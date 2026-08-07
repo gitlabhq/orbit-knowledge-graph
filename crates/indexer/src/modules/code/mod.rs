@@ -27,7 +27,7 @@ use repository::RepositoryResolver;
 
 pub use checkpoint::ClickHouseCodeCheckpointStore;
 pub use handler::CodeIndexingTaskHandler;
-pub use pipeline::{CodeIndexingPipeline, IndexingRequest};
+pub use pipeline::{CodeIndexer, IndexError, IndexingRequest};
 pub use repository::{
     CachingRepositoryService, LocalRepositoryCache, RailsRepositoryService, RepositoryCache,
     RepositoryService, RepositoryServiceError,
@@ -102,7 +102,7 @@ pub async fn register_handlers(
 
     let mut pipeline_config = code_indexing_task_config.pipeline.clone();
     pipeline_config.resolve_runtime_defaults(resources);
-    let pipeline = Arc::new(pipeline::CodeIndexingPipeline::new(
+    let pipeline = Arc::new(pipeline::CodeIndexer::new(
         resolver,
         writer,
         Arc::clone(&checkpoint_store),
