@@ -30,7 +30,6 @@ pub struct IndexingRequest {
     pub had_prior_checkpoint: bool,
 }
 
-/// Terminal outcome of `CodeIndexer::index_fetched`.
 pub enum IndexOutcome {
     /// Parsed and streamed to the sink, which checkpoints it after the flush lands.
     Indexed,
@@ -47,7 +46,6 @@ impl IndexOutcome {
     }
 }
 
-/// Bytes on disk to index, or a terminal empty repository that is already checkpointed.
 enum Fetched {
     Repository(CachedRepository),
     EmptyRepository,
@@ -67,7 +65,6 @@ pub enum IndexError {
     Failed(HandlerError),
 }
 
-/// One budget shared by every timed phase; queueing for a lane deliberately runs outside it.
 struct WorkClock {
     total: Option<Duration>,
     remaining: Duration,
@@ -282,15 +279,11 @@ impl CodeIndexer {
         let budget = self.pipeline_config.job_timeout();
         let mut clock = WorkClock::new(budget);
 
-        // On budget overrun: cancel so the detached parse bails; the timed-out future is
-        // already dropped, so nothing of it reaches a flush or a checkpoint.
-        let overrun = || IndexError::BudgetExceeded {
-            budget: budget.unwrap_or_default(),
-        };
-
         let Some(fetched) = clock.run(self.fetch_repository(request)).await else {
             cancel.cancel();
-            return Err(overrun());
+            return Err(IndexError::BudgetExceeded {
+                budget: budget.unwrap_or_default(),
+            });
         };
         let repository = match fetched.map_err(IndexError::Failed)? {
             Fetched::EmptyRepository => return Ok(IndexOutcome::EmptyRepository),
@@ -299,12 +292,12 @@ impl CodeIndexer {
 
         // Fetch plus the longest allowed wait can reach ack_wait; refresh the delivery first.
         context.progress.notify_in_progress().await;
-        let waited = lock.time_left().saturating_sub(clock.remaining);
-        let acquire = self.acquire_indexing_lane(&repository);
-        let lane = match tokio::time::timeout(waited, acquire).await {
-            Ok(permit) => permit.map_err(IndexError::Failed)?,
-            Err(_) => return Err(IndexError::NoLane { waited }),
-        };
+        let lane = self
+            .acquire_indexing_lane(
+                &repository,
+                lock.time_left().saturating_sub(clock.remaining),
+            )
+            .await?;
 
         let indexed = clock
             .run(self.index_fetched(
@@ -319,8 +312,12 @@ impl CodeIndexer {
         match indexed {
             Some(result) => result.map_err(IndexError::Failed),
             None => {
+                // Dropping the timed-out future leaves the blocking parse running; the cancel
+                // makes it bail per file.
                 cancel.cancel();
-                Err(overrun())
+                Err(IndexError::BudgetExceeded {
+                    budget: budget.unwrap_or_default(),
+                })
             }
         }
     }
@@ -405,7 +402,8 @@ impl CodeIndexer {
     async fn acquire_indexing_lane(
         &self,
         repository: &CachedRepository,
-    ) -> Result<Option<OwnedSemaphorePermit>, HandlerError> {
+        within: Duration,
+    ) -> Result<Option<OwnedSemaphorePermit>, IndexError> {
         // A reserved big lane keeps a flood of small repos from starving monorepos.
         let parseable = code_graph::v2::inventory::parseable_file_count(&repository.file_inventory);
         let lane = if parseable <= self.small_repo_max_files {
@@ -414,10 +412,14 @@ impl CodeIndexer {
             &self.big_indexing_slots
         };
         let queued = Instant::now();
-        let permit = acquire(lane, "indexing").await;
-        self.metrics
-            .record_slot_wait("indexing_lane_wait", queued.elapsed());
-        permit
+        match tokio::time::timeout(within, acquire(lane, "indexing")).await {
+            Ok(permit) => {
+                self.metrics
+                    .record_slot_wait("indexing_lane_wait", queued.elapsed());
+                permit.map_err(IndexError::Failed)
+            }
+            Err(_) => Err(IndexError::NoLane { waited: within }),
+        }
     }
 
     async fn index_fetched(
