@@ -180,10 +180,8 @@ fn evaluate_module_statement_inner(
             state.module_exports =
                 evaluate_export_default(&export_default.declaration, context, state, cache);
         }
-        Statement::ExportNamedDeclaration(export_named) => {
-            if let Some(declaration) = &export_named.declaration {
-                evaluate_exported_declaration(declaration, context, state, cache);
-            }
+        Statement::ExportDeclaration(export_declaration) => {
+            evaluate_exported_declaration(&export_declaration.declaration, context, state, cache);
         }
         _ => {}
     }
