@@ -179,7 +179,7 @@ local-cli-publish-npm:
   extends:
     - .local-cli-release-rules
   stage: publish
-  image: node:24
+  image: node:26
   tags:
     - saas-linux-medium-amd64
   id_tokens:
