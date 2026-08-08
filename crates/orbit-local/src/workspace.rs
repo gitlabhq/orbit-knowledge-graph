@@ -166,14 +166,6 @@ pub fn git_info(repo_path: &Path) -> Result<GitInfo> {
     let branch = repo
         .get_current_branch()
         .context("failed to get current branch")?;
-    // gitalisk surfaces an unborn `HEAD` as a raw `ambiguous argument 'HEAD'`
-    // git error, which reads as a bug rather than an empty repository (#658).
-    //
-    // Only a symbolic `HEAD` with no commit behind it reaches this arm, so the
-    // message needs no guard. `get_current_branch` resolves first and fails
-    // outright on a repository git will not read, and its detached-`HEAD`
-    // fallback (`rev-parse --short HEAD`, gitalisk v0.8.0
-    // `current_branch.rs:22`) only succeeds where `rev-parse HEAD` does.
     let commit_sha = repo.get_current_commit_hash().map_err(|_| {
         anyhow::anyhow!(
             "{} has no commits yet. Make at least one commit before indexing.",
@@ -241,9 +233,6 @@ fn is_git_repo(path: &Path) -> bool {
 fn discover_repos(workspace_path: &Path) -> Vec<PathBuf> {
     let ws = CoreGitaliskWorkspaceFolder::new(workspace_path.to_string_lossy().to_string());
     if let Err(e) = ws.index_repositories() {
-        // Discovery failing and finding nothing are indistinguishable to the
-        // caller, which then reports no repository found for a path that may
-        // be correct. Log so the difference is at least diagnosable.
         let path = workspace_path.display();
         tracing::warn!("repository discovery failed in {path}: {e}");
         return vec![];

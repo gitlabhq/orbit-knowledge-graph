@@ -524,12 +524,6 @@ fn index_errors_when_repository_has_no_commits() {
     );
 }
 
-/// The no-commits message is emitted without re-checking for commits, on the
-/// argument that only an unborn `HEAD` can reach it. That argument rests on
-/// gitalisk's `get_current_branch` failing first on anything else, which the
-/// pinned tag holds but nothing else asserts. Pin the consequence instead of
-/// the reasoning, so a tag bump that breaks it fails here rather than telling
-/// a user with an unreadable repository that it is empty.
 #[test]
 fn index_does_not_report_an_unreadable_repository_as_empty() {
     let data_dir = tempfile::TempDir::new().unwrap();
