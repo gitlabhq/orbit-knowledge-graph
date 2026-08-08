@@ -466,9 +466,9 @@ fn build_export_member_bindings(
                     &mut by_local,
                 );
             }
-            oxc::ast::ast::Statement::ExportNamedDeclaration(export_named) => {
-                if let Some(oxc::ast::ast::Declaration::VariableDeclaration(variable_declaration)) =
-                    &export_named.declaration
+            oxc::ast::ast::Statement::ExportDeclaration(export_declaration) => {
+                if let oxc::ast::ast::Declaration::VariableDeclaration(variable_declaration) =
+                    &export_declaration.declaration
                 {
                     collect_variable_declaration_member_bindings(
                         variable_declaration,
