@@ -417,8 +417,10 @@ pub(crate) fn index_collect(
     let repos = store.resolve_repos(&path)?;
 
     if repos.is_empty() {
-        info!("No git repositories found in {}", path.display());
-        return Ok(Vec::new());
+        anyhow::bail!(
+            "no git repository found in {}. Pass a repository path, or a directory containing one.",
+            path.display()
+        );
     }
 
     let ontology = Ontology::load_embedded().context("failed to load embedded ontology")?;

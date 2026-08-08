@@ -166,9 +166,12 @@ pub fn git_info(repo_path: &Path) -> Result<GitInfo> {
     let branch = repo
         .get_current_branch()
         .context("failed to get current branch")?;
-    let commit_sha = repo
-        .get_current_commit_hash()
-        .context("failed to get current commit hash")?;
+    let commit_sha = repo.get_current_commit_hash().map_err(|_| {
+        anyhow::anyhow!(
+            "{} has no commits yet. Make at least one commit before indexing.",
+            canonical.display()
+        )
+    })?;
     let parent_repo_path = repo
         .parent_repo_path()
         .context("failed to resolve parent repo path")?;
@@ -229,7 +232,9 @@ fn is_git_repo(path: &Path) -> bool {
 
 fn discover_repos(workspace_path: &Path) -> Vec<PathBuf> {
     let ws = CoreGitaliskWorkspaceFolder::new(workspace_path.to_string_lossy().to_string());
-    if ws.index_repositories().is_err() {
+    if let Err(e) = ws.index_repositories() {
+        let path = workspace_path.display();
+        tracing::warn!("repository discovery failed in {path}: {e}");
         return vec![];
     }
     ws.get_repositories()
