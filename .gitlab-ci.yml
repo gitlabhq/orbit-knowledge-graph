@@ -190,7 +190,7 @@ agent-file-sync-check:
 
 mr-title-check:
   stage: lint
-  image: node:22-alpine
+  image: node:26-alpine
   tags:
     - saas-linux-medium-amd64
   extends:
@@ -1036,7 +1036,7 @@ publish-proto-gem:
 
 semantic-release:
   stage: release
-  image: node:22
+  image: node:26
   tags:
     - saas-linux-medium-amd64
   id_tokens:
