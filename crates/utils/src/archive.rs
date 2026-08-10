@@ -126,10 +126,12 @@ pub fn extract_tar_gz<R: Read, H: FileStreamHooks>(
                 // Both loaded states materialize the bytes; only the parse axis
                 // differs, which the pipeline acts on, not the extractor.
                 Decision::Parse | Decision::Load => {
-                    let written = crate::fs::resolve_dest_within(&target_canonical, &dest)
-                        .and_then(std::fs::File::create)
-                        .and_then(|mut file| file.write_all(&content));
-                    match written {
+                    // resolve_dest_within is the containment guard; keep it a hard
+                    // failure. Only a genuine write error (e.g. name too long) skips.
+                    let dest_canonical = crate::fs::resolve_dest_within(&target_canonical, &dest)?;
+                    match std::fs::File::create(&dest_canonical)
+                        .and_then(|mut file| file.write_all(&content))
+                    {
                         Ok(()) => inventory.push(meta),
                         Err(e) => {
                             warn!(entry = %meta.path, error = %e, "skipping archive entry that could not be written");
@@ -141,9 +143,8 @@ pub fn extract_tar_gz<R: Read, H: FileStreamHooks>(
             continue;
         }
 
-        let unpacked = crate::fs::resolve_dest_within(&target_canonical, &dest)
-            .and_then(|dest_canonical| entry.unpack(&dest_canonical).map(|_| ()));
-        if let Err(e) = unpacked {
+        let dest_canonical = crate::fs::resolve_dest_within(&target_canonical, &dest)?;
+        if let Err(e) = entry.unpack(&dest_canonical) {
             warn!(entry = %relative_path.display(), error = %e, "skipping archive entry that could not be unpacked");
             continue;
         }
