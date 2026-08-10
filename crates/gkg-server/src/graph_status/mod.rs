@@ -408,10 +408,9 @@ fn aggregate_indexing_status(
         })
         .collect();
 
-    let entity_entries = entity_progress.iter().map(|(_, progress)| match progress {
-        None => (IndexingState::NotIndexed, None),
-        Some(p) => (derive_indexing_state(p), Some(p)),
-    });
+    let entity_entries = entity_progress
+        .iter()
+        .map(|(name, progress)| (pipeline_states[name.as_str()], progress.as_ref()));
     let legacy_entry = legacy_progress
         .as_ref()
         .map(|p| (derive_indexing_state(p), Some(p)));
