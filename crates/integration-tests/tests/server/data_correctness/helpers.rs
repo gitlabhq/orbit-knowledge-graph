@@ -8,6 +8,7 @@ pub(super) use crate::common::{
 };
 pub(super) use gkg_server::pipeline::HydrationStage;
 pub(super) use gkg_server::redaction::QueryResult;
+pub(super) use integration_testkit::SeededColumnResolver;
 pub(super) use integration_testkit::load_seed;
 pub(super) use integration_testkit::visitor::{NodeExt, Requirement, ResponseView};
 pub(super) use query_engine::compiler::SecurityContext;
@@ -19,27 +20,8 @@ pub(super) use query_engine::shared::RedactionOutput;
 pub(super) use query_engine::shared::content::ColumnResolverRegistry;
 pub(super) use serde_json::Value;
 
-pub(super) struct MockColumnResolver;
-
-#[async_trait::async_trait]
-impl query_engine::shared::content::ColumnResolver for MockColumnResolver {
-    async fn resolve_batch(
-        &self,
-        lookup: &str,
-        rows: &[&query_engine::shared::content::PropertyRow],
-        _ctx: &query_engine::shared::content::ResolverContext,
-    ) -> Result<Vec<Option<gkg_utils::arrow::ColumnValue>>, query_engine::pipeline::PipelineError>
-    {
-        Ok(rows
-            .iter()
-            .map(|_| {
-                Some(gkg_utils::arrow::ColumnValue::String(format!(
-                    "mock:{lookup}"
-                )))
-            })
-            .collect())
-    }
-}
+static SEEDED_RESOLVER: std::sync::LazyLock<Arc<SeededColumnResolver>> =
+    std::sync::LazyLock::new(|| Arc::new(SeededColumnResolver::from_seed_file()));
 
 pub(super) static RESPONSE_SCHEMA: std::sync::LazyLock<jsonschema::Validator> =
     std::sync::LazyLock::new(|| {
@@ -80,7 +62,7 @@ pub(super) async fn run_query_with_security(
     let redacted_count = run_redaction(&mut result, svc);
 
     let mut resolver_registry = ColumnResolverRegistry::new();
-    resolver_registry.register("gitaly", Arc::new(MockColumnResolver));
+    resolver_registry.register("gitaly", Arc::clone(&*SEEDED_RESOLVER) as _);
 
     let mut server_extensions = TypeMap::default();
     server_extensions.insert(client);
