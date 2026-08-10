@@ -59,6 +59,18 @@ spec:
                 [ ${p} -gt 0 ] && echo "  ${t}: ${p} parts"
               done
 
+              echo "==> Normalizing _siphon_watermark to now()"
+              # Dump data has watermarks from the original CDC time. Without
+              # this the dispatcher's cursor window misses old-watermarked rows.
+              TABLES=$(curl -s "${CH_URL}/?${CH_AUTH}&database=datalake" \
+                -d "SELECT DISTINCT table FROM system.columns WHERE database='datalake' AND name='_siphon_watermark' FORMAT TSVRaw" \
+                2>/dev/null || true)
+              for t in ${TABLES}; do
+                curl -sf "${CH_URL}/?${CH_AUTH}&database=datalake" \
+                  -d "ALTER TABLE ${t} UPDATE _siphon_watermark = now64(6) WHERE 1" \
+                  2>/dev/null && echo "  ${t}" || echo "  SKIP: ${t}"
+              done
+
               echo "==> Row counts"
               curl -s "${CH_URL}/?${CH_AUTH}&database=datalake" \
                 -d "SELECT name, total_rows FROM system.tables WHERE database='datalake' AND total_rows > 0 ORDER BY total_rows DESC FORMAT TSV" \
