@@ -4,6 +4,7 @@ pub mod config;
 mod handler;
 pub mod metrics;
 pub(crate) mod observer;
+pub mod overlay;
 mod pipeline;
 pub mod repository;
 mod stale_data_cleaner;

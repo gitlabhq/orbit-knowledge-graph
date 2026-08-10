@@ -444,6 +444,14 @@ The core issue with indexing active branches is volume: billions of definitions 
 
 After the initial deployment, metrics and customer feedback will determine whether branch-level indexing is worth the storage and compute cost. The approach below outlines one viable path.
 
+The current overlay proof of concept models a Python branch index as changed-file output plus the
+inbound-caller invalidation closure. It writes complete replacement definitions and outgoing calls
+tagged with the feature branch, uses native versioned tombstone rows for removed output, and masks
+default-branch paths only for deletes and renames. A differential harness compares the effective
+base-plus-overlay view with a full feature-branch snapshot for additions, edits, deletions, renames,
+import resolution changes, call changes, and signature changes. Trigger dispatch, persistence, and
+lifecycle management remain outside the proof of concept.
+
 As stated above GitLab has the concept of a branch being "active" or "stale". An active branch is one that has been committed to within the last 3 months. A stale branch is one that has not been committed to in the last 3 months.
 
 For the amount of data and uneven query distribution (some branches are never going to be queried), it's best we don't keep the data against the main branches in the same database since that would result in a lot of wasted storage and compute resources.
