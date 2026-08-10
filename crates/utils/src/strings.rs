@@ -1,5 +1,6 @@
 use std::{borrow::Cow, fmt};
 
+/// Builds a byte lookup table allowing ASCII alphanumerics and the supplied extra bytes.
 pub const fn ascii_alphanumeric_table(extra: &[u8]) -> [bool; 256] {
     let mut table = [false; 256];
     let mut byte = b'0';
@@ -25,11 +26,17 @@ pub const fn ascii_alphanumeric_table(extra: &[u8]) -> [bool; 256] {
     table
 }
 
+/// Returns whether every byte is enabled in the supplied lookup table.
 #[inline]
 pub fn bytes_are_allowed(bytes: &[u8], allowed: &[bool; 256]) -> bool {
     bytes.iter().all(|byte| allowed[*byte as usize])
 }
 
+/// Wraps a string in quotes using GOON's escapes for backslash, quote, newline, carriage return,
+/// and tab.
+///
+/// All other C0 control bytes and DEL (`0x7f`) are silently dropped. This policy is not
+/// lossless or JSON-compatible and must not be used when control-character fidelity matters.
 pub fn quote_escaped(value: &str) -> String {
     let mut output = String::with_capacity(value.len() + 2);
     output.push('"');
@@ -65,6 +72,7 @@ fn next_escape_byte(bytes: &[u8]) -> Option<usize> {
     control.or(quoted)
 }
 
+/// Returns the character count only when it exceeds `limit`.
 #[inline]
 pub fn char_count_if_exceeds(value: &str, limit: usize) -> Option<usize> {
     if value.len() <= limit {
@@ -74,6 +82,7 @@ pub fn char_count_if_exceeds(value: &str, limit: usize) -> Option<usize> {
     (count > limit).then_some(count)
 }
 
+/// Borrows values within `limit`; otherwise returns a prefix fitting `limit - suffix` plus `suffix`.
 pub fn truncate_chars<'a>(value: &'a str, limit: usize, suffix: &str) -> Cow<'a, str> {
     if char_count_if_exceeds(value, limit).is_none() {
         return Cow::Borrowed(value);
