@@ -1,6 +1,10 @@
 use std::collections::BTreeMap;
 use std::fmt::Write;
 
+use gkg_utils::strings::{
+    ascii_alphanumeric_table, bytes_are_allowed, char_count_if_exceeds, quote_escaped,
+    truncate_chars,
+};
 use semver::Version;
 use serde_json::{Map, Value};
 
@@ -12,6 +16,7 @@ const LONG_TEXT_LIMIT: usize = 200;
 const HARD_VALUE_LIMIT: usize = 1000;
 
 const LONG_TEXT_KEYS: &[&str] = &["body", "description", "name", "note", "title"];
+const BARE_TOKEN_BYTES: [bool; 256] = ascii_alphanumeric_table(b"_-:./@+");
 
 fn column_priority(key: &str) -> u8 {
     match key {
@@ -451,12 +456,7 @@ fn truncate<'a>(raw: &'a str, key: &str) -> std::borrow::Cow<'a, str> {
     } else {
         HARD_VALUE_LIMIT
     };
-    if raw.chars().count() <= limit {
-        return std::borrow::Cow::Borrowed(raw);
-    }
-    let take = limit.saturating_sub(3);
-    let head: String = raw.chars().take(take).collect();
-    std::borrow::Cow::Owned(format!("{head}..."))
+    truncate_chars(raw, limit, "...")
 }
 
 fn string_len_for_breadcrumb(value: &Value, key: &str) -> Option<usize> {
@@ -466,31 +466,11 @@ fn string_len_for_breadcrumb(value: &Value, key: &str) -> Option<usize> {
     } else {
         HARD_VALUE_LIMIT
     };
-    let count = s.chars().count();
-    (count > limit).then_some(count)
-}
-
-fn quote_escaped(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() + 2);
-    out.push('"');
-    for c in s.chars() {
-        match c {
-            '\\' => out.push_str("\\\\"),
-            '"' => out.push_str("\\\""),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            c if (c as u32) < 0x20 || c == '\u{7f}' => {}
-            c => out.push(c),
-        }
-    }
-    out.push('"');
-    out
+    char_count_if_exceeds(s, limit)
 }
 
 fn is_bare_token(s: &str) -> bool {
-    s.chars()
-        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | ':' | '.' | '/' | '@' | '+'))
+    bytes_are_allowed(s.as_bytes(), &BARE_TOKEN_BYTES)
 }
 
 /// ClickHouse emits datetimes as `2026-05-08 23:13:59.643407`. Convert to
