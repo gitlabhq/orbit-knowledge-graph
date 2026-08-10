@@ -494,10 +494,8 @@ pub struct IndexingStatus {
     pub last_duration_ms: ::core::option::Option<u64>,
     #[prost(string, optional, tag = "5")]
     pub last_error: ::core::option::Option<::prost::alloc::string::String>,
-    /// rows the last run read from its source
     #[prost(uint64, optional, tag = "6")]
     pub last_rows_read: ::core::option::Option<u64>,
-    /// rows the last run wrote to the graph
     #[prost(uint64, optional, tag = "7")]
     pub last_rows_written: ::core::option::Option<u64>,
 }
@@ -529,10 +527,9 @@ pub struct StructuredGraphStatus {
     /// worst of sdlc_indexing and code_indexing
     #[prost(message, optional, tag = "3")]
     pub indexing: ::core::option::Option<IndexingStatus>,
-    /// SDLC entity pipelines (issues, MRs, pipelines, ...)
     #[prost(message, optional, tag = "4")]
     pub sdlc_indexing: ::core::option::Option<IndexingStatus>,
-    /// code graph coverage, derived from projects indexed vs known
+    /// derived from project coverage, not a recorded run
     #[prost(message, optional, tag = "5")]
     pub code_indexing: ::core::option::Option<IndexingStatus>,
 }

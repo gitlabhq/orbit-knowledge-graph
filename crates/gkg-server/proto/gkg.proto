@@ -427,8 +427,8 @@ message IndexingStatus {
   optional string last_completed_at = 3;
   optional uint64 last_duration_ms = 4;
   optional string last_error = 5;
-  optional uint64 last_rows_read = 6;     // rows the last run read from its source
-  optional uint64 last_rows_written = 7;  // rows the last run wrote to the graph
+  optional uint64 last_rows_read = 6;
+  optional uint64 last_rows_written = 7;
 }
 
 // Response containing project coverage and entity counts grouped by domain.
@@ -443,9 +443,9 @@ message GetGraphStatusResponse {
 message StructuredGraphStatus {
   ProjectsStatus projects = 1;
   repeated GraphStatusDomain domains = 2;
-  IndexingStatus indexing = 3;       // worst of sdlc_indexing and code_indexing
-  IndexingStatus sdlc_indexing = 4;  // SDLC entity pipelines (issues, MRs, pipelines, ...)
-  IndexingStatus code_indexing = 5;  // code graph coverage, derived from projects indexed vs known
+  IndexingStatus indexing = 3;  // worst of sdlc_indexing and code_indexing
+  IndexingStatus sdlc_indexing = 4;
+  IndexingStatus code_indexing = 5;  // derived from project coverage, not a recorded run
 }
 
 // How many projects under this scope have been code-indexed.

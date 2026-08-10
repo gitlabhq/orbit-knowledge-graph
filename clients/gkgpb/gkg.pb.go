@@ -2883,8 +2883,8 @@ type IndexingStatus struct {
 	LastCompletedAt *string                `protobuf:"bytes,3,opt,name=last_completed_at,json=lastCompletedAt,proto3,oneof" json:"last_completed_at,omitempty"`
 	LastDurationMs  *uint64                `protobuf:"varint,4,opt,name=last_duration_ms,json=lastDurationMs,proto3,oneof" json:"last_duration_ms,omitempty"`
 	LastError       *string                `protobuf:"bytes,5,opt,name=last_error,json=lastError,proto3,oneof" json:"last_error,omitempty"`
-	LastRowsRead    *uint64                `protobuf:"varint,6,opt,name=last_rows_read,json=lastRowsRead,proto3,oneof" json:"last_rows_read,omitempty"`          // rows the last run read from its source
-	LastRowsWritten *uint64                `protobuf:"varint,7,opt,name=last_rows_written,json=lastRowsWritten,proto3,oneof" json:"last_rows_written,omitempty"` // rows the last run wrote to the graph
+	LastRowsRead    *uint64                `protobuf:"varint,6,opt,name=last_rows_read,json=lastRowsRead,proto3,oneof" json:"last_rows_read,omitempty"`
+	LastRowsWritten *uint64                `protobuf:"varint,7,opt,name=last_rows_written,json=lastRowsWritten,proto3,oneof" json:"last_rows_written,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -3056,9 +3056,9 @@ type StructuredGraphStatus struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Projects      *ProjectsStatus        `protobuf:"bytes,1,opt,name=projects,proto3" json:"projects,omitempty"`
 	Domains       []*GraphStatusDomain   `protobuf:"bytes,2,rep,name=domains,proto3" json:"domains,omitempty"`
-	Indexing      *IndexingStatus        `protobuf:"bytes,3,opt,name=indexing,proto3" json:"indexing,omitempty"`                             // worst of sdlc_indexing and code_indexing
-	SdlcIndexing  *IndexingStatus        `protobuf:"bytes,4,opt,name=sdlc_indexing,json=sdlcIndexing,proto3" json:"sdlc_indexing,omitempty"` // SDLC entity pipelines (issues, MRs, pipelines, ...)
-	CodeIndexing  *IndexingStatus        `protobuf:"bytes,5,opt,name=code_indexing,json=codeIndexing,proto3" json:"code_indexing,omitempty"` // code graph coverage, derived from projects indexed vs known
+	Indexing      *IndexingStatus        `protobuf:"bytes,3,opt,name=indexing,proto3" json:"indexing,omitempty"` // worst of sdlc_indexing and code_indexing
+	SdlcIndexing  *IndexingStatus        `protobuf:"bytes,4,opt,name=sdlc_indexing,json=sdlcIndexing,proto3" json:"sdlc_indexing,omitempty"`
+	CodeIndexing  *IndexingStatus        `protobuf:"bytes,5,opt,name=code_indexing,json=codeIndexing,proto3" json:"code_indexing,omitempty"` // derived from project coverage, not a recorded run
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }

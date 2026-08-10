@@ -162,6 +162,11 @@ impl Drop for ProjectCommit {
     }
 }
 
+struct IndexedRun {
+    commit: Arc<ProjectCommit>,
+    rows_written: u64,
+}
+
 pub struct CodeIndexer {
     resolver: RepositoryResolver,
     writer: BufferedWriter,
@@ -429,13 +434,15 @@ impl CodeIndexer {
         // `repository` owns a TempDir that removes the extraction tree on drop, so it is reclaimed
         // whether this returns, errors, or is dropped mid-run on the wall-clock timeout.
         self.metrics.record_cleanup("success");
-        let (commit, rows_written) = indexing_result?;
+        let run = indexing_result?;
 
         // Drop the pipeline's sentinel hold. If every submitted batch has already flushed, this
         // is the decrement that finalizes; otherwise the writer's last flush will.
-        commit.release();
+        run.commit.release();
 
-        Ok(IndexOutcome::Indexed { rows_written })
+        Ok(IndexOutcome::Indexed {
+            rows_written: run.rows_written,
+        })
     }
 
     #[allow(
@@ -450,7 +457,7 @@ impl CodeIndexer {
         indexed_at: DateTime<Utc>,
         observer: &mut dyn IndexingObserver,
         cancel: CancellationToken,
-    ) -> Result<(Arc<ProjectCommit>, u64), HandlerError> {
+    ) -> Result<IndexedRun, HandlerError> {
         let indexing_start = Instant::now();
         let config = self.build_pipeline_config(context, cancel.clone());
         let (result, commit, metered_bytes) = self
@@ -490,7 +497,10 @@ impl CodeIndexer {
         }
 
         context.progress.notify_in_progress().await;
-        Ok((commit, rows_written))
+        Ok(IndexedRun {
+            commit,
+            rows_written,
+        })
     }
 
     fn build_pipeline_config(

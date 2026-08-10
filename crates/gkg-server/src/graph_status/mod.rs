@@ -306,9 +306,6 @@ fn derive_indexing_state(progress: &IndexingProgress) -> IndexingState {
     }
 }
 
-/// The SDLC indexer records progress under its pipeline names (node names plus
-/// composed edge and derived names), so the read set must come from the same
-/// descriptors — not from node names alone.
 fn namespaced_pipeline_names(ontology: &Ontology) -> Vec<String> {
     ontology
         .pipeline_descriptors()
