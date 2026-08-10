@@ -74,9 +74,39 @@ fn query_scans_code(query: &Query, code_tables: &HashSet<String>) -> bool {
         .any(|cte| query_scans_code(&cte.query, code_tables))
         || table_ref_scans_code(&query.from, code_tables)
         || query
+            .where_clause
+            .as_ref()
+            .is_some_and(|expr| expr_scans_code(expr, code_tables))
+        || query
+            .having
+            .as_ref()
+            .is_some_and(|expr| expr_scans_code(expr, code_tables))
+        || query
             .union_all
             .iter()
             .any(|arm| query_scans_code(arm, code_tables))
+}
+
+fn expr_scans_code(expr: &Expr, code_tables: &HashSet<String>) -> bool {
+    match expr {
+        Expr::InSelect { expr, query } => {
+            expr_scans_code(expr, code_tables) || query_scans_code(query, code_tables)
+        }
+        Expr::BinaryOp { left, right, .. } => {
+            expr_scans_code(left, code_tables) || expr_scans_code(right, code_tables)
+        }
+        Expr::UnaryOp { expr, .. }
+        | Expr::Lambda { body: expr, .. }
+        | Expr::InSubquery { expr, .. } => expr_scans_code(expr, code_tables),
+        Expr::FuncCall { args, .. } => args
+            .iter()
+            .any(|argument| expr_scans_code(argument, code_tables)),
+        Expr::Column { .. }
+        | Expr::Identifier(_)
+        | Expr::Literal(_)
+        | Expr::Param { .. }
+        | Expr::Star => false,
+    }
 }
 
 fn table_ref_scans_code(table_ref: &TableRef, code_tables: &HashSet<String>) -> bool {
@@ -212,7 +242,10 @@ fn rewrite_expr(
         return Ok(());
     };
     match expr {
-        Expr::InSelect { query, .. } => rewrite_query(query, context, code_tables),
+        Expr::InSelect { expr, query } => {
+            rewrite_expr(Some(expr), context, code_tables)?;
+            rewrite_query(query, context, code_tables)
+        }
         Expr::BinaryOp { left, right, .. } => {
             rewrite_expr(Some(left), context, code_tables)?;
             rewrite_expr(Some(right), context, code_tables)
@@ -299,6 +332,35 @@ mod tests {
             ..Input::default()
         };
         assert!(apply(&mut node, &input, &Ontology::load_embedded().unwrap()).is_err());
+    }
+
+    #[test]
+    fn rejects_code_scan_reachable_only_from_where_subquery() {
+        let mut node = Node::Query(Box::new(Query {
+            select: vec![SelectExpr::star()],
+            from: TableRef::scan("gl_project", "p"),
+            where_clause: Some(Expr::InSelect {
+                expr: Box::new(Expr::col("p", "id")),
+                query: Box::new(Query {
+                    select: vec![SelectExpr::col("e", "source_id")],
+                    from: TableRef::scan("gl_code_edge", "e"),
+                    ..Query::default()
+                }),
+            }),
+            ..Query::default()
+        }));
+
+        let error = apply(
+            &mut node,
+            &Input::default(),
+            &Ontology::load_embedded().unwrap(),
+        )
+        .expect_err("predicate subqueries that scan code must fail closed");
+        assert!(
+            error
+                .to_string()
+                .contains("default-branch fallback is disabled")
+        );
     }
 
     #[test]

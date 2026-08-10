@@ -129,7 +129,7 @@ The prefix is validated within authorized scope before use: the path resolver on
 ## Request Flow (Deployed)
 
 1. Client (MCP or REST) submits a tool call or Cypher.
-2. Adapter validates and normalizes input pursuant to the deployed schema and computes the user's `traversal_path` prefixes, which encode the organization ID as their first segment. Code queries require one resolved, ready `code_contexts` entry in the current proof of concept; every code node and edge scan is rewritten to an effective default-plus-overlay view, and a missing or non-ready context is rejected without default-branch fallback.
+2. Adapter validates and normalizes input pursuant to the deployed schema and computes the user's `traversal_path` prefixes, which encode the organization ID as their first segment. Code queries require one resolved, ready `code_contexts` entry in the current proof of concept; every code node and edge scan is rewritten to an effective default-plus-overlay view, and a missing or non-ready context is rejected without default-branch fallback. The proof of concept trusts client-supplied readiness fields and has no persisted base mask, so it is not delete- or rename-correct; ref resolution and readiness must become server-authoritative before production use.
 3. Planner compiles to ClickHouse SQL (CTEs, recursive CTEs, unions, joins) with bound parameters.
 4. ClickHouse executes; the server returns rows plus the generated SQL for audit.
 
