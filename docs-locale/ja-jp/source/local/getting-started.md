@@ -63,6 +63,44 @@ irm https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/raw/main/install.ps1 |
 orbit help
 ```
 
+エンドポイントポリシーによりリモートスクリプトの実行が制限されている場合は、スクリプトを実行せずにインストールできます。Windowsリリースアーカイブには、GitLab Inc.によって署名された単一の自己完結型`orbit.exe`が含まれているため、アプリケーション許可リストポリシーで発行者による承認が可能です:
+
+1. [最新リリース](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/releases)から、`orbit-local-windows-x86_64.zip`とその`.sha256`ファイルをダウンロードします。
+1. チェックサムを確認します:
+
+   ```powershell
+   (Get-FileHash .\orbit-local-windows-x86_64.zip -Algorithm SHA256).Hash
+   ```
+
+   出力は`.sha256`ファイルのハッシュと一致する必要があります。比較は大文字・小文字を区別しません: `Get-FileHash`は大文字を返し、`.sha256`ファイルは小文字で保存されます。
+1. Mark of the Webをクリアします。ブラウザがダウンロード時に付加し、展開時に`orbit.exe`に引き継がれるため、初回実行時にSmartScreenのプロンプトが表示されたり、ポリシーによってブロックされたりする場合があります:
+
+   ```powershell
+   Unblock-File .\orbit-local-windows-x86_64.zip
+   ```
+
+1. アーカイブを展開し、ターゲットディレクトリを作成して、`orbit.exe`を移動します。この例では、インストーラーが使用するデフォルトと同じ`$env:LOCALAPPDATA\Programs\orbit`を使用します:
+
+   ```powershell
+   Expand-Archive -Path .\orbit-local-windows-x86_64.zip -DestinationPath .
+   New-Item -ItemType Directory -Force -Path "$env:LOCALAPPDATA\Programs\orbit"
+   Move-Item .\orbit.exe "$env:LOCALAPPDATA\Programs\orbit\orbit.exe"
+   ```
+
+1. そのディレクトリがまだ`PATH`に含まれていない場合は、ユーザー用に追加します:
+
+   ```powershell
+   [Environment]::SetEnvironmentVariable("PATH", "$env:LOCALAPPDATA\Programs\orbit;$([Environment]::GetEnvironmentVariable('PATH', 'User'))", "User")
+   ```
+
+管理者権限は不要です。
+
+新しいターミナルを開いて、確認します:
+
+```shell
+orbit help
+```
+
 {{< /tab >}}
 
 {{< tab title="npm" >}}
