@@ -170,9 +170,9 @@ SELECT * FROM knowledge_graph_enabled_namespaces;
 ```
 
 The stored `traversal_path` can be permanently wrong (a replication race bakes
-in `0/`), so every reader re-resolves it at query time. Enrollment CDC events
-never carry a path; the route looks it up in `namespace_traversal_paths`, and
-the sweep catches whatever is not resolvable yet.
+in `0/`), so no reader trusts it: enrollment CDC events and the periodic sweep
+both resolve the current path from `namespace_traversal_paths` at query time.
+A namespace whose path is not resolvable yet is skipped until the next sweep.
 
 ##### NATS JetStream and KV orchestration
 

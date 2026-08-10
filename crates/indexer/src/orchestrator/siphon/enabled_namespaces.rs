@@ -11,13 +11,12 @@ use tracing::warn;
 use crate::clickhouse::ArrowClickHouseClient;
 use crate::orchestrator::dispatch::{
     CodeBackfill, NamespaceDispatchRequest, NamespaceIndexingDispatch,
+    enabled_namespaces::NAMESPACE_PATHS_TABLE,
 };
 use crate::orchestrator::scheduled::TaskError;
 use crate::orchestrator::siphon::decoder::ColumnExtractor;
 use crate::orchestrator::siphon::route::{CdcContext, Route, RouteOutcome};
 use crate::orchestrator::siphon::subjects;
-
-const NAMESPACE_PATHS_TABLE: &str = "namespace_traversal_paths";
 
 pub struct EnabledNamespacesRoute {
     namespace_indexing: NamespaceIndexingDispatch,
