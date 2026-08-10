@@ -126,13 +126,17 @@ pub fn extract_tar_gz<R: Read, H: FileStreamHooks>(
                 // Both loaded states materialize the bytes; only the parse axis
                 // differs, which the pipeline acts on, not the extractor.
                 Decision::Parse | Decision::Load => {
-                    // resolve_dest_within is the containment guard; keep it a hard
-                    // failure. Only a genuine write error (e.g. name too long) skips.
-                    let dest_canonical = crate::fs::resolve_dest_within(&target_canonical, &dest)?;
-                    match std::fs::File::create(&dest_canonical)
-                        .and_then(|mut file| file.write_all(&content))
-                    {
+                    // A containment escape (PermissionDenied from resolve_dest_within)
+                    // is fatal; any other error — a path the filesystem rejects such
+                    // as an over-long file or directory component — skips the entry.
+                    let written = crate::fs::resolve_dest_within(&target_canonical, &dest)
+                        .and_then(std::fs::File::create)
+                        .and_then(|mut file| file.write_all(&content));
+                    match written {
                         Ok(()) => inventory.push(meta),
+                        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+                            return Err(StreamError::Io(e));
+                        }
                         Err(e) => {
                             warn!(entry = %meta.path, error = %e, "skipping archive entry that could not be written");
                             continue;
@@ -143,10 +147,17 @@ pub fn extract_tar_gz<R: Read, H: FileStreamHooks>(
             continue;
         }
 
-        let dest_canonical = crate::fs::resolve_dest_within(&target_canonical, &dest)?;
-        if let Err(e) = entry.unpack(&dest_canonical) {
-            warn!(entry = %relative_path.display(), error = %e, "skipping archive entry that could not be unpacked");
-            continue;
+        let unpacked = crate::fs::resolve_dest_within(&target_canonical, &dest)
+            .and_then(|dest_canonical| entry.unpack(&dest_canonical).map(|_| ()));
+        match unpacked {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+                return Err(StreamError::Io(e));
+            }
+            Err(e) => {
+                warn!(entry = %relative_path.display(), error = %e, "skipping archive entry that could not be unpacked");
+                continue;
+            }
         }
     }
 
@@ -333,6 +344,19 @@ mod tests {
         let data = build_archive(&[
             Entry::File("project-main/src/main.rs", b"fn main() {}"),
             Entry::File(&format!("project-main/{long_name}.rs"), b"unwritable"),
+        ]);
+        let inv = extract_tar_gz(&data[..], dir.path(), &mut ParseAll).unwrap();
+        assert_eq!(paths(&inv), vec!["src/main.rs"]);
+        assert!(dir.path().join("src/main.rs").exists());
+    }
+
+    #[test]
+    fn skips_entry_whose_directory_name_is_too_long_and_keeps_the_rest() {
+        let dir = tempfile::tempdir().unwrap();
+        let long_dir = "z".repeat(500);
+        let data = build_archive(&[
+            Entry::File("project-main/src/main.rs", b"fn main() {}"),
+            Entry::File(&format!("project-main/{long_dir}/f.rs"), b"unwritable"),
         ]);
         let inv = extract_tar_gz(&data[..], dir.path(), &mut ParseAll).unwrap();
         assert_eq!(paths(&inv), vec!["src/main.rs"]);
