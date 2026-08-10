@@ -68,8 +68,6 @@ fn row_matches(entry: &SeedEntry, row: &PropertyRow) -> bool {
     })
 }
 
-/// Hydration stringifies every property (`toJSONString(map(...))`), so
-/// comparisons normalize both sides to their string form.
 fn column_value_string(value: &ColumnValue) -> String {
     match value {
         ColumnValue::Int64(v) => v.to_string(),

@@ -740,9 +740,6 @@ pub(super) async fn search_multi_filter_mixed_with_single_filter(ctx: &TestConte
     });
 }
 
-/// Seeded diffs: MR 2002 mentions "refactored_helper", MRs 2004/2005 mention
-/// "ship feature". The contains filter must drop 2002 even though all three
-/// pass the state filter.
 pub(super) async fn search_virtual_filter_contains_matching(ctx: &TestContext) {
     let resp = run_query(
         ctx,
@@ -795,8 +792,6 @@ pub(super) async fn search_virtual_filter_eq_no_match(ctx: &TestContext) {
     resp.assert_node_count(0);
 }
 
-/// Only MRs 2000, 2002, 2004, and 2005 have seeded diffs; 2001 and 2003
-/// must be dropped by `is_not_null`.
 pub(super) async fn search_virtual_filter_is_not_null(ctx: &TestContext) {
     let resp = run_query(
         ctx,
@@ -820,9 +815,6 @@ pub(super) async fn search_virtual_filter_is_not_null(ctx: &TestContext) {
     resp.assert_filter("MergeRequest", "diff", |n| n.prop_str("diff").is_some());
 }
 
-/// MR 2002's seeded diff starts with a `diff --git` header while 2004/2005
-/// start with a hunk marker, so `starts_with: "@@ -"` must drop 2002 from
-/// the merged set.
 pub(super) async fn search_virtual_filter_combined_with_physical(ctx: &TestContext) {
     let resp = run_query(
         ctx,
@@ -852,8 +844,6 @@ pub(super) async fn search_virtual_filter_combined_with_physical(ctx: &TestConte
     });
 }
 
-/// Seeded content: only src/clickhouse.rs and README.md mention ClickHouse;
-/// src/parser.rs, VERSION, and the binary logo must be dropped.
 pub(super) async fn search_file_content_contains_selective(ctx: &TestContext) {
     let resp = run_query(
         ctx,
@@ -964,7 +954,6 @@ pub(super) async fn search_file_content_starts_with(ctx: &TestContext) {
     });
 }
 
-/// Only README.md's seeded content ends with "crate.".
 pub(super) async fn search_file_content_ends_with(ctx: &TestContext) {
     let resp = run_query(
         ctx,
@@ -992,7 +981,6 @@ pub(super) async fn search_file_content_ends_with(ctx: &TestContext) {
     });
 }
 
-/// assets/logo.png is seeded with null content (binary file).
 pub(super) async fn search_file_content_is_null_matches_binary(ctx: &TestContext) {
     let resp = run_query(
         ctx,
@@ -1046,8 +1034,6 @@ pub(super) async fn search_file_content_is_not_null_excludes_binary(ctx: &TestCo
     resp.assert_filter("File", "content", |n| n.prop_str("content").is_some());
 }
 
-/// The physical path filter narrows to src/, the virtual content filter
-/// then drops src/parser.rs; only the two together select src/clickhouse.rs.
 pub(super) async fn search_file_content_combined_with_physical(ctx: &TestContext) {
     let resp = run_query(
         ctx,
@@ -1080,9 +1066,6 @@ pub(super) async fn search_file_content_combined_with_physical(ctx: &TestContext
     });
 }
 
-/// Definitions 12100/12102 in project 1001 share file_path and byte offsets
-/// with project 1000's definitions but have no seeded content, so the
-/// resolver must distinguish rows by project_id and drop them.
 pub(super) async fn search_definition_content_selective(ctx: &TestContext) {
     let resp = run_query(
         ctx,

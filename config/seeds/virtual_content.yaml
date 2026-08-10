@@ -1,22 +1,7 @@
-# Virtual column content for data correctness tests, resolved by
-# integration-testkit's SeededColumnResolver in place of Gitaly.
-#
-# Entries are keyed by lookup and matched against the hydrated dependency
-# properties (`depends_on` in the ontology), the same fields the production
-# resolver uses to address rows:
-#
-#   blob_content  (File)              -> project_id + path
-#   blob_content  (Definition)        -> project_id + file_path + start_byte
-#   mr_raw_patch  (MergeRequest.diff) -> project_id + iid
-#
-# `value: null` marks unresolvable content (e.g. binary files). Rows with no
-# matching entry also resolve to null.
-#
-# Selectivity map for File content (project 1000):
-#   contains "ClickHouse" -> src/clickhouse.rs, README.md
-#   contains "tokenize"   -> src/parser.rs
-#   eq "0.91.0"           -> VERSION
-#   is_null               -> assets/logo.png
+# Virtual column content for data correctness tests, loaded by
+# integration-testkit's SeededColumnResolver. Entries are keyed by lookup and
+# matched against the hydrated `depends_on` properties; `value: null` and
+# unmatched rows resolve to null.
 blob_content:
   - match: {project_id: 1000, path: src/parser.rs}
     value: |-
@@ -62,7 +47,6 @@ blob_content:
           client.execute(q).await
       }
 
-# MRs 2001 (opened) and 2003 (closed) have no entry, so their diff is null.
 mr_raw_patch:
   - match: {project_id: 1000, iid: 1}
     value: |-

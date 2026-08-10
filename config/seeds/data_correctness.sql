@@ -120,14 +120,13 @@
 --     ASSIGNED:      User 1 -> WI 4000, User 2 -> WI 4000, User 3 -> WI 4001
 --     HAS_LABEL:     WI 4000 -> Label 7000, WI 4000 -> Label 7001, WI 4001 -> Label 7002
 --
---   Files (all in Project 1000, branch main, path 1/100/1000/):
---     13000 src/parser.rs      (content mentions tokenize)
---     13001 src/clickhouse.rs  (content mentions ClickHouse)
---     13002 README.md          (content mentions ClickHouse)
---     13003 assets/logo.png    (binary, null content)
---     13004 VERSION            (content "0.91.0")
---     Virtual `content` values live in virtual_content.yaml, keyed by
---     project_id + path.
+--   Files (all in Project 1000, path 1/100/1000/, virtual content seeded
+--   in virtual_content.yaml):
+--     13000 src/parser.rs
+--     13001 src/clickhouse.rs
+--     13002 README.md
+--     13003 assets/logo.png (binary, null content)
+--     13004 VERSION
 --
 --   Code definitions:
 --     Project 1000: compile -> helper -> run_query via CALLS
