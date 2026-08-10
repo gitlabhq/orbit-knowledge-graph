@@ -4,7 +4,18 @@ use query_engine::compiler::{HydrationPlan, SecurityContext, compile};
 fn compile_query(json: &str) -> query_engine::compiler::CompiledQueryContext {
     let ontology = Ontology::load_embedded().unwrap();
     let security_ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
-    compile(json, &ontology, &security_ctx).unwrap()
+    let mut input: serde_json::Value = serde_json::from_str(json).unwrap();
+    input["code_contexts"] = serde_json::json!([{
+        "project_id": 1,
+        "ref": "feature",
+        "commit_sha": "head",
+        "base_ref": "main",
+        "indexed_sha": "head",
+        "base_sha": "base",
+        "generation": 1,
+        "state": "ready"
+    }]);
+    compile(&input.to_string(), &ontology, &security_ctx).unwrap()
 }
 
 #[test]

@@ -1,6 +1,25 @@
 use crate::compiler::setup::{compile_to_ast, test_ctx, test_ontology};
 use crate::compiler::utils::has_param_value;
-use compiler::{Node, QueryError, compile};
+use compiler::{Node, QueryError, SecurityContext, compile as compiler_compile};
+
+fn compile(
+    json: &str,
+    ontology: &ontology::Ontology,
+    context: &SecurityContext,
+) -> compiler::Result<compiler::CompiledQueryContext> {
+    let mut input: serde_json::Value = serde_json::from_str(json)?;
+    input["code_contexts"] = serde_json::json!([{
+        "project_id": 1,
+        "ref": "feature",
+        "commit_sha": "head",
+        "base_ref": "main",
+        "indexed_sha": "head",
+        "base_sha": "base",
+        "generation": 1,
+        "state": "ready"
+    }]);
+    compiler_compile(&input.to_string(), ontology, context)
+}
 
 #[test]
 fn compile_to_ast_works() {

@@ -2,9 +2,28 @@ use std::sync::Arc;
 
 use super::setup::{admin_ctx, embedded_ontology, test_ctx};
 use compiler::{
-    ColumnSelection, HydrationPlan, Input, InputNode, QueryType, TraversalPath, compile,
-    compile_input,
+    ColumnSelection, HydrationPlan, Input, InputNode, QueryType, SecurityContext, TraversalPath,
+    compile as compiler_compile, compile_input,
 };
+
+fn compile(
+    json: &str,
+    ontology: &ontology::Ontology,
+    context: &SecurityContext,
+) -> compiler::Result<compiler::CompiledQueryContext> {
+    let mut input: serde_json::Value = serde_json::from_str(json)?;
+    input["code_contexts"] = serde_json::json!([{
+        "project_id": 1,
+        "ref": "feature",
+        "commit_sha": "head",
+        "base_ref": "main",
+        "indexed_sha": "head",
+        "base_sha": "base",
+        "generation": 1,
+        "state": "ready"
+    }]);
+    compiler_compile(&input.to_string(), ontology, context)
+}
 
 #[test]
 fn valid_column_in_order_by() {
@@ -647,7 +666,18 @@ fn cursor_pagination_validation() {
         "cursor queries select hidden key readback columns: {rendered}"
     );
 
-    let hash = canonical_hash(&serde_json::from_str(json).unwrap());
+    let mut canonical_input: serde_json::Value = serde_json::from_str(json).unwrap();
+    canonical_input["code_contexts"] = serde_json::json!([{
+        "project_id": 1,
+        "ref": "feature",
+        "commit_sha": "head",
+        "base_ref": "main",
+        "indexed_sha": "head",
+        "base_sha": "base",
+        "generation": 1,
+        "state": "ready"
+    }]);
+    let hash = canonical_hash(&canonical_input);
     let paged: serde_json::Value = {
         let mut v: serde_json::Value = serde_json::from_str(json).unwrap();
         v["cursor"]["after"] = encode(hash, &[Some("7".into())]).into();
