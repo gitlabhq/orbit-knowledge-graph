@@ -1,3 +1,34 @@
+## [0.96.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.95.3...v0.96.0) (2026-08-10)
+
+### Features
+
+* **query:** attach attribution payload to base-query log_comment ([af0baad](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/af0baadbfdd6d629b3d0c801c32aede4a65b4d7c)) by Michael Usachenko
+
+### Fixes
+
+* **indexer:** dispatch enrolled namespaces whose stored traversal path is stale ([c148e92](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/c148e929d4fa3f41d0d08d6d9816251940ffbd9a)) by Jean-Gabriel Doyon
+* **indexer:** fall back to per-table change detection when the combined query fails ([7be5252](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/7be525255e6728d1de455665bddcb7c06b8288be)) by Jean-Gabriel Doyon
+* **indexer:** time only the work in code indexing jobs ([70b12d5](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/70b12d55f79e2b4fb074060310fa3f7e242400c9)) by Jean-Gabriel Doyon
+* **orbit-local:** friendly errors for non-git and empty-git index paths ([7e0f661](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/7e0f6614de126cec4e174a78ee261f0585cf8ca1)) by Andrew Dunn
+* **release:** unbreak npm publish of signed local CLI archives ([4634dc1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/4634dc15a2c6580cea3c5a4d00909270252b5d65)) by Aaron Algutifan
+
+### Performance
+
+* **code-graph:** improve import resolver perf ([9f746fa](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/9f746fa0164bd87a470d0436df450856385edc38)) by Dmitry Gruzd
+* **treesitter-visit:** use memchr for column seeking ([9c05584](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/9c05584e81e4b7946ff4c058be17b709d1df5023)) by Michael Usachenko
+
+### Other
+
+* **ci:** revert ai review bot model to opus 4.8 (high) ([4a16347](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/4a1634726e5d461f17ada27115ad05f9b365d60b)) by Dmitry Gruzd
+* **deps:** bump oxc crates to 0.143.0 ([17a9129](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/17a9129396efd837bedc060a3c0935d39992a21e)) by Michael Angelo Rivera
+* **deps:** bump ra_ap crates to 0.0.345 ([3307460](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/3307460a99af8ec24a84f2179e1fb6074996228f)) by Michael Angelo Rivera
+* **deps:** update datafusion to v54 and duckdb to v1.10505 ([6c17265](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/6c17265c50f47f7ee543f693ddc845843dddd5c2)) by Bohdan Parkhomchuk
+* **deps:** update rust crate clap to v4.6.5 ([a699adc](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/a699adc91b1341e1f6a4fbb5a14d8cad790c15a2)) by GitLab Renovate Bot
+* **deps:** update rust crate futures to v0.3.33 ([203a020](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/203a020d543f3d17a08624ea2e1c9b1abb39bb7c)) by GitLab Renovate Bot
+* **deps:** upgrade Node toolchain to 26 ([6d5c241](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/6d5c241424e799e339dc1fcebd10b2ab34408101)) by Michael Angelo Rivera
+* **i18n:** update ja-jp for commit 5d6101f6 ([ecb99d4](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/ecb99d4b739a711a77579d1af747c3ff1f9daf1f)) by GitLab-Argo Bot
+* **local:** document the script-free Windows install path ([68d1b1f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/68d1b1f2e5f787e53eedafa98f2a8aafde3a5395)) by Andrew Dunn
+
 ## [0.95.3](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.95.2...v0.95.3) (2026-08-06)
 
 ### Fixes
