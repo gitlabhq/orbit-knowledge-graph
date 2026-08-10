@@ -10,6 +10,7 @@ use crate::input::{CodeContext, CodeContextState, Input};
 
 pub fn apply(node: &mut Node, input: &Input, ontology: &Ontology) -> Result<()> {
     let code_tables = code_tables(ontology);
+    let contextual_tables = contextual_tables(ontology);
     let scans_code = match node {
         Node::Query(query) => query_scans_code(query, &code_tables),
         Node::Insert(_) => false,
@@ -40,9 +41,33 @@ pub fn apply(node: &mut Node, input: &Input, ontology: &Ontology) -> Result<()> 
     }
 
     match node {
-        Node::Query(query) => rewrite_query(query, context, &code_tables),
+        Node::Query(query) => rewrite_query(query, context, &contextual_tables),
         Node::Insert(_) => Ok(()),
     }
+}
+
+fn contextual_tables(ontology: &Ontology) -> HashSet<String> {
+    let mut tables: HashSet<_> = ontology
+        .nodes()
+        .filter(|node| {
+            node.domain == "source_code"
+                && node
+                    .storage
+                    .columns
+                    .iter()
+                    .any(|column| column.name == "branch")
+        })
+        .map(|node| unprefixed(&node.destination_table).to_string())
+        .collect();
+    tables.extend(
+        ontology
+            .edge_tables()
+            .into_iter()
+            .filter(|table| table.contains("code_edge"))
+            .map(unprefixed)
+            .map(str::to_string),
+    );
+    tables
 }
 
 fn code_tables(ontology: &Ontology) -> HashSet<String> {
@@ -382,6 +407,22 @@ mod tests {
                 .to_string()
                 .contains("default-branch fallback is disabled")
         );
+    }
+
+    #[test]
+    fn requires_context_without_rewriting_non_branch_source_code_tables() {
+        let mut node = Node::Query(Box::new(Query {
+            select: vec![SelectExpr::star()],
+            from: TableRef::scan("gl_branch", "b"),
+            ..Query::default()
+        }));
+        let input = Input {
+            code_contexts: vec![context(CodeContextState::Ready)],
+            ..Input::default()
+        };
+
+        apply(&mut node, &input, &Ontology::load_embedded().unwrap()).unwrap();
+        assert!(matches!(node, Node::Query(query) if matches!(query.from, TableRef::Scan { .. })));
     }
 
     #[test]

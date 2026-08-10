@@ -2828,11 +2828,11 @@ async fn setup_indirect_auth_data(ctx: &TestContext) {
     .await;
 
     ctx.execute(&format!(
-        "INSERT INTO {} (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
-         ('1/100/1000/', 3000, 'File', 'DEFINES', 5000, 'Definition'),
-         ('1/100/1000/', 3000, 'File', 'DEFINES', 5001, 'Definition'),
-         ('1/100/1000/', 3001, 'File', 'DEFINES', 5002, 'Definition'),
-         ('1/101/1001/', 3002, 'File', 'DEFINES', 5003, 'Definition')",
+        "INSERT INTO {} (traversal_path, project_id, branch, source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
+         ('1/100/1000/', 1000, 'main', 3000, 'File', 'DEFINES', 5000, 'Definition'),
+         ('1/100/1000/', 1000, 'main', 3000, 'File', 'DEFINES', 5001, 'Definition'),
+         ('1/100/1000/', 1000, 'main', 3001, 'File', 'DEFINES', 5002, 'Definition'),
+         ('1/101/1001/', 1001, 'main', 3002, 'File', 'DEFINES', 5003, 'Definition')",
         edge_table_for("DEFINES")
     ))
     .await;

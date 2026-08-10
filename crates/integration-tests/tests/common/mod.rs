@@ -22,6 +22,13 @@ pub fn compile(
     ontology: &Ontology,
     security_ctx: &SecurityContext,
 ) -> query_engine::compiler::Result<CompiledQueryContext> {
+    match query_engine::compiler::compile(json, ontology, security_ctx) {
+        Err(query_engine::compiler::QueryError::Authorization(message))
+            if message
+                == "code scans require one resolved code_context; default-branch fallback is disabled" =>
+            {}
+        result => return result,
+    }
     let mut input: serde_json::Value = serde_json::from_str(json)?;
     input["code_contexts"] = serde_json::json!([{
         "project_id": 1000,

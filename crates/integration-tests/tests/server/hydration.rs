@@ -2,13 +2,13 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use crate::common::{
-    GRAPH_SCHEMA_SQL, MockRedactionService, SIPHON_SCHEMA_SQL, TestContext, load_ontology,
+    GRAPH_SCHEMA_SQL, MockRedactionService, SIPHON_SCHEMA_SQL, TestContext, compile, load_ontology,
     run_redaction, test_security_context,
 };
 use gkg_server::pipeline::HydrationStage;
 use gkg_server::redaction::QueryResult;
 use integration_testkit::{run_subtests_shared, t};
-use query_engine::compiler::{HydrationPlan, SecurityContext, compile};
+use query_engine::compiler::{HydrationPlan, SecurityContext};
 use query_engine::formatters::row_to_json;
 use query_engine::pipeline::{NoOpObserver, PipelineStage, QueryPipelineContext, TypeMap};
 use query_engine::shared::RedactionOutput;
@@ -78,9 +78,9 @@ async fn setup_test_data(ctx: &TestContext) {
 
     let ontology = load_ontology();
     ctx.execute(&format!(
-        "INSERT INTO {} (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
-         ('1/100/1000/', 5001, 'File', 'DEFINES', 6001, 'Definition'),
-         ('1/100/1000/', 5002, 'File', 'DEFINES', 6002, 'Definition')",
+        "INSERT INTO {} (traversal_path, project_id, branch, source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
+         ('1/100/1000/', 1000, 'main', 5001, 'File', 'DEFINES', 6001, 'Definition'),
+         ('1/100/1000/', 1000, 'main', 5002, 'File', 'DEFINES', 6002, 'Definition')",
         ontology.edge_table_for_relationship("DEFINES")
     ))
     .await;
