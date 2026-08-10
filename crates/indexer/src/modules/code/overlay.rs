@@ -233,15 +233,10 @@ pub fn effective_snapshot(base: &CodeSnapshot, overlay: &BranchOverlay) -> CodeS
         definitions.insert(row.value.id, row.value.clone());
     }
 
-    let visible_ids: BTreeSet<_> = definitions.keys().copied().collect();
     let mut calls: BTreeMap<_, _> = base
         .calls
         .iter()
-        .filter(|call| {
-            visible_ids.contains(&call.source_id)
-                && visible_ids.contains(&call.target_id)
-                && !deleted_calls.contains(&(call.source_id, call.target_id))
-        })
+        .filter(|call| !deleted_calls.contains(&(call.source_id, call.target_id)))
         .map(|call| ((call.source_id, call.target_id), call.clone()))
         .collect();
     for row in overlay.calls.iter().filter(|row| !row.deleted) {
@@ -345,6 +340,14 @@ mod tests {
             BTreeSet::from([LIB.into(), MAIN.into()])
         );
         assert!(overlay.definitions.iter().any(|row| row.deleted));
+        assert!(overlay.calls.iter().any(|row| {
+            row.deleted
+                && row.value
+                    == CallRow {
+                        source_id: 1,
+                        target_id: 2,
+                    }
+        }));
         assert_eq!(overlay.base_mask, BTreeSet::from([LIB.into()]));
     }
 
@@ -393,13 +396,30 @@ mod tests {
                 definition(1, MAIN, "run()"),
                 definition(2, LIB, "load(path)"),
                 definition(3, LIB, "save()"),
+                definition(4, LIB, "load()"),
             ],
-            vec![call(1, 2)],
+            vec![call(1, 4)],
         );
         let overlay = assert_differential(feature, vec![FileChange::Edit(LIB.into())]);
         assert_eq!(
             overlay.reparsed_paths,
             BTreeSet::from([LIB.into(), MAIN.into()])
         );
+        assert!(overlay.calls.iter().any(|row| {
+            row.deleted
+                && row.value
+                    == CallRow {
+                        source_id: 1,
+                        target_id: 2,
+                    }
+        }));
+        assert!(overlay.calls.iter().any(|row| {
+            !row.deleted
+                && row.value
+                    == CallRow {
+                        source_id: 1,
+                        target_id: 4,
+                    }
+        }));
     }
 }

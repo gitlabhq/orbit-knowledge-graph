@@ -18,6 +18,7 @@
 migrations:
 - version: 89
   scope: code
+  note: Drops branch from Directory, File, Definition, and ImportedSymbol IDs while retaining byte-range identity; reindex regenerates code rows under the branch-independent scheme.
 - version: 88
   scope: none
   note: Marks 13 edge mappings mutable so the stale-edge sweep reconciles them. The flag is read only by the sweep's group derivation; extract SQL, transform output and DDL are untouched, so every indexed row is byte-identical.

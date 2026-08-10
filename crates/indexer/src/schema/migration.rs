@@ -202,10 +202,16 @@ pub async fn prepare_tables_for_migration(
         let base_table_name = table.name.strip_prefix(&new_prefix).unwrap_or(&table.name);
         let old_name = format!("{old_prefix}{base_table_name}");
 
-        if base_table_name == CHECKPOINT_TABLE && matches!(scope, MigrationScope::Sdlc(_)) {
+        if base_table_name == CHECKPOINT_TABLE
+            && matches!(scope, MigrationScope::Sdlc(_))
+            && existing_old.contains(&old_name)
+        {
             seed_sdlc_checkpoint(graph, ontology, table, &old_prefix, &scope).await?;
             seeded += 1;
-        } else if base_table_name == CHECKPOINT_TABLE && matches!(scope, MigrationScope::Code) {
+        } else if base_table_name == CHECKPOINT_TABLE
+            && matches!(scope, MigrationScope::Code)
+            && existing_old.contains(&old_name)
+        {
             seed_code_scope_checkpoint(graph, table, &old_prefix).await?;
             seeded += 1;
         } else if should_clone(base_table_name, &old_name, &actions, &existing_old) {
