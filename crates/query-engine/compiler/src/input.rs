@@ -336,6 +336,11 @@ pub struct InputNode {
     /// into SQL. Applied in-memory after hydration resolves the column values.
     #[serde(skip)]
     pub virtual_filters: Vec<(String, InputFilter)>,
+    /// Virtual columns added to `virtual_columns` only because a filter
+    /// references them. Resolved for filtering, then stripped from the
+    /// response since the caller never requested them.
+    #[serde(skip)]
+    pub filter_injected_virtuals: Vec<String>,
     #[serde(skip)]
     pub has_traversal_path: bool,
     /// Whether the entity is declared `global: true` in the ontology.
@@ -362,6 +367,7 @@ impl Default for InputNode {
             redaction_id_column: DEFAULT_PRIMARY_KEY.to_string(),
             virtual_columns: Vec::new(),
             virtual_filters: Vec::new(),
+            filter_injected_virtuals: Vec::new(),
             has_traversal_path: false,
             is_global: false,
             traversal_paths: Vec::new(),

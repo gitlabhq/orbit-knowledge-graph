@@ -40,6 +40,9 @@ pub struct HydrationTemplate {
     /// Filters on virtual columns to apply in-memory after hydration resolves
     /// their values.
     pub virtual_filters: Vec<(String, crate::input::InputFilter)>,
+    /// Virtual columns resolved only to evaluate `virtual_filters`; stripped
+    /// from the response after filtering since the caller never selected them.
+    pub filter_injected_virtuals: Vec<String>,
 }
 
 /// Pre-resolved column spec for an entity type in dynamic hydration.
@@ -90,7 +93,8 @@ pub fn generate_hydration_plan(
             // with VCRs. Multi-node traversal needs all templates for
             // DB-column hydration.
             if input.is_search() || input.query_type == QueryType::Aggregation {
-                templates.retain(|t| !t.virtual_columns.is_empty());
+                templates
+                    .retain(|t| !t.virtual_columns.is_empty() || !t.virtual_filters.is_empty());
             }
 
             if templates.is_empty() {
@@ -134,6 +138,7 @@ fn build_static_templates(input: &Input, ontology: &Ontology) -> Vec<HydrationTe
                 injected_columns,
                 has_traversal_path: ont_node.has_traversal_path,
                 virtual_filters: node.virtual_filters.clone(),
+                filter_injected_virtuals: node.filter_injected_virtuals.clone(),
             })
         })
         .collect()

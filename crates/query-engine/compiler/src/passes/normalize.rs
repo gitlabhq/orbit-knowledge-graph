@@ -257,6 +257,36 @@ pub fn normalize(mut input: Input, ontology: &Ontology) -> Result<Input> {
         });
         node.virtual_filters = virtual_filters;
 
+        // A filtered virtual column the caller didn't select must still be
+        // resolved, or the post-hydration filter has no value to test and
+        // the clause silently drops (#1054).
+        if strip_virtual {
+            for (prop, _) in &node.virtual_filters {
+                if node
+                    .virtual_columns
+                    .iter()
+                    .any(|vc| vc.column_name == *prop)
+                {
+                    continue;
+                }
+                let Some(field) = node_entity.fields.iter().find(|f| f.name == *prop) else {
+                    continue;
+                };
+                let ontology::FieldSource::Virtual(vs) = &field.source else {
+                    continue;
+                };
+                if vs.disabled {
+                    continue;
+                }
+                node.virtual_columns.push(VirtualColumnRequest {
+                    column_name: prop.clone(),
+                    service: vs.service.clone(),
+                    lookup: vs.lookup.clone(),
+                });
+                node.filter_injected_virtuals.push(prop.clone());
+            }
+        }
+
         for (column, filters) in &mut node.filters {
             let Some(field) = node_entity.fields.iter().find(|f| f.name == *column) else {
                 continue;

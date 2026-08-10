@@ -479,6 +479,25 @@ fn eval_virtual_filter(value: Option<&ColumnValue>, filter: &InputFilter) -> boo
     }
 }
 
+pub fn strip_filter_injected_virtuals(result: &mut QueryResult, templates: &[HydrationTemplate]) {
+    let cols: Vec<String> = templates
+        .iter()
+        .flat_map(|t| {
+            t.filter_injected_virtuals
+                .iter()
+                .map(move |c| format!("{}_{c}", t.node_alias))
+        })
+        .collect();
+    if cols.is_empty() {
+        return;
+    }
+    for row in result.authorized_rows_mut() {
+        for col in &cols {
+            row.remove_column(col);
+        }
+    }
+}
+
 pub fn apply_virtual_filters_static(result: &mut QueryResult, templates: &[HydrationTemplate]) {
     let filters: Vec<_> = templates
         .iter()
