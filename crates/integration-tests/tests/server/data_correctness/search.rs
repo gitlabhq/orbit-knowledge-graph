@@ -1089,3 +1089,57 @@ pub(super) async fn search_definition_content_selective(ctx: &TestContext) {
             .is_some_and(|s| s.contains("normalize"))
     });
 }
+
+pub(super) async fn search_file_content_filter_without_content_column(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "nodes": [{"id": "f", "entity": "File",
+                     "columns": ["path", "project_id"],
+                     "filters": {
+                         "project_id": {"eq": 1000},
+                         "content": {"contains": "ClickHouse"}
+                     }}],
+            "order_by": "f.id",
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_node_count(2);
+    resp.assert_node_order("File", &[13001, 13002]);
+    resp.assert_filter("File", "project_id", |n| {
+        n.prop_i64("project_id") == Some(1000) || n.prop_str("project_id") == Some("1000")
+    });
+    resp.assert_filter("File", "content", |n| {
+        n.prop_str("path").is_some() && n.prop_str("content").is_none()
+    });
+}
+
+pub(super) async fn search_file_content_filter_without_content_column_no_match(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "nodes": [{"id": "f", "entity": "File",
+                     "columns": ["path", "project_id"],
+                     "filters": {
+                         "project_id": {"eq": 1000},
+                         "content": {"contains": "zqxjnonexistenttoken9town_xyzzy"}
+                     }}],
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.skip_requirement(Requirement::Filter {
+        field: "content".into(),
+    });
+    resp.skip_requirement(Requirement::Filter {
+        field: "project_id".into(),
+    });
+    resp.assert_node_count(0);
+}

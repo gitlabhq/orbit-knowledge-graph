@@ -2055,4 +2055,108 @@ mod tests {
         );
         assert!(msg.contains("gt"), "error should name the operator: {msg}");
     }
+
+    /// #1054: a virtual filter whose column is not selected must still
+    /// produce a hydration plan that resolves the column, or the filter
+    /// silently drops.
+    #[test]
+    fn filter_only_virtual_column_injects_resolution() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+        let compiled = compile(
+            r#"{
+                "query_type": "traversal",
+                "nodes": [{"id": "f", "entity": "File",
+                         "filters": {"content": {"contains": "needle"},
+                                     "project_id": {"eq": 1000}},
+                         "columns": ["path", "project_id"]}],
+                "limit": 10
+            }"#,
+            &ontology,
+            &security_ctx(),
+        )
+        .expect("filter-only virtual column should compile");
+
+        let sql = compiled.base.render();
+        assert!(
+            !sql.contains("content"),
+            "virtual column 'content' must not appear in SQL, got:\n{sql}"
+        );
+
+        let HydrationPlan::Static(templates) = &compiled.hydration else {
+            panic!(
+                "expected static hydration plan, got {:?}",
+                compiled.hydration
+            );
+        };
+        let template = templates
+            .iter()
+            .find(|t| t.entity_type == "File")
+            .expect("File template");
+        assert!(
+            template
+                .virtual_columns
+                .iter()
+                .any(|vc| vc.column_name == "content"),
+            "content must be injected for resolution: {template:?}"
+        );
+        assert_eq!(template.filter_injected_virtuals, vec!["content"]);
+        assert!(
+            template
+                .virtual_filters
+                .iter()
+                .any(|(col, _)| col == "content"),
+            "content filter must be carried: {template:?}"
+        );
+    }
+
+    #[test]
+    fn requested_virtual_column_filter_is_not_marked_injected() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+        let compiled = compile(
+            r#"{
+                "query_type": "traversal",
+                "nodes": [{"id": "f", "entity": "File",
+                         "filters": {"content": {"contains": "needle"}},
+                         "columns": ["path", "content"]}],
+                "limit": 10
+            }"#,
+            &ontology,
+            &security_ctx(),
+        )
+        .expect("should compile");
+
+        let HydrationPlan::Static(templates) = &compiled.hydration else {
+            panic!("expected static hydration plan");
+        };
+        let template = templates
+            .iter()
+            .find(|t| t.entity_type == "File")
+            .expect("File template");
+        assert!(template.filter_injected_virtuals.is_empty());
+    }
+
+    #[test]
+    fn filter_on_virtual_column_rejects_non_traversal_query() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+        let err = compile(
+            r#"{
+                "query_type": "aggregation",
+                "nodes": [{"id": "f", "entity": "File",
+                         "filters": {"content": {"contains": "needle"}}}],
+                "group_by": ["f.language"],
+                "aggregations": [{"count": "f", "as": "total"}],
+                "limit": 10
+            }"#,
+            &ontology,
+            &security_ctx(),
+        )
+        .expect_err("virtual filter on aggregation should be rejected");
+
+        assert!(err.is_client_safe());
+        let msg = err.to_string();
+        assert!(
+            msg.contains("only supported on traversal queries"),
+            "unexpected error: {msg}"
+        );
+    }
 }
