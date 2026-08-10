@@ -497,3 +497,25 @@ pub fn apply_virtual_filters_static(result: &mut QueryResult, templates: &[Hydra
             .all(|(col_key, filter)| eval_virtual_filter(row.get(col_key), filter))
     });
 }
+
+/// Must run after [`apply_virtual_filters_static`]: filter-injected columns
+/// are resolved solely for the filter comparison and were never requested,
+/// so they are dropped from the rows that survived it.
+pub fn strip_filter_injected_static(result: &mut QueryResult, templates: &[HydrationTemplate]) {
+    let col_keys: Vec<String> = templates
+        .iter()
+        .flat_map(|t| {
+            t.filter_injected_columns
+                .iter()
+                .map(move |col| format!("{}_{col}", t.node_alias))
+        })
+        .collect();
+    if col_keys.is_empty() {
+        return;
+    }
+    for row in result.authorized_rows_mut() {
+        for key in &col_keys {
+            row.remove_column(key);
+        }
+    }
+}

@@ -257,6 +257,32 @@ pub fn normalize(mut input: Input, ontology: &Ontology) -> Result<Input> {
         });
         node.virtual_filters = virtual_filters;
 
+        let mut filter_injected = Vec::new();
+        if strip_virtual {
+            for (prop, _) in &node.virtual_filters {
+                if node
+                    .virtual_columns
+                    .iter()
+                    .any(|vc| vc.column_name == *prop)
+                    || filter_injected.contains(prop)
+                {
+                    continue;
+                }
+                if let Some(field) = node_entity.fields.iter().find(|f| f.name == *prop)
+                    && let ontology::FieldSource::Virtual(vs) = &field.source
+                    && !vs.disabled
+                {
+                    node.virtual_columns.push(VirtualColumnRequest {
+                        column_name: prop.clone(),
+                        service: vs.service.clone(),
+                        lookup: vs.lookup.clone(),
+                    });
+                    filter_injected.push(prop.clone());
+                }
+            }
+        }
+        node.filter_injected_virtual_columns = filter_injected;
+
         for (column, filters) in &mut node.filters {
             let Some(field) = node_entity.fields.iter().find(|f| f.name == *column) else {
                 continue;

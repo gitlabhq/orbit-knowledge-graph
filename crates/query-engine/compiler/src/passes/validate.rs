@@ -183,13 +183,13 @@ impl<'a> Validator<'a> {
         Self { ontology }
     }
 
-    /// If the field is virtual, returns the allowed filter operators from the
-    /// ontology. Returns `None` for non-virtual fields.
-    fn virtual_allowed_ops(&self, entity: &str, prop: &str) -> Option<Vec<&str>> {
+    /// Returns the virtual source declaration for the field, or `None` for
+    /// non-virtual fields.
+    fn virtual_source(&self, entity: &str, prop: &str) -> Option<&ontology::VirtualSource> {
         let node = self.ontology.get_node(entity)?;
         let field = node.fields.iter().find(|f| f.name == prop)?;
         if let ontology::FieldSource::Virtual(vs) = &field.source {
-            Some(vs.allowed_ops.iter().map(|s| s.as_str()).collect())
+            Some(vs)
         } else {
             None
         }
@@ -421,7 +421,24 @@ impl<'a> Validator<'a> {
                         "filter on \"{prop}\" for {entity}: field is not filterable"
                     )));
                 }
-                if let Some(allowed) = self.virtual_allowed_ops(entity, prop) {
+                if let Some(vs) = self.virtual_source(entity, prop) {
+                    if matches!(
+                        input.query_type,
+                        QueryType::Aggregation | QueryType::Neighbors | QueryType::PathFinding
+                    ) {
+                        let qt: &str = input.query_type.into();
+                        return Err(QueryError::Validation(format!(
+                            "filter on \"{prop}\" for {entity}: virtual columns cannot be \
+                             filtered in {qt} queries"
+                        )));
+                    }
+                    if vs.disabled {
+                        return Err(QueryError::Validation(format!(
+                            "filter on \"{prop}\" for {entity}: virtual column is not yet \
+                             resolvable"
+                        )));
+                    }
+                    let allowed: Vec<&str> = vs.allowed_ops.iter().map(|s| s.as_str()).collect();
                     for filter in filters {
                         let op = filter.op.unwrap_or(FilterOp::Eq);
                         if !allowed.contains(&op.as_ref()) {
