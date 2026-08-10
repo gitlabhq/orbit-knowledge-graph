@@ -42,6 +42,17 @@ impl EmptyRepositoryReason {
             EmptyRepositoryReason::RepositoryTooLarge => "repository_too_large",
         }
     }
+
+    /// Only the size cap is known to be permanent; the other reasons can be
+    /// Gitaly visibility lag, which a retry may clear.
+    pub fn is_permanent(self) -> bool {
+        match self {
+            EmptyRepositoryReason::RepositoryTooLarge => true,
+            EmptyRepositoryReason::NotFound
+            | EmptyRepositoryReason::ServerError
+            | EmptyRepositoryReason::EmptyArchive => false,
+        }
+    }
 }
 
 impl std::fmt::Display for EmptyRepositoryReason {
@@ -157,6 +168,18 @@ mod tests {
     use parking_lot::Mutex;
 
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[test]
+    fn only_the_size_cap_is_permanent() {
+        assert!(EmptyRepositoryReason::RepositoryTooLarge.is_permanent());
+        for reason in [
+            EmptyRepositoryReason::NotFound,
+            EmptyRepositoryReason::ServerError,
+            EmptyRepositoryReason::EmptyArchive,
+        ] {
+            assert!(!reason.is_permanent());
+        }
+    }
 
     struct ScriptedRepositoryService {
         archive: Mutex<Vec<u8>>,
