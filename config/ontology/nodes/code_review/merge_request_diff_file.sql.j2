@@ -23,7 +23,8 @@ WITH
   _e0 AS (SELECT
     id,
     merge_request_id,
-    project_id
+    project_id,
+    traversal_path
   FROM siphon_merge_request_diffs
   WHERE id IN (SELECT
       merge_request_diff_id
@@ -44,7 +45,7 @@ SELECT
   _batch.generated AS generated,
   _batch.a_mode AS a_mode,
   _batch.b_mode AS b_mode,
-  _batch.traversal_path AS traversal_path,
+  _e0.traversal_path AS traversal_path,
   _batch.relative_order AS relative_order,
   _batch._version AS _version,
   _batch._deleted AS _deleted
