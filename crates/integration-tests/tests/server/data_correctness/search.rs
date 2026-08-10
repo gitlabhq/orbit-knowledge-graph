@@ -789,6 +789,7 @@ pub(super) async fn search_virtual_filter_eq_no_match(ctx: &TestContext) {
     resp.skip_requirement(Requirement::Filter {
         field: "diff".into(),
     });
+    resp.skip_requirement(Requirement::NodeIds);
     resp.assert_node_count(0);
 }
 
@@ -923,6 +924,7 @@ pub(super) async fn search_file_content_contains_no_match(ctx: &TestContext) {
     resp.skip_requirement(Requirement::Filter {
         field: "project_id".into(),
     });
+    resp.skip_requirement(Requirement::NodeIds);
     resp.assert_node_count(0);
 }
 
@@ -1180,6 +1182,7 @@ pub(super) async fn search_file_content_filter_without_selecting_column_no_match
     resp.skip_requirement(Requirement::Filter {
         field: "project_id".into(),
     });
+    resp.skip_requirement(Requirement::NodeIds);
     resp.assert_node_count(0);
 }
 
