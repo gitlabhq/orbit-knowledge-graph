@@ -431,14 +431,16 @@ mod tests {
                 definition(1, upstream, "start()"),
                 definition(2, caller, "run()"),
                 definition(3, LIB, "load()"),
+                definition(4, caller, "helper()"),
             ],
             vec![call(1, 2), call(2, 3)],
         );
         let feature = snapshot(
             vec![
                 definition(1, upstream, "start()"),
-                definition(2, caller, "run(updated)"),
+                definition(2, caller, "run()"),
                 definition(3, LIB, "load(path)"),
+                definition(4, caller, "helper(updated)"),
             ],
             vec![call(1, 2), call(2, 3)],
         );
