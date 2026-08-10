@@ -334,9 +334,10 @@ impl CodeIndexer {
                 path
             }
             Err(ResolveError::EmptyRepository { reason, detail }) => {
-                // Retry a transient empty only when a commit SHA proves content
-                // exists; a permanent size cap is checkpointed empty, not retried.
-                if request.commit_sha.is_some() && reason.is_transient() {
+                // A commit SHA proves content exists, so an empty archive is
+                // worth a retry — unless the reason is permanent, where retrying
+                // only burns redeliveries on the way to the dead-letter queue.
+                if request.commit_sha.is_some() && !reason.is_permanent() {
                     self.metrics.record_stage_error("repository_fetch");
                     return Err(HandlerError::Processing(format!(
                         "archive empty ({reason}: {detail}) for task with commit_sha; retrying"

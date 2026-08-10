@@ -43,14 +43,14 @@ impl EmptyRepositoryReason {
         }
     }
 
-    /// A transient empty (Gitaly visibility lag) may resolve on retry; a
-    /// `RepositoryTooLarge` size cap is permanent, so it never does.
-    pub fn is_transient(self) -> bool {
+    /// Only the size cap is known to be permanent; the other reasons can be
+    /// Gitaly visibility lag, which a retry may clear.
+    pub fn is_permanent(self) -> bool {
         match self {
+            EmptyRepositoryReason::RepositoryTooLarge => true,
             EmptyRepositoryReason::NotFound
             | EmptyRepositoryReason::ServerError
-            | EmptyRepositoryReason::EmptyArchive => true,
-            EmptyRepositoryReason::RepositoryTooLarge => false,
+            | EmptyRepositoryReason::EmptyArchive => false,
         }
     }
 }
@@ -170,14 +170,14 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     #[test]
-    fn only_the_size_cap_is_not_transient() {
-        assert!(!EmptyRepositoryReason::RepositoryTooLarge.is_transient());
+    fn only_the_size_cap_is_permanent() {
+        assert!(EmptyRepositoryReason::RepositoryTooLarge.is_permanent());
         for reason in [
             EmptyRepositoryReason::NotFound,
             EmptyRepositoryReason::ServerError,
             EmptyRepositoryReason::EmptyArchive,
         ] {
-            assert!(reason.is_transient());
+            assert!(!reason.is_permanent());
         }
     }
 
