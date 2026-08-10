@@ -31,6 +31,16 @@ pub struct IndexingProgress {
     pub last_duration_ms: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_rows_read: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_rows_written: Option<u64>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct RunRows {
+    pub read: Option<u64>,
+    pub written: Option<u64>,
 }
 
 pub struct IndexingStatusStore {
@@ -60,6 +70,8 @@ impl IndexingStatusStore {
                 last_completed_at: None,
                 last_duration_ms: None,
                 last_error: None,
+                last_rows_read: None,
+                last_rows_written: None,
             },
         };
         self.write(traversal_path, progress).await;
@@ -71,19 +83,11 @@ impl IndexingStatusStore {
         started_at: DateTime<Utc>,
         completed_at: DateTime<Utc>,
         error: Option<String>,
+        rows: RunRows,
     ) {
-        let duration_ms = completed_at
-            .signed_duration_since(started_at)
-            .num_milliseconds()
-            .max(0) as u64;
         self.write(
             traversal_path,
-            IndexingProgress {
-                last_started_at: started_at,
-                last_completed_at: Some(completed_at),
-                last_duration_ms: Some(duration_ms),
-                last_error: error,
-            },
+            completed_progress(started_at, completed_at, error, rows),
         )
         .await;
     }
@@ -113,6 +117,8 @@ impl IndexingStatusStore {
                 last_completed_at: None,
                 last_duration_ms: None,
                 last_error: None,
+                last_rows_read: None,
+                last_rows_written: None,
             },
         };
         self.write_entity(traversal_path, entity_kind, progress)
@@ -126,20 +132,12 @@ impl IndexingStatusStore {
         started_at: DateTime<Utc>,
         completed_at: DateTime<Utc>,
         error: Option<String>,
+        rows: RunRows,
     ) {
-        let duration_ms = completed_at
-            .signed_duration_since(started_at)
-            .num_milliseconds()
-            .max(0) as u64;
         self.write_entity(
             traversal_path,
             entity_kind,
-            IndexingProgress {
-                last_started_at: started_at,
-                last_completed_at: Some(completed_at),
-                last_duration_ms: Some(duration_ms),
-                last_error: error,
-            },
+            completed_progress(started_at, completed_at, error, rows),
         )
         .await;
     }
@@ -212,6 +210,26 @@ impl IndexingStatusStore {
     }
 }
 
+fn completed_progress(
+    started_at: DateTime<Utc>,
+    completed_at: DateTime<Utc>,
+    error: Option<String>,
+    rows: RunRows,
+) -> IndexingProgress {
+    let duration_ms = completed_at
+        .signed_duration_since(started_at)
+        .num_milliseconds()
+        .max(0) as u64;
+    IndexingProgress {
+        last_started_at: started_at,
+        last_completed_at: Some(completed_at),
+        last_duration_ms: Some(duration_ms),
+        last_error: error,
+        last_rows_read: rows.read,
+        last_rows_written: rows.written,
+    }
+}
+
 /// `"42/9970/12345/"` → `"status.42.9970.12345"`.
 fn normalize_key(traversal_path: &str) -> Result<String, Error> {
     let dotted = gkg_utils::traversal_path::to_dotted(traversal_path);
@@ -274,33 +292,54 @@ mod tests {
             last_completed_at: None,
             last_duration_ms: None,
             last_error: None,
+            last_rows_read: None,
+            last_rows_written: None,
         };
         let json: serde_json::Value = serde_json::to_value(&progress).unwrap();
         assert!(json.get("last_completed_at").is_none());
         assert!(json.get("last_duration_ms").is_none());
         assert!(json.get("last_error").is_none());
+        assert!(json.get("last_rows_read").is_none());
+        assert!(json.get("last_rows_written").is_none());
     }
 
     #[test]
     fn completion_serializes_success_and_failure() {
         let started_at = Utc::now();
-        let success = IndexingProgress {
-            last_started_at: started_at,
-            last_completed_at: Some(started_at + chrono::Duration::milliseconds(300)),
-            last_duration_ms: Some(300),
-            last_error: None,
-        };
+        let success = completed_progress(
+            started_at,
+            started_at + chrono::Duration::milliseconds(300),
+            None,
+            RunRows {
+                read: Some(120),
+                written: Some(80),
+            },
+        );
         let json = serde_json::to_value(&success).unwrap();
         assert_eq!(json["last_duration_ms"], 300);
+        assert_eq!(json["last_rows_read"], 120);
+        assert_eq!(json["last_rows_written"], 80);
         assert!(json.get("last_error").is_none());
 
-        let failure = IndexingProgress {
-            last_started_at: started_at,
-            last_completed_at: Some(started_at),
-            last_duration_ms: Some(0),
-            last_error: Some("deadline exceeded".to_string()),
-        };
+        let failure = completed_progress(
+            started_at,
+            started_at,
+            Some("deadline exceeded".to_string()),
+            RunRows::default(),
+        );
         let json = serde_json::to_value(&failure).unwrap();
         assert_eq!(json["last_error"], "deadline exceeded");
+        assert!(json.get("last_rows_read").is_none());
+        assert!(json.get("last_rows_written").is_none());
+    }
+
+    #[test]
+    fn progress_deserializes_legacy_json_without_rows() {
+        let progress: IndexingProgress = serde_json::from_str(
+            r#"{"last_started_at":"2026-08-01T00:00:00Z","last_completed_at":"2026-08-01T00:00:05Z","last_duration_ms":5000}"#,
+        )
+        .unwrap();
+        assert_eq!(progress.last_rows_read, None);
+        assert_eq!(progress.last_rows_written, None);
     }
 }

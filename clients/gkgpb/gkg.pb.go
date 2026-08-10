@@ -2883,6 +2883,8 @@ type IndexingStatus struct {
 	LastCompletedAt *string                `protobuf:"bytes,3,opt,name=last_completed_at,json=lastCompletedAt,proto3,oneof" json:"last_completed_at,omitempty"`
 	LastDurationMs  *uint64                `protobuf:"varint,4,opt,name=last_duration_ms,json=lastDurationMs,proto3,oneof" json:"last_duration_ms,omitempty"`
 	LastError       *string                `protobuf:"bytes,5,opt,name=last_error,json=lastError,proto3,oneof" json:"last_error,omitempty"`
+	LastRowsRead    *uint64                `protobuf:"varint,6,opt,name=last_rows_read,json=lastRowsRead,proto3,oneof" json:"last_rows_read,omitempty"`          // rows the last run read from its source
+	LastRowsWritten *uint64                `protobuf:"varint,7,opt,name=last_rows_written,json=lastRowsWritten,proto3,oneof" json:"last_rows_written,omitempty"` // rows the last run wrote to the graph
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -2950,6 +2952,20 @@ func (x *IndexingStatus) GetLastError() string {
 		return *x.LastError
 	}
 	return ""
+}
+
+func (x *IndexingStatus) GetLastRowsRead() uint64 {
+	if x != nil && x.LastRowsRead != nil {
+		return *x.LastRowsRead
+	}
+	return 0
+}
+
+func (x *IndexingStatus) GetLastRowsWritten() uint64 {
+	if x != nil && x.LastRowsWritten != nil {
+		return *x.LastRowsWritten
+	}
+	return 0
 }
 
 // Response containing project coverage and entity counts grouped by domain.
@@ -3040,7 +3056,9 @@ type StructuredGraphStatus struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Projects      *ProjectsStatus        `protobuf:"bytes,1,opt,name=projects,proto3" json:"projects,omitempty"`
 	Domains       []*GraphStatusDomain   `protobuf:"bytes,2,rep,name=domains,proto3" json:"domains,omitempty"`
-	Indexing      *IndexingStatus        `protobuf:"bytes,3,opt,name=indexing,proto3" json:"indexing,omitempty"`
+	Indexing      *IndexingStatus        `protobuf:"bytes,3,opt,name=indexing,proto3" json:"indexing,omitempty"`                             // worst of sdlc_indexing and code_indexing
+	SdlcIndexing  *IndexingStatus        `protobuf:"bytes,4,opt,name=sdlc_indexing,json=sdlcIndexing,proto3" json:"sdlc_indexing,omitempty"` // SDLC entity pipelines (issues, MRs, pipelines, ...)
+	CodeIndexing  *IndexingStatus        `protobuf:"bytes,5,opt,name=code_indexing,json=codeIndexing,proto3" json:"code_indexing,omitempty"` // code graph coverage, derived from projects indexed vs known
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3092,6 +3110,20 @@ func (x *StructuredGraphStatus) GetDomains() []*GraphStatusDomain {
 func (x *StructuredGraphStatus) GetIndexing() *IndexingStatus {
 	if x != nil {
 		return x.Indexing
+	}
+	return nil
+}
+
+func (x *StructuredGraphStatus) GetSdlcIndexing() *IndexingStatus {
+	if x != nil {
+		return x.SdlcIndexing
+	}
+	return nil
+}
+
+func (x *StructuredGraphStatus) GetCodeIndexing() *IndexingStatus {
+	if x != nil {
+		return x.CodeIndexing
 	}
 	return nil
 }
@@ -3207,6 +3239,7 @@ type GraphStatusItem struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
 	Count         int64                  `protobuf:"varint,2,opt,name=count,proto3" json:"count,omitempty"`
+	State         *IndexingState         `protobuf:"varint,3,opt,name=state,proto3,enum=gkg.v1.IndexingState,oneof" json:"state,omitempty"` // absent for entities with no per-entity signal
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3253,6 +3286,13 @@ func (x *GraphStatusItem) GetCount() int64 {
 		return x.Count
 	}
 	return 0
+}
+
+func (x *GraphStatusItem) GetState() IndexingState {
+	if x != nil && x.State != nil {
+		return *x.State
+	}
+	return IndexingState_INDEXING_STATE_NOT_INDEXED
 }
 
 var File_gkg_proto protoreflect.FileDescriptor
@@ -3440,38 +3480,46 @@ const file_gkg_proto_rawDesc = "" +
 	"\x0etraversal_path\x18\x01 \x01(\tR\rtraversalPath\x123\n" +
 	"\vsource_type\x18\x02 \x01(\x0e2\x12.gkg.v1.SourceTypeR\n" +
 	"sourceType\x12.\n" +
-	"\x06format\x18\x03 \x01(\x0e2\x16.gkg.v1.ResponseFormatR\x06format\"\xbc\x02\n" +
+	"\x06format\x18\x03 \x01(\x0e2\x16.gkg.v1.ResponseFormatR\x06format\"\xc1\x03\n" +
 	"\x0eIndexingStatus\x12+\n" +
 	"\x05state\x18\x01 \x01(\x0e2\x15.gkg.v1.IndexingStateR\x05state\x12+\n" +
 	"\x0flast_started_at\x18\x02 \x01(\tH\x00R\rlastStartedAt\x88\x01\x01\x12/\n" +
 	"\x11last_completed_at\x18\x03 \x01(\tH\x01R\x0flastCompletedAt\x88\x01\x01\x12-\n" +
 	"\x10last_duration_ms\x18\x04 \x01(\x04H\x02R\x0elastDurationMs\x88\x01\x01\x12\"\n" +
 	"\n" +
-	"last_error\x18\x05 \x01(\tH\x03R\tlastError\x88\x01\x01B\x12\n" +
+	"last_error\x18\x05 \x01(\tH\x03R\tlastError\x88\x01\x01\x12)\n" +
+	"\x0elast_rows_read\x18\x06 \x01(\x04H\x04R\flastRowsRead\x88\x01\x01\x12/\n" +
+	"\x11last_rows_written\x18\a \x01(\x04H\x05R\x0flastRowsWritten\x88\x01\x01B\x12\n" +
 	"\x10_last_started_atB\x14\n" +
 	"\x12_last_completed_atB\x13\n" +
 	"\x11_last_duration_msB\r\n" +
-	"\v_last_error\"\x8d\x01\n" +
+	"\v_last_errorB\x11\n" +
+	"\x0f_last_rows_readB\x14\n" +
+	"\x12_last_rows_written\"\x8d\x01\n" +
 	"\x16GetGraphStatusResponse\x12?\n" +
 	"\n" +
 	"structured\x18\x01 \x01(\v2\x1d.gkg.v1.StructuredGraphStatusH\x00R\n" +
 	"structured\x12'\n" +
 	"\x0eformatted_text\x18\x02 \x01(\tH\x00R\rformattedTextB\t\n" +
-	"\acontent\"\xb4\x01\n" +
+	"\acontent\"\xae\x02\n" +
 	"\x15StructuredGraphStatus\x122\n" +
 	"\bprojects\x18\x01 \x01(\v2\x16.gkg.v1.ProjectsStatusR\bprojects\x123\n" +
 	"\adomains\x18\x02 \x03(\v2\x19.gkg.v1.GraphStatusDomainR\adomains\x122\n" +
-	"\bindexing\x18\x03 \x01(\v2\x16.gkg.v1.IndexingStatusR\bindexing\"K\n" +
+	"\bindexing\x18\x03 \x01(\v2\x16.gkg.v1.IndexingStatusR\bindexing\x12;\n" +
+	"\rsdlc_indexing\x18\x04 \x01(\v2\x16.gkg.v1.IndexingStatusR\fsdlcIndexing\x12;\n" +
+	"\rcode_indexing\x18\x05 \x01(\v2\x16.gkg.v1.IndexingStatusR\fcodeIndexing\"K\n" +
 	"\x0eProjectsStatus\x12\x18\n" +
 	"\aindexed\x18\x01 \x01(\x03R\aindexed\x12\x1f\n" +
 	"\vtotal_known\x18\x02 \x01(\x03R\n" +
 	"totalKnown\"V\n" +
 	"\x11GraphStatusDomain\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12-\n" +
-	"\x05items\x18\x02 \x03(\v2\x17.gkg.v1.GraphStatusItemR\x05items\";\n" +
+	"\x05items\x18\x02 \x03(\v2\x17.gkg.v1.GraphStatusItemR\x05items\"w\n" +
 	"\x0fGraphStatusItem\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
-	"\x05count\x18\x02 \x01(\x03R\x05count*B\n" +
+	"\x05count\x18\x02 \x01(\x03R\x05count\x120\n" +
+	"\x05state\x18\x03 \x01(\x0e2\x15.gkg.v1.IndexingStateH\x00R\x05state\x88\x01\x01B\b\n" +
+	"\x06_state*B\n" +
 	"\x0eResponseFormat\x12\x17\n" +
 	"\x13RESPONSE_FORMAT_RAW\x10\x00\x12\x17\n" +
 	"\x13RESPONSE_FORMAT_LLM\x10\x01*7\n" +
@@ -3624,32 +3672,35 @@ var file_gkg_proto_depIdxs = []int32{
 	49, // 39: gkg.v1.StructuredGraphStatus.projects:type_name -> gkg.v1.ProjectsStatus
 	50, // 40: gkg.v1.StructuredGraphStatus.domains:type_name -> gkg.v1.GraphStatusDomain
 	46, // 41: gkg.v1.StructuredGraphStatus.indexing:type_name -> gkg.v1.IndexingStatus
-	51, // 42: gkg.v1.GraphStatusDomain.items:type_name -> gkg.v1.GraphStatusItem
-	33, // 43: gkg.v1.KnowledgeGraphService.ListTools:input_type -> gkg.v1.ListToolsRequest
-	36, // 44: gkg.v1.KnowledgeGraphService.ListAgentCommands:input_type -> gkg.v1.ListAgentCommandsRequest
-	38, // 45: gkg.v1.KnowledgeGraphService.InvokeAgentCommand:input_type -> gkg.v1.InvokeAgentCommandRequest
-	6,  // 46: gkg.v1.KnowledgeGraphService.ExecuteQuery:input_type -> gkg.v1.ExecuteQueryMessage
-	11, // 47: gkg.v1.KnowledgeGraphService.GetGraphSchema:input_type -> gkg.v1.GetGraphSchemaRequest
-	20, // 48: gkg.v1.KnowledgeGraphService.GetQueryDsl:input_type -> gkg.v1.GetQueryDslRequest
-	25, // 49: gkg.v1.KnowledgeGraphService.ListNamedQueries:input_type -> gkg.v1.ListNamedQueriesRequest
-	22, // 50: gkg.v1.KnowledgeGraphService.GetResponseFormat:input_type -> gkg.v1.GetResponseFormatRequest
-	40, // 51: gkg.v1.KnowledgeGraphService.GetClusterHealth:input_type -> gkg.v1.GetClusterHealthRequest
-	45, // 52: gkg.v1.KnowledgeGraphService.GetGraphStatus:input_type -> gkg.v1.GetGraphStatusRequest
-	34, // 53: gkg.v1.KnowledgeGraphService.ListTools:output_type -> gkg.v1.ListToolsResponse
-	37, // 54: gkg.v1.KnowledgeGraphService.ListAgentCommands:output_type -> gkg.v1.ListAgentCommandsResponse
-	39, // 55: gkg.v1.KnowledgeGraphService.InvokeAgentCommand:output_type -> gkg.v1.InvokeAgentCommandResponse
-	6,  // 56: gkg.v1.KnowledgeGraphService.ExecuteQuery:output_type -> gkg.v1.ExecuteQueryMessage
-	12, // 57: gkg.v1.KnowledgeGraphService.GetGraphSchema:output_type -> gkg.v1.GetGraphSchemaResponse
-	21, // 58: gkg.v1.KnowledgeGraphService.GetQueryDsl:output_type -> gkg.v1.GetQueryDslResponse
-	26, // 59: gkg.v1.KnowledgeGraphService.ListNamedQueries:output_type -> gkg.v1.ListNamedQueriesResponse
-	23, // 60: gkg.v1.KnowledgeGraphService.GetResponseFormat:output_type -> gkg.v1.GetResponseFormatResponse
-	41, // 61: gkg.v1.KnowledgeGraphService.GetClusterHealth:output_type -> gkg.v1.GetClusterHealthResponse
-	47, // 62: gkg.v1.KnowledgeGraphService.GetGraphStatus:output_type -> gkg.v1.GetGraphStatusResponse
-	53, // [53:63] is the sub-list for method output_type
-	43, // [43:53] is the sub-list for method input_type
-	43, // [43:43] is the sub-list for extension type_name
-	43, // [43:43] is the sub-list for extension extendee
-	0,  // [0:43] is the sub-list for field type_name
+	46, // 42: gkg.v1.StructuredGraphStatus.sdlc_indexing:type_name -> gkg.v1.IndexingStatus
+	46, // 43: gkg.v1.StructuredGraphStatus.code_indexing:type_name -> gkg.v1.IndexingStatus
+	51, // 44: gkg.v1.GraphStatusDomain.items:type_name -> gkg.v1.GraphStatusItem
+	5,  // 45: gkg.v1.GraphStatusItem.state:type_name -> gkg.v1.IndexingState
+	33, // 46: gkg.v1.KnowledgeGraphService.ListTools:input_type -> gkg.v1.ListToolsRequest
+	36, // 47: gkg.v1.KnowledgeGraphService.ListAgentCommands:input_type -> gkg.v1.ListAgentCommandsRequest
+	38, // 48: gkg.v1.KnowledgeGraphService.InvokeAgentCommand:input_type -> gkg.v1.InvokeAgentCommandRequest
+	6,  // 49: gkg.v1.KnowledgeGraphService.ExecuteQuery:input_type -> gkg.v1.ExecuteQueryMessage
+	11, // 50: gkg.v1.KnowledgeGraphService.GetGraphSchema:input_type -> gkg.v1.GetGraphSchemaRequest
+	20, // 51: gkg.v1.KnowledgeGraphService.GetQueryDsl:input_type -> gkg.v1.GetQueryDslRequest
+	25, // 52: gkg.v1.KnowledgeGraphService.ListNamedQueries:input_type -> gkg.v1.ListNamedQueriesRequest
+	22, // 53: gkg.v1.KnowledgeGraphService.GetResponseFormat:input_type -> gkg.v1.GetResponseFormatRequest
+	40, // 54: gkg.v1.KnowledgeGraphService.GetClusterHealth:input_type -> gkg.v1.GetClusterHealthRequest
+	45, // 55: gkg.v1.KnowledgeGraphService.GetGraphStatus:input_type -> gkg.v1.GetGraphStatusRequest
+	34, // 56: gkg.v1.KnowledgeGraphService.ListTools:output_type -> gkg.v1.ListToolsResponse
+	37, // 57: gkg.v1.KnowledgeGraphService.ListAgentCommands:output_type -> gkg.v1.ListAgentCommandsResponse
+	39, // 58: gkg.v1.KnowledgeGraphService.InvokeAgentCommand:output_type -> gkg.v1.InvokeAgentCommandResponse
+	6,  // 59: gkg.v1.KnowledgeGraphService.ExecuteQuery:output_type -> gkg.v1.ExecuteQueryMessage
+	12, // 60: gkg.v1.KnowledgeGraphService.GetGraphSchema:output_type -> gkg.v1.GetGraphSchemaResponse
+	21, // 61: gkg.v1.KnowledgeGraphService.GetQueryDsl:output_type -> gkg.v1.GetQueryDslResponse
+	26, // 62: gkg.v1.KnowledgeGraphService.ListNamedQueries:output_type -> gkg.v1.ListNamedQueriesResponse
+	23, // 63: gkg.v1.KnowledgeGraphService.GetResponseFormat:output_type -> gkg.v1.GetResponseFormatResponse
+	41, // 64: gkg.v1.KnowledgeGraphService.GetClusterHealth:output_type -> gkg.v1.GetClusterHealthResponse
+	47, // 65: gkg.v1.KnowledgeGraphService.GetGraphStatus:output_type -> gkg.v1.GetGraphStatusResponse
+	56, // [56:66] is the sub-list for method output_type
+	46, // [46:56] is the sub-list for method input_type
+	46, // [46:46] is the sub-list for extension type_name
+	46, // [46:46] is the sub-list for extension extendee
+	0,  // [0:46] is the sub-list for field type_name
 }
 
 func init() { file_gkg_proto_init() }
@@ -3696,6 +3747,7 @@ func file_gkg_proto_init() {
 		(*GetGraphStatusResponse_Structured)(nil),
 		(*GetGraphStatusResponse_FormattedText)(nil),
 	}
+	file_gkg_proto_msgTypes[45].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

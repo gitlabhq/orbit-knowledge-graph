@@ -494,6 +494,12 @@ pub struct IndexingStatus {
     pub last_duration_ms: ::core::option::Option<u64>,
     #[prost(string, optional, tag = "5")]
     pub last_error: ::core::option::Option<::prost::alloc::string::String>,
+    /// rows the last run read from its source
+    #[prost(uint64, optional, tag = "6")]
+    pub last_rows_read: ::core::option::Option<u64>,
+    /// rows the last run wrote to the graph
+    #[prost(uint64, optional, tag = "7")]
+    pub last_rows_written: ::core::option::Option<u64>,
 }
 /// Response containing project coverage and entity counts grouped by domain.
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -520,8 +526,15 @@ pub struct StructuredGraphStatus {
     pub projects: ::core::option::Option<ProjectsStatus>,
     #[prost(message, repeated, tag = "2")]
     pub domains: ::prost::alloc::vec::Vec<GraphStatusDomain>,
+    /// worst of sdlc_indexing and code_indexing
     #[prost(message, optional, tag = "3")]
     pub indexing: ::core::option::Option<IndexingStatus>,
+    /// SDLC entity pipelines (issues, MRs, pipelines, ...)
+    #[prost(message, optional, tag = "4")]
+    pub sdlc_indexing: ::core::option::Option<IndexingStatus>,
+    /// code graph coverage, derived from projects indexed vs known
+    #[prost(message, optional, tag = "5")]
+    pub code_indexing: ::core::option::Option<IndexingStatus>,
 }
 /// How many projects under this scope have been code-indexed.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
@@ -546,6 +559,9 @@ pub struct GraphStatusItem {
     pub name: ::prost::alloc::string::String,
     #[prost(int64, tag = "2")]
     pub count: i64,
+    /// absent for entities with no per-entity signal
+    #[prost(enumeration = "IndexingState", optional, tag = "3")]
+    pub state: ::core::option::Option<i32>,
 }
 /// Controls output serialization across all data RPCs.
 /// RAW returns structured JSON for programmatic consumers (dashboard, CLI).

@@ -12,6 +12,7 @@ use crate::checkpoint::{Checkpoint, CheckpointStore, namespace_position_key};
 
 use crate::durability::RunDurability;
 use crate::handler::{Handler, HandlerContext, HandlerError};
+use crate::indexing_status::RunRows;
 use crate::modules::sdlc::datalake::DatalakeQuery;
 use crate::modules::sdlc::metrics::SdlcMetrics;
 use crate::modules::sdlc::observer::SdlcOtelObserver;
@@ -122,7 +123,7 @@ impl EntityHandler {
         &self,
         context: HandlerContext,
         request: IndexingRequest,
-    ) -> Result<(), HandlerError> {
+    ) -> Result<PipelineStats, HandlerError> {
         let mut observers: Vec<Box<dyn IndexingObserver>> =
             vec![Box::new(SdlcOtelObserver::new(self.metrics.clone()))];
         observers.extend(self.analytics.observer());
@@ -267,7 +268,7 @@ impl EntityHandler {
             }
         }
 
-        result.map(|_| ())
+        result
     }
 
     async fn run_partitions(
@@ -453,6 +454,13 @@ impl Handler for EntityHandler {
             }
 
             if let Some(path) = traversal_path.as_deref() {
+                let rows = result
+                    .as_ref()
+                    .map(|stats| RunRows {
+                        read: Some(stats.read_rows),
+                        written: Some(stats.written_rows),
+                    })
+                    .unwrap_or_default();
                 context
                     .indexing_status
                     .record_entity_completion(
@@ -461,11 +469,12 @@ impl Handler for EntityHandler {
                         started_at,
                         completed_at,
                         result.as_ref().err().map(ToString::to_string),
+                        rows,
                     )
                     .await;
             }
 
-            result
+            result.map(|_| ())
         }
         .instrument(span)
         .await
@@ -570,6 +579,40 @@ mod tests {
 
         let result = handler.handle(handler_context(), envelope).await;
         assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn namespaced_entity_handler_records_run_rows() {
+        let handler = build_handler("MergeRequest", EtlScope::Namespaced);
+        let mock_nats = Arc::new(MockNatsServices::new());
+        let store = Arc::new(crate::indexing_status::IndexingStatusStore::new(
+            mock_nats.clone(),
+        ));
+        let context = HandlerContext::new(
+            mock_nats,
+            Arc::new(MockLockService::new()),
+            ProgressNotifier::noop(),
+            Arc::clone(&store),
+        );
+
+        let envelope = TestEnvelopeFactory::simple(
+            &serde_json::json!({
+                "namespace": 100,
+                "traversal_path": "42/100/",
+                "watermark": "2024-01-21T00:00:00Z"
+            })
+            .to_string(),
+        );
+
+        handler.handle(context, envelope).await.unwrap();
+
+        let progress = store
+            .get_entity("42/100/", "MergeRequest")
+            .await
+            .unwrap()
+            .expect("entity progress should be recorded");
+        assert_eq!(progress.last_rows_read, Some(0));
+        assert_eq!(progress.last_rows_written, Some(0));
     }
 
     #[test]

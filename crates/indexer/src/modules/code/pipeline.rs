@@ -32,7 +32,7 @@ pub struct IndexingRequest {
 
 pub enum IndexOutcome {
     /// Parsed and streamed to the sink, which checkpoints it after the flush lands.
-    Indexed,
+    Indexed { rows_written: u64 },
     /// Archive endpoint signalled no repository content (404 or 5xx); already checkpointed.
     EmptyRepository,
 }
@@ -40,7 +40,7 @@ pub enum IndexOutcome {
 impl IndexOutcome {
     pub fn metric_label(&self) -> &'static str {
         match self {
-            IndexOutcome::Indexed => "indexed",
+            IndexOutcome::Indexed { .. } => "indexed",
             IndexOutcome::EmptyRepository => "empty_repository",
         }
     }
@@ -429,13 +429,13 @@ impl CodeIndexer {
         // `repository` owns a TempDir that removes the extraction tree on drop, so it is reclaimed
         // whether this returns, errors, or is dropped mid-run on the wall-clock timeout.
         self.metrics.record_cleanup("success");
-        let commit = indexing_result?;
+        let (commit, rows_written) = indexing_result?;
 
         // Drop the pipeline's sentinel hold. If every submitted batch has already flushed, this
         // is the decrement that finalizes; otherwise the writer's last flush will.
         commit.release();
 
-        Ok(IndexOutcome::Indexed)
+        Ok(IndexOutcome::Indexed { rows_written })
     }
 
     #[allow(
@@ -450,7 +450,7 @@ impl CodeIndexer {
         indexed_at: DateTime<Utc>,
         observer: &mut dyn IndexingObserver,
         cancel: CancellationToken,
-    ) -> Result<Arc<ProjectCommit>, HandlerError> {
+    ) -> Result<(Arc<ProjectCommit>, u64), HandlerError> {
         let indexing_start = Instant::now();
         let config = self.build_pipeline_config(context, cancel.clone());
         let (result, commit, metered_bytes) = self
@@ -470,7 +470,7 @@ impl CodeIndexer {
         self.metrics
             .record_indexing_duration(indexing_start.elapsed());
 
-        self.record_indexing_results(
+        let rows_written = self.record_indexing_results(
             &result,
             observer,
             request,
@@ -490,7 +490,7 @@ impl CodeIndexer {
         }
 
         context.progress.notify_in_progress().await;
-        Ok(commit)
+        Ok((commit, rows_written))
     }
 
     fn build_pipeline_config(
@@ -664,7 +664,7 @@ impl CodeIndexer {
         request: &IndexingRequest,
         indexing_start: Instant,
         written_bytes: u64,
-    ) {
+    ) -> u64 {
         let parsed_count = result
             .stats
             .files_parsed
@@ -751,6 +751,8 @@ impl CodeIndexer {
         for error in &result.errors {
             self.metrics.record_stage_error(error.stage);
         }
+
+        rows_written
     }
 }
 
