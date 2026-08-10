@@ -60,11 +60,9 @@ pub fn quote_escaped(value: &str) -> String {
 #[inline]
 fn next_escape_byte(bytes: &[u8]) -> Option<usize> {
     let quoted = memchr::memchr3(b'\\', b'"', 0x7f, bytes);
-    let control = bytes.iter().position(|byte| *byte < 0x20);
-    match (quoted, control) {
-        (Some(left), Some(right)) => Some(left.min(right)),
-        (left, right) => left.or(right),
-    }
+    let bound = quoted.unwrap_or(bytes.len());
+    let control = bytes[..bound].iter().position(|byte| *byte < 0x20);
+    control.or(quoted)
 }
 
 #[inline]
@@ -270,6 +268,7 @@ mod tests {
             "plain ASCII clean span".repeat(20),
             "日本語のきれいな範囲".repeat(20),
             format!("{}\\{}", "a".repeat(512), "b".repeat(512)),
+            "\\\"\u{7f}".repeat(1024),
             "a".repeat(199),
             "a".repeat(200),
             "a".repeat(201),
