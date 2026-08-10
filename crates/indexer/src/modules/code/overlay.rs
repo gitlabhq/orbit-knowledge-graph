@@ -197,9 +197,8 @@ fn add_inbound_caller_closure(
             continue;
         }
         for call in base.calls.iter().filter(|call| call.target_id == target_id) {
-            if let Some(caller) = base.definition(call.source_id)
-                && reparsed_paths.insert(caller.path.clone())
-            {
+            if let Some(caller) = base.definition(call.source_id) {
+                reparsed_paths.insert(caller.path.clone());
                 queue.push_back(caller.id);
             }
         }
@@ -421,5 +420,43 @@ mod tests {
                         target_id: 4,
                     }
         }));
+    }
+
+    #[test]
+    fn inbound_closure_crosses_an_already_reparsed_caller_path() {
+        let caller = "caller.py";
+        let upstream = "upstream.py";
+        let base = snapshot(
+            vec![
+                definition(1, upstream, "start()"),
+                definition(2, caller, "run()"),
+                definition(3, LIB, "load()"),
+            ],
+            vec![call(1, 2), call(2, 3)],
+        );
+        let feature = snapshot(
+            vec![
+                definition(1, upstream, "start()"),
+                definition(2, caller, "run(updated)"),
+                definition(3, LIB, "load(path)"),
+            ],
+            vec![call(1, 2), call(2, 3)],
+        );
+
+        let overlay = build_overlay(
+            &base,
+            &feature,
+            "feature",
+            &[
+                FileChange::Edit(caller.into()),
+                FileChange::Edit(LIB.into()),
+            ],
+            7,
+        );
+
+        assert_eq!(
+            overlay.reparsed_paths,
+            BTreeSet::from([caller.into(), LIB.into(), upstream.into()])
+        );
     }
 }
