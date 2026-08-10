@@ -68,6 +68,7 @@ mimalloc = { version = "0.1.48", default-features = false }
 parking_lot = "0.12.5"
 petgraph = "0.8.3"
 globset = "0.4"
+memchr = "2.8.3"
 rust-lapper = "1.2.0"
 rustc-hash = "2.1.1"
 rmcp = { version = "1.7", features = ["server", "macros", "transport-io"] }

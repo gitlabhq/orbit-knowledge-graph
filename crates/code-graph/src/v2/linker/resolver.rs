@@ -1351,8 +1351,7 @@ impl<'a> ResolveCtx<'a> {
         if let Some(did) = self.graph.graph[enclosing_node].def_id() {
             let gdef = &self.graph.defs[did.0 as usize];
             let fqn = self.graph.str(gdef.fqn);
-            let mut scope = fqn;
-            loop {
+            for scope in crate::utils::fqn_scopes(fqn, sep) {
                 self.graph.indexes.nested.lookup_into(
                     scope,
                     name,
@@ -1395,11 +1394,6 @@ impl<'a> ResolveCtx<'a> {
                 }
                 if !result.is_empty() {
                     break;
-                }
-
-                match scope.rfind(sep) {
-                    Some(pos) => scope = &scope[..pos],
-                    None => break,
                 }
             }
         }

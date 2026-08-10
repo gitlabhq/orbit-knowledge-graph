@@ -237,9 +237,12 @@ impl<'a> ImportResolver<'a> {
         for &did in &def_ids {
             let def = &self.graph.defs[did.0 as usize];
             let fqn_str = self.graph.str(def.fqn);
-            let mut current = fqn_str;
-            loop {
-                let key = self.scratch.set_fmt(format_args!("{current}{sep}{name}"));
+            for prefix in crate::utils::fqn_scopes(fqn_str, sep) {
+                self.scratch.clear();
+                self.scratch.push_str(prefix);
+                self.scratch.push_str(sep);
+                self.scratch.push_str(name);
+                let key = self.scratch.as_str();
                 let matches = self
                     .graph
                     .indexes
@@ -247,10 +250,6 @@ impl<'a> ImportResolver<'a> {
                     .lookup(key, |idx| self.graph.def_fqn(idx) == key);
                 if !matches.is_empty() {
                     return matches.to_vec();
-                }
-                match current.rfind(sep) {
-                    Some(pos) => current = &current[..pos],
-                    None => break,
                 }
             }
         }
