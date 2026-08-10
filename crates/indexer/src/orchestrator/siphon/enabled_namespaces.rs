@@ -11,7 +11,7 @@ use tracing::warn;
 use crate::clickhouse::ArrowClickHouseClient;
 use crate::orchestrator::dispatch::{
     CodeBackfill, NamespaceDispatchRequest, NamespaceIndexingDispatch,
-    enabled_namespaces::NAMESPACE_PATHS_TABLE,
+    enabled_namespaces::resolved_paths_for_namespace_ids_sql,
 };
 use crate::orchestrator::scheduled::TaskError;
 use crate::orchestrator::siphon::decoder::ColumnExtractor;
@@ -107,15 +107,8 @@ async fn lookup_paths(
         return Ok(Vec::new());
     }
 
-    let sql = format!(
-        "SELECT id, argMax(traversal_path, version) AS traversal_path \
-         FROM {NAMESPACE_PATHS_TABLE} \
-         WHERE id IN {{ids:Array(Int64)}} \
-         GROUP BY id \
-         HAVING argMax(deleted, version) = false"
-    );
     let batches = datalake
-        .query(&sql)
+        .query(resolved_paths_for_namespace_ids_sql())
         .param("ids", namespace_ids.to_vec())
         .fetch_arrow()
         .await
@@ -129,8 +122,8 @@ async fn lookup_paths(
         warn!(
             requested = namespace_ids.len(),
             resolved = found.len(),
-            "enabled namespaces without a resolvable traversal path yet; \
-             the namespace sweep will pick them up"
+            "enabled namespaces without a live top-level traversal path; \
+             the sweep picks up any that become resolvable"
         );
     }
 

@@ -25,8 +25,23 @@ AND match(traversal_path, '{TOP_LEVEL_PREFIX_REGEX}')"
     )
 });
 
+static RESOLVED_PATHS_FOR_NAMESPACE_IDS_SQL: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        "SELECT id, argMax(traversal_path, version) AS traversal_path \
+FROM {NAMESPACE_PATHS_TABLE} \
+WHERE id IN {{ids:Array(Int64)}} \
+GROUP BY id \
+HAVING argMax(deleted, version) = false \
+AND match(traversal_path, '{TOP_LEVEL_PREFIX_REGEX}')"
+    )
+});
+
 pub fn resolved_enabled_namespaces_sql() -> &'static str {
     &RESOLVED_ENABLED_NAMESPACES_SQL
+}
+
+pub fn resolved_paths_for_namespace_ids_sql() -> &'static str {
+    &RESOLVED_PATHS_FOR_NAMESPACE_IDS_SQL
 }
 
 #[cfg(test)]
@@ -35,10 +50,14 @@ mod tests {
 
     #[test]
     fn sql_resolves_paths_from_the_datalake_table_not_the_enrollment_row() {
-        let sql = resolved_enabled_namespaces_sql();
-        assert!(sql.contains("FROM namespace_traversal_paths"));
-        assert!(sql.contains("argMax(traversal_path, version)"));
-        assert!(!sql.contains("dictGet"));
+        for sql in [
+            resolved_enabled_namespaces_sql(),
+            resolved_paths_for_namespace_ids_sql(),
+        ] {
+            assert!(sql.contains("FROM namespace_traversal_paths"));
+            assert!(sql.contains("argMax(traversal_path, version)"));
+            assert!(!sql.contains("dictGet"));
+        }
     }
 
     #[test]
@@ -51,9 +70,14 @@ mod tests {
 
     #[test]
     fn sql_filters_to_top_level_paths() {
-        assert!(
-            resolved_enabled_namespaces_sql().contains(TOP_LEVEL_PREFIX_REGEX),
-            "a '' or '0/' path would prefix-match every project during backfill"
-        );
+        for sql in [
+            resolved_enabled_namespaces_sql(),
+            resolved_paths_for_namespace_ids_sql(),
+        ] {
+            assert!(
+                sql.contains(TOP_LEVEL_PREFIX_REGEX),
+                "a '' or '0/' path would prefix-match every project during backfill"
+            );
+        }
     }
 }
