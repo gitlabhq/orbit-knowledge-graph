@@ -746,7 +746,7 @@ pub(super) async fn search_virtual_filter_contains_matching(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "nodes": [{"id": "mr", "entity": "MergeRequest",
-                     "id_range": {"start": 1, "end": 10000},
+                     "node_ids": [2000, 2001, 2002, 2003, 2004, 2005],
                      "columns": ["title", "state", "diff"],
                      "filters": {
                          "state": {"eq": "merged"},
@@ -775,7 +775,7 @@ pub(super) async fn search_virtual_filter_eq_no_match(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "nodes": [{"id": "mr", "entity": "MergeRequest",
-                     "id_range": {"start": 1, "end": 10000},
+                     "node_ids": [2000, 2001, 2002, 2003, 2004, 2005],
                      "columns": ["title", "diff"],
                      "filters": {
                          "diff": {"eq": "nonexistent content"}
@@ -798,7 +798,7 @@ pub(super) async fn search_virtual_filter_is_not_null(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "nodes": [{"id": "mr", "entity": "MergeRequest",
-                     "id_range": {"start": 1, "end": 10000},
+                     "node_ids": [2000, 2001, 2002, 2003, 2004, 2005],
                      "columns": ["title", "diff"],
                      "filters": {
                          "diff": {"is_not_null": true}
@@ -821,7 +821,7 @@ pub(super) async fn search_virtual_filter_combined_with_physical(ctx: &TestConte
         r#"{
             "query_type": "traversal",
             "nodes": [{"id": "mr", "entity": "MergeRequest",
-                     "id_range": {"start": 1, "end": 10000},
+                     "node_ids": [2000, 2001, 2002, 2003, 2004, 2005],
                      "columns": ["title", "state", "diff"],
                      "filters": {
                          "state": "merged",
@@ -844,12 +844,38 @@ pub(super) async fn search_virtual_filter_combined_with_physical(ctx: &TestConte
     });
 }
 
+pub(super) async fn search_virtual_filter_without_node_ids_rejected(_ctx: &TestContext) {
+    let ontology = load_ontology();
+    let err = compile(
+        r#"{
+            "query_type": "traversal",
+            "nodes": [{"id": "f", "entity": "File",
+                     "columns": ["path"],
+                     "filters": {
+                         "project_id": {"eq": 1000},
+                         "content": {"contains": "ClickHouse"}
+                     }}],
+            "limit": 10
+        }"#,
+        &ontology,
+        &test_security_context(),
+    )
+    .expect_err("content search without node_ids should be rejected at compile");
+
+    let msg = err.to_string();
+    assert!(
+        msg.contains("node_ids") && msg.contains("content"),
+        "error should name node_ids and the column: {msg}"
+    );
+}
+
 pub(super) async fn search_file_content_contains_selective(ctx: &TestContext) {
     let resp = run_query(
         ctx,
         r#"{
             "query_type": "traversal",
             "nodes": [{"id": "f", "entity": "File",
+                     "node_ids": [13000, 13001, 13002, 13003, 13004],
                      "columns": ["path", "project_id", "content"],
                      "filters": {
                          "project_id": {"eq": 1000},
@@ -879,6 +905,7 @@ pub(super) async fn search_file_content_contains_no_match(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "nodes": [{"id": "f", "entity": "File",
+                     "node_ids": [13000, 13001, 13002, 13003, 13004],
                      "columns": ["path", "content"],
                      "filters": {
                          "project_id": {"eq": 1000},
@@ -905,6 +932,7 @@ pub(super) async fn search_file_content_eq_exact(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "nodes": [{"id": "f", "entity": "File",
+                     "node_ids": [13000, 13001, 13002, 13003, 13004],
                      "columns": ["path", "project_id", "content"],
                      "filters": {
                          "project_id": {"eq": 1000},
@@ -932,6 +960,7 @@ pub(super) async fn search_file_content_starts_with(ctx: &TestContext) {
         r##"{
             "query_type": "traversal",
             "nodes": [{"id": "f", "entity": "File",
+                     "node_ids": [13000, 13001, 13002, 13003, 13004],
                      "columns": ["path", "project_id", "content"],
                      "filters": {
                          "project_id": {"eq": 1000},
@@ -960,6 +989,7 @@ pub(super) async fn search_file_content_ends_with(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "nodes": [{"id": "f", "entity": "File",
+                     "node_ids": [13000, 13001, 13002, 13003, 13004],
                      "columns": ["path", "project_id", "content"],
                      "filters": {
                          "project_id": {"eq": 1000},
@@ -987,6 +1017,7 @@ pub(super) async fn search_file_content_is_null_matches_binary(ctx: &TestContext
         r#"{
             "query_type": "traversal",
             "nodes": [{"id": "f", "entity": "File",
+                     "node_ids": [13000, 13001, 13002, 13003, 13004],
                      "columns": ["path", "project_id", "content"],
                      "filters": {
                          "project_id": {"eq": 1000},
@@ -1014,6 +1045,7 @@ pub(super) async fn search_file_content_is_not_null_excludes_binary(ctx: &TestCo
         r#"{
             "query_type": "traversal",
             "nodes": [{"id": "f", "entity": "File",
+                     "node_ids": [13000, 13001, 13002, 13003, 13004],
                      "columns": ["path", "project_id", "content"],
                      "filters": {
                          "project_id": {"eq": 1000},
@@ -1040,6 +1072,7 @@ pub(super) async fn search_file_content_combined_with_physical(ctx: &TestContext
         r#"{
             "query_type": "traversal",
             "nodes": [{"id": "f", "entity": "File",
+                     "node_ids": [13000, 13001, 13002, 13003, 13004],
                      "columns": ["path", "project_id", "content"],
                      "filters": {
                          "project_id": {"eq": 1000},
@@ -1072,6 +1105,7 @@ pub(super) async fn search_definition_content_selective(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "nodes": [{"id": "d", "entity": "Definition",
+                     "node_ids": [12000, 12001, 12002, 12100, 12102],
                      "columns": ["name", "file_path", "content"],
                      "filters": {
                          "content": {"contains": "normalize"}
@@ -1096,6 +1130,7 @@ pub(super) async fn search_file_content_filter_without_selecting_column(ctx: &Te
         r#"{
             "query_type": "traversal",
             "nodes": [{"id": "f", "entity": "File",
+                     "node_ids": [13000, 13001, 13002, 13003, 13004],
                      "columns": ["path"],
                      "filters": {
                          "project_id": {"eq": 1000},
@@ -1127,6 +1162,7 @@ pub(super) async fn search_file_content_filter_without_selecting_column_no_match
         r#"{
             "query_type": "traversal",
             "nodes": [{"id": "f", "entity": "File",
+                     "node_ids": [13000, 13001, 13002, 13003, 13004],
                      "columns": ["path"],
                      "filters": {
                          "project_id": {"eq": 1000},
@@ -1153,6 +1189,7 @@ pub(super) async fn search_file_content_is_null_filter_without_selecting_column(
         r#"{
             "query_type": "traversal",
             "nodes": [{"id": "f", "entity": "File",
+                     "node_ids": [13000, 13001, 13002, 13003, 13004],
                      "columns": ["path"],
                      "filters": {
                          "project_id": {"eq": 1000},

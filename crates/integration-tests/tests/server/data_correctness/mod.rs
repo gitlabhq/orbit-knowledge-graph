@@ -55,6 +55,7 @@ async fn data_correctness() {
         search::search_virtual_filter_eq_no_match,
         search::search_virtual_filter_is_not_null,
         search::search_virtual_filter_combined_with_physical,
+        search::search_virtual_filter_without_node_ids_rejected,
         search::search_file_content_contains_selective,
         search::search_file_content_contains_no_match,
         search::search_file_content_eq_exact,

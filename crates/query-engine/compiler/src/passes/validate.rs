@@ -438,6 +438,13 @@ impl<'a> Validator<'a> {
                              resolvable"
                         )));
                     }
+                    if node.node_ids.is_empty() {
+                        return Err(QueryError::Validation(format!(
+                            "filter on \"{prop}\" for {entity}: virtual columns can only be \
+                             filtered on nodes with explicit node_ids; searching by virtual \
+                             column content is not yet supported"
+                        )));
+                    }
                     let allowed: Vec<&str> = vs.allowed_ops.iter().map(|s| s.as_str()).collect();
                     for filter in filters {
                         let op = filter.op.unwrap_or(FilterOp::Eq);

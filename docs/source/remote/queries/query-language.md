@@ -261,15 +261,16 @@ The `content` column is for source code. For merge request diff text, use
 ### Filtering on virtual columns
 
 Virtual columns support the `eq`, `contains`, `starts_with`, `ends_with`,
-`is_null`, and `is_not_null` filter operators in `traversal` queries. You do
-not need to request the column to filter on it; a virtual column that is
-filtered but not requested is resolved for the comparison and omitted from
-the response.
+`is_null`, and `is_not_null` filter operators in `traversal` queries, and
+only on nodes that pin explicit `node_ids`. The filter resolves the column
+for those rows and compares in memory. Using a virtual column filter to
+search rows you have not identified yet (content search) is not supported
+and is rejected; find candidate rows with indexed filters first, then
+filter the pinned rows by virtual column content.
 
-The filter applies to the current page after it is fetched, so a page can
-contain fewer rows than `limit` even when more matches exist later in the
-result set. Narrow the candidate set with indexed filters (for example
-`project_id` or `path`) for best results.
+You do not need to request the column to filter on it; a virtual column
+that is filtered but not requested is resolved for the comparison and
+omitted from the response.
 
 `aggregation`, `neighbors`, and `path_finding` queries reject filters on
 virtual columns.

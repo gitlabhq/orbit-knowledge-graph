@@ -2035,6 +2035,7 @@ mod tests {
             r#"{
                 "query_type": "traversal",
                 "nodes": [{"id": "f", "entity": "File",
+                         "node_ids": [1, 2],
                          "filters": {"content": {"contains": "needle"},
                                      "project_id": {"eq": 1000}},
                          "columns": ["project_id", "path"]}],
@@ -2097,6 +2098,31 @@ mod tests {
                 .filter(|vc| vc.column_name == "content")
                 .count(),
             1
+        );
+    }
+
+    #[test]
+    fn filter_on_virtual_column_rejected_without_node_ids() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+        let err = compile(
+            r#"{
+                "query_type": "traversal",
+                "nodes": [{"id": "f", "entity": "File",
+                         "filters": {"content": {"contains": "needle"},
+                                     "project_id": {"eq": 1000}},
+                         "columns": ["path"]}],
+                "limit": 10
+            }"#,
+            &ontology,
+            &security_ctx(),
+        )
+        .expect_err("virtual filter without node_ids should be rejected");
+
+        assert!(err.is_client_safe());
+        let msg = err.to_string();
+        assert!(
+            msg.contains("node_ids") && msg.contains("content"),
+            "error should name node_ids and the column: {msg}"
         );
     }
 
