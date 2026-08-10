@@ -2,7 +2,6 @@
 
 use gkg_server::redaction::QueryResult;
 use ontology::Ontology;
-pub use query_engine::compiler::compile;
 use query_engine::compiler::{AccessLevel, CompiledQueryContext, SecurityContext, TraversalPath};
 
 pub use integration_testkit::mock_redaction::MockRedactionService;
@@ -16,6 +15,25 @@ pub fn admin_security_context() -> SecurityContext {
     SecurityContext::new_with_roles(1, vec![TraversalPath::new("1/", AccessLevel::Owner as u32)])
         .expect("valid admin security context")
         .with_role(true, Some(AccessLevel::Owner as u32))
+}
+
+pub fn compile(
+    json: &str,
+    ontology: &Ontology,
+    security_ctx: &SecurityContext,
+) -> query_engine::compiler::Result<CompiledQueryContext> {
+    let mut input: serde_json::Value = serde_json::from_str(json)?;
+    input["code_contexts"] = serde_json::json!([{
+        "project_id": 1000,
+        "ref": "main",
+        "commit_sha": "abc123",
+        "base_ref": "main",
+        "indexed_sha": "abc123",
+        "base_sha": "abc123",
+        "generation": 1,
+        "state": "ready"
+    }]);
+    query_engine::compiler::compile(&input.to_string(), ontology, security_ctx)
 }
 
 pub async fn compile_and_execute(

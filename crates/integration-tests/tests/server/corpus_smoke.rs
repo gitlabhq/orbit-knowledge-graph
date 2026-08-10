@@ -472,6 +472,18 @@ async fn corpus_smoke() {
                 continue;
             }
         };
+        let mut input: serde_json::Value = serde_json::from_str(&json).unwrap();
+        input["code_contexts"] = serde_json::json!([{
+            "project_id": 1000,
+            "ref": "main",
+            "commit_sha": "abc123",
+            "base_ref": "main",
+            "indexed_sha": "abc123",
+            "base_sha": "abc123",
+            "generation": 1,
+            "state": "ready"
+        }]);
+        let json = serde_json::to_string(&input).unwrap();
 
         let outcome = run_pipeline(&ctx, &json, &ontology, &claims).await;
 

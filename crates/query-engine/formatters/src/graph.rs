@@ -59,7 +59,7 @@ pub struct GraphResponse {
     pub rows: Option<Vec<Map<String, Value>>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pagination: Option<PaginationResponse>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub code_contexts: Vec<compiler::CodeContext>,
 }
 

@@ -301,6 +301,16 @@ async fn indexes_calls_and_extends_edges() {
             {{"id": "callee", "entity": "Definition", "columns": ["name", "fqn"]}}
         ],
         "relationships": [{{"type": "CALLS", "from": "caller", "to": "callee"}}],
+        "code_contexts": [{{
+            "project_id": {project_id},
+            "ref": "main",
+            "commit_sha": "{commit_sha}",
+            "base_ref": "main",
+            "indexed_sha": "{commit_sha}",
+            "base_sha": "{commit_sha}",
+            "generation": 1,
+            "state": "ready"
+        }}],
         "limit": 25
     }}"#
     );
