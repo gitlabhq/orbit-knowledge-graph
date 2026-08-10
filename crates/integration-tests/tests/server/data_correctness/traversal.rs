@@ -662,8 +662,7 @@ pub(super) async fn traversal_code_graph_project_id_filter_scopes_edges(ctx: &Te
     )
     .await;
 
-    // The cross-project edge helper(12001)→run_query(12102) must NOT appear:
-    // its edge project_id=1001 doesn't match the filter.
+    // The project 1000 context excludes the separate 12100→12102 graph.
     resp.skip_requirement(Requirement::Filter {
         field: "project_id".into(),
     });
@@ -710,8 +709,7 @@ pub(super) async fn traversal_code_graph_project_id_filter_on_target_scopes_edge
     )
     .await;
 
-    // Can't assert_filter because both caller (project 1000) and callee
-    // (project 1001) are Definition nodes -- skip and prove via exact IDs.
+    // Both aliases are Definition nodes, so prove the project 1001 scope via exact IDs.
     resp.skip_requirement(Requirement::Filter {
         field: "project_id".into(),
     });

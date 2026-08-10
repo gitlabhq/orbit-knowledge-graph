@@ -2849,7 +2849,7 @@ async fn neighbors_indirect_auth_definition_via_project(ctx: &TestContext) {
 
     let json = r#"{
         "query_type": "neighbors",
-        "nodes": [{"id": "f", "entity": "File", "node_ids": [3000]}],
+        "nodes": [{"id": "f", "entity": "File", "node_ids": [3000, 3002]}],
         "neighbors": {"direction": "outgoing", "rel_types": ["DEFINES"]},
         "code_contexts": [{
             "project_id": 1000,

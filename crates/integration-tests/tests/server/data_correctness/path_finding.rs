@@ -416,10 +416,10 @@ pub(super) async fn path_finding_code_filtered_endpoints_stay_on_same_traversal_
     assert_eq!(
         paths,
         vec![vec![12000, 12001, 12002]],
-        "filtered Definition path finding must not join CALLS hops across traversal_path"
+        "the project 1000 context must select its complete CALLS path"
     );
     assert!(
         paths.iter().all(|path| path.last() != Some(&12102)),
-        "cross-project decoy run_query must not be reachable: {paths:?}"
+        "the separate project 1001 run_query must not be reachable: {paths:?}"
     );
 }
