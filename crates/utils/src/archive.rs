@@ -68,7 +68,13 @@ pub fn extract_tar_gz<R: Read, H: FileStreamHooks>(
             continue;
         }
         let relative_path = entry_path.strip_prefix("/").unwrap_or(&entry_path);
-        let relative_path = strip_archive_root(relative_path, &mut archive_root)?;
+        let relative_path = match strip_archive_root(relative_path, &mut archive_root) {
+            Ok(path) => path,
+            Err(e) => {
+                warn!(entry = %entry_path_str, error = %e, "skipping archive entry outside the archive root");
+                continue;
+            }
+        };
         if relative_path.as_os_str().is_empty() {
             continue;
         }
@@ -120,19 +126,27 @@ pub fn extract_tar_gz<R: Read, H: FileStreamHooks>(
                 // Both loaded states materialize the bytes; only the parse axis
                 // differs, which the pipeline acts on, not the extractor.
                 Decision::Parse | Decision::Load => {
-                    let dest_canonical = crate::fs::resolve_dest_within(&target_canonical, &dest)?;
-                    let mut file = std::fs::File::create(&dest_canonical)?;
-                    file.write_all(&content)?;
-                    inventory.push(meta);
+                    let written = crate::fs::resolve_dest_within(&target_canonical, &dest)
+                        .and_then(std::fs::File::create)
+                        .and_then(|mut file| file.write_all(&content));
+                    match written {
+                        Ok(()) => inventory.push(meta),
+                        Err(e) => {
+                            warn!(entry = %meta.path, error = %e, "skipping archive entry that could not be written");
+                            continue;
+                        }
+                    }
                 }
             }
             continue;
         }
 
-        let dest_canonical = crate::fs::resolve_dest_within(&target_canonical, &dest)?;
-        entry
-            .unpack(&dest_canonical)
-            .map_err(std::io::Error::other)?;
+        let unpacked = crate::fs::resolve_dest_within(&target_canonical, &dest)
+            .and_then(|dest_canonical| entry.unpack(&dest_canonical).map(|_| ()));
+        if let Err(e) = unpacked {
+            warn!(entry = %relative_path.display(), error = %e, "skipping archive entry that could not be unpacked");
+            continue;
+        }
     }
 
     for (link_path, target) in deferred_symlinks {
@@ -300,14 +314,28 @@ mod tests {
     }
 
     #[test]
-    fn rejects_inconsistent_archive_root() {
+    fn skips_entry_outside_archive_root_and_keeps_the_rest() {
         let dir = tempfile::tempdir().unwrap();
         let data = build_archive(&[
             Entry::File("root-a/file1.rs", b"a"),
             Entry::File("root-b/file2.rs", b"b"),
         ]);
-        let err = extract_tar_gz(&data[..], dir.path(), &mut ParseAll).unwrap_err();
-        assert!(err.to_string().contains("not under the expected root"));
+        let inv = extract_tar_gz(&data[..], dir.path(), &mut ParseAll).unwrap();
+        assert_eq!(paths(&inv), vec!["file1.rs"]);
+        assert!(dir.path().join("file1.rs").exists());
+    }
+
+    #[test]
+    fn skips_entry_whose_name_is_too_long_and_keeps_the_rest() {
+        let dir = tempfile::tempdir().unwrap();
+        let long_name = "z".repeat(500);
+        let data = build_archive(&[
+            Entry::File("project-main/src/main.rs", b"fn main() {}"),
+            Entry::File(&format!("project-main/{long_name}.rs"), b"unwritable"),
+        ]);
+        let inv = extract_tar_gz(&data[..], dir.path(), &mut ParseAll).unwrap();
+        assert_eq!(paths(&inv), vec!["src/main.rs"]);
+        assert!(dir.path().join("src/main.rs").exists());
     }
 
     #[test]
