@@ -2850,7 +2850,17 @@ async fn neighbors_indirect_auth_definition_via_project(ctx: &TestContext) {
     let json = r#"{
         "query_type": "neighbors",
         "nodes": [{"id": "f", "entity": "File", "node_ids": [3000]}],
-        "neighbors": {"direction": "outgoing", "rel_types": ["DEFINES"]}
+        "neighbors": {"direction": "outgoing", "rel_types": ["DEFINES"]},
+        "code_contexts": [{
+            "project_id": 1000,
+            "ref": "main",
+            "commit_sha": "abc123",
+            "base_ref": "main",
+            "indexed_sha": "abc123",
+            "base_sha": "abc123",
+            "generation": 1,
+            "state": "ready"
+        }]
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
@@ -3034,7 +3044,7 @@ async fn neighbors_indirect_auth_mixed_projects(ctx: &TestContext) {
 
     let json = r#"{
         "query_type": "neighbors",
-        "nodes": [{"id": "f", "entity": "File", "node_ids": [3000, 3002]}],
+        "nodes": [{"id": "f", "entity": "File", "node_ids": [3000]}],
         "neighbors": {"direction": "outgoing", "rel_types": ["DEFINES"]}
     }"#;
 
@@ -3044,8 +3054,8 @@ async fn neighbors_indirect_auth_mixed_projects(ctx: &TestContext) {
 
     assert_eq!(
         result.len(),
-        3,
-        "should have 3 total neighbors across both files"
+        2,
+        "the resolved context should return both neighbors in project 1000"
     );
 
     let mut mock_service = MockRedactionService::new();

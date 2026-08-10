@@ -576,20 +576,28 @@ pub(super) async fn traversal_code_graph_calls_without_node_ids(ctx: &TestContex
                 {"id": "callee", "entity": "Definition", "columns": ["name", "fqn"]}
             ],
             "relationships": [{"type": "CALLS", "from": "caller", "to": "callee"}],
+            "code_contexts": [{
+                "project_id": 1000,
+                "ref": "main",
+                "commit_sha": "abc123",
+                "base_ref": "main",
+                "indexed_sha": "abc123",
+                "base_sha": "abc123",
+                "generation": 1,
+                "state": "ready"
+            }],
             "limit": 20
         }"#,
         &allow_all(),
     )
     .await;
 
-    // Seed CALLS graph: compile(12000) → helper(12001) → run_query(12002) in
-    // project 1000, plus cross-project helper(12001) → run_query(12102) in 1001.
-    resp.assert_node_count(4);
+    resp.assert_node_count(3);
     resp.assert_referential_integrity();
     resp.assert_node("Definition", 12000, |n| {
         n.prop_str("name") == Some("compile")
     });
-    resp.assert_edge_set("CALLS", &[(12000, 12001), (12001, 12002), (12001, 12102)]);
+    resp.assert_edge_set("CALLS", &[(12000, 12001), (12001, 12002)]);
 }
 
 /// Code graph traversal WITH node_ids — the existing cascade path.
@@ -604,6 +612,16 @@ pub(super) async fn traversal_code_graph_calls_with_node_ids(ctx: &TestContext) 
                 {"id": "callee", "entity": "Definition", "columns": ["name", "fqn"]}
             ],
             "relationships": [{"type": "CALLS", "from": "caller", "to": "callee"}],
+            "code_contexts": [{
+                "project_id": 1000,
+                "ref": "main",
+                "commit_sha": "abc123",
+                "base_ref": "main",
+                "indexed_sha": "abc123",
+                "base_sha": "abc123",
+                "generation": 1,
+                "state": "ready"
+            }],
             "limit": 20
         }"#,
         &allow_all(),
@@ -628,6 +646,16 @@ pub(super) async fn traversal_code_graph_project_id_filter_scopes_edges(ctx: &Te
                 {"id": "callee", "entity": "Definition", "columns": ["name"]}
             ],
             "relationships": [{"type": "CALLS", "from": "caller", "to": "callee"}],
+            "code_contexts": [{
+                "project_id": 1000,
+                "ref": "main",
+                "commit_sha": "abc123",
+                "base_ref": "main",
+                "indexed_sha": "abc123",
+                "base_sha": "abc123",
+                "generation": 1,
+                "state": "ready"
+            }],
             "limit": 20
         }"#,
         &allow_all(),
@@ -666,6 +694,16 @@ pub(super) async fn traversal_code_graph_project_id_filter_on_target_scopes_edge
                 {"id": "callee", "entity": "Definition", "filters": {"project_id": 1001}, "columns": ["name"]}
             ],
             "relationships": [{"type": "CALLS", "from": "caller", "to": "callee"}],
+            "code_contexts": [{
+                "project_id": 1001,
+                "ref": "main",
+                "commit_sha": "def456",
+                "base_ref": "main",
+                "indexed_sha": "def456",
+                "base_sha": "def456",
+                "generation": 1,
+                "state": "ready"
+            }],
             "limit": 20
         }"#,
         &allow_all(),
@@ -679,11 +717,11 @@ pub(super) async fn traversal_code_graph_project_id_filter_on_target_scopes_edge
     });
     resp.assert_node_count(2);
     resp.assert_referential_integrity();
-    resp.assert_node_ids("Definition", &[12001, 12102]);
+    resp.assert_node_ids("Definition", &[12100, 12102]);
     resp.assert_node("Definition", 12102, |n| {
         n.prop_str("name") == Some("run_query")
     });
-    resp.assert_edge_set("CALLS", &[(12001, 12102)]);
+    resp.assert_edge_set("CALLS", &[(12100, 12102)]);
 }
 
 /// Relationship-level project_id filter (the explicit mechanism, not the
