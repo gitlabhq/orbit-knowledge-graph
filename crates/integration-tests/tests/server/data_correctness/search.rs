@@ -905,7 +905,7 @@ pub(super) async fn search_file_content_eq_exact(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "nodes": [{"id": "f", "entity": "File",
-                     "columns": ["path", "content"],
+                     "columns": ["path", "project_id", "content"],
                      "filters": {
                          "project_id": {"eq": 1000},
                          "content": {"eq": "0.91.0"}
@@ -919,7 +919,7 @@ pub(super) async fn search_file_content_eq_exact(ctx: &TestContext) {
     resp.assert_node_count(1);
     resp.assert_node_ids("File", &[13004]);
     resp.assert_filter("File", "project_id", |n| {
-        n.prop_str("path") == Some("VERSION")
+        n.prop_i64("project_id") == Some(1000) || n.prop_str("project_id") == Some("1000")
     });
     resp.assert_filter("File", "content", |n| {
         n.prop_str("content") == Some("0.91.0")
@@ -932,7 +932,7 @@ pub(super) async fn search_file_content_starts_with(ctx: &TestContext) {
         r##"{
             "query_type": "traversal",
             "nodes": [{"id": "f", "entity": "File",
-                     "columns": ["path", "content"],
+                     "columns": ["path", "project_id", "content"],
                      "filters": {
                          "project_id": {"eq": 1000},
                          "content": {"starts_with": "# Demo"}
@@ -946,7 +946,7 @@ pub(super) async fn search_file_content_starts_with(ctx: &TestContext) {
     resp.assert_node_count(1);
     resp.assert_node_ids("File", &[13002]);
     resp.assert_filter("File", "project_id", |n| {
-        n.prop_str("path") == Some("README.md")
+        n.prop_i64("project_id") == Some(1000) || n.prop_str("project_id") == Some("1000")
     });
     resp.assert_filter("File", "content", |n| {
         n.prop_str("content")
@@ -960,7 +960,7 @@ pub(super) async fn search_file_content_ends_with(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "nodes": [{"id": "f", "entity": "File",
-                     "columns": ["path", "content"],
+                     "columns": ["path", "project_id", "content"],
                      "filters": {
                          "project_id": {"eq": 1000},
                          "content": {"ends_with": "crate."}
@@ -974,7 +974,7 @@ pub(super) async fn search_file_content_ends_with(ctx: &TestContext) {
     resp.assert_node_count(1);
     resp.assert_node_ids("File", &[13002]);
     resp.assert_filter("File", "project_id", |n| {
-        n.prop_str("path") == Some("README.md")
+        n.prop_i64("project_id") == Some(1000) || n.prop_str("project_id") == Some("1000")
     });
     resp.assert_filter("File", "content", |n| {
         n.prop_str("content").is_some_and(|s| s.ends_with("crate."))
@@ -987,7 +987,7 @@ pub(super) async fn search_file_content_is_null_matches_binary(ctx: &TestContext
         r#"{
             "query_type": "traversal",
             "nodes": [{"id": "f", "entity": "File",
-                     "columns": ["path", "content"],
+                     "columns": ["path", "project_id", "content"],
                      "filters": {
                          "project_id": {"eq": 1000},
                          "content": {"is_null": true}
@@ -1001,7 +1001,7 @@ pub(super) async fn search_file_content_is_null_matches_binary(ctx: &TestContext
     resp.assert_node_count(1);
     resp.assert_node_ids("File", &[13003]);
     resp.assert_filter("File", "project_id", |n| {
-        n.prop_str("path") == Some("assets/logo.png")
+        n.prop_i64("project_id") == Some(1000) || n.prop_str("project_id") == Some("1000")
     });
     resp.assert_filter("File", "content", |n| {
         n.prop_str("path").is_some() && n.prop_str("content").is_none()
@@ -1014,7 +1014,7 @@ pub(super) async fn search_file_content_is_not_null_excludes_binary(ctx: &TestCo
         r#"{
             "query_type": "traversal",
             "nodes": [{"id": "f", "entity": "File",
-                     "columns": ["path", "content"],
+                     "columns": ["path", "project_id", "content"],
                      "filters": {
                          "project_id": {"eq": 1000},
                          "content": {"is_not_null": true}
@@ -1029,7 +1029,7 @@ pub(super) async fn search_file_content_is_not_null_excludes_binary(ctx: &TestCo
     resp.assert_node_count(4);
     resp.assert_node_order("File", &[13000, 13001, 13002, 13004]);
     resp.assert_filter("File", "project_id", |n| {
-        n.prop_str("path").is_some_and(|p| p != "assets/logo.png")
+        n.prop_i64("project_id") == Some(1000) || n.prop_str("project_id") == Some("1000")
     });
     resp.assert_filter("File", "content", |n| n.prop_str("content").is_some());
 }
@@ -1040,7 +1040,7 @@ pub(super) async fn search_file_content_combined_with_physical(ctx: &TestContext
         r#"{
             "query_type": "traversal",
             "nodes": [{"id": "f", "entity": "File",
-                     "columns": ["path", "content"],
+                     "columns": ["path", "project_id", "content"],
                      "filters": {
                          "project_id": {"eq": 1000},
                          "path": {"starts_with": "src/"},
@@ -1058,7 +1058,7 @@ pub(super) async fn search_file_content_combined_with_physical(ctx: &TestContext
         n.prop_str("path").is_some_and(|p| p.starts_with("src/"))
     });
     resp.assert_filter("File", "project_id", |n| {
-        n.prop_str("path") == Some("src/clickhouse.rs")
+        n.prop_i64("project_id") == Some(1000) || n.prop_str("project_id") == Some("1000")
     });
     resp.assert_filter("File", "content", |n| {
         n.prop_str("content")
