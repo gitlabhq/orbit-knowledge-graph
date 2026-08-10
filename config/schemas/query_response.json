@@ -27,6 +27,11 @@
       "type": "array",
       "items": { "$ref": "#/$defs/edge" }
     },
+    "code_contexts": {
+      "description": "Readiness metadata for resolved source-code contexts used by this query.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/code_context" }
+    },
     "columns": {
       "description": "Present for aggregation queries. Describes each computed column: its output name, the aggregation function used, the target node alias, and the property being aggregated. Lets the consumer distinguish aggregate values from entity properties without inspecting the ontology.",
       "type": "array",
@@ -48,6 +53,21 @@
     }
   },
   "$defs": {
+    "code_context": {
+      "type": "object",
+      "required": ["project_id", "ref", "base_ref", "indexed_sha", "base_sha", "generation", "state"],
+      "properties": {
+        "project_id": { "type": "integer" },
+        "ref": { "type": "string" },
+        "commit_sha": { "type": ["string", "null"] },
+        "base_ref": { "type": "string" },
+        "indexed_sha": { "type": "string" },
+        "base_sha": { "type": "string" },
+        "generation": { "type": "integer" },
+        "state": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
     "node": {
       "type": "object",
       "required": ["type", "id"],

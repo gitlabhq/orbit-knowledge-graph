@@ -2,6 +2,7 @@
 //! `restrict::restrict`) consumed by the phase functions in `config.rs`.
 
 pub mod check;
+pub mod code_context;
 pub mod codegen;
 pub mod cursor;
 pub mod enforce;

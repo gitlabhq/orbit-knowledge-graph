@@ -1,7 +1,7 @@
 //! Security validation (identifiers, SQL injection) is handled by JSON Schema in lib.rs.
 
 use ontology::constants::{DEFAULT_PRIMARY_KEY, SOURCE_ID_COLUMN, TARGET_ID_COLUMN};
-use serde::{Deserialize, Deserializer};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use strum::VariantNames;
@@ -69,6 +69,8 @@ impl Default for EntityAuthConfig {
 #[derive(Debug, Clone, Deserialize)]
 pub struct Input {
     pub query_type: QueryType,
+    #[serde(default)]
+    pub code_contexts: Vec<CodeContext>,
     pub nodes: Vec<InputNode>,
     #[serde(default)]
     pub relationships: Vec<InputRelationship>,
@@ -168,6 +170,8 @@ pub struct CompilerMetadata {
     pub query_hash: u64,
     /// Number of `_gkg_cursor_N` readback columns the cursor pass appended.
     pub cursor_key_count: usize,
+    /// Physical code tables, derived from ontology nodes and edge routing.
+    pub code_tables: HashSet<String>,
 }
 
 /// Defaults to `gl_edge` for test convenience. In production, `normalize()`
@@ -190,6 +194,7 @@ impl Default for CompilerMetadata {
             tp_id_lookup: HashMap::new(),
             query_hash: 0,
             cursor_key_count: 0,
+            code_tables: HashSet::new(),
         }
     }
 }
@@ -247,6 +252,7 @@ impl Default for Input {
     fn default() -> Self {
         Self {
             query_type: QueryType::Traversal,
+            code_contexts: vec![],
             nodes: vec![],
             relationships: vec![],
             aggregation: InputAggregation::default(),
@@ -261,6 +267,29 @@ impl Default for Input {
             hydration_dynamic: false,
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+pub struct CodeContext {
+    pub project_id: i64,
+    #[serde(rename = "ref")]
+    pub ref_: String,
+    pub commit_sha: Option<String>,
+    pub base_ref: String,
+    pub indexed_sha: String,
+    pub base_sha: String,
+    pub generation: u64,
+    pub state: CodeContextState,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CodeContextState {
+    Building,
+    Ready,
+    Stale,
+    Failed,
+    Missing,
 }
 
 fn default_limit() -> u32 {

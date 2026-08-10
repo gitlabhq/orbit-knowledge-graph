@@ -129,13 +129,15 @@ The prefix is validated within authorized scope before use: the path resolver on
 ## Request Flow (Deployed)
 
 1. Client (MCP or REST) submits a tool call or Cypher.
-2. Adapter validates/normalizes input pursuant to the currently deployed schema, computes the user's `traversal_path` prefixes (which encode the organization ID as their first segment) for SDLC queries, and selects the active `branch` for code queries.
+2. Adapter validates and normalizes input pursuant to the deployed schema and computes the user's `traversal_path` prefixes, which encode the organization ID as their first segment. Code queries require one resolved, ready `code_contexts` entry in the current proof of concept; every code node and edge scan is rewritten to an effective default-plus-overlay view, and a missing or non-ready context is rejected without default-branch fallback.
 3. Planner compiles to ClickHouse SQL (CTEs, recursive CTEs, unions, joins) with bound parameters.
 4. ClickHouse executes; the server returns rows plus the generated SQL for audit.
 
 ### Unified Response Format
 
-The server fetches one probe row beyond the requested window, trims it, and derives honest pagination metadata (`has_more`, `truncated`, `next_cursor`). Keyset cursors (`{ page_size, after }`) lower into seek predicates in SQL, so each page is a fresh bounded query; there is no offset slicing and no cross-page result cache. The formatting stage then transforms the trimmed `QueryResult` into the output payload. [ADR 004](../decisions/004_unified_response_schema.md) defines the format: a unified `{ format_version, query_type, nodes, edges, columns?, group_columns?, rows?, pagination? }` shape for all four query types (traversal, aggregation, path_finding, neighbors) with deduplicated nodes and instance-level edges. `format_version` (semver) lets consumers detect breaking changes.
+The server fetches one probe row beyond the requested window, trims it, and derives honest pagination metadata (`has_more`, `truncated`, `next_cursor`). Keyset cursors (`{ page_size, after }`) lower into seek predicates in SQL, so each page is a fresh bounded query; there is no offset slicing and no cross-page result cache. The formatting stage then transforms the trimmed `QueryResult` into the output payload. [ADR 004](../decisions/004_unified_response_schema.md) defines the format: a unified `{ format_version, query_type, nodes, edges, code_contexts?, columns?, group_columns?, rows?, pagination? }` shape for all four query types with deduplicated nodes and instance-level edges.
+
+`code_contexts` echoes indexed and base SHAs, state, and generation for branch-readiness visibility. `format_version` (semver) lets consumers detect breaking changes.
 Aggregation queries include `columns`, `group_columns`, and `rows` for table-shaped analytics output.
 A `GraphFormatter` handles the transformation, and a JSON Schema defines the response contract between server and frontend.
 

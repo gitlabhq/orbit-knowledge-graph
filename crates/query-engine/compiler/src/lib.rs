@@ -615,6 +615,7 @@ mod tests {
     fn path_finding_code_filtered_endpoints_prune_by_traversal_path() {
         let query = r#"{
             "query_type": "path_finding",
+            "code_contexts": [{"project_id":42,"ref":"feature","commit_sha":"head","base_ref":"main","indexed_sha":"head","base_sha":"base","generation":1,"state":"ready"}],
             "nodes": [
                 {"id": "start", "entity": "Definition", "filters": {"name": {"eq": "compile"}}},
                 {"id": "end", "entity": "Definition", "filters": {"name": {"eq": "run_query"}}}
@@ -728,6 +729,7 @@ mod tests {
     fn wildcard_path_finding_filters_only_endpoint_hops_by_relationship_kind() {
         let query = r#"{
             "query_type": "path_finding",
+            "code_contexts": [{"project_id":42,"ref":"feature","commit_sha":"head","base_ref":"main","indexed_sha":"head","base_sha":"base","generation":1,"state":"ready"}],
             "nodes": [
                 {"id": "start", "entity": "User", "node_ids": [1]},
                 {"id": "end", "entity": "Project", "node_ids": [100]}
@@ -1821,6 +1823,7 @@ mod tests {
     fn filtered_redaction_joins_push_filters_into_subquery() {
         let query = r#"{
             "query_type": "traversal",
+            "code_contexts": [{"project_id":42,"ref":"feature","commit_sha":"head","base_ref":"main","indexed_sha":"head","base_sha":"base","generation":1,"state":"ready"}],
             "nodes": [
                 {"id": "f", "entity": "File", "filters": {"path": {"ends_with": ".rb"}}},
                 {"id": "d", "entity": "Definition", "filters": {"name": {"starts_with": "process"}}}
@@ -1832,12 +1835,12 @@ mod tests {
         let sql = compile_sql(query);
 
         assert!(
-            sql.contains("INNER JOIN (SELECT * FROM gl_file AS f FINAL WHERE")
+            sql.contains("FROM gl_file AS f_overlay FINAL WHERE")
                 && sql.contains("endsWith(f.path, '.rb')"),
             "filtered File join should push filters into the subquery, got:\n{sql}"
         );
         assert!(
-            sql.contains("INNER JOIN (SELECT * FROM gl_definition AS d FINAL WHERE")
+            sql.contains("FROM gl_definition AS d_overlay FINAL WHERE")
                 && sql.contains("startsWith(d.name, 'process')"),
             "filtered Definition join should push filters into the subquery, got:\n{sql}"
         );
@@ -2001,6 +2004,7 @@ mod tests {
         let compiled = compile(
             r#"{
                 "query_type": "traversal",
+                "code_contexts": [{"project_id":42,"ref":"feature","commit_sha":"head","base_ref":"main","indexed_sha":"head","base_sha":"base","generation":1,"state":"ready"}],
                 "nodes": [{"id": "f", "entity": "File",
                          "node_ids": [1],
                          "filters": {"content": {"eq": "x"}},

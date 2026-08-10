@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://gitlab.com/gitlab-org/orbit/knowledge-graph/schemas/graph_query/v12",
+  "$id": "https://gitlab.com/gitlab-org/orbit/knowledge-graph/schemas/graph_query/v13",
   "title": "GraphQueryAsJSON",
   "description": "Schema for LLM-generated graph queries that compile to ClickHouse SQL",
   "type": "object",
@@ -8,6 +8,14 @@
   "properties": {
     "query_type": {
       "$ref": "#/$defs/QueryType"
+    },
+    "code_contexts": {
+      "type": "array",
+      "description": "Resolved source-code contexts. The PoC supports exactly one ready context.",
+      "maxItems": 1,
+      "items": {
+        "$ref": "#/$defs/CodeContext"
+      }
     },
     "nodes": {
       "type": "array",
@@ -240,6 +248,25 @@
       "type": "string",
       "description": "Type of graph query to execute",
       "enum": ["traversal", "aggregation", "path_finding", "neighbors"]
+    },
+    "CodeContext": {
+      "type": "object",
+      "description": "A resolved, immutable source-code overlay generation.",
+      "required": ["project_id", "ref", "base_ref", "indexed_sha", "base_sha", "generation", "state"],
+      "properties": {
+        "project_id": { "type": "integer" },
+        "ref": { "type": "string", "minLength": 1 },
+        "commit_sha": { "type": "string", "minLength": 1 },
+        "base_ref": { "type": "string", "minLength": 1 },
+        "indexed_sha": { "type": "string", "minLength": 1 },
+        "base_sha": { "type": "string", "minLength": 1 },
+        "generation": { "type": "integer", "minimum": 0 },
+        "state": {
+          "type": "string",
+          "enum": ["building", "ready", "stale", "failed", "missing"]
+        }
+      },
+      "additionalProperties": false
     },
     "EntityType": {
       "type": "string",

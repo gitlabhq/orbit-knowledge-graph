@@ -20,8 +20,8 @@ use crate::passes::enforce::ResultContext;
 use crate::passes::hydrate::HydrationPlan;
 use crate::passes::plan::QueryPlan;
 use crate::passes::{
-    check, codegen, cursor, enforce, hydrate, lower, normalize, partition, plan, restrict,
-    security, settings, validate,
+    check, code_context, codegen, cursor, enforce, hydrate, lower, normalize, partition, plan,
+    restrict, security, settings, validate,
 };
 use crate::types::SecurityContext;
 
@@ -74,6 +74,11 @@ compiler_pipeline_macros::define_compiler_ctx! {
             reads_env: [security_ctx, ontology]
             mutates: [node]
         }
+        code_context {
+            reads_env: [ontology]
+            reads_state: [input]
+            mutates: [node]
+        }
         partition {
             reads_env: [ontology, security_ctx]
             mutates: [node]
@@ -104,7 +109,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
         clickhouse {
             env: [ontology, security_ctx]
             state: [json, input, query_plan, node, result_ctx, query_config, hydration_plan, output]
-            phases: [validate, normalize, restrict, plan, lower, enforce, security, partition, cursor, check, hydrate_plan, settings, codegen]
+            phases: [validate, normalize, restrict, plan, lower, enforce, code_context, security, partition, cursor, check, hydrate_plan, settings, codegen]
         }
         ch_hydration {
             env: [ontology, security_ctx]
@@ -198,6 +203,14 @@ fn security(ctx: &mut impl CompilerCtx) -> Result<()> {
     let ontology = ctx.ontology().clone();
     let mut node = require(ctx.take_node(), "node")?;
     security::apply_security_context(&mut node, &security_ctx, &ontology)?;
+    ctx.set_node(node);
+    Ok(())
+}
+
+fn code_context(ctx: &mut impl CompilerCtx) -> Result<()> {
+    let input = require(ctx.input().clone(), "input")?;
+    let mut node = require(ctx.take_node(), "node")?;
+    code_context::apply(&mut node, &input, ctx.ontology())?;
     ctx.set_node(node);
     Ok(())
 }
