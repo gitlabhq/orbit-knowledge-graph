@@ -1483,21 +1483,13 @@ mod tests {
         let cases: &[&[&str]] = &[
             &[
                 "1",
-                "main",
                 "def",
                 "src/lib.rs",
                 "lower_traversal_edge_only",
                 "100:120",
             ],
-            &[
-                "42",
-                "feature/x",
-                "def",
-                "internal/foo.go",
-                "main.Dup",
-                "200:220",
-            ],
-            &["7", "main", "def", "a.py", "pkg.A.method", "0:5"],
+            &["42", "def", "internal/foo.go", "main.Dup", "200:220"],
+            &["7", "def", "a.py", "pkg.A.method", "0:5"],
             &["999", "release/1", "branch", "main", "", "0:0"],
         ];
         for components in cases {
