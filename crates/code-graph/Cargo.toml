@@ -24,6 +24,7 @@ either = { workspace = true }
 globset = { workspace = true }
 ignore = { workspace = true }
 indicatif = { workspace = true }
+memchr = { workspace = true }
 petgraph = { workspace = true }
 rayon = { workspace = true }
 rust-lapper = { workspace = true }
