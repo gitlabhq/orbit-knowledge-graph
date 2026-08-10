@@ -135,8 +135,11 @@ async fn dispatch_enabled_namespace_cdc(
         ScheduledTaskMetrics::new(),
         Arc::new(CampaignState::new()),
     ));
-    let route =
-        EnabledNamespacesRoute::new(NamespaceIndexingDispatch::new(services.nats), backfill);
+    let route = EnabledNamespacesRoute::new(
+        NamespaceIndexingDispatch::new(services.nats),
+        backfill,
+        ctx.config.build_client(),
+    );
     let events: Vec<LogicalReplicationEvents> = cdc.iter().map(replication_event).collect();
 
     route

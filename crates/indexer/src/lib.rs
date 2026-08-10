@@ -407,6 +407,7 @@ pub async fn run_dispatcher(
         Arc::new(EnabledNamespacesRoute::new(
             NamespaceIndexingDispatch::new(services.nats.clone()),
             backfill.clone(),
+            config.datalake.build_client(),
         )),
     ];
 
