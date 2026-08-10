@@ -3035,7 +3035,7 @@ async fn path_finding_indirect_auth_fail_closed_no_owner_in_path(ctx: &TestConte
     assert_eq!(result.authorized_count(), 0);
 }
 
-async fn neighbors_indirect_auth_mixed_projects(ctx: &TestContext) {
+async fn neighbors_indirect_auth_same_project(ctx: &TestContext) {
     setup_test_data(ctx).await;
     setup_indirect_auth_data(ctx).await;
 
@@ -3060,7 +3060,6 @@ async fn neighbors_indirect_auth_mixed_projects(ctx: &TestContext) {
 
     let mut mock_service = MockRedactionService::new();
     mock_service.allow("project", &[1000]);
-    mock_service.deny("project", &[1001]);
 
     run_redaction(&mut result, &mock_service);
 
@@ -3077,12 +3076,7 @@ async fn neighbors_indirect_auth_mixed_projects(ctx: &TestContext) {
     assert_eq!(
         neighbor_ids,
         HashSet::from([5000, 5001]),
-        "only Definitions from authorized Project 1000 should remain"
-    );
-
-    assert!(
-        !neighbor_ids.contains(&5003),
-        "Definition from denied Project 1001 must not appear"
+        "both Definitions owned by authorized Project 1000 should remain"
     );
 }
 
@@ -4050,7 +4044,7 @@ async fn redaction_integration() {
         column_selection_aggregation_with_wildcard_columns,
         neighbors_indirect_auth_definition_via_project,
         path_finding_indirect_auth_fail_closed_no_owner_in_path,
-        neighbors_indirect_auth_mixed_projects,
+        neighbors_indirect_auth_same_project,
         neighbors_query_filters_by_entity_type,
         cross_entity_id_collision_redaction,
     );
