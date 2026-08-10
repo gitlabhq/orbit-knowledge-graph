@@ -740,8 +740,9 @@ pub(super) async fn search_multi_filter_mixed_with_single_filter(ctx: &TestConte
     });
 }
 
-/// MockColumnResolver returns "mock:mr_raw_patch" for every MR, so
-/// `contains: "mock"` should return all merged MRs that pass the state filter.
+/// Seeded diffs: MR 2002 mentions "refactored_helper", MRs 2004/2005 mention
+/// "ship feature". The contains filter must drop 2002 even though all three
+/// pass the state filter.
 pub(super) async fn search_virtual_filter_contains_matching(ctx: &TestContext) {
     let resp = run_query(
         ctx,
@@ -752,20 +753,22 @@ pub(super) async fn search_virtual_filter_contains_matching(ctx: &TestContext) {
                      "columns": ["title", "state", "diff"],
                      "filters": {
                          "state": {"eq": "merged"},
-                         "diff": {"contains": "mock"}
+                         "diff": {"contains": "ship"}
                      }}],
+            "order_by": "mr.id",
             "limit": 10
         }"#,
         &allow_all(),
     )
     .await;
 
-    resp.assert_node_count(3);
+    resp.assert_node_count(2);
+    resp.assert_node_order("MergeRequest", &[2004, 2005]);
     resp.assert_filter("MergeRequest", "state", |n| {
         n.prop_str("state") == Some("merged")
     });
     resp.assert_filter("MergeRequest", "diff", |n| {
-        n.prop_str("diff").is_some_and(|s| s.contains("mock"))
+        n.prop_str("diff").is_some_and(|s| s.contains("ship"))
     });
 }
 
@@ -792,8 +795,8 @@ pub(super) async fn search_virtual_filter_eq_no_match(ctx: &TestContext) {
     resp.assert_node_count(0);
 }
 
-/// Virtual filter `is_not_null` on `diff`. MockColumnResolver always
-/// returns a value, so all MRs should pass.
+/// Only MRs 2000, 2002, 2004, and 2005 have seeded diffs; 2001 and 2003
+/// must be dropped by `is_not_null`.
 pub(super) async fn search_virtual_filter_is_not_null(ctx: &TestContext) {
     let resp = run_query(
         ctx,
@@ -805,16 +808,21 @@ pub(super) async fn search_virtual_filter_is_not_null(ctx: &TestContext) {
                      "filters": {
                          "diff": {"is_not_null": true}
                      }}],
+            "order_by": "mr.id",
             "limit": 10
         }"#,
         &allow_all(),
     )
     .await;
 
-    resp.assert_node_count(6);
+    resp.assert_node_count(4);
+    resp.assert_node_order("MergeRequest", &[2000, 2002, 2004, 2005]);
     resp.assert_filter("MergeRequest", "diff", |n| n.prop_str("diff").is_some());
 }
 
+/// MR 2002's seeded diff starts with a `diff --git` header while 2004/2005
+/// start with a hunk marker, so `starts_with: "@@ -"` must drop 2002 from
+/// the merged set.
 pub(super) async fn search_virtual_filter_combined_with_physical(ctx: &TestContext) {
     let resp = run_query(
         ctx,
@@ -825,7 +833,7 @@ pub(super) async fn search_virtual_filter_combined_with_physical(ctx: &TestConte
                      "columns": ["title", "state", "diff"],
                      "filters": {
                          "state": "merged",
-                         "diff": {"starts_with": "mock:"}
+                         "diff": {"starts_with": "@@ -"}
                      }}],
             "order_by": "mr.id",
             "limit": 10
@@ -834,12 +842,267 @@ pub(super) async fn search_virtual_filter_combined_with_physical(ctx: &TestConte
     )
     .await;
 
-    resp.assert_node_count(3);
-    resp.assert_node_order("MergeRequest", &[2002, 2004, 2005]);
+    resp.assert_node_count(2);
+    resp.assert_node_order("MergeRequest", &[2004, 2005]);
     resp.assert_filter("MergeRequest", "state", |n| {
         n.prop_str("state") == Some("merged")
     });
     resp.assert_filter("MergeRequest", "diff", |n| {
-        n.prop_str("diff").is_some_and(|s| s.starts_with("mock:"))
+        n.prop_str("diff").is_some_and(|s| s.starts_with("@@ -"))
+    });
+}
+
+/// Seeded content: only src/clickhouse.rs and README.md mention ClickHouse;
+/// src/parser.rs, VERSION, and the binary logo must be dropped.
+pub(super) async fn search_file_content_contains_selective(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "nodes": [{"id": "f", "entity": "File",
+                     "columns": ["path", "project_id", "content"],
+                     "filters": {
+                         "project_id": {"eq": 1000},
+                         "content": {"contains": "ClickHouse"}
+                     }}],
+            "order_by": "f.id",
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_node_count(2);
+    resp.assert_node_order("File", &[13001, 13002]);
+    resp.assert_filter("File", "project_id", |n| {
+        n.prop_i64("project_id") == Some(1000) || n.prop_str("project_id") == Some("1000")
+    });
+    resp.assert_filter("File", "content", |n| {
+        n.prop_str("content")
+            .is_some_and(|s| s.contains("ClickHouse"))
+    });
+}
+
+pub(super) async fn search_file_content_contains_no_match(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "nodes": [{"id": "f", "entity": "File",
+                     "columns": ["path", "content"],
+                     "filters": {
+                         "project_id": {"eq": 1000},
+                         "content": {"contains": "zqxj_nonexistent_token"}
+                     }}],
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.skip_requirement(Requirement::Filter {
+        field: "content".into(),
+    });
+    resp.skip_requirement(Requirement::Filter {
+        field: "project_id".into(),
+    });
+    resp.assert_node_count(0);
+}
+
+pub(super) async fn search_file_content_eq_exact(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "nodes": [{"id": "f", "entity": "File",
+                     "columns": ["path", "content"],
+                     "filters": {
+                         "project_id": {"eq": 1000},
+                         "content": {"eq": "0.91.0"}
+                     }}],
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_node_count(1);
+    resp.assert_node_ids("File", &[13004]);
+    resp.assert_filter("File", "project_id", |n| {
+        n.prop_str("path") == Some("VERSION")
+    });
+    resp.assert_filter("File", "content", |n| {
+        n.prop_str("content") == Some("0.91.0")
+    });
+}
+
+pub(super) async fn search_file_content_starts_with(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r##"{
+            "query_type": "traversal",
+            "nodes": [{"id": "f", "entity": "File",
+                     "columns": ["path", "content"],
+                     "filters": {
+                         "project_id": {"eq": 1000},
+                         "content": {"starts_with": "# Demo"}
+                     }}],
+            "limit": 10
+        }"##,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_node_count(1);
+    resp.assert_node_ids("File", &[13002]);
+    resp.assert_filter("File", "project_id", |n| {
+        n.prop_str("path") == Some("README.md")
+    });
+    resp.assert_filter("File", "content", |n| {
+        n.prop_str("content")
+            .is_some_and(|s| s.starts_with("# Demo"))
+    });
+}
+
+/// Only README.md's seeded content ends with "crate.".
+pub(super) async fn search_file_content_ends_with(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "nodes": [{"id": "f", "entity": "File",
+                     "columns": ["path", "content"],
+                     "filters": {
+                         "project_id": {"eq": 1000},
+                         "content": {"ends_with": "crate."}
+                     }}],
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_node_count(1);
+    resp.assert_node_ids("File", &[13002]);
+    resp.assert_filter("File", "project_id", |n| {
+        n.prop_str("path") == Some("README.md")
+    });
+    resp.assert_filter("File", "content", |n| {
+        n.prop_str("content").is_some_and(|s| s.ends_with("crate."))
+    });
+}
+
+/// assets/logo.png is seeded with null content (binary file).
+pub(super) async fn search_file_content_is_null_matches_binary(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "nodes": [{"id": "f", "entity": "File",
+                     "columns": ["path", "content"],
+                     "filters": {
+                         "project_id": {"eq": 1000},
+                         "content": {"is_null": true}
+                     }}],
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_node_count(1);
+    resp.assert_node_ids("File", &[13003]);
+    resp.assert_filter("File", "project_id", |n| {
+        n.prop_str("path") == Some("assets/logo.png")
+    });
+    resp.assert_filter("File", "content", |n| {
+        n.prop_str("path").is_some() && n.prop_str("content").is_none()
+    });
+}
+
+pub(super) async fn search_file_content_is_not_null_excludes_binary(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "nodes": [{"id": "f", "entity": "File",
+                     "columns": ["path", "content"],
+                     "filters": {
+                         "project_id": {"eq": 1000},
+                         "content": {"is_not_null": true}
+                     }}],
+            "order_by": "f.id",
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_node_count(4);
+    resp.assert_node_order("File", &[13000, 13001, 13002, 13004]);
+    resp.assert_filter("File", "project_id", |n| {
+        n.prop_str("path").is_some_and(|p| p != "assets/logo.png")
+    });
+    resp.assert_filter("File", "content", |n| n.prop_str("content").is_some());
+}
+
+/// The physical path filter narrows to src/, the virtual content filter
+/// then drops src/parser.rs; only the two together select src/clickhouse.rs.
+pub(super) async fn search_file_content_combined_with_physical(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "nodes": [{"id": "f", "entity": "File",
+                     "columns": ["path", "content"],
+                     "filters": {
+                         "project_id": {"eq": 1000},
+                         "path": {"starts_with": "src/"},
+                         "content": {"contains": "ClickHouse"}
+                     }}],
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_node_count(1);
+    resp.assert_node_ids("File", &[13001]);
+    resp.assert_filter("File", "path", |n| {
+        n.prop_str("path").is_some_and(|p| p.starts_with("src/"))
+    });
+    resp.assert_filter("File", "project_id", |n| {
+        n.prop_str("path") == Some("src/clickhouse.rs")
+    });
+    resp.assert_filter("File", "content", |n| {
+        n.prop_str("content")
+            .is_some_and(|s| s.contains("ClickHouse"))
+    });
+}
+
+/// Definitions 12100/12102 in project 1001 share file_path and byte offsets
+/// with project 1000's definitions but have no seeded content, so the
+/// resolver must distinguish rows by project_id and drop them.
+pub(super) async fn search_definition_content_selective(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "nodes": [{"id": "d", "entity": "Definition",
+                     "columns": ["name", "file_path", "content"],
+                     "filters": {
+                         "content": {"contains": "normalize"}
+                     }}],
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_node_count(1);
+    resp.assert_node_ids("Definition", &[12000]);
+    resp.assert_filter("Definition", "content", |n| {
+        n.prop_str("content")
+            .is_some_and(|s| s.contains("normalize"))
     });
 }

@@ -1,0 +1,84 @@
+# Virtual column content for data correctness tests, resolved by
+# integration-testkit's SeededColumnResolver in place of Gitaly.
+#
+# Entries are keyed by lookup and matched against the hydrated dependency
+# properties (`depends_on` in the ontology), the same fields the production
+# resolver uses to address rows:
+#
+#   blob_content  (File)              -> project_id + path
+#   blob_content  (Definition)        -> project_id + file_path + start_byte
+#   mr_raw_patch  (MergeRequest.diff) -> project_id + iid
+#
+# `value: null` marks unresolvable content (e.g. binary files). Rows with no
+# matching entry also resolve to null.
+#
+# Selectivity map for File content (project 1000):
+#   contains "ClickHouse" -> src/clickhouse.rs, README.md
+#   contains "tokenize"   -> src/parser.rs
+#   eq "0.91.0"           -> VERSION
+#   is_null               -> assets/logo.png
+blob_content:
+  - match: {project_id: 1000, path: src/parser.rs}
+    value: |-
+      use crate::lexer::tokenize;
+
+      pub fn parse(input: &str) -> Ast {
+          let tokens = tokenize(input);
+          build_ast(tokens)
+      }
+  - match: {project_id: 1000, path: src/clickhouse.rs}
+    value: |-
+      pub struct ClickHouseClient {
+          url: String,
+      }
+
+      impl ClickHouseClient {
+          pub fn execute(&self, sql: &str) -> Result<Rows> {
+              send(&self.url, sql)
+          }
+      }
+  - match: {project_id: 1000, path: README.md}
+    value: |-
+      # Demo Project
+
+      Queries run against ClickHouse through the client crate.
+  - match: {project_id: 1000, path: assets/logo.png}
+    value: null
+  - match: {project_id: 1000, path: VERSION}
+    value: "0.91.0"
+  - match: {project_id: 1000, file_path: crates/compiler/src/lib.rs, start_byte: 100}
+    value: |-
+      pub fn compile(input: Input) -> Compiled {
+          lower(normalize(input))
+      }
+  - match: {project_id: 1000, file_path: crates/compiler/src/lib.rs, start_byte: 220}
+    value: |-
+      fn helper() -> u32 {
+          42
+      }
+  - match: {project_id: 1000, file_path: crates/orbit/src/main.rs, start_byte: 400}
+    value: |-
+      pub async fn run_query(q: Query) -> Rows {
+          client.execute(q).await
+      }
+
+# MRs 2001 (opened) and 2003 (closed) have no entry, so their diff is null.
+mr_raw_patch:
+  - match: {project_id: 1000, iid: 1}
+    value: |-
+      @@ -1,2 +1,4 @@
+      +feature A scaffolding
+  - match: {project_id: 1001, iid: 3}
+    value: |-
+      diff --git a/helper.rs b/helper.rs
+      @@ -5,7 +5,7 @@
+      -old_helper()
+      +refactored_helper()
+  - match: {project_id: 1000, iid: 5}
+    value: |-
+      @@ -10,3 +10,6 @@
+      +ship feature E
+  - match: {project_id: 1000, iid: 6}
+    value: |-
+      @@ -20,1 +20,2 @@
+      +ship feature F

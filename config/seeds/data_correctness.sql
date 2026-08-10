@@ -120,6 +120,15 @@
 --     ASSIGNED:      User 1 -> WI 4000, User 2 -> WI 4000, User 3 -> WI 4001
 --     HAS_LABEL:     WI 4000 -> Label 7000, WI 4000 -> Label 7001, WI 4001 -> Label 7002
 --
+--   Files (all in Project 1000, branch main, path 1/100/1000/):
+--     13000 src/parser.rs      (content mentions tokenize)
+--     13001 src/clickhouse.rs  (content mentions ClickHouse)
+--     13002 README.md          (content mentions ClickHouse)
+--     13003 assets/logo.png    (binary, null content)
+--     13004 VERSION            (content "0.91.0")
+--     Virtual `content` values live in virtual_content.yaml, keyed by
+--     project_id + path.
+--
 --   Code definitions:
 --     Project 1000: compile -> helper -> run_query via CALLS
 --     Project 1001: compile and run_query endpoints, plus a decoy CALLS edge
@@ -204,6 +213,13 @@ INSERT INTO gl_definition (
     (12002, '1/100/1000/', 1000, 'main', 'abc123', 'crates/orbit/src/main.rs', 'orbit::run_query', 'run_query', 'Function', 40, 55, 400, 550, 4, 13),
     (12100, '1/101/1001/', 1001, 'main', 'def456', 'crates/compiler/src/lib.rs', 'compiler::compile', 'compile', 'Function', 10, 20, 100, 200, 4, 11),
     (12102, '1/101/1001/', 1001, 'main', 'def456', 'crates/orbit/src/main.rs', 'orbit::run_query', 'run_query', 'Function', 40, 55, 400, 550, 4, 13);
+
+INSERT INTO gl_file (id, traversal_path, project_id, branch, commit_sha, path, name, extension, language) VALUES
+    (13000, '1/100/1000/', 1000, 'main', 'abc123', 'src/parser.rs', 'parser.rs', 'rs', 'Rust'),
+    (13001, '1/100/1000/', 1000, 'main', 'abc123', 'src/clickhouse.rs', 'clickhouse.rs', 'rs', 'Rust'),
+    (13002, '1/100/1000/', 1000, 'main', 'abc123', 'README.md', 'README.md', 'md', 'Markdown'),
+    (13003, '1/100/1000/', 1000, 'main', 'abc123', 'assets/logo.png', 'logo.png', 'png', ''),
+    (13004, '1/100/1000/', 1000, 'main', 'abc123', 'VERSION', 'VERSION', '', '');
 
 INSERT INTO gl_code_edge (traversal_path, project_id, branch, source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
     ('1/100/1000/', 1000, 'main', 12000, 'Definition', 'CALLS', 12001, 'Definition'),
