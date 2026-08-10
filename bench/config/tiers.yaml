@@ -7,7 +7,7 @@ tiers:
       webserver:  { replicas: 2, requests: { cpu: 1, memory: 2Gi }, limits: { memory: 3Gi } }
       dispatcher: { replicas: 1, requests: { cpu: 200m, memory: 256Mi }, limits: { memory: 512Mi } }
       concurrency: { max_concurrent_workers: 4, sdlc: 2, code: 2 }
-    clickhouse: { cpu: 4, memory: 16Gi, storage: 100Gi }
+    clickhouse: { cpu: 4, memory: 32Gi, storage: 100Gi }
     nats:       { replicas: 3, storage: 20Gi }
     workload:
       steady_rows_per_sec: 200
