@@ -1136,6 +1136,7 @@ pub(crate) mod tests {
             group_columns: None,
             rows: None,
             pagination: None,
+            code_contexts: vec![],
         }
     }
 
@@ -1152,6 +1153,7 @@ pub(crate) mod tests {
             group_columns: None,
             rows: None,
             pagination: None,
+            code_contexts: vec![],
         }
     }
 
@@ -1170,6 +1172,7 @@ pub(crate) mod tests {
             group_columns: Some(vec![]),
             rows: Some(vec![json!({"c": 2}).as_object().unwrap().clone()]),
             pagination: None,
+            code_contexts: vec![],
         }
     }
 
@@ -1203,6 +1206,7 @@ pub(crate) mod tests {
                     .clone(),
             ]),
             pagination: None,
+            code_contexts: vec![],
         }
     }
 
@@ -1223,6 +1227,7 @@ pub(crate) mod tests {
             group_columns: None,
             rows: None,
             pagination: None,
+            code_contexts: vec![],
         }
     }
 
@@ -1371,6 +1376,7 @@ pub(crate) mod tests {
             group_columns: None,
             rows: None,
             pagination: None,
+            code_contexts: vec![],
         };
         let view = ResponseView::new(resp);
         assert_eq!(*view.path_ids(), vec![0, 2]);
@@ -1394,6 +1400,7 @@ pub(crate) mod tests {
             group_columns: None,
             rows: None,
             pagination: None,
+            code_contexts: vec![],
         };
         let view = ResponseView::new(resp);
         let path = view.path(0);
@@ -1520,6 +1527,7 @@ pub(crate) mod tests {
             group_columns: None,
             rows: None,
             pagination: None,
+            code_contexts: vec![],
         };
         ResponseView::new(resp).assert_referential_integrity();
     }
@@ -1629,6 +1637,7 @@ pub(crate) mod tests {
             group_columns: None,
             rows: None,
             pagination: None,
+            code_contexts: vec![],
         };
         let view = ResponseView::new(resp);
         assert_eq!(view.node_count(), 0);
@@ -1663,6 +1672,7 @@ mod edge_coverage_tests {
             group_columns: None,
             rows: None,
             pagination: None,
+            code_contexts: vec![],
         }
     }
 
@@ -1725,6 +1735,7 @@ mod edge_coverage_tests {
             group_columns: None,
             rows: None,
             pagination: None,
+            code_contexts: vec![],
         };
         let view = ResponseView::new(resp);
         view.assert_all_edge_types_covered();
@@ -1741,6 +1752,7 @@ mod edge_coverage_tests {
             group_columns: None,
             rows: None,
             pagination: None,
+            code_contexts: vec![],
         };
         let view = ResponseView::new(resp);
         view.assert_edge_exists("User", 1, "Group", 100, "MEMBER_OF");
@@ -1767,6 +1779,7 @@ mod edge_coverage_tests {
             group_columns: None,
             rows: None,
             pagination: None,
+            code_contexts: vec![],
         };
         let view = ResponseView::new(resp);
         view.assert_edge_set("MEMBER_OF", &[(1, 100), (1, 102)]);

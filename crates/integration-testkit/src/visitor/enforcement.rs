@@ -529,6 +529,7 @@ mod tests {
             group_columns: None,
             rows: None,
             pagination: None,
+            code_contexts: vec![],
         };
         let view = ResponseView::for_query(&input, resp);
         assert_eq!(view.path_ids().len(), 1);
@@ -849,6 +850,7 @@ mod tests {
             group_columns: None,
             rows: None,
             pagination: None,
+            code_contexts: vec![],
         };
         let view = ResponseView::for_query(&input, resp);
         drop(view);
