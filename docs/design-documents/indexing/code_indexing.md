@@ -244,6 +244,11 @@ After parsing, the analysis phase groups results by language and builds a graph 
 | Definition | Code definition with FQN, type, source range, file path |
 | Imported symbol | Import statement with path, type, identifier, source range |
 
+Directory, file, definition, and imported-symbol IDs are branch-agnostic. Their identity includes
+the project and source identity, with byte ranges retained for definitions and imported symbols.
+The branch remains part of each row's physical identity so branch visibility is independent from
+node identity; branch nodes remain branch-specific.
+
 ##### Relationship types
 
 The graph captures fine-grained relationships across several categories:

@@ -1030,15 +1030,15 @@ impl CodeGraph {
 
     /// Compute stable IDs for all nodes. Returns a dense Vec indexed by
     /// `NodeIndex::index()` — O(1) lookup, more compact than FxHashMap.
-    pub fn assign_ids(&self, project_id: i64, branch: &str) -> Vec<i64> {
+    pub fn assign_ids(&self, project_id: i64, _branch: &str) -> Vec<i64> {
         use std::fmt::Write as _;
         let pid = project_id.to_string();
         let mut ids = vec![0i64; self.graph.node_count()];
         let mut range = String::new();
         for idx in self.graph.node_indices() {
             ids[idx.index()] = match &self.graph[idx] {
-                GraphNode::Directory(d) => compute_id(&[&pid, branch, "dir", &d.path]),
-                GraphNode::File(f) => compute_id(&[&pid, branch, "file", &f.path]),
+                GraphNode::Directory(d) => compute_id(&[&pid, "dir", &d.path]),
+                GraphNode::File(f) => compute_id(&[&pid, "file", &f.path]),
                 GraphNode::Definition { file_path, id } => {
                     let def = &self.defs[id.0 as usize];
                     range.clear();
@@ -1047,14 +1047,7 @@ impl CodeGraph {
                         "{}:{}",
                         def.range.byte_offset.0, def.range.byte_offset.1
                     );
-                    compute_id(&[
-                        &pid,
-                        branch,
-                        "def",
-                        file_path,
-                        self.strings.get(def.fqn),
-                        &range,
-                    ])
+                    compute_id(&[&pid, "def", file_path, self.strings.get(def.fqn), &range])
                 }
                 GraphNode::Import { file_path, id } => {
                     let import = &self.imports[id.0 as usize];
@@ -1066,7 +1059,6 @@ impl CodeGraph {
                     );
                     compute_id(&[
                         &pid,
-                        branch,
                         "import",
                         file_path,
                         self.strings.get(import.path),
@@ -1557,6 +1549,35 @@ mod tests {
 
         assert_eq!(import_ids.len(), 2);
         assert_ne!(import_ids[0], import_ids[1]);
+    }
+
+    #[test]
+    fn assign_ids_are_branch_independent() {
+        let import = CanonicalImport {
+            import_type: "Use",
+            binding_kind: ImportBindingKind::Namespace,
+            mode: ImportMode::Declarative,
+            path: "pkg::dependency".to_string(),
+            name: None,
+            alias: None,
+            scope_fqn: None,
+            range: Range::new(Position::new(0, 0), Position::new(0, 20), (100, 120)),
+            is_type_only: false,
+            wildcard: false,
+        };
+        let mut cg = CodeGraph::new_with_root("/repo".to_string());
+        cg.add_file(
+            "/repo/src/lib.rs",
+            "rs",
+            Language::Python,
+            100,
+            &[make_def_at("run", &["pkg", "run"], 200, 220)],
+            &[import],
+        );
+        let tracer = crate::v2::trace::Tracer::new(false);
+        cg.finalize(&tracer);
+
+        assert_eq!(cg.assign_ids(42, "main"), cg.assign_ids(42, "feature"));
     }
 
     #[test]
