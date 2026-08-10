@@ -66,15 +66,7 @@ $KC exec -n "${CH_NS}" clickhouse-0 -- \
   "
 log "  Databases and users created (clean slate)"
 
-# Enable external sort/group-by so large queries spill to disk instead of OOMing.
-# Self-managed CH defaults these to 0 (disabled); Cloud sets them to half RAM.
-SPILL_BYTES=8589934592  # 8 GiB
-for u in gkg_siphon_reader gkg_writer gkg_reader siphon gitlab; do
-  $KC exec -n "${CH_NS}" clickhouse-0 -- \
-    clickhouse-client --password "${CH_PASSWORD}" \
-    --query "ALTER USER ${u} SETTINGS max_bytes_before_external_sort = ${SPILL_BYTES}, max_bytes_before_external_group_by = ${SPILL_BYTES}" 2>/dev/null || true
-done
-log "  External sort/group-by enabled (${SPILL_BYTES} bytes)"
+
 
 # Store the default password for the import job.
 $KC create secret generic ra-ch-credentials -n "${CH_NS}" \

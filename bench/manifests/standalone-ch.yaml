@@ -38,6 +38,8 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /var/lib/clickhouse
+            - name: config-overrides
+              mountPath: /etc/clickhouse-server/users.d
           resources:
             requests: { cpu: "2", memory: "8Gi" }
             limits: { cpu: "${CH_CPU}", memory: "${CH_MEMORY}" }
@@ -49,6 +51,10 @@ spec:
             httpGet: { path: /ping, port: http }
             initialDelaySeconds: 2
             periodSeconds: 2
+      volumes:
+        - name: config-overrides
+          configMap:
+            name: ch-config-overrides
   volumeClaimTemplates:
     - metadata:
         name: data
@@ -57,6 +63,22 @@ spec:
         resources:
           requests:
             storage: ${CH_STORAGE}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ch-config-overrides
+  namespace: ra-clickhouse
+data:
+  bench-profile.xml: |
+    <clickhouse>
+      <profiles>
+        <default>
+          <max_bytes_before_external_sort>8589934592</max_bytes_before_external_sort>
+          <max_bytes_before_external_group_by>8589934592</max_bytes_before_external_group_by>
+        </default>
+      </profiles>
+    </clickhouse>
 ---
 apiVersion: v1
 kind: Service
