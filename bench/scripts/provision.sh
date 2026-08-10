@@ -109,7 +109,29 @@ $KC rollout restart -n "e2e-${RUN_ID}-gkg" deploy/gkg-dispatcher deploy/gkg-inde
 $KC rollout status -n "e2e-${RUN_ID}-gkg" deploy/gkg-dispatcher --timeout=120s
 log "  Dispatcher and indexer restarted"
 
-# --- 8. Validate ---
+# --- 8. Enable GMP metrics scraping for GKG pods ---
+log "Creating GMP PodMonitoring resources"
+GKG_NS="e2e-${RUN_ID}-gkg"
+for component in dispatcher indexer webserver; do
+  cat <<EOMON | $KC apply -f -
+apiVersion: monitoring.googleapis.com/v1
+kind: PodMonitoring
+metadata:
+  name: gkg-${component}
+  namespace: ${GKG_NS}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: ${component}
+      app.kubernetes.io/name: gkg
+  endpoints:
+    - port: metrics
+      interval: 15s
+EOMON
+done
+log "  GMP scraping GKG pods every 15s"
+
+# --- 9. Validate ---
 log "Running validation gate"
 "${BENCH_DIR}/scripts/validate.sh"
 
