@@ -170,8 +170,6 @@ pub struct CompilerMetadata {
     pub query_hash: u64,
     /// Number of `_gkg_cursor_N` readback columns the cursor pass appended.
     pub cursor_key_count: usize,
-    /// Physical code tables, derived from ontology nodes and edge routing.
-    pub code_tables: HashSet<String>,
 }
 
 /// Defaults to `gl_edge` for test convenience. In production, `normalize()`
@@ -194,7 +192,6 @@ impl Default for CompilerMetadata {
             tp_id_lookup: HashMap::new(),
             query_hash: 0,
             cursor_key_count: 0,
-            code_tables: HashSet::new(),
         }
     }
 }

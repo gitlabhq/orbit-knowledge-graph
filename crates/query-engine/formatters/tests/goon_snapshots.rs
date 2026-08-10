@@ -32,6 +32,7 @@ fn empty_response(query_type: &str) -> GraphResponse {
         group_columns: None,
         rows: None,
         pagination: None,
+        code_contexts: vec![],
     }
 }
 

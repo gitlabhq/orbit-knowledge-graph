@@ -59,6 +59,8 @@ pub struct GraphResponse {
     pub rows: Option<Vec<Map<String, Value>>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pagination: Option<PaginationResponse>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub code_contexts: Vec<compiler::CodeContext>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -141,18 +143,8 @@ impl ResultFormatter for GraphFormatter {
         // GraphResponse holds only strings, primitives, and Values that
         // already came from `column_value_to_json` (which filters non-finite
         // floats). Serialization is infallible.
-        let mut response = serde_json::to_value(self.build_response(output))
-            .expect("GraphResponse serialization is infallible");
-        if !output.compiled.input.code_contexts.is_empty()
-            && let Value::Object(object) = &mut response
-        {
-            object.insert(
-                "code_contexts".into(),
-                serde_json::to_value(&output.compiled.input.code_contexts)
-                    .expect("CodeContext serialization is infallible"),
-            );
-        }
-        response
+        serde_json::to_value(self.build_response(output))
+            .expect("GraphResponse serialization is infallible")
     }
 }
 
@@ -239,6 +231,7 @@ impl GraphFormatter {
             group_columns,
             rows,
             pagination,
+            code_contexts: output.compiled.input.code_contexts.clone(),
         }
     }
 

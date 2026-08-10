@@ -49,7 +49,7 @@ fn code_tables(ontology: &Ontology) -> HashSet<String> {
     let mut tables: HashSet<_> = ontology
         .nodes()
         .filter(|node| node.domain == "source_code")
-        .map(|node| node.destination_table.clone())
+        .map(|node| unprefixed(&node.destination_table).to_string())
         .collect();
     if ontology
         .edge_tables()
@@ -61,6 +61,7 @@ fn code_tables(ontology: &Ontology) -> HashSet<String> {
                 .edge_tables()
                 .into_iter()
                 .filter(|table| table.contains("code_edge"))
+                .map(unprefixed)
                 .map(str::to_string),
         );
     }
@@ -356,6 +357,26 @@ mod tests {
             &Ontology::load_embedded().unwrap(),
         )
         .expect_err("predicate subqueries that scan code must fail closed");
+        assert!(
+            error
+                .to_string()
+                .contains("default-branch fallback is disabled")
+        );
+    }
+
+    #[test]
+    fn rejects_uncontextualized_code_scan_with_prefixed_ontology() {
+        let mut node = Node::Query(Box::new(Query {
+            select: vec![SelectExpr::star()],
+            from: TableRef::scan("v89_gl_definition", "d"),
+            ..Query::default()
+        }));
+        let ontology = Ontology::load_embedded()
+            .unwrap()
+            .with_schema_version_prefix("v89_");
+
+        let error = apply(&mut node, &Input::default(), &ontology)
+            .expect_err("prefixed code scans must fail closed");
         assert!(
             error
                 .to_string()

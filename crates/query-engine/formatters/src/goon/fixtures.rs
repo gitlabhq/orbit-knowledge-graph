@@ -15,6 +15,7 @@ pub fn response(query_type: &str, nodes: Vec<GraphNode>, edges: Vec<GraphEdge>) 
         group_columns: None,
         rows: None,
         pagination: None,
+        code_contexts: vec![],
     }
 }
 

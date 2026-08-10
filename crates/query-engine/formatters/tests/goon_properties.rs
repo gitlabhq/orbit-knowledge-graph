@@ -83,6 +83,7 @@ fn arb_response() -> impl Strategy<Value = GraphResponse> {
             group_columns: None,
             rows: None,
             pagination: None,
+            code_contexts: vec![],
         })
 }
 
@@ -108,6 +109,7 @@ proptest! {
             group_columns: response.group_columns.clone(),
             rows: response.rows.clone(),
             pagination: None,
+            code_contexts: vec![],
         };
         shuffled.nodes.shuffle(&mut rng);
         shuffled.edges.shuffle(&mut rng);

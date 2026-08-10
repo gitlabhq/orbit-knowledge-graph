@@ -55,8 +55,8 @@ pub use constants::{
 };
 pub use error::{QueryError, Result};
 pub use input::{
-    ColumnSelection, DynamicColumnMode, EntityAuthConfig, FilterOp, Input, InputFilter, InputNode,
-    QueryType, parse_input,
+    CodeContext, CodeContextState, ColumnSelection, DynamicColumnMode, EntityAuthConfig, FilterOp,
+    Input, InputFilter, InputNode, QueryType, parse_input,
 };
 pub use metrics::{METRICS, QueryEngineMetrics};
 pub use ontology::{Ontology, OntologyError};
