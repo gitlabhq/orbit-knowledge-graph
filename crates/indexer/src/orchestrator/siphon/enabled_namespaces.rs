@@ -3,12 +3,15 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use clickhouse_client::FromArrowColumn;
 use siphon_proto::LogicalReplicationEvents;
 use siphon_proto::replication_event::Operation;
-use tracing::{debug, warn};
+use tracing::warn;
 
+use crate::clickhouse::ArrowClickHouseClient;
 use crate::orchestrator::dispatch::{
     CodeBackfill, NamespaceDispatchRequest, NamespaceIndexingDispatch,
+    enabled_namespaces::resolved_paths_for_namespace_ids_sql,
 };
 use crate::orchestrator::scheduled::TaskError;
 use crate::orchestrator::siphon::decoder::ColumnExtractor;
@@ -18,68 +21,21 @@ use crate::orchestrator::siphon::subjects;
 pub struct EnabledNamespacesRoute {
     namespace_indexing: NamespaceIndexingDispatch,
     code_backfill: Arc<CodeBackfill>,
+    datalake: ArrowClickHouseClient,
 }
 
 impl EnabledNamespacesRoute {
     pub fn new(
         namespace_indexing: NamespaceIndexingDispatch,
         code_backfill: Arc<CodeBackfill>,
+        datalake: ArrowClickHouseClient,
     ) -> Self {
         Self {
             namespace_indexing,
             code_backfill,
+            datalake,
         }
     }
-}
-
-/// Pulls (namespace_id, traversal_path) from insert/snapshot/update CDC events on the enabled-namespaces table.
-fn extract_enabled_namespaces(events: &[LogicalReplicationEvents]) -> Vec<(i64, String)> {
-    let mut rows: Vec<(i64, String)> = Vec::new();
-
-    for replication_events in events {
-        let extractor = ColumnExtractor::new(replication_events);
-
-        for event in &replication_events.events {
-            let dispatchable = event.operation == Operation::Insert as i32
-                || event.operation == Operation::InitialSnapshot as i32
-                || event.operation == Operation::Update as i32;
-
-            if !dispatchable {
-                debug!(
-                    operation = event.operation,
-                    "skipping non-dispatchable event"
-                );
-                continue;
-            }
-
-            let Some(root_namespace_id) = extractor.get_i64(event, "root_namespace_id") else {
-                warn!("failed to extract root_namespace_id, skipping");
-                continue;
-            };
-
-            let Some(traversal_path) = extractor.get_string(event, "traversal_path") else {
-                warn!(
-                    root_namespace_id,
-                    "CDC event missing traversal_path; skipping (re-tries next tick via active backfill)"
-                );
-                continue;
-            };
-
-            if traversal_path.is_empty() {
-                warn!(
-                    root_namespace_id,
-                    "CDC event has empty traversal_path; skipping to avoid prefix-matching every project"
-                );
-                continue;
-            }
-
-            rows.push((root_namespace_id, traversal_path.to_string()));
-        }
-    }
-
-    rows.sort();
-    rows.dedup();
-    rows
 }
 
 #[async_trait]
@@ -93,7 +49,9 @@ impl Route for EnabledNamespacesRoute {
         ctx: &CdcContext,
         events: &[LogicalReplicationEvents],
     ) -> Result<RouteOutcome, TaskError> {
-        let enabled = extract_enabled_namespaces(events);
+        let ids = enabled_namespace_ids(events);
+        let enabled = lookup_paths(&self.datalake, &ids).await?;
+
         let sdlc_requests: Vec<NamespaceDispatchRequest> = enabled
             .iter()
             .map(|(namespace_id, traversal_path)| NamespaceDispatchRequest {
@@ -117,17 +75,69 @@ impl Route for EnabledNamespacesRoute {
     }
 }
 
+fn enabled_namespace_ids(events: &[LogicalReplicationEvents]) -> Vec<i64> {
+    let mut ids: Vec<i64> = Vec::new();
+
+    for batch in events {
+        let extractor = ColumnExtractor::new(batch);
+        for event in &batch.events {
+            let dispatchable = event.operation == Operation::Insert as i32
+                || event.operation == Operation::InitialSnapshot as i32
+                || event.operation == Operation::Update as i32;
+            if !dispatchable {
+                continue;
+            }
+            match extractor.get_i64(event, "root_namespace_id") {
+                Some(id) => ids.push(id),
+                None => warn!("failed to extract root_namespace_id, skipping"),
+            }
+        }
+    }
+
+    ids.sort_unstable();
+    ids.dedup();
+    ids
+}
+
+async fn lookup_paths(
+    datalake: &ArrowClickHouseClient,
+    namespace_ids: &[i64],
+) -> Result<Vec<(i64, String)>, TaskError> {
+    if namespace_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let batches = datalake
+        .query(resolved_paths_for_namespace_ids_sql())
+        .param("ids", namespace_ids.to_vec())
+        .fetch_arrow()
+        .await
+        .map_err(TaskError::new)?;
+
+    let ids = i64::extract_column(&batches, 0).map_err(TaskError::new)?;
+    let paths = String::extract_column(&batches, 1).map_err(TaskError::new)?;
+    let found: Vec<(i64, String)> = ids.into_iter().zip(paths).collect();
+
+    if found.len() < namespace_ids.len() {
+        warn!(
+            requested = namespace_ids.len(),
+            resolved = found.len(),
+            "enabled namespaces without a live top-level traversal path; \
+             the sweep picks up any that become resolvable"
+        );
+    }
+
+    Ok(found)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::modules::code::test_helpers::{EventBuilder, build_replication_events_for_table};
     use crate::orchestrator::siphon::decoder::decode_logical_replication_events;
 
-    fn namespace_enabled_columns(root_namespace_id: i64) -> EventBuilder {
-        let traversal_path = format!("1/{root_namespace_id}/");
-        EventBuilder::new()
-            .with_i64("root_namespace_id", root_namespace_id)
-            .with_string("traversal_path", &traversal_path)
+    fn enabled_namespace_event(root_namespace_id: i64) -> EventBuilder {
+        EventBuilder::new().with_i64("root_namespace_id", root_namespace_id)
     }
 
     fn decode(
@@ -139,57 +149,47 @@ mod tests {
     }
 
     #[test]
-    fn extracts_namespace_ids_from_insert_events() {
+    fn extracts_and_dedups_ids_from_insert_events() {
         let decoded = decode(vec![
-            namespace_enabled_columns(100).build(),
-            namespace_enabled_columns(200).build(),
+            enabled_namespace_event(200).build(),
+            enabled_namespace_event(100).build(),
+            enabled_namespace_event(100).build(),
         ]);
-        let rows = extract_enabled_namespaces(std::slice::from_ref(&decoded));
 
-        assert_eq!(
-            rows,
-            vec![(100, "1/100/".to_string()), (200, "1/200/".to_string())]
-        );
+        let ids = enabled_namespace_ids(std::slice::from_ref(&decoded));
+
+        assert_eq!(ids, vec![100, 200]);
     }
 
     #[test]
     fn skips_delete_events() {
         let decoded = decode(vec![
-            namespace_enabled_columns(100)
+            enabled_namespace_event(100)
                 .with_operation(Operation::Delete as i32)
                 .build(),
         ]);
-        let rows = extract_enabled_namespaces(std::slice::from_ref(&decoded));
 
-        assert!(rows.is_empty());
+        assert!(enabled_namespace_ids(std::slice::from_ref(&decoded)).is_empty());
     }
 
     #[test]
-    fn extracts_namespace_ids_from_snapshot_events() {
+    fn extracts_ids_from_snapshot_and_update_events() {
         let decoded = decode(vec![
-            namespace_enabled_columns(300)
+            enabled_namespace_event(300)
                 .with_operation(Operation::InitialSnapshot as i32)
                 .build(),
-        ]);
-        let rows = extract_enabled_namespaces(std::slice::from_ref(&decoded));
-
-        assert_eq!(rows, vec![(300, "1/300/".to_string())]);
-    }
-
-    #[test]
-    fn extracts_namespace_ids_from_update_events() {
-        let decoded = decode(vec![
-            namespace_enabled_columns(400)
+            enabled_namespace_event(400)
                 .with_operation(Operation::Update as i32)
                 .build(),
         ]);
-        let rows = extract_enabled_namespaces(std::slice::from_ref(&decoded));
 
-        assert_eq!(rows, vec![(400, "1/400/".to_string())]);
+        let ids = enabled_namespace_ids(std::slice::from_ref(&decoded));
+
+        assert_eq!(ids, vec![300, 400]);
     }
 
     #[test]
-    fn no_events_produces_no_dispatches() {
-        assert!(extract_enabled_namespaces(&[]).is_empty());
+    fn no_events_produce_no_ids() {
+        assert!(enabled_namespace_ids(&[]).is_empty());
     }
 }

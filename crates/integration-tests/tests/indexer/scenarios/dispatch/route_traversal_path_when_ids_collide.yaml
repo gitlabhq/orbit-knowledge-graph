@@ -11,6 +11,7 @@ seed:
     - { id: 4, root_namespace_id: 900, traversal_path: "9/900/", created_at: "2024-01-15", updated_at: "2024-01-15" }
   namespace_traversal_paths:
     - { id: 300, traversal_path: "3/300/" }
+    - { id: 400, traversal_path: "4/400/" }
     - { id: 4000, traversal_path: "9/900/4000/" }
   project_namespace_traversal_paths:
     - { id: 300, traversal_path: "8/800/300/" }

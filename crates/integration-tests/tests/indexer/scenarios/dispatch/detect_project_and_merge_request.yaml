@@ -8,6 +8,9 @@ seed:
   siphon_knowledge_graph_enabled_namespaces:
     - { id: 1, root_namespace_id: 100, traversal_path: "1/100/", created_at: "2024-01-15", updated_at: "2024-01-15" }
     - { id: 2, root_namespace_id: 200, traversal_path: "2/200/", created_at: "2024-01-15", updated_at: "2024-01-15" }
+  namespace_traversal_paths:
+    - { id: 100, traversal_path: "1/100/" }
+    - { id: 200, traversal_path: "2/200/" }
   projects:
     - { id: 1000, namespace_id: 100, traversal_path: "1/100/1000/" }
   merge_requests:
