@@ -42,6 +42,17 @@ impl EmptyRepositoryReason {
             EmptyRepositoryReason::RepositoryTooLarge => "repository_too_large",
         }
     }
+
+    /// A transient empty (Gitaly visibility lag) may resolve on retry; a
+    /// `RepositoryTooLarge` size cap is permanent, so it never does.
+    pub fn is_transient(self) -> bool {
+        match self {
+            EmptyRepositoryReason::NotFound
+            | EmptyRepositoryReason::ServerError
+            | EmptyRepositoryReason::EmptyArchive => true,
+            EmptyRepositoryReason::RepositoryTooLarge => false,
+        }
+    }
 }
 
 impl std::fmt::Display for EmptyRepositoryReason {
@@ -157,6 +168,18 @@ mod tests {
     use parking_lot::Mutex;
 
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[test]
+    fn only_the_size_cap_is_not_transient() {
+        assert!(!EmptyRepositoryReason::RepositoryTooLarge.is_transient());
+        for reason in [
+            EmptyRepositoryReason::NotFound,
+            EmptyRepositoryReason::ServerError,
+            EmptyRepositoryReason::EmptyArchive,
+        ] {
+            assert!(reason.is_transient());
+        }
+    }
 
     struct ScriptedRepositoryService {
         archive: Mutex<Vec<u8>>,

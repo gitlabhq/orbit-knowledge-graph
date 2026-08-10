@@ -334,10 +334,9 @@ impl CodeIndexer {
                 path
             }
             Err(ResolveError::EmptyRepository { reason, detail }) => {
-                // A commit SHA means content exists (push-dispatched task), so
-                // an empty archive is visibility lag; checkpointing empty here
-                // would be terminal. Fail so the task is retried.
-                if request.commit_sha.is_some() {
+                // Retry a transient empty only when a commit SHA proves content
+                // exists; a permanent size cap is checkpointed empty, not retried.
+                if request.commit_sha.is_some() && reason.is_transient() {
                     self.metrics.record_stage_error("repository_fetch");
                     return Err(HandlerError::Processing(format!(
                         "archive empty ({reason}: {detail}) for task with commit_sha; retrying"
@@ -348,7 +347,7 @@ impl CodeIndexer {
                     branch = %request.branch,
                     reason = %reason,
                     detail,
-                    "project has no repository content; checkpointing as indexed-empty"
+                    "checkpointing repository as indexed-empty"
                 );
                 self.metrics.record_resolution_strategy("empty_repository");
                 self.metrics
