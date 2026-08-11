@@ -67,8 +67,6 @@ async fn run_with_heartbeat<T>(
                 progress.notify_in_progress().await;
                 match guard.renew(lock_ttl).await {
                     Ok(()) => {}
-                    // Only a lost lease means another holder owns it; a Backend error is a
-                    // transient NATS blip, so retry on the next tick rather than killing the job.
                     Err(error @ LockError::Lost) => {
                         warn!(%error, "project lock lost mid-index; cancelling to avoid a double-write");
                         cancel.cancel();
