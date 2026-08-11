@@ -92,6 +92,9 @@ EOSNAP
           apiGroup: snapshot.storage.k8s.io"
 fi
 
+# StatefulSet volumeClaimTemplates are immutable; delete before re-applying.
+$KC delete statefulset clickhouse -n "${CH_NS}" --cascade=orphan 2>/dev/null || true
+
 log "Deploying standalone ClickHouse in ${CH_NS}"
 export CH_NAMESPACE="${CH_NS}" CH_PASSWORD CH_NODE_SELECTOR CH_TOLERATIONS PVC_DATA_SOURCE
 export CH_STORAGE="$(tier '.clickhouse.storage')"
