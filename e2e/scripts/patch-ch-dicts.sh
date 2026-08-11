@@ -60,10 +60,21 @@ for dict in "${DICTS[@]}"; do
     | sed -E "s|LIFETIME\\([^)]*\\)||" \
     | sed -E "s|USER '[^']+' PASSWORD '\\[HIDDEN\\]'|USER 'default' PASSWORD '$DEFAULT_PASS'|")
   ch_query "$patched" >/dev/null
+  # system.dictionaries.type stays empty until the dictionary first loads, so
+  # checking it right after CREATE OR REPLACE is a guaranteed false negative.
+  # A dictGet probe forces the lazy load and also proves the rewritten SOURCE
+  # credentials work (a bad password only surfaces on lookup, not on DDL).
+  if ! ch_query "SELECT dictGetOrDefault('$dict', 'traversal_path', toUInt64(0), '')" >/dev/null; then
+    log "  ERROR: $dict probe lookup failed after patch"
+    exit 1
+  fi
   layout=$(ch_query "SELECT type FROM system.dictionaries WHERE database || '.' || name = '$dict'" 2>/dev/null || true)
   case "$layout" in
-    *Direct*|*direct*) ;;
-    *) log "  WARNING: $dict layout is '$layout', not DIRECT — cache race window remains" ;;
+    *Direct*|*direct*) log "  $dict layout: $layout" ;;
+    *)
+      log "  ERROR: $dict layout is '$layout', not DIRECT — cache race window remains"
+      exit 1
+      ;;
   esac
 done
 
