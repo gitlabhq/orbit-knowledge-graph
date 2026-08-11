@@ -258,6 +258,23 @@ can require external service calls.
 The `content` column is for source code. For merge request diff text, use
 `MergeRequest.diff`, `MergeRequestDiff.patch`, or `MergeRequestDiffFile.diff`.
 
+### Filtering on virtual columns
+
+Virtual columns support the `eq`, `contains`, `starts_with`, `ends_with`,
+`is_null`, and `is_not_null` filter operators in `traversal` queries, and
+only on nodes that pin explicit `node_ids`. The filter resolves the column
+for those rows and compares in memory. Using a virtual column filter to
+search rows you have not identified yet (content search) is not supported
+and is rejected; find candidate rows with indexed filters first, then
+filter the pinned rows by virtual column content.
+
+You do not need to request the column to filter on it; a virtual column
+that is filtered but not requested is resolved for the comparison and
+omitted from the response.
+
+`aggregation`, `neighbors`, and `path_finding` queries reject filters on
+virtual columns.
+
 ## Traversal examples
 
 Fetch one merge request with its full diff:
