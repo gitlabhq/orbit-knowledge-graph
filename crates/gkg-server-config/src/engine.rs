@@ -898,7 +898,7 @@ mod tests {
     #[test]
     fn job_timeout_is_some_by_default_and_disabled_at_zero() {
         let cfg = CodeIndexingPipelineConfig::default();
-        assert_eq!(cfg.job_timeout(), Some(Duration::from_secs(250)));
+        assert_eq!(cfg.job_timeout(), Some(Duration::from_secs(1500)));
         let disabled = CodeIndexingPipelineConfig {
             job_timeout_secs: 0,
             ..Default::default()
