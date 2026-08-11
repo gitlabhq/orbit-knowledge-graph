@@ -121,11 +121,15 @@ SETUP_SQL=$(sed \
   -e "s|\${GKG_SIPHON_READER_PASSWORD}|${E2E_CH_DATALAKE_PASS}|g" \
   "${REPO_ROOT}/config/clickhouse-setup.sql")
 
+DROP_DATALAKE="DROP DATABASE IF EXISTS datalake; CREATE DATABASE datalake;"
+if [[ -n "${RA_DATALAKE_SNAPSHOT:-}" ]]; then
+  DROP_DATALAKE=""
+fi
+
 $KC exec -n "${CH_NS}" clickhouse-0 -- \
   clickhouse-client --password "${CH_PASSWORD}" --multiquery --query "
-    DROP DATABASE IF EXISTS datalake;
+    ${DROP_DATALAKE}
     DROP DATABASE IF EXISTS gkg;
-    CREATE DATABASE datalake;
     CREATE DATABASE gkg;
     DROP USER IF EXISTS siphon;
     DROP USER IF EXISTS gitlab;
