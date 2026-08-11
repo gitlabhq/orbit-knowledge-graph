@@ -9,7 +9,7 @@ title: GitLab Orbit
 {{< details >}}
 
 - Tier: Premium, Ultimate
-- Offering: GitLab.com
+- Offering: GitLab.com, GitLab Self-Managed
 - Status: Beta
 
 {{< /details >}}
@@ -18,6 +18,7 @@ title: GitLab Orbit
 
 - [Introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) in GitLab 18.10 [with a feature flag](https://docs.gitlab.com/administration/feature_flags/) named `knowledge_graph`. Disabled by default. This feature is an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment).
 - [Changed](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) to [beta](https://docs.gitlab.com/policy/development_stages_support/#beta) in GitLab 19.1.
+- [Introduced](https://gitlab.com/groups/gitlab-org/-/epics/22739) for GitLab Self-Managed in GitLab 19.3.
 
 {{< /history >}}
 
@@ -95,6 +96,14 @@ GitLab Orbit Remote.
 
 [Get started with GitLab Orbit Local](local/getting-started.md)
 
+## GitLab Orbit on GitLab Self-Managed
+
+On GitLab Self-Managed, you run GitLab Orbit yourself on a Kubernetes cluster next to your instance,
+along with the data pipeline that feeds it: PostgreSQL logical replication, Siphon, NATS, and ClickHouse.
+The graph and the query surfaces are the same as on GitLab.com.
+
+[Get started with GitLab Orbit on GitLab Self-Managed](self-managed/getting-started.md)
+
 ## What GitLab Orbit indexes
 
 GitLab Orbit indexes two categories of data:
@@ -113,4 +122,5 @@ GitLab Orbit indexes code in Ruby, Java, Kotlin, Python, TypeScript, JavaScript,
 
 - [Enable GitLab Orbit Remote and run your first query](remote/getting-started.md)
 - [Build a local code graph with GitLab Orbit Local](local/getting-started.md)
+- [Install GitLab Orbit on GitLab Self-Managed](self-managed/getting-started.md)
 - [Set up AI coding agents with the GitLab Orbit skill](ai_coding_agents.md)
