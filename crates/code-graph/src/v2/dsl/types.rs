@@ -725,6 +725,9 @@ pub struct LanguageHooks {
     pub on_scope: Option<ScopeHookFn>,
     /// Override import extraction (e.g. Ruby require/require_relative).
     pub on_import: Option<fn(&N<'_>, &mut Vec<crate::v2::types::CanonicalImport>) -> bool>,
+    /// Restrict `on_import` to files whose path passes this filter
+    /// (e.g. YAML extracts CI includes from `*.gitlab-ci.yml` only).
+    pub on_import_file_filter: Option<fn(&str) -> bool>,
     /// Override the identifier an import writes into SSA.
     pub import_scope_name: Option<ImportScopeNameHook>,
     /// Override the target FQN used by type-resolution import maps.

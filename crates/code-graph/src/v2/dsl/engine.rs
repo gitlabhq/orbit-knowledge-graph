@@ -1041,10 +1041,15 @@ impl LanguageSpec {
             }
 
             let import_count_before = state.imports.len();
-            let handled = self
+            let hook_applies = self
                 .hooks
-                .on_import
-                .is_some_and(|f| f(node, &mut state.imports));
+                .on_import_file_filter
+                .is_none_or(|filter| filter(state.file_path));
+            let handled = hook_applies
+                && self
+                    .hooks
+                    .on_import
+                    .is_some_and(|f| f(node, &mut state.imports));
             if !handled {
                 self.evaluate_imports(node, nk, &mut state.imports);
             }
