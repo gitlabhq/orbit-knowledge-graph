@@ -16,7 +16,8 @@ use crate::analytics::IndexingAnalytics;
 
 use crate::engine::retry::{Backoff, RetryMode, RetryPolicy};
 use crate::handler::{Handler, HandlerContext, HandlerError};
-use crate::locking::LockGuard;
+use crate::locking::{LockError, LockGuard};
+use crate::nats::ProgressNotifier;
 use crate::observer::{self, IndexingMode, IndexingObserver, PipelineType};
 use crate::topic::CodeIndexingTaskRequest;
 use crate::types::{Envelope, Subscription};
@@ -40,6 +41,43 @@ fn project_lock_key(project_id: i64, branch: &str) -> String {
     use base64::Engine;
     let encoded_branch = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(branch);
     format!("project.{project_id}.{encoded_branch}")
+}
+
+/// Heartbeat lives in this future (not a spawned task), so it can't leak; it only ticks during the parse because that parse is on `spawn_blocking`.
+async fn run_with_heartbeat<T>(
+    work: impl std::future::Future<Output = T>,
+    progress: &ProgressNotifier,
+    guard: &LockGuard,
+    lock_ttl: Duration,
+    interval: Duration,
+    cancel: &CancellationToken,
+) -> T {
+    tokio::pin!(work);
+    let mut ticker = tokio::time::interval(interval);
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    ticker.tick().await;
+
+    loop {
+        tokio::select! {
+            outcome = &mut work => return outcome,
+            _ = ticker.tick() => {
+                if cancel.is_cancelled() {
+                    continue;
+                }
+                progress.notify_in_progress().await;
+                match guard.renew(lock_ttl).await {
+                    Ok(()) => {}
+                    Err(error @ LockError::Lost) => {
+                        warn!(%error, "project lock lost mid-index; cancelling to avoid a double-write");
+                        cancel.cancel();
+                    }
+                    Err(error) => {
+                        warn!(%error, "lock renewal failed transiently; retrying on the next heartbeat tick");
+                    }
+                }
+            }
+        }
+    }
 }
 
 pub struct CodeIndexingTaskHandler {
@@ -326,10 +364,23 @@ impl CodeIndexingTaskHandler {
             had_prior_checkpoint,
         };
         let cancel = CancellationToken::new();
-        let result = match self
-            .pipeline
-            .index_project(context, &indexing_request, observer, cancel.clone(), &guard)
-            .await
+        let heartbeat_interval = self.lock_ttl / 3;
+        let indexing = self.pipeline.index_project(
+            context,
+            &indexing_request,
+            observer,
+            cancel.clone(),
+            &guard,
+        );
+        let result = match run_with_heartbeat(
+            indexing,
+            &context.progress,
+            &guard,
+            self.lock_ttl,
+            heartbeat_interval,
+            &cancel,
+        )
+        .await
         {
             Ok(outcome) => Ok(outcome),
             Err(IndexError::BudgetExceeded { budget }) => {
@@ -759,5 +810,140 @@ mod tests {
             project_lock_key(42, "refs/heads/main"),
             "project.42.cmVmcy9oZWFkcy9tYWlu"
         );
+    }
+
+    struct ProgressCountingAcker {
+        progress_acks: Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    #[async_trait]
+    impl crate::nats::MessageAcker for ProgressCountingAcker {
+        async fn ack(&self) -> Result<(), nats_client::NatsError> {
+            Ok(())
+        }
+        async fn ack_term(&self) -> Result<(), nats_client::NatsError> {
+            Ok(())
+        }
+        async fn ack_progress(&self) -> Result<(), nats_client::NatsError> {
+            self.progress_acks
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            Ok(())
+        }
+        async fn nack(&self, _delay: Option<Duration>) -> Result<(), nats_client::NatsError> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn heartbeat_pings_progress_and_renews_lock_during_blocking_work() {
+        let progress_acks = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let message = crate::nats::NatsMessage::new(
+            crate::testkit::TestEnvelopeFactory::simple("{}"),
+            ProgressCountingAcker {
+                progress_acks: progress_acks.clone(),
+            },
+        );
+        let progress = message.progress_notifier();
+
+        let locks = Arc::new(MockLockService::new());
+        let guard = LockGuard::acquire(locks.clone(), "p1", Duration::from_secs(30))
+            .await
+            .expect("acquire ok")
+            .expect("acquired");
+
+        let cancel = CancellationToken::new();
+        let work = async {
+            tokio::task::spawn_blocking(|| std::thread::sleep(Duration::from_millis(150)))
+                .await
+                .expect("blocking task ok");
+            "done"
+        };
+        let outcome = run_with_heartbeat(
+            work,
+            &progress,
+            &guard,
+            Duration::from_secs(30),
+            Duration::from_millis(25),
+            &cancel,
+        )
+        .await;
+
+        assert_eq!(outcome, "done");
+        assert!(
+            progress_acks.load(std::sync::atomic::Ordering::Relaxed) >= 3,
+            "heartbeat should ping ack_progress during the blocking parse"
+        );
+        assert!(
+            locks.renew_count() >= 1,
+            "heartbeat should renew the lock during the blocking parse"
+        );
+        assert!(!cancel.is_cancelled());
+    }
+
+    #[tokio::test]
+    async fn heartbeat_cancels_the_job_when_the_lock_is_lost() {
+        let locks = Arc::new(MockLockService::new());
+        let guard = LockGuard::acquire(locks.clone(), "p1", Duration::from_secs(30))
+            .await
+            .expect("acquire ok")
+            .expect("acquired");
+        locks.steal_leases();
+
+        let cancel = CancellationToken::new();
+        let work_cancel = cancel.clone();
+        let work = async {
+            loop {
+                if work_cancel.is_cancelled() {
+                    break "cancelled";
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        };
+        let outcome = run_with_heartbeat(
+            work,
+            &ProgressNotifier::noop(),
+            &guard,
+            Duration::from_secs(30),
+            Duration::from_millis(20),
+            &cancel,
+        )
+        .await;
+
+        assert_eq!(outcome, "cancelled");
+        assert!(cancel.is_cancelled());
+    }
+
+    #[tokio::test]
+    async fn heartbeat_tolerates_transient_renew_failures_without_cancelling() {
+        let locks = Arc::new(MockLockService::new());
+        let guard = LockGuard::acquire(locks.clone(), "p1", Duration::from_secs(30))
+            .await
+            .expect("acquire ok")
+            .expect("acquired");
+        locks.fail_renews_transiently();
+
+        let cancel = CancellationToken::new();
+        let work = async {
+            tokio::task::spawn_blocking(|| std::thread::sleep(Duration::from_millis(150)))
+                .await
+                .expect("blocking task ok");
+            "done"
+        };
+        let outcome = run_with_heartbeat(
+            work,
+            &ProgressNotifier::noop(),
+            &guard,
+            Duration::from_secs(30),
+            Duration::from_millis(25),
+            &cancel,
+        )
+        .await;
+
+        assert_eq!(
+            outcome, "done",
+            "a transient renew error must not kill the job"
+        );
+        assert!(!cancel.is_cancelled());
+        assert!(locks.renew_count() >= 1, "renew should have been attempted");
     }
 }

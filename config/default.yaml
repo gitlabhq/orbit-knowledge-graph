@@ -82,7 +82,7 @@ engine:
         per_file_walk_timeout_ms: 100
         per_file_ssa_timeout_ms: 100
         cross_file_resolve_timeout_ms: 180000
-        job_timeout_secs: 250
+        job_timeout_secs: 1500
         fetch_concurrency: 10
         write_channel_capacity: 8
         write_slice_rows: 1000000
