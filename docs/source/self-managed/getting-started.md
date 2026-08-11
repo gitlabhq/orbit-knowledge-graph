@@ -28,9 +28,7 @@ reachable.
 
 ### GitLab
 
-GitLab 19.3 or later, with a Premium or Ultimate license. Linux package installations gain the
-GitLab Orbit settings in 19.3. On the GitLab Helm chart, 19.3 renames them from `knowledgeGraph` to
-`orbit`, and the old name is deprecated for removal in 19.5.
+GitLab 19.3 or later, with a Premium or Ultimate license.
 
 You also need administrator access to the instance and to its PostgreSQL server, including the ability
 to restart PostgreSQL once.
@@ -52,27 +50,25 @@ and [enabling ClickHouse for analytics](https://docs.gitlab.com/integration/clic
 Those migrations create the data lake tables that replication writes into, so replication has nowhere
 to land without them.
 
-GitLab Orbit uses two databases on the same ClickHouse instance:
+GitLab Orbit uses two databases:
 
 | Database | Written by | Read by |
 |---|---|---|
 | `gitlab_clickhouse_main_production` | GitLab, Siphon | GitLab, the GitLab Orbit indexer and dispatcher |
 | `gkg` | The GitLab Orbit dispatcher (schema) and indexer (data) | All three GitLab Orbit components |
 
-The first one already exists after you finish the ClickHouse page. [Set up GitLab Orbit](orbit-setup.md)
-creates the second one.
+They do not have to be on the same ClickHouse instance. Split them if you prefer, and give GitLab,
+Siphon, and GitLab Orbit credentials for whichever instance holds the database each one needs.
+
+The first database already exists after you finish the ClickHouse page.
+[Set up GitLab Orbit](orbit-setup.md) creates the second one.
 
 ### Kubernetes
 
-Kubernetes 1.33 or later, with the `ImageVolume` feature gate turned on. Siphon reads its table list from
-an image volume. That feature is on by default from Kubernetes 1.35 and stable in 1.36. On 1.33 and 1.34,
-turn the gate on across the control plane and the nodes, and run a container runtime that supports it:
-CRI-O 1.31 or later, or `containerd` 2.1.0 or later.
+Kubernetes 1.33 or later, with the `ImageVolume` feature gate turned on.
 
 The cluster does not have to be the one that runs GitLab. A separate cluster next to your instance
 works, as long as it can reach GitLab, PostgreSQL, ClickHouse, and NATS, and GitLab can reach it back.
-
-You also need Helm 3.
 
 ### NATS
 

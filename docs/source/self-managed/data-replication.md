@@ -195,15 +195,19 @@ On a managed ClickHouse that restricts the `system` database, also run:
 GRANT SELECT ON system.tables, system.columns TO siphon_app;
 ```
 
-## Step 5: Store the passwords in Kubernetes
+## Step 5: Make the passwords available to Siphon
 
-```shell
-kubectl create namespace siphon
+Siphon reads both passwords from environment variables backed by a Kubernetes Secret. The values file
+below expects one Secret named `siphon-secrets` in the Siphon namespace, with these keys:
 
-kubectl -n siphon create secret generic siphon-secrets \
-  --from-literal=pg-password='PASSWORD_HERE' \
-  --from-literal=ch-siphon-password='PASSWORD_HERE'
-```
+| Key | Holds |
+|---|---|
+| `pg-password` | The password for the PostgreSQL roles from Step 2 |
+| `ch-siphon-password` | The password for the ClickHouse `siphon` user from Step 4 |
+
+How that Secret gets there is your decision. Keep the values in whatever secret manager you already run
+and sync them into the cluster with a tool such as the External Secrets Operator, rather than holding
+the plaintext anywhere else.
 
 ## Step 6: Install Siphon
 
