@@ -1,6 +1,15 @@
+//! YAML as a graph language: mapping keys become `MappingKey`
+//! definitions with dotted FQNs, anchors become definitions, aliases
+//! become references. Filename-gated document types live in submodules
+//! ([`gitlab_ci`] handles `*.gitlab-ci.yml`).
+
+mod gitlab_ci;
+
 use crate::v2::config::Language;
 use crate::v2::dsl::types::*;
 use crate::v2::types::{DefKind, Fqn};
+use treesitter_visit::Axis::*;
+use treesitter_visit::Match::*;
 use treesitter_visit::extract::{child_of_kind, field};
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
@@ -10,13 +19,10 @@ use crate::v2::linker::{HasRules, ResolveSettings};
 
 type N<'a> = Node<'a, StrDoc<SupportLang>>;
 
-// Key depth is deliberately unbounded: depth is a poor proxy for
-// machine-generated YAML (openapi dumps nest at 3-6 while hand-written
-// helm values legitimately reach 7+), so a depth cap silently truncates
-// exactly the config surface this language exists to index. Pathological
-// files are excluded whole at the file level instead — see
-// YAML_PARSER_MAX_FILE_SIZE in v2/pipeline.rs.
-const PAIR_KINDS: &[&str] = &["block_mapping_pair", "flow_pair"];
+// Key depth is deliberately unbounded: hand-written helm values reach
+// depth 7+, so capping truncates real config. Pathological files are
+// bounded whole via YAML_PARSER_MAX_FILE_SIZE in v2/pipeline.rs.
+pub(super) const PAIR_KINDS: &[&str] = &["block_mapping_pair", "flow_pair"];
 
 #[derive(Default)]
 pub struct YamlDsl;
@@ -60,6 +66,8 @@ impl DslLanguage for YamlDsl {
     fn hooks() -> LanguageHooks {
         LanguageHooks {
             on_scope: Some(yaml_strip_key_quotes),
+            on_import: Some(gitlab_ci::extract_ci_includes),
+            on_import_file_filter: Some(gitlab_ci::is_ci_config_path),
             ..LanguageHooks::default()
         }
     }
@@ -107,6 +115,52 @@ fn yaml_strip_key_quotes(
     false
 }
 
+pub(super) fn scalar_text(node: &N<'_>) -> Option<String> {
+    if node.kind().as_ref() != "flow_node" {
+        return None;
+    }
+    if node
+        .find(Child, AnyKind(&["flow_sequence", "flow_mapping"]))
+        .is_some()
+    {
+        return None;
+    }
+    let text = strip_quotes(node.text().as_ref().trim()).to_string();
+    (!text.is_empty()).then_some(text)
+}
+
+pub(super) fn pair_key(pair: &N<'_>) -> Option<String> {
+    pair.field("key").as_ref().and_then(scalar_text)
+}
+
+pub(super) fn child_mapping<'a>(node: &N<'a>) -> Option<N<'a>> {
+    node.find(Child, AnyKind(&["block_mapping", "flow_mapping"]))
+        .or_else(|| {
+            node.find(Child, AnyKind(&["block_node", "flow_node"]))
+                .and_then(|wrapper| {
+                    wrapper.find(Child, AnyKind(&["block_mapping", "flow_mapping"]))
+                })
+        })
+}
+
+pub(super) fn child_sequence<'a>(node: &N<'a>) -> Option<N<'a>> {
+    node.find(Child, AnyKind(&["block_sequence", "flow_sequence"]))
+        .or_else(|| {
+            node.find(Child, AnyKind(&["block_node", "flow_node"]))
+                .and_then(|wrapper| {
+                    wrapper.find(Child, AnyKind(&["block_sequence", "flow_sequence"]))
+                })
+        })
+}
+
+pub(super) fn item_scalar(item: &N<'_>) -> Option<String> {
+    scalar_text(item).or_else(|| {
+        item.find(Child, Kind("flow_node"))
+            .as_ref()
+            .and_then(scalar_text)
+    })
+}
+
 pub struct YamlRules;
 
 impl HasRules for YamlRules {
@@ -130,20 +184,27 @@ impl HasRules for YamlRules {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
     use crate::v2::trace::Tracer;
 
-    fn parse(code: &str) -> crate::v2::dsl::engine::ParseFullResult {
+    pub(in super::super) fn parse_at(
+        file_path: &str,
+        code: &str,
+    ) -> crate::v2::dsl::engine::ParseFullResult {
         YamlDsl::spec()
             .parse_full_collect(
                 code.as_bytes(),
-                "test.yml",
+                file_path,
                 Language::Yaml,
                 &Tracer::new(false),
                 Default::default(),
             )
             .unwrap()
+    }
+
+    pub(in super::super) fn parse(code: &str) -> crate::v2::dsl::engine::ParseFullResult {
+        parse_at("test.yml", code)
     }
 
     fn defs(code: &str) -> Vec<(String, String)> {
@@ -242,11 +303,5 @@ mod tests {
         let defs = defs("a: 1\n---\nb:\n  c: 2\n");
         assert!(defs.contains(&("a".into(), "a".into())), "{defs:?}");
         assert!(defs.contains(&("c".into(), "b.c".into())), "{defs:?}");
-    }
-
-    #[test]
-    fn yaml_files_produce_no_imports() {
-        let result = parse("include: '/ci/build.yml'\njob:\n  script: make\n");
-        assert!(result.imports.is_empty(), "{:?}", result.imports);
     }
 }
