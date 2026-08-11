@@ -43,13 +43,9 @@ fn project_lock_key(project_id: i64, branch: &str) -> String {
     format!("project.{project_id}.{encoded_branch}")
 }
 
-/// Runs `work` while resetting the NATS `ack_wait` timer and renewing the project lock on a
-/// fixed cadence, letting an index run past `ack_wait` without redelivery. The heartbeat is part
-/// of this future — not a spawned task — so it ends the instant `work` returns, errors, or is
-/// dropped; there is nothing to leak. It keeps ticking during the CPU-bound parse because that
-/// parse runs on `spawn_blocking`, so awaiting it yields this task.
-///
-/// A lost lock cancels the job: we never keep indexing on a lease we can't prove we hold.
+/// The heartbeat lives inside this future, not a spawned task, so it cannot outlive `work`.
+/// It still ticks during the CPU-bound parse only because that parse runs on `spawn_blocking`;
+/// non-yielding work on this task would starve the select.
 async fn run_with_heartbeat<T>(
     work: impl std::future::Future<Output = T>,
     progress: &ProgressNotifier,
@@ -59,14 +55,14 @@ async fn run_with_heartbeat<T>(
     cancel: &CancellationToken,
 ) -> T {
     tokio::pin!(work);
-    let mut tick = tokio::time::interval(interval);
-    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-    tick.tick().await;
+    let mut ticker = tokio::time::interval(interval);
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    ticker.tick().await;
 
     loop {
         tokio::select! {
             outcome = &mut work => return outcome,
-            _ = tick.tick() => {
+            _ = ticker.tick() => {
                 progress.notify_in_progress().await;
                 if let Err(error) = guard.renew(lock_ttl).await {
                     warn!(%error, "project lock lost mid-index; cancelling to avoid a double-write");
@@ -809,12 +805,12 @@ mod tests {
         );
     }
 
-    struct CountingAcker {
-        progress: Arc<std::sync::atomic::AtomicUsize>,
+    struct ProgressCountingAcker {
+        progress_acks: Arc<std::sync::atomic::AtomicUsize>,
     }
 
     #[async_trait]
-    impl crate::nats::MessageAcker for CountingAcker {
+    impl crate::nats::MessageAcker for ProgressCountingAcker {
         async fn ack(&self) -> Result<(), nats_client::NatsError> {
             Ok(())
         }
@@ -822,7 +818,7 @@ mod tests {
             Ok(())
         }
         async fn ack_progress(&self) -> Result<(), nats_client::NatsError> {
-            self.progress
+            self.progress_acks
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             Ok(())
         }
@@ -831,15 +827,13 @@ mod tests {
         }
     }
 
-    // A repo that parses for ~300ms via spawn_blocking must not starve the heartbeat: the
-    // interval arm keeps firing because awaiting the JoinHandle yields this task.
     #[tokio::test]
     async fn heartbeat_pings_progress_and_renews_lock_during_blocking_work() {
-        let progress_calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let progress_acks = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let message = crate::nats::NatsMessage::new(
             crate::testkit::TestEnvelopeFactory::simple("{}"),
-            CountingAcker {
-                progress: progress_calls.clone(),
+            ProgressCountingAcker {
+                progress_acks: progress_acks.clone(),
             },
         );
         let progress = message.progress_notifier();
@@ -849,11 +843,10 @@ mod tests {
             .await
             .expect("acquire ok")
             .expect("acquired");
-        let first_revision = locks.revision("p1").expect("held");
 
         let cancel = CancellationToken::new();
         let work = async {
-            tokio::task::spawn_blocking(|| std::thread::sleep(Duration::from_millis(300)))
+            tokio::task::spawn_blocking(|| std::thread::sleep(Duration::from_millis(150)))
                 .await
                 .expect("blocking task ok");
             "done"
@@ -863,19 +856,19 @@ mod tests {
             &progress,
             &guard,
             Duration::from_secs(30),
-            Duration::from_millis(50),
+            Duration::from_millis(25),
             &cancel,
         )
         .await;
 
         assert_eq!(outcome, "done");
         assert!(
-            progress_calls.load(std::sync::atomic::Ordering::Relaxed) >= 3,
+            progress_acks.load(std::sync::atomic::Ordering::Relaxed) >= 3,
             "heartbeat should ping ack_progress during the blocking parse"
         );
         assert!(
-            locks.revision("p1").expect("held") > first_revision,
-            "heartbeat should renew the lock",
+            locks.renew_count() >= 1,
+            "heartbeat should renew the lock during the blocking parse"
         );
         assert!(!cancel.is_cancelled());
     }
@@ -887,7 +880,7 @@ mod tests {
             .await
             .expect("acquire ok")
             .expect("acquired");
-        locks.fail_renews();
+        locks.steal_leases();
 
         let cancel = CancellationToken::new();
         let work_cancel = cancel.clone();

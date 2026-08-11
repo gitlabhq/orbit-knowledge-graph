@@ -10,7 +10,6 @@ use crate::nats::{KvPutOptions, KvPutResult};
 
 pub const INDEXING_LOCKS_BUCKET: &str = "indexing_locks";
 
-/// KV revision of a held lock; a renewal CAS-swaps against it (see [`NatsLockService`]).
 pub type LockRevision = u64;
 
 #[derive(Debug, thiserror::Error)]
@@ -25,34 +24,24 @@ pub enum LockError {
 pub trait LockService: Send + Sync {
     async fn try_acquire(&self, key: &str, ttl: Duration) -> Result<bool, LockError>;
 
-    /// Acquire and return the KV revision needed to renew the lease. The default
-    /// delegates to [`try_acquire`](Self::try_acquire) with a sentinel revision, so
-    /// services without CAS renewal degrade to non-renewable locks (the historical
-    /// behavior). [`NatsLockService`] overrides this with the real revision.
     async fn try_acquire_renewable(
         &self,
         key: &str,
         ttl: Duration,
-    ) -> Result<Option<LockRevision>, LockError> {
-        Ok(self.try_acquire(key, ttl).await?.then_some(0))
-    }
+    ) -> Result<Option<LockRevision>, LockError>;
 
-    /// Extend a lease previously taken with [`try_acquire_renewable`](Self::try_acquire_renewable).
-    /// `Ok(Some(new_revision))` renewed; `Ok(None)` means the lease was lost to another holder.
-    /// The default is a no-op keep-alive for services without CAS renewal.
+    /// `Ok(None)`: the lease was lost to another holder.
     async fn renew(
         &self,
-        _key: &str,
-        _ttl: Duration,
+        key: &str,
+        ttl: Duration,
         revision: LockRevision,
-    ) -> Result<Option<LockRevision>, LockError> {
-        Ok(Some(revision))
-    }
+    ) -> Result<Option<LockRevision>, LockError>;
 
     async fn release(&self, key: &str) -> Result<(), LockError>;
 }
 
-struct LockState {
+struct Lease {
     expires_at: tokio::time::Instant,
     revision: LockRevision,
 }
@@ -60,10 +49,8 @@ struct LockState {
 pub struct LockGuard {
     service: Option<Arc<dyn LockService>>,
     key: String,
-    // The heartbeat renews the lease while `index_project` still borrows `&self`, so the
-    // renewable state sits behind a Mutex to keep `renew` a `&self` method. Held only for a
-    // field read/write, never across an await.
-    state: std::sync::Mutex<LockState>,
+    // std Mutex, never held across an await: renew is &self because index_project borrows the guard.
+    lease: std::sync::Mutex<Lease>,
 }
 
 impl LockGuard {
@@ -76,7 +63,7 @@ impl LockGuard {
             Some(revision) => Ok(Some(Self {
                 service: Some(service),
                 key: key.to_string(),
-                state: std::sync::Mutex::new(LockState {
+                lease: std::sync::Mutex::new(Lease {
                     expires_at: tokio::time::Instant::now() + ttl,
                     revision,
                 }),
@@ -86,25 +73,23 @@ impl LockGuard {
     }
 
     pub fn time_left(&self) -> Duration {
-        self.state
+        self.lease
             .lock()
             .unwrap()
             .expires_at
             .saturating_duration_since(tokio::time::Instant::now())
     }
 
-    /// Extend the lease. `Err(LockError::Lost)` means another pod stole it — the caller
-    /// must stop working before it double-writes.
     pub async fn renew(&self, ttl: Duration) -> Result<(), LockError> {
         let Some(service) = &self.service else {
             return Ok(());
         };
-        let revision = self.state.lock().unwrap().revision;
+        let revision = self.lease.lock().unwrap().revision;
         match service.renew(&self.key, ttl, revision).await? {
             Some(new_revision) => {
-                let mut state = self.state.lock().unwrap();
-                state.revision = new_revision;
-                state.expires_at = tokio::time::Instant::now() + ttl;
+                let mut lease = self.lease.lock().unwrap();
+                lease.revision = new_revision;
+                lease.expires_at = tokio::time::Instant::now() + ttl;
                 Ok(())
             }
             None => Err(LockError::Lost),
@@ -226,8 +211,6 @@ impl LockService for NatsLockService {
         }
     }
 
-    /// CAS the stored expiry forward against the revision we hold. A revision mismatch means
-    /// the lease expired and another holder took it — report `None` so the caller stops.
     async fn renew(
         &self,
         key: &str,
@@ -367,7 +350,7 @@ mod tests {
             .await
             .expect("acquire ok")
             .expect("acquired");
-        svc.fail_renews();
+        svc.steal_leases();
         assert!(
             matches!(
                 guard.renew(Duration::from_secs(1)).await,
@@ -465,6 +448,56 @@ mod tests {
                     .await
                     .unwrap(),
                 "unparseable lock value must not pin the lock forever",
+            );
+        }
+
+        #[tokio::test]
+        async fn renew_advances_revision_and_pushes_expiry() {
+            let (nats, svc) = new_service();
+            let revision = svc
+                .try_acquire_renewable("p6", Duration::from_secs(1))
+                .await
+                .unwrap()
+                .expect("acquired");
+            let before =
+                decode_expiration(&nats.get_kv(INDEXING_LOCKS_BUCKET, "p6").unwrap()).unwrap();
+
+            let renewed = svc
+                .renew("p6", Duration::from_secs(30), revision)
+                .await
+                .unwrap();
+
+            assert_eq!(
+                renewed,
+                Some(revision + 1),
+                "renew returns the next revision"
+            );
+            let after =
+                decode_expiration(&nats.get_kv(INDEXING_LOCKS_BUCKET, "p6").unwrap()).unwrap();
+            assert!(after > before, "renew must push the stored expiry forward");
+        }
+
+        #[tokio::test]
+        async fn renew_reports_none_when_revision_is_stale() {
+            let (_, svc) = new_service();
+            let revision = svc
+                .try_acquire_renewable("p7", Duration::from_secs(30))
+                .await
+                .unwrap()
+                .expect("acquired");
+            svc.renew("p7", Duration::from_secs(30), revision)
+                .await
+                .unwrap()
+                .expect("first renew supersedes the revision");
+
+            let stale = svc
+                .renew("p7", Duration::from_secs(30), revision)
+                .await
+                .unwrap();
+
+            assert!(
+                stale.is_none(),
+                "renewing against a superseded revision reports the lease lost",
             );
         }
     }

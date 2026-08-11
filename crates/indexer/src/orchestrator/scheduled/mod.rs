@@ -321,6 +321,21 @@ mod tests {
         async fn try_acquire(&self, _key: &str, _ttl: Duration) -> Result<bool, LockError> {
             Ok(true)
         }
+        async fn try_acquire_renewable(
+            &self,
+            _key: &str,
+            _ttl: Duration,
+        ) -> Result<Option<crate::locking::LockRevision>, LockError> {
+            Ok(Some(0))
+        }
+        async fn renew(
+            &self,
+            _key: &str,
+            _ttl: Duration,
+            revision: crate::locking::LockRevision,
+        ) -> Result<Option<crate::locking::LockRevision>, LockError> {
+            Ok(Some(revision))
+        }
         async fn release(&self, _key: &str) -> Result<(), LockError> {
             Ok(())
         }

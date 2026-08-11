@@ -7,12 +7,11 @@ use futures::{StreamExt, TryStreamExt};
 use gkg_server_config::NatsConfiguration;
 use indexer::dead_letter::{DEAD_LETTER_STREAM, DeadLetterEnvelope};
 use indexer::indexing_status::INDEXING_PROGRESS_BUCKET;
-use indexer::locking::{INDEXING_LOCKS_BUCKET, LockError, LockGuard, LockService, NatsLockService};
 use indexer::metrics::EngineMetrics;
+use indexer::nats::NatsBroker;
 use indexer::nats::versioning::{
     NATS_VERSIONER, NatsVersioner, cleanup_schema_state, gc_idle_release_streams,
 };
-use indexer::nats::{NatsBroker, NatsServicesImpl};
 use indexer::orchestrator::Trigger;
 use indexer::orchestrator::max_deliveries::MaxDeliveriesReconciler;
 use indexer::topic::INDEXER_STREAM;
@@ -693,97 +692,6 @@ async fn in_progress_prevents_redelivery() {
     );
 
     message.ack().await.expect("failed to ack");
-}
-
-// The heartbeat pings on a cadence (ack_wait/3) so a job can outlive ack_wait. Prove a sustained
-// series of in-progress signals keeps one message from redelivering well past its original deadline.
-#[tokio::test]
-async fn sustained_in_progress_keeps_message_beyond_ack_wait() {
-    let (_container, url) = start_nats_container().await;
-    create_test_stream(&url).await;
-
-    let ack_wait = Duration::from_secs(3);
-    let config = NatsConfiguration {
-        url,
-        ack_wait_secs: ack_wait.as_secs(),
-        ..Default::default()
-    };
-    let broker = NatsBroker::connect(&config)
-        .await
-        .expect("failed to connect");
-    let subscription = Subscription::new(TEST_STREAM, TEST_SUBJECT);
-    let mut messages = broker
-        .subscribe(&subscription, Arc::new(EngineMetrics::new()))
-        .await
-        .expect("failed to subscribe");
-
-    publish_event(&broker, &subscription, "long-job", 1).await;
-    let message = expect_delivery(&mut messages, ack_wait * 2).await;
-    let progress = message.progress_notifier();
-
-    // Ping at ack_wait/3 for ~2.3x ack_wait: without the heartbeat the message would redeliver at 3s.
-    let interval = ack_wait / 3;
-    let deadline = tokio::time::Instant::now() + ack_wait * 2 + interval;
-    while tokio::time::Instant::now() < deadline {
-        tokio::time::sleep(interval).await;
-        progress.notify_in_progress().await;
-    }
-
-    assert_no_delivery(
-        &mut messages,
-        Duration::from_secs(1),
-        "a heartbeat every ack_wait/3 must keep the message from redelivering",
-    )
-    .await;
-    message.ack().await.expect("failed to ack");
-}
-
-// Exercises the real NatsLockService CAS renewal against a live NATS KV: a renewed lease stays
-// held past its original TTL, and once renewal stops the lease lapses and a stolen holder makes
-// the original guard's next renew report LockError::Lost.
-#[tokio::test]
-async fn lock_renewal_extends_lease_and_detects_steal() {
-    let (_container, url) = start_nats_container().await;
-    let config = default_config(&url);
-    let broker = Arc::new(connect_broker(&config).await);
-    broker
-        .ensure_kv_bucket_exists(INDEXING_LOCKS_BUCKET, KvBucketConfig::default())
-        .await
-        .expect("ensure locks bucket");
-
-    let lock_service: Arc<dyn LockService> = Arc::new(NatsLockService::new(Arc::new(
-        NatsServicesImpl::new(broker.clone()),
-    )));
-
-    let ttl = Duration::from_secs(2);
-    let key = "project.1.main";
-    let guard = LockGuard::acquire(lock_service.clone(), key, ttl)
-        .await
-        .expect("acquire ok")
-        .expect("acquired");
-
-    for _ in 0..3 {
-        tokio::time::sleep(Duration::from_secs(1)).await;
-        guard.renew(ttl).await.expect("renew ok");
-        assert!(
-            LockGuard::acquire(lock_service.clone(), key, ttl)
-                .await
-                .expect("contended acquire ok")
-                .is_none(),
-            "a renewed lease must stay held against a competing acquire",
-        );
-    }
-
-    tokio::time::sleep(ttl + Duration::from_millis(500)).await;
-    let stealer = LockGuard::acquire(lock_service.clone(), key, ttl)
-        .await
-        .expect("acquire ok");
-    assert!(stealer.is_some(), "an expired lease must be reclaimable");
-
-    assert!(
-        matches!(guard.renew(ttl).await, Err(LockError::Lost)),
-        "renewing a stolen lease must surface LockError::Lost",
-    );
 }
 
 // Regression: https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/753

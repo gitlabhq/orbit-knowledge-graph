@@ -250,7 +250,7 @@ impl Handler for MockHandler {
 pub struct MockLockService {
     held: Arc<Mutex<HashMap<String, LockRevision>>>,
     next_revision: Arc<AtomicU64>,
-    renew_fails: Arc<AtomicBool>,
+    leases_stolen: Arc<AtomicBool>,
     renew_calls: Arc<AtomicUsize>,
 }
 
@@ -268,13 +268,8 @@ impl MockLockService {
         self.held.lock().contains_key(key)
     }
 
-    pub fn revision(&self, key: &str) -> Option<LockRevision> {
-        self.held.lock().get(key).copied()
-    }
-
-    /// Test hook: make every subsequent `renew` report the lease as stolen.
-    pub fn fail_renews(&self) {
-        self.renew_fails.store(true, Ordering::Relaxed);
+    pub fn steal_leases(&self) {
+        self.leases_stolen.store(true, Ordering::Relaxed);
     }
 
     pub fn renew_count(&self) -> usize {
@@ -314,7 +309,7 @@ impl LockService for MockLockService {
         revision: LockRevision,
     ) -> Result<Option<LockRevision>, LockError> {
         self.renew_calls.fetch_add(1, Ordering::Relaxed);
-        if self.renew_fails.load(Ordering::Relaxed) {
+        if self.leases_stolen.load(Ordering::Relaxed) {
             return Ok(None);
         }
         let mut held = self.held.lock();

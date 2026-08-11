@@ -32,6 +32,8 @@ use std::collections::HashMap;
 
 const SIGNING_KEY: &[u8] = b"test-secret-that-is-long-enough!";
 
+const SLOW_ARCHIVE_DELAY: std::time::Duration = std::time::Duration::from_secs(3);
+
 pub struct CodeIndexingDeps {
     pub pipeline: Arc<CodeIndexer>,
     pub repository_service: Arc<dyn RepositoryService>,
@@ -326,7 +328,7 @@ async fn handle_download_archive(
         .get(&project_id)
         .is_some_and(|p| p.slow_archive);
     if slow {
-        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+        tokio::time::sleep(SLOW_ARCHIVE_DELAY).await;
     }
     let projects = state.projects.lock();
     match projects.get(&project_id) {

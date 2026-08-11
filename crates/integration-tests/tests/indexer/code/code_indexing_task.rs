@@ -1434,9 +1434,6 @@ async fn timed_out_job_writes_no_data() {
     }
 }
 
-// End-to-end: a real indexing job whose 3s archive fetch far outlasts the lock_ttl still completes
-// and writes data to ClickHouse, because the in-loop heartbeat renews the lease on cadence during
-// the fetch. Proves the heartbeat wrapping is transparent to a real, slow pipeline run.
 #[tokio::test]
 async fn heartbeat_keeps_a_slow_job_alive_and_indexes_it() {
     let project_id: i64 = 4242;
@@ -1449,11 +1446,10 @@ async fn heartbeat_keeps_a_slow_job_alive_and_indexes_it() {
     let mock = MockGitlabServer::start().await;
     mock.add_project_with_slow_archive(project_id, "main");
 
-    // Default budget (1500s) easily covers the 3s fetch; a 900ms lock_ttl makes the heartbeat tick
-    // every 300ms, so it renews several times during the fetch instead of once at the 20s default.
+    let lock_ttl_forcing_ticks_during_fetch = std::time::Duration::from_millis(900);
     let deps = CodeIndexingDeps::new(&mock, &clickhouse);
     let handler =
-        deps.code_indexing_task_handler_with_lock_ttl(std::time::Duration::from_millis(900));
+        deps.code_indexing_task_handler_with_lock_ttl(lock_ttl_forcing_ticks_during_fetch);
 
     let locks = Arc::new(MockLockService::new());
     let context = handler_context_with_lock_service(locks.clone());
@@ -1469,7 +1465,7 @@ async fn heartbeat_keeps_a_slow_job_alive_and_indexes_it() {
     assert_code_indexed(&clickhouse, project_id).await;
     assert!(
         locks.renew_count() >= 3,
-        "the heartbeat must renew the lock during the 3s fetch; got {} renews",
+        "the heartbeat must renew the lock during the slow fetch; got {} renews",
         locks.renew_count(),
     );
 }
