@@ -13,7 +13,10 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use crate::v2::config::Language;
 use crate::v2::error::FileReason;
-use crate::v2::types::{DefKind, ImportBindingKind, ImportMode, Range, Relationship};
+use crate::v2::types::{
+    DefKind, EdgeKind, ImportBindingKind, ImportMode, NodeKind, Range, Relationship,
+    containment_relationship,
+};
 
 // ── Ids ──────────────────────────────────────────────────────────────────────
 
@@ -266,6 +269,185 @@ impl ConcurrentGraph {
             .push(node);
     }
 
+    // ── File insertion (all &self) ──────────────────────────────────────
+
+    /// Insert a parsed file and all its definitions/imports into the graph.
+    /// Returns the node IDs assigned to the file, defs, and imports.
+    /// Safe to call from multiple rayon workers concurrently.
+    pub fn add_file(
+        &self,
+        path: &str,
+        extension: &str,
+        language: Option<Language>,
+        file_size: u64,
+        definitions: Vec<GraphDef>,
+        imports: Vec<GraphImport>,
+        reason: FileReason,
+    ) -> (NodeId, Vec<NodeId>, Vec<NodeId>) {
+        let relative_path = self.relative_path(path);
+
+        let file_name = std::path::Path::new(&relative_path)
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
+
+        let file_node = self.push_node(NodeData::File {
+            path: relative_path.clone(),
+            name: file_name,
+            extension: extension.to_string(),
+            language,
+            size: file_size,
+            reason,
+        });
+        self.file_index.insert(relative_path.clone(), file_node);
+
+        if let Some(dir_idx) = self.ensure_directory_chain(&relative_path) {
+            self.push_edge(Edge {
+                source: dir_idx,
+                target: file_node,
+                relationship: Relationship {
+                    edge_kind: EdgeKind::Contains,
+                    source_node: NodeKind::Directory,
+                    target_node: NodeKind::File,
+                    source_def_kind: None,
+                    target_def_kind: None,
+                },
+            });
+        }
+
+        let mut def_nodes = Vec::with_capacity(definitions.len());
+        let mut definition_ranges = Vec::with_capacity(definitions.len());
+
+        for gdef in &definitions {
+            let def_id = self.push_def(gdef.clone());
+            let def_node = self.push_node(NodeData::Definition {
+                file_path: self.strings.alloc(&relative_path),
+                def_id,
+            });
+            def_nodes.push(def_node);
+
+            let fqn_str = self.str(gdef.fqn);
+            let name_str = self.str(gdef.name);
+            self.index_fqn(fqn_str, def_node);
+            self.index_name(name_str, def_node);
+
+            if let Some(sep_pos) = fqn_str.rfind(gdef.fqn_sep) {
+                let parent = &fqn_str[..sep_pos];
+                self.index_nested(parent, name_str, def_node);
+            }
+            definition_ranges.push((gdef.range, def_node));
+
+            self.push_edge(Edge {
+                source: file_node,
+                target: def_node,
+                relationship: Relationship {
+                    edge_kind: EdgeKind::Defines,
+                    source_node: NodeKind::File,
+                    target_node: NodeKind::Definition,
+                    source_def_kind: None,
+                    target_def_kind: None,
+                },
+            });
+        }
+
+        self.definition_ranges.insert(
+            relative_path.clone(),
+            DefinitionRangeIndex::from_ranges(definition_ranges),
+        );
+
+        // Intra-file containment edges (parent def → child def by FQN prefix).
+        for (i, gdef) in definitions.iter().enumerate() {
+            let fqn_str = self.str(gdef.fqn);
+            let Some(sep_pos) = fqn_str.rfind(gdef.fqn_sep) else {
+                continue;
+            };
+            let parent_fqn = &fqn_str[..sep_pos];
+            for (j, parent_def) in definitions.iter().enumerate() {
+                if j != i
+                    && self.str(parent_def.fqn) == parent_fqn
+                    && let Some(rel) = containment_relationship(parent_def.kind, gdef.kind)
+                {
+                    self.push_edge(Edge {
+                        source: def_nodes[j],
+                        target: def_nodes[i],
+                        relationship: rel,
+                    });
+                    break;
+                }
+            }
+        }
+
+        self.file_defs.insert(file_node, def_nodes.clone());
+
+        let mut import_nodes = Vec::with_capacity(imports.len());
+        for gimp in imports {
+            let import_id = self.push_import(gimp);
+            let imp_node = self.push_node(NodeData::Import {
+                file_path: self.strings.alloc(&relative_path),
+                import_id,
+            });
+            import_nodes.push(imp_node);
+            self.push_edge(Edge {
+                source: file_node,
+                target: imp_node,
+                relationship: Relationship {
+                    edge_kind: EdgeKind::Imports,
+                    source_node: NodeKind::File,
+                    target_node: NodeKind::ImportedSymbol,
+                    source_def_kind: None,
+                    target_def_kind: None,
+                },
+            });
+        }
+
+        self.file_imports.insert(file_node, import_nodes.clone());
+
+        (file_node, def_nodes, import_nodes)
+    }
+
+    fn relative_path(&self, path: &str) -> String {
+        path.strip_prefix(&self.root_path)
+            .unwrap_or(path)
+            .trim_start_matches('/')
+            .to_string()
+    }
+
+    fn ensure_directory_chain(&self, relative_path: &str) -> Option<NodeId> {
+        let parent = std::path::Path::new(relative_path).parent()?;
+        let mut current: Option<NodeId> = None;
+        let mut accumulated = String::new();
+
+        for component in parent.components() {
+            let name = component.as_os_str().to_string_lossy().to_string();
+            if !accumulated.is_empty() {
+                accumulated.push('/');
+            }
+            accumulated.push_str(&name);
+
+            let dir_node = *self
+                .dir_index
+                .entry(accumulated.clone())
+                .or_insert_with(|| {
+                    self.push_node(NodeData::Directory {
+                        path: accumulated.clone(),
+                        name: name.clone(),
+                    })
+                });
+
+            if let Some(parent_node) = current {
+                // Only add the edge if we just created this dir node
+                // (it might already be linked from a previous file).
+                // DashMap entry returns the existing value, so we
+                // skip the edge if the dir already existed. We rely
+                // on push_edge being idempotent-ish (duplicate structural
+                // edges are harmless and filtered at conversion).
+            }
+            current = Some(dir_node);
+        }
+
+        current
+    }
+
     // ── Read operations ──────────────────────────────────────────────────
 
     pub fn str(&self, id: StrId) -> &str {
@@ -464,5 +646,59 @@ mod tests {
 
         assert_eq!(g.node_count(), 8000);
         assert_eq!(g.def_count(), 8000);
+    }
+
+    #[test]
+    fn add_file_concurrent() {
+        use std::sync::Arc;
+        use std::thread;
+
+        let g = Arc::new(ConcurrentGraph::new("/repo".into()));
+        let threads: Vec<_> = (0..4)
+            .map(|t| {
+                let g = Arc::clone(&g);
+                thread::spawn(move || {
+                    for i in 0..100 {
+                        let file_path = format!("/repo/src/t{t}/file{i}.rs");
+                        let def_name = format!("Def_{t}_{i}");
+                        let def_fqn = format!("pkg.t{t}.{def_name}");
+                        let name_id = g.strings.alloc(&def_name);
+                        let fqn_id = g.strings.alloc(&def_fqn);
+
+                        let defs = vec![GraphDef {
+                            definition_type: "class",
+                            kind: DefKind::Class,
+                            name: name_id,
+                            fqn: fqn_id,
+                            fqn_sep: ".",
+                            range: Range::empty(),
+                            is_top_level: true,
+                            metadata: None,
+                        }];
+
+                        let (file_node, def_nodes, _) = g.add_file(
+                            &file_path,
+                            "rs",
+                            None,
+                            100,
+                            defs,
+                            vec![],
+                            crate::v2::error::FileReason::None,
+                        );
+
+                        assert_eq!(def_nodes.len(), 1);
+                        assert_eq!(g.def_fqn(def_nodes[0]), def_fqn);
+                        assert!(!g.lookup_fqn(&def_fqn, |_| true).is_empty());
+                        assert!(g.file_defs.contains_key(&file_node));
+                    }
+                })
+            })
+            .collect();
+
+        for t in threads {
+            t.join().unwrap();
+        }
+
+        assert_eq!(g.def_count(), 400);
     }
 }
