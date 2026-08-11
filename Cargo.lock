@@ -5202,12 +5202,14 @@ name = "gkg-utils"
 version = "0.1.0"
 dependencies = [
  "arrow 58.3.0",
+ "boxcar",
  "chrono",
  "enum-as-inner",
  "flate2",
  "ignore",
  "rustc-hash 2.1.3",
  "serde_json",
+ "smol_str",
  "strum 0.28.0",
  "tar",
  "tempfile",
