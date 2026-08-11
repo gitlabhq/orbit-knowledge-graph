@@ -50,16 +50,11 @@ if [[ -n "${RA_DATALAKE_SNAPSHOT:-}" ]]; then
 fi
 
 log "Deploying standalone ClickHouse in ${CH_NS}"
-sed -e "s|\${CH_NAMESPACE}|${CH_NS}|g" \
-    -e "s|\${CH_STORAGE}|$(tier '.clickhouse.storage')|g" \
-    -e "s|\${CH_CPU}|$(tier '.clickhouse.cpu')|g" \
-    -e "s|\${CH_MEMORY}|$(tier '.clickhouse.memory')|g" \
-    -e "s|\${CH_PASSWORD}|${CH_PASSWORD}|g" \
-    -e "s|\${PVC_DATA_SOURCE}|${PVC_DATA_SOURCE}|g" \
-    -e "s|\${CH_NODE_SELECTOR}|${CH_NODE_SELECTOR}|g" \
-    -e "s|\${CH_TOLERATIONS}|${CH_TOLERATIONS}|g" \
-  < "${BENCH_DIR}/manifests/standalone-ch.yaml" \
-  | $KC apply -f -
+export CH_NAMESPACE="${CH_NS}" CH_PASSWORD CH_NODE_SELECTOR CH_TOLERATIONS PVC_DATA_SOURCE
+export CH_STORAGE="$(tier '.clickhouse.storage')"
+export CH_CPU="$(tier '.clickhouse.cpu')"
+export CH_MEMORY="$(tier '.clickhouse.memory')"
+envsubst < "${BENCH_DIR}/manifests/standalone-ch.yaml" | $KC apply -f -
 
 $KC rollout status -n "${CH_NS}" statefulset/clickhouse --timeout=120s
 log "  ClickHouse ready"

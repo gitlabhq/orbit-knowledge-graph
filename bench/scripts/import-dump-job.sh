@@ -34,10 +34,8 @@ $KC delete job ra-import-dump -n "${CH_NS}" --ignore-not-found=true 2>/dev/null
 
 log "Submitting import job (dump=${DUMP_PREFIX}, ch=${CH_NS})"
 
-sed -e "s/\${CH_NAMESPACE}/${CH_NS}/g" \
-    -e "s/\${DUMP_PREFIX}/${DUMP_PREFIX}/g" \
-  < "${BENCH_DIR}/manifests/import-job.yaml" \
-  | $KC apply -n "${CH_NS}" -f -
+CH_NAMESPACE="${CH_NS}" DUMP_PREFIX="${DUMP_PREFIX}" \
+  envsubst < "${BENCH_DIR}/manifests/import-job.yaml" | $KC apply -n "${CH_NS}" -f -
 
 log "Waiting for import job to start..."
 $KC wait -n "${CH_NS}" job/ra-import-dump \
