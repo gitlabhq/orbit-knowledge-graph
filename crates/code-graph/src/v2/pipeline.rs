@@ -23,6 +23,12 @@ use crate::v2::trace::Tracer;
 // limit; `arrow_overflow` panic recovery keeps that case self-healing.
 const GO_PARSER_MAX_FILE_SIZE: u64 = 10 * 1024 * 1024;
 
+// Hand-written YAML config (helm values, CI definitions, app config) tops
+// out around 40 KiB in the repos surveyed; machine-generated YAML (openapi
+// dumps, ordering todos, queue inventories) starts near 170 KiB and reaches
+// megabytes. 128 KiB separates the two with headroom.
+const YAML_PARSER_MAX_FILE_SIZE: u64 = 128 * 1024;
+
 /// Log files >= this size before processing so an uncatchable OOM/overflow crash names the in-flight file.
 pub(crate) const LARGE_FILE_BREADCRUMB_BYTES: u64 = 2 * 1024 * 1024;
 
@@ -151,6 +157,7 @@ fn is_offset_overflow_message(message: &str) -> bool {
 fn parser_max_file_size(language: Language) -> Option<u64> {
     match language {
         Language::Go => Some(GO_PARSER_MAX_FILE_SIZE),
+        Language::Yaml => Some(YAML_PARSER_MAX_FILE_SIZE),
         _ => None,
     }
 }
@@ -1769,6 +1776,37 @@ mod tests {
             crate::v2::error::FileSkip::ParserOversize
         );
         assert_eq!(result.skipped[0].path, "proto.gen.go");
+    }
+
+    #[test]
+    fn yaml_parser_skips_files_above_parser_size_cap() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let path = root.join("openapi_v3.yaml");
+        let file = std::fs::File::create(&path).unwrap();
+        file.set_len(YAML_PARSER_MAX_FILE_SIZE + 1).unwrap();
+
+        let result = Pipeline::run_with_tracer(
+            root,
+            Arc::from(vec![FileInventoryEntry {
+                path: "openapi_v3.yaml".into(),
+                size: YAML_PARSER_MAX_FILE_SIZE + 1,
+                decision: Decision::Parse,
+            }]),
+            PipelineConfig::default(),
+            &FxHashMap::default(),
+            crate::v2::trace::Tracer::new(false),
+            Arc::new(TestCapture::new()),
+            Arc::new(|_: &str, _: RecordBatch| Ok(())),
+        );
+
+        assert_eq!(result.errors.len(), 0);
+        assert_eq!(result.skipped.len(), 1);
+        assert_eq!(
+            result.skipped[0].kind,
+            crate::v2::error::FileSkip::ParserOversize
+        );
+        assert_eq!(result.skipped[0].path, "openapi_v3.yaml");
     }
 
     #[test]
