@@ -16,7 +16,7 @@ use crate::analytics::IndexingAnalytics;
 
 use crate::engine::retry::{Backoff, RetryMode, RetryPolicy};
 use crate::handler::{Handler, HandlerContext, HandlerError};
-use crate::locking::LockGuard;
+use crate::locking::{LockError, LockGuard};
 use crate::nats::ProgressNotifier;
 use crate::observer::{self, IndexingMode, IndexingObserver, PipelineType};
 use crate::topic::CodeIndexingTaskRequest;
@@ -61,10 +61,21 @@ async fn run_with_heartbeat<T>(
         tokio::select! {
             outcome = &mut work => return outcome,
             _ = ticker.tick() => {
+                if cancel.is_cancelled() {
+                    continue;
+                }
                 progress.notify_in_progress().await;
-                if let Err(error) = guard.renew(lock_ttl).await {
-                    warn!(%error, "project lock lost mid-index; cancelling to avoid a double-write");
-                    cancel.cancel();
+                match guard.renew(lock_ttl).await {
+                    Ok(()) => {}
+                    // Only a lost lease means another holder owns it; a Backend error is a
+                    // transient NATS blip, so retry on the next tick rather than killing the job.
+                    Err(error @ LockError::Lost) => {
+                        warn!(%error, "project lock lost mid-index; cancelling to avoid a double-write");
+                        cancel.cancel();
+                    }
+                    Err(error) => {
+                        warn!(%error, "lock renewal failed transiently; retrying on the next heartbeat tick");
+                    }
                 }
             }
         }
@@ -902,5 +913,39 @@ mod tests {
 
         assert_eq!(outcome, "cancelled");
         assert!(cancel.is_cancelled());
+    }
+
+    #[tokio::test]
+    async fn heartbeat_tolerates_transient_renew_failures_without_cancelling() {
+        let locks = Arc::new(MockLockService::new());
+        let guard = LockGuard::acquire(locks.clone(), "p1", Duration::from_secs(30))
+            .await
+            .expect("acquire ok")
+            .expect("acquired");
+        locks.fail_renews_transiently();
+
+        let cancel = CancellationToken::new();
+        let work = async {
+            tokio::task::spawn_blocking(|| std::thread::sleep(Duration::from_millis(150)))
+                .await
+                .expect("blocking task ok");
+            "done"
+        };
+        let outcome = run_with_heartbeat(
+            work,
+            &ProgressNotifier::noop(),
+            &guard,
+            Duration::from_secs(30),
+            Duration::from_millis(25),
+            &cancel,
+        )
+        .await;
+
+        assert_eq!(
+            outcome, "done",
+            "a transient renew error must not kill the job"
+        );
+        assert!(!cancel.is_cancelled());
+        assert!(locks.renew_count() >= 1, "renew should have been attempted");
     }
 }

@@ -251,6 +251,7 @@ pub struct MockLockService {
     held: Arc<Mutex<HashMap<String, LockRevision>>>,
     next_revision: Arc<AtomicU64>,
     leases_stolen: Arc<AtomicBool>,
+    renew_backend_errors: Arc<AtomicBool>,
     renew_calls: Arc<AtomicUsize>,
 }
 
@@ -270,6 +271,10 @@ impl MockLockService {
 
     pub fn steal_leases(&self) {
         self.leases_stolen.store(true, Ordering::Relaxed);
+    }
+
+    pub fn fail_renews_transiently(&self) {
+        self.renew_backend_errors.store(true, Ordering::Relaxed);
     }
 
     pub fn renew_count(&self) -> usize {
@@ -309,6 +314,11 @@ impl LockService for MockLockService {
         revision: LockRevision,
     ) -> Result<Option<LockRevision>, LockError> {
         self.renew_calls.fetch_add(1, Ordering::Relaxed);
+        if self.renew_backend_errors.load(Ordering::Relaxed) {
+            return Err(LockError::Backend(
+                "mock transient renew failure".to_string(),
+            ));
+        }
         if self.leases_stolen.load(Ordering::Relaxed) {
             return Ok(None);
         }
