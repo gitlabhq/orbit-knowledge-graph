@@ -20,6 +20,7 @@ use crate::v2::langs::generic::python::{PythonDsl, PythonRules};
 use crate::v2::langs::generic::ruby::{RubyDsl, RubyRules};
 use crate::v2::langs::generic::scala::{ScalaDsl, ScalaRules};
 use crate::v2::langs::generic::swift::{SwiftDsl, SwiftRules};
+use crate::v2::langs::generic::yaml::{YamlDsl, YamlRules};
 use crate::v2::langs::generic::zig::{ZigDsl, ZigRules};
 use std::sync::Arc;
 
@@ -106,6 +107,7 @@ register_v2_pipelines! {
     Swift   => [GenericPipeline<SwiftDsl, SwiftRules>],
     Rust    => [RustPipeline],
     Hcl     => [GenericPipeline<HclDsl, HclRules>],
+    Yaml    => [GenericPipeline<YamlDsl, YamlRules>],
     Zig     => [GenericPipeline<ZigDsl, ZigRules>],
     Tag("js") => [JsPipeline],
 }
