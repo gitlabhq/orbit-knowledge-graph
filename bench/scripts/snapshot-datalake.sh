@@ -18,6 +18,7 @@ metadata:
   name: ${SNAPSHOT_NAME}
   namespace: ${CH_NS}
 spec:
+  volumeSnapshotClassName: gce-pd-snapshot
   source:
     persistentVolumeClaimName: data-clickhouse-0
 EOF

@@ -43,6 +43,22 @@ CH_PASSWORD=$(openssl rand -hex 24)
 
 PVC_DATA_SOURCE=""
 if [[ -n "${RA_DATALAKE_SNAPSHOT:-}" ]]; then
+  # VolumeSnapshots are namespace-scoped. Create a local reference to the
+  # cluster-scoped VolumeSnapshotContent so the PVC can restore from it.
+  SNAP_CONTENT=$($KC get volumesnapshot "${RA_DATALAKE_SNAPSHOT}" \
+    -n "${RA_DATALAKE_SNAPSHOT_NS:-ra-clickhouse}" \
+    -o jsonpath='{.status.boundVolumeSnapshotContentName}')
+  $KC create ns "${CH_NS}" --dry-run=client -o yaml | $KC apply -f -
+  cat <<EOSNAP | $KC apply -f -
+apiVersion: snapshot.storage.k8s.io/v1
+kind: VolumeSnapshot
+metadata:
+  name: ${RA_DATALAKE_SNAPSHOT}
+  namespace: ${CH_NS}
+spec:
+  source:
+    volumeSnapshotContentName: ${SNAP_CONTENT}
+EOSNAP
   PVC_DATA_SOURCE="        dataSource:
           name: ${RA_DATALAKE_SNAPSHOT}
           kind: VolumeSnapshot
