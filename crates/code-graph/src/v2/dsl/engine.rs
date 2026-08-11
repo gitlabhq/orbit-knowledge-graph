@@ -7,11 +7,9 @@ use super::utils::{
 use crate::trace;
 use crate::utils::node_to_range;
 use crate::v2::config::Language;
+use crate::v2::linker::state::{GraphDef, GraphDefMeta, GraphImport, StringPool};
 use crate::v2::trace::Tracer;
-use crate::v2::types::{
-    CanonicalDefinition, CanonicalImport, DefKind, DefinitionMetadata, ExpressionStep, Fqn,
-    ImportBindingKind, ImportMode,
-};
+use crate::v2::types::{DefKind, ExpressionStep, Fqn, ImportBindingKind, ImportMode};
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Axis, Match};
 use treesitter_visit::{Node, SupportLang};
@@ -22,54 +20,60 @@ pub(crate) struct ParseFullOptions<'a> {
 }
 
 pub struct ParsedDefs {
-    pub definitions: Vec<CanonicalDefinition>,
-    pub imports: Vec<CanonicalImport>,
+    pub definitions: Vec<GraphDef>,
+    pub imports: Vec<GraphImport>,
 }
 
-fn default_import_scope_name(imp: &CanonicalImport, sep: &str) -> Option<String> {
-    imp.alias.clone().or_else(|| imp.name.clone()).or_else(|| {
-        (!imp.path.is_empty()).then(|| {
-            imp.path
-                .rsplit_once(sep)
-                .map_or(imp.path.as_str(), |(_, name)| name)
-                .to_string()
+fn default_import_scope_name(imp: &GraphImport, pool: &StringPool, sep: &str) -> Option<String> {
+    imp.alias
+        .map(|id| pool.get(id).to_string())
+        .or_else(|| imp.name.map(|id| pool.get(id).to_string()))
+        .or_else(|| {
+            let path = pool.get(imp.path);
+            (!path.is_empty()).then(|| {
+                path.rsplit_once(sep)
+                    .map_or(path, |(_, name)| name)
+                    .to_string()
+            })
         })
-    })
 }
 
 fn import_scope_name(
     hooks: &super::types::LanguageHooks,
-    imp: &CanonicalImport,
+    imp: &GraphImport,
+    pool: &StringPool,
     sep: &str,
     scope_name_override: Option<&str>,
 ) -> Option<String> {
     imp.alias
-        .clone()
+        .map(|id| pool.get(id).to_string())
         .or_else(|| scope_name_override.map(ToString::to_string))
-        .or_else(|| hooks.import_scope_name.and_then(|f| f(imp, sep)))
-        .or_else(|| default_import_scope_name(imp, sep))
+        .or_else(|| hooks.import_scope_name.and_then(|f| f(imp, pool, sep)))
+        .or_else(|| default_import_scope_name(imp, pool, sep))
 }
 
-fn default_imported_target_path(imp: &CanonicalImport, sep: &str) -> Option<String> {
-    if imp.path.is_empty() {
-        return imp.name.clone();
+fn default_imported_target_path(imp: &GraphImport, pool: &StringPool, sep: &str) -> Option<String> {
+    let path = pool.get(imp.path);
+    if path.is_empty() {
+        return imp.name.map(|id| pool.get(id).to_string());
     }
 
-    Some(match imp.name.as_deref() {
-        Some(name) => format!("{}{}{}", imp.path, sep, name),
-        None => imp.path.clone(),
+    Some(match imp.name {
+        Some(id) => format!("{}{}{}", path, sep, pool.get(id)),
+        None => path.to_string(),
     })
 }
 
 fn imported_target_path(
     hooks: &super::types::LanguageHooks,
-    imp: &CanonicalImport,
+    imp: &GraphImport,
+    pool: &StringPool,
     sep: &str,
 ) -> Option<String> {
     hooks
         .import_target_path
-        .and_then(|f| f(imp, sep))
-        .or_else(|| default_imported_target_path(imp, sep))
+        .and_then(|f| f(imp, pool, sep))
+        .or_else(|| default_imported_target_path(imp, pool, sep))
 }
 
 /// A ref collected during the full AST walk, with SSA reaching values
@@ -85,8 +89,8 @@ pub struct CollectedRef {
 /// Result of a full parse (defs + imports + refs). The refs have SSA
 /// reaching values resolved but NOT cross-file resolved.
 pub struct ParseFullResult {
-    pub definitions: Vec<CanonicalDefinition>,
-    pub imports: Vec<CanonicalImport>,
+    pub definitions: Vec<GraphDef>,
+    pub imports: Vec<GraphImport>,
     pub refs: Vec<CollectedRef>,
     pub inferred_returns: Vec<(u32, String)>,
     /// Refs whose SSA alias chain couldn't be resolved without the
@@ -143,7 +147,7 @@ struct ScopeMatch {
     def_kind: DefKind,
     range: crate::utils::Range,
     creates_scope: bool,
-    metadata: Option<Box<DefinitionMetadata>>,
+    metadata: Option<Box<GraphDefMeta>>,
 }
 
 impl LanguageSpec {
@@ -151,6 +155,7 @@ impl LanguageSpec {
         &self,
         node: &Node<StrDoc<SupportLang>>,
         node_kind: &str,
+        pool: &StringPool,
         resolve: impl Fn(String, &Node<StrDoc<SupportLang>>) -> String,
     ) -> Option<ScopeMatch> {
         let indices = self.scope_dispatch.get(node_kind)?;
@@ -170,7 +175,7 @@ impl LanguageSpec {
             def_kind: rule.resolve_def_kind(),
             range: node_to_range(node),
             creates_scope: rule.creates_scope,
-            metadata: rule.extract_metadata(node, &resolve),
+            metadata: rule.extract_metadata(node, pool, &resolve),
         })
     }
 
@@ -427,7 +432,8 @@ impl LanguageSpec {
         &self,
         node: &Node<StrDoc<SupportLang>>,
         node_kind: &str,
-        imports: &mut Vec<CanonicalImport>,
+        imports: &mut Vec<GraphImport>,
+        pool: &StringPool,
     ) {
         let Some(indices) = self.import_dispatch.get(node_kind) else {
             return;
@@ -464,14 +470,13 @@ impl LanguageSpec {
                         } else {
                             infer_import_binding_kind(name.as_deref(), alias.as_deref(), false)
                         };
-                        imports.push(CanonicalImport {
+                        imports.push(GraphImport {
                             import_type: label,
-                            path,
+                            path: pool.alloc(&path),
                             binding_kind,
                             mode: ImportMode::Declarative,
-                            name,
-                            alias,
-                            scope_fqn: None,
+                            name: name.map(|s| pool.alloc(&s)),
+                            alias: alias.map(|s| pool.alloc(&s)),
                             range,
                             is_type_only: false,
                             wildcard: false,
@@ -492,27 +497,25 @@ impl LanguageSpec {
                     } else {
                         infer_import_binding_kind(name.as_deref(), None, false)
                     };
-                    imports.push(CanonicalImport {
+                    imports.push(GraphImport {
                         import_type: label,
                         binding_kind,
                         mode: ImportMode::Declarative,
-                        path,
-                        name,
+                        path: pool.alloc(&path),
+                        name: name.map(|s| pool.alloc(&s)),
                         alias: None,
-                        scope_fqn: None,
                         range,
                         is_type_only: false,
                         wildcard: false,
                     });
                 } else if rule.wildcard_child_kind.is_some_and(|wk| wk == ck.as_ref()) {
-                    imports.push(CanonicalImport {
+                    imports.push(GraphImport {
                         import_type: label,
                         binding_kind: ImportBindingKind::Named,
                         mode: ImportMode::Declarative,
-                        path: base_path.clone(),
-                        name: Some(rule.wildcard_symbol.to_string()),
+                        path: pool.alloc(&base_path),
+                        name: Some(pool.alloc(rule.wildcard_symbol)),
                         alias: None,
-                        scope_fqn: None,
                         range,
                         is_type_only: false,
                         wildcard: true,
@@ -534,14 +537,13 @@ impl LanguageSpec {
                 has_wildcard_child || (rule.always_wildcard && alias.is_none());
 
             if is_wildcard_import {
-                imports.push(CanonicalImport {
+                imports.push(GraphImport {
                     import_type: label,
                     binding_kind: ImportBindingKind::Named,
                     mode: ImportMode::Declarative,
-                    path: full_path,
+                    path: pool.alloc(&full_path),
                     name: None,
                     alias: None,
-                    scope_fqn: None,
                     range,
                     is_type_only: false,
                     wildcard: true,
@@ -555,14 +557,13 @@ impl LanguageSpec {
                 let is_wildcard = name.as_deref() == Some(rule.wildcard_symbol);
                 let binding_kind =
                     infer_import_binding_kind(name.as_deref(), alias.as_deref(), is_wildcard);
-                imports.push(CanonicalImport {
+                imports.push(GraphImport {
                     import_type: label,
                     binding_kind,
                     mode: ImportMode::Declarative,
-                    path,
-                    name,
-                    alias,
-                    scope_fqn: None,
+                    path: pool.alloc(&path),
+                    name: name.map(|s| pool.alloc(&s)),
+                    alias: alias.map(|s| pool.alloc(&s)),
                     range,
                     is_type_only: false,
                     wildcard: is_wildcard,
@@ -582,6 +583,7 @@ impl LanguageSpec {
         language: Language,
         tracer: &Tracer,
         timeouts: PhaseTimeouts,
+        pool: &StringPool,
     ) -> Result<ParseFullResult, ParseFullError> {
         self.parse_full_collect_with_options(
             source,
@@ -590,6 +592,7 @@ impl LanguageSpec {
             tracer,
             timeouts,
             ParseFullOptions::default(),
+            pool,
         )
     }
 
@@ -601,6 +604,7 @@ impl LanguageSpec {
         tracer: &Tracer,
         timeouts: PhaseTimeouts,
         options: ParseFullOptions<'_>,
+        pool: &StringPool,
     ) -> Result<ParseFullResult, ParseFullError> {
         let source_str = std::str::from_utf8(source).map_err(ParseFullError::InvalidUtf8)?;
 
@@ -618,6 +622,7 @@ impl LanguageSpec {
         let arena = bumpalo::Bump::new();
         let mut state = WalkFullState::new(
             &arena,
+            pool,
             tracer,
             file_path,
             timeouts.walk,
@@ -681,7 +686,7 @@ impl LanguageSpec {
             if state.defs[enclosing_idx as usize]
                 .metadata
                 .as_ref()
-                .and_then(|m| m.return_type.as_ref())
+                .and_then(|m| m.return_type)
                 .is_some()
             {
                 continue;
@@ -696,10 +701,10 @@ impl LanguageSpec {
                     crate::v2::types::ssa::ParseValue::LocalDef(i) => state
                         .defs
                         .get(i as usize)
-                        .map(|d| d.fqn.as_str().to_string()),
+                        .map(|d| pool.get(d.fqn).to_string()),
                     crate::v2::types::ssa::ParseValue::ImportRef(i) => {
                         state.imports.get(i as usize).and_then(|imp| {
-                            let name = imp.name.as_deref()?;
+                            let name = imp.name.map(|id| pool.get(id))?;
                             state
                                 .import_map
                                 .get(name)
@@ -715,14 +720,14 @@ impl LanguageSpec {
                     tracer,
                     ReturnTypeInferred {
                         def_index: enclosing_idx,
-                        def_fqn: state.defs[enclosing_idx as usize].fqn.as_str().to_string(),
+                        def_fqn: pool.get(state.defs[enclosing_idx as usize].fqn).to_string(),
                         return_type: rt.clone(),
                     }
                 );
                 state.defs[enclosing_idx as usize]
                     .metadata
                     .get_or_insert_with(Box::default)
-                    .return_type = Some(rt);
+                    .return_type = Some(pool.alloc(&rt));
             }
         }
 
@@ -783,8 +788,7 @@ impl LanguageSpec {
                 def.metadata
                     .as_ref()?
                     .return_type
-                    .as_ref()
-                    .map(|rt| (i as u32, rt.clone()))
+                    .map(|rt| (i as u32, pool.get(rt).to_string()))
             })
             .collect();
 
@@ -851,7 +855,7 @@ impl LanguageSpec {
             state.scope_stack.push(Arc::from(name.as_str()));
         }
 
-        if let Some(m) = self.evaluate_scope(node, nk, |bare, _origin| {
+        if let Some(m) = self.evaluate_scope(node, nk, state.pool, |bare, _origin| {
             if let Some(fqn) = state.import_map.get(&bare) {
                 return fqn.clone();
             }
@@ -901,11 +905,12 @@ impl LanguageSpec {
                     block_id: state.current_block.0,
                 }
             );
-            state.defs.push(CanonicalDefinition {
+            state.defs.push(GraphDef {
                 definition_type: m.label,
                 kind: m.def_kind,
-                name: m.name,
-                fqn,
+                name: state.pool.alloc(&m.name),
+                fqn: state.pool.alloc(fqn.as_str()),
+                fqn_sep: sep,
                 range: canonical_range(&m.range),
                 is_top_level,
                 metadata: m.metadata,
@@ -914,8 +919,8 @@ impl LanguageSpec {
             trace!(
                 state.tracer,
                 DefDiscovered {
-                    name: last_def.name.clone(),
-                    fqn: last_def.fqn.as_str().to_string(),
+                    name: state.pool.get(last_def.name).to_string(),
+                    fqn: state.pool.get(last_def.fqn).to_string(),
                     kind: format!("{:?}", last_def.kind),
                     label: last_def.definition_type.to_string(),
                     is_top_level: is_top_level,
@@ -950,10 +955,11 @@ impl LanguageSpec {
                 }
                 if let Some(super_name) = self.ssa_config.super_name
                     && let Some(meta) = &state.defs[def_index as usize].metadata
-                    && let Some(super_type) = meta.super_types.first()
+                    && let Some(&super_type_id) = meta.super_types.first()
                 {
+                    let super_type_str = state.pool.get(super_type_id);
                     let resolved =
-                        resolve_type_name(super_type, &state.import_map, module_prefix, sep);
+                        resolve_type_name(super_type_str, &state.import_map, module_prefix, sep);
                     let st = state.arena.alloc_str(&resolved);
                     let name = state.arena.alloc_str(super_name);
                     state.ssa.write_variable(
@@ -1005,7 +1011,7 @@ impl LanguageSpec {
         let custom_handled = self
             .hooks
             .on_scope
-            .is_some_and(|f| f(node, &mut state.defs, &state.scope_stack, sep));
+            .is_some_and(|f| f(node, &mut state.defs, state.pool, &state.scope_stack, sep));
 
         // Expression-bodied functions: when a node like `function_body`
         // contains `=`, treat all refs within as implicit returns.
@@ -1044,27 +1050,37 @@ impl LanguageSpec {
             let handled = self
                 .hooks
                 .on_import
-                .is_some_and(|f| f(node, &mut state.imports));
+                .is_some_and(|f| f(node, &mut state.imports, state.pool));
             if !handled {
-                self.evaluate_imports(node, nk, &mut state.imports);
+                self.evaluate_imports(node, nk, &mut state.imports, state.pool);
             }
             let module_scope = state.scope_stack.first().map(ToString::to_string);
             let module_scope = module_scope.as_deref();
             let import_rewriter = state.import_rewriter;
             for idx in import_count_before..state.imports.len() {
                 let scope_override = import_rewriter.and_then(|rewrite| {
-                    rewrite(&mut state.imports[idx], module_scope, sep, state.file_path)
+                    rewrite(
+                        &mut state.imports[idx],
+                        state.pool,
+                        module_scope,
+                        sep,
+                        state.file_path,
+                    )
                 });
                 let imp = &state.imports[idx];
                 let import_idx = idx as u32;
                 let effective_name =
-                    import_scope_name(&self.hooks, imp, sep, scope_override.as_deref());
+                    import_scope_name(&self.hooks, imp, state.pool, sep, scope_override.as_deref());
                 trace!(
                     state.tracer,
                     ImportRecorded {
-                        path: imp.path.clone(),
-                        name: imp.name.as_deref().unwrap_or("").to_string(),
-                        alias: imp.alias.clone(),
+                        path: state.pool.get(imp.path).to_string(),
+                        name: imp
+                            .name
+                            .map(|id| state.pool.get(id))
+                            .unwrap_or("")
+                            .to_string(),
+                        alias: imp.alias.map(|id| state.pool.get(id).to_string()),
                         wildcard: imp.wildcard,
                         ssa_name: if !imp.wildcard {
                             effective_name.clone()
@@ -1078,7 +1094,9 @@ impl LanguageSpec {
                     && !matches!(imp.binding_kind, ImportBindingKind::SideEffect)
                     && let Some(effective_name) = effective_name
                 {
-                    if let Some(target_path) = imported_target_path(&self.hooks, imp, sep) {
+                    if let Some(target_path) =
+                        imported_target_path(&self.hooks, imp, state.pool, sep)
+                    {
                         state.import_map.insert(effective_name.clone(), target_path);
                     }
                     // Write import to SSA so alias chasing finds it
@@ -1183,7 +1201,7 @@ impl LanguageSpec {
                     && state.defs[enclosing_idx as usize]
                         .metadata
                         .as_ref()
-                        .and_then(|m| m.return_type.as_ref())
+                        .and_then(|m| m.return_type)
                         .is_none()
                     && let Some(cc) = &self.chain_config
                     && node
@@ -1203,7 +1221,7 @@ impl LanguageSpec {
                             crate::v2::types::ssa::ParseValue::LocalDef(i) => state
                                 .defs
                                 .get(i as usize)
-                                .map(|d| d.fqn.as_str().to_string()),
+                                .map(|d| state.pool.get(d.fqn).to_string()),
                             _ => None,
                         }
                     });
@@ -1211,7 +1229,7 @@ impl LanguageSpec {
                         state.defs[enclosing_idx as usize]
                             .metadata
                             .get_or_insert_with(Box::default)
-                            .return_type = Some(rt);
+                            .return_type = Some(state.pool.alloc(&rt));
                     }
                 }
             }
@@ -1470,11 +1488,12 @@ struct PendingRef<'a> {
 struct WalkFullState<'a> {
     ssa: super::ssa::SsaEngine<'a>,
     arena: &'a bumpalo::Bump,
+    pool: &'a StringPool,
     current_block: super::ssa::BlockId,
     scope_stack: Vec<Arc<str>>,
     enclosing_def_stack: Vec<u32>,
-    defs: Vec<CanonicalDefinition>,
-    imports: Vec<CanonicalImport>,
+    defs: Vec<GraphDef>,
+    imports: Vec<GraphImport>,
     pending_refs: Vec<PendingRef<'a>>,
     saved_blocks: Vec<super::ssa::BlockId>,
     import_map: rustc_hash::FxHashMap<String, String>,
@@ -1490,6 +1509,7 @@ struct WalkFullState<'a> {
 impl<'a> WalkFullState<'a> {
     fn new(
         arena: &'a bumpalo::Bump,
+        pool: &'a StringPool,
         tracer: &'a Tracer,
         file_path: &'a str,
         budget: Option<std::time::Duration>,
@@ -1502,6 +1522,7 @@ impl<'a> WalkFullState<'a> {
         Self {
             ssa,
             arena,
+            pool,
             current_block: entry,
             scope_stack: Vec::new(),
             enclosing_def_stack: Vec::new(),
@@ -1598,16 +1619,22 @@ impl<'a> WalkFullState<'a> {
 mod tests {
     use super::*;
     use crate::v2::dsl::types::*;
+    use crate::v2::linker::state::StringPool;
     use treesitter_visit::extract::field;
     use treesitter_visit::predicate::*;
 
-    fn parse_with(spec: &LanguageSpec, code: &str) -> Result<ParsedDefs, ParseFullError> {
+    fn parse_with(
+        spec: &LanguageSpec,
+        code: &str,
+        pool: &StringPool,
+    ) -> Result<ParsedDefs, ParseFullError> {
         spec.parse_full_collect(
             code.as_bytes(),
             "test.py",
             Language::Python,
             &Tracer::new(false),
             Default::default(),
+            pool,
         )
         .map(|r| ParsedDefs {
             definitions: r.definitions,
@@ -1617,6 +1644,7 @@ mod tests {
 
     #[test]
     fn scope_matching_and_fqn() {
+        let pool = StringPool::new();
         let spec = LanguageSpec::new(
             "test",
             vec![
@@ -1627,21 +1655,35 @@ mod tests {
             vec![],
             vec![],
         );
-        let result = parse_with(&spec, "class A:\n    def b(self): pass\ndef c(): pass").unwrap();
+        let result = parse_with(
+            &spec,
+            "class A:\n    def b(self): pass\ndef c(): pass",
+            &pool,
+        )
+        .unwrap();
 
         assert_eq!(result.definitions.len(), 3);
 
-        let b = result.definitions.iter().find(|d| d.name == "b").unwrap();
+        let b = result
+            .definitions
+            .iter()
+            .find(|d| pool.get(d.name) == "b")
+            .unwrap();
         assert_eq!(b.definition_type, "Method");
-        assert_eq!(b.fqn.to_string(), "A.b");
+        assert_eq!(pool.get(b.fqn), "A.b");
 
-        let c = result.definitions.iter().find(|d| d.name == "c").unwrap();
+        let c = result
+            .definitions
+            .iter()
+            .find(|d| pool.get(d.name) == "c")
+            .unwrap();
         assert_eq!(c.definition_type, "Function");
-        assert_eq!(c.fqn.to_string(), "c");
+        assert_eq!(pool.get(c.fqn), "c");
     }
 
     #[test]
     fn reference_extraction() {
+        let pool = StringPool::new();
         let spec = LanguageSpec::new(
             "test",
             vec![scope("function_definition", "Function")],
@@ -1656,6 +1698,7 @@ mod tests {
                 Language::Python,
                 &tracer,
                 Default::default(),
+                &pool,
             )
             .unwrap();
 
@@ -1666,6 +1709,7 @@ mod tests {
 
     #[test]
     fn no_scope_definition() {
+        let pool = StringPool::new();
         let spec = LanguageSpec::new(
             "test",
             vec![
@@ -1678,19 +1722,20 @@ mod tests {
             vec![],
             vec![],
         );
-        let result = parse_with(&spec, "class A:\n    def method(self): pass").unwrap();
+        let result = parse_with(&spec, "class A:\n    def method(self): pass", &pool).unwrap();
 
         let method = result
             .definitions
             .iter()
-            .find(|d| d.name == "method")
+            .find(|d| pool.get(d.name) == "method")
             .unwrap();
-        assert_eq!(method.fqn.to_string(), "A.method");
+        assert_eq!(pool.get(method.fqn), "A.method");
         assert_eq!(method.definition_type, "FlatMethod");
     }
 
     #[test]
     fn conditional_scope_rules() {
+        let pool = StringPool::new();
         let spec = LanguageSpec::new(
             "test",
             vec![
@@ -1701,17 +1746,34 @@ mod tests {
             vec![],
             vec![],
         );
-        let result = parse_with(&spec, "class A:\n    def b(self): pass\ndef c(): pass").unwrap();
+        let result = parse_with(
+            &spec,
+            "class A:\n    def b(self): pass\ndef c(): pass",
+            &pool,
+        )
+        .unwrap();
 
         assert_eq!(result.definitions.len(), 3);
 
-        let a = result.definitions.iter().find(|d| d.name == "A").unwrap();
+        let a = result
+            .definitions
+            .iter()
+            .find(|d| pool.get(d.name) == "A")
+            .unwrap();
         assert_eq!(a.definition_type, "Class");
 
-        let b = result.definitions.iter().find(|d| d.name == "b").unwrap();
+        let b = result
+            .definitions
+            .iter()
+            .find(|d| pool.get(d.name) == "b")
+            .unwrap();
         assert_eq!(b.definition_type, "Method");
 
-        let c = result.definitions.iter().find(|d| d.name == "c").unwrap();
+        let c = result
+            .definitions
+            .iter()
+            .find(|d| pool.get(d.name) == "c")
+            .unwrap();
         assert_eq!(c.definition_type, "Function");
     }
 }

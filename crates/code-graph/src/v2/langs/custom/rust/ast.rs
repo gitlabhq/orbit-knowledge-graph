@@ -14,8 +14,9 @@ pub(super) fn build_parsed_rust_file(
     source_file: ast::SourceFile,
     sema: Option<&Semantics<'_, RootDatabase>>,
     workspace: Option<&WorkspaceIndex>,
+    pool: &crate::v2::linker::state::StringPool,
 ) -> ParsedRustFile {
-    let extractor = RustStructureExtractor::new(file_module_parts, crate_root_parts, &source);
+    let extractor = RustStructureExtractor::new(file_module_parts, crate_root_parts, &source, pool);
     let (definitions, imports) = extractor.extract(&source_file, sema, workspace);
 
     ParsedRustFile {
@@ -56,12 +57,13 @@ impl ByteLineIndex {
     }
 }
 
-struct RustStructureExtractor {
+struct RustStructureExtractor<'p> {
     line_index: ByteLineIndex,
+    pool: &'p crate::v2::linker::state::StringPool,
     file_module_parts: Vec<String>,
     crate_root_parts: Vec<String>,
-    definitions: Vec<CanonicalDefinition>,
-    imports: Vec<CanonicalImport>,
+    definitions: Vec<GraphDef>,
+    imports: Vec<GraphImport>,
     trait_impl_scopes: Vec<TraitImplScope>,
     /// Pending supertype edges to be applied after all definitions are
     /// collected. Each entry is (target definition FQN, supertype FQN).
@@ -76,10 +78,16 @@ struct TraitImplScope {
     end: usize,
 }
 
-impl RustStructureExtractor {
-    fn new(file_module_parts: Vec<String>, crate_root_parts: Vec<String>, source: &str) -> Self {
+impl<'p> RustStructureExtractor<'p> {
+    fn new(
+        file_module_parts: Vec<String>,
+        crate_root_parts: Vec<String>,
+        source: &str,
+        pool: &'p crate::v2::linker::state::StringPool,
+    ) -> Self {
         Self {
             line_index: ByteLineIndex::new(source),
+            pool,
             file_module_parts,
             crate_root_parts,
             definitions: Vec::new(),
@@ -94,7 +102,7 @@ impl RustStructureExtractor {
         source_file: &ast::SourceFile,
         sema: Option<&Semantics<'_, RootDatabase>>,
         workspace: Option<&WorkspaceIndex>,
-    ) -> (Vec<CanonicalDefinition>, Vec<CanonicalImport>) {
+    ) -> (Vec<GraphDef>, Vec<GraphImport>) {
         let module_parts = self.file_module_parts.clone();
         self.collect_items(source_file.items(), &module_parts, true, sema, workspace);
         self.disambiguate_trait_impl_collisions();
@@ -115,7 +123,7 @@ impl RustStructureExtractor {
         let mut by_fqn: HashMap<String, Vec<usize>> = HashMap::new();
         for (idx, def) in self.definitions.iter().enumerate() {
             by_fqn
-                .entry(def.fqn.as_str().to_string())
+                .entry(self.pool.get(def.fqn).to_string())
                 .or_default()
                 .push(idx);
         }
@@ -125,15 +133,15 @@ impl RustStructureExtractor {
             };
             for &idx in indices {
                 let def = &mut self.definitions[idx];
-                let metadata = def.metadata.get_or_insert_with(|| {
-                    Box::new(crate::v2::types::DefinitionMetadata::default())
-                });
+                let metadata = def
+                    .metadata
+                    .get_or_insert_with(|| Box::new(crate::v2::types::GraphDefMeta::default()));
                 if !metadata
                     .super_types
                     .iter()
-                    .any(|existing| existing == &super_fqn)
+                    .any(|&existing| self.pool.get(existing) == super_fqn)
                 {
-                    metadata.super_types.push(super_fqn.clone());
+                    metadata.super_types.push(self.pool.alloc(&super_fqn));
                 }
             }
         }
@@ -145,7 +153,10 @@ impl RustStructureExtractor {
         }
         let mut fqn_groups: HashMap<String, Vec<usize>> = HashMap::new();
         for (idx, def) in self.definitions.iter().enumerate() {
-            fqn_groups.entry(def.fqn.to_string()).or_default().push(idx);
+            fqn_groups
+                .entry(self.pool.get(def.fqn).to_string())
+                .or_default()
+                .push(idx);
         }
         for indices in fqn_groups.values() {
             if indices.len() < 2 {
@@ -163,10 +174,10 @@ impl RustStructureExtractor {
                     continue;
                 };
                 let def = &mut self.definitions[idx];
-                let parts: Vec<String> = def
-                    .fqn
-                    .as_str()
-                    .split(def.fqn.separator())
+                let parts: Vec<String> = self
+                    .pool
+                    .get(def.fqn)
+                    .split(def.fqn_sep)
                     .map(str::to_string)
                     .collect();
                 if parts.len() < 2 {
@@ -176,7 +187,9 @@ impl RustStructureExtractor {
                 let mut new_parts: Vec<String> = container.to_vec();
                 new_parts.push(format!("<{}>", trait_name));
                 new_parts.push(last.clone());
-                def.fqn = canonical_fqn_parts(&new_parts);
+                def.fqn = self
+                    .pool
+                    .alloc(&canonical_fqn_parts(&new_parts).to_string());
             }
         }
     }
@@ -862,11 +875,12 @@ impl RustStructureExtractor {
         top_level: bool,
         range: TextRange,
     ) {
-        self.definitions.push(CanonicalDefinition {
+        self.definitions.push(GraphDef {
             definition_type,
             kind,
-            name,
-            fqn: canonical_fqn_parts(fqn_parts),
+            name: self.pool.alloc(&name),
+            fqn: self.pool.alloc(&canonical_fqn_parts(fqn_parts).to_string()),
+            fqn_sep: "::",
             range: self.line_index.range(range),
             is_top_level: top_level,
             metadata: None,
@@ -883,7 +897,7 @@ impl RustStructureExtractor {
         path: String,
         name: Option<String>,
         alias: Option<String>,
-        module_parts: &[String],
+        _module_parts: &[String],
         range: TextRange,
         wildcard: bool,
     ) {
@@ -891,7 +905,7 @@ impl RustStructureExtractor {
             return;
         }
 
-        self.imports.push(CanonicalImport {
+        self.imports.push(GraphImport {
             import_type,
             binding_kind: if wildcard {
                 crate::v2::types::ImportBindingKind::Namespace
@@ -899,10 +913,9 @@ impl RustStructureExtractor {
                 crate::v2::types::ImportBindingKind::Named
             },
             mode: crate::v2::types::ImportMode::Declarative,
-            path,
-            name,
-            alias,
-            scope_fqn: scope_fqn(module_parts),
+            path: self.pool.alloc(&path),
+            name: name.map(|s| self.pool.alloc(&s)),
+            alias: alias.map(|s| self.pool.alloc(&s)),
             range: self.line_index.range(range),
             is_type_only: false,
             wildcard,
@@ -1084,10 +1097,6 @@ fn hir_trait_fqn(
             .to_string(),
     );
     canonical_fqn_parts(&parts).as_str().to_string()
-}
-
-fn scope_fqn(parts: &[String]) -> Option<Fqn> {
-    (!parts.is_empty()).then(|| canonical_fqn_parts(parts))
 }
 
 fn item_is_active(sema: Option<&Semantics<'_, RootDatabase>>, item: &ast::Item) -> bool {

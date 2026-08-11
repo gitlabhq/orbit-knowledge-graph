@@ -4,7 +4,8 @@ use treesitter_visit::predicate::Pred;
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
 
-use crate::v2::types::{DefKind, DefinitionMetadata};
+use crate::v2::linker::state::{GraphDefMeta, StringPool};
+use crate::v2::types::DefKind;
 
 use super::extractors::MetadataRule;
 
@@ -12,7 +13,13 @@ use super::extractors::MetadataRule;
 /// importing module's scope, the FQN separator, and the importing file's path,
 /// it may rewrite the import path and optionally return a local-binding
 /// scope-name override.
-pub type ImportRewriter = dyn Fn(&mut crate::v2::types::CanonicalImport, Option<&str>, &str, &str) -> Option<String>
+pub type ImportRewriter = dyn Fn(
+        &mut crate::v2::linker::state::GraphImport,
+        &StringPool,
+        Option<&str>,
+        &str,
+        &str,
+    ) -> Option<String>
     + Send
     + Sync;
 
@@ -108,9 +115,12 @@ impl ScopeRule {
     pub(crate) fn extract_metadata(
         &self,
         node: &N<'_>,
+        pool: &StringPool,
         resolve: impl Fn(String, &N<'_>) -> String,
-    ) -> Option<Box<DefinitionMetadata>> {
-        self.metadata_rule.as_ref()?.extract_metadata(node, resolve)
+    ) -> Option<Box<GraphDefMeta>> {
+        self.metadata_rule
+            .as_ref()?
+            .extract_metadata(node, pool, resolve)
     }
 
     pub(crate) fn resolve_label(&self, node: &N<'_>) -> &'static str {
@@ -709,12 +719,15 @@ pub struct SsaConfig {
 
 pub type ScopeHookFn = fn(
     &N<'_>,
-    &mut Vec<crate::v2::types::CanonicalDefinition>,
+    &mut Vec<crate::v2::linker::state::GraphDef>,
+    &StringPool,
     &[std::sync::Arc<str>],
     &'static str,
 ) -> bool;
-pub type ImportScopeNameHook = fn(&crate::v2::types::CanonicalImport, &str) -> Option<String>;
-pub type ImportTargetPathHook = fn(&crate::v2::types::CanonicalImport, &str) -> Option<String>;
+pub type ImportScopeNameHook =
+    fn(&crate::v2::linker::state::GraphImport, &StringPool, &str) -> Option<String>;
+pub type ImportTargetPathHook =
+    fn(&crate::v2::linker::state::GraphImport, &StringPool, &str) -> Option<String>;
 
 /// Language-specific escape hatches. All fields default to `None`.
 /// The engine calls each hook if set, otherwise uses default behavior.
@@ -724,7 +737,8 @@ pub struct LanguageHooks {
     /// Inject extra definitions after scope matching (e.g. Ruby attr_reader).
     pub on_scope: Option<ScopeHookFn>,
     /// Override import extraction (e.g. Ruby require/require_relative).
-    pub on_import: Option<fn(&N<'_>, &mut Vec<crate::v2::types::CanonicalImport>) -> bool>,
+    pub on_import:
+        Option<fn(&N<'_>, &mut Vec<crate::v2::linker::state::GraphImport>, &StringPool) -> bool>,
     /// Override the identifier an import writes into SSA.
     pub import_scope_name: Option<ImportScopeNameHook>,
     /// Override the target FQN used by type-resolution import maps.

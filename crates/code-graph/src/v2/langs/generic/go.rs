@@ -1,7 +1,8 @@
 use crate::v2::config::Language;
 use crate::v2::dsl::extractors::metadata;
 use crate::v2::dsl::types::*;
-use crate::v2::types::{BindingKind, CanonicalImport, DefKind, ImportBindingKind, ImportMode};
+use crate::v2::linker::state::StringPool;
+use crate::v2::types::{BindingKind, DefKind, GraphImport, ImportBindingKind, ImportMode};
 use treesitter_visit::extract::Extract;
 use treesitter_visit::extract::{child_of_kind, field, field_chain, text};
 use treesitter_visit::predicate::*;
@@ -221,7 +222,7 @@ fn go_embedded_types(node: &N<'_>) -> Vec<String> {
         .collect()
 }
 
-fn go_extract_imports(node: &N<'_>, imports: &mut Vec<CanonicalImport>) -> bool {
+fn go_extract_imports(node: &N<'_>, imports: &mut Vec<GraphImport>, pool: &StringPool) -> bool {
     if node.kind().as_ref() != "import_declaration" {
         return false;
     }
@@ -229,11 +230,11 @@ fn go_extract_imports(node: &N<'_>, imports: &mut Vec<CanonicalImport>) -> bool 
     for child in node.children() {
         let kind = child.kind();
         match kind.as_ref() {
-            "import_spec" => extract_single_import(&child, imports),
+            "import_spec" => extract_single_import(&child, imports, pool),
             "import_spec_list" => {
                 for spec in child.children() {
                     if spec.kind().as_ref() == "import_spec" {
-                        extract_single_import(&spec, imports);
+                        extract_single_import(&spec, imports, pool);
                     }
                 }
             }
@@ -243,7 +244,7 @@ fn go_extract_imports(node: &N<'_>, imports: &mut Vec<CanonicalImport>) -> bool 
     true
 }
 
-fn extract_single_import(node: &N<'_>, imports: &mut Vec<CanonicalImport>) {
+fn extract_single_import(node: &N<'_>, imports: &mut Vec<GraphImport>, pool: &StringPool) {
     let path_node = node.find(Child, Kind("interpreted_string_literal"));
 
     let Some(path_node) = path_node else {
@@ -271,14 +272,15 @@ fn extract_single_import(node: &N<'_>, imports: &mut Vec<CanonicalImport>) {
         ImportBindingKind::Named
     };
 
-    imports.push(CanonicalImport {
+    imports.push(GraphImport {
         import_type: "Import",
         binding_kind,
         mode: ImportMode::Declarative,
-        path: import_path,
-        name: pkg_name,
-        alias: alias.filter(|_| !is_blank && !is_dot),
-        scope_fqn: None,
+        path: pool.alloc(&import_path),
+        name: pkg_name.map(|s| pool.alloc(&s)),
+        alias: alias
+            .filter(|_| !is_blank && !is_dot)
+            .map(|s| pool.alloc(&s)),
         range: crate::v2::types::Range::empty(),
         is_type_only: false,
         wildcard: is_dot,

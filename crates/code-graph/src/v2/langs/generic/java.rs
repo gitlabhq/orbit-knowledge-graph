@@ -1,6 +1,7 @@
 use crate::v2::config::Language;
 use crate::v2::dsl::extractors::metadata;
 use crate::v2::dsl::types::{self, *};
+use crate::v2::linker::state::StringPool;
 use crate::v2::types::{BindingKind, DefKind};
 use treesitter_visit::Axis::*;
 use treesitter_visit::Match::*;
@@ -62,7 +63,8 @@ fn java_super_types(node: &N<'_>) -> Vec<String> {
 /// with that component.
 fn java_record_accessors(
     node: &N<'_>,
-    defs: &mut Vec<crate::v2::types::CanonicalDefinition>,
+    defs: &mut Vec<crate::v2::types::GraphDef>,
+    pool: &StringPool,
     scope_stack: &[std::sync::Arc<str>],
     sep: &'static str,
 ) -> bool {
@@ -102,16 +104,17 @@ fn java_record_accessors(
             .inner("type_arguments", "type_identifier")
             .apply(&param);
         let fqn = crate::v2::types::Fqn::from_scope(scope_stack, &name, sep);
-        defs.push(crate::v2::types::CanonicalDefinition {
+        defs.push(crate::v2::types::GraphDef {
             definition_type: "Method",
             kind: DefKind::Method,
-            name,
-            fqn,
+            name: pool.alloc(&name),
+            fqn: pool.alloc(fqn.as_str()),
+            fqn_sep: sep,
             range: crate::v2::dsl::utils::canonical_range(&crate::utils::node_to_range(&param)),
             is_top_level: false,
             metadata: return_type.map(|rt| {
-                Box::new(crate::v2::types::DefinitionMetadata {
-                    return_type: Some(rt),
+                Box::new(crate::v2::types::GraphDefMeta {
+                    return_type: Some(pool.alloc(&rt)),
                     ..Default::default()
                 })
             }),
@@ -390,10 +393,12 @@ impl HasRules for JavaRules {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::v2::linker::state::StringPool;
     use crate::v2::trace::Tracer;
 
     fn parse(
         code: &str,
+        pool: &StringPool,
     ) -> Result<crate::v2::dsl::engine::ParsedDefs, crate::v2::pipeline::PipelineError> {
         JavaDsl::spec()
             .parse_full_collect(
@@ -402,6 +407,7 @@ mod tests {
                 crate::v2::config::Language::Java,
                 &Tracer::new(false),
                 Default::default(),
+                pool,
             )
             .map_err(|e| {
                 crate::v2::pipeline::PipelineError::parse(
@@ -417,47 +423,54 @@ mod tests {
 
     #[test]
     fn class_with_methods() {
+        let pool = StringPool::new();
         let result = parse(
             "public class Calculator {\n    public int add(int a, int b) {\n        return a + b;\n    }\n}\n",
+            &pool,
         ).unwrap();
         assert_eq!(result.definitions.len(), 2);
-        assert_eq!(result.definitions[0].name, "Calculator");
+        assert_eq!(pool.get(result.definitions[0].name), "Calculator");
         assert_eq!(result.definitions[0].kind, DefKind::Class);
-        assert_eq!(result.definitions[1].name, "add");
-        assert_eq!(result.definitions[1].fqn.to_string(), "Calculator.add");
+        assert_eq!(pool.get(result.definitions[1].name), "add");
+        assert_eq!(pool.get(result.definitions[1].fqn), "Calculator.add");
     }
 
     #[test]
     fn package_scoping() {
-        let result =
-            parse("package com.example;\n\npublic class Service {\n    public void run() {}\n}\n")
-                .unwrap();
+        let pool = StringPool::new();
+        let result = parse(
+            "package com.example;\n\npublic class Service {\n    public void run() {}\n}\n",
+            &pool,
+        )
+        .unwrap();
         let service = result
             .definitions
             .iter()
-            .find(|d| d.name == "Service")
+            .find(|d| pool.get(d.name) == "Service")
             .unwrap();
-        assert_eq!(service.fqn.to_string(), "com.example.Service");
+        assert_eq!(pool.get(service.fqn), "com.example.Service");
     }
 
     #[test]
     fn super_types_extracted() {
-        let result =
-            parse("public class Dog extends Animal implements Serializable {\n}\n").unwrap();
-        let dog = result.definitions.iter().find(|d| d.name == "Dog").unwrap();
+        let pool = StringPool::new();
+        let result = parse(
+            "public class Dog extends Animal implements Serializable {\n}\n",
+            &pool,
+        )
+        .unwrap();
+        let dog = result
+            .definitions
+            .iter()
+            .find(|d| pool.get(d.name) == "Dog")
+            .unwrap();
         let meta = dog.metadata.as_ref().expect("Dog should have metadata");
         assert!(!meta.super_types.is_empty());
     }
 
     #[test]
     fn permits_clause_names_reach_the_reference_stream() {
-        // JEP 409 sealed types: the `permits` clause is not extracted into
-        // metadata and produces no semantic Extends edge (#847) — in valid
-        // Java the child-side extends/implements clause already provides it.
-        // The permitted type names are still picked up by the bare
-        // `reference("type_identifier")` rule, attributed to the sealed
-        // parent, so the parent->child relationship stays reachable even
-        // when a child file is missing or malformed.
+        let pool = StringPool::new();
         let probe = |code: &str| {
             JavaDsl::spec()
                 .parse_full_collect(
@@ -466,6 +479,7 @@ mod tests {
                     crate::v2::config::Language::Java,
                     &Tracer::new(false),
                     Default::default(),
+                    &pool,
                 )
                 .unwrap()
         };
@@ -476,7 +490,7 @@ mod tests {
         let shape_idx = r
             .definitions
             .iter()
-            .position(|d| d.name == "Shape")
+            .position(|d| pool.get(d.name) == "Shape")
             .unwrap() as u32;
         for name in ["Circle", "Rectangle", "Triangle"] {
             let r#ref = r
@@ -500,8 +514,10 @@ mod tests {
 
     #[test]
     fn record_compact_constructor() {
+        let pool = StringPool::new();
         let result = parse(
             "public record Bounds(int lo, int hi) {\n    public Bounds {\n        if (lo > hi) throw new IllegalArgumentException(\"lo > hi\");\n    }\n}\n",
+            &pool,
         )
         .unwrap();
         let ctor = result
@@ -509,55 +525,63 @@ mod tests {
             .iter()
             .find(|d| d.kind == DefKind::Constructor)
             .expect("compact constructor should be extracted");
-        assert_eq!(ctor.name, "Bounds");
-        assert_eq!(ctor.fqn.to_string(), "Bounds.Bounds");
+        assert_eq!(pool.get(ctor.name), "Bounds");
+        assert_eq!(pool.get(ctor.fqn), "Bounds.Bounds");
     }
 
     #[test]
     fn record_implicit_accessors() {
-        let result = parse("public record Point(int x, int y) {}\n").unwrap();
+        let pool = StringPool::new();
+        let result = parse("public record Point(int x, int y) {}\n", &pool).unwrap();
         let accessors: Vec<_> = result
             .definitions
             .iter()
             .filter(|d| d.kind == DefKind::Method)
             .collect();
         assert_eq!(accessors.len(), 2);
-        assert_eq!(accessors[0].fqn.to_string(), "Point.x");
-        assert_eq!(accessors[1].fqn.to_string(), "Point.y");
+        assert_eq!(pool.get(accessors[0].fqn), "Point.x");
+        assert_eq!(pool.get(accessors[1].fqn), "Point.y");
         assert_eq!(
-            accessors[0].metadata.as_ref().unwrap().return_type,
-            Some("int".to_string())
+            accessors[0]
+                .metadata
+                .as_ref()
+                .unwrap()
+                .return_type
+                .map(|id| pool.get(id)),
+            Some("int")
         );
     }
 
     #[test]
     fn record_parameterized_overload_does_not_suppress_accessor() {
+        let pool = StringPool::new();
         let result = parse(
             "public record Circle(int radius) {\n    public int radius(int base) {\n        return this.radius() + base;\n    }\n}\n",
+            &pool,
         )
         .unwrap();
         let mut lines: Vec<_> = result
             .definitions
             .iter()
-            .filter(|d| d.name == "radius" && d.kind == DefKind::Method)
+            .filter(|d| pool.get(d.name) == "radius" && d.kind == DefKind::Method)
             .map(|d| d.range.start.line)
             .collect();
         lines.sort_unstable();
-        // Line 0 is the synthetic accessor anchored to the component; line 1
-        // is the explicit radius(int) overload, which must not suppress it.
         assert_eq!(lines, [0, 1]);
     }
 
     #[test]
     fn record_zero_arg_override_beside_overload_suppresses_accessor() {
+        let pool = StringPool::new();
         let result = parse(
             "public record Circle(int radius) {\n    public int radius() {\n        return 0;\n    }\n    public int radius(int base) {\n        return this.radius() + base;\n    }\n}\n",
+            &pool,
         )
         .unwrap();
         let mut lines: Vec<_> = result
             .definitions
             .iter()
-            .filter(|d| d.name == "radius" && d.kind == DefKind::Method)
+            .filter(|d| pool.get(d.name) == "radius" && d.kind == DefKind::Method)
             .map(|d| d.range.start.line)
             .collect();
         lines.sort_unstable();
@@ -566,14 +590,16 @@ mod tests {
 
     #[test]
     fn record_explicit_accessor_override_not_duplicated() {
+        let pool = StringPool::new();
         let result = parse(
             "public record Wrapped(int raw) {\n    public int raw() {\n        return raw < 0 ? 0 : raw;\n    }\n}\n",
+            &pool,
         )
         .unwrap();
         let raws: Vec<_> = result
             .definitions
             .iter()
-            .filter(|d| d.name == "raw" && d.kind == DefKind::Method)
+            .filter(|d| pool.get(d.name) == "raw" && d.kind == DefKind::Method)
             .collect();
         assert_eq!(raws.len(), 1);
         assert_ne!(raws[0].range.start.line, 0, "must be the explicit override");
@@ -581,8 +607,12 @@ mod tests {
 
     #[test]
     fn imports_extracted() {
-        let result =
-            parse("import java.util.List;\nimport java.util.*;\n\npublic class Test {}\n").unwrap();
+        let pool = StringPool::new();
+        let result = parse(
+            "import java.util.List;\nimport java.util.*;\n\npublic class Test {}\n",
+            &pool,
+        )
+        .unwrap();
         assert!(result.imports.len() >= 2);
     }
 }

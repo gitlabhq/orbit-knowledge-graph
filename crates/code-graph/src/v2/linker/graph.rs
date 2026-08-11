@@ -4,10 +4,7 @@ use std::sync::Arc;
 
 use crate::trace;
 use crate::v2::config::Language;
-use crate::v2::types::{
-    CanonicalDefinition, CanonicalDirectory, CanonicalFile, CanonicalImport, EdgeKind, NodeKind,
-    Range, Relationship, containment_relationship,
-};
+use crate::v2::types::{EdgeKind, NodeKind, Range, Relationship, containment_relationship};
 use gkg_utils::arrow::{AsRecordBatch, BatchBuilder, ColumnSpec, ColumnType};
 
 fn common_prefix_len(a: &str, b: &str) -> usize {
@@ -19,6 +16,28 @@ use rustc_hash::{FxHashMap, FxHasher};
 use smallvec::SmallVec;
 
 use super::state::{DefinitionRangeIndex, GraphDef, GraphImport, GraphIndexes, StrId, StringPool};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CanonicalDirectory {
+    pub path: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CanonicalFile {
+    pub path: String,
+    pub name: String,
+    pub extension: String,
+    pub language: Option<crate::v2::config::Language>,
+    pub size: u64,
+    pub reason: crate::v2::error::FileReason,
+}
+
+impl CanonicalFile {
+    pub fn language_name(&self) -> &'static str {
+        self.language.map_or("unknown", |lang| lang.names()[0])
+    }
+}
 
 #[derive(Debug, Clone)]
 pub enum GraphNode {
@@ -251,8 +270,8 @@ impl CodeGraph {
         extension: &str,
         language: Language,
         file_size: u64,
-        definitions: &[CanonicalDefinition],
-        imports: &[CanonicalImport],
+        definitions: Vec<GraphDef>,
+        imports: Vec<GraphImport>,
     ) -> (NodeIndex, Vec<NodeIndex>, Vec<NodeIndex>) {
         self.add_file_with_language(
             path,
@@ -280,8 +299,15 @@ impl CodeGraph {
             .and_then(|ext| ext.to_str())
             .unwrap_or_default()
             .to_string();
-        let (file_node, _, _) =
-            self.add_file_with_language(path, &extension, language, file_size, &[], &[], reason);
+        let (file_node, _, _) = self.add_file_with_language(
+            path,
+            &extension,
+            language,
+            file_size,
+            vec![],
+            vec![],
+            reason,
+        );
         file_node
     }
 
@@ -295,8 +321,8 @@ impl CodeGraph {
         extension: &str,
         language: Option<Language>,
         file_size: u64,
-        definitions: &[CanonicalDefinition],
-        imports: &[CanonicalImport],
+        definitions: Vec<GraphDef>,
+        imports: Vec<GraphImport>,
         reason: crate::v2::error::FileReason,
     ) -> (NodeIndex, Vec<NodeIndex>, Vec<NodeIndex>) {
         let relative_path = self.relative_path(path);
@@ -331,12 +357,7 @@ impl CodeGraph {
         let mut def_nodes = Vec::with_capacity(definitions.len());
         let mut definition_ranges = Vec::with_capacity(definitions.len());
 
-        let graph_defs: Vec<GraphDef> = definitions
-            .iter()
-            .map(|d| GraphDef::from_canonical(d, &mut self.strings))
-            .collect();
-
-        for (i, gdef) in graph_defs.iter().enumerate() {
+        for (i, gdef) in definitions.iter().enumerate() {
             let id = DefId(def_base + i as u32);
             let def_node = self.graph.add_node(GraphNode::Definition {
                 file_path: file_path.clone(),
@@ -367,13 +388,13 @@ impl CodeGraph {
             DefinitionRangeIndex::from_ranges(definition_ranges),
         );
 
-        for (i, gdef) in graph_defs.iter().enumerate() {
+        for (i, gdef) in definitions.iter().enumerate() {
             let fqn_str = self.strings.get(gdef.fqn);
             let Some(sep_pos) = fqn_str.rfind(gdef.fqn_sep) else {
                 continue;
             };
             let parent_fqn = &fqn_str[..sep_pos];
-            for (j, parent_def) in graph_defs.iter().enumerate() {
+            for (j, parent_def) in definitions.iter().enumerate() {
                 if j != i
                     && self.strings.get(parent_def.fqn) == parent_fqn
                     && let Some(rel) = containment_relationship(parent_def.kind, gdef.kind)
@@ -388,16 +409,12 @@ impl CodeGraph {
             }
         }
 
-        self.defs.extend(graph_defs);
+        self.defs.extend(definitions);
 
         let mut import_nodes = Vec::with_capacity(imports.len());
         let import_base = self.imports.len() as u32;
-        let graph_imports: Vec<GraphImport> = imports
-            .iter()
-            .map(|imp| GraphImport::from_canonical(imp, &mut self.strings))
-            .collect();
 
-        for (i, _) in graph_imports.iter().enumerate() {
+        for (i, _) in imports.iter().enumerate() {
             let id = ImportId(import_base + i as u32);
             let imp_node = self.graph.add_node(GraphNode::Import {
                 file_path: file_path.clone(),
@@ -410,7 +427,7 @@ impl CodeGraph {
                 GraphEdge::structural(EdgeKind::Imports, NodeKind::File, NodeKind::ImportedSymbol),
             );
         }
-        self.imports.extend(graph_imports);
+        self.imports.extend(imports);
 
         (file_node, def_nodes, import_nodes)
     }
@@ -1266,29 +1283,62 @@ mod tests {
     use crate::v2::config::Language;
     use crate::v2::types::*;
 
-    fn build_graph(file_path: &str, defs: Vec<CanonicalDefinition>) -> CodeGraph {
-        build_graph_multi(vec![(file_path, defs)])
+    fn build_graph(file_path: &str, defs: Vec<GraphDef>) -> CodeGraph {
+        build_graph_with(vec![(file_path, defs)], None)
     }
 
-    fn build_graph_multi(files: Vec<(&str, Vec<CanonicalDefinition>)>) -> CodeGraph {
+    fn build_graph_with_pool(file_path: &str, defs: Vec<GraphDef>, pool: StringPool) -> CodeGraph {
+        build_graph_with(vec![(file_path, defs)], Some(pool))
+    }
+
+    fn build_graph_multi(files: Vec<(&str, Vec<GraphDef>)>) -> CodeGraph {
+        build_graph_with(files, None)
+    }
+
+    fn build_graph_with(files: Vec<(&str, Vec<GraphDef>)>, pool: Option<StringPool>) -> CodeGraph {
         let mut cg = CodeGraph::new_with_root("/repo".to_string());
-        for (path, defs) in &files {
+        if let Some(p) = pool {
+            cg.strings = p;
+        }
+        for (path, defs) in files {
             let ext = path.rsplit_once('.').map(|(_, e)| e).unwrap_or("");
-            cg.add_file(path, ext, Language::Python, 100, defs, &[]);
+            cg.add_file(path, ext, Language::Python, 100, defs, vec![]);
         }
         let tracer = crate::v2::trace::Tracer::new(false);
         cg.finalize(&tracer);
         cg
     }
 
-    fn make_def(name: &str, fqn_parts: &[&str], kind: DefKind) -> CanonicalDefinition {
-        CanonicalDefinition {
+    fn make_def(name: &str, fqn_parts: &[&str], kind: DefKind, pool: &StringPool) -> GraphDef {
+        let fqn = Fqn::from_parts(fqn_parts, ".");
+        GraphDef {
             definition_type: "Class",
             kind,
-            name: name.to_string(),
-            fqn: Fqn::from_parts(fqn_parts, "."),
+            name: pool.alloc(name),
+            fqn: pool.alloc(fqn.as_str()),
+            fqn_sep: ".",
             range: Range::new(Position::new(0, 0), Position::new(10, 0), (0, 100)),
             is_top_level: fqn_parts.len() == 1,
+            metadata: None,
+        }
+    }
+
+    fn make_def_at(
+        name: &str,
+        fqn_parts: &[&str],
+        start: usize,
+        end: usize,
+        pool: &StringPool,
+    ) -> GraphDef {
+        let fqn = Fqn::from_parts(fqn_parts, ".");
+        GraphDef {
+            definition_type: "Method",
+            kind: DefKind::Function,
+            name: pool.alloc(name),
+            fqn: pool.alloc(fqn.as_str()),
+            fqn_sep: ".",
+            range: Range::new(Position::new(0, 0), Position::new(10, 0), (start, end)),
+            is_top_level: false,
             metadata: None,
         }
     }
@@ -1343,9 +1393,11 @@ mod tests {
 
     #[test]
     fn builds_file_to_definition_edges() {
-        let cg = build_graph(
+        let pool = StringPool::new();
+        let cg = build_graph_with_pool(
             "/repo/main.py",
-            vec![make_def("Foo", &["Foo"], DefKind::Class)],
+            vec![make_def("Foo", &["Foo"], DefKind::Class, &pool)],
+            pool,
         );
 
         let file_def: Vec<_> = cg
@@ -1360,12 +1412,14 @@ mod tests {
 
     #[test]
     fn builds_definition_containment_edges() {
-        let cg = build_graph(
+        let pool = StringPool::new();
+        let cg = build_graph_with_pool(
             "/repo/main.py",
             vec![
-                make_def("Foo", &["Foo"], DefKind::Class),
-                make_def("bar", &["Foo", "bar"], DefKind::Method),
+                make_def("Foo", &["Foo"], DefKind::Class, &pool),
+                make_def("bar", &["Foo", "bar"], DefKind::Method, &pool),
             ],
+            pool,
         );
 
         let def_def: Vec<_> = cg
@@ -1397,12 +1451,14 @@ mod tests {
 
     #[test]
     fn resolution_indexes_populated() {
-        let cg = build_graph(
+        let pool = StringPool::new();
+        let cg = build_graph_with_pool(
             "/repo/main.py",
             vec![
-                make_def("Foo", &["Foo"], DefKind::Class),
-                make_def("bar", &["Foo", "bar"], DefKind::Method),
+                make_def("Foo", &["Foo"], DefKind::Class, &pool),
+                make_def("bar", &["Foo", "bar"], DefKind::Method, &pool),
             ],
+            pool,
         );
 
         assert_eq!(
@@ -1442,23 +1498,6 @@ mod tests {
         );
     }
 
-    fn make_def_at(
-        name: &str,
-        fqn_parts: &[&str],
-        start: usize,
-        end: usize,
-    ) -> CanonicalDefinition {
-        CanonicalDefinition {
-            definition_type: "Method",
-            kind: DefKind::Function,
-            name: name.to_string(),
-            fqn: Fqn::from_parts(fqn_parts, "."),
-            range: Range::new(Position::new(0, 0), Position::new(10, 0), (start, end)),
-            is_top_level: false,
-            metadata: None,
-        }
-    }
-
     #[test]
     fn assign_ids_distinguishes_definitions_sharing_fqn_in_same_file() {
         // Regression: v2 Definition ids previously hashed only
@@ -1466,12 +1505,14 @@ mod tests {
         // an fqn (e.g. Go methods on different receivers, or generated
         // protobuf methods with the same synthesized fqn) collapsed to
         // one id and dedup'd on insert.
-        let cg = build_graph(
+        let pool = StringPool::new();
+        let cg = build_graph_with_pool(
             "/repo/main.go",
             vec![
-                make_def_at("Dup", &["main", "Dup"], 100, 120),
-                make_def_at("Dup", &["main", "Dup"], 200, 220),
+                make_def_at("Dup", &["main", "Dup"], 100, 120, &pool),
+                make_def_at("Dup", &["main", "Dup"], 200, 220, &pool),
             ],
+            pool,
         );
 
         let ids = cg.assign_ids(42, "main");
@@ -1516,35 +1557,32 @@ mod tests {
 
     #[test]
     fn assign_ids_distinguishes_imports_sharing_path_in_same_file() {
-        // Regression: v2 Import ids previously hashed only
-        // (project_id, branch, file_path, import_path, name|"*"),
-        // so repeated `use foo::bar` style imports in one file
-        // (common in tonic-generated Rust) collapsed to one id.
-        let import_a = CanonicalImport {
+        let pool = StringPool::new();
+        let import_a = GraphImport {
             import_type: "Use",
             binding_kind: ImportBindingKind::Namespace,
             mode: ImportMode::Declarative,
-            path: "tonic::codegen".to_string(),
+            path: pool.alloc("tonic::codegen"),
             name: None,
             alias: None,
-            scope_fqn: None,
             range: Range::new(Position::new(0, 0), Position::new(0, 20), (100, 120)),
             is_type_only: false,
             wildcard: false,
         };
-        let import_b = CanonicalImport {
+        let import_b = GraphImport {
             range: Range::new(Position::new(0, 0), Position::new(0, 20), (500, 520)),
             ..import_a.clone()
         };
 
         let mut cg = CodeGraph::new_with_root("/repo".to_string());
+        cg.strings = pool;
         cg.add_file(
             "/repo/gen.rs",
             "rs",
             Language::Python,
             100,
-            &[],
-            &[import_a, import_b],
+            vec![],
+            vec![import_a, import_b],
         );
         let tracer = crate::v2::trace::Tracer::new(false);
         cg.finalize(&tracer);
@@ -1563,20 +1601,25 @@ mod tests {
     fn def_on_import_panics_with_typed_unexpected_node_type() {
         use crate::v2::error::CodeGraphError;
         let mut cg = CodeGraph::new_with_root("/repo".to_string());
-        let import = CanonicalImport {
+        let import = GraphImport {
             import_type: "NamedImport",
             binding_kind: ImportBindingKind::Named,
             mode: ImportMode::Declarative,
-            path: "std::fs".to_string(),
-            name: Some("read".to_string()),
+            path: cg.strings.alloc("std::fs"),
+            name: Some(cg.strings.alloc("read")),
             alias: None,
-            scope_fqn: None,
             range: Range::new(Position::new(0, 0), Position::new(0, 10), (0, 10)),
             is_type_only: false,
             wildcard: false,
         };
-        let (_, _, import_nodes) =
-            cg.add_file("/repo/x.rs", "rs", Language::Python, 1, &[], &[import]);
+        let (_, _, import_nodes) = cg.add_file(
+            "/repo/x.rs",
+            "rs",
+            Language::Python,
+            1,
+            vec![],
+            vec![import],
+        );
         let import_idx = import_nodes[0];
 
         let payload = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {

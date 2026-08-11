@@ -51,8 +51,8 @@ use crate::v2::pipeline::{
     BatchTx, FileTimingEntry, LanguagePipeline, LanguageTimings, PipelineContext, PipelineError,
 };
 use crate::v2::types::{
-    CanonicalDefinition, CanonicalImport, DefKind, EdgeKind, Fqn, ImportBindingKind, NodeKind,
-    Position, Range, Relationship,
+    DefKind, EdgeKind, Fqn, GraphDef, GraphImport, ImportBindingKind, NodeKind, Position, Range,
+    Relationship,
 };
 
 type RustFileError = (String, AnalyzerError);
@@ -79,8 +79,8 @@ pub struct RustPipeline;
 struct ParsedRustFile {
     relative_path: String,
     file_size: u64,
-    definitions: Vec<CanonicalDefinition>,
-    imports: Vec<CanonicalImport>,
+    definitions: Vec<GraphDef>,
+    imports: Vec<GraphImport>,
     edge_candidates: Vec<ResolvedEdgeCandidate>,
     unresolved_imported_calls: Vec<UnresolvedImportedCallCandidate>,
     parse_ms: f64,
@@ -171,7 +171,14 @@ impl LanguagePipeline for RustPipeline {
                 None
             }
         };
-        let output = parse_rust_files(files, root_path, workspaces.as_ref(), sentinel_handle);
+        let pool = crate::v2::linker::state::StringPool::new();
+        let output = parse_rust_files(
+            files,
+            root_path,
+            workspaces.as_ref(),
+            sentinel_handle,
+            &pool,
+        );
         let parse_ms = t0.elapsed().as_secs_f64() * 1000.0;
         for (path, error) in &output.errors {
             match error {
@@ -186,7 +193,7 @@ impl LanguagePipeline for RustPipeline {
             }
         }
         let parsed = output.parsed;
-        let mut graph = build_graph(root_path, &parsed);
+        let mut graph = build_graph(root_path, &parsed, pool);
         let graph_build_ms = t0.elapsed().as_secs_f64() * 1000.0 - parse_ms;
         if ctx.config.emit_file_inventory_graph {
             graph.mark_parsed_only();
@@ -280,12 +287,13 @@ fn parse_rust_files(
     root_path: &str,
     workspaces: Option<&WorkspaceCatalog>,
     sentinel: Option<&sentinel::SentinelHandle>,
+    pool: &crate::v2::linker::state::StringPool,
 ) -> RustParseOutput {
     if let Some(workspaces) = workspaces {
-        return parse_rust_files_with_workspaces(files, root_path, workspaces, sentinel);
+        return parse_rust_files_with_workspaces(files, root_path, workspaces, sentinel, pool);
     }
 
-    parse_rust_files_standalone(files, root_path, sentinel)
+    parse_rust_files_standalone(files, root_path, sentinel, pool)
 }
 
 fn parse_rust_files_with_workspaces(
@@ -293,6 +301,7 @@ fn parse_rust_files_with_workspaces(
     root_path: &str,
     workspaces: &WorkspaceCatalog,
     sentinel: Option<&sentinel::SentinelHandle>,
+    pool: &crate::v2::linker::state::StringPool,
 ) -> RustParseOutput {
     let mut parsed = Vec::with_capacity(files.len());
     let mut errors = Vec::new();
@@ -329,7 +338,7 @@ fn parse_rust_files_with_workspaces(
                 }
                 let t_file = std::time::Instant::now();
                 let result = catch_rust_file_panic(file, || {
-                    parse_workspace_file(file, root_path, &workspace)
+                    parse_workspace_file(file, root_path, &workspace, pool)
                 });
                 let parse_ms = t_file.elapsed().as_secs_f64() * 1000.0;
                 if guard.as_ref().is_some_and(|g| g.is_killed()) {
@@ -362,7 +371,7 @@ fn parse_rust_files_with_workspaces(
             let guard = sentinel.map(|s| s.file_start(file_path));
             let t_file = std::time::Instant::now();
             let result = catch_rust_file_panic(file_path, || {
-                parse_rust_file_standalone(file_path, root_path)
+                parse_rust_file_standalone(file_path, root_path, pool)
             });
             let parse_ms = t_file.elapsed().as_secs_f64() * 1000.0;
             if guard.as_ref().is_some_and(|g| g.is_killed()) {
@@ -395,6 +404,7 @@ fn parse_rust_files_standalone(
     files: &[FileInput],
     root_path: &str,
     sentinel: Option<&sentinel::SentinelHandle>,
+    pool: &crate::v2::linker::state::StringPool,
 ) -> RustParseOutput {
     let results = files
         .par_iter()
@@ -402,7 +412,7 @@ fn parse_rust_files_standalone(
             let guard = sentinel.map(|s| s.file_start(file_path));
             let t_file = std::time::Instant::now();
             let result = catch_rust_file_panic(file_path, || {
-                parse_rust_file_standalone(file_path, root_path)
+                parse_rust_file_standalone(file_path, root_path, pool)
             });
             let parse_ms = t_file.elapsed().as_secs_f64() * 1000.0;
             if guard.as_ref().is_some_and(|g| g.is_killed()) {
@@ -466,12 +476,13 @@ fn parse_workspace_file(
     file_path: &str,
     root_path: &str,
     workspace: &WorkspaceIndex,
+    pool: &crate::v2::linker::state::StringPool,
 ) -> Result<ParsedRustFile, RustFileError> {
     let abs_path = to_absolute_path(root_path, file_path);
     let relative_path = relative_path(root_path, &abs_path);
 
     let Some(&file_id) = workspace.file_ids_by_relative_path.get(&relative_path) else {
-        return parse_rust_file_standalone(file_path, root_path);
+        return parse_rust_file_standalone(file_path, root_path, pool);
     };
 
     attach_db(&workspace.db, || {
@@ -498,6 +509,7 @@ fn parse_workspace_file(
             source_file,
             Some(&sema),
             Some(workspace),
+            pool,
         ))
     })
 }
@@ -505,6 +517,7 @@ fn parse_workspace_file(
 fn parse_rust_file_standalone(
     file_path: &str,
     root_path: &str,
+    pool: &crate::v2::linker::state::StringPool,
 ) -> Result<ParsedRustFile, RustFileError> {
     let abs_path = to_absolute_path(root_path, file_path);
     let Some(relative_path) = relative_path_if_under_root(root_path, &abs_path) else {
@@ -558,16 +571,22 @@ fn parse_rust_file_standalone(
             source_file.clone(),
             Some(&sema),
             Some(&workspace),
+            pool,
         )
     });
 
     Ok(parsed)
 }
 
-fn build_graph(root_path: &str, parsed: &[ParsedRustFile]) -> CodeGraph {
+fn build_graph(
+    root_path: &str,
+    parsed: &[ParsedRustFile],
+    pool: crate::v2::linker::state::StringPool,
+) -> CodeGraph {
     let mut graph = CodeGraph::new_with_root(root_path.to_string());
+    graph.strings = pool;
 
-    for file in parsed {
+    for file in parsed.iter() {
         let extension = Path::new(&file.relative_path)
             .extension()
             .and_then(|ext| ext.to_str())
@@ -578,8 +597,8 @@ fn build_graph(root_path: &str, parsed: &[ParsedRustFile]) -> CodeGraph {
             extension,
             Language::Rust,
             file.file_size,
-            &file.definitions,
-            &file.imports,
+            file.definitions.clone(),
+            file.imports.clone(),
         );
     }
 
@@ -590,7 +609,7 @@ fn add_unresolved_imported_call_edges(graph: &mut CodeGraph, parsed: &[ParsedRus
     let import_lookup = RustImportedSymbolLookup::from_graph(graph);
     let mut seen_edges = HashSet::new();
 
-    for file in parsed {
+    for file in parsed.iter() {
         for call in &file.unresolved_imported_calls {
             let Some(source_node) = graph.enclosing_definition_for_range(
                 &call.source_relative_path,
@@ -1488,7 +1507,10 @@ mod tests {
                 unreachable_code,
                 reason = "deliberately unreachable — the preceding panic!() is the test subject; this call exists only to give the closure a concrete return type"
             )]
-            super::parse_rust_file_standalone("src/lib.rs", "/tmp")
+            {
+                let pool = crate::v2::linker::state::StringPool::new();
+                super::parse_rust_file_standalone("src/lib.rs", "/tmp", &pool)
+            }
         }) {
             Ok(_) => panic!("panic should be converted to a fault"),
             Err(pair) => pair,

@@ -4,9 +4,9 @@
 
 use crate::v2::config::Language;
 use crate::v2::linker::CodeGraph;
+use crate::v2::linker::state::StringPool;
 use crate::v2::types::{
-    CanonicalDefinition, CanonicalImport, DefKind, DefinitionMetadata, Fqn, ImportMode, Position,
-    Range,
+    DefKind, Fqn, GraphDef, GraphDefMeta, GraphImport, ImportMode, Position, Range,
 };
 use petgraph::graph::NodeIndex;
 use rustc_hash::FxHashMap;
@@ -65,8 +65,8 @@ pub struct JsPhase1File {
     pub extension: String,
     pub language: Language,
     pub size: u64,
-    pub definitions: Vec<CanonicalDefinition>,
-    pub imports: Vec<CanonicalImport>,
+    pub definitions: Vec<GraphDef>,
+    pub imports: Vec<GraphImport>,
     pub bindings: Vec<JsModuleBindingInput>,
     pub star_reexports: Vec<JsStarReexport>,
 }
@@ -145,15 +145,20 @@ impl JsModuleGraphBuilder {
         }
     }
 
+    #[cfg(test)]
+    pub fn pool(&self) -> &StringPool {
+        &self.graph.strings
+    }
+
     pub fn add_file(&mut self, file: JsPhase1File) -> JsPhase1FileInfo {
         let relative_path = self.graph.relative_path(&file.path);
-        let module_def = synthesize_module_definition(&relative_path);
-        let module_scope = module_def.fqn.as_str().to_string();
+        let module_def = synthesize_module_definition(&relative_path, &self.graph.strings);
+        let module_scope = self.graph.strings.get(module_def.fqn).to_string();
 
         let local_defs_by_fqn: FxHashMap<_, _> = file
             .definitions
             .iter()
-            .map(|def| (def.fqn.as_str().to_string(), def))
+            .map(|def| (self.graph.strings.get(def.fqn).to_string(), def))
             .collect();
         let binding_local_fqns: Vec<Option<String>> = file
             .bindings
@@ -174,7 +179,12 @@ impl JsModuleGraphBuilder {
             .zip(&binding_local_fqns)
             .filter(|(_, local)| local.is_none())
             .map(|(binding, _)| {
-                synthesize_export_definition(&module_scope, binding, &local_defs_by_fqn)
+                synthesize_export_definition(
+                    &module_scope,
+                    binding,
+                    &self.graph.strings,
+                    &local_defs_by_fqn,
+                )
             })
             .collect();
 
@@ -191,8 +201,8 @@ impl JsModuleGraphBuilder {
             &file.extension,
             file.language,
             file.size,
-            &graph_defs,
-            &file.imports,
+            graph_defs,
+            file.imports,
         );
 
         let module_node = def_nodes[0];
@@ -204,7 +214,7 @@ impl JsModuleGraphBuilder {
             .definitions
             .iter()
             .zip(local_def_nodes.iter().copied())
-            .map(|(def, node)| (def.fqn.as_str().to_string(), node))
+            .map(|(def, node)| (self.graph.strings.get(def.fqn).to_string(), node))
             .collect();
 
         let mut proxy_nodes = proxy_def_nodes.iter().copied();
@@ -276,12 +286,13 @@ impl JsModuleGraphBuilder {
     }
 }
 
-fn synthesize_module_definition(file_path: &str) -> CanonicalDefinition {
-    CanonicalDefinition {
+fn synthesize_module_definition(file_path: &str, pool: &StringPool) -> GraphDef {
+    GraphDef {
         definition_type: "Module",
         kind: DefKind::Module,
-        name: file_path.to_string(),
-        fqn: Fqn::from_parts(&[file_path], "::"),
+        name: pool.alloc(file_path),
+        fqn: pool.alloc(&Fqn::from_parts(&[file_path], "::").to_string()),
+        fqn_sep: "::",
         range: Range::empty(),
         is_top_level: true,
         metadata: None,
@@ -291,8 +302,9 @@ fn synthesize_module_definition(file_path: &str) -> CanonicalDefinition {
 fn synthesize_export_definition(
     module_fqn: &str,
     binding: &JsModuleBindingInput,
-    local_defs_by_fqn: &FxHashMap<String, &CanonicalDefinition>,
-) -> CanonicalDefinition {
+    pool: &StringPool,
+    local_defs_by_fqn: &FxHashMap<String, &GraphDef>,
+) -> GraphDef {
     let member_name = binding.export_name.member_name();
     let local_target = match &binding.target {
         JsModuleBindingTargetInput::LocalDefinition { fqn } => local_defs_by_fqn.get(fqn).copied(),
@@ -303,16 +315,18 @@ fn synthesize_export_definition(
         .map(|def| (def.definition_type, def.kind))
         .unwrap_or((MODULE_EXPORT_TYPE, DefKind::Other));
 
-    CanonicalDefinition {
+    let fqn = Fqn::from_parts(&[module_fqn, member_name], "::");
+    GraphDef {
         definition_type,
         kind,
-        name: member_name.to_string(),
-        fqn: Fqn::from_parts(&[module_fqn, member_name], "::"),
+        name: pool.alloc(member_name),
+        fqn: pool.alloc(fqn.as_str()),
+        fqn_sep: "::",
         range: to_graph_range(binding.binding.range),
         is_top_level: false,
-        metadata: Some(Box::new(DefinitionMetadata {
+        metadata: Some(Box::new(GraphDefMeta {
             is_exported: true,
-            ..DefinitionMetadata::default()
+            ..GraphDefMeta::default()
         })),
     }
 }
@@ -329,18 +343,20 @@ fn to_graph_range(range: crate::utils::Range) -> Range {
 mod tests {
     use super::*;
     use crate::utils::{Position as SourcePosition, Range as SourceRange};
+    use crate::v2::linker::state::StringPool;
     use crate::v2::types::{Position, Range};
 
-    fn local_def(name: &str, kind: DefKind) -> CanonicalDefinition {
-        CanonicalDefinition {
+    fn local_def(name: &str, kind: DefKind, pool: &StringPool) -> GraphDef {
+        GraphDef {
             definition_type: match kind {
                 DefKind::Function => "Function",
                 DefKind::Class => "Class",
                 _ => "Other",
             },
             kind,
-            name: name.to_string(),
-            fqn: Fqn::from_parts(&[name], "::"),
+            name: pool.alloc(name),
+            fqn: pool.alloc(name),
+            fqn_sep: "::",
             range: Range::new(Position::new(1, 0), Position::new(3, 0), (0, 42)),
             is_top_level: true,
             metadata: None,
@@ -355,7 +371,7 @@ mod tests {
             extension: "ts".to_string(),
             language: Language::TypeScript,
             size: 64,
-            definitions: vec![local_def("normalize", DefKind::Function)],
+            definitions: vec![local_def("normalize", DefKind::Function, builder.pool())],
             imports: Vec::new(),
             bindings: vec![
                 JsModuleBindingInput {

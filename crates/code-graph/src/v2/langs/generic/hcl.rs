@@ -1,5 +1,6 @@
 use crate::v2::config::Language;
 use crate::v2::dsl::types::*;
+use crate::v2::linker::state::StringPool;
 use crate::v2::types::{DefKind, Fqn};
 use treesitter_visit::extract::{child_of_kind, text};
 use treesitter_visit::predicate::*;
@@ -123,7 +124,8 @@ impl DslLanguage for HclDsl {
 /// the second label, producing FQNs like `aws_instance.web`.
 fn hcl_on_scope(
     node: &N<'_>,
-    defs: &mut Vec<crate::v2::types::CanonicalDefinition>,
+    defs: &mut Vec<crate::v2::types::GraphDef>,
+    pool: &StringPool,
     scope_stack: &[std::sync::Arc<str>],
     sep: &'static str,
 ) -> bool {
@@ -156,11 +158,12 @@ fn hcl_on_scope(
                     } else {
                         "Resource"
                     };
-                    defs.push(crate::v2::types::CanonicalDefinition {
+                    defs.push(crate::v2::types::GraphDef {
                         definition_type: def_type,
                         kind: DefKind::Class,
-                        name,
-                        fqn,
+                        name: pool.alloc(&name),
+                        fqn: pool.alloc(fqn.as_str()),
+                        fqn_sep: sep,
                         range: crate::v2::types::Range::empty(),
                         is_top_level: false,
                         metadata: None,
@@ -174,11 +177,12 @@ fn hcl_on_scope(
                     if let Some(id) = attr.children().find(|c| c.kind().as_ref() == "identifier") {
                         let name = id.text().to_string();
                         let fqn = Fqn::from_scope(scope_stack, &name, sep);
-                        defs.push(crate::v2::types::CanonicalDefinition {
+                        defs.push(crate::v2::types::GraphDef {
                             definition_type: "Local",
                             kind: DefKind::Property,
-                            name,
-                            fqn,
+                            name: pool.alloc(&name),
+                            fqn: pool.alloc(fqn.as_str()),
+                            fqn_sep: sep,
                             range: crate::v2::types::Range::empty(),
                             is_top_level: false,
                             metadata: None,
@@ -206,8 +210,11 @@ fn hcl_on_scope(
                 && last.definition_type == expected
             {
                 let prefix = if ns == "variable" { "var" } else { "module" };
-                let name = last.name.clone();
-                last.fqn = Fqn::from_parts(&[prefix, name.as_str()], sep);
+                let _name = last.name;
+                last.fqn = pool.alloc(
+                    &crate::v2::types::Fqn::from_parts(&[prefix, pool.get(last.name)], sep)
+                        .to_string(),
+                );
             }
         }
         _ => {}
@@ -314,7 +321,10 @@ mod tests {
     use crate::v2::config::Language;
     use crate::v2::trace::Tracer;
 
+    use crate::v2::linker::state::StringPool;
+
     fn parse_defs(code: &str) -> Vec<(String, String)> {
+        let pool = StringPool::new();
         let result = HclDsl::spec()
             .parse_full_collect(
                 code.as_bytes(),
@@ -322,12 +332,13 @@ mod tests {
                 Language::Hcl,
                 &Tracer::new(false),
                 Default::default(),
+                &pool,
             )
             .unwrap();
         result
             .definitions
             .iter()
-            .map(|d| (d.name.clone(), d.fqn.as_str().to_string()))
+            .map(|d| (pool.get(d.name).to_string(), pool.get(d.fqn).to_string()))
             .collect()
     }
 
@@ -425,6 +436,7 @@ locals {
     }
 
     fn parse_refs(code: &str) -> Vec<String> {
+        let pool = StringPool::new();
         let result = HclDsl::spec()
             .parse_full_collect(
                 code.as_bytes(),
@@ -432,6 +444,7 @@ locals {
                 Language::Hcl,
                 &Tracer::new(false),
                 Default::default(),
+                &pool,
             )
             .unwrap();
         result.refs.iter().map(|r| r.name.to_string()).collect()

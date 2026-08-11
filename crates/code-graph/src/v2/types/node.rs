@@ -1,6 +1,3 @@
-use super::fqn::Fqn;
-use super::range::Range;
-use crate::v2::config::Language;
 use strum::{AsRefStr, Display, EnumIter, EnumString};
 
 /// Canonical definition categories used by the linker for
@@ -43,32 +40,6 @@ impl DefKind {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CanonicalDefinition {
-    pub definition_type: &'static str,
-    pub kind: DefKind,
-    pub name: String,
-    pub fqn: Fqn,
-    pub range: Range,
-    pub is_top_level: bool,
-    /// `None` for most definitions keeps the common case small.
-    pub metadata: Option<Box<DefinitionMetadata>>,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct DefinitionMetadata {
-    pub super_types: Vec<String>,
-    /// `None` for void/untyped.
-    pub return_type: Option<String>,
-    pub type_annotation: Option<String>,
-    /// Receiver type for extension functions (Kotlin).
-    pub receiver_type: Option<String>,
-    pub decorators: Vec<String>,
-    /// If this is a companion object, the FQN of the owning class.
-    pub companion_of: Option<String>,
-    pub is_exported: bool,
-}
-
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub enum ImportBindingKind {
     #[default]
@@ -84,22 +55,6 @@ pub enum ImportMode {
     #[default]
     Declarative,
     Runtime,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CanonicalImport {
-    pub import_type: &'static str,
-    pub binding_kind: ImportBindingKind,
-    pub mode: ImportMode,
-    pub path: String,
-    pub name: Option<String>,
-    pub alias: Option<String>,
-    pub scope_fqn: Option<Fqn>,
-    pub range: Range,
-    pub is_type_only: bool,
-    /// The resolver uses this to drive wildcard import lookup instead of matching
-    /// on `import_type` strings.
-    pub wildcard: bool,
 }
 
 /// Chains are read left-to-right. The resolver resolves the base then applies
@@ -122,28 +77,4 @@ pub enum BindingKind {
     Deletion,
     ForTarget,
     WithAlias,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CanonicalDirectory {
-    pub path: String,
-    pub name: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CanonicalFile {
-    pub path: String,
-    pub name: String,
-    pub extension: String,
-    pub language: Option<Language>,
-    pub size: u64,
-    /// Why the file did not index cleanly (skip/fault), or `None`. Strictly an
-    /// enum so `gl_file.reason` can never hold an unbounded string.
-    pub reason: crate::v2::error::FileReason,
-}
-
-impl CanonicalFile {
-    pub fn language_name(&self) -> &'static str {
-        self.language.map_or("unknown", |lang| lang.names()[0])
-    }
 }

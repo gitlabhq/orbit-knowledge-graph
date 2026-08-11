@@ -356,51 +356,6 @@ pub struct GraphImport {
     pub wildcard: bool,
 }
 
-impl GraphDef {
-    pub fn from_canonical(
-        def: &crate::v2::types::CanonicalDefinition,
-        pool: &mut StringPool,
-    ) -> Self {
-        let metadata = def.metadata.as_ref().map(|m| {
-            Box::new(GraphDefMeta {
-                super_types: m.super_types.iter().map(|s| pool.alloc(s)).collect(),
-                return_type: m.return_type.as_deref().map(|s| pool.alloc(s)),
-                type_annotation: m.type_annotation.as_deref().map(|s| pool.alloc(s)),
-                receiver_type: m.receiver_type.as_deref().map(|s| pool.alloc(s)),
-                decorators: m.decorators.iter().map(|s| pool.alloc(s)).collect(),
-                companion_of: m.companion_of.as_deref().map(|s| pool.alloc(s)),
-                is_exported: m.is_exported,
-            })
-        });
-        Self {
-            definition_type: def.definition_type,
-            kind: def.kind,
-            name: pool.alloc(&def.name),
-            fqn: pool.alloc(def.fqn.as_str()),
-            fqn_sep: def.fqn.separator(),
-            range: def.range,
-            is_top_level: def.is_top_level,
-            metadata,
-        }
-    }
-}
-
-impl GraphImport {
-    pub fn from_canonical(imp: &crate::v2::types::CanonicalImport, pool: &mut StringPool) -> Self {
-        Self {
-            import_type: imp.import_type,
-            binding_kind: imp.binding_kind,
-            mode: imp.mode,
-            path: pool.alloc(&imp.path),
-            name: imp.name.as_deref().map(|s| pool.alloc(s)),
-            alias: imp.alias.as_deref().map(|s| pool.alloc(s)),
-            range: imp.range,
-            is_type_only: imp.is_type_only,
-            wildcard: imp.wildcard,
-        }
-    }
-}
-
 /// Per-file arena for walker scratch strings.
 ///
 /// Wraps a [`bumpalo::Bump`] allocator. Thread-local, created at Phase 2
@@ -721,14 +676,14 @@ mod tests {
 
     #[test]
     fn string_pool_alloc_and_get() {
-        let mut pool = StringPool::new();
+        let pool = StringPool::new();
         let id = pool.alloc("hello");
         assert_eq!(pool.get(id), "hello");
     }
 
     #[test]
     fn string_pool_multiple() {
-        let mut pool = StringPool::new();
+        let pool = StringPool::new();
         let a = pool.alloc("foo");
         let b = pool.alloc("bar");
         let c = pool.alloc("baz");
@@ -740,7 +695,7 @@ mod tests {
 
     #[test]
     fn string_pool_duplicates_not_deduped() {
-        let mut pool = StringPool::new();
+        let pool = StringPool::new();
         let a = pool.alloc("same");
         let b = pool.alloc("same");
         assert_ne!(a, b);
@@ -748,28 +703,24 @@ mod tests {
     }
 
     #[test]
-    fn graph_def_from_canonical() {
+    fn graph_def_direct_construction() {
         use crate::v2::types::*;
 
-        let mut pool = StringPool::new();
-        let cdef = CanonicalDefinition {
+        let pool = StringPool::new();
+        let gdef = GraphDef {
             definition_type: "Class",
             kind: DefKind::Class,
-            name: "UserService".to_string(),
-            fqn: Fqn::from_parts(&["com", "example", "UserService"], "."),
+            name: pool.alloc("UserService"),
+            fqn: pool.alloc("com.example.UserService"),
+            fqn_sep: ".",
             range: Range::new(Position::new(1, 0), Position::new(50, 0), (0, 1000)),
             is_top_level: true,
-            metadata: Some(Box::new(DefinitionMetadata {
-                super_types: vec!["BaseService".to_string()],
-                return_type: None,
-                type_annotation: None,
-                receiver_type: None,
-                decorators: vec![],
-                companion_of: None,
+            metadata: Some(Box::new(GraphDefMeta {
+                super_types: smallvec::smallvec![pool.alloc("BaseService")],
                 is_exported: true,
+                ..Default::default()
             })),
         };
-        let gdef = GraphDef::from_canonical(&cdef, &mut pool);
 
         assert_eq!(pool.get(gdef.name), "UserService");
         assert_eq!(pool.get(gdef.fqn), "com.example.UserService");
@@ -781,23 +732,21 @@ mod tests {
     }
 
     #[test]
-    fn graph_import_from_canonical() {
+    fn graph_import_direct_construction() {
         use crate::v2::types::*;
 
-        let mut pool = StringPool::new();
-        let cimp = CanonicalImport {
+        let pool = StringPool::new();
+        let gimp = GraphImport {
             import_type: "FromImport",
             binding_kind: ImportBindingKind::Named,
             mode: ImportMode::Declarative,
-            path: "app.services".to_string(),
-            name: Some("AuthService".to_string()),
-            alias: Some("Auth".to_string()),
-            scope_fqn: None,
+            path: pool.alloc("app.services"),
+            name: Some(pool.alloc("AuthService")),
+            alias: Some(pool.alloc("Auth")),
             range: Range::new(Position::new(1, 0), Position::new(1, 30), (0, 30)),
             is_type_only: true,
             wildcard: false,
         };
-        let gimp = GraphImport::from_canonical(&cimp, &mut pool);
 
         assert_eq!(pool.get(gimp.path), "app.services");
         assert_eq!(pool.get(gimp.name.unwrap()), "AuthService");

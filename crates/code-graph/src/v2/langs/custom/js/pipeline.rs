@@ -35,7 +35,8 @@ impl LanguagePipeline for JsPipeline {
             .and_then(sentinel::spawn_sentinel);
         let sentinel_handle = sentinel.as_ref().map(|(h, _)| h);
 
-        let (analyzed_files, errors) = analyze_files(files, root_path, sentinel_handle);
+        let js_pool = crate::v2::linker::state::StringPool::new();
+        let (analyzed_files, errors) = analyze_files(files, root_path, sentinel_handle, &js_pool);
         let parse_ms = t0.elapsed().as_secs_f64() * 1000.0;
 
         // Route per-file outcomes to the typed collections regardless of

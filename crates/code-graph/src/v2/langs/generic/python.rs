@@ -1,7 +1,8 @@
 use crate::v2::config::Language;
 use crate::v2::dsl::extractors::metadata;
 use crate::v2::dsl::types::{self, *};
-use crate::v2::types::{CanonicalImport, DefKind};
+use crate::v2::linker::state::{GraphImport, StringPool};
+use crate::v2::types::DefKind;
 use treesitter_visit::Axis::*;
 use treesitter_visit::Match::*;
 use treesitter_visit::extract::{Extract, child_of_kind, field, field_chain, no_extract, text};
@@ -456,7 +457,8 @@ impl PythonImportRewriter {
 
     fn rewrite(
         &self,
-        import: &mut CanonicalImport,
+        import: &mut GraphImport,
+        pool: &crate::v2::linker::state::StringPool,
         module_scope: Option<&str>,
         sep: &str,
         file_path: &str,
@@ -464,22 +466,21 @@ impl PythonImportRewriter {
         let module_scope = module_scope?;
 
         if let Some(path) = resolve_python_relative_import(
-            &import.path,
+            pool.get(import.path),
             module_scope,
             sep,
             is_package_init(file_path),
         ) {
-            import.path = path;
+            import.path = pool.alloc(&path);
             return None;
         }
 
-        if let Some(path) = self.resolve_source_root(&import.path, module_scope, sep) {
+        if let Some(path) = self.resolve_source_root(pool.get(import.path), module_scope, sep) {
             // The local binding keeps the originally-written first segment, so
             // capture it before the path gains the source-root prefix.
             let scope_name =
                 if import.import_type == "Import" || import.import_type == "AliasedImport" {
-                    import
-                        .path
+                    pool.get(import.path)
                         .split(sep)
                         .next()
                         .filter(|segment| !segment.is_empty())
@@ -487,7 +488,7 @@ impl PythonImportRewriter {
                 } else {
                     None
                 };
-            import.path = path;
+            import.path = pool.alloc(&path);
             return scope_name;
         }
 
@@ -497,8 +498,8 @@ impl PythonImportRewriter {
 
 fn build_python_import_rewriter(paths: &[&str], sep: &str) -> Box<ImportRewriter> {
     let rewriter = PythonImportRewriter::from_paths(paths.iter().copied(), sep);
-    Box::new(move |import, module_scope, sep, file_path| {
-        rewriter.rewrite(import, module_scope, sep, file_path)
+    Box::new(move |import, pool, module_scope, sep, file_path| {
+        rewriter.rewrite(import, pool, module_scope, sep, file_path)
     })
 }
 
@@ -627,25 +628,25 @@ fn is_package_init(file_path: &str) -> bool {
         .is_some_and(|name| name == "__init__.py")
 }
 
-fn python_import_scope_name(imp: &CanonicalImport, sep: &str) -> Option<String> {
-    if let Some(alias) = &imp.alias {
-        return Some(alias.clone());
+fn python_import_scope_name(imp: &GraphImport, pool: &StringPool, sep: &str) -> Option<String> {
+    if let Some(alias) = imp.alias {
+        return Some(pool.get(alias).to_string());
     }
 
     if imp.import_type == "Import" || imp.import_type == "AliasedImport" {
-        return imp
-            .path
+        let path = pool.get(imp.path);
+        return path
             .split(sep)
             .next()
             .filter(|segment| !segment.is_empty())
             .map(ToString::to_string);
     }
 
-    imp.name.clone().or_else(|| {
-        (!imp.path.is_empty()).then(|| {
-            imp.path
-                .rsplit_once(sep)
-                .map_or(imp.path.as_str(), |(_, name)| name)
+    imp.name.map(|id| pool.get(id).to_string()).or_else(|| {
+        let path = pool.get(imp.path);
+        (!path.is_empty()).then(|| {
+            path.rsplit_once(sep)
+                .map_or(path, |(_, name)| name)
                 .to_string()
         })
     })
@@ -654,6 +655,7 @@ fn python_import_scope_name(imp: &CanonicalImport, sep: &str) -> Option<String> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::v2::linker::state::StringPool;
     use crate::v2::trace::Tracer;
     use crate::v2::types::{ImportBindingKind, ImportMode, Range};
 
@@ -664,24 +666,25 @@ mod tests {
         name: Option<&str>,
         module_scope: &str,
     ) -> (String, Option<String>) {
-        let mut import = CanonicalImport {
+        let pool = StringPool::new();
+        let mut import = GraphImport {
             import_type,
             binding_kind: ImportBindingKind::Named,
             mode: ImportMode::Declarative,
-            path: path.to_string(),
-            name: name.map(ToString::to_string),
+            path: pool.alloc(path),
+            name: name.map(|n| pool.alloc(n)),
             alias: None,
-            scope_fqn: None,
             range: Range::empty(),
             is_type_only: false,
             wildcard: false,
         };
-        let scope_name = rewriter.rewrite(&mut import, Some(module_scope), ".", "module.py");
-        (import.path, scope_name)
+        let scope_name = rewriter.rewrite(&mut import, &pool, Some(module_scope), ".", "module.py");
+        (pool.get(import.path).to_string(), scope_name)
     }
 
     fn parse(
         code: &str,
+        pool: &StringPool,
     ) -> Result<crate::v2::dsl::engine::ParsedDefs, crate::v2::pipeline::PipelineError> {
         PythonDsl::spec()
             .parse_full_collect(
@@ -690,6 +693,7 @@ mod tests {
                 crate::v2::config::Language::Python,
                 &Tracer::new(false),
                 Default::default(),
+                pool,
             )
             .map(|r| crate::v2::dsl::engine::ParsedDefs {
                 definitions: r.definitions,
@@ -705,31 +709,41 @@ mod tests {
 
     #[test]
     fn classes_and_methods() {
-        let result =
-            parse("class Calculator:\n    def add(self, a, b):\n        return a + b\n").unwrap();
+        let pool = StringPool::new();
+        let result = parse(
+            "class Calculator:\n    def add(self, a, b):\n        return a + b\n",
+            &pool,
+        )
+        .unwrap();
 
         assert_eq!(result.definitions.len(), 2);
-        assert_eq!(result.definitions[0].name, "Calculator");
+        assert_eq!(pool.get(result.definitions[0].name), "Calculator");
         assert_eq!(result.definitions[0].kind, DefKind::Class);
         assert!(result.definitions[0].is_top_level);
 
-        assert_eq!(result.definitions[1].name, "add");
-        // FQN includes module prefix from file path (test.py → "test")
-        assert_eq!(result.definitions[1].fqn.to_string(), "test.Calculator.add");
+        assert_eq!(pool.get(result.definitions[1].name), "add");
+        assert_eq!(pool.get(result.definitions[1].fqn), "test.Calculator.add");
     }
 
     #[test]
     fn super_types() {
-        let result = parse("class Dog(Animal, Serializable):\n    pass\n").unwrap();
-        let dog = result.definitions.iter().find(|d| d.name == "Dog").unwrap();
+        let pool = StringPool::new();
+        let result = parse("class Dog(Animal, Serializable):\n    pass\n", &pool).unwrap();
+        let dog = result
+            .definitions
+            .iter()
+            .find(|d| pool.get(d.name) == "Dog")
+            .unwrap();
         let meta = dog.metadata.as_ref().expect("should have metadata");
         assert_eq!(meta.super_types.len(), 2);
     }
 
     #[test]
     fn class_fields_as_properties() {
+        let pool = StringPool::new();
         let result = parse(
             "@dataclass\nclass User:\n    id: int\n    name: str = \"\"\n\n    def greet(self):\n        return self.name\n",
+            &pool,
         )
         .unwrap();
 
@@ -737,33 +751,44 @@ mod tests {
             .definitions
             .iter()
             .filter(|d| d.kind == DefKind::Property)
-            .map(|d| d.fqn.to_string())
+            .map(|d| pool.get(d.fqn).to_string())
             .collect();
         assert!(fields.contains(&"test.User.id".to_string()), "{fields:?}");
         assert!(fields.contains(&"test.User.name".to_string()), "{fields:?}");
 
-        let id = result.definitions.iter().find(|d| d.name == "id").unwrap();
+        let id = result
+            .definitions
+            .iter()
+            .find(|d| pool.get(d.name) == "id")
+            .unwrap();
         let meta = id.metadata.as_ref().expect("field should have metadata");
-        assert_eq!(meta.type_annotation.as_deref(), Some("test.int"));
+        assert_eq!(
+            meta.type_annotation.map(|id| pool.get(id)),
+            Some("test.int")
+        );
     }
 
     #[test]
     fn method_alongside_fields_still_extracted() {
-        let result =
-            parse("class User:\n    id: int\n\n    def greet(self):\n        return self.id\n")
-                .unwrap();
+        let pool = StringPool::new();
+        let result = parse(
+            "class User:\n    id: int\n\n    def greet(self):\n        return self.id\n",
+            &pool,
+        )
+        .unwrap();
 
         let greet = result
             .definitions
             .iter()
-            .find(|d| d.name == "greet")
+            .find(|d| pool.get(d.name) == "greet")
             .expect("method should be extracted");
         assert_eq!(greet.kind, DefKind::Method);
     }
 
     #[test]
     fn module_level_typed_assignment_is_not_a_property() {
-        let result = parse("X: int = 1\n").unwrap();
+        let pool = StringPool::new();
+        let result = parse("X: int = 1\n", &pool).unwrap();
         assert!(
             result
                 .definitions
@@ -774,19 +799,24 @@ mod tests {
 
     #[test]
     fn return_type_annotation() {
-        let result = parse("def greet(name: str) -> str:\n    return f'Hello, {name}'\n").unwrap();
+        let pool = StringPool::new();
+        let result = parse(
+            "def greet(name: str) -> str:\n    return f'Hello, {name}'\n",
+            &pool,
+        )
+        .unwrap();
         let greet = result
             .definitions
             .iter()
-            .find(|d| d.name == "greet")
+            .find(|d| pool.get(d.name) == "greet")
             .unwrap();
         let meta = greet.metadata.as_ref().expect("should have metadata");
-        // "str" is FQN-qualified with the module prefix from "test.py"
-        assert_eq!(meta.return_type.as_deref(), Some("test.str"));
+        assert_eq!(meta.return_type.map(|id| pool.get(id)), Some("test.str"));
     }
 
     #[test]
     fn call_references() {
+        let pool = StringPool::new();
         let tracer = crate::v2::trace::Tracer::new(false);
         let result = PythonDsl::spec()
             .parse_full_collect(
@@ -795,6 +825,7 @@ mod tests {
                 crate::v2::config::Language::Python,
                 &tracer,
                 Default::default(),
+                &pool,
             )
             .unwrap();
         let ref_names: Vec<_> = result.refs.iter().map(|r| r.name.as_str()).collect();
@@ -804,14 +835,15 @@ mod tests {
 
     #[test]
     fn imports() {
-        let result = parse("import os\nfrom pathlib import Path\n").unwrap();
+        let pool = StringPool::new();
+        let result = parse("import os\nfrom pathlib import Path\n", &pool).unwrap();
         assert!(result.imports.len() >= 2);
-        assert!(result.imports.iter().any(|i| i.path == "os"));
+        assert!(result.imports.iter().any(|i| pool.get(i.path) == "os"));
         assert!(
             result
                 .imports
                 .iter()
-                .any(|i| i.name.as_deref() == Some("Path"))
+                .any(|i| i.name.map(|id| pool.get(id)) == Some("Path"))
         );
     }
 
@@ -1100,21 +1132,27 @@ mod tests {
     #[test]
     fn relative_imports_in_a_package_init_resolve_against_the_package() {
         let transformer = PythonImportRewriter::from_paths(std::iter::empty(), ".");
+        let pool = StringPool::new();
         let resolve = |path: &str| {
-            let mut import = CanonicalImport {
+            let mut import = GraphImport {
                 import_type: "FromImport",
                 binding_kind: ImportBindingKind::Named,
                 mode: ImportMode::Declarative,
-                path: path.to_string(),
-                name: Some("Thing".to_string()),
+                path: pool.alloc(path),
+                name: Some(pool.alloc("Thing")),
                 alias: None,
-                scope_fqn: None,
                 range: Range::empty(),
                 is_type_only: false,
                 wildcard: false,
             };
-            transformer.rewrite(&mut import, Some("pkg.sub"), ".", "pkg/sub/__init__.py");
-            import.path
+            transformer.rewrite(
+                &mut import,
+                &pool,
+                Some("pkg.sub"),
+                ".",
+                "pkg/sub/__init__.py",
+            );
+            pool.get(import.path).to_string()
         };
 
         assert_eq!(resolve(".base"), "pkg.sub.base");

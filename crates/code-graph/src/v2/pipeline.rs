@@ -1137,6 +1137,7 @@ impl FamilyPipeline {
             parse_ms: f64,
         }
 
+        let string_pool = crate::v2::linker::state::StringPool::new();
         let parse_outcomes: Vec<Option<ParseOutcome>> = files
             .par_iter()
             .enumerate()
@@ -1193,6 +1194,7 @@ impl FamilyPipeline {
                     crate::v2::dsl::engine::ParseFullOptions {
                         import_rewriter: import_rewriters.get(&f.language).map(|r| r.as_ref()),
                     },
+                    &string_pool,
                 );
                 let result = match result {
                     Ok(r) => r,
@@ -1282,6 +1284,7 @@ impl FamilyPipeline {
         }
 
         let mut graph = CodeGraph::new_with_root(root_path.to_string()).with_rules(primary_rules);
+        graph.strings = string_pool;
         if ctx.config.emit_file_inventory_graph {
             graph.mark_parsed_only();
         }
@@ -1300,8 +1303,8 @@ impl FamilyPipeline {
                 &parsed_file.ext,
                 parsed_file.language,
                 parsed_file.file_size,
-                &parsed_file.result.definitions,
-                &parsed_file.result.imports,
+                parsed_file.result.definitions,
+                parsed_file.result.imports,
             );
 
             files_with_refs[parsed_file.path_idx] = Some(FileWithRefs {

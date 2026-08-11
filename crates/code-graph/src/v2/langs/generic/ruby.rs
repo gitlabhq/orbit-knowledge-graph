@@ -5,7 +5,8 @@ use crate::v2::dsl::types::{
     LanguageHooks, LoopRule, ReferenceRule, ScopeRule, binding, branch, loop_rule, reference,
     scope, scopes,
 };
-use crate::v2::types::{BindingKind, CanonicalImport, DefKind, ImportBindingKind, ImportMode};
+use crate::v2::linker::state::StringPool;
+use crate::v2::types::{BindingKind, DefKind, GraphImport, ImportBindingKind, ImportMode};
 use petgraph::graph::NodeIndex;
 use treesitter_visit::Axis::*;
 use treesitter_visit::Match::*;
@@ -237,7 +238,8 @@ fn ruby_lambda_assignment() -> Pred {
 
 fn ruby_extract_attr_methods(
     node: &N<'_>,
-    defs: &mut Vec<crate::v2::types::CanonicalDefinition>,
+    defs: &mut Vec<crate::v2::types::GraphDef>,
+    pool: &StringPool,
     scope_stack: &[std::sync::Arc<str>],
     sep: &'static str,
 ) -> bool {
@@ -249,11 +251,12 @@ fn ruby_extract_attr_methods(
             let name = name_node.text().to_string();
             if !name.is_empty() {
                 let fqn = crate::v2::types::Fqn::from_scope(scope_stack, &name, sep);
-                defs.push(crate::v2::types::CanonicalDefinition {
+                defs.push(crate::v2::types::GraphDef {
                     definition_type: "Method",
                     kind: DefKind::Method,
-                    name,
-                    fqn,
+                    name: pool.alloc(&name),
+                    fqn: pool.alloc(fqn.as_str()),
+                    fqn_sep: sep,
                     range: crate::v2::types::Range::empty(),
                     is_top_level: false,
                     metadata: None,
@@ -302,7 +305,7 @@ fn ruby_extract_attr_methods(
     };
 
     let push_symbol_defs = |args: &N<'_>,
-                            defs: &mut Vec<crate::v2::types::CanonicalDefinition>,
+                            defs: &mut Vec<crate::v2::types::GraphDef>,
                             def_type: &'static str,
                             kind: DefKind| {
         for arg in args.children() {
@@ -310,11 +313,12 @@ fn ruby_extract_attr_methods(
                 continue;
             };
             let fqn = crate::v2::types::Fqn::from_scope(scope_stack, &name, sep);
-            defs.push(crate::v2::types::CanonicalDefinition {
+            defs.push(crate::v2::types::GraphDef {
                 definition_type: def_type,
                 kind,
-                name,
-                fqn,
+                name: pool.alloc(&name),
+                fqn: pool.alloc(fqn.as_str()),
+                fqn_sep: sep,
                 range: crate::v2::types::Range::empty(),
                 is_top_level: false,
                 metadata: None,
@@ -323,7 +327,7 @@ fn ruby_extract_attr_methods(
     };
 
     let push_first_symbol = |args: &N<'_>,
-                             defs: &mut Vec<crate::v2::types::CanonicalDefinition>,
+                             defs: &mut Vec<crate::v2::types::GraphDef>,
                              def_type: &'static str,
                              kind: DefKind| {
         for arg in args.children() {
@@ -331,11 +335,12 @@ fn ruby_extract_attr_methods(
                 continue;
             };
             let fqn = crate::v2::types::Fqn::from_scope(scope_stack, &name, sep);
-            defs.push(crate::v2::types::CanonicalDefinition {
+            defs.push(crate::v2::types::GraphDef {
                 definition_type: def_type,
                 kind,
-                name,
-                fqn,
+                name: pool.alloc(&name),
+                fqn: pool.alloc(fqn.as_str()),
+                fqn_sep: sep,
                 range: crate::v2::types::Range::empty(),
                 is_top_level: false,
                 metadata: None,
@@ -369,11 +374,12 @@ fn ruby_extract_attr_methods(
                     continue;
                 }
                 let fqn = crate::v2::types::Fqn::from_scope(scope_stack, &name, sep);
-                defs.push(crate::v2::types::CanonicalDefinition {
+                defs.push(crate::v2::types::GraphDef {
                     definition_type: "Method",
                     kind: DefKind::Method,
-                    name,
-                    fqn,
+                    name: pool.alloc(&name),
+                    fqn: pool.alloc(fqn.as_str()),
+                    fqn_sep: sep,
                     range: crate::v2::types::Range::empty(),
                     is_top_level: false,
                     metadata: None,
@@ -387,11 +393,12 @@ fn ruby_extract_attr_methods(
                     continue;
                 };
                 let fqn = crate::v2::types::Fqn::from_scope(scope_stack, &name, sep);
-                defs.push(crate::v2::types::CanonicalDefinition {
+                defs.push(crate::v2::types::GraphDef {
                     definition_type: "Method",
                     kind: DefKind::Method,
-                    name,
-                    fqn,
+                    name: pool.alloc(&name),
+                    fqn: pool.alloc(fqn.as_str()),
+                    fqn_sep: sep,
                     range: crate::v2::types::Range::empty(),
                     is_top_level: false,
                     metadata: None,
@@ -553,7 +560,7 @@ fn ruby_super_types(node: &N<'_>) -> Vec<String> {
     types
 }
 
-fn ruby_extract_imports(node: &N<'_>, imports: &mut Vec<CanonicalImport>) -> bool {
+fn ruby_extract_imports(node: &N<'_>, imports: &mut Vec<GraphImport>, pool: &StringPool) -> bool {
     if node.kind().as_ref() != "call" {
         return false;
     }
@@ -570,7 +577,7 @@ fn ruby_extract_imports(node: &N<'_>, imports: &mut Vec<CanonicalImport>) -> boo
                 .and_then(|s| s.find(Child, Kind("string_content")))
                 .map(|c| c.text().to_string());
             if let Some(path) = path {
-                imports.push(CanonicalImport {
+                imports.push(GraphImport {
                     import_type: if method == "require_relative" {
                         "RequireRelative"
                     } else {
@@ -578,10 +585,9 @@ fn ruby_extract_imports(node: &N<'_>, imports: &mut Vec<CanonicalImport>) -> boo
                     },
                     binding_kind: ImportBindingKind::SideEffect,
                     mode: ImportMode::Runtime,
-                    path,
+                    path: pool.alloc(&path),
                     name: None,
                     alias: None,
-                    scope_fqn: None,
                     range: crate::v2::types::Range::empty(),
                     is_type_only: false,
                     wildcard: false,
@@ -602,7 +608,7 @@ fn ruby_extract_imports(node: &N<'_>, imports: &mut Vec<CanonicalImport>) -> boo
                 if !matches!(arg.kind().as_ref(), "constant" | "scope_resolution") {
                     continue;
                 }
-                push_named_import(imports, import_type, strip_leading_scope(&arg.text()));
+                push_named_import(imports, import_type, strip_leading_scope(&arg.text()), pool);
             }
             true
         }
@@ -610,7 +616,12 @@ fn ruby_extract_imports(node: &N<'_>, imports: &mut Vec<CanonicalImport>) -> boo
     }
 }
 
-fn push_named_import(imports: &mut Vec<CanonicalImport>, import_type: &'static str, fqn: String) {
+fn push_named_import(
+    imports: &mut Vec<GraphImport>,
+    import_type: &'static str,
+    fqn: String,
+    pool: &StringPool,
+) {
     if fqn.is_empty() {
         return;
     }
@@ -618,14 +629,13 @@ fn push_named_import(imports: &mut Vec<CanonicalImport>, import_type: &'static s
         .rsplit_once("::")
         .map(|(p, l)| (p.to_string(), l.to_string()))
         .unwrap_or((String::new(), fqn));
-    imports.push(CanonicalImport {
+    imports.push(GraphImport {
         import_type,
         binding_kind: ImportBindingKind::Named,
         mode: ImportMode::Declarative,
-        path,
-        name: Some(leaf),
+        path: pool.alloc(&path),
+        name: Some(pool.alloc(&leaf)),
         alias: None,
-        scope_fqn: None,
         range: crate::v2::types::Range::empty(),
         is_type_only: false,
         wildcard: false,
@@ -746,10 +756,12 @@ impl HasRules for RubyRules {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::v2::linker::state::StringPool;
     use crate::v2::trace::Tracer;
 
     fn parse(
         code: &str,
+        pool: &StringPool,
     ) -> Result<crate::v2::dsl::engine::ParsedDefs, crate::v2::pipeline::PipelineError> {
         RubyDsl::spec()
             .parse_full_collect(
@@ -758,6 +770,7 @@ mod tests {
                 Language::Ruby,
                 &Tracer::new(false),
                 Default::default(),
+                pool,
             )
             .map(|r| crate::v2::dsl::engine::ParsedDefs {
                 definitions: r.definitions,
@@ -768,7 +781,12 @@ mod tests {
 
     #[test]
     fn require_extracts_runtime_side_effect_imports() {
-        let result = parse("require \"json\"\nrequire_relative \"app/models/user.rb\"\n").unwrap();
+        let pool = StringPool::new();
+        let result = parse(
+            "require \"json\"\nrequire_relative \"app/models/user.rb\"\n",
+            &pool,
+        )
+        .unwrap();
 
         assert_eq!(result.imports.len(), 2);
         assert!(result.imports.iter().all(|import| {
@@ -781,10 +799,11 @@ mod tests {
 
     #[test]
     fn constructor_chain_produces_refs() {
+        let pool = StringPool::new();
         let result = RubyDsl::spec().parse_full_collect(b"class Foo\n  def bar; end\nend\nclass Worker\n  def run\n    Foo.new.bar\n  end\nend\n",
         "test.rb",
         Language::Ruby,
-        &Tracer::new(false), Default::default())
+        &Tracer::new(false), Default::default(), &pool)
             .unwrap();
         let ref_names: Vec<&str> = result.refs.iter().map(|r| r.name.as_str()).collect();
         let ref_chains: Vec<_> = result
@@ -813,6 +832,7 @@ mod tests {
 
     #[test]
     fn constant_assignments_emit_definitions() {
+        let pool = StringPool::new();
         let code = "MAX_REFS = 2\n\
                     class Tracker\n  \
                       MAX_TRACKED_REFS_PER_PROJECT = 2\n  \
@@ -820,13 +840,13 @@ mod tests {
                       counter = 0\n\
                     end\n\
                     Tracker::EXTRA = 5\n";
-        let result = parse(code).unwrap();
+        let result = parse(code, &pool).unwrap();
 
         let consts: Vec<(&str, &str)> = result
             .definitions
             .iter()
             .filter(|d| d.definition_type == "Constant")
-            .map(|d| (d.name.as_str(), d.fqn.as_str()))
+            .map(|d| (pool.get(d.name), pool.get(d.fqn)))
             .collect();
 
         assert!(
@@ -856,6 +876,7 @@ mod tests {
 
     #[test]
     fn lambda_and_proc_assignments_emit_lambda_definitions() {
+        let pool = StringPool::new();
         let code = "TRIPLE = ->(x) { x * 3 }\n\
                     DOUBLE = lambda { |x| x * 2 }\n\
                     VALIDATE = proc { |e| e }\n\
@@ -866,13 +887,13 @@ mod tests {
                     triple = ->(x) { x * 3 }\n\
                     MAX = 2\n\
                     BUILDER = Widget.new\n";
-        let result = parse(code).unwrap();
+        let result = parse(code, &pool).unwrap();
 
         let lambdas: Vec<(&str, &str)> = result
             .definitions
             .iter()
             .filter(|d| d.definition_type == "Lambda")
-            .map(|d| (d.name.as_str(), d.fqn.as_str()))
+            .map(|d| (pool.get(d.name), pool.get(d.fqn)))
             .collect();
 
         for name in ["TRIPLE", "DOUBLE", "VALIDATE", "MAKER", "triple"] {
@@ -890,24 +911,22 @@ mod tests {
             result
                 .definitions
                 .iter()
-                .filter(|d| d.name == name)
+                .filter(|d| pool.get(d.name) == name)
                 .map(|d| d.definition_type)
                 .collect()
         };
-        // The callable RHS rule wins over the Constant rule, so a lambda
-        // constant is a Lambda only — never double-emitted as a Constant.
         assert_eq!(
             kinds("TRIPLE"),
             ["Lambda"],
             "TRIPLE must not also be a Constant"
         );
         assert_eq!(kinds("MAX"), ["Constant"]);
-        // `Widget.new` is an ordinary constructor, not `Proc.new`.
         assert_eq!(kinds("BUILDER"), ["Constant"]);
     }
 
     #[test]
     fn bare_constant_reference_emits_a_ref() {
+        let pool = StringPool::new();
         let code = "class Foo\n  \
                       MAX = 2\n  \
                       OTHER = MAX + 1\n  \
@@ -923,6 +942,7 @@ mod tests {
                 Language::Ruby,
                 &Tracer::new(false),
                 Default::default(),
+                &pool,
             )
             .unwrap();
         let ref_names: Vec<&str> = result.refs.iter().map(|r| r.name.as_str()).collect();
@@ -951,6 +971,7 @@ mod tests {
 
     #[test]
     fn qualified_constant_reference_emits_a_ref() {
+        let pool = StringPool::new();
         let code = "module Foo\n  \
                       class Bar\n    \
                         MAX = 1\n  \
@@ -968,6 +989,7 @@ mod tests {
                 Language::Ruby,
                 &Tracer::new(false),
                 Default::default(),
+                &pool,
             )
             .unwrap();
         let ref_names: Vec<&str> = result.refs.iter().map(|r| r.name.as_str()).collect();
@@ -995,91 +1017,136 @@ mod tests {
 
     #[test]
     fn leading_scope_stripped_from_super_types() {
+        let pool = StringPool::new();
         let result = parse(
             "class AbuseReportPolicy < ::BasePolicy\nend\n\
              class GroupPolicy < BasePolicy\n  include ::Gitlab::Allowable\nend\n",
+            &pool,
         )
         .unwrap();
 
         let abuse = result
             .definitions
             .iter()
-            .find(|d| d.name == "AbuseReportPolicy")
+            .find(|d| pool.get(d.name) == "AbuseReportPolicy")
             .unwrap();
         let meta = abuse.metadata.as_ref().expect("AbuseReportPolicy metadata");
         assert!(
-            meta.super_types.contains(&"BasePolicy".to_string()),
+            meta.super_types
+                .iter()
+                .any(|s| pool.get(*s) == "BasePolicy"),
             "leading :: should be stripped: {:?}",
             meta.super_types
+                .iter()
+                .map(|s| pool.get(*s))
+                .collect::<Vec<_>>()
         );
         assert!(
-            !meta.super_types.iter().any(|s| s.starts_with("::")),
+            !meta
+                .super_types
+                .iter()
+                .any(|s| pool.get(*s).starts_with("::")),
             "no super_type should retain a leading ::: {:?}",
             meta.super_types
+                .iter()
+                .map(|s| pool.get(*s))
+                .collect::<Vec<_>>()
         );
 
         let group = result
             .definitions
             .iter()
-            .find(|d| d.name == "GroupPolicy")
+            .find(|d| pool.get(d.name) == "GroupPolicy")
             .unwrap();
         let gmeta = group.metadata.as_ref().expect("GroupPolicy metadata");
         assert!(
-            gmeta.super_types.contains(&"BasePolicy".to_string()),
+            gmeta
+                .super_types
+                .iter()
+                .any(|s| pool.get(*s) == "BasePolicy"),
             "unqualified superclass still works: {:?}",
-            gmeta.super_types
+            gmeta
+                .super_types
+                .iter()
+                .map(|s| pool.get(*s))
+                .collect::<Vec<_>>()
         );
         assert!(
-            gmeta.super_types.contains(&"Gitlab::Allowable".to_string()),
+            gmeta
+                .super_types
+                .iter()
+                .any(|s| pool.get(*s) == "Gitlab::Allowable"),
             "qualified include should be stripped of leading ::: {:?}",
-            gmeta.super_types
+            gmeta
+                .super_types
+                .iter()
+                .map(|s| pool.get(*s))
+                .collect::<Vec<_>>()
         );
 
         let allowable_import = result
             .imports
             .iter()
-            .find(|i| i.name.as_deref() == Some("Allowable"))
+            .find(|i| i.name.map(|id| pool.get(id)) == Some("Allowable"))
             .expect("include ::Gitlab::Allowable should be recorded as an import");
         assert_eq!(
-            allowable_import.path, "Gitlab",
+            pool.get(allowable_import.path),
+            "Gitlab",
             "import path should drop the leading ::, got {:?}",
-            allowable_import.path
+            pool.get(allowable_import.path)
         );
     }
 
     #[test]
     fn module_includes_become_super_types() {
-        let result = parse("module ProjectsHelper\n  include Gitlab::Allowable\nend\n").unwrap();
-        let m = result
-            .definitions
-            .iter()
-            .find(|d| d.name == "ProjectsHelper")
-            .unwrap();
-        let meta = m.metadata.as_ref().expect("ProjectsHelper metadata");
-        assert!(
-            meta.super_types.contains(&"Gitlab::Allowable".to_string()),
-            "module include should be captured as a super type: {:?}",
-            meta.super_types
-        );
-    }
-
-    #[test]
-    fn concern_included_block_includes_become_super_types() {
+        let pool = StringPool::new();
         let result = parse(
-            "module RequestAwareEntity\n  extend ActiveSupport::Concern\n  \
-             included do\n    include Gitlab::Allowable\n  end\nend\n",
+            "module ProjectsHelper\n  include Gitlab::Allowable\nend\n",
+            &pool,
         )
         .unwrap();
         let m = result
             .definitions
             .iter()
-            .find(|d| d.name == "RequestAwareEntity")
+            .find(|d| pool.get(d.name) == "ProjectsHelper")
+            .unwrap();
+        let meta = m.metadata.as_ref().expect("ProjectsHelper metadata");
+        assert!(
+            meta.super_types
+                .iter()
+                .any(|s| pool.get(*s) == "Gitlab::Allowable"),
+            "module include should be captured as a super type: {:?}",
+            meta.super_types
+                .iter()
+                .map(|s| pool.get(*s))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn concern_included_block_includes_become_super_types() {
+        let pool = StringPool::new();
+        let result = parse(
+            "module RequestAwareEntity\n  extend ActiveSupport::Concern\n  \
+             included do\n    include Gitlab::Allowable\n  end\nend\n",
+            &pool,
+        )
+        .unwrap();
+        let m = result
+            .definitions
+            .iter()
+            .find(|d| pool.get(d.name) == "RequestAwareEntity")
             .unwrap();
         let meta = m.metadata.as_ref().expect("RequestAwareEntity metadata");
         assert!(
-            meta.super_types.contains(&"Gitlab::Allowable".to_string()),
+            meta.super_types
+                .iter()
+                .any(|s| pool.get(*s) == "Gitlab::Allowable"),
             "include inside `included do` should be captured: {:?}",
             meta.super_types
+                .iter()
+                .map(|s| pool.get(*s))
+                .collect::<Vec<_>>()
         );
     }
 }

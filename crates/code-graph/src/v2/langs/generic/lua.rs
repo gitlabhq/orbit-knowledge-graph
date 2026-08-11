@@ -1,6 +1,7 @@
 use crate::v2::config::Language;
 use crate::v2::dsl::types::{self, *};
-use crate::v2::types::{BindingKind, CanonicalImport, DefKind, ImportBindingKind, ImportMode};
+use crate::v2::linker::state::StringPool;
+use crate::v2::types::{BindingKind, DefKind, GraphImport, ImportBindingKind, ImportMode};
 use treesitter_visit::extract::field;
 use treesitter_visit::predicate::*;
 use treesitter_visit::tree_sitter::StrDoc;
@@ -133,7 +134,7 @@ impl DslLanguage for LuaDsl {
 
 /// Returns `true` for a `require` `function_call` node to prevent the default
 /// import extractor from also running on it.
-fn lua_extract_require(node: &N<'_>, imports: &mut Vec<CanonicalImport>) -> bool {
+fn lua_extract_require(node: &N<'_>, imports: &mut Vec<GraphImport>, pool: &StringPool) -> bool {
     if node.kind().as_ref() != "function_call" {
         return false;
     }
@@ -168,14 +169,13 @@ fn lua_extract_require(node: &N<'_>, imports: &mut Vec<CanonicalImport>) -> bool
     }
 
     let name = module_path.rsplit('.').next().map(|s| s.to_string());
-    imports.push(CanonicalImport {
+    imports.push(GraphImport {
         import_type: "Require",
         binding_kind: ImportBindingKind::Named,
         mode: ImportMode::Runtime,
-        path: module_path,
-        name,
+        path: pool.alloc(&module_path),
+        name: name.map(|s| pool.alloc(&s)),
         alias: None,
-        scope_fqn: None,
         range: crate::v2::types::Range::empty(),
         is_type_only: false,
         wildcard: false,
@@ -212,10 +212,12 @@ impl HasRules for LuaRules {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::v2::linker::state::StringPool;
     use crate::v2::trace::Tracer;
 
     fn parse(
         code: &str,
+        pool: &StringPool,
     ) -> Result<crate::v2::dsl::engine::ParsedDefs, crate::v2::pipeline::PipelineError> {
         LuaDsl::spec()
             .parse_full_collect(
@@ -224,6 +226,7 @@ mod tests {
                 Language::Lua,
                 &Tracer::new(false),
                 Default::default(),
+                pool,
             )
             .map(|r| crate::v2::dsl::engine::ParsedDefs {
                 definitions: r.definitions,
@@ -234,51 +237,69 @@ mod tests {
 
     #[test]
     fn simple_function() {
-        let result = parse("function greet()\n  print('hello')\nend\n").unwrap();
-        let def = result.definitions.iter().find(|d| d.name == "greet");
+        let pool = StringPool::new();
+        let result = parse("function greet()\n  print('hello')\nend\n", &pool).unwrap();
+        let def = result
+            .definitions
+            .iter()
+            .find(|d| pool.get(d.name) == "greet");
         assert!(def.is_some(), "should find function greet");
         assert_eq!(def.unwrap().kind, DefKind::Function);
     }
 
     #[test]
     fn local_function() {
-        let result = parse("local function add(a, b)\n  return a + b\nend\n").unwrap();
-        let def = result.definitions.iter().find(|d| d.name == "add");
+        let pool = StringPool::new();
+        let result = parse("local function add(a, b)\n  return a + b\nend\n", &pool).unwrap();
+        let def = result
+            .definitions
+            .iter()
+            .find(|d| pool.get(d.name) == "add");
         assert!(def.is_some(), "should find local function add");
         assert_eq!(def.unwrap().kind, DefKind::Function);
     }
 
     #[test]
     fn dot_function() {
-        let result = parse("function M.greet()\n  print('hi')\nend\n").unwrap();
-        let def = result.definitions.iter().find(|d| d.name == "greet");
+        let pool = StringPool::new();
+        let result = parse("function M.greet()\n  print('hi')\nend\n", &pool).unwrap();
+        let def = result
+            .definitions
+            .iter()
+            .find(|d| pool.get(d.name) == "greet");
         assert!(def.is_some(), "should find M.greet as 'greet'");
         assert_eq!(def.unwrap().kind, DefKind::Function);
     }
 
     #[test]
     fn method_function() {
-        let result = parse("function M:speak()\n  print(self.name)\nend\n").unwrap();
-        let def = result.definitions.iter().find(|d| d.name == "speak");
+        let pool = StringPool::new();
+        let result = parse("function M:speak()\n  print(self.name)\nend\n", &pool).unwrap();
+        let def = result
+            .definitions
+            .iter()
+            .find(|d| pool.get(d.name) == "speak");
         assert!(def.is_some(), "should find M:speak as 'speak'");
         assert_eq!(def.unwrap().kind, DefKind::Method);
     }
 
     #[test]
     fn require_extraction() {
-        let result = parse("local utils = require('utils')\n").unwrap();
+        let pool = StringPool::new();
+        let result = parse("local utils = require('utils')\n", &pool).unwrap();
         assert_eq!(result.imports.len(), 1, "should find one require import");
         let imp = &result.imports[0];
-        assert_eq!(imp.path, "utils");
-        assert_eq!(imp.name.as_deref(), Some("utils"));
+        assert_eq!(pool.get(imp.path), "utils");
+        assert_eq!(imp.name.map(|id| pool.get(id)), Some("utils"));
     }
 
     #[test]
     fn dotted_require_extraction() {
-        let result = parse("local json = require('vendor.json')\n").unwrap();
+        let pool = StringPool::new();
+        let result = parse("local json = require('vendor.json')\n", &pool).unwrap();
         assert_eq!(result.imports.len(), 1);
         let imp = &result.imports[0];
-        assert_eq!(imp.path, "vendor.json");
-        assert_eq!(imp.name.as_deref(), Some("json"));
+        assert_eq!(pool.get(imp.path), "vendor.json");
+        assert_eq!(imp.name.map(|id| pool.get(id)), Some("json"));
     }
 }

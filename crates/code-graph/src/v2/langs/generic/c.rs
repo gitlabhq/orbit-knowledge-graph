@@ -169,10 +169,12 @@ impl HasRules for CRules {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::v2::linker::state::StringPool;
     use crate::v2::trace::Tracer;
 
     fn parse(
         code: &str,
+        pool: &StringPool,
     ) -> Result<crate::v2::dsl::engine::ParsedDefs, crate::v2::pipeline::PipelineError> {
         CDsl::spec()
             .parse_full_collect(
@@ -181,6 +183,7 @@ mod tests {
                 Language::C,
                 &Tracer::new(false),
                 Default::default(),
+                pool,
             )
             .map(|r| crate::v2::dsl::engine::ParsedDefs {
                 definitions: r.definitions,
@@ -191,24 +194,42 @@ mod tests {
 
     #[test]
     fn function_definitions() {
-        let result = parse("int add(int a, int b) { return a + b; }\nvoid greet() {}\n").unwrap();
-        let names: Vec<&str> = result.definitions.iter().map(|d| d.name.as_str()).collect();
+        let pool = StringPool::new();
+        let result = parse(
+            "int add(int a, int b) { return a + b; }\nvoid greet() {}\n",
+            &pool,
+        )
+        .unwrap();
+        let names: Vec<&str> = result
+            .definitions
+            .iter()
+            .map(|d| pool.get(d.name))
+            .collect();
         assert!(names.contains(&"add"), "should find add");
         assert!(names.contains(&"greet"), "should find greet");
     }
 
     #[test]
     fn struct_definition() {
-        let result = parse("struct Point { int x; int y; };\n").unwrap();
-        let point = result.definitions.iter().find(|d| d.name == "Point");
+        let pool = StringPool::new();
+        let result = parse("struct Point { int x; int y; };\n", &pool).unwrap();
+        let point = result
+            .definitions
+            .iter()
+            .find(|d| pool.get(d.name) == "Point");
         assert!(point.is_some(), "should find struct Point");
         assert_eq!(point.unwrap().kind, DefKind::Class);
     }
 
     #[test]
     fn enum_definition() {
-        let result = parse("enum Color { RED, GREEN, BLUE };\n").unwrap();
-        let names: Vec<&str> = result.definitions.iter().map(|d| d.name.as_str()).collect();
+        let pool = StringPool::new();
+        let result = parse("enum Color { RED, GREEN, BLUE };\n", &pool).unwrap();
+        let names: Vec<&str> = result
+            .definitions
+            .iter()
+            .map(|d| pool.get(d.name))
+            .collect();
         assert!(names.contains(&"Color"), "should find enum Color");
         assert!(names.contains(&"RED"), "should find RED");
         assert!(names.contains(&"GREEN"), "should find GREEN");
@@ -217,14 +238,24 @@ mod tests {
 
     #[test]
     fn typedef_definition() {
-        let result = parse("typedef struct { int x; int y; } Point;\n").unwrap();
-        let names: Vec<&str> = result.definitions.iter().map(|d| d.name.as_str()).collect();
+        let pool = StringPool::new();
+        let result = parse("typedef struct { int x; int y; } Point;\n", &pool).unwrap();
+        let names: Vec<&str> = result
+            .definitions
+            .iter()
+            .map(|d| pool.get(d.name))
+            .collect();
         assert!(names.contains(&"Point"), "should find typedef Point");
     }
 
     #[test]
     fn include_imports() {
-        let result = parse("#include <stdio.h>\n#include \"mylib.h\"\nvoid main() {}\n").unwrap();
+        let pool = StringPool::new();
+        let result = parse(
+            "#include <stdio.h>\n#include \"mylib.h\"\nvoid main() {}\n",
+            &pool,
+        )
+        .unwrap();
         assert!(
             result.imports.len() >= 2,
             "should find at least 2 includes, got {}",

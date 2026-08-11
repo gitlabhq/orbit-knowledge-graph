@@ -1,3 +1,4 @@
+use crate::v2::linker::state::{GraphDefMeta, StringPool};
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
 
@@ -65,26 +66,42 @@ impl MetadataRule {
     pub fn extract_metadata(
         &self,
         node: &N<'_>,
+        pool: &StringPool,
         resolve: impl Fn(String, &N<'_>) -> String,
-    ) -> Option<Box<crate::v2::types::DefinitionMetadata>> {
-        let super_types: Vec<String> = self
+    ) -> Option<Box<GraphDefMeta>> {
+        let super_types: smallvec::SmallVec<[gkg_utils::strings::StrId; 2]> = self
             .super_types
-            .map(|f| f(node).into_iter().map(|s| resolve(s, node)).collect())
+            .map(|f| {
+                f(node)
+                    .into_iter()
+                    .map(|s| pool.alloc(&resolve(s, node)))
+                    .collect()
+            })
             .unwrap_or_default();
         let return_type = self
             .return_type
             .as_ref()
-            .and_then(|e| e.apply_with(node, &resolve));
+            .and_then(|e| e.apply_with(node, &resolve))
+            .map(|s| pool.alloc(&s));
         let type_annotation = self
             .type_annotation
             .as_ref()
-            .and_then(|e| e.apply_with(node, &resolve));
-        // receiver_type uses bare apply (no import resolution) so it
-        // stores the source-level type name. The lookup_by_receiver_type
-        // matches against bare_type extracted from the chain's FQN.
-        let receiver_type = self.receiver_type.as_ref().and_then(|e| e.apply(node));
-        let decorators = self.decorators.map(|f| f(node)).unwrap_or_default();
-        let companion_of = self.companion_of.as_ref().and_then(|e| e.apply(node));
+            .and_then(|e| e.apply_with(node, &resolve))
+            .map(|s| pool.alloc(&s));
+        let receiver_type = self
+            .receiver_type
+            .as_ref()
+            .and_then(|e| e.apply(node))
+            .map(|s| pool.alloc(&s));
+        let decorators: smallvec::SmallVec<[gkg_utils::strings::StrId; 2]> = self
+            .decorators
+            .map(|f| f(node).into_iter().map(|s| pool.alloc(&s)).collect())
+            .unwrap_or_default();
+        let companion_of = self
+            .companion_of
+            .as_ref()
+            .and_then(|e| e.apply(node))
+            .map(|s| pool.alloc(&s));
 
         let has_data = !super_types.is_empty()
             || return_type.is_some()
@@ -97,7 +114,7 @@ impl MetadataRule {
             return None;
         }
 
-        Some(Box::new(crate::v2::types::DefinitionMetadata {
+        Some(Box::new(GraphDefMeta {
             super_types,
             return_type,
             type_annotation,

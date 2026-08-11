@@ -6,8 +6,8 @@ pub mod ssa;
 
 pub use edge::{EdgeKind, NodeKind, Relationship, containment_edge_kind, containment_relationship};
 pub use fqn::Fqn;
-pub use node::{
-    BindingKind, CanonicalDefinition, CanonicalDirectory, CanonicalFile, CanonicalImport, DefKind,
-    DefinitionMetadata, ExpressionStep, ImportBindingKind, ImportMode,
-};
+pub use node::{BindingKind, DefKind, ExpressionStep, ImportBindingKind, ImportMode};
 pub use range::{Position, Range};
+
+pub use crate::v2::linker::graph::{DefId, GraphNode, ImportId};
+pub use crate::v2::linker::state::{GraphDef, GraphDefMeta, GraphImport};
