@@ -6,8 +6,8 @@ description: >
   is defined, and how an unfamiliar repository is organized. Resolves symbols
   instead of matching text. Prefer it over grep/rg when a name has many text
   hits or the answer spans files; prefer grep/rg for literal strings, config,
-  docs, and unique symbols. Indexing a checkout takes about a second (`orbit
-  index .`).
+  docs, and unique symbols. Indexing a checkout often takes a few seconds
+  (`orbit index .`); large monorepos take longer.
 version: 0.4.0
 license: MIT
 metadata:
@@ -25,9 +25,9 @@ relationships without requiring SQL.
 ## Start with `repo-map`
 
 Index the repository, then choose the narrowest map for the question. Indexing
-usually takes about a second. This example runs from the knowledge-graph
-repository root and shows its structure, implementations of `HasRules`, and
-the API surface of the Orbit Local crate:
+often takes a few seconds, with longer times for large monorepos. This example
+runs from the knowledge-graph repository root and shows its structure,
+implementations of `HasRules`, and the API surface of the Orbit Local crate:
 
 ```bash
 orbit index .
@@ -78,6 +78,9 @@ ORDER BY file_path, start_line"
 Search paths with `gl_file.path` or use `repo-map tree` when the search term may
 name a directory rather than a definition. See [`references/sql.md`](references/sql.md)
 for callers, definitions in a file, subclasses, imports, and table details.
+Member-assigned JavaScript or TypeScript exports may not be indexed as
+definitions, so partial `LIKE` matching can also return no rows. For a unique
+symbol in that form, grep/rg is the right fallback.
 
 ### Callers recall limitation
 
