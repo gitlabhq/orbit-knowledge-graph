@@ -1,18 +1,14 @@
 ---
 name: orbit-local
 description: >
-  Index and query a LOCAL checkout of a repository offline with the Orbit local
-  CLI (the `orbit` binary, run directly or via `glab orbit local`). It builds a
-  DuckDB property graph from the working tree and you query it with read-only
-  SQL. Use when the request targets the current checkout, working tree, or a
-  branch that is not pushed/indexed remotely, or is explicitly offline/local:
-  index this repo locally, who calls X in my checkout, list definitions in a
-  file, generate a repo map of a local checkout, run SQL over the local code
-  graph, or serve the local graph over MCP. For queries against already-indexed
-  production data in GitLab (a project such as gitlab-org/gitlab, cross-project
-  blast radius, contributor or merge-request aggregation) use the `orbit` skill;
-  for single-entity GitLab lookups or write operations use `glab`.
-version: 0.3.0
+  Answers structural questions about a code repository: which classes extend a
+  base type, what a module exposes with signatures, where a common-named symbol
+  is defined, and how an unfamiliar repository is organized. Resolves symbols
+  instead of matching text. Prefer it over grep/rg when a name has many text
+  hits or the answer spans files; prefer grep/rg for literal strings, config,
+  docs, and unique symbols. Indexing a checkout takes about a second (`orbit
+  index .`).
+version: 0.4.0
 license: MIT
 metadata:
   audience: developers
@@ -22,92 +18,105 @@ metadata:
 
 # Orbit local CLI skill
 
-Index and query a **local** copy of the GitLab Knowledge Graph (product name
-**Orbit**). The local CLI parses a checked-out repository into a DuckDB property
-graph and answers questions with **read-only SQL** — a different surface from
-Orbit Remote, which speaks the JSON DSL over gRPC. Use this skill for the
-working tree; use the `orbit` skill for production data.
+Use Orbit Local's Code Graph to answer structural questions about the current
+checkout. Start with `repo-map`: it returns source locations and resolved
+relationships without requiring SQL.
 
-## Invocation
+## Start with `repo-map`
 
-The binary is `orbit`. This skill writes commands as `orbit <subcommand>`. When
-you reach it through glab, prefix with `glab orbit local` and add `--yes` to
-skip the download/run prompts in non-interactive shells:
+Index the repository, then choose the narrowest map for the question. Indexing
+usually takes about a second. This example runs from the knowledge-graph
+repository root and shows its structure, implementations of `HasRules`, and
+the API surface of the Orbit Local crate:
 
 ```bash
-orbit index .                     # bundled binary
-glab orbit local --yes index .    # same, via the glab wrapper
+orbit index .
+orbit repo-map overview
+orbit repo-map extends HasRules
+orbit repo-map api crates/orbit-local
 ```
 
-`glab orbit local --install --yes` installs/updates the managed binary. Full
-wrapper flags, config keys, and pass-through rules:
-[`references/cli.md`](references/cli.md).
+Use the map that matches the question:
 
-## Gotchas (read first)
+- `repo-map overview` for languages, directories, and key abstractions in an
+  unfamiliar repository.
+- `repo-map tree <path>` for what lives below a directory.
+- `repo-map api <path>` for definitions and extracted signatures below a path.
+- `repo-map class <name>` for a class, module, or trait and its members.
+- `repo-map extends <name>` for descendants of a base type.
+- `repo-map imports <pattern>` for files importing matching symbols or paths.
 
-- **`index` operates on git repositories found under `PATH`.** Pointing it at a
-  plain subdirectory that is not its own repo indexes nothing (no graph stats are
-  printed at all). Pass a repository root.
-- **Queries are SQL, not the DSL.** `orbit sql "SELECT …"` runs against DuckDB
-  tables (`gl_definition`, `gl_edge`, `gl_file`, `gl_directory`,
-  `gl_imported_symbol`). There is no `query_type`/`nodes`/`relationships` JSON
-  here — that is Orbit Remote.
-- **`definition_type` values are capitalized** (`Function`, `Method`,
-  `AssociatedFunction`, `Struct`, `Field`, `Variant`, `Module`, `Constant`, …).
-  Filtering `WHERE definition_type='function'`
-  returns zero rows; use `'Function'`. Run `orbit schema gl_definition` when
-  unsure of columns.
-- **Relationships live in `gl_edge`**, keyed by `source_id`/`target_id` with
-  `relationship_kind` in `DEFINES`, `CALLS`, `IMPORTS`, `CONTAINS`, `EXTENDS`.
-  Join back to `gl_definition` on `id` to resolve names.
-- **The graph is per-commit.** The node tables (`gl_definition`, `gl_file`,
-  `gl_directory`, `gl_imported_symbol`) carry `commit_sha`; `gl_edge` does
-  not - join back to a definition to scope edges to a commit. Re-run `index`
-  after checking out a different commit. Default database is
-  `~/.orbit/graph.duckdb` (override with `--db`).
+Use returned `path:line` locations to read the relevant source instead of
+immediately repeating the search with grep. Keep `api` scoped to a feature
+directory, package, or crate rather than a large repository root. See the full
+[`repo-map` reference](references/repo_map.md) for options and output details.
 
-## Command surface
+## Choose graph or grep
+
+Prefer the graph when the answer depends on code structure or relationships,
+especially when a common name produces many text matches or the answer spans
+multiple files. Examples include inheritance trees, module API surfaces,
+same-named definitions, imports, and repository orientation.
+
+Prefer grep/rg when searching for literal strings, configuration keys,
+documentation, generated text, or a unique symbol whose text match directly
+identifies the file. Read a known file directly rather than mapping it again.
+
+## Focused SQL queries
+
+Use read-only SQL when `repo-map` does not express the relationship you need.
+Start with partial matching for an unfamiliar symbol instead of a brittle exact
+match:
+
+```bash
+orbit sql "SELECT name, definition_type, file_path, start_line
+FROM gl_definition
+WHERE name LIKE '%HasRules%'
+ORDER BY file_path, start_line"
+```
+
+Search paths with `gl_file.path` or use `repo-map tree` when the search term may
+name a directory rather than a definition. See [`references/sql.md`](references/sql.md)
+for callers, definitions in a file, subclasses, imports, and table details.
+
+### Callers recall limitation
+
+`CALLS` edges are statically resolved and are not complete. Calls through
+attributes or parameters may not resolve to the receiver's type, so a "who calls
+X" query can return direct and test callers while missing the production caller,
+for example `client.check_quota_available()`. Verify caller searches with grep/rg
+when recall matters.
+
+## Invocation and reference
+
+The binary is `orbit`. Through glab, prefix commands with `glab orbit local
+--yes`, for example `glab orbit local --yes repo-map overview`. Run `glab orbit
+local --install --yes` to install or update the managed binary.
+
+Index a repository root, not a plain subdirectory. The graph is scoped to a
+commit, so run `orbit index .` again after checking out another commit. Use the
+`orbit` skill instead for cross-project and GitLab SDLC questions against Orbit
+Remote, and use `glab` for single-entity GitLab lookups and writes.
+
+### Command and schema appendix
 
 | Command | Purpose |
 |---|---|
-| `orbit index <PATH> [--stats] [--db P]` | Parse repos under `PATH` into DuckDB; prints graph stats as JSON |
-| `orbit sql [QUERY] [-f FILE] [-F table\|json\|ndjson\|csv]` | Run read-only SQL; `-` reads from stdin |
-| `orbit schema [TABLE…] [--raw]` | Describe tables/columns; scope to table names to trim output |
-| `orbit list [-F …]` | List indexed repositories, branch, commit, status |
-| `orbit mcp serve` | Serve the local graph to MCP agents (`run_sql`, `get_graph_schema`, `index`) |
-| `orbit repo-map <SUBCOMMAND> [--repo P] [--ext E]` | High-level, LLM-oriented repo map (`overview`, `tree`, `api`, `class`, `extends`, `imports`) |
-| `orbit skill [PATH]` | Print the bundled, version-matched skill content; no arg prints `SKILL.md`, else a relative path like `references/sql.md` |
+| `orbit index <path> [--stats] [--db P]` | Index Git repositories found under a path |
+| `orbit repo-map <subcommand> [--repo P] [--ext E]` | Query a high-level repository map |
+| `orbit sql [query] [-f file] [-F table\|json\|ndjson\|csv]` | Run read-only SQL |
+| `orbit schema [table...] [--raw]` | Describe live tables and columns |
+| `orbit list [-F ...]` | List indexed repositories, branches, and commits |
+| `orbit mcp serve` | Expose `run_sql`, `get_graph_schema`, and `index` over MCP |
+| `orbit skill [path]` | Print bundled skill or reference content |
 
-## Quick start
+SQL uses `gl_definition`, `gl_edge`, `gl_file`, `gl_directory`, and
+`gl_imported_symbol`. `definition_type` values are capitalized, such as
+`Function`, `Method`, and `Struct`. Relationships in `gl_edge` use
+`source_id`/`target_id` and `DEFINES`, `CALLS`, `IMPORTS`, `CONTAINS`, or
+`EXTENDS`; join IDs back to node tables to resolve names. Inspect the shipped
+schema instead of assuming columns: `orbit schema gl_definition gl_edge`.
 
-```bash
-orbit index .                                   # index the current repo
-orbit schema gl_definition gl_edge              # confirm columns before querying
-orbit sql "SELECT definition_type, count(*) n FROM gl_definition GROUP BY 1 ORDER BY n DESC"
-```
-
-Paste-ready SQL for callers, definitions-in-file, subclasses, and imports:
-[`references/sql.md`](references/sql.md).
-
-## Repository map
-
-For a hierarchical orientation pass over a local checkout (languages, structure,
-key abstractions, per-file APIs) instead of ad-hoc SQL, use the native
-`orbit repo-map` command:
-
-```bash
-orbit repo-map overview                 # start here
-orbit repo-map tree crates              # types grouped by file under a subtree
-orbit repo-map api crates/orbit-local   # types + callables + signatures
-```
-
-It is scoped to the current commit; index first if the commit is not indexed.
-Full workflow and subcommands: [`references/repo_map.md`](references/repo_map.md).
-
-## References
-
-| Topic | Location |
-|---|---|
-| CLI wrapper flags, config keys, pass-through args | [`references/cli.md`](references/cli.md) |
-| DuckDB tables and paste-ready SQL recipes | [`references/sql.md`](references/sql.md) |
-| Repository-map command (`orbit repo-map`) | [`references/repo_map.md`](references/repo_map.md) |
+- [CLI wrapper and configuration reference](references/cli.md)
+- [SQL tables and recipes](references/sql.md)
+- [`repo-map` workflow and subcommands](references/repo_map.md)
