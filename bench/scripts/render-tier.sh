@@ -40,13 +40,4 @@ engine:
   concurrency_groups:
     sdlc: $(tier ".gkg.concurrency.sdlc")
     code: $(tier ".gkg.concurrency.code")
-
-global:
-  nodeSelector:
-    ra-run: "${RUN_ID}"
-  tolerations:
-    - key: ra-run
-      operator: Equal
-      value: "${RUN_ID}"
-      effect: NoSchedule
 EOF

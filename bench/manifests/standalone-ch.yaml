@@ -3,13 +3,13 @@
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: ra-clickhouse
+  name: ${CH_NAMESPACE}
 ---
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
   name: clickhouse
-  namespace: ra-clickhouse
+  namespace: ${CH_NAMESPACE}
   labels: { app: clickhouse }
 spec:
   replicas: 1
@@ -20,6 +20,8 @@ spec:
     metadata:
       labels: { app: clickhouse }
     spec:
+${CH_NODE_SELECTOR}
+${CH_TOLERATIONS}
       containers:
         - name: clickhouse
           image: clickhouse/clickhouse-server:26.6
@@ -63,12 +65,13 @@ spec:
         resources:
           requests:
             storage: ${CH_STORAGE}
+${PVC_DATA_SOURCE}
 ---
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: ch-config-overrides
-  namespace: ra-clickhouse
+  namespace: ${CH_NAMESPACE}
 data:
   bench-profile.xml: |
     <clickhouse>
@@ -84,7 +87,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: clickhouse
-  namespace: ra-clickhouse
+  namespace: ${CH_NAMESPACE}
 spec:
   selector: { app: clickhouse }
   ports:

@@ -4,7 +4,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 log "Provisioning tier=${TIER} run=${RUN_ID}"
 mkdir -p "${BENCH_DIR}/results/${RUN_ID}"
 
-CH_NS="${E2E_CH_NAMESPACE:-ra-clickhouse}"
+CH_NS="${E2E_CH_NAMESPACE:-ra-ch-${RUN_ID}}"
 
 # --- 1. Clean up previous e2e namespaces for this run ---
 log "Cleaning up previous e2e-${RUN_ID}-* namespaces"
@@ -17,21 +17,54 @@ for ns in $($KC get ns -o name 2>/dev/null | grep "e2e-${RUN_ID}-" | sed 's|name
   $KC wait --for=delete "ns/${ns}" --timeout=120s 2>/dev/null || true
 done
 
-# --- 2. Standalone ClickHouse (PVC-backed, survives across runs) ---
+# --- 2. Dedicated node pool for CH (optional) ---
+CH_NODE_SELECTOR=""
+CH_TOLERATIONS=""
+if [[ "${RA_DEDICATED_POOL:-}" == "1" ]]; then
+  IFS=_ read -r _ GKE_PROJECT GKE_ZONE GKE_CLUSTER <<< "${KCTX}"
+  POOL_NAME="ra-${RUN_ID}"
+  log "Creating dedicated pool ${POOL_NAME}"
+  gcloud container node-pools create "${POOL_NAME}" \
+    --cluster "${GKE_CLUSTER}" --project "${GKE_PROJECT}" --zone "${GKE_ZONE}" \
+    --machine-type "$(tier '.nodes.machine')" --num-nodes 1 \
+    --node-taints "ra-run=${RUN_ID}:NoSchedule" \
+    --node-labels "ra-run=${RUN_ID}" --quiet
+  CH_NODE_SELECTOR="      nodeSelector:
+        ra-run: \"${RUN_ID}\""
+  CH_TOLERATIONS="      tolerations:
+        - key: ra-run
+          operator: Equal
+          value: \"${RUN_ID}\"
+          effect: NoSchedule"
+fi
+
+# --- 3. Standalone ClickHouse (PVC-backed, survives across runs) ---
 CH_PASSWORD=$(openssl rand -hex 24)
 
+PVC_DATA_SOURCE=""
+if [[ -n "${RA_DATALAKE_SNAPSHOT:-}" ]]; then
+  PVC_DATA_SOURCE="        dataSource:
+          name: ${RA_DATALAKE_SNAPSHOT}
+          kind: VolumeSnapshot
+          apiGroup: snapshot.storage.k8s.io"
+fi
+
 log "Deploying standalone ClickHouse in ${CH_NS}"
-sed -e "s|\${CH_STORAGE}|$(tier '.clickhouse.storage')|g" \
+sed -e "s|\${CH_NAMESPACE}|${CH_NS}|g" \
+    -e "s|\${CH_STORAGE}|$(tier '.clickhouse.storage')|g" \
     -e "s|\${CH_CPU}|$(tier '.clickhouse.cpu')|g" \
     -e "s|\${CH_MEMORY}|$(tier '.clickhouse.memory')|g" \
     -e "s|\${CH_PASSWORD}|${CH_PASSWORD}|g" \
+    -e "s|\${PVC_DATA_SOURCE}|${PVC_DATA_SOURCE}|g" \
+    -e "s|\${CH_NODE_SELECTOR}|${CH_NODE_SELECTOR}|g" \
+    -e "s|\${CH_TOLERATIONS}|${CH_TOLERATIONS}|g" \
   < "${BENCH_DIR}/manifests/standalone-ch.yaml" \
   | $KC apply -f -
 
 $KC rollout status -n "${CH_NS}" statefulset/clickhouse --timeout=120s
 log "  ClickHouse ready"
 
-# --- 3. Create databases and users ---
+# --- 4. Create databases and users ---
 # All passwords are hex (no special chars that break sed or SQL quoting).
 export E2E_CH_SIPHON_PASS=$(openssl rand -hex 24)
 export E2E_CH_GITLAB_PASS=$(openssl rand -hex 24)
@@ -66,18 +99,16 @@ $KC exec -n "${CH_NS}" clickhouse-0 -- \
   "
 log "  Databases and users created (clean slate)"
 
-
-
 # Store the default password for the import job.
 $KC create secret generic ra-ch-credentials -n "${CH_NS}" \
   --from-literal=default-password="${CH_PASSWORD}" \
   --dry-run=client -o yaml | $KC apply -f -
 
-# --- 4. Render tier overlay ---
+# --- 5. Render tier overlay ---
 log "Rendering tier overlay"
 "${BENCH_DIR}/scripts/render-tier.sh" > "/tmp/ra-${RUN_ID}-tier-values.yaml"
 
-# --- 5. Deploy e2e stack pointing at our standalone CH ---
+# --- 6. Deploy e2e stack pointing at our standalone CH ---
 log "Deploying e2e stack (GitLab takes ~5 min, Siphon follows)"
 export E2E_SHA="${RUN_ID}"
 export E2E_CH_HOST="clickhouse.${CH_NS}.svc.cluster.local"
@@ -87,11 +118,15 @@ export E2E_EXTRA_VALUES="/tmp/ra-${RUN_ID}-tier-values.yaml"
 
 "${E2E_DIR}/scripts/setup.sh" || log "WARN: setup.sh exited non-zero (license activation may have failed, non-fatal)"
 
-# --- 6. Import datalake dump ---
-log "Importing datalake dump"
-"${BENCH_DIR}/scripts/import-dump-job.sh"
+# --- 7. Import datalake dump (or restore from snapshot) ---
+if [[ -n "${RA_DATALAKE_SNAPSHOT:-}" ]]; then
+  log "Skipping import: PVC restored from snapshot ${RA_DATALAKE_SNAPSHOT}"
+else
+  log "Importing datalake dump"
+  CH_NS="${CH_NS}" "${BENCH_DIR}/scripts/import-dump-job.sh"
+fi
 
-# --- 7. Reset dispatcher checkpoints to epoch so it re-indexes all dump data ---
+# --- 8. Reset dispatcher checkpoints to epoch so it re-indexes all dump data ---
 # The dump preserves original _siphon_watermark timestamps. Without this
 # the dispatcher's cursor starts at now() and never sees the old data.
 log "Resetting dispatcher checkpoints to epoch"
@@ -111,7 +146,7 @@ $KC rollout restart -n "e2e-${RUN_ID}-gkg" deploy/gkg-dispatcher deploy/gkg-inde
 $KC rollout status -n "e2e-${RUN_ID}-gkg" deploy/gkg-dispatcher --timeout=120s
 log "  Dispatcher and indexer restarted"
 
-# --- 8. Enable GMP metrics scraping for GKG pods ---
+# --- 9. Enable GMP metrics scraping for GKG pods ---
 log "Creating GMP PodMonitoring resources"
 GKG_NS="e2e-${RUN_ID}-gkg"
 for component in dispatcher indexer webserver; do
@@ -133,7 +168,7 @@ EOMON
 done
 log "  GMP scraping GKG pods every 15s"
 
-# --- 9. Validate ---
+# --- 10. Validate ---
 log "Running validation gate"
 "${BENCH_DIR}/scripts/validate.sh"
 

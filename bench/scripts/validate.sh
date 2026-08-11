@@ -2,7 +2,7 @@
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 NS="e2e-${RUN_ID}-gkg"
-CH_NS="ra-clickhouse"
+CH_NS="${E2E_CH_NAMESPACE:-ra-ch-${RUN_ID}}"
 
 log "Waiting for GKG pods to be ready (up to 10 min)..."
 $KC wait -n "${NS}" deploy -l app.kubernetes.io/name=gkg --for=condition=available --timeout=600s 2>/dev/null || true

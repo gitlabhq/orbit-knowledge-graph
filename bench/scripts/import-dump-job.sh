@@ -8,7 +8,7 @@ BENCH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "${BENCH_DIR}/scripts/lib.sh"
 
 : "${DUMP_PREFIX:=core-2026-06-25-1115}"
-CH_NS="ra-clickhouse"
+: "${CH_NS:=ra-ch-${RUN_ID}}"
 
 # Read credentials from the secret created by provision.sh.
 CH_PASSWORD=$($KC get secret ra-ch-credentials -n "${CH_NS}" \
