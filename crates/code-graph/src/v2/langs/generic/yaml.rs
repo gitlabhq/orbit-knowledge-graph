@@ -1,32 +1,22 @@
 use crate::v2::config::Language;
 use crate::v2::dsl::types::*;
 use crate::v2::types::{DefKind, Fqn};
-use treesitter_visit::extract::{child_of_kind, field, text};
-use treesitter_visit::predicate::Pred;
+use treesitter_visit::extract::{child_of_kind, field};
 use treesitter_visit::tree_sitter::StrDoc;
-use treesitter_visit::{Axis, Match, Node, SupportLang};
+use treesitter_visit::{Node, SupportLang};
 
 use crate::v2::linker::rules::{ReceiverMode, ResolutionRules};
 use crate::v2::linker::{HasRules, ResolveSettings};
 
 type N<'a> = Node<'a, StrDoc<SupportLang>>;
 
-/// Keys nested deeper than this produce no definitions. Deep YAML is
-/// almost always machine-generated (k8s manifests, fixtures) and would
-/// bloat gl_definition without adding queryable config surface. The
-/// sibling data-format precedent is JSON, which the JS pipeline indexes
-/// at depth zero (one synthetic export, no keys).
-const MAX_KEY_DEPTH: isize = 6;
-
+// Key depth is deliberately unbounded: depth is a poor proxy for
+// machine-generated YAML (openapi dumps nest at 3-6 while hand-written
+// helm values legitimately reach 7+), so a depth cap silently truncates
+// exactly the config surface this language exists to index. Pathological
+// files are excluded whole at the file level instead — see
+// YAML_PARSER_MAX_FILE_SIZE in v2/pipeline.rs.
 const PAIR_KINDS: &[&str] = &["block_mapping_pair", "flow_pair"];
-
-fn within_depth_cap() -> Pred {
-    !Pred::Exists(Box::new(text().nth(
-        Axis::Ancestor,
-        Match::AnyKind(PAIR_KINDS),
-        MAX_KEY_DEPTH - 1,
-    )))
-}
 
 #[derive(Default)]
 pub struct YamlDsl;
@@ -44,11 +34,9 @@ impl DslLanguage for YamlDsl {
         vec![
             scope("block_mapping_pair", "MappingKey")
                 .def_kind(DefKind::Property)
-                .when(within_depth_cap())
                 .name_from(field("key")),
             scope("flow_pair", "MappingKey")
                 .def_kind(DefKind::Property)
-                .when(within_depth_cap())
                 .name_from(field("key")),
             scope("anchor", "Anchor")
                 .def_kind(DefKind::Other)
@@ -229,12 +217,13 @@ mod tests {
     }
 
     #[test]
-    fn keys_beyond_depth_cap_produce_no_defs() {
-        let code = "a:\n b:\n  c:\n   d:\n    e:\n     f:\n      g:\n       h: 1\n";
-        let names: Vec<String> = defs(code).iter().map(|(n, _)| n.clone()).collect();
-        assert!(names.contains(&"f".to_string()), "{names:?}");
-        assert!(!names.contains(&"g".to_string()), "{names:?}");
-        assert!(!names.contains(&"h".to_string()), "{names:?}");
+    fn deeply_nested_keys_keep_full_fqns() {
+        let code = "a:\n b:\n  c:\n   d:\n    e:\n     f:\n      g:\n       h:\n        i:\n         j: 1\n";
+        let all = defs(code);
+        assert!(
+            all.contains(&("j".into(), "a.b.c.d.e.f.g.h.i.j".into())),
+            "{all:?}"
+        );
     }
 
     #[test]
