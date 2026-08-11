@@ -238,6 +238,14 @@ REST APIまたは`glab orbit remote query`でクエリを送信する場合は�
 
 `content`列はソースコード用です。マージリクエストの差分テキストには、`MergeRequest.diff`、`MergeRequestDiff.patch`、または`MergeRequestDiffFile.diff`を使用してください。
 
+### 仮想列でのフィルタリング {#filtering-on-virtual-columns}
+
+仮想列は`traversal`クエリにおいて、`eq`、`contains`、`starts_with`、`ends_with`、`is_null`、および`is_not_null`フィルター演算子をサポートしています。ただし、明示的な`node_ids`を指定したノードに対してのみ有効です。フィルターはそれらの行の列を解決し、メモリ内で比較します。まだ特定していない行を検索するための仮想列フィルター（コンテンツ検索）はサポートされておらず、拒否されます。まずインデックス付きフィルターで候補行を絞り込んでから、固定された行に対して仮想列コンテンツでフィルタリングしてください。
+
+列をリクエストしなくてもフィルタリングは可能です。フィルタリングされているが返却対象でない仮想列は、比較のために解決されますが、レスポンスには含まれません。
+
+`aggregation`、`neighbors`、および`path_finding`クエリは仮想列へのフィルターを拒否します。
+
 ## トラバーサルの例 {#traversal-examples}
 
 完全な差分を含む1つのマージリクエストをフェッチする:
