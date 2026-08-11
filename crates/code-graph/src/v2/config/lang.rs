@@ -226,6 +226,12 @@ define_languages! {
         separator: ".",
         names: ["lua"],
     },
+    Yaml => {
+        support_lang: Yaml,
+        extensions: ["yml", "yaml"],
+        separator: ".",
+        names: ["yaml"],
+    },
     Zig => {
         support_lang: Zig,
         extensions: ["zig"],

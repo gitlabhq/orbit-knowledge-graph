@@ -1940,7 +1940,7 @@ mod tests {
                 decision: Decision::Parse,
             },
             FileInventoryEntry {
-                path: "config/app.yml".into(),
+                path: "config/app.toml".into(),
                 size: 9,
                 decision: Decision::Parse,
             },
@@ -1988,7 +1988,7 @@ mod tests {
             vec![
                 ("README.md".into(), "unknown"),
                 ("assets/logo.png".into(), "unknown"),
-                ("config/app.yml".into(), "unknown"),
+                ("config/app.toml".into(), "unknown"),
                 ("src/main.py".into(), "python"),
                 ("vendor/jquery.min.js".into(), "unknown"),
             ]
