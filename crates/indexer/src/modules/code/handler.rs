@@ -43,9 +43,7 @@ fn project_lock_key(project_id: i64, branch: &str) -> String {
     format!("project.{project_id}.{encoded_branch}")
 }
 
-/// The heartbeat lives inside this future, not a spawned task, so it cannot outlive `work`.
-/// It still ticks during the CPU-bound parse only because that parse runs on `spawn_blocking`;
-/// non-yielding work on this task would starve the select.
+/// Heartbeat lives in this future (not a spawned task), so it can't leak; it only ticks during the parse because that parse is on `spawn_blocking`.
 async fn run_with_heartbeat<T>(
     work: impl std::future::Future<Output = T>,
     progress: &ProgressNotifier,
