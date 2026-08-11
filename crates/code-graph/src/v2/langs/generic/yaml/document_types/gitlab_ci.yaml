@@ -1,0 +1,25 @@
+# GitLab CI configuration: `include:` statements become imports.
+# Columns: path = source (project path, component spec, template name,
+# local path, or URL), name = file within a project include, alias =
+# pinned ref or component version.
+name: gitlab_ci
+match:
+  filename_suffixes: [".gitlab-ci.yml", ".gitlab-ci.yaml"]
+imports:
+  - key: include
+    also_under: [trigger]
+    scalar_type: CiLocalInclude
+    mapping_forms:
+      - type: CiProjectInclude
+        path_key: project
+        name_keys: [file, files]
+        alias_key: ref
+      - type: CiLocalInclude
+        path_key: local
+      - type: CiTemplateInclude
+        path_key: template
+      - type: CiRemoteInclude
+        path_key: remote
+      - type: CiComponentInclude
+        path_key: component
+        version_split: "@"
