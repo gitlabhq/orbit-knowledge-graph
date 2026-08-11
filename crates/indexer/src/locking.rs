@@ -10,22 +10,60 @@ use crate::nats::{KvPutOptions, KvPutResult};
 
 pub const INDEXING_LOCKS_BUCKET: &str = "indexing_locks";
 
+/// KV revision of a held lock; a renewal CAS-swaps against it (see [`NatsLockService`]).
+pub type LockRevision = u64;
+
 #[derive(Debug, thiserror::Error)]
 pub enum LockError {
     #[error("lock operation failed: {0}")]
     Backend(String),
+    #[error("lock lost: another holder owns it")]
+    Lost,
 }
 
 #[async_trait]
 pub trait LockService: Send + Sync {
     async fn try_acquire(&self, key: &str, ttl: Duration) -> Result<bool, LockError>;
+
+    /// Acquire and return the KV revision needed to renew the lease. The default
+    /// delegates to [`try_acquire`](Self::try_acquire) with a sentinel revision, so
+    /// services without CAS renewal degrade to non-renewable locks (the historical
+    /// behavior). [`NatsLockService`] overrides this with the real revision.
+    async fn try_acquire_renewable(
+        &self,
+        key: &str,
+        ttl: Duration,
+    ) -> Result<Option<LockRevision>, LockError> {
+        Ok(self.try_acquire(key, ttl).await?.then_some(0))
+    }
+
+    /// Extend a lease previously taken with [`try_acquire_renewable`](Self::try_acquire_renewable).
+    /// `Ok(Some(new_revision))` renewed; `Ok(None)` means the lease was lost to another holder.
+    /// The default is a no-op keep-alive for services without CAS renewal.
+    async fn renew(
+        &self,
+        _key: &str,
+        _ttl: Duration,
+        revision: LockRevision,
+    ) -> Result<Option<LockRevision>, LockError> {
+        Ok(Some(revision))
+    }
+
     async fn release(&self, key: &str) -> Result<(), LockError>;
+}
+
+struct LockState {
+    expires_at: tokio::time::Instant,
+    revision: LockRevision,
 }
 
 pub struct LockGuard {
     service: Option<Arc<dyn LockService>>,
     key: String,
-    expires_at: tokio::time::Instant,
+    // The heartbeat renews the lease while `index_project` still borrows `&self`, so the
+    // renewable state sits behind a Mutex to keep `renew` a `&self` method. Held only for a
+    // field read/write, never across an await.
+    state: std::sync::Mutex<LockState>,
 }
 
 impl LockGuard {
@@ -34,21 +72,43 @@ impl LockGuard {
         key: &str,
         ttl: Duration,
     ) -> Result<Option<Self>, LockError> {
-        if service.try_acquire(key, ttl).await? {
-            Ok(Some(Self {
+        match service.try_acquire_renewable(key, ttl).await? {
+            Some(revision) => Ok(Some(Self {
                 service: Some(service),
                 key: key.to_string(),
-                expires_at: tokio::time::Instant::now() + ttl,
-            }))
-        } else {
-            Ok(None)
+                state: std::sync::Mutex::new(LockState {
+                    expires_at: tokio::time::Instant::now() + ttl,
+                    revision,
+                }),
+            })),
+            None => Ok(None),
         }
     }
 
-    /// Time left before the lock lapses on its own; nothing ever renews it.
     pub fn time_left(&self) -> Duration {
-        self.expires_at
+        self.state
+            .lock()
+            .unwrap()
+            .expires_at
             .saturating_duration_since(tokio::time::Instant::now())
+    }
+
+    /// Extend the lease. `Err(LockError::Lost)` means another pod stole it — the caller
+    /// must stop working before it double-writes.
+    pub async fn renew(&self, ttl: Duration) -> Result<(), LockError> {
+        let Some(service) = &self.service else {
+            return Ok(());
+        };
+        let revision = self.state.lock().unwrap().revision;
+        match service.renew(&self.key, ttl, revision).await? {
+            Some(new_revision) => {
+                let mut state = self.state.lock().unwrap();
+                state.revision = new_revision;
+                state.expires_at = tokio::time::Instant::now() + ttl;
+                Ok(())
+            }
+            None => Err(LockError::Lost),
+        }
     }
 
     pub async fn release(mut self) -> Result<(), LockError> {
@@ -100,6 +160,14 @@ fn decode_expiration(value: &[u8]) -> Option<DateTime<Utc>> {
 #[async_trait]
 impl LockService for NatsLockService {
     async fn try_acquire(&self, key: &str, ttl: Duration) -> Result<bool, LockError> {
+        Ok(self.try_acquire_renewable(key, ttl).await?.is_some())
+    }
+
+    async fn try_acquire_renewable(
+        &self,
+        key: &str,
+        ttl: Duration,
+    ) -> Result<Option<LockRevision>, LockError> {
         let chrono_ttl =
             chrono::Duration::from_std(ttl).map_err(|e| LockError::Backend(e.to_string()))?;
         let expiration = Utc::now() + chrono_ttl;
@@ -116,11 +184,11 @@ impl LockService for NatsLockService {
             .await
             .map_err(|e| LockError::Backend(e.to_string()))?
         {
-            KvPutResult::Success(_) => {
+            KvPutResult::Success(revision) => {
                 debug!(key, "lock acquired");
-                return Ok(true);
+                return Ok(Some(revision));
             }
-            KvPutResult::RevisionMismatch => return Ok(false),
+            KvPutResult::RevisionMismatch => return Ok(None),
             KvPutResult::AlreadyExists => {}
         }
 
@@ -129,12 +197,12 @@ impl LockService for NatsLockService {
             .kv_get(INDEXING_LOCKS_BUCKET, key)
             .await
             .map_err(|e| LockError::Backend(e.to_string()))?;
-        let Some(entry) = entry else { return Ok(false) };
+        let Some(entry) = entry else { return Ok(None) };
 
         match decode_expiration(&entry.value) {
             Some(at) if Utc::now() < at => {
                 debug!(key, expires_at = %at, "lock contention, still valid");
-                Ok(false)
+                Ok(None)
             }
             Some(_) | None => {
                 match self
@@ -148,13 +216,41 @@ impl LockService for NatsLockService {
                     .await
                     .map_err(|e| LockError::Backend(e.to_string()))?
                 {
-                    KvPutResult::Success(_) => {
+                    KvPutResult::Success(revision) => {
                         debug!(key, "lock acquired after expiry");
-                        Ok(true)
+                        Ok(Some(revision))
                     }
-                    KvPutResult::AlreadyExists | KvPutResult::RevisionMismatch => Ok(false),
+                    KvPutResult::AlreadyExists | KvPutResult::RevisionMismatch => Ok(None),
                 }
             }
+        }
+    }
+
+    /// CAS the stored expiry forward against the revision we hold. A revision mismatch means
+    /// the lease expired and another holder took it — report `None` so the caller stops.
+    async fn renew(
+        &self,
+        key: &str,
+        ttl: Duration,
+        revision: LockRevision,
+    ) -> Result<Option<LockRevision>, LockError> {
+        let chrono_ttl =
+            chrono::Duration::from_std(ttl).map_err(|e| LockError::Backend(e.to_string()))?;
+        let value = encode_expiration(Utc::now() + chrono_ttl);
+
+        match self
+            .nats
+            .kv_put(
+                INDEXING_LOCKS_BUCKET,
+                key,
+                value,
+                KvPutOptions::update_revision(revision),
+            )
+            .await
+            .map_err(|e| LockError::Backend(e.to_string()))?
+        {
+            KvPutResult::Success(new_revision) => Ok(Some(new_revision)),
+            KvPutResult::AlreadyExists | KvPutResult::RevisionMismatch => Ok(None),
         }
     }
 
@@ -244,6 +340,41 @@ mod tests {
             .await
             .expect("acquire ok");
         assert!(result.is_none(), "contended acquire must return None");
+    }
+
+    #[tokio::test]
+    async fn lock_guard_renew_extends_the_lease() {
+        let svc = Arc::new(MockLockService::new());
+        let guard = LockGuard::acquire(svc.clone(), "k6", Duration::from_millis(50))
+            .await
+            .expect("acquire ok")
+            .expect("acquired");
+        let before = guard.time_left();
+        guard
+            .renew(Duration::from_secs(30))
+            .await
+            .expect("renew ok");
+        assert!(
+            guard.time_left() > before,
+            "renew must push the expiry further out",
+        );
+    }
+
+    #[tokio::test]
+    async fn lock_guard_renew_reports_lost_when_stolen() {
+        let svc = Arc::new(MockLockService::new());
+        let guard = LockGuard::acquire(svc.clone(), "k7", Duration::from_secs(1))
+            .await
+            .expect("acquire ok")
+            .expect("acquired");
+        svc.fail_renews();
+        assert!(
+            matches!(
+                guard.renew(Duration::from_secs(1)).await,
+                Err(LockError::Lost)
+            ),
+            "a stolen lease must surface as LockError::Lost",
+        );
     }
 
     mod nats_lock_service {

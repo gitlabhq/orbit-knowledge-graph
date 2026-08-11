@@ -1,6 +1,6 @@
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -11,7 +11,7 @@ use parking_lot::Mutex;
 use uuid::Uuid;
 
 use crate::handler::{Handler, HandlerContext, HandlerError};
-use crate::locking::{LockError, LockService};
+use crate::locking::{LockError, LockRevision, LockService};
 use crate::nats::{
     KvEntry, KvPutOptions, KvPutResult, NatsError, NatsMessage, NatsServices, NoopAcker,
 };
@@ -248,7 +248,10 @@ impl Handler for MockHandler {
 
 #[derive(Clone, Default)]
 pub struct MockLockService {
-    held: Arc<Mutex<HashSet<String>>>,
+    held: Arc<Mutex<HashMap<String, LockRevision>>>,
+    next_revision: Arc<AtomicU64>,
+    renew_fails: Arc<AtomicBool>,
+    renew_calls: Arc<AtomicUsize>,
 }
 
 impl MockLockService {
@@ -257,23 +260,71 @@ impl MockLockService {
     }
 
     pub fn set_lock(&self, key: &str) {
-        self.held.lock().insert(key.to_string());
+        let revision = self.bump_revision();
+        self.held.lock().insert(key.to_string(), revision);
     }
 
     pub fn is_held(&self, key: &str) -> bool {
-        self.held.lock().contains(key)
+        self.held.lock().contains_key(key)
+    }
+
+    pub fn revision(&self, key: &str) -> Option<LockRevision> {
+        self.held.lock().get(key).copied()
+    }
+
+    /// Test hook: make every subsequent `renew` report the lease as stolen.
+    pub fn fail_renews(&self) {
+        self.renew_fails.store(true, Ordering::Relaxed);
+    }
+
+    pub fn renew_count(&self) -> usize {
+        self.renew_calls.load(Ordering::Relaxed)
+    }
+
+    fn bump_revision(&self) -> LockRevision {
+        self.next_revision.fetch_add(1, Ordering::Relaxed) + 1
     }
 }
 
 #[async_trait]
 impl LockService for MockLockService {
-    async fn try_acquire(&self, key: &str, _ttl: Duration) -> Result<bool, LockError> {
+    async fn try_acquire(&self, key: &str, ttl: Duration) -> Result<bool, LockError> {
+        Ok(self.try_acquire_renewable(key, ttl).await?.is_some())
+    }
+
+    async fn try_acquire_renewable(
+        &self,
+        key: &str,
+        _ttl: Duration,
+    ) -> Result<Option<LockRevision>, LockError> {
         let mut held = self.held.lock();
-        if held.contains(key) {
-            Ok(false)
+        if held.contains_key(key) {
+            Ok(None)
         } else {
-            held.insert(key.to_string());
-            Ok(true)
+            let revision = self.bump_revision();
+            held.insert(key.to_string(), revision);
+            Ok(Some(revision))
+        }
+    }
+
+    async fn renew(
+        &self,
+        key: &str,
+        _ttl: Duration,
+        revision: LockRevision,
+    ) -> Result<Option<LockRevision>, LockError> {
+        self.renew_calls.fetch_add(1, Ordering::Relaxed);
+        if self.renew_fails.load(Ordering::Relaxed) {
+            return Ok(None);
+        }
+        let mut held = self.held.lock();
+        match held.get(key) {
+            Some(&current) if current == revision => {
+                let new_revision = self.bump_revision();
+                held.insert(key.to_string(), new_revision);
+                Ok(Some(new_revision))
+            }
+            _ => Ok(None),
         }
     }
 
