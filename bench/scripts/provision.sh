@@ -24,11 +24,17 @@ if [[ "${RA_DEDICATED_POOL:-}" == "1" ]]; then
   IFS=_ read -r _ GKE_PROJECT GKE_ZONE GKE_CLUSTER <<< "${KCTX}"
   POOL_NAME="ra-${RUN_ID}"
   log "Creating dedicated pool ${POOL_NAME}"
-  gcloud container node-pools create "${POOL_NAME}" \
-    --cluster "${GKE_CLUSTER}" --project "${GKE_PROJECT}" --zone "${GKE_ZONE}" \
-    --machine-type "$(tier '.nodes.machine')" --num-nodes 1 \
-    --node-taints "ra-run=${RUN_ID}:NoSchedule" \
-    --node-labels "ra-run=${RUN_ID}" --quiet
+  if ! gcloud container node-pools describe "${POOL_NAME}" \
+      --cluster "${GKE_CLUSTER}" --project "${GKE_PROJECT}" --zone "${GKE_ZONE}" \
+      >/dev/null 2>&1; then
+    gcloud container node-pools create "${POOL_NAME}" \
+      --cluster "${GKE_CLUSTER}" --project "${GKE_PROJECT}" --zone "${GKE_ZONE}" \
+      --machine-type "$(tier '.nodes.machine')" --num-nodes 1 \
+      --node-taints "ra-run=${RUN_ID}:NoSchedule" \
+      --node-labels "ra-run=${RUN_ID}" --quiet
+  else
+    log "  Pool ${POOL_NAME} already exists, reusing"
+  fi
   CH_NODE_SELECTOR="      nodeSelector:
         ra-run: \"${RUN_ID}\""
   CH_TOLERATIONS="      tolerations:
@@ -43,24 +49,45 @@ CH_PASSWORD=$(openssl rand -hex 24)
 
 PVC_DATA_SOURCE=""
 if [[ -n "${RA_DATALAKE_SNAPSHOT:-}" ]]; then
-  # VolumeSnapshots are namespace-scoped. Create a local reference to the
-  # cluster-scoped VolumeSnapshotContent so the PVC can restore from it.
-  SNAP_CONTENT=$($KC get volumesnapshot "${RA_DATALAKE_SNAPSHOT}" \
+  # VolumeSnapshots are namespace-scoped. To restore across namespaces we
+  # create a pre-provisioned VolumeSnapshotContent + VolumeSnapshot pair
+  # that references the same underlying GCE disk snapshot.
+  ORIG_CONTENT=$($KC get volumesnapshot "${RA_DATALAKE_SNAPSHOT}" \
     -n "${RA_DATALAKE_SNAPSHOT_NS:-ra-clickhouse}" \
     -o jsonpath='{.status.boundVolumeSnapshotContentName}')
+  SNAP_HANDLE=$($KC get volumesnapshotcontent "${ORIG_CONTENT}" \
+    -o jsonpath='{.status.snapshotHandle}')
+  LOCAL_SNAP="datalake-${RUN_ID}"
+  LOCAL_CONTENT="datalake-content-${RUN_ID}"
   $KC create ns "${CH_NS}" --dry-run=client -o yaml | $KC apply -f -
   cat <<EOSNAP | $KC apply -f -
 apiVersion: snapshot.storage.k8s.io/v1
+kind: VolumeSnapshotContent
+metadata:
+  name: ${LOCAL_CONTENT}
+spec:
+  driver: pd.csi.storage.gke.io
+  deletionPolicy: Retain
+  source:
+    snapshotHandle: ${SNAP_HANDLE}
+  volumeSnapshotRef:
+    name: ${LOCAL_SNAP}
+    namespace: ${CH_NS}
+---
+apiVersion: snapshot.storage.k8s.io/v1
 kind: VolumeSnapshot
 metadata:
-  name: ${RA_DATALAKE_SNAPSHOT}
+  name: ${LOCAL_SNAP}
   namespace: ${CH_NS}
 spec:
   source:
-    volumeSnapshotContentName: ${SNAP_CONTENT}
+    volumeSnapshotContentName: ${LOCAL_CONTENT}
 EOSNAP
+  log "  Waiting for snapshot ${LOCAL_SNAP} to bind"
+  $KC wait -n "${CH_NS}" volumesnapshot/"${LOCAL_SNAP}" \
+    --for=jsonpath='{.status.readyToUse}'=true --timeout=60s
   PVC_DATA_SOURCE="        dataSource:
-          name: ${RA_DATALAKE_SNAPSHOT}
+          name: ${LOCAL_SNAP}
           kind: VolumeSnapshot
           apiGroup: snapshot.storage.k8s.io"
 fi

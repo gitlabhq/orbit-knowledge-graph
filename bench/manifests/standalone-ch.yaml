@@ -41,7 +41,7 @@ ${CH_TOLERATIONS}
             - name: data
               mountPath: /var/lib/clickhouse
             - name: config-overrides
-              mountPath: /etc/clickhouse-server/users.d
+              mountPath: /etc/clickhouse-server/config.d/bench
           resources:
             requests: { cpu: "2", memory: "8Gi" }
             limits: { cpu: "${CH_CPU}", memory: "${CH_MEMORY}" }
