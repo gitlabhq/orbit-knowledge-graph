@@ -1,9 +1,9 @@
 //! YAML as a graph language: mapping keys become `MappingKey`
 //! definitions with dotted FQNs, anchors become definitions, aliases
-//! become references. Filename-gated document types live in submodules
-//! ([`gitlab_ci`] handles `*.gitlab-ci.yml`).
+//! become references. Document types are declared in embedded YAML
+//! configs interpreted by [`document_types`].
 
-mod gitlab_ci;
+mod document_types;
 
 use crate::v2::config::Language;
 use crate::v2::dsl::types::*;
@@ -19,9 +19,6 @@ use crate::v2::linker::{HasRules, ResolveSettings};
 
 type N<'a> = Node<'a, StrDoc<SupportLang>>;
 
-// Key depth is deliberately unbounded: hand-written helm values reach
-// depth 7+, so capping truncates real config. Pathological files are
-// bounded whole via YAML_PARSER_MAX_FILE_SIZE in v2/pipeline.rs.
 pub(super) const PAIR_KINDS: &[&str] = &["block_mapping_pair", "flow_pair"];
 
 #[derive(Default)]
@@ -66,8 +63,7 @@ impl DslLanguage for YamlDsl {
     fn hooks() -> LanguageHooks {
         LanguageHooks {
             on_scope: Some(yaml_strip_key_quotes),
-            on_import: Some(gitlab_ci::extract_ci_includes),
-            on_import_file_filter: Some(gitlab_ci::is_ci_config_path),
+            on_import_with_path: Some(document_types::extract_imports),
             ..LanguageHooks::default()
         }
     }

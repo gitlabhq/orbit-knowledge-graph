@@ -707,6 +707,7 @@ pub struct SsaConfig {
     pub constructor_methods: &'static [&'static str],
 }
 
+pub type PathImportHookFn = fn(&N<'_>, &str, &mut Vec<crate::v2::types::CanonicalImport>) -> bool;
 pub type ScopeHookFn = fn(
     &N<'_>,
     &mut Vec<crate::v2::types::CanonicalDefinition>,
@@ -725,9 +726,9 @@ pub struct LanguageHooks {
     pub on_scope: Option<ScopeHookFn>,
     /// Override import extraction (e.g. Ruby require/require_relative).
     pub on_import: Option<fn(&N<'_>, &mut Vec<crate::v2::types::CanonicalImport>) -> bool>,
-    /// Restrict `on_import` to files whose path passes this filter
-    /// (e.g. YAML extracts CI includes from `*.gitlab-ci.yml` only).
-    pub on_import_file_filter: Option<fn(&str) -> bool>,
+    /// Path-aware variant of `on_import` for extraction that dispatches
+    /// on filename (e.g. YAML document types). Takes precedence when set.
+    pub on_import_with_path: Option<PathImportHookFn>,
     /// Override the identifier an import writes into SSA.
     pub import_scope_name: Option<ImportScopeNameHook>,
     /// Override the target FQN used by type-resolution import maps.
