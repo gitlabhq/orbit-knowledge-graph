@@ -32,6 +32,8 @@ use std::collections::HashMap;
 
 const SIGNING_KEY: &[u8] = b"test-secret-that-is-long-enough!";
 
+const SLOW_ARCHIVE_DELAY: std::time::Duration = std::time::Duration::from_secs(3);
+
 pub struct CodeIndexingDeps {
     pub pipeline: Arc<CodeIndexer>,
     pub repository_service: Arc<dyn RepositoryService>,
@@ -152,12 +154,19 @@ impl CodeIndexingDeps {
     }
 
     pub fn code_indexing_task_handler(&self) -> CodeIndexingTaskHandler {
+        self.code_indexing_task_handler_with_lock_ttl(std::time::Duration::from_secs(60))
+    }
+
+    pub fn code_indexing_task_handler_with_lock_ttl(
+        &self,
+        lock_ttl: std::time::Duration,
+    ) -> CodeIndexingTaskHandler {
         CodeIndexingTaskHandler::new(
             Arc::clone(&self.pipeline),
             Arc::clone(&self.repository_service),
             Arc::clone(&self.checkpoint_store) as _,
             self.metrics.clone(),
-            std::time::Duration::from_secs(60),
+            lock_ttl,
             CodeIndexingTaskRequest::subscription(),
             indexer::analytics::IndexingAnalytics::disabled(),
         )
@@ -319,7 +328,7 @@ async fn handle_download_archive(
         .get(&project_id)
         .is_some_and(|p| p.slow_archive);
     if slow {
-        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+        tokio::time::sleep(SLOW_ARCHIVE_DELAY).await;
     }
     let projects = state.projects.lock();
     match projects.get(&project_id) {
@@ -368,10 +377,14 @@ fn build_tar_gz(files: &[(&str, &str)], ref_name: &str) -> Vec<u8> {
 }
 
 pub fn handler_context() -> HandlerContext {
+    handler_context_with_lock_service(Arc::new(MockLockService::new()))
+}
+
+pub fn handler_context_with_lock_service(lock_service: Arc<MockLockService>) -> HandlerContext {
     let mock_nats = Arc::new(MockNatsServices::new());
     HandlerContext::new(
         mock_nats.clone(),
-        Arc::new(MockLockService::new()),
+        lock_service,
         ProgressNotifier::noop(),
         Arc::new(indexer::indexing_status::IndexingStatusStore::new(
             mock_nats,

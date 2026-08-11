@@ -70,7 +70,7 @@
               "big_indexing_slots": null,
               "cross_file_resolve_timeout_ms": 180000,
               "fetch_concurrency": 10,
-              "job_timeout_secs": 250,
+              "job_timeout_secs": 1500,
               "max_concurrent_languages": 0,
               "max_file_size_bytes": 5000000,
               "max_files": 1000000,
@@ -437,10 +437,10 @@
           "minimum": 0
         },
         "job_timeout_secs": {
-          "description": "Hard wall-clock budget (seconds) for one repository job (fetch + index); exceeding it aborts and retries. Keep below `nats.ack_wait_secs`. 0 = no timeout. Defaults to 250.",
+          "description": "Hard wall-clock budget (seconds) for one repository job (fetch + index); exceeding it aborts and retries. May exceed `nats.ack_wait_secs`: the handler heartbeats `ack_progress` and renews the project lock so a long job is not redelivered. 0 = no timeout. Defaults to 1500.",
           "type": "integer",
           "format": "uint64",
-          "default": 250,
+          "default": 1500,
           "minimum": 0
         },
         "max_concurrent_languages": {
@@ -570,7 +570,7 @@
             "big_indexing_slots": null,
             "cross_file_resolve_timeout_ms": 180000,
             "fetch_concurrency": 10,
-            "job_timeout_secs": 250,
+            "job_timeout_secs": 1500,
             "max_concurrent_languages": 0,
             "max_file_size_bytes": 5000000,
             "max_files": 1000000,
@@ -675,7 +675,7 @@
                 "big_indexing_slots": null,
                 "cross_file_resolve_timeout_ms": 180000,
                 "fetch_concurrency": 10,
-                "job_timeout_secs": 250,
+                "job_timeout_secs": 1500,
                 "max_concurrent_languages": 0,
                 "max_file_size_bytes": 5000000,
                 "max_files": 1000000,
@@ -911,7 +911,7 @@
               "big_indexing_slots": null,
               "cross_file_resolve_timeout_ms": 180000,
               "fetch_concurrency": 10,
-              "job_timeout_secs": 250,
+              "job_timeout_secs": 1500,
               "max_concurrent_languages": 0,
               "max_file_size_bytes": 5000000,
               "max_files": 1000000,
