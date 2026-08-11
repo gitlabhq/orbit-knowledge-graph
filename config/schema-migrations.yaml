@@ -17,8 +17,7 @@
 # version with no entry is treated as "*", which also makes pruning old entries safe.
 migrations:
 - version: 89
-  scope: sdlc
-  entities: [MergeRequestDiffFile]
+  scope: '*'
   note: MergeRequestDiffFile extract rewritten from bare INNER JOIN to CTE + IN-list. The traversal_path column now comes from the file table instead of the parent diff table; in production these are identical, but this is a semantic change that requires re-indexing this entity.
 - version: 88
   scope: none
