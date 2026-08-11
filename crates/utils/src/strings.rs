@@ -40,11 +40,11 @@ impl StringPool {
         StrId(idx as u32)
     }
 
-    /// Resolve a handle to an owned `SmolStr`. For strings <= 23 bytes this
-    /// is a stack copy with no heap allocation.
+    /// Resolve a handle to a string reference. The returned `&str` borrows
+    /// from the pool and is valid for as long as `&self` is alive.
     #[inline]
-    pub fn get(&self, id: StrId) -> SmolStr {
-        self.store[id.0 as usize].clone()
+    pub fn get(&self, id: StrId) -> &str {
+        &self.store[id.0 as usize]
     }
 
     pub fn len(&self) -> usize {

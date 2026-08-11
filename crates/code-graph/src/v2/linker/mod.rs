@@ -1,3 +1,4 @@
+pub mod concurrent_graph;
 pub mod graph;
 pub mod imports;
 pub mod resolver;
