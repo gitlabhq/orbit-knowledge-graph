@@ -1,3 +1,15 @@
+## [0.96.1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.96.0...v0.96.1) (2026-08-11)
+
+### Fixes
+
+* **indexer:** checkpoint oversized repos empty instead of dead-lettering ([9372482](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/9372482a34ad74fb007ff614ad25f83e70d3f286)) by Jean-Gabriel Doyon
+* **indexer:** skip unindexable archive entries instead of failing the whole repo ([7cd9db1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/7cd9db12d293275be38b1fc674449fbb844b624b)) by Jean-Gabriel Doyon
+
+### Other
+
+* **i18n:** update ja-jp for commit 194f138a ([b8bef7d](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b8bef7dc1c402d2c3bbb2dce16dfa6ec7141cc6b)) by GitLab-Argo Bot
+* **integration:** seeded virtual column resolver for data correctness tests ([6b7a9e4](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/6b7a9e4a716ef83efaf7ea9e50bb52e6739e3c21)) by Aaron Algutifan
+
 ## [0.96.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.95.3...v0.96.0) (2026-08-10)
 
 ### Features
