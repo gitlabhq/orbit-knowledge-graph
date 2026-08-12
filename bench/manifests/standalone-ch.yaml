@@ -80,6 +80,7 @@ data:
         <default>
           <max_bytes_before_external_sort>8589934592</max_bytes_before_external_sort>
           <max_bytes_before_external_group_by>8589934592</max_bytes_before_external_group_by>
+          <max_memory_usage>21474836480</max_memory_usage>
         </default>
       </profiles>
     </clickhouse>
