@@ -21,7 +21,7 @@ use crate::proto::{
     ResponseFormat, StructuredGraphStatus, get_graph_status_response,
 };
 
-use self::input::{GraphStatusInput, NodeTable};
+use self::input::GraphStatusInput;
 
 pub struct GraphStatusService {
     client: Arc<ArrowClickHouseClient>,
@@ -134,19 +134,17 @@ fn entity_counts_sql(input: &GraphStatusInput) -> String {
     input
         .nodes
         .iter()
-        .map(node_count_sql)
+        .map(|node| {
+            format!(
+                "SELECT '{name}' AS entity, uniqIf(d.id, d._deleted = 0) AS cnt \
+                   FROM {table} AS d \
+                  WHERE startsWith(d.traversal_path, {{path:String}})",
+                name = node.name,
+                table = node.table,
+            )
+        })
         .collect::<Vec<_>>()
         .join(" UNION ALL ")
-}
-
-fn node_count_sql(node: &NodeTable) -> String {
-    format!(
-        "SELECT '{name}' AS entity, uniqIf(d.id, d._deleted = 0) AS cnt \
-           FROM {table} AS d \
-          WHERE startsWith(d.traversal_path, {{path:String}})",
-        name = node.name,
-        table = node.table,
-    )
 }
 
 async fn execute_count_query(
@@ -281,6 +279,7 @@ fn present_domain_response(
 
 #[cfg(test)]
 mod tests {
+    use super::input::NodeTable;
     use super::*;
     use clickhouse_client::ClickHouseConfigurationExt;
     use query_engine::compiler::TraversalPath;
