@@ -12,6 +12,73 @@ path = "src/main.rs"
 default = []
 regenerate-protos = []
 testkit = ["orbit-analytics/testkit"]
+# FIPS: single opt-in toggle that routes every crypto surface in the binary
+# through a FIPS-validated module (AWS-LC via aws-lc-rs). `default = []` keeps the
+# normal build on the non-FIPS backends; `cargo build --features fips` is the only
+# difference. It fans out to each distinct crypto surface:
+#
+#   rustls/fips          — the shared rustls TLS stack. rustls's own `fips`
+#                          feature enables `aws-lc-rs/fips` (the validated
+#                          aws-lc-fips-sys module, built from source with
+#                          -DFIPS=1) AND `webpki/aws-lc-rs-fips`, so via Cargo
+#                          feature unification the whole rustls-based transport —
+#                          tonic (`tls-aws-lc`), clickhouse (`rustls-tls-aws-lc`),
+#                          hyper-rustls, rcgen, reqwest (`rustls-no-provider`,
+#                          which uses the installed aws_lc_rs process provider) —
+#                          runs on the FIPS module.
+#
+#   nats-client/fips     — async-nats bundles its OWN rustls and would otherwise
+#                          use the `ring` provider (`rustls/fips` does NOT reach
+#                          it). nats-client's `fips` feature enables
+#                          `async-nats/fips` (aws-lc-rs + tokio-rustls/fips) so
+#                          NATS TLS uses AWS-LC. NOTE: async-nats builds its TLS
+#                          ClientConfig with the rustls *process-default*
+#                          provider, which main.rs sets to aws_lc_rs — so NATS
+#                          TLS uses AWS-LC at runtime either way; this feature
+#                          additionally moves async-nats's own digest helper onto
+#                          aws-lc-rs. (`ring` may still be COMPILED but is not
+#                          used for TLS — see the ring note below.)
+#
+#   jsonwebtoken/aws_lc_rs — JWT signing/verification (HS256 for the GitLab
+#                          internal API) otherwise runs on the pure-Rust
+#                          RustCrypto backend. This adds the aws_lc_rs backend
+#                          alongside the default rust_crypto one; main.rs installs
+#                          the correct jsonwebtoken provider based on the `fips`
+#                          cfg (both backends are compiled, so the provider is
+#                          installed explicitly, exactly like the rustls provider).
+#
+#   ontology/fips          — the one non-TLS SHA-256 on the server's own boundary:
+#                          the ontology / DDL fingerprint hash. Without this it
+#                          runs on the RustCrypto `sha2` crate; ontology/fips
+#                          computes it with the AWS-LC module (aws-lc-rs digest)
+#                          instead, so no in-boundary hash uses a non-validated
+#                          implementation. (RNG in the server is UUIDs/jitter, not
+#                          cryptographic; NATS uses user/pass not nkey; SigV4/lance
+#                          object-store signing is test-only and not in the binary.)
+#
+# Build tooling (FIPS only): aws-lc-fips-sys compiles AWS-LC from source and needs
+# cmake, go, perl, nasm (x86_64) and clang (the FIPS delocate step rejects GCC
+# assembly). These are pulled in via mise.toml so local + CI builds have them.
+#
+# Residual / accepted non-FIPS surfaces (documented, out of scope for the
+# binary's TLS/JWT boundary):
+#   - `ring`: async-nats and a few transitive deps still COMPILE `ring`, but it
+#     is not used for TLS (rustls uses the installed aws_lc_rs provider) nor for
+#     JWT. Fully removing it from the link is blocked by Cargo's global feature
+#     unification (indexer/health-check/integration-tests pull async-nats too)
+#     and would require an ecosystem-wide `--no-default-features` build; tracked
+#     as a follow-up. This mirrors the accepted `aws-lc-sys`-compiled-but-unused
+#     situation under `rustls/fips`.
+#   - `sha2` (RustCrypto): used only for ontology fingerprinting / DDL content
+#     hashing (integrity/versioning, not a security boundary).
+#   - `reqsign` pulls a transitive `jsonwebtoken` for cloud request signing (not
+#     exercised by the server's own auth path).
+fips = [
+  "rustls/fips",
+  "nats-client/fips",
+  "jsonwebtoken/aws_lc_rs",
+  "ontology/fips",
+]
 
 [dependencies]
 mimalloc = { workspace = true, features = ["secure"] }

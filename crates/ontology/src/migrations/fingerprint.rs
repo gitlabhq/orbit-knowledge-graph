@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
+#[cfg(all(not(feature = "fips"), feature = "sha2"))]
 use sha2::{Digest, Sha256};
 
 use crate::loading::ONTOLOGY_SCHEMA_FILE;
@@ -108,13 +109,29 @@ fn stable_versioned_schema_hash(content: &str) -> String {
         .unwrap_or_else(|_| sha256_hex(content))
 }
 
+/// Hex-encoded SHA-256 of `input`, used for ontology / DDL fingerprinting.
+///
+/// Under the `fips` feature the digest is computed with the FIPS-validated
+/// AWS-LC module (aws-lc-rs); otherwise it uses the RustCrypto `sha2` crate. Both
+/// produce identical output — this only changes which cryptographic module runs
+/// the hash, so a FIPS build has no non-validated SHA-256 on this path.
 #[must_use]
 pub fn sha256_hex(input: &str) -> String {
     use std::fmt::Write as _;
 
-    let mut hasher = Sha256::new();
-    hasher.update(input.as_bytes());
-    let digest = hasher.finalize();
+    #[cfg(feature = "fips")]
+    let digest: Vec<u8> = {
+        let d = aws_lc_rs::digest::digest(&aws_lc_rs::digest::SHA256, input.as_bytes());
+        d.as_ref().to_vec()
+    };
+
+    #[cfg(not(feature = "fips"))]
+    let digest: Vec<u8> = {
+        let mut hasher = Sha256::new();
+        hasher.update(input.as_bytes());
+        hasher.finalize().to_vec()
+    };
+
     let mut out = String::with_capacity(digest.len() * 2);
     for byte in digest {
         let _ = write!(out, "{byte:02x}");
@@ -227,6 +244,18 @@ mod tests {
 
     fn set(names: &[&str]) -> BTreeSet<String> {
         names.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn sha256_hex_matches_known_vector() {
+        // NIST FIPS 180-4 test vector for SHA-256("abc"). Pins that both the
+        // RustCrypto (`sha2`) and the FIPS AWS-LC (aws-lc-rs) backends produce
+        // the standard digest, so the `fips` feature only swaps the module, not
+        // the output.
+        assert_eq!(
+            sha256_hex("abc"),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
     }
 
     #[test]

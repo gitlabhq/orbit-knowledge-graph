@@ -5,8 +5,22 @@ edition = "2024"
 license = "LicenseRef-EE"
 
 [features]
-default = []
+# `ring` is the default async-nats TLS provider for normal builds (the workspace
+# async-nats dep has default-features off, so a provider must be selected here).
+default = ["ring"]
 testkit = []
+# Normal (non-FIPS) TLS provider for async-nats.
+ring = ["async-nats/ring"]
+# FIPS: enable async-nats's validated AWS-LC provider.
+# `async-nats/fips` = ["aws-lc-rs", "tokio-rustls/fips"]. orbit-server's `fips`
+# feature turns this on. NOTE: with a plain `--features fips` build the `ring`
+# default above stays enabled (Cargo can't drop a dependency default per-feature),
+# so `ring` is still COMPILED but is not used for TLS — async-nats builds its
+# ClientConfig from the rustls process-default provider, which orbit-server
+# installs as aws_lc_rs. Dropping `ring` from the link entirely needs an
+# ecosystem-wide `--no-default-features` build (all async-nats users), tracked as
+# a follow-up.
+fips = ["async-nats/fips"]
 
 [dependencies]
 circuit-breaker = { workspace = true }

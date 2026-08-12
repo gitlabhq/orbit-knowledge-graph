@@ -33,6 +33,22 @@ async fn main() -> anyhow::Result<()> {
         .install_default()
         .expect("Failed to install rustls CryptoProvider");
 
+    // jsonwebtoken auto-selects its crypto backend from crate features only when
+    // exactly one of `rust_crypto` / `aws_lc_rs` is enabled. The `fips` feature
+    // adds `aws_lc_rs` alongside the default `rust_crypto`, so both are compiled
+    // and we must install the process-wide provider explicitly (mirroring the
+    // rustls provider install above) — otherwise the first JWT sign/verify would
+    // panic with "Could not automatically determine the process-level
+    // CryptoProvider". The choice is still driven by the `fips` build feature.
+    #[cfg(feature = "fips")]
+    jsonwebtoken::crypto::aws_lc::DEFAULT_PROVIDER
+        .install_default()
+        .expect("Failed to install jsonwebtoken FIPS (aws-lc-rs) CryptoProvider");
+    #[cfg(not(feature = "fips"))]
+    jsonwebtoken::crypto::rust_crypto::DEFAULT_PROVIDER
+        .install_default()
+        .expect("Failed to install jsonwebtoken (RustCrypto) CryptoProvider");
+
     let args = Args::parse();
     let config = AppConfig::load()?;
 

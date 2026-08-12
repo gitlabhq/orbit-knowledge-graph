@@ -50,6 +50,17 @@ hyperfine = "1.20.0"
 "aqua:gitleaks/gitleaks" = "8.30.1"
 "github:google/go-jsonnet" = "0.22.0"
 
+# FIPS build toolchain (only exercised by `cargo build --features fips`).
+# aws-lc-fips-sys compiles the FIPS-validated AWS-LC module from source, which
+# needs cmake, go and nasm (x86_64 pre-generated asm). perl and clang are also
+# required — clang because the FIPS `delocate` step rejects GCC-emitted assembly
+# (`.data section found in module`) — but are expected from the system toolchain
+# (they are not reliably available across mise backends); CI images install them.
+# These are harmless no-ops for normal (non-FIPS) builds.
+cmake = "3.31"
+go = "1.24"
+nasm = "2.16.3"
+
 [tasks."hooks:install"]
 run = ["lefthook install --force", "cp scripts/hooks/post-checkout $(git rev-parse --git-common-dir)/hooks/post-checkout"]
 description = "Install git hooks (lefthook + worktree support)"

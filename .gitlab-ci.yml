@@ -459,8 +459,50 @@ lint-check:
     - .sccache-template
     - .mr-only-rules
   script:
-    - cargo clippy --workspace --exclude duckdb-client --all-targets --all-features -- -D warnings
+    # NOTE: `--all-features` deliberately does NOT reach the `fips` features
+    # (orbit-server/fips, ontology/fips) — those pull the from-source AWS-LC FIPS
+    # module and are verified separately by `fips-check` (below), so this fast,
+    # every-MR clippy pass never compiles it. orbit-server and ontology are
+    # excluded from the workspace `--all-features` sweep and linted with their
+    # non-fips features explicitly.
+    - cargo clippy --workspace --exclude duckdb-client --exclude orbit-server --exclude ontology --all-targets --all-features -- -D warnings
+    - cargo clippy -p orbit-server --all-targets --features regenerate-protos,testkit -- -D warnings
+    - cargo clippy -p ontology --all-targets --features sha2 -- -D warnings
     - cargo clippy -p duckdb-client --all-targets -- -D warnings
+    - sccache --show-stats || true
+
+# Dedicated FIPS build verification. Compiles orbit-server with the `fips`
+# feature so the from-source AWS-LC FIPS module (aws-lc-fips-sys, needing
+# cmake/go/perl/nasm/clang from mise + the build image) is exercised on CI and
+# cannot silently bit-rot on a rustls / aws-lc-rs / async-nats / jsonwebtoken /
+# ontology-digest bump. Also runs the ontology FIPS digest test so the aws-lc-rs
+# hash backend is verified against the known SHA-256 vector. Kept out of the
+# default `--all-features` matrix (lint-check) so normal MRs stay fast; runs on
+# MRs that touch the crypto/manifest surface and on main.
+fips-check:
+  stage: security
+  extends:
+    - .job-template
+    - .sccache-template
+  needs: []
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      changes:
+        - Cargo.toml
+        - Cargo.lock
+        - mise.toml
+        - crates/orbit-server/Cargo.toml
+        - crates/nats-client/Cargo.toml
+        - crates/gitlab-client/Cargo.toml
+        - crates/orbit-server/src/main.rs
+        - crates/ontology/Cargo.toml
+        - crates/ontology/src/migrations/fingerprint.rs
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+  script:
+    - cargo build -p orbit-server --features fips
+    - cargo clippy -p orbit-server --all-targets --features fips -- -D warnings
+    # ontology's FIPS SHA-256 backend (aws-lc-rs) — verify it matches the vector.
+    - cargo test -p ontology --no-default-features --features fips sha256_hex_matches
     - sccache --show-stats || true
 
 # Security Stage
@@ -699,6 +741,12 @@ integration-test:
       wait
   script:
     # corpus-smoke runs as its own parallel job below.
+    # NOTE: `--all-features` also enables orbit-server's `fips` feature, so this
+    # job compiles the from-source AWS-LC FIPS module (cmake/go/perl/nasm/clang
+    # come from mise + the build image). That is intentional extra coverage of
+    # the FIPS path in an integration context; sccache keeps the AWS-LC object
+    # cache warm across runs. `fips-check` (security stage) is the fast,
+    # targeted gate; this is belt-and-braces.
     - cargo nextest run --profile ci --all-features --test containers -E 'not test(corpus_smoke)'
     - sccache --show-stats || true
 

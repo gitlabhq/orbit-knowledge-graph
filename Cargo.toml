@@ -106,7 +106,29 @@ toon-format = { version = "0.5.0", default-features = false }
 opentelemetry = { version = "0.32", default-features = false, features = ["metrics"] }
 tracing = "0.1.44"
 uuid = { version = "1.19.0", features = ["v4", "serde"] }
-async-nats = { version = "0.49.0", features = ["server_2_11"] }
+# async-nats: default-features disabled so the TLS crypto provider is not pulled
+# in at the workspace level (`ring` is one of async-nats's defaults). The provider
+# is selected once by the `nats-client` crate — `ring` for normal builds,
+# `async-nats/fips` (aws-lc-rs) under `nats-client/fips`. The non-provider
+# defaults async-nats would otherwise enable are re-listed explicitly here
+# (everything except `ring`); the direct async-nats users (indexer, health-check,
+# integration-tests) inherit this via `workspace = true`, so none of them re-adds
+# `ring`. NOTE: async-nats builds its TLS ClientConfig with the rustls
+# process-default provider (set to aws_lc_rs in orbit-server main.rs), so NATS
+# TLS uses AWS-LC regardless; the provider feature here controls async-nats's own
+# digest helper and keeps the FIPS build's provider surface consistent.
+async-nats = { version = "0.49.0", default-features = false, features = [
+  "server_2_10",
+  "server_2_11",
+  "jetstream",
+  "kv",
+  "object-store",
+  "service",
+  "crypto",
+  "nkeys",
+  "nuid",
+  "websockets",
+] }
 arrow-ipc = "58.0.0"
 clickhouse = { version = "0.15", features = ["inserter", "rustls-tls-aws-lc", "rustls-tls-native-roots"] }
 testcontainers = "0.27.3"
@@ -169,6 +191,11 @@ minijinja = "2.21.0"
 
 # Server dependencies
 axum = { version = "0.8.8", features = ["macros"] }
+# jsonwebtoken: `rust_crypto` is the baseline (non-FIPS) backend and stays on.
+# The FIPS build additionally enables `aws_lc_rs` (via orbit-server's `fips`
+# feature). With both backends compiled, jsonwebtoken cannot auto-pick a
+# provider, so orbit-server installs the process-wide provider explicitly in
+# main.rs, chosen by the `fips` cfg (mirroring the rustls provider install).
 jsonwebtoken = { version = "10.2.0", features = ["rust_crypto"] }
 rust-embed = { version = "8.11.0", features = ["interpolate-folder-path", "debug-embed"] }
 semver = { version = "1.0", features = ["serde"] }
@@ -182,6 +209,11 @@ kube = { version = "3.0", features = ["client", "runtime", "ws"] }
 k8s-openapi = { version = "0.27", features = ["v1_31"] }
 reqwest = { version = "0.13", default-features = false, features = ["json", "query", "rustls-no-provider"] }
 rustls = { version = "0.23.36", default-features = false, features = ["aws_lc_rs"] }
+# aws-lc-rs digest API for FIPS builds of non-TLS hashing (e.g. ontology
+# fingerprints). Version tracks the aws-lc-rs already resolved via rustls. Under
+# a crate's `fips` feature it carries the `fips` sub-feature so the validated
+# AWS-LC module performs the hash; otherwise it's the standard aws-lc-rs.
+aws-lc-rs = { version = "1.16", default-features = false, features = ["aws-lc-sys"] }
 health-check = { path = "crates/health-check" }
 gitlab-client = { path = "crates/gitlab-client" }
 
