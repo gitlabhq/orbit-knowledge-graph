@@ -1,8 +1,8 @@
 name: query_graph_v2
-version: 1.0.1
+version: 1.0.2
 description: >-
   Query GitLab relationships and code structure: traversal,
   dependency/blast-radius, cross-entity joins, grouped aggregation. Prefer
-  ordinary glab for one known entity, a simple list/count, or a write. Before
-  composing a query, call get_query_dsl for the grammar and get_graph_schema for
-  the node, property, and edge names.
+  ordinary GitLab tools for one known entity, a simple list/count, or a write.
+  Before composing a query, call get_query_dsl for the grammar and
+  get_graph_schema for the node, property, and edge names.

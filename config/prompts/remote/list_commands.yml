@@ -1,5 +1,5 @@
 name: list_commands
-version: 1.1.1
+version: 1.1.2
 variables: [commands]
 description: >-
   Discover Orbit commands for GitLab relationship and code-structure questions.
@@ -7,7 +7,7 @@ description: >-
   relationship traversal, cross-entity or cross-project joins, grouped or
   multi-entity aggregation, and repository maps. Do not use Orbit for a lookup,
   list, or simple count about one known MR, project, or user, or for writes; use
-  ordinary GitLab or glab tools instead. Call this before invoke_command to get
+  ordinary GitLab tools instead. Call this before invoke_command to get
   command input schemas.
 
 
