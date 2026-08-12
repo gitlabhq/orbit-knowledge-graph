@@ -1,9 +1,0 @@
-run:
-  name: smoke
-  repetitions: 1
-  results_bucket: gs://gkg-ra-results
-dataset:
-  dump_prefix: core-2026-06-25-1115
-  scrub: true
-tiers: [small]
-phases: [p1, p2, p3a, p4]
