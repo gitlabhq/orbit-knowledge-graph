@@ -137,9 +137,11 @@ pub struct JsModuleGraphBuilder {
 }
 
 impl JsModuleGraphBuilder {
-    pub fn new(root_path: String) -> Self {
+    pub fn new(root_path: String, pool: StringPool) -> Self {
+        let mut graph = CodeGraph::new(root_path);
+        graph.strings = pool;
         Self {
-            graph: CodeGraph::new(root_path),
+            graph,
             modules: JsModuleIndex::default(),
         }
     }

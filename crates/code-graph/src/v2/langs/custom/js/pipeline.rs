@@ -59,7 +59,7 @@ impl LanguagePipeline for JsPipeline {
             return Ok(());
         }
 
-        let mut builder = JsModuleGraphBuilder::new(root_path.to_string());
+        let mut builder = JsModuleGraphBuilder::new(root_path.to_string(), js_pool);
         let mut file_infos: FxHashMap<String, JsPhase1FileInfo> = FxHashMap::default();
         let mut resolved_files = Vec::with_capacity(analyzed_files.len());
         for file in analyzed_files {
