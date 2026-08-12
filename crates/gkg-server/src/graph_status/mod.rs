@@ -140,21 +140,8 @@ fn entity_counts_sql(input: &GraphStatusInput) -> String {
 }
 
 fn node_count_sql(node: &NodeTable) -> String {
-    // Group alone needs FINAL: namespace-deletion tombstones (distinct ids the _deleted-less
-    // projection can't drop) inflate uniq(id). The table is tiny, so FINAL is cheap; other
-    // types stay accurate enough with approximate uniq(id).
-    if node.name == "Group" {
-        return format!(
-            "SELECT '{name}' AS entity, count() AS cnt \
-               FROM {table} AS d FINAL \
-              WHERE d._deleted = 0 AND startsWith(d.traversal_path, {{path:String}})",
-            name = node.name,
-            table = node.table,
-        );
-    }
-
     format!(
-        "SELECT '{name}' AS entity, uniq(d.id) AS cnt \
+        "SELECT '{name}' AS entity, uniqIf(d.id, d._deleted = 0) AS cnt \
            FROM {table} AS d \
           WHERE startsWith(d.traversal_path, {{path:String}})",
         name = node.name,
@@ -534,20 +521,15 @@ mod tests {
     }
 
     #[test]
-    fn entity_counts_scans_only_group_with_final() {
-        let sql = entity_counts_sql(&counts_input());
+    fn entity_counts_exclude_deleted_uniformly_without_final() {
+        let input = counts_input();
+        let sql = entity_counts_sql(&input);
 
-        assert_eq!(sql.matches(" FINAL").count(), 1, "SQL: {sql}");
-        assert!(sql.contains("v1_gl_group AS d FINAL"), "SQL: {sql}");
-        assert!(sql.contains("d._deleted"), "SQL: {sql}");
-    }
-
-    #[test]
-    fn entity_counts_non_group_entities_use_uniq_projection() {
-        let sql = entity_counts_sql(&counts_input());
-
-        assert_eq!(sql.matches("uniq(d.id)").count(), 3, "SQL: {sql}");
-        assert!(!sql.contains("v1_gl_definition AS d FINAL"), "SQL: {sql}");
-        assert!(!sql.contains("v1_gl_project AS d FINAL"), "SQL: {sql}");
+        assert_eq!(
+            sql.matches("uniqIf(d.id, d._deleted = 0)").count(),
+            input.nodes.len(),
+            "every node counts live ids the same way. SQL: {sql}"
+        );
+        assert!(!sql.contains("FINAL"), "SQL: {sql}");
     }
 }
