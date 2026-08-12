@@ -138,8 +138,12 @@ releases:
 
   - name: gkg
     namespace: e2e-{{ $sha }}-gkg
+{{- if env "E2E_GKG_CHART" }}
+    chart: {{ env "E2E_GKG_CHART" }}
+{{- else }}
     chart: oci://registry.gitlab.com/gitlab-org/orbit/orbit-helm-charts/gkg
     version: {{ $v.gkg.chart }}
+{{- end }}
     labels:
       phase: pipeline
       component: gkg

@@ -37,6 +37,12 @@ secrets:
     graphReadPassword:
       secretName: "gkg-secrets"
 
+clickhouseSetup:
+  enabled: true
+  adminSecret:
+    secretName: "gkg-secrets"
+    key: admin-password
+
 webserver:
   enabled: true
   replicas: 1
