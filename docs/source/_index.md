@@ -40,7 +40,7 @@ Query the graph to answer questions your instance cannot answer directly:
 - Where are the open critical vulnerabilities, and which pipelines introduced them?
 - Which projects depend on this library?
 
-*GitLab Orbit is an analytical system designed for point-in-time SDLC insight, not real-time or transactional use cases. Results reflect the state of your data as of the last index cycle.*
+GitLab Orbit is an analytical system designed for point-in-time SDLC insight, not real-time or transactional use cases. Results reflect the state of your data as of the last index cycle.
 
 For a click-through demo, see [GitLab Orbit](https://click-through-demo-generator-v-2-d63870.gitlab.io/demos/orbit-v2/).
 <!-- Demo published on 2026-06-30 -->
@@ -98,9 +98,9 @@ GitLab Orbit Remote.
 
 ## GitLab Orbit on GitLab Self-Managed
 
-On GitLab Self-Managed, you run GitLab Orbit yourself on a Kubernetes cluster next to your instance,
-along with the data pipeline that feeds it: PostgreSQL logical replication, Siphon, NATS, and ClickHouse.
-The graph and the query surfaces are the same as on GitLab.com.
+On GitLab Self-Managed, you run GitLab Orbit on a Kubernetes cluster next to your instance. The deployment
+also includes the data pipeline that feeds the graph: PostgreSQL logical replication, Siphon, NATS, and
+ClickHouse. The graph and the query surfaces match GitLab.com.
 
 [Get started with GitLab Orbit on GitLab Self-Managed](self-managed/getting-started.md)
 

@@ -20,22 +20,31 @@ title: GitLab Orbit on GitLab Self-Managed
 
 {{< /history >}}
 
-On GitLab.com, GitLab Orbit runs on GitLab infrastructure. On GitLab Self-Managed you run it yourself,
-next to your instance.
+On GitLab.com, GitLab Orbit runs on GitLab infrastructure.
+On GitLab Self-Managed, you run GitLab Orbit next to your instance.
 
-You install two things. First a data pipeline that copies your GitLab database into ClickHouse, then
-GitLab Orbit itself, which turns that copy into a queryable graph. The data pipeline stands on its own,
-so you can verify it before you install GitLab Orbit.
+A GitLab Orbit deployment has two parts:
 
-GitLab does not ship GitLab Orbit in the Linux package. The only supported deployment is the Helm chart
-on Kubernetes, either on the GitLab cluster or on a cluster next to your instance.
+- A data pipeline that copies the GitLab database into ClickHouse.
+- GitLab Orbit, which turns that copy into a queryable graph.
+
+The data pipeline does not depend on GitLab Orbit, so you can verify the pipeline before you install
+GitLab Orbit.
+
+The Linux package does not include GitLab Orbit. The only supported deployment is the GitLab Orbit Helm
+chart on Kubernetes. Install the chart on the cluster that runs GitLab, or on a separate cluster next to
+your instance.
+
+GitLab Orbit on GitLab Self-Managed is in
+[beta](https://docs.gitlab.com/policy/development_stages_support/#beta).
+GitLab works with you to set up each deployment, so contact your account team before you plan one.
 
 ## Architecture
 
 ```mermaid
 flowchart LR
     accTitle: GitLab Orbit on GitLab Self-Managed
-    accDescr: GitLab writes to PostgreSQL. Siphon reads the PostgreSQL write-ahead log, passes rows through NATS JetStream, and writes them into the ClickHouse data lake. The GitLab Orbit dispatcher watches the same NATS stream, owns the graph schema, and publishes indexing tasks back to NATS. The GitLab Orbit indexer takes those tasks, reads the data lake, reads source code over the GitLab internal API, and writes the graph to ClickHouse. GitLab queries the GitLab Orbit webserver over gRPC.
+    accDescr: GitLab writes to PostgreSQL, Siphon reads the PostgreSQL write-ahead log and replicates rows through NATS JetStream into the ClickHouse data lake, the GitLab Orbit dispatcher watches the same NATS stream and creates the graph schema in ClickHouse, the GitLab Orbit indexer takes indexing tasks from NATS and builds the property graph from the data lake and from source code fetched over the GitLab internal API, and GitLab queries the GitLab Orbit webserver over gRPC.
 
     subgraph GitLab["GitLab instance"]
         PG[(PostgreSQL)]
@@ -67,27 +76,26 @@ flowchart LR
     Rails -- gRPC --> Web
 ```
 
-Siphon copies rows out of PostgreSQL into the ClickHouse data lake, passing them through NATS on the
-way. The dispatcher watches the same NATS stream to learn what changed, owns the graph schema, and
-publishes indexing tasks back to NATS. The indexer takes those tasks, reads the data lake, fetches
-source code over the GitLab internal API, and writes the property graph. The webserver answers queries
-from that graph, fetching file content over the internal API when a query needs it, and GitLab reaches
-it over gRPC.
+| Component | Function |
+|-----------|----------|
+| Siphon | Copies rows from PostgreSQL into the ClickHouse data lake, through NATS. |
+| Dispatcher | Watches the same NATS stream, owns the graph schema, and publishes indexing tasks back to NATS. |
+| Indexer | Takes indexing tasks from NATS, reads the data lake, fetches source code over the GitLab internal API, and writes the property graph. |
+| Webserver | Answers queries from the graph, and fetches file content over the internal API when a query needs it. |
+
+GitLab reaches the webserver over gRPC.
 
 ## In this section
 
 | Page | Description |
-|---|---|
-| [Get started](getting-started.md) | What you need before you begin, and in which order to install it |
+|------|-------------|
+| [Get started](getting-started.md) | Prerequisites, installation order, and shared configuration values |
 | [Set up data replication](data-replication.md) | PostgreSQL logical replication and Siphon |
-| [Set up GitLab Orbit](orbit-setup.md) | ClickHouse identities, the GitLab Orbit chart, and enabling a group |
+| [Set up GitLab Orbit](orbit-setup.md) | ClickHouse identities, the GitLab connection, the GitLab Orbit chart, and group indexing |
 
-## What is not covered
+## Support and coverage
 
-GitLab Orbit on GitLab Self-Managed is in beta. Onboarding happens together with GitLab, so contact your
-account team before you plan a deployment.
+GitLab Orbit is not supported on a GitLab Geo secondary site, and no FIPS builds are available.
 
-- **High availability and disaster recovery.** GitLab Orbit holds no data of its own. If you lose the
-  graph database, you rebuild it by indexing again.
-- **GitLab Geo.** GitLab Orbit is not supported on a secondary site.
-- **FIPS.** GitLab Orbit has no FIPS builds.
+Redundancy and recovery for GitLab Orbit are not documented. GitLab Orbit holds no data of its own, so if
+you lose the graph database, you can rebuild it by indexing again.
