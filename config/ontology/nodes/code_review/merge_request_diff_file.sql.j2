@@ -1,31 +1,52 @@
-SELECT
-  sipHash64(file.merge_request_diff_id, file.relative_order) AS id,
-  diff.merge_request_id AS merge_request_id,
-  file.merge_request_diff_id AS merge_request_diff_id,
-  diff.project_id AS project_id,
-  file.too_large AS too_large,
-  file.new_path AS new_path,
-  file.old_path AS old_path,
-  file.new_file AS new_file,
-  file.renamed_file AS renamed_file,
-  file.deleted_file AS deleted_file,
-  file.binary AS binary,
-  file.generated AS generated,
-  file.a_mode AS a_mode,
-  file.b_mode AS b_mode,
-  diff.traversal_path AS traversal_path,
-  file.relative_order AS relative_order,
-  file.{{watermark_column}} AS _version,
-  file.{{deleted_column}} AS _deleted
-FROM siphon_merge_request_diff_files file
-INNER JOIN (
-  SELECT
+WITH
+  _batch AS (SELECT
+    sipHash64(merge_request_diff_id, relative_order) AS id,
+    merge_request_diff_id,
+    too_large,
+    new_path,
+    old_path,
+    new_file,
+    renamed_file,
+    deleted_file,
+    binary,
+    generated,
+    a_mode,
+    b_mode,
+    relative_order,
+    traversal_path,
+    {{watermark_column}} AS _version,
+    {{deleted_column}} AS _deleted
+  FROM siphon_merge_request_diff_files
+  WHERE startsWith(traversal_path, {traversal_path:String}) {{filters}}
+  ORDER BY traversal_path, merge_request_diff_id, relative_order
+  LIMIT {{batch_size}}),
+  _e0 AS (SELECT
     id,
     merge_request_id,
-    project_id,
-    traversal_path
+    project_id
   FROM siphon_merge_request_diffs
-  WHERE startsWith(traversal_path, {traversal_path:String}) ) diff ON file.merge_request_diff_id = diff.id
-WHERE startsWith(file.traversal_path, {traversal_path:String}) {{filters}}
-ORDER BY traversal_path, merge_request_diff_id, relative_order
-LIMIT {{batch_size}}
+  WHERE id IN (SELECT
+      merge_request_diff_id
+    FROM _batch)
+    AND startsWith(traversal_path, {traversal_path:String}))
+SELECT
+  _batch.id AS id,
+  _e0.merge_request_id AS merge_request_id,
+  _batch.merge_request_diff_id AS merge_request_diff_id,
+  _e0.project_id AS project_id,
+  _batch.too_large AS too_large,
+  _batch.new_path AS new_path,
+  _batch.old_path AS old_path,
+  _batch.new_file AS new_file,
+  _batch.renamed_file AS renamed_file,
+  _batch.deleted_file AS deleted_file,
+  _batch.binary AS binary,
+  _batch.generated AS generated,
+  _batch.a_mode AS a_mode,
+  _batch.b_mode AS b_mode,
+  _batch.traversal_path AS traversal_path,
+  _batch.relative_order AS relative_order,
+  _batch._version AS _version,
+  _batch._deleted AS _deleted
+FROM _batch
+LEFT JOIN _e0 ON _batch.merge_request_diff_id = _e0.id
