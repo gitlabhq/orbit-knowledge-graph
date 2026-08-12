@@ -45,7 +45,6 @@ pub async fn get_sdlc_indexing_state(
 
 struct PipelineReads {
     pipelines: Vec<PipelineProgress>,
-    legacy: Option<IndexingProgress>,
     read_errors: usize,
 }
 
@@ -85,36 +84,13 @@ async fn fetch_pipeline_progress(
         }
     }
 
-    let legacy = match store.get(traversal_path).await {
-        Ok(progress) => progress,
-        Err(error) => {
-            read_errors += 1;
-            warn!(%error, traversal_path, "failed to read indexing progress from NATS KV");
-            None
-        }
-    };
-
     PipelineReads {
         pipelines,
-        legacy,
         read_errors,
     }
 }
 
 fn pipeline_states(reads: &PipelineReads) -> HashMap<String, IndexingState> {
-    let no_per_pipeline_progress_yet = reads.pipelines.iter().all(|p| p.progress.is_none());
-    if no_per_pipeline_progress_yet {
-        let legacy_state = reads
-            .legacy
-            .as_ref()
-            .map_or(IndexingState::NotIndexed, derive_state);
-        return reads
-            .pipelines
-            .iter()
-            .map(|p| (p.name.clone(), legacy_state))
-            .collect();
-    }
-
     reads
         .pipelines
         .iter()
@@ -123,19 +99,10 @@ fn pipeline_states(reads: &PipelineReads) -> HashMap<String, IndexingState> {
 }
 
 fn aggregate_status(reads: &PipelineReads) -> IndexingStatus {
-    let any_present = reads.pipelines.iter().any(|p| p.progress.is_some());
-    if !any_present {
-        return match &reads.legacy {
-            None => status_with_state(IndexingState::NotIndexed),
-            Some(progress) => indexing_status_from_progress(derive_state(progress), progress),
-        };
-    }
-
     let (worst_state, worst_progress) = reads
         .pipelines
         .iter()
         .map(|p| (p.state, p.progress.as_ref()))
-        .chain(reads.legacy.as_ref().map(|p| (derive_state(p), Some(p))))
         .max_by_key(|(state, _)| state_priority(*state))
         .unwrap_or((IndexingState::NotIndexed, None));
 
@@ -226,10 +193,7 @@ mod tests {
         progress(30, Some(25), error)
     }
 
-    fn reads(
-        pipelines: Vec<(&str, Option<IndexingProgress>)>,
-        legacy: Option<IndexingProgress>,
-    ) -> PipelineReads {
+    fn reads(pipelines: Vec<(&str, Option<IndexingProgress>)>) -> PipelineReads {
         PipelineReads {
             pipelines: pipelines
                 .into_iter()
@@ -241,7 +205,6 @@ mod tests {
                     progress,
                 })
                 .collect(),
-            legacy,
             read_errors: 0,
         }
     }
@@ -272,42 +235,27 @@ mod tests {
     }
 
     #[test]
-    fn aggregate_falls_back_to_legacy_when_no_entity_keys_present() {
-        let r = reads(
-            vec![("MergeRequest", None), ("Issue", None)],
-            Some(completed_progress(None)),
-        );
-        assert_eq!(aggregate_status(&r).state, IndexingState::Indexed as i32);
-    }
-
-    #[test]
-    fn aggregate_not_indexed_when_no_entity_keys_and_no_legacy() {
-        let r = reads(vec![("MergeRequest", None), ("Issue", None)], None);
+    fn aggregate_not_indexed_when_no_pipeline_progress() {
+        let r = reads(vec![("MergeRequest", None), ("Issue", None)]);
         assert_eq!(aggregate_status(&r).state, IndexingState::NotIndexed as i32);
     }
 
     #[test]
     fn aggregate_missing_entity_key_wins_over_indexed() {
-        let r = reads(
-            vec![
-                ("MergeRequest", Some(completed_progress(None))),
-                ("Issue", None),
-            ],
-            None,
-        );
+        let r = reads(vec![
+            ("MergeRequest", Some(completed_progress(None))),
+            ("Issue", None),
+        ]);
         assert_eq!(aggregate_status(&r).state, IndexingState::NotIndexed as i32);
     }
 
     #[test]
     fn aggregate_error_wins_over_indexed_and_indexing() {
-        let r = reads(
-            vec![
-                ("MergeRequest", Some(completed_progress(None))),
-                ("Issue", Some(progress(0, Some(60), None))),
-                ("Project", Some(completed_progress(Some("scan failure")))),
-            ],
-            None,
-        );
+        let r = reads(vec![
+            ("MergeRequest", Some(completed_progress(None))),
+            ("Issue", Some(progress(0, Some(60), None))),
+            ("Project", Some(completed_progress(Some("scan failure")))),
+        ]);
         let aggregate = aggregate_status(&r);
         assert_eq!(aggregate.state, IndexingState::Error as i32);
         assert_eq!(
@@ -317,30 +265,15 @@ mod tests {
     }
 
     #[test]
-    fn aggregate_legacy_folds_into_worst_state() {
-        let r = reads(
-            vec![("MergeRequest", Some(completed_progress(None)))],
-            Some(progress(0, None, None)),
-        );
-        assert_eq!(
-            aggregate_status(&r).state,
-            IndexingState::Backfilling as i32
-        );
-    }
-
-    #[test]
     fn pipeline_states_reports_per_pipeline() {
-        let r = reads(
-            vec![
-                ("MergeRequest", Some(completed_progress(None))),
-                (
-                    "MEMBER_OF_siphon_members",
-                    Some(completed_progress(Some("scan failure"))),
-                ),
-                ("Issue", None),
-            ],
-            None,
-        );
+        let r = reads(vec![
+            ("MergeRequest", Some(completed_progress(None))),
+            (
+                "MEMBER_OF_siphon_members",
+                Some(completed_progress(Some("scan failure"))),
+            ),
+            ("Issue", None),
+        ]);
         let states = pipeline_states(&r);
 
         assert_eq!(states.get("MergeRequest"), Some(&IndexingState::Indexed));
@@ -350,19 +283,6 @@ mod tests {
         );
         assert_eq!(states.get("Issue"), Some(&IndexingState::NotIndexed));
         assert_eq!(aggregate_status(&r).state, IndexingState::NotIndexed as i32);
-    }
-
-    #[test]
-    fn pipeline_states_fallback_assigns_legacy_state_to_every_pipeline() {
-        let r = reads(
-            vec![("MergeRequest", None), ("Issue", None)],
-            Some(completed_progress(None)),
-        );
-        let states = pipeline_states(&r);
-
-        assert_eq!(aggregate_status(&r).state, IndexingState::Indexed as i32);
-        assert_eq!(states.get("MergeRequest"), Some(&IndexingState::Indexed));
-        assert_eq!(states.get("Issue"), Some(&IndexingState::Indexed));
     }
 
     #[test]
