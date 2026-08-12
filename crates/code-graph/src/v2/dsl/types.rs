@@ -20,12 +20,6 @@ pub type ImportRewriterBuilder = fn(paths: &[&str], sep: &str) -> Box<ImportRewr
 type N<'a> = Node<'a, StrDoc<SupportLang>>;
 pub type LabelFn = fn(&N<'_>) -> &'static str;
 
-/// A language-supplied definition-name computation. Given the definition node,
-/// returns the scope name, or `None` to fall back to `default_name` (dropping
-/// the definition when no `default_name` is set). When set, the hook fully
-/// replaces the `Extract` pipeline. The escape hatch for names an `Extract`
-/// chain can't express (e.g. C/C++ declarator descent, which lives in the
-/// language module, not the wrapper).
 pub type NameHookFn = fn(&N<'_>) -> Option<String>;
 
 pub trait Rule {
@@ -70,8 +64,6 @@ impl Rule for ScopeRule {
         &self.name
     }
 
-    /// A `name_hook` takes precedence over the `Extract`; when one is set the
-    /// `Extract` returned by `extract()` is unused.
     fn extract_name(&self, node: &N<'_>) -> Option<String> {
         match self.name_hook {
             Some(hook) => hook(node),
@@ -98,11 +90,8 @@ impl ScopeRule {
         self
     }
 
-    /// Compute the definition name with a language-supplied function instead of
-    /// an `Extract` pipeline. When set, the hook fully replaces `name_from`; a
-    /// `None` result falls back to `default_name`, not to the `Extract` path.
-    /// Use only for names an `Extract` chain can't express (e.g. C/C++
-    /// declarator descent).
+    /// Use this hook only when an `Extract` chain cannot express the name.
+    /// The hook replaces `name_from`. `None` falls back to `default_name`.
     pub fn name_hook(mut self, hook: NameHookFn) -> Self {
         self.name_hook = Some(hook);
         self
