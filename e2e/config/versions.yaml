@@ -36,7 +36,9 @@ gitlab:
     toolbox:
       digest: "sha256:0acd52dd23015d8419d906fce1e834f63e5253a992b8fc0fef96eb40158e452c"
 gkg:
-  chart: "1.4.3"
+  # TODO: set to the clickhouse-setup-hook chart version once published to OCI
+  # (gkg-helm-charts branch jgdoyon/clickhouse-setup-hook). 1.4.3 has no hook.
+  chart: "SET-HOOK-CHART-VERSION"
   image:
     repository: registry.gitlab.com/gitlab-org/orbit/knowledge-graph/gkg
     tag: "0.94.0"

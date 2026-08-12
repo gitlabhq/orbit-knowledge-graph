@@ -37,6 +37,14 @@ secrets:
     graphReadPassword:
       secretName: "gkg-secrets"
 
+# Create the gkg users and database via the chart hook instead of ClickHouse
+# initdb, so e2e exercises the same path Dedicated uses for managed Cloud CH.
+clickhouseSetup:
+  enabled: true
+  adminSecret:
+    secretName: "gkg-secrets"
+    key: admin-password
+
 webserver:
   enabled: true
   replicas: 1
