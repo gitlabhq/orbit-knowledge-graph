@@ -170,7 +170,7 @@ mod tests {
             .collect();
         assert_eq!(pool.len(), 80_000);
         for (id, expected) in &all {
-            assert_eq!(pool.get(*id).as_str(), expected.as_str());
+            assert_eq!(pool.get(*id), expected.as_str());
         }
     }
 
