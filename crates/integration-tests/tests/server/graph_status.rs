@@ -196,16 +196,6 @@ fn dotted_traversal(traversal_path: &str) -> String {
         .join(".")
 }
 
-fn seed_indexing_progress(
-    mock_kv: &MockKvServices,
-    traversal_path: &str,
-    progress: &IndexingProgress,
-) {
-    let key = format!("status.{}", dotted_traversal(traversal_path));
-    let payload = serde_json::to_vec(progress).expect("serialize progress");
-    mock_kv.set(INDEXING_PROGRESS_BUCKET, &key, Bytes::from(payload));
-}
-
 fn seed_entity_progress(
     mock_kv: &MockKvServices,
     traversal_path: &str,
@@ -266,7 +256,6 @@ async fn graph_status() {
         indexing_status_unknown_when_nats_unreachable,
         indexing_status_per_entity_worst_state_wins,
         indexing_status_per_entity_missing_key_treated_as_not_indexed,
-        indexing_status_falls_back_to_legacy_key_during_rollout,
         indexing_status_survives_single_entity_read_failure,
         code_not_indexed_dominates_when_no_project_checkpointed,
         code_indexing_omitted_when_no_projects_known,
@@ -436,7 +425,7 @@ async fn indexing_status_indexed_for_group(ctx: &TestContext) {
     let mock_kv = MockKvServices::new();
     let started = Utc::now() - Duration::seconds(30);
     let completed = Utc::now() - Duration::seconds(25);
-    seed_indexing_progress(
+    seed_namespaced_entities(
         &mock_kv,
         "1/100/",
         &IndexingProgress {
@@ -475,7 +464,7 @@ async fn indexing_status_indexed_for_group(ctx: &TestContext) {
 
 async fn indexing_status_backfilling_for_project(ctx: &TestContext) {
     let mock_kv = MockKvServices::new();
-    seed_indexing_progress(
+    seed_namespaced_entities(
         &mock_kv,
         "1/100/1000/",
         &IndexingProgress {
@@ -513,7 +502,7 @@ async fn indexing_status_backfilling_for_project(ctx: &TestContext) {
 async fn indexing_status_indexing_when_reindex_in_flight(ctx: &TestContext) {
     let mock_kv = MockKvServices::new();
     let previous_completion = Utc::now() - Duration::seconds(60);
-    seed_indexing_progress(
+    seed_namespaced_entities(
         &mock_kv,
         "1/100/",
         &IndexingProgress {
@@ -556,7 +545,7 @@ async fn indexing_status_not_indexed_when_no_kv_entry(ctx: &TestContext) {
 async fn indexing_status_error_state(ctx: &TestContext) {
     let mock_kv = MockKvServices::new();
     let started = Utc::now() - Duration::seconds(10);
-    seed_indexing_progress(
+    seed_namespaced_entities(
         &mock_kv,
         "1/100/",
         &IndexingProgress {
@@ -670,34 +659,6 @@ async fn indexing_status_per_entity_missing_key_treated_as_not_indexed(ctx: &Tes
 
     let indexing = status.indexing.expect("indexing should be present");
     assert_eq!(indexing.state, IndexingState::NotIndexed as i32);
-}
-
-async fn indexing_status_falls_back_to_legacy_key_during_rollout(ctx: &TestContext) {
-    let mock_kv = MockKvServices::new();
-    let started = Utc::now() - Duration::seconds(30);
-    let completed = started + Duration::seconds(5);
-    let legacy = IndexingProgress {
-        last_started_at: started,
-        last_completed_at: Some(completed),
-        last_duration_ms: Some(5000),
-        last_error: None,
-        last_rows_read: None,
-        last_rows_written: None,
-    };
-    seed_indexing_progress(&mock_kv, "1/100/", &legacy);
-
-    let service = build_service_with_indexing_status(ctx, mock_kv);
-    let response = service
-        .get_status("1/100/", ResponseFormat::Raw as i32, &admin_context())
-        .await
-        .expect("should succeed");
-    let status = extract_structured(response);
-
-    let sdlc = status
-        .sdlc_indexing
-        .expect("sdlc_indexing should be present");
-    assert_eq!(sdlc.state, IndexingState::Indexed as i32);
-    assert_eq!(sdlc.last_duration_ms, Some(5000));
 }
 
 async fn reporter_excludes_security_entity_counts(ctx: &TestContext) {
@@ -920,7 +881,7 @@ async fn indexing_status_reports_last_run_rows(ctx: &TestContext) {
     let mut progress = completed_progress();
     progress.last_rows_read = Some(307);
     progress.last_rows_written = Some(465);
-    seed_indexing_progress(&mock_kv, "1/100/", &progress);
+    seed_namespaced_entities(&mock_kv, "1/100/", &progress);
 
     let service = build_service_with_indexing_status(ctx, mock_kv);
     let response = service
@@ -1044,7 +1005,7 @@ async fn get_status_degrades_when_entity_count_table_missing(ctx: &TestContext) 
 
     let mock_kv = MockKvServices::new();
     let started = Utc::now() - Duration::seconds(30);
-    seed_indexing_progress(
+    seed_namespaced_entities(
         &mock_kv,
         "1/",
         &IndexingProgress {
