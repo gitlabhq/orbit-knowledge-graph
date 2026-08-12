@@ -1514,6 +1514,7 @@ impl FamilyPipeline {
         }
 
         graph.definition_ranges.clear();
+        graph.drop_construction_indexes();
 
         if let Some((handle, join)) = sentinel {
             handle.shutdown();

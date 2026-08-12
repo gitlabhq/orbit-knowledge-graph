@@ -163,6 +163,9 @@ pub struct CodeGraph {
     pub file_defs: DashMap<NodeId, Vec<NodeId>>,
     pub file_imports: DashMap<NodeId, Vec<NodeId>>,
 
+    // Dedup for ImportedSymbol edges (source, target, edge_kind)
+    seen_import_edges: DashMap<(NodeId, NodeId, EdgeKind), ()>,
+
     // Construction-phase indexes (dropped after barrier 0)
     pub dir_index: DashMap<String, NodeId>,
     pub file_index: DashMap<String, NodeId>,
@@ -198,6 +201,7 @@ impl CodeGraph {
             definition_ranges: DashMap::new(),
             file_defs: DashMap::new(),
             file_imports: DashMap::new(),
+            seen_import_edges: DashMap::new(),
             dir_index: DashMap::new(),
             file_index: DashMap::new(),
             global_return_types: DashMap::new(),
@@ -230,6 +234,13 @@ impl CodeGraph {
     }
 
     pub fn push_edge(&self, edge: Edge) {
+        if edge.relationship.target_node == NodeKind::ImportedSymbol {
+            let key = (edge.source, edge.target, edge.relationship.edge_kind);
+            if self.seen_import_edges.contains_key(&key) {
+                return;
+            }
+            self.seen_import_edges.insert(key, ());
+        }
         self.edges.push(edge);
     }
 
@@ -854,6 +865,7 @@ impl CodeGraph {
     pub fn drop_construction_indexes(&self) {
         self.dir_index.clear();
         self.file_index.clear();
+        self.seen_import_edges.clear();
     }
 }
 

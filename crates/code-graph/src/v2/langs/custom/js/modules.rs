@@ -367,7 +367,7 @@ mod tests {
 
     #[test]
     fn phase1_builder_synthesizes_module_and_export_defs() {
-        let mut builder = JsModuleGraphBuilder::new(String::new());
+        let mut builder = JsModuleGraphBuilder::new(String::new(), StringPool::new());
         let file = JsPhase1File {
             path: "src/utils.ts".to_string(),
             extension: "ts".to_string(),
@@ -447,7 +447,7 @@ mod tests {
 
     #[test]
     fn phase1_builder_preserves_star_reexports_and_file_targets() {
-        let mut builder = JsModuleGraphBuilder::new(String::new());
+        let mut builder = JsModuleGraphBuilder::new(String::new(), StringPool::new());
         let file = JsPhase1File {
             path: "src/index.ts".to_string(),
             extension: "ts".to_string(),
