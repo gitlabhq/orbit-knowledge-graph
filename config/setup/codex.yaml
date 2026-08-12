@@ -1,0 +1,6 @@
+# Codex rejects additionalContext on PreToolUse hooks, so AGENTS.md is the
+# whole integration.
+name: codex
+instruction_file:
+  project: AGENTS.md
+  global: "~/.codex/AGENTS.md"

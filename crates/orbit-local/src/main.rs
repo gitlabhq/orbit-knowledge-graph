@@ -256,6 +256,50 @@ enum Commands {
         #[command(subcommand)]
         command: Option<commands::repo_map::RepoMapCommand>,
     },
+    /// Configure AI coding assistants to consult the local graph.
+    #[command(
+        long_about = "Configure AI coding assistants to consult the local graph.\n\n\
+                      Writes a managed section into each assistant's user-global \
+                      instruction file (default) or the project's with `--project`/`--dir`, \
+                      telling the assistant to prefer graph queries over grepping raw files, \
+                      plus nudge hooks where the platform supports them (Claude Code, \
+                      OpenCode). Pre-existing files get a one-time `.orbit-backup` sibling \
+                      before their first modification. Re-running updates the section in \
+                      place; `--remove` uninstalls."
+    )]
+    Setup {
+        /// Assistants to configure. Required when installing; `--remove`
+        /// without assistants removes the setup for all of them.
+        #[arg(value_name = "ASSISTANT", value_parser = commands::setup::assistant_value_parser(), required_unless_present = "remove")]
+        assistants: Vec<String>,
+
+        /// Remove the configuration written by `orbit setup`.
+        #[arg(long)]
+        remove: bool,
+
+        /// Point the guidance at the remote Knowledge Graph (queries run
+        /// through `glab orbit remote`) instead of the local graph. Pass this
+        /// when glab has verified remote access.
+        #[arg(long, conflicts_with = "remove")]
+        remote: bool,
+
+        /// Write into the current project instead of the user-global config
+        /// files.
+        #[arg(long)]
+        project: bool,
+
+        /// Project directory (implies --project; default: current directory).
+        #[arg(long, value_name = "PATH")]
+        dir: Option<PathBuf>,
+    },
+    #[command(hide = true)]
+    HookGuard {
+        #[arg(value_name = "KIND")]
+        kind: commands::hook_guard::Kind,
+
+        #[arg(long, default_value = "local")]
+        mode: commands::setup::spec::Mode,
+    },
 }
 
 #[derive(Subcommand)]
@@ -334,6 +378,29 @@ async fn main() -> Result<()> {
             db,
             command.unwrap_or(commands::repo_map::RepoMapCommand::Overview),
         ),
+        Commands::Setup {
+            assistants,
+            remove,
+            remote,
+            project,
+            dir,
+        } => {
+            let mode = if remote {
+                commands::setup::spec::Mode::Remote
+            } else {
+                commands::setup::spec::Mode::Local
+            };
+            let target = if project || dir.is_some() {
+                commands::setup::Target::project(dir)?
+            } else {
+                commands::setup::Target::Global
+            };
+            commands::setup::run(assistants, remove, mode, target)
+        }
+        Commands::HookGuard { kind, mode } => {
+            commands::hook_guard::run(kind, mode);
+            Ok(())
+        }
     }
 }
 

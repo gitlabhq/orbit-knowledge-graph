@@ -1,0 +1,1 @@
+The remote Orbit graph is available. Before reading source files one by one, run `glab orbit remote query` (definitions, callers, imports; see `glab orbit remote schema`) to orient. Read raw files after the graph has oriented you, or to modify/debug specific lines.

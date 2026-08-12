@@ -1,0 +1,1 @@
+A local Orbit code graph is available. For code-structure questions, run `orbit sql "<DuckDB SQL>"` or `orbit repo-map` before grepping raw files — the graph returns scoped results with far less output. `orbit schema` lists the tables. Grep after the graph has oriented you, or to modify/debug specific lines.

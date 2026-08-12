@@ -1,0 +1,21 @@
+# Claude Code honors PreToolUse additionalContext, so search/read tool calls
+# get an orbit nudge via `orbit hook-guard` in addition to the CLAUDE.md block.
+name: claude
+instruction_file:
+  project: CLAUDE.md
+  global: "~/.claude/CLAUDE.md"
+json_merges:
+  - file:
+      project: .claude/settings.json
+      global: "~/.claude/settings.json"
+    path: [hooks, PreToolUse]
+    marker: orbit hook-guard
+    entries:
+      - matcher: "Bash|Grep|Glob"
+        hooks:
+          - type: command
+            command: orbit hook-guard search --mode {mode}
+      - matcher: Read
+        hooks:
+          - type: command
+            command: orbit hook-guard read --mode {mode}
