@@ -1,8 +1,7 @@
 use crate::v2::config::Language;
 use crate::v2::dsl::extractors::metadata;
 use crate::v2::dsl::types::{self, *};
-use crate::v2::linker::state::StringPool;
-use crate::v2::types::{BindingKind, DefKind, GraphImport, ImportBindingKind, ImportMode};
+use crate::v2::types::{BindingKind, CanonicalImport, DefKind, ImportBindingKind, ImportMode};
 use treesitter_visit::Axis::*;
 use treesitter_visit::Match::*;
 use treesitter_visit::extract::{Emit, Extract, child_of_kind, default_name, field, text};
@@ -10,11 +9,10 @@ use treesitter_visit::predicate::has_child_text;
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
 
-use crate::v2::linker::graph::CodeGraph;
 use crate::v2::linker::rules::{
     ImportStrategy, ImportedSymbolFallbackPolicy, ReceiverMode, ResolveStage, ResolverHooks,
 };
-use crate::v2::linker::{HasRules, ResolutionRules, ResolveSettings};
+use crate::v2::linker::{CodeGraph, HasRules, ResolutionRules, ResolveSettings};
 
 type N<'a> = Node<'a, StrDoc<SupportLang>>;
 
@@ -279,8 +277,7 @@ impl DslLanguage for PhpDsl {
 )]
 fn php_on_scope(
     node: &N<'_>,
-    defs: &mut Vec<crate::v2::types::GraphDef>,
-    pool: &StringPool,
+    defs: &mut Vec<crate::v2::types::CanonicalDefinition>,
     scope_stack: &[std::sync::Arc<str>],
     sep: &'static str,
 ) -> bool {
@@ -297,10 +294,8 @@ fn php_on_scope(
                 Some("__construct") => &scope_stack[..scope_stack.len() - 1],
                 _ => scope_stack,
             };
-            let name = last.name;
-            last.fqn = pool.alloc(
-                &crate::v2::types::Fqn::from_scope(class_scope, pool.get(name), sep).to_string(),
-            );
+            let name = last.name.clone();
+            last.fqn = crate::v2::types::Fqn::from_scope(class_scope, &name, sep);
         }
         return false;
     }
@@ -309,7 +304,7 @@ fn php_on_scope(
         let is_parent = match defs
             .last()
             .and_then(|d| d.metadata.as_ref())
-            .and_then(|m| m.return_type.map(|id| pool.get(id)))
+            .and_then(|m| m.return_type.as_deref())
         {
             Some("self") | Some("static") => false,
             Some("parent") => true,
@@ -328,18 +323,18 @@ fn php_on_scope(
             let parent = defs
                 .iter()
                 .rev()
-                .find(|d| d.kind.is_type_container() && pool.get(d.fqn) == class_fqn)
+                .find(|d| d.kind.is_type_container() && d.fqn.as_str() == class_fqn)
                 .and_then(|d| d.metadata.as_ref())
                 .and_then(|m| m.super_types.first().cloned());
             match parent {
-                Some(p) => pool.get(p).to_string(),
+                Some(p) => p,
                 None => return false,
             }
         } else {
-            class_fqn.to_string()
+            class_fqn
         };
         if let Some(meta) = defs.last_mut().and_then(|d| d.metadata.as_mut()) {
-            meta.return_type = Some(pool.alloc(&new_rt));
+            meta.return_type = Some(new_rt);
         }
     }
     false
@@ -389,7 +384,7 @@ fn php_rewrite_ref_name(node: &N<'_>, name: &str) -> Option<String> {
 }
 
 /// Extract `use` imports: single, aliased, grouped, and `use function`/`use const`.
-fn php_extract_use(node: &N<'_>, imports: &mut Vec<GraphImport>, pool: &StringPool) -> bool {
+fn php_extract_use(node: &N<'_>, imports: &mut Vec<CanonicalImport>) -> bool {
     if node.kind().as_ref() != "namespace_use_declaration" {
         return false;
     }
@@ -406,7 +401,7 @@ fn php_extract_use(node: &N<'_>, imports: &mut Vec<GraphImport>, pool: &StringPo
             .children()
             .filter(|c| c.kind().as_ref() == "namespace_use_clause")
         {
-            push_use_clause(&clause, prefix.as_deref(), imports, pool);
+            push_use_clause(&clause, prefix.as_deref(), imports);
         }
         return true;
     }
@@ -415,17 +410,12 @@ fn php_extract_use(node: &N<'_>, imports: &mut Vec<GraphImport>, pool: &StringPo
         .children()
         .filter(|c| c.kind().as_ref() == "namespace_use_clause")
     {
-        push_use_clause(&clause, None, imports, pool);
+        push_use_clause(&clause, None, imports);
     }
     true
 }
 
-fn push_use_clause(
-    clause: &N<'_>,
-    group_prefix: Option<&str>,
-    imports: &mut Vec<GraphImport>,
-    pool: &StringPool,
-) {
+fn push_use_clause(clause: &N<'_>, group_prefix: Option<&str>, imports: &mut Vec<CanonicalImport>) {
     let Some(target) = clause
         .children()
         .find(|c| matches!(c.kind().as_ref(), "qualified_name" | "name"))
@@ -446,7 +436,7 @@ fn push_use_clause(
         None => (String::new(), full),
     };
 
-    imports.push(GraphImport {
+    imports.push(CanonicalImport {
         import_type: if alias.is_some() {
             "AliasedImport"
         } else {
@@ -454,9 +444,10 @@ fn push_use_clause(
         },
         binding_kind: ImportBindingKind::Named,
         mode: ImportMode::Declarative,
-        path: pool.alloc(&path),
-        name: Some(pool.alloc(&name)),
-        alias: alias.map(|s| pool.alloc(&s)),
+        path,
+        name: Some(name),
+        alias,
+        scope_fqn: None,
         range: crate::v2::types::Range::empty(),
         is_type_only: false,
         wildcard: false,
@@ -466,9 +457,9 @@ fn push_use_clause(
 /// Resolve a bare/qualified class name to its FQN for chain bases with no SSA value.
 fn php_resolve_ident_type(graph: &CodeGraph, name: &str) -> Option<String> {
     let lookup = name.trim_start_matches('\\');
-    for &node in &crate::v2::linker::resolver::resolve_scope_nodes(graph, lookup) {
-        if let Some(did) = graph.node(node).def_id() {
-            let gdef = graph.def(did);
+    for &node in &graph.resolve_scope_nodes(lookup) {
+        if let Some(did) = graph.graph[node].def_id() {
+            let gdef = &graph.defs[did.0 as usize];
             if gdef.kind.is_type_container() {
                 return Some(graph.str(gdef.fqn).to_string());
             }
@@ -518,12 +509,10 @@ impl HasRules for PhpRules {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::v2::linker::state::StringPool;
     use crate::v2::trace::Tracer;
 
     fn parse(
         code: &str,
-        pool: &StringPool,
     ) -> Result<crate::v2::dsl::engine::ParsedDefs, crate::v2::pipeline::PipelineError> {
         PhpDsl::spec()
             .parse_full_collect(
@@ -532,7 +521,6 @@ mod tests {
                 crate::v2::config::Language::Php,
                 &Tracer::new(false),
                 Default::default(),
-                pool,
             )
             .map(|r| crate::v2::dsl::engine::ParsedDefs {
                 definitions: r.definitions,
@@ -545,56 +533,42 @@ mod tests {
 
     #[test]
     fn class_with_methods() {
-        let pool = StringPool::new();
         let result = parse(
             "<?php\nclass Calculator {\n    public function add(int $a, int $b): int { return $a + $b; }\n}\n",
-            &pool,
         )
         .unwrap();
-        let names: Vec<&str> = result
-            .definitions
-            .iter()
-            .map(|d| pool.get(d.name))
-            .collect();
+        let names: Vec<&str> = result.definitions.iter().map(|d| d.name.as_str()).collect();
         assert!(names.contains(&"Calculator"), "should have class");
         assert!(names.contains(&"add"), "should have method");
     }
 
     #[test]
     fn namespace_scoping() {
-        let pool = StringPool::new();
         let result = parse(
             "<?php\nnamespace App\\Models;\nclass Service {\n    public function run(): void {}\n}\n",
-            &pool,
         )
         .unwrap();
         let service = result
             .definitions
             .iter()
-            .find(|d| pool.get(d.name) == "Service")
+            .find(|d| d.name == "Service")
             .unwrap();
-        assert_eq!(pool.get(service.fqn), "App\\Models\\Service");
+        assert_eq!(service.fqn.to_string(), "App\\Models\\Service");
     }
 
     #[test]
     fn interface_trait_enum() {
-        let pool = StringPool::new();
         let result = parse(
             "<?php\ninterface Repo { public function find(int $id); }\ntrait T { public function touch(): void {} }\nenum Status: string { case Active = 'active'; }\n",
-            &pool,
         )
         .unwrap();
         let repo = result
             .definitions
             .iter()
-            .find(|d| pool.get(d.name) == "Repo")
+            .find(|d| d.name == "Repo")
             .unwrap();
         assert_eq!(repo.kind, DefKind::Interface);
-        let names: Vec<&str> = result
-            .definitions
-            .iter()
-            .map(|d| pool.get(d.name))
-            .collect();
+        let names: Vec<&str> = result.definitions.iter().map(|d| d.name.as_str()).collect();
         assert!(names.contains(&"T"), "should have trait");
         assert!(names.contains(&"Status"), "should have enum");
         assert!(names.contains(&"Active"), "should have enum case");
@@ -602,50 +576,27 @@ mod tests {
 
     #[test]
     fn super_types_extracted() {
-        let pool = StringPool::new();
-        let result = parse(
-            "<?php\nclass Dog extends Animal implements Runnable, Loud {\n}\n",
-            &pool,
-        )
-        .unwrap();
-        let dog = result
-            .definitions
-            .iter()
-            .find(|d| pool.get(d.name) == "Dog")
-            .unwrap();
+        let result =
+            parse("<?php\nclass Dog extends Animal implements Runnable, Loud {\n}\n").unwrap();
+        let dog = result.definitions.iter().find(|d| d.name == "Dog").unwrap();
         let meta = dog.metadata.as_ref().expect("Dog should have metadata");
-        assert!(
-            meta.super_types
-                .iter()
-                .any(|s| pool.get(*s).ends_with("Animal"))
-        );
-        assert!(
-            meta.super_types
-                .iter()
-                .any(|s| pool.get(*s).ends_with("Runnable"))
-        );
-        assert!(
-            meta.super_types
-                .iter()
-                .any(|s| pool.get(*s).ends_with("Loud"))
-        );
+        assert!(meta.super_types.iter().any(|s| s.ends_with("Animal")));
+        assert!(meta.super_types.iter().any(|s| s.ends_with("Runnable")));
+        assert!(meta.super_types.iter().any(|s| s.ends_with("Loud")));
     }
 
     #[test]
     fn trait_use_is_super_type() {
-        let pool = StringPool::new();
         let result =
-            parse("<?php\ntrait Timestamps { public function touch(): void {} }\nclass User {\n    use Timestamps;\n}\n", &pool).unwrap();
+            parse("<?php\ntrait Timestamps { public function touch(): void {} }\nclass User {\n    use Timestamps;\n}\n").unwrap();
         let user = result
             .definitions
             .iter()
-            .find(|d| pool.get(d.name) == "User")
+            .find(|d| d.name == "User")
             .unwrap();
         let meta = user.metadata.as_ref().expect("User should have metadata");
         assert!(
-            meta.super_types
-                .iter()
-                .any(|s| pool.get(*s).ends_with("Timestamps")),
+            meta.super_types.iter().any(|s| s.ends_with("Timestamps")),
             "trait use should be recorded as a super type, got {:?}",
             meta.super_types
         );
@@ -653,10 +604,8 @@ mod tests {
 
     #[test]
     fn imports_extracted() {
-        let pool = StringPool::new();
         let result = parse(
             "<?php\nnamespace App;\nuse App\\Support\\Logger;\nuse App\\Support\\Cache as C;\n\nclass Test {}\n",
-            &pool,
         )
         .unwrap();
         assert!(
@@ -664,29 +613,23 @@ mod tests {
             "expected >= 2 imports, got {}",
             result.imports.len()
         );
-        let paths: Vec<&str> = result.imports.iter().map(|i| pool.get(i.path)).collect();
+        let paths: Vec<&str> = result.imports.iter().map(|i| i.path.as_str()).collect();
         assert!(paths.iter().any(|p| p.contains("Support")));
         let aliased = result
             .imports
             .iter()
-            .find(|i| i.alias.map(|id| pool.get(id)) == Some("C"))
+            .find(|i| i.alias.as_deref() == Some("C"))
             .expect("aliased import should be captured");
-        assert_eq!(aliased.name.map(|id| pool.get(id)), Some("Cache"));
+        assert_eq!(aliased.name.as_deref(), Some("Cache"));
     }
 
     #[test]
     fn properties_and_constants() {
-        let pool = StringPool::new();
         let result = parse(
             "<?php\nclass Model {\n    const TABLE = 'models';\n    public int $id = 0;\n    protected ?string $name = null;\n}\n",
-            &pool,
         )
         .unwrap();
-        let names: Vec<&str> = result
-            .definitions
-            .iter()
-            .map(|d| pool.get(d.name))
-            .collect();
+        let names: Vec<&str> = result.definitions.iter().map(|d| d.name.as_str()).collect();
         assert!(names.contains(&"TABLE"), "should have constant");
         assert!(
             names.contains(&"id"),
@@ -697,16 +640,11 @@ mod tests {
 
     #[test]
     fn function_definition() {
-        let pool = StringPool::new();
-        let result = parse(
-            "<?php\nfunction helper(int $x): int { return $x; }\n",
-            &pool,
-        )
-        .unwrap();
+        let result = parse("<?php\nfunction helper(int $x): int { return $x; }\n").unwrap();
         let helper = result
             .definitions
             .iter()
-            .find(|d| pool.get(d.name) == "helper")
+            .find(|d| d.name == "helper")
             .unwrap();
         assert_eq!(helper.kind, DefKind::Function);
     }

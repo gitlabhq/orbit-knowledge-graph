@@ -16,6 +16,9 @@
 # note-gated `scope: none` entry, the certified output-neutral escape hatch. A
 # version with no entry is treated as "*", which also makes pruning old entries safe.
 migrations:
+- version: 89
+  scope: none
+  note: MergeRequestDiffFile extract rewritten from bare INNER JOIN to CTE + IN-list. Output is byte-identical in production because both siphon_merge_request_diff_files and siphon_merge_request_diffs carry the same traversal_path for related records.
 - version: 88
   scope: none
   note: Marks 13 edge mappings mutable so the stale-edge sweep reconciles them. The flag is read only by the sweep's group derivation; extract SQL, transform output and DDL are untouched, so every indexed row is byte-identical.

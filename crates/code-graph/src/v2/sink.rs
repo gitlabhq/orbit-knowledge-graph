@@ -1,6 +1,6 @@
 use arrow::record_batch::RecordBatch;
 
-use super::linker::graph::CodeGraph;
+use super::linker::CodeGraph;
 
 pub trait GraphConverter: Send + Sync {
     fn convert(&self, graph: CodeGraph) -> Result<Vec<(String, RecordBatch)>, SinkError>;

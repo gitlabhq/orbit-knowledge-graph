@@ -10,7 +10,7 @@ struct NoopConverter;
 impl GraphConverter for NoopConverter {
     fn convert(
         &self,
-        _graph: code_graph::v2::linker::graph::CodeGraph,
+        _graph: code_graph::v2::linker::CodeGraph,
     ) -> Result<Vec<(String, arrow::record_batch::RecordBatch)>, code_graph::v2::SinkError> {
         Ok(Vec::new())
     }

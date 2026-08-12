@@ -358,12 +358,10 @@ impl HasRules for KotlinRules {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::v2::linker::state::StringPool;
     use crate::v2::trace::Tracer;
 
     fn parse(
         code: &str,
-        pool: &StringPool,
     ) -> Result<crate::v2::dsl::engine::ParsedDefs, crate::v2::pipeline::PipelineError> {
         KotlinDsl::spec()
             .parse_full_collect(
@@ -372,7 +370,6 @@ mod tests {
                 crate::v2::config::Language::Kotlin,
                 &Tracer::new(false),
                 Default::default(),
-                pool,
             )
             .map(|r| crate::v2::dsl::engine::ParsedDefs {
                 definitions: r.definitions,
@@ -388,42 +385,29 @@ mod tests {
 
     #[test]
     fn class_with_methods() {
-        let pool = StringPool::new();
-        let result = parse(
-            "class Calculator {\n    fun add(a: Int, b: Int): Int = a + b\n}\n",
-            &pool,
-        )
-        .unwrap();
+        let result =
+            parse("class Calculator {\n    fun add(a: Int, b: Int): Int = a + b\n}\n").unwrap();
         assert_eq!(result.definitions.len(), 2);
-        assert_eq!(pool.get(result.definitions[0].name), "Calculator");
+        assert_eq!(result.definitions[0].name, "Calculator");
         assert_eq!(result.definitions[0].kind, DefKind::Class);
     }
 
     #[test]
     fn package_scoping() {
-        let pool = StringPool::new();
-        let result = parse(
-            "package com.example\n\nclass Service {\n    fun run() {}\n}\n",
-            &pool,
-        )
-        .unwrap();
+        let result =
+            parse("package com.example\n\nclass Service {\n    fun run() {}\n}\n").unwrap();
         let service = result
             .definitions
             .iter()
-            .find(|d| pool.get(d.name) == "Service")
+            .find(|d| d.name == "Service")
             .unwrap();
-        assert_eq!(pool.get(service.fqn), "com.example.Service");
+        assert_eq!(service.fqn.to_string(), "com.example.Service");
     }
 
     #[test]
     fn super_types() {
-        let pool = StringPool::new();
-        let result = parse("open class Animal\nclass Dog : Animal() {\n}\n", &pool).unwrap();
-        let dog = result
-            .definitions
-            .iter()
-            .find(|d| pool.get(d.name) == "Dog")
-            .unwrap();
+        let result = parse("open class Animal\nclass Dog : Animal() {\n}\n").unwrap();
+        let dog = result.definitions.iter().find(|d| d.name == "Dog").unwrap();
         if let Some(meta) = &dog.metadata {
             assert!(!meta.super_types.is_empty());
         }

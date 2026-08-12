@@ -1,7 +1,6 @@
 use crate::v2::config::Language;
 use crate::v2::dsl::types::{self, *};
-use crate::v2::linker::state::StringPool;
-use crate::v2::types::{DefKind, GraphImport, ImportBindingKind, ImportMode};
+use crate::v2::types::{CanonicalImport, DefKind, ImportBindingKind, ImportMode};
 use treesitter_visit::extract::field;
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
@@ -47,7 +46,7 @@ impl DslLanguage for BashDsl {
     }
 }
 
-fn bash_extract_imports(node: &N<'_>, imports: &mut Vec<GraphImport>, pool: &StringPool) -> bool {
+fn bash_extract_imports(node: &N<'_>, imports: &mut Vec<CanonicalImport>) -> bool {
     if node.kind().as_ref() != "command" {
         return false;
     }
@@ -61,13 +60,14 @@ fn bash_extract_imports(node: &N<'_>, imports: &mut Vec<GraphImport>, pool: &Str
         .field("argument")
         .map(|arg| strip_quotes(arg.text().as_ref()).to_string());
     if let Some(path) = path.filter(|p| !p.is_empty()) {
-        imports.push(GraphImport {
+        imports.push(CanonicalImport {
             import_type: "Source",
             binding_kind: ImportBindingKind::SideEffect,
             mode: ImportMode::Runtime,
-            path: pool.alloc(&path),
+            path,
             name: None,
             alias: None,
+            scope_fqn: None,
             range: crate::v2::types::Range::empty(),
             is_type_only: false,
             wildcard: false,
@@ -105,12 +105,10 @@ impl HasRules for BashRules {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::v2::linker::state::StringPool;
     use crate::v2::trace::Tracer;
 
     fn parse(
         code: &str,
-        pool: &StringPool,
     ) -> Result<crate::v2::dsl::engine::ParsedDefs, crate::v2::pipeline::PipelineError> {
         BashDsl::spec()
             .parse_full_collect(
@@ -119,7 +117,6 @@ mod tests {
                 Language::Bash,
                 &Tracer::new(false),
                 Default::default(),
-                pool,
             )
             .map(|r| crate::v2::dsl::engine::ParsedDefs {
                 definitions: r.definitions,
@@ -130,17 +127,8 @@ mod tests {
 
     #[test]
     fn both_function_syntaxes() {
-        let pool = StringPool::new();
-        let result = parse(
-            "greet() {\n  echo hi\n}\nfunction helper {\n  echo yo\n}\n",
-            &pool,
-        )
-        .unwrap();
-        let names: Vec<&str> = result
-            .definitions
-            .iter()
-            .map(|d| pool.get(d.name))
-            .collect();
+        let result = parse("greet() {\n  echo hi\n}\nfunction helper {\n  echo yo\n}\n").unwrap();
+        let names: Vec<&str> = result.definitions.iter().map(|d| d.name.as_str()).collect();
         assert!(names.contains(&"greet"), "should find greet");
         assert!(names.contains(&"helper"), "should find helper");
         assert!(
@@ -154,9 +142,8 @@ mod tests {
 
     #[test]
     fn source_and_dot_imports() {
-        let pool = StringPool::new();
-        let result = parse("source ./lib.sh\n. ../util.sh\n", &pool).unwrap();
-        let paths: Vec<&str> = result.imports.iter().map(|i| pool.get(i.path)).collect();
+        let result = parse("source ./lib.sh\n. ../util.sh\n").unwrap();
+        let paths: Vec<&str> = result.imports.iter().map(|i| i.path.as_str()).collect();
         assert!(paths.contains(&"./lib.sh"), "should find sourced lib.sh");
         assert!(paths.contains(&"../util.sh"), "should find dotted util.sh");
         assert!(
@@ -167,16 +154,14 @@ mod tests {
 
     #[test]
     fn quoted_source_path_is_stripped() {
-        let pool = StringPool::new();
-        let result = parse("source \"./config.sh\"\n", &pool).unwrap();
+        let result = parse("source \"./config.sh\"\n").unwrap();
         assert_eq!(result.imports.len(), 1);
-        assert_eq!(pool.get(result.imports[0].path), "./config.sh");
+        assert_eq!(result.imports[0].path, "./config.sh");
     }
 
     #[test]
     fn ordinary_command_is_not_an_import() {
-        let pool = StringPool::new();
-        let result = parse("echo hello\nls -la\n", &pool).unwrap();
+        let result = parse("echo hello\nls -la\n").unwrap();
         assert!(
             result.imports.is_empty(),
             "non-source commands must not import"
@@ -185,16 +170,14 @@ mod tests {
 
     #[test]
     fn env_prefixed_source_resolves_the_path_not_the_assignment() {
-        let pool = StringPool::new();
-        let result = parse("FOO=1 source ./env.sh\n", &pool).unwrap();
+        let result = parse("FOO=1 source ./env.sh\n").unwrap();
         assert_eq!(result.imports.len(), 1);
-        assert_eq!(pool.get(result.imports[0].path), "./env.sh");
+        assert_eq!(result.imports[0].path, "./env.sh");
     }
 
     #[test]
     fn bare_source_without_argument_emits_no_import() {
-        let pool = StringPool::new();
-        let result = parse("source\n", &pool).unwrap();
+        let result = parse("source\n").unwrap();
         assert!(result.imports.is_empty());
     }
 }

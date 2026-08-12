@@ -14,14 +14,12 @@ gkg-utils = { path = "../utils" }
 # Common
 anyhow = { workspace = true }
 arrow = { workspace = true }
-boxcar = { workspace = true }
 bumpalo = { workspace = true }
 cargo-platform = { workspace = true }
 cargo-util-schemas = { workspace = true }
 cargo_metadata = { workspace = true }
 cpu-time = { workspace = true }
 crossbeam-channel = "0.5"
-dashmap = { workspace = true }
 either = { workspace = true }
 globset = { workspace = true }
 ignore = { workspace = true }

@@ -3,10 +3,9 @@ use std::path::{Path, PathBuf};
 use crate::utils::Range as SourceRange;
 use crate::v2::config::Language;
 use crate::v2::error::{AbortPhase, AnalyzerError, FileFault, FileSkip};
-use crate::v2::linker::state::StringPool;
 use crate::v2::types::{
-    DefKind, Fqn, GraphDef, GraphDefMeta, GraphImport, ImportBindingKind, ImportMode,
-    Position as GraphPosition, Range as GraphRange,
+    CanonicalDefinition, CanonicalImport, DefKind, DefinitionMetadata, Fqn, ImportBindingKind,
+    ImportMode, Position as GraphPosition, Range as GraphRange,
 };
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -38,7 +37,6 @@ pub fn analyze_files(
     files: &[String],
     root_path: &str,
     sentinel: Option<&crate::v2::sentinel::SentinelHandle>,
-    pool: &StringPool,
 ) -> (Vec<AnalyzedJsFile>, Vec<FailedJsFile>) {
     let root_gone = std::sync::atomic::AtomicBool::new(false);
     // `catch_unwind` isolates per-file panics: a malformed input that trips
@@ -52,7 +50,7 @@ pub fn analyze_files(
             let guard = sentinel.map(|s| s.file_start(relative_path));
             let t_file = std::time::Instant::now();
             let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                analyze_file(relative_path, root_path, pool)
+                analyze_file(relative_path, root_path)
             }))
             .unwrap_or_else(|panic_payload| {
                 let message = panic_message(&panic_payload);
@@ -229,11 +227,7 @@ fn sanitize_panic_message(raw: &str) -> String {
     out
 }
 
-fn analyze_file(
-    relative_path: &str,
-    root_path: &str,
-    pool: &StringPool,
-) -> Result<AnalyzedJsFile, AnalyzerError> {
+fn analyze_file(relative_path: &str, root_path: &str) -> Result<AnalyzedJsFile, AnalyzerError> {
     let absolute_path = safe_repo_join(root_path, relative_path)?;
     let source = std::fs::read_to_string(&absolute_path)
         .map_err(|error| AnalyzerError::fault(FileFault::FileRead, error.to_string()))?;
@@ -262,8 +256,8 @@ fn analyze_file(
         extension,
         language,
         size: source.len() as u64,
-        definitions: canonical_definitions(&analysis, pool),
-        imports: canonical_imports(&analysis.imports, pool),
+        definitions: canonical_definitions(&analysis),
+        imports: canonical_imports(&analysis.imports),
         bindings: module_bindings(&analysis),
         star_reexports: dedup_and_cap_star_reexports(&analysis.module_info.star_export_sources),
     };
@@ -360,7 +354,7 @@ fn normalize_relative_path(path: &str, root_path: &str) -> String {
         .unwrap_or_else(|_| path.to_string())
 }
 
-fn canonical_definitions(analysis: &JsFileAnalysis, pool: &StringPool) -> Vec<GraphDef> {
+fn canonical_definitions(analysis: &JsFileAnalysis) -> Vec<CanonicalDefinition> {
     let extends_by_fqn: FxHashMap<_, _> = analysis
         .classes
         .iter()
@@ -376,42 +370,30 @@ fn canonical_definitions(analysis: &JsFileAnalysis, pool: &StringPool) -> Vec<Gr
         .defs
         .iter()
         .map(|definition| {
-            canonical_definition(
-                definition,
-                extends_by_fqn.get(definition.fqn.as_str()),
-                pool,
-            )
+            canonical_definition(definition, extends_by_fqn.get(definition.fqn.as_str()))
         })
         .collect()
 }
 
-fn canonical_definition(
-    definition: &JsDef,
-    extends: Option<&String>,
-    pool: &StringPool,
-) -> GraphDef {
-    let mut metadata = GraphDefMeta {
+fn canonical_definition(definition: &JsDef, extends: Option<&String>) -> CanonicalDefinition {
+    let mut metadata = DefinitionMetadata {
         type_annotation: definition
             .type_annotation
             .as_deref()
-            .map(|s| pool.alloc(&truncate_identifier(s))),
+            .map(truncate_identifier),
         is_exported: definition.is_exported,
-        ..GraphDefMeta::default()
+        ..DefinitionMetadata::default()
     };
     if let Some(extends) = extends {
-        metadata
-            .super_types
-            .push(pool.alloc(&truncate_identifier(extends)));
+        metadata.super_types.push(truncate_identifier(extends));
     }
 
     let fqn_truncated = truncate_identifier(&definition.fqn);
-    let fqn = Fqn::from_parts(&[fqn_truncated.as_str()], "::");
-    GraphDef {
+    CanonicalDefinition {
         definition_type: definition.kind.as_str(),
         kind: canonical_def_kind(&definition.kind),
-        name: pool.alloc(&truncate_identifier(&definition.name)),
-        fqn: pool.alloc(fqn.as_str()),
-        fqn_sep: "::",
+        name: truncate_identifier(&definition.name),
+        fqn: Fqn::from_parts(&[fqn_truncated.as_str()], "::"),
         range: to_range(definition.range),
         is_top_level: !fqn_truncated.contains("::"),
         metadata: Some(Box::new(metadata)),
@@ -456,14 +438,11 @@ fn canonical_def_kind(kind: &JsDefKind) -> DefKind {
     }
 }
 
-fn canonical_imports(imports: &[JsImport], pool: &StringPool) -> Vec<GraphImport> {
-    imports
-        .iter()
-        .map(|imp| canonical_import(imp, pool))
-        .collect()
+fn canonical_imports(imports: &[JsImport]) -> Vec<CanonicalImport> {
+    imports.iter().map(canonical_import).collect()
 }
 
-fn canonical_import(import_entry: &JsImport, pool: &StringPool) -> GraphImport {
+fn canonical_import(import_entry: &JsImport) -> CanonicalImport {
     let (import_type, binding_kind, mode, name, alias) = match &import_entry.kind {
         JsImportKind::Named { imported_name } => (
             "NamedImport",
@@ -506,15 +485,14 @@ fn canonical_import(import_entry: &JsImport, pool: &StringPool) -> GraphImport {
         ),
     };
 
-    GraphImport {
+    CanonicalImport {
         import_type,
         binding_kind,
         mode,
-        path: pool.alloc(&truncate_identifier(&import_entry.specifier)),
-        name: name.as_deref().map(|s| pool.alloc(&truncate_identifier(s))),
-        alias: alias
-            .as_deref()
-            .map(|s| pool.alloc(&truncate_identifier(s))),
+        path: truncate_identifier(&import_entry.specifier),
+        name: name.as_deref().map(truncate_identifier),
+        alias: alias.as_deref().map(truncate_identifier),
+        scope_fqn: None,
         range: to_range(import_entry.range),
         is_type_only: import_entry.is_type,
         wildcard: false,
@@ -725,9 +703,8 @@ mod tests {
             "cts/consumer.ts".to_string(),
         ];
 
-        let pool = crate::v2::linker::state::StringPool::new();
         let (analyzed, errors) =
-            analyze_files(&files, root.to_str().expect("utf8 root path"), None, &pool);
+            analyze_files(&files, root.to_str().expect("utf8 root path"), None);
 
         assert!(
             errors.is_empty(),

@@ -9,11 +9,11 @@ use crate::v2::types::ssa::ParseValue;
 use crate::v2::types::{
     DefKind, EdgeKind, ExpressionStep, ImportBindingKind, NodeKind, Relationship,
 };
+use petgraph::graph::NodeIndex;
 use rustc_hash::{FxHashMap, FxHashSet};
-use smallvec::SmallVec;
 use std::sync::Arc;
 
-use super::graph::{CodeGraph, Edge, NodeId};
+use super::graph::{CodeGraph, GraphEdge};
 use super::imports::{ImportResolver, ResolveSettings};
 use super::rules::{
     AmbientImportFallback, ImportedSymbolFallbackContext, ResolutionRules, ResolveStage,
@@ -35,16 +35,16 @@ pub struct FileResolver<'a> {
     _guard: Option<FileGuard>,
     /// Edges from definitions to external imported symbols. Stored
     /// separately so they don't interfere with the failed_chains check.
-    import_edges: Vec<Edge>,
-    import_edge_keys: FxHashSet<(NodeId, NodeId, EdgeKind)>,
+    import_edges: Vec<(NodeIndex, NodeIndex, GraphEdge)>,
+    import_edge_keys: FxHashSet<(NodeIndex, NodeIndex, EdgeKind)>,
 }
 
 impl<'a> FileResolver<'a> {
     pub fn new(
         graph: &'a CodeGraph,
-        file_node: NodeId,
-        def_nodes: &'a [NodeId],
-        import_nodes: &'a [NodeId],
+        file_node: NodeIndex,
+        def_nodes: &'a [NodeIndex],
+        import_nodes: &'a [NodeIndex],
         lang_ctx: &'a Arc<LanguageContext>,
         guard: Option<FileGuard>,
     ) -> Self {
@@ -72,14 +72,14 @@ impl<'a> FileResolver<'a> {
     /// (e.g. JS) that manage their own rules and settings.
     pub fn from_parts(
         graph: &'a CodeGraph,
-        file_node: NodeId,
-        def_nodes: &'a [NodeId],
-        import_nodes: &'a [NodeId],
+        file_node: NodeIndex,
+        def_nodes: &'a [NodeIndex],
+        import_nodes: &'a [NodeIndex],
         rules: &'a ResolutionRules,
         settings: &'a ResolveSettings,
         tracer: &'a Tracer,
     ) -> Self {
-        let import_map = pre_resolve_imports(graph, import_nodes, rules.fqn_separator);
+        let import_map = pre_resolve_imports(graph, import_nodes);
         let ctx = ResolveCtx {
             graph,
             file_node,
@@ -114,7 +114,7 @@ impl<'a> FileResolver<'a> {
         self.ctx.reexport_index = Some(idx);
     }
 
-    pub fn drain_import_edges(&mut self) -> Vec<Edge> {
+    pub fn drain_import_edges(&mut self) -> Vec<(NodeIndex, NodeIndex, GraphEdge)> {
         self.import_edge_keys.clear();
         std::mem::take(&mut self.import_edges)
     }
@@ -141,7 +141,7 @@ impl<'a> FileResolver<'a> {
         chain: Option<&[ExpressionStep]>,
         reaching: &[ParseValue],
         enclosing_def: Option<u32>,
-        edges: &mut Vec<Edge>,
+        edges: &mut Vec<(NodeIndex, NodeIndex, GraphEdge)>,
     ) -> Result<(), Killed> {
         self.ctx.check_killed()?;
 
@@ -164,10 +164,14 @@ impl<'a> FileResolver<'a> {
 
         let (source_node_kind, source_def_kind) = enclosing_def
             .and_then(|i| self.ctx.def_nodes.get(i as usize))
-            .and_then(|&n| graph.node(n).def_id())
-            .map(|did| (NodeKind::Definition, Some(graph.def(did).kind)))
+            .and_then(|&n| graph.graph[n].def_id())
+            .map(|did| (NodeKind::Definition, Some(graph.defs[did.0 as usize].kind)))
             .unwrap_or((NodeKind::File, None));
 
+        // A member call on a non-self receiver cannot resolve to
+        // the enclosing function. `stream_->Foo()` inside `Foo()`
+        // is not recursion. But `this->Foo()` or `self.foo()` IS
+        // a legitimate self-call, and bare `Foo()` can be recursion.
         let receiver_is_other = chain.is_some_and(|c| {
             matches!(
                 c.first(),
@@ -179,18 +183,22 @@ impl<'a> FileResolver<'a> {
             if receiver_is_other && target == source_node {
                 continue;
             }
-            let target_def_kind = graph.node(target).def_id().map(|did| graph.def(did).kind);
-            edges.push(Edge {
-                source: source_node,
+            let target_def_kind = graph.graph[target]
+                .def_id()
+                .map(|did| graph.defs[did.0 as usize].kind);
+            edges.push((
+                source_node,
                 target,
-                relationship: Relationship {
-                    edge_kind: EdgeKind::Calls,
-                    source_node: source_node_kind,
-                    target_node: NodeKind::Definition,
-                    source_def_kind,
-                    target_def_kind,
+                GraphEdge {
+                    relationship: Relationship {
+                        edge_kind: EdgeKind::Calls,
+                        source_node: source_node_kind,
+                        target_node: NodeKind::Definition,
+                        source_def_kind,
+                        target_def_kind,
+                    },
                 },
-            });
+            ));
         }
         Ok(())
     }
@@ -204,8 +212,8 @@ impl<'a> FileResolver<'a> {
         let (source_node_kind, source_def_kind) = r
             .enclosing_def
             .and_then(|i| self.ctx.def_nodes.get(i as usize))
-            .and_then(|&n| graph.node(n).def_id())
-            .map(|did| (NodeKind::Definition, Some(graph.def(did).kind)))
+            .and_then(|&n| graph.graph[n].def_id())
+            .map(|did| (NodeKind::Definition, Some(graph.defs[did.0 as usize].kind)))
             .unwrap_or((NodeKind::File, None));
         let rel = Relationship {
             edge_kind: EdgeKind::Calls,
@@ -251,7 +259,7 @@ impl<'a> FileResolver<'a> {
                     && let Some(&import_node) = self.ctx.import_nodes.get(*i as usize)
                 {
                     saw_explicit_import = true;
-                    let import = self.ctx.graph.import_for_node(import_node);
+                    let import = self.ctx.graph.import(import_node);
                     if excluded_ambient_name && import.wildcard {
                         continue;
                     }
@@ -269,12 +277,12 @@ impl<'a> FileResolver<'a> {
         match policy.ambient {
             AmbientImportFallback::None => {}
             AmbientImportFallback::Wildcard => {
-                let candidates: Vec<NodeId> = self
+                let candidates: Vec<NodeIndex> = self
                     .ctx
                     .import_nodes
                     .iter()
                     .copied()
-                    .filter(|&import_node| self.ctx.graph.import_for_node(import_node).wildcard)
+                    .filter(|&import_node| self.ctx.graph.import(import_node).wildcard)
                     .collect();
                 if candidates.is_empty()
                     || candidates.len() > policy.max_ambient_candidates
@@ -291,37 +299,34 @@ impl<'a> FileResolver<'a> {
 
     fn push_imported_symbol_edge(
         &mut self,
-        src: NodeId,
-        import_node: NodeId,
+        src: NodeIndex,
+        import_node: NodeIndex,
         relationship: Relationship,
     ) {
         if self
             .import_edge_keys
             .insert((src, import_node, relationship.edge_kind))
         {
-            self.import_edges.push(Edge {
-                source: src,
-                target: import_node,
-                relationship,
-            });
+            self.import_edges
+                .push((src, import_node, GraphEdge { relationship }));
         }
     }
 }
 
 struct ResolveCtx<'a> {
     graph: &'a CodeGraph,
-    file_node: NodeId,
-    def_nodes: &'a [NodeId],
-    import_nodes: &'a [NodeId],
-    import_map: FxHashMap<String, Vec<NodeId>>,
+    file_node: NodeIndex,
+    def_nodes: &'a [NodeIndex],
+    import_nodes: &'a [NodeIndex],
+    import_map: FxHashMap<String, Vec<NodeIndex>>,
     rules: &'a ResolutionRules,
     settings: &'a ResolveSettings,
     tracer: &'a Tracer,
     kill_flag: Arc<std::sync::atomic::AtomicBool>,
     scratch: ScratchBuf,
-    import_cache: FxHashMap<NodeId, Vec<NodeId>>,
-    nested_cache: FxHashMap<String, Vec<NodeId>>,
-    inferred_returns: FxHashMap<NodeId, String>,
+    import_cache: FxHashMap<NodeIndex, Vec<NodeIndex>>,
+    nested_cache: FxHashMap<String, Vec<NodeIndex>>,
+    inferred_returns: FxHashMap<NodeIndex, String>,
     /// Precomputed or lazily built include index for C/C++ resolution.
     include_index: Option<std::sync::Arc<super::graph::IncludeIndex>>,
     /// Cached BFS result: paths of files reachable via transitive includes
@@ -335,16 +340,16 @@ struct ResolveCtx<'a> {
 impl<'a> ResolveCtx<'a> {
     fn new(
         graph: &'a CodeGraph,
-        file_node: NodeId,
-        def_nodes: &'a [NodeId],
-        import_nodes: &'a [NodeId],
+        file_node: NodeIndex,
+        def_nodes: &'a [NodeIndex],
+        import_nodes: &'a [NodeIndex],
         lang_ctx: &'a Arc<LanguageContext>,
         kill_flag: Arc<std::sync::atomic::AtomicBool>,
     ) -> Self {
         let rules = &*lang_ctx.rules;
         let settings = &rules.settings;
         let tracer = lang_ctx.tracer();
-        let import_map = pre_resolve_imports(graph, import_nodes, rules.fqn_separator);
+        let import_map = pre_resolve_imports(graph, import_nodes);
         Self {
             graph,
             file_node,
@@ -390,34 +395,34 @@ impl<'a> ResolveCtx<'a> {
             import_map: &self.import_map,
             scratch: &mut self.scratch,
             settings: self.settings,
-            sep: self.rules.fqn_separator,
             include_index: self.include_index.as_deref(),
             include_reachable: &mut self.include_reachable,
             reexport_index: self.reexport_index.as_deref(),
         }
     }
 
-    fn resolve_import_cached(&mut self, import_node: NodeId) -> Vec<NodeId> {
+    fn resolve_import_cached(&mut self, import_node: NodeIndex) -> Vec<NodeIndex> {
         if let Some(cached) = self.import_cache.get(&import_node) {
             return cached.clone();
         }
         let result = self.import_resolver().resolve_import(import_node);
-        if let Some(iid) = self.graph.node(import_node).import_id() {
-            let gimp = self.graph.import(iid);
+        if let Some(iid) = self.graph.graph[import_node].import_id() {
+            let gimp = &self.graph.imports[iid.0 as usize];
             let path = self.graph.str(gimp.path);
             let name = gimp.name.map(|n| self.graph.str(n)).unwrap_or("");
             let fqn = if path.is_empty() {
                 name.to_string()
             } else {
-                format!("{path}{}{name}", self.rules.fqn_separator)
+                format!("{path}{}{name}", self.graph.sep())
             };
             let result_fqns: Vec<String> = result
                 .iter()
                 .filter_map(|&n| {
-                    self.graph
-                        .node(n)
-                        .def_id()
-                        .map(|d| self.graph.str(self.graph.def(d).fqn).to_string())
+                    self.graph.graph[n].def_id().map(|d| {
+                        self.graph
+                            .str(self.graph.defs[d.0 as usize].fqn)
+                            .to_string()
+                    })
                 })
                 .collect();
             trace!(
@@ -433,7 +438,7 @@ impl<'a> ResolveCtx<'a> {
         result
     }
 
-    fn import_resolves_locally(&mut self, import_node: NodeId) -> bool {
+    fn import_resolves_locally(&mut self, import_node: NodeIndex) -> bool {
         !self.resolve_import_cached(import_node).is_empty()
     }
 
@@ -470,7 +475,7 @@ impl<'a> ResolveCtx<'a> {
         &mut self,
         scope_fqn: &str,
         member_name: &str,
-        out: &mut Vec<NodeId>,
+        out: &mut Vec<NodeIndex>,
     ) -> bool {
         // `\u{1}` never appears in an FQN, so one combined key is collision-free
         // and avoids the second per-probe allocation.
@@ -483,23 +488,22 @@ impl<'a> ResolveCtx<'a> {
             return false;
         }
         let mut result = Vec::new();
-        lookup_nested_with_hierarchy(self.graph, scope_fqn, member_name, &mut result);
+        self.graph
+            .lookup_nested_with_hierarchy(scope_fqn, member_name, &mut result);
 
         if result.is_empty() {
             let direct_fqn = format!("{}{member_name}", self.scope_member_prefix(scope_fqn));
-            let direct = self.graph.lookup_fqn(&direct_fqn, |idx| {
-                self.graph
-                    .node(idx)
-                    .def_id()
-                    .is_some_and(|d| self.graph.str(self.graph.def(d).fqn) == direct_fqn)
-            });
-            result.extend_from_slice(&direct);
+            let direct = self.graph.indexes.by_fqn.lookup_unverified(&direct_fqn);
+            result.extend_from_slice(direct);
         }
 
+        // Fallback: try implicit sub-scopes (e.g. Kotlin Companion objects).
+        // Foo.bar() → Foo.Companion.bar()
         if result.is_empty() {
             for &sub in self.rules.implicit_sub_scopes {
                 let sub_scope = format!("{scope_fqn}{}{sub}", self.rules.fqn_separator);
-                lookup_nested_with_hierarchy(self.graph, &sub_scope, member_name, &mut result);
+                self.graph
+                    .lookup_nested_with_hierarchy(&sub_scope, member_name, &mut result);
                 if !result.is_empty() {
                     trace!(
                         self.tracer,
@@ -521,18 +525,19 @@ impl<'a> ResolveCtx<'a> {
         // structs (`Service` embeds `Logger`, `svc.Log()` resolves via
         // Logger's receiver type).
         if result.is_empty() {
-            lookup_by_receiver_type(self.graph, scope_fqn, member_name, &mut result);
+            self.graph
+                .lookup_by_receiver_type(scope_fqn, member_name, &mut result);
             // Walk ancestors for receiver type lookup (struct embedding,
             // extension functions on parent types). Collects ALL matches
             // across the full ancestor chain — doesn't early-exit so that
             // diamond/multiple inheritance cases surface all candidates.
             if result.is_empty() {
-                let scope_nodes = resolve_scope_nodes(self.graph, scope_fqn);
+                let scope_nodes = self.graph.resolve_scope_nodes(scope_fqn);
                 for &scope_node in &scope_nodes {
                     if let Some(ancestors) = self.graph.ancestors(scope_node) {
-                        for &ancestor in &ancestors {
+                        for &ancestor in ancestors {
                             let ancestor_fqn = self.graph.def_fqn(ancestor);
-                            lookup_by_receiver_type(self.graph, 
+                            self.graph.lookup_by_receiver_type(
                                 ancestor_fqn,
                                 member_name,
                                 &mut result,
@@ -563,10 +568,11 @@ impl<'a> ResolveCtx<'a> {
                 result_fqns: result
                     .iter()
                     .filter_map(|&n| {
-                        self.graph
-                            .node(n)
-                            .def_id()
-                            .map(|d| self.graph.str(self.graph.def(d).fqn).to_string())
+                        self.graph.graph[n].def_id().map(|d| {
+                            self.graph
+                                .str(self.graph.defs[d.0 as usize].fqn)
+                                .to_string()
+                        })
                     })
                     .collect(),
             }
@@ -578,7 +584,7 @@ impl<'a> ResolveCtx<'a> {
         found
     }
 
-    fn resolve_single(&mut self, r: &RefData<'_>) -> Result<Vec<NodeId>, Killed> {
+    fn resolve_single(&mut self, r: &RefData<'_>) -> Result<Vec<NodeIndex>, Killed> {
         trace!(
             self.tracer,
             ResolveStart {
@@ -588,8 +594,12 @@ impl<'a> ResolveCtx<'a> {
                 enclosing_def: r.enclosing_def.and_then(|i| {
                     self.def_nodes
                         .get(i as usize)
-                        .and_then(|&n| self.graph.node(n).def_id())
-                        .map(|d| self.graph.str(self.graph.def(d).fqn).to_string())
+                        .and_then(|&n| self.graph.graph[n].def_id())
+                        .map(|d| {
+                            self.graph
+                                .str(self.graph.defs[d.0 as usize].fqn)
+                                .to_string()
+                        })
                 }),
             }
         );
@@ -608,10 +618,11 @@ impl<'a> ResolveCtx<'a> {
                 targets: result
                     .iter()
                     .filter_map(|&n| {
-                        self.graph
-                            .node(n)
-                            .def_id()
-                            .map(|d| self.graph.str(self.graph.def(d).fqn).to_string())
+                        self.graph.graph[n].def_id().map(|d| {
+                            self.graph
+                                .str(self.graph.defs[d.0 as usize].fqn)
+                                .to_string()
+                        })
                     })
                     .collect(),
             }
@@ -620,7 +631,7 @@ impl<'a> ResolveCtx<'a> {
         Ok(result)
     }
 
-    fn resolve_bare(&mut self, r: &RefData<'_>) -> Result<Vec<NodeId>, Killed> {
+    fn resolve_bare(&mut self, r: &RefData<'_>) -> Result<Vec<NodeIndex>, Killed> {
         self.check_killed()?;
 
         // Qualified-name fast path. For refs whose name contains the
@@ -633,18 +644,20 @@ impl<'a> ResolveCtx<'a> {
         if !r.name.is_empty() && r.name.contains(self.rules.fqn_separator) {
             let matches = self
                 .graph
-                .lookup_fqn(r.name, |idx| self.graph.def_fqn(idx) == r.name);
+                .indexes
+                .by_fqn
+                .lookup(r.name, |idx| self.graph.def_fqn(idx) == r.name);
             if !matches.is_empty() {
                 if self.settings.same_directory_scope {
                     // Directory-scoped languages (HCL): a qualified ref such as
                     // `local.x` / `aws_vpc.this` only addresses its own module
                     // (directory). Keep same-directory matches; if none, fall
                     // through rather than bind to an unrelated module's def.
-                    let dir = super::imports::dir_of(self.graph.node_path(self.file_node));
+                    let dir = super::imports::dir_of(self.graph.graph[self.file_node].path());
                     let same: Vec<_> = matches
                         .iter()
                         .copied()
-                        .filter(|&idx| super::imports::dir_of(self.graph.node_path(idx)) == dir)
+                        .filter(|&idx| super::imports::dir_of(self.graph.graph[idx].path()) == dir)
                         .collect();
                     if !same.is_empty() {
                         return Ok(same);
@@ -655,7 +668,7 @@ impl<'a> ResolveCtx<'a> {
             }
         }
 
-        if r.reaching.is_empty() && !self.graph.name_exists(r.name) {
+        if r.reaching.is_empty() && !self.graph.indexes.by_name.contains(r.name) {
             return Ok(vec![]);
         }
 
@@ -669,7 +682,7 @@ impl<'a> ResolveCtx<'a> {
                     }
                 }
                 ResolveStage::ImportStrategies => {
-                    if !self.graph.name_exists(r.name) {
+                    if !self.graph.indexes.by_name.contains(r.name) {
                         continue;
                     }
                     {
@@ -678,7 +691,7 @@ impl<'a> ResolveCtx<'a> {
                     }
                 }
                 ResolveStage::ImplicitMember => {
-                    if !self.graph.name_exists(r.name) {
+                    if !self.graph.indexes.by_name.contains(r.name) {
                         continue;
                     }
                     if let Some(enclosing_idx) = r.enclosing_def
@@ -699,10 +712,11 @@ impl<'a> ResolveCtx<'a> {
                     result_fqns: result
                         .iter()
                         .filter_map(|&n| {
-                            self.graph
-                                .node(n)
-                                .def_id()
-                                .map(|d| self.graph.str(self.graph.def(d).fqn).to_string())
+                            self.graph.graph[n].def_id().map(|d| {
+                                self.graph
+                                    .str(self.graph.defs[d.0 as usize].fqn)
+                                    .to_string()
+                            })
                         })
                         .collect(),
                 }
@@ -721,16 +735,16 @@ impl<'a> ResolveCtx<'a> {
         &mut self,
         reaching: &[ParseValue],
         ref_name: &str,
-    ) -> Result<Vec<NodeId>, Killed> {
+    ) -> Result<Vec<NodeIndex>, Killed> {
         self.check_killed()?;
         let mut result = Vec::new();
         for value in reaching {
             match value {
                 ParseValue::LocalDef(i) => {
                     if let Some(&node) = self.def_nodes.get(*i as usize)
-                        && let Some(did) = self.graph.node(node).def_id()
+                        && let Some(did) = self.graph.graph[node].def_id()
                     {
-                        let gdef = &self.graph.def(did);
+                        let gdef = &self.graph.defs[did.0 as usize];
                         if gdef.kind.is_type_container() {
                             let name = self.graph.str(gdef.name);
                             let fqn = self.graph.str(gdef.fqn);
@@ -803,10 +817,11 @@ impl<'a> ResolveCtx<'a> {
                         let fqns: Vec<String> = resolved
                             .iter()
                             .filter_map(|&n| {
-                                self.graph
-                                    .node(n)
-                                    .def_id()
-                                    .map(|d| self.graph.str(self.graph.def(d).fqn).to_string())
+                                self.graph.graph[n].def_id().map(|d| {
+                                    self.graph
+                                        .str(self.graph.defs[d.0 as usize].fqn)
+                                        .to_string()
+                                })
                             })
                             .collect();
                         trace!(
@@ -866,7 +881,7 @@ impl<'a> ResolveCtx<'a> {
         Ok(result)
     }
 
-    fn resolve_chain(&mut self, r: &RefData<'_>) -> Result<Vec<NodeId>, Killed> {
+    fn resolve_chain(&mut self, r: &RefData<'_>) -> Result<Vec<NodeIndex>, Killed> {
         self.check_killed()?;
         let chain = r.chain.unwrap_or(&[]);
         if chain.is_empty() {
@@ -894,7 +909,7 @@ impl<'a> ResolveCtx<'a> {
         // When a chain starts with a class and the next step is a
         // constructor (e.g. MergeRequest.new.execute), emit a Calls
         // edge to the class itself alongside the terminal target.
-        let mut base_class_nodes: Vec<NodeId> = Vec::new();
+        let mut base_class_nodes: Vec<NodeIndex> = Vec::new();
         if chain.len() > 1 {
             let next_is_constructor = match &chain[1] {
                 ExpressionStep::Call(n) | ExpressionStep::Field(n) => {
@@ -904,12 +919,10 @@ impl<'a> ResolveCtx<'a> {
             };
             if next_is_constructor {
                 for type_fqn in &current_types {
-                    for &node in resolve_scope_nodes(self.graph, type_fqn).iter() {
-                        if self
-                            .graph
-                            .node(node)
+                    for &node in self.graph.resolve_scope_nodes(type_fqn).iter() {
+                        if self.graph.graph[node]
                             .def_id()
-                            .is_some_and(|d| self.graph.def(d).kind.is_type_container())
+                            .is_some_and(|d| self.graph.defs[d.0 as usize].kind.is_type_container())
                         {
                             base_class_nodes.push(node);
                         }
@@ -937,11 +950,13 @@ impl<'a> ResolveCtx<'a> {
                 self.lookup_nested_cached(type_fqn, member_name, &mut found_nodes);
 
                 for &def_idx in &found_nodes[before..] {
-                    if let Some(did) = self.graph.node(def_idx).def_id() {
-                        let gdef = &self.graph.def(did);
+                    if let Some(did) = self.graph.graph[def_idx].def_id() {
+                        let gdef = &self.graph.defs[did.0 as usize];
                         if matches!(step, ExpressionStep::Call(_)) {
                             let mut has_return_type = false;
-                            if let Some(rt) = self.graph.def_return_type(did) {
+                            if let Some(meta) = &gdef.metadata
+                                && let Some(rt) = meta.return_type
+                            {
                                 next_types.push(self.graph.str(rt).to_string());
                                 has_return_type = true;
                             }
@@ -960,7 +975,9 @@ impl<'a> ResolveCtx<'a> {
                                 && let Some(ta) = meta.type_annotation
                             {
                                 next_types.push(self.graph.str(ta).to_string());
-                            } else if let Some(rt) = self.graph.def_return_type(did) {
+                            } else if let Some(meta) = &gdef.metadata
+                                && let Some(rt) = meta.return_type
+                            {
                                 next_types.push(self.graph.str(rt).to_string());
                             } else if gdef.kind == DefKind::EnumEntry {
                                 let fqn = self.graph.str(gdef.fqn);
@@ -990,10 +1007,11 @@ impl<'a> ResolveCtx<'a> {
             let found_fqns: Vec<String> = found_nodes
                 .iter()
                 .filter_map(|&n| {
-                    self.graph
-                        .node(n)
-                        .def_id()
-                        .map(|d| self.graph.str(self.graph.def(d).fqn).to_string())
+                    self.graph.graph[n].def_id().map(|d| {
+                        self.graph
+                            .str(self.graph.defs[d.0 as usize].fqn)
+                            .to_string()
+                    })
                 })
                 .collect();
             trace!(
@@ -1034,7 +1052,7 @@ impl<'a> ResolveCtx<'a> {
         &mut self,
         r: &RefData<'_>,
         chain: &[ExpressionStep],
-    ) -> Result<Vec<NodeId>, Killed> {
+    ) -> Result<Vec<NodeIndex>, Killed> {
         if !self.settings.chain_fallback {
             return Ok(vec![]);
         }
@@ -1082,9 +1100,9 @@ impl<'a> ResolveCtx<'a> {
                         }
                         ParseValue::LocalDef(i) => {
                             if let Some(&node) = self.def_nodes.get(*i as usize)
-                                && let Some(did) = self.graph.node(node).def_id()
+                                && let Some(did) = self.graph.graph[node].def_id()
                             {
-                                let gdef = &self.graph.def(did);
+                                let gdef = &self.graph.defs[did.0 as usize];
                                 let fqn = self.graph.str(gdef.fqn);
                                 if gdef.kind.is_type_container() {
                                     trace!(
@@ -1098,7 +1116,9 @@ impl<'a> ResolveCtx<'a> {
                                         }
                                     );
                                     types.push(fqn.to_string());
-                                } else if let Some(rt) = self.graph.def_return_type(did) {
+                                } else if let Some(meta) = &gdef.metadata
+                                    && let Some(rt) = meta.return_type
+                                {
                                     let rt_str = self.graph.str(rt);
                                     trace!(
                                         self.tracer,
@@ -1142,8 +1162,8 @@ impl<'a> ResolveCtx<'a> {
                                 let before = types.len();
                                 let resolved = self.resolve_import_cached(import_node);
                                 for def_idx in resolved {
-                                    if let Some(did) = self.graph.node(def_idx).def_id() {
-                                        let gdef = &self.graph.def(did);
+                                    if let Some(did) = self.graph.graph[def_idx].def_id() {
+                                        let gdef = &self.graph.defs[did.0 as usize];
                                         let fqn = self.graph.str(gdef.fqn);
                                         if gdef.kind.is_type_container() {
                                             trace!(
@@ -1159,7 +1179,9 @@ impl<'a> ResolveCtx<'a> {
                                                 }
                                             );
                                             types.push(fqn.to_string());
-                                        } else if let Some(rt) = self.graph.def_return_type(did) {
+                                        } else if let Some(meta) = &gdef.metadata
+                                            && let Some(rt) = meta.return_type
+                                        {
                                             let rt_str = self.graph.str(rt);
                                             trace!(
                                                 self.tracer,
@@ -1241,8 +1263,8 @@ impl<'a> ResolveCtx<'a> {
                         nodes = self.import_resolver().global_name(name);
                     }
                     for n in nodes {
-                        if let Some(did) = self.graph.node(n).def_id() {
-                            let gdef = &self.graph.def(did);
+                        if let Some(did) = self.graph.graph[n].def_id() {
+                            let gdef = &self.graph.defs[did.0 as usize];
                             if gdef.kind.is_type_container() {
                                 let fqn = self.graph.str(gdef.fqn).to_string();
                                 trace!(
@@ -1267,28 +1289,23 @@ impl<'a> ResolveCtx<'a> {
                 })
                 .collect()),
             ExpressionStep::New(type_name) => {
-                let fqn_matches = self.graph.lookup_fqn(type_name, |idx| {
-                    self.graph
-                        .node(idx)
-                        .def_id()
-                        .is_some_and(|d| self.graph.str(self.graph.def(d).fqn) == *type_name)
-                });
+                let fqn_matches = self.graph.indexes.by_fqn.lookup_unverified(type_name);
                 if !fqn_matches.is_empty() {
                     return Ok(vec![type_name.to_string()]);
                 }
-                let name_matches = self.graph.lookup_name(type_name, |idx| {
-                    self.graph
-                        .node(idx)
-                        .def_id()
-                        .is_some_and(|d| self.graph.str(self.graph.def(d).name) == *type_name)
+                let name_matches = self.graph.indexes.by_name.lookup(type_name, |idx| {
+                    self.graph.graph[idx].def_id().is_some_and(|d| {
+                        self.graph.str(self.graph.defs[d.0 as usize].name) == *type_name
+                    })
                 });
                 Ok(name_matches
                     .iter()
                     .filter_map(|&idx| {
-                        self.graph
-                            .node(idx)
-                            .def_id()
-                            .map(|d| self.graph.str(self.graph.def(d).fqn).to_string())
+                        self.graph.graph[idx].def_id().map(|d| {
+                            self.graph
+                                .str(self.graph.defs[d.0 as usize].fqn)
+                                .to_string()
+                        })
                     })
                     .collect())
             }
@@ -1296,12 +1313,12 @@ impl<'a> ResolveCtx<'a> {
         }
     }
 
-    fn imported_symbol_type_fqn(&self, import_node: NodeId) -> Option<String> {
+    fn imported_symbol_type_fqn(&self, import_node: NodeIndex) -> Option<String> {
         if let Some(hook) = self.rules.hooks.external_import_type {
             return hook(self.graph, import_node);
         }
 
-        let imp = self.graph.import_for_node(import_node);
+        let imp = self.graph.import(import_node);
         if imp.wildcard || matches!(imp.binding_kind, ImportBindingKind::SideEffect) {
             return None;
         }
@@ -1320,21 +1337,20 @@ impl<'a> ResolveCtx<'a> {
         format!("{}{}", scope_fqn, self.rules.fqn_separator)
     }
 
-    fn resolve_implicit_member(&self, enclosing_node: NodeId, name: &str) -> Vec<NodeId> {
-        let sep = self.rules.fqn_separator;
+    fn resolve_implicit_member(&self, enclosing_node: NodeIndex, name: &str) -> Vec<NodeIndex> {
+        let sep = self.graph.sep();
         let mut result = Vec::new();
-        if let Some(did) = self.graph.node(enclosing_node).def_id() {
-            let gdef = &self.graph.def(did);
+        if let Some(did) = self.graph.graph[enclosing_node].def_id() {
+            let gdef = &self.graph.defs[did.0 as usize];
             let fqn = self.graph.str(gdef.fqn);
             for scope in crate::utils::fqn_scopes(fqn, sep) {
-                lookup_nested_into(self.graph, 
+                self.graph.indexes.nested.lookup_into(
                     scope,
                     name,
                     |idx| {
-                        self.graph
-                            .node(idx)
-                            .def_id()
-                            .is_some_and(|d| self.graph.str(self.graph.def(d).name) == name)
+                        self.graph.graph[idx].def_id().is_some_and(|d| {
+                            self.graph.str(self.graph.defs[d.0 as usize].name) == name
+                        })
                     },
                     &mut result,
                 );
@@ -1346,18 +1362,20 @@ impl<'a> ResolveCtx<'a> {
                 // members. Collect all candidates across all ancestors
                 // so diamond/mixin cases surface all matches (consistent
                 // with lookup_nested_cached's ancestor walk).
-                let scope_nodes = resolve_scope_nodes(self.graph, scope);
+                let scope_nodes = self.graph.resolve_scope_nodes(scope);
                 for &scope_node in &scope_nodes {
                     if let Some(ancestors) = self.graph.ancestors(scope_node) {
-                        for &ancestor in &ancestors {
-                            if let Some(ancestor_did) = self.graph.node(ancestor).def_id() {
-                                let ancestor_fqn = self.graph.str(self.graph.def(ancestor_did).fqn);
-                                lookup_nested_into(self.graph, 
+                        for &ancestor in ancestors {
+                            if let Some(ancestor_did) = self.graph.graph[ancestor].def_id() {
+                                let ancestor_fqn =
+                                    self.graph.str(self.graph.defs[ancestor_did.0 as usize].fqn);
+                                self.graph.indexes.nested.lookup_into(
                                     ancestor_fqn,
                                     name,
                                     |idx| {
-                                        self.graph.node(idx).def_id().is_some_and(|d| {
-                                            self.graph.str(self.graph.def(d).name) == name
+                                        self.graph.graph[idx].def_id().is_some_and(|d| {
+                                            self.graph.str(self.graph.defs[d.0 as usize].name)
+                                                == name
                                         })
                                     },
                                     &mut result,
@@ -1393,13 +1411,13 @@ fn format_chain(chain: Option<&[ExpressionStep]>) -> Option<Vec<String>> {
 
 fn pre_resolve_imports(
     graph: &CodeGraph,
-    import_nodes: &[NodeId],
-    sep: &str,
-) -> FxHashMap<String, Vec<NodeId>> {
-    let mut map: FxHashMap<String, Vec<NodeId>> = FxHashMap::default();
+    import_nodes: &[NodeIndex],
+) -> FxHashMap<String, Vec<NodeIndex>> {
+    let sep = graph.sep();
+    let mut map: FxHashMap<String, Vec<NodeIndex>> = FxHashMap::default();
     for &import_node in import_nodes {
-        if let Some(iid) = graph.node(import_node).import_id() {
-            let gimp = graph.import(iid);
+        if let Some(iid) = graph.graph[import_node].import_id() {
+            let gimp = &graph.imports[iid.0 as usize];
             let effective_name = gimp
                 .alias
                 .or(gimp.name)
@@ -1407,23 +1425,10 @@ fn pre_resolve_imports(
                 .unwrap_or_default();
             if !effective_name.is_empty() {
                 let fqn = match gimp.name {
-                    Some(n) => {
-                        let path = graph.str(gimp.path);
-                        let name = graph.str(n);
-                        if path.is_empty() {
-                            name.to_string()
-                        } else {
-                            format!("{path}{sep}{name}")
-                        }
-                    }
+                    Some(n) => format!("{}{}{}", graph.str(gimp.path), sep, graph.str(n)),
                     None => graph.str(gimp.path).to_string(),
                 };
-                let targets = graph.lookup_fqn(&fqn, |idx| {
-                    graph
-                        .node(idx)
-                        .def_id()
-                        .is_some_and(|d| graph.str(graph.def(d).fqn) == fqn)
-                });
+                let targets = graph.indexes.by_fqn.lookup_unverified(&fqn);
                 if !targets.is_empty() {
                     map.entry(effective_name).or_default().extend(targets);
                 }
@@ -1431,147 +1436,4 @@ fn pre_resolve_imports(
         }
     }
     map
-}
-
-// ── Graph query helpers (free functions) ─────────────────────────────────────
-
-/// Like `CodeGraph::lookup_nested` but appends matches to `out`.
-pub fn lookup_nested_into(
-    graph: &CodeGraph,
-    scope: &str,
-    member: &str,
-    verify: impl Fn(NodeId) -> bool,
-    out: &mut Vec<NodeId>,
-) -> bool {
-    let found = graph.lookup_nested(scope, member, verify);
-    if found.is_empty() {
-        return false;
-    }
-    out.extend_from_slice(&found);
-    true
-}
-
-/// Resolve a scope name to definition nodes. Tries by_fqn, then by_name
-/// filtered to type containers, then segmented qualified-name walk.
-pub fn resolve_scope_nodes(graph: &CodeGraph, name: &str) -> SmallVec<[NodeId; 8]> {
-    let by_fqn = graph.lookup_fqn(name, |idx| graph.def_fqn(idx) == name);
-    if !by_fqn.is_empty() {
-        return by_fqn;
-    }
-    let by_name = graph.lookup_name(name, |idx| {
-        graph.def_name(idx) == name
-            && graph
-                .node(idx)
-                .def_id()
-                .is_some_and(|d| graph.def(d).kind.is_type_container())
-    });
-    if !by_name.is_empty() {
-        return by_name;
-    }
-    for sep in &[".", "::"] {
-        let segments: Vec<&str> = name.split(sep).collect();
-        if segments.len() < 2 {
-            continue;
-        }
-        let first_matches = graph.lookup_name(segments[0], |idx| {
-            graph.def_name(idx) == segments[0]
-                && graph
-                    .node(idx)
-                    .def_id()
-                    .is_some_and(|d| graph.def(d).kind.is_type_container())
-        });
-        if first_matches.is_empty() {
-            continue;
-        }
-        let rest = &segments[1..].join(sep);
-        for &node in &first_matches {
-            let prefix_fqn = graph.def_fqn(node);
-            let candidate = format!("{prefix_fqn}{sep}{rest}");
-            let matches = graph.lookup_fqn(&candidate, |idx| graph.def_fqn(idx) == candidate);
-            if !matches.is_empty() {
-                return matches;
-            }
-        }
-    }
-    SmallVec::new()
-}
-
-pub fn lookup_nested_with_hierarchy(
-    graph: &CodeGraph,
-    scope_fqn: &str,
-    member_name: &str,
-    out: &mut Vec<NodeId>,
-) -> bool {
-    let start_nodes = resolve_scope_nodes(graph, scope_fqn);
-    if start_nodes.is_empty() {
-        return false;
-    }
-    let verify_member = |idx: NodeId| graph.def_name(idx) == member_name;
-    for &start in &start_nodes {
-        let actual_fqn = graph.def_fqn(start);
-        if lookup_nested_into(graph, actual_fqn, member_name, verify_member, out) {
-            return true;
-        }
-        if let Some(chain) = graph.ancestors(start) {
-            for &ancestor in &chain {
-                let ancestor_fqn = graph.def_fqn(ancestor);
-                if lookup_nested_into(graph, ancestor_fqn, member_name, verify_member, out) {
-                    return true;
-                }
-            }
-        }
-    }
-    false
-}
-
-pub fn lookup_nested_from_node_with_hierarchy(
-    graph: &CodeGraph,
-    scope_node: NodeId,
-    member_name: &str,
-    out: &mut Vec<NodeId>,
-) -> bool {
-    let scope_fqn = graph.def_fqn(scope_node);
-    let verify_member = |idx: NodeId| graph.def_name(idx) == member_name;
-    if lookup_nested_into(graph, scope_fqn, member_name, verify_member, out) {
-        return true;
-    }
-    if let Some(chain) = graph.ancestors(scope_node) {
-        for &ancestor in &chain {
-            let ancestor_fqn = graph.def_fqn(ancestor);
-            if lookup_nested_into(graph, ancestor_fqn, member_name, verify_member, out) {
-                return true;
-            }
-        }
-    }
-    false
-}
-
-pub fn lookup_by_receiver_type(
-    graph: &CodeGraph,
-    type_name: &str,
-    member_name: &str,
-    out: &mut Vec<NodeId>,
-) {
-    let candidates = graph.lookup_name(member_name, |idx| {
-        graph
-            .node(idx)
-            .def_id()
-            .is_some_and(|d| graph.str(graph.def(d).name) == member_name)
-    });
-    let bare_type = type_name.rsplit_once('.').map_or(type_name, |(_, t)| t);
-    for idx in candidates {
-        if let Some(did) = graph.node(idx).def_id()
-            && let Some(meta) = &graph.def(did).metadata
-            && let Some(rt) = meta.receiver_type
-        {
-            let rt_str = graph.str(rt);
-            if rt_str == type_name || rt_str == bare_type {
-                out.push(idx);
-            }
-        }
-    }
-}
-
-pub fn def_in_file(graph: &CodeGraph, node_id: NodeId, file_path: &str) -> bool {
-    graph.node_path(node_id) == file_path
 }

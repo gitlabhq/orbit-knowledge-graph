@@ -35,8 +35,7 @@ impl LanguagePipeline for JsPipeline {
             .and_then(sentinel::spawn_sentinel);
         let sentinel_handle = sentinel.as_ref().map(|(h, _)| h);
 
-        let js_pool = crate::v2::linker::state::StringPool::new();
-        let (analyzed_files, errors) = analyze_files(files, root_path, sentinel_handle, &js_pool);
+        let (analyzed_files, errors) = analyze_files(files, root_path, sentinel_handle);
         let parse_ms = t0.elapsed().as_secs_f64() * 1000.0;
 
         // Route per-file outcomes to the typed collections regardless of
@@ -59,7 +58,7 @@ impl LanguagePipeline for JsPipeline {
             return Ok(());
         }
 
-        let mut builder = JsModuleGraphBuilder::new(root_path.to_string(), js_pool);
+        let mut builder = JsModuleGraphBuilder::new(root_path.to_string());
         let mut file_infos: FxHashMap<String, JsPhase1FileInfo> = FxHashMap::default();
         let mut resolved_files = Vec::with_capacity(analyzed_files.len());
         for file in analyzed_files {
@@ -87,10 +86,10 @@ impl LanguagePipeline for JsPipeline {
         let (mut graph, modules) = builder.into_parts();
         let graph_build_ms = t0.elapsed().as_secs_f64() * 1000.0 - parse_ms;
         if ctx.config.emit_file_inventory_graph {
-            graph.parsed_only = true;
+            graph.mark_parsed_only();
         }
         attach_resolution_edges(
-            &graph,
+            &mut graph,
             &resolved_files,
             &file_infos,
             &modules,
@@ -99,7 +98,7 @@ impl LanguagePipeline for JsPipeline {
             sentinel_handle,
             ctx,
         );
-        graph.finalize();
+        graph.finalize(tracer);
         let total_ms = t0.elapsed().as_secs_f64() * 1000.0;
         let resolve_ms = total_ms - parse_ms - graph_build_ms;
         let total_bytes: u64 = resolved_files
@@ -147,7 +146,7 @@ mod tests {
     impl GraphConverter for NoopConverter {
         fn convert(
             &self,
-            _graph: crate::v2::linker::graph::CodeGraph,
+            _graph: crate::v2::linker::CodeGraph,
         ) -> Result<Vec<(String, RecordBatch)>, crate::v2::SinkError> {
             Ok(Vec::new())
         }

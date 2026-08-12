@@ -182,12 +182,10 @@ impl HasRules for CppRules {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::v2::linker::state::StringPool;
     use crate::v2::trace::Tracer;
 
     fn parse(
         code: &str,
-        pool: &StringPool,
     ) -> Result<crate::v2::dsl::engine::ParsedDefs, crate::v2::pipeline::PipelineError> {
         CppDsl::spec()
             .parse_full_collect(
@@ -196,7 +194,6 @@ mod tests {
                 Language::Cpp,
                 &Tracer::new(false),
                 Default::default(),
-                pool,
             )
             .map(|r| crate::v2::dsl::engine::ParsedDefs {
                 definitions: r.definitions,
@@ -207,71 +204,40 @@ mod tests {
 
     #[test]
     fn function_definitions() {
-        let pool = StringPool::new();
-        let result = parse(
-            "int add(int a, int b) { return a + b; }\nvoid greet() {}\n",
-            &pool,
-        )
-        .unwrap();
-        let names: Vec<&str> = result
-            .definitions
-            .iter()
-            .map(|d| pool.get(d.name))
-            .collect();
+        let result = parse("int add(int a, int b) { return a + b; }\nvoid greet() {}\n").unwrap();
+        let names: Vec<&str> = result.definitions.iter().map(|d| d.name.as_str()).collect();
         assert!(names.contains(&"add"), "should find add");
         assert!(names.contains(&"greet"), "should find greet");
     }
 
     #[test]
     fn class_definition() {
-        let pool = StringPool::new();
-        let result = parse("class Point { public: int x; int y; };\n", &pool).unwrap();
-        let point = result
-            .definitions
-            .iter()
-            .find(|d| pool.get(d.name) == "Point");
+        let result = parse("class Point { public: int x; int y; };\n").unwrap();
+        let point = result.definitions.iter().find(|d| d.name == "Point");
         assert!(point.is_some(), "should find class Point");
         assert_eq!(point.unwrap().kind, DefKind::Class);
     }
 
     #[test]
     fn struct_definition() {
-        let pool = StringPool::new();
-        let result = parse("struct Vec3 { double x; double y; double z; };\n", &pool).unwrap();
-        let v = result
-            .definitions
-            .iter()
-            .find(|d| pool.get(d.name) == "Vec3");
+        let result = parse("struct Vec3 { double x; double y; double z; };\n").unwrap();
+        let v = result.definitions.iter().find(|d| d.name == "Vec3");
         assert!(v.is_some(), "should find struct Vec3");
         assert_eq!(v.unwrap().kind, DefKind::Class);
     }
 
     #[test]
     fn namespace_definition() {
-        let pool = StringPool::new();
-        let result = parse(
-            "namespace math { int add(int a, int b) { return a + b; } }\n",
-            &pool,
-        )
-        .unwrap();
-        let names: Vec<&str> = result
-            .definitions
-            .iter()
-            .map(|d| pool.get(d.name))
-            .collect();
+        let result = parse("namespace math { int add(int a, int b) { return a + b; } }\n").unwrap();
+        let names: Vec<&str> = result.definitions.iter().map(|d| d.name.as_str()).collect();
         assert!(names.contains(&"math"), "should find namespace math");
         assert!(names.contains(&"add"), "should find add inside namespace");
     }
 
     #[test]
     fn enum_definition() {
-        let pool = StringPool::new();
-        let result = parse("enum Color { RED, GREEN, BLUE };\n", &pool).unwrap();
-        let names: Vec<&str> = result
-            .definitions
-            .iter()
-            .map(|d| pool.get(d.name))
-            .collect();
+        let result = parse("enum Color { RED, GREEN, BLUE };\n").unwrap();
+        let names: Vec<&str> = result.definitions.iter().map(|d| d.name.as_str()).collect();
         assert!(names.contains(&"Color"), "should find enum Color");
         assert!(names.contains(&"RED"), "should find RED");
         assert!(names.contains(&"GREEN"), "should find GREEN");
@@ -280,7 +246,6 @@ mod tests {
 
     #[test]
     fn qualified_call_ref() {
-        let pool = StringPool::new();
         let result = CppDsl::spec()
             .parse_full_collect(
                 b"namespace ns { void target() {} }\nvoid f() { ns::target(); }\n",
@@ -288,7 +253,6 @@ mod tests {
                 Language::Cpp,
                 &Tracer::new(false),
                 Default::default(),
-                &pool,
             )
             .unwrap();
         let ref_names: Vec<&str> = result.refs.iter().map(|r| r.name.as_str()).collect();
@@ -301,12 +265,7 @@ mod tests {
 
     #[test]
     fn include_imports() {
-        let pool = StringPool::new();
-        let result = parse(
-            "#include <iostream>\n#include \"mylib.h\"\nvoid main() {}\n",
-            &pool,
-        )
-        .unwrap();
+        let result = parse("#include <iostream>\n#include \"mylib.h\"\nvoid main() {}\n").unwrap();
         assert!(
             result.imports.len() >= 2,
             "should find at least 2 includes, got {}",

@@ -59,10 +59,9 @@ fn scala_super_types(node: &N<'_>) -> Vec<String> {
 
 fn scala_extract_imports(
     node: &N<'_>,
-    imports: &mut Vec<crate::v2::types::GraphImport>,
-    pool: &crate::v2::linker::state::StringPool,
+    imports: &mut Vec<crate::v2::types::CanonicalImport>,
 ) -> bool {
-    use crate::v2::types::{GraphImport, ImportBindingKind, ImportMode};
+    use crate::v2::types::{CanonicalImport, ImportBindingKind, ImportMode};
 
     if node.kind().as_ref() != "import_declaration" {
         return false;
@@ -113,13 +112,14 @@ fn scala_extract_imports(
     let base_path = path_parts.join(".");
 
     if has_wildcard {
-        imports.push(GraphImport {
+        imports.push(CanonicalImport {
             import_type: "WildcardImport",
             binding_kind: ImportBindingKind::Named,
             mode: ImportMode::Declarative,
-            path: pool.alloc(&base_path),
+            path: base_path.clone(),
             name: None,
             alias: None,
+            scope_fqn: None,
             range: crate::v2::types::Range::empty(),
             is_type_only: false,
             wildcard: true,
@@ -128,7 +128,7 @@ fn scala_extract_imports(
 
     if !selectors.is_empty() {
         for (name, alias) in selectors {
-            imports.push(GraphImport {
+            imports.push(CanonicalImport {
                 import_type: if alias.is_some() {
                     "AliasedImport"
                 } else {
@@ -136,9 +136,10 @@ fn scala_extract_imports(
                 },
                 binding_kind: ImportBindingKind::Named,
                 mode: ImportMode::Declarative,
-                path: pool.alloc(&base_path),
-                name: Some(pool.alloc(&name)),
-                alias: alias.map(|s| pool.alloc(&s)),
+                path: base_path.clone(),
+                name: Some(name),
+                alias,
+                scope_fqn: None,
                 range: crate::v2::types::Range::empty(),
                 is_type_only: false,
                 wildcard: false,
@@ -150,13 +151,14 @@ fn scala_extract_imports(
             .map(|(p, n)| (p.to_string(), Some(n.to_string())))
             .unwrap_or((base_path, None));
 
-        imports.push(GraphImport {
+        imports.push(CanonicalImport {
             import_type: "Import",
             binding_kind: ImportBindingKind::Named,
             mode: ImportMode::Declarative,
-            path: pool.alloc(&path),
-            name: name.map(|s| pool.alloc(&s)),
+            path,
+            name,
             alias: None,
+            scope_fqn: None,
             range: crate::v2::types::Range::empty(),
             is_type_only: false,
             wildcard: false,
@@ -381,12 +383,10 @@ impl HasRules for ScalaRules {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::v2::linker::state::StringPool;
     use crate::v2::trace::Tracer;
 
     fn parse(
         code: &str,
-        pool: &StringPool,
     ) -> Result<crate::v2::dsl::engine::ParsedDefs, crate::v2::pipeline::PipelineError> {
         ScalaDsl::spec()
             .parse_full_collect(
@@ -395,7 +395,6 @@ mod tests {
                 crate::v2::config::Language::Scala,
                 &Tracer::new(false),
                 Default::default(),
-                pool,
             )
             .map(|r| crate::v2::dsl::engine::ParsedDefs {
                 definitions: r.definitions,
@@ -411,151 +410,114 @@ mod tests {
 
     #[test]
     fn class_with_methods() {
-        let pool = StringPool::new();
-        let result = parse(
-            "class Calculator {\n  def add(a: Int, b: Int): Int = a + b\n}\n",
-            &pool,
-        )
-        .unwrap();
+        let result =
+            parse("class Calculator {\n  def add(a: Int, b: Int): Int = a + b\n}\n").unwrap();
         assert!(!result.definitions.is_empty());
-        assert_eq!(pool.get(result.definitions[0].name), "Calculator");
+        assert_eq!(result.definitions[0].name, "Calculator");
         assert_eq!(result.definitions[0].kind, DefKind::Class);
     }
 
     #[test]
     fn package_scoping() {
-        let pool = StringPool::new();
-        let result = parse(
-            "package com.example\n\nclass Service {\n  def run(): Unit = {}\n}\n",
-            &pool,
-        )
-        .unwrap();
+        let result =
+            parse("package com.example\n\nclass Service {\n  def run(): Unit = {}\n}\n").unwrap();
         let service = result
             .definitions
             .iter()
-            .find(|d| pool.get(d.name) == "Service")
+            .find(|d| d.name == "Service")
             .unwrap();
-        assert_eq!(pool.get(service.fqn), "com.example.Service");
+        assert_eq!(service.fqn.to_string(), "com.example.Service");
     }
 
     #[test]
     fn case_class() {
-        let pool = StringPool::new();
-        let result = parse("case class User(id: Int, name: String)\n", &pool).unwrap();
-        assert!(
-            result
-                .definitions
-                .iter()
-                .any(|d| pool.get(d.name) == "User")
-        );
+        let result = parse("case class User(id: Int, name: String)\n").unwrap();
+        assert!(result.definitions.iter().any(|d| d.name == "User"));
     }
 
     #[test]
     fn object_and_trait() {
-        let pool = StringPool::new();
         let result = parse(
             "trait Repository[T] {\n  def find(id: Int): T\n}\nobject Repo extends Repository[String] {\n  def find(id: Int): String = id.toString\n}\n",
-            &pool,
         )
         .unwrap();
-        assert!(
-            result
-                .definitions
-                .iter()
-                .any(|d| pool.get(d.name) == "Repository")
-        );
-        assert!(
-            result
-                .definitions
-                .iter()
-                .any(|d| pool.get(d.name) == "Repo")
-        );
+        assert!(result.definitions.iter().any(|d| d.name == "Repository"));
+        assert!(result.definitions.iter().any(|d| d.name == "Repo"));
     }
 
     #[test]
     fn case_class_with_modifiers() {
-        let pool = StringPool::new();
-        let result = parse(
-            "final case class Money(cents: Long)\nsealed case class Result(value: Int)\n",
-            &pool,
-        )
-        .unwrap();
+        let result =
+            parse("final case class Money(cents: Long)\nsealed case class Result(value: Int)\n")
+                .unwrap();
         assert!(
             result
                 .definitions
                 .iter()
-                .any(|d| pool.get(d.name) == "Money" && d.definition_type == "CaseClass")
+                .any(|d| d.name == "Money" && d.definition_type == "CaseClass")
         );
         assert!(
             result
                 .definitions
                 .iter()
-                .any(|d| pool.get(d.name) == "Result" && d.definition_type == "CaseClass")
+                .any(|d| d.name == "Result" && d.definition_type == "CaseClass")
         );
     }
 
     #[test]
     fn abstract_val_var_in_trait() {
-        let pool = StringPool::new();
-        let result = parse(
-            "trait Shape {\n  val name: String\n  var counter: Int\n  def area: Double\n}\n",
-            &pool,
-        )
-        .unwrap();
-        assert!(
-            result
-                .definitions
-                .iter()
-                .any(|d| pool.get(d.name) == "name")
-        );
-        assert!(
-            result
-                .definitions
-                .iter()
-                .any(|d| pool.get(d.name) == "counter")
-        );
+        let result =
+            parse("trait Shape {\n  val name: String\n  var counter: Int\n  def area: Double\n}\n")
+                .unwrap();
+        assert!(result.definitions.iter().any(|d| d.name == "name"));
+        assert!(result.definitions.iter().any(|d| d.name == "counter"));
     }
 
     #[test]
     fn import_extraction() {
-        let pool = StringPool::new();
         let result = parse(
-            "package com.example\nimport com.example.models.User\nimport com.example.utils._\nimport com.example.{A, B}\nclass Service {}\n",
-            &pool,
+            "package com.example\nimport com.example.models.User\nimport com.example.utils._\nimport com.example.{A, B}\nclass Service {}\n"
         ).unwrap();
         assert!(
             result
                 .imports
                 .iter()
-                .any(|i| i.name.map(|id| pool.get(id)) == Some("User")
-                    && pool.get(i.path) == "com.example.models")
+                .any(|i| i.name == Some("User".to_string()) && i.path == "com.example.models")
         );
         assert!(
             result
                 .imports
                 .iter()
-                .any(|i| i.wildcard && pool.get(i.path) == "com.example.utils")
+                .any(|i| i.wildcard && i.path == "com.example.utils")
         );
-        assert!(result.imports.iter().any(
-            |i| i.name.map(|id| pool.get(id)) == Some("A") && pool.get(i.path) == "com.example"
-        ));
-        assert!(result.imports.iter().any(
-            |i| i.name.map(|id| pool.get(id)) == Some("B") && pool.get(i.path) == "com.example"
-        ));
+        assert!(
+            result
+                .imports
+                .iter()
+                .any(|i| i.name == Some("A".to_string()) && i.path == "com.example")
+        );
+        assert!(
+            result
+                .imports
+                .iter()
+                .any(|i| i.name == Some("B".to_string()) && i.path == "com.example")
+        );
     }
 
     #[test]
     fn mixed_import_with_wildcard() {
-        let pool = StringPool::new();
-        let result = parse("import com.example.{A, _}\nclass Service {}\n", &pool).unwrap();
+        let result = parse("import com.example.{A, _}\nclass Service {}\n").unwrap();
         assert!(
             result
                 .imports
                 .iter()
-                .any(|i| i.wildcard && pool.get(i.path) == "com.example")
+                .any(|i| i.wildcard && i.path == "com.example")
         );
-        assert!(result.imports.iter().any(
-            |i| i.name.map(|id| pool.get(id)) == Some("A") && pool.get(i.path) == "com.example"
-        ));
+        assert!(
+            result
+                .imports
+                .iter()
+                .any(|i| i.name == Some("A".to_string()) && i.path == "com.example")
+        );
     }
 }

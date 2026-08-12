@@ -1,8 +1,7 @@
 use crate::v2::config::Language;
 use crate::v2::dsl::extractors::metadata;
 use crate::v2::dsl::types::{self, *};
-use crate::v2::linker::state::StringPool;
-use crate::v2::types::{BindingKind, DefKind, GraphImport, ImportBindingKind, ImportMode};
+use crate::v2::types::{BindingKind, CanonicalImport, DefKind, ImportBindingKind, ImportMode};
 use treesitter_visit::Axis::*;
 use treesitter_visit::Match::*;
 use treesitter_visit::extract::Extract;
@@ -53,7 +52,7 @@ fn swift_super_types(node: &N<'_>) -> Vec<String> {
     result
 }
 
-fn swift_extract_imports(node: &N<'_>, imports: &mut Vec<GraphImport>, pool: &StringPool) -> bool {
+fn swift_extract_imports(node: &N<'_>, imports: &mut Vec<CanonicalImport>) -> bool {
     if node.kind().as_ref() != "import_declaration" {
         return false;
     }
@@ -81,13 +80,14 @@ fn swift_extract_imports(node: &N<'_>, imports: &mut Vec<GraphImport>, pool: &St
 
     let name = path.rsplit('.').next().unwrap_or(&path).to_string();
 
-    imports.push(GraphImport {
+    imports.push(CanonicalImport {
         import_type: "Import",
         binding_kind: ImportBindingKind::Named,
         mode: ImportMode::Declarative,
-        path: pool.alloc(&path),
-        name: Some(pool.alloc(&name)),
+        path,
+        name: Some(name),
         alias: None,
+        scope_fqn: None,
         range: crate::v2::types::Range::empty(),
         is_type_only: false,
         wildcard: false,
@@ -282,12 +282,10 @@ impl HasRules for SwiftRules {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::v2::linker::state::StringPool;
     use crate::v2::trace::Tracer;
 
     fn parse(
         code: &str,
-        pool: &StringPool,
     ) -> Result<crate::v2::dsl::engine::ParsedDefs, crate::v2::pipeline::PipelineError> {
         SwiftDsl::spec()
             .parse_full_collect(
@@ -296,7 +294,6 @@ mod tests {
                 crate::v2::config::Language::Swift,
                 &Tracer::new(false),
                 Default::default(),
-                pool,
             )
             .map(|r| crate::v2::dsl::engine::ParsedDefs {
                 definitions: r.definitions,
@@ -312,64 +309,47 @@ mod tests {
 
     #[test]
     fn class_and_method() {
-        let pool = StringPool::new();
-        let result = parse("class Animal {\n    func speak() {}\n}\n", &pool).unwrap();
+        let result = parse("class Animal {\n    func speak() {}\n}\n").unwrap();
         assert_eq!(result.definitions.len(), 2);
-        assert_eq!(pool.get(result.definitions[0].name), "Animal");
+        assert_eq!(result.definitions[0].name, "Animal");
         assert_eq!(result.definitions[0].kind, DefKind::Class);
     }
 
     #[test]
     fn struct_definition() {
-        let pool = StringPool::new();
-        let result = parse(
-            "struct Point {\n    var x: Double\n    var y: Double\n}\n",
-            &pool,
-        )
-        .unwrap();
+        let result = parse("struct Point {\n    var x: Double\n    var y: Double\n}\n").unwrap();
         let point = result
             .definitions
             .iter()
-            .find(|d| pool.get(d.name) == "Point")
+            .find(|d| d.name == "Point")
             .unwrap();
         assert_eq!(point.kind, DefKind::Class);
     }
 
     #[test]
     fn protocol_definition() {
-        let pool = StringPool::new();
-        let result = parse("protocol Drawable {\n    func draw()\n}\n", &pool).unwrap();
+        let result = parse("protocol Drawable {\n    func draw()\n}\n").unwrap();
         let drawable = result
             .definitions
             .iter()
-            .find(|d| pool.get(d.name) == "Drawable")
+            .find(|d| d.name == "Drawable")
             .unwrap();
         assert_eq!(drawable.kind, DefKind::Interface);
     }
 
     #[test]
     fn import_extraction() {
-        let pool = StringPool::new();
-        let result = parse("import Foundation\nimport UIKit\n\nclass Foo {}\n", &pool).unwrap();
+        let result = parse("import Foundation\nimport UIKit\n\nclass Foo {}\n").unwrap();
         assert_eq!(result.imports.len(), 2);
-        assert!(
-            result
-                .imports
-                .iter()
-                .any(|i| pool.get(i.path) == "Foundation")
-        );
-        assert!(result.imports.iter().any(|i| pool.get(i.path) == "UIKit"));
+        assert!(result.imports.iter().any(|i| i.path == "Foundation"));
+        assert!(result.imports.iter().any(|i| i.path == "UIKit"));
     }
 
     #[test]
     fn dotted_import_extraction() {
-        let pool = StringPool::new();
-        let result = parse("import UIKit.UIViewController\nclass Foo {}\n", &pool).unwrap();
+        let result = parse("import UIKit.UIViewController\nclass Foo {}\n").unwrap();
         assert_eq!(result.imports.len(), 1);
-        assert_eq!(pool.get(result.imports[0].path), "UIKit.UIViewController");
-        assert_eq!(
-            result.imports[0].name.map(|id| pool.get(id)),
-            Some("UIViewController")
-        );
+        assert_eq!(result.imports[0].path, "UIKit.UIViewController");
+        assert_eq!(result.imports[0].name.as_deref(), Some("UIViewController"));
     }
 }

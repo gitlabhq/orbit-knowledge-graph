@@ -18,7 +18,7 @@ fi
 export E2E_GKG_TAG="${E2E_GKG_TAG:-dev}"
 
 export NS_NATS="e2e-${E2E_SHA}-nats"
-export NS_CH="e2e-${E2E_SHA}-clickhouse"
+export NS_CH="${E2E_CH_NAMESPACE:-e2e-${E2E_SHA}-clickhouse}"
 export NS_GITLAB="e2e-${E2E_SHA}-gitlab"
 export NS_SIPHON="e2e-${E2E_SHA}-siphon"
 export NS_GKG="e2e-${E2E_SHA}-gkg"

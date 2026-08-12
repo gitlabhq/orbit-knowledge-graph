@@ -3,16 +3,14 @@ use crate::v2::dsl::types::{
     ChainConfig, DslLanguage, FieldAccessEntry, LanguageHooks, ReferenceRule, ScopeRule, reference,
     scope,
 };
-use crate::v2::linker::state::StringPool;
-use crate::v2::types::{DefKind, GraphImport, ImportBindingKind, ImportMode};
+use crate::v2::types::{CanonicalImport, DefKind, ImportBindingKind, ImportMode};
 use treesitter_visit::Axis::*;
 use treesitter_visit::Match::*;
 use treesitter_visit::extract::{Extract, child_of_kind, field, text};
 use treesitter_visit::predicate::{Pred, field_kind, has_child, has_named_prev_sibling};
 
-use crate::v2::linker::graph::CodeGraph;
 use crate::v2::linker::rules::{ImportStrategy, ReceiverMode, ResolveStage, ResolverHooks};
-use crate::v2::linker::{HasRules, ResolutionRules};
+use crate::v2::linker::{CodeGraph, HasRules, ResolutionRules};
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
 
@@ -218,7 +216,7 @@ impl DslLanguage for ElixirDsl {
     }
 }
 
-fn elixir_extract_imports(node: &N<'_>, imports: &mut Vec<GraphImport>, pool: &StringPool) -> bool {
+fn elixir_extract_imports(node: &N<'_>, imports: &mut Vec<CanonicalImport>) -> bool {
     if node.kind().as_ref() != "call" {
         return false;
     }
@@ -265,7 +263,7 @@ fn elixir_extract_imports(node: &N<'_>, imports: &mut Vec<GraphImport>, pool: &S
                     Some((sub, n)) => (format!("{prefix}.{sub}"), n.to_string()),
                     None => (prefix.clone(), full),
                 };
-                push_import(imports, import_type, path, name, None, false, pool);
+                push_import(imports, import_type, path, name, None, false);
             }
             return true;
         }
@@ -286,7 +284,7 @@ fn elixir_extract_imports(node: &N<'_>, imports: &mut Vec<GraphImport>, pool: &S
             .rsplit_once('.')
             .map_or(full.as_str(), |(_, n)| n)
             .to_string();
-        push_import(imports, import_type, full.clone(), last, None, true, pool);
+        push_import(imports, import_type, full.clone(), last, None, true);
         return true;
     }
 
@@ -295,7 +293,7 @@ fn elixir_extract_imports(node: &N<'_>, imports: &mut Vec<GraphImport>, pool: &S
         Some((p, n)) => (p.to_string(), n.to_string()),
         None => (String::new(), full),
     };
-    push_import(imports, import_type, path, name, as_alias, false, pool);
+    push_import(imports, import_type, path, name, as_alias, false);
     true
 }
 
@@ -312,24 +310,24 @@ fn find_pair<'a>(keywords: &N<'a>, key: &str) -> Option<N<'a>> {
 }
 
 fn push_import(
-    imports: &mut Vec<GraphImport>,
+    imports: &mut Vec<CanonicalImport>,
     import_type: &'static str,
     path: String,
     name: String,
     alias: Option<String>,
     wildcard: bool,
-    pool: &StringPool,
 ) {
     if name.is_empty() {
         return;
     }
-    imports.push(GraphImport {
+    imports.push(CanonicalImport {
         import_type,
         binding_kind: ImportBindingKind::Named,
         mode: ImportMode::Declarative,
-        path: pool.alloc(&path),
-        name: Some(pool.alloc(&name)),
-        alias: alias.map(|s| pool.alloc(&s)),
+        path,
+        name: Some(name),
+        alias,
+        scope_fqn: None,
         range: crate::v2::types::Range::empty(),
         is_type_only: false,
         wildcard,
@@ -339,10 +337,10 @@ fn push_import(
 /// Resolve a chain base like `Baz` in `Baz.hello(name)` to a module
 /// FQN when no alias or SSA binding covers it.
 fn elixir_resolve_ident_type(graph: &CodeGraph, name: &str) -> Option<String> {
-    let nodes = crate::v2::linker::resolver::resolve_scope_nodes(graph, name);
+    let nodes = graph.resolve_scope_nodes(name);
     for &node in &nodes {
-        if let Some(did) = graph.node(node).def_id() {
-            let gdef = graph.def(did);
+        if let Some(did) = graph.graph[node].def_id() {
+            let gdef = &graph.defs[did.0 as usize];
             if gdef.kind.is_type_container() {
                 return Some(graph.str(gdef.fqn).to_string());
             }
@@ -385,13 +383,11 @@ impl HasRules for ElixirRules {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::v2::linker::state::StringPool;
     use crate::v2::trace::Tracer;
     use crate::v2::types::ExpressionStep;
 
     fn parse(
         code: &str,
-        pool: &StringPool,
     ) -> Result<crate::v2::dsl::engine::ParseFullResult, crate::v2::pipeline::PipelineError> {
         ElixirDsl::spec()
             .parse_full_collect(
@@ -400,14 +396,12 @@ mod tests {
                 Language::Elixir,
                 &Tracer::new(false),
                 Default::default(),
-                pool,
             )
             .map_err(|e| crate::v2::pipeline::PipelineError::parse("test.ex", format!("{e:?}")))
     }
 
     #[test]
     fn modules_and_functions_carry_dotted_fqns() {
-        let pool = StringPool::new();
         let result = parse(
             "defmodule Greeter do\n  \
                def hello(name) do\n    name\n  end\n  \
@@ -415,14 +409,13 @@ mod tests {
                defmodule Inner do\n    def run, do: :ok\n  end\n\
              end\n\
              defmodule Foo.Bar do\n  def baz(x), do: x\nend\n",
-            &pool,
         )
         .unwrap();
 
         let defs: Vec<(&str, &str, &str)> = result
             .definitions
             .iter()
-            .map(|d| (d.definition_type, pool.get(d.name), pool.get(d.fqn)))
+            .map(|d| (d.definition_type, d.name.as_str(), d.fqn.as_str()))
             .collect();
 
         assert!(defs.contains(&("Module", "Greeter", "Greeter")), "{defs:?}");
@@ -454,7 +447,6 @@ mod tests {
 
     #[test]
     fn def_head_variants_extract_the_name() {
-        let pool = StringPool::new();
         let result = parse(
             "defmodule Calc do\n  \
                def zero do\n    0\n  end\n  \
@@ -462,7 +454,6 @@ mod tests {
                def add(a, b) when is_integer(a) do\n    a + b\n  end\n  \
                def add(a, b, c) do\n    a + b + c\n  end\n\
              end\n",
-            &pool,
         )
         .unwrap();
 
@@ -470,17 +461,18 @@ mod tests {
             .definitions
             .iter()
             .filter(|d| d.definition_type == "Function")
-            .map(|d| pool.get(d.name))
+            .map(|d| d.name.as_str())
             .collect();
         assert!(names.contains(&"zero"), "zero-arity do-block: {names:?}");
         assert!(names.contains(&"keyword"), "keyword do: form: {names:?}");
         assert!(names.contains(&"add"), "when-guard head: {names:?}");
 
+        // Arity overloads collapse to the same name-only FQN.
         let add_fqns = result
             .definitions
             .iter()
-            .filter(|d| pool.get(d.name) == "add")
-            .map(|d| pool.get(d.fqn).to_string())
+            .filter(|d| d.name == "add")
+            .map(|d| d.fqn.as_str().to_string())
             .collect::<Vec<_>>();
         assert_eq!(add_fqns.len(), 2, "{add_fqns:?}");
         assert!(add_fqns.iter().all(|f| f == "Calc.add"), "{add_fqns:?}");
@@ -488,7 +480,6 @@ mod tests {
 
     #[test]
     fn import_forms_emit_canonical_imports() {
-        let pool = StringPool::new();
         let result = parse(
             "defmodule Foo do\n  \
                alias Helpers.Format\n  \
@@ -500,7 +491,6 @@ mod tests {
                use GenServer\n  \
                require Logger\n\
              end\n",
-            &pool,
         )
         .unwrap();
 
@@ -510,9 +500,9 @@ mod tests {
             .map(|i| {
                 (
                     i.import_type,
-                    pool.get(i.path),
-                    i.name.map(|id| pool.get(id)).unwrap_or(""),
-                    i.alias.map(|id| pool.get(id)),
+                    i.path.as_str(),
+                    i.name.as_deref().unwrap_or(""),
+                    i.alias.as_deref(),
                     i.wildcard,
                 )
             })
@@ -550,6 +540,7 @@ mod tests {
             imports.contains(&("Require", "", "Logger", None, false)),
             "{imports:?}"
         );
+        // alias Foo.{Bar, Baz} plus alias Foo.Bar, as: Fb → two Bar rows
         assert_eq!(
             imports
                 .iter()
@@ -562,13 +553,11 @@ mod tests {
 
     #[test]
     fn remote_and_local_calls_emit_refs() {
-        let pool = StringPool::new();
         let result = parse(
             "defmodule Foo do\n  \
                def greet(name), do: Baz.hello(name)\n  \
                def run(x) do\n    helper(x)\n  end\n\
              end\n",
-            &pool,
         )
         .unwrap();
 
@@ -593,7 +582,6 @@ mod tests {
 
     #[test]
     fn bare_field_access_is_not_a_call_ref() {
-        let pool = StringPool::new();
         let result = parse(
             "defmodule Shop do\n  \
                def total(order), do: order.price\n  \
@@ -601,7 +589,6 @@ mod tests {
                def norm(x), do: x |> String.downcase\n  \
                def trim(x), do: String.trim(x)\n\
              end\n",
-            &pool,
         )
         .unwrap();
 
@@ -622,7 +609,6 @@ mod tests {
 
     #[test]
     fn special_forms_are_not_refs() {
-        let pool = StringPool::new();
         let result = parse(
             "defmodule Flow do\n  \
                def decide(x) do\n    \
@@ -635,7 +621,6 @@ mod tests {
                  quote do\n      unquote(name)\n    end\n  \
                end\n\
              end\n",
-            &pool,
         )
         .unwrap();
 
@@ -654,14 +639,12 @@ mod tests {
 
     #[test]
     fn dynamically_named_defs_are_dropped_not_garbled() {
-        let pool = StringPool::new();
         let result = parse(
             "defmodule Gen do\n  \
                for {k, v} <- [a: 1, b: 2] do\n    \
                  def unquote(k)(), do: unquote(v)\n  \
                end\n\
              end\n",
-            &pool,
         )
         .unwrap();
 
@@ -669,7 +652,7 @@ mod tests {
             !result
                 .definitions
                 .iter()
-                .any(|d| pool.get(d.name).contains("unquote")),
+                .any(|d| d.name.contains("unquote")),
             "macro-generated def heads must not emit source text as a name: {:?}",
             result.definitions
         );
@@ -677,7 +660,6 @@ mod tests {
 
     #[test]
     fn keywords_def_heads_and_attributes_are_not_refs() {
-        let pool = StringPool::new();
         let result = parse(
             "defmodule Foo do\n  \
                alias Helpers.Format\n  \
@@ -689,7 +671,6 @@ mod tests {
                def add(a, b) when is_integer(a) do\n    a + b\n  end\n  \
                def check(x) do\n    !valid?(x)\n  end\n\
              end\n",
-            &pool,
         )
         .unwrap();
 

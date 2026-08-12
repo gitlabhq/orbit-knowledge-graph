@@ -11,14 +11,16 @@ use std::time::Instant;
 use rayon::prelude::*;
 
 use crate::v2::error::{AbortPhase, FileSkip};
-use crate::v2::linker::graph::{CodeGraph, Edge, GraphImport, NodeId};
 use crate::v2::linker::rules::{ReceiverMode, ResolveStage};
-use crate::v2::linker::{FileResolver, ResolutionRules, ResolveSettings};
+use crate::v2::linker::{
+    CodeGraph, FileResolver, GraphEdge, GraphImport, ResolutionRules, ResolveSettings,
+};
 use crate::v2::pipeline::PipelineContext;
 use crate::v2::sentinel::SentinelHandle;
 use crate::v2::types::{
     DefKind, EdgeKind, ImportBindingKind, ImportMode, NodeKind, Relationship, ssa::ParseValue,
 };
+use petgraph::graph::NodeIndex;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::analyze::invocation::invocation_support_for_graph_def_kind;
@@ -34,7 +36,7 @@ use super::{
     reason = "top-level resolution entry point combining graph, analysis, index, and context; a params struct would not reduce complexity at the single call site"
 )]
 pub fn attach_resolution_edges(
-    graph: &CodeGraph,
+    graph: &mut CodeGraph,
     analyzed_files: &[ResolvedJsFile],
     file_infos: &FxHashMap<String, JsPhase1FileInfo>,
     modules_index: &JsModuleIndex,
@@ -46,7 +48,8 @@ pub fn attach_resolution_edges(
     let lookup = GraphLookup::from_graph(graph);
     let mut seen = FxHashSet::default();
 
-    let all_local_edges: Vec<Vec<Edge>> = {
+    let all_local_edges: Vec<Vec<(NodeIndex, NodeIndex, GraphEdge)>> = {
+        let graph: &CodeGraph = graph;
         analyzed_files
             .par_iter()
             .map(|analyzed| {
@@ -70,8 +73,8 @@ pub fn attach_resolution_edges(
     };
 
     for edges in all_local_edges {
-        for edge in edges {
-            add_edge(graph, &mut seen, edge);
+        for (source, target, edge) in edges {
+            add_edge(graph, &mut seen, source, target, edge);
         }
     }
 
@@ -102,11 +105,12 @@ pub fn attach_resolution_edges(
     let timed_out = AtomicBool::new(false);
 
     let import_nodes: Vec<_> = graph
-        .iter_imports()
-        .map(|(node, file_path, _)| (node, file_path.to_string()))
+        .imports_iter()
+        .map(|(node, file_path, _)| (node, file_path.as_ref().to_string()))
         .collect();
 
     let import_results: Vec<_> = {
+        let graph: &CodeGraph = graph;
         import_nodes
             .par_iter()
             .filter_map(|(source_node, source_path)| {
@@ -126,9 +130,9 @@ pub fn attach_resolution_edges(
         if add_edge(
             graph,
             &mut seen,
-            Edge {
-                source: source_node,
-                target: target_node,
+            source_node,
+            target_node,
+            GraphEdge {
                 relationship: Relationship {
                     edge_kind: EdgeKind::Imports,
                     source_node: NodeKind::ImportedSymbol,
@@ -170,7 +174,7 @@ fn resolve_local_call_edges(
     analyzed: &ResolvedJsFile,
     file_info: Option<&JsPhase1FileInfo>,
     tracer: &crate::v2::trace::Tracer,
-) -> Vec<Edge> {
+) -> Vec<(NodeIndex, NodeIndex, GraphEdge)> {
     let Some(file_info) = file_info else {
         return Vec::new();
     };
@@ -200,22 +204,22 @@ fn resolve_local_call_edges(
             &mut resolved,
         );
 
-        for edge in &resolved {
+        for (source_node, target_node, edge) in &resolved {
             if !local_target_supports_invocation(
                 graph,
                 &analyzed.analysis,
-                edge.target,
+                *target_node,
                 call.invocation_kind,
             ) {
                 continue;
             }
             let semantic_key = (
-                edge.source.0 as usize,
-                graph.def_fqn(edge.target).to_string(),
+                source_node.index(),
+                graph.def_fqn(*target_node).to_string(),
                 EdgeKind::Calls,
             );
             if semantic_seen.insert(semantic_key) {
-                filtered.push(*edge);
+                filtered.push((*source_node, *target_node, edge.clone()));
             }
         }
 
@@ -254,10 +258,10 @@ fn js_local_settings() -> &'static ResolveSettings {
 fn local_target_supports_invocation(
     graph: &CodeGraph,
     analysis: &JsFileAnalysis,
-    target_node: NodeId,
+    target_node: NodeIndex,
     invocation_kind: super::JsInvocationKind,
 ) -> bool {
-    let graph_def = graph.try_def_for_node(target_node).unwrap();
+    let graph_def = graph.def(target_node);
     let target_fqn = graph.def_fqn(target_node);
     let support = analysis
         .defs
@@ -273,7 +277,7 @@ fn append_direct_class_invocations(
     graph: &CodeGraph,
     file_info: &JsPhase1FileInfo,
     call: &super::JsPendingLocalCall,
-    edges: &mut Vec<Edge>,
+    edges: &mut Vec<(NodeIndex, NodeIndex, GraphEdge)>,
     semantic_seen: &mut FxHashSet<(usize, String, EdgeKind)>,
 ) {
     if call.chain.is_some()
@@ -288,7 +292,7 @@ fn append_direct_class_invocations(
     let (source_node, source_node_kind, source_def_kind) = call
         .enclosing_def
         .and_then(|idx| file_info.local_def_nodes.get(idx as usize).copied())
-        .map(|node| (node, NodeKind::Definition, graph.def_kind(node)))
+        .map(|node| (node, NodeKind::Definition, Some(graph.def(node).kind)))
         .unwrap_or((file_info.file_node, NodeKind::File, None));
 
     for value in &call.reaching {
@@ -298,28 +302,30 @@ fn append_direct_class_invocations(
         let Some(&target_node) = file_info.local_def_nodes.get(*idx as usize) else {
             continue;
         };
-        if graph.def_kind(target_node) != Some(DefKind::Class) {
+        if graph.def(target_node).kind != DefKind::Class {
             continue;
         }
         let semantic_key = (
-            source_node.0 as usize,
+            source_node.index(),
             graph.def_fqn(target_node).to_string(),
             EdgeKind::Calls,
         );
         if !semantic_seen.insert(semantic_key) {
             continue;
         }
-        edges.push(Edge {
-            source: source_node,
-            target: target_node,
-            relationship: Relationship {
-                edge_kind: EdgeKind::Calls,
-                source_node: source_node_kind,
-                target_node: NodeKind::Definition,
-                source_def_kind,
-                target_def_kind: Some(DefKind::Class),
+        edges.push((
+            source_node,
+            target_node,
+            GraphEdge {
+                relationship: Relationship {
+                    edge_kind: EdgeKind::Calls,
+                    source_node: source_node_kind,
+                    target_node: NodeKind::Definition,
+                    source_def_kind,
+                    target_def_kind: Some(DefKind::Class),
+                },
             },
-        });
+        ));
     }
 }
 
@@ -327,10 +333,10 @@ fn import_target(
     graph: &CodeGraph,
     modules: &JsModuleIndex,
     resolver: &JsCrossFileResolver,
-    source_node: NodeId,
+    source_node: NodeIndex,
     source_path: &str,
-) -> Option<(NodeId, NodeKind, Option<DefKind>)> {
-    let import = graph.import_for_node(source_node);
+) -> Option<(NodeIndex, NodeKind, Option<DefKind>)> {
+    let import = graph.import(source_node);
     if matches!(import.binding_kind, ImportBindingKind::SideEffect) {
         return None;
     }
@@ -358,7 +364,7 @@ fn primary_import_target(
     graph: &CodeGraph,
     module: &super::JsModuleRecord,
     import_mode: ImportMode,
-) -> Option<(NodeId, NodeKind, Option<DefKind>)> {
+) -> Option<(NodeIndex, NodeKind, Option<DefKind>)> {
     module
         .bindings
         .get(&JsExportName::Primary)
@@ -375,7 +381,7 @@ fn named_import_target(
     resolver: &JsCrossFileResolver,
     module: &super::JsModuleRecord,
     export_name: &str,
-) -> Option<(NodeId, NodeKind, Option<DefKind>)> {
+) -> Option<(NodeIndex, NodeKind, Option<DefKind>)> {
     let export_name = JsExportName::Named(export_name.to_string());
     let mut visited = FxHashSet::default();
     resolve_named_export_target(graph, modules, resolver, module, &export_name, &mut visited)
@@ -388,7 +394,7 @@ fn resolve_named_export_target(
     module: &super::JsModuleRecord,
     export_name: &JsExportName,
     visited: &mut FxHashSet<(String, JsExportName)>,
-) -> Option<(NodeId, NodeKind, Option<DefKind>)> {
+) -> Option<(NodeIndex, NodeKind, Option<DefKind>)> {
     if let Some(binding) = module.bindings.get(export_name) {
         return Some(module_target(graph, binding.export_node));
     }
@@ -410,7 +416,7 @@ fn resolve_star_reexport_target(
     module_path: &str,
     export_name: &JsExportName,
     visited: &mut FxHashSet<(String, JsExportName)>,
-) -> Option<(NodeId, NodeKind, Option<DefKind>)> {
+) -> Option<(NodeIndex, NodeKind, Option<DefKind>)> {
     if !visited.insert((module_path.to_string(), export_name.clone())) {
         return None;
     }
@@ -453,17 +459,17 @@ fn resolve_star_reexport_target(
 
 fn module_target(
     graph: &CodeGraph,
-    target_node: NodeId,
-) -> (NodeId, NodeKind, Option<DefKind>) {
+    target_node: NodeIndex,
+) -> (NodeIndex, NodeKind, Option<DefKind>) {
     (
         target_node,
         NodeKind::Definition,
-        graph.def_kind(target_node),
+        Some(graph.def(target_node).kind),
     )
 }
 
 fn add_call_relationship_edge(
-    graph: &CodeGraph,
+    graph: &mut CodeGraph,
     lookup: &GraphLookup,
     relationship: &JsResolvedCallRelationship,
     seen: &mut FxHashSet<(usize, usize, EdgeKind)>,
@@ -492,7 +498,7 @@ fn add_call_relationship_edge(
         (
             source_node,
             NodeKind::Definition,
-            graph.def_kind(source_node),
+            Some(graph.def(source_node).kind),
         )
     } else {
         let Some(source_node) = lookup.file_by_path.get(&relationship.source_path).copied() else {
@@ -504,22 +510,22 @@ fn add_call_relationship_edge(
     add_edge(
         graph,
         seen,
-        Edge {
-            source: source_node,
-            target: target_node,
+        source_node,
+        target_node,
+        GraphEdge {
             relationship: Relationship {
                 edge_kind: EdgeKind::Calls,
                 source_node: source_node_kind,
                 target_node: NodeKind::Definition,
                 source_def_kind,
-                target_def_kind: graph.def_kind(target_node),
+                target_def_kind: Some(graph.def(target_node).kind),
             },
         },
     );
 }
 
 fn add_unresolved_imported_call_edges(
-    graph: &CodeGraph,
+    graph: &mut CodeGraph,
     lookup: &GraphLookup,
     import_lookup: &ImportedSymbolLookup,
     calls_by_file: &[(String, Vec<JsCallEdge>)],
@@ -542,9 +548,9 @@ fn add_unresolved_imported_call_edges(
             add_edge(
                 graph,
                 seen,
-                Edge {
-                    source: source.node,
-                    target: target_node,
+                source.node,
+                target_node,
+                GraphEdge {
                     relationship: Relationship {
                         edge_kind: EdgeKind::Calls,
                         source_node: source.node_kind,
@@ -559,10 +565,10 @@ fn add_unresolved_imported_call_edges(
 }
 
 struct SourceCallNode {
-    node: NodeId,
+    node: NodeIndex,
     node_kind: NodeKind,
     def_kind: Option<DefKind>,
-    definition_node: Option<NodeId>,
+    definition_node: Option<NodeIndex>,
 }
 
 fn source_node_for_call(
@@ -599,17 +605,15 @@ fn source_node_for_call(
 }
 
 fn add_edge(
-    graph: &CodeGraph,
+    graph: &mut CodeGraph,
     seen: &mut FxHashSet<(usize, usize, EdgeKind)>,
-    edge: Edge,
+    source: NodeIndex,
+    target: NodeIndex,
+    edge: GraphEdge,
 ) -> bool {
-    let key = (
-        edge.source.0 as usize,
-        edge.target.0 as usize,
-        edge.relationship.edge_kind,
-    );
+    let key = (source.index(), target.index(), edge.relationship.edge_kind);
     if seen.insert(key) {
-        graph.push_edge(edge);
+        graph.graph.add_edge(source, target, edge);
         true
     } else {
         false
@@ -632,14 +636,14 @@ struct ImportedSymbolLookup {
 }
 
 struct ImportedSymbolEntry {
-    node: NodeId,
-    enclosing_definition: Option<NodeId>,
+    node: NodeIndex,
+    enclosing_definition: Option<NodeIndex>,
 }
 
 impl ImportedSymbolLookup {
-    fn from_graph(graph: &CodeGraph, locally_resolved_imports: &FxHashSet<NodeId>) -> Self {
+    fn from_graph(graph: &CodeGraph, locally_resolved_imports: &FxHashSet<NodeIndex>) -> Self {
         let mut lookup = Self::default();
-        for (node, file_path, import) in graph.iter_imports() {
+        for (node, file_path, import) in graph.imports_iter() {
             if import.is_type_only
                 || import.wildcard
                 || matches!(import.binding_kind, ImportBindingKind::SideEffect)
@@ -647,14 +651,18 @@ impl ImportedSymbolLookup {
             {
                 continue;
             }
-            let enclosing_definition = graph.enclosing_definition(
-                file_path,
+            let enclosing_definition = graph.enclosing_definition_for_range(
+                file_path.as_ref(),
                 import.range.byte_offset.0 as u32,
                 import.range.byte_offset.1 as u32,
             );
             lookup
                 .unresolved_by_key
-                .entry(import_symbol_key_for_graph_import(graph, file_path, import))
+                .entry(import_symbol_key_for_graph_import(
+                    graph,
+                    file_path.as_ref(),
+                    import,
+                ))
                 .or_default()
                 .push(ImportedSymbolEntry {
                     node,
@@ -668,8 +676,8 @@ impl ImportedSymbolLookup {
         &self,
         source_path: &str,
         binding: &JsImportedBinding,
-        source_definition: Option<NodeId>,
-    ) -> Option<NodeId> {
+        source_definition: Option<NodeIndex>,
+    ) -> Option<NodeIndex> {
         let entries = self
             .unresolved_by_key
             .get(&import_symbol_key_for_binding(source_path, binding))?;
@@ -745,21 +753,21 @@ fn import_symbol_key_for_binding(
 
 #[derive(Default)]
 struct GraphLookup {
-    file_by_path: FxHashMap<String, NodeId>,
-    def_by_file_and_range: FxHashMap<(String, (usize, usize)), NodeId>,
-    def_kind_by_node: FxHashMap<NodeId, DefKind>,
+    file_by_path: FxHashMap<String, NodeIndex>,
+    def_by_file_and_range: FxHashMap<(String, (usize, usize)), NodeIndex>,
+    def_kind_by_node: FxHashMap<NodeIndex, DefKind>,
 }
 
 impl GraphLookup {
     fn from_graph(graph: &CodeGraph) -> Self {
         let mut lookup = Self::default();
 
-        for (node, path, _, _, _, _, _) in graph.iter_files() {
-            lookup.file_by_path.insert(path.to_string(), node);
+        for (node, file) in graph.files() {
+            lookup.file_by_path.insert(file.path.clone(), node);
         }
 
-        for (node, file_path, definition) in graph.iter_definitions() {
-            let file_path = file_path.to_string();
+        for (node, file_path, definition) in graph.definitions() {
+            let file_path = file_path.as_ref().to_string();
             lookup
                 .def_by_file_and_range
                 .insert((file_path, definition.range.byte_offset), node);

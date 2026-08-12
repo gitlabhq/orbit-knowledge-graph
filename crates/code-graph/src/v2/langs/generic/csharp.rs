@@ -1,8 +1,7 @@
 use crate::v2::config::Language;
 use crate::v2::dsl::extractors::metadata;
 use crate::v2::dsl::types::{self, *};
-use crate::v2::linker::state::StringPool;
-use crate::v2::types::{BindingKind, DefKind, GraphImport, ImportBindingKind, ImportMode};
+use crate::v2::types::{BindingKind, CanonicalImport, DefKind, ImportBindingKind, ImportMode};
 use treesitter_visit::Axis::*;
 use treesitter_visit::Match::*;
 use treesitter_visit::extract::{Extract, field, text};
@@ -250,11 +249,7 @@ impl DslLanguage for CSharpDsl {
     }
 }
 
-fn csharp_extract_alias_using(
-    node: &N<'_>,
-    imports: &mut Vec<GraphImport>,
-    pool: &StringPool,
-) -> bool {
+fn csharp_extract_alias_using(node: &N<'_>, imports: &mut Vec<CanonicalImport>) -> bool {
     if node.kind().as_ref() != "using_directive" {
         return false;
     }
@@ -282,13 +277,14 @@ fn csharp_extract_alias_using(
         seg.split('<').next().unwrap_or(seg).to_string()
     });
 
-    imports.push(GraphImport {
+    imports.push(CanonicalImport {
         import_type: "AliasedImport",
         binding_kind: ImportBindingKind::Named,
         mode: ImportMode::Declarative,
-        path: pool.alloc(&path),
-        name: name.map(|s| pool.alloc(&s)),
-        alias: Some(pool.alloc(&alias)),
+        path,
+        name,
+        alias: Some(alias),
+        scope_fqn: None,
         range: crate::v2::types::Range::empty(),
         is_type_only: false,
         wildcard: false,
@@ -336,12 +332,10 @@ impl HasRules for CSharpRules {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::v2::linker::state::StringPool;
     use crate::v2::trace::Tracer;
 
     fn parse(
         code: &str,
-        pool: &StringPool,
     ) -> Result<crate::v2::dsl::engine::ParsedDefs, crate::v2::pipeline::PipelineError> {
         CSharpDsl::spec()
             .parse_full_collect(
@@ -350,7 +344,6 @@ mod tests {
                 crate::v2::config::Language::CSharp,
                 &Tracer::new(false),
                 Default::default(),
-                pool,
             )
             .map(|r| crate::v2::dsl::engine::ParsedDefs {
                 definitions: r.definitions,
@@ -366,16 +359,10 @@ mod tests {
 
     #[test]
     fn class_with_methods() {
-        let pool = StringPool::new();
         let result = parse(
             "namespace MyApp {\n    public class Controller {\n        public void Index() {}\n        public string Get(int id) { return \"\"; }\n    }\n}\n",
-            &pool,
         ).unwrap();
-        let names: Vec<&str> = result
-            .definitions
-            .iter()
-            .map(|d| pool.get(d.name))
-            .collect();
+        let names: Vec<&str> = result.definitions.iter().map(|d| d.name.as_str()).collect();
         assert!(names.contains(&"MyApp"), "should have namespace");
         assert!(names.contains(&"Controller"), "should have class");
         assert!(names.contains(&"Index"), "should have method");
@@ -384,31 +371,23 @@ mod tests {
 
     #[test]
     fn namespace_scoping() {
-        let pool = StringPool::new();
         let result = parse(
             "namespace Com.Example {\n    public class Service {\n        public void Run() {}\n    }\n}\n",
-            &pool,
         ).unwrap();
         let service = result
             .definitions
             .iter()
-            .find(|d| pool.get(d.name) == "Service")
+            .find(|d| d.name == "Service")
             .unwrap();
-        assert_eq!(pool.get(service.fqn), "Com.Example.Service");
+        assert_eq!(service.fqn.to_string(), "Com.Example.Service");
     }
 
     #[test]
     fn struct_and_enum() {
-        let pool = StringPool::new();
         let result = parse(
             "public struct Point { public int X; public int Y; }\npublic enum Color { Red, Green, Blue }\n",
-            &pool,
         ).unwrap();
-        let names: Vec<&str> = result
-            .definitions
-            .iter()
-            .map(|d| pool.get(d.name))
-            .collect();
+        let names: Vec<&str> = result.definitions.iter().map(|d| d.name.as_str()).collect();
         assert!(names.contains(&"Point"));
         assert!(names.contains(&"Color"));
         assert!(names.contains(&"Red"));
@@ -416,48 +395,35 @@ mod tests {
 
     #[test]
     fn interface_declaration() {
-        let pool = StringPool::new();
-        let result = parse(
-            "public interface IService {\n    void Execute();\n}\n",
-            &pool,
-        )
-        .unwrap();
+        let result = parse("public interface IService {\n    void Execute();\n}\n").unwrap();
         let iface = result
             .definitions
             .iter()
-            .find(|d| pool.get(d.name) == "IService")
+            .find(|d| d.name == "IService")
             .unwrap();
         assert_eq!(iface.kind, DefKind::Interface);
     }
 
     #[test]
     fn super_types_extracted() {
-        let pool = StringPool::new();
-        let result = parse("public class Dog : Animal, IRunnable {\n}\n", &pool).unwrap();
-        let dog = result
-            .definitions
-            .iter()
-            .find(|d| pool.get(d.name) == "Dog")
-            .unwrap();
+        let result = parse("public class Dog : Animal, IRunnable {\n}\n").unwrap();
+        let dog = result.definitions.iter().find(|d| d.name == "Dog").unwrap();
         let meta = dog.metadata.as_ref().expect("Dog should have metadata");
-        assert!(meta.super_types.iter().any(|s| pool.get(*s) == "Animal"));
-        assert!(meta.super_types.iter().any(|s| pool.get(*s) == "IRunnable"));
+        assert!(meta.super_types.contains(&"Animal".to_string()));
+        assert!(meta.super_types.contains(&"IRunnable".to_string()));
     }
 
     #[test]
     fn imports_extracted() {
-        let pool = StringPool::new();
-        let result = parse(
-            "using System;\nusing System.Collections.Generic;\n\npublic class Test {}\n",
-            &pool,
-        )
-        .unwrap();
+        let result =
+            parse("using System;\nusing System.Collections.Generic;\n\npublic class Test {}\n")
+                .unwrap();
         assert!(
             result.imports.len() >= 2,
             "Expected at least 2 imports, got {}",
             result.imports.len()
         );
-        let paths: Vec<&str> = result.imports.iter().map(|i| pool.get(i.path)).collect();
+        let paths: Vec<&str> = result.imports.iter().map(|i| i.path.as_str()).collect();
         assert!(
             paths.iter().any(|p| p.contains("System")),
             "should have System import"
@@ -466,59 +432,42 @@ mod tests {
 
     #[test]
     fn static_import_extracted() {
-        let pool = StringPool::new();
-        let result = parse("using static System.Math;\n\npublic class Test {}\n", &pool).unwrap();
+        let result = parse("using static System.Math;\n\npublic class Test {}\n").unwrap();
+        // using static may parse differently — verify we get at least the basic form
         assert!(!result.imports.is_empty(), "should extract static import");
     }
 
     #[test]
     fn property_and_field() {
-        let pool = StringPool::new();
         let result = parse(
             "public class Foo {\n    public int Count { get; set; }\n    private string _name;\n}\n",
-            &pool,
         ).unwrap();
-        let names: Vec<&str> = result
-            .definitions
-            .iter()
-            .map(|d| pool.get(d.name))
-            .collect();
+        let names: Vec<&str> = result.definitions.iter().map(|d| d.name.as_str()).collect();
         assert!(names.contains(&"Count"), "should have property");
     }
 
     #[test]
     fn enum_members() {
-        let pool = StringPool::new();
-        let result = parse(
-            "public enum Direction { North, South, East, West }\n",
-            &pool,
-        )
-        .unwrap();
-        let names: Vec<&str> = result
-            .definitions
-            .iter()
-            .map(|d| pool.get(d.name))
-            .collect();
+        let result = parse("public enum Direction { North, South, East, West }\n").unwrap();
+        let names: Vec<&str> = result.definitions.iter().map(|d| d.name.as_str()).collect();
         assert!(names.contains(&"North"));
         assert!(names.contains(&"West"));
     }
 
     #[test]
     fn record_declaration() {
-        let pool = StringPool::new();
-        let result = parse("public record Person(string Name, int Age);\n", &pool).unwrap();
+        let result = parse("public record Person(string Name, int Age);\n").unwrap();
         let person = result
             .definitions
             .iter()
-            .find(|d| pool.get(d.name) == "Person")
+            .find(|d| d.name == "Person")
             .unwrap();
         assert_eq!(person.kind, DefKind::Class);
     }
 
     #[test]
     fn constructor_declaration() {
-        let pool = StringPool::new();
-        let result = parse("public class Foo {\n    public Foo(int x) {}\n}\n", &pool).unwrap();
+        let result = parse("public class Foo {\n    public Foo(int x) {}\n}\n").unwrap();
         let ctor = result
             .definitions
             .iter()
