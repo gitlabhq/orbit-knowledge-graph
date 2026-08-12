@@ -9,7 +9,3 @@ users:
     password: {{ requiredEnv "E2E_CH_SIPHON_PASS" | quote }}
   gitlab:
     password: {{ requiredEnv "E2E_CH_GITLAB_PASS" | quote }}
-
-# The gkg users and database are now created by the gkg chart's clickhouseSetup
-# hook, not here. The default user keeps access management so the hook can run
-# CREATE USER / GRANT.
