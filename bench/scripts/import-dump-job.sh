@@ -12,7 +12,7 @@ source "${BENCH_DIR}/scripts/lib.sh"
 
 # Read credentials from the secret created by provision.sh.
 CH_PASSWORD=$($KC get secret ra-ch-credentials -n "${CH_NS}" \
-  -o jsonpath='{.data.default-password}' 2>/dev/null | base64 -d)
+  -o jsonpath='{.data.default-password}' 2>/dev/null | base64 -d) || true
 if [[ -z "${CH_PASSWORD}" ]]; then
   log "ERROR: ra-ch-credentials secret not found in ${CH_NS}"
   exit 1
@@ -35,7 +35,7 @@ $KC delete job ra-import-dump -n "${CH_NS}" --ignore-not-found=true 2>/dev/null
 log "Submitting import job (dump=${DUMP_PREFIX}, ch=${CH_NS})"
 
 CH_NAMESPACE="${CH_NS}" DUMP_PREFIX="${DUMP_PREFIX}" \
-  envsubst < "${BENCH_DIR}/manifests/import-datalake-job.yaml" | $KC apply -n "${CH_NS}" -f -
+  envsubst '${CH_NAMESPACE} ${DUMP_PREFIX}' < "${BENCH_DIR}/manifests/import-datalake-job.yaml" | $KC apply -n "${CH_NS}" -f -
 
 log "Waiting for import job to start..."
 $KC wait -n "${CH_NS}" job/ra-import-dump \
