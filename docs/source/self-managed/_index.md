@@ -60,10 +60,10 @@ flowchart LR
     Dispatch -- creates schema --> CH
     NATS -- indexing tasks --> Indexer
     CH -- reads data lake --> Indexer
-    Rails -- internal API --> Indexer
+    Indexer -- internal API --> Rails
     Indexer -- writes graph --> CH
     CH -- reads graph --> Web
-    Rails -- internal API --> Web
+    Web -- internal API --> Rails
     Rails -- gRPC --> Web
 ```
 
