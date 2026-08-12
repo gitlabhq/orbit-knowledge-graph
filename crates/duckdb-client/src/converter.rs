@@ -42,7 +42,7 @@ fn edge_specs(ontology: &Ontology) -> Vec<ColumnSpec> {
 }
 
 pub fn convert_v2_graph(
-    graph: &code_graph::v2::linker::CodeGraph,
+    graph: &code_graph::v2::linker::concurrent_graph::ConcurrentGraph,
     project_id: i64,
     branch: &str,
     commit_sha: &str,
@@ -58,7 +58,7 @@ pub fn convert_v2_graph(
         commit_sha,
     };
     let ids = graph.assign_ids(project_id, branch);
-    let write_repository_structure = graph.output.writes_repository_structure();
+    let write_repository_structure = !graph.parsed_only;
     let mut tables = Vec::new();
 
     for entity_name in ontology.local_entity_names() {
@@ -73,10 +73,11 @@ pub fn convert_v2_graph(
             "Directory" => {
                 let rows: Vec<_> = if write_repository_structure {
                     graph
-                        .directories()
-                        .map(|(idx, dir)| DirectoryRow {
-                            dir,
-                            id: ids[idx.index()],
+                        .iter_directories()
+                        .map(|(nid, path, name)| DirectoryRow {
+                            path,
+                            name,
+                            id: ids[nid.0 as usize],
                         })
                         .collect()
                 } else {
@@ -85,39 +86,50 @@ pub fn convert_v2_graph(
                 DirectoryRow::to_record_batch(&rows, &specs, &ctx)?
             }
             "File" => {
-                let rows: Vec<_> = if write_repository_structure {
+                let file_data: Vec<_> = if write_repository_structure {
                     graph
-                        .files()
-                        .map(|(idx, file)| FileRow {
-                            file,
-                            id: ids[idx.index()],
+                        .iter_files()
+                        .map(|(nid, path, name, ext, lang, size, reason)| {
+                            (nid, path, name, ext, lang, size, reason.to_string())
                         })
                         .collect()
                 } else {
                     Vec::new()
                 };
+                let rows: Vec<_> = file_data
+                    .iter()
+                    .map(|(nid, path, name, ext, lang, size, reason_s)| FileRow {
+                        path,
+                        name,
+                        extension: ext,
+                        language: lang.map_or("unknown", |l| l.names()[0]),
+                        size: *size,
+                        reason: reason_s,
+                        id: ids[nid.0 as usize],
+                    })
+                    .collect();
                 FileRow::to_record_batch(&rows, &specs, &ctx)?
             }
             "Definition" => {
                 let rows: Vec<_> = graph
-                    .definitions()
-                    .map(|(idx, file_path, def)| DefinitionRow {
+                    .iter_definitions()
+                    .map(|(nid, file_path, def)| DefinitionRow {
                         file_path,
                         def,
                         pool: &graph.strings,
-                        id: ids[idx.index()],
+                        id: ids[nid.0 as usize],
                     })
                     .collect();
                 DefinitionRow::to_record_batch(&rows, &specs, &ctx)?
             }
             "ImportedSymbol" => {
                 let rows: Vec<_> = graph
-                    .imports_iter()
-                    .map(|(idx, file_path, import)| ImportRow {
+                    .iter_imports()
+                    .map(|(nid, file_path, import)| ImportRow {
                         file_path,
                         import,
                         pool: &graph.strings,
-                        id: ids[idx.index()],
+                        id: ids[nid.0 as usize],
                     })
                     .collect();
                 ImportRow::to_record_batch(&rows, &specs, &ctx)?
@@ -134,26 +146,17 @@ pub fn convert_v2_graph(
         .to_string();
 
     let mut edge_rows: Vec<_> = graph
-        .graph
-        .edge_indices()
-        .filter(|&ei| {
-            write_repository_structure
-                || graph.graph[ei].relationship.edge_kind.as_ref() != "CONTAINS"
-        })
-        .map(|ei| {
-            let (src, tgt) = graph.graph.edge_endpoints(ei).unwrap();
-            let edge = &graph.graph[ei];
-            EdgeRow {
-                source_id: ids[src.index()],
-                target_id: ids[tgt.index()],
-                edge_kind: edge.relationship.edge_kind.as_ref(),
-                source_node_kind: edge.relationship.source_node.as_ref(),
-                target_node_kind: edge.relationship.target_node.as_ref(),
-            }
+        .iter_edges()
+        .filter(|e| write_repository_structure || e.relationship.edge_kind.as_ref() != "CONTAINS")
+        .map(|e| EdgeRow {
+            source_id: ids[e.source.0 as usize],
+            target_id: ids[e.target.0 as usize],
+            edge_kind: e.relationship.edge_kind.as_ref(),
+            source_node_kind: e.relationship.source_node.as_ref(),
+            target_node_kind: e.relationship.target_node.as_ref(),
         })
         .collect();
 
-    // Sort edges by low-cardinality columns for better encoding.
     edge_rows.sort_by(|a, b| {
         a.edge_kind
             .cmp(b.edge_kind)
@@ -177,7 +180,7 @@ pub struct DuckDbConverter {
 impl code_graph::v2::GraphConverter for DuckDbConverter {
     fn convert(
         &self,
-        graph: code_graph::v2::linker::CodeGraph,
+        graph: code_graph::v2::linker::concurrent_graph::ConcurrentGraph,
     ) -> std::result::Result<Vec<(String, RecordBatch)>, code_graph::v2::SinkError> {
         convert_v2_graph(
             &graph,

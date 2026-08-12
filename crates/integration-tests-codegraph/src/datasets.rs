@@ -1,22 +1,24 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use arrow_56::array::{Array, ArrayBuilder, BooleanBuilder, Int64Builder, StringBuilder};
 use arrow_56::datatypes::{DataType, Field, Schema};
 use arrow_56::record_batch::RecordBatch;
-use code_graph::v2::linker::graph::*;
+use code_graph::v2::linker::concurrent_graph::{ConcurrentGraph, NodeId};
+use code_graph::v2::linker::graph::RowContext;
+use code_graph::v2::types::EdgeKind;
 
 pub(crate) type LanceDatasets = HashMap<String, RecordBatch>;
 type NodeIds = Vec<i64>;
 
 pub(crate) fn to_lance_datasets(
-    graph: &CodeGraph,
+    graph: &ConcurrentGraph,
     ctx: &RowContext<'_>,
 ) -> anyhow::Result<LanceDatasets> {
     let ids = graph.assign_ids(ctx.project_id, ctx.branch);
     let mut datasets = HashMap::new();
 
-    if graph.output.writes_repository_structure() {
+    if !graph.parsed_only {
         datasets.insert("Directory".into(), build_directory_batch(graph, &ids)?);
         datasets.insert("File".into(), build_file_batch(graph, &ids)?);
     }
@@ -45,17 +47,17 @@ fn make_batch(
     Ok(RecordBatch::try_new(schema, arrays)?)
 }
 
-fn build_directory_batch(graph: &CodeGraph, ids: &NodeIds) -> anyhow::Result<RecordBatch> {
-    let dirs: Vec<_> = graph.directories().collect();
+fn build_directory_batch(graph: &ConcurrentGraph, ids: &NodeIds) -> anyhow::Result<RecordBatch> {
+    let dirs: Vec<_> = graph.iter_directories().collect();
     let n = dirs.len();
     let mut id_b = Int64Builder::with_capacity(n);
     let mut path_b = StringBuilder::with_capacity(n, n * 32);
     let mut name_b = StringBuilder::with_capacity(n, n * 16);
 
-    for (idx, d) in &dirs {
-        id_b.append_value(ids[idx.index()]);
-        path_b.append_value(&d.path);
-        name_b.append_value(&d.name);
+    for (idx, path, name) in &dirs {
+        id_b.append_value(ids[idx.0 as usize]);
+        path_b.append_value(path);
+        name_b.append_value(name);
     }
 
     make_batch(
@@ -68,8 +70,8 @@ fn build_directory_batch(graph: &CodeGraph, ids: &NodeIds) -> anyhow::Result<Rec
     )
 }
 
-fn build_file_batch(graph: &CodeGraph, ids: &NodeIds) -> anyhow::Result<RecordBatch> {
-    let files: Vec<_> = graph.files().collect();
+fn build_file_batch(graph: &ConcurrentGraph, ids: &NodeIds) -> anyhow::Result<RecordBatch> {
+    let files: Vec<_> = graph.iter_files().collect();
     let n = files.len();
     let mut id_b = Int64Builder::with_capacity(n);
     let mut path_b = StringBuilder::with_capacity(n, n * 32);
@@ -77,12 +79,12 @@ fn build_file_batch(graph: &CodeGraph, ids: &NodeIds) -> anyhow::Result<RecordBa
     let mut ext_b = StringBuilder::with_capacity(n, n * 4);
     let mut lang_b = StringBuilder::with_capacity(n, n * 8);
 
-    for (idx, f) in &files {
-        id_b.append_value(ids[idx.index()]);
-        path_b.append_value(&f.path);
-        name_b.append_value(&f.name);
-        ext_b.append_value(&f.extension);
-        lang_b.append_value(f.language_name());
+    for (idx, path, name, extension, lang, _size, _reason) in &files {
+        id_b.append_value(ids[idx.0 as usize]);
+        path_b.append_value(path);
+        name_b.append_value(name);
+        ext_b.append_value(extension);
+        lang_b.append_value(lang.map_or("unknown", |l| l.names()[0]));
     }
 
     make_batch(
@@ -103,8 +105,8 @@ fn build_file_batch(graph: &CodeGraph, ids: &NodeIds) -> anyhow::Result<RecordBa
     )
 }
 
-fn build_definition_batch(graph: &CodeGraph, ids: &NodeIds) -> anyhow::Result<RecordBatch> {
-    let defs: Vec<_> = graph.definitions().collect();
+fn build_definition_batch(graph: &ConcurrentGraph, ids: &NodeIds) -> anyhow::Result<RecordBatch> {
+    let defs: Vec<_> = graph.iter_definitions().collect();
     let n = defs.len();
     let mut id_b = Int64Builder::with_capacity(n);
     let mut fp_b = StringBuilder::with_capacity(n, n * 32);
@@ -119,8 +121,8 @@ fn build_definition_batch(graph: &CodeGraph, ids: &NodeIds) -> anyhow::Result<Re
     let mut ec_b = Int64Builder::with_capacity(n);
 
     for (idx, fp, d) in &defs {
-        id_b.append_value(ids[idx.index()]);
-        fp_b.append_value(fp.as_ref());
+        id_b.append_value(ids[idx.0 as usize]);
+        fp_b.append_value(fp);
         fqn_b.append_value(graph.str(d.fqn));
         name_b.append_value(graph.str(d.name));
         dt_b.append_value(d.definition_type);
@@ -162,8 +164,8 @@ fn build_definition_batch(graph: &CodeGraph, ids: &NodeIds) -> anyhow::Result<Re
     )
 }
 
-fn build_import_batch(graph: &CodeGraph, ids: &NodeIds) -> anyhow::Result<RecordBatch> {
-    let imports: Vec<_> = graph.imports_iter().collect();
+fn build_import_batch(graph: &ConcurrentGraph, ids: &NodeIds) -> anyhow::Result<RecordBatch> {
+    let imports: Vec<_> = graph.iter_imports().collect();
     let n = imports.len();
     let mut id_b = Int64Builder::with_capacity(n);
     let mut fp_b = StringBuilder::with_capacity(n, n * 32);
@@ -180,9 +182,15 @@ fn build_import_batch(graph: &CodeGraph, ids: &NodeIds) -> anyhow::Result<Record
     let mut sc_b = Int64Builder::with_capacity(n);
     let mut ec_b = Int64Builder::with_capacity(n);
 
+    let has_target: HashSet<NodeId> = graph
+        .iter_edges()
+        .filter(|e| graph.node(e.target).def_id().is_some())
+        .map(|e| e.source)
+        .collect();
+
     for (idx, fp, imp) in &imports {
-        id_b.append_value(ids[idx.index()]);
-        fp_b.append_value(fp.as_ref());
+        id_b.append_value(ids[idx.0 as usize]);
+        fp_b.append_value(fp);
         it_b.append_value(imp.import_type);
         path_b.append_value(graph.str(imp.path));
         match imp.name {
@@ -194,12 +202,7 @@ fn build_import_batch(graph: &CodeGraph, ids: &NodeIds) -> anyhow::Result<Record
             None => alias_b.append_null(),
         }
         type_only_b.append_value(imp.is_type_only);
-        has_target_b.append_value(
-            graph
-                .graph
-                .neighbors_directed(*idx, petgraph::Direction::Outgoing)
-                .any(|neighbor| graph.graph[neighbor].def_id().is_some()),
-        );
+        has_target_b.append_value(has_target.contains(idx));
         sl_b.append_value(imp.range.start.line as i64 + 1);
         el_b.append_value(imp.range.end.line as i64 + 1);
         sb_b.append_value(imp.range.byte_offset.0 as i64);
@@ -252,24 +255,16 @@ struct EdgeRow {
     target_node_kind: String,
 }
 
-fn build_edge_rows(graph: &CodeGraph, ids: &NodeIds) -> Vec<EdgeRow> {
+fn build_edge_rows(graph: &ConcurrentGraph, ids: &NodeIds) -> Vec<EdgeRow> {
     graph
-        .graph
-        .edge_indices()
-        .filter(|&edge_idx| {
-            graph.output.writes_repository_structure()
-                || graph.graph[edge_idx].relationship.edge_kind.as_ref() != "CONTAINS"
-        })
-        .filter_map(|edge_idx| {
-            let (src, tgt) = graph.graph.edge_endpoints(edge_idx)?;
-            let weight = &graph.graph[edge_idx];
-            Some(EdgeRow {
-                source_id: ids[src.index()],
-                target_id: ids[tgt.index()],
-                edge_kind: format!("{:?}", weight.relationship.edge_kind),
-                source_node_kind: format!("{:?}", weight.relationship.source_node),
-                target_node_kind: format!("{:?}", weight.relationship.target_node),
-            })
+        .iter_edges()
+        .filter(|edge| !graph.parsed_only || edge.relationship.edge_kind != EdgeKind::Contains)
+        .map(|edge| EdgeRow {
+            source_id: ids[edge.source.0 as usize],
+            target_id: ids[edge.target.0 as usize],
+            edge_kind: format!("{:?}", edge.relationship.edge_kind),
+            source_node_kind: format!("{:?}", edge.relationship.source_node),
+            target_node_kind: format!("{:?}", edge.relationship.target_node),
         })
         .collect()
 }

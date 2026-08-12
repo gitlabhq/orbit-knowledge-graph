@@ -1,322 +1,22 @@
-//! Centralized linker state with collision-safe verified lookups and
-//! arena-backed string storage.
-//!
-//! ## Verified lookups
-//!
-//! All hash-keyed index maps are wrapped in [`VerifiedMap`] / [`NestedMap`]
-//! which force callers to provide the original string key and a verifier
-//! function. There is no API to get raw unverified results — the collision
-//! bug class is structurally impossible.
+//! Graph data types and per-file arena allocator.
 //!
 //! ## String storage
 //!
-//! Three tiers eliminate per-string heap allocation and Drop overhead:
-//!
-//! - **[`StringPool`]**: graph-level, contiguous `Vec<u8>` buffer. Owns all
-//!   definition names, FQN strings, import paths, metadata strings. Accessed
-//!   via [`StrId`]. Dropped with the graph.
+//! - **[`StringPool`]**: graph-level, contiguous buffer. Owns all definition
+//!   names, FQN strings, import paths, metadata strings. Accessed via [`StrId`].
 //!
 //! - **[`FileArena`]** (`'file`): per-file, thread-local bump allocator.
 //!   Holds walker scratch strings (scope names, cache keys, constructed FQNs).
-//!   Created at Phase 2 file start, dropped wholesale when `FusedWalkResult`
-//!   is returned. Output contains no arena refs, so `'file` never escapes.
 //!
 //! - **[`ScratchBuf`]**: reusable heap `String` for transient lookup keys.
-//!   Allocated once per walker, reused via `clear()` + `write!()`. For
-//!   strings that are used once for a lookup and immediately discarded.
-
-use std::hash::{Hash, Hasher};
 
 use crate::v2::types::{DefKind, ImportBindingKind, ImportMode, Range};
 use bumpalo::Bump;
-use petgraph::graph::NodeIndex;
-use rust_lapper::{Interval, Lapper};
-use rustc_hash::{FxHashMap, FxHasher};
 use smallvec::SmallVec;
 
 use bumpalo::collections::String as BumpString;
 
-/// Hashes a string into a `u64` index key (FxHash, for speed). Also public for
-/// `ssa_names` membership checks in the walker, where a collision only costs
-/// extra work, never wrong edges.
-#[inline]
-pub fn hash_name(s: &str) -> u64 {
-    let mut h = FxHasher::default();
-    s.hash(&mut h);
-    h.finish()
-}
-
-/// A hash-keyed index map that forces verification on every lookup.
-///
-/// The u64 keys avoid string pointer chases during HashMap probing, but hash
-/// collisions (~10⁻⁹ per lookup) can return wrong entries. VerifiedMap makes
-/// it structurally impossible to consume unverified results.
-pub struct VerifiedMap<const N: usize = 8> {
-    inner: FxHashMap<u64, SmallVec<[NodeIndex; N]>>,
-}
-
-impl<const N: usize> VerifiedMap<N> {
-    pub fn new() -> Self {
-        Self {
-            inner: FxHashMap::default(),
-        }
-    }
-
-    pub fn with_capacity(cap: usize) -> Self {
-        Self {
-            inner: FxHashMap::with_capacity_and_hasher(cap, Default::default()),
-        }
-    }
-
-    pub fn insert(&mut self, key: &str, value: NodeIndex) {
-        self.inner.entry(hash_name(key)).or_default().push(value);
-    }
-
-    /// The verifier receives each candidate `NodeIndex` and must check that
-    /// the actual stored data matches `key` (e.g. `|idx| graph.def(idx).name == key`).
-    pub fn lookup(
-        &self,
-        key: &str,
-        verify: impl Fn(NodeIndex) -> bool,
-    ) -> SmallVec<[NodeIndex; N]> {
-        match self.inner.get(&hash_name(key)) {
-            Some(candidates) => candidates
-                .iter()
-                .copied()
-                .filter(|idx| verify(*idx))
-                .collect(),
-            None => SmallVec::new(),
-        }
-    }
-
-    /// Sort all entry lists for deterministic lookup order. Call once after
-    /// all insertions are complete.
-    pub fn sort_all(&mut self, key_fn: impl Fn(NodeIndex) -> String) {
-        for entries in self.inner.values_mut() {
-            entries.sort_by_cached_key(|idx| key_fn(*idx));
-        }
-    }
-
-    /// Like [`lookup`] but appends to `out` instead of allocating.
-    /// Returns `true` if any verified entries were found.
-    pub fn lookup_into(
-        &self,
-        key: &str,
-        verify: impl Fn(NodeIndex) -> bool,
-        out: &mut Vec<NodeIndex>,
-    ) -> bool {
-        let Some(candidates) = self.inner.get(&hash_name(key)) else {
-            return false;
-        };
-        let before = out.len();
-        for &idx in candidates {
-            if verify(idx) {
-                out.push(idx);
-            }
-        }
-        out.len() > before
-    }
-
-    /// Conservative existence check. A hash collision can produce a false
-    /// positive (name absent but hash matches another entry), which causes
-    /// extra work but never wrong edges — callers use this for early-skip
-    /// decisions where "maybe yes" is safe.
-    pub fn contains(&self, key: &str) -> bool {
-        self.inner.contains_key(&hash_name(key))
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.inner.is_empty()
-    }
-
-    pub fn len(&self) -> usize {
-        self.inner.len()
-    }
-}
-
-impl<const N: usize> Default for VerifiedMap<N> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-/// Two-level hash-keyed index map for scope → member lookups.
-///
-/// `nested_defs[hash(scope_fqn)][hash(member_name)]` → `SmallVec<[NodeIndex; 8]>`
-pub struct NestedMap {
-    inner: FxHashMap<u64, FxHashMap<u64, SmallVec<[NodeIndex; 8]>>>,
-}
-
-impl NestedMap {
-    pub fn new() -> Self {
-        Self {
-            inner: FxHashMap::default(),
-        }
-    }
-
-    pub fn insert(&mut self, scope: &str, member: &str, value: NodeIndex) {
-        self.inner
-            .entry(hash_name(scope))
-            .or_default()
-            .entry(hash_name(member))
-            .or_default()
-            .push(value);
-    }
-
-    /// Scope verification is implicit: callers pass a scope string that was
-    /// already verified against the graph (e.g. from `def_fqn(start_node)`).
-    /// If two scope FQNs hash-collide, entries from the wrong scope appear
-    /// in the inner map, but `verify_member` filters them as long as the
-    /// member names don't also collide (independent events, ~10⁻¹⁸).
-    pub fn lookup(
-        &self,
-        scope: &str,
-        member: &str,
-        verify_member: impl Fn(NodeIndex) -> bool,
-    ) -> SmallVec<[NodeIndex; 8]> {
-        let Some(inner) = self.inner.get(&hash_name(scope)) else {
-            return SmallVec::new();
-        };
-        let Some(candidates) = inner.get(&hash_name(member)) else {
-            return SmallVec::new();
-        };
-        candidates
-            .iter()
-            .copied()
-            .filter(|idx| verify_member(*idx))
-            .collect()
-    }
-
-    pub fn lookup_into(
-        &self,
-        scope: &str,
-        member: &str,
-        verify_member: impl Fn(NodeIndex) -> bool,
-        out: &mut Vec<NodeIndex>,
-    ) -> bool {
-        let Some(inner) = self.inner.get(&hash_name(scope)) else {
-            return false;
-        };
-        let Some(candidates) = inner.get(&hash_name(member)) else {
-            return false;
-        };
-        let before = out.len();
-        for &idx in candidates {
-            if verify_member(idx) {
-                out.push(idx);
-            }
-        }
-        out.len() > before
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.inner.is_empty()
-    }
-}
-
-impl Default for NestedMap {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-pub struct DefinitionRangeIndex {
-    lapper: Lapper<u64, NodeIndex>,
-}
-
-impl DefinitionRangeIndex {
-    pub fn new() -> Self {
-        Self {
-            lapper: Lapper::new(Vec::new()),
-        }
-    }
-
-    pub fn from_ranges(ranges: impl IntoIterator<Item = (Range, NodeIndex)>) -> Self {
-        let intervals = ranges
-            .into_iter()
-            .map(|(range, node)| Interval {
-                start: range.byte_offset.0 as u64,
-                stop: range.byte_offset.1 as u64,
-                val: node,
-            })
-            .collect();
-        Self {
-            lapper: Lapper::new(intervals),
-        }
-    }
-
-    pub fn find_enclosing(&self, start: u32, end: u32) -> Option<NodeIndex> {
-        self.lapper
-            .find(start as u64, end as u64)
-            .filter(|interval| interval.start <= start as u64 && end as u64 <= interval.stop)
-            .min_by_key(|interval| interval.stop.saturating_sub(interval.start))
-            .map(|interval| interval.val)
-    }
-
-    pub fn find_enclosing_or_overlapping(&self, start: u32, end: u32) -> Option<NodeIndex> {
-        self.find_enclosing(start, end).or_else(|| {
-            self.lapper
-                .find(start as u64, end as u64)
-                .min_by_key(|interval| interval.stop.saturating_sub(interval.start))
-                .map(|interval| interval.val)
-        })
-    }
-}
-
-impl Default for DefinitionRangeIndex {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-/// All resolution indexes for a CodeGraph, bundled together.
-///
-/// Construction-only indexes (`dir_index`, `file_index`) are held as
-/// `Option` and dropped after `finalize()`.
-pub struct GraphIndexes {
-    /// FQN → definition nodes. Verified by `fqn.as_str() == key`.
-    pub by_fqn: VerifiedMap,
-    /// Bare name → definition nodes. Verified by `def.name == key`.
-    pub by_name: VerifiedMap,
-    /// Parent FQN → member name → definition nodes. Both levels verified.
-    pub nested: NestedMap,
-    /// Pre-computed ancestor chains from Extends edges (no hash keys).
-    pub ancestors: FxHashMap<NodeIndex, SmallVec<[NodeIndex; 8]>>,
-
-    /// Directory path → node index. Only used during Phase 1 construction.
-    pub dir_index: Option<FxHashMap<String, NodeIndex>>,
-    /// File path → node index. Only used during Phase 1 construction.
-    pub file_index: Option<FxHashMap<String, NodeIndex>>,
-    /// File path → definition range index for source/target lookup.
-    pub definition_ranges: FxHashMap<String, DefinitionRangeIndex>,
-}
-
-impl GraphIndexes {
-    pub fn new() -> Self {
-        Self {
-            by_fqn: VerifiedMap::new(),
-            by_name: VerifiedMap::new(),
-            nested: NestedMap::new(),
-            ancestors: FxHashMap::default(),
-            dir_index: Some(FxHashMap::default()),
-            file_index: Some(FxHashMap::default()),
-            definition_ranges: FxHashMap::default(),
-        }
-    }
-
-    pub fn drop_construction_indexes(&mut self) {
-        self.dir_index = None;
-        self.file_index = None;
-    }
-}
-
-impl Default for GraphIndexes {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-pub use gkg_utils::strings::{StrId, StringPool};
+pub use gkg_utils::strings::{ScratchBuf, StrId, StringPool};
 
 /// Pool-backed definition. All strings are [`StrId`] referencing the graph's
 /// [`StringPool`].
@@ -359,29 +59,7 @@ pub struct GraphImport {
 /// Per-file arena for walker scratch strings.
 ///
 /// Wraps a [`bumpalo::Bump`] allocator. Thread-local, created at Phase 2
-/// file start, dropped wholesale when the walk completes. Output from the
-/// walk (`Vec<(NodeIndex, NodeIndex, GraphEdge)>`) contains no arena refs,
-/// so `'file` never escapes.
-///
-/// # What goes here
-///
-/// - `import_name_map` keys and values → `&'file str`
-/// - `import_map` keys → `&'file str`
-/// - `nested_cache` keys → `&'file str`
-/// - `scope_stack[].name` → `&'file str`
-/// - Constructed FQN candidates during resolution → `&'file str`
-/// - `Value::Type` / `Value::Alias` name strings → `&'file str`
-///
-/// # Lifecycle
-///
-/// ```text
-/// // Inside par_iter (one per rayon thread):
-/// let file_arena = FileArena::new();
-/// let walker = FileWalker::new(&graph, &file_arena);
-/// walker.walk(&root);
-/// let result = walker.into_result();  // no &'file refs
-/// drop(file_arena);                   // one free(), all strings gone
-/// ```
+/// file start, dropped wholesale when the walk completes.
 pub struct FileArena(Bump);
 
 impl FileArena {
@@ -389,8 +67,6 @@ impl FileArena {
         Self(Bump::new())
     }
 
-    /// Allocate with a capacity hint. Rule of thumb: ~4KB per file covers
-    /// scope names, cache keys, and constructed FQNs for typical files.
     pub fn with_capacity(bytes: usize) -> Self {
         Self(Bump::with_capacity(bytes))
     }
@@ -411,10 +87,6 @@ impl FileArena {
         self.0.allocated_bytes()
     }
 
-    /// Reset the arena for reuse (e.g. processing another file on the same
-    /// thread without reallocating the backing storage). All references
-    /// previously returned by `alloc_str` / `alloc_fmt` become invalid —
-    /// the caller must ensure nothing borrows them.
     pub fn reset(&mut self) {
         self.0.reset();
     }
@@ -426,172 +98,9 @@ impl Default for FileArena {
     }
 }
 
-pub use gkg_utils::strings::ScratchBuf;
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn verified_map_insert_and_lookup() {
-        let mut map = VerifiedMap::<8>::new();
-        let n0 = NodeIndex::new(0);
-        let n1 = NodeIndex::new(1);
-
-        map.insert("foo", n0);
-        map.insert("bar", n1);
-
-        let result = map.lookup("foo", |idx| idx == n0);
-        assert_eq!(result.as_slice(), &[n0]);
-
-        let result = map.lookup("bar", |idx| idx == n1);
-        assert_eq!(result.as_slice(), &[n1]);
-    }
-
-    #[test]
-    fn verified_map_multiple_values_same_key() {
-        let mut map = VerifiedMap::<8>::new();
-        let n0 = NodeIndex::new(0);
-        let n1 = NodeIndex::new(1);
-
-        map.insert("foo", n0);
-        map.insert("foo", n1);
-
-        let result = map.lookup("foo", |_| true);
-        assert_eq!(result.len(), 2);
-        assert!(result.contains(&n0));
-        assert!(result.contains(&n1));
-
-        let result = map.lookup("foo", |idx| idx == n1);
-        assert_eq!(result.as_slice(), &[n1]);
-    }
-
-    #[test]
-    fn verified_map_miss_returns_empty() {
-        let map = VerifiedMap::<8>::new();
-        let result = map.lookup("missing", |_| true);
-        assert!(result.is_empty());
-    }
-
-    #[test]
-    fn verified_map_contains_is_conservative() {
-        let mut map = VerifiedMap::<8>::new();
-        map.insert("foo", NodeIndex::new(0));
-
-        assert!(map.contains("foo"));
-        assert!(!map.contains("bar"));
-    }
-
-    #[test]
-    fn verified_map_lookup_into_appends() {
-        let mut map = VerifiedMap::<8>::new();
-        let n0 = NodeIndex::new(0);
-        let n1 = NodeIndex::new(1);
-        map.insert("foo", n0);
-        map.insert("foo", n1);
-
-        let mut out = vec![NodeIndex::new(99)];
-        let found = map.lookup_into("foo", |_| true, &mut out);
-        assert!(found);
-        assert_eq!(out.len(), 3);
-        assert_eq!(out[0], NodeIndex::new(99));
-        assert!(out.contains(&n0));
-        assert!(out.contains(&n1));
-    }
-
-    #[test]
-    fn verified_map_lookup_into_returns_false_on_miss() {
-        let map = VerifiedMap::<8>::new();
-        let mut out = Vec::new();
-        let found = map.lookup_into("missing", |_| true, &mut out);
-        assert!(!found);
-        assert!(out.is_empty());
-    }
-
-    #[test]
-    fn verified_map_verifier_rejects_all() {
-        let mut map = VerifiedMap::<8>::new();
-        map.insert("foo", NodeIndex::new(0));
-        map.insert("foo", NodeIndex::new(1));
-
-        let result = map.lookup("foo", |_| false);
-        assert!(result.is_empty());
-
-        let mut out = Vec::new();
-        let found = map.lookup_into("foo", |_| false, &mut out);
-        assert!(!found);
-    }
-
-    #[test]
-    fn nested_map_insert_and_lookup() {
-        let mut map = NestedMap::new();
-        let n0 = NodeIndex::new(0);
-
-        map.insert("Foo", "bar", n0);
-
-        let result = map.lookup("Foo", "bar", |idx| idx == n0);
-        assert_eq!(result.as_slice(), &[n0]);
-    }
-
-    #[test]
-    fn nested_map_different_scopes() {
-        let mut map = NestedMap::new();
-        let n0 = NodeIndex::new(0);
-        let n1 = NodeIndex::new(1);
-
-        map.insert("Foo", "method", n0);
-        map.insert("Bar", "method", n1);
-
-        let result = map.lookup("Foo", "method", |idx| idx == n0);
-        assert_eq!(result.as_slice(), &[n0]);
-
-        let result = map.lookup("Bar", "method", |idx| idx == n1);
-        assert_eq!(result.as_slice(), &[n1]);
-    }
-
-    #[test]
-    fn nested_map_miss_scope() {
-        let mut map = NestedMap::new();
-        map.insert("Foo", "bar", NodeIndex::new(0));
-
-        let result = map.lookup("Missing", "bar", |_| true);
-        assert!(result.is_empty());
-    }
-
-    #[test]
-    fn nested_map_miss_member() {
-        let mut map = NestedMap::new();
-        map.insert("Foo", "bar", NodeIndex::new(0));
-
-        let result = map.lookup("Foo", "missing", |_| true);
-        assert!(result.is_empty());
-    }
-
-    #[test]
-    fn nested_map_lookup_into_appends() {
-        let mut map = NestedMap::new();
-        let n0 = NodeIndex::new(0);
-        map.insert("Foo", "bar", n0);
-
-        let mut out = vec![NodeIndex::new(99)];
-        let found = map.lookup_into("Foo", "bar", |_| true, &mut out);
-        assert!(found);
-        assert_eq!(out.len(), 2);
-        assert_eq!(out[0], NodeIndex::new(99));
-        assert_eq!(out[1], n0);
-    }
-
-    #[test]
-    fn nested_map_verifier_filters() {
-        let mut map = NestedMap::new();
-        let n0 = NodeIndex::new(0);
-        let n1 = NodeIndex::new(1);
-        map.insert("Foo", "bar", n0);
-        map.insert("Foo", "bar", n1);
-
-        let result = map.lookup("Foo", "bar", |idx| idx == n1);
-        assert_eq!(result.as_slice(), &[n1]);
-    }
 
     #[test]
     fn file_arena_basic() {
@@ -613,65 +122,9 @@ mod tests {
         arena.alloc_str("first file strings");
         let bytes_before = arena.allocated_bytes();
         assert!(bytes_before > 0);
-
         arena.reset();
         let s = arena.alloc_str("second file");
         assert_eq!(s, "second file");
-    }
-
-    #[test]
-    fn file_arena_many_small_allocs() {
-        let arena = FileArena::new();
-        let mut refs = Vec::new();
-        for i in 0..1000 {
-            let s = arena.alloc_fmt(format_args!("name_{}", i));
-            refs.push(s);
-        }
-        assert_eq!(refs[0], "name_0");
-        assert_eq!(refs[999], "name_999");
-        assert_eq!(refs.len(), 1000);
-    }
-
-    #[test]
-    fn graph_indexes_construction_lifecycle() {
-        let mut indexes = GraphIndexes::new();
-
-        assert!(indexes.dir_index.is_some());
-        assert!(indexes.file_index.is_some());
-
-        indexes
-            .dir_index
-            .as_mut()
-            .unwrap()
-            .insert("src".to_string(), NodeIndex::new(0));
-        indexes
-            .file_index
-            .as_mut()
-            .unwrap()
-            .insert("src/main.py".to_string(), NodeIndex::new(1));
-
-        indexes.drop_construction_indexes();
-        assert!(indexes.dir_index.is_none());
-        assert!(indexes.file_index.is_none());
-    }
-
-    #[test]
-    fn graph_indexes_all_maps_independent() {
-        let mut indexes = GraphIndexes::new();
-        let n0 = NodeIndex::new(0);
-        let n1 = NodeIndex::new(1);
-        let n2 = NodeIndex::new(2);
-
-        indexes.by_fqn.insert("com.Foo", n0);
-        indexes.by_name.insert("Foo", n1);
-        indexes.nested.insert("com.Foo", "bar", n2);
-
-        assert_eq!(indexes.by_fqn.lookup("com.Foo", |_| true).len(), 1);
-        assert_eq!(indexes.by_name.lookup("Foo", |_| true).len(), 1);
-        assert_eq!(indexes.nested.lookup("com.Foo", "bar", |_| true).len(), 1);
-
-        assert!(indexes.by_fqn.lookup("Foo", |_| true).is_empty());
-        assert!(indexes.by_name.lookup("com.Foo", |_| true).is_empty());
     }
 
     #[test]
@@ -691,15 +144,6 @@ mod tests {
         assert_eq!(pool.get(b), "bar");
         assert_eq!(pool.get(c), "baz");
         assert_eq!(pool.len(), 3);
-    }
-
-    #[test]
-    fn string_pool_duplicates_not_deduped() {
-        let pool = StringPool::new();
-        let a = pool.alloc("same");
-        let b = pool.alloc("same");
-        assert_ne!(a, b);
-        assert_eq!(pool.get(a), pool.get(b));
     }
 
     #[test]

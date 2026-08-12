@@ -6,7 +6,6 @@ use crate::v2::inventory::{
 use crate::v2::sink::{GraphConverter, OnBatch};
 use arrow::record_batch::RecordBatch;
 use indicatif::{ProgressBar, ProgressStyle};
-use petgraph::graph::NodeIndex;
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::any::Any;
@@ -15,7 +14,7 @@ use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-use crate::v2::linker::{CodeGraph, GraphEdge};
+use crate::v2::linker::concurrent_graph::{ConcurrentGraph, Edge, NodeId};
 use crate::v2::trace::Tracer;
 
 // This is a parse-cost guard for generated Go blobs, not the cumulative Arrow
@@ -60,8 +59,6 @@ impl CancellationToken {
     }
 }
 
-type EdgeTriple = (NodeIndex, NodeIndex, GraphEdge);
-
 /// A chain reference that failed resolution in Phase 2, stored for
 /// re-resolution in Phase 3 after return types are merged.
 struct FailedChain {
@@ -69,44 +66,19 @@ struct FailedChain {
     chain: Vec<crate::v2::types::ExpressionStep>,
     reaching: smallvec::SmallVec<[crate::v2::types::ssa::ParseValue; 2]>,
     enclosing_def: Option<u32>,
-    pending_import_edges: Vec<EdgeTriple>,
+    pending_import_edges: Vec<Edge>,
 }
 
-fn dedupe_edge_triples(edges: &mut Vec<EdgeTriple>) {
+fn dedupe_edges(edges: &mut Vec<Edge>) {
     let mut seen = FxHashSet::default();
-    edges.retain(|(source, target, edge)| {
+    edges.retain(|edge| {
         edge.relationship.target_node != crate::v2::types::NodeKind::ImportedSymbol
-            || seen.insert((source.index(), target.index(), edge.relationship.edge_kind))
+            || seen.insert((edge.source, edge.target, edge.relationship.edge_kind))
     });
 }
 
-fn graph_has_edge_kind(
-    graph: &CodeGraph,
-    source: NodeIndex,
-    target: NodeIndex,
-    edge: &GraphEdge,
-) -> bool {
-    graph
-        .graph
-        .edges_connecting(source, target)
-        .any(|existing| existing.weight().relationship.edge_kind == edge.relationship.edge_kind)
-}
-
-fn add_edge_if_missing(
-    graph: &mut CodeGraph,
-    source: NodeIndex,
-    target: NodeIndex,
-    edge: GraphEdge,
-) {
-    if edge.relationship.target_node != crate::v2::types::NodeKind::ImportedSymbol
-        || !graph_has_edge_kind(graph, source, target, &edge)
-    {
-        graph.graph.add_edge(source, target, edge);
-    }
-}
-
-/// Per-file inferred return types keyed by the graph node indices of definitions.
-type InferredReturns = (Vec<petgraph::graph::NodeIndex>, Vec<(u32, String)>);
+/// Per-file inferred return types keyed by the graph node IDs of definitions.
+type InferredReturns = (Vec<NodeId>, Vec<(u32, String)>);
 
 fn progress_bar(len: u64, prefix: &str) -> ProgressBar {
     let pb = ProgressBar::new(len);
@@ -334,24 +306,23 @@ impl<'a> GraphStatsCounters<'a> {
         }
     }
 
-    fn record_graph(self, graph: &CodeGraph) {
-        if graph.output.writes_repository_structure() {
+    fn record_graph(self, graph: &ConcurrentGraph) {
+        if !graph.parsed_only {
             self.directories
-                .fetch_add(graph.directories().count(), Ordering::Relaxed);
+                .fetch_add(graph.iter_directories().count(), Ordering::Relaxed);
             self.files
-                .fetch_add(graph.files().count(), Ordering::Relaxed);
+                .fetch_add(graph.iter_files().count(), Ordering::Relaxed);
         }
         self.definitions
-            .fetch_add(graph.definitions().count(), Ordering::Relaxed);
+            .fetch_add(graph.iter_definitions().count(), Ordering::Relaxed);
         self.imports
-            .fetch_add(graph.imports_iter().count(), Ordering::Relaxed);
-        let emitted_edges = if graph.output.writes_repository_structure() {
+            .fetch_add(graph.iter_imports().count(), Ordering::Relaxed);
+        let emitted_edges = if !graph.parsed_only {
             graph.edge_count()
         } else {
             graph
-                .graph
-                .edge_indices()
-                .filter(|&idx| graph.graph[idx].relationship.edge_kind.as_ref() != "CONTAINS")
+                .iter_edges()
+                .filter(|e| e.relationship.edge_kind.as_ref() != "CONTAINS")
                 .count()
         };
         self.edges.fetch_add(emitted_edges, Ordering::Relaxed);
@@ -382,7 +353,7 @@ impl<'a> BatchTx<'a> {
 }
 
 impl BatchTx<'_> {
-    pub fn send_graph(&self, graph: CodeGraph) {
+    pub fn send_graph(&self, graph: ConcurrentGraph) {
         self.stats.record_graph(&graph);
         let batches = match self.converter.convert(graph) {
             Ok(batches) => batches,
@@ -424,7 +395,7 @@ impl BatchTx<'_> {
 }
 
 fn write_graph_direct(
-    graph: CodeGraph,
+    graph: ConcurrentGraph,
     converter: &dyn GraphConverter,
     on_batch: &OnBatch,
     errors: &Mutex<Vec<PipelineError>>,
@@ -1113,35 +1084,33 @@ impl FamilyPipeline {
 
         let pb = progress_bar(file_count as u64, "parse + graph");
 
-        use crate::v2::dsl::engine::{CollectedRef, ParseFullResult};
+        use crate::v2::dsl::engine::CollectedRef;
         use crate::v2::error::{FaultedFile, FileFault, FileSkip, SkippedFile};
 
-        struct FileInfo {
-            file_node: petgraph::graph::NodeIndex,
-            def_nodes: Vec<petgraph::graph::NodeIndex>,
-            import_nodes: Vec<petgraph::graph::NodeIndex>,
-        }
-
-        enum ParseOutcome {
-            Ok(ParsedFile),
-            Skip(SkippedFile),
-            Err(FaultedFile),
-        }
-
-        struct ParsedFile {
-            path_idx: usize,
+        struct FileWithRefs {
+            file_node: NodeId,
+            def_nodes: Vec<NodeId>,
+            import_nodes: Vec<NodeId>,
             language: Language,
-            result: ParseFullResult,
-            ext: String,
-            file_size: u64,
+            refs: Vec<CollectedRef>,
+            inferred_returns: Vec<(u32, String)>,
+            unresolved_aliases: Vec<(usize, String)>,
             parse_ms: f64,
+            file_size: u64,
         }
 
-        let string_pool = crate::v2::linker::state::StringPool::new();
-        let parse_outcomes: Vec<Option<ParseOutcome>> = files
+        let mut graph = ConcurrentGraph::new(root_path.to_string());
+        graph.strings = crate::v2::linker::state::StringPool::new();
+        if ctx.config.emit_file_inventory_graph {
+            graph.parsed_only = true;
+        }
+        let total_defs = AtomicUsize::new(0);
+        let total_imports = AtomicUsize::new(0);
+
+        let mut files_with_refs: Vec<Option<FileWithRefs>> = files
             .par_iter()
             .enumerate()
-            .map(|(idx, f)| {
+            .map(|(_, f)| {
                 if ctx.is_cancelled() {
                     pb.inc(1);
                     return None;
@@ -1153,27 +1122,33 @@ impl FamilyPipeline {
                     && metadata.len() > limit
                 {
                     pb.inc(1);
-                    return Some(ParseOutcome::Skip(SkippedFile {
-                        path: f.path.clone(),
-                        kind: FileSkip::ParserOversize,
-                        detail: format!(
-                            "{} file is {} bytes, parser limit is {} bytes",
-                            f.language,
-                            metadata.len(),
-                            limit
-                        ),
-                    }));
+                    if let Ok(mut skipped) = ctx.skipped.lock() {
+                        skipped.push(SkippedFile {
+                            path: f.path.clone(),
+                            kind: FileSkip::ParserOversize,
+                            detail: format!(
+                                "{} file is {} bytes, parser limit is {} bytes",
+                                f.language,
+                                metadata.len(),
+                                limit
+                            ),
+                        });
+                    }
+                    return None;
                 }
                 let source = match std::fs::read(&abs_path) {
                     Ok(s) => s,
                     Err(e) => {
                         tracing::debug!(path = f.path, error = %e, "failed to read file");
                         pb.inc(1);
-                        return Some(ParseOutcome::Err(FaultedFile {
-                            path: f.path.to_string(),
-                            kind: FileFault::FileRead,
-                            detail: e.to_string(),
-                        }));
+                        if let Ok(mut faults) = ctx.faults.lock() {
+                            faults.push(FaultedFile {
+                                path: f.path.to_string(),
+                                kind: FileFault::FileRead,
+                                detail: e.to_string(),
+                            });
+                        }
+                        return None;
                     }
                 };
 
@@ -1194,27 +1169,33 @@ impl FamilyPipeline {
                     crate::v2::dsl::engine::ParseFullOptions {
                         import_rewriter: import_rewriters.get(&f.language).map(|r| r.as_ref()),
                     },
-                    &string_pool,
+                    &graph.strings,
                 );
                 let result = match result {
                     Ok(r) => r,
                     Err(crate::v2::dsl::engine::ParseFullError::Aborted { phase, detail }) => {
                         tracing::warn!(path = f.path, phase = phase.as_ref(), %detail, "parse aborted: per-file CPU budget");
                         pb.inc(1);
-                        return Some(ParseOutcome::Skip(SkippedFile {
-                            path: f.path.clone(),
-                            kind: FileSkip::Timeout(phase),
-                            detail,
-                        }));
+                        if let Ok(mut skipped) = ctx.skipped.lock() {
+                            skipped.push(SkippedFile {
+                                path: f.path.clone(),
+                                kind: FileSkip::Timeout(phase),
+                                detail,
+                            });
+                        }
+                        return None;
                     }
                     Err(crate::v2::dsl::engine::ParseFullError::InvalidUtf8(err)) => {
                         tracing::debug!(path = f.path, error = %err, "failed to parse file");
                         pb.inc(1);
-                        return Some(ParseOutcome::Err(FaultedFile {
-                            path: f.path.to_string(),
-                            kind: FileFault::InvalidUtf8,
-                            detail: err.to_string(),
-                        }));
+                        if let Ok(mut faults) = ctx.faults.lock() {
+                            faults.push(FaultedFile {
+                                path: f.path.to_string(),
+                                kind: FileFault::InvalidUtf8,
+                                detail: err.to_string(),
+                            });
+                        }
+                        return None;
                     }
                 };
                 let parse_ms = t_parse.elapsed().as_secs_f64() * 1000.0;
@@ -1227,108 +1208,46 @@ impl FamilyPipeline {
                     .path
                     .rsplit_once('.')
                     .map(|(_, e)| e)
-                    .unwrap_or("")
-                    .to_string();
+                    .unwrap_or("");
                 let file_size = source.len() as u64;
-                pb.inc(1);
-                Some(ParseOutcome::Ok(ParsedFile {
-                    path_idx: idx,
-                    language: f.language,
-                    result,
+
+                total_defs.fetch_add(result.definitions.len(), Ordering::Relaxed);
+                total_imports.fetch_add(result.imports.len(), Ordering::Relaxed);
+
+                let (file_node, def_nodes, import_nodes) = graph.add_file(
+                    &f.path,
                     ext,
+                    Some(f.language),
                     file_size,
+                    result.definitions,
+                    result.imports,
+                    crate::v2::error::FileReason::None,
+                );
+
+                pb.inc(1);
+                Some(FileWithRefs {
+                    file_node,
+                    def_nodes,
+                    import_nodes,
+                    language: f.language,
+                    refs: result.refs,
+                    inferred_returns: result.inferred_returns,
+                    unresolved_aliases: result.unresolved_aliases,
                     parse_ms,
-                }))
+                    file_size,
+                })
             })
             .collect();
 
         let parse_ms = t0.elapsed().as_secs_f64() * 1000.0;
-
-        let mut parsed_skips: Vec<SkippedFile> = Vec::new();
-        let mut parsed_faults: Vec<FaultedFile> = Vec::new();
-        let parsed: Vec<Option<ParsedFile>> = parse_outcomes
-            .into_iter()
-            .map(|outcome| match outcome {
-                Some(ParseOutcome::Ok(file)) => Some(file),
-                Some(ParseOutcome::Skip(s)) => {
-                    parsed_skips.push(s);
-                    None
-                }
-                Some(ParseOutcome::Err(e)) => {
-                    parsed_faults.push(e);
-                    None
-                }
-                None => None,
-            })
-            .collect();
-
-        if !parsed_skips.is_empty()
-            && let Ok(mut skipped) = ctx.skipped.lock()
-        {
-            skipped.extend(parsed_skips);
-        }
-        if !parsed_faults.is_empty()
-            && let Ok(mut faults) = ctx.faults.lock()
-        {
-            faults.extend(parsed_faults);
-        }
-
-        struct FileWithRefs {
-            info: FileInfo,
-            language: Language,
-            refs: Vec<CollectedRef>,
-            inferred_returns: Vec<(u32, String)>,
-            unresolved_aliases: Vec<(usize, String)>,
-            parse_ms: f64,
-            file_size: u64,
-        }
-
-        let mut graph = CodeGraph::new_with_root(root_path.to_string()).with_rules(primary_rules);
-        graph.strings = string_pool;
-        if ctx.config.emit_file_inventory_graph {
-            graph.mark_parsed_only();
-        }
-        let mut total_defs = 0usize;
-        let mut total_imports = 0usize;
-        let mut files_with_refs: Vec<Option<FileWithRefs>> =
-            (0..file_count).map(|_| None).collect();
-
-        for parsed_file in parsed.into_iter().flatten() {
-            let path = &files[parsed_file.path_idx].path;
-            total_defs += parsed_file.result.definitions.len();
-            total_imports += parsed_file.result.imports.len();
-
-            let (file_node, def_nodes, import_nodes) = graph.add_file(
-                path,
-                &parsed_file.ext,
-                parsed_file.language,
-                parsed_file.file_size,
-                parsed_file.result.definitions,
-                parsed_file.result.imports,
-            );
-
-            files_with_refs[parsed_file.path_idx] = Some(FileWithRefs {
-                info: FileInfo {
-                    file_node,
-                    def_nodes,
-                    import_nodes,
-                },
-                language: parsed_file.language,
-                refs: parsed_file.result.refs,
-                inferred_returns: parsed_file.result.inferred_returns,
-                unresolved_aliases: parsed_file.result.unresolved_aliases,
-                parse_ms: parsed_file.parse_ms,
-                file_size: parsed_file.file_size,
-            });
-        }
-
+        let total_defs = total_defs.load(Ordering::Relaxed);
+        let total_imports = total_imports.load(Ordering::Relaxed);
         pb.finish_with_message(format!(
             "{total_defs} defs, {total_imports} imports in {:.2?}",
             t0.elapsed()
         ));
 
-        graph.finalize(tracer);
-        graph.drop_construction_indexes();
+        graph.finalize();
         let graph_build_ms = t0.elapsed().as_secs_f64() * 1000.0 - parse_ms;
 
         for fwr in files_with_refs.iter_mut().flatten() {
@@ -1338,7 +1257,7 @@ impl FamilyPipeline {
             for (ref_idx, alias_target) in &fwr.unresolved_aliases {
                 let nodes = graph.resolve_scope_nodes(alias_target);
                 if let Some(&n) = nodes.first()
-                    && graph.def_kind(n).is_type_container()
+                    && graph.def_kind(n).is_some_and(|k| k.is_type_container())
                 {
                     let fqn = graph.def_fqn(n).to_string();
                     if let Some(r) = fwr.refs.get_mut(*ref_idx) {
@@ -1377,10 +1296,17 @@ impl FamilyPipeline {
         let pb2 = progress_bar(file_count as u64, "resolve");
         let total_edges = std::sync::atomic::AtomicUsize::new(0);
 
+        struct Phase2FileInfo {
+            file_node: NodeId,
+            def_nodes: Vec<NodeId>,
+            import_nodes: Vec<NodeId>,
+            language: Language,
+        }
+
         type Phase2Result = (
-            Vec<EdgeTriple>,
+            Vec<Edge>,
             Vec<(u32, String)>,
-            Option<(FileInfo, Language)>,
+            Option<Phase2FileInfo>,
             Vec<FailedChain>,
             bool,
         );
@@ -1404,9 +1330,9 @@ impl FamilyPipeline {
                     .map(|(handle, _)| handle.file_start("family"));
                 let mut resolver = crate::v2::linker::FileResolver::new(
                     &graph,
-                    fwr.info.file_node,
-                    &fwr.info.def_nodes,
-                    &fwr.info.import_nodes,
+                    fwr.file_node,
+                    &fwr.def_nodes,
+                    &fwr.import_nodes,
                     lctx,
                     guard,
                 );
@@ -1462,13 +1388,18 @@ impl FamilyPipeline {
                     language: format!("{}", fwr.language),
                 });
 
-                dedupe_edge_triples(&mut edges);
+                dedupe_edges(&mut edges);
                 total_edges.fetch_add(edges.len(), std::sync::atomic::Ordering::Relaxed);
                 pb2.inc(1);
                 (
                     edges,
                     fwr.inferred_returns,
-                    Some((fwr.info, fwr.language)),
+                    Some(Phase2FileInfo {
+                        file_node: fwr.file_node,
+                        def_nodes: fwr.def_nodes,
+                        import_nodes: fwr.import_nodes,
+                        language: fwr.language,
+                    }),
                     failed_chains,
                     killed,
                 )
@@ -1482,29 +1413,26 @@ impl FamilyPipeline {
         ));
 
         let mut all_inferred: Vec<InferredReturns> = Vec::new();
-        let mut all_failed: Vec<(FileInfo, Language, Vec<FailedChain>)> = Vec::new();
+        let mut all_failed: Vec<(Phase2FileInfo, Vec<FailedChain>)> = Vec::new();
 
         for (edges, inferred, info_opt, failed_chains, killed) in resolve_results {
-            if killed && let Some((ref info, _)) = info_opt {
-                let path = match &graph.graph[info.file_node] {
-                    crate::v2::linker::graph::GraphNode::File(f) => f.path.as_str(),
-                    _ => "unknown",
-                };
+            if killed && let Some(ref info) = info_opt {
+                let path = graph.node_path(info.file_node);
                 ctx.record_skip(
                     path.to_string(),
                     crate::v2::error::FileSkip::Timeout(crate::v2::error::AbortPhase::Sentinel),
                     "per-file watchdog killed analysis",
                 );
             }
-            for (src, tgt, edge) in edges {
-                add_edge_if_missing(&mut graph, src, tgt, edge);
+            for edge in edges {
+                graph.push_edge(edge);
             }
-            if let Some((info, lang)) = info_opt {
+            if let Some(info) = info_opt {
                 if !inferred.is_empty() {
                     all_inferred.push((info.def_nodes.clone(), inferred));
                 }
                 if !failed_chains.is_empty() {
-                    all_failed.push((info, lang, failed_chains));
+                    all_failed.push((info, failed_chains));
                 }
             }
         }
@@ -1513,13 +1441,10 @@ impl FamilyPipeline {
             for (def_nodes, inferred) in &all_inferred {
                 for (def_idx, rt) in inferred {
                     if let Some(&node) = def_nodes.get(*def_idx as usize)
-                        && let Some(did) = graph.graph[node].def_id()
+                        && let Some(did) = graph.node(node).def_id()
                     {
                         let rt_id = graph.strings.alloc(rt);
-                        graph.defs[did.0 as usize]
-                            .metadata
-                            .get_or_insert_with(Default::default)
-                            .return_type = Some(rt_id);
+                        graph.global_return_types.insert(did, rt_id);
                     }
                 }
             }
@@ -1528,8 +1453,8 @@ impl FamilyPipeline {
         if !all_failed.is_empty() {
             let phase3_results: Vec<_> = all_failed
                 .par_iter()
-                .map(|(info, lang, failed_chains)| {
-                    let lctx = &member_ctxs[lang];
+                .map(|(info, failed_chains)| {
+                    let lctx = &member_ctxs[&info.language];
                     let guard = sentinel
                         .as_ref()
                         .map(|(handle, _)| handle.file_start("phase3"));
@@ -1571,7 +1496,7 @@ impl FamilyPipeline {
                             }
                         }
                     }
-                    dedupe_edge_triples(&mut edges);
+                    dedupe_edges(&mut edges);
                     edges
                 })
                 .collect();
@@ -1579,8 +1504,8 @@ impl FamilyPipeline {
             let mut phase3_edges = 0usize;
             for edges in phase3_results {
                 phase3_edges += edges.len();
-                for (src, tgt, edge) in edges {
-                    add_edge_if_missing(&mut graph, src, tgt, edge);
+                for edge in edges {
+                    graph.push_edge(edge);
                 }
             }
             if phase3_edges > 0 {
@@ -1588,8 +1513,7 @@ impl FamilyPipeline {
             }
         }
 
-        graph.indexes.definition_ranges.clear();
-        graph.indexes.definition_ranges.shrink_to_fit();
+        graph.definition_ranges.clear();
 
         if let Some((handle, join)) = sentinel {
             handle.shutdown();
@@ -1622,10 +1546,10 @@ impl FamilyPipeline {
 
         tracing::info!(
             duration_ms = t0.elapsed().as_millis() as u64,
-            nodes = graph.graph.node_count(),
-            edges = graph.graph.edge_count(),
-            defs = graph.defs.len(),
-            imports = graph.imports.len(),
+            nodes = graph.node_count(),
+            edges = graph.edge_count(),
+            defs = graph.def_count(),
+            imports = graph.import_count(),
             strings = graph.strings.len(),
             "family pipeline complete"
         );
@@ -1638,12 +1562,11 @@ impl FamilyPipeline {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::v2::linker::CodeGraph;
     use crate::v2::sink::{GraphConverter, SinkError};
     use crate::v2::types::{DefKind, NodeKind};
 
     struct TestCapture {
-        graphs: std::sync::Mutex<Vec<CodeGraph>>,
+        graphs: std::sync::Mutex<Vec<ConcurrentGraph>>,
     }
 
     impl TestCapture {
@@ -1653,13 +1576,13 @@ mod tests {
             }
         }
 
-        fn take(&self) -> Vec<CodeGraph> {
+        fn take(&self) -> Vec<ConcurrentGraph> {
             std::mem::take(&mut *self.graphs.lock().unwrap())
         }
     }
 
     impl GraphConverter for TestCapture {
-        fn convert(&self, graph: CodeGraph) -> Result<Vec<(String, RecordBatch)>, SinkError> {
+        fn convert(&self, graph: ConcurrentGraph) -> Result<Vec<(String, RecordBatch)>, SinkError> {
             self.graphs.lock().unwrap().push(graph);
             Ok(Vec::new())
         }
@@ -1668,8 +1591,8 @@ mod tests {
     struct OffsetOverflowOnParsedGraph;
 
     impl GraphConverter for OffsetOverflowOnParsedGraph {
-        fn convert(&self, graph: CodeGraph) -> Result<Vec<(String, RecordBatch)>, SinkError> {
-            if graph.output.writes_repository_structure() {
+        fn convert(&self, graph: ConcurrentGraph) -> Result<Vec<(String, RecordBatch)>, SinkError> {
+            if !graph.parsed_only {
                 Ok(Vec::new())
             } else {
                 panic!("byte array offset overflow")
@@ -1680,8 +1603,8 @@ mod tests {
     struct TypedOffsetOverflowOnParsedGraph;
 
     impl GraphConverter for TypedOffsetOverflowOnParsedGraph {
-        fn convert(&self, graph: CodeGraph) -> Result<Vec<(String, RecordBatch)>, SinkError> {
-            if graph.output.writes_repository_structure() {
+        fn convert(&self, graph: ConcurrentGraph) -> Result<Vec<(String, RecordBatch)>, SinkError> {
+            if !graph.parsed_only {
                 Ok(Vec::new())
             } else {
                 std::panic::panic_any(crate::v2::error::CodeGraphError::ArrowConversion {
@@ -1696,7 +1619,7 @@ mod tests {
         format!("{manifest}/../../fixtures/code/{relative}")
     }
 
-    fn parse_fixture_file(path: &str, language: Language) -> CodeGraph {
+    fn parse_fixture_file(path: &str, language: Language) -> ConcurrentGraph {
         let ctx = Arc::new(PipelineContext {
             config: PipelineConfig::default(),
             tracer: crate::v2::trace::Tracer::new(false),
@@ -1978,10 +1901,12 @@ mod tests {
         let graphs = capture.take();
         let mut structural_files: Vec<_> = graphs
             .iter()
-            .filter(|g| g.output.writes_repository_structure())
+            .filter(|g| !g.parsed_only)
             .flat_map(|g| {
-                g.files()
-                    .map(|(_, file)| (file.path.clone(), file.language_name()))
+                g.iter_files().map(|(_, path, _, _, lang, _, _)| {
+                    let lang_name = lang.map_or("unknown", |l| l.names()[0]);
+                    (path.to_string(), lang_name)
+                })
             })
             .collect();
         structural_files.sort();
@@ -2028,8 +1953,11 @@ mod tests {
         let structural_files: Vec<_> = capture
             .take()
             .iter()
-            .filter(|g| g.output.writes_repository_structure())
-            .flat_map(|g| g.files().map(|(_, file)| file.path.clone()))
+            .filter(|g| !g.parsed_only)
+            .flat_map(|g| {
+                g.iter_files()
+                    .map(|(_, path, _, _, _, _, _)| path.to_string())
+            })
             .collect();
         assert_eq!(structural_files, vec!["listed.py".to_string()]);
     }
@@ -2039,7 +1967,7 @@ mod tests {
         let path = fixture_path("python/definitions.py");
         let cg = parse_fixture_file(&path, Language::Python);
 
-        let defs: Vec<_> = cg.definitions().collect();
+        let defs: Vec<_> = cg.iter_definitions().collect();
         assert!(
             defs.len() >= 10,
             "Expected at least 10 definitions, got {}",
@@ -2067,7 +1995,7 @@ mod tests {
         let path = fixture_path("java/ComprehensiveJavaDefinitions.java");
         let cg = parse_fixture_file(&path, Language::Java);
 
-        let defs: Vec<_> = cg.definitions().collect();
+        let defs: Vec<_> = cg.iter_definitions().collect();
         assert!(
             defs.len() >= 5,
             "Expected at least 5 definitions, got {}",
@@ -2084,7 +2012,7 @@ mod tests {
         let path = fixture_path("kotlin/ComprehensiveKotlinDefinitions.kt");
         let cg = parse_fixture_file(&path, Language::Kotlin);
 
-        let defs: Vec<_> = cg.definitions().collect();
+        let defs: Vec<_> = cg.iter_definitions().collect();
         assert!(
             defs.len() >= 5,
             "Expected at least 5 definitions, got {}",
@@ -2101,7 +2029,7 @@ mod tests {
         let path = fixture_path("csharp/ComprehensiveCSharp.cs");
         let cg = parse_fixture_file(&path, Language::CSharp);
 
-        let defs: Vec<_> = cg.definitions().collect();
+        let defs: Vec<_> = cg.iter_definitions().collect();
         assert!(
             defs.len() >= 5,
             "Expected at least 5 definitions, got {}",
@@ -2215,13 +2143,13 @@ namespace MyApp {
         let graphs = capture.take();
         let total_files: usize = graphs
             .iter()
-            .filter(|g| g.output.writes_repository_structure())
-            .map(|g| g.files().count())
+            .filter(|g| !g.parsed_only)
+            .map(|g| g.iter_files().count())
             .sum();
         let total_dirs: usize = graphs
             .iter()
-            .filter(|g| g.output.writes_repository_structure())
-            .map(|g| g.directories().count())
+            .filter(|g| !g.parsed_only)
+            .map(|g| g.iter_directories().count())
             .sum();
         let total_edges: usize = graphs.iter().map(|g| g.edge_count()).sum();
         assert_eq!(total_files, 4);
@@ -2230,8 +2158,8 @@ namespace MyApp {
 
         let def_to_def: usize = graphs
             .iter()
-            .flat_map(|g| g.edges())
-            .filter(|(_, _, e)| {
+            .flat_map(|g| g.iter_edges())
+            .filter(|e| {
                 e.relationship.source_node == NodeKind::Definition
                     && e.relationship.target_node == NodeKind::Definition
             })
@@ -2243,8 +2171,8 @@ namespace MyApp {
 
         let file_to_def: usize = graphs
             .iter()
-            .flat_map(|g| g.edges())
-            .filter(|(_, _, e)| {
+            .flat_map(|g| g.iter_edges())
+            .filter(|e| {
                 e.relationship.source_node == NodeKind::File
                     && e.relationship.target_node == NodeKind::Definition
             })

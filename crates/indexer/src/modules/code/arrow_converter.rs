@@ -2,7 +2,7 @@ use arrow::error::ArrowError;
 use arrow::record_batch::RecordBatch;
 use chrono::{DateTime, Utc};
 use code_graph::v2::SinkError;
-use code_graph::v2::linker::graph::{DefinitionRow, DirectoryRow, FileRow, GraphOutput, ImportRow};
+use code_graph::v2::linker::graph::{DefinitionRow, DirectoryRow, FileRow, ImportRow};
 use gkg_utils::arrow::{AsRecordBatch, BatchBuilder, ColumnSpec, ColumnType, RowEnvelope};
 use ontology::DataType as OntDataType;
 use ontology::Ontology;
@@ -65,19 +65,20 @@ pub struct ConvertedGraphData {
 }
 
 pub fn convert_code_graph(
-    graph: &code_graph::v2::linker::CodeGraph,
+    graph: &code_graph::v2::linker::concurrent_graph::ConcurrentGraph,
     envelope: &IndexerEnvelope,
     specs: &ConverterSpecs,
 ) -> Result<ConvertedGraphData, ArrowError> {
     let ids = graph.assign_ids(envelope.project_id, &envelope.branch);
-    match graph.output {
-        GraphOutput::Complete => convert_repository_graph(graph, &ids, envelope, specs),
-        GraphOutput::ParsedOnly => convert_semantic_graph(graph, &ids, envelope, specs),
+    if graph.parsed_only {
+        convert_semantic_graph(graph, &ids, envelope, specs)
+    } else {
+        convert_repository_graph(graph, &ids, envelope, specs)
     }
 }
 
 fn convert_repository_graph(
-    graph: &code_graph::v2::linker::CodeGraph,
+    graph: &code_graph::v2::linker::concurrent_graph::ConcurrentGraph,
     ids: &[i64],
     envelope: &IndexerEnvelope,
     specs: &ConverterSpecs,
@@ -93,7 +94,7 @@ fn convert_repository_graph(
 }
 
 fn convert_semantic_graph(
-    graph: &code_graph::v2::linker::CodeGraph,
+    graph: &code_graph::v2::linker::concurrent_graph::ConcurrentGraph,
     ids: &[i64],
     envelope: &IndexerEnvelope,
     specs: &ConverterSpecs,
@@ -214,11 +215,14 @@ fn edge_specs(ontology: &Ontology) -> Vec<ColumnSpec> {
 }
 
 fn convert_entity<'a, R: AsRecordBatch<IndexerEnvelope>>(
-    graph: &'a code_graph::v2::linker::CodeGraph,
+    graph: &'a code_graph::v2::linker::concurrent_graph::ConcurrentGraph,
     ids: &[i64],
     env: &IndexerEnvelope,
     specs: &[ColumnSpec],
-    build_rows: impl FnOnce(&'a code_graph::v2::linker::CodeGraph, &[i64]) -> Vec<R>,
+    build_rows: impl FnOnce(
+        &'a code_graph::v2::linker::concurrent_graph::ConcurrentGraph,
+        &[i64],
+    ) -> Vec<R>,
 ) -> Result<RecordBatch, ArrowError> {
     let rows = build_rows(graph, ids);
     R::to_record_batch(&rows, specs, env)
@@ -233,16 +237,17 @@ fn convert_empty_entity<R: AsRecordBatch<IndexerEnvelope>>(
 }
 
 fn convert_directories(
-    graph: &code_graph::v2::linker::CodeGraph,
+    graph: &code_graph::v2::linker::concurrent_graph::ConcurrentGraph,
     ids: &[i64],
     env: &IndexerEnvelope,
     specs: &[ColumnSpec],
 ) -> Result<RecordBatch, ArrowError> {
     convert_entity(graph, ids, env, specs, |g, ids| {
-        g.directories()
-            .map(|(idx, dir)| DirectoryRow {
-                dir,
-                id: ids[idx.index()],
+        g.iter_directories()
+            .map(|(nid, path, name)| DirectoryRow {
+                path,
+                name,
+                id: ids[nid.0 as usize],
             })
             .collect()
     })
@@ -256,19 +261,30 @@ fn convert_empty_directories(
 }
 
 fn convert_files(
-    graph: &code_graph::v2::linker::CodeGraph,
+    graph: &code_graph::v2::linker::concurrent_graph::ConcurrentGraph,
     ids: &[i64],
     env: &IndexerEnvelope,
     specs: &[ColumnSpec],
 ) -> Result<RecordBatch, ArrowError> {
-    convert_entity(graph, ids, env, specs, |g, ids| {
-        g.files()
-            .map(|(idx, file)| FileRow {
-                file,
-                id: ids[idx.index()],
-            })
-            .collect()
-    })
+    let file_data: Vec<_> = graph
+        .iter_files()
+        .map(|(nid, path, name, ext, lang, size, reason)| {
+            (nid, path, name, ext, lang, size, reason.to_string())
+        })
+        .collect();
+    let rows: Vec<_> = file_data
+        .iter()
+        .map(|(nid, path, name, ext, lang, size, reason_s)| FileRow {
+            path,
+            name,
+            extension: ext,
+            language: lang.map_or("unknown", |l| l.names()[0]),
+            size: *size,
+            reason: reason_s,
+            id: ids[nid.0 as usize],
+        })
+        .collect();
+    FileRow::to_record_batch(&rows, specs, env)
 }
 
 fn convert_empty_files(
@@ -279,36 +295,36 @@ fn convert_empty_files(
 }
 
 fn convert_definitions(
-    graph: &code_graph::v2::linker::CodeGraph,
+    graph: &code_graph::v2::linker::concurrent_graph::ConcurrentGraph,
     ids: &[i64],
     env: &IndexerEnvelope,
     specs: &[ColumnSpec],
 ) -> Result<RecordBatch, ArrowError> {
     convert_entity(graph, ids, env, specs, |g, ids| {
-        g.definitions()
+        g.iter_definitions()
             .map(|(idx, file_path, def)| DefinitionRow {
                 file_path,
                 def,
                 pool: &g.strings,
-                id: ids[idx.index()],
+                id: ids[idx.0 as usize],
             })
             .collect()
     })
 }
 
 fn convert_imports(
-    graph: &code_graph::v2::linker::CodeGraph,
+    graph: &code_graph::v2::linker::concurrent_graph::ConcurrentGraph,
     ids: &[i64],
     env: &IndexerEnvelope,
     specs: &[ColumnSpec],
 ) -> Result<RecordBatch, ArrowError> {
     convert_entity(graph, ids, env, specs, |g, ids| {
-        g.imports_iter()
+        g.iter_imports()
             .map(|(idx, file_path, import)| ImportRow {
                 file_path,
                 import,
                 pool: &g.strings,
-                id: ids[idx.index()],
+                id: ids[idx.0 as usize],
             })
             .collect()
     })
@@ -348,7 +364,7 @@ fn convert_empty_branch(specs: &[ColumnSpec]) -> Result<RecordBatch, ArrowError>
 }
 
 fn convert_repository_edges(
-    graph: &code_graph::v2::linker::CodeGraph,
+    graph: &code_graph::v2::linker::concurrent_graph::ConcurrentGraph,
     ids: &[i64],
     env: &IndexerEnvelope,
     specs: &ConverterSpecs,
@@ -418,7 +434,7 @@ fn convert_repository_edges(
 }
 
 fn convert_semantic_edges(
-    graph: &code_graph::v2::linker::CodeGraph,
+    graph: &code_graph::v2::linker::concurrent_graph::ConcurrentGraph,
     ids: &[i64],
     env: &IndexerEnvelope,
     specs: &ConverterSpecs,
@@ -466,19 +482,19 @@ impl AsRecordBatch for IndexerEdgeRow<'_> {
 }
 
 fn branch_contains_directory_rows<'a>(
-    graph: &'a code_graph::v2::linker::CodeGraph,
+    graph: &'a code_graph::v2::linker::concurrent_graph::ConcurrentGraph,
     ids: &'a [i64],
     env: &'a IndexerEnvelope,
     branch_id: i64,
     branch_tags: &[String],
 ) -> Vec<IndexerEdgeRow<'a>> {
     graph
-        .directories()
-        .filter(|(_, dir)| dir.path != "." && !dir.path.contains('/'))
-        .map(|(idx, _)| IndexerEdgeRow {
+        .iter_directories()
+        .filter(|(_, path, _)| *path != "." && !path.contains('/'))
+        .map(|(idx, _, _)| IndexerEdgeRow {
             env,
             source_id: branch_id,
-            target_id: ids[idx.index()],
+            target_id: ids[idx.0 as usize],
             edge_kind: "CONTAINS",
             source_node_kind: "Branch",
             target_node_kind: "Directory",
@@ -489,7 +505,7 @@ fn branch_contains_directory_rows<'a>(
 }
 
 fn branch_contains_file_rows<'a>(
-    graph: &'a code_graph::v2::linker::CodeGraph,
+    graph: &'a code_graph::v2::linker::concurrent_graph::ConcurrentGraph,
     ids: &'a [i64],
     env: &'a IndexerEnvelope,
     branch_id: i64,
@@ -497,23 +513,23 @@ fn branch_contains_file_rows<'a>(
     tag_cache: &[Vec<String>],
 ) -> Vec<IndexerEdgeRow<'a>> {
     graph
-        .files()
-        .filter(|(_, file)| !file.path.contains('/'))
-        .map(|(idx, _)| IndexerEdgeRow {
+        .iter_files()
+        .filter(|(_, path, _, _, _, _, _)| !path.contains('/'))
+        .map(|(idx, _, _, _, _, _, _)| IndexerEdgeRow {
             env,
             source_id: branch_id,
-            target_id: ids[idx.index()],
+            target_id: ids[idx.0 as usize],
             edge_kind: "CONTAINS",
             source_node_kind: "Branch",
             target_node_kind: "File",
             source_tags: branch_tags.to_vec(),
-            target_tags: tag_cache[idx.index()].clone(),
+            target_tags: tag_cache[idx.0 as usize].clone(),
         })
         .collect()
 }
 
 fn repository_on_branch_rows<'a>(
-    graph: &'a code_graph::v2::linker::CodeGraph,
+    graph: &'a code_graph::v2::linker::concurrent_graph::ConcurrentGraph,
     ids: &'a [i64],
     env: &'a IndexerEnvelope,
     branch_id: i64,
@@ -522,9 +538,9 @@ fn repository_on_branch_rows<'a>(
 ) -> Vec<IndexerEdgeRow<'a>> {
     let mut rows = Vec::new();
 
-    rows.extend(graph.directories().map(|(idx, _)| IndexerEdgeRow {
+    rows.extend(graph.iter_directories().map(|(idx, _, _)| IndexerEdgeRow {
         env,
-        source_id: ids[idx.index()],
+        source_id: ids[idx.0 as usize],
         target_id: branch_id,
         edge_kind: "ON_BRANCH",
         source_node_kind: "Directory",
@@ -532,39 +548,41 @@ fn repository_on_branch_rows<'a>(
         source_tags: Vec::new(),
         target_tags: branch_tags.to_vec(),
     }));
-    rows.extend(graph.files().map(|(idx, _)| IndexerEdgeRow {
-        env,
-        source_id: ids[idx.index()],
-        target_id: branch_id,
-        edge_kind: "ON_BRANCH",
-        source_node_kind: "File",
-        target_node_kind: "Branch",
-        source_tags: tag_cache[idx.index()].clone(),
-        target_tags: branch_tags.to_vec(),
-    }));
+    rows.extend(
+        graph
+            .iter_files()
+            .map(|(idx, _, _, _, _, _, _)| IndexerEdgeRow {
+                env,
+                source_id: ids[idx.0 as usize],
+                target_id: branch_id,
+                edge_kind: "ON_BRANCH",
+                source_node_kind: "File",
+                target_node_kind: "Branch",
+                source_tags: tag_cache[idx.0 as usize].clone(),
+                target_tags: branch_tags.to_vec(),
+            }),
+    );
 
     rows
 }
 
 fn graph_edge_rows<'a>(
-    graph: &'a code_graph::v2::linker::CodeGraph,
+    graph: &'a code_graph::v2::linker::concurrent_graph::ConcurrentGraph,
     ids: &'a [i64],
     env: &'a IndexerEnvelope,
     tag_cache: &[Vec<String>],
 ) -> Vec<IndexerEdgeRow<'a>> {
     let mut rows = Vec::new();
-    for ei in graph.graph.edge_indices() {
-        let (src, tgt) = graph.graph.edge_endpoints(ei).unwrap();
-        let edge = &graph.graph[ei];
+    for edge in graph.iter_edges() {
         rows.push(IndexerEdgeRow {
             env,
-            source_id: ids[src.index()],
-            target_id: ids[tgt.index()],
+            source_id: ids[edge.source.0 as usize],
+            target_id: ids[edge.target.0 as usize],
             edge_kind: edge.relationship.edge_kind.as_ref(),
             source_node_kind: edge.relationship.source_node.as_ref(),
             target_node_kind: edge.relationship.target_node.as_ref(),
-            source_tags: tag_cache[src.index()].clone(),
-            target_tags: tag_cache[tgt.index()].clone(),
+            source_tags: tag_cache[edge.source.0 as usize].clone(),
+            target_tags: tag_cache[edge.target.0 as usize].clone(),
         });
     }
     rows
@@ -666,7 +684,7 @@ impl IndexerConverter {
 impl code_graph::v2::GraphConverter for IndexerConverter {
     fn convert(
         &self,
-        graph: code_graph::v2::linker::CodeGraph,
+        graph: code_graph::v2::linker::concurrent_graph::ConcurrentGraph,
     ) -> Result<Vec<(String, RecordBatch)>, SinkError> {
         let data = convert_code_graph(&graph, &self.envelope, &self.specs)
             .map_err(|e| SinkError(format!("ClickHouse graph conversion: {e}")))?;

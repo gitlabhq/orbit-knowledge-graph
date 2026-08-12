@@ -87,10 +87,10 @@ impl LanguagePipeline for JsPipeline {
         let (mut graph, modules) = builder.into_parts();
         let graph_build_ms = t0.elapsed().as_secs_f64() * 1000.0 - parse_ms;
         if ctx.config.emit_file_inventory_graph {
-            graph.mark_parsed_only();
+            graph.parsed_only = true;
         }
         attach_resolution_edges(
-            &mut graph,
+            &graph,
             &resolved_files,
             &file_infos,
             &modules,
@@ -99,7 +99,7 @@ impl LanguagePipeline for JsPipeline {
             sentinel_handle,
             ctx,
         );
-        graph.finalize(tracer);
+        graph.finalize();
         let total_ms = t0.elapsed().as_secs_f64() * 1000.0;
         let resolve_ms = total_ms - parse_ms - graph_build_ms;
         let total_bytes: u64 = resolved_files
@@ -147,7 +147,7 @@ mod tests {
     impl GraphConverter for NoopConverter {
         fn convert(
             &self,
-            _graph: crate::v2::linker::CodeGraph,
+            _graph: crate::v2::linker::concurrent_graph::ConcurrentGraph,
         ) -> Result<Vec<(String, RecordBatch)>, crate::v2::SinkError> {
             Ok(Vec::new())
         }

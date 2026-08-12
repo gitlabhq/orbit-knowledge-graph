@@ -5,9 +5,9 @@ use crate::v2::dsl::types::{
     LanguageHooks, LoopRule, ReferenceRule, ScopeRule, binding, branch, loop_rule, reference,
     scope, scopes,
 };
+use crate::v2::linker::concurrent_graph::{ConcurrentGraph, NodeId};
 use crate::v2::linker::state::StringPool;
 use crate::v2::types::{BindingKind, DefKind, GraphImport, ImportBindingKind, ImportMode};
-use petgraph::graph::NodeIndex;
 use treesitter_visit::Axis::*;
 use treesitter_visit::Match::*;
 use treesitter_visit::extract::{field, no_extract, text};
@@ -16,7 +16,7 @@ use treesitter_visit::predicate::*;
 use crate::v2::linker::rules::{
     ImportStrategy, ImportedSymbolFallbackContext, ReceiverMode, ResolveStage, ResolverHooks,
 };
-use crate::v2::linker::{CodeGraph, HasRules, ResolutionRules};
+use crate::v2::linker::{HasRules, ResolutionRules};
 
 /// Methods that act as constructors — `Class.method(args)` returns a
 /// `Class` instance. Shared between `SsaConfig` (binding analysis) and
@@ -451,11 +451,11 @@ const RUBY_DSL_METHODS: &[&str] = &[
 /// Resolve a constant identifier as a class/module FQN for chain
 /// resolution. `Model.new.save!` needs `Model` to resolve to the
 /// `Model` class so the chain can look up `Model::save!`.
-fn ruby_resolve_ident_type(graph: &CodeGraph, name: &str) -> Option<String> {
+fn ruby_resolve_ident_type(graph: &ConcurrentGraph, name: &str) -> Option<String> {
     let nodes = graph.resolve_scope_nodes(name);
     for &node in &nodes {
-        if let Some(did) = graph.graph[node].def_id() {
-            let gdef = &graph.defs[did.0 as usize];
+        if let Some(did) = graph.node(node).def_id() {
+            let gdef = graph.def(did);
             if gdef.kind.is_type_container() {
                 return Some(graph.str(gdef.fqn).to_string());
             }
@@ -643,10 +643,10 @@ fn push_named_import(
 }
 
 fn ruby_imported_symbol_candidates(
-    graph: &CodeGraph,
-    import_nodes: &[NodeIndex],
+    graph: &ConcurrentGraph,
+    import_nodes: &[NodeId],
     ctx: ImportedSymbolFallbackContext<'_>,
-) -> Vec<NodeIndex> {
+) -> Vec<NodeId> {
     let Some(require_path) = ctx.chain.and_then(ruby_require_path_from_chain) else {
         return Vec::new();
     };
@@ -655,7 +655,7 @@ fn ruby_imported_symbol_candidates(
         .iter()
         .copied()
         .filter(|&import_node| {
-            let imp = graph.import(import_node);
+            let imp = graph.import_for_node(import_node);
             matches!(imp.import_type, "Require" | "RequireRelative")
                 && matches!(imp.binding_kind, ImportBindingKind::SideEffect)
                 && ruby_require_paths_match(graph.str(imp.path), &require_path)

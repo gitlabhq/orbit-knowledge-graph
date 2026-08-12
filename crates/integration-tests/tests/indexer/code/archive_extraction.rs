@@ -2,8 +2,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use code_graph::v2::config::{CodeFilter, FilterSkip, detect_language_from_path};
-use code_graph::v2::linker::CodeGraph;
-use code_graph::v2::linker::graph::GraphNode;
+use code_graph::v2::linker::concurrent_graph::ConcurrentGraph;
 use code_graph::v2::types::EdgeKind;
 use code_graph::v2::{FileInventoryEntry, GraphConverter, Pipeline, PipelineConfig, SinkError};
 use flate2::Compression;
@@ -36,11 +35,11 @@ fn build_archive(entries: &[Entry]) -> Vec<u8> {
 }
 
 struct CapturingConverter {
-    graphs: Mutex<Vec<CodeGraph>>,
+    graphs: Mutex<Vec<ConcurrentGraph>>,
 }
 
 struct CapturedPipelineRun {
-    graphs: Vec<CodeGraph>,
+    graphs: Vec<ConcurrentGraph>,
     files_discovered: usize,
     files_indexed: usize,
     files_parsed: usize,
@@ -49,7 +48,7 @@ struct CapturedPipelineRun {
 impl GraphConverter for CapturingConverter {
     fn convert(
         &self,
-        graph: CodeGraph,
+        graph: ConcurrentGraph,
     ) -> Result<Vec<(String, arrow::record_batch::RecordBatch)>, SinkError> {
         self.graphs.lock().unwrap().push(graph);
         Ok(Vec::new())
@@ -152,43 +151,40 @@ async fn run_pipeline(
     }
 }
 
-fn has_def(graphs: &[CodeGraph], file: &str, name: &str) -> bool {
+fn has_def(graphs: &[ConcurrentGraph], file: &str, name: &str) -> bool {
     graphs.iter().any(|g| {
-        g.graph.node_indices().any(|idx| {
-            if let GraphNode::Definition { file_path, id } = &g.graph[idx] {
-                file_path.ends_with(file) && g.str(g.defs[id.0 as usize].name) == name
-            } else {
-                false
-            }
-        })
+        g.iter_definitions()
+            .any(|(_, file_path, def)| file_path.ends_with(file) && g.str(def.name) == name)
     })
 }
 
-fn edge_count(graphs: &[CodeGraph], kind: EdgeKind) -> usize {
+fn edge_count(graphs: &[ConcurrentGraph], kind: EdgeKind) -> usize {
     graphs
         .iter()
         .map(|g| {
-            g.graph
-                .raw_edges()
-                .iter()
-                .filter(|e| e.weight.relationship.edge_kind == kind)
+            g.iter_edges()
+                .filter(|e| e.relationship.edge_kind == kind)
                 .count()
         })
         .sum()
 }
 
-fn file_language(graphs: &[CodeGraph], path: &str) -> Option<&'static str> {
+fn file_language(graphs: &[ConcurrentGraph], path: &str) -> Option<&'static str> {
     graphs
         .iter()
-        .flat_map(|g| g.files())
-        .find_map(|(_, file)| (file.path == path).then(|| file.language_name()))
+        .flat_map(|g| g.iter_files())
+        .find_map(|(_, file_path, _, _, lang, _, _)| {
+            (file_path == path).then(|| lang.map_or("unknown", |l| l.names()[0]))
+        })
 }
 
-fn file_reason(graphs: &[CodeGraph], path: &str) -> Option<String> {
+fn file_reason(graphs: &[ConcurrentGraph], path: &str) -> Option<String> {
     graphs
         .iter()
-        .flat_map(|g| g.files())
-        .find_map(|(_, file)| (file.path == path).then(|| file.reason.to_string()))
+        .flat_map(|g| g.iter_files())
+        .find_map(|(_, file_path, _, _, _, _, reason)| {
+            (file_path == path).then(|| reason.to_string())
+        })
 }
 
 #[tokio::test]

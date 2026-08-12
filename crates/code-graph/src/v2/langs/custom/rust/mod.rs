@@ -9,7 +9,6 @@ use cargo_util_schemas::manifest as cargo_manifest;
 use either::Either;
 use globset::{Glob, GlobMatcher};
 use ignore::WalkBuilder;
-use petgraph::graph::NodeIndex;
 use ra_ap_cfg::CfgAtom;
 use ra_ap_hir::{
     CallableKind, ChangeWithProcMacros, HasSource, InFile, ModuleDef, PathResolution, Semantics,
@@ -43,7 +42,7 @@ pub(super) use triomphe::Arc;
 use crate::v2::config::Language;
 use crate::v2::dsl::ssa::{BlockId, ResolvedSite, SsaEngine, SsaValue};
 use crate::v2::error::{AbortPhase, AnalyzerError, FileFault, FileSkip};
-use crate::v2::linker::{CodeGraph, GraphEdge};
+use crate::v2::linker::concurrent_graph::{ConcurrentGraph, Edge, NodeId};
 use crate::v2::sentinel;
 
 use crate::v2::inventory::FileInput;
@@ -140,7 +139,6 @@ impl LanguagePipeline for RustPipeline {
         btx: &BatchTx<'_>,
     ) -> Result<(), Vec<PipelineError>> {
         let root_path = ctx.root_path.as_str();
-        let tracer = &ctx.tracer;
         let t0 = std::time::Instant::now();
         let canonical_root = canonical_root_path(root_path);
         let root_path = canonical_root.as_str();
@@ -196,7 +194,7 @@ impl LanguagePipeline for RustPipeline {
         let mut graph = build_graph(root_path, &parsed, pool);
         let graph_build_ms = t0.elapsed().as_secs_f64() * 1000.0 - parse_ms;
         if ctx.config.emit_file_inventory_graph {
-            graph.mark_parsed_only();
+            graph.parsed_only = true;
         }
 
         // Edge resolution is sequential over all parsed files, so it
@@ -225,7 +223,7 @@ impl LanguagePipeline for RustPipeline {
                     });
                     break 'edge_resolve;
                 }
-                let Some(source_node) = graph.enclosing_definition_for_range(
+                let Some(source_node) = graph.enclosing_definition(
                     &edge.source_relative_path,
                     edge.source_start,
                     edge.source_end,
@@ -254,9 +252,9 @@ impl LanguagePipeline for RustPipeline {
             });
         }
         if !edge_timed_out {
-            add_unresolved_imported_call_edges(&mut graph, &parsed);
+            add_unresolved_imported_call_edges(&graph, &parsed);
         }
-        graph.finalize(tracer);
+        graph.finalize();
 
         let total_ms = t0.elapsed().as_secs_f64() * 1000.0;
         let resolve_ms = total_ms - parse_ms - graph_build_ms;
@@ -582,8 +580,8 @@ fn build_graph(
     root_path: &str,
     parsed: &[ParsedRustFile],
     pool: crate::v2::linker::state::StringPool,
-) -> CodeGraph {
-    let mut graph = CodeGraph::new_with_root(root_path.to_string());
+) -> ConcurrentGraph {
+    let mut graph = ConcurrentGraph::new(root_path.to_string());
     graph.strings = pool;
 
     for file in parsed.iter() {
@@ -595,23 +593,24 @@ fn build_graph(
         graph.add_file(
             &file.relative_path,
             extension,
-            Language::Rust,
+            Some(Language::Rust),
             file.file_size,
             file.definitions.clone(),
             file.imports.clone(),
+            crate::v2::error::FileReason::None,
         );
     }
 
     graph
 }
 
-fn add_unresolved_imported_call_edges(graph: &mut CodeGraph, parsed: &[ParsedRustFile]) {
+fn add_unresolved_imported_call_edges(graph: &ConcurrentGraph, parsed: &[ParsedRustFile]) {
     let import_lookup = RustImportedSymbolLookup::from_graph(graph);
     let mut seen_edges = HashSet::new();
 
     for file in parsed.iter() {
         for call in &file.unresolved_imported_calls {
-            let Some(source_node) = graph.enclosing_definition_for_range(
+            let Some(source_node) = graph.enclosing_definition(
                 &call.source_relative_path,
                 call.source_start,
                 call.source_end,
@@ -629,19 +628,17 @@ fn add_unresolved_imported_call_edges(graph: &mut CodeGraph, parsed: &[ParsedRus
                 continue;
             }
 
-            graph.graph.add_edge(
-                source_node,
-                target_node,
-                GraphEdge {
-                    relationship: Relationship {
-                        edge_kind: EdgeKind::Calls,
-                        source_node: NodeKind::Definition,
-                        target_node: NodeKind::ImportedSymbol,
-                        source_def_kind: Some(graph.def(source_node).kind),
-                        target_def_kind: None,
-                    },
+            graph.push_edge(Edge {
+                source: source_node,
+                target: target_node,
+                relationship: Relationship {
+                    edge_kind: EdgeKind::Calls,
+                    source_node: NodeKind::Definition,
+                    target_node: NodeKind::ImportedSymbol,
+                    source_def_kind: graph.try_def_for_node(source_node).map(|d| d.kind),
+                    target_def_kind: None,
                 },
-            );
+            });
         }
     }
 }
@@ -652,25 +649,25 @@ struct RustImportedSymbolLookup {
 }
 
 struct RustImportedSymbolEntry {
-    node: NodeIndex,
-    enclosing_definition: Option<NodeIndex>,
+    node: NodeId,
+    enclosing_definition: Option<NodeId>,
 }
 
 impl RustImportedSymbolLookup {
-    fn from_graph(graph: &CodeGraph) -> Self {
+    fn from_graph(graph: &ConcurrentGraph) -> Self {
         let mut lookup = Self::default();
-        for (node, file_path, import) in graph.imports_iter() {
+        for (node, file_path, import) in graph.iter_imports() {
             let Some(name) = rust_external_import_effective_name(graph, import) else {
                 continue;
             };
-            let enclosing_definition = graph.enclosing_definition_for_range(
-                file_path.as_ref(),
+            let enclosing_definition = graph.enclosing_definition(
+                file_path,
                 import.range.byte_offset.0 as u32,
                 import.range.byte_offset.1 as u32,
             );
             lookup
                 .imports_by_file_and_name
-                .entry((file_path.as_ref().to_string(), name))
+                .entry((file_path.to_string(), name))
                 .or_default()
                 .push(RustImportedSymbolEntry {
                     node,
@@ -684,8 +681,8 @@ impl RustImportedSymbolLookup {
         &self,
         file_path: &str,
         name: &str,
-        source_node: NodeIndex,
-    ) -> Option<NodeIndex> {
+        source_node: NodeId,
+    ) -> Option<NodeId> {
         let entries = self
             .imports_by_file_and_name
             .get(&(file_path.to_string(), name.to_string()))?
@@ -713,7 +710,7 @@ impl RustImportedSymbolLookup {
 }
 
 fn rust_external_import_effective_name(
-    graph: &CodeGraph,
+    graph: &ConcurrentGraph,
     import: &crate::v2::linker::GraphImport,
 ) -> Option<String> {
     if import.is_type_only

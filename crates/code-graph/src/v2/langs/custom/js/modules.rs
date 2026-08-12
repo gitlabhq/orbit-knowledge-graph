@@ -3,12 +3,11 @@
 //! attach import edges without guessing at file-level fallbacks.
 
 use crate::v2::config::Language;
-use crate::v2::linker::CodeGraph;
+use crate::v2::linker::concurrent_graph::{ConcurrentGraph, NodeId};
 use crate::v2::linker::state::StringPool;
 use crate::v2::types::{
     DefKind, Fqn, GraphDef, GraphDefMeta, GraphImport, ImportMode, Position, Range,
 };
-use petgraph::graph::NodeIndex;
 use rustc_hash::FxHashMap;
 
 use super::types::ExportedBinding;
@@ -73,17 +72,17 @@ pub struct JsPhase1File {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JsPhase1FileInfo {
-    pub file_node: NodeIndex,
-    pub module_node: NodeIndex,
-    pub local_def_nodes: Vec<NodeIndex>,
-    pub import_nodes: Vec<NodeIndex>,
+    pub file_node: NodeId,
+    pub module_node: NodeId,
+    pub local_def_nodes: Vec<NodeId>,
+    pub import_nodes: Vec<NodeId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum JsModuleBindingTarget {
     LocalDefinition {
         fqn: String,
-        node: NodeIndex,
+        node: NodeId,
     },
     Reexport {
         specifier: String,
@@ -98,7 +97,7 @@ pub enum JsModuleBindingTarget {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JsModuleBinding {
     pub export_name: JsExportName,
-    pub export_node: NodeIndex,
+    pub export_node: NodeId,
     pub binding: ExportedBinding,
     pub target: JsModuleBindingTarget,
 }
@@ -106,8 +105,8 @@ pub struct JsModuleBinding {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JsModuleRecord {
     pub file_path: String,
-    pub file_node: NodeIndex,
-    pub module_node: NodeIndex,
+    pub file_node: NodeId,
+    pub module_node: NodeId,
     pub bindings: FxHashMap<JsExportName, JsModuleBinding>,
     pub star_reexports: Vec<JsStarReexport>,
 }
@@ -133,14 +132,14 @@ fn normalize_module_key(path: &str) -> String {
 }
 
 pub struct JsModuleGraphBuilder {
-    graph: CodeGraph,
+    graph: ConcurrentGraph,
     modules: JsModuleIndex,
 }
 
 impl JsModuleGraphBuilder {
     pub fn new(root_path: String) -> Self {
         Self {
-            graph: CodeGraph::new_with_root(root_path),
+            graph: ConcurrentGraph::new(root_path),
             modules: JsModuleIndex::default(),
         }
     }
@@ -199,10 +198,11 @@ impl JsModuleGraphBuilder {
         let (file_node, def_nodes, import_nodes) = self.graph.add_file(
             &file.path,
             &file.extension,
-            file.language,
+            Some(file.language),
             file.size,
             graph_defs,
             file.imports,
+            crate::v2::error::FileReason::None,
         );
 
         let module_node = def_nodes[0];
@@ -281,7 +281,7 @@ impl JsModuleGraphBuilder {
         }
     }
 
-    pub fn into_parts(self) -> (CodeGraph, JsModuleIndex) {
+    pub fn into_parts(self) -> (ConcurrentGraph, JsModuleIndex) {
         (self.graph, self.modules)
     }
 }
@@ -434,10 +434,13 @@ mod tests {
         assert_eq!(named.export_node, info.local_def_nodes[0]);
         assert_eq!(primary.export_node, info.local_def_nodes[0]);
 
-        let exported = graph.def(named.export_node);
+        let exported = graph.try_def_for_node(named.export_node).unwrap();
         assert_eq!(graph.str(exported.name), "normalize");
         assert_eq!(exported.definition_type, "Function");
-        assert_eq!(graph.def(primary.export_node).fqn, exported.fqn);
+        assert_eq!(
+            graph.try_def_for_node(primary.export_node).unwrap().fqn,
+            exported.fqn
+        );
     }
 
     #[test]

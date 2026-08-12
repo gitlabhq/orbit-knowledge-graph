@@ -9,5 +9,5 @@ pub use fqn::Fqn;
 pub use node::{BindingKind, DefKind, ExpressionStep, ImportBindingKind, ImportMode};
 pub use range::{Position, Range};
 
-pub use crate::v2::linker::graph::{DefId, GraphNode, ImportId};
+pub use crate::v2::linker::concurrent_graph::{DefId, ImportId, NodeId};
 pub use crate::v2::linker::state::{GraphDef, GraphDefMeta, GraphImport};

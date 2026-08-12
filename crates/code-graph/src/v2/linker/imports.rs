@@ -1,10 +1,9 @@
-//! All lookups go through `CodeGraph.indexes` (VerifiedMap).
-//! String access goes through `CodeGraph.str(id)` (StringPool).
+//! All lookups go through `ConcurrentGraph` indexes (DashMap).
+//! String access goes through `ConcurrentGraph.str(id)` (StringPool).
 
-use petgraph::graph::NodeIndex;
 use rustc_hash::FxHashMap;
 
-use super::graph::CodeGraph;
+use super::concurrent_graph::{ConcurrentGraph, NodeId};
 use super::rules::ImportStrategy;
 use super::state::ScratchBuf;
 use crate::v2::types::ImportBindingKind;
@@ -51,32 +50,24 @@ pub(crate) fn dir_of(path: &str) -> &str {
 }
 
 pub(crate) struct ImportResolver<'a> {
-    pub graph: &'a CodeGraph,
-    pub file_node: NodeIndex,
-    pub import_map: &'a FxHashMap<String, Vec<NodeIndex>>,
+    pub graph: &'a ConcurrentGraph,
+    pub file_node: NodeId,
+    pub import_map: &'a FxHashMap<String, Vec<NodeId>>,
     pub scratch: &'a mut ScratchBuf,
     pub settings: &'a ResolveSettings,
+    pub sep: &'static str,
     pub include_index: Option<&'a super::graph::IncludeIndex>,
     pub include_reachable: &'a mut Option<rustc_hash::FxHashSet<String>>,
     pub reexport_index: Option<&'a super::graph::ReexportIndex>,
 }
 
 impl<'a> ImportResolver<'a> {
-    /// FQN separator. Returns `&'static str` so it doesn't borrow self.
     #[inline]
     fn sep(&self) -> &'static str {
-        self.graph
-            .rules
-            .as_ref()
-            .map(|r| r.fqn_separator)
-            .unwrap_or(".")
+        self.sep
     }
 
-    pub fn apply_strategies(
-        &mut self,
-        strategies: &[ImportStrategy],
-        name: &str,
-    ) -> Vec<NodeIndex> {
+    pub fn apply_strategies(&mut self, strategies: &[ImportStrategy], name: &str) -> Vec<NodeId> {
         for strategy in strategies {
             let candidates = match strategy {
                 ImportStrategy::ScopeFqnWalk => self.scope_fqn_walk(name),
@@ -95,13 +86,12 @@ impl<'a> ImportResolver<'a> {
         vec![]
     }
 
-    pub fn resolve_import(&mut self, import_idx: NodeIndex) -> Vec<NodeIndex> {
-        let import = self.graph.import(import_idx);
+    pub fn resolve_import(&mut self, import_idx: NodeId) -> Vec<NodeId> {
+        let import = self.graph.import_for_node(import_idx);
         if matches!(import.binding_kind, ImportBindingKind::SideEffect) || import.wildcard {
             return vec![];
         }
 
-        // Rebuild the imported symbol's FQN from `name`; the alias is only the local handle.
         let symbol_name = import
             .name
             .or(import.alias)
@@ -116,9 +106,7 @@ impl<'a> ImportResolver<'a> {
             }
             let by_path = self
                 .graph
-                .indexes
-                .by_fqn
-                .lookup(imp_path, |idx| self.graph.def_fqn(idx) == imp_path);
+                .lookup_fqn(imp_path, |idx| self.graph.def_fqn(idx) == imp_path);
             return by_path.to_vec();
         }
 
@@ -132,9 +120,7 @@ impl<'a> ImportResolver<'a> {
         };
         let by_fqn = self
             .graph
-            .indexes
-            .by_fqn
-            .lookup(key, |idx| self.graph.def_fqn(idx) == key);
+            .lookup_fqn(key, |idx| self.graph.def_fqn(idx) == key);
         if !by_fqn.is_empty() {
             return by_fqn.to_vec();
         }
@@ -142,9 +128,7 @@ impl<'a> ImportResolver<'a> {
         if !imp_path.is_empty() {
             let by_path = self
                 .graph
-                .indexes
-                .by_fqn
-                .lookup(imp_path, |idx| self.graph.def_fqn(idx) == imp_path);
+                .lookup_fqn(imp_path, |idx| self.graph.def_fqn(idx) == imp_path);
             if !by_path.is_empty() {
                 return by_path.to_vec();
             }
@@ -168,12 +152,12 @@ impl<'a> ImportResolver<'a> {
         reexport: &super::graph::ReexportIndex,
         module: &str,
         name: &str,
-    ) -> Vec<NodeIndex> {
+    ) -> Vec<NodeId> {
         const MAX_REEXPORT_DEPTH: usize = 16;
         let sep = self.sep();
         let mut visited: rustc_hash::FxHashSet<(String, String)> = rustc_hash::FxHashSet::default();
         let mut stack = vec![(module.to_string(), name.to_string(), 0usize)];
-        let mut out: Vec<NodeIndex> = Vec::new();
+        let mut out: Vec<NodeId> = Vec::new();
         while let Some((module, name, depth)) = stack.pop() {
             if depth > MAX_REEXPORT_DEPTH || !visited.insert((module.clone(), name.clone())) {
                 continue;
@@ -192,9 +176,7 @@ impl<'a> ImportResolver<'a> {
                 let key = format!("{m}{sep}{n}");
                 let found = self
                     .graph
-                    .indexes
-                    .by_fqn
-                    .lookup(&key, |idx| self.graph.def_fqn(idx) == key);
+                    .lookup_fqn(&key, |idx| self.graph.def_fqn(idx) == key);
                 if found.is_empty() {
                     stack.push((m, n, depth + 1));
                 } else {
@@ -210,32 +192,31 @@ impl<'a> ImportResolver<'a> {
         if out.len() == 1 { out } else { Vec::new() }
     }
 
-    fn scope_fqn_walk(&mut self, name: &str) -> Vec<NodeIndex> {
+    fn scope_fqn_walk(&mut self, name: &str) -> Vec<NodeId> {
         let sep = self.sep();
-        let def_ids: Vec<_> = self
-            .graph
-            .graph
-            .neighbors_directed(self.file_node, petgraph::Direction::Outgoing)
-            .filter_map(|idx| self.graph.graph[idx].def_id())
+        let empty = Vec::new();
+        let def_nodes = self.graph.file_defs.get(&self.file_node);
+        let def_nodes = def_nodes.as_deref().unwrap_or(&empty);
+        let def_ids: Vec<_> = def_nodes
+            .iter()
+            .filter_map(|&node| self.graph.node(node).def_id())
             .collect();
 
         for &did in &def_ids {
-            let def = &self.graph.defs[did.0 as usize];
+            let def = self.graph.def(did);
             if def.is_top_level {
                 let fqn = self.graph.str(def.fqn);
                 let key = self.scratch.set_fmt(format_args!("{fqn}{sep}{name}"));
                 let matches = self
                     .graph
-                    .indexes
-                    .by_fqn
-                    .lookup(key, |idx| self.graph.def_fqn(idx) == key);
+                    .lookup_fqn(key, |idx| self.graph.def_fqn(idx) == key);
                 if !matches.is_empty() {
                     return matches.to_vec();
                 }
             }
         }
         for &did in &def_ids {
-            let def = &self.graph.defs[did.0 as usize];
+            let def = self.graph.def(did);
             let fqn_str = self.graph.str(def.fqn);
             for prefix in crate::utils::fqn_scopes(fqn_str, sep) {
                 self.scratch.clear();
@@ -245,9 +226,7 @@ impl<'a> ImportResolver<'a> {
                 let key = self.scratch.as_str();
                 let matches = self
                     .graph
-                    .indexes
-                    .by_fqn
-                    .lookup(key, |idx| self.graph.def_fqn(idx) == key);
+                    .lookup_fqn(key, |idx| self.graph.def_fqn(idx) == key);
                 if !matches.is_empty() {
                     return matches.to_vec();
                 }
@@ -256,59 +235,53 @@ impl<'a> ImportResolver<'a> {
         vec![]
     }
 
-    fn explicit_import(&self, name: &str) -> Vec<NodeIndex> {
+    fn explicit_import(&self, name: &str) -> Vec<NodeId> {
         self.import_map.get(name).cloned().unwrap_or_default()
     }
 
-    fn wildcard_import(&mut self, name: &str) -> Vec<NodeIndex> {
+    fn wildcard_import(&mut self, name: &str) -> Vec<NodeId> {
         let sep = self.sep();
-        for neighbor in self
-            .graph
-            .graph
-            .neighbors_directed(self.file_node, petgraph::Direction::Outgoing)
-        {
-            if let Some(import_id) = self.graph.graph[neighbor].import_id()
-                && let imp = &self.graph.imports[import_id.0 as usize]
-                && imp.wildcard
-            {
-                let path = self.graph.str(imp.path);
-                let key = self.scratch.set_fmt(format_args!("{path}{sep}{name}"));
-                let matches = self
-                    .graph
-                    .indexes
-                    .by_fqn
-                    .lookup(key, |idx| self.graph.def_fqn(idx) == key);
-                if !matches.is_empty() {
-                    return matches.to_vec();
+        let empty_imports = Vec::new();
+        let import_nodes = self.graph.file_imports.get(&self.file_node);
+        let import_nodes = import_nodes.as_deref().unwrap_or(&empty_imports);
+        for &neighbor in import_nodes {
+            if let Some(import_id) = self.graph.node(neighbor).import_id() {
+                let imp = self.graph.import(import_id);
+                if imp.wildcard {
+                    let path = self.graph.str(imp.path);
+                    let key = self.scratch.set_fmt(format_args!("{path}{sep}{name}"));
+                    let matches = self
+                        .graph
+                        .lookup_fqn(key, |idx| self.graph.def_fqn(idx) == key);
+                    if !matches.is_empty() {
+                        return matches.to_vec();
+                    }
                 }
             }
         }
         vec![]
     }
 
-    fn same_package(&mut self, name: &str) -> Vec<NodeIndex> {
+    fn same_package(&mut self, name: &str) -> Vec<NodeId> {
         let sep = self.sep();
-        for neighbor in self
-            .graph
-            .graph
-            .neighbors_directed(self.file_node, petgraph::Direction::Outgoing)
-        {
-            if let Some(def_id) = self.graph.graph[neighbor].def_id()
-                && let def = &self.graph.defs[def_id.0 as usize]
-                && def.is_top_level
-            {
-                let fqn_str = self.graph.str(def.fqn);
-                if let Some(sep_pos) = fqn_str.rfind(sep) {
-                    let key = self
-                        .scratch
-                        .set_fmt(format_args!("{}{sep}{name}", &fqn_str[..sep_pos]));
-                    let matches = self
-                        .graph
-                        .indexes
-                        .by_fqn
-                        .lookup(key, |idx| self.graph.def_fqn(idx) == key);
-                    if !matches.is_empty() {
-                        return matches.to_vec();
+        let empty = Vec::new();
+        let def_nodes = self.graph.file_defs.get(&self.file_node);
+        let def_nodes = def_nodes.as_deref().unwrap_or(&empty);
+        for &neighbor in def_nodes {
+            if let Some(def_id) = self.graph.node(neighbor).def_id() {
+                let def = self.graph.def(def_id);
+                if def.is_top_level {
+                    let fqn_str = self.graph.str(def.fqn);
+                    if let Some(sep_pos) = fqn_str.rfind(sep) {
+                        let key = self
+                            .scratch
+                            .set_fmt(format_args!("{}{sep}{name}", &fqn_str[..sep_pos]));
+                        let matches = self
+                            .graph
+                            .lookup_fqn(key, |idx| self.graph.def_fqn(idx) == key);
+                        if !matches.is_empty() {
+                            return matches.to_vec();
+                        }
                     }
                 }
             }
@@ -319,16 +292,14 @@ impl<'a> ImportResolver<'a> {
     /// Resolve a bare name against top-level definitions across all files.
     /// Returns empty if the name is too ambiguous (more than `max_results`
     /// matches) to avoid O(candidates) fan-out on common names.
-    pub fn global_name(&self, name: &str) -> Vec<NodeIndex> {
+    pub fn global_name(&self, name: &str) -> Vec<NodeId> {
         let max_results = self.settings.global_name_max_results;
         let results = self
             .graph
-            .indexes
-            .by_name
-            .lookup(name, |idx| {
+            .lookup_name(name, |idx| {
                 self.graph.def_name(idx) == name
-                    && self.graph.graph[idx].def_id().is_some_and(|d| {
-                        let def = &self.graph.defs[d.0 as usize];
+                    && self.graph.node(idx).def_id().is_some_and(|d| {
+                        let def = self.graph.def(d);
                         if !def.is_top_level {
                             return false;
                         }
@@ -349,7 +320,7 @@ impl<'a> ImportResolver<'a> {
     /// BFS through the include DAG: starting from this file's includes,
     /// recursively follow each included header's includes. For each
     /// reachable header, also search the paired source file (.h -> .c/.cpp).
-    fn include_graph(&mut self, name: &str) -> Vec<NodeIndex> {
+    fn include_graph(&mut self, name: &str) -> Vec<NodeId> {
         let Some(idx) = self.include_index else {
             return Vec::new();
         };
@@ -357,7 +328,7 @@ impl<'a> ImportResolver<'a> {
         if self.include_reachable.is_none() {
             const SOURCE_EXTENSIONS: &[&str] = &[".c", ".cc", ".cpp", ".cxx", ".m"];
             const MAX_REACHABLE: usize = 512;
-            let self_path = self.graph.graph[self.file_node].path().to_string();
+            let self_path = self.graph.node_path(self.file_node).to_string();
             let mut visited: rustc_hash::FxHashSet<String> = rustc_hash::FxHashSet::default();
             visited.insert(self_path.clone());
             let mut queue = std::collections::VecDeque::new();
@@ -409,22 +380,18 @@ impl<'a> ImportResolver<'a> {
 
         let reachable = self.include_reachable.as_ref().unwrap();
         self.graph
-            .indexes
-            .by_name
-            .lookup(name, |i| self.graph.def_name(i) == name)
+            .lookup_name(name, |i| self.graph.def_name(i) == name)
             .into_iter()
-            .filter(|&i| reachable.contains(self.graph.graph[i].path()))
+            .filter(|&i| reachable.contains(self.graph.node_path(i)))
             .collect()
     }
 
-    fn same_file(&self, name: &str) -> Vec<NodeIndex> {
-        let file_path = self.graph.graph[self.file_node].path();
+    fn same_file(&self, name: &str) -> Vec<NodeId> {
+        let file_path = self.graph.node_path(self.file_node);
 
-        let by_fqn: Vec<NodeIndex> = self
+        let by_fqn: Vec<NodeId> = self
             .graph
-            .indexes
-            .by_fqn
-            .lookup(name, |idx| self.graph.def_fqn(idx) == name)
+            .lookup_fqn(name, |idx| self.graph.def_fqn(idx) == name)
             .into_iter()
             .filter(|&idx| self.graph.def_in_file(idx, file_path))
             .collect();
@@ -433,9 +400,7 @@ impl<'a> ImportResolver<'a> {
         }
 
         self.graph
-            .indexes
-            .by_name
-            .lookup(name, |idx| self.graph.def_name(idx) == name)
+            .lookup_name(name, |idx| self.graph.def_name(idx) == name)
             .into_iter()
             .filter(|&idx| self.graph.def_in_file(idx, file_path))
             .collect()
