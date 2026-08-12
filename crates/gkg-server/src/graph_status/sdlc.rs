@@ -206,16 +206,24 @@ mod tests {
         Arc::new(Ontology::load_embedded().expect("ontology must load"))
     }
 
-    fn completed_progress(error: Option<&str>) -> IndexingProgress {
-        let started = Utc::now() - Duration::seconds(30);
+    fn progress(
+        started_ago_s: i64,
+        completed_ago_s: Option<i64>,
+        error: Option<&str>,
+    ) -> IndexingProgress {
+        let now = Utc::now();
         IndexingProgress {
-            last_started_at: started,
-            last_completed_at: Some(started + Duration::seconds(5)),
-            last_duration_ms: Some(5000),
+            last_started_at: now - Duration::seconds(started_ago_s),
+            last_completed_at: completed_ago_s.map(|s| now - Duration::seconds(s)),
+            last_duration_ms: None,
             last_error: error.map(String::from),
             last_rows_read: None,
             last_rows_written: None,
         }
+    }
+
+    fn completed_progress(error: Option<&str>) -> IndexingProgress {
+        progress(30, Some(25), error)
     }
 
     fn reads(
@@ -239,85 +247,28 @@ mod tests {
     }
 
     #[test]
-    fn derive_state_backfilling_when_started_but_not_completed() {
-        let progress = IndexingProgress {
-            last_started_at: Utc::now(),
-            last_completed_at: None,
-            last_duration_ms: None,
-            last_error: None,
-            last_rows_read: None,
-            last_rows_written: None,
-        };
-        assert_eq!(derive_state(&progress), IndexingState::Backfilling);
-    }
-
-    #[test]
-    fn derive_state_indexed_when_completed_successfully() {
-        let started = Utc::now();
-        let progress = IndexingProgress {
-            last_started_at: started,
-            last_completed_at: Some(started + Duration::seconds(5)),
-            last_duration_ms: Some(5000),
-            last_error: None,
-            last_rows_read: None,
-            last_rows_written: None,
-        };
-        assert_eq!(derive_state(&progress), IndexingState::Indexed);
-    }
-
-    #[test]
-    fn derive_state_indexed_when_started_equals_completed() {
-        let now = Utc::now();
-        let progress = IndexingProgress {
-            last_started_at: now,
-            last_completed_at: Some(now),
-            last_duration_ms: Some(0),
-            last_error: None,
-            last_rows_read: None,
-            last_rows_written: None,
-        };
-        assert_eq!(derive_state(&progress), IndexingState::Indexed);
-    }
-
-    #[test]
-    fn derive_state_error_when_completed_with_error() {
-        let started = Utc::now();
-        let progress = IndexingProgress {
-            last_started_at: started,
-            last_completed_at: Some(started + Duration::seconds(1)),
-            last_duration_ms: Some(1000),
-            last_error: Some("deadline exceeded".to_string()),
-            last_rows_read: None,
-            last_rows_written: None,
-        };
-        assert_eq!(derive_state(&progress), IndexingState::Error);
-    }
-
-    #[test]
-    fn derive_state_backfilling_when_error_but_not_completed() {
-        let progress = IndexingProgress {
-            last_started_at: Utc::now(),
-            last_completed_at: None,
-            last_duration_ms: None,
-            last_error: Some("connection reset".to_string()),
-            last_rows_read: None,
-            last_rows_written: None,
-        };
-        assert_eq!(derive_state(&progress), IndexingState::Backfilling);
-    }
-
-    #[test]
-    fn derive_state_indexing_when_started_after_completion() {
-        let completed = Utc::now() - Duration::seconds(60);
-        let progress = IndexingProgress {
-            last_started_at: Utc::now(),
-            last_completed_at: Some(completed),
-            last_duration_ms: Some(5000),
-            last_error: None,
-            last_rows_read: None,
-            last_rows_written: None,
-        };
-        assert_eq!(derive_state(&progress), IndexingState::Indexing);
+    fn derive_state_maps_progress_shape_to_state() {
+        let cases = [
+            (progress(0, None, None), IndexingState::Backfilling),
+            (progress(30, Some(25), None), IndexingState::Indexed),
+            (progress(0, Some(0), None), IndexingState::Indexed),
+            (
+                progress(30, Some(29), Some("deadline exceeded")),
+                IndexingState::Error,
+            ),
+            (
+                progress(0, None, Some("connection reset")),
+                IndexingState::Backfilling,
+            ),
+            (progress(0, Some(60), None), IndexingState::Indexing),
+        ];
+        for (i, (input, expected)) in cases.iter().enumerate() {
+            assert_eq!(
+                derive_state(input),
+                *expected,
+                "case {i} expected {expected:?}"
+            );
+        }
     }
 
     #[test]
@@ -349,18 +300,10 @@ mod tests {
 
     #[test]
     fn aggregate_error_wins_over_indexed_and_indexing() {
-        let in_flight = IndexingProgress {
-            last_started_at: Utc::now(),
-            last_completed_at: Some(Utc::now() - Duration::seconds(60)),
-            last_duration_ms: Some(5000),
-            last_error: None,
-            last_rows_read: None,
-            last_rows_written: None,
-        };
         let r = reads(
             vec![
                 ("MergeRequest", Some(completed_progress(None))),
-                ("Issue", Some(in_flight)),
+                ("Issue", Some(progress(0, Some(60), None))),
                 ("Project", Some(completed_progress(Some("scan failure")))),
             ],
             None,
@@ -375,17 +318,9 @@ mod tests {
 
     #[test]
     fn aggregate_legacy_folds_into_worst_state() {
-        let legacy = IndexingProgress {
-            last_started_at: Utc::now(),
-            last_completed_at: None,
-            last_duration_ms: None,
-            last_error: None,
-            last_rows_read: None,
-            last_rows_written: None,
-        };
         let r = reads(
             vec![("MergeRequest", Some(completed_progress(None)))],
-            Some(legacy),
+            Some(progress(0, None, None)),
         );
         assert_eq!(
             aggregate_status(&r).state,
@@ -463,11 +398,11 @@ mod tests {
 
     #[test]
     fn indexing_status_from_progress_carries_rows() {
-        let mut progress = completed_progress(None);
-        progress.last_rows_read = Some(307);
-        progress.last_rows_written = Some(465);
+        let mut with_rows = completed_progress(None);
+        with_rows.last_rows_read = Some(307);
+        with_rows.last_rows_written = Some(465);
 
-        let status = indexing_status_from_progress(IndexingState::Indexed, &progress);
+        let status = indexing_status_from_progress(IndexingState::Indexed, &with_rows);
 
         assert_eq!(status.last_rows_read, Some(307));
         assert_eq!(status.last_rows_written, Some(465));
