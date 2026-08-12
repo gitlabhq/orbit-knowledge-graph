@@ -1,6 +1,6 @@
-use query_engine::compiler::{Expr, JoinType, Node, Query, SelectExpr, TableRef};
+use query_engine::compiler::{Expr, Node, Query, SelectExpr, TableRef};
 
-use super::input::{GraphStatusInput, NodeTable, ProjectTables};
+use super::input::{GraphStatusInput, NodeTable};
 
 pub fn lower_entity_counts(input: &GraphStatusInput) -> Node {
     let mut queries = input
@@ -12,97 +12,6 @@ pub fn lower_entity_counts(input: &GraphStatusInput) -> Node {
     first.union_all = queries.collect();
 
     Node::Query(Box::new(first))
-}
-
-pub fn lower_projects(tables: &ProjectTables, traversal_path: &str) -> Node {
-    let total_known = build_total_known_projects_query(&tables.project, traversal_path);
-    let mut indexed =
-        build_indexed_projects_query(&tables.project, &tables.code_checkpoint, traversal_path);
-
-    indexed.union_all = vec![total_known];
-
-    Node::Query(Box::new(indexed))
-}
-
-fn build_total_known_projects_query(project_table: &str, traversal_path: &str) -> Query {
-    let alias = "p";
-
-    let select = vec![
-        SelectExpr::new(Expr::string("total_known"), "metric"),
-        SelectExpr::new(Expr::func("uniqExact", vec![Expr::col(alias, "id")]), "cnt"),
-    ];
-
-    let from = TableRef::scan_final(project_table, alias);
-
-    let where_clause = live_project_scope_filter(alias, traversal_path);
-
-    Query {
-        select,
-        from,
-        where_clause: Some(where_clause),
-        ..Default::default()
-    }
-}
-
-fn build_indexed_projects_query(
-    project_table: &str,
-    code_checkpoint_table: &str,
-    traversal_path: &str,
-) -> Query {
-    let checkpoint_alias = "c";
-    let project_alias = "p";
-
-    let select = vec![
-        SelectExpr::new(Expr::string("indexed"), "metric"),
-        SelectExpr::new(
-            Expr::func("uniqExact", vec![Expr::col(checkpoint_alias, "project_id")]),
-            "cnt",
-        ),
-    ];
-
-    let from = TableRef::join(
-        JoinType::Inner,
-        TableRef::scan_final(code_checkpoint_table, checkpoint_alias),
-        TableRef::scan_final(project_table, project_alias),
-        Expr::eq(
-            Expr::col(checkpoint_alias, "project_id"),
-            Expr::col(project_alias, "id"),
-        ),
-    );
-
-    let where_clause = Expr::and(
-        live_project_scope_filter(project_alias, traversal_path),
-        Expr::and(
-            Expr::eq(Expr::col(checkpoint_alias, "_deleted"), Expr::int(0)),
-            Expr::func(
-                "startsWith",
-                vec![
-                    Expr::col(checkpoint_alias, "traversal_path"),
-                    Expr::string(traversal_path),
-                ],
-            ),
-        ),
-    );
-
-    Query {
-        select,
-        from,
-        where_clause: Some(where_clause),
-        ..Default::default()
-    }
-}
-
-fn live_project_scope_filter(alias: &str, traversal_path: &str) -> Expr {
-    Expr::and(
-        Expr::eq(Expr::col(alias, "_deleted"), Expr::int(0)),
-        Expr::func(
-            "startsWith",
-            vec![
-                Expr::col(alias, "traversal_path"),
-                Expr::string(traversal_path),
-            ],
-        ),
-    )
 }
 
 fn build_node_query(node: &NodeTable, traversal_path: &str) -> Query {
@@ -151,13 +60,6 @@ mod tests {
 
     use super::*;
 
-    fn test_tables() -> ProjectTables {
-        ProjectTables {
-            project: "v1_gl_project".to_string(),
-            code_checkpoint: "v1_code_indexing_checkpoint".to_string(),
-        }
-    }
-
     fn test_input() -> GraphStatusInput {
         GraphStatusInput {
             traversal_path: "1/2/".to_string(),
@@ -179,7 +81,6 @@ mod tests {
                     table: "v1_gl_definition".to_string(),
                 },
             ],
-            project_tables: test_tables(),
         }
     }
 
@@ -277,69 +178,6 @@ mod tests {
         assert!(
             !result.sql.contains("v1_gl_project AS d FINAL"),
             "SQL: {}",
-            result.sql
-        );
-    }
-
-    #[test]
-    fn projects_query_includes_both_tables() {
-        let tables = test_tables();
-        let ast = lower_projects(&tables, "1/2/");
-        let result = codegen(&ast, ResultContext::new(), QueryConfig::default()).unwrap();
-
-        assert!(result.sql.contains(&tables.project), "SQL: {}", result.sql);
-        assert!(
-            result.sql.contains(&tables.code_checkpoint),
-            "SQL: {}",
-            result.sql
-        );
-    }
-
-    #[test]
-    fn projects_query_joins_checkpoints_to_live_projects() {
-        let ast = lower_projects(&test_tables(), "1/2/");
-        let result = codegen(&ast, ResultContext::new(), QueryConfig::default()).unwrap();
-
-        assert!(result.sql.contains("INNER JOIN"), "SQL: {}", result.sql);
-        assert!(
-            result.sql.contains("c.project_id = p.id"),
-            "SQL: {}",
-            result.sql
-        );
-        assert!(
-            result.sql.contains("startsWith(p.traversal_path"),
-            "SQL: {}",
-            result.sql
-        );
-        assert!(
-            result.sql.contains("startsWith(c.traversal_path"),
-            "SQL: {}",
-            result.sql
-        );
-    }
-
-    #[test]
-    fn projects_query_uses_uniq() {
-        let ast = lower_projects(&test_tables(), "1/2/");
-        let result = codegen(&ast, ResultContext::new(), QueryConfig::default()).unwrap();
-
-        assert_eq!(
-            result.sql.matches("uniqExact(").count(),
-            2,
-            "Should have two uniqExact() calls. SQL: {}",
-            result.sql
-        );
-    }
-
-    #[test]
-    fn projects_query_filters_deleted_on_both_tables() {
-        let ast = lower_projects(&test_tables(), "1/2/");
-        let result = codegen(&ast, ResultContext::new(), QueryConfig::default()).unwrap();
-
-        assert_eq!(
-            result.sql.matches("_deleted").count(),
-            3,
-            "Project coverage should filter deleted checkpoint and project rows. SQL: {}",
             result.sql
         );
     }

@@ -1,14 +1,9 @@
 use ontology::Ontology;
 use query_engine::compiler::{DEFAULT_PATH_ACCESS_LEVEL, SecurityContext};
-use tonic::Status;
-
-const PROJECT_NODE: &str = "Project";
-const CHECKPOINT_TABLE_SUFFIX: &str = "code_indexing_checkpoint";
 
 pub struct GraphStatusInput {
     pub traversal_path: String,
     pub nodes: Vec<NodeTable>,
-    pub project_tables: ProjectTables,
 }
 
 pub struct NodeTable {
@@ -16,17 +11,12 @@ pub struct NodeTable {
     pub table: String,
 }
 
-pub struct ProjectTables {
-    pub project: String,
-    pub code_checkpoint: String,
-}
-
 impl GraphStatusInput {
     pub fn from_ontology(
         ontology: &Ontology,
         traversal_path: String,
         security_context: &SecurityContext,
-    ) -> Result<Self, Status> {
+    ) -> Self {
         let nodes = ontology
             .nodes()
             .filter(|node| node.has_traversal_path)
@@ -44,34 +34,10 @@ impl GraphStatusInput {
             })
             .collect();
 
-        let project = ontology
-            .get_node(PROJECT_NODE)
-            .ok_or_else(|| {
-                Status::internal(format!("ontology missing required node: {PROJECT_NODE}"))
-            })?
-            .destination_table
-            .clone();
-
-        let code_checkpoint = ontology
-            .auxiliary_tables()
-            .iter()
-            .find(|t| t.name.ends_with(CHECKPOINT_TABLE_SUFFIX))
-            .ok_or_else(|| {
-                Status::internal(format!(
-                    "ontology missing auxiliary table ending with: {CHECKPOINT_TABLE_SUFFIX}"
-                ))
-            })?
-            .name
-            .clone();
-
-        Ok(Self {
+        Self {
             traversal_path,
             nodes,
-            project_tables: ProjectTables {
-                project,
-                code_checkpoint,
-            },
-        })
+        }
     }
 }
 
@@ -97,7 +63,7 @@ mod tests {
         let ctx =
             SecurityContext::new_with_roles(1, vec![TraversalPath::new("1/100/", 20)]).unwrap();
 
-        let input = GraphStatusInput::from_ontology(&ontology, "1/100/".to_string(), &ctx).unwrap();
+        let input = GraphStatusInput::from_ontology(&ontology, "1/100/".to_string(), &ctx);
 
         assert!(!has_node(&input, VULNERABILITY));
         assert!(has_node(&input, "Project"));
@@ -110,7 +76,7 @@ mod tests {
         let ctx =
             SecurityContext::new_with_roles(1, vec![TraversalPath::new("1/100/", 25)]).unwrap();
 
-        let input = GraphStatusInput::from_ontology(&ontology, "1/100/".to_string(), &ctx).unwrap();
+        let input = GraphStatusInput::from_ontology(&ontology, "1/100/".to_string(), &ctx);
 
         assert!(has_node(&input, VULNERABILITY));
         assert!(has_node(&input, "Project"));
@@ -123,7 +89,7 @@ mod tests {
             .unwrap()
             .with_role(true, Some(50));
 
-        let input = GraphStatusInput::from_ontology(&ontology, "1/".to_string(), &ctx).unwrap();
+        let input = GraphStatusInput::from_ontology(&ontology, "1/".to_string(), &ctx);
 
         assert!(has_node(&input, VULNERABILITY));
         assert!(has_node(&input, "Project"));
