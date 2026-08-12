@@ -1,6 +1,8 @@
 name: query_graph_v2
-version: 1.0.0
+version: 1.0.1
 description: >-
-  Execute a graph query. Before composing a query, call get_query_dsl for the
-  DSL and get_graph_schema for the node and edge names relevant to the user's
-  question.
+  Query GitLab relationships and code structure: traversal,
+  dependency/blast-radius, cross-entity joins, grouped aggregation. Prefer
+  ordinary glab for one known entity, a simple list/count, or a write. Before
+  composing a query, call get_query_dsl for the grammar and get_graph_schema for
+  the node, property, and edge names.

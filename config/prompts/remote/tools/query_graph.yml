@@ -1,7 +1,11 @@
 name: query_graph
-version: 1.0.0
-summary: Execute permission-aware graph queries over GitLab SDLC and code entities.
+version: 1.0.1
+summary: >-
+  Traverse GitLab relationships and code structure for callers/imports,
+  dependencies and blast radius, cross-entity joins, or grouped aggregation.
 description: >-
-  Execute graph queries. The DSL below is STRUCTURE ONLY — you MUST call
-  get_graph_schema (with expand_nodes) to discover valid node/property/edge
-  names. Use get_query_dsl for the full grammar reference.
+  Query GitLab relationships and code structure: traversal,
+  dependency/blast-radius, cross-entity joins, grouped aggregation. Prefer
+  ordinary glab for one known entity, a simple list/count, or a write. DSL below
+  is structure only: call get_graph_schema with expand_nodes for valid
+  node/property/edge names and get_query_dsl for the full grammar.
