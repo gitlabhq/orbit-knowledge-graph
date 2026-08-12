@@ -2,14 +2,16 @@ use rustc_hash::FxHashMap;
 use std::fmt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct StrId(pub u32);
+pub struct StrId(u32);
 
 /// Interning string pool. Identical strings return the same `StrId`,
 /// enabling O(1) equality checks via integer comparison.
 pub struct StringPool {
     buf: String,
     index: Vec<(u32, u32)>,
-    intern_map: FxHashMap<(u32, u32), StrId>,
+    /// Maps (hash64, byte_len) → list of StrIds with that hash+len.
+    /// On lookup, each candidate is verified by full string comparison.
+    intern_map: FxHashMap<(u64, u32), Vec<StrId>>,
 }
 
 impl Default for StringPool {
@@ -37,29 +39,30 @@ impl StringPool {
 
     /// Intern a string. Returns the same `StrId` for identical content.
     pub fn alloc(&mut self, s: &str) -> StrId {
-        let hash = fxhash_str(s);
-        let len = s.len() as u32;
-        let probe_key = (hash, len);
+        let key = (fxhash_str(s), s.len() as u32);
 
-        if let Some(&existing) = self.intern_map.get(&probe_key) {
-            if self.get(existing) == s {
-                return existing;
+        if let Some(candidates) = self.intern_map.get(&key) {
+            for &existing in candidates {
+                if self.get(existing) == s {
+                    return existing;
+                }
             }
         }
 
         let id = StrId(self.index.len() as u32);
         let offset = self.buf.len() as u32;
         self.buf.push_str(s);
-        self.index.push((offset, len));
-        self.intern_map.insert(probe_key, id);
+        self.index.push((offset, s.len() as u32));
+        self.intern_map.entry(key).or_default().push(id);
         id
     }
 
     /// Look up a string's `StrId` without allocating. Returns `None` if the
     /// string has never been interned.
     pub fn find(&self, s: &str) -> Option<StrId> {
-        let probe_key = (fxhash_str(s), s.len() as u32);
-        self.intern_map.get(&probe_key).copied().filter(|&id| self.get(id) == s)
+        let key = (fxhash_str(s), s.len() as u32);
+        let candidates = self.intern_map.get(&key)?;
+        candidates.iter().copied().find(|&id| self.get(id) == s)
     }
 
     #[inline]
@@ -77,11 +80,11 @@ impl StringPool {
     }
 }
 
-fn fxhash_str(s: &str) -> u32 {
+fn fxhash_str(s: &str) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut h = rustc_hash::FxHasher::default();
     s.hash(&mut h);
-    h.finish() as u32
+    h.finish()
 }
 
 impl fmt::Debug for StringPool {
