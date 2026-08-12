@@ -1,6 +1,5 @@
 mod code;
 mod input;
-mod lower;
 mod sdlc;
 mod toon;
 
@@ -13,7 +12,7 @@ use gkg_server_config::QueryConfig;
 use gkg_utils::arrow::ArrowUtils;
 use indexer::indexing_status::IndexingStatusStore;
 use ontology::Ontology;
-use query_engine::compiler::{Node, ResultContext, SecurityContext, codegen};
+use query_engine::compiler::SecurityContext;
 use tonic::Status;
 use tracing::{debug, info, warn};
 
@@ -22,7 +21,7 @@ use crate::proto::{
     ResponseFormat, StructuredGraphStatus, get_graph_status_response,
 };
 
-use self::input::GraphStatusInput;
+use self::input::{GraphStatusInput, NodeTable};
 
 pub struct GraphStatusService {
     client: Arc<ArrowClickHouseClient>,
@@ -63,18 +62,14 @@ impl GraphStatusService {
 
         info!(traversal_path, "Graph status fetching");
 
-        let input = GraphStatusInput::from_ontology(
-            &self.ontology,
-            traversal_path.to_string(),
-            security_context,
-        );
+        let input = GraphStatusInput::from_ontology(&self.ontology, security_context);
 
         let entity_counts_future = async {
             if input.nodes.is_empty() {
                 return HashMap::new();
             }
-            let ast = lower::lower_entity_counts(&input);
-            execute_count_query(&self.client, &ast)
+            let sql = entity_counts_sql(&input);
+            execute_count_query(&self.client, &sql, traversal_path)
                 .await
                 .unwrap_or_else(|error| {
                     warn!(traversal_path, label = "entity counts", %error, "Graph status branch failed");
@@ -108,8 +103,6 @@ impl GraphStatusService {
         let domains =
             present_domain_response(&self.ontology, &entity_counts, &visible_nodes, &item_states);
 
-        // Rails `orbit/status` consumes `indexing`; only emit the combined roll-up when SDLC state
-        // exists so no-store (local/CLI) deployments keep omitting it rather than reporting code alone.
         let indexing = match &sdlc.aggregate {
             Some(sdlc_status) => worst_indexing_status(Some(sdlc_status), code.aggregate.as_ref()),
             None => None,
@@ -137,11 +130,44 @@ impl GraphStatusService {
     }
 }
 
+fn entity_counts_sql(input: &GraphStatusInput) -> String {
+    input
+        .nodes
+        .iter()
+        .map(node_count_sql)
+        .collect::<Vec<_>>()
+        .join(" UNION ALL ")
+}
+
+fn node_count_sql(node: &NodeTable) -> String {
+    // Group alone needs FINAL: namespace-deletion tombstones (distinct ids the _deleted-less
+    // projection can't drop) inflate uniq(id). The table is tiny, so FINAL is cheap; other
+    // types stay accurate enough with approximate uniq(id).
+    if node.name == "Group" {
+        return format!(
+            "SELECT '{name}' AS entity, count() AS cnt \
+               FROM {table} AS d FINAL \
+              WHERE d._deleted = 0 AND startsWith(d.traversal_path, {{path:String}})",
+            name = node.name,
+            table = node.table,
+        );
+    }
+
+    format!(
+        "SELECT '{name}' AS entity, uniq(d.id) AS cnt \
+           FROM {table} AS d \
+          WHERE startsWith(d.traversal_path, {{path:String}})",
+        name = node.name,
+        table = node.table,
+    )
+}
+
 async fn execute_count_query(
     client: &ArrowClickHouseClient,
-    ast: &Node,
+    sql: &str,
+    traversal_path: &str,
 ) -> Result<HashMap<String, i64>, Status> {
-    let batches = execute_query(client, ast, "entity counts").await?;
+    let batches = execute_query(client, sql, traversal_path, "entity counts").await?;
 
     let mut counts: HashMap<String, i64> = HashMap::new();
     for batch in &batches {
@@ -164,23 +190,34 @@ async fn execute_count_query(
 
 pub(super) async fn execute_query(
     client: &ArrowClickHouseClient,
-    ast: &Node,
+    sql: &str,
+    traversal_path: &str,
     label: &str,
 ) -> Result<Vec<arrow::record_batch::RecordBatch>, Status> {
-    let parameterized = codegen(ast, ResultContext::new(), graph_status_query_config())
-        .map_err(|e| Status::internal(format!("codegen error ({label}): {e}")))?;
+    let sql = append_query_settings(sql)
+        .map_err(|e| Status::internal(format!("query settings error ({label}): {e}")))?;
 
-    debug!(sql = %parameterized.sql, label, "Graph status query compiled");
+    debug!(sql, label, "Graph status query");
 
-    let mut query = client.query(&parameterized.sql);
-    for (key, param) in &parameterized.params {
-        query = ArrowClickHouseClient::bind_param(query, key, &param.value, &param.ch_type);
-    }
-
-    query
+    client
+        .query(&sql)
+        .param("path", traversal_path)
         .fetch_arrow()
         .await
         .map_err(|e| Status::internal(format!("ClickHouse error ({label}): {e}")))
+}
+
+fn append_query_settings(sql: &str) -> Result<String, String> {
+    let settings = graph_status_query_config().to_clickhouse_settings()?;
+    if settings.is_empty() {
+        return Ok(sql.to_string());
+    }
+    let clause = settings
+        .iter()
+        .map(|(key, value)| format!("{key} = {value}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    Ok(format!("{sql} SETTINGS {clause}"))
 }
 
 pub(super) fn status_with_state(state: IndexingState) -> IndexingStatus {
@@ -439,5 +476,78 @@ mod tests {
                 "node {node_name} is claimed by both the code and SDLC surfaces"
             );
         }
+    }
+
+    fn counts_input() -> GraphStatusInput {
+        GraphStatusInput {
+            nodes: vec![
+                NodeTable {
+                    name: "Project".to_string(),
+                    table: "v1_gl_project".to_string(),
+                },
+                NodeTable {
+                    name: "Group".to_string(),
+                    table: "v1_gl_group".to_string(),
+                },
+                NodeTable {
+                    name: "MergeRequest".to_string(),
+                    table: "v1_gl_merge_request".to_string(),
+                },
+                NodeTable {
+                    name: "Definition".to_string(),
+                    table: "v1_gl_definition".to_string(),
+                },
+            ],
+        }
+    }
+
+    #[test]
+    fn entity_counts_produces_union_all() {
+        let sql = entity_counts_sql(&counts_input());
+
+        assert!(sql.contains("UNION ALL"), "SQL: {sql}");
+        assert!(sql.contains("v1_gl_project"), "SQL: {sql}");
+        assert!(sql.contains("v1_gl_group"), "SQL: {sql}");
+        assert!(sql.contains("v1_gl_merge_request"), "SQL: {sql}");
+        assert!(sql.contains("v1_gl_definition"), "SQL: {sql}");
+    }
+
+    #[test]
+    fn entity_counts_binds_traversal_path_per_subquery() {
+        let input = counts_input();
+        let sql = entity_counts_sql(&input);
+
+        assert_eq!(
+            sql.matches("startsWith").count(),
+            input.nodes.len(),
+            "each subquery filters on the bound traversal_path. SQL: {sql}"
+        );
+        assert!(sql.contains("{path:String}"), "SQL: {sql}");
+    }
+
+    #[test]
+    fn entity_counts_deduplicates_by_id() {
+        let sql = entity_counts_sql(&counts_input());
+
+        assert!(!sql.contains("argMax("), "SQL: {sql}");
+        assert!(!sql.contains("GROUP BY"), "SQL: {sql}");
+    }
+
+    #[test]
+    fn entity_counts_scans_only_group_with_final() {
+        let sql = entity_counts_sql(&counts_input());
+
+        assert_eq!(sql.matches(" FINAL").count(), 1, "SQL: {sql}");
+        assert!(sql.contains("v1_gl_group AS d FINAL"), "SQL: {sql}");
+        assert!(sql.contains("d._deleted"), "SQL: {sql}");
+    }
+
+    #[test]
+    fn entity_counts_non_group_entities_use_uniq_projection() {
+        let sql = entity_counts_sql(&counts_input());
+
+        assert_eq!(sql.matches("uniq(d.id)").count(), 3, "SQL: {sql}");
+        assert!(!sql.contains("v1_gl_definition AS d FINAL"), "SQL: {sql}");
+        assert!(!sql.contains("v1_gl_project AS d FINAL"), "SQL: {sql}");
     }
 }

@@ -4,7 +4,6 @@ use arrow::array::{Array, StringArray, UInt64Array};
 use clickhouse_client::ArrowClickHouseClient;
 use gkg_utils::arrow::ArrowUtils;
 use ontology::Ontology;
-use query_engine::compiler::{Expr, JoinType, Node, Query, SelectExpr, TableRef};
 use tonic::Status;
 use tracing::warn;
 
@@ -59,8 +58,6 @@ fn derive_state(projects: &ProjectsStatus) -> Option<IndexingState> {
     })
 }
 
-// A node with no pipelines is code-derived, so it inherits the single code coverage state.
-// Nodes that declare pipelines belong to the SDLC surface and are resolved there.
 pub(super) fn resolve_node_states(
     ontology: &Ontology,
     state: Option<IndexingState>,
@@ -81,8 +78,8 @@ async fn fetch_project_coverage(
     traversal_path: &str,
 ) -> Result<ProjectsStatus, Status> {
     let tables = project_tables(ontology)?;
-    let ast = lower_projects(&tables, traversal_path);
-    let batches = execute_query(client, &ast, "projects").await?;
+    let sql = projects_sql(&tables.project, &tables.code_checkpoint);
+    let batches = execute_query(client, &sql, traversal_path, "projects").await?;
 
     let mut projects = ProjectsStatus::default();
     for batch in &batches {
@@ -137,98 +134,23 @@ fn project_tables(ontology: &Ontology) -> Result<ProjectTables, Status> {
     })
 }
 
-fn lower_projects(tables: &ProjectTables, traversal_path: &str) -> Node {
-    let total_known = build_total_known_projects_query(&tables.project, traversal_path);
-    let mut indexed =
-        build_indexed_projects_query(&tables.project, &tables.code_checkpoint, traversal_path);
-
-    indexed.union_all = vec![total_known];
-
-    Node::Query(Box::new(indexed))
-}
-
-fn build_total_known_projects_query(project_table: &str, traversal_path: &str) -> Query {
-    let alias = "p";
-
-    let select = vec![
-        SelectExpr::new(Expr::string("total_known"), "metric"),
-        SelectExpr::new(Expr::func("uniqExact", vec![Expr::col(alias, "id")]), "cnt"),
-    ];
-
-    Query {
-        select,
-        from: TableRef::scan_final(project_table, alias),
-        where_clause: Some(live_project_scope_filter(alias, traversal_path)),
-        ..Default::default()
-    }
-}
-
-fn build_indexed_projects_query(
-    project_table: &str,
-    code_checkpoint_table: &str,
-    traversal_path: &str,
-) -> Query {
-    let checkpoint_alias = "c";
-    let project_alias = "p";
-
-    let select = vec![
-        SelectExpr::new(Expr::string("indexed"), "metric"),
-        SelectExpr::new(
-            Expr::func("uniqExact", vec![Expr::col(checkpoint_alias, "project_id")]),
-            "cnt",
-        ),
-    ];
-
-    let from = TableRef::join(
-        JoinType::Inner,
-        TableRef::scan_final(code_checkpoint_table, checkpoint_alias),
-        TableRef::scan_final(project_table, project_alias),
-        Expr::eq(
-            Expr::col(checkpoint_alias, "project_id"),
-            Expr::col(project_alias, "id"),
-        ),
-    );
-
-    let where_clause = Expr::and(
-        live_project_scope_filter(project_alias, traversal_path),
-        Expr::and(
-            Expr::eq(Expr::col(checkpoint_alias, "_deleted"), Expr::int(0)),
-            Expr::func(
-                "startsWith",
-                vec![
-                    Expr::col(checkpoint_alias, "traversal_path"),
-                    Expr::string(traversal_path),
-                ],
-            ),
-        ),
-    );
-
-    Query {
-        select,
-        from,
-        where_clause: Some(where_clause),
-        ..Default::default()
-    }
-}
-
-fn live_project_scope_filter(alias: &str, traversal_path: &str) -> Expr {
-    Expr::and(
-        Expr::eq(Expr::col(alias, "_deleted"), Expr::int(0)),
-        Expr::func(
-            "startsWith",
-            vec![
-                Expr::col(alias, "traversal_path"),
-                Expr::string(traversal_path),
-            ],
-        ),
+fn projects_sql(project_table: &str, code_checkpoint_table: &str) -> String {
+    format!(
+        "SELECT 'total_known' AS metric, uniqExact(p.id) AS cnt \
+           FROM {project_table} AS p FINAL \
+          WHERE p._deleted = 0 AND startsWith(p.traversal_path, {{path:String}}) \
+         UNION ALL \
+         SELECT 'indexed' AS metric, uniqExact(c.project_id) AS cnt \
+           FROM {code_checkpoint_table} AS c FINAL \
+           INNER JOIN {project_table} AS p FINAL ON c.project_id = p.id \
+          WHERE p._deleted = 0 AND startsWith(p.traversal_path, {{path:String}}) \
+            AND c._deleted = 0 AND startsWith(c.traversal_path, {{path:String}})"
     )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gkg_server_config::QueryConfig;
-    use query_engine::compiler::{ResultContext, codegen};
     use std::sync::Arc;
 
     fn test_ontology() -> Arc<Ontology> {
@@ -291,27 +213,20 @@ mod tests {
         assert!(resolve_node_states(&ontology, None).is_empty());
     }
 
-    fn compiled_projects_sql(traversal_path: &str) -> String {
-        let tables = ProjectTables {
-            project: "v1_gl_project".to_string(),
-            code_checkpoint: "v1_code_indexing_checkpoint".to_string(),
-        };
-        let ast = lower_projects(&tables, traversal_path);
-        codegen(&ast, ResultContext::new(), QueryConfig::default())
-            .unwrap()
-            .sql
+    fn test_projects_sql() -> String {
+        projects_sql("v1_gl_project", "v1_code_indexing_checkpoint")
     }
 
     #[test]
     fn projects_query_includes_both_tables() {
-        let sql = compiled_projects_sql("1/2/");
+        let sql = test_projects_sql();
         assert!(sql.contains("v1_gl_project"), "SQL: {sql}");
         assert!(sql.contains("v1_code_indexing_checkpoint"), "SQL: {sql}");
     }
 
     #[test]
     fn projects_query_joins_checkpoints_to_live_projects() {
-        let sql = compiled_projects_sql("1/2/");
+        let sql = test_projects_sql();
         assert!(sql.contains("INNER JOIN"), "SQL: {sql}");
         assert!(sql.contains("c.project_id = p.id"), "SQL: {sql}");
         assert!(sql.contains("startsWith(p.traversal_path"), "SQL: {sql}");
@@ -319,8 +234,16 @@ mod tests {
     }
 
     #[test]
+    fn projects_query_binds_traversal_path() {
+        assert!(
+            test_projects_sql().contains("{path:String}"),
+            "traversal_path must be a bound parameter, not interpolated"
+        );
+    }
+
+    #[test]
     fn projects_query_uses_uniq() {
-        let sql = compiled_projects_sql("1/2/");
+        let sql = test_projects_sql();
         assert_eq!(
             sql.matches("uniqExact(").count(),
             2,
@@ -330,7 +253,7 @@ mod tests {
 
     #[test]
     fn projects_query_filters_deleted_on_both_tables() {
-        let sql = compiled_projects_sql("1/2/");
+        let sql = test_projects_sql();
         assert_eq!(
             sql.matches("_deleted").count(),
             3,

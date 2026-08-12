@@ -101,10 +101,9 @@ async fn fetch_pipeline_progress(
     }
 }
 
-// Rollout fallback: nothing per-pipeline has been written yet → the legacy single-key state
-// stands in for every known pipeline so pre-MR deployments keep annotating nodes.
 fn pipeline_states(reads: &PipelineReads) -> HashMap<String, IndexingState> {
-    if reads.pipelines.iter().all(|p| p.progress.is_none()) {
+    let no_per_pipeline_progress_yet = reads.pipelines.iter().all(|p| p.progress.is_none());
+    if no_per_pipeline_progress_yet {
         let legacy_state = reads
             .legacy
             .as_ref()

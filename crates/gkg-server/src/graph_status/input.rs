@@ -2,7 +2,6 @@ use ontology::Ontology;
 use query_engine::compiler::{DEFAULT_PATH_ACCESS_LEVEL, SecurityContext};
 
 pub struct GraphStatusInput {
-    pub traversal_path: String,
     pub nodes: Vec<NodeTable>,
 }
 
@@ -12,11 +11,7 @@ pub struct NodeTable {
 }
 
 impl GraphStatusInput {
-    pub fn from_ontology(
-        ontology: &Ontology,
-        traversal_path: String,
-        security_context: &SecurityContext,
-    ) -> Self {
+    pub fn from_ontology(ontology: &Ontology, security_context: &SecurityContext) -> Self {
         let nodes = ontology
             .nodes()
             .filter(|node| node.has_traversal_path)
@@ -34,10 +29,7 @@ impl GraphStatusInput {
             })
             .collect();
 
-        Self {
-            traversal_path,
-            nodes,
-        }
+        Self { nodes }
     }
 }
 
@@ -63,7 +55,7 @@ mod tests {
         let ctx =
             SecurityContext::new_with_roles(1, vec![TraversalPath::new("1/100/", 20)]).unwrap();
 
-        let input = GraphStatusInput::from_ontology(&ontology, "1/100/".to_string(), &ctx);
+        let input = GraphStatusInput::from_ontology(&ontology, &ctx);
 
         assert!(!has_node(&input, VULNERABILITY));
         assert!(has_node(&input, "Project"));
@@ -76,7 +68,7 @@ mod tests {
         let ctx =
             SecurityContext::new_with_roles(1, vec![TraversalPath::new("1/100/", 25)]).unwrap();
 
-        let input = GraphStatusInput::from_ontology(&ontology, "1/100/".to_string(), &ctx);
+        let input = GraphStatusInput::from_ontology(&ontology, &ctx);
 
         assert!(has_node(&input, VULNERABILITY));
         assert!(has_node(&input, "Project"));
@@ -89,7 +81,7 @@ mod tests {
             .unwrap()
             .with_role(true, Some(50));
 
-        let input = GraphStatusInput::from_ontology(&ontology, "1/".to_string(), &ctx);
+        let input = GraphStatusInput::from_ontology(&ontology, &ctx);
 
         assert!(has_node(&input, VULNERABILITY));
         assert!(has_node(&input, "Project"));
