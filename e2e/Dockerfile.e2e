@@ -2,5 +2,8 @@ FROM registry.access.redhat.com/ubi10/ubi-minimal:10.2
 
 WORKDIR /app
 COPY gkg-server /usr/local/bin/gkg-server
+# Match the production image: ship the ClickHouse setup contract so the chart's
+# clickhouseSetup hook can read it from the image.
+COPY config/clickhouse-setup.sql /usr/share/gkg/clickhouse-setup.sql
 
 ENTRYPOINT ["gkg-server"]
