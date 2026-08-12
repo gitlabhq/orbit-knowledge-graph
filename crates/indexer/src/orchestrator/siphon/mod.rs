@@ -6,7 +6,6 @@ pub mod enabled_namespaces;
 pub mod route;
 pub mod router;
 pub mod subjects;
-pub mod wire;
 
 pub use code_indexing_task::CodeIndexingTaskRoute;
 pub use enabled_namespaces::EnabledNamespacesRoute;

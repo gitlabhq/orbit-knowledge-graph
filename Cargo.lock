@@ -14878,7 +14878,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "arrow 58.3.0",
- "async-nats",
  "chrono",
  "clap",
  "clickhouse",

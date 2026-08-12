@@ -1,7 +1,6 @@
 tiers:
   small:
     nodes: { machine: e2-standard-8, count: 3 }
-    dataset: { subset_pct: 10 }
     gkg:
       indexer:    { replicas: 1, requests: { cpu: 2, memory: 4Gi }, limits: { memory: 6Gi } }
       webserver:  { replicas: 2, requests: { cpu: 1, memory: 2Gi }, limits: { memory: 3Gi } }
@@ -23,7 +22,6 @@ tiers:
 
   medium:
     nodes: { machine: e2-standard-16, count: 3 }
-    dataset: { subset_pct: 50 }
     gkg:
       indexer:    { replicas: 2, requests: { cpu: 4, memory: 8Gi }, limits: { memory: 12Gi } }
       webserver:  { replicas: 3, requests: { cpu: 2, memory: 4Gi }, limits: { memory: 6Gi } }
@@ -45,7 +43,6 @@ tiers:
 
   large:
     nodes: { machine: e2-standard-32, count: 5 }
-    dataset: { subset_pct: 100 }
     gkg:
       indexer:    { replicas: 3, requests: { cpu: 8, memory: 16Gi }, limits: { memory: 24Gi } }
       webserver:  { replicas: 4, requests: { cpu: 4, memory: 8Gi }, limits: { memory: 12Gi } }

@@ -26,7 +26,6 @@ toml = { workspace = true }
 ignored = ["toml"]
 
 [dependencies]
-async-nats = { workspace = true }
 clap = { workspace = true }
 anyhow = { workspace = true }
 arrow = { workspace = true }
