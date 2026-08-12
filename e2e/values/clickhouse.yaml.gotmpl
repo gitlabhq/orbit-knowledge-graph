@@ -9,15 +9,3 @@ users:
     password: {{ requiredEnv "E2E_CH_SIPHON_PASS" | quote }}
   gitlab:
     password: {{ requiredEnv "E2E_CH_GITLAB_PASS" | quote }}
-
-{{/* GKG's ClickHouse setup contract — the single source of truth in this repo,
-applied here at the version under test. */}}
-initdbScripts:
-  02-gkg-setup.sql: |
-{{ readFile "../../config/clickhouse-setup.sql"
-   | replace "${GRAPH_DB}" "gkg"
-   | replace "${DATALAKE_DB}" "datalake"
-   | replace "${GKG_WRITER_PASSWORD}" (requiredEnv "E2E_CH_GRAPH_PASS")
-   | replace "${GKG_READER_PASSWORD}" (requiredEnv "E2E_CH_GRAPH_READ_PASS")
-   | replace "${GKG_SIPHON_READER_PASSWORD}" (requiredEnv "E2E_CH_DATALAKE_PASS")
-   | indent 4 }}
