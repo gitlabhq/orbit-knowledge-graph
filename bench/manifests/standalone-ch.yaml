@@ -1,0 +1,99 @@
+# Standalone ClickHouse for the RA bench harness.
+# Mirrors the e2e chart's StatefulSet so patch-ch-dicts.sh works unmodified.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ${CH_NAMESPACE}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: clickhouse
+  namespace: ${CH_NAMESPACE}
+  labels: { app: clickhouse }
+spec:
+  replicas: 1
+  serviceName: clickhouse
+  selector:
+    matchLabels: { app: clickhouse }
+  template:
+    metadata:
+      labels: { app: clickhouse }
+    spec:
+${CH_NODE_SELECTOR}
+${CH_TOLERATIONS}
+      containers:
+        - name: clickhouse
+          image: clickhouse/clickhouse-server:26.6
+          env:
+            - name: CLICKHOUSE_USER
+              value: "default"
+            - name: CLICKHOUSE_PASSWORD
+              value: "${CH_PASSWORD}"
+            - name: CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT
+              value: "1"
+          ports:
+            - containerPort: 8123
+              name: http
+            - containerPort: 9000
+              name: native
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/clickhouse
+            - name: config-overrides
+              mountPath: /etc/clickhouse-server/users.d/bench-profile.xml
+              subPath: bench-profile.xml
+          resources:
+            requests: { cpu: "2", memory: "8Gi" }
+            limits: { cpu: "${CH_CPU}", memory: "${CH_MEMORY}" }
+          livenessProbe:
+            httpGet: { path: /ping, port: http }
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          readinessProbe:
+            httpGet: { path: /ping, port: http }
+            initialDelaySeconds: 2
+            periodSeconds: 2
+      volumes:
+        - name: config-overrides
+          configMap:
+            name: ch-config-overrides
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: ${CH_STORAGE}
+${PVC_DATA_SOURCE}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ch-config-overrides
+  namespace: ${CH_NAMESPACE}
+data:
+  bench-profile.xml: |
+    <clickhouse>
+      <profiles>
+        <default>
+          <max_bytes_before_external_sort>8589934592</max_bytes_before_external_sort>
+          <max_bytes_before_external_group_by>8589934592</max_bytes_before_external_group_by>
+          <max_memory_usage>21474836480</max_memory_usage>
+        </default>
+      </profiles>
+    </clickhouse>
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: clickhouse
+  namespace: ${CH_NAMESPACE}
+spec:
+  selector: { app: clickhouse }
+  ports:
+    - port: 8123
+      name: http
+    - port: 9000
+      name: native

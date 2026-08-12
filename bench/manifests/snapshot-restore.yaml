@@ -1,0 +1,21 @@
+apiVersion: snapshot.storage.k8s.io/v1
+kind: VolumeSnapshotContent
+metadata:
+  name: ${LOCAL_CONTENT}
+spec:
+  driver: pd.csi.storage.gke.io
+  deletionPolicy: Retain
+  source:
+    snapshotHandle: ${SNAP_HANDLE}
+  volumeSnapshotRef:
+    name: ${LOCAL_SNAP}
+    namespace: ${CH_NAMESPACE}
+---
+apiVersion: snapshot.storage.k8s.io/v1
+kind: VolumeSnapshot
+metadata:
+  name: ${LOCAL_SNAP}
+  namespace: ${CH_NAMESPACE}
+spec:
+  source:
+    volumeSnapshotContentName: ${LOCAL_CONTENT}
