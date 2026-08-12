@@ -344,14 +344,13 @@ impl CodeGraph {
             });
             def_nodes.push(def_node);
 
-            let fqn_str = self.strings.get(gdef.fqn);
-            let name_str = self.strings.get(gdef.name);
-            self.indexes.by_fqn.insert(fqn_str, def_node);
-            self.indexes.by_name.insert(name_str, def_node);
+            self.indexes.by_fqn.insert(gdef.fqn, def_node);
+            self.indexes.by_name.insert(gdef.name, def_node);
 
+            let fqn_str = self.strings.get(gdef.fqn).to_string();
             if let Some(sep_pos) = fqn_str.rfind(gdef.fqn_sep) {
-                let parent = &fqn_str[..sep_pos];
-                self.indexes.nested.insert(parent, name_str, def_node);
+                let parent_id = self.strings.alloc(&fqn_str[..sep_pos]);
+                self.indexes.nested.insert(parent_id, gdef.name, def_node);
             }
             definition_ranges.push((gdef.range, def_node));
 
@@ -576,17 +575,14 @@ impl CodeGraph {
                 format!("{imp_path}{sep}{name}")
             };
 
-            let mut defs: Vec<_> = self
-                .indexes
-                .by_fqn
-                .lookup(&full_fqn, |idx| self.def_fqn(idx) == full_fqn)
-                .to_vec();
+            let Some(fqn_id) = self.strings.find(&full_fqn) else {
+                continue;
+            };
+            let mut defs: Vec<_> = self.indexes.by_fqn.lookup(fqn_id).to_vec();
             if defs.is_empty() && !imp_path.is_empty() {
-                defs = self
-                    .indexes
-                    .by_fqn
-                    .lookup(imp_path, |idx| self.def_fqn(idx) == imp_path)
-                    .to_vec();
+                if let Some(path_id) = self.strings.find(imp_path) {
+                    defs = self.indexes.by_fqn.lookup(path_id).to_vec();
+                }
             }
             if !defs.is_empty() {
                 map.entry(name.to_string()).or_insert(defs);
@@ -605,29 +601,19 @@ impl CodeGraph {
         if start_nodes.is_empty() {
             return false;
         }
-
-        let verify_member = |idx: NodeIndex| self.def_name(idx) == member_name;
+        let Some(member_id) = self.strings.find(member_name) else {
+            return false;
+        };
 
         for &start in &start_nodes {
-            let actual_fqn = self.def_fqn(start);
-
-            if self
-                .indexes
-                .nested
-                .lookup_into(actual_fqn, member_name, verify_member, out)
-            {
+            let actual_fqn_id = self.def(start).fqn;
+            if self.indexes.nested.lookup_into(actual_fqn_id, member_id, out) {
                 return true;
             }
-
             if let Some(chain) = self.indexes.ancestors.get(&start) {
                 for &ancestor in chain {
-                    let ancestor_fqn = self.def_fqn(ancestor);
-                    if self.indexes.nested.lookup_into(
-                        ancestor_fqn,
-                        member_name,
-                        verify_member,
-                        out,
-                    ) {
+                    let ancestor_fqn_id = self.def(ancestor).fqn;
+                    if self.indexes.nested.lookup_into(ancestor_fqn_id, member_id, out) {
                         return true;
                     }
                 }
@@ -636,29 +622,21 @@ impl CodeGraph {
         false
     }
 
-    /// Find methods whose `receiver_type` metadata matches `type_name` and
-    /// whose name matches `member_name`. Used for Go methods and Kotlin
-    /// extension functions where the method is not nested inside the type.
-    ///
-    /// Receiver types in source are often bare names (`Service`) while the
-    /// lookup FQN is fully qualified (`main.Service`). We match if the
-    /// receiver_type equals the FQN or its last segment after `sep`.
     pub fn lookup_by_receiver_type(
         &self,
         type_name: &str,
         member_name: &str,
         out: &mut Vec<NodeIndex>,
     ) {
-        let candidates = self.indexes.by_name.lookup(member_name, |idx| {
-            self.graph[idx]
-                .def_id()
-                .is_some_and(|d| self.str(self.defs[d.0 as usize].name) == member_name)
-        });
+        let Some(member_id) = self.strings.find(member_name) else {
+            return;
+        };
+        let candidates = self.indexes.by_name.lookup(member_id);
         let bare_type = type_name
             .rsplit_once(self.sep())
             .map_or(type_name, |(_, t)| t);
 
-        for idx in candidates {
+        for &idx in candidates {
             if let Some(did) = self.graph[idx].def_id() {
                 let gdef = &self.defs[did.0 as usize];
                 if let Some(meta) = &gdef.metadata
@@ -679,30 +657,21 @@ impl CodeGraph {
         member_name: &str,
         out: &mut Vec<NodeIndex>,
     ) -> bool {
-        let scope_fqn = self.def_fqn(scope_node);
-        let verify_member = |idx: NodeIndex| self.def_name(idx) == member_name;
-
-        if self
-            .indexes
-            .nested
-            .lookup_into(scope_fqn, member_name, verify_member, out)
-        {
+        let Some(member_id) = self.strings.find(member_name) else {
+            return false;
+        };
+        let scope_fqn_id = self.def(scope_node).fqn;
+        if self.indexes.nested.lookup_into(scope_fqn_id, member_id, out) {
             return true;
         }
-
         if let Some(chain) = self.indexes.ancestors.get(&scope_node) {
             for &ancestor in chain {
-                let ancestor_fqn = self.def_fqn(ancestor);
-                if self
-                    .indexes
-                    .nested
-                    .lookup_into(ancestor_fqn, member_name, verify_member, out)
-                {
+                let ancestor_fqn_id = self.def(ancestor).fqn;
+                if self.indexes.nested.lookup_into(ancestor_fqn_id, member_id, out) {
                     return true;
                 }
             }
         }
-
         false
     }
 
@@ -802,6 +771,40 @@ impl CodeGraph {
     #[inline]
     pub fn def_kind(&self, idx: NodeIndex) -> crate::v2::types::DefKind {
         self.def(idx).kind
+    }
+
+    /// Look up by FQN string. Returns empty if the string is not interned.
+    pub fn lookup_fqn(&self, key: &str) -> &[NodeIndex] {
+        match self.strings.find(key) {
+            Some(id) => self.indexes.by_fqn.lookup(id),
+            None => &[],
+        }
+    }
+
+    /// Look up by bare name string. Returns empty if the string is not interned.
+    pub fn lookup_name(&self, key: &str) -> &[NodeIndex] {
+        match self.strings.find(key) {
+            Some(id) => self.indexes.by_name.lookup(id),
+            None => &[],
+        }
+    }
+
+    pub fn name_exists(&self, key: &str) -> bool {
+        self.strings
+            .find(key)
+            .is_some_and(|id| self.indexes.by_name.contains(id))
+    }
+
+    pub fn lookup_nested(&self, scope: &str, member: &str) -> &[NodeIndex] {
+        let scope_id = match self.strings.find(scope) {
+            Some(id) => id,
+            None => return &[],
+        };
+        let member_id = match self.strings.find(member) {
+            Some(id) => id,
+            None => return &[],
+        };
+        self.indexes.nested.lookup(scope_id, member_id)
     }
 
     #[inline]
@@ -978,34 +981,42 @@ impl CodeGraph {
     }
 
     pub fn resolve_scope_nodes(&self, name: &str) -> SmallVec<[NodeIndex; 8]> {
-        let by_fqn = self.indexes.by_fqn.lookup_unverified(name);
+        let Some(name_id) = self.strings.find(name) else {
+            return SmallVec::new();
+        };
+        let by_fqn = self.indexes.by_fqn.lookup(name_id);
         if !by_fqn.is_empty() {
             return SmallVec::from_slice(by_fqn);
         }
-        let by_name = self.indexes.by_name.lookup(name, |idx| {
-            self.def_name(idx) == name
-                && self.graph[idx]
+        let by_name: SmallVec<[NodeIndex; 8]> = self.indexes.by_name.lookup(name_id)
+            .iter()
+            .copied()
+            .filter(|&idx| {
+                self.graph[idx]
                     .def_id()
                     .is_some_and(|d| self.defs[d.0 as usize].kind.is_type_container())
-        });
+            })
+            .collect();
         if !by_name.is_empty() {
             return by_name;
         }
-        // Qualified bare name (e.g. "Parent.Child"): resolve the first
-        // segment by name to find candidate prefixes, then check by_fqn
-        // for the full qualified name under each prefix. O(first_matches)
-        // instead of O(matches^segments).
         for sep in &[".", "::"] {
             let segments: Vec<&str> = name.split(sep).collect();
             if segments.len() < 2 {
                 continue;
             }
-            let first_matches = self.indexes.by_name.lookup(segments[0], |idx| {
-                self.def_name(idx) == segments[0]
-                    && self.graph[idx]
+            let Some(first_id) = self.strings.find(segments[0]) else {
+                continue;
+            };
+            let first_matches: SmallVec<[NodeIndex; 8]> = self.indexes.by_name.lookup(first_id)
+                .iter()
+                .copied()
+                .filter(|&idx| {
+                    self.graph[idx]
                         .def_id()
                         .is_some_and(|d| self.defs[d.0 as usize].kind.is_type_container())
-            });
+                })
+                .collect();
             if first_matches.is_empty() {
                 continue;
             }
@@ -1013,12 +1024,11 @@ impl CodeGraph {
             for &node in &first_matches {
                 let prefix_fqn = self.def_fqn(node);
                 let candidate = format!("{prefix_fqn}{sep}{rest}");
-                let matches = self
-                    .indexes
-                    .by_fqn
-                    .lookup(&candidate, |idx| self.def_fqn(idx) == candidate);
-                if !matches.is_empty() {
-                    return matches;
+                if let Some(candidate_id) = self.strings.find(&candidate) {
+                    let matches = self.indexes.by_fqn.lookup(candidate_id);
+                    if !matches.is_empty() {
+                        return SmallVec::from_slice(matches);
+                    }
                 }
             }
         }
@@ -1402,41 +1412,11 @@ mod tests {
             ],
         );
 
-        assert_eq!(
-            cg.indexes
-                .by_fqn
-                .lookup("Foo", |idx| cg.def_fqn(idx) == "Foo")
-                .len(),
-            1
-        );
-        assert_eq!(
-            cg.indexes
-                .by_fqn
-                .lookup("Foo.bar", |idx| cg.def_fqn(idx) == "Foo.bar")
-                .len(),
-            1
-        );
-        assert_eq!(
-            cg.indexes
-                .by_name
-                .lookup("Foo", |idx| cg.def_name(idx) == "Foo")
-                .len(),
-            1
-        );
-        assert_eq!(
-            cg.indexes
-                .by_name
-                .lookup("bar", |idx| cg.def_name(idx) == "bar")
-                .len(),
-            1
-        );
-        assert_eq!(
-            cg.indexes
-                .nested
-                .lookup("Foo", "bar", |idx| cg.def_name(idx) == "bar")
-                .len(),
-            1
-        );
+        assert_eq!(cg.lookup_fqn("Foo").len(), 1);
+        assert_eq!(cg.lookup_fqn("Foo.bar").len(), 1);
+        assert_eq!(cg.lookup_name("Foo").len(), 1);
+        assert_eq!(cg.lookup_name("bar").len(), 1);
+        assert_eq!(cg.lookup_nested("Foo", "bar").len(), 1);
     }
 
     fn make_def_at(
