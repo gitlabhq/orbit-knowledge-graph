@@ -262,8 +262,8 @@ fn analyze_file(
         extension,
         language,
         size: source.len() as u64,
-        definitions: canonical_definitions(&analysis, &pool),
-        imports: canonical_imports(&analysis.imports, &pool),
+        definitions: canonical_definitions(&analysis, pool),
+        imports: canonical_imports(&analysis.imports, pool),
         bindings: module_bindings(&analysis),
         star_reexports: dedup_and_cap_star_reexports(&analysis.module_info.star_export_sources),
     };

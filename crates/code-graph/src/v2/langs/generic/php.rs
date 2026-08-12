@@ -297,7 +297,7 @@ fn php_on_scope(
                 Some("__construct") => &scope_stack[..scope_stack.len() - 1],
                 _ => scope_stack,
             };
-            let name = last.name.clone();
+            let name = last.name;
             last.fqn = pool.alloc(
                 &crate::v2::types::Fqn::from_scope(class_scope, pool.get(name), sep).to_string(),
             );

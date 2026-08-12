@@ -737,6 +737,10 @@ pub struct LanguageHooks {
     /// Inject extra definitions after scope matching (e.g. Ruby attr_reader).
     pub on_scope: Option<ScopeHookFn>,
     /// Override import extraction (e.g. Ruby require/require_relative).
+    #[expect(
+        clippy::type_complexity,
+        reason = "hook signature matches the callsite shape"
+    )]
     pub on_import:
         Option<fn(&N<'_>, &mut Vec<crate::v2::linker::state::GraphImport>, &StringPool) -> bool>,
     /// Override the identifier an import writes into SSA.

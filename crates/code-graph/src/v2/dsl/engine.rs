@@ -596,6 +596,10 @@ impl LanguageSpec {
         )
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "threading parse config through a single entry point; a params struct would add indirection without reducing call-site complexity"
+    )]
     pub(crate) fn parse_full_collect_with_options(
         &self,
         source: &[u8],

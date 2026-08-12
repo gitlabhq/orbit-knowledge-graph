@@ -258,6 +258,10 @@ impl ConcurrentGraph {
     /// Insert a parsed file and all its definitions/imports into the graph.
     /// Returns the node IDs assigned to the file, defs, and imports.
     /// Safe to call from multiple rayon workers concurrently.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "file metadata is flat; a wrapper struct would just shuffle fields"
+    )]
     pub fn add_file(
         &self,
         path: &str,
@@ -767,14 +771,13 @@ impl ConcurrentGraph {
         });
         let bare_type = type_name.rsplit_once('.').map_or(type_name, |(_, t)| t);
         for idx in candidates {
-            if let Some(did) = self.node(idx).def_id() {
-                if let Some(meta) = &self.def(did).metadata
-                    && let Some(rt) = meta.receiver_type
-                {
-                    let rt_str = self.str(rt);
-                    if rt_str == type_name || rt_str == bare_type {
-                        out.push(idx);
-                    }
+            if let Some(did) = self.node(idx).def_id()
+                && let Some(meta) = &self.def(did).metadata
+                && let Some(rt) = meta.receiver_type
+            {
+                let rt_str = self.str(rt);
+                if rt_str == type_name || rt_str == bare_type {
+                    out.push(idx);
                 }
             }
         }
@@ -860,7 +863,7 @@ impl ConcurrentGraph {
             }
         }
         // BFS from each node with outgoing Extends edges.
-        for (&start, _) in &extends_adj {
+        for &start in extends_adj.keys() {
             let mut chain: SmallVec<[NodeId; 8]> = SmallVec::new();
             let mut visited = rustc_hash::FxHashSet::default();
             visited.insert(start);
@@ -994,6 +997,32 @@ impl ConcurrentGraph {
     /// Returns a vec indexed by `NodeId.0`, mapping each node to its
     /// denormalized tag strings. `tag_properties` maps node kind name
     /// (e.g. `"File"`) to `(tag_key, property_name)` pairs.
+    fn node_property(&self, id: NodeId, property: &str) -> Option<String> {
+        let value = match self.node(id) {
+            NodeData::File {
+                extension,
+                language,
+                reason,
+                ..
+            } => match property {
+                "extension" => Some(extension.clone()),
+                "language" => Some(language.map_or("unknown", |l| l.names()[0]).to_string()),
+                "reason" => Some(reason.to_string()),
+                _ => None,
+            },
+            NodeData::Definition { def_id, .. } => match property {
+                "definition_type" => Some(self.def(*def_id).definition_type.to_string()),
+                _ => None,
+            },
+            NodeData::Import { import_id, .. } => match property {
+                "import_type" => Some(self.import(*import_id).import_type.to_string()),
+                _ => None,
+            },
+            NodeData::Directory { .. } => None,
+        };
+        value.filter(|v| !v.is_empty())
+    }
+
     pub fn build_node_tags(
         &self,
         tag_properties: &std::collections::HashMap<String, Vec<(String, String)>>,
@@ -1002,49 +1031,10 @@ impl ConcurrentGraph {
         let mut tags = Vec::with_capacity(count);
         for i in 0..count {
             let node = &self.nodes[i];
-            let (kind_name, prop_value): (&str, Box<dyn Fn(&str) -> Option<String>>) = match node {
-                NodeData::File {
-                    extension,
-                    language,
-                    reason,
-                    ..
-                } => (
-                    "File",
-                    Box::new({
-                        let ext = extension.clone();
-                        let lang = *language;
-                        let reason = *reason;
-                        move |prop: &str| match prop {
-                            "extension" => Some(ext.clone()).filter(|v| !v.is_empty()),
-                            "language" => {
-                                Some(lang.map_or("unknown", |l| l.names()[0]).to_string())
-                                    .filter(|v| !v.is_empty())
-                            }
-                            "reason" => Some(reason.to_string()).filter(|v| !v.is_empty()),
-                            _ => None,
-                        }
-                    }),
-                ),
-                NodeData::Definition { def_id, .. } => {
-                    let dt = self.def(*def_id).definition_type;
-                    (
-                        "Definition",
-                        Box::new(move |prop: &str| match prop {
-                            "definition_type" => Some(dt.to_string()),
-                            _ => None,
-                        }),
-                    )
-                }
-                NodeData::Import { import_id, .. } => {
-                    let it = self.import(*import_id).import_type;
-                    (
-                        "ImportedSymbol",
-                        Box::new(move |prop: &str| match prop {
-                            "import_type" => Some(it.to_string()),
-                            _ => None,
-                        }),
-                    )
-                }
+            let kind_name = match node {
+                NodeData::File { .. } => "File",
+                NodeData::Definition { .. } => "Definition",
+                NodeData::Import { .. } => "ImportedSymbol",
                 NodeData::Directory { .. } => {
                     tags.push(Vec::new());
                     continue;
@@ -1058,7 +1048,8 @@ impl ConcurrentGraph {
                 props
                     .iter()
                     .filter_map(|(tag_key, prop_name)| {
-                        prop_value(prop_name).map(|val| format!("{tag_key}:{val}"))
+                        let val = self.node_property(NodeId(i as u32), prop_name)?;
+                        Some(format!("{tag_key}:{val}"))
                     })
                     .collect(),
             );
@@ -1066,6 +1057,10 @@ impl ConcurrentGraph {
         tags
     }
 
+    #[expect(
+        clippy::needless_range_loop,
+        reason = "indexes into both ids[i] and boxcar::Vec nodes[i] which has no zip-friendly iterator"
+    )]
     pub fn assign_ids(&self, project_id: i64, branch: &str) -> Vec<i64> {
         use std::fmt::Write as _;
         let pid = project_id.to_string();
