@@ -14,7 +14,7 @@ use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-use crate::v2::linker::concurrent_graph::{ConcurrentGraph, Edge, NodeId};
+use crate::v2::linker::graph::{CodeGraph, Edge, NodeId};
 use crate::v2::trace::Tracer;
 
 // This is a parse-cost guard for generated Go blobs, not the cumulative Arrow
@@ -306,7 +306,7 @@ impl<'a> GraphStatsCounters<'a> {
         }
     }
 
-    fn record_graph(self, graph: &ConcurrentGraph) {
+    fn record_graph(self, graph: &CodeGraph) {
         if !graph.parsed_only {
             self.directories
                 .fetch_add(graph.iter_directories().count(), Ordering::Relaxed);
@@ -353,7 +353,7 @@ impl<'a> BatchTx<'a> {
 }
 
 impl BatchTx<'_> {
-    pub fn send_graph(&self, graph: ConcurrentGraph) {
+    pub fn send_graph(&self, graph: CodeGraph) {
         self.stats.record_graph(&graph);
         let batches = match self.converter.convert(graph) {
             Ok(batches) => batches,
@@ -395,7 +395,7 @@ impl BatchTx<'_> {
 }
 
 fn write_graph_direct(
-    graph: ConcurrentGraph,
+    graph: CodeGraph,
     converter: &dyn GraphConverter,
     on_batch: &OnBatch,
     errors: &Mutex<Vec<PipelineError>>,
@@ -1099,7 +1099,7 @@ impl FamilyPipeline {
             file_size: u64,
         }
 
-        let mut graph = ConcurrentGraph::new(root_path.to_string());
+        let mut graph = CodeGraph::new(root_path.to_string());
         graph.strings = crate::v2::linker::state::StringPool::new();
         if ctx.config.emit_file_inventory_graph {
             graph.parsed_only = true;
@@ -1566,7 +1566,7 @@ mod tests {
     use crate::v2::types::{DefKind, NodeKind};
 
     struct TestCapture {
-        graphs: std::sync::Mutex<Vec<ConcurrentGraph>>,
+        graphs: std::sync::Mutex<Vec<CodeGraph>>,
     }
 
     impl TestCapture {
@@ -1576,13 +1576,13 @@ mod tests {
             }
         }
 
-        fn take(&self) -> Vec<ConcurrentGraph> {
+        fn take(&self) -> Vec<CodeGraph> {
             std::mem::take(&mut *self.graphs.lock().unwrap())
         }
     }
 
     impl GraphConverter for TestCapture {
-        fn convert(&self, graph: ConcurrentGraph) -> Result<Vec<(String, RecordBatch)>, SinkError> {
+        fn convert(&self, graph: CodeGraph) -> Result<Vec<(String, RecordBatch)>, SinkError> {
             self.graphs.lock().unwrap().push(graph);
             Ok(Vec::new())
         }
@@ -1591,7 +1591,7 @@ mod tests {
     struct OffsetOverflowOnParsedGraph;
 
     impl GraphConverter for OffsetOverflowOnParsedGraph {
-        fn convert(&self, graph: ConcurrentGraph) -> Result<Vec<(String, RecordBatch)>, SinkError> {
+        fn convert(&self, graph: CodeGraph) -> Result<Vec<(String, RecordBatch)>, SinkError> {
             if !graph.parsed_only {
                 Ok(Vec::new())
             } else {
@@ -1603,7 +1603,7 @@ mod tests {
     struct TypedOffsetOverflowOnParsedGraph;
 
     impl GraphConverter for TypedOffsetOverflowOnParsedGraph {
-        fn convert(&self, graph: ConcurrentGraph) -> Result<Vec<(String, RecordBatch)>, SinkError> {
+        fn convert(&self, graph: CodeGraph) -> Result<Vec<(String, RecordBatch)>, SinkError> {
             if !graph.parsed_only {
                 Ok(Vec::new())
             } else {
@@ -1619,7 +1619,7 @@ mod tests {
         format!("{manifest}/../../fixtures/code/{relative}")
     }
 
-    fn parse_fixture_file(path: &str, language: Language) -> ConcurrentGraph {
+    fn parse_fixture_file(path: &str, language: Language) -> CodeGraph {
         let ctx = Arc::new(PipelineContext {
             config: PipelineConfig::default(),
             tracer: crate::v2::trace::Tracer::new(false),

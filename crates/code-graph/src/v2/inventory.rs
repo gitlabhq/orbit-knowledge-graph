@@ -9,7 +9,7 @@ use rustc_hash::FxHashMap;
 
 use crate::v2::config::{Language, LanguageFamily, detect_language_from_path};
 use crate::v2::error::FileReason;
-use crate::v2::linker::concurrent_graph::ConcurrentGraph;
+use crate::v2::linker::graph::CodeGraph;
 
 /// Input to a language pipeline: file path (source read on demand).
 pub type FileInput = String;
@@ -79,8 +79,8 @@ pub fn build_file_inventory_graph(
     inventory: &[FileInventoryEntry],
     parsed_file_languages: &FxHashMap<String, Language>,
     reasons: &FxHashMap<&str, FileReason>,
-) -> ConcurrentGraph {
-    let graph = ConcurrentGraph::new(root.to_string_lossy().to_string());
+) -> CodeGraph {
+    let graph = CodeGraph::new(root.to_string_lossy().to_string());
     for entry in inventory {
         let language = parsed_file_languages.get(&entry.path).copied();
         let reason = reasons

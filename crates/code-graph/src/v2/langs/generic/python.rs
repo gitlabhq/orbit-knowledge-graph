@@ -506,7 +506,7 @@ fn build_python_import_rewriter(paths: &[&str], sep: &str) -> Box<ImportRewriter
 /// Index every `from M import ...` (named or `import *`) keyed by the declaring
 /// module, so callers of a re-exported name bind to the concrete definition.
 fn build_python_reexport_index(
-    graph: &crate::v2::linker::concurrent_graph::ConcurrentGraph,
+    graph: &crate::v2::linker::graph::CodeGraph,
     sep: &str,
 ) -> crate::v2::linker::graph::ReexportIndex {
     let mut index = crate::v2::linker::graph::ReexportIndex::default();

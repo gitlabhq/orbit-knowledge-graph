@@ -10,7 +10,7 @@ use treesitter_visit::Match::*;
 use treesitter_visit::extract::{Extract, child_of_kind, field, text};
 use treesitter_visit::predicate::{Pred, field_kind, has_child, has_named_prev_sibling};
 
-use crate::v2::linker::concurrent_graph::ConcurrentGraph;
+use crate::v2::linker::graph::CodeGraph;
 use crate::v2::linker::rules::{ImportStrategy, ReceiverMode, ResolveStage, ResolverHooks};
 use crate::v2::linker::{HasRules, ResolutionRules};
 use treesitter_visit::tree_sitter::StrDoc;
@@ -338,7 +338,7 @@ fn push_import(
 
 /// Resolve a chain base like `Baz` in `Baz.hello(name)` to a module
 /// FQN when no alias or SSA binding covers it.
-fn elixir_resolve_ident_type(graph: &ConcurrentGraph, name: &str) -> Option<String> {
+fn elixir_resolve_ident_type(graph: &CodeGraph, name: &str) -> Option<String> {
     let nodes = graph.resolve_scope_nodes(name);
     for &node in &nodes {
         if let Some(did) = graph.node(node).def_id() {

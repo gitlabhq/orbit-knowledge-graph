@@ -1,9 +1,9 @@
-//! All lookups go through `ConcurrentGraph` indexes (DashMap).
-//! String access goes through `ConcurrentGraph.str(id)` (StringPool).
+//! All lookups go through `CodeGraph` indexes (DashMap).
+//! String access goes through `CodeGraph.str(id)` (StringPool).
 
 use rustc_hash::FxHashMap;
 
-use super::concurrent_graph::{ConcurrentGraph, NodeId};
+use super::graph::{CodeGraph, NodeId};
 use super::rules::ImportStrategy;
 use super::state::ScratchBuf;
 use crate::v2::types::ImportBindingKind;
@@ -50,7 +50,7 @@ pub(crate) fn dir_of(path: &str) -> &str {
 }
 
 pub(crate) struct ImportResolver<'a> {
-    pub graph: &'a ConcurrentGraph,
+    pub graph: &'a CodeGraph,
     pub file_node: NodeId,
     pub import_map: &'a FxHashMap<String, Vec<NodeId>>,
     pub scratch: &'a mut ScratchBuf,

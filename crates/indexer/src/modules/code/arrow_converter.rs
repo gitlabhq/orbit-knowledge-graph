@@ -65,7 +65,7 @@ pub struct ConvertedGraphData {
 }
 
 pub fn convert_code_graph(
-    graph: &code_graph::v2::linker::concurrent_graph::ConcurrentGraph,
+    graph: &code_graph::v2::linker::graph::CodeGraph,
     envelope: &IndexerEnvelope,
     specs: &ConverterSpecs,
 ) -> Result<ConvertedGraphData, ArrowError> {
@@ -78,7 +78,7 @@ pub fn convert_code_graph(
 }
 
 fn convert_repository_graph(
-    graph: &code_graph::v2::linker::concurrent_graph::ConcurrentGraph,
+    graph: &code_graph::v2::linker::graph::CodeGraph,
     ids: &[i64],
     envelope: &IndexerEnvelope,
     specs: &ConverterSpecs,
@@ -94,7 +94,7 @@ fn convert_repository_graph(
 }
 
 fn convert_semantic_graph(
-    graph: &code_graph::v2::linker::concurrent_graph::ConcurrentGraph,
+    graph: &code_graph::v2::linker::graph::CodeGraph,
     ids: &[i64],
     envelope: &IndexerEnvelope,
     specs: &ConverterSpecs,
@@ -215,12 +215,12 @@ fn edge_specs(ontology: &Ontology) -> Vec<ColumnSpec> {
 }
 
 fn convert_entity<'a, R: AsRecordBatch<IndexerEnvelope>>(
-    graph: &'a code_graph::v2::linker::concurrent_graph::ConcurrentGraph,
+    graph: &'a code_graph::v2::linker::graph::CodeGraph,
     ids: &[i64],
     env: &IndexerEnvelope,
     specs: &[ColumnSpec],
     build_rows: impl FnOnce(
-        &'a code_graph::v2::linker::concurrent_graph::ConcurrentGraph,
+        &'a code_graph::v2::linker::graph::CodeGraph,
         &[i64],
     ) -> Vec<R>,
 ) -> Result<RecordBatch, ArrowError> {
@@ -237,7 +237,7 @@ fn convert_empty_entity<R: AsRecordBatch<IndexerEnvelope>>(
 }
 
 fn convert_directories(
-    graph: &code_graph::v2::linker::concurrent_graph::ConcurrentGraph,
+    graph: &code_graph::v2::linker::graph::CodeGraph,
     ids: &[i64],
     env: &IndexerEnvelope,
     specs: &[ColumnSpec],
@@ -261,7 +261,7 @@ fn convert_empty_directories(
 }
 
 fn convert_files(
-    graph: &code_graph::v2::linker::concurrent_graph::ConcurrentGraph,
+    graph: &code_graph::v2::linker::graph::CodeGraph,
     ids: &[i64],
     env: &IndexerEnvelope,
     specs: &[ColumnSpec],
@@ -295,7 +295,7 @@ fn convert_empty_files(
 }
 
 fn convert_definitions(
-    graph: &code_graph::v2::linker::concurrent_graph::ConcurrentGraph,
+    graph: &code_graph::v2::linker::graph::CodeGraph,
     ids: &[i64],
     env: &IndexerEnvelope,
     specs: &[ColumnSpec],
@@ -313,7 +313,7 @@ fn convert_definitions(
 }
 
 fn convert_imports(
-    graph: &code_graph::v2::linker::concurrent_graph::ConcurrentGraph,
+    graph: &code_graph::v2::linker::graph::CodeGraph,
     ids: &[i64],
     env: &IndexerEnvelope,
     specs: &[ColumnSpec],
@@ -364,7 +364,7 @@ fn convert_empty_branch(specs: &[ColumnSpec]) -> Result<RecordBatch, ArrowError>
 }
 
 fn convert_repository_edges(
-    graph: &code_graph::v2::linker::concurrent_graph::ConcurrentGraph,
+    graph: &code_graph::v2::linker::graph::CodeGraph,
     ids: &[i64],
     env: &IndexerEnvelope,
     specs: &ConverterSpecs,
@@ -434,7 +434,7 @@ fn convert_repository_edges(
 }
 
 fn convert_semantic_edges(
-    graph: &code_graph::v2::linker::concurrent_graph::ConcurrentGraph,
+    graph: &code_graph::v2::linker::graph::CodeGraph,
     ids: &[i64],
     env: &IndexerEnvelope,
     specs: &ConverterSpecs,
@@ -482,7 +482,7 @@ impl AsRecordBatch for IndexerEdgeRow<'_> {
 }
 
 fn branch_contains_directory_rows<'a>(
-    graph: &'a code_graph::v2::linker::concurrent_graph::ConcurrentGraph,
+    graph: &'a code_graph::v2::linker::graph::CodeGraph,
     ids: &'a [i64],
     env: &'a IndexerEnvelope,
     branch_id: i64,
@@ -505,7 +505,7 @@ fn branch_contains_directory_rows<'a>(
 }
 
 fn branch_contains_file_rows<'a>(
-    graph: &'a code_graph::v2::linker::concurrent_graph::ConcurrentGraph,
+    graph: &'a code_graph::v2::linker::graph::CodeGraph,
     ids: &'a [i64],
     env: &'a IndexerEnvelope,
     branch_id: i64,
@@ -529,7 +529,7 @@ fn branch_contains_file_rows<'a>(
 }
 
 fn repository_on_branch_rows<'a>(
-    graph: &'a code_graph::v2::linker::concurrent_graph::ConcurrentGraph,
+    graph: &'a code_graph::v2::linker::graph::CodeGraph,
     ids: &'a [i64],
     env: &'a IndexerEnvelope,
     branch_id: i64,
@@ -567,7 +567,7 @@ fn repository_on_branch_rows<'a>(
 }
 
 fn graph_edge_rows<'a>(
-    graph: &'a code_graph::v2::linker::concurrent_graph::ConcurrentGraph,
+    graph: &'a code_graph::v2::linker::graph::CodeGraph,
     ids: &'a [i64],
     env: &'a IndexerEnvelope,
     tag_cache: &[Vec<String>],
@@ -684,7 +684,7 @@ impl IndexerConverter {
 impl code_graph::v2::GraphConverter for IndexerConverter {
     fn convert(
         &self,
-        graph: code_graph::v2::linker::concurrent_graph::ConcurrentGraph,
+        graph: code_graph::v2::linker::graph::CodeGraph,
     ) -> Result<Vec<(String, RecordBatch)>, SinkError> {
         let data = convert_code_graph(&graph, &self.envelope, &self.specs)
             .map_err(|e| SinkError(format!("ClickHouse graph conversion: {e}")))?;

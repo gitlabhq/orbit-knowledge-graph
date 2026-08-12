@@ -4,7 +4,7 @@ use std::sync::Arc;
 use arrow_56::array::{Array, ArrayBuilder, BooleanBuilder, Int64Builder, StringBuilder};
 use arrow_56::datatypes::{DataType, Field, Schema};
 use arrow_56::record_batch::RecordBatch;
-use code_graph::v2::linker::concurrent_graph::{ConcurrentGraph, NodeId};
+use code_graph::v2::linker::graph::{CodeGraph, NodeId};
 use code_graph::v2::linker::graph::RowContext;
 use code_graph::v2::types::EdgeKind;
 
@@ -12,7 +12,7 @@ pub(crate) type LanceDatasets = HashMap<String, RecordBatch>;
 type NodeIds = Vec<i64>;
 
 pub(crate) fn to_lance_datasets(
-    graph: &ConcurrentGraph,
+    graph: &CodeGraph,
     ctx: &RowContext<'_>,
 ) -> anyhow::Result<LanceDatasets> {
     let ids = graph.assign_ids(ctx.project_id, ctx.branch);
@@ -47,7 +47,7 @@ fn make_batch(
     Ok(RecordBatch::try_new(schema, arrays)?)
 }
 
-fn build_directory_batch(graph: &ConcurrentGraph, ids: &NodeIds) -> anyhow::Result<RecordBatch> {
+fn build_directory_batch(graph: &CodeGraph, ids: &NodeIds) -> anyhow::Result<RecordBatch> {
     let dirs: Vec<_> = graph.iter_directories().collect();
     let n = dirs.len();
     let mut id_b = Int64Builder::with_capacity(n);
@@ -70,7 +70,7 @@ fn build_directory_batch(graph: &ConcurrentGraph, ids: &NodeIds) -> anyhow::Resu
     )
 }
 
-fn build_file_batch(graph: &ConcurrentGraph, ids: &NodeIds) -> anyhow::Result<RecordBatch> {
+fn build_file_batch(graph: &CodeGraph, ids: &NodeIds) -> anyhow::Result<RecordBatch> {
     let files: Vec<_> = graph.iter_files().collect();
     let n = files.len();
     let mut id_b = Int64Builder::with_capacity(n);
@@ -105,7 +105,7 @@ fn build_file_batch(graph: &ConcurrentGraph, ids: &NodeIds) -> anyhow::Result<Re
     )
 }
 
-fn build_definition_batch(graph: &ConcurrentGraph, ids: &NodeIds) -> anyhow::Result<RecordBatch> {
+fn build_definition_batch(graph: &CodeGraph, ids: &NodeIds) -> anyhow::Result<RecordBatch> {
     let defs: Vec<_> = graph.iter_definitions().collect();
     let n = defs.len();
     let mut id_b = Int64Builder::with_capacity(n);
@@ -164,7 +164,7 @@ fn build_definition_batch(graph: &ConcurrentGraph, ids: &NodeIds) -> anyhow::Res
     )
 }
 
-fn build_import_batch(graph: &ConcurrentGraph, ids: &NodeIds) -> anyhow::Result<RecordBatch> {
+fn build_import_batch(graph: &CodeGraph, ids: &NodeIds) -> anyhow::Result<RecordBatch> {
     let imports: Vec<_> = graph.iter_imports().collect();
     let n = imports.len();
     let mut id_b = Int64Builder::with_capacity(n);
@@ -255,7 +255,7 @@ struct EdgeRow {
     target_node_kind: String,
 }
 
-fn build_edge_rows(graph: &ConcurrentGraph, ids: &NodeIds) -> Vec<EdgeRow> {
+fn build_edge_rows(graph: &CodeGraph, ids: &NodeIds) -> Vec<EdgeRow> {
     graph
         .iter_edges()
         .filter(|edge| !graph.parsed_only || edge.relationship.edge_kind != EdgeKind::Contains)

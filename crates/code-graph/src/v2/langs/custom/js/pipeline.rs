@@ -147,7 +147,7 @@ mod tests {
     impl GraphConverter for NoopConverter {
         fn convert(
             &self,
-            _graph: crate::v2::linker::concurrent_graph::ConcurrentGraph,
+            _graph: crate::v2::linker::graph::CodeGraph,
         ) -> Result<Vec<(String, RecordBatch)>, crate::v2::SinkError> {
             Ok(Vec::new())
         }

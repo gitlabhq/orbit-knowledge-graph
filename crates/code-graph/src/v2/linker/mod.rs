@@ -1,10 +1,10 @@
-pub mod concurrent_graph;
 pub mod graph;
 pub mod imports;
 pub mod resolver;
 pub mod rules;
 pub mod state;
 
+pub use graph::{CodeGraph, Edge, NodeId, DefId, ImportId};
 pub use imports::ResolveSettings;
 pub use resolver::FileResolver;
 pub use rules::{

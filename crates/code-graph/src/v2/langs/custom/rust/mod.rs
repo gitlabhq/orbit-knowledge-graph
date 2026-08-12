@@ -42,7 +42,7 @@ pub(super) use triomphe::Arc;
 use crate::v2::config::Language;
 use crate::v2::dsl::ssa::{BlockId, ResolvedSite, SsaEngine, SsaValue};
 use crate::v2::error::{AbortPhase, AnalyzerError, FileFault, FileSkip};
-use crate::v2::linker::concurrent_graph::{ConcurrentGraph, Edge, NodeId};
+use crate::v2::linker::graph::{CodeGraph, Edge, NodeId};
 use crate::v2::sentinel;
 
 use crate::v2::inventory::FileInput;
@@ -580,8 +580,8 @@ fn build_graph(
     root_path: &str,
     parsed: &[ParsedRustFile],
     pool: crate::v2::linker::state::StringPool,
-) -> ConcurrentGraph {
-    let mut graph = ConcurrentGraph::new(root_path.to_string());
+) -> CodeGraph {
+    let mut graph = CodeGraph::new(root_path.to_string());
     graph.strings = pool;
 
     for file in parsed.iter() {
@@ -604,7 +604,7 @@ fn build_graph(
     graph
 }
 
-fn add_unresolved_imported_call_edges(graph: &ConcurrentGraph, parsed: &[ParsedRustFile]) {
+fn add_unresolved_imported_call_edges(graph: &CodeGraph, parsed: &[ParsedRustFile]) {
     let import_lookup = RustImportedSymbolLookup::from_graph(graph);
     let mut seen_edges = HashSet::new();
 
@@ -654,7 +654,7 @@ struct RustImportedSymbolEntry {
 }
 
 impl RustImportedSymbolLookup {
-    fn from_graph(graph: &ConcurrentGraph) -> Self {
+    fn from_graph(graph: &CodeGraph) -> Self {
         let mut lookup = Self::default();
         for (node, file_path, import) in graph.iter_imports() {
             let Some(name) = rust_external_import_effective_name(graph, import) else {
@@ -710,7 +710,7 @@ impl RustImportedSymbolLookup {
 }
 
 fn rust_external_import_effective_name(
-    graph: &ConcurrentGraph,
+    graph: &CodeGraph,
     import: &crate::v2::linker::GraphImport,
 ) -> Option<String> {
     if import.is_type_only

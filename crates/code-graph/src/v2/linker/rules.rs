@@ -3,7 +3,7 @@
 //! strategy ordering, chain mode, receiver handling). The `FileWalker` uses the
 //! walking half to drive the SSA engine; the `RulesResolver` uses the resolution
 //! half to chase imports.
-use super::concurrent_graph::{ConcurrentGraph, NodeId};
+use super::graph::{CodeGraph, NodeId};
 use crate::v2::types::ExpressionStep;
 
 pub trait HasRules {
@@ -121,7 +121,7 @@ impl Default for ImportedSymbolFallbackPolicy {
     }
 }
 
-pub type ExternalImportTypeHook = fn(&ConcurrentGraph, NodeId) -> Option<String>;
+pub type ExternalImportTypeHook = fn(&CodeGraph, NodeId) -> Option<String>;
 
 #[derive(Debug, Clone, Copy)]
 pub struct ImportedSymbolFallbackContext<'a> {
@@ -130,10 +130,10 @@ pub struct ImportedSymbolFallbackContext<'a> {
 }
 
 pub type ImportedSymbolFallbackCandidatesHook =
-    fn(&ConcurrentGraph, &[NodeId], ImportedSymbolFallbackContext<'_>) -> Vec<NodeId>;
+    fn(&CodeGraph, &[NodeId], ImportedSymbolFallbackContext<'_>) -> Vec<NodeId>;
 
 /// Build the language's symbol re-export index from the linked graph.
-pub type ReexportIndexBuilder = fn(&ConcurrentGraph, &str) -> super::graph::ReexportIndex;
+pub type ReexportIndexBuilder = fn(&CodeGraph, &str) -> super::graph::ReexportIndex;
 
 /// Language-specific resolver behavior. All fields default to `None`.
 #[derive(Default)]
@@ -161,7 +161,7 @@ pub struct ResolverHooks {
     /// values. Called for chain bases like `Model.new.save!` where
     /// `Model` is a constant with no SSA write. Ruby uses this to
     /// look up constants as class names in the graph.
-    pub resolve_ident_type: Option<fn(&ConcurrentGraph, &str) -> Option<String>>,
+    pub resolve_ident_type: Option<fn(&CodeGraph, &str) -> Option<String>>,
     /// Build the language's re-export index; when set, callers bind through
     /// re-exports to the concrete definition instead of an `ImportedSymbol`.
     pub reexport_index_builder: Option<ReexportIndexBuilder>,

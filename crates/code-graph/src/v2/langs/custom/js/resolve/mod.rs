@@ -11,7 +11,7 @@ use std::time::Instant;
 use rayon::prelude::*;
 
 use crate::v2::error::{AbortPhase, FileSkip};
-use crate::v2::linker::concurrent_graph::{ConcurrentGraph, Edge, GraphImport, NodeId};
+use crate::v2::linker::graph::{CodeGraph, Edge, GraphImport, NodeId};
 use crate::v2::linker::rules::{ReceiverMode, ResolveStage};
 use crate::v2::linker::{FileResolver, ResolutionRules, ResolveSettings};
 use crate::v2::pipeline::PipelineContext;
@@ -34,7 +34,7 @@ use super::{
     reason = "top-level resolution entry point combining graph, analysis, index, and context; a params struct would not reduce complexity at the single call site"
 )]
 pub fn attach_resolution_edges(
-    graph: &ConcurrentGraph,
+    graph: &CodeGraph,
     analyzed_files: &[ResolvedJsFile],
     file_infos: &FxHashMap<String, JsPhase1FileInfo>,
     modules_index: &JsModuleIndex,
@@ -166,7 +166,7 @@ pub fn attach_resolution_edges(
 }
 
 fn resolve_local_call_edges(
-    graph: &ConcurrentGraph,
+    graph: &CodeGraph,
     analyzed: &ResolvedJsFile,
     file_info: Option<&JsPhase1FileInfo>,
     tracer: &crate::v2::trace::Tracer,
@@ -252,7 +252,7 @@ fn js_local_settings() -> &'static ResolveSettings {
 }
 
 fn local_target_supports_invocation(
-    graph: &ConcurrentGraph,
+    graph: &CodeGraph,
     analysis: &JsFileAnalysis,
     target_node: NodeId,
     invocation_kind: super::JsInvocationKind,
@@ -270,7 +270,7 @@ fn local_target_supports_invocation(
 }
 
 fn append_direct_class_invocations(
-    graph: &ConcurrentGraph,
+    graph: &CodeGraph,
     file_info: &JsPhase1FileInfo,
     call: &super::JsPendingLocalCall,
     edges: &mut Vec<Edge>,
@@ -324,7 +324,7 @@ fn append_direct_class_invocations(
 }
 
 fn import_target(
-    graph: &ConcurrentGraph,
+    graph: &CodeGraph,
     modules: &JsModuleIndex,
     resolver: &JsCrossFileResolver,
     source_node: NodeId,
@@ -355,7 +355,7 @@ fn import_target(
 }
 
 fn primary_import_target(
-    graph: &ConcurrentGraph,
+    graph: &CodeGraph,
     module: &super::JsModuleRecord,
     import_mode: ImportMode,
 ) -> Option<(NodeId, NodeKind, Option<DefKind>)> {
@@ -370,7 +370,7 @@ fn primary_import_target(
 }
 
 fn named_import_target(
-    graph: &ConcurrentGraph,
+    graph: &CodeGraph,
     modules: &JsModuleIndex,
     resolver: &JsCrossFileResolver,
     module: &super::JsModuleRecord,
@@ -382,7 +382,7 @@ fn named_import_target(
 }
 
 fn resolve_named_export_target(
-    graph: &ConcurrentGraph,
+    graph: &CodeGraph,
     modules: &JsModuleIndex,
     resolver: &JsCrossFileResolver,
     module: &super::JsModuleRecord,
@@ -404,7 +404,7 @@ fn resolve_named_export_target(
 }
 
 fn resolve_star_reexport_target(
-    graph: &ConcurrentGraph,
+    graph: &CodeGraph,
     modules: &JsModuleIndex,
     resolver: &JsCrossFileResolver,
     module_path: &str,
@@ -452,7 +452,7 @@ fn resolve_star_reexport_target(
 }
 
 fn module_target(
-    graph: &ConcurrentGraph,
+    graph: &CodeGraph,
     target_node: NodeId,
 ) -> (NodeId, NodeKind, Option<DefKind>) {
     (
@@ -463,7 +463,7 @@ fn module_target(
 }
 
 fn add_call_relationship_edge(
-    graph: &ConcurrentGraph,
+    graph: &CodeGraph,
     lookup: &GraphLookup,
     relationship: &JsResolvedCallRelationship,
     seen: &mut FxHashSet<(usize, usize, EdgeKind)>,
@@ -519,7 +519,7 @@ fn add_call_relationship_edge(
 }
 
 fn add_unresolved_imported_call_edges(
-    graph: &ConcurrentGraph,
+    graph: &CodeGraph,
     lookup: &GraphLookup,
     import_lookup: &ImportedSymbolLookup,
     calls_by_file: &[(String, Vec<JsCallEdge>)],
@@ -599,7 +599,7 @@ fn source_node_for_call(
 }
 
 fn add_edge(
-    graph: &ConcurrentGraph,
+    graph: &CodeGraph,
     seen: &mut FxHashSet<(usize, usize, EdgeKind)>,
     edge: Edge,
 ) -> bool {
@@ -637,7 +637,7 @@ struct ImportedSymbolEntry {
 }
 
 impl ImportedSymbolLookup {
-    fn from_graph(graph: &ConcurrentGraph, locally_resolved_imports: &FxHashSet<NodeId>) -> Self {
+    fn from_graph(graph: &CodeGraph, locally_resolved_imports: &FxHashSet<NodeId>) -> Self {
         let mut lookup = Self::default();
         for (node, file_path, import) in graph.iter_imports() {
             if import.is_type_only
@@ -698,7 +698,7 @@ impl ImportedSymbolLookup {
 }
 
 fn import_symbol_key_for_graph_import(
-    graph: &ConcurrentGraph,
+    graph: &CodeGraph,
     file_path: &str,
     import: &GraphImport,
 ) -> ImportSymbolKey {
@@ -751,7 +751,7 @@ struct GraphLookup {
 }
 
 impl GraphLookup {
-    fn from_graph(graph: &ConcurrentGraph) -> Self {
+    fn from_graph(graph: &CodeGraph) -> Self {
         let mut lookup = Self::default();
 
         for (node, path, _, _, _, _, _) in graph.iter_files() {

@@ -3,7 +3,7 @@
 //! attach import edges without guessing at file-level fallbacks.
 
 use crate::v2::config::Language;
-use crate::v2::linker::concurrent_graph::{ConcurrentGraph, NodeId};
+use crate::v2::linker::graph::{CodeGraph, NodeId};
 use crate::v2::linker::state::StringPool;
 use crate::v2::types::{
     DefKind, Fqn, GraphDef, GraphDefMeta, GraphImport, ImportMode, Position, Range,
@@ -132,14 +132,14 @@ fn normalize_module_key(path: &str) -> String {
 }
 
 pub struct JsModuleGraphBuilder {
-    graph: ConcurrentGraph,
+    graph: CodeGraph,
     modules: JsModuleIndex,
 }
 
 impl JsModuleGraphBuilder {
     pub fn new(root_path: String) -> Self {
         Self {
-            graph: ConcurrentGraph::new(root_path),
+            graph: CodeGraph::new(root_path),
             modules: JsModuleIndex::default(),
         }
     }
@@ -281,7 +281,7 @@ impl JsModuleGraphBuilder {
         }
     }
 
-    pub fn into_parts(self) -> (ConcurrentGraph, JsModuleIndex) {
+    pub fn into_parts(self) -> (CodeGraph, JsModuleIndex) {
         (self.graph, self.modules)
     }
 }

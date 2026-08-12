@@ -42,7 +42,7 @@ fn edge_specs(ontology: &Ontology) -> Vec<ColumnSpec> {
 }
 
 pub fn convert_v2_graph(
-    graph: &code_graph::v2::linker::concurrent_graph::ConcurrentGraph,
+    graph: &code_graph::v2::linker::graph::CodeGraph,
     project_id: i64,
     branch: &str,
     commit_sha: &str,
@@ -180,7 +180,7 @@ pub struct DuckDbConverter {
 impl code_graph::v2::GraphConverter for DuckDbConverter {
     fn convert(
         &self,
-        graph: code_graph::v2::linker::concurrent_graph::ConcurrentGraph,
+        graph: code_graph::v2::linker::graph::CodeGraph,
     ) -> std::result::Result<Vec<(String, RecordBatch)>, code_graph::v2::SinkError> {
         convert_v2_graph(
             &graph,

@@ -12,7 +12,7 @@ use crate::v2::types::{
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::sync::Arc;
 
-use super::concurrent_graph::{ConcurrentGraph, Edge, NodeId};
+use super::graph::{CodeGraph, Edge, NodeId};
 use super::imports::{ImportResolver, ResolveSettings};
 use super::rules::{
     AmbientImportFallback, ImportedSymbolFallbackContext, ResolutionRules, ResolveStage,
@@ -40,7 +40,7 @@ pub struct FileResolver<'a> {
 
 impl<'a> FileResolver<'a> {
     pub fn new(
-        graph: &'a ConcurrentGraph,
+        graph: &'a CodeGraph,
         file_node: NodeId,
         def_nodes: &'a [NodeId],
         import_nodes: &'a [NodeId],
@@ -70,7 +70,7 @@ impl<'a> FileResolver<'a> {
     /// Construct without a `LanguageContext` — used by custom pipelines
     /// (e.g. JS) that manage their own rules and settings.
     pub fn from_parts(
-        graph: &'a ConcurrentGraph,
+        graph: &'a CodeGraph,
         file_node: NodeId,
         def_nodes: &'a [NodeId],
         import_nodes: &'a [NodeId],
@@ -308,7 +308,7 @@ impl<'a> FileResolver<'a> {
 }
 
 struct ResolveCtx<'a> {
-    graph: &'a ConcurrentGraph,
+    graph: &'a CodeGraph,
     file_node: NodeId,
     def_nodes: &'a [NodeId],
     import_nodes: &'a [NodeId],
@@ -333,7 +333,7 @@ struct ResolveCtx<'a> {
 
 impl<'a> ResolveCtx<'a> {
     fn new(
-        graph: &'a ConcurrentGraph,
+        graph: &'a CodeGraph,
         file_node: NodeId,
         def_nodes: &'a [NodeId],
         import_nodes: &'a [NodeId],
@@ -1396,7 +1396,7 @@ fn format_chain(chain: Option<&[ExpressionStep]>) -> Option<Vec<String>> {
 }
 
 fn pre_resolve_imports(
-    graph: &ConcurrentGraph,
+    graph: &CodeGraph,
     import_nodes: &[NodeId],
     sep: &str,
 ) -> FxHashMap<String, Vec<NodeId>> {

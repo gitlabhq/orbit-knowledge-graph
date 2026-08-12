@@ -10,7 +10,7 @@ use treesitter_visit::predicate::has_child_text;
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
 
-use crate::v2::linker::concurrent_graph::ConcurrentGraph;
+use crate::v2::linker::graph::CodeGraph;
 use crate::v2::linker::rules::{
     ImportStrategy, ImportedSymbolFallbackPolicy, ReceiverMode, ResolveStage, ResolverHooks,
 };
@@ -464,7 +464,7 @@ fn push_use_clause(
 }
 
 /// Resolve a bare/qualified class name to its FQN for chain bases with no SSA value.
-fn php_resolve_ident_type(graph: &ConcurrentGraph, name: &str) -> Option<String> {
+fn php_resolve_ident_type(graph: &CodeGraph, name: &str) -> Option<String> {
     let lookup = name.trim_start_matches('\\');
     for &node in &graph.resolve_scope_nodes(lookup) {
         if let Some(did) = graph.node(node).def_id() {

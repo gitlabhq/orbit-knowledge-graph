@@ -2,7 +2,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use code_graph::v2::config::{CodeFilter, FilterSkip, detect_language_from_path};
-use code_graph::v2::linker::concurrent_graph::ConcurrentGraph;
+use code_graph::v2::linker::graph::CodeGraph;
 use code_graph::v2::types::EdgeKind;
 use code_graph::v2::{FileInventoryEntry, GraphConverter, Pipeline, PipelineConfig, SinkError};
 use flate2::Compression;
@@ -35,11 +35,11 @@ fn build_archive(entries: &[Entry]) -> Vec<u8> {
 }
 
 struct CapturingConverter {
-    graphs: Mutex<Vec<ConcurrentGraph>>,
+    graphs: Mutex<Vec<CodeGraph>>,
 }
 
 struct CapturedPipelineRun {
-    graphs: Vec<ConcurrentGraph>,
+    graphs: Vec<CodeGraph>,
     files_discovered: usize,
     files_indexed: usize,
     files_parsed: usize,
@@ -48,7 +48,7 @@ struct CapturedPipelineRun {
 impl GraphConverter for CapturingConverter {
     fn convert(
         &self,
-        graph: ConcurrentGraph,
+        graph: CodeGraph,
     ) -> Result<Vec<(String, arrow::record_batch::RecordBatch)>, SinkError> {
         self.graphs.lock().unwrap().push(graph);
         Ok(Vec::new())
@@ -151,14 +151,14 @@ async fn run_pipeline(
     }
 }
 
-fn has_def(graphs: &[ConcurrentGraph], file: &str, name: &str) -> bool {
+fn has_def(graphs: &[CodeGraph], file: &str, name: &str) -> bool {
     graphs.iter().any(|g| {
         g.iter_definitions()
             .any(|(_, file_path, def)| file_path.ends_with(file) && g.str(def.name) == name)
     })
 }
 
-fn edge_count(graphs: &[ConcurrentGraph], kind: EdgeKind) -> usize {
+fn edge_count(graphs: &[CodeGraph], kind: EdgeKind) -> usize {
     graphs
         .iter()
         .map(|g| {
@@ -169,7 +169,7 @@ fn edge_count(graphs: &[ConcurrentGraph], kind: EdgeKind) -> usize {
         .sum()
 }
 
-fn file_language(graphs: &[ConcurrentGraph], path: &str) -> Option<&'static str> {
+fn file_language(graphs: &[CodeGraph], path: &str) -> Option<&'static str> {
     graphs
         .iter()
         .flat_map(|g| g.iter_files())
@@ -178,7 +178,7 @@ fn file_language(graphs: &[ConcurrentGraph], path: &str) -> Option<&'static str>
         })
 }
 
-fn file_reason(graphs: &[ConcurrentGraph], path: &str) -> Option<String> {
+fn file_reason(graphs: &[CodeGraph], path: &str) -> Option<String> {
     graphs
         .iter()
         .flat_map(|g| g.iter_files())

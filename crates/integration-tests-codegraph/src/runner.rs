@@ -56,7 +56,7 @@ impl LanceConverter {
 impl GraphConverter for LanceConverter {
     fn convert(
         &self,
-        graph: code_graph::v2::linker::concurrent_graph::ConcurrentGraph,
+        graph: code_graph::v2::linker::graph::CodeGraph,
     ) -> Result<Vec<(String, arrow::record_batch::RecordBatch)>, code_graph::v2::SinkError> {
         let row_ctx = RowContext::empty();
         let ds = to_lance_datasets(&graph, &row_ctx)

@@ -5,7 +5,7 @@ use crate::v2::dsl::types::{
     LanguageHooks, LoopRule, ReferenceRule, ScopeRule, binding, branch, loop_rule, reference,
     scope, scopes,
 };
-use crate::v2::linker::concurrent_graph::{ConcurrentGraph, NodeId};
+use crate::v2::linker::graph::{CodeGraph, NodeId};
 use crate::v2::linker::state::StringPool;
 use crate::v2::types::{BindingKind, DefKind, GraphImport, ImportBindingKind, ImportMode};
 use treesitter_visit::Axis::*;
@@ -451,7 +451,7 @@ const RUBY_DSL_METHODS: &[&str] = &[
 /// Resolve a constant identifier as a class/module FQN for chain
 /// resolution. `Model.new.save!` needs `Model` to resolve to the
 /// `Model` class so the chain can look up `Model::save!`.
-fn ruby_resolve_ident_type(graph: &ConcurrentGraph, name: &str) -> Option<String> {
+fn ruby_resolve_ident_type(graph: &CodeGraph, name: &str) -> Option<String> {
     let nodes = graph.resolve_scope_nodes(name);
     for &node in &nodes {
         if let Some(did) = graph.node(node).def_id() {
@@ -643,7 +643,7 @@ fn push_named_import(
 }
 
 fn ruby_imported_symbol_candidates(
-    graph: &ConcurrentGraph,
+    graph: &CodeGraph,
     import_nodes: &[NodeId],
     ctx: ImportedSymbolFallbackContext<'_>,
 ) -> Vec<NodeId> {
