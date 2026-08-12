@@ -71,9 +71,13 @@ fn local_graph_exists() -> bool {
 }
 
 fn nudge_text(kind: Kind, mode: Mode) -> String {
-    spec::embedded_text(&format!("{}/nudge_{}.md", mode.as_str(), kind.as_str()))
-        .trim_end()
-        .to_string()
+    spec::embedded_text(&format!(
+        "modes/{}/nudge_{}.md",
+        mode.as_str(),
+        kind.as_str()
+    ))
+    .trim_end()
+    .to_string()
 }
 
 fn should_nudge(kind: Kind, call: &Value) -> bool {

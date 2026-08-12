@@ -37,8 +37,6 @@ pub(super) fn deregister(root: &mut Value, path: &[String], value: &str) -> bool
     retain_and_prune(root, path, &|entry| entry.as_str() != Some(value))
 }
 
-/// Walks `path` through objects, creating (and normalizing wrongly-typed)
-/// segments, and returns the array at the final segment.
 fn ensure_array_at<'a>(root: &'a mut Value, path: &[String]) -> &'a mut Vec<Value> {
     let (last, parents) = path.split_last().expect("spec paths are non-empty");
     let mut current = root;

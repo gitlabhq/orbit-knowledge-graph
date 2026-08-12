@@ -1,0 +1,1 @@
+A local Orbit code graph is available — it returns resolved definitions instead of textual noise. Instead of grep, try: `orbit sql "SELECT name, definition_type, file_path, start_line FROM gl_definition WHERE name LIKE '%<term>%'"`. Caller/import/subtype recipes: `orbit skill`. Grep after the graph has oriented you, or to modify/debug specific lines.

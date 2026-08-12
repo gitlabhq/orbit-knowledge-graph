@@ -1,4 +1,4 @@
-//! Declarative assistant specs embedded from `config/setup/`. Each YAML file
+//! Declarative assistant specs embedded from `config/setup/agents/`. Each YAML file
 //! describes one assistant in terms of four generic operations (instruction
 //! file, marker-owned JSON merges, templated files, string registrations);
 //! adding an assistant means adding a YAML file, not Rust.
@@ -16,7 +16,7 @@ struct SetupAssets;
 /// Which graph mechanism the written guidance points at. The rules are the
 /// same either way; only the commands differ, so the two variants replace
 /// each other rather than combining. `{mode}` tokens in specs resolve to the
-/// matching `config/setup/<mode>/` assets and hook-guard flags.
+/// matching `config/setup/modes/<mode>/` assets and hook-guard flags.
 #[derive(clap::ValueEnum, Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub(crate) enum Mode {
     #[default]
@@ -87,7 +87,7 @@ pub(super) struct Registration {
 static SPECS: LazyLock<Vec<AssistantSpec>> = LazyLock::new(|| {
     let mut specs: Vec<AssistantSpec> = SetupAssets::iter()
         .filter_map(|path| {
-            let stem = path.strip_suffix(".yaml")?;
+            let stem = path.strip_prefix("agents/")?.strip_suffix(".yaml")?;
             let file = SetupAssets::get(&path).expect("embedded file must be readable");
             let spec: AssistantSpec = serde_yaml::from_slice(&file.data)
                 .unwrap_or_else(|e| panic!("config/setup/{path} is invalid: {e}"));
@@ -171,7 +171,7 @@ mod tests {
                 }
             }
             for name in ["instructions.md", "nudge_search.md", "nudge_read.md"] {
-                let text = embedded_text(&format!("{}/{name}", mode.as_str()));
+                let text = embedded_text(&format!("modes/{}/{name}", mode.as_str()));
                 assert!(!text.trim().is_empty());
             }
         }
