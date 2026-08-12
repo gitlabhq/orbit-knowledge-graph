@@ -103,8 +103,10 @@ puts token.token
 RUBY
   ) || true
   [[ -n "$PAT" && ${#PAT} -ge 20 ]] && break
-  log "  bootstrap attempt ${attempt} failed, retrying in 30s..."
-  sleep 30
+  if [[ "$attempt" -lt 3 ]]; then
+    log "  bootstrap attempt ${attempt} failed, retrying in 30s..."
+    sleep 30
+  fi
 done
 
 if [[ -z "$PAT" || ${#PAT} -lt 20 ]]; then
