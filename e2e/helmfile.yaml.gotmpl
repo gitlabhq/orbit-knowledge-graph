@@ -142,8 +142,9 @@ releases:
     # Test an unreleased chart: point at a local dir or packaged .tgz, no version.
     chart: {{ env "E2E_GKG_CHART" }}
 {{- else }}
-    chart: oci://registry.gitlab.com/gitlab-org/orbit/orbit-helm-charts/gkg
-    version: {{ $v.gkg.chart }}
+    # VALIDATION: vendored unreleased hook chart. Revert to the OCI line below
+    # (chart: oci://.../gkg, version: {{`{{ $v.gkg.chart }}`}}) before merge.
+    chart: charts/gkg
 {{- end }}
     labels:
       phase: pipeline
