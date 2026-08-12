@@ -10,6 +10,7 @@ use crate::v2::types::{
     DefKind, EdgeKind, ExpressionStep, ImportBindingKind, NodeKind, Relationship,
 };
 use rustc_hash::{FxHashMap, FxHashSet};
+use smallvec::SmallVec;
 use std::sync::Arc;
 
 use super::graph::{CodeGraph, Edge, NodeId};
@@ -482,8 +483,7 @@ impl<'a> ResolveCtx<'a> {
             return false;
         }
         let mut result = Vec::new();
-        self.graph
-            .lookup_nested_with_hierarchy(scope_fqn, member_name, &mut result);
+        lookup_nested_with_hierarchy(self.graph, scope_fqn, member_name, &mut result);
 
         if result.is_empty() {
             let direct_fqn = format!("{}{member_name}", self.scope_member_prefix(scope_fqn));
@@ -496,13 +496,10 @@ impl<'a> ResolveCtx<'a> {
             result.extend_from_slice(&direct);
         }
 
-        // Fallback: try implicit sub-scopes (e.g. Kotlin Companion objects).
-        // Foo.bar() → Foo.Companion.bar()
         if result.is_empty() {
             for &sub in self.rules.implicit_sub_scopes {
                 let sub_scope = format!("{scope_fqn}{}{sub}", self.rules.fqn_separator);
-                self.graph
-                    .lookup_nested_with_hierarchy(&sub_scope, member_name, &mut result);
+                lookup_nested_with_hierarchy(self.graph, &sub_scope, member_name, &mut result);
                 if !result.is_empty() {
                     trace!(
                         self.tracer,
@@ -524,19 +521,18 @@ impl<'a> ResolveCtx<'a> {
         // structs (`Service` embeds `Logger`, `svc.Log()` resolves via
         // Logger's receiver type).
         if result.is_empty() {
-            self.graph
-                .lookup_by_receiver_type(scope_fqn, member_name, &mut result);
+            lookup_by_receiver_type(self.graph, scope_fqn, member_name, &mut result);
             // Walk ancestors for receiver type lookup (struct embedding,
             // extension functions on parent types). Collects ALL matches
             // across the full ancestor chain — doesn't early-exit so that
             // diamond/multiple inheritance cases surface all candidates.
             if result.is_empty() {
-                let scope_nodes = self.graph.resolve_scope_nodes(scope_fqn);
+                let scope_nodes = resolve_scope_nodes(self.graph, scope_fqn);
                 for &scope_node in &scope_nodes {
                     if let Some(ancestors) = self.graph.ancestors(scope_node) {
                         for &ancestor in &ancestors {
                             let ancestor_fqn = self.graph.def_fqn(ancestor);
-                            self.graph.lookup_by_receiver_type(
+                            lookup_by_receiver_type(self.graph, 
                                 ancestor_fqn,
                                 member_name,
                                 &mut result,
@@ -908,7 +904,7 @@ impl<'a> ResolveCtx<'a> {
             };
             if next_is_constructor {
                 for type_fqn in &current_types {
-                    for &node in self.graph.resolve_scope_nodes(type_fqn).iter() {
+                    for &node in resolve_scope_nodes(self.graph, type_fqn).iter() {
                         if self
                             .graph
                             .node(node)
@@ -1331,7 +1327,7 @@ impl<'a> ResolveCtx<'a> {
             let gdef = &self.graph.def(did);
             let fqn = self.graph.str(gdef.fqn);
             for scope in crate::utils::fqn_scopes(fqn, sep) {
-                self.graph.lookup_nested_into(
+                lookup_nested_into(self.graph, 
                     scope,
                     name,
                     |idx| {
@@ -1350,13 +1346,13 @@ impl<'a> ResolveCtx<'a> {
                 // members. Collect all candidates across all ancestors
                 // so diamond/mixin cases surface all matches (consistent
                 // with lookup_nested_cached's ancestor walk).
-                let scope_nodes = self.graph.resolve_scope_nodes(scope);
+                let scope_nodes = resolve_scope_nodes(self.graph, scope);
                 for &scope_node in &scope_nodes {
                     if let Some(ancestors) = self.graph.ancestors(scope_node) {
                         for &ancestor in &ancestors {
                             if let Some(ancestor_did) = self.graph.node(ancestor).def_id() {
                                 let ancestor_fqn = self.graph.str(self.graph.def(ancestor_did).fqn);
-                                self.graph.lookup_nested_into(
+                                lookup_nested_into(self.graph, 
                                     ancestor_fqn,
                                     name,
                                     |idx| {
@@ -1435,4 +1431,147 @@ fn pre_resolve_imports(
         }
     }
     map
+}
+
+// ── Graph query helpers (free functions) ─────────────────────────────────────
+
+/// Like `CodeGraph::lookup_nested` but appends matches to `out`.
+pub fn lookup_nested_into(
+    graph: &CodeGraph,
+    scope: &str,
+    member: &str,
+    verify: impl Fn(NodeId) -> bool,
+    out: &mut Vec<NodeId>,
+) -> bool {
+    let found = graph.lookup_nested(scope, member, verify);
+    if found.is_empty() {
+        return false;
+    }
+    out.extend_from_slice(&found);
+    true
+}
+
+/// Resolve a scope name to definition nodes. Tries by_fqn, then by_name
+/// filtered to type containers, then segmented qualified-name walk.
+pub fn resolve_scope_nodes(graph: &CodeGraph, name: &str) -> SmallVec<[NodeId; 8]> {
+    let by_fqn = graph.lookup_fqn(name, |idx| graph.def_fqn(idx) == name);
+    if !by_fqn.is_empty() {
+        return by_fqn;
+    }
+    let by_name = graph.lookup_name(name, |idx| {
+        graph.def_name(idx) == name
+            && graph
+                .node(idx)
+                .def_id()
+                .is_some_and(|d| graph.def(d).kind.is_type_container())
+    });
+    if !by_name.is_empty() {
+        return by_name;
+    }
+    for sep in &[".", "::"] {
+        let segments: Vec<&str> = name.split(sep).collect();
+        if segments.len() < 2 {
+            continue;
+        }
+        let first_matches = graph.lookup_name(segments[0], |idx| {
+            graph.def_name(idx) == segments[0]
+                && graph
+                    .node(idx)
+                    .def_id()
+                    .is_some_and(|d| graph.def(d).kind.is_type_container())
+        });
+        if first_matches.is_empty() {
+            continue;
+        }
+        let rest = &segments[1..].join(sep);
+        for &node in &first_matches {
+            let prefix_fqn = graph.def_fqn(node);
+            let candidate = format!("{prefix_fqn}{sep}{rest}");
+            let matches = graph.lookup_fqn(&candidate, |idx| graph.def_fqn(idx) == candidate);
+            if !matches.is_empty() {
+                return matches;
+            }
+        }
+    }
+    SmallVec::new()
+}
+
+pub fn lookup_nested_with_hierarchy(
+    graph: &CodeGraph,
+    scope_fqn: &str,
+    member_name: &str,
+    out: &mut Vec<NodeId>,
+) -> bool {
+    let start_nodes = resolve_scope_nodes(graph, scope_fqn);
+    if start_nodes.is_empty() {
+        return false;
+    }
+    let verify_member = |idx: NodeId| graph.def_name(idx) == member_name;
+    for &start in &start_nodes {
+        let actual_fqn = graph.def_fqn(start);
+        if lookup_nested_into(graph, actual_fqn, member_name, verify_member, out) {
+            return true;
+        }
+        if let Some(chain) = graph.ancestors(start) {
+            for &ancestor in &chain {
+                let ancestor_fqn = graph.def_fqn(ancestor);
+                if lookup_nested_into(graph, ancestor_fqn, member_name, verify_member, out) {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
+pub fn lookup_nested_from_node_with_hierarchy(
+    graph: &CodeGraph,
+    scope_node: NodeId,
+    member_name: &str,
+    out: &mut Vec<NodeId>,
+) -> bool {
+    let scope_fqn = graph.def_fqn(scope_node);
+    let verify_member = |idx: NodeId| graph.def_name(idx) == member_name;
+    if lookup_nested_into(graph, scope_fqn, member_name, verify_member, out) {
+        return true;
+    }
+    if let Some(chain) = graph.ancestors(scope_node) {
+        for &ancestor in &chain {
+            let ancestor_fqn = graph.def_fqn(ancestor);
+            if lookup_nested_into(graph, ancestor_fqn, member_name, verify_member, out) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+pub fn lookup_by_receiver_type(
+    graph: &CodeGraph,
+    type_name: &str,
+    member_name: &str,
+    out: &mut Vec<NodeId>,
+) {
+    let candidates = graph.lookup_name(member_name, |idx| {
+        graph
+            .node(idx)
+            .def_id()
+            .is_some_and(|d| graph.str(graph.def(d).name) == member_name)
+    });
+    let bare_type = type_name.rsplit_once('.').map_or(type_name, |(_, t)| t);
+    for idx in candidates {
+        if let Some(did) = graph.node(idx).def_id()
+            && let Some(meta) = &graph.def(did).metadata
+            && let Some(rt) = meta.receiver_type
+        {
+            let rt_str = graph.str(rt);
+            if rt_str == type_name || rt_str == bare_type {
+                out.push(idx);
+            }
+        }
+    }
+}
+
+pub fn def_in_file(graph: &CodeGraph, node_id: NodeId, file_path: &str) -> bool {
+    graph.node_path(node_id) == file_path
 }

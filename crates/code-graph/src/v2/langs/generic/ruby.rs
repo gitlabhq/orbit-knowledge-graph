@@ -452,7 +452,7 @@ const RUBY_DSL_METHODS: &[&str] = &[
 /// resolution. `Model.new.save!` needs `Model` to resolve to the
 /// `Model` class so the chain can look up `Model::save!`.
 fn ruby_resolve_ident_type(graph: &CodeGraph, name: &str) -> Option<String> {
-    let nodes = graph.resolve_scope_nodes(name);
+    let nodes = crate::v2::linker::resolver::resolve_scope_nodes(graph, name);
     for &node in &nodes {
         if let Some(did) = graph.node(node).def_id() {
             let gdef = graph.def(did);

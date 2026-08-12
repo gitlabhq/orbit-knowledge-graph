@@ -15,7 +15,7 @@ pub(crate) fn to_lance_datasets(
     graph: &CodeGraph,
     ctx: &RowContext<'_>,
 ) -> anyhow::Result<LanceDatasets> {
-    let ids = graph.assign_ids(ctx.project_id, ctx.branch);
+    let ids = code_graph::v2::linker::graph::assign_ids(graph, ctx.project_id, ctx.branch);
     let mut datasets = HashMap::new();
 
     if !graph.parsed_only {

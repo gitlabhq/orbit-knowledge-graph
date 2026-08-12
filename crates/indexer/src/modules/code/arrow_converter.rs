@@ -69,7 +69,7 @@ pub fn convert_code_graph(
     envelope: &IndexerEnvelope,
     specs: &ConverterSpecs,
 ) -> Result<ConvertedGraphData, ArrowError> {
-    let ids = graph.assign_ids(envelope.project_id, &envelope.branch);
+    let ids = code_graph::v2::linker::graph::assign_ids(graph, envelope.project_id, &envelope.branch);
     if graph.parsed_only {
         convert_semantic_graph(graph, &ids, envelope, specs)
     } else {
@@ -370,7 +370,7 @@ fn convert_repository_edges(
     specs: &ConverterSpecs,
 ) -> Result<RecordBatch, ArrowError> {
     let branch_id = compute_branch_id(env.project_id, &env.branch);
-    let tag_cache = graph.build_node_tags(&specs.tag_properties);
+    let tag_cache = code_graph::v2::linker::graph::build_node_tags(graph, &specs.tag_properties);
     let branch_tags: Vec<String> = specs
         .tag_properties
         .get("Branch")
@@ -439,7 +439,7 @@ fn convert_semantic_edges(
     env: &IndexerEnvelope,
     specs: &ConverterSpecs,
 ) -> Result<RecordBatch, ArrowError> {
-    let tag_cache = graph.build_node_tags(&specs.tag_properties);
+    let tag_cache = code_graph::v2::linker::graph::build_node_tags(graph, &specs.tag_properties);
     let edge_rows: Vec<_> = graph_edge_rows(graph, ids, env, &tag_cache)
         .into_iter()
         .filter(|row| row.edge_kind != "CONTAINS")

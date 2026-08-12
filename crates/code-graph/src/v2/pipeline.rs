@@ -1255,7 +1255,7 @@ impl FamilyPipeline {
                 continue;
             }
             for (ref_idx, alias_target) in &fwr.unresolved_aliases {
-                let nodes = graph.resolve_scope_nodes(alias_target);
+                let nodes = crate::v2::linker::resolver::resolve_scope_nodes(&graph, alias_target);
                 if let Some(&n) = nodes.first()
                     && graph.def_kind(n).is_some_and(|k| k.is_type_container())
                 {

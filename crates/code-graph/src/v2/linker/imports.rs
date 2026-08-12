@@ -393,7 +393,7 @@ impl<'a> ImportResolver<'a> {
             .graph
             .lookup_fqn(name, |idx| self.graph.def_fqn(idx) == name)
             .into_iter()
-            .filter(|&idx| self.graph.def_in_file(idx, file_path))
+            .filter(|&idx| super::resolver::def_in_file(self.graph, idx, file_path))
             .collect();
         if !by_fqn.is_empty() {
             return by_fqn;
@@ -402,7 +402,7 @@ impl<'a> ImportResolver<'a> {
         self.graph
             .lookup_name(name, |idx| self.graph.def_name(idx) == name)
             .into_iter()
-            .filter(|&idx| self.graph.def_in_file(idx, file_path))
+            .filter(|&idx| super::resolver::def_in_file(self.graph, idx, file_path))
             .collect()
     }
 }

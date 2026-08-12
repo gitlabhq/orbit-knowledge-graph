@@ -57,7 +57,7 @@ pub fn convert_v2_graph(
         branch,
         commit_sha,
     };
-    let ids = graph.assign_ids(project_id, branch);
+    let ids = code_graph::v2::linker::graph::assign_ids(graph, project_id, branch);
     let write_repository_structure = !graph.parsed_only;
     let mut tables = Vec::new();
 

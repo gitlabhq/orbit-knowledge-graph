@@ -636,152 +636,11 @@ impl CodeGraph {
             .unwrap_or_else(|| panic!("expected Import node at {id:?}, got {:?}", self.node(id)))
     }
 
-    pub fn def_in_file(&self, node_id: NodeId, file_path: &str) -> bool {
-        self.node_path(node_id) == file_path
-    }
-
     pub fn file_node_for_path(&self, file_path: &str) -> Option<NodeId> {
         self.file_index.get(file_path).map(|v| *v)
     }
 
-    /// Like `lookup_nested` but appends matches to `out` and returns whether
-    /// any were found.
-    pub fn lookup_nested_into(
-        &self,
-        scope: &str,
-        member: &str,
-        verify: impl Fn(NodeId) -> bool,
-        out: &mut Vec<NodeId>,
-    ) -> bool {
-        let found = self.lookup_nested(scope, member, verify);
-        if found.is_empty() {
-            return false;
-        }
-        out.extend_from_slice(&found);
-        true
-    }
 
-    /// Resolve a scope name to definition nodes. Tries by_fqn first, then
-    /// by_name filtered to type containers, then segmented qualified-name walk.
-    pub fn resolve_scope_nodes(&self, name: &str) -> SmallVec<[NodeId; 8]> {
-        let by_fqn = self.lookup_fqn(name, |idx| self.def_fqn(idx) == name);
-        if !by_fqn.is_empty() {
-            return by_fqn;
-        }
-        let by_name = self.lookup_name(name, |idx| {
-            self.def_name(idx) == name
-                && self
-                    .node(idx)
-                    .def_id()
-                    .is_some_and(|d| self.def(d).kind.is_type_container())
-        });
-        if !by_name.is_empty() {
-            return by_name;
-        }
-        for sep in &[".", "::"] {
-            let segments: Vec<&str> = name.split(sep).collect();
-            if segments.len() < 2 {
-                continue;
-            }
-            let first_matches = self.lookup_name(segments[0], |idx| {
-                self.def_name(idx) == segments[0]
-                    && self
-                        .node(idx)
-                        .def_id()
-                        .is_some_and(|d| self.def(d).kind.is_type_container())
-            });
-            if first_matches.is_empty() {
-                continue;
-            }
-            let rest = &segments[1..].join(sep);
-            for &node in &first_matches {
-                let prefix_fqn = self.def_fqn(node);
-                let candidate = format!("{prefix_fqn}{sep}{rest}");
-                let matches = self.lookup_fqn(&candidate, |idx| self.def_fqn(idx) == candidate);
-                if !matches.is_empty() {
-                    return matches;
-                }
-            }
-        }
-        SmallVec::new()
-    }
-
-    /// Resolve nested member with hierarchy (ancestor chain) walk.
-    pub fn lookup_nested_with_hierarchy(
-        &self,
-        scope_fqn: &str,
-        member_name: &str,
-        out: &mut Vec<NodeId>,
-    ) -> bool {
-        let start_nodes = self.resolve_scope_nodes(scope_fqn);
-        if start_nodes.is_empty() {
-            return false;
-        }
-        let verify_member = |idx: NodeId| self.def_name(idx) == member_name;
-        for &start in &start_nodes {
-            let actual_fqn = self.def_fqn(start);
-            if self.lookup_nested_into(actual_fqn, member_name, verify_member, out) {
-                return true;
-            }
-            if let Some(chain) = self.ancestors(start) {
-                for &ancestor in &chain {
-                    let ancestor_fqn = self.def_fqn(ancestor);
-                    if self.lookup_nested_into(ancestor_fqn, member_name, verify_member, out) {
-                        return true;
-                    }
-                }
-            }
-        }
-        false
-    }
-
-    pub fn lookup_nested_from_node_with_hierarchy(
-        &self,
-        scope_node: NodeId,
-        member_name: &str,
-        out: &mut Vec<NodeId>,
-    ) -> bool {
-        let scope_fqn = self.def_fqn(scope_node);
-        let verify_member = |idx: NodeId| self.def_name(idx) == member_name;
-        if self.lookup_nested_into(scope_fqn, member_name, verify_member, out) {
-            return true;
-        }
-        if let Some(chain) = self.ancestors(scope_node) {
-            for &ancestor in &chain {
-                let ancestor_fqn = self.def_fqn(ancestor);
-                if self.lookup_nested_into(ancestor_fqn, member_name, verify_member, out) {
-                    return true;
-                }
-            }
-        }
-        false
-    }
-
-    /// Find methods whose `receiver_type` metadata matches `type_name`.
-    pub fn lookup_by_receiver_type(
-        &self,
-        type_name: &str,
-        member_name: &str,
-        out: &mut Vec<NodeId>,
-    ) {
-        let candidates = self.lookup_name(member_name, |idx| {
-            self.node(idx)
-                .def_id()
-                .is_some_and(|d| self.str(self.def(d).name) == member_name)
-        });
-        let bare_type = type_name.rsplit_once('.').map_or(type_name, |(_, t)| t);
-        for idx in candidates {
-            if let Some(did) = self.node(idx).def_id()
-                && let Some(meta) = &self.def(did).metadata
-                && let Some(rt) = meta.receiver_type
-            {
-                let rt_str = self.str(rt);
-                if rt_str == type_name || rt_str == bare_type {
-                    out.push(idx);
-                }
-            }
-        }
-    }
 
     // ── Finalize (post barrier-0, pre barrier-1) ─────────────────────────
 
@@ -812,7 +671,7 @@ impl CodeGraph {
             let child_fqn = self.str(gdef.fqn).to_string();
             for &super_id in &meta.super_types {
                 let super_name = self.str(super_id);
-                let mut targets = self.resolve_scope_nodes(super_name);
+                let mut targets = super::resolver::resolve_scope_nodes(self, super_name);
                 targets.retain(|t| *t != child);
                 if targets.len() > 1 {
                     let child_prefix = format!("{}.", child_fqn);
@@ -992,132 +851,129 @@ impl CodeGraph {
         self.edges.count()
     }
 
-    /// Compute stable IDs for all nodes. Returns a dense Vec indexed by
-    /// `NodeId.0` for O(1) lookup.
-    /// Returns a vec indexed by `NodeId.0`, mapping each node to its
-    /// denormalized tag strings. `tag_properties` maps node kind name
-    /// (e.g. `"File"`) to `(tag_key, property_name)` pairs.
-    fn node_property(&self, id: NodeId, property: &str) -> Option<String> {
-        let value = match self.node(id) {
-            NodeData::File {
-                extension,
-                language,
-                reason,
-                ..
-            } => match property {
-                "extension" => Some(extension.clone()),
-                "language" => Some(language.map_or("unknown", |l| l.names()[0]).to_string()),
-                "reason" => Some(reason.to_string()),
-                _ => None,
-            },
-            NodeData::Definition { def_id, .. } => match property {
-                "definition_type" => Some(self.def(*def_id).definition_type.to_string()),
-                _ => None,
-            },
-            NodeData::Import { import_id, .. } => match property {
-                "import_type" => Some(self.import(*import_id).import_type.to_string()),
-                _ => None,
-            },
-            NodeData::Directory { .. } => None,
-        };
-        value.filter(|v| !v.is_empty())
-    }
-
-    pub fn build_node_tags(
-        &self,
-        tag_properties: &std::collections::HashMap<String, Vec<(String, String)>>,
-    ) -> Vec<Vec<String>> {
-        let count = self.nodes.count();
-        let mut tags = Vec::with_capacity(count);
-        for i in 0..count {
-            let node = &self.nodes[i];
-            let kind_name = match node {
-                NodeData::File { .. } => "File",
-                NodeData::Definition { .. } => "Definition",
-                NodeData::Import { .. } => "ImportedSymbol",
-                NodeData::Directory { .. } => {
-                    tags.push(Vec::new());
-                    continue;
-                }
-            };
-            let Some(props) = tag_properties.get(kind_name) else {
-                tags.push(Vec::new());
-                continue;
-            };
-            tags.push(
-                props
-                    .iter()
-                    .filter_map(|(tag_key, prop_name)| {
-                        let val = self.node_property(NodeId(i as u32), prop_name)?;
-                        Some(format!("{tag_key}:{val}"))
-                    })
-                    .collect(),
-            );
-        }
-        tags
-    }
-
-    #[expect(
-        clippy::needless_range_loop,
-        reason = "indexes into both ids[i] and boxcar::Vec nodes[i] which has no zip-friendly iterator"
-    )]
-    pub fn assign_ids(&self, project_id: i64, branch: &str) -> Vec<i64> {
-        use std::fmt::Write as _;
-        let pid = project_id.to_string();
-        let count = self.nodes.count();
-        let mut ids = vec![0i64; count];
-        let mut range_buf = String::new();
-        for i in 0..count {
-            ids[i] = match &self.nodes[i] {
-                NodeData::Directory { path, .. } => compute_id(&[&pid, branch, "dir", path]),
-                NodeData::File { path, .. } => compute_id(&[&pid, branch, "file", path]),
-                NodeData::Definition { file_path, def_id } => {
-                    let def = self.def(*def_id);
-                    range_buf.clear();
-                    let _ = write!(
-                        range_buf,
-                        "{}:{}",
-                        def.range.byte_offset.0, def.range.byte_offset.1
-                    );
-                    compute_id(&[
-                        &pid,
-                        branch,
-                        "def",
-                        self.str(*file_path),
-                        self.str(def.fqn),
-                        &range_buf,
-                    ])
-                }
-                NodeData::Import {
-                    file_path,
-                    import_id,
-                } => {
-                    let imp = self.import(*import_id);
-                    range_buf.clear();
-                    let _ = write!(
-                        range_buf,
-                        "{}:{}",
-                        imp.range.byte_offset.0, imp.range.byte_offset.1
-                    );
-                    compute_id(&[
-                        &pid,
-                        branch,
-                        "import",
-                        self.str(*file_path),
-                        self.str(imp.path),
-                        imp.name.map(|id| self.str(id)).unwrap_or("*"),
-                        &range_buf,
-                    ])
-                }
-            };
-        }
-        ids
-    }
-
     pub fn drop_construction_indexes(&self) {
         self.dir_index.clear();
         self.file_index.clear();
     }
+}
+
+// ── Serialization helpers (free functions) ───────────────────────────────────
+
+fn node_property(graph: &CodeGraph, id: NodeId, property: &str) -> Option<String> {
+    let value = match graph.node(id) {
+        NodeData::File {
+            extension,
+            language,
+            reason,
+            ..
+        } => match property {
+            "extension" => Some(extension.clone()),
+            "language" => Some(language.map_or("unknown", |l| l.names()[0]).to_string()),
+            "reason" => Some(reason.to_string()),
+            _ => None,
+        },
+        NodeData::Definition { def_id, .. } => match property {
+            "definition_type" => Some(graph.def(*def_id).definition_type.to_string()),
+            _ => None,
+        },
+        NodeData::Import { import_id, .. } => match property {
+            "import_type" => Some(graph.import(*import_id).import_type.to_string()),
+            _ => None,
+        },
+        NodeData::Directory { .. } => None,
+    };
+    value.filter(|v| !v.is_empty())
+}
+
+pub fn build_node_tags(
+    graph: &CodeGraph,
+    tag_properties: &std::collections::HashMap<String, Vec<(String, String)>>,
+) -> Vec<Vec<String>> {
+    let count = graph.nodes.count();
+    let mut tags = Vec::with_capacity(count);
+    for i in 0..count {
+        let node = &graph.nodes[i];
+        let kind_name = match node {
+            NodeData::File { .. } => "File",
+            NodeData::Definition { .. } => "Definition",
+            NodeData::Import { .. } => "ImportedSymbol",
+            NodeData::Directory { .. } => {
+                tags.push(Vec::new());
+                continue;
+            }
+        };
+        let Some(props) = tag_properties.get(kind_name) else {
+            tags.push(Vec::new());
+            continue;
+        };
+        tags.push(
+            props
+                .iter()
+                .filter_map(|(tag_key, prop_name)| {
+                    let val = node_property(graph, NodeId(i as u32), prop_name)?;
+                    Some(format!("{tag_key}:{val}"))
+                })
+                .collect(),
+        );
+    }
+    tags
+}
+
+#[expect(
+    clippy::needless_range_loop,
+    reason = "indexes into both ids[i] and boxcar::Vec nodes[i] which has no zip-friendly iterator"
+)]
+pub fn assign_ids(graph: &CodeGraph, project_id: i64, branch: &str) -> Vec<i64> {
+    use std::fmt::Write as _;
+    let pid = project_id.to_string();
+    let count = graph.nodes.count();
+    let mut ids = vec![0i64; count];
+    let mut range_buf = String::new();
+    for i in 0..count {
+        ids[i] = match &graph.nodes[i] {
+            NodeData::Directory { path, .. } => compute_id(&[&pid, branch, "dir", path]),
+            NodeData::File { path, .. } => compute_id(&[&pid, branch, "file", path]),
+            NodeData::Definition { file_path, def_id } => {
+                let def = graph.def(*def_id);
+                range_buf.clear();
+                let _ = write!(
+                    range_buf,
+                    "{}:{}",
+                    def.range.byte_offset.0, def.range.byte_offset.1
+                );
+                compute_id(&[
+                    &pid,
+                    branch,
+                    "def",
+                    graph.str(*file_path),
+                    graph.str(def.fqn),
+                    &range_buf,
+                ])
+            }
+            NodeData::Import {
+                file_path,
+                import_id,
+            } => {
+                let imp = graph.import(*import_id);
+                range_buf.clear();
+                let _ = write!(
+                    range_buf,
+                    "{}:{}",
+                    imp.range.byte_offset.0, imp.range.byte_offset.1
+                );
+                compute_id(&[
+                    &pid,
+                    branch,
+                    "import",
+                    graph.str(*file_path),
+                    graph.str(imp.path),
+                    imp.name.map(|id| graph.str(id)).unwrap_or("*"),
+                    &range_buf,
+                ])
+            }
+        };
+    }
+    ids
 }
 
 #[cfg(test)]
@@ -1349,43 +1205,6 @@ mod tests {
     }
 
     #[test]
-    fn resolve_scope_nodes_by_fqn() {
-        let g = make_graph_with_hierarchy();
-        let found = g.resolve_scope_nodes("pkg.Animal");
-        assert_eq!(found.len(), 1);
-        assert_eq!(g.def_fqn(found[0]), "pkg.Animal");
-    }
-
-    #[test]
-    fn resolve_scope_nodes_by_name_fallback() {
-        let g = make_graph_with_hierarchy();
-        let found = g.resolve_scope_nodes("Animal");
-        assert_eq!(found.len(), 1);
-        assert_eq!(g.def_fqn(found[0]), "pkg.Animal");
-    }
-
-    #[test]
-    fn lookup_nested_with_hierarchy_inherited() {
-        let g = make_graph_with_hierarchy();
-        let mut out = Vec::new();
-        // Dog inherits speak from Animal
-        let found = g.lookup_nested_with_hierarchy("pkg.Dog", "speak", &mut out);
-        assert!(found);
-        assert_eq!(out.len(), 1);
-        assert_eq!(g.def_fqn(out[0]), "pkg.Animal.speak");
-    }
-
-    #[test]
-    fn lookup_nested_with_hierarchy_own_member() {
-        let g = make_graph_with_hierarchy();
-        let mut out = Vec::new();
-        let found = g.lookup_nested_with_hierarchy("pkg.Dog", "fetch", &mut out);
-        assert!(found);
-        assert_eq!(out.len(), 1);
-        assert_eq!(g.def_fqn(out[0]), "pkg.Dog.fetch");
-    }
-
-    #[test]
     fn finalize_builds_extends_edges() {
         let g = make_graph_with_hierarchy();
         let has_extends = (0..g.edges.count()).any(|i| {
@@ -1398,45 +1217,13 @@ mod tests {
     #[test]
     fn finalize_builds_ancestor_table() {
         let g = make_graph_with_hierarchy();
-        let dog_nodes = g.resolve_scope_nodes("pkg.Dog");
+        let dog_nodes = crate::v2::linker::resolver::resolve_scope_nodes(&g, "pkg.Dog");
         assert_eq!(dog_nodes.len(), 1);
         let ancestors = g.ancestors(dog_nodes[0]);
         assert!(ancestors.is_some());
         let chain = ancestors.unwrap();
         assert_eq!(chain.len(), 1);
         assert_eq!(g.def_fqn(chain[0]), "pkg.Animal");
-    }
-
-    #[test]
-    fn lookup_by_receiver_type_finds_methods() {
-        let g = CodeGraph::new("/repo".into());
-        let fp = g.strings.alloc("src/main.go");
-        let recv = g.strings.alloc("Service");
-        let method_name = g.strings.alloc("Run");
-        let method_fqn = g.strings.alloc("main.Run");
-        let did = g.push_def(GraphDef {
-            definition_type: "method",
-            kind: DefKind::Method,
-            name: method_name,
-            fqn: method_fqn,
-            fqn_sep: ".",
-            range: Range::empty(),
-            is_top_level: false,
-            metadata: Some(Box::new(GraphDefMeta {
-                receiver_type: Some(recv),
-                ..GraphDefMeta::default()
-            })),
-        });
-        let node = g.push_node(NodeData::Definition {
-            file_path: fp,
-            def_id: did,
-        });
-        g.index_name("Run", node);
-
-        let mut out = Vec::new();
-        g.lookup_by_receiver_type("Service", "Run", &mut out);
-        assert_eq!(out.len(), 1);
-        assert_eq!(g.def_fqn(out[0]), "main.Run");
     }
 
     #[test]

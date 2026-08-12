@@ -339,7 +339,7 @@ fn push_import(
 /// Resolve a chain base like `Baz` in `Baz.hello(name)` to a module
 /// FQN when no alias or SSA binding covers it.
 fn elixir_resolve_ident_type(graph: &CodeGraph, name: &str) -> Option<String> {
-    let nodes = graph.resolve_scope_nodes(name);
+    let nodes = crate::v2::linker::resolver::resolve_scope_nodes(graph, name);
     for &node in &nodes {
         if let Some(did) = graph.node(node).def_id() {
             let gdef = graph.def(did);
