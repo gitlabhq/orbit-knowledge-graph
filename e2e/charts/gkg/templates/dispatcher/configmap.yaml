@@ -1,0 +1,38 @@
+{{- if .Values.dispatcher.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "gkg.fullname" . }}-dispatcher-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gkg.componentLabels" (dict "root" . "component" "dispatcher") | nindent 4 }}
+data:
+  default.yaml: |
+    dispatcher_health_bind_address: "0.0.0.0:{{ .Values.dispatcher.probes.port }}"
+    nats:
+      url: {{ include "gkg.natsUrl" . | quote }}
+      {{- if .Values.nats.tls.enabled }}
+      tls_ca_cert_path: "/etc/nats-tls/ca.pem"
+      tls_cert_path: "/etc/nats-tls/client.pem"
+      tls_key_path: "/etc/nats-tls/client-key.pem"
+      {{- end }}
+    datalake:
+      {{- include "gkg.clickhouseConfig" (dict "url" (include "gkg.clickhouseDatalakeUrl" .) "config" .Values.clickhouse.datalake) | nindent 6 }}
+    graph:
+      {{- include "gkg.clickhouseConfig" (dict "url" (include "gkg.clickhouseGraphUrl" .) "config" .Values.clickhouse.graph) | nindent 6 }}
+    schedule:
+      tasks:
+        {{- include "gkg.scheduleConfig" . | nindent 8 }}
+    metrics:
+      log_level: {{ .Values.dispatcher.logLevel | quote }}
+      otel:
+        enabled: {{ .Values.metrics.otel.enabled }}
+        {{- if .Values.metrics.otel.enabled }}
+        endpoint: {{ .Values.metrics.otel.endpoint | quote }}
+        {{- end }}
+      prometheus:
+        enabled: {{ .Values.metrics.prometheus.enabled }}
+        port: {{ .Values.metrics.prometheus.port }}
+    analytics:
+      {{- include "gkg.analyticsConfig" . | nindent 6 }}
+{{- end }}

@@ -1,0 +1,62 @@
+{{- if .Values.indexer.enabled }}
+{{- range $name, $pool := .Values.indexer.pools }}
+{{- if eq (include "gkg.indexerPoolEnabled" (dict "root" $ "pool" $pool)) "true" }}
+{{- $merged := include "gkg.indexerPoolMerged" (dict "root" $ "pool" $pool) | fromYaml }}
+{{- $nats := include "gkg.indexerPoolNats" (dict "root" $ "pool" $pool) | fromYaml }}
+{{- $graph := include "gkg.indexerPoolClickhouseGraph" (dict "root" $ "pool" $pool) | fromYaml }}
+{{- $kind := include "gkg.indexerPoolKind" $merged.modules }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "gkg.indexerPoolName" (dict "root" $ "pool" $name) }}-config
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "gkg.indexerPoolLabels" (dict "root" $ "pool" $name "kind" $kind "serviceTag" $merged.image.tag) | nindent 4 }}
+data:
+  default.yaml: |
+    nats:
+      url: {{ include "gkg.natsUrl" $ | quote }}
+      consumer_name: {{ $nats.consumerName | quote }}
+      fetch_expires_secs: {{ $nats.fetchExpiresSecs }}
+      batch_size: {{ $nats.batchSize }}
+      subscription_buffer_size: {{ $nats.subscriptionBufferSize }}
+      {{- if $nats.tls.enabled }}
+      tls_ca_cert_path: "/etc/nats-tls/ca.pem"
+      tls_cert_path: "/etc/nats-tls/client.pem"
+      tls_key_path: "/etc/nats-tls/client-key.pem"
+      {{- end }}
+    datalake:
+      {{- include "gkg.clickhouseConfig" (dict "url" (include "gkg.clickhouseDatalakeUrl" $) "config" $.Values.clickhouse.datalake) | nindent 6 }}
+    graph:
+      {{- include "gkg.clickhouseConfig" (dict "url" (include "gkg.clickhouseGraphUrl" $) "config" $graph) | nindent 6 }}
+    gitlab:
+      base_url: {{ include "gkg.gitlabBaseUrl" $ | quote }}
+      {{- if $.Values.gitlab.resolveHost }}
+      resolve_host: {{ $.Values.gitlab.resolveHost | quote }}
+      {{- end }}
+    metrics:
+      log_level: {{ $merged.logLevel | quote }}
+      otel:
+        enabled: {{ $.Values.metrics.otel.enabled }}
+        {{- if $.Values.metrics.otel.enabled }}
+        endpoint: {{ $.Values.metrics.otel.endpoint | quote }}
+        {{- end }}
+      prometheus:
+        enabled: {{ $.Values.metrics.prometheus.enabled }}
+        port: {{ $.Values.metrics.prometheus.port }}
+    engine:
+      {{- include "gkg.indexerPoolEngine" (dict "root" $ "pool" $pool) | nindent 6 }}
+    schedule:
+      tasks:
+        {{- include "gkg.scheduleConfig" $ | nindent 8 }}
+    analytics:
+      {{- include "gkg.analyticsConfig" $ | nindent 6 }}
+{{- $features := include "gkg.featuresConfig" $ | trim }}
+{{- if $features }}
+    features:
+      {{- $features | nindent 6 }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}

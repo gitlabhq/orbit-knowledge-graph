@@ -1,0 +1,29 @@
+{{- if and .Values.indexer.enabled .Values.metrics.prometheus.enabled }}
+{{- range $name, $pool := .Values.indexer.pools }}
+{{- if eq (include "gkg.indexerPoolEnabled" (dict "root" $ "pool" $pool)) "true" }}
+{{- $merged := include "gkg.indexerPoolMerged" (dict "root" $ "pool" $pool) | fromYaml }}
+{{- $kind := include "gkg.indexerPoolKind" $merged.modules }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: {{ include "gkg.indexerPoolName" (dict "root" $ "pool" $name) }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "gkg.indexerPoolLabels" (dict "root" $ "pool" $name "kind" $kind "serviceTag" $merged.image.tag) | nindent 4 }}
+spec:
+  podTargetLabels:
+    - gkg.gitlab.com/indexer-pool
+    - gkg.gitlab.com/indexer-modules
+    {{- with $.Values.metrics.prometheus.podTargetLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  selector:
+    matchLabels:
+      {{- include "gkg.indexerPoolSelectorLabels" (dict "root" $ "pool" $name) | nindent 6 }}
+  podMetricsEndpoints:
+    - port: metrics
+      path: /metrics
+{{- end }}
+{{- end }}
+{{- end }}

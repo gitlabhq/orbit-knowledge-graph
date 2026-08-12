@@ -1,0 +1,47 @@
+{{- if .Values.indexer.enabled }}
+{{- range $name, $pool := .Values.indexer.pools }}
+{{- if eq (include "gkg.indexerPoolEnabled" (dict "root" $ "pool" $pool)) "true" }}
+{{- $merged := include "gkg.indexerPoolMerged" (dict "root" $ "pool" $pool) | fromYaml }}
+{{- if and $merged.keda $merged.keda.enabled }}
+{{- if not $.Values.healthCheck.enabled }}{{ fail (printf "indexer pool %q sets keda.enabled but healthCheck.enabled is false; KEDA scales on the health-check metrics endpoint" $name) }}{{ end }}
+{{- $kind := include "gkg.indexerPoolKind" $merged.modules }}
+{{- $k := $merged.keda }}
+{{- $path := required (printf "indexer pool %q: keda.trigger.path is required" $name) $k.trigger.path }}
+{{- if not (hasPrefix "/" $path) }}{{ fail (printf "indexer pool %q: keda.trigger.path must start with /" $name) }}{{ end }}
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: {{ include "gkg.indexerPoolName" (dict "root" $ "pool" $name) }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "gkg.indexerPoolLabels" (dict "root" $ "pool" $name "kind" $kind "serviceTag" $merged.image.tag) | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "gkg.indexerPoolName" (dict "root" $ "pool" $name) }}
+  minReplicaCount: {{ required (printf "indexer pool %q: keda.minReplicaCount is required" $name) $k.minReplicaCount }}
+  maxReplicaCount: {{ required (printf "indexer pool %q: keda.maxReplicaCount is required" $name) $k.maxReplicaCount }}
+  pollingInterval: {{ $k.pollingInterval | default 15 }}
+  cooldownPeriod: {{ $k.cooldownPeriod | default 300 }}
+  {{- with $k.fallback }}
+  fallback:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with $k.advanced }}
+  advanced:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  triggers:
+    - type: metrics-api
+      metadata:
+        url: "http://{{ include "gkg.fullname" $ }}-health-check.{{ $.Release.Namespace }}.svc:{{ $.Values.healthCheck.port }}{{ $path }}"
+        valueLocation: {{ required (printf "indexer pool %q: keda.trigger.valueLocation is required" $name) $k.trigger.valueLocation | quote }}
+        targetValue: {{ required (printf "indexer pool %q: keda.trigger.targetValue is required" $name) $k.trigger.targetValue | quote }}
+        activationTargetValue: {{ if hasKey $k.trigger "activationTargetValue" }}{{ $k.trigger.activationTargetValue | quote }}{{ else }}"1"{{ end }}
+        format: "json"
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}

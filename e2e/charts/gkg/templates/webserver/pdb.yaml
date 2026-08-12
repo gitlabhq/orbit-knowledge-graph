@@ -1,0 +1,14 @@
+{{- if and .Values.webserver.enabled .Values.webserver.pdb.enabled (ge (int .Values.webserver.replicas) 2) }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "gkg.fullname" . }}-webserver
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gkg.componentLabels" (dict "root" . "component" "webserver" "serviceTag" .Values.webserver.image.tag) | nindent 4 }}
+spec:
+  {{- include "gkg.pdbSpec" .Values.webserver.pdb | nindent 2 }}
+  selector:
+    matchLabels:
+      {{- include "gkg.componentSelectorLabels" (dict "root" . "component" "webserver") | nindent 6 }}
+{{- end }}

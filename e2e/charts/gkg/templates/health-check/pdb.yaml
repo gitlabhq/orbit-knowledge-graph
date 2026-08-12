@@ -1,0 +1,14 @@
+{{- if and .Values.healthCheck.enabled .Values.healthCheck.pdb.enabled (ge (int .Values.healthCheck.replicas) 2) }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "gkg.fullname" . }}-health-check
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gkg.componentLabels" (dict "root" . "component" "health-check" "serviceTag" .Values.healthCheck.image.tag) | nindent 4 }}
+spec:
+  {{- include "gkg.pdbSpec" .Values.healthCheck.pdb | nindent 2 }}
+  selector:
+    matchLabels:
+      {{- include "gkg.componentSelectorLabels" (dict "root" . "component" "health-check") | nindent 6 }}
+{{- end }}

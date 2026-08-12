@@ -1,0 +1,71 @@
+{{- $WARNING := "########################################\n#              WARNING                 #\n########################################" -}}
+{{- $NOTICE := "########################################\n#               NOTICE                 #\n########################################" -}}
+
+Orbit has been deployed.
+
+Enabled components:
+{{- if .Values.webserver.enabled }}
+  - Webserver: {{ include "gkg.fullname" . }}-webserver
+    Service: {{ include "gkg.fullname" . }}-webserver:{{ .Values.webserver.service.httpPort }} (HTTP), :{{ .Values.webserver.service.grpcPort }} (gRPC)
+{{- end }}
+{{- if .Values.indexer.enabled }}
+  - Indexer pools:
+  {{- range $name, $pool := .Values.indexer.pools }}
+    {{- if eq (include "gkg.indexerPoolEnabled" (dict "root" $ "pool" $pool)) "true" }}
+    {{- $merged := include "gkg.indexerPoolMerged" (dict "root" $ "pool" $pool) | fromYaml }}
+    {{- $kind := include "gkg.indexerPoolKind" $merged.modules }}
+      • {{ include "gkg.indexerPoolName" (dict "root" $ "pool" $name) }} (modules: {{ $kind }}, replicas: {{ $merged.replicas }})
+    {{- end }}
+  {{- end }}
+{{- end }}
+{{- if .Values.dispatcher.enabled }}
+  - Dispatcher: {{ include "gkg.fullname" . }}-dispatcher
+{{- end }}
+{{- if .Values.healthCheck.enabled }}
+  - Health Check: {{ include "gkg.fullname" . }}-health-check:{{ .Values.healthCheck.port }}
+{{- end }}
+
+Application credentials are sourced per-key from secrets.perKey.*:
+{{- range $key := list "gitlabJwtVerifyingKey" "gitlabJwtSigningKey" "datalakePassword" "graphPassword" "graphReadPassword" }}
+{{- $entry := index $.Values.secrets.perKey $key }}
+{{- if $entry.secretName }}
+  - {{ $key }}: {{ $entry.secretName }}
+{{- end }}
+{{- end }}
+
+{{- if .Values.indexer.enabled }}
+{{- $cov := include "gkg.indexerCoverage" . | fromJson }}
+
+{{- if eq (int $cov.count) 0 }}
+
+{{ $WARNING }}
+indexer.enabled is true but no pools are enabled.
+  No indexer Deployments will be rendered. Add at least one entry to
+  `indexer.pools` (e.g. `pools.default: {}` for a universal pool).
+{{- else if and (not (and $cov.covered.code $cov.covered.sdlc $cov.covered.namespace_deletion)) }}
+
+{{ $WARNING }}
+Indexer pools do not cover all engine modules.
+  Missing module coverage:
+  {{- if not $cov.covered.code }}
+    • code{{- end }}
+  {{- if not $cov.covered.sdlc }}
+    • sdlc{{- end }}
+  {{- if not $cov.covered.namespace_deletion }}
+    • namespace_deletion{{- end }}
+  Configure either:
+    • a single universal pool (omit `modules`), or
+    • a `code` pool (modules: [code]) AND an `sdlc` pool (modules: [sdlc, namespace_deletion]).
+{{- else if and $cov.kinds.universal (or $cov.kinds.code $cov.kinds.sdlc) }}
+
+{{ $WARNING }}
+Mixing a universal indexer pool with split (code/sdlc) pools.
+  Handlers will be double-registered, leading to duplicate work and metrics.
+  Use either a single universal pool OR a code + sdlc split, not both.
+{{- else if $cov.kinds.custom }}
+
+{{ $NOTICE }}
+At least one indexer pool uses a custom `modules` subset.
+  Verify the union of all enabled pools' modules matches your intended workload coverage.
+{{- end }}
+{{- end }}

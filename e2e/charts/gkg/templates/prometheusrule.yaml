@@ -1,0 +1,18 @@
+{{- if .Values.alerts.enabled }}
+{{- if not .Values.metrics.prometheus.enabled }}
+{{- fail "alerts.enabled requires metrics.prometheus.enabled so the alerted series are scraped" }}
+{{- end }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "gkg.fullname" . }}-alerts
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gkg.labels" . | nindent 4 }}
+    app.kubernetes.io/part-of: gkg
+    {{- with .Values.alerts.additionalLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  {{- .Files.Get "files/gkg-alert-rules.yaml" | nindent 2 }}
+{{- end }}
