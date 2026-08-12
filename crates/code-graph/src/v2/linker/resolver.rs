@@ -1340,7 +1340,10 @@ impl<'a> ResolveCtx<'a> {
             };
             for scope in crate::utils::fqn_scopes(fqn, sep) {
                 if let Some(scope_id) = self.graph.strings.find(scope) {
-                    self.graph.indexes.nested.lookup_into(scope_id, name_id, &mut result);
+                    self.graph
+                        .indexes
+                        .nested
+                        .lookup_into(scope_id, name_id, &mut result);
                 }
                 if !result.is_empty() {
                     break;
@@ -1351,8 +1354,7 @@ impl<'a> ResolveCtx<'a> {
                     if let Some(ancestors) = self.graph.ancestors(scope_node) {
                         for &ancestor in ancestors {
                             if let Some(ancestor_did) = self.graph.graph[ancestor].def_id() {
-                                let ancestor_fqn_id =
-                                    self.graph.defs[ancestor_did.0 as usize].fqn;
+                                let ancestor_fqn_id = self.graph.defs[ancestor_did.0 as usize].fqn;
                                 self.graph.indexes.nested.lookup_into(
                                     ancestor_fqn_id,
                                     name_id,

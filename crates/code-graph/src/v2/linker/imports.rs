@@ -387,7 +387,9 @@ impl<'a> ImportResolver<'a> {
     fn same_file(&self, name: &str) -> Vec<NodeIndex> {
         let file_path = self.graph.graph[self.file_node].path();
 
-        let by_fqn: Vec<NodeIndex> = self.graph.lookup_fqn(name)
+        let by_fqn: Vec<NodeIndex> = self
+            .graph
+            .lookup_fqn(name)
             .iter()
             .copied()
             .filter(|&idx| self.graph.def_in_file(idx, file_path))

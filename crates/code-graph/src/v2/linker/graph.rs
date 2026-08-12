@@ -579,10 +579,11 @@ impl CodeGraph {
                 continue;
             };
             let mut defs: Vec<_> = self.indexes.by_fqn.lookup(fqn_id).to_vec();
-            if defs.is_empty() && !imp_path.is_empty() {
-                if let Some(path_id) = self.strings.find(imp_path) {
-                    defs = self.indexes.by_fqn.lookup(path_id).to_vec();
-                }
+            if defs.is_empty()
+                && !imp_path.is_empty()
+                && let Some(path_id) = self.strings.find(imp_path)
+            {
+                defs = self.indexes.by_fqn.lookup(path_id).to_vec();
             }
             if !defs.is_empty() {
                 map.entry(name.to_string()).or_insert(defs);
@@ -607,13 +608,21 @@ impl CodeGraph {
 
         for &start in &start_nodes {
             let actual_fqn_id = self.def(start).fqn;
-            if self.indexes.nested.lookup_into(actual_fqn_id, member_id, out) {
+            if self
+                .indexes
+                .nested
+                .lookup_into(actual_fqn_id, member_id, out)
+            {
                 return true;
             }
             if let Some(chain) = self.indexes.ancestors.get(&start) {
                 for &ancestor in chain {
                     let ancestor_fqn_id = self.def(ancestor).fqn;
-                    if self.indexes.nested.lookup_into(ancestor_fqn_id, member_id, out) {
+                    if self
+                        .indexes
+                        .nested
+                        .lookup_into(ancestor_fqn_id, member_id, out)
+                    {
                         return true;
                     }
                 }
@@ -661,13 +670,21 @@ impl CodeGraph {
             return false;
         };
         let scope_fqn_id = self.def(scope_node).fqn;
-        if self.indexes.nested.lookup_into(scope_fqn_id, member_id, out) {
+        if self
+            .indexes
+            .nested
+            .lookup_into(scope_fqn_id, member_id, out)
+        {
             return true;
         }
         if let Some(chain) = self.indexes.ancestors.get(&scope_node) {
             for &ancestor in chain {
                 let ancestor_fqn_id = self.def(ancestor).fqn;
-                if self.indexes.nested.lookup_into(ancestor_fqn_id, member_id, out) {
+                if self
+                    .indexes
+                    .nested
+                    .lookup_into(ancestor_fqn_id, member_id, out)
+                {
                     return true;
                 }
             }
@@ -988,7 +1005,10 @@ impl CodeGraph {
         if !by_fqn.is_empty() {
             return SmallVec::from_slice(by_fqn);
         }
-        let by_name: SmallVec<[NodeIndex; 8]> = self.indexes.by_name.lookup(name_id)
+        let by_name: SmallVec<[NodeIndex; 8]> = self
+            .indexes
+            .by_name
+            .lookup(name_id)
             .iter()
             .copied()
             .filter(|&idx| {
@@ -1008,7 +1028,10 @@ impl CodeGraph {
             let Some(first_id) = self.strings.find(segments[0]) else {
                 continue;
             };
-            let first_matches: SmallVec<[NodeIndex; 8]> = self.indexes.by_name.lookup(first_id)
+            let first_matches: SmallVec<[NodeIndex; 8]> = self
+                .indexes
+                .by_name
+                .lookup(first_id)
                 .iter()
                 .copied()
                 .filter(|&idx| {

@@ -143,12 +143,7 @@ impl NestedMap {
         candidates.as_slice()
     }
 
-    pub fn lookup_into(
-        &self,
-        scope: StrId,
-        member: StrId,
-        out: &mut Vec<NodeIndex>,
-    ) -> bool {
+    pub fn lookup_into(&self, scope: StrId, member: StrId, out: &mut Vec<NodeIndex>) -> bool {
         let Some(inner) = self.inner.get(&scope) else {
             return false;
         };
