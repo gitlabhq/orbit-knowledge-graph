@@ -55,34 +55,12 @@ if [[ -n "${RA_DATALAKE_SNAPSHOT:-}" ]]; then
   ORIG_CONTENT=$($KC get volumesnapshot "${RA_DATALAKE_SNAPSHOT}" \
     -n "${RA_DATALAKE_SNAPSHOT_NS:-ra-clickhouse}" \
     -o jsonpath='{.status.boundVolumeSnapshotContentName}')
-  SNAP_HANDLE=$($KC get volumesnapshotcontent "${ORIG_CONTENT}" \
+  export SNAP_HANDLE=$($KC get volumesnapshotcontent "${ORIG_CONTENT}" \
     -o jsonpath='{.status.snapshotHandle}')
-  LOCAL_SNAP="datalake-${RUN_ID}"
-  LOCAL_CONTENT="datalake-content-${RUN_ID}"
+  export LOCAL_SNAP="datalake-${RUN_ID}"
+  export LOCAL_CONTENT="datalake-content-${RUN_ID}"
   $KC create ns "${CH_NS}" --dry-run=client -o yaml | $KC apply -f -
-  cat <<EOSNAP | $KC apply -f -
-apiVersion: snapshot.storage.k8s.io/v1
-kind: VolumeSnapshotContent
-metadata:
-  name: ${LOCAL_CONTENT}
-spec:
-  driver: pd.csi.storage.gke.io
-  deletionPolicy: Retain
-  source:
-    snapshotHandle: ${SNAP_HANDLE}
-  volumeSnapshotRef:
-    name: ${LOCAL_SNAP}
-    namespace: ${CH_NS}
----
-apiVersion: snapshot.storage.k8s.io/v1
-kind: VolumeSnapshot
-metadata:
-  name: ${LOCAL_SNAP}
-  namespace: ${CH_NS}
-spec:
-  source:
-    volumeSnapshotContentName: ${LOCAL_CONTENT}
-EOSNAP
+  envsubst < "${BENCH_DIR}/manifests/snapshot-restore.yaml" | $KC apply -f -
   log "  Waiting for snapshot ${LOCAL_SNAP} to bind"
   $KC wait -n "${CH_NS}" volumesnapshot/"${LOCAL_SNAP}" \
     --for=jsonpath='{.status.readyToUse}'=true --timeout=60s
@@ -193,23 +171,9 @@ log "  Dispatcher and indexer restarted"
 
 # --- 9. Enable GMP metrics scraping for GKG pods ---
 log "Creating GMP PodMonitoring resources"
-GKG_NS="e2e-${RUN_ID}-gkg"
-for component in dispatcher indexer webserver; do
-  cat <<EOMON | $KC apply -f -
-apiVersion: monitoring.googleapis.com/v1
-kind: PodMonitoring
-metadata:
-  name: gkg-${component}
-  namespace: ${GKG_NS}
-spec:
-  selector:
-    matchLabels:
-      app.kubernetes.io/component: ${component}
-      app.kubernetes.io/name: gkg
-  endpoints:
-    - port: metrics
-      interval: 15s
-EOMON
+export GKG_NAMESPACE="e2e-${RUN_ID}-gkg"
+for comp in dispatcher indexer webserver; do
+  COMPONENT="${comp}" envsubst < "${BENCH_DIR}/manifests/pod-monitoring.yaml" | $KC apply -f -
 done
 log "  GMP scraping GKG pods every 15s"
 
