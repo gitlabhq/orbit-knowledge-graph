@@ -8,6 +8,19 @@ source "${BENCH_DIR}/scripts/lib.sh"
 IFS=_ read -r _ GKE_PROJECT GKE_ZONE GKE_CLUSTER <<< "${KCTX}"
 
 case "${1:-}" in
+  teardown)
+    log "Teardown for run=${RUN_ID}"
+    for suffix in gkg nats clickhouse gitlab siphon; do
+      $KC delete ns "e2e-${RUN_ID}-${suffix}" --wait=false 2>/dev/null || true
+    done
+    $KC delete ns "ra-ch-${RUN_ID}" --wait=false 2>/dev/null || true
+    if [[ "${RA_DEDICATED_POOL:-}" == "1" ]]; then
+      gcloud container node-pools delete "ra-${RUN_ID}" \
+        --cluster "${GKE_CLUSTER}" --project "${GKE_PROJECT}" --zone "${GKE_ZONE}" \
+        --quiet 2>/dev/null || true
+    fi
+    log "Teardown complete"
+    ;;
   sleep)
     ACTIVE=$($KC get ns -o name 2>/dev/null | grep -E "e2e-|ra-ch-" | sed 's|namespace/||' || true)
     if [[ -n "${ACTIVE}" ]]; then
@@ -29,7 +42,7 @@ case "${1:-}" in
     log "Cluster awake (${NODES} nodes)."
     ;;
   *)
-    echo "Usage: $0 sleep | wake [N]" >&2
+    echo "Usage: $0 teardown | sleep | wake [N]" >&2
     exit 1
     ;;
 esac
