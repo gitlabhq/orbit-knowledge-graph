@@ -46,19 +46,19 @@ done
 
 # Generate random credentials
 log "Generating secrets"
-E2E_JWT_KEY=$(openssl rand -base64 32)
-E2E_CH_DEFAULT_PASS=$(openssl rand -base64 24)
-E2E_CH_SIPHON_PASS=$(openssl rand -base64 24)
-E2E_CH_DATALAKE_PASS=$(openssl rand -base64 24)
-E2E_CH_GRAPH_PASS=$(openssl rand -base64 24)
-E2E_CH_GRAPH_READ_PASS=$(openssl rand -base64 24)
-E2E_PG_SIPHON_PASS=$(openssl rand -base64 24)
-E2E_CH_GITLAB_PASS=$(openssl rand -base64 24)
-E2E_GITLAB_ROOT_PASS=$(openssl rand -base64 24)
-E2E_PG_GITLAB_PASS=$(openssl rand -base64 24)
-E2E_PG_POSTGRES_PASS=$(openssl rand -base64 24)
-E2E_PG_REPLICATION_PASS=$(openssl rand -base64 24)
-E2E_REDIS_PASS=$(openssl rand -base64 24)
+: "${E2E_JWT_KEY:=$(openssl rand -base64 32)}"
+: "${E2E_CH_DEFAULT_PASS:=$(openssl rand -base64 24)}"
+: "${E2E_CH_SIPHON_PASS:=$(openssl rand -base64 24)}"
+: "${E2E_CH_DATALAKE_PASS:=$(openssl rand -base64 24)}"
+: "${E2E_CH_GRAPH_PASS:=$(openssl rand -base64 24)}"
+: "${E2E_CH_GRAPH_READ_PASS:=$(openssl rand -base64 24)}"
+: "${E2E_PG_SIPHON_PASS:=$(openssl rand -base64 24)}"
+: "${E2E_CH_GITLAB_PASS:=$(openssl rand -base64 24)}"
+: "${E2E_GITLAB_ROOT_PASS:=$(openssl rand -base64 24)}"
+: "${E2E_PG_GITLAB_PASS:=$(openssl rand -base64 24)}"
+: "${E2E_PG_POSTGRES_PASS:=$(openssl rand -base64 24)}"
+: "${E2E_PG_REPLICATION_PASS:=$(openssl rand -base64 24)}"
+: "${E2E_REDIS_PASS:=$(openssl rand -base64 24)}"
 export E2E_JWT_KEY E2E_CH_DEFAULT_PASS E2E_CH_SIPHON_PASS E2E_CH_DATALAKE_PASS
 export E2E_CH_GRAPH_PASS E2E_CH_GRAPH_READ_PASS E2E_PG_SIPHON_PASS E2E_CH_GITLAB_PASS
 export E2E_GITLAB_ROOT_PASS

@@ -76,7 +76,7 @@ global:
         secret: gitlab-clickhouse-password
         key: main_password
       database: datalake
-      url: "http://clickhouse.e2e-{{ requiredEnv "E2E_SHA" }}-clickhouse.svc.cluster.local:8123"
+      url: "http://{{ env "E2E_CH_HOST" | default (printf "clickhouse.e2e-%s-clickhouse.svc.cluster.local" (requiredEnv "E2E_SHA")) }}:8123"
 
   minio:
     enabled: false
