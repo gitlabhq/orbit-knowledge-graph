@@ -26,6 +26,7 @@ type ResolvedBinding = (String, ExportedBinding);
 
 struct RepoFileSystem {
     root_dir: PathBuf,
+    canon_cache: std::sync::Mutex<rustc_hash::FxHashMap<PathBuf, Option<PathBuf>>>,
 }
 
 impl RepoFileSystem {
@@ -34,7 +35,22 @@ impl RepoFileSystem {
             root_dir: root_dir
                 .canonicalize()
                 .unwrap_or_else(|_| root_dir.to_path_buf()),
+            canon_cache: std::sync::Mutex::new(rustc_hash::FxHashMap::default()),
         }
+    }
+
+    fn cached_canonicalize(&self, path: &Path) -> Option<PathBuf> {
+        let cache = self.canon_cache.lock().unwrap();
+        if let Some(cached) = cache.get(path) {
+            return cached.clone();
+        }
+        drop(cache);
+        let result = std::fs::canonicalize(path).ok();
+        self.canon_cache
+            .lock()
+            .unwrap()
+            .insert(path.to_path_buf(), result.clone());
+        result
     }
 
     fn candidate_path(&self, path: &Path) -> PathBuf {
@@ -47,23 +63,31 @@ impl RepoFileSystem {
 
     fn existing_contained_path(&self, path: &Path) -> io::Result<PathBuf> {
         let path = self.candidate_path(path);
-        gkg_utils::fs::contained_canonical_path(&self.root_dir, &path).ok_or_else(|| {
-            io::Error::new(
+        let canonical = self
+            .cached_canonicalize(&path)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "path does not exist"))?;
+        if canonical.starts_with(&self.root_dir) {
+            Ok(canonical)
+        } else {
+            Err(io::Error::new(
                 io::ErrorKind::PermissionDenied,
                 format!("resolver path outside repository: {}", path.display()),
-            )
-        })
+            ))
+        }
     }
 
     fn contained_or_missing_path(&self, path: &Path) -> io::Result<PathBuf> {
         let path = self.candidate_path(path);
-        if let Some(path) = gkg_utils::fs::contained_canonical_path(&self.root_dir, &path) {
-            return Ok(path);
+        if let Some(canonical) = self.cached_canonicalize(&path)
+            && canonical.starts_with(&self.root_dir)
+        {
+            return Ok(canonical);
         }
 
         let ancestor = gkg_utils::fs::longest_existing_ancestor(&path);
-        let ancestor = ancestor.canonicalize()?;
-        if ancestor.starts_with(&self.root_dir) {
+        if let Some(canonical_ancestor) = self.cached_canonicalize(ancestor)
+            && canonical_ancestor.starts_with(&self.root_dir)
+        {
             return Ok(path);
         }
 
@@ -92,6 +116,7 @@ impl FileSystem for RepoFileSystem {
     fn new() -> Self {
         Self {
             root_dir: PathBuf::new(),
+            canon_cache: std::sync::Mutex::new(rustc_hash::FxHashMap::default()),
         }
     }
 
