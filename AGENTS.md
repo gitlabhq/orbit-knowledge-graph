@@ -41,6 +41,7 @@ CLI integration tests (concurrency, worktrees): `mise test:cli`.
 - Clippy with all features, warnings as errors (`lint-check`)
 - Ontology YAML validated against JSON schema (`ontology-schema-validate`)
 - Named query YAML validated against JSON schema (`named-query-schema-validate`); each query is also compiled against the ontology by `gkg-server`'s build script, so drift fails every build
+- Assistant setup specs and mode texts in `config/setup/` validated against JSON schema (`setup-schema-validate`)
 - Migration ledger validated and scope-checked (`migration-ledger-schema-validate`, `migration-ledger-check`, plus `gkg-server` build-time drift checks); full ledger rules in `docs/design-documents/schema_management.md`
 - `cargo fmt` (`fmt-check`)
 - `cargo shear` detects unused workspace and crate dependencies (`unused-deps-check`)
