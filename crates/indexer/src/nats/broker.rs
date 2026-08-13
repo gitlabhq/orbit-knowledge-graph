@@ -2,11 +2,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 /// Flat 100ms hot-poll for the unbounded fetch supervisor loop.
-const FETCH_RETRY: crate::engine::retry::RetryPolicy = crate::engine::retry::RetryPolicy {
-    mode: crate::engine::retry::RetryMode::Local,
-    backoff: crate::engine::retry::Backoff::Fixed(&[Duration::from_millis(100)]),
+const FETCH_RETRY: crate::retry::LocalRetry = crate::retry::LocalRetry {
+    backoff: crate::retry::Backoff::Fixed(&[Duration::from_millis(100)]),
     max_attempts: u32::MAX, // unused by drive_forever; the loop is unbounded by design
-    dead_letter: false,
 };
 const DEAD_LETTER_MAX_AGE: Duration = Duration::ZERO;
 
@@ -25,9 +23,9 @@ use tracing::{debug, info, warn};
 use crate::dead_letter::{
     DEAD_LETTER_STREAM, DEAD_LETTER_SUBJECT_PREFIX, DeadLetterEnvelope, dead_letter_subject,
 };
-use crate::engine::retry::{Loop, drive_forever};
 use crate::metrics::EngineMetrics;
 use crate::nats::versioning::NATS_VERSIONER;
+use crate::retry::{Loop, drive_forever};
 use crate::types::{Envelope, MessageId, Subscription};
 
 use async_nats::jetstream::ErrorCode;
