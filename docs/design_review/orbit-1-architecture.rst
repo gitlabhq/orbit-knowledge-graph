@@ -1,4 +1,4 @@
-.. _gkg-architecture:
+.. _orbit-architecture:
 
 1. Simplified Architecture Block Diagram
 ========================================
@@ -8,13 +8,13 @@ source code into a single property graph stored in ClickHouse, queryable
 through a compiled DSL, and accessible to LLM agents, the Orbit dashboard,
 and the GitLab Web IDE.
 
-.. uml:: puml/gkg_architecture_simplified.puml
+.. uml:: puml/orbit_architecture_simplified.puml
    :caption: Orbit architecture
 
 For the fully expanded subcomponent diagram, see
-:ref:`Appendix: Detailed Cloud Architecture <gkg-appendix-detailed-arch>`.
+:ref:`Appendix: Detailed Cloud Architecture <orbit-appendix-detailed-arch>`.
 For the standalone desktop binary (embedded DuckDB, no cloud
-dependencies), see :ref:`Appendix: Desktop Mode <gkg-appendix-desktop>`.
+dependencies), see :ref:`Appendix: Desktop Mode <orbit-appendix-desktop>`.
 
 Components Inside the Module
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~

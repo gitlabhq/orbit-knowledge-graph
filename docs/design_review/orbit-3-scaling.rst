@@ -1,4 +1,4 @@
-.. _gkg-scaling:
+.. _orbit-scaling:
 
 3. Multi-Tenancy, Scaling, and COGS
 ====================================
@@ -13,7 +13,7 @@ Tenancy Isolation Model
 2. **Traversal ID filtering** --- the query engine injects traversal_path
    filters into every ClickHouse query.  The allowed traversal paths are
    delivered from Rails in the request JWT (no Orbit-side cache); see
-   :ref:`Appendix: Authorization Cache <gkg-appendix-auth-cache>`.
+   :ref:`Appendix: Authorization Cache <orbit-appendix-auth-cache>`.
 3. **Rails redaction** --- after ClickHouse returns results, global IDs are
    extracted and sent to the Rails redaction service
    (``Ability.allowed?``) for final permission check.

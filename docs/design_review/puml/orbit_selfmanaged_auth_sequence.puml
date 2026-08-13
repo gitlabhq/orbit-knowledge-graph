@@ -1,4 +1,4 @@
-@startuml gkg_selfmanaged_auth_sequence
+@startuml orbit_selfmanaged_auth_sequence
 
 skinparam backgroundColor #FFFFFF
 skinparam defaultFontSize 11
@@ -8,7 +8,7 @@ skinparam shadowing false
 skinparam sequenceArrowThickness 2
 skinparam sequenceMessageAlign center
 
-title Hybrid Self-Managed: Auth Flow\n(Cloud-hosted GKG ↔ On-Prem Monolith)
+title Hybrid Self-Managed: Auth Flow\n(Cloud-hosted Orbit ↔ On-Prem Monolith)
 
 box "Customer On-Premises" #FFF3E0
   actor "User /\nLLM Agent" as user

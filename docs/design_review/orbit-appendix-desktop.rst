@@ -1,14 +1,14 @@
-.. _gkg-appendix-desktop:
+.. _orbit-appendix-desktop:
 
 Appendix: Desktop Mode (``orbit`` CLI, Embedded DuckDB)
 ======================================================
 
-GKG ships a standalone desktop binary (``orbit``) that runs without any
+Orbit ships a standalone desktop binary (``orbit``) that runs without any
 external infrastructure.  This mode is separate from the cloud-deployed Orbit
 architecture reviewed in the main sections and is included here for
 completeness.
 
-.. uml:: puml/gkg_architecture.puml
+.. uml:: puml/orbit_architecture.puml
    :caption: Desktop mode --- self-contained ``orbit`` binary with embedded
              DuckDB
 

@@ -1,4 +1,4 @@
-@startuml gkg_dependencies
+@startuml orbit_dependencies
 !theme plain
 skinparam backgroundColor #FFFFFF
 skinparam defaultFontSize 10
@@ -6,7 +6,7 @@ skinparam componentStyle rectangle
 
 title Orbit Dependency Map
 
-rectangle "Orbit Module" as gkg #E8F4FD {
+rectangle "Orbit Module" as orbit #E8F4FD {
   component "SDLC Indexer" as sdlc
   component "Code Indexer" as code
   component "Query Engine" as qe

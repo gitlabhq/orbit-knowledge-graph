@@ -1,9 +1,9 @@
-.. _gkg-dependencies:
+.. _orbit-dependencies:
 
 4. Dependency Map
 =================
 
-.. uml:: puml/gkg_dependencies.puml
+.. uml:: puml/orbit_dependencies.puml
    :caption: Orbit dependency map --- ingestion, query, and consumer dependencies
 
 What Orbit Depends On

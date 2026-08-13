@@ -1,4 +1,4 @@
-@startuml gkg_search_sequence
+@startuml orbit_search_sequence
 !theme plain
 skinparam backgroundColor #FFFFFF
 skinparam defaultFontSize 11
@@ -9,7 +9,7 @@ title Orbit Code Search --- Runtime Sequence
 participant "Developer /\nLLM Agent" as user
 participant "GitLab Workhorse" as rails #FFB3B3
 participant "DAP" as dap #FFE0B2
-participant "Orbit gkg-server\n(gRPC)" as gkg #B3D9FF
+participant "Orbit gkg-server\n(gRPC)" as orbit #B3D9FF
 participant "Query Engine\n(DSL compiler)" as qe #B3D9FF
 participant "ClickHouse\nCloud" as ch #CCE5CC
 participant "Rails Redaction\n(Ability.allowed?)" as redact #FFB3B3
@@ -20,11 +20,11 @@ activate rails #FFB3B3
 rails -> dap : Forward request
 activate dap
 
-dap -> gkg : gRPC + JWT\n(JWT carries traversal paths)
-activate gkg
-gkg -> gkg : JWT validation\n(read Claims.group_traversal_ids)
+dap -> orbit : gRPC + JWT\n(JWT carries traversal paths)
+activate orbit
+orbit -> orbit : JWT validation\n(read Claims.group_traversal_ids)
 
-gkg -> qe : JSON DSL query
+orbit -> qe : JSON DSL query
 activate qe
 qe -> qe : 13-phase compile\n(validate, normalize, ... ,\nsecurity, enforce, ... , codegen)
 qe -> qe : Inject traversal_path filter\n(from JWT claims) into SQL
@@ -36,14 +36,14 @@ qe -> qe : Extract global IDs\nfor redaction
 deactivate qe
 
 loop For each batch of result resources
-  gkg -> redact : RedactionRequired (gRPC stream)\nresource_type + abilities ("read")
+  orbit -> redact : RedactionRequired (gRPC stream)\nresource_type + abilities ("read")
   activate redact #FFB3B3
-  redact --> gkg : Authorized resource set
+  redact --> orbit : Authorized resource set
   deactivate redact
 end
 
-gkg --> dap : Filtered results
-deactivate gkg
+orbit --> dap : Filtered results
+deactivate orbit
 
 dap --> rails : Response
 deactivate dap
