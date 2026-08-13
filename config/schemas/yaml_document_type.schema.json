@@ -1,0 +1,125 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "yaml_document_type.schema.json",
+  "title": "Orbit YAML document type",
+  "description": "Declares how the YAML language module recognizes a document type and which keys become imports. Configs live in crates/code-graph/src/v2/langs/generic/yaml/document_types/ and are validated when the module loads them.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["name", "match", "imports"],
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Document type identifier; must equal the config file stem.",
+      "pattern": "^[a-z0-9_]+$"
+    },
+    "match": { "$ref": "#/definitions/matcher" },
+    "imports": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/definitions/keyRule" }
+    }
+  },
+  "definitions": {
+    "matcher": {
+      "type": "object",
+      "description": "A file is of this document type when its name matches a suffix or its root mapping satisfies every declared key condition.",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "anyOf": [
+        { "required": ["filename_suffixes"] },
+        { "required": ["document_keys"] }
+      ],
+      "properties": {
+        "filename_suffixes": {
+          "type": "array",
+          "minItems": 1,
+          "description": "Matched against the filename. A suffix that does not start with '.' only matches a whole filename, so 'Chart.yaml' never matches 'MyChart.yaml'.",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "document_keys": {
+          "type": "object",
+          "minProperties": 1,
+          "description": "Root-level scalar keys and the conditions their values must satisfy.",
+          "additionalProperties": { "$ref": "#/definitions/keyCondition" }
+        }
+      }
+    },
+    "keyCondition": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "anyOf": [{ "required": ["in"] }, { "required": ["starts_with"] }],
+      "properties": {
+        "in": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string" }
+        },
+        "starts_with": { "type": "string", "minLength": 1 }
+      }
+    },
+    "keyRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key"],
+      "anyOf": [
+        { "required": ["scalar_type"] },
+        { "required": ["mapping_forms"] }
+      ],
+      "properties": {
+        "key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Mapping key that carries imports, for example 'include' or 'dependencies'."
+        },
+        "also_under": {
+          "type": "array",
+          "minItems": 1,
+          "description": "Parent keys the rule also applies under; without it the key only counts at the document root.",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "scalar_type": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Import type emitted when the value is a scalar or a sequence of scalars."
+        },
+        "mapping_forms": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/definitions/mappingForm" }
+        }
+      }
+    },
+    "mappingForm": {
+      "type": "object",
+      "description": "One shape a mapping entry can take; a form applies when its path_key is present.",
+      "additionalProperties": false,
+      "required": ["type", "path_key"],
+      "properties": {
+        "type": { "type": "string", "minLength": 1 },
+        "path_key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Key whose value becomes the import path."
+        },
+        "name_keys": {
+          "type": "array",
+          "minItems": 1,
+          "description": "Keys whose values become import names; a sequence value emits one import per entry.",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "alias_key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Key whose value becomes the import alias, typically a pinned version or ref."
+        },
+        "version_split": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1,
+          "description": "Single character splitting a version off the end of the path, for example '@'."
+        }
+      }
+    }
+  }
+}

@@ -2092,6 +2092,7 @@ dependencies = [
  "globset",
  "ignore",
  "indicatif",
+ "jsonschema",
  "memchr",
  "oxc",
  "oxc_linter",
