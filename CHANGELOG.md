@@ -1,3 +1,18 @@
+## [0.99.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.98.0...v0.99.0) (2026-08-13)
+
+### Features
+
+* **graph-status:** report honest indexing state split by code and SDLC surfaces ([f3c9c89](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f3c9c89ad5c1cb0c77f0b41aedd1aecbf90c5076)) by Jean-Gabriel Doyon
+
+### Fixes
+
+* **clickhouse:** grant gkg_app SELECT on system.parts ([0691891](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/06918914228abaaa10c55c2b946e173b1383b9ce)) by Jean-Gabriel Doyon
+* **indexer:** retry transient archive download failures before dead-lettering ([f2a87e3](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f2a87e32400eae79ad6834710fec7079c0b8c92b)) by Jean-Gabriel Doyon
+
+### Other
+
+* **indexer:** split RetryPolicy into LocalRetry and GlobalRetry ([b1a2e8d](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b1a2e8d7b9242902edb7b47618f5f5376801eada)) by Jean-Gabriel Doyon
+
 ## [0.98.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.97.0...v0.98.0) (2026-08-13)
 
 ### Features
