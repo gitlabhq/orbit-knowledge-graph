@@ -1,7 +1,6 @@
 # yaml-language-server: $schema=../schemas/setup_modes.schema.json
-# Every string that differs between the local graph (`orbit sql`) and the
-# remote Knowledge Graph (`glab orbit remote`). The rules are the same either
-# way; only the commands and the availability check differ. `template_vars`
+# Every string that differs between the local graph (`orbit sql`) and the remote graph
+# (`glab orbit remote`); only the commands and the availability check differ. `template_vars`
 # fill `{{name}}` placeholders in the templates assistants declare.
 local:
   instructions: |

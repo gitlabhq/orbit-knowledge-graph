@@ -1,7 +1,6 @@
-//! Managed instruction-file block: a marker-delimited section spliced into
-//! AGENTS.md / CLAUDE.md. Re-running setup replaces the section in place, so
-//! upgrades refresh the guidance without duplicating it or touching the rest
-//! of the file.
+//! Managed instruction-file block: a marker-delimited section spliced into AGENTS.md /
+//! CLAUDE.md. Re-running setup replaces the section in place, so upgrades refresh the guidance
+//! without duplicating it or touching the rest of the file.
 
 use std::path::Path;
 

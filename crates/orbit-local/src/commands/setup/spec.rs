@@ -1,8 +1,8 @@
-//! Declarative assistant specs embedded from `config/setup/agents/`. Each YAML file
-//! describes one assistant in terms of four generic operations (instruction
-//! file, marker-owned JSON merges, templated files, string registrations);
-//! adding an assistant means adding a YAML file, not Rust. Everything that
-//! differs between the local and remote graph lives in `config/setup/modes.yaml`.
+//! Declarative assistant specs embedded from `config/setup/agents/`. Each YAML file describes
+//! one assistant as four generic operations (instruction file, marker-owned JSON merges,
+//! templated files, string registrations), so adding an assistant means adding a YAML file, not
+//! Rust. Everything that differs between the local and remote graph lives in
+//! `config/setup/modes.yaml`, selected by the `{mode}` token.
 
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
@@ -15,10 +15,6 @@ use serde_json::Value;
 #[folder = "$CONFIG_DIR/setup"]
 struct SetupAssets;
 
-/// Which graph mechanism the written guidance points at. The rules are the
-/// same either way; only the commands differ, so the two variants replace
-/// each other rather than combining. `{mode}` tokens in specs resolve to the
-/// matching `config/setup/modes.yaml` section and hook-guard flags.
 #[derive(clap::ValueEnum, Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub(crate) enum Mode {
     Local,
@@ -27,6 +23,8 @@ pub(crate) enum Mode {
 }
 
 impl Mode {
+    pub(super) const ALL: [Mode; 2] = [Mode::Local, Mode::Remote];
+
     pub(crate) fn as_str(self) -> &'static str {
         match self {
             Mode::Local => "local",
@@ -42,9 +40,6 @@ impl Mode {
     }
 }
 
-/// Every string that differs between the two modes: the instruction block,
-/// the two hook nudges, and the values filling `{{name}}` placeholders in
-/// assistant templates.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Modes {
@@ -109,8 +104,6 @@ pub(super) struct AssistantSpec {
     pub(super) registrations: Vec<Registration>,
 }
 
-/// A file location that differs by install scope: `project` is relative to
-/// the project root, `global` is a `~/`-anchored user-config path.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct ScopedPath {
@@ -118,9 +111,6 @@ pub(super) struct ScopedPath {
     pub(super) global: String,
 }
 
-/// Idempotent merge into a JSON array at `path`: entries containing `marker`
-/// in any nested string are owned by orbit and replaced wholesale, everything
-/// else is preserved.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct JsonMerge {
@@ -130,7 +120,6 @@ pub(super) struct JsonMerge {
     pub(super) entries: Vec<Value>,
 }
 
-/// A file written verbatim from an embedded `config/setup/` template.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct TemplateFile {
@@ -138,7 +127,6 @@ pub(super) struct TemplateFile {
     pub(super) template: String,
 }
 
-/// A string appended to a JSON array at `path` (e.g. a plugin list).
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct Registration {
@@ -186,10 +174,14 @@ impl TemplateFile {
         }
         rendered
     }
+
+    pub(super) fn is_unmodified(&self, contents: &str) -> bool {
+        Mode::ALL
+            .iter()
+            .any(|mode| self.contents(*mode) == contents)
+    }
 }
 
-/// A template shipped next to the specs, embedded so every install method
-/// carries version-matched content.
 fn embedded_text(name: &str) -> String {
     let file =
         SetupAssets::get(name).unwrap_or_else(|| panic!("config/setup/{name} is not embedded"));
@@ -212,8 +204,6 @@ mod tests {
 
     #[test]
     fn merge_entries_contain_their_marker() {
-        // An entry without its marker would not be recognized as orbit-owned,
-        // so re-running setup would duplicate it.
         for spec in all() {
             for merge in &spec.json_merges {
                 assert!(!merge.marker.is_empty(), "{}: empty marker", spec.name);
@@ -251,10 +241,6 @@ mod tests {
         }
     }
 
-    // Template values land inside a JS double-quoted string that is echoed
-    // inside bash double quotes, so a quote ends the string early and
-    // backticks or $( substitute there, corrupting output and executing what
-    // we only suggest.
     #[test]
     fn opencode_plugins_are_shell_safe() {
         for mode in [Mode::Local, Mode::Remote] {

@@ -1,7 +1,6 @@
-//! Generic, invertible JSON operations behind assistant specs: a marker-owned
-//! array merge (hook entries) and a string registration (plugin lists). Both
-//! preserve everything they do not own, and removal prunes containers they
-//! emptied.
+//! Generic, invertible JSON operations behind assistant specs: a marker-owned array merge
+//! (hook entries) and a string registration (plugin lists). Both preserve everything they do
+//! not own, and removal prunes containers they emptied.
 
 use anyhow::{Result, anyhow};
 use serde_json::{Value, json};
@@ -93,8 +92,6 @@ fn type_name(value: &Value) -> &'static str {
     }
 }
 
-/// Retains array entries matching `keep` at `path`, then removes containers
-/// left empty along the way. Returns whether anything was removed.
 fn retain_and_prune(value: &mut Value, path: &[String], keep: &dyn Fn(&Value) -> bool) -> bool {
     let Some((first, rest)) = path.split_first() else {
         return false;

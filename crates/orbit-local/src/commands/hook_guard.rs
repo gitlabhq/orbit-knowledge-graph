@@ -1,10 +1,7 @@
-//! Hidden `orbit hook-guard` — the PreToolUse guard that `orbit setup`
-//! installs for Claude Code. Reads the tool-call JSON from stdin and emits an
-//! `additionalContext` nudge steering the agent to query the graph before
-//! grepping or reading raw source files. The nudge wording follows the mode
-//! the guard was installed with (local `orbit sql` vs `glab orbit remote`).
-//! Fails open: any error prints nothing and exits 0, so a tool call is never
-//! blocked.
+//! Hidden `orbit hook-guard` — the Claude Code PreToolUse guard installed by `orbit setup`.
+//! Reads a tool call from stdin and nudges the agent to query the graph before grepping or
+//! reading source. Fails open: on any error it prints nothing and exits 0, never blocking a
+//! tool call.
 
 use std::io::Read;
 
@@ -24,14 +21,10 @@ const SEARCH_COMMANDS: &[&str] = &[
     "ack", "ag", "egrep", "fd", "fgrep", "find", "grep", "rg", "ripgrep",
 ];
 
-/// Commands that run the command following them, so a search can hide behind
-/// one (`sudo rg …`, `xargs grep …`, `git grep …`).
 const COMMAND_WRAPPERS: &[&str] = &[
     "command", "env", "git", "nice", "nohup", "sudo", "time", "xargs",
 ];
 
-/// Code extensions the graph indexes; reads of anything else (docs, config,
-/// data) never nudge.
 const SOURCE_EXTS: &[&str] = &[
     "py", "js", "cjs", "mjs", "ts", "tsx", "jsx", "vue", "svelte", "go", "rs", "java", "rb", "c",
     "h", "cpp", "hpp", "cc", "cs", "kt", "kts", "swift", "php", "scala", "lua", "sh", "pl",
@@ -45,8 +38,6 @@ pub(crate) fn run(kind: Kind, mode: Mode) {
     let Ok(call) = serde_json::from_str::<Value>(&input) else {
         return;
     };
-    // Remote availability was verified when setup wrote the hook; only the
-    // local graph can disappear (database deleted) after install.
     if mode == Mode::Local && !local_graph_exists() {
         return;
     }
@@ -84,9 +75,6 @@ fn should_nudge(kind: Kind, call: &Value) -> bool {
                 .get("command")
                 .and_then(Value::as_str)
                 .unwrap_or("");
-            // Grep and Glob carry `pattern` and no `command`; a pattern-based
-            // call is a content search by definition. Bash only nudges on
-            // search-looking commands.
             let is_pattern_tool = command.is_empty()
                 && tool_input
                     .get("pattern")
@@ -104,9 +92,6 @@ fn should_nudge(kind: Kind, call: &Value) -> bool {
     }
 }
 
-/// Whether any pipeline segment of a shell command *runs* a search tool.
-/// Matching whole commands rather than substrings keeps `git tag` and
-/// `npm run build --flag foo` from reading as searches.
 fn invokes_search(command: &str) -> bool {
     command
         .split(['|', ';', '&', '\n', '(', ')', '`'])

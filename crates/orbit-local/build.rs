@@ -6,8 +6,6 @@ fn main() {
 
     validate_prompts();
 
-    // rust-embed only tracks files that existed at the last macro expansion,
-    // so a new file under config/setup/ would otherwise ship stale embeds.
     println!(
         "cargo:rerun-if-changed={}",
         std::path::Path::new(env!("CONFIG_DIR"))

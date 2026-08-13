@@ -1,6 +1,6 @@
-//! Read/modify/write for assistant JSON config files (Claude settings,
-//! OpenCode config). Invalid JSON is a hard error, never a silent overwrite:
-//! clobbering a user's settings file is worse than failing the setup.
+//! Read/modify/write for assistant JSON config files (Claude settings, OpenCode config).
+//! Invalid JSON is a hard error, never a silent overwrite: clobbering a user's settings file is
+//! worse than failing the setup.
 
 use std::path::Path;
 
