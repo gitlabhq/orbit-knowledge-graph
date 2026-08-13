@@ -8,6 +8,13 @@ local:
 
     Repositories on this machine are indexed into a local Orbit code graph (`orbit list` shows which). Query the graph before grep or reading files for any question about how the code fits together: where something is defined or belongs, where a behavior happens, what handles a case, who calls or imports it, what an API looks like. Plain questions count — "where do we send X", "what handles Y", "how does Z work" are all graph questions. Grep matches text and returns noise; the graph returns resolved definitions, callers, and imports.
 
+    Rules:
+
+    - For any question about how this code fits together, run `orbit ask "<your question>"` FIRST, before grep and before reading files. One command, plain language, no SQL to write.
+    - Ask in the words you would use with a colleague. "where do we send messages to the dlq", "what handles NATS backpressure" are single `orbit ask` calls.
+    - Grep and raw file reads come *after* the graph has oriented you, or to modify and debug specific lines.
+    - Drop to SQL only for what `ask` does not cover: exact filters, aggregation, or columns it does not print.
+
     Copy-paste recipes (DuckDB SQL):
 
     - Find a definition: `orbit sql "SELECT name, definition_type, file_path, start_line FROM gl_definition WHERE name LIKE '%Retry%'"`
@@ -19,26 +26,28 @@ local:
 
     This applies to subagents: put the same rule in any subagent prompt that explores code.
   nudge_search: |
-    MANDATORY: a local Orbit code graph covers this code. You MUST query it before grepping raw files — grep returns textual noise, the graph returns resolved definitions. Start with `orbit sql "SELECT name, definition_type, file_path, start_line FROM gl_definition WHERE name LIKE '%<term>%'"`; caller/import/subtype recipes are in `orbit skill`, and `orbit repo-map` orients you in unfamiliar code. Grep after the graph has oriented you, or to modify/debug specific lines. This applies to subagents too — put the same rule in any subagent prompt that explores code.
+    MANDATORY: a local Orbit code graph covers this code. Before grepping raw files, run `orbit ask "<your question>"` — one command in plain language, returning resolved definitions and their connections instead of textual noise. For exact filters or aggregation use `orbit sql "<DuckDB SQL>"` (`orbit skill` prints the recipes), and `orbit repo-map` orients you in unfamiliar code. Grep after the graph has oriented you, or to modify/debug specific lines. This applies to subagents too — put the same rule in any subagent prompt that explores code.
   nudge_read: |
-    MANDATORY: a local Orbit code graph covers this code. You MUST orient with the graph before reading source files one by one — run `orbit sql "<DuckDB SQL>"` (definitions, callers, imports) or `orbit repo-map`. Read raw files after the graph has oriented you, or to modify/debug specific lines. This applies to subagents too — put the same rule in any subagent prompt that explores code.
+    MANDATORY: a local Orbit code graph covers this code. Before reading source files one by one, orient with `orbit ask "<your question>"` — one command in plain language, returning the matching definitions and what connects to them. For exact filters or aggregation use `orbit sql "<DuckDB SQL>"`, or `orbit repo-map` for a structural overview. Read raw files after the graph has oriented you, or to modify/debug specific lines. This applies to subagents too — put the same rule in any subagent prompt that explores code.
   template_vars:
-    reminder: "[orbit] local code graph available: for code-structure questions run orbit sql or orbit repo-map (scoped results, cheaper than grep); orbit skill prints the query reference."
+    reminder: "[orbit] local code graph available: for code-structure questions run orbit ask with your question (one command, no SQL to write, cheaper than grep); orbit sql and orbit repo-map cover exact filters and structure."
     require_local_graph: true
 remote:
   instructions: |
     ## Orbit graph
 
-    GitLab projects are covered by the remote Orbit graph. Query the graph before grep or reading files for any question about how the code fits together: where something is defined, where a behavior happens, what handles a case, who calls or imports it, what an API looks like. Plain questions count — "where do we send X", "what handles Y", "how does Z work" are all graph questions. The same goes for GitLab entities: merge requests, issues, pipelines, users, cross-project dependencies. Grep matches text and returns noise; the graph returns resolved definitions and relationships.
+    This project is covered by the remote Orbit graph: resolved definitions, callers, imports, merge requests, issues, and the relationships between them.
 
-    - Run queries with `glab orbit remote query <file.json|->`; `glab orbit remote schema` lists entities and edges.
-    - The `orbit` agent skill has copy-paste query recipes and the full DSL reference — consult it before writing a query by hand.
-    - Raw grep and file reads are fine once the graph has oriented you, or to modify and debug specific lines.
+    Rules:
+
+    - For any question about this codebase or its GitLab history — where something is defined, who calls it, which merge requests or issues relate to it — query the graph FIRST, before grep and before reading files: `glab orbit remote query <file.json|->`.
+    - `glab orbit remote schema` lists entities and edges, and the `orbit` agent skill has copy-paste query recipes — consult it before writing a query by hand.
+    - Grep and raw file reads come *after* the graph has oriented you, or to modify and debug specific lines. Grep matches text and returns noise; the graph returns resolved relationships.
     - This applies to subagents: put the same rule in any subagent prompt that explores code.
   nudge_search: |
-    MANDATORY: the remote Orbit graph covers this code. You MUST run `glab orbit remote query` before grepping raw files — grep returns textual noise, the graph returns resolved definitions and relationships. `glab orbit remote schema` lists entities and edges; the `orbit` skill has copy-paste recipes. Grep after the graph has oriented you, or to modify/debug specific lines. This applies to subagents too — put the same rule in any subagent prompt that explores code.
+    MANDATORY: the remote Orbit graph covers this code. Before grepping raw files, query it with `glab orbit remote query` (the `orbit` skill has copy-paste recipes) — it returns resolved definitions and their connections instead of textual noise, and covers merge requests, issues, pipelines, and aggregation. Grep after the graph has oriented you, or to modify/debug specific lines. This applies to subagents too — put the same rule in any subagent prompt that explores code.
   nudge_read: |
-    MANDATORY: the remote Orbit graph covers this code. You MUST orient with the graph before reading source files one by one — run `glab orbit remote query` (definitions, callers, imports; `glab orbit remote schema` lists entities). Read raw files after the graph has oriented you, or to modify/debug specific lines. This applies to subagents too — put the same rule in any subagent prompt that explores code.
+    MANDATORY: the remote Orbit graph covers this code. Before reading source files one by one, orient with `glab orbit remote query` (the `orbit` skill has copy-paste recipes) — it returns the matching definitions and what connects to them, and covers merge requests, issues, pipelines, and aggregation. Read raw files after the graph has oriented you, or to modify/debug specific lines. This applies to subagents too — put the same rule in any subagent prompt that explores code.
   template_vars:
-    reminder: "[orbit] remote Orbit graph available: for code-structure and GitLab-entity questions run glab orbit remote query (scoped results, cheaper than grep); glab orbit remote schema lists entities."
+    reminder: "[orbit] remote Orbit graph available: for code-structure, merge-request, or issue questions use glab orbit remote query (the orbit skill has recipes; cheaper than grep)."
     require_local_graph: false

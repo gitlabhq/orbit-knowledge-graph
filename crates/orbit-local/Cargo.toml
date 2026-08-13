@@ -35,6 +35,7 @@ rust-embed = { workspace = true }
 rustls = { workspace = true }
 schemars = { workspace = true }
 serde = { workspace = true }
+rust-stemmers = { workspace = true }
 serde_json = { workspace = true, features = ["raw_value"] }
 strum = { workspace = true }
 

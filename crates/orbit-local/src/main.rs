@@ -173,6 +173,31 @@ struct IndexArgs {
 }
 
 #[derive(Args, Debug, PartialEq)]
+#[command(about = descriptions::short("ask"))]
+#[command(
+    long_about = "Answer a plain-language question with a scoped subgraph.\n\n\
+                  Ranks indexed definitions by how many distinct question terms they \
+                  match, then shows the connections one hop around the top matches."
+)]
+struct AskArgs {
+    /// Plain-language question, e.g. "how does the quota gate decide?"
+    #[arg(value_name = "QUESTION")]
+    question: String,
+
+    /// Repository path (default: current directory).
+    #[arg(long, value_name = "PATH")]
+    repo: Option<PathBuf>,
+
+    /// Maximum matched definitions to show.
+    #[arg(long, default_value = "10")]
+    limit: usize,
+
+    /// Override the DuckDB path (default: ~/.orbit/graph.duckdb).
+    #[arg(long, value_name = "PATH")]
+    db: Option<PathBuf>,
+}
+
+#[derive(Args, Debug, PartialEq)]
 #[command(about = descriptions::short("run_sql"))]
 struct SqlArgs {
     /// SQL query, or `-` to read from stdin.
@@ -264,6 +289,8 @@ enum Commands {
     Version,
     #[command(hide = true)]
     Index(IndexArgs),
+    #[command(hide = true)]
+    Ask(AskArgs),
     #[command(hide = true)]
     Sql(SqlArgs),
     #[command(hide = true)]
@@ -367,6 +394,7 @@ enum ConfigCommands {
 #[derive(Subcommand)]
 enum LocalCommands {
     Index(IndexArgs),
+    Ask(AskArgs),
     Sql(SqlArgs),
     Schema(SchemaArgs),
     List(ListArgs),
@@ -482,6 +510,7 @@ async fn dispatch(
             Ok(())
         }
         Commands::Index(args) => dispatch_local(LocalCommands::Index(args)).await,
+        Commands::Ask(args) => dispatch_local(LocalCommands::Ask(args)).await,
         Commands::Sql(args) => dispatch_local(LocalCommands::Sql(args)).await,
         Commands::Schema(args) => dispatch_local(LocalCommands::Schema(args)).await,
         Commands::List(args) => dispatch_local(LocalCommands::List(args)).await,
@@ -549,6 +578,12 @@ async fn dispatch_local(command: LocalCommands) -> Result<()> {
 
             run_index(path, threads, stats, db).await
         }
+        LocalCommands::Ask(AskArgs {
+            question,
+            repo,
+            limit,
+            db,
+        }) => commands::ask::run(question, repo, db, limit),
         LocalCommands::Sql(SqlArgs {
             query,
             file,
