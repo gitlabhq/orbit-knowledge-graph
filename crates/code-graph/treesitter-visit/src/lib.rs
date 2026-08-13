@@ -6,6 +6,7 @@ pub mod predicate;
 mod source;
 pub mod tree_sitter;
 
+pub use ::tree_sitter::Parser as TsParser;
 pub use language::Language;
 pub use languages::SupportLang;
 pub use node::{Axis, KindId, Match, Node, Position, Root};

@@ -83,6 +83,7 @@ macro_rules! define_languages {
             /// Parse with tree-sitter, optionally CPU-budgeted; `Err` if there is no grammar or the parse aborted.
             pub fn parse_ast(
                 &self,
+                parser: &mut treesitter_visit::TsParser,
                 code: &str,
                 budget: Option<std::time::Duration>,
             ) -> Result<
@@ -96,7 +97,7 @@ macro_rules! define_languages {
                 if let Some(b) = budget {
                     guard = guard.with_budget(b);
                 }
-                treesitter_visit::Root::try_new(code, lang, &guard)
+                treesitter_visit::Root::try_new(parser, code, lang, &guard)
             }
         }
     };

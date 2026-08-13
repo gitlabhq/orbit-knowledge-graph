@@ -26,12 +26,12 @@ pub enum TSParseError {
 
 #[inline]
 fn parse_lang(
+    parser: &mut Parser,
     parse_fn: impl Fn(&mut Parser) -> Option<Tree>,
     ts_lang: TSLanguage,
 ) -> Result<Tree, TSParseError> {
-    let mut parser = Parser::new();
     parser.set_language(&ts_lang)?;
-    if let Some(tree) = parse_fn(&mut parser) {
+    if let Some(tree) = parse_fn(parser) {
         Ok(tree)
     } else {
         Err(TSParseError::TreeUnavailable)
@@ -103,11 +103,17 @@ impl ParseGuard {
 
 impl<L: LanguageExt> StrDoc<L> {
     /// Parse, aborting if the [`ParseGuard`] trips (stall or CPU budget); an abort surfaces as `Err`.
-    pub fn try_new(src: &str, lang: L, guard: &ParseGuard) -> Result<Self, String> {
+    pub fn try_new(
+        parser: &mut Parser,
+        src: &str,
+        lang: L,
+        guard: &ParseGuard,
+    ) -> Result<Self, String> {
         let src = src.to_string();
         let kind_names = lang.kind_names();
         let ts_lang = lang.get_ts_language();
         let tree = parse_lang(
+            parser,
             |p| {
                 use std::ops::ControlFlow;
                 use std::sync::atomic::{AtomicU64, Ordering};
@@ -397,13 +403,19 @@ pub trait LanguageExt: Language {
 }
 
 impl<L: LanguageExt> crate::Root<StrDoc<L>> {
-    /// Infallible parse with default limits; panics on failure. For tests/fuzz; production uses [`Self::try_new`].
+    /// Infallible parse with default limits; panics on failure. For tests/fuzz.
     pub fn new<S: AsRef<str>>(src: S, lang: L) -> Self {
-        Self::try_new(src, lang, &ParseGuard::default()).expect("should parse")
+        let mut parser = Parser::new();
+        Self::try_new(&mut parser, src, lang, &ParseGuard::default()).expect("should parse")
     }
 
-    pub fn try_new<S: AsRef<str>>(src: S, lang: L, guard: &ParseGuard) -> Result<Self, String> {
-        let doc = StrDoc::try_new(src.as_ref(), lang, guard)?;
+    pub fn try_new<S: AsRef<str>>(
+        parser: &mut Parser,
+        src: S,
+        lang: L,
+        guard: &ParseGuard,
+    ) -> Result<Self, String> {
+        let doc = StrDoc::try_new(parser, src.as_ref(), lang, guard)?;
         Ok(Root { doc })
     }
 
@@ -419,7 +431,7 @@ impl<L: LanguageExt> crate::Root<StrDoc<L>> {
 #[cfg(test)]
 mod tests {
     #[cfg(feature = "builtin-parser")]
-    use super::StrDoc;
+    use super::{Parser, StrDoc};
     use std::ops::ControlFlow;
     use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -465,7 +477,9 @@ mod tests {
     #[cfg(feature = "builtin-parser")]
     #[test]
     fn test_default_stall_limit_allows_valid_parse() {
+        let mut parser = Parser::new();
         let result = StrDoc::try_new(
+            &mut parser,
             "def f(x):\n    return x\n",
             crate::SupportLang::Python,
             &super::ParseGuard::default(),
@@ -482,9 +496,10 @@ mod tests {
     fn zero_cpu_budget_aborts_large_parse() {
         use super::ParseGuard;
         use std::time::Duration;
+        let mut parser = Parser::new();
         let src = "def f(x):\n    return x + 1\n".repeat(50_000);
         let guard = ParseGuard::default().with_budget(Duration::ZERO);
-        let result = StrDoc::try_new(&src, crate::SupportLang::Python, &guard);
+        let result = StrDoc::try_new(&mut parser, &src, crate::SupportLang::Python, &guard);
         assert_eq!(
             result.err().as_deref(),
             Some("per-file CPU budget exceeded"),
@@ -497,8 +512,10 @@ mod tests {
     fn ample_cpu_budget_allows_parse() {
         use super::ParseGuard;
         use std::time::Duration;
+        let mut parser = Parser::new();
         let guard = ParseGuard::default().with_budget(Duration::from_secs(300));
         let result = StrDoc::try_new(
+            &mut parser,
             "def f(x):\n    return x\n",
             crate::SupportLang::Python,
             &guard,

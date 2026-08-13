@@ -604,13 +604,20 @@ impl LanguageSpec {
     ) -> Result<ParseFullResult, ParseFullError> {
         let source_str = std::str::from_utf8(source).map_err(ParseFullError::InvalidUtf8)?;
 
+        thread_local! {
+            static TS_PARSER: std::cell::RefCell<treesitter_visit::TsParser> =
+                std::cell::RefCell::new(treesitter_visit::TsParser::new());
+        }
+
         let parse_start = cpu_time::ThreadTime::now();
-        let ast = language
-            .parse_ast(source_str, timeouts.parse)
-            .map_err(|detail| ParseFullError::Aborted {
-                phase: crate::v2::error::AbortPhase::Parse,
-                detail,
-            })?;
+        let ast = TS_PARSER.with_borrow_mut(|parser| {
+            language
+                .parse_ast(parser, source_str, timeouts.parse)
+                .map_err(|detail| ParseFullError::Aborted {
+                    phase: crate::v2::error::AbortPhase::Parse,
+                    detail,
+                })
+        })?;
         let parse_cpu = parse_start.elapsed();
         let root = ast.root();
         let sep = language.fqn_separator();
