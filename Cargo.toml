@@ -74,6 +74,7 @@ rustc-hash = "2.1.1"
 rmcp = { version = "1.7", features = ["server", "macros", "transport-io"] }
 schemars = "1.2.1"
 serde = { version = "1.0.228", features = ["derive"] }
+rust-stemmers = "1.2.0"
 serde_json = "1.0.149"
 serde_yaml = "0.9.34"
 sha2 = "0.11.0"

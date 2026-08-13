@@ -23,7 +23,7 @@ use crate::workspace;
 /// `LIKE` patterns excluded from the map: test, mock, fixture, generated,
 /// vendored, and build-output paths. Anchored both top-level (`spec/%`) and
 /// nested (`%/spec/%`) because monorepos keep `spec/` at the repo root.
-const EXCLUDE_LIKE: &[&str] = &[
+pub(crate) const EXCLUDE_LIKE: &[&str] = &[
     "spec/%",
     "%/spec/%",
     "ee/spec/%",
@@ -54,6 +54,9 @@ const EXCLUDE_LIKE: &[&str] = &[
     "%_pb.rb",
     "%.pb.cc",
     "%.pb.h",
+    "%.pb.rs",
+    "proto/%",
+    "%/proto/%",
     "%/generated/%",
     "generated/%",
     "node_modules/%",
@@ -70,7 +73,7 @@ const EXCLUDE_LIKE: &[&str] = &[
 
 /// RE2 patterns whose matches are excluded — catches `foo_tests/` style
 /// directories and Go `mock_*.go` files that the `LIKE` list cannot.
-const EXCLUDE_REGEX: &[&str] = &[r"(^|/)[a-z]+_tests?/", r"(^|/)mock_[a-z_]+\.go$"];
+pub(crate) const EXCLUDE_REGEX: &[&str] = &[r"(^|/)[a-z]+_tests?/", r"(^|/)mock_[a-z_]+\.go$"];
 
 /// Structural signature keyword regex (RE2), matched against the first
 /// non-comment line in the window after `start_line`.
@@ -83,7 +86,7 @@ const SIG_REGEX: &str = concat!(
 );
 
 /// Source extensions Orbit indexes; used to build `read_text` globs.
-const DEFAULT_SOURCE_EXTS: &[&str] = &[
+pub(crate) const DEFAULT_SOURCE_EXTS: &[&str] = &[
     "rs", "rb", "py", "js", "ts", "vue", "jsx", "tsx", "mjs", "cjs", "go", "java", "kt", "kts",
     "scala", "cs", "cpp", "c", "h", "hpp", "swift", "php", "rake",
 ];
@@ -808,7 +811,7 @@ fn section<W: Write>(client: &duckdb_client::DuckDbClient, out: &mut W, query: &
 }
 
 /// SQL string literal with single-quote doubling.
-fn sql_lit(s: &str) -> String {
+pub(crate) fn sql_lit(s: &str) -> String {
     format!("'{}'", s.replace('\'', "''"))
 }
 
@@ -839,7 +842,7 @@ fn parse_extensions(raw: &[String]) -> Vec<String> {
     out
 }
 
-fn ext_regex(exts: &[String]) -> String {
+pub(crate) fn ext_regex(exts: &[String]) -> String {
     let alt = exts
         .iter()
         .map(|e| regex_escape(e))
@@ -859,7 +862,7 @@ fn regex_escape(s: &str) -> String {
     out
 }
 
-fn scalar_i64(batches: &[RecordBatch]) -> i64 {
+pub(crate) fn scalar_i64(batches: &[RecordBatch]) -> i64 {
     batches
         .iter()
         .find(|b| b.num_rows() > 0)
@@ -868,7 +871,7 @@ fn scalar_i64(batches: &[RecordBatch]) -> i64 {
         .unwrap_or(0)
 }
 
-fn string_column(batches: &[RecordBatch], name: &str) -> Vec<String> {
+pub(crate) fn string_column(batches: &[RecordBatch], name: &str) -> Vec<String> {
     batches
         .iter()
         .filter_map(|b| {
