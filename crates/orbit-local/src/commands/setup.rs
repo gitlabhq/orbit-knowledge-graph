@@ -299,6 +299,23 @@ mod tests {
     }
 
     #[test]
+    fn global_paths_resolve_to_real_components_under_home() {
+        let home = dirs::home_dir().unwrap();
+        for (assistant, tail) in [
+            ("claude", [".claude", "CLAUDE.md"]),
+            ("codex", [".codex", "AGENTS.md"]),
+        ] {
+            let spec = spec::get(assistant).unwrap();
+            let (path, _) = Target::Global.resolve(&spec.instruction_file).unwrap();
+            assert!(path.starts_with(&home), "{assistant}: {path:?}");
+            assert!(
+                path.ends_with(Path::new(tail[0]).join(tail[1])),
+                "{assistant}: {path:?}"
+            );
+        }
+    }
+
+    #[test]
     fn install_requires_at_least_one_assistant_and_bare_remove_removes_all() {
         let dir = tempfile::tempdir().unwrap();
 

@@ -1,5 +1,3 @@
-// No backticks or $( ) here: the reminder is echoed inside bash double quotes, where they
-// would substitute and execute the command we only suggest.
 import { existsSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
@@ -11,13 +9,12 @@ export const OrbitPlugin = async () => {
   let reminded = false;
   const root = process.env.ORBIT_DATA_DIR || join(homedir(), ".orbit");
   return {
-    "tool.execute.before": async (input, output) => {
+    "tool.execute.after": async (input, output) => {
       if (reminded) return;
+      if (input.tool !== "bash") return;
       if (REQUIRE_LOCAL_GRAPH && !existsSync(join(root, "graph.duckdb"))) return;
-      if (input.tool === "bash") {
-        output.args.command = 'echo "' + REMINDER + '" ; ' + output.args.command;
-        reminded = true;
-      }
+      output.output = output.output + "\n\n" + REMINDER;
+      reminded = true;
     },
   };
 };
