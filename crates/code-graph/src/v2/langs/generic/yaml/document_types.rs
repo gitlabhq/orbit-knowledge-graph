@@ -109,21 +109,39 @@ struct MappingForm {
     version_split: Option<char>,
 }
 
+const CONFIG_SCHEMA: &str = include_str!(concat!(
+    env!("SCHEMA_DIR"),
+    "/yaml_document_type.schema.json"
+));
+
+fn config_validator() -> jsonschema::Validator {
+    let schema: serde_json::Value =
+        serde_json::from_str(CONFIG_SCHEMA).expect("yaml_document_type.schema.json must be JSON");
+    jsonschema::validator_for(&schema).expect("yaml_document_type.schema.json must be a schema")
+}
+
 static DOCUMENT_TYPES: LazyLock<Vec<DocumentType>> = LazyLock::new(|| {
+    let validator = config_validator();
     ConfigFiles::iter()
         .map(|path| {
             let file = ConfigFiles::get(&path).expect("iterated embedded file must exist");
-            let doc_type: DocumentType = serde_yaml::from_slice(&file.data)
+            let document: serde_json::Value = orbit_utils::yaml::from_slice(&file.data)
                 .unwrap_or_else(|e| panic!("document-type config {path} must parse: {e}"));
+            let errors: Vec<String> = validator
+                .iter_errors(&document)
+                .map(|e| format!("{}: {e}", e.instance_path()))
+                .collect();
+            assert!(
+                errors.is_empty(),
+                "document-type config {path} violates yaml_document_type.schema.json: {}",
+                errors.join("; ")
+            );
+            let doc_type: DocumentType = serde_json::from_value(document)
+                .unwrap_or_else(|e| panic!("document-type config {path} must deserialize: {e}"));
             let stem = path.trim_end_matches(".yaml").trim_end_matches(".yml");
             assert_eq!(
                 doc_type.name, stem,
                 "document-type config {path} must be named after its `name`"
-            );
-            assert!(
-                !doc_type.matcher.filename_suffixes.is_empty()
-                    || !doc_type.matcher.document_keys.is_empty(),
-                "document-type config {path} must declare at least one match criterion"
             );
             doc_type
         })
@@ -309,6 +327,47 @@ mod tests {
     #[test]
     fn embedded_configs_parse() {
         assert!(!super::DOCUMENT_TYPES.is_empty());
+    }
+
+    fn schema_errors(config: &str) -> Vec<String> {
+        let document: serde_json::Value =
+            orbit_utils::yaml::from_str(config).expect("config parses");
+        super::config_validator()
+            .iter_errors(&document)
+            .map(|e| e.to_string())
+            .collect()
+    }
+
+    #[test]
+    fn schema_accepts_a_minimal_config() {
+        let errors = schema_errors(
+            "name: helm_chart\nmatch:\n  filename_suffixes: [Chart.yaml]\nimports:\n  - key: dependencies\n    mapping_forms:\n      - type: HelmChartDependency\n        path_key: name\n",
+        );
+        assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    #[test]
+    fn schema_rejects_a_matcher_without_criteria() {
+        let errors = schema_errors(
+            "name: x\nmatch: {}\nimports:\n  - key: include\n    scalar_type: CiLocalInclude\n",
+        );
+        assert!(!errors.is_empty());
+    }
+
+    #[test]
+    fn schema_rejects_a_rule_that_emits_nothing() {
+        let errors = schema_errors(
+            "name: x\nmatch:\n  filename_suffixes: [x.yaml]\nimports:\n  - key: include\n",
+        );
+        assert!(!errors.is_empty());
+    }
+
+    #[test]
+    fn schema_rejects_unknown_keys() {
+        let errors = schema_errors(
+            "name: x\nmatch:\n  filename_suffixes: [x.yaml]\nimports:\n  - key: include\n    scalar_type: CiLocalInclude\n    typo_key: true\n",
+        );
+        assert!(!errors.is_empty());
     }
 
     #[test]

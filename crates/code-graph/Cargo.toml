@@ -24,6 +24,7 @@ either = { workspace = true }
 globset = { workspace = true }
 ignore = { workspace = true }
 indicatif = { workspace = true }
+jsonschema = { workspace = true }
 memchr = { workspace = true }
 parking_lot = { workspace = true }
 petgraph = { workspace = true }
@@ -33,7 +34,6 @@ rust-embed = { workspace = true }
 rustc-hash = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-serde_yaml = { workspace = true }
 smallvec = { workspace = true }
 smol_str = "0.3"
 stacker = { workspace = true }
