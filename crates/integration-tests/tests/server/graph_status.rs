@@ -196,16 +196,6 @@ fn dotted_traversal(traversal_path: &str) -> String {
         .join(".")
 }
 
-fn seed_indexing_progress(
-    mock_kv: &MockKvServices,
-    traversal_path: &str,
-    progress: &IndexingProgress,
-) {
-    let key = format!("status.{}", dotted_traversal(traversal_path));
-    let payload = serde_json::to_vec(progress).expect("serialize progress");
-    mock_kv.set(INDEXING_PROGRESS_BUCKET, &key, Bytes::from(payload));
-}
-
 fn seed_entity_progress(
     mock_kv: &MockKvServices,
     traversal_path: &str,
@@ -266,8 +256,13 @@ async fn graph_status() {
         indexing_status_unknown_when_nats_unreachable,
         indexing_status_per_entity_worst_state_wins,
         indexing_status_per_entity_missing_key_treated_as_not_indexed,
-        indexing_status_falls_back_to_legacy_key_during_rollout,
         indexing_status_survives_single_entity_read_failure,
+        code_not_indexed_dominates_when_no_project_checkpointed,
+        code_indexing_omitted_when_no_projects_known,
+        edge_pipeline_error_surfaces_in_sdlc_state,
+        items_carry_per_entity_state,
+        indexing_status_reports_last_run_rows,
+        toon_renders_split_indexing_blocks,
         reporter_excludes_security_entity_counts,
         security_manager_includes_security_entity_counts,
         definition_count_counts_distinct_ids,
@@ -415,13 +410,22 @@ async fn indexing_status_absent_without_store(ctx: &TestContext) {
         status.indexing.is_none(),
         "indexing field should be absent when no store is configured"
     );
+    assert!(status.sdlc_indexing.is_none());
+    let code = status
+        .code_indexing
+        .expect("code_indexing needs only ClickHouse");
+    assert_eq!(
+        code.state,
+        IndexingState::Backfilling as i32,
+        "2 of 3 projects checkpointed"
+    );
 }
 
 async fn indexing_status_indexed_for_group(ctx: &TestContext) {
     let mock_kv = MockKvServices::new();
     let started = Utc::now() - Duration::seconds(30);
     let completed = Utc::now() - Duration::seconds(25);
-    seed_indexing_progress(
+    seed_namespaced_entities(
         &mock_kv,
         "1/100/",
         &IndexingProgress {
@@ -429,6 +433,8 @@ async fn indexing_status_indexed_for_group(ctx: &TestContext) {
             last_completed_at: Some(completed),
             last_duration_ms: Some(5000),
             last_error: None,
+            last_rows_read: None,
+            last_rows_written: None,
         },
     );
 
@@ -439,17 +445,26 @@ async fn indexing_status_indexed_for_group(ctx: &TestContext) {
         .expect("should succeed");
     let status = extract_structured(response);
 
+    let sdlc = status
+        .sdlc_indexing
+        .expect("sdlc_indexing should be present");
+    assert_eq!(sdlc.state, IndexingState::Indexed as i32);
+    assert!(sdlc.last_started_at.is_some());
+    assert!(sdlc.last_completed_at.is_some());
+    assert_eq!(sdlc.last_duration_ms, Some(5000));
+    assert!(sdlc.last_error.is_none());
+
     let indexing = status.indexing.expect("indexing should be present");
-    assert_eq!(indexing.state, IndexingState::Indexed as i32);
-    assert!(indexing.last_started_at.is_some());
-    assert!(indexing.last_completed_at.is_some());
-    assert_eq!(indexing.last_duration_ms, Some(5000));
-    assert!(indexing.last_error.is_none());
+    assert_eq!(
+        indexing.state,
+        IndexingState::Backfilling as i32,
+        "combined state reflects code coverage (1 of 2 projects) even though SDLC completed"
+    );
 }
 
 async fn indexing_status_backfilling_for_project(ctx: &TestContext) {
     let mock_kv = MockKvServices::new();
-    seed_indexing_progress(
+    seed_namespaced_entities(
         &mock_kv,
         "1/100/1000/",
         &IndexingProgress {
@@ -457,6 +472,8 @@ async fn indexing_status_backfilling_for_project(ctx: &TestContext) {
             last_completed_at: None,
             last_duration_ms: None,
             last_error: None,
+            last_rows_read: None,
+            last_rows_written: None,
         },
     );
 
@@ -471,12 +488,21 @@ async fn indexing_status_backfilling_for_project(ctx: &TestContext) {
     assert_eq!(indexing.state, IndexingState::Backfilling as i32);
     assert!(indexing.last_started_at.is_some());
     assert!(indexing.last_completed_at.is_none());
+
+    let code = status
+        .code_indexing
+        .expect("code_indexing should be present");
+    assert_eq!(
+        code.state,
+        IndexingState::Indexed as i32,
+        "the project itself is checkpointed"
+    );
 }
 
 async fn indexing_status_indexing_when_reindex_in_flight(ctx: &TestContext) {
     let mock_kv = MockKvServices::new();
     let previous_completion = Utc::now() - Duration::seconds(60);
-    seed_indexing_progress(
+    seed_namespaced_entities(
         &mock_kv,
         "1/100/",
         &IndexingProgress {
@@ -484,6 +510,8 @@ async fn indexing_status_indexing_when_reindex_in_flight(ctx: &TestContext) {
             last_completed_at: Some(previous_completion),
             last_duration_ms: Some(5000),
             last_error: None,
+            last_rows_read: None,
+            last_rows_written: None,
         },
     );
 
@@ -494,8 +522,10 @@ async fn indexing_status_indexing_when_reindex_in_flight(ctx: &TestContext) {
         .expect("should succeed");
     let status = extract_structured(response);
 
-    let indexing = status.indexing.expect("indexing should be present");
-    assert_eq!(indexing.state, IndexingState::Indexing as i32);
+    let sdlc = status
+        .sdlc_indexing
+        .expect("sdlc_indexing should be present");
+    assert_eq!(sdlc.state, IndexingState::Indexing as i32);
 }
 
 async fn indexing_status_not_indexed_when_no_kv_entry(ctx: &TestContext) {
@@ -515,7 +545,7 @@ async fn indexing_status_not_indexed_when_no_kv_entry(ctx: &TestContext) {
 async fn indexing_status_error_state(ctx: &TestContext) {
     let mock_kv = MockKvServices::new();
     let started = Utc::now() - Duration::seconds(10);
-    seed_indexing_progress(
+    seed_namespaced_entities(
         &mock_kv,
         "1/100/",
         &IndexingProgress {
@@ -523,6 +553,8 @@ async fn indexing_status_error_state(ctx: &TestContext) {
             last_completed_at: Some(started + Duration::seconds(2)),
             last_duration_ms: Some(2000),
             last_error: Some("deadline exceeded".to_string()),
+            last_rows_read: None,
+            last_rows_written: None,
         },
     );
 
@@ -533,10 +565,12 @@ async fn indexing_status_error_state(ctx: &TestContext) {
         .expect("should succeed");
     let status = extract_structured(response);
 
-    let indexing = status.indexing.expect("indexing should be present");
-    assert_eq!(indexing.state, IndexingState::Error as i32);
+    let sdlc = status
+        .sdlc_indexing
+        .expect("sdlc_indexing should be present");
+    assert_eq!(sdlc.state, IndexingState::Error as i32);
     assert_eq!(
-        indexing.last_error.as_deref(),
+        sdlc.last_error.as_deref(),
         Some("Something went wrong during indexing.")
     );
 }
@@ -566,25 +600,25 @@ async fn indexing_status_per_entity_worst_state_wins(ctx: &TestContext) {
         last_completed_at: Some(completed),
         last_duration_ms: Some(5000),
         last_error: None,
+        last_rows_read: None,
+        last_rows_written: None,
     };
     let errored = IndexingProgress {
         last_started_at: started,
         last_completed_at: Some(completed),
         last_duration_ms: Some(5000),
         last_error: Some("scan failure".to_string()),
+        last_rows_read: None,
+        last_rows_written: None,
     };
 
-    let ontology = load_ontology();
-    for node in ontology.nodes() {
-        if !has_namespaced_pipeline(node) {
-            continue;
-        }
-        let progress = if node.name == "WorkItem" {
+    for name in namespaced_pipeline_names() {
+        let progress = if name == "WorkItem" {
             &errored
         } else {
             &indexed
         };
-        seed_entity_progress(&mock_kv, "1/100/", &node.name, progress);
+        seed_entity_progress(&mock_kv, "1/100/", &name, progress);
     }
 
     let service = build_service_with_indexing_status(ctx, mock_kv);
@@ -594,10 +628,12 @@ async fn indexing_status_per_entity_worst_state_wins(ctx: &TestContext) {
         .expect("should succeed");
     let status = extract_structured(response);
 
-    let indexing = status.indexing.expect("indexing should be present");
-    assert_eq!(indexing.state, IndexingState::Error as i32);
+    let sdlc = status
+        .sdlc_indexing
+        .expect("sdlc_indexing should be present");
+    assert_eq!(sdlc.state, IndexingState::Error as i32);
     assert_eq!(
-        indexing.last_error.as_deref(),
+        sdlc.last_error.as_deref(),
         Some("Something went wrong during indexing.")
     );
 }
@@ -609,6 +645,8 @@ async fn indexing_status_per_entity_missing_key_treated_as_not_indexed(ctx: &Tes
         last_completed_at: Some(Utc::now() - Duration::seconds(25)),
         last_duration_ms: Some(5000),
         last_error: None,
+        last_rows_read: None,
+        last_rows_written: None,
     };
     seed_entity_progress(&mock_kv, "1/100/", "MergeRequest", &progress);
 
@@ -621,30 +659,6 @@ async fn indexing_status_per_entity_missing_key_treated_as_not_indexed(ctx: &Tes
 
     let indexing = status.indexing.expect("indexing should be present");
     assert_eq!(indexing.state, IndexingState::NotIndexed as i32);
-}
-
-async fn indexing_status_falls_back_to_legacy_key_during_rollout(ctx: &TestContext) {
-    let mock_kv = MockKvServices::new();
-    let started = Utc::now() - Duration::seconds(30);
-    let completed = started + Duration::seconds(5);
-    let legacy = IndexingProgress {
-        last_started_at: started,
-        last_completed_at: Some(completed),
-        last_duration_ms: Some(5000),
-        last_error: None,
-    };
-    seed_indexing_progress(&mock_kv, "1/100/", &legacy);
-
-    let service = build_service_with_indexing_status(ctx, mock_kv);
-    let response = service
-        .get_status("1/100/", ResponseFormat::Raw as i32, &admin_context())
-        .await
-        .expect("should succeed");
-    let status = extract_structured(response);
-
-    let indexing = status.indexing.expect("indexing should be present");
-    assert_eq!(indexing.state, IndexingState::Indexed as i32);
-    assert_eq!(indexing.last_duration_ms, Some(5000));
 }
 
 async fn reporter_excludes_security_entity_counts(ctx: &TestContext) {
@@ -690,24 +704,23 @@ async fn security_manager_includes_security_entity_counts(ctx: &TestContext) {
     );
 }
 
+fn namespaced_pipeline_names() -> Vec<String> {
+    load_ontology()
+        .pipeline_descriptors()
+        .into_iter()
+        .filter(|descriptor| descriptor.scope == ontology::EtlScope::Namespaced)
+        .map(|descriptor| descriptor.name)
+        .collect()
+}
+
 fn seed_namespaced_entities(
     mock_kv: &MockKvServices,
     traversal_path: &str,
     progress: &IndexingProgress,
 ) {
-    let ontology = load_ontology();
-    for node in ontology.nodes() {
-        if !has_namespaced_pipeline(node) {
-            continue;
-        }
-        seed_entity_progress(mock_kv, traversal_path, &node.name, progress);
+    for name in namespaced_pipeline_names() {
+        seed_entity_progress(mock_kv, traversal_path, &name, progress);
     }
-}
-
-fn has_namespaced_pipeline(node: &ontology::NodeEntity) -> bool {
-    node.pipelines
-        .iter()
-        .any(|pipeline| pipeline.scope == ontology::EtlScope::Namespaced)
 }
 
 async fn indexing_status_survives_single_entity_read_failure(ctx: &TestContext) {
@@ -718,6 +731,8 @@ async fn indexing_status_survives_single_entity_read_failure(ctx: &TestContext) 
         last_completed_at: Some(started + Duration::seconds(5)),
         last_duration_ms: Some(5000),
         last_error: None,
+        last_rows_read: None,
+        last_rows_written: None,
     };
     seed_namespaced_entities(&mock_kv, "1/100/", &indexed);
 
@@ -735,9 +750,173 @@ async fn indexing_status_survives_single_entity_read_failure(ctx: &TestContext) 
         .expect("should succeed");
     let status = extract_structured(response);
 
+    let sdlc = status
+        .sdlc_indexing
+        .expect("sdlc_indexing should be present");
+    assert_ne!(sdlc.state, IndexingState::Unknown as i32);
+    assert_eq!(sdlc.state, IndexingState::Indexed as i32);
+}
+
+fn completed_progress() -> IndexingProgress {
+    let started = Utc::now() - Duration::seconds(30);
+    IndexingProgress {
+        last_started_at: started,
+        last_completed_at: Some(started + Duration::seconds(5)),
+        last_duration_ms: Some(5000),
+        last_error: None,
+        last_rows_read: None,
+        last_rows_written: None,
+    }
+}
+
+async fn code_not_indexed_dominates_when_no_project_checkpointed(ctx: &TestContext) {
+    let mock_kv = MockKvServices::new();
+    seed_namespaced_entities(&mock_kv, "1/100/1002/", &completed_progress());
+
+    let service = build_service_with_indexing_status(ctx, mock_kv);
+    let response = service
+        .get_status("1/100/1002/", ResponseFormat::Raw as i32, &admin_context())
+        .await
+        .expect("should succeed");
+    let status = extract_structured(response);
+
+    let sdlc = status
+        .sdlc_indexing
+        .expect("sdlc_indexing should be present");
+    assert_eq!(sdlc.state, IndexingState::Indexed as i32);
+
+    let code = status
+        .code_indexing
+        .expect("code_indexing should be present");
+    assert_eq!(
+        code.state,
+        IndexingState::NotIndexed as i32,
+        "project 1002 has no checkpoint"
+    );
+
     let indexing = status.indexing.expect("indexing should be present");
-    assert_ne!(indexing.state, IndexingState::Unknown as i32);
+    assert_eq!(
+        indexing.state,
+        IndexingState::NotIndexed as i32,
+        "an un-code-indexed scope must not report plain indexed"
+    );
+}
+
+async fn code_indexing_omitted_when_no_projects_known(ctx: &TestContext) {
+    let mock_kv = MockKvServices::new();
+    seed_namespaced_entities(&mock_kv, "999/", &completed_progress());
+
+    let service = build_service_with_indexing_status(ctx, mock_kv);
+    let response = service
+        .get_status("999/", ResponseFormat::Raw as i32, &admin_context())
+        .await
+        .expect("should succeed");
+    let status = extract_structured(response);
+
+    assert!(
+        status.code_indexing.is_none(),
+        "a scope with no known projects has no code coverage to claim"
+    );
+    let indexing = status.indexing.expect("indexing should be present");
     assert_eq!(indexing.state, IndexingState::Indexed as i32);
+}
+
+async fn edge_pipeline_error_surfaces_in_sdlc_state(ctx: &TestContext) {
+    let mock_kv = MockKvServices::new();
+    seed_namespaced_entities(&mock_kv, "1/100/", &completed_progress());
+    let mut errored = completed_progress();
+    errored.last_error = Some("scan failure".to_string());
+    seed_entity_progress(&mock_kv, "1/100/", "MEMBER_OF_siphon_members", &errored);
+
+    let service = build_service_with_indexing_status(ctx, mock_kv);
+    let response = service
+        .get_status("1/100/", ResponseFormat::Raw as i32, &admin_context())
+        .await
+        .expect("should succeed");
+    let status = extract_structured(response);
+
+    let sdlc = status
+        .sdlc_indexing
+        .expect("sdlc_indexing should be present");
+    assert_eq!(sdlc.state, IndexingState::Error as i32);
+    assert_eq!(
+        sdlc.last_error.as_deref(),
+        Some("Something went wrong during indexing.")
+    );
+}
+
+async fn items_carry_per_entity_state(ctx: &TestContext) {
+    let mock_kv = MockKvServices::new();
+    seed_namespaced_entities(&mock_kv, "1/100/", &completed_progress());
+
+    let service = build_service_with_indexing_status(ctx, mock_kv);
+    let response = service
+        .get_status("1/100/", ResponseFormat::Raw as i32, &admin_context())
+        .await
+        .expect("should succeed");
+    let status = extract_structured(response);
+
+    let find_state = |domain: &str, item: &str| {
+        find_domain(&status.domains, domain)
+            .items
+            .iter()
+            .find(|i| i.name == item)
+            .unwrap_or_else(|| panic!("item {item} not found"))
+            .state
+    };
+
+    assert_eq!(
+        find_state("code_review", "MergeRequest"),
+        Some(IndexingState::Indexed as i32)
+    );
+    assert_eq!(
+        find_state("source_code", "Definition"),
+        Some(IndexingState::Backfilling as i32),
+        "code entities carry the code coverage state (1 of 2 projects under 1/100/)"
+    );
+}
+
+async fn indexing_status_reports_last_run_rows(ctx: &TestContext) {
+    let mock_kv = MockKvServices::new();
+    let mut progress = completed_progress();
+    progress.last_rows_read = Some(307);
+    progress.last_rows_written = Some(465);
+    seed_namespaced_entities(&mock_kv, "1/100/", &progress);
+
+    let service = build_service_with_indexing_status(ctx, mock_kv);
+    let response = service
+        .get_status("1/100/", ResponseFormat::Raw as i32, &admin_context())
+        .await
+        .expect("should succeed");
+    let status = extract_structured(response);
+
+    let sdlc = status
+        .sdlc_indexing
+        .expect("sdlc_indexing should be present");
+    assert_eq!(sdlc.last_rows_read, Some(307));
+    assert_eq!(sdlc.last_rows_written, Some(465));
+}
+
+async fn toon_renders_split_indexing_blocks(ctx: &TestContext) {
+    let mock_kv = MockKvServices::new();
+    seed_namespaced_entities(&mock_kv, "1/100/", &completed_progress());
+
+    let service = build_service_with_indexing_status(ctx, mock_kv);
+    let response = service
+        .get_status("1/100/", ResponseFormat::Llm as i32, &admin_context())
+        .await
+        .expect("should succeed");
+    let text = match response.content {
+        Some(get_graph_status_response::Content::FormattedText(t)) => t,
+        _ => panic!("Expected formatted text response"),
+    };
+
+    assert!(text.contains("sdlc_indexing"), "TOON output: {text}");
+    assert!(text.contains("code_indexing"), "TOON output: {text}");
+    assert!(
+        text.contains("backfilling"),
+        "code coverage 1/2 renders as backfilling: {text}"
+    );
 }
 
 async fn definition_count_counts_distinct_ids(ctx: &TestContext) {
@@ -826,7 +1005,7 @@ async fn get_status_degrades_when_entity_count_table_missing(ctx: &TestContext) 
 
     let mock_kv = MockKvServices::new();
     let started = Utc::now() - Duration::seconds(30);
-    seed_indexing_progress(
+    seed_namespaced_entities(
         &mock_kv,
         "1/",
         &IndexingProgress {
@@ -834,6 +1013,8 @@ async fn get_status_degrades_when_entity_count_table_missing(ctx: &TestContext) 
             last_completed_at: Some(started + Duration::seconds(5)),
             last_duration_ms: Some(5000),
             last_error: None,
+            last_rows_read: None,
+            last_rows_written: None,
         },
     );
     let service = build_service_with_indexing_status(&db, mock_kv);
@@ -847,8 +1028,10 @@ async fn get_status_degrades_when_entity_count_table_missing(ctx: &TestContext) 
     let projects = status.projects.expect("projects should be present");
     assert_eq!(projects.total_known, 3);
 
-    let indexing = status.indexing.expect("indexing should be present");
-    assert_eq!(indexing.state, IndexingState::Indexed as i32);
+    let sdlc = status
+        .sdlc_indexing
+        .expect("sdlc_indexing should be present");
+    assert_eq!(sdlc.state, IndexingState::Indexed as i32);
 
     let core = find_domain(&status.domains, "core");
     assert_eq!(

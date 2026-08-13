@@ -10,12 +10,13 @@ use tracing::{debug, info, warn};
 use super::checkpoint::{CodeCheckpointStore, CodeIndexingCheckpoint};
 use super::metrics::CodeMetrics;
 use super::observer::CodeOtelObserver;
-use super::pipeline::{CodeIndexer, IndexError, IndexingRequest};
+use super::pipeline::{CodeIndexer, IndexError, IndexOutcome, IndexingRequest};
 use super::repository::{EmptyRepositoryReason, RepositoryService, RepositoryServiceError};
 use crate::analytics::IndexingAnalytics;
 
 use crate::engine::retry::{Backoff, RetryMode, RetryPolicy};
 use crate::handler::{Handler, HandlerContext, HandlerError};
+use crate::indexing_status::RunRows;
 use crate::locking::{LockError, LockGuard};
 use crate::nats::ProgressNotifier;
 use crate::observer::{self, IndexingMode, IndexingObserver, PipelineType};
@@ -405,6 +406,17 @@ impl CodeIndexingTaskHandler {
             Err(IndexError::Failed(e)) => Err(e),
         };
 
+        let rows = match &result {
+            Ok(IndexOutcome::Indexed { rows_written }) => RunRows {
+                read: None,
+                written: Some(*rows_written),
+            },
+            Ok(IndexOutcome::EmptyRepository) => RunRows {
+                read: None,
+                written: Some(0),
+            },
+            Err(_) => RunRows::default(),
+        };
         let result = result.map(|outcome| outcome.metric_label());
 
         context
@@ -414,6 +426,7 @@ impl CodeIndexingTaskHandler {
                 started_at,
                 Utc::now(),
                 result.as_ref().err().map(ToString::to_string),
+                rows,
             )
             .await;
 
@@ -734,6 +747,14 @@ mod tests {
             .expect("checkpoint should be set for empty repo");
         assert_eq!(checkpoint.last_task_id, 42);
         assert!(checkpoint.last_commit.is_none());
+
+        let progress = crate::indexing_status::IndexingStatusStore::new(ctx.mock_nats.clone())
+            .get("1/123/")
+            .await
+            .unwrap()
+            .expect("progress should be recorded for empty repo");
+        assert_eq!(progress.last_rows_written, Some(0));
+        assert_eq!(progress.last_rows_read, None);
     }
 
     #[tokio::test]
