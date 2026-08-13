@@ -1,1 +1,0 @@
-A local Orbit code graph is available. Before reading source files one by one, run `orbit sql "<DuckDB SQL>"` (definitions, callers, imports) or `orbit repo-map` to orient. Read raw files after the graph has oriented you, or to modify/debug specific lines.

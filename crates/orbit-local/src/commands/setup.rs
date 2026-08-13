@@ -459,7 +459,8 @@ mod tests {
         let plugin =
             std::fs::read_to_string(dir.path().join(".opencode/plugins/orbit.js")).unwrap();
         assert!(plugin.contains("glab orbit remote"));
-        assert!(!plugin.contains("graph.duckdb"));
+        assert!(plugin.contains("const REQUIRE_LOCAL_GRAPH = false"));
+        assert!(!plugin.contains("{{"));
     }
 
     #[test]

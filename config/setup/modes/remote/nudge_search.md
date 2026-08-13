@@ -1,1 +1,0 @@
-The remote Orbit graph is available. For code-structure questions, run `glab orbit remote query` before grepping raw files — the graph returns scoped results with far less output. `glab orbit remote schema` lists entities and edges. Grep after the graph has oriented you, or to modify/debug specific lines.

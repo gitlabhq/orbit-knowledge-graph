@@ -9,7 +9,7 @@ template_files:
   - path:
       project: .opencode/plugins/orbit.js
       global: "~/.config/opencode/plugins/orbit.js"
-    template: "modes/{mode}/opencode_plugin.js"
+    template: opencode_plugin.js
 registrations:
   - file:
       project: .opencode/opencode.json

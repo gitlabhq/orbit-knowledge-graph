@@ -20,15 +20,6 @@ pub(crate) enum Kind {
     Read,
 }
 
-impl Kind {
-    fn as_str(self) -> &'static str {
-        match self {
-            Kind::Search => "search",
-            Kind::Read => "read",
-        }
-    }
-}
-
 const SEARCH_COMMANDS: &[&str] = &[
     "ack", "ag", "egrep", "fd", "fgrep", "find", "grep", "rg", "ripgrep",
 ];
@@ -78,14 +69,11 @@ fn local_graph_exists() -> bool {
         .unwrap_or(false)
 }
 
-fn nudge_text(kind: Kind, mode: Mode) -> String {
-    spec::embedded_text(&format!(
-        "modes/{}/nudge_{}.md",
-        mode.as_str(),
-        kind.as_str()
-    ))
-    .trim_end()
-    .to_string()
+fn nudge_text(kind: Kind, mode: Mode) -> &'static str {
+    match kind {
+        Kind::Search => spec::nudge_search(mode),
+        Kind::Read => spec::nudge_read(mode),
+    }
 }
 
 fn should_nudge(kind: Kind, call: &Value) -> bool {

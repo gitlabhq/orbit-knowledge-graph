@@ -1,8 +1,10 @@
 //! Declarative assistant specs embedded from `config/setup/agents/`. Each YAML file
 //! describes one assistant in terms of four generic operations (instruction
 //! file, marker-owned JSON merges, templated files, string registrations);
-//! adding an assistant means adding a YAML file, not Rust.
+//! adding an assistant means adding a YAML file, not Rust. Everything that
+//! differs between the local and remote graph lives in `config/setup/modes.yaml`.
 
+use std::collections::BTreeMap;
 use std::sync::LazyLock;
 
 use rust_embed::Embed;
@@ -16,7 +18,7 @@ struct SetupAssets;
 /// Which graph mechanism the written guidance points at. The rules are the
 /// same either way; only the commands differ, so the two variants replace
 /// each other rather than combining. `{mode}` tokens in specs resolve to the
-/// matching `config/setup/modes/<mode>/` assets and hook-guard flags.
+/// matching `config/setup/modes.yaml` section and hook-guard flags.
 #[derive(clap::ValueEnum, Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub(crate) enum Mode {
     Local,
@@ -31,6 +33,67 @@ impl Mode {
             Mode::Remote => "remote",
         }
     }
+
+    fn texts(self) -> &'static ModeTexts {
+        match self {
+            Mode::Local => &MODES.local,
+            Mode::Remote => &MODES.remote,
+        }
+    }
+}
+
+/// Every string that differs between the two modes: the instruction block,
+/// the two hook nudges, and the values filling `{{name}}` placeholders in
+/// assistant templates.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Modes {
+    local: ModeTexts,
+    remote: ModeTexts,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ModeTexts {
+    instructions: String,
+    nudge_search: String,
+    nudge_read: String,
+    #[serde(default)]
+    template_vars: BTreeMap<String, TemplateVar>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum TemplateVar {
+    Flag(bool),
+    Text(String),
+}
+
+impl TemplateVar {
+    fn rendered(&self) -> String {
+        match self {
+            TemplateVar::Flag(flag) => flag.to_string(),
+            TemplateVar::Text(text) => text.clone(),
+        }
+    }
+}
+
+static MODES: LazyLock<Modes> = LazyLock::new(|| {
+    let file = SetupAssets::get("modes.yaml").expect("config/setup/modes.yaml must be embedded");
+    serde_yaml::from_slice(&file.data)
+        .unwrap_or_else(|e| panic!("config/setup/modes.yaml is invalid: {e}"))
+});
+
+pub(crate) fn instructions(mode: Mode) -> &'static str {
+    mode.texts().instructions.trim_end()
+}
+
+pub(crate) fn nudge_search(mode: Mode) -> &'static str {
+    mode.texts().nudge_search.trim_end()
+}
+
+pub(crate) fn nudge_read(mode: Mode) -> &'static str {
+    mode.texts().nudge_read.trim_end()
 }
 
 #[derive(Debug, Deserialize)]
@@ -117,13 +180,17 @@ pub(crate) fn names() -> Vec<&'static str> {
 
 impl TemplateFile {
     pub(super) fn contents(&self, mode: Mode) -> String {
-        embedded_text(&self.template.replace("{mode}", mode.as_str()))
+        let mut rendered = embedded_text(&self.template);
+        for (name, value) in &mode.texts().template_vars {
+            rendered = rendered.replace(&format!("{{{{{name}}}}}"), &value.rendered());
+        }
+        rendered
     }
 }
 
-/// Agent-facing text shipped next to the specs (instruction block, hook
-/// nudges), embedded so every install method carries version-matched content.
-pub(crate) fn embedded_text(name: &str) -> String {
+/// A template shipped next to the specs, embedded so every install method
+/// carries version-matched content.
+fn embedded_text(name: &str) -> String {
     let file =
         SetupAssets::get(name).unwrap_or_else(|| panic!("config/setup/{name} is not embedded"));
     String::from_utf8(file.data.into_owned())
@@ -167,25 +234,44 @@ mod tests {
         for mode in [Mode::Local, Mode::Remote] {
             for spec in all() {
                 for template_file in &spec.template_files {
-                    assert!(!template_file.contents(mode).is_empty());
+                    let rendered = template_file.contents(mode);
+                    assert!(!rendered.is_empty());
+                    assert!(
+                        !rendered.contains("{{"),
+                        "{}: unresolved placeholder in {} for {}",
+                        spec.name,
+                        template_file.template,
+                        mode.as_str()
+                    );
                 }
             }
-            for name in ["instructions.md", "nudge_search.md", "nudge_read.md"] {
-                let text = embedded_text(&format!("modes/{}/{name}", mode.as_str()));
+            for text in [instructions(mode), nudge_search(mode), nudge_read(mode)] {
                 assert!(!text.trim().is_empty());
             }
         }
     }
 
-    // The reminder echo lands inside bash double quotes, so backticks and $(
-    // would substitute there, corrupting output and executing what we only
-    // suggest.
+    // Template values land inside a JS double-quoted string that is echoed
+    // inside bash double quotes, so a quote ends the string early and
+    // backticks or $( substitute there, corrupting output and executing what
+    // we only suggest.
     #[test]
     fn opencode_plugins_are_shell_safe() {
         for mode in [Mode::Local, Mode::Remote] {
             let contents = get("opencode").unwrap().template_files[0].contents(mode);
             assert!(!contents.contains('`'), "{}", mode.as_str());
             assert!(!contents.contains("$("), "{}", mode.as_str());
+
+            for (name, value) in &mode.texts().template_vars {
+                let TemplateVar::Text(text) = value else {
+                    continue;
+                };
+                assert!(
+                    !text.contains(['"', '`']) && !text.contains("$("),
+                    "{}: {name} is not shell-safe",
+                    mode.as_str()
+                );
+            }
         }
     }
 

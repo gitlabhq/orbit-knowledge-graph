@@ -13,7 +13,7 @@ const BLOCK_END: &str = "<!-- orbit:setup:end -->";
 fn rendered_block(mode: super::spec::Mode) -> String {
     format!(
         "{BLOCK_BEGIN}\n{}\n{BLOCK_END}",
-        super::spec::embedded_text(&format!("modes/{}/instructions.md", mode.as_str())).trim_end()
+        super::spec::instructions(mode)
     )
 }
 
