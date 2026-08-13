@@ -51,12 +51,17 @@ impl KeyCondition {
     }
 }
 
+fn filename_matches(file_path: &str, suffix: &str) -> bool {
+    let filename = file_path.rsplit('/').next().unwrap_or(file_path);
+    filename == suffix || (suffix.starts_with('.') && filename.ends_with(suffix))
+}
+
 impl Matcher {
     fn matches(&self, node: &N<'_>, file_path: &str) -> bool {
         if self
             .filename_suffixes
             .iter()
-            .any(|suffix| file_path.ends_with(suffix.as_str()))
+            .any(|suffix| filename_matches(file_path, suffix))
         {
             return true;
         }
@@ -125,26 +130,27 @@ static DOCUMENT_TYPES: LazyLock<Vec<DocumentType>> = LazyLock::new(|| {
         .collect()
 });
 
-fn leak(s: &str) -> &'static str {
-    Box::leak(s.to_string().into_boxed_str())
+fn node_range(node: &N<'_>) -> crate::v2::types::Range {
+    crate::v2::dsl::utils::canonical_range(&crate::utils::node_to_range(node))
 }
 
 fn push_import(
     imports: &mut Vec<CanonicalImport>,
-    import_type: &str,
+    import_type: &'static str,
     path: String,
     name: Option<String>,
     alias: Option<String>,
+    range: crate::v2::types::Range,
 ) {
     imports.push(CanonicalImport {
-        import_type: leak(import_type),
+        import_type,
         binding_kind: ImportBindingKind::SideEffect,
         mode: ImportMode::Declarative,
         path,
         name,
         alias,
         scope_fqn: None,
-        range: crate::v2::types::Range::empty(),
+        range,
         is_type_only: false,
         wildcard: false,
     });
@@ -166,7 +172,8 @@ fn value_list(value: Option<&N<'_>>) -> Vec<String> {
         .collect()
 }
 
-fn emit_mapping(rule: &KeyRule, mapping: &N<'_>, imports: &mut Vec<CanonicalImport>) {
+fn emit_mapping(rule: &'static KeyRule, mapping: &N<'_>, imports: &mut Vec<CanonicalImport>) {
+    let range = node_range(mapping);
     for form in &rule.mapping_forms {
         let mut path: Option<String> = None;
         let mut names: Vec<String> = Vec::new();
@@ -195,15 +202,16 @@ fn emit_mapping(rule: &KeyRule, mapping: &N<'_>, imports: &mut Vec<CanonicalImpo
             path = base.to_string();
         }
         if names.is_empty() {
-            push_import(imports, &form.import_type, path, None, alias);
+            push_import(imports, form.import_type.as_str(), path, None, alias, range);
         } else {
             for name in names {
                 push_import(
                     imports,
-                    &form.import_type,
+                    form.import_type.as_str(),
                     path.clone(),
                     Some(name),
                     alias.clone(),
+                    range,
                 );
             }
         }
@@ -221,7 +229,11 @@ fn key_applies(rule: &KeyRule, node: &N<'_>) -> bool {
     true
 }
 
-fn extract_with_rule(rule: &KeyRule, node: &N<'_>, imports: &mut Vec<CanonicalImport>) -> bool {
+fn extract_with_rule(
+    rule: &'static KeyRule,
+    node: &N<'_>,
+    imports: &mut Vec<CanonicalImport>,
+) -> bool {
     if !key_applies(rule, node) {
         return false;
     }
@@ -231,7 +243,14 @@ fn extract_with_rule(rule: &KeyRule, node: &N<'_>, imports: &mut Vec<CanonicalIm
 
     if let Some(scalar) = scalar_text(&value) {
         if let Some(scalar_type) = &rule.scalar_type {
-            push_import(imports, scalar_type, scalar, None, None);
+            push_import(
+                imports,
+                scalar_type.as_str(),
+                scalar,
+                None,
+                None,
+                node_range(&value),
+            );
         }
     } else if let Some(mapping) = child_mapping(&value) {
         emit_mapping(rule, &mapping, imports);
@@ -239,7 +258,14 @@ fn extract_with_rule(rule: &KeyRule, node: &N<'_>, imports: &mut Vec<CanonicalIm
         for item in sequence.children() {
             if let Some(scalar) = item_scalar(&item) {
                 if let Some(scalar_type) = &rule.scalar_type {
-                    push_import(imports, scalar_type, scalar, None, None);
+                    push_import(
+                        imports,
+                        scalar_type.as_str(),
+                        scalar,
+                        None,
+                        None,
+                        node_range(&item),
+                    );
                 }
             } else if let Some(mapping) = child_mapping(&item) {
                 emit_mapping(rule, &mapping, imports);
@@ -260,7 +286,8 @@ pub(super) fn extract_imports(
     let Some(key) = pair_key(node) else {
         return false;
     };
-    DOCUMENT_TYPES.iter().any(|doc_type| {
+    let document_types: &'static [DocumentType] = &DOCUMENT_TYPES;
+    document_types.iter().any(|doc_type| {
         doc_type
             .imports
             .iter()
@@ -494,13 +521,11 @@ mod tests {
 
     #[test]
     fn chart_without_dependencies_produces_no_imports() {
-        let code = std::fs::read_to_string(
-            "/Users/aaronalgutifan/Repos/orbit-helm-charts/chart/Chart.yaml",
+        let result = parse_at(
+            "Chart.yaml",
+            "apiVersion: v2\nname: gkg\ndescription: GitLab Orbit - indexer, webserver, and data pipeline\ntype: application\nversion: 0.1.0\n",
         );
-        if let Ok(code) = code {
-            let result = parse_at("Chart.yaml", &code);
-            assert!(result.imports.is_empty(), "{:?}", result.imports);
-        }
+        assert!(result.imports.is_empty(), "{:?}", result.imports);
     }
 
     #[test]
