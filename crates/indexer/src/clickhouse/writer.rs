@@ -13,7 +13,7 @@ use tokio::time::Instant;
 use tracing::{error, warn};
 
 use crate::durability::WriteDurability;
-use crate::engine::retry::{Backoff, RetryExhausted, RetryMode, RetryPolicy, Step, drive};
+use crate::engine::retry::{Backoff, LocalRetry, RetryExhausted, Step, drive};
 use crate::metrics::EngineMetrics;
 
 #[derive(Debug, Error)]
@@ -351,11 +351,9 @@ impl Drop for NotifyOnDrop {
 }
 
 /// Blanket-retries a transient ClickHouse insert (its error codes are not stable enough to classify).
-const WRITE_RETRY: RetryPolicy = RetryPolicy {
-    mode: RetryMode::Local,
+const WRITE_RETRY: LocalRetry = LocalRetry {
     backoff: Backoff::Fixed(&[Duration::from_secs(2), Duration::from_secs(4)]),
     max_attempts: 3,
-    dead_letter: false,
 };
 
 /// Write one coalesced part, then notify every batch's token whether its rows landed.

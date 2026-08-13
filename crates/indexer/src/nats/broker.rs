@@ -2,11 +2,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 /// Flat 100ms hot-poll for the unbounded fetch supervisor loop.
-const FETCH_RETRY: crate::engine::retry::RetryPolicy = crate::engine::retry::RetryPolicy {
-    mode: crate::engine::retry::RetryMode::Local,
+const FETCH_RETRY: crate::engine::retry::LocalRetry = crate::engine::retry::LocalRetry {
     backoff: crate::engine::retry::Backoff::Fixed(&[Duration::from_millis(100)]),
     max_attempts: u32::MAX, // unused by drive_forever; the loop is unbounded by design
-    dead_letter: false,
 };
 const DEAD_LETTER_MAX_AGE: Duration = Duration::ZERO;
 

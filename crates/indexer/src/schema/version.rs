@@ -17,7 +17,7 @@ use thiserror::Error;
 use tokio::time::Instant;
 use uuid::Uuid;
 
-use crate::engine::retry::{Backoff, RetryMode, RetryPolicy, Step, drive_until};
+use crate::engine::retry::{Backoff, LocalRetry, Step, drive_until};
 use tracing::{info, warn};
 
 const VERSION_TABLE: &str = "gkg_schema_version";
@@ -452,14 +452,12 @@ pub async fn wait_until_ready(
     );
 
     let deadline = Instant::now() + timeout;
-    let policy = RetryPolicy {
-        mode: RetryMode::Local,
+    let policy = LocalRetry {
         backoff: Backoff::Exponential {
             base: poll_interval,
             cap: MAX_BACKOFF_INTERVAL,
         },
         max_attempts: u32::MAX, // the deadline is the real bound
-        dead_letter: false,
     };
 
     // Carried state is the last-seen (active, migrating), read back by on_deadline for the report.

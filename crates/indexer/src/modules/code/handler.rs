@@ -14,7 +14,7 @@ use super::pipeline::{CodeIndexer, IndexError, IndexOutcome, IndexingRequest};
 use super::repository::{EmptyRepositoryReason, RepositoryService, RepositoryServiceError};
 use crate::analytics::IndexingAnalytics;
 
-use crate::engine::retry::{Backoff, RetryMode, RetryPolicy};
+use crate::engine::retry::GlobalRetry;
 use crate::handler::{Handler, HandlerContext, HandlerError};
 use crate::indexing_status::RunRows;
 use crate::locking::{LockError, LockGuard};
@@ -31,9 +31,7 @@ use crate::types::{Envelope, Subscription};
 const DELETED_PROJECT_BRANCH_SENTINEL: &str = "HEAD";
 
 /// A timed-out job is likely transiently slow: retry once, then dead-letter (engine reads this policy).
-const JOB_TIMEOUT_RETRY: RetryPolicy = RetryPolicy {
-    mode: RetryMode::Global,
-    backoff: Backoff::Fixed(&[]),
+const JOB_TIMEOUT_RETRY: GlobalRetry = GlobalRetry {
     max_attempts: 2,
     dead_letter: true,
 };

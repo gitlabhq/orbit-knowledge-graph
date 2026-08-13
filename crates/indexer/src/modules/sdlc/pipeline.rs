@@ -11,7 +11,7 @@ use futures::stream::FuturesUnordered;
 use serde_json::Value;
 use tracing::{debug, info, warn};
 
-use crate::engine::retry::{Backoff, RetryMode, RetryPolicy, Step, drive_with};
+use crate::engine::retry::{Backoff, LocalRetry, Step, drive_with};
 use crate::handler::HandlerError;
 use crate::nats::ProgressNotifier;
 use crate::observer::{IndexingMode, IndexingObserver};
@@ -27,15 +27,13 @@ use gkg_server_config::DatalakeRetryConfig;
 const MAX_RETRIES: u32 = 3;
 
 /// Retry a datalake page read, shrinking the block size each time so an oversized page self-corrects.
-const DATALAKE_EXTRACT_RETRY: RetryPolicy = RetryPolicy {
-    mode: RetryMode::Local,
+const DATALAKE_EXTRACT_RETRY: LocalRetry = LocalRetry {
     backoff: Backoff::Fixed(&[
         Duration::from_millis(100),
         Duration::from_millis(200),
         Duration::from_millis(400),
     ]),
     max_attempts: MAX_RETRIES + 1,
-    dead_letter: false,
 };
 
 /// `read_*` count the rows/bytes actually returned from the datalake; `scanned_*`
