@@ -1,3 +1,18 @@
+## [0.98.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.97.0...v0.98.0) (2026-08-13)
+
+### Features
+
+* **e2e:** add reference architecture simulation suite ([dd8fc80](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/dd8fc80d9cf3ed58a930af4d5650b45b3378e079)) by Michael Usachenko
+
+### Performance
+
+* **code-graph:** cache canonicalize syscalls in JS module resolver ([5ec978d](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/5ec978d301fac6f4463ec852947f993f16d12c11)) by Michael Usachenko
+* **code-graph:** intern StringPool, StrId-keyed indexes (-30% resolution) ([aa98b0a](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/aa98b0a34972902d5a44640f69f41447f6d2fbfd)) by Michael Usachenko
+
+### Other
+
+* **e2e:** create ClickHouse identity via the gkg chart hook ([b4a5331](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b4a533139e931e218a483f3c24e8590cbb7a4b5a)) by Jean-Gabriel Doyon
+
 ## [0.97.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.96.1...v0.97.0) (2026-08-12)
 
 ### Features
