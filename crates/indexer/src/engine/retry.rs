@@ -58,7 +58,6 @@ pub struct GlobalRetry {
 }
 
 impl GlobalRetry {
-    /// Whether a global failure on its 1-based delivery `attempt` should be redelivered or exhausted.
     pub fn should_redeliver(&self, attempt: u32) -> bool {
         attempt < self.max_attempts.max(1)
     }
