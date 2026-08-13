@@ -305,11 +305,11 @@ run = "mise run dev"
 description = "Alias for the local GKG environment connected to GDK services"
 
 [tasks."dev:check"]
-run = "./scripts/gkg-native-dev.sh check"
+run = "./scripts/orbit-native-dev.sh check"
 description = "Verify GDK-connected local development prerequisites"
 
 [tasks."dev:status"]
-run = "./scripts/gkg-native-dev.sh env"
+run = "./scripts/orbit-native-dev.sh env"
 description = "Show the derived GDK-backed environment for local development"
 
 [tasks."dev:restart"]
@@ -321,27 +321,27 @@ run = "echo 'Use Ctrl+C in the running mise session to stop all dev processes'"
 description = "Explain how to stop the local GKG environment"
 
 [tasks."dev:setup"]
-run = "./scripts/gkg-native-dev.sh setup"
+run = "./scripts/orbit-native-dev.sh setup"
 description = "Create the graph database and apply config/graph.sql to ClickHouse"
 
 [tasks."dev:web"]
-run = "GKG_BIND_ADDRESS=127.0.0.1:${GKG_SERVER_PORT:-8090} GKG_GRPC_BIND_ADDRESS=127.0.0.1:${GKG_SERVER_GRPC_PORT:-50054} GKG_METRICS__PROMETHEUS__ENABLED=${GKG_ENABLE_METRICS:-false} GKG_METRICS__PROMETHEUS__PORT=${GKG_METRICS_PORT:-9100} ./scripts/gkg-native-dev.sh webserver"
+run = "GKG_BIND_ADDRESS=127.0.0.1:${GKG_SERVER_PORT:-8090} GKG_GRPC_BIND_ADDRESS=127.0.0.1:${GKG_SERVER_GRPC_PORT:-50054} GKG_METRICS__PROMETHEUS__ENABLED=${GKG_ENABLE_METRICS:-false} GKG_METRICS__PROMETHEUS__PORT=${GKG_METRICS_PORT:-9100} ./scripts/orbit-native-dev.sh webserver"
 description = "Start a local GKG webserver connected to GDK services"
 
 [tasks."dev:indexer"]
-run = "GKG_INDEXER_HEALTH_BIND_ADDRESS=127.0.0.1:${GKG_INDEXER_PORT:-4202} GKG_NATS__CONSUMER_NAME=${GKG_INDEXER_CONSUMER:-gkg-indexer-dev} GKG_METRICS__PROMETHEUS__ENABLED=${GKG_ENABLE_METRICS:-false} GKG_METRICS__PROMETHEUS__PORT=${GKG_INDEXER_METRICS_PORT:-9200} ./scripts/gkg-native-dev.sh indexer"
+run = "GKG_INDEXER_HEALTH_BIND_ADDRESS=127.0.0.1:${GKG_INDEXER_PORT:-4202} GKG_NATS__CONSUMER_NAME=${GKG_INDEXER_CONSUMER:-gkg-indexer-dev} GKG_METRICS__PROMETHEUS__ENABLED=${GKG_ENABLE_METRICS:-false} GKG_METRICS__PROMETHEUS__PORT=${GKG_INDEXER_METRICS_PORT:-9200} ./scripts/orbit-native-dev.sh indexer"
 description = "Start a local GKG indexer connected to GDK services"
 
 [tasks."dev:dispatcher"]
-run = "./scripts/gkg-native-dev.sh dispatcher"
+run = "./scripts/orbit-native-dev.sh dispatcher"
 description = "Start a local GKG dispatch-indexing process connected to GDK services"
 
 [tasks."dev:healthcheck"]
-run = "./scripts/gkg-native-dev.sh healthcheck"
+run = "./scripts/orbit-native-dev.sh healthcheck"
 description = "Start the local GKG health-check process"
 
 [tasks."dev:env"]
-run = "./scripts/gkg-native-dev.sh env"
+run = "./scripts/orbit-native-dev.sh env"
 description = "Print the derived local GKG environment"
 
 
