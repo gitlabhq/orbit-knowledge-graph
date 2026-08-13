@@ -256,16 +256,17 @@ enum Commands {
         #[command(subcommand)]
         command: Option<commands::repo_map::RepoMapCommand>,
     },
-    /// Configure AI coding assistants to consult the local graph.
+    /// Configure AI coding assistants to consult the graph.
     #[command(
-        long_about = "Configure AI coding assistants to consult the local graph.\n\n\
+        long_about = "Configure AI coding assistants to consult the graph.\n\n\
                       Writes a managed section into each assistant's user-global \
                       instruction file (default) or the project's with `--project`/`--dir`, \
                       telling the assistant to prefer graph queries over grepping raw files, \
                       plus nudge hooks where the platform supports them (Claude Code, \
-                      OpenCode). Pre-existing files get a one-time `.orbit-backup` sibling \
-                      before their first modification. Re-running updates the section in \
-                      place; `--remove` uninstalls."
+                      OpenCode). The guidance points at the remote Knowledge Graph \
+                      (`glab orbit remote`) unless `--local` is passed. Pre-existing files \
+                      get a one-time `.orbit-backup` sibling before their first modification. \
+                      Re-running updates the section in place; `--remove` uninstalls."
     )]
     Setup {
         /// Assistants to configure. Required when installing; `--remove`
@@ -277,11 +278,10 @@ enum Commands {
         #[arg(long)]
         remove: bool,
 
-        /// Point the guidance at the remote Knowledge Graph (queries run
-        /// through `glab orbit remote`) instead of the local graph. Pass this
-        /// when glab has verified remote access.
+        /// Point the guidance at the local graph (queries run through
+        /// `orbit sql`) instead of the remote Knowledge Graph.
         #[arg(long, conflicts_with = "remove")]
-        remote: bool,
+        local: bool,
 
         /// Write into the current project instead of the user-global config
         /// files.
@@ -297,7 +297,7 @@ enum Commands {
         #[arg(value_name = "KIND")]
         kind: commands::hook_guard::Kind,
 
-        #[arg(long, default_value = "local")]
+        #[arg(long, default_value = "remote")]
         mode: commands::setup::spec::Mode,
     },
 }
@@ -381,14 +381,14 @@ async fn main() -> Result<()> {
         Commands::Setup {
             assistants,
             remove,
-            remote,
+            local,
             project,
             dir,
         } => {
-            let mode = if remote {
-                commands::setup::spec::Mode::Remote
-            } else {
+            let mode = if local {
                 commands::setup::spec::Mode::Local
+            } else {
+                commands::setup::spec::Mode::Remote
             };
             let target = if project || dir.is_some() {
                 commands::setup::Target::project(dir)?

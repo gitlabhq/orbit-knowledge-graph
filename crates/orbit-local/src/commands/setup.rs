@@ -113,7 +113,8 @@ fn install_extras(spec: &AssistantSpec, target: &Target, mode: Mode) -> Result<(
         if path.exists() {
             backup_once(&path, &label)?;
         }
-        json_ops::merge_owned(&mut root, &merge.path, &merge.marker, &entries);
+        json_ops::merge_owned(&mut root, &merge.path, &merge.marker, &entries)
+            .with_context(|| format!("failed to update {}", path.display()))?;
         json_config::write_object(&path, &root)?;
         println!("  {label}  ->  orbit entries installed");
     }
@@ -133,7 +134,9 @@ fn install_extras(spec: &AssistantSpec, target: &Target, mode: Mode) -> Result<(
         let (path, label) = target.resolve(&registration.file)?;
         let value = target.registration_value(&registration.value)?;
         let mut root = json_config::read_object(&path)?;
-        if json_ops::register(&mut root, &registration.path, &value) {
+        if json_ops::register(&mut root, &registration.path, &value)
+            .with_context(|| format!("failed to update {}", path.display()))?
+        {
             if path.exists() {
                 backup_once(&path, &label)?;
             }

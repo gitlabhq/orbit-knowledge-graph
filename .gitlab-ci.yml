@@ -245,6 +245,17 @@ indexer-scenario-schema-validate:
   script:
     - find crates/integration-tests/tests/indexer/scenarios -name '*.yaml' | xargs uvx check-jsonschema --verbose --schemafile config/schemas/indexer_scenario.schema.json
 
+setup-agent-schema-validate:
+  stage: lint
+  image: ghcr.io/astral-sh/uv:python3.12-alpine
+  tags:
+    - saas-linux-medium-amd64
+  extends:
+    - .mr-and-main-rules
+  needs: []
+  script:
+    - find config/setup/agents -name '*.yaml' | xargs uvx check-jsonschema --verbose --schemafile config/schemas/setup_agent.schema.json
+
 generate-config-schema:
   stage: lint
   extends:

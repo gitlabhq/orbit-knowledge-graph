@@ -29,7 +29,15 @@ impl Kind {
     }
 }
 
-const BASH_SEARCH_TOKENS: &[&str] = &["grep", "ripgrep", "rg ", "find ", "fd ", "ack ", "ag "];
+const SEARCH_COMMANDS: &[&str] = &[
+    "ack", "ag", "egrep", "fd", "fgrep", "find", "grep", "rg", "ripgrep",
+];
+
+/// Commands that run the command following them, so a search can hide behind
+/// one (`sudo rg …`, `xargs grep …`, `git grep …`).
+const COMMAND_WRAPPERS: &[&str] = &[
+    "command", "env", "git", "nice", "nohup", "sudo", "time", "xargs",
+];
 
 /// Code extensions the graph indexes; reads of anything else (docs, config,
 /// data) never nudge.
@@ -96,8 +104,7 @@ fn should_nudge(kind: Kind, call: &Value) -> bool {
                     .get("pattern")
                     .and_then(Value::as_str)
                     .is_some_and(|p| !p.is_empty());
-            let is_bash_search = BASH_SEARCH_TOKENS.iter().any(|tok| command.contains(tok));
-            is_pattern_tool || is_bash_search
+            is_pattern_tool || invokes_search(command)
         }
         Kind::Read => {
             let path = tool_input
@@ -107,6 +114,33 @@ fn should_nudge(kind: Kind, call: &Value) -> bool {
             is_source_path(path)
         }
     }
+}
+
+/// Whether any pipeline segment of a shell command *runs* a search tool.
+/// Matching whole commands rather than substrings keeps `git tag` and
+/// `npm run build --flag foo` from reading as searches.
+fn invokes_search(command: &str) -> bool {
+    command
+        .split(['|', ';', '&', '\n', '(', ')', '`'])
+        .any(segment_invokes_search)
+}
+
+fn segment_invokes_search(segment: &str) -> bool {
+    for token in segment.split_whitespace() {
+        if token.starts_with('-') || token.contains('=') {
+            continue;
+        }
+        let name = basename(token);
+        if COMMAND_WRAPPERS.contains(&name) {
+            continue;
+        }
+        return SEARCH_COMMANDS.contains(&name);
+    }
+    false
+}
+
+fn basename(token: &str) -> &str {
+    token.rsplit('/').next().unwrap_or(token)
 }
 
 fn is_source_path(path: &str) -> bool {
@@ -132,7 +166,17 @@ mod tests {
 
     #[test]
     fn bash_search_commands_nudge() {
-        for command in ["rg -n foo src/", "grep -r foo .", "find . -name '*.rs'"] {
+        for command in [
+            "rg -n foo src/",
+            "grep -r foo .",
+            "find . -name '*.rs'",
+            "sudo rg foo",
+            "xargs -n1 grep foo",
+            "/usr/bin/rg foo",
+            "git grep foo",
+            "cat x.txt | grep foo",
+            "RUST_LOG=debug rg foo",
+        ] {
             let call = json!({"tool_input": {"command": command}});
             assert!(should_nudge(Kind::Search, &call), "{command}");
         }
@@ -140,7 +184,16 @@ mod tests {
 
     #[test]
     fn non_search_bash_does_not_nudge() {
-        for command in ["cargo build", "ls -la", "git status"] {
+        for command in [
+            "cargo build",
+            "ls -la",
+            "git status",
+            "git tag -a v1.0",
+            "docker tag img repo/img",
+            "npm run build --flag foo",
+            "git log --grep=foo",
+            "echo storage",
+        ] {
             let call = json!({"tool_input": {"command": command}});
             assert!(!should_nudge(Kind::Search, &call), "{command}");
         }

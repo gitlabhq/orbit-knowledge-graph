@@ -19,8 +19,8 @@ struct SetupAssets;
 /// matching `config/setup/modes/<mode>/` assets and hook-guard flags.
 #[derive(clap::ValueEnum, Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub(crate) enum Mode {
-    #[default]
     Local,
+    #[default]
     Remote,
 }
 

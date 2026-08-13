@@ -3,6 +3,7 @@
 //! preserve everything they do not own, and removal prunes containers they
 //! emptied.
 
+use anyhow::{Result, anyhow};
 use serde_json::{Value, json};
 
 pub(super) fn contains_marker(value: &Value, marker: &str) -> bool {
@@ -14,54 +15,82 @@ pub(super) fn contains_marker(value: &Value, marker: &str) -> bool {
     }
 }
 
-pub(super) fn merge_owned(root: &mut Value, path: &[String], marker: &str, entries: &[Value]) {
-    let target = ensure_array_at(root, path);
+pub(super) fn merge_owned(
+    root: &mut Value,
+    path: &[String],
+    marker: &str,
+    entries: &[Value],
+) -> Result<()> {
+    let target = ensure_array_at(root, path)?;
     target.retain(|entry| !contains_marker(entry, marker));
     target.extend(entries.iter().cloned());
+    Ok(())
 }
 
 pub(super) fn remove_owned(root: &mut Value, path: &[String], marker: &str) -> bool {
     retain_and_prune(root, path, &|entry| !contains_marker(entry, marker))
 }
 
-pub(super) fn register(root: &mut Value, path: &[String], value: &str) -> bool {
-    let target = ensure_array_at(root, path);
+pub(super) fn register(root: &mut Value, path: &[String], value: &str) -> Result<bool> {
+    let target = ensure_array_at(root, path)?;
     if target.iter().any(|entry| entry.as_str() == Some(value)) {
-        return false;
+        return Ok(false);
     }
     target.push(json!(value));
-    true
+    Ok(true)
 }
 
 pub(super) fn deregister(root: &mut Value, path: &[String], value: &str) -> bool {
     retain_and_prune(root, path, &|entry| entry.as_str() != Some(value))
 }
 
-fn ensure_array_at<'a>(root: &'a mut Value, path: &[String]) -> &'a mut Vec<Value> {
+fn ensure_array_at<'a>(root: &'a mut Value, path: &[String]) -> Result<&'a mut Vec<Value>> {
     let (last, parents) = path.split_last().expect("spec paths are non-empty");
     let mut current = root;
-    for segment in parents {
+    for (depth, segment) in parents.iter().enumerate() {
         if !current.is_object() {
-            *current = json!({});
+            return Err(type_conflict(path, depth, "an object", current));
         }
         current = current
             .as_object_mut()
-            .expect("normalized above")
+            .expect("checked above")
             .entry(segment.clone())
             .or_insert_with(|| json!({}));
     }
     if !current.is_object() {
-        *current = json!({});
+        return Err(type_conflict(path, parents.len(), "an object", current));
     }
     let target = current
         .as_object_mut()
-        .expect("normalized above")
+        .expect("checked above")
         .entry(last.clone())
         .or_insert_with(|| json!([]));
     if !target.is_array() {
-        *target = json!([]);
+        return Err(type_conflict(path, path.len(), "an array", target));
     }
-    target.as_array_mut().expect("normalized above")
+    Ok(target.as_array_mut().expect("checked above"))
+}
+
+fn type_conflict(path: &[String], depth: usize, expected: &str, found: &Value) -> anyhow::Error {
+    let location = match path[..depth].join(".") {
+        location if location.is_empty() => "the file root".to_string(),
+        location => format!("\"{location}\""),
+    };
+    anyhow!(
+        "expected {expected} at {location}, found {}; fix or remove it and re-run",
+        type_name(found)
+    )
+}
+
+fn type_name(value: &Value) -> &'static str {
+    match value {
+        Value::Null => "null",
+        Value::Bool(_) => "a boolean",
+        Value::Number(_) => "a number",
+        Value::String(_) => "a string",
+        Value::Array(_) => "an array",
+        Value::Object(_) => "an object",
+    }
 }
 
 /// Retains array entries matching `keep` at `path`, then removes containers
@@ -128,13 +157,15 @@ mod tests {
             &hook_path(),
             "orbit hook-guard",
             &[orbit_entry()],
-        );
+        )
+        .unwrap();
         merge_owned(
             &mut root,
             &hook_path(),
             "orbit hook-guard",
             &[orbit_entry()],
-        );
+        )
+        .unwrap();
 
         assert_eq!(root["permissions"]["allow"][0], "Bash");
         let entries = root["hooks"]["PreToolUse"].as_array().unwrap();
@@ -150,7 +181,8 @@ mod tests {
             &hook_path(),
             "orbit hook-guard",
             &[orbit_entry()],
-        );
+        )
+        .unwrap();
         assert_eq!(root["hooks"]["PreToolUse"].as_array().unwrap().len(), 1);
     }
 
@@ -162,7 +194,8 @@ mod tests {
             &hook_path(),
             "orbit hook-guard",
             &[orbit_entry()],
-        );
+        )
+        .unwrap();
         assert!(remove_owned(&mut root, &hook_path(), "orbit hook-guard"));
         assert_eq!(root, json!({}));
     }
@@ -181,8 +214,8 @@ mod tests {
         let plugin_path = vec!["plugin".to_string()];
         let mut root = json!({"theme": "dark"});
 
-        assert!(register(&mut root, &plugin_path, "orbit.js"));
-        assert!(!register(&mut root, &plugin_path, "orbit.js"));
+        assert!(register(&mut root, &plugin_path, "orbit.js").unwrap());
+        assert!(!register(&mut root, &plugin_path, "orbit.js").unwrap());
         assert_eq!(root["plugin"], json!(["orbit.js"]));
 
         assert!(deregister(&mut root, &plugin_path, "orbit.js"));
@@ -195,6 +228,38 @@ mod tests {
         let mut root = json!({"plugin": ["other.js", "orbit.js"]});
         assert!(deregister(&mut root, &plugin_path, "orbit.js"));
         assert_eq!(root["plugin"], json!(["other.js"]));
+    }
+
+    #[test]
+    fn conflicting_types_error_and_leave_the_value_untouched() {
+        let mut string_container = json!({"hooks": "a-string"});
+        let err = merge_owned(
+            &mut string_container,
+            &hook_path(),
+            "orbit hook-guard",
+            &[orbit_entry()],
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("\"hooks\""), "{err}");
+        assert_eq!(string_container, json!({"hooks": "a-string"}));
+
+        let mut object_where_array_expected = json!({"hooks": {"PreToolUse": {"foo": 1}}});
+        let err = merge_owned(
+            &mut object_where_array_expected,
+            &hook_path(),
+            "orbit hook-guard",
+            &[orbit_entry()],
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("an array"), "{err}");
+        assert_eq!(
+            object_where_array_expected,
+            json!({"hooks": {"PreToolUse": {"foo": 1}}})
+        );
+
+        let mut plugin_string = json!({"plugin": "other.js"});
+        assert!(register(&mut plugin_string, &["plugin".to_string()], "orbit.js").is_err());
+        assert_eq!(plugin_string, json!({"plugin": "other.js"}));
     }
 
     #[test]

@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=../../schemas/setup_agent.schema.json
 # Claude Code honors PreToolUse additionalContext, so search/read tool calls
 # get an orbit nudge via `orbit hook-guard` in addition to the CLAUDE.md block.
 name: claude
