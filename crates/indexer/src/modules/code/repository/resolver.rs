@@ -5,8 +5,8 @@ use tracing::{info, warn};
 
 use super::cache::{CachedRepository, RepositoryCache, RepositoryCacheError};
 use super::service::{RepositoryService, RepositoryServiceError};
-use crate::engine::retry::{Backoff, LocalRetry, RetryExhausted, Step, drive};
 use crate::handler::HandlerError;
+use crate::retry::{Backoff, LocalRetry, RetryExhausted, Step, drive};
 use gitlab_client::GitlabClientError;
 
 const ARCHIVE_DOWNLOAD_RETRY: LocalRetry = LocalRetry {

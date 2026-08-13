@@ -14,12 +14,12 @@ use super::pipeline::{CodeIndexer, IndexError, IndexOutcome, IndexingRequest};
 use super::repository::{EmptyRepositoryReason, RepositoryService, RepositoryServiceError};
 use crate::analytics::IndexingAnalytics;
 
-use crate::engine::retry::GlobalRetry;
 use crate::handler::{Handler, HandlerContext, HandlerError};
 use crate::indexing_status::RunRows;
 use crate::locking::{LockError, LockGuard};
 use crate::nats::ProgressNotifier;
 use crate::observer::{self, IndexingMode, IndexingObserver, PipelineType};
+use crate::retry::GlobalRetry;
 use crate::topic::CodeIndexingTaskRequest;
 use crate::types::{Envelope, Subscription};
 

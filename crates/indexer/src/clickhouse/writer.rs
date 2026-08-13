@@ -13,8 +13,8 @@ use tokio::time::Instant;
 use tracing::{error, warn};
 
 use crate::durability::WriteDurability;
-use crate::engine::retry::{Backoff, LocalRetry, RetryExhausted, Step, drive};
 use crate::metrics::EngineMetrics;
+use crate::retry::{Backoff, LocalRetry, RetryExhausted, Step, drive};
 
 #[derive(Debug, Error)]
 pub enum WriteError {

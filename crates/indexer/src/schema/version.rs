@@ -17,7 +17,7 @@ use thiserror::Error;
 use tokio::time::Instant;
 use uuid::Uuid;
 
-use crate::engine::retry::{Backoff, LocalRetry, Step, drive_until};
+use crate::retry::{Backoff, LocalRetry, Step, drive_until};
 use tracing::{info, warn};
 
 const VERSION_TABLE: &str = "gkg_schema_version";

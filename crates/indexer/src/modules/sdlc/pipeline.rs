@@ -11,10 +11,10 @@ use futures::stream::FuturesUnordered;
 use serde_json::Value;
 use tracing::{debug, info, warn};
 
-use crate::engine::retry::{Backoff, LocalRetry, Step, drive_with};
 use crate::handler::HandlerError;
 use crate::nats::ProgressNotifier;
 use crate::observer::{IndexingMode, IndexingObserver};
+use crate::retry::{Backoff, LocalRetry, Step, drive_with};
 
 use super::datalake::{DatalakeQuery, ScanStats, is_arrow_string_overflow};
 use super::metrics::SdlcMetrics;
