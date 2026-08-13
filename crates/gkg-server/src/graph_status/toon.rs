@@ -2,7 +2,7 @@ use serde::Serialize;
 use toon_format::{EncodeOptions, encode};
 use tracing::warn;
 
-use crate::proto::{IndexingState, StructuredGraphStatus};
+use crate::proto::{IndexingState, IndexingStatus, StructuredGraphStatus};
 
 #[derive(Serialize)]
 struct StatusToon {
@@ -11,6 +11,10 @@ struct StatusToon {
     domains: Vec<DomainToon>,
     #[serde(skip_serializing_if = "Option::is_none")]
     indexing: Option<IndexingToon>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sdlc_indexing: Option<IndexingToon>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    code_indexing: Option<IndexingToon>,
 }
 
 #[derive(Serialize)]
@@ -29,6 +33,8 @@ struct DomainToon {
 struct ItemToon {
     name: String,
     count: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    state: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -42,6 +48,22 @@ struct IndexingToon {
     last_duration_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     last_error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    last_rows_read: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    last_rows_written: Option<u64>,
+}
+
+fn indexing_toon(status: &IndexingStatus) -> IndexingToon {
+    IndexingToon {
+        state: indexing_state_name(status.state),
+        last_started_at: status.last_started_at.clone(),
+        last_completed_at: status.last_completed_at.clone(),
+        last_duration_ms: status.last_duration_ms,
+        last_error: status.last_error.clone(),
+        last_rows_read: status.last_rows_read,
+        last_rows_written: status.last_rows_written,
+    }
 }
 
 fn indexing_state_name(val: i32) -> String {
@@ -72,17 +94,14 @@ pub fn format_status_as_toon(status: &StructuredGraphStatus) -> String {
                     .map(|i| ItemToon {
                         name: i.name.clone(),
                         count: i.count,
+                        state: i.state.map(indexing_state_name),
                     })
                     .collect(),
             })
             .collect(),
-        indexing: status.indexing.as_ref().map(|i| IndexingToon {
-            state: indexing_state_name(i.state),
-            last_started_at: i.last_started_at.clone(),
-            last_completed_at: i.last_completed_at.clone(),
-            last_duration_ms: i.last_duration_ms,
-            last_error: i.last_error.clone(),
-        }),
+        indexing: status.indexing.as_ref().map(indexing_toon),
+        sdlc_indexing: status.sdlc_indexing.as_ref().map(indexing_toon),
+        code_indexing: status.code_indexing.as_ref().map(indexing_toon),
     };
 
     encode(&toon, &EncodeOptions::default()).unwrap_or_else(|e| {

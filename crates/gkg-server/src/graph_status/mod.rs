@@ -1,5 +1,6 @@
+mod code;
 mod input;
-mod lower;
+mod sdlc;
 mod toon;
 
 use std::collections::{HashMap, HashSet};
@@ -7,18 +8,17 @@ use std::sync::Arc;
 
 use arrow::array::{Array, StringArray, UInt64Array};
 use clickhouse_client::ArrowClickHouseClient;
-use futures::stream::{FuturesUnordered, StreamExt};
 use gkg_server_config::QueryConfig;
 use gkg_utils::arrow::ArrowUtils;
-use indexer::indexing_status::{IndexingProgress, IndexingStatusStore};
-use ontology::{EtlScope, Ontology};
-use query_engine::compiler::{ResultContext, SecurityContext, codegen};
+use indexer::indexing_status::IndexingStatusStore;
+use ontology::Ontology;
+use query_engine::compiler::SecurityContext;
 use tonic::Status;
 use tracing::{debug, info, warn};
 
 use crate::proto::{
     GetGraphStatusResponse, GraphStatusDomain, GraphStatusItem, IndexingState, IndexingStatus,
-    ProjectsStatus, ResponseFormat, StructuredGraphStatus, get_graph_status_response,
+    ResponseFormat, StructuredGraphStatus, get_graph_status_response,
 };
 
 use self::input::GraphStatusInput;
@@ -62,57 +62,58 @@ impl GraphStatusService {
 
         info!(traversal_path, "Graph status fetching");
 
-        let input = GraphStatusInput::from_ontology(
-            &self.ontology,
-            traversal_path.to_string(),
-            security_context,
-        )?;
+        let input = GraphStatusInput::from_ontology(&self.ontology, security_context);
 
         let entity_counts_future = async {
             if input.nodes.is_empty() {
-                return Ok(HashMap::new());
+                return HashMap::new();
             }
-            let ast = lower::lower_entity_counts(&input);
-            self.execute_count_query(&ast, "entity counts").await
+            let sql = entity_counts_sql(&input);
+            execute_count_query(&self.client, &sql, traversal_path)
+                .await
+                .unwrap_or_else(|error| {
+                    warn!(traversal_path, label = "entity counts", %error, "Graph status branch failed");
+                    HashMap::new()
+                })
         };
+        let code_future =
+            code::get_code_indexing_state(&self.client, &self.ontology, traversal_path);
+        let sdlc_future = sdlc::get_sdlc_indexing_state(
+            self.indexing_status.as_ref(),
+            &self.ontology,
+            traversal_path,
+        );
 
-        let projects_future = async {
-            let ast = lower::lower_projects(&input.project_tables, traversal_path);
-            self.execute_projects_query(&ast).await
-        };
-
-        let indexing_future = self.fetch_indexing_status(traversal_path);
-
-        let (entity_counts, projects, indexing) =
-            tokio::join!(entity_counts_future, projects_future, indexing_future);
-
-        let entity_counts = entity_counts.unwrap_or_else(|error| {
-            warn!(traversal_path, label = "entity counts", %error, "Graph status branch failed");
-            HashMap::new()
-        });
-        let projects = projects.unwrap_or_else(|error| {
-            warn!(traversal_path, label = "projects", %error, "Graph status branch failed");
-            ProjectsStatus::default()
-        });
-        let indexing = indexing.unwrap_or_else(|error| {
-            warn!(traversal_path, label = "indexing", %error, "Graph status branch failed");
-            None
-        });
+        let (entity_counts, code, sdlc) =
+            tokio::join!(entity_counts_future, code_future, sdlc_future);
 
         info!(
             entity_count = entity_counts.len(),
-            projects_indexed = projects.indexed,
-            projects_total = projects.total_known,
-            indexing_state = ?IndexingState::try_from(indexing.as_ref().map_or(0, |s| s.state)).ok(),
+            projects_indexed = code.projects.indexed,
+            projects_total = code.projects.total_known,
+            sdlc_state = ?sdlc.aggregate.as_ref().and_then(|s| IndexingState::try_from(s.state).ok()),
+            code_state = ?code.aggregate.as_ref().and_then(|s| IndexingState::try_from(s.state).ok()),
             "Graph status fetched"
         );
 
+        let mut item_states = code.node_states;
+        item_states.extend(sdlc.node_states);
+
         let visible_nodes: HashSet<&str> = input.nodes.iter().map(|n| n.name.as_str()).collect();
-        let domains = present_domain_response(&self.ontology, &entity_counts, &visible_nodes);
+        let domains =
+            present_domain_response(&self.ontology, &entity_counts, &visible_nodes, &item_states);
+
+        let indexing = match &sdlc.aggregate {
+            Some(sdlc_status) => worst_indexing_status(Some(sdlc_status), code.aggregate.as_ref()),
+            None => None,
+        };
+
         let structured = StructuredGraphStatus {
-            projects: Some(projects),
+            projects: Some(code.projects),
             domains,
             indexing,
+            sdlc_indexing: sdlc.aggregate,
+            code_indexing: code.aggregate,
         };
 
         let content = if format == ResponseFormat::Llm as i32 {
@@ -127,166 +128,113 @@ impl GraphStatusService {
             content: Some(content),
         })
     }
+}
 
-    async fn fetch_indexing_status(
-        &self,
-        traversal_path: &str,
-    ) -> Result<Option<IndexingStatus>, Status> {
-        let Some(store) = &self.indexing_status else {
-            return Ok(None);
-        };
-
-        let entity_kinds = namespaced_entity_kinds(&self.ontology);
-
-        let mut futures = FuturesUnordered::new();
-        for kind in &entity_kinds {
-            futures
-                .push(async move { (kind.as_str(), store.get_entity(traversal_path, kind).await) });
-        }
-
-        let mut entity_progress: Vec<(String, Option<IndexingProgress>)> = Vec::new();
-        let mut read_errors = 0usize;
-        while let Some((kind, result)) = futures.next().await {
-            match result {
-                Ok(progress) => entity_progress.push((kind.to_string(), progress)),
-                Err(error) => {
-                    read_errors += 1;
-                    warn!(%error, traversal_path, entity = kind, "failed to read entity indexing progress");
-                }
-            }
-        }
-
-        let legacy_progress = match store.get(traversal_path).await {
-            Ok(p) => p,
-            Err(error) => {
-                read_errors += 1;
-                warn!(%error, traversal_path, "failed to read indexing progress from NATS KV");
-                None
-            }
-        };
-
-        if entity_progress.is_empty() && read_errors > 0 {
-            return Ok(Some(IndexingStatus {
-                state: IndexingState::Unknown.into(),
-                ..Default::default()
-            }));
-        }
-
-        Ok(Some(aggregate_indexing_status(
-            entity_progress,
-            legacy_progress,
-        )))
-    }
-
-    async fn execute_count_query(
-        &self,
-        ast: &query_engine::compiler::Node,
-        label: &str,
-    ) -> Result<HashMap<String, i64>, Status> {
-        let batches = self.execute_query(ast, label).await?;
-
-        let mut counts: HashMap<String, i64> = HashMap::new();
-        for batch in &batches {
-            let Some(labels) = ArrowUtils::get_column_by_name::<StringArray>(batch, "entity")
-            else {
-                continue;
-            };
-            let Some(values) = ArrowUtils::get_column_by_name::<UInt64Array>(batch, "cnt") else {
-                continue;
-            };
-            for row in 0..batch.num_rows() {
-                if labels.is_null(row) || values.is_null(row) {
-                    continue;
-                }
-                let name = labels.value(row);
-                let count = values.value(row) as i64;
-                *counts.entry(name.to_string()).or_default() += count;
-            }
-        }
-
-        Ok(counts)
-    }
-
-    async fn execute_projects_query(
-        &self,
-        ast: &query_engine::compiler::Node,
-    ) -> Result<ProjectsStatus, Status> {
-        let batches = self.execute_query(ast, "projects").await?;
-
-        let mut indexed = 0i64;
-        let mut total_known = 0i64;
-        for batch in &batches {
-            let Some(labels) = ArrowUtils::get_column_by_name::<StringArray>(batch, "metric")
-            else {
-                continue;
-            };
-            let Some(values) = ArrowUtils::get_column_by_name::<UInt64Array>(batch, "cnt") else {
-                continue;
-            };
-            for row in 0..batch.num_rows() {
-                if labels.is_null(row) || values.is_null(row) {
-                    continue;
-                }
-                match labels.value(row) {
-                    "indexed" => indexed += values.value(row) as i64,
-                    "total_known" => total_known += values.value(row) as i64,
-                    _ => {}
-                }
-            }
-        }
-
-        Ok(ProjectsStatus {
-            indexed,
-            total_known,
+fn entity_counts_sql(input: &GraphStatusInput) -> String {
+    input
+        .nodes
+        .iter()
+        .map(|node| {
+            format!(
+                "SELECT '{name}' AS entity, uniqIf(d.id, d._deleted = 0) AS cnt \
+                   FROM {table} AS d \
+                  WHERE startsWith(d.traversal_path, {{path:String}})",
+                name = node.name,
+                table = node.table,
+            )
         })
+        .collect::<Vec<_>>()
+        .join(" UNION ALL ")
+}
+
+async fn execute_count_query(
+    client: &ArrowClickHouseClient,
+    sql: &str,
+    traversal_path: &str,
+) -> Result<HashMap<String, i64>, Status> {
+    let batches = execute_query(client, sql, traversal_path, "entity counts").await?;
+
+    let mut counts: HashMap<String, i64> = HashMap::new();
+    for batch in &batches {
+        let Some(labels) = ArrowUtils::get_column_by_name::<StringArray>(batch, "entity") else {
+            continue;
+        };
+        let Some(values) = ArrowUtils::get_column_by_name::<UInt64Array>(batch, "cnt") else {
+            continue;
+        };
+        for row in 0..batch.num_rows() {
+            if labels.is_null(row) || values.is_null(row) {
+                continue;
+            }
+            *counts.entry(labels.value(row).to_string()).or_default() += values.value(row) as i64;
+        }
     }
 
-    async fn execute_query(
-        &self,
-        ast: &query_engine::compiler::Node,
-        label: &str,
-    ) -> Result<Vec<arrow::record_batch::RecordBatch>, Status> {
-        let parameterized = codegen(ast, ResultContext::new(), graph_status_query_config())
-            .map_err(|e| Status::internal(format!("codegen error ({label}): {e}")))?;
+    Ok(counts)
+}
 
-        debug!(sql = %parameterized.sql, label, "Graph status query compiled");
+pub(super) async fn execute_query(
+    client: &ArrowClickHouseClient,
+    sql: &str,
+    traversal_path: &str,
+    label: &str,
+) -> Result<Vec<arrow::record_batch::RecordBatch>, Status> {
+    let sql = append_query_settings(sql)
+        .map_err(|e| Status::internal(format!("query settings error ({label}): {e}")))?;
 
-        let mut query = self.client.query(&parameterized.sql);
-        for (key, param) in &parameterized.params {
-            query = ArrowClickHouseClient::bind_param(query, key, &param.value, &param.ch_type);
-        }
+    debug!(sql, label, "Graph status query");
 
-        query
-            .fetch_arrow()
-            .await
-            .map_err(|e| Status::internal(format!("ClickHouse error ({label}): {e}")))
+    client
+        .query(&sql)
+        .param("path", traversal_path)
+        .fetch_arrow()
+        .await
+        .map_err(|e| Status::internal(format!("ClickHouse error ({label}): {e}")))
+}
+
+fn append_query_settings(sql: &str) -> Result<String, String> {
+    let settings = graph_status_query_config().to_clickhouse_settings()?;
+    if settings.is_empty() {
+        return Ok(sql.to_string());
+    }
+    let clause = settings
+        .iter()
+        .map(|(key, value)| format!("{key} = {value}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    Ok(format!("{sql} SETTINGS {clause}"))
+}
+
+pub(super) fn status_with_state(state: IndexingState) -> IndexingStatus {
+    IndexingStatus {
+        state: state.into(),
+        ..Default::default()
     }
 }
 
-fn derive_indexing_state(progress: &IndexingProgress) -> IndexingState {
-    match progress.last_completed_at {
-        None => IndexingState::Backfilling,
-        Some(completed) if progress.last_started_at > completed => IndexingState::Indexing,
-        Some(_) if progress.last_error.is_some() => IndexingState::Error,
-        Some(_) => IndexingState::Indexed,
-    }
+pub(super) fn unknown_status() -> IndexingStatus {
+    status_with_state(IndexingState::Unknown)
 }
 
-fn namespaced_entity_kinds(ontology: &Ontology) -> Vec<String> {
-    ontology
-        .nodes()
-        .filter(|n| {
-            n.pipelines
-                .iter()
-                .any(|pipeline| pipeline.scope == EtlScope::Namespaced)
-        })
-        .map(|n| n.name.clone())
-        .collect()
+fn worst_indexing_status(
+    a: Option<&IndexingStatus>,
+    b: Option<&IndexingStatus>,
+) -> Option<IndexingStatus> {
+    let priority = |status: &IndexingStatus| {
+        state_priority(IndexingState::try_from(status.state).unwrap_or(IndexingState::Unknown))
+    };
+    match (a, b) {
+        (Some(a), Some(b)) if priority(b) > priority(a) => Some(b.clone()),
+        (Some(a), Some(_)) => Some(a.clone()),
+        (Some(a), None) => Some(a.clone()),
+        (None, Some(b)) => Some(b.clone()),
+        (None, None) => None,
+    }
 }
 
 // Higher = worse, so the "worst" state wins. NotIndexed dominates a missing
 // key because not-yet-started is a strictly less-known state than failing.
-fn state_priority(state: IndexingState) -> u8 {
+pub(super) fn state_priority(state: IndexingState) -> u8 {
     match state {
         IndexingState::Indexed => 0,
         IndexingState::Indexing => 1,
@@ -297,65 +245,11 @@ fn state_priority(state: IndexingState) -> u8 {
     }
 }
 
-fn aggregate_indexing_status(
-    entity_progress: Vec<(String, Option<IndexingProgress>)>,
-    legacy_progress: Option<IndexingProgress>,
-) -> IndexingStatus {
-    // Rollout fallback: nothing per-entity has been written yet → defer to
-    // the legacy single-key format so existing pre-MR deployments keep
-    // reporting state.
-    let any_entity_present = entity_progress.iter().any(|(_, p)| p.is_some());
-    if !any_entity_present {
-        return match legacy_progress {
-            None => IndexingStatus {
-                state: IndexingState::NotIndexed.into(),
-                ..Default::default()
-            },
-            Some(p) => indexing_status_from_progress(derive_indexing_state(&p), &p),
-        };
-    }
-
-    let entity_entries = entity_progress.iter().map(|(_, progress)| match progress {
-        None => (IndexingState::NotIndexed, None),
-        Some(p) => (derive_indexing_state(p), Some(p)),
-    });
-    let legacy_entry = legacy_progress
-        .as_ref()
-        .map(|p| (derive_indexing_state(p), Some(p)));
-
-    let (worst_state, worst_progress) = entity_entries
-        .chain(legacy_entry)
-        .max_by_key(|(state, _)| state_priority(*state))
-        .unwrap_or((IndexingState::NotIndexed, None));
-
-    match worst_progress {
-        Some(p) => indexing_status_from_progress(worst_state, p),
-        None => IndexingStatus {
-            state: worst_state.into(),
-            ..Default::default()
-        },
-    }
-}
-
-fn indexing_status_from_progress(state: IndexingState, p: &IndexingProgress) -> IndexingStatus {
-    IndexingStatus {
-        state: state.into(),
-        last_started_at: Some(p.last_started_at.to_rfc3339()),
-        last_completed_at: p.last_completed_at.map(|t| t.to_rfc3339()),
-        last_duration_ms: p.last_duration_ms,
-        last_error: p
-            .last_error
-            .as_ref()
-            .map(|_| SANITIZED_INDEXING_ERROR.to_string()),
-    }
-}
-
-const SANITIZED_INDEXING_ERROR: &str = "Something went wrong during indexing.";
-
 fn present_domain_response(
     ontology: &Ontology,
     entity_counts: &HashMap<String, i64>,
     visible_nodes: &HashSet<&str>,
+    item_states: &HashMap<String, IndexingState>,
 ) -> Vec<GraphStatusDomain> {
     ontology
         .domains()
@@ -367,6 +261,7 @@ fn present_domain_response(
                 .map(|node_name| GraphStatusItem {
                     name: node_name.clone(),
                     count: entity_counts.get(node_name).copied().unwrap_or(0),
+                    state: item_states.get(node_name).map(|state| *state as i32),
                 })
                 .collect();
 
@@ -384,10 +279,9 @@ fn present_domain_response(
 
 #[cfg(test)]
 mod tests {
+    use super::input::NodeTable;
     use super::*;
-    use chrono::{Duration, Utc};
     use clickhouse_client::ClickHouseConfigurationExt;
-    use indexer::indexing_status::IndexingProgress;
     use query_engine::compiler::TraversalPath;
 
     fn admin_context() -> SecurityContext {
@@ -412,7 +306,7 @@ mod tests {
         entity_counts.insert("Project".to_string(), 42);
         entity_counts.insert("User".to_string(), 10);
 
-        let domains = present_domain_response(&ontology, &entity_counts, &visible);
+        let domains = present_domain_response(&ontology, &entity_counts, &visible, &HashMap::new());
 
         assert!(!domains.is_empty());
 
@@ -435,7 +329,7 @@ mod tests {
         let visible = all_node_names(&ontology);
         let entity_counts = HashMap::new();
 
-        let domains = present_domain_response(&ontology, &entity_counts, &visible);
+        let domains = present_domain_response(&ontology, &entity_counts, &visible, &HashMap::new());
 
         for domain in &domains {
             for item in &domain.items {
@@ -454,7 +348,7 @@ mod tests {
         let visible = all_node_names(&ontology);
         let entity_counts = HashMap::new();
 
-        let domains = present_domain_response(&ontology, &entity_counts, &visible);
+        let domains = present_domain_response(&ontology, &entity_counts, &visible, &HashMap::new());
         let domain_count = ontology.domains().count();
 
         assert_eq!(domains.len(), domain_count);
@@ -467,7 +361,7 @@ mod tests {
         let mut entity_counts = HashMap::new();
         entity_counts.insert("Project".to_string(), 5);
 
-        let domains = present_domain_response(&ontology, &entity_counts, &visible);
+        let domains = present_domain_response(&ontology, &entity_counts, &visible, &HashMap::new());
 
         let security = domains.iter().find(|d| d.name == "security");
         assert!(
@@ -499,187 +393,142 @@ mod tests {
         assert!(status.message().contains("traversal_path"));
     }
 
-    #[test]
-    fn derive_state_not_indexed_when_no_progress() {
-        let status = IndexingStatus {
-            state: IndexingState::NotIndexed.into(),
+    fn dated_status(state: IndexingState) -> IndexingStatus {
+        IndexingStatus {
+            state: state.into(),
+            last_started_at: Some("2020-01-01T00:00:00Z".to_string()),
             ..Default::default()
-        };
-        assert_eq!(status.state, IndexingState::NotIndexed as i32);
-    }
-
-    #[test]
-    fn derive_state_backfilling_when_started_but_not_completed() {
-        let progress = IndexingProgress {
-            last_started_at: Utc::now(),
-            last_completed_at: None,
-            last_duration_ms: None,
-            last_error: None,
-        };
-        assert_eq!(derive_indexing_state(&progress), IndexingState::Backfilling);
-    }
-
-    #[test]
-    fn derive_state_indexed_when_completed_successfully() {
-        let started = Utc::now();
-        let progress = IndexingProgress {
-            last_started_at: started,
-            last_completed_at: Some(started + Duration::seconds(5)),
-            last_duration_ms: Some(5000),
-            last_error: None,
-        };
-        assert_eq!(derive_indexing_state(&progress), IndexingState::Indexed);
-    }
-
-    #[test]
-    fn derive_state_indexed_when_started_equals_completed() {
-        let now = Utc::now();
-        let progress = IndexingProgress {
-            last_started_at: now,
-            last_completed_at: Some(now),
-            last_duration_ms: Some(0),
-            last_error: None,
-        };
-        assert_eq!(derive_indexing_state(&progress), IndexingState::Indexed);
-    }
-
-    #[test]
-    fn derive_state_error_when_completed_with_error() {
-        let started = Utc::now();
-        let progress = IndexingProgress {
-            last_started_at: started,
-            last_completed_at: Some(started + Duration::seconds(1)),
-            last_duration_ms: Some(1000),
-            last_error: Some("deadline exceeded".to_string()),
-        };
-        assert_eq!(derive_indexing_state(&progress), IndexingState::Error);
-    }
-
-    #[test]
-    fn derive_state_backfilling_when_error_but_not_completed() {
-        let progress = IndexingProgress {
-            last_started_at: Utc::now(),
-            last_completed_at: None,
-            last_duration_ms: None,
-            last_error: Some("connection reset".to_string()),
-        };
-        assert_eq!(derive_indexing_state(&progress), IndexingState::Backfilling);
-    }
-
-    #[test]
-    fn derive_state_indexing_when_started_after_completion() {
-        let completed = Utc::now() - Duration::seconds(60);
-        let progress = IndexingProgress {
-            last_started_at: Utc::now(),
-            last_completed_at: Some(completed),
-            last_duration_ms: Some(5000),
-            last_error: None,
-        };
-        assert_eq!(derive_indexing_state(&progress), IndexingState::Indexing);
-    }
-
-    fn completed_progress(error: Option<&str>) -> IndexingProgress {
-        let started = Utc::now() - Duration::seconds(30);
-        IndexingProgress {
-            last_started_at: started,
-            last_completed_at: Some(started + Duration::seconds(5)),
-            last_duration_ms: Some(5000),
-            last_error: error.map(String::from),
         }
     }
 
     #[test]
-    fn aggregate_falls_back_to_legacy_when_no_entity_keys_present() {
-        let entities = vec![
-            ("MergeRequest".to_string(), None),
-            ("Issue".to_string(), None),
-        ];
-        let status = aggregate_indexing_status(entities, Some(completed_progress(None)));
-        assert_eq!(status.state, IndexingState::Indexed as i32);
+    fn worst_indexing_status_picks_worse_surface() {
+        let sdlc = dated_status(IndexingState::Indexed);
+        let code = status_with_state(IndexingState::NotIndexed);
+
+        let worst = worst_indexing_status(Some(&sdlc), Some(&code)).unwrap();
+
+        assert_eq!(worst.state, IndexingState::NotIndexed as i32);
+        assert!(worst.last_started_at.is_none());
     }
 
     #[test]
-    fn aggregate_not_indexed_when_no_entity_keys_and_no_legacy() {
-        let entities = vec![
-            ("MergeRequest".to_string(), None),
-            ("Issue".to_string(), None),
-        ];
-        let status = aggregate_indexing_status(entities, None);
-        assert_eq!(status.state, IndexingState::NotIndexed as i32);
+    fn worst_indexing_status_keeps_timestamps_of_winning_surface() {
+        let sdlc = dated_status(IndexingState::Error);
+        let code = status_with_state(IndexingState::Indexed);
+
+        let worst = worst_indexing_status(Some(&sdlc), Some(&code)).unwrap();
+
+        assert_eq!(worst.state, IndexingState::Error as i32);
+        assert!(worst.last_started_at.is_some());
+
+        let tie = dated_status(IndexingState::Indexed);
+        let worst =
+            worst_indexing_status(Some(&tie), Some(&status_with_state(IndexingState::Indexed)))
+                .unwrap();
+        assert!(worst.last_started_at.is_some());
     }
 
     #[test]
-    fn aggregate_missing_entity_key_wins_over_indexed() {
-        let entities = vec![
-            ("MergeRequest".to_string(), Some(completed_progress(None))),
-            ("Issue".to_string(), None),
-        ];
-        let status = aggregate_indexing_status(entities, None);
-        assert_eq!(status.state, IndexingState::NotIndexed as i32);
+    fn worst_indexing_status_folds_absent_surfaces() {
+        let status = dated_status(IndexingState::Indexed);
+
+        assert_eq!(
+            worst_indexing_status(Some(&status), None).unwrap().state,
+            IndexingState::Indexed as i32
+        );
+        assert_eq!(
+            worst_indexing_status(None, Some(&status)).unwrap().state,
+            IndexingState::Indexed as i32
+        );
+        assert!(worst_indexing_status(None, None).is_none());
     }
 
     #[test]
-    fn aggregate_error_wins_over_indexed_and_indexing() {
-        let in_flight = IndexingProgress {
-            last_started_at: Utc::now(),
-            last_completed_at: Some(Utc::now() - Duration::seconds(60)),
-            last_duration_ms: Some(5000),
-            last_error: None,
-        };
-        let entities = vec![
-            ("MergeRequest".to_string(), Some(completed_progress(None))),
-            ("Issue".to_string(), Some(in_flight)),
-            (
-                "Project".to_string(),
-                Some(completed_progress(Some("scan failure"))),
-            ),
-        ];
-        let status = aggregate_indexing_status(entities, None);
-        assert_eq!(status.state, IndexingState::Error as i32);
-        assert_eq!(status.last_error.as_deref(), Some(SANITIZED_INDEXING_ERROR));
-    }
+    fn code_and_sdlc_cover_disjoint_nodes() {
+        let ontology = test_ontology();
 
-    #[test]
-    fn indexing_status_replaces_raw_error_with_generic_message() {
-        let raw = "processing failed: failed to finish write for example_internal_table: failed \
-             to write batch: bad response: Code: 999. DB::NetException: Timeout exceeded while \
-             reading from socket (peer: 192.0.2.1:55555, local: 198.51.100.2:8124, 30000 ms). \
-             (SOCKET_TIMEOUT) (version 0.0.0.0 (official build))";
-        let status =
-            indexing_status_from_progress(IndexingState::Error, &completed_progress(Some(raw)));
+        let code_nodes = code::resolve_node_states(&ontology, Some(IndexingState::Indexed));
+        let pipeline_states: HashMap<String, IndexingState> =
+            sdlc::namespaced_pipeline_names(&ontology)
+                .into_iter()
+                .map(|name| (name, IndexingState::Indexed))
+                .collect();
+        let sdlc_nodes = sdlc::resolve_node_states(&ontology, &pipeline_states);
 
-        assert_eq!(status.last_error.as_deref(), Some(SANITIZED_INDEXING_ERROR));
-        for leaked in [
-            "example_internal_table",
-            "192.0.2.1",
-            "8124",
-            "0.0.0.0",
-            "Code: 999",
-        ] {
+        for node_name in code_nodes.keys() {
             assert!(
-                !status.last_error.as_deref().unwrap().contains(leaked),
-                "graph status leaked {leaked:?}"
+                !sdlc_nodes.contains_key(node_name),
+                "node {node_name} is claimed by both the code and SDLC surfaces"
             );
         }
     }
 
-    #[test]
-    fn indexing_status_keeps_error_absent_on_success() {
-        let status =
-            indexing_status_from_progress(IndexingState::Indexed, &completed_progress(None));
-        assert!(status.last_error.is_none());
+    fn counts_input() -> GraphStatusInput {
+        GraphStatusInput {
+            nodes: vec![
+                NodeTable {
+                    name: "Project".to_string(),
+                    table: "v1_gl_project".to_string(),
+                },
+                NodeTable {
+                    name: "Group".to_string(),
+                    table: "v1_gl_group".to_string(),
+                },
+                NodeTable {
+                    name: "MergeRequest".to_string(),
+                    table: "v1_gl_merge_request".to_string(),
+                },
+                NodeTable {
+                    name: "Definition".to_string(),
+                    table: "v1_gl_definition".to_string(),
+                },
+            ],
+        }
     }
 
     #[test]
-    fn aggregate_legacy_folds_into_worst_state() {
-        let entities = vec![("MergeRequest".to_string(), Some(completed_progress(None)))];
-        let legacy = IndexingProgress {
-            last_started_at: Utc::now(),
-            last_completed_at: None,
-            last_duration_ms: None,
-            last_error: None,
-        };
-        let status = aggregate_indexing_status(entities, Some(legacy));
-        assert_eq!(status.state, IndexingState::Backfilling as i32);
+    fn entity_counts_produces_union_all() {
+        let sql = entity_counts_sql(&counts_input());
+
+        assert!(sql.contains("UNION ALL"), "SQL: {sql}");
+        assert!(sql.contains("v1_gl_project"), "SQL: {sql}");
+        assert!(sql.contains("v1_gl_group"), "SQL: {sql}");
+        assert!(sql.contains("v1_gl_merge_request"), "SQL: {sql}");
+        assert!(sql.contains("v1_gl_definition"), "SQL: {sql}");
+    }
+
+    #[test]
+    fn entity_counts_binds_traversal_path_per_subquery() {
+        let input = counts_input();
+        let sql = entity_counts_sql(&input);
+
+        assert_eq!(
+            sql.matches("startsWith").count(),
+            input.nodes.len(),
+            "each subquery filters on the bound traversal_path. SQL: {sql}"
+        );
+        assert!(sql.contains("{path:String}"), "SQL: {sql}");
+    }
+
+    #[test]
+    fn entity_counts_deduplicates_by_id() {
+        let sql = entity_counts_sql(&counts_input());
+
+        assert!(!sql.contains("argMax("), "SQL: {sql}");
+        assert!(!sql.contains("GROUP BY"), "SQL: {sql}");
+    }
+
+    #[test]
+    fn entity_counts_exclude_deleted_uniformly_without_final() {
+        let input = counts_input();
+        let sql = entity_counts_sql(&input);
+
+        assert_eq!(
+            sql.matches("uniqIf(d.id, d._deleted = 0)").count(),
+            input.nodes.len(),
+            "every node counts live ids the same way. SQL: {sql}"
+        );
+        assert!(!sql.contains("FINAL"), "SQL: {sql}");
     }
 }

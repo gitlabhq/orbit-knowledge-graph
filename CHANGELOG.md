@@ -1,3 +1,37 @@
+## [0.98.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.97.0...v0.98.0) (2026-08-13)
+
+### Features
+
+* **e2e:** add reference architecture simulation suite ([dd8fc80](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/dd8fc80d9cf3ed58a930af4d5650b45b3378e079)) by Michael Usachenko
+
+### Performance
+
+* **code-graph:** cache canonicalize syscalls in JS module resolver ([5ec978d](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/5ec978d301fac6f4463ec852947f993f16d12c11)) by Michael Usachenko
+* **code-graph:** intern StringPool, StrId-keyed indexes (-30% resolution) ([aa98b0a](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/aa98b0a34972902d5a44640f69f41447f6d2fbfd)) by Michael Usachenko
+
+### Other
+
+* **e2e:** create ClickHouse identity via the gkg chart hook ([b4a5331](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b4a533139e931e218a483f3c24e8590cbb7a4b5a)) by Jean-Gabriel Doyon
+
+## [0.97.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.96.1...v0.97.0) (2026-08-12)
+
+### Features
+
+* **e2e:** support external ClickHouse via E2E_CH_HOST ([901e665](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/901e665a9fcbf2d771c0bfd990052787f1311cb5)) by Michael Usachenko
+
+### Fixes
+
+* **ci:** fail fast and isolate per-MR failures in the stale-MR sweeper ([a521066](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/a5210665d1129364e9c744c1fb590db203e603cc)) by Andrew Dunn
+* **compiler:** apply virtual column filters without requiring the column in select ([f9f6b02](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f9f6b022eb31c8548c7239e14741ffabb97f4b43)) by Aaron Algutifan
+* **e2e:** fail setup when dictionary patch cannot confirm DIRECT layout ([7fc0a76](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/7fc0a763c88bbb657988784278235ada5f628f18)) by Aaron Algutifan
+* **indexer:** heartbeat ack + renew lock so code jobs can outlive ack_wait ([006e3f1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/006e3f1e0dcca8f440f47a27a5888b7f2e1643f1)) by Jean-Gabriel Doyon
+* **indexer:** rewrite diff-file extract to CTE + IN-list pattern ([02cbc02](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/02cbc02b24bfa2756a1a91b848e2cfdacb2e6688)) by Michael Usachenko
+
+### Other
+
+* **i18n:** update ja-jp for commit 13c204fa ([e5c9512](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/e5c95127056d4a18b017634f55af77d0e194ad40)) by GitLab-Argo Bot
+* **prompts:** sharpen Orbit MCP tool descriptions for agent routing ([52d1b1b](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/52d1b1b002da936fbcbbd473cd0b35d76d43eaad)) by Dmitry Gruzd (OOO from 2026-08-14 to 2026-08-27)
+
 ## [0.96.1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.96.0...v0.96.1) (2026-08-11)
 
 ### Fixes
