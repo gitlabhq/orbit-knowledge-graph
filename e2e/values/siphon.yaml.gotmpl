@@ -75,8 +75,8 @@ appConfigDefaults:
       type: "nats"
       bucket_name: "e2e_siphon_oversize_bucket"
   clickhouse:
-    host: clickhouse.e2e-{{ $sha }}-clickhouse.svc.cluster.local
-    port: 9000
+    host: {{ env "E2E_CH_HOST" | default (printf "clickhouse.e2e-%s-clickhouse.svc.cluster.local" $sha) }}
+    port: {{ env "E2E_CH_NATIVE_PORT" | default "9000" }}
     ssl: false
     username: siphon
     password: {{ requiredEnv "E2E_CH_SIPHON_PASS" | quote }}

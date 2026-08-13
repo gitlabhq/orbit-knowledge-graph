@@ -37,6 +37,12 @@ secrets:
     graphReadPassword:
       secretName: "gkg-secrets"
 
+clickhouseSetup:
+  enabled: true
+  adminSecret:
+    secretName: "gkg-secrets"
+    key: admin-password
+
 webserver:
   enabled: true
   replicas: 1
@@ -109,15 +115,16 @@ healthCheck:
       cpu: 200m
       memory: 128Mi
 
+{{ $chHost := env "E2E_CH_HOST" | default (printf "clickhouse.e2e-%s-clickhouse.svc.cluster.local" $sha) }}
 clickhouse:
   datalake:
-    host: clickhouse.e2e-{{ $sha }}-clickhouse.svc.cluster.local
+    host: {{ $chHost }}
     httpPort: 8123
     database: datalake
     user: gkg_siphon_reader
     ssl: false
   graph:
-    host: clickhouse.e2e-{{ $sha }}-clickhouse.svc.cluster.local
+    host: {{ $chHost }}
     httpPort: 8123
     database: gkg
     user: gkg_writer

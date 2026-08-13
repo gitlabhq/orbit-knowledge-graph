@@ -1,3 +1,4 @@
+use rustc_hash::FxHashMap;
 use std::{borrow::Cow, fmt};
 
 /// Builds a byte lookup table allowing ASCII alphanumerics and the supplied extra bytes.
@@ -96,14 +97,14 @@ pub fn truncate_chars<'a>(value: &'a str, limit: usize, suffix: &str) -> Cow<'a,
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct StrId(u32);
 
-/// One large allocation instead of many individual `Box<str>` heap allocs;
-/// an index `Vec` of `(offset, len)` pairs gives O(1) retrieval.
+/// Interning string pool. Identical strings return the same `StrId`,
+/// enabling O(1) equality checks via integer comparison.
 pub struct StringPool {
-    // `String`, not `Vec<u8>`, so `get` slices in O(1) instead of revalidating
-    // UTF-8 on every access (it is the hot accessor for every graph string).
     buf: String,
-    /// (byte_offset, byte_len) into `buf` for each StrId.
     index: Vec<(u32, u32)>,
+    /// Maps (hash64, byte_len) → list of StrIds with that hash+len.
+    /// On lookup, each candidate is verified by full string comparison.
+    intern_map: FxHashMap<(u64, u32), Vec<StrId>>,
 }
 
 impl Default for StringPool {
@@ -117,6 +118,7 @@ impl StringPool {
         Self {
             buf: String::new(),
             index: Vec::new(),
+            intern_map: FxHashMap::default(),
         }
     }
 
@@ -124,15 +126,36 @@ impl StringPool {
         Self {
             buf: String::with_capacity(cap * 32),
             index: Vec::with_capacity(cap),
+            intern_map: FxHashMap::with_capacity_and_hasher(cap, Default::default()),
         }
     }
 
+    /// Intern a string. Returns the same `StrId` for identical content.
     pub fn alloc(&mut self, s: &str) -> StrId {
+        let key = (fxhash_str(s), s.len() as u32);
+
+        if let Some(candidates) = self.intern_map.get(&key) {
+            for &existing in candidates {
+                if self.get(existing) == s {
+                    return existing;
+                }
+            }
+        }
+
         let id = StrId(self.index.len() as u32);
         let offset = self.buf.len() as u32;
         self.buf.push_str(s);
         self.index.push((offset, s.len() as u32));
+        self.intern_map.entry(key).or_default().push(id);
         id
+    }
+
+    /// Look up a string's `StrId` without allocating. Returns `None` if the
+    /// string has never been interned.
+    pub fn find(&self, s: &str) -> Option<StrId> {
+        let key = (fxhash_str(s), s.len() as u32);
+        let candidates = self.intern_map.get(&key)?;
+        candidates.iter().copied().find(|&id| self.get(id) == s)
     }
 
     #[inline]
@@ -148,6 +171,13 @@ impl StringPool {
     pub fn is_empty(&self) -> bool {
         self.index.is_empty()
     }
+}
+
+fn fxhash_str(s: &str) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = rustc_hash::FxHasher::default();
+    s.hash(&mut h);
+    h.finish()
 }
 
 impl fmt::Debug for StringPool {

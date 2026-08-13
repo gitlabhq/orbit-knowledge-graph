@@ -1,0 +1,13 @@
+apiVersion: monitoring.googleapis.com/v1
+kind: PodMonitoring
+metadata:
+  name: gkg-${COMPONENT}
+  namespace: ${GKG_NAMESPACE}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: ${COMPONENT}
+      app.kubernetes.io/name: gkg
+  endpoints:
+    - port: metrics
+      interval: 15s

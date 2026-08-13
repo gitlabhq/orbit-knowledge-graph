@@ -1,3 +1,65 @@
+## [0.97.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.96.1...v0.97.0) (2026-08-12)
+
+### Features
+
+* **e2e:** support external ClickHouse via E2E_CH_HOST ([901e665](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/901e665a9fcbf2d771c0bfd990052787f1311cb5)) by Michael Usachenko
+
+### Fixes
+
+* **ci:** fail fast and isolate per-MR failures in the stale-MR sweeper ([a521066](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/a5210665d1129364e9c744c1fb590db203e603cc)) by Andrew Dunn
+* **compiler:** apply virtual column filters without requiring the column in select ([f9f6b02](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f9f6b022eb31c8548c7239e14741ffabb97f4b43)) by Aaron Algutifan
+* **e2e:** fail setup when dictionary patch cannot confirm DIRECT layout ([7fc0a76](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/7fc0a763c88bbb657988784278235ada5f628f18)) by Aaron Algutifan
+* **indexer:** heartbeat ack + renew lock so code jobs can outlive ack_wait ([006e3f1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/006e3f1e0dcca8f440f47a27a5888b7f2e1643f1)) by Jean-Gabriel Doyon
+* **indexer:** rewrite diff-file extract to CTE + IN-list pattern ([02cbc02](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/02cbc02b24bfa2756a1a91b848e2cfdacb2e6688)) by Michael Usachenko
+
+### Other
+
+* **i18n:** update ja-jp for commit 13c204fa ([e5c9512](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/e5c95127056d4a18b017634f55af77d0e194ad40)) by GitLab-Argo Bot
+* **prompts:** sharpen Orbit MCP tool descriptions for agent routing ([52d1b1b](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/52d1b1b002da936fbcbbd473cd0b35d76d43eaad)) by Dmitry Gruzd (OOO from 2026-08-14 to 2026-08-27)
+
+## [0.96.1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.96.0...v0.96.1) (2026-08-11)
+
+### Fixes
+
+* **indexer:** checkpoint oversized repos empty instead of dead-lettering ([9372482](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/9372482a34ad74fb007ff614ad25f83e70d3f286)) by Jean-Gabriel Doyon
+* **indexer:** skip unindexable archive entries instead of failing the whole repo ([7cd9db1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/7cd9db12d293275be38b1fc674449fbb844b624b)) by Jean-Gabriel Doyon
+
+### Other
+
+* **i18n:** update ja-jp for commit 194f138a ([b8bef7d](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b8bef7dc1c402d2c3bbb2dce16dfa6ec7141cc6b)) by GitLab-Argo Bot
+* **integration:** seeded virtual column resolver for data correctness tests ([6b7a9e4](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/6b7a9e4a716ef83efaf7ea9e50bb52e6739e3c21)) by Aaron Algutifan
+
+## [0.96.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.95.3...v0.96.0) (2026-08-10)
+
+### Features
+
+* **query:** attach attribution payload to base-query log_comment ([af0baad](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/af0baadbfdd6d629b3d0c801c32aede4a65b4d7c)) by Michael Usachenko
+
+### Fixes
+
+* **indexer:** dispatch enrolled namespaces whose stored traversal path is stale ([c148e92](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/c148e929d4fa3f41d0d08d6d9816251940ffbd9a)) by Jean-Gabriel Doyon
+* **indexer:** fall back to per-table change detection when the combined query fails ([7be5252](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/7be525255e6728d1de455665bddcb7c06b8288be)) by Jean-Gabriel Doyon
+* **indexer:** time only the work in code indexing jobs ([70b12d5](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/70b12d55f79e2b4fb074060310fa3f7e242400c9)) by Jean-Gabriel Doyon
+* **orbit-local:** friendly errors for non-git and empty-git index paths ([7e0f661](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/7e0f6614de126cec4e174a78ee261f0585cf8ca1)) by Andrew Dunn
+* **release:** unbreak npm publish of signed local CLI archives ([4634dc1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/4634dc15a2c6580cea3c5a4d00909270252b5d65)) by Aaron Algutifan
+
+### Performance
+
+* **code-graph:** improve import resolver perf ([9f746fa](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/9f746fa0164bd87a470d0436df450856385edc38)) by Dmitry Gruzd
+* **treesitter-visit:** use memchr for column seeking ([9c05584](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/9c05584e81e4b7946ff4c058be17b709d1df5023)) by Michael Usachenko
+
+### Other
+
+* **ci:** revert ai review bot model to opus 4.8 (high) ([4a16347](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/4a1634726e5d461f17ada27115ad05f9b365d60b)) by Dmitry Gruzd
+* **deps:** bump oxc crates to 0.143.0 ([17a9129](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/17a9129396efd837bedc060a3c0935d39992a21e)) by Michael Angelo Rivera
+* **deps:** bump ra_ap crates to 0.0.345 ([3307460](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/3307460a99af8ec24a84f2179e1fb6074996228f)) by Michael Angelo Rivera
+* **deps:** update datafusion to v54 and duckdb to v1.10505 ([6c17265](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/6c17265c50f47f7ee543f693ddc845843dddd5c2)) by Bohdan Parkhomchuk
+* **deps:** update rust crate clap to v4.6.5 ([a699adc](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/a699adc91b1341e1f6a4fbb5a14d8cad790c15a2)) by GitLab Renovate Bot
+* **deps:** update rust crate futures to v0.3.33 ([203a020](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/203a020d543f3d17a08624ea2e1c9b1abb39bb7c)) by GitLab Renovate Bot
+* **deps:** upgrade Node toolchain to 26 ([6d5c241](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/6d5c241424e799e339dc1fcebd10b2ab34408101)) by Michael Angelo Rivera
+* **i18n:** update ja-jp for commit 5d6101f6 ([ecb99d4](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/ecb99d4b739a711a77579d1af747c3ff1f9daf1f)) by GitLab-Argo Bot
+* **local:** document the script-free Windows install path ([68d1b1f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/68d1b1f2e5f787e53eedafa98f2a8aafde3a5395)) by Andrew Dunn
+
 ## [0.95.3](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.95.2...v0.95.3) (2026-08-06)
 
 ### Fixes

@@ -164,6 +164,10 @@ impl QueryResultRow {
     pub fn set_column(&mut self, column: String, value: ColumnValue) {
         self.columns.insert(column, value);
     }
+
+    pub fn remove_column(&mut self, column: &str) {
+        self.columns.remove(column);
+    }
 }
 
 #[derive(Debug, Clone)]

@@ -740,32 +740,32 @@ pub(super) async fn search_multi_filter_mixed_with_single_filter(ctx: &TestConte
     });
 }
 
-/// MockColumnResolver returns "mock:mr_raw_patch" for every MR, so
-/// `contains: "mock"` should return all merged MRs that pass the state filter.
 pub(super) async fn search_virtual_filter_contains_matching(ctx: &TestContext) {
     let resp = run_query(
         ctx,
         r#"{
             "query_type": "traversal",
             "nodes": [{"id": "mr", "entity": "MergeRequest",
-                     "id_range": {"start": 1, "end": 10000},
+                     "node_ids": [2000, 2001, 2002, 2003, 2004, 2005],
                      "columns": ["title", "state", "diff"],
                      "filters": {
                          "state": {"eq": "merged"},
-                         "diff": {"contains": "mock"}
+                         "diff": {"contains": "ship"}
                      }}],
+            "order_by": "mr.id",
             "limit": 10
         }"#,
         &allow_all(),
     )
     .await;
 
-    resp.assert_node_count(3);
+    resp.assert_node_count(2);
+    resp.assert_node_order("MergeRequest", &[2004, 2005]);
     resp.assert_filter("MergeRequest", "state", |n| {
         n.prop_str("state") == Some("merged")
     });
     resp.assert_filter("MergeRequest", "diff", |n| {
-        n.prop_str("diff").is_some_and(|s| s.contains("mock"))
+        n.prop_str("diff").is_some_and(|s| s.contains("ship"))
     });
 }
 
@@ -775,7 +775,7 @@ pub(super) async fn search_virtual_filter_eq_no_match(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "nodes": [{"id": "mr", "entity": "MergeRequest",
-                     "id_range": {"start": 1, "end": 10000},
+                     "node_ids": [2000, 2001, 2002, 2003, 2004, 2005],
                      "columns": ["title", "diff"],
                      "filters": {
                          "diff": {"eq": "nonexistent content"}
@@ -789,29 +789,30 @@ pub(super) async fn search_virtual_filter_eq_no_match(ctx: &TestContext) {
     resp.skip_requirement(Requirement::Filter {
         field: "diff".into(),
     });
+    resp.skip_requirement(Requirement::NodeIds);
     resp.assert_node_count(0);
 }
 
-/// Virtual filter `is_not_null` on `diff`. MockColumnResolver always
-/// returns a value, so all MRs should pass.
 pub(super) async fn search_virtual_filter_is_not_null(ctx: &TestContext) {
     let resp = run_query(
         ctx,
         r#"{
             "query_type": "traversal",
             "nodes": [{"id": "mr", "entity": "MergeRequest",
-                     "id_range": {"start": 1, "end": 10000},
+                     "node_ids": [2000, 2001, 2002, 2003, 2004, 2005],
                      "columns": ["title", "diff"],
                      "filters": {
                          "diff": {"is_not_null": true}
                      }}],
+            "order_by": "mr.id",
             "limit": 10
         }"#,
         &allow_all(),
     )
     .await;
 
-    resp.assert_node_count(6);
+    resp.assert_node_count(4);
+    resp.assert_node_order("MergeRequest", &[2000, 2002, 2004, 2005]);
     resp.assert_filter("MergeRequest", "diff", |n| n.prop_str("diff").is_some());
 }
 
@@ -821,11 +822,11 @@ pub(super) async fn search_virtual_filter_combined_with_physical(ctx: &TestConte
         r#"{
             "query_type": "traversal",
             "nodes": [{"id": "mr", "entity": "MergeRequest",
-                     "id_range": {"start": 1, "end": 10000},
+                     "node_ids": [2000, 2001, 2002, 2003, 2004, 2005],
                      "columns": ["title", "state", "diff"],
                      "filters": {
                          "state": "merged",
-                         "diff": {"starts_with": "mock:"}
+                         "diff": {"starts_with": "@@ -"}
                      }}],
             "order_by": "mr.id",
             "limit": 10
@@ -834,12 +835,381 @@ pub(super) async fn search_virtual_filter_combined_with_physical(ctx: &TestConte
     )
     .await;
 
-    resp.assert_node_count(3);
-    resp.assert_node_order("MergeRequest", &[2002, 2004, 2005]);
+    resp.assert_node_count(2);
+    resp.assert_node_order("MergeRequest", &[2004, 2005]);
     resp.assert_filter("MergeRequest", "state", |n| {
         n.prop_str("state") == Some("merged")
     });
     resp.assert_filter("MergeRequest", "diff", |n| {
-        n.prop_str("diff").is_some_and(|s| s.starts_with("mock:"))
+        n.prop_str("diff").is_some_and(|s| s.starts_with("@@ -"))
+    });
+}
+
+pub(super) async fn search_virtual_filter_without_node_ids_rejected(_ctx: &TestContext) {
+    let ontology = load_ontology();
+    let err = compile(
+        r#"{
+            "query_type": "traversal",
+            "nodes": [{"id": "f", "entity": "File",
+                     "columns": ["path"],
+                     "filters": {
+                         "project_id": {"eq": 1000},
+                         "content": {"contains": "ClickHouse"}
+                     }}],
+            "limit": 10
+        }"#,
+        &ontology,
+        &test_security_context(),
+    )
+    .expect_err("content search without node_ids should be rejected at compile");
+
+    let msg = err.to_string();
+    assert!(
+        msg.contains("node_ids") && msg.contains("content"),
+        "error should name node_ids and the column: {msg}"
+    );
+}
+
+pub(super) async fn search_file_content_contains_selective(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "nodes": [{"id": "f", "entity": "File",
+                     "node_ids": [13000, 13001, 13002, 13003, 13004],
+                     "columns": ["path", "project_id", "content"],
+                     "filters": {
+                         "project_id": {"eq": 1000},
+                         "content": {"contains": "ClickHouse"}
+                     }}],
+            "order_by": "f.id",
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_node_count(2);
+    resp.assert_node_order("File", &[13001, 13002]);
+    resp.assert_filter("File", "project_id", |n| {
+        n.prop_i64("project_id") == Some(1000) || n.prop_str("project_id") == Some("1000")
+    });
+    resp.assert_filter("File", "content", |n| {
+        n.prop_str("content")
+            .is_some_and(|s| s.contains("ClickHouse"))
+    });
+}
+
+pub(super) async fn search_file_content_contains_no_match(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "nodes": [{"id": "f", "entity": "File",
+                     "node_ids": [13000, 13001, 13002, 13003, 13004],
+                     "columns": ["path", "content"],
+                     "filters": {
+                         "project_id": {"eq": 1000},
+                         "content": {"contains": "zqxj_nonexistent_token"}
+                     }}],
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.skip_requirement(Requirement::Filter {
+        field: "content".into(),
+    });
+    resp.skip_requirement(Requirement::Filter {
+        field: "project_id".into(),
+    });
+    resp.skip_requirement(Requirement::NodeIds);
+    resp.assert_node_count(0);
+}
+
+pub(super) async fn search_file_content_eq_exact(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "nodes": [{"id": "f", "entity": "File",
+                     "node_ids": [13000, 13001, 13002, 13003, 13004],
+                     "columns": ["path", "project_id", "content"],
+                     "filters": {
+                         "project_id": {"eq": 1000},
+                         "content": {"eq": "0.91.0"}
+                     }}],
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_node_count(1);
+    resp.assert_node_ids("File", &[13004]);
+    resp.assert_filter("File", "project_id", |n| {
+        n.prop_i64("project_id") == Some(1000) || n.prop_str("project_id") == Some("1000")
+    });
+    resp.assert_filter("File", "content", |n| {
+        n.prop_str("content") == Some("0.91.0")
+    });
+}
+
+pub(super) async fn search_file_content_starts_with(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r##"{
+            "query_type": "traversal",
+            "nodes": [{"id": "f", "entity": "File",
+                     "node_ids": [13000, 13001, 13002, 13003, 13004],
+                     "columns": ["path", "project_id", "content"],
+                     "filters": {
+                         "project_id": {"eq": 1000},
+                         "content": {"starts_with": "# Demo"}
+                     }}],
+            "limit": 10
+        }"##,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_node_count(1);
+    resp.assert_node_ids("File", &[13002]);
+    resp.assert_filter("File", "project_id", |n| {
+        n.prop_i64("project_id") == Some(1000) || n.prop_str("project_id") == Some("1000")
+    });
+    resp.assert_filter("File", "content", |n| {
+        n.prop_str("content")
+            .is_some_and(|s| s.starts_with("# Demo"))
+    });
+}
+
+pub(super) async fn search_file_content_ends_with(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "nodes": [{"id": "f", "entity": "File",
+                     "node_ids": [13000, 13001, 13002, 13003, 13004],
+                     "columns": ["path", "project_id", "content"],
+                     "filters": {
+                         "project_id": {"eq": 1000},
+                         "content": {"ends_with": "crate."}
+                     }}],
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_node_count(1);
+    resp.assert_node_ids("File", &[13002]);
+    resp.assert_filter("File", "project_id", |n| {
+        n.prop_i64("project_id") == Some(1000) || n.prop_str("project_id") == Some("1000")
+    });
+    resp.assert_filter("File", "content", |n| {
+        n.prop_str("content").is_some_and(|s| s.ends_with("crate."))
+    });
+}
+
+pub(super) async fn search_file_content_is_null_matches_binary(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "nodes": [{"id": "f", "entity": "File",
+                     "node_ids": [13000, 13001, 13002, 13003, 13004],
+                     "columns": ["path", "project_id", "content"],
+                     "filters": {
+                         "project_id": {"eq": 1000},
+                         "content": {"is_null": true}
+                     }}],
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_node_count(1);
+    resp.assert_node_ids("File", &[13003]);
+    resp.assert_filter("File", "project_id", |n| {
+        n.prop_i64("project_id") == Some(1000) || n.prop_str("project_id") == Some("1000")
+    });
+    resp.assert_filter("File", "content", |n| {
+        n.prop_str("path").is_some() && n.prop_str("content").is_none()
+    });
+}
+
+pub(super) async fn search_file_content_is_not_null_excludes_binary(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "nodes": [{"id": "f", "entity": "File",
+                     "node_ids": [13000, 13001, 13002, 13003, 13004],
+                     "columns": ["path", "project_id", "content"],
+                     "filters": {
+                         "project_id": {"eq": 1000},
+                         "content": {"is_not_null": true}
+                     }}],
+            "order_by": "f.id",
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_node_count(4);
+    resp.assert_node_order("File", &[13000, 13001, 13002, 13004]);
+    resp.assert_filter("File", "project_id", |n| {
+        n.prop_i64("project_id") == Some(1000) || n.prop_str("project_id") == Some("1000")
+    });
+    resp.assert_filter("File", "content", |n| n.prop_str("content").is_some());
+}
+
+pub(super) async fn search_file_content_combined_with_physical(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "nodes": [{"id": "f", "entity": "File",
+                     "node_ids": [13000, 13001, 13002, 13003, 13004],
+                     "columns": ["path", "project_id", "content"],
+                     "filters": {
+                         "project_id": {"eq": 1000},
+                         "path": {"starts_with": "src/"},
+                         "content": {"contains": "ClickHouse"}
+                     }}],
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_node_count(1);
+    resp.assert_node_ids("File", &[13001]);
+    resp.assert_filter("File", "path", |n| {
+        n.prop_str("path").is_some_and(|p| p.starts_with("src/"))
+    });
+    resp.assert_filter("File", "project_id", |n| {
+        n.prop_i64("project_id") == Some(1000) || n.prop_str("project_id") == Some("1000")
+    });
+    resp.assert_filter("File", "content", |n| {
+        n.prop_str("content")
+            .is_some_and(|s| s.contains("ClickHouse"))
+    });
+}
+
+pub(super) async fn search_definition_content_selective(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "nodes": [{"id": "d", "entity": "Definition",
+                     "node_ids": [12000, 12001, 12002, 12100, 12102],
+                     "columns": ["name", "file_path", "content"],
+                     "filters": {
+                         "content": {"contains": "normalize"}
+                     }}],
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_node_count(1);
+    resp.assert_node_ids("Definition", &[12000]);
+    resp.assert_filter("Definition", "content", |n| {
+        n.prop_str("content")
+            .is_some_and(|s| s.contains("normalize"))
+    });
+}
+
+pub(super) async fn search_file_content_filter_without_selecting_column(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "nodes": [{"id": "f", "entity": "File",
+                     "node_ids": [13000, 13001, 13002, 13003, 13004],
+                     "columns": ["path"],
+                     "filters": {
+                         "project_id": {"eq": 1000},
+                         "content": {"contains": "ClickHouse"}
+                     }}],
+            "order_by": "f.id",
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_node_count(2);
+    resp.assert_node_order("File", &[13001, 13002]);
+    resp.assert_filter("File", "project_id", |n| {
+        n.prop_str("path")
+            .is_some_and(|p| p == "src/clickhouse.rs" || p == "README.md")
+    });
+    resp.assert_filter("File", "content", |n| {
+        n.prop_str("path").is_some() && !n.has_prop("content")
+    });
+}
+
+pub(super) async fn search_file_content_filter_without_selecting_column_no_match(
+    ctx: &TestContext,
+) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "nodes": [{"id": "f", "entity": "File",
+                     "node_ids": [13000, 13001, 13002, 13003, 13004],
+                     "columns": ["path"],
+                     "filters": {
+                         "project_id": {"eq": 1000},
+                         "content": {"contains": "zqxjnonexistenttoken9town_xyzzy"}
+                     }}],
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.skip_requirement(Requirement::Filter {
+        field: "content".into(),
+    });
+    resp.skip_requirement(Requirement::Filter {
+        field: "project_id".into(),
+    });
+    resp.skip_requirement(Requirement::NodeIds);
+    resp.assert_node_count(0);
+}
+
+pub(super) async fn search_file_content_is_null_filter_without_selecting_column(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "nodes": [{"id": "f", "entity": "File",
+                     "node_ids": [13000, 13001, 13002, 13003, 13004],
+                     "columns": ["path"],
+                     "filters": {
+                         "project_id": {"eq": 1000},
+                         "content": {"is_null": true}
+                     }}],
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_node_count(1);
+    resp.assert_node_ids("File", &[13003]);
+    resp.assert_filter("File", "project_id", |n| {
+        n.prop_str("path") == Some("assets/logo.png")
+    });
+    resp.assert_filter("File", "content", |n| {
+        n.prop_str("path").is_some() && !n.has_prop("content")
     });
 }

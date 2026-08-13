@@ -1,0 +1,86 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ra-import-dump
+  labels:
+    app: ra-bench
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      restartPolicy: Never
+      serviceAccountName: ra-import-sa
+      containers:
+        - name: import
+          image: google/cloud-sdk:latest
+          env:
+            - name: CH_HOST
+              value: "clickhouse.${CH_NAMESPACE}.svc.cluster.local"
+            - name: CH_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ra-import-ch-auth
+                  key: password
+            - name: DUMP_PREFIX
+              value: "${DUMP_PREFIX}"
+            - name: BUCKET
+              value: "gs://gkg-datalake-dumps"
+            - name: GCE_METADATA_HOST
+              value: "169.254.169.254"
+          command: ["/bin/bash", "-euo", "pipefail", "-c"]
+          args:
+            - |
+              CH_URL="http://${CH_HOST}:8123"
+              CH_PASS_ENC=$(python3 -c "import urllib.parse,os; print(urllib.parse.quote(os.environ['CH_PASSWORD'], safe=''))")
+              CH_AUTH="user=default&password=${CH_PASS_ENC}"
+              unset CH_PASSWORD CH_PASS_ENC
+
+              WORK="/tmp/dump/datalake"
+              mkdir -p "${WORK}"
+
+              echo "==> Downloading datalake from ${BUCKET}/${DUMP_PREFIX}/datalake/"
+              gsutil -m rsync -r "${BUCKET}/${DUMP_PREFIX}/datalake/" "${WORK}/"
+
+              echo "==> Importing data (tables already created by Siphon)"
+              for sf in ${WORK}/*.schema.sql; do
+                [ -f "${sf}" ] || continue
+                t=$(basename "${sf}" .schema.sql)
+
+                p=0
+                for pf in ${WORK}/${t}.part*.Native.gz; do
+                  [ -f "${pf}" ] || continue
+                  gzip -dc "${pf}" | curl -sf \
+                    -H "Content-Type: application/octet-stream" \
+                    "${CH_URL}/?${CH_AUTH}&database=datalake&query=INSERT+INTO+${t}+FORMAT+Native&input_format_skip_unknown_fields=1" \
+                    --data-binary @- 2>/dev/null || echo "  WARN: ${t} part ${p}"
+                  p=$((p+1))
+                done
+                [ ${p} -gt 0 ] && echo "  ${t}: ${p} parts"
+              done
+
+              echo "==> Spreading _siphon_watermark across 24 one-hour windows"
+              # Spread watermarks across 24 synthetic hours instead of a single
+              # instant. More realistic CDC simulation and ready to benefit if
+              # the indexer ever gains a watermark step-size mechanism.
+              TABLES=$(curl -s "${CH_URL}/?${CH_AUTH}&database=datalake" \
+                -d "SELECT DISTINCT table FROM system.columns WHERE database='datalake' AND name='_siphon_watermark' FORMAT TSVRaw" \
+                2>/dev/null || true)
+              for t in ${TABLES}; do
+                curl -sf "${CH_URL}/?${CH_AUTH}&database=datalake" \
+                  -d "ALTER TABLE ${t} UPDATE _siphon_watermark = now64(6) - INTERVAL (rand() % 24) HOUR WHERE 1" \
+                  2>/dev/null && echo "  ${t}" || echo "  SKIP: ${t}"
+              done
+
+              echo "==> Row counts"
+              curl -s "${CH_URL}/?${CH_AUTH}&database=datalake" \
+                -d "SELECT name, total_rows FROM system.tables WHERE database='datalake' AND total_rows > 0 ORDER BY total_rows DESC FORMAT TSV" \
+                2>/dev/null
+
+              echo "==> Import complete."
+          resources:
+            requests:
+              cpu: "1"
+              memory: 4Gi
+            limits:
+              memory: 16Gi

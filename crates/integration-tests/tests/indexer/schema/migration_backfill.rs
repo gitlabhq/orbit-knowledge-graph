@@ -72,6 +72,12 @@ impl TestContext {
                     i + 1
                 ))
                 .await;
+            self.clickhouse
+                .execute(&format!(
+                    "INSERT INTO namespace_traversal_paths (id, traversal_path) \
+                     VALUES ({ns_id}, '1/{ns_id}/')"
+                ))
+                .await;
         }
     }
 

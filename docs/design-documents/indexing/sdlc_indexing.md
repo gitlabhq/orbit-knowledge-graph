@@ -169,6 +169,11 @@ If the table is not present, the indexer assumes that no namespaces have access 
 SELECT * FROM knowledge_graph_enabled_namespaces;
 ```
 
+The stored `traversal_path` can be permanently wrong (a replication race bakes
+in `0/`), so no reader trusts it: enrollment CDC events and the periodic sweep
+both resolve the current path from `namespace_traversal_paths` at query time.
+A namespace whose path is not resolvable yet is skipped until the next sweep.
+
 ##### NATS JetStream and KV orchestration
 
 **Indexing job creation**

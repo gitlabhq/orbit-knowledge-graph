@@ -2,5 +2,6 @@ FROM registry.access.redhat.com/ubi10/ubi-minimal:10.2
 
 WORKDIR /app
 COPY gkg-server /usr/local/bin/gkg-server
+COPY config/clickhouse-setup.sql /usr/share/gkg/clickhouse-setup.sql
 
 ENTRYPOINT ["gkg-server"]
