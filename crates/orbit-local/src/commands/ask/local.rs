@@ -100,9 +100,9 @@ impl LocalBackend {
         Ok((corpus, Some(weights)))
     }
 
-    pub(super) fn expand(&self, seeds: &[&CorpusRow]) -> Result<Vec<Edge>> {
+    pub(super) fn expand(&self, seeds: &[&CorpusRow], focus: Option<&str>) -> Result<Vec<Edge>> {
         let ids: Vec<&str> = seeds.iter().map(|s| s.id.as_str()).collect();
-        let batches = sql::query(&self.client, &expand_sql(self.pid, &self.sha, &ids))?;
+        let batches = sql::query(&self.client, &expand_sql(self.pid, &self.sha, &ids, focus))?;
         let kinds = string_column(&batches, "relationship_kind");
         let sources = string_column(&batches, "source_label");
         let targets = string_column(&batches, "target_label");
@@ -269,8 +269,20 @@ fn rows_from_batches(batches: &[arrow::record_batch::RecordBatch]) -> Vec<Corpus
         .collect()
 }
 
-fn expand_sql(pid: i64, sha: &str, seed_ids: &[&str]) -> String {
+fn expand_sql(pid: i64, sha: &str, seed_ids: &[&str], focus: Option<&str>) -> String {
     let ids = seed_ids.join(", ");
+    let order = match focus {
+        Some(kind) => {
+            let lit = sql_lit(kind);
+            format!(
+                "CASE WHEN h.relationship_kind = {lit} THEN 0 ELSE 1 END,
+         h.relationship_kind,
+         CASE WHEN h.relationship_kind = {lit} AND h.target_id IN ({ids}) THEN 0 ELSE 1 END,
+         source_label, target_label"
+            )
+        }
+        None => "h.relationship_kind, source_label, target_label".to_string(),
+    };
     format!(
         "WITH hood AS (
   SELECT DISTINCT relationship_kind, source_id, target_id
@@ -294,7 +306,7 @@ SELECT h.relationship_kind,
 FROM hood h
 LEFT JOIN labels s ON s.id = h.source_id
 LEFT JOIN labels t ON t.id = h.target_id
-ORDER BY h.relationship_kind, source_label, target_label
+ORDER BY {order}
 LIMIT {EDGE_LIMIT}"
     )
 }
