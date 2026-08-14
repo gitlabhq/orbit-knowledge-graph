@@ -607,6 +607,13 @@ impl LanguageSpec {
         if let crate::v2::dsl::types::LanguageParser::Custom(custom) = self.parser {
             let parse_start = cpu_time::ThreadTime::now();
             let (definitions, imports) = custom(source_str, file_path);
+            let parse = parse_start.elapsed();
+            if timeouts.parse.is_some_and(|budget| parse > budget) {
+                return Err(ParseFullError::Aborted {
+                    phase: crate::v2::error::AbortPhase::Parse,
+                    detail: "exceeded per-file CPU budget during custom parse".to_string(),
+                });
+            }
             return Ok(ParseFullResult {
                 definitions,
                 imports,
@@ -614,7 +621,7 @@ impl LanguageSpec {
                 inferred_returns: Vec::new(),
                 unresolved_aliases: Vec::new(),
                 phase_cpu: PhaseCpu {
-                    parse: parse_start.elapsed(),
+                    parse,
                     ..PhaseCpu::default()
                 },
             });
