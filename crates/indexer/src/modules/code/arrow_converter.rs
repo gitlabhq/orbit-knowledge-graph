@@ -540,11 +540,6 @@ fn repository_on_branch_rows<'a>(
     rows
 }
 
-/// A row in the edge batch: either a pre-built structural row or a petgraph
-/// edge rendered lazily. Graph edges dominate (millions on large repos), so
-/// they are never materialized as `IndexerEdgeRow`s — sorting and rendering
-/// work from the edge index, keeping peak memory at one small enum per edge
-/// instead of a full row copy plus per-row tag clones.
 enum EdgeEntry<'r, 'a> {
     Row(&'r IndexerEdgeRow<'a>),
     Graph(petgraph::graph::EdgeIndex),
