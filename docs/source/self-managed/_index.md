@@ -91,7 +91,7 @@ GitLab reaches the webserver over gRPC.
 |------|-------------|
 | [Get started](getting-started.md) | Prerequisites, installation order, and shared configuration values |
 | [Set up data replication](data-replication.md) | PostgreSQL logical replication and Siphon |
-| [Set up GitLab Orbit](orbit-setup.md) | ClickHouse identities, the GitLab connection, the GitLab Orbit chart, and group indexing |
+| [Set up GitLab Orbit](orbit-setup.md) | The ClickHouse database and identities, the GitLab connection, the GitLab Orbit chart, and group indexing |
 
 ## Support and coverage
 

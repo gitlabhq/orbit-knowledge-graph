@@ -64,13 +64,39 @@ GitLab Orbit uses two databases:
 | Database | Written by | Read by |
 |----------|------------|---------|
 | `gitlab_clickhouse_main_production` | GitLab, Siphon | GitLab, the GitLab Orbit indexer and dispatcher |
-| `gkg` | The GitLab Orbit dispatcher (schema) and indexer (data) | All three GitLab Orbit components |
+| `orbit` | The GitLab Orbit dispatcher (schema) and indexer (data) | All three GitLab Orbit components |
 
 The two databases can be on separate ClickHouse instances. If they are, give GitLab, Siphon, and
 GitLab Orbit credentials for the instance that holds the database each one uses.
 
-The `gitlab_clickhouse_main_production` database exists after ClickHouse setup is complete. The `gkg`
-database is created when you set up GitLab Orbit.
+The `gitlab_clickhouse_main_production` database exists after ClickHouse setup is complete. You create the
+`orbit` database when you set up GitLab Orbit. GitLab Orbit does not create it at startup.
+
+### Sizing and settings
+
+Provision at least 8 CPU and 32 GiB of memory for ClickHouse. On 16 GiB, the work item extract runs out of
+memory during the first backfill even with spilling to disk turned on. ClickHouse saturates 8 cores while
+the graph builds.
+
+Provision at least as much ClickHouse storage as the size of the GitLab PostgreSQL database. Siphon
+replicates roughly half of the GitLab data into the data lake, and the graph indexes up to a quarter of it.
+GitLab Orbit keeps the previous index version during a promotion, so budget for the graph twice.
+
+A ClickHouse instance you run yourself sets `max_bytes_before_external_sort` and
+`max_bytes_before_external_group_by` to `0`, which turns off spilling to disk. ClickHouse Cloud sets both to
+half of available memory. Without spilling, a wide sort over the work item columns holds the whole result in
+memory, and the server runs out of memory. Set both in the `default` profile. The following values suit a
+32 GiB instance, with 8 GiB for each threshold and 20 GiB for the memory ceiling:
+
+```xml
+<profiles>
+  <default>
+    <max_bytes_before_external_sort>8589934592</max_bytes_before_external_sort>
+    <max_bytes_before_external_group_by>8589934592</max_bytes_before_external_group_by>
+    <max_memory_usage>21474836480</max_memory_usage>
+  </default>
+</profiles>
+```
 
 ## Kubernetes
 
@@ -109,7 +135,7 @@ processes no data.
 |-------|---------|---------|
 | NATS stream name | Siphon and GitLab Orbit | `siphon_stream_main_db` |
 | Data lake database | GitLab, Siphon, and GitLab Orbit | `gitlab_clickhouse_main_production` |
-| Graph database | GitLab Orbit | `gkg` |
+| Graph database | GitLab Orbit | `orbit` |
 | PostgreSQL host and port | Siphon | `postgres.example.com:5432` |
 | GitLab URL reachable from the cluster | GitLab Orbit | `https://gitlab.example.com` |
 | GitLab Orbit gRPC endpoint reachable from GitLab | GitLab | `tls://orbit.example.com:50054` |

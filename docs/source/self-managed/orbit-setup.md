@@ -34,13 +34,13 @@ Prerequisites:
 
 Set up GitLab Orbit in this order:
 
-1. Create the ClickHouse identities.
+1. Create the ClickHouse database and identities.
 1. Turn on GitLab Orbit in GitLab.
 1. Make the credentials available to GitLab Orbit.
 1. Install GitLab Orbit.
 1. Turn on indexing for a group.
 
-## Create the ClickHouse identities
+## Create the ClickHouse database and identities
 
 GitLab Orbit requires its own graph database and three users:
 
@@ -50,10 +50,11 @@ GitLab Orbit requires its own graph database and three users:
 | `gkg_reader` | `gkg_reader_app` | Read the graph database |
 | `gkg_siphon_reader` | `gkg_siphon_reader_app` | Read the data lake |
 
-The statements that create them ship inside the GitLab Orbit image, so the statements always match the
-version you run. The statements are idempotent.
+The statements that create the database and the users ship inside the GitLab Orbit image, so the statements
+always match the version you run. The statements are idempotent. GitLab Orbit does not create the graph
+database at startup, and the dispatcher only runs schema migrations against a database that already exists.
 
-To create the identities:
+To create the database and the identities:
 
 1. Read the statements:
 
@@ -63,9 +64,11 @@ To create the identities:
      /usr/share/gkg/clickhouse-setup.sql
    ```
 
-1. Substitute the graph database name, the data lake database name, and a password for each user.
+1. Substitute the graph database name, the data lake database name, and a password for each user. Use
+   `orbit` as the graph database name.
 
-1. Run the result against ClickHouse as an administrator.
+1. Run the result against ClickHouse as an administrator. The statements create the graph database and
+   grant the `gkg_app` role the privileges it needs on that database.
 
 1. Add the three grants that the shipped file does not include:
 
@@ -208,7 +211,7 @@ You must also provide a TLS certificate for the gRPC endpoint. For more informat
        user: gkg_siphon_reader
      graph:
        host: <clickhouse_host>
-       database: gkg
+       database: orbit
        user: gkg_writer
        readUser: gkg_reader
 
