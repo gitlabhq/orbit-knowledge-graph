@@ -1,0 +1,20 @@
+[package]
+name = "memprof"
+version.workspace = true
+edition = "2024"
+description = "Tiny RSS-correlated allocation profiler: fuses process-RSS sampling with sampled allocation backtraces to show which call sites held memory when RSS peaked."
+# Deliberately does NOT inherit `[workspace.lints]`: that table forbids
+# `unsafe_code`, and a `GlobalAlloc` shim is unavoidably unsafe.
+
+[dependencies]
+backtrace = "0.3"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+mach2 = "0.4"
+
+[[bin]]
+name = "memprof-demo"
+path = "src/bin/demo.rs"
