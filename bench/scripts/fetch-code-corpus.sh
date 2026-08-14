@@ -1,26 +1,34 @@
 #!/usr/bin/env bash
 # Fetch repository archives from gitlab.com and upload to GCS.
 # Input: TSV file with project_id \t full_path (from dump-project-list.sh)
-# Usage: GITLAB_TOKEN=glpat-... bash bench/scripts/fetch-code-corpus.sh projects.tsv
+# Usage:
+#   GITLAB_TOKEN=glpat-... bash bench/scripts/fetch-code-corpus.sh projects.tsv
+#   GITLAB_TOKEN=glpat-... FETCH_MAX=10 bash bench/scripts/fetch-code-corpus.sh projects.tsv
 set -euo pipefail
 
 : "${GITLAB_TOKEN:?must be set (PAT with read_api scope)}"
 : "${BUCKET:=gs://gkg-code-corpus}"
 : "${JOBS:=8}"
+: "${FETCH_MAX:=0}"
 
 INPUT="${1:?usage: $0 <projects.tsv>}"
 WORK="${TMPDIR:-/tmp}/code-corpus"
 mkdir -p "${WORK}"
 
 TOTAL=$(wc -l < "${INPUT}" | tr -d ' ')
-echo "[corpus] ${TOTAL} projects to fetch, ${JOBS} parallel jobs"
+if [[ "${FETCH_MAX}" -gt 0 ]]; then
+  echo "[corpus] ${TOTAL} projects in list, fetching first ${FETCH_MAX}, ${JOBS} parallel jobs"
+  INPUT_LINES=$(head -n "${FETCH_MAX}" "${INPUT}")
+else
+  echo "[corpus] ${TOTAL} projects to fetch, ${JOBS} parallel jobs"
+  INPUT_LINES=$(cat "${INPUT}")
+fi
 
 fetch_one() {
   local id="$1" path="$2"
   local dest="${WORK}/${id}.tar.gz"
   local gcs="${BUCKET}/${id}.tar.gz"
 
-  # Skip if already in GCS
   if gsutil -q stat "${gcs}" 2>/dev/null; then
     return 0
   fi
@@ -36,12 +44,10 @@ fetch_one() {
     case "${code}" in
       200) break ;;
       404|403)
-        # Archived, deleted, or private
         rm -f "${dest}"
         return 0
         ;;
       429)
-        # Rate limited
         sleep $((attempt * 10))
         ;;
       *)
@@ -63,11 +69,10 @@ fetch_one() {
 export -f fetch_one
 export WORK BUCKET GITLAB_TOKEN
 
-# GNU parallel or xargs fallback
 if command -v parallel &>/dev/null; then
-  cat "${INPUT}" | parallel -j "${JOBS}" --colsep '\t' fetch_one {1} {2}
+  echo "${INPUT_LINES}" | parallel -j "${JOBS}" --colsep '\t' fetch_one {1} {2}
 else
-  cat "${INPUT}" | xargs -P "${JOBS}" -I{} bash -c '
+  echo "${INPUT_LINES}" | xargs -P "${JOBS}" -I{} bash -c '
     id=$(echo "{}" | cut -f1)
     path=$(echo "{}" | cut -f2)
     fetch_one "${id}" "${path}"

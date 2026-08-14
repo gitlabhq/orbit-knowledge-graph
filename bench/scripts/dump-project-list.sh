@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
 # Dump project IDs and full paths from the datalake for code corpus fetching.
-# Output: TSV to stdout (project_id \t full_path)
-# Usage: KCTX=... RUN_ID=bench7 bash bench/scripts/dump-project-list.sh > projects.tsv
+# Output: TSV (project_id \t full_path), written to GCS and stdout.
+# Usage: KCTX=... RUN_ID=bench7 bash bench/scripts/dump-project-list.sh
 set -euo pipefail
 
 BENCH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "${BENCH_DIR}/scripts/lib.sh"
 
 CH_NS="${E2E_CH_NAMESPACE:-ra-ch-${RUN_ID}}"
+: "${BUCKET:=gs://gkg-code-corpus}"
 
-$KC exec -n "${CH_NS}" clickhouse-0 -- clickhouse-client -q "
+PROJECTS=$($KC exec -n "${CH_NS}" clickhouse-0 -- clickhouse-client -q "
 SELECT
     p.id AS project_id,
     r.path AS full_path
@@ -18,4 +19,12 @@ JOIN datalake.siphon_routes r FINAL ON r.source_id = p.id AND r.source_type = 'P
 WHERE NOT p._deleted AND NOT r._siphon_deleted
 ORDER BY p.id
 FORMAT TSV
-"
+")
+
+COUNT=$(echo "${PROJECTS}" | wc -l | tr -d ' ')
+log "${COUNT} projects dumped"
+
+echo "${PROJECTS}" | gsutil -q cp - "${BUCKET}/projects.tsv"
+log "Uploaded to ${BUCKET}/projects.tsv"
+
+echo "${PROJECTS}"
