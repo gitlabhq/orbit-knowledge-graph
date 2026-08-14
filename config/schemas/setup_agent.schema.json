@@ -1,0 +1,109 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "setup_agent.schema.json",
+  "title": "Orbit setup assistant spec",
+  "description": "One AI coding assistant configured by `orbit setup`, described as generic operations: a managed instruction-file block, marker-owned JSON merges, templated files, and string registrations. Each file's name field must match its file stem. Applied by crates/orbit-local/src/commands/setup.",
+  "type": "object",
+  "required": ["name", "instruction_file"],
+  "additionalProperties": false,
+  "properties": {
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*$",
+      "description": "Assistant identifier accepted by `orbit setup <ASSISTANT>`. Must match the YAML file stem."
+    },
+    "instruction_file": {
+      "$ref": "#/definitions/scopedPath",
+      "description": "Instruction file receiving the managed guidance block."
+    },
+    "json_merges": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/definitions/jsonMerge" },
+      "description": "Marker-owned merges into JSON arrays in the assistant's config, e.g. PreToolUse hooks."
+    },
+    "template_files": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/definitions/templateFile" },
+      "description": "Files written verbatim from an embedded config/setup/ template."
+    },
+    "registrations": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/definitions/registration" },
+      "description": "Strings appended to a JSON array in the assistant's config, e.g. a plugin list."
+    }
+  },
+  "definitions": {
+    "scopedPath": {
+      "type": "object",
+      "required": ["project", "global"],
+      "additionalProperties": false,
+      "properties": {
+        "project": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[^~/]",
+          "description": "Path relative to the project root, used by --project/--dir."
+        },
+        "global": {
+          "type": "string",
+          "pattern": "^~/",
+          "description": "Home-anchored user-config path, used by the default global scope."
+        }
+      }
+    },
+    "jsonMerge": {
+      "type": "object",
+      "required": ["file", "path", "marker", "entries"],
+      "additionalProperties": false,
+      "properties": {
+        "file": { "$ref": "#/definitions/scopedPath" },
+        "path": { "$ref": "#/definitions/jsonPath" },
+        "marker": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Substring identifying orbit-owned entries. Every entry must contain it in a nested string, otherwise re-running setup duplicates the entry instead of replacing it."
+        },
+        "entries": {
+          "type": "array",
+          "minItems": 1,
+          "description": "Entries orbit owns at path. `{mode}` in any nested string resolves to the install mode (local or remote)."
+        }
+      }
+    },
+    "templateFile": {
+      "type": "object",
+      "required": ["path", "template"],
+      "additionalProperties": false,
+      "properties": {
+        "path": { "$ref": "#/definitions/scopedPath" },
+        "template": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Template location under config/setup/. `{mode}` resolves to the install mode, e.g. modes/{mode}/opencode_plugin.js."
+        }
+      }
+    },
+    "registration": {
+      "type": "object",
+      "required": ["file", "path", "value"],
+      "additionalProperties": false,
+      "properties": {
+        "file": { "$ref": "#/definitions/scopedPath" },
+        "path": { "$ref": "#/definitions/jsonPath" },
+        "value": {
+          "$ref": "#/definitions/scopedPath",
+          "description": "String appended to the array: project-relative in project scope, expanded absolute in global scope."
+        }
+      }
+    },
+    "jsonPath": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 },
+      "description": "Object keys naming the target JSON array, outermost first."
+    }
+  }
+}

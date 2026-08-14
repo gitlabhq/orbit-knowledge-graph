@@ -23,7 +23,19 @@ For the full field reference see [`query_language.md`](query_language.md).
 ## Look up a GitLab project's numeric ID
 
 Many filters (e.g. `project_id` on MergeRequest) need the numeric project ID.
-Query the `Project` entity by `full_path` and read back its `id`:
+
+For the repository you are in, let `glab` resolve it from the Git remote. This
+needs no query, so inline it into the command you already need to run:
+
+```shell
+PROJECT_ID=$(glab api projects/:fullpath | jq -r '.id')
+```
+
+The `:fullpath` placeholder expands to the path of the checkout you are in, so
+this works unchanged anywhere.
+
+For a *different* project, or when you are not inside its checkout, query the
+`Project` entity by `full_path` and read back its `id`:
 
 ```json orbit-query
 {

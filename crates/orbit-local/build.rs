@@ -6,6 +6,13 @@ fn main() {
 
     validate_prompts();
 
+    println!(
+        "cargo:rerun-if-changed={}",
+        std::path::Path::new(env!("CONFIG_DIR"))
+            .join("setup")
+            .display()
+    );
+
     // Release jobs run on `vX.Y.Z` tags (.gitlab/ci/release-local.yml), so
     // CI_COMMIT_TAG is the authoritative release version. `git describe` is a
     // best-effort convenience for local/dev builds; the static Cargo.toml
