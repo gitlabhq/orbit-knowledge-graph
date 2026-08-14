@@ -6,6 +6,7 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 
+use crate::search::{split_words, stem};
 use local::LocalBackend;
 
 const EXPAND_SEEDS: usize = 5;
@@ -21,13 +22,27 @@ const SUBSTRING_BONUS: f64 = 1.0;
 const SOURCE_BONUS: f64 = 0.5;
 
 #[rustfmt::skip]
-const RELATIONAL_INTENT: &[&str] = &[
-    "call", "called", "caller", "callers", "calls", "depend", "depends",
-    "extend", "extended", "extends", "export", "exported", "exports",
-    "implement", "implemented", "implements", "import", "imported", "imports",
-    "invoke", "invoked", "invokes", "mention", "mentioned", "mentions",
-    "reference", "referenced", "references", "use", "used", "uses", "using",
+const RELATIONAL_SYNONYMS: &[&str] = &[
+    "caller", "callee", "depend", "export", "implement", "invoke", "mention",
+    "reference", "render", "use", "used", "uses", "using",
 ];
+
+fn is_relational(term: &str) -> bool {
+    static STEMS: std::sync::OnceLock<std::collections::HashSet<String>> =
+        std::sync::OnceLock::new();
+    STEMS
+        .get_or_init(|| {
+            use strum::IntoEnumIterator;
+            let mut stems: std::collections::HashSet<String> =
+                code_graph::v2::types::EdgeKind::iter()
+                    .flat_map(|kind| split_words(kind.as_ref()))
+                    .map(|word| stem(&word))
+                    .collect();
+            stems.extend(RELATIONAL_SYNONYMS.iter().map(|word| stem(word)));
+            stems
+        })
+        .contains(&stem(term))
+}
 
 const QUERY_STOPWORDS: &[&str] = &[
     "a", "about", "all", "an", "and", "any", "are", "be", "been", "being", "but", "can", "could",
@@ -57,6 +72,7 @@ struct Hit {
     index: usize,
     score: f64,
     tiered: bool,
+    guaranteed: bool,
 }
 
 pub(crate) fn run(
@@ -148,14 +164,6 @@ enum Tier {
     None,
 }
 
-fn stem(word: &str) -> String {
-    thread_local! {
-        static STEMMER: rust_stemmers::Stemmer =
-            rust_stemmers::Stemmer::create(rust_stemmers::Algorithm::English);
-    }
-    STEMMER.with(|s| s.stem(word).into_owned())
-}
-
 fn tier_of(term: &str, tokens: &[String]) -> Tier {
     if tokens.iter().any(|t| t == term) {
         Tier::Exact
@@ -208,7 +216,7 @@ fn rank(terms: &[String], corpus: &[CorpusRow], cap: usize, weights: Option<&[f6
             .iter()
             .zip(w)
             .map(|(term, weight)| {
-                if RELATIONAL_INTENT.contains(&term.as_str()) {
+                if is_relational(term) {
                     weight.min(1.0)
                 } else {
                     *weight
@@ -246,10 +254,11 @@ fn rank(terms: &[String], corpus: &[CorpusRow], cap: usize, weights: Option<&[f6
                     score += SUBSTRING_BONUS * weight;
                     matched += 1;
                 }
-                Tier::None => {}
-            }
-            if matches!(tier_of(term, &row.path), Tier::Exact | Tier::Prefix) {
-                score += SOURCE_BONUS * weight;
+                Tier::None => {
+                    if matches!(tier_of(term, &row.path), Tier::Exact | Tier::Prefix) {
+                        score += SOURCE_BONUS * weight;
+                    }
+                }
             }
         }
         if tiered > 0.0 {
@@ -261,6 +270,7 @@ fn rank(terms: &[String], corpus: &[CorpusRow], cap: usize, weights: Option<&[f6
                 index,
                 score,
                 tiered: tiered > 0.0,
+                guaranteed: false,
             });
             for ((slot, term), term_stem) in per_term_best.iter_mut().zip(terms).zip(&term_stems) {
                 if row.matches(term, term_stem) && slot.is_none_or(|(best, _)| score > best) {
@@ -286,16 +296,18 @@ fn rank(terms: &[String], corpus: &[CorpusRow], cap: usize, weights: Option<&[f6
     let mut guaranteed = false;
     for (slot, term) in per_term_best.iter().zip(terms) {
         let Some((score, index)) = slot else { continue };
-        if RELATIONAL_INTENT.contains(&term.as_str()) {
+        if is_relational(term) {
             continue;
         }
-        if hits.iter().any(|h| h.index == *index) {
+        if let Some(hit) = hits.iter_mut().find(|h| h.index == *index) {
+            hit.guaranteed = true;
             continue;
         }
         hits.push(Hit {
             index: *index,
             score: *score,
             tiered: false,
+            guaranteed: true,
         });
         guaranteed = true;
     }
@@ -312,8 +324,12 @@ fn rank(terms: &[String], corpus: &[CorpusRow], cap: usize, weights: Option<&[f6
 fn dedupe_by_parent(results: Vec<Hit>, corpus: &[CorpusRow], limit: usize) -> Vec<Hit> {
     let mut per_parent: HashMap<String, usize> = HashMap::new();
     let mut per_file: HashMap<String, usize> = HashMap::new();
-    let mut kept = Vec::with_capacity(limit);
+    let mut kept: Vec<Hit> = Vec::with_capacity(limit);
+    let mut overflow_guaranteed: Vec<Hit> = Vec::new();
     for r in results {
+        if kept.len() >= limit && !r.guaranteed {
+            continue;
+        }
         let row = &corpus[r.index];
         let file = row
             .loc
@@ -327,13 +343,22 @@ fn dedupe_by_parent(results: Vec<Hit>, corpus: &[CorpusRow], limit: usize) -> Ve
             *seen += 1;
         }
         let count = per_parent.entry(parent_key(&row.fqn)).or_insert(0);
-        if *count < MAX_PER_PARENT {
-            *count += 1;
-            kept.push(r);
-            if kept.len() >= limit {
-                break;
-            }
+        if *count >= MAX_PER_PARENT {
+            continue;
         }
+        *count += 1;
+        if kept.len() < limit {
+            kept.push(r);
+        } else {
+            overflow_guaranteed.push(r);
+        }
+    }
+    for g in overflow_guaranteed {
+        let Some(pos) = kept.iter().rposition(|h| !h.guaranteed) else {
+            break;
+        };
+        kept.remove(pos);
+        kept.push(g);
     }
     kept
 }
@@ -356,29 +381,6 @@ fn content_words(input: &str) -> Vec<String> {
         .cloned()
         .collect();
     if content.is_empty() { words } else { content }
-}
-
-fn split_words(input: &str) -> Vec<String> {
-    let mut tokens = Vec::new();
-    for word in input.split(|c: char| !c.is_ascii_alphanumeric()) {
-        let chars: Vec<char> = word.chars().collect();
-        let mut start = 0;
-        for i in 1..=chars.len() {
-            let boundary = i == chars.len()
-                || (chars[i].is_ascii_uppercase()
-                    && (chars[i - 1].is_ascii_lowercase()
-                        || chars[i - 1].is_ascii_digit()
-                        || (i + 1 < chars.len() && chars[i + 1].is_ascii_lowercase())));
-            if boundary {
-                let tok: String = chars[start..i].iter().collect::<String>().to_lowercase();
-                if tok.len() >= 2 {
-                    tokens.push(tok);
-                }
-                start = i;
-            }
-        }
-    }
-    tokens
 }
 
 fn report_hidden(out: &mut impl Write, kind: &str, total: usize) -> std::io::Result<()> {
@@ -451,6 +453,55 @@ mod tests {
         assert!(
             flat.iter().all(|h| (h.score - top).abs() < f64::EPSILON),
             "without weights every one-term match should tie"
+        );
+    }
+
+    #[test]
+    fn relational_intent_derives_from_edge_kinds_and_synonyms() {
+        for word in [
+            "calls",
+            "called",
+            "imports",
+            "importing",
+            "extends",
+            "defined",
+            "contains",
+            "renders",
+            "rendering",
+            "mentioned",
+            "uses",
+            "callers",
+        ] {
+            assert!(is_relational(word), "{word} should be relational");
+        }
+        for word in ["dlq", "widget", "backpressure", "user", "hooks"] {
+            assert!(!is_relational(word), "{word} should not be relational");
+        }
+    }
+
+    #[test]
+    fn rank_prefers_the_short_exact_symbol_over_a_longer_tie() {
+        let corpus = vec![
+            row("Ci::ExecuteBuildHooksWorker::execute_hooks_for_created_build"),
+            row("Group::execute_hooks"),
+        ];
+        let terms = vec!["execute".to_string(), "hooks".to_string()];
+        let hits = rank(&terms, &corpus, 10, None);
+        assert_eq!(corpus[hits[0].index].fqn, "Group::execute_hooks");
+    }
+
+    #[test]
+    fn guaranteed_rare_term_row_survives_the_display_cap() {
+        let mut corpus: Vec<CorpusRow> = (0..20)
+            .map(|i| row(&format!("pkg{i}::parse_file_entry")))
+            .collect();
+        corpus.push(row("code_graph::langs::js::frameworks::vue"));
+        let terms = vec!["parse".to_string(), "vue".to_string(), "file".to_string()];
+        let hits = dedupe_by_parent(rank(&terms, &corpus, 15, None), &corpus, 3);
+        assert_eq!(hits.len(), 3);
+        assert!(
+            hits.iter().any(|h| corpus[h.index].fqn.ends_with("::vue")),
+            "the only row matching 'vue' must survive the cap"
         );
     }
 

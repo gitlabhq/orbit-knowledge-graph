@@ -85,3 +85,10 @@ CREATE TABLE IF NOT EXISTS gl_edge (
 );
 
 
+CREATE TABLE IF NOT EXISTS gl_search_token (
+    project_id BIGINT NOT NULL,
+    commit_sha VARCHAR NOT NULL,
+    def_id BIGINT NOT NULL,
+    token VARCHAR NOT NULL,
+    tf INTEGER NOT NULL
+);

@@ -3,9 +3,8 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 
 use super::{CorpusRow, Edge};
-use crate::commands::repo_map::{
-    DEFAULT_SOURCE_EXTS, EXCLUDE_LIKE, EXCLUDE_REGEX, ext_regex, scalar_i64, sql_lit, string_column,
-};
+use crate::commands::repo_map::{scalar_i64, sql_lit, string_column};
+use crate::search;
 use crate::sql;
 use crate::workspace;
 
@@ -27,21 +26,36 @@ impl LocalBackend {
         let git = workspace::git_info(&top_level)
             .with_context(|| format!("failed to read git info for {}", top_level.display()))?;
 
-        let client = sql::open_graph(Some(db))?;
+        let mut client = sql::open_graph(Some(db.clone()))?;
         let pid = git.project_id;
         let sha = sql_lit(&git.commit_sha);
 
-        let indexed = sql::query(
-            &client,
-            &format!(
-                "SELECT COUNT(*) AS n FROM gl_file WHERE project_id = {pid} AND commit_sha = {sha}"
-            ),
-        )?;
-        if scalar_i64(&indexed) == 0 {
-            anyhow::bail!(
-                "current commit {} is not indexed in the local graph\n       run:  orbit index .",
-                git.commit_sha
+        let indexed_count = |client: &duckdb_client::DuckDbClient| -> Result<i64> {
+            let batches = sql::query(
+                client,
+                &format!(
+                    "SELECT COUNT(*) AS n FROM gl_file WHERE project_id = {pid} AND commit_sha = {sha}"
+                ),
+            )?;
+            Ok(scalar_i64(&batches))
+        };
+
+        if indexed_count(&client)? == 0 {
+            eprintln!(
+                "current commit {} is not indexed — indexing {} first",
+                git.commit_sha.get(..8).unwrap_or(&git.commit_sha),
+                git.repo_path.display()
             );
+            drop(client);
+            crate::index_collect(git.repo_path.clone(), 0, false, Some(db.clone()))
+                .context("failed to index the repository for ask")?;
+            client = sql::open_graph(Some(db))?;
+            if indexed_count(&client)? == 0 {
+                anyhow::bail!(
+                    "indexing finished but commit {} still has no rows in the local graph",
+                    git.commit_sha
+                );
+            }
         }
 
         Ok(Self {
@@ -65,14 +79,24 @@ impl LocalBackend {
             .iter()
             .map(|df| (1.0 + n / (1.0 + *df as f64)).ln())
             .collect();
-        let corpus = fetch_corpus(
-            &self.client,
-            self.pid,
-            &self.sha,
-            terms,
-            &weights,
-            LOCAL_CANDIDATES,
-        )?;
+        let corpus = if search::has_postings(&self.client, self.pid, &self.sha)? {
+            let sql = search::bm25_candidates_sql(
+                self.pid,
+                &self.sha,
+                &search::query_tokens(terms),
+                LOCAL_CANDIDATES,
+            );
+            rows_from_batches(&sql::query(&self.client, &sql)?)
+        } else {
+            fetch_corpus(
+                &self.client,
+                self.pid,
+                &self.sha,
+                terms,
+                &weights,
+                LOCAL_CANDIDATES,
+            )?
+        };
         Ok((corpus, Some(weights)))
     }
 
@@ -92,37 +116,32 @@ impl LocalBackend {
     }
 }
 
-fn corpus_predicate(pid: i64, sha: &str) -> String {
-    format!(
-        "d.project_id = {pid} AND d.commit_sha = {sha}
-  AND regexp_matches(d.file_path, {source_only})
-  AND NOT regexp_matches(d.name, '^[0-9]+$')
-{exclude}",
-        source_only = sql_lit(&ext_regex(
-            &DEFAULT_SOURCE_EXTS
-                .iter()
-                .map(|s| s.to_string())
-                .collect::<Vec<_>>()
-        )),
-        exclude = exclusions("d.file_path"),
-    )
-}
-
-fn term_match_sql(term: &str) -> String {
+fn term_needles(term: &str) -> Vec<String> {
     let lower = term.to_lowercase();
     let mut needles = vec![lower.clone()];
-    let stemmed = super::stem(&lower);
+    let stemmed = search::stem(&lower);
     if stemmed.len() >= 3 && stemmed != lower {
         needles.push(stemmed);
     }
-    let clauses: Vec<String> = needles
+    needles
+}
+
+fn columns_match_sql(term: &str, columns: &[&str]) -> String {
+    let clauses: Vec<String> = term_needles(term)
         .iter()
-        .map(|needle| {
+        .flat_map(|needle| {
             let pat = sql_lit(&format!("%{needle}%"));
-            format!("lower(d.fqn) LIKE {pat} OR lower(d.file_path) LIKE {pat}")
+            columns
+                .iter()
+                .map(move |col| format!("lower({col}) LIKE {pat}"))
+                .collect::<Vec<_>>()
         })
         .collect();
     format!("({})", clauses.join(" OR "))
+}
+
+fn term_match_sql(term: &str) -> String {
+    columns_match_sql(term, &["d.fqn", "d.file_path"])
 }
 
 fn term_predicate(terms: &[String]) -> String {
@@ -143,8 +162,10 @@ fn relevance_sql(terms: &[String], weights: &[f64]) -> String {
         .map(|(i, t)| {
             let weight = weights.get(i).copied().unwrap_or(1.0);
             format!(
-                "CASE WHEN {} THEN {weight:.6} ELSE 0 END",
-                term_match_sql(t)
+                "CASE WHEN {name} THEN {double:.6} WHEN {any} THEN {weight:.6} ELSE 0 END",
+                name = columns_match_sql(t, &["d.name"]),
+                double = weight * 2.0,
+                any = term_match_sql(t),
             )
         })
         .collect();
@@ -176,7 +197,7 @@ fn corpus_term_counts(
         client,
         &format!(
             "SELECT CAST(COUNT(*) AS VARCHAR) AS total{selects} FROM gl_definition d WHERE {pred}",
-            pred = corpus_predicate(pid, sha),
+            pred = search::corpus_predicate(pid, sha),
         ),
     )?;
     let count_of = |name: &str| {
@@ -208,7 +229,7 @@ fn fetch_corpus(
   FROM gl_definition d
   WHERE {pred}
   AND {terms}
-  ORDER BY {relevance} DESC
+  ORDER BY {relevance} DESC, length(d.fqn) ASC
   LIMIT {cap}
 ),
 deg AS (
@@ -223,17 +244,21 @@ SELECT CAST(c.id AS VARCHAR) AS id, c.fqn, c.definition_type,
        CAST(COALESCE(deg.degree, 0) AS VARCHAR) AS degree
 FROM cand c
 LEFT JOIN deg ON deg.id = c.id",
-            pred = corpus_predicate(pid, sha),
+            pred = search::corpus_predicate(pid, sha),
             terms = term_predicate(terms),
             relevance = relevance_sql(terms, weights),
         ),
     )?;
-    let ids = string_column(&batches, "id");
-    let fqns = string_column(&batches, "fqn");
-    let kinds = string_column(&batches, "definition_type");
-    let locs = string_column(&batches, "loc");
-    let degrees = string_column(&batches, "degree");
-    Ok((0..ids.len())
+    Ok(rows_from_batches(&batches))
+}
+
+fn rows_from_batches(batches: &[arrow::record_batch::RecordBatch]) -> Vec<CorpusRow> {
+    let ids = string_column(batches, "id");
+    let fqns = string_column(batches, "fqn");
+    let kinds = string_column(batches, "definition_type");
+    let locs = string_column(batches, "loc");
+    let degrees = string_column(batches, "degree");
+    (0..ids.len())
         .map(|i| CorpusRow {
             id: ids[i].clone(),
             fqn: fqns[i].clone(),
@@ -241,21 +266,7 @@ LEFT JOIN deg ON deg.id = c.id",
             loc: locs[i].clone(),
             degree: degrees[i].clone(),
         })
-        .collect())
-}
-
-fn exclusions(col: &str) -> String {
-    let mut s = String::new();
-    for pat in EXCLUDE_LIKE {
-        s.push_str(&format!("  AND {col} NOT LIKE {}\n", sql_lit(pat)));
-    }
-    for re in EXCLUDE_REGEX {
-        s.push_str(&format!(
-            "  AND NOT regexp_matches({col}, {})\n",
-            sql_lit(re)
-        ));
-    }
-    s
+        .collect()
 }
 
 fn expand_sql(pid: i64, sha: &str, seed_ids: &[&str]) -> String {
