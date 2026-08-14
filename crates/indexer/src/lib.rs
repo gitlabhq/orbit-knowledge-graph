@@ -32,6 +32,8 @@ pub mod engine;
 pub mod health;
 pub mod indexing_status;
 pub mod locking;
+#[cfg(feature = "mem-harness")]
+pub mod mem_harness;
 pub mod modules;
 pub mod nats;
 pub mod observer;

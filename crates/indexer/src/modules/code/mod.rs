@@ -1,4 +1,4 @@
-mod arrow_converter;
+pub(crate) mod arrow_converter;
 mod checkpoint;
 pub mod config;
 mod handler;

@@ -7,11 +7,19 @@ license = "LicenseRef-EE"
 [features]
 default = []
 testkit = ["nats-client/testkit"]
+# Dev-only in-process memory harness for the ClickHouse indexing path.
+mem-harness = ["dep:mimalloc"]
+
+[[bin]]
+name = "ch-mem-harness"
+path = "src/bin/ch_mem_harness.rs"
+required-features = ["mem-harness"]
 
 [dependencies]
 async-nats = { workspace = true }
 async-trait = { workspace = true }
 arrow = { workspace = true }
+mimalloc = { workspace = true, optional = true }
 base64 = { workspace = true }
 bytes = { workspace = true }
 chrono = { workspace = true }
@@ -22,6 +30,7 @@ croner = { workspace = true }
 orbit-analytics = { path = "../orbit-analytics" }
 orbit-observability = { workspace = true }
 orbit-server-config = { path = "../orbit-server-config" }
+petgraph = { workspace = true }
 orbit-utils = { path = "../utils" }
 datafusion = { workspace = true }
 flate2 = { workspace = true }
