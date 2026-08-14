@@ -1,4 +1,4 @@
-# GitLab Knowledge Graph
+# GitLab Orbit
 
 ## Current State
 
@@ -14,16 +14,16 @@ Today, the repository includes the following major components:
 
 The legacy local-only tooling from the earlier `gitlab-org/rust/knowledge-graph` project remains useful as historical context, but it is not the best description of the current Orbit knowledge-graph service. Where the service intentionally differs from that earlier tool, the service architecture in this repository is the source of truth.
 
-## Knowledge Graph Architecture High-Level Overview
+## Orbit Architecture High-Level Overview
 
-Building a Knowledge Graph is a ***data engineering problem***. The Knowledge Graph service will build off of the **Data Insights Platform** to power both indexing code and SDLC metadata as a distributed system. For an end-to-end overview of the Data Insights Platform (logical replication, NATS JetStream, ClickHouse), see the [Data Insights Platform design doc](https://handbook.gitlab.com/handbook/engineering/architecture/design-documents/data_insights_platform/).
+Building Orbit is a ***data engineering problem***. The Orbit service will build off of the **Data Insights Platform** to power both indexing code and SDLC metadata as a distributed system. For an end-to-end overview of the Data Insights Platform (logical replication, NATS JetStream, ClickHouse), see the [Data Insights Platform design doc](https://handbook.gitlab.com/handbook/engineering/architecture/design-documents/data_insights_platform/).
 
-We will then build a secure query layer on top of the Data Insights Platform to allow developers and AI agents to query the graph for various product use cases. The Knowledge Graph tech stack will look like the following:
+We will then build a secure query layer on top of the Data Insights Platform to allow developers and AI agents to query the graph for various product use cases. The Orbit tech stack will look like the following:
 
 - [Siphon](https://gitlab.com/gitlab-org/analytics-section/siphon) acts as the CDC bridge, streaming PostgreSQL logical replication events into NATS.
 - [NATS](https://docs.nats.io/) acts as the durable message broker between Siphon and ClickHouse. Additionally, we will leverage NATS to power all event-driven logic, high availability, and queuing, such as consuming [`p_knowledge_graph_code_indexing_tasks`](https://gitlab.com/gitlab-org/gitlab/-/blob/master/db/docs/p_knowledge_graph_code_indexing_tasks.yml) for code indexing (see [ADR 005](decisions/005_code_indexing_task_table.md)).
 - [ClickHouse](https://clickhouse.com/) will act as the primary data store and data lake. With ClickHouse, we will build namespace property graphs and project-level indexes. We will never establish a direct connection to the OLTP database.
-- **Knowledge Graph service** as a unified binary with four runtime modes:
+- **Orbit service** as a unified binary with four runtime modes:
   - **`Webserver`** (`gkg-server --mode Webserver`): Serves HTTP, gRPC, and MCP traffic; validates graph queries against the JSON schema and ontology; compiles them to ClickHouse SQL; and applies authorization and formatting before returning results.
   - **`Indexer`** (`gkg-server --mode Indexer`): Runs the shared indexing engine, consumes SDLC and code indexing requests from NATS JetStream, and writes graph data into ClickHouse.
   - **`DispatchIndexing`** (`gkg-server --mode DispatchIndexing`): On a schedule, detects enabled root namespaces with recent Siphon changes and publishes deduplicated per-namespace indexing requests to the internal `GKG_INDEXER` stream. Also runs scheduled dispatchers for code indexing tasks, namespace deletion, stale-edge reconciliation, and schema-migration lifecycle.
@@ -35,7 +35,7 @@ graph TD
     RailsAPI["GitLab Rails API Server"]
     Postgres["PostgreSQL"]
     DataInsights["Data Insights Platform"]
-    KGService["Knowledge Graph Service"]
+    KGService["Orbit"]
 
     subgraph Omnibus["Omnibus VM"]
         RailsAPI
@@ -66,14 +66,14 @@ graph TD
 
 ### Design Documents
 
-Please see the following design documents for more details on the Knowledge Graph architecture:
+Please see the following design documents for more details on the Orbit architecture:
 
-- [Knowledge Graph Indexing Service](indexing/)
-- [Knowledge Graph Querying Service](querying/)
-- [Knowledge Graph Data Model](data_model.md)
-- [Knowledge Graph Schema Management](schema_management.md)
-- [Knowledge Graph Security](security.md)
-- [Knowledge Graph Observability](observability.md)
+- [Orbit Indexing Service](indexing/)
+- [Orbit Querying Service](querying/)
+- [Orbit Data Model](data_model.md)
+- [Orbit Schema Management](schema_management.md)
+- [Orbit Security](security.md)
+- [Orbit Observability](observability.md)
 - [Duo / Orbit Prompt Routing Architecture](duo_orbit_prompt_routing.md)
 - [Architecture Decision Records](decisions/) — numbered ADRs covering storage choice, communication protocols, API design, indexing triggers, and more
 
@@ -105,7 +105,7 @@ flowchart TD
       JS[(Streams & Consumers)]
     end
 
-    subgraph KGGrp[Knowledge Graph - Rust]
+    subgraph KGGrp[Orbit - Rust]
       IDX[gkg-server --mode Indexer]
       WEB[gkg-server --mode Webserver]
       DSP[gkg-server --mode DispatchIndexing]
@@ -171,7 +171,7 @@ GitLab has hundreds of REST APIs and GraphQL Schema Elements. AI agents and data
 
 ### Solution
 
-We aim to build the ***"Knowledge Graph as a service"***, which will be a separate service outside of GitLab Rails to index and query metadata. This service will expose a **unified** **data** **API layer** that enables developers and AI agents to query across the entire software development lifecycle.
+We aim to build ***Orbit as a service***, which will be a separate service outside of GitLab Rails to index and query metadata. This service will expose a **unified** **data** **API layer** that enables developers and AI agents to query across the entire software development lifecycle.
 
 What underlying technology will power this unified data layer? Graph technology empowers analytics, users, and AI agents to reason across a **wide range of data types**. We will model GitLab data in a [**Property Graph**](https://pg-format.github.io/) format, which will be queried via a high-performance Graph Query Engine built on ClickHouse that we are calling **GitLab GraphHouse**.
 
@@ -285,7 +285,7 @@ By contrast:
 
 #### 2. We Need Arbitrary Neighbor Exploration and Path Finding (N-Hop Queries)
 
-Many Knowledge Graph workloads involve **exploring neighbors** and **path finding** up to N levels deep—for example, finding “all pipelines triggered by MRs that close issues linked to epics under a group.”
+Many Orbit workloads involve **exploring neighbors** and **path finding** up to N levels deep—for example, finding “all pipelines triggered by MRs that close issues linked to epics under a group.”
 Neither REST nor GraphQL provides a clean or efficient way to express variable-length traversal:
 
 - REST would require chained requests or recursive pagination.
@@ -295,7 +295,7 @@ Cypher’s MATCH (a)-[*1..N]->(b) semantics make such traversals first-class, op
 
 #### 3. Aggregations and Analytics Are Essential
 
-The Knowledge Graph is not just a document API—it is an analytical OLAP system.
+Orbit is not just a document API—it is an analytical OLAP system.
 We routinely need aggregations such as:
 
 ```cypher
@@ -310,7 +310,7 @@ Cypher allows server-side execution with optimized graph planners, leveraging ad
 
 #### 4. Schema Flexibility and Evolution are Essential
 
-Customers will eventually need to be able to add their own data to the graph. Additionally, the Knowledge Graph’s schema must evolve rapidly as new GitLab SDLC entities (e.g., vulnerabilities, packages, runners) appear.
+Customers will eventually need to be able to add their own data to the graph. Additionally, Orbit’s schema must evolve rapidly as new GitLab SDLC entities (e.g., vulnerabilities, packages, runners) appear.
 
 GraphQL schemas require explicit type registration and backfilling, creating friction for iteration.
 Cypher, being label-based, allows us to introduce new node or relationship labels without altering existing queries—`MATCH (n:Vulnerability)` returns zero rows until those labels exist. We can also use this to add custom data types in the future—something customers have shown strong interest in.
@@ -319,17 +319,17 @@ This makes property graphs a far more flexible and schema-tolerant choice for bo
 
 #### 5. Open Cypher (GQL) and Property Graphs are now Standard
 
-The Knowledge Graph service is intentionally aligned with Open Cypher (GQL) and, most importantly, with Property Graphs, which are now standardized by [SQL 2023’s ISO/IEC 9075-16:2023)](https://www.iso.org/standard/79473.html). Cypher-like patterns are the de facto standard for property-graph databases and Knowledge Graphs (Neo4j, Memgraph, Kùzu). By adopting it, we inherit a well-understood, declarative language for expressing complex traversals, aggregations, and pattern matching over graph data—operations required to fully leverage the GitLab SDLC and code metadata.
+The Orbit service is intentionally aligned with Open Cypher (GQL) and, most importantly, with Property Graphs, which are now standardized by [SQL 2023’s ISO/IEC 9075-16:2023)](https://www.iso.org/standard/79473.html). Cypher-like patterns are the de facto standard for property-graph databases and Knowledge Graphs (Neo4j, Memgraph, Kùzu). By adopting it, we inherit a well-understood, declarative language for expressing complex traversals, aggregations, and pattern matching over graph data—operations required to fully leverage the GitLab SDLC and code metadata.
 
 > You can read more about how we will enable all LLMs to query under the [querying](./querying) documentation.
 
-### Knowledge Graph is OLAP, not OLTP
+### Orbit is OLAP, not OLTP
 
-The Knowledge Graph is an **OLAP application** over an OLTP one. The service is not required to provide transaction guarantees or real-time data for the first iteration. The Knowledge Graph initial iteration will serve as a **read-only** analytical data store and a data retrieval API for users and AI agents, providing access to code and SDLC metadata.
+Orbit is an **OLAP application** over an OLTP one. The service is not required to provide transaction guarantees or real-time data for the first iteration. The initial Orbit iteration will serve as a **read-only** analytical data store and a data retrieval API for users and AI agents, providing access to code and SDLC metadata.
 
 ## Architecture Goals
 
-We aim to build the Knowledge Graph service with the following goals in mind:
+We aim to build the Orbit service with the following goals in mind:
 
 ### Security
 
@@ -367,7 +367,7 @@ For how we will achieve this, please see the following design documents:
   - Handling Rails database migrations and schema changes.
   - Adding new data source entities to the graph.
 
-Please see the [Knowledge Graph Data Model](data_model.md) design document for more details on the data model.
+Please see the [Orbit Data Model](data_model.md) design document for more details on the data model.
 
 Follow up MR: New section/page on deployment resource requirements, and plan for operations past day 30.
 
@@ -418,7 +418,7 @@ This is still the current implementation shape in the repository. SDLC and code 
 
 ### Workstreams Roadmap
 
-The first release of the Knowledge Graph will be delivered through three parallel workstreams. The successful deployment of these components is primarily dependent on aligning cross-team resourcing, as the core technical components are largely complete.
+The first release of Orbit will be delivered through three parallel workstreams. The successful deployment of these components is primarily dependent on aligning cross-team resourcing, as the core technical components are largely complete.
 
 - **Producer-Only Siphon Production Deployment**: The goal is to deploy a producer-only Siphon to GitLab.com to validate end-to-end logical replication from PostgreSQL. This stream is currently blocked on DBRE and Infrastructure resourcing.
 

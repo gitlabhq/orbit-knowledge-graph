@@ -1,6 +1,6 @@
 # xtask
 
-Development task runner for the GitLab Knowledge Graph.
+Development task runner for GitLab Orbit.
 
 ## Features
 

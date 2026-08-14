@@ -1,7 +1,7 @@
 # SOX billing boundary — authoring rules
 
 This document captures the SOX-billing authoring rules for the GitLab
-Knowledge Graph (Orbit) repository. It applies to humans writing code and
+Orbit repository. It applies to humans writing code and
 to AI coding agents working on this repository (Claude Code, opencode,
 Codex, etc.).
 

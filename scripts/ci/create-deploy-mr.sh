@@ -64,7 +64,7 @@ else
 fi
 
 mr_title="chore(gkg): bump orbit-stg + orbit-prd image to ${VERSION}"
-mr_description="Rolls out [Knowledge Graph ${VERSION}](${SOURCE_PROJECT_URL}/-/releases/${TAG}) to orbit-stg and orbit-prd.
+mr_description="Rolls out [Orbit ${VERSION}](${SOURCE_PROJECT_URL}/-/releases/${TAG}) to orbit-stg and orbit-prd.
 
 ${schema_sentence}
 

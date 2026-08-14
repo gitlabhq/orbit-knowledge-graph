@@ -41,7 +41,7 @@ Build Private Redaction Fixture
     Add Group Member    ${SHARED_NAMESPACE_ID}    ${victim["id"]}    20
 
     ${target_group}=    Create Group    redaction-${suffix}-target
-    Enable Knowledge Graph    ${target_group["id"]}
+    Enable Orbit    ${target_group["id"]}
 
     Start Indexing Budget    300
     ${project}=    Create Project    redaction-${suffix}-prj    ${target_group["id"]}    visibility=private

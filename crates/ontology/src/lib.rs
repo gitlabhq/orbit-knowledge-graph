@@ -1,7 +1,7 @@
 //! Ontology loading from YAML files.
 //!
 //! This crate loads ontology definitions from YAML files and converts them
-//! into strongly-typed entity definitions for the Knowledge Graph.
+//! into strongly-typed entity definitions for Orbit.
 //!
 //! # Example
 //!

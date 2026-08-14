@@ -1,6 +1,6 @@
 //! # Indexer
 //!
-//! Message processing framework and domain modules for the GitLab Knowledge Graph.
+//! Message processing framework and domain modules for GitLab Orbit.
 //!
 //! This crate contains both the engine (message routing, concurrency)
 //! and the domain modules (SDLC, Code) that implement indexing logic.

@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "setup_modes.schema.json",
   "title": "Orbit setup mode texts",
-  "description": "Every string `orbit setup` writes that differs between the local graph (`orbit sql`) and the remote Knowledge Graph (`glab orbit remote`): the managed instruction block, the two hook nudges, and the values filling {{name}} placeholders in assistant templates. Read by crates/orbit-local/src/commands/setup/spec.rs.",
+  "description": "Every string `orbit setup` writes that differs between the local graph (`orbit sql`) and the remote Orbit graph (`glab orbit remote`): the managed instruction block, the two hook nudges, and the values filling {{name}} placeholders in assistant templates. Read by crates/orbit-local/src/commands/setup/spec.rs.",
   "type": "object",
   "required": ["local", "remote"],
   "additionalProperties": false,

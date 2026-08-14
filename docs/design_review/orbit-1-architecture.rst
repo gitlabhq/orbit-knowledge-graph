@@ -3,7 +3,7 @@
 1. Simplified Architecture Block Diagram
 ========================================
 
-Orbit (the cloud-deployed GitLab Knowledge Graph) unifies SDLC metadata and
+Orbit (the cloud-deployed graph service) unifies SDLC metadata and
 source code into a single property graph stored in ClickHouse, queryable
 through a compiled DSL, and accessible to LLM agents, the Orbit dashboard,
 and the GitLab Web IDE.

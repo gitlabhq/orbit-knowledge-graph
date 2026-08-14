@@ -4,7 +4,7 @@
 # fill `{{name}}` placeholders in the templates assistants declare.
 local:
   instructions: |
-    ## Orbit knowledge graph
+    ## Orbit graph
 
     Repositories on this machine are indexed into a local Orbit code graph (`orbit list` shows which). Query the graph before grep or reading files for any question about how the code fits together: where something is defined or belongs, where a behavior happens, what handles a case, who calls or imports it, what an API looks like. Plain questions count — "where do we send X", "what handles Y", "how does Z work" are all graph questions. Grep matches text and returns noise; the graph returns resolved definitions, callers, and imports.
 
@@ -27,7 +27,7 @@ local:
     require_local_graph: true
 remote:
   instructions: |
-    ## Orbit knowledge graph
+    ## Orbit graph
 
     GitLab projects are covered by the remote Orbit graph. Query the graph before grep or reading files for any question about how the code fits together: where something is defined, where a behavior happens, what handles a case, who calls or imports it, what an API looks like. Plain questions count — "where do we send X", "what handles Y", "how does Z work" are all graph questions. The same goes for GitLab entities: merge requests, issues, pipelines, users, cross-project dependencies. Grep matches text and returns noise; the graph returns resolved definitions and relationships.
 

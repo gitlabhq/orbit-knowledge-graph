@@ -2,11 +2,11 @@
 
 ## Summary
 
-This document covers how we monitor the Knowledge Graph services (Indexer, Dispatcher, and Web Service): metrics, logs, tracing, health checks, and what operators need to do for self-managed deployments.
+This document covers how we monitor the Orbit services (Indexer, Dispatcher, and Web Service): metrics, logs, tracing, health checks, and what operators need to do for self-managed deployments.
 
 ## How Observability Works Today (GitLab.com)
 
-On GitLab.com, the Knowledge Graph services use the existing observability stack:
+On GitLab.com, the Orbit services use the existing observability stack:
 
 - **Metrics**: [Grafana](https://grafana.com/) and [Grafana Mimir](https://grafana.com/oss/mimir/)
 - **Logs**: [Elasticsearch](https://www.elastic.co/elasticsearch/) and [Logstash](https://www.elastic.co/logstash/)
@@ -319,14 +319,14 @@ Who owns what, and who gets paged.
 
 ### Service/Component Ownership
 
-- **Siphon & NATS (development/bug fixes)**: Analytics stage (primarily Platform Insights), with collaboration from the Knowledge Graph team.
-- **GKG Service (Indexer + API/MCP)**: Knowledge Graph team.
+- **Siphon & NATS (development/bug fixes)**: Analytics stage (primarily Platform Insights), with collaboration from the Orbit team.
+- **GKG Service (Indexer + API/MCP)**: Orbit team.
 
 ### On-call
 
 - **Tier 1**: Production Engineering SRE (existing on-call rotation).
 - **Tier 2**: Analytics / Platform Insights.
-- **Knowledge Graph Services**: Dedicated on-call rotation (TBD). During initial launch the KG team will actively monitor the service.
+- **Orbit services**: Dedicated on-call rotation (TBD). During initial launch the KG team will actively monitor the service.
 
 ### Long-term Stewardship
 

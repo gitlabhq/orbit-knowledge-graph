@@ -1,7 +1,7 @@
-# Adding data to the GitLab Knowledge Graph (Orbit) — an agent's playbook
+# Adding data to GitLab Orbit — an agent's playbook
 
 > Audience: a coding agent (Claude Code or similar) tasked with adding a new
-> **node** or **edge** to the Orbit knowledge graph. This is the end-to-end,
+> **node** or **edge** to the Orbit graph. This is the end-to-end,
 > cross-repo workflow distilled from shipping the Package Registry + Container
 > Registry entities (Package, ContainerRepository, PackageFile, Dependency and
 > their edges). Follow it top to bottom; the ordering matters.

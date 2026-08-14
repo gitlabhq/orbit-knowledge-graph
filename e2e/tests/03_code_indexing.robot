@@ -134,6 +134,6 @@ Push Weather Fixtures
     Push Fixture To Project    ${ruby}    ${RUBY_FIXTURE_DIR}
     ${java}=    Create Project    java-weather-${suffix}    ${group["id"]}
     Push Fixture To Project    ${java}    ${JAVA_FIXTURE_DIR}
-    Enable Knowledge Graph    ${group["id"]}
+    Enable Orbit    ${group["id"]}
     Set Suite Variable    ${RUBY_PROJECT}    ${ruby}
     Set Suite Variable    ${JAVA_PROJECT}    ${java}

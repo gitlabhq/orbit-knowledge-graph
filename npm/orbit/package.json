@@ -1,7 +1,7 @@
 {
   "name": "@gitlab/orbit",
   "version": "0.0.0",
-  "description": "GitLab Knowledge Graph (Orbit) local CLI",
+  "description": "GitLab Orbit local CLI",
   "keywords": [
     "gitlab",
     "orbit",

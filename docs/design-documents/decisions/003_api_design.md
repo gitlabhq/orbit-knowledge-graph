@@ -158,7 +158,7 @@ All endpoints require authentication (personal access token, session cookie, or 
 
 ### `POST /api/v4/orbit/query`
 
-Execute a Knowledge Graph query.
+Execute an Orbit query.
 
 **Request body (pseudo code):**
 
@@ -210,7 +210,7 @@ Execute a Knowledge Graph query.
 
 ### `GET /api/v4/orbit/schema`
 
-Retrieve the Knowledge Graph schema (ontology).
+Retrieve Orbit schema (ontology).
 
 **Parameters:**
 
@@ -350,7 +350,7 @@ The `query_graph` tool description includes the full TOON-format schema (~15KB) 
     },
     {
       "name": "get_graph_schema",
-      "description": "List Knowledge Graph schema (node/edge discovery with optional expansion)",
+      "description": "List Orbit schema (node/edge discovery with optional expansion)",
       "parameters_json_schema": { "type": "object", "properties": { "expand_nodes": { "type": "array", "items": { "type": "string" } } } },
       "endpoint": "GET /api/v4/orbit/schema"
     }
@@ -691,7 +691,7 @@ module API
     end
 
     namespace :orbit do
-      desc 'Execute a Knowledge Graph query'
+      desc 'Execute an Orbit query'
       params do
         requires :query, type: Hash, desc: 'Query DSL object'
         optional :query_type, type: String, values: %w[json], default: 'json'
@@ -712,7 +712,7 @@ module API
         service_unavailable!(e.message)
       end
 
-      desc 'Retrieve Knowledge Graph schema'
+      desc 'Retrieve Orbit schema'
       params do
         optional :expand, type: String, desc: 'Comma-separated node names to expand'
         optional :format, type: String, values: %w[raw llm], default: 'raw'

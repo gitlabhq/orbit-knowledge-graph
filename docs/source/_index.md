@@ -1,8 +1,8 @@
 ---
-stage: Analytics
-group: Knowledge Graph
+stage: Orbit
+group: Context Systems
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Query your GitLab instance as a knowledge graph. Find blast radius, trace dependencies, and answer SDLC questions that GitLab alone cannot.
+description: Query your GitLab instance as a property graph. Find blast radius, trace dependencies, and answer SDLC questions that GitLab alone cannot.
 title: GitLab Orbit
 ---
 
@@ -26,7 +26,7 @@ title: GitLab Orbit
 > For more information, see the history.
 > This feature is available for testing, but not ready for production use.
 
-GitLab Orbit indexes your GitLab instance and exposes your entire SDLC as a queryable knowledge graph.
+GitLab Orbit indexes your GitLab instance and exposes your entire SDLC as a queryable property graph.
 Enable it on a group and GitLab Orbit maps everything: projects, users, merge requests, pipelines,
 work items, security findings, and the source code itself, then builds a property graph of how they
 relate to each other.

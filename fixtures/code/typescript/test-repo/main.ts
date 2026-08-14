@@ -12,7 +12,7 @@ class Application {
   }
 
   run(): void {
-    console.log("Starting Knowledge Graph Test Application");
+    console.log("Starting Orbit Test Application");
     
     this.createSampleUsers();
     this.testAuthentication();

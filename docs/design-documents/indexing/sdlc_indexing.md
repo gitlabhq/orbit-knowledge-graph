@@ -38,7 +38,7 @@ The pipeline begins with **Siphon**, the GitLab in-house Change Data Capture (CD
 
 #### Siphon's Architecture
 
-Siphon operates on a producer/consumer model, but for the purpose of the Knowledge Graph's ETL pipeline, we are primarily concerned with the **Siphon Producer**.
+Siphon operates on a producer/consumer model, but for the purpose of Orbit's ETL pipeline, we are primarily concerned with the **Siphon Producer**.
 
 ```mermaid
 flowchart LR
@@ -67,7 +67,7 @@ flowchart LR
 
 - **Replication Manager**: This is the primary component that connects to a PostgreSQL logical replication slot. It uses the `pgoutput` plugin to decode the Write-Ahead Log (WAL) into a stream of logical changes (inserts, updates, deletes). It's responsible for managing the replication slot and acknowledging the WAL position to the database, ensuring that processed data is not sent again.
 
-- **Snapshot Manager**: To bootstrap the data lake, Siphon must first perform an initial, full copy of the existing data. The Snapshot Manager handles this by running `COPY` commands against the tables to be replicated. To avoid impacting the primary database, this snapshot can be configured to run against a separate read-replica (`snapshot_database`). *This aspect is critical to Knowledge Graph to enable backfilling of the data lake in the event of schema migrations, data corruption, or other issues*.
+- **Snapshot Manager**: To bootstrap the data lake, Siphon must first perform an initial, full copy of the existing data. The Snapshot Manager handles this by running `COPY` commands against the tables to be replicated. To avoid impacting the primary database, this snapshot can be configured to run against a separate read-replica (`snapshot_database`). *This aspect is critical to Orbit to enable backfilling of the data lake in the event of schema migrations, data corruption, or other issues*.
 
 - **NATS Publisher**: Both the live replication events and the initial snapshot data are converted into a standardized protobuf format (`LogicalReplicationEvents`) and published to NATS JetStream.
 
@@ -83,7 +83,7 @@ flowchart LR
       subject: merge_requests
   ```
 
-By using Siphon, the Knowledge Graph's indexing pipeline is cleanly decoupled from the production PostgreSQL database. It receives a reliable, real-time stream of data changes without imposing a significant load on the source system.
+By using Siphon, Orbit's indexing pipeline is cleanly decoupled from the production PostgreSQL database. It receives a reliable, real-time stream of data changes without imposing a significant load on the source system.
 
 ### 2. Transform: Shaping Data in the Lake
 
@@ -120,22 +120,22 @@ The transformation from CDC data to the graph schema is handled by the ETL Index
 ##### Core components
 
 - `gkg-indexer`: The ETL pipeline for GitLab SDLC data.
-- `gkg-webserver`: The gRPC and HTTP interface to query the Knowledge Graph.
-- `NATS JetStream`: The message broker for the Knowledge Graph.
-- `NATS KV`: The key-value store for the Knowledge Graph.
-- `ClickHouse`: The OLAP database for GitLab and the Knowledge Graph.
+- `gkg-webserver`: The gRPC and HTTP interface to query Orbit.
+- `NATS JetStream`: The message broker for Orbit.
+- `NATS KV`: The key-value store for Orbit.
+- `ClickHouse`: The OLAP database for GitLab and Orbit.
 - `PostgreSQL`: The main OLTP database for GitLab.
 
 ##### Data storage
 
-The Knowledge Graph data is stored in a separate ClickHouse database.
+The Orbit graph data is stored in a separate ClickHouse database.
 
 - On `.com` this runs in a separate instance.
 - For small dedicated environments and self-hosted instances, this can run in the same instance as the main ClickHouse database. This choice depends on what the operators think is best for their environment.
 
-##### Namespace Knowledge Graph access detection
+##### Namespace Orbit access detection
 
-The first step is to detect which top-level namespaces have access to the Knowledge Graph. Following a similar approach to Zoekt's `zoekt_enabled_namespaces` table, the `knowledge_graph_enabled_namespaces` table in the main PostgreSQL database stores the namespaces that are enabled for the Knowledge Graph and various metadata about the namespaces. Siphon replicates this table into ClickHouse for the Knowledge Graph.
+The first step is to detect which top-level namespaces have access to Orbit. Following a similar approach to Zoekt's `zoekt_enabled_namespaces` table, the `knowledge_graph_enabled_namespaces` table in the main PostgreSQL database stores the namespaces that are enabled for Orbit and various metadata about the namespaces. Siphon replicates this table into ClickHouse for Orbit.
 
 ```sql
 -- PostgreSQL
@@ -162,7 +162,7 @@ CREATE TABLE knowledge_graph_enabled_namespaces (
 );
 ```
 
-If the table is not present, the indexer assumes that no namespaces have access to the Knowledge Graph.
+If the table is not present, the indexer assumes that no namespaces have access to Orbit.
 
 ```sql
 --- ClickHouse
@@ -178,7 +178,7 @@ A namespace whose path is not resolvable yet is skipped until the next sweep.
 
 **Indexing job creation**
 
-The `gkg-indexer` is responsible for getting the namespace data for the Knowledge Graph. A cron-based scheduler (`ScheduledTask`) periodically triggers the indexing process for namespaces that are due for indexing. If a namespace is due for indexing, the scheduler creates a job message and publishes it to the appropriate NATS JetStream subject.
+The `gkg-indexer` is responsible for getting the namespace data for Orbit. A cron-based scheduler (`ScheduledTask`) periodically triggers the indexing process for namespaces that are due for indexing. If a namespace is due for indexing, the scheduler creates a job message and publishes it to the appropriate NATS JetStream subject.
 
 It is important to differentiate between initial and incremental indexing when publishing the jobs. Workers have different priorities for each type of indexing. This prevents resource starvation by big initial indexing jobs and ensures that the indexing process remains efficient.
 
@@ -217,7 +217,7 @@ SET last_indexed_at = {started_at}, result = 'success | error', ...
 WHERE id = '{namespace_id}';
 ```
 
-**Planned:** A `knowledge_graph_indexing_job_events` table would record individual job lifecycle events (started, completed, error) in the Knowledge Graph ClickHouse database for observability. This is not yet implemented; job-level observability currently relies on structured logging and OpenTelemetry metrics. If implemented, the table may need periodic re-creation to remove bloat, triggered by a dedicated cron job.
+**Planned:** A `knowledge_graph_indexing_job_events` table would record individual job lifecycle events (started, completed, error) in the Orbit ClickHouse database for observability. This is not yet implemented; job-level observability currently relies on structured logging and OpenTelemetry metrics. If implemented, the table may need periodic re-creation to remove bloat, triggered by a dedicated cron job.
 
 **Handling errors**
 
@@ -360,17 +360,17 @@ This runs directly in the dispatcher rather than dispatching to indexer workers 
 
 **Main PostgreSQL to Lake**
 
-The Knowledge Graph `gkg-indexer` accounts for schema changes in the main ClickHouse database used as a data lake. The main ClickHouse database tables may change over time; new columns may be added, columns may be renamed or dropped, etc. If the `gkg-indexer` is not aware of the schema changes, it could lead to service interruptions in production due to queries failing.
+The Orbit `gkg-indexer` accounts for schema changes in the main ClickHouse database used as a data lake. The main ClickHouse database tables may change over time; new columns may be added, columns may be renamed or dropped, etc. If the `gkg-indexer` is not aware of the schema changes, it could lead to service interruptions in production due to queries failing.
 
-The schema is explicitly defined in the ontology YAML (`config/ontology/nodes/` and `config/ontology/edges/`), specifying which tables and columns are needed for the Knowledge Graph. For some columns, additional metadata is exposed where needed, such as Integer-to-Enum mappings (for example: issue status).
+The schema is explicitly defined in the ontology YAML (`config/ontology/nodes/` and `config/ontology/edges/`), specifying which tables and columns are needed for Orbit. For some columns, additional metadata is exposed where needed, such as Integer-to-Enum mappings (for example: issue status).
 
 A CI job (`ddl-freshness-check`) detects schema drift by comparing the committed `config/graph.sql` (versioned graph), `config/graph_persistent.sql` (durable unversioned objects), and `config/graph_local.sql` (DuckDB) against the DDL regenerated from the ontology. This ensures that the schema is always in sync with the ontology definition.
 
-The indexer uses the ontology to create the Knowledge Graph ClickHouse tables and build the indexing queries.
+The indexer uses the ontology to create the Orbit ClickHouse tables and build the indexing queries.
 
 **Lake to Graph**
 
-The Knowledge Graph schema is declared in `config/graph.sql` (generated from the ontology) and versioned via `config/SCHEMA_VERSION`. All graph tables are prefixed with `v<N>_` (e.g. `v58_gl_issue`) so that multiple schema versions can coexist during migration. Migrations are applied to the Knowledge Graph database by the dispatcher at boot via `schema::migration::run_if_needed()`.
+The Orbit schema is declared in `config/graph.sql` (generated from the ontology) and versioned via `config/SCHEMA_VERSION`. All graph tables are prefixed with `v<N>_` (e.g. `v58_gl_issue`) so that multiple schema versions can coexist during migration. Migrations are applied to the Orbit graph database by the dispatcher at boot via `schema::migration::run_if_needed()`.
 
 The schema is backward compatible with the previous version until the schema migration is complete for every namespace. A migration is considered complete when `MigrationCompletionChecker` detects that all enabled namespaces have been re-indexed into new-prefix tables, then promotes the new version to `active` and retires the old one.
 
@@ -378,7 +378,7 @@ There are multiple types of schema changes the system accounts for:
 
 **New node/relationship type**
 
-To add a new entity type to the Knowledge Graph, the new type is defined in the ontology YAML, and the DDL is regenerated. The migration orchestrator creates the new table at dispatcher boot. The table is filled on the next indexing job for each namespace.
+To add a new entity type to Orbit, the new type is defined in the ontology YAML, and the DDL is regenerated. The migration orchestrator creates the new table at dispatcher boot. The table is filled on the next indexing job for each namespace.
 
 ```sql
 CREATE TABLE database_b.<table_name> (
@@ -450,4 +450,4 @@ In contrast, the Rust-based pipeline provides the necessary extensibility and co
 
 - **Monitoring**: The indexer tracks metrics such as processing lag, batch sizes, error rates, and data freshness to ensure the graph database remains current and healthy.
 
-Both strategies leverage ClickHouse's powerful query engine while maintaining the simplicity and debuggability of declarative data transformations. The resulting graph-structured data in ClickHouse serves as the optimized, queryable source for the Knowledge Graph's analysis and insight capabilities.
+Both strategies leverage ClickHouse's powerful query engine while maintaining the simplicity and debuggability of declarative data transformations. The resulting graph-structured data in ClickHouse serves as the optimized, queryable source for Orbit's analysis and insight capabilities.

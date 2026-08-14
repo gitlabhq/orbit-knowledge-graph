@@ -40,7 +40,7 @@ field honest:
 
 ## Context
 
-`GetGraphStats` returns entity counts grouped by ontology domain, scoped to a namespace via `traversal_path`. Consumers (Rails UI, Duo) use it to see what data exists in the knowledge graph for a given group or project.
+`GetGraphStats` returns entity counts grouped by ontology domain, scoped to a namespace via `traversal_path`. Consumers (Rails UI, Duo) use it to see what data exists in the graph for a given group or project.
 
 Entity counts alone don't answer the questions users actually ask:
 

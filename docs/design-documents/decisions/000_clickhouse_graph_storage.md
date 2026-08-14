@@ -15,7 +15,7 @@ Accepted (recorded retroactively; this decision predates the numbered ADR series
 
 ## Context
 
-The Knowledge Graph was originally built on [Kuzu](https://docs.kuzudb.com/), a
+Orbit was originally built on [Kuzu](https://docs.kuzudb.com/), a
 file-embedded graph database, as a local-only desktop tool (see
 [previous design](../previous_design/README.md)). In October 2025, KuzuDB
 [was archived](https://www.theregister.com/2025/10/14/kuzudb_abandoned/) by its

@@ -263,7 +263,7 @@ enum Commands {
                       instruction file (default) or the project's with `--project`/`--dir`, \
                       telling the assistant to prefer graph queries over grepping raw files, \
                       plus nudge hooks where the platform supports them (Claude Code, \
-                      OpenCode). The guidance points at the remote Knowledge Graph \
+                      OpenCode). The guidance points at the remote Orbit graph \
                       (`glab orbit remote`) unless `--local` is passed. Pre-existing files \
                       get a one-time `.orbit-backup` sibling before their first modification. \
                       Re-running updates the section in place; `--remove` uninstalls."
@@ -279,7 +279,7 @@ enum Commands {
         remove: bool,
 
         /// Point the guidance at the local graph (queries run through
-        /// `orbit sql`) instead of the remote Knowledge Graph.
+        /// `orbit sql`) instead of the remote Orbit graph.
         #[arg(long, conflicts_with = "remove")]
         local: bool,
 

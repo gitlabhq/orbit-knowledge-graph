@@ -2,7 +2,7 @@
 
 ## Overview
 
-The GitLab Knowledge Graph is composed of two primary sub-graphs that share a common schema foundation: the **Namespace (SDLC) Graph** and the **Code Graph**. This document details the data model for each, covering the nodes and relationships that constitute them.
+The Orbit graph is composed of two primary sub-graphs that share a common schema foundation: the **Namespace (SDLC) Graph** and the **Code Graph**. This document details the data model for each, covering the nodes and relationships that constitute them.
 
 The data model is designed to be intuitive and to mirror the mental model that developers and users have of the GitLab platform. By representing entities as nodes and their interactions as relationships, we can perform complex queries that would be difficult or inefficient with a traditional relational database.
 
@@ -12,7 +12,7 @@ The data model follows a [Property Graph](https://neo4j.com/blog/knowledge-graph
 
 ## Data Storage Location
 
-The Knowledge Graph data is stored in ClickHouse graph tables that are separate from the raw replicated data lake tables.
+The Orbit graph data is stored in ClickHouse graph tables that are separate from the raw replicated data lake tables.
 
 - The implemented graph schema is defined in `config/graph.sql`.
 - The implemented ontology metadata and ETL mappings are defined under `config/ontology/`.

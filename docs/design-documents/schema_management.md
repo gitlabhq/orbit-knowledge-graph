@@ -2,7 +2,7 @@
 
 ## Overview
 
-The GitLab Knowledge Graph schema evolves over time as new entities and relationships are added.
+The GitLab Orbit schema evolves over time as new entities and relationships are added.
 This document describes the implemented approach to schema version tracking and the
 table-prefix-aware migration orchestrator.
 
