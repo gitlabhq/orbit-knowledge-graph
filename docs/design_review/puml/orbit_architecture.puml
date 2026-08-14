@@ -5,7 +5,7 @@ skinparam componentStyle rectangle
 skinparam defaultFontSize 11
 skinparam padding 4
 
-title GitLab Knowledge Graph — Desktop (orbit) Architecture Block Diagram
+title GitLab Orbit — Desktop (orbit) Architecture Block Diagram
 
 rectangle "orbit Binary Boundary" as module #E8F4FD {
 

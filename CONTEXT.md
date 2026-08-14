@@ -7,15 +7,15 @@ A property graph built from GitLab instance data — SDLC metadata and source co
 ### Product
 
 **Orbit**:
-The GitLab Knowledge Graph product. Builds a property graph from GitLab data and serves queries against it.
+The product. Previously named GitLab Knowledge Graph. Builds a property graph from GitLab data and serves queries against it.
 _Avoid_: KGaaS, Knowledge Graph Service
 
 **GKG**:
-Engineering abbreviation for Orbit. Used in binary names (`gkg-server`), config prefixes (`GKG_*`), and metrics. Stands for "GitLab Knowledge Graph."
+Retired engineering abbreviation for Orbit ("GitLab Knowledge Graph"). Still present in the binary name (`gkg-server`), config prefixes (`GKG_*`), metrics, and pinned wire/database names.
 _Avoid_: using GKG in user-facing contexts
 
 **Orbit Remote**:
-The hosted Knowledge Graph service, queried via `glab orbit remote`. Indexes all GitLab.com SDLC and code data; queries are user-scoped and JWT-authenticated.
+The hosted Orbit service, queried via `glab orbit remote`. Indexes all GitLab.com SDLC and code data; queries are user-scoped and JWT-authenticated.
 _Avoid_: "the server", "production GKG"
 
 **Orbit Local**:

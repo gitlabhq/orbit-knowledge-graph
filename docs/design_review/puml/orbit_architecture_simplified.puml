@@ -7,7 +7,7 @@ skinparam shadowing false
 skinparam rectangleBorderThickness 2
 skinparam componentStyle rectangle
 
-title GitLab Knowledge Graph (Orbit)
+title GitLab Orbit
 
 ' ===================================================================
 ' MODULE BOUNDARY - everything inside deploys together

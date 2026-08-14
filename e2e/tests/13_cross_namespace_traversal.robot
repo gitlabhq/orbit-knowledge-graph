@@ -161,8 +161,8 @@ Seed Cross Namespace Fixture
     Start Indexing Budget    300
     ${group_a}=    Create Group    e2e-xns-a-${suffix}
     ${group_b}=    Create Group    e2e-xns-b-${suffix}
-    Enable Knowledge Graph    ${group_a["id"]}
-    Enable Knowledge Graph    ${group_b["id"]}
+    Enable Orbit    ${group_a["id"]}
+    Enable Orbit    ${group_b["id"]}
     ${project_a}=    Create Project    e2e-xns-prj-a-${suffix}    ${group_a["id"]}
     ${project_b}=    Create Project    e2e-xns-prj-b-${suffix}    ${group_b["id"]}
     ${issue_a}=    Create Issue    ${project_a["id"]}    e2e-xns-issue-a-${suffix}

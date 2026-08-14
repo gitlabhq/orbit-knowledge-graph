@@ -1,7 +1,7 @@
 use clap::{Parser, ValueEnum};
 
 #[derive(Parser)]
-#[command(name = "gkg-server", about = "GitLab Knowledge Graph server")]
+#[command(name = "gkg-server", about = "GitLab Orbit server")]
 pub struct Args {
     #[arg(long, value_enum, default_value = "webserver")]
     pub mode: Mode,

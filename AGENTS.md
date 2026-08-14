@@ -1,6 +1,6 @@
 # AGENTS.md
 
-GitLab Knowledge Graph (Orbit). Rust service that builds a property graph from GitLab data and serves queries over gRPC/HTTP. 
+GitLab Orbit, previously known as GitLab Knowledge Graph or "gkg". Rust service that builds a property graph from GitLab data and serves queries over gRPC/HTTP. 
 
 ## Quick start
 

@@ -120,11 +120,11 @@ Provision Role Scoped Groups
     ...    kg347-${ROLE_AUTHZ_SUFFIX}-nested-reporter
     ${nested_developer_group}=    Create Subgroup    ${nested_parent_group["id"]}
     ...    kg347-${ROLE_AUTHZ_SUFFIX}-nested-developer
-    Enable Knowledge Graph    ${reporter_group["id"]}
-    Enable Knowledge Graph    ${security_group["id"]}
-    Enable Knowledge Graph    ${developer_group["id"]}
-    Enable Knowledge Graph    ${maintainer_group["id"]}
-    Enable Knowledge Graph    ${nested_parent_group["id"]}
+    Enable Orbit    ${reporter_group["id"]}
+    Enable Orbit    ${security_group["id"]}
+    Enable Orbit    ${developer_group["id"]}
+    Enable Orbit    ${maintainer_group["id"]}
+    Enable Orbit    ${nested_parent_group["id"]}
     Set Suite Variable    ${REPORTER_GROUP}            ${reporter_group}
     Set Suite Variable    ${SECURITY_GROUP}            ${security_group}
     Set Suite Variable    ${DEVELOPER_GROUP}           ${developer_group}

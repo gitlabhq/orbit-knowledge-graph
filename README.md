@@ -196,7 +196,7 @@ The product name is Orbit. The binary and config still use the engineering name 
 - Workstream epics: [Product (#20884)](https://gitlab.com/groups/gitlab-org/-/work_items/20884) · [Core Development (#20357)](https://gitlab.com/groups/gitlab-org/-/work_items/20357) · [Security (#20248)](https://gitlab.com/groups/gitlab-org/-/work_items/20248) · [Infra/Delivery (#36)](https://gitlab.com/groups/gitlab-org/rust/-/work_items/36) · [Architecture & Discovery (#20885)](https://gitlab.com/groups/gitlab-org/-/work_items/20885)
 - Cross-functional: [Infra support (#1804)](https://gitlab.com/groups/gitlab-com/gl-infra/-/work_items/1804) · [DataSec support (#407)](https://gitlab.com/groups/gitlab-com/gl-security/-/work_items/407) · [DE&M data product (#86)](https://gitlab.com/groups/gitlab-operating-model/-/work_items/86) · [Monetization (#79)](https://gitlab.com/groups/gitlab-operating-model/-/work_items/79)
 - [PREP readiness review !64](https://gitlab.com/gitlab-org/architecture/readiness/-/merge_requests/64)
-- [Issues labeled `knowledge graph`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/?label_name%5B%5D=knowledge+graph)
+- [Issues labeled `knowledge graph` (the historical feature label)](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/?label_name%5B%5D=knowledge+graph)
 
 ### Related repositories
 
@@ -255,7 +255,7 @@ Billing emission is on the SOX audit boundary. Before touching billing code, rea
 | Nick Leonard ([@nickleonard](https://gitlab.com/nickleonard)) | Design |
 | Jerome Ng ([@jeromezng](https://gitlab.com/jeromezng)) | Usage billing system architect |
 
-GitLab stage: Analytics. Group: Knowledge Graph.
+GitLab stage: Orbit. Group: Context Systems.
 
 </details>
 

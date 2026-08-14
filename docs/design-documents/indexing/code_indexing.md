@@ -4,7 +4,7 @@
 
 This document describes how the code indexing ETL pipeline works. Unlike SDLC entities, code versions can exist in parallel across branches, so the same file can look different on `main` vs. a feature branch.
 
-If we want the Knowledge Graph to answer questions about code, it needs to understand relationships at any given branch and commit.
+If we want Orbit to answer questions about code, it needs to understand relationships at any given branch and commit.
 
 The ETL pipeline:
 
@@ -117,7 +117,7 @@ For background on Siphon CDC, NATS, and ClickHouse architecture, see the
 
 ### Data storage
 
-The Knowledge Graph code data is stored in a separate ClickHouse database.
+Orbit code data is stored in a separate ClickHouse database.
 
 - For `.com` this is expected to run in a separate instance.
 - For small dedicated environments and self-hosted instances, this can be done in the same instance as the main ClickHouse database. This choice ultimately depends on what the operators think is best for their environment.
@@ -152,7 +152,7 @@ The first milestone is indexing the main branch for every repository. This cover
 
 The extract phase uses a two-hop dispatch model to decouple Siphon CDC consumption from indexing.
 
-Rails writes to a dedicated `p_knowledge_graph_code_indexing_tasks` table only when a push lands on the default branch of a namespace with Knowledge Graph indexing enabled. These rows are replicated via Siphon CDC to NATS JetStream:
+Rails writes to a dedicated `p_knowledge_graph_code_indexing_tasks` table only when a push lands on the default branch of a namespace with Orbit indexing enabled. These rows are replicated via Siphon CDC to NATS JetStream:
 
 - `gkg_siphon_stream.p_knowledge_graph_code_indexing_tasks`
 
@@ -168,7 +168,7 @@ This separation lets task dispatching be stopped independently from the indexer 
 
 ##### Namespace backfill dispatch
 
-When a namespace first enables Knowledge Graph indexing, its existing projects need to be indexed even though no push events have occurred yet. The `NamespaceCodeBackfillDispatcher` handles this by consuming `knowledge_graph_enabled_namespaces` CDC events from Siphon. For each newly enabled namespace it:
+When a namespace first enables Orbit indexing, its existing projects need to be indexed even though no push events have occurred yet. The `NamespaceCodeBackfillDispatcher` handles this by consuming `knowledge_graph_enabled_namespaces` CDC events from Siphon. For each newly enabled namespace it:
 
 1. Resolves the namespace's traversal path from `namespace_traversal_paths`
 2. Queries `project_namespace_traversal_paths` to find all projects under that namespace
@@ -431,7 +431,7 @@ tool. Here are the main architectural differences in the current service:
 
 #### The problem
 
-The main branch is the most common branch to index, but a strategy for active branches is worth documenting. The Knowledge Graph also includes a local version that customers can use to query code against their local repository at any version.
+The main branch is the most common branch to index, but a strategy for active branches is worth documenting. Orbit also includes a local version that customers can use to query code against their local repository at any version.
 
 The core issue with indexing active branches is volume: billions of definitions and relationships for repositories the size of the GitLab monolith. The initial release focuses on main-branch indexing; branch-level and commit-level support are planned as follow-on work.
 
@@ -490,7 +490,7 @@ Code Indexing is going to follow the same schema migration strategy as the main 
 
 ### How code querying works today
 
-The Knowledge Graph team originally built dedicated MCP tools for code querying. Each tool wraps a focused workflow on top of the indexed call graph. Reference documentation lives at [Knowledge Graph: tools](https://gitlab-org.gitlab.io/rust/knowledge-graph/mcp/tools/).
+The Orbit team originally built dedicated MCP tools for code querying. Each tool wraps a focused workflow on top of the indexed call graph. Reference documentation lives at [Knowledge Graph: tools](https://gitlab-org.gitlab.io/rust/knowledge-graph/mcp/tools/).
 
 The available tools:
 

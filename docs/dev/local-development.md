@@ -159,7 +159,7 @@ ClickHouse from your GDK installation.
    The [staging Siphon config](https://gitlab.com/gitlab-com/gl-infra/k8s-workloads/gitlab-helmfiles/-/blob/master/bases/environments/orbit-stg.yaml.gotmpl)
    lists the tables used in production.
 
-1. **Enable Knowledge Graph and JWT auth:**
+1. **Enable Orbit and JWT auth:**
 
    Add the `knowledge_graph` section to `$GDK_ROOT/gitlab/config/gitlab.yml`
    under the `production:` / `development:` block (e.g. near the `elasticsearch:` section):
@@ -209,7 +209,7 @@ ClickHouse from your GDK installation.
    bundle exec rails runner "Namespace.where(type: 'Group', parent_id: nil).find_each { |ns| Analytics::KnowledgeGraph::EnabledNamespace.find_or_create_by!(root_namespace_id: ns.id) }"
    ```
 
-   The Knowledge Graph UI is available at
+   The Orbit UI is available at
    `https://<gdk-hostname>:<gdk-port>/dashboard/orbit`.
 
 ## Setup
@@ -365,7 +365,7 @@ RAM, not a fixed number, is the right ceiling.
 
 **403 Forbidden on the /dashboard/orbit page but JWT auth works:**
 
-- The Knowledge Graph UI on the GDK (`/dashboard/orbit`) requires a Premium or Ultimate license.
+- The Orbit UI on the GDK (`/dashboard/orbit`) requires a Premium or Ultimate license.
 - View instructions for configuring a license for the GDK: [Configure a developer license in GDK](https://gitlab-org.gitlab.io/gitlab-development-kit/#configure-developer-license-in-gdk)
 
 **No data in graph:**

@@ -1,8 +1,8 @@
 ---
-stage: Analytics
-group: Knowledge Graph
+stage: Orbit
+group: Context Systems
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Query the GitLab Orbit knowledge graph to find GitLab data, code, and relationships.
+description: Query the GitLab Orbit graph to find GitLab data, code, and relationships.
 title: Queries
 ---
 

@@ -532,7 +532,7 @@ PRIMARY KEY (traversal_path, id)
 ORDER BY (traversal_path, id)
 SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild';
 
--- Knowledge graph enabled namespaces.
+-- Orbit enabled namespaces.
 -- `traversal_path` mirrors the production column added in
 CREATE TABLE IF NOT EXISTS siphon_knowledge_graph_enabled_namespaces
 (

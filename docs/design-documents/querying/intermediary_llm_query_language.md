@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Knowledge Graph uses a JSON query DSL that compiles to ClickHouse SQL. Rather than exposing multiple specialized tools, we provide a single query schema that supports traversal (including single-entity lookups), aggregation, path finding, and neighborhood exploration. The graph ontology validates all queries at runtime.
+Orbit uses a JSON query DSL that compiles to ClickHouse SQL. Rather than exposing multiple specialized tools, we provide a single query schema that supports traversal (including single-entity lookups), aggregation, path finding, and neighborhood exploration. The graph ontology validates all queries at runtime.
 
 The query engine follows this pipeline:
 
@@ -495,7 +495,7 @@ This filtering is applied to node tables (not edge tables) and injected into the
 Generated SQL is executed using a read-only database user that:
 
 - Can only run `SELECT` (no `INSERT/UPDATE/DELETE/DDL`)
-- Is restricted to Knowledge Graph tables
+- Is restricted to Orbit graph tables
 - Has permission predicates injected based on the caller's JWT
 
 This makes it harder for an LLM-originated query to read cross-tenant data or modify storage.

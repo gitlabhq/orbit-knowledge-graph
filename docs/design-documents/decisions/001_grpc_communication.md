@@ -60,7 +60,7 @@ sequenceDiagram
     participant AuthEngine as Query Pipeline
 
     Client->>Rails: Send Request
-    Rails->>WebServer: Query Knowledge Graph
+    Rails->>WebServer: Query Orbit
 
     activate WebServer
     WebServer->>WebServer: Compile Graph Query & Execute

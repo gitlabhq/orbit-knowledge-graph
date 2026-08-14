@@ -49,7 +49,7 @@ Whether a given Duo agent actually receives these commands depends on routing de
 
 The web server will expose endpoints for GitLab Rails to consume. This will power the following features:
 
-- API endpoints for GitLab Rails to query the graph directly, for Knowledge Graph or Analytics products.
+- API endpoints for GitLab Rails to query the graph directly, for Orbit or Analytics products.
 - MCP interface for LLMs and UI clients to query the graph.
 - Software Architecture Map (UI) to visualize the graph.
 

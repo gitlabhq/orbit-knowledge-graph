@@ -107,7 +107,7 @@
     [
       "semantic-release-slack-bot",
       {
-        "packageName": "Knowledge Graph",
+        "packageName": "Orbit",
         "notifyOnSuccess": false,
         "notifyOnFail": false,
         "markdownReleaseNotes": true,

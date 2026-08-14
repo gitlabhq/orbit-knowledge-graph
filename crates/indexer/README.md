@@ -1,6 +1,6 @@
 # Indexer
 
-Message processing framework and domain modules for the GitLab Knowledge Graph. Consumes events from NATS JetStream, routes them through domain-specific handlers, and writes property graph data to ClickHouse.
+Message processing framework and domain modules for GitLab Orbit. Consumes events from NATS JetStream, routes them through domain-specific handlers, and writes property graph data to ClickHouse.
 
 ## How it works
 

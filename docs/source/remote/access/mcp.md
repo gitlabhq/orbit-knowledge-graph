@@ -1,6 +1,6 @@
 ---
-stage: Analytics
-group: Knowledge Graph
+stage: Orbit
+group: Context Systems
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
 description: Connect Claude Code, Codex, or any MCP-compatible AI agent to GitLab Orbit using the two MCP tools list_commands and invoke_command.
 title: Connect via MCP
@@ -27,7 +27,7 @@ title: Connect via MCP
 > This feature is available for testing, but not ready for production use.
 
 GitLab Orbit exposes two MCP tools that let any MCP-compatible AI agent discover and
-invoke GitLab Orbit commands against your GitLab knowledge graph. Use this with
+invoke GitLab Orbit commands against your graph. Use this with
 Claude Code, OpenAI Codex, or any other tool that supports the Model Context Protocol.
 
 ## Prerequisites

@@ -2,13 +2,13 @@
 
 ## Overview
 
-When a namespace loses access to the Knowledge Graph, all of its indexed data needs to be removed. This includes every node and edge in the graph tables, plus the SDLC and code indexing checkpoints that track indexing progress for that namespace.
+When a namespace loses access to Orbit, all of its indexed data needs to be removed. This includes every node and edge in the graph tables, plus the SDLC and code indexing checkpoints that track indexing progress for that namespace.
 
 Deletion is not immediate. A 30-day grace period gives operators time to reverse the decision before any data is removed. The scheduler detects deleted namespaces and queues them for future removal. The handler does the actual deletion once the grace period passes.
 
 ## How detection works
 
-The `knowledge_graph_enabled_namespaces` table in the datalake tracks which namespaces have access to the Knowledge Graph. When a namespace is disabled, Siphon's CDC pipeline sets `_siphon_deleted = true` on the corresponding row. The deletion scheduler picks this up on its next run.
+The `knowledge_graph_enabled_namespaces` table in the datalake tracks which namespaces have access to Orbit. When a namespace is disabled, Siphon's CDC pipeline sets `_siphon_deleted = true` on the corresponding row. The deletion scheduler picks this up on its next run.
 
 The scheduler runs every 24 hours. Each run has two phases:
 

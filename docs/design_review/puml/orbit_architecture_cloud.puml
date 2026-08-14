@@ -5,7 +5,7 @@ skinparam componentStyle rectangle
 skinparam defaultFontSize 10
 skinparam padding 3
 
-title GitLab Knowledge Graph (Orbit) --- Cloud Architecture
+title GitLab Orbit --- Cloud Architecture
 
 rectangle "Orbit Module Boundary" as module #E8F4FD {
 
