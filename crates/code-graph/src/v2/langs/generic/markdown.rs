@@ -480,6 +480,30 @@ mod tests {
     }
 
     #[test]
+    fn custom_parse_respects_the_per_file_cpu_budget() {
+        let doc: String = (0..2000)
+            .map(|i| format!("# h{i}\n\ntext [l{i}](./f{i}.md)\n\n"))
+            .collect();
+        let result = MarkdownDsl::spec().parse_full_collect(
+            doc.as_bytes(),
+            "big.md",
+            crate::v2::config::Language::Markdown,
+            &Tracer::new(false),
+            crate::v2::dsl::engine::PhaseTimeouts {
+                parse: Some(std::time::Duration::from_nanos(1)),
+                ..Default::default()
+            },
+        );
+        match result {
+            Err(crate::v2::dsl::engine::ParseFullError::Aborted { phase, .. }) => {
+                assert_eq!(phase, crate::v2::error::AbortPhase::Parse);
+            }
+            Err(other) => panic!("expected a parse-budget abort, got {other}"),
+            Ok(_) => panic!("expected a parse-budget abort, got a successful parse"),
+        }
+    }
+
+    #[test]
     fn duplicate_sibling_headings_get_suffixed_fqns_but_keep_their_name() {
         let result =
             parse("# Setup\n\n## Examples\n\na\n\n## Examples\n\nb\n\n## Examples\n\nc\n").unwrap();
