@@ -1,9 +1,9 @@
-.. _gkg-appendix:
+.. _orbit-appendix:
 
 Appendix: Canonical Subcomponent Definitions
 =============================================
 
-These definitions are the authoritative descriptions of each GKG/Orbit
+These definitions are the authoritative descriptions of each Orbit
 subcomponent, referenced throughout the CTO review document.
 
 SDLC Indexing
@@ -81,7 +81,7 @@ discernment (standalone vs. within-DAP sessions).
 Monetization Engineering
 ------------------------
 
-Handles metering, billing, and license enforcement for Orbit.  GKG uses a
+Handles metering, billing, and license enforcement for Orbit.  Orbit uses a
 credit-based pricing model on .com and Dedicated (zero-rated for GitLab-driven
 queries, charged for customer-driven queries) and a per-seat add-on for
 Self-Managed.  The billing pipeline emits Snowplow events to CDot, which

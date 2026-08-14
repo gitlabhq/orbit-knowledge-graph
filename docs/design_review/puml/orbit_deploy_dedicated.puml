@@ -1,5 +1,5 @@
-@startuml gkg_deploy_dedicated
-!include gkg_common.puml
+@startuml orbit_deploy_dedicated
+!include orbit_common.puml
 
 title Deployment: GitLab Dedicated
 

@@ -1,4 +1,4 @@
-@startuml gkg_simplified
+@startuml orbit_simplified
 skinparam backgroundColor #FFFFFF
 skinparam defaultFontSize 11
 skinparam padding 5

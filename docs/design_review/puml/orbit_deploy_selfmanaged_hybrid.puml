@@ -1,6 +1,6 @@
-@startuml gkg_deploy_selfmanaged_hybrid
+@startuml orbit_deploy_selfmanaged_hybrid
 
-title Deployment: Self-Managed (Hybrid --- Cloud-hosted GKG)
+title Deployment: Self-Managed (Hybrid --- Cloud-hosted Orbit)
 
 ' ===================================================================
 ' HYBRID SELF-MANAGED: Orbit runs in GitLab shared cloud infra,
@@ -22,7 +22,7 @@ rectangle "**GitLab Cloud Infrastructure**\n//Shared multi-tenant//" as cloud #E
 
     note as gate_note 
       Using embedded GATE,
-      GKG can redact search results with 
+      Orbit can redact search results with 
       high speed and no rails callback.
     end note
 
@@ -82,7 +82,7 @@ note as cloud_note
   Clickhouse is cloud (today) optionally GitLab hosted later.
   Customer only operates Rails, Gitaly, PostgreSQL on-prem.
 
-  **GKG Billing:** Credit-based (same as SaaS).
+  **Orbit Billing:** Credit-based (same as SaaS).
 end note
 
 cloud_note .. cloud

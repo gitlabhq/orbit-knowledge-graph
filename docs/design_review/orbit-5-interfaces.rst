@@ -1,4 +1,4 @@
-.. _gkg-interfaces:
+.. _orbit-interfaces:
 
 5. Interfaces
 =============
@@ -10,7 +10,7 @@ The code/SDLC search flow in cloud mode involves a synchronous chain through
 DAP, Orbit, ClickHouse, and the Rails redaction service.  This chain
 **blocks a Puma thread** for the entire duration of the request.
 
-.. uml:: puml/gkg_search_sequence.puml
+.. uml:: puml/orbit_search_sequence.puml
    :caption: Search flow --- query engine compilation, auth, and redaction all
              block the Puma thread
 
@@ -20,7 +20,7 @@ pipeline), the ClickHouse query, and N ``RedactionRequired`` round-trips over
 the gRPC stream back to Rails for ``Ability.allowed?`` permission filtering.
 (Traversal-path filtering adds no round-trip --- the allowed paths ride in the
 request JWT; see :ref:`Appendix: Traversal-Path Authorization
-<gkg-appendix-auth-cache>`.)  At 100x concurrency this exhausts the Puma pool
+<orbit-appendix-auth-cache>`.)  At 100x concurrency this exhausts the Puma pool
 and degrades all Rails request handling --- not just search.
 
 **Remediation path:** Move the search request to an async job (Sidekiq) or
@@ -124,7 +124,7 @@ DAP / AI Gateway):
        pattern).
 
 For desktop server APIs, see
-:ref:`Appendix: Desktop Mode <gkg-appendix-desktop>`.
+:ref:`Appendix: Desktop Mode <orbit-appendix-desktop>`.
 
 APIs Consumed
 -------------

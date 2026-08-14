@@ -1,4 +1,4 @@
-.. _gkg-appendix-auth-cache:
+.. _orbit-appendix-auth-cache:
 
 Appendix: Traversal-Path Authorization
 =======================================

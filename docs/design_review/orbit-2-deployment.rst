@@ -1,4 +1,4 @@
-.. _gkg-deployment:
+.. _orbit-deployment:
 
 2. Deployment Topology
 ======================
@@ -56,7 +56,7 @@
 GitLab.com (Multi-tenant SaaS)
 ------------------------------
 
-.. uml:: puml/gkg_deploy_saas.puml
+.. uml:: puml/orbit_deploy_saas.puml
    :caption: SaaS deployment --- Orbit behind DAP with ClickHouse Cloud
 
 Orbit runs as a stateless Rust service behind the Data Access Proxy (DAP).
@@ -82,7 +82,7 @@ replicated from PostgreSQL via Siphon CDC; code is fetched from Gitaly.
 GitLab Dedicated
 ----------------
 
-.. uml:: puml/gkg_deploy_dedicated.puml
+.. uml:: puml/orbit_deploy_dedicated.puml
    :caption: Dedicated deployment --- one Orbit instance per tenant
 
 Each Dedicated tenant receives one Orbit instance with its own ClickHouse
@@ -105,10 +105,10 @@ There are two deployment options for Self-Managed customers: a **hybrid**
 model where Orbit runs in GitLab's cloud infrastructure, and a **fully
 self-managed** model where the customer operates the entire stack on-premises.
 
-Self-Managed (Hybrid --- Cloud-hosted GKG)
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Self-Managed (Hybrid --- Cloud-hosted Orbit)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-.. uml:: puml/gkg_deploy_selfmanaged_hybrid.puml
+.. uml:: puml/orbit_deploy_selfmanaged_hybrid.puml
    :caption: Hybrid Self-Managed --- Orbit in GitLab cloud, monolith on-prem
 
 The hybrid model is the **default and recommended** option for Self-Managed
@@ -133,7 +133,7 @@ GitLab Rails monolith, Gitaly, and PostgreSQL on-premises.
    (``Ability.allowed?``) and row-level redaction.  This introduces
    several significant challenges --- see the sequence diagram below.
 
-.. uml:: puml/gkg_selfmanaged_auth_sequence.puml
+.. uml:: puml/orbit_selfmanaged_auth_sequence.puml
    :caption: Auth flow --- cloud-hosted Orbit calling back to on-prem Rails
 
 The auth callback flow highlights four key risks:
@@ -150,7 +150,7 @@ The auth callback flow highlights four key risks:
 3. **Availability coupling** --- if the on-prem monolith is unreachable,
    Orbit cannot authorize queries.  Fail-open is not acceptable from a
    security standpoint, so an outage on the customer side effectively
-   disables GKG.
+   disables Orbit.
 
 4. **Security posture** --- exposing an auth endpoint externally increases
    the customer's attack surface.  Mutual TLS or equivalent is required.
@@ -158,14 +158,14 @@ The auth callback flow highlights four key risks:
 Self-Managed (Fully Self-Managed)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-.. uml:: puml/gkg_deploy_selfmanaged.puml
+.. uml:: puml/orbit_deploy_selfmanaged.puml
    :caption: Fully Self-Managed deployment --- bring-your-own-ClickHouse
 
 In the fully self-managed model, the customer provisions and operates the
 entire Orbit stack on-premises, including ClickHouse.  This avoids the
 cross-boundary auth challenge but requires significantly more operational
 investment.  A standalone desktop binary exists for local code-only use
-(see :ref:`Appendix: Desktop Mode <gkg-appendix-desktop>`).
+(see :ref:`Appendix: Desktop Mode <orbit-appendix-desktop>`).
 
 - **ClickHouse:** Customer-provisioned.  Orbit connects via the standard
   ClickHouse TCP or HTTP protocol.
