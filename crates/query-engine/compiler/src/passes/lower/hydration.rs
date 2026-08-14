@@ -20,6 +20,10 @@ use super::helpers::limit_by_scan;
 
 const ARRAY_EXISTS_PATH_THRESHOLD: usize = 256;
 
+/// Half of the 65,534-byte URI cap the `http` crate enforces; bound params
+/// ride the request URL and share it with id lists and settings (#1154).
+const PATH_FILTER_URL_BYTE_BUDGET: usize = 32 * 1024;
+
 #[derive(Clone, Copy)]
 struct HydrationPathFilterContext {
     array_exists_path_threshold: usize,
@@ -131,7 +135,10 @@ fn emit_arm(node: &HydrationNodePlan, is_dynamic: bool) -> Result<Query> {
 ///    guarantee — TP is purely a scan optimizer.
 /// 2. **Small path sets:** balanced OR of `startsWith` calls. This keeps the
 ///    primary-key pruning that makes low-fanout hydration fast.
-/// 3. **Large dynamic path sets:** `arrayExists(path -> startsWith(...))`.
+/// 3. **Byte budget:** an over-budget set is generalized to parent prefixes,
+///    which match a superset of the leaf rows — results are unchanged, only
+///    granule pruning coarsens.
+/// 4. **Large dynamic path sets:** `arrayExists(path -> startsWith(...))`.
 ///    This avoids ClickHouse parser-depth failures when dynamic hydration
 ///    discovers hundreds of traversal paths.
 fn traversal_path_filter(alias: &str, paths: &[String], is_dynamic: bool) -> Option<Expr> {
@@ -142,10 +149,37 @@ fn traversal_path_filter(alias: &str, paths: &[String], is_dynamic: bool) -> Opt
     if leaves.is_empty() {
         return None;
     }
+    let leaves = generalize_to_budget(leaves, PATH_FILTER_URL_BYTE_BUDGET);
     let ctx = HydrationPathFilterContext::default();
     match ctx.shape_for(is_dynamic, leaves.len()) {
         HydrationPathFilterShape::OrStartsWith => or_starts_with(alias, &leaves),
         HydrationPathFilterShape::ArrayExists => Some(array_exists_starts_with(alias, &leaves)),
+    }
+}
+
+fn generalize_to_budget(mut leaves: Vec<String>, budget: usize) -> Vec<String> {
+    while leaves.iter().map(|p| url_encoded_cost(p)).sum::<usize>() > budget {
+        let parents: Vec<String> = leaves.iter().map(|p| parent_path(p)).collect();
+        if parents == leaves {
+            break;
+        }
+        leaves = prune_to_leaves(&parents);
+    }
+    leaves
+}
+
+/// Percent-encoded size plus the quoting and separator around one element.
+fn url_encoded_cost(path: &str) -> usize {
+    9 + path
+        .bytes()
+        .map(|b| if b.is_ascii_alphanumeric() { 1 } else { 3 })
+        .sum::<usize>()
+}
+
+fn parent_path(path: &str) -> String {
+    match path.trim_end_matches('/').rfind('/') {
+        Some(i) => path[..=i].to_string(),
+        None => path.to_string(),
     }
 }
 
@@ -434,6 +468,106 @@ mod tests {
             sql.matches("startsWith").count(),
             ARRAY_EXISTS_PATH_THRESHOLD + 1
         );
+    }
+
+    #[test]
+    fn identical_path_sets_bind_one_param_across_arms() {
+        let paths: Vec<String> = (0..=ARRAY_EXISTS_PATH_THRESHOLD)
+            .map(|id| format!("1/9970/{id}/"))
+            .collect();
+        let arm = |table: &str| HydrationNodePlan {
+            alias: "hydrate".into(),
+            table: table.into(),
+            entity: "MergeRequest".into(),
+            id_property: "id".into(),
+            node_ids: vec![1],
+            columns: vec!["title".into()],
+            traversal_paths: paths.clone(),
+            sort_key: vec!["id".to_string()],
+        };
+
+        let node = emit_hydration(&[arm("gl_merge_request"), arm("gl_note")], 10, true).unwrap();
+        let (sql, params) = render_with_params(&node);
+
+        assert_eq!(sql.matches("arrayExists").count(), 2);
+        let array_params = params
+            .values()
+            .filter(|p| matches!(p.value, serde_json::Value::Array(_)))
+            .count();
+        assert_eq!(array_params, 1, "arms should share one path array param");
+    }
+
+    #[test]
+    fn over_budget_paths_generalize_to_ancestor_prefixes() {
+        let paths: Vec<String> = (0..500).map(|i| format!("1/{i:0>30}/{i:0>30}/")).collect();
+        let leaves = generalize_to_budget(prune_to_leaves(&paths), 4096);
+
+        assert!(leaves.iter().map(|p| url_encoded_cost(p)).sum::<usize>() <= 4096);
+        for path in &paths {
+            assert!(
+                leaves.iter().any(|l| path.starts_with(l.as_str())),
+                "{path} lost its ancestor prefix"
+            );
+        }
+    }
+
+    #[test]
+    fn generalize_noop_under_budget() {
+        let paths = vec!["1/2/3/".to_string(), "1/4/".to_string()];
+        assert_eq!(
+            generalize_to_budget(paths.clone(), PATH_FILTER_URL_BYTE_BUDGET),
+            paths
+        );
+    }
+
+    #[test]
+    fn generalize_stops_at_root_segments() {
+        let paths: Vec<String> = (0..50).map(|i| format!("{i}/")).collect();
+        assert_eq!(generalize_to_budget(paths.clone(), 10), paths);
+    }
+
+    #[test]
+    fn over_budget_dynamic_hydration_stays_within_url_budget() {
+        let paths: Vec<String> = (0..500)
+            .map(|i| format!("1/{i:0>40}/{:0>40}/", i + 1000))
+            .collect();
+        let plan = HydrationNodePlan {
+            alias: "hydrate".into(),
+            table: "gl_merge_request".into(),
+            entity: "MergeRequest".into(),
+            id_property: "id".into(),
+            node_ids: vec![1],
+            columns: vec!["title".into()],
+            traversal_paths: paths.clone(),
+            sort_key: vec!["id".to_string()],
+        };
+
+        let node = emit_hydration(&[plan], 10, true).unwrap();
+        let (sql, params) = render_with_params(&node);
+
+        assert!(sql.contains("arrayExists"), "{sql}");
+        let bound_paths: Vec<String> = params
+            .values()
+            .filter_map(|p| match &p.value {
+                serde_json::Value::Array(items) => Some(items),
+                _ => None,
+            })
+            .flat_map(|items| items.iter().filter_map(|v| v.as_str()))
+            .map(String::from)
+            .collect();
+        assert!(
+            bound_paths
+                .iter()
+                .map(|p| url_encoded_cost(p))
+                .sum::<usize>()
+                <= PATH_FILTER_URL_BYTE_BUDGET
+        );
+        for path in &paths {
+            assert!(
+                bound_paths.iter().any(|l| path.starts_with(l.as_str())),
+                "{path} lost its ancestor prefix"
+            );
+        }
     }
 
     #[test]

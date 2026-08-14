@@ -255,49 +255,47 @@ impl Context {
             Value::Null => "NULL".into(),
             // Array ChType: bind the whole array as a single ClickHouse Array(T) param.
             Value::Array(_) if matches!(data_type, ChType::Array(_)) => {
-                let name = format!("p{}", self.params.len());
-                let placeholder = format!("{{{name}:{data_type}}}");
-                self.params.insert(
-                    name,
-                    ParamValue {
-                        ch_type: data_type,
-                        value: v.clone(),
-                    },
-                );
-                placeholder
+                let name = self.intern_param(data_type, v);
+                format!("{{{name}:{data_type}}}")
             }
             // Scalar ChType with array value: expand element-by-element.
             Value::Array(arr) => {
                 let placeholders: Vec<_> = arr
                     .iter()
                     .map(|item| {
-                        let name = format!("p{}", self.params.len());
-                        let placeholder = format!("{{{name}:{data_type}}}");
-                        self.params.insert(
-                            name,
-                            ParamValue {
-                                ch_type: data_type,
-                                value: item.clone(),
-                            },
-                        );
-                        placeholder
+                        let name = self.intern_param(data_type, item);
+                        format!("{{{name}:{data_type}}}")
                     })
                     .collect();
                 format!("({})", placeholders.join(", "))
             }
             _ => {
-                let name = format!("p{}", self.params.len());
-                let placeholder = format!("{{{name}:{data_type}}}");
-                self.params.insert(
-                    name,
-                    ParamValue {
-                        ch_type: data_type,
-                        value: v.clone(),
-                    },
-                );
-                placeholder
+                let name = self.intern_param(data_type, v);
+                format!("{{{name}:{data_type}}}")
             }
         }
+    }
+
+    /// Params ride the request URL (capped at 64 KiB), so repeated
+    /// (type, value) pairs share one placeholder (#1154).
+    fn intern_param(&mut self, data_type: ChType, value: &Value) -> String {
+        if let Some(name) = self
+            .params
+            .iter()
+            .find(|(_, p)| p.ch_type == data_type && p.value == *value)
+            .map(|(name, _)| name.clone())
+        {
+            return name;
+        }
+        let name = format!("p{}", self.params.len());
+        self.params.insert(
+            name.clone(),
+            ParamValue {
+                ch_type: data_type,
+                value: value.clone(),
+            },
+        );
+        name
     }
 
     fn emit_literal(&mut self, v: &Value) -> String {
@@ -524,6 +522,42 @@ mod tests {
             ctx.emit_literal(&Value::Array(vec![Value::from(1), Value::from(2)])),
             "({p3:Int64}, {p4:Int64})"
         );
+    }
+
+    #[test]
+    fn repeated_params_intern_to_one_placeholder() {
+        let mut ctx = Context::new();
+
+        assert_eq!(ctx.emit_literal(&Value::from("dup")), "{p0:String}");
+        assert_eq!(ctx.emit_literal(&Value::from("dup")), "{p0:String}");
+        assert_eq!(ctx.emit_literal(&Value::from("other")), "{p1:String}");
+        assert_eq!(ctx.params.len(), 2);
+    }
+
+    #[test]
+    fn repeated_array_params_intern_to_one_placeholder() {
+        let mut ctx = Context::new();
+        let array = Value::Array(vec![Value::from("1/2/"), Value::from("1/3/")]);
+        let ch_type = ChType::Array(crate::ast::ChScalar::String);
+
+        assert_eq!(ctx.emit_param(ch_type, &array), "{p0:Array(String)}");
+        assert_eq!(ctx.emit_param(ch_type, &array), "{p0:Array(String)}");
+        assert_eq!(ctx.params.len(), 1);
+    }
+
+    #[test]
+    fn same_value_different_type_binds_separately() {
+        let mut ctx = Context::new();
+
+        assert_eq!(
+            ctx.emit_param(ChType::String, &Value::from("42")),
+            "{p0:String}"
+        );
+        assert_eq!(
+            ctx.emit_param(ChType::DateTime64, &Value::from("42")),
+            "{p1:DateTime64(6, 'UTC')}"
+        );
+        assert_eq!(ctx.params.len(), 2);
     }
 
     #[test]
