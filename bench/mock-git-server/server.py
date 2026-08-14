@@ -12,7 +12,7 @@ Archives are read from a local directory (mounted via GCS FUSE).
 import argparse
 import json
 import re
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 
 INFO_RE = re.compile(r"/api/v4/internal/orbit/project/(\d+)/info$")
@@ -61,7 +61,7 @@ def main():
     p.add_argument("--port", type=int, default=8090)
     args = p.parse_args()
 
-    server = HTTPServer(("0.0.0.0", args.port), CorpusHandler)
+    server = ThreadingHTTPServer(("0.0.0.0", args.port), CorpusHandler)
     server.corpus_dir = args.corpus_dir
     count = sum(1 for _ in args.corpus_dir.glob("*.tar.gz")) if args.corpus_dir.exists() else 0
     print(f"corpus server on :{args.port}  dir={args.corpus_dir}  archives={count}")
