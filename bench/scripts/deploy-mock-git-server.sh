@@ -15,11 +15,18 @@ IMAGE="${MOCK_GIT_REGISTRY}/mock-git-server:latest"
 log "Building mock-git-server image (linux/amd64)"
 docker buildx build --platform linux/amd64 -t "${IMAGE}" --push "${BENCH_DIR}/mock-git-server"
 
-# --- 2. Create service account for GCS FUSE ---
+# --- 2. Create service account + IAM binding for GCS FUSE ---
 $KC create sa mock-git-server-sa -n "${CH_NS}" 2>/dev/null || true
 $KC annotate sa mock-git-server-sa -n "${CH_NS}" \
   "iam.gke.io/gcp-service-account=1079327125344-compute@developer.gserviceaccount.com" \
   --overwrite 2>/dev/null
+IFS=_ read -r _ GKE_PROJECT _ _ <<< "${KCTX}"
+gcloud iam service-accounts add-iam-policy-binding \
+  1079327125344-compute@developer.gserviceaccount.com \
+  --project="${GKE_PROJECT}" \
+  --role=roles/iam.workloadIdentityUser \
+  --member="serviceAccount:${GKE_PROJECT}.svc.id.goog[${CH_NS}/mock-git-server-sa]" \
+  --quiet 2>/dev/null || true
 
 # --- 3. Deploy ---
 log "Deploying mock-git-server in ${CH_NS}"
@@ -45,6 +52,12 @@ HELM_ARGS=(upgrade gkg
   --kube-context "${KCTX}")
 
 helm "${HELM_ARGS[@]}"
+
+# --- 5. Reset code indexing checkpoints so projects are re-indexed against the mock ---
+log "Resetting code indexing checkpoints"
+$KC exec -n "${CH_NS}" clickhouse-0 -- clickhouse-client -q "
+  TRUNCATE TABLE gkg.v88_code_indexing_checkpoint
+" 2>/dev/null || true
 
 $KC rollout restart -n "${GKG_NS}" deploy/gkg-indexer-default
 $KC rollout status -n "${GKG_NS}" deploy/gkg-indexer-default --timeout=120s
