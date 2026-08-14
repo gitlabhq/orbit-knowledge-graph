@@ -84,7 +84,11 @@ mod tests {
             detect_language_from_extension("cts"),
             Some(Language::TypeScript)
         );
-        assert_eq!(detect_language_from_extension("md"), None);
+        assert_eq!(
+            detect_language_from_extension("md"),
+            Some(Language::Markdown)
+        );
+        assert_eq!(detect_language_from_extension("txt"), None);
     }
 
     #[test]
@@ -125,7 +129,10 @@ mod tests {
             detect_language_from_path("src/main.java"),
             Some(Language::Java)
         );
-        assert_eq!(detect_language_from_path("README.md"), None);
+        assert_eq!(
+            detect_language_from_path("README.md"),
+            Some(Language::Markdown)
+        );
         assert_eq!(detect_language_from_path("Makefile"), None);
         // Pure extension lookup: minified-bundle exclusion is the CodeFilter
         // denylist's job, not this mapping's.

@@ -24,6 +24,8 @@ use crate::workspace;
 /// vendored, and build-output paths. Anchored both top-level (`spec/%`) and
 /// nested (`%/spec/%`) because monorepos keep `spec/` at the repo root.
 const EXCLUDE_LIKE: &[&str] = &[
+    "docs-locale/%",
+    "%/docs-locale/%",
     "spec/%",
     "%/spec/%",
     "ee/spec/%",
@@ -85,7 +87,7 @@ const SIG_REGEX: &str = concat!(
 /// Source extensions Orbit indexes; used to build `read_text` globs.
 const DEFAULT_SOURCE_EXTS: &[&str] = &[
     "rs", "rb", "py", "js", "ts", "vue", "jsx", "tsx", "mjs", "cjs", "go", "java", "kt", "kts",
-    "scala", "cs", "cpp", "c", "h", "hpp", "swift", "php", "rake",
+    "scala", "cs", "cpp", "c", "h", "hpp", "swift", "php", "rake", "md",
 ];
 
 const TYPE_KINDS: &[&str] = &[
