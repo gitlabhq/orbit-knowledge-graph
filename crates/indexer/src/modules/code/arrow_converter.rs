@@ -680,19 +680,12 @@ impl code_graph::v2::GraphConverter for IndexerConverter {
             let rel_array = rel_col_str.as_string::<i32>();
 
             let mut table_rows: HashMap<&str, Vec<u32>> = HashMap::new();
-            // edge_row_batch sorts edges by edge_kind, so adjacent rows share
-            // rel_kind: cache the last (rel_kind, table) to skip the lookup.
-            let mut last: Option<(&str, &str)> = None;
+            let mut table_of: HashMap<&str, &str> = HashMap::new();
             for i in 0..data.edges.num_rows() {
                 let rel_kind = rel_array.value(i);
-                let table = match last {
-                    Some((prev_kind, prev_table)) if prev_kind == rel_kind => prev_table,
-                    _ => {
-                        let t = self.table_names.edge_table_for(rel_kind);
-                        last = Some((rel_kind, t));
-                        t
-                    }
-                };
+                let table = *table_of
+                    .entry(rel_kind)
+                    .or_insert_with(|| self.table_names.edge_table_for(rel_kind));
                 table_rows.entry(table).or_default().push(i as u32);
             }
 
