@@ -8,7 +8,7 @@ File.umask(0o022)
 
 SOURCE_DIR = File.absolute_path(File.join(__dir__, '..', '..'))
 PROTO_DIR = File.join(SOURCE_DIR, 'crates', 'orbit-server', 'proto')
-GEM_NAME = 'gitlab-gkg-proto'
+GEM_NAME = 'gitlab-orbit-proto'
 DEFAULT_VERSION = '0.1.0'
 
 def parse_options
@@ -46,7 +46,7 @@ end
 
 def generate_sources(workdir, version)
   gem_lib = File.join(workdir, 'lib')
-  proto_out = File.join(gem_lib, 'gkg', 'v1')
+  proto_out = File.join(gem_lib, 'orbit', 'v1')
   FileUtils.mkdir_p(proto_out)
 
   run!(
@@ -54,7 +54,7 @@ def generate_sources(workdir, version)
     "--ruby_out=#{proto_out} " \
     "--grpc_out=#{proto_out} " \
     "-I #{PROTO_DIR} " \
-    "#{File.join(PROTO_DIR, 'gkg.proto')}"
+    "#{File.join(PROTO_DIR, 'orbit.proto')}"
   )
 
   write_version_file(gem_lib, version)
@@ -64,22 +64,22 @@ def generate_sources(workdir, version)
 end
 
 def write_version_file(gem_lib, version)
-  version_dir = File.join(gem_lib, 'gkg')
+  version_dir = File.join(gem_lib, 'orbit')
   FileUtils.mkdir_p(version_dir)
 
   File.write(File.join(version_dir, 'version.rb'), <<~RUBY)
-    module Gkg
+    module Orbit
       VERSION = '#{version}'
     end
   RUBY
 end
 
 def write_entry_point(gem_lib)
-  File.write(File.join(gem_lib, 'gkg.rb'), <<~RUBY)
-    $:.unshift(File.expand_path('gkg/v1', __dir__))
+  File.write(File.join(gem_lib, 'orbit.rb'), <<~RUBY)
+    $:.unshift(File.expand_path('orbit/v1', __dir__))
 
-    require_relative 'gkg/version'
-    require_relative 'gkg/v1/gkg_services_pb'
+    require_relative 'orbit/version'
+    require_relative 'orbit/v1/orbit_services_pb'
   RUBY
 end
 
@@ -92,7 +92,7 @@ def build_gem(workdir, version, output)
       spec.version       = '#{version}'
       spec.authors       = ['GitLab']
       spec.email         = ['engineering@gitlab.com']
-      spec.summary       = 'Auto-generated gRPC client for the GitLab Knowledge Graph service'
+      spec.summary       = 'Auto-generated gRPC client for the GitLab Orbit service'
       spec.homepage      = 'https://gitlab.com/gitlab-org/orbit/knowledge-graph'
       spec.license       = 'MIT'
       spec.metadata      = {

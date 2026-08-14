@@ -1,4 +1,4 @@
-// GitLab Knowledge Graph gRPC service definition.
+// Orbit gRPC service definition.
 //
 // Serves the Orbit dashboard, MCP agents, and glab CLI.
 // All data RPCs accept a ResponseFormat to switch between structured JSON (RAW)
@@ -6,7 +6,9 @@
 
 syntax = "proto3";
 
-package gkg.v1;
+package orbit.v1;
+
+option go_package = "gitlab.com/gitlab-org/orbit/knowledge-graph/clients/orbitpb";
 
 // Controls output serialization across all data RPCs.
 // RAW returns structured JSON for programmatic consumers (dashboard, CLI).
@@ -26,7 +28,10 @@ enum FormatName {
 
 // Core service exposing 4 RPCs. Gated behind the :knowledge_graph feature flag
 // in Rails. JWT auth carries user identity and traversal IDs for authorization.
-service KnowledgeGraphService {
+// Renamed from gkg.v1.KnowledgeGraphService (knowledge-graph#1152, chain
+// T10). The server keeps answering the old request paths through a legacy
+// facade until published-client traffic on them reaches zero.
+service OrbitService {
   // Returns available tool definitions with parameter schemas.
   // Used by MCP tools/list and GET /api/v4/orbit/tools.
   rpc ListTools(ListToolsRequest) returns (ListToolsResponse);

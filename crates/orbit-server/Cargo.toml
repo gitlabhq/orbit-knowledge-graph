@@ -35,6 +35,7 @@ minijinja = { workspace = true }
 named-queries = { path = "../named-queries" }
 nats-client = { workspace = true }
 ontology = { path = "../ontology" }
+tower = { workspace = true }
 opentelemetry = { workspace = true }
 prost = { workspace = true }
 reqwest = { workspace = true }
@@ -66,12 +67,12 @@ compiler = { path = "../query-engine/compiler" }
 orbit-prompts = { path = "../orbit-prompts" }
 named-queries = { path = "../named-queries" }
 ontology = { path = "../ontology" }
+tower = { workspace = true }
 tonic-prost-build = { workspace = true }
 
 [dev-dependencies]
 orbit-analytics = { path = "../orbit-analytics", features = ["testkit"] }
 tokio = { workspace = true }
-tower = { workspace = true }
 tracing-subscriber = { workspace = true }
 
 [lints.rust]

@@ -23,7 +23,7 @@ fn main() {
         .or_else(|| {
             std::process::Command::new("git")
                 // --match pins us to release tags: this repo also has
-                // `clients/gkgpb/vX.Y.Z` tags, and a bare --tags would pick the
+                // `clients/orbitpb/vX.Y.Z` tags, and a bare --tags would pick the
                 // nearest of either namespace.
                 .args([
                     "describe", "--tags", "--always", "--dirty", "--match", "v[0-9]*",

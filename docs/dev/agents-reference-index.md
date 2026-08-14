@@ -37,7 +37,7 @@ Canonical locations for files, schemas, configs, and tools in the knowledge-grap
 | RAW output format version | `config/RAW_OUTPUT_FORMAT_VERSION` (semver, bump when `graph.rs` or `query_response.json` changes) |
 | Graph DDL (local DuckDB) | Generated at runtime from ontology via `generate_local_tables()` + `duckdb_ddl` |
 | Datalake DDL (ClickHouse) | `fixtures/siphon.sql` |
-| gRPC service definition | `crates/orbit-server/proto/gkg.proto` |
+| gRPC service definition | `crates/orbit-server/proto/orbit.proto` |
 | Server config structure | `crates/orbit-server-config/src/app.rs` (`AppConfig`), `config/default.yaml` |
 | Query settings (timeouts, cache) | `config/default.yaml` (`query:` section), `crates/orbit-server-config/src/query.rs` |
 | Configuration runbook | `docs/dev/runbooks/server_configuration.md` |

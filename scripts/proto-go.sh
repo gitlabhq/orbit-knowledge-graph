@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PROTO_SRC="crates/orbit-server/proto/gkg.proto"
+PROTO_SRC="crates/orbit-server/proto/orbit.proto"
 PROTO_DIR="crates/orbit-server/proto"
-OUT_DIR="clients/gkgpb"
-MODULE="gitlab.com/gitlab-org/orbit/knowledge-graph/clients/gkgpb"
+OUT_DIR="clients/orbitpb"
+MODULE="gitlab.com/gitlab-org/orbit/knowledge-graph/clients/orbitpb"
 
 PROTOC_VERSION="34.1"
 PROTOC_GEN_GO_VERSION="v1.36.11"
@@ -44,9 +44,9 @@ install_tools() {
 run_protoc() {
   local dest="$1"
   protoc --go_out="$dest" --go_opt=paths=source_relative \
-         --go_opt="Mgkg.proto=${MODULE}" \
+         --go_opt="Morbit.proto=${MODULE}" \
          --go-grpc_out="$dest" --go-grpc_opt=paths=source_relative \
-         --go-grpc_opt="Mgkg.proto=${MODULE}" \
+         --go-grpc_opt="Morbit.proto=${MODULE}" \
          -I"$PROTO_DIR" \
          "$PROTO_SRC"
 }
@@ -66,8 +66,8 @@ cmd_check() {
 
   run_protoc "$tmpdir"
 
-  if ! diff -q "${OUT_DIR}/gkg.pb.go" "${tmpdir}/gkg.pb.go" >/dev/null 2>&1 ||
-     ! diff -q "${OUT_DIR}/gkg_grpc.pb.go" "${tmpdir}/gkg_grpc.pb.go" >/dev/null 2>&1; then
+  if ! diff -q "${OUT_DIR}/orbit.pb.go" "${tmpdir}/orbit.pb.go" >/dev/null 2>&1 ||
+     ! diff -q "${OUT_DIR}/orbit_grpc.pb.go" "${tmpdir}/orbit_grpc.pb.go" >/dev/null 2>&1; then
     echo "Go proto stubs are out of date. Run 'mise run proto:go' and commit." >&2
     exit 1
   fi

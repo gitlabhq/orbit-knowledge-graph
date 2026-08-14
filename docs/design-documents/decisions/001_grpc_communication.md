@@ -25,7 +25,7 @@ Use gRPC with bidirectional streaming for the RPC that requires redaction (`Exec
 
 ### Service definition
 
-From `gkg.proto` (package `gkg.v1`). The original 5-RPC design included `ExecuteTool` and `GetOntology`; these were consolidated into `ExecuteQuery` (with `ResponseFormat`) and `GetGraphSchema` respectively. See [ADR 003](003_api_design.md) for the rationale.
+From `orbit.proto` (package `orbit.v1`; the server also answers the legacy gkg.v1 paths through a facade during the rename). The original 5-RPC design included `ExecuteTool` and `GetOntology`; these were consolidated into `ExecuteQuery` (with `ResponseFormat`) and `GetGraphSchema` respectively. See [ADR 003](003_api_design.md) for the rationale.
 
 ```protobuf
 service KnowledgeGraphService {
@@ -162,7 +162,7 @@ Without bidi streaming, a redaction-capable query requires two separate connecti
 
 ## Why gRPC over REST
 
-`gkg.proto` is the contract. Rails generates a Ruby client gem from it; GKG implements the server in Rust with `tonic`. Schema mismatches are caught at compile time, not at runtime.
+`orbit.proto` is the contract. Rails generates a Ruby client gem from it; GKG implements the server in Rust with `tonic`. Schema mismatches are caught at compile time, not at runtime.
 
 HTTP/2 multiplexing is built into gRPC. The bidi streaming pattern described above has no clean equivalent in REST or GraphQL.
 
@@ -174,7 +174,7 @@ GitLab already runs several gRPC services in production: Gitaly (Git storage), P
 
 The Rails-GKG integration copies the patterns Gitaly established.
 
-A `gkg-proto` gem will be published to the GitLab gem registry, generated from `gkg.proto`. Rails consumes this gem for client stubs, the same way it consumes `gitaly-proto`.
+The `gitlab-orbit-proto` gem is published to rubygems.org, generated from `orbit.proto` (Ruby module `Orbit::V1`, wire service `orbit.v1.OrbitService`). Rails consumes this gem for client stubs, the same way it consumes `gitaly-proto`.
 
 Rails will maintain a gRPC channel pool to GKG, configured via `gitlab.yml` with the GKG service address. Connection settings (keepalive, max message size, timeouts) follow Gitaly's configuration model.
 
@@ -255,9 +255,9 @@ There is no limit on concurrent bidi streams on the GKG server. Each stream spaw
 
 ## Consequences
 
-Rails will need the `grpc` gem and the `gkg-proto` generated client. This follows the Gitaly pattern and uses the same gem infrastructure.
+Rails needs the `grpc` gem and the `gitlab-orbit-proto` generated client. This follows the Gitaly pattern and uses the same gem infrastructure.
 
-Changes to `gkg.proto` require regenerating the proto gem, publishing it, and updating Rails. Backwards-compatible changes (adding fields, adding RPCs) do not require lockstep deploys. Breaking changes (removing fields, changing types) require the standard proto deprecation workflow.
+Changes to `orbit.proto` require regenerating the proto gem, publishing it, and updating Rails. Backwards-compatible changes (adding fields, adding RPCs) do not require lockstep deploys. Breaking changes (removing fields, changing types) require the standard proto deprecation workflow.
 
 Bidi streaming RPCs are harder to inspect than unary calls. Standard HTTP debugging tools do not work. Teams will need gRPC-aware tooling (grpcurl, Bloom RPC, or custom logging interceptors) for debugging.
 
@@ -265,7 +265,7 @@ If Rails is down or slow, GKG cannot complete any query that requires Layer 3 ch
 
 ## References
 
-- [Proto definition: `gkg.proto`](../../../crates/orbit-server/proto/gkg.proto)
+- [Proto definition: `orbit.proto`](../../../crates/orbit-server/proto/orbit.proto)
 - [Security design document](../security.md)
 - [MR !273: gRPC service implementation](https://gitlab.com/gitlab-org/rust/knowledge-graph/-/merge_requests/273)
 - [Gitaly client in Rails](https://gitlab.com/gitlab-org/gitlab/-/tree/master/lib/gitlab/gitaly_client)

@@ -308,4 +308,4 @@ Cross-language parity (Rust encoder vs the Python prototype in `gkg-evals-harnes
 - Encoder source: `crates/query-engine/formatters/src/goon/`
 - Wire version constant: `config/GOON_OUTPUT_FORMAT_VERSION`
 - Response JSON Schema: `config/schemas/query_response.json`
-- Proto: `crates/orbit-server/proto/gkg.proto` (`ResponseFormat::RESPONSE_FORMAT_LLM`)
+- Proto: `crates/orbit-server/proto/orbit.proto` (`ResponseFormat::RESPONSE_FORMAT_LLM`)

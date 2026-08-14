@@ -17,7 +17,7 @@ Accepted
 
 GKG already exposes an agent-facing surface in three places:
 
-- gRPC: `KnowledgeGraphService` on the GKG server (`crates/orbit-server/proto/gkg.proto`).
+- gRPC: `KnowledgeGraphService` on the GKG server (`crates/orbit-server/proto/orbit.proto`).
 - REST: `GET /api/v4/orbit/*` endpoints owned by Rails (proxy to GKG).
 - MCP: `tools/list` and `tools/call` handled by Rails, fanning out to GKG.
 

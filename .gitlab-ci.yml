@@ -988,7 +988,7 @@ check-go-proto:
     - apt-get update -qq && apt-get install -y -qq unzip
   script:
     - scripts/proto-go.sh check
-    - cd clients/gkgpb && go build ./...
+    - cd clients/orbitpb && go build ./...
   rules:
     - !reference [.skip-on-solo-schedule, rules]
     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
@@ -996,7 +996,7 @@ check-go-proto:
       when: never
     - changes:
         - crates/orbit-server/proto/**/*
-        - clients/gkgpb/**/*
+        - clients/orbitpb/**/*
 
 build-proto-gem:
   needs: []
@@ -1023,7 +1023,7 @@ build-proto-gem:
         - clients/protogem/**/*
   artifacts:
     paths:
-      - _build/gitlab-gkg-proto-*.gem
+      - _build/gitlab-orbit-proto-*.gem
     expire_in: 30 days
 
 publish-proto-gem:
@@ -1035,14 +1035,14 @@ publish-proto-gem:
   stage: publish
   before_script: []
   script:
-    - gem push "_build/gitlab-gkg-proto-${CI_COMMIT_TAG#v}.gem"
+    - gem push "_build/gitlab-orbit-proto-${CI_COMMIT_TAG#v}.gem"
   rules:
     - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
       when: never
     - if: '$CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+/'
   environment:
     name: rubygems
-    url: https://rubygems.org/gems/gitlab-gkg-proto
+    url: https://rubygems.org/gems/gitlab-orbit-proto
 
 # Release Stage
 

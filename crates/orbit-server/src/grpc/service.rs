@@ -60,7 +60,7 @@ fn command_error_to_status(error: ExecutorError) -> Status {
     }
 }
 
-pub struct KnowledgeGraphServiceImpl {
+pub struct OrbitServiceImpl {
     validator: Arc<JwtValidator>,
     ontology: Arc<Ontology>,
     tool_service: ToolService,
@@ -72,7 +72,7 @@ pub struct KnowledgeGraphServiceImpl {
     quota: Arc<QuotaService>,
 }
 
-impl KnowledgeGraphServiceImpl {
+impl OrbitServiceImpl {
     pub fn new(
         validator: Arc<JwtValidator>,
         ontology: Arc<Ontology>,
@@ -146,9 +146,7 @@ type ExecuteQueryStream =
     Pin<Box<dyn futures::Stream<Item = Result<ExecuteQueryMessage, Status>> + Send>>;
 
 #[tonic::async_trait]
-impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
-    for KnowledgeGraphServiceImpl
-{
+impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
     #[instrument(
         skip(self, request),
         fields(user_id, source_type, ai_session_id, coding_agent)
@@ -581,7 +579,7 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
     }
 }
 
-impl KnowledgeGraphServiceImpl {
+impl OrbitServiceImpl {
     fn build_structured_schema(&self, expand_nodes: &[String]) -> StructuredSchema {
         let domains: Vec<SchemaDomain> = self
             .ontology
@@ -773,7 +771,7 @@ fn authorize_traversal_path(claims: &Claims, requested_path: &str) -> Result<(),
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::proto::knowledge_graph_service_server::KnowledgeGraphService;
+    use crate::proto::orbit_service_server::OrbitService;
     use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
     use tonic::metadata::MetadataValue;
 
@@ -789,8 +787,8 @@ mod tests {
         ClickHouseConfiguration::default()
     }
 
-    fn test_service() -> KnowledgeGraphServiceImpl {
-        KnowledgeGraphServiceImpl::new(
+    fn test_service() -> OrbitServiceImpl {
+        OrbitServiceImpl::new(
             Arc::new(mock_validator()),
             test_ontology(),
             &test_config(),
@@ -829,7 +827,7 @@ mod tests {
     #[test]
     fn test_service_can_be_created() {
         let validator = Arc::new(mock_validator());
-        let service = KnowledgeGraphServiceImpl::new(
+        let service = OrbitServiceImpl::new(
             validator,
             test_ontology(),
             &test_config(),
@@ -980,7 +978,7 @@ mod tests {
     #[test]
     fn test_build_structured_schema() {
         let validator = Arc::new(mock_validator());
-        let service = KnowledgeGraphServiceImpl::new(
+        let service = OrbitServiceImpl::new(
             validator,
             test_ontology(),
             &test_config(),
@@ -1010,7 +1008,7 @@ mod tests {
     #[test]
     fn test_build_structured_schema_with_expand() {
         let validator = Arc::new(mock_validator());
-        let service = KnowledgeGraphServiceImpl::new(
+        let service = OrbitServiceImpl::new(
             validator,
             test_ontology(),
             &test_config(),
@@ -1046,7 +1044,7 @@ mod tests {
     #[test]
     fn test_get_node_edge_names_returns_sorted() {
         let validator = Arc::new(mock_validator());
-        let service = KnowledgeGraphServiceImpl::new(
+        let service = OrbitServiceImpl::new(
             validator,
             test_ontology(),
             &test_config(),
@@ -1070,7 +1068,7 @@ mod tests {
     #[test]
     fn test_get_node_edge_names_unknown_node_returns_empty() {
         let validator = Arc::new(mock_validator());
-        let service = KnowledgeGraphServiceImpl::new(
+        let service = OrbitServiceImpl::new(
             validator,
             test_ontology(),
             &test_config(),
@@ -1088,7 +1086,7 @@ mod tests {
     #[test]
     fn test_expanded_node_has_property_details() {
         let validator = Arc::new(mock_validator());
-        let service = KnowledgeGraphServiceImpl::new(
+        let service = OrbitServiceImpl::new(
             validator,
             test_ontology(),
             &test_config(),
@@ -1117,7 +1115,7 @@ mod tests {
     #[test]
     fn test_structured_schema_domains_have_nodes() {
         let validator = Arc::new(mock_validator());
-        let service = KnowledgeGraphServiceImpl::new(
+        let service = OrbitServiceImpl::new(
             validator,
             test_ontology(),
             &test_config(),
@@ -1141,7 +1139,7 @@ mod tests {
     #[test]
     fn test_structured_schema_edges_have_variants() {
         let validator = Arc::new(mock_validator());
-        let service = KnowledgeGraphServiceImpl::new(
+        let service = OrbitServiceImpl::new(
             validator,
             test_ontology(),
             &test_config(),
@@ -1169,7 +1167,7 @@ mod tests {
     #[test]
     fn test_expand_multiple_nodes() {
         let validator = Arc::new(mock_validator());
-        let service = KnowledgeGraphServiceImpl::new(
+        let service = OrbitServiceImpl::new(
             validator,
             test_ontology(),
             &test_config(),
@@ -1335,7 +1333,7 @@ mod tests {
         let ontology = test_ontology();
         let expected_count = ontology.nodes().count();
         let validator = Arc::new(mock_validator());
-        let service = KnowledgeGraphServiceImpl::new(
+        let service = OrbitServiceImpl::new(
             validator,
             Arc::clone(&ontology),
             &test_config(),

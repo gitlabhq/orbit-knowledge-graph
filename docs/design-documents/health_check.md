@@ -101,7 +101,7 @@ client synthesizes an Unhealthy ClickHouse component, which also prevents the mi
 An error reading `gkg_schema_version` leaves the status Unhealthy.
 
 The monolith's gRPC client currently maps only Healthy, Degraded, and Unhealthy, so
-`GET /api/v4/orbit/status` reports `"unknown"` for `Migrating` until the `gitlab-gkg-proto` gem and
+`GET /api/v4/orbit/status` reports `"unknown"` for `Migrating` until the `gitlab-orbit-proto` gem and
 mapping are updated. The TOON response reports `"migrating"` immediately.
 
 An unrelated pod failure during a migration is an accepted false negative: the aggregate reports

@@ -12,14 +12,14 @@ use tracing::info;
 use crate::analytics::AnalyticsTracker;
 use crate::auth::JwtValidator;
 use crate::cluster_health::ClusterHealthChecker;
-use crate::proto::knowledge_graph_service_server::KnowledgeGraphServiceServer;
+use crate::proto::orbit_service_server::OrbitServiceServer;
 use orbit_billing::{BillingTracker, QuotaService};
 
-use super::service::KnowledgeGraphServiceImpl;
+use super::service::OrbitServiceImpl;
 
 pub struct GrpcServer {
     addr: SocketAddr,
-    service: KnowledgeGraphServiceImpl,
+    service: OrbitServiceImpl,
     tls_config: Option<ServerTlsConfig>,
     grpc_config: GrpcConfig,
 }
@@ -36,7 +36,7 @@ impl GrpcServer {
         grpc_config: GrpcConfig,
         analytics_config: Arc<AnalyticsConfig>,
     ) -> Self {
-        let service = KnowledgeGraphServiceImpl::new(
+        let service = OrbitServiceImpl::new(
             validator,
             ontology,
             clickhouse_config,
@@ -98,6 +98,7 @@ impl GrpcServer {
         let tls_enabled = self.tls_config.is_some();
         info!(addr = %self.addr, tls = tls_enabled, "Starting gRPC server");
 
+        let service = Arc::new(self.service);
         let gc = &self.grpc_config;
         let mut builder = TonicServer::builder()
             .http2_keepalive_interval(Some(Duration::from_secs(gc.keepalive_interval_secs)))
@@ -123,7 +124,10 @@ impl GrpcServer {
             ))
             .layer(labkit::grpc::GrpcTraceLayer::new())
             .layer(labkit::grpc::GrpcCorrelationLayer::new())
-            .add_service(KnowledgeGraphServiceServer::new(self.service))
+            .add_service(OrbitServiceServer::from_arc(Arc::clone(&service)))
+            .add_service(super::legacy::LegacyGkgService::new(
+                OrbitServiceServer::from_arc(service),
+            ))
             .serve(self.addr)
             .await
     }
