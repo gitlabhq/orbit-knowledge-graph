@@ -21,7 +21,7 @@ log() { printf '==> %s\n' "$*" >&2; }
 log "Bumping pins"
 bash e2e/scripts/bump-gitlab-pins.sh
 bash e2e/scripts/bump-siphon-pins.sh
-bash e2e/scripts/bump-gkg-pins.sh
+bash e2e/scripts/bump-orbit-pins.sh
 
 if git diff --quiet -- "$VERSIONS"; then
   log "No pin changes; nothing to do."

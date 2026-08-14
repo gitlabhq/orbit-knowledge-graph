@@ -1278,7 +1278,7 @@ e2e:
     - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
     # Sourced: exports E2E_GKG_IMAGE/E2E_GKG_TAG and backgrounds the MR build
     # so `wait "$E2E_BUILD_PID"` below stays in this shell.
-    - source e2e/scripts/build-gkg-image.sh
+    - source e2e/scripts/build-orbit-image.sh
     - |
       E2E_ROBOT_TAG=$(sha256sum e2e/Dockerfile.robot | cut -c1-12)
       if docker manifest inspect "${CI_REGISTRY_IMAGE}/e2e-robot:${E2E_ROBOT_TAG}" >/dev/null 2>&1; then
