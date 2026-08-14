@@ -1,23 +1,23 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: corpus-server
+  name: mock-git-server
   namespace: ${CH_NAMESPACE}
-  labels: { app: corpus-server }
+  labels: { app: mock-git-server }
 spec:
   replicas: 1
   selector:
-    matchLabels: { app: corpus-server }
+    matchLabels: { app: mock-git-server }
   template:
     metadata:
-      labels: { app: corpus-server }
+      labels: { app: mock-git-server }
       annotations:
         gke-gcsfuse/volumes: "true"
     spec:
-      serviceAccountName: corpus-server-sa
+      serviceAccountName: mock-git-server-sa
       containers:
         - name: server
-          image: ${CORPUS_IMAGE}
+          image: ${MOCK_GIT_SERVER_IMAGE}
           args: ["--corpus-dir", "/data/corpus", "--port", "8090"]
           ports:
             - containerPort: 8090
@@ -39,16 +39,16 @@ spec:
             driver: gcsfuse.csi.storage.gke.io
             readOnly: true
             volumeAttributes:
-              bucketName: ${CORPUS_BUCKET}
+              bucketName: ${MOCK_GIT_BUCKET}
               fileCacheCapacity: "10Gi"
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: corpus-server
+  name: mock-git-server
   namespace: ${CH_NAMESPACE}
 spec:
-  selector: { app: corpus-server }
+  selector: { app: mock-git-server }
   ports:
     - port: 8090
       name: http
