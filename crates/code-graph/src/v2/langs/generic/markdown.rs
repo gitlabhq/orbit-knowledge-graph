@@ -38,7 +38,7 @@ impl DslLanguage for MarkdownDsl {
     fn hooks() -> LanguageHooks {
         LanguageHooks {
             on_import: Some(markdown_extract_links),
-            post_graph_build: Some(|graph| graph.link_file_imports_lexically(Language::Markdown)),
+            lexical_file_links: true,
             ..LanguageHooks::default()
         }
     }
