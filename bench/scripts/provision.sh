@@ -59,6 +59,7 @@ if [[ -n "${RA_DATALAKE_SNAPSHOT:-}" ]]; then
     -o jsonpath='{.status.snapshotHandle}')
   export LOCAL_SNAP="datalake-${RUN_ID}"
   export LOCAL_CONTENT="datalake-content-${RUN_ID}"
+  export CH_NAMESPACE="${CH_NS}"
   $KC create ns "${CH_NS}" --dry-run=client -o yaml | $KC apply -f -
   envsubst < "${BENCH_DIR}/manifests/snapshot-restore.yaml" | $KC apply -f -
   log "  Waiting for snapshot ${LOCAL_SNAP} to bind"
