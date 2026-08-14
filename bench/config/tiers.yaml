@@ -2,7 +2,7 @@ tiers:
   small:
     nodes: { machine: e2-standard-8, count: 3 }
     gkg:
-      indexer:    { replicas: 1, requests: { cpu: 2, memory: 4Gi }, limits: { memory: 6Gi } }
+      indexer:    { replicas: 1, requests: { cpu: 2, memory: 4Gi }, limits: { memory: 12Gi } }
       webserver:  { replicas: 2, requests: { cpu: 1, memory: 2Gi }, limits: { memory: 3Gi } }
       dispatcher: { replicas: 1, requests: { cpu: 200m, memory: 256Mi }, limits: { memory: 512Mi } }
       concurrency: { max_concurrent_workers: 4, sdlc: 2, code: 2 }
