@@ -26,7 +26,7 @@ Siphon CDC, and all four GKG modes (webserver, indexer, dispatcher, health-check
 ## Cluster
 
 - **GKE**: `gke_gl-knowledgegraph-prj-f2eec59d_us-central1-a_e2e-harness`
-- **Harness config**: [`gitlab-org/orbit/gkg-e2e-harness`](https://gitlab.com/gitlab-org/orbit/gkg-e2e-harness) — cluster bootstrap (cert-manager, GitLab Agent)
+- **Harness config**: [`gitlab-org/orbit/orbit-e2e-harness`](https://gitlab.com/gitlab-org/orbit/orbit-e2e-harness) — cluster bootstrap (cert-manager, GitLab Agent)
 - **CI access**: GitLab Agent `e2e-harness-agent`
 
 ## Running

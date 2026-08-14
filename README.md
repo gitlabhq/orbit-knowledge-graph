@@ -204,7 +204,7 @@ The product name is Orbit. The binary and config still use the engineering name 
 |---|---|
 | [`orbit/knowledge-graph`](https://gitlab.com/gitlab-org/orbit/knowledge-graph) | This repo. Server, indexer, CLI. |
 | [`orbit/orbit-helm-charts`](https://gitlab.com/gitlab-org/orbit/orbit-helm-charts) | Official Helm chart. |
-| [`orbit/gkg-e2e-harness`](https://gitlab.com/gitlab-org/orbit/gkg-e2e-harness) | GKE bootstrap for end-to-end tests. |
+| [`orbit/orbit-e2e-harness`](https://gitlab.com/gitlab-org/orbit/orbit-e2e-harness) | GKE bootstrap for end-to-end tests. |
 | [`orbit/documentation/orbit-artifacts`](https://gitlab.com/gitlab-org/orbit/documentation/orbit-artifacts) | Offsite transcripts and session notes. |
 | [`analytics-section/siphon`](https://gitlab.com/gitlab-org/analytics-section/siphon) | External CDC pipeline that feeds the datalake. |
 | [`analytics-section/platform-insights/siphon-helm-charts`](https://gitlab.com/gitlab-org/analytics-section/platform-insights/siphon-helm-charts) | Production Siphon Helm chart. |
