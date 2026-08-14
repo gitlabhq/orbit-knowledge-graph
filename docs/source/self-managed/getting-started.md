@@ -16,7 +16,7 @@ title: Get started with GitLab Orbit on GitLab Self-Managed
 
 {{< history >}}
 
-- [Introduced](https://gitlab.com/groups/gitlab-org/-/epics/22739) in GitLab 19.3.
+- [Introduced](https://gitlab.com/groups/gitlab-org/-/epics/22739) in GitLab 19.2.2.
 
 {{< /history >}}
 
@@ -25,7 +25,7 @@ The remaining setup steps require all three systems to exist and be reachable.
 
 ## Prerequisites
 
-- GitLab 19.3 or later.
+- GitLab 19.2.2 or later.
 - Administrator access to the GitLab instance and to its PostgreSQL server.
 - A maintenance window for one PostgreSQL restart.
 - ClickHouse 26.2 or later, set up for GitLab.
@@ -74,7 +74,8 @@ database is created when you set up GitLab Orbit.
 
 ## Kubernetes
 
-GitLab Orbit requires Kubernetes 1.33 or later, with the `ImageVolume` feature gate turned on.
+GitLab Orbit requires Kubernetes 1.33 or later, with the `ImageVolume` feature gate turned on and supported
+by the container runtime.
 
 GitLab Orbit can run on a separate cluster from GitLab. That cluster must reach GitLab, PostgreSQL,
 ClickHouse, and NATS, and GitLab must reach that cluster.

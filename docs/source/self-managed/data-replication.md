@@ -16,7 +16,7 @@ title: Set up data replication
 
 {{< history >}}
 
-- [Introduced](https://gitlab.com/groups/gitlab-org/-/epics/22739) in GitLab 19.3.
+- [Introduced](https://gitlab.com/groups/gitlab-org/-/epics/22739) in GitLab 19.2.2.
 
 {{< /history >}}
 
@@ -83,13 +83,16 @@ The Siphon producer stops at startup unless `wal_level` is `logical`. Changes to
    sudo gitlab-ctl restart postgresql
    ```
 
-1. Confirm the setting:
+1. Confirm the settings:
 
    ```shell
    sudo gitlab-psql -c 'SHOW wal_level'
+   sudo gitlab-psql -c "SELECT name, setting, pending_restart FROM pg_settings WHERE name IN ('wal_level','max_wal_senders','max_replication_slots')"
    ```
 
-   The command returns `logical`.
+   `wal_level` returns `logical`, the other two match `gitlab.rb`, and no row reports
+   `pending_restart = t`. A partially applied combination leaves PostgreSQL unable to start at its next
+   restart. To recover, correct `/etc/gitlab/gitlab.rb`, reconfigure, and confirm the service is running.
 
 {{< /tab >}}
 
@@ -114,13 +117,15 @@ or managed database.
 
 1. Allow connections from the cluster to reach port 5432.
 
-1. Confirm the setting:
+1. Confirm the settings:
 
    ```shell
-   psql -h <postgresql_host> -U <admin_user> -d gitlabhq_production -c 'SHOW wal_level'
+   psql -h <postgresql_host> -U <admin_user> -d gitlabhq_production \
+     -c "SELECT name, setting, pending_restart FROM pg_settings WHERE name IN ('wal_level','max_wal_senders','max_replication_slots')"
    ```
 
-   The command returns `logical`.
+   `wal_level` returns `logical`, the other two match the values you set, and no row reports
+   `pending_restart = t`.
 
 {{< /tab >}}
 
@@ -156,7 +161,7 @@ GitLab ships a Rake task that prepares PostgreSQL for Siphon. The task is idempo
 - The helper function Siphon calls to add tables to the publication.
 - Read access to every GitLab schema.
 
-GitLab 19.3 and later includes the task.
+GitLab 19.2.2 and later includes the task.
 
 {{< tabs >}}
 
@@ -239,8 +244,9 @@ GRANT SELECT ON system.tables, system.columns TO siphon_app;
 
 ## Make the passwords available to Siphon
 
-Siphon reads both passwords from environment variables backed by a Kubernetes Secret. The values file in the
-following section expects one Secret named `siphon-secrets` in the Siphon namespace, with these keys:
+Siphon reads both passwords from environment variables backed by a Kubernetes Secret. The namespace must
+exist before you create the Secret. The values file in the following section expects one Secret named
+`siphon-secrets` in the Siphon namespace, with these keys:
 
 | Key | Holds |
 |-----|-------|
@@ -268,7 +274,7 @@ tag that does not exist prevents the pods from starting.
    global:
      # Tag of the gitlab-siphon-tables image.
      # Must match your GitLab version exactly, patch level included.
-     gitlabVersion: v19.3.0-ee
+     gitlabVersion: v19.2.2-ee
 
    image:
      repository: registry.gitlab.com/gitlab-org/analytics-section/siphon
@@ -371,8 +377,12 @@ tag that does not exist prevents the pods from starting.
    helm upgrade --install siphon siphon/siphon \
      --version 1.18.0 \
      --namespace siphon \
+     --create-namespace \
      --values siphon-values.yaml
    ```
+
+   These commands are a reference for a direct Helm install. Adjust the namespace names and the
+   deployment method to match your own tooling.
 
 1. Confirm that all three deployments are running:
 
@@ -398,6 +408,7 @@ kubectl -n siphon rollout restart deployment
 | `stream_name` | Must match the stream name GitLab Orbit reads. For the full list of values both sides share, see [Shared configuration values](getting-started.md#shared-configuration-values). |
 | `advisory_lock_id` and the lock timeouts | Required. The producer stops at startup without them. |
 | `nats_config.replicas` | Must match your NATS cluster size. A single NATS server supports only one replica. |
+| `ssl_mode` | Must match what the PostgreSQL server offers. The example uses `require`, which works with a Linux package PostgreSQL because it serves TLS by default. A server that does not serve TLS refuses the connection, and the producer stops at startup with `server refused TLS connection`. |
 | `connection.replication.use_alter_publication_function` | Must stay `true`, which is the chart default. The `EXECUTE` grant on `public.siphon_alter_publication` exists for this setting: the publication belongs to the GitLab database user, so a direct `ALTER PUBLICATION` from a Siphon role fails. |
 | `max_age_seconds` | Controls how far back a consumer can replay. Retaining 15 days of every changed row across more than 60 tables produces a large JetStream file store. Size the NATS volume for the full retention window, or lower the value. |
 
@@ -416,7 +427,7 @@ credentials.
 ## Verify replication
 
 The first copy processes one table at a time and pauses replication while each table is merged. The
-duration therefore depends on the number of tables, not on the amount of data. A GitLab 19.3 instance
+duration therefore depends on the number of tables, not on the amount of data. A GitLab 19.2.2 instance
 replicates more than 60 tables. These checks confirm that replication is running. They do not confirm that
 the first copy is complete.
 

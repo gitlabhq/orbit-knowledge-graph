@@ -16,7 +16,7 @@ title: Set up GitLab Orbit
 
 {{< history >}}
 
-- [Introduced](https://gitlab.com/groups/gitlab-org/-/epics/22739) in GitLab 19.3.
+- [Introduced](https://gitlab.com/groups/gitlab-org/-/epics/22739) in GitLab 19.2.2.
 
 {{< /history >}}
 
@@ -142,7 +142,7 @@ GitLab. The chart mounts the Secret without an `optional` flag, so a missing Sec
    ```yaml
    global:
      appConfig:
-       orbit:
+       knowledgeGraph:
          enabled: true
          grpcEndpoint: 'tls://orbit.example.com:50054'
          jwtSecret:
@@ -159,8 +159,9 @@ are expected.
 
 ## Make the credentials available to GitLab Orbit
 
-GitLab Orbit reads each credential from its own key in a Kubernetes Secret. The values file in the following
-section expects one Secret named `gkg-secrets` in the GitLab Orbit namespace, with these keys:
+GitLab Orbit reads each credential from its own key in a Kubernetes Secret. The namespace must exist before
+you create the Secret. The values file in the following section expects one Secret named `gkg-secrets` in
+the GitLab Orbit namespace, with these keys:
 
 | Key | Holds |
 |-----|-------|
@@ -239,8 +240,12 @@ You must also provide a TLS certificate for the gRPC endpoint. For more informat
      oci://registry.gitlab.com/gitlab-org/orbit/orbit-helm-charts/gkg \
      --version 1.5.0 \
      --namespace gitlab-orbit \
+     --create-namespace \
      --values orbit-values.yaml
    ```
+
+   This command is a reference for a direct Helm install. Adjust the namespace names and the deployment
+   method to match your own tooling.
 
 1. Confirm that all three components are running:
 
@@ -262,11 +267,14 @@ webserver itself with `tls.enabled` and `tls.existingSecret`. Only the webserver
 inside the cluster.
 
 A certificate issued by a publicly trusted certificate authority (CA) needs no extra configuration in
-GitLab. For a certificate from your own CA, add the CA certificate to the GitLab trust store.
+GitLab. For a certificate from your own CA, add the CA certificate to the GitLab trust store. For more
+information, see
+[Install custom public certificates](https://docs.gitlab.com/omnibus/settings/ssl/#install-custom-public-certificates).
 
 If GitLab runs in the same cluster, `ClusterIP` is enough and the endpoint is
-`gkg-webserver.gitlab-orbit.svc.cluster.local:50054`. Otherwise, expose the service with a method your
-cluster supports, and keep the address on a private network.
+`tls://gkg-webserver.gitlab-orbit.svc.cluster.local:50054`. The certificate must be valid for the host name
+GitLab connects to. Otherwise, expose the service with a method your cluster supports, and keep the address
+on a private network.
 
 ### Resource requirements
 
