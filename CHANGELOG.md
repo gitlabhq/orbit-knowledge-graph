@@ -1,3 +1,30 @@
+## [0.100.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.99.0...v0.100.0) (2026-08-14)
+
+### Features
+
+* **bench:** code corpus fetch scripts ([cccbc84](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/cccbc8412550c3e0ce39220458c2768263b88126)) by Michael Usachenko
+* **bench:** mock git server for code indexing benchmarks ([b440980](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b4409809f39bfa07bdea0430447ecbb3758fb4da)) by Michael Usachenko
+* **grpc:** rename wire contract to orbit.v1.OrbitService with legacy facade ([3d5f90d](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/3d5f90dc0f235caf3048deecac80b8fadb679c4a)) by michaelangeloio
+* **orbit-cli:** add orbit setup to configure AI assistants to use the graph ([d754c5b](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/d754c5bcdf3378ecb5042222901831489e98ee12)) by Aaron Algutifan
+
+### Fixes
+
+* **bench:** export CH_NAMESPACE before snapshot-restore envsubst ([9bfb1cb](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/9bfb1cb46c80ab420c8b0c50b30b025a74b1bb3a)) by michaelusa
+
+### Performance
+
+* **code-graph:** skip unnamed AST nodes in walk ([ee3d311](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/ee3d311eb29e37f23db97c5ef8e9f71eceefff47)) by Michael Usachenko
+
+### Other
+
+* clean up docs redirects - 2026-08-14 ([cb01433](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/cb014331cbba6f4f293f61fdcd16d404fb4d50fb)) by Brendan Lynch
+* **deps:** update rust crate clap to v4.6.6 ([9b6b61f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/9b6b61f2cc4dbea30bad756cd046ca2b5d48014d)) by GitLab Renovate Bot
+* **deps:** update rust crate globset to v0.4.20 ([da2db7b](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/da2db7b9b11e4bdbb6c199eae22b8807e9b80f83)) by GitLab Renovate Bot
+* **design-review:** rename gkg-prefixed design review files to orbit ([2bfbc4d](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/2bfbc4d0bd8209fe8fbb38d3608f019bb18a1b5f)) by michaelangeloio
+* **e2e:** update cluster agent context for orbit-e2e-harness rename ([efadeac](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/efadeaca076855df5b0d266623f7aa0dd88a3806)) by michaelangeloio
+* **scripts:** rename gkg-prefixed dev and e2e scripts to orbit ([8b12287](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/8b122876f1a038cda5e48dfd9c4e63aedc630970)) by michaelangeloio
+* **workspace:** rename gkg-prefixed crates to orbit ([bee0936](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/bee09364bb797966890027f2b2d3db49c8bf8f34)) by michaelangeloio
+
 ## [0.99.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.98.0...v0.99.0) (2026-08-13)
 
 ### Features
