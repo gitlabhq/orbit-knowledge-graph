@@ -32,6 +32,20 @@ trap 'rm -rf "${WORK}"' EXIT
 export AUTH_HEADER_FILE="${WORK}/.auth_header"
 
 TOTAL=$(wc -l < "${INPUT}" | tr -d ' ')
+
+# Pre-fetch existing archives list to avoid per-project GCS lookups.
+if [[ "${BUCKET}" == gs://* ]]; then
+  echo "[corpus] Listing existing archives in ${BUCKET}..."
+  gcloud storage ls "${BUCKET}/*.tar.gz" 2>/dev/null \
+    | sed "s|${BUCKET}/||; s|\.tar\.gz$||" \
+    | sort > "${WORK}/existing.txt"
+  EXISTING=$(wc -l < "${WORK}/existing.txt" | tr -d ' ')
+  echo "[corpus] ${EXISTING} archives already in bucket"
+else
+  touch "${WORK}/existing.txt"
+fi
+export EXISTING_FILE="${WORK}/existing.txt"
+
 if [[ "${FETCH_MAX}" -gt 0 ]]; then
   echo "[corpus] ${TOTAL} projects in list, fetching first ${FETCH_MAX}, ${JOBS} parallel"
   head -n "${FETCH_MAX}" "${INPUT}" > "${WORK}/input.tsv"
@@ -45,7 +59,7 @@ FETCH_SCRIPT="${BENCH_DIR}/scripts/fetch-one-archive.sh"
 # Convert TSV to space-separated for xargs, run fetch-one-archive.sh per line.
 awk -F'\t' '{print $1, $2}' "${WORK}/input.tsv" \
   | xargs -P "${JOBS}" -n 2 \
-    env WORK="${WORK}" BUCKET="${BUCKET}" AUTH_HEADER_FILE="${AUTH_HEADER_FILE}" \
+    env WORK="${WORK}" BUCKET="${BUCKET}" AUTH_HEADER_FILE="${AUTH_HEADER_FILE}" EXISTING_FILE="${EXISTING_FILE}" \
     bash "${FETCH_SCRIPT}"
 
 echo "[corpus] Done. Archives in ${BUCKET}"

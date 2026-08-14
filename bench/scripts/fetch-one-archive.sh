@@ -7,9 +7,9 @@ dest="${WORK}/${id}.tar.gz"
 target="${BUCKET}/${id}.tar.gz"
 AUTH_HEADER=$(cat "${AUTH_HEADER_FILE}")
 
-# Skip if already exists
+# Skip if already exists (checked against pre-fetched list, no per-project API call)
 if [[ "${BUCKET}" == gs://* ]]; then
-  gcloud storage ls "${target}" &>/dev/null && exit 0
+  grep -qx "${id}" "${EXISTING_FILE}" && exit 0
 else
   [[ -f "${target}" ]] && exit 0
 fi
