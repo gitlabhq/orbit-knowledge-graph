@@ -22,12 +22,13 @@ else
 fi
 
 INPUT="${1:?usage: $0 <projects.tsv>}"
-export WORK="${TMPDIR:-/tmp}/code-corpus-work"
+export WORK="${TMPDIR:-/tmp}/code-corpus-work.$$"
 export BUCKET
 mkdir -p "${WORK}"
 [[ "${BUCKET}" != gs://* ]] && mkdir -p "${BUCKET}"
-# Write auth header to a file so subshells can read it without quoting issues.
 echo "${AUTH_HEADER}" > "${WORK}/.auth_header"
+chmod 600 "${WORK}/.auth_header"
+trap 'rm -rf "${WORK}"' EXIT
 export AUTH_HEADER_FILE="${WORK}/.auth_header"
 
 TOTAL=$(wc -l < "${INPUT}" | tr -d ' ')
