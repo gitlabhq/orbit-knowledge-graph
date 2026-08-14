@@ -517,7 +517,11 @@ impl CodeGraph {
                     continue;
                 }
                 let link = self.str(import.path);
-                let Some(target) = normalize_relative_path(&dir, link) else {
+                let target = match link.strip_prefix('/') {
+                    Some(rooted) => normalize_relative_path("", rooted),
+                    None => normalize_relative_path(&dir, link),
+                };
+                let Some(target) = target else {
                     continue;
                 };
                 out.push(PendingFileLink {
