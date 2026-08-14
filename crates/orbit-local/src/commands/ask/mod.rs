@@ -15,6 +15,17 @@ const MAX_PER_FILE: usize = 3;
 const SEED_GAP_RATIO: f64 = 0.2;
 const CANDIDATE_FACTOR: usize = 5;
 const MAX_EDGES_PER_KIND: usize = 5;
+const FOCUS_EDGES_PER_KIND: usize = 15;
+
+const EDGE_KIND_SYNONYMS: &[(&str, &str)] = &[
+    ("use", "CALLS"),
+    ("invoke", "CALLS"),
+    ("caller", "CALLS"),
+    ("callee", "CALLS"),
+    ("depend", "IMPORTS"),
+    ("implement", "EXTENDS"),
+    ("inherit", "EXTENDS"),
+];
 
 const EXACT_BONUS: f64 = 1000.0;
 const PREFIX_BONUS: f64 = 100.0;
@@ -26,6 +37,24 @@ const RELATIONAL_SYNONYMS: &[&str] = &[
     "caller", "callee", "depend", "export", "implement", "invoke", "mention",
     "reference", "render", "use", "used", "uses", "using",
 ];
+
+fn focus_edge_kind(terms: &[String]) -> Option<String> {
+    static BY_STEM: std::sync::OnceLock<HashMap<String, String>> = std::sync::OnceLock::new();
+    let by_stem = BY_STEM.get_or_init(|| {
+        use strum::IntoEnumIterator;
+        let mut map: HashMap<String, String> = code_graph::v2::types::EdgeKind::iter()
+            .map(|kind| {
+                let name: &str = kind.as_ref();
+                (stem(&name.to_lowercase()), name.to_uppercase())
+            })
+            .collect();
+        for (word, kind) in EDGE_KIND_SYNONYMS {
+            map.insert(stem(word), (*kind).to_string());
+        }
+        map
+    });
+    terms.iter().find_map(|t| by_stem.get(&stem(t)).cloned())
+}
 
 fn is_relational(term: &str) -> bool {
     static STEMS: std::sync::OnceLock<std::collections::HashSet<String>> =
@@ -132,28 +161,36 @@ pub(crate) fn run(
         .take_while(|r| r.score >= cutoff)
         .map(|r| &corpus[r.index])
         .collect();
-    let edges = backend.expand(&seeds)?;
+    let focus = focus_edge_kind(&terms);
+    let edges = backend.expand(&seeds, focus.as_deref())?;
     if edges.is_empty() {
         writeln!(out, "\nNo connections found around the top matches.")?;
         return Ok(());
     }
 
     writeln!(out, "\nConnections (1 hop around top {}):", seeds.len())?;
+    let kind_cap = |kind: &str| {
+        if focus.as_deref() == Some(kind) {
+            FOCUS_EDGES_PER_KIND
+        } else {
+            MAX_EDGES_PER_KIND
+        }
+    };
     let mut current = "";
     let mut in_kind = 0usize;
     for e in &edges {
         if e.kind != current {
-            report_hidden(&mut out, current, in_kind)?;
+            report_hidden(&mut out, current, in_kind, kind_cap(current))?;
             current = &e.kind;
             in_kind = 0;
             writeln!(out, "  {current}:")?;
         }
-        if in_kind < MAX_EDGES_PER_KIND {
+        if in_kind < kind_cap(current) {
             writeln!(out, "    {} --> {}", e.source, e.target)?;
         }
         in_kind += 1;
     }
-    report_hidden(&mut out, current, in_kind)?;
+    report_hidden(&mut out, current, in_kind, kind_cap(current))?;
     Ok(())
 }
 
@@ -383,9 +420,14 @@ fn content_words(input: &str) -> Vec<String> {
     if content.is_empty() { words } else { content }
 }
 
-fn report_hidden(out: &mut impl Write, kind: &str, total: usize) -> std::io::Result<()> {
-    if !kind.is_empty() && total > MAX_EDGES_PER_KIND {
-        writeln!(out, "    … {} more", total - MAX_EDGES_PER_KIND)?;
+fn report_hidden(
+    out: &mut impl Write,
+    kind: &str,
+    total: usize,
+    cap: usize,
+) -> std::io::Result<()> {
+    if !kind.is_empty() && total > cap {
+        writeln!(out, "    … {} more", total - cap)?;
     }
     Ok(())
 }
@@ -488,6 +530,22 @@ mod tests {
         let terms = vec!["execute".to_string(), "hooks".to_string()];
         let hits = rank(&terms, &corpus, 10, None);
         assert_eq!(corpus[hits[0].index].fqn, "Group::execute_hooks");
+    }
+
+    #[test]
+    fn focus_edge_kind_maps_question_verbs_to_relationships() {
+        let kind = |q: &str| focus_edge_kind(&content_words(q));
+        assert_eq!(kind("who calls execute_hooks"), Some("CALLS".to_string()));
+        assert_eq!(kind("who uses sql_template"), Some("CALLS".to_string()));
+        assert_eq!(
+            kind("what imports the ontology"),
+            Some("IMPORTS".to_string())
+        );
+        assert_eq!(
+            kind("what extends HandlerError"),
+            Some("EXTENDS".to_string())
+        );
+        assert_eq!(kind("where do we send messages to the dlq"), None);
     }
 
     #[test]
