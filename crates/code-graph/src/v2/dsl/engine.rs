@@ -1291,9 +1291,7 @@ impl LanguageSpec {
         }
 
         for child in node.children() {
-            if child.is_named() {
-                self.walk_full(&child, state, sep, module_prefix);
-            }
+            self.walk_full(&child, state, sep, module_prefix);
         }
 
         if (!self.hooks.return_kinds.is_empty() && self.hooks.return_kinds.contains(&nk))
@@ -1370,9 +1368,7 @@ impl LanguageSpec {
                 );
 
                 for arm_child in child.children() {
-                    if arm_child.is_named() {
-                        self.walk_full(&arm_child, state, sep, module_prefix);
-                    }
+                    self.walk_full(&arm_child, state, sep, module_prefix);
                 }
 
                 end_blocks.push(state.current_block);
@@ -1445,9 +1441,7 @@ impl LanguageSpec {
             self.walk_full(&body_node, state, sep, module_prefix);
         } else {
             for child in node.children() {
-                if child.is_named() {
-                    self.walk_full(&child, state, sep, module_prefix);
-                }
+                self.walk_full(&child, state, sep, module_prefix);
             }
         }
 

@@ -284,28 +284,18 @@ impl<'a> SsaEngine<'a> {
         block: BlockId,
         value: SsaValue<'a>,
     ) {
-        let resolved = if let SsaValue::Alias(alias_name) = value {
-            let alias_val = self.read_variable_internal(alias_name, block);
-            if alias_val != SsaValue::Opaque {
-                alias_val
-            } else {
-                SsaValue::Alias(alias_name)
-            }
-        } else {
-            value
-        };
         trace!(
             self.tracer,
             SsaWrite {
                 variable: variable.to_string(),
                 block_id: block.0,
-                value: resolved.trace_display(),
+                value: value.trace_display(),
             }
         );
         self.current_def
             .entry(variable)
             .or_default()
-            .insert(block, resolved);
+            .insert(block, value);
         self.stats.writes += 1;
     }
 
