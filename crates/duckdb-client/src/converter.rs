@@ -133,20 +133,14 @@ pub fn convert_v2_graph(
         .expect("local_db.edge_table.name must be configured")
         .to_string();
 
-    let mut edge_indices: Vec<_> = Vec::with_capacity(graph.graph.edge_count());
-    edge_indices.extend(graph.graph.edge_indices().filter(|&ei| {
-        write_repository_structure || graph.graph[ei].relationship.edge_kind.as_ref() != "CONTAINS"
-    }));
-
-    // Sort edges by low-cardinality columns for better encoding.
-    edge_indices.sort_by_key(|&ei| {
-        let r = &graph.graph[ei].relationship;
-        (
-            r.edge_kind.as_ref(),
-            r.source_node.as_ref(),
-            r.target_node.as_ref(),
-        )
-    });
+    let edge_indices: Vec<_> = graph
+        .graph
+        .edge_indices()
+        .filter(|&ei| {
+            write_repository_structure
+                || graph.graph[ei].relationship.edge_kind.as_ref() != "CONTAINS"
+        })
+        .collect();
 
     let edge_batch = orbit_utils::arrow::BatchBuilder::new(
         &edge_specs(ontology),

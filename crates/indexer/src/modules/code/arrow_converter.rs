@@ -413,7 +413,14 @@ fn convert_repository_edges(
         &tag_cache,
     ));
 
-    edge_row_batch(graph, ids, env, &tag_cache, edge_rows, true, &specs.edge)
+    let mut builder = BatchBuilder::new(&specs.edge, edge_rows.len() + graph.graph.edge_count())?;
+    for row in &edge_rows {
+        row.write_row(&mut builder, &())?;
+    }
+    for ei in graph.graph.edge_indices() {
+        graph_edge_row(graph, ids, env, &tag_cache, ei).write_row(&mut builder, &())?;
+    }
+    builder.finish()
 }
 
 fn convert_semantic_edges(
@@ -423,7 +430,14 @@ fn convert_semantic_edges(
     specs: &ConverterSpecs,
 ) -> Result<RecordBatch, ArrowError> {
     let tag_cache = graph.build_node_tags(&specs.tag_properties);
-    edge_row_batch(graph, ids, env, &tag_cache, Vec::new(), false, &specs.edge)
+    let mut builder = BatchBuilder::new(&specs.edge, graph.graph.edge_count())?;
+    for ei in graph.graph.edge_indices() {
+        if graph.graph[ei].relationship.edge_kind.as_ref() == "CONTAINS" {
+            continue;
+        }
+        graph_edge_row(graph, ids, env, &tag_cache, ei).write_row(&mut builder, &())?;
+    }
+    builder.finish()
 }
 
 struct IndexerEdgeRow<'a> {
@@ -540,84 +554,25 @@ fn repository_on_branch_rows<'a>(
     rows
 }
 
-enum EdgeEntry<'r, 'a> {
-    Row(&'r IndexerEdgeRow<'a>),
-    Graph(petgraph::graph::EdgeIndex),
-}
-
-fn edge_row_batch(
-    graph: &code_graph::v2::linker::CodeGraph,
-    ids: &[i64],
-    env: &IndexerEnvelope,
-    tag_cache: &[Vec<String>],
-    structural_rows: Vec<IndexerEdgeRow<'_>>,
-    include_contains: bool,
-    specs: &[ColumnSpec],
-) -> Result<RecordBatch, ArrowError> {
-    let mut entries: Vec<EdgeEntry<'_, '_>> =
-        Vec::with_capacity(structural_rows.len() + graph.graph.edge_count());
-    entries.extend(structural_rows.iter().map(EdgeEntry::Row));
-    entries.extend(
-        graph
-            .graph
-            .edge_indices()
-            .filter(|&ei| {
-                include_contains || graph.graph[ei].relationship.edge_kind.as_ref() != "CONTAINS"
-            })
-            .map(EdgeEntry::Graph),
-    );
-
-    // Sort edges to match the ClickHouse edge table ORDER BY:
-    // (traversal_path, relationship_kind, source_id, target_id, source_kind, target_kind).
-    // traversal_path is constant within a batch so we skip it. Pre-sorted
-    // inserts create parts that are already in primary key order, reducing
-    // merge work and improving compression via delta encoding on source_id.
-    fn entry_sort_key<'k>(
-        entry: &EdgeEntry<'_, 'k>,
-        graph: &'k code_graph::v2::linker::CodeGraph,
-        ids: &[i64],
-    ) -> (&'k str, i64, i64, &'k str, &'k str) {
-        match *entry {
-            EdgeEntry::Row(r) => (
-                r.edge_kind,
-                r.source_id,
-                r.target_id,
-                r.source_node_kind,
-                r.target_node_kind,
-            ),
-            EdgeEntry::Graph(ei) => {
-                let (src, tgt) = graph.graph.edge_endpoints(ei).unwrap();
-                let rel = &graph.graph[ei].relationship;
-                (
-                    rel.edge_kind.as_ref(),
-                    ids[src.index()],
-                    ids[tgt.index()],
-                    rel.source_node.as_ref(),
-                    rel.target_node.as_ref(),
-                )
-            }
-        }
+fn graph_edge_row<'a>(
+    graph: &'a code_graph::v2::linker::CodeGraph,
+    ids: &'a [i64],
+    env: &'a IndexerEnvelope,
+    tag_cache: &'a [Vec<String>],
+    ei: petgraph::graph::EdgeIndex,
+) -> IndexerEdgeRow<'a> {
+    let (src, tgt) = graph.graph.edge_endpoints(ei).unwrap();
+    let rel = &graph.graph[ei].relationship;
+    IndexerEdgeRow {
+        env,
+        source_id: ids[src.index()],
+        target_id: ids[tgt.index()],
+        edge_kind: rel.edge_kind.as_ref(),
+        source_node_kind: rel.source_node.as_ref(),
+        target_node_kind: rel.target_node.as_ref(),
+        source_tags: &tag_cache[src.index()],
+        target_tags: &tag_cache[tgt.index()],
     }
-    entries.sort_by(|a, b| entry_sort_key(a, graph, ids).cmp(&entry_sort_key(b, graph, ids)));
-
-    BatchBuilder::new(specs, entries.len())?.build(&entries, |entry, b| match *entry {
-        EdgeEntry::Row(r) => r.write_row(b, &()),
-        EdgeEntry::Graph(ei) => {
-            let (src, tgt) = graph.graph.edge_endpoints(ei).unwrap();
-            let rel = &graph.graph[ei].relationship;
-            IndexerEdgeRow {
-                env,
-                source_id: ids[src.index()],
-                target_id: ids[tgt.index()],
-                edge_kind: rel.edge_kind.as_ref(),
-                source_node_kind: rel.source_node.as_ref(),
-                target_node_kind: rel.target_node.as_ref(),
-                source_tags: &tag_cache[src.index()],
-                target_tags: &tag_cache[tgt.index()],
-            }
-            .write_row(b, &())
-        }
-    })
 }
 
 fn compute_branch_id(project_id: i64, branch: &str) -> i64 {
