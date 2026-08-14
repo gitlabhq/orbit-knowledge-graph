@@ -435,6 +435,10 @@ pub trait DslLanguage: Send + Sync + Default {
         None
     }
 
+    fn parser() -> LanguageParser {
+        LanguageParser::TreeSitter
+    }
+
     /// Use the filename (without extension) as the root scope.
     /// For C/C++ where the file is the only namespace.
     fn file_scope() -> bool {
@@ -476,6 +480,7 @@ pub trait DslLanguage: Send + Sync + Default {
             spec = spec.package(kind, extract);
         }
         spec.file_scope = Self::file_scope();
+        spec.parser = Self::parser();
         spec
     }
 }
@@ -742,6 +747,25 @@ pub type PathScopeHookFn = fn(
     &'static str,
 ) -> bool;
 pub type ImportScopeNameHook = fn(&crate::v2::types::CanonicalImport, &str) -> Option<String>;
+pub type CustomParseFn = fn(
+    &str,
+    &str,
+) -> (
+    Vec<crate::v2::types::CanonicalDefinition>,
+    Vec<crate::v2::types::CanonicalImport>,
+);
+
+/// How a language turns source into definitions and imports. Most languages
+/// parse with tree-sitter and walk the CST through the rule tables; `Custom`
+/// replaces that wholesale with `(source, file_path) -> (definitions,
+/// imports)`. Per-phase CPU budgets cannot interrupt a custom parser, so it
+/// must be robust to pathological input on its own. Used by Markdown (comrak).
+#[derive(Clone, Copy, Default)]
+pub enum LanguageParser {
+    #[default]
+    TreeSitter,
+    Custom(CustomParseFn),
+}
 pub type ImportTargetPathHook = fn(&crate::v2::types::CanonicalImport, &str) -> Option<String>;
 
 /// Language-specific escape hatches. All fields default to `None`.
@@ -837,6 +861,7 @@ pub struct LanguageSpec {
     /// top-level definitions. For languages without namespaces/modules
     /// (C, C++, header files) where the file IS the scope.
     pub(crate) file_scope: bool,
+    pub(crate) parser: LanguageParser,
     pub(crate) hooks: LanguageHooks,
     pub ssa_config: SsaConfig,
 
@@ -871,6 +896,7 @@ impl LanguageSpec {
             chain_config: None,
             package_node: None,
             file_scope: false,
+            parser: LanguageParser::default(),
             hooks: LanguageHooks::default(),
             ssa_config: SsaConfig::default(),
             scope_dispatch,

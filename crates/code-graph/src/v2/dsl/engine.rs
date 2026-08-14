@@ -603,6 +603,22 @@ impl LanguageSpec {
     ) -> Result<ParseFullResult, ParseFullError> {
         let source_str = std::str::from_utf8(source).map_err(ParseFullError::InvalidUtf8)?;
 
+        if let crate::v2::dsl::types::LanguageParser::Custom(custom) = self.parser {
+            let parse_start = cpu_time::ThreadTime::now();
+            let (definitions, imports) = custom(source_str, file_path);
+            return Ok(ParseFullResult {
+                definitions,
+                imports,
+                refs: Vec::new(),
+                inferred_returns: Vec::new(),
+                unresolved_aliases: Vec::new(),
+                phase_cpu: PhaseCpu {
+                    parse: parse_start.elapsed(),
+                    ..PhaseCpu::default()
+                },
+            });
+        }
+
         let parse_start = cpu_time::ThreadTime::now();
         let ast = language
             .parse_ast(source_str, timeouts.parse)
