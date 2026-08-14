@@ -87,7 +87,7 @@ const SIG_REGEX: &str = concat!(
 /// Source extensions Orbit indexes; used to build `read_text` globs.
 const DEFAULT_SOURCE_EXTS: &[&str] = &[
     "rs", "rb", "py", "js", "ts", "vue", "jsx", "tsx", "mjs", "cjs", "go", "java", "kt", "kts",
-    "scala", "cs", "cpp", "c", "h", "hpp", "swift", "php", "rake", "md",
+    "scala", "cs", "cpp", "c", "h", "hpp", "swift", "php", "rake", "md", "markdown",
 ];
 
 const TYPE_KINDS: &[&str] = &[
