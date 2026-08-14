@@ -470,7 +470,11 @@ impl CodeGraph {
                 let Some(import_id) = self.graph[neighbor].import_id() else {
                     continue;
                 };
-                let link = self.str(self.imports[import_id.0 as usize].path);
+                let import = &self.imports[import_id.0 as usize];
+                if import.import_type != "Link" {
+                    continue;
+                }
+                let link = self.str(import.path);
                 let Some(target) = normalize_relative_path(&dir, link) else {
                     continue;
                 };

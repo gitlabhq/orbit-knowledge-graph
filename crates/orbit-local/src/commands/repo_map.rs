@@ -24,6 +24,8 @@ use crate::workspace;
 /// vendored, and build-output paths. Anchored both top-level (`spec/%`) and
 /// nested (`%/spec/%`) because monorepos keep `spec/` at the repo root.
 const EXCLUDE_LIKE: &[&str] = &[
+    "doc-locale/%",
+    "%/doc-locale/%",
     "docs-locale/%",
     "%/docs-locale/%",
     "spec/%",
