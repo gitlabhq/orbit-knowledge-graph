@@ -489,11 +489,11 @@ impl CodeGraph {
         self.build_ancestor_table(tracer);
     }
 
-    pub fn link_file_imports_lexically(&mut self, language: crate::v2::config::Language) {
-        let Some(file_index) = self.indexes.file_index.as_ref() else {
-            return;
-        };
-        let mut pending: Vec<(NodeIndex, NodeIndex)> = Vec::new();
+    pub fn collect_lexical_file_links(
+        &self,
+        language: crate::v2::config::Language,
+        out: &mut Vec<PendingFileLink>,
+    ) {
         for node_idx in self.graph.node_indices() {
             let GraphNode::File(file) = &self.graph[node_idx] else {
                 continue;
@@ -516,13 +516,26 @@ impl CodeGraph {
                 let Some(target) = normalize_relative_path(&dir, link) else {
                     continue;
                 };
-                if let Some(&target_idx) = file_index.get(&target)
-                    && target_idx != node_idx
-                {
-                    pending.push((node_idx, target_idx));
-                }
+                out.push(PendingFileLink {
+                    source: file.path.clone(),
+                    target,
+                });
             }
         }
+    }
+
+    pub fn link_files(&mut self, links: &[PendingFileLink]) {
+        let Some(file_index) = self.indexes.file_index.as_ref() else {
+            return;
+        };
+        let mut pending: Vec<(NodeIndex, NodeIndex)> = links
+            .iter()
+            .filter_map(|link| {
+                let &source = file_index.get(&link.source)?;
+                let &target = file_index.get(&link.target)?;
+                (source != target).then_some((source, target))
+            })
+            .collect();
         pending.sort();
         pending.dedup();
         for (source, target) in pending {
@@ -1725,6 +1738,12 @@ mod tests {
         ));
         assert_eq!(typed.stage(), "graph_node");
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct PendingFileLink {
+    pub source: String,
+    pub target: String,
 }
 
 fn normalize_relative_path(dir: &str, link: &str) -> Option<String> {
