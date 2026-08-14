@@ -59,7 +59,7 @@ pub const EXCLUDE_REGEX: &[&str] = &[
 
 pub const DEFAULT_SOURCE_EXTS: &[&str] = &[
     "rs", "rb", "py", "js", "ts", "vue", "jsx", "tsx", "mjs", "cjs", "go", "java", "kt", "kts",
-    "scala", "cs", "cpp", "c", "h", "hpp", "swift", "php", "rake",
+    "scala", "cs", "cpp", "c", "h", "hpp", "swift", "php", "rake", "md",
 ];
 
 /// Config formats whose definitions are searchable but carry no signature

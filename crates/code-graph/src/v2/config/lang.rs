@@ -238,6 +238,12 @@ define_languages! {
         separator: ".",
         names: ["zig"],
     },
+    Markdown => {
+        support_lang: Markdown,
+        extensions: ["md", "markdown"],
+        separator: "#",
+        names: ["markdown"],
+    },
 }
 
 #[cfg(test)]
