@@ -31,8 +31,22 @@ envsubst '${CH_NAMESPACE} ${MOCK_GIT_SERVER_IMAGE} ${MOCK_GIT_BUCKET}' \
   < "${BENCH_DIR}/manifests/mock-git-server.yaml" | $KC apply -f -
 
 $KC rollout status -n "${CH_NS}" deploy/mock-git-server --timeout=120s
-log "Mock git server ready at mock-git-server.${CH_NS}.svc.cluster.local:8090"
-log ""
-log "To use with the code indexer, set gitlab.baseUrl in the GKG helm values:"
-log "  gitlab:"
-log "    baseUrl: http://mock-git-server.${CH_NS}.svc.cluster.local:8090"
+log "Mock git server ready"
+
+# --- 4. Upgrade GKG chart to point at the mock ---
+GKG_NS="e2e-${RUN_ID}-gkg"
+MOCK_URL="http://mock-git-server.${CH_NS}.svc.cluster.local:8090"
+log "Upgrading GKG release: gitlab.baseUrl=${MOCK_URL}"
+
+HELM_ARGS=(upgrade gkg
+  oci://registry.gitlab.com/gitlab-org/orbit/orbit-helm-charts/gkg
+  --namespace "${GKG_NS}"
+  --reuse-values
+  --set "gitlab.baseUrl=${MOCK_URL}"
+  --kube-context "${KCTX}")
+
+helm "${HELM_ARGS[@]}"
+
+$KC rollout restart -n "${GKG_NS}" deploy/gkg-indexer-default
+$KC rollout status -n "${GKG_NS}" deploy/gkg-indexer-default --timeout=120s
+log "Indexer restarted with mock git server"
