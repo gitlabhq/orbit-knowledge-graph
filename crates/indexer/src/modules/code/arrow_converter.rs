@@ -374,8 +374,8 @@ fn convert_repository_edges(
         edge_kind: "IN_PROJECT",
         source_node_kind: "Branch",
         target_node_kind: "Project",
-        source_tags: branch_tags.clone(),
-        target_tags: Vec::new(),
+        source_tags: &branch_tags,
+        target_tags: &[],
     });
 
     edge_rows.push(IndexerEdgeRow {
@@ -385,8 +385,8 @@ fn convert_repository_edges(
         edge_kind: "CONTAINS",
         source_node_kind: "Project",
         target_node_kind: "Branch",
-        source_tags: Vec::new(),
-        target_tags: branch_tags.clone(),
+        source_tags: &[],
+        target_tags: &branch_tags,
     });
 
     edge_rows.extend(branch_contains_directory_rows(
@@ -412,9 +412,8 @@ fn convert_repository_edges(
         &branch_tags,
         &tag_cache,
     ));
-    edge_rows.extend(graph_edge_rows(graph, ids, env, &tag_cache));
 
-    edge_row_batch(edge_rows, &specs.edge)
+    edge_row_batch(graph, ids, env, &tag_cache, edge_rows, true, &specs.edge)
 }
 
 fn convert_semantic_edges(
@@ -424,12 +423,7 @@ fn convert_semantic_edges(
     specs: &ConverterSpecs,
 ) -> Result<RecordBatch, ArrowError> {
     let tag_cache = graph.build_node_tags(&specs.tag_properties);
-    let edge_rows: Vec<_> = graph_edge_rows(graph, ids, env, &tag_cache)
-        .into_iter()
-        .filter(|row| row.edge_kind != "CONTAINS")
-        .collect();
-
-    edge_row_batch(edge_rows, &specs.edge)
+    edge_row_batch(graph, ids, env, &tag_cache, Vec::new(), false, &specs.edge)
 }
 
 struct IndexerEdgeRow<'a> {
@@ -439,8 +433,8 @@ struct IndexerEdgeRow<'a> {
     edge_kind: &'a str,
     source_node_kind: &'a str,
     target_node_kind: &'a str,
-    source_tags: Vec<String>,
-    target_tags: Vec<String>,
+    source_tags: &'a [String],
+    target_tags: &'a [String],
 }
 
 impl AsRecordBatch for IndexerEdgeRow<'_> {
@@ -470,7 +464,7 @@ fn branch_contains_directory_rows<'a>(
     ids: &'a [i64],
     env: &'a IndexerEnvelope,
     branch_id: i64,
-    branch_tags: &[String],
+    branch_tags: &'a [String],
 ) -> Vec<IndexerEdgeRow<'a>> {
     graph
         .directories()
@@ -482,8 +476,8 @@ fn branch_contains_directory_rows<'a>(
             edge_kind: "CONTAINS",
             source_node_kind: "Branch",
             target_node_kind: "Directory",
-            source_tags: branch_tags.to_vec(),
-            target_tags: Vec::new(),
+            source_tags: branch_tags,
+            target_tags: &[],
         })
         .collect()
 }
@@ -493,8 +487,8 @@ fn branch_contains_file_rows<'a>(
     ids: &'a [i64],
     env: &'a IndexerEnvelope,
     branch_id: i64,
-    branch_tags: &[String],
-    tag_cache: &[Vec<String>],
+    branch_tags: &'a [String],
+    tag_cache: &'a [Vec<String>],
 ) -> Vec<IndexerEdgeRow<'a>> {
     graph
         .files()
@@ -506,8 +500,8 @@ fn branch_contains_file_rows<'a>(
             edge_kind: "CONTAINS",
             source_node_kind: "Branch",
             target_node_kind: "File",
-            source_tags: branch_tags.to_vec(),
-            target_tags: tag_cache[idx.index()].clone(),
+            source_tags: branch_tags,
+            target_tags: &tag_cache[idx.index()],
         })
         .collect()
 }
@@ -517,8 +511,8 @@ fn repository_on_branch_rows<'a>(
     ids: &'a [i64],
     env: &'a IndexerEnvelope,
     branch_id: i64,
-    branch_tags: &[String],
-    tag_cache: &[Vec<String>],
+    branch_tags: &'a [String],
+    tag_cache: &'a [Vec<String>],
 ) -> Vec<IndexerEdgeRow<'a>> {
     let mut rows = Vec::new();
 
@@ -529,8 +523,8 @@ fn repository_on_branch_rows<'a>(
         edge_kind: "ON_BRANCH",
         source_node_kind: "Directory",
         target_node_kind: "Branch",
-        source_tags: Vec::new(),
-        target_tags: branch_tags.to_vec(),
+        source_tags: &[],
+        target_tags: branch_tags,
     }));
     rows.extend(graph.files().map(|(idx, _)| IndexerEdgeRow {
         env,
@@ -539,56 +533,96 @@ fn repository_on_branch_rows<'a>(
         edge_kind: "ON_BRANCH",
         source_node_kind: "File",
         target_node_kind: "Branch",
-        source_tags: tag_cache[idx.index()].clone(),
-        target_tags: branch_tags.to_vec(),
+        source_tags: &tag_cache[idx.index()],
+        target_tags: branch_tags,
     }));
 
     rows
 }
 
-fn graph_edge_rows<'a>(
-    graph: &'a code_graph::v2::linker::CodeGraph,
-    ids: &'a [i64],
-    env: &'a IndexerEnvelope,
-    tag_cache: &[Vec<String>],
-) -> Vec<IndexerEdgeRow<'a>> {
-    let mut rows = Vec::new();
-    for ei in graph.graph.edge_indices() {
-        let (src, tgt) = graph.graph.edge_endpoints(ei).unwrap();
-        let edge = &graph.graph[ei];
-        rows.push(IndexerEdgeRow {
-            env,
-            source_id: ids[src.index()],
-            target_id: ids[tgt.index()],
-            edge_kind: edge.relationship.edge_kind.as_ref(),
-            source_node_kind: edge.relationship.source_node.as_ref(),
-            target_node_kind: edge.relationship.target_node.as_ref(),
-            source_tags: tag_cache[src.index()].clone(),
-            target_tags: tag_cache[tgt.index()].clone(),
-        });
-    }
-    rows
+/// A row in the edge batch: either a pre-built structural row or a petgraph
+/// edge rendered lazily. Graph edges dominate (millions on large repos), so
+/// they are never materialized as `IndexerEdgeRow`s — sorting and rendering
+/// work from the edge index, keeping peak memory at one small enum per edge
+/// instead of a full row copy plus per-row tag clones.
+enum EdgeEntry<'r, 'a> {
+    Row(&'r IndexerEdgeRow<'a>),
+    Graph(petgraph::graph::EdgeIndex),
 }
 
 fn edge_row_batch(
-    mut edge_rows: Vec<IndexerEdgeRow<'_>>,
+    graph: &code_graph::v2::linker::CodeGraph,
+    ids: &[i64],
+    env: &IndexerEnvelope,
+    tag_cache: &[Vec<String>],
+    structural_rows: Vec<IndexerEdgeRow<'_>>,
+    include_contains: bool,
     specs: &[ColumnSpec],
 ) -> Result<RecordBatch, ArrowError> {
+    let mut entries: Vec<EdgeEntry<'_, '_>> =
+        Vec::with_capacity(structural_rows.len() + graph.graph.edge_count());
+    entries.extend(structural_rows.iter().map(EdgeEntry::Row));
+    entries.extend(
+        graph
+            .graph
+            .edge_indices()
+            .filter(|&ei| {
+                include_contains || graph.graph[ei].relationship.edge_kind.as_ref() != "CONTAINS"
+            })
+            .map(EdgeEntry::Graph),
+    );
+
     // Sort edges to match the ClickHouse edge table ORDER BY:
     // (traversal_path, relationship_kind, source_id, target_id, source_kind, target_kind).
     // traversal_path is constant within a batch so we skip it. Pre-sorted
     // inserts create parts that are already in primary key order, reducing
     // merge work and improving compression via delta encoding on source_id.
-    edge_rows.sort_by(|a, b| {
-        a.edge_kind
-            .cmp(b.edge_kind)
-            .then_with(|| a.source_id.cmp(&b.source_id))
-            .then_with(|| a.target_id.cmp(&b.target_id))
-            .then_with(|| a.source_node_kind.cmp(b.source_node_kind))
-            .then_with(|| a.target_node_kind.cmp(b.target_node_kind))
-    });
+    fn entry_sort_key<'k>(
+        entry: &EdgeEntry<'_, 'k>,
+        graph: &'k code_graph::v2::linker::CodeGraph,
+        ids: &[i64],
+    ) -> (&'k str, i64, i64, &'k str, &'k str) {
+        match *entry {
+            EdgeEntry::Row(r) => (
+                r.edge_kind,
+                r.source_id,
+                r.target_id,
+                r.source_node_kind,
+                r.target_node_kind,
+            ),
+            EdgeEntry::Graph(ei) => {
+                let (src, tgt) = graph.graph.edge_endpoints(ei).unwrap();
+                let rel = &graph.graph[ei].relationship;
+                (
+                    rel.edge_kind.as_ref(),
+                    ids[src.index()],
+                    ids[tgt.index()],
+                    rel.source_node.as_ref(),
+                    rel.target_node.as_ref(),
+                )
+            }
+        }
+    }
+    entries.sort_by(|a, b| entry_sort_key(a, graph, ids).cmp(&entry_sort_key(b, graph, ids)));
 
-    IndexerEdgeRow::to_record_batch(&edge_rows, specs, &())
+    BatchBuilder::new(specs, entries.len())?.build(&entries, |entry, b| match *entry {
+        EdgeEntry::Row(r) => r.write_row(b, &()),
+        EdgeEntry::Graph(ei) => {
+            let (src, tgt) = graph.graph.edge_endpoints(ei).unwrap();
+            let rel = &graph.graph[ei].relationship;
+            IndexerEdgeRow {
+                env,
+                source_id: ids[src.index()],
+                target_id: ids[tgt.index()],
+                edge_kind: rel.edge_kind.as_ref(),
+                source_node_kind: rel.source_node.as_ref(),
+                target_node_kind: rel.target_node.as_ref(),
+                source_tags: &tag_cache[src.index()],
+                target_tags: &tag_cache[tgt.index()],
+            }
+            .write_row(b, &())
+        }
+    })
 }
 
 fn compute_branch_id(project_id: i64, branch: &str) -> i64 {
