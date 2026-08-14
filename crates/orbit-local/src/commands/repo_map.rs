@@ -73,7 +73,11 @@ pub(crate) const EXCLUDE_LIKE: &[&str] = &[
 
 /// RE2 patterns whose matches are excluded — catches `foo_tests/` style
 /// directories and Go `mock_*.go` files that the `LIKE` list cannot.
-pub(crate) const EXCLUDE_REGEX: &[&str] = &[r"(^|/)[a-z]+_tests?/", r"(^|/)mock_[a-z_]+\.go$"];
+pub(crate) const EXCLUDE_REGEX: &[&str] = &[
+    r"(^|/)[a-z]+_tests?/",
+    r"(^|/)mock_[a-z_]+\.go$",
+    r"(^|/)(test_[^/]+|conftest)\.py$",
+];
 
 /// Structural signature keyword regex (RE2), matched against the first
 /// non-comment line in the window after `start_line`.
