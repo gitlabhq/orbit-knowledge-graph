@@ -1352,6 +1352,13 @@ impl FamilyPipeline {
         ));
 
         graph.finalize(tracer);
+        let mut hook_members: Vec<_> = member_ctxs.iter().collect();
+        hook_members.sort_by_key(|(lang, _)| format!("{lang:?}"));
+        for (_, lctx) in hook_members {
+            if let Some(hook) = lctx.spec.hooks.post_graph_build {
+                hook(&mut graph);
+            }
+        }
         graph.drop_construction_indexes();
         let graph_build_ms = t0.elapsed().as_secs_f64() * 1000.0 - parse_ms;
 
@@ -1994,6 +2001,7 @@ mod tests {
         let root = tmp.path();
         std::fs::create_dir_all(root.join("src")).unwrap();
         std::fs::write(root.join("src/main.py"), "def hello(): pass\n").unwrap();
+        std::fs::write(root.join("README.md"), "# Hi\nhello!\n").unwrap();
 
         let inventory = vec![
             FileInventoryEntry {
@@ -2037,7 +2045,7 @@ mod tests {
         assert_eq!(result.errors.len(), 0, "Should have no errors");
         assert_eq!(result.stats.files_discovered, 5);
         assert_eq!(result.stats.files_indexed, 5);
-        assert_eq!(result.stats.files_parsed, 1);
+        assert_eq!(result.stats.files_parsed, 2);
 
         let graphs = capture.take();
         let mut structural_files: Vec<_> = graphs
@@ -2053,7 +2061,7 @@ mod tests {
         assert_eq!(
             structural_files,
             vec![
-                ("README.md".into(), "unknown"),
+                ("README.md".into(), "markdown"),
                 ("assets/logo.png".into(), "unknown"),
                 ("config/app.toml".into(), "unknown"),
                 ("src/main.py".into(), "python"),

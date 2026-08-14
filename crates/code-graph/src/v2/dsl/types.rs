@@ -785,6 +785,10 @@ pub struct LanguageHooks {
     /// `None` to keep the original. Used by Ruby to resolve
     /// `obj.send(:foo)` as `obj.foo`.
     pub ref_name_rewrite: Option<fn(&N<'_>, &str) -> Option<String>>,
+    /// Runs once after the family graph is finalized, while construction
+    /// indexes are still alive. Used by Markdown to turn relative link
+    /// imports into File -> File edges.
+    pub post_graph_build: Option<fn(&mut crate::v2::linker::CodeGraph)>,
 }
 
 fn build_dispatch(rules: &[ScopeRule]) -> FxHashMap<&'static str, Vec<usize>> {

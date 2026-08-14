@@ -132,11 +132,7 @@ async fn indexes_file_nodes_for_all_archive_files() {
             "src/main.py".to_string(),
         ])
     );
-    assert_eq!(
-        language_for(&files, "README.md"),
-        Some("unknown"),
-        "non-parsable markdown should use the stable unknown language"
-    );
+    assert_eq!(language_for(&files, "README.md"), Some("markdown"));
     assert_eq!(language_for(&files, "assets/logo.png"), Some("unknown"));
     assert_eq!(language_for(&files, "src/main.py"), Some("python"));
     assert_eq!(language_for(&files, "config/app.yml"), Some("yaml"));
@@ -165,7 +161,7 @@ async fn indexes_file_nodes_for_all_archive_files() {
     )
     .await;
 
-    assert_no_active_definitions(&clickhouse, project_id, "README.md").await;
+    assert_active_definitions(&clickhouse, project_id, "README.md", &["Project"]).await;
     assert_no_active_definitions(&clickhouse, project_id, "assets/logo.png").await;
     assert_no_active_definitions(&clickhouse, project_id, "config/app.yml").await;
     assert_active_definitions(

@@ -28,6 +28,7 @@ pub enum SupportLang {
     Yaml,
     Zig,
     Markdown,
+    MarkdownInline,
 }
 
 impl fmt::Display for SupportLang {
@@ -155,6 +156,11 @@ impl LanguageExt for SupportLang {
             Self::Markdown => tree_sitter_md::LANGUAGE.into(),
             #[cfg(not(feature = "tree-sitter-md"))]
             Self::Markdown => panic!("tree-sitter-md feature not enabled"),
+
+            #[cfg(feature = "tree-sitter-md")]
+            Self::MarkdownInline => tree_sitter_md::INLINE_LANGUAGE.into(),
+            #[cfg(not(feature = "tree-sitter-md"))]
+            Self::MarkdownInline => panic!("tree-sitter-md feature not enabled"),
         }
     }
 
