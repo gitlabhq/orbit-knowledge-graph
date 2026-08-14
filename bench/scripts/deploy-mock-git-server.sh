@@ -12,9 +12,8 @@ CH_NS="${E2E_CH_NAMESPACE:-ra-ch-${RUN_ID}}"
 IMAGE="${MOCK_GIT_REGISTRY}/mock-git-server:latest"
 
 # --- 1. Build and push ---
-log "Building mock-git-server image"
-docker build -t "${IMAGE}" "${BENCH_DIR}/mock-git-server"
-docker push "${IMAGE}"
+log "Building mock-git-server image (linux/amd64)"
+docker buildx build --platform linux/amd64 -t "${IMAGE}" --push "${BENCH_DIR}/mock-git-server"
 
 # --- 2. Create service account for GCS FUSE ---
 $KC create sa mock-git-server-sa -n "${CH_NS}" 2>/dev/null || true
