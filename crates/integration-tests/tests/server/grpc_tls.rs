@@ -5,7 +5,7 @@ use orbit_server::auth::JwtValidator;
 use orbit_server::cluster_health::ClusterHealthChecker;
 use orbit_server::grpc::GrpcServer;
 use orbit_server::proto::GetClusterHealthRequest;
-use orbit_server::proto::knowledge_graph_service_client::KnowledgeGraphServiceClient;
+use orbit_server::proto::orbit_service_client::OrbitServiceClient;
 use orbit_server_config::{AnalyticsConfig, ClickHouseConfiguration, GrpcConfig};
 use tonic::transport::server::ServerTlsConfig;
 use tonic::transport::{Certificate, ClientTlsConfig, Endpoint, Identity};
@@ -88,7 +88,7 @@ async fn grpc_tls_handshake_succeeds() {
     let server_handle = tokio::spawn(server.run());
 
     let channel = connect_with_retry(tls_endpoint(bound_addr.port(), &ca_pem), 20).await;
-    let mut client = KnowledgeGraphServiceClient::new(channel);
+    let mut client = OrbitServiceClient::new(channel);
 
     // No auth token → Unauthenticated. Getting a gRPC status proves TLS worked.
     let status = client
@@ -121,8 +121,7 @@ async fn grpc_plaintext_client_rejected_by_tls_server() {
     let _ = connect_with_retry(tls_endpoint(bound_addr.port(), &ca_pem), 20).await;
 
     let result =
-        KnowledgeGraphServiceClient::connect(format!("http://127.0.0.1:{}", bound_addr.port()))
-            .await;
+        OrbitServiceClient::connect(format!("http://127.0.0.1:{}", bound_addr.port())).await;
 
     match result {
         Err(_) => {}
@@ -133,6 +132,78 @@ async fn grpc_plaintext_client_rejected_by_tls_server() {
             assert!(call.is_err(), "plaintext call to TLS server should fail");
         }
     }
+
+    server_handle.abort();
+}
+
+#[tokio::test]
+async fn legacy_gkg_service_path_reaches_the_service() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let bound_addr = listener.local_addr().unwrap();
+    drop(listener);
+
+    let server = build_grpc_server(bound_addr, None);
+    let server_handle = tokio::spawn(server.run());
+
+    let endpoint =
+        Endpoint::from_shared(format!("http://127.0.0.1:{}", bound_addr.port())).unwrap();
+    let channel = connect_with_retry(endpoint, 20).await;
+
+    let mut grpc = tonic::client::Grpc::new(channel);
+    grpc.ready().await.unwrap();
+    let codec: tonic_prost::ProstCodec<
+        GetClusterHealthRequest,
+        orbit_server::proto::GetClusterHealthResponse,
+    > = tonic_prost::ProstCodec::default();
+    let status = grpc
+        .unary(
+            tonic::Request::new(GetClusterHealthRequest { format: 0 }),
+            tonic::codegen::http::uri::PathAndQuery::from_static(
+                "/gkg.v1.KnowledgeGraphService/GetClusterHealth",
+            ),
+            codec,
+        )
+        .await
+        .unwrap_err();
+
+    // Unauthenticated proves the legacy path routed into the real service;
+    // an unrouted service name would return Unimplemented instead.
+    assert_eq!(status.code(), tonic::Code::Unauthenticated);
+
+    server_handle.abort();
+}
+
+#[tokio::test]
+async fn unknown_service_path_is_unimplemented() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let bound_addr = listener.local_addr().unwrap();
+    drop(listener);
+
+    let server = build_grpc_server(bound_addr, None);
+    let server_handle = tokio::spawn(server.run());
+
+    let endpoint =
+        Endpoint::from_shared(format!("http://127.0.0.1:{}", bound_addr.port())).unwrap();
+    let channel = connect_with_retry(endpoint, 20).await;
+
+    let mut grpc = tonic::client::Grpc::new(channel);
+    grpc.ready().await.unwrap();
+    let codec: tonic_prost::ProstCodec<
+        GetClusterHealthRequest,
+        orbit_server::proto::GetClusterHealthResponse,
+    > = tonic_prost::ProstCodec::default();
+    let status = grpc
+        .unary(
+            tonic::Request::new(GetClusterHealthRequest { format: 0 }),
+            tonic::codegen::http::uri::PathAndQuery::from_static(
+                "/gkg.v2.NoSuchService/GetClusterHealth",
+            ),
+            codec,
+        )
+        .await
+        .unwrap_err();
+
+    assert_eq!(status.code(), tonic::Code::Unimplemented);
 
     server_handle.abort();
 }

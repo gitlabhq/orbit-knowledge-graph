@@ -264,7 +264,7 @@ The Ruby `GrpcClient` was also updated: `STREAMING_TIMEOUT` increased from 10 to
 
 ### Go proto dependency
 
-The Workhorse Go module imports `gitlab.com/gitlab-org/orbit/knowledge-graph/clients/gkgpb` for the generated protobuf types. This module is published from the `clients/gkgpb/` directory in this repository. Proto changes require updating the Go module version in `workhorse/go.mod`.
+The Workhorse Go module imports `gitlab.com/gitlab-org/orbit/knowledge-graph/clients/orbitpb` for the generated protobuf types. This module is published from the `clients/orbitpb/` directory in this repository. Proto changes require updating the Go module version in `workhorse/go.mod`.
 
 ### TLS and transport security
 
@@ -281,7 +281,7 @@ There are three network legs in this architecture, each with different security 
 ### What does not change
 
 - **GKG Rust code**: the gRPC protocol is identical regardless of whether the client is Rails or Workhorse. JWT format, metadata keys, stream message types, and the redaction handshake remain unchanged.
-- **Proto definition**: `gkg.proto` is compiled for Go and added to the Workhorse codebase. The proto itself does not change.
+- **Proto definition**: `orbit.proto` is compiled for Go and added to the Workhorse codebase. The proto itself does not change.
 - **Unary RPCs**: `GetGraphSchema`, `ListTools`, and `GetClusterHealth` are fast unary calls that do not hold Puma workers for extended periods. They stay in Rails.
 - **GKG query pipeline**: the SecurityStage → CompilationStage → ClickHouseExecutor → ExtractionStage → AuthorizationStage → RedactionStage → HydrationStage → OutputStage pipeline runs identically.
 

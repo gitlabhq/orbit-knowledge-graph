@@ -434,7 +434,7 @@ let needs_quota_check = matches!(
 
 ### 1.7 JWT claims change
 
-`source_type` is carried exclusively in the JWT claims, and the gRPC proto (`gkg.proto`) is **not** modified. Adding `source_type` to the proto request body would create an unsigned, untrusted field that any caller could set to any value, enabling spoofing. The JWT is signed by Rails with the shared HS256 secret, so GKG can trust the claim.
+`source_type` is carried exclusively in the JWT claims, and the gRPC proto (`orbit.proto`) is **not** modified. Adding `source_type` to the proto request body would create an unsigned, untrusted field that any caller could set to any value, enabling spoofing. The JWT is signed by Rails with the shared HS256 secret, so GKG can trust the claim.
 
 `source_type` is a required field on the JWT claims struct in `crates/orbit-server/src/auth/claims.rs`:
 

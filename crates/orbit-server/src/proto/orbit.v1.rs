@@ -747,7 +747,7 @@ impl IndexingState {
     }
 }
 /// Generated client implementations.
-pub mod knowledge_graph_service_client {
+pub mod orbit_service_client {
     #![allow(
         unused_variables,
         dead_code,
@@ -759,11 +759,14 @@ pub mod knowledge_graph_service_client {
     use tonic::codegen::http::Uri;
     /// Core service exposing 4 RPCs. Gated behind the :knowledge_graph feature flag
     /// in Rails. JWT auth carries user identity and traversal IDs for authorization.
+    /// Renamed from gkg.v1.KnowledgeGraphService (knowledge-graph#1152, chain
+    /// T10). The server keeps answering the old request paths through a legacy
+    /// facade until published-client traffic on them reaches zero.
     #[derive(Debug, Clone)]
-    pub struct KnowledgeGraphServiceClient<T> {
+    pub struct OrbitServiceClient<T> {
         inner: tonic::client::Grpc<T>,
     }
-    impl KnowledgeGraphServiceClient<tonic::transport::Channel> {
+    impl OrbitServiceClient<tonic::transport::Channel> {
         /// Attempt to create a new client by connecting to a given endpoint.
         pub async fn connect<D>(dst: D) -> Result<Self, tonic::transport::Error>
         where
@@ -774,7 +777,7 @@ pub mod knowledge_graph_service_client {
             Ok(Self::new(conn))
         }
     }
-    impl<T> KnowledgeGraphServiceClient<T>
+    impl<T> OrbitServiceClient<T>
     where
         T: tonic::client::GrpcService<tonic::body::Body>,
         T::Error: Into<StdError>,
@@ -792,7 +795,7 @@ pub mod knowledge_graph_service_client {
         pub fn with_interceptor<F>(
             inner: T,
             interceptor: F,
-        ) -> KnowledgeGraphServiceClient<InterceptedService<T, F>>
+        ) -> OrbitServiceClient<InterceptedService<T, F>>
         where
             F: tonic::service::Interceptor,
             T::ResponseBody: Default,
@@ -806,7 +809,7 @@ pub mod knowledge_graph_service_client {
                 http::Request<tonic::body::Body>,
             >>::Error: Into<StdError> + std::marker::Send + std::marker::Sync,
         {
-            KnowledgeGraphServiceClient::new(InterceptedService::new(inner, interceptor))
+            OrbitServiceClient::new(InterceptedService::new(inner, interceptor))
         }
         /// Compress requests with the given encoding.
         ///
@@ -858,11 +861,11 @@ pub mod knowledge_graph_service_client {
                 })?;
             let codec = tonic_prost::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
-                "/gkg.v1.KnowledgeGraphService/ListTools",
+                "/orbit.v1.OrbitService/ListTools",
             );
             let mut req = request.into_request();
             req.extensions_mut()
-                .insert(GrpcMethod::new("gkg.v1.KnowledgeGraphService", "ListTools"));
+                .insert(GrpcMethod::new("orbit.v1.OrbitService", "ListTools"));
             self.inner.unary(req, path, codec).await
         }
         /// Returns available lazy command definitions with parameter schemas.
@@ -884,13 +887,11 @@ pub mod knowledge_graph_service_client {
                 })?;
             let codec = tonic_prost::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
-                "/gkg.v1.KnowledgeGraphService/ListAgentCommands",
+                "/orbit.v1.OrbitService/ListAgentCommands",
             );
             let mut req = request.into_request();
             req.extensions_mut()
-                .insert(
-                    GrpcMethod::new("gkg.v1.KnowledgeGraphService", "ListAgentCommands"),
-                );
+                .insert(GrpcMethod::new("orbit.v1.OrbitService", "ListAgentCommands"));
             self.inner.unary(req, path, codec).await
         }
         /// Executes a lazy command that does not require Rails-specific interception.
@@ -912,13 +913,11 @@ pub mod knowledge_graph_service_client {
                 })?;
             let codec = tonic_prost::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
-                "/gkg.v1.KnowledgeGraphService/InvokeAgentCommand",
+                "/orbit.v1.OrbitService/InvokeAgentCommand",
             );
             let mut req = request.into_request();
             req.extensions_mut()
-                .insert(
-                    GrpcMethod::new("gkg.v1.KnowledgeGraphService", "InvokeAgentCommand"),
-                );
+                .insert(GrpcMethod::new("orbit.v1.OrbitService", "InvokeAgentCommand"));
             self.inner.unary(req, path, codec).await
         }
         /// Executes a graph query against ClickHouse with bidirectional streaming
@@ -944,11 +943,11 @@ pub mod knowledge_graph_service_client {
                 })?;
             let codec = tonic_prost::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
-                "/gkg.v1.KnowledgeGraphService/ExecuteQuery",
+                "/orbit.v1.OrbitService/ExecuteQuery",
             );
             let mut req = request.into_streaming_request();
             req.extensions_mut()
-                .insert(GrpcMethod::new("gkg.v1.KnowledgeGraphService", "ExecuteQuery"));
+                .insert(GrpcMethod::new("orbit.v1.OrbitService", "ExecuteQuery"));
             self.inner.streaming(req, path, codec).await
         }
         /// Returns the graph ontology (nodes, edges, domains) from in-memory cache.
@@ -971,13 +970,11 @@ pub mod knowledge_graph_service_client {
                 })?;
             let codec = tonic_prost::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
-                "/gkg.v1.KnowledgeGraphService/GetGraphSchema",
+                "/orbit.v1.OrbitService/GetGraphSchema",
             );
             let mut req = request.into_request();
             req.extensions_mut()
-                .insert(
-                    GrpcMethod::new("gkg.v1.KnowledgeGraphService", "GetGraphSchema"),
-                );
+                .insert(GrpcMethod::new("orbit.v1.OrbitService", "GetGraphSchema"));
             self.inner.unary(req, path, codec).await
         }
         /// Returns the query DSL grammar (JSON Schema for query_graph input).
@@ -1000,11 +997,11 @@ pub mod knowledge_graph_service_client {
                 })?;
             let codec = tonic_prost::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
-                "/gkg.v1.KnowledgeGraphService/GetQueryDsl",
+                "/orbit.v1.OrbitService/GetQueryDsl",
             );
             let mut req = request.into_request();
             req.extensions_mut()
-                .insert(GrpcMethod::new("gkg.v1.KnowledgeGraphService", "GetQueryDsl"));
+                .insert(GrpcMethod::new("orbit.v1.OrbitService", "GetQueryDsl"));
             self.inner.unary(req, path, codec).await
         }
         /// Lists the server-defined named queries with their DSL rendered for the
@@ -1029,13 +1026,11 @@ pub mod knowledge_graph_service_client {
                 })?;
             let codec = tonic_prost::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
-                "/gkg.v1.KnowledgeGraphService/ListNamedQueries",
+                "/orbit.v1.OrbitService/ListNamedQueries",
             );
             let mut req = request.into_request();
             req.extensions_mut()
-                .insert(
-                    GrpcMethod::new("gkg.v1.KnowledgeGraphService", "ListNamedQueries"),
-                );
+                .insert(GrpcMethod::new("orbit.v1.OrbitService", "ListNamedQueries"));
             self.inner.unary(req, path, codec).await
         }
         /// Returns the JSON Schema describing the query response shape (the formatter
@@ -1059,13 +1054,11 @@ pub mod knowledge_graph_service_client {
                 })?;
             let codec = tonic_prost::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
-                "/gkg.v1.KnowledgeGraphService/GetResponseFormat",
+                "/orbit.v1.OrbitService/GetResponseFormat",
             );
             let mut req = request.into_request();
             req.extensions_mut()
-                .insert(
-                    GrpcMethod::new("gkg.v1.KnowledgeGraphService", "GetResponseFormat"),
-                );
+                .insert(GrpcMethod::new("orbit.v1.OrbitService", "GetResponseFormat"));
             self.inner.unary(req, path, codec).await
         }
         /// Returns cluster health and component status.
@@ -1087,13 +1080,11 @@ pub mod knowledge_graph_service_client {
                 })?;
             let codec = tonic_prost::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
-                "/gkg.v1.KnowledgeGraphService/GetClusterHealth",
+                "/orbit.v1.OrbitService/GetClusterHealth",
             );
             let mut req = request.into_request();
             req.extensions_mut()
-                .insert(
-                    GrpcMethod::new("gkg.v1.KnowledgeGraphService", "GetClusterHealth"),
-                );
+                .insert(GrpcMethod::new("orbit.v1.OrbitService", "GetClusterHealth"));
             self.inner.unary(req, path, codec).await
         }
         /// Returns entity counts per domain, scoped by traversal_path prefix.
@@ -1115,19 +1106,17 @@ pub mod knowledge_graph_service_client {
                 })?;
             let codec = tonic_prost::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
-                "/gkg.v1.KnowledgeGraphService/GetGraphStatus",
+                "/orbit.v1.OrbitService/GetGraphStatus",
             );
             let mut req = request.into_request();
             req.extensions_mut()
-                .insert(
-                    GrpcMethod::new("gkg.v1.KnowledgeGraphService", "GetGraphStatus"),
-                );
+                .insert(GrpcMethod::new("orbit.v1.OrbitService", "GetGraphStatus"));
             self.inner.unary(req, path, codec).await
         }
     }
 }
 /// Generated server implementations.
-pub mod knowledge_graph_service_server {
+pub mod orbit_service_server {
     #![allow(
         unused_variables,
         dead_code,
@@ -1136,9 +1125,9 @@ pub mod knowledge_graph_service_server {
         clippy::let_unit_value,
     )]
     use tonic::codegen::*;
-    /// Generated trait containing gRPC methods that should be implemented for use with KnowledgeGraphServiceServer.
+    /// Generated trait containing gRPC methods that should be implemented for use with OrbitServiceServer.
     #[async_trait]
-    pub trait KnowledgeGraphService: std::marker::Send + std::marker::Sync + 'static {
+    pub trait OrbitService: std::marker::Send + std::marker::Sync + 'static {
         /// Returns available tool definitions with parameter schemas.
         /// Used by MCP tools/list and GET /api/v4/orbit/tools.
         async fn list_tools(
@@ -1247,15 +1236,18 @@ pub mod knowledge_graph_service_server {
     }
     /// Core service exposing 4 RPCs. Gated behind the :knowledge_graph feature flag
     /// in Rails. JWT auth carries user identity and traversal IDs for authorization.
+    /// Renamed from gkg.v1.KnowledgeGraphService (knowledge-graph#1152, chain
+    /// T10). The server keeps answering the old request paths through a legacy
+    /// facade until published-client traffic on them reaches zero.
     #[derive(Debug)]
-    pub struct KnowledgeGraphServiceServer<T> {
+    pub struct OrbitServiceServer<T> {
         inner: Arc<T>,
         accept_compression_encodings: EnabledCompressionEncodings,
         send_compression_encodings: EnabledCompressionEncodings,
         max_decoding_message_size: Option<usize>,
         max_encoding_message_size: Option<usize>,
     }
-    impl<T> KnowledgeGraphServiceServer<T> {
+    impl<T> OrbitServiceServer<T> {
         pub fn new(inner: T) -> Self {
             Self::from_arc(Arc::new(inner))
         }
@@ -1306,10 +1298,9 @@ pub mod knowledge_graph_service_server {
             self
         }
     }
-    impl<T, B> tonic::codegen::Service<http::Request<B>>
-    for KnowledgeGraphServiceServer<T>
+    impl<T, B> tonic::codegen::Service<http::Request<B>> for OrbitServiceServer<T>
     where
-        T: KnowledgeGraphService,
+        T: OrbitService,
         B: Body + std::marker::Send + 'static,
         B::Error: Into<StdError> + std::marker::Send + 'static,
     {
@@ -1324,11 +1315,11 @@ pub mod knowledge_graph_service_server {
         }
         fn call(&mut self, req: http::Request<B>) -> Self::Future {
             match req.uri().path() {
-                "/gkg.v1.KnowledgeGraphService/ListTools" => {
+                "/orbit.v1.OrbitService/ListTools" => {
                     #[allow(non_camel_case_types)]
-                    struct ListToolsSvc<T: KnowledgeGraphService>(pub Arc<T>);
+                    struct ListToolsSvc<T: OrbitService>(pub Arc<T>);
                     impl<
-                        T: KnowledgeGraphService,
+                        T: OrbitService,
                     > tonic::server::UnaryService<super::ListToolsRequest>
                     for ListToolsSvc<T> {
                         type Response = super::ListToolsResponse;
@@ -1342,8 +1333,7 @@ pub mod knowledge_graph_service_server {
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as KnowledgeGraphService>::list_tools(&inner, request)
-                                    .await
+                                <T as OrbitService>::list_tools(&inner, request).await
                             };
                             Box::pin(fut)
                         }
@@ -1370,11 +1360,11 @@ pub mod knowledge_graph_service_server {
                     };
                     Box::pin(fut)
                 }
-                "/gkg.v1.KnowledgeGraphService/ListAgentCommands" => {
+                "/orbit.v1.OrbitService/ListAgentCommands" => {
                     #[allow(non_camel_case_types)]
-                    struct ListAgentCommandsSvc<T: KnowledgeGraphService>(pub Arc<T>);
+                    struct ListAgentCommandsSvc<T: OrbitService>(pub Arc<T>);
                     impl<
-                        T: KnowledgeGraphService,
+                        T: OrbitService,
                     > tonic::server::UnaryService<super::ListAgentCommandsRequest>
                     for ListAgentCommandsSvc<T> {
                         type Response = super::ListAgentCommandsResponse;
@@ -1388,10 +1378,7 @@ pub mod knowledge_graph_service_server {
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as KnowledgeGraphService>::list_agent_commands(
-                                        &inner,
-                                        request,
-                                    )
+                                <T as OrbitService>::list_agent_commands(&inner, request)
                                     .await
                             };
                             Box::pin(fut)
@@ -1419,11 +1406,11 @@ pub mod knowledge_graph_service_server {
                     };
                     Box::pin(fut)
                 }
-                "/gkg.v1.KnowledgeGraphService/InvokeAgentCommand" => {
+                "/orbit.v1.OrbitService/InvokeAgentCommand" => {
                     #[allow(non_camel_case_types)]
-                    struct InvokeAgentCommandSvc<T: KnowledgeGraphService>(pub Arc<T>);
+                    struct InvokeAgentCommandSvc<T: OrbitService>(pub Arc<T>);
                     impl<
-                        T: KnowledgeGraphService,
+                        T: OrbitService,
                     > tonic::server::UnaryService<super::InvokeAgentCommandRequest>
                     for InvokeAgentCommandSvc<T> {
                         type Response = super::InvokeAgentCommandResponse;
@@ -1437,10 +1424,7 @@ pub mod knowledge_graph_service_server {
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as KnowledgeGraphService>::invoke_agent_command(
-                                        &inner,
-                                        request,
-                                    )
+                                <T as OrbitService>::invoke_agent_command(&inner, request)
                                     .await
                             };
                             Box::pin(fut)
@@ -1468,11 +1452,11 @@ pub mod knowledge_graph_service_server {
                     };
                     Box::pin(fut)
                 }
-                "/gkg.v1.KnowledgeGraphService/ExecuteQuery" => {
+                "/orbit.v1.OrbitService/ExecuteQuery" => {
                     #[allow(non_camel_case_types)]
-                    struct ExecuteQuerySvc<T: KnowledgeGraphService>(pub Arc<T>);
+                    struct ExecuteQuerySvc<T: OrbitService>(pub Arc<T>);
                     impl<
-                        T: KnowledgeGraphService,
+                        T: OrbitService,
                     > tonic::server::StreamingService<super::ExecuteQueryMessage>
                     for ExecuteQuerySvc<T> {
                         type Response = super::ExecuteQueryMessage;
@@ -1489,8 +1473,7 @@ pub mod knowledge_graph_service_server {
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as KnowledgeGraphService>::execute_query(&inner, request)
-                                    .await
+                                <T as OrbitService>::execute_query(&inner, request).await
                             };
                             Box::pin(fut)
                         }
@@ -1517,11 +1500,11 @@ pub mod knowledge_graph_service_server {
                     };
                     Box::pin(fut)
                 }
-                "/gkg.v1.KnowledgeGraphService/GetGraphSchema" => {
+                "/orbit.v1.OrbitService/GetGraphSchema" => {
                     #[allow(non_camel_case_types)]
-                    struct GetGraphSchemaSvc<T: KnowledgeGraphService>(pub Arc<T>);
+                    struct GetGraphSchemaSvc<T: OrbitService>(pub Arc<T>);
                     impl<
-                        T: KnowledgeGraphService,
+                        T: OrbitService,
                     > tonic::server::UnaryService<super::GetGraphSchemaRequest>
                     for GetGraphSchemaSvc<T> {
                         type Response = super::GetGraphSchemaResponse;
@@ -1535,11 +1518,7 @@ pub mod knowledge_graph_service_server {
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as KnowledgeGraphService>::get_graph_schema(
-                                        &inner,
-                                        request,
-                                    )
-                                    .await
+                                <T as OrbitService>::get_graph_schema(&inner, request).await
                             };
                             Box::pin(fut)
                         }
@@ -1566,11 +1545,11 @@ pub mod knowledge_graph_service_server {
                     };
                     Box::pin(fut)
                 }
-                "/gkg.v1.KnowledgeGraphService/GetQueryDsl" => {
+                "/orbit.v1.OrbitService/GetQueryDsl" => {
                     #[allow(non_camel_case_types)]
-                    struct GetQueryDslSvc<T: KnowledgeGraphService>(pub Arc<T>);
+                    struct GetQueryDslSvc<T: OrbitService>(pub Arc<T>);
                     impl<
-                        T: KnowledgeGraphService,
+                        T: OrbitService,
                     > tonic::server::UnaryService<super::GetQueryDslRequest>
                     for GetQueryDslSvc<T> {
                         type Response = super::GetQueryDslResponse;
@@ -1584,8 +1563,7 @@ pub mod knowledge_graph_service_server {
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as KnowledgeGraphService>::get_query_dsl(&inner, request)
-                                    .await
+                                <T as OrbitService>::get_query_dsl(&inner, request).await
                             };
                             Box::pin(fut)
                         }
@@ -1612,11 +1590,11 @@ pub mod knowledge_graph_service_server {
                     };
                     Box::pin(fut)
                 }
-                "/gkg.v1.KnowledgeGraphService/ListNamedQueries" => {
+                "/orbit.v1.OrbitService/ListNamedQueries" => {
                     #[allow(non_camel_case_types)]
-                    struct ListNamedQueriesSvc<T: KnowledgeGraphService>(pub Arc<T>);
+                    struct ListNamedQueriesSvc<T: OrbitService>(pub Arc<T>);
                     impl<
-                        T: KnowledgeGraphService,
+                        T: OrbitService,
                     > tonic::server::UnaryService<super::ListNamedQueriesRequest>
                     for ListNamedQueriesSvc<T> {
                         type Response = super::ListNamedQueriesResponse;
@@ -1630,10 +1608,7 @@ pub mod knowledge_graph_service_server {
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as KnowledgeGraphService>::list_named_queries(
-                                        &inner,
-                                        request,
-                                    )
+                                <T as OrbitService>::list_named_queries(&inner, request)
                                     .await
                             };
                             Box::pin(fut)
@@ -1661,11 +1636,11 @@ pub mod knowledge_graph_service_server {
                     };
                     Box::pin(fut)
                 }
-                "/gkg.v1.KnowledgeGraphService/GetResponseFormat" => {
+                "/orbit.v1.OrbitService/GetResponseFormat" => {
                     #[allow(non_camel_case_types)]
-                    struct GetResponseFormatSvc<T: KnowledgeGraphService>(pub Arc<T>);
+                    struct GetResponseFormatSvc<T: OrbitService>(pub Arc<T>);
                     impl<
-                        T: KnowledgeGraphService,
+                        T: OrbitService,
                     > tonic::server::UnaryService<super::GetResponseFormatRequest>
                     for GetResponseFormatSvc<T> {
                         type Response = super::GetResponseFormatResponse;
@@ -1679,10 +1654,7 @@ pub mod knowledge_graph_service_server {
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as KnowledgeGraphService>::get_response_format(
-                                        &inner,
-                                        request,
-                                    )
+                                <T as OrbitService>::get_response_format(&inner, request)
                                     .await
                             };
                             Box::pin(fut)
@@ -1710,11 +1682,11 @@ pub mod knowledge_graph_service_server {
                     };
                     Box::pin(fut)
                 }
-                "/gkg.v1.KnowledgeGraphService/GetClusterHealth" => {
+                "/orbit.v1.OrbitService/GetClusterHealth" => {
                     #[allow(non_camel_case_types)]
-                    struct GetClusterHealthSvc<T: KnowledgeGraphService>(pub Arc<T>);
+                    struct GetClusterHealthSvc<T: OrbitService>(pub Arc<T>);
                     impl<
-                        T: KnowledgeGraphService,
+                        T: OrbitService,
                     > tonic::server::UnaryService<super::GetClusterHealthRequest>
                     for GetClusterHealthSvc<T> {
                         type Response = super::GetClusterHealthResponse;
@@ -1728,10 +1700,7 @@ pub mod knowledge_graph_service_server {
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as KnowledgeGraphService>::get_cluster_health(
-                                        &inner,
-                                        request,
-                                    )
+                                <T as OrbitService>::get_cluster_health(&inner, request)
                                     .await
                             };
                             Box::pin(fut)
@@ -1759,11 +1728,11 @@ pub mod knowledge_graph_service_server {
                     };
                     Box::pin(fut)
                 }
-                "/gkg.v1.KnowledgeGraphService/GetGraphStatus" => {
+                "/orbit.v1.OrbitService/GetGraphStatus" => {
                     #[allow(non_camel_case_types)]
-                    struct GetGraphStatusSvc<T: KnowledgeGraphService>(pub Arc<T>);
+                    struct GetGraphStatusSvc<T: OrbitService>(pub Arc<T>);
                     impl<
-                        T: KnowledgeGraphService,
+                        T: OrbitService,
                     > tonic::server::UnaryService<super::GetGraphStatusRequest>
                     for GetGraphStatusSvc<T> {
                         type Response = super::GetGraphStatusResponse;
@@ -1777,11 +1746,7 @@ pub mod knowledge_graph_service_server {
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as KnowledgeGraphService>::get_graph_status(
-                                        &inner,
-                                        request,
-                                    )
-                                    .await
+                                <T as OrbitService>::get_graph_status(&inner, request).await
                             };
                             Box::pin(fut)
                         }
@@ -1830,7 +1795,7 @@ pub mod knowledge_graph_service_server {
             }
         }
     }
-    impl<T> Clone for KnowledgeGraphServiceServer<T> {
+    impl<T> Clone for OrbitServiceServer<T> {
         fn clone(&self) -> Self {
             let inner = self.inner.clone();
             Self {
@@ -1843,8 +1808,8 @@ pub mod knowledge_graph_service_server {
         }
     }
     /// Generated gRPC service name
-    pub const SERVICE_NAME: &str = "gkg.v1.KnowledgeGraphService";
-    impl<T> tonic::server::NamedService for KnowledgeGraphServiceServer<T> {
+    pub const SERVICE_NAME: &str = "orbit.v1.OrbitService";
+    impl<T> tonic::server::NamedService for OrbitServiceServer<T> {
         const NAME: &'static str = SERVICE_NAME;
     }
 }

@@ -99,11 +99,11 @@ fn regenerate_protos() {
     use std::path::PathBuf;
     use std::process::Command;
 
-    println!("cargo:rerun-if-changed=proto/gkg.proto");
+    println!("cargo:rerun-if-changed=proto/orbit.proto");
 
-    let proto_path = PathBuf::from("proto/gkg.proto");
+    let proto_path = PathBuf::from("proto/orbit.proto");
     if !proto_path.exists() {
-        println!("cargo:warning=proto/gkg.proto not found, skipping proto regeneration");
+        println!("cargo:warning=proto/orbit.proto not found, skipping proto regeneration");
         return;
     }
 
@@ -118,8 +118,8 @@ fn regenerate_protos() {
 
     tonic_prost_build::configure()
         .out_dir(&out_dir)
-        .compile_protos(&["proto/gkg.proto"], &["proto"])
-        .expect("Failed to compile gkg protos");
+        .compile_protos(&["proto/orbit.proto"], &["proto"])
+        .expect("Failed to compile protos");
 
     println!("cargo:warning=Regenerated protos to {}", out_dir.display());
 }

@@ -51,6 +51,7 @@ testcontainers-modules = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 tonic = { workspace = true }
+tonic-prost = { workspace = true }
 tower = { workspace = true }
 tempfile = { workspace = true }
 cargo_metadata = { workspace = true }

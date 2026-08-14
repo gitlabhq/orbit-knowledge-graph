@@ -268,7 +268,7 @@ protoc --ruby_out=crates/orbit-server/proto/ruby \
   --grpc_out=crates/orbit-server/proto/ruby \
   --plugin=protoc-gen-grpc=$(which grpc_ruby_plugin) \
   -I crates/orbit-server/proto \
-  crates/orbit-server/proto/gkg.proto
+  crates/orbit-server/proto/orbit.proto
 echo "Ruby proto files generated in crates/orbit-server/proto/ruby/"
 '''
 description = "Generate Ruby protobuf files for Rails client"

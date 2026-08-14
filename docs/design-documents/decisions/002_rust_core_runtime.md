@@ -79,7 +79,7 @@ SWC (Rust-native JS/TS parser) runs alongside tree-sitter for JS/TS-specific ana
 
 ### gRPC and protobuf ecosystem
 
-We use Tonic for gRPC (client and server) and Prost for protobuf codegen. `gkg.proto` defines the service contract; `tonic-build` generates Rust server traits and client stubs at compile time. The same proto file generates the `gitlab-gkg-proto` Ruby gem for the Rails client, so the contract is shared between Rust and Ruby. Schema mismatches get caught at compile time on the Rust side.
+We use Tonic for gRPC (client and server) and Prost for protobuf codegen. `orbit.proto` defines the service contract; `tonic-build` generates Rust server traits and client stubs at compile time. The same proto file generates the `gitlab-orbit-proto` Ruby gem for the Rails client, so the contract is shared between Rust and Ruby. Schema mismatches get caught at compile time on the Rust side.
 
 ### Columnar data processing
 
@@ -89,7 +89,7 @@ The `clickhouse-client` crate streams query results as Arrow-IPC batches using t
 
 Beyond memory safety, the type system catches whole categories of bugs before anything runs:
 
-- Exhaustive `match` on protobuf `oneof` enums means every message variant must be handled. Add a new RPC message type to `gkg.proto` and the compiler forces you to update every handler.
+- Exhaustive `match` on protobuf `oneof` enums means every message variant must be handled. Add a new RPC message type to `orbit.proto` and the compiler forces you to update every handler.
 - The ontology crate validates YAML schemas at startup and exposes typed accessors. Invalid ontology references break CI, not production queries.
 - Clippy runs with all warnings as errors in CI. `cargo deny` checks licenses, `cargo audit` checks for known vulnerabilities, `cargo geiger` reports unsafe usage.
 
