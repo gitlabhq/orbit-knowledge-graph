@@ -5,8 +5,6 @@ use comrak::{Arena, Options, parse_document};
 
 use crate::v2::config::Language;
 use crate::v2::dsl::types::*;
-use crate::v2::linker::HasRules;
-use crate::v2::linker::rules::{ReceiverMode, ResolutionRules};
 use crate::v2::types::{
     CanonicalDefinition, CanonicalImport, DefKind, Fqn, ImportBindingKind, ImportMode, Position,
     Range,
@@ -36,21 +34,22 @@ impl DslLanguage for MarkdownDsl {
     }
 }
 
+const MAX_SECTIONS_PER_FILE: usize = 10_000;
+const MAX_LINKS_PER_FILE: usize = 10_000;
+
 fn parse_markdown(
     source: &str,
     file_path: &str,
 ) -> (Vec<CanonicalDefinition>, Vec<CanonicalImport>) {
     let arena = Arena::new();
     let mut options = Options::default();
-    // Without this, `title: x` under the opening `---` of GitLab-style YAML
-    // front matter parses as a setext heading and becomes a bogus Section.
     options.extension.front_matter_delimiter = Some("---".to_string());
     let root = parse_document(&arena, source, &options);
     let lines = LineIndex::new(source);
 
     (
         section_definitions(root, source, file_path, &lines),
-        link_imports(root, source, &lines),
+        link_imports(root, source, file_path, &lines),
     )
 }
 
@@ -65,46 +64,56 @@ fn section_definitions<'a>(
         .and_then(|s| s.to_str())
         .unwrap_or(file_path);
 
-    let headings: Vec<(u8, String, Sourcepos)> = root
-        .descendants()
-        .filter_map(|node| match &node.data.borrow().value {
-            NodeValue::Heading(heading) => {
-                let name = inline_text(node);
-                (!name.is_empty()).then(|| (heading.level, name, node.data.borrow().sourcepos))
-            }
-            _ => None,
-        })
-        .collect();
-
-    let mut stack: Vec<(u8, String)> = Vec::new();
-    let mut definitions = Vec::with_capacity(headings.len());
-    for (i, (level, name, sourcepos)) in headings.iter().enumerate() {
-        while stack.last().is_some_and(|(l, _)| l >= level) {
-            stack.pop();
+    let mut stack: Vec<(u8, String, usize)> = Vec::new();
+    let mut definitions: Vec<CanonicalDefinition> = Vec::new();
+    let close = |stack: &mut Vec<(u8, String, usize)>,
+                 definitions: &mut Vec<CanonicalDefinition>,
+                 level: u8,
+                 end: usize| {
+        while stack.last().is_some_and(|(l, _, _)| *l >= level) {
+            let (_, _, idx) = stack.pop().expect("non-empty stack");
+            definitions[idx].range.end = lines.position(end);
+            definitions[idx].range.byte_offset.1 = end;
         }
-        let (end_position, end_byte) = headings[i + 1..]
-            .iter()
-            .find(|(l, _, _)| l <= level)
-            .map(|(_, _, next)| (lines.position(next.start), lines.byte(next.start)))
-            .unwrap_or_else(|| lines.eof(source));
-        let parts: Vec<&str> = std::iter::once(stem)
-            .chain(stack.iter().map(|(_, n)| n.as_str()))
-            .chain(std::iter::once(name.as_str()))
-            .collect();
+    };
+
+    for node in root.descendants() {
+        let data = node.data.borrow();
+        let NodeValue::Heading(heading) = &data.value else {
+            continue;
+        };
+        let name = inline_text(node);
+        if name.is_empty() {
+            continue;
+        }
+        if definitions.len() == MAX_SECTIONS_PER_FILE {
+            tracing::debug!(file_path, cap = MAX_SECTIONS_PER_FILE, "section cap hit");
+            break;
+        }
+        let start = lines.byte(data.sourcepos.start);
+        close(&mut stack, &mut definitions, heading.level, start);
+        let fqn = {
+            let parts: Vec<&str> = std::iter::once(stem)
+                .chain(stack.iter().map(|(_, n, _)| n.as_str()))
+                .chain(std::iter::once(name.as_str()))
+                .collect();
+            Fqn::from_parts(&parts, "#")
+        };
+        let is_top_level = stack.is_empty();
+        stack.push((heading.level, name.clone(), definitions.len()));
         definitions.push(CanonicalDefinition {
             definition_type: "Section",
             kind: DefKind::Module,
-            name: name.clone(),
-            fqn: Fqn::from_parts(&parts, "#"),
+            name,
+            fqn,
             range: Range::new(
-                lines.position(sourcepos.start),
-                end_position,
-                (lines.byte(sourcepos.start), end_byte),
+                lines.position(start),
+                lines.position(source.len()),
+                (start, source.len()),
             ),
-            is_top_level: stack.is_empty(),
+            is_top_level,
             metadata: None,
         });
-        stack.push((*level, name.clone()));
     }
     definitions
 }
@@ -112,36 +121,43 @@ fn section_definitions<'a>(
 fn link_imports<'a>(
     root: &'a AstNode<'a>,
     source: &str,
+    file_path: &str,
     lines: &LineIndex,
 ) -> Vec<CanonicalImport> {
-    root.descendants()
-        .filter_map(|node| {
-            let data = node.data.borrow();
-            let url = match &data.value {
-                NodeValue::Link(link) | NodeValue::Image(link) => &link.url,
-                _ => return None,
-            };
-            let target = repo_link_target(url)?;
-            let name = target
-                .rsplit('/')
-                .next()
-                .map(|f| f.rsplit_once('.').map_or(f, |(base, _)| base))
-                .filter(|s| !s.is_empty())
-                .map(str::to_string);
-            Some(CanonicalImport {
-                import_type: "Link",
-                binding_kind: ImportBindingKind::Named,
-                mode: ImportMode::Declarative,
-                path: target,
-                name,
-                alias: None,
-                scope_fqn: None,
-                range: lines.range(data.sourcepos, source),
-                is_type_only: false,
-                wildcard: false,
-            })
-        })
-        .collect()
+    let mut imports = Vec::new();
+    for node in root.descendants() {
+        let data = node.data.borrow();
+        let url = match &data.value {
+            NodeValue::Link(link) | NodeValue::Image(link) => &link.url,
+            _ => continue,
+        };
+        let Some(target) = repo_link_target(url) else {
+            continue;
+        };
+        if imports.len() == MAX_LINKS_PER_FILE {
+            tracing::debug!(file_path, cap = MAX_LINKS_PER_FILE, "link cap hit");
+            break;
+        }
+        let name = target
+            .rsplit('/')
+            .next()
+            .map(|f| f.rsplit_once('.').map_or(f, |(base, _)| base))
+            .filter(|s| !s.is_empty())
+            .map(str::to_string);
+        imports.push(CanonicalImport {
+            import_type: "Link",
+            binding_kind: ImportBindingKind::Named,
+            mode: ImportMode::Declarative,
+            path: target,
+            name,
+            alias: None,
+            scope_fqn: None,
+            range: lines.range(data.sourcepos, source),
+            is_type_only: false,
+            wildcard: false,
+        });
+    }
+    imports
 }
 
 fn inline_text<'a>(node: &'a AstNode<'a>) -> String {
@@ -167,11 +183,6 @@ fn repo_link_target(raw: &str) -> Option<String> {
     .then(|| target.to_string())
 }
 
-/// Converts comrak's 1-based, byte-counted [`Sourcepos`] coordinates into the
-/// 0-based, exclusive-end [`Range`] convention shared with tree-sitter. All
-/// byte conversions clamp to the source length and the exclusive end snaps to
-/// a char boundary, so an off sourcepos from comrak degrades to a truncated
-/// range, never an out-of-bounds or mid-char offset.
 struct LineIndex {
     starts: Vec<usize>,
     len: usize,
@@ -199,50 +210,22 @@ impl LineIndex {
             .min(self.len)
     }
 
-    fn position(&self, lc: LineColumn) -> Position {
-        Position::new(lc.line.saturating_sub(1), lc.column.saturating_sub(1))
+    fn position(&self, offset: usize) -> Position {
+        let line = self
+            .starts
+            .partition_point(|start| *start <= offset)
+            .saturating_sub(1);
+        Position::new(line, offset - self.starts[line])
     }
 
     fn range(&self, sourcepos: Sourcepos, source: &str) -> Range {
+        let start = self.byte(sourcepos.start);
         let end_start = self.byte(sourcepos.end);
-        let end_exclusive = source
+        let end = source
             .get(end_start..)
             .and_then(|rest| rest.chars().next())
             .map_or(self.len, |c| end_start + c.len_utf8());
-        Range::new(
-            self.position(sourcepos.start),
-            Position::new(sourcepos.end.line.saturating_sub(1), sourcepos.end.column),
-            (self.byte(sourcepos.start), end_exclusive),
-        )
-    }
-
-    fn eof(&self, source: &str) -> (Position, usize) {
-        let last_line = self.starts.len() - 1;
-        (
-            Position::new(last_line, source.len() - self.starts[last_line]),
-            source.len(),
-        )
-    }
-}
-
-pub struct MarkdownRules;
-
-impl HasRules for MarkdownRules {
-    fn rules() -> ResolutionRules {
-        let spec = MarkdownDsl::spec();
-        let scopes = ResolutionRules::derive_scopes(&spec);
-
-        ResolutionRules::new(
-            "markdown",
-            scopes,
-            spec,
-            vec![],
-            vec![],
-            ReceiverMode::None,
-            "#",
-            &[],
-            None,
-        )
+        Range::new(self.position(start), self.position(end), (start, end))
     }
 }
 
@@ -416,6 +399,19 @@ mod tests {
         );
         assert_eq!(result.imports[1].path, "docs/z\u{e4}hler.md");
         assert_eq!(result.definitions[0].name, "\u{dc}n\u{ef}code");
+    }
+
+    #[test]
+    fn section_and_link_emission_is_capped_per_file() {
+        let headings: String = (0..MAX_SECTIONS_PER_FILE + 50)
+            .map(|i| format!("# h{i}\n"))
+            .collect();
+        let links: String = (0..MAX_LINKS_PER_FILE + 50)
+            .map(|i| format!("[l{i}](./f{i}.md) "))
+            .collect();
+        let result = parse(&format!("{headings}\n{links}\n")).unwrap();
+        assert_eq!(result.definitions.len(), MAX_SECTIONS_PER_FILE);
+        assert_eq!(result.imports.len(), MAX_LINKS_PER_FILE);
     }
 
     #[test]
