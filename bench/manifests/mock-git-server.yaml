@@ -30,7 +30,7 @@ spec:
             requests: { cpu: "100m", memory: "256Mi" }
             limits: { memory: "512Mi" }
           readinessProbe:
-            httpGet: { path: /api/v4/internal/orbit/project/0/info, port: http }
+            httpGet: { path: /healthz, port: http }
             initialDelaySeconds: 2
             periodSeconds: 5
       volumes:

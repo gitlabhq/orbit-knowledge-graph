@@ -15,12 +15,21 @@ import re
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 
+HEALTHZ_RE = re.compile(r"/healthz$")
 INFO_RE = re.compile(r"/api/v4/internal/orbit/project/(\d+)/info$")
 ARCHIVE_RE = re.compile(r"/api/v4/internal/orbit/project/(\d+)/repository/archive")
 
 
 class CorpusHandler(BaseHTTPRequestHandler):
     def do_GET(self):
+        if HEALTHZ_RE.match(self.path):
+            if not self.server.corpus_dir.is_dir() or not any(self.server.corpus_dir.glob("*.tar.gz")):
+                self.send_error(503, "corpus dir empty or not mounted")
+                return
+            self.send_response(200)
+            self.end_headers()
+            return
+
         m = INFO_RE.match(self.path)
         if m:
             pid = int(m.group(1))
