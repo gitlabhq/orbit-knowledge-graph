@@ -11,15 +11,21 @@ spec:
   template:
     metadata:
       labels: { app: corpus-server }
+      annotations:
+        gke-gcsfuse/volumes: "true"
     spec:
       serviceAccountName: corpus-server-sa
       containers:
         - name: server
           image: ${CORPUS_IMAGE}
-          args: ["--gcs-bucket", "${CORPUS_BUCKET}", "--port", "8090"]
+          args: ["--corpus-dir", "/data/corpus", "--port", "8090"]
           ports:
             - containerPort: 8090
               name: http
+          volumeMounts:
+            - name: corpus
+              mountPath: /data/corpus
+              readOnly: true
           resources:
             requests: { cpu: "100m", memory: "256Mi" }
             limits: { memory: "512Mi" }
@@ -27,6 +33,14 @@ spec:
             httpGet: { path: /api/v4/internal/orbit/project/0/info, port: http }
             initialDelaySeconds: 2
             periodSeconds: 5
+      volumes:
+        - name: corpus
+          csi:
+            driver: gcsfuse.csi.storage.gke.io
+            readOnly: true
+            volumeAttributes:
+              bucketName: ${CORPUS_BUCKET}
+              fileCacheCapacity: "10Gi"
 ---
 apiVersion: v1
 kind: Service
