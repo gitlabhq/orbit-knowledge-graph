@@ -1260,7 +1260,7 @@ e2e:
     - name: docker:29-dind
       alias: docker
   variables:
-    KCTX: gitlab-org/orbit/gkg-e2e-harness:e2e-harness-agent
+    KCTX: gitlab-org/orbit/orbit-e2e-harness:e2e-harness-agent
     KUBECTL_VERSION: "1.35.2"
     HELM_VERSION: "3.20.0"
     HELMFILE_VERSION: "1.4.2"
