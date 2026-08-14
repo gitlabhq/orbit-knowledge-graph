@@ -4,7 +4,6 @@ use std::sync::Arc;
 use arrow::array::{Array, BooleanArray, Int64Array, StringArray};
 use chrono::{TimeZone, Utc};
 use clickhouse_client::ClickHouseConfigurationExt;
-use gkg_utils::arrow::ArrowUtils;
 use indexer::handler::{Handler, HandlerContext};
 use indexer::indexing_status::IndexingStatusStore;
 use indexer::modules::code::{
@@ -15,6 +14,7 @@ use indexer::testkit::{MockLockService, MockNatsServices};
 use indexer::topic::CodeIndexingTaskRequest;
 use indexer::types::Envelope;
 use integration_testkit::{assert_edge_count_for_traversal_path, t};
+use orbit_utils::arrow::ArrowUtils;
 
 use super::helpers::*;
 
@@ -195,7 +195,7 @@ async fn skips_oversized_go_parser_input_and_indexes_repository() {
     let deps = CodeIndexingDeps::new_with_pipeline_config(
         &mock,
         &clickhouse,
-        gkg_server_config::CodeIndexingPipelineConfig {
+        orbit_server_config::CodeIndexingPipelineConfig {
             max_file_size_bytes: u64::MAX,
             ..Default::default()
         },
@@ -1018,7 +1018,7 @@ fn handler_context_with_status() -> (HandlerContext, Arc<IndexingStatusStore>) {
 fn failing_writer() -> Arc<indexer::clickhouse::ClickHouseWriter> {
     Arc::new(
         indexer::clickhouse::ClickHouseWriter::new(
-            gkg_server_config::ClickHouseConfiguration {
+            orbit_server_config::ClickHouseConfiguration {
                 url: "http://127.0.0.1:1".into(),
                 ..Default::default()
             },
@@ -1389,7 +1389,7 @@ async fn timed_out_job_writes_no_data() {
     let deps = CodeIndexingDeps::new_with_pipeline_config(
         &mock,
         &clickhouse,
-        gkg_server_config::CodeIndexingPipelineConfig {
+        orbit_server_config::CodeIndexingPipelineConfig {
             job_timeout_secs: 1,
             ..Default::default()
         },
@@ -1486,7 +1486,7 @@ async fn disk_is_clean_after_a_timed_out_job() {
     let deps = CodeIndexingDeps::new_with_pipeline_config(
         &mock,
         &clickhouse,
-        gkg_server_config::CodeIndexingPipelineConfig {
+        orbit_server_config::CodeIndexingPipelineConfig {
             job_timeout_secs: 1,
             ..Default::default()
         },

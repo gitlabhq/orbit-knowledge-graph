@@ -265,7 +265,7 @@ If Rails is down or slow, GKG cannot complete any query that requires Layer 3 ch
 
 ## References
 
-- [Proto definition: `gkg.proto`](../../../crates/gkg-server/proto/gkg.proto)
+- [Proto definition: `gkg.proto`](../../../crates/orbit-server/proto/gkg.proto)
 - [Security design document](../security.md)
 - [MR !273: gRPC service implementation](https://gitlab.com/gitlab-org/rust/knowledge-graph/-/merge_requests/273)
 - [Gitaly client in Rails](https://gitlab.com/gitlab-org/gitlab/-/tree/master/lib/gitlab/gitaly_client)

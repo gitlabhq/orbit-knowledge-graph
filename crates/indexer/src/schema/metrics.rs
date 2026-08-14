@@ -1,11 +1,11 @@
 //! Names, descriptions, units, labels, and histogram buckets live in
-//! `crates/gkg-observability/src/indexer/migration.rs`. This module only
+//! `crates/orbit-observability/src/indexer/migration.rs`. This module only
 //! builds instruments against the running `MeterProvider`.
 
 use opentelemetry::KeyValue;
 use opentelemetry::metrics::{Counter, Gauge};
 
-use gkg_observability::indexer::migration;
+use orbit_observability::indexer::migration;
 
 /// Prometheus exposes this as `gkg_schema_migration_phase_total` after the
 /// rename from the former `gkg_schema_migration_total_total` double suffix.
@@ -16,7 +16,7 @@ pub struct MigrationMetrics {
 
 impl MigrationMetrics {
     pub fn new() -> Self {
-        let meter = gkg_observability::meter();
+        let meter = orbit_observability::meter();
         Self {
             phase: migration::PHASE.build_counter_u64(&meter),
         }
@@ -55,7 +55,7 @@ pub struct CompletionMetrics {
 
 impl CompletionMetrics {
     pub fn new() -> Self {
-        let meter = gkg_observability::meter();
+        let meter = orbit_observability::meter();
         Self {
             migration_completed: migration::COMPLETED.build_counter_u64(&meter),
             cleanup: migration::CLEANUP.build_counter_u64(&meter),

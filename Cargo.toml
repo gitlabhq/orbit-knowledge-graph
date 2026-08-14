@@ -19,12 +19,12 @@ members = [
   "crates/query-engine/compiler-pipeline-macros",
   "crates/orbit-local",
 
-  "crates/gkg-analytics",
-  "crates/gkg-billing",
-  "crates/gkg-observability",
-  "crates/gkg-prompts",
-  "crates/gkg-server-config",
-  "crates/gkg-server",
+  "crates/orbit-analytics",
+  "crates/orbit-billing",
+  "crates/orbit-observability",
+  "crates/orbit-prompts",
+  "crates/orbit-server-config",
+  "crates/orbit-server",
   "crates/ontology",
 
   "crates/health-check",
@@ -42,7 +42,7 @@ members = [
 ]
 
 [workspace.dependencies]
-gkg-observability = { path = "crates/gkg-observability" }
+orbit-observability = { path = "crates/orbit-observability" }
 labkit = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", rev = "1e235f49" }
 labkit-events = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", rev = "1e235f49" }
 arrow = "58.0.0"
@@ -120,7 +120,7 @@ syn = { version = "2.0.117", features = ["full"] }
 quote = "1.0.45"
 proc-macro2 = "1.0.106"
 
-# Iglu schema codegen (build-time only; consumed by gkg-analytics/build.rs)
+# Iglu schema codegen (build-time only; consumed by orbit-analytics/build.rs)
 prettyplease = "0.2.37"
 typify = "0.7.0"
 

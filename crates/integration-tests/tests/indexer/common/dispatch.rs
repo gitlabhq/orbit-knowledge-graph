@@ -3,7 +3,6 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use clickhouse_client::ClickHouseConfigurationExt;
 use futures::StreamExt;
-use gkg_server_config::{GlobalDispatcherConfig, NamespaceDispatcherConfig, NatsConfiguration};
 use indexer::campaign::CampaignState;
 use indexer::checkpoint::ClickHouseCheckpointStore;
 use indexer::nats::versioning::NATS_VERSIONER;
@@ -20,6 +19,7 @@ use integration_testkit::TestContext;
 use integration_testkit::scenario::{
     CdcEvent, CdcOperation, DispatchedMessage, HandlerInput, ScenarioHandlers,
 };
+use orbit_server_config::{GlobalDispatcherConfig, NamespaceDispatcherConfig, NatsConfiguration};
 use siphon_proto::replication_event::{Column, Operation};
 use siphon_proto::{LogicalReplicationEvents, ReplicationEvent, Value, value};
 use testcontainers::ImageExt;

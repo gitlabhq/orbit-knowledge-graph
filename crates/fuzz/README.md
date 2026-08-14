@@ -1,4 +1,4 @@
-# gkg-fuzz
+# orbit-fuzz
 
 Fuzz testing for GKG using [Bolero](https://github.com/camshaft/bolero).
 
@@ -49,8 +49,8 @@ mise fuzz:indexer-messages     # fuzz indexer message deserialization
 Or directly with cargo-bolero:
 
 ```sh
-cargo bolero +nightly test <target_name> -p gkg-fuzz
-cargo +nightly bolero test <target_name> -p gkg-fuzz
+cargo bolero +nightly test <target_name> -p orbit-fuzz
+cargo +nightly bolero test <target_name> -p orbit-fuzz
 
 If toolchain is already defaulted to nightly, you can omit the `+nightly`.
 

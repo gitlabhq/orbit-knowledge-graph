@@ -50,7 +50,7 @@ impl Handler for NamespaceDeletionHandler {
                 SerializationError::Json(err) => HandlerError::Deserialization(err),
             })?;
 
-        if !gkg_utils::traversal_path::is_valid(&payload.traversal_path) {
+        if !orbit_utils::traversal_path::is_valid(&payload.traversal_path) {
             error!(
                 namespace_id = payload.namespace_id,
                 traversal_path = %payload.traversal_path,

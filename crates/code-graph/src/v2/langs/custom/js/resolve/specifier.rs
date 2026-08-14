@@ -84,7 +84,7 @@ impl RepoFileSystem {
             return Ok(canonical);
         }
 
-        let ancestor = gkg_utils::fs::longest_existing_ancestor(&path);
+        let ancestor = orbit_utils::fs::longest_existing_ancestor(&path);
         if let Some(canonical_ancestor) = self.cached_canonicalize(ancestor)
             && canonical_ancestor.starts_with(&self.root_dir)
         {

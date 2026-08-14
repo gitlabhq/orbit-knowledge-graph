@@ -1,6 +1,6 @@
 use std::sync::LazyLock;
 
-use gkg_utils::traversal_path::TOP_LEVEL_PREFIX_REGEX;
+use orbit_utils::traversal_path::TOP_LEVEL_PREFIX_REGEX;
 
 pub const ENABLED_NAMESPACE_TABLE: &str = "siphon_knowledge_graph_enabled_namespaces";
 

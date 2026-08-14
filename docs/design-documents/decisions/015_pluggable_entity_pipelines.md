@@ -199,7 +199,7 @@ and hands each stage exactly its inputs so data flows top-down:
   `build → {extract, transform}`; neither stage imports the other or exchanges planning metadata.
 
 `ExtractTemplate::new` is the only way a `Plan` gets its `extract_template`, so an
-unvalidated template cannot reach the runtime. A build-time gate in `gkg-server`'s
+unvalidated template cannot reach the runtime. A build-time gate in `orbit-server`'s
 build script (`ontology::etl_sql::validate_authored_etl_sql`) enforces that every
 authored `.sql.j2` file projects `AS _version`/`AS _deleted` and uses
 `{{watermark_column}}`/`{{deleted_column}}` markers instead of hardcoding the column
@@ -312,7 +312,7 @@ unaffected.
   `ExtractQuery`, `Transform`, `EdgeMapping`); YAML loading in
   `crates/ontology/src/loading/node.rs`; authored `.sql.j2` marker/alias check in
   `crates/ontology/src/etl_sql.rs` (`validate_authored_etl_sql`, run from
-  `gkg-server`'s build script)
+  `orbit-server`'s build script)
 - Transform spec: `crates/indexer/src/modules/sdlc/plan/mod.rs` (`TransformSpec`,
   `Transformation`, `Cursor`, filters); plan building in `plan/build.rs`; point
   lookups in `plan/extract/lookup.rs`; extract stage in `plan/extract/` (`ExtractSpec`,

@@ -2,7 +2,7 @@
 //!
 //! Named queries are graph query templates committed under
 //! `config/named_queries/` so the query text lives with the engine
-//! `gkg-server`'s build script compiles every template against the ontology,
+//! `orbit-server`'s build script compiles every template against the ontology,
 //! and the same files are embedded into the binary so the server can execute
 //! them by name at runtime.
 //!

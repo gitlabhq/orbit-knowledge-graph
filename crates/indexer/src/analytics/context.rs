@@ -2,12 +2,12 @@
 //! contexts. Mirrors the webserver's `analytics::context` but sources its
 //! dimensions from the indexer config and dispatch rather than JWT claims.
 
-use gkg_analytics::{
+use labkit_events::Error as LabkitError;
+use orbit_analytics::{
     OrbitCodeIndexingContext, OrbitCommonContext, OrbitSdlcIndexingContext, orbit_code_indexing,
     orbit_common, orbit_sdlc_indexing,
 };
-use gkg_server_config::{AnalyticsConfig, DeploymentKind};
-use labkit_events::Error as LabkitError;
+use orbit_server_config::{AnalyticsConfig, DeploymentKind};
 
 use crate::observer::IndexingMode;
 

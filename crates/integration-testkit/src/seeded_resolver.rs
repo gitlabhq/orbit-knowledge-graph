@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use async_trait::async_trait;
-use gkg_utils::arrow::ColumnValue;
+use orbit_utils::arrow::ColumnValue;
 use query_engine::pipeline::PipelineError;
 use query_engine::shared::content::{ColumnResolver, PropertyRow, ResolverContext};
 use serde::Deserialize;

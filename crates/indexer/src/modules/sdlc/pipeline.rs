@@ -22,7 +22,7 @@ use super::plan::{Cursor, CursorFilter, Plan, PreparedQuery};
 use super::transform::{BlockTransform, TransformRegistry};
 use crate::checkpoint::{Checkpoint, CheckpointStore};
 use crate::durability::RunDurability;
-use gkg_server_config::DatalakeRetryConfig;
+use orbit_server_config::DatalakeRetryConfig;
 
 const MAX_RETRIES: u32 = 3;
 

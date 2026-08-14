@@ -229,8 +229,8 @@ The product name is Orbit. The binary and config still use the engineering name 
 
 Billing emission is on the SOX audit boundary. Before touching billing code, read [SOX billing boundary](docs/dev/sox-billing-boundary.md).
 
-- [`crates/gkg-billing/`](crates/gkg-billing/): Snowplow billing-event emission and CDot quota enforcement.
-- [`crates/gkg-server/src/billing_adapter.rs`](crates/gkg-server/src/billing_adapter.rs): the single `Claims` to `BillingInputs` conversion point.
+- [`crates/orbit-billing/`](crates/orbit-billing/): Snowplow billing-event emission and CDot quota enforcement.
+- [`crates/orbit-server/src/billing_adapter.rs`](crates/orbit-server/src/billing_adapter.rs): the single `Claims` to `BillingInputs` conversion point.
 
 ### People
 

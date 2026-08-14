@@ -5,7 +5,7 @@ use std::time::Duration;
 use arrow::compute::concat_batches;
 use arrow::record_batch::RecordBatch;
 use clickhouse_client::{ArrowClickHouseClient, ClickHouseConfigurationExt};
-use gkg_server_config::ClickHouseConfiguration;
+use orbit_server_config::ClickHouseConfiguration;
 use query_engine::compiler::ParameterizedQuery;
 use testcontainers::bollard::Docker;
 use testcontainers::bollard::query_parameters::{
@@ -16,7 +16,7 @@ use testcontainers::runners::AsyncRunner;
 use testcontainers::{ContainerAsync, GenericImage};
 
 use arrow::array::StringArray;
-use gkg_utils::arrow::ArrowUtils;
+use orbit_utils::arrow::ArrowUtils;
 
 const CLICKHOUSE_IMAGE: &str = "clickhouse/clickhouse-server";
 const CLICKHOUSE_TAG: &str = "26.2";

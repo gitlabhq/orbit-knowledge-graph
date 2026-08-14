@@ -13,7 +13,7 @@ set -euo pipefail
 args=(cargo nextest run --workspace \
   --exclude integration-tests \
   --exclude integration-tests-codegraph \
-  --exclude gkg-fuzz \
+  --exclude orbit-fuzz \
   --exclude query-profiler \
   --lib --bin xtask)
 

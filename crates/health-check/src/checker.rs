@@ -3,7 +3,7 @@ use crate::error::Error;
 use crate::k8s::K8sChecker;
 use crate::nats::{CodeQueueConfig, NatsDepthChecker};
 use crate::types::{HealthStatus, QueueDepth};
-use gkg_server_config::{HealthCheckConfig, NamespaceTarget};
+use orbit_server_config::{HealthCheckConfig, NamespaceTarget};
 
 pub struct HealthChecker {
     k8s: K8sChecker,

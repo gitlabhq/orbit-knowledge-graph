@@ -264,7 +264,7 @@ impl Default for GraphIndexes {
     }
 }
 
-pub use gkg_utils::strings::{StrId, StringPool};
+pub use orbit_utils::strings::{StrId, StringPool};
 
 /// Pool-backed definition. All strings are [`StrId`] referencing the graph's
 /// [`StringPool`].
@@ -419,7 +419,7 @@ impl Default for FileArena {
     }
 }
 
-pub use gkg_utils::strings::ScratchBuf;
+pub use orbit_utils::strings::ScratchBuf;
 
 #[cfg(test)]
 mod tests {

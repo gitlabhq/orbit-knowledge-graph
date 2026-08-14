@@ -4,7 +4,7 @@ use tracing::warn;
 
 use crate::error::Error;
 use crate::types::{ResourceKind, ServiceHealth, Status};
-use gkg_server_config::NamespaceTarget;
+use orbit_server_config::NamespaceTarget;
 
 pub struct K8sChecker {
     client: Client,

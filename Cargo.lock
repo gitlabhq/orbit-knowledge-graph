@@ -2018,8 +2018,8 @@ dependencies = [
  "circuit-breaker",
  "clickhouse",
  "futures",
- "gkg-server-config",
- "gkg-utils",
+ "orbit-server-config",
+ "orbit-utils",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -2088,11 +2088,11 @@ dependencies = [
  "cpu-time",
  "crossbeam-channel",
  "either",
- "gkg-utils",
  "globset",
  "ignore",
  "indicatif",
  "memchr",
+ "orbit-utils",
  "oxc",
  "oxc_linter",
  "oxc_resolver",
@@ -2187,12 +2187,12 @@ version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "compiler-pipeline-macros",
- "gkg-observability",
- "gkg-server-config",
- "gkg-utils",
  "jsonschema",
  "ontology",
  "opentelemetry",
+ "orbit-observability",
+ "orbit-server-config",
+ "orbit-utils",
  "regex",
  "serde",
  "serde_json",
@@ -4199,8 +4199,8 @@ dependencies = [
  "arrow 58.3.0",
  "code-graph",
  "duckdb",
- "gkg-utils",
  "ontology",
+ "orbit-utils",
  "serde_json",
  "tempfile",
  "thiserror 2.0.18",
@@ -4655,9 +4655,9 @@ dependencies = [
  "arrow 58.3.0",
  "chrono",
  "compiler",
- "gkg-utils",
  "indexmap 2.14.0",
  "insta",
+ "orbit-utils",
  "proptest",
  "rand 0.10.2",
  "semver",
@@ -5043,175 +5043,14 @@ dependencies = [
  "chrono",
  "circuit-breaker",
  "futures",
- "gkg-server-config",
  "jsonwebtoken 10.4.0",
+ "orbit-server-config",
  "reqwest 0.13.4",
  "rustls",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
  "tokio",
- "tracing",
-]
-
-[[package]]
-name = "gkg-analytics"
-version = "0.1.0"
-dependencies = [
- "gkg-server-config",
- "labkit-events",
- "parking_lot",
- "prettyplease",
- "serde",
- "serde_json",
- "syn 2.0.118",
- "tracing",
- "typify",
-]
-
-[[package]]
-name = "gkg-billing"
-version = "0.1.0"
-dependencies = [
- "axum",
- "gkg-observability",
- "gkg-server-config",
- "labkit",
- "labkit-events",
- "moka",
- "opentelemetry",
- "query-engine",
- "rand 0.10.2",
- "reqwest 0.13.4",
- "rustls",
- "serde_json",
- "tokio",
- "tonic",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "gkg-fuzz"
-version = "0.1.0"
-dependencies = [
- "bolero",
- "code-graph",
- "compiler",
- "indexer",
- "serde_json",
-]
-
-[[package]]
-name = "gkg-observability"
-version = "0.1.0"
-dependencies = [
- "circuit-breaker",
- "opentelemetry",
- "serde",
- "tracing",
-]
-
-[[package]]
-name = "gkg-prompts"
-version = "0.1.0"
-dependencies = [
- "minijinja",
- "rust-embed",
- "semver",
- "serde",
- "serde_yaml",
-]
-
-[[package]]
-name = "gkg-server"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "arrow 58.3.0",
- "async-trait",
- "axum",
- "base64 0.22.1",
- "chrono",
- "clap",
- "clickhouse-client",
- "compiler",
- "futures",
- "gitlab-client",
- "gkg-analytics",
- "gkg-billing",
- "gkg-observability",
- "gkg-prompts",
- "gkg-server-config",
- "gkg-utils",
- "health-check",
- "indexer",
- "jsonschema",
- "jsonwebtoken 10.4.0",
- "labkit",
- "labkit-events",
- "mimalloc",
- "minijinja",
- "moka",
- "named-queries",
- "nats-client",
- "ontology",
- "opentelemetry",
- "prost 0.14.4",
- "query-engine",
- "reqwest 0.13.4",
- "rustls",
- "semver",
- "serde",
- "serde_json",
- "strum 0.28.0",
- "thiserror 2.0.18",
- "tokio",
- "tokio-stream",
- "tokio-util",
- "tonic",
- "tonic-prost",
- "tonic-prost-build",
- "toon-format",
- "tower",
- "tracing",
- "tracing-subscriber",
- "uuid",
-]
-
-[[package]]
-name = "gkg-server-config"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "config",
- "croner",
- "schemars 1.2.1",
- "serde",
- "serde_json",
- "serde_yaml",
- "strum 0.28.0",
- "sysinfo",
- "tempfile",
- "thiserror 2.0.18",
- "tracing",
-]
-
-[[package]]
-name = "gkg-utils"
-version = "0.1.0"
-dependencies = [
- "arrow 58.3.0",
- "chrono",
- "enum-as-inner",
- "flate2",
- "ignore",
- "rustc-hash 2.1.3",
- "serde_json",
- "strum 0.28.0",
- "tar",
- "tempfile",
- "thiserror 2.0.18",
  "tracing",
 ]
 
@@ -5389,10 +5228,10 @@ dependencies = [
  "async-nats",
  "axum",
  "clickhouse-client",
- "gkg-server-config",
  "k8s-openapi",
  "kube",
  "nats-client",
+ "orbit-server-config",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -5925,10 +5764,6 @@ dependencies = [
  "futures",
  "gitaly-protos",
  "gitlab-client",
- "gkg-analytics",
- "gkg-observability",
- "gkg-server-config",
- "gkg-utils",
  "indexmap 2.14.0",
  "jsonschema",
  "labkit-events",
@@ -5936,6 +5771,10 @@ dependencies = [
  "nats-client",
  "ontology",
  "opentelemetry",
+ "orbit-analytics",
+ "orbit-observability",
+ "orbit-server-config",
+ "orbit-utils",
  "parking_lot",
  "prost 0.14.4",
  "query-engine",
@@ -6052,10 +5891,10 @@ dependencies = [
  "clickhouse-client",
  "futures",
  "gitalisk-core",
- "gkg-server",
- "gkg-server-config",
- "gkg-utils",
  "ontology",
+ "orbit-server",
+ "orbit-server-config",
+ "orbit-utils",
  "query-engine",
  "reqwest 0.13.4",
  "rustls",
@@ -6088,10 +5927,6 @@ dependencies = [
  "futures",
  "gitaly-protos",
  "gitlab-client",
- "gkg-analytics",
- "gkg-server",
- "gkg-server-config",
- "gkg-utils",
  "indexer",
  "integration-testkit",
  "jsonschema",
@@ -6102,6 +5937,10 @@ dependencies = [
  "ontology",
  "opentelemetry",
  "opentelemetry_sdk",
+ "orbit-analytics",
+ "orbit-server",
+ "orbit-server-config",
+ "orbit-utils",
  "parking_lot",
  "prost 0.14.4",
  "query-engine",
@@ -7730,7 +7569,7 @@ dependencies = [
  "bytes",
  "circuit-breaker",
  "futures",
- "gkg-server-config",
+ "orbit-server-config",
  "parking_lot",
  "testcontainers",
  "testcontainers-modules",
@@ -8356,6 +8195,54 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 
 [[package]]
+name = "orbit-analytics"
+version = "0.1.0"
+dependencies = [
+ "labkit-events",
+ "orbit-server-config",
+ "parking_lot",
+ "prettyplease",
+ "serde",
+ "serde_json",
+ "syn 2.0.118",
+ "tracing",
+ "typify",
+]
+
+[[package]]
+name = "orbit-billing"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "labkit",
+ "labkit-events",
+ "moka",
+ "opentelemetry",
+ "orbit-observability",
+ "orbit-server-config",
+ "query-engine",
+ "rand 0.10.2",
+ "reqwest 0.13.4",
+ "rustls",
+ "serde_json",
+ "tokio",
+ "tonic",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "orbit-fuzz"
+version = "0.1.0"
+dependencies = [
+ "bolero",
+ "code-graph",
+ "compiler",
+ "indexer",
+ "serde_json",
+]
+
+[[package]]
 name = "orbit-local"
 version = "0.1.0"
 dependencies = [
@@ -8367,10 +8254,10 @@ dependencies = [
  "duckdb-client",
  "dunce",
  "gitalisk-core",
- "gkg-prompts",
- "gkg-utils",
  "mimalloc",
  "ontology",
+ "orbit-prompts",
+ "orbit-utils",
  "rmcp",
  "rust-embed",
  "schemars 1.2.1",
@@ -8382,6 +8269,119 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "orbit-observability"
+version = "0.1.0"
+dependencies = [
+ "circuit-breaker",
+ "opentelemetry",
+ "serde",
+ "tracing",
+]
+
+[[package]]
+name = "orbit-prompts"
+version = "0.1.0"
+dependencies = [
+ "minijinja",
+ "rust-embed",
+ "semver",
+ "serde",
+ "serde_yaml",
+]
+
+[[package]]
+name = "orbit-server"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "arrow 58.3.0",
+ "async-trait",
+ "axum",
+ "base64 0.22.1",
+ "chrono",
+ "clap",
+ "clickhouse-client",
+ "compiler",
+ "futures",
+ "gitlab-client",
+ "health-check",
+ "indexer",
+ "jsonschema",
+ "jsonwebtoken 10.4.0",
+ "labkit",
+ "labkit-events",
+ "mimalloc",
+ "minijinja",
+ "moka",
+ "named-queries",
+ "nats-client",
+ "ontology",
+ "opentelemetry",
+ "orbit-analytics",
+ "orbit-billing",
+ "orbit-observability",
+ "orbit-prompts",
+ "orbit-server-config",
+ "orbit-utils",
+ "prost 0.14.4",
+ "query-engine",
+ "reqwest 0.13.4",
+ "rustls",
+ "semver",
+ "serde",
+ "serde_json",
+ "strum 0.28.0",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-stream",
+ "tokio-util",
+ "tonic",
+ "tonic-prost",
+ "tonic-prost-build",
+ "toon-format",
+ "tower",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
+name = "orbit-server-config"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "config",
+ "croner",
+ "schemars 1.2.1",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "strum 0.28.0",
+ "sysinfo",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tracing",
+]
+
+[[package]]
+name = "orbit-utils"
+version = "0.1.0"
+dependencies = [
+ "arrow 58.3.0",
+ "chrono",
+ "enum-as-inner",
+ "flate2",
+ "ignore",
+ "rustc-hash 2.1.3",
+ "serde_json",
+ "strum 0.28.0",
+ "tar",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tracing",
 ]
 
 [[package]]
@@ -9387,8 +9387,8 @@ name = "pipeline"
 version = "0.1.0"
 dependencies = [
  "compiler",
- "gkg-utils",
  "ontology",
+ "orbit-utils",
  "thiserror 2.0.18",
 ]
 
@@ -9886,11 +9886,11 @@ dependencies = [
  "clickhouse-client",
  "compiler",
  "formatters",
- "gkg-server",
- "gkg-server-config",
- "gkg-utils",
  "labkit",
  "ontology",
+ "orbit-server",
+ "orbit-server-config",
+ "orbit-utils",
  "pipeline",
  "regex",
  "rustls",
@@ -12041,8 +12041,8 @@ dependencies = [
  "async-trait",
  "compiler",
  "futures",
- "gkg-utils",
  "ontology",
+ "orbit-utils",
  "pipeline",
  "serde",
  "serde_json",
@@ -13710,7 +13710,7 @@ version = "0.1.0"
 dependencies = [
  "arrow 58.3.0",
  "compiler",
- "gkg-utils",
+ "orbit-utils",
 ]
 
 [[package]]
@@ -14738,10 +14738,10 @@ dependencies = [
  "clickhouse",
  "clickhouse-client",
  "futures",
- "gkg-observability",
- "gkg-server-config",
- "gkg-utils",
  "ontology",
+ "orbit-observability",
+ "orbit-server-config",
+ "orbit-utils",
  "parquet 58.3.0",
  "query-engine",
  "rand 0.10.2",

@@ -1,9 +1,9 @@
 use std::time::Duration;
 
 use bytes::Bytes;
-use gkg_server_config::NatsConfiguration;
 use nats_client::kv_types::{KvBucketConfig, KvPutOptions, KvPutResult};
 use nats_client::{NatsClient, SubjectDedup};
+use orbit_server_config::NatsConfiguration;
 use testcontainers::ImageExt;
 use testcontainers::core::{ContainerPort, WaitFor};
 use testcontainers::runners::AsyncRunner;

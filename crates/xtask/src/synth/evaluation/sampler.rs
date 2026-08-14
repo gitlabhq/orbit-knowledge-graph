@@ -212,7 +212,7 @@ impl ParameterSampler {
             .await?
             .into_iter()
             .filter_map(|r| {
-                let org_id: i64 = gkg_utils::traversal_path::org_id(&r.traversal_path)?;
+                let org_id: i64 = orbit_utils::traversal_path::org_id(&r.traversal_path)?;
                 // Append trailing slash for SecurityContext format
                 let path = if r.traversal_path.ends_with('/') {
                     r.traversal_path

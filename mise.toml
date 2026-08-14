@@ -55,43 +55,43 @@ run = ["lefthook install --force", "cp scripts/hooks/post-checkout $(git rev-par
 description = "Install git hooks (lefthook + worktree support)"
 
 [tasks."fuzz:compile"]
-run = "cargo +nightly bolero test fuzz_compile -p gkg-fuzz"
+run = "cargo +nightly bolero test fuzz_compile -p orbit-fuzz"
 description = "Fuzz the query compiler (compile JSON → SQL pipeline)"
 
 [tasks."fuzz:compile-structured"]
-run = "cargo +nightly bolero test fuzz_compile_structured -p gkg-fuzz"
+run = "cargo +nightly bolero test fuzz_compile_structured -p orbit-fuzz"
 description = "Fuzz the query compiler with structured JSON query generation"
 
 [tasks."fuzz:ruby"]
-run = "cargo +nightly bolero test fuzz_ruby -p gkg-fuzz"
+run = "cargo +nightly bolero test fuzz_ruby -p orbit-fuzz"
 description = "Fuzz the Ruby code parser"
 
 [tasks."fuzz:python"]
-run = "cargo +nightly bolero test fuzz_python -p gkg-fuzz"
+run = "cargo +nightly bolero test fuzz_python -p orbit-fuzz"
 description = "Fuzz the Python code parser"
 
 [tasks."fuzz:typescript"]
-run = "cargo +nightly bolero test fuzz_typescript -p gkg-fuzz"
+run = "cargo +nightly bolero test fuzz_typescript -p orbit-fuzz"
 description = "Fuzz the TypeScript/JavaScript code parser"
 
 [tasks."fuzz:java"]
-run = "cargo +nightly bolero test fuzz_java -p gkg-fuzz"
+run = "cargo +nightly bolero test fuzz_java -p orbit-fuzz"
 description = "Fuzz the Java code parser"
 
 [tasks."fuzz:kotlin"]
-run = "cargo +nightly bolero test fuzz_kotlin -p gkg-fuzz"
+run = "cargo +nightly bolero test fuzz_kotlin -p orbit-fuzz"
 description = "Fuzz the Kotlin code parser"
 
 [tasks."fuzz:csharp"]
-run = "cargo +nightly bolero test fuzz_csharp -p gkg-fuzz"
+run = "cargo +nightly bolero test fuzz_csharp -p orbit-fuzz"
 description = "Fuzz the C# code parser"
 
 [tasks."fuzz:rust-parser"]
-run = "cargo +nightly bolero test fuzz_rust_parser -p gkg-fuzz"
+run = "cargo +nightly bolero test fuzz_rust_parser -p orbit-fuzz"
 description = "Fuzz the Rust code parser"
 
 [tasks."fuzz:indexer-messages"]
-run = "cargo +nightly bolero test fuzz_indexer_messages -p gkg-fuzz"
+run = "cargo +nightly bolero test fuzz_indexer_messages -p orbit-fuzz"
 description = "Fuzz indexer message deserialization"
 
 [tasks.build]
@@ -263,13 +263,13 @@ description = "Verify Go proto stubs are up to date"
 
 [tasks."proto:ruby"]
 run = '''
-mkdir -p crates/gkg-server/proto/ruby
-protoc --ruby_out=crates/gkg-server/proto/ruby \
-  --grpc_out=crates/gkg-server/proto/ruby \
+mkdir -p crates/orbit-server/proto/ruby
+protoc --ruby_out=crates/orbit-server/proto/ruby \
+  --grpc_out=crates/orbit-server/proto/ruby \
   --plugin=protoc-gen-grpc=$(which grpc_ruby_plugin) \
-  -I crates/gkg-server/proto \
-  crates/gkg-server/proto/gkg.proto
-echo "Ruby proto files generated in crates/gkg-server/proto/ruby/"
+  -I crates/orbit-server/proto \
+  crates/orbit-server/proto/gkg.proto
+echo "Ruby proto files generated in crates/orbit-server/proto/ruby/"
 '''
 description = "Generate Ruby protobuf files for Rails client"
 
@@ -286,7 +286,7 @@ run = 'gem push _build/gitlab-gkg-proto-*.gem'
 description = "Publish gitlab-gkg-proto gem to RubyGems.org"
 
 [tasks."server:start"]
-run = 'GKG_GITLAB__JWT__VERIFYING_KEY=${GKG_GITLAB__JWT__VERIFYING_KEY:-$(cat $GDK_ROOT_RESOLVED/gitlab/.gitlab_knowledge_graph_secret 2>/dev/null || cat $GDK_ROOT_RESOLVED/gitlab/.gitlab_shell_secret 2>/dev/null || echo "development-secret-at-least-32-bytes")} cargo run -p gkg-server'
+run = 'GKG_GITLAB__JWT__VERIFYING_KEY=${GKG_GITLAB__JWT__VERIFYING_KEY:-$(cat $GDK_ROOT_RESOLVED/gitlab/.gitlab_knowledge_graph_secret 2>/dev/null || cat $GDK_ROOT_RESOLVED/gitlab/.gitlab_shell_secret 2>/dev/null || echo "development-secret-at-least-32-bytes")} cargo run -p orbit-server'
 description = "Start the GKG server (webserver mode)"
 
 [tasks."server:dispatch"]
@@ -391,7 +391,7 @@ description = "Fail if the migration ledger or fingerprint snapshot drifted from
 
 [tasks."metrics:catalog"]
 run = "cargo xtask metrics-catalog"
-description = "Regenerate crates/gkg-observability/orbit-dashboards/gkg-metrics.json"
+description = "Regenerate crates/orbit-observability/orbit-dashboards/gkg-metrics.json"
 
 [tasks."metrics:catalog:check"]
 run = "cargo xtask metrics-catalog --check"

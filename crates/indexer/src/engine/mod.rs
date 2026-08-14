@@ -47,9 +47,9 @@ use crate::indexing_status::IndexingStatusStore;
 use crate::locking::{LockService, NatsLockService};
 use crate::nats::{DlqResult, NatsBroker, NatsError, NatsMessage, NatsServices, NatsServicesImpl};
 
-use gkg_server_config::EngineConfiguration;
 use handler::{Handler, HandlerContext, HandlerError, HandlerRegistry, PermanentAction};
 use metrics::EngineMetrics;
+use orbit_server_config::EngineConfiguration;
 use types::{Envelope, Subscription};
 use worker_pool::WorkerPool;
 
@@ -558,8 +558,8 @@ mod tests {
     use crate::testkit::mocks::{
         MockHandler, MockLockService, MockNatsServices, TestEnvelopeFactory,
     };
-    use gkg_server_config::SubscriptionConfig;
     use handler::{HandlerError, PermanentAction};
+    use orbit_server_config::SubscriptionConfig;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     fn test_context() -> HandlerContext {

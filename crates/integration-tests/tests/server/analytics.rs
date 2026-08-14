@@ -1,7 +1,7 @@
 use std::time::Duration;
 
-use gkg_analytics::{OrbitCommonContext, OrbitQueryContext, orbit_common, orbit_query};
 use labkit_events::Tracker;
+use orbit_analytics::{OrbitCommonContext, OrbitQueryContext, orbit_common, orbit_query};
 use serde_json::Value;
 use testcontainers::core::{ContainerPort, WaitFor};
 use testcontainers::runners::AsyncRunner;
@@ -77,8 +77,8 @@ async fn start_micro(http: &reqwest::Client) -> Micro {
             CopyDataSource::Data(IGLU_CONFIG.as_bytes().to_vec()),
         );
     let schemas = [
-        gkg_analytics::ORBIT_COMMON_SCHEMA,
-        gkg_analytics::ORBIT_QUERY_SCHEMA,
+        orbit_analytics::ORBIT_COMMON_SCHEMA,
+        orbit_analytics::ORBIT_QUERY_SCHEMA,
     ]
     .into_iter()
     .chain(ENVELOPE_SCHEMAS);
@@ -143,7 +143,7 @@ async fn snowplow_micro_receives_gkg_query_executed() {
     let http = reqwest::Client::new();
     let micro = start_micro(&http).await;
 
-    let tracker = Tracker::builder(&micro.base_url, "gkg-analytics-it")
+    let tracker = Tracker::builder(&micro.base_url, "orbit-analytics-it")
         .batch_size(1)
         .build()
         .expect("tracker build");
@@ -221,13 +221,13 @@ async fn snowplow_micro_receives_gkg_query_executed() {
     assert!(
         context_schemas
             .iter()
-            .any(|s| s == gkg_analytics::ORBIT_COMMON_SCHEMA),
+            .any(|s| s == orbit_analytics::ORBIT_COMMON_SCHEMA),
         "missing orbit_common context, contexts={context_schemas:?}"
     );
     assert!(
         context_schemas
             .iter()
-            .any(|s| s == gkg_analytics::ORBIT_QUERY_SCHEMA),
+            .any(|s| s == orbit_analytics::ORBIT_QUERY_SCHEMA),
         "missing orbit_query context, contexts={context_schemas:?}"
     );
 

@@ -1,6 +1,6 @@
 use arrow::array::{Array, Int64Array, StringArray, UInt64Array};
-use gkg_utils::arrow::ArrowUtils;
 use integration_testkit::t;
+use orbit_utils::arrow::ArrowUtils;
 
 use crate::indexer::common::{
     TestContext, create_namespace, create_user, entity_handler_with_partitions, global_envelope,

@@ -11,11 +11,11 @@ publish = false
 [dev-dependencies]
 clickhouse-client = { path = "../clickhouse-client" }
 compiler = { path = "../query-engine/compiler" }
-gkg-analytics = { path = "../gkg-analytics" }
+orbit-analytics = { path = "../orbit-analytics" }
 code-graph = { path = "../code-graph" }
-gkg-server = { path = "../gkg-server", features = ["testkit"] }
-gkg-server-config = { path = "../gkg-server-config" }
-gkg-utils = { path = "../utils" }
+orbit-server = { path = "../orbit-server", features = ["testkit"] }
+orbit-server-config = { path = "../orbit-server-config" }
+orbit-utils = { path = "../utils" }
 jsonschema = { workspace = true }
 indexer = { path = "../indexer", features = ["testkit"] }
 named-queries = { path = "../named-queries" }

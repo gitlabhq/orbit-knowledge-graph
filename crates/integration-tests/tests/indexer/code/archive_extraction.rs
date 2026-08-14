@@ -8,7 +8,7 @@ use code_graph::v2::types::EdgeKind;
 use code_graph::v2::{FileInventoryEntry, GraphConverter, Pipeline, PipelineConfig, SinkError};
 use flate2::Compression;
 use flate2::write::GzEncoder;
-use gkg_utils::archive::extract_tar_gz;
+use orbit_utils::archive::extract_tar_gz;
 use rustc_hash::FxHashMap;
 use std::io::Write;
 

@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 use opentelemetry::KeyValue;
 use opentelemetry::metrics::{Counter, Histogram, Meter};
 
-use gkg_observability::indexer::code;
+use orbit_observability::indexer::code;
 
 use crate::handler::HandlerError;
 
@@ -35,7 +35,7 @@ pub struct CodeMetrics {
 
 impl CodeMetrics {
     pub fn new() -> Self {
-        let meter = gkg_observability::meter();
+        let meter = orbit_observability::meter();
         Self::with_meter(&meter)
     }
 

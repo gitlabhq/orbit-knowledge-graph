@@ -4,9 +4,9 @@ version.workspace = true
 edition = "2024"
 
 [dependencies]
-gkg-observability = { workspace = true }
-gkg-server-config = { path = "../../gkg-server-config" }
-gkg-utils = { path = "../../utils" }
+orbit-observability = { workspace = true }
+orbit-server-config = { path = "../../orbit-server-config" }
+orbit-utils = { path = "../../utils" }
 base64 = { workspace = true }
 ontology = { path = "../../ontology" }
 compiler-pipeline-macros = { path = "../compiler-pipeline-macros" }

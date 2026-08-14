@@ -12,7 +12,7 @@ use tracing::debug;
 
 use crate::error::GitlabClientError;
 use crate::types::{MergeRequestDiffBatch, ProjectInfo};
-use gkg_server_config::GitlabClientConfiguration;
+use orbit_server_config::GitlabClientConfiguration;
 
 pub type ByteStream = Pin<Box<dyn Stream<Item = Result<bytes::Bytes, GitlabClientError>> + Send>>;
 

@@ -1,7 +1,7 @@
 #![allow(dead_code, unused_imports)]
 
-use gkg_server::redaction::QueryResult;
 use ontology::Ontology;
+use orbit_server::redaction::QueryResult;
 pub use query_engine::compiler::compile;
 use query_engine::compiler::{AccessLevel, CompiledQueryContext, SecurityContext, TraversalPath};
 
@@ -34,7 +34,7 @@ pub trait DummyClaims {
     fn dummy() -> Self;
 }
 
-impl DummyClaims for gkg_server::auth::Claims {
+impl DummyClaims for orbit_server::auth::Claims {
     fn dummy() -> Self {
         Self {
             sub: "user:1".into(),
@@ -47,11 +47,11 @@ impl DummyClaims for gkg_server::auth::Claims {
             admin: true,
             organization_id: Some(1),
             min_access_level: Some(AccessLevel::Owner as u32),
-            group_traversal_ids: vec![gkg_server::auth::TraversalPathClaim {
+            group_traversal_ids: vec![orbit_server::auth::TraversalPathClaim {
                 path: "1/".into(),
                 access_levels: vec![AccessLevel::Owner as u32],
             }],
-            source_type: gkg_server::auth::SourceType::Rest,
+            source_type: orbit_server::auth::SourceType::Rest,
             ai_session_id: None,
             instance_id: None,
             unique_instance_id: None,

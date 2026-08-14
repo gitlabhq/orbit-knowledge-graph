@@ -1,6 +1,6 @@
 use async_nats::jetstream::consumer::PullConsumer;
-use gkg_server_config::NatsConfiguration;
 use nats_client::NatsClient;
+use orbit_server_config::NatsConfiguration;
 use tokio::sync::OnceCell;
 use tracing::warn;
 

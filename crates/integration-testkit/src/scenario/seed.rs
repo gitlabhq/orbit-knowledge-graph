@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use arrow::array::StringArray;
-use gkg_utils::arrow::ArrowUtils;
+use orbit_utils::arrow::ArrowUtils;
 
 use super::format::{Row, Seed, SeedSettings};
 use crate::context::TestContext;

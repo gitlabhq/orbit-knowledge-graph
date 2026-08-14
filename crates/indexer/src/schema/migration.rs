@@ -26,8 +26,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use arrow::datatypes::UInt64Type;
-use gkg_utils::arrow::ArrowUtils;
 use ontology::migrations::{MigrationLedger, MigrationScope};
+use orbit_utils::arrow::ArrowUtils;
 use query_engine::compiler::{
     DictionarySource, emit_create_dictionary, emit_create_materialized_view,
     emit_create_refreshable_materialized_view, emit_create_table,

@@ -6,11 +6,11 @@ pub(super) use crate::common::{
     GRAPH_SCHEMA_SQL, MockRedactionService, SIPHON_SCHEMA_SQL, TestContext, admin_security_context,
     load_ontology, run_redaction, test_security_context,
 };
-pub(super) use gkg_server::pipeline::HydrationStage;
-pub(super) use gkg_server::redaction::QueryResult;
 pub(super) use integration_testkit::SeededColumnResolver;
 pub(super) use integration_testkit::load_seed;
 pub(super) use integration_testkit::visitor::{NodeExt, Requirement, ResponseView};
+pub(super) use orbit_server::pipeline::HydrationStage;
+pub(super) use orbit_server::redaction::QueryResult;
 pub(super) use query_engine::compiler::SecurityContext;
 pub(super) use query_engine::formatters::{GraphFormatter, ResultFormatter};
 pub(super) use query_engine::pipeline::{

@@ -21,9 +21,9 @@ Canonical locations for files, schemas, configs, and tools in the knowledge-grap
 | Ontology extraction SQL | Generated from the pipeline (`query: generated`) for nodes and edges; a `.sql.j2` MiniJinja template next to the YAML only for complex nodes (`config/ontology/nodes/`) and derived entities (`config/ontology/derived/`) |
 | Ontology JSON schema | `config/schemas/ontology.schema.json` |
 | Graph query JSON schema | `config/schemas/graph_query.schema.json` |
-| Named query definitions | `config/named_queries/` (parsed/embedded by `crates/named-queries`, compiled against the ontology by `crates/gkg-server/build.rs`, executed via gRPC `QUERY_TYPE_NAMED`, listed via gRPC `ListNamedQueries`) |
+| Named query definitions | `config/named_queries/` (parsed/embedded by `crates/named-queries`, compiled against the ontology by `crates/orbit-server/build.rs`, executed via gRPC `QUERY_TYPE_NAMED`, listed via gRPC `ListNamedQueries`) |
 | Named query JSON schema | `config/schemas/named_query.schema.json` (validate with `mise named-queries:validate`; CI gate `named-query-schema-validate`) |
-| Agent prompt files (tool descriptions) | `config/prompts/` (versioned YAML, one file per prompt; `remote/` feeds `gkg-server`, `local/` feeds `orbit-local`; embedded via rust-embed and build-time validated by `crates/gkg-prompts`) |
+| Agent prompt files (tool descriptions) | `config/prompts/` (versioned YAML, one file per prompt; `remote/` feeds `orbit-server`, `local/` feeds `orbit-local`; embedded via rust-embed and build-time validated by `crates/orbit-prompts`) |
 | Query DSL version | `config/QUERY_DSL_VERSION` |
 | Server config JSON schema | `config/schemas/config.schema.json` (generated via `mise schema:generate`) |
 | Query response JSON schema | `config/schemas/query_response.json` |
@@ -37,9 +37,9 @@ Canonical locations for files, schemas, configs, and tools in the knowledge-grap
 | RAW output format version | `config/RAW_OUTPUT_FORMAT_VERSION` (semver, bump when `graph.rs` or `query_response.json` changes) |
 | Graph DDL (local DuckDB) | Generated at runtime from ontology via `generate_local_tables()` + `duckdb_ddl` |
 | Datalake DDL (ClickHouse) | `fixtures/siphon.sql` |
-| gRPC service definition | `crates/gkg-server/proto/gkg.proto` |
-| Server config structure | `crates/gkg-server-config/src/app.rs` (`AppConfig`), `config/default.yaml` |
-| Query settings (timeouts, cache) | `config/default.yaml` (`query:` section), `crates/gkg-server-config/src/query.rs` |
+| gRPC service definition | `crates/orbit-server/proto/gkg.proto` |
+| Server config structure | `crates/orbit-server-config/src/app.rs` (`AppConfig`), `config/default.yaml` |
+| Query settings (timeouts, cache) | `config/default.yaml` (`query:` section), `crates/orbit-server-config/src/query.rs` |
 | Configuration runbook | `docs/dev/runbooks/server_configuration.md` |
 | Local development guide | `docs/dev/local-development.md` |
 | Local development (`mise run dev`) | `scripts/orbit-native-dev.sh`, `docs/dev/local-development.md` |
@@ -52,7 +52,7 @@ Canonical locations for files, schemas, configs, and tools in the knowledge-grap
 | Iglu schemas (committed; codegen'd at build) | `config/schemas/iglu/<name>/<version>.json` (update via `mise iglu:bump -- <name> <version>`) |
 | Iglu version pins | `config/schemas/iglu/*.version` (bump via `mise iglu:bump -- <name> <version>`, check via `mise iglu:check`) |
 | Analytics event definition | `config/events/gkg_query_executed.yml` |
-| Analytics contexts (Snowplow) | `crates/gkg-analytics/src/context.rs` (types), `crates/gkg-server/src/analytics/` (builders + observer) |
-| Billing config + observer | `crates/gkg-billing/`, `crates/gkg-server/src/billing_adapter.rs` |
+| Analytics contexts (Snowplow) | `crates/orbit-analytics/src/context.rs` (types), `crates/orbit-server/src/analytics/` (builders + observer) |
+| Billing config + observer | `crates/orbit-billing/`, `crates/orbit-server/src/billing_adapter.rs` |
 | SOX billing authoring rules | `docs/dev/sox-billing-boundary.md` |
 | Query profiler CLI | `crates/query-engine/profiler/`, `mise query:profile` |

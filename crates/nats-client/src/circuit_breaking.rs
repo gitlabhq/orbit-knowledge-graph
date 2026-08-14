@@ -29,7 +29,7 @@ impl CircuitBreakingNatsClient {
         self.client.jetstream()
     }
 
-    pub fn config(&self) -> &gkg_server_config::NatsConfiguration {
+    pub fn config(&self) -> &orbit_server_config::NatsConfiguration {
         self.client.config()
     }
 

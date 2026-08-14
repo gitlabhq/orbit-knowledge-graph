@@ -21,7 +21,9 @@ use query_engine::compiler::{
     generate_graph_tables_with_prefix,
 };
 
-fn dictionary_source(config: &gkg_server_config::ClickHouseConfiguration) -> DictionarySource<'_> {
+fn dictionary_source(
+    config: &orbit_server_config::ClickHouseConfiguration,
+) -> DictionarySource<'_> {
     DictionarySource {
         database: &config.database,
         user: &config.username,

@@ -18,8 +18,8 @@ use tracing_subscriber::{EnvFilter, Layer};
 
 use executor::enrich_output;
 use formatters::{GoonFormatter, GraphFormatter, ResultFormatter};
-use gkg_server::pipeline::PathResolver;
-use gkg_server_config::{PathResolverConfig, ProfilingConfig};
+use orbit_server::pipeline::PathResolver;
+use orbit_server_config::{PathResolverConfig, ProfilingConfig};
 use output::{ProfilerOutput, build_output};
 use service::ProfilerPipelineService;
 
@@ -396,7 +396,7 @@ async fn main() -> Result<()> {
         }
     };
 
-    let org_id = gkg_utils::traversal_path::org_id(&cli.traversal_paths[0])
+    let org_id = orbit_utils::traversal_path::org_id(&cli.traversal_paths[0])
         .context("failed to parse org_id from first traversal path")?;
 
     let mut security_ctx = SecurityContext::new(org_id, cli.traversal_paths.clone())

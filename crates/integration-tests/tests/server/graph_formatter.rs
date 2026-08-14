@@ -6,9 +6,9 @@ use crate::common::{
     GRAPH_SCHEMA_SQL, MockRedactionService, SIPHON_SCHEMA_SQL, TestContext, admin_security_context,
     load_ontology, run_redaction, test_security_context,
 };
-use gkg_server::pipeline::HydrationStage;
-use gkg_server::redaction::QueryResult;
 use integration_testkit::{run_subtests, run_subtests_shared, t};
+use orbit_server::pipeline::HydrationStage;
+use orbit_server::redaction::QueryResult;
 use query_engine::compiler::SecurityContext;
 use query_engine::formatters::{GraphFormatter, ResultFormatter};
 use query_engine::pipeline::{NoOpObserver, PipelineStage, QueryPipelineContext, TypeMap};

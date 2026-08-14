@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Utc};
 use code_graph::v2::{CancellationToken, Pipeline, PipelineConfig};
-use gkg_server_config::CodeIndexingPipelineConfig;
+use orbit_server_config::CodeIndexingPipelineConfig;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tracing::{debug, info, warn};
 
@@ -604,7 +604,7 @@ impl CodeIndexer {
                 }
                 // logical_byte_size is slice-invariant, so metering the whole batch once equals
                 // summing the slices below.
-                let batch_bytes = match gkg_utils::arrow::logical_byte_size(&batch) {
+                let batch_bytes = match orbit_utils::arrow::logical_byte_size(&batch) {
                     Ok(n) => n,
                     Err(e) => {
                         tracing::error!(table, error = %e, "batch has no logical-byte-size rule; counting 0 bytes");

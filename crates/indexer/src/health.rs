@@ -16,7 +16,7 @@ struct HealthResponse {
 }
 
 fn version() -> &'static str {
-    gkg_utils::version::get()
+    orbit_utils::version::get()
 }
 
 async fn live() -> Json<HealthResponse> {

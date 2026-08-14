@@ -1,0 +1,1364 @@
+{
+  "$generated_by": "cargo xtask metrics-catalog - do not edit",
+  "metrics": [
+    {
+      "otel_name": "gkg.billing.events.delivered",
+      "prom_name": "gkg_billing_events_delivered_total",
+      "description": "Billing events confirmed handed over to the Snowplow collector (HTTP 2xx), reported by the emitter's on_success callback. Unlike `emitted` (which counts enqueues), this counts events that actually reached the collector after retries.",
+      "kind": "counter",
+      "labels": [],
+      "stability": "stable",
+      "domain": "billing.events"
+    },
+    {
+      "otel_name": "gkg.billing.events.delivery_failed",
+      "prom_name": "gkg_billing_events_delivery_failed_total",
+      "description": "Billing events permanently dropped by the emitter without reaching the collector, reported by the on_failure callback: a non-retriable status, exhausted retries, auth failure, or an unknown future variant.",
+      "kind": "counter",
+      "labels": [
+        "reason"
+      ],
+      "stability": "stable",
+      "domain": "billing.events"
+    },
+    {
+      "otel_name": "gkg.billing.events.dropped",
+      "prom_name": "gkg_billing_events_dropped_total",
+      "description": "Billing events not emitted because event construction failed (realm missing, realm unrecognized, or builder error).",
+      "kind": "counter",
+      "labels": [
+        "reason"
+      ],
+      "stability": "stable",
+      "domain": "billing.events"
+    },
+    {
+      "otel_name": "gkg.billing.events.emitted",
+      "prom_name": "gkg_billing_events_emitted_total",
+      "description": "Billing events handed to the Snowplow tracker after a successful query.",
+      "kind": "counter",
+      "labels": [],
+      "stability": "stable",
+      "domain": "billing.events"
+    },
+    {
+      "otel_name": "gkg.billing.events.rejected",
+      "prom_name": "gkg_billing_events_rejected_total",
+      "description": "Billing events refused by the labkit tracker at enqueue (queue full or tracker shutdown). HTTP delivery failures to the Snowplow collector occur in labkit's background loop and are not surfaced through this counter.",
+      "kind": "counter",
+      "labels": [],
+      "stability": "stable",
+      "domain": "billing.events"
+    },
+    {
+      "otel_name": "gkg.billing.quota.bypassed",
+      "prom_name": "gkg_billing_quota_bypassed_total",
+      "description": "Requests that bypassed the quota gate because their source_type is not in the metered set (mcp/rest), labelled by source_type.",
+      "kind": "counter",
+      "labels": [
+        "source_type"
+      ],
+      "stability": "stable",
+      "domain": "billing.quota"
+    },
+    {
+      "otel_name": "gkg.billing.quota.cache.entries",
+      "prom_name": "gkg_billing_quota_cache_entries",
+      "description": "Current number of entries in the per-pod quota decision cache. Approaches the QUOTA_MAX_CACHE_ENTRIES ceiling under sustained load from many distinct namespaces.",
+      "kind": "observable_gauge",
+      "labels": [],
+      "stability": "stable",
+      "domain": "billing.quota"
+    },
+    {
+      "otel_name": "gkg.billing.quota.cdot.duration",
+      "prom_name": "gkg_billing_quota_cdot_duration_seconds",
+      "description": "Latency of upstream CustomersDot HEAD requests for quota resolution. Recorded once per actual HTTP call; concurrent cache-miss coalescing means this count is lower than the decisions{cache=miss} counter under load.",
+      "kind": "histogram_f64",
+      "unit": "s",
+      "labels": [
+        "outcome"
+      ],
+      "buckets": [
+        0.1,
+        0.25,
+        0.5,
+        1.0,
+        2.5,
+        5.0
+      ],
+      "stability": "stable",
+      "domain": "billing.quota"
+    },
+    {
+      "otel_name": "gkg.billing.quota.decisions",
+      "prom_name": "gkg_billing_quota_decisions_total",
+      "description": "Quota gate decisions, labelled by outcome (allow/deny/fail_open), cache result (hit/miss), and source_type (mcp/rest). cache=miss on fail_open does not imply a 1:1 CDot call ratio — see gkg.billing.quota.cdot.duration for actual upstream call counts.",
+      "kind": "counter",
+      "labels": [
+        "decision",
+        "cache",
+        "source_type"
+      ],
+      "stability": "stable",
+      "domain": "billing.quota"
+    },
+    {
+      "otel_name": "gkg.circuit_breaker.calls",
+      "prom_name": "gkg_circuit_breaker_calls_total",
+      "description": "Classified call outcomes through the circuit breaker.",
+      "kind": "counter",
+      "labels": [
+        "service",
+        "outcome"
+      ],
+      "stability": "stable",
+      "domain": "resilience.circuit_breaker"
+    },
+    {
+      "otel_name": "gkg.circuit_breaker.calls.rejected",
+      "prom_name": "gkg_circuit_breaker_calls_rejected_total",
+      "description": "Calls rejected by an open circuit breaker.",
+      "kind": "counter",
+      "labels": [
+        "service"
+      ],
+      "stability": "stable",
+      "domain": "resilience.circuit_breaker"
+    },
+    {
+      "otel_name": "gkg.circuit_breaker.state.transitions",
+      "prom_name": "gkg_circuit_breaker_state_transitions_total",
+      "description": "Circuit-breaker state transitions, labelled by service and direction.",
+      "kind": "counter",
+      "labels": [
+        "service",
+        "from",
+        "to"
+      ],
+      "stability": "stable",
+      "domain": "resilience.circuit_breaker"
+    },
+    {
+      "otel_name": "gkg.content.blob.size",
+      "prom_name": "gkg_content_blob_size_bytes",
+      "description": "Size of resolved blob content in bytes.",
+      "kind": "histogram_u64",
+      "unit": "By",
+      "labels": [],
+      "buckets": [
+        256.0,
+        1024.0,
+        4096.0,
+        16384.0,
+        65536.0,
+        262144.0,
+        1048576.0,
+        4194304.0,
+        16777216.0
+      ],
+      "stability": "stable",
+      "domain": "server.content"
+    },
+    {
+      "otel_name": "gkg.content.gitaly.calls",
+      "prom_name": "gkg_content_gitaly_calls_total",
+      "description": "Total list_blobs RPCs issued to Gitaly.",
+      "kind": "counter",
+      "labels": [],
+      "stability": "stable",
+      "domain": "server.content"
+    },
+    {
+      "otel_name": "gkg.content.mr_diff.calls",
+      "prom_name": "gkg_content_mr_diff_calls_total",
+      "description": "Total HTTP calls issued to the merge_request_diffs internal API.",
+      "kind": "counter",
+      "labels": [
+        "endpoint"
+      ],
+      "stability": "stable",
+      "domain": "server.content"
+    },
+    {
+      "otel_name": "gkg.content.resolve",
+      "prom_name": "gkg_content_resolve_total",
+      "description": "Total content resolution attempts.",
+      "kind": "counter",
+      "labels": [
+        "outcome"
+      ],
+      "stability": "stable",
+      "domain": "server.content"
+    },
+    {
+      "otel_name": "gkg.content.resolve.batch_size",
+      "prom_name": "gkg_content_resolve_batch_size",
+      "description": "Number of rows per content resolution batch.",
+      "kind": "histogram_u64",
+      "labels": [],
+      "buckets": [
+        1.0,
+        5.0,
+        10.0,
+        25.0,
+        50.0,
+        100.0,
+        500.0,
+        1000.0
+      ],
+      "stability": "stable",
+      "domain": "server.content"
+    },
+    {
+      "otel_name": "gkg.content.resolve.duration",
+      "prom_name": "gkg_content_resolve_duration_seconds",
+      "description": "Time spent resolving content from Gitaly.",
+      "kind": "histogram_f64",
+      "unit": "s",
+      "labels": [
+        "outcome"
+      ],
+      "buckets": [
+        0.1,
+        0.25,
+        0.5,
+        1.0,
+        2.5,
+        5.0
+      ],
+      "stability": "stable",
+      "domain": "server.content"
+    },
+    {
+      "otel_name": "gkg.etl.destination.rows.written",
+      "prom_name": "gkg_etl_destination_rows_written_total",
+      "description": "Total rows written to ClickHouse per table.",
+      "kind": "counter",
+      "labels": [
+        "table"
+      ],
+      "stability": "stable",
+      "domain": "indexer.etl"
+    },
+    {
+      "otel_name": "gkg.etl.destination.unmeterable.batches",
+      "prom_name": "gkg_etl_destination_unmeterable_batches_total",
+      "description": "Batches whose Arrow type had no logical-byte-size rule; counted as 0 bytes and written anyway. Nonzero means the counting rules drifted from a shipped column type.",
+      "kind": "counter",
+      "labels": [
+        "table"
+      ],
+      "stability": "stable",
+      "domain": "indexer.etl"
+    },
+    {
+      "otel_name": "gkg.etl.destination.write.duration",
+      "prom_name": "gkg_etl_destination_write_duration_seconds",
+      "description": "Time to write a batch to ClickHouse per table.",
+      "kind": "histogram_f64",
+      "unit": "s",
+      "labels": [
+        "table"
+      ],
+      "buckets": [
+        0.025,
+        0.05,
+        0.1,
+        0.25,
+        0.5,
+        1.0,
+        2.5,
+        5.0,
+        10.0,
+        30.0,
+        60.0
+      ],
+      "stability": "stable",
+      "domain": "indexer.etl"
+    },
+    {
+      "otel_name": "gkg.etl.destination.write.errors",
+      "prom_name": "gkg_etl_destination_write_errors_total",
+      "description": "Total failed writes to ClickHouse per table.",
+      "kind": "counter",
+      "labels": [
+        "table"
+      ],
+      "stability": "stable",
+      "domain": "indexer.etl"
+    },
+    {
+      "otel_name": "gkg.etl.destination.written",
+      "prom_name": "gkg_etl_destination_written_bytes_total",
+      "description": "Total logical bytes written to ClickHouse per table (orbit_utils::arrow::logical_byte_size, a deterministic count of row values, not allocator memory).",
+      "kind": "counter",
+      "unit": "By",
+      "labels": [
+        "table"
+      ],
+      "stability": "stable",
+      "domain": "indexer.etl"
+    },
+    {
+      "otel_name": "gkg.etl.handler.duration",
+      "prom_name": "gkg_etl_handler_duration_seconds",
+      "description": "Time inside each handler's handle() call.",
+      "kind": "histogram_f64",
+      "unit": "s",
+      "labels": [
+        "handler"
+      ],
+      "buckets": [
+        0.025,
+        0.05,
+        0.1,
+        0.25,
+        0.5,
+        1.0,
+        2.5,
+        5.0,
+        10.0,
+        30.0,
+        60.0
+      ],
+      "stability": "stable",
+      "domain": "indexer.etl"
+    },
+    {
+      "otel_name": "gkg.etl.handler.errors",
+      "prom_name": "gkg_etl_handler_errors_total",
+      "description": "Total handler errors at the engine dispatch level.",
+      "kind": "counter",
+      "labels": [
+        "handler",
+        "error_kind"
+      ],
+      "stability": "stable",
+      "domain": "indexer.etl"
+    },
+    {
+      "otel_name": "gkg.etl.message.duration",
+      "prom_name": "gkg_etl_message_duration_seconds",
+      "description": "End-to-end time per message through dispatch.",
+      "kind": "histogram_f64",
+      "unit": "s",
+      "labels": [
+        "topic"
+      ],
+      "buckets": [
+        0.025,
+        0.05,
+        0.1,
+        0.25,
+        0.5,
+        1.0,
+        2.5,
+        5.0,
+        10.0,
+        30.0,
+        60.0
+      ],
+      "stability": "stable",
+      "domain": "indexer.etl"
+    },
+    {
+      "otel_name": "gkg.etl.messages.processed",
+      "prom_name": "gkg_etl_messages_processed_total",
+      "description": "ETL messages processed by the indexer, labelled by topic and outcome.",
+      "kind": "counter",
+      "labels": [
+        "topic",
+        "outcome"
+      ],
+      "stability": "stable",
+      "domain": "indexer.etl"
+    },
+    {
+      "otel_name": "gkg.etl.nats.fetch.duration",
+      "prom_name": "gkg_etl_nats_fetch_duration_seconds",
+      "description": "Time to fetch a batch of messages from NATS.",
+      "kind": "histogram_f64",
+      "unit": "s",
+      "labels": [
+        "outcome"
+      ],
+      "buckets": [
+        0.005,
+        0.01,
+        0.025,
+        0.05,
+        0.1,
+        0.25,
+        0.5,
+        1.0
+      ],
+      "stability": "stable",
+      "domain": "indexer.etl"
+    },
+    {
+      "otel_name": "gkg.etl.permit.wait.duration",
+      "prom_name": "gkg_etl_permit_wait_duration_seconds",
+      "description": "Time waiting for a worker pool permit, labelled by permit kind (global|group) and group.",
+      "kind": "histogram_f64",
+      "unit": "s",
+      "labels": [
+        "permit_kind",
+        "group"
+      ],
+      "buckets": [
+        0.025,
+        0.05,
+        0.1,
+        0.25,
+        0.5,
+        1.0,
+        2.5,
+        5.0,
+        10.0,
+        30.0,
+        60.0
+      ],
+      "stability": "stable",
+      "domain": "indexer.etl"
+    },
+    {
+      "otel_name": "gkg.etl.permits.active",
+      "prom_name": "gkg_etl_permits_active",
+      "description": "Number of worker permits currently held, labelled by permit kind (global or concurrency-group name).",
+      "kind": "up_down_counter",
+      "labels": [
+        "permit_kind"
+      ],
+      "stability": "stable",
+      "domain": "indexer.etl"
+    },
+    {
+      "otel_name": "gkg.indexer.code.archive.bytes.skipped",
+      "prom_name": "gkg_indexer_code_archive_bytes_skipped_bytes_total",
+      "description": "Total bytes that the archive extractor refused to write to disk, summed from the tar header sizes of skipped entries. Same `reason` labels as `gkg.indexer.code.archive.entries.skipped`.",
+      "kind": "counter",
+      "unit": "By",
+      "labels": [
+        "reason"
+      ],
+      "stability": "stable",
+      "domain": "indexer.code"
+    },
+    {
+      "otel_name": "gkg.indexer.code.archive.entries.skipped",
+      "prom_name": "gkg_indexer_code_archive_entries_skipped_total",
+      "description": "Files the stream recorded as a graph node but did not load or parse (and, for the tar source, did not write to disk). Reasons: `excluded_extension` (basename matches the `code-graph::v2::config::filter::EXCLUDED_INDEXING_GLOBS` denylist — binary assets, media, archives, minified bundles), `oversize` (declared size exceeds the configured per-file ceiling), `binary` (a NUL byte in the first 8000 bytes, git-style, with a UTF BOM rescue), `not_utf8` (content is not valid UTF-8), `minified` / `line_too_long` (high average line length or a >64 KiB line), `non_regular_file` (a symlink — a node, never parsed).",
+      "kind": "counter",
+      "labels": [
+        "reason"
+      ],
+      "stability": "stable",
+      "domain": "indexer.code"
+    },
+    {
+      "otel_name": "gkg.indexer.code.errors",
+      "prom_name": "gkg_indexer_code_errors_total",
+      "description": "Task-level code indexing failures by pipeline stage. Increments only when a code indexing task ends with a fatal pipeline error (sink write, thread pool, sentinel spawn, internal panic). Per-file failures land in `gkg.indexer.code.file_faults` instead, so this rate is suitable for alerting.",
+      "kind": "counter",
+      "labels": [
+        "stage"
+      ],
+      "stability": "stable",
+      "domain": "indexer.code"
+    },
+    {
+      "otel_name": "gkg.indexer.code.events.processed",
+      "prom_name": "gkg_indexer_code_events_processed_total",
+      "description": "Total push events processed by the code indexing handler.",
+      "kind": "counter",
+      "labels": [
+        "outcome"
+      ],
+      "stability": "stable",
+      "domain": "indexer.code"
+    },
+    {
+      "otel_name": "gkg.indexer.code.file.phase_cpu_duration",
+      "prom_name": "gkg_indexer_code_file_phase_cpu_duration_seconds",
+      "description": "Per-file CPU time in each bounded parse sub-phase (the phases the per-file CPU budgets bound). One observation per successfully-parsed file. Labels: language, phase (parse, walk, ssa). Aborted files appear in `files.skipped{reason=timeout_*}` instead, so this measures the surviving-file distribution used to size the budgets.",
+      "kind": "histogram_f64",
+      "unit": "s",
+      "labels": [
+        "language",
+        "phase"
+      ],
+      "buckets": [
+        0.005,
+        0.01,
+        0.025,
+        0.05,
+        0.1,
+        0.25,
+        0.5,
+        1.0
+      ],
+      "stability": "stable",
+      "domain": "indexer.code"
+    },
+    {
+      "otel_name": "gkg.indexer.code.file_faults",
+      "prom_name": "gkg_indexer_code_file_faults_total",
+      "description": "Per-file failures during code indexing, by kind. The task itself completes successfully; individual files were excluded from the graph. Kinds: `file_read`, `invalid_utf8`, `syntax_error`, `oxc_panic`, `oxc_semantic`, `analyzer_panic`, `unknown_source_type`, `embedded_script_parse`, `rust_workspace_missing`.",
+      "kind": "counter",
+      "labels": [
+        "kind"
+      ],
+      "stability": "stable",
+      "domain": "indexer.code"
+    },
+    {
+      "otel_name": "gkg.indexer.code.files.processed",
+      "prom_name": "gkg_indexer_code_files_processed_total",
+      "description": "Total files seen by the code-graph indexer.",
+      "kind": "counter",
+      "labels": [
+        "outcome"
+      ],
+      "stability": "stable",
+      "domain": "indexer.code"
+    },
+    {
+      "otel_name": "gkg.indexer.code.files.skipped",
+      "prom_name": "gkg_indexer_code_files_skipped_total",
+      "description": "Source files skipped by the code-graph indexer for policy or watchdog reasons. Not an error. Reasons: `oversize`, `oversize_combined`, `parser_oversize`, `arrow_offset_overflow`, `unsafe_path`, and per-phase CPU-budget timeouts `timeout_parse`, `timeout_walk`, `timeout_ssa`, `timeout_sentinel`.",
+      "kind": "counter",
+      "labels": [
+        "reason"
+      ],
+      "stability": "stable",
+      "domain": "indexer.code"
+    },
+    {
+      "otel_name": "gkg.indexer.code.handler.duration",
+      "prom_name": "gkg_indexer_code_handler_duration_seconds",
+      "description": "End-to-end duration of processing a single push event.",
+      "kind": "histogram_f64",
+      "unit": "s",
+      "labels": [],
+      "buckets": [
+        0.1,
+        0.5,
+        1.0,
+        2.5,
+        5.0,
+        10.0,
+        30.0,
+        60.0,
+        120.0,
+        300.0,
+        600.0
+      ],
+      "stability": "stable",
+      "domain": "indexer.code"
+    },
+    {
+      "otel_name": "gkg.indexer.code.indexing.duration",
+      "prom_name": "gkg_indexer_code_indexing_duration_seconds",
+      "description": "Duration of code-graph parsing and analysis.",
+      "kind": "histogram_f64",
+      "unit": "s",
+      "labels": [],
+      "buckets": [
+        0.1,
+        0.5,
+        1.0,
+        2.5,
+        5.0,
+        10.0,
+        30.0,
+        60.0,
+        120.0,
+        300.0,
+        600.0
+      ],
+      "stability": "stable",
+      "domain": "indexer.code"
+    },
+    {
+      "otel_name": "gkg.indexer.code.language.bytes",
+      "prom_name": "gkg_indexer_code_language_bytes_bytes_total",
+      "description": "Source bytes processed per language family.",
+      "kind": "counter",
+      "unit": "By",
+      "labels": [
+        "language"
+      ],
+      "stability": "stable",
+      "domain": "indexer.code"
+    },
+    {
+      "otel_name": "gkg.indexer.code.language.files",
+      "prom_name": "gkg_indexer_code_language_files_total",
+      "description": "Files processed per language family.",
+      "kind": "counter",
+      "labels": [
+        "language"
+      ],
+      "stability": "stable",
+      "domain": "indexer.code"
+    },
+    {
+      "otel_name": "gkg.indexer.code.language.phase_duration",
+      "prom_name": "gkg_indexer_code_language_phase_duration_seconds",
+      "description": "Per-language pipeline phase duration. Labels: language (ruby, java_script, type_script, rust, ...), phase (parse, graph_build, resolve).",
+      "kind": "histogram_f64",
+      "unit": "s",
+      "labels": [
+        "language",
+        "phase"
+      ],
+      "buckets": [
+        0.1,
+        0.5,
+        1.0,
+        2.5,
+        5.0,
+        10.0,
+        30.0,
+        60.0,
+        120.0,
+        300.0,
+        600.0
+      ],
+      "stability": "stable",
+      "domain": "indexer.code"
+    },
+    {
+      "otel_name": "gkg.indexer.code.nodes.indexed",
+      "prom_name": "gkg_indexer_code_nodes_indexed_total",
+      "description": "Total graph nodes and edges indexed by the code handler.",
+      "kind": "counter",
+      "labels": [
+        "kind"
+      ],
+      "stability": "stable",
+      "domain": "indexer.code"
+    },
+    {
+      "otel_name": "gkg.indexer.code.pipeline.phase_duration",
+      "prom_name": "gkg_indexer_code_pipeline_phase_duration_seconds",
+      "description": "Top-level pipeline phase duration. Labels: phase (file_discovery, structural_graph, language_processing).",
+      "kind": "histogram_f64",
+      "unit": "s",
+      "labels": [
+        "phase"
+      ],
+      "buckets": [
+        0.1,
+        0.5,
+        1.0,
+        2.5,
+        5.0,
+        10.0,
+        30.0,
+        60.0,
+        120.0,
+        300.0,
+        600.0
+      ],
+      "stability": "stable",
+      "domain": "indexer.code"
+    },
+    {
+      "otel_name": "gkg.indexer.code.repository.cleanup",
+      "prom_name": "gkg_indexer_code_repository_cleanup_total",
+      "description": "Repository disk cleanup outcomes (success, failure).",
+      "kind": "counter",
+      "labels": [
+        "outcome"
+      ],
+      "stability": "stable",
+      "domain": "indexer.code"
+    },
+    {
+      "otel_name": "gkg.indexer.code.repository.empty",
+      "prom_name": "gkg_indexer_code_repository_empty_total",
+      "description": "Projects short-circuited as terminal-empty at fetch time.",
+      "kind": "counter",
+      "labels": [
+        "reason"
+      ],
+      "stability": "stable",
+      "domain": "indexer.code"
+    },
+    {
+      "otel_name": "gkg.indexer.code.repository.fetch.duration",
+      "prom_name": "gkg_indexer_code_repository_fetch_duration_seconds",
+      "description": "Duration of downloading a repository archive from Gitaly.",
+      "kind": "histogram_f64",
+      "unit": "s",
+      "labels": [],
+      "buckets": [
+        0.1,
+        0.5,
+        1.0,
+        2.5,
+        5.0,
+        10.0,
+        30.0,
+        60.0,
+        120.0,
+        300.0,
+        600.0
+      ],
+      "stability": "stable",
+      "domain": "indexer.code"
+    },
+    {
+      "otel_name": "gkg.indexer.code.repository.indexing.completed",
+      "prom_name": "gkg_indexer_code_repository_indexing_completed_total",
+      "description": "Repository indexing runs completed by the code indexing handler.",
+      "kind": "counter",
+      "labels": [
+        "outcome"
+      ],
+      "stability": "stable",
+      "domain": "indexer.code"
+    },
+    {
+      "otel_name": "gkg.indexer.code.repository.resolution",
+      "prom_name": "gkg_indexer_code_repository_resolution_total",
+      "description": "Repository resolution strategy used (full_download, empty_repository).",
+      "kind": "counter",
+      "labels": [
+        "strategy"
+      ],
+      "stability": "stable",
+      "domain": "indexer.code"
+    },
+    {
+      "otel_name": "gkg.indexer.code.repository.source.size",
+      "prom_name": "gkg_indexer_code_repository_source_size_bytes",
+      "description": "Total bytes of repository files discovered during one code indexing run.",
+      "kind": "histogram_u64",
+      "unit": "By",
+      "labels": [],
+      "buckets": [
+        1048576.0,
+        10485760.0,
+        104857600.0,
+        1073741824.0,
+        10737418240.0,
+        107374182400.0
+      ],
+      "stability": "stable",
+      "domain": "indexer.code"
+    },
+    {
+      "otel_name": "gkg.indexer.max_deliveries.exhausted",
+      "prom_name": "gkg_indexer_max_deliveries_exhausted_total",
+      "description": "Messages deleted after JetStream exhausted max_deliver, labelled by stream and consumer.",
+      "kind": "counter",
+      "labels": [
+        "stream",
+        "consumer"
+      ],
+      "stability": "stable",
+      "domain": "indexer.nats"
+    },
+    {
+      "otel_name": "gkg.indexer.namespace_deletion.table.duration",
+      "prom_name": "gkg_indexer_namespace_deletion_table_duration_seconds",
+      "description": "Duration of a single table's soft-delete INSERT-SELECT.",
+      "kind": "histogram_f64",
+      "unit": "s",
+      "labels": [],
+      "buckets": [
+        0.025,
+        0.05,
+        0.1,
+        0.25,
+        0.5,
+        1.0,
+        2.5,
+        5.0,
+        10.0,
+        30.0,
+        60.0
+      ],
+      "stability": "stable",
+      "domain": "indexer.namespace_deletion"
+    },
+    {
+      "otel_name": "gkg.indexer.namespace_deletion.table.errors",
+      "prom_name": "gkg_indexer_namespace_deletion_table_errors_total",
+      "description": "Total table deletion failures during namespace deletion.",
+      "kind": "counter",
+      "labels": [],
+      "stability": "stable",
+      "domain": "indexer.namespace_deletion"
+    },
+    {
+      "otel_name": "gkg.indexer.sdlc.datalake.query",
+      "prom_name": "gkg_indexer_sdlc_datalake_query_bytes_total",
+      "description": "Total bytes returned by ClickHouse datalake extraction queries.",
+      "kind": "counter",
+      "unit": "By",
+      "labels": [
+        "entity"
+      ],
+      "stability": "stable",
+      "domain": "indexer.sdlc"
+    },
+    {
+      "otel_name": "gkg.indexer.sdlc.datalake.query.duration",
+      "prom_name": "gkg_indexer_sdlc_datalake_query_duration_seconds",
+      "description": "Duration of ClickHouse datalake extraction queries.",
+      "kind": "histogram_f64",
+      "unit": "s",
+      "labels": [],
+      "buckets": [
+        0.005,
+        0.01,
+        0.025,
+        0.05,
+        0.1,
+        0.25,
+        0.5,
+        1.0
+      ],
+      "stability": "stable",
+      "domain": "indexer.sdlc"
+    },
+    {
+      "otel_name": "gkg.indexer.sdlc.handler.duration",
+      "prom_name": "gkg_indexer_sdlc_handler_duration_seconds",
+      "description": "Duration of a full handler invocation across all its pipelines.",
+      "kind": "histogram_f64",
+      "unit": "s",
+      "labels": [
+        "handler"
+      ],
+      "buckets": [
+        0.025,
+        0.05,
+        0.1,
+        0.25,
+        0.5,
+        1.0,
+        2.5,
+        5.0,
+        10.0,
+        30.0,
+        60.0
+      ],
+      "stability": "stable",
+      "domain": "indexer.sdlc"
+    },
+    {
+      "otel_name": "gkg.indexer.sdlc.pipeline.duration",
+      "prom_name": "gkg_indexer_sdlc_pipeline_duration_seconds",
+      "description": "End-to-end duration of a single entity or edge pipeline run.",
+      "kind": "histogram_f64",
+      "unit": "s",
+      "labels": [
+        "entity"
+      ],
+      "buckets": [
+        0.025,
+        0.05,
+        0.1,
+        0.25,
+        0.5,
+        1.0,
+        2.5,
+        5.0,
+        10.0,
+        30.0,
+        60.0
+      ],
+      "stability": "stable",
+      "domain": "indexer.sdlc"
+    },
+    {
+      "otel_name": "gkg.indexer.sdlc.pipeline.errors",
+      "prom_name": "gkg_indexer_sdlc_pipeline_errors_total",
+      "description": "Total SDLC pipeline failures.",
+      "kind": "counter",
+      "labels": [
+        "entity",
+        "error_kind"
+      ],
+      "stability": "stable",
+      "domain": "indexer.sdlc"
+    },
+    {
+      "otel_name": "gkg.indexer.sdlc.pipeline.rows.processed",
+      "prom_name": "gkg_indexer_sdlc_pipeline_rows_processed_total",
+      "description": "Total rows extracted and written by SDLC pipelines.",
+      "kind": "counter",
+      "labels": [
+        "entity"
+      ],
+      "stability": "stable",
+      "domain": "indexer.sdlc"
+    },
+    {
+      "otel_name": "gkg.indexer.sdlc.transform.duration",
+      "prom_name": "gkg_indexer_sdlc_transform_duration_seconds",
+      "description": "Duration of DataFusion SQL transform per batch.",
+      "kind": "histogram_f64",
+      "unit": "s",
+      "labels": [],
+      "buckets": [
+        0.005,
+        0.01,
+        0.025,
+        0.05,
+        0.1,
+        0.25,
+        0.5,
+        1.0
+      ],
+      "stability": "stable",
+      "domain": "indexer.sdlc"
+    },
+    {
+      "otel_name": "gkg.indexer.sdlc.watermark.lag",
+      "prom_name": "gkg_indexer_sdlc_watermark_lag_seconds",
+      "description": "Seconds between the current watermark and wall-clock time (data freshness).",
+      "kind": "gauge",
+      "unit": "s",
+      "labels": [],
+      "stability": "stable",
+      "domain": "indexer.sdlc"
+    },
+    {
+      "otel_name": "gkg.query.engine.compiler.rejected",
+      "prom_name": "gkg_query_engine_compiler_rejected_total",
+      "description": "Total queries the compiler rejected before execution, labelled by failure reason.",
+      "kind": "counter",
+      "labels": [
+        "failure_reason"
+      ],
+      "stability": "stable",
+      "domain": "query.engine"
+    },
+    {
+      "otel_name": "gkg.query.pipeline.authorization.duration",
+      "prom_name": "gkg_query_pipeline_authorization_duration_seconds",
+      "description": "Time spent on authorization exchange with Rails.",
+      "kind": "histogram_f64",
+      "unit": "s",
+      "labels": [
+        "query_type"
+      ],
+      "buckets": [
+        0.025,
+        0.05,
+        0.1,
+        0.25,
+        0.5,
+        1.0,
+        2.5,
+        5.0,
+        10.0,
+        30.0,
+        60.0
+      ],
+      "stability": "stable",
+      "domain": "query.pipeline"
+    },
+    {
+      "otel_name": "gkg.query.pipeline.batches",
+      "prom_name": "gkg_query_pipeline_batches",
+      "description": "Number of Arrow record batches returned from ClickHouse per query.",
+      "kind": "histogram_u64",
+      "labels": [
+        "query_type"
+      ],
+      "buckets": [
+        1.0,
+        10.0,
+        100.0,
+        1000.0,
+        10000.0,
+        100000.0,
+        1000000.0
+      ],
+      "stability": "stable",
+      "domain": "query.pipeline"
+    },
+    {
+      "otel_name": "gkg.query.pipeline.ch.memory_usage",
+      "prom_name": "gkg_query_pipeline_ch_memory_usage_bytes",
+      "description": "ClickHouse peak memory usage per query execution.",
+      "kind": "histogram_u64",
+      "unit": "By",
+      "labels": [
+        "query_type",
+        "label"
+      ],
+      "buckets": [
+        1048576.0,
+        10485760.0,
+        104857600.0,
+        1073741824.0,
+        10737418240.0,
+        107374182400.0
+      ],
+      "stability": "stable",
+      "domain": "query.pipeline"
+    },
+    {
+      "otel_name": "gkg.query.pipeline.ch.read",
+      "prom_name": "gkg_query_pipeline_ch_read_bytes_total",
+      "description": "ClickHouse bytes read across all queries in the pipeline.",
+      "kind": "counter",
+      "unit": "By",
+      "labels": [
+        "query_type",
+        "label"
+      ],
+      "stability": "stable",
+      "domain": "query.pipeline"
+    },
+    {
+      "otel_name": "gkg.query.pipeline.ch.read_rows",
+      "prom_name": "gkg_query_pipeline_ch_read_rows_total",
+      "description": "ClickHouse rows read across all queries in the pipeline.",
+      "kind": "counter",
+      "labels": [
+        "query_type",
+        "label"
+      ],
+      "stability": "stable",
+      "domain": "query.pipeline"
+    },
+    {
+      "otel_name": "gkg.query.pipeline.compile.duration",
+      "prom_name": "gkg_query_pipeline_compile_duration_seconds",
+      "description": "Time spent compiling a query from JSON to parameterised SQL.",
+      "kind": "histogram_f64",
+      "unit": "s",
+      "labels": [
+        "query_type"
+      ],
+      "buckets": [
+        0.005,
+        0.01,
+        0.025,
+        0.05,
+        0.1,
+        0.25,
+        0.5,
+        1.0
+      ],
+      "stability": "stable",
+      "domain": "query.pipeline"
+    },
+    {
+      "otel_name": "gkg.query.pipeline.duration",
+      "prom_name": "gkg_query_pipeline_duration_seconds",
+      "description": "End-to-end pipeline duration from security check to formatted output.",
+      "kind": "histogram_f64",
+      "unit": "s",
+      "labels": [
+        "query_type",
+        "status"
+      ],
+      "buckets": [
+        0.025,
+        0.05,
+        0.1,
+        0.25,
+        0.5,
+        1.0,
+        2.5,
+        5.0,
+        10.0,
+        30.0,
+        60.0
+      ],
+      "stability": "stable",
+      "domain": "query.pipeline"
+    },
+    {
+      "otel_name": "gkg.query.pipeline.execute.duration",
+      "prom_name": "gkg_query_pipeline_execute_duration_seconds",
+      "description": "Time spent executing the compiled query against ClickHouse.",
+      "kind": "histogram_f64",
+      "unit": "s",
+      "labels": [
+        "query_type"
+      ],
+      "buckets": [
+        0.025,
+        0.05,
+        0.1,
+        0.25,
+        0.5,
+        1.0,
+        2.5,
+        5.0,
+        10.0,
+        30.0,
+        60.0
+      ],
+      "stability": "stable",
+      "domain": "query.pipeline"
+    },
+    {
+      "otel_name": "gkg.query.pipeline.failed",
+      "prom_name": "gkg_query_pipeline_failed_total",
+      "description": "Total queries that failed in the pipeline post-compile, labelled by failure reason.",
+      "kind": "counter",
+      "labels": [
+        "failure_reason"
+      ],
+      "stability": "stable",
+      "domain": "query.pipeline"
+    },
+    {
+      "otel_name": "gkg.query.pipeline.hydration.duration",
+      "prom_name": "gkg_query_pipeline_hydration_duration_seconds",
+      "description": "Time spent hydrating neighbour properties from ClickHouse.",
+      "kind": "histogram_f64",
+      "unit": "s",
+      "labels": [
+        "query_type"
+      ],
+      "buckets": [
+        0.005,
+        0.01,
+        0.025,
+        0.05,
+        0.1,
+        0.25,
+        0.5,
+        1.0
+      ],
+      "stability": "stable",
+      "domain": "query.pipeline"
+    },
+    {
+      "otel_name": "gkg.query.pipeline.queries",
+      "prom_name": "gkg_query_pipeline_queries_total",
+      "description": "Total queries processed through the pipeline.",
+      "kind": "counter",
+      "labels": [
+        "query_type",
+        "status"
+      ],
+      "stability": "stable",
+      "domain": "query.pipeline"
+    },
+    {
+      "otel_name": "gkg.query.pipeline.redactions",
+      "prom_name": "gkg_query_pipeline_redactions",
+      "description": "Number of rows redacted per query.",
+      "kind": "histogram_u64",
+      "labels": [
+        "query_type"
+      ],
+      "buckets": [
+        1.0,
+        10.0,
+        100.0,
+        1000.0,
+        10000.0,
+        100000.0,
+        1000000.0
+      ],
+      "stability": "stable",
+      "domain": "query.pipeline"
+    },
+    {
+      "otel_name": "gkg.query.pipeline.result_set.rows",
+      "prom_name": "gkg_query_pipeline_result_set_rows",
+      "description": "Number of rows returned after formatting.",
+      "kind": "histogram_u64",
+      "labels": [
+        "query_type"
+      ],
+      "buckets": [
+        1.0,
+        10.0,
+        100.0,
+        1000.0,
+        10000.0,
+        100000.0,
+        1000000.0
+      ],
+      "stability": "stable",
+      "domain": "query.pipeline"
+    },
+    {
+      "otel_name": "gkg.scheduler.task.duration",
+      "prom_name": "gkg_scheduler_task_duration_seconds",
+      "description": "End-to-end duration of a scheduled task run.",
+      "kind": "histogram_f64",
+      "unit": "s",
+      "labels": [
+        "task"
+      ],
+      "buckets": [
+        0.025,
+        0.05,
+        0.1,
+        0.25,
+        0.5,
+        1.0,
+        2.5,
+        5.0,
+        10.0,
+        30.0,
+        60.0
+      ],
+      "stability": "stable",
+      "domain": "indexer.scheduler"
+    },
+    {
+      "otel_name": "gkg.scheduler.task.errors",
+      "prom_name": "gkg_scheduler_task_errors_total",
+      "description": "Scheduled task errors, labelled by task and pipeline stage.",
+      "kind": "counter",
+      "labels": [
+        "task",
+        "stage"
+      ],
+      "stability": "stable",
+      "domain": "indexer.scheduler"
+    },
+    {
+      "otel_name": "gkg.scheduler.task.query.duration",
+      "prom_name": "gkg_scheduler_task_query_duration_seconds",
+      "description": "Duration of a scheduled task's ClickHouse query.",
+      "kind": "histogram_f64",
+      "unit": "s",
+      "labels": [
+        "query"
+      ],
+      "buckets": [
+        0.005,
+        0.01,
+        0.025,
+        0.05,
+        0.1,
+        0.25,
+        0.5,
+        1.0
+      ],
+      "stability": "stable",
+      "domain": "indexer.scheduler"
+    },
+    {
+      "otel_name": "gkg.scheduler.task.requests.published",
+      "prom_name": "gkg_scheduler_task_requests_published_total",
+      "description": "Requests successfully published to NATS per task.",
+      "kind": "counter",
+      "labels": [
+        "task"
+      ],
+      "stability": "stable",
+      "domain": "indexer.scheduler"
+    },
+    {
+      "otel_name": "gkg.scheduler.task.requests.skipped",
+      "prom_name": "gkg_scheduler_task_requests_skipped_total",
+      "description": "Requests skipped because an equivalent request was already in flight.",
+      "kind": "counter",
+      "labels": [
+        "task"
+      ],
+      "stability": "stable",
+      "domain": "indexer.scheduler"
+    },
+    {
+      "otel_name": "gkg.scheduler.task.runs",
+      "prom_name": "gkg_scheduler_task_runs_total",
+      "description": "Total scheduled task runs, labelled by task and outcome.",
+      "kind": "counter",
+      "labels": [
+        "task",
+        "outcome"
+      ],
+      "stability": "stable",
+      "domain": "indexer.scheduler"
+    },
+    {
+      "otel_name": "gkg.schema.cleanup",
+      "prom_name": "gkg_schema_cleanup_total",
+      "description": "Schema table cleanup operations, labelled by version band and result.",
+      "kind": "counter",
+      "labels": [
+        "version_band",
+        "result"
+      ],
+      "stability": "stable",
+      "domain": "indexer.migration"
+    },
+    {
+      "otel_name": "gkg.schema.eligible_units",
+      "prom_name": "gkg_schema_eligible_units",
+      "description": "Distinct units under enabled namespaces. Denominator of the migration-readiness ratio.",
+      "kind": "gauge",
+      "labels": [
+        "scope",
+        "version_band"
+      ],
+      "stability": "stable",
+      "domain": "indexer.migration"
+    },
+    {
+      "otel_name": "gkg.schema.indexed_units",
+      "prom_name": "gkg_schema_indexed_units",
+      "description": "Distinct units with a checkpoint on the migrating schema version. Numerator of the migration-readiness ratio.",
+      "kind": "gauge",
+      "labels": [
+        "scope",
+        "version_band"
+      ],
+      "stability": "stable",
+      "domain": "indexer.migration"
+    },
+    {
+      "otel_name": "gkg.schema.migrating_age",
+      "prom_name": "gkg_schema_migrating_age_seconds",
+      "description": "Seconds since the current migrating version's row was created. Zero when no version is migrating.",
+      "kind": "gauge",
+      "unit": "s",
+      "labels": [],
+      "stability": "stable",
+      "domain": "indexer.migration"
+    },
+    {
+      "otel_name": "gkg.schema.migration.completed",
+      "prom_name": "gkg_schema_migration_completed_total",
+      "description": "Total successful schema migration completions.",
+      "kind": "counter",
+      "labels": [],
+      "stability": "stable",
+      "domain": "indexer.migration"
+    },
+    {
+      "otel_name": "gkg.schema.migration.phase",
+      "prom_name": "gkg_schema_migration_phase_total",
+      "description": "Total schema migration phase executions, labelled by phase and result.",
+      "kind": "counter",
+      "labels": [
+        "phase",
+        "result"
+      ],
+      "stability": "stable",
+      "domain": "indexer.migration"
+    },
+    {
+      "otel_name": "gkg.webserver.schema.state",
+      "prom_name": "gkg_webserver_schema_state",
+      "description": "Webserver readiness gate state (pending|ready|outdated|migrating); 1 indicates the active state per `state` label.",
+      "kind": "observable_gauge",
+      "labels": [
+        "state"
+      ],
+      "stability": "stable",
+      "domain": "server.schema_watcher"
+    }
+  ]
+}

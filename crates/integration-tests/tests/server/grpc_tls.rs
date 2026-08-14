@@ -1,12 +1,12 @@
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 
-use gkg_server::auth::JwtValidator;
-use gkg_server::cluster_health::ClusterHealthChecker;
-use gkg_server::grpc::GrpcServer;
-use gkg_server::proto::GetClusterHealthRequest;
-use gkg_server::proto::knowledge_graph_service_client::KnowledgeGraphServiceClient;
-use gkg_server_config::{AnalyticsConfig, ClickHouseConfiguration, GrpcConfig};
+use orbit_server::auth::JwtValidator;
+use orbit_server::cluster_health::ClusterHealthChecker;
+use orbit_server::grpc::GrpcServer;
+use orbit_server::proto::GetClusterHealthRequest;
+use orbit_server::proto::knowledge_graph_service_client::KnowledgeGraphServiceClient;
+use orbit_server_config::{AnalyticsConfig, ClickHouseConfiguration, GrpcConfig};
 use tonic::transport::server::ServerTlsConfig;
 use tonic::transport::{Certificate, ClientTlsConfig, Endpoint, Identity};
 

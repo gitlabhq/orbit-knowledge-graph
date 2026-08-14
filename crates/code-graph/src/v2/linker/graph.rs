@@ -8,7 +8,7 @@ use crate::v2::types::{
     CanonicalDefinition, CanonicalDirectory, CanonicalFile, CanonicalImport, EdgeKind, NodeKind,
     Range, Relationship, containment_relationship,
 };
-use gkg_utils::arrow::{AsRecordBatch, BatchBuilder, ColumnSpec, ColumnType};
+use orbit_utils::arrow::{AsRecordBatch, BatchBuilder, ColumnSpec, ColumnType};
 
 fn common_prefix_len(a: &str, b: &str) -> usize {
     a.bytes().zip(b.bytes()).take_while(|(x, y)| x == y).count()
@@ -1147,7 +1147,7 @@ impl<'a> RowContext<'a> {
     }
 }
 
-impl gkg_utils::arrow::RowEnvelope for RowContext<'_> {
+impl orbit_utils::arrow::RowEnvelope for RowContext<'_> {
     fn write_header(&self, b: &mut BatchBuilder, id: i64) -> Result<(), arrow::error::ArrowError> {
         b.col("id")?.push_int(id)?;
         b.col("project_id")?.push_int(self.project_id)?;
@@ -1203,7 +1203,7 @@ pub struct DirectoryRow<'a> {
     pub dir: &'a CanonicalDirectory,
     pub id: i64,
 }
-impl<C: gkg_utils::arrow::RowEnvelope> AsRecordBatch<C> for DirectoryRow<'_> {
+impl<C: orbit_utils::arrow::RowEnvelope> AsRecordBatch<C> for DirectoryRow<'_> {
     fn write_row(&self, b: &mut BatchBuilder, ctx: &C) -> Result<(), arrow::error::ArrowError> {
         ctx.write_header(b, self.id)?;
         b.col("path")?.push_str(&self.dir.path)?;
@@ -1216,7 +1216,7 @@ pub struct FileRow<'a> {
     pub file: &'a CanonicalFile,
     pub id: i64,
 }
-impl<C: gkg_utils::arrow::RowEnvelope> AsRecordBatch<C> for FileRow<'_> {
+impl<C: orbit_utils::arrow::RowEnvelope> AsRecordBatch<C> for FileRow<'_> {
     fn write_row(&self, b: &mut BatchBuilder, ctx: &C) -> Result<(), arrow::error::ArrowError> {
         ctx.write_header(b, self.id)?;
         b.col("path")?.push_str(&self.file.path)?;
@@ -1235,7 +1235,7 @@ pub struct DefinitionRow<'a> {
     pub pool: &'a StringPool,
     pub id: i64,
 }
-impl<C: gkg_utils::arrow::RowEnvelope> AsRecordBatch<C> for DefinitionRow<'_> {
+impl<C: orbit_utils::arrow::RowEnvelope> AsRecordBatch<C> for DefinitionRow<'_> {
     fn write_row(&self, b: &mut BatchBuilder, ctx: &C) -> Result<(), arrow::error::ArrowError> {
         ctx.write_header(b, self.id)?;
         b.col("file_path")?.push_str(self.file_path)?;
@@ -1254,7 +1254,7 @@ pub struct ImportRow<'a> {
     pub pool: &'a StringPool,
     pub id: i64,
 }
-impl<C: gkg_utils::arrow::RowEnvelope> AsRecordBatch<C> for ImportRow<'_> {
+impl<C: orbit_utils::arrow::RowEnvelope> AsRecordBatch<C> for ImportRow<'_> {
     fn write_row(&self, b: &mut BatchBuilder, ctx: &C) -> Result<(), arrow::error::ArrowError> {
         ctx.write_header(b, self.id)?;
         b.col("file_path")?.push_str(self.file_path)?;

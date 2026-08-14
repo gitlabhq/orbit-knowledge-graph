@@ -4,10 +4,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures::StreamExt;
-use gkg_server_config::NatsConfiguration;
 use indexer::metrics::EngineMetrics;
 use indexer::nats::NatsBroker;
 use indexer::types::{Envelope, Event, Subscription};
+use orbit_server_config::NatsConfiguration;
 use rcgen::{
     BasicConstraints, CertificateParams, CertifiedIssuer, DnType, ExtendedKeyUsagePurpose, IsCa,
     KeyPair, KeyUsagePurpose,

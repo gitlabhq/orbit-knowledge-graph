@@ -20,10 +20,10 @@ use std::sync::{Arc, LazyLock};
 use arrow::datatypes::UInt64Type;
 use async_trait::async_trait;
 use clickhouse_client::FromArrowColumn;
-use gkg_server_config::{MigrationCompletionConfig, ScheduleConfiguration, SchemaConfig};
-use gkg_utils::arrow::ArrowUtils;
-use gkg_utils::traversal_path::TopLevelSplit;
 use ontology::migrations::{MigrationLedger, MigrationScope};
+use orbit_server_config::{MigrationCompletionConfig, ScheduleConfiguration, SchemaConfig};
+use orbit_utils::arrow::ArrowUtils;
+use orbit_utils::traversal_path::TopLevelSplit;
 use query_engine::compiler::{
     generate_graph_dictionaries, generate_graph_materialized_views, generate_graph_tables,
 };
@@ -68,7 +68,7 @@ static FETCH_ENABLED_NAMESPACES: LazyLock<String> = LazyLock::new(|| {
 /// Count distinct projects whose top-level namespace is enabled.
 static COUNT_CODE_ELIGIBLE_PROJECTS: LazyLock<String> = LazyLock::new(|| {
     let del = ontology::siphon_deleted_column();
-    let top = gkg_utils::traversal_path::TOP_LEVEL_PREFIX_REGEX;
+    let top = orbit_utils::traversal_path::TOP_LEVEL_PREFIX_REGEX;
     format!(
         "SELECT count(DISTINCT p.id) AS ns_count \
          FROM project_namespace_traversal_paths AS p \
@@ -88,7 +88,7 @@ static COUNT_CODE_ELIGIBLE_PROJECTS: LazyLock<String> = LazyLock::new(|| {
 /// inflate the numerator and produce a misleading "approaching 100%" log
 /// line while currently-enabled namespaces were still under-indexed.
 static COUNT_CODE_CHECKPOINT_PROJECTS_SCOPED: LazyLock<String> = LazyLock::new(|| {
-    let top = gkg_utils::traversal_path::TOP_LEVEL_PREFIX_REGEX;
+    let top = orbit_utils::traversal_path::TOP_LEVEL_PREFIX_REGEX;
     format!(
         "SELECT count(DISTINCT project_id) AS ns_count \
          FROM {{table:Identifier}} FINAL \
@@ -342,8 +342,8 @@ impl MigrationCompletionChecker {
                 mark_version_retired(&self.graph, entry.version)
                     .await
                     .map_err(|e| TaskError::new(format!("mark v{} retired: {e}", entry.version)))?;
-                if gkg_server_config::features::enabled(
-                    gkg_server_config::Feature::StopMergesOnRetire,
+                if orbit_server_config::features::enabled(
+                    orbit_server_config::Feature::StopMergesOnRetire,
                 ) {
                     self.stop_merges_for_version(entry.version).await;
                 }
@@ -553,7 +553,7 @@ impl MigrationCompletionChecker {
         let ids = i64::extract_column(&batches, 0).map_err(|e| e.to_string())?;
         let paths = String::extract_column(&batches, 1).map_err(|e| e.to_string())?;
 
-        let split = gkg_utils::traversal_path::split_top_level(ids, paths);
+        let split = orbit_utils::traversal_path::split_top_level(ids, paths);
         if !split.skipped.is_empty() {
             warn!(
                 skipped = ?split.skipped,
@@ -687,7 +687,8 @@ impl MigrationCompletionChecker {
             _ => 2,
         });
 
-        if gkg_server_config::features::enabled(gkg_server_config::Feature::StopMergesOnRetire) {
+        if orbit_server_config::features::enabled(orbit_server_config::Feature::StopMergesOnRetire)
+        {
             let dead_versions: HashSet<u32> = drops.iter().map(|(v, _, _)| *v).collect();
             for version in &dead_versions {
                 self.stop_merges_for_version(*version).await;

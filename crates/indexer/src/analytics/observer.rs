@@ -7,9 +7,9 @@
 
 use std::sync::Arc;
 
-use gkg_analytics::AnalyticsTracker;
-use gkg_server_config::AnalyticsConfig;
 use labkit_events::StructuredEvent;
+use orbit_analytics::AnalyticsTracker;
+use orbit_server_config::AnalyticsConfig;
 use uuid::Uuid;
 
 use super::context::{CodeInputs, SdlcInputs, TriggerType, build_code, build_common, build_sdlc};
@@ -96,8 +96,8 @@ impl SnowplowIndexingObserver {
     fn namespace_ids(&self) -> (Option<i64>, Option<i64>) {
         match &self.traversal_path {
             Some(path) => (
-                gkg_utils::traversal_path::leaf_id(path),
-                gkg_utils::traversal_path::top_level_namespace_id(path),
+                orbit_utils::traversal_path::leaf_id(path),
+                orbit_utils::traversal_path::top_level_namespace_id(path),
             ),
             None => (self.namespace_id, None),
         }
@@ -199,13 +199,13 @@ impl SnowplowIndexingObserver {
 }
 
 enum EventContext {
-    Sdlc(gkg_analytics::OrbitSdlcIndexingContext),
-    Code(gkg_analytics::OrbitCodeIndexingContext),
+    Sdlc(orbit_analytics::OrbitSdlcIndexingContext),
+    Code(orbit_analytics::OrbitCodeIndexingContext),
 }
 
 fn build_event(
     context: Result<EventContext, labkit_events::Error>,
-    common: gkg_analytics::OrbitCommonContext,
+    common: orbit_analytics::OrbitCommonContext,
 ) -> Result<StructuredEvent, labkit_events::Error> {
     let builder = StructuredEvent::builder(GKG_CATEGORY, ACTION_INDEXING_COMPLETED).context(common);
     match context? {
@@ -308,11 +308,11 @@ impl IndexingObserver for SnowplowIndexingObserver {
 mod tests {
     use std::sync::LazyLock;
 
-    use gkg_analytics::{
+    use orbit_analytics::{
         InMemoryAnalyticsTracker, ORBIT_CODE_INDEXING_SCHEMA, ORBIT_COMMON_SCHEMA,
         ORBIT_SDLC_INDEXING_SCHEMA,
     };
-    use gkg_server_config::{
+    use orbit_server_config::{
         AnalyticsConfig, DeploymentConfig, DeploymentEnvironment, DeploymentKind,
     };
     use uuid::Uuid;
@@ -338,7 +338,7 @@ mod tests {
     }
 
     fn validator(schema_name: &str) -> jsonschema::Validator {
-        let schema = gkg_analytics::load_schema_json(schema_name);
+        let schema = orbit_analytics::load_schema_json(schema_name);
         jsonschema::validator_for(&schema).expect("vendored schema compiles")
     }
 

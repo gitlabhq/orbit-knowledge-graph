@@ -14,7 +14,7 @@ use crate::clickhouse::ClickHouseConfigurationExt;
 use crate::handler::{HandlerInitError, HandlerRegistry};
 use crate::topic::{NAMESPACE_DELETION_TOPIC, NamespaceDeletionRequest};
 use crate::types::Event;
-use gkg_server_config::{IndexerModule, SubscriptionConfig};
+use orbit_server_config::{IndexerModule, SubscriptionConfig};
 
 const NAMESPACE_DELETION_CONCURRENCY_GROUP: &str =
     IndexerModule::NamespaceDeletion.concurrency_group();

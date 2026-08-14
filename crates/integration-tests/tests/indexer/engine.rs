@@ -8,10 +8,6 @@ use arrow::array::{Int32Array, StringArray, UInt64Array};
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
-use gkg_server_config::{
-    ClickHouseConfiguration, EngineConfiguration, NatsConfiguration, SubscriptionConfig,
-};
-use gkg_utils::arrow::ArrowUtils;
 use indexer::clickhouse::{ArrowClickHouseClient, ClickHouseWriter};
 use indexer::dead_letter::{DEAD_LETTER_STREAM, DeadLetterEnvelope};
 use indexer::durability::WriteDurability;
@@ -21,6 +17,10 @@ use indexer::metrics::EngineMetrics;
 use indexer::nats::NatsBroker;
 use indexer::nats::versioning::NATS_VERSIONER;
 use indexer::types::{Envelope, Event, Subscription};
+use orbit_server_config::{
+    ClickHouseConfiguration, EngineConfiguration, NatsConfiguration, SubscriptionConfig,
+};
+use orbit_utils::arrow::ArrowUtils;
 use serde::{Deserialize, Serialize};
 use testcontainers::GenericImage;
 use testcontainers::core::{ContainerPort, ImageExt, WaitFor};

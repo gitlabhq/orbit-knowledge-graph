@@ -232,7 +232,7 @@ mod tests {
     use super::*;
     use crate::passes::codegen::codegen;
     use crate::passes::enforce::ResultContext;
-    use gkg_server_config::QueryConfig;
+    use orbit_server_config::QueryConfig;
 
     fn render(node: &Node) -> String {
         codegen(node, ResultContext::new(), QueryConfig::empty())

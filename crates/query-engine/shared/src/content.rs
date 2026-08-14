@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use gkg_utils::arrow::ColumnValue;
+use orbit_utils::arrow::ColumnValue;
 use pipeline::PipelineError;
 
 use compiler::VirtualColumnRequest;

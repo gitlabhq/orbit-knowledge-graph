@@ -320,7 +320,7 @@ impl CodeIndexingTaskHandler {
         observer: &mut dyn IndexingObserver,
     ) -> Result<Option<&'static str>, HandlerError> {
         let Some(namespace_id) =
-            gkg_utils::traversal_path::top_level_namespace_id(&request.traversal_path)
+            orbit_utils::traversal_path::top_level_namespace_id(&request.traversal_path)
         else {
             return Err(HandlerError::Processing(format!(
                 "traversal_path {:?} has no namespace_id",
@@ -516,7 +516,7 @@ mod tests {
                 metrics.clone(),
                 table_names,
                 Arc::new(ontology),
-                gkg_server_config::CodeIndexingPipelineConfig::default(),
+                orbit_server_config::CodeIndexingPipelineConfig::default(),
             ));
 
             let handler = CodeIndexingTaskHandler::new(

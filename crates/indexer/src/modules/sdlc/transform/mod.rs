@@ -11,7 +11,7 @@ use arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
 use datafusion::datasource::MemTable;
 use datafusion::prelude::*;
-use gkg_utils::arrow::prepare_batches;
+use orbit_utils::arrow::prepare_batches;
 
 use crate::handler::HandlerError;
 

@@ -21,4 +21,4 @@ export GKG_GRAPH__DATABASE="${GKG_GRAPH__DATABASE:-gkg-development}"
 # JWT verifying key (same logic as server:start in mise.toml)
 export GKG_GITLAB__JWT__VERIFYING_KEY="${GKG_GITLAB__JWT__VERIFYING_KEY:-$(cat "$GDK_ROOT/gitlab/.gitlab_knowledge_graph_secret" 2>/dev/null || cat "$GDK_ROOT/gitlab/.gitlab_shell_secret" 2>/dev/null || echo "development-secret-at-least-32-bytes")}"
 
-exec cargo run -p gkg-server -- --mode=dispatch-indexing "$@"
+exec cargo run -p orbit-server -- --mode=dispatch-indexing "$@"

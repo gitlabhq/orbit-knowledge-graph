@@ -8,10 +8,10 @@ use crate::common::{
     GRAPH_SCHEMA_SQL, MockRedactionService, SIPHON_SCHEMA_SQL, TestContext, load_ontology,
     run_redaction, test_security_context,
 };
-use gkg_server::pipeline::HydrationStage;
-use gkg_server::redaction::QueryResult;
 use integration_testkit::load_seed;
 use integration_testkit::visitor::{NodeExt, Requirement, ResponseView};
+use orbit_server::pipeline::HydrationStage;
+use orbit_server::redaction::QueryResult;
 use query_engine::compiler::compile;
 use query_engine::compiler::{SecurityContext, TraversalPath};
 use query_engine::formatters::{GraphFormatter, ResultFormatter};

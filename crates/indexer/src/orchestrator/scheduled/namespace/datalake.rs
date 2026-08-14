@@ -6,8 +6,8 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use clickhouse_client::FromArrowColumn;
 use futures::StreamExt;
-use gkg_utils::traversal_path::TOP_LEVEL_PREFIX_REGEX;
 use ontology::{PathResolution, ReindexSource};
+use orbit_utils::traversal_path::TOP_LEVEL_PREFIX_REGEX;
 use tracing::{error, warn};
 
 use crate::clickhouse::{ArrowClickHouseClient, ClickHouseError, TIMESTAMP_FORMAT};

@@ -532,7 +532,7 @@ impl Default for PipelineConfig {
     }
 }
 
-pub use gkg_utils::fs_stream::{Decision, FileInventoryEntry};
+pub use orbit_utils::fs_stream::{Decision, FileInventoryEntry};
 
 /// Per-file timing captured during pipeline execution.
 ///

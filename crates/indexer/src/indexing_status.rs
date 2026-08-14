@@ -232,7 +232,7 @@ fn completed_progress(
 
 /// `"42/9970/12345/"` → `"status.42.9970.12345"`.
 fn normalize_key(traversal_path: &str) -> Result<String, Error> {
-    let dotted = gkg_utils::traversal_path::to_dotted(traversal_path);
+    let dotted = orbit_utils::traversal_path::to_dotted(traversal_path);
     if dotted.is_empty() {
         return Err(Error::EmptyTraversalPath);
     }

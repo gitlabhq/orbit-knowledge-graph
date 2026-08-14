@@ -32,7 +32,7 @@ fn sanitize_release(raw: &str) -> String {
 }
 
 fn release_segment() -> String {
-    sanitize_release(gkg_utils::version::get())
+    sanitize_release(orbit_utils::version::get())
 }
 
 pub struct NatsVersioner {

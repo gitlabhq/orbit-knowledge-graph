@@ -6,15 +6,15 @@ use std::fs;
 use std::path::PathBuf;
 
 use anyhow::{Context, Result, anyhow};
-use gkg_observability::{MetricSpec, catalog};
+use orbit_observability::{MetricSpec, catalog};
 use serde::Serialize;
 
-const DEFAULT_OUTPUT: &str = "crates/gkg-observability/orbit-dashboards/gkg-metrics.json";
+const DEFAULT_OUTPUT: &str = "crates/orbit-observability/orbit-dashboards/gkg-metrics.json";
 
 const GENERATED_BY: &str = "cargo xtask metrics-catalog - do not edit";
 
 /// Sanity floor so an accidental truncation (e.g. a missing `v.extend(...)`
-/// line in `gkg_observability::catalog`) fails the `--check` pass rather than
+/// line in `orbit_observability::catalog`) fails the `--check` pass rather than
 /// quietly shipping an incomplete dashboard inventory.
 const MIN_CATALOG_SIZE: usize = 55;
 
@@ -74,7 +74,7 @@ fn validate(specs: &[&'static MetricSpec]) -> Result<()> {
         }
         if spec.kind.is_histogram() && spec.buckets.is_none() {
             return Err(anyhow!(
-                "histogram {} has no buckets; assign one from gkg_observability::buckets",
+                "histogram {} has no buckets; assign one from orbit_observability::buckets",
                 spec.otel_name
             ));
         }
@@ -115,8 +115,8 @@ impl From<&MetricSpec> for Entry {
     }
 }
 
-fn kind_str(kind: gkg_observability::MetricKind) -> &'static str {
-    use gkg_observability::MetricKind::*;
+fn kind_str(kind: orbit_observability::MetricKind) -> &'static str {
+    use orbit_observability::MetricKind::*;
     match kind {
         Counter => "counter",
         UpDownCounter => "up_down_counter",
@@ -127,10 +127,10 @@ fn kind_str(kind: gkg_observability::MetricKind) -> &'static str {
     }
 }
 
-fn stability_str(stability: gkg_observability::Stability) -> &'static str {
+fn stability_str(stability: orbit_observability::Stability) -> &'static str {
     match stability {
-        gkg_observability::Stability::Stable => "stable",
-        gkg_observability::Stability::Experimental => "experimental",
+        orbit_observability::Stability::Stable => "stable",
+        orbit_observability::Stability::Experimental => "experimental",
     }
 }
 

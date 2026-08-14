@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use arrow::record_batch::RecordBatch;
 use clickhouse_client::{ArrowClickHouseClient, ClickHouseConfigurationExt};
-use gkg_server_config::ClickHouseConfiguration;
+use orbit_server_config::ClickHouseConfiguration;
 use thiserror::Error;
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
@@ -99,7 +99,7 @@ impl ClickHouseWriter {
         let rows: u64 = batches.iter().map(|b| b.num_rows() as u64).sum();
         let bytes: u64 = batches
             .iter()
-            .map(|batch| match gkg_utils::arrow::logical_byte_size(batch) {
+            .map(|batch| match orbit_utils::arrow::logical_byte_size(batch) {
                 Ok(n) => n,
                 Err(e) => {
                     self.metrics.record_unmeterable_batch(table);

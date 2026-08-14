@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use arrow::datatypes::UInt32Type;
 use clickhouse_client::{ArrowClickHouseClient, ArrowQuery};
-use gkg_utils::arrow::ArrowUtils;
+use orbit_utils::arrow::ArrowUtils;
 use query_engine::compiler::ast::ddl::{ColumnDef, ColumnType, CreateTable, Engine};
 use query_engine::compiler::emit_create_table;
 use query_engine::compiler::emit_simple_query;
@@ -73,7 +73,7 @@ fn version_table_ddl() -> CreateTable {
 
 fn read_active_version_query() -> (
     String,
-    std::collections::HashMap<String, gkg_utils::clickhouse::ParamValue>,
+    std::collections::HashMap<String, orbit_utils::clickhouse::ParamValue>,
 ) {
     let query = Query {
         select: vec![SelectExpr {
@@ -97,7 +97,7 @@ fn write_version_query(
     version: u32,
 ) -> (
     String,
-    std::collections::HashMap<String, gkg_utils::clickhouse::ParamValue>,
+    std::collections::HashMap<String, orbit_utils::clickhouse::ParamValue>,
 ) {
     let insert = Insert::new(
         VERSION_TABLE,
@@ -111,7 +111,7 @@ fn write_migrating_version_query(
     version: u32,
 ) -> (
     String,
-    std::collections::HashMap<String, gkg_utils::clickhouse::ParamValue>,
+    std::collections::HashMap<String, orbit_utils::clickhouse::ParamValue>,
 ) {
     let insert = Insert::new(
         VERSION_TABLE,

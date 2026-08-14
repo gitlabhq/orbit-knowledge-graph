@@ -13,7 +13,6 @@ use clickhouse_client::ClickHouseConfigurationExt;
 use flate2::Compression;
 use flate2::write::GzEncoder;
 use gitlab_client::GitlabClient;
-use gkg_server_config::{CodeIndexingPipelineConfig, GitlabClientConfiguration};
 use indexer::handler::HandlerContext;
 use indexer::modules::code::{
     ClickHouseCodeCheckpointStore, ClickHouseStaleDataCleaner, CodeIndexer,
@@ -26,6 +25,7 @@ use indexer::testkit::{MockLockService, MockNatsServices};
 use indexer::topic::CodeIndexingTaskRequest;
 use indexer::types::Event;
 use integration_testkit::{TestContext, t};
+use orbit_server_config::{CodeIndexingPipelineConfig, GitlabClientConfiguration};
 use parking_lot::Mutex;
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -39,7 +39,7 @@ pub struct CodeIndexingDeps {
     pub repository_service: Arc<dyn RepositoryService>,
     pub checkpoint_store: Arc<ClickHouseCodeCheckpointStore>,
     pub metrics: CodeMetrics,
-    pub clickhouse_config: gkg_server_config::ClickHouseConfiguration,
+    pub clickhouse_config: orbit_server_config::ClickHouseConfiguration,
     cache_dir: tempfile::TempDir,
 }
 

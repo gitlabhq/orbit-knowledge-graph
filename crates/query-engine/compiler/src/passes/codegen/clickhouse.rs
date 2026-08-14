@@ -1,6 +1,6 @@
 //! Emits parameterized SQL using ClickHouse's `{name:Type}` bind syntax.
 
-use gkg_server_config::QueryConfig;
+use orbit_server_config::QueryConfig;
 
 use crate::ast::{ChType, Cte, Expr, Insert, JoinType, Node, Op, Query, TableRef};
 use crate::error::Result;
@@ -938,14 +938,14 @@ mod tests {
         params.insert(
             "p0".into(),
             ParamValue {
-                ch_type: ChType::Array(gkg_utils::clickhouse::ChScalar::String),
+                ch_type: ChType::Array(orbit_utils::clickhouse::ChScalar::String),
                 value: serde_json::json!(["a", "b"]),
             },
         );
         params.insert(
             "p1".into(),
             ParamValue {
-                ch_type: ChType::Array(gkg_utils::clickhouse::ChScalar::Int64),
+                ch_type: ChType::Array(orbit_utils::clickhouse::ChScalar::Int64),
                 value: serde_json::json!([10, 20]),
             },
         );

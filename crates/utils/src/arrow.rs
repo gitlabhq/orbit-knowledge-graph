@@ -70,7 +70,7 @@ impl ColumnValue {
     /// Extract as the requested type, parsing from string if needed.
     ///
     /// ```
-    /// # use gkg_utils::arrow::ColumnValue;
+    /// # use orbit_utils::arrow::ColumnValue;
     /// assert_eq!(ColumnValue::Int64(42).coerce::<i64>(), Some(42));
     /// assert_eq!(ColumnValue::String("42".into()).coerce::<i64>(), Some(42));
     /// assert_eq!(ColumnValue::String("hello".into()).coerce::<i64>(), None);
@@ -505,7 +505,7 @@ impl ColRef<'_> {
 /// columns exist or their order -- the caller controls the full schema.
 ///
 /// ```ignore
-/// use gkg_utils::arrow::{BatchBuilder, ColumnSpec, ColumnType};
+/// use orbit_utils::arrow::{BatchBuilder, ColumnSpec, ColumnType};
 ///
 /// let specs = vec![
 ///     ColumnSpec { name: "id".into(), col_type: ColumnType::Int, nullable: false },

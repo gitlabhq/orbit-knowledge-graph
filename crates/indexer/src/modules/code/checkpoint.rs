@@ -6,7 +6,7 @@ use arrow::array::{Array, Int64Array, StringArray, TimestampMicrosecondArray};
 use arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
 use chrono::{DateTime, TimeZone, Utc};
-use gkg_utils::arrow::ArrowUtils;
+use orbit_utils::arrow::ArrowUtils;
 use thiserror::Error;
 
 const CODE_INDEXING_CHECKPOINT_TABLE: &str = "code_indexing_checkpoint";

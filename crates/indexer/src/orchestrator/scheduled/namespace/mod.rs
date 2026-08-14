@@ -20,7 +20,7 @@ use datalake::{
     DatalakeChangeDetector, DatalakeEnabledNamespaceReader, EnabledNamespaceReader,
     NamespaceChangeDetector,
 };
-use gkg_server_config::{NamespaceDispatcherConfig, ScheduleConfiguration};
+use orbit_server_config::{NamespaceDispatcherConfig, ScheduleConfiguration};
 
 pub const CHECKPOINT_KEY: &str = "dispatch.sdlc.namespace.changes";
 pub const SWEEP_CHECKPOINT_KEY: &str = "dispatch.sdlc.namespace.sweep";

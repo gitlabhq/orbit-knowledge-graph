@@ -24,13 +24,13 @@ use crate::common::{DummyClaims, GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL, TestContex
 use compiler::parse_input;
 use comrak::nodes::{NodeCodeBlock, NodeValue};
 use comrak::{Arena, Options, parse_document};
-use gkg_server::auth::Claims;
-use gkg_server::pipeline::{
-    ClickHouseExecutor, HydrationStage, PathResolutionStage, RedactionStage, SecurityStage,
-};
-use gkg_server::redaction::ResourceAuthorization;
 use integration_testkit::load_seed;
 use ontology::Ontology;
+use orbit_server::auth::Claims;
+use orbit_server::pipeline::{
+    ClickHouseExecutor, HydrationStage, PathResolutionStage, RedactionStage, SecurityStage,
+};
+use orbit_server::redaction::ResourceAuthorization;
 use query_engine::formatters::GraphResponse;
 use query_engine::pipeline::{
     NoOpObserver, PipelineError, PipelineObserver, PipelineRunner, PipelineStage,
@@ -116,11 +116,11 @@ impl ColumnResolver for MockColumnResolver {
         lookup: &str,
         rows: &[&query_engine::shared::content::PropertyRow],
         _ctx: &query_engine::shared::content::ResolverContext,
-    ) -> Result<Vec<Option<gkg_utils::arrow::ColumnValue>>, PipelineError> {
+    ) -> Result<Vec<Option<orbit_utils::arrow::ColumnValue>>, PipelineError> {
         Ok(rows
             .iter()
             .map(|_| {
-                Some(gkg_utils::arrow::ColumnValue::String(format!(
+                Some(orbit_utils::arrow::ColumnValue::String(format!(
                     "mock:{lookup}"
                 )))
             })

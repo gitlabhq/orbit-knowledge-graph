@@ -1,6 +1,6 @@
 use std::net::SocketAddr;
 
-use gkg_server_config::{
+use orbit_server_config::{
     AnalyticsConfig, ClickHouseConfiguration, EngineConfigError, EngineConfiguration,
     GitlabClientConfiguration, NatsConfiguration, ScheduleConfig, SchemaConfig,
 };
@@ -78,7 +78,7 @@ pub enum IndexerError {
     SchemaWait(#[from] crate::schema::version::SchemaWaitError),
 
     #[error("Invalid configuration: {0}")]
-    InvalidConfig(#[from] gkg_server_config::SchemaConfigError),
+    InvalidConfig(#[from] orbit_server_config::SchemaConfigError),
 
     #[error("Invalid engine configuration: {0}")]
     InvalidEngineConfig(#[from] EngineConfigError),

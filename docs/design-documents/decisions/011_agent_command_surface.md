@@ -17,7 +17,7 @@ Accepted
 
 GKG already exposes an agent-facing surface in three places:
 
-- gRPC: `KnowledgeGraphService` on the GKG server (`crates/gkg-server/proto/gkg.proto`).
+- gRPC: `KnowledgeGraphService` on the GKG server (`crates/orbit-server/proto/gkg.proto`).
 - REST: `GET /api/v4/orbit/*` endpoints owned by Rails (proxy to GKG).
 - MCP: `tools/list` and `tools/call` handled by Rails, fanning out to GKG.
 
@@ -51,7 +51,7 @@ The new agent REST endpoints sit under `/orbit/agent/*` and are marked `hidden: 
 
 ### Command catalog
 
-The command registry lives in the GKG server at `crates/gkg-server/src/tools/registry.rs` (`CommandRegistry`). Each command has a name, a short description, and a JSON Schema for its parameters — the same `ToolDefinition` shape we already use for MCP tools.
+The command registry lives in the GKG server at `crates/orbit-server/src/tools/registry.rs` (`CommandRegistry`). Each command has a name, a short description, and a JSON Schema for its parameters — the same `ToolDefinition` shape we already use for MCP tools.
 
 Initial catalog:
 

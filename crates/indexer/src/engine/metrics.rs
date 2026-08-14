@@ -1,17 +1,17 @@
 //! OTel instrument holders for the ETL engine, backed by the central
-//! `gkg-observability` catalog.
+//! `orbit-observability` catalog.
 //!
 //! Names, descriptions, units, labels, and histogram buckets live in
-//! `crates/gkg-observability/src/indexer/etl.rs`. This module only
+//! `crates/orbit-observability/src/indexer/etl.rs`. This module only
 //! builds instruments against the running `MeterProvider` and exposes
 //! ergonomic `record_*` wrappers for the ETL engine.
 
 use opentelemetry::KeyValue;
 use opentelemetry::metrics::{Counter, Histogram, Meter, UpDownCounter};
 
-use gkg_observability::indexer::etl;
+use orbit_observability::indexer::etl;
 
-pub use gkg_observability::buckets::LATENCY as DURATION_BUCKETS;
+pub use orbit_observability::buckets::LATENCY as DURATION_BUCKETS;
 
 #[derive(Clone)]
 pub struct EngineMetrics {
@@ -31,7 +31,7 @@ pub struct EngineMetrics {
 
 impl EngineMetrics {
     pub fn new() -> Self {
-        let meter = gkg_observability::meter();
+        let meter = orbit_observability::meter();
         Self::with_meter(&meter)
     }
 

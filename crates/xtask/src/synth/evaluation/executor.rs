@@ -872,7 +872,7 @@ mod tests {
 
     #[test]
     fn test_substitute_params() {
-        use gkg_utils::clickhouse::ChType;
+        use orbit_utils::clickhouse::ChType;
 
         let sql = "SELECT * FROM users WHERE name = {p0:String} AND id = {p1:Int64}";
         let mut params = std::collections::HashMap::new();

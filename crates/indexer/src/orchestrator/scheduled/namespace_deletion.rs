@@ -14,7 +14,7 @@ use crate::nats::NatsServices;
 use crate::orchestrator::scheduled::{ScheduledTask, ScheduledTaskMetrics, TaskError};
 use crate::topic::NamespaceDeletionRequest;
 use crate::types::Envelope;
-use gkg_server_config::{NamespaceDeletionSchedulerConfig, ScheduleConfiguration};
+use orbit_server_config::{NamespaceDeletionSchedulerConfig, ScheduleConfiguration};
 
 const CHECKPOINT_KEY: &str = "namespace_deletion_scheduler";
 const GRACE_PERIOD_DAYS: i64 = 30;
@@ -87,7 +87,7 @@ impl NamespaceDeletionScheduler {
 
         let mut reconciled = 0u64;
         for root in &roots {
-            if !gkg_utils::traversal_path::is_valid(root) {
+            if !orbit_utils::traversal_path::is_valid(root) {
                 warn!(
                     traversal_path = %root,
                     "skipping reconcile for enabled namespace with invalid traversal_path"

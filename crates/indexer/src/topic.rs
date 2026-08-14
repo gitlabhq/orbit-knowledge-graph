@@ -56,7 +56,7 @@ pub struct NamespaceIndexingRequest {
 
 impl NamespaceIndexingRequest {
     pub fn publish_subscription(&self) -> Subscription {
-        let suffix = gkg_utils::traversal_path::to_dotted(&self.traversal_path);
+        let suffix = orbit_utils::traversal_path::to_dotted(&self.traversal_path);
         Subscription::new(
             INDEXER_STREAM,
             format!("{NAMESPACE_INDEXING_SUBJECT_PREFIX}.{suffix}"),

@@ -21,7 +21,7 @@ else
     (
       set -e
       # Drop DWARF: ~5x smaller image; backtraces keep function names.
-      CARGO_PROFILE_DEV_DEBUG=0 cargo build -p gkg-server --locked
+      CARGO_PROFILE_DEV_DEBUG=0 cargo build -p orbit-server --locked
       cp target/debug/gkg-server .
       docker build -t "${E2E_GKG_IMAGE}:${E2E_GKG_TAG}" -f e2e/Dockerfile.e2e .
       docker push "${E2E_GKG_IMAGE}:${E2E_GKG_TAG}"

@@ -32,8 +32,8 @@ use async_nats::jetstream::ErrorCode;
 use async_nats::jetstream::context::{PublishError, PublishErrorKind};
 
 use super::message::{NatsAcker, NatsMessage, NatsSubscription};
-use gkg_server_config::NatsConfiguration;
 use nats_client::NatsError;
+use orbit_server_config::NatsConfiguration;
 
 fn map_subscribe_error<E: std::fmt::Display>(error: E) -> NatsError {
     NatsError::Subscribe(error.to_string())
