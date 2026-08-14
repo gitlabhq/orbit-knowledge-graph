@@ -16,8 +16,8 @@ mimalloc = { workspace = true }
 arrow = { workspace = true, features = ["prettyprint"] }
 code-graph = { path = "../code-graph" }
 duckdb-client = { path = "../duckdb-client" }
-gkg-prompts = { path = "../gkg-prompts" }
-gkg-utils = { path = "../utils" }
+orbit-prompts = { path = "../orbit-prompts" }
+orbit-utils = { path = "../utils" }
 ontology = { path = "../ontology" }
 gitalisk-core = { workspace = true }
 clap = { workspace = true }
@@ -36,7 +36,7 @@ serde_yaml = { workspace = true }
 strum = { workspace = true }
 
 [build-dependencies]
-gkg-prompts = { path = "../gkg-prompts" }
+orbit-prompts = { path = "../orbit-prompts" }
 
 [dev-dependencies]
 tempfile = { workspace = true }

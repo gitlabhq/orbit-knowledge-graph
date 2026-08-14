@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
-use gkg_server_config::SubscriptionConfig;
+use orbit_server_config::SubscriptionConfig;
 use serde::{Serialize, de::DeserializeOwned};
 
 use crate::engine::retry::GlobalRetry;

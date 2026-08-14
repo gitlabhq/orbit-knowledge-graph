@@ -1,5 +1,5 @@
 [package]
-name = "gkg-utils"
+name = "orbit-utils"
 version.workspace = true
 edition = "2024"
 license = "LicenseRef-EE"

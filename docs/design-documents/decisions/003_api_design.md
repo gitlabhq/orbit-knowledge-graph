@@ -452,7 +452,7 @@ Unchanged — pure passthrough from `grpc_client.list_tools`.
 
 ### New proto definition
 
-The proto definition below reflects the end state after [MR !411](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/411). Pseudo code — see the authoritative definition in [`gkg.proto`](../../../crates/gkg-server/proto/gkg.proto).
+The proto definition below reflects the end state after [MR !411](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/411). Pseudo code — see the authoritative definition in [`gkg.proto`](../../../crates/orbit-server/proto/gkg.proto).
 
 > Historical sketch: the shipped proto carries no PaginationInfo message; pagination metadata lives in the formatted JSON/GOON body.
 
@@ -751,7 +751,7 @@ end
 
 ## References
 
-- [Proto definition: `gkg.proto`](../../../crates/gkg-server/proto/gkg.proto)
+- [Proto definition: `gkg.proto`](../../../crates/orbit-server/proto/gkg.proto)
 - [ADR 001: gRPC Communication Protocol](001_grpc_communication.md)
 - [ADR 002: Rust Core Runtime](002_rust_core_runtime.md)
 - [ADR 011: Agent command surface](011_agent_command_surface.md)

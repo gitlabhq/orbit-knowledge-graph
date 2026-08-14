@@ -8,7 +8,7 @@ use std::sync::LazyLock;
 use regex::Regex;
 use serde_json::Value;
 
-pub use gkg_utils::clickhouse::{ChScalar, ChType};
+pub use orbit_utils::clickhouse::{ChScalar, ChType};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {

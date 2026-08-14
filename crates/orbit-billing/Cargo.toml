@@ -1,0 +1,31 @@
+[package]
+name = "orbit-billing"
+version.workspace = true
+edition = "2024"
+license = "LicenseRef-EE"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+labkit = { workspace = true }
+labkit-events = { workspace = true }
+orbit-observability = { workspace = true }
+orbit-server-config = { path = "../orbit-server-config" }
+moka = { workspace = true }
+opentelemetry = { workspace = true }
+query-engine = { path = "../query-engine" }
+rand = { workspace = true }
+reqwest = { workspace = true }
+serde_json = { workspace = true }
+tonic = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+axum = { workspace = true }
+rustls = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net"] }
+
+[lints.rust]
+unsafe_code = "forbid"

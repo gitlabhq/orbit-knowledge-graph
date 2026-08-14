@@ -17,7 +17,7 @@ use uuid::Uuid;
 use crate::orchestrator::dispatch::CodeBackfill;
 use crate::orchestrator::dispatch::code_backfill::METRIC_NAME;
 use crate::orchestrator::scheduled::{CodeStaleSweep, ScheduledTask, TaskError};
-use gkg_server_config::{CodeBackfillSweepConfig, ScheduleConfiguration};
+use orbit_server_config::{CodeBackfillSweepConfig, ScheduleConfiguration};
 
 pub struct CodeBackfillSweep {
     code_backfill: Arc<CodeBackfill>,

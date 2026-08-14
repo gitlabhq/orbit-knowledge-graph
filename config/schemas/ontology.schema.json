@@ -291,7 +291,7 @@
     },
     "redactionConfig": {
       "type": "object",
-      "description": "Redaction configuration for access control. Defines how query results for this entity are validated against Rails' RedactionService to filter out entities the user cannot access. When a node has redaction config, the query engine includes id/type columns in results, and gkg-server validates these against the user's permissions before returning data.",
+      "description": "Redaction configuration for access control. Defines how query results for this entity are validated against Rails' RedactionService to filter out entities the user cannot access. When a node has redaction config, the query engine includes id/type columns in results, and orbit-server validates these against the user's permissions before returning data.",
       "properties": {
         "resource_type": {
           "type": "string",

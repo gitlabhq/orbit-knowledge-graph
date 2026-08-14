@@ -59,12 +59,12 @@ use clickhouse::ClickHouseConfigurationExt;
 use clickhouse::ClickHouseWriter;
 use engine::EngineBuilder;
 use engine::handler::HandlerRegistry;
-use gkg_server_config::IndexerModule;
 use health::run_health_server;
 use indexing_status::{INDEXING_PROGRESS_BUCKET, IndexingStatusStore};
 use locking::INDEXING_LOCKS_BUCKET;
 use modules::namespace_deletion::{ClickHouseNamespaceDeletionStore, NamespaceDeletionStore};
 use nats::{KvBucketConfig, NatsBroker};
+use orbit_server_config::IndexerModule;
 use orchestrator::Trigger;
 use orchestrator::dispatch::{CodeBackfill, NamespaceIndexingDispatch};
 use orchestrator::max_deliveries::MaxDeliveriesReconciler;
@@ -83,7 +83,7 @@ pub async fn run(
     ontology: Arc<ontology::Ontology>,
     shutdown: CancellationToken,
 ) -> Result<(), IndexerError> {
-    let resources = gkg_server_config::ContainerResources::detect();
+    let resources = orbit_server_config::ContainerResources::detect();
     let mut config = config.clone();
     config.engine.resolve_runtime_defaults(&resources);
     let config = &config;

@@ -1,7 +1,7 @@
 //! Enforce return columns for query results.
 //!
 //! Ensures all query results include ID and type columns for entities, enabling
-//! the gkg-server to extract entity IDs and types for redaction validation.
+//! the orbit-server to extract entity IDs and types for redaction validation.
 //!
 //! For aggregation queries, only nodes that appear in node group keys can have
 //! their ID columns selected (aggregated nodes don't have individual IDs).

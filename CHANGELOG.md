@@ -890,7 +890,7 @@
 
 ### Other
 
-* **billing:** add SOX boundary check for gkg-billing dependents ([7a0648c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/7a0648c61bf7b1e93c5acc7d2375e34028e33569)) by Sharmad Nachnolkar
+* **billing:** add SOX boundary check for orbit-billing dependents ([7a0648c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/7a0648c61bf7b1e93c5acc7d2375e34028e33569)) by Sharmad Nachnolkar
 * **deps:** update rust-analyzer crates (ra_ap_*) to 0.0.336 ([14d3c69](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/14d3c69162e044bcbadf390274a3990a676d2fa9)) by Jean-Gabriel Doyon
 * **local:** make `glab orbit local` the primary install path ([19014e4](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/19014e4edc6658b6efa40df78fdc1493742ea746)) by Meg Corren
 * move Orbit to beta ([c4a86e6](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/c4a86e6e84d08fba8ba8929525f1a906e453d9bb)) by Meg Corren
@@ -1461,7 +1461,7 @@
 ### Other
 
 * add ADR 011 — agent command surface (lazy-mcp pattern) ([ddd1934](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/ddd193413d110fee0f937f0d08a888abd639f0da)) by Dmitry Gruzd
-* **billing:** extract gkg-billing crate ([6448153](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/64481533f83cb7ed620e9876de4410c0bbff137b)) by Sharmad Nachnolkar
+* **billing:** extract orbit-billing crate ([6448153](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/64481533f83cb7ed620e9876de4410c0bbff137b)) by Sharmad Nachnolkar
 * focus linting tasks on specific markdown files ([613626a](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/613626a5600289f0dff2161081e65179fa089521)) by Evan Read
 
 ## [0.51.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.50.0...v0.51.0) (2026-05-06)
@@ -2246,9 +2246,9 @@
 
 * add MIT license and go.mod to gkgpb Go submodule ([e165a69](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/e165a6955adf13266b1aad929e6851de7c5b93ca)) by Michael Angelo Rivera
 * add MR issue-link guidance ([4202298](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/420229853a89ca16690646ddc80968ea52b35af6)) by Dmitry Gruzd
-* **config:** load query settings from YAML via gkg-server-config crate ([e49e797](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/e49e797aa090bb702fbc762426d32746cc3f8b8c)) by Michael Usachenko
+* **config:** load query settings from YAML via orbit-server-config crate ([e49e797](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/e49e797aa090bb702fbc762426d32746cc3f8b8c)) by Michael Usachenko
 * **config:** remove config re-export shims ([c6af4f0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/c6af4f082e283cf45f0dd963fdcc396dcacca7b9)) by Michael Usachenko
-* **config:** unify all config types in gkg-server-config crate ([5fedf4e](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/5fedf4ef9d233ba4d5bd11900570c481f5384368)) by Michael Usachenko
+* **config:** unify all config types in orbit-server-config crate ([5fedf4e](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/5fedf4ef9d233ba4d5bd11900570c481f5384368)) by Michael Usachenko
 * **server:** rename config.rs to tls.rs ([f507fe5](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f507fe5e42e4f29b32e0a9ad5185dab0dd6805a2)) by Michael Usachenko
 * **server:** replace QueryProfiler with log_comment-based system table queries ([f5f52bf](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f5f52bfd664dddf28baf027cc13bb3bd78a0202d)) by Michael Usachenko
 * tag gkgpb Go submodule on release ([8758034](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/87580344056dad0153ebf9a33bba03f3bf357741)) by Michael Angelo Rivera

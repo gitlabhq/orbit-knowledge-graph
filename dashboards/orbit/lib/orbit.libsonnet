@@ -1,14 +1,14 @@
 // Panel + dashboard helpers for the Orbit Playground dashboards.
 //
 // Consumes the generated metric catalog at
-// `crates/gkg-observability/orbit-dashboards/gkg-metrics.json`. Every
+// `crates/orbit-observability/orbit-dashboards/gkg-metrics.json`. Every
 // catalog-driven panel constructor (`counterPanel`, `histogramPanels`,
 // `gaugePanel`) takes a metric name and looks up its kind, labels, unit,
 // and description from the catalog. An unknown name aborts evaluation,
 // which is the build-time check that keeps dashboards from drifting away
 // from the names the service actually emits.
 
-local catalog = import '../../../crates/gkg-observability/orbit-dashboards/gkg-metrics.json';
+local catalog = import '../../../crates/orbit-observability/orbit-dashboards/gkg-metrics.json';
 
 // Rendered per flavor: `com` for dashboards.gitlab.net, `dedicated` for a
 // GitLab Dedicated tenant's Grafana. `cargo xtask dashboards` passes

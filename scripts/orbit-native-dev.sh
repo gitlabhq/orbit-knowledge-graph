@@ -343,7 +343,7 @@ PY
 run_mode() {
   local mode="$1"
   shift
-  exec cargo run -p gkg-server -- --mode="$mode"
+  exec cargo run -p orbit-server -- --mode="$mode"
 }
 
 case "${1:-webserver}" in

@@ -7,7 +7,7 @@ require 'optparse'
 File.umask(0o022)
 
 SOURCE_DIR = File.absolute_path(File.join(__dir__, '..', '..'))
-PROTO_DIR = File.join(SOURCE_DIR, 'crates', 'gkg-server', 'proto')
+PROTO_DIR = File.join(SOURCE_DIR, 'crates', 'orbit-server', 'proto')
 GEM_NAME = 'gitlab-gkg-proto'
 DEFAULT_VERSION = '0.1.0'
 

@@ -21,8 +21,8 @@ use crate::topic::{CODE_INDEXING_TASK_TOPIC, CodeIndexingTaskRequest};
 use crate::types::Event;
 use config::CodeTableNames;
 use gitlab_client::GitlabClient;
-use gkg_server_config::{IndexerModule, SubscriptionConfig};
 use metrics::CodeMetrics;
+use orbit_server_config::{IndexerModule, SubscriptionConfig};
 use repository::RepositoryResolver;
 
 pub use checkpoint::ClickHouseCodeCheckpointStore;
@@ -52,7 +52,7 @@ pub async fn register_handlers(
     ontology: &ontology::Ontology,
     writer: Arc<crate::clickhouse::ClickHouseWriter>,
     analytics: IndexingAnalytics,
-    resources: &gkg_server_config::ContainerResources,
+    resources: &orbit_server_config::ContainerResources,
 ) -> Result<(), HandlerInitError> {
     let Some(gitlab_config) = &config.gitlab else {
         tracing::info!("Code handlers disabled (GitLab client not configured)");
@@ -126,7 +126,7 @@ pub async fn register_handlers(
 #[cfg(test)]
 mod tests {
     use super::code_indexing_task_topic_policy;
-    use gkg_server_config::SubscriptionConfig;
+    use orbit_server_config::SubscriptionConfig;
 
     #[test]
     fn declared_policy_retries_and_dead_letters() {

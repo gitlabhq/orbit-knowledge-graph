@@ -27,7 +27,7 @@ members = ["crates/real-member"]
 
 #[test]
 fn crate_key_strips_only_the_crates_prefix() {
-    assert_eq!(crate_key("crates/gkg-server"), "gkg-server");
+    assert_eq!(crate_key("crates/orbit-server"), "orbit-server");
     assert_eq!(
         crate_key("crates/query-engine/compiler"),
         "query-engine/compiler"
@@ -39,14 +39,14 @@ fn map_rows_keep_the_nested_path_and_skip_header() {
     let md = "\
 | Crate | Role |
 |---|---|
-| `gkg-server` | server |
+| `orbit-server` | server |
 | `query-engine/compiler` | compiler |
 ";
     let rows = crate_map_row_names(md);
     assert_eq!(
         rows,
         BTreeSet::from([
-            "gkg-server".to_string(),
+            "orbit-server".to_string(),
             "query-engine/compiler".to_string()
         ])
     );

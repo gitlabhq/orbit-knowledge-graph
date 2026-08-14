@@ -106,7 +106,7 @@ graph LR
 | `code-graph` crate | Single crate containing the v2 pipeline stack in `src/v2/`, the preserved legacy parser/linker stack in `src/legacy/`, and shared code-indexing utilities |
 | `treesitter-visit` crate | Tree-sitter wrapper crate kept separate for compile-time isolation and shared by the legacy and generic v2 language pipelines |
 | `indexer` crate | NATS consumer, ETL engine, Siphon task dispatcher, namespace backfill dispatcher, code indexing task handler, Arrow conversion, ClickHouse writes |
-| `gkg-server` | HTTP/gRPC server, runs in Indexer mode for code indexing |
+| `orbit-server` | HTTP/gRPC server, runs in Indexer mode for code indexing |
 | NATS JetStream | Message broker with durable delivery between Siphon and GKG |
 | NATS KV | Distributed lock store to prevent concurrent indexing of the same project |
 | ClickHouse | Columnar OLAP database storing the data lake and the property graph |

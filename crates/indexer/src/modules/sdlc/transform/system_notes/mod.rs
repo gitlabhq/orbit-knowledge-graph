@@ -30,7 +30,7 @@ use chrono::Utc;
 use serde_json::json;
 use tracing::{debug, warn};
 
-use gkg_utils::arrow::ArrowUtils;
+use orbit_utils::arrow::ArrowUtils;
 
 use crate::handler::HandlerError;
 use crate::modules::sdlc::datalake::DatalakeQuery;
@@ -100,7 +100,7 @@ impl BlockTransform for SystemNotesTransform {
 
         let Some(root_prefix) = notes
             .iter()
-            .find_map(|n| gkg_utils::traversal_path::root_prefix(&n.traversal_path))
+            .find_map(|n| orbit_utils::traversal_path::root_prefix(&n.traversal_path))
         else {
             warn!("system_notes: block has no valid traversal_path root; skipping resolution");
             return Ok(Vec::new());

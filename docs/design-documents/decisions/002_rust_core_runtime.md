@@ -31,7 +31,7 @@ The service is implemented as a Cargo workspace with 16 crates:
 
 | Crate | Purpose |
 |-------|---------|
-| `gkg-server` | HTTP/gRPC server, JWT auth, config loading, 4 execution modes |
+| `orbit-server` | HTTP/gRPC server, JWT auth, config loading, 4 execution modes |
 | `query-engine` | JSON DSL to parameterized ClickHouse SQL compilation |
 | `indexer` | NATS consumer, SDLC + code indexing handlers, worker pools |
 | `ontology` | YAML ontology loading, JSON schema validation, query validators |

@@ -1,6 +1,6 @@
 use bolero::check;
 use compiler::{Ontology, SecurityContext, compile};
-use gkg_fuzz::generators::FuzzQuery;
+use orbit_fuzz::generators::FuzzQuery;
 use std::sync::OnceLock;
 
 fn ontology() -> &'static Ontology {

@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use opentelemetry::KeyValue;
 use opentelemetry::metrics::{Counter, Gauge, Histogram, Meter};
 
-use gkg_observability::indexer::sdlc;
+use orbit_observability::indexer::sdlc;
 
 #[derive(Clone)]
 pub struct SdlcMetrics {
@@ -18,7 +18,7 @@ pub struct SdlcMetrics {
 
 impl SdlcMetrics {
     pub fn new() -> Self {
-        let meter = gkg_observability::meter();
+        let meter = orbit_observability::meter();
         Self::with_meter(&meter)
     }
 

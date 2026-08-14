@@ -13,7 +13,7 @@ use shared::{
 };
 use types::ResourceAuthorization;
 
-use gkg_server::pipeline::{HydrationStage, PathResolutionStage, PathResolver, RedactionStage};
+use orbit_server::pipeline::{HydrationStage, PathResolutionStage, PathResolver, RedactionStage};
 
 pub struct ProfilerPipelineService {
     ontology: Arc<Ontology>,

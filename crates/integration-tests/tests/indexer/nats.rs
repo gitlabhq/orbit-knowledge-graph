@@ -4,7 +4,6 @@ use std::time::Duration;
 
 use bytes::Bytes;
 use futures::{StreamExt, TryStreamExt};
-use gkg_server_config::NatsConfiguration;
 use indexer::dead_letter::{DEAD_LETTER_STREAM, DeadLetterEnvelope};
 use indexer::indexing_status::INDEXING_PROGRESS_BUCKET;
 use indexer::metrics::EngineMetrics;
@@ -17,6 +16,7 @@ use indexer::orchestrator::max_deliveries::MaxDeliveriesReconciler;
 use indexer::topic::INDEXER_STREAM;
 use indexer::types::{Envelope, Event, Subscription};
 use nats_client::{KvBucketConfig, KvPutOptions};
+use orbit_server_config::NatsConfiguration;
 use serde::{Deserialize, Serialize};
 use testcontainers::ImageExt;
 use testcontainers::core::{ContainerPort, WaitFor};

@@ -138,7 +138,7 @@ fn safe_repo_join(root_path: &str, relative_path: &str) -> Result<PathBuf, Analy
     } else {
         input
     };
-    if !gkg_utils::fs::is_safe_relative_path(rel) {
+    if !orbit_utils::fs::is_safe_relative_path(rel) {
         return Err(AnalyzerError::skip(
             FileSkip::UnsafePath,
             format!("refusing unsafe path: {relative_path}"),

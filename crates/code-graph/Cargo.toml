@@ -9,7 +9,7 @@ test-utils = []
 
 [dependencies]
 treesitter-visit = { path = "treesitter-visit", features = ["builtin-parser"] }
-gkg-utils = { path = "../utils" }
+orbit-utils = { path = "../utils" }
 
 # Common
 anyhow = { workspace = true }

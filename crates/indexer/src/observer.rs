@@ -49,7 +49,7 @@ pub trait IndexingObserver: Send {
 
     fn set_traversal_path(&mut self, traversal_path: Option<&str>) {
         let Some(path) = traversal_path else { return };
-        if let Some(namespace_id) = gkg_utils::traversal_path::top_level_namespace_id(path) {
+        if let Some(namespace_id) = orbit_utils::traversal_path::top_level_namespace_id(path) {
             self.set_namespace(Some(namespace_id));
         }
     }
@@ -81,7 +81,7 @@ pub struct NoOpObserver;
 
 impl IndexingObserver for NoOpObserver {}
 
-pub type MultiObserver = gkg_utils::observability::MultiObserver<dyn IndexingObserver>;
+pub type MultiObserver = orbit_utils::observability::MultiObserver<dyn IndexingObserver>;
 
 impl IndexingObserver for MultiObserver {
     fn record_datalake_read(&mut self, rows: u64, bytes: u64) {

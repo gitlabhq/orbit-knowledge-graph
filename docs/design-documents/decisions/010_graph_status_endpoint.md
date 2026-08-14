@@ -84,7 +84,7 @@ Entity counts are returned for all node types under the traversal path using `st
 
 Every type is counted with `uniq(id)`, which routes to the per-table `tp_count` aggregate projection (`SELECT traversal_path, uniq(id) GROUP BY traversal_path`). It reads kilobytes of HyperLogLog state rather than scanning the namespace and deduplicates the un-merged `ReplacingMergeTree` versions that a plain `count()` overcounts (observed up to +300% for frequently updated types). It carries ~1-2% HyperLogLog error, acceptable for a status indicator, and every type except Group measured within ~1% of exact on prod.
 
-Group is the one exception, counted with exact `count() FINAL`. Namespace deletion permanently removes groups and leaves tombstoned rows with distinct ids, and the projection has no `_deleted` column to exclude them, so `uniq(id)` overcounts Group ~6x (measured +549% on a large namespace). The group table is tiny, so FINAL is cheap. The check lives in `build_node_query` in `crates/gkg-server/src/graph_status/lower.rs`.
+Group is the one exception, counted with exact `count() FINAL`. Namespace deletion permanently removes groups and leaves tombstoned rows with distinct ids, and the projection has no `_deleted` column to exclude them, so `uniq(id)` overcounts Group ~6x (measured +549% on a large namespace). The group table is tiny, so FINAL is cheap. The check lives in `build_node_query` in `crates/orbit-server/src/graph_status/lower.rs`.
 
 #### Per-entity access control
 

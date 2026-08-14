@@ -4,8 +4,8 @@
 
 use std::sync::Arc;
 
-use gkg_server_config::QueryConfig;
 use ontology::Ontology;
+use orbit_server_config::QueryConfig;
 
 /// Pathfinding hard ceilings. Config can tighten but never exceed these.
 /// Kept in sync with config/default.yaml `path_finding:` block.

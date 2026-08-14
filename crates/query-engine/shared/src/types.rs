@@ -1,6 +1,6 @@
 use arrow::record_batch::RecordBatch;
 use compiler::{CompiledQueryContext, ResultContext};
-use gkg_utils::arrow::ColumnValue;
+use orbit_utils::arrow::ColumnValue;
 use serde::Serialize;
 use std::sync::Arc;
 use types::{QueryResult, ResourceAuthorization};

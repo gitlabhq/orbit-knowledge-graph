@@ -37,7 +37,7 @@ impl NamespaceIndexingDispatch {
 
         for namespace in namespaces {
             let traversal_path = &namespace.traversal_path;
-            if !gkg_utils::traversal_path::is_valid(traversal_path) {
+            if !orbit_utils::traversal_path::is_valid(traversal_path) {
                 warn!(
                     namespace_id = namespace.namespace_id,
                     %traversal_path,

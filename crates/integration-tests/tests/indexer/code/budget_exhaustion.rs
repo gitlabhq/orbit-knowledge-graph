@@ -1,11 +1,11 @@
 //! An overrun leaves no checkpoint, so the sweep re-dispatches the repository every tick;
 //! landing writes one, which is what stops it.
 
-use gkg_server_config::CodeIndexingPipelineConfig;
 use indexer::handler::Handler;
 use indexer::topic::CodeIndexingTaskRequest;
 use indexer::types::Envelope;
 use integration_testkit::t;
+use orbit_server_config::CodeIndexingPipelineConfig;
 
 use super::helpers::{CodeIndexingDeps, MockGitlabServer, handler_context};
 

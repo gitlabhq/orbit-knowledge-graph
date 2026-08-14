@@ -254,7 +254,7 @@ Initial-load partition parallelism is no longer configured here; a pipeline decl
 
 ## Scheduler configuration
 
-Scheduled tasks run in `DispatchIndexing` mode. Each task has a 6-field cron expression (seconds, minutes, hours, day-of-month, month, day-of-week). Every task's default cron is declared in Rust (`ScheduledTasksConfiguration` in `crates/gkg-server-config/src/engine.rs`); a `schedule.tasks.<name>` entry in YAML overrides only the cadence you set. A task with no declared cron and no config falls back to a 60-second interval.
+Scheduled tasks run in `DispatchIndexing` mode. Each task has a 6-field cron expression (seconds, minutes, hours, day-of-month, month, day-of-week). Every task's default cron is declared in Rust (`ScheduledTasksConfiguration` in `crates/orbit-server-config/src/engine.rs`); a `schedule.tasks.<name>` entry in YAML overrides only the cadence you set. A task with no declared cron and no config falls back to a 60-second interval.
 
 Distributed locking via NATS KV ensures only one dispatcher instance runs each task per interval.
 
@@ -319,7 +319,7 @@ Required for code indexing (repository archive download) and authorization.
 |-------------|---------|---------|-------------|
 | `metrics.log_level` | `GKG_METRICS__LOG_LEVEL` | None | Rust log filter string |
 
-Example: `info,gkg_server=debug,gkg_indexer=trace`
+Example: `info,orbit_server=debug,gkg_indexer=trace`
 
 ### OpenTelemetry
 
@@ -403,7 +403,7 @@ query:
 
 ## Analytics
 
-Controls Snowplow product-analytics event emission. Events carry `orbit_common` and `orbit_query` contexts (consumer-owned, defined in `gkg-analytics`). Disabled by default -- Helm enables it for .com and Dedicated.
+Controls Snowplow product-analytics event emission. Events carry `orbit_common` and `orbit_query` contexts (consumer-owned, defined in `orbit-analytics`). Disabled by default -- Helm enables it for .com and Dedicated.
 
 | Config path | Env var | Default | Description |
 |-------------|---------|---------|-------------|
@@ -656,7 +656,7 @@ schedule:
       cron: "0 */1 * * * *"
 
 metrics:
-  log_level: info,gkg_server=debug
+  log_level: info,orbit_server=debug
   prometheus:
     enabled: true
     port: 9394

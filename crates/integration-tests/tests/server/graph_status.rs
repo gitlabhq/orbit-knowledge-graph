@@ -8,14 +8,14 @@ use nats_client::kv_types::{KvEntry, KvPutOptions, KvPutResult};
 use query_engine::compiler::{SecurityContext, TraversalPath};
 
 use crate::common::{GRAPH_SCHEMA_SQL, TestContext};
-use gkg_server::graph_status::GraphStatusService;
-use gkg_server::proto::{
-    GetGraphStatusResponse, IndexingState, ResponseFormat, StructuredGraphStatus,
-    get_graph_status_response,
-};
 use indexer::indexing_status::{INDEXING_PROGRESS_BUCKET, IndexingProgress, IndexingStatusStore};
 use integration_testkit::{load_ontology, run_subtests_shared, t};
 use nats_client::testkit::MockKvServices;
+use orbit_server::graph_status::GraphStatusService;
+use orbit_server::proto::{
+    GetGraphStatusResponse, IndexingState, ResponseFormat, StructuredGraphStatus,
+    get_graph_status_response,
+};
 
 fn admin_context() -> SecurityContext {
     SecurityContext::new_with_roles(1, vec![TraversalPath::new("1/", 50)])
@@ -215,16 +215,16 @@ fn extract_structured(response: GetGraphStatusResponse) -> StructuredGraphStatus
 }
 
 fn find_domain<'a>(
-    domains: &'a [gkg_server::proto::GraphStatusDomain],
+    domains: &'a [orbit_server::proto::GraphStatusDomain],
     name: &str,
-) -> &'a gkg_server::proto::GraphStatusDomain {
+) -> &'a orbit_server::proto::GraphStatusDomain {
     domains
         .iter()
         .find(|d| d.name == name)
         .unwrap_or_else(|| panic!("domain '{name}' not found"))
 }
 
-fn find_item(domain: &gkg_server::proto::GraphStatusDomain, name: &str) -> i64 {
+fn find_item(domain: &orbit_server::proto::GraphStatusDomain, name: &str) -> i64 {
     domain
         .items
         .iter()

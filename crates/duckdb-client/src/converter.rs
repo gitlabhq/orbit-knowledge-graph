@@ -1,6 +1,6 @@
 use arrow::record_batch::RecordBatch;
-use gkg_utils::arrow::{AsRecordBatch, ColumnSpec, ColumnType};
 use ontology::{DataType as OntDataType, Ontology};
+use orbit_utils::arrow::{AsRecordBatch, ColumnSpec, ColumnType};
 
 use crate::error::Result;
 

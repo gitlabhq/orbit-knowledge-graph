@@ -13,7 +13,7 @@ use crate::orchestrator::siphon::decoder::decode_logical_replication_events;
 use crate::orchestrator::siphon::route::{CdcContext, Route, RouteOutcome};
 use crate::orchestrator::{Trigger, TriggerError};
 use crate::types::Subscription;
-use gkg_server_config::SiphonRouterConfig;
+use orbit_server_config::SiphonRouterConfig;
 
 const METRIC_NAME: &str = "dispatch.siphon";
 const POLL_INTERVAL: Duration = Duration::from_secs(1);

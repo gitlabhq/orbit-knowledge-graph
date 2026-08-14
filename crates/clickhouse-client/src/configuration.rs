@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use gkg_server_config::ClickHouseConfiguration;
+use orbit_server_config::ClickHouseConfiguration;
 
 use crate::arrow_client::ArrowClickHouseClient;
 
@@ -51,7 +51,7 @@ fn build_session_settings_with_quorum_defaults(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gkg_server_config::ConfigurationError;
+    use orbit_server_config::ConfigurationError;
 
     #[test]
     fn test_optional_password() {

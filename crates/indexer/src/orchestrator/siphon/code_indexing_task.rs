@@ -166,7 +166,7 @@ mod tests {
     };
     use crate::orchestrator::siphon::Siphon;
     use crate::testkit::{MockNatsServices, TestEnvelopeFactory};
-    use gkg_server_config::SiphonRouterConfig;
+    use orbit_server_config::SiphonRouterConfig;
     use siphon_proto::replication_event::Operation;
 
     fn test_metrics() -> ScheduledTaskMetrics {

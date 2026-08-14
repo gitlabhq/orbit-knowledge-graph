@@ -10,9 +10,9 @@ pub(in crate::modules::sdlc) const SOURCE_DATA_TABLE: &str = "source_data";
 
 use arrow::record_batch::RecordBatch;
 use chrono::{DateTime, Utc};
-use gkg_utils::arrow::ArrowUtils;
 use ontology::EtlScope;
 use ontology::sql_template;
+use orbit_utils::arrow::ArrowUtils;
 use serde_json::Value;
 
 use super::partitioning::PartitionAssignment;

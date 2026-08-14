@@ -610,7 +610,7 @@ fn index_repo(
         code_graph::v2::config::detect_language_from_path,
     );
     let file_inventory: std::sync::Arc<[code_graph::v2::FileInventoryEntry]> = std::sync::Arc::from(
-        gkg_utils::walk::walk_dir(&git.repo_path, &mut filter)
+        orbit_utils::walk::walk_dir(&git.repo_path, &mut filter)
             .context("failed to walk repository files")?,
     );
 

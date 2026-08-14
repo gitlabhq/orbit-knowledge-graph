@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PROTO_SRC="crates/gkg-server/proto/gkg.proto"
-PROTO_DIR="crates/gkg-server/proto"
+PROTO_SRC="crates/orbit-server/proto/gkg.proto"
+PROTO_DIR="crates/orbit-server/proto"
 OUT_DIR="clients/gkgpb"
 MODULE="gitlab.com/gitlab-org/orbit/knowledge-graph/clients/gkgpb"
 

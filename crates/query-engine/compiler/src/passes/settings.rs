@@ -1,7 +1,7 @@
-use gkg_server_config::QueryConfig;
+use orbit_server_config::QueryConfig;
 
 pub fn resolve(query_type: &str) -> QueryConfig {
-    gkg_server_config::query::for_query_type(query_type)
+    orbit_server_config::query::for_query_type(query_type)
 }
 
 #[cfg(test)]

@@ -13,8 +13,8 @@ use compiler::{
     ColumnSelection, DynamicEntityColumns, FilterOp, HydrationTemplate, Input, InputFilter,
     InputNode, QueryType,
 };
-use gkg_utils::arrow::{ArrowUtils, ColumnValue};
 use ontology::{DataType, Ontology};
+use orbit_utils::arrow::{ArrowUtils, ColumnValue};
 use pipeline::PipelineError;
 use types::QueryResult;
 

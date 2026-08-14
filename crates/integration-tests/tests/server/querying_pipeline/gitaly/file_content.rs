@@ -11,8 +11,8 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 use gitaly_protos::proto::ListBlobsResponse;
 use gitaly_protos::proto::list_blobs_response::Blob as BlobChunk;
 use gitlab_client::GitlabClient;
-use gkg_server::content::gitaly::file_content::GitalyContentService;
-use gkg_utils::arrow::ColumnValue;
+use orbit_server::content::gitaly::file_content::GitalyContentService;
+use orbit_utils::arrow::ColumnValue;
 use prost::Message;
 use query_engine::compiler::SecurityContext;
 use query_engine::shared::content::{ColumnResolver, ResolverContext};
@@ -98,7 +98,7 @@ async fn mock_gitlab_server(
         axum::serve(listener, app).await.unwrap();
     });
 
-    let client = GitlabClient::new(gkg_server_config::GitlabClientConfiguration {
+    let client = GitlabClient::new(orbit_server_config::GitlabClientConfiguration {
         base_url: format!("http://{addr}"),
         signing_key: BASE64.encode(b"test-secret-that-is-long-enough!"),
         resolve_host: None,
@@ -339,7 +339,7 @@ async fn gitlab_error_returns_none_gracefully() {
     });
 
     let client = Arc::new(
-        GitlabClient::new(gkg_server_config::GitlabClientConfiguration {
+        GitlabClient::new(orbit_server_config::GitlabClientConfiguration {
             base_url: format!("http://{addr}"),
             signing_key: BASE64.encode(b"test-secret-that-is-long-enough!"),
             resolve_host: None,

@@ -19,10 +19,10 @@ clickhouse = { workspace = true }
 clickhouse-client = { workspace = true }
 code-graph = { path = "../code-graph" }
 croner = { workspace = true }
-gkg-analytics = { path = "../gkg-analytics" }
-gkg-observability = { workspace = true }
-gkg-server-config = { path = "../gkg-server-config" }
-gkg-utils = { path = "../utils" }
+orbit-analytics = { path = "../orbit-analytics" }
+orbit-observability = { workspace = true }
+orbit-server-config = { path = "../orbit-server-config" }
+orbit-utils = { path = "../utils" }
 datafusion = { workspace = true }
 flate2 = { workspace = true }
 futures = { workspace = true }
@@ -55,7 +55,7 @@ axum = { workspace = true }
 zstd = "0.13.3"
 
 [dev-dependencies]
-gkg-analytics = { path = "../gkg-analytics", features = ["testkit"] }
+orbit-analytics = { path = "../orbit-analytics", features = ["testkit"] }
 jsonschema = { workspace = true }
 nats-client = { workspace = true, features = ["testkit"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "time", "test-util", "macros"] }

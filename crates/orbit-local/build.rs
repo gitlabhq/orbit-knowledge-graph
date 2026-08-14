@@ -51,5 +51,5 @@ fn main() {
 fn validate_prompts() {
     let dir = std::path::Path::new(env!("PROMPTS_DIR")).join("local");
     println!("cargo:rerun-if-changed={}", dir.display());
-    gkg_prompts::Prompts::load_dir(&dir).unwrap_or_else(|e| panic!("{e}"));
+    orbit_prompts::Prompts::load_dir(&dir).unwrap_or_else(|e| panic!("{e}"));
 }

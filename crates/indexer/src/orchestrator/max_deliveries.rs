@@ -44,9 +44,9 @@ struct MaxDeliveriesMetrics {
 
 impl MaxDeliveriesMetrics {
     fn new() -> Self {
-        let meter = gkg_observability::meter();
+        let meter = orbit_observability::meter();
         Self {
-            exhausted: gkg_observability::indexer::nats::MAX_DELIVERIES_EXHAUSTED
+            exhausted: orbit_observability::indexer::nats::MAX_DELIVERIES_EXHAUSTED
                 .build_counter_u64(&meter),
         }
     }
@@ -56,11 +56,11 @@ impl MaxDeliveriesMetrics {
             1,
             &[
                 KeyValue::new(
-                    gkg_observability::indexer::nats::labels::STREAM,
+                    orbit_observability::indexer::nats::labels::STREAM,
                     stream.to_owned(),
                 ),
                 KeyValue::new(
-                    gkg_observability::indexer::nats::labels::CONSUMER,
+                    orbit_observability::indexer::nats::labels::CONSUMER,
                     consumer.to_owned(),
                 ),
             ],

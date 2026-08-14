@@ -1284,7 +1284,7 @@ pub(super) async fn aggregation_vulnerability_property_grouping_sql_drops_report
         matches!(
             (&p.ch_type, &p.value),
             (
-                gkg_utils::clickhouse::ChType::Bool,
+                orbit_utils::clickhouse::ChType::Bool,
                 serde_json::Value::Bool(false)
             )
         )
@@ -1397,7 +1397,7 @@ pub(super) async fn aggregation_vulnerability_sql_drops_reporter_paths(ctx: &Tes
         matches!(
             (&p.ch_type, &p.value),
             (
-                gkg_utils::clickhouse::ChType::Bool,
+                orbit_utils::clickhouse::ChType::Bool,
                 serde_json::Value::Bool(false)
             )
         )

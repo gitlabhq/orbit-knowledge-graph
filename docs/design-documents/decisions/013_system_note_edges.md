@@ -192,7 +192,7 @@ Three-layer defence:
 
 1. **Vendored constant.** `crates/indexer/src/modules/sdlc/transform/system_notes/vendored/icon_types.rs` carries a literal copy of upstream Rails `ICON_TYPES` (61 values at the time of writing), pinned to a SHA and documented in a header comment.
 2. **CI drift check.** `scripts/check-system-note-actions.sh` mirrors the working pattern of `scripts/check-goon-format-version.sh` (ADR 012, the analogous "upstream owns the source of truth, we vendor a copy" problem): the script fetches the upstream `system_note_metadata.rb`, diffs the `ICON_TYPES` array against the vendored constant, and fails with an explicit message listing values present upstream but missing locally. Wired into lefthook pre-commit and into the `lint` CI stage.
-3. **Runtime safety.** The handler's dispatch is `match action { ... _ => log_and_drop }`, never `panic!`. Unknown actions surface as a new metric `gkg.indexer.sdlc.system_notes.unknown_action_total{action}` registered in `crates/gkg-observability/src/indexer/sdlc.rs`; cardinality is bounded by `ICON_TYPES` size (~60–100), so a label dimension is safe. See the [metrics step](#implementation-plan) of the implementation plan for the full instrument list.
+3. **Runtime safety.** The handler's dispatch is `match action { ... _ => log_and_drop }`, never `panic!`. Unknown actions surface as a new metric `gkg.indexer.sdlc.system_notes.unknown_action_total{action}` registered in `crates/orbit-observability/src/indexer/sdlc.rs`; cardinality is bounded by `ICON_TYPES` size (~60–100), so a label dimension is safe. See the [metrics step](#implementation-plan) of the implementation plan for the full instrument list.
 
 ## Implementation plan
 
@@ -205,7 +205,7 @@ Three-layer defence:
 7. Implement `SystemNotesTransform` at `crates/indexer/src/modules/sdlc/transform/system_notes/`, lifting `parser.rs` and `resolver.rs` verbatim from the POC at `crates/xtask/src/system_notes_bench/`. The type implements `BlockTransform` (ADR 015) and is registered as `system_notes` in the `TransformRegistry` when the `SystemNotes` feature is enabled. The single shared `Pipeline` still owns extraction, paging, checkpointing, and writes.
 
     Custom-pipeline precedent: ADR 014 names SystemNotes specifically as the motivating example for the `EntityPipeline` extension point. Custom-handler precedent in the existing codebase: `crates/indexer/src/modules/code/`.
-8. Metrics. Hook into the existing `gkg.indexer.sdlc.*` catalog (`crates/gkg-observability/src/indexer/sdlc.rs`) wherever an instrument already fits; add two narrowly-scoped new instruments. This directly addresses the review request to "hook ourselves in the existing metrics":
+8. Metrics. Hook into the existing `gkg.indexer.sdlc.*` catalog (`crates/orbit-observability/src/indexer/sdlc.rs`) wherever an instrument already fits; add two narrowly-scoped new instruments. This directly addresses the review request to "hook ourselves in the existing metrics":
 
     | Concern | Instrument | Status |
     |---|---|---|
@@ -215,7 +215,7 @@ Three-layer defence:
     | Edges emitted | `gkg.indexer.sdlc.edges_emitted_total{entity, edge_kind}` | **Add** to `sdlc.rs` (general-purpose; future entities benefit) |
     | Unknown action drift | `gkg.indexer.sdlc.system_notes.unknown_action_total{action}` | **Add**; cardinality bounded by `ICON_TYPES` (~60–100) |
 
-    Catalog regeneration via `metrics-catalog-check`. The two new instruments land in `gkg-observability/src/indexer/sdlc.rs` (not in a system-notes-specific module) so the catalog stays domain-aligned.
+    Catalog regeneration via `metrics-catalog-check`. The two new instruments land in `orbit-observability/src/indexer/sdlc.rs` (not in a system-notes-specific module) so the catalog stays domain-aligned.
 9. Bump `config/SCHEMA_VERSION` (currently 44 → 45).
 10. Update `docs/design-documents/data_model.md`, `docs/design-documents/indexing/sdlc_indexing.md`, `AGENTS.md`, and `CLAUDE.md` in the same MR (per the AGENTS.md design-doc sync rule).
 11. Integration test `crates/integration-tests/tests/indexer/sdlc/notes.rs::materialises_cross_reference_edges`, plus a lifecycle test ported from the closed !1109. The full source of the !1109 lifecycle test is preserved alongside the research package at [`dgruzd/droid-workspace/task/2685`](https://gitlab.com/dgruzd/droid-workspace/-/tree/main/task/2685/) so future implementers do not need to spelunk a closed-MR branch.
@@ -229,7 +229,7 @@ Three-layer defence:
         # No extract.partition_count for v1; see "Out of scope".
     ```
 
-    `HandlersConfiguration` uses `deny_unknown_fields` (`crates/gkg-server-config/src/engine.rs`), so the SystemNote-specific knobs must fit inside `entity-handler.batch_size_overrides` (the map key is the entity kind) rather than introducing a new top-level config block. Toggling between staging-on and staging-off is a config push, no code change.
+    `HandlersConfiguration` uses `deny_unknown_fields` (`crates/orbit-server-config/src/engine.rs`), so the SystemNote-specific knobs must fit inside `entity-handler.batch_size_overrides` (the map key is the entity kind) rather than introducing a new top-level config block. Toggling between staging-on and staging-off is a config push, no code change.
 
 ## POC results
 
