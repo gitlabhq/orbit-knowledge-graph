@@ -53,6 +53,13 @@ fn parse_markdown(
     )
 }
 
+struct SectionFrame {
+    level: u8,
+    segment: String,
+    def_idx: usize,
+    child_names: rustc_hash::FxHashMap<String, usize>,
+}
+
 fn section_definitions<'a>(
     root: &'a AstNode<'a>,
     source: &str,
@@ -64,16 +71,17 @@ fn section_definitions<'a>(
         .and_then(|s| s.to_str())
         .unwrap_or(file_path);
 
-    let mut stack: Vec<(u8, String, usize)> = Vec::new();
+    let mut stack: Vec<SectionFrame> = Vec::new();
+    let mut root_names: rustc_hash::FxHashMap<String, usize> = rustc_hash::FxHashMap::default();
     let mut definitions: Vec<CanonicalDefinition> = Vec::new();
-    let close = |stack: &mut Vec<(u8, String, usize)>,
+    let close = |stack: &mut Vec<SectionFrame>,
                  definitions: &mut Vec<CanonicalDefinition>,
                  level: u8,
                  end: usize| {
-        while stack.last().is_some_and(|(l, _, _)| *l >= level) {
-            let (_, _, idx) = stack.pop().expect("non-empty stack");
-            definitions[idx].range.end = lines.position(end);
-            definitions[idx].range.byte_offset.1 = end;
+        while stack.last().is_some_and(|f| f.level >= level) {
+            let frame = stack.pop().expect("non-empty stack");
+            definitions[frame.def_idx].range.end = lines.position(end);
+            definitions[frame.def_idx].range.byte_offset.1 = end;
         }
     };
 
@@ -92,15 +100,33 @@ fn section_definitions<'a>(
         }
         let start = lines.byte(data.sourcepos.start);
         close(&mut stack, &mut definitions, heading.level, start);
+        let segment = {
+            let seen = stack
+                .last_mut()
+                .map_or(&mut root_names, |f| &mut f.child_names);
+            let count = seen.entry(name.clone()).or_insert(0);
+            let segment = if *count == 0 {
+                name.clone()
+            } else {
+                format!("{name}-{count}")
+            };
+            *count += 1;
+            segment
+        };
         let fqn = {
             let parts: Vec<&str> = std::iter::once(stem)
-                .chain(stack.iter().map(|(_, n, _)| n.as_str()))
-                .chain(std::iter::once(name.as_str()))
+                .chain(stack.iter().map(|f| f.segment.as_str()))
+                .chain(std::iter::once(segment.as_str()))
                 .collect();
             Fqn::from_parts(&parts, "#")
         };
         let is_top_level = stack.is_empty();
-        stack.push((heading.level, name.clone(), definitions.len()));
+        stack.push(SectionFrame {
+            level: heading.level,
+            segment,
+            def_idx: definitions.len(),
+            child_names: rustc_hash::FxHashMap::default(),
+        });
         definitions.push(CanonicalDefinition {
             definition_type: "Section",
             kind: DefKind::Module,
@@ -177,7 +203,7 @@ fn repo_link_target(raw: &str) -> Option<String> {
     let target = raw.trim().trim_start_matches('<').trim_end_matches('>');
     let target = target.split(['#', '?']).next().unwrap_or("").trim();
     (!target.is_empty()
-        && !target.starts_with('/')
+        && !target.starts_with("//")
         && !target.contains(':')
         && !target.contains(char::is_whitespace))
     .then(|| target.to_string())
@@ -327,7 +353,7 @@ mod tests {
     #[test]
     fn relative_links_become_imports_and_external_links_are_ignored() {
         let result = parse(
-            "# Guide\n\nSee [security](../design/security.md#auth) and [the API](https://example.com/api?v=2),\nplus [setup](./setup.md) but not [mail](mailto:x@y.z) or [abs](/etc/passwd).\n",
+            "# Guide\n\nSee [security](../design/security.md#auth) and [the API](https://example.com/api?v=2),\nplus [setup](./setup.md) and [root](/docs/root.md) but not [mail](mailto:x@y.z) or [cdn](//cdn.example.com/x.md).\n",
         )
         .unwrap();
         let links: Vec<(&str, &str)> = result
@@ -337,7 +363,11 @@ mod tests {
             .collect();
         assert_eq!(
             links,
-            vec![("Link", "../design/security.md"), ("Link", "./setup.md")]
+            vec![
+                ("Link", "../design/security.md"),
+                ("Link", "./setup.md"),
+                ("Link", "/docs/root.md"),
+            ]
         );
         assert_eq!(result.imports[0].name.as_deref(), Some("security"));
     }
@@ -447,6 +477,52 @@ mod tests {
     fn link_names_keep_every_dot_but_the_extension() {
         let result = parse("# G\n\nSee [v2](docs/reference.v2.md).\n").unwrap();
         assert_eq!(result.imports[0].name.as_deref(), Some("reference.v2"));
+    }
+
+    #[test]
+    fn duplicate_sibling_headings_get_suffixed_fqns_but_keep_their_name() {
+        let result =
+            parse("# Setup\n\n## Examples\n\na\n\n## Examples\n\nb\n\n## Examples\n\nc\n").unwrap();
+        let fqns: Vec<String> = result
+            .definitions
+            .iter()
+            .map(|d| d.fqn.to_string())
+            .collect();
+        assert_eq!(
+            fqns,
+            vec![
+                "guide#Setup",
+                "guide#Setup#Examples",
+                "guide#Setup#Examples-1",
+                "guide#Setup#Examples-2",
+            ]
+        );
+        assert!(result.definitions[1..].iter().all(|d| d.name == "Examples"));
+    }
+
+    #[test]
+    fn same_heading_under_different_parents_is_not_suffixed() {
+        let result = parse("# A\n\n## X\n\n# B\n\n## X\n").unwrap();
+        let fqns: Vec<String> = result
+            .definitions
+            .iter()
+            .map(|d| d.fqn.to_string())
+            .collect();
+        assert_eq!(fqns, vec!["guide#A", "guide#A#X", "guide#B", "guide#B#X"]);
+    }
+
+    #[test]
+    fn children_scope_under_the_deduped_parent_segment() {
+        let result = parse("# A\n\n## C\n\n# A\n\n## C\n").unwrap();
+        let fqns: Vec<String> = result
+            .definitions
+            .iter()
+            .map(|d| d.fqn.to_string())
+            .collect();
+        assert_eq!(
+            fqns,
+            vec!["guide#A", "guide#A#C", "guide#A-1", "guide#A-1#C"]
+        );
     }
 
     #[test]

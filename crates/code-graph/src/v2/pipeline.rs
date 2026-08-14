@@ -2030,7 +2030,7 @@ mod tests {
         std::fs::create_dir_all(root.join("docs")).unwrap();
         std::fs::create_dir_all(root.join("src")).unwrap();
         let readme = "# Hi\n\nSee [guide](docs/guide.md), [main](src/main.py), and [gone](docs/missing.md).\n";
-        let guide = "# Guide\n\nBack to [readme](../README.md).\n";
+        let guide = "# Guide\n\nBack to [readme](../README.md), [main](/src/main.py), and [gone](/etc/passwd).\n";
         let main_py = "def hello(): pass\n";
         std::fs::write(root.join("README.md"), readme).unwrap();
         std::fs::write(root.join("docs/guide.md"), guide).unwrap();
@@ -2087,6 +2087,7 @@ mod tests {
                 ("README.md".into(), "docs/guide.md".into()),
                 ("README.md".into(), "src/main.py".into()),
                 ("docs/guide.md".into(), "README.md".into()),
+                ("docs/guide.md".into(), "src/main.py".into()),
             ]
         );
     }
