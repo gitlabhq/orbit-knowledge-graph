@@ -24,7 +24,10 @@ FORMAT TSV
 COUNT=$(echo "${PROJECTS}" | wc -l | tr -d ' ')
 log "${COUNT} projects dumped"
 
-echo "${PROJECTS}" | gsutil -q cp - "${BUCKET}/projects.tsv"
-log "Uploaded to ${BUCKET}/projects.tsv"
+if gsutil -q cp - "${BUCKET}/projects.tsv" <<< "${PROJECTS}" 2>/dev/null; then
+  log "Uploaded to ${BUCKET}/projects.tsv"
+else
+  log "GCS upload skipped (gsutil unavailable or no access)"
+fi
 
 echo "${PROJECTS}"
