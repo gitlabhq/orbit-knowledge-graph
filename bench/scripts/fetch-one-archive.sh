@@ -14,7 +14,7 @@ else
   [[ -f "${target}" ]] && exit 0
 fi
 
-code=$(curl -sf -w '%{http_code}' -o "${dest}" \
+code=$(curl -s -w '%{http_code}' -o "${dest}" \
   -H "${AUTH_HEADER}" \
   "https://gitlab.com/api/v4/projects/${id}/repository/archive.tar.gz" 2>/dev/null) || code="000"
 
@@ -22,11 +22,17 @@ case "${code}" in
   200)
     if [[ -s "${dest}" ]]; then
       if [[ "${BUCKET}" == gs://* ]]; then
-        gcloud storage cp "${dest}" "${target}" --quiet && rm -f "${dest}"
+        if gcloud storage cp "${dest}" "${target}" --quiet 2>/dev/null; then
+          rm -f "${dest}"
+          echo "  OK ${path} (${id})"
+        else
+          rm -f "${dest}"
+          echo "  FAIL ${path} (${id}): gcs upload" >&2
+        fi
       else
         mv "${dest}" "${target}"
+        echo "  OK ${path} (${id})"
       fi
-      echo "  OK ${path} (${id})"
     else
       rm -f "${dest}"
     fi
