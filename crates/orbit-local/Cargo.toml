@@ -11,8 +11,14 @@ path = "src/main.rs"
 [lints]
 workspace = true
 
+[features]
+# Dev-only: swaps the global allocator for the RSS-correlated profiler and
+# writes a report at the end of `index`. See crates/memprof.
+memprof = ["dep:memprof"]
+
 [dependencies]
 mimalloc = { workspace = true }
+memprof = { path = "../memprof", optional = true }
 arrow = { workspace = true, features = ["prettyprint"] }
 code-graph = { path = "../code-graph" }
 duckdb-client = { path = "../duckdb-client" }

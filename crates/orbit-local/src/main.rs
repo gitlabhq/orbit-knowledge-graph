@@ -1,5 +1,10 @@
+#[cfg(not(feature = "memprof"))]
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
+#[cfg(feature = "memprof")]
+#[global_allocator]
+static GLOBAL: memprof::ProfAlloc = memprof::ProfAlloc;
 
 mod commands;
 mod descriptions;
@@ -479,6 +484,11 @@ pub(crate) fn index_collect(
     show_stats: bool,
     db: Option<PathBuf>,
 ) -> Result<Vec<IndexOutput>> {
+    #[cfg(feature = "memprof")]
+    let _memprof = memprof::start(
+        &std::env::var("MEMPROF_OUT").unwrap_or_else(|_| "orbit-memprof".to_string()),
+    );
+
     let db_path = workspace::resolve_db_path(db)?;
     let store = workspace::Workspace::open_default()?;
     let repos = store.resolve_repos(&path)?;
