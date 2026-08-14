@@ -1,19 +1,17 @@
 #!/usr/bin/env python3
 """
-Mock GitLab internal API for code indexing.
+Mock GitLab internal API for code indexing benchmarks.
 
 Serves two endpoints the code indexer needs:
   GET /api/v4/internal/orbit/project/{id}/info
   GET /api/v4/internal/orbit/project/{id}/repository/archive
 
-Archives are read from a local directory or GCS bucket.
+Archives are read from a local directory, falling back to GCS download
+on first request. No external dependencies beyond the standard library.
 
 Usage:
-  # From local directory:
-  python3 code-corpus-server.py --corpus-dir /tmp/code-corpus --port 8090
-
-  # From GCS (downloads on first request, caches locally):
-  python3 code-corpus-server.py --gcs-bucket gs://gkg-code-corpus --port 8090
+  python3 server.py --corpus-dir /data/corpus --port 8090
+  python3 server.py --gcs-bucket gs://gkg-code-corpus --port 8090
 """
 
 import argparse
@@ -21,7 +19,6 @@ import json
 import os
 import re
 import subprocess
-import sys
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 
@@ -66,26 +63,31 @@ class CorpusHandler(BaseHTTPRequestHandler):
         if local.exists():
             return local
 
-        if self.server.gcs_bucket:
-            gcs = f"{self.server.gcs_bucket}/{pid}.tar.gz"
+        bucket = self.server.gcs_bucket
+        if bucket:
+            # Use curl to avoid gsutil dependency in the container.
+            bucket_name = bucket.replace("gs://", "")
+            url = f"https://storage.googleapis.com/{bucket_name}/{pid}.tar.gz"
             try:
                 subprocess.run(
-                    ["gsutil", "-q", "cp", gcs, str(local)],
-                    check=True, capture_output=True,
+                    ["curl", "-sfL", "-o", str(local), url],
+                    check=True, capture_output=True, timeout=120,
                 )
-                return local
-            except subprocess.CalledProcessError:
-                return None
+                if local.exists() and local.stat().st_size > 0:
+                    return local
+                local.unlink(missing_ok=True)
+            except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+                local.unlink(missing_ok=True)
 
         return None
 
     def log_message(self, fmt, *args):
-        pass  # quiet
+        pass
 
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--corpus-dir", type=Path, default=Path("/tmp/code-corpus"))
+    p.add_argument("--corpus-dir", type=Path, default=Path("/data/corpus"))
     p.add_argument("--gcs-bucket", type=str, default=os.environ.get("CORPUS_BUCKET"))
     p.add_argument("--port", type=int, default=8090)
     args = p.parse_args()
