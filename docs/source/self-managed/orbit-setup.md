@@ -281,22 +281,16 @@ on a private network.
 
 ### Resource requirements
 
-The chart defaults suit a large deployment: three webserver replicas at 500m CPU and 4 GiB each. The three
-indexer replicas each request 2 CPU, 4 GiB, and 5 GiB of ephemeral storage. Those requests total roughly
-8 CPU and 24 GiB before Siphon and NATS. On a smaller instance, lower them:
+The chart defaults suit most installations. Each of the three webserver replicas requests 500m CPU and
+4 GiB. Each of the three indexer replicas requests 2 CPU, 4 GiB, and 5 GiB of ephemeral storage. Those
+requests total roughly 8 CPU and 24 GiB before Siphon and NATS.
 
-```yaml
-webserver:
-  replicas: 1
-  resources:
-    requests: {cpu: "250m", memory: "2Gi"}
+Give the indexer room to reach at least 8 CPU and 16 GiB of memory. Many concurrent indexing tasks can use
+all of it. The chart limits allow that headroom by default.
 
-indexer:
-  replicas: 1
-  tmpSizeLimit: "5Gi"
-  resources:
-    requests: {cpu: "1", memory: "2Gi", ephemeral-storage: "5Gi"}
-```
+The indexer also needs enough ephemeral storage on each node to download code archives. The chart sizes
+that scratch space with `indexer.tmpSizeLimit`, which defaults to 10 GiB, and with the indexer ephemeral
+storage requests and limits.
 
 ## Turn on indexing for a group
 

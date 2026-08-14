@@ -74,19 +74,16 @@ The `gitlab_clickhouse_main_production` database exists after ClickHouse setup i
 
 ### Sizing and settings
 
-Provision at least 8 CPU and 32 GiB of memory for ClickHouse. On 16 GiB, the work item extract runs out of
-memory during the first backfill even with spilling to disk turned on. ClickHouse saturates 8 cores while
-the graph builds.
+Provision at least 8 CPU and 32 GiB of memory for ClickHouse. ClickHouse saturates 8 cores while the graph
+builds.
 
-Provision at least as much ClickHouse storage as the size of the GitLab PostgreSQL database. Siphon
-replicates roughly half of the GitLab data into the data lake, and the graph indexes up to a quarter of it.
-GitLab Orbit keeps the previous index version during a promotion, so budget for the graph twice.
+Provision at least as much ClickHouse storage as the size of the GitLab PostgreSQL database.
 
 A ClickHouse instance you run yourself sets `max_bytes_before_external_sort` and
 `max_bytes_before_external_group_by` to `0`, which turns off spilling to disk. ClickHouse Cloud sets both to
-half of available memory. Without spilling, a wide sort over the work item columns holds the whole result in
-memory, and the server runs out of memory. Set both in the `default` profile. The following values suit a
-32 GiB instance, with 8 GiB for each threshold and 20 GiB for the memory ceiling:
+half of available memory. Without spilling, a large sort holds the whole result in memory and the server
+runs out of memory. Set both in the `default` profile. The following values suit a 32 GiB instance, with
+8 GiB for each threshold and 20 GiB for the memory ceiling:
 
 ```xml
 <profiles>
