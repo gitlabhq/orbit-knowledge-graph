@@ -1,4 +1,8 @@
 pub const EXCLUDE_LIKE: &[&str] = &[
+    "doc-locale/%",
+    "%/doc-locale/%",
+    "docs-locale/%",
+    "%/docs-locale/%",
     "spec/%",
     "%/spec/%",
     "ee/spec/%",
