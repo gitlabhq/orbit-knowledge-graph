@@ -1052,6 +1052,15 @@ impl<'a> ResolveCtx<'a> {
         if !self.settings.chain_fallback {
             return Ok(vec![]);
         }
+        // Only fall back for chains rooted at This/Super or bare calls.
+        // A receiver like `request.user.get_profile()` can't produce a
+        // useful edge from just `get_profile` without knowing the type.
+        if matches!(
+            chain.first(),
+            Some(ExpressionStep::Ident(_) | ExpressionStep::Field(_) | ExpressionStep::New(_))
+        ) {
+            return Ok(vec![]);
+        }
         let Some(last_name) = chain.last().and_then(|s| match s {
             ExpressionStep::Call(n) | ExpressionStep::Field(n) => Some(n.as_str()),
             _ => None,
