@@ -112,7 +112,6 @@ impl ParamValue {
     }
 }
 
-/// Interns query params so repeated (type, value) pairs share one placeholder.
 #[derive(Debug, Default)]
 pub struct ParamBindings {
     params: HashMap<String, ParamValue>,

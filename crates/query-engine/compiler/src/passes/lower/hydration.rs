@@ -20,8 +20,6 @@ use super::helpers::limit_by_scan;
 
 const ARRAY_EXISTS_PATH_THRESHOLD: usize = 256;
 
-/// Half of the 65,534-byte URI cap the `http` crate enforces; bound params
-/// ride the request URL and share it with id lists and settings (#1154).
 const PATH_FILTER_URL_BYTE_BUDGET: usize = 32 * 1024;
 
 #[derive(Clone, Copy)]
@@ -135,10 +133,7 @@ fn emit_arm(node: &HydrationNodePlan, is_dynamic: bool) -> Result<Query> {
 ///    guarantee — TP is purely a scan optimizer.
 /// 2. **Small path sets:** balanced OR of `startsWith` calls. This keeps the
 ///    primary-key pruning that makes low-fanout hydration fast.
-/// 3. **Byte budget:** an over-budget set is generalized to parent prefixes,
-///    which match a superset of the leaf rows — results are unchanged, only
-///    granule pruning coarsens.
-/// 4. **Large dynamic path sets:** `arrayExists(path -> startsWith(...))`.
+/// 3. **Large dynamic path sets:** `arrayExists(path -> startsWith(...))`.
 ///    This avoids ClickHouse parser-depth failures when dynamic hydration
 ///    discovers hundreds of traversal paths.
 fn traversal_path_filter(alias: &str, paths: &[String], is_dynamic: bool) -> Option<Expr> {
@@ -168,7 +163,6 @@ fn generalize_to_budget(mut leaves: Vec<String>, budget: usize) -> Vec<String> {
     leaves
 }
 
-/// Percent-encoded size plus the quoting and separator around one element.
 fn url_encoded_cost(path: &str) -> usize {
     9 + path
         .bytes()
