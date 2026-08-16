@@ -91,7 +91,7 @@ pub fn emit(plan: &Plan, input: &Input) -> Result<Node> {
             nodes,
             plan.limit,
             input.hydration_dynamic,
-            input.param_byte_budget,
+            input.path_segment_budget,
         ),
     }
 }

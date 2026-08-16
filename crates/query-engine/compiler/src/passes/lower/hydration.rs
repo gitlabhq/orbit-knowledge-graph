@@ -53,17 +53,11 @@ pub fn emit_hydration(
     nodes: &[HydrationNodePlan],
     limit: u32,
     is_dynamic: bool,
-    param_byte_budget: Option<usize>,
+    path_segment_budget: Option<usize>,
 ) -> Result<Node> {
-    let path_budget = param_byte_budget.map(|total| {
-        let ids_bytes: usize = nodes
-            .iter()
-            .flat_map(|n| &n.node_ids)
-            .map(|id| id.to_string().len())
-            .sum();
-        total.saturating_sub(ids_bytes)
-    });
-    let mut arms = nodes.iter().map(|n| emit_arm(n, is_dynamic, path_budget));
+    let mut arms = nodes
+        .iter()
+        .map(|n| emit_arm(n, is_dynamic, path_segment_budget));
     let mut first = arms
         .next()
         .ok_or_else(|| QueryError::Lowering("hydration requires at least one node".into()))??;
@@ -77,7 +71,7 @@ pub fn emit_hydration(
 fn emit_arm(
     node: &HydrationNodePlan,
     is_dynamic: bool,
-    path_budget: Option<usize>,
+    path_segment_budget: Option<usize>,
 ) -> Result<Query> {
     let alias = &node.alias;
     let pk = &node.id_property;
@@ -100,9 +94,12 @@ fn emit_arm(
 
     let mut scan_where = Vec::new();
 
-    if let Some(tp_filter) =
-        traversal_path_filter(alias, &node.traversal_paths, is_dynamic, path_budget)
-    {
+    if let Some(tp_filter) = traversal_path_filter(
+        alias,
+        &node.traversal_paths,
+        is_dynamic,
+        path_segment_budget,
+    ) {
         scan_where.push(tp_filter);
     }
 
@@ -157,7 +154,7 @@ fn traversal_path_filter(
     alias: &str,
     paths: &[String],
     is_dynamic: bool,
-    path_budget: Option<usize>,
+    path_segment_budget: Option<usize>,
 ) -> Option<Expr> {
     if paths.is_empty() {
         return None;
@@ -166,7 +163,7 @@ fn traversal_path_filter(
     if leaves.is_empty() {
         return None;
     }
-    let leaves = match path_budget {
+    let leaves = match path_segment_budget {
         Some(budget) => generalize_to_budget(leaves, budget),
         None => leaves,
     };
@@ -178,7 +175,7 @@ fn traversal_path_filter(
 }
 
 fn generalize_to_budget(mut leaves: Vec<String>, budget: usize) -> Vec<String> {
-    while leaves.iter().map(|p| p.len()).sum::<usize>() > budget {
+    while leaves.iter().map(|p| segment_count(p)).sum::<usize>() > budget {
         let parents: Vec<String> = leaves.iter().map(|p| parent_path(p)).collect();
         if parents == leaves {
             break;
@@ -186,6 +183,10 @@ fn generalize_to_budget(mut leaves: Vec<String>, budget: usize) -> Vec<String> {
         leaves = prune_to_leaves(&parents);
     }
     leaves
+}
+
+fn segment_count(path: &str) -> usize {
+    path.split('/').filter(|s| !s.is_empty()).count()
 }
 
 fn parent_path(path: &str) -> String {
@@ -483,7 +484,7 @@ mod tests {
     }
 
     #[test]
-    fn path_filter_fits_param_byte_budget() {
+    fn path_filter_fits_segment_budget() {
         let deep = |count: usize| -> Vec<String> {
             (0..count)
                 .map(|i| format!("1/{i:0>40}/{:0>40}/", i + 10000))
@@ -514,7 +515,7 @@ mod tests {
                 .map(String::from)
                 .collect()
         };
-        let budget = Some(50 * 1024);
+        let budget = Some(2000);
 
         let exact = deep(500);
         let node = emit_hydration(
@@ -547,7 +548,7 @@ mod tests {
         assert!(sql.contains("arrayExists"), "{sql}");
         let widened = bound_paths(&params);
         assert!(widened.iter().all(|w| !over.contains(w)));
-        assert!(widened.iter().map(|p| p.len()).sum::<usize>() <= 50 * 1024);
+        assert!(widened.iter().map(|p| segment_count(p)).sum::<usize>() <= 2000);
         for path in &over {
             assert!(
                 widened.iter().any(|w| path.starts_with(w.as_str())),

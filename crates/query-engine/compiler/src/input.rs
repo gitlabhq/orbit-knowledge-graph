@@ -103,10 +103,8 @@ pub struct Input {
     #[serde(skip)]
     pub hydration_dynamic: bool,
 
-    /// Serialized-byte allowance for bound params, set by callers whose
-    /// transport constrains them. `None` disables path widening.
     #[serde(skip)]
-    pub param_byte_budget: Option<usize>,
+    pub path_segment_budget: Option<usize>,
 }
 
 /// Text index metadata for a column, used by the optimizer to rewrite
@@ -264,7 +262,7 @@ impl Default for Input {
             entity_auth: HashMap::new(),
             compiler: CompilerMetadata::default(),
             hydration_dynamic: false,
-            param_byte_budget: None,
+            path_segment_budget: None,
         }
     }
 }

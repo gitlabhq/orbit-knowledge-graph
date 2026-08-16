@@ -80,7 +80,8 @@ impl HydrationStage {
             ctx.compiled()?.input.query_type,
             QueryType::Neighbors | QueryType::PathFinding
         );
-        hydration_input.param_byte_budget = Some(orbit_utils::clickhouse::MAX_PARAM_RAW_BYTES);
+        hydration_input.path_segment_budget =
+            Some(orbit_utils::clickhouse::MAX_BOUND_PATH_SEGMENTS);
 
         let compiled = compile_input(hydration_input, &ctx.ontology, ctx.security_context()?)
             .map_err(|e| PipelineError::Compile {

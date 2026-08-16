@@ -112,10 +112,7 @@ impl ParamValue {
     }
 }
 
-/// Serialized-byte allowance for one query's bound params. Params ride the
-/// HTTP request URL (capped at 65,534 bytes by the `http` crate) and
-/// percent-encoding expands separators, so this stays well under the cap.
-pub const MAX_PARAM_RAW_BYTES: usize = 32 * 1024;
+pub const MAX_BOUND_PATH_SEGMENTS: usize = 2000;
 
 #[derive(Debug, Default)]
 pub struct ParamBindings {
