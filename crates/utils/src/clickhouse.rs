@@ -1,7 +1,9 @@
 //! ClickHouse parameter types shared between `compiler` and `clickhouse-client`.
 
 use std::collections::HashMap;
+use std::collections::hash_map::DefaultHasher;
 use std::fmt;
+use std::hash::Hasher;
 
 use serde_json::Value;
 
@@ -115,19 +117,19 @@ impl ParamValue {
 #[derive(Debug, Default)]
 pub struct ParamBindings {
     params: HashMap<String, ParamValue>,
+    index: HashMap<(ChType, u64), Vec<String>>,
 }
 
 impl ParamBindings {
     pub fn intern(&mut self, ch_type: ChType, value: &Value) -> String {
-        if let Some(name) = self
-            .params
-            .iter()
-            .find(|(_, p)| p.ch_type == ch_type && p.value == *value)
-            .map(|(name, _)| name.clone())
-        {
-            return name;
+        let names = self.index.entry((ch_type, value_hash(value))).or_default();
+        for name in names.iter() {
+            if self.params[name].value == *value {
+                return name.clone();
+            }
         }
         let name = format!("p{}", self.params.len());
+        names.push(name.clone());
         self.params.insert(
             name.clone(),
             ParamValue {
@@ -141,14 +143,25 @@ impl ParamBindings {
     pub fn into_map(self) -> HashMap<String, ParamValue> {
         self.params
     }
+}
 
-    pub fn len(&self) -> usize {
-        self.params.len()
+fn value_hash(value: &Value) -> u64 {
+    struct HashWriter<'a>(&'a mut DefaultHasher);
+
+    impl std::io::Write for HashWriter<'_> {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.write(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.params.is_empty()
-    }
+    let mut hasher = DefaultHasher::new();
+    serde_json::to_writer(HashWriter(&mut hasher), value).expect("JSON value serializes");
+    hasher.finish()
 }
 
 pub fn render_value(value: &Value) -> String {

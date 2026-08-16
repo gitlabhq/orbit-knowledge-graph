@@ -510,7 +510,7 @@ mod tests {
         assert_eq!(ctx.emit_literal(&Value::from("dup")), "{p0:String}");
         assert_eq!(ctx.emit_literal(&Value::from("dup")), "{p0:String}");
         assert_eq!(ctx.emit_literal(&Value::from("other")), "{p1:String}");
-        assert_eq!(ctx.params.len(), 2);
+        assert_eq!(ctx.params.into_map().len(), 2);
     }
 
     #[test]
@@ -521,7 +521,7 @@ mod tests {
 
         assert_eq!(ctx.emit_param(ch_type, &array), "{p0:Array(String)}");
         assert_eq!(ctx.emit_param(ch_type, &array), "{p0:Array(String)}");
-        assert_eq!(ctx.params.len(), 1);
+        assert_eq!(ctx.params.into_map().len(), 1);
     }
 
     #[test]
@@ -536,7 +536,7 @@ mod tests {
             ctx.emit_param(ChType::DateTime64, &Value::from("42")),
             "{p1:DateTime64(6, 'UTC')}"
         );
-        assert_eq!(ctx.params.len(), 2);
+        assert_eq!(ctx.params.into_map().len(), 2);
     }
 
     #[test]
