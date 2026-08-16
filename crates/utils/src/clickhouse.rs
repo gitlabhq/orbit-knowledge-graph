@@ -112,6 +112,15 @@ impl ParamValue {
     }
 }
 
+pub const MAX_PARAM_URL_BYTES: usize = 60 * 1024;
+
+pub fn param_url_cost(value: &str) -> usize {
+    9 + value
+        .bytes()
+        .map(|b| if b.is_ascii_alphanumeric() { 1 } else { 3 })
+        .sum::<usize>()
+}
+
 #[derive(Debug, Default)]
 pub struct ParamBindings {
     params: HashMap<String, ParamValue>,

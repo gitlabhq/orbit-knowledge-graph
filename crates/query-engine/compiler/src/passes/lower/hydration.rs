@@ -18,9 +18,9 @@ use crate::passes::shared::deleted_false;
 
 use super::helpers::limit_by_scan;
 
-const ARRAY_EXISTS_PATH_THRESHOLD: usize = 256;
+use orbit_utils::clickhouse::{MAX_PARAM_URL_BYTES, param_url_cost};
 
-const URL_PARAM_BYTE_BUDGET: usize = 60 * 1024;
+const ARRAY_EXISTS_PATH_THRESHOLD: usize = 256;
 
 #[derive(Clone, Copy)]
 struct HydrationPathFilterContext {
@@ -55,9 +55,9 @@ pub fn emit_hydration(nodes: &[HydrationNodePlan], limit: u32, is_dynamic: bool)
     let ids_cost: usize = nodes
         .iter()
         .flat_map(|n| &n.node_ids)
-        .map(|id| url_encoded_cost(&id.to_string()))
+        .map(|id| param_url_cost(&id.to_string()))
         .sum();
-    let path_budget = URL_PARAM_BYTE_BUDGET.saturating_sub(ids_cost);
+    let path_budget = MAX_PARAM_URL_BYTES.saturating_sub(ids_cost);
     let mut arms = nodes.iter().map(|n| emit_arm(n, is_dynamic, path_budget));
     let mut first = arms
         .next()
@@ -166,7 +166,7 @@ fn traversal_path_filter(
 }
 
 fn generalize_to_budget(mut leaves: Vec<String>, budget: usize) -> Vec<String> {
-    while leaves.iter().map(|p| url_encoded_cost(p)).sum::<usize>() > budget {
+    while leaves.iter().map(|p| param_url_cost(p)).sum::<usize>() > budget {
         let parents: Vec<String> = leaves.iter().map(|p| parent_path(p)).collect();
         if parents == leaves {
             break;
@@ -174,13 +174,6 @@ fn generalize_to_budget(mut leaves: Vec<String>, budget: usize) -> Vec<String> {
         leaves = prune_to_leaves(&parents);
     }
     leaves
-}
-
-fn url_encoded_cost(path: &str) -> usize {
-    9 + path
-        .bytes()
-        .map(|b| if b.is_ascii_alphanumeric() { 1 } else { 3 })
-        .sum::<usize>()
 }
 
 fn parent_path(path: &str) -> String {
@@ -539,9 +532,7 @@ mod tests {
         assert!(sql.contains("arrayExists"), "{sql}");
         let widened = bound_paths(&params);
         assert!(widened.iter().all(|w| !over.contains(w)));
-        assert!(
-            widened.iter().map(|p| url_encoded_cost(p)).sum::<usize>() <= URL_PARAM_BYTE_BUDGET
-        );
+        assert!(widened.iter().map(|p| param_url_cost(p)).sum::<usize>() <= MAX_PARAM_URL_BYTES);
         for path in &over {
             assert!(
                 widened.iter().any(|w| path.starts_with(w.as_str())),
