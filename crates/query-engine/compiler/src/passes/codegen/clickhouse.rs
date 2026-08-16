@@ -504,39 +504,21 @@ mod tests {
     }
 
     #[test]
-    fn repeated_params_intern_to_one_placeholder() {
+    fn param_interning() {
         let mut ctx = Context::new();
+        let array = Value::Array(vec![Value::from("1/2/"), Value::from("1/3/")]);
+        let array_type = ChType::Array(crate::ast::ChScalar::String);
 
         assert_eq!(ctx.emit_literal(&Value::from("dup")), "{p0:String}");
         assert_eq!(ctx.emit_literal(&Value::from("dup")), "{p0:String}");
         assert_eq!(ctx.emit_literal(&Value::from("other")), "{p1:String}");
-        assert_eq!(ctx.params.into_map().len(), 2);
-    }
-
-    #[test]
-    fn repeated_array_params_intern_to_one_placeholder() {
-        let mut ctx = Context::new();
-        let array = Value::Array(vec![Value::from("1/2/"), Value::from("1/3/")]);
-        let ch_type = ChType::Array(crate::ast::ChScalar::String);
-
-        assert_eq!(ctx.emit_param(ch_type, &array), "{p0:Array(String)}");
-        assert_eq!(ctx.emit_param(ch_type, &array), "{p0:Array(String)}");
-        assert_eq!(ctx.params.into_map().len(), 1);
-    }
-
-    #[test]
-    fn same_value_different_type_binds_separately() {
-        let mut ctx = Context::new();
-
+        assert_eq!(ctx.emit_param(array_type, &array), "{p2:Array(String)}");
+        assert_eq!(ctx.emit_param(array_type, &array), "{p2:Array(String)}");
         assert_eq!(
-            ctx.emit_param(ChType::String, &Value::from("42")),
-            "{p0:String}"
+            ctx.emit_param(ChType::DateTime64, &Value::from("dup")),
+            "{p3:DateTime64(6, 'UTC')}"
         );
-        assert_eq!(
-            ctx.emit_param(ChType::DateTime64, &Value::from("42")),
-            "{p1:DateTime64(6, 'UTC')}"
-        );
-        assert_eq!(ctx.params.into_map().len(), 2);
+        assert_eq!(ctx.params.into_map().len(), 4);
     }
 
     #[test]
