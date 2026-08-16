@@ -1,5 +1,6 @@
 //! ClickHouse parameter types shared between `compiler` and `clickhouse-client`.
 
+use std::collections::HashMap;
 use std::fmt;
 
 use serde_json::Value;
@@ -108,6 +109,46 @@ impl ParamValue {
     /// typing via the `{name:Type}` placeholder in the SQL.
     pub fn render_http_param(&self) -> String {
         render_http_value(&self.value)
+    }
+}
+
+/// Interns query params so repeated (type, value) pairs share one placeholder.
+#[derive(Debug, Default)]
+pub struct ParamBindings {
+    params: HashMap<String, ParamValue>,
+}
+
+impl ParamBindings {
+    pub fn intern(&mut self, ch_type: ChType, value: &Value) -> String {
+        if let Some(name) = self
+            .params
+            .iter()
+            .find(|(_, p)| p.ch_type == ch_type && p.value == *value)
+            .map(|(name, _)| name.clone())
+        {
+            return name;
+        }
+        let name = format!("p{}", self.params.len());
+        self.params.insert(
+            name.clone(),
+            ParamValue {
+                ch_type,
+                value: value.clone(),
+            },
+        );
+        name
+    }
+
+    pub fn into_map(self) -> HashMap<String, ParamValue> {
+        self.params
+    }
+
+    pub fn len(&self) -> usize {
+        self.params.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.params.is_empty()
     }
 }
 

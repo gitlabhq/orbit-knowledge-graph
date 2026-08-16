@@ -9,6 +9,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 
 use super::{ParamValue, ParameterizedQuery, SqlDialect};
+use orbit_utils::clickhouse::ParamBindings;
 
 pub fn codegen(
     ast: &Node,
@@ -39,7 +40,7 @@ pub fn codegen(
 
     Ok(ParameterizedQuery {
         sql,
-        params: ctx.params,
+        params: ctx.params.into_map(),
         result_context,
         query_config,
         dialect: SqlDialect::ClickHouse,
@@ -58,17 +59,17 @@ pub fn emit_simple_query(node: &Node) -> Result<(String, HashMap<String, ParamVa
         Node::Query(q) => ctx.emit_query(q)?,
         Node::Insert(ins) => ctx.emit_insert(ins),
     };
-    Ok((sql, ctx.params))
+    Ok((sql, ctx.params.into_map()))
 }
 
 struct Context {
-    params: HashMap<String, ParamValue>,
+    params: ParamBindings,
 }
 
 impl Context {
     fn new() -> Self {
         Self {
-            params: HashMap::new(),
+            params: ParamBindings::default(),
         }
     }
 
@@ -255,7 +256,7 @@ impl Context {
             Value::Null => "NULL".into(),
             // Array ChType: bind the whole array as a single ClickHouse Array(T) param.
             Value::Array(_) if matches!(data_type, ChType::Array(_)) => {
-                let name = self.intern_param(data_type, v);
+                let name = self.params.intern(data_type, v);
                 format!("{{{name}:{data_type}}}")
             }
             // Scalar ChType with array value: expand element-by-element.
@@ -263,39 +264,17 @@ impl Context {
                 let placeholders: Vec<_> = arr
                     .iter()
                     .map(|item| {
-                        let name = self.intern_param(data_type, item);
+                        let name = self.params.intern(data_type, item);
                         format!("{{{name}:{data_type}}}")
                     })
                     .collect();
                 format!("({})", placeholders.join(", "))
             }
             _ => {
-                let name = self.intern_param(data_type, v);
+                let name = self.params.intern(data_type, v);
                 format!("{{{name}:{data_type}}}")
             }
         }
-    }
-
-    /// Params ride the request URL (capped at 64 KiB), so repeated
-    /// (type, value) pairs share one placeholder (#1154).
-    fn intern_param(&mut self, data_type: ChType, value: &Value) -> String {
-        if let Some(name) = self
-            .params
-            .iter()
-            .find(|(_, p)| p.ch_type == data_type && p.value == *value)
-            .map(|(name, _)| name.clone())
-        {
-            return name;
-        }
-        let name = format!("p{}", self.params.len());
-        self.params.insert(
-            name.clone(),
-            ParamValue {
-                ch_type: data_type,
-                value: value.clone(),
-            },
-        );
-        name
     }
 
     fn emit_literal(&mut self, v: &Value) -> String {
