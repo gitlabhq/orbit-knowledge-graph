@@ -20,7 +20,7 @@ use super::helpers::limit_by_scan;
 
 const ARRAY_EXISTS_PATH_THRESHOLD: usize = 256;
 
-const PATH_FILTER_URL_BYTE_BUDGET: usize = 32 * 1024;
+const URL_PARAM_BYTE_BUDGET: usize = 60 * 1024;
 
 #[derive(Clone, Copy)]
 struct HydrationPathFilterContext {
@@ -52,7 +52,13 @@ impl HydrationPathFilterContext {
 }
 
 pub fn emit_hydration(nodes: &[HydrationNodePlan], limit: u32, is_dynamic: bool) -> Result<Node> {
-    let mut arms = nodes.iter().map(|n| emit_arm(n, is_dynamic));
+    let ids_cost: usize = nodes
+        .iter()
+        .flat_map(|n| &n.node_ids)
+        .map(|id| url_encoded_cost(&id.to_string()))
+        .sum();
+    let path_budget = URL_PARAM_BYTE_BUDGET.saturating_sub(ids_cost);
+    let mut arms = nodes.iter().map(|n| emit_arm(n, is_dynamic, path_budget));
     let mut first = arms
         .next()
         .ok_or_else(|| QueryError::Lowering("hydration requires at least one node".into()))??;
@@ -63,7 +69,7 @@ pub fn emit_hydration(nodes: &[HydrationNodePlan], limit: u32, is_dynamic: bool)
     Ok(Node::Query(Box::new(first)))
 }
 
-fn emit_arm(node: &HydrationNodePlan, is_dynamic: bool) -> Result<Query> {
+fn emit_arm(node: &HydrationNodePlan, is_dynamic: bool, path_budget: usize) -> Result<Query> {
     let alias = &node.alias;
     let pk = &node.id_property;
 
@@ -85,7 +91,9 @@ fn emit_arm(node: &HydrationNodePlan, is_dynamic: bool) -> Result<Query> {
 
     let mut scan_where = Vec::new();
 
-    if let Some(tp_filter) = traversal_path_filter(alias, &node.traversal_paths, is_dynamic) {
+    if let Some(tp_filter) =
+        traversal_path_filter(alias, &node.traversal_paths, is_dynamic, path_budget)
+    {
         scan_where.push(tp_filter);
     }
 
@@ -136,7 +144,12 @@ fn emit_arm(node: &HydrationNodePlan, is_dynamic: bool) -> Result<Query> {
 /// 3. **Large dynamic path sets:** `arrayExists(path -> startsWith(...))`.
 ///    This avoids ClickHouse parser-depth failures when dynamic hydration
 ///    discovers hundreds of traversal paths.
-fn traversal_path_filter(alias: &str, paths: &[String], is_dynamic: bool) -> Option<Expr> {
+fn traversal_path_filter(
+    alias: &str,
+    paths: &[String],
+    is_dynamic: bool,
+    path_budget: usize,
+) -> Option<Expr> {
     if paths.is_empty() {
         return None;
     }
@@ -144,7 +157,7 @@ fn traversal_path_filter(alias: &str, paths: &[String], is_dynamic: bool) -> Opt
     if leaves.is_empty() {
         return None;
     }
-    let leaves = generalize_to_budget(leaves, PATH_FILTER_URL_BYTE_BUDGET);
+    let leaves = generalize_to_budget(leaves, path_budget);
     let ctx = HydrationPathFilterContext::default();
     match ctx.shape_for(is_dynamic, leaves.len()) {
         HydrationPathFilterShape::OrStartsWith => or_starts_with(alias, &leaves),
@@ -509,7 +522,7 @@ mod tests {
     fn generalize_noop_under_budget() {
         let paths = vec!["1/2/3/".to_string(), "1/4/".to_string()];
         assert_eq!(
-            generalize_to_budget(paths.clone(), PATH_FILTER_URL_BYTE_BUDGET),
+            generalize_to_budget(paths.clone(), URL_PARAM_BYTE_BUDGET),
             paths
         );
     }
@@ -520,27 +533,29 @@ mod tests {
         assert_eq!(generalize_to_budget(paths.clone(), 10), paths);
     }
 
-    #[test]
-    fn over_budget_dynamic_hydration_stays_within_url_budget() {
-        let paths: Vec<String> = (0..500)
-            .map(|i| format!("1/{i:0>40}/{:0>40}/", i + 1000))
-            .collect();
-        let plan = HydrationNodePlan {
+    fn deep_paths(count: usize) -> Vec<String> {
+        (0..count)
+            .map(|i| format!("1/{i:0>40}/{:0>40}/", i + 10000))
+            .collect()
+    }
+
+    fn deep_plan(paths: Vec<String>) -> HydrationNodePlan {
+        HydrationNodePlan {
             alias: "hydrate".into(),
             table: "gl_merge_request".into(),
             entity: "MergeRequest".into(),
             id_property: "id".into(),
             node_ids: vec![1],
             columns: vec!["title".into()],
-            traversal_paths: paths.clone(),
+            traversal_paths: paths,
             sort_key: vec!["id".to_string()],
-        };
+        }
+    }
 
-        let node = emit_hydration(&[plan], 10, true).unwrap();
-        let (sql, params) = render_with_params(&node);
-
-        assert!(sql.contains("arrayExists"), "{sql}");
-        let bound_paths: Vec<String> = params
+    fn bound_array_paths(
+        params: &std::collections::HashMap<String, crate::passes::codegen::ParamValue>,
+    ) -> Vec<String> {
+        params
             .values()
             .filter_map(|p| match &p.value {
                 serde_json::Value::Array(items) => Some(items),
@@ -548,13 +563,37 @@ mod tests {
             })
             .flat_map(|items| items.iter().filter_map(|v| v.as_str()))
             .map(String::from)
-            .collect();
+            .collect()
+    }
+
+    #[test]
+    fn paths_under_url_budget_stay_exact() {
+        let paths = deep_paths(500);
+        let node = emit_hydration(&[deep_plan(paths.clone())], 10, true).unwrap();
+        let (_, params) = render_with_params(&node);
+
+        let mut bound = bound_array_paths(&params);
+        bound.sort_unstable();
+        let mut expected = paths;
+        expected.sort_unstable();
+        assert_eq!(bound, expected);
+    }
+
+    #[test]
+    fn over_budget_dynamic_hydration_stays_within_url_budget() {
+        let paths = deep_paths(900);
+        let node = emit_hydration(&[deep_plan(paths.clone())], 10, true).unwrap();
+        let (sql, params) = render_with_params(&node);
+
+        assert!(sql.contains("arrayExists"), "{sql}");
+        let bound_paths = bound_array_paths(&params);
+        assert!(bound_paths.iter().all(|b| !paths.contains(b)));
         assert!(
             bound_paths
                 .iter()
                 .map(|p| url_encoded_cost(p))
                 .sum::<usize>()
-                <= PATH_FILTER_URL_BYTE_BUDGET
+                <= URL_PARAM_BYTE_BUDGET
         );
         for path in &paths {
             assert!(
