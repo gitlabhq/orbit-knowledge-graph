@@ -112,14 +112,10 @@ impl ParamValue {
     }
 }
 
-pub const MAX_PARAM_URL_BYTES: usize = 60 * 1024;
-
-pub fn param_url_cost(value: &str) -> usize {
-    9 + value
-        .bytes()
-        .map(|b| if b.is_ascii_alphanumeric() { 1 } else { 3 })
-        .sum::<usize>()
-}
+/// Serialized-byte allowance for one query's bound params. Params ride the
+/// HTTP request URL (capped at 65,534 bytes by the `http` crate) and
+/// percent-encoding expands separators, so this stays well under the cap.
+pub const MAX_PARAM_RAW_BYTES: usize = 32 * 1024;
 
 #[derive(Debug, Default)]
 pub struct ParamBindings {

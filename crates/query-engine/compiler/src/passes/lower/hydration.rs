@@ -18,8 +18,6 @@ use crate::passes::shared::deleted_false;
 
 use super::helpers::limit_by_scan;
 
-use orbit_utils::clickhouse::{MAX_PARAM_URL_BYTES, param_url_cost};
-
 const ARRAY_EXISTS_PATH_THRESHOLD: usize = 256;
 
 #[derive(Clone, Copy)]
@@ -51,13 +49,20 @@ impl HydrationPathFilterContext {
     }
 }
 
-pub fn emit_hydration(nodes: &[HydrationNodePlan], limit: u32, is_dynamic: bool) -> Result<Node> {
-    let ids_cost: usize = nodes
-        .iter()
-        .flat_map(|n| &n.node_ids)
-        .map(|id| param_url_cost(&id.to_string()))
-        .sum();
-    let path_budget = MAX_PARAM_URL_BYTES.saturating_sub(ids_cost);
+pub fn emit_hydration(
+    nodes: &[HydrationNodePlan],
+    limit: u32,
+    is_dynamic: bool,
+    param_byte_budget: Option<usize>,
+) -> Result<Node> {
+    let path_budget = param_byte_budget.map(|total| {
+        let ids_bytes: usize = nodes
+            .iter()
+            .flat_map(|n| &n.node_ids)
+            .map(|id| id.to_string().len())
+            .sum();
+        total.saturating_sub(ids_bytes)
+    });
     let mut arms = nodes.iter().map(|n| emit_arm(n, is_dynamic, path_budget));
     let mut first = arms
         .next()
@@ -69,7 +74,11 @@ pub fn emit_hydration(nodes: &[HydrationNodePlan], limit: u32, is_dynamic: bool)
     Ok(Node::Query(Box::new(first)))
 }
 
-fn emit_arm(node: &HydrationNodePlan, is_dynamic: bool, path_budget: usize) -> Result<Query> {
+fn emit_arm(
+    node: &HydrationNodePlan,
+    is_dynamic: bool,
+    path_budget: Option<usize>,
+) -> Result<Query> {
     let alias = &node.alias;
     let pk = &node.id_property;
 
@@ -148,7 +157,7 @@ fn traversal_path_filter(
     alias: &str,
     paths: &[String],
     is_dynamic: bool,
-    path_budget: usize,
+    path_budget: Option<usize>,
 ) -> Option<Expr> {
     if paths.is_empty() {
         return None;
@@ -157,7 +166,10 @@ fn traversal_path_filter(
     if leaves.is_empty() {
         return None;
     }
-    let leaves = generalize_to_budget(leaves, path_budget);
+    let leaves = match path_budget {
+        Some(budget) => generalize_to_budget(leaves, budget),
+        None => leaves,
+    };
     let ctx = HydrationPathFilterContext::default();
     match ctx.shape_for(is_dynamic, leaves.len()) {
         HydrationPathFilterShape::OrStartsWith => or_starts_with(alias, &leaves),
@@ -166,7 +178,7 @@ fn traversal_path_filter(
 }
 
 fn generalize_to_budget(mut leaves: Vec<String>, budget: usize) -> Vec<String> {
-    while leaves.iter().map(|p| param_url_cost(p)).sum::<usize>() > budget {
+    while leaves.iter().map(|p| p.len()).sum::<usize>() > budget {
         let parents: Vec<String> = leaves.iter().map(|p| parent_path(p)).collect();
         if parents == leaves {
             break;
@@ -302,11 +314,11 @@ mod tests {
     }
 
     fn emit_dynamic(plans: &[HydrationNodePlan], limit: u32) -> Node {
-        emit_hydration(plans, limit, true).unwrap()
+        emit_hydration(plans, limit, true, None).unwrap()
     }
 
     fn emit_static(plans: &[HydrationNodePlan], limit: u32) -> Node {
-        emit_hydration(plans, limit, false).unwrap()
+        emit_hydration(plans, limit, false, None).unwrap()
     }
 
     #[test]
@@ -414,7 +426,7 @@ mod tests {
             sort_key: vec!["id".to_string()],
         };
 
-        let node = emit_hydration(&[plan], 10, true).unwrap();
+        let node = emit_hydration(&[plan], 10, true, None).unwrap();
         let (sql, params) = render_with_params(&node);
 
         assert!(
@@ -457,7 +469,7 @@ mod tests {
             sort_key: vec!["id".to_string()],
         };
 
-        let node = emit_hydration(&[plan], 10, false).unwrap();
+        let node = emit_hydration(&[plan], 10, false, None).unwrap();
         let sql = render(&node);
 
         assert!(
@@ -471,7 +483,7 @@ mod tests {
     }
 
     #[test]
-    fn path_filter_fits_url_budget() {
+    fn path_filter_fits_param_byte_budget() {
         let deep = |count: usize| -> Vec<String> {
             (0..count)
                 .map(|i| format!("1/{i:0>40}/{:0>40}/", i + 10000))
@@ -502,6 +514,7 @@ mod tests {
                 .map(String::from)
                 .collect()
         };
+        let budget = Some(50 * 1024);
 
         let exact = deep(500);
         let node = emit_hydration(
@@ -511,6 +524,7 @@ mod tests {
             ],
             10,
             true,
+            budget,
         )
         .unwrap();
         let (sql, params) = render_with_params(&node);
@@ -527,18 +541,28 @@ mod tests {
         assert_eq!(kept, expected, "under budget keeps exact leaf paths");
 
         let over = deep(900);
-        let node = emit_hydration(&[arm("gl_merge_request", over.clone())], 10, true).unwrap();
+        let node =
+            emit_hydration(&[arm("gl_merge_request", over.clone())], 10, true, budget).unwrap();
         let (sql, params) = render_with_params(&node);
         assert!(sql.contains("arrayExists"), "{sql}");
         let widened = bound_paths(&params);
         assert!(widened.iter().all(|w| !over.contains(w)));
-        assert!(widened.iter().map(|p| param_url_cost(p)).sum::<usize>() <= MAX_PARAM_URL_BYTES);
+        assert!(widened.iter().map(|p| p.len()).sum::<usize>() <= 50 * 1024);
         for path in &over {
             assert!(
                 widened.iter().any(|w| path.starts_with(w.as_str())),
                 "{path} lost its ancestor prefix"
             );
         }
+
+        let node =
+            emit_hydration(&[arm("gl_merge_request", over.clone())], 10, true, None).unwrap();
+        let (_, params) = render_with_params(&node);
+        assert_eq!(
+            bound_paths(&params).len(),
+            over.len(),
+            "no budget, no widening"
+        );
 
         let roots: Vec<String> = (0..50).map(|i| format!("{i}/")).collect();
         assert_eq!(generalize_to_budget(roots.clone(), 10), roots);
