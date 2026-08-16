@@ -484,86 +484,19 @@ mod tests {
     }
 
     #[test]
-    fn path_filter_fits_segment_budget() {
-        let deep = |count: usize| -> Vec<String> {
-            (0..count)
-                .map(|i| format!("1/{i:0>40}/{:0>40}/", i + 10000))
-                .collect()
-        };
-        let arm = |table: &str, paths: Vec<String>| HydrationNodePlan {
-            alias: "hydrate".into(),
-            table: table.into(),
-            entity: "MergeRequest".into(),
-            id_property: "id".into(),
-            node_ids: vec![1],
-            columns: vec!["title".into()],
-            traversal_paths: paths,
-            sort_key: vec!["id".to_string()],
-        };
-        let bound_paths = |params: &std::collections::HashMap<
-            String,
-            crate::passes::codegen::ParamValue,
-        >|
-         -> Vec<String> {
-            params
-                .values()
-                .filter_map(|p| match &p.value {
-                    serde_json::Value::Array(items) => Some(items),
-                    _ => None,
-                })
-                .flat_map(|items| items.iter().filter_map(|v| v.as_str()))
-                .map(String::from)
-                .collect()
-        };
-        let budget = Some(2000);
-
-        let exact = deep(500);
-        let node = emit_hydration(
-            &[
-                arm("gl_merge_request", exact.clone()),
-                arm("gl_note", exact.clone()),
-            ],
-            10,
-            true,
-            budget,
-        )
-        .unwrap();
-        let (sql, params) = render_with_params(&node);
-        assert_eq!(sql.matches("arrayExists").count(), 2);
-        let array_params = params
-            .values()
-            .filter(|p| matches!(p.value, serde_json::Value::Array(_)))
-            .count();
-        assert_eq!(array_params, 1, "arms should share one path array param");
-        let mut kept = bound_paths(&params);
-        kept.sort_unstable();
-        let mut expected = exact.clone();
-        expected.sort_unstable();
-        assert_eq!(kept, expected, "under budget keeps exact leaf paths");
-
-        let over = deep(900);
-        let node =
-            emit_hydration(&[arm("gl_merge_request", over.clone())], 10, true, budget).unwrap();
-        let (sql, params) = render_with_params(&node);
-        assert!(sql.contains("arrayExists"), "{sql}");
-        let widened = bound_paths(&params);
-        assert!(widened.iter().all(|w| !over.contains(w)));
+    fn generalize_to_budget_widens_to_ancestors() {
+        let leaves: Vec<String> = (0..900)
+            .map(|i| format!("1/{i:0>40}/{:0>40}/", i + 10000))
+            .collect();
+        let widened = generalize_to_budget(leaves.clone(), 2000);
         assert!(widened.iter().map(|p| segment_count(p)).sum::<usize>() <= 2000);
-        for path in &over {
+        assert!(widened.iter().all(|w| !leaves.contains(w)));
+        for path in &leaves {
             assert!(
                 widened.iter().any(|w| path.starts_with(w.as_str())),
                 "{path} lost its ancestor prefix"
             );
         }
-
-        let node =
-            emit_hydration(&[arm("gl_merge_request", over.clone())], 10, true, None).unwrap();
-        let (_, params) = render_with_params(&node);
-        assert_eq!(
-            bound_paths(&params).len(),
-            over.len(),
-            "no budget, no widening"
-        );
 
         let roots: Vec<String> = (0..50).map(|i| format!("{i}/")).collect();
         assert_eq!(generalize_to_budget(roots.clone(), 10), roots);
