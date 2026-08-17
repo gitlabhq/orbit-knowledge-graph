@@ -7,6 +7,7 @@ use opentelemetry::KeyValue;
 use orbit_observability::billing::events as spec;
 use query_engine::compiler::{CompiledQueryContext, ExecMetrics};
 use query_engine::pipeline::{PipelineError, PipelineObserver};
+use serde::Serialize;
 use serde_json::json;
 
 use crate::constants::{
@@ -30,6 +31,17 @@ fn correlation_id_string() -> String {
         .unwrap_or_default()
 }
 
+#[derive(Serialize)]
+struct BillingMetadata<'a> {
+    query_type: &'a str,
+    feature_qualified_name: String,
+    source_type: &'a str,
+    coding_agent: Option<&'a str>,
+    is_gitlab_team_member: Option<bool>,
+    #[serde(flatten)]
+    metrics: &'a ExecMetrics,
+}
+
 pub struct BillingObserver {
     tracker: Option<Arc<dyn BillingTracker>>,
     inputs: BillingInputs,
@@ -50,21 +62,15 @@ impl BillingObserver {
     }
 
     fn build_metadata(&self) -> serde_json::Value {
-        let mut metadata = json!({
-            "query_type": self.query_type,
-            "feature_qualified_name": feature_qualified_name(&self.inputs.source_type),
-            "source_type": self.inputs.source_type,
-            "coding_agent": self.inputs.coding_agent,
-            "is_gitlab_team_member": self.inputs.is_gitlab_team_member,
-        });
-        if let (serde_json::Value::Object(map), Ok(serde_json::Value::Object(m))) =
-            (&mut metadata, serde_json::to_value(&self.metrics))
-        {
-            for (k, v) in m {
-                map.entry(k).or_insert(v);
-            }
-        }
-        metadata
+        let metadata = BillingMetadata {
+            query_type: self.query_type,
+            feature_qualified_name: feature_qualified_name(&self.inputs.source_type),
+            source_type: &self.inputs.source_type,
+            coding_agent: self.inputs.coding_agent.as_deref(),
+            is_gitlab_team_member: self.inputs.is_gitlab_team_member,
+            metrics: &self.metrics,
+        };
+        serde_json::to_value(&metadata).unwrap_or_else(|_| json!({}))
     }
 
     fn build_event(&self) -> Option<BillingEvent> {
