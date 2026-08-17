@@ -1,9 +1,6 @@
-use super::ResponseFormat;
 use super::client::OrbitClient;
 use super::error::RemoteError;
-use super::{pretty_json, write_stdout};
-
-const GRAPH_STATUS_PATH: &str = "/api/v4/orbit/graph_status";
+use super::{ResponseFormat, pretty_json, write_stdout};
 
 pub(crate) async fn run_graph_status(
     full_path: Option<String>,
@@ -13,7 +10,7 @@ pub(crate) async fn run_graph_status(
 ) -> Result<(), RemoteError> {
     let client = OrbitClient::from_env()?;
     let params = graph_status_params(full_path, namespace_id, project_id, format);
-    let body = client.get_body(GRAPH_STATUS_PATH, &params).await?;
+    let body = client.get_graph_status(&params).await?;
     write_stdout(&pretty_json(&body))
 }
 

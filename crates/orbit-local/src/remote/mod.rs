@@ -48,38 +48,6 @@ pub(crate) fn pretty_value(value: &serde_json::Value) -> Vec<u8> {
     serde_json::to_vec_pretty(value).unwrap_or_default()
 }
 
-pub(crate) async fn read_body(response: reqwest::Response) -> Result<Vec<u8>, RemoteError> {
-    response
-        .bytes()
-        .await
-        .map(|b| b.to_vec())
-        .map_err(|e| RemoteError::new(EXIT_GENERIC, format!("failed to read response body: {e}")))
-}
-
-pub(crate) async fn stream_to_stdout(
-    mut response: reqwest::Response,
-    trailing_newline: bool,
-) -> Result<(), RemoteError> {
-    let mut stdout = std::io::stdout().lock();
-    while let Some(chunk) = response
-        .chunk()
-        .await
-        .map_err(|e| RemoteError::new(EXIT_GENERIC, format!("failed to read response body: {e}")))?
-    {
-        stdout.write_all(&chunk).map_err(|e| {
-            RemoteError::new(EXIT_GENERIC, format!("failed to write to stdout: {e}"))
-        })?;
-    }
-    if trailing_newline {
-        stdout.write_all(b"\n").map_err(|e| {
-            RemoteError::new(EXIT_GENERIC, format!("failed to write to stdout: {e}"))
-        })?;
-    }
-    stdout
-        .flush()
-        .map_err(|e| RemoteError::new(EXIT_GENERIC, format!("failed to flush stdout: {e}")))
-}
-
 pub(crate) fn write_stdout(bytes: &[u8]) -> Result<(), RemoteError> {
     let mut stdout = std::io::stdout().lock();
     stdout
@@ -89,9 +57,17 @@ pub(crate) fn write_stdout(bytes: &[u8]) -> Result<(), RemoteError> {
         .map_err(|e| RemoteError::new(EXIT_GENERIC, format!("failed to write to stdout: {e}")))
 }
 
+pub(crate) fn write_stdout_raw(bytes: &[u8]) -> Result<(), RemoteError> {
+    let mut stdout = std::io::stdout().lock();
+    stdout
+        .write_all(bytes)
+        .and_then(|()| stdout.flush())
+        .map_err(|e| RemoteError::new(EXIT_GENERIC, format!("failed to write to stdout: {e}")))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::status::STATUS_PATH;
+    use super::client::STATUS_PATH;
     use super::*;
 
     #[test]

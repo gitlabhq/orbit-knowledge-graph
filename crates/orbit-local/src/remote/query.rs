@@ -4,11 +4,10 @@ use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 
-use super::ResponseFormat;
 use super::client::OrbitClient;
 use super::error::{EXIT_GENERIC, RemoteError};
+use super::{ResponseFormat, write_stdout_raw};
 
-const QUERY_PATH: &str = "/api/v4/orbit/query";
 const DEFAULT_QUERY_FORMAT: &str = "llm";
 
 pub(crate) async fn run_query(
@@ -18,7 +17,8 @@ pub(crate) async fn run_query(
     let client = OrbitClient::from_env()?;
     let raw_body = read_query_body(source.as_deref())?;
     let request_body = build_query_request(&raw_body, format_override)?;
-    client.post_stream(QUERY_PATH, request_body, false).await
+    let response = client.query_raw(request_body).await?;
+    write_stdout_raw(&response)
 }
 
 fn read_query_body(source: Option<&str>) -> anyhow::Result<Vec<u8>> {

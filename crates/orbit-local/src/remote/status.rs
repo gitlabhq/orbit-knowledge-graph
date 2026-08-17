@@ -2,11 +2,9 @@ use super::client::OrbitClient;
 use super::error::{EXIT_UNAVAILABLE, RemoteError};
 use super::{pretty_json, pretty_value, write_stdout};
 
-pub(crate) const STATUS_PATH: &str = "/api/v4/orbit/status";
-
 pub(crate) async fn run_status() -> Result<(), RemoteError> {
     let client = OrbitClient::from_env()?;
-    let body = client.get_body(STATUS_PATH, &[]).await?;
+    let body = client.get_status().await?;
     write_stdout(&select_status_output(&body)?)
 }
 

@@ -2,13 +2,11 @@ use super::client::OrbitClient;
 use super::error::RemoteError;
 use super::{pretty_json, write_stdout};
 
-const SCHEMA_PATH: &str = "/api/v4/orbit/schema";
-
 pub(crate) async fn run_schema(nodes: Vec<String>) -> Result<(), RemoteError> {
     let client = OrbitClient::from_env()?;
     let params: Vec<(&str, String)> = expand_param(&nodes).into_iter().collect();
-    let body = client.get_body(SCHEMA_PATH, &params).await?;
-    write_stdout(&pretty_json(&body))
+    let schema = client.get_schema(&params).await?;
+    write_stdout(&pretty_json(&schema))
 }
 
 fn expand_param(nodes: &[String]) -> Option<(&'static str, String)> {

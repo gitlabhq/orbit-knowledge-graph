@@ -1,9 +1,9 @@
 use super::client::OrbitClient;
 use super::error::RemoteError;
-
-const DSL_PATH: &str = "/api/v4/orbit/schema/dsl";
+use super::write_stdout;
 
 pub(crate) async fn run_dsl() -> Result<(), RemoteError> {
     let client = OrbitClient::from_env()?;
-    client.get_stream(DSL_PATH, true).await
+    let dsl = client.get_dsl().await?;
+    write_stdout(&dsl)
 }

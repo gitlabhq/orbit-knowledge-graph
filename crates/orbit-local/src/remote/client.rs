@@ -3,11 +3,18 @@ use std::time::Duration;
 use anyhow::bail;
 
 use super::error::{EXIT_GENERIC, RemoteError, map_http_error};
-use super::{join_url, read_body, stream_to_stdout};
+use super::join_url;
 
 const DEFAULT_GITLAB_BASE_URL: &str = "https://gitlab.com";
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 const READ_TIMEOUT: Duration = Duration::from_secs(120);
+
+pub(crate) const STATUS_PATH: &str = "/api/v4/orbit/status";
+const SCHEMA_PATH: &str = "/api/v4/orbit/schema";
+const DSL_PATH: &str = "/api/v4/orbit/schema/dsl";
+const TOOLS_PATH: &str = "/api/v4/orbit/tools";
+const QUERY_PATH: &str = "/api/v4/orbit/query";
+const GRAPH_STATUS_PATH: &str = "/api/v4/orbit/graph_status";
 
 pub(crate) struct OrbitClient {
     endpoint: ResolvedEndpoint,
@@ -37,7 +44,45 @@ impl OrbitClient {
         Ok(Self { endpoint, http })
     }
 
-    pub(crate) async fn get_body(
+    pub(crate) async fn get_status(&self) -> Result<Vec<u8>, RemoteError> {
+        self.get_bytes(STATUS_PATH, &[]).await
+    }
+
+    pub(crate) async fn get_schema(
+        &self,
+        params: &[(&str, String)],
+    ) -> Result<Vec<u8>, RemoteError> {
+        self.get_bytes(SCHEMA_PATH, params).await
+    }
+
+    pub(crate) async fn get_dsl(&self) -> Result<Vec<u8>, RemoteError> {
+        self.get_bytes(DSL_PATH, &[]).await
+    }
+
+    pub(crate) async fn get_tools(&self) -> Result<Vec<u8>, RemoteError> {
+        self.get_bytes(TOOLS_PATH, &[]).await
+    }
+
+    pub(crate) async fn get_graph_status(
+        &self,
+        params: &[(&str, String)],
+    ) -> Result<Vec<u8>, RemoteError> {
+        self.get_bytes(GRAPH_STATUS_PATH, params).await
+    }
+
+    pub(crate) async fn query_raw(&self, body: Vec<u8>) -> Result<Vec<u8>, RemoteError> {
+        let response = self
+            .send(
+                self.http
+                    .post(self.url(QUERY_PATH))
+                    .header(reqwest::header::CONTENT_TYPE, "application/json")
+                    .body(body),
+            )
+            .await?;
+        read_body(response).await
+    }
+
+    async fn get_bytes(
         &self,
         path: &str,
         params: &[(&str, String)],
@@ -46,32 +91,6 @@ impl OrbitClient {
             .send(self.http.get(self.url(path)).query(params))
             .await?;
         read_body(response).await
-    }
-
-    pub(crate) async fn get_stream(
-        &self,
-        path: &str,
-        trailing_newline: bool,
-    ) -> Result<(), RemoteError> {
-        let response = self.send(self.http.get(self.url(path))).await?;
-        stream_to_stdout(response, trailing_newline).await
-    }
-
-    pub(crate) async fn post_stream(
-        &self,
-        path: &str,
-        body: Vec<u8>,
-        trailing_newline: bool,
-    ) -> Result<(), RemoteError> {
-        let response = self
-            .send(
-                self.http
-                    .post(self.url(path))
-                    .header(reqwest::header::CONTENT_TYPE, "application/json")
-                    .body(body),
-            )
-            .await?;
-        stream_to_stdout(response, trailing_newline).await
     }
 
     fn url(&self, path: &str) -> String {
@@ -130,6 +149,14 @@ fn resolve_endpoint(get_env: impl Fn(&str) -> Option<String>) -> anyhow::Result<
          ORBIT_AUTH_HEADER_VALUE, or GITLAB_TOKEN (with optional GITLAB_URL). Running through \
          `glab orbit` injects these automatically."
     );
+}
+
+async fn read_body(response: reqwest::Response) -> Result<Vec<u8>, RemoteError> {
+    response
+        .bytes()
+        .await
+        .map(|b| b.to_vec())
+        .map_err(|e| RemoteError::new(EXIT_GENERIC, format!("failed to read response body: {e}")))
 }
 
 #[cfg(test)]

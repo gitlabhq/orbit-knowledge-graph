@@ -2,11 +2,9 @@ use super::client::OrbitClient;
 use super::error::RemoteError;
 use super::{pretty_value, write_stdout};
 
-const TOOLS_PATH: &str = "/api/v4/orbit/tools";
-
 pub(crate) async fn run_tools() -> Result<(), RemoteError> {
     let client = OrbitClient::from_env()?;
-    let body = client.get_body(TOOLS_PATH, &[]).await?;
+    let body = client.get_tools().await?;
     write_stdout(&tools_output(&body))
 }
 
