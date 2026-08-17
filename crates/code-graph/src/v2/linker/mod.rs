@@ -4,7 +4,7 @@ pub mod resolver;
 pub mod rules;
 pub mod state;
 
-pub use graph::{CodeGraph, GraphEdge, GraphNode, PendingFileLink};
+pub use graph::{CodeGraph, GraphEdge, GraphNode, PendingFileLink, lexical_file_links};
 pub use imports::ResolveSettings;
 pub use resolver::FileResolver;
 pub use rules::{

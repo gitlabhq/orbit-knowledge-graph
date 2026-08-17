@@ -1332,10 +1332,23 @@ impl FamilyPipeline {
             });
         graph.reserve_for(parsed_files, parsed_defs, parsed_imports);
 
+        let mut file_links = Vec::new();
         for parsed_file in parsed.into_iter().flatten() {
             let path = &files[parsed_file.path_idx].path;
             total_defs += parsed_file.result.definitions.len();
             total_imports += parsed_file.result.imports.len();
+
+            if member_ctxs[&parsed_file.language]
+                .spec
+                .hooks
+                .lexical_file_links
+            {
+                crate::v2::linker::lexical_file_links(
+                    path,
+                    &parsed_file.result.imports,
+                    &mut file_links,
+                );
+            }
 
             let (file_node, def_nodes, import_nodes) = graph.add_file(
                 path,
@@ -1367,12 +1380,6 @@ impl FamilyPipeline {
         ));
 
         graph.finalize(tracer);
-        let mut file_links = Vec::new();
-        for (lang, lctx) in member_ctxs.iter() {
-            if lctx.spec.hooks.lexical_file_links {
-                graph.collect_lexical_file_links(*lang, &mut file_links);
-            }
-        }
         if !file_links.is_empty()
             && let Ok(mut pending) = ctx.file_links.lock()
         {
