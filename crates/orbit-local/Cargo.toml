@@ -1,5 +1,5 @@
 [package]
-name = "orbit-local"
+name = "orbit-cli"
 version.workspace = true
 edition = "2024"
 build = "build.rs"

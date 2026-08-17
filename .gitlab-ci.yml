@@ -672,7 +672,7 @@ cli-integration-test:
     - .mr-and-main-rules
   needs: []
   script:
-    - cargo build -p orbit-local
+    - cargo build -p orbit-cli
     - cargo nextest run --profile ci --test cli --no-fail-fast
     - sccache --show-stats || true
 
