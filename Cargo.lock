@@ -8228,6 +8228,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tonic",
+ "tonic-types",
  "tracing",
  "uuid",
 ]
