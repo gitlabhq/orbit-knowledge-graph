@@ -191,7 +191,7 @@ fn http_403_exits_with_code_four() {
             }
             line.clear();
         }
-        let body = "No Knowledge Graph enabled namespaces";
+        let body = "No Orbit enabled namespaces";
         let response = format!(
             "HTTP/1.1 403 Forbidden\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
             body.len()

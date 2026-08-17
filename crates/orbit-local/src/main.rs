@@ -327,17 +327,17 @@ enum RemoteCommands {
         #[arg(long, value_enum)]
         response_format: Option<remote::ResponseFormat>,
     },
-    /// Show GitLab Knowledge Graph cluster health.
+    /// Show Orbit cluster health.
     Status,
-    /// Show the GitLab Knowledge Graph ontology.
+    /// Show the Orbit ontology.
     Schema {
         /// Node names to expand with full properties and edge lists.
         #[arg(value_name = "NODE")]
         nodes: Vec<String>,
     },
-    /// Show the GitLab Knowledge Graph query DSL JSON Schema.
+    /// Show the Orbit query DSL JSON Schema.
     Dsl,
-    /// Show the GitLab Knowledge Graph MCP tool manifest.
+    /// Show the Orbit MCP tool manifest.
     Tools,
     /// Show indexing progress for a namespace or project.
     #[command(name = "graph-status")]
