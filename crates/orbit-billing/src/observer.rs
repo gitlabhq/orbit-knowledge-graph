@@ -38,6 +38,10 @@ struct BillingMetadata<'a> {
     source_type: &'a str,
     coding_agent: Option<&'a str>,
     is_gitlab_team_member: Option<bool>,
+    node_count: Option<i64>,
+    relationship_count: Option<i64>,
+    max_hops: Option<i64>,
+    path_max_depth: Option<i64>,
     #[serde(flatten)]
     metrics: &'a ExecMetrics,
 }
@@ -62,12 +66,23 @@ impl BillingObserver {
     }
 
     fn build_metadata(&self) -> serde_json::Value {
+        let input = self.metrics.input.as_ref();
         let metadata = BillingMetadata {
             query_type: self.query_type,
             feature_qualified_name: feature_qualified_name(&self.inputs.source_type),
             source_type: &self.inputs.source_type,
             coding_agent: self.inputs.coding_agent.as_deref(),
             is_gitlab_team_member: self.inputs.is_gitlab_team_member,
+            node_count: input.map(|i| i.nodes.len() as i64),
+            relationship_count: input.map(|i| i.relationships.len() as i64),
+            max_hops: input.map(|i| {
+                i.relationships
+                    .iter()
+                    .map(|r| r.hops.max)
+                    .max()
+                    .unwrap_or(0) as i64
+            }),
+            path_max_depth: input.and_then(|i| i.path.as_ref().map(|p| p.max_depth as i64)),
             metrics: &self.metrics,
         };
         serde_json::to_value(&metadata).unwrap_or_else(|_| json!({}))
@@ -313,6 +328,46 @@ mod tests {
     }
 
     #[test]
+    fn metadata_carries_depth_dimensions() {
+        use query_engine::compiler::Input;
+        use query_engine::compiler::input::{Direction, HopRange, InputNode, InputRelationship};
+
+        let mut obs = BillingObserver::new(None, test_inputs());
+        obs.set_query_type("traversal");
+        obs.metrics.input = Some(Input {
+            nodes: vec![
+                InputNode {
+                    entity: Some("User".into()),
+                    ..Default::default()
+                },
+                InputNode {
+                    entity: Some("MergeRequest".into()),
+                    ..Default::default()
+                },
+            ],
+            relationships: vec![InputRelationship {
+                types: vec!["AUTHORED".into()],
+                from: "u".into(),
+                to: "mr".into(),
+                hops: HopRange { min: 1, max: 3 },
+                direction: Direction::Outgoing,
+                filters: Default::default(),
+                fk_column: None,
+                scope_prefix: None,
+                scope_preserving: false,
+            }],
+            ..Default::default()
+        });
+
+        let metadata = obs.build_metadata();
+
+        assert_eq!(metadata["node_count"], 2);
+        assert_eq!(metadata["relationship_count"], 1);
+        assert_eq!(metadata["max_hops"], 3);
+        assert!(metadata["path_max_depth"].is_null());
+    }
+
+    #[test]
     fn metrics_keys_do_not_collide_with_billing_dimensions() {
         let billing_keys = [
             "query_type",
@@ -320,6 +375,10 @@ mod tests {
             "source_type",
             "coding_agent",
             "is_gitlab_team_member",
+            "node_count",
+            "relationship_count",
+            "max_hops",
+            "path_max_depth",
         ];
         let metrics = serde_json::to_value(ExecMetrics::default()).unwrap();
         let metrics = metrics.as_object().unwrap();
