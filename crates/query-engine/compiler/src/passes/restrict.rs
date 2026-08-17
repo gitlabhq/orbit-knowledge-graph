@@ -13,6 +13,7 @@ use crate::error::{QueryError, Result};
 use crate::input::{ColumnSelection, FilterOp, Input, InputFilter, QueryType};
 use crate::types::{DEFAULT_PATH_ACCESS_LEVEL, SecurityContext};
 use ontology::{EdgeVariantScope, Ontology};
+use orbit_utils::traversal_path::TraversalPath;
 use std::collections::HashSet;
 
 fn entity_of<'a>(input: &'a Input, node_id: &str) -> Option<&'a str> {
@@ -135,7 +136,7 @@ fn enforce_traversal_path_filters(
 fn validate_traversal_path_filter_scope(
     label: &str,
     traversal_path_filter: &InputFilter,
-    eligible_paths: &[&str],
+    eligible_paths: &[&TraversalPath],
 ) -> Result<()> {
     for path in traversal_path_values(label, traversal_path_filter)? {
         validate_traversal_path_within_scope(label, path, eligible_paths)?;
@@ -181,7 +182,7 @@ fn traversal_path_values<'a>(
 fn validate_traversal_path_within_scope(
     label: &str,
     path: &str,
-    eligible_paths: &[&str],
+    eligible_paths: &[&TraversalPath],
 ) -> Result<()> {
     if orbit_utils::traversal_path::is_within_scope(path, eligible_paths) {
         return Ok(());
@@ -364,6 +365,7 @@ mod tests {
     };
 
     use ontology::{DataType, RequiredRole};
+    use orbit_utils::traversal_path::TraversalPath;
     use serde_json::Value;
     use std::collections::HashMap;
 
@@ -537,7 +539,7 @@ mod tests {
             .with_redaction_role("Vulnerability", RequiredRole::SecurityManager);
         let ctx = SecurityContext::new_with_roles(
             1,
-            vec![crate::TraversalPath::new(
+            vec![crate::AuthorizedPath::new(
                 "1/100/",
                 DEFAULT_PATH_ACCESS_LEVEL,
             )],
@@ -1202,7 +1204,10 @@ mod tests {
     #[test]
     fn prune_to_target_stamps_when_target_resolves() {
         let ont = reviewer_prune_to_target_ontology();
-        let prefixes = HashMap::from([("mr".to_string(), "1/9970/15846663/".to_string())]);
+        let prefixes = HashMap::from([(
+            "mr".to_string(),
+            TraversalPath::new_unchecked("1/9970/15846663/"),
+        )]);
         let ctx = SecurityContext::new(1, vec!["1/9970/".into()])
             .unwrap()
             .with_scope_prefixes(prefixes);
@@ -1225,7 +1230,10 @@ mod tests {
         };
         restrict(&mut input, &ont, &ctx).expect("restrict ok");
         assert_eq!(
-            input.relationships[0].scope_prefix.as_deref(),
+            input.relationships[0]
+                .scope_prefix
+                .as_ref()
+                .map(TraversalPath::as_str),
             Some("1/9970/15846663/"),
             "prune_to_target must stamp the edge from the pinned target prefix"
         );
@@ -1234,7 +1242,10 @@ mod tests {
     #[test]
     fn prune_to_target_does_not_propagate_across_hub() {
         let ont = reviewer_prune_to_target_ontology();
-        let prefixes = HashMap::from([("mr_a".to_string(), "1/9970/15846663/".to_string())]);
+        let prefixes = HashMap::from([(
+            "mr_a".to_string(),
+            TraversalPath::new_unchecked("1/9970/15846663/"),
+        )]);
         let ctx = SecurityContext::new(1, vec!["1/9970/".into()])
             .unwrap()
             .with_scope_prefixes(prefixes);
@@ -1266,7 +1277,10 @@ mod tests {
         restrict(&mut input, &ont, &ctx).expect("restrict ok");
 
         assert_eq!(
-            input.relationships[0].scope_prefix.as_deref(),
+            input.relationships[0]
+                .scope_prefix
+                .as_ref()
+                .map(TraversalPath::as_str),
             Some("1/9970/15846663/"),
             "edge adjacent to pinned mr_a must be scoped"
         );

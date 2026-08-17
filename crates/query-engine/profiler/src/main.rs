@@ -261,7 +261,10 @@ fn seed_scope_prefixes(
         let (alias, prefix) = spec
             .split_once('=')
             .context("--scope-prefix must be alias=prefix")?;
-        if let Some(prev) = seed.insert(alias.to_string(), prefix.to_string()) {
+        if let Some(prev) = seed.insert(
+            alias.to_string(),
+            orbit_utils::traversal_path::TraversalPath::new_unchecked(prefix),
+        ) {
             eprintln!(
                 "warning: --scope-prefix alias '{alias}' specified more than once ('{prev}' overwritten by '{prefix}')"
             );

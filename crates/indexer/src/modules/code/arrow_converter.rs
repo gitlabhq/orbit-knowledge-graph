@@ -6,12 +6,13 @@ use code_graph::v2::linker::graph::{DefinitionRow, DirectoryRow, FileRow, GraphO
 use ontology::DataType as OntDataType;
 use ontology::Ontology;
 use orbit_utils::arrow::{AsRecordBatch, BatchBuilder, ColumnSpec, ColumnType, RowEnvelope};
+use orbit_utils::traversal_path::TraversalPath;
 use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 pub struct IndexerEnvelope {
-    pub traversal_path: String,
+    pub traversal_path: TraversalPath,
     pub project_id: i64,
     pub branch: String,
     pub commit_sha: String,
@@ -20,7 +21,7 @@ pub struct IndexerEnvelope {
 
 impl IndexerEnvelope {
     pub fn new(
-        traversal_path: String,
+        traversal_path: TraversalPath,
         project_id: i64,
         branch: String,
         commit_sha: String,
@@ -39,7 +40,8 @@ impl IndexerEnvelope {
 impl RowEnvelope for IndexerEnvelope {
     fn write_header(&self, b: &mut BatchBuilder, id: i64) -> Result<(), ArrowError> {
         b.col("id")?.push_int(id)?;
-        b.col("traversal_path")?.push_str(&self.traversal_path)?;
+        b.col("traversal_path")?
+            .push_str(self.traversal_path.as_str())?;
         b.col("project_id")?.push_int(self.project_id)?;
         b.col("branch")?.push_str(&self.branch)?;
         b.col("commit_sha")?.push_str(&self.commit_sha)?;

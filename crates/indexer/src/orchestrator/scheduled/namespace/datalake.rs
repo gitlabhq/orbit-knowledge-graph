@@ -7,7 +7,7 @@ use chrono::{DateTime, Utc};
 use clickhouse_client::FromArrowColumn;
 use futures::StreamExt;
 use ontology::{PathResolution, ReindexSource};
-use orbit_utils::traversal_path::TOP_LEVEL_PREFIX_REGEX;
+use orbit_utils::traversal_path::{TOP_LEVEL_PREFIX_REGEX, TraversalPath};
 use tracing::{error, warn};
 
 use crate::clickhouse::{ArrowClickHouseClient, ClickHouseError, TIMESTAMP_FORMAT};
@@ -172,10 +172,14 @@ fn group_by_namespace(batches: &[RecordBatch]) -> Result<Vec<NamespaceDispatchRe
 
     let by_namespace = namespace_ids
         .into_iter()
-        .zip(traversal_paths)
+        .zip(
+            traversal_paths
+                .into_iter()
+                .map(TraversalPath::new_unchecked),
+        )
         .zip(targets)
         .fold(
-            BTreeMap::<(i64, String), BTreeSet<String>>::new(),
+            BTreeMap::<(i64, TraversalPath), BTreeSet<String>>::new(),
             |mut acc, ((namespace_id, traversal_path), target)| {
                 acc.entry((namespace_id, traversal_path))
                     .or_default()
@@ -301,7 +305,11 @@ impl EnabledNamespaceReader for DatalakeEnabledNamespaceReader {
 
         Ok(namespace_ids
             .into_iter()
-            .zip(traversal_paths)
+            .zip(
+                traversal_paths
+                    .into_iter()
+                    .map(TraversalPath::new_unchecked),
+            )
             .map(|(namespace_id, traversal_path)| NamespaceDispatchRequest {
                 namespace_id,
                 traversal_path,

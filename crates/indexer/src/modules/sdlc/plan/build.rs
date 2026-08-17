@@ -222,6 +222,7 @@ mod tests {
     };
     use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
     use chrono::Utc;
+    use orbit_utils::traversal_path::TraversalPath;
 
     fn test_ontology() -> Ontology {
         Ontology::load_embedded().expect("should load ontology")
@@ -243,7 +244,7 @@ mod tests {
         sql.split_whitespace().collect::<Vec<_>>().join(" ")
     }
 
-    fn render_namespaced(plan: &Plan, path: &str) -> String {
+    fn render_namespaced(plan: &Plan, path: &TraversalPath) -> String {
         plan.prepare()
             .with(WatermarkFilter {
                 column: &plan.watermark_column,
@@ -519,10 +520,13 @@ mod tests {
         let plan = built
             .namespaced
             .iter()
-            .find(|p| render_namespaced(p, "1/2/").contains("siphon_issue_assignees"))
+            .find(|p| {
+                render_namespaced(p, &TraversalPath::new_unchecked("1/2/"))
+                    .contains("siphon_issue_assignees")
+            })
             .expect("siphon_issue_assignees plan");
 
-        let sql = render_namespaced(plan, "1/2/");
+        let sql = render_namespaced(plan, &TraversalPath::new_unchecked("1/2/"));
         let normalized = normalize(&sql);
         assert!(normalized.contains("WITH _batch AS ("), "sql: {sql}");
         assert!(normalized.contains("_e0 AS ("), "sql: {sql}");
@@ -573,10 +577,16 @@ mod tests {
         let plan = built
             .namespaced
             .iter()
-            .find(|p| render_namespaced(p, "1/2/").contains("siphon_issue_links"))
+            .find(|p| {
+                render_namespaced(p, &TraversalPath::new_unchecked("1/2/"))
+                    .contains("siphon_issue_links")
+            })
             .expect("siphon_issue_links plan");
 
-        let normalized = normalize(&render_namespaced(plan, "1/2/"));
+        let normalized = normalize(&render_namespaced(
+            plan,
+            &TraversalPath::new_unchecked("1/2/"),
+        ));
         assert!(
             normalized.contains("_e0.state_id AS source_state_id"),
             "sql: {normalized}"
@@ -600,7 +610,7 @@ mod tests {
             .find(|p| p.name == "SystemNote")
             .expect("SystemNote plan");
 
-        let sql = render_namespaced(plan, "1/2/");
+        let sql = render_namespaced(plan, &TraversalPath::new_unchecked("1/2/"));
         let normalized = normalize(&sql);
 
         assert!(normalized.contains("WITH _batch AS ("), "sql: {sql}");
@@ -683,7 +693,9 @@ mod tests {
             count += 1;
             let sql = match scope {
                 EtlScope::Global => render_global(plan),
-                EtlScope::Namespaced => render_namespaced(plan, "1/2/"),
+                EtlScope::Namespaced => {
+                    render_namespaced(plan, &TraversalPath::new_unchecked("1/2/"))
+                }
             };
             let name = &plan.name;
             assert!(

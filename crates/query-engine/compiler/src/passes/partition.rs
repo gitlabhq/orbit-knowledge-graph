@@ -133,7 +133,7 @@ fn authorized_bucket_ids(strategy: &PartitionStrategy, ctx: &SecurityContext) ->
     let mut tlns: BTreeSet<String> = BTreeSet::new();
     for tp in &ctx.traversal_paths {
         // An org-only path pins no namespace, so it spans every bucket.
-        let tln = orbit_utils::traversal_path::segments(&tp.path).nth(1)?;
+        let tln = tp.path.segments().nth(1)?;
         tlns.insert(tln.to_string());
     }
     // Count TLNs, not hashed buckets, so the hash stays in ClickHouse.

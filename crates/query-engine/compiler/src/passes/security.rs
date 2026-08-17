@@ -31,7 +31,7 @@ use crate::constants::{GL_TABLE_PREFIX, TRAVERSAL_PATH_COLUMN, global_tables};
 use crate::error::Result;
 pub use crate::types::SecurityContext;
 use ontology::Ontology;
-use orbit_utils::traversal_path::{PathTrie, is_within_scope, lowest_common_prefix};
+use orbit_utils::traversal_path::{PathTrie, TraversalPath, lowest_common_prefix};
 
 /// Matches `gl_*` or `v{N}_gl_*`, captures the unprefixed name.
 static GL_TABLE_RE: OnceLock<Regex> = OnceLock::new();
@@ -83,13 +83,13 @@ fn apply_to_query(q: &mut Query, ctx: &SecurityContext, ontology: &Ontology) -> 
             match ctx.scope_prefixes.get(alias) {
                 Some(prefix)
                     if ontology.is_table_path_scopable(table)
-                        && is_within_scope(prefix, &eligible) =>
+                        && eligible.iter().any(|p| prefix.is_descendant_of(p)) =>
                 {
-                    starts_with_expr(alias, prefix)
+                    starts_with_expr(alias, prefix.as_str())
                 }
                 Some(prefix) if ontology.is_table_path_scopable(table) => Expr::and(
                     build_path_filter(alias, &eligible),
-                    starts_with_expr(alias, prefix),
+                    starts_with_expr(alias, prefix.as_str()),
                 ),
                 _ => build_path_filter(alias, &eligible),
             }
@@ -142,10 +142,10 @@ fn apply_security_to_expr(
     }
 }
 
-fn build_path_filter(alias: &str, paths: &[&str]) -> Expr {
+fn build_path_filter(alias: &str, paths: &[&TraversalPath]) -> Expr {
     match paths.len() {
         0 => Expr::Literal(Value::Bool(false)),
-        1 => starts_with_expr(alias, paths[0]),
+        1 => starts_with_expr(alias, paths[0].as_str()),
         _ => {
             let collapsed = PathTrie::from_paths(paths).to_minimal_prefixes();
             if collapsed.len() == 1 {
@@ -254,9 +254,10 @@ fn should_apply_security_filter(table: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::TraversalPath;
+    use crate::AuthorizedPath;
     use crate::ast::{JoinType, Op, SelectExpr};
     use ontology::constants::EDGE_TABLE;
+    use orbit_utils::traversal_path::TraversalPath;
     use serde_json::Value;
 
     fn simple_query() -> Node {
@@ -292,20 +293,28 @@ mod tests {
 
     #[test]
     fn single_path_uses_starts_with() {
-        let expr = build_path_filter("u", &["42/43/"]);
+        let expr = build_path_filter("u", &[&TraversalPath::from("42/43/")]);
         assert!(matches!(expr, Expr::FuncCall { name, .. } if name == "startsWith"));
     }
 
     #[test]
     fn multiple_paths_uses_prefix_and_or_starts_with() {
-        let expr = build_path_filter("u", &["1/2/4/", "1/2/5/"]);
+        let expr = build_path_filter(
+            "u",
+            &[
+                &TraversalPath::from("1/2/4/"),
+                &TraversalPath::from("1/2/5/"),
+            ],
+        );
         assert!(matches!(expr, Expr::BinaryOp { op: Op::And, .. }));
     }
 
     #[test]
     fn many_paths_uses_or_chain() {
-        let paths: Vec<String> = (0..200u64).map(|i| format!("1/{i}/")).collect();
-        let refs: Vec<&str> = paths.iter().map(|s| s.as_str()).collect();
+        let paths: Vec<TraversalPath> = (0..200u64)
+            .map(|i| TraversalPath::from(format!("1/{i}/")))
+            .collect();
+        let refs: Vec<&TraversalPath> = paths.iter().collect();
         let expr = build_path_filter("e", &refs);
         let dbg = format!("{expr:?}");
         assert!(
@@ -332,8 +341,8 @@ mod tests {
         let sc = SecurityContext::new_with_roles(
             1,
             vec![
-                TraversalPath::new("1/100/", 20),
-                TraversalPath::new("1/101/", 30),
+                AuthorizedPath::new("1/100/", 20),
+                AuthorizedPath::new("1/101/", 30),
             ],
         )
         .unwrap();
@@ -347,7 +356,7 @@ mod tests {
         assert!(
             SecurityContext::new_with_roles(
                 1,
-                vec![TraversalPath::with_access_levels("1/100/", vec![])]
+                vec![AuthorizedPath::with_access_levels("1/100/", vec![])]
             )
             .is_err()
         );
@@ -464,8 +473,8 @@ mod tests {
         let ctx = SecurityContext::new_with_roles(
             1,
             vec![
-                TraversalPath::new("1/100/", 20), // Reporter
-                TraversalPath::new("1/101/", 30), // Developer (covers SM)
+                AuthorizedPath::new("1/100/", 20), // Reporter
+                AuthorizedPath::new("1/101/", 30), // Developer (covers SM)
             ],
         )
         .unwrap();
@@ -514,7 +523,7 @@ mod tests {
     fn no_eligible_paths_compile_to_bool_false() {
         let ctx = SecurityContext::new_with_roles(
             1,
-            vec![TraversalPath::new("1/100/", 20)], // Reporter only
+            vec![AuthorizedPath::new("1/100/", 20)], // Reporter only
         )
         .unwrap();
 
@@ -548,14 +557,14 @@ mod tests {
 
     #[test]
     fn trie_collapse_after_role_filtering() {
-        use crate::types::TraversalPath;
+        use crate::types::AuthorizedPath;
         let ctx = SecurityContext::new_with_roles(
             1,
             vec![
-                TraversalPath::new(String::from("1/100/"), 20),
-                TraversalPath::new(String::from("1/100/200/"), 20),
-                TraversalPath::new(String::from("1/100/200/"), 30),
-                TraversalPath::new(String::from("1/300/"), 30),
+                AuthorizedPath::new(String::from("1/100/"), 20),
+                AuthorizedPath::new(String::from("1/100/200/"), 20),
+                AuthorizedPath::new(String::from("1/100/200/"), 30),
+                AuthorizedPath::new(String::from("1/300/"), 30),
             ],
         )
         .unwrap();
@@ -713,7 +722,7 @@ mod tests {
     #[test]
     fn scope_prefix_replaces_broad_on_scoped_alias() {
         let mut prefixes = std::collections::HashMap::new();
-        prefixes.insert("p".to_string(), "1/24/23/".to_string());
+        prefixes.insert("p".to_string(), TraversalPath::new_unchecked("1/24/23/"));
         let ctx = SecurityContext::new(1, vec!["1/".into()])
             .unwrap()
             .with_scope_prefixes(prefixes);
@@ -756,8 +765,8 @@ mod tests {
     fn scope_prefix_below_role_floor_keeps_broad() {
         let ontology = Ontology::load_embedded().unwrap();
         let mut prefixes = std::collections::HashMap::new();
-        prefixes.insert("v".to_string(), "1/100/200/".to_string());
-        let ctx = SecurityContext::new_with_roles(1, vec![TraversalPath::new("1/100/", 20)])
+        prefixes.insert("v".to_string(), TraversalPath::new_unchecked("1/100/200/"));
+        let ctx = SecurityContext::new_with_roles(1, vec![AuthorizedPath::new("1/100/", 20)])
             .unwrap()
             .with_scope_prefixes(prefixes);
 
@@ -785,7 +794,7 @@ mod tests {
     #[test]
     fn scope_prefix_dropped_on_non_path_scopable_alias() {
         let mut prefixes = std::collections::HashMap::new();
-        prefixes.insert("g".to_string(), "1/24/23/".to_string());
+        prefixes.insert("g".to_string(), TraversalPath::new_unchecked("1/24/23/"));
         let ctx = SecurityContext::new(1, vec!["1/".into()])
             .unwrap()
             .with_scope_prefixes(prefixes);

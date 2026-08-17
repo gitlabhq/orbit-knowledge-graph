@@ -3,6 +3,7 @@ use std::sync::Arc;
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use nats_client::KvPutOptions;
+use orbit_utils::traversal_path::TraversalPath;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tracing::warn;
@@ -55,9 +56,9 @@ impl IndexingStatusStore {
     /// Read-modify-write — a concurrent call on the same path could lose the
     /// previous completion fields. Safe here because NATS message deduping and
     /// per-path locks already serialize runs for a given traversal path.
-    pub async fn record_start(&self, traversal_path: &str, started_at: DateTime<Utc>) {
+    pub async fn record_start(&self, traversal_path: &TraversalPath, started_at: DateTime<Utc>) {
         let previous = self.get(traversal_path).await.unwrap_or_else(|error| {
-            warn!(traversal_path, %error, "failed to read previous progress; starting from scratch");
+            warn!(%traversal_path, %error, "failed to read previous progress; starting from scratch");
             None
         });
         let progress = match previous {
@@ -79,7 +80,7 @@ impl IndexingStatusStore {
 
     pub async fn record_completion(
         &self,
-        traversal_path: &str,
+        traversal_path: &TraversalPath,
         started_at: DateTime<Utc>,
         completed_at: DateTime<Utc>,
         error: Option<String>,
@@ -92,19 +93,22 @@ impl IndexingStatusStore {
         .await;
     }
 
-    pub async fn get(&self, traversal_path: &str) -> Result<Option<IndexingProgress>, Error> {
+    pub async fn get(
+        &self,
+        traversal_path: &TraversalPath,
+    ) -> Result<Option<IndexingProgress>, Error> {
         let key = normalize_key(traversal_path)?;
         self.read_key(&key).await
     }
 
     pub async fn record_entity_start(
         &self,
-        traversal_path: &str,
+        traversal_path: &TraversalPath,
         entity_kind: &str,
         started_at: DateTime<Utc>,
     ) {
         let previous = self.get_entity(traversal_path, entity_kind).await.unwrap_or_else(|error| {
-            warn!(traversal_path, entity_kind, %error, "failed to read previous entity progress; starting from scratch");
+            warn!(%traversal_path, entity_kind, %error, "failed to read previous entity progress; starting from scratch");
             None
         });
         let progress = match previous {
@@ -127,7 +131,7 @@ impl IndexingStatusStore {
 
     pub async fn record_entity_completion(
         &self,
-        traversal_path: &str,
+        traversal_path: &TraversalPath,
         entity_kind: &str,
         started_at: DateTime<Utc>,
         completed_at: DateTime<Utc>,
@@ -144,7 +148,7 @@ impl IndexingStatusStore {
 
     pub async fn get_entity(
         &self,
-        traversal_path: &str,
+        traversal_path: &TraversalPath,
         entity_kind: &str,
     ) -> Result<Option<IndexingProgress>, Error> {
         let key = entity_key(traversal_path, entity_kind)?;
@@ -159,11 +163,11 @@ impl IndexingStatusStore {
         Ok(Some(progress))
     }
 
-    async fn write(&self, traversal_path: &str, progress: IndexingProgress) {
+    async fn write(&self, traversal_path: &TraversalPath, progress: IndexingProgress) {
         let key = match normalize_key(traversal_path) {
             Ok(key) => key,
             Err(error) => {
-                warn!(traversal_path, %error, "skipping indexing status record");
+                warn!(%traversal_path, %error, "skipping indexing status record");
                 return;
             }
         };
@@ -172,14 +176,14 @@ impl IndexingStatusStore {
 
     async fn write_entity(
         &self,
-        traversal_path: &str,
+        traversal_path: &TraversalPath,
         entity_kind: &str,
         progress: IndexingProgress,
     ) {
         let key = match entity_key(traversal_path, entity_kind) {
             Ok(key) => key,
             Err(error) => {
-                warn!(traversal_path, entity_kind, %error, "skipping entity indexing status record");
+                warn!(%traversal_path, entity_kind, %error, "skipping entity indexing status record");
                 return;
             }
         };
@@ -231,8 +235,8 @@ fn completed_progress(
 }
 
 /// `"42/9970/12345/"` → `"status.42.9970.12345"`.
-fn normalize_key(traversal_path: &str) -> Result<String, Error> {
-    let dotted = orbit_utils::traversal_path::to_dotted(traversal_path);
+fn normalize_key(traversal_path: &TraversalPath) -> Result<String, Error> {
+    let dotted = traversal_path.to_dotted();
     if dotted.is_empty() {
         return Err(Error::EmptyTraversalPath);
     }
@@ -240,7 +244,7 @@ fn normalize_key(traversal_path: &str) -> Result<String, Error> {
 }
 
 /// `("42/9970/", "MergeRequest")` → `"status.42.9970.MergeRequest"`.
-fn entity_key(traversal_path: &str, entity_kind: &str) -> Result<String, Error> {
+fn entity_key(traversal_path: &TraversalPath, entity_kind: &str) -> Result<String, Error> {
     let base = normalize_key(traversal_path)?;
     Ok(format!("{base}.{entity_kind}"))
 }
@@ -258,12 +262,19 @@ mod tests {
             ("42//9970", "status.42.9970"),
         ];
         for (input, expected) in cases {
-            assert_eq!(normalize_key(input).unwrap(), expected, "input: {input:?}");
+            assert_eq!(
+                normalize_key(&TraversalPath::new_unchecked(input)).unwrap(),
+                expected,
+                "input: {input:?}"
+            );
         }
 
         for empty in ["", "/", "//"] {
             assert!(
-                matches!(normalize_key(empty), Err(Error::EmptyTraversalPath)),
+                matches!(
+                    normalize_key(&TraversalPath::new_unchecked(empty)),
+                    Err(Error::EmptyTraversalPath)
+                ),
                 "input: {empty:?}"
             );
         }
@@ -272,15 +283,15 @@ mod tests {
     #[test]
     fn entity_key_appends_kind() {
         assert_eq!(
-            entity_key("42/9970/", "MergeRequest").unwrap(),
+            entity_key(&TraversalPath::new_unchecked("42/9970/"), "MergeRequest").unwrap(),
             "status.42.9970.MergeRequest"
         );
         assert_eq!(
-            entity_key("42/9970/12345/", "Issue").unwrap(),
+            entity_key(&TraversalPath::new_unchecked("42/9970/12345/"), "Issue").unwrap(),
             "status.42.9970.12345.Issue"
         );
         assert!(matches!(
-            entity_key("", "MergeRequest"),
+            entity_key(&TraversalPath::new_unchecked(""), "MergeRequest"),
             Err(Error::EmptyTraversalPath)
         ));
     }

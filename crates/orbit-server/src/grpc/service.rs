@@ -5,6 +5,7 @@ use std::sync::Arc;
 use clickhouse_client::ClickHouseConfigurationExt;
 use ontology::Ontology;
 use orbit_server_config::{AnalyticsConfig, ClickHouseConfiguration};
+use orbit_utils::traversal_path::TraversalPath;
 use query_engine::pipeline::PipelineError;
 use query_engine::shared::content::ColumnResolverRegistry;
 use tokio::sync::mpsc;
@@ -564,16 +565,17 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
         let claims = ctx.claims;
 
         let req = request.get_ref();
-        authorize_traversal_path(&claims, &req.traversal_path)?;
+        let traversal_path = TraversalPath::new_unchecked(req.traversal_path.clone());
+        authorize_traversal_path(&claims, &traversal_path)?;
 
         let security_context =
             build_security_context(&claims).map_err(|e| Status::unauthenticated(e.to_string()))?;
 
-        info!(traversal_path = %req.traversal_path, format = ?req.format, "Fetching graph status for user");
+        info!(traversal_path = %traversal_path, format = ?req.format, "Fetching graph status for user");
 
         let response = self
             .graph_status
-            .get_status(&req.traversal_path, req.format, &security_context)
+            .get_status(&traversal_path, req.format, &security_context)
             .await?;
         Ok(Response::new(response))
     }
@@ -744,19 +746,19 @@ fn named_query_definitions(
         .collect()
 }
 
-fn authorize_traversal_path(claims: &Claims, requested_path: &str) -> Result<(), Status> {
+fn authorize_traversal_path(claims: &Claims, requested_path: &TraversalPath) -> Result<(), Status> {
     if claims.admin {
         return Ok(());
     }
 
-    let authorized_paths: Vec<&str> = claims
+    let authorized_paths: Vec<&orbit_utils::traversal_path::TraversalPath> = claims
         .group_traversal_ids
         .iter()
-        .map(|tp| tp.path.as_str())
+        .map(|tp| &tp.path)
         .collect();
 
     let is_authorized =
-        orbit_utils::traversal_path::is_within_scope(requested_path, &authorized_paths);
+        orbit_utils::traversal_path::is_within_scope(requested_path.as_str(), &authorized_paths);
 
     if !is_authorized {
         return Err(Status::permission_denied(
@@ -1293,7 +1295,7 @@ mod tests {
             group_traversal_ids: groups
                 .into_iter()
                 .map(|p| crate::auth::claims::TraversalPathClaim {
-                    path: p.to_string(),
+                    path: TraversalPath::new_unchecked(p),
                     access_levels: vec![20],
                 })
                 .collect(),
@@ -1309,7 +1311,7 @@ mod tests {
             (user(1, vec!["1/22/", "1/33/"]), "1/33/55/"),
         ] {
             assert!(
-                authorize_traversal_path(&claims, path).is_ok(),
+                authorize_traversal_path(&claims, &TraversalPath::new_unchecked(path)).is_ok(),
                 "expected OK for {path}"
             );
         }
@@ -1320,7 +1322,9 @@ mod tests {
             (user(1, vec![]), "1/22/"),
         ] {
             assert_eq!(
-                authorize_traversal_path(&claims, path).unwrap_err().code(),
+                authorize_traversal_path(&claims, &TraversalPath::new_unchecked(path))
+                    .unwrap_err()
+                    .code(),
                 tonic::Code::PermissionDenied,
                 "expected PermissionDenied for {path}"
             );

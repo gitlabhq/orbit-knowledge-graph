@@ -19,6 +19,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::LazyLock;
 
 use super::parse::{RefKind, Reference};
+use orbit_utils::traversal_path::TraversalPath;
 
 fn wm() -> &'static str {
     ontology::siphon_watermark_column()
@@ -142,7 +143,7 @@ pub static WORK_ITEMS_SQL: LazyLock<String> = LazyLock::new(|| {
 pub struct RouteRow {
     pub source_id: i64,
     pub path: String,
-    pub traversal_path: String,
+    pub traversal_path: TraversalPath,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -160,7 +161,7 @@ pub struct EntityRow {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedTarget {
     pub id: i64,
-    pub traversal_path: String,
+    pub traversal_path: TraversalPath,
 }
 
 /// Plan summary: the distinct work the resolver needs to issue against
@@ -238,9 +239,9 @@ impl ResolvedIndex {
         mr_entities: &[EntityRow],
         wi_entities: &[EntityRow],
     ) -> Self {
-        let path_routes: HashMap<i64, (&str, &str)> = routes
+        let path_routes: HashMap<i64, (&str, &TraversalPath)> = routes
             .iter()
-            .map(|r| (r.source_id, (r.path.as_str(), r.traversal_path.as_str())))
+            .map(|r| (r.source_id, (r.path.as_str(), &r.traversal_path)))
             .collect();
 
         let mut by_key = HashMap::new();
@@ -257,7 +258,7 @@ impl ResolvedIndex {
                             path.to_string(),
                             ResolvedTarget {
                                 id: e.id,
-                                traversal_path: traversal_path.to_string(),
+                                traversal_path: traversal_path.clone(),
                             },
                         );
                 }
@@ -436,7 +437,7 @@ mod tests {
         RouteRow {
             source_id: 999,
             path: "gitlab-org/gitlab".to_string(),
-            traversal_path: "1/999/".to_string(),
+            traversal_path: TraversalPath::new_unchecked("1/999/"),
         }
     }
 

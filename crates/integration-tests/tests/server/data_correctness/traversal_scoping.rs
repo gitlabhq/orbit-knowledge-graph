@@ -7,13 +7,14 @@
 use std::collections::HashMap;
 
 use integration_testkit::t;
+use orbit_utils::traversal_path::TraversalPath;
 
 use super::helpers::*;
 
 fn scoped(authorized: &str, prefixes: &[(&str, &str)]) -> SecurityContext {
-    let map: HashMap<String, String> = prefixes
+    let map: HashMap<String, TraversalPath> = prefixes
         .iter()
-        .map(|(alias, prefix)| (alias.to_string(), prefix.to_string()))
+        .map(|(alias, prefix)| (alias.to_string(), TraversalPath::new_unchecked(*prefix)))
         .collect();
     SecurityContext::new(1, vec![authorized.into()])
         .unwrap()

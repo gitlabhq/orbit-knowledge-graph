@@ -1,6 +1,5 @@
 //! Helpers for the `<org_id>/<namespace_id>/` traversal path format used
-//! throughout the indexer, NATS topic routing, the query profiler, and the
-//! compiler and server authorization scope checks.
+//! throughout the indexer, NATS topic routing, and query profiler.
 
 use std::collections::{BTreeMap, HashSet};
 use std::sync::LazyLock;
@@ -29,8 +28,10 @@ pub fn overlaps(a: &str, b: &str) -> bool {
     a.starts_with(b) || b.starts_with(a)
 }
 
-pub fn is_within_scope(path: &str, allowed: &[&str]) -> bool {
-    allowed.iter().any(|prefix| path.starts_with(prefix))
+pub fn is_within_scope<S: AsRef<str>>(path: &str, allowed: &[S]) -> bool {
+    allowed
+        .iter()
+        .any(|prefix| path.starts_with(prefix.as_ref()))
 }
 
 pub fn is_valid_any_depth(path: &str) -> bool {
@@ -53,11 +54,11 @@ pub fn validate(path: &str) -> Result<(), String> {
     Ok(())
 }
 
-pub fn prune_to_leaves(paths: &[String]) -> Vec<String> {
+pub fn prune_to_leaves<S: AsRef<str>>(paths: &[S]) -> Vec<String> {
     if paths.len() <= 1 {
-        return paths.to_vec();
+        return paths.iter().map(|p| p.as_ref().to_string()).collect();
     }
-    let mut sorted: Vec<&str> = paths.iter().map(String::as_str).collect();
+    let mut sorted: Vec<&str> = paths.iter().map(AsRef::as_ref).collect();
     sorted.sort_unstable();
     sorted.dedup();
 
@@ -78,10 +79,10 @@ pub struct PathTrie {
 }
 
 impl PathTrie {
-    pub fn from_paths(paths: &[&str]) -> Self {
+    pub fn from_paths<S: AsRef<str>>(paths: &[S]) -> Self {
         let mut root = Self::default();
         for path in paths {
-            root.insert(path);
+            root.insert(path.as_ref());
         }
         root
     }
@@ -130,13 +131,13 @@ impl PathTrie {
     }
 }
 
-pub fn lowest_common_prefix(paths: &[String]) -> String {
+pub fn lowest_common_prefix<S: AsRef<str>>(paths: &[S]) -> String {
     if paths.is_empty() {
         return String::new();
     }
     let segments: Vec<Vec<&str>> = paths
         .iter()
-        .map(|p| p.trim_end_matches('/').split('/').collect())
+        .map(|p| p.as_ref().trim_end_matches('/').split('/').collect())
         .collect();
     let first = &segments[0];
     let common_len = (0..first.len())
@@ -234,19 +235,19 @@ pub struct TopLevelSplit {
     /// Distinct IDs of top-level namespaces.
     pub ids: Vec<i64>,
     /// Traversal paths of the top-level namespaces.
-    pub paths: Vec<String>,
+    pub paths: Vec<TraversalPath>,
     /// `(id, path)` rows dropped for not being top-level.
-    pub skipped: Vec<(i64, String)>,
+    pub skipped: Vec<(i64, TraversalPath)>,
 }
 
 /// Partitions enabled `(id, path)` rows into top-level namespaces and the rows
 /// dropped for not being top-level.
-pub fn split_top_level(ids: Vec<i64>, paths: Vec<String>) -> TopLevelSplit {
+pub fn split_top_level(ids: Vec<i64>, paths: Vec<TraversalPath>) -> TopLevelSplit {
     let mut kept_ids = HashSet::new();
     let mut kept_paths = Vec::new();
     let mut skipped = Vec::new();
     for (id, path) in ids.into_iter().zip(paths) {
-        if is_top_level(&path) {
+        if path.is_top_level() {
             kept_ids.insert(id);
             kept_paths.push(path);
         } else {
@@ -259,6 +260,118 @@ pub fn split_top_level(ids: Vec<i64>, paths: Vec<String>) -> TopLevelSplit {
         ids,
         paths: kept_paths,
         skipped,
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
+#[serde(transparent)]
+pub struct TraversalPath(String);
+
+impl std::fmt::Debug for TraversalPath {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Debug::fmt(&self.0, f)
+    }
+}
+
+impl TraversalPath {
+    pub fn new_unchecked(path: impl Into<String>) -> Self {
+        Self(path.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn into_string(self) -> String {
+        self.0
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    pub fn segments(&self) -> impl Iterator<Item = &str> {
+        segments(&self.0)
+    }
+
+    pub fn is_descendant_of(&self, ancestor: &TraversalPath) -> bool {
+        self.0.starts_with(&ancestor.0)
+    }
+
+    pub fn is_valid(&self) -> bool {
+        is_valid(&self.0)
+    }
+
+    pub fn is_top_level(&self) -> bool {
+        is_top_level(&self.0)
+    }
+
+    pub fn org_id(&self) -> Option<i64> {
+        org_id(&self.0)
+    }
+
+    pub fn top_level_namespace_id(&self) -> Option<i64> {
+        top_level_namespace_id(&self.0)
+    }
+
+    pub fn root_prefix(&self) -> Option<Self> {
+        root_prefix(&self.0).map(Self)
+    }
+
+    pub fn leaf_id(&self) -> Option<i64> {
+        leaf_id(&self.0)
+    }
+
+    pub fn to_dotted(&self) -> String {
+        to_dotted(&self.0)
+    }
+}
+
+impl std::fmt::Display for TraversalPath {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl AsRef<str> for TraversalPath {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::borrow::Borrow<str> for TraversalPath {
+    fn borrow(&self) -> &str {
+        &self.0
+    }
+}
+
+impl From<TraversalPath> for String {
+    fn from(path: TraversalPath) -> Self {
+        path.0
+    }
+}
+
+impl PartialEq<str> for TraversalPath {
+    fn eq(&self, other: &str) -> bool {
+        self.0 == other
+    }
+}
+
+impl PartialEq<&str> for TraversalPath {
+    fn eq(&self, other: &&str) -> bool {
+        self.0 == *other
+    }
+}
+
+impl From<&str> for TraversalPath {
+    fn from(path: &str) -> Self {
+        Self(path.to_string())
+    }
+}
+
+impl From<String> for TraversalPath {
+    fn from(path: String) -> Self {
+        Self(path)
     }
 }
 
@@ -338,14 +451,17 @@ mod tests {
 
     #[test]
     fn leaf_pruning_keeps_sibling_paths() {
-        let leaves =
-            prune_to_leaves(&["1/9970/".into(), "1/9970/100/".into(), "1/9970/200/".into()]);
+        let leaves = prune_to_leaves(&[
+            "1/9970/".to_string(),
+            "1/9970/100/".to_string(),
+            "1/9970/200/".to_string(),
+        ]);
         assert_eq!(leaves, vec!["1/9970/100/", "1/9970/200/"]);
     }
 
     #[test]
     fn leaf_pruning_noop_when_no_ancestors() {
-        let leaves = prune_to_leaves(&["1/9970/100/".into(), "1/9970/200/".into()]);
+        let leaves = prune_to_leaves(&["1/9970/100/".to_string(), "1/9970/200/".to_string()]);
         assert_eq!(leaves, vec!["1/9970/100/", "1/9970/200/"]);
     }
 
@@ -355,7 +471,7 @@ mod tests {
         assert!(is_within_scope("1/22/", &["1/22/"]));
         assert!(is_within_scope("1/22/", &["9/", "1/"]));
         assert!(!is_within_scope("1/22/", &["1/23/"]));
-        assert!(!is_within_scope("1/22/", &[]));
+        assert!(!is_within_scope("1/22/", &[] as &[&str]));
     }
 
     #[test]
@@ -366,13 +482,19 @@ mod tests {
     #[test]
     fn lowest_common_prefix_finds_shared_path() {
         assert_eq!(
-            lowest_common_prefix(&["1/2/4/".into(), "1/2/5/".into()]),
+            lowest_common_prefix(&["1/2/4/".to_string(), "1/2/5/".to_string()]),
             "1/2/"
         );
-        assert_eq!(lowest_common_prefix(&["1/2/".into(), "1/3/".into()]), "1/");
-        assert_eq!(lowest_common_prefix(&["1/".into(), "2/".into()]), "");
-        assert_eq!(lowest_common_prefix(&["42/".into()]), "42/");
-        assert_eq!(lowest_common_prefix(&[]), "");
+        assert_eq!(
+            lowest_common_prefix(&["1/2/".to_string(), "1/3/".to_string()]),
+            "1/"
+        );
+        assert_eq!(
+            lowest_common_prefix(&["1/".to_string(), "2/".to_string()]),
+            ""
+        );
+        assert_eq!(lowest_common_prefix(&["42/".to_string()]), "42/");
+        assert_eq!(lowest_common_prefix(&[] as &[&str]), "");
     }
 
     #[test]
@@ -542,143 +664,20 @@ mod tests {
     fn split_top_level_keeps_top_level_and_skips_the_rest() {
         let ids = vec![1, 2, 3, 4];
         let paths = vec![
-            "1/100/".to_string(),
-            "1/100/200/".to_string(),
-            "0/".to_string(),
-            "1/300/".to_string(),
+            TraversalPath::new_unchecked("1/100/"),
+            TraversalPath::new_unchecked("1/100/200/"),
+            TraversalPath::new_unchecked("0/"),
+            TraversalPath::new_unchecked("1/300/"),
         ];
         let split = split_top_level(ids, paths);
         assert_eq!(split.ids, vec![1, 4]);
-        assert_eq!(
-            split.paths,
-            vec!["1/100/".to_string(), "1/300/".to_string()]
-        );
+        assert_eq!(split.paths, vec!["1/100/", "1/300/"]);
         assert_eq!(
             split.skipped,
-            vec![(2, "1/100/200/".to_string()), (3, "0/".to_string())]
+            vec![
+                (2, TraversalPath::new_unchecked("1/100/200/")),
+                (3, TraversalPath::new_unchecked("0/"))
+            ]
         );
-    }
-}
-
-#[derive(
-    Debug,
-    Clone,
-    Default,
-    PartialEq,
-    Eq,
-    Hash,
-    PartialOrd,
-    Ord,
-    serde::Serialize,
-    serde::Deserialize,
-)]
-#[serde(transparent)]
-pub struct TraversalPath(String);
-
-impl TraversalPath {
-    pub fn parse(path: impl Into<String>) -> Result<Self, String> {
-        let path = path.into();
-        validate(&path)?;
-        Ok(Self(path))
-    }
-
-    pub fn new_unchecked(path: impl Into<String>) -> Self {
-        Self(path.into())
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-
-    pub fn into_string(self) -> String {
-        self.0
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
-
-    pub fn segments(&self) -> impl Iterator<Item = &str> {
-        segments(&self.0)
-    }
-
-    pub fn segment_count(&self) -> usize {
-        segment_count(&self.0)
-    }
-
-    pub fn parent(&self) -> Self {
-        Self(parent(&self.0))
-    }
-
-    pub fn is_descendant_of(&self, ancestor: &TraversalPath) -> bool {
-        self.0.starts_with(&ancestor.0)
-    }
-
-    pub fn overlaps(&self, other: &TraversalPath) -> bool {
-        overlaps(&self.0, &other.0)
-    }
-
-    pub fn is_valid_any_depth(&self) -> bool {
-        is_valid_any_depth(&self.0)
-    }
-
-    pub fn is_top_level(&self) -> bool {
-        is_top_level(&self.0)
-    }
-
-    pub fn org_id(&self) -> Option<i64> {
-        org_id(&self.0)
-    }
-
-    pub fn top_level_namespace_id(&self) -> Option<i64> {
-        top_level_namespace_id(&self.0)
-    }
-
-    pub fn root_prefix(&self) -> Option<Self> {
-        root_prefix(&self.0).map(Self)
-    }
-
-    pub fn leaf_id(&self) -> Option<i64> {
-        leaf_id(&self.0)
-    }
-
-    pub fn to_dotted(&self) -> String {
-        to_dotted(&self.0)
-    }
-}
-
-impl std::fmt::Display for TraversalPath {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
-impl AsRef<str> for TraversalPath {
-    fn as_ref(&self) -> &str {
-        &self.0
-    }
-}
-
-impl std::borrow::Borrow<str> for TraversalPath {
-    fn borrow(&self) -> &str {
-        &self.0
-    }
-}
-
-impl From<TraversalPath> for String {
-    fn from(path: TraversalPath) -> Self {
-        path.0
-    }
-}
-
-impl PartialEq<str> for TraversalPath {
-    fn eq(&self, other: &str) -> bool {
-        self.0 == other
-    }
-}
-
-impl PartialEq<&str> for TraversalPath {
-    fn eq(&self, other: &&str) -> bool {
-        self.0 == *other
     }
 }

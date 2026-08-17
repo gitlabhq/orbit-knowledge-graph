@@ -10,6 +10,7 @@ use query_engine::pipeline::{
 };
 
 use crate::pipeline::path_resolver::PathResolver;
+use orbit_utils::traversal_path::TraversalPath;
 
 #[derive(Clone)]
 pub struct PathResolutionStage;
@@ -76,7 +77,7 @@ impl PipelineStage for PathResolutionStage {
         let resolved = resolver.resolve_batch(&wanted).await;
         let mut scope_prefixes = HashMap::new();
         for (alias, keys) in keys_by_alias {
-            let paths: Vec<String> = keys
+            let paths: Vec<TraversalPath> = keys
                 .iter()
                 .filter_map(|k| resolved.get(k).cloned().flatten())
                 .collect();
@@ -113,12 +114,14 @@ impl PipelineStage for PathResolutionStage {
     }
 }
 
-fn is_descendant(resolved: &str, authorized: &[&str]) -> bool {
-    orbit_utils::traversal_path::is_within_scope(resolved, authorized)
+fn is_descendant(resolved: &TraversalPath, authorized: &[&TraversalPath]) -> bool {
+    orbit_utils::traversal_path::is_within_scope(resolved.as_str(), authorized)
 }
 
-fn longest_common_path_prefix(paths: &[String]) -> Option<String> {
-    Some(orbit_utils::traversal_path::lowest_common_prefix(paths)).filter(|s| !s.is_empty())
+fn longest_common_path_prefix(paths: &[TraversalPath]) -> Option<TraversalPath> {
+    Some(orbit_utils::traversal_path::lowest_common_prefix(paths))
+        .filter(|s| !s.is_empty())
+        .map(TraversalPath::new_unchecked)
 }
 
 /// Only Traversal/Aggregation scope a node to a tight prefix. Neighbors and
@@ -165,13 +168,16 @@ mod tests {
             "limit": 50
         }"#;
         let input = parse_input(json).unwrap();
-        let seed = HashMap::from([("mr".to_string(), "1/9970/15846663/".to_string())]);
+        let seed = HashMap::from([(
+            "mr".to_string(),
+            TraversalPath::new_unchecked("1/9970/15846663/"),
+        )]);
         let got = ontology().propagate_scope_prefixes(&scope_edges(&input), &seed);
         assert_eq!(
-            got.get("diff").map(String::as_str),
+            got.get("diff").map(|p| p.as_str()),
             Some("1/9970/15846663/")
         );
-        assert_eq!(got.get("df").map(String::as_str), Some("1/9970/15846663/"));
+        assert_eq!(got.get("df").map(|p| p.as_str()), Some("1/9970/15846663/"));
     }
 
     #[test]
@@ -191,14 +197,17 @@ mod tests {
             "limit": 80
         }"#;
         let input = parse_input(json).unwrap();
-        let seed = HashMap::from([("mr".to_string(), "1/9970/120946322/122873006/".to_string())]);
+        let seed = HashMap::from([(
+            "mr".to_string(),
+            TraversalPath::new_unchecked("1/9970/120946322/122873006/"),
+        )]);
         let got = ontology().propagate_scope_prefixes(&scope_edges(&input), &seed);
         assert_eq!(
-            got.get("diff").map(String::as_str),
+            got.get("diff").map(|p| p.as_str()),
             Some("1/9970/120946322/122873006/")
         );
         assert_eq!(
-            got.get("df").map(String::as_str),
+            got.get("df").map(|p| p.as_str()),
             Some("1/9970/120946322/122873006/")
         );
     }
@@ -237,14 +246,20 @@ mod tests {
         }"#;
         let input = parse_input(json).unwrap();
         let seed = HashMap::from([
-            ("mr_a".to_string(), "1/100/1000/".to_string()),
-            ("mr_b".to_string(), "1/101/1001/".to_string()),
+            (
+                "mr_a".to_string(),
+                TraversalPath::new_unchecked("1/100/1000/"),
+            ),
+            (
+                "mr_b".to_string(),
+                TraversalPath::new_unchecked("1/101/1001/"),
+            ),
         ]);
         let got = ontology().propagate_scope_prefixes(&scope_edges(&input), &seed);
-        assert_eq!(got.get("mr_a").map(String::as_str), Some("1/100/1000/"));
-        assert_eq!(got.get("diff_a").map(String::as_str), Some("1/100/1000/"));
-        assert_eq!(got.get("mr_b").map(String::as_str), Some("1/101/1001/"));
-        assert_eq!(got.get("diff_b").map(String::as_str), Some("1/101/1001/"));
+        assert_eq!(got.get("mr_a").map(|p| p.as_str()), Some("1/100/1000/"));
+        assert_eq!(got.get("diff_a").map(|p| p.as_str()), Some("1/100/1000/"));
+        assert_eq!(got.get("mr_b").map(|p| p.as_str()), Some("1/101/1001/"));
+        assert_eq!(got.get("diff_b").map(|p| p.as_str()), Some("1/101/1001/"));
     }
 
     fn ontology_keys(node: &InputNode, ontology: &Ontology) -> Vec<PathResolutionKey> {
@@ -323,31 +338,43 @@ mod tests {
 
     #[test]
     fn lcp_collapses_sibling_projects_to_shared_group() {
-        let paths = vec!["1/9970/15846663/".to_string(), "1/9970/18/".to_string()];
+        let paths = vec![
+            TraversalPath::new_unchecked("1/9970/15846663/"),
+            TraversalPath::new_unchecked("1/9970/18/"),
+        ];
         assert_eq!(
             longest_common_path_prefix(&paths),
-            Some("1/9970/".to_string())
+            Some(TraversalPath::new_unchecked("1/9970/"))
         );
     }
 
     #[test]
     fn lcp_is_segment_aligned_not_byte_aligned() {
-        let paths = vec!["1/9970/15846663/".to_string(), "1/9971/".to_string()];
-        assert_eq!(longest_common_path_prefix(&paths), Some("1/".to_string()));
+        let paths = vec![
+            TraversalPath::new_unchecked("1/9970/15846663/"),
+            TraversalPath::new_unchecked("1/9971/"),
+        ];
+        assert_eq!(
+            longest_common_path_prefix(&paths),
+            Some(TraversalPath::new_unchecked("1/"))
+        );
     }
 
     #[test]
     fn lcp_returns_none_when_paths_share_no_segment() {
-        let paths = vec!["1/9970/".to_string(), "2/100/".to_string()];
+        let paths = vec![
+            TraversalPath::new_unchecked("1/9970/"),
+            TraversalPath::new_unchecked("2/100/"),
+        ];
         assert_eq!(longest_common_path_prefix(&paths), None);
     }
 
     #[test]
     fn lcp_identity_for_single_path() {
-        let paths = vec!["1/9970/15846663/".to_string()];
+        let paths = vec![TraversalPath::new_unchecked("1/9970/15846663/")];
         assert_eq!(
             longest_common_path_prefix(&paths),
-            Some("1/9970/15846663/".to_string())
+            Some(TraversalPath::new_unchecked("1/9970/15846663/"))
         );
     }
 
@@ -362,11 +389,26 @@ mod tests {
 
     #[test]
     fn injection_only_when_resolved_within_authorized_and_never_widens() {
-        assert!(is_descendant("1/22/", &["1/22/"]));
-        assert!(is_descendant("1/22/333/", &["1/22/"]));
-        assert!(!is_descendant("1/99/", &["1/22/"]));
-        assert!(!is_descendant("9/9/", &["1/22/"]));
-        assert!(!is_descendant("1/22/", &["1/22/333/"]));
+        assert!(is_descendant(
+            &TraversalPath::new_unchecked("1/22/"),
+            &[&TraversalPath::from("1/22/")]
+        ));
+        assert!(is_descendant(
+            &TraversalPath::new_unchecked("1/22/333/"),
+            &[&TraversalPath::from("1/22/")]
+        ));
+        assert!(!is_descendant(
+            &TraversalPath::new_unchecked("1/99/"),
+            &[&TraversalPath::from("1/22/")]
+        ));
+        assert!(!is_descendant(
+            &TraversalPath::new_unchecked("9/9/"),
+            &[&TraversalPath::from("1/22/")]
+        ));
+        assert!(!is_descendant(
+            &TraversalPath::new_unchecked("1/22/"),
+            &[&TraversalPath::from("1/22/333/")]
+        ));
     }
 
     #[test]
@@ -374,9 +416,15 @@ mod tests {
         // A transfer re-stamps rows while the cache may still resolve the pre-move
         // prefix. is_descendant confines that to a benign under-prune within authorized
         // scope and rejects any stale prefix the caller is not already authorized over.
-        let authorized = ["1/255/"];
-        assert!(is_descendant("1/255/273/292/", &authorized));
-        assert!(!is_descendant("1/700/701/292/", &authorized));
+        let authorized = [&TraversalPath::from("1/255/")];
+        assert!(is_descendant(
+            &TraversalPath::new_unchecked("1/255/273/292/"),
+            &authorized
+        ));
+        assert!(!is_descendant(
+            &TraversalPath::new_unchecked("1/700/701/292/"),
+            &authorized
+        ));
     }
 
     #[test]

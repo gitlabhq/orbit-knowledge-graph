@@ -9,12 +9,13 @@ use tracing::debug;
 use super::config::CodeTableNames;
 use crate::clickhouse::{ArrowClickHouseClient, TIMESTAMP_FORMAT, insert_overrides};
 use crate::durability::WriteDurability;
+use orbit_utils::traversal_path::TraversalPath;
 
 #[async_trait]
 pub trait StaleDataCleaner: Send + Sync {
     async fn delete_stale_data(
         &self,
-        traversal_path: &str,
+        traversal_path: &TraversalPath,
         project_id: i64,
         branch: &str,
         watermark_time: DateTime<Utc>,
@@ -28,7 +29,7 @@ pub enum StaleDataCleanerError {
     )]
     Query {
         table: String,
-        traversal_path: String,
+        traversal_path: TraversalPath,
         project_id: i64,
         branch: String,
         reason: String,
@@ -157,14 +158,14 @@ impl ClickHouseStaleDataCleaner {
         &self,
         table: &str,
         query: &str,
-        traversal_path: &str,
+        traversal_path: &TraversalPath,
         project_id: i64,
         branch: &str,
         formatted_watermark: &str,
     ) -> Result<(), StaleDataCleanerError> {
         let query_error = |reason: String| StaleDataCleanerError::Query {
             table: table.to_string(),
-            traversal_path: traversal_path.to_string(),
+            traversal_path: traversal_path.clone(),
             project_id,
             branch: branch.to_string(),
             reason,
@@ -172,12 +173,12 @@ impl ClickHouseStaleDataCleaner {
 
         debug!(
             table,
-            traversal_path, project_id, branch, "tombstoning stale rows"
+            %traversal_path, project_id, branch, "tombstoning stale rows"
         );
         let stale = self
             .client
             .query(query)
-            .param("traversal_path", traversal_path)
+            .param("traversal_path", traversal_path.as_str())
             .param("project_id", project_id)
             .param("branch", branch)
             .param("watermark_time", formatted_watermark)
@@ -204,7 +205,7 @@ impl ClickHouseStaleDataCleaner {
 impl StaleDataCleaner for ClickHouseStaleDataCleaner {
     async fn delete_stale_data(
         &self,
-        traversal_path: &str,
+        traversal_path: &TraversalPath,
         project_id: i64,
         branch: &str,
         watermark_time: DateTime<Utc>,
@@ -241,20 +242,20 @@ pub mod test_utils {
             clippy::type_complexity,
             reason = "test-only call recorder; the tuple mirrors the trait method arguments"
         )]
-        pub calls: Mutex<Vec<(String, i64, String, DateTime<Utc>)>>,
+        pub calls: Mutex<Vec<(TraversalPath, i64, String, DateTime<Utc>)>>,
     }
 
     #[async_trait]
     impl StaleDataCleaner for MockStaleDataCleaner {
         async fn delete_stale_data(
             &self,
-            traversal_path: &str,
+            traversal_path: &TraversalPath,
             project_id: i64,
             branch: &str,
             watermark_time: DateTime<Utc>,
         ) -> Result<(), StaleDataCleanerError> {
             self.calls.lock().push((
-                traversal_path.to_string(),
+                traversal_path.clone(),
                 project_id,
                 branch.to_string(),
                 watermark_time,

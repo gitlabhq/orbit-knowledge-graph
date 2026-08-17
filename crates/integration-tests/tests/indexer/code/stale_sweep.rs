@@ -5,6 +5,7 @@ use indexer::checkpoint::{CheckpointStore, ClickHouseCheckpointStore};
 use indexer::modules::code::config::CodeTableNames;
 use indexer::orchestrator::scheduled::CodeStaleSweep;
 use integration_testkit::{TestContext, t};
+use orbit_utils::traversal_path::TraversalPath;
 
 const WATERMARK: &str = "2026-01-02 00:00:00.000000";
 const PRE_WATERMARK: &str = "2026-01-01 00:00:00.000000";
@@ -75,7 +76,7 @@ async fn drained_namespace_sweeps_unclaimed_rows_once() {
         "sweep must not touch a namespace the backfill has not drained"
     );
 
-    let drained = vec![traversal_path.to_string()];
+    let drained = vec![TraversalPath::new_unchecked(traversal_path)];
     sweep.run_for_drained(&drained).await.expect("sweep failed");
 
     assert!(!file_is_active(&clickhouse, project_id, 111).await);
@@ -139,7 +140,7 @@ async fn sweep_scopes_to_the_drained_namespace() {
 
     let (sweep, _) = build_sweep(&clickhouse);
     sweep
-        .run_for_drained(&["1/40/".to_string()])
+        .run_for_drained(&[TraversalPath::new_unchecked("1/40/")])
         .await
         .expect("sweep failed");
 
@@ -192,7 +193,7 @@ async fn sweep_writes_no_tombstones_for_superseded_rows() {
 
     let (sweep, _) = build_sweep(&clickhouse);
     sweep
-        .run_for_drained(&[traversal_path.to_string()])
+        .run_for_drained(&[TraversalPath::new_unchecked(traversal_path)])
         .await
         .expect("sweep failed");
 

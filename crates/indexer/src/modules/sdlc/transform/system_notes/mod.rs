@@ -38,6 +38,7 @@ use crate::modules::sdlc::transform::{
     BlockTransform, TableBatch, TransformFactory, TransformRegistry,
 };
 use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
+use orbit_utils::traversal_path::TraversalPath;
 
 /// Registry key for this transform; also the `etl.transform` value in
 /// `config/ontology/derived/core/system_note.yaml`.
@@ -56,7 +57,7 @@ struct ExtractedNote {
     noteable_type: String,
     author_id: Option<i64>,
     project_id: Option<i64>,
-    traversal_path: String,
+    traversal_path: TraversalPath,
     action: String,
 }
 
@@ -98,10 +99,7 @@ impl BlockTransform for SystemNotesTransform {
             return Ok(Vec::new());
         }
 
-        let Some(root_prefix) = notes
-            .iter()
-            .find_map(|n| orbit_utils::traversal_path::root_prefix(&n.traversal_path))
-        else {
+        let Some(root_prefix) = notes.iter().find_map(|n| n.traversal_path.root_prefix()) else {
             warn!("system_notes: block has no valid traversal_path root; skipping resolution");
             return Ok(Vec::new());
         };
@@ -182,7 +180,7 @@ fn batch_to_notes(block: &RecordBatch) -> Result<Vec<ExtractedNote>, HandlerErro
             } else {
                 Some(project_id_col.value(i))
             },
-            traversal_path: traversal_path_col.value(i).to_string(),
+            traversal_path: TraversalPath::new_unchecked(traversal_path_col.value(i)),
             action: action_col.value(i).to_string(),
         });
     }
@@ -192,7 +190,7 @@ fn batch_to_notes(block: &RecordBatch) -> Result<Vec<ExtractedNote>, HandlerErro
 async fn resolve_and_emit(
     datalake: &dyn DatalakeQuery,
     notes: &[ExtractedNote],
-    root_prefix: &str,
+    root_prefix: &TraversalPath,
     resolve_lookup_batch_size: usize,
 ) -> Result<Vec<EmittedEdge>, HandlerError> {
     let default_projects =
@@ -285,7 +283,7 @@ fn plan_for_batch(
 async fn resolve_default_projects(
     datalake: &dyn DatalakeQuery,
     notes: &[ExtractedNote],
-    root_prefix: &str,
+    root_prefix: &TraversalPath,
     resolve_lookup_batch_size: usize,
 ) -> Result<DefaultProjectLookup, HandlerError> {
     let project_ids: Vec<i64> = {
@@ -301,7 +299,7 @@ async fn resolve_default_projects(
 
     let mut lookup = DefaultProjectLookup::new();
     for source_ids in lookup_chunks(&project_ids, resolve_lookup_batch_size) {
-        let params = json!({ "root_prefix": root_prefix, "source_ids": source_ids });
+        let params = json!({ "root_prefix": root_prefix.as_str(), "source_ids": source_ids });
         let batches = datalake
             .query_batches(&PROJECT_PATHS_SQL, params, None)
             .await
@@ -321,7 +319,7 @@ async fn resolve_default_projects(
 async fn resolve_plan(
     datalake: &dyn DatalakeQuery,
     plan: &ResolutionPlan,
-    root_prefix: &str,
+    root_prefix: &TraversalPath,
     resolve_lookup_batch_size: usize,
 ) -> Result<ResolvedIndex, HandlerError> {
     if plan.paths.is_empty() {
@@ -371,12 +369,12 @@ fn pairs_with_project_id(
 async fn query_routes(
     datalake: &dyn DatalakeQuery,
     paths: &[&str],
-    root_prefix: &str,
+    root_prefix: &TraversalPath,
 ) -> Result<Vec<RouteRow>, HandlerError> {
     let mut rows = Vec::new();
 
     for paths in lookup_chunks(paths, paths_per_routes_query(paths)) {
-        let params = json!({ "root_prefix": root_prefix, "paths": paths });
+        let params = json!({ "root_prefix": root_prefix.as_str(), "paths": paths });
         let batches = datalake
             .query_batches(&ROUTES_SQL, params, None)
             .await
@@ -390,7 +388,7 @@ async fn query_routes(
                 rows.push(RouteRow {
                     source_id: source_id_col.value(i),
                     path: path_col.value(i).to_string(),
-                    traversal_path: tp_col.value(i).to_string(),
+                    traversal_path: TraversalPath::new_unchecked(tp_col.value(i)),
                 });
             }
         }
@@ -402,7 +400,7 @@ async fn query_entities(
     datalake: &dyn DatalakeQuery,
     sql: &str,
     pairs: &[(i64, i64)],
-    root_prefix: &str,
+    root_prefix: &TraversalPath,
     resolve_lookup_batch_size: usize,
 ) -> Result<Vec<EntityRow>, HandlerError> {
     if pairs.is_empty() {
@@ -413,7 +411,7 @@ async fn query_entities(
         let project_ids: Vec<i64> = pairs.iter().map(|(p, _)| *p).collect();
         let iids: Vec<i64> = pairs.iter().map(|(_, i)| *i).collect();
         let params = json!({
-            "root_prefix": root_prefix,
+            "root_prefix": root_prefix.as_str(),
             "project_ids": project_ids,
             "iids": iids,
         });
@@ -528,7 +526,7 @@ mod tests {
             noteable_type: noteable_type.to_string(),
             author_id: Some(7),
             project_id: Some(100),
-            traversal_path: "1/100/".to_string(),
+            traversal_path: TraversalPath::new_unchecked("1/100/"),
             action: action.to_string(),
         }
     }
@@ -677,7 +675,7 @@ mod tests {
         let edges = process_batch(&notes, &DefaultProjectLookup::new(), |_r, _default| {
             Some(ResolvedTarget {
                 id: 456,
-                traversal_path: "1/100/".to_string(),
+                traversal_path: TraversalPath::new_unchecked("1/100/"),
             })
         });
         assert_eq!(edges.len(), 1);
@@ -700,7 +698,7 @@ mod tests {
             seen_default = Some(default.to_string());
             Some(ResolvedTarget {
                 id: 456,
-                traversal_path: "1/100/".to_string(),
+                traversal_path: TraversalPath::new_unchecked("1/100/"),
             })
         });
         assert_eq!(seen_default.as_deref(), Some("my/proj"));
@@ -769,10 +767,14 @@ mod tests {
             })
             .collect();
 
-        let lookup =
-            resolve_default_projects(&datalake, &notes, "1/", TEST_RESOLVE_LOOKUP_BATCH_SIZE)
-                .await
-                .unwrap();
+        let lookup = resolve_default_projects(
+            &datalake,
+            &notes,
+            &TraversalPath::new_unchecked("1/"),
+            TEST_RESOLVE_LOOKUP_BATCH_SIZE,
+        )
+        .await
+        .unwrap();
 
         let queries = datalake.queries();
         let chunk_sizes: Vec<_> = queries
@@ -794,7 +796,9 @@ mod tests {
         let paths: Vec<_> = (0..3_000).map(|i| format!("group/project-{i}")).collect();
         let path_refs: Vec<_> = paths.iter().map(String::as_str).collect();
 
-        let routes = query_routes(&datalake, &path_refs, "1/").await.unwrap();
+        let routes = query_routes(&datalake, &path_refs, &TraversalPath::new_unchecked("1/"))
+            .await
+            .unwrap();
 
         assert!(
             datalake.queries().len() > 1,
@@ -816,7 +820,7 @@ mod tests {
             &datalake,
             &WORK_ITEMS_SQL,
             &pairs,
-            "1/",
+            &TraversalPath::new_unchecked("1/"),
             TEST_RESOLVE_LOOKUP_BATCH_SIZE,
         )
         .await
@@ -851,9 +855,14 @@ mod tests {
             plan.issue_pairs.insert((path, i as i64));
         }
 
-        let index = resolve_plan(&datalake, &plan, "1/", TEST_RESOLVE_LOOKUP_BATCH_SIZE)
-            .await
-            .unwrap();
+        let index = resolve_plan(
+            &datalake,
+            &plan,
+            &TraversalPath::new_unchecked("1/"),
+            TEST_RESOLVE_LOOKUP_BATCH_SIZE,
+        )
+        .await
+        .unwrap();
 
         for i in [
             0,
@@ -871,7 +880,7 @@ mod tests {
                 resolved.id,
                 i as i64 * TEST_ENTITY_ID_PROJECT_FACTOR + i as i64
             );
-            assert_eq!(resolved.traversal_path, format!("1/{i}/"));
+            assert_eq!(resolved.traversal_path.as_str(), format!("1/{i}/"));
         }
     }
 
@@ -881,7 +890,7 @@ mod tests {
         let index = resolve_plan(
             &datalake,
             &ResolutionPlan::default(),
-            "1/",
+            &TraversalPath::new_unchecked("1/"),
             TEST_RESOLVE_LOOKUP_BATCH_SIZE,
         )
         .await
@@ -910,9 +919,14 @@ mod tests {
                 plan.issue_pairs.insert((path, i as i64));
             }
 
-            let index = resolve_plan(&datalake, &plan, "1/", TEST_RESOLVE_LOOKUP_BATCH_SIZE)
-                .await
-                .unwrap();
+            let index = resolve_plan(
+                &datalake,
+                &plan,
+                &TraversalPath::new_unchecked("1/"),
+                TEST_RESOLVE_LOOKUP_BATCH_SIZE,
+            )
+            .await
+            .unwrap();
             let reference = Reference {
                 kind: RefKind::Issue,
                 project_path: Some(format!("group/project-{}", count - 1)),
@@ -921,7 +935,10 @@ mod tests {
             };
 
             let resolved = index.resolve(&reference, "").unwrap();
-            assert_eq!(resolved.traversal_path, format!("1/{}/", count - 1));
+            assert_eq!(
+                resolved.traversal_path.as_str(),
+                format!("1/{}/", count - 1)
+            );
         }
     }
 }

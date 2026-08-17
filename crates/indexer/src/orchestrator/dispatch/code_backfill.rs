@@ -18,6 +18,7 @@ use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
 use crate::topic::CodeIndexingTaskRequest;
 use crate::types::Envelope;
 use clickhouse_client::FromArrowColumn;
+use orbit_utils::traversal_path::TraversalPath;
 
 pub const METRIC_NAME: &str = "dispatch.code_backfill";
 
@@ -39,7 +40,7 @@ WHERE deleted = false
 
 pub struct PendingProject {
     pub project_id: i64,
-    pub traversal_path: String,
+    pub traversal_path: TraversalPath,
 }
 
 pub struct CodeBackfill {
@@ -78,11 +79,11 @@ impl CodeBackfill {
 
     pub async fn dispatch_for_namespaces(
         &self,
-        namespaces: &[(i64, String)],
+        namespaces: &[(i64, TraversalPath)],
         dispatch_id: Uuid,
     ) -> Result<DispatchOutcome, TaskError> {
         let mut all_pending: Vec<PendingProject> = Vec::new();
-        let mut drained_paths: Vec<String> = Vec::new();
+        let mut drained_paths: Vec<TraversalPath> = Vec::new();
         for (namespace_id, traversal_path) in namespaces {
             let pending = self
                 .fetch_pending_for_namespace(*namespace_id, traversal_path)
@@ -120,14 +121,14 @@ impl CodeBackfill {
     /// under `traversal_path` for the indexer's current schema version.
     async fn fetch_checkpointed_project_ids(
         &self,
-        traversal_path: &str,
+        traversal_path: &TraversalPath,
     ) -> Result<HashSet<i64>, TaskError> {
         let table = prefixed_table_name(CODE_INDEXING_CHECKPOINT_TABLE, *SCHEMA_VERSION);
         let batches = self
             .graph
             .query(CHECKPOINTED_PROJECT_IDS_QUERY)
             .param("table", &table)
-            .param("traversal_path", traversal_path)
+            .param("traversal_path", traversal_path.as_str())
             .fetch_arrow()
             .await
             .map_err(|error| {
@@ -139,7 +140,7 @@ impl CodeBackfill {
         Ok(ids.into_iter().collect())
     }
 
-    pub async fn fetch_enabled_namespaces(&self) -> Result<Vec<(i64, String)>, TaskError> {
+    pub async fn fetch_enabled_namespaces(&self) -> Result<Vec<(i64, TraversalPath)>, TaskError> {
         let batches = self
             .datalake
             .query(resolved_enabled_namespaces_sql())
@@ -152,13 +153,16 @@ impl CodeBackfill {
 
         let ids = i64::extract_column(&batches, 0).map_err(TaskError::new)?;
         let paths = String::extract_column(&batches, 1).map_err(TaskError::new)?;
-        Ok(ids.into_iter().zip(paths).collect())
+        Ok(ids
+            .into_iter()
+            .zip(paths.into_iter().map(TraversalPath::new_unchecked))
+            .collect())
     }
 
     async fn fetch_pending_for_namespace(
         &self,
         namespace_id: i64,
-        traversal_path: &str,
+        traversal_path: &TraversalPath,
     ) -> Result<Vec<PendingProject>, TaskError> {
         let projects = self.fetch_namespace_projects(traversal_path).await?;
 
@@ -197,7 +201,7 @@ impl CodeBackfill {
     pub async fn publish_pending(
         &self,
         projects: &[PendingProject],
-        drained_paths: Vec<String>,
+        drained_paths: Vec<TraversalPath>,
         dispatch_id: Uuid,
     ) -> Result<DispatchOutcome, TaskError> {
         let mut outcome = DispatchOutcome {
@@ -242,13 +246,13 @@ impl CodeBackfill {
 
     async fn fetch_namespace_projects(
         &self,
-        traversal_path: &str,
+        traversal_path: &TraversalPath,
     ) -> Result<Vec<PendingProject>, TaskError> {
         let query_start = Instant::now();
         let batches = self
             .datalake
             .query(NAMESPACE_PROJECTS_QUERY)
-            .param("traversal_path", traversal_path)
+            .param("traversal_path", traversal_path.as_str())
             .fetch_arrow()
             .await
             .map_err(|error| {
@@ -268,7 +272,7 @@ impl CodeBackfill {
             .zip(traversal_paths)
             .map(|(project_id, traversal_path)| PendingProject {
                 project_id,
-                traversal_path,
+                traversal_path: TraversalPath::new_unchecked(traversal_path),
             })
             .collect())
     }
@@ -320,12 +324,12 @@ mod tests {
         let mut projects: Vec<PendingProject> = (0..100)
             .map(|i| PendingProject {
                 project_id: 10_000 + i,
-                traversal_path: "1/A/".to_string(),
+                traversal_path: TraversalPath::new_unchecked("1/A/"),
             })
             .collect();
         projects.extend((0..100).map(|i| PendingProject {
             project_id: 20_000 + i,
-            traversal_path: "1/B/".to_string(),
+            traversal_path: TraversalPath::new_unchecked("1/B/"),
         }));
 
         projects.shuffle(&mut rand::rng());

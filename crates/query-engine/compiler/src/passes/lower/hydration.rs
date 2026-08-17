@@ -18,7 +18,7 @@ use crate::passes::shared::deleted_false;
 
 use super::helpers::limit_by_scan;
 
-use orbit_utils::traversal_path::{parent, prune_to_leaves, segment_count};
+use orbit_utils::traversal_path::{TraversalPath, parent, prune_to_leaves, segment_count};
 
 const ARRAY_EXISTS_PATH_THRESHOLD: usize = 256;
 
@@ -154,7 +154,7 @@ fn emit_arm(
 ///    discovers hundreds of traversal paths.
 fn traversal_path_filter(
     alias: &str,
-    paths: &[String],
+    paths: &[TraversalPath],
     is_dynamic: bool,
     path_segment_budget: Option<usize>,
 ) -> Option<Expr> {
@@ -277,7 +277,10 @@ mod tests {
             id_property: "id".into(),
             node_ids,
             columns: columns.into_iter().map(String::from).collect(),
-            traversal_paths: traversal_paths.into_iter().map(String::from).collect(),
+            traversal_paths: traversal_paths
+                .into_iter()
+                .map(TraversalPath::new_unchecked)
+                .collect(),
             sort_key: vec!["id".to_string()],
         }
     }
@@ -381,8 +384,8 @@ mod tests {
 
     #[test]
     fn large_dynamic_tp_sets_emit_array_exists() {
-        let paths: Vec<String> = (0..=ARRAY_EXISTS_PATH_THRESHOLD)
-            .map(|id| format!("1/9970/{id}/"))
+        let paths: Vec<TraversalPath> = (0..=ARRAY_EXISTS_PATH_THRESHOLD)
+            .map(|id| TraversalPath::new_unchecked(format!("1/9970/{id}/")))
             .collect();
         let plan = HydrationNodePlan {
             alias: "hydrate".into(),
@@ -424,8 +427,8 @@ mod tests {
 
     #[test]
     fn large_static_tp_sets_emit_or() {
-        let paths: Vec<String> = (0..=ARRAY_EXISTS_PATH_THRESHOLD)
-            .map(|id| format!("1/9970/{id}/"))
+        let paths: Vec<TraversalPath> = (0..=ARRAY_EXISTS_PATH_THRESHOLD)
+            .map(|id| TraversalPath::new_unchecked(format!("1/9970/{id}/")))
             .collect();
         let plan = HydrationNodePlan {
             alias: "hydrate".into(),

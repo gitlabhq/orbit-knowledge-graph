@@ -1,4 +1,5 @@
 use crate::error::{QueryError, Result};
+use orbit_utils::traversal_path::TraversalPath;
 use serde::Deserialize;
 use std::collections::HashMap;
 
@@ -51,17 +52,17 @@ impl AccessLevel {
 /// against an entity's `required_access_level` is a direct `>=` without a
 /// role-table lookup.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TraversalPath {
-    pub path: String,
+pub struct AuthorizedPath {
+    pub path: TraversalPath,
     pub access_levels: Vec<u32>,
 }
 
-impl TraversalPath {
-    pub fn new(path: impl Into<String>, access_level: u32) -> Self {
+impl AuthorizedPath {
+    pub fn new(path: impl Into<TraversalPath>, access_level: u32) -> Self {
         Self::with_access_levels(path, vec![access_level])
     }
 
-    pub fn with_access_levels(path: impl Into<String>, access_levels: Vec<u32>) -> Self {
+    pub fn with_access_levels(path: impl Into<TraversalPath>, access_levels: Vec<u32>) -> Self {
         let mut access_levels = access_levels;
         access_levels.sort_unstable();
         access_levels.dedup();
@@ -87,7 +88,7 @@ impl TraversalPath {
 #[derive(Debug, Clone)]
 pub struct SecurityContext {
     pub org_id: i64,
-    pub traversal_paths: Vec<TraversalPath>,
+    pub traversal_paths: Vec<AuthorizedPath>,
     pub admin: bool,
     pub access_level: Option<AccessLevel>,
     pub realm: Option<Realm>,
@@ -98,7 +99,7 @@ pub struct SecurityContext {
     /// node's alias (= its DSL `id`). Additive scope metadata the security pass
     /// ANDs onto that node's scan only; it never narrows `traversal_paths`,
     /// which still drive the broad per-alias authz filter.
-    pub scope_prefixes: HashMap<String, String>,
+    pub scope_prefixes: HashMap<String, TraversalPath>,
 }
 
 impl SecurityContext {
@@ -108,7 +109,7 @@ impl SecurityContext {
     pub fn new(org_id: i64, traversal_paths: Vec<String>) -> Result<Self> {
         let tagged = traversal_paths
             .into_iter()
-            .map(|p| TraversalPath::new(p, DEFAULT_PATH_ACCESS_LEVEL))
+            .map(|p| AuthorizedPath::new(p, DEFAULT_PATH_ACCESS_LEVEL))
             .collect();
         Self::new_with_roles(org_id, tagged)
     }
@@ -118,9 +119,9 @@ impl SecurityContext {
     /// Validates that:
     /// - Each path matches the format `int/int/.../`
     /// - Each segment fits in i64
-    pub fn new_with_roles(org_id: i64, traversal_paths: Vec<TraversalPath>) -> Result<Self> {
+    pub fn new_with_roles(org_id: i64, traversal_paths: Vec<AuthorizedPath>) -> Result<Self> {
         for tp in &traversal_paths {
-            Self::validate_traversal_path(&tp.path)?;
+            Self::validate_traversal_path(tp.path.as_str())?;
             if tp.access_levels.is_empty() {
                 return Err(QueryError::Security(format!(
                     "traversal_path '{}' has no access_levels",
@@ -155,7 +156,7 @@ impl SecurityContext {
         self
     }
 
-    pub fn with_scope_prefixes(mut self, scope_prefixes: HashMap<String, String>) -> Self {
+    pub fn with_scope_prefixes(mut self, scope_prefixes: HashMap<String, TraversalPath>) -> Self {
         self.scope_prefixes = scope_prefixes;
         self
     }
@@ -163,7 +164,7 @@ impl SecurityContext {
     /// Return the subset of paths where one of the user's access levels meets
     /// `required_access_level`. Admin users bypass the filter because they
     /// already carry the synthetic org-root path at maximum role.
-    pub fn paths_at_least(&self, required_access_level: u32) -> Vec<&str> {
+    pub fn paths_at_least(&self, required_access_level: u32) -> Vec<&TraversalPath> {
         self.traversal_paths
             .iter()
             .filter(|tp| {
@@ -171,7 +172,7 @@ impl SecurityContext {
                     .iter()
                     .any(|level| *level >= required_access_level)
             })
-            .map(|tp| tp.path.as_str())
+            .map(|tp| &tp.path)
             .collect()
     }
 

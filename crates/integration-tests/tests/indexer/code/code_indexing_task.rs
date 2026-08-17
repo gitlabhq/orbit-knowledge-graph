@@ -17,6 +17,7 @@ use integration_testkit::{assert_edge_count_for_traversal_path, t};
 use orbit_utils::arrow::ArrowUtils;
 
 use super::helpers::*;
+use orbit_utils::traversal_path::TraversalPath;
 
 #[tokio::test]
 async fn indexes_repository() {
@@ -61,7 +62,7 @@ async fn indexes_repository() {
         "CONTAINS",
         "Branch",
         "File",
-        traversal_path,
+        &TraversalPath::new_unchecked(traversal_path),
         0,
     )
     .await;
@@ -529,7 +530,12 @@ async fn stale_cleanup_tombstones_must_not_outrank_rows_versioned_at_the_waterma
 
     let watermark = Utc.with_ymd_and_hms(2026, 1, 2, 0, 0, 0).unwrap();
     cleaner
-        .delete_stale_data(traversal_path, project_id, branch, watermark)
+        .delete_stale_data(
+            &TraversalPath::new_unchecked(traversal_path),
+            project_id,
+            branch,
+            watermark,
+        )
         .await
         .expect("stale data cleanup failed");
 
@@ -1062,7 +1068,7 @@ fn code_indexing_task_envelope(
         project_id,
         branch: Some("main".to_string()),
         commit_sha: Some(commit_sha.to_string()),
-        traversal_path: traversal_path.to_string(),
+        traversal_path: TraversalPath::new_unchecked(traversal_path),
         dispatch_id: uuid::Uuid::new_v4(),
         campaign_id: None,
     })
@@ -1079,7 +1085,7 @@ fn code_indexing_backfill_envelope(
         project_id,
         branch: Some("main".to_string()),
         commit_sha: None,
-        traversal_path: traversal_path.to_string(),
+        traversal_path: TraversalPath::new_unchecked(traversal_path),
         dispatch_id: uuid::Uuid::new_v4(),
         campaign_id: None,
     })
@@ -1337,7 +1343,7 @@ async fn assert_branch_indexed(
         "IN_PROJECT",
         "Branch",
         "Project",
-        expected_traversal_path,
+        &TraversalPath::new_unchecked(expected_traversal_path),
         1,
     )
     .await;
@@ -1347,7 +1353,7 @@ async fn assert_branch_indexed(
         "CONTAINS",
         "Project",
         "Branch",
-        expected_traversal_path,
+        &TraversalPath::new_unchecked(expected_traversal_path),
         1,
     )
     .await;
@@ -1357,7 +1363,7 @@ async fn assert_branch_indexed(
         "CONTAINS",
         "Branch",
         "Directory",
-        expected_traversal_path,
+        &TraversalPath::new_unchecked(expected_traversal_path),
         1,
     )
     .await;
@@ -1367,7 +1373,7 @@ async fn assert_branch_indexed(
         "ON_BRANCH",
         "File",
         "Branch",
-        expected_traversal_path,
+        &TraversalPath::new_unchecked(expected_traversal_path),
         1,
     )
     .await;
@@ -1530,7 +1536,7 @@ async fn cancelled_run_that_finishes_writes_no_checkpoint() {
     let request = indexer::modules::code::IndexingRequest {
         project_id,
         branch: "main".to_string(),
-        traversal_path: traversal_path.to_string(),
+        traversal_path: TraversalPath::new_unchecked(traversal_path),
         task_id: 1,
         commit_sha: Some("abc123".to_string()),
         had_prior_checkpoint: false,

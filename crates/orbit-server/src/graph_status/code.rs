@@ -4,6 +4,7 @@ use arrow::array::{Array, StringArray, UInt64Array};
 use clickhouse_client::ArrowClickHouseClient;
 use ontology::Ontology;
 use orbit_utils::arrow::ArrowUtils;
+use orbit_utils::traversal_path::TraversalPath;
 use tonic::Status;
 use tracing::warn;
 
@@ -22,12 +23,12 @@ pub struct CodeIndexingState {
 pub async fn get_code_indexing_state(
     client: &ArrowClickHouseClient,
     ontology: &Ontology,
-    traversal_path: &str,
+    traversal_path: &TraversalPath,
 ) -> CodeIndexingState {
     let projects = match fetch_project_coverage(client, ontology, traversal_path).await {
         Ok(projects) => projects,
         Err(error) => {
-            warn!(traversal_path, %error, "Graph status branch failed");
+            warn!(%traversal_path, %error, "Graph status branch failed");
             return CodeIndexingState {
                 projects: ProjectsStatus::default(),
                 aggregate: Some(unknown_status()),
@@ -75,7 +76,7 @@ pub(super) fn resolve_node_states(
 async fn fetch_project_coverage(
     client: &ArrowClickHouseClient,
     ontology: &Ontology,
-    traversal_path: &str,
+    traversal_path: &TraversalPath,
 ) -> Result<ProjectsStatus, Status> {
     let tables = project_tables(ontology)?;
     let sql = projects_sql(&tables.project, &tables.code_checkpoint);

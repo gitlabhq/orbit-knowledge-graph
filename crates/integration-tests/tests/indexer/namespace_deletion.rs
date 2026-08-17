@@ -13,6 +13,7 @@ use indexer::modules::namespace_deletion::{
 };
 use indexer::topic::NamespaceDeletionRequest;
 use indexer::types::{Envelope, Event};
+use orbit_utils::traversal_path::TraversalPath;
 
 const DELETED_NAMESPACE_PATH: &str = "1/100/";
 const SIBLING_NAMESPACE_PATH: &str = "1/200/";
@@ -128,7 +129,7 @@ async fn run_deletion_handler(context: &TestContext, ontology: &ontology::Ontolo
 
     let request = NamespaceDeletionRequest {
         namespace_id: DELETED_NAMESPACE_ID,
-        traversal_path: DELETED_NAMESPACE_PATH.to_string(),
+        traversal_path: TraversalPath::new_unchecked(DELETED_NAMESPACE_PATH),
         dispatch_id: uuid::Uuid::new_v4(),
     };
     let envelope = Envelope::new(&request).unwrap();
@@ -378,7 +379,9 @@ async fn reconcile_root(context: &TestContext, ontology: &ontology::Ontology, ro
         datalake, graph, ontology,
     ));
 
-    let outcomes = store.reconcile_moved_entities(root).await;
+    let outcomes = store
+        .reconcile_moved_entities(&TraversalPath::new_unchecked(root))
+        .await;
     for outcome in &outcomes {
         assert!(
             outcome.error.is_none(),

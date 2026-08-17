@@ -83,7 +83,7 @@ async fn check_edges(ctx: &TestContext, expect: &EdgeExpect, location: &str) {
             let actual = &row["traversal_path"];
             assert_eq!(
                 actual,
-                &ColumnValue::String(expected_path.clone()),
+                &ColumnValue::String(expected_path.as_str().to_string()),
                 "{edge_location}: row {i} should have traversal_path '{expected_path}', got {actual:?}"
             );
         }

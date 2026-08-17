@@ -293,7 +293,7 @@ fn leaf_namespace_ids(claims: &Claims) -> Vec<i64> {
     claims
         .group_traversal_ids
         .iter()
-        .filter_map(|tp| orbit_utils::traversal_path::leaf_id(&tp.path))
+        .filter_map(|tp| tp.path.leaf_id())
         .collect()
 }
 
@@ -318,7 +318,7 @@ mod tests {
             group_traversal_ids: paths
                 .into_iter()
                 .map(|p| TraversalPathClaim {
-                    path: p.to_string(),
+                    path: orbit_utils::traversal_path::TraversalPath::new_unchecked(p),
                     access_levels: vec![20],
                 })
                 .collect(),

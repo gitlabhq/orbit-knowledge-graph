@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 
 use ontology::constants::*;
+use orbit_utils::traversal_path::TraversalPath;
 
 use crate::input::*;
 
@@ -25,7 +26,7 @@ pub struct Hop {
     pub join_prev: Option<JoinColumns>,
     /// Tight `traversal_path` prefix to confine this hop's edge scan to,
     /// carried over from the originating `InputRelationship`.
-    pub scope_prefix: Option<String>,
+    pub scope_prefix: Option<TraversalPath>,
     /// Whether this hop keeps both endpoints in the same namespace (intrinsic
     /// child). Gates the FK-chain lowering, which is only result-equivalent to
     /// the edge scan for such relationships.
