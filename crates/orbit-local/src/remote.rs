@@ -1,11 +1,3 @@
-//! Authenticated calls to the remote Orbit graph. The credential is resolved
-//! from the process environment: `glab orbit` injects the `ORBIT_*` triplet
-//! before exec, and the `GITLAB_*` fallback lets the binary run standalone.
-//!
-//! The six subcommands mirror `glab orbit remote`. Their HTTP surface is the
-//! `/api/v4/orbit/*` REST family and the exit-code taxonomy (2..5) matches
-//! glab's `orbiterr` package so scripting agents can branch on the same codes.
-
 use std::io::{Read, Write};
 use std::time::Duration;
 
@@ -32,17 +24,12 @@ const EXIT_UNAUTHENTICATED: i32 = 3;
 const EXIT_FORBIDDEN: i32 = 4;
 const EXIT_RATE_LIMITED: i32 = 5;
 
-/// Server response shape requested via `--response-format`. `llm` is compact
-/// GOON/TOON text for agents; `raw` is structured JSON suitable for `jq`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub(crate) enum ResponseFormat {
     Llm,
     Raw,
 }
 
-/// A failed remote call carrying the process exit code it should terminate
-/// with. Codes 2..5 map to stable HTTP meanings (see `map_http_error`); every
-/// other failure is the generic code 1.
 #[derive(Debug)]
 pub(crate) struct RemoteError {
     pub exit_code: i32,
@@ -162,9 +149,6 @@ impl OrbitClient {
     fn from_env() -> Result<Self, RemoteError> {
         let endpoint = resolve_endpoint(|key| std::env::var(key).ok())?;
 
-        // reqwest is compiled with `rustls-no-provider`, so a CryptoProvider
-        // must be installed before building a client. install_default is
-        // idempotent.
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
         let http = reqwest::Client::builder()
@@ -204,8 +188,6 @@ impl OrbitClient {
     }
 }
 
-/// Resolution order: the explicit `ORBIT_*` triplet wins; otherwise fall back
-/// to `GITLAB_TOKEN` as a `Bearer` credential against `GITLAB_URL`.
 fn resolve_endpoint(get_env: impl Fn(&str) -> Option<String>) -> anyhow::Result<ResolvedEndpoint> {
     let non_empty = |key: &str| get_env(key).filter(|value| !value.is_empty());
 
@@ -256,7 +238,7 @@ fn map_http_error(status: u16, body: &str) -> RemoteError {
                 "Knowledge Graph access denied (HTTP 403){}. If the message mentions \"No \
                  Knowledge Graph enabled namespaces\", an Owner of a top-level group you belong \
                  to must enable Orbit.",
-                suffix(body)
+                body_suffix(body)
             ),
         ),
         429 => RemoteError::new(
@@ -270,14 +252,12 @@ fn map_http_error(status: u16, body: &str) -> RemoteError {
         ),
         _ => RemoteError::new(
             EXIT_GENERIC,
-            format!("Orbit API error (HTTP {status}){}", suffix(body)),
+            format!("Orbit API error (HTTP {status}){}", body_suffix(body)),
         ),
     }
 }
 
-/// Prepends `": "` to a non-empty body so it can be appended to a status
-/// message without a trailing separator when the body is empty.
-fn suffix(body: &str) -> String {
+fn body_suffix(body: &str) -> String {
     if body.is_empty() {
         String::new()
     } else {
@@ -301,9 +281,6 @@ fn read_query_body(source: Option<&str>) -> anyhow::Result<Vec<u8>> {
     }
 }
 
-/// Builds the `POST /orbit/query` body. The user's `query` is forwarded
-/// verbatim; `response_format` priority is flag > body field > `llm` default,
-/// matching glab's `buildRequest`.
 fn build_query_request(
     body: &[u8],
     format_override: Option<ResponseFormat>,
@@ -389,10 +366,6 @@ fn graph_status_params(
     params
 }
 
-/// Applies the nested-shape rules of `GET /orbit/status`: newer instances wrap
-/// health under `user`/`system`. An unavailable user (or a present user with
-/// no system health) is an error; otherwise the inner `system` object is
-/// printed. The pre-nesting flat shape is printed as-is.
 fn select_status_output(body: &[u8]) -> Result<Vec<u8>, RemoteError> {
     let Ok(value) = serde_json::from_slice::<serde_json::Value>(body) else {
         return Ok(body.to_vec());
@@ -522,8 +495,6 @@ mod tests {
         assert_eq!(endpoint.base_url, "https://gitlab.example.com");
     }
 
-    // A partial ORBIT_* triplet must not resolve; it falls through so the
-    // fallback (or the clear error) applies rather than sending a blank header.
     #[test]
     fn partial_orbit_triplet_falls_through_to_error() {
         let result = resolve_endpoint(env_from(&[("ORBIT_API_BASE_URL", "https://example.test")]));

@@ -1,8 +1,3 @@
-//! End-to-end checks that the built `orbit remote` binary sends the HTTP
-//! method, path, query string, and auth header each subcommand promises.
-//! A hand-rolled single-connection mock stands in for the Orbit REST API so
-//! no live GitLab credentials are needed.
-
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpListener;
 use std::process::Command;
