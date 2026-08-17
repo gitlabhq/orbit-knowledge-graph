@@ -149,10 +149,10 @@ fn build_path_filter(alias: &str, paths: &[&TraversalPath]) -> Expr {
         _ => {
             let collapsed = TraversalPathTrie::from_paths(paths).to_minimal_prefixes();
             if collapsed.len() == 1 {
-                return starts_with_expr(alias, &collapsed[0]);
+                return starts_with_expr(alias, collapsed[0].as_str());
             }
             let lcp = lowest_common_prefix(&collapsed);
-            let lcp_filter = starts_with_expr(alias, &lcp);
+            let lcp_filter = starts_with_expr(alias, lcp.as_str());
             Expr::and(lcp_filter, path_or_filter(alias, &collapsed))
         }
     }
@@ -175,8 +175,8 @@ fn starts_with_value_expr(alias: &str, path: Expr) -> Expr {
 /// granule pruning per path prefix. This matters inside `dedup_edge_scan`
 /// FINAL subqueries: PK range pruning reduces the scan from the entire LCP
 /// namespace to only the user's authorized paths.
-fn path_or_filter(alias: &str, paths: &[String]) -> Expr {
-    let mut iter = paths.iter().map(|p| starts_with_expr(alias, p));
+fn path_or_filter(alias: &str, paths: &[TraversalPath]) -> Expr {
+    let mut iter = paths.iter().map(|p| starts_with_expr(alias, p.as_str()));
     let first = iter.next().expect("paths is non-empty (caller checks)");
     iter.fold(first, |a, b| Expr::binary(crate::ast::Op::Or, a, b))
 }

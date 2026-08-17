@@ -18,7 +18,7 @@ use crate::passes::shared::deleted_false;
 
 use super::helpers::limit_by_scan;
 
-use orbit_utils::traversal_path::{TraversalPath, parent, prune_to_leaves, segment_count};
+use orbit_utils::traversal_path::{TraversalPath, prune_to_leaves};
 
 const ARRAY_EXISTS_PATH_THRESHOLD: usize = 256;
 
@@ -176,9 +176,9 @@ fn traversal_path_filter(
     }
 }
 
-fn generalize_to_budget(mut leaves: Vec<String>, budget: usize) -> Vec<String> {
-    while leaves.iter().map(|p| segment_count(p)).sum::<usize>() > budget {
-        let parents: Vec<String> = leaves.iter().map(|p| parent(p)).collect();
+fn generalize_to_budget(mut leaves: Vec<TraversalPath>, budget: usize) -> Vec<TraversalPath> {
+    while leaves.iter().map(|p| p.segment_count()).sum::<usize>() > budget {
+        let parents: Vec<TraversalPath> = leaves.iter().map(|p| p.parent()).collect();
         if parents == leaves {
             break;
         }
@@ -187,18 +187,21 @@ fn generalize_to_budget(mut leaves: Vec<String>, budget: usize) -> Vec<String> {
     leaves
 }
 
-fn or_starts_with(alias: &str, paths: &[String]) -> Option<Expr> {
+fn or_starts_with(alias: &str, paths: &[TraversalPath]) -> Option<Expr> {
     or_balanced(paths.iter().map(|tp| starts_with_path(alias, tp)).collect())
 }
 
-fn starts_with_path(alias: &str, tp: &str) -> Expr {
+fn starts_with_path(alias: &str, tp: &TraversalPath) -> Expr {
     Expr::func(
         "startsWith",
-        vec![Expr::col(alias, TRAVERSAL_PATH_COLUMN), Expr::string(tp)],
+        vec![
+            Expr::col(alias, TRAVERSAL_PATH_COLUMN),
+            Expr::string(tp.as_str()),
+        ],
     )
 }
 
-fn array_exists_starts_with(alias: &str, paths: &[String]) -> Expr {
+fn array_exists_starts_with(alias: &str, paths: &[TraversalPath]) -> Expr {
     let lambda_param = "_gkg_path";
     Expr::func(
         "arrayExists",
@@ -218,7 +221,7 @@ fn array_exists_starts_with(alias: &str, paths: &[String]) -> Expr {
                 serde_json::Value::Array(
                     paths
                         .iter()
-                        .map(|p| serde_json::Value::String(p.clone()))
+                        .map(|p| serde_json::Value::String(p.as_str().to_string()))
                         .collect(),
                 ),
             ),
@@ -456,20 +459,22 @@ mod tests {
 
     #[test]
     fn generalize_to_budget_widens_to_ancestors() {
-        let leaves: Vec<String> = (0..900)
-            .map(|i| format!("1/{i:0>40}/{:0>40}/", i + 10000))
+        let leaves: Vec<TraversalPath> = (0..900)
+            .map(|i| TraversalPath::new_unchecked(format!("1/{i:0>40}/{:0>40}/", i + 10000)))
             .collect();
         let widened = generalize_to_budget(leaves.clone(), 2000);
-        assert!(widened.iter().map(|p| segment_count(p)).sum::<usize>() <= 2000);
+        assert!(widened.iter().map(|p| p.segment_count()).sum::<usize>() <= 2000);
         assert!(widened.iter().all(|w| !leaves.contains(w)));
         for path in &leaves {
             assert!(
-                widened.iter().any(|w| path.starts_with(w.as_str())),
+                widened.iter().any(|w| path.is_descendant_of(w)),
                 "{path} lost its ancestor prefix"
             );
         }
 
-        let roots: Vec<String> = (0..50).map(|i| format!("{i}/")).collect();
+        let roots: Vec<TraversalPath> = (0..50)
+            .map(|i| TraversalPath::new_unchecked(format!("{i}/")))
+            .collect();
         assert_eq!(generalize_to_budget(roots.clone(), 10), roots);
     }
 

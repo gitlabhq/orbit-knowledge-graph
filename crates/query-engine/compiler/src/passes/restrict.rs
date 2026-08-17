@@ -184,7 +184,7 @@ fn validate_traversal_path_within_scope(
     path: &str,
     eligible_paths: &[&TraversalPath],
 ) -> Result<()> {
-    if orbit_utils::traversal_path::is_within_scope(path, eligible_paths) {
+    if TraversalPath::new_unchecked(path).is_within_scope(eligible_paths) {
         return Ok(());
     }
 

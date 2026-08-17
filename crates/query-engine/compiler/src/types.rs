@@ -121,7 +121,7 @@ impl SecurityContext {
     /// - Each segment fits in i64
     pub fn new_with_roles(org_id: i64, traversal_paths: Vec<AuthorizedPath>) -> Result<Self> {
         for tp in &traversal_paths {
-            Self::validate_traversal_path(tp.path.as_str())?;
+            Self::validate_traversal_path(&tp.path)?;
             if tp.access_levels.is_empty() {
                 return Err(QueryError::Security(format!(
                     "traversal_path '{}' has no access_levels",
@@ -176,7 +176,7 @@ impl SecurityContext {
             .collect()
     }
 
-    pub(crate) fn validate_traversal_path(path: &str) -> Result<()> {
-        orbit_utils::traversal_path::validate(path).map_err(QueryError::Security)
+    pub(crate) fn validate_traversal_path(path: &TraversalPath) -> Result<()> {
+        path.validate().map_err(QueryError::Security)
     }
 }

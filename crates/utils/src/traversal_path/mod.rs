@@ -13,172 +13,49 @@ pub use trie::TraversalPathTrie;
 static ANY_DEPTH_REGEX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^(\d+/)+$").expect("valid regex"));
 
-pub fn segments(path: &str) -> impl Iterator<Item = &str> {
-    path.split('/').filter(|s| !s.is_empty())
-}
-
-pub fn segment_count(path: &str) -> usize {
-    segments(path).count()
-}
-
-pub fn parent(path: &str) -> String {
-    match path.trim_end_matches('/').rfind('/') {
-        Some(i) => path[..=i].to_string(),
-        None => path.to_string(),
-    }
-}
-
-pub fn overlaps(a: &str, b: &str) -> bool {
-    a.starts_with(b) || b.starts_with(a)
-}
-
-pub fn is_within_scope<S: AsRef<str>>(path: &str, allowed: &[S]) -> bool {
-    allowed.iter().any(|prefix| {
-        let prefix = prefix.as_ref();
-        path.starts_with(prefix)
-            && (prefix.ends_with('/')
-                || path.len() == prefix.len()
-                || path.as_bytes().get(prefix.len()) == Some(&b'/'))
-    })
-}
-
-pub fn is_valid_any_depth(path: &str) -> bool {
-    ANY_DEPTH_REGEX.is_match(path)
-}
-
-pub fn validate(path: &str) -> Result<(), String> {
-    if !is_valid_any_depth(path) {
-        return Err(format!(
-            "invalid traversal_path format: '{path}' (expected pattern like '1/2/3/')"
-        ));
-    }
-    for segment in path.trim_end_matches('/').split('/') {
-        if segment.parse::<i64>().is_err() {
-            return Err(format!(
-                "traversal_path segment '{segment}' exceeds i64 range"
-            ));
-        }
-    }
-    Ok(())
-}
-
-pub fn prune_to_leaves<S: AsRef<str>>(paths: &[S]) -> Vec<String> {
+pub fn prune_to_leaves(paths: &[TraversalPath]) -> Vec<TraversalPath> {
     if paths.len() <= 1 {
-        return paths.iter().map(|p| p.as_ref().to_string()).collect();
+        return paths.to_vec();
     }
-    let mut sorted: Vec<&str> = paths.iter().map(AsRef::as_ref).collect();
+    let mut sorted: Vec<&TraversalPath> = paths.iter().collect();
     sorted.sort_unstable();
     sorted.dedup();
 
     let mut leaves = Vec::with_capacity(sorted.len());
     for (i, path) in sorted.iter().enumerate() {
-        let is_prefix_of_next = sorted.get(i + 1).is_some_and(|next| next.starts_with(path));
+        let is_prefix_of_next = sorted
+            .get(i + 1)
+            .is_some_and(|next| next.is_descendant_of(path));
         if !is_prefix_of_next {
-            leaves.push((*path).to_string());
+            leaves.push((*path).clone());
         }
     }
     leaves
 }
 
-pub fn lowest_common_prefix<S: AsRef<str>>(paths: &[S]) -> String {
+pub fn lowest_common_prefix(paths: &[TraversalPath]) -> TraversalPath {
     debug_assert!(
-        paths.iter().all(|p| p.as_ref().ends_with('/')),
+        paths.iter().all(|p| p.0.ends_with('/')),
         "lowest_common_prefix requires '/'-terminated traversal paths"
     );
     let Some((first, rest)) = paths.split_first() else {
-        return String::new();
+        return TraversalPath(String::new());
     };
-    let mut cursors: Vec<_> = rest.iter().map(|p| segments(p.as_ref())).collect();
+    let mut cursors: Vec<_> = rest.iter().map(|p| p.segments()).collect();
     let mut out = String::new();
-    for seg in segments(first.as_ref()) {
+    for seg in first.segments() {
         if !cursors.iter_mut().all(|c| c.next() == Some(seg)) {
             break;
         }
         out.push_str(seg);
         out.push('/');
     }
-    out
-}
-
-/// Convert slash-separated segments to dot-separated, stripping empties.
-///
-/// `"42/9970/" → "42.9970"`, `"42/9970/12345/" → "42.9970.12345"`.
-pub fn to_dotted(path: &str) -> String {
-    segments(path).collect::<Vec<_>>().join(".")
-}
-
-/// Extract the organization ID (first segment) from a traversal path.
-///
-/// Returns `None` when the path is empty or the first segment isn't numeric.
-pub fn organization_id(path: &str) -> Option<i64> {
-    path.trim_start_matches('/')
-        .split('/')
-        .next()
-        .and_then(|s| s.parse().ok())
-}
-
-/// Extract the top-level namespace ID (second segment) from a traversal path.
-///
-/// `"42/100/" → Some(100)`, `"42/100/1000/" → Some(100)`.
-/// Returns `None` when the path has fewer than two segments or the second
-/// segment isn't numeric.
-pub fn top_level_namespace_id(path: &str) -> Option<i64> {
-    segments(path).nth(1).and_then(|s| s.parse().ok())
-}
-
-/// The top-level-namespace prefix of a traversal path: the first two
-/// segments with a trailing slash (`<org_id>/<top_level_ns_id>/`).
-///
-/// `"42/100/" → Some("42/100/")`, `"42/100/1000/" → Some("42/100/")`.
-/// Returns `None` when the path has fewer than two numeric segments, so a
-/// malformed path can never produce `startsWith(traversal_path, "")` (which
-/// would match every row). Used to bound the system-notes resolver scans to a
-/// single top-level namespace partition.
-pub fn root_prefix(path: &str) -> Option<String> {
-    let mut segments = segments(path);
-    let org = segments.next()?;
-    let top_level = segments.next()?;
-    if org.parse::<u64>().is_err() || top_level.parse::<u64>().is_err() {
-        return None;
-    }
-    Some(format!("{org}/{top_level}/"))
-}
-
-/// Extract the leaf namespace ID (last segment) from a traversal path.
-///
-/// `"1/22/" → Some(22)`, `"1/22/33/" → Some(33)`. Returns `None` when the
-/// path is empty or the last segment isn't numeric.
-pub fn leaf_id(path: &str) -> Option<i64> {
-    path.trim_end_matches('/')
-        .rsplit('/')
-        .next()
-        .and_then(|s| s.parse().ok())
-}
-
-/// A traversal path is valid when it matches `<org_id>/<namespace_id>/`
-/// where both segments are unsigned integers.
-///
-/// An empty or malformed path would cause `startsWith(traversal_path, '')`
-/// to match every row in the table.
-pub fn is_valid(path: &str) -> bool {
-    let Some(inner) = path.strip_suffix('/') else {
-        return false;
-    };
-    let Some((org, namespace)) = inner.split_once('/') else {
-        return false;
-    };
-    org.parse::<u64>().is_ok() && namespace.parse::<u64>().is_ok()
+    TraversalPath(out)
 }
 
 /// Regex (RE2) matching the top-level `<org_id>/<namespace_id>/` prefix of a
 /// traversal path. Anchor with `$` to match a path that is exactly top-level.
 pub const TOP_LEVEL_PREFIX_REGEX: &str = "^[0-9]+/[0-9]+/";
-
-/// A path is top-level when it is exactly `<org_id>/<namespace_id>/` (two
-/// segments). Subgroups (three or more segments) are never indexed.
-pub fn is_top_level(path: &str) -> bool {
-    segment_count(path) == 2
-}
 
 /// Result of [`split_top_level`].
 pub struct TopLevelSplit {
@@ -237,43 +114,134 @@ impl TraversalPath {
     }
 
     pub fn segments(&self) -> impl Iterator<Item = &str> {
-        segments(&self.0)
+        self.0.split('/').filter(|s| !s.is_empty())
+    }
+
+    pub fn segment_count(&self) -> usize {
+        self.segments().count()
+    }
+
+    pub fn parent(&self) -> Self {
+        match self.0.trim_end_matches('/').rfind('/') {
+            Some(i) => Self(self.0[..=i].to_string()),
+            None => self.clone(),
+        }
     }
 
     pub fn is_descendant_of(&self, ancestor: &TraversalPath) -> bool {
         self.0.starts_with(&ancestor.0)
     }
 
-    pub fn is_within_scope<S: AsRef<str>>(&self, allowed: &[S]) -> bool {
-        is_within_scope(&self.0, allowed)
+    pub fn is_within_scope(&self, allowed: &[&TraversalPath]) -> bool {
+        allowed.iter().any(|prefix| {
+            self.0.starts_with(&prefix.0)
+                && (prefix.0.ends_with('/')
+                    || self.0.len() == prefix.0.len()
+                    || self.0.as_bytes().get(prefix.0.len()) == Some(&b'/'))
+        })
     }
 
-    pub fn overlaps(&self, other: &str) -> bool {
-        overlaps(&self.0, other)
+    pub fn overlaps(&self, other: &TraversalPath) -> bool {
+        self.0.starts_with(&other.0) || other.0.starts_with(&self.0)
     }
 
+    /// A traversal path is valid when it matches `<org_id>/<namespace_id>/`
+    /// where both segments are unsigned integers.
+    ///
+    /// An empty or malformed path would cause `startsWith(traversal_path, '')`
+    /// to match every row in the table.
     pub fn is_valid(&self) -> bool {
-        is_valid(&self.0)
+        let Some(inner) = self.0.strip_suffix('/') else {
+            return false;
+        };
+        let Some((org, namespace)) = inner.split_once('/') else {
+            return false;
+        };
+        org.parse::<u64>().is_ok() && namespace.parse::<u64>().is_ok()
     }
 
+    pub fn is_valid_any_depth(&self) -> bool {
+        ANY_DEPTH_REGEX.is_match(&self.0)
+    }
+
+    pub fn validate(&self) -> Result<(), String> {
+        if !self.is_valid_any_depth() {
+            return Err(format!(
+                "invalid traversal_path format: '{}' (expected pattern like '1/2/3/')",
+                self.0
+            ));
+        }
+        for segment in self.0.trim_end_matches('/').split('/') {
+            if segment.parse::<i64>().is_err() {
+                return Err(format!(
+                    "traversal_path segment '{segment}' exceeds i64 range"
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    /// A path is top-level when it is exactly `<org_id>/<namespace_id>/` (two
+    /// segments). Subgroups (three or more segments) are never indexed.
     pub fn is_top_level(&self) -> bool {
-        is_top_level(&self.0)
+        self.segment_count() == 2
     }
 
+    /// Extract the organization ID (first segment) from a traversal path.
+    ///
+    /// Returns `None` when the path is empty or the first segment isn't numeric.
+    pub fn organization_id(&self) -> Option<i64> {
+        self.0
+            .trim_start_matches('/')
+            .split('/')
+            .next()
+            .and_then(|s| s.parse().ok())
+    }
+
+    /// Extract the top-level namespace ID (second segment) from a traversal path.
+    ///
+    /// `"42/100/" → Some(100)`, `"42/100/1000/" → Some(100)`.
+    /// Returns `None` when the path has fewer than two segments or the second
+    /// segment isn't numeric.
     pub fn top_level_namespace_id(&self) -> Option<i64> {
-        top_level_namespace_id(&self.0)
+        self.segments().nth(1).and_then(|s| s.parse().ok())
     }
 
+    /// The top-level-namespace prefix of a traversal path: the first two
+    /// segments with a trailing slash (`<org_id>/<top_level_ns_id>/`).
+    ///
+    /// `"42/100/" → Some("42/100/")`, `"42/100/1000/" → Some("42/100/")`.
+    /// Returns `None` when the path has fewer than two numeric segments, so a
+    /// malformed path can never produce `startsWith(traversal_path, "")` (which
+    /// would match every row). Used to bound the system-notes resolver scans to a
+    /// single top-level namespace partition.
     pub fn root_prefix(&self) -> Option<Self> {
-        root_prefix(&self.0).map(Self)
+        let mut segments = self.segments();
+        let org = segments.next()?;
+        let top_level = segments.next()?;
+        if org.parse::<u64>().is_err() || top_level.parse::<u64>().is_err() {
+            return None;
+        }
+        Some(Self(format!("{org}/{top_level}/")))
     }
 
+    /// Extract the leaf namespace ID (last segment) from a traversal path.
+    ///
+    /// `"1/22/" → Some(22)`, `"1/22/33/" → Some(33)`. Returns `None` when the
+    /// path is empty or the last segment isn't numeric.
     pub fn leaf_id(&self) -> Option<i64> {
-        leaf_id(&self.0)
+        self.0
+            .trim_end_matches('/')
+            .rsplit('/')
+            .next()
+            .and_then(|s| s.parse().ok())
     }
 
+    /// Convert slash-separated segments to dot-separated, stripping empties.
+    ///
+    /// `"42/9970/" → "42.9970"`, `"42/9970/12345/" → "42.9970.12345"`.
     pub fn to_dotted(&self) -> String {
-        to_dotted(&self.0)
+        self.segments().collect::<Vec<_>>().join(".")
     }
 }
 
@@ -289,18 +257,6 @@ impl AsRef<str> for TraversalPath {
     }
 }
 
-impl PartialEq<str> for TraversalPath {
-    fn eq(&self, other: &str) -> bool {
-        self.0 == other
-    }
-}
-
-impl PartialEq<&str> for TraversalPath {
-    fn eq(&self, other: &&str) -> bool {
-        self.0 == *other
-    }
-}
-
 impl From<&str> for TraversalPath {
     fn from(path: &str) -> Self {
         Self(path.to_string())
@@ -313,222 +269,222 @@ impl From<String> for TraversalPath {
     }
 }
 
+impl PartialEq<str> for TraversalPath {
+    fn eq(&self, other: &str) -> bool {
+        self.0 == other
+    }
+}
+
+impl PartialEq<&str> for TraversalPath {
+    fn eq(&self, other: &&str) -> bool {
+        self.0 == *other
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    fn tp(s: &str) -> TraversalPath {
+        TraversalPath::from(s)
+    }
+
     #[test]
     fn leaf_pruning_keeps_sibling_paths() {
-        let leaves = prune_to_leaves(&[
-            "1/9970/".to_string(),
-            "1/9970/100/".to_string(),
-            "1/9970/200/".to_string(),
-        ]);
+        let leaves = prune_to_leaves(&[tp("1/9970/"), tp("1/9970/100/"), tp("1/9970/200/")]);
         assert_eq!(leaves, vec!["1/9970/100/", "1/9970/200/"]);
     }
 
     #[test]
     fn leaf_pruning_noop_when_no_ancestors() {
-        let leaves = prune_to_leaves(&["1/9970/100/".to_string(), "1/9970/200/".to_string()]);
+        let leaves = prune_to_leaves(&[tp("1/9970/100/"), tp("1/9970/200/")]);
         assert_eq!(leaves, vec!["1/9970/100/", "1/9970/200/"]);
     }
 
     #[test]
     fn is_within_scope_matches_descendants_and_exact() {
-        assert!(is_within_scope("1/22/33/", &["1/22/"]));
-        assert!(is_within_scope("1/22/", &["1/22/"]));
-        assert!(is_within_scope("1/22/", &["9/", "1/"]));
-        assert!(!is_within_scope("1/22/", &["1/23/"]));
-        assert!(!is_within_scope("1/22/", &[] as &[&str]));
+        assert!(tp("1/22/33/").is_within_scope(&[&tp("1/22/")]));
+        assert!(tp("1/22/").is_within_scope(&[&tp("1/22/")]));
+        assert!(tp("1/22/").is_within_scope(&[&tp("9/"), &tp("1/")]));
+        assert!(!tp("1/22/").is_within_scope(&[&tp("1/23/")]));
+        assert!(!tp("1/22/").is_within_scope(&[]));
     }
 
     #[test]
     fn is_within_scope_respects_segment_boundaries() {
-        assert!(!is_within_scope("1/100/", &["1/10/"]));
-        assert!(!is_within_scope("1/100/", &["1/10"]));
-        assert!(is_within_scope("1/10/300/", &["1/10"]));
-        assert!(is_within_scope("1/10", &["1/10"]));
+        assert!(!tp("1/100/").is_within_scope(&[&tp("1/10/")]));
+        assert!(!tp("1/100/").is_within_scope(&[&tp("1/10")]));
+        assert!(tp("1/10/300/").is_within_scope(&[&tp("1/10")]));
+        assert!(tp("1/10").is_within_scope(&[&tp("1/10")]));
     }
 
     #[test]
     fn lowest_common_prefix_finds_shared_path() {
-        assert_eq!(
-            lowest_common_prefix(&["1/2/4/".to_string(), "1/2/5/".to_string()]),
-            "1/2/"
-        );
-        assert_eq!(
-            lowest_common_prefix(&["1/2/".to_string(), "1/3/".to_string()]),
-            "1/"
-        );
-        assert_eq!(
-            lowest_common_prefix(&["1/".to_string(), "2/".to_string()]),
-            ""
-        );
-        assert_eq!(lowest_common_prefix(&["42/".to_string()]), "42/");
-        assert_eq!(lowest_common_prefix(&[] as &[&str]), "");
+        assert_eq!(lowest_common_prefix(&[tp("1/2/4/"), tp("1/2/5/")]), "1/2/");
+        assert_eq!(lowest_common_prefix(&[tp("1/2/"), tp("1/3/")]), "1/");
+        assert_eq!(lowest_common_prefix(&[tp("1/"), tp("2/")]), "");
+        assert_eq!(lowest_common_prefix(&[tp("42/")]), "42/");
+        assert_eq!(lowest_common_prefix(&[]), "");
     }
 
     #[test]
     fn to_dotted_strips_trailing_slash() {
-        assert_eq!(to_dotted("42/9970/"), "42.9970");
+        assert_eq!(tp("42/9970/").to_dotted(), "42.9970");
     }
 
     #[test]
     fn to_dotted_handles_deeper_paths() {
-        assert_eq!(to_dotted("42/9970/12345/"), "42.9970.12345");
+        assert_eq!(tp("42/9970/12345/").to_dotted(), "42.9970.12345");
     }
 
     #[test]
     fn to_dotted_no_trailing_slash() {
-        assert_eq!(to_dotted("42/9970"), "42.9970");
+        assert_eq!(tp("42/9970").to_dotted(), "42.9970");
     }
 
     #[test]
     fn to_dotted_empty() {
-        assert_eq!(to_dotted(""), "");
+        assert_eq!(tp("").to_dotted(), "");
     }
 
     #[test]
     fn organization_id_extracts_first_segment() {
-        assert_eq!(organization_id("42/9970/"), Some(42));
+        assert_eq!(tp("42/9970/").organization_id(), Some(42));
     }
 
     #[test]
     fn organization_id_with_leading_slash() {
-        assert_eq!(organization_id("/42/9970/"), Some(42));
+        assert_eq!(tp("/42/9970/").organization_id(), Some(42));
     }
 
     #[test]
     fn organization_id_non_numeric() {
-        assert_eq!(organization_id("abc/9970/"), None);
+        assert_eq!(tp("abc/9970/").organization_id(), None);
     }
 
     #[test]
     fn organization_id_empty() {
-        assert_eq!(organization_id(""), None);
+        assert_eq!(tp("").organization_id(), None);
     }
 
     #[test]
     fn top_level_namespace_id_two_segments() {
-        assert_eq!(top_level_namespace_id("42/100/"), Some(100));
+        assert_eq!(tp("42/100/").top_level_namespace_id(), Some(100));
     }
 
     #[test]
     fn top_level_namespace_id_three_segments() {
-        assert_eq!(top_level_namespace_id("42/100/1000/"), Some(100));
+        assert_eq!(tp("42/100/1000/").top_level_namespace_id(), Some(100));
     }
 
     #[test]
     fn top_level_namespace_id_single_segment() {
-        assert_eq!(top_level_namespace_id("42/"), None);
+        assert_eq!(tp("42/").top_level_namespace_id(), None);
     }
 
     #[test]
     fn top_level_namespace_id_empty() {
-        assert_eq!(top_level_namespace_id(""), None);
+        assert_eq!(tp("").top_level_namespace_id(), None);
     }
 
     #[test]
     fn root_prefix_two_segments() {
-        assert_eq!(root_prefix("42/100/"), Some("42/100/".to_string()));
+        assert_eq!(tp("42/100/").root_prefix(), Some(tp("42/100/")));
     }
 
     #[test]
     fn root_prefix_truncates_deeper_paths() {
-        assert_eq!(root_prefix("42/100/1000/"), Some("42/100/".to_string()));
-        assert_eq!(
-            root_prefix("42/100/1000/2000/"),
-            Some("42/100/".to_string())
-        );
+        assert_eq!(tp("42/100/1000/").root_prefix(), Some(tp("42/100/")));
+        assert_eq!(tp("42/100/1000/2000/").root_prefix(), Some(tp("42/100/")));
     }
 
     #[test]
     fn root_prefix_single_segment_is_none() {
-        assert_eq!(root_prefix("42/"), None);
+        assert_eq!(tp("42/").root_prefix(), None);
     }
 
     #[test]
     fn root_prefix_empty_is_none() {
-        assert_eq!(root_prefix(""), None);
+        assert_eq!(tp("").root_prefix(), None);
     }
 
     #[test]
     fn root_prefix_non_numeric_is_none() {
-        assert_eq!(root_prefix("abc/100/"), None);
-        assert_eq!(root_prefix("42/abc/"), None);
+        assert_eq!(tp("abc/100/").root_prefix(), None);
+        assert_eq!(tp("42/abc/").root_prefix(), None);
     }
 
     #[test]
     fn leaf_id_extracts_last_segment() {
-        assert_eq!(leaf_id("1/22/"), Some(22));
+        assert_eq!(tp("1/22/").leaf_id(), Some(22));
     }
 
     #[test]
     fn leaf_id_handles_deeper_paths() {
-        assert_eq!(leaf_id("1/22/33/"), Some(33));
+        assert_eq!(tp("1/22/33/").leaf_id(), Some(33));
     }
 
     #[test]
     fn leaf_id_no_trailing_slash() {
-        assert_eq!(leaf_id("1/22"), Some(22));
+        assert_eq!(tp("1/22").leaf_id(), Some(22));
     }
 
     #[test]
     fn leaf_id_non_numeric() {
-        assert_eq!(leaf_id("1/abc/"), None);
+        assert_eq!(tp("1/abc/").leaf_id(), None);
     }
 
     #[test]
     fn leaf_id_empty() {
-        assert_eq!(leaf_id(""), None);
+        assert_eq!(tp("").leaf_id(), None);
     }
 
     #[test]
     fn leaf_id_only_slash() {
-        assert_eq!(leaf_id("/"), None);
+        assert_eq!(tp("/").leaf_id(), None);
     }
 
     #[test]
     fn is_valid_accepts_well_formed() {
-        assert!(is_valid("1/100/"));
+        assert!(tp("1/100/").is_valid());
     }
 
     #[test]
     fn is_valid_rejects_missing_trailing_slash() {
-        assert!(!is_valid("1/100"));
+        assert!(!tp("1/100").is_valid());
     }
 
     #[test]
     fn is_valid_rejects_single_segment() {
-        assert!(!is_valid("100/"));
+        assert!(!tp("100/").is_valid());
     }
 
     #[test]
     fn is_valid_rejects_non_numeric() {
-        assert!(!is_valid("abc/100/"));
+        assert!(!tp("abc/100/").is_valid());
     }
 
     #[test]
     fn is_valid_rejects_empty() {
-        assert!(!is_valid(""));
+        assert!(!tp("").is_valid());
     }
 
     #[test]
     fn is_valid_rejects_subgroup() {
-        assert!(!is_valid("1/100/1000/"));
+        assert!(!tp("1/100/1000/").is_valid());
     }
 
     #[test]
     fn is_top_level_accepts_org_and_namespace() {
-        assert!(is_top_level("1/100/"));
+        assert!(tp("1/100/").is_top_level());
     }
 
     #[test]
     fn is_top_level_rejects_subgroup_and_malformed() {
-        assert!(!is_top_level("1/100/200/"));
-        assert!(!is_top_level("0/"));
-        assert!(!is_top_level("1/"));
-        assert!(!is_top_level(""));
+        assert!(!tp("1/100/200/").is_top_level());
+        assert!(!tp("0/").is_top_level());
+        assert!(!tp("1/").is_top_level());
+        assert!(!tp("").is_top_level());
     }
 
     #[test]

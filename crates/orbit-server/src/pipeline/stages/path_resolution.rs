@@ -119,9 +119,7 @@ fn is_descendant(resolved: &TraversalPath, authorized: &[&TraversalPath]) -> boo
 }
 
 fn longest_common_path_prefix(paths: &[TraversalPath]) -> Option<TraversalPath> {
-    Some(orbit_utils::traversal_path::lowest_common_prefix(paths))
-        .filter(|s| !s.is_empty())
-        .map(TraversalPath::new_unchecked)
+    Some(orbit_utils::traversal_path::lowest_common_prefix(paths)).filter(|p| !p.is_empty())
 }
 
 /// Only Traversal/Aggregation scope a node to a tight prefix. Neighbors and

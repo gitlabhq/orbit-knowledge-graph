@@ -12,6 +12,7 @@ use crate::ast::{Expr, Node, Op, Query, TableRef};
 use crate::error::Result;
 use crate::passes::security::collect_aliased_tables;
 use crate::types::SecurityContext;
+use orbit_utils::traversal_path::TraversalPath;
 
 /// ClickHouse per-part virtual column holding the formatted partition value.
 const PARTITION_ID_COLUMN: &str = "_partition_id";
@@ -183,7 +184,7 @@ fn collect_pinning(expr: &Expr, strategy: &PartitionStrategy, out: &mut Vec<(Str
                 },
             ) = (&args[0], &args[1])
                 && column.as_str() == strategy.column()
-                && prefix_pins_partition(strategy, prefix)
+                && prefix_pins_partition(strategy, &TraversalPath::new_unchecked(prefix.as_str()))
             {
                 out.push((table.clone(), prefix.clone()));
             }
@@ -247,11 +248,9 @@ pub fn partition_expr(strategy: &PartitionStrategy, input: Expr) -> Expr {
 }
 
 /// Whether `prefix` pins the strategy's hashed value (hash-bucket needs `org/top_level/`).
-fn prefix_pins_partition(strategy: &PartitionStrategy, prefix: &str) -> bool {
+fn prefix_pins_partition(strategy: &PartitionStrategy, prefix: &TraversalPath) -> bool {
     match strategy {
-        PartitionStrategy::HashBucket { .. } => {
-            orbit_utils::traversal_path::segment_count(prefix) >= 2
-        }
+        PartitionStrategy::HashBucket { .. } => prefix.segment_count() >= 2,
     }
 }
 
