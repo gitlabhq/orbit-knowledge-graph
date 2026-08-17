@@ -14,8 +14,10 @@ set -euo pipefail
 : "${CI_JOB_TOKEN:?CI_JOB_TOKEN is required}"
 
 VERSION="${CI_COMMIT_TAG#v}"
-PACKAGE_NAME="orbit-local"
-ARTIFACTS=(
+LEGACY_PACKAGE_NAME="orbit-local"
+PACKAGE_NAME="orbit-cli"
+
+LEGACY_ARTIFACTS=(
   "orbit-local-linux-x86_64.tar.gz"
   "orbit-local-linux-aarch64.tar.gz"
   "orbit-local-linux-musl-x86_64.tar.gz"
@@ -25,33 +27,50 @@ ARTIFACTS=(
   "orbit-local-windows-x86_64.zip"
 )
 
-for artifact in "${ARTIFACTS[@]}"; do
+for artifact in "${LEGACY_ARTIFACTS[@]}"; do
   if [ ! -f "$artifact" ]; then
     echo "missing build artifact: $artifact" >&2
     exit 1
   fi
 done
 
+CLI_ARTIFACTS=()
+for artifact in "${LEGACY_ARTIFACTS[@]}"; do
+  cli_artifact="${artifact/orbit-local/orbit-cli}"
+  cp "$artifact" "$cli_artifact"
+  CLI_ARTIFACTS+=("$cli_artifact")
+done
+
 echo "Generating sha256 checksums..."
-for artifact in "${ARTIFACTS[@]}"; do
+for artifact in "${LEGACY_ARTIFACTS[@]}" "${CLI_ARTIFACTS[@]}"; do
   sha256sum "$artifact" > "${artifact}.sha256"
   cat "${artifact}.sha256"
 done
 
 package_url() {
-  echo "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/${PACKAGE_NAME}/${VERSION}/$1"
+  local pkg="$1" file="$2"
+  echo "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/${pkg}/${VERSION}/${file}"
 }
 
 upload_file() {
-  local file="$1"
+  local pkg="$1" file="$2"
   local url
-  url=$(package_url "$file")
+  url=$(package_url "$pkg" "$file")
   echo "Uploading $file -> $url"
   curl --fail-with-body --silent --show-error \
     --header "JOB-TOKEN: ${CI_JOB_TOKEN}" \
     --upload-file "$file" \
     "$url"
   echo
+}
+
+upload_package() {
+  local pkg="$1"
+  shift
+  for artifact in "$@"; do
+    upload_file "$pkg" "$artifact"
+    upload_file "$pkg" "${artifact}.sha256"
+  done
 }
 
 # semantic-release's @semantic-release/git plugin pushes the tag, which fires
@@ -75,7 +94,7 @@ add_release_link() {
   local file="$1"
   local link_type="$2"
   local url
-  url=$(package_url "$file")
+  url=$(package_url "$PACKAGE_NAME" "$file")
   echo "Linking $file ($link_type) on release ${CI_COMMIT_TAG}"
   curl --fail-with-body --silent --show-error \
     --request POST \
@@ -87,14 +106,12 @@ add_release_link() {
     > /dev/null
 }
 
-for artifact in "${ARTIFACTS[@]}"; do
-  upload_file "$artifact"
-  upload_file "${artifact}.sha256"
-done
+upload_package "$LEGACY_PACKAGE_NAME" "${LEGACY_ARTIFACTS[@]}"
+upload_package "$PACKAGE_NAME" "${CLI_ARTIFACTS[@]}"
 
 wait_for_release
 
-for artifact in "${ARTIFACTS[@]}"; do
+for artifact in "${CLI_ARTIFACTS[@]}"; do
   add_release_link "$artifact" "package"
   add_release_link "${artifact}.sha256" "other"
 done

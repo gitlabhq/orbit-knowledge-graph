@@ -8233,18 +8233,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "orbit-fuzz"
-version = "0.1.0"
-dependencies = [
- "bolero",
- "code-graph",
- "compiler",
- "indexer",
- "serde_json",
-]
-
-[[package]]
-name = "orbit-local"
+name = "orbit-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -8270,6 +8259,17 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "orbit-fuzz"
+version = "0.1.0"
+dependencies = [
+ "bolero",
+ "code-graph",
+ "compiler",
+ "indexer",
+ "serde_json",
 ]
 
 [[package]]

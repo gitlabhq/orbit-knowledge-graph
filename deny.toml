@@ -87,7 +87,7 @@ expression = "LicenseRef-EE"
 license-files = []
 
 [[licenses.clarify]]
-name = "orbit-local"
+name = "orbit-cli"
 expression = "LicenseRef-EE"
 license-files = []
 
