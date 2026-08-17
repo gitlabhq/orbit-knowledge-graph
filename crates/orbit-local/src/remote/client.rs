@@ -3,13 +3,12 @@ use std::time::Duration;
 use anyhow::bail;
 
 use super::error::{EXIT_GENERIC, RemoteError, map_http_error};
-use super::join_url;
 
 const DEFAULT_GITLAB_BASE_URL: &str = "https://gitlab.com";
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 const READ_TIMEOUT: Duration = Duration::from_secs(120);
 
-pub(crate) const STATUS_PATH: &str = "/api/v4/orbit/status";
+const STATUS_PATH: &str = "/api/v4/orbit/status";
 const SCHEMA_PATH: &str = "/api/v4/orbit/schema";
 const DSL_PATH: &str = "/api/v4/orbit/schema/dsl";
 const TOOLS_PATH: &str = "/api/v4/orbit/tools";
@@ -94,7 +93,7 @@ impl OrbitClient {
     }
 
     fn url(&self, path: &str) -> String {
-        join_url(&self.endpoint.base_url, path)
+        format!("{}{path}", self.endpoint.base_url.trim_end_matches('/'))
     }
 
     async fn send(
