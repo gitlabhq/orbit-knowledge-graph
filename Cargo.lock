@@ -8378,6 +8378,7 @@ dependencies = [
  "ignore",
  "regex",
  "rustc-hash 2.1.3",
+ "serde",
  "serde_json",
  "strum 0.28.0",
  "tar",

@@ -559,3 +559,126 @@ mod tests {
         );
     }
 }
+
+#[derive(
+    Debug,
+    Clone,
+    Default,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    serde::Serialize,
+    serde::Deserialize,
+)]
+#[serde(transparent)]
+pub struct TraversalPath(String);
+
+impl TraversalPath {
+    pub fn parse(path: impl Into<String>) -> Result<Self, String> {
+        let path = path.into();
+        validate(&path)?;
+        Ok(Self(path))
+    }
+
+    pub fn new_unchecked(path: impl Into<String>) -> Self {
+        Self(path.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn into_string(self) -> String {
+        self.0
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    pub fn segments(&self) -> impl Iterator<Item = &str> {
+        segments(&self.0)
+    }
+
+    pub fn segment_count(&self) -> usize {
+        segment_count(&self.0)
+    }
+
+    pub fn parent(&self) -> Self {
+        Self(parent(&self.0))
+    }
+
+    pub fn is_descendant_of(&self, ancestor: &TraversalPath) -> bool {
+        self.0.starts_with(&ancestor.0)
+    }
+
+    pub fn overlaps(&self, other: &TraversalPath) -> bool {
+        overlaps(&self.0, &other.0)
+    }
+
+    pub fn is_valid_any_depth(&self) -> bool {
+        is_valid_any_depth(&self.0)
+    }
+
+    pub fn is_top_level(&self) -> bool {
+        is_top_level(&self.0)
+    }
+
+    pub fn org_id(&self) -> Option<i64> {
+        org_id(&self.0)
+    }
+
+    pub fn top_level_namespace_id(&self) -> Option<i64> {
+        top_level_namespace_id(&self.0)
+    }
+
+    pub fn root_prefix(&self) -> Option<Self> {
+        root_prefix(&self.0).map(Self)
+    }
+
+    pub fn leaf_id(&self) -> Option<i64> {
+        leaf_id(&self.0)
+    }
+
+    pub fn to_dotted(&self) -> String {
+        to_dotted(&self.0)
+    }
+}
+
+impl std::fmt::Display for TraversalPath {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl AsRef<str> for TraversalPath {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::borrow::Borrow<str> for TraversalPath {
+    fn borrow(&self) -> &str {
+        &self.0
+    }
+}
+
+impl From<TraversalPath> for String {
+    fn from(path: TraversalPath) -> Self {
+        path.0
+    }
+}
+
+impl PartialEq<str> for TraversalPath {
+    fn eq(&self, other: &str) -> bool {
+        self.0 == other
+    }
+}
+
+impl PartialEq<&str> for TraversalPath {
+    fn eq(&self, other: &&str) -> bool {
+        self.0 == *other
+    }
+}
