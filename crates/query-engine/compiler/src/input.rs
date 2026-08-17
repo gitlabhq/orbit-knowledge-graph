@@ -102,6 +102,9 @@ pub struct Input {
     ///   only ever a small project-bounded set of paths)
     #[serde(skip)]
     pub hydration_dynamic: bool,
+
+    #[serde(skip)]
+    pub path_segment_budget: Option<usize>,
 }
 
 /// Text index metadata for a column, used by the optimizer to rewrite
@@ -259,6 +262,7 @@ impl Default for Input {
             entity_auth: HashMap::new(),
             compiler: CompilerMetadata::default(),
             hydration_dynamic: false,
+            path_segment_budget: None,
         }
     }
 }

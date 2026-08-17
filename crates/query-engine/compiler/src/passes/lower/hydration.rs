@@ -49,8 +49,15 @@ impl HydrationPathFilterContext {
     }
 }
 
-pub fn emit_hydration(nodes: &[HydrationNodePlan], limit: u32, is_dynamic: bool) -> Result<Node> {
-    let mut arms = nodes.iter().map(|n| emit_arm(n, is_dynamic));
+pub fn emit_hydration(
+    nodes: &[HydrationNodePlan],
+    limit: u32,
+    is_dynamic: bool,
+    path_segment_budget: Option<usize>,
+) -> Result<Node> {
+    let mut arms = nodes
+        .iter()
+        .map(|n| emit_arm(n, is_dynamic, path_segment_budget));
     let mut first = arms
         .next()
         .ok_or_else(|| QueryError::Lowering("hydration requires at least one node".into()))??;
@@ -61,7 +68,11 @@ pub fn emit_hydration(nodes: &[HydrationNodePlan], limit: u32, is_dynamic: bool)
     Ok(Node::Query(Box::new(first)))
 }
 
-fn emit_arm(node: &HydrationNodePlan, is_dynamic: bool) -> Result<Query> {
+fn emit_arm(
+    node: &HydrationNodePlan,
+    is_dynamic: bool,
+    path_segment_budget: Option<usize>,
+) -> Result<Query> {
     let alias = &node.alias;
     let pk = &node.id_property;
 
@@ -83,7 +94,12 @@ fn emit_arm(node: &HydrationNodePlan, is_dynamic: bool) -> Result<Query> {
 
     let mut scan_where = Vec::new();
 
-    if let Some(tp_filter) = traversal_path_filter(alias, &node.traversal_paths, is_dynamic) {
+    if let Some(tp_filter) = traversal_path_filter(
+        alias,
+        &node.traversal_paths,
+        is_dynamic,
+        path_segment_budget,
+    ) {
         scan_where.push(tp_filter);
     }
 
@@ -134,7 +150,12 @@ fn emit_arm(node: &HydrationNodePlan, is_dynamic: bool) -> Result<Query> {
 /// 3. **Large dynamic path sets:** `arrayExists(path -> startsWith(...))`.
 ///    This avoids ClickHouse parser-depth failures when dynamic hydration
 ///    discovers hundreds of traversal paths.
-fn traversal_path_filter(alias: &str, paths: &[String], is_dynamic: bool) -> Option<Expr> {
+fn traversal_path_filter(
+    alias: &str,
+    paths: &[String],
+    is_dynamic: bool,
+    path_segment_budget: Option<usize>,
+) -> Option<Expr> {
     if paths.is_empty() {
         return None;
     }
@@ -142,10 +163,36 @@ fn traversal_path_filter(alias: &str, paths: &[String], is_dynamic: bool) -> Opt
     if leaves.is_empty() {
         return None;
     }
+    let leaves = match path_segment_budget {
+        Some(budget) => generalize_to_budget(leaves, budget),
+        None => leaves,
+    };
     let ctx = HydrationPathFilterContext::default();
     match ctx.shape_for(is_dynamic, leaves.len()) {
         HydrationPathFilterShape::OrStartsWith => or_starts_with(alias, &leaves),
         HydrationPathFilterShape::ArrayExists => Some(array_exists_starts_with(alias, &leaves)),
+    }
+}
+
+fn generalize_to_budget(mut leaves: Vec<String>, budget: usize) -> Vec<String> {
+    while leaves.iter().map(|p| segment_count(p)).sum::<usize>() > budget {
+        let parents: Vec<String> = leaves.iter().map(|p| parent_path(p)).collect();
+        if parents == leaves {
+            break;
+        }
+        leaves = prune_to_leaves(&parents);
+    }
+    leaves
+}
+
+fn segment_count(path: &str) -> usize {
+    path.split('/').filter(|s| !s.is_empty()).count()
+}
+
+fn parent_path(path: &str) -> String {
+    match path.trim_end_matches('/').rfind('/') {
+        Some(i) => path[..=i].to_string(),
+        None => path.to_string(),
     }
 }
 
@@ -268,11 +315,11 @@ mod tests {
     }
 
     fn emit_dynamic(plans: &[HydrationNodePlan], limit: u32) -> Node {
-        emit_hydration(plans, limit, true).unwrap()
+        emit_hydration(plans, limit, true, None).unwrap()
     }
 
     fn emit_static(plans: &[HydrationNodePlan], limit: u32) -> Node {
-        emit_hydration(plans, limit, false).unwrap()
+        emit_hydration(plans, limit, false, None).unwrap()
     }
 
     #[test]
@@ -380,7 +427,7 @@ mod tests {
             sort_key: vec!["id".to_string()],
         };
 
-        let node = emit_hydration(&[plan], 10, true).unwrap();
+        let node = emit_hydration(&[plan], 10, true, None).unwrap();
         let (sql, params) = render_with_params(&node);
 
         assert!(
@@ -423,7 +470,7 @@ mod tests {
             sort_key: vec!["id".to_string()],
         };
 
-        let node = emit_hydration(&[plan], 10, false).unwrap();
+        let node = emit_hydration(&[plan], 10, false, None).unwrap();
         let sql = render(&node);
 
         assert!(
@@ -434,6 +481,25 @@ mod tests {
             sql.matches("startsWith").count(),
             ARRAY_EXISTS_PATH_THRESHOLD + 1
         );
+    }
+
+    #[test]
+    fn generalize_to_budget_widens_to_ancestors() {
+        let leaves: Vec<String> = (0..900)
+            .map(|i| format!("1/{i:0>40}/{:0>40}/", i + 10000))
+            .collect();
+        let widened = generalize_to_budget(leaves.clone(), 2000);
+        assert!(widened.iter().map(|p| segment_count(p)).sum::<usize>() <= 2000);
+        assert!(widened.iter().all(|w| !leaves.contains(w)));
+        for path in &leaves {
+            assert!(
+                widened.iter().any(|w| path.starts_with(w.as_str())),
+                "{path} lost its ancestor prefix"
+            );
+        }
+
+        let roots: Vec<String> = (0..50).map(|i| format!("{i}/")).collect();
+        assert_eq!(generalize_to_budget(roots.clone(), 10), roots);
     }
 
     #[test]

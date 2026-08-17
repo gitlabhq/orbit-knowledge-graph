@@ -9,6 +9,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 
 use super::{ParamValue, ParameterizedQuery, SqlDialect};
+use orbit_utils::clickhouse::ParamBindings;
 
 pub fn codegen(
     ast: &Node,
@@ -39,7 +40,7 @@ pub fn codegen(
 
     Ok(ParameterizedQuery {
         sql,
-        params: ctx.params,
+        params: ctx.params.into_map(),
         result_context,
         query_config,
         dialect: SqlDialect::ClickHouse,
@@ -58,17 +59,17 @@ pub fn emit_simple_query(node: &Node) -> Result<(String, HashMap<String, ParamVa
         Node::Query(q) => ctx.emit_query(q)?,
         Node::Insert(ins) => ctx.emit_insert(ins),
     };
-    Ok((sql, ctx.params))
+    Ok((sql, ctx.params.into_map()))
 }
 
 struct Context {
-    params: HashMap<String, ParamValue>,
+    params: ParamBindings,
 }
 
 impl Context {
     fn new() -> Self {
         Self {
-            params: HashMap::new(),
+            params: ParamBindings::default(),
         }
     }
 
@@ -255,47 +256,23 @@ impl Context {
             Value::Null => "NULL".into(),
             // Array ChType: bind the whole array as a single ClickHouse Array(T) param.
             Value::Array(_) if matches!(data_type, ChType::Array(_)) => {
-                let name = format!("p{}", self.params.len());
-                let placeholder = format!("{{{name}:{data_type}}}");
-                self.params.insert(
-                    name,
-                    ParamValue {
-                        ch_type: data_type,
-                        value: v.clone(),
-                    },
-                );
-                placeholder
+                let name = self.params.intern(data_type, v);
+                format!("{{{name}:{data_type}}}")
             }
             // Scalar ChType with array value: expand element-by-element.
             Value::Array(arr) => {
                 let placeholders: Vec<_> = arr
                     .iter()
                     .map(|item| {
-                        let name = format!("p{}", self.params.len());
-                        let placeholder = format!("{{{name}:{data_type}}}");
-                        self.params.insert(
-                            name,
-                            ParamValue {
-                                ch_type: data_type,
-                                value: item.clone(),
-                            },
-                        );
-                        placeholder
+                        let name = self.params.intern(data_type, item);
+                        format!("{{{name}:{data_type}}}")
                     })
                     .collect();
                 format!("({})", placeholders.join(", "))
             }
             _ => {
-                let name = format!("p{}", self.params.len());
-                let placeholder = format!("{{{name}:{data_type}}}");
-                self.params.insert(
-                    name,
-                    ParamValue {
-                        ch_type: data_type,
-                        value: v.clone(),
-                    },
-                );
-                placeholder
+                let name = self.params.intern(data_type, v);
+                format!("{{{name}:{data_type}}}")
             }
         }
     }
@@ -524,6 +501,24 @@ mod tests {
             ctx.emit_literal(&Value::Array(vec![Value::from(1), Value::from(2)])),
             "({p3:Int64}, {p4:Int64})"
         );
+    }
+
+    #[test]
+    fn param_interning() {
+        let mut ctx = Context::new();
+        let array = Value::Array(vec![Value::from("1/2/"), Value::from("1/3/")]);
+        let array_type = ChType::Array(crate::ast::ChScalar::String);
+
+        assert_eq!(ctx.emit_literal(&Value::from("dup")), "{p0:String}");
+        assert_eq!(ctx.emit_literal(&Value::from("dup")), "{p0:String}");
+        assert_eq!(ctx.emit_literal(&Value::from("other")), "{p1:String}");
+        assert_eq!(ctx.emit_param(array_type, &array), "{p2:Array(String)}");
+        assert_eq!(ctx.emit_param(array_type, &array), "{p2:Array(String)}");
+        assert_eq!(
+            ctx.emit_param(ChType::DateTime64, &Value::from("dup")),
+            "{p3:DateTime64(6, 'UTC')}"
+        );
+        assert_eq!(ctx.params.into_map().len(), 4);
     }
 
     #[test]
