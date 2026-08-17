@@ -52,7 +52,7 @@ live graph rather than the agent's general knowledge.
 ## Billing
 
 Queries that GitLab Duo Agent Platform makes against GitLab Orbit on your behalf are
-zero-rated. They do not consume GitLab Credits (subject to change).
+zero-rated (subject to change). They do not consume GitLab Credits (subject to change).
 
 ## Example prompts
 
