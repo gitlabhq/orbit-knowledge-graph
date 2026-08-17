@@ -29,31 +29,39 @@ pub(crate) fn map_http_error(status: u16, body: &str) -> RemoteError {
     match status {
         404 => RemoteError::new(
             EXIT_UNAVAILABLE,
-            "Knowledge Graph endpoint not available (HTTP 404). The `knowledge_graph` feature \
-             flag is most likely disabled for your user on this instance.",
+            "Orbit endpoint not available\n\n\
+             The `/api/v4/orbit/*` endpoints returned 404. The most likely cause is\n\
+             that the `knowledge_graph` feature flag is disabled for your user on this\n\
+             instance. Contact an instance administrator to enable it.",
         ),
         401 => RemoteError::new(
             EXIT_UNAUTHENTICATED,
-            "not authenticated (HTTP 401). Check your token with `glab auth status` and re-run \
-             `glab auth login` if it has expired.",
+            "not authenticated\n\n\
+             The Orbit API rejected the request with HTTP 401. Run `glab auth status`\n\
+             to check your token, then `glab auth login` if it has expired.",
         ),
         403 => RemoteError::new(
             EXIT_FORBIDDEN,
             format!(
-                "Knowledge Graph access denied (HTTP 403){}. If the message mentions \"No \
-                 Knowledge Graph enabled namespaces\", an Owner of a top-level group you belong \
-                 to must enable Orbit.",
+                "Orbit access denied\n\n\
+                 The Orbit API rejected the request with HTTP 403{}.\n\
+                 If your top-level groups have not enabled Orbit, an Owner of a group\n\
+                 you belong to must enable it via Orbit > Configuration in the GitLab UI.",
                 body_suffix(body)
             ),
         ),
         429 => RemoteError::new(
             EXIT_RATE_LIMITED,
-            "rate limited (HTTP 429). Inspect the `Retry-After` response header and back off.",
+            "rate limited\n\n\
+             The Orbit API rejected the request with HTTP 429. Inspect the `Retry-After`\n\
+             response header and back off, or batch via aggregation if you are running\n\
+             many small queries.",
         ),
         503 => RemoteError::new(
             EXIT_GENERIC,
-            "knowledge graph service unavailable (HTTP 503). The underlying GKG service is \
-             currently unreachable; retry shortly.",
+            "Orbit service unavailable\n\n\
+             The Orbit API returned HTTP 503. The underlying GKG service is currently\n\
+             unreachable; retry shortly or check the GitLab status page.",
         ),
         _ => RemoteError::new(
             EXIT_GENERIC,
@@ -86,11 +94,8 @@ mod tests {
 
     #[test]
     fn forbidden_error_appends_server_body() {
-        let err = map_http_error(403, "No Knowledge Graph enabled namespaces");
-        assert!(
-            err.message
-                .contains("No Knowledge Graph enabled namespaces")
-        );
+        let err = map_http_error(403, "no enabled namespaces");
+        assert!(err.message.contains("no enabled namespaces"));
     }
 
     #[test]

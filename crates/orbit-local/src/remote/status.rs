@@ -24,8 +24,12 @@ fn select_status_output(body: &[u8]) -> Result<Vec<u8>, RemoteError> {
     if !available {
         return Err(RemoteError::new(
             EXIT_UNAVAILABLE,
-            "Orbit is not available for your user. The `knowledge_graph` feature flag is likely \
-             disabled, or the instance lacks the `:orbit` license.",
+            "Orbit is not available for your user\n\n\
+             The Orbit status API reports that your user does not have access.\n\
+             The most common causes are:\n\
+             \x20 - The `knowledge_graph` feature flag is disabled for your user.\n\
+             \x20 - The instance does not include the `:orbit` license add-on.\n\
+             Contact an instance administrator to enable it.",
         ));
     }
 
@@ -33,8 +37,10 @@ fn select_status_output(body: &[u8]) -> Result<Vec<u8>, RemoteError> {
         Some(system) => Ok(pretty_value(system)),
         None => Err(RemoteError::new(
             EXIT_UNAVAILABLE,
-            "Orbit status: user has access but system health is absent. This is unexpected and \
-             may indicate an API contract change.",
+            "Orbit status: user has access but system health is absent\n\n\
+             The Orbit status API reports user.available=true but did not include\n\
+             the system health object. This is unexpected and may indicate an API\n\
+             contract change. Update the CLI or contact your instance administrator.",
         )),
     }
 }

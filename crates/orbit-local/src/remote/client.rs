@@ -144,9 +144,10 @@ fn resolve_endpoint(get_env: impl Fn(&str) -> Option<String>) -> anyhow::Result<
     }
 
     bail!(
-        "no Orbit credential found: set ORBIT_API_BASE_URL, ORBIT_AUTH_HEADER_NAME and \
-         ORBIT_AUTH_HEADER_VALUE, or GITLAB_TOKEN (with optional GITLAB_URL). Running through \
-         `glab orbit` injects these automatically."
+        "no Orbit credential found\n\n\
+         Set ORBIT_API_BASE_URL, ORBIT_AUTH_HEADER_NAME, and ORBIT_AUTH_HEADER_VALUE,\n\
+         or set GITLAB_TOKEN with an optional GITLAB_URL. Running through `glab orbit`\n\
+         injects these automatically."
     );
 }
 
