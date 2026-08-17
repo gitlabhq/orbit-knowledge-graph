@@ -1,7 +1,31 @@
 //! Helpers for the `<org_id>/<namespace_id>/` traversal path format used
-//! throughout the indexer, NATS topic routing, and query profiler.
+//! throughout the indexer, NATS topic routing, the query profiler, and the
+//! compiler and server authorization scope checks.
 
 use std::collections::HashSet;
+
+pub fn is_within_scope(path: &str, allowed: &[&str]) -> bool {
+    allowed.iter().any(|prefix| path.starts_with(prefix))
+}
+
+pub fn lowest_common_prefix(paths: &[String]) -> String {
+    if paths.is_empty() {
+        return String::new();
+    }
+    let segments: Vec<Vec<&str>> = paths
+        .iter()
+        .map(|p| p.trim_end_matches('/').split('/').collect())
+        .collect();
+    let first = &segments[0];
+    let common_len = (0..first.len())
+        .take_while(|&i| segments.iter().all(|s| s.get(i) == first.get(i)))
+        .count();
+    if common_len == 0 {
+        String::new()
+    } else {
+        format!("{}/", first[..common_len].join("/"))
+    }
+}
 
 /// Convert slash-separated segments to dot-separated, stripping empties.
 ///
@@ -124,6 +148,32 @@ pub fn split_top_level(ids: Vec<i64>, paths: Vec<String>) -> TopLevelSplit {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn is_within_scope_matches_descendants_and_exact() {
+        assert!(is_within_scope("1/22/33/", &["1/22/"]));
+        assert!(is_within_scope("1/22/", &["1/22/"]));
+        assert!(is_within_scope("1/22/", &["9/", "1/"]));
+        assert!(!is_within_scope("1/22/", &["1/23/"]));
+        assert!(!is_within_scope("1/22/", &[]));
+    }
+
+    #[test]
+    fn is_within_scope_respects_segment_boundaries() {
+        assert!(!is_within_scope("1/100/", &["1/10/"]));
+    }
+
+    #[test]
+    fn lowest_common_prefix_finds_shared_path() {
+        assert_eq!(
+            lowest_common_prefix(&["1/2/4/".into(), "1/2/5/".into()]),
+            "1/2/"
+        );
+        assert_eq!(lowest_common_prefix(&["1/2/".into(), "1/3/".into()]), "1/");
+        assert_eq!(lowest_common_prefix(&["1/".into(), "2/".into()]), "");
+        assert_eq!(lowest_common_prefix(&["42/".into()]), "42/");
+        assert_eq!(lowest_common_prefix(&[]), "");
+    }
 
     #[test]
     fn to_dotted_strips_trailing_slash() {

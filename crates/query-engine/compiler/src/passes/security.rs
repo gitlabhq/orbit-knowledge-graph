@@ -31,6 +31,7 @@ use crate::constants::{GL_TABLE_PREFIX, TRAVERSAL_PATH_COLUMN, global_tables};
 use crate::error::Result;
 pub use crate::types::SecurityContext;
 use ontology::Ontology;
+use orbit_utils::traversal_path::{is_within_scope, lowest_common_prefix};
 
 /// Matches `gl_*` or `v{N}_gl_*`, captures the unprefixed name.
 static GL_TABLE_RE: OnceLock<Regex> = OnceLock::new();
@@ -82,7 +83,7 @@ fn apply_to_query(q: &mut Query, ctx: &SecurityContext, ontology: &Ontology) -> 
             match ctx.scope_prefixes.get(alias) {
                 Some(prefix)
                     if ontology.is_table_path_scopable(table)
-                        && eligible.iter().any(|p| prefix.starts_with(p)) =>
+                        && is_within_scope(prefix, &eligible) =>
                 {
                     starts_with_expr(alias, prefix)
                 }
@@ -228,25 +229,6 @@ impl PathTrie {
             child.collect(prefix, out);
             prefix.truncate(restore_len);
         }
-    }
-}
-
-fn lowest_common_prefix(paths: &[String]) -> String {
-    if paths.is_empty() {
-        return String::new();
-    }
-    let segments: Vec<Vec<&str>> = paths
-        .iter()
-        .map(|p| p.trim_end_matches('/').split('/').collect())
-        .collect();
-    let first = &segments[0];
-    let common_len = (0..first.len())
-        .take_while(|&i| segments.iter().all(|s| s.get(i) == first.get(i)))
-        .count();
-    if common_len == 0 {
-        String::new()
-    } else {
-        format!("{}/", first[..common_len].join("/"))
     }
 }
 
@@ -636,17 +618,6 @@ mod tests {
             where_sql.contains("Bool") && where_sql.contains("false"),
             "where clause should compile to Bool(false) for empty path set, got: {where_sql}"
         );
-    }
-
-    #[test]
-    fn lowest_common_prefix_finds_shared_path() {
-        assert_eq!(
-            lowest_common_prefix(&["1/2/4/".into(), "1/2/5/".into()]),
-            "1/2/"
-        );
-        assert_eq!(lowest_common_prefix(&["1/2/".into(), "1/3/".into()]), "1/");
-        assert_eq!(lowest_common_prefix(&["1/".into(), "2/".into()]), "");
-        assert_eq!(lowest_common_prefix(&["42/".into()]), "42/");
     }
 
     #[test]

@@ -114,24 +114,11 @@ impl PipelineStage for PathResolutionStage {
 }
 
 fn is_descendant(resolved: &str, authorized: &[&str]) -> bool {
-    authorized.iter().any(|auth| resolved.starts_with(auth))
+    orbit_utils::traversal_path::is_within_scope(resolved, authorized)
 }
 
 fn longest_common_path_prefix(paths: &[String]) -> Option<String> {
-    let (first, rest) = paths.split_first()?;
-    let mut common: &str = first;
-    for p in rest {
-        let n = common
-            .bytes()
-            .zip(p.bytes())
-            .take_while(|(a, b)| a == b)
-            .count();
-        common = &common[..n];
-    }
-    common
-        .rfind('/')
-        .map(|i| common[..=i].to_string())
-        .filter(|s| !s.is_empty())
+    Some(orbit_utils::traversal_path::lowest_common_prefix(paths)).filter(|s| !s.is_empty())
 }
 
 /// Only Traversal/Aggregation scope a node to a tight prefix. Neighbors and

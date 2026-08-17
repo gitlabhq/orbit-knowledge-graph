@@ -183,10 +183,7 @@ fn validate_traversal_path_within_scope(
     path: &str,
     eligible_paths: &[&str],
 ) -> Result<()> {
-    if eligible_paths
-        .iter()
-        .any(|authorized| path.starts_with(authorized))
-    {
+    if orbit_utils::traversal_path::is_within_scope(path, eligible_paths) {
         return Ok(());
     }
 
