@@ -321,6 +321,43 @@ enum RemoteCommands {
         /// Query body file, or `-`/omitted to read from stdin.
         #[arg(value_name = "FILE")]
         source: Option<String>,
+
+        /// Server response format. Overrides the body's `response_format`;
+        /// defaults to `llm` when neither is set.
+        #[arg(long, value_enum)]
+        response_format: Option<remote::ResponseFormat>,
+    },
+    /// Show GitLab Knowledge Graph cluster health.
+    Status,
+    /// Show the GitLab Knowledge Graph ontology.
+    Schema {
+        /// Node names to expand with full properties and edge lists.
+        #[arg(value_name = "NODE")]
+        nodes: Vec<String>,
+    },
+    /// Show the GitLab Knowledge Graph query DSL JSON Schema.
+    Dsl,
+    /// Show the GitLab Knowledge Graph MCP tool manifest.
+    Tools,
+    /// Show indexing progress for a namespace or project.
+    #[command(name = "graph-status")]
+    #[command(group(clap::ArgGroup::new("graph_status_scope").required(true).args(["full_path", "namespace_id", "project_id"])))]
+    GraphStatus {
+        /// Full path of a project or group, such as `gitlab-org/gitlab`.
+        #[arg(long)]
+        full_path: Option<String>,
+
+        /// Namespace (group) ID to inspect.
+        #[arg(long)]
+        namespace_id: Option<i64>,
+
+        /// Project ID to inspect.
+        #[arg(long)]
+        project_id: Option<i64>,
+
+        /// Server response format. Defaults to `raw` (structured JSON).
+        #[arg(long, value_enum)]
+        response_format: Option<remote::ResponseFormat>,
     },
 }
 
@@ -417,10 +454,33 @@ async fn main() -> Result<()> {
             commands::hook_guard::run(kind, mode);
             Ok(())
         }
-        Commands::Remote {
-            command: RemoteCommands::Query { source },
-        } => remote::run_query(source).await,
+        Commands::Remote { command } => run_remote(command).await,
     }
+}
+
+async fn run_remote(command: RemoteCommands) -> Result<()> {
+    let result = match command {
+        RemoteCommands::Query {
+            source,
+            response_format,
+        } => remote::run_query(source, response_format).await,
+        RemoteCommands::Status => remote::run_status().await,
+        RemoteCommands::Schema { nodes } => remote::run_schema(nodes).await,
+        RemoteCommands::Dsl => remote::run_dsl().await,
+        RemoteCommands::Tools => remote::run_tools().await,
+        RemoteCommands::GraphStatus {
+            full_path,
+            namespace_id,
+            project_id,
+            response_format,
+        } => remote::run_graph_status(full_path, namespace_id, project_id, response_format).await,
+    };
+
+    if let Err(err) = result {
+        eprintln!("{}", err.message);
+        std::process::exit(err.exit_code);
+    }
+    Ok(())
 }
 
 fn run_schema(db: Option<PathBuf>, raw: bool, tables: Vec<String>) -> Result<()> {
