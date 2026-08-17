@@ -7,6 +7,7 @@ use super::error::{EXIT_GENERIC, RemoteError, map_http_error};
 const DEFAULT_GITLAB_BASE_URL: &str = "https://gitlab.com";
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 const READ_TIMEOUT: Duration = Duration::from_secs(120);
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(300);
 
 const STATUS_PATH: &str = "/api/v4/orbit/status";
 const SCHEMA_PATH: &str = "/api/v4/orbit/schema";
@@ -35,6 +36,7 @@ impl OrbitClient {
         let http = reqwest::Client::builder()
             .connect_timeout(CONNECT_TIMEOUT)
             .read_timeout(READ_TIMEOUT)
+            .timeout(REQUEST_TIMEOUT)
             .build()
             .map_err(|e| {
                 RemoteError::new(EXIT_GENERIC, format!("failed to build HTTP client: {e}"))
@@ -136,6 +138,11 @@ fn resolve_endpoint(get_env: impl Fn(&str) -> Option<String>) -> anyhow::Result<
     if let Some(token) = non_empty("GITLAB_TOKEN") {
         let base_url =
             non_empty("GITLAB_URL").unwrap_or_else(|| DEFAULT_GITLAB_BASE_URL.to_string());
+        if !base_url.starts_with("https://") {
+            eprintln!(
+                "warning: GITLAB_URL is not https ({base_url}); the token will be sent in plaintext"
+            );
+        }
         return Ok(ResolvedEndpoint {
             base_url,
             header_name: "Authorization".to_string(),
