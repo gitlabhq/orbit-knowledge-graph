@@ -1,3 +1,4 @@
+use orbit_utils::traversal_path::TraversalPath;
 use serde::{Deserialize, Deserializer, Serialize};
 
 /// One traversal path the user holds in their scope, paired with the exact
@@ -11,7 +12,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 /// `required_role` in the ontology remain direct numeric checks.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TraversalPathClaim {
-    pub path: String,
+    pub path: TraversalPath,
     pub access_levels: Vec<u32>,
 }
 

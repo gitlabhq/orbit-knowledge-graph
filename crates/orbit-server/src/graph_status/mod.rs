@@ -12,6 +12,7 @@ use indexer::indexing_status::IndexingStatusStore;
 use ontology::Ontology;
 use orbit_server_config::QueryConfig;
 use orbit_utils::arrow::ArrowUtils;
+use orbit_utils::traversal_path::TraversalPath;
 use query_engine::compiler::SecurityContext;
 use tonic::Status;
 use tracing::{debug, info, warn};
@@ -52,7 +53,7 @@ impl GraphStatusService {
 
     pub async fn get_status(
         &self,
-        traversal_path: &str,
+        traversal_path: &TraversalPath,
         format: i32,
         security_context: &SecurityContext,
     ) -> Result<GetGraphStatusResponse, Status> {
@@ -60,7 +61,7 @@ impl GraphStatusService {
             return Err(Status::invalid_argument("traversal_path is required"));
         }
 
-        info!(traversal_path, "Graph status fetching");
+        info!(%traversal_path, "Graph status fetching");
 
         let input = GraphStatusInput::from_ontology(&self.ontology, security_context);
 
@@ -72,7 +73,7 @@ impl GraphStatusService {
             execute_count_query(&self.client, &sql, traversal_path)
                 .await
                 .unwrap_or_else(|error| {
-                    warn!(traversal_path, label = "entity counts", %error, "Graph status branch failed");
+                    warn!(%traversal_path, label = "entity counts", %error, "Graph status branch failed");
                     HashMap::new()
                 })
         };
@@ -150,7 +151,7 @@ fn entity_counts_sql(input: &GraphStatusInput) -> String {
 async fn execute_count_query(
     client: &ArrowClickHouseClient,
     sql: &str,
-    traversal_path: &str,
+    traversal_path: &TraversalPath,
 ) -> Result<HashMap<String, i64>, Status> {
     let batches = execute_query(client, sql, traversal_path, "entity counts").await?;
 
@@ -176,7 +177,7 @@ async fn execute_count_query(
 pub(super) async fn execute_query(
     client: &ArrowClickHouseClient,
     sql: &str,
-    traversal_path: &str,
+    traversal_path: &TraversalPath,
     label: &str,
 ) -> Result<Vec<arrow::record_batch::RecordBatch>, Status> {
     let sql = append_query_settings(sql)
@@ -186,7 +187,7 @@ pub(super) async fn execute_query(
 
     client
         .query(&sql)
-        .param("path", traversal_path)
+        .param("path", traversal_path.as_str())
         .fetch_arrow()
         .await
         .map_err(|e| Status::internal(format!("ClickHouse error ({label}): {e}")))
@@ -282,10 +283,10 @@ mod tests {
     use super::input::NodeTable;
     use super::*;
     use clickhouse_client::ClickHouseConfigurationExt;
-    use query_engine::compiler::TraversalPath;
+    use query_engine::compiler::AuthorizedPath;
 
     fn admin_context() -> SecurityContext {
-        SecurityContext::new_with_roles(1, vec![TraversalPath::new("1/", 50)])
+        SecurityContext::new_with_roles(1, vec![AuthorizedPath::new("1/", 50)])
             .unwrap()
             .with_role(true, Some(50))
     }
@@ -385,7 +386,11 @@ mod tests {
         let service = GraphStatusService::new(client, test_ontology());
 
         let result = service
-            .get_status("", ResponseFormat::Raw as i32, &admin_context())
+            .get_status(
+                &TraversalPath::new_unchecked(""),
+                ResponseFormat::Raw as i32,
+                &admin_context(),
+            )
             .await;
 
         assert!(result.is_err());

@@ -9,6 +9,7 @@ use arrow::record_batch::RecordBatch;
 use crate::clickhouse::ArrowClickHouseClient;
 use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
 use clickhouse_client::FromArrowColumn;
+use orbit_utils::traversal_path::TraversalPath;
 
 use std::sync::LazyLock;
 
@@ -146,13 +147,13 @@ pub struct TableDeletionOutcome {
 #[derive(Clone)]
 pub struct NamespaceScheduleEntry {
     pub namespace_id: i64,
-    pub traversal_path: String,
+    pub traversal_path: TraversalPath,
 }
 
 #[derive(Clone)]
 pub struct DeletedNamespaceEntry {
     pub namespace_id: i64,
-    pub traversal_path: String,
+    pub traversal_path: TraversalPath,
     pub deleted_at: String,
 }
 
@@ -173,25 +174,30 @@ pub trait NamespaceDeletionStore: Send + Sync {
         namespace_id: i64,
     ) -> Result<bool, NamespaceDeletionStoreError>;
 
-    async fn delete_namespace_data(&self, traversal_path: &str) -> Vec<TableDeletionOutcome>;
+    async fn delete_namespace_data(
+        &self,
+        traversal_path: &TraversalPath,
+    ) -> Vec<TableDeletionOutcome>;
 
-    async fn enabled_namespace_roots(&self) -> Result<Vec<String>, NamespaceDeletionStoreError>;
+    async fn enabled_namespace_roots(
+        &self,
+    ) -> Result<Vec<TraversalPath>, NamespaceDeletionStoreError>;
 
     async fn reconcile_moved_entities(
         &self,
-        root_traversal_path: &str,
+        root_traversal_path: &TraversalPath,
     ) -> Vec<TableDeletionOutcome>;
 
     async fn delete_namespace_checkpoints(
         &self,
-        traversal_path: &str,
+        traversal_path: &TraversalPath,
         namespace_id: i64,
     ) -> Result<(), NamespaceDeletionStoreError>;
 
     async fn mark_deletion_complete(
         &self,
         namespace_id: i64,
-        traversal_path: &str,
+        traversal_path: &TraversalPath,
     ) -> Result<(), NamespaceDeletionStoreError>;
 
     async fn find_newly_deleted_namespaces(
@@ -203,7 +209,7 @@ pub trait NamespaceDeletionStore: Send + Sync {
     async fn schedule_deletion(
         &self,
         namespace_id: i64,
-        traversal_path: &str,
+        traversal_path: &TraversalPath,
         scheduled_deletion_date: &str,
     ) -> Result<(), NamespaceDeletionStoreError>;
 
@@ -236,8 +242,8 @@ impl ClickHouseNamespaceDeletionStore {
     async fn tombstone(
         &self,
         statements: &[DeletionStatement],
-        traversal_path: &str,
-        current_paths: Option<&[String]>,
+        traversal_path: &TraversalPath,
+        current_paths: Option<&[TraversalPath]>,
     ) -> Vec<TableDeletionOutcome> {
         let mut outcomes = Vec::with_capacity(statements.len());
 
@@ -247,7 +253,7 @@ impl ClickHouseNamespaceDeletionStore {
             let mut query = self
                 .graph
                 .insert_query(&statement.sql)
-                .param("traversal_path", traversal_path);
+                .param("traversal_path", traversal_path.as_str());
             if let Some(current_paths) = current_paths {
                 query = query.param("current_paths", current_paths);
             }
@@ -266,17 +272,23 @@ impl ClickHouseNamespaceDeletionStore {
 
     async fn current_routes_under_root(
         &self,
-        root_traversal_path: &str,
-    ) -> Result<Vec<String>, NamespaceDeletionStoreError> {
+        root_traversal_path: &TraversalPath,
+    ) -> Result<Vec<TraversalPath>, NamespaceDeletionStoreError> {
         let batches = self
             .datalake
             .query(CURRENT_ROUTES_UNDER_ROOT)
-            .param("traversal_path", root_traversal_path)
+            .param("traversal_path", root_traversal_path.as_str())
             .fetch_arrow()
             .await
             .map_err(|e| NamespaceDeletionStoreError::Query(e.to_string()))?;
 
         String::extract_column(&batches, 0)
+            .map(|paths| {
+                paths
+                    .into_iter()
+                    .map(TraversalPath::new_unchecked)
+                    .collect()
+            })
             .map_err(|e| NamespaceDeletionStoreError::Query(e.to_string()))
     }
 }
@@ -303,7 +315,7 @@ impl NamespaceDeletionStore for ClickHouseNamespaceDeletionStore {
 
     async fn delete_namespace_checkpoints(
         &self,
-        traversal_path: &str,
+        traversal_path: &TraversalPath,
         namespace_id: i64,
     ) -> Result<(), NamespaceDeletionStoreError> {
         let key_prefix = format!("{}.", namespace_position_key(namespace_id));
@@ -317,18 +329,23 @@ impl NamespaceDeletionStore for ClickHouseNamespaceDeletionStore {
 
         self.graph
             .insert_query(&delete_code_checkpoints_sql())
-            .param("traversal_path", traversal_path)
+            .param("traversal_path", traversal_path.as_str())
             .execute()
             .await
             .map_err(|e| NamespaceDeletionStoreError::Query(e.to_string()))
     }
 
-    async fn delete_namespace_data(&self, traversal_path: &str) -> Vec<TableDeletionOutcome> {
+    async fn delete_namespace_data(
+        &self,
+        traversal_path: &TraversalPath,
+    ) -> Vec<TableDeletionOutcome> {
         self.tombstone(&self.deletion_statements, traversal_path, None)
             .await
     }
 
-    async fn enabled_namespace_roots(&self) -> Result<Vec<String>, NamespaceDeletionStoreError> {
+    async fn enabled_namespace_roots(
+        &self,
+    ) -> Result<Vec<TraversalPath>, NamespaceDeletionStoreError> {
         let batches = self
             .datalake
             .query(&ENABLED_NAMESPACE_ROOTS_QUERY)
@@ -337,12 +354,18 @@ impl NamespaceDeletionStore for ClickHouseNamespaceDeletionStore {
             .map_err(|e| NamespaceDeletionStoreError::Query(e.to_string()))?;
 
         String::extract_column(&batches, 0)
+            .map(|paths| {
+                paths
+                    .into_iter()
+                    .map(TraversalPath::new_unchecked)
+                    .collect()
+            })
             .map_err(|e| NamespaceDeletionStoreError::Query(e.to_string()))
     }
 
     async fn reconcile_moved_entities(
         &self,
-        root_traversal_path: &str,
+        root_traversal_path: &TraversalPath,
     ) -> Vec<TableDeletionOutcome> {
         let current_paths = match self.current_routes_under_root(root_traversal_path).await {
             Ok(paths) => paths,
@@ -366,12 +389,12 @@ impl NamespaceDeletionStore for ClickHouseNamespaceDeletionStore {
     async fn mark_deletion_complete(
         &self,
         namespace_id: i64,
-        traversal_path: &str,
+        traversal_path: &TraversalPath,
     ) -> Result<(), NamespaceDeletionStoreError> {
         self.graph
             .insert_query(&mark_deletion_complete_sql())
             .param("namespace_id", namespace_id)
-            .param("traversal_path", traversal_path)
+            .param("traversal_path", traversal_path.as_str())
             .execute()
             .await
             .map_err(|error| NamespaceDeletionStoreError::MarkComplete {
@@ -400,13 +423,13 @@ impl NamespaceDeletionStore for ClickHouseNamespaceDeletionStore {
     async fn schedule_deletion(
         &self,
         namespace_id: i64,
-        traversal_path: &str,
+        traversal_path: &TraversalPath,
         scheduled_deletion_date: &str,
     ) -> Result<(), NamespaceDeletionStoreError> {
         self.graph
             .insert_query(&schedule_deletion_insert_sql())
             .param("namespace_id", namespace_id)
-            .param("traversal_path", traversal_path)
+            .param("traversal_path", traversal_path.as_str())
             .param("scheduled_deletion_date", scheduled_deletion_date)
             .execute()
             .await
@@ -443,7 +466,7 @@ fn extract_schedule_entries(
         .zip(traversal_paths)
         .map(|(namespace_id, traversal_path)| NamespaceScheduleEntry {
             namespace_id,
-            traversal_path,
+            traversal_path: TraversalPath::new_unchecked(traversal_path),
         })
         .collect())
 }
@@ -465,7 +488,7 @@ fn extract_deleted_namespace_entries(
         .map(
             |((namespace_id, traversal_path), deleted_at)| DeletedNamespaceEntry {
                 namespace_id,
-                traversal_path,
+                traversal_path: TraversalPath::new_unchecked(traversal_path),
                 deleted_at,
             },
         )
@@ -478,15 +501,15 @@ pub mod test_utils {
     use parking_lot::Mutex;
 
     pub struct MockNamespaceDeletionStore {
-        delete_calls: Mutex<Vec<String>>,
-        reconcile_calls: Mutex<Vec<String>>,
+        delete_calls: Mutex<Vec<TraversalPath>>,
+        reconcile_calls: Mutex<Vec<TraversalPath>>,
         delete_checkpoint_calls: Mutex<Vec<i64>>,
-        mark_complete_calls: Mutex<Vec<(i64, String)>>,
-        schedule_calls: Mutex<Vec<(i64, String, String)>>,
+        mark_complete_calls: Mutex<Vec<(i64, TraversalPath)>>,
+        schedule_calls: Mutex<Vec<(i64, TraversalPath, String)>>,
         deletion_outcomes: Vec<TableDeletionOutcome>,
         newly_deleted: Vec<DeletedNamespaceEntry>,
         due_deletions: Vec<NamespaceScheduleEntry>,
-        enabled_roots: Vec<String>,
+        enabled_roots: Vec<TraversalPath>,
         namespace_still_deleted: bool,
         fail_mark_complete: bool,
         fail_schedule: bool,
@@ -556,24 +579,24 @@ pub mod test_utils {
             self
         }
 
-        pub fn with_enabled_roots(mut self, roots: Vec<String>) -> Self {
+        pub fn with_enabled_roots(mut self, roots: Vec<TraversalPath>) -> Self {
             self.enabled_roots = roots;
             self
         }
 
-        pub fn delete_calls(&self) -> Vec<String> {
+        pub fn delete_calls(&self) -> Vec<TraversalPath> {
             self.delete_calls.lock().clone()
         }
 
-        pub fn reconcile_calls(&self) -> Vec<String> {
+        pub fn reconcile_calls(&self) -> Vec<TraversalPath> {
             self.reconcile_calls.lock().clone()
         }
 
-        pub fn mark_complete_calls(&self) -> Vec<(i64, String)> {
+        pub fn mark_complete_calls(&self) -> Vec<(i64, TraversalPath)> {
             self.mark_complete_calls.lock().clone()
         }
 
-        pub fn schedule_calls(&self) -> Vec<(i64, String, String)> {
+        pub fn schedule_calls(&self) -> Vec<(i64, TraversalPath, String)> {
             self.schedule_calls.lock().clone()
         }
 
@@ -591,30 +614,33 @@ pub mod test_utils {
             Ok(self.namespace_still_deleted)
         }
 
-        async fn delete_namespace_data(&self, traversal_path: &str) -> Vec<TableDeletionOutcome> {
-            self.delete_calls.lock().push(traversal_path.to_string());
+        async fn delete_namespace_data(
+            &self,
+            traversal_path: &TraversalPath,
+        ) -> Vec<TableDeletionOutcome> {
+            self.delete_calls.lock().push(traversal_path.clone());
             self.deletion_outcomes.clone()
         }
 
         async fn enabled_namespace_roots(
             &self,
-        ) -> Result<Vec<String>, NamespaceDeletionStoreError> {
+        ) -> Result<Vec<TraversalPath>, NamespaceDeletionStoreError> {
             Ok(self.enabled_roots.clone())
         }
 
         async fn reconcile_moved_entities(
             &self,
-            root_traversal_path: &str,
+            root_traversal_path: &TraversalPath,
         ) -> Vec<TableDeletionOutcome> {
             self.reconcile_calls
                 .lock()
-                .push(root_traversal_path.to_string());
+                .push(root_traversal_path.clone());
             self.deletion_outcomes.clone()
         }
 
         async fn delete_namespace_checkpoints(
             &self,
-            _traversal_path: &str,
+            _traversal_path: &TraversalPath,
             namespace_id: i64,
         ) -> Result<(), NamespaceDeletionStoreError> {
             self.delete_checkpoint_calls.lock().push(namespace_id);
@@ -624,11 +650,11 @@ pub mod test_utils {
         async fn mark_deletion_complete(
             &self,
             namespace_id: i64,
-            traversal_path: &str,
+            traversal_path: &TraversalPath,
         ) -> Result<(), NamespaceDeletionStoreError> {
             self.mark_complete_calls
                 .lock()
-                .push((namespace_id, traversal_path.to_string()));
+                .push((namespace_id, traversal_path.clone()));
 
             if self.fail_mark_complete {
                 return Err(NamespaceDeletionStoreError::MarkComplete {
@@ -651,12 +677,12 @@ pub mod test_utils {
         async fn schedule_deletion(
             &self,
             namespace_id: i64,
-            traversal_path: &str,
+            traversal_path: &TraversalPath,
             scheduled_deletion_date: &str,
         ) -> Result<(), NamespaceDeletionStoreError> {
             self.schedule_calls.lock().push((
                 namespace_id,
-                traversal_path.to_string(),
+                traversal_path.clone(),
                 scheduled_deletion_date.to_string(),
             ));
 

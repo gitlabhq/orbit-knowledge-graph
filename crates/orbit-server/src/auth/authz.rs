@@ -1,4 +1,4 @@
-use query_engine::compiler::{SecurityContext, TraversalPath};
+use query_engine::compiler::{AuthorizedPath, SecurityContext};
 
 use super::Claims;
 
@@ -10,7 +10,7 @@ pub fn build_security_context(claims: &Claims) -> Result<SecurityContext, String
         .ok_or("missing organization_id in claims")? as i64;
 
     let traversal_paths = if claims.admin {
-        vec![TraversalPath::new(
+        vec![AuthorizedPath::new(
             format!("{org_id}/"),
             ADMIN_ORG_ROOT_ACCESS_LEVEL,
         )]
@@ -21,7 +21,7 @@ pub fn build_security_context(claims: &Claims) -> Result<SecurityContext, String
         claims
             .group_traversal_ids
             .iter()
-            .map(|tp| TraversalPath::with_access_levels(tp.path.clone(), tp.access_levels.clone()))
+            .map(|tp| AuthorizedPath::with_access_levels(tp.path.clone(), tp.access_levels.clone()))
             .collect()
     };
 
@@ -43,6 +43,7 @@ pub fn build_security_context(claims: &Claims) -> Result<SecurityContext, String
 mod tests {
     use super::*;
     use crate::auth::TraversalPathClaim;
+    use orbit_utils::traversal_path::TraversalPath;
 
     fn make_claims(
         admin: bool,
@@ -108,11 +109,11 @@ mod tests {
             false,
             vec![
                 TraversalPathClaim {
-                    path: "1/22/".to_string(),
+                    path: TraversalPath::new_unchecked("1/22/"),
                     access_levels: vec![20],
                 },
                 TraversalPathClaim {
-                    path: "1/33/".to_string(),
+                    path: TraversalPath::new_unchecked("1/33/"),
                     access_levels: vec![30],
                 },
             ],
@@ -131,11 +132,11 @@ mod tests {
             false,
             vec![
                 TraversalPathClaim {
-                    path: "1/22/".to_string(),
+                    path: TraversalPath::new_unchecked("1/22/"),
                     access_levels: vec![20],
                 },
                 TraversalPathClaim {
-                    path: "2000271/122276018/".to_string(),
+                    path: TraversalPath::new_unchecked("2000271/122276018/"),
                     access_levels: vec![20],
                 },
             ],
@@ -152,11 +153,11 @@ mod tests {
             false,
             vec![
                 TraversalPathClaim {
-                    path: "1/22/".to_string(),
+                    path: TraversalPath::new_unchecked("1/22/"),
                     access_levels: vec![20],
                 },
                 TraversalPathClaim {
-                    path: "1/33/".to_string(),
+                    path: TraversalPath::new_unchecked("1/33/"),
                     access_levels: vec![20],
                 },
             ],
@@ -181,7 +182,7 @@ mod tests {
         let claims = make_claims(
             false,
             vec![TraversalPathClaim {
-                path: "1/22/".to_string(),
+                path: TraversalPath::new_unchecked("1/22/"),
                 access_levels: vec![20, 25],
             }],
             Some(1),

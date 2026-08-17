@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use arrow::array::StringArray;
 use orbit_utils::arrow::ArrowUtils;
+use orbit_utils::traversal_path::TraversalPath;
 
 use super::format::{Row, Seed, SeedSettings};
 use crate::context::TestContext;
@@ -95,7 +96,7 @@ fn expand_pseudo_rows(
 fn expand_namespace(row: &Row, location: &str) -> Vec<(String, Row)> {
     let mut fields = PseudoFields::new("namespaces", row, location);
     let id = fields.required("id");
-    let traversal_path = fields.required_str("traversal_path");
+    let traversal_path = TraversalPath::new_unchecked(fields.required_str("traversal_path"));
     let parent_id = fields.optional("parent_id");
     let visibility_level = fields.optional_or("visibility_level", 0.into());
     let id_number = yaml_i64(&id, "namespaces.id", location);
@@ -122,12 +123,15 @@ fn expand_namespace(row: &Row, location: &str) -> Vec<(String, Row)> {
             "siphon_namespace_details".to_string(),
             row_of([
                 ("namespace_id", id.clone()),
-                ("traversal_path", traversal_path.clone().into()),
+                ("traversal_path", traversal_path.as_str().into()),
             ]),
         ),
         (
             "namespace_traversal_paths".to_string(),
-            row_of([("id", id), ("traversal_path", traversal_path.into())]),
+            row_of([
+                ("id", id),
+                ("traversal_path", traversal_path.as_str().to_string().into()),
+            ]),
         ),
     ]
 }
@@ -136,7 +140,7 @@ fn expand_project(row: &Row, location: &str) -> Vec<(String, Row)> {
     let mut fields = PseudoFields::new("projects", row, location);
     let id = fields.required("id");
     let namespace_id = fields.required("namespace_id");
-    let traversal_path = fields.required_str("traversal_path");
+    let traversal_path = TraversalPath::new_unchecked(fields.required_str("traversal_path"));
     let creator_id = fields.optional_or("creator_id", 1.into());
     let visibility_level = fields.optional_or("visibility_level", 0.into());
     let id_number = yaml_i64(&id, "projects.id", location);
@@ -162,7 +166,10 @@ fn expand_project(row: &Row, location: &str) -> Vec<(String, Row)> {
         ),
         (
             "project_namespace_traversal_paths".to_string(),
-            row_of([("id", id), ("traversal_path", traversal_path.into())]),
+            row_of([
+                ("id", id),
+                ("traversal_path", traversal_path.as_str().to_string().into()),
+            ]),
         ),
     ]
 }
@@ -174,11 +181,10 @@ fn row_of<const N: usize>(entries: [(&str, serde_yaml::Value); N]) -> Row {
         .collect()
 }
 
-fn traversal_ids(traversal_path: &str) -> serde_yaml::Value {
+fn traversal_ids(traversal_path: &TraversalPath) -> serde_yaml::Value {
     serde_yaml::Value::Sequence(
         traversal_path
-            .trim_end_matches('/')
-            .split('/')
+            .segments()
             .filter_map(|s| s.parse::<i64>().ok())
             .map(serde_yaml::Value::from)
             .collect(),

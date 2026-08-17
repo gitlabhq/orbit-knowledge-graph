@@ -87,7 +87,7 @@ impl NamespaceDeletionScheduler {
 
         let mut reconciled = 0u64;
         for root in &roots {
-            if !orbit_utils::traversal_path::is_valid(root) {
+            if !root.is_valid() {
                 warn!(
                     traversal_path = %root,
                     "skipping reconcile for enabled namespace with invalid traversal_path"
@@ -253,6 +253,7 @@ mod tests {
     use crate::durability::WriteDurability;
     use crate::nats::{NatsError, NatsServices};
     use crate::types::{Envelope, Subscription};
+    use orbit_utils::traversal_path::TraversalPath;
 
     struct MockCheckpointStore;
 
@@ -310,7 +311,7 @@ mod tests {
         let store = Arc::new(MockNamespaceDeletionStore::new().with_newly_deleted(vec![
             DeletedNamespaceEntry {
                 namespace_id: 100,
-                traversal_path: "1/100/".to_string(),
+                traversal_path: TraversalPath::new_unchecked("1/100/"),
                 deleted_at: "2025-04-01 12:00:00.000000".to_string(),
             },
         ]));
@@ -330,7 +331,7 @@ mod tests {
         let store = Arc::new(MockNamespaceDeletionStore::new().with_due_deletions(vec![
             NamespaceScheduleEntry {
                 namespace_id: 200,
-                traversal_path: "1/200/".to_string(),
+                traversal_path: TraversalPath::new_unchecked("1/200/"),
             },
         ]));
 
@@ -362,10 +363,10 @@ mod tests {
 
     #[tokio::test]
     async fn reconciles_moved_entities_per_enabled_root() {
-        let store = Arc::new(
-            MockNamespaceDeletionStore::new()
-                .with_enabled_roots(vec!["1/100/".to_string(), "1/200/".to_string()]),
-        );
+        let store = Arc::new(MockNamespaceDeletionStore::new().with_enabled_roots(vec![
+            TraversalPath::new_unchecked("1/100/"),
+            TraversalPath::new_unchecked("1/200/"),
+        ]));
         let scheduler = scheduler_with_store(store.clone());
 
         scheduler.run().await.unwrap();
@@ -386,9 +387,9 @@ mod tests {
     #[tokio::test]
     async fn skips_reconcile_for_invalid_roots() {
         let store = Arc::new(MockNamespaceDeletionStore::new().with_enabled_roots(vec![
-            "0/".to_string(),
-            "1/100/".to_string(),
-            "abc/100/".to_string(),
+            TraversalPath::new_unchecked("0/"),
+            TraversalPath::new_unchecked("1/100/"),
+            TraversalPath::new_unchecked("abc/100/"),
         ]));
         let scheduler = scheduler_with_store(store.clone());
 
@@ -404,7 +405,7 @@ mod tests {
                 .failing_schedule()
                 .with_newly_deleted(vec![DeletedNamespaceEntry {
                     namespace_id: 100,
-                    traversal_path: "1/100/".to_string(),
+                    traversal_path: TraversalPath::new_unchecked("1/100/"),
                     deleted_at: "2025-04-01 12:00:00.000000".to_string(),
                 }]),
         );
@@ -420,7 +421,7 @@ mod tests {
         let store = Arc::new(MockNamespaceDeletionStore::new().with_due_deletions(vec![
             NamespaceScheduleEntry {
                 namespace_id: 200,
-                traversal_path: "1/200/".to_string(),
+                traversal_path: TraversalPath::new_unchecked("1/200/"),
             },
         ]));
 

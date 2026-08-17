@@ -90,10 +90,7 @@ pub use passes::hydrate::{
 };
 pub use passes::normalize::{build_entity_auth, normalize};
 pub use scope::{PathResolutionKey, PathScopeId, scope_edges, scope_keys};
-pub use types::{
-    AccessLevel, DEFAULT_PATH_ACCESS_LEVEL, Realm, SecurityContext, TraversalPath,
-    is_valid_traversal_path,
-};
+pub use types::{AccessLevel, AuthorizedPath, DEFAULT_PATH_ACCESS_LEVEL, Realm, SecurityContext};
 
 use metrics::CountErr;
 use std::sync::Arc;
@@ -168,7 +165,7 @@ pub fn compile_input(
 
 #[cfg(test)]
 pub(crate) mod testkit {
-    use crate::types::{AccessLevel, SecurityContext, TraversalPath};
+    use crate::types::{AccessLevel, AuthorizedPath, SecurityContext};
 
     pub fn non_admin_ctx() -> SecurityContext {
         SecurityContext::new(1, vec!["1/".into()]).unwrap()
@@ -177,7 +174,7 @@ pub(crate) mod testkit {
     pub fn admin_ctx() -> SecurityContext {
         SecurityContext::new_with_roles(
             1,
-            vec![TraversalPath::new("1/", AccessLevel::Owner as u32)],
+            vec![AuthorizedPath::new("1/", AccessLevel::Owner as u32)],
         )
         .unwrap()
         .with_role(true, Some(AccessLevel::Owner as u32))
@@ -187,6 +184,7 @@ pub(crate) mod testkit {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use orbit_utils::traversal_path::TraversalPath;
     use std::sync::LazyLock;
 
     static ONTOLOGY: LazyLock<Ontology> =
@@ -1700,7 +1698,9 @@ mod tests {
         );
         let ctx = SecurityContext::new(1, vec!["1/".into()])
             .unwrap()
-            .with_scope_prefixes([("g".to_string(), "1/9970/".to_string())].into());
+            .with_scope_prefixes(
+                [("g".to_string(), TraversalPath::new_unchecked("1/9970/"))].into(),
+            );
         compile(&query, &ONTOLOGY, &ctx).unwrap().base.render()
     }
 
@@ -1709,7 +1709,9 @@ mod tests {
         let query = r#"{"query_type":"traversal","nodes":[{"id":"m","entity":"MergeRequest","columns":["id"],"filters":{"state":{"eq":"opened"}}}],"limit":20}"#;
         let ctx = SecurityContext::new(1, vec!["1/".into()])
             .unwrap()
-            .with_scope_prefixes([("m".to_string(), "1/9970/".to_string())].into());
+            .with_scope_prefixes(
+                [("m".to_string(), TraversalPath::new_unchecked("1/9970/"))].into(),
+            );
         let sql = compile(query, &ONTOLOGY, &ctx).unwrap().base.render();
         assert!(
             sql.contains("startsWith(m.traversal_path"),
@@ -1893,7 +1895,7 @@ mod tests {
                 columns: Some(ColumnSelection::List(vec!["id".into(), "state".into()])),
                 node_ids: vec![1],
                 has_traversal_path: true,
-                traversal_paths: vec!["1/".into()],
+                traversal_paths: vec![TraversalPath::new_unchecked("1/")],
                 ..Default::default()
             }],
             limit: 10,

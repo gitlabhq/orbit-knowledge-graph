@@ -10,7 +10,9 @@ chrono = { workspace = true }
 enum-as-inner = { workspace = true }
 flate2 = { workspace = true }
 ignore = { workspace = true }
+regex = { workspace = true }
 rustc-hash = { workspace = true }
+serde = { workspace = true }
 serde_json = { workspace = true }
 strum = { workspace = true }
 tar = { workspace = true }

@@ -15,6 +15,7 @@ use crate::input::{
 };
 use crate::types::SecurityContext;
 use ontology::{DataType, Ontology, TRAVERSAL_PATH_COLUMN};
+use orbit_utils::traversal_path::TraversalPath;
 
 use super::errors::format_schema_error;
 
@@ -568,10 +569,12 @@ impl<'a> Validator<'a> {
     }
 
     fn check_traversal_path_value(label: &str, path: &str) -> Result<()> {
-        SecurityContext::validate_traversal_path(path).map_err(|err| match err {
-            QueryError::Security(msg) => QueryError::Validation(format!("{label}: {msg}")),
-            other => other,
-        })
+        SecurityContext::validate_traversal_path(&TraversalPath::new_unchecked(path)).map_err(
+            |err| match err {
+                QueryError::Security(msg) => QueryError::Validation(format!("{label}: {msg}")),
+                other => other,
+            },
+        )
     }
 
     fn check_one_filter(

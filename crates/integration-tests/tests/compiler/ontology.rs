@@ -2,9 +2,10 @@ use std::sync::Arc;
 
 use super::setup::{admin_ctx, embedded_ontology, test_ctx};
 use compiler::{
-    ColumnSelection, HydrationPlan, Input, InputNode, QueryType, TraversalPath, compile,
+    AuthorizedPath, ColumnSelection, HydrationPlan, Input, InputNode, QueryType, compile,
     compile_input,
 };
+use orbit_utils::traversal_path::TraversalPath;
 
 #[test]
 fn valid_column_in_order_by() {
@@ -905,12 +906,12 @@ fn hydration_query_type_generates_union_all() {
 
 #[test]
 fn hydration_widens_paths_to_segment_budget() {
-    let deep = |count: usize| -> Vec<String> {
+    let deep = |count: usize| -> Vec<TraversalPath> {
         (0..count)
-            .map(|i| format!("1/{i:0>40}/{:0>40}/", i + 10000))
+            .map(|i| TraversalPath::new_unchecked(format!("1/{i:0>40}/{:0>40}/", i + 10000)))
             .collect()
     };
-    let node = |table: &str, entity: &str, paths: Vec<String>| InputNode {
+    let node = |table: &str, entity: &str, paths: Vec<TraversalPath>| InputNode {
         id: "hydrate".into(),
         entity: Some(entity.into()),
         table: Some(table.into()),
@@ -930,7 +931,7 @@ fn hydration_widens_paths_to_segment_budget() {
         };
         compile_input(input, &Arc::new(embedded_ontology()), &test_ctx()).unwrap()
     };
-    let bound_paths = |result: &compiler::CompiledQueryContext| -> Vec<String> {
+    let bound_paths = |result: &compiler::CompiledQueryContext| -> Vec<TraversalPath> {
         result
             .base
             .params
@@ -940,7 +941,7 @@ fn hydration_widens_paths_to_segment_budget() {
                 _ => None,
             })
             .flat_map(|items| items.iter().filter_map(|v| v.as_str()))
-            .map(String::from)
+            .map(TraversalPath::new_unchecked)
             .collect()
     };
 
@@ -971,7 +972,9 @@ fn hydration_widens_paths_to_segment_budget() {
     assert!(widened.iter().all(|w| !over.contains(w)));
     for path in &over {
         assert!(
-            widened.iter().any(|w| path.starts_with(w.as_str())),
+            widened
+                .iter()
+                .any(|w| path.as_str().starts_with(w.as_str())),
             "{path} lost its ancestor prefix"
         );
     }
@@ -1428,7 +1431,7 @@ fn filterable_rejects_traversal_path_below_entity_role_floor() {
             "limit": 10
         }"#,
         &embedded_ontology(),
-        &compiler::SecurityContext::new_with_roles(1, vec![TraversalPath::new("1/100/", 20)])
+        &compiler::SecurityContext::new_with_roles(1, vec![AuthorizedPath::new("1/100/", 20)])
             .unwrap(),
     )
     .unwrap_err();

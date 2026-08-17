@@ -8,7 +8,8 @@ use moka::future::Cache;
 use ontology::{Ontology, TraversalPathKind, TraversalPathLookup};
 use orbit_server_config::PathResolverConfig;
 use orbit_utils::arrow::ArrowUtils;
-use query_engine::compiler::{PathResolutionKey, PathScopeId, is_valid_traversal_path};
+use orbit_utils::traversal_path::TraversalPath;
+use query_engine::compiler::{PathResolutionKey, PathScopeId};
 use tracing::{debug, warn};
 
 use crate::pipeline::correlation;
@@ -19,7 +20,7 @@ pub struct PathResolver {
     client: Arc<ArrowClickHouseClient>,
     lookups: Vec<TraversalPathLookup>,
     dict_available: bool,
-    cache: Cache<PathResolutionKey, Option<String>>,
+    cache: Cache<PathResolutionKey, Option<TraversalPath>>,
 }
 
 impl PathResolver {
@@ -58,7 +59,7 @@ impl PathResolver {
     pub async fn resolve_batch(
         &self,
         keys: &[PathResolutionKey],
-    ) -> HashMap<PathResolutionKey, Option<String>> {
+    ) -> HashMap<PathResolutionKey, Option<TraversalPath>> {
         let mut resolved = HashMap::new();
         let mut groups: HashMap<(String, TraversalPathKind), Vec<PathResolutionKey>> =
             HashMap::new();
@@ -219,9 +220,14 @@ impl PathResolver {
     }
 }
 
-fn normalize_path(path: Option<String>) -> Option<String> {
+fn normalize_path(path: Option<String>) -> Option<TraversalPath> {
     match path {
-        Some(p) if p != DICT_DEFAULT && is_valid_traversal_path(&p) => Some(p),
+        Some(p)
+            if p != DICT_DEFAULT
+                && TraversalPath::new_unchecked(p.as_str()).is_valid_any_depth() =>
+        {
+            Some(TraversalPath::new_unchecked(p))
+        }
         _ => None,
     }
 }
@@ -293,7 +299,7 @@ mod tests {
     fn normalize_accepts_valid_and_rejects_malformed() {
         assert_eq!(
             normalize_path(Some("1/2/".to_string())),
-            Some("1/2/".to_string())
+            Some(TraversalPath::new_unchecked("1/2/"))
         );
         assert_eq!(normalize_path(Some("0/".to_string())), None);
         assert_eq!(normalize_path(Some("1/22/../../foo".to_string())), None);

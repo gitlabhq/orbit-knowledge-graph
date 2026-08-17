@@ -7,6 +7,7 @@ use tracing::warn;
 
 use super::parse::{Action, RefKind, Reference};
 use super::resolve::ResolvedTarget;
+use orbit_utils::traversal_path::TraversalPath;
 
 /// Collapses the `Issue` family into `WorkItem` to match the upstream graph
 /// schema (see `lower_edge_kind` precedent in
@@ -56,7 +57,7 @@ pub mod edge_kinds {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EmittedEdge {
-    pub traversal_path: String,
+    pub traversal_path: TraversalPath,
     pub relationship_kind: &'static str,
     pub source_id: i64,
     pub source_kind: &'static str,
@@ -66,7 +67,7 @@ pub struct EmittedEdge {
 
 #[derive(Debug, Clone)]
 pub struct NoteRow {
-    pub traversal_path: String,
+    pub traversal_path: TraversalPath,
     /// Full path of the source note's owning project (e.g. `gitlab-org/gitlab`).
     /// Substituted for same-project GFM shorthand (`#123`, `!456`) when the
     /// reference carries no explicit project prefix. Empty string when the
@@ -198,7 +199,7 @@ mod tests {
         noteable_id: i64,
     ) -> NoteRow {
         NoteRow {
-            traversal_path: "1/2/".to_string(),
+            traversal_path: TraversalPath::new_unchecked("1/2/"),
             default_project: "src/proj".to_string(),
             author_id: Some(7),
             noteable_id,
@@ -212,7 +213,7 @@ mod tests {
         id: i64,
         traversal_path: &str,
     ) -> impl FnMut(&Reference, &str) -> Option<ResolvedTarget> + use<> {
-        let tp = traversal_path.to_string();
+        let tp = TraversalPath::new_unchecked(traversal_path);
         move |_r, _default| {
             Some(ResolvedTarget {
                 id,

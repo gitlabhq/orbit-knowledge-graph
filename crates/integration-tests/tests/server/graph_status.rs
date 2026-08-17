@@ -5,7 +5,8 @@ use bytes::Bytes;
 use chrono::{Duration, Utc};
 use nats_client::error::NatsError;
 use nats_client::kv_types::{KvEntry, KvPutOptions, KvPutResult};
-use query_engine::compiler::{SecurityContext, TraversalPath};
+use orbit_utils::traversal_path::TraversalPath;
+use query_engine::compiler::{AuthorizedPath, SecurityContext};
 
 use crate::common::{GRAPH_SCHEMA_SQL, TestContext};
 use indexer::indexing_status::{INDEXING_PROGRESS_BUCKET, IndexingProgress, IndexingStatusStore};
@@ -18,7 +19,7 @@ use orbit_server::proto::{
 };
 
 fn admin_context() -> SecurityContext {
-    SecurityContext::new_with_roles(1, vec![TraversalPath::new("1/", 50)])
+    SecurityContext::new_with_roles(1, vec![AuthorizedPath::new("1/", 50)])
         .unwrap()
         .with_role(true, Some(50))
 }
@@ -275,7 +276,11 @@ async fn graph_status() {
 async fn root_traversal_path_returns_all_entity_counts(ctx: &TestContext) {
     let service = build_service(ctx);
     let response = service
-        .get_status("1/", ResponseFormat::Raw as i32, &admin_context())
+        .get_status(
+            &TraversalPath::new_unchecked("1/"),
+            ResponseFormat::Raw as i32,
+            &admin_context(),
+        )
         .await
         .expect("should succeed");
     let status = extract_structured(response);
@@ -298,7 +303,11 @@ async fn scoped_by_traversal_path_filters_counts(ctx: &TestContext) {
     let service = build_service(ctx);
 
     let response = service
-        .get_status("1/100/", ResponseFormat::Raw as i32, &admin_context())
+        .get_status(
+            &TraversalPath::new_unchecked("1/100/"),
+            ResponseFormat::Raw as i32,
+            &admin_context(),
+        )
         .await
         .expect("should succeed");
     let status = extract_structured(response);
@@ -325,7 +334,11 @@ async fn empty_traversal_path_rejected(ctx: &TestContext) {
     let service = build_service(ctx);
 
     let result = service
-        .get_status("", ResponseFormat::Raw as i32, &admin_context())
+        .get_status(
+            &TraversalPath::new_unchecked(""),
+            ResponseFormat::Raw as i32,
+            &admin_context(),
+        )
         .await;
 
     assert!(result.is_err());
@@ -337,7 +350,11 @@ async fn non_matching_traversal_path_returns_zeros(ctx: &TestContext) {
     let service = build_service(ctx);
 
     let response = service
-        .get_status("999/", ResponseFormat::Raw as i32, &admin_context())
+        .get_status(
+            &TraversalPath::new_unchecked("999/"),
+            ResponseFormat::Raw as i32,
+            &admin_context(),
+        )
         .await
         .expect("should succeed");
     let status = extract_structured(response);
@@ -352,7 +369,11 @@ async fn all_domains_present_in_response(ctx: &TestContext) {
     let ontology = load_ontology();
 
     let response = service
-        .get_status("1/", ResponseFormat::Raw as i32, &admin_context())
+        .get_status(
+            &TraversalPath::new_unchecked("1/"),
+            ResponseFormat::Raw as i32,
+            &admin_context(),
+        )
         .await
         .expect("should succeed");
     let status = extract_structured(response);
@@ -372,7 +393,11 @@ async fn all_domains_present_in_response(ctx: &TestContext) {
 async fn projects_status_at_root(ctx: &TestContext) {
     let service = build_service(ctx);
     let response = service
-        .get_status("1/", ResponseFormat::Raw as i32, &admin_context())
+        .get_status(
+            &TraversalPath::new_unchecked("1/"),
+            ResponseFormat::Raw as i32,
+            &admin_context(),
+        )
         .await
         .expect("should succeed");
     let status = extract_structured(response);
@@ -385,7 +410,11 @@ async fn projects_status_at_root(ctx: &TestContext) {
 async fn projects_status_scoped_by_traversal_path(ctx: &TestContext) {
     let service = build_service(ctx);
     let response = service
-        .get_status("1/100/", ResponseFormat::Raw as i32, &admin_context())
+        .get_status(
+            &TraversalPath::new_unchecked("1/100/"),
+            ResponseFormat::Raw as i32,
+            &admin_context(),
+        )
         .await
         .expect("should succeed");
     let status = extract_structured(response);
@@ -401,7 +430,11 @@ async fn projects_status_scoped_by_traversal_path(ctx: &TestContext) {
 async fn indexing_status_absent_without_store(ctx: &TestContext) {
     let service = build_service(ctx);
     let response = service
-        .get_status("1/", ResponseFormat::Raw as i32, &admin_context())
+        .get_status(
+            &TraversalPath::new_unchecked("1/"),
+            ResponseFormat::Raw as i32,
+            &admin_context(),
+        )
         .await
         .expect("should succeed");
     let status = extract_structured(response);
@@ -440,7 +473,11 @@ async fn indexing_status_indexed_for_group(ctx: &TestContext) {
 
     let service = build_service_with_indexing_status(ctx, mock_kv);
     let response = service
-        .get_status("1/100/", ResponseFormat::Raw as i32, &admin_context())
+        .get_status(
+            &TraversalPath::new_unchecked("1/100/"),
+            ResponseFormat::Raw as i32,
+            &admin_context(),
+        )
         .await
         .expect("should succeed");
     let status = extract_structured(response);
@@ -479,7 +516,11 @@ async fn indexing_status_backfilling_for_project(ctx: &TestContext) {
 
     let service = build_service_with_indexing_status(ctx, mock_kv);
     let response = service
-        .get_status("1/100/1000/", ResponseFormat::Raw as i32, &admin_context())
+        .get_status(
+            &TraversalPath::new_unchecked("1/100/1000/"),
+            ResponseFormat::Raw as i32,
+            &admin_context(),
+        )
         .await
         .expect("should succeed");
     let status = extract_structured(response);
@@ -517,7 +558,11 @@ async fn indexing_status_indexing_when_reindex_in_flight(ctx: &TestContext) {
 
     let service = build_service_with_indexing_status(ctx, mock_kv);
     let response = service
-        .get_status("1/100/", ResponseFormat::Raw as i32, &admin_context())
+        .get_status(
+            &TraversalPath::new_unchecked("1/100/"),
+            ResponseFormat::Raw as i32,
+            &admin_context(),
+        )
         .await
         .expect("should succeed");
     let status = extract_structured(response);
@@ -532,7 +577,11 @@ async fn indexing_status_not_indexed_when_no_kv_entry(ctx: &TestContext) {
     let mock_kv = MockKvServices::new();
     let service = build_service_with_indexing_status(ctx, mock_kv);
     let response = service
-        .get_status("1/101/", ResponseFormat::Raw as i32, &admin_context())
+        .get_status(
+            &TraversalPath::new_unchecked("1/101/"),
+            ResponseFormat::Raw as i32,
+            &admin_context(),
+        )
         .await
         .expect("should succeed");
     let status = extract_structured(response);
@@ -560,7 +609,11 @@ async fn indexing_status_error_state(ctx: &TestContext) {
 
     let service = build_service_with_indexing_status(ctx, mock_kv);
     let response = service
-        .get_status("1/100/", ResponseFormat::Raw as i32, &admin_context())
+        .get_status(
+            &TraversalPath::new_unchecked("1/100/"),
+            ResponseFormat::Raw as i32,
+            &admin_context(),
+        )
         .await
         .expect("should succeed");
     let status = extract_structured(response);
@@ -582,7 +635,11 @@ async fn indexing_status_unknown_when_nats_unreachable(ctx: &TestContext) {
     let service = GraphStatusService::new(client, ontology).with_indexing_status(store);
 
     let response = service
-        .get_status("1/100/", ResponseFormat::Raw as i32, &admin_context())
+        .get_status(
+            &TraversalPath::new_unchecked("1/100/"),
+            ResponseFormat::Raw as i32,
+            &admin_context(),
+        )
         .await
         .expect("should succeed");
     let status = extract_structured(response);
@@ -623,7 +680,11 @@ async fn indexing_status_per_entity_worst_state_wins(ctx: &TestContext) {
 
     let service = build_service_with_indexing_status(ctx, mock_kv);
     let response = service
-        .get_status("1/100/", ResponseFormat::Raw as i32, &admin_context())
+        .get_status(
+            &TraversalPath::new_unchecked("1/100/"),
+            ResponseFormat::Raw as i32,
+            &admin_context(),
+        )
         .await
         .expect("should succeed");
     let status = extract_structured(response);
@@ -652,7 +713,11 @@ async fn indexing_status_per_entity_missing_key_treated_as_not_indexed(ctx: &Tes
 
     let service = build_service_with_indexing_status(ctx, mock_kv);
     let response = service
-        .get_status("1/100/", ResponseFormat::Raw as i32, &admin_context())
+        .get_status(
+            &TraversalPath::new_unchecked("1/100/"),
+            ResponseFormat::Raw as i32,
+            &admin_context(),
+        )
         .await
         .expect("should succeed");
     let status = extract_structured(response);
@@ -664,10 +729,14 @@ async fn indexing_status_per_entity_missing_key_treated_as_not_indexed(ctx: &Tes
 async fn reporter_excludes_security_entity_counts(ctx: &TestContext) {
     let service = build_service(ctx);
     let reporter_context =
-        SecurityContext::new_with_roles(1, vec![TraversalPath::new("1/", 20)]).unwrap();
+        SecurityContext::new_with_roles(1, vec![AuthorizedPath::new("1/", 20)]).unwrap();
 
     let response = service
-        .get_status("1/", ResponseFormat::Raw as i32, &reporter_context)
+        .get_status(
+            &TraversalPath::new_unchecked("1/"),
+            ResponseFormat::Raw as i32,
+            &reporter_context,
+        )
         .await
         .expect("should succeed");
     let status = extract_structured(response);
@@ -688,10 +757,14 @@ async fn reporter_excludes_security_entity_counts(ctx: &TestContext) {
 async fn security_manager_includes_security_entity_counts(ctx: &TestContext) {
     let service = build_service(ctx);
     let sm_context =
-        SecurityContext::new_with_roles(1, vec![TraversalPath::new("1/", 25)]).unwrap();
+        SecurityContext::new_with_roles(1, vec![AuthorizedPath::new("1/", 25)]).unwrap();
 
     let response = service
-        .get_status("1/", ResponseFormat::Raw as i32, &sm_context)
+        .get_status(
+            &TraversalPath::new_unchecked("1/"),
+            ResponseFormat::Raw as i32,
+            &sm_context,
+        )
         .await
         .expect("should succeed");
     let status = extract_structured(response);
@@ -745,7 +818,11 @@ async fn indexing_status_survives_single_entity_read_failure(ctx: &TestContext) 
     let service = GraphStatusService::new(client, ontology).with_indexing_status(store);
 
     let response = service
-        .get_status("1/100/", ResponseFormat::Raw as i32, &admin_context())
+        .get_status(
+            &TraversalPath::new_unchecked("1/100/"),
+            ResponseFormat::Raw as i32,
+            &admin_context(),
+        )
         .await
         .expect("should succeed");
     let status = extract_structured(response);
@@ -775,7 +852,11 @@ async fn code_not_indexed_dominates_when_no_project_checkpointed(ctx: &TestConte
 
     let service = build_service_with_indexing_status(ctx, mock_kv);
     let response = service
-        .get_status("1/100/1002/", ResponseFormat::Raw as i32, &admin_context())
+        .get_status(
+            &TraversalPath::new_unchecked("1/100/1002/"),
+            ResponseFormat::Raw as i32,
+            &admin_context(),
+        )
         .await
         .expect("should succeed");
     let status = extract_structured(response);
@@ -808,7 +889,11 @@ async fn code_indexing_omitted_when_no_projects_known(ctx: &TestContext) {
 
     let service = build_service_with_indexing_status(ctx, mock_kv);
     let response = service
-        .get_status("999/", ResponseFormat::Raw as i32, &admin_context())
+        .get_status(
+            &TraversalPath::new_unchecked("999/"),
+            ResponseFormat::Raw as i32,
+            &admin_context(),
+        )
         .await
         .expect("should succeed");
     let status = extract_structured(response);
@@ -830,7 +915,11 @@ async fn edge_pipeline_error_surfaces_in_sdlc_state(ctx: &TestContext) {
 
     let service = build_service_with_indexing_status(ctx, mock_kv);
     let response = service
-        .get_status("1/100/", ResponseFormat::Raw as i32, &admin_context())
+        .get_status(
+            &TraversalPath::new_unchecked("1/100/"),
+            ResponseFormat::Raw as i32,
+            &admin_context(),
+        )
         .await
         .expect("should succeed");
     let status = extract_structured(response);
@@ -851,7 +940,11 @@ async fn items_carry_per_entity_state(ctx: &TestContext) {
 
     let service = build_service_with_indexing_status(ctx, mock_kv);
     let response = service
-        .get_status("1/100/", ResponseFormat::Raw as i32, &admin_context())
+        .get_status(
+            &TraversalPath::new_unchecked("1/100/"),
+            ResponseFormat::Raw as i32,
+            &admin_context(),
+        )
         .await
         .expect("should succeed");
     let status = extract_structured(response);
@@ -885,7 +978,11 @@ async fn indexing_status_reports_last_run_rows(ctx: &TestContext) {
 
     let service = build_service_with_indexing_status(ctx, mock_kv);
     let response = service
-        .get_status("1/100/", ResponseFormat::Raw as i32, &admin_context())
+        .get_status(
+            &TraversalPath::new_unchecked("1/100/"),
+            ResponseFormat::Raw as i32,
+            &admin_context(),
+        )
         .await
         .expect("should succeed");
     let status = extract_structured(response);
@@ -903,7 +1000,11 @@ async fn toon_renders_split_indexing_blocks(ctx: &TestContext) {
 
     let service = build_service_with_indexing_status(ctx, mock_kv);
     let response = service
-        .get_status("1/100/", ResponseFormat::Llm as i32, &admin_context())
+        .get_status(
+            &TraversalPath::new_unchecked("1/100/"),
+            ResponseFormat::Llm as i32,
+            &admin_context(),
+        )
         .await
         .expect("should succeed");
     let text = match response.content {
@@ -934,7 +1035,11 @@ async fn definition_count_counts_distinct_ids(ctx: &TestContext) {
 
     let service = build_service(&db);
     let response = service
-        .get_status("1/100/1000/", ResponseFormat::Raw as i32, &admin_context())
+        .get_status(
+            &TraversalPath::new_unchecked("1/100/1000/"),
+            ResponseFormat::Raw as i32,
+            &admin_context(),
+        )
         .await
         .expect("should succeed");
     let status = extract_structured(response);
@@ -960,7 +1065,11 @@ async fn group_count_excludes_deleted(ctx: &TestContext) {
 
     let service = build_service(&db);
     let response = service
-        .get_status("1/900/", ResponseFormat::Raw as i32, &admin_context())
+        .get_status(
+            &TraversalPath::new_unchecked("1/900/"),
+            ResponseFormat::Raw as i32,
+            &admin_context(),
+        )
         .await
         .expect("should succeed");
     let status = extract_structured(response);
@@ -986,7 +1095,11 @@ async fn projects_total_known_counts_distinct_ids(ctx: &TestContext) {
 
     let service = build_service(&db);
     let response = service
-        .get_status("1/", ResponseFormat::Raw as i32, &admin_context())
+        .get_status(
+            &TraversalPath::new_unchecked("1/"),
+            ResponseFormat::Raw as i32,
+            &admin_context(),
+        )
         .await
         .expect("should succeed");
     let projects = extract_structured(response)
@@ -1020,7 +1133,11 @@ async fn get_status_degrades_when_entity_count_table_missing(ctx: &TestContext) 
     let service = build_service_with_indexing_status(&db, mock_kv);
 
     let response = service
-        .get_status("1/", ResponseFormat::Raw as i32, &admin_context())
+        .get_status(
+            &TraversalPath::new_unchecked("1/"),
+            ResponseFormat::Raw as i32,
+            &admin_context(),
+        )
         .await
         .expect("a failed entity-count branch must not fail the whole request");
     let status = extract_structured(response);

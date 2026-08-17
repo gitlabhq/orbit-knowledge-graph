@@ -261,7 +261,10 @@ fn seed_scope_prefixes(
         let (alias, prefix) = spec
             .split_once('=')
             .context("--scope-prefix must be alias=prefix")?;
-        if let Some(prev) = seed.insert(alias.to_string(), prefix.to_string()) {
+        if let Some(prev) = seed.insert(
+            alias.to_string(),
+            orbit_utils::traversal_path::TraversalPath::new_unchecked(prefix),
+        ) {
             eprintln!(
                 "warning: --scope-prefix alias '{alias}' specified more than once ('{prev}' overwritten by '{prefix}')"
             );
@@ -396,8 +399,10 @@ async fn main() -> Result<()> {
         }
     };
 
-    let org_id = orbit_utils::traversal_path::org_id(&cli.traversal_paths[0])
-        .context("failed to parse org_id from first traversal path")?;
+    let org_id =
+        orbit_utils::traversal_path::TraversalPath::new_unchecked(cli.traversal_paths[0].as_str())
+            .organization_id()
+            .context("failed to parse org_id from first traversal path")?;
 
     let mut security_ctx = SecurityContext::new(org_id, cli.traversal_paths.clone())
         .map_err(|e| anyhow::anyhow!("invalid security context: {e}"))?;

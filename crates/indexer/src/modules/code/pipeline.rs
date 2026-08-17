@@ -20,11 +20,12 @@ use crate::clickhouse::{BufferedWriter, BufferedWriterConfig, ClickHouseWriter, 
 use crate::handler::{HandlerContext, HandlerError};
 use crate::locking::LockGuard;
 use crate::observer::IndexingObserver;
+use orbit_utils::traversal_path::TraversalPath;
 
 pub struct IndexingRequest {
     pub project_id: i64,
     pub branch: String,
-    pub traversal_path: String,
+    pub traversal_path: TraversalPath,
     pub task_id: i64,
     pub commit_sha: Option<String>,
     pub had_prior_checkpoint: bool,
@@ -814,7 +815,7 @@ mod tests {
             remaining: AtomicUsize::new(1 + batches),
             failed: AtomicBool::new(false),
             checkpoint: CodeIndexingCheckpoint {
-                traversal_path: "1/7/".into(),
+                traversal_path: TraversalPath::new_unchecked("1/7/"),
                 project_id: 7,
                 branch: "main".into(),
                 last_task_id: 7,
@@ -849,7 +850,7 @@ mod tests {
         commit.clone().release();
         assert!(
             store
-                .get_checkpoint("1/7/", 7, "main")
+                .get_checkpoint(&TraversalPath::new_unchecked("1/7/"), 7, "main")
                 .await
                 .unwrap()
                 .is_none(),
@@ -860,7 +861,7 @@ mod tests {
         settle(&inflight).await;
         assert!(
             store
-                .get_checkpoint("1/7/", 7, "main")
+                .get_checkpoint(&TraversalPath::new_unchecked("1/7/"), 7, "main")
                 .await
                 .unwrap()
                 .is_some(),
@@ -882,7 +883,7 @@ mod tests {
         assert!(cleaner.calls.lock().is_empty());
         assert!(
             store
-                .get_checkpoint("1/7/", 7, "main")
+                .get_checkpoint(&TraversalPath::new_unchecked("1/7/"), 7, "main")
                 .await
                 .unwrap()
                 .is_some(),
@@ -916,7 +917,7 @@ mod tests {
         settle(&inflight).await;
         assert!(
             store
-                .get_checkpoint("1/7/", 7, "main")
+                .get_checkpoint(&TraversalPath::new_unchecked("1/7/"), 7, "main")
                 .await
                 .unwrap()
                 .is_none(),
@@ -967,7 +968,7 @@ mod tests {
         settle(&inflight).await;
         assert!(
             store
-                .get_checkpoint("1/7/", 7, "main")
+                .get_checkpoint(&TraversalPath::new_unchecked("1/7/"), 7, "main")
                 .await
                 .unwrap()
                 .is_none(),

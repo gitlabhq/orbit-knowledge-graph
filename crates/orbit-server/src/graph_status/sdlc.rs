@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use futures::stream::{FuturesUnordered, StreamExt};
 use indexer::indexing_status::{IndexingProgress, IndexingStatusStore};
 use ontology::{EtlScope, Ontology};
+use orbit_utils::traversal_path::TraversalPath;
 use tracing::warn;
 
 use super::{state_priority, status_with_state, unknown_status};
@@ -18,7 +19,7 @@ pub struct SdlcIndexingState {
 pub async fn get_sdlc_indexing_state(
     store: Option<&IndexingStatusStore>,
     ontology: &Ontology,
-    traversal_path: &str,
+    traversal_path: &TraversalPath,
 ) -> SdlcIndexingState {
     let Some(store) = store else {
         return SdlcIndexingState {
@@ -57,7 +58,7 @@ struct PipelineProgress {
 async fn fetch_pipeline_progress(
     store: &IndexingStatusStore,
     ontology: &Ontology,
-    traversal_path: &str,
+    traversal_path: &TraversalPath,
 ) -> PipelineReads {
     let names = namespaced_pipeline_names(ontology);
 
@@ -79,7 +80,7 @@ async fn fetch_pipeline_progress(
             }),
             Err(error) => {
                 read_errors += 1;
-                warn!(%error, traversal_path, pipeline = name, "failed to read pipeline indexing progress");
+                warn!(%error, %traversal_path, pipeline = name, "failed to read pipeline indexing progress");
             }
         }
     }

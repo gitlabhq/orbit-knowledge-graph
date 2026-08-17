@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 
+use orbit_utils::traversal_path::TraversalPath;
 use serde::Deserialize;
 
 pub type Row = BTreeMap<String, serde_yaml::Value>;
@@ -218,7 +219,7 @@ pub struct EdgeExpect {
     #[serde(default)]
     pub to: Option<String>,
     #[serde(default)]
-    pub traversal_path: Option<String>,
+    pub traversal_path: Option<TraversalPath>,
     #[serde(default)]
     pub count: Option<usize>,
     #[serde(default)]

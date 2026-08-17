@@ -240,7 +240,7 @@ impl QueryExecutor {
         let traversal_path: Option<String> = security_ctx
             .traversal_paths
             .first()
-            .map(|tp| tp.path.clone());
+            .map(|tp| tp.path.to_string());
 
         let mut sampling_info = SamplingInfo {
             traversal_path: traversal_path.clone(),
