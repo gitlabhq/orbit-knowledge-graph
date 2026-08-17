@@ -5,6 +5,7 @@ mod commands;
 mod descriptions;
 mod list;
 mod mcp;
+mod remote;
 mod skill;
 mod sql;
 mod sql_format;
@@ -300,12 +301,27 @@ enum Commands {
         #[arg(long, default_value = "remote")]
         mode: commands::setup::spec::Mode,
     },
+    /// Query the remote Orbit graph over the GitLab API.
+    Remote {
+        #[command(subcommand)]
+        command: RemoteCommands,
+    },
 }
 
 #[derive(Subcommand)]
 enum McpCommands {
     /// Start a stateless MCP server over stdio.
     Serve,
+}
+
+#[derive(Subcommand)]
+enum RemoteCommands {
+    /// POST a query envelope to the remote Orbit API and stream the response.
+    Query {
+        /// Query body file, or `-`/omitted to read from stdin.
+        #[arg(value_name = "FILE")]
+        source: Option<String>,
+    },
 }
 
 #[tokio::main]
@@ -401,6 +417,9 @@ async fn main() -> Result<()> {
             commands::hook_guard::run(kind, mode);
             Ok(())
         }
+        Commands::Remote {
+            command: RemoteCommands::Query { source },
+        } => remote::run_query(source).await,
     }
 }
 

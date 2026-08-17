@@ -27,8 +27,10 @@ tracing-subscriber = { workspace = true }
 anyhow = { workspace = true }
 dirs = { workspace = true }
 dunce = { workspace = true }
+reqwest = { workspace = true }
 rmcp = { workspace = true }
 rust-embed = { workspace = true }
+rustls = { workspace = true }
 schemars = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
