@@ -22,6 +22,7 @@ croner = { workspace = true }
 orbit-analytics = { path = "../orbit-analytics" }
 orbit-observability = { workspace = true }
 orbit-server-config = { path = "../orbit-server-config" }
+petgraph = { workspace = true }
 orbit-utils = { path = "../utils" }
 datafusion = { workspace = true }
 flate2 = { workspace = true }
