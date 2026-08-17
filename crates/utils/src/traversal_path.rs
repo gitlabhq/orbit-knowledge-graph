@@ -29,9 +29,13 @@ pub fn overlaps(a: &str, b: &str) -> bool {
 }
 
 pub fn is_within_scope<S: AsRef<str>>(path: &str, allowed: &[S]) -> bool {
-    allowed
-        .iter()
-        .any(|prefix| path.starts_with(prefix.as_ref()))
+    allowed.iter().any(|prefix| {
+        let prefix = prefix.as_ref();
+        path.starts_with(prefix)
+            && (prefix.ends_with('/')
+                || path.len() == prefix.len()
+                || path.as_bytes().get(prefix.len()) == Some(&b'/'))
+    })
 }
 
 pub fn is_valid_any_depth(path: &str) -> bool {
@@ -91,7 +95,7 @@ impl PathTrie {
         let path_segments: Vec<&str> = segments(path).collect();
         debug_assert!(
             !path_segments.is_empty(),
-            "PathTrie::insert called with empty path"
+            "PathTrie::insert called with empty path; an empty terminal would emit \"\" and match every row"
         );
         if path_segments.is_empty() {
             return;
@@ -132,6 +136,10 @@ impl PathTrie {
 }
 
 pub fn lowest_common_prefix<S: AsRef<str>>(paths: &[S]) -> String {
+    debug_assert!(
+        paths.iter().all(|p| p.as_ref().ends_with('/')),
+        "lowest_common_prefix requires '/'-terminated traversal paths"
+    );
     let Some((first, rest)) = paths.split_first() else {
         return String::new();
     };
@@ -279,10 +287,6 @@ impl TraversalPath {
         &self.0
     }
 
-    pub fn into_string(self) -> String {
-        self.0
-    }
-
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
@@ -301,10 +305,6 @@ impl TraversalPath {
 
     pub fn is_top_level(&self) -> bool {
         is_top_level(&self.0)
-    }
-
-    pub fn org_id(&self) -> Option<i64> {
-        org_id(&self.0)
     }
 
     pub fn top_level_namespace_id(&self) -> Option<i64> {
@@ -333,18 +333,6 @@ impl std::fmt::Display for TraversalPath {
 impl AsRef<str> for TraversalPath {
     fn as_ref(&self) -> &str {
         &self.0
-    }
-}
-
-impl std::borrow::Borrow<str> for TraversalPath {
-    fn borrow(&self) -> &str {
-        &self.0
-    }
-}
-
-impl From<TraversalPath> for String {
-    fn from(path: TraversalPath) -> Self {
-        path.0
     }
 }
 
@@ -474,6 +462,9 @@ mod tests {
     #[test]
     fn is_within_scope_respects_segment_boundaries() {
         assert!(!is_within_scope("1/100/", &["1/10/"]));
+        assert!(!is_within_scope("1/100/", &["1/10"]));
+        assert!(is_within_scope("1/10/300/", &["1/10"]));
+        assert!(is_within_scope("1/10", &["1/10"]));
     }
 
     #[test]

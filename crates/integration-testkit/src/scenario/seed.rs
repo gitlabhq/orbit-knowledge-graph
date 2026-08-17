@@ -130,7 +130,7 @@ fn expand_namespace(row: &Row, location: &str) -> Vec<(String, Row)> {
             "namespace_traversal_paths".to_string(),
             row_of([
                 ("id", id),
-                ("traversal_path", traversal_path.into_string().into()),
+                ("traversal_path", traversal_path.as_str().to_string().into()),
             ]),
         ),
     ]
@@ -168,7 +168,7 @@ fn expand_project(row: &Row, location: &str) -> Vec<(String, Row)> {
             "project_namespace_traversal_paths".to_string(),
             row_of([
                 ("id", id),
-                ("traversal_path", traversal_path.into_string().into()),
+                ("traversal_path", traversal_path.as_str().to_string().into()),
             ]),
         ),
     ]
