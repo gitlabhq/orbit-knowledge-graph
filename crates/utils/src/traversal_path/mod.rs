@@ -1,10 +1,14 @@
 //! Helpers for the `<org_id>/<namespace_id>/` traversal path format used
 //! throughout the indexer, NATS topic routing, and query profiler.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::HashSet;
 use std::sync::LazyLock;
 
 use regex::Regex;
+
+mod trie;
+
+pub use trie::TraversalPathTrie;
 
 static ANY_DEPTH_REGEX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^(\d+/)+$").expect("valid regex"));
@@ -76,65 +80,6 @@ pub fn prune_to_leaves<S: AsRef<str>>(paths: &[S]) -> Vec<String> {
     leaves
 }
 
-#[derive(Default)]
-pub struct PathTrie {
-    children: BTreeMap<String, PathTrie>,
-    terminal: bool,
-}
-
-impl PathTrie {
-    pub fn from_paths<S: AsRef<str>>(paths: &[S]) -> Self {
-        let mut root = Self::default();
-        for path in paths {
-            root.insert(path.as_ref());
-        }
-        root
-    }
-
-    fn insert(&mut self, path: &str) {
-        let path_segments: Vec<&str> = segments(path).collect();
-        debug_assert!(
-            !path_segments.is_empty(),
-            "PathTrie::insert called with empty path; an empty terminal would emit \"\" and match every row"
-        );
-        if path_segments.is_empty() {
-            return;
-        }
-        let mut node = self;
-        for seg in path_segments {
-            node = node.children.entry(seg.to_string()).or_default();
-        }
-        node.terminal = true;
-    }
-
-    pub fn to_minimal_prefixes(&self) -> Vec<String> {
-        let mut result = Vec::new();
-        self.collect(&mut String::new(), &mut result);
-        result
-    }
-
-    fn collect(&self, prefix: &mut String, out: &mut Vec<String>) {
-        if self.terminal {
-            let mut p = prefix.clone();
-            if !p.is_empty() {
-                p.push('/');
-            }
-            out.push(p);
-            return;
-        }
-
-        for (seg, child) in &self.children {
-            let restore_len = prefix.len();
-            if !prefix.is_empty() {
-                prefix.push('/');
-            }
-            prefix.push_str(seg);
-            child.collect(prefix, out);
-            prefix.truncate(restore_len);
-        }
-    }
-}
-
 pub fn lowest_common_prefix<S: AsRef<str>>(paths: &[S]) -> String {
     debug_assert!(
         paths.iter().all(|p| p.as_ref().ends_with('/')),
@@ -165,7 +110,7 @@ pub fn to_dotted(path: &str) -> String {
 /// Extract the organization ID (first segment) from a traversal path.
 ///
 /// Returns `None` when the path is empty or the first segment isn't numeric.
-pub fn org_id(path: &str) -> Option<i64> {
+pub fn organization_id(path: &str) -> Option<i64> {
     path.trim_start_matches('/')
         .split('/')
         .next()
@@ -373,76 +318,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn path_trie_subsumes_children() {
-        let t = PathTrie::from_paths(&["1/100/", "1/100/200/", "1/100/201/"]);
-        assert_eq!(t.to_minimal_prefixes(), vec!["1/100/"]);
-    }
-
-    #[test]
-    fn path_trie_keeps_siblings() {
-        let t = PathTrie::from_paths(&["1/100/", "1/200/"]);
-        assert_eq!(t.to_minimal_prefixes(), vec!["1/100/", "1/200/"]);
-    }
-
-    #[test]
-    fn path_trie_siblings_under_shared_parent() {
-        let t = PathTrie::from_paths(&["1/100/200/", "1/100/201/", "1/100/202/", "1/200/300/"]);
-        let result = t.to_minimal_prefixes();
-        assert_eq!(result.len(), 4);
-        assert!(result.contains(&"1/200/300/".to_string()));
-    }
-
-    #[test]
-    fn path_trie_single_path() {
-        let t = PathTrie::from_paths(&["1/100/"]);
-        assert_eq!(t.to_minimal_prefixes(), vec!["1/100/"]);
-    }
-
-    #[test]
-    fn path_trie_deduplicates() {
-        let t = PathTrie::from_paths(&["1/100/", "1/100/", "1/200/"]);
-        assert_eq!(t.to_minimal_prefixes(), vec!["1/100/", "1/200/"]);
-    }
-
-    #[test]
-    fn path_trie_deep_subsumption() {
-        let t = PathTrie::from_paths(&["1/", "1/100/", "1/100/200/", "1/100/200/300/"]);
-        assert_eq!(t.to_minimal_prefixes(), vec!["1/"]);
-    }
-
-    #[test]
-    fn path_trie_mixed_orgs() {
-        let t = PathTrie::from_paths(&["1/100/", "2/100/"]);
-        assert_eq!(t.to_minimal_prefixes(), vec!["1/100/", "2/100/"]);
-    }
-
-    #[test]
-    fn path_trie_realistic_38_paths() {
-        let mut paths: Vec<String> = (100..130).map(|i| format!("1/10/{i}/")).collect();
-        paths.extend((200..208).map(|i| format!("1/{i}/")));
-        let refs: Vec<&str> = paths.iter().map(|s| s.as_str()).collect();
-        let t = PathTrie::from_paths(&refs);
-        let result = t.to_minimal_prefixes();
-        assert_eq!(result.len(), 38);
-    }
-
-    #[test]
-    fn path_trie_parent_collapses_many_children() {
-        let mut paths = vec!["1/10/"];
-        let children: Vec<String> = (100..130).map(|i| format!("1/10/{i}/")).collect();
-        let refs: Vec<&str> = children.iter().map(|s| s.as_str()).collect();
-        paths.extend(refs);
-        let t = PathTrie::from_paths(&paths);
-        assert_eq!(t.to_minimal_prefixes(), vec!["1/10/"]);
-    }
-
-    #[test]
-    #[should_panic(expected = "empty path")]
-    fn path_trie_empty_path_panics_in_debug() {
-        PathTrie::from_paths(&[""]);
-    }
-
-    #[test]
     fn leaf_pruning_keeps_sibling_paths() {
         let leaves = prune_to_leaves(&[
             "1/9970/".to_string(),
@@ -514,23 +389,23 @@ mod tests {
     }
 
     #[test]
-    fn org_id_extracts_first_segment() {
-        assert_eq!(org_id("42/9970/"), Some(42));
+    fn organization_id_extracts_first_segment() {
+        assert_eq!(organization_id("42/9970/"), Some(42));
     }
 
     #[test]
-    fn org_id_with_leading_slash() {
-        assert_eq!(org_id("/42/9970/"), Some(42));
+    fn organization_id_with_leading_slash() {
+        assert_eq!(organization_id("/42/9970/"), Some(42));
     }
 
     #[test]
-    fn org_id_non_numeric() {
-        assert_eq!(org_id("abc/9970/"), None);
+    fn organization_id_non_numeric() {
+        assert_eq!(organization_id("abc/9970/"), None);
     }
 
     #[test]
-    fn org_id_empty() {
-        assert_eq!(org_id(""), None);
+    fn organization_id_empty() {
+        assert_eq!(organization_id(""), None);
     }
 
     #[test]

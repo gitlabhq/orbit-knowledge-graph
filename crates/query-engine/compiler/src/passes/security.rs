@@ -31,7 +31,7 @@ use crate::constants::{GL_TABLE_PREFIX, TRAVERSAL_PATH_COLUMN, global_tables};
 use crate::error::Result;
 pub use crate::types::SecurityContext;
 use ontology::Ontology;
-use orbit_utils::traversal_path::{PathTrie, TraversalPath, lowest_common_prefix};
+use orbit_utils::traversal_path::{TraversalPath, TraversalPathTrie, lowest_common_prefix};
 
 /// Matches `gl_*` or `v{N}_gl_*`, captures the unprefixed name.
 static GL_TABLE_RE: OnceLock<Regex> = OnceLock::new();
@@ -147,7 +147,7 @@ fn build_path_filter(alias: &str, paths: &[&TraversalPath]) -> Expr {
         0 => Expr::Literal(Value::Bool(false)),
         1 => starts_with_expr(alias, paths[0].as_str()),
         _ => {
-            let collapsed = PathTrie::from_paths(paths).to_minimal_prefixes();
+            let collapsed = TraversalPathTrie::from_paths(paths).to_minimal_prefixes();
             if collapsed.len() == 1 {
                 return starts_with_expr(alias, &collapsed[0]);
             }
@@ -572,7 +572,7 @@ mod tests {
         let eligible = ctx.paths_at_least(20);
         assert_eq!(eligible.len(), 4);
 
-        let collapsed = PathTrie::from_paths(&eligible).to_minimal_prefixes();
+        let collapsed = TraversalPathTrie::from_paths(&eligible).to_minimal_prefixes();
         assert_eq!(collapsed, vec!["1/100/", "1/300/"]);
 
         let filter = build_path_filter("t", &eligible);

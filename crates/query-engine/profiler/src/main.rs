@@ -399,7 +399,7 @@ async fn main() -> Result<()> {
         }
     };
 
-    let org_id = orbit_utils::traversal_path::org_id(&cli.traversal_paths[0])
+    let org_id = orbit_utils::traversal_path::organization_id(&cli.traversal_paths[0])
         .context("failed to parse org_id from first traversal path")?;
 
     let mut security_ctx = SecurityContext::new(org_id, cli.traversal_paths.clone())
