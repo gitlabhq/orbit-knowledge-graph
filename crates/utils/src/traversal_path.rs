@@ -299,6 +299,14 @@ impl TraversalPath {
         self.0.starts_with(&ancestor.0)
     }
 
+    pub fn is_within_scope<S: AsRef<str>>(&self, allowed: &[S]) -> bool {
+        is_within_scope(&self.0, allowed)
+    }
+
+    pub fn overlaps(&self, other: &str) -> bool {
+        overlaps(&self.0, other)
+    }
+
     pub fn is_valid(&self) -> bool {
         is_valid(&self.0)
     }

@@ -115,7 +115,7 @@ impl PipelineStage for PathResolutionStage {
 }
 
 fn is_descendant(resolved: &TraversalPath, authorized: &[&TraversalPath]) -> bool {
-    orbit_utils::traversal_path::is_within_scope(resolved.as_str(), authorized)
+    resolved.is_within_scope(authorized)
 }
 
 fn longest_common_path_prefix(paths: &[TraversalPath]) -> Option<TraversalPath> {

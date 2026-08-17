@@ -145,10 +145,7 @@ fn has_matching_starts_with(expr: &Expr, alias: &str, ctx: &SecurityContext) -> 
                 | Expr::Param {
                     value: Value::String(path),
                     ..
-                } => ctx
-                    .traversal_paths
-                    .iter()
-                    .any(|tp| orbit_utils::traversal_path::overlaps(tp.path.as_str(), path)),
+                } => ctx.traversal_paths.iter().any(|tp| tp.path.overlaps(path)),
                 _ => false,
             })
         }

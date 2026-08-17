@@ -757,8 +757,7 @@ fn authorize_traversal_path(claims: &Claims, requested_path: &TraversalPath) -> 
         .map(|tp| &tp.path)
         .collect();
 
-    let is_authorized =
-        orbit_utils::traversal_path::is_within_scope(requested_path.as_str(), &authorized_paths);
+    let is_authorized = requested_path.is_within_scope(&authorized_paths);
 
     if !is_authorized {
         return Err(Status::permission_denied(
