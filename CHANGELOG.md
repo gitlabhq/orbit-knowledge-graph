@@ -1,3 +1,10 @@
+## [0.100.2](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.100.1...v0.100.2) (2026-08-17)
+
+### Other
+
+* **cli:** rename orbit-local package to orbit-cli with dual-publish ([55bc5db](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/55bc5db9baef652bfc8ce68a418be5823a8c7c3c)) by Jean-Gabriel Doyon
+* **i18n:** update ja-jp for commit 9bb35fcc ([8a9ed5c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/8a9ed5c3398bfdca6bd00d6104aea538ebeda31c)) by GitLab-Argo Bot
+
 ## [0.100.1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.100.0...v0.100.1) (2026-08-17)
 
 ### Fixes
