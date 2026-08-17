@@ -1,3 +1,18 @@
+## [0.100.1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.100.0...v0.100.1) (2026-08-17)
+
+### Fixes
+
+* **compiler:** fit query params in the request URL ([fe934c2](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/fe934c2bc133910a291795882888d4facae5f486)) by Michael Angelo Rivera
+
+### Performance
+
+* **indexer:** stream edge conversion for DuckDB and ClickHouse sinks ([096a20a](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/096a20a08ba22bb966ac3f8d0d2f6e8b20b673da)) by Jean-Gabriel Doyon
+
+### Other
+
+* **orbit:** say Orbit instead of Knowledge Graph across prose ([823b75d](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/823b75de14ccd3f58ec1a6e1741c32777e3b9ad5)) by michaelangeloio
+* **utils:** traversal path SSOT with a typed TraversalPath ([b42991f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b42991f7e0eb375ad70bbe922ee4d3af19708b3b)) by Michael Angelo Rivera
+
 ## [0.100.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.99.0...v0.100.0) (2026-08-14)
 
 ### Features
