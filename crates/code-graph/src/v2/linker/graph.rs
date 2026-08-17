@@ -447,49 +447,6 @@ impl CodeGraph {
         self.build_ancestor_table(tracer);
     }
 
-    pub fn collect_lexical_file_links(
-        &self,
-        language: crate::v2::config::Language,
-        out: &mut Vec<PendingFileLink>,
-    ) {
-        for node_idx in self.graph.node_indices() {
-            let GraphNode::File(file) = &self.graph[node_idx] else {
-                continue;
-            };
-            if file.language != Some(language) {
-                continue;
-            }
-            let dir = Path::new(&file.path)
-                .parent()
-                .map(|p| p.to_string_lossy().to_string())
-                .unwrap_or_default();
-            for neighbor in self
-                .graph
-                .neighbors_directed(node_idx, petgraph::Direction::Outgoing)
-            {
-                let Some(import_id) = self.graph[neighbor].import_id() else {
-                    continue;
-                };
-                let import = &self.imports[import_id.0 as usize];
-                if import.import_type != "Link" {
-                    continue;
-                }
-                let link = self.str(import.path);
-                let target = match link.strip_prefix('/') {
-                    Some(rooted) => normalize_relative_path("", rooted),
-                    None => normalize_relative_path(&dir, link),
-                };
-                let Some(target) = target else {
-                    continue;
-                };
-                out.push(PendingFileLink {
-                    source: file.path.clone(),
-                    target,
-                });
-            }
-        }
-    }
-
     pub fn link_files(&mut self, links: &[PendingFileLink]) {
         let Some(file_index) = self.indexes.file_index.as_ref() else {
             return;
@@ -1668,6 +1625,33 @@ mod tests {
 pub struct PendingFileLink {
     pub source: String,
     pub target: String,
+}
+
+pub fn lexical_file_links(
+    file_path: &str,
+    imports: &[CanonicalImport],
+    out: &mut Vec<PendingFileLink>,
+) {
+    let dir = Path::new(file_path)
+        .parent()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_default();
+    for import in imports {
+        if import.import_type != "Link" {
+            continue;
+        }
+        let target = match import.path.strip_prefix('/') {
+            Some(rooted) => normalize_relative_path("", rooted),
+            None => normalize_relative_path(&dir, &import.path),
+        };
+        let Some(target) = target else {
+            continue;
+        };
+        out.push(PendingFileLink {
+            source: file_path.to_string(),
+            target,
+        });
+    }
 }
 
 fn normalize_relative_path(dir: &str, link: &str) -> Option<String> {
