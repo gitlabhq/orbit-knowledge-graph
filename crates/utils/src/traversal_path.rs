@@ -132,22 +132,19 @@ impl PathTrie {
 }
 
 pub fn lowest_common_prefix<S: AsRef<str>>(paths: &[S]) -> String {
-    if paths.is_empty() {
+    let Some((first, rest)) = paths.split_first() else {
         return String::new();
+    };
+    let mut cursors: Vec<_> = rest.iter().map(|p| segments(p.as_ref())).collect();
+    let mut out = String::new();
+    for seg in segments(first.as_ref()) {
+        if !cursors.iter_mut().all(|c| c.next() == Some(seg)) {
+            break;
+        }
+        out.push_str(seg);
+        out.push('/');
     }
-    let segments: Vec<Vec<&str>> = paths
-        .iter()
-        .map(|p| p.as_ref().trim_end_matches('/').split('/').collect())
-        .collect();
-    let first = &segments[0];
-    let common_len = (0..first.len())
-        .take_while(|&i| segments.iter().all(|s| s.get(i) == first.get(i)))
-        .count();
-    if common_len == 0 {
-        String::new()
-    } else {
-        format!("{}/", first[..common_len].join("/"))
-    }
+    out
 }
 
 /// Convert slash-separated segments to dot-separated, stripping empties.
