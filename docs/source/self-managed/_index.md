@@ -20,6 +20,11 @@ title: GitLab Orbit on GitLab Self-Managed
 
 {{< /history >}}
 
+> [!note]
+> GitLab Orbit on GitLab Self-Managed is in
+> [beta](https://docs.gitlab.com/policy/development_stages_support/#beta).
+> This feature is available for testing, but not ready for production use.
+
 On GitLab.com, GitLab Orbit runs on GitLab infrastructure.
 On GitLab Self-Managed, you run GitLab Orbit next to your instance.
 
@@ -31,13 +36,11 @@ A GitLab Orbit deployment has two parts:
 The data pipeline does not depend on GitLab Orbit, so you can verify the pipeline before you install
 GitLab Orbit.
 
-The Linux package does not include GitLab Orbit. The only supported deployment is the GitLab Orbit Helm
-chart on Kubernetes. Install the chart on the cluster that runs GitLab, or on a separate cluster next to
-your instance.
+GitLab Orbit is distributed only as a Helm chart for Kubernetes. The Linux package does not include it.
+Install the chart on the cluster that runs GitLab, or on a separate cluster next to your instance.
 
-GitLab Orbit on GitLab Self-Managed is in
-[beta](https://docs.gitlab.com/policy/development_stages_support/#beta).
-GitLab works with you to set up each deployment, so contact your account team before you plan one.
+Because GitLab Orbit on GitLab Self-Managed is in beta, contact your account team before you plan a
+deployment to confirm current limitations.
 
 ## Architecture
 
@@ -93,9 +96,13 @@ GitLab reaches the webserver over gRPC.
 | [Set up data replication](data-replication.md) | PostgreSQL logical replication and Siphon |
 | [Set up GitLab Orbit](orbit-setup.md) | The ClickHouse database and identities, the GitLab connection, the GitLab Orbit chart, and group indexing |
 
-## Support and coverage
+## Known limitations
 
-GitLab Orbit is not supported on a GitLab Geo secondary site, and no FIPS builds are available.
+GitLab Orbit does not run on a GitLab Geo secondary site. No FIPS-compliant builds are available.
 
 Redundancy and recovery for GitLab Orbit are not documented. GitLab Orbit holds no data of its own, so if
 you lose the graph database, you can rebuild it by indexing again.
+
+For the support that applies during beta, see
+[beta](https://docs.gitlab.com/policy/development_stages_support/#beta) and the
+[Statement of Support](https://about.gitlab.com/support/statement-of-support/).

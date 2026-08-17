@@ -20,6 +20,11 @@ title: Set up GitLab Orbit
 
 {{< /history >}}
 
+> [!note]
+> GitLab Orbit on GitLab Self-Managed is in
+> [beta](https://docs.gitlab.com/policy/development_stages_support/#beta).
+> This feature is available for testing, but not ready for production use.
+
 GitLab Orbit runs as a Helm release next to your instance. The indexer reads the ClickHouse data lake and
 fetches source code over the GitLab internal API. The webserver answers queries from the graph.
 
