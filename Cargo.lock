@@ -5776,6 +5776,7 @@ dependencies = [
  "orbit-server-config",
  "orbit-utils",
  "parking_lot",
+ "petgraph 0.8.3",
  "prost 0.14.4",
  "query-engine",
  "rand 0.10.2",

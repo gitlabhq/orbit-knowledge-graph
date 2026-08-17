@@ -587,7 +587,12 @@ impl BatchBuilder {
         for item in items {
             fill(item, &mut self)?;
         }
+        self.finish()
+    }
 
+    /// Finalize into a `RecordBatch`. Use with `col(...)` when rows come from
+    /// more than one source and `build` (single slice) does not fit.
+    pub fn finish(self) -> BatchResult<RecordBatch> {
         if let Some(expected) = self.cols.first().map(Col::len) {
             for (i, col) in self.cols.iter().enumerate().skip(1) {
                 let actual = col.len();
