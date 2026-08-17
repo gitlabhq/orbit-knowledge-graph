@@ -10,6 +10,7 @@ use ontology::{Extract, Ontology};
 use crate::handler::HandlerError;
 
 use super::datalake::DatalakeQuery;
+use orbit_utils::traversal_path::TraversalPath;
 
 /// The probe derives its bucket width from the id span to land near this count;
 /// a fixed width would collapse a narrow id range into a single bucket.
@@ -87,7 +88,7 @@ impl PartitionStrategy {
     pub async fn compute_ranges(
         &self,
         datalake: &dyn DatalakeQuery,
-        traversal_path: Option<&str>,
+        traversal_path: Option<&TraversalPath>,
     ) -> Result<Vec<PartitionAssignment>, HandlerError> {
         if self.count <= 1 || self.key_columns.is_empty() {
             return Ok(Vec::new());
@@ -145,7 +146,7 @@ impl PartitionStrategy {
     /// and takes the first key tuple of each row-balanced quantile. Carrying the
     /// leading keys lets a cut split *inside* a dominant path by id — a
     /// path-only cut cannot.
-    fn probe_sql(&self, traversal_path: Option<&str>) -> String {
+    fn probe_sql(&self, traversal_path: Option<&TraversalPath>) -> String {
         let table = &self.datalake_table;
         let count = self.count;
         let scope = match traversal_path {
@@ -205,9 +206,9 @@ impl PartitionStrategy {
     }
 }
 
-fn probe_params(traversal_path: Option<&str>) -> Value {
+fn probe_params(traversal_path: Option<&TraversalPath>) -> Value {
     match traversal_path {
-        Some(path) => serde_json::json!({ "traversal_path": path }),
+        Some(path) => serde_json::json!({ "traversal_path": path.as_str() }),
         None => Value::Null,
     }
 }
@@ -368,7 +369,7 @@ mod tests {
             vec!["1/9970/z/", "0"],
         ]);
         let ranges = strategy(&["traversal_path", "id"], 5, 0)
-            .compute_ranges(&datalake, Some("1/9970/"))
+            .compute_ranges(&datalake, Some(&TraversalPath::new_unchecked("1/9970/")))
             .await
             .unwrap();
 
@@ -404,7 +405,7 @@ mod tests {
             2,
         );
         let ranges = strategy(&["traversal_path", "id"], 5, 0)
-            .compute_ranges(&datalake, Some("1/9970/"))
+            .compute_ranges(&datalake, Some(&TraversalPath::new_unchecked("1/9970/")))
             .await
             .unwrap();
 
@@ -450,7 +451,7 @@ mod tests {
             vec!["1/9970/d/", "0"],
         ]);
         let _ = strategy(&["traversal_path", "id"], 4, 50_000_000)
-            .compute_ranges(&datalake, Some("1/9970/"))
+            .compute_ranges(&datalake, Some(&TraversalPath::new_unchecked("1/9970/")))
             .await
             .unwrap();
 

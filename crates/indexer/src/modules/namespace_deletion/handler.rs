@@ -50,7 +50,7 @@ impl Handler for NamespaceDeletionHandler {
                 SerializationError::Json(err) => HandlerError::Deserialization(err),
             })?;
 
-        if !orbit_utils::traversal_path::is_valid(&payload.traversal_path) {
+        if !payload.traversal_path.is_valid() {
             error!(
                 namespace_id = payload.namespace_id,
                 traversal_path = %payload.traversal_path,
@@ -160,6 +160,7 @@ mod tests {
     use crate::nats::ProgressNotifier;
     use crate::testkit::mocks::{MockLockService, MockNatsServices};
     use crate::types::{Envelope, Event};
+    use orbit_utils::traversal_path::TraversalPath;
 
     use super::super::store::test_utils::{MockNamespaceDeletionStore, failed_outcome, ok_outcome};
 
@@ -184,7 +185,7 @@ mod tests {
     fn envelope_for(namespace_id: i64, traversal_path: &str) -> Envelope {
         let request = NamespaceDeletionRequest {
             namespace_id,
-            traversal_path: traversal_path.to_string(),
+            traversal_path: TraversalPath::new_unchecked(traversal_path),
             dispatch_id: uuid::Uuid::new_v4(),
         };
         Envelope::new(&request).unwrap()
@@ -204,7 +205,7 @@ mod tests {
         assert_eq!(store.delete_checkpoint_calls(), vec![100]);
         assert_eq!(
             store.mark_complete_calls(),
-            vec![(100, "1/100/".to_string())]
+            vec![(100, TraversalPath::new_unchecked("1/100/"))]
         );
     }
 
@@ -320,7 +321,7 @@ mod tests {
         );
         assert_eq!(
             store.mark_complete_calls(),
-            vec![(100, "1/100/".to_string())],
+            vec![(100, TraversalPath::new_unchecked("1/100/"))],
             "should clear the schedule entry"
         );
     }

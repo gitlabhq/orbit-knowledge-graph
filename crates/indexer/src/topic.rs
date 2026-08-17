@@ -1,5 +1,6 @@
 use crate::types::{Event, Subscription};
 use chrono::{DateTime, Utc};
+use orbit_utils::traversal_path::TraversalPath;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -44,7 +45,7 @@ impl Event for GlobalIndexingRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NamespaceIndexingRequest {
     pub namespace: i64,
-    pub traversal_path: String,
+    pub traversal_path: TraversalPath,
     pub watermark: DateTime<Utc>,
     #[serde(default)]
     pub dispatch_id: Uuid,
@@ -56,7 +57,7 @@ pub struct NamespaceIndexingRequest {
 
 impl NamespaceIndexingRequest {
     pub fn publish_subscription(&self) -> Subscription {
-        let suffix = orbit_utils::traversal_path::to_dotted(&self.traversal_path);
+        let suffix = self.traversal_path.to_dotted();
         Subscription::new(
             INDEXER_STREAM,
             format!("{NAMESPACE_INDEXING_SUBJECT_PREFIX}.{suffix}"),
@@ -79,7 +80,7 @@ pub struct CodeIndexingTaskRequest {
     pub project_id: i64,
     pub branch: Option<String>,
     pub commit_sha: Option<String>,
-    pub traversal_path: String,
+    pub traversal_path: TraversalPath,
     #[serde(default)]
     pub dispatch_id: Uuid,
     #[serde(default)]
@@ -115,7 +116,7 @@ pub const NAMESPACE_DELETION_SUBJECT_PATTERN: &str = "sdlc.namespace.deletion.re
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NamespaceDeletionRequest {
     pub namespace_id: i64,
-    pub traversal_path: String,
+    pub traversal_path: TraversalPath,
     #[serde(default)]
     pub dispatch_id: Uuid,
 }

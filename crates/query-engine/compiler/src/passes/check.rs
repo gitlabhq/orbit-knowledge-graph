@@ -12,6 +12,7 @@ use crate::ast::{Expr, Node, Query, TableRef};
 use crate::constants::TRAVERSAL_PATH_COLUMN;
 use crate::error::{QueryError, Result};
 use crate::passes::security::{SecurityContext, collect_node_aliases};
+use orbit_utils::traversal_path::TraversalPath;
 
 const STARTS_WITH_FNAME: &str = "startsWith";
 
@@ -145,9 +146,12 @@ fn has_matching_starts_with(expr: &Expr, alias: &str, ctx: &SecurityContext) -> 
                 | Expr::Param {
                     value: Value::String(path),
                     ..
-                } => ctx.traversal_paths.iter().any(|tp| {
-                    tp.path.starts_with(path.as_str()) || path.starts_with(tp.path.as_str())
-                }),
+                } => {
+                    let candidate = TraversalPath::new_unchecked(path.as_str());
+                    ctx.traversal_paths
+                        .iter()
+                        .any(|tp| tp.path.overlaps(&candidate))
+                }
                 _ => false,
             })
         }

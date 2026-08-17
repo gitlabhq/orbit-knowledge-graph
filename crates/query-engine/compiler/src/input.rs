@@ -1,6 +1,7 @@
 //! Security validation (identifiers, SQL injection) is handled by JSON Schema in lib.rs.
 
 use ontology::constants::{DEFAULT_PRIMARY_KEY, SOURCE_ID_COLUMN, TARGET_ID_COLUMN};
+use orbit_utils::traversal_path::TraversalPath;
 use serde::{Deserialize, Deserializer};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
@@ -353,7 +354,7 @@ pub struct InputNode {
     /// hydration pipeline to inject `startsWith(traversal_path, tp)` into hydration
     /// queries, pruning granules through the primary key.
     #[serde(skip)]
-    pub traversal_paths: Vec<String>,
+    pub traversal_paths: Vec<TraversalPath>,
 }
 
 impl Default for InputNode {
@@ -586,7 +587,7 @@ pub struct InputRelationship {
     /// the edge scan inherits the PK prefix instead of the broad org-wide one.
     /// Lossless because an edge row's `traversal_path` is its source entity's.
     #[serde(skip)]
-    pub scope_prefix: Option<String>,
+    pub scope_prefix: Option<TraversalPath>,
     /// Whether every resolved variant of this relationship keeps both endpoints
     /// in the same namespace. Set by `restrict`. Only scope-preserving FK edges
     /// link a node to an intrinsic child whose lifecycle is coupled to the

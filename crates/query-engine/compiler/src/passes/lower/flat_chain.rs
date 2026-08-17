@@ -112,12 +112,12 @@ fn build_cascade_anchor(plan: &Plan, i: usize, ctes: &[Cte]) -> Option<Query> {
 /// Emitted alongside the broad authorization filter so ClickHouse can seek the
 /// edge PK to the project's contiguous range instead of the whole org.
 fn edge_scope_predicate(hop: &Hop, alias: &str) -> Option<Expr> {
-    hop.scope_prefix.as_deref().map(|prefix| {
+    hop.scope_prefix.as_ref().map(|prefix| {
         Expr::func(
             "startsWith",
             vec![
                 Expr::col(alias, TRAVERSAL_PATH_COLUMN),
-                Expr::string(prefix),
+                Expr::string(prefix.as_str()),
             ],
         )
     })

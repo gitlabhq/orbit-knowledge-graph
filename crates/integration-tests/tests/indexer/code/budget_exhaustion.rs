@@ -8,6 +8,7 @@ use integration_testkit::t;
 use orbit_server_config::CodeIndexingPipelineConfig;
 
 use super::helpers::{CodeIndexingDeps, MockGitlabServer, handler_context};
+use orbit_utils::traversal_path::TraversalPath;
 
 const PROJECT_ID: i64 = 4242;
 const TRAVERSAL_PATH: &str = "1/4242/";
@@ -19,7 +20,7 @@ fn backfill_envelope() -> Envelope {
         project_id: PROJECT_ID,
         branch: Some(BRANCH.to_string()),
         commit_sha: None,
-        traversal_path: TRAVERSAL_PATH.to_string(),
+        traversal_path: TraversalPath::new_unchecked(TRAVERSAL_PATH),
         dispatch_id: uuid::Uuid::new_v4(),
         campaign_id: None,
     })

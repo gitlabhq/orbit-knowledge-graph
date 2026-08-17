@@ -17,6 +17,7 @@ use crate::orchestrator::scheduled::TaskError;
 use crate::orchestrator::siphon::decoder::ColumnExtractor;
 use crate::orchestrator::siphon::route::{CdcContext, Route, RouteOutcome};
 use crate::orchestrator::siphon::subjects;
+use orbit_utils::traversal_path::TraversalPath;
 
 pub struct EnabledNamespacesRoute {
     namespace_indexing: NamespaceIndexingDispatch,
@@ -102,7 +103,7 @@ fn enabled_namespace_ids(events: &[LogicalReplicationEvents]) -> Vec<i64> {
 async fn lookup_paths(
     datalake: &ArrowClickHouseClient,
     namespace_ids: &[i64],
-) -> Result<Vec<(i64, String)>, TaskError> {
+) -> Result<Vec<(i64, TraversalPath)>, TaskError> {
     if namespace_ids.is_empty() {
         return Ok(Vec::new());
     }
@@ -116,7 +117,10 @@ async fn lookup_paths(
 
     let ids = i64::extract_column(&batches, 0).map_err(TaskError::new)?;
     let paths = String::extract_column(&batches, 1).map_err(TaskError::new)?;
-    let found: Vec<(i64, String)> = ids.into_iter().zip(paths).collect();
+    let found: Vec<(i64, TraversalPath)> = ids
+        .into_iter()
+        .zip(paths.into_iter().map(TraversalPath::new_unchecked))
+        .collect();
 
     if found.len() < namespace_ids.len() {
         warn!(

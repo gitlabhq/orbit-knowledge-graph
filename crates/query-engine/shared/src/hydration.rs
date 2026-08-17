@@ -15,6 +15,7 @@ use compiler::{
 };
 use ontology::{DataType, Ontology};
 use orbit_utils::arrow::{ArrowUtils, ColumnValue};
+use orbit_utils::traversal_path::TraversalPath;
 use pipeline::PipelineError;
 use types::QueryResult;
 
@@ -38,12 +39,13 @@ pub fn collect_static_ids(result: &QueryResult, template: &HydrationTemplate) ->
 }
 
 /// Reads the `_gkg_{alias}_tp` column emitted by the enforce pass.
-pub fn collect_traversal_paths(result: &QueryResult, alias: &str) -> Vec<String> {
+pub fn collect_traversal_paths(result: &QueryResult, alias: &str) -> Vec<TraversalPath> {
     let tp_col = traversal_path_column(alias);
-    let mut paths: Vec<String> = result
+    let mut paths: Vec<TraversalPath> = result
         .authorized_rows()
         .filter_map(|row| row.get_column_string(&tp_col))
         .filter(|p| !p.is_empty())
+        .map(TraversalPath::new_unchecked)
         .collect();
     paths.sort_unstable();
     paths.dedup();
@@ -57,8 +59,8 @@ pub fn collect_traversal_paths(result: &QueryResult, alias: &str) -> Vec<String>
 fn collect_all_traversal_paths(
     result: &QueryResult,
     templates: &[HydrationTemplate],
-) -> Vec<String> {
-    let mut all: Vec<String> = Vec::new();
+) -> Vec<TraversalPath> {
+    let mut all: Vec<TraversalPath> = Vec::new();
     for t in templates {
         if !t.has_traversal_path {
             continue;
@@ -68,7 +70,7 @@ fn collect_all_traversal_paths(
             if let Some(tp) = row.get_column_string(&tp_col)
                 && !tp.is_empty()
             {
-                all.push(tp);
+                all.push(TraversalPath::new_unchecked(tp));
             }
         }
     }
@@ -386,15 +388,15 @@ pub fn hydrate_static(
 pub fn collect_dynamic_traversal_paths(
     result: &QueryResult,
     static_nodes: &[compiler::RedactionNode],
-) -> Vec<String> {
-    let mut paths: Vec<String> = Vec::new();
+) -> Vec<TraversalPath> {
+    let mut paths: Vec<TraversalPath> = Vec::new();
     for node in static_nodes {
         let tp_col = traversal_path_column(&node.alias);
         for row in result.authorized_rows() {
             if let Some(tp) = row.get_column_string(&tp_col)
                 && !tp.is_empty()
             {
-                paths.push(tp);
+                paths.push(TraversalPath::new_unchecked(tp));
             }
         }
     }
@@ -412,7 +414,7 @@ pub fn collect_dynamic_traversal_paths(
 pub fn hydrate_dynamic(
     entity_specs: &[DynamicEntityColumns],
     refs: &HashMap<String, Vec<i64>>,
-    traversal_paths: &[String],
+    traversal_paths: &[TraversalPath],
 ) -> Result<(Vec<InputNode>, usize), PipelineError> {
     let mut nodes = Vec::new();
     let mut total_ids: usize = 0;

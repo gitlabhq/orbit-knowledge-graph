@@ -11,12 +11,13 @@ use crate::durability::WriteDurability;
 use crate::modules::code::config::CodeTableNames;
 use crate::orchestrator::scheduled::TaskError;
 use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
+use orbit_utils::traversal_path::TraversalPath;
 
 pub(crate) const CHECKPOINT_KEY_PREFIX: &str = "maintenance.code_stale_sweep";
 
 const CODE_INDEXING_CHECKPOINT_TABLE: &str = "code_indexing_checkpoint";
 
-fn namespace_checkpoint_key(traversal_path: &str) -> String {
+fn namespace_checkpoint_key(traversal_path: &TraversalPath) -> String {
     format!("{CHECKPOINT_KEY_PREFIX}.{traversal_path}")
 }
 
@@ -53,7 +54,7 @@ impl CodeStaleSweep {
         }
     }
 
-    pub async fn run_for_drained(&self, drained_paths: &[String]) -> Result<(), TaskError> {
+    pub async fn run_for_drained(&self, drained_paths: &[TraversalPath]) -> Result<(), TaskError> {
         if drained_paths.is_empty() {
             return Ok(());
         }
@@ -75,13 +76,13 @@ impl CodeStaleSweep {
         Ok(())
     }
 
-    async fn sweep_namespace(&self, traversal_path: &str) -> Result<(), TaskError> {
+    async fn sweep_namespace(&self, traversal_path: &TraversalPath) -> Result<(), TaskError> {
         let started = Utc::now();
         for (table, sql) in &self.statements {
             let statement_start = Instant::now();
             self.graph
                 .query(sql)
-                .param("path", traversal_path)
+                .param("path", traversal_path.as_str())
                 .execute()
                 .await
                 .map_err(|e| {
@@ -89,7 +90,7 @@ impl CodeStaleSweep {
                 })?;
             debug!(
                 table,
-                traversal_path,
+                %traversal_path,
                 duration_ms = statement_start.elapsed().as_millis() as u64,
                 "stale sweep statement complete"
             );
@@ -103,7 +104,7 @@ impl CodeStaleSweep {
             )
             .await
             .map_err(TaskError::new)?;
-        info!(traversal_path, "post-backfill stale sweep complete");
+        info!(%traversal_path, "post-backfill stale sweep complete");
         Ok(())
     }
 }
@@ -261,7 +262,7 @@ mod tests {
 
     #[test]
     fn namespace_checkpoint_keys_share_the_seed_drop_prefix() {
-        let key = namespace_checkpoint_key("1/9970/");
+        let key = namespace_checkpoint_key(&TraversalPath::new_unchecked("1/9970/"));
         assert!(
             key.starts_with(CHECKPOINT_KEY_PREFIX),
             "SEED_CODE_CHECKPOINT_SQL drops sweep gates by this prefix; a key \

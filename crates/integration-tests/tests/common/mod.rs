@@ -3,7 +3,7 @@
 use ontology::Ontology;
 use orbit_server::redaction::QueryResult;
 pub use query_engine::compiler::compile;
-use query_engine::compiler::{AccessLevel, CompiledQueryContext, SecurityContext, TraversalPath};
+use query_engine::compiler::{AccessLevel, AuthorizedPath, CompiledQueryContext, SecurityContext};
 
 pub use integration_testkit::mock_redaction::MockRedactionService;
 pub use integration_testkit::{GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL, TestContext, load_ontology};
@@ -13,9 +13,12 @@ pub fn test_security_context() -> SecurityContext {
 }
 
 pub fn admin_security_context() -> SecurityContext {
-    SecurityContext::new_with_roles(1, vec![TraversalPath::new("1/", AccessLevel::Owner as u32)])
-        .expect("valid admin security context")
-        .with_role(true, Some(AccessLevel::Owner as u32))
+    SecurityContext::new_with_roles(
+        1,
+        vec![AuthorizedPath::new("1/", AccessLevel::Owner as u32)],
+    )
+    .expect("valid admin security context")
+    .with_role(true, Some(AccessLevel::Owner as u32))
 }
 
 pub async fn compile_and_execute(
@@ -48,7 +51,7 @@ impl DummyClaims for orbit_server::auth::Claims {
             organization_id: Some(1),
             min_access_level: Some(AccessLevel::Owner as u32),
             group_traversal_ids: vec![orbit_server::auth::TraversalPathClaim {
-                path: "1/".into(),
+                path: orbit_utils::traversal_path::TraversalPath::new_unchecked("1/"),
                 access_levels: vec![AccessLevel::Owner as u32],
             }],
             source_type: orbit_server::auth::SourceType::Rest,

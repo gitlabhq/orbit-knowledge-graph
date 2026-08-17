@@ -36,7 +36,7 @@ impl GraphStatusInput {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use query_engine::compiler::TraversalPath;
+    use query_engine::compiler::AuthorizedPath;
     use std::sync::Arc;
 
     const VULNERABILITY: &str = "Vulnerability";
@@ -53,7 +53,7 @@ mod tests {
     fn reporter_excludes_security_entities() {
         let ontology = embedded_ontology();
         let ctx =
-            SecurityContext::new_with_roles(1, vec![TraversalPath::new("1/100/", 20)]).unwrap();
+            SecurityContext::new_with_roles(1, vec![AuthorizedPath::new("1/100/", 20)]).unwrap();
 
         let input = GraphStatusInput::from_ontology(&ontology, &ctx);
 
@@ -66,7 +66,7 @@ mod tests {
     fn security_manager_includes_security_entities() {
         let ontology = embedded_ontology();
         let ctx =
-            SecurityContext::new_with_roles(1, vec![TraversalPath::new("1/100/", 25)]).unwrap();
+            SecurityContext::new_with_roles(1, vec![AuthorizedPath::new("1/100/", 25)]).unwrap();
 
         let input = GraphStatusInput::from_ontology(&ontology, &ctx);
 
@@ -77,7 +77,7 @@ mod tests {
     #[test]
     fn admin_includes_all_entities() {
         let ontology = embedded_ontology();
-        let ctx = SecurityContext::new_with_roles(1, vec![TraversalPath::new("1/", 50)])
+        let ctx = SecurityContext::new_with_roles(1, vec![AuthorizedPath::new("1/", 50)])
             .unwrap()
             .with_role(true, Some(50));
 

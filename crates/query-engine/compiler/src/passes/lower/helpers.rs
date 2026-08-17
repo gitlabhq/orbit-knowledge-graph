@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 
 use ontology::constants::*;
+use orbit_utils::traversal_path::TraversalPath;
 
 use crate::ast::*;
 use crate::constants::*;
@@ -560,7 +561,7 @@ pub(super) fn build_multi_hop_union(
                 end_type_col,
                 hop.direction,
                 &type_filter,
-                hop.scope_prefix.as_deref(),
+                hop.scope_prefix.as_ref(),
             )
         })
         .collect();
@@ -597,13 +598,16 @@ pub(super) fn build_depth_arm(
     end_type_col: &str,
     direction: Direction,
     type_filter: &Option<Vec<String>>,
-    scope_prefix: Option<&str>,
+    scope_prefix: Option<&TraversalPath>,
 ) -> Query {
     let scope_pred = |alias: &str| -> Option<Expr> {
         scope_prefix.map(|p| {
             Expr::func(
                 "startsWith",
-                vec![Expr::col(alias, TRAVERSAL_PATH_COLUMN), Expr::string(p)],
+                vec![
+                    Expr::col(alias, TRAVERSAL_PATH_COLUMN),
+                    Expr::string(p.as_str()),
+                ],
             )
         })
     };

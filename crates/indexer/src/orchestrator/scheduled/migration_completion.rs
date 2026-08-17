@@ -23,7 +23,7 @@ use clickhouse_client::FromArrowColumn;
 use ontology::migrations::{MigrationLedger, MigrationScope};
 use orbit_server_config::{MigrationCompletionConfig, ScheduleConfiguration, SchemaConfig};
 use orbit_utils::arrow::ArrowUtils;
-use orbit_utils::traversal_path::TopLevelSplit;
+use orbit_utils::traversal_path::{TopLevelSplit, TraversalPath};
 use query_engine::compiler::{
     generate_graph_dictionaries, generate_graph_materialized_views, generate_graph_tables,
 };
@@ -521,7 +521,7 @@ impl MigrationCompletionChecker {
     async fn compute_code_coverage(
         &self,
         code_table: &str,
-        enabled_paths: &[String],
+        enabled_paths: &[TraversalPath],
     ) -> Result<(u64, u64, f64), String> {
         let eligible_projects = self
             .count_eligible_projects()
@@ -553,7 +553,13 @@ impl MigrationCompletionChecker {
         let ids = i64::extract_column(&batches, 0).map_err(|e| e.to_string())?;
         let paths = String::extract_column(&batches, 1).map_err(|e| e.to_string())?;
 
-        let split = orbit_utils::traversal_path::split_top_level(ids, paths);
+        let split = orbit_utils::traversal_path::split_top_level(
+            ids,
+            paths
+                .into_iter()
+                .map(TraversalPath::new_unchecked)
+                .collect(),
+        );
         if !split.skipped.is_empty() {
             warn!(
                 skipped = ?split.skipped,
@@ -585,7 +591,7 @@ impl MigrationCompletionChecker {
     async fn count_scoped_checkpoint_projects(
         &self,
         code_table: &str,
-        enabled_paths: &[String],
+        enabled_paths: &[TraversalPath],
     ) -> Result<u64, String> {
         if enabled_paths.is_empty() {
             return Ok(0);

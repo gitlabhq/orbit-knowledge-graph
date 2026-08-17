@@ -18,6 +18,8 @@ use crate::passes::shared::deleted_false;
 
 use super::helpers::limit_by_scan;
 
+use orbit_utils::traversal_path::{TraversalPath, prune_to_leaves};
+
 const ARRAY_EXISTS_PATH_THRESHOLD: usize = 256;
 
 #[derive(Clone, Copy)]
@@ -152,7 +154,7 @@ fn emit_arm(
 ///    discovers hundreds of traversal paths.
 fn traversal_path_filter(
     alias: &str,
-    paths: &[String],
+    paths: &[TraversalPath],
     is_dynamic: bool,
     path_segment_budget: Option<usize>,
 ) -> Option<Expr> {
@@ -174,9 +176,9 @@ fn traversal_path_filter(
     }
 }
 
-fn generalize_to_budget(mut leaves: Vec<String>, budget: usize) -> Vec<String> {
-    while leaves.iter().map(|p| segment_count(p)).sum::<usize>() > budget {
-        let parents: Vec<String> = leaves.iter().map(|p| parent_path(p)).collect();
+fn generalize_to_budget(mut leaves: Vec<TraversalPath>, budget: usize) -> Vec<TraversalPath> {
+    while leaves.iter().map(|p| p.segment_count()).sum::<usize>() > budget {
+        let parents: Vec<TraversalPath> = leaves.iter().map(|p| p.parent()).collect();
         if parents == leaves {
             break;
         }
@@ -185,29 +187,21 @@ fn generalize_to_budget(mut leaves: Vec<String>, budget: usize) -> Vec<String> {
     leaves
 }
 
-fn segment_count(path: &str) -> usize {
-    path.split('/').filter(|s| !s.is_empty()).count()
-}
-
-fn parent_path(path: &str) -> String {
-    match path.trim_end_matches('/').rfind('/') {
-        Some(i) => path[..=i].to_string(),
-        None => path.to_string(),
-    }
-}
-
-fn or_starts_with(alias: &str, paths: &[String]) -> Option<Expr> {
+fn or_starts_with(alias: &str, paths: &[TraversalPath]) -> Option<Expr> {
     or_balanced(paths.iter().map(|tp| starts_with_path(alias, tp)).collect())
 }
 
-fn starts_with_path(alias: &str, tp: &str) -> Expr {
+fn starts_with_path(alias: &str, tp: &TraversalPath) -> Expr {
     Expr::func(
         "startsWith",
-        vec![Expr::col(alias, TRAVERSAL_PATH_COLUMN), Expr::string(tp)],
+        vec![
+            Expr::col(alias, TRAVERSAL_PATH_COLUMN),
+            Expr::string(tp.as_str()),
+        ],
     )
 }
 
-fn array_exists_starts_with(alias: &str, paths: &[String]) -> Expr {
+fn array_exists_starts_with(alias: &str, paths: &[TraversalPath]) -> Expr {
     let lambda_param = "_gkg_path";
     Expr::func(
         "arrayExists",
@@ -227,7 +221,7 @@ fn array_exists_starts_with(alias: &str, paths: &[String]) -> Expr {
                 serde_json::Value::Array(
                     paths
                         .iter()
-                        .map(|p| serde_json::Value::String(p.clone()))
+                        .map(|p| serde_json::Value::String(p.as_str().to_string()))
                         .collect(),
                 ),
             ),
@@ -249,29 +243,6 @@ fn or_balanced(mut exprs: Vec<Expr>) -> Option<Expr> {
             ))
         }
     }
-}
-
-/// Drop any path that is a strict prefix of another path in the set.
-///
-/// Given sorted paths, a path is an "ancestor" if another (longer) path
-/// starts with it. Keeping only leaves maximizes primary-key selectivity
-/// in the hydration scan.
-fn prune_to_leaves(paths: &[String]) -> Vec<String> {
-    if paths.len() <= 1 {
-        return paths.to_vec();
-    }
-    let mut sorted: Vec<&str> = paths.iter().map(String::as_str).collect();
-    sorted.sort_unstable();
-    sorted.dedup();
-
-    let mut leaves = Vec::with_capacity(sorted.len());
-    for (i, path) in sorted.iter().enumerate() {
-        let is_prefix_of_next = sorted.get(i + 1).is_some_and(|next| next.starts_with(path));
-        if !is_prefix_of_next {
-            leaves.push((*path).to_string());
-        }
-    }
-    leaves
 }
 
 #[cfg(test)]
@@ -309,7 +280,10 @@ mod tests {
             id_property: "id".into(),
             node_ids,
             columns: columns.into_iter().map(String::from).collect(),
-            traversal_paths: traversal_paths.into_iter().map(String::from).collect(),
+            traversal_paths: traversal_paths
+                .into_iter()
+                .map(TraversalPath::new_unchecked)
+                .collect(),
             sort_key: vec!["id".to_string()],
         }
     }
@@ -413,8 +387,8 @@ mod tests {
 
     #[test]
     fn large_dynamic_tp_sets_emit_array_exists() {
-        let paths: Vec<String> = (0..=ARRAY_EXISTS_PATH_THRESHOLD)
-            .map(|id| format!("1/9970/{id}/"))
+        let paths: Vec<TraversalPath> = (0..=ARRAY_EXISTS_PATH_THRESHOLD)
+            .map(|id| TraversalPath::new_unchecked(format!("1/9970/{id}/")))
             .collect();
         let plan = HydrationNodePlan {
             alias: "hydrate".into(),
@@ -456,8 +430,8 @@ mod tests {
 
     #[test]
     fn large_static_tp_sets_emit_or() {
-        let paths: Vec<String> = (0..=ARRAY_EXISTS_PATH_THRESHOLD)
-            .map(|id| format!("1/9970/{id}/"))
+        let paths: Vec<TraversalPath> = (0..=ARRAY_EXISTS_PATH_THRESHOLD)
+            .map(|id| TraversalPath::new_unchecked(format!("1/9970/{id}/")))
             .collect();
         let plan = HydrationNodePlan {
             alias: "hydrate".into(),
@@ -485,20 +459,22 @@ mod tests {
 
     #[test]
     fn generalize_to_budget_widens_to_ancestors() {
-        let leaves: Vec<String> = (0..900)
-            .map(|i| format!("1/{i:0>40}/{:0>40}/", i + 10000))
+        let leaves: Vec<TraversalPath> = (0..900)
+            .map(|i| TraversalPath::new_unchecked(format!("1/{i:0>40}/{:0>40}/", i + 10000)))
             .collect();
         let widened = generalize_to_budget(leaves.clone(), 2000);
-        assert!(widened.iter().map(|p| segment_count(p)).sum::<usize>() <= 2000);
+        assert!(widened.iter().map(|p| p.segment_count()).sum::<usize>() <= 2000);
         assert!(widened.iter().all(|w| !leaves.contains(w)));
         for path in &leaves {
             assert!(
-                widened.iter().any(|w| path.starts_with(w.as_str())),
+                widened.iter().any(|w| path.is_descendant_of(w)),
                 "{path} lost its ancestor prefix"
             );
         }
 
-        let roots: Vec<String> = (0..50).map(|i| format!("{i}/")).collect();
+        let roots: Vec<TraversalPath> = (0..50)
+            .map(|i| TraversalPath::new_unchecked(format!("{i}/")))
+            .collect();
         assert_eq!(generalize_to_budget(roots.clone(), 10), roots);
     }
 
@@ -580,18 +556,5 @@ mod tests {
             starts_with_count, 1,
             "ancestor should be pruned, only one startsWith for the leaf: {sql}"
         );
-    }
-
-    #[test]
-    fn leaf_pruning_keeps_sibling_paths() {
-        let leaves =
-            prune_to_leaves(&["1/9970/".into(), "1/9970/100/".into(), "1/9970/200/".into()]);
-        assert_eq!(leaves, vec!["1/9970/100/", "1/9970/200/"]);
-    }
-
-    #[test]
-    fn leaf_pruning_noop_when_no_ancestors() {
-        let leaves = prune_to_leaves(&["1/9970/100/".into(), "1/9970/200/".into()]);
-        assert_eq!(leaves, vec!["1/9970/100/", "1/9970/200/"]);
     }
 }

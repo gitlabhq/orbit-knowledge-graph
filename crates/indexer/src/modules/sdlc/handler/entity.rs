@@ -24,6 +24,7 @@ use crate::modules::sdlc::plan::{
 use crate::observer::{self, IndexingMode, IndexingObserver, PipelineType};
 use crate::topic::{GlobalIndexingRequest, NamespaceIndexingRequest};
 use crate::types::{Envelope, SerializationError, Subscription};
+use orbit_utils::traversal_path::TraversalPath;
 
 pub struct EntityHandler {
     handler_name: String,
@@ -42,7 +43,7 @@ pub struct EntityHandler {
 struct IndexingRequest {
     watermark: DateTime<Utc>,
     scope_key: String,
-    traversal_path: Option<String>,
+    traversal_path: Option<TraversalPath>,
     namespace_id: Option<i64>,
     dispatch_id: Uuid,
     campaign_id: Option<String>,
@@ -132,7 +133,7 @@ impl EntityHandler {
         observer.set_campaign_id(request.campaign_id.clone());
         observer.set_pipeline_type(PipelineType::Sdlc);
         observer.set_entity_type(&self.plan.name);
-        observer.set_traversal_path(request.traversal_path.as_deref());
+        observer.set_traversal_path(request.traversal_path.as_ref());
         observer.set_namespace(request.namespace_id);
 
         let checkpoint_key = format!("{}.{}", request.scope_key, self.plan.name);
@@ -164,7 +165,7 @@ impl EntityHandler {
             .with(
                 request
                     .traversal_path
-                    .as_deref()
+                    .as_ref()
                     .map(|path| TraversalPathFilter { path }),
             )
             .with((mode == IndexingMode::Full).then_some(DeletedFilter {
@@ -176,7 +177,7 @@ impl EntityHandler {
             self.partition_strategy
                 .as_ref()
                 .unwrap()
-                .compute_ranges(self.datalake.as_ref(), request.traversal_path.as_deref())
+                .compute_ranges(self.datalake.as_ref(), request.traversal_path.as_ref())
                 .await?
         } else {
             Vec::new()
@@ -433,7 +434,7 @@ impl Handler for EntityHandler {
         let traversal_path = request.traversal_path.clone();
 
         async {
-            if let Some(path) = traversal_path.as_deref() {
+            if let Some(path) = traversal_path.as_ref() {
                 context
                     .indexing_status
                     .record_entity_start(path, &self.plan.name, started_at)
@@ -453,7 +454,7 @@ impl Handler for EntityHandler {
                     .record_pipeline_error(&self.plan.name, err.error_kind());
             }
 
-            if let Some(path) = traversal_path.as_deref() {
+            if let Some(path) = traversal_path.as_ref() {
                 let rows = result
                     .as_ref()
                     .map(|stats| RunRows {
@@ -607,7 +608,7 @@ mod tests {
         handler.handle(context, envelope).await.unwrap();
 
         let progress = store
-            .get_entity("42/100/", "MergeRequest")
+            .get_entity(&TraversalPath::new_unchecked("42/100/"), "MergeRequest")
             .await
             .unwrap()
             .expect("entity progress should be recorded");

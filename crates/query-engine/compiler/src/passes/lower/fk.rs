@@ -4,6 +4,7 @@
 //! columns the formatter expects.
 
 use ontology::constants::*;
+use orbit_utils::traversal_path::TraversalPath;
 use std::collections::{HashMap, HashSet};
 
 use crate::ast::*;
@@ -384,7 +385,11 @@ fn emit_join_target_candidate_ctes(
 /// Latest-row, `_deleted`-filtered `SELECT *` scan using `FINAL` for streaming
 /// dedup. `scope_prefix` is the tighter project/group prefix that lets
 /// ClickHouse seek the node PK to a contiguous range.
-fn node_scan(np: &NodePlan, _plan: &Plan, scope_prefix: Option<&str>) -> Result<TableRef> {
+fn node_scan(
+    np: &NodePlan,
+    _plan: &Plan,
+    scope_prefix: Option<&TraversalPath>,
+) -> Result<TableRef> {
     let alias = &np.alias;
     let table = np
         .table
@@ -399,7 +404,7 @@ fn node_scan(np: &NodePlan, _plan: &Plan, scope_prefix: Option<&str>) -> Result<
             "startsWith",
             vec![
                 Expr::col(alias, TRAVERSAL_PATH_COLUMN),
-                Expr::string(prefix),
+                Expr::string(prefix.as_str()),
             ],
         ));
     }
@@ -422,7 +427,7 @@ fn emit_chain(plan: &Plan) -> Result<EmitOutput> {
         .get(root_alias)
         .ok_or_else(|| QueryError::Lowering(format!("FK chain root '{root_alias}' not found")))?;
 
-    let mut from = node_scan(root_np, plan, plan.hops[0].scope_prefix.as_deref())?;
+    let mut from = node_scan(root_np, plan, plan.hops[0].scope_prefix.as_ref())?;
     let mut selects = node_select_columns(root_alias, root_np);
     let mut edge_aliases = Vec::new();
 
@@ -457,7 +462,7 @@ fn emit_chain(plan: &Plan) -> Result<EmitOutput> {
         from = TableRef::join(
             JoinType::Inner,
             from,
-            node_scan(new_np, plan, hop.scope_prefix.as_deref())?,
+            node_scan(new_np, plan, hop.scope_prefix.as_ref())?,
             on,
         );
         selects.extend(node_select_columns(new_alias, new_np));

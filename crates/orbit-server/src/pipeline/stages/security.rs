@@ -100,7 +100,7 @@ mod tests {
         let claims = make_claims(
             false,
             vec![TraversalPathClaim {
-                path: "1/22/".to_string(),
+                path: orbit_utils::traversal_path::TraversalPath::new_unchecked("1/22/"),
                 access_levels: vec![20],
             }],
             Some(1),
