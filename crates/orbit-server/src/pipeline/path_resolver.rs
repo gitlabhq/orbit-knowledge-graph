@@ -8,7 +8,8 @@ use moka::future::Cache;
 use ontology::{Ontology, TraversalPathKind, TraversalPathLookup};
 use orbit_server_config::PathResolverConfig;
 use orbit_utils::arrow::ArrowUtils;
-use query_engine::compiler::{PathResolutionKey, PathScopeId, is_valid_traversal_path};
+use orbit_utils::traversal_path::is_valid_any_depth;
+use query_engine::compiler::{PathResolutionKey, PathScopeId};
 use tracing::{debug, warn};
 
 use crate::pipeline::correlation;
@@ -221,7 +222,7 @@ impl PathResolver {
 
 fn normalize_path(path: Option<String>) -> Option<String> {
     match path {
-        Some(p) if p != DICT_DEFAULT && is_valid_traversal_path(&p) => Some(p),
+        Some(p) if p != DICT_DEFAULT && is_valid_any_depth(&p) => Some(p),
         _ => None,
     }
 }

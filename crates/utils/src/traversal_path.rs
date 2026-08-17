@@ -2,10 +2,132 @@
 //! throughout the indexer, NATS topic routing, the query profiler, and the
 //! compiler and server authorization scope checks.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
+use std::sync::LazyLock;
+
+use regex::Regex;
+
+static ANY_DEPTH_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^(\d+/)+$").expect("valid regex"));
+
+pub fn segments(path: &str) -> impl Iterator<Item = &str> {
+    path.split('/').filter(|s| !s.is_empty())
+}
+
+pub fn segment_count(path: &str) -> usize {
+    segments(path).count()
+}
+
+pub fn parent(path: &str) -> String {
+    match path.trim_end_matches('/').rfind('/') {
+        Some(i) => path[..=i].to_string(),
+        None => path.to_string(),
+    }
+}
+
+pub fn overlaps(a: &str, b: &str) -> bool {
+    a.starts_with(b) || b.starts_with(a)
+}
 
 pub fn is_within_scope(path: &str, allowed: &[&str]) -> bool {
     allowed.iter().any(|prefix| path.starts_with(prefix))
+}
+
+pub fn is_valid_any_depth(path: &str) -> bool {
+    ANY_DEPTH_REGEX.is_match(path)
+}
+
+pub fn validate(path: &str) -> Result<(), String> {
+    if !is_valid_any_depth(path) {
+        return Err(format!(
+            "invalid traversal_path format: '{path}' (expected pattern like '1/2/3/')"
+        ));
+    }
+    for segment in path.trim_end_matches('/').split('/') {
+        if segment.parse::<i64>().is_err() {
+            return Err(format!(
+                "traversal_path segment '{segment}' exceeds i64 range"
+            ));
+        }
+    }
+    Ok(())
+}
+
+pub fn prune_to_leaves(paths: &[String]) -> Vec<String> {
+    if paths.len() <= 1 {
+        return paths.to_vec();
+    }
+    let mut sorted: Vec<&str> = paths.iter().map(String::as_str).collect();
+    sorted.sort_unstable();
+    sorted.dedup();
+
+    let mut leaves = Vec::with_capacity(sorted.len());
+    for (i, path) in sorted.iter().enumerate() {
+        let is_prefix_of_next = sorted.get(i + 1).is_some_and(|next| next.starts_with(path));
+        if !is_prefix_of_next {
+            leaves.push((*path).to_string());
+        }
+    }
+    leaves
+}
+
+#[derive(Default)]
+pub struct PathTrie {
+    children: BTreeMap<String, PathTrie>,
+    terminal: bool,
+}
+
+impl PathTrie {
+    pub fn from_paths(paths: &[&str]) -> Self {
+        let mut root = Self::default();
+        for path in paths {
+            root.insert(path);
+        }
+        root
+    }
+
+    fn insert(&mut self, path: &str) {
+        let path_segments: Vec<&str> = segments(path).collect();
+        debug_assert!(
+            !path_segments.is_empty(),
+            "PathTrie::insert called with empty path"
+        );
+        if path_segments.is_empty() {
+            return;
+        }
+        let mut node = self;
+        for seg in path_segments {
+            node = node.children.entry(seg.to_string()).or_default();
+        }
+        node.terminal = true;
+    }
+
+    pub fn to_minimal_prefixes(&self) -> Vec<String> {
+        let mut result = Vec::new();
+        self.collect(&mut String::new(), &mut result);
+        result
+    }
+
+    fn collect(&self, prefix: &mut String, out: &mut Vec<String>) {
+        if self.terminal {
+            let mut p = prefix.clone();
+            if !p.is_empty() {
+                p.push('/');
+            }
+            out.push(p);
+            return;
+        }
+
+        for (seg, child) in &self.children {
+            let restore_len = prefix.len();
+            if !prefix.is_empty() {
+                prefix.push('/');
+            }
+            prefix.push_str(seg);
+            child.collect(prefix, out);
+            prefix.truncate(restore_len);
+        }
+    }
 }
 
 pub fn lowest_common_prefix(paths: &[String]) -> String {
@@ -31,10 +153,7 @@ pub fn lowest_common_prefix(paths: &[String]) -> String {
 ///
 /// `"42/9970/" → "42.9970"`, `"42/9970/12345/" → "42.9970.12345"`.
 pub fn to_dotted(path: &str) -> String {
-    path.split('/')
-        .filter(|s| !s.is_empty())
-        .collect::<Vec<_>>()
-        .join(".")
+    segments(path).collect::<Vec<_>>().join(".")
 }
 
 /// Extract the organization ID (first segment) from a traversal path.
@@ -53,9 +172,7 @@ pub fn org_id(path: &str) -> Option<i64> {
 /// Returns `None` when the path has fewer than two segments or the second
 /// segment isn't numeric.
 pub fn top_level_namespace_id(path: &str) -> Option<i64> {
-    let mut segments = path.split('/').filter(|s| !s.is_empty());
-    segments.next();
-    segments.next().and_then(|s| s.parse().ok())
+    segments(path).nth(1).and_then(|s| s.parse().ok())
 }
 
 /// The top-level-namespace prefix of a traversal path: the first two
@@ -67,7 +184,7 @@ pub fn top_level_namespace_id(path: &str) -> Option<i64> {
 /// would match every row). Used to bound the system-notes resolver scans to a
 /// single top-level namespace partition.
 pub fn root_prefix(path: &str) -> Option<String> {
-    let mut segments = path.split('/').filter(|s| !s.is_empty());
+    let mut segments = segments(path);
     let org = segments.next()?;
     let top_level = segments.next()?;
     if org.parse::<u64>().is_err() || top_level.parse::<u64>().is_err() {
@@ -109,7 +226,7 @@ pub const TOP_LEVEL_PREFIX_REGEX: &str = "^[0-9]+/[0-9]+/";
 /// A path is top-level when it is exactly `<org_id>/<namespace_id>/` (two
 /// segments). Subgroups (three or more segments) are never indexed.
 pub fn is_top_level(path: &str) -> bool {
-    path.split('/').filter(|s| !s.is_empty()).count() == 2
+    segment_count(path) == 2
 }
 
 /// Result of [`split_top_level`].
@@ -148,6 +265,89 @@ pub fn split_top_level(ids: Vec<i64>, paths: Vec<String>) -> TopLevelSplit {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn path_trie_subsumes_children() {
+        let t = PathTrie::from_paths(&["1/100/", "1/100/200/", "1/100/201/"]);
+        assert_eq!(t.to_minimal_prefixes(), vec!["1/100/"]);
+    }
+
+    #[test]
+    fn path_trie_keeps_siblings() {
+        let t = PathTrie::from_paths(&["1/100/", "1/200/"]);
+        assert_eq!(t.to_minimal_prefixes(), vec!["1/100/", "1/200/"]);
+    }
+
+    #[test]
+    fn path_trie_siblings_under_shared_parent() {
+        let t = PathTrie::from_paths(&["1/100/200/", "1/100/201/", "1/100/202/", "1/200/300/"]);
+        let result = t.to_minimal_prefixes();
+        assert_eq!(result.len(), 4);
+        assert!(result.contains(&"1/200/300/".to_string()));
+    }
+
+    #[test]
+    fn path_trie_single_path() {
+        let t = PathTrie::from_paths(&["1/100/"]);
+        assert_eq!(t.to_minimal_prefixes(), vec!["1/100/"]);
+    }
+
+    #[test]
+    fn path_trie_deduplicates() {
+        let t = PathTrie::from_paths(&["1/100/", "1/100/", "1/200/"]);
+        assert_eq!(t.to_minimal_prefixes(), vec!["1/100/", "1/200/"]);
+    }
+
+    #[test]
+    fn path_trie_deep_subsumption() {
+        let t = PathTrie::from_paths(&["1/", "1/100/", "1/100/200/", "1/100/200/300/"]);
+        assert_eq!(t.to_minimal_prefixes(), vec!["1/"]);
+    }
+
+    #[test]
+    fn path_trie_mixed_orgs() {
+        let t = PathTrie::from_paths(&["1/100/", "2/100/"]);
+        assert_eq!(t.to_minimal_prefixes(), vec!["1/100/", "2/100/"]);
+    }
+
+    #[test]
+    fn path_trie_realistic_38_paths() {
+        let mut paths: Vec<String> = (100..130).map(|i| format!("1/10/{i}/")).collect();
+        paths.extend((200..208).map(|i| format!("1/{i}/")));
+        let refs: Vec<&str> = paths.iter().map(|s| s.as_str()).collect();
+        let t = PathTrie::from_paths(&refs);
+        let result = t.to_minimal_prefixes();
+        assert_eq!(result.len(), 38);
+    }
+
+    #[test]
+    fn path_trie_parent_collapses_many_children() {
+        let mut paths = vec!["1/10/"];
+        let children: Vec<String> = (100..130).map(|i| format!("1/10/{i}/")).collect();
+        let refs: Vec<&str> = children.iter().map(|s| s.as_str()).collect();
+        paths.extend(refs);
+        let t = PathTrie::from_paths(&paths);
+        assert_eq!(t.to_minimal_prefixes(), vec!["1/10/"]);
+    }
+
+    #[test]
+    #[should_panic(expected = "empty path")]
+    fn path_trie_empty_path_panics_in_debug() {
+        PathTrie::from_paths(&[""]);
+    }
+
+    #[test]
+    fn leaf_pruning_keeps_sibling_paths() {
+        let leaves =
+            prune_to_leaves(&["1/9970/".into(), "1/9970/100/".into(), "1/9970/200/".into()]);
+        assert_eq!(leaves, vec!["1/9970/100/", "1/9970/200/"]);
+    }
+
+    #[test]
+    fn leaf_pruning_noop_when_no_ancestors() {
+        let leaves = prune_to_leaves(&["1/9970/100/".into(), "1/9970/200/".into()]);
+        assert_eq!(leaves, vec!["1/9970/100/", "1/9970/200/"]);
+    }
 
     #[test]
     fn is_within_scope_matches_descendants_and_exact() {

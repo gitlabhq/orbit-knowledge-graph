@@ -132,12 +132,9 @@ fn authorized_bucket_ids(strategy: &PartitionStrategy, ctx: &SecurityContext) ->
     }
     let mut tlns: BTreeSet<String> = BTreeSet::new();
     for tp in &ctx.traversal_paths {
-        let segments: Vec<&str> = tp.path.split('/').filter(|s| !s.is_empty()).collect();
         // An org-only path pins no namespace, so it spans every bucket.
-        if segments.len() < 2 {
-            return None;
-        }
-        tlns.insert(segments[1].to_string());
+        let tln = orbit_utils::traversal_path::segments(&tp.path).nth(1)?;
+        tlns.insert(tln.to_string());
     }
     // Count TLNs, not hashed buckets, so the hash stays in ClickHouse.
     if tlns.is_empty() || tlns.len() >= bucket_count(strategy) {
@@ -253,7 +250,7 @@ pub fn partition_expr(strategy: &PartitionStrategy, input: Expr) -> Expr {
 fn prefix_pins_partition(strategy: &PartitionStrategy, prefix: &str) -> bool {
     match strategy {
         PartitionStrategy::HashBucket { .. } => {
-            prefix.split('/').filter(|s| !s.is_empty()).count() >= 2
+            orbit_utils::traversal_path::segment_count(prefix) >= 2
         }
     }
 }

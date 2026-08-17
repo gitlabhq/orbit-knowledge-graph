@@ -90,10 +90,7 @@ pub use passes::hydrate::{
 };
 pub use passes::normalize::{build_entity_auth, normalize};
 pub use scope::{PathResolutionKey, PathScopeId, scope_edges, scope_keys};
-pub use types::{
-    AccessLevel, DEFAULT_PATH_ACCESS_LEVEL, Realm, SecurityContext, TraversalPath,
-    is_valid_traversal_path,
-};
+pub use types::{AccessLevel, DEFAULT_PATH_ACCESS_LEVEL, Realm, SecurityContext, TraversalPath};
 
 use metrics::CountErr;
 use std::sync::Arc;

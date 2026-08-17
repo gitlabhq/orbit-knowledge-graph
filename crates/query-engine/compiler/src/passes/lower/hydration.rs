@@ -18,6 +18,8 @@ use crate::passes::shared::deleted_false;
 
 use super::helpers::limit_by_scan;
 
+use orbit_utils::traversal_path::{parent, prune_to_leaves, segment_count};
+
 const ARRAY_EXISTS_PATH_THRESHOLD: usize = 256;
 
 #[derive(Clone, Copy)]
@@ -176,24 +178,13 @@ fn traversal_path_filter(
 
 fn generalize_to_budget(mut leaves: Vec<String>, budget: usize) -> Vec<String> {
     while leaves.iter().map(|p| segment_count(p)).sum::<usize>() > budget {
-        let parents: Vec<String> = leaves.iter().map(|p| parent_path(p)).collect();
+        let parents: Vec<String> = leaves.iter().map(|p| parent(p)).collect();
         if parents == leaves {
             break;
         }
         leaves = prune_to_leaves(&parents);
     }
     leaves
-}
-
-fn segment_count(path: &str) -> usize {
-    path.split('/').filter(|s| !s.is_empty()).count()
-}
-
-fn parent_path(path: &str) -> String {
-    match path.trim_end_matches('/').rfind('/') {
-        Some(i) => path[..=i].to_string(),
-        None => path.to_string(),
-    }
 }
 
 fn or_starts_with(alias: &str, paths: &[String]) -> Option<Expr> {
@@ -249,29 +240,6 @@ fn or_balanced(mut exprs: Vec<Expr>) -> Option<Expr> {
             ))
         }
     }
-}
-
-/// Drop any path that is a strict prefix of another path in the set.
-///
-/// Given sorted paths, a path is an "ancestor" if another (longer) path
-/// starts with it. Keeping only leaves maximizes primary-key selectivity
-/// in the hydration scan.
-fn prune_to_leaves(paths: &[String]) -> Vec<String> {
-    if paths.len() <= 1 {
-        return paths.to_vec();
-    }
-    let mut sorted: Vec<&str> = paths.iter().map(String::as_str).collect();
-    sorted.sort_unstable();
-    sorted.dedup();
-
-    let mut leaves = Vec::with_capacity(sorted.len());
-    for (i, path) in sorted.iter().enumerate() {
-        let is_prefix_of_next = sorted.get(i + 1).is_some_and(|next| next.starts_with(path));
-        if !is_prefix_of_next {
-            leaves.push((*path).to_string());
-        }
-    }
-    leaves
 }
 
 #[cfg(test)]
@@ -580,18 +548,5 @@ mod tests {
             starts_with_count, 1,
             "ancestor should be pruned, only one startsWith for the leaf: {sql}"
         );
-    }
-
-    #[test]
-    fn leaf_pruning_keeps_sibling_paths() {
-        let leaves =
-            prune_to_leaves(&["1/9970/".into(), "1/9970/100/".into(), "1/9970/200/".into()]);
-        assert_eq!(leaves, vec!["1/9970/100/", "1/9970/200/"]);
-    }
-
-    #[test]
-    fn leaf_pruning_noop_when_no_ancestors() {
-        let leaves = prune_to_leaves(&["1/9970/100/".into(), "1/9970/200/".into()]);
-        assert_eq!(leaves, vec!["1/9970/100/", "1/9970/200/"]);
     }
 }
