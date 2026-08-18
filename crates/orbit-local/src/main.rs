@@ -6,7 +6,6 @@ mod descriptions;
 mod list;
 mod mcp;
 mod remote;
-mod search;
 mod skill;
 mod sql;
 mod sql_format;
@@ -843,7 +842,7 @@ fn index_repo(
 
     let client =
         duckdb_client::DuckDbClient::open(db_path).context("failed to open DuckDB for status")?;
-    match search::build_postings(&client, git.project_id, &git.commit_sha) {
+    match orbit_search::duckdb::build_postings(&client, git.project_id, &git.commit_sha) {
         Ok(rows) => info!("built {rows} search postings for {key}"),
         Err(e) => {
             tracing::warn!("failed to build search postings (ask falls back to LIKE search): {e:#}")

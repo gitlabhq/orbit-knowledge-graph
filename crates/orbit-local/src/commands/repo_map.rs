@@ -4,80 +4,22 @@
 //! subcommands, same compact `file:line` output, but no Python runtime and no
 //! shelling back out to `orbit sql`.
 //!
-//! The definition-kind and path-exclusion vocabularies below mirror the
-//! free-text `definition_type` values the code-graph parsers emit (there is no
-//! single ontology enum for them) and the generated/test/vendor paths a repo
-//! map should hide. They are named constants so the SQL that consumes them
-//! stays declarative.
+//! The definition-kind vocabularies below mirror the free-text
+//! `definition_type` values the code-graph parsers emit (there is no single
+//! ontology enum for them); the shared path-exclusion and source-extension
+//! policy lives in `orbit_search::corpus`. They are named constants so the
+//! SQL that consumes them stays declarative.
 
 use std::io::Write;
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
-use arrow::array::{Int64Array, RecordBatch, StringArray};
+use duckdb_client::{scalar_i64, sql_lit, string_column};
+use orbit_search::corpus::{DEFAULT_SOURCE_EXTS, EXCLUDE_LIKE, EXCLUDE_REGEX, ext_regex};
 
 use crate::sql;
 use crate::sql_format;
 use crate::workspace;
-
-/// `LIKE` patterns excluded from the map: test, mock, fixture, generated,
-/// vendored, and build-output paths. Anchored both top-level (`spec/%`) and
-/// nested (`%/spec/%`) because monorepos keep `spec/` at the repo root.
-pub(crate) const EXCLUDE_LIKE: &[&str] = &[
-    "spec/%",
-    "%/spec/%",
-    "ee/spec/%",
-    "qa/spec/%",
-    "tests/%",
-    "%/tests/%",
-    "test/%",
-    "%/test/%",
-    "%_spec.rb",
-    "%_test.rb",
-    "%_test.rs",
-    "%_test.go",
-    "%.spec.%",
-    "%.test.%",
-    "__mocks__/%",
-    "%/__mocks__/%",
-    "__tests__/%",
-    "%/__tests__/%",
-    "fixtures/%",
-    "%/fixtures/%",
-    "qa/%",
-    "mocks/%",
-    "%/mocks/%",
-    "%/mocks.go",
-    "%.Test/%",
-    "%.Tests/%",
-    "%.pb.go",
-    "%_pb.rb",
-    "%.pb.cc",
-    "%.pb.h",
-    "%.pb.rs",
-    "proto/%",
-    "%/proto/%",
-    "%/generated/%",
-    "generated/%",
-    "node_modules/%",
-    "%/node_modules/%",
-    "vendor/%",
-    "%/vendor/%",
-    "target/%",
-    "%/target/%",
-    "dist/%",
-    "%/dist/%",
-    "build/%",
-    "%/build/%",
-];
-
-/// RE2 patterns whose matches are excluded — catches `foo_tests/` style
-/// directories and Go `mock_*.go` files that the `LIKE` list cannot.
-pub(crate) const EXCLUDE_REGEX: &[&str] = &[
-    r"(^|/)[a-z]+_tests?/",
-    r"(^|/)mock_[a-z_]+\.go$",
-    r"(^|/)(test_[^/]+|conftest)\.py$",
-];
 
 /// Structural signature keyword regex (RE2), matched against the first
 /// non-comment line in the window after `start_line`.
@@ -88,12 +30,6 @@ const SIG_REGEX: &str = concat!(
     r"(fn|func|struct|enum|trait|type|mod|impl|const|let|var|class|module|def|function",
     r"|interface|namespace|object|fun|record)\s+[A-Za-z_$<({]"
 );
-
-/// Source extensions Orbit indexes; used to build `read_text` globs.
-pub(crate) const DEFAULT_SOURCE_EXTS: &[&str] = &[
-    "rs", "rb", "py", "js", "ts", "vue", "jsx", "tsx", "mjs", "cjs", "go", "java", "kt", "kts",
-    "scala", "cs", "cpp", "c", "h", "hpp", "swift", "php", "rake",
-];
 
 const TYPE_KINDS: &[&str] = &[
     "Class",
@@ -814,11 +750,6 @@ fn section<W: Write>(client: &duckdb_client::DuckDbClient, out: &mut W, query: &
     sql_format::write_table(&mut *out, &batches)
 }
 
-/// SQL string literal with single-quote doubling.
-pub(crate) fn sql_lit(s: &str) -> String {
-    format!("'{}'", s.replace('\'', "''"))
-}
-
 fn kind_list(kinds: &[&str]) -> String {
     format!(
         "({})",
@@ -846,55 +777,9 @@ fn parse_extensions(raw: &[String]) -> Vec<String> {
     out
 }
 
-pub(crate) fn ext_regex(exts: &[String]) -> String {
-    let alt = exts
-        .iter()
-        .map(|e| regex_escape(e))
-        .collect::<Vec<_>>()
-        .join("|");
-    format!(r"\.({alt})$")
-}
-
-fn regex_escape(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for c in s.chars() {
-        if "\\.+*?()|[]{}^$".contains(c) {
-            out.push('\\');
-        }
-        out.push(c);
-    }
-    out
-}
-
-pub(crate) fn scalar_i64(batches: &[RecordBatch]) -> i64 {
-    batches
-        .iter()
-        .find(|b| b.num_rows() > 0)
-        .and_then(|b| b.column(0).as_any().downcast_ref::<Int64Array>())
-        .map(|arr| arr.value(0))
-        .unwrap_or(0)
-}
-
-pub(crate) fn string_column(batches: &[RecordBatch], name: &str) -> Vec<String> {
-    batches
-        .iter()
-        .filter_map(|b| {
-            b.column_by_name(name)
-                .and_then(|c| c.as_any().downcast_ref::<StringArray>())
-        })
-        .flat_map(|arr| arr.iter().flatten().map(String::from))
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn sql_lit_doubles_single_quotes() {
-        assert_eq!(sql_lit("O'Brien"), "'O''Brien'");
-        assert_eq!(sql_lit("plain"), "'plain'");
-    }
 
     #[test]
     fn kind_list_quotes_each_element() {
@@ -911,12 +796,6 @@ mod tests {
     fn parse_extensions_empty_when_no_values() {
         assert!(parse_extensions(&[]).is_empty());
         assert!(parse_extensions(&["".into(), " , ".into()]).is_empty());
-    }
-
-    #[test]
-    fn ext_regex_escapes_and_anchors() {
-        assert_eq!(ext_regex(&["rs".into()]), r"\.(rs)$");
-        assert_eq!(ext_regex(&["c++".into()]), r"\.(c\+\+)$");
     }
 
     // The map hides tests/vendored/generated paths, so the clause must render
