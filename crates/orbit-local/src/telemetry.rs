@@ -21,13 +21,7 @@ impl TelemetryConfig {
         if !self.enabled {
             return None;
         }
-        match SnowplowAnalyticsTracker::new(&self.collector_url, self.app_id) {
-            Ok(tracker) => Some(tracker),
-            Err(e) => {
-                tracing::debug!(error = %e, "failed to build telemetry tracker; telemetry disabled");
-                None
-            }
-        }
+        SnowplowAnalyticsTracker::new(&self.collector_url, self.app_id).ok()
     }
 }
 
@@ -37,9 +31,8 @@ pub fn resolve_from_env(no_telemetry: bool) -> TelemetryConfig {
 }
 
 pub fn emit_command_event<T: AnalyticsTracker + ?Sized>(tracker: &T, action: &str) {
-    match StructuredEvent::builder(CATEGORY, action).build() {
-        Ok(event) => tracker.track(event),
-        Err(e) => tracing::debug!(error = %e, "failed to build telemetry event"),
+    if let Ok(event) = StructuredEvent::builder(CATEGORY, action).build() {
+        tracker.track(event);
     }
 }
 

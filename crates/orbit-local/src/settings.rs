@@ -39,10 +39,18 @@ pub fn parse_bool(value: &str) -> Option<bool> {
 }
 
 fn load_from(root: &Path) -> Settings {
-    std::fs::read_to_string(root.join(SETTINGS_FILE))
-        .ok()
-        .and_then(|raw| serde_json::from_str(&raw).ok())
-        .unwrap_or_default()
+    let path = root.join(SETTINGS_FILE);
+    match std::fs::read_to_string(&path) {
+        Ok(raw) => serde_json::from_str(&raw).unwrap_or_else(|e| {
+            eprintln!("warning: ignoring invalid {}: {e}", path.display());
+            Settings::default()
+        }),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Settings::default(),
+        Err(e) => {
+            eprintln!("warning: cannot read {}: {e}", path.display());
+            Settings::default()
+        }
+    }
 }
 
 fn save_to(root: &Path, settings: &Settings) -> Result<PathBuf> {
@@ -74,6 +82,13 @@ mod tests {
     #[test]
     fn missing_file_loads_default() {
         let dir = tempfile::tempdir().unwrap();
+        assert_eq!(load_from(dir.path()).telemetry.enabled, None);
+    }
+
+    #[test]
+    fn corrupt_file_loads_default_without_panicking() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(SETTINGS_FILE), "not json {{").unwrap();
         assert_eq!(load_from(dir.path()).telemetry.enabled, None);
     }
 }
