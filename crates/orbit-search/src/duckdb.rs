@@ -9,7 +9,10 @@ use duckdb_client::{DuckDbClient, scalar_i64, sql_lit, string_column};
 use rayon::prelude::*;
 
 use crate::corpus::{DEFAULT_SOURCE_EXTS, EXCLUDE_LIKE, EXCLUDE_REGEX, ext_regex};
-use crate::{BM25_B, BM25_K1, CorpusRow, Edge, query_tokens, split_words, stem, token_counts};
+use crate::{
+    AskMatch, AskOutcome, BM25_B, BM25_K1, CorpusRow, Edge, SearchVocab, content_words,
+    query_tokens, rank_and_trim, seed_rows, split_words, stem, token_counts,
+};
 
 const POSTINGS_FLUSH_ROWS: usize = 500_000;
 const POSTINGS_CHUNK_ROWS: usize = 65_536;
@@ -29,6 +32,37 @@ impl DuckDbSearch {
             pid: project_id,
             sha: sql_lit(commit_sha),
         }
+    }
+
+    pub fn ask(&self, question: &str, limit: usize, vocab: &SearchVocab) -> Result<AskOutcome> {
+        let terms = content_words(question);
+        if terms.is_empty() {
+            anyhow::bail!("no usable search terms in question: {question:?}");
+        }
+        let (corpus, weights) = self.search(&terms)?;
+        let hits = rank_and_trim(&terms, &corpus, limit, weights.as_deref(), vocab);
+        let focus = vocab.focus_edge_kind(&terms);
+        let (seed_count, edges) = if hits.is_empty() {
+            (0, Vec::new())
+        } else {
+            let seeds = seed_rows(&hits, &corpus);
+            let edges = self.expand(&seeds, focus.as_deref())?;
+            (seeds.len(), edges)
+        };
+        let matches = hits
+            .into_iter()
+            .map(|h| AskMatch {
+                row: corpus[h.index].clone(),
+                score: h.score,
+            })
+            .collect();
+        Ok(AskOutcome {
+            terms,
+            matches,
+            seed_count,
+            focus,
+            edges,
+        })
     }
 
     pub fn search(&self, terms: &[String]) -> Result<(Vec<CorpusRow>, Option<Vec<f64>>)> {

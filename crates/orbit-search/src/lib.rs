@@ -7,9 +7,10 @@ use std::collections::{HashMap, HashSet};
 pub const BM25_K1: f64 = 1.2;
 pub const BM25_B: f64 = 0.75;
 
-pub const EXPAND_SEEDS: usize = 5;
-pub const SEED_GAP_RATIO: f64 = 0.2;
-pub const CANDIDATE_FACTOR: usize = 5;
+const EXPAND_SEEDS: usize = 5;
+const SEED_GAP_RATIO: f64 = 0.2;
+const CANDIDATE_FACTOR: usize = 5;
+
 pub const MAX_EDGES_PER_KIND: usize = 5;
 pub const FOCUS_EDGES_PER_KIND: usize = 15;
 
@@ -163,6 +164,20 @@ impl SearchVocab {
     }
 }
 
+pub struct AskOutcome {
+    pub terms: Vec<String>,
+    pub matches: Vec<AskMatch>,
+    pub seed_count: usize,
+    pub focus: Option<String>,
+    pub edges: Vec<Edge>,
+}
+
+pub struct AskMatch {
+    pub row: CorpusRow,
+    pub score: f64,
+}
+
+#[derive(Clone)]
 pub struct CorpusRow {
     pub id: String,
     pub fqn: String,
@@ -223,7 +238,30 @@ impl RowTokens {
     }
 }
 
-pub fn rank(
+pub fn rank_and_trim(
+    terms: &[String],
+    corpus: &[CorpusRow],
+    limit: usize,
+    weights: Option<&[f64]>,
+    vocab: &SearchVocab,
+) -> Vec<Hit> {
+    dedupe_by_parent(
+        rank(terms, corpus, limit * CANDIDATE_FACTOR, weights, vocab),
+        corpus,
+        limit,
+    )
+}
+
+pub fn seed_rows<'c>(hits: &[Hit], corpus: &'c [CorpusRow]) -> Vec<&'c CorpusRow> {
+    let cutoff = hits.first().map_or(0.0, |top| top.score * SEED_GAP_RATIO);
+    hits.iter()
+        .take(EXPAND_SEEDS)
+        .take_while(|h| h.score >= cutoff)
+        .map(|h| &corpus[h.index])
+        .collect()
+}
+
+fn rank(
     terms: &[String],
     corpus: &[CorpusRow],
     cap: usize,
@@ -354,7 +392,7 @@ pub fn rank(
     hits
 }
 
-pub fn dedupe_by_parent(results: Vec<Hit>, corpus: &[CorpusRow], limit: usize) -> Vec<Hit> {
+fn dedupe_by_parent(results: Vec<Hit>, corpus: &[CorpusRow], limit: usize) -> Vec<Hit> {
     let mut per_parent: HashMap<String, usize> = HashMap::new();
     let mut per_file: HashMap<String, usize> = HashMap::new();
     let mut kept: Vec<Hit> = Vec::with_capacity(limit);
@@ -561,6 +599,28 @@ mod tests {
         let hits = rank(&["validated".to_string()], &corpus, 10, None, &test_vocab());
         assert_eq!(hits.len(), 1);
         assert_eq!(corpus[hits[0].index].fqn, "ontology::validation::validate");
+    }
+
+    #[test]
+    fn seed_rows_applies_the_gap_cutoff_and_the_seed_cap() {
+        let corpus: Vec<CorpusRow> = (0..8).map(|i| row(&format!("m{i}::f"))).collect();
+        let hit = |index: usize, score: f64| Hit {
+            index,
+            score,
+            tiered: false,
+            guaranteed: false,
+        };
+        let gapped: Vec<Hit> = [100.0, 90.0, 10.0, 5.0]
+            .iter()
+            .enumerate()
+            .map(|(i, &s)| hit(i, s))
+            .collect();
+        let seeds = seed_rows(&gapped, &corpus);
+        assert_eq!(seeds.len(), 2);
+        assert_eq!(seeds[1].fqn, "m1::f");
+
+        let flat: Vec<Hit> = (0..8).map(|i| hit(i, 50.0)).collect();
+        assert_eq!(seed_rows(&flat, &corpus).len(), EXPAND_SEEDS);
     }
 
     #[test]

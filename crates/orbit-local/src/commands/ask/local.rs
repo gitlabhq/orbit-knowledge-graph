@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use orbit_search::duckdb::DuckDbSearch;
-use orbit_search::{CorpusRow, Edge};
+use orbit_search::{AskOutcome, SearchVocab};
 
 use duckdb_client::scalar_i64;
 
@@ -64,12 +64,13 @@ impl LocalBackend {
         &self.header
     }
 
-    pub(super) fn search(&self, terms: &[String]) -> Result<(Vec<CorpusRow>, Option<Vec<f64>>)> {
-        self.search.search(terms)
-    }
-
-    pub(super) fn expand(&self, seeds: &[&CorpusRow], focus: Option<&str>) -> Result<Vec<Edge>> {
-        self.search.expand(seeds, focus)
+    pub(super) fn ask(
+        &self,
+        question: &str,
+        limit: usize,
+        vocab: &SearchVocab,
+    ) -> Result<AskOutcome> {
+        self.search.ask(question, limit, vocab)
     }
 }
 
