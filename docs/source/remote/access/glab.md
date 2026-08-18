@@ -33,13 +33,14 @@ title: Use GitLab Orbit with the GitLab CLI (`glab`)
 The [GitLab CLI (`glab`)](https://docs.gitlab.com/cli/) is the canonical way to set up and
 query GitLab Orbit from the command line.
 
-Two top-level commands:
+`glab orbit` runs the managed `orbit` binary. It forwards each command to the
+binary, which `glab` downloads, verifies, and keeps up to date for you. Run
+`glab orbit remote <command> --help` for the binary's own command reference.
 
-- `glab orbit remote`: typed subcommands that call the GitLab Orbit Remote REST API.
-  Available in `glab` 1.94 or later.
-- `glab orbit setup`: one-command install of the GitLab Orbit skill and MCP config
-  for your AI agent. Planned for a future `glab` release. Until it ships,
-  [configure your MCP client manually](mcp.md#connect-your-mcp-client).
+- `glab orbit remote`: query the GitLab Orbit Remote REST API. `glab` injects
+  your GitLab credential automatically. Available in `glab` 1.94 or later.
+- `glab orbit setup`: guided onboarding that installs the GitLab Orbit skill and
+  configures your AI agent.
 
 ## Prerequisites
 
@@ -54,17 +55,24 @@ Two top-level commands:
 
 ## Set up your AI agent
 
-`glab orbit setup` is planned for a future `glab` release. When it ships, one
-command will install the GitLab Orbit skill and write the MCP config for your AI
-agent (Claude Code, OpenCode, Cursor, Codex, Gemini CLI).
+`glab orbit setup` configures AI coding agents (Claude Code, OpenCode, Cursor,
+Codex, Gemini CLI) to consult the graph, and installs the GitLab Orbit skill:
 
-Until it ships, [configure your MCP client manually](mcp.md#connect-your-mcp-client).
+```shell
+glab orbit setup
+```
+
+To connect an MCP client instead, [configure it manually](mcp.md#connect-your-mcp-client).
 
 ## Query GitLab Orbit from the command line
 
-Use `glab orbit remote` (or the `r` alias) to call the GitLab Orbit Remote API directly.
+Use `glab orbit remote` to call the GitLab Orbit Remote API directly.
 Useful for scripting, debugging, and exploring the schema before writing queries.
 Requires `glab` 1.94 or later.
+
+`glab` resolves your credential and passes it to the binary, so no extra
+authentication step is needed. Use `--hostname` to target a specific GitLab
+instance, and `--yes` to skip the one-time run confirmation in scripts.
 
 | Subcommand | Endpoint | Purpose |
 |------------|----------|---------|
@@ -110,13 +118,13 @@ Put the request body in `query.json`:
 glab orbit remote query query.json
 ```
 
-The `--format` flag maps to the body's `response_format`:
+The `--response-format` flag maps to the body's `response_format`:
 
-- `--format llm` - compact text optimized for AI agent consumption.
-- `--format raw` - structured JSON, suitable for piping to `jq`.
+- `--response-format llm` - compact text optimized for AI agent consumption.
+- `--response-format raw` - structured JSON, suitable for piping to `jq`.
 
-If `--format` is unset, the body's `response_format` wins, with `llm` as the
-final fallback.
+If `--response-format` is unset, the body's `response_format` wins, with `llm`
+as the final fallback.
 
 ### Check indexing progress
 
