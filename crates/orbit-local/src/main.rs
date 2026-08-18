@@ -168,7 +168,7 @@ struct IndexArgs {
     db: Option<PathBuf>,
 }
 
-#[derive(Args)]
+#[derive(Args, Debug, PartialEq)]
 #[command(about = descriptions::short("run_sql"))]
 struct SqlArgs {
     /// SQL query, or `-` to read from stdin.
@@ -207,7 +207,7 @@ struct SchemaArgs {
 }
 
 /// List the repositories indexed in the local DuckDB graph.
-#[derive(Args)]
+#[derive(Args, Debug, PartialEq)]
 struct ListArgs {
     /// Output format.
     #[arg(long, short = 'F', default_value = "table")]
@@ -218,7 +218,7 @@ struct ListArgs {
     db: Option<PathBuf>,
 }
 
-#[derive(Args)]
+#[derive(Args, Debug, PartialEq)]
 #[command(about = descriptions::short("mcp_serve"))]
 #[command(long_about = "Serve the local graph to MCP-compatible AI agents.\n\n\
                   Plug into editors that support MCP (Claude Code, Cursor, OpenCode, Codex) \
@@ -228,7 +228,7 @@ struct McpArgs {
     command: McpCommands,
 }
 
-#[derive(Args)]
+#[derive(Args, Debug, PartialEq)]
 #[command(name = "repo-map", about = descriptions::short("repo_map"))]
 #[command(
     long_about = "Produce a high-level, LLM-oriented map of a locally indexed repository.\n\n\
@@ -348,7 +348,7 @@ enum LocalCommands {
     RepoMap(RepoMapArgs),
 }
 
-#[derive(Subcommand)]
+#[derive(Subcommand, Debug, PartialEq)]
 enum McpCommands {
     /// Start a stateless MCP server over stdio.
     Serve,
@@ -985,6 +985,74 @@ mod tests {
                 tables: vec!["gl_edge".to_string()],
             }
         );
+    }
+
+    #[test]
+    fn local_sql_and_top_level_sql_parse_to_same_args() {
+        let grouped = Cli::parse_from(["orbit", "local", "sql", "SELECT 1"]);
+        let top_level = Cli::parse_from(["orbit", "sql", "SELECT 1"]);
+        let grouped_args = match grouped.command {
+            Commands::Local {
+                command: LocalCommands::Sql(args),
+            } => args,
+            _ => panic!("expected local sql command"),
+        };
+        let top_level_args = match top_level.command {
+            Commands::Sql(args) => args,
+            _ => panic!("expected top-level sql command"),
+        };
+        assert_eq!(grouped_args, top_level_args);
+    }
+
+    #[test]
+    fn local_list_and_top_level_list_parse_to_same_args() {
+        let grouped = Cli::parse_from(["orbit", "local", "list"]);
+        let top_level = Cli::parse_from(["orbit", "list"]);
+        let grouped_args = match grouped.command {
+            Commands::Local {
+                command: LocalCommands::List(args),
+            } => args,
+            _ => panic!("expected local list command"),
+        };
+        let top_level_args = match top_level.command {
+            Commands::List(args) => args,
+            _ => panic!("expected top-level list command"),
+        };
+        assert_eq!(grouped_args, top_level_args);
+    }
+
+    #[test]
+    fn local_mcp_and_top_level_mcp_parse_to_same_args() {
+        let grouped = Cli::parse_from(["orbit", "local", "mcp", "serve"]);
+        let top_level = Cli::parse_from(["orbit", "mcp", "serve"]);
+        let grouped_args = match grouped.command {
+            Commands::Local {
+                command: LocalCommands::Mcp(args),
+            } => args,
+            _ => panic!("expected local mcp command"),
+        };
+        let top_level_args = match top_level.command {
+            Commands::Mcp(args) => args,
+            _ => panic!("expected top-level mcp command"),
+        };
+        assert_eq!(grouped_args, top_level_args);
+    }
+
+    #[test]
+    fn local_repo_map_and_top_level_repo_map_parse_to_same_args() {
+        let grouped = Cli::parse_from(["orbit", "local", "repo-map", "overview"]);
+        let top_level = Cli::parse_from(["orbit", "repo-map", "overview"]);
+        let grouped_args = match grouped.command {
+            Commands::Local {
+                command: LocalCommands::RepoMap(args),
+            } => args,
+            _ => panic!("expected local repo-map command"),
+        };
+        let top_level_args = match top_level.command {
+            Commands::RepoMap(args) => args,
+            _ => panic!("expected top-level repo-map command"),
+        };
+        assert_eq!(grouped_args, top_level_args);
     }
 
     fn err(stage: &'static str, msg: &str, fatal: bool) -> PipelineError {

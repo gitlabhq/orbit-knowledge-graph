@@ -138,7 +138,7 @@ const CONTAINER_KINDS: &[&str] = &[
 
 const ABSTRACTION_KINDS: &[&str] = &["Class", "Trait", "Interface", "Struct"];
 
-#[derive(clap::Subcommand)]
+#[derive(clap::Subcommand, Debug, PartialEq)]
 pub(crate) enum RepoMapCommand {
     /// Languages, top directories, key types, and repo anchors.
     Overview,
