@@ -1,0 +1,37 @@
+use arrow::array::{Int64Array, RecordBatch, StringArray};
+
+/// SQL string literal with single-quote doubling.
+pub fn sql_lit(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "''"))
+}
+
+pub fn scalar_i64(batches: &[RecordBatch]) -> i64 {
+    batches
+        .iter()
+        .find(|b| b.num_rows() > 0)
+        .and_then(|b| b.column(0).as_any().downcast_ref::<Int64Array>())
+        .map(|arr| arr.value(0))
+        .unwrap_or(0)
+}
+
+pub fn string_column(batches: &[RecordBatch], name: &str) -> Vec<String> {
+    batches
+        .iter()
+        .filter_map(|b| {
+            b.column_by_name(name)
+                .and_then(|c| c.as_any().downcast_ref::<StringArray>())
+        })
+        .flat_map(|arr| arr.iter().flatten().map(String::from))
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sql_lit_doubles_single_quotes() {
+        assert_eq!(sql_lit("O'Brien"), "'O''Brien'");
+        assert_eq!(sql_lit("plain"), "'plain'");
+    }
+}

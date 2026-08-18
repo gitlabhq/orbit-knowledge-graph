@@ -23,6 +23,7 @@ members = [
   "crates/orbit-billing",
   "crates/orbit-observability",
   "crates/orbit-prompts",
+  "crates/orbit-search",
   "crates/orbit-server-config",
   "crates/orbit-server",
   "crates/ontology",

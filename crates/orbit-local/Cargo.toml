@@ -19,6 +19,7 @@ duckdb-client = { path = "../duckdb-client" }
 labkit-events = { workspace = true }
 orbit-analytics = { path = "../orbit-analytics" }
 orbit-prompts = { path = "../orbit-prompts" }
+orbit-search = { path = "../orbit-search", features = ["duckdb"] }
 orbit-utils = { path = "../utils" }
 ontology = { path = "../ontology" }
 gitalisk-core = { workspace = true }
@@ -35,7 +36,6 @@ rust-embed = { workspace = true }
 rustls = { workspace = true }
 schemars = { workspace = true }
 serde = { workspace = true }
-rust-stemmers = { workspace = true }
 serde_json = { workspace = true, features = ["raw_value"] }
 strum = { workspace = true }
 

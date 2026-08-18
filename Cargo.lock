@@ -8280,11 +8280,11 @@ dependencies = [
  "ontology",
  "orbit-analytics",
  "orbit-prompts",
+ "orbit-search",
  "orbit-utils",
  "reqwest 0.13.4",
  "rmcp",
  "rust-embed",
- "rust-stemmers",
  "rustls",
  "schemars 1.2.1",
  "serde",
@@ -8326,6 +8326,17 @@ dependencies = [
  "rust-embed",
  "semver",
  "serde",
+]
+
+[[package]]
+name = "orbit-search"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "arrow 58.3.0",
+ "duckdb-client",
+ "rayon",
+ "rust-stemmers",
 ]
 
 [[package]]
