@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use arrow::array::RecordBatch;
 use std::io::Write;
 
-#[derive(Debug, Clone, Copy, Default, clap::ValueEnum)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, clap::ValueEnum)]
 pub enum Format {
     #[default]
     Table,
