@@ -7,6 +7,7 @@ const DEFAULT_COLLECTOR_URL: &str = "https://snowplowprd.trx.gitlab.net";
 const APP_ID: &str = "orbit";
 const CATEGORY: &str = "orbit_cli";
 
+const ENABLED_ENV: &str = "ORBIT_TELEMETRY_ENABLED";
 const COLLECTOR_URL_ENV: &str = "ORBIT_TELEMETRY_COLLECTOR_URL";
 
 pub struct TelemetryConfig {
@@ -41,12 +42,18 @@ fn resolve(
     get_env: impl Fn(&str) -> Option<String>,
     persisted_enabled: Option<bool>,
 ) -> TelemetryConfig {
+    let enabled = get_env(ENABLED_ENV)
+        .as_deref()
+        .and_then(settings::parse_bool)
+        .or(persisted_enabled)
+        .unwrap_or(true);
+
     let collector_url = get_env(COLLECTOR_URL_ENV)
         .filter(|value| !value.is_empty())
         .unwrap_or_else(|| DEFAULT_COLLECTOR_URL.to_string());
 
     TelemetryConfig {
-        enabled: persisted_enabled.unwrap_or(true),
+        enabled,
         collector_url,
         app_id: APP_ID,
     }
@@ -76,6 +83,18 @@ mod tests {
     #[test]
     fn persisted_setting_disables() {
         let cfg = resolve(env_from(&[]), Some(false));
+        assert!(!cfg.enabled);
+    }
+
+    #[test]
+    fn env_overrides_persisted_setting() {
+        let cfg = resolve(env_from(&[(ENABLED_ENV, "false")]), Some(true));
+        assert!(!cfg.enabled);
+    }
+
+    #[test]
+    fn unrecognized_env_falls_back_to_persisted() {
+        let cfg = resolve(env_from(&[(ENABLED_ENV, "maybe")]), Some(false));
         assert!(!cfg.enabled);
     }
 

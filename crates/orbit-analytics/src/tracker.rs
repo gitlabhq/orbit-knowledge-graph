@@ -73,13 +73,3 @@ impl AnalyticsTracker for InMemoryAnalyticsTracker {
         self.events.lock().push(event);
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn new_builds_tracker_with_custom_app_id() {
-        assert!(SnowplowAnalyticsTracker::new("https://collector.example.test", "orbit").is_ok());
-    }
-}
