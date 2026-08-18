@@ -14,7 +14,7 @@ mod telemetry;
 mod workspace;
 
 use anyhow::{Context, Result};
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, CommandFactory, FromArgMatches, Parser, Subcommand};
 use ontology::Ontology;
 use serde::Serialize;
 use std::collections::HashMap;
@@ -437,7 +437,8 @@ enum RemoteCommands {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let cli = Cli::parse();
+    let matches = Cli::command().get_matches();
+    let cli = Cli::from_arg_matches(&matches).expect("clap already validated the arguments");
 
     let tracker = if matches!(cli.command, Commands::HookGuard { .. }) {
         None
@@ -445,7 +446,7 @@ async fn main() -> Result<()> {
         telemetry::resolve_from_env(cli.no_telemetry).build_tracker()
     };
     if let Some(tracker) = &tracker {
-        telemetry::emit_command_event(tracker, command_action(&cli.command));
+        telemetry::emit_command_event(tracker, &subcommand_path(&matches));
     }
 
     let result = dispatch(cli.command, tracker.as_ref()).await;
@@ -454,49 +455,22 @@ async fn main() -> Result<()> {
     result
 }
 
+/// The invoked subcommand path as an underscore-joined action name, read from
+/// clap so new commands are instrumented without touching this code. For
+/// example `orbit remote query` becomes `remote_query`.
+fn subcommand_path(matches: &clap::ArgMatches) -> String {
+    let mut parts = Vec::new();
+    let mut current = matches;
+    while let Some((name, sub)) = current.subcommand() {
+        parts.push(name.replace('-', "_"));
+        current = sub;
+    }
+    parts.join("_")
+}
+
 async fn flush_telemetry(tracker: Option<&orbit_analytics::SnowplowAnalyticsTracker>) {
     if let Some(tracker) = tracker {
         let _ = tokio::time::timeout(TELEMETRY_FLUSH_TIMEOUT, tracker.shutdown()).await;
-    }
-}
-
-fn command_action(command: &Commands) -> &'static str {
-    match command {
-        Commands::Version => "version",
-        Commands::Index(_) => "index",
-        Commands::Sql(_) => "sql",
-        Commands::Schema(_) => "schema",
-        Commands::List(_) => "list",
-        Commands::Mcp(_) => "mcp_serve",
-        Commands::RepoMap(_) => "repo_map",
-        Commands::Local { command } => local_action(command),
-        Commands::Config { .. } => "config",
-        Commands::Skill { .. } => "skill",
-        Commands::Setup { .. } => "setup",
-        Commands::HookGuard { .. } => "hook_guard",
-        Commands::Remote { command } => remote_action(command),
-    }
-}
-
-fn local_action(command: &LocalCommands) -> &'static str {
-    match command {
-        LocalCommands::Index(_) => "index",
-        LocalCommands::Sql(_) => "sql",
-        LocalCommands::Schema(_) => "schema",
-        LocalCommands::List(_) => "list",
-        LocalCommands::Mcp(_) => "mcp_serve",
-        LocalCommands::RepoMap(_) => "repo_map",
-    }
-}
-
-fn remote_action(command: &RemoteCommands) -> &'static str {
-    match command {
-        RemoteCommands::Query { .. } => "remote_query",
-        RemoteCommands::Status => "remote_status",
-        RemoteCommands::Schema { .. } => "remote_schema",
-        RemoteCommands::Dsl => "remote_dsl",
-        RemoteCommands::Tools => "remote_tools",
-        RemoteCommands::GraphStatus { .. } => "remote_graph_status",
     }
 }
 
@@ -1037,6 +1011,29 @@ mod tests {
     #[test]
     fn cli_command_tree_verifies() {
         Cli::command().debug_assert();
+    }
+
+    fn action_for(argv: &[&str]) -> String {
+        let matches = Cli::command().get_matches_from(argv);
+        super::subcommand_path(&matches)
+    }
+
+    #[test]
+    fn subcommand_path_derives_nested_action_names() {
+        assert_eq!(action_for(&["orbit", "version"]), "version");
+        assert_eq!(action_for(&["orbit", "remote", "query"]), "remote_query");
+        assert_eq!(
+            action_for(&["orbit", "local", "sql", "SELECT 1"]),
+            "local_sql"
+        );
+        assert_eq!(
+            action_for(&["orbit", "config", "set", "k", "v"]),
+            "config_set"
+        );
+        assert_eq!(
+            action_for(&["orbit", "remote", "graph-status", "--full-path", "a/b"]),
+            "remote_graph_status"
+        );
     }
 
     #[test]
