@@ -38,7 +38,7 @@ ARCHIVE_URL="https://gitlab.com/api/v4/projects/${GITLAB_PROJECT}/repository/arc
 log "fetching $TABLES_PATH from gitlab-org/gitlab @ $GITLAB_REF"
 fetched=false
 for attempt in 1 2 3 4 5; do
-  if curl -sSL --fail -o "$SRC" "$ARCHIVE_URL" \
+  if curl -sSL --fail --connect-timeout 10 --max-time 60 -o "$SRC" "$ARCHIVE_URL" \
     && tar -xzf "$SRC" -C "$CLONE" --strip-components=1; then
     fetched=true
     break
