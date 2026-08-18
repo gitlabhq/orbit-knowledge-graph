@@ -144,11 +144,6 @@ struct ErroredFile {
 #[command(name = "orbit", version = env!("ORBIT_VERSION"))]
 #[command(about = "Orbit - local code indexing and query CLI")]
 struct Cli {
-    /// Do not send telemetry for this invocation. Also settable with
-    /// `ORBIT_TELEMETRY_ENABLED=false`.
-    #[arg(long, global = true)]
-    no_telemetry: bool,
-
     #[command(subcommand)]
     command: Commands,
 }
@@ -441,7 +436,7 @@ async fn main() -> Result<()> {
     let tracker = if matches!(cli.command, Commands::HookGuard { .. }) {
         None
     } else {
-        telemetry::resolve_from_env(cli.no_telemetry).build_tracker()
+        telemetry::resolve_from_env().build_tracker()
     };
     if let Some(tracker) = &tracker {
         telemetry::emit_command_event(tracker, &subcommand_path(&matches));

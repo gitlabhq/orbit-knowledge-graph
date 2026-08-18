@@ -254,20 +254,14 @@ can see how GitLab Orbit is used. Each event records which command ran, nothing 
 no repository content, file paths, or query text is sent. Telemetry is on by
 default.
 
-Turn it off in whichever way suits you:
+Turn it off with a saved setting:
 
 ```shell
-orbit config set telemetry.enabled false   # save the choice for every run
-orbit --no-telemetry sql 'SELECT 1'        # skip it for a single run
-export ORBIT_TELEMETRY_ENABLED=false       # disable it for the current shell
+orbit config set telemetry.enabled false
 ```
-
-When more than one applies, the most specific wins: the `--no-telemetry` flag
-first, then `ORBIT_TELEMETRY_ENABLED`, then the saved setting, then the default.
 
 | Variable | Purpose |
 |----------|---------|
-| `ORBIT_TELEMETRY_ENABLED` | `false` disables telemetry, `true` enables it. Overrides the saved setting. |
 | `ORBIT_TELEMETRY_COLLECTOR_URL` | Send events to a different collector, for testing. Defaults to the GitLab collector. |
 
 ## Billing
