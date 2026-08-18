@@ -232,6 +232,44 @@ same instruction block and hooks by hand.
 The graph is stored at `~/.orbit/graph.duckdb`. Multiple repositories share
 the same database. Delete the file to start over.
 
+## Configure the CLI
+
+`orbit config` reads and writes persisted settings in `~/.orbit/settings.json`.
+A saved setting applies to every later run.
+
+```shell
+orbit config list                          # all settings and their saved values
+orbit config get telemetry.enabled         # one setting
+orbit config set telemetry.enabled false   # save a setting
+```
+
+| Setting | Values | Default | Purpose |
+|---------|--------|---------|---------|
+| `telemetry.enabled` | `true`, `false` | `true` | Whether the CLI sends usage telemetry. |
+
+## Telemetry
+
+The CLI sends usage events to the GitLab product analytics service so the team
+can see how GitLab Orbit is used. Each event records which command ran, nothing more:
+no repository content, file paths, or query text is sent. Telemetry is on by
+default.
+
+Turn it off in whichever way suits you:
+
+```shell
+orbit config set telemetry.enabled false   # save the choice for every run
+orbit --no-telemetry sql 'SELECT 1'        # skip it for a single run
+export ORBIT_TELEMETRY_ENABLED=false       # disable it for the current shell
+```
+
+When more than one applies, the most specific wins: the `--no-telemetry` flag
+first, then `ORBIT_TELEMETRY_ENABLED`, then the saved setting, then the default.
+
+| Variable | Purpose |
+|----------|---------|
+| `ORBIT_TELEMETRY_ENABLED` | `false` disables telemetry, `true` enables it. Overrides the saved setting. |
+| `ORBIT_TELEMETRY_COLLECTOR_URL` | Send events to a different collector, for testing. Defaults to the GitLab collector. |
+
 ## Billing
 
 GitLab Orbit Local does not consume GitLab Credits. All processing is local.
