@@ -1,10 +1,11 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use arrow::array::{Int32Array, Int64Array, StringArray};
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
+use rayon::prelude::*;
 
 use crate::commands::repo_map::{
     DEFAULT_SOURCE_EXTS, EXCLUDE_LIKE, EXCLUDE_REGEX, ext_regex, scalar_i64, sql_lit, string_column,
@@ -13,6 +14,7 @@ use crate::commands::repo_map::{
 const BM25_K1: f64 = 1.2;
 const BM25_B: f64 = 0.75;
 const POSTINGS_FLUSH_ROWS: usize = 500_000;
+const POSTINGS_CHUNK_ROWS: usize = 65_536;
 
 pub(crate) fn split_words(input: &str) -> Vec<String> {
     let mut tokens = Vec::new();
@@ -41,8 +43,17 @@ pub(crate) fn stem(word: &str) -> String {
     thread_local! {
         static STEMMER: rust_stemmers::Stemmer =
             rust_stemmers::Stemmer::create(rust_stemmers::Algorithm::English);
+        static CACHE: std::cell::RefCell<HashMap<String, String>> =
+            std::cell::RefCell::new(HashMap::new());
     }
-    STEMMER.with(|s| s.stem(word).into_owned())
+    CACHE.with(|cache| {
+        if let Some(stemmed) = cache.borrow().get(word) {
+            return stemmed.clone();
+        }
+        let stemmed = STEMMER.with(|s| s.stem(word).into_owned());
+        cache.borrow_mut().insert(word.to_string(), stemmed.clone());
+        stemmed
+    })
 }
 
 pub(crate) fn corpus_predicate(pid: i64, sha: &str) -> String {
@@ -75,10 +86,19 @@ fn exclusions(col: &str) -> String {
     s
 }
 
-fn doc_token_counts(fqn: &str, file_path: &str) -> HashMap<String, i32> {
+fn token_counts(words: Vec<String>) -> HashMap<String, i32> {
     let mut counts: HashMap<String, i32> = HashMap::new();
-    for token in split_words(fqn).into_iter().chain(split_words(file_path)) {
-        *counts.entry(stem(&token)).or_insert(0) += 1;
+    for word in words {
+        *counts.entry(stem(&word)).or_insert(0) += 1;
+    }
+    counts
+}
+
+#[cfg(test)]
+fn doc_token_counts(fqn: &str, file_path: &str) -> HashMap<String, i32> {
+    let mut counts = token_counts(split_words(fqn));
+    for (token, tf) in token_counts(split_words(file_path)) {
+        *counts.entry(token).or_insert(0) += tf;
     }
     counts
 }
@@ -129,18 +149,40 @@ pub(crate) fn build_postings(
     let ids = string_column(&batches, "id");
     let fqns = string_column(&batches, "fqn");
     let paths = string_column(&batches, "file_path");
-    for i in 0..ids.len() {
-        let Ok(def_id) = ids[i].parse::<i64>() else {
-            continue;
-        };
-        for (token, tf) in doc_token_counts(&fqns[i], &paths[i]) {
-            def_ids.push(def_id);
-            tokens.push(token);
-            tfs.push(tf);
-            total += 1;
-        }
-        if def_ids.len() >= POSTINGS_FLUSH_ROWS {
-            flush(&mut def_ids, &mut tokens, &mut tfs)?;
+
+    let path_counts: HashMap<&str, HashMap<String, i32>> = paths
+        .iter()
+        .map(String::as_str)
+        .collect::<HashSet<_>>()
+        .into_par_iter()
+        .map(|path| (path, token_counts(split_words(path))))
+        .collect();
+
+    for start in (0..ids.len()).step_by(POSTINGS_CHUNK_ROWS) {
+        let end = (start + POSTINGS_CHUNK_ROWS).min(ids.len());
+        let counted: Vec<(i64, HashMap<String, i32>)> = (start..end)
+            .into_par_iter()
+            .filter_map(|i| {
+                let def_id = ids[i].parse::<i64>().ok()?;
+                let mut counts = token_counts(split_words(&fqns[i]));
+                if let Some(path) = path_counts.get(paths[i].as_str()) {
+                    for (token, tf) in path {
+                        *counts.entry(token.clone()).or_insert(0) += tf;
+                    }
+                }
+                Some((def_id, counts))
+            })
+            .collect();
+        for (def_id, counts) in counted {
+            for (token, tf) in counts {
+                def_ids.push(def_id);
+                tokens.push(token);
+                tfs.push(tf);
+                total += 1;
+            }
+            if def_ids.len() >= POSTINGS_FLUSH_ROWS {
+                flush(&mut def_ids, &mut tokens, &mut tfs)?;
+            }
         }
     }
     flush(&mut def_ids, &mut tokens, &mut tfs)?;

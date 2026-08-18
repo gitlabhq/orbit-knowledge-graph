@@ -8250,6 +8250,7 @@ dependencies = [
  "ontology",
  "orbit-prompts",
  "orbit-utils",
+ "rayon",
  "reqwest 0.13.4",
  "rmcp",
  "rust-embed",
