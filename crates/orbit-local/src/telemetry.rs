@@ -1,11 +1,3 @@
-//! CLI telemetry: resolve whether to send Snowplow usage events, and emit them.
-//!
-//! Phase 1 of the unified Orbit telemetry rollout (see issue #1161). The CLI
-//! sends structured events under `app_id = "orbit"`. The server keeps
-//! `gkg-server` until a later, coordinated migration. Events carry no custom
-//! context yet; the shared `orbit_common` context and its `surface` field are a
-//! follow-up.
-
 use std::path::Path;
 
 use labkit_events::StructuredEvent;
@@ -22,7 +14,6 @@ const ENABLED_ENV: &str = "ORBIT_TELEMETRY_ENABLED";
 const COLLECTOR_URL_ENV: &str = "ORBIT_TELEMETRY_COLLECTOR_URL";
 const SETTINGS_FILE: &str = "telemetry.json";
 
-/// Telemetry settings resolved for a single CLI invocation.
 pub struct TelemetryConfig {
     pub enabled: bool,
     pub collector_url: String,
@@ -30,9 +21,6 @@ pub struct TelemetryConfig {
 }
 
 impl TelemetryConfig {
-    /// Build a Snowplow tracker, or `None` when telemetry is off or the tracker
-    /// cannot be built. A build failure must not break the command, so the error
-    /// is logged and swallowed.
     pub fn build_tracker(&self) -> Option<SnowplowAnalyticsTracker> {
         if !self.enabled {
             return None;
@@ -47,8 +35,6 @@ impl TelemetryConfig {
     }
 }
 
-/// Resolve telemetry settings from the real environment and the saved setting.
-/// `no_telemetry` is the `--no-telemetry` flag.
 pub fn resolve_from_env(no_telemetry: bool) -> TelemetryConfig {
     let persisted = Workspace::default_root()
         .ok()
@@ -56,8 +42,6 @@ pub fn resolve_from_env(no_telemetry: bool) -> TelemetryConfig {
     resolve(no_telemetry, |key| std::env::var(key).ok(), persisted)
 }
 
-/// Send one `orbit_cli` command-usage event. The event is queued; the caller
-/// flushes it with [`SnowplowAnalyticsTracker::shutdown`] before exit.
 pub fn emit_command_event<T: AnalyticsTracker + ?Sized>(tracker: &T, action: &str) {
     match StructuredEvent::builder(CATEGORY, action).build() {
         Ok(event) => tracker.track(event),

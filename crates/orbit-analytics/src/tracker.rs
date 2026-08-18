@@ -25,9 +25,6 @@ impl SnowplowAnalyticsTracker {
         Self::new(&config.collector_url, APP_ID)
     }
 
-    /// Flush buffered events and stop the background emitter. A short-lived
-    /// process (the CLI) must call this before exit, or labkit drops the
-    /// events that have not reached a full batch yet.
     pub async fn shutdown(&self) {
         self.tracker.shutdown().await;
     }

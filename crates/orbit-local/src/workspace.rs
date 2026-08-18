@@ -28,9 +28,6 @@ impl Workspace {
         Self::open(Self::default_root()?)
     }
 
-    /// The `~/.orbit/` directory (or the `ORBIT_DATA_DIR` override) without
-    /// creating it. Use this to read a workspace file when a missing directory
-    /// should stay missing.
     pub fn default_root() -> Result<PathBuf> {
         if let Some(dir) = std::env::var("ORBIT_DATA_DIR")
             .ok()

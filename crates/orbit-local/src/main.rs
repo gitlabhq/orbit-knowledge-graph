@@ -411,8 +411,6 @@ enum RemoteCommands {
 async fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    // Skip the git-hook guard: it runs inside git hooks, where a telemetry
-    // flush would add network latency to every commit.
     let tracker = if matches!(cli.command, Commands::HookGuard { .. }) {
         None
     } else {
@@ -601,7 +599,6 @@ async fn run_remote(
 
     if let Err(err) = result {
         eprintln!("{}", err.message);
-        // Flush before the hard exit, or the command-usage event is dropped.
         if let Some(tracker) = tracker {
             tracker.shutdown().await;
         }
