@@ -5,7 +5,7 @@ set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 
 VERSIONS="$E2E_DIR/config/versions.yaml"
-GITLAB_REPO="https://gitlab.com/gitlab-org/gitlab.git"
+GITLAB_PROJECT="gitlab-org%2Fgitlab"
 TABLES_PATH="db/siphon/tables"
 PKG_PROJECT="${CI_PROJECT_ID:-gitlab-org%2Forbit%2Fknowledge-graph}"
 
@@ -25,18 +25,21 @@ fi
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
+SRC="$TMP/archive.tar.gz"
 CLONE="$TMP/gitlab"
 TARBALL="$TMP/tables.tar.gz"
+mkdir -p "$CLONE"
 
-log "sparse-fetching $TABLES_PATH from gitlab-org/gitlab @ $GITLAB_REF"
-git init -q "$CLONE"
-git -C "$CLONE" remote add origin "$GITLAB_REPO"
-git -C "$CLONE" sparse-checkout set --no-cone "$TABLES_PATH"
+# A path-filtered archive is one cached HTTP request. Fetching an arbitrary SHA
+# over git-upload-pack from a repo this large gets throttled with "GitLab is
+# currently unable to handle this request due to load", which no retry outlasts.
+ARCHIVE_URL="https://gitlab.com/api/v4/projects/${GITLAB_PROJECT}/repository/archive.tar.gz?sha=${GITLAB_REF}&path=${TABLES_PATH}"
 
+log "fetching $TABLES_PATH from gitlab-org/gitlab @ $GITLAB_REF"
 fetched=false
 for attempt in 1 2 3 4 5; do
-  if git -C "$CLONE" fetch -q --depth 1 --filter=blob:none origin "$GITLAB_REF" \
-    && git -C "$CLONE" checkout -q FETCH_HEAD; then
+  if curl -sSL --fail -o "$SRC" "$ARCHIVE_URL" \
+    && tar -xzf "$SRC" -C "$CLONE" --strip-components=1; then
     fetched=true
     break
   fi
