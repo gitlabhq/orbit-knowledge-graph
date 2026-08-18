@@ -6,7 +6,7 @@ local:
   instructions: |
     ## Orbit graph
 
-    Repositories on this machine are indexed into a local Orbit code graph (`orbit list` shows which). Query the graph before grep or reading files for any question about how the code fits together: where something is defined or belongs, where a behavior happens, what handles a case, who calls or imports it, what an API looks like. Plain questions count — "where do we send X", "what handles Y", "how does Z work" are all graph questions. Grep matches text and returns noise; the graph returns resolved definitions, callers, and imports.
+    Repositories on this machine are indexed into a local Orbit code graph; `orbit local ask` indexes the current repository on demand, so never check coverage first. Query the graph before grep or reading files for any question about how the code fits together: where something is defined or belongs, where a behavior happens, what handles a case, who calls or imports it, what an API looks like. Plain questions count — "where do we send X", "what handles Y", "how does Z work" are all graph questions. Grep matches text and returns noise; the graph returns resolved definitions, callers, and imports.
 
     Rules:
 
@@ -14,6 +14,7 @@ local:
     - Ask in the words you would use with a colleague. "where do we send messages to the dlq", "what handles NATS backpressure" are single `orbit local ask` calls.
     - Grep and raw file reads come *after* the graph has oriented you, or to modify and debug specific lines.
     - Drop to SQL only for what `ask` does not cover: exact filters, aggregation, or columns it does not print.
+    - If two graph queries in a row return nothing useful, the graph likely lacks those edges — fall back to grep immediately instead of reformulating SQL.
 
     Copy-paste recipes (DuckDB SQL):
 
@@ -22,7 +23,7 @@ local:
     - Orient in unfamiliar code / where should new code live: `orbit repo-map` (drill down: `tree`, `api <Type>`, `class`, `extends`, `imports`)
     - `orbit schema` lists tables; `orbit skill` prints the full recipe reference
 
-    If orbit reports the current commit is not indexed, run `orbit index .` and retry. Grep and raw file reads are fine once the graph has oriented you, or to modify and debug specific lines. For questions spanning other projects or GitLab entities (merge requests, issues, pipelines, users), use `glab orbit` when available.
+    `ask` indexes the current commit automatically; if `orbit sql` or `orbit repo-map` report it is not indexed, run `orbit index .` and retry. Grep and raw file reads are fine once the graph has oriented you, or to modify and debug specific lines. For questions spanning other projects or GitLab entities (merge requests, issues, pipelines, users), use `glab orbit` when available.
 
     This applies to subagents: put the same rule in any subagent prompt that explores code.
   nudge_search: |
@@ -43,6 +44,7 @@ remote:
     - For any question about this codebase or its GitLab history — where something is defined, who calls it, which merge requests or issues relate to it — query the graph FIRST, before grep and before reading files: `glab orbit remote query <file.json|->`.
     - `glab orbit remote schema` lists entities and edges, and the `orbit` agent skill has copy-paste query recipes — consult it before writing a query by hand.
     - Grep and raw file reads come *after* the graph has oriented you, or to modify and debug specific lines. Grep matches text and returns noise; the graph returns resolved relationships.
+    - If two graph queries in a row return nothing useful, the graph likely lacks those edges — fall back to grep immediately instead of reformulating the query.
     - This applies to subagents: put the same rule in any subagent prompt that explores code.
   nudge_search: |
     MANDATORY: the remote Orbit graph covers this code. Before grepping raw files, query it with `glab orbit remote query` (the `orbit` skill has copy-paste recipes) — it returns resolved definitions and their connections instead of textual noise, and covers merge requests, issues, pipelines, and aggregation. Grep after the graph has oriented you, or to modify/debug specific lines. This applies to subagents too — put the same rule in any subagent prompt that explores code.

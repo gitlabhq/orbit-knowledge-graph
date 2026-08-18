@@ -4,10 +4,7 @@ use std::io::Write;
 use std::path::PathBuf;
 
 use anyhow::Result;
-use orbit_search::{
-    CANDIDATE_FACTOR, CorpusRow, EXPAND_SEEDS, FOCUS_EDGES_PER_KIND, MAX_EDGES_PER_KIND,
-    SEED_GAP_RATIO, SearchVocab, content_words, dedupe_by_parent, rank,
-};
+use orbit_search::{FOCUS_EDGES_PER_KIND, MAX_EDGES_PER_KIND, SearchVocab, content_words};
 
 use local::LocalBackend;
 
@@ -27,8 +24,9 @@ pub(crate) fn run(
     db: Option<PathBuf>,
     limit: usize,
 ) -> Result<()> {
-    let terms = content_words(&question);
-    if terms.is_empty() {
+    // Duplicates ask()'s guard so a termless question fails before open(),
+    // which may auto-index the whole repository.
+    if content_words(&question).is_empty() {
         anyhow::bail!("no usable search terms in question: {question:?}");
     }
 
@@ -37,56 +35,35 @@ pub(crate) fn run(
 
     let mut out = std::io::stdout().lock();
     writeln!(out, "ask {:?} — {}", question, backend.header())?;
-    writeln!(out, "terms: {}", terms.join(" "))?;
 
-    let (corpus, weights) = backend.search(&terms)?;
-    if corpus.is_empty() {
-        writeln!(out, "\nNo definitions match those terms.")?;
-        return Ok(());
-    }
-    let results = dedupe_by_parent(
-        rank(
-            &terms,
-            &corpus,
-            limit * CANDIDATE_FACTOR,
-            weights.as_deref(),
-            vocab(),
-        ),
-        &corpus,
-        limit,
-    );
-    if results.is_empty() {
+    let outcome = backend.ask(&question, limit, vocab())?;
+    writeln!(out, "terms: {}", outcome.terms.join(" "))?;
+
+    if outcome.matches.is_empty() {
         writeln!(out, "\nNo definitions match those terms.")?;
         return Ok(());
     }
 
     writeln!(out, "\nMatches:")?;
-    for r in &results {
-        let row = &corpus[r.index];
+    for m in &outcome.matches {
         writeln!(
             out,
             "  {}  [{}]  {}  (score {:.1}, links {})",
-            row.fqn, row.kind, row.loc, r.score, row.degree
+            m.row.fqn, m.row.kind, m.row.loc, m.score, m.row.degree
         )?;
     }
 
-    let cutoff = results
-        .first()
-        .map_or(0.0, |top| top.score * SEED_GAP_RATIO);
-    let seeds: Vec<&CorpusRow> = results
-        .iter()
-        .take(EXPAND_SEEDS)
-        .take_while(|r| r.score >= cutoff)
-        .map(|r| &corpus[r.index])
-        .collect();
-    let focus = vocab().focus_edge_kind(&terms);
-    let edges = backend.expand(&seeds, focus.as_deref())?;
-    if edges.is_empty() {
+    if outcome.edges.is_empty() {
         writeln!(out, "\nNo connections found around the top matches.")?;
         return Ok(());
     }
 
-    writeln!(out, "\nConnections (1 hop around top {}):", seeds.len())?;
+    writeln!(
+        out,
+        "\nConnections (1 hop around top {}):",
+        outcome.seed_count
+    )?;
+    let focus = outcome.focus;
     let kind_cap = |kind: &str| {
         if focus.as_deref() == Some(kind) {
             FOCUS_EDGES_PER_KIND
@@ -96,7 +73,7 @@ pub(crate) fn run(
     };
     let mut current = "";
     let mut in_kind = 0usize;
-    for e in &edges {
+    for e in &outcome.edges {
         if e.kind != current {
             report_hidden(&mut out, current, in_kind, kind_cap(current))?;
             current = &e.kind;
