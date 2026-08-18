@@ -6,6 +6,7 @@ mod descriptions;
 mod list;
 mod mcp;
 mod remote;
+mod settings;
 mod skill;
 mod sql;
 mod sql_format;
@@ -341,6 +342,29 @@ enum Commands {
         #[command(subcommand)]
         command: LocalCommands,
     },
+    /// Read and write persisted CLI settings (`~/.orbit/settings.json`).
+    Config {
+        #[command(subcommand)]
+        command: ConfigCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum ConfigCommands {
+    /// Print the saved value of a setting.
+    Get {
+        #[arg(value_name = "KEY")]
+        key: String,
+    },
+    /// Save a setting, such as `telemetry.enabled false`.
+    Set {
+        #[arg(value_name = "KEY")]
+        key: String,
+        #[arg(value_name = "VALUE")]
+        value: String,
+    },
+    /// List all known settings and their saved values.
+    List,
 }
 
 #[derive(Subcommand)]
@@ -438,6 +462,7 @@ fn command_action(command: &Commands) -> &'static str {
         Commands::Mcp(_) => "mcp_serve",
         Commands::RepoMap(_) => "repo_map",
         Commands::Local { command } => local_action(command),
+        Commands::Config { .. } => "config",
         Commands::Skill { .. } => "skill",
         Commands::Setup { .. } => "setup",
         Commands::HookGuard { .. } => "hook_guard",
@@ -483,6 +508,11 @@ async fn dispatch(
         Commands::Mcp(args) => dispatch_local(LocalCommands::Mcp(args)).await,
         Commands::RepoMap(args) => dispatch_local(LocalCommands::RepoMap(args)).await,
         Commands::Local { command } => dispatch_local(command).await,
+        Commands::Config { command } => match command {
+            ConfigCommands::Get { key } => commands::config::get(&key),
+            ConfigCommands::Set { key, value } => commands::config::set(&key, &value),
+            ConfigCommands::List => commands::config::list(),
+        },
         Commands::Skill { path } => skill::run(path),
         Commands::Setup {
             assistants,

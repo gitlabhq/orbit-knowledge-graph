@@ -1,10 +1,7 @@
-use std::path::Path;
-
 use labkit_events::StructuredEvent;
 use orbit_analytics::{AnalyticsTracker, SnowplowAnalyticsTracker};
-use serde::Deserialize;
 
-use crate::workspace::Workspace;
+use crate::settings;
 
 const DEFAULT_COLLECTOR_URL: &str = "https://snowplowprd.trx.gitlab.net";
 const APP_ID: &str = "orbit";
@@ -12,7 +9,6 @@ const CATEGORY: &str = "orbit_cli";
 
 const ENABLED_ENV: &str = "ORBIT_TELEMETRY_ENABLED";
 const COLLECTOR_URL_ENV: &str = "ORBIT_TELEMETRY_COLLECTOR_URL";
-const SETTINGS_FILE: &str = "telemetry.json";
 
 pub struct TelemetryConfig {
     pub enabled: bool,
@@ -36,9 +32,7 @@ impl TelemetryConfig {
 }
 
 pub fn resolve_from_env(no_telemetry: bool) -> TelemetryConfig {
-    let persisted = Workspace::default_root()
-        .ok()
-        .and_then(|root| load_persisted_enabled(&root));
+    let persisted = settings::load().telemetry.enabled;
     resolve(no_telemetry, |key| std::env::var(key).ok(), persisted)
 }
 
@@ -56,7 +50,10 @@ fn resolve(
 ) -> TelemetryConfig {
     let enabled = if no_telemetry {
         false
-    } else if let Some(from_env) = get_env(ENABLED_ENV).as_deref().and_then(parse_bool) {
+    } else if let Some(from_env) = get_env(ENABLED_ENV)
+        .as_deref()
+        .and_then(settings::parse_bool)
+    {
         from_env
     } else {
         persisted_enabled.unwrap_or(true)
@@ -71,26 +68,6 @@ fn resolve(
         collector_url,
         app_id: APP_ID,
     }
-}
-
-fn load_persisted_enabled(root: &Path) -> Option<bool> {
-    let raw = std::fs::read_to_string(root.join(SETTINGS_FILE)).ok()?;
-    serde_json::from_str::<PersistedSettings>(&raw)
-        .ok()?
-        .enabled
-}
-
-fn parse_bool(value: &str) -> Option<bool> {
-    match value.trim().to_ascii_lowercase().as_str() {
-        "1" | "true" | "yes" | "on" => Some(true),
-        "0" | "false" | "no" | "off" => Some(false),
-        _ => None,
-    }
-}
-
-#[derive(Deserialize)]
-struct PersistedSettings {
-    enabled: Option<bool>,
 }
 
 #[cfg(test)]
