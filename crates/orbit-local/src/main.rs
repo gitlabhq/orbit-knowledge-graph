@@ -29,6 +29,10 @@ const LOCAL_DDL: &str = include_str!(concat!(env!("CONFIG_DIR"), "/graph_local.s
 /// but not loaded or parsed.
 const MAX_INDEXED_FILE_BYTES: u64 = 5_000_000;
 
+/// Upper bound on the telemetry flush at exit so an unreachable collector never
+/// stalls a command on an offline or black-holed network.
+const TELEMETRY_FLUSH_TIMEOUT: Duration = Duration::from_millis(500);
+
 #[derive(Serialize)]
 struct IndexOutput {
     repository: String,
@@ -446,10 +450,14 @@ async fn main() -> Result<()> {
 
     let result = dispatch(cli.command, tracker.as_ref()).await;
 
-    if let Some(tracker) = &tracker {
-        tracker.shutdown().await;
-    }
+    flush_telemetry(tracker.as_ref()).await;
     result
+}
+
+async fn flush_telemetry(tracker: Option<&orbit_analytics::SnowplowAnalyticsTracker>) {
+    if let Some(tracker) = tracker {
+        let _ = tokio::time::timeout(TELEMETRY_FLUSH_TIMEOUT, tracker.shutdown()).await;
+    }
 }
 
 fn command_action(command: &Commands) -> &'static str {
@@ -629,9 +637,7 @@ async fn run_remote(
 
     if let Err(err) = result {
         eprintln!("{}", err.message);
-        if let Some(tracker) = tracker {
-            tracker.shutdown().await;
-        }
+        flush_telemetry(tracker).await;
         std::process::exit(err.exit_code);
     }
     Ok(())
