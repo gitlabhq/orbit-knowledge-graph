@@ -29,8 +29,6 @@ const LOCAL_DDL: &str = include_str!(concat!(env!("CONFIG_DIR"), "/graph_local.s
 /// but not loaded or parsed.
 const MAX_INDEXED_FILE_BYTES: u64 = 5_000_000;
 
-/// Upper bound on the telemetry flush at exit so an unreachable collector never
-/// stalls a command on an offline or black-holed network.
 const TELEMETRY_FLUSH_TIMEOUT: Duration = Duration::from_millis(500);
 
 #[derive(Serialize)]
@@ -455,17 +453,16 @@ async fn main() -> Result<()> {
     result
 }
 
-/// The invoked subcommand path as an underscore-joined action name, read from
-/// clap so new commands are instrumented without touching this code. For
-/// example `orbit remote query` becomes `remote_query`.
 fn subcommand_path(matches: &clap::ArgMatches) -> String {
-    let mut parts = Vec::new();
-    let mut current = matches;
-    while let Some((name, sub)) = current.subcommand() {
-        parts.push(name.replace('-', "_"));
-        current = sub;
+    let Some((top, sub)) = matches.subcommand() else {
+        return String::new();
+    };
+    if matches!(top, "local" | "remote")
+        && let Some((verb, _)) = sub.subcommand()
+    {
+        return format!("{top}_{}", verb.replace('-', "_"));
     }
-    parts.join("_")
+    top.replace('-', "_")
 }
 
 async fn flush_telemetry(tracker: Option<&orbit_analytics::SnowplowAnalyticsTracker>) {
@@ -1014,26 +1011,27 @@ mod tests {
     }
 
     fn action_for(argv: &[&str]) -> String {
-        let matches = Cli::command().get_matches_from(argv);
+        let matches = Cli::command()
+            .try_get_matches_from(argv)
+            .expect("valid argv");
         super::subcommand_path(&matches)
     }
 
     #[test]
-    fn subcommand_path_derives_nested_action_names() {
+    fn subcommand_path_names_command_and_namespace_verb() {
         assert_eq!(action_for(&["orbit", "version"]), "version");
         assert_eq!(action_for(&["orbit", "remote", "query"]), "remote_query");
-        assert_eq!(
-            action_for(&["orbit", "local", "sql", "SELECT 1"]),
-            "local_sql"
-        );
-        assert_eq!(
-            action_for(&["orbit", "config", "set", "k", "v"]),
-            "config_set"
-        );
         assert_eq!(
             action_for(&["orbit", "remote", "graph-status", "--full-path", "a/b"]),
             "remote_graph_status"
         );
+        assert_eq!(
+            action_for(&["orbit", "local", "sql", "SELECT 1"]),
+            "local_sql"
+        );
+        assert_eq!(action_for(&["orbit", "config", "set", "k", "v"]), "config");
+        assert_eq!(action_for(&["orbit", "repo-map", "tree"]), "repo_map");
+        assert_eq!(action_for(&["orbit", "mcp", "serve"]), "mcp");
     }
 
     #[test]
