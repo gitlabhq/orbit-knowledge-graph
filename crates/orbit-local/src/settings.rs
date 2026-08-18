@@ -1,13 +1,11 @@
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::workspace::Workspace;
 
 const SETTINGS_FILE: &str = "settings.json";
-
-pub const KNOWN_KEYS: &[&str] = &["telemetry.enabled"];
 
 #[derive(Default, Serialize, Deserialize)]
 #[serde(default)]
@@ -27,27 +25,9 @@ pub fn load() -> Settings {
         .unwrap_or_default()
 }
 
-pub fn get(key: &str) -> Result<Option<String>> {
-    read_key(&load(), key)
-}
-
-pub fn set(key: &str, value: &str) -> Result<(String, PathBuf)> {
+pub fn save(settings: &Settings) -> Result<PathBuf> {
     let root = Workspace::default_root()?;
-    let mut settings = load_from(&root);
-    let normalized = apply_set(&mut settings, key, value)?;
-    let path = save_to(&root, &settings)?;
-    Ok((normalized, path))
-}
-
-pub fn list() -> Vec<(String, Option<String>)> {
-    let settings = load();
-    KNOWN_KEYS
-        .iter()
-        .map(|key| {
-            let value = read_key(&settings, key).ok().flatten();
-            (key.to_string(), value)
-        })
-        .collect()
+    save_to(&root, settings)
 }
 
 pub fn parse_bool(value: &str) -> Option<bool> {
@@ -55,25 +35,6 @@ pub fn parse_bool(value: &str) -> Option<bool> {
         "1" | "true" | "yes" | "on" => Some(true),
         "0" | "false" | "no" | "off" => Some(false),
         _ => None,
-    }
-}
-
-fn read_key(settings: &Settings, key: &str) -> Result<Option<String>> {
-    match key {
-        "telemetry.enabled" => Ok(settings.telemetry.enabled.map(|b| b.to_string())),
-        _ => bail!("unknown setting `{key}` (known: {})", KNOWN_KEYS.join(", ")),
-    }
-}
-
-fn apply_set(settings: &mut Settings, key: &str, value: &str) -> Result<String> {
-    match key {
-        "telemetry.enabled" => {
-            let parsed = parse_bool(value)
-                .with_context(|| format!("`{key}` expects a boolean, got `{value}`"))?;
-            settings.telemetry.enabled = Some(parsed);
-            Ok(parsed.to_string())
-        }
-        _ => bail!("unknown setting `{key}` (known: {})", KNOWN_KEYS.join(", ")),
     }
 }
 
@@ -97,36 +58,22 @@ mod tests {
     use super::*;
 
     #[test]
-    fn set_then_read_roundtrips_through_disk() {
+    fn save_then_load_roundtrips_through_disk() {
         let dir = tempfile::tempdir().unwrap();
-        let mut settings = load_from(dir.path());
-        apply_set(&mut settings, "telemetry.enabled", "false").unwrap();
+        let settings = Settings {
+            telemetry: TelemetrySettings {
+                enabled: Some(false),
+            },
+        };
         save_to(dir.path(), &settings).unwrap();
 
         let reloaded = load_from(dir.path());
-        assert_eq!(
-            read_key(&reloaded, "telemetry.enabled").unwrap(),
-            Some("false".to_string())
-        );
+        assert_eq!(reloaded.telemetry.enabled, Some(false));
     }
 
     #[test]
-    fn missing_file_reads_as_unset() {
+    fn missing_file_loads_default() {
         let dir = tempfile::tempdir().unwrap();
-        let settings = load_from(dir.path());
-        assert_eq!(read_key(&settings, "telemetry.enabled").unwrap(), None);
-    }
-
-    #[test]
-    fn unknown_key_is_rejected() {
-        let mut settings = Settings::default();
-        assert!(apply_set(&mut settings, "nope.key", "true").is_err());
-        assert!(read_key(&settings, "nope.key").is_err());
-    }
-
-    #[test]
-    fn non_boolean_value_is_rejected() {
-        let mut settings = Settings::default();
-        assert!(apply_set(&mut settings, "telemetry.enabled", "maybe").is_err());
+        assert_eq!(load_from(dir.path()).telemetry.enabled, None);
     }
 }
