@@ -1134,6 +1134,23 @@ mod tests {
     }
 
     #[test]
+    fn local_ask_and_top_level_ask_parse_to_same_args() {
+        let grouped = Cli::parse_from(["orbit", "local", "ask", "who calls this", "--limit", "5"]);
+        let top_level = Cli::parse_from(["orbit", "ask", "who calls this", "--limit", "5"]);
+        let grouped_args = match grouped.command {
+            Commands::Local {
+                command: LocalCommands::Ask(args),
+            } => args,
+            _ => panic!("expected local ask command"),
+        };
+        let top_level_args = match top_level.command {
+            Commands::Ask(args) => args,
+            _ => panic!("expected top-level ask command"),
+        };
+        assert_eq!(grouped_args, top_level_args);
+    }
+
+    #[test]
     fn local_sql_and_top_level_sql_parse_to_same_args() {
         let grouped = Cli::parse_from(["orbit", "local", "sql", "SELECT 1"]);
         let top_level = Cli::parse_from(["orbit", "sql", "SELECT 1"]);

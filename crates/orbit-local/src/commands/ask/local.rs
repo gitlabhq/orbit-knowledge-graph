@@ -73,13 +73,18 @@ impl LocalBackend {
     }
 
     pub(super) fn search(&self, terms: &[String]) -> Result<(Vec<CorpusRow>, Option<Vec<f64>>)> {
-        let (total, per_term) = corpus_term_counts(&self.client, self.pid, &self.sha, terms)?;
+        let use_postings = search::has_postings(&self.client, self.pid, &self.sha)?;
+        let (total, per_term) = if use_postings {
+            postings_term_counts(&self.client, self.pid, &self.sha, terms)?
+        } else {
+            corpus_term_counts(&self.client, self.pid, &self.sha, terms)?
+        };
         let n = total.max(1) as f64;
         let weights: Vec<f64> = per_term
             .iter()
             .map(|df| (1.0 + n / (1.0 + *df as f64)).ln())
             .collect();
-        let corpus = if search::has_postings(&self.client, self.pid, &self.sha)? {
+        let corpus = if use_postings {
             let sql = search::bm25_candidates_sql(
                 self.pid,
                 &self.sha,
@@ -170,6 +175,51 @@ fn relevance_sql(terms: &[String], weights: &[f64]) -> String {
         })
         .collect();
     format!("({})", clauses.join(" + "))
+}
+
+fn postings_term_counts(
+    client: &duckdb_client::DuckDbClient,
+    pid: i64,
+    sha: &str,
+    terms: &[String],
+) -> Result<(i64, Vec<i64>)> {
+    let counters: Vec<String> = terms
+        .iter()
+        .enumerate()
+        .map(|(i, t)| {
+            let tokens = search::query_tokens(std::slice::from_ref(t));
+            if tokens.is_empty() {
+                return format!("CAST(0 AS VARCHAR) AS df_{i}");
+            }
+            let list: Vec<String> = tokens.iter().map(|tok| sql_lit(tok)).collect();
+            format!(
+                "CAST(COUNT(DISTINCT def_id) FILTER (WHERE token IN ({})) AS VARCHAR) AS df_{i}",
+                list.join(", ")
+            )
+        })
+        .collect();
+    let selects = if counters.is_empty() {
+        String::new()
+    } else {
+        format!(", {}", counters.join(", "))
+    };
+    let batches = sql::query(
+        client,
+        &format!(
+            "SELECT CAST(COUNT(DISTINCT def_id) AS VARCHAR) AS total{selects} FROM gl_search_token WHERE project_id = {pid} AND commit_sha = {sha}"
+        ),
+    )?;
+    let count_of = |name: &str| {
+        string_column(&batches, name)
+            .first()
+            .and_then(|v| v.parse::<i64>().ok())
+            .unwrap_or(0)
+    };
+    let total = count_of("total");
+    let per_term = (0..terms.len())
+        .map(|i| count_of(&format!("df_{i}")))
+        .collect();
+    Ok((total, per_term))
 }
 
 fn corpus_term_counts(
