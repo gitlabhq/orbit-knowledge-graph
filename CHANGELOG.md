@@ -1,3 +1,14 @@
+## [0.101.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.100.2...v0.101.0) (2026-08-18)
+
+### Features
+
+* **orbit-cli:** authenticated remote command surface ([0d93e1e](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/0d93e1e326f62e5bb7acb98482eb3b41b17975ec)) by Jean-Gabriel Doyon
+
+### Other
+
+* **billing:** build metadata blob from a typed struct ([f995f8f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f995f8f473d85149e8b85d8485ef70f73211d812)) by Sharmad Nachnolkar
+* self-managed GitLab Orbit installation docs ([06b60f3](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/06b60f34a0b877e878f81ec96550bcbdc04f58bd)) by Bohdan Parkhomchuk
+
 ## [0.100.2](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.100.1...v0.100.2) (2026-08-17)
 
 ### Other
