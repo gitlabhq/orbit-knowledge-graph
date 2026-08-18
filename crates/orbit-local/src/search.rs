@@ -162,6 +162,12 @@ pub(crate) fn has_postings(
     project_id: i64,
     sha: &str,
 ) -> Result<bool> {
+    let tables = client.query_arrow(
+        "SELECT CAST(COUNT(*) AS BIGINT) AS n FROM information_schema.tables WHERE table_name = 'gl_search_token'",
+    )?;
+    if scalar_i64(&tables) == 0 {
+        return Ok(false);
+    }
     let batches = client.query_arrow(&format!(
         "SELECT CAST(COUNT(*) AS BIGINT) AS n FROM (
   SELECT 1 FROM gl_search_token

@@ -397,6 +397,11 @@ fn dedupe_by_parent(results: Vec<Hit>, corpus: &[CorpusRow], limit: usize) -> Ve
         kept.remove(pos);
         kept.push(g);
     }
+    kept.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     kept
 }
 
@@ -561,6 +566,34 @@ mod tests {
             hits.iter().any(|h| corpus[h.index].fqn.ends_with("::vue")),
             "the only row matching 'vue' must survive the cap"
         );
+    }
+
+    #[test]
+    fn dedupe_returns_hits_in_score_order_after_guaranteed_reinsertion() {
+        let corpus = vec![row("a::one"), row("b::two"), row("c::three")];
+        let results = vec![
+            Hit {
+                index: 0,
+                score: 5.0,
+                tiered: false,
+                guaranteed: false,
+            },
+            Hit {
+                index: 1,
+                score: 3.0,
+                tiered: false,
+                guaranteed: true,
+            },
+            Hit {
+                index: 2,
+                score: 4.0,
+                tiered: false,
+                guaranteed: true,
+            },
+        ];
+        let hits = dedupe_by_parent(results, &corpus, 2);
+        let scores: Vec<f64> = hits.iter().map(|h| h.score).collect();
+        assert_eq!(scores, vec![4.0, 3.0]);
     }
 
     #[test]
