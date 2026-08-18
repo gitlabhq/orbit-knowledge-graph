@@ -9,6 +9,7 @@ mod remote;
 mod skill;
 mod sql;
 mod sql_format;
+mod telemetry;
 mod workspace;
 
 use anyhow::{Context, Result};
@@ -140,6 +141,11 @@ struct ErroredFile {
 #[command(name = "orbit", version = env!("ORBIT_VERSION"))]
 #[command(about = "Orbit - local code indexing and query CLI")]
 struct Cli {
+    /// Do not send telemetry for this invocation. Also settable with
+    /// `ORBIT_TELEMETRY_ENABLED=false`.
+    #[arg(long, global = true)]
+    no_telemetry: bool,
+
     #[command(subcommand)]
     command: Commands,
 }
@@ -405,10 +411,72 @@ enum RemoteCommands {
 async fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    match cli.command {
+    // Skip the git-hook guard: it runs inside git hooks, where a telemetry
+    // flush would add network latency to every commit.
+    let tracker = if matches!(cli.command, Commands::HookGuard { .. }) {
+        None
+    } else {
+        telemetry::resolve_from_env(cli.no_telemetry).build_tracker()
+    };
+    if let Some(tracker) = &tracker {
+        telemetry::emit_command_event(tracker, command_action(&cli.command));
+    }
+
+    let result = dispatch(cli.command, tracker.as_ref()).await;
+
+    if let Some(tracker) = &tracker {
+        tracker.shutdown().await;
+    }
+    result
+}
+
+fn command_action(command: &Commands) -> &'static str {
+    match command {
+        Commands::Version => "version",
+        Commands::Index(_) => "index",
+        Commands::Sql(_) => "sql",
+        Commands::Schema(_) => "schema",
+        Commands::List(_) => "list",
+        Commands::Mcp(_) => "mcp_serve",
+        Commands::RepoMap(_) => "repo_map",
+        Commands::Local { command } => local_action(command),
+        Commands::Skill { .. } => "skill",
+        Commands::Setup { .. } => "setup",
+        Commands::HookGuard { .. } => "hook_guard",
+        Commands::Remote { command } => remote_action(command),
+    }
+}
+
+fn local_action(command: &LocalCommands) -> &'static str {
+    match command {
+        LocalCommands::Index(_) => "index",
+        LocalCommands::Sql(_) => "sql",
+        LocalCommands::Schema(_) => "schema",
+        LocalCommands::List(_) => "list",
+        LocalCommands::Mcp(_) => "mcp_serve",
+        LocalCommands::RepoMap(_) => "repo_map",
+    }
+}
+
+fn remote_action(command: &RemoteCommands) -> &'static str {
+    match command {
+        RemoteCommands::Query { .. } => "remote_query",
+        RemoteCommands::Status => "remote_status",
+        RemoteCommands::Schema { .. } => "remote_schema",
+        RemoteCommands::Dsl => "remote_dsl",
+        RemoteCommands::Tools => "remote_tools",
+        RemoteCommands::GraphStatus { .. } => "remote_graph_status",
+    }
+}
+
+async fn dispatch(
+    command: Commands,
+    tracker: Option<&orbit_analytics::SnowplowAnalyticsTracker>,
+) -> Result<()> {
+    match command {
         Commands::Version => {
             println!("{}", env!("ORBIT_VERSION"));
-            return Ok(());
+            Ok(())
         }
         Commands::Index(args) => dispatch_local(LocalCommands::Index(args)).await,
         Commands::Sql(args) => dispatch_local(LocalCommands::Sql(args)).await,
@@ -441,7 +509,7 @@ async fn main() -> Result<()> {
             commands::hook_guard::run(kind, mode);
             Ok(())
         }
-        Commands::Remote { command } => run_remote(command).await,
+        Commands::Remote { command } => run_remote(command, tracker).await,
     }
 }
 
@@ -510,7 +578,10 @@ async fn dispatch_local(command: LocalCommands) -> Result<()> {
     }
 }
 
-async fn run_remote(command: RemoteCommands) -> Result<()> {
+async fn run_remote(
+    command: RemoteCommands,
+    tracker: Option<&orbit_analytics::SnowplowAnalyticsTracker>,
+) -> Result<()> {
     let result = match command {
         RemoteCommands::Query {
             source,
@@ -530,6 +601,10 @@ async fn run_remote(command: RemoteCommands) -> Result<()> {
 
     if let Err(err) = result {
         eprintln!("{}", err.message);
+        // Flush before the hard exit, or the command-usage event is dropped.
+        if let Some(tracker) = tracker {
+            tracker.shutdown().await;
+        }
         std::process::exit(err.exit_code);
     }
     Ok(())

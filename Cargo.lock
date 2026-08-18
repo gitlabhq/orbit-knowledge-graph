@@ -8207,6 +8207,7 @@ dependencies = [
  "serde",
  "serde_json",
  "syn 2.0.118",
+ "tokio",
  "tracing",
  "typify",
 ]
@@ -8246,8 +8247,10 @@ dependencies = [
  "duckdb-client",
  "dunce",
  "gitalisk-core",
+ "labkit-events",
  "mimalloc",
  "ontology",
+ "orbit-analytics",
  "orbit-prompts",
  "orbit-utils",
  "reqwest 0.13.4",

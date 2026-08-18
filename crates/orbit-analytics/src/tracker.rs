@@ -14,11 +14,22 @@ pub struct SnowplowAnalyticsTracker {
 }
 
 impl SnowplowAnalyticsTracker {
-    pub fn from_config(config: &AnalyticsConfig) -> Result<Self, labkit_events::Error> {
-        let tracker = labkit_events::Tracker::builder(&config.collector_url, APP_ID).build()?;
+    pub fn new(collector_url: &str, app_id: &str) -> Result<Self, labkit_events::Error> {
+        let tracker = labkit_events::Tracker::builder(collector_url, app_id).build()?;
         Ok(Self {
             tracker: Arc::new(tracker),
         })
+    }
+
+    pub fn from_config(config: &AnalyticsConfig) -> Result<Self, labkit_events::Error> {
+        Self::new(&config.collector_url, APP_ID)
+    }
+
+    /// Flush buffered events and stop the background emitter. A short-lived
+    /// process (the CLI) must call this before exit, or labkit drops the
+    /// events that have not reached a full batch yet.
+    pub async fn shutdown(&self) {
+        self.tracker.shutdown().await;
     }
 }
 
@@ -63,5 +74,15 @@ impl Default for InMemoryAnalyticsTracker {
 impl AnalyticsTracker for InMemoryAnalyticsTracker {
     fn track(&self, event: StructuredEvent) {
         self.events.lock().push(event);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn new_builds_tracker_with_custom_app_id() {
+        assert!(SnowplowAnalyticsTracker::new("https://collector.example.test", "orbit").is_ok());
     }
 }
