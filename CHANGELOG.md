@@ -1,3 +1,14 @@
+## [0.101.1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.101.0...v0.101.1) (2026-08-18)
+
+### Fixes
+
+* **e2e:** fetch siphon tables via archive API to dodge git-upload-pack load throttle ([38118cb](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/38118cbc1422d6c51fcb07e8f148b6abfc6b2f85)) by Jean-Gabriel Doyon
+
+### Other
+
+* **deps:** bump h2 to 0.4.16 for RUSTSEC-2026-0258 ([262093a](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/262093a61070adf2a293ab326bd528407bff736a)) by Jean-Gabriel Doyon
+* **orbit-cli:** group local commands under 'orbit local' ([756a89b](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/756a89b99f93bca4c526727fb06ef9fd2451c863)) by Jean-Gabriel Doyon
+
 ## [0.101.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.100.2...v0.101.0) (2026-08-18)
 
 ### Features
