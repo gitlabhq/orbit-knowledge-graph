@@ -1,5 +1,7 @@
 use labkit_events::StructuredEvent;
-use orbit_analytics::{AnalyticsTracker, SnowplowAnalyticsTracker};
+use orbit_analytics::{
+    AnalyticsTracker, OrbitCommonContext, SnowplowAnalyticsTracker, orbit_common,
+};
 
 use crate::settings;
 
@@ -33,9 +35,51 @@ pub fn resolve_from_env() -> TelemetryConfig {
 }
 
 pub fn emit_command_event<T: AnalyticsTracker + ?Sized>(tracker: &T, action: &str) {
-    if let Ok(event) = StructuredEvent::builder(CATEGORY, action).build() {
+    if let Ok(event) = StructuredEvent::builder(CATEGORY, action)
+        .context(build_common_context(action))
+        .build()
+    {
         tracker.track(event);
     }
+}
+
+fn build_common_context(action: &str) -> OrbitCommonContext {
+    let host = action
+        .starts_with("remote")
+        .then(crate::remote::client::instance_host)
+        .flatten();
+    let (deployment_type, environment) = classify_deployment(host.as_deref());
+    OrbitCommonContext::new(orbit_common::OrbitCommon {
+        deployment_type,
+        surface: Some(orbit_common::OrbitCommonSurface::Cli),
+        environment,
+        correlation_id: None,
+        instance_id: None,
+        unique_instance_id: None,
+        host_name: None,
+        organization_id: None,
+        root_namespace_ids: None,
+        schema_version: None,
+    })
+}
+
+fn classify_deployment(
+    host: Option<&str>,
+) -> (
+    orbit_common::OrbitCommonDeploymentType,
+    orbit_common::OrbitCommonEnvironment,
+) {
+    use orbit_common::OrbitCommonDeploymentType as Deployment;
+    let (deployment, environment) = match host {
+        Some(h) if h.eq_ignore_ascii_case("gitlab.com") => (Deployment::Com, "production"),
+        _ => (Deployment::Unknown, "unknown"),
+    };
+    (
+        deployment,
+        environment
+            .parse()
+            .expect("static environment string is valid"),
+    )
 }
 
 fn resolve(
@@ -105,6 +149,20 @@ mod tests {
             None,
         );
         assert_eq!(cfg.collector_url, "https://collector.example.test");
+    }
+
+    #[test]
+    fn classify_deployment_only_asserts_gitlab_com() {
+        use orbit_common::OrbitCommonDeploymentType as Deployment;
+        let (dt, env) = classify_deployment(Some("gitlab.com"));
+        assert_eq!(dt, Deployment::Com);
+        assert_eq!(env.to_string(), "production");
+
+        for host in [Some("gitlab.example.com"), Some("staging.gitlab.com"), None] {
+            let (dt, env) = classify_deployment(host);
+            assert_eq!(dt, Deployment::Unknown);
+            assert_eq!(env.to_string(), "unknown");
+        }
     }
 
     #[test]
