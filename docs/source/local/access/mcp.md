@@ -2,8 +2,8 @@
 stage: Orbit
 group: Context Systems
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Connect Claude Code, Codex, OpenCode, or any MCP-compatible AI agent to your local GitLab Orbit graph.
-title: Connect to GitLab Orbit Local via MCP
+description: Connect AI agents to your local graph with the GitLab Orbit Local MCP server.
+title: GitLab Orbit Local MCP server
 ---
 
 {{< details >}}
@@ -20,21 +20,105 @@ title: Connect to GitLab Orbit Local via MCP
 
 {{< /history >}}
 
-GitLab Orbit Local runs as a stateless MCP server over stdio, pointed at the local
-DuckDB graph instead of a GitLab instance. Unlike GitLab Orbit Remote (which exposes
-a JSON query DSL), GitLab Orbit Local speaks raw DuckDB SQL: agents compose SQL
-directly against the property graph tables.
+> [!flag]
+> The availability of this feature is controlled by a feature flag.
+> For more information, see the history.
+> This feature is available for testing, but not ready for production use.
 
-> [!note]
-> The MCP server is experimental. Capabilities and config shape may change
-> before GA.
+With the GitLab Orbit Local [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server,
+you can securely connect AI tools and applications to your local DuckDB graph. AI assistants
+like Claude Desktop, Claude Code and OpenCode can then access your graph and write SQL queries against
+it.
+
+The GitLab Orbit Local MCP server is stateless, which means the server:
+
+- Queries your local DuckDB graph, not a GitLab instance
+- Does not cache results or persist query history
+- Can respond to multiple clients independently
 
 ## Prerequisites
 
-- The GitLab Orbit CLI (`orbit`) is installed. See [Use the GitLab Orbit CLI directly](cli.md).
-- A local repository has been indexed (`orbit index <path>` or
-  `glab orbit local index <path>`). Agents can also index through the `index`
-  MCP tool.
+- Install the [GitLab Orbit CLI](./cli.md) (`orbit`), version 0.101.1 or later
+
+## Connect a client to the GitLab Orbit Local MCP server
+
+The GitLab Orbit Local MCP server supports stdio transport. Arguments and commands
+vary depending on the MCP client and your local environment.
+
+### Connect Claude Code
+
+Claude Code stores the MCP server configuration in one of three scopes. Choose the
+scope that matches how widely you want the server available.
+
+| Scope | Availability | Stored in |
+| ----- | ------------ | --------- |
+| `local` (default) | You only, in the current project | `~/.claude.json` |
+| `user` | You only, in all projects | `~/.claude.json` |
+| `project` | Everyone who checks out the repository | `.mcp.json` in the repository root |
+
+Prerequisites:
+
+- If connecting to a shared repository, an `.mcp.json` file in your project root.
+
+To add the server for the current project, run:
+
+```shell
+claude mcp add orbit-local -- orbit local mcp serve
+```
+
+To add the server for all of your projects, run:
+
+```shell
+claude mcp add orbit-local --scope user -- orbit local mcp serve
+```
+
+To add the server for everyone who checks out the repository, run:
+
+```shell
+claude mcp add orbit-local --scope project -- orbit local mcp serve
+```
+
+You can also edit the `.mcp.json` file directly:
+
+```json
+{
+  "mcpServers": {
+    "orbit-local": {
+      "command": "orbit",
+      "args": ["local", "mcp", "serve"]
+    }
+  }
+}
+```
+
+### Connect Codex
+
+```shell
+codex mcp add orbit-local -- orbit mcp serve
+```
+
+### Connect OpenCode
+
+Add to `opencode.json` (project or global):
+
+```json
+{
+  "mcp": {
+    "orbit-local": {
+      "type": "local",
+      "command": ["orbit", "mcp", "serve"],
+      "enabled": true
+    }
+  }
+}
+```
+
+### Connect other MCP clients
+
+Any MCP client can connect by running `orbit mcp serve` (or
+`glab orbit local mcp serve`) as a stdio server. For Cursor, use the
+`.mcp.json` block above in `.cursor/mcp.json`.
+
 
 ## MCP tools
 
@@ -51,53 +135,6 @@ each against the same graph.
 Large `run_sql` results are rejected before serialisation (about 1 MB of
 Arrow data) with an error asking the agent to add `LIMIT` or narrow the
 projection, so a runaway `SELECT *` cannot freeze your editor.
-
-## Connect Claude Code
-
-```shell
-claude mcp add orbit-local -- orbit mcp serve
-```
-
-Or add the equivalent to your project's `.mcp.json`:
-
-```json
-{
-  "mcpServers": {
-    "orbit-local": {
-      "command": "orbit",
-      "args": ["mcp", "serve"]
-    }
-  }
-}
-```
-
-## Connect Codex
-
-```shell
-codex mcp add orbit-local -- orbit mcp serve
-```
-
-## Connect OpenCode
-
-Add to `opencode.json` (project or global):
-
-```json
-{
-  "mcp": {
-    "orbit-local": {
-      "type": "local",
-      "command": ["orbit", "mcp", "serve"],
-      "enabled": true
-    }
-  }
-}
-```
-
-## Connect other MCP clients
-
-Any MCP client can connect by running `orbit mcp serve` (or
-`glab orbit local mcp serve`) as a stdio server. For Cursor, use the
-`.mcp.json` block above in `.cursor/mcp.json`.
 
 ## Using the tools
 
