@@ -6,8 +6,13 @@
 #   bash bench/scripts/fetch-code-corpus.sh [projects.tsv]
 #   FETCH_MAX=10 bash bench/scripts/fetch-code-corpus.sh
 #   JOBS=16 ARCHIVE_TIMEOUT=300 bash bench/scripts/fetch-code-corpus.sh
-#   RETRY=failed bash bench/scripts/fetch-code-corpus.sh   # retry only failures
+#   RETRY=fail bash bench/scripts/fetch-code-corpus.sh      # retry only failures
+#   RETRY=fail,skip bash bench/scripts/fetch-code-corpus.sh # retry both
 #   RETRY=all bash bench/scripts/fetch-code-corpus.sh      # re-fetch everything
+#
+# RETRY modes parse LOG_FILE for previous run output. Redirect the initial
+# run's output to LOG_FILE so retries can find it:
+#   bash bench/scripts/fetch-code-corpus.sh 2>&1 | tee /tmp/corpus-fetch.log
 set -euo pipefail
 
 BENCH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -82,7 +87,7 @@ else
   fi
 fi
 
-if [[ "${FETCH_MAX}" -gt 0 ]] && [[ "${RETRY}" != "failed" ]]; then
+if [[ "${FETCH_MAX}" -gt 0 ]] && { [[ -z "${RETRY}" ]] || [[ "${RETRY}" == "all" ]]; }; then
   echo "[corpus] ${TOTAL} projects in list, fetching first ${FETCH_MAX}, ${JOBS} parallel, timeout=${ARCHIVE_TIMEOUT}s"
   head -n "${FETCH_MAX}" "${INPUT}" > "${WORK}/input.tsv"
 else
