@@ -6,7 +6,10 @@ description: Learn what data you can index with GitLab Orbit Local and GitLab Or
 title: Index data with GitLab Orbit
 ---
 
-GitLab Orbit can index data from multiple sources, including code repositories and SDLC data rooted in a top-level group. After data is indexed, GitLab Orbit builds a knowledge graph that you can query to retrieve relationships, dependencies, and structural context across your codebase.
+GitLab Orbit indexes data from multiple sources, including code repositories and SDLC data
+rooted in a top-level group. After GitLab Orbit indexes the data, it builds a knowledge graph
+that you can query to retrieve relationships, dependencies, and structural context across
+your codebase.
 
 Use GitLab Orbit Remote to index data from a top-level group and its subgroups and projects.
 
@@ -16,7 +19,7 @@ Use GitLab Orbit Local to index data from the working tree of any local reposito
 
 GitLab Orbit Local and GitLab Orbit Remote index different types of data. The following sections list what each feature indexes.
 
-Neither GitLab Orbit Remote or GitLab Orbit Local index:
+GitLab Orbit Remote and GitLab Orbit Local do not index:
 
 - Binary files
 - Branches other than the checked out branch (GitLab Orbit Local) or the default branch (GitLab Orbit Remote)
@@ -87,6 +90,8 @@ Neither GitLab Orbit Remote or GitLab Orbit Local index:
 | Branch selection | {{< no >}} | {{< no >}} |
 
 ## Supported languages
+
+GitLab Orbit Remote and Local index data for the following languages:
 
 | Language | Definitions | Cross-file references |
 |----------|-------------|----------------------|
