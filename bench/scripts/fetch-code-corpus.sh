@@ -58,7 +58,7 @@ FETCH_SCRIPT="${BENCH_DIR}/scripts/fetch-one-archive.sh"
 
 awk -F'\t' '{print $1, $2}' "${WORK}/input.tsv" \
   | xargs -P "${JOBS}" -n 2 \
-    env BUCKET="${BUCKET}" EXISTING_FILE="${WORK}/existing.txt" \
+    env BUCKET="${BUCKET}" EXISTING_FILE="${WORK}/existing.txt" ARCHIVE_TIMEOUT="${ARCHIVE_TIMEOUT:-120}" \
     bash "${FETCH_SCRIPT}"
 
 echo "[corpus] Done. Archives in ${BUCKET}"

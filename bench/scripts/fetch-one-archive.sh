@@ -15,17 +15,20 @@ else
 fi
 
 remote="git@gitlab.com:${path}.git"
+export GIT_SSH_COMMAND="ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new"
+
+: "${ARCHIVE_TIMEOUT:=120}"
 
 if [[ "${BUCKET}" == gs://* ]]; then
-  # Stream directly to GCS, no local disk
-  if git archive --remote="${remote}" HEAD 2>/dev/null | gzip | gcloud storage cp - "${target}" --quiet 2>/dev/null; then
+  if timeout "${ARCHIVE_TIMEOUT}" git archive --remote="${remote}" HEAD 2>/dev/null | gzip | gcloud storage cp - "${target}" --quiet 2>/dev/null; then
     echo "  OK ${path} (${id})"
   else
-    echo "  SKIP ${path} (${id})" >&2
+    gcloud storage rm "${target}" --quiet 2>/dev/null || true
+    echo "  FAIL ${path} (${id})" >&2
   fi
 else
   mkdir -p "${BUCKET}"
-  if git archive --remote="${remote}" HEAD 2>/dev/null | gzip > "${target}"; then
+  if timeout "${ARCHIVE_TIMEOUT}" git archive --remote="${remote}" HEAD 2>/dev/null | gzip > "${target}"; then
     if [[ -s "${target}" ]]; then
       echo "  OK ${path} (${id})"
     else
