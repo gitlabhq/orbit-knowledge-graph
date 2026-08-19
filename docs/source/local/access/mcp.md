@@ -27,7 +27,7 @@ title: GitLab Orbit Local MCP server
 
 With the GitLab Orbit Local [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server,
 you can securely connect AI tools and applications to your local DuckDB graph. AI assistants
-like Claude Desktop, Claude Code and OpenCode can then access your graph and write SQL queries against
+like Claude Code, Codex and OpenCode can then access your graph and write SQL queries against
 it.
 
 The GitLab Orbit Local MCP server is stateless, which means the server:
@@ -38,7 +38,9 @@ The GitLab Orbit Local MCP server is stateless, which means the server:
 
 ## Prerequisites
 
-- Install the [GitLab Orbit CLI](./cli.md) (`orbit`), version 0.101.1 or later
+- Install either:
+  - The [GitLab Orbit CLI](./cli.md) (`orbit`)
+  - The [GitLab CLI](./glab.md) (`glab orbit`)
 
 ## Connect a client to the GitLab Orbit Local MCP server
 
@@ -62,23 +64,75 @@ Prerequisites:
 
 To add the server for the current project, run:
 
+{{< tabs >}}
+
+{{< tab title="orbit" >}}
+
 ```shell
 claude mcp add orbit-local -- orbit local mcp serve
 ```
 
+{{< /tab >}}
+
+{{< tab title="glab" >}}
+
+```shell
+claude mcp add orbit-local -- glab orbit local mcp serve
+```
+
+{{< /tab >}}
+
+{{< /tabs >}}
+
 To add the server for all of your projects, run:
+
+{{< tabs >}}
+
+{{< tab title="orbit" >}}
 
 ```shell
 claude mcp add orbit-local --scope user -- orbit local mcp serve
 ```
 
+{{< /tab >}}
+
+{{< tab title="glab" >}}
+
+```shell
+claude mcp add orbit-local --scope user -- glab orbit local mcp serve
+```
+
+{{< /tab >}}
+
+{{< /tabs >}}
+
 To add the server for everyone who checks out the repository, run:
+
+{{< tabs >}}
+
+{{< tab title="orbit" >}}
 
 ```shell
 claude mcp add orbit-local --scope project -- orbit local mcp serve
 ```
 
+{{< /tab >}}
+
+{{< tab title="glab" >}}
+
+```shell
+claude mcp add orbit-local --scope project -- glab orbit local mcp serve
+```
+
+{{< /tab >}}
+
+{{< /tabs >}}
+
 You can also edit the `.mcp.json` file directly:
+
+{{< tabs >}}
+
+{{< tab title="orbit" >}}
 
 ```json
 {
@@ -90,6 +144,25 @@ You can also edit the `.mcp.json` file directly:
   }
 }
 ```
+
+{{< /tab >}}
+
+{{< tab title="glab" >}}
+
+```json
+{
+  "mcpServers": {
+    "orbit-local": {
+      "command": "glab",
+      "args": ["orbit", "local", "mcp", "serve"]
+    }
+  }
+}
+```
+
+{{< /tab >}}
+
+{{< /tabs >}}
 
 ### Connect Codex
 
