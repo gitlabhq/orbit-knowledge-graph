@@ -1,3 +1,18 @@
+## [0.102.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.101.1...v0.102.0) (2026-08-19)
+
+### Features
+
+* **dashboards:** pretty print for 2 line formatting in helm charts ([5fde584](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/5fde584c8146821dea4d65856447b81b74dd1420)) by Aaron Algutifan
+* **orbit-cli:** send Snowplow telemetry for CLI commands ([b948dcf](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b948dcf8b5d72292756a69d7242d93c5f66874f9)) by Jean-Gabriel Doyon
+
+### Fixes
+
+* **billing:** attach ErrorInfo detail to quota-exhausted gRPC status ([3253dd1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/3253dd1497713acfcd5b1e2e89bc2ebd5c58091a)) by Sharmad Nachnolkar
+
+### Other
+
+* **Orbit:** rewrites index content, redirects pages ([e5ab418](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/e5ab4184070af0d887f162eadb00922d70f2faf3)) by Zachary Painter
+
 ## [0.101.1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.101.0...v0.101.1) (2026-08-18)
 
 ### Fixes
