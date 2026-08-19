@@ -27,8 +27,8 @@ title: GitLab Orbit Local MCP server
 
 With the GitLab Orbit Local [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server,
 you can securely connect AI tools and applications to your local DuckDB graph. AI assistants
-like Claude Code, Codex and OpenCode can then access your graph and write SQL queries against
-it.
+like Claude Code, Codex, Cursor, and OpenCode can then access your graph and write SQL queries
+against it.
 
 The GitLab Orbit Local MCP server is stateless, which means the server:
 
@@ -175,6 +175,8 @@ claude mcp list
 Codex stores the MCP server configuration in `~/.codex/config.toml`. Codex
 always configures the server for all of your projects.
 
+To connect to Codex, run:
+
 {{< tabs >}}
 
 {{< tab title="orbit" >}}
@@ -199,6 +201,64 @@ To confirm the server is registered, run:
 
 ```shell
 codex mcp list
+```
+
+### Connect Cursor
+
+Cursor reads the MCP server configuration from an `mcp.json` file. Choose the
+scope that matches how widely you want the server available.
+
+| Scope | Availability | Stored in |
+| ----- | ------------ | --------- |
+| Project | You only, in the current project | `.cursor/mcp.json` in the repository root |
+| Global | You only, in all projects | `~/.cursor/mcp.json` |
+
+Prerequisites:
+
+- If connecting to a specific project, an `.mcp.json` file in your project root.
+
+To connect to Cursor, edit your `mcp.json` file:
+
+{{< tabs >}}
+
+{{< tab title="orbit" >}}
+
+```json
+{
+  "mcpServers": {
+    "orbit-local": {
+      "type": "stdio",
+      "command": "orbit",
+      "args": ["local", "mcp", "serve"]
+    }
+  }
+}
+```
+
+{{< /tab >}}
+
+{{< tab title="glab" >}}
+
+```json
+{
+  "mcpServers": {
+    "orbit-local": {
+      "type": "stdio",
+      "command": "glab",
+      "args": ["orbit", "local", "mcp", "serve"]
+    }
+  }
+}
+```
+
+{{< /tab >}}
+
+{{< /tabs >}}
+
+To confirm the server is connected, run:
+
+```shell
+agent mcp list
 ```
 
 ### Connect OpenCode
@@ -248,23 +308,10 @@ To confirm the server is connected, run:
 opencode mcp list
 ```
 
-If the server does not appear as connected, OpenCode logs a warning and
-continues without its tools rather than failing at startup, so check the logs in
-`~/.local/share/opencode/log/`. OpenCode runs the command without a shell, which
-means `~` and environment variables are not expanded: use an absolute path if
-`orbit` is not on the `PATH` that OpenCode inherits.
-
-> [!note]
-> OpenCode prefixes MCP tool names with the server name, so the tools in
-> [MCP tools](#mcp-tools) appear as `orbit-local_run_sql`,
-> `orbit-local_get_graph_schema`, and `orbit-local_index`.
-
 ### Connect other MCP clients
 
 Any MCP client can connect by running `orbit mcp serve` (or
-`glab orbit local mcp serve`) as a stdio server. For Cursor, use the
-`.mcp.json` block above in `.cursor/mcp.json`.
-
+`glab orbit local mcp serve`) as a stdio server.
 
 ## MCP tools
 
