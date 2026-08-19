@@ -14,14 +14,6 @@ CREATE TABLE IF NOT EXISTS _orbit_manifest (
     error_message VARCHAR
 );
 
-CREATE TABLE IF NOT EXISTS gl_search_token (
-    project_id BIGINT NOT NULL,
-    commit_sha VARCHAR NOT NULL,
-    def_id BIGINT NOT NULL,
-    token VARCHAR NOT NULL,
-    tf INTEGER NOT NULL
-);
-
 CREATE TABLE IF NOT EXISTS gl_definition (
     id BIGINT NOT NULL,
     traversal_path VARCHAR NOT NULL,
@@ -37,7 +29,9 @@ CREATE TABLE IF NOT EXISTS gl_definition (
     start_byte BIGINT NOT NULL,
     end_byte BIGINT NOT NULL,
     start_char BIGINT NOT NULL,
-    end_char BIGINT NOT NULL
+    end_char BIGINT NOT NULL,
+    search_text VARCHAR NOT NULL DEFAULT '',
+    token_count BIGINT NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS gl_directory (

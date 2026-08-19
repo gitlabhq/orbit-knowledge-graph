@@ -9,6 +9,7 @@ test-utils = []
 
 [dependencies]
 treesitter-visit = { path = "treesitter-visit", features = ["builtin-parser"] }
+orbit-search = { path = "../orbit-search" }
 orbit-utils = { path = "../utils" }
 
 # Common

@@ -1,6 +1,4 @@
 pub mod corpus;
-#[cfg(feature = "duckdb")]
-pub mod duckdb;
 
 use std::collections::{HashMap, HashSet};
 
@@ -52,6 +50,7 @@ pub fn split_words(input: &str) -> Vec<String> {
     let mut tokens = Vec::new();
     for word in input.split(|c: char| !c.is_ascii_alphanumeric()) {
         let chars: Vec<char> = word.chars().collect();
+        let mut parts: Vec<(usize, usize)> = Vec::new();
         let mut start = 0;
         for i in 1..=chars.len() {
             let boundary = i == chars.len()
@@ -60,11 +59,18 @@ pub fn split_words(input: &str) -> Vec<String> {
                         || chars[i - 1].is_ascii_digit()
                         || (i + 1 < chars.len() && chars[i + 1].is_ascii_lowercase())));
             if boundary {
-                let tok: String = chars[start..i].iter().collect::<String>().to_lowercase();
-                if tok.len() >= 2 {
-                    tokens.push(tok);
-                }
+                parts.push((start, i));
                 start = i;
+            }
+        }
+        for (idx, &(s, e)) in parts.iter().enumerate() {
+            if e - s >= 2 {
+                tokens.push(chars[s..e].iter().collect::<String>().to_lowercase());
+            } else if let Some(&(_, next_end)) = parts.get(idx + 1) {
+                // A lone capital ("OAuth", "IUser") is noise on its own but
+                // meaningful fused with the next part; emitting the fused form
+                // alongside the parts lets both `oauth` and `user` match.
+                tokens.push(chars[s..next_end].iter().collect::<String>().to_lowercase());
             }
         }
     }
@@ -102,6 +108,18 @@ pub fn doc_token_counts(fqn: &str, file_path: &str) -> HashMap<String, i32> {
         *counts.entry(token).or_insert(0) += tf;
     }
     counts
+}
+
+/// Stemmed token stream persisted on `gl_definition.search_text`, plus its
+/// length for BM25 document-length normalization. Stemming at write time keeps
+/// stored tokens aligned with [`query_tokens`] so query-side matching is exact
+/// token equality.
+pub fn search_document(fqn: &str, file_path: &str) -> (String, i64) {
+    let mut tokens = split_words(fqn);
+    tokens.extend(split_words(file_path));
+    let stemmed: Vec<String> = tokens.iter().map(|t| stem(t)).collect();
+    let count = stemmed.len() as i64;
+    (stemmed.join(" "), count)
 }
 
 pub fn query_tokens(terms: &[String]) -> Vec<String> {
@@ -458,6 +476,30 @@ mod tests {
 
     fn test_vocab() -> SearchVocab {
         SearchVocab::new(["Contains", "Defines", "Imports", "Calls", "Extends"])
+    }
+
+    #[test]
+    fn split_words_handles_camel_snake_and_acronym_boundaries() {
+        assert_eq!(
+            split_words("MergeRequestWidget"),
+            ["merge", "request", "widget"]
+        );
+        assert_eq!(split_words("HTTPServer"), ["http", "server"]);
+        assert_eq!(split_words("getUserByID"), ["get", "user", "by", "id"]);
+        assert_eq!(
+            split_words("app/models/merge_request.rb"),
+            ["app", "models", "merge", "request", "rb"]
+        );
+    }
+
+    #[test]
+    fn split_words_emits_fused_and_bare_forms_for_a_lone_capital() {
+        assert_eq!(
+            split_words("OAuth2Provider"),
+            ["oauth2", "auth2", "provider"]
+        );
+        assert_eq!(split_words("IUserService"), ["iuser", "user", "service"]);
+        assert_eq!(split_words("UserT"), ["user"]);
     }
 
     #[test]
