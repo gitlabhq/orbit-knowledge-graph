@@ -1,3 +1,20 @@
+## [0.104.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.103.0...v0.104.0) (2026-08-19)
+
+### Features
+
+* **bench:** add retry modes and configurable timeout to corpus fetch ([10117e8](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/10117e8be4226bdaf206690e9ee67b32c1f9245b)) by Michael Usachenko
+
+## [0.103.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.102.0...v0.103.0) (2026-08-19)
+
+### Features
+
+* **dashboards:** bundle dashboards in image ([b1b0125](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b1b0125fbbb6a244e915cf1805adf6c6d6b17b2f)) by Aaron Algutifan
+
+### Fixes
+
+* **bench:** fetch archives via git archive --remote, zero local disk ([a30002f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/a30002f6015555c4692661c364714782d7faa4cc)) by Michael Usachenko
+* **orbit-cli:** scope local CLI build to fix musl openssl ([9c9b28a](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/9c9b28a3203cc86d70f0128c1a5a146e593c555d)) by Jean-Gabriel Doyon
+
 ## [0.102.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.101.1...v0.102.0) (2026-08-19)
 
 ### Features
