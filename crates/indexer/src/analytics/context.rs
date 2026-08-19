@@ -5,9 +5,9 @@
 use labkit_events::Error as LabkitError;
 use orbit_analytics::{
     OrbitCodeIndexingContext, OrbitCommonContext, OrbitSdlcIndexingContext, orbit_code_indexing,
-    orbit_common, orbit_sdlc_indexing,
+    orbit_common, orbit_sdlc_indexing, validation,
 };
-use orbit_server_config::{AnalyticsConfig, DeploymentKind};
+use orbit_server_config::AnalyticsConfig;
 
 use crate::observer::IndexingMode;
 
@@ -18,13 +18,6 @@ use crate::observer::IndexingMode;
 pub(crate) enum TriggerType {
     Push,
     Scheduled,
-}
-
-fn validation<E: std::fmt::Display>(field: &'static str) -> impl FnOnce(E) -> LabkitError {
-    move |e| LabkitError::Validation {
-        field,
-        message: e.to_string(),
-    }
 }
 
 /// Clamp to `i64::MAX` so an over-range count can't wrap to a negative,
@@ -40,7 +33,8 @@ pub(crate) fn build_common(
     let environment: &'static str = config.deployment.environment.into();
 
     Ok(OrbitCommonContext::new(orbit_common::OrbitCommon {
-        deployment_type: deployment_type(config.deployment.kind),
+        deployment_type: config.deployment.kind.into(),
+        surface: Some(orbit_common::OrbitCommonSurface::Server),
         environment: environment
             .parse::<orbit_common::OrbitCommonEnvironment>()
             .map_err(validation("environment"))?,
@@ -181,13 +175,4 @@ pub(crate) fn build_code(inputs: CodeInputs) -> Result<OrbitCodeIndexingContext,
             duration_ms: saturating_i64(inputs.duration_ms),
         },
     ))
-}
-
-fn deployment_type(kind: DeploymentKind) -> orbit_common::OrbitCommonDeploymentType {
-    use orbit_common::OrbitCommonDeploymentType as DeploymentType;
-    match kind {
-        DeploymentKind::Com => DeploymentType::Com,
-        DeploymentKind::Dedicated => DeploymentType::Dedicated,
-        DeploymentKind::SelfManaged => DeploymentType::SelfManaged,
-    }
 }

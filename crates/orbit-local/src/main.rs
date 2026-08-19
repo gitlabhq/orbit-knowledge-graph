@@ -6,13 +6,15 @@ mod descriptions;
 mod list;
 mod mcp;
 mod remote;
+mod settings;
 mod skill;
 mod sql;
 mod sql_format;
+mod telemetry;
 mod workspace;
 
 use anyhow::{Context, Result};
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, CommandFactory, FromArgMatches, Parser, Subcommand};
 use ontology::Ontology;
 use serde::Serialize;
 use std::collections::HashMap;
@@ -26,6 +28,8 @@ const LOCAL_DDL: &str = include_str!(concat!(env!("CONFIG_DIR"), "/graph_local.s
 /// Per-file byte cap for local indexing; files above it are recorded as nodes
 /// but not loaded or parsed.
 const MAX_INDEXED_FILE_BYTES: u64 = 5_000_000;
+
+const TELEMETRY_FLUSH_TIMEOUT: Duration = Duration::from_millis(500);
 
 #[derive(Serialize)]
 struct IndexOutput {
@@ -335,6 +339,29 @@ enum Commands {
         #[command(subcommand)]
         command: LocalCommands,
     },
+    /// Read and write persisted CLI settings (`~/.orbit/settings.json`).
+    Config {
+        #[command(subcommand)]
+        command: ConfigCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum ConfigCommands {
+    /// Print the saved value of a setting.
+    Get {
+        #[arg(value_name = "KEY")]
+        key: String,
+    },
+    /// Save a setting, such as `telemetry.enabled false`.
+    Set {
+        #[arg(value_name = "KEY")]
+        key: String,
+        #[arg(value_name = "VALUE")]
+        value: String,
+    },
+    /// List all known settings and their saved values.
+    List,
 }
 
 #[derive(Subcommand)]
@@ -403,12 +430,56 @@ enum RemoteCommands {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let cli = Cli::parse();
+    let matches = Cli::command().get_matches();
+    let cli = Cli::from_arg_matches(&matches).expect("clap already validated the arguments");
 
-    match cli.command {
+    let tracker = if matches!(cli.command, Commands::HookGuard { .. }) {
+        None
+    } else {
+        telemetry::resolve_from_env().build_tracker()
+    };
+    if let Some(tracker) = &tracker {
+        telemetry::emit_command_event(tracker, &subcommand_path(&matches));
+    }
+
+    let result = dispatch(cli.command, tracker.as_ref()).await;
+
+    flush_telemetry(tracker.as_ref()).await;
+    result
+}
+
+fn subcommand_path(matches: &clap::ArgMatches) -> String {
+    let Some((top, sub)) = matches.subcommand() else {
+        return String::new();
+    };
+    if matches!(top, "local" | "remote")
+        && let Some((verb, _)) = sub.subcommand()
+    {
+        return format!("{top}_{}", verb.replace('-', "_"));
+    }
+    top.replace('-', "_")
+}
+
+async fn flush_telemetry(tracker: Option<&orbit_analytics::SnowplowAnalyticsTracker>) {
+    if let Some(tracker) = tracker
+        && tokio::time::timeout(TELEMETRY_FLUSH_TIMEOUT, tracker.shutdown())
+            .await
+            .is_err()
+    {
+        eprintln!(
+            "warning: telemetry flush timed out; set ORBIT_TELEMETRY_ENABLED=false to disable telemetry"
+        );
+    }
+}
+
+async fn dispatch(
+    command: Commands,
+    tracker: Option<&orbit_analytics::SnowplowAnalyticsTracker>,
+) -> Result<()> {
+    match command {
         Commands::Version => {
             println!("{}", env!("ORBIT_VERSION"));
-            return Ok(());
+            Ok(())
         }
         Commands::Index(args) => dispatch_local(LocalCommands::Index(args)).await,
         Commands::Sql(args) => dispatch_local(LocalCommands::Sql(args)).await,
@@ -417,6 +488,11 @@ async fn main() -> Result<()> {
         Commands::Mcp(args) => dispatch_local(LocalCommands::Mcp(args)).await,
         Commands::RepoMap(args) => dispatch_local(LocalCommands::RepoMap(args)).await,
         Commands::Local { command } => dispatch_local(command).await,
+        Commands::Config { command } => match command {
+            ConfigCommands::Get { key } => commands::config::get(&key),
+            ConfigCommands::Set { key, value } => commands::config::set(&key, &value),
+            ConfigCommands::List => commands::config::list(),
+        },
         Commands::Skill { path } => skill::run(path),
         Commands::Setup {
             assistants,
@@ -441,7 +517,7 @@ async fn main() -> Result<()> {
             commands::hook_guard::run(kind, mode);
             Ok(())
         }
-        Commands::Remote { command } => run_remote(command).await,
+        Commands::Remote { command } => run_remote(command, tracker).await,
     }
 }
 
@@ -510,7 +586,10 @@ async fn dispatch_local(command: LocalCommands) -> Result<()> {
     }
 }
 
-async fn run_remote(command: RemoteCommands) -> Result<()> {
+async fn run_remote(
+    command: RemoteCommands,
+    tracker: Option<&orbit_analytics::SnowplowAnalyticsTracker>,
+) -> Result<()> {
     let result = match command {
         RemoteCommands::Query {
             source,
@@ -530,6 +609,7 @@ async fn run_remote(command: RemoteCommands) -> Result<()> {
 
     if let Err(err) = result {
         eprintln!("{}", err.message);
+        flush_telemetry(tracker).await;
         std::process::exit(err.exit_code);
     }
     Ok(())
@@ -929,6 +1009,30 @@ mod tests {
     #[test]
     fn cli_command_tree_verifies() {
         Cli::command().debug_assert();
+    }
+
+    fn action_for(argv: &[&str]) -> String {
+        let matches = Cli::command()
+            .try_get_matches_from(argv)
+            .expect("valid argv");
+        super::subcommand_path(&matches)
+    }
+
+    #[test]
+    fn subcommand_path_names_command_and_namespace_verb() {
+        assert_eq!(action_for(&["orbit", "version"]), "version");
+        assert_eq!(action_for(&["orbit", "remote", "query"]), "remote_query");
+        assert_eq!(
+            action_for(&["orbit", "remote", "graph-status", "--full-path", "a/b"]),
+            "remote_graph_status"
+        );
+        assert_eq!(
+            action_for(&["orbit", "local", "sql", "SELECT 1"]),
+            "local_sql"
+        );
+        assert_eq!(action_for(&["orbit", "config", "set", "k", "v"]), "config");
+        assert_eq!(action_for(&["orbit", "repo-map", "tree"]), "repo_map");
+        assert_eq!(action_for(&["orbit", "mcp", "serve"]), "mcp");
     }
 
     #[test]
