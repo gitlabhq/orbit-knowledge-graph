@@ -198,24 +198,24 @@ fn remove_auxiliary_schema_settings(value: &mut serde_yaml::Value) {
     else {
         return;
     };
-    retain_versioned_auxiliary_tables(settings);
-    retain_versioned_entries(settings, "materialized_views");
+    let keys: Vec<String> = settings
+        .keys()
+        .filter_map(|k| k.as_str().map(String::from))
+        .collect();
+    for key in &keys {
+        retain_versioned_entries(settings, key);
+    }
     settings.remove(serde_yaml::Value::String(
         "refreshable_materialized_views".to_string(),
     ));
 }
 
-fn retain_versioned_auxiliary_tables(settings: &mut serde_yaml::Mapping) {
-    retain_versioned_entries(settings, "auxiliary_tables");
-}
-
-/// Drops entries flagged `versioned: false` (which default to `true`) so the
-/// versioned-source hash ignores unversioned objects, whose drift is snapshot-only.
 fn retain_versioned_entries(settings: &mut serde_yaml::Mapping, key: &str) {
     let key = serde_yaml::Value::String(key.to_string());
     let Some(serde_yaml::Value::Sequence(entries)) = settings.get_mut(&key) else {
         return;
     };
+    let had_entries = !entries.is_empty();
     entries.retain(|entry| {
         entry
             .as_mapping()
@@ -223,7 +223,7 @@ fn retain_versioned_entries(settings: &mut serde_yaml::Mapping, key: &str) {
             .and_then(serde_yaml::Value::as_bool)
             .unwrap_or(true)
     });
-    if entries.is_empty() {
+    if had_entries && entries.is_empty() {
         settings.remove(&key);
     }
 }

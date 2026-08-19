@@ -1,3 +1,35 @@
+## [0.104.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.103.0...v0.104.0) (2026-08-19)
+
+### Features
+
+* **bench:** add retry modes and configurable timeout to corpus fetch ([10117e8](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/10117e8be4226bdaf206690e9ee67b32c1f9245b)) by Michael Usachenko
+
+## [0.103.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.102.0...v0.103.0) (2026-08-19)
+
+### Features
+
+* **dashboards:** bundle dashboards in image ([b1b0125](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b1b0125fbbb6a244e915cf1805adf6c6d6b17b2f)) by Aaron Algutifan
+
+### Fixes
+
+* **bench:** fetch archives via git archive --remote, zero local disk ([a30002f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/a30002f6015555c4692661c364714782d7faa4cc)) by Michael Usachenko
+* **orbit-cli:** scope local CLI build to fix musl openssl ([9c9b28a](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/9c9b28a3203cc86d70f0128c1a5a146e593c555d)) by Jean-Gabriel Doyon
+
+## [0.102.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.101.1...v0.102.0) (2026-08-19)
+
+### Features
+
+* **dashboards:** pretty print for 2 line formatting in helm charts ([5fde584](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/5fde584c8146821dea4d65856447b81b74dd1420)) by Aaron Algutifan
+* **orbit-cli:** send Snowplow telemetry for CLI commands ([b948dcf](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b948dcf8b5d72292756a69d7242d93c5f66874f9)) by Jean-Gabriel Doyon
+
+### Fixes
+
+* **billing:** attach ErrorInfo detail to quota-exhausted gRPC status ([3253dd1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/3253dd1497713acfcd5b1e2e89bc2ebd5c58091a)) by Sharmad Nachnolkar
+
+### Other
+
+* **Orbit:** rewrites index content, redirects pages ([e5ab418](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/e5ab4184070af0d887f162eadb00922d70f2faf3)) by Zachary Painter
+
 ## [0.101.1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.101.0...v0.101.1) (2026-08-18)
 
 ### Fixes

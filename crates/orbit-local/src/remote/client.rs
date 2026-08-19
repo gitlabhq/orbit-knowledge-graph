@@ -158,6 +158,23 @@ fn resolve_endpoint(get_env: impl Fn(&str) -> Option<String>) -> anyhow::Result<
     );
 }
 
+pub(crate) fn instance_host() -> Option<String> {
+    let endpoint = resolve_endpoint(|key| std::env::var(key).ok()).ok()?;
+    host_of(&endpoint.base_url)
+}
+
+pub(crate) fn is_gitlab_com(host: &str) -> bool {
+    host.eq_ignore_ascii_case("gitlab.com")
+}
+
+fn host_of(base_url: &str) -> Option<String> {
+    let after_scheme = base_url
+        .split_once("://")
+        .map_or(base_url, |(_, rest)| rest);
+    let host = after_scheme.split(['/', ':']).next()?;
+    (!host.is_empty()).then(|| host.to_ascii_lowercase())
+}
+
 async fn read_body(response: reqwest::Response) -> Result<Vec<u8>, RemoteError> {
     response
         .bytes()
@@ -177,6 +194,31 @@ mod tests {
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect();
         move |key: &str| map.get(key).cloned()
+    }
+
+    #[test]
+    fn is_gitlab_com_matches_only_saas_host() {
+        assert!(is_gitlab_com("gitlab.com"));
+        assert!(is_gitlab_com("GitLab.com"));
+        assert!(!is_gitlab_com("staging.gitlab.com"));
+        assert!(!is_gitlab_com("gitlab.example.com"));
+    }
+
+    #[test]
+    fn host_of_strips_scheme_port_and_path() {
+        assert_eq!(
+            host_of("https://gitlab.com"),
+            Some("gitlab.com".to_string())
+        );
+        assert_eq!(
+            host_of("https://GitLab.example.com/api"),
+            Some("gitlab.example.com".to_string())
+        );
+        assert_eq!(
+            host_of("http://localhost:8080/x"),
+            Some("localhost".to_string())
+        );
+        assert_eq!(host_of(""), None);
     }
 
     #[test]

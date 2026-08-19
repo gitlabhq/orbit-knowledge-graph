@@ -52,7 +52,7 @@ pub fn run(dir: Option<PathBuf>, check: bool) -> Result<()> {
             if check {
                 let current = fs::read_to_string(&dest)
                     .with_context(|| format!("reading existing dashboard at {}", dest.display()))?;
-                if normalise(&current) != normalise(&rendered) {
+                if current != rendered {
                     drift.push(dest.display().to_string());
                 }
             } else {
@@ -130,18 +130,12 @@ fn run_jsonnet(src: &Path, flavor: &str) -> Result<String> {
         let stderr = String::from_utf8_lossy(&output.stderr);
         bail!("jsonnet failed for {}:\n{stderr}", src.display());
     }
-    let mut json = String::from_utf8(output.stdout)
+    let raw = String::from_utf8(output.stdout)
         .with_context(|| format!("jsonnet output for {} not UTF-8", src.display()))?;
-    if !json.ends_with('\n') {
-        json.push('\n');
-    }
+    let value: serde_json::Value = serde_json::from_str(&raw)
+        .with_context(|| format!("parsing jsonnet output for {}", src.display()))?;
+    let mut json = serde_json::to_string_pretty(&value)
+        .with_context(|| format!("serialising dashboard for {}", src.display()))?;
+    json.push('\n');
     Ok(json)
-}
-
-/// Canonicalise JSON so whitespace-only differences don't count as drift.
-fn normalise(raw: &str) -> String {
-    match serde_json::from_str::<serde_json::Value>(raw) {
-        Ok(value) => serde_json::to_string_pretty(&value).unwrap_or_else(|_| raw.to_string()),
-        Err(_) => raw.to_string(),
-    }
 }

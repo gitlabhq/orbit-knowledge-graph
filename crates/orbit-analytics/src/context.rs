@@ -11,8 +11,28 @@
 //! wrappers `impl labkit_events::SnowplowContext`.
 
 use labkit_events::SnowplowContext;
+use orbit_server_config::DeploymentKind;
 
 include!(concat!(env!("OUT_DIR"), "/iglu_schemas.rs"));
+
+impl From<DeploymentKind> for orbit_common::OrbitCommonDeploymentType {
+    fn from(kind: DeploymentKind) -> Self {
+        match kind {
+            DeploymentKind::Com => Self::Com,
+            DeploymentKind::Dedicated => Self::Dedicated,
+            DeploymentKind::SelfManaged => Self::SelfManaged,
+        }
+    }
+}
+
+pub fn validation<E: std::fmt::Display>(
+    field: &'static str,
+) -> impl FnOnce(E) -> labkit_events::Error {
+    move |e| labkit_events::Error::Validation {
+        field,
+        message: e.to_string(),
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct OrbitCommonContext {

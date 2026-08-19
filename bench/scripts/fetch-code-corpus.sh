@@ -1,65 +1,105 @@
 #!/usr/bin/env bash
-# Fetch repository archives from gitlab.com and store locally or in GCS.
-# Input: TSV file with project_id \t full_path (from dump-project-list.sh)
+# Fetch repository archives from gitlab.com via git archive --remote (SSH).
+# Streams directly to GCS without touching local disk.
+#
 # Usage:
-#   bash bench/scripts/fetch-code-corpus.sh projects.tsv
-#   FETCH_MAX=10 BUCKET=/tmp/corpus bash bench/scripts/fetch-code-corpus.sh projects.tsv
-#   JOBS=16 bash bench/scripts/fetch-code-corpus.sh projects.tsv
+#   bash bench/scripts/fetch-code-corpus.sh [projects.tsv]
+#   FETCH_MAX=10 bash bench/scripts/fetch-code-corpus.sh
+#   JOBS=16 ARCHIVE_TIMEOUT=300 bash bench/scripts/fetch-code-corpus.sh
+#   RETRY=fail bash bench/scripts/fetch-code-corpus.sh      # retry only failures
+#   RETRY=fail,skip bash bench/scripts/fetch-code-corpus.sh # retry both
+#   RETRY=all bash bench/scripts/fetch-code-corpus.sh      # re-fetch everything
+#
+# RETRY modes parse LOG_FILE for previous run output. Redirect the initial
+# run's output to LOG_FILE so retries can find it:
+#   bash bench/scripts/fetch-code-corpus.sh 2>&1 | tee /tmp/corpus-fetch.log
 set -euo pipefail
 
 BENCH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-: "${GITLAB_TOKEN:=$(glab config get token --host gitlab.com 2>/dev/null)}"
-: "${GITLAB_TOKEN:?must be set (PAT or glab oauth token)}"
 : "${BUCKET:=gs://gkg-code-corpus}"
 : "${JOBS:=8}"
 : "${FETCH_MAX:=0}"
+: "${ARCHIVE_TIMEOUT:=120}"
+: "${RETRY:=}"
+: "${LOG_FILE:=/tmp/corpus-fetch.log}"
 
-if [[ "${GITLAB_TOKEN}" == glpat-* ]]; then
-  AUTH_HEADER="PRIVATE-TOKEN: ${GITLAB_TOKEN}"
-else
-  AUTH_HEADER="Authorization: Bearer ${GITLAB_TOKEN}"
-fi
-
-INPUT="${1:?usage: $0 <projects.tsv>}"
-export WORK="${TMPDIR:-/tmp}/code-corpus-work.$$"
-export BUCKET
+INPUT="${1:-}"
+WORK="${TMPDIR:-/tmp}/code-corpus-work.$$"
 mkdir -p "${WORK}"
-[[ "${BUCKET}" != gs://* ]] && mkdir -p "${BUCKET}"
-echo "${AUTH_HEADER}" > "${WORK}/.auth_header"
-chmod 600 "${WORK}/.auth_header"
 trap 'rm -rf "${WORK}"' EXIT
-export AUTH_HEADER_FILE="${WORK}/.auth_header"
+[[ "${BUCKET}" != gs://* ]] && mkdir -p "${BUCKET}"
+
+# Resolve project list: explicit file > GCS > error
+if [[ -z "${INPUT}" ]]; then
+  if [[ "${BUCKET}" == gs://* ]]; then
+    echo "[corpus] No input file specified, checking ${BUCKET}/projects.tsv"
+    INPUT="${WORK}/projects.tsv"
+    gcloud storage cp "${BUCKET}/projects.tsv" "${INPUT}" --quiet 2>/dev/null \
+      || { echo "[corpus] ERROR: no projects.tsv in ${BUCKET}. Run dump-project-list.sh first." >&2; exit 1; }
+  else
+    echo "Usage: $0 [projects.tsv]" >&2; exit 1
+  fi
+fi
 
 TOTAL=$(wc -l < "${INPUT}" | tr -d ' ')
 
-# Pre-fetch existing archives list to avoid per-project GCS lookups.
-if [[ "${BUCKET}" == gs://* ]]; then
-  echo "[corpus] Listing existing archives in ${BUCKET}..."
-  gcloud storage ls "${BUCKET}/*.tar.gz" 2>/dev/null \
-    | sed "s|${BUCKET}/||; s|\.tar\.gz$||" \
-    | sort > "${WORK}/existing.txt"
-  EXISTING=$(wc -l < "${WORK}/existing.txt" | tr -d ' ')
-  echo "[corpus] ${EXISTING} archives already in bucket"
-else
+# --- Retry modes ---
+# RETRY=fail         re-fetch only FAIL entries from a previous log
+# RETRY=skip         re-fetch only SKIP entries from a previous log
+# RETRY=fail,skip    both (any order, comma-separated)
+# RETRY=all          ignore existing archives, re-fetch everything
+# (unset)            skip existing archives (default)
+if [[ "${RETRY}" == "all" ]]; then
+  echo "[corpus] RETRY=all: re-fetching all projects (ignoring existing)"
   touch "${WORK}/existing.txt"
+elif [[ -n "${RETRY}" ]]; then
+  if [[ ! -f "${LOG_FILE}" ]]; then
+    echo "[corpus] ERROR: RETRY requires a previous log at ${LOG_FILE}" >&2; exit 1
+  fi
+  GREP_PATTERN=""
+  IFS=',' read -ra MODES <<< "${RETRY}"
+  for mode in "${MODES[@]}"; do
+    case "${mode}" in
+      fail|failed) GREP_PATTERN="${GREP_PATTERN:+${GREP_PATTERN}|}FAIL" ;;
+      skip|skipped) GREP_PATTERN="${GREP_PATTERN:+${GREP_PATTERN}|}SKIP" ;;
+      *) echo "[corpus] ERROR: unknown retry mode '${mode}' (use fail, skip, all)" >&2; exit 1 ;;
+    esac
+  done
+  grep -E "${GREP_PATTERN}" "${LOG_FILE}" | grep -oE '\([0-9]+\)' | tr -d '()' | sort -u > "${WORK}/retry_ids.txt"
+  RETRY_COUNT=$(wc -l < "${WORK}/retry_ids.txt" | tr -d ' ')
+  echo "[corpus] Retrying ${RETRY_COUNT} projects (${RETRY}) from ${LOG_FILE}"
+  awk -F'\t' 'NR==FNR{ids[$1];next} ($1 in ids)' "${WORK}/retry_ids.txt" "${INPUT}" > "${WORK}/filtered.tsv"
+  INPUT="${WORK}/filtered.tsv"
+  TOTAL="${RETRY_COUNT}"
+  touch "${WORK}/existing.txt"
+else
+  # Pre-fetch existing archives list to avoid per-project GCS lookups.
+  if [[ "${BUCKET}" == gs://* ]]; then
+    echo "[corpus] Listing existing archives in ${BUCKET}..."
+    gcloud storage ls "${BUCKET}/*.tar.gz" 2>/dev/null \
+      | sed "s|${BUCKET}/||; s|\.tar\.gz$||" \
+      | sort > "${WORK}/existing.txt"
+    EXISTING=$(wc -l < "${WORK}/existing.txt" | tr -d ' ')
+    echo "[corpus] ${EXISTING} archives already in bucket"
+  else
+    touch "${WORK}/existing.txt"
+  fi
 fi
-export EXISTING_FILE="${WORK}/existing.txt"
 
-if [[ "${FETCH_MAX}" -gt 0 ]]; then
-  echo "[corpus] ${TOTAL} projects in list, fetching first ${FETCH_MAX}, ${JOBS} parallel"
+if [[ "${FETCH_MAX}" -gt 0 ]] && { [[ -z "${RETRY}" ]] || [[ "${RETRY}" == "all" ]]; }; then
+  echo "[corpus] ${TOTAL} projects in list, fetching first ${FETCH_MAX}, ${JOBS} parallel, timeout=${ARCHIVE_TIMEOUT}s"
   head -n "${FETCH_MAX}" "${INPUT}" > "${WORK}/input.tsv"
 else
-  echo "[corpus] ${TOTAL} projects to fetch, ${JOBS} parallel"
+  echo "[corpus] ${TOTAL} projects to fetch, ${JOBS} parallel, timeout=${ARCHIVE_TIMEOUT}s"
   cp "${INPUT}" "${WORK}/input.tsv"
 fi
 
 FETCH_SCRIPT="${BENCH_DIR}/scripts/fetch-one-archive.sh"
 
-# Convert TSV to space-separated for xargs, run fetch-one-archive.sh per line.
 awk -F'\t' '{print $1, $2}' "${WORK}/input.tsv" \
   | xargs -P "${JOBS}" -n 2 \
-    env WORK="${WORK}" BUCKET="${BUCKET}" AUTH_HEADER_FILE="${AUTH_HEADER_FILE}" EXISTING_FILE="${EXISTING_FILE}" \
+    env BUCKET="${BUCKET}" EXISTING_FILE="${WORK}/existing.txt" ARCHIVE_TIMEOUT="${ARCHIVE_TIMEOUT}" \
     bash "${FETCH_SCRIPT}"
 
 echo "[corpus] Done. Archives in ${BUCKET}"

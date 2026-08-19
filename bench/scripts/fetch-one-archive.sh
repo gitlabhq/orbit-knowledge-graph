@@ -1,50 +1,41 @@
 #!/usr/bin/env bash
-# Fetch a single project archive. Called by fetch-code-corpus.sh.
+# Fetch a single project archive via git archive --remote (SSH).
+# Pipes directly to GCS or local file. Zero local disk for GCS path.
+# Called by fetch-code-corpus.sh.
 set -euo pipefail
 
 id="$1" path="$2"
-dest="${WORK}/${id}.tar.gz"
 target="${BUCKET}/${id}.tar.gz"
-AUTH_HEADER=$(cat "${AUTH_HEADER_FILE}")
 
-# Skip if already exists (checked against pre-fetched list, no per-project API call)
+# Skip if already exists (checked against pre-fetched list)
 if [[ "${BUCKET}" == gs://* ]]; then
   grep -qx "${id}" "${EXISTING_FILE}" && exit 0
 else
   [[ -f "${target}" ]] && exit 0
 fi
 
-code=$(curl -s -w '%{http_code}' -o "${dest}" \
-  -H "${AUTH_HEADER}" \
-  "https://gitlab.com/api/v4/projects/${id}/repository/archive.tar.gz" 2>/dev/null) || code="000"
+remote="git@gitlab.com:${path}.git"
+export GIT_SSH_COMMAND="ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new"
 
-case "${code}" in
-  200)
-    if [[ -s "${dest}" ]]; then
-      if [[ "${BUCKET}" == gs://* ]]; then
-        if gcloud storage cp "${dest}" "${target}" --quiet 2>/dev/null; then
-          rm -f "${dest}"
-          echo "  OK ${path} (${id})"
-        else
-          rm -f "${dest}"
-          echo "  FAIL ${path} (${id}): gcs upload" >&2
-        fi
-      else
-        mv "${dest}" "${target}"
-        echo "  OK ${path} (${id})"
-      fi
+: "${ARCHIVE_TIMEOUT:=120}"
+
+if [[ "${BUCKET}" == gs://* ]]; then
+  if timeout "${ARCHIVE_TIMEOUT}" git archive --remote="${remote}" --prefix="${id}/" HEAD 2>/dev/null | gzip | gcloud storage cp - "${target}" --quiet 2>/dev/null; then
+    echo "  OK ${path} (${id})"
+  else
+    gcloud storage rm "${target}" --quiet 2>/dev/null || true
+    echo "  FAIL ${path} (${id})" >&2
+  fi
+else
+  mkdir -p "${BUCKET}"
+  if timeout "${ARCHIVE_TIMEOUT}" git archive --remote="${remote}" --prefix="${id}/" HEAD 2>/dev/null | gzip > "${target}"; then
+    if [[ -s "${target}" ]]; then
+      echo "  OK ${path} (${id})"
     else
-      rm -f "${dest}"
+      rm -f "${target}"
     fi
-    ;;
-  404|403) rm -f "${dest}" ;;
-  429)
-    rm -f "${dest}"
-    echo "  RATE-LIMITED ${path} (${id})"
-    sleep 30
-    ;;
-  *)
-    rm -f "${dest}"
-    echo "  FAIL ${path} (${id}): HTTP ${code}"
-    ;;
-esac
+  else
+    rm -f "${target}"
+    echo "  SKIP ${path} (${id})" >&2
+  fi
+fi
