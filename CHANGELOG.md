@@ -1,3 +1,9 @@
+## [0.104.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.103.0...v0.104.0) (2026-08-19)
+
+### Features
+
+* **bench:** add retry modes and configurable timeout to corpus fetch ([10117e8](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/10117e8be4226bdaf206690e9ee67b32c1f9245b)) by Michael Usachenko
+
 ## [0.103.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.102.0...v0.103.0) (2026-08-19)
 
 ### Features
