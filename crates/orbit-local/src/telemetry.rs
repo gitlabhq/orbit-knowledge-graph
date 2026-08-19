@@ -44,11 +44,11 @@ pub fn emit_command_event<T: AnalyticsTracker + ?Sized>(tracker: &T, action: &st
 }
 
 fn build_common_context(action: &str) -> OrbitCommonContext {
-    let host = action
-        .starts_with("remote")
-        .then(crate::remote::client::instance_host)
-        .flatten();
-    let (deployment_type, environment) = classify_deployment(host.as_deref());
+    let targets_saas = action.starts_with("remote")
+        && crate::remote::client::instance_host()
+            .as_deref()
+            .is_some_and(crate::remote::client::is_gitlab_com);
+    let (deployment_type, environment) = deployment_for(targets_saas);
     OrbitCommonContext::new(orbit_common::OrbitCommon {
         deployment_type,
         surface: Some(orbit_common::OrbitCommonSurface::Cli),
@@ -63,16 +63,17 @@ fn build_common_context(action: &str) -> OrbitCommonContext {
     })
 }
 
-fn classify_deployment(
-    host: Option<&str>,
+fn deployment_for(
+    targets_saas: bool,
 ) -> (
     orbit_common::OrbitCommonDeploymentType,
     orbit_common::OrbitCommonEnvironment,
 ) {
     use orbit_common::OrbitCommonDeploymentType as Deployment;
-    let (deployment, environment) = match host {
-        Some(h) if h.eq_ignore_ascii_case("gitlab.com") => (Deployment::Com, "production"),
-        _ => (Deployment::Unknown, "unknown"),
+    let (deployment, environment) = if targets_saas {
+        (Deployment::Com, "production")
+    } else {
+        (Deployment::Unknown, "unknown")
     };
     (
         deployment,
@@ -152,17 +153,15 @@ mod tests {
     }
 
     #[test]
-    fn classify_deployment_only_asserts_gitlab_com() {
+    fn deployment_for_only_asserts_saas() {
         use orbit_common::OrbitCommonDeploymentType as Deployment;
-        let (dt, env) = classify_deployment(Some("gitlab.com"));
+        let (dt, env) = deployment_for(true);
         assert_eq!(dt, Deployment::Com);
         assert_eq!(env.to_string(), "production");
 
-        for host in [Some("gitlab.example.com"), Some("staging.gitlab.com"), None] {
-            let (dt, env) = classify_deployment(host);
-            assert_eq!(dt, Deployment::Unknown);
-            assert_eq!(env.to_string(), "unknown");
-        }
+        let (dt, env) = deployment_for(false);
+        assert_eq!(dt, Deployment::Unknown);
+        assert_eq!(env.to_string(), "unknown");
     }
 
     #[test]

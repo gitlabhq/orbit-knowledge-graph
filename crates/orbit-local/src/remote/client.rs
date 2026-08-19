@@ -163,6 +163,10 @@ pub(crate) fn instance_host() -> Option<String> {
     host_of(&endpoint.base_url)
 }
 
+pub(crate) fn is_gitlab_com(host: &str) -> bool {
+    host.eq_ignore_ascii_case("gitlab.com")
+}
+
 fn host_of(base_url: &str) -> Option<String> {
     let after_scheme = base_url
         .split_once("://")
@@ -190,6 +194,14 @@ mod tests {
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect();
         move |key: &str| map.get(key).cloned()
+    }
+
+    #[test]
+    fn is_gitlab_com_matches_only_saas_host() {
+        assert!(is_gitlab_com("gitlab.com"));
+        assert!(is_gitlab_com("GitLab.com"));
+        assert!(!is_gitlab_com("staging.gitlab.com"));
+        assert!(!is_gitlab_com("gitlab.example.com"));
     }
 
     #[test]
