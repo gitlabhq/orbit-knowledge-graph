@@ -8,7 +8,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use orbit_server_config::BillingConfig;
-use tonic::Status;
+use tonic::{Code, Status};
+use tonic_types::{ErrorDetails, StatusExt};
 use tracing::{info, warn};
 
 use crate::constants::{METERED_SOURCE_TYPES, QUOTA_MAX_CACHE_ENTRIES};
@@ -16,6 +17,9 @@ use cache::{CacheOutcome, QuotaCache, QuotaGateDecision};
 use client::QuotaClient;
 pub use inputs::QuotaCheckInputs;
 use key::CdotRequest;
+
+const ERROR_DOMAIN: &str = "BILLING";
+const REASON_GITLAB_CREDITS_EXHAUSTED: &str = "GITLAB_CREDITS_EXHAUSTED";
 
 pub use metrics::register as register_metrics;
 
@@ -148,7 +152,16 @@ impl QuotaService {
                     correlation_id = %correlation_id,
                     "quota gate decision: denied"
                 );
-                Err(Status::resource_exhausted(reason.message()))
+                let details = ErrorDetails::with_error_info(
+                    REASON_GITLAB_CREDITS_EXHAUSTED,
+                    ERROR_DOMAIN,
+                    std::collections::HashMap::new(),
+                );
+                Err(Status::with_error_details(
+                    Code::ResourceExhausted,
+                    reason.message(),
+                    details,
+                ))
             }
         }
     }
@@ -366,6 +379,13 @@ mod tests {
         let before = DECISION_RECORD_HITS.load(Ordering::Relaxed);
         let err = svc.check(&inputs_with_source("mcp")).await.unwrap_err();
         assert_eq!(err.code(), tonic::Code::ResourceExhausted);
+        let error_info = err
+            .get_error_details()
+            .error_info()
+            .cloned()
+            .expect("deny status must carry an ErrorInfo detail");
+        assert_eq!(error_info.reason, REASON_GITLAB_CREDITS_EXHAUSTED);
+        assert_eq!(error_info.domain, ERROR_DOMAIN);
         let after = DECISION_RECORD_HITS.load(Ordering::Relaxed);
         assert!(
             after > before,

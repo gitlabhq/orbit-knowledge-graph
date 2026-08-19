@@ -161,6 +161,7 @@ tonic = { version = "0.14.2", features = ["tls-aws-lc"] }
 tonic-build = "0.14.2"
 tonic-prost = "0.14.2"
 tonic-prost-build = "0.14.2"
+tonic-types = "0.14.2"
 tower = "0.5.3"
 triomphe = "0.1.15"
 base64 = "0.22.1"
