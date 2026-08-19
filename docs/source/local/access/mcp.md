@@ -164,27 +164,100 @@ You can also edit the `.mcp.json` file directly:
 
 {{< /tabs >}}
 
-### Connect Codex
+To confirm the server is connected, run:
 
 ```shell
-codex mcp add orbit-local -- orbit mcp serve
+claude mcp list
+```
+
+### Connect Codex
+
+Codex stores the MCP server configuration in `~/.codex/config.toml`. Codex
+always configures the server for all of your projects.
+
+{{< tabs >}}
+
+{{< tab title="orbit" >}}
+
+```shell
+codex mcp add orbit-local -- orbit local mcp serve
+```
+
+{{< /tab >}}
+
+{{< tab title="glab" >}}
+
+```shell
+codex mcp add orbit-local -- glab orbit local mcp serve
+```
+
+{{< /tab >}}
+
+{{< /tabs >}}
+
+To confirm the server is registered, run:
+
+```shell
+codex mcp list
 ```
 
 ### Connect OpenCode
 
-Add to `opencode.json` (project or global):
+Add the MCP server configuration to `opencode.json` in the repository root, or to
+`~/.config/opencode/opencode.json` to use it in all of your projects:
+
+{{< tabs >}}
+
+{{< tab title="orbit" >}}
 
 ```json
 {
+  "$schema": "https://opencode.ai/config.json",
   "mcp": {
     "orbit-local": {
       "type": "local",
-      "command": ["orbit", "mcp", "serve"],
-      "enabled": true
+      "command": ["orbit", "local", "mcp", "serve"]
     }
   }
 }
 ```
+
+{{< /tab >}}
+
+{{< tab title="glab" >}}
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "orbit-local": {
+      "type": "local",
+      "command": ["glab", "orbit", "local", "mcp", "serve"]
+    }
+  }
+}
+```
+
+{{< /tab >}}
+
+{{< /tabs >}}
+
+To confirm the server is connected, run:
+
+```shell
+opencode mcp list
+```
+
+If the server does not appear as connected, OpenCode logs a warning and
+continues without its tools rather than failing at startup, so check the logs in
+`~/.local/share/opencode/log/`. OpenCode runs the command without a shell, which
+means `~` and environment variables are not expanded: use an absolute path if
+`orbit` is not on the `PATH` that OpenCode inherits.
+
+> [!note]
+> OpenCode prefixes MCP tool names with the server name, so the tools in
+> [MCP tools](#mcp-tools) appear as `orbit-local_run_sql`,
+> `orbit-local_get_graph_schema`, and `orbit-local_index`.
 
 ### Connect other MCP clients
 
