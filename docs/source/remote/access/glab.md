@@ -78,6 +78,7 @@ instance, and `--yes` to skip the one-time run confirmation in scripts.
 |------------|----------|---------|
 | `glab orbit remote status` | `GET orbit/status` | Cluster health. |
 | `glab orbit remote schema [node...]` | `GET orbit/schema` | Graph ontology. Positional args expand specific nodes. |
+| `glab orbit remote dsl` | `GET orbit/schema/dsl` | Query DSL JSON Schema. The source of truth for the query body shape. |
 | `glab orbit remote tools` | `GET orbit/tools` | MCP tool manifest with the full DSL JSON Schema. |
 | `glab orbit remote query [file\|-]` | `POST orbit/query` | Run a query from a file or stdin. |
 | `glab orbit remote graph-status` | `GET orbit/graph_status` | Indexing progress for a namespace, project, or full path. |
@@ -88,6 +89,7 @@ instance, and `--yes` to skip the one-time run confirmation in scripts.
 glab orbit remote status
 glab orbit remote schema
 glab orbit remote schema MergeRequest Project
+glab orbit remote dsl
 glab orbit remote tools
 ```
 
