@@ -40,6 +40,9 @@ pub struct HydrationTemplate {
     /// Filters on virtual columns to apply in-memory after hydration resolves
     /// their values.
     pub virtual_filters: Vec<(String, crate::input::InputFilter)>,
+    /// Virtual columns resolved only because they are filtered, not selected.
+    /// Stripped from result rows after the in-memory filter pass.
+    pub filter_injected_columns: Vec<String>,
 }
 
 /// Pre-resolved column spec for an entity type in dynamic hydration.
@@ -134,6 +137,7 @@ fn build_static_templates(input: &Input, ontology: &Ontology) -> Vec<HydrationTe
                 injected_columns,
                 has_traversal_path: ont_node.has_traversal_path,
                 virtual_filters: node.virtual_filters.clone(),
+                filter_injected_columns: node.filter_injected_virtual_columns.clone(),
             })
         })
         .collect()

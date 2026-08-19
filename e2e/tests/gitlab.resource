@@ -130,12 +130,12 @@ Create Group
     ...    headers=${headers}    json=${body}    expected_status=201
     RETURN    ${resp.json()}
 
-Enable Knowledge Graph
+Enable Orbit
     [Arguments]    ${namespace_id}
     [Documentation]    Retry-wrapped enable; admin endpoint can briefly 5xx during siphon snapshot.
-    Wait Until Keyword Succeeds    30s    5s    Enable Knowledge Graph Once    ${namespace_id}
+    Wait Until Keyword Succeeds    30s    5s    Enable Orbit Once    ${namespace_id}
 
-Enable Knowledge Graph Once
+Enable Orbit Once
     [Arguments]    ${namespace_id}
     ${headers}=    Create Dictionary    PRIVATE-TOKEN=${GITLAB_PAT}
     ${resp}=    PUT    ${GITLAB_URL}/api/v4/admin/knowledge_graph/namespaces/${namespace_id}
@@ -339,7 +339,7 @@ Delete Note On Issue
     DELETE    ${GITLAB_URL}/api/v4/projects/${project_id}/issues/${issue_iid}/notes/${note_id}
     ...    headers=${headers}    expected_status=204
 
-Disable Knowledge Graph
+Disable Orbit
     [Documentation]    Tear down the enabled-namespace record (mirrors the admin DELETE used by
     ...                ToggleNamespaceService). Existing graph data is retained until the deletion
     ...                grace period elapses; only dispatching stops.

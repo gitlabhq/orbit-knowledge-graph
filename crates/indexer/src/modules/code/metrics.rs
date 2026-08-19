@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 use opentelemetry::KeyValue;
 use opentelemetry::metrics::{Counter, Histogram, Meter};
 
-use gkg_observability::indexer::code;
+use orbit_observability::indexer::code;
 
 use crate::handler::HandlerError;
 
@@ -35,7 +35,7 @@ pub struct CodeMetrics {
 
 impl CodeMetrics {
     pub fn new() -> Self {
-        let meter = gkg_observability::meter();
+        let meter = orbit_observability::meter();
         Self::with_meter(&meter)
     }
 
@@ -197,6 +197,14 @@ impl CodeMetrics {
                 &[KeyValue::new(code::labels::PHASE, phase)],
             );
         }
+    }
+
+    /// Queue time is off the work budget, so without this a starved pod is invisible.
+    pub(in crate::modules::code) fn record_slot_wait(&self, slot: &'static str, elapsed: Duration) {
+        self.pipeline_phase_duration.record(
+            elapsed.as_secs_f64(),
+            &[KeyValue::new(code::labels::PHASE, slot)],
+        );
     }
 
     pub(in crate::modules::code) fn record_fetch_duration(&self, elapsed: Duration) {

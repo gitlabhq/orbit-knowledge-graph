@@ -87,9 +87,12 @@ pub fn emit(plan: &Plan, input: &Input) -> Result<Node> {
             center_tp_lookup.as_ref(),
         ),
         PlanBody::PathFinding(pf) => pathfinding::emit_pathfinding(plan, pf),
-        PlanBody::Hydration(nodes) => {
-            hydration::emit_hydration(nodes, plan.limit, input.hydration_dynamic)
-        }
+        PlanBody::Hydration(nodes) => hydration::emit_hydration(
+            nodes,
+            plan.limit,
+            input.hydration_dynamic,
+            input.path_segment_budget,
+        ),
     }
 }
 

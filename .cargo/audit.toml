@@ -20,4 +20,9 @@ ignore = [
     # Remove when upstream updates (check: cargo tree -i quick-xml)
     "RUSTSEC-2026-0194", # quadratic attribute-name duplicate check
     "RUSTSEC-2026-0195", # unbounded NsReader namespace-declaration allocation
+    # rkyv 0.7.46 out-of-bounds read on untrusted archives — optional feature of
+    # rust_decimal (transitive via duckdb), not compiled into our build and we
+    # never access rkyv archives. Fix is rkyv >= 0.8.17; 0.7 is unsupported upstream.
+    # Remove when rust_decimal/duckdb drop rkyv 0.7 (check: cargo tree -i rkyv --target all).
+    "RUSTSEC-2026-0235",
 ]

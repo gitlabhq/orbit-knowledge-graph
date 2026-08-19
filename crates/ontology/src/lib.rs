@@ -1,7 +1,7 @@
 //! Ontology loading from YAML files.
 //!
 //! This crate loads ontology definitions from YAML files and converts them
-//! into strongly-typed entity definitions for the Knowledge Graph.
+//! into strongly-typed entity definitions for Orbit.
 //!
 //! # Example
 //!
@@ -1001,11 +1001,11 @@ impl Ontology {
     ///
     /// Pure: no DB calls, no widening past the seed.
     #[must_use]
-    pub fn propagate_scope_prefixes(
+    pub fn propagate_scope_prefixes<P: Clone>(
         &self,
         edges: &[ScopeEdge<'_>],
-        seed: &std::collections::HashMap<String, String>,
-    ) -> std::collections::HashMap<String, String> {
+        seed: &std::collections::HashMap<String, P>,
+    ) -> std::collections::HashMap<String, P> {
         use std::collections::{HashMap, HashSet};
 
         if seed.is_empty() {

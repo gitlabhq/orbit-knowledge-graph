@@ -3,7 +3,6 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use clickhouse_client::ClickHouseConfigurationExt;
 use futures::StreamExt;
-use gkg_server_config::{GlobalDispatcherConfig, NamespaceDispatcherConfig, NatsConfiguration};
 use indexer::campaign::CampaignState;
 use indexer::checkpoint::ClickHouseCheckpointStore;
 use indexer::nats::versioning::NATS_VERSIONER;
@@ -20,6 +19,7 @@ use integration_testkit::TestContext;
 use integration_testkit::scenario::{
     CdcEvent, CdcOperation, DispatchedMessage, HandlerInput, ScenarioHandlers,
 };
+use orbit_server_config::{GlobalDispatcherConfig, NamespaceDispatcherConfig, NatsConfiguration};
 use siphon_proto::replication_event::{Column, Operation};
 use siphon_proto::{LogicalReplicationEvents, ReplicationEvent, Value, value};
 use testcontainers::ImageExt;
@@ -135,8 +135,11 @@ async fn dispatch_enabled_namespace_cdc(
         ScheduledTaskMetrics::new(),
         Arc::new(CampaignState::new()),
     ));
-    let route =
-        EnabledNamespacesRoute::new(NamespaceIndexingDispatch::new(services.nats), backfill);
+    let route = EnabledNamespacesRoute::new(
+        NamespaceIndexingDispatch::new(services.nats),
+        backfill,
+        ctx.config.build_client(),
+    );
     let events: Vec<LogicalReplicationEvents> = cdc.iter().map(replication_event).collect();
 
     route

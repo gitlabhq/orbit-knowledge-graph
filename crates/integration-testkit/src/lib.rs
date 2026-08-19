@@ -4,6 +4,7 @@ mod context;
 pub mod mock_redaction;
 pub mod scenario;
 mod seed;
+pub mod seeded_resolver;
 pub mod visitor;
 
 pub use assertions::{
@@ -13,6 +14,7 @@ pub use assertions::{
 };
 pub use context::TestContext;
 pub use seed::load_seed;
+pub use seeded_resolver::SeededColumnResolver;
 
 pub fn load_ontology() -> ontology::Ontology {
     let ont = ontology::Ontology::load_embedded().expect("embedded ontology should load");

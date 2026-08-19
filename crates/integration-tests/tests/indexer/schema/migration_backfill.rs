@@ -8,7 +8,6 @@
 use std::collections::HashSet;
 
 use clickhouse_client::{ClickHouseConfigurationExt, FromArrowColumn};
-use gkg_server_config::NatsConfiguration;
 use indexer::nats::versioning::NATS_VERSIONER;
 use indexer::orchestrator::dispatch::CodeBackfill;
 use indexer::orchestrator::scheduled::{
@@ -19,6 +18,7 @@ use indexer::schema::version::{
     write_schema_version,
 };
 use indexer::topic::{CODE_INDEXING_TASK_SUBJECT_PATTERN, INDEXER_STREAM};
+use orbit_server_config::NatsConfiguration;
 use serde::Deserialize;
 use testcontainers::ImageExt;
 use testcontainers::core::{ContainerPort, WaitFor};
@@ -70,6 +70,12 @@ impl TestContext {
                      (id, root_namespace_id, traversal_path, created_at, updated_at) \
                      VALUES ({}, {ns_id}, '1/{ns_id}/', now(), now())",
                     i + 1
+                ))
+                .await;
+            self.clickhouse
+                .execute(&format!(
+                    "INSERT INTO namespace_traversal_paths (id, traversal_path) \
+                     VALUES ({ns_id}, '1/{ns_id}/')"
                 ))
                 .await;
         }
@@ -315,8 +321,8 @@ async fn migration_completion_checker_promotes_rebuilt_rollback_version() {
         context.clickhouse.create_client(),
         std::sync::Arc::new(indexer::testkit::MockLockService::new()),
         std::sync::Arc::new(ontology::Ontology::load_embedded().unwrap()),
-        gkg_server_config::SchemaConfig::default(),
-        gkg_server_config::MigrationCompletionConfig::default(),
+        orbit_server_config::SchemaConfig::default(),
+        orbit_server_config::MigrationCompletionConfig::default(),
         ScheduledTaskMetrics::new(),
         std::sync::Arc::new(indexer::campaign::CampaignState::new()),
         services.nats_client.clone(),
@@ -397,8 +403,8 @@ async fn migration_completion_checker_does_not_promote_version_it_does_not_embed
         context.clickhouse.create_client(),
         std::sync::Arc::new(indexer::testkit::MockLockService::new()),
         std::sync::Arc::new(ontology::Ontology::load_embedded().unwrap()),
-        gkg_server_config::SchemaConfig::default(),
-        gkg_server_config::MigrationCompletionConfig::default(),
+        orbit_server_config::SchemaConfig::default(),
+        orbit_server_config::MigrationCompletionConfig::default(),
         ScheduledTaskMetrics::new(),
         std::sync::Arc::new(indexer::campaign::CampaignState::new()),
         services.nats_client.clone(),
@@ -465,8 +471,8 @@ async fn migration_completion_checker_guards_against_two_migrating_versions() {
         context.clickhouse.create_client(),
         std::sync::Arc::new(indexer::testkit::MockLockService::new()),
         std::sync::Arc::new(ontology::Ontology::load_embedded().unwrap()),
-        gkg_server_config::SchemaConfig::default(),
-        gkg_server_config::MigrationCompletionConfig::default(),
+        orbit_server_config::SchemaConfig::default(),
+        orbit_server_config::MigrationCompletionConfig::default(),
         ScheduledTaskMetrics::new(),
         std::sync::Arc::new(indexer::campaign::CampaignState::new()),
         services.nats_client.clone(),

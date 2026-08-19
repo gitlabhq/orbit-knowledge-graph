@@ -7,8 +7,8 @@ mod observer;
 
 use std::sync::Arc;
 
-use gkg_analytics::{AnalyticsTracker, SnowplowAnalyticsTracker};
-use gkg_server_config::AnalyticsConfig;
+use orbit_analytics::{AnalyticsTracker, SnowplowAnalyticsTracker};
+use orbit_server_config::AnalyticsConfig;
 
 use crate::observer::IndexingObserver;
 pub use observer::SnowplowIndexingObserver;

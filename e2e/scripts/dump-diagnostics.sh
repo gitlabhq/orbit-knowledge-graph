@@ -117,7 +117,7 @@ if [[ -n "$CH_POD" ]]; then
   # Cache hit rate, last refresh time, errors. Critical for diagnosing
   # dictGet-via-DEFAULT issues (namespace_traversal_paths_dict etc.) that
   # surface as stale '0/' traversal_path in derived tables.
-  ch_query "SELECT name, status, last_successful_update_time, element_count,
+  ch_query "SELECT name, status, type, last_successful_update_time, element_count,
                    found_rate, last_exception
             FROM system.dictionaries WHERE database = 'datalake'
             FORMAT Vertical" \

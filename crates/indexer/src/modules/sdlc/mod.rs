@@ -24,9 +24,9 @@ use crate::topic::{
 };
 use crate::types::Event;
 use datalake::{Datalake, DatalakeQuery};
-use gkg_server_config::{IndexerModule, SubscriptionConfig};
 use handler::entity::EntityHandler;
 use metrics::SdlcMetrics;
+use orbit_server_config::{IndexerModule, SubscriptionConfig};
 use pipeline::Pipeline;
 use tracing::info;
 

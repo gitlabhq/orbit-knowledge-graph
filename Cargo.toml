@@ -19,12 +19,12 @@ members = [
   "crates/query-engine/compiler-pipeline-macros",
   "crates/orbit-local",
 
-  "crates/gkg-analytics",
-  "crates/gkg-billing",
-  "crates/gkg-observability",
-  "crates/gkg-prompts",
-  "crates/gkg-server-config",
-  "crates/gkg-server",
+  "crates/orbit-analytics",
+  "crates/orbit-billing",
+  "crates/orbit-observability",
+  "crates/orbit-prompts",
+  "crates/orbit-server-config",
+  "crates/orbit-server",
   "crates/ontology",
 
   "crates/health-check",
@@ -42,7 +42,7 @@ members = [
 ]
 
 [workspace.dependencies]
-gkg-observability = { path = "crates/gkg-observability" }
+orbit-observability = { path = "crates/orbit-observability" }
 labkit = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", rev = "1e235f49" }
 labkit-events = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", rev = "1e235f49" }
 arrow = "58.0.0"
@@ -53,7 +53,7 @@ cargo-util-schemas = "0.14.0"
 cargo_metadata = "0.23.1"
 enum-as-inner = "0.7.0"
 either = "1.15.0"
-datafusion = { version = "53.0.0", default-features = false, features = ["sql", "nested_expressions"] }
+datafusion = { version = "54.1.0", default-features = false, features = ["sql", "nested_expressions"] }
 clap = { version = "4.5.57", features = ["derive", "env"] }
 comrak = { version = "0.53.0", default-features = false }
 dirs = "6"
@@ -68,6 +68,7 @@ mimalloc = { version = "0.1.48", default-features = false }
 parking_lot = "0.12.5"
 petgraph = "0.8.3"
 globset = "0.4"
+memchr = "2.8.3"
 rust-lapper = "1.2.0"
 rustc-hash = "2.1.1"
 rmcp = { version = "1.7", features = ["server", "macros", "transport-io"] }
@@ -95,7 +96,7 @@ walkdir = "2.5.0"
 circuit-breaker = { path = "crates/circuit-breaker" }
 clickhouse-client = { path = "crates/clickhouse-client" }
 nats-client = { path = "crates/nats-client" }
-duckdb = { version = "1.10501.0", features = ["vtab-arrow", "appender-arrow"] }
+duckdb = { version = "1.10505.0", features = ["vtab-arrow", "appender-arrow"] }
 gitalisk-core = { git = "https://gitlab.com/gitlab-org/rust/gitalisk.git", tag = "v0.8.0" }
 siphon-proto = { git = "https://gitlab.com/gitlab-org/analytics-section/siphon.git", tag = "0.0.103-beta" }
 thiserror = "2.0.18"
@@ -119,13 +120,13 @@ syn = { version = "2.0.117", features = ["full"] }
 quote = "1.0.45"
 proc-macro2 = "1.0.106"
 
-# Iglu schema codegen (build-time only; consumed by gkg-analytics/build.rs)
+# Iglu schema codegen (build-time only; consumed by orbit-analytics/build.rs)
 prettyplease = "0.2.37"
 typify = "0.7.0"
 
 # JS/TS ecosystem (v2 custom pipeline)
-oxc = { git = "https://github.com/oxc-project/oxc", rev = "fc702c1fa9f0412d06ec6908b58cd395b826cf7f", features = ["semantic", "ast_visit"] }
-oxc_linter = { git = "https://github.com/oxc-project/oxc", rev = "fc702c1fa9f0412d06ec6908b58cd395b826cf7f" }
+oxc = { git = "https://github.com/oxc-project/oxc", rev = "45a17c25d188bf1b289638483e2bc61adbadd364", features = ["semantic", "ast_visit"] }
+oxc_linter = { git = "https://github.com/oxc-project/oxc", rev = "45a17c25d188bf1b289638483e2bc61adbadd364" }
 oxc_resolver = "11.24.2"
 
 # Simulator dependencies
@@ -140,16 +141,16 @@ lance-graph = { version = "0.5.4", default-features = false }
 
 rcgen = { version = "0.14.7", default-features = false, features = ["aws_lc_rs", "pem"] }
 regex = "1.12.2"
-ra_ap_hir = "0.0.344"
-ra_ap_cfg = "0.0.344"
-ra_ap_ide = "0.0.344"
-ra_ap_ide_db = "0.0.344"
-ra_ap_intern = "0.0.344"
-ra_ap_load-cargo = "0.0.344"
-ra_ap_paths = "0.0.344"
-ra_ap_project_model = "0.0.344"
-ra_ap_syntax = "0.0.344"
-ra_ap_vfs = "0.0.344"
+ra_ap_hir = "0.0.345"
+ra_ap_cfg = "0.0.345"
+ra_ap_ide = "0.0.345"
+ra_ap_ide_db = "0.0.345"
+ra_ap_intern = "0.0.345"
+ra_ap_load-cargo = "0.0.345"
+ra_ap_paths = "0.0.345"
+ra_ap_project_model = "0.0.345"
+ra_ap_syntax = "0.0.345"
+ra_ap_vfs = "0.0.345"
 sqlparser = { version = "0.62.0", features = ["visitor"] }
 prost = "0.14.3"
 prost-build = "0.14.3"

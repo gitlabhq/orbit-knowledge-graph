@@ -3,13 +3,12 @@ use std::time::Duration;
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use clickhouse_client::ArrowClickHouseClient;
-use gkg_server::schema_watcher::{SchemaState, SchemaWatcher};
-use gkg_server::webserver::create_router;
 use indexer::schema::version::{
     ensure_version_table, write_migrating_version, write_schema_version,
 };
 use integration_testkit::TestContext;
+use orbit_server::schema_watcher::{SchemaState, SchemaWatcher};
+use orbit_server::webserver::create_router;
 use tokio::time::{sleep, timeout};
 use tokio_util::sync::CancellationToken;
 use tower::ServiceExt;
@@ -40,17 +39,6 @@ fn unhealthy_components(json: &serde_json::Value) -> Vec<String> {
         .collect()
 }
 
-fn dummy_clickhouse() -> ArrowClickHouseClient {
-    ArrowClickHouseClient::new(
-        "http://127.0.0.1:1",
-        "default",
-        "x",
-        None,
-        &std::collections::HashMap::new(),
-        &std::collections::HashMap::new(),
-    )
-}
-
 async fn await_state(watcher: &Arc<SchemaWatcher>, target: SchemaState) {
     timeout(WAIT_LIMIT, async {
         while watcher.current() != target {
@@ -64,7 +52,7 @@ async fn await_state(watcher: &Arc<SchemaWatcher>, target: SchemaState) {
 #[tokio::test]
 async fn ready_returns_503_when_schema_pending() {
     let watcher = SchemaWatcher::for_state(SchemaState::Pending);
-    let router = create_router(dummy_clickhouse(), None, watcher);
+    let router = create_router(watcher);
 
     let (status, json) = parse_response(router.oneshot(ready_request()).await.unwrap()).await;
 
@@ -75,7 +63,7 @@ async fn ready_returns_503_when_schema_pending() {
 #[tokio::test]
 async fn ready_returns_503_when_schema_outdated() {
     let watcher = SchemaWatcher::for_state(SchemaState::Outdated);
-    let router = create_router(dummy_clickhouse(), None, watcher);
+    let router = create_router(watcher);
 
     let (status, json) = parse_response(router.oneshot(ready_request()).await.unwrap()).await;
 
@@ -85,11 +73,8 @@ async fn ready_returns_503_when_schema_outdated() {
 
 #[tokio::test]
 async fn ready_returns_503_with_migrating_status_when_schema_migrating() {
-    let ctx = TestContext::new(&[]).await;
-    let client = ctx.create_client();
-
     let watcher = SchemaWatcher::for_state(SchemaState::Migrating);
-    let router = create_router(client, None, watcher);
+    let router = create_router(watcher);
 
     let (status, json) = parse_response(router.oneshot(ready_request()).await.unwrap()).await;
 

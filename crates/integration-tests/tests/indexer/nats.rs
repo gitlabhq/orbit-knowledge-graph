@@ -4,7 +4,6 @@ use std::time::Duration;
 
 use bytes::Bytes;
 use futures::{StreamExt, TryStreamExt};
-use gkg_server_config::NatsConfiguration;
 use indexer::dead_letter::{DEAD_LETTER_STREAM, DeadLetterEnvelope};
 use indexer::indexing_status::INDEXING_PROGRESS_BUCKET;
 use indexer::metrics::EngineMetrics;
@@ -17,6 +16,7 @@ use indexer::orchestrator::max_deliveries::MaxDeliveriesReconciler;
 use indexer::topic::INDEXER_STREAM;
 use indexer::types::{Envelope, Event, Subscription};
 use nats_client::{KvBucketConfig, KvPutOptions};
+use orbit_server_config::NatsConfiguration;
 use serde::{Deserialize, Serialize};
 use testcontainers::ImageExt;
 use testcontainers::core::{ContainerPort, WaitFor};
@@ -352,6 +352,42 @@ async fn dead_letters_use_delivered_subject_for_wildcard_subscriptions() {
         !subject_counts.contains_key(&wildcard_subject),
         "dead letters should not be stored under the wildcard subscription subject"
     );
+}
+
+#[tokio::test]
+async fn repeat_failures_for_one_subject_all_reach_the_dead_letter_queue() {
+    let (_container, url) = start_nats_container().await;
+    let broker = connect_broker(&default_config(&url)).await;
+    let subscription = Subscription::new(DLQ_SOURCE_STREAM, DLQ_SOURCE_SUBJECT_FILTER)
+        .dead_letter_on_exhaustion(true);
+
+    broker
+        .ensure_streams(std::slice::from_ref(&subscription))
+        .await
+        .expect("failed to create streams");
+
+    let failing_subject = "code.task.indexing.requested.41490860.bWFpbg";
+    for attempt in 0..3 {
+        broker
+            .publish_dead_letter(
+                &subscription,
+                &delivered_envelope(failing_subject, &format!("attempt-{attempt}")),
+                &format!("failure {attempt}"),
+            )
+            .await
+            .unwrap_or_else(|e| panic!("dead letter {attempt} should publish, got: {e}"));
+    }
+
+    let subject = NATS_VERSIONER.subject(&format!("dlq.{DLQ_SOURCE_STREAM}.{failing_subject}"));
+    assert_eq!(
+        dead_letter_subject_counts(&url).await,
+        BTreeMap::from([(subject.clone(), 3)])
+    );
+
+    let latest: DeadLetterEnvelope =
+        serde_json::from_slice(&get_dead_letter(&url, &subject).await.payload)
+            .expect("failed to parse dead letter");
+    assert_eq!(latest.last_error, "failure 2");
 }
 
 #[tokio::test]

@@ -690,7 +690,10 @@ const SCOPED_PREFIX: &str = "1/24/23/";
 
 fn scoped_ctx() -> compiler::SecurityContext {
     let mut prefixes = std::collections::HashMap::new();
-    prefixes.insert("p".to_string(), SCOPED_PREFIX.to_string());
+    prefixes.insert(
+        "p".to_string(),
+        orbit_utils::traversal_path::TraversalPath::new_unchecked(SCOPED_PREFIX),
+    );
     admin_ctx().with_scope_prefixes(prefixes)
 }
 

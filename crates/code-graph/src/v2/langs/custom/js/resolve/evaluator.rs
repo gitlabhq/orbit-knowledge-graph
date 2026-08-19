@@ -5,6 +5,8 @@ use oxc::span::SourceType;
 use rustc_hash::FxHashMap;
 use std::path::{Path, PathBuf};
 
+use crate::utils::exceeds_nesting_cap;
+
 const MAX_EVAL_MODULES: usize = 64;
 const MAX_EVAL_DEPTH: usize = 12;
 const MAX_EVAL_FILE_BYTES: u64 = 256 * 1024;
@@ -97,6 +99,9 @@ fn evaluate_script_module(
     depth: usize,
 ) -> Option<EvaluatedValue> {
     let source = std::fs::read_to_string(module_path).ok()?;
+    if exceeds_nesting_cap(&source) {
+        return None;
+    }
     let source_type = SourceType::from_path(module_path).ok()?;
 
     let allocator = Allocator::default();
@@ -175,10 +180,8 @@ fn evaluate_module_statement_inner(
             state.module_exports =
                 evaluate_export_default(&export_default.declaration, context, state, cache);
         }
-        Statement::ExportNamedDeclaration(export_named) => {
-            if let Some(declaration) = &export_named.declaration {
-                evaluate_exported_declaration(declaration, context, state, cache);
-            }
+        Statement::ExportDeclaration(export_declaration) => {
+            evaluate_exported_declaration(&export_declaration.declaration, context, state, cache);
         }
         _ => {}
     }
@@ -985,11 +988,11 @@ fn normalize_path(path: PathBuf) -> PathBuf {
     normalized
 }
 
-/// Thin wrapper around `gkg_utils::fs::contained_canonical_path` so the
+/// Thin wrapper around `orbit_utils::fs::contained_canonical_path` so the
 /// evaluator's existing call sites read unchanged. All security-relevant
 /// path-containment logic lives in `crates/utils/src/fs.rs` as a SSOT.
 fn canonical_repo_existing_path(root_dir: &Path, path: &Path) -> Option<PathBuf> {
-    gkg_utils::fs::contained_canonical_path(root_dir, path)
+    orbit_utils::fs::contained_canonical_path(root_dir, path)
 }
 
 pub(super) fn contained_repo_path(

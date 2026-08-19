@@ -1,6 +1,6 @@
 *** Settings ***
 Documentation       Verify the namespace enable/disable lifecycle as observed through the API:
-...                 disabling Knowledge Graph stops dispatching but retains already-indexed data
+...                 disabling Orbit stops dispatching but retains already-indexed data
 ...                 (the 30-day deletion grace), and re-enabling resumes indexing for new entities.
 ...                 Uses a dedicated group so it never disturbs the shared namespace.
 ...
@@ -14,14 +14,14 @@ Suite Setup         Attach To Shared Fixture
 
 
 *** Test Cases ***
-Disabling Knowledge Graph Retains Indexed Data
+Disabling Orbit Retains Indexed Data
     [Documentation]    Enable a fresh group, index an issue, disable, then assert the issue is still
     ...                queryable. Disable removes the enabled-namespace record but must not purge data.
     [Tags]    lifecycle
     ${suffix}=    Random Suffix
     ${group}=    Create Group    e2e-lifecycle-${suffix}
     Set Suite Variable    ${LIFECYCLE_GROUP_ID}    ${group["id"]}
-    Enable Knowledge Graph    ${LIFECYCLE_GROUP_ID}
+    Enable Orbit    ${LIFECYCLE_GROUP_ID}
 
     Start Indexing Budget    300
     ${project}=    Create Project    e2e-lifecycle-prj-${suffix}    ${LIFECYCLE_GROUP_ID}
@@ -29,15 +29,15 @@ Disabling Knowledge Graph Retains Indexed Data
     Wait For Node Indexed Within Budget    WorkItem    ${issue["id"]}    e2e-lifecycle-issue-${suffix}
     ...    label_field=title
 
-    Disable Knowledge Graph    ${LIFECYCLE_GROUP_ID}
+    Disable Orbit    ${LIFECYCLE_GROUP_ID}
     Verify Node Indexed    WorkItem    ${issue["id"]}
 
-Re-enabling Knowledge Graph Resumes Indexing
+Re-enabling Orbit Resumes Indexing
     [Documentation]    Re-enable the same group and create a new issue; it must be indexed, proving
     ...                the namespace dispatcher picks the namespace back up.
     [Tags]    lifecycle
     ${suffix}=    Random Suffix
-    Enable Knowledge Graph    ${LIFECYCLE_GROUP_ID}
+    Enable Orbit    ${LIFECYCLE_GROUP_ID}
 
     Start Indexing Budget    300
     ${project}=    Create Project    e2e-reenable-prj-${suffix}    ${LIFECYCLE_GROUP_ID}

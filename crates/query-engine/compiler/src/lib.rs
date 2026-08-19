@@ -89,10 +89,7 @@ pub use passes::hydrate::{
 };
 pub use passes::normalize::{build_entity_auth, normalize};
 pub use scope::{PathResolutionKey, PathScopeId, scope_edges, scope_keys};
-pub use types::{
-    AccessLevel, DEFAULT_PATH_ACCESS_LEVEL, Realm, SecurityContext, TraversalPath,
-    is_valid_traversal_path,
-};
+pub use types::{AccessLevel, AuthorizedPath, DEFAULT_PATH_ACCESS_LEVEL, Realm, SecurityContext};
 
 use metrics::CountErr;
 use std::sync::Arc;
@@ -167,7 +164,7 @@ pub fn compile_input(
 
 #[cfg(test)]
 pub(crate) mod testkit {
-    use crate::types::{AccessLevel, SecurityContext, TraversalPath};
+    use crate::types::{AccessLevel, AuthorizedPath, SecurityContext};
 
     pub fn non_admin_ctx() -> SecurityContext {
         SecurityContext::new(1, vec!["1/".into()]).unwrap()
@@ -176,7 +173,7 @@ pub(crate) mod testkit {
     pub fn admin_ctx() -> SecurityContext {
         SecurityContext::new_with_roles(
             1,
-            vec![TraversalPath::new("1/", AccessLevel::Owner as u32)],
+            vec![AuthorizedPath::new("1/", AccessLevel::Owner as u32)],
         )
         .unwrap()
         .with_role(true, Some(AccessLevel::Owner as u32))
@@ -186,6 +183,7 @@ pub(crate) mod testkit {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use orbit_utils::traversal_path::TraversalPath;
     use std::sync::LazyLock;
 
     static ONTOLOGY: LazyLock<Ontology> =
@@ -1699,7 +1697,9 @@ mod tests {
         );
         let ctx = SecurityContext::new(1, vec!["1/".into()])
             .unwrap()
-            .with_scope_prefixes([("g".to_string(), "1/9970/".to_string())].into());
+            .with_scope_prefixes(
+                [("g".to_string(), TraversalPath::new_unchecked("1/9970/"))].into(),
+            );
         compile(&query, &ONTOLOGY, &ctx).unwrap().base.render()
     }
 
@@ -1708,7 +1708,9 @@ mod tests {
         let query = r#"{"query_type":"traversal","nodes":[{"id":"m","entity":"MergeRequest","columns":["id"],"filters":{"state":{"eq":"opened"}}}],"limit":20}"#;
         let ctx = SecurityContext::new(1, vec!["1/".into()])
             .unwrap()
-            .with_scope_prefixes([("m".to_string(), "1/9970/".to_string())].into());
+            .with_scope_prefixes(
+                [("m".to_string(), TraversalPath::new_unchecked("1/9970/"))].into(),
+            );
         let sql = compile(query, &ONTOLOGY, &ctx).unwrap().base.render();
         assert!(
             sql.contains("startsWith(m.traversal_path"),
@@ -1892,7 +1894,7 @@ mod tests {
                 columns: Some(ColumnSelection::List(vec!["id".into(), "state".into()])),
                 node_ids: vec![1],
                 has_traversal_path: true,
-                traversal_paths: vec!["1/".into()],
+                traversal_paths: vec![TraversalPath::new_unchecked("1/")],
                 ..Default::default()
             }],
             limit: 10,
@@ -2025,6 +2027,153 @@ mod tests {
         } else {
             panic!("expected static hydration plan");
         }
+    }
+
+    #[test]
+    fn filter_on_virtual_column_without_selecting_it_injects_resolution() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+        let compiled = compile(
+            r#"{
+                "query_type": "traversal",
+                "nodes": [{"id": "f", "entity": "File",
+                         "node_ids": [1, 2],
+                         "filters": {"content": {"contains": "needle"},
+                                     "project_id": {"eq": 1000}},
+                         "columns": ["project_id", "path"]}],
+                "limit": 10
+            }"#,
+            &ontology,
+            &security_ctx(),
+        )
+        .expect("filter-only virtual column should compile");
+
+        let HydrationPlan::Static(templates) = &compiled.hydration else {
+            panic!(
+                "filter-only virtual column must produce a static hydration plan, got {:?}",
+                compiled.hydration
+            );
+        };
+        let template = &templates[0];
+        assert!(
+            template
+                .virtual_columns
+                .iter()
+                .any(|vc| vc.column_name == "content"),
+            "content must be injected for resolution: {template:?}"
+        );
+        assert_eq!(template.filter_injected_columns, vec!["content"]);
+        assert!(
+            template
+                .virtual_filters
+                .iter()
+                .any(|(col, _)| col == "content"),
+            "content filter must be carried: {template:?}"
+        );
+    }
+
+    #[test]
+    fn filter_on_selected_virtual_column_is_not_marked_injected() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+        let compiled = compile(
+            r#"{
+                "query_type": "traversal",
+                "nodes": [{"id": "f", "entity": "File",
+                         "node_ids": [1],
+                         "filters": {"content": {"contains": "needle"}},
+                         "columns": ["path", "content"]}],
+                "limit": 5
+            }"#,
+            &ontology,
+            &security_ctx(),
+        )
+        .expect("should compile");
+
+        let HydrationPlan::Static(templates) = &compiled.hydration else {
+            panic!("expected static hydration plan");
+        };
+        assert!(templates[0].filter_injected_columns.is_empty());
+        assert_eq!(
+            templates[0]
+                .virtual_columns
+                .iter()
+                .filter(|vc| vc.column_name == "content")
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn filter_on_virtual_column_rejected_without_node_ids() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+        let err = compile(
+            r#"{
+                "query_type": "traversal",
+                "nodes": [{"id": "f", "entity": "File",
+                         "filters": {"content": {"contains": "needle"},
+                                     "project_id": {"eq": 1000}},
+                         "columns": ["path"]}],
+                "limit": 10
+            }"#,
+            &ontology,
+            &security_ctx(),
+        )
+        .expect_err("virtual filter without node_ids should be rejected");
+
+        assert!(err.is_client_safe());
+        let msg = err.to_string();
+        assert!(
+            msg.contains("node_ids") && msg.contains("content"),
+            "error should name node_ids and the column: {msg}"
+        );
+    }
+
+    #[test]
+    fn filter_on_virtual_column_rejected_for_aggregation() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+        let err = compile(
+            r#"{
+                "query_type": "aggregation",
+                "nodes": [{"id": "f", "entity": "File",
+                         "filters": {"content": {"contains": "needle"}}}],
+                "aggregations": [{"count": "f", "as": "total"}],
+                "group_by": ["f.language"],
+                "limit": 5
+            }"#,
+            &ontology,
+            &security_ctx(),
+        )
+        .expect_err("virtual filter on aggregation should be rejected");
+
+        assert!(err.is_client_safe());
+        let msg = err.to_string();
+        assert!(
+            msg.contains("aggregation") && msg.contains("content"),
+            "error should name the query type and column: {msg}"
+        );
+    }
+
+    #[test]
+    fn filter_on_virtual_column_rejected_for_neighbors() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+        let err = compile(
+            r#"{
+                "query_type": "neighbors",
+                "nodes": [{"id": "f", "entity": "File", "node_ids": [1],
+                         "filters": {"content": {"contains": "needle"}}}],
+                "neighbors": {"direction": "outgoing"},
+                "limit": 5
+            }"#,
+            &ontology,
+            &security_ctx(),
+        )
+        .expect_err("virtual filter on neighbors should be rejected");
+
+        assert!(err.is_client_safe());
+        let msg = err.to_string();
+        assert!(
+            msg.contains("neighbors") && msg.contains("content"),
+            "error should name the query type and column: {msg}"
+        );
     }
 
     #[test]

@@ -3,9 +3,9 @@ use std::time::Duration;
 use bytes::Bytes;
 use circuit_breaker::CircuitBreaker;
 
-use crate::NatsClient;
 use crate::error::NatsError;
 use crate::kv_types::{KvBucketConfig, KvEntry, KvPutOptions, KvPutResult};
+use crate::{NatsClient, SubjectDedup};
 
 pub struct CircuitBreakingNatsClient {
     client: NatsClient,
@@ -29,7 +29,7 @@ impl CircuitBreakingNatsClient {
         self.client.jetstream()
     }
 
-    pub fn config(&self) -> &gkg_server_config::NatsConfiguration {
+    pub fn config(&self) -> &orbit_server_config::NatsConfiguration {
         self.client.config()
     }
 
@@ -38,11 +38,12 @@ impl CircuitBreakingNatsClient {
         stream_name: &str,
         subjects: Vec<String>,
         max_age: Option<Duration>,
+        dedup: SubjectDedup,
     ) -> Result<async_nats::jetstream::stream::Stream, NatsError> {
         self.breaker
             .call_transient(|| {
                 self.client
-                    .create_or_update_stream(stream_name, subjects.clone(), max_age)
+                    .create_or_update_stream(stream_name, subjects.clone(), max_age, dedup)
             })
             .await
     }

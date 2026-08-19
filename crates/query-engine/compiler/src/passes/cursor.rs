@@ -11,7 +11,7 @@ use crate::ast::*;
 use crate::constants::internal_column_prefix;
 use crate::error::{QueryError, Result};
 use crate::input::{AggFunction, Input, QueryType};
-use gkg_utils::clickhouse::ChType;
+use orbit_utils::clickhouse::ChType;
 
 pub fn cursor_column(i: usize) -> String {
     format!("{}cursor_{i}", internal_column_prefix())

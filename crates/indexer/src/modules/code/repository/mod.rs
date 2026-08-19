@@ -1,4 +1,4 @@
-// pub: consumed by gkg-server's content resolver for Workhorse wire format parsing.
+// pub: consumed by orbit-server's content resolver for Workhorse wire format parsing.
 pub mod blob_stream;
 pub mod cache;
 pub mod resolver;

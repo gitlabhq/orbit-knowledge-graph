@@ -10,15 +10,16 @@ pub(in crate::modules::sdlc) const SOURCE_DATA_TABLE: &str = "source_data";
 
 use arrow::record_batch::RecordBatch;
 use chrono::{DateTime, Utc};
-use gkg_utils::arrow::ArrowUtils;
 use ontology::EtlScope;
 use ontology::sql_template;
+use orbit_utils::arrow::ArrowUtils;
 use serde_json::Value;
 
 use super::partitioning::PartitionAssignment;
 use crate::checkpoint::Checkpoint;
 use crate::clickhouse::TIMESTAMP_FORMAT;
 use crate::handler::HandlerError;
+use orbit_utils::traversal_path::TraversalPath;
 
 #[derive(Debug, Clone)]
 pub(in crate::modules::sdlc) struct Cursor {
@@ -124,7 +125,7 @@ impl Filter for WatermarkFilter<'_> {
 }
 
 pub(in crate::modules::sdlc) struct TraversalPathFilter<'a> {
-    pub path: &'a str,
+    pub path: &'a TraversalPath,
 }
 
 pub(in crate::modules::sdlc) struct DeletedFilter<'a> {
@@ -145,7 +146,7 @@ impl Filter for TraversalPathFilter<'_> {
     fn params(&self) -> Vec<(String, Value)> {
         vec![(
             "traversal_path".into(),
-            Value::String(self.path.to_string()),
+            Value::String(self.path.as_str().to_string()),
         )]
     }
 }
@@ -555,7 +556,9 @@ mod tests {
     #[test]
     fn traversal_path_filter_adds_starts_with_and_param() {
         let plan = test_plan(vec!["id"], 1000);
-        let prepared = plan.prepare().with(TraversalPathFilter { path: "1/2/" });
+        let prepared = plan.prepare().with(TraversalPathFilter {
+            path: &TraversalPath::new_unchecked("1/2/"),
+        });
         let sql = prepared.to_sql().expect("renders extract SQL");
         assert!(
             sql.contains("startsWith(traversal_path, {traversal_path:String})"),
@@ -598,7 +601,9 @@ mod tests {
                 last: Utc::now(),
                 current: Utc::now(),
             })
-            .with(TraversalPathFilter { path: "1/2/" })
+            .with(TraversalPathFilter {
+                path: &TraversalPath::new_unchecked("1/2/"),
+            })
             .to_sql()
             .expect("renders extract SQL");
         assert!(sql.contains(" AND ("), "sql: {sql}");

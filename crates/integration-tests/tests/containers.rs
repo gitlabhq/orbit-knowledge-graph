@@ -15,7 +15,6 @@ mod server {
     pub mod graph_formatter;
     pub mod graph_status;
     pub mod grpc_tls;
-    pub mod health;
     pub mod hydration;
     pub mod query_log_retention;
     pub mod redaction;

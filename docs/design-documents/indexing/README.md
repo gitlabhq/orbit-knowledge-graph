@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Knowledge Graph indexing architecture transforms GitLab SDLC metadata and code repositories into a queryable property graph. The indexing service operates as a distributed ETL (Extract, Transform, Load) pipeline that leverages the Data Insights Platform to process both SDLC events and code changes.
+The Orbit indexing architecture transforms GitLab SDLC metadata and code repositories into a queryable property graph. The indexing service operates as a distributed ETL (Extract, Transform, Load) pipeline that leverages the Data Insights Platform to process both SDLC events and code changes.
 
 This document outlines the general architecture, shared patterns, and components across both indexing domains. For detailed implementation specifics, see:
 
@@ -95,7 +95,7 @@ flowchart TD
 - SDLC indexing: Receives events for issues, merge requests, pipelines, projects, namespaces, and other SDLC entities
 - Code indexing: Receives `p_knowledge_graph_code_indexing_tasks` to trigger repository indexing and `knowledge_graph_enabled_namespaces` to trigger namespace backfill
 
-Siphon uses PostgreSQL's logical replication to capture changes from the write-ahead log (WAL), publishing them as protobuf messages to NATS JetStream. This decouples the Knowledge Graph from the production database.
+Siphon uses PostgreSQL's logical replication to capture changes from the write-ahead log (WAL), publishing them as protobuf messages to NATS JetStream. This decouples Orbit from the production database.
 
 ### 2. NATS JetStream and NATS KV (Event Broker and Distributed Coordination)
 

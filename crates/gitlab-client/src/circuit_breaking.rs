@@ -109,7 +109,7 @@ mod tests {
     use tokio::net::TcpListener;
 
     use super::*;
-    use gkg_server_config::GitlabClientConfiguration;
+    use orbit_server_config::GitlabClientConfiguration;
 
     #[derive(Clone, Copy)]
     struct TestService;

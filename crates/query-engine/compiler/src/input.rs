@@ -1,6 +1,7 @@
 //! Security validation (identifiers, SQL injection) is handled by JSON Schema in lib.rs.
 
 use ontology::constants::{DEFAULT_PRIMARY_KEY, SOURCE_ID_COLUMN, TARGET_ID_COLUMN};
+use orbit_utils::traversal_path::TraversalPath;
 use serde::{Deserialize, Deserializer};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
@@ -102,6 +103,9 @@ pub struct Input {
     ///   only ever a small project-bounded set of paths)
     #[serde(skip)]
     pub hydration_dynamic: bool,
+
+    #[serde(skip)]
+    pub path_segment_budget: Option<usize>,
 }
 
 /// Text index metadata for a column, used by the optimizer to rewrite
@@ -259,6 +263,7 @@ impl Default for Input {
             entity_auth: HashMap::new(),
             compiler: CompilerMetadata::default(),
             hydration_dynamic: false,
+            path_segment_budget: None,
         }
     }
 }
@@ -336,6 +341,10 @@ pub struct InputNode {
     /// into SQL. Applied in-memory after hydration resolves the column values.
     #[serde(skip)]
     pub virtual_filters: Vec<(String, InputFilter)>,
+    /// Virtual columns injected by normalize because they are filtered but
+    /// not selected. Resolved for filtering, then stripped from the response.
+    #[serde(skip)]
+    pub filter_injected_virtual_columns: Vec<String>,
     #[serde(skip)]
     pub has_traversal_path: bool,
     /// Whether the entity is declared `global: true` in the ontology.
@@ -345,7 +354,7 @@ pub struct InputNode {
     /// hydration pipeline to inject `startsWith(traversal_path, tp)` into hydration
     /// queries, pruning granules through the primary key.
     #[serde(skip)]
-    pub traversal_paths: Vec<String>,
+    pub traversal_paths: Vec<TraversalPath>,
 }
 
 impl Default for InputNode {
@@ -362,6 +371,7 @@ impl Default for InputNode {
             redaction_id_column: DEFAULT_PRIMARY_KEY.to_string(),
             virtual_columns: Vec::new(),
             virtual_filters: Vec::new(),
+            filter_injected_virtual_columns: Vec::new(),
             has_traversal_path: false,
             is_global: false,
             traversal_paths: Vec::new(),
@@ -577,7 +587,7 @@ pub struct InputRelationship {
     /// the edge scan inherits the PK prefix instead of the broad org-wide one.
     /// Lossless because an edge row's `traversal_path` is its source entity's.
     #[serde(skip)]
-    pub scope_prefix: Option<String>,
+    pub scope_prefix: Option<TraversalPath>,
     /// Whether every resolved variant of this relationship keeps both endpoints
     /// in the same namespace. Set by `restrict`. Only scope-preserving FK edges
     /// link a node to an intrinsic child whose lifecycle is coupled to the

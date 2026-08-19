@@ -46,13 +46,10 @@ pub fn hash_name(s: &str) -> u64 {
     h.finish()
 }
 
-/// A hash-keyed index map that forces verification on every lookup.
-///
-/// The u64 keys avoid string pointer chases during HashMap probing, but hash
-/// collisions (~10⁻⁹ per lookup) can return wrong entries. VerifiedMap makes
-/// it structurally impossible to consume unverified results.
+/// Intern-keyed index map. Keys are `StrId` from the graph's `StringPool`,
+/// so lookups are integer-keyed HashMap probes with no string comparison.
 pub struct VerifiedMap<const N: usize = 8> {
-    inner: FxHashMap<u64, SmallVec<[NodeIndex; N]>>,
+    inner: FxHashMap<StrId, SmallVec<[NodeIndex; N]>>,
 }
 
 impl<const N: usize> VerifiedMap<N> {
@@ -68,61 +65,36 @@ impl<const N: usize> VerifiedMap<N> {
         }
     }
 
-    pub fn insert(&mut self, key: &str, value: NodeIndex) {
-        self.inner.entry(hash_name(key)).or_default().push(value);
+    pub fn insert(&mut self, key: StrId, value: NodeIndex) {
+        self.inner.entry(key).or_default().push(value);
     }
 
-    /// The verifier receives each candidate `NodeIndex` and must check that
-    /// the actual stored data matches `key` (e.g. `|idx| graph.def(idx).name == key`).
-    pub fn lookup(
-        &self,
-        key: &str,
-        verify: impl Fn(NodeIndex) -> bool,
-    ) -> SmallVec<[NodeIndex; N]> {
-        match self.inner.get(&hash_name(key)) {
-            Some(candidates) => candidates
-                .iter()
-                .copied()
-                .filter(|idx| verify(*idx))
-                .collect(),
-            None => SmallVec::new(),
+    pub fn lookup(&self, key: StrId) -> &[NodeIndex] {
+        match self.inner.get(&key) {
+            Some(candidates) => candidates.as_slice(),
+            None => &[],
         }
     }
 
-    /// Sort all entry lists for deterministic lookup order. Call once after
-    /// all insertions are complete.
     pub fn sort_all(&mut self, key_fn: impl Fn(NodeIndex) -> String) {
         for entries in self.inner.values_mut() {
             entries.sort_by_cached_key(|idx| key_fn(*idx));
         }
     }
 
-    /// Like [`lookup`] but appends to `out` instead of allocating.
-    /// Returns `true` if any verified entries were found.
-    pub fn lookup_into(
-        &self,
-        key: &str,
-        verify: impl Fn(NodeIndex) -> bool,
-        out: &mut Vec<NodeIndex>,
-    ) -> bool {
-        let Some(candidates) = self.inner.get(&hash_name(key)) else {
+    pub fn lookup_into(&self, key: StrId, out: &mut Vec<NodeIndex>) -> bool {
+        let Some(candidates) = self.inner.get(&key) else {
             return false;
         };
-        let before = out.len();
-        for &idx in candidates {
-            if verify(idx) {
-                out.push(idx);
-            }
+        if candidates.is_empty() {
+            return false;
         }
-        out.len() > before
+        out.extend_from_slice(candidates);
+        true
     }
 
-    /// Conservative existence check. A hash collision can produce a false
-    /// positive (name absent but hash matches another entry), which causes
-    /// extra work but never wrong edges — callers use this for early-skip
-    /// decisions where "maybe yes" is safe.
-    pub fn contains(&self, key: &str) -> bool {
-        self.inner.contains_key(&hash_name(key))
+    pub fn contains(&self, key: StrId) -> bool {
+        self.inner.contains_key(&key)
     }
 
     pub fn is_empty(&self) -> bool {
@@ -140,11 +112,9 @@ impl<const N: usize> Default for VerifiedMap<N> {
     }
 }
 
-/// Two-level hash-keyed index map for scope → member lookups.
-///
-/// `nested_defs[hash(scope_fqn)][hash(member_name)]` → `SmallVec<[NodeIndex; 8]>`
+/// Two-level intern-keyed index map for scope → member lookups.
 pub struct NestedMap {
-    inner: FxHashMap<u64, FxHashMap<u64, SmallVec<[NodeIndex; 8]>>>,
+    inner: FxHashMap<StrId, FxHashMap<StrId, SmallVec<[NodeIndex; 8]>>>,
 }
 
 impl NestedMap {
@@ -154,59 +124,37 @@ impl NestedMap {
         }
     }
 
-    pub fn insert(&mut self, scope: &str, member: &str, value: NodeIndex) {
+    pub fn insert(&mut self, scope: StrId, member: StrId, value: NodeIndex) {
         self.inner
-            .entry(hash_name(scope))
+            .entry(scope)
             .or_default()
-            .entry(hash_name(member))
+            .entry(member)
             .or_default()
             .push(value);
     }
 
-    /// Scope verification is implicit: callers pass a scope string that was
-    /// already verified against the graph (e.g. from `def_fqn(start_node)`).
-    /// If two scope FQNs hash-collide, entries from the wrong scope appear
-    /// in the inner map, but `verify_member` filters them as long as the
-    /// member names don't also collide (independent events, ~10⁻¹⁸).
-    pub fn lookup(
-        &self,
-        scope: &str,
-        member: &str,
-        verify_member: impl Fn(NodeIndex) -> bool,
-    ) -> SmallVec<[NodeIndex; 8]> {
-        let Some(inner) = self.inner.get(&hash_name(scope)) else {
-            return SmallVec::new();
+    pub fn lookup(&self, scope: StrId, member: StrId) -> &[NodeIndex] {
+        let Some(inner) = self.inner.get(&scope) else {
+            return &[];
         };
-        let Some(candidates) = inner.get(&hash_name(member)) else {
-            return SmallVec::new();
+        let Some(candidates) = inner.get(&member) else {
+            return &[];
         };
-        candidates
-            .iter()
-            .copied()
-            .filter(|idx| verify_member(*idx))
-            .collect()
+        candidates.as_slice()
     }
 
-    pub fn lookup_into(
-        &self,
-        scope: &str,
-        member: &str,
-        verify_member: impl Fn(NodeIndex) -> bool,
-        out: &mut Vec<NodeIndex>,
-    ) -> bool {
-        let Some(inner) = self.inner.get(&hash_name(scope)) else {
+    pub fn lookup_into(&self, scope: StrId, member: StrId, out: &mut Vec<NodeIndex>) -> bool {
+        let Some(inner) = self.inner.get(&scope) else {
             return false;
         };
-        let Some(candidates) = inner.get(&hash_name(member)) else {
+        let Some(candidates) = inner.get(&member) else {
             return false;
         };
-        let before = out.len();
-        for &idx in candidates {
-            if verify_member(idx) {
-                out.push(idx);
-            }
+        if candidates.is_empty() {
+            return false;
         }
-        out.len() > before
+        out.extend_from_slice(candidates);
+        true
     }
 
     pub fn is_empty(&self) -> bool {
@@ -316,7 +264,7 @@ impl Default for GraphIndexes {
     }
 }
 
-pub use gkg_utils::strings::{StrId, StringPool};
+pub use orbit_utils::strings::{StrId, StringPool};
 
 /// Pool-backed definition. All strings are [`StrId`] referencing the graph's
 /// [`StringPool`].
@@ -471,7 +419,7 @@ impl Default for FileArena {
     }
 }
 
-pub use gkg_utils::strings::ScratchBuf;
+pub use orbit_utils::strings::ScratchBuf;
 
 #[cfg(test)]
 mod tests {
@@ -479,64 +427,67 @@ mod tests {
 
     #[test]
     fn verified_map_insert_and_lookup() {
+        let mut pool = StringPool::new();
+        let foo = pool.alloc("foo");
+        let bar = pool.alloc("bar");
         let mut map = VerifiedMap::<8>::new();
         let n0 = NodeIndex::new(0);
         let n1 = NodeIndex::new(1);
+        map.insert(foo, n0);
+        map.insert(bar, n1);
 
-        map.insert("foo", n0);
-        map.insert("bar", n1);
-
-        let result = map.lookup("foo", |idx| idx == n0);
-        assert_eq!(result.as_slice(), &[n0]);
-
-        let result = map.lookup("bar", |idx| idx == n1);
-        assert_eq!(result.as_slice(), &[n1]);
+        assert_eq!(map.lookup(foo), &[n0]);
+        assert_eq!(map.lookup(bar), &[n1]);
     }
 
     #[test]
     fn verified_map_multiple_values_same_key() {
+        let mut pool = StringPool::new();
+        let foo = pool.alloc("foo");
         let mut map = VerifiedMap::<8>::new();
         let n0 = NodeIndex::new(0);
         let n1 = NodeIndex::new(1);
+        map.insert(foo, n0);
+        map.insert(foo, n1);
 
-        map.insert("foo", n0);
-        map.insert("foo", n1);
-
-        let result = map.lookup("foo", |_| true);
+        let result = map.lookup(foo);
         assert_eq!(result.len(), 2);
         assert!(result.contains(&n0));
         assert!(result.contains(&n1));
-
-        let result = map.lookup("foo", |idx| idx == n1);
-        assert_eq!(result.as_slice(), &[n1]);
     }
 
     #[test]
     fn verified_map_miss_returns_empty() {
+        let mut pool = StringPool::new();
+        let missing = pool.alloc("missing");
         let map = VerifiedMap::<8>::new();
-        let result = map.lookup("missing", |_| true);
-        assert!(result.is_empty());
+        assert!(map.lookup(missing).is_empty());
     }
 
     #[test]
-    fn verified_map_contains_is_conservative() {
+    fn verified_map_contains() {
+        let mut pool = StringPool::new();
+        let foo = pool.alloc("foo");
+        let bar = pool.alloc("bar");
         let mut map = VerifiedMap::<8>::new();
-        map.insert("foo", NodeIndex::new(0));
+        map.insert(foo, NodeIndex::new(0));
 
-        assert!(map.contains("foo"));
-        assert!(!map.contains("bar"));
+        assert!(map.contains(foo));
+        assert!(!map.contains(bar));
     }
 
     #[test]
     fn verified_map_lookup_into_appends() {
+        let mut pool = StringPool::new();
+        let foo = pool.alloc("foo");
         let mut map = VerifiedMap::<8>::new();
         let n0 = NodeIndex::new(0);
         let n1 = NodeIndex::new(1);
-        map.insert("foo", n0);
-        map.insert("foo", n1);
+        map.insert(foo, n0);
+        map.insert(foo, n1);
 
         let mut out = vec![NodeIndex::new(99)];
-        let found = map.lookup_into("foo", |_| true, &mut out);
+        let found = map.lookup_into(foo, &mut out);
         assert!(found);
         assert_eq!(out.len(), 3);
         assert_eq!(out[0], NodeIndex::new(99));
@@ -546,96 +497,79 @@ mod tests {
 
     #[test]
     fn verified_map_lookup_into_returns_false_on_miss() {
+        let mut pool = StringPool::new();
+        let missing = pool.alloc("missing");
         let map = VerifiedMap::<8>::new();
         let mut out = Vec::new();
-        let found = map.lookup_into("missing", |_| true, &mut out);
+        let found = map.lookup_into(missing, &mut out);
         assert!(!found);
         assert!(out.is_empty());
     }
 
     #[test]
-    fn verified_map_verifier_rejects_all() {
-        let mut map = VerifiedMap::<8>::new();
-        map.insert("foo", NodeIndex::new(0));
-        map.insert("foo", NodeIndex::new(1));
-
-        let result = map.lookup("foo", |_| false);
-        assert!(result.is_empty());
-
-        let mut out = Vec::new();
-        let found = map.lookup_into("foo", |_| false, &mut out);
-        assert!(!found);
-    }
-
-    #[test]
     fn nested_map_insert_and_lookup() {
+        let mut pool = StringPool::new();
+        let foo = pool.alloc("Foo");
+        let bar = pool.alloc("bar");
         let mut map = NestedMap::new();
         let n0 = NodeIndex::new(0);
-
-        map.insert("Foo", "bar", n0);
-
-        let result = map.lookup("Foo", "bar", |idx| idx == n0);
-        assert_eq!(result.as_slice(), &[n0]);
+        map.insert(foo, bar, n0);
+        assert_eq!(map.lookup(foo, bar), &[n0]);
     }
 
     #[test]
     fn nested_map_different_scopes() {
+        let mut pool = StringPool::new();
+        let foo = pool.alloc("Foo");
+        let bar_scope = pool.alloc("Bar");
+        let method = pool.alloc("method");
         let mut map = NestedMap::new();
         let n0 = NodeIndex::new(0);
         let n1 = NodeIndex::new(1);
+        map.insert(foo, method, n0);
+        map.insert(bar_scope, method, n1);
 
-        map.insert("Foo", "method", n0);
-        map.insert("Bar", "method", n1);
-
-        let result = map.lookup("Foo", "method", |idx| idx == n0);
-        assert_eq!(result.as_slice(), &[n0]);
-
-        let result = map.lookup("Bar", "method", |idx| idx == n1);
-        assert_eq!(result.as_slice(), &[n1]);
+        assert_eq!(map.lookup(foo, method), &[n0]);
+        assert_eq!(map.lookup(bar_scope, method), &[n1]);
     }
 
     #[test]
     fn nested_map_miss_scope() {
+        let mut pool = StringPool::new();
+        let foo = pool.alloc("Foo");
+        let bar = pool.alloc("bar");
+        let missing = pool.alloc("Missing");
         let mut map = NestedMap::new();
-        map.insert("Foo", "bar", NodeIndex::new(0));
-
-        let result = map.lookup("Missing", "bar", |_| true);
-        assert!(result.is_empty());
+        map.insert(foo, bar, NodeIndex::new(0));
+        assert!(map.lookup(missing, bar).is_empty());
     }
 
     #[test]
     fn nested_map_miss_member() {
+        let mut pool = StringPool::new();
+        let foo = pool.alloc("Foo");
+        let bar = pool.alloc("bar");
+        let missing = pool.alloc("missing");
         let mut map = NestedMap::new();
-        map.insert("Foo", "bar", NodeIndex::new(0));
-
-        let result = map.lookup("Foo", "missing", |_| true);
-        assert!(result.is_empty());
+        map.insert(foo, bar, NodeIndex::new(0));
+        assert!(map.lookup(foo, missing).is_empty());
     }
 
     #[test]
     fn nested_map_lookup_into_appends() {
+        let mut pool = StringPool::new();
+        let foo = pool.alloc("Foo");
+        let bar = pool.alloc("bar");
         let mut map = NestedMap::new();
         let n0 = NodeIndex::new(0);
-        map.insert("Foo", "bar", n0);
+        map.insert(foo, bar, n0);
 
         let mut out = vec![NodeIndex::new(99)];
-        let found = map.lookup_into("Foo", "bar", |_| true, &mut out);
+        let found = map.lookup_into(foo, bar, &mut out);
         assert!(found);
         assert_eq!(out.len(), 2);
         assert_eq!(out[0], NodeIndex::new(99));
         assert_eq!(out[1], n0);
-    }
-
-    #[test]
-    fn nested_map_verifier_filters() {
-        let mut map = NestedMap::new();
-        let n0 = NodeIndex::new(0);
-        let n1 = NodeIndex::new(1);
-        map.insert("Foo", "bar", n0);
-        map.insert("Foo", "bar", n1);
-
-        let result = map.lookup("Foo", "bar", |idx| idx == n1);
-        assert_eq!(result.as_slice(), &[n1]);
     }
 
     #[test]
@@ -707,16 +641,21 @@ mod tests {
         let n1 = NodeIndex::new(1);
         let n2 = NodeIndex::new(2);
 
-        indexes.by_fqn.insert("com.Foo", n0);
-        indexes.by_name.insert("Foo", n1);
-        indexes.nested.insert("com.Foo", "bar", n2);
+        let mut pool = StringPool::new();
+        let com_foo = pool.alloc("com.Foo");
+        let foo = pool.alloc("Foo");
+        let bar = pool.alloc("bar");
 
-        assert_eq!(indexes.by_fqn.lookup("com.Foo", |_| true).len(), 1);
-        assert_eq!(indexes.by_name.lookup("Foo", |_| true).len(), 1);
-        assert_eq!(indexes.nested.lookup("com.Foo", "bar", |_| true).len(), 1);
+        indexes.by_fqn.insert(com_foo, n0);
+        indexes.by_name.insert(foo, n1);
+        indexes.nested.insert(com_foo, bar, n2);
 
-        assert!(indexes.by_fqn.lookup("Foo", |_| true).is_empty());
-        assert!(indexes.by_name.lookup("com.Foo", |_| true).is_empty());
+        assert_eq!(indexes.by_fqn.lookup(com_foo).len(), 1);
+        assert_eq!(indexes.by_name.lookup(foo).len(), 1);
+        assert_eq!(indexes.nested.lookup(com_foo, bar).len(), 1);
+
+        assert!(indexes.by_fqn.lookup(foo).is_empty());
+        assert!(indexes.by_name.lookup(com_foo).is_empty());
     }
 
     #[test]
@@ -739,12 +678,11 @@ mod tests {
     }
 
     #[test]
-    fn string_pool_duplicates_not_deduped() {
+    fn string_pool_deduplicates() {
         let mut pool = StringPool::new();
         let a = pool.alloc("same");
         let b = pool.alloc("same");
-        assert_ne!(a, b);
-        assert_eq!(pool.get(a), pool.get(b));
+        assert_eq!(a, b);
     }
 
     #[test]

@@ -142,7 +142,7 @@ Rails does **not** emit billing events. It acts as a proxy only. Billing events 
 
 | Emitter | What it captures | Transport | Notes |
 |---------|-----------------|-----------|-------|
-| **GKG webserver** (Rust) | Every query execution: source type, query type, namespace, execution metrics | Snowplow `billable_usage` event via `labkit-rs`, OIDC-authenticated ([orbit/kg#307](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/307)) | Source of truth for per-query billing. Receives `source_type` from Rails via JWT claims. The `gkg-billing` crate builds and emits the event; the single `Claims` to `BillingInputs` conversion lives at `crates/gkg-server/src/billing_adapter.rs`. |
+| **GKG webserver** (Rust) | Every query execution: source type, query type, namespace, execution metrics | Snowplow `billable_usage` event via `labkit-rs`, OIDC-authenticated ([orbit/kg#307](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/307)) | Source of truth for per-query billing. Receives `source_type` from Rails via JWT claims. The `orbit-billing` crate builds and emits the event; the single `Claims` to `BillingInputs` conversion lives at `crates/orbit-server/src/billing_adapter.rs`. |
 | **GKG indexer** (Rust) | Indexing volume: entities indexed, bytes written, namespace | Same `labkit-rs` Snowplow path (planned) | Drives GB-based pricing on self-managed. `EngineMetrics` already tracks `destination_rows_written` and `destination_bytes_written`. |
 | **AIGW/DWS** (Python) | DAP usage, independent of Orbit | Snowplow `BillingEventsClient` (`iglu:com.gitlab/billable_usage/jsonschema/1-0-2`) | Emits the existing `DAP_FLOW_ON_COMPLETION` event as usual. It does not annotate GKG calls. GKG-from-DAP metering is the `source_type = 'dws'` GKG event, zero-rated by multiplier. |
 
@@ -223,7 +223,7 @@ dws -[#7B1FA2]> snowplow : DAP_FLOW_ON_COMPLETION (DAP usage)
 `source_type` is propagated exclusively via JWT claims and is **not** added to the gRPC proto message body. This is intentional: the JWT is signed by Rails with the shared HS256 secret, so GKG can trust the value. An unsigned proto field in the request body would carry no trust guarantee and could be spoofed by any caller.
 
 ```rust
-// In crates/gkg-server/src/auth/claims.rs
+// In crates/orbit-server/src/auth/claims.rs
 pub struct Claims {
     // ... existing fields ...
     pub source_type: SourceType,        // required claim; tokens without it are rejected
@@ -370,7 +370,7 @@ See [orbit/knowledge-graph#471](https://gitlab.com/gitlab-org/orbit/knowledge-gr
 
 GKG emits billable events as Snowplow `billable_usage` events through `labkit-rs`, authenticated with OIDC ([orbit/kg#307](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/307)).
 
-**Webserver events.** Emitted after each successful query execution by the `BillingObserver` in the `gkg-billing` crate. The single `Claims` to `BillingInputs` conversion is the SOX seam at `crates/gkg-server/src/billing_adapter.rs`. The event carries:
+**Webserver events.** Emitted after each successful query execution by the `BillingObserver` in the `orbit-billing` crate. The single `Claims` to `BillingInputs` conversion is the SOX seam at `crates/orbit-server/src/billing_adapter.rs`. The event carries:
 
 | Field | Source | Notes |
 |-------|--------|-------|
@@ -402,7 +402,7 @@ GKG emits billable events as Snowplow `billable_usage` events through `labkit-rs
 `source_type` is attached where channel breakdown matters for billing and operations: the quota metric families and the `orbit_query` analytics context.
 
 ```rust
-// crates/gkg-billing/src/quota/metrics.rs: source_type labels the quota decision counters
+// crates/orbit-billing/src/quota/metrics.rs: source_type labels the quota decision counters
 KeyValue::new("source_type", inputs.source_type.clone());
 ```
 
@@ -434,9 +434,9 @@ let needs_quota_check = matches!(
 
 ### 1.7 JWT claims change
 
-`source_type` is carried exclusively in the JWT claims, and the gRPC proto (`gkg.proto`) is **not** modified. Adding `source_type` to the proto request body would create an unsigned, untrusted field that any caller could set to any value, enabling spoofing. The JWT is signed by Rails with the shared HS256 secret, so GKG can trust the claim.
+`source_type` is carried exclusively in the JWT claims, and the gRPC proto (`orbit.proto`) is **not** modified. Adding `source_type` to the proto request body would create an unsigned, untrusted field that any caller could set to any value, enabling spoofing. The JWT is signed by Rails with the shared HS256 secret, so GKG can trust the claim.
 
-`source_type` is a required field on the JWT claims struct in `crates/gkg-server/src/auth/claims.rs`:
+`source_type` is a required field on the JWT claims struct in `crates/orbit-server/src/auth/claims.rs`:
 
 ```rust
 pub struct Claims {
@@ -779,7 +779,7 @@ The controls that apply to GKG billing code fall into three categories:
 
 ### GKG SOX compliance checklist
 
-1. **Isolate billing code.** Billing event emission lives in a dedicated crate, `crates/gkg-billing/`, with a single `Claims` to `BillingInputs` conversion seam at `crates/gkg-server/src/billing_adapter.rs`. The authoring rules for this boundary are in `docs/dev/sox-billing-boundary.md`. This keeps CODEOWNERS scoping practical and the SOX audit surface small.
+1. **Isolate billing code.** Billing event emission lives in a dedicated crate, `crates/orbit-billing/`, with a single `Claims` to `BillingInputs` conversion seam at `crates/orbit-server/src/billing_adapter.rs`. The authoring rules for this boundary are in `docs/dev/sox-billing-boundary.md`. This keeps CODEOWNERS scoping practical and the SOX audit surface small.
 2. **Set up CODEOWNERS.** `.gitlab/CODEOWNERS` requires approval from designated billing code owners on the billing crate and the adapter seam. Satisfies PC.2 (change approval) and LA.4 (privileged access).
 3. **Finalize SOX scope.** The detailed control scoping is tracked in [orbit/knowledge-graph#507](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/507) and ADR 013.
 

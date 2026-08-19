@@ -3,6 +3,8 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 log "E2E Setup (SHA: $E2E_SHA)"
 
+"$E2E_DIR/scripts/cleanup-stale-namespaces.sh"
+
 # Clean cluster-scoped resources orphaned by previous e2e runs whose owning
 # namespace has been torn down. The GitLab chart 9.11.x installs cluster-scoped
 # resources (GatewayClass "gitlab-gw", ClusterRole/ClusterRoleBinding for the
@@ -44,19 +46,19 @@ done
 
 # Generate random credentials
 log "Generating secrets"
-E2E_JWT_KEY=$(openssl rand -base64 32)
-E2E_CH_DEFAULT_PASS=$(openssl rand -base64 24)
-E2E_CH_SIPHON_PASS=$(openssl rand -base64 24)
-E2E_CH_DATALAKE_PASS=$(openssl rand -base64 24)
-E2E_CH_GRAPH_PASS=$(openssl rand -base64 24)
-E2E_CH_GRAPH_READ_PASS=$(openssl rand -base64 24)
-E2E_PG_SIPHON_PASS=$(openssl rand -base64 24)
-E2E_CH_GITLAB_PASS=$(openssl rand -base64 24)
-E2E_GITLAB_ROOT_PASS=$(openssl rand -base64 24)
-E2E_PG_GITLAB_PASS=$(openssl rand -base64 24)
-E2E_PG_POSTGRES_PASS=$(openssl rand -base64 24)
-E2E_PG_REPLICATION_PASS=$(openssl rand -base64 24)
-E2E_REDIS_PASS=$(openssl rand -base64 24)
+: "${E2E_JWT_KEY:=$(openssl rand -base64 32)}"
+: "${E2E_CH_DEFAULT_PASS:=$(openssl rand -base64 24)}"
+: "${E2E_CH_SIPHON_PASS:=$(openssl rand -base64 24)}"
+: "${E2E_CH_DATALAKE_PASS:=$(openssl rand -base64 24)}"
+: "${E2E_CH_GRAPH_PASS:=$(openssl rand -base64 24)}"
+: "${E2E_CH_GRAPH_READ_PASS:=$(openssl rand -base64 24)}"
+: "${E2E_PG_SIPHON_PASS:=$(openssl rand -base64 24)}"
+: "${E2E_CH_GITLAB_PASS:=$(openssl rand -base64 24)}"
+: "${E2E_GITLAB_ROOT_PASS:=$(openssl rand -base64 24)}"
+: "${E2E_PG_GITLAB_PASS:=$(openssl rand -base64 24)}"
+: "${E2E_PG_POSTGRES_PASS:=$(openssl rand -base64 24)}"
+: "${E2E_PG_REPLICATION_PASS:=$(openssl rand -base64 24)}"
+: "${E2E_REDIS_PASS:=$(openssl rand -base64 24)}"
 export E2E_JWT_KEY E2E_CH_DEFAULT_PASS E2E_CH_SIPHON_PASS E2E_CH_DATALAKE_PASS
 export E2E_CH_GRAPH_PASS E2E_CH_GRAPH_READ_PASS E2E_PG_SIPHON_PASS E2E_CH_GITLAB_PASS
 export E2E_GITLAB_ROOT_PASS

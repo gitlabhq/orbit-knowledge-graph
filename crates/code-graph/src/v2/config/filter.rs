@@ -8,8 +8,8 @@
 use std::path::Path;
 use std::sync::LazyLock;
 
-use gkg_utils::fs_stream::{CapExceeded, Counter, Decision, FileInventoryEntry, FileStreamHooks};
 use globset::{Glob, GlobSet, GlobSetBuilder};
+use orbit_utils::fs_stream::{CapExceeded, Counter, Decision, FileInventoryEntry, FileStreamHooks};
 use rustc_hash::FxHashMap;
 
 use super::Language;

@@ -289,6 +289,38 @@ fn sequential_read_consistency() {
 }
 
 #[test]
+fn unindexable_repo_records_error_in_manifest() {
+    let data_dir = tempfile::TempDir::new().unwrap();
+    let repo = tempfile::TempDir::new().unwrap();
+    // A commitless repo is discovered (.git exists) but git_info fails on HEAD.
+    git(repo.path(), &["init"]);
+
+    let ok = orbit_cmd()
+        .args(["index", repo.path().to_str().unwrap()])
+        .env("ORBIT_DATA_DIR", data_dir.path())
+        .output()
+        .unwrap()
+        .status
+        .success();
+    assert!(!ok, "indexing a commitless repo should report failure");
+
+    let manifest = orbit_sql(
+        "SELECT CAST(status AS VARCHAR) AS status, error_message FROM _orbit_manifest",
+        data_dir.path(),
+    );
+    let rows = rows(&manifest);
+    assert_eq!(rows.len(), 1, "expected one error row, got {rows:?}");
+    assert_eq!(rows[0]["status"], "error");
+    assert!(
+        rows[0]["error_message"]
+            .as_str()
+            .is_some_and(|m| !m.is_empty()),
+        "error row must carry a reason: {:?}",
+        rows[0]
+    );
+}
+
+#[test]
 fn nested_repos_indexed_separately() {
     let data_dir = tempfile::TempDir::new().unwrap();
     let workspace = tempfile::TempDir::new().unwrap();
@@ -451,6 +483,77 @@ fn schema_errors_when_db_missing() {
 }
 
 #[test]
+fn index_errors_when_path_has_no_git_repository() {
+    let data_dir = tempfile::TempDir::new().unwrap();
+    let not_a_repo = tempfile::TempDir::new().unwrap();
+    std::fs::write(
+        not_a_repo.path().join("a.go"),
+        "package main\nfunc Alpha() {}\n",
+    )
+    .unwrap();
+
+    let (_, stderr, ok) = run_cmd(
+        &["index", not_a_repo.path().to_str().unwrap()],
+        data_dir.path(),
+    );
+    assert!(!ok, "index should fail when the path has no git repository");
+    assert!(
+        stderr.contains("no git repository found"),
+        "expected no-repository error: {stderr}"
+    );
+}
+
+#[test]
+fn index_errors_when_repository_has_no_commits() {
+    let data_dir = tempfile::TempDir::new().unwrap();
+    let empty_repo = tempfile::TempDir::new().unwrap();
+    git(empty_repo.path(), &["init", "--quiet"]);
+
+    let (_, stderr, ok) = run_cmd(
+        &["index", empty_repo.path().to_str().unwrap()],
+        data_dir.path(),
+    );
+    assert!(!ok, "index should fail when the repository has no commits");
+    assert!(
+        stderr.contains("has no commits yet"),
+        "expected no-commits error: {stderr}"
+    );
+    assert!(
+        !stderr.contains("ambiguous argument"),
+        "raw git error should not leak: {stderr}"
+    );
+}
+
+#[test]
+fn index_does_not_report_an_unreadable_repository_as_empty() {
+    let data_dir = tempfile::TempDir::new().unwrap();
+    let broken = tempfile::TempDir::new().unwrap();
+    git(broken.path(), &["init", "--quiet"]);
+    git(
+        broken.path(),
+        &[
+            "-c",
+            "user.email=t@t",
+            "-c",
+            "user.name=t",
+            "commit",
+            "--allow-empty",
+            "--quiet",
+            "-m",
+            "x",
+        ],
+    );
+    std::fs::remove_dir_all(broken.path().join(".git").join("objects")).unwrap();
+
+    let (_, stderr, ok) = run_cmd(&["index", broken.path().to_str().unwrap()], data_dir.path());
+    assert!(!ok, "index should fail on a repository git cannot read");
+    assert!(
+        !stderr.contains("has no commits yet"),
+        "an unreadable repository must not be reported as empty: {stderr}"
+    );
+}
+
+#[test]
 fn schema_scoped_excludes_unrequested_tables() {
     let data_dir = tempfile::TempDir::new().unwrap();
     let repo = create_test_repo();
@@ -591,6 +694,33 @@ fn mcp_bad_sql_is_recoverable_tool_error() {
         "missing statement index: {msg}"
     );
     assert!(msg.contains("does_not_exist"), "missing SQL preview: {msg}");
+}
+
+#[test]
+fn mcp_index_on_non_git_path_is_recoverable_tool_error() {
+    let data_dir = tempfile::TempDir::new().unwrap();
+    let not_a_repo = tempfile::TempDir::new().unwrap();
+    std::fs::write(
+        not_a_repo.path().join("a.go"),
+        "package main\nfunc Alpha() {}\n",
+    )
+    .unwrap();
+
+    let resps = mcp_roundtrip(
+        data_dir.path(),
+        &[mcp_tool_call(
+            1,
+            "index",
+            json!({"path": not_a_repo.path()}),
+        )],
+    );
+
+    assert_eq!(resps[0]["result"]["isError"], true);
+    let msg = mcp_tool_text(&resps[0]);
+    assert!(
+        msg.contains("no git repository found"),
+        "expected no-repository error: {msg}"
+    );
 }
 
 #[test]

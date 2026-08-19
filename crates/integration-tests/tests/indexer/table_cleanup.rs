@@ -1,8 +1,8 @@
 use clickhouse_client::{ClickHouseConfigurationExt, FromArrowColumn};
-use gkg_server_config::TableCleanupConfig;
 use indexer::orchestrator::scheduled::table_cleanup::TableCleanup;
 use indexer::orchestrator::scheduled::{ScheduledTask, ScheduledTaskMetrics};
 use integration_testkit::{GRAPH_SCHEMA_SQL, TestContext, t};
+use orbit_server_config::TableCleanupConfig;
 
 fn build_tombstone_sweep_task(context: &TestContext) -> TableCleanup {
     let ontology = ontology::Ontology::load_embedded().unwrap();

@@ -16,7 +16,7 @@ Accepted
 
 ## Context
 
-Orbit (the GitLab Knowledge Graph, GKG) exposes agent-facing tools that let
+Orbit exposes agent-facing tools that let
 LLMs query structured graph data instead of assembling answers from dozens of
 REST calls. `query_graph` executes a query written in the condensed graph DSL.
 `get_graph_schema` returns the ontology with progressive disclosure.

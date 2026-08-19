@@ -7,9 +7,10 @@
 
 use std::sync::Arc;
 
-use gkg_analytics::AnalyticsTracker;
-use gkg_server_config::AnalyticsConfig;
 use labkit_events::StructuredEvent;
+use orbit_analytics::AnalyticsTracker;
+use orbit_server_config::AnalyticsConfig;
+use orbit_utils::traversal_path::TraversalPath;
 use uuid::Uuid;
 
 use super::context::{CodeInputs, SdlcInputs, TriggerType, build_code, build_common, build_sdlc};
@@ -25,7 +26,7 @@ pub struct SnowplowIndexingObserver {
     pipeline_type: Option<PipelineType>,
     dispatch_id: Option<Uuid>,
     campaign_id: Option<String>,
-    traversal_path: Option<String>,
+    traversal_path: Option<TraversalPath>,
     namespace_id: Option<i64>,
     indexing_mode: Option<IndexingMode>,
 
@@ -95,10 +96,7 @@ impl SnowplowIndexingObserver {
     /// namespace with no root (globally-scoped SDLC runs have neither).
     fn namespace_ids(&self) -> (Option<i64>, Option<i64>) {
         match &self.traversal_path {
-            Some(path) => (
-                gkg_utils::traversal_path::leaf_id(path),
-                gkg_utils::traversal_path::top_level_namespace_id(path),
-            ),
+            Some(path) => (path.leaf_id(), path.top_level_namespace_id()),
             None => (self.namespace_id, None),
         }
     }
@@ -199,13 +197,13 @@ impl SnowplowIndexingObserver {
 }
 
 enum EventContext {
-    Sdlc(gkg_analytics::OrbitSdlcIndexingContext),
-    Code(gkg_analytics::OrbitCodeIndexingContext),
+    Sdlc(orbit_analytics::OrbitSdlcIndexingContext),
+    Code(orbit_analytics::OrbitCodeIndexingContext),
 }
 
 fn build_event(
     context: Result<EventContext, labkit_events::Error>,
-    common: gkg_analytics::OrbitCommonContext,
+    common: orbit_analytics::OrbitCommonContext,
 ) -> Result<StructuredEvent, labkit_events::Error> {
     let builder = StructuredEvent::builder(GKG_CATEGORY, ACTION_INDEXING_COMPLETED).context(common);
     match context? {
@@ -227,8 +225,8 @@ impl IndexingObserver for SnowplowIndexingObserver {
         self.pipeline_type = Some(pipeline_type);
     }
 
-    fn set_traversal_path(&mut self, traversal_path: Option<&str>) {
-        self.traversal_path = traversal_path.map(str::to_owned);
+    fn set_traversal_path(&mut self, traversal_path: Option<&TraversalPath>) {
+        self.traversal_path = traversal_path.cloned();
     }
 
     fn set_namespace(&mut self, namespace_id: Option<i64>) {
@@ -308,11 +306,11 @@ impl IndexingObserver for SnowplowIndexingObserver {
 mod tests {
     use std::sync::LazyLock;
 
-    use gkg_analytics::{
+    use orbit_analytics::{
         InMemoryAnalyticsTracker, ORBIT_CODE_INDEXING_SCHEMA, ORBIT_COMMON_SCHEMA,
         ORBIT_SDLC_INDEXING_SCHEMA,
     };
-    use gkg_server_config::{
+    use orbit_server_config::{
         AnalyticsConfig, DeploymentConfig, DeploymentEnvironment, DeploymentKind,
     };
     use uuid::Uuid;
@@ -338,7 +336,7 @@ mod tests {
     }
 
     fn validator(schema_name: &str) -> jsonschema::Validator {
-        let schema = gkg_analytics::load_schema_json(schema_name);
+        let schema = orbit_analytics::load_schema_json(schema_name);
         jsonschema::validator_for(&schema).expect("vendored schema compiles")
     }
 
@@ -373,7 +371,7 @@ mod tests {
         obs.set_pipeline_type(PipelineType::Code);
         obs.set_project(99, "main");
         obs.set_commit_sha(Some("deadbeef".to_string()));
-        obs.set_traversal_path(Some("42/100/200/"));
+        obs.set_traversal_path(Some(&TraversalPath::new_unchecked("42/100/200/")));
         obs.set_indexing_mode(IndexingMode::Full);
         obs.record_source_bytes(123_456);
         obs.files_processed(500, 480, 20);
@@ -422,7 +420,7 @@ mod tests {
         obs.set_campaign_id(Some("namespace-backfill".to_string()));
         obs.set_pipeline_type(PipelineType::Code);
         obs.set_project(1, "main");
-        obs.set_traversal_path(Some("42/100/"));
+        obs.set_traversal_path(Some(&TraversalPath::new_unchecked("42/100/")));
         obs.files_processed(1, 1, 0);
         obs.finish();
 
@@ -439,7 +437,7 @@ mod tests {
         obs.set_campaign_id(Some("migration-v48".to_string()));
         obs.set_pipeline_type(PipelineType::Sdlc);
         obs.set_entity_type("MergeRequest");
-        obs.set_traversal_path(Some("42/100/"));
+        obs.set_traversal_path(Some(&TraversalPath::new_unchecked("42/100/")));
         obs.set_indexing_mode(IndexingMode::Incremental);
         obs.record_datalake_read(1000, 50_000);
         obs.record_datalake_scan(80_000, 4_000_000);
@@ -505,7 +503,7 @@ mod tests {
         obs.set_dispatch_id(Uuid::nil());
         obs.set_pipeline_type(PipelineType::Sdlc);
         obs.set_entity_type("MergeRequest");
-        obs.set_traversal_path(Some("42/100/"));
+        obs.set_traversal_path(Some(&TraversalPath::new_unchecked("42/100/")));
         obs.set_indexing_mode(IndexingMode::Incremental);
         obs.record_datalake_scan(80_000, 4_000_000);
         obs.record_duration(12_000);

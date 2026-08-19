@@ -114,11 +114,7 @@ impl<'a> ImportResolver<'a> {
             if imp_path.is_empty() {
                 return vec![];
             }
-            let by_path = self
-                .graph
-                .indexes
-                .by_fqn
-                .lookup(imp_path, |idx| self.graph.def_fqn(idx) == imp_path);
+            let by_path = self.graph.lookup_fqn(imp_path);
             return by_path.to_vec();
         }
 
@@ -130,21 +126,13 @@ impl<'a> ImportResolver<'a> {
             self.scratch
                 .set_fmt(format_args!("{imp_path}{sep}{symbol_name}"))
         };
-        let by_fqn = self
-            .graph
-            .indexes
-            .by_fqn
-            .lookup(key, |idx| self.graph.def_fqn(idx) == key);
+        let by_fqn = self.graph.lookup_fqn(key);
         if !by_fqn.is_empty() {
             return by_fqn.to_vec();
         }
 
         if !imp_path.is_empty() {
-            let by_path = self
-                .graph
-                .indexes
-                .by_fqn
-                .lookup(imp_path, |idx| self.graph.def_fqn(idx) == imp_path);
+            let by_path = self.graph.lookup_fqn(imp_path);
             if !by_path.is_empty() {
                 return by_path.to_vec();
             }
@@ -190,11 +178,7 @@ impl<'a> ImportResolver<'a> {
             };
             for (m, n) in next {
                 let key = format!("{m}{sep}{n}");
-                let found = self
-                    .graph
-                    .indexes
-                    .by_fqn
-                    .lookup(&key, |idx| self.graph.def_fqn(idx) == key);
+                let found = self.graph.lookup_fqn(&key);
                 if found.is_empty() {
                     stack.push((m, n, depth + 1));
                 } else {
@@ -224,11 +208,7 @@ impl<'a> ImportResolver<'a> {
             if def.is_top_level {
                 let fqn = self.graph.str(def.fqn);
                 let key = self.scratch.set_fmt(format_args!("{fqn}{sep}{name}"));
-                let matches = self
-                    .graph
-                    .indexes
-                    .by_fqn
-                    .lookup(key, |idx| self.graph.def_fqn(idx) == key);
+                let matches = self.graph.lookup_fqn(key);
                 if !matches.is_empty() {
                     return matches.to_vec();
                 }
@@ -237,20 +217,15 @@ impl<'a> ImportResolver<'a> {
         for &did in &def_ids {
             let def = &self.graph.defs[did.0 as usize];
             let fqn_str = self.graph.str(def.fqn);
-            let mut current = fqn_str;
-            loop {
-                let key = self.scratch.set_fmt(format_args!("{current}{sep}{name}"));
-                let matches = self
-                    .graph
-                    .indexes
-                    .by_fqn
-                    .lookup(key, |idx| self.graph.def_fqn(idx) == key);
+            for prefix in crate::utils::fqn_scopes(fqn_str, sep) {
+                self.scratch.clear();
+                self.scratch.push_str(prefix);
+                self.scratch.push_str(sep);
+                self.scratch.push_str(name);
+                let key = self.scratch.as_str();
+                let matches = self.graph.lookup_fqn(key);
                 if !matches.is_empty() {
                     return matches.to_vec();
-                }
-                match current.rfind(sep) {
-                    Some(pos) => current = &current[..pos],
-                    None => break,
                 }
             }
         }
@@ -274,11 +249,7 @@ impl<'a> ImportResolver<'a> {
             {
                 let path = self.graph.str(imp.path);
                 let key = self.scratch.set_fmt(format_args!("{path}{sep}{name}"));
-                let matches = self
-                    .graph
-                    .indexes
-                    .by_fqn
-                    .lookup(key, |idx| self.graph.def_fqn(idx) == key);
+                let matches = self.graph.lookup_fqn(key);
                 if !matches.is_empty() {
                     return matches.to_vec();
                 }
@@ -303,11 +274,7 @@ impl<'a> ImportResolver<'a> {
                     let key = self
                         .scratch
                         .set_fmt(format_args!("{}{sep}{name}", &fqn_str[..sep_pos]));
-                    let matches = self
-                        .graph
-                        .indexes
-                        .by_fqn
-                        .lookup(key, |idx| self.graph.def_fqn(idx) == key);
+                    let matches = self.graph.lookup_fqn(key);
                     if !matches.is_empty() {
                         return matches.to_vec();
                     }
@@ -322,25 +289,25 @@ impl<'a> ImportResolver<'a> {
     /// matches) to avoid O(candidates) fan-out on common names.
     pub fn global_name(&self, name: &str) -> Vec<NodeIndex> {
         let max_results = self.settings.global_name_max_results;
-        let results = self
+        let results: Vec<NodeIndex> = self
             .graph
-            .indexes
-            .by_name
-            .lookup(name, |idx| {
-                self.graph.def_name(idx) == name
-                    && self.graph.graph[idx].def_id().is_some_and(|d| {
-                        let def = &self.graph.defs[d.0 as usize];
-                        if !def.is_top_level {
-                            return false;
-                        }
-                        if !def.kind.is_type_container() {
-                            self.graph.str(def.fqn) != name
-                        } else {
-                            true
-                        }
-                    })
+            .lookup_name(name)
+            .iter()
+            .copied()
+            .filter(|&idx| {
+                self.graph.graph[idx].def_id().is_some_and(|d| {
+                    let def = &self.graph.defs[d.0 as usize];
+                    if !def.is_top_level {
+                        return false;
+                    }
+                    if !def.kind.is_type_container() {
+                        self.graph.str(def.fqn) != name
+                    } else {
+                        true
+                    }
+                })
             })
-            .to_vec();
+            .collect();
         if results.len() > max_results {
             return vec![];
         }
@@ -410,10 +377,9 @@ impl<'a> ImportResolver<'a> {
 
         let reachable = self.include_reachable.as_ref().unwrap();
         self.graph
-            .indexes
-            .by_name
-            .lookup(name, |i| self.graph.def_name(i) == name)
-            .into_iter()
+            .lookup_name(name)
+            .iter()
+            .copied()
             .filter(|&i| reachable.contains(self.graph.graph[i].path()))
             .collect()
     }
@@ -423,10 +389,9 @@ impl<'a> ImportResolver<'a> {
 
         let by_fqn: Vec<NodeIndex> = self
             .graph
-            .indexes
-            .by_fqn
-            .lookup(name, |idx| self.graph.def_fqn(idx) == name)
-            .into_iter()
+            .lookup_fqn(name)
+            .iter()
+            .copied()
             .filter(|&idx| self.graph.def_in_file(idx, file_path))
             .collect();
         if !by_fqn.is_empty() {
@@ -434,10 +399,9 @@ impl<'a> ImportResolver<'a> {
         }
 
         self.graph
-            .indexes
-            .by_name
-            .lookup(name, |idx| self.graph.def_name(idx) == name)
-            .into_iter()
+            .lookup_name(name)
+            .iter()
+            .copied()
             .filter(|&idx| self.graph.def_in_file(idx, file_path))
             .collect()
     }

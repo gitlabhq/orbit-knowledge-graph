@@ -10,14 +10,16 @@ use tracing::{debug, info, warn};
 use super::checkpoint::{CodeCheckpointStore, CodeIndexingCheckpoint};
 use super::metrics::CodeMetrics;
 use super::observer::CodeOtelObserver;
-use super::pipeline::{CodeIndexingPipeline, IndexingRequest};
+use super::pipeline::{CodeIndexer, IndexError, IndexOutcome, IndexingRequest};
 use super::repository::{EmptyRepositoryReason, RepositoryService, RepositoryServiceError};
 use crate::analytics::IndexingAnalytics;
 
-use crate::engine::retry::{Backoff, RetryMode, RetryPolicy};
 use crate::handler::{Handler, HandlerContext, HandlerError};
-use crate::locking::LockGuard;
+use crate::indexing_status::RunRows;
+use crate::locking::{LockError, LockGuard};
+use crate::nats::ProgressNotifier;
 use crate::observer::{self, IndexingMode, IndexingObserver, PipelineType};
+use crate::retry::GlobalRetry;
 use crate::topic::CodeIndexingTaskRequest;
 use crate::types::{Envelope, Subscription};
 
@@ -29,9 +31,7 @@ use crate::types::{Envelope, Subscription};
 const DELETED_PROJECT_BRANCH_SENTINEL: &str = "HEAD";
 
 /// A timed-out job is likely transiently slow: retry once, then dead-letter (engine reads this policy).
-const JOB_TIMEOUT_RETRY: RetryPolicy = RetryPolicy {
-    mode: RetryMode::Global,
-    backoff: Backoff::Fixed(&[]),
+const JOB_TIMEOUT_RETRY: GlobalRetry = GlobalRetry {
     max_attempts: 2,
     dead_letter: true,
 };
@@ -42,8 +42,45 @@ fn project_lock_key(project_id: i64, branch: &str) -> String {
     format!("project.{project_id}.{encoded_branch}")
 }
 
+/// Heartbeat lives in this future (not a spawned task), so it can't leak; it only ticks during the parse because that parse is on `spawn_blocking`.
+async fn run_with_heartbeat<T>(
+    work: impl std::future::Future<Output = T>,
+    progress: &ProgressNotifier,
+    guard: &LockGuard,
+    lock_ttl: Duration,
+    interval: Duration,
+    cancel: &CancellationToken,
+) -> T {
+    tokio::pin!(work);
+    let mut ticker = tokio::time::interval(interval);
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    ticker.tick().await;
+
+    loop {
+        tokio::select! {
+            outcome = &mut work => return outcome,
+            _ = ticker.tick() => {
+                if cancel.is_cancelled() {
+                    continue;
+                }
+                progress.notify_in_progress().await;
+                match guard.renew(lock_ttl).await {
+                    Ok(()) => {}
+                    Err(error @ LockError::Lost) => {
+                        warn!(%error, "project lock lost mid-index; cancelling to avoid a double-write");
+                        cancel.cancel();
+                    }
+                    Err(error) => {
+                        warn!(%error, "lock renewal failed transiently; retrying on the next heartbeat tick");
+                    }
+                }
+            }
+        }
+    }
+}
+
 pub struct CodeIndexingTaskHandler {
-    pipeline: Arc<CodeIndexingPipeline>,
+    pipeline: Arc<CodeIndexer>,
     repository_service: Arc<dyn RepositoryService>,
     checkpoint_store: Arc<dyn CodeCheckpointStore>,
     metrics: CodeMetrics,
@@ -63,7 +100,7 @@ impl CodeIndexingTaskHandler {
         reason = "handler constructor wires all collaborators explicitly; grouping into a struct would just move the arity"
     )]
     pub fn new(
-        pipeline: Arc<CodeIndexingPipeline>,
+        pipeline: Arc<CodeIndexer>,
         repository_service: Arc<dyn RepositoryService>,
         checkpoint_store: Arc<dyn CodeCheckpointStore>,
         metrics: CodeMetrics,
@@ -262,6 +299,16 @@ impl CodeIndexingTaskHandler {
         clippy::too_many_arguments,
         reason = "indexing stage threads its collaborators and per-delivery state explicitly; a params struct would just move the arity"
     )]
+    #[tracing::instrument(
+        name = "code_indexing_project",
+        skip_all,
+        fields(
+            project_id = request.project_id,
+            namespace_id,
+            traversal_path = %request.traversal_path,
+            branch = %branch,
+        )
+    )]
     async fn index_with_lock(
         &self,
         context: &HandlerContext,
@@ -272,10 +319,18 @@ impl CodeIndexingTaskHandler {
         attempt: u32,
         observer: &mut dyn IndexingObserver,
     ) -> Result<Option<&'static str>, HandlerError> {
+        let Some(namespace_id) = request.traversal_path.top_level_namespace_id() else {
+            return Err(HandlerError::Processing(format!(
+                "traversal_path {:?} has no namespace_id",
+                request.traversal_path.as_str()
+            )));
+        };
+        tracing::Span::current().record("namespace_id", namespace_id);
+
         let project_id = request.project_id;
         let key = project_lock_key(project_id, branch);
 
-        let _guard = match LockGuard::acquire(context.lock_service.clone(), &key, self.lock_ttl)
+        let guard = match LockGuard::acquire(context.lock_service.clone(), &key, self.lock_ttl)
             .await
             .map_err(|e| HandlerError::Processing(format!("lock acquire failed: {e}")))?
         {
@@ -305,34 +360,59 @@ impl CodeIndexingTaskHandler {
             commit_sha: request.commit_sha.clone(),
             had_prior_checkpoint,
         };
-        // On timeout: cancel so the detached parse bails, and drop the future before its flush so nothing commits.
         let cancel = CancellationToken::new();
-        let work =
-            self.pipeline
-                .index_project(context, &indexing_request, observer, cancel.clone());
-        let result = match self.pipeline.job_timeout() {
-            Some(timeout) => match tokio::time::timeout(timeout, work).await {
-                Ok(result) => result,
-                Err(_) => {
-                    cancel.cancel();
-                    warn!(
-                        project_id,
-                        branch = %branch,
-                        timeout_secs = timeout.as_secs(),
-                        "code indexing job exceeded wall-clock timeout"
-                    );
-                    Err(JOB_TIMEOUT_RETRY.global_failure(
-                        attempt,
-                        format!(
-                            "code indexing job exceeded the {}s timeout",
-                            timeout.as_secs()
-                        ),
-                    ))
-                }
-            },
-            None => work.await,
+        let heartbeat_interval = self.lock_ttl / 3;
+        let indexing = self.pipeline.index_project(
+            context,
+            &indexing_request,
+            observer,
+            cancel.clone(),
+            &guard,
+        );
+        let result = match run_with_heartbeat(
+            indexing,
+            &context.progress,
+            &guard,
+            self.lock_ttl,
+            heartbeat_interval,
+            &cancel,
+        )
+        .await
+        {
+            Ok(outcome) => Ok(outcome),
+            Err(IndexError::BudgetExceeded { budget }) => {
+                warn!(
+                    project_id,
+                    branch = %branch,
+                    budget_secs = budget.as_secs(),
+                    "code indexing job exceeded its work budget"
+                );
+                Err(JOB_TIMEOUT_RETRY.global_failure(
+                    attempt,
+                    format!(
+                        "code indexing job exceeded the {}s work budget",
+                        budget.as_secs()
+                    ),
+                ))
+            }
+            Err(IndexError::NoLane { waited }) => Err(HandlerError::Backpressure(format!(
+                "no indexing lane within {}s",
+                waited.as_secs()
+            ))),
+            Err(IndexError::Failed(e)) => Err(e),
         };
 
+        let rows = match &result {
+            Ok(IndexOutcome::Indexed { rows_written }) => RunRows {
+                read: None,
+                written: Some(*rows_written),
+            },
+            Ok(IndexOutcome::EmptyRepository) => RunRows {
+                read: None,
+                written: Some(0),
+            },
+            Err(_) => RunRows::default(),
+        };
         let result = result.map(|outcome| outcome.metric_label());
 
         context
@@ -342,6 +422,7 @@ impl CodeIndexingTaskHandler {
                 started_at,
                 Utc::now(),
                 result.as_ref().err().map(ToString::to_string),
+                rows,
             )
             .await;
 
@@ -383,6 +464,7 @@ mod tests {
     use crate::testkit::{MockLockService, MockNatsServices};
     use crate::types::Event;
     use chrono::Utc;
+    use orbit_utils::traversal_path::TraversalPath;
 
     fn test_metrics() -> CodeMetrics {
         CodeMetrics::with_meter(&crate::testkit::test_meter())
@@ -425,7 +507,7 @@ mod tests {
                 ));
             let resolver = RepositoryResolver::new(Arc::clone(&repo_service), cache);
 
-            let pipeline = Arc::new(CodeIndexingPipeline::new(
+            let pipeline = Arc::new(CodeIndexer::new(
                 resolver,
                 crate::testkit::test_writer(),
                 Arc::clone(&checkpoint_store),
@@ -433,7 +515,7 @@ mod tests {
                 metrics.clone(),
                 table_names,
                 Arc::new(ontology),
-                gkg_server_config::CodeIndexingPipelineConfig::default(),
+                orbit_server_config::CodeIndexingPipelineConfig::default(),
             ));
 
             let handler = CodeIndexingTaskHandler::new(
@@ -482,7 +564,7 @@ mod tests {
                 project_id,
                 branch: Some(branch.to_string()),
                 commit_sha: commit_sha.map(str::to_string),
-                traversal_path: format!("1/{project_id}/"),
+                traversal_path: TraversalPath::new_unchecked(format!("1/{project_id}/")),
                 dispatch_id: uuid::Uuid::new_v4(),
                 campaign_id: None,
             })
@@ -492,13 +574,13 @@ mod tests {
         async fn set_checkpoint(
             &self,
             project_id: i64,
-            traversal_path: &str,
+            traversal_path: &TraversalPath,
             branch: &str,
             last_task_id: i64,
         ) {
             self.mock_checkpoints
                 .set_checkpoint(&CodeIndexingCheckpoint {
-                    traversal_path: traversal_path.to_string(),
+                    traversal_path: traversal_path.clone(),
                     project_id,
                     branch: branch.to_string(),
                     last_task_id,
@@ -523,7 +605,8 @@ mod tests {
     #[tokio::test]
     async fn skips_already_indexed_tasks() {
         let ctx = TestContext::new();
-        ctx.set_checkpoint(123, "1/123/", "main", 100).await;
+        ctx.set_checkpoint(123, &TraversalPath::new_unchecked("1/123/"), "main", 100)
+            .await;
 
         let envelope = TestContext::make_request(50, 123, "main");
         let result = ctx.handler.handle(ctx.handler_context(), envelope).await;
@@ -546,14 +629,15 @@ mod tests {
     #[tokio::test]
     async fn resolves_default_branch_when_branch_is_none() {
         let ctx = TestContext::new();
-        ctx.set_checkpoint(123, "1/123/", "main", 100).await;
+        ctx.set_checkpoint(123, &TraversalPath::new_unchecked("1/123/"), "main", 100)
+            .await;
 
         let envelope = Envelope::new(&CodeIndexingTaskRequest {
             task_id: 0,
             project_id: 123,
             branch: None,
             commit_sha: None,
-            traversal_path: "1/123/".to_string(),
+            traversal_path: TraversalPath::new_unchecked("1/123/"),
             dispatch_id: uuid::Uuid::new_v4(),
             campaign_id: None,
         })
@@ -580,7 +664,7 @@ mod tests {
             project_id: 123,
             branch: None,
             commit_sha: None,
-            traversal_path: "1/123/".to_string(),
+            traversal_path: TraversalPath::new_unchecked("1/123/"),
             dispatch_id: uuid::Uuid::new_v4(),
             campaign_id: None,
         })
@@ -598,7 +682,7 @@ mod tests {
         );
         let checkpoint = ctx
             .mock_checkpoints
-            .get_checkpoint("1/123/", 123, "HEAD")
+            .get_checkpoint(&TraversalPath::new_unchecked("1/123/"), 123, "HEAD")
             .await
             .unwrap()
             .expect("checkpoint should be written for deleted project so the dispatcher dedupes");
@@ -625,7 +709,7 @@ mod tests {
             project_id: 123,
             branch: None,
             commit_sha: None,
-            traversal_path: "1/123/".to_string(),
+            traversal_path: TraversalPath::new_unchecked("1/123/"),
             dispatch_id: uuid::Uuid::new_v4(),
             campaign_id: None,
         })
@@ -656,12 +740,20 @@ mod tests {
         assert!(result.is_ok(), "empty repo should ack, got {result:?}");
         let checkpoint = ctx
             .mock_checkpoints
-            .get_checkpoint("1/123/", 123, "main")
+            .get_checkpoint(&TraversalPath::new_unchecked("1/123/"), 123, "main")
             .await
             .unwrap()
             .expect("checkpoint should be set for empty repo");
         assert_eq!(checkpoint.last_task_id, 42);
         assert!(checkpoint.last_commit.is_none());
+
+        let progress = crate::indexing_status::IndexingStatusStore::new(ctx.mock_nats.clone())
+            .get(&TraversalPath::new_unchecked("1/123/"))
+            .await
+            .unwrap()
+            .expect("progress should be recorded for empty repo");
+        assert_eq!(progress.last_rows_written, Some(0));
+        assert_eq!(progress.last_rows_read, None);
     }
 
     #[tokio::test]
@@ -684,7 +776,7 @@ mod tests {
         );
         let checkpoint = ctx
             .mock_checkpoints
-            .get_checkpoint("1/123/", 123, "main")
+            .get_checkpoint(&TraversalPath::new_unchecked("1/123/"), 123, "main")
             .await
             .unwrap();
         assert!(checkpoint.is_none(), "no checkpoint on the raced attempt");
@@ -710,7 +802,7 @@ mod tests {
         assert!(result.is_ok());
         let checkpoint = ctx
             .mock_checkpoints
-            .get_checkpoint("1/123/", 123, "main")
+            .get_checkpoint(&TraversalPath::new_unchecked("1/123/"), 123, "main")
             .await
             .unwrap()
             .expect("checkpoint should be set for missing repository");
@@ -738,5 +830,140 @@ mod tests {
             project_lock_key(42, "refs/heads/main"),
             "project.42.cmVmcy9oZWFkcy9tYWlu"
         );
+    }
+
+    struct ProgressCountingAcker {
+        progress_acks: Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    #[async_trait]
+    impl crate::nats::MessageAcker for ProgressCountingAcker {
+        async fn ack(&self) -> Result<(), nats_client::NatsError> {
+            Ok(())
+        }
+        async fn ack_term(&self) -> Result<(), nats_client::NatsError> {
+            Ok(())
+        }
+        async fn ack_progress(&self) -> Result<(), nats_client::NatsError> {
+            self.progress_acks
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            Ok(())
+        }
+        async fn nack(&self, _delay: Option<Duration>) -> Result<(), nats_client::NatsError> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn heartbeat_pings_progress_and_renews_lock_during_blocking_work() {
+        let progress_acks = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let message = crate::nats::NatsMessage::new(
+            crate::testkit::TestEnvelopeFactory::simple("{}"),
+            ProgressCountingAcker {
+                progress_acks: progress_acks.clone(),
+            },
+        );
+        let progress = message.progress_notifier();
+
+        let locks = Arc::new(MockLockService::new());
+        let guard = LockGuard::acquire(locks.clone(), "p1", Duration::from_secs(30))
+            .await
+            .expect("acquire ok")
+            .expect("acquired");
+
+        let cancel = CancellationToken::new();
+        let work = async {
+            tokio::task::spawn_blocking(|| std::thread::sleep(Duration::from_millis(150)))
+                .await
+                .expect("blocking task ok");
+            "done"
+        };
+        let outcome = run_with_heartbeat(
+            work,
+            &progress,
+            &guard,
+            Duration::from_secs(30),
+            Duration::from_millis(25),
+            &cancel,
+        )
+        .await;
+
+        assert_eq!(outcome, "done");
+        assert!(
+            progress_acks.load(std::sync::atomic::Ordering::Relaxed) >= 3,
+            "heartbeat should ping ack_progress during the blocking parse"
+        );
+        assert!(
+            locks.renew_count() >= 1,
+            "heartbeat should renew the lock during the blocking parse"
+        );
+        assert!(!cancel.is_cancelled());
+    }
+
+    #[tokio::test]
+    async fn heartbeat_cancels_the_job_when_the_lock_is_lost() {
+        let locks = Arc::new(MockLockService::new());
+        let guard = LockGuard::acquire(locks.clone(), "p1", Duration::from_secs(30))
+            .await
+            .expect("acquire ok")
+            .expect("acquired");
+        locks.steal_leases();
+
+        let cancel = CancellationToken::new();
+        let work_cancel = cancel.clone();
+        let work = async {
+            loop {
+                if work_cancel.is_cancelled() {
+                    break "cancelled";
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        };
+        let outcome = run_with_heartbeat(
+            work,
+            &ProgressNotifier::noop(),
+            &guard,
+            Duration::from_secs(30),
+            Duration::from_millis(20),
+            &cancel,
+        )
+        .await;
+
+        assert_eq!(outcome, "cancelled");
+        assert!(cancel.is_cancelled());
+    }
+
+    #[tokio::test]
+    async fn heartbeat_tolerates_transient_renew_failures_without_cancelling() {
+        let locks = Arc::new(MockLockService::new());
+        let guard = LockGuard::acquire(locks.clone(), "p1", Duration::from_secs(30))
+            .await
+            .expect("acquire ok")
+            .expect("acquired");
+        locks.fail_renews_transiently();
+
+        let cancel = CancellationToken::new();
+        let work = async {
+            tokio::task::spawn_blocking(|| std::thread::sleep(Duration::from_millis(150)))
+                .await
+                .expect("blocking task ok");
+            "done"
+        };
+        let outcome = run_with_heartbeat(
+            work,
+            &ProgressNotifier::noop(),
+            &guard,
+            Duration::from_secs(30),
+            Duration::from_millis(25),
+            &cancel,
+        )
+        .await;
+
+        assert_eq!(
+            outcome, "done",
+            "a transient renew error must not kill the job"
+        );
+        assert!(!cancel.is_cancelled());
+        assert!(locks.renew_count() >= 1, "renew should have been attempted");
     }
 }

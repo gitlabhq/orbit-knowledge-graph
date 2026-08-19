@@ -6,12 +6,12 @@ use chrono::Utc;
 use futures::StreamExt;
 use tracing::{info, warn};
 
-use gkg_utils::arrow::ArrowUtils;
+use orbit_utils::arrow::ArrowUtils;
 
 use crate::clickhouse::{ArrowClickHouseClient, TIMESTAMP_FORMAT};
 use crate::orchestrator::scheduled::{ScheduledTask, ScheduledTaskMetrics, TaskError};
 use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
-use gkg_server_config::{ScheduleConfiguration, TableCleanupConfig};
+use orbit_server_config::{ScheduleConfiguration, TableCleanupConfig};
 
 const TASK_NAME: &str = "maintenance.table_cleanup";
 const TOMBSTONED_KEYS_TABLE_PREFIX: &str = "tombstone_sweep_keys";

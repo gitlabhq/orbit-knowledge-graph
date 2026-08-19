@@ -7,7 +7,7 @@ use std::sync::LazyLock;
 use semver::Version;
 use serde_json::{Value, json};
 
-use gkg_utils::arrow::ColumnValue;
+use orbit_utils::arrow::ColumnValue;
 use shared::PipelineOutput;
 
 pub use goon::{GOON_OUTPUT_FORMAT_VERSION, GoonFormatter, encode as goon_encode};
@@ -69,7 +69,7 @@ mod tests {
 
     #[test]
     fn query_response_schema_id_major_matches_raw_output_format_version() {
-        // The `$id` in crates/gkg-server/schemas/query_response.json ends with
+        // The `$id` in crates/orbit-server/schemas/query_response.json ends with
         // `/vN` where N is the major component of RAW_OUTPUT_FORMAT_VERSION.
         // Guards against the two drifting silently when the semver major bumps.
         let schema: Value = serde_json::from_str(include_str!(concat!(

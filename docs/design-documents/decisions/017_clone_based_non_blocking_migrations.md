@@ -48,7 +48,7 @@ by `mise schema:bump`:
 - `scope: code` — the code-graph tables and their edge table.
 
 A human may widen an entry but never narrow it below the fingerprint-snapshot
-drift; `migration-ledger-check` (CI) and the `gkg-server` build script enforce
+drift; `migration-ledger-check` (CI) and the `orbit-server` build script enforce
 that floor. A migration across several versions unions their scopes via
 `MigrationLedger::resolve_migration_scope_between`, widening to `Full` on any gap
 or backward range.

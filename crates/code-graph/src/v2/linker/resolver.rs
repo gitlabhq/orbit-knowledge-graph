@@ -493,12 +493,8 @@ impl<'a> ResolveCtx<'a> {
 
         if result.is_empty() {
             let direct_fqn = format!("{}{member_name}", self.scope_member_prefix(scope_fqn));
-            let direct = self.graph.indexes.by_fqn.lookup(&direct_fqn, |idx| {
-                self.graph.graph[idx].def_id().is_some_and(|d| {
-                    self.graph.str(self.graph.defs[d.0 as usize].fqn) == direct_fqn
-                })
-            });
-            result.extend_from_slice(&direct);
+            let direct = self.graph.lookup_fqn(&direct_fqn);
+            result.extend_from_slice(direct);
         }
 
         // Fallback: try implicit sub-scopes (e.g. Kotlin Companion objects).
@@ -646,11 +642,7 @@ impl<'a> ResolveCtx<'a> {
         // direct by_fqn lookup first so absolute qualified references
         // resolve to non-type-container definitions like Constants.
         if !r.name.is_empty() && r.name.contains(self.rules.fqn_separator) {
-            let matches = self
-                .graph
-                .indexes
-                .by_fqn
-                .lookup(r.name, |idx| self.graph.def_fqn(idx) == r.name);
+            let matches = self.graph.lookup_fqn(r.name);
             if !matches.is_empty() {
                 if self.settings.same_directory_scope {
                     // Directory-scoped languages (HCL): a qualified ref such as
@@ -672,7 +664,7 @@ impl<'a> ResolveCtx<'a> {
             }
         }
 
-        if r.reaching.is_empty() && !self.graph.indexes.by_name.contains(r.name) {
+        if r.reaching.is_empty() && !self.graph.name_exists(r.name) {
             return Ok(vec![]);
         }
 
@@ -686,7 +678,7 @@ impl<'a> ResolveCtx<'a> {
                     }
                 }
                 ResolveStage::ImportStrategies => {
-                    if !self.graph.indexes.by_name.contains(r.name) {
+                    if !self.graph.name_exists(r.name) {
                         continue;
                     }
                     {
@@ -695,7 +687,7 @@ impl<'a> ResolveCtx<'a> {
                     }
                 }
                 ResolveStage::ImplicitMember => {
-                    if !self.graph.indexes.by_name.contains(r.name) {
+                    if !self.graph.name_exists(r.name) {
                         continue;
                     }
                     if let Some(enclosing_idx) = r.enclosing_def
@@ -1293,19 +1285,11 @@ impl<'a> ResolveCtx<'a> {
                 })
                 .collect()),
             ExpressionStep::New(type_name) => {
-                let fqn_matches = self.graph.indexes.by_fqn.lookup(type_name, |idx| {
-                    self.graph.graph[idx].def_id().is_some_and(|d| {
-                        self.graph.str(self.graph.defs[d.0 as usize].fqn) == *type_name
-                    })
-                });
+                let fqn_matches = self.graph.lookup_fqn(type_name);
                 if !fqn_matches.is_empty() {
                     return Ok(vec![type_name.to_string()]);
                 }
-                let name_matches = self.graph.indexes.by_name.lookup(type_name, |idx| {
-                    self.graph.graph[idx].def_id().is_some_and(|d| {
-                        self.graph.str(self.graph.defs[d.0 as usize].name) == *type_name
-                    })
-                });
+                let name_matches = self.graph.lookup_name(type_name);
                 Ok(name_matches
                     .iter()
                     .filter_map(|&idx| {
@@ -1351,42 +1335,29 @@ impl<'a> ResolveCtx<'a> {
         if let Some(did) = self.graph.graph[enclosing_node].def_id() {
             let gdef = &self.graph.defs[did.0 as usize];
             let fqn = self.graph.str(gdef.fqn);
-            let mut scope = fqn;
-            loop {
-                self.graph.indexes.nested.lookup_into(
-                    scope,
-                    name,
-                    |idx| {
-                        self.graph.graph[idx].def_id().is_some_and(|d| {
-                            self.graph.str(self.graph.defs[d.0 as usize].name) == name
-                        })
-                    },
-                    &mut result,
-                );
+            let Some(name_id) = self.graph.strings.find(name) else {
+                return result;
+            };
+            for scope in crate::utils::fqn_scopes(fqn, sep) {
+                if let Some(scope_id) = self.graph.strings.find(scope) {
+                    self.graph
+                        .indexes
+                        .nested
+                        .lookup_into(scope_id, name_id, &mut result);
+                }
                 if !result.is_empty() {
                     break;
                 }
 
-                // Walk ancestor chain (Extends edges) to find inherited
-                // members. Collect all candidates across all ancestors
-                // so diamond/mixin cases surface all matches (consistent
-                // with lookup_nested_cached's ancestor walk).
                 let scope_nodes = self.graph.resolve_scope_nodes(scope);
                 for &scope_node in &scope_nodes {
                     if let Some(ancestors) = self.graph.ancestors(scope_node) {
                         for &ancestor in ancestors {
                             if let Some(ancestor_did) = self.graph.graph[ancestor].def_id() {
-                                let ancestor_fqn =
-                                    self.graph.str(self.graph.defs[ancestor_did.0 as usize].fqn);
+                                let ancestor_fqn_id = self.graph.defs[ancestor_did.0 as usize].fqn;
                                 self.graph.indexes.nested.lookup_into(
-                                    ancestor_fqn,
-                                    name,
-                                    |idx| {
-                                        self.graph.graph[idx].def_id().is_some_and(|d| {
-                                            self.graph.str(self.graph.defs[d.0 as usize].name)
-                                                == name
-                                        })
-                                    },
+                                    ancestor_fqn_id,
+                                    name_id,
                                     &mut result,
                                 );
                             }
@@ -1395,11 +1366,6 @@ impl<'a> ResolveCtx<'a> {
                 }
                 if !result.is_empty() {
                     break;
-                }
-
-                match scope.rfind(sep) {
-                    Some(pos) => scope = &scope[..pos],
-                    None => break,
                 }
             }
         }
@@ -1442,11 +1408,7 @@ fn pre_resolve_imports(
                     Some(n) => format!("{}{}{}", graph.str(gimp.path), sep, graph.str(n)),
                     None => graph.str(gimp.path).to_string(),
                 };
-                let targets = graph.indexes.by_fqn.lookup(&fqn, |idx| {
-                    graph.graph[idx]
-                        .def_id()
-                        .is_some_and(|d| graph.str(graph.defs[d.0 as usize].fqn) == fqn)
-                });
+                let targets = graph.lookup_fqn(&fqn);
                 if !targets.is_empty() {
                     map.entry(effective_name).or_default().extend(targets);
                 }

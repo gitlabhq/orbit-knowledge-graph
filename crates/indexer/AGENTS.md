@@ -1,6 +1,6 @@
 # Indexer
 
-Message processing framework and domain modules for the GitLab Knowledge Graph. Consumes events from NATS JetStream, routes them through handlers, and writes property graph data to ClickHouse.
+Message processing framework and domain modules for GitLab Orbit. Consumes events from NATS JetStream, routes them through handlers, and writes property graph data to ClickHouse.
 
 ## Architecture
 
@@ -92,7 +92,7 @@ ready, connects to NATS and ClickHouse, registers handlers via `sdlc::register_h
 `code::register_handlers()`, and `namespace_deletion::register_handlers()`, builds the engine,
 and runs until shutdown.
 
-`IndexerConfig` holds all configuration (NATS, ClickHouse graph/datalake, engine concurrency, handler configs, GitLab client). Handler configs are typed via `HandlersConfiguration` in `crates/gkg-server-config/src/engine.rs` — no string-keyed lookups.
+`IndexerConfig` holds all configuration (NATS, ClickHouse graph/datalake, engine concurrency, handler configs, GitLab client). Handler configs are typed via `HandlersConfiguration` in `crates/orbit-server-config/src/engine.rs` — no string-keyed lookups.
 
 ## Development
 
@@ -128,7 +128,7 @@ preventable feedback (see #2772, !1416). Check each of these first:
   extraction, keyset cursor persistence (`cursor_values` / `to_checkpoint_values()`), and
   watermark advance. Reuse them before hand-rolling a page loop. For code indexing, reuse the
   checkpoint store in `modules/code/checkpoint.rs`.
-- **Arrow extraction:** decode datalake `RecordBatch` rows with the `gkg_utils::arrow` helpers
+- **Arrow extraction:** decode datalake `RecordBatch` rows with the `orbit_utils::arrow` helpers
   (`get_column`, `get_column_string`, `get_string_list`, `extract_row` in
   `crates/utils/src/arrow.rs`), not bespoke `col_i64` / `col_string` functions.
 - **Edge/node `RecordBatch` specs:** derive column specs from the ontology — `edge_specs(ontology)`
@@ -196,7 +196,7 @@ If the transform is a per-row projection of one extracted batch, express it as a
 2. Define event type implementing `Event`
 3. Create handler implementing `Handler` (`name`, `subscription`, `handle`)
 4. Add topic config to `engine.topics` in `config/default.yaml` for retry/concurrency policy
-5. If handler needs domain config, add a typed config field to `HandlersConfiguration` in `crates/gkg-server-config/src/engine.rs`
+5. If handler needs domain config, add a typed config field to `HandlersConfiguration` in `crates/orbit-server-config/src/engine.rs`
 6. Register in `sdlc::register_handlers()`, `code::register_handlers()`, or `namespace_deletion::register_handlers()`
 
 ### No `#[allow(dead_code)]` in shipped code

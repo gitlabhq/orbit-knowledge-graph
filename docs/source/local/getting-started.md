@@ -1,6 +1,6 @@
 ---
-stage: Analytics
-group: Knowledge Graph
+stage: Orbit
+group: Context Systems
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
 description: Pick an access method and build your first local GitLab Orbit graph.
 title: Get started with GitLab Orbit Local
@@ -60,6 +60,54 @@ orbit help
 ```powershell
 irm https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/raw/main/install.ps1 | iex
 ```
+
+Open a new terminal, then verify:
+
+```shell
+orbit help
+```
+
+If your endpoint policy restricts remote script execution, you can install
+without running any script. The Windows release archive contains a single
+self-contained `orbit.exe`, signed by GitLab Inc., so application
+allowlisting policies can authorize it by publisher:
+
+1. From the [latest release](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/releases),
+   download `orbit-local-windows-x86_64.zip` and its `.sha256` file.
+1. Verify the checksum:
+
+   ```powershell
+   (Get-FileHash .\orbit-local-windows-x86_64.zip -Algorithm SHA256).Hash
+   ```
+
+   The output must match the hash in the `.sha256` file. The comparison is not
+   case-sensitive: `Get-FileHash` returns uppercase and the `.sha256` file
+   stores lowercase.
+1. Clear the Mark of the Web. A browser attaches it to the download, extraction
+   carries it to `orbit.exe`, and the first run can then raise a SmartScreen
+   prompt or be blocked by policy:
+
+   ```powershell
+   Unblock-File .\orbit-local-windows-x86_64.zip
+   ```
+
+1. Extract the archive, create the target directory, then move `orbit.exe` into
+   it. This example uses `$env:LOCALAPPDATA\Programs\orbit`, the same default
+   the installer uses:
+
+   ```powershell
+   Expand-Archive -Path .\orbit-local-windows-x86_64.zip -DestinationPath .
+   New-Item -ItemType Directory -Force -Path "$env:LOCALAPPDATA\Programs\orbit"
+   Move-Item .\orbit.exe "$env:LOCALAPPDATA\Programs\orbit\orbit.exe"
+   ```
+
+1. If that directory is not already on your `PATH`, add it for your user:
+
+   ```powershell
+   [Environment]::SetEnvironmentVariable("PATH", "$env:LOCALAPPDATA\Programs\orbit;$([Environment]::GetEnvironmentVariable('PATH', 'User'))", "User")
+   ```
+
+No administrator rights are required.
 
 Open a new terminal, then verify:
 

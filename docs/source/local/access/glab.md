@@ -1,6 +1,6 @@
 ---
-stage: Analytics
-group: Knowledge Graph
+stage: Orbit
+group: Context Systems
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
 description: Install, index, and query GitLab Orbit Local through the GitLab CLI with glab orbit local and glab orbit setup.
 title: Use GitLab Orbit Local with the GitLab CLI (`glab`)

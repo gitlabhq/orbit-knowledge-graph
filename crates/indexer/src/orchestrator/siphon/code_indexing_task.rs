@@ -13,6 +13,7 @@ use crate::orchestrator::siphon::route::{CdcContext, Route, RouteOutcome};
 use crate::orchestrator::siphon::subjects;
 use crate::topic::CodeIndexingTaskRequest;
 use crate::types::Envelope;
+use orbit_utils::traversal_path::TraversalPath;
 
 const METRIC_NAME: &str = "dispatch.code.task";
 
@@ -77,7 +78,7 @@ impl CodeIndexingTaskRoute {
                     project_id,
                     branch: Some(branch),
                     commit_sha: Some(commit_sha.to_string()),
-                    traversal_path: traversal_path.to_string(),
+                    traversal_path: TraversalPath::new_unchecked(traversal_path),
                     dispatch_id: ctx.dispatch_id,
                     campaign_id: ctx.campaign_id.clone(),
                 };
@@ -166,7 +167,7 @@ mod tests {
     };
     use crate::orchestrator::siphon::Siphon;
     use crate::testkit::{MockNatsServices, TestEnvelopeFactory};
-    use gkg_server_config::SiphonRouterConfig;
+    use orbit_server_config::SiphonRouterConfig;
     use siphon_proto::replication_event::Operation;
 
     fn test_metrics() -> ScheduledTaskMetrics {

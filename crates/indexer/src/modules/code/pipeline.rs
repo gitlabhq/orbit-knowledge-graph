@@ -1,10 +1,11 @@
+use std::future::Future;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Utc};
 use code_graph::v2::{CancellationToken, Pipeline, PipelineConfig};
-use gkg_server_config::CodeIndexingPipelineConfig;
+use orbit_server_config::CodeIndexingPipelineConfig;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tracing::{debug, info, warn};
 
@@ -17,21 +18,22 @@ use super::repository::{RepositoryResolver, ResolveError};
 use super::stale_data_cleaner::StaleDataCleaner;
 use crate::clickhouse::{BufferedWriter, BufferedWriterConfig, ClickHouseWriter, FlushToken};
 use crate::handler::{HandlerContext, HandlerError};
+use crate::locking::LockGuard;
 use crate::observer::IndexingObserver;
+use orbit_utils::traversal_path::TraversalPath;
 
 pub struct IndexingRequest {
     pub project_id: i64,
     pub branch: String,
-    pub traversal_path: String,
+    pub traversal_path: TraversalPath,
     pub task_id: i64,
     pub commit_sha: Option<String>,
     pub had_prior_checkpoint: bool,
 }
 
-/// Terminal outcome of `CodeIndexingPipeline::index_project`.
 pub enum IndexOutcome {
     /// Parsed and streamed to the sink, which checkpoints it after the flush lands.
-    Indexed,
+    Indexed { rows_written: u64 },
     /// Archive endpoint signalled no repository content (404 or 5xx); already checkpointed.
     EmptyRepository,
 }
@@ -39,9 +41,45 @@ pub enum IndexOutcome {
 impl IndexOutcome {
     pub fn metric_label(&self) -> &'static str {
         match self {
-            IndexOutcome::Indexed => "indexed",
+            IndexOutcome::Indexed { .. } => "indexed",
             IndexOutcome::EmptyRepository => "empty_repository",
         }
+    }
+}
+
+enum Fetched {
+    Repository(CachedRepository),
+    EmptyRepository,
+}
+
+pub enum IndexError {
+    BudgetExceeded { budget: Duration },
+    NoLane { waited: Duration },
+    Failed(HandlerError),
+}
+
+struct WorkClock {
+    total: Option<Duration>,
+    remaining: Duration,
+}
+
+impl WorkClock {
+    fn new(budget: Option<Duration>) -> Self {
+        Self {
+            total: budget,
+            remaining: budget.unwrap_or(Duration::ZERO),
+        }
+    }
+
+    /// `None` when the budget ran out before the phase finished.
+    async fn run<T>(&mut self, phase: impl Future<Output = T>) -> Option<T> {
+        if self.total.is_none() {
+            return Some(phase.await);
+        }
+        let started = tokio::time::Instant::now();
+        let result = tokio::time::timeout(self.remaining, phase).await.ok();
+        self.remaining = self.remaining.saturating_sub(started.elapsed());
+        result
     }
 }
 
@@ -125,7 +163,12 @@ impl Drop for ProjectCommit {
     }
 }
 
-pub struct CodeIndexingPipeline {
+struct IndexedRun {
+    commit: Arc<ProjectCommit>,
+    rows_written: u64,
+}
+
+pub struct CodeIndexer {
     resolver: RepositoryResolver,
     writer: BufferedWriter,
     checkpoint_store: Arc<dyn CodeCheckpointStore>,
@@ -142,7 +185,7 @@ pub struct CodeIndexingPipeline {
     big_indexing_slots: Option<Arc<Semaphore>>,
 }
 
-impl CodeIndexingPipeline {
+impl CodeIndexer {
     #[allow(
         clippy::too_many_arguments,
         reason = "pipeline constructor wires all collaborators explicitly; grouping into a struct would just move the arity"
@@ -220,37 +263,67 @@ impl CodeIndexingPipeline {
         Ok(())
     }
 
-    #[tracing::instrument(
-        name = "code_indexing_project",
-        skip_all,
-        fields(
-            project_id = request.project_id,
-            namespace_id,
-            traversal_path = %request.traversal_path,
-            branch = %request.branch,
-        )
-    )]
     pub async fn index_project(
         &self,
         context: &HandlerContext,
         request: &IndexingRequest,
         observer: &mut dyn IndexingObserver,
         cancel: CancellationToken,
-    ) -> Result<IndexOutcome, HandlerError> {
-        let Some(namespace_id) =
-            gkg_utils::traversal_path::top_level_namespace_id(&request.traversal_path)
-        else {
-            return Err(HandlerError::Processing(format!(
-                "traversal_path {:?} has no namespace_id",
-                request.traversal_path
-            )));
-        };
-        tracing::Span::current().record("namespace_id", namespace_id);
+        lock: &LockGuard,
+    ) -> Result<IndexOutcome, IndexError> {
+        let budget = self.pipeline_config.job_timeout();
+        let mut clock = WorkClock::new(budget);
 
+        // Dropping the timed-out fetch is what stops it; nothing in that phase polls the token.
+        let Some(fetched) = clock.run(self.fetch_repository(request)).await else {
+            return Err(IndexError::BudgetExceeded {
+                budget: budget.unwrap_or_default(),
+            });
+        };
+        let repository = match fetched.map_err(IndexError::Failed)? {
+            Fetched::EmptyRepository => return Ok(IndexOutcome::EmptyRepository),
+            Fetched::Repository(repository) => repository,
+        };
+
+        // Fetch plus the longest allowed wait can reach ack_wait; refresh the delivery first.
+        context.progress.notify_in_progress().await;
+        let lane = self
+            .acquire_indexing_lane(
+                &repository,
+                lock.time_left().saturating_sub(clock.remaining),
+            )
+            .await?;
+
+        let indexed = clock
+            .run(self.index_fetched(
+                context,
+                request,
+                &repository,
+                lane,
+                observer,
+                cancel.clone(),
+            ))
+            .await;
+        match indexed {
+            Some(result) => result.map_err(IndexError::Failed),
+            None => {
+                // The blocking parse outlives the dropped future; cancel makes it bail.
+                cancel.cancel();
+                Err(IndexError::BudgetExceeded {
+                    budget: budget.unwrap_or_default(),
+                })
+            }
+        }
+    }
+
+    async fn fetch_repository(&self, request: &IndexingRequest) -> Result<Fetched, HandlerError> {
         // Phase 1: Fetch — bounded by fetch_slots so we don't overwhelm
         // Gitaly with concurrent downloads while still pre-fetching ahead
         // of the processing phase.
+        let fetch_queued = Instant::now();
         let _fetch_slot = acquire(&self.fetch_slots, "fetch").await?;
+        self.metrics
+            .record_slot_wait("fetch_slot_wait", fetch_queued.elapsed());
 
         let fetch_start = Instant::now();
         let repository = match self
@@ -267,10 +340,10 @@ impl CodeIndexingPipeline {
                 path
             }
             Err(ResolveError::EmptyRepository { reason, detail }) => {
-                // A commit SHA means content exists (push-dispatched task), so
-                // an empty archive is visibility lag; checkpointing empty here
-                // would be terminal. Fail so the task is retried.
-                if request.commit_sha.is_some() {
+                // A commit SHA proves content exists, so an empty archive is
+                // worth a retry — unless the reason is permanent, where retrying
+                // only burns redeliveries on the way to the dead-letter queue.
+                if request.commit_sha.is_some() && !reason.is_permanent() {
                     self.metrics.record_stage_error("repository_fetch");
                     return Err(HandlerError::Processing(format!(
                         "archive empty ({reason}: {detail}) for task with commit_sha; retrying"
@@ -281,7 +354,7 @@ impl CodeIndexingPipeline {
                     branch = %request.branch,
                     reason = %reason,
                     detail,
-                    "project has no repository content; checkpointing as indexed-empty"
+                    "checkpointing repository as indexed-empty"
                 );
                 self.metrics.record_resolution_strategy("empty_repository");
                 self.metrics
@@ -300,7 +373,7 @@ impl CodeIndexingPipeline {
                     .await
                     .map_err(|e| HandlerError::Processing(format!("failed to set checkpoint: {e}")))
                     .record_error_stage(&self.metrics, "checkpoint")?;
-                return Ok(IndexOutcome::EmptyRepository);
+                return Ok(Fetched::EmptyRepository);
             }
             Err(ResolveError::Other(err)) => {
                 self.metrics.record_stage_error("repository_fetch");
@@ -314,11 +387,17 @@ impl CodeIndexingPipeline {
             "repository extraction completed"
         );
 
-        // Release fetch slot before waiting for the indexing slot. This is
-        // the pipelining point: freeing the fetch slot lets another handler
-        // start its Gitaly download while we wait for an indexing slot.
+        // Release the fetch slot before the caller queues for an indexing slot. This is the
+        // pipelining point: freeing it lets another handler start its Gitaly download.
         drop(_fetch_slot);
+        Ok(Fetched::Repository(repository))
+    }
 
+    async fn acquire_indexing_lane(
+        &self,
+        repository: &CachedRepository,
+        within: Duration,
+    ) -> Result<Option<OwnedSemaphorePermit>, IndexError> {
         // A reserved big lane keeps a flood of small repos from starving monorepos.
         let parseable = code_graph::v2::inventory::parseable_file_count(&repository.file_inventory);
         let lane = if parseable <= self.small_repo_max_files {
@@ -326,25 +405,45 @@ impl CodeIndexingPipeline {
         } else {
             &self.big_indexing_slots
         };
-        let _indexing_slot = acquire(lane, "indexing").await?;
+        let queued = Instant::now();
+        match tokio::time::timeout(within, acquire(lane, "indexing")).await {
+            Ok(permit) => {
+                self.metrics
+                    .record_slot_wait("indexing_lane_wait", queued.elapsed());
+                permit.map_err(IndexError::Failed)
+            }
+            Err(_) => Err(IndexError::NoLane { waited: within }),
+        }
+    }
 
+    async fn index_fetched(
+        &self,
+        context: &HandlerContext,
+        request: &IndexingRequest,
+        repository: &CachedRepository,
+        _lane: Option<OwnedSemaphorePermit>,
+        observer: &mut dyn IndexingObserver,
+        cancel: CancellationToken,
+    ) -> Result<IndexOutcome, HandlerError> {
         context.progress.notify_in_progress().await;
 
         let indexed_at = Utc::now();
         let indexing_result = self
-            .run_indexing(context, request, &repository, indexed_at, observer, cancel)
+            .run_indexing(context, request, repository, indexed_at, observer, cancel)
             .await;
 
         // `repository` owns a TempDir that removes the extraction tree on drop, so it is reclaimed
         // whether this returns, errors, or is dropped mid-run on the wall-clock timeout.
         self.metrics.record_cleanup("success");
-        let commit = indexing_result?;
+        let run = indexing_result?;
 
         // Drop the pipeline's sentinel hold. If every submitted batch has already flushed, this
         // is the decrement that finalizes; otherwise the writer's last flush will.
-        commit.release();
+        run.commit.release();
 
-        Ok(IndexOutcome::Indexed)
+        Ok(IndexOutcome::Indexed {
+            rows_written: run.rows_written,
+        })
     }
 
     #[allow(
@@ -359,18 +458,27 @@ impl CodeIndexingPipeline {
         indexed_at: DateTime<Utc>,
         observer: &mut dyn IndexingObserver,
         cancel: CancellationToken,
-    ) -> Result<Arc<ProjectCommit>, HandlerError> {
+    ) -> Result<IndexedRun, HandlerError> {
         let indexing_start = Instant::now();
-        let config = self.build_pipeline_config(context, cancel);
+        let config = self.build_pipeline_config(context, cancel.clone());
         let (result, commit, metered_bytes) = self
             .build_code_graph(request, repository, indexed_at, config)
             .await?;
+
+        // A cancelled run yields a partial graph with no error, so the fatal-error guard can't catch it.
+        if cancel.is_cancelled() {
+            commit.failed.store(true, Ordering::Release);
+            commit.release();
+            return Err(HandlerError::Processing(
+                "code indexing cancelled mid-run; not checkpointing partial graph".to_string(),
+            ));
+        }
 
         context.progress.notify_in_progress().await;
         self.metrics
             .record_indexing_duration(indexing_start.elapsed());
 
-        self.record_indexing_results(
+        let rows_written = self.record_indexing_results(
             &result,
             observer,
             request,
@@ -390,7 +498,10 @@ impl CodeIndexingPipeline {
         }
 
         context.progress.notify_in_progress().await;
-        Ok(commit)
+        Ok(IndexedRun {
+            commit,
+            rows_written,
+        })
     }
 
     fn build_pipeline_config(
@@ -494,7 +605,7 @@ impl CodeIndexingPipeline {
                 }
                 // logical_byte_size is slice-invariant, so metering the whole batch once equals
                 // summing the slices below.
-                let batch_bytes = match gkg_utils::arrow::logical_byte_size(&batch) {
+                let batch_bytes = match orbit_utils::arrow::logical_byte_size(&batch) {
                     Ok(n) => n,
                     Err(e) => {
                         tracing::error!(table, error = %e, "batch has no logical-byte-size rule; counting 0 bytes");
@@ -522,16 +633,19 @@ impl CodeIndexingPipeline {
         let repo_dir = repository.path().to_path_buf();
         let file_inventory = repository.file_inventory.clone();
         let stream_reasons = repository.stream_reasons.clone();
+        let span = tracing::Span::current();
         let parsed = tokio::task::spawn_blocking(move || {
-            Pipeline::run_with_tracer(
-                &repo_dir,
-                file_inventory,
-                config,
-                &stream_reasons,
-                tracer,
-                converter,
-                on_batch,
-            )
+            span.in_scope(|| {
+                Pipeline::run_with_tracer(
+                    &repo_dir,
+                    file_inventory,
+                    config,
+                    &stream_reasons,
+                    tracer,
+                    converter,
+                    on_batch,
+                )
+            })
         })
         .await;
         let result = match parsed {
@@ -561,7 +675,7 @@ impl CodeIndexingPipeline {
         request: &IndexingRequest,
         indexing_start: Instant,
         written_bytes: u64,
-    ) {
+    ) -> u64 {
         let parsed_count = result
             .stats
             .files_parsed
@@ -648,6 +762,8 @@ impl CodeIndexingPipeline {
         for error in &result.errors {
             self.metrics.record_stage_error(error.stage);
         }
+
+        rows_written
     }
 }
 
@@ -699,7 +815,7 @@ mod tests {
             remaining: AtomicUsize::new(1 + batches),
             failed: AtomicBool::new(false),
             checkpoint: CodeIndexingCheckpoint {
-                traversal_path: "1/7/".into(),
+                traversal_path: TraversalPath::new_unchecked("1/7/"),
                 project_id: 7,
                 branch: "main".into(),
                 last_task_id: 7,
@@ -734,7 +850,7 @@ mod tests {
         commit.clone().release();
         assert!(
             store
-                .get_checkpoint("1/7/", 7, "main")
+                .get_checkpoint(&TraversalPath::new_unchecked("1/7/"), 7, "main")
                 .await
                 .unwrap()
                 .is_none(),
@@ -745,7 +861,7 @@ mod tests {
         settle(&inflight).await;
         assert!(
             store
-                .get_checkpoint("1/7/", 7, "main")
+                .get_checkpoint(&TraversalPath::new_unchecked("1/7/"), 7, "main")
                 .await
                 .unwrap()
                 .is_some(),
@@ -767,7 +883,7 @@ mod tests {
         assert!(cleaner.calls.lock().is_empty());
         assert!(
             store
-                .get_checkpoint("1/7/", 7, "main")
+                .get_checkpoint(&TraversalPath::new_unchecked("1/7/"), 7, "main")
                 .await
                 .unwrap()
                 .is_some(),
@@ -801,12 +917,39 @@ mod tests {
         settle(&inflight).await;
         assert!(
             store
-                .get_checkpoint("1/7/", 7, "main")
+                .get_checkpoint(&TraversalPath::new_unchecked("1/7/"), 7, "main")
                 .await
                 .unwrap()
                 .is_none(),
             "a failed flush must leave the project un-checkpointed for re-indexing",
         );
+    }
+
+    async fn work_for(secs: u64) {
+        tokio::time::sleep(std::time::Duration::from_secs(secs)).await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn phases_share_one_work_budget() {
+        let mut clock = WorkClock::new(Some(Duration::from_secs(250)));
+
+        let started = tokio::time::Instant::now();
+        assert!(clock.run(work_for(100)).await.is_some());
+        assert!(
+            clock.run(work_for(200)).await.is_none(),
+            "100s + 200s must overrun a 250s budget"
+        );
+        assert_eq!(
+            started.elapsed().as_secs(),
+            250,
+            "the second phase gets only what the first left"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_disabled_budget_never_times_out() {
+        let mut clock = WorkClock::new(None);
+        assert!(clock.run(work_for(10_000)).await.is_some());
     }
 
     #[tokio::test]
@@ -825,7 +968,7 @@ mod tests {
         settle(&inflight).await;
         assert!(
             store
-                .get_checkpoint("1/7/", 7, "main")
+                .get_checkpoint(&TraversalPath::new_unchecked("1/7/"), 7, "main")
                 .await
                 .unwrap()
                 .is_none(),

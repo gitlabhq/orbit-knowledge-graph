@@ -12,7 +12,7 @@ use crate::orchestrator::scheduled::ScheduledTaskMetrics;
 use crate::orchestrator::scheduled::{ScheduledTask, TaskError};
 use crate::topic::GlobalIndexingRequest;
 use crate::types::{Envelope, Event};
-use gkg_server_config::{GlobalDispatcherConfig, ScheduleConfiguration};
+use orbit_server_config::{GlobalDispatcherConfig, ScheduleConfiguration};
 
 pub struct GlobalDispatcher {
     nats: Arc<dyn NatsServices>,

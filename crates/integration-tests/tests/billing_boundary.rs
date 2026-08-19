@@ -1,4 +1,4 @@
-//! SOX boundary check: only permitted crates may depend on `gkg-billing`.
+//! SOX boundary check: only permitted crates may depend on `orbit-billing`.
 //!
 //! A passing run in CI is control evidence that the billing crate's dependency
 //! surface has not silently expanded. See ADR 013:
@@ -8,10 +8,10 @@ use std::path::PathBuf;
 
 use cargo_metadata::MetadataCommand;
 
-const PERMITTED_DEPENDENTS: &[&str] = &["gkg-server"];
+const PERMITTED_DEPENDENTS: &[&str] = &["orbit-server"];
 
 #[test]
-fn only_permitted_crates_depend_on_gkg_billing() {
+fn only_permitted_crates_depend_on_orbit_billing() {
     let workspace_root = workspace_root();
     let metadata = MetadataCommand::new()
         .manifest_path(workspace_root.join("Cargo.toml"))
@@ -22,15 +22,19 @@ fn only_permitted_crates_depend_on_gkg_billing() {
     let violations: Vec<String> = metadata
         .workspace_packages()
         .into_iter()
-        .filter(|pkg| pkg.name != "gkg-billing")
-        .filter(|pkg| pkg.dependencies.iter().any(|dep| dep.name == "gkg-billing"))
+        .filter(|pkg| pkg.name != "orbit-billing")
+        .filter(|pkg| {
+            pkg.dependencies
+                .iter()
+                .any(|dep| dep.name == "orbit-billing")
+        })
         .filter(|pkg| !PERMITTED_DEPENDENTS.contains(&pkg.name.as_str()))
         .map(|pkg| pkg.name.to_string())
         .collect();
 
     assert!(
         violations.is_empty(),
-        "SOX boundary violation: {violations:?} depend on `gkg-billing` \
+        "SOX boundary violation: {violations:?} depend on `orbit-billing` \
          but are not in the permitted list {PERMITTED_DEPENDENTS:?}.\n\
          Add to PERMITTED_DEPENDENTS only after SOX review — \
          see docs/design-documents/decisions/013_billing_sox_scope.md"

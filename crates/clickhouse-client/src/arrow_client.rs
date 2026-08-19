@@ -10,7 +10,7 @@ use clickhouse::{Client, query::Query};
 use futures::StreamExt;
 use futures::stream;
 use futures::stream::BoxStream;
-use gkg_utils::clickhouse::{ChScalar, ChType};
+use orbit_utils::clickhouse::{ChScalar, ChType};
 use serde::Serialize;
 use serde_json::Value;
 use tokio::sync::{mpsc, oneshot};

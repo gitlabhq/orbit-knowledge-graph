@@ -683,6 +683,50 @@ mod tests {
         }));
     }
 
+    // DataFusion 54 resolves `<string column> = <int literal>` by coercing the column,
+    // so an ordinal comparison against a string enum fails the cast at runtime.
+    #[test]
+    fn string_enum_denormalized_tag_never_compares_against_int_ordinals() {
+        let ontology = test_ontology();
+        let pipeline = ontology
+            .get_edge_etl("APPROVED")
+            .and_then(|pipelines| pipelines.first())
+            .expect("APPROVED pipeline");
+        let mapping = pipeline
+            .transform
+            .edges()
+            .first()
+            .expect("APPROVED edge mapping");
+
+        let projections = standalone_edge_denormalized_columns("APPROVED", mapping, &ontology);
+        let user_state = projections
+            .iter()
+            .find(|projection| projection.source_column == "user_state")
+            .expect("User.state denormalized onto APPROVED");
+
+        assert!(
+            user_state.enum_mapping.is_none(),
+            "User.state is enum_type: string, mapping: {:?}",
+            user_state.enum_mapping
+        );
+
+        let sql = edge_select_list(
+            "id",
+            "'User'",
+            "APPROVED",
+            "merge_request_id",
+            "'MergeRequest'",
+            true,
+            &projections,
+        )
+        .join(", ");
+        assert!(!sql.contains("user_state = 0"), "sql: {sql}");
+        assert!(
+            sql.contains("concat('state:', CAST(user_state AS VARCHAR))"),
+            "sql: {sql}"
+        );
+    }
+
     #[test]
     fn fk_edge_transform_outgoing_literal() {
         let mapping = literal_mapping("id", "Group", "owner_id", "User", "owns");

@@ -1,7 +1,7 @@
 #!/bin/sh
 # Fails when a file under config/prompts/ changes without a version: change.
 # Compares the working tree against $1 (default: MR diff base, then
-# origin/main). Semver format itself is validated at build time by gkg-prompts.
+# origin/main). Semver format itself is validated at build time by orbit-prompts.
 set -eu
 
 base="${1:-${CI_MERGE_REQUEST_DIFF_BASE_SHA:-origin/main}}"

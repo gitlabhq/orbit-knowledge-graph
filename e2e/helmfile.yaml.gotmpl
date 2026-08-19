@@ -43,6 +43,7 @@ releases:
     values:
       - values/nats.yaml
 
+{{ if not (env "E2E_CH_HOST") }}
   - name: clickhouse
     namespace: e2e-{{ $sha }}-clickhouse
     createNamespace: true
@@ -54,6 +55,7 @@ releases:
       - e2e-{{ $sha }}-gkg/bootstrap
     values:
       - values/clickhouse.yaml.gotmpl
+{{ end }}
 
   # GitLab chart v9.11.1+ (heading toward v10.0) removed bundled PG/Redis/MinIO
   # subcharts. We deploy bitnami's PG and Redis charts standalone in the same
@@ -127,22 +129,33 @@ releases:
       component: siphon
     needs:
       - e2e-{{ $sha }}-nats/nats
+{{ if not (env "E2E_CH_HOST") }}
       - e2e-{{ $sha }}-clickhouse/clickhouse
+{{ end }}
       - e2e-{{ $sha }}-gitlab/pg-cdc-setup
     values:
       - values/siphon.yaml.gotmpl
 
   - name: gkg
     namespace: e2e-{{ $sha }}-gkg
+{{- if env "E2E_GKG_CHART" }}
+    chart: {{ env "E2E_GKG_CHART" }}
+{{- else }}
     chart: oci://registry.gitlab.com/gitlab-org/orbit/orbit-helm-charts/gkg
     version: {{ $v.gkg.chart }}
+{{- end }}
     labels:
       phase: pipeline
       component: gkg
-    # Deploy overlaps the GitLab boot; the webserver /ready probe still holds
-    # this release until Rails answers.
+    # Deploy overlaps the GitLab boot; GKG becomes ready when its local schema
+    # gate clears, independently of Rails readiness.
     needs:
       - e2e-{{ $sha }}-nats/nats
+{{ if not (env "E2E_CH_HOST") }}
       - e2e-{{ $sha }}-clickhouse/clickhouse
+{{ end }}
     values:
       - values/gkg.yaml.gotmpl
+{{ if env "E2E_EXTRA_VALUES" }}
+      - {{ env "E2E_EXTRA_VALUES" }}
+{{ end }}

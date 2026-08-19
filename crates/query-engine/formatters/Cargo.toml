@@ -9,7 +9,7 @@ default = []
 testutils = []
 
 [dependencies]
-gkg-utils = { path = "../../utils" }
+orbit-utils = { path = "../../utils" }
 indexmap = { workspace = true }
 shared = { path = "../shared" }
 types = { path = "../types" }

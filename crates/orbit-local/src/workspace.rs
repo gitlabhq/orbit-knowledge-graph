@@ -119,6 +119,31 @@ pub fn set_status(
     Ok(())
 }
 
+/// Best-effort `error` manifest row for a repo git_info could not open; logged, never propagated so it can't mask the original error.
+pub fn record_git_info_failure(db_path: &Path, repo_path: &Path, error: &str) {
+    let key = dunce::canonicalize(repo_path)
+        .unwrap_or_else(|_| repo_path.to_path_buf())
+        .to_string_lossy()
+        .to_string();
+    let client = match DuckDbClient::open(db_path) {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::warn!("failed to open DuckDB to record git failure for {key}: {e}");
+            return;
+        }
+    };
+    if let Err(e) = set_status(
+        &client,
+        &key,
+        project_id_from_path(&key),
+        RepoStatus::Error,
+        Some(error),
+        None,
+    ) {
+        tracing::warn!("failed to record git failure status for {key}: {e}");
+    }
+}
+
 pub struct GitInfo {
     pub repo_path: PathBuf,
     /// Deterministic project ID derived from `repo_path`.
@@ -141,9 +166,12 @@ pub fn git_info(repo_path: &Path) -> Result<GitInfo> {
     let branch = repo
         .get_current_branch()
         .context("failed to get current branch")?;
-    let commit_sha = repo
-        .get_current_commit_hash()
-        .context("failed to get current commit hash")?;
+    let commit_sha = repo.get_current_commit_hash().map_err(|_| {
+        anyhow::anyhow!(
+            "{} has no commits yet. Make at least one commit before indexing.",
+            canonical.display()
+        )
+    })?;
     let parent_repo_path = repo
         .parent_repo_path()
         .context("failed to resolve parent repo path")?;
@@ -204,7 +232,9 @@ fn is_git_repo(path: &Path) -> bool {
 
 fn discover_repos(workspace_path: &Path) -> Vec<PathBuf> {
     let ws = CoreGitaliskWorkspaceFolder::new(workspace_path.to_string_lossy().to_string());
-    if ws.index_repositories().is_err() {
+    if let Err(e) = ws.index_repositories() {
+        let path = workspace_path.display();
+        tracing::warn!("repository discovery failed in {path}: {e}");
         return vec![];
     }
     ws.get_repositories()
@@ -224,6 +254,40 @@ mod tests {
             .current_dir(path)
             .output()
             .unwrap();
+    }
+
+    const LOCAL_DDL: &str = include_str!(concat!(env!("CONFIG_DIR"), "/graph_local.sql"));
+
+    #[test]
+    fn record_git_info_failure_writes_error_row() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let db = tmp.path().join("graph.duckdb");
+        let client = DuckDbClient::open(&db).unwrap();
+        client.initialize_schema(LOCAL_DDL).unwrap();
+        drop(client);
+
+        let repo = tmp.path().join("unopenable");
+        std::fs::create_dir_all(&repo).unwrap();
+        record_git_info_failure(&db, &repo, "failed to get current branch");
+
+        let client = DuckDbClient::open(&db).unwrap();
+        let rows = client
+            .query_arrow("SELECT CAST(status AS VARCHAR), error_message FROM _orbit_manifest")
+            .unwrap();
+        let batch = rows.first().expect("one row");
+        assert_eq!(batch.num_rows(), 1);
+        let status = batch
+            .column(0)
+            .as_any()
+            .downcast_ref::<arrow::array::StringArray>()
+            .unwrap();
+        let msg = batch
+            .column(1)
+            .as_any()
+            .downcast_ref::<arrow::array::StringArray>()
+            .unwrap();
+        assert_eq!(status.value(0), "error");
+        assert_eq!(msg.value(0), "failed to get current branch");
     }
 
     #[test]

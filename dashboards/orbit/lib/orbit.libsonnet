@@ -1,14 +1,21 @@
 // Panel + dashboard helpers for the Orbit Playground dashboards.
 //
 // Consumes the generated metric catalog at
-// `crates/gkg-observability/orbit-dashboards/gkg-metrics.json`. Every
+// `crates/orbit-observability/orbit-dashboards/gkg-metrics.json`. Every
 // catalog-driven panel constructor (`counterPanel`, `histogramPanels`,
 // `gaugePanel`) takes a metric name and looks up its kind, labels, unit,
 // and description from the catalog. An unknown name aborts evaluation,
 // which is the build-time check that keeps dashboards from drifting away
 // from the names the service actually emits.
 
-local catalog = import '../../../crates/gkg-observability/orbit-dashboards/gkg-metrics.json';
+local catalog = import '../../../crates/orbit-observability/orbit-dashboards/gkg-metrics.json';
+
+// Rendered per flavor: `com` for dashboards.gitlab.net, `dedicated` for a
+// GitLab Dedicated tenant's Grafana. `cargo xtask dashboards` passes
+// `--ext-str flavor=...`; manual jsonnet renders need the same flag.
+local FLAVOR = std.extVar('flavor');
+assert FLAVOR == 'com' || FLAVOR == 'dedicated' : 'unknown dashboard flavor `' + FLAVOR + '`';
+local IS_DEDICATED = FLAVOR == 'dedicated';
 
 local GRID_WIDTH = 24;
 local PANEL_W = 8;
@@ -75,7 +82,7 @@ local urlEncode(s) = (
 // Uses std.manifestJsonEx so quotes inside the expression are escaped
 // correctly. Hand-rolled JSON concatenation here breaks for any expr
 // containing `"`, which is most of them.
-local exploreLink(expr, ds_uid='mimir-analytics-eventsdot', title='Open in Explore') = {
+local exploreLink(expr, ds_uid=if IS_DEDICATED then '${ORBIT_DS}' else 'mimir-analytics-eventsdot', title='Open in Explore') = {
   local payload = {
     datasource: ds_uid,
     queries: [{
@@ -142,9 +149,13 @@ local unitFor(spec, rate=false) = (
 // split per environment (`mimir-gitlab-gprd`, `mimir-gitlab-gstg`). Keeping
 // it as a free-standing datasource picker let users select the gprd tenant
 // while querying gstg labels, producing silent "no data" panels.
+// On Dedicated the one tenant Prometheus scrapes Rails too, so RAILS_DS
+// collapses into $ORBIT_DS.
 local datasource(uid_var) = {
   type: 'prometheus',
-  uid: if uid_var == 'RAILS_DS' then 'mimir-gitlab-${rails_env}' else '$' + uid_var,
+  uid: if uid_var == 'RAILS_DS' then
+    (if IS_DEDICATED then '$ORBIT_DS' else 'mimir-gitlab-${rails_env}')
+  else '$' + uid_var,
 };
 
 local target(expr, legend, ds_var, refId='A') = {
@@ -737,7 +748,20 @@ local layoutItems(items) = (
 
 // ---------- Templating + dashboard shell ----------
 
-local TEMPLATING = {
+// The cluster and rails_env pickers select .com Mimir tenants that don't
+// exist on Dedicated.
+local TEMPLATING = if IS_DEDICATED then {
+  list: [
+    {
+      name: 'ORBIT_DS',
+      label: 'Prometheus datasource',
+      type: 'datasource',
+      query: 'prometheus',
+      hide: 0,
+      refresh: 1,
+    },
+  ],
+} else {
   list: [
     {
       name: 'ORBIT_DS',
@@ -811,13 +835,17 @@ local dashboard(uid, title, tags, description, items) = {
 
 // ---------- Selectors ----------
 
-local GKG_WEB_SEL = 'container="gkg-webserver", cluster=~"$cluster"';
-local GKG_IDX_SEL = 'container="gkg-indexer", cluster=~"$cluster"';
-local GKG_DSP_SEL = 'container="gkg-dispatcher", cluster=~"$cluster"';
-local GKG_ANY_SEL = 'container=~"gkg-.*", cluster=~"$cluster"';
-local SIPHON_SEL = 'namespace="siphon", cluster=~"$cluster"';
-local NATS_SEL = 'cluster=~"$cluster"';
-local RAILS_SEL = 'env=~"$rails_env"';
+// `.*` also matches series that lack the label, so the dedicated selectors
+// stay valid where cluster/env are never set.
+local CLUSTER_SEL = if IS_DEDICATED then 'cluster=~".*"' else 'cluster=~"$cluster"';
+
+local GKG_WEB_SEL = 'container="gkg-webserver", ' + CLUSTER_SEL;
+local GKG_IDX_SEL = 'container="gkg-indexer", ' + CLUSTER_SEL;
+local GKG_DSP_SEL = 'container="gkg-dispatcher", ' + CLUSTER_SEL;
+local GKG_ANY_SEL = 'container=~"gkg-.*", ' + CLUSTER_SEL;
+local SIPHON_SEL = 'namespace="siphon", ' + CLUSTER_SEL;
+local NATS_SEL = CLUSTER_SEL;
+local RAILS_SEL = if IS_DEDICATED then 'env=~".*"' else 'env=~"$rails_env"';
 
 // ---------- Public surface ----------
 
@@ -875,4 +903,5 @@ local RAILS_SEL = 'env=~"$rails_env"';
   RAILS_SEL: RAILS_SEL,
   // Constants
   GRID_WIDTH: GRID_WIDTH,
+  IS_DEDICATED: IS_DEDICATED,
 }

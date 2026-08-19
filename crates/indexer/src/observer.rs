@@ -1,5 +1,6 @@
 use std::fmt;
 
+use orbit_utils::traversal_path::TraversalPath;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -47,9 +48,9 @@ pub trait IndexingObserver: Send {
 
     fn set_pipeline_type(&mut self, _pipeline_type: PipelineType) {}
 
-    fn set_traversal_path(&mut self, traversal_path: Option<&str>) {
+    fn set_traversal_path(&mut self, traversal_path: Option<&TraversalPath>) {
         let Some(path) = traversal_path else { return };
-        if let Some(namespace_id) = gkg_utils::traversal_path::top_level_namespace_id(path) {
+        if let Some(namespace_id) = path.top_level_namespace_id() {
             self.set_namespace(Some(namespace_id));
         }
     }
@@ -81,7 +82,7 @@ pub struct NoOpObserver;
 
 impl IndexingObserver for NoOpObserver {}
 
-pub type MultiObserver = gkg_utils::observability::MultiObserver<dyn IndexingObserver>;
+pub type MultiObserver = orbit_utils::observability::MultiObserver<dyn IndexingObserver>;
 
 impl IndexingObserver for MultiObserver {
     fn record_datalake_read(&mut self, rows: u64, bytes: u64) {
@@ -126,7 +127,7 @@ impl IndexingObserver for MultiObserver {
         }
     }
 
-    fn set_traversal_path(&mut self, traversal_path: Option<&str>) {
+    fn set_traversal_path(&mut self, traversal_path: Option<&TraversalPath>) {
         for o in self.iter_mut() {
             o.set_traversal_path(traversal_path);
         }
@@ -241,7 +242,7 @@ mod tests {
         fn set_pipeline_type(&mut self, _: PipelineType) {
             self.push("set_pipeline_type");
         }
-        fn set_traversal_path(&mut self, _: Option<&str>) {
+        fn set_traversal_path(&mut self, _: Option<&TraversalPath>) {
             self.push("set_traversal_path");
         }
         fn set_entity_type(&mut self, _: &str) {
@@ -282,7 +283,7 @@ mod tests {
         obs.set_dispatch_id(Uuid::new_v4());
         obs.set_campaign_id(Some("migration-v48".to_string()));
         obs.set_pipeline_type(PipelineType::Sdlc);
-        obs.set_traversal_path(Some("42/100/"));
+        obs.set_traversal_path(Some(&TraversalPath::new_unchecked("42/100/")));
         obs.set_entity_type("MergeRequest");
         obs.set_indexing_mode(IndexingMode::Incremental);
         obs.extracted(1000, 50_000);

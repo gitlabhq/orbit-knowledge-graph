@@ -12,6 +12,7 @@ use crate::checkpoint::{Checkpoint, CheckpointStore, namespace_position_key};
 
 use crate::durability::RunDurability;
 use crate::handler::{Handler, HandlerContext, HandlerError};
+use crate::indexing_status::RunRows;
 use crate::modules::sdlc::datalake::DatalakeQuery;
 use crate::modules::sdlc::metrics::SdlcMetrics;
 use crate::modules::sdlc::observer::SdlcOtelObserver;
@@ -23,6 +24,7 @@ use crate::modules::sdlc::plan::{
 use crate::observer::{self, IndexingMode, IndexingObserver, PipelineType};
 use crate::topic::{GlobalIndexingRequest, NamespaceIndexingRequest};
 use crate::types::{Envelope, SerializationError, Subscription};
+use orbit_utils::traversal_path::TraversalPath;
 
 pub struct EntityHandler {
     handler_name: String,
@@ -41,7 +43,7 @@ pub struct EntityHandler {
 struct IndexingRequest {
     watermark: DateTime<Utc>,
     scope_key: String,
-    traversal_path: Option<String>,
+    traversal_path: Option<TraversalPath>,
     namespace_id: Option<i64>,
     dispatch_id: Uuid,
     campaign_id: Option<String>,
@@ -122,7 +124,7 @@ impl EntityHandler {
         &self,
         context: HandlerContext,
         request: IndexingRequest,
-    ) -> Result<(), HandlerError> {
+    ) -> Result<PipelineStats, HandlerError> {
         let mut observers: Vec<Box<dyn IndexingObserver>> =
             vec![Box::new(SdlcOtelObserver::new(self.metrics.clone()))];
         observers.extend(self.analytics.observer());
@@ -131,7 +133,7 @@ impl EntityHandler {
         observer.set_campaign_id(request.campaign_id.clone());
         observer.set_pipeline_type(PipelineType::Sdlc);
         observer.set_entity_type(&self.plan.name);
-        observer.set_traversal_path(request.traversal_path.as_deref());
+        observer.set_traversal_path(request.traversal_path.as_ref());
         observer.set_namespace(request.namespace_id);
 
         let checkpoint_key = format!("{}.{}", request.scope_key, self.plan.name);
@@ -163,7 +165,7 @@ impl EntityHandler {
             .with(
                 request
                     .traversal_path
-                    .as_deref()
+                    .as_ref()
                     .map(|path| TraversalPathFilter { path }),
             )
             .with((mode == IndexingMode::Full).then_some(DeletedFilter {
@@ -175,7 +177,7 @@ impl EntityHandler {
             self.partition_strategy
                 .as_ref()
                 .unwrap()
-                .compute_ranges(self.datalake.as_ref(), request.traversal_path.as_deref())
+                .compute_ranges(self.datalake.as_ref(), request.traversal_path.as_ref())
                 .await?
         } else {
             Vec::new()
@@ -267,7 +269,7 @@ impl EntityHandler {
             }
         }
 
-        result.map(|_| ())
+        result
     }
 
     async fn run_partitions(
@@ -432,7 +434,7 @@ impl Handler for EntityHandler {
         let traversal_path = request.traversal_path.clone();
 
         async {
-            if let Some(path) = traversal_path.as_deref() {
+            if let Some(path) = traversal_path.as_ref() {
                 context
                     .indexing_status
                     .record_entity_start(path, &self.plan.name, started_at)
@@ -452,7 +454,14 @@ impl Handler for EntityHandler {
                     .record_pipeline_error(&self.plan.name, err.error_kind());
             }
 
-            if let Some(path) = traversal_path.as_deref() {
+            if let Some(path) = traversal_path.as_ref() {
+                let rows = result
+                    .as_ref()
+                    .map(|stats| RunRows {
+                        read: Some(stats.read_rows),
+                        written: Some(stats.written_rows),
+                    })
+                    .unwrap_or_default();
                 context
                     .indexing_status
                     .record_entity_completion(
@@ -461,11 +470,12 @@ impl Handler for EntityHandler {
                         started_at,
                         completed_at,
                         result.as_ref().err().map(ToString::to_string),
+                        rows,
                     )
                     .await;
             }
 
-            result
+            result.map(|_| ())
         }
         .instrument(span)
         .await
@@ -570,6 +580,40 @@ mod tests {
 
         let result = handler.handle(handler_context(), envelope).await;
         assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn namespaced_entity_handler_records_run_rows() {
+        let handler = build_handler("MergeRequest", EtlScope::Namespaced);
+        let mock_nats = Arc::new(MockNatsServices::new());
+        let store = Arc::new(crate::indexing_status::IndexingStatusStore::new(
+            mock_nats.clone(),
+        ));
+        let context = HandlerContext::new(
+            mock_nats,
+            Arc::new(MockLockService::new()),
+            ProgressNotifier::noop(),
+            Arc::clone(&store),
+        );
+
+        let envelope = TestEnvelopeFactory::simple(
+            &serde_json::json!({
+                "namespace": 100,
+                "traversal_path": "42/100/",
+                "watermark": "2024-01-21T00:00:00Z"
+            })
+            .to_string(),
+        );
+
+        handler.handle(context, envelope).await.unwrap();
+
+        let progress = store
+            .get_entity(&TraversalPath::new_unchecked("42/100/"), "MergeRequest")
+            .await
+            .unwrap()
+            .expect("entity progress should be recorded");
+        assert_eq!(progress.last_rows_read, Some(0));
+        assert_eq!(progress.last_rows_written, Some(0));
     }
 
     #[test]

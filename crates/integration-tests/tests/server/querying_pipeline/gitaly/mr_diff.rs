@@ -10,8 +10,8 @@ use axum::{Router, routing::get};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use gitlab_client::GitlabClient;
-use gkg_server::content::gitaly::mr_diff::MergeRequestDiffContentService;
-use gkg_utils::arrow::ColumnValue;
+use orbit_server::content::gitaly::mr_diff::MergeRequestDiffContentService;
+use orbit_utils::arrow::ColumnValue;
 use query_engine::shared::content::{ColumnResolver, ResolverContext};
 use tokio::net::TcpListener;
 
@@ -95,7 +95,7 @@ async fn mock_mr_diff_server(
         axum::serve(listener, app).await.unwrap();
     });
 
-    let client = GitlabClient::new(gkg_server_config::GitlabClientConfiguration {
+    let client = GitlabClient::new(orbit_server_config::GitlabClientConfiguration {
         base_url: format!("http://{addr}"),
         signing_key: BASE64.encode(b"test-secret-that-is-long-enough!"),
         resolve_host: None,

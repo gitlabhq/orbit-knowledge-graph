@@ -31,6 +31,7 @@ use crate::constants::{GL_TABLE_PREFIX, TRAVERSAL_PATH_COLUMN, global_tables};
 use crate::error::Result;
 pub use crate::types::SecurityContext;
 use ontology::Ontology;
+use orbit_utils::traversal_path::{TraversalPath, TraversalPathTrie, lowest_common_prefix};
 
 /// Matches `gl_*` or `v{N}_gl_*`, captures the unprefixed name.
 static GL_TABLE_RE: OnceLock<Regex> = OnceLock::new();
@@ -82,13 +83,13 @@ fn apply_to_query(q: &mut Query, ctx: &SecurityContext, ontology: &Ontology) -> 
             match ctx.scope_prefixes.get(alias) {
                 Some(prefix)
                     if ontology.is_table_path_scopable(table)
-                        && eligible.iter().any(|p| prefix.starts_with(p)) =>
+                        && eligible.iter().any(|p| prefix.is_descendant_of(p)) =>
                 {
-                    starts_with_expr(alias, prefix)
+                    starts_with_expr(alias, prefix.as_str())
                 }
                 Some(prefix) if ontology.is_table_path_scopable(table) => Expr::and(
                     build_path_filter(alias, &eligible),
-                    starts_with_expr(alias, prefix),
+                    starts_with_expr(alias, prefix.as_str()),
                 ),
                 _ => build_path_filter(alias, &eligible),
             }
@@ -141,112 +142,19 @@ fn apply_security_to_expr(
     }
 }
 
-fn build_path_filter(alias: &str, paths: &[&str]) -> Expr {
+fn build_path_filter(alias: &str, paths: &[&TraversalPath]) -> Expr {
     match paths.len() {
         0 => Expr::Literal(Value::Bool(false)),
-        1 => starts_with_expr(alias, paths[0]),
+        1 => starts_with_expr(alias, paths[0].as_str()),
         _ => {
-            let collapsed = PathTrie::from_paths(paths).to_minimal_prefixes();
+            let collapsed = TraversalPathTrie::from_paths(paths).to_minimal_prefixes();
             if collapsed.len() == 1 {
-                return starts_with_expr(alias, &collapsed[0]);
+                return starts_with_expr(alias, collapsed[0].as_str());
             }
             let lcp = lowest_common_prefix(&collapsed);
-            let lcp_filter = starts_with_expr(alias, &lcp);
+            let lcp_filter = starts_with_expr(alias, lcp.as_str());
             Expr::and(lcp_filter, path_or_filter(alias, &collapsed))
         }
-    }
-}
-
-/// A trie keyed on path segments (`"1"`, `"100"`, …). Each node tracks
-/// whether it was explicitly inserted (i.e., the user has access to that
-/// exact namespace prefix). Inserting `"1/100/"` marks the `1 → 100` node
-/// as terminal.
-#[derive(Default)]
-struct PathTrie {
-    children: std::collections::BTreeMap<String, PathTrie>,
-    terminal: bool,
-}
-
-impl PathTrie {
-    fn from_paths(paths: &[&str]) -> Self {
-        let mut root = Self::default();
-        for path in paths {
-            root.insert(path);
-        }
-        root
-    }
-
-    fn insert(&mut self, path: &str) {
-        let segments: Vec<&str> = path
-            .trim_end_matches('/')
-            .split('/')
-            .filter(|s| !s.is_empty())
-            .collect();
-        // Empty paths are impossible: SecurityContext::validate_traversal_path
-        // enforces ^(\d+/)+$. Guard here to prevent the root node from being
-        // marked terminal, which would emit "" and match everything.
-        debug_assert!(
-            !segments.is_empty(),
-            "PathTrie::insert called with empty path"
-        );
-        if segments.is_empty() {
-            return;
-        }
-        let mut node = self;
-        for seg in segments {
-            node = node.children.entry(seg.to_string()).or_default();
-        }
-        node.terminal = true;
-    }
-
-    /// Walk the trie and emit the minimal set of prefixes. A terminal
-    /// node emits its path and prunes all descendants (subsumption).
-    /// A non-terminal node with exactly one child merges into that
-    /// child (prefix compression).
-    fn to_minimal_prefixes(&self) -> Vec<String> {
-        let mut result = Vec::new();
-        self.collect(&mut String::new(), &mut result);
-        result
-    }
-
-    fn collect(&self, prefix: &mut String, out: &mut Vec<String>) {
-        if self.terminal {
-            let mut p = prefix.clone();
-            if !p.is_empty() {
-                p.push('/');
-            }
-            out.push(p);
-            return;
-        }
-
-        for (seg, child) in &self.children {
-            let restore_len = prefix.len();
-            if !prefix.is_empty() {
-                prefix.push('/');
-            }
-            prefix.push_str(seg);
-            child.collect(prefix, out);
-            prefix.truncate(restore_len);
-        }
-    }
-}
-
-fn lowest_common_prefix(paths: &[String]) -> String {
-    if paths.is_empty() {
-        return String::new();
-    }
-    let segments: Vec<Vec<&str>> = paths
-        .iter()
-        .map(|p| p.trim_end_matches('/').split('/').collect())
-        .collect();
-    let first = &segments[0];
-    let common_len = (0..first.len())
-        .take_while(|&i| segments.iter().all(|s| s.get(i) == first.get(i)))
-        .count();
-    if common_len == 0 {
-        String::new()
-    } else {
-        format!("{}/", first[..common_len].join("/"))
     }
 }
 
@@ -267,8 +175,8 @@ fn starts_with_value_expr(alias: &str, path: Expr) -> Expr {
 /// granule pruning per path prefix. This matters inside `dedup_edge_scan`
 /// FINAL subqueries: PK range pruning reduces the scan from the entire LCP
 /// namespace to only the user's authorized paths.
-fn path_or_filter(alias: &str, paths: &[String]) -> Expr {
-    let mut iter = paths.iter().map(|p| starts_with_expr(alias, p));
+fn path_or_filter(alias: &str, paths: &[TraversalPath]) -> Expr {
+    let mut iter = paths.iter().map(|p| starts_with_expr(alias, p.as_str()));
     let first = iter.next().expect("paths is non-empty (caller checks)");
     iter.fold(first, |a, b| Expr::binary(crate::ast::Op::Or, a, b))
 }
@@ -346,9 +254,10 @@ fn should_apply_security_filter(table: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::TraversalPath;
+    use crate::AuthorizedPath;
     use crate::ast::{JoinType, Op, SelectExpr};
     use ontology::constants::EDGE_TABLE;
+    use orbit_utils::traversal_path::TraversalPath;
     use serde_json::Value;
 
     fn simple_query() -> Node {
@@ -384,20 +293,28 @@ mod tests {
 
     #[test]
     fn single_path_uses_starts_with() {
-        let expr = build_path_filter("u", &["42/43/"]);
+        let expr = build_path_filter("u", &[&TraversalPath::from("42/43/")]);
         assert!(matches!(expr, Expr::FuncCall { name, .. } if name == "startsWith"));
     }
 
     #[test]
     fn multiple_paths_uses_prefix_and_or_starts_with() {
-        let expr = build_path_filter("u", &["1/2/4/", "1/2/5/"]);
+        let expr = build_path_filter(
+            "u",
+            &[
+                &TraversalPath::from("1/2/4/"),
+                &TraversalPath::from("1/2/5/"),
+            ],
+        );
         assert!(matches!(expr, Expr::BinaryOp { op: Op::And, .. }));
     }
 
     #[test]
     fn many_paths_uses_or_chain() {
-        let paths: Vec<String> = (0..200u64).map(|i| format!("1/{i}/")).collect();
-        let refs: Vec<&str> = paths.iter().map(|s| s.as_str()).collect();
+        let paths: Vec<TraversalPath> = (0..200u64)
+            .map(|i| TraversalPath::from(format!("1/{i}/")))
+            .collect();
+        let refs: Vec<&TraversalPath> = paths.iter().collect();
         let expr = build_path_filter("e", &refs);
         let dbg = format!("{expr:?}");
         assert!(
@@ -424,8 +341,8 @@ mod tests {
         let sc = SecurityContext::new_with_roles(
             1,
             vec![
-                TraversalPath::new("1/100/", 20),
-                TraversalPath::new("1/101/", 30),
+                AuthorizedPath::new("1/100/", 20),
+                AuthorizedPath::new("1/101/", 30),
             ],
         )
         .unwrap();
@@ -439,7 +356,7 @@ mod tests {
         assert!(
             SecurityContext::new_with_roles(
                 1,
-                vec![TraversalPath::with_access_levels("1/100/", vec![])]
+                vec![AuthorizedPath::with_access_levels("1/100/", vec![])]
             )
             .is_err()
         );
@@ -556,8 +473,8 @@ mod tests {
         let ctx = SecurityContext::new_with_roles(
             1,
             vec![
-                TraversalPath::new("1/100/", 20), // Reporter
-                TraversalPath::new("1/101/", 30), // Developer (covers SM)
+                AuthorizedPath::new("1/100/", 20), // Reporter
+                AuthorizedPath::new("1/101/", 30), // Developer (covers SM)
             ],
         )
         .unwrap();
@@ -606,7 +523,7 @@ mod tests {
     fn no_eligible_paths_compile_to_bool_false() {
         let ctx = SecurityContext::new_with_roles(
             1,
-            vec![TraversalPath::new("1/100/", 20)], // Reporter only
+            vec![AuthorizedPath::new("1/100/", 20)], // Reporter only
         )
         .unwrap();
 
@@ -639,96 +556,15 @@ mod tests {
     }
 
     #[test]
-    fn lowest_common_prefix_finds_shared_path() {
-        assert_eq!(
-            lowest_common_prefix(&["1/2/4/".into(), "1/2/5/".into()]),
-            "1/2/"
-        );
-        assert_eq!(lowest_common_prefix(&["1/2/".into(), "1/3/".into()]), "1/");
-        assert_eq!(lowest_common_prefix(&["1/".into(), "2/".into()]), "");
-        assert_eq!(lowest_common_prefix(&["42/".into()]), "42/");
-    }
-
-    #[test]
-    fn path_trie_subsumes_children() {
-        let t = PathTrie::from_paths(&["1/100/", "1/100/200/", "1/100/201/"]);
-        assert_eq!(t.to_minimal_prefixes(), vec!["1/100/"]);
-    }
-
-    #[test]
-    fn path_trie_keeps_siblings() {
-        let t = PathTrie::from_paths(&["1/100/", "1/200/"]);
-        assert_eq!(t.to_minimal_prefixes(), vec!["1/100/", "1/200/"]);
-    }
-
-    #[test]
-    fn path_trie_siblings_under_shared_parent() {
-        let t = PathTrie::from_paths(&["1/100/200/", "1/100/201/", "1/100/202/", "1/200/300/"]);
-        let result = t.to_minimal_prefixes();
-        assert_eq!(result.len(), 4);
-        assert!(result.contains(&"1/200/300/".to_string()));
-    }
-
-    #[test]
-    fn path_trie_single_path() {
-        let t = PathTrie::from_paths(&["1/100/"]);
-        assert_eq!(t.to_minimal_prefixes(), vec!["1/100/"]);
-    }
-
-    #[test]
-    fn path_trie_deduplicates() {
-        let t = PathTrie::from_paths(&["1/100/", "1/100/", "1/200/"]);
-        assert_eq!(t.to_minimal_prefixes(), vec!["1/100/", "1/200/"]);
-    }
-
-    #[test]
-    fn path_trie_deep_subsumption() {
-        let t = PathTrie::from_paths(&["1/", "1/100/", "1/100/200/", "1/100/200/300/"]);
-        assert_eq!(t.to_minimal_prefixes(), vec!["1/"]);
-    }
-
-    #[test]
-    fn path_trie_mixed_orgs() {
-        let t = PathTrie::from_paths(&["1/100/", "2/100/"]);
-        assert_eq!(t.to_minimal_prefixes(), vec!["1/100/", "2/100/"]);
-    }
-
-    #[test]
-    fn path_trie_realistic_38_paths() {
-        let mut paths: Vec<String> = (100..130).map(|i| format!("1/10/{i}/")).collect();
-        paths.extend((200..208).map(|i| format!("1/{i}/")));
-        let refs: Vec<&str> = paths.iter().map(|s| s.as_str()).collect();
-        let t = PathTrie::from_paths(&refs);
-        let result = t.to_minimal_prefixes();
-        assert_eq!(result.len(), 38);
-    }
-
-    #[test]
-    fn path_trie_parent_collapses_many_children() {
-        let mut paths = vec!["1/10/"];
-        let children: Vec<String> = (100..130).map(|i| format!("1/10/{i}/")).collect();
-        let refs: Vec<&str> = children.iter().map(|s| s.as_str()).collect();
-        paths.extend(refs);
-        let t = PathTrie::from_paths(&paths);
-        assert_eq!(t.to_minimal_prefixes(), vec!["1/10/"]);
-    }
-
-    #[test]
-    #[should_panic(expected = "empty path")]
-    fn path_trie_empty_path_panics_in_debug() {
-        PathTrie::from_paths(&[""]);
-    }
-
-    #[test]
     fn trie_collapse_after_role_filtering() {
-        use crate::types::TraversalPath;
+        use crate::types::AuthorizedPath;
         let ctx = SecurityContext::new_with_roles(
             1,
             vec![
-                TraversalPath::new(String::from("1/100/"), 20),
-                TraversalPath::new(String::from("1/100/200/"), 20),
-                TraversalPath::new(String::from("1/100/200/"), 30),
-                TraversalPath::new(String::from("1/300/"), 30),
+                AuthorizedPath::new(String::from("1/100/"), 20),
+                AuthorizedPath::new(String::from("1/100/200/"), 20),
+                AuthorizedPath::new(String::from("1/100/200/"), 30),
+                AuthorizedPath::new(String::from("1/300/"), 30),
             ],
         )
         .unwrap();
@@ -736,7 +572,7 @@ mod tests {
         let eligible = ctx.paths_at_least(20);
         assert_eq!(eligible.len(), 4);
 
-        let collapsed = PathTrie::from_paths(&eligible).to_minimal_prefixes();
+        let collapsed = TraversalPathTrie::from_paths(&eligible).to_minimal_prefixes();
         assert_eq!(collapsed, vec!["1/100/", "1/300/"]);
 
         let filter = build_path_filter("t", &eligible);
@@ -886,7 +722,7 @@ mod tests {
     #[test]
     fn scope_prefix_replaces_broad_on_scoped_alias() {
         let mut prefixes = std::collections::HashMap::new();
-        prefixes.insert("p".to_string(), "1/24/23/".to_string());
+        prefixes.insert("p".to_string(), TraversalPath::new_unchecked("1/24/23/"));
         let ctx = SecurityContext::new(1, vec!["1/".into()])
             .unwrap()
             .with_scope_prefixes(prefixes);
@@ -929,8 +765,8 @@ mod tests {
     fn scope_prefix_below_role_floor_keeps_broad() {
         let ontology = Ontology::load_embedded().unwrap();
         let mut prefixes = std::collections::HashMap::new();
-        prefixes.insert("v".to_string(), "1/100/200/".to_string());
-        let ctx = SecurityContext::new_with_roles(1, vec![TraversalPath::new("1/100/", 20)])
+        prefixes.insert("v".to_string(), TraversalPath::new_unchecked("1/100/200/"));
+        let ctx = SecurityContext::new_with_roles(1, vec![AuthorizedPath::new("1/100/", 20)])
             .unwrap()
             .with_scope_prefixes(prefixes);
 
@@ -958,7 +794,7 @@ mod tests {
     #[test]
     fn scope_prefix_dropped_on_non_path_scopable_alias() {
         let mut prefixes = std::collections::HashMap::new();
-        prefixes.insert("g".to_string(), "1/24/23/".to_string());
+        prefixes.insert("g".to_string(), TraversalPath::new_unchecked("1/24/23/"));
         let ctx = SecurityContext::new(1, vec!["1/".into()])
             .unwrap()
             .with_scope_prefixes(prefixes);

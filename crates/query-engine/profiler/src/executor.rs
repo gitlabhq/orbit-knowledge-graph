@@ -1,7 +1,7 @@
 use clickhouse_client::ArrowClickHouseClient;
 use shared::PipelineOutput;
 
-use gkg_server_config::ProfilingConfig;
+use orbit_server_config::ProfilingConfig;
 
 pub async fn enrich_output(
     client: &ArrowClickHouseClient,

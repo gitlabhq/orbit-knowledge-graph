@@ -8,17 +8,17 @@
 
 This document describes how a user prompt is routed from a GitLab Duo surface
 through GitLab Rails to the GitLab Duo Workflow Service (DWS) and the AI Gateway,
-and where the Knowledge Graph (Orbit) attaches to that flow. It describes
+and where Orbit attaches to that flow. It describes
 the three independent routing *patterns* that decide whether an in-flight
 prompt sees Orbit tooling — one per Rails seam — and shows how each pattern
 behaves with Orbit on vs. off across the affected surfaces (Duo Chat, Duo
 Developer, foundational agents, custom AI Catalog agents).
 
-The Knowledge Graph repository owns the service that backs the Orbit MCP tools
+The Orbit repository owns the service that backs the Orbit MCP tools
 (`query_graph`, `get_graph_schema`, `list_commands`, `invoke_command`). The
 routing decisions documented here, however, live in `gitlab-org/gitlab`. This
 document is therefore a *consumer-side* description: it captures the invariants
-the Knowledge Graph team relies on when reasoning about which prompts can reach
+the Orbit team relies on when reasoning about which prompts can reach
 Orbit, which agents advertise our tools, and which feature flags gate the
 overall surface.
 
@@ -178,7 +178,7 @@ flowchart LR
     DWS -->|MCP calls| OrbitMCP[Orbit MCP server<br/>POST /api/v4/orbit/mcp]
     DWS -->|MCP calls| GitLabMCP[GitLab MCP server]
     DWS -->|LLM| AIGW
-    OrbitMCP -->|gRPC| GKG[Knowledge Graph<br/>gkg-server]
+    OrbitMCP -->|gRPC| GKG[Orbit<br/>gkg-server]
 ```
 
 The three seams that decide Orbit's involvement are `McpConfigService`
@@ -288,7 +288,7 @@ catalog agents. All four predicates apply the same three-layer evaluation:
 
 1. **Platform-level kill switches.** Two feature flags must both be on, or
    nothing else matters and every predicate returns `false`. These exist so
-   the Knowledge Graph and the foundational-agent integration can be turned
+   Orbit and the foundational-agent integration can be turned
    off at the platform level.
 2. **Per-user preference flag.** If the per-user preference rollout flag is
    off, the platform falls back to the legacy behaviour: every workflow gets
@@ -917,7 +917,7 @@ to experimental variants.
 
 Two further Orbit-adjacent flags exist but do **not** gate routing:
 `:orbit_enroll_namespace` gates *namespace enrollment* (the moment an
-owner opts a namespace into Knowledge Graph) and `:knowledge_graph_billing`
+owner opts a namespace into Orbit) and `:knowledge_graph_billing`
 exposes the governing-namespace picker in user preferences. They are
 listed in the table below for completeness.
 
@@ -935,7 +935,7 @@ listed in the table below for completeness.
 | `duo_developer_orbit` | `gitlab_com_derisk` | off | Gates the `developer/v1` → `2.0.0-orbit` override in Seam B. Combined with `Ai::Orbit::Settings.killswitch_on?`. |
 | `duo_developer_next_unstable` | `wip` | off | Routes `developer/v1` to `developer_unstable/experimental`. Checked *after* the Orbit branch in Seam B, so the Orbit variant wins when both apply. Scoped to `container` / `container.root_ancestor` at the call site. |
 | `fix_pipeline_next` | `experiment` | off | Routes `fix_pipeline/v1` to `fix_pipeline_next/v1`. Unrelated to Orbit. Scoped to `container` / `container.root_ancestor` at the call site. |
-| `orbit_enroll_namespace` | `ops` | on | **Enrollment, not routing.** Gates whether an owner can opt a namespace into Knowledge Graph. Disabling/unenrollment is intentionally ungated. No effect on `Ai::Orbit::Settings` or the three seams. |
+| `orbit_enroll_namespace` | `ops` | on | **Enrollment, not routing.** Gates whether an owner can opt a namespace into Orbit. Disabling/unenrollment is intentionally ungated. No effect on `Ai::Orbit::Settings` or the three seams. |
 | `knowledge_graph_billing` | `wip` | off | **Preferences UI, not routing.** Exposes the "Default Orbit namespace" picker and the `:assign_governing_knowledge_graph_namespace` ability. Touches `UserPreference` but not the four `_enabled?` predicates. |
 
 </details>
@@ -999,7 +999,7 @@ follow-up MRs have a single jump-to map.
 
 ## Implications and recommendations
 
-Five observations follow from the structure above that the Knowledge Graph
+Five observations follow from the structure above that the Orbit
 team should keep in view. The first is the only one that is an active
 correctness risk; the others are about prompt content, custom-agent
 plumbing, future maintenance, and what Orbit can — and cannot — see in
@@ -1040,7 +1040,7 @@ The two states that matter:
 
 The current shape is intentional: `duo_developer_orbit` exists so the
 `2.0.0-orbit` variant can be rolled out independently of the broader Orbit
-foundational gate. The Knowledge Graph team should treat the second failure
+foundational gate. The Orbit team should treat the second failure
 mode as a known risk to monitor: production runs that flip the flow but drop
 the MCP server will show DWS errors trying to call `query_graph`. When
 `duo_developer_orbit` is unflagged, the two gates should be consolidated to

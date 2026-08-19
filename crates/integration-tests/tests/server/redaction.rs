@@ -11,8 +11,8 @@ use crate::common::{
     GRAPH_SCHEMA_SQL, MockRedactionService, SIPHON_SCHEMA_SQL, TestContext, compile_and_execute,
     load_ontology, run_redaction, test_security_context,
 };
-use gkg_server::redaction::QueryResult;
 use integration_testkit::{run_subtests, run_subtests_shared, t};
+use orbit_server::redaction::QueryResult;
 use query_engine::compiler::build_entity_auth;
 
 fn table_users() -> String {

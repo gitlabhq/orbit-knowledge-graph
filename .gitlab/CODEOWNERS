@@ -2,13 +2,13 @@
 # (docs/design-documents/decisions/013_billing_sox_scope.md).
 
 [SOX Billing] @gitlab-org/orbit/team
-/crates/gkg-billing/
-/crates/gkg-server-config/
-/crates/gkg-server/src/auth/
-/crates/gkg-server/src/pipeline/
-/crates/gkg-server/src/grpc/
-/crates/gkg-server/src/billing_adapter.rs
-/crates/gkg-server/src/main.rs
+/crates/orbit-billing/
+/crates/orbit-server-config/
+/crates/orbit-server/src/auth/
+/crates/orbit-server/src/pipeline/
+/crates/orbit-server/src/grpc/
+/crates/orbit-server/src/billing_adapter.rs
+/crates/orbit-server/src/main.rs
 /crates/query-engine/pipeline/
 /crates/integration-tests/tests/billing_boundary.rs
 /.gitlab/CODEOWNERS

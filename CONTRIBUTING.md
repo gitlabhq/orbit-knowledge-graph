@@ -1,6 +1,6 @@
 # Contributing to Orbit
 
-Thanks for contributing to [GitLab Orbit](https://docs.gitlab.com/orbit/), the knowledge graph
+Thanks for contributing to [GitLab Orbit](https://docs.gitlab.com/orbit/), the service
 that turns GitLab SDLC data and source code into a queryable property graph.
 
 Community contributions go through the [community fork](https://gitlab.com/gitlab-community/gitlab-org/orbit/knowledge-graph).

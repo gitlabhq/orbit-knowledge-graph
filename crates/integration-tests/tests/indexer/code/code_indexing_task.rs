@@ -4,7 +4,6 @@ use std::sync::Arc;
 use arrow::array::{Array, BooleanArray, Int64Array, StringArray};
 use chrono::{TimeZone, Utc};
 use clickhouse_client::ClickHouseConfigurationExt;
-use gkg_utils::arrow::ArrowUtils;
 use indexer::handler::{Handler, HandlerContext};
 use indexer::indexing_status::IndexingStatusStore;
 use indexer::modules::code::{
@@ -15,8 +14,10 @@ use indexer::testkit::{MockLockService, MockNatsServices};
 use indexer::topic::CodeIndexingTaskRequest;
 use indexer::types::Envelope;
 use integration_testkit::{assert_edge_count_for_traversal_path, t};
+use orbit_utils::arrow::ArrowUtils;
 
 use super::helpers::*;
+use orbit_utils::traversal_path::TraversalPath;
 
 #[tokio::test]
 async fn indexes_repository() {
@@ -61,7 +62,7 @@ async fn indexes_repository() {
         "CONTAINS",
         "Branch",
         "File",
-        traversal_path,
+        &TraversalPath::new_unchecked(traversal_path),
         0,
     )
     .await;
@@ -195,7 +196,7 @@ async fn skips_oversized_go_parser_input_and_indexes_repository() {
     let deps = CodeIndexingDeps::new_with_pipeline_config(
         &mock,
         &clickhouse,
-        gkg_server_config::CodeIndexingPipelineConfig {
+        orbit_server_config::CodeIndexingPipelineConfig {
             max_file_size_bytes: u64::MAX,
             ..Default::default()
         },
@@ -529,7 +530,12 @@ async fn stale_cleanup_tombstones_must_not_outrank_rows_versioned_at_the_waterma
 
     let watermark = Utc.with_ymd_and_hms(2026, 1, 2, 0, 0, 0).unwrap();
     cleaner
-        .delete_stale_data(traversal_path, project_id, branch, watermark)
+        .delete_stale_data(
+            &TraversalPath::new_unchecked(traversal_path),
+            project_id,
+            branch,
+            watermark,
+        )
         .await
         .expect("stale data cleanup failed");
 
@@ -1018,7 +1024,7 @@ fn handler_context_with_status() -> (HandlerContext, Arc<IndexingStatusStore>) {
 fn failing_writer() -> Arc<indexer::clickhouse::ClickHouseWriter> {
     Arc::new(
         indexer::clickhouse::ClickHouseWriter::new(
-            gkg_server_config::ClickHouseConfiguration {
+            orbit_server_config::ClickHouseConfiguration {
                 url: "http://127.0.0.1:1".into(),
                 ..Default::default()
             },
@@ -1062,7 +1068,7 @@ fn code_indexing_task_envelope(
         project_id,
         branch: Some("main".to_string()),
         commit_sha: Some(commit_sha.to_string()),
-        traversal_path: traversal_path.to_string(),
+        traversal_path: TraversalPath::new_unchecked(traversal_path),
         dispatch_id: uuid::Uuid::new_v4(),
         campaign_id: None,
     })
@@ -1079,7 +1085,7 @@ fn code_indexing_backfill_envelope(
         project_id,
         branch: Some("main".to_string()),
         commit_sha: None,
-        traversal_path: traversal_path.to_string(),
+        traversal_path: TraversalPath::new_unchecked(traversal_path),
         dispatch_id: uuid::Uuid::new_v4(),
         campaign_id: None,
     })
@@ -1337,7 +1343,7 @@ async fn assert_branch_indexed(
         "IN_PROJECT",
         "Branch",
         "Project",
-        expected_traversal_path,
+        &TraversalPath::new_unchecked(expected_traversal_path),
         1,
     )
     .await;
@@ -1347,7 +1353,7 @@ async fn assert_branch_indexed(
         "CONTAINS",
         "Project",
         "Branch",
-        expected_traversal_path,
+        &TraversalPath::new_unchecked(expected_traversal_path),
         1,
     )
     .await;
@@ -1357,7 +1363,7 @@ async fn assert_branch_indexed(
         "CONTAINS",
         "Branch",
         "Directory",
-        expected_traversal_path,
+        &TraversalPath::new_unchecked(expected_traversal_path),
         1,
     )
     .await;
@@ -1367,7 +1373,7 @@ async fn assert_branch_indexed(
         "ON_BRANCH",
         "File",
         "Branch",
-        expected_traversal_path,
+        &TraversalPath::new_unchecked(expected_traversal_path),
         1,
     )
     .await;
@@ -1389,7 +1395,7 @@ async fn timed_out_job_writes_no_data() {
     let deps = CodeIndexingDeps::new_with_pipeline_config(
         &mock,
         &clickhouse,
-        gkg_server_config::CodeIndexingPipelineConfig {
+        orbit_server_config::CodeIndexingPipelineConfig {
             job_timeout_secs: 1,
             ..Default::default()
         },
@@ -1435,6 +1441,42 @@ async fn timed_out_job_writes_no_data() {
 }
 
 #[tokio::test]
+async fn heartbeat_keeps_a_slow_job_alive_and_indexes_it() {
+    let project_id: i64 = 4242;
+    let clickhouse = integration_testkit::TestContext::new(&[
+        integration_testkit::SIPHON_SCHEMA_SQL,
+        *integration_testkit::GRAPH_SCHEMA_SQL,
+    ])
+    .await;
+
+    let mock = MockGitlabServer::start().await;
+    mock.add_project_with_slow_archive(project_id, "main");
+
+    let lock_ttl_forcing_ticks_during_fetch = std::time::Duration::from_millis(900);
+    let deps = CodeIndexingDeps::new(&mock, &clickhouse);
+    let handler =
+        deps.code_indexing_task_handler_with_lock_ttl(lock_ttl_forcing_ticks_during_fetch);
+
+    let locks = Arc::new(MockLockService::new());
+    let context = handler_context_with_lock_service(locks.clone());
+    let envelope = code_indexing_task_envelope(project_id, "slow-sha", 1, "4242/4242/");
+
+    let result = handler.handle(context, envelope).await;
+    assert!(
+        result.is_ok(),
+        "a slow job must complete under the heartbeat, not fail: {result:?}"
+    );
+    handler.flush().await.expect("flush");
+
+    assert_code_indexed(&clickhouse, project_id).await;
+    assert!(
+        locks.renew_count() >= 3,
+        "the heartbeat must renew the lock during the slow fetch; got {} renews",
+        locks.renew_count(),
+    );
+}
+
+#[tokio::test]
 async fn disk_is_clean_after_a_timed_out_job() {
     let project_id: i64 = 991;
     let clickhouse = integration_testkit::TestContext::new(&[
@@ -1450,7 +1492,7 @@ async fn disk_is_clean_after_a_timed_out_job() {
     let deps = CodeIndexingDeps::new_with_pipeline_config(
         &mock,
         &clickhouse,
-        gkg_server_config::CodeIndexingPipelineConfig {
+        orbit_server_config::CodeIndexingPipelineConfig {
             job_timeout_secs: 1,
             ..Default::default()
         },
@@ -1470,5 +1512,66 @@ async fn disk_is_clean_after_a_timed_out_job() {
     assert!(
         remaining.is_empty(),
         "a dropped job must not leak its extraction dir, found: {remaining:?}"
+    );
+}
+
+#[tokio::test]
+async fn cancelled_run_that_finishes_writes_no_checkpoint() {
+    let project_id: i64 = 993;
+    let traversal_path = "993/993/";
+    let clickhouse = integration_testkit::TestContext::new(&[
+        integration_testkit::SIPHON_SCHEMA_SQL,
+        *integration_testkit::GRAPH_SCHEMA_SQL,
+    ])
+    .await;
+
+    let mock = MockGitlabServer::start().await;
+    mock.add_project(
+        project_id,
+        "main",
+        &[("src/Main.java", "public class Main { void a() {} }")],
+    );
+
+    let deps = CodeIndexingDeps::new(&mock, &clickhouse);
+    let request = indexer::modules::code::IndexingRequest {
+        project_id,
+        branch: "main".to_string(),
+        traversal_path: TraversalPath::new_unchecked(traversal_path),
+        task_id: 1,
+        commit_sha: Some("abc123".to_string()),
+        had_prior_checkpoint: false,
+    };
+
+    let cancel = code_graph::v2::CancellationToken::new();
+    cancel.cancel();
+    let mut observer = indexer::observer::NoOpObserver;
+    let lock = indexer::locking::LockGuard::acquire(
+        Arc::new(MockLockService::new()),
+        "project.9911.cancelled",
+        std::time::Duration::from_secs(300),
+    )
+    .await
+    .expect("lock service")
+    .expect("lock free");
+    let result = deps
+        .pipeline
+        .index_project(&handler_context(), &request, &mut observer, cancel, &lock)
+        .await;
+    assert!(
+        matches!(
+            result,
+            Err(indexer::modules::code::IndexError::Failed(
+                indexer::handler::HandlerError::Processing(_)
+            ))
+        ),
+        "a cancelled run must fail with Processing so it is retried, not checkpointed"
+    );
+
+    deps.pipeline.flush().await.expect("flush");
+
+    assert_eq!(
+        latest_checkpoint_task_id(&clickhouse, traversal_path, project_id, "main").await,
+        None,
+        "a cancelled run must not write a checkpoint"
     );
 }

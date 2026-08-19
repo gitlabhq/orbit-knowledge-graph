@@ -18,7 +18,7 @@ RUN --mount=type=secret,id=sccache_gcs_key \
     fi && \
     export RUSTC_WRAPPER="$SCCACHE_BIN" && \
     "$SCCACHE_BIN" --start-server || true && \
-    cargo build --release -p gkg-server --locked && \
+    cargo build --release -p orbit-server --locked && \
     "$SCCACHE_BIN" --show-stats || true && \
     cp target/release/gkg-server /gkg-server
 

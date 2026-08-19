@@ -32,8 +32,8 @@ use tracing::{debug, info, warn};
 use crate::locking::{INDEXING_LOCKS_BUCKET, LockService, NatsLockService};
 use crate::nats::{KvBucketConfig, NatsBroker, NatsServices, NatsServicesImpl};
 use crate::orchestrator::{Trigger, TriggerError};
-use gkg_server_config::NatsConfiguration;
-use gkg_server_config::ScheduleConfiguration;
+use orbit_server_config::NatsConfiguration;
+use orbit_server_config::ScheduleConfiguration;
 
 #[derive(Debug, thiserror::Error)]
 #[error("{0}")]
@@ -320,6 +320,21 @@ mod tests {
     impl LockService for AlwaysGrantLockService {
         async fn try_acquire(&self, _key: &str, _ttl: Duration) -> Result<bool, LockError> {
             Ok(true)
+        }
+        async fn try_acquire_renewable(
+            &self,
+            _key: &str,
+            _ttl: Duration,
+        ) -> Result<Option<crate::locking::LockRevision>, LockError> {
+            Ok(Some(0))
+        }
+        async fn renew(
+            &self,
+            _key: &str,
+            _ttl: Duration,
+            revision: crate::locking::LockRevision,
+        ) -> Result<Option<crate::locking::LockRevision>, LockError> {
+            Ok(Some(revision))
         }
         async fn release(&self, _key: &str) -> Result<(), LockError> {
             Ok(())

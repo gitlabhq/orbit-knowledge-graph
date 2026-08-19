@@ -2,11 +2,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 /// Flat 100ms hot-poll for the unbounded fetch supervisor loop.
-const FETCH_RETRY: crate::engine::retry::RetryPolicy = crate::engine::retry::RetryPolicy {
-    mode: crate::engine::retry::RetryMode::Local,
-    backoff: crate::engine::retry::Backoff::Fixed(&[Duration::from_millis(100)]),
+const FETCH_RETRY: crate::retry::LocalRetry = crate::retry::LocalRetry {
+    backoff: crate::retry::Backoff::Fixed(&[Duration::from_millis(100)]),
     max_attempts: u32::MAX, // unused by drive_forever; the loop is unbounded by design
-    dead_letter: false,
 };
 const DEAD_LETTER_MAX_AGE: Duration = Duration::ZERO;
 
@@ -14,7 +12,7 @@ use async_nats::jetstream::consumer::PullConsumer;
 use async_nats::jetstream::consumer::pull::Config as ConsumerConfig;
 use bytes::Bytes;
 use futures::StreamExt;
-use nats_client::NatsClient;
+use nats_client::{NatsClient, SubjectDedup};
 use parking_lot::Mutex;
 use tokio::task::JoinHandle;
 use tokio_stream::wrappers::ReceiverStream;
@@ -25,17 +23,17 @@ use tracing::{debug, info, warn};
 use crate::dead_letter::{
     DEAD_LETTER_STREAM, DEAD_LETTER_SUBJECT_PREFIX, DeadLetterEnvelope, dead_letter_subject,
 };
-use crate::engine::retry::{Loop, drive_forever};
 use crate::metrics::EngineMetrics;
 use crate::nats::versioning::NATS_VERSIONER;
+use crate::retry::{Loop, drive_forever};
 use crate::types::{Envelope, MessageId, Subscription};
 
 use async_nats::jetstream::ErrorCode;
 use async_nats::jetstream::context::{PublishError, PublishErrorKind};
 
 use super::message::{NatsAcker, NatsMessage, NatsSubscription};
-use gkg_server_config::NatsConfiguration;
 use nats_client::NatsError;
+use orbit_server_config::NatsConfiguration;
 
 fn map_subscribe_error<E: std::fmt::Display>(error: E) -> NatsError {
     NatsError::Subscribe(error.to_string())
@@ -113,7 +111,12 @@ impl NatsBroker {
 
         for (stream_name, subjects) in managed_streams {
             self.inner
-                .create_or_update_stream(&stream_name, subjects, None)
+                .create_or_update_stream(
+                    &stream_name,
+                    subjects,
+                    None,
+                    SubjectDedup::CollapseDuplicates,
+                )
                 .await?;
         }
 
@@ -146,6 +149,7 @@ impl NatsBroker {
                 &NATS_VERSIONER.stream(DEAD_LETTER_STREAM),
                 vec![subject],
                 Some(DEAD_LETTER_MAX_AGE),
+                SubjectDedup::KeepAll,
             )
             .await?;
         Ok(())

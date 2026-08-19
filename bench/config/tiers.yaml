@@ -1,0 +1,63 @@
+tiers:
+  small:
+    nodes: { machine: e2-standard-8, count: 3 }
+    gkg:
+      indexer:    { replicas: 1, requests: { cpu: 2, memory: 4Gi }, limits: { memory: 12Gi } }
+      webserver:  { replicas: 2, requests: { cpu: 1, memory: 2Gi }, limits: { memory: 3Gi } }
+      dispatcher: { replicas: 1, requests: { cpu: 200m, memory: 256Mi }, limits: { memory: 512Mi } }
+      concurrency: { max_concurrent_workers: 4, sdlc: 2, code: 2 }
+    clickhouse: { cpu: 8, memory: 32Gi, storage: 100Gi }
+    nats:       { replicas: 3, storage: 20Gi }
+    workload:
+      steady_rows_per_sec: 200
+      qps_ladder: [1, 5, 10]
+    slos:
+      query_p90_ms: 500
+      query_success_rate: 0.99
+      achieved_rate_multiplier: 0.8
+      sdlc_watermark_lag_p99_s: 300
+      code_backfill_hours_max: 4
+      oom_count: 0
+      cpu_throttle_ratio_max: 0.1
+
+  medium:
+    nodes: { machine: e2-standard-16, count: 3 }
+    gkg:
+      indexer:    { replicas: 2, requests: { cpu: 4, memory: 8Gi }, limits: { memory: 12Gi } }
+      webserver:  { replicas: 3, requests: { cpu: 2, memory: 4Gi }, limits: { memory: 6Gi } }
+      dispatcher: { replicas: 1, requests: { cpu: 500m, memory: 1Gi }, limits: { memory: 2Gi } }
+      concurrency: { max_concurrent_workers: 8, sdlc: 4, code: 4 }
+    clickhouse: { cpu: 8, memory: 32Gi, storage: 250Gi }
+    nats:       { replicas: 3, storage: 50Gi }
+    workload:
+      steady_rows_per_sec: 1000
+      qps_ladder: [1, 5, 20]
+    slos:
+      query_p90_ms: 500
+      query_success_rate: 0.99
+      achieved_rate_multiplier: 0.8
+      sdlc_watermark_lag_p99_s: 300
+      code_backfill_hours_max: 8
+      oom_count: 0
+      cpu_throttle_ratio_max: 0.1
+
+  large:
+    nodes: { machine: e2-standard-32, count: 5 }
+    gkg:
+      indexer:    { replicas: 3, requests: { cpu: 8, memory: 16Gi }, limits: { memory: 24Gi } }
+      webserver:  { replicas: 4, requests: { cpu: 4, memory: 8Gi }, limits: { memory: 12Gi } }
+      dispatcher: { replicas: 1, requests: { cpu: 1, memory: 2Gi }, limits: { memory: 4Gi } }
+      concurrency: { max_concurrent_workers: 16, sdlc: 8, code: 8 }
+    clickhouse: { cpu: 16, memory: 64Gi, storage: 500Gi }
+    nats:       { replicas: 3, storage: 100Gi }
+    workload:
+      steady_rows_per_sec: 5000
+      qps_ladder: [1, 5, 20, 50]
+    slos:
+      query_p90_ms: 500
+      query_success_rate: 0.99
+      achieved_rate_multiplier: 0.8
+      sdlc_watermark_lag_p99_s: 300
+      code_backfill_hours_max: 16
+      oom_count: 0
+      cpu_throttle_ratio_max: 0.1

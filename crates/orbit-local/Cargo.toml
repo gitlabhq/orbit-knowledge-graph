@@ -1,5 +1,5 @@
 [package]
-name = "orbit-local"
+name = "orbit-cli"
 version.workspace = true
 edition = "2024"
 build = "build.rs"
@@ -16,8 +16,8 @@ mimalloc = { workspace = true }
 arrow = { workspace = true, features = ["prettyprint"] }
 code-graph = { path = "../code-graph" }
 duckdb-client = { path = "../duckdb-client" }
-gkg-prompts = { path = "../gkg-prompts" }
-gkg-utils = { path = "../utils" }
+orbit-prompts = { path = "../orbit-prompts" }
+orbit-utils = { path = "../utils" }
 ontology = { path = "../ontology" }
 gitalisk-core = { workspace = true }
 clap = { workspace = true }
@@ -27,15 +27,18 @@ tracing-subscriber = { workspace = true }
 anyhow = { workspace = true }
 dirs = { workspace = true }
 dunce = { workspace = true }
+reqwest = { workspace = true }
 rmcp = { workspace = true }
 rust-embed = { workspace = true }
+rustls = { workspace = true }
 schemars = { workspace = true }
 serde = { workspace = true }
-serde_json = { workspace = true }
+serde_json = { workspace = true, features = ["raw_value"] }
+serde_yaml = { workspace = true }
 strum = { workspace = true }
 
 [build-dependencies]
-gkg-prompts = { path = "../gkg-prompts" }
+orbit-prompts = { path = "../orbit-prompts" }
 
 [dev-dependencies]
 tempfile = { workspace = true }

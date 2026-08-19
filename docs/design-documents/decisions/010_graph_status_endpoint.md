@@ -11,11 +11,36 @@ Accepted
 
 ## Date
 
-2026-04-21
+2026-04-21 (state semantics updated 2026-08-10, see "Update: honest indexing state")
+
+## Update: honest indexing state (2026-08-10)
+
+The single `indexing.state` word used to derive purely from run timestamps in NATS KV, so
+a run that completed without writing anything (empty datalake, aborted extract) still
+reported `indexed` — [#1137](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/1137)
+problem 1. The response now separates the two indexing surfaces and makes the combined
+field honest:
+
+- `sdlc_indexing`: the existing worst-of aggregation over per-pipeline KV progress. The
+  read set covers every Namespaced pipeline descriptor (node, composed edge, and derived
+  names), matching the keys the SDLC indexer writes under `plan.name`, so edge-pipeline
+  failures surface too.
+- `code_indexing`: derived from the existing `projects` coverage ratio — no checkpoint on
+  any known project → `not_indexed`, partial → `backfilling`, full → `indexed`. Omitted
+  when the scope has no known projects (nothing to claim).
+- `indexing` (pre-existing field): now the worst of the two, so a namespace whose code was
+  never indexed no longer reports plain `indexed`. Wire shape and enum values are
+  unchanged; Rails needs no update.
+- Each domain item carries an optional per-entity `state` (its own pipeline's state for
+  SDLC entities, the code coverage state for code-graph entities).
+- `IndexingStatus` carries `last_rows_read` / `last_rows_written`, recorded by both
+  indexers at run completion. Rows are evidence for operators (a 0-row full pull next to
+  zero counts explains an empty graph); they never drive the state, because idle
+  incremental ticks legitimately read and write nothing.
 
 ## Context
 
-`GetGraphStats` returns entity counts grouped by ontology domain, scoped to a namespace via `traversal_path`. Consumers (Rails UI, Duo) use it to see what data exists in the knowledge graph for a given group or project.
+`GetGraphStats` returns entity counts grouped by ontology domain, scoped to a namespace via `traversal_path`. Consumers (Rails UI, Duo) use it to see what data exists in the graph for a given group or project.
 
 Entity counts alone don't answer the questions users actually ask:
 
@@ -59,7 +84,7 @@ Entity counts are returned for all node types under the traversal path using `st
 
 Every type is counted with `uniq(id)`, which routes to the per-table `tp_count` aggregate projection (`SELECT traversal_path, uniq(id) GROUP BY traversal_path`). It reads kilobytes of HyperLogLog state rather than scanning the namespace and deduplicates the un-merged `ReplacingMergeTree` versions that a plain `count()` overcounts (observed up to +300% for frequently updated types). It carries ~1-2% HyperLogLog error, acceptable for a status indicator, and every type except Group measured within ~1% of exact on prod.
 
-Group is the one exception, counted with exact `count() FINAL`. Namespace deletion permanently removes groups and leaves tombstoned rows with distinct ids, and the projection has no `_deleted` column to exclude them, so `uniq(id)` overcounts Group ~6x (measured +549% on a large namespace). The group table is tiny, so FINAL is cheap. The check lives in `build_node_query` in `crates/gkg-server/src/graph_status/lower.rs`.
+Group is the one exception, counted with exact `count() FINAL`. Namespace deletion permanently removes groups and leaves tombstoned rows with distinct ids, and the projection has no `_deleted` column to exclude them, so `uniq(id)` overcounts Group ~6x (measured +549% on a large namespace). The group table is tiny, so FINAL is cheap. The check lives in `build_node_query` in `crates/orbit-server/src/graph_status/lower.rs`.
 
 #### Per-entity access control
 

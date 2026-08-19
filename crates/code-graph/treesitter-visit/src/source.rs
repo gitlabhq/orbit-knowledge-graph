@@ -137,19 +137,13 @@ impl Content for String {
         &self.as_bytes()[range]
     }
 
-    /// This is an O(n) operation for UTF-8 column calculation.
     fn get_char_column(&self, _col: usize, offset: usize) -> usize {
         let src = self.as_bytes();
-        let mut col = 0;
-        for &b in src[..offset].iter().rev() {
-            if b == b'\n' {
-                break;
-            }
-            // https://en.wikipedia.org/wiki/UTF-8#Description
-            if b & 0b1100_0000 != 0b1000_0000 {
-                col += 1;
-            }
-        }
-        col
+        let line_start = memchr::memrchr(b'\n', &src[..offset]).map_or(0, |pos| pos + 1);
+        // Count UTF-8 codepoint lead bytes in the line prefix.
+        src[line_start..offset]
+            .iter()
+            .filter(|&&b| b & 0b1100_0000 != 0b1000_0000)
+            .count()
     }
 }

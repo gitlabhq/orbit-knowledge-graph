@@ -1,4 +1,4 @@
-//! Guards the dispatch in `crates/gkg-server/src/grpc/service.rs` against
+//! Guards the dispatch in `crates/orbit-server/src/grpc/service.rs` against
 //! regressions where the `ResponseFormat::Llm` branch silently falls through
 //! to the raw `GraphFormatter`.
 
@@ -9,9 +9,9 @@ use crate::common::{
     GRAPH_SCHEMA_SQL, MockRedactionService, SIPHON_SCHEMA_SQL, TestContext, load_ontology,
     run_redaction, test_security_context,
 };
-use gkg_server::pipeline::HydrationStage;
-use gkg_server::redaction::QueryResult;
 use integration_testkit::{run_subtests_shared, t};
+use orbit_server::pipeline::HydrationStage;
+use orbit_server::redaction::QueryResult;
 use query_engine::compiler::SecurityContext;
 use query_engine::formatters::{
     FormatName, GOON_OUTPUT_FORMAT_VERSION, GoonFormatter, GraphFormatter, ResultFormatter,

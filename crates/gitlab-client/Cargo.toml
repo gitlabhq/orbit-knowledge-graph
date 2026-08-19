@@ -10,7 +10,7 @@ base64 = { workspace = true }
 bytes = { workspace = true }
 chrono = { workspace = true }
 futures = { workspace = true }
-gkg-server-config = { path = "../gkg-server-config" }
+orbit-server-config = { path = "../orbit-server-config" }
 jsonwebtoken = { workspace = true }
 reqwest = { workspace = true }
 rustls = { workspace = true }

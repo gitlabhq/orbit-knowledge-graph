@@ -2,6 +2,30 @@
 /// tree-sitter visitors. Guards against stack overflow on deeply nested ASTs.
 pub const MINIMUM_STACK_REMAINING: usize = 128 * 1024;
 
+/// oxc has no recursion limit and aborts the process past depth 4000-8000, where
+/// tree-sitter walkers check [`MINIMUM_STACK_REMAINING`] and survive instead.
+/// Deepest real file seen was 131.
+pub const MAX_NESTING_DEPTH: usize = 1000;
+
+pub fn exceeds_nesting_cap(source: &str) -> bool {
+    bracket_depth_upper_bound(source) > MAX_NESTING_DEPTH
+}
+
+fn bracket_depth_upper_bound(source: &str) -> usize {
+    let (mut depth, mut max) = (0usize, 0usize);
+    for b in source.bytes() {
+        match b {
+            b'(' | b'[' | b'{' => {
+                depth += 1;
+                max = max.max(depth);
+            }
+            b')' | b']' | b'}' => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+    }
+    max
+}
+
 use rust_lapper::{Interval, Lapper};
 use serde::{Deserialize, Serialize};
 use treesitter_visit::tree_sitter::StrDoc;
@@ -82,6 +106,49 @@ impl std::fmt::Display for Range {
             self.start.line, self.start.column, self.end.line, self.end.column, self.byte_offset
         )
     }
+}
+
+/// Scope-climb prefixes of a fully-qualified name, stripping the trailing
+/// `sep`-delimited segment one level at a time: `net.http.Client` yields
+/// `net.http.Client`, `net.http`, `net`. Lazy and right-to-left, so a caller
+/// that resolves at an outer scope stops without scanning the rest of the name.
+///
+/// Non-overlapping like a repeated `rfind(sep)` + truncate-to-match-start climb,
+/// byte-for-byte, including the adjacent-separator case (`a::::b` climbs
+/// `a::::b`, `a::`, `a`). An empty `sep` yields only the full string.
+///
+/// The single-byte separator (`.`, `\`) is the hot path on real corpora and
+/// takes a SIMD `memrchr` scan; multi-byte separators (`::`) fall back to the
+/// std substring searcher.
+pub fn fqn_scopes<'a>(fqn: &'a str, sep: &'a str) -> impl Iterator<Item = &'a str> + 'a {
+    let hay = fqn.as_bytes();
+    let mut end = fqn.len();
+    let mut done = false;
+    let single = (sep.len() == 1).then(|| sep.as_bytes()[0]);
+    let mut multi = (sep.len() > 1).then(|| fqn.rmatch_indices(sep));
+
+    std::iter::once(fqn.len())
+        .chain(std::iter::from_fn(move || {
+            if done {
+                return None;
+            }
+            let next = match (single, multi.as_mut()) {
+                (Some(b), _) => memchr::memrchr(b, &hay[..end]),
+                (None, Some(it)) => it.next().map(|(i, _)| i),
+                (None, None) => None,
+            };
+            match next {
+                Some(pos) => {
+                    end = pos;
+                    Some(pos)
+                }
+                None => {
+                    done = true;
+                    None
+                }
+            }
+        }))
+        .map(move |e| &fqn[..e])
 }
 
 pub fn compare_positions(p1: &Position, p2: &Position) -> std::cmp::Ordering {
@@ -192,6 +259,83 @@ impl<T: HasRange + Clone + Eq + Send + Sync> IntervalTree<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bracket_depth_counts_structural_nesting() {
+        assert_eq!(bracket_depth_upper_bound("const x = 1;"), 0);
+        assert_eq!(bracket_depth_upper_bound("([{}])"), 3);
+        assert_eq!(bracket_depth_upper_bound("f(g(h()))"), 3);
+        assert_eq!(bracket_depth_upper_bound("a()b()c()"), 1);
+    }
+
+    #[test]
+    fn bracket_depth_overcounts_brackets_in_strings() {
+        assert_eq!(bracket_depth_upper_bound("const s = \"(((((\";"), 5);
+    }
+
+    fn rfind_climb<'a>(fqn: &'a str, sep: &str) -> Vec<&'a str> {
+        let mut out = Vec::new();
+        let mut current = fqn;
+        loop {
+            out.push(current);
+            match current.rfind(sep) {
+                Some(pos) => current = &current[..pos],
+                None => break,
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn fqn_scopes_matches_rfind_climb() {
+        for sep in [".", "::"] {
+            for fqn in [
+                "",
+                "pkg",
+                "net.http.Client.Do",
+                "std::collections::HashMap",
+                "a::::b",
+                "..",
+                "::leading",
+                "trailing::",
+            ] {
+                assert_eq!(
+                    fqn_scopes(fqn, sep).collect::<Vec<_>>(),
+                    rfind_climb(fqn, sep),
+                    "fqn={fqn:?} sep={sep:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn fqn_scopes_empty_separator_yields_full_string_only() {
+        assert_eq!(fqn_scopes("a.b.c", "").collect::<Vec<_>>(), ["a.b.c"]);
+    }
+
+    #[test]
+    fn fqn_scopes_matches_rfind_climb_exhaustive() {
+        fn recurse(buf: &mut String, remaining: usize) {
+            if !buf.is_empty() {
+                for sep in [".", "::"] {
+                    assert_eq!(
+                        fqn_scopes(buf, sep).collect::<Vec<_>>(),
+                        rfind_climb(buf, sep),
+                        "fqn={buf:?} sep={sep:?}"
+                    );
+                }
+            }
+            if remaining == 0 {
+                return;
+            }
+            for c in ['a', ':', '.'] {
+                buf.push(c);
+                recurse(buf, remaining - 1);
+                buf.pop();
+            }
+        }
+        recurse(&mut String::new(), 8);
+    }
 
     #[test]
     fn test_position_creation() {

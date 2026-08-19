@@ -1,11 +1,11 @@
 use axum::{Json, Router, routing::get};
-use gkg_server::cluster_health::ClusterHealthChecker;
-use gkg_server::proto::{
+use indexer::schema::version::{ensure_version_table, write_migrating_version};
+use integration_testkit::TestContext;
+use orbit_server::cluster_health::ClusterHealthChecker;
+use orbit_server::proto::{
     ClusterStatus, GetClusterHealthResponse, ResponseFormat, StructuredClusterHealth,
     get_cluster_health_response,
 };
-use indexer::schema::version::{ensure_version_table, write_migrating_version};
-use integration_testkit::TestContext;
 use serde_json::json;
 use tokio::net::TcpListener;
 
@@ -61,7 +61,7 @@ async fn cluster_health_migrating_when_migration_active() {
     write_migrating_version(&client, 2).await.unwrap();
 
     let sidecar = start_mock_sidecar(unready_indexer_payload()).await;
-    let checker = ClusterHealthChecker::new(Some(sidecar), Some(client));
+    let checker = ClusterHealthChecker::new(Some(sidecar), Some(client), None);
 
     let s = extract_structured(checker.get_cluster_health(ResponseFormat::Raw as i32).await);
 
@@ -99,7 +99,7 @@ async fn cluster_health_stays_unhealthy_when_no_migration() {
     ensure_version_table(&client).await.unwrap();
 
     let sidecar = start_mock_sidecar(unready_indexer_payload()).await;
-    let checker = ClusterHealthChecker::new(Some(sidecar), Some(client));
+    let checker = ClusterHealthChecker::new(Some(sidecar), Some(client), None);
 
     let s = extract_structured(checker.get_cluster_health(ResponseFormat::Raw as i32).await);
 

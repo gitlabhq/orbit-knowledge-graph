@@ -1,6 +1,6 @@
 ---
-stage: Analytics
-group: Knowledge Graph
+stage: Orbit
+group: Context Systems
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
 description: Use GitLab Orbit through GitLab Duo Agent Platform. Agents call GitLab Orbit's graph tools to ground their answers in your live GitLab data, across the GitLab Duo Agent, the Planner Agent, the Security Analyst Agent, the Data Analyst Agent, the CI Expert Agent, and the Developer Flow.
 title: Use GitLab Orbit with GitLab Duo Agent Platform

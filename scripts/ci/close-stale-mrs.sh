@@ -49,10 +49,10 @@ get_last_activity_epoch() {
   local latest_commit latest_note created_epoch commit_epoch note_epoch
 
   latest_commit="$(api "projects/$PROJECT_ID/merge_requests/$iid/commits?per_page=1" \
-    | jq -r '.[0].committed_date // empty')"
+    | jq -r '.[0].committed_date // empty')" || return 1
   latest_note="$(api "projects/$PROJECT_ID/merge_requests/$iid/notes?sort=desc&order_by=created_at&per_page=100" \
     | jq -r --arg bot "$BOT_USERNAME" \
-      '[.[] | select(.system == false and .author.username != $bot)][0].created_at // empty')"
+      '[.[] | select(.system == false and .author.username != $bot)][0].created_at // empty')" || return 1
 
   created_epoch="$(to_epoch "$created_at")"
   commit_epoch="$(to_epoch "$latest_commit")"
@@ -69,7 +69,7 @@ get_scheduled_label_epoch() {
   local added_at
   added_at="$(api "projects/$PROJECT_ID/merge_requests/$iid/resource_label_events?per_page=100" \
     | jq -r --arg label "$SCHEDULED_LABEL" \
-      '[.[] | select(.action == "add" and .label.name == $label)] | last | .created_at // empty')"
+      '[.[] | select(.action == "add" and .label.name == $label)] | last | .created_at // empty')" || return 1
   to_epoch "$added_at"
 }
 
@@ -124,6 +124,9 @@ Reopen it any time the work is still relevant, and add ~"${KEEP_LABEL}" to keep 
 EOF
 }
 
+# process_mr runs in a context where errexit is suspended (the caller inspects
+# its status), so every API-touching step carries an explicit `|| return 1` —
+# a failure skips this MR rather than acting on defaulted data.
 process_mr() {
   local mr="$1"
   local iid author created_at labels has_keep has_scheduled
@@ -143,8 +146,8 @@ process_mr() {
   # a kept MR falls through to the has_keep skip below.
   if [ "$has_scheduled" = true ]; then
     local label_epoch activity_epoch
-    label_epoch="$(get_scheduled_label_epoch "$iid")"
-    activity_epoch="$(get_last_activity_epoch "$iid" "$created_at")"
+    label_epoch="$(get_scheduled_label_epoch "$iid")" || return 1
+    activity_epoch="$(get_last_activity_epoch "$iid" "$created_at")" || return 1
 
     if [ "$label_epoch" -eq 0 ]; then
       log "MR !$iid: $SCHEDULED_LABEL present but no add event found, skipping"
@@ -153,18 +156,18 @@ process_mr() {
 
     if [ "$activity_epoch" -gt "$label_epoch" ]; then
       log "MR !$iid: activity resumed after warning, removing $SCHEDULED_LABEL"
-      remove_scheduled_label "$iid"
+      remove_scheduled_label "$iid" || return 1
       return
     fi
 
     local age=$(( NOW_EPOCH - label_epoch ))
     if [ "$age" -ge "$GRACE_SECONDS" ]; then
       log "MR !$iid: grace elapsed (${age}s >= ${GRACE_SECONDS}s), closing"
-      post_comment "$iid" "$(close_comment_body)"
-      close_mr "$iid"
+      post_comment "$iid" "$(close_comment_body)" || return 1
+      close_mr "$iid" || return 1
       # Drop the label so a later reopen starts a fresh warn/grace cycle instead
       # of being closed again immediately off the original (now-ancient) warning.
-      remove_scheduled_label "$iid"
+      remove_scheduled_label "$iid" || return 1
     else
       local remaining=$(( (GRACE_SECONDS - age + 86399) / 86400 ))
       log "MR !$iid: in grace period, ~${remaining}d until close"
@@ -178,23 +181,49 @@ process_mr() {
   fi
 
   local activity_epoch
-  activity_epoch="$(get_last_activity_epoch "$iid" "$created_at")"
+  activity_epoch="$(get_last_activity_epoch "$iid" "$created_at")" || return 1
   if [ "$activity_epoch" -le "$IDLE_CUTOFF_EPOCH" ]; then
     log "MR !$iid: idle since $(date -u -d "@$activity_epoch" +%Y-%m-%d), warning"
-    add_scheduled_label "$iid"
-    post_comment "$iid" "$(warn_comment_body "$author")"
+    add_scheduled_label "$iid" || return 1
+    post_comment "$iid" "$(warn_comment_body "$author")" || return 1
   else
     log "MR !$iid: active, skipping"
   fi
 }
 
-BOT_USERNAME="$(api "user" | jq -r '.username')"
+BOT_USER="$(api "user")"
+BOT_USERNAME="$(printf '%s' "$BOT_USER" | jq -r '.username')"
+BOT_USER_ID="$(printf '%s' "$BOT_USER" | jq -r '.id')"
 log "Stale-MR sweeper: bot=$BOT_USERNAME idle=${IDLE_DAYS}d grace=${GRACE_DAYS}d prefix=$PREFIX dry_run=$DRY_RUN"
 
-api --paginate "projects/$PROJECT_ID/merge_requests?state=opened&per_page=100" \
-  | jq -c '.[]' \
-  | while IFS= read -r mr; do
-      process_mr "$mr"
-    done
+# Fail before the sweep if the token cannot write here: labelling, warning and
+# closing all need Developer, and with less the run dies on its first write with
+# every MR behind it never evaluated. members/all resolves direct, inherited and
+# invited-group membership alike; a token minted in another project resolves 404.
+ACCESS_LEVEL="$(api "projects/$PROJECT_ID/members/all/$BOT_USER_ID" 2>/dev/null | jq -r '.access_level // 0' || true)"
+ACCESS_LEVEL="${ACCESS_LEVEL:-0}"
+if [ "$ACCESS_LEVEL" -lt 30 ]; then
+  if [ "$DRY_RUN" = "true" ]; then
+    log "WARNING: $BOT_USERNAME has access level $ACCESS_LEVEL on project $PROJECT_ID (writes need Developer/30); a non-dry run would fail on its first write"
+  else
+    log "FATAL: $BOT_USERNAME has access level $ACCESS_LEVEL on project $PROJECT_ID; the sweeper's writes need Developer (30)."
+    log "Mint the token on this project or an ancestor group (see the setup comment in .gitlab/ci/stale-mr.yml). Project bot users cannot be added to other projects."
+    exit 1
+  fi
+fi
 
+FAILED=0
+MR_LIST="$(api --paginate "projects/$PROJECT_ID/merge_requests?state=opened&per_page=100" | jq -c '.[]')"
+while IFS= read -r mr; do
+  [ -z "$mr" ] && continue
+  if ! process_mr "$mr"; then
+    log "MR !$(printf '%s' "$mr" | jq -r '.iid'): processing failed, continuing with the remaining MRs"
+    FAILED=$(( FAILED + 1 ))
+  fi
+done <<< "$MR_LIST"
+
+if [ "$FAILED" -gt 0 ]; then
+  log "Stale-MR sweeper: done, $FAILED MR(s) failed"
+  exit 1
+fi
 log "Stale-MR sweeper: done"

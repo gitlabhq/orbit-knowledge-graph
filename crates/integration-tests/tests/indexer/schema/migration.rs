@@ -16,12 +16,15 @@ use indexer::schema::version::{
 use indexer::testkit::MockLockService;
 use integration_testkit::{TestContext, t};
 use ontology::migrations::MigrationScope;
+use orbit_utils::traversal_path::TraversalPath;
 use query_engine::compiler::{
     DictionarySource, emit_create_table, generate_graph_dictionaries_with_prefix,
     generate_graph_tables_with_prefix,
 };
 
-fn dictionary_source(config: &gkg_server_config::ClickHouseConfiguration) -> DictionarySource<'_> {
+fn dictionary_source(
+    config: &orbit_server_config::ClickHouseConfiguration,
+) -> DictionarySource<'_> {
     DictionarySource {
         database: &config.database,
         user: &config.username,
@@ -1040,7 +1043,7 @@ impl MigrationScenario {
             self.ctx.config.build_client(),
         )));
         CodeStaleSweep::new(self.ctx.config.build_client(), &table_names, store)
-            .run_for_drained(&["1/100/".to_string()])
+            .run_for_drained(&[TraversalPath::new_unchecked("1/100/")])
             .await
             .expect("sweep failed");
     }

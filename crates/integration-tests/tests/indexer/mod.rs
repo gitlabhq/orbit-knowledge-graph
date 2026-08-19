@@ -3,7 +3,6 @@ mod code;
 mod common;
 mod dispatcher;
 mod engine;
-mod health;
 mod namespace_deletion;
 mod nats;
 mod nats_tls;

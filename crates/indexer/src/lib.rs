@@ -1,6 +1,6 @@
 //! # Indexer
 //!
-//! Message processing framework and domain modules for the GitLab Knowledge Graph.
+//! Message processing framework and domain modules for GitLab Orbit.
 //!
 //! This crate contains both the engine (message routing, concurrency)
 //! and the domain modules (SDLC, Code) that implement indexing logic.
@@ -44,7 +44,7 @@ pub mod testkit;
 
 // Re-export engine submodules at crate root for external API stability.
 pub use config::*;
-pub use engine::{dead_letter, durability, handler, types, worker_pool};
+pub use engine::{dead_letter, durability, handler, retry, types, worker_pool};
 
 /// Re-export metrics from their canonical locations for external API stability.
 pub mod metrics {
@@ -58,14 +58,13 @@ use std::time::Duration;
 use clickhouse::ClickHouseConfigurationExt;
 use clickhouse::ClickHouseWriter;
 use engine::EngineBuilder;
-use engine::handler::{HandlerInitError, HandlerRegistry};
-use gitlab_client::GitlabClient;
-use gkg_server_config::IndexerModule;
-use health::{HealthState, run_health_server};
+use engine::handler::HandlerRegistry;
+use health::run_health_server;
 use indexing_status::{INDEXING_PROGRESS_BUCKET, IndexingStatusStore};
 use locking::INDEXING_LOCKS_BUCKET;
 use modules::namespace_deletion::{ClickHouseNamespaceDeletionStore, NamespaceDeletionStore};
 use nats::{KvBucketConfig, NatsBroker};
+use orbit_server_config::IndexerModule;
 use orchestrator::Trigger;
 use orchestrator::dispatch::{CodeBackfill, NamespaceIndexingDispatch};
 use orchestrator::max_deliveries::MaxDeliveriesReconciler;
@@ -84,7 +83,7 @@ pub async fn run(
     ontology: Arc<ontology::Ontology>,
     shutdown: CancellationToken,
 ) -> Result<(), IndexerError> {
-    let resources = gkg_server_config::ContainerResources::detect();
+    let resources = orbit_server_config::ContainerResources::detect();
     let mut config = config.clone();
     config.engine.resolve_runtime_defaults(&resources);
     let config = &config;
@@ -114,30 +113,16 @@ pub async fn run(
 
     let indexing_status = Arc::new(IndexingStatusStore::new(broker.clone()));
 
-    let gitlab_client = config
-        .gitlab
-        .as_ref()
-        .map(|cfg| GitlabClient::new(cfg.clone()))
-        .transpose()
-        .map_err(HandlerInitError::new)?
-        .map(Arc::new);
-
     // Start the health server before waiting for schema readiness so that the
     // Kubernetes liveness probe is answered during the (potentially long) schema
     // wait phase. Readiness stays `503` until the gate clears (`serving`).
     let serving = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let health_state = HealthState {
-        nats_client: broker.nats_client().clone(),
-        graph_client: config.graph.build_client(),
-        datalake_client: config.datalake.build_client(),
-        gitlab_client,
-        serving: serving.clone(),
-    };
+    let health_serving = serving.clone();
     let health_shutdown = shutdown.clone();
     let health_bind_address = config.health_bind_address;
     let health_task = tokio::spawn(async move {
         tokio::select! {
-            result = run_health_server(health_bind_address, health_state) => result,
+            result = run_health_server(health_bind_address, health_serving) => result,
             _ = health_shutdown.cancelled() => Ok(()),
         }
     });
@@ -281,18 +266,12 @@ pub async fn run_dispatcher(
     // probe is answered during the (potentially long) DDL phase. Readiness stays
     // `503` until migration completes (`serving`).
     let serving = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let health_state = HealthState {
-        nats_client: services.nats_client.clone(),
-        graph_client: config.graph.build_client(),
-        datalake_client: config.datalake.build_client(),
-        gitlab_client: None,
-        serving: serving.clone(),
-    };
+    let health_serving = serving.clone();
     let health_shutdown = shutdown.clone();
     let health_bind_address = config.health_bind_address;
     let health_task = tokio::spawn(async move {
         tokio::select! {
-            result = run_health_server(health_bind_address, health_state) => result,
+            result = run_health_server(health_bind_address, health_serving) => result,
             _ = health_shutdown.cancelled() => Ok(()),
         }
     });
@@ -428,6 +407,7 @@ pub async fn run_dispatcher(
         Arc::new(EnabledNamespacesRoute::new(
             NamespaceIndexingDispatch::new(services.nats.clone()),
             backfill.clone(),
+            config.datalake.build_client(),
         )),
     ];
 

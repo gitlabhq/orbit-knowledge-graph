@@ -1,6 +1,6 @@
 ---
-stage: Analytics
-group: Knowledge Graph
+stage: Orbit
+group: Context Systems
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
 description: What GitLab Orbit Local indexes on your machine, which languages are supported, and the boundaries of the local code graph.
 title: What GitLab Orbit Local indexes

@@ -1,22 +1,25 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 
+use arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use clickhouse_client::FromArrowColumn;
-use gkg_utils::traversal_path::TOP_LEVEL_PREFIX_REGEX;
+use futures::StreamExt;
 use ontology::{PathResolution, ReindexSource};
+use orbit_utils::traversal_path::{TOP_LEVEL_PREFIX_REGEX, TraversalPath};
+use tracing::{error, warn};
 
-use crate::clickhouse::{ArrowClickHouseClient, TIMESTAMP_FORMAT};
+use crate::clickhouse::{ArrowClickHouseClient, ClickHouseError, TIMESTAMP_FORMAT};
 use crate::orchestrator::dispatch::NamespaceDispatchRequest;
-use crate::orchestrator::scheduled::TaskError;
+use crate::orchestrator::dispatch::enabled_namespaces::resolved_enabled_namespaces_sql;
+use crate::orchestrator::scheduled::{ScheduledTaskMetrics, TaskError};
 
-const ENABLED_NAMESPACE_TABLE: &str = "siphon_knowledge_graph_enabled_namespaces";
+const BRANCH_FALLBACK_CONCURRENCY: usize = 4;
 
 const CHANGE_QUERY_SQL: &str = r#"WITH
   enabled AS (
-    SELECT DISTINCT root_namespace_id, traversal_path
-    FROM {{enabled_namespace_table}}
-    WHERE {{deleted_column}} = false AND traversal_path != ''
+    {{enabled_namespaces}}
   ),
   changed AS (
 {{branches}}
@@ -41,15 +44,21 @@ pub(super) trait NamespaceChangeDetector: Send + Sync {
 }
 
 pub(super) struct DatalakeChangeDetector {
-    datalake: ArrowClickHouseClient,
+    datalake: Arc<dyn ChangeQueryClient>,
     query: NamespaceChangeQuery,
+    metrics: ScheduledTaskMetrics,
 }
 
 impl DatalakeChangeDetector {
-    pub(super) fn new(datalake: ArrowClickHouseClient, ontology: &ontology::Ontology) -> Self {
+    pub(super) fn new(
+        datalake: ArrowClickHouseClient,
+        ontology: &ontology::Ontology,
+        metrics: ScheduledTaskMetrics,
+    ) -> Self {
         Self {
-            datalake,
+            datalake: Arc::new(datalake),
             query: NamespaceChangeQuery::from_ontology(ontology),
+            metrics,
         }
     }
 }
@@ -63,45 +72,145 @@ impl NamespaceChangeDetector for DatalakeChangeDetector {
     ) -> Result<Vec<NamespaceDispatchRequest>, TaskError> {
         let lower = lower.format(TIMESTAMP_FORMAT).to_string();
         let upper = upper.format(TIMESTAMP_FORMAT).to_string();
-        let batches = self
+
+        let batches = match self
             .datalake
-            .query(&self.query.sql)
+            .fetch_change_batches(&self.query.combined_sql, &lower, &upper)
+            .await
+        {
+            Ok(batches) => batches,
+            Err(err) => self.batches_per_branch(&lower, &upper, &err).await?,
+        };
+
+        group_by_namespace(&batches)
+    }
+}
+
+impl DatalakeChangeDetector {
+    async fn batches_per_branch(
+        &self,
+        lower: &str,
+        upper: &str,
+        combined_err: &ClickHouseError,
+    ) -> Result<Vec<RecordBatch>, TaskError> {
+        warn!(
+            error = %combined_err,
+            "combined change detection query failed; retrying one branch per source table"
+        );
+
+        let mut stream = futures::stream::iter(0..self.query.branches.len())
+            .map(|index| async move {
+                let branch = &self.query.branches[index];
+                let batches = self
+                    .datalake
+                    .fetch_change_batches(&branch.sql, lower, upper)
+                    .await;
+                (branch, batches)
+            })
+            .buffer_unordered(BRANCH_FALLBACK_CONCURRENCY);
+
+        let mut batches = Vec::new();
+        let mut failed = 0usize;
+
+        while let Some((branch, result)) = stream.next().await {
+            match result {
+                Ok(branch_batches) => batches.extend(branch_batches),
+                Err(err) => {
+                    failed += 1;
+                    self.metrics
+                        .record_error(super::TASK_NAME, "detection_branch");
+                    error!(
+                        table = %branch.table,
+                        target = %branch.target,
+                        error = %err,
+                        "change detection branch failed; skipping it until the next full sweep"
+                    );
+                }
+            }
+        }
+
+        if failed == self.query.branches.len() {
+            return Err(TaskError::new(format!(
+                "all {failed} change detection branches failed; combined query error: {combined_err}"
+            )));
+        }
+
+        Ok(batches)
+    }
+}
+
+#[async_trait]
+trait ChangeQueryClient: Send + Sync {
+    async fn fetch_change_batches(
+        &self,
+        sql: &str,
+        lower: &str,
+        upper: &str,
+    ) -> Result<Vec<RecordBatch>, ClickHouseError>;
+}
+
+#[async_trait]
+impl ChangeQueryClient for ArrowClickHouseClient {
+    async fn fetch_change_batches(
+        &self,
+        sql: &str,
+        lower: &str,
+        upper: &str,
+    ) -> Result<Vec<RecordBatch>, ClickHouseError> {
+        self.query(sql)
             .param("lower", lower)
             .param("upper", upper)
             .fetch_arrow()
             .await
-            .map_err(TaskError::new)?;
-
-        let namespace_ids = i64::extract_column(&batches, 0).map_err(TaskError::new)?;
-        let traversal_paths = String::extract_column(&batches, 1).map_err(TaskError::new)?;
-        let targets = String::extract_column(&batches, 2).map_err(TaskError::new)?;
-
-        let mut by_namespace: BTreeMap<(i64, String), Vec<String>> = BTreeMap::new();
-        for ((namespace_id, traversal_path), target) in
-            namespace_ids.into_iter().zip(traversal_paths).zip(targets)
-        {
-            by_namespace
-                .entry((namespace_id, traversal_path))
-                .or_default()
-                .push(target);
-        }
-
-        Ok(by_namespace
-            .into_iter()
-            .map(
-                |((namespace_id, traversal_path), targets)| NamespaceDispatchRequest {
-                    namespace_id,
-                    traversal_path,
-                    targets,
-                },
-            )
-            .collect())
     }
+}
+
+fn group_by_namespace(batches: &[RecordBatch]) -> Result<Vec<NamespaceDispatchRequest>, TaskError> {
+    let namespace_ids = i64::extract_column(batches, 0).map_err(TaskError::new)?;
+    let traversal_paths = String::extract_column(batches, 1).map_err(TaskError::new)?;
+    let targets = String::extract_column(batches, 2).map_err(TaskError::new)?;
+
+    let by_namespace = namespace_ids
+        .into_iter()
+        .zip(
+            traversal_paths
+                .into_iter()
+                .map(TraversalPath::new_unchecked),
+        )
+        .zip(targets)
+        .fold(
+            BTreeMap::<(i64, TraversalPath), BTreeSet<String>>::new(),
+            |mut acc, ((namespace_id, traversal_path), target)| {
+                acc.entry((namespace_id, traversal_path))
+                    .or_default()
+                    .insert(target);
+                acc
+            },
+        );
+
+    Ok(by_namespace
+        .into_iter()
+        .map(
+            |((namespace_id, traversal_path), targets)| NamespaceDispatchRequest {
+                namespace_id,
+                traversal_path,
+                targets: targets.into_iter().collect(),
+            },
+        )
+        .collect())
+}
+
+#[derive(Debug, Clone)]
+struct BranchQuery {
+    table: String,
+    target: String,
+    sql: String,
 }
 
 #[derive(Debug, Clone)]
 struct NamespaceChangeQuery {
-    sql: String,
+    combined_sql: String,
+    branches: Vec<BranchQuery>,
 }
 
 impl NamespaceChangeQuery {
@@ -110,8 +219,18 @@ impl NamespaceChangeQuery {
     }
 
     fn new(reindex_sources: impl IntoIterator<Item = ReindexSource>) -> Self {
+        let sources: BTreeSet<ReindexSource> = reindex_sources.into_iter().collect();
+        let branches = sources
+            .iter()
+            .map(|source| BranchQuery {
+                table: source.table.clone(),
+                target: source.target.clone(),
+                sql: render_change_query(&BTreeSet::from([source.clone()])),
+            })
+            .collect();
         Self {
-            sql: render_change_query(&reindex_sources.into_iter().collect()),
+            combined_sql: render_change_query(&sources),
+            branches,
         }
     }
 }
@@ -124,8 +243,7 @@ fn render_change_query(reindex_sources: &BTreeSet<ReindexSource>) -> String {
         .join("\nUNION ALL\n");
 
     CHANGE_QUERY_SQL
-        .replace("{{enabled_namespace_table}}", ENABLED_NAMESPACE_TABLE)
-        .replace("{{deleted_column}}", ontology::siphon_deleted_column())
+        .replace("{{enabled_namespaces}}", resolved_enabled_namespaces_sql())
         .replace("{{branches}}", &branches)
 }
 
@@ -164,20 +282,11 @@ pub(super) trait EnabledNamespaceReader: Send + Sync {
 
 pub(super) struct DatalakeEnabledNamespaceReader {
     datalake: ArrowClickHouseClient,
-    sql: String,
 }
 
 impl DatalakeEnabledNamespaceReader {
     pub(super) fn new(datalake: ArrowClickHouseClient) -> Self {
-        Self {
-            datalake,
-            sql: format!(
-                "SELECT root_namespace_id, traversal_path \
-                 FROM {ENABLED_NAMESPACE_TABLE} \
-                 WHERE {deleted} = false AND match(traversal_path, '{TOP_LEVEL_PREFIX_REGEX}')",
-                deleted = ontology::siphon_deleted_column()
-            ),
-        }
+        Self { datalake }
     }
 }
 
@@ -186,7 +295,7 @@ impl EnabledNamespaceReader for DatalakeEnabledNamespaceReader {
     async fn enabled_namespaces(&self) -> Result<Vec<NamespaceDispatchRequest>, TaskError> {
         let batches = self
             .datalake
-            .query(&self.sql)
+            .query(resolved_enabled_namespaces_sql())
             .fetch_arrow()
             .await
             .map_err(TaskError::new)?;
@@ -196,7 +305,11 @@ impl EnabledNamespaceReader for DatalakeEnabledNamespaceReader {
 
         Ok(namespace_ids
             .into_iter()
-            .zip(traversal_paths)
+            .zip(
+                traversal_paths
+                    .into_iter()
+                    .map(TraversalPath::new_unchecked),
+            )
             .map(|(namespace_id, traversal_path)| NamespaceDispatchRequest {
                 namespace_id,
                 traversal_path,
@@ -208,7 +321,13 @@ impl EnabledNamespaceReader for DatalakeEnabledNamespaceReader {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use arrow::array::{Int64Array, StringArray};
+    use arrow::datatypes::{DataType, Field, Schema};
+
     use super::*;
+    use crate::orchestrator::dispatch::enabled_namespaces::ENABLED_NAMESPACE_TABLE;
 
     fn column_source(table: &str) -> ReindexSource {
         ReindexSource {
@@ -218,16 +337,130 @@ mod tests {
         }
     }
 
+    fn change_batches(rows: &[(i64, &str, &str)]) -> Vec<RecordBatch> {
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("root_namespace_id", DataType::Int64, false),
+            Field::new("traversal_path", DataType::Utf8, false),
+            Field::new("target", DataType::Utf8, false),
+        ]));
+        let batch = RecordBatch::try_new(
+            schema,
+            vec![
+                Arc::new(Int64Array::from(
+                    rows.iter().map(|r| r.0).collect::<Vec<_>>(),
+                )),
+                Arc::new(StringArray::from(
+                    rows.iter().map(|r| r.1).collect::<Vec<_>>(),
+                )),
+                Arc::new(StringArray::from(
+                    rows.iter().map(|r| r.2).collect::<Vec<_>>(),
+                )),
+            ],
+        )
+        .unwrap();
+        vec![batch]
+    }
+
+    fn branch_error() -> ClickHouseError {
+        ClickHouseError::BadResponse {
+            status: 404,
+            body: "Code: 47. DB::Exception: Unknown expression or function identifier".to_string(),
+        }
+    }
+
+    struct StubClient {
+        combined: Result<Vec<RecordBatch>, ()>,
+        branches: BTreeMap<&'static str, Result<Vec<RecordBatch>, ()>>,
+        calls: AtomicUsize,
+    }
+
+    #[async_trait]
+    impl ChangeQueryClient for StubClient {
+        async fn fetch_change_batches(
+            &self,
+            sql: &str,
+            _lower: &str,
+            _upper: &str,
+        ) -> Result<Vec<RecordBatch>, ClickHouseError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            let result = if sql.contains("UNION ALL") {
+                &self.combined
+            } else {
+                self.branches
+                    .iter()
+                    .find(|(table, _)| sql.contains(&format!("FROM {table}")))
+                    .map(|(_, result)| result)
+                    .expect("branch query names a known table")
+            };
+            result.clone().map_err(|()| branch_error())
+        }
+    }
+
+    fn detector(
+        client: Arc<StubClient>,
+        sources: impl IntoIterator<Item = ReindexSource>,
+    ) -> DatalakeChangeDetector {
+        DatalakeChangeDetector {
+            datalake: client,
+            query: NamespaceChangeQuery::new(sources),
+            metrics: ScheduledTaskMetrics::new(),
+        }
+    }
+
+    async fn detect(detector: &DatalakeChangeDetector) -> Vec<NamespaceDispatchRequest> {
+        detector
+            .changed_namespaces(Utc::now(), Utc::now())
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn combined_success_runs_a_single_query() {
+        let client = Arc::new(StubClient {
+            combined: Ok(change_batches(&[(9, "1/9/", "WorkItem")])),
+            branches: BTreeMap::new(),
+            calls: AtomicUsize::new(0),
+        });
+        let detector = detector(
+            client.clone(),
+            [column_source("work_items"), column_source("siphon_notes")],
+        );
+
+        let namespaces = detect(&detector).await;
+
+        assert_eq!(client.calls.load(Ordering::SeqCst), 1);
+        assert_eq!(namespaces.len(), 1);
+        assert_eq!(namespaces[0].namespace_id, 9);
+        assert_eq!(namespaces[0].targets, vec!["WorkItem"]);
+    }
+
+    #[tokio::test]
+    async fn all_branches_failing_is_an_error() {
+        let client = Arc::new(StubClient {
+            combined: Err(()),
+            branches: BTreeMap::from([("work_items", Err(())), ("siphon_notes", Err(()))]),
+            calls: AtomicUsize::new(0),
+        });
+        let detector = detector(
+            client,
+            [column_source("work_items"), column_source("siphon_notes")],
+        );
+
+        let err = detector
+            .changed_namespaces(Utc::now(), Utc::now())
+            .await
+            .unwrap_err();
+
+        assert!(err.to_string().contains("all 2 change detection branches"));
+    }
+
     #[test]
     fn change_query_filters_enabled_namespaces() {
         let query = NamespaceChangeQuery::new([column_source("work_items")]);
-        assert!(query.sql.contains(ENABLED_NAMESPACE_TABLE));
-        assert!(query.sql.contains("_siphon_deleted = false"));
-        assert!(query.sql.contains("traversal_path != ''"));
-        assert!(query.sql.contains("INNER JOIN enabled"));
+        assert!(query.combined_sql.contains("INNER JOIN enabled"));
         assert!(
             query
-                .sql
+                .combined_sql
                 .contains("SELECT DISTINCT enabled.root_namespace_id")
         );
     }
@@ -235,41 +468,56 @@ mod tests {
     #[test]
     fn change_query_uses_watermark_bounds() {
         let query = NamespaceChangeQuery::new([column_source("work_items")]);
-        assert!(query.sql.contains("_siphon_watermark > {lower:String}"));
-        assert!(query.sql.contains("_siphon_watermark <= {upper:String}"));
+        assert!(
+            query
+                .combined_sql
+                .contains("_siphon_watermark > {lower:String}")
+        );
+        assert!(
+            query
+                .combined_sql
+                .contains("_siphon_watermark <= {upper:String}")
+        );
     }
 
     #[test]
     fn change_query_extracts_root_path() {
         let query = NamespaceChangeQuery::new([column_source("work_items")]);
-        assert!(query.sql.contains("splitByChar('/', traversal_path)[1]"));
-        assert!(query.sql.contains("splitByChar('/', traversal_path)[2]"));
-        assert!(query.sql.contains(TOP_LEVEL_PREFIX_REGEX));
+        assert!(
+            query
+                .combined_sql
+                .contains("splitByChar('/', traversal_path)[1]")
+        );
+        assert!(
+            query
+                .combined_sql
+                .contains("splitByChar('/', traversal_path)[2]")
+        );
+        assert!(query.combined_sql.contains(TOP_LEVEL_PREFIX_REGEX));
     }
 
     #[test]
     fn change_query_renders_expected_sql_shape() {
         let query = NamespaceChangeQuery::new([column_source("work_items")]);
 
-        assert_eq!(
-            query.sql,
+        let expected = format!(
             r#"WITH
   enabled AS (
-    SELECT DISTINCT root_namespace_id, traversal_path
-    FROM siphon_knowledge_graph_enabled_namespaces
-    WHERE _siphon_deleted = false AND traversal_path != ''
+    {enabled}
   ),
   changed AS (
     SELECT concat(splitByChar('/', traversal_path)[1], '/', splitByChar('/', traversal_path)[2], '/') AS root_path, 'WorkItem' AS target
     FROM work_items
-    WHERE _siphon_watermark > {lower:String}
-      AND _siphon_watermark <= {upper:String}
+    WHERE _siphon_watermark > {{lower:String}}
+      AND _siphon_watermark <= {{upper:String}}
       AND match(traversal_path, '^[0-9]+/[0-9]+/')
   )
 SELECT DISTINCT enabled.root_namespace_id, enabled.traversal_path, changed.target
 FROM changed
-INNER JOIN enabled ON changed.root_path = enabled.traversal_path"#
+INNER JOIN enabled ON changed.root_path = enabled.traversal_path"#,
+            enabled = resolved_enabled_namespaces_sql()
         );
+        assert_eq!(query.combined_sql, expected);
     }
 
     #[test]
@@ -282,7 +530,7 @@ INNER JOIN enabled ON changed.root_path = enabled.traversal_path"#
                 key_column: "id".to_string(),
             },
         }]);
-        assert!(query.sql.contains(
+        assert!(query.combined_sql.contains(
             "dictGetOrDefault('project_traversal_paths_dict', 'traversal_path', toUInt64(id), '0/')"
         ));
     }
@@ -291,14 +539,27 @@ INNER JOIN enabled ON changed.root_path = enabled.traversal_path"#
     fn change_query_combines_sources_with_union_all() {
         let query =
             NamespaceChangeQuery::new([column_source("work_items"), column_source("siphon_notes")]);
-        assert!(query.sql.contains("UNION ALL"));
+        assert!(query.combined_sql.contains("UNION ALL"));
+    }
+
+    #[test]
+    fn each_branch_query_covers_exactly_one_source() {
+        let query =
+            NamespaceChangeQuery::new([column_source("work_items"), column_source("siphon_notes")]);
+        assert_eq!(query.branches.len(), 2);
+        for branch in &query.branches {
+            assert!(!branch.sql.contains("UNION ALL"));
+            assert!(branch.sql.contains(&format!("FROM {}", branch.table)));
+            assert!(branch.sql.contains("INNER JOIN enabled"));
+        }
     }
 
     #[test]
     fn duplicate_reindex_sources_render_once() {
         let query =
             NamespaceChangeQuery::new([column_source("work_items"), column_source("work_items")]);
-        assert_eq!(query.sql.matches("FROM work_items").count(), 1);
+        assert_eq!(query.combined_sql.matches("FROM work_items").count(), 1);
+        assert_eq!(query.branches.len(), 1);
     }
 
     #[test]

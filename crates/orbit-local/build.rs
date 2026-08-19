@@ -6,6 +6,13 @@ fn main() {
 
     validate_prompts();
 
+    println!(
+        "cargo:rerun-if-changed={}",
+        std::path::Path::new(env!("CONFIG_DIR"))
+            .join("setup")
+            .display()
+    );
+
     // Release jobs run on `vX.Y.Z` tags (.gitlab/ci/release-local.yml), so
     // CI_COMMIT_TAG is the authoritative release version. `git describe` is a
     // best-effort convenience for local/dev builds; the static Cargo.toml
@@ -16,7 +23,7 @@ fn main() {
         .or_else(|| {
             std::process::Command::new("git")
                 // --match pins us to release tags: this repo also has
-                // `clients/gkgpb/vX.Y.Z` tags, and a bare --tags would pick the
+                // `clients/orbitpb/vX.Y.Z` tags, and a bare --tags would pick the
                 // nearest of either namespace.
                 .args([
                     "describe", "--tags", "--always", "--dirty", "--match", "v[0-9]*",
@@ -44,5 +51,5 @@ fn main() {
 fn validate_prompts() {
     let dir = std::path::Path::new(env!("PROMPTS_DIR")).join("local");
     println!("cargo:rerun-if-changed={}", dir.display());
-    gkg_prompts::Prompts::load_dir(&dir).unwrap_or_else(|e| panic!("{e}"));
+    orbit_prompts::Prompts::load_dir(&dir).unwrap_or_else(|e| panic!("{e}"));
 }
