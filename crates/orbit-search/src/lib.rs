@@ -183,13 +183,16 @@ pub struct CorpusRow {
     pub fqn: String,
     pub kind: String,
     pub loc: String,
+    pub end_line: String,
     pub degree: String,
 }
 
 pub struct Edge {
     pub kind: String,
     pub source: String,
+    pub source_loc: String,
     pub target: String,
+    pub target_loc: String,
 }
 
 pub struct Hit {
@@ -493,6 +496,7 @@ mod tests {
             fqn: fqn.to_string(),
             kind: "Definition".to_string(),
             loc: String::new(),
+            end_line: "0".to_string(),
             degree: "0".to_string(),
         }
     }

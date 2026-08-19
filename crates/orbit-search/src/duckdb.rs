@@ -99,12 +99,16 @@ impl DuckDbSearch {
         let batches = query(&self.client, &expand_sql(self.pid, &self.sha, &ids, focus))?;
         let kinds = string_column(&batches, "relationship_kind");
         let sources = string_column(&batches, "source_label");
+        let source_locs = string_column(&batches, "source_loc");
         let targets = string_column(&batches, "target_label");
+        let target_locs = string_column(&batches, "target_loc");
         Ok((0..kinds.len())
             .map(|i| Edge {
                 kind: kinds[i].clone(),
                 source: sources[i].clone(),
+                source_loc: source_locs[i].clone(),
                 target: targets[i].clone(),
+                target_loc: target_locs[i].clone(),
             })
             .collect())
     }
@@ -289,7 +293,7 @@ scores AS (
   GROUP BY t.def_id
 ),
 cand AS (
-  SELECT d.id, d.fqn, d.definition_type, d.file_path, d.start_line
+  SELECT d.id, d.fqn, d.definition_type, d.file_path, d.start_line, d.end_line
   FROM scores sc
   JOIN gl_definition d ON d.id = sc.def_id
   WHERE d.project_id = {pid} AND d.commit_sha = {sha}
@@ -305,6 +309,7 @@ deg AS (
 )
 SELECT CAST(c.id AS VARCHAR) AS id, c.fqn, c.definition_type,
        c.file_path || ':' || CAST(c.start_line AS VARCHAR) AS loc,
+       CAST(c.end_line AS VARCHAR) AS end_line,
        CAST(COALESCE(deg.degree, 0) AS VARCHAR) AS degree
 FROM cand c
 LEFT JOIN deg ON deg.id = c.id",
@@ -468,7 +473,7 @@ fn fetch_corpus(
         client,
         &format!(
             "WITH cand AS (
-  SELECT d.id, d.fqn, d.definition_type, d.file_path, d.start_line
+  SELECT d.id, d.fqn, d.definition_type, d.file_path, d.start_line, d.end_line
   FROM gl_definition d
   WHERE {pred}
   AND {terms}
@@ -484,6 +489,7 @@ deg AS (
 )
 SELECT CAST(c.id AS VARCHAR) AS id, c.fqn, c.definition_type,
        c.file_path || ':' || CAST(c.start_line AS VARCHAR) AS loc,
+       CAST(c.end_line AS VARCHAR) AS end_line,
        CAST(COALESCE(deg.degree, 0) AS VARCHAR) AS degree
 FROM cand c
 LEFT JOIN deg ON deg.id = c.id",
@@ -500,6 +506,7 @@ fn rows_from_batches(batches: &[RecordBatch]) -> Vec<CorpusRow> {
     let fqns = string_column(batches, "fqn");
     let kinds = string_column(batches, "definition_type");
     let locs = string_column(batches, "loc");
+    let end_lines = string_column(batches, "end_line");
     let degrees = string_column(batches, "degree");
     (0..ids.len())
         .map(|i| CorpusRow {
@@ -507,6 +514,7 @@ fn rows_from_batches(batches: &[RecordBatch]) -> Vec<CorpusRow> {
             fqn: fqns[i].clone(),
             kind: kinds[i].clone(),
             loc: locs[i].clone(),
+            end_line: end_lines[i].clone(),
             degree: degrees[i].clone(),
         })
         .collect()
@@ -533,22 +541,28 @@ fn expand_sql(pid: i64, sha: &str, seed_ids: &[&str], focus: Option<&str>) -> St
   WHERE source_id IN ({ids}) OR target_id IN ({ids})
 ),
 labels AS (
-  SELECT id, fqn AS label FROM gl_definition
+  SELECT id, fqn AS label,
+         file_path || ':' || CAST(start_line AS VARCHAR) AS loc,
+         fqn LIKE '%@%' AS scoped
+  FROM gl_definition
   WHERE project_id = {pid} AND commit_sha = {sha}
   UNION ALL
-  SELECT id, path FROM gl_file WHERE project_id = {pid} AND commit_sha = {sha}
+  SELECT id, path, '', FALSE FROM gl_file WHERE project_id = {pid} AND commit_sha = {sha}
   UNION ALL
-  SELECT id, path FROM gl_directory WHERE project_id = {pid} AND commit_sha = {sha}
+  SELECT id, path, '', FALSE FROM gl_directory WHERE project_id = {pid} AND commit_sha = {sha}
   UNION ALL
-  SELECT id, identifier_name FROM gl_imported_symbol
+  SELECT id, identifier_name, '', FALSE FROM gl_imported_symbol
   WHERE project_id = {pid} AND commit_sha = {sha}
 )
 SELECT h.relationship_kind,
        COALESCE(s.label, CAST(h.source_id AS VARCHAR)) AS source_label,
-       COALESCE(t.label, CAST(h.target_id AS VARCHAR)) AS target_label
+       COALESCE(s.loc, '') AS source_loc,
+       COALESCE(t.label, CAST(h.target_id AS VARCHAR)) AS target_label,
+       COALESCE(t.loc, '') AS target_loc
 FROM hood h
 LEFT JOIN labels s ON s.id = h.source_id
 LEFT JOIN labels t ON t.id = h.target_id
+WHERE NOT COALESCE(s.scoped, FALSE) AND NOT COALESCE(t.scoped, FALSE)
 ORDER BY {order}
 LIMIT {EDGE_LIMIT}"
     )
