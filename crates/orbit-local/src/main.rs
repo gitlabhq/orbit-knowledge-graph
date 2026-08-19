@@ -461,8 +461,14 @@ fn subcommand_path(matches: &clap::ArgMatches) -> String {
 }
 
 async fn flush_telemetry(tracker: Option<&orbit_analytics::SnowplowAnalyticsTracker>) {
-    if let Some(tracker) = tracker {
-        let _ = tokio::time::timeout(TELEMETRY_FLUSH_TIMEOUT, tracker.shutdown()).await;
+    if let Some(tracker) = tracker
+        && tokio::time::timeout(TELEMETRY_FLUSH_TIMEOUT, tracker.shutdown())
+            .await
+            .is_err()
+    {
+        eprintln!(
+            "warning: telemetry flush timed out; set ORBIT_TELEMETRY_ENABLED=false to disable telemetry"
+        );
     }
 }
 
