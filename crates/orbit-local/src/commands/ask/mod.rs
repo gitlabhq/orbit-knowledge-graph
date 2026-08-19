@@ -8,6 +8,9 @@ use orbit_search::{FOCUS_EDGES_PER_KIND, MAX_EDGES_PER_KIND, SearchVocab, conten
 
 use local::LocalBackend;
 
+const SNIPPET_LINES: usize = 4;
+const SNIPPET_LINE_CHARS: usize = 160;
+
 fn vocab() -> &'static SearchVocab {
     static VOCAB: std::sync::OnceLock<SearchVocab> = std::sync::OnceLock::new();
     VOCAB.get_or_init(|| {
@@ -51,6 +54,9 @@ pub(crate) fn run(
             "  {}  [{}]  {}  (score {:.1}, links {})",
             m.row.fqn, m.row.kind, m.row.loc, m.score, m.row.degree
         )?;
+        for line in snippet(backend.root(), &m.row.loc, &m.row.end_line) {
+            writeln!(out, "{line}")?;
+        }
     }
 
     if outcome.edges.is_empty() {
@@ -81,12 +87,62 @@ pub(crate) fn run(
             writeln!(out, "  {current}:")?;
         }
         if in_kind < kind_cap(current) {
-            writeln!(out, "    {} --> {}", e.source, e.target)?;
+            writeln!(
+                out,
+                "    {}{} --> {}{}",
+                e.source,
+                fmt_loc(&e.source_loc),
+                e.target,
+                fmt_loc(&e.target_loc)
+            )?;
         }
         in_kind += 1;
     }
     report_hidden(&mut out, current, in_kind, kind_cap(current))?;
     Ok(())
+}
+
+fn fmt_loc(loc: &str) -> String {
+    if loc.is_empty() {
+        String::new()
+    } else {
+        format!(" ({loc})")
+    }
+}
+
+fn snippet(root: &std::path::Path, loc: &str, end_line: &str) -> Vec<String> {
+    let Some((path, start)) = loc.rsplit_once(':') else {
+        return Vec::new();
+    };
+    let Ok(start) = start.parse::<usize>() else {
+        return Vec::new();
+    };
+    let Ok(content) = std::fs::read_to_string(root.join(path)) else {
+        return Vec::new();
+    };
+    let last = end_line
+        .parse::<usize>()
+        .ok()
+        .filter(|&e| e >= start)
+        .unwrap_or(start)
+        .min(start + SNIPPET_LINES - 1);
+    content
+        .lines()
+        .enumerate()
+        .skip(start.saturating_sub(1))
+        .take_while(|(i, _)| *i < last)
+        .map(|(i, text)| {
+            let mut text = text.trim_end();
+            if text.len() > SNIPPET_LINE_CHARS {
+                let mut cut = SNIPPET_LINE_CHARS;
+                while !text.is_char_boundary(cut) {
+                    cut -= 1;
+                }
+                text = &text[..cut];
+            }
+            format!("    {} | {}", i + 1, text)
+        })
+        .collect()
 }
 
 fn report_hidden(
