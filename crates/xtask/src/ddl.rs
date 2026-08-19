@@ -300,12 +300,14 @@ mod tests {
     #[test]
     fn persistent_ddl_contains_unversioned_table_without_prefix() {
         let ont = ontology::Ontology::load_embedded().unwrap();
-        let tables = query_engine::compiler::generate_unversioned_graph_tables(&ont);
-        assert!(!tables.is_empty());
-        let sql = query_engine::compiler::emit_create_table(&tables[0]);
-        assert!(sql.contains("CREATE TABLE"));
+        let objects = query_engine::compiler::generate_unversioned_objects(&ont);
+        let table = objects
+            .iter()
+            .find(|o| o.kind == "table")
+            .expect("an unversioned table should be generated");
+        assert!(table.ddl.contains("CREATE TABLE"));
         let schema_version = include_str!(concat!(env!("CONFIG_DIR"), "/SCHEMA_VERSION")).trim();
-        assert!(!sql.contains(&format!(" v{schema_version}_")));
+        assert!(!table.ddl.contains(&format!(" v{schema_version}_")));
     }
 
     #[test]

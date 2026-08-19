@@ -198,25 +198,32 @@ fn remove_auxiliary_schema_settings(value: &mut serde_yaml::Value) {
     else {
         return;
     };
-    retain_versioned_auxiliary_tables(settings);
+    let keys: Vec<String> = settings
+        .keys()
+        .filter_map(|k| k.as_str().map(String::from))
+        .collect();
+    for key in &keys {
+        retain_versioned_entries(settings, key);
+    }
     settings.remove(serde_yaml::Value::String(
         "refreshable_materialized_views".to_string(),
     ));
 }
 
-fn retain_versioned_auxiliary_tables(settings: &mut serde_yaml::Mapping) {
-    let key = serde_yaml::Value::String("auxiliary_tables".to_string());
-    let Some(serde_yaml::Value::Sequence(tables)) = settings.get_mut(&key) else {
+fn retain_versioned_entries(settings: &mut serde_yaml::Mapping, key: &str) {
+    let key = serde_yaml::Value::String(key.to_string());
+    let Some(serde_yaml::Value::Sequence(entries)) = settings.get_mut(&key) else {
         return;
     };
-    tables.retain(|table| {
-        table
+    let had_entries = !entries.is_empty();
+    entries.retain(|entry| {
+        entry
             .as_mapping()
             .and_then(|mapping| mapping.get(serde_yaml::Value::String("versioned".to_string())))
             .and_then(serde_yaml::Value::as_bool)
             .unwrap_or(true)
     });
-    if tables.is_empty() {
+    if had_entries && entries.is_empty() {
         settings.remove(&key);
     }
 }
@@ -284,6 +291,17 @@ mod tests {
         assert_ne!(
             stable_versioned_schema_hash(first),
             stable_versioned_schema_hash(second)
+        );
+    }
+
+    #[test]
+    fn versioned_schema_hash_ignores_unversioned_views() {
+        let empty = "settings:\n  internal_column_prefix: _\n";
+        let with_unversioned = "settings:\n  internal_column_prefix: _\n  materialized_views:\n    - name: sink\n      versioned: false\n      to_table: retention\n      select_query: SELECT 1 FROM system.query_log\n";
+
+        assert_eq!(
+            stable_versioned_schema_hash(empty),
+            stable_versioned_schema_hash(with_unversioned)
         );
     }
 
