@@ -40,23 +40,33 @@ fi
 TOTAL=$(wc -l < "${INPUT}" | tr -d ' ')
 
 # --- Retry modes ---
-# RETRY=failed: re-fetch only projects that failed in a previous log
-# RETRY=all: ignore existing archives, re-fetch everything
-# (unset): skip existing archives (default)
-if [[ "${RETRY}" == "failed" ]]; then
+# RETRY=fail         re-fetch only FAIL entries from a previous log
+# RETRY=skip         re-fetch only SKIP entries from a previous log
+# RETRY=fail,skip    both (any order, comma-separated)
+# RETRY=all          ignore existing archives, re-fetch everything
+# (unset)            skip existing archives (default)
+if [[ "${RETRY}" == "all" ]]; then
+  echo "[corpus] RETRY=all: re-fetching all projects (ignoring existing)"
+  touch "${WORK}/existing.txt"
+elif [[ -n "${RETRY}" ]]; then
   if [[ ! -f "${LOG_FILE}" ]]; then
-    echo "[corpus] ERROR: RETRY=failed requires a previous log at ${LOG_FILE}" >&2; exit 1
+    echo "[corpus] ERROR: RETRY requires a previous log at ${LOG_FILE}" >&2; exit 1
   fi
-  grep "FAIL" "${LOG_FILE}" | grep -oP '\(\K[0-9]+' | sort -u > "${WORK}/retry_ids.txt"
+  GREP_PATTERN=""
+  IFS=',' read -ra MODES <<< "${RETRY}"
+  for mode in "${MODES[@]}"; do
+    case "${mode}" in
+      fail|failed) GREP_PATTERN="${GREP_PATTERN:+${GREP_PATTERN}|}FAIL" ;;
+      skip|skipped) GREP_PATTERN="${GREP_PATTERN:+${GREP_PATTERN}|}SKIP" ;;
+      *) echo "[corpus] ERROR: unknown retry mode '${mode}' (use fail, skip, all)" >&2; exit 1 ;;
+    esac
+  done
+  grep -E "${GREP_PATTERN}" "${LOG_FILE}" | grep -oE '\([0-9]+\)' | tr -d '()' | sort -u > "${WORK}/retry_ids.txt"
   RETRY_COUNT=$(wc -l < "${WORK}/retry_ids.txt" | tr -d ' ')
-  echo "[corpus] Retrying ${RETRY_COUNT} failed projects from ${LOG_FILE}"
-  # Filter input to only failed IDs
+  echo "[corpus] Retrying ${RETRY_COUNT} projects (${RETRY}) from ${LOG_FILE}"
   awk -F'\t' 'NR==FNR{ids[$1];next} ($1 in ids)' "${WORK}/retry_ids.txt" "${INPUT}" > "${WORK}/filtered.tsv"
   INPUT="${WORK}/filtered.tsv"
   TOTAL="${RETRY_COUNT}"
-  touch "${WORK}/existing.txt"
-elif [[ "${RETRY}" == "all" ]]; then
-  echo "[corpus] RETRY=all: re-fetching all projects (ignoring existing)"
   touch "${WORK}/existing.txt"
 else
   # Pre-fetch existing archives list to avoid per-project GCS lookups.
