@@ -16,6 +16,8 @@ mimalloc = { workspace = true }
 arrow = { workspace = true, features = ["prettyprint"] }
 code-graph = { path = "../code-graph" }
 duckdb-client = { path = "../duckdb-client" }
+labkit-events = { workspace = true }
+orbit-analytics = { path = "../orbit-analytics" }
 orbit-prompts = { path = "../orbit-prompts" }
 orbit-utils = { path = "../utils" }
 ontology = { path = "../ontology" }
@@ -41,4 +43,5 @@ strum = { workspace = true }
 orbit-prompts = { path = "../orbit-prompts" }
 
 [dev-dependencies]
+orbit-analytics = { path = "../orbit-analytics", features = ["testkit"] }
 tempfile = { workspace = true }

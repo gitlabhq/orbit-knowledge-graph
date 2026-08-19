@@ -2,18 +2,13 @@ use std::collections::BTreeSet;
 use std::time::Duration;
 
 use labkit_events::Error as LabkitError;
-use orbit_analytics::{OrbitCommonContext, OrbitQueryContext, orbit_common, orbit_query};
-use orbit_server_config::{AnalyticsConfig, DeploymentKind};
+use orbit_analytics::{
+    OrbitCommonContext, OrbitQueryContext, orbit_common, orbit_query, validation,
+};
+use orbit_server_config::AnalyticsConfig;
 use query_engine::compiler::ExecMetrics;
 
 use crate::auth::{Claims, SourceType};
-
-fn validation<E: std::fmt::Display>(field: &'static str) -> impl FnOnce(E) -> LabkitError {
-    move |e| LabkitError::Validation {
-        field,
-        message: e.to_string(),
-    }
-}
 
 pub(crate) fn build_common(
     config: &AnalyticsConfig,
@@ -23,7 +18,8 @@ pub(crate) fn build_common(
     let environment: &'static str = config.deployment.environment.into();
 
     Ok(OrbitCommonContext::new(orbit_common::OrbitCommon {
-        deployment_type: deployment_type(config.deployment.kind),
+        deployment_type: config.deployment.kind.into(),
+        surface: Some(orbit_common::OrbitCommonSurface::Server),
         environment: environment
             .parse::<orbit_common::OrbitCommonEnvironment>()
             .map_err(validation("environment"))?,
@@ -266,15 +262,6 @@ fn parse_opt_query(
     field: &'static str,
 ) -> Result<Option<orbit_query::OrbitQueryGlobalUserId>, LabkitError> {
     parse_opt(value, field)
-}
-
-fn deployment_type(kind: DeploymentKind) -> orbit_common::OrbitCommonDeploymentType {
-    use orbit_common::OrbitCommonDeploymentType as DT;
-    match kind {
-        DeploymentKind::Com => DT::Com,
-        DeploymentKind::Dedicated => DT::Dedicated,
-        DeploymentKind::SelfManaged => DT::SelfManaged,
-    }
 }
 
 fn source_type(source: SourceType) -> orbit_query::OrbitQuerySourceType {
