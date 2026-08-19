@@ -71,7 +71,7 @@ All 13 languages supported by GitLab Orbit Remote are also supported locally:
 Ruby, Java, Kotlin, Python, TypeScript, JavaScript, Rust, Go, C#, C, C++, PHP,
 and Bash/Shell.
 
-See [What GitLab Orbit indexes](../remote/indexing.md#supported-languages) for the full language support table.
+See [index data with GitLab Orbit](../indexed-data.md#supported-languages) for the full language support table.
 
 ## Billing
 
