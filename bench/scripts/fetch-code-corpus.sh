@@ -14,11 +14,23 @@ BENCH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 : "${JOBS:=8}"
 : "${FETCH_MAX:=0}"
 
-INPUT="${1:?usage: $0 <projects.tsv>}"
+INPUT="${1:-}"
 WORK="${TMPDIR:-/tmp}/code-corpus-work.$$"
 mkdir -p "${WORK}"
 trap 'rm -rf "${WORK}"' EXIT
 [[ "${BUCKET}" != gs://* ]] && mkdir -p "${BUCKET}"
+
+# Resolve project list: explicit file > GCS > error
+if [[ -z "${INPUT}" ]]; then
+  if [[ "${BUCKET}" == gs://* ]]; then
+    echo "[corpus] No input file specified, checking ${BUCKET}/projects.tsv"
+    INPUT="${WORK}/projects.tsv"
+    gcloud storage cp "${BUCKET}/projects.tsv" "${INPUT}" --quiet 2>/dev/null \
+      || { echo "[corpus] ERROR: no projects.tsv in ${BUCKET}. Run dump-project-list.sh first." >&2; exit 1; }
+  else
+    echo "Usage: $0 [projects.tsv]" >&2; exit 1
+  fi
+fi
 
 TOTAL=$(wc -l < "${INPUT}" | tr -d ' ')
 
