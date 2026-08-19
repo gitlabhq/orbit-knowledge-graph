@@ -16,6 +16,9 @@
 # note-gated `scope: none` entry, the certified output-neutral escape hatch. A
 # version with no entry is treated as "*", which also makes pruning old entries safe.
 migrations:
+- version: 90
+  scope: code
+  note: gl_definition gains search_text and token_count columns (write-time tokenized identifier text for ranked search); code tables re-derive to populate them
 - version: 89
   scope: none
   note: MergeRequestDiffFile extract rewritten from bare INNER JOIN to CTE + IN-list. Output is byte-identical in production because both siphon_merge_request_diff_files and siphon_merge_request_diffs carry the same traversal_path for related records.

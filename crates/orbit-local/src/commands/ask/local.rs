@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use orbit_search::duckdb::DuckDbSearch;
+use duckdb_client::search::DuckDbSearch;
 use orbit_search::{AskOutcome, SearchVocab};
 
 use duckdb_client::scalar_i64;
@@ -83,10 +83,9 @@ impl LocalBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use orbit_search::duckdb::build_postings;
 
     #[test]
-    fn postings_roundtrip_ranks_exact_symbol_above_long_tie() {
+    fn search_text_roundtrip_ranks_exact_symbol_above_long_tie() {
         let dir = std::env::temp_dir().join(format!("orbit-search-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let db = dir.join("t.duckdb");
@@ -99,10 +98,11 @@ mod tests {
             )))
             .unwrap();
         let insert = |id: i64, fqn: &str, name: &str, path: &str| {
+            let (search_text, token_count) = orbit_search::search_document(fqn, path);
             client
                 .execute(
                     &format!(
-                        "INSERT INTO gl_definition VALUES ({id}, '', 7, 'main', 'sha', '{path}', '{fqn}', '{name}', 'Method', 1, 2, 0, 0, 0, 0)"
+                        "INSERT INTO gl_definition VALUES ({id}, '', 7, 'main', 'sha', '{path}', '{fqn}', '{name}', 'Method', 1, 2, 0, 0, 0, 0, '{search_text}', {token_count})"
                     ),
                     &[],
                 )
@@ -126,9 +126,6 @@ mod tests {
             "unrelated",
             "app/models/project.rb",
         );
-
-        let rows = build_postings(&client, 7, "sha").unwrap();
-        assert!(rows > 0);
 
         let search = DuckDbSearch::new(client, 7, "sha");
         let (corpus, weights) = search.search(&["execute_hooks".to_string()]).unwrap();

@@ -97,14 +97,6 @@ CREATE TABLE IF NOT EXISTS _orbit_manifest (
     status repo_status NOT NULL DEFAULT 'pending',
     last_indexed_at TIMESTAMP,
     error_message VARCHAR
-);
-
-CREATE TABLE IF NOT EXISTS gl_search_token (
-    project_id BIGINT NOT NULL,
-    commit_sha VARCHAR NOT NULL,
-    def_id BIGINT NOT NULL,
-    token VARCHAR NOT NULL,
-    tf INTEGER NOT NULL
 );";
 
 pub fn run_local(ontology_path: Option<PathBuf>) -> Result<()> {
@@ -322,7 +314,7 @@ mod tests {
         let ddl = query_engine::compiler::generate_local_ddl(&ont, MANIFEST_DDL);
         assert!(ddl.contains("CREATE TABLE"));
         assert!(ddl.contains("_orbit_manifest"));
-        assert!(ddl.contains("gl_search_token"));
+        assert!(ddl.contains("search_text"));
         assert!(ddl.contains("SCHEMA_VERSION="));
     }
 

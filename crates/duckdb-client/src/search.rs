@@ -1,21 +1,13 @@
-use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
-
 use anyhow::{Context, Result};
-use arrow::array::{Int32Array, Int64Array, StringArray};
-use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
-use duckdb_client::{DuckDbClient, scalar_i64, sql_lit, string_column};
-use rayon::prelude::*;
 
-use crate::corpus::{DEFAULT_SOURCE_EXTS, EXCLUDE_LIKE, EXCLUDE_REGEX, ext_regex};
-use crate::{
+use crate::{DuckDbClient, scalar_i64, sql_lit, string_column};
+use orbit_search::corpus::{DEFAULT_SOURCE_EXTS, EXCLUDE_LIKE, EXCLUDE_REGEX, ext_regex};
+use orbit_search::{
     AskMatch, AskOutcome, BM25_B, BM25_K1, CorpusRow, Edge, SearchVocab, content_words,
-    query_tokens, rank_and_trim, seed_rows, split_words, stem, token_counts,
+    query_tokens, rank_and_trim, seed_rows, stem,
 };
 
-const POSTINGS_FLUSH_ROWS: usize = 500_000;
-const POSTINGS_CHUNK_ROWS: usize = 65_536;
 const LOCAL_CANDIDATES: usize = 2000;
 const EDGE_LIMIT: usize = 40;
 
@@ -66,9 +58,9 @@ impl DuckDbSearch {
     }
 
     pub fn search(&self, terms: &[String]) -> Result<(Vec<CorpusRow>, Option<Vec<f64>>)> {
-        let use_postings = has_postings(&self.client, self.pid, &self.sha)?;
-        let (total, per_term) = if use_postings {
-            postings_term_counts(&self.client, self.pid, &self.sha, terms)?
+        let use_search_text = has_search_text(&self.client, self.pid, &self.sha)?;
+        let (total, per_term) = if use_search_text {
+            search_text_term_counts(&self.client, self.pid, &self.sha, terms)?
         } else {
             corpus_term_counts(&self.client, self.pid, &self.sha, terms)?
         };
@@ -77,9 +69,8 @@ impl DuckDbSearch {
             .iter()
             .map(|df| (1.0 + n / (1.0 + *df as f64)).ln())
             .collect();
-        let corpus = if use_postings {
-            let sql =
-                bm25_candidates_sql(self.pid, &self.sha, &query_tokens(terms), LOCAL_CANDIDATES);
+        let corpus = if use_search_text {
+            let sql = bm25_candidates_sql(self.pid, &self.sha, terms, &weights, LOCAL_CANDIDATES);
             rows_from_batches(&query(&self.client, &sql)?)
         } else {
             fetch_corpus(
@@ -122,109 +113,20 @@ fn query(client: &DuckDbClient, sql: &str) -> Result<Vec<RecordBatch>> {
     })
 }
 
-pub fn build_postings(client: &DuckDbClient, project_id: i64, commit_sha: &str) -> Result<usize> {
-    let sha = sql_lit(commit_sha);
-    client.execute(
-        &format!("DELETE FROM gl_search_token WHERE project_id = {project_id}"),
-        &[],
+/// Local DBs indexed by an older binary predate the `search_text` column;
+/// they fall back to the LIKE-based corpus scan until re-indexed.
+fn has_search_text(client: &DuckDbClient, project_id: i64, sha: &str) -> Result<bool> {
+    let columns = client.query_arrow(
+        "SELECT CAST(COUNT(*) AS BIGINT) AS n FROM information_schema.columns
+ WHERE table_name = 'gl_definition' AND column_name = 'search_text'",
     )?;
-
-    let batches = client
-        .query_arrow(&format!(
-            "SELECT CAST(d.id AS VARCHAR) AS id, d.fqn, d.file_path FROM gl_definition d WHERE {}",
-            corpus_predicate(project_id, &sha)
-        ))
-        .context("failed to read definitions for the search index")?;
-
-    let mut def_ids: Vec<i64> = Vec::new();
-    let mut tokens: Vec<String> = Vec::new();
-    let mut tfs: Vec<i32> = Vec::new();
-    let mut total = 0usize;
-
-    let flush =
-        |def_ids: &mut Vec<i64>, tokens: &mut Vec<String>, tfs: &mut Vec<i32>| -> Result<()> {
-            if def_ids.is_empty() {
-                return Ok(());
-            }
-            let rows = def_ids.len();
-            let batch = RecordBatch::try_new(
-                postings_schema(),
-                vec![
-                    Arc::new(Int64Array::from(vec![project_id; rows])),
-                    Arc::new(StringArray::from(vec![commit_sha; rows])),
-                    Arc::new(Int64Array::from(std::mem::take(def_ids))),
-                    Arc::new(StringArray::from(std::mem::take(tokens))),
-                    Arc::new(Int32Array::from(std::mem::take(tfs))),
-                ],
-            )?;
-            client.insert_batch("gl_search_token", &batch)?;
-            Ok(())
-        };
-
-    let ids = string_column(&batches, "id");
-    let fqns = string_column(&batches, "fqn");
-    let paths = string_column(&batches, "file_path");
-
-    let path_counts: HashMap<&str, HashMap<String, i32>> = paths
-        .iter()
-        .map(String::as_str)
-        .collect::<HashSet<_>>()
-        .into_par_iter()
-        .map(|path| (path, token_counts(split_words(path))))
-        .collect();
-
-    for start in (0..ids.len()).step_by(POSTINGS_CHUNK_ROWS) {
-        let end = (start + POSTINGS_CHUNK_ROWS).min(ids.len());
-        let counted: Vec<(i64, HashMap<String, i32>)> = (start..end)
-            .into_par_iter()
-            .filter_map(|i| {
-                let def_id = ids[i].parse::<i64>().ok()?;
-                let mut counts = token_counts(split_words(&fqns[i]));
-                if let Some(path) = path_counts.get(paths[i].as_str()) {
-                    for (token, tf) in path {
-                        *counts.entry(token.clone()).or_insert(0) += tf;
-                    }
-                }
-                Some((def_id, counts))
-            })
-            .collect();
-        for (def_id, counts) in counted {
-            for (token, tf) in counts {
-                def_ids.push(def_id);
-                tokens.push(token);
-                tfs.push(tf);
-                total += 1;
-            }
-            if def_ids.len() >= POSTINGS_FLUSH_ROWS {
-                flush(&mut def_ids, &mut tokens, &mut tfs)?;
-            }
-        }
-    }
-    flush(&mut def_ids, &mut tokens, &mut tfs)?;
-    Ok(total)
-}
-
-fn postings_schema() -> Arc<Schema> {
-    Arc::new(Schema::new(vec![
-        Field::new("project_id", DataType::Int64, false),
-        Field::new("commit_sha", DataType::Utf8, false),
-        Field::new("def_id", DataType::Int64, false),
-        Field::new("token", DataType::Utf8, false),
-        Field::new("tf", DataType::Int32, false),
-    ]))
-}
-
-fn has_postings(client: &DuckDbClient, project_id: i64, sha: &str) -> Result<bool> {
-    let tables = client.query_arrow(
-        "SELECT CAST(COUNT(*) AS BIGINT) AS n FROM information_schema.tables WHERE table_name = 'gl_search_token'",
-    )?;
-    if scalar_i64(&tables) == 0 {
+    if scalar_i64(&columns) == 0 {
         return Ok(false);
     }
     let batches = client.query_arrow(&format!(
         "SELECT CAST(COUNT(*) AS BIGINT) AS n FROM (
-  SELECT 1 FROM gl_search_token
-  WHERE project_id = {project_id} AND commit_sha = {sha}
+  SELECT 1 FROM gl_definition
+  WHERE project_id = {project_id} AND commit_sha = {sha} AND token_count > 0
   LIMIT 1
 )"
     ))?;
@@ -261,43 +163,89 @@ fn exclusions(col: &str) -> String {
     s
 }
 
-fn bm25_candidates_sql(pid: i64, sha: &str, tokens: &[String], cap: usize) -> String {
-    let values: Vec<String> = tokens.iter().map(|t| format!("({})", sql_lit(t))).collect();
+/// `' tok '` padded-LIKE over the space-joined stemmed token stream: exact
+/// token equality without splitting the string per row.
+fn token_like_sql(term: &str) -> Option<String> {
+    let tokens = query_tokens(std::slice::from_ref(&term.to_string()));
+    if tokens.is_empty() {
+        return None;
+    }
+    let clauses: Vec<String> = tokens
+        .iter()
+        .map(|tok| {
+            format!(
+                "' ' || d.search_text || ' ' LIKE {}",
+                sql_lit(&format!("% {tok} %"))
+            )
+        })
+        .collect();
+    Some(format!("({})", clauses.join(" OR ")))
+}
+
+/// Per-term BM25 term frequency: occurrences of the term's tokens in the
+/// stored token list.
+fn token_tf_sql(term: &str) -> Option<String> {
+    let tokens = query_tokens(std::slice::from_ref(&term.to_string()));
+    if tokens.is_empty() {
+        return None;
+    }
+    let clauses: Vec<String> = tokens
+        .iter()
+        .map(|tok| {
+            format!(
+                "len(list_filter(string_split(d.search_text, ' '), x -> x = {}))",
+                sql_lit(tok)
+            )
+        })
+        .collect();
+    Some(format!("({})", clauses.join(" + ")))
+}
+
+fn bm25_candidates_sql(
+    pid: i64,
+    sha: &str,
+    terms: &[String],
+    weights: &[f64],
+    cap: usize,
+) -> String {
+    let match_clauses: Vec<String> = terms.iter().filter_map(|t| token_like_sql(t)).collect();
+    let any_match = if match_clauses.is_empty() {
+        "FALSE".to_string()
+    } else {
+        format!("({})", match_clauses.join(" OR "))
+    };
+    let score_parts: Vec<String> = terms
+        .iter()
+        .enumerate()
+        .filter_map(|(i, t)| {
+            let tf = token_tf_sql(t)?;
+            let idf = weights.get(i).copied().unwrap_or(1.0);
+            Some(format!(
+                "{idf:.6} * {tf} * ({k1} + 1)
+           / ({tf} + {k1} * (1 - {b} + {b} * d.token_count / s.avgdl))",
+                k1 = BM25_K1,
+                b = BM25_B,
+            ))
+        })
+        .collect();
+    let score = if score_parts.is_empty() {
+        "0".to_string()
+    } else {
+        score_parts.join("\n         + ")
+    };
     format!(
-        "WITH docs AS (
-  SELECT def_id, SUM(tf) AS dl
-  FROM gl_search_token
-  WHERE project_id = {pid} AND commit_sha = {sha}
-  GROUP BY def_id
-),
-stats AS (SELECT COUNT(*) AS n, AVG(dl) AS avgdl FROM docs),
-q(token) AS (VALUES {values}),
-df AS (
-  SELECT t.token, COUNT(*) AS df
-  FROM gl_search_token t
-  JOIN q USING (token)
-  WHERE t.project_id = {pid} AND t.commit_sha = {sha}
-  GROUP BY t.token
-),
-scores AS (
-  SELECT t.def_id,
-         SUM(ln(1 + (s.n - f.df + 0.5) / (f.df + 0.5))
-             * t.tf * ({k1} + 1)
-             / (t.tf + {k1} * (1 - {b} + {b} * docs.dl / s.avgdl))) AS score
-  FROM gl_search_token t
-  JOIN q USING (token)
-  JOIN df f USING (token)
-  JOIN docs ON docs.def_id = t.def_id
-  CROSS JOIN stats s
-  WHERE t.project_id = {pid} AND t.commit_sha = {sha}
-  GROUP BY t.def_id
+        "WITH stats AS (
+  SELECT GREATEST(AVG(d.token_count), 1) AS avgdl
+  FROM gl_definition d
+  WHERE {pred}
 ),
 cand AS (
   SELECT d.id, d.fqn, d.definition_type, d.file_path, d.start_line, d.end_line
-  FROM scores sc
-  JOIN gl_definition d ON d.id = sc.def_id
-  WHERE d.project_id = {pid} AND d.commit_sha = {sha}
-  ORDER BY sc.score DESC, length(d.fqn) ASC
+  FROM gl_definition d
+  CROSS JOIN stats s
+  WHERE {pred}
+  AND {any_match}
+  ORDER BY ({score}) DESC, length(d.fqn) ASC
   LIMIT {cap}
 ),
 deg AS (
@@ -313,9 +261,7 @@ SELECT CAST(c.id AS VARCHAR) AS id, c.fqn, c.definition_type,
        CAST(COALESCE(deg.degree, 0) AS VARCHAR) AS degree
 FROM cand c
 LEFT JOIN deg ON deg.id = c.id",
-        values = values.join(", "),
-        k1 = BM25_K1,
-        b = BM25_B,
+        pred = corpus_predicate(pid, sha),
     )
 }
 
@@ -375,7 +321,7 @@ fn relevance_sql(terms: &[String], weights: &[f64]) -> String {
     format!("({})", clauses.join(" + "))
 }
 
-fn postings_term_counts(
+fn search_text_term_counts(
     client: &DuckDbClient,
     pid: i64,
     sha: &str,
@@ -384,40 +330,14 @@ fn postings_term_counts(
     let counters: Vec<String> = terms
         .iter()
         .enumerate()
-        .map(|(i, t)| {
-            let tokens = query_tokens(std::slice::from_ref(t));
-            if tokens.is_empty() {
-                return format!("CAST(0 AS VARCHAR) AS df_{i}");
+        .map(|(i, t)| match token_like_sql(t) {
+            Some(matched) => {
+                format!("CAST(COUNT(*) FILTER (WHERE {matched}) AS VARCHAR) AS df_{i}")
             }
-            let list: Vec<String> = tokens.iter().map(|tok| sql_lit(tok)).collect();
-            format!(
-                "CAST(COUNT(DISTINCT def_id) FILTER (WHERE token IN ({})) AS VARCHAR) AS df_{i}",
-                list.join(", ")
-            )
+            None => format!("CAST(0 AS VARCHAR) AS df_{i}"),
         })
         .collect();
-    let selects = if counters.is_empty() {
-        String::new()
-    } else {
-        format!(", {}", counters.join(", "))
-    };
-    let batches = query(
-        client,
-        &format!(
-            "SELECT CAST(COUNT(DISTINCT def_id) AS VARCHAR) AS total{selects} FROM gl_search_token WHERE project_id = {pid} AND commit_sha = {sha}"
-        ),
-    )?;
-    let count_of = |name: &str| {
-        string_column(&batches, name)
-            .first()
-            .and_then(|v| v.parse::<i64>().ok())
-            .unwrap_or(0)
-    };
-    let total = count_of("total");
-    let per_term = (0..terms.len())
-        .map(|i| count_of(&format!("df_{i}")))
-        .collect();
-    Ok((total, per_term))
+    term_counts(client, pid, sha, terms, &counters)
 }
 
 fn corpus_term_counts(
@@ -436,6 +356,16 @@ fn corpus_term_counts(
             )
         })
         .collect();
+    term_counts(client, pid, sha, terms, &counters)
+}
+
+fn term_counts(
+    client: &DuckDbClient,
+    pid: i64,
+    sha: &str,
+    terms: &[String],
+    counters: &[String],
+) -> Result<(i64, Vec<i64>)> {
     let selects = if counters.is_empty() {
         String::new()
     } else {
@@ -573,10 +503,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn bm25_sql_embeds_tokens_as_values() {
-        let sql = bm25_candidates_sql(1, "'abc'", &["valid".to_string()], 10);
-        assert!(sql.contains("VALUES ('valid')"), "sql was {sql}");
-        assert!(sql.contains("ORDER BY sc.score DESC"), "sql was {sql}");
+    fn bm25_sql_embeds_padded_token_matches() {
+        let sql = bm25_candidates_sql(1, "'abc'", &["valid".to_string()], &[1.5], 10);
+        assert!(sql.contains("LIKE '% valid %'"), "sql was {sql}");
+        assert!(sql.contains("1.500000"), "sql was {sql}");
+        assert!(sql.contains("ORDER BY ("), "sql was {sql}");
+    }
+
+    #[test]
+    fn bm25_tf_counts_exact_tokens_not_substrings() {
+        let sql = token_tf_sql("validated").unwrap();
+        assert!(sql.contains("x = 'valid'"), "sql was {sql}");
+        assert!(!sql.contains('%'), "sql was {sql}");
     }
 
     #[test]

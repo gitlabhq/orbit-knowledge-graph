@@ -17,7 +17,7 @@ arrow = { workspace = true, features = ["prettyprint"] }
 code-graph = { path = "../code-graph" }
 duckdb-client = { path = "../duckdb-client" }
 orbit-prompts = { path = "../orbit-prompts" }
-orbit-search = { path = "../orbit-search", features = ["duckdb"] }
+orbit-search = { path = "../orbit-search" }
 orbit-utils = { path = "../utils" }
 ontology = { path = "../ontology" }
 gitalisk-core = { workspace = true }
