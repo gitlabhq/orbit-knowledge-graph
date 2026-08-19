@@ -84,9 +84,9 @@ if [[ "$TARGET" == *-musl ]]; then
         echo "cargo-zigbuild is required for musl local CLI builds" >&2
         exit 1
     }
-    rustup run "$TOOLCHAIN" cargo zigbuild --release --locked --bin orbit --target "$TARGET" --features duckdb-client/bundled
+    rustup run "$TOOLCHAIN" cargo zigbuild --release --locked -p orbit-cli --bin orbit --target "$TARGET" --features duckdb-client/bundled
 else
-    rustup run "$TOOLCHAIN" cargo build --release --locked --bin orbit --target "$TARGET" --features duckdb-client/bundled
+    rustup run "$TOOLCHAIN" cargo build --release --locked -p orbit-cli --bin orbit --target "$TARGET" --features duckdb-client/bundled
 fi
 
 BIN_DIR="target/${TARGET}/release"
