@@ -11,7 +11,7 @@ const SEED_DIR: &str = env!("SEEDS_DIR");
 #[derive(Debug, Deserialize)]
 pub struct SeedEntry {
     #[serde(rename = "match")]
-    pub match_fields: HashMap<String, serde_yaml::Value>,
+    pub match_fields: HashMap<String, serde_json::Value>,
     pub value: Option<String>,
 }
 
@@ -35,7 +35,7 @@ impl SeededColumnResolver {
 
     pub fn from_yaml(yaml: &str) -> Self {
         let content: SeededContent =
-            serde_yaml::from_str(yaml).expect("virtual content seed should parse");
+            orbit_utils::yaml::from_str(yaml).expect("virtual content seed should parse");
         Self { content }
     }
 
@@ -78,11 +78,11 @@ fn column_value_string(value: &ColumnValue) -> String {
     }
 }
 
-fn yaml_scalar_string(value: &serde_yaml::Value) -> String {
+fn yaml_scalar_string(value: &serde_json::Value) -> String {
     match value {
-        serde_yaml::Value::Number(n) => n.to_string(),
-        serde_yaml::Value::String(s) => s.clone(),
-        serde_yaml::Value::Bool(b) => b.to_string(),
+        serde_json::Value::Number(n) => n.to_string(),
+        serde_json::Value::String(s) => s.clone(),
+        serde_json::Value::Bool(b) => b.to_string(),
         other => panic!("unsupported match value in virtual content seed: {other:?}"),
     }
 }

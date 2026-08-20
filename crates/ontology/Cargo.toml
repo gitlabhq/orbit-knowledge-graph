@@ -9,7 +9,7 @@ indexmap = { workspace = true, features = ["serde"] }
 minijinja = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-serde_yaml = { workspace = true }
+orbit-utils = { path = "../utils" }
 sha2 = { workspace = true }
 rust-embed = { workspace = true, features = ["include-exclude"] }
 strum = { workspace = true }

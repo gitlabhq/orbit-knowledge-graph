@@ -101,19 +101,19 @@ impl<'de> Deserialize<'de> for Assert {
     where
         D: de::Deserializer<'de>,
     {
-        let mut value: serde_yaml::Value = Deserialize::deserialize(deserializer)?;
+        let mut value: serde_json::Value = Deserialize::deserialize(deserializer)?;
         let filter = value
-            .as_mapping_mut()
+            .as_object_mut()
             .and_then(|m| m.remove("where"))
-            .map(serde_yaml::from_value)
+            .map(serde_json::from_value)
             .transpose()
             .map_err(de::Error::custom)?;
         let negate = value
-            .as_mapping_mut()
+            .as_object_mut()
             .and_then(|m| m.remove("not"))
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
-        let check: AssertCheck = serde_yaml::from_value(value).map_err(de::Error::custom)?;
+        let check: AssertCheck = serde_json::from_value(value).map_err(de::Error::custom)?;
         Ok(Assert {
             filter,
             negate,
@@ -142,7 +142,7 @@ pub(crate) enum AssertCheck {
         match_args: MatchArgs,
     },
     Row {
-        row: HashMap<String, serde_yaml::Value>,
+        row: HashMap<String, serde_json::Value>,
     },
     NoNulls {
         no_nulls: String,

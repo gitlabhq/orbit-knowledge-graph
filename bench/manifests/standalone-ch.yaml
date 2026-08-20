@@ -24,7 +24,7 @@ ${CH_NODE_SELECTOR}
 ${CH_TOLERATIONS}
       containers:
         - name: clickhouse
-          image: clickhouse/clickhouse-server:26.6
+          image: ${CH_IMAGE}
           env:
             - name: CLICKHOUSE_USER
               value: "default"

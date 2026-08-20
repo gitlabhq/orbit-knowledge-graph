@@ -76,6 +76,7 @@ $KC delete statefulset clickhouse -n "${CH_NS}" --cascade=orphan 2>/dev/null || 
 
 log "Deploying standalone ClickHouse in ${CH_NS}"
 export CH_NAMESPACE="${CH_NS}" CH_PASSWORD CH_NODE_SELECTOR CH_TOLERATIONS PVC_DATA_SOURCE
+export CH_IMAGE="$(bench '.images.clickhouse')"
 export CH_STORAGE="$(tier '.clickhouse.storage')"
 export CH_CPU="$(tier '.clickhouse.cpu')"
 export CH_MEMORY="$(tier '.clickhouse.memory')"
@@ -122,6 +123,20 @@ $KC exec -n "${CH_NS}" clickhouse-0 -- \
     ${SETUP_SQL}
   "
 log "  Databases and users created (clean slate)"
+
+# Set TTLs on system log tables to prevent disk exhaustion.
+log "Setting TTLs on system log tables"
+for tbl in text_log trace_log query_log metric_log asynchronous_metric_log processors_profile_log part_log; do
+  $KC exec -n "${CH_NS}" clickhouse-0 -- \
+    clickhouse-client --password "${CH_PASSWORD}" -q \
+    "ALTER TABLE system.${tbl} MODIFY TTL event_date + INTERVAL 1 DAY SETTINGS mutations_sync=0" 2>/dev/null || true
+done
+# Truncate any existing bloat from snapshot restores.
+for tbl in text_log trace_log query_log metric_log asynchronous_metric_log processors_profile_log part_log; do
+  $KC exec -n "${CH_NS}" clickhouse-0 -- \
+    clickhouse-client --password "${CH_PASSWORD}" -q \
+    "TRUNCATE TABLE IF EXISTS system.${tbl}" 2>/dev/null || true
+done
 
 # Store the default password for the import job.
 $KC create secret generic ra-ch-credentials -n "${CH_NS}" \

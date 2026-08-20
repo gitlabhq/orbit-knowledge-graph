@@ -64,7 +64,7 @@ mod tests {
             max_connection_age_secs: 300
             stream_timeout_secs: 60
         "#;
-        let cfg: GrpcConfig = serde_yaml::from_str(yaml).expect("valid config");
+        let cfg: GrpcConfig = orbit_utils::yaml::from_str(yaml).expect("valid config");
         assert_eq!(cfg.max_connection_age_grace_secs, 30);
     }
 

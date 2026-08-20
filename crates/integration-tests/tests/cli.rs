@@ -824,7 +824,7 @@ struct RepoMapFixtureCommand {
 }
 
 fn load_repo_map_fixture() -> RepoMapFixture {
-    serde_yaml::from_str(include_str!("fixtures/repo_map.yaml"))
+    orbit_utils::yaml::from_str(include_str!("fixtures/repo_map.yaml"))
         .expect("invalid fixtures/repo_map.yaml")
 }
 

@@ -181,7 +181,7 @@ fn load_corpus() -> Vec<SmokeCase> {
         let file = path.file_name().unwrap().to_string_lossy().into_owned();
         let text = std::fs::read_to_string(&path).expect("read corpus file");
         let entries: BTreeMap<String, Entry> =
-            serde_yaml::from_str(&text).unwrap_or_else(|e| panic!("parse {file}: {e}"));
+            orbit_utils::yaml::from_str(&text).unwrap_or_else(|e| panic!("parse {file}: {e}"));
         for (key, entry) in entries {
             let expects_error = entry.expect.as_deref() == Some("error");
             out.push(SmokeCase {

@@ -33,7 +33,7 @@ pub fn load_queries(path: &Path) -> Result<HashMap<String, QueryEntry>> {
     let content = std::fs::read_to_string(path)
         .with_context(|| format!("Failed to read queries file: {}", path.display()))?;
 
-    let queries: HashMap<String, QueryEntry> = serde_yaml::from_str(&content)
+    let queries: HashMap<String, QueryEntry> = orbit_utils::yaml::from_str(&content)
         .with_context(|| format!("Failed to parse queries file: {}", path.display()))?;
 
     for (key, entry) in &queries {

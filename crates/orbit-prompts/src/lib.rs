@@ -126,7 +126,7 @@ fn template_placeholders(template: &str) -> Result<Vec<String>, minijinja::Error
 
 fn parse_prompt(key: &str, raw: &str) -> Result<Prompt, String> {
     let mut prompt: Prompt =
-        serde_yaml::from_str(raw).map_err(|e| format!("parsing prompt `{key}`: {e}"))?;
+        orbit_utils::yaml::from_str(raw).map_err(|e| format!("parsing prompt `{key}`: {e}"))?;
     prompt.summary = prompt.summary.map(|s| s.trim_end().to_string());
     prompt.short = prompt.short.map(|s| s.trim_end().to_string());
     prompt.description = prompt.description.map(|s| s.trim_end().to_string());
@@ -212,7 +212,7 @@ mod tests {
     use super::*;
 
     fn prompt(yaml: &str) -> Prompt {
-        serde_yaml::from_str(yaml).expect("test prompt should parse")
+        orbit_utils::yaml::from_str(yaml).expect("test prompt should parse")
     }
 
     #[test]

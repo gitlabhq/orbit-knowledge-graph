@@ -88,9 +88,9 @@ pub(crate) fn parse_yaml<T: for<'de> Deserialize<'de>>(
     content: &str,
     path: &str,
 ) -> Result<T, OntologyError> {
-    serde_yaml::from_str(content).map_err(|e| OntologyError::Yaml {
+    orbit_utils::yaml::from_str(content).map_err(|e| OntologyError::Yaml {
         path: path.to_string(),
-        source: e,
+        source: Box::new(e),
     })
 }
 

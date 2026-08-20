@@ -206,11 +206,11 @@ enum NodeScope {
 struct NodeScopeYaml {
     node_type: String,
     #[serde(default)]
-    etl: Option<serde_yaml::Value>,
+    etl: Option<serde_json::Value>,
 }
 
 fn parse_node_scope(content: &str) -> Option<NodeScope> {
-    let parsed: NodeScopeYaml = serde_yaml::from_str(content).ok()?;
+    let parsed: NodeScopeYaml = orbit_utils::yaml::from_str(content).ok()?;
     if parsed.etl.is_some() {
         Some(NodeScope::Sdlc(parsed.node_type))
     } else {
@@ -224,7 +224,7 @@ struct DerivedNameYaml {
 }
 
 fn parse_derived_name(content: &str) -> Option<String> {
-    let parsed: DerivedNameYaml = serde_yaml::from_str(content).ok()?;
+    let parsed: DerivedNameYaml = orbit_utils::yaml::from_str(content).ok()?;
     Some(parsed.name)
 }
 

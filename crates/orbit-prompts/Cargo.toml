@@ -9,4 +9,4 @@ minijinja = { workspace = true }
 rust-embed = { workspace = true }
 semver = { workspace = true }
 serde = { workspace = true }
-serde_yaml = { workspace = true }
+orbit-utils = { path = "../utils" }
