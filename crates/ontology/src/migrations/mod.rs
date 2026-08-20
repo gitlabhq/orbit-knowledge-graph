@@ -2,13 +2,11 @@
 //! snapshot. Shared by the build-time check and the `xtask` tooling. Runtime
 //! SDLC plan lowering isn't fingerprinted, and each entry carries one scope.
 
-mod auxiliary;
 mod fingerprint;
 mod ledger;
 mod scope;
 mod verify;
 
-pub use auxiliary::{AUXILIARY_LEDGER_FILE, AuxiliaryLedger, AuxiliaryMigration};
 pub use fingerprint::{
     FINGERPRINT_FILE, Fingerprints, embedded_sources, sha256_hex, source_fingerprints,
 };

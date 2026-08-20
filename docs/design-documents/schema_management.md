@@ -72,33 +72,10 @@ schema-version prefix and are dropped on version rollover, so they must referenc
 tables via `{table_name}` placeholders. Setting `versioned: false` makes the view durable: it
 skips the version prefix and is excluded from version-completeness and dead-version GC.
 
-The unversioned object boot sequence runs three phases in order:
-
-1. **Drop all non-prefixed MVs.** Queries `system.tables` for every `MaterializedView` without a
-   `v<N>_` prefix and drops it. This covers changed definitions, removed views, and orphans in one
-   pass. Safe because MVs are insert triggers with no stored data; target tables are untouched.
-2. **Run auxiliary migrations.** One-time SQL statements from `config/auxiliary-migrations.yaml`,
-   each executed at most once, tracked by the `gkg_auxiliary_migrations` table. Used for
-   destructive table changes (DROP, ALTER) that `CREATE IF NOT EXISTS` cannot express. Runs after
-   the MV drop so that a migration can safely drop a backing table whose MV is already gone.
-3. **Create all ontology-declared unversioned objects.** Tables use `CREATE TABLE IF NOT EXISTS`
-   (idempotent, never drops data). MVs are created fresh (the old ones were dropped in phase 1).
-
-To retire an unversioned MV and its backing table, remove both from the ontology and add an
-auxiliary migration entry:
-
-```yaml
-migrations:
-  - id: 1
-    sql: "DROP TABLE IF EXISTS query_log_retention"
-    note: "retired query_log_retention"
-```
-
-Phase 1 drops the MV. Phase 2 drops the table. Phase 3 creates neither.
-
-The auxiliary migration YAML is validated against
-`config/schemas/auxiliary-migrations.schema.json` in CI and parsed at compile time via the
-ontology crate. IDs must be strictly ascending and are never reused.
+At boot, all non-prefixed materialized views are dropped and recreated from the current ontology.
+This covers changed definitions, removed views, and orphans in one pass. Safe because MVs are
+insert triggers with no stored data; target tables are untouched. Tables use
+`CREATE TABLE IF NOT EXISTS` and are never dropped automatically.
 
 An unversioned view must target an unversioned auxiliary table; it may read from external system
 tables (for example `system.query_log`) that are not ontology-tracked and therefore not prefixed.
