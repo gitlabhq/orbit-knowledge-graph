@@ -60,7 +60,7 @@ pub(crate) fn map_http_error(status: u16, body: &str) -> RemoteError {
         503 => RemoteError::new(
             EXIT_GENERIC,
             "Orbit service unavailable\n\n\
-             The Orbit API returned HTTP 503. The underlying GKG service is currently\n\
+             The Orbit API returned HTTP 503. The underlying Orbit service is currently\n\
              unreachable; retry shortly or check the GitLab status page.",
         ),
         _ => RemoteError::new(
