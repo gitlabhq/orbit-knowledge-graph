@@ -87,6 +87,7 @@ fn stable_yaml_hash(content: &str) -> String {
     match serde_yaml::from_str::<serde_yaml::Value>(content) {
         Ok(mut value) => {
             remove_runtime_extract_fields(&mut value);
+            remove_query_time_annotations(&mut value);
             sort_yaml_keys(&mut value);
             match serde_yaml::to_string(&value) {
                 Ok(rendered) => sha256_hex(&rendered),
@@ -189,6 +190,15 @@ fn remove_runtime_extract_fields(value: &mut serde_yaml::Value) {
     }
 }
 
+/// `search_weight` only tunes query-time ranking; it cannot change any
+/// indexed row, so edits to it must not register as versioned schema drift.
+fn remove_query_time_annotations(value: &mut serde_yaml::Value) {
+    let serde_yaml::Value::Mapping(root) = value else {
+        return;
+    };
+    root.remove(serde_yaml::Value::String("search_weight".to_string()));
+}
+
 fn remove_auxiliary_schema_settings(value: &mut serde_yaml::Value) {
     let serde_yaml::Value::Mapping(schema) = value else {
         return;
@@ -242,6 +252,15 @@ mod tests {
             "pipelines:\n  - name: Job\n    extract:\n      tables: [t]\n      order_by: [id]\n";
         let with = "pipelines:\n  - name: Job\n    extract:\n      tables: [t]\n      order_by: [id]\n      partition_count: 5\n";
         assert_eq!(stable_yaml_hash(without), stable_yaml_hash(with));
+    }
+
+    #[test]
+    fn stable_hash_ignores_search_weight() {
+        let without = "description: calls\ntable: gl_code_edge\n";
+        let with = "description: calls\ntable: gl_code_edge\nsearch_weight: 1.0\n";
+        let retuned = "description: calls\ntable: gl_code_edge\nsearch_weight: 0.3\n";
+        assert_eq!(stable_yaml_hash(without), stable_yaml_hash(with));
+        assert_eq!(stable_yaml_hash(with), stable_yaml_hash(retuned));
     }
 
     #[test]

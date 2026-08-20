@@ -1264,6 +1264,12 @@
           "pattern": "^[a-z_]+$",
           "description": "Optional ClickHouse table for this edge type. Must be a key in settings.edge_tables. Defaults to settings.default_edge_table."
         },
+        "search_weight": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "How much search rank flows across this edge during graph expansion (personalized PageRank). Unset means no declared opinion; search falls back to its default."
+        },
         "properties": {
           "type": "object",
           "description": "Property definitions for this edge (for edges with additional data).",
