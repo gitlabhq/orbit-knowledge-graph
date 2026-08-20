@@ -191,6 +191,16 @@ mod tests {
         let outcome = search.ask("dlq publish", 5, &vocab, &weights).unwrap();
 
         assert!(!outcome.matches.is_empty());
+        assert!(!outcome.weak);
+        assert!(outcome.unmatched_terms.is_empty());
+
+        let vague = search
+            .ask("first repository setup initialization", 5, &vocab, &weights)
+            .unwrap();
+        assert!(
+            vague.matches.is_empty() || vague.weak || !vague.unmatched_terms.is_empty(),
+            "a vocabulary-mismatched question must not present as confident"
+        );
         let rendered: Vec<String> = outcome
             .edges
             .iter()

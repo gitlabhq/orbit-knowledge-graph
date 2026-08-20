@@ -7,7 +7,7 @@ use orbit_search::expand::{NeighborhoodSource, NodeLabel, expand_neighborhood};
 use orbit_search::ppr::NeighborhoodEdge;
 use orbit_search::{
     AskMatch, AskOutcome, BM25_B, BM25_K1, CorpusRow, SearchVocab, content_words, query_tokens,
-    rank_and_trim, stem,
+    rank_and_trim, stem, unmatched_terms,
 };
 use std::collections::HashMap;
 
@@ -42,6 +42,8 @@ impl DuckDbSearch {
         let (corpus, weights) = self.search(&terms)?;
         let hits = rank_and_trim(&terms, &corpus, limit, weights.as_deref(), vocab);
         let focus = vocab.focus_edge_kind(&terms);
+        let weak = hits.first().is_none_or(|h| !h.confident());
+        let unmatched = unmatched_terms(&terms, &corpus, vocab);
         let matches: Vec<AskMatch> = hits
             .into_iter()
             .map(|h| AskMatch {
@@ -65,6 +67,8 @@ impl DuckDbSearch {
             focus,
             edges,
             hidden_by_kind,
+            weak,
+            unmatched_terms: unmatched,
         })
     }
 
