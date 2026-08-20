@@ -16,6 +16,7 @@
 set -euo pipefail
 
 BENCH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+bench() { yq eval "${1}" "${BENCH_DIR}/config/bench.yaml"; }
 
 : "${BUCKET:=$(bench '.corpus.bucket' 2>/dev/null || echo 'gs://gkg-code-corpus')}"
 : "${JOBS:=$(bench '.corpus.jobs' 2>/dev/null || echo '8')}"
