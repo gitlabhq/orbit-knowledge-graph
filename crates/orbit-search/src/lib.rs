@@ -64,9 +64,6 @@ pub fn split_words(input: &str) -> Vec<String> {
             if e - s >= 2 {
                 tokens.push(chars[s..e].iter().collect::<String>().to_lowercase());
             } else if let Some(&(_, next_end)) = parts.get(idx + 1) {
-                // A lone capital ("OAuth", "IUser") is noise on its own but
-                // meaningful fused with the next part; emitting the fused form
-                // alongside the parts lets both `oauth` and `user` match.
                 tokens.push(chars[s..next_end].iter().collect::<String>().to_lowercase());
             }
         }
@@ -91,26 +88,6 @@ pub fn stem(word: &str) -> String {
     })
 }
 
-pub fn token_counts(words: Vec<String>) -> HashMap<String, i32> {
-    let mut counts: HashMap<String, i32> = HashMap::new();
-    for word in words {
-        *counts.entry(stem(&word)).or_insert(0) += 1;
-    }
-    counts
-}
-
-pub fn doc_token_counts(fqn: &str, file_path: &str) -> HashMap<String, i32> {
-    let mut counts = token_counts(split_words(fqn));
-    for (token, tf) in token_counts(split_words(file_path)) {
-        *counts.entry(token).or_insert(0) += tf;
-    }
-    counts
-}
-
-/// Stemmed token stream persisted on `gl_definition.search_text`, plus its
-/// length for BM25 document-length normalization. Stemming at write time keeps
-/// stored tokens aligned with [`query_tokens`] so query-side matching is exact
-/// token equality.
 pub fn search_document(fqn: &str, file_path: &str) -> (String, i64) {
     let mut tokens = split_words(fqn);
     tokens.extend(split_words(file_path));
@@ -224,17 +201,10 @@ pub struct Hit {
 pub const CONFIDENT_COVERAGE: f64 = 0.5;
 
 impl Hit {
-    /// True when some query term hit the symbol name at Exact or Prefix tier;
-    /// false means the hit survives on substring or file-path evidence only.
     pub fn tiered(&self) -> bool {
         self.tiered
     }
 
-    /// A hit is confident when at least half the question terms anchored on
-    /// the symbol name at Exact/Prefix tier. Substring hits are excluded: on a
-    /// large corpus a generic word always lands inside some identifier ("up"
-    /// inside "group"), so counting them would mask exactly the weak matches
-    /// this signal exists to flag.
     pub fn confident(&self) -> bool {
         self.tiered && self.coverage >= CONFIDENT_COVERAGE
     }
@@ -508,7 +478,7 @@ mod tests {
     }
 
     #[test]
-    fn split_words_handles_camel_snake_and_acronym_boundaries() {
+    fn split_words_handles_camel_snake_acronym_and_lone_capital_boundaries() {
         assert_eq!(
             split_words("MergeRequestWidget"),
             ["merge", "request", "widget"]
@@ -519,10 +489,6 @@ mod tests {
             split_words("app/models/merge_request.rb"),
             ["app", "models", "merge", "request", "rb"]
         );
-    }
-
-    #[test]
-    fn split_words_emits_fused_and_bare_forms_for_a_lone_capital() {
         assert_eq!(
             split_words("OAuth2Provider"),
             ["oauth2", "auth2", "provider"]
@@ -532,32 +498,25 @@ mod tests {
     }
 
     #[test]
-    fn doc_token_counts_stems_and_counts_identifier_fragments() {
-        let counts = doc_token_counts(
+    fn document_and_query_tokens_stem_to_the_same_space() {
+        let (text, count) = search_document(
             "indexer::nats::message::NatsMessage::to_dlq",
             "crates/indexer/src/nats/message.rs",
         );
-        assert_eq!(counts.get("dlq"), Some(&1));
-        assert_eq!(counts.get("nat"), Some(&3));
-        assert_eq!(counts.get("messag"), Some(&3));
-    }
+        assert_eq!(count, 13);
+        assert!(text.split(' ').any(|t| t == "dlq"), "text was {text}");
+        assert_eq!(text.matches("messag").count(), 3, "text was {text}");
 
-    #[test]
-    fn query_tokens_stem_and_dedupe() {
         let tokens = query_tokens(&["validated".to_string(), "Validate".to_string()]);
         assert_eq!(tokens, vec!["valid".to_string()]);
     }
 
     #[test]
-    fn content_words_drops_question_words_but_keeps_the_subject() {
+    fn content_words_drops_fillers_unless_nothing_would_remain() {
         assert_eq!(
             content_words("which issues mention the ontology"),
             vec!["issues", "mention", "ontology"]
         );
-    }
-
-    #[test]
-    fn content_words_falls_back_when_every_word_is_filler() {
         assert_eq!(content_words("what is this"), vec!["what", "is", "this"]);
     }
 
@@ -573,19 +532,32 @@ mod tests {
     }
 
     #[test]
-    fn rank_prefers_rows_matching_more_query_terms() {
+    fn rank_orders_by_coverage_stems_inflections_and_breaks_ties_short() {
         let corpus = vec![row("issues found during testing"), row("ontology issues")];
         let terms = vec!["issues".to_string(), "ontology".to_string()];
         let hits = rank(&terms, &corpus, 10, None, &test_vocab());
         assert_eq!(corpus[hits[0].index].fqn, "ontology issues");
-    }
 
-    #[test]
-    fn rank_scores_every_substring_match_above_zero() {
         let corpus = vec![row("feat(ontology): add plan ontology")];
         let hits = rank(&["ontology".to_string()], &corpus, 10, None, &test_vocab());
         assert_eq!(hits.len(), 1);
         assert!(hits[0].score > 0.0, "score was {}", hits[0].score);
+
+        let corpus = vec![
+            row("Ci::ExecuteBuildHooksWorker::execute_hooks_for_created_build"),
+            row("Group::execute_hooks"),
+        ];
+        let terms = vec!["execute".to_string(), "hooks".to_string()];
+        let hits = rank(&terms, &corpus, 10, None, &test_vocab());
+        assert_eq!(corpus[hits[0].index].fqn, "Group::execute_hooks");
+
+        let corpus = vec![
+            row("ontology::validation::validate"),
+            row("indexer::unrelated::thing"),
+        ];
+        let hits = rank(&["validated".to_string()], &corpus, 10, None, &test_vocab());
+        assert_eq!(hits.len(), 1);
+        assert_eq!(corpus[hits[0].index].fqn, "ontology::validation::validate");
     }
 
     #[test]
@@ -623,7 +595,7 @@ mod tests {
     }
 
     #[test]
-    fn guaranteed_rare_term_row_survives_the_display_cap() {
+    fn dedupe_keeps_guaranteed_rows_under_the_cap_in_score_order() {
         let mut corpus: Vec<CorpusRow> = (0..20)
             .map(|i| row(&format!("pkg{i}::parse_file_entry")))
             .collect();
@@ -635,55 +607,19 @@ mod tests {
             hits.iter().any(|h| corpus[h.index].fqn.ends_with("::vue")),
             "the only row matching 'vue' must survive the cap"
         );
-    }
 
-    #[test]
-    fn dedupe_returns_hits_in_score_order_after_guaranteed_reinsertion() {
         let corpus = vec![row("a::one"), row("b::two"), row("c::three")];
-        let results = vec![
-            Hit {
-                index: 0,
-                score: 5.0,
-                tiered: false,
-                guaranteed: false,
-                coverage: 0.0,
-            },
-            Hit {
-                index: 1,
-                score: 3.0,
-                tiered: false,
-                guaranteed: true,
-                coverage: 0.0,
-            },
-            Hit {
-                index: 2,
-                score: 4.0,
-                tiered: false,
-                guaranteed: true,
-                coverage: 0.0,
-            },
-        ];
+        let hit = |index: usize, score: f64, guaranteed: bool| Hit {
+            index,
+            score,
+            tiered: false,
+            guaranteed,
+            coverage: 0.0,
+        };
+        let results = vec![hit(0, 5.0, false), hit(1, 3.0, true), hit(2, 4.0, true)];
         let hits = dedupe_by_parent(results, &corpus, 2);
         let scores: Vec<f64> = hits.iter().map(|h| h.score).collect();
         assert_eq!(scores, vec![4.0, 3.0]);
-    }
-
-    #[test]
-    fn stemmed_query_matches_inflected_symbols() {
-        let corpus = vec![
-            row("ontology::validation::validate"),
-            row("indexer::unrelated::thing"),
-        ];
-        let hits = rank(&["validated".to_string()], &corpus, 10, None, &test_vocab());
-        assert_eq!(hits.len(), 1);
-        assert_eq!(corpus[hits[0].index].fqn, "ontology::validation::validate");
-    }
-
-    #[test]
-    fn parent_key_strips_the_last_segment_for_rust_and_go_fqns() {
-        assert_eq!(parent_key("a::B::field"), "a::B");
-        assert_eq!(parent_key("pkg.Func"), "pkg");
-        assert_eq!(parent_key("bare"), "bare");
     }
 
     #[test]

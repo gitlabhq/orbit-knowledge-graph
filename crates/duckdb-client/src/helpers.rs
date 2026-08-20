@@ -1,6 +1,5 @@
 use arrow::array::{Int64Array, RecordBatch, StringArray};
 
-/// SQL string literal with single-quote doubling.
 pub fn sql_lit(s: &str) -> String {
     format!("'{}'", s.replace('\'', "''"))
 }

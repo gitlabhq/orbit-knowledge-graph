@@ -183,8 +183,6 @@ fn remove_runtime_extract_fields(value: &mut serde_json::Value) {
     }
 }
 
-/// `search_weight` only tunes query-time ranking; it cannot change any
-/// indexed row, so edits to it must not register as versioned schema drift.
 fn remove_query_time_annotations(value: &mut serde_json::Value) {
     if let serde_json::Value::Object(root) = value {
         root.remove("search_weight");

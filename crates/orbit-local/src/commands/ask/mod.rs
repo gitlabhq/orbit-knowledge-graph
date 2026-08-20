@@ -45,8 +45,6 @@ pub(crate) fn run(
     db: Option<PathBuf>,
     limit: usize,
 ) -> Result<()> {
-    // Duplicates ask()'s guard so a termless question fails before open(),
-    // which may auto-index the whole repository.
     if content_words(&question).is_empty() {
         anyhow::bail!("no usable search terms in question: {question:?}");
     }

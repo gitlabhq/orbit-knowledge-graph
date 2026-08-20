@@ -7,7 +7,7 @@ use orbit_search::expand::{NeighborhoodSource, NodeLabel, expand_neighborhood};
 use orbit_search::ppr::NeighborhoodEdge;
 use orbit_search::{
     AskMatch, AskOutcome, BM25_B, BM25_K1, CorpusRow, SearchVocab, content_words, query_tokens,
-    rank_and_trim, stem, unmatched_terms,
+    rank_and_trim, unmatched_terms,
 };
 use std::collections::HashMap;
 
@@ -73,30 +73,20 @@ impl DuckDbSearch {
     }
 
     pub fn search(&self, terms: &[String]) -> Result<(Vec<CorpusRow>, Option<Vec<f64>>)> {
-        let use_search_text = has_search_text(&self.client, self.pid, &self.sha)?;
-        let (total, per_term) = if use_search_text {
-            search_text_term_counts(&self.client, self.pid, &self.sha, terms)?
-        } else {
-            corpus_term_counts(&self.client, self.pid, &self.sha, terms)?
-        };
+        if !has_search_text(&self.client, self.pid, &self.sha)? {
+            anyhow::bail!(
+                "local graph has no ranked-search data for this commit; \
+                 re-index the repository (`orbit index <path>`)"
+            );
+        }
+        let (total, per_term) = search_text_term_counts(&self.client, self.pid, &self.sha, terms)?;
         let n = total.max(1) as f64;
         let weights: Vec<f64> = per_term
             .iter()
             .map(|df| (1.0 + n / (1.0 + *df as f64)).ln())
             .collect();
-        let corpus = if use_search_text {
-            let sql = bm25_candidates_sql(self.pid, &self.sha, terms, &weights, LOCAL_CANDIDATES);
-            rows_from_batches(&query(&self.client, &sql)?)
-        } else {
-            fetch_corpus(
-                &self.client,
-                self.pid,
-                &self.sha,
-                terms,
-                &weights,
-                LOCAL_CANDIDATES,
-            )?
-        };
+        let sql = bm25_candidates_sql(self.pid, &self.sha, terms, &weights, LOCAL_CANDIDATES);
+        let corpus = rows_from_batches(&query(&self.client, &sql)?);
         Ok((corpus, Some(weights)))
     }
 }
@@ -204,8 +194,6 @@ fn query(client: &DuckDbClient, sql: &str) -> Result<Vec<RecordBatch>> {
     })
 }
 
-/// Local DBs indexed by an older binary predate the `search_text` column;
-/// they fall back to the LIKE-based corpus scan until re-indexed.
 fn has_search_text(client: &DuckDbClient, project_id: i64, sha: &str) -> Result<bool> {
     let columns = client.query_arrow(
         "SELECT CAST(COUNT(*) AS BIGINT) AS n FROM information_schema.columns
@@ -229,6 +217,7 @@ fn corpus_predicate(pid: i64, sha: &str) -> String {
         "d.project_id = {pid} AND d.commit_sha = {sha}
   AND regexp_matches(d.file_path, {source_only})
   AND NOT regexp_matches(d.name, '^[0-9]+$')
+  AND d.fqn NOT LIKE '%@%'
 {exclude}",
         source_only = sql_lit(&ext_regex(
             &DEFAULT_SOURCE_EXTS
@@ -254,8 +243,6 @@ fn exclusions(col: &str) -> String {
     s
 }
 
-/// `' tok '` padded-LIKE over the space-joined stemmed token stream: exact
-/// token equality without splitting the string per row.
 fn token_like_sql(term: &str) -> Option<String> {
     let tokens = query_tokens(std::slice::from_ref(&term.to_string()));
     if tokens.is_empty() {
@@ -273,8 +260,6 @@ fn token_like_sql(term: &str) -> Option<String> {
     Some(format!("({})", clauses.join(" OR ")))
 }
 
-/// Per-term BM25 term frequency: occurrences of the term's tokens in the
-/// stored token list.
 fn token_tf_sql(term: &str) -> Option<String> {
     let tokens = query_tokens(std::slice::from_ref(&term.to_string()));
     if tokens.is_empty() {
@@ -356,62 +341,6 @@ LEFT JOIN deg ON deg.id = c.id",
     )
 }
 
-fn term_needles(term: &str) -> Vec<String> {
-    let lower = term.to_lowercase();
-    let mut needles = vec![lower.clone()];
-    let stemmed = stem(&lower);
-    if stemmed.len() >= 3 && stemmed != lower {
-        needles.push(stemmed);
-    }
-    needles
-}
-
-fn columns_match_sql(term: &str, columns: &[&str]) -> String {
-    let clauses: Vec<String> = term_needles(term)
-        .iter()
-        .flat_map(|needle| {
-            let pat = sql_lit(&format!("%{needle}%"));
-            columns
-                .iter()
-                .map(move |col| format!("lower({col}) LIKE {pat}"))
-                .collect::<Vec<_>>()
-        })
-        .collect();
-    format!("({})", clauses.join(" OR "))
-}
-
-fn term_match_sql(term: &str) -> String {
-    columns_match_sql(term, &["d.fqn", "d.file_path"])
-}
-
-fn term_predicate(terms: &[String]) -> String {
-    if terms.is_empty() {
-        return "TRUE".to_string();
-    }
-    let clauses: Vec<String> = terms.iter().map(|t| term_match_sql(t)).collect();
-    format!("({})", clauses.join(" OR "))
-}
-
-fn relevance_sql(terms: &[String], weights: &[f64]) -> String {
-    if terms.is_empty() {
-        return "0".to_string();
-    }
-    let clauses: Vec<String> = terms
-        .iter()
-        .enumerate()
-        .map(|(i, t)| {
-            let weight = weights.get(i).copied().unwrap_or(1.0);
-            format!(
-                "CASE WHEN {name} THEN {double:.6} WHEN {any} THEN {weight:.6} ELSE 0 END",
-                name = columns_match_sql(t, &["d.name"]),
-                double = weight * 2.0,
-                any = term_match_sql(t),
-            )
-        })
-        .collect();
-    format!("({})", clauses.join(" + "))
-}
-
 fn search_text_term_counts(
     client: &DuckDbClient,
     pid: i64,
@@ -426,25 +355,6 @@ fn search_text_term_counts(
                 format!("CAST(COUNT(*) FILTER (WHERE {matched}) AS VARCHAR) AS df_{i}")
             }
             None => format!("CAST(0 AS VARCHAR) AS df_{i}"),
-        })
-        .collect();
-    term_counts(client, pid, sha, terms, &counters)
-}
-
-fn corpus_term_counts(
-    client: &DuckDbClient,
-    pid: i64,
-    sha: &str,
-    terms: &[String],
-) -> Result<(i64, Vec<i64>)> {
-    let counters: Vec<String> = terms
-        .iter()
-        .enumerate()
-        .map(|(i, t)| {
-            format!(
-                "CAST(COUNT(*) FILTER (WHERE {}) AS VARCHAR) AS df_{i}",
-                term_match_sql(t)
-            )
         })
         .collect();
     term_counts(client, pid, sha, terms, &counters)
@@ -480,46 +390,6 @@ fn term_counts(
         .map(|i| count_of(&format!("df_{i}")))
         .collect();
     Ok((total, per_term))
-}
-
-fn fetch_corpus(
-    client: &DuckDbClient,
-    pid: i64,
-    sha: &str,
-    terms: &[String],
-    weights: &[f64],
-    cap: usize,
-) -> Result<Vec<CorpusRow>> {
-    let batches = query(
-        client,
-        &format!(
-            "WITH cand AS (
-  SELECT d.id, d.fqn, d.definition_type, d.file_path, d.start_line, d.end_line
-  FROM gl_definition d
-  WHERE {pred}
-  AND {terms}
-  ORDER BY {relevance} DESC, length(d.fqn) ASC
-  LIMIT {cap}
-),
-deg AS (
-  SELECT id, COUNT(*) AS degree FROM (
-    SELECT source_id AS id FROM gl_edge WHERE source_id IN (SELECT id FROM cand)
-    UNION ALL
-    SELECT target_id FROM gl_edge WHERE target_id IN (SELECT id FROM cand)
-  ) GROUP BY 1
-)
-SELECT CAST(c.id AS VARCHAR) AS id, c.fqn, c.definition_type,
-       c.file_path || ':' || CAST(c.start_line AS VARCHAR) AS loc,
-       CAST(c.end_line AS VARCHAR) AS end_line,
-       CAST(COALESCE(deg.degree, 0) AS VARCHAR) AS degree
-FROM cand c
-LEFT JOIN deg ON deg.id = c.id",
-            pred = corpus_predicate(pid, sha),
-            terms = term_predicate(terms),
-            relevance = relevance_sql(terms, weights),
-        ),
-    )?;
-    Ok(rows_from_batches(&batches))
 }
 
 fn rows_from_batches(batches: &[RecordBatch]) -> Vec<CorpusRow> {
@@ -558,25 +428,5 @@ mod tests {
         let sql = token_tf_sql("validated").unwrap();
         assert!(sql.contains("x = 'valid'"), "sql was {sql}");
         assert!(!sql.contains('%'), "sql was {sql}");
-    }
-
-    #[test]
-    fn term_match_sql_adds_a_stem_pattern_for_inflected_terms() {
-        let sql = term_match_sql("validated");
-        assert!(sql.contains("%validated%"), "sql was {sql}");
-        assert!(sql.contains("%valid%"), "sql was {sql}");
-    }
-
-    #[test]
-    fn term_match_sql_skips_the_stem_when_it_matches_the_term() {
-        let sql = term_match_sql("dlq");
-        assert_eq!(sql.matches("LIKE").count(), 2, "sql was {sql}");
-    }
-
-    #[test]
-    fn relevance_sql_weights_each_term_independently() {
-        let sql = relevance_sql(&["send".to_string(), "dlq".to_string()], &[0.5, 3.0]);
-        assert!(sql.contains("0.500000"), "sql was {sql}");
-        assert!(sql.contains("3.000000"), "sql was {sql}");
     }
 }
