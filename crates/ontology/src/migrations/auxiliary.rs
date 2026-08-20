@@ -23,7 +23,7 @@ pub struct AuxiliaryMigration {
 
 impl AuxiliaryLedger {
     pub fn parse(content: &str) -> Result<Self, String> {
-        let ledger: Self = serde_yaml::from_str(content)
+        let ledger: Self = orbit_utils::yaml::from_str(content)
             .map_err(|e| format!("parsing auxiliary migration ledger: {e}"))?;
         ledger.validate()?;
         Ok(ledger)
