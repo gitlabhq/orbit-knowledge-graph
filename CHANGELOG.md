@@ -1,3 +1,19 @@
+## [0.105.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.104.0...v0.105.0) (2026-08-20)
+
+### Features
+
+* **bench:** centralized config and Cloud Monitoring SLO reporting ([2ebd038](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/2ebd038812e9f15d48ba12970fdc5ed8d78d47cd)) by Michael Usachenko
+
+### Fixes
+
+* **bench:** add --prefix to git archive so indexer can extract flat repos ([1f79fcf](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/1f79fcf74904d7d0e1e0105c83073cdf17c3d74f)) by Michael Usachenko
+* **bench:** automate mock git server deploy with version pinning and checkpoint reset ([a3b0db0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/a3b0db02ff2107973482d2868fa9efec49a12dd5)) by Michael Usachenko
+
+### Other
+
+* **schema:** auto-strip unversioned entries from the versioned schema hash ([770d7dd](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/770d7dda60f3838cf1857cd69d0439b84f65b12f)) by Michael Usachenko
+* **yaml:** replace unmaintained serde_yaml with serde-saphyr ([dd05a2b](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/dd05a2b2b3edf4c4d39db0b4f6218ad756b1e459)) by Michael Angelo Rivera
+
 ## [0.104.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.103.0...v0.104.0) (2026-08-19)
 
 ### Features
