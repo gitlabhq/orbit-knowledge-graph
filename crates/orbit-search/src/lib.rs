@@ -115,6 +115,8 @@ pub fn split_words(input: &str) -> Vec<String> {
     tokens
 }
 
+const STEM_CACHE_CAP: usize = 65_536;
+
 pub fn stem(word: &str) -> String {
     thread_local! {
         static STEMMER: rust_stemmers::Stemmer =
@@ -127,7 +129,11 @@ pub fn stem(word: &str) -> String {
             return stemmed.clone();
         }
         let stemmed = STEMMER.with(|s| s.stem(word).into_owned());
-        cache.borrow_mut().insert(word.to_string(), stemmed.clone());
+        let mut cache = cache.borrow_mut();
+        if cache.len() >= STEM_CACHE_CAP {
+            cache.clear();
+        }
+        cache.insert(word.to_string(), stemmed.clone());
         stemmed
     })
 }

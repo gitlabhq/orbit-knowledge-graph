@@ -1,6 +1,5 @@
 //! Subcommand implementations kept out of the top-level module list.
 
-pub(crate) mod ask;
 pub(crate) mod config;
 pub(crate) mod hook_guard;
 pub(crate) mod repo_map;
