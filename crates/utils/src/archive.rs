@@ -92,7 +92,7 @@ pub fn extract_tar_gz<R: Read, H: FileStreamHooks>(
             // within-root deferral, which is the source's security mechanism.
             let mut meta = FileInventoryEntry {
                 path: relative_path.to_string_lossy().into_owned(),
-                size: entry.header().size().unwrap_or(0),
+                size: entry.size(),
                 decision: Decision::ListOnly,
             };
             meta.decision = hooks.on_non_regular(&meta);
@@ -111,12 +111,9 @@ pub fn extract_tar_gz<R: Read, H: FileStreamHooks>(
         if entry_type == tar::EntryType::Regular {
             let mut meta = FileInventoryEntry {
                 path: relative_path.to_string_lossy().into_owned(),
-                size: entry.header().size().unwrap_or(0),
+                size: entry.size(),
                 decision: Decision::Parse,
             };
-            // The tar Entry Read stops at the declared entry size, so this is
-            // bounded by it; oversize files are settled in `on_header` and never
-            // reach the read.
             meta.decision = step(hooks, &meta, &mut content, |buf| {
                 entry.read_to_end(buf).map(|_| ())
             })?;
@@ -490,5 +487,48 @@ mod tests {
         let data = build_archive(&[Entry::File("project-main/big.txt", &body)]);
         extract_tar_gz(&data[..], dir.path(), &mut ParseAll).unwrap();
         assert_eq!(std::fs::read(dir.path().join("big.txt")).unwrap(), body);
+    }
+
+    /// Skips files above a byte limit, so the test can observe which size the
+    /// guard was handed.
+    struct MaxSize(u64);
+    impl FileStreamHooks for MaxSize {
+        fn on_header(&mut self, f: &FileInventoryEntry) -> Option<Decision> {
+            (f.size > self.0).then_some(Decision::ListOnly)
+        }
+    }
+
+    /// An entry can carry its real size in a PAX record with the base header
+    /// size left at zero. The guard has to be given the real size, otherwise
+    /// the file is read into memory before anything can reject it.
+    #[test]
+    fn oversize_entry_is_filtered_when_the_size_comes_from_a_pax_record() {
+        let dir = tempfile::tempdir().unwrap();
+        let body = vec![b'a'; 4096];
+
+        let mut tb = tar::Builder::new(Vec::new());
+        let pax = &b"13 size=4096\n"[..];
+        let mut ph = tar::Header::new_gnu();
+        ph.set_entry_type(tar::EntryType::XHeader);
+        ph.set_size(pax.len() as u64);
+        ph.set_mode(0o644);
+        tb.append_data(&mut ph, "PaxHeaders/size", pax).unwrap();
+
+        let mut h = tar::Header::new_gnu();
+        h.set_size(0);
+        h.set_mode(0o644);
+        tb.append_data(&mut h, "project-main/big.txt", &body[..])
+            .unwrap();
+
+        let mut enc = GzEncoder::new(Vec::new(), Compression::fast());
+        enc.write_all(&tb.into_inner().unwrap()).unwrap();
+        let data = enc.finish().unwrap();
+
+        let inv = extract_tar_gz(&data[..], dir.path(), &mut MaxSize(64)).unwrap();
+
+        assert_eq!(paths(&inv), vec!["big.txt"]);
+        assert_eq!(inv[0].size, 4096);
+        assert_eq!(inv[0].decision, Decision::ListOnly);
+        assert!(!dir.path().join("big.txt").exists());
     }
 }
