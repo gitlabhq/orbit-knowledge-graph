@@ -268,6 +268,11 @@ pub async fn create_unversioned_tables(
     Ok(())
 }
 
+/// Rows inserted into source tables while the MV is absent are not captured.
+/// The window is brief (milliseconds at boot) and acceptable: the retention
+/// subsystem is best-effort and never backfills. Concurrent pod boots are safe
+/// because DROP VIEW IF EXISTS and CREATE MATERIALIZED VIEW IF NOT EXISTS are
+/// both idempotent.
 async fn drop_all_unversioned_materialized_views(
     graph: &ArrowClickHouseClient,
 ) -> Result<(), MigrationError> {
@@ -285,8 +290,11 @@ async fn drop_all_unversioned_materialized_views(
             reason: e.to_string(),
         })?;
 
-    let names: Vec<String> =
-        clickhouse_client::FromArrowColumn::extract_column(&batches, 0).unwrap_or_default();
+    let names: Vec<String> = clickhouse_client::FromArrowColumn::extract_column(&batches, 0)
+        .map_err(|e| MigrationError::Ddl {
+            table: "system.tables".into(),
+            reason: format!("failed to extract name column: {e}"),
+        })?;
     for name in &names {
         info!(view = %name, "dropping unversioned materialized view");
         graph
