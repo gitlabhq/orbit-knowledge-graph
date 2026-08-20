@@ -65,6 +65,7 @@ pub(crate) fn run(
         return Ok(());
     }
 
+    report_confidence(&mut out, &outcome)?;
     writeln!(out, "\nMatches:")?;
     for m in &outcome.matches {
         writeln!(
@@ -158,6 +159,31 @@ fn snippet(root: &std::path::Path, loc: &str, end_line: &str) -> Vec<String> {
             format!("    {} | {}", i + 1, text)
         })
         .collect()
+}
+
+fn report_confidence(
+    out: &mut impl Write,
+    outcome: &orbit_search::AskOutcome,
+) -> std::io::Result<()> {
+    if !outcome.weak && outcome.unmatched_terms.is_empty() {
+        return Ok(());
+    }
+    if outcome.weak {
+        writeln!(
+            out,
+            "note: weak matches — too few question terms anchor a symbol name, \
+             so the results below may be coincidental. Rephrase with a code \
+             identifier, or use `orbit local sql` for an exact-name lookup."
+        )?;
+    }
+    if !outcome.unmatched_terms.is_empty() {
+        writeln!(
+            out,
+            "note: no matches for: {}",
+            outcome.unmatched_terms.join(", ")
+        )?;
+    }
+    Ok(())
 }
 
 fn report_hidden(

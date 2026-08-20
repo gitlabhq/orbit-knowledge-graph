@@ -186,6 +186,8 @@ pub struct AskOutcome {
     pub focus: Option<String>,
     pub edges: Vec<Edge>,
     pub hidden_by_kind: Vec<(String, usize)>,
+    pub weak: bool,
+    pub unmatched_terms: Vec<String>,
 }
 
 pub struct AskMatch {
@@ -216,6 +218,40 @@ pub struct Hit {
     pub score: f64,
     tiered: bool,
     guaranteed: bool,
+    coverage: f64,
+}
+
+pub const CONFIDENT_COVERAGE: f64 = 0.5;
+
+impl Hit {
+    /// True when some query term hit the symbol name at Exact or Prefix tier;
+    /// false means the hit survives on substring or file-path evidence only.
+    pub fn tiered(&self) -> bool {
+        self.tiered
+    }
+
+    /// A hit is confident when at least half the question terms anchored on
+    /// the symbol name at Exact/Prefix tier. Substring hits are excluded: on a
+    /// large corpus a generic word always lands inside some identifier ("up"
+    /// inside "group"), so counting them would mask exactly the weak matches
+    /// this signal exists to flag.
+    pub fn confident(&self) -> bool {
+        self.tiered && self.coverage >= CONFIDENT_COVERAGE
+    }
+}
+
+pub fn unmatched_terms(terms: &[String], corpus: &[CorpusRow], vocab: &SearchVocab) -> Vec<String> {
+    terms
+        .iter()
+        .filter(|term| !vocab.is_relational(term))
+        .filter(|term| {
+            let term_stem = stem(term);
+            !corpus
+                .iter()
+                .any(|row| RowTokens::of(row).matches(term, &term_stem))
+        })
+        .cloned()
+        .collect()
 }
 
 enum Tier {
@@ -244,6 +280,16 @@ struct RowTokens {
 }
 
 impl RowTokens {
+    fn of(row: &CorpusRow) -> Self {
+        let name = split_words(&row.fqn);
+        let name_stems = name.iter().map(|t| stem(t)).collect();
+        Self {
+            name,
+            name_stems,
+            path: split_words(&row.loc),
+        }
+    }
+
     fn name_tier(&self, term: &str, term_stem: &str) -> Tier {
         match tier_of(term, &self.name) {
             Tier::None if self.name_stems.iter().any(|s| s == term_stem) => Tier::Prefix,
@@ -280,18 +326,7 @@ fn rank(
 ) -> Vec<Hit> {
     let joined = terms.join(" ");
     let term_stems: Vec<String> = terms.iter().map(|t| stem(t)).collect();
-    let rows: Vec<RowTokens> = corpus
-        .iter()
-        .map(|r| {
-            let name = split_words(&r.fqn);
-            let name_stems = name.iter().map(|t| stem(t)).collect();
-            RowTokens {
-                name,
-                name_stems,
-                path: split_words(&r.loc),
-            }
-        })
-        .collect();
+    let rows: Vec<RowTokens> = corpus.iter().map(RowTokens::of).collect();
     let weights: Vec<f64> = match weights {
         Some(w) if w.len() == terms.len() => terms
             .iter()
@@ -321,15 +356,18 @@ fn rank(
         }
         let mut tiered = 0.0;
         let mut matched = 0usize;
+        let mut anchored = 0usize;
         for ((term, term_stem), weight) in terms.iter().zip(&term_stems).zip(&weights) {
             match row.name_tier(term, term_stem) {
                 Tier::Exact => {
                     tiered += EXACT_BONUS * weight;
                     matched += 1;
+                    anchored += 1;
                 }
                 Tier::Prefix => {
                     tiered += PREFIX_BONUS * weight;
                     matched += 1;
+                    anchored += 1;
                 }
                 Tier::Inner => {
                     score += SUBSTRING_BONUS * weight;
@@ -352,6 +390,7 @@ fn rank(
                 score,
                 tiered: tiered > 0.0,
                 guaranteed: false,
+                coverage: anchored as f64 / terms.len().max(1) as f64,
             });
             for ((slot, term), term_stem) in per_term_best.iter_mut().zip(terms).zip(&term_stems) {
                 if row.matches(term, term_stem) && slot.is_none_or(|(best, _)| score > best) {
@@ -389,6 +428,7 @@ fn rank(
             score: *score,
             tiered: false,
             guaranteed: true,
+            coverage: 0.0,
         });
         guaranteed = true;
     }
@@ -606,18 +646,21 @@ mod tests {
                 score: 5.0,
                 tiered: false,
                 guaranteed: false,
+                coverage: 0.0,
             },
             Hit {
                 index: 1,
                 score: 3.0,
                 tiered: false,
                 guaranteed: true,
+                coverage: 0.0,
             },
             Hit {
                 index: 2,
                 score: 4.0,
                 tiered: false,
                 guaranteed: true,
+                coverage: 0.0,
             },
         ];
         let hits = dedupe_by_parent(results, &corpus, 2);
@@ -641,6 +684,48 @@ mod tests {
         assert_eq!(parent_key("a::B::field"), "a::B");
         assert_eq!(parent_key("pkg.Func"), "pkg");
         assert_eq!(parent_key("bare"), "bare");
+    }
+
+    #[test]
+    fn unmatched_terms_reports_dead_words_but_not_relational_ones() {
+        let corpus = vec![row("Project::execute_hooks")];
+        let terms: Vec<String> = ["fires", "hooks", "push", "uses"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        assert_eq!(
+            unmatched_terms(&terms, &corpus, &test_vocab()),
+            vec!["fires".to_string(), "push".to_string()]
+        );
+    }
+
+    #[test]
+    fn top_hit_confidence_requires_a_name_tier_hit_and_half_coverage() {
+        let corpus = vec![row("Dlq::publish")];
+        let strong = rank(
+            &["dlq".to_string(), "publish".to_string()],
+            &corpus,
+            10,
+            None,
+            &test_vocab(),
+        );
+        assert!(strong[0].confident());
+
+        let corpus = vec![row("prehooksetup")];
+        let substring_only = rank(&["hooks".to_string()], &corpus, 10, None, &test_vocab());
+        assert!(!substring_only.is_empty());
+        assert!(!substring_only[0].confident());
+
+        let corpus = vec![row("getTestRunsForProject")];
+        let terms = content_words(
+            "when a repository gets its first commit, what runs to set the project up",
+        );
+        let low_coverage = rank(&terms, &corpus, 10, None, &test_vocab());
+        assert!(!low_coverage.is_empty());
+        assert!(
+            !low_coverage[0].confident(),
+            "generic-verb name hits covering under half the question must not present as confident"
+        );
     }
 
     #[test]
