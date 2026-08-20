@@ -70,20 +70,35 @@ promotion and drops outgoing version-prefixed refreshable views afterward.
 Standard materialized views default to `versioned: true`: the view and its `to_table` receive the
 schema-version prefix and are dropped on version rollover, so they must reference version-tracked
 tables via `{table_name}` placeholders. Setting `versioned: false` makes the view durable: it
-skips the version prefix and is excluded from version-completeness and dead-version GC. At boot,
-unversioned MVs are dropped and recreated (`DROP VIEW IF EXISTS` then `CREATE MATERIALIZED VIEW`),
-so a changed `select_query` or column list takes effect on the next deploy without manual
-intervention. The target table is not affected by the drop since the MV is only an insert trigger.
-If an unversioned MV is removed from the ontology, the boot pass drops it as an orphan: it queries
-`system.tables` for non-prefixed `MaterializedView` entries not in the current ontology and drops
-them. Unversioned tables use `CREATE TABLE IF NOT EXISTS` and are not dropped automatically.
+skips the version prefix and is excluded from version-completeness and dead-version GC.
 
-For destructive table changes (dropping a table, altering a column type), add an entry to
-`config/auxiliary-migrations.yaml`. Each entry has a sequential `id` and a `sql` statement that
-runs at most once, tracked by the `gkg_auxiliary_migrations` table. Auxiliary migrations run at
-boot before the normal create pass. The YAML file is validated against
+The unversioned object boot sequence runs three phases in order:
+
+1. **Drop all non-prefixed MVs.** Queries `system.tables` for every `MaterializedView` without a
+   `v<N>_` prefix and drops it. This covers changed definitions, removed views, and orphans in one
+   pass. Safe because MVs are insert triggers with no stored data; target tables are untouched.
+2. **Run auxiliary migrations.** One-time SQL statements from `config/auxiliary-migrations.yaml`,
+   each executed at most once, tracked by the `gkg_auxiliary_migrations` table. Used for
+   destructive table changes (DROP, ALTER) that `CREATE IF NOT EXISTS` cannot express. Runs after
+   the MV drop so that a migration can safely drop a backing table whose MV is already gone.
+3. **Create all ontology-declared unversioned objects.** Tables use `CREATE TABLE IF NOT EXISTS`
+   (idempotent, never drops data). MVs are created fresh (the old ones were dropped in phase 1).
+
+To retire an unversioned MV and its backing table, remove both from the ontology and add an
+auxiliary migration entry:
+
+```yaml
+migrations:
+  - id: 1
+    sql: "DROP TABLE IF EXISTS query_log_retention"
+    note: "retired query_log_retention"
+```
+
+Phase 1 drops the MV. Phase 2 drops the table. Phase 3 creates neither.
+
+The auxiliary migration YAML is validated against
 `config/schemas/auxiliary-migrations.schema.json` in CI and parsed at compile time via the
-ontology crate.
+ontology crate. IDs must be strictly ascending and are never reused.
 
 An unversioned view must target an unversioned auxiliary table; it may read from external system
 tables (for example `system.query_log`) that are not ontology-tracked and therefore not prefixed.
