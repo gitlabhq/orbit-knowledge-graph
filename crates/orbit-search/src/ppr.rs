@@ -42,19 +42,23 @@ pub struct NeighborhoodEdge {
 pub struct RankedNeighborhood {
     pub selected: Vec<usize>,
     pub hidden_by_kind: Vec<(String, usize)>,
+    pub node_scores: Vec<(String, f64)>,
 }
+
+const CONSENSUS_EPSILON: f64 = 1e-9;
+pub const CONSENSUS_QUORUM: f64 = 0.6;
 
 pub fn rank_neighborhood(
     edges: &[NeighborhoodEdge],
     degrees: &HashMap<String, u64>,
-    seeds: &[(String, f64)],
+    term_seeds: &[Vec<(String, f64)>],
     kind_weights: &HashMap<String, f64>,
     focus: Option<&str>,
     cap: usize,
 ) -> RankedNeighborhood {
     let mut index: HashMap<&str, usize> = HashMap::new();
     let mut node_count = 0usize;
-    for (id, _) in seeds {
+    for (id, _) in term_seeds.iter().flatten() {
         index.entry(id.as_str()).or_insert_with(|| {
             node_count += 1;
             node_count - 1
@@ -93,11 +97,35 @@ pub fn rank_neighborhood(
         );
     }
 
-    let seed_indices: Vec<(usize, f64)> = seeds
+    let per_term_scores: Vec<Vec<f64>> = term_seeds
         .iter()
-        .map(|(id, w)| (index[id.as_str()], *w))
+        .filter(|set| set.iter().any(|&(_, w)| w > 0.0))
+        .map(|set| {
+            let seed_indices: Vec<(usize, f64)> =
+                set.iter().map(|(id, w)| (index[id.as_str()], *w)).collect();
+            personalized_pagerank(&graph, &seed_indices, PPR_DAMPING)
+        })
         .collect();
-    let scores = personalized_pagerank(&graph, &seed_indices, PPR_DAMPING);
+    if per_term_scores.is_empty() {
+        return RankedNeighborhood {
+            selected: Vec::new(),
+            hidden_by_kind: Vec::new(),
+            node_scores: Vec::new(),
+        };
+    }
+    let term_count = per_term_scores.len();
+    let quorum = ((term_count as f64 * CONSENSUS_QUORUM).ceil() as usize).clamp(1, term_count);
+    let scores: Vec<f64> = (0..node_count)
+        .map(|v| {
+            let mut logs: Vec<f64> = per_term_scores
+                .iter()
+                .map(|r| (r[v] + CONSENSUS_EPSILON).ln())
+                .collect();
+            logs.sort_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
+            let quorum_sum: f64 = logs[..quorum].iter().sum();
+            (quorum_sum / quorum as f64).exp()
+        })
+        .collect();
 
     let mut order: Vec<(usize, f64)> = edges
         .iter()
@@ -139,9 +167,17 @@ pub fn rank_neighborhood(
         .collect();
     hidden_by_kind.sort();
 
+    let mut node_scores: Vec<(String, f64)> = index
+        .into_iter()
+        .map(|(id, i)| (id.to_string(), scores[i]))
+        .filter(|&(_, s)| s > CONSENSUS_EPSILON * 1.5)
+        .collect();
+    node_scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
     RankedNeighborhood {
         selected: selected.into_iter().map(|(i, _)| i).collect(),
         hidden_by_kind,
+        node_scores,
     }
 }
 
@@ -271,7 +307,7 @@ mod tests {
         rank_neighborhood(
             edges,
             degrees,
-            &[("seed".to_string(), 1.0)],
+            &[vec![("seed".to_string(), 1.0)]],
             &weights,
             focus,
             cap,
@@ -329,6 +365,73 @@ mod tests {
             .collect();
         assert_eq!(kinds, vec!["CONTAINS", "CONTAINS", "CALLS"]);
         assert!(ranked.hidden_by_kind.is_empty());
+    }
+
+    #[test]
+    fn triangulation_surfaces_the_node_connected_to_multiple_weak_seeds() {
+        let edges = [
+            edge("CALLS", "seed_a", "answer"),
+            edge("CALLS", "seed_b", "answer"),
+            edge("CALLS", "seed_a", "satellite_a"),
+            edge("CALLS", "seed_b", "satellite_b"),
+        ];
+        let weights = HashMap::from([("CALLS".to_string(), 1.0)]);
+        let ranked = rank_neighborhood(
+            &edges,
+            &HashMap::new(),
+            &[
+                vec![("seed_a".to_string(), 1.0)],
+                vec![("seed_b".to_string(), 1.0)],
+            ],
+            &weights,
+            None,
+            4,
+        );
+        let non_seed_top = ranked
+            .node_scores
+            .iter()
+            .find(|(id, _)| !id.starts_with("seed"))
+            .unwrap();
+        assert_eq!(
+            non_seed_top.0, "answer",
+            "scores were {:?}",
+            ranked.node_scores
+        );
+    }
+
+    #[test]
+    fn quorum_consensus_forgives_filler_terms_but_still_requires_agreement() {
+        let edges = [
+            edge("CALLS", "seed_a", "answer"),
+            edge("CALLS", "seed_b", "answer"),
+            edge("CALLS", "seed_a", "satellite"),
+        ];
+        let weights = HashMap::from([("CALLS".to_string(), 1.0)]);
+        let ranked = rank_neighborhood(
+            &edges,
+            &HashMap::new(),
+            &[
+                vec![("seed_a".to_string(), 1.0)],
+                vec![("seed_b".to_string(), 1.0)],
+                vec![("filler".to_string(), 1.0)],
+            ],
+            &weights,
+            None,
+            4,
+        );
+        let score_of = |id: &str| {
+            ranked
+                .node_scores
+                .iter()
+                .find(|(n, _)| n == id)
+                .map(|&(_, s)| s)
+                .unwrap_or(0.0)
+        };
+        assert!(
+            score_of("answer") > score_of("satellite"),
+            "two-term consensus must beat a single-term satellite despite the dead filler term; scores were {:?}",
+            ranked.node_scores
+        );
     }
 
     #[test]

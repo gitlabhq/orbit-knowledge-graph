@@ -6,9 +6,11 @@ use orbit_search::corpus::{DEFAULT_SOURCE_EXTS, EXCLUDE_LIKE, EXCLUDE_REGEX, ext
 use orbit_search::expand::{NeighborhoodSource, NodeLabel, expand_neighborhood};
 use orbit_search::ppr::NeighborhoodEdge;
 use orbit_search::{
-    AskMatch, AskOutcome, BM25_B, BM25_K1, CorpusRow, SearchVocab, content_words, query_tokens,
-    rank_and_trim, unmatched_terms,
+    AskMatch, AskOutcome, BM25_B, BM25_K1, CorpusRow, SearchVocab, candidate_splits, content_words,
+    query_tokens, rank_and_trim, term_base_sets, unmatched_terms,
 };
+
+const SURFACED_LIMIT: usize = 3;
 use std::collections::HashMap;
 
 const LOCAL_CANDIDATES: usize = 2000;
@@ -39,7 +41,14 @@ impl DuckDbSearch {
         if terms.is_empty() {
             anyhow::bail!("no usable search terms in question: {question:?}");
         }
-        let (corpus, weights) = self.search(&terms)?;
+        let splits = self.accepted_splits(&terms)?;
+        let mut anchor_terms = terms.clone();
+        for (_, a, b) in &splits {
+            anchor_terms.push(a.clone());
+            anchor_terms.push(b.clone());
+        }
+        let (corpus, anchor_weights) = self.search(&anchor_terms)?;
+        let weights = anchor_weights.as_ref().map(|w| w[..terms.len()].to_vec());
         let hits = rank_and_trim(&terms, &corpus, limit, weights.as_deref(), vocab);
         let focus = vocab.focus_edge_kind(&terms);
         let weak = hits.first().is_none_or(|h| !h.confident());
@@ -51,19 +60,67 @@ impl DuckDbSearch {
                 score: h.score,
             })
             .collect();
-        let seeds: Vec<(String, f64)> = matches
+        let mut term_seeds: Vec<Vec<(String, f64)>> =
+            term_base_sets(&anchor_terms, &corpus, anchor_weights.as_deref(), vocab)
+                .into_iter()
+                .map(|set| {
+                    set.into_iter()
+                        .map(|(i, w)| (corpus[i].id.clone(), w))
+                        .collect()
+                })
+                .collect();
+        if term_seeds.is_empty() && !matches.is_empty() {
+            term_seeds = vec![
+                matches
+                    .iter()
+                    .map(|m| (m.row.id.clone(), m.score))
+                    .collect(),
+            ];
+        }
+        let seed_count = term_seeds
             .iter()
-            .map(|m| (m.row.id.clone(), m.score))
-            .collect();
-        let (edges, hidden_by_kind) = if seeds.is_empty() {
-            (Vec::new(), Vec::new())
+            .flatten()
+            .map(|(id, _)| id.as_str())
+            .collect::<std::collections::HashSet<_>>()
+            .len();
+        let (edges, hidden_by_kind, surfaced) = if term_seeds.is_empty() {
+            (Vec::new(), Vec::new(), Vec::new())
         } else {
-            expand_neighborhood(self, &seeds, kind_weights, focus.as_deref())?
+            let expanded = expand_neighborhood(self, &term_seeds, kind_weights, focus.as_deref())?;
+            let shown: std::collections::HashSet<&str> =
+                matches.iter().map(|m| m.row.id.as_str()).collect();
+            let candidates: Vec<(String, f64)> = expanded
+                .surfaced
+                .into_iter()
+                .filter(|(id, _)| !shown.contains(id.as_str()))
+                .take(SURFACED_LIMIT)
+                .collect();
+            let rows = self.rows_by_ids(
+                &candidates
+                    .iter()
+                    .map(|(id, _)| id.as_str())
+                    .collect::<Vec<_>>(),
+            )?;
+            let surfaced = candidates
+                .into_iter()
+                .filter_map(|(id, score)| {
+                    rows.iter().find(|r| r.id == id).map(|r| AskMatch {
+                        row: r.clone(),
+                        score,
+                    })
+                })
+                .collect();
+            (expanded.edges, expanded.hidden_by_kind, surfaced)
         };
         Ok(AskOutcome {
             terms,
-            seed_count: seeds.len(),
+            splits: splits
+                .into_iter()
+                .map(|(term, a, b)| (term, format!("{a} {b}")))
+                .collect(),
+            seed_count,
             matches,
+            surfaced,
             focus,
             edges,
             hidden_by_kind,
@@ -88,6 +145,86 @@ impl DuckDbSearch {
         let sql = bm25_candidates_sql(self.pid, &self.sha, terms, &weights, LOCAL_CANDIDATES);
         let corpus = rows_from_batches(&query(&self.client, &sql)?);
         Ok((corpus, Some(weights)))
+    }
+
+    fn accepted_splits(&self, terms: &[String]) -> Result<Vec<(String, String, String)>> {
+        let candidates: Vec<(String, String, String)> = terms
+            .iter()
+            .flat_map(|term| {
+                candidate_splits(term)
+                    .into_iter()
+                    .map(|(a, b)| (term.clone(), a, b))
+            })
+            .collect();
+        if candidates.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut parts: Vec<String> = candidates
+            .iter()
+            .flat_map(|(_, a, b)| [a.clone(), b.clone()])
+            .collect();
+        parts.sort();
+        parts.dedup();
+        let counters: Vec<String> = parts
+            .iter()
+            .enumerate()
+            .map(|(i, p)| match token_like_sql(p) {
+                Some(matched) => {
+                    format!("CAST(COUNT(*) FILTER (WHERE {matched}) AS VARCHAR) AS df_{i}")
+                }
+                None => format!("CAST(0 AS VARCHAR) AS df_{i}"),
+            })
+            .collect();
+        let (_, dfs) = term_counts(&self.client, self.pid, &self.sha, &parts, &counters)?;
+        let known: std::collections::HashSet<&str> = parts
+            .iter()
+            .zip(&dfs)
+            .filter(|&(_, &df)| df > 0)
+            .map(|(p, _)| p.as_str())
+            .collect();
+        let mut accepted: Vec<(String, String, String)> = Vec::new();
+        for (term, a, b) in candidates {
+            if accepted.iter().any(|(t, _, _)| *t == term) {
+                continue;
+            }
+            if known.contains(a.as_str()) && known.contains(b.as_str()) {
+                accepted.push((term, a, b));
+            }
+        }
+        Ok(accepted)
+    }
+
+    fn rows_by_ids(&self, ids: &[&str]) -> Result<Vec<CorpusRow>> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let list = ids.join(", ");
+        let batches = query(
+            &self.client,
+            &format!(
+                "WITH cand AS (
+  SELECT d.id, d.fqn, d.definition_type, d.file_path, d.start_line, d.end_line
+  FROM gl_definition d
+  WHERE d.project_id = {pid} AND d.commit_sha = {sha} AND d.id IN ({list})
+),
+deg AS (
+  SELECT id, COUNT(*) AS degree FROM (
+    SELECT source_id AS id FROM gl_edge WHERE source_id IN ({list})
+    UNION ALL
+    SELECT target_id FROM gl_edge WHERE target_id IN ({list})
+  ) GROUP BY 1
+)
+SELECT CAST(c.id AS VARCHAR) AS id, c.fqn, c.definition_type,
+       c.file_path || ':' || CAST(c.start_line AS VARCHAR) AS loc,
+       CAST(c.end_line AS VARCHAR) AS end_line,
+       CAST(COALESCE(deg.degree, 0) AS VARCHAR) AS degree
+FROM cand c
+LEFT JOIN deg ON deg.id = c.id",
+                pid = self.pid,
+                sha = self.sha,
+            ),
+        )?;
+        Ok(rows_from_batches(&batches))
     }
 }
 
