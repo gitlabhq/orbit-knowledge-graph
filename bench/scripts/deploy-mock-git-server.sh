@@ -10,9 +10,8 @@ source "${BENCH_DIR}/scripts/lib.sh"
 
 CH_NS="${E2E_CH_NAMESPACE:-ra-ch-${RUN_ID}}"
 GKG_NS="e2e-${RUN_ID}-gkg"
-: "${MOCK_GIT_BUCKET:=gkg-code-corpus}"
-: "${MOCK_GIT_REGISTRY:=gcr.io/gl-knowledgegraph-prj-f2eec59d}"
-IMAGE="${MOCK_GIT_REGISTRY}/mock-git-server:latest"
+: "${MOCK_GIT_BUCKET:=$(bench '.corpus.bucket' | sed 's|gs://||')}"
+IMAGE="$(bench '.images.mock_git_server')"
 
 # --- 1. Build and push ---
 log "Building mock-git-server image (linux/amd64)"
@@ -21,11 +20,12 @@ docker buildx build --platform linux/amd64 -t "${IMAGE}" --push "${BENCH_DIR}/mo
 # --- 2. Create service account + IAM binding for GCS FUSE ---
 $KC create sa mock-git-server-sa -n "${CH_NS}" 2>/dev/null || true
 $KC annotate sa mock-git-server-sa -n "${CH_NS}" \
-  "iam.gke.io/gcp-service-account=1079327125344-compute@developer.gserviceaccount.com" \
+GCP_SA="$(bench '.iam.gcp_service_account')"
+  "iam.gke.io/gcp-service-account=${GCP_SA}" \
   --overwrite 2>/dev/null
 IFS=_ read -r _ GKE_PROJECT _ _ <<< "${KCTX}"
 gcloud iam service-accounts add-iam-policy-binding \
-  1079327125344-compute@developer.gserviceaccount.com \
+  "${GCP_SA}" \
   --project="${GKE_PROJECT}" \
   --role=roles/iam.workloadIdentityUser \
   --member="serviceAccount:${GKE_PROJECT}.svc.id.goog[${CH_NS}/mock-git-server-sa]" \

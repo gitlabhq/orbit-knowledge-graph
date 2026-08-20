@@ -7,7 +7,7 @@ set -euo pipefail
 BENCH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "${BENCH_DIR}/scripts/lib.sh"
 
-: "${DUMP_PREFIX:=core-2026-06-25-1115}"
+: "${DUMP_PREFIX:=$(bench '.gcs.dump_prefix')}"
 : "${CH_NS:=ra-ch-${RUN_ID}}"
 
 # Read credentials from the secret created by provision.sh.
@@ -26,7 +26,7 @@ $KC create secret generic ra-import-ch-auth \
 # Ensure the GCS-access KSA exists.
 $KC create sa ra-import-sa -n "${CH_NS}" 2>/dev/null || true
 $KC annotate sa ra-import-sa -n "${CH_NS}" \
-  "iam.gke.io/gcp-service-account=1079327125344-compute@developer.gserviceaccount.com" \
+  "iam.gke.io/gcp-service-account=$(bench '.iam.gcp_service_account')" \
   --overwrite 2>/dev/null
 
 # Delete any previous Job.
