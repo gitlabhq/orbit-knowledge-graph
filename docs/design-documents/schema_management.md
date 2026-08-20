@@ -71,10 +71,19 @@ Standard materialized views default to `versioned: true`: the view and its `to_t
 schema-version prefix and are dropped on version rollover, so they must reference version-tracked
 tables via `{table_name}` placeholders. Setting `versioned: false` makes the view durable — it is
 created once (`CREATE MATERIALIZED VIEW IF NOT EXISTS`) alongside unversioned tables, skips the
-version prefix, and is excluded from version-completeness and dead-version GC. An unversioned view
-must target an unversioned auxiliary table; it may read from external system tables (for example
-`system.query_log`) that are not ontology-tracked and therefore not prefixed. Its DDL fingerprint
-lives in the auxiliary snapshot, so a body change requires `mise schema:snapshot`, not a version bump.
+version prefix, and is excluded from version-completeness and dead-version GC.
+
+For destructive changes to unversioned tables (DROP, ALTER), add an entry to
+`config/auxiliary-migrations.yaml`. Each entry has a sequential `id` and a `sql` statement that
+runs at most once, tracked by the `gkg_auxiliary_migrations` table. Auxiliary migrations run at
+boot before the normal `CREATE IF NOT EXISTS` pass. The YAML file is validated against
+`config/schemas/auxiliary-migrations.schema.json` in CI and parsed at compile time via the
+ontology crate.
+
+An unversioned view must target an unversioned auxiliary table; it may read from external system
+tables (for example `system.query_log`) that are not ontology-tracked and therefore not prefixed.
+Its DDL fingerprint lives in the auxiliary snapshot, so a body change requires
+`mise schema:snapshot`, not a version bump.
 
 The durable unversioned objects (unversioned tables and unversioned materialized views) are
 tracked in their own committed snapshot, `config/graph_persistent.sql`, separate from the

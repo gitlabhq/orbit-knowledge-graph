@@ -1,0 +1,9 @@
+# yaml-language-server: $schema=schemas/auxiliary-migrations.schema.json
+#
+# One-time SQL statements for destructive changes to unversioned objects
+# (dropping tables, altering columns). Each entry runs at most once, tracked
+# by the gkg_auxiliary_migrations table in ClickHouse.
+#
+# Add new entries at the end with the next sequential ID. Entries must never
+# be reordered or removed.
+migrations: []

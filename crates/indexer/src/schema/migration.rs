@@ -254,6 +254,8 @@ pub async fn create_unversioned_tables(
     graph: &ArrowClickHouseClient,
     ontology: &ontology::Ontology,
 ) -> Result<(), MigrationError> {
+    run_auxiliary_migrations(graph).await?;
+
     for object in generate_unversioned_objects(ontology) {
         graph
             .execute(&object.ddl)
@@ -261,6 +263,69 @@ pub async fn create_unversioned_tables(
             .map_err(|error| MigrationError::Ddl {
                 table: object.name,
                 reason: error.to_string(),
+            })?;
+    }
+    Ok(())
+}
+
+const AUXILIARY_MIGRATION_TABLE: &str = "gkg_auxiliary_migrations";
+
+async fn run_auxiliary_migrations(graph: &ArrowClickHouseClient) -> Result<(), MigrationError> {
+    let ledger =
+        ontology::migrations::AuxiliaryLedger::load_embedded().map_err(MigrationError::Ledger)?;
+    if ledger.migrations.is_empty() {
+        return Ok(());
+    }
+
+    graph
+        .execute(
+            "CREATE TABLE IF NOT EXISTS gkg_auxiliary_migrations (\
+                 id UInt32, applied_at DateTime DEFAULT now()\
+             ) ENGINE = ReplacingMergeTree(applied_at) ORDER BY id",
+        )
+        .await
+        .map_err(|e| MigrationError::Ddl {
+            table: AUXILIARY_MIGRATION_TABLE.into(),
+            reason: e.to_string(),
+        })?;
+
+    let batches = graph
+        .query(&format!("SELECT id FROM {AUXILIARY_MIGRATION_TABLE} FINAL"))
+        .fetch_arrow()
+        .await
+        .map_err(|e| MigrationError::Ddl {
+            table: AUXILIARY_MIGRATION_TABLE.into(),
+            reason: e.to_string(),
+        })?;
+    let applied: std::collections::HashSet<u32> = batches
+        .iter()
+        .flat_map(|b| {
+            (0..b.num_rows())
+                .filter_map(|r| ArrowUtils::get_column::<arrow::datatypes::UInt32Type>(b, "id", r))
+        })
+        .collect();
+
+    for entry in &ledger.migrations {
+        if applied.contains(&entry.id) {
+            continue;
+        }
+        info!(id = entry.id, sql = %entry.sql, "running auxiliary migration");
+        graph
+            .execute(&entry.sql)
+            .await
+            .map_err(|e| MigrationError::Ddl {
+                table: format!("auxiliary_migration/{}", entry.id),
+                reason: e.to_string(),
+            })?;
+        graph
+            .execute(&format!(
+                "INSERT INTO {AUXILIARY_MIGRATION_TABLE} (id) VALUES ({})",
+                entry.id
+            ))
+            .await
+            .map_err(|e| MigrationError::Ddl {
+                table: AUXILIARY_MIGRATION_TABLE.into(),
+                reason: e.to_string(),
             })?;
     }
     Ok(())
