@@ -22,6 +22,33 @@ struct NamespaceStorageAttributionFixture {
 }
 
 #[tokio::test]
+async fn boot_drops_orphaned_unversioned_materialized_view() {
+    let scenario = NamespaceStorageSnapshotScenario::new().await;
+
+    scenario
+        .context
+        .execute(
+            "CREATE TABLE IF NOT EXISTS orphan_target (x UInt32) ENGINE = MergeTree ORDER BY x",
+        )
+        .await;
+    scenario
+        .context
+        .execute(
+            "CREATE MATERIALIZED VIEW IF NOT EXISTS orphan_mv TO orphan_target AS SELECT 1 AS x",
+        )
+        .await;
+    assert_eq!(scenario.get_table_or_view_count("orphan_mv").await, 1);
+
+    scenario.create_schema().await;
+
+    assert_eq!(
+        scenario.get_table_or_view_count("orphan_mv").await,
+        0,
+        "orphaned MV should be dropped by create_unversioned_tables"
+    );
+}
+
+#[tokio::test]
 async fn creates_namespace_storage_table_and_refreshable_view() {
     let scenario = NamespaceStorageSnapshotScenario::new().await;
     scenario.create_schema().await;
