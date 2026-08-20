@@ -138,7 +138,6 @@ fn run_jsonnet(src: &Path, flavor: &str) -> Result<String> {
     Ok(json)
 }
 
-/// Canonicalise JSON so whitespace-only differences don't count as drift.
 fn normalise(raw: &str) -> String {
     match serde_json::from_str::<serde_json::Value>(raw) {
         Ok(value) => serde_json::to_string_pretty(&value).unwrap_or_else(|_| raw.to_string()),

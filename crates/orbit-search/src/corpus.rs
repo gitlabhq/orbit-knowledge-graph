@@ -1,7 +1,3 @@
-/// `LIKE` patterns excluded from the search corpus and repo map: test, mock,
-/// fixture, generated, vendored, and build-output paths. Anchored both
-/// top-level (`spec/%`) and nested (`%/spec/%`) because monorepos keep `spec/`
-/// at the repo root.
 pub const EXCLUDE_LIKE: &[&str] = &[
     "spec/%",
     "%/spec/%",
@@ -24,6 +20,10 @@ pub const EXCLUDE_LIKE: &[&str] = &[
     "fixtures/%",
     "%/fixtures/%",
     "qa/%",
+    "%/qa/%",
+    "%Tests.java",
+    "%TestCase.java",
+    "%IT.java",
     "mocks/%",
     "%/mocks/%",
     "%/mocks.go",
@@ -50,15 +50,13 @@ pub const EXCLUDE_LIKE: &[&str] = &[
     "%/build/%",
 ];
 
-/// RE2 patterns whose matches are excluded — catches `foo_tests/` style
-/// directories and Go `mock_*.go` files that the `LIKE` list cannot.
 pub const EXCLUDE_REGEX: &[&str] = &[
     r"(^|/)[a-z]+_tests?/",
     r"(^|/)mock_[a-z_]+\.go$",
     r"(^|/)(test_[^/]+|conftest)\.py$",
+    r"/src/[a-zA-Z0-9]*[Tt]est[a-zA-Z0-9]*/",
 ];
 
-/// Source extensions Orbit indexes; used to build `read_text` globs.
 pub const DEFAULT_SOURCE_EXTS: &[&str] = &[
     "rs", "rb", "py", "js", "ts", "vue", "jsx", "tsx", "mjs", "cjs", "go", "java", "kt", "kts",
     "scala", "cs", "cpp", "c", "h", "hpp", "swift", "php", "rake",

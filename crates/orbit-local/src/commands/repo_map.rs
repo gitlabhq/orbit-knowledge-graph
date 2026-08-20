@@ -3,12 +3,6 @@
 //! Rust port of the former `skills/orbit-local/scripts/repo_map.py`: same six
 //! subcommands, same compact `file:line` output, but no Python runtime and no
 //! shelling back out to `orbit sql`.
-//!
-//! The definition-kind vocabularies below mirror the free-text
-//! `definition_type` values the code-graph parsers emit (there is no single
-//! ontology enum for them); the shared path-exclusion and source-extension
-//! policy lives in `orbit_search::corpus`. They are named constants so the
-//! SQL that consumes them stays declarative.
 
 use std::io::Write;
 use std::path::PathBuf;

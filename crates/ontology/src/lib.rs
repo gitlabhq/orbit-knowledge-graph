@@ -136,9 +136,6 @@ pub struct Ontology {
     pub(crate) nodes: BTreeMap<String, NodeEntity>,
     pub(crate) edges: BTreeMap<String, Vec<EdgeEntity>>,
     pub(crate) edge_descriptions: BTreeMap<String, String>,
-    /// Declared search rank flow per relationship kind (`search_weight` in
-    /// edge YAML). Kinds without a declaration are absent; search applies its
-    /// own default.
     pub(crate) edge_search_weights: BTreeMap<String, f64>,
     pub(crate) edge_pipelines: BTreeMap<String, Vec<Pipeline>>,
     /// Reindex trigger tables per edge relationship kind, resolved from each

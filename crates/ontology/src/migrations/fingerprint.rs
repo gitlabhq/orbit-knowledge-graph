@@ -190,8 +190,6 @@ fn remove_runtime_extract_fields(value: &mut serde_yaml::Value) {
     }
 }
 
-/// `search_weight` only tunes query-time ranking; it cannot change any
-/// indexed row, so edits to it must not register as versioned schema drift.
 fn remove_query_time_annotations(value: &mut serde_yaml::Value) {
     let serde_yaml::Value::Mapping(root) = value else {
         return;
