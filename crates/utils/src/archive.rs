@@ -92,7 +92,7 @@ pub fn extract_tar_gz<R: Read, H: FileStreamHooks>(
             // within-root deferral, which is the source's security mechanism.
             let mut meta = FileInventoryEntry {
                 path: relative_path.to_string_lossy().into_owned(),
-                size: entry.header().size().unwrap_or(0),
+                size: entry.size(),
                 decision: Decision::ListOnly,
             };
             meta.decision = hooks.on_non_regular(&meta);
@@ -111,12 +111,13 @@ pub fn extract_tar_gz<R: Read, H: FileStreamHooks>(
         if entry_type == tar::EntryType::Regular {
             let mut meta = FileInventoryEntry {
                 path: relative_path.to_string_lossy().into_owned(),
-                size: entry.header().size().unwrap_or(0),
+                size: entry.size(),
                 decision: Decision::Parse,
             };
-            // The tar Entry Read stops at the declared entry size, so this is
-            // bounded by it; oversize files are settled in `on_header` and never
-            // reach the read.
+            // The tar Entry Read stops at `entry.size()` — the PAX-corrected
+            // size, which is what `meta.size` above carries — so the guards see
+            // the same number the read will produce and oversize files are
+            // settled in `admit`/`on_header` before the read.
             meta.decision = step(hooks, &meta, &mut content, |buf| {
                 entry.read_to_end(buf).map(|_| ())
             })?;
@@ -209,6 +210,7 @@ fn strip_archive_root(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::fs_stream::{CapExceeded, Counter};
     use flate2::Compression;
     use flate2::write::GzEncoder;
 
@@ -490,5 +492,169 @@ mod tests {
         let data = build_archive(&[Entry::File("project-main/big.txt", &body)]);
         extract_tar_gz(&data[..], dir.path(), &mut ParseAll).unwrap();
         assert_eq!(std::fs::read(dir.path().join("big.txt")).unwrap(), body);
+    }
+
+    struct SizeGuard {
+        max_file_size: u64,
+        oversize: u64,
+    }
+
+    impl FileStreamHooks for SizeGuard {
+        fn on_header(&mut self, f: &FileInventoryEntry) -> Option<Decision> {
+            (f.size > self.max_file_size).then(|| {
+                self.oversize += 1;
+                Decision::ListOnly
+            })
+        }
+        fn on_content(&mut self, f: &FileInventoryEntry, content: &[u8]) -> Decision {
+            assert!(
+                content.len() as u64 <= self.max_file_size,
+                "buffered {} bytes of '{}' in memory with a {}-byte size guard; \
+                 the guard saw size={}",
+                content.len(),
+                f.path,
+                self.max_file_size,
+                f.size
+            );
+            Decision::Parse
+        }
+    }
+
+    struct TotalBytesCap {
+        total_bytes: Counter,
+    }
+
+    impl FileStreamHooks for TotalBytesCap {
+        fn admit(&mut self, f: &FileInventoryEntry) -> Result<(), CapExceeded> {
+            self.total_bytes.add(f.size)
+        }
+    }
+
+    fn pax_record(key: &str, value: &str) -> Vec<u8> {
+        let mut len = key.len() + value.len() + 3;
+        let mut record = format!("{len} {key}={value}\n");
+        while record.len() != len {
+            len = record.len();
+            record = format!("{len} {key}={value}\n");
+        }
+        record.into_bytes()
+    }
+
+    fn build_pax_size_archive(path: &str, body: &[u8]) -> Vec<u8> {
+        let mut tb = tar::Builder::new(Vec::new());
+
+        let pax = pax_record("size", &body.len().to_string());
+        let mut ph = tar::Header::new_gnu();
+        ph.set_entry_type(tar::EntryType::XHeader);
+        ph.set_size(pax.len() as u64);
+        ph.set_mode(0o644);
+        tb.append_data(&mut ph, "PaxHeaders/size", &pax[..])
+            .unwrap();
+
+        let mut h = tar::Header::new_gnu();
+        h.set_entry_type(tar::EntryType::Regular);
+        h.set_size(0);
+        h.set_mode(0o644);
+        tb.append_data(&mut h, path, body).unwrap();
+
+        let tar_bytes = tb.into_inner().unwrap();
+        let mut enc = GzEncoder::new(Vec::new(), Compression::fast());
+        enc.write_all(&tar_bytes).unwrap();
+        enc.finish().unwrap()
+    }
+
+    #[test]
+    fn pax_size_record_drives_the_oversize_guard() {
+        let dir = tempfile::tempdir().unwrap();
+        let body = vec![b'a'; 4096];
+        let data = build_pax_size_archive("project-main/big.txt", &body);
+
+        let mut guard = SizeGuard {
+            max_file_size: 64,
+            oversize: 0,
+        };
+        let inv = extract_tar_gz(&data[..], dir.path(), &mut guard).unwrap();
+
+        assert_eq!(guard.oversize, 1, "the oversize guard never fired");
+        assert_eq!(paths(&inv), vec!["big.txt"]);
+        assert_eq!(
+            inv[0].size, 4096,
+            "inventory recorded the base header size, not the PAX size"
+        );
+        assert_eq!(inv[0].decision, Decision::ListOnly);
+        assert!(!dir.path().join("big.txt").exists());
+    }
+
+    #[test]
+    fn pax_size_record_is_charged_to_the_total_bytes_cap() {
+        let dir = tempfile::tempdir().unwrap();
+        let body = vec![b'a'; 4096];
+        let data = build_pax_size_archive("project-main/big.txt", &body);
+
+        let mut hooks = TotalBytesCap {
+            total_bytes: Counter::new("total_bytes", 1024),
+        };
+        let err = extract_tar_gz(&data[..], dir.path(), &mut hooks).unwrap_err();
+
+        assert!(
+            matches!(
+                err,
+                StreamError::Cap(CapExceeded {
+                    metric: "total_bytes",
+                    count: 4096,
+                    cap: 1024
+                })
+            ),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn gnu_base256_size_is_charged_without_a_pax_record() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut tb = tar::Builder::new(Vec::new());
+        let mut h = tar::Header::new_gnu();
+        h.set_entry_type(tar::EntryType::Regular);
+        h.set_size(9_663_676_416);
+        h.set_mode(0o644);
+        tb.append_data(&mut h, "project-main/huge.bin", &[][..])
+            .unwrap();
+        let tar_bytes = tb.into_inner().unwrap();
+        let mut enc = GzEncoder::new(Vec::new(), Compression::fast());
+        enc.write_all(&tar_bytes).unwrap();
+        let data = enc.finish().unwrap();
+
+        let mut hooks = TotalBytesCap {
+            total_bytes: Counter::new("total_bytes", 2_000_000_000),
+        };
+        let err = extract_tar_gz(&data[..], dir.path(), &mut hooks).unwrap_err();
+
+        assert!(
+            matches!(
+                err,
+                StreamError::Cap(CapExceeded {
+                    metric: "total_bytes",
+                    count: 9_663_676_416,
+                    cap: 2_000_000_000
+                })
+            ),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn honest_octal_size_is_recorded_in_the_inventory() {
+        let dir = tempfile::tempdir().unwrap();
+        let body = vec![b'x'; 3000];
+        let data = build_archive(&[Entry::File("project-main/plain.txt", &body)]);
+        let inv = extract_tar_gz(&data[..], dir.path(), &mut ParseAll).unwrap();
+
+        assert_eq!(inv[0].size, 3000);
+        assert_eq!(
+            std::fs::metadata(dir.path().join("plain.txt"))
+                .unwrap()
+                .len(),
+            3000
+        );
     }
 }
