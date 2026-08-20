@@ -158,7 +158,9 @@ impl SearchVocab {
 
 pub struct AskOutcome {
     pub terms: Vec<String>,
+    pub splits: Vec<(String, String)>,
     pub matches: Vec<AskMatch>,
+    pub surfaced: Vec<AskMatch>,
     pub seed_count: usize,
     pub focus: Option<String>,
     pub edges: Vec<Edge>,
@@ -208,6 +210,76 @@ impl Hit {
     pub fn confident(&self) -> bool {
         self.tiered && self.coverage >= CONFIDENT_COVERAGE
     }
+}
+
+pub const BASE_SET_PER_TERM: usize = 10;
+pub const MAX_SEEDS: usize = 50;
+
+pub fn term_base_sets(
+    terms: &[String],
+    corpus: &[CorpusRow],
+    weights: Option<&[f64]>,
+    vocab: &SearchVocab,
+) -> Vec<Vec<(usize, f64)>> {
+    let rows: Vec<RowTokens> = corpus.iter().map(RowTokens::of).collect();
+    let mut sets: Vec<Vec<(usize, f64)>> = Vec::new();
+    let mut seeded: HashSet<usize> = HashSet::new();
+    for (t, term) in terms.iter().enumerate() {
+        if vocab.is_relational(term) {
+            continue;
+        }
+        let idf = weights.and_then(|w| w.get(t)).copied().unwrap_or(1.0);
+        let term_stem = stem(term);
+        let mut matched: Vec<(usize, f64)> = rows
+            .iter()
+            .enumerate()
+            .filter_map(|(i, row)| {
+                let tier_factor = match row.name_tier(term, &term_stem) {
+                    Tier::Exact => 1.0,
+                    Tier::Prefix => 0.7,
+                    Tier::Inner => 0.2,
+                    Tier::None => match tier_of(term, &row.path) {
+                        Tier::Exact | Tier::Prefix => 0.3,
+                        _ => return None,
+                    },
+                };
+                Some((i, idf * tier_factor))
+            })
+            .collect();
+        matched.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        matched.truncate(BASE_SET_PER_TERM);
+        if !matched.is_empty() {
+            seeded.extend(matched.iter().map(|&(i, _)| i));
+            sets.push(matched);
+            if seeded.len() >= MAX_SEEDS {
+                break;
+            }
+        }
+    }
+    sets
+}
+
+const MIN_COMPOUND_PART: usize = 3;
+
+pub fn candidate_splits(term: &str) -> Vec<(String, String)> {
+    let lower = term.to_lowercase();
+    let chars: Vec<char> = lower.chars().collect();
+    if chars.len() < MIN_COMPOUND_PART * 2 || !chars.iter().all(|c| c.is_ascii_alphabetic()) {
+        return Vec::new();
+    }
+    let mut splits: Vec<(String, String)> = (MIN_COMPOUND_PART..=chars.len() - MIN_COMPOUND_PART)
+        .map(|i| {
+            (
+                chars[..i].iter().collect::<String>(),
+                chars[i..].iter().collect::<String>(),
+            )
+        })
+        .filter(|(a, b)| {
+            !QUERY_STOPWORDS.contains(&a.as_str()) && !QUERY_STOPWORDS.contains(&b.as_str())
+        })
+        .collect();
+    splits.sort_by_key(|(a, b)| std::cmp::Reverse(a.len().min(b.len())));
+    splits
 }
 
 pub fn unmatched_terms(terms: &[String], corpus: &[CorpusRow], vocab: &SearchVocab) -> Vec<String> {
@@ -620,6 +692,50 @@ mod tests {
         let hits = dedupe_by_parent(results, &corpus, 2);
         let scores: Vec<f64> = hits.iter().map(|h| h.score).collect();
         assert_eq!(scores, vec![4.0, 3.0]);
+    }
+
+    #[test]
+    fn term_base_sets_seed_every_term_and_accumulate_overlap() {
+        let corpus = vec![
+            row("Repo::commit_hook"),
+            row("Project::setup"),
+            row("Project::commit_and_setup"),
+            row("Other::thing"),
+        ];
+        let terms = vec![
+            "commit".to_string(),
+            "setup".to_string(),
+            "uses".to_string(),
+        ];
+        let sets = term_base_sets(&terms, &corpus, None, &test_vocab());
+        assert_eq!(sets.len(), 2, "relational 'uses' must not produce a set");
+        let commit_ids: Vec<usize> = sets[0].iter().map(|&(i, _)| i).collect();
+        let setup_ids: Vec<usize> = sets[1].iter().map(|&(i, _)| i).collect();
+        assert!(commit_ids.contains(&0) && commit_ids.contains(&2));
+        assert!(setup_ids.contains(&1) && setup_ids.contains(&2));
+        assert!(!commit_ids.contains(&3) && !setup_ids.contains(&3));
+
+        let big: Vec<CorpusRow> = (0..40).map(|i| row(&format!("m{i}::commit"))).collect();
+        let capped = term_base_sets(&["commit".to_string()], &big, None, &test_vocab());
+        assert_eq!(capped[0].len(), BASE_SET_PER_TERM);
+    }
+
+    #[test]
+    fn candidate_splits_offer_balanced_compound_parts_and_reject_stopword_halves() {
+        let splits = candidate_splits("webhooks");
+        assert!(
+            splits.contains(&("web".to_string(), "hooks".to_string())),
+            "splits were {splits:?}"
+        );
+        assert!(
+            !candidate_splits("someone").iter().any(|(a, _)| a == "some"),
+            "stopword halves must be rejected"
+        );
+        assert!(candidate_splits("up").is_empty());
+        assert!(
+            candidate_splits("oauth2").is_empty(),
+            "non-alphabetic terms are not split"
+        );
     }
 
     #[test]

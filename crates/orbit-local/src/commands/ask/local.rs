@@ -225,4 +225,69 @@ mod tests {
             assert!(chain_first < hub_pos, "hub edge outranked the chain");
         }
     }
+
+    #[test]
+    fn structurally_central_node_surfaces_without_matching_any_term() {
+        let dir =
+            std::env::temp_dir().join(format!("orbit-objectrank-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = dir.join("t.duckdb");
+        let _ = std::fs::remove_file(&db);
+        let client = duckdb_client::DuckDbClient::open(&db).unwrap();
+        client
+            .initialize_schema(include_str!(concat!(
+                env!("CONFIG_DIR"),
+                "/graph_local.sql"
+            )))
+            .unwrap();
+        let insert = |id: i64, fqn: &str, name: &str, path: &str| {
+            let (search_text, token_count) = orbit_search::search_document(fqn, path);
+            client
+                .execute(
+                    &format!(
+                        "INSERT INTO gl_definition VALUES ({id}, '', 7, 'main', 'sha', '{path}', '{fqn}', '{name}', 'Method', 1, 2, 0, 0, 0, 0, '{search_text}', {token_count})"
+                    ),
+                    &[],
+                )
+                .unwrap();
+        };
+        insert(1, "Repo::commit_created", "commit_created", "app/a.rb");
+        insert(2, "Project::branch_created", "branch_created", "app/b.rb");
+        insert(
+            3,
+            "Setup::initialize_defaults",
+            "initialize_defaults",
+            "app/c.rb",
+        );
+        let edge = |source: i64, target: i64| {
+            client
+                .execute(
+                    &format!(
+                        "INSERT INTO gl_edge VALUES ({source}, 'Definition', 'CALLS', {target}, 'Definition', '')"
+                    ),
+                    &[],
+                )
+                .unwrap();
+        };
+        edge(1, 3);
+        edge(2, 3);
+
+        let search = DuckDbSearch::new(client, 7, "sha");
+        let vocab = SearchVocab::new(["Calls", "Imports", "Extends", "Contains", "Defines"]);
+        let weights = std::collections::HashMap::from([("CALLS".to_string(), 1.0)]);
+        let outcome = search.ask("commit branch", 5, &vocab, &weights).unwrap();
+
+        assert!(
+            outcome
+                .surfaced
+                .iter()
+                .any(|m| m.row.fqn == "Setup::initialize_defaults"),
+            "the node both weak anchors call must surface; surfaced were {:?}",
+            outcome
+                .surfaced
+                .iter()
+                .map(|m| m.row.fqn.as_str())
+                .collect::<Vec<_>>()
+        );
+    }
 }

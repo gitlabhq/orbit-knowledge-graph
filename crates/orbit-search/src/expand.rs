@@ -13,7 +13,15 @@ pub struct NodeLabel {
     pub scoped: bool,
 }
 
-pub type ExpandedNeighborhood = (Vec<Edge>, Vec<(String, usize)>);
+pub struct ExpandedNeighborhood {
+    pub edges: Vec<Edge>,
+    pub hidden_by_kind: Vec<(String, usize)>,
+    pub surfaced: Vec<(String, f64)>,
+}
+
+pub const SURFACED_POOL: usize = 10;
+pub const SURFACED_MIN_SCORE: f64 = 1e-3;
+pub const SURFACED_MAX_DEGREE: u64 = 200;
 
 pub trait NeighborhoodSource {
     type Error;
@@ -25,11 +33,17 @@ pub trait NeighborhoodSource {
 
 pub fn expand_neighborhood<S: NeighborhoodSource>(
     source: &S,
-    seeds: &[(String, f64)],
+    term_seeds: &[Vec<(String, f64)>],
     kind_weights: &HashMap<String, f64>,
     focus: Option<&str>,
 ) -> Result<ExpandedNeighborhood, S::Error> {
-    let seed_ids: Vec<&str> = seeds.iter().map(|(id, _)| id.as_str()).collect();
+    let mut seed_ids: Vec<&str> = Vec::new();
+    let mut seen_seed: HashSet<&str> = HashSet::new();
+    for (id, _) in term_seeds.iter().flatten() {
+        if seen_seed.insert(id.as_str()) {
+            seed_ids.push(id.as_str());
+        }
+    }
     let hop1 = source.hop(&seed_ids, PER_HOP_EDGE_CAP)?;
 
     let mut seen: HashSet<String> = seed_ids.iter().map(|s| (*s).to_string()).collect();
@@ -82,7 +96,14 @@ pub fn expand_neighborhood<S: NeighborhoodSource>(
         })
         .collect();
 
-    let ranked = rank_neighborhood(&edges, &degrees, seeds, kind_weights, focus, EDGE_LIMIT);
+    let ranked = rank_neighborhood(
+        &edges,
+        &degrees,
+        term_seeds,
+        kind_weights,
+        focus,
+        EDGE_LIMIT,
+    );
     let display = |id: &str| -> (String, String) {
         match labels.get(id) {
             Some(l) => (l.label.clone(), l.loc.clone()),
@@ -105,7 +126,21 @@ pub fn expand_neighborhood<S: NeighborhoodSource>(
             }
         })
         .collect();
-    Ok((shown, ranked.hidden_by_kind))
+    let surfaced = ranked
+        .node_scores
+        .into_iter()
+        .filter(|&(ref id, s)| {
+            s >= SURFACED_MIN_SCORE
+                && !seen_seed.contains(id.as_str())
+                && degrees.get(id.as_str()).copied().unwrap_or(0) <= SURFACED_MAX_DEGREE
+        })
+        .take(SURFACED_POOL)
+        .collect();
+    Ok(ExpandedNeighborhood {
+        edges: shown,
+        hidden_by_kind: ranked.hidden_by_kind,
+        surfaced,
+    })
 }
 
 fn refs(ids: &[String]) -> Vec<&str> {
@@ -188,8 +223,8 @@ mod tests {
         }
     }
 
-    fn seeds(ids: &[&str]) -> Vec<(String, f64)> {
-        ids.iter().map(|id| ((*id).to_string(), 1.0)).collect()
+    fn seeds(ids: &[&str]) -> Vec<Vec<(String, f64)>> {
+        vec![ids.iter().map(|id| ((*id).to_string(), 1.0)).collect()]
     }
 
     fn weights() -> HashMap<String, f64> {
@@ -199,9 +234,9 @@ mod tests {
     #[test]
     fn expands_two_hops_and_dedupes_edges_seen_in_both_hops() {
         let source = FakeSource::new(vec![("CALLS", "seed", "mid"), ("CALLS", "mid", "far")]);
-        let (edges, hidden) =
-            expand_neighborhood(&source, &seeds(&["seed"]), &weights(), None).unwrap();
-        let rendered: Vec<String> = edges
+        let expanded = expand_neighborhood(&source, &seeds(&["seed"]), &weights(), None).unwrap();
+        let rendered: Vec<String> = expanded
+            .edges
             .iter()
             .map(|e| format!("{} -> {}", e.source, e.target))
             .collect();
@@ -209,7 +244,7 @@ mod tests {
             rendered,
             vec!["label_seed -> label_mid", "label_mid -> label_far"]
         );
-        assert!(hidden.is_empty());
+        assert!(expanded.hidden_by_kind.is_empty());
         assert_eq!(source.hop_requests.borrow().len(), 2);
     }
 
@@ -220,11 +255,10 @@ mod tests {
             ("CALLS", "seed", "local@3:1"),
         ]);
         source.scoped.insert("local@3:1".to_string());
-        let (edges, hidden) =
-            expand_neighborhood(&source, &seeds(&["seed"]), &weights(), None).unwrap();
-        assert_eq!(edges.len(), 1);
-        assert_eq!(edges[0].target, "label_kept");
-        assert!(hidden.is_empty());
+        let expanded = expand_neighborhood(&source, &seeds(&["seed"]), &weights(), None).unwrap();
+        assert_eq!(expanded.edges.len(), 1);
+        assert_eq!(expanded.edges[0].target, "label_kept");
+        assert!(expanded.hidden_by_kind.is_empty());
     }
 
     #[test]
@@ -253,6 +287,29 @@ mod tests {
     }
 
     #[test]
+    fn mega_hubs_route_flow_but_never_headline_the_surfaced_list() {
+        let mut edge_list: Vec<(String, String, String)> = vec![
+            ("CALLS".to_string(), "seed".to_string(), "hub".to_string()),
+            ("CALLS".to_string(), "seed".to_string(), "quiet".to_string()),
+        ];
+        for i in 0..(SURFACED_MAX_DEGREE + 20) {
+            edge_list.push(("CALLS".to_string(), format!("c{i}"), "hub".to_string()));
+        }
+        let source = FakeSource::new(
+            edge_list
+                .iter()
+                .map(|(k, s, t)| (k.as_str(), s.as_str(), t.as_str()))
+                .collect(),
+        );
+        let expanded = expand_neighborhood(&source, &seeds(&["seed"]), &weights(), None).unwrap();
+        assert!(
+            !expanded.surfaced.iter().any(|(id, _)| id == "hub"),
+            "surfaced were {:?}",
+            expanded.surfaced
+        );
+    }
+
+    #[test]
     fn unlabeled_nodes_fall_back_to_their_id() {
         struct NoLabels(FakeSource);
         impl NeighborhoodSource for NoLabels {
@@ -268,8 +325,8 @@ mod tests {
             }
         }
         let source = NoLabels(FakeSource::new(vec![("CALLS", "seed", "42")]));
-        let (edges, _) = expand_neighborhood(&source, &seeds(&["seed"]), &weights(), None).unwrap();
-        assert_eq!(edges[0].source, "seed");
-        assert_eq!(edges[0].target, "42");
+        let expanded = expand_neighborhood(&source, &seeds(&["seed"]), &weights(), None).unwrap();
+        assert_eq!(expanded.edges[0].source, "seed");
+        assert_eq!(expanded.edges[0].target, "42");
     }
 }

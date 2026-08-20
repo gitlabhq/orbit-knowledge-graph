@@ -57,6 +57,9 @@ pub(crate) fn run(
 
     let outcome = backend.ask(&question, limit, vocab(), kind_weights())?;
     writeln!(out, "terms: {}", outcome.terms.join(" "))?;
+    for (term, parts) in &outcome.splits {
+        writeln!(out, "note: also matching {term} as compound of: {parts}")?;
+    }
 
     if outcome.matches.is_empty() {
         writeln!(out, "\nNo definitions match those terms.")?;
@@ -76,6 +79,20 @@ pub(crate) fn run(
         }
     }
 
+    if !outcome.surfaced.is_empty() {
+        writeln!(out, "\nConnected to your terms (structurally surfaced):")?;
+        for m in &outcome.surfaced {
+            writeln!(
+                out,
+                "  {}  [{}]  {}  (link score {:.3}, links {})",
+                m.row.fqn, m.row.kind, m.row.loc, m.score, m.row.degree
+            )?;
+            for line in snippet(backend.root(), &m.row.loc, &m.row.end_line) {
+                writeln!(out, "{line}")?;
+            }
+        }
+    }
+
     if outcome.edges.is_empty() {
         writeln!(out, "\nNo connections found around the top matches.")?;
         return Ok(());
@@ -83,7 +100,7 @@ pub(crate) fn run(
 
     writeln!(
         out,
-        "\nConnections (2 hops around top {}):",
+        "\nConnections (2 hops around {} anchors):",
         outcome.seed_count
     )?;
     let hidden: HashMap<&str, usize> = outcome
