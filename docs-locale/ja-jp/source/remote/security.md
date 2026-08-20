@@ -1,9 +1,9 @@
 ---
-stage: Analytics
-group: Knowledge Graph
+stage: Orbit
+group: Context Systems
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
 description: Orbit Remoteがデータを保護する方法（クエリに必要なロール、認可モデル、プログラムによるアクセスを含む）。
-title: Orbit Remoteのセキュリティ
+title: GitLab Orbit Remoteのセキュリティ
 ---
 
 {{< details >}}
@@ -26,11 +26,12 @@ title: Orbit Remoteのセキュリティ
 > 詳細については、履歴を参照してください。
 > この機能はテスト目的で利用可能ですが、本番環境での使用には対応していません。
 
-Orbitへのクエリから返されるレスポンスには、あなたのロールで参照可能な情報のみが含まれます。あなたまたはエージェントが、より高いユーザーロールを必要とするGitLabの機能にアクセスしようとした場合、関連情報はグラフに表示されません。
+GitLab Orbitへのクエリから返されるレスポンスには、あなたのロールで参照可能な情報のみが含まれます。あなたまたはエージェントが、より高いユーザーロールを必要とするGitLabの機能にアクセスしようとした場合、関連情報はグラフに表示されません。
 
-Orbitのアクセスは階層的です。トップレベルグループで割り当てられたロールは、その配下のすべてのサブグループおよびプロジェクトに適用されます。Orbitを有効にしても、既存のアクセス権限は変更されません。
+GitLab Orbitのアクセスは階層的です。トップレベルグループで割り当てられたロールは、その配下のすべてのサブグループおよびプロジェクトに適用されます。GitLab Orbitを有効にしても、既存のアクセス権限は変更されません。
 
-## Orbitのクエリに必要なロール {#roles-required-to-query-orbit}
+<!-- markdownlint-disable-next-line MD044 -->
+## GitLab Orbitのクエリに必要なロール {#roles-required-to-query-gitlab-orbit}
 
 グループをクエリするには、そのグループに対してレポーター以上のロールが必要です。
 
@@ -51,7 +52,7 @@ Orbitのアクセスは階層的です。トップレベルグループで割り
 
 ## セキュリティアーキテクチャ {#security-architecture}
 
-Orbitは独自に権限を生成しません。GitLabが「誰が何を参照できるか」の信頼できる唯一の情報源であり、すべてのクエリはGitLabを通じて認可されます。
+GitLab Orbitは独自に権限を生成しません。GitLabが「誰が何を参照できるか」の信頼できる唯一の情報源であり、すべてのクエリはGitLabを通じて認可されます。
 
 アクセスは以下のレイヤーで制御されます。
 
@@ -61,7 +62,7 @@ Orbitは独自に権限を生成しません。GitLabが「誰が何を参照で
 
 グループの[IPアドレス制限](https://docs.gitlab.com/user/group/access_and_permissions/#restrict-group-access-by-ip-address)はクエリ結果にも適用されます。グループの許可された範囲外のIPからのリクエストは、そのグループからの結果を返しません。
 
-Orbitは読み取り専用です。GitLabからの変更を読み取るのみで、書き戻しは行いません。また、独立した環境で動作し、独自の権限データは保存しません。
+GitLab Orbitは読み取り専用です。GitLabからの変更を読み取るのみで、書き戻しは行いません。また、独立した環境で動作し、独自の権限データは保存しません。
 
 ## プログラムによるアクセス {#programmatic-access}
 

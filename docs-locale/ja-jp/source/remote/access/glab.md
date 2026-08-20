@@ -1,8 +1,8 @@
 ---
-stage: Analytics
-group: Knowledge Graph
+stage: Orbit
+group: Context Systems
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: glab orbit remoteを使用してコマンドラインからOrbitにクエリを実行できます。glab 1.94以降で利用可能です。glab orbit setupヘルパーは将来のglabリリースで提供予定です。
+description: glab orbit remoteを使用してコマンドラインからGitLab Orbitにクエリを実行できます。glab 1.94以降で利用可能です。glab orbit setupヘルパーは将来のglabリリースで提供予定です。
 title: GitLab CLI（`glab`）でOrbitを使用する
 ---
 
@@ -30,33 +30,34 @@ title: GitLab CLI（`glab`）でOrbitを使用する
 
 > [!disclaimer]
 
-[GitLab CLI（`glab`）](https://docs.gitlab.com/cli/)は、コマンドラインからOrbitをセットアップおよびクエリするための標準的な方法です。
+[GitLab CLI（`glab`）](https://docs.gitlab.com/cli/)は、コマンドラインからGitLab Orbitをセットアップおよびクエリするための標準的な方法です。
 
 トップレベルコマンドは2つあります。
 
-- `glab orbit remote`: Orbit Remote REST APIを呼び出す型付きサブコマンドです。`glab` 1.94以降で利用可能です。
+- `glab orbit remote`: GitLab Orbit Remote REST APIを呼び出す型付きサブコマンドです。`glab` 1.94以降で利用可能です。
 - `glab orbit setup`: AIエージェント向けにOrbitスキルとMCP設定をワンコマンドでインストールします。将来の`glab`リリースで提供予定です。リリースまでの間は、[MCPクライアントを手動で設定してください](mcp.md#connect-your-mcp-client)。
 
 ## 前提条件 {#prerequisites}
 
-- Orbitが[グループで有効化されている](../getting-started.md)こと。
+- GitLab Orbitが[グループで有効化されている](../getting-started.md)こと。
 - `glab`がインストールされ、認証済みであること:
 
   ```shell
   glab auth login
   ```
 
-- ユーザーがOrbitを有効にした少なくとも1つのトップレベルグループにアクセスできること。
+- ユーザーがGitLab Orbitを有効にした少なくとも1つのトップレベルグループにアクセスできること。
 
 ## AIエージェントをセットアップする {#set-up-your-ai-agent}
 
-`glab orbit setup`は将来の`glab`リリースで提供予定です。リリース後は、ワンコマンドでOrbitスキルのインストールとAIエージェント（Claude Code、OpenCode、Cursor、Codex、Gemini CLI）向けのMCP設定の書き込みが行えるようになります。
+`glab orbit setup`は将来の`glab`リリースで提供予定です。リリース後は、ワンコマンドでGitLab OrbitスキルのインストールとAIエージェント（Claude Code、OpenCode、Cursor、Codex、Gemini CLI）向けのMCP設定の書き込みが行えるようになります。
 
 リリースまでの間は、[MCPクライアントを手動で設定してください](mcp.md#connect-your-mcp-client)。
 
-## コマンドラインからOrbitにクエリを実行する {#query-orbit-from-the-command-line}
+<!-- markdownlint-disable-next-line MD044 -->
+## コマンドラインからGitLab Orbitにクエリを実行する {#query-gitlab-orbit-from-the-command-line}
 
-`glab orbit remote`（またはエイリアス`r`）を使用して、Orbit Remote APIを直接呼び出します。スクリプト作成、デバッグ、クエリ作成前のスキーマ調査に役立ちます。`glab` 1.94以降が必要です。
+`glab orbit remote`（またはエイリアス`r`）を使用して、GitLab Orbit Remote APIを直接呼び出します。スクリプト作成、デバッグ、クエリ作成前のスキーマ調査に役立ちます。`glab` 1.94以降が必要です。
 
 | サブコマンド | エンドポイント | 目的 |
 |------------|----------|---------|
@@ -85,13 +86,13 @@ glab orbit remote tools
 {
   "query": {
     "query_type": "traversal",
-    "node": {
+    "nodes": [{
       "id": "p",
       "entity": "Project",
       "filters": {
-        "full_path": { "op": "starts_with", "value": "your-group/" }
+        "full_path": {"starts_with": "your-group/"}
       }
-    },
+    }],
     "limit": 5
   }
 }
@@ -133,4 +134,4 @@ glab orbit remote graph-status --project-id 2
 
 ## 課金 {#billing}
 
-`glab orbit remote query`はMCPクエリと同様にGitLabクレジットを消費します。`status`、`schema`、`tools`、`graph-status`の呼び出しは消費対象外です。
+`glab orbit remote query`はMCPクエリと同様にGitLabクレジットを消費します。`status`、`schema`、`tools`、`graph-status`の呼び出しは無料です。
