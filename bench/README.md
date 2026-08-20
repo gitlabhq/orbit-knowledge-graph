@@ -17,71 +17,94 @@ Set `KCTX` to your kubectl context before running any script:
 export KCTX="gke_gl-knowledgegraph-prj-f2eec59d_us-central1-a_ra-bench-smoke"
 ```
 
-## Quick start (SDLC only)
+## From scratch
 
-Provision a bench run with a golden datalake snapshot. Takes ~10 minutes.
+Use this when there is no existing datalake snapshot or code corpus. This is the first-time setup.
 
-```bash
-TIER=small RUN_ID=bench8 \
-  RA_DATALAKE_SNAPSHOT=golden-core-2026-06-25-1115 \
-  bash bench/scripts/provision.sh
-```
+### 1. Provision the stack
 
-This deploys standalone ClickHouse, the full e2e stack (GitLab, NATS, Siphon, GKG), restores the datalake from the snapshot, drops the graph database, and lets the indexer rebuild it from scratch.
-
-Check progress:
+Deploys standalone ClickHouse, the full e2e stack (GitLab, NATS, Siphon, GKG), imports the datalake dump from GCS (~15 minutes), and starts SDLC indexing.
 
 ```bash
-kubectl --context "${KCTX}" exec -n ra-ch-bench8 clickhouse-0 -- \
-  clickhouse-client -q "SELECT name, total_rows FROM system.tables WHERE database='gkg' AND total_rows > 0 ORDER BY total_rows DESC FORMAT PrettyCompact"
+TIER=small RUN_ID=bench8 bash bench/scripts/provision.sh
 ```
 
-Run the SLO report:
+### 2. Create a golden snapshot
+
+Once the import finishes and the graph starts building, snapshot the CH PVC so future runs skip the 15-minute import:
 
 ```bash
-RUN_ID=bench8 TIER=small bash bench/scripts/slos.sh
+RUN_ID=bench8 DUMP_PREFIX=core-2026-06-25-1115 bash bench/scripts/snapshot-datalake.sh
 ```
 
-## Adding code indexing
-
-Code indexing requires a corpus of repository archives in GCS and a mock git server to serve them.
-
-### 1. Build the corpus
+### 3. Build the code corpus
 
 Dump the project list from the bench datalake and fetch archives from gitlab.com:
 
 ```bash
-# Dump project IDs (stored in GCS automatically)
 RUN_ID=bench8 bash bench/scripts/dump-project-list.sh > projects.tsv
-
-# Fetch archives (streams via SSH, no local disk for GCS path)
 bash bench/scripts/fetch-code-corpus.sh projects.tsv
 ```
 
-The fetch script reads defaults from `bench/config/bench.yaml`. Override with env vars:
+This streams archives via SSH directly to GCS. 7,736 repos takes a few hours. Test with a subset first:
 
 ```bash
-FETCH_MAX=100 bash bench/scripts/fetch-code-corpus.sh      # test with 100 repos
-ARCHIVE_TIMEOUT=300 bash bench/scripts/fetch-code-corpus.sh # longer timeout for big repos
-RETRY=fail bash bench/scripts/fetch-code-corpus.sh          # retry failures from previous run
-RETRY=all bash bench/scripts/fetch-code-corpus.sh           # re-fetch everything
+FETCH_MAX=50 bash bench/scripts/fetch-code-corpus.sh projects.tsv
 ```
 
-### 2. Deploy the mock server and start indexing
+### 4. Deploy the mock git server
 
-```bash
-RUN_ID=bench8 bash bench/scripts/deploy-mock-git-server.sh
-```
-
-This builds and pushes the mock server image, deploys it in the CH namespace with GCS FUSE mounting the corpus bucket, upgrades the GKG helm release to point at the mock, resets code indexing checkpoints, and restarts the indexer.
-
-The GCS FUSE CSI driver must be enabled on the cluster (one-time setup):
+The GCS FUSE CSI driver must be enabled on the cluster (one-time):
 
 ```bash
 gcloud container clusters update ra-bench-smoke \
   --project gl-knowledgegraph-prj-f2eec59d \
   --zone us-central1-a \
   --update-addons GcsFuseCsiDriver=ENABLED
+```
+
+Then deploy the mock server and point the indexer at it:
+
+```bash
+RUN_ID=bench8 bash bench/scripts/deploy-mock-git-server.sh
+```
+
+This builds the image, deploys the pod with GCS FUSE, upgrades the GKG helm release, resets code indexing checkpoints, and restarts the indexer. Code indexing starts immediately.
+
+### 5. Check SLOs
+
+```bash
+RUN_ID=bench8 TIER=small bash bench/scripts/slos.sh
+```
+
+## From snapshot (fast path)
+
+Use this when a golden snapshot and code corpus already exist. Takes ~10 minutes instead of ~30.
+
+### 1. Provision from snapshot
+
+```bash
+TIER=small RUN_ID=bench9 \
+  RA_DATALAKE_SNAPSHOT=golden-core-2026-06-25-1115 \
+  bash bench/scripts/provision.sh
+```
+
+The datalake restores from the snapshot (~5 minutes). The graph database is dropped and rebuilt from scratch. SDLC indexing starts immediately.
+
+### 2. Deploy the mock git server
+
+The code corpus is already in `gs://gkg-code-corpus` from the initial scrape. Just deploy the mock server:
+
+```bash
+RUN_ID=bench9 bash bench/scripts/deploy-mock-git-server.sh
+```
+
+Code indexing starts against the existing 7K repo corpus. Both SDLC and code index in parallel.
+
+### 3. Check SLOs
+
+```bash
+RUN_ID=bench9 TIER=small bash bench/scripts/slos.sh
 ```
 
 ## Cluster management
@@ -95,33 +118,27 @@ bash bench/scripts/cluster.sh teardown  # delete all namespaces for this run
 
 ## Dedicated node pools
 
-For isolated CH sizing runs, add `RA_DEDICATED_POOL=1` to provision. This creates a tainted node pool that only the CH pod schedules on.
+For isolated CH sizing runs, add `RA_DEDICATED_POOL=1`. This creates a tainted node pool that only the CH pod schedules on.
 
 ```bash
 RA_DEDICATED_POOL=1 RUN_ID=bench8 TIER=small bash bench/scripts/provision.sh
-```
-
-Teardown deletes the pool:
-
-```bash
 RA_DEDICATED_POOL=1 RUN_ID=bench8 bash bench/scripts/cluster.sh teardown
 ```
 
-## Golden snapshots
-
-After a successful import, snapshot the CH PVC so future runs skip the 15-minute import:
+## Corpus management
 
 ```bash
-RUN_ID=bench8 DUMP_PREFIX=core-2026-06-25-1115 bash bench/scripts/snapshot-datalake.sh
+# Retry failed fetches with longer timeout
+RETRY=fail ARCHIVE_TIMEOUT=300 bash bench/scripts/fetch-code-corpus.sh
+
+# Retry both failures and skips
+RETRY=fail,skip bash bench/scripts/fetch-code-corpus.sh
+
+# Re-fetch everything (overwrites existing archives)
+RETRY=all bash bench/scripts/fetch-code-corpus.sh
 ```
 
-Then provision from the snapshot:
-
-```bash
-RA_DATALAKE_SNAPSHOT=golden-core-2026-06-25-1115 RUN_ID=bench9 bash bench/scripts/provision.sh
-```
-
-The snapshot restores in ~5 minutes. The datalake is preserved, the graph is dropped and rebuilt.
+The fetch script auto-downloads `projects.tsv` from GCS if no file is given.
 
 ## Configuration
 
@@ -130,7 +147,7 @@ All defaults live in two YAML files:
 - `bench/config/bench.yaml` -- GCP project, bucket names, image tags, IAM accounts, corpus settings
 - `bench/config/tiers.yaml` -- per-tier resource limits, concurrency, SLO targets
 
-Every env var can override the YAML defaults. The scripts never hardcode GCP-specific values.
+Every env var can override the YAML defaults.
 
 ## Scripts
 
@@ -149,6 +166,7 @@ Every env var can override the YAML defaults. The scripts never hardcode GCP-spe
 
 ## Known issues
 
-- CH system logs grow unbounded without TTLs. `provision.sh` sets 1-day TTLs via ALTER TABLE on each run, but a fresh CH from a snapshot may have existing bloat. The script truncates the biggest tables on provision.
-- The indexer needs a 12 GiB memory limit for the WorkItem extract (sorts 1M rows with description text, peaks at 7.4 GiB). The default in tiers.yaml is set accordingly.
+- CH system logs grow unbounded without TTLs. `provision.sh` sets 1-day TTLs and truncates existing bloat on each run, but a long-running bench can still accumulate logs between provisions.
+- The indexer needs a 12 GiB memory limit for the WorkItem extract (peaks at 7.4 GiB sorting 1M rows with description text). Set in tiers.yaml.
 - Self-managed CH defaults `max_bytes_before_external_sort` to 0 (disabled). The bench sets it to 8 GiB via a ConfigMap override. Without it, wide-column sorts OOM the server.
+- The mock git server does not return commit SHAs, so `last_commit` in code indexing checkpoints stays empty. The code graph data is written correctly.
