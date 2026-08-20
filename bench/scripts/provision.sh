@@ -123,6 +123,21 @@ $KC exec -n "${CH_NS}" clickhouse-0 -- \
   "
 log "  Databases and users created (clean slate)"
 
+# Set TTLs on system log tables to prevent disk exhaustion.
+log "Setting TTLs on system log tables"
+for tbl in text_log trace_log query_log metric_log asynchronous_metric_log processors_profile_log part_log; do
+  $KC exec -n "${CH_NS}" clickhouse-0 -- \
+    clickhouse-client --password "${CH_PASSWORD}" -q \
+    "ALTER TABLE system.${tbl} MODIFY TTL event_date + INTERVAL 1 DAY SETTINGS mutations_sync=0" 2>/dev/null || true
+done
+# Truncate any existing bloat from snapshot restores.
+$KC exec -n "${CH_NS}" clickhouse-0 -- \
+  clickhouse-client --password "${CH_PASSWORD}" --multiquery -q "
+    TRUNCATE TABLE IF EXISTS system.text_log;
+    TRUNCATE TABLE IF EXISTS system.processors_profile_log;
+    TRUNCATE TABLE IF EXISTS system.trace_log;
+  " 2>/dev/null || true
+
 # Store the default password for the import job.
 $KC create secret generic ra-ch-credentials -n "${CH_NS}" \
   --from-literal=default-password="${CH_PASSWORD}" \
