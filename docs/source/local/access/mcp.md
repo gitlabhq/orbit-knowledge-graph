@@ -25,9 +25,10 @@ title: GitLab Orbit Local MCP server
 > For more information, see the history.
 > This feature is available for testing, but not ready for production use.
 
-With the GitLab Orbit Local [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server,
-you can securely connect AI tools and applications to your local DuckDB graph. AI assistants
-like Claude Code, Codex, Cursor, and OpenCode can then access your graph and write SQL queries
+With the GitLab Orbit Local [Model Context Protocol](https://modelcontextprotocol.io/)
+(MCP) server, you can securely connect AI tools and applications to your
+local DuckDB graph. AI assistants like Claude Code, Codex, Cursor, and OpenCode
+can then access your graph and write SQL queries
 against it.
 
 The GitLab Orbit Local MCP server is stateless, which means the server:
@@ -50,7 +51,7 @@ vary depending on the MCP client and your local environment.
 ### Connect Claude Code
 
 Claude Code stores the MCP server configuration in one of three scopes. Choose the
-scope that matches how widely you want the server available.
+scope that matches your use case.
 
 | Scope | Availability | Stored in |
 | ----- | ------------ | --------- |
@@ -58,18 +59,14 @@ scope that matches how widely you want the server available.
 | `user` | You only, in all projects | `~/.claude.json` |
 | `project` | Everyone who checks out the repository | `.mcp.json` in the repository root |
 
-Prerequisites:
-
-- If connecting to a shared repository, an `.mcp.json` file in your project root.
-
-To add the server for the current project, run:
+To add the MCP server for the current project, run:
 
 {{< tabs >}}
 
 {{< tab title="orbit" >}}
 
 ```shell
-claude mcp add orbit-local -- orbit local mcp serve
+claude mcp add orbit-local -- orbit mcp serve
 ```
 
 {{< /tab >}}
@@ -91,7 +88,7 @@ To add the server for all of your projects, run:
 {{< tab title="orbit" >}}
 
 ```shell
-claude mcp add orbit-local --scope user -- orbit local mcp serve
+claude mcp add orbit-local --scope user -- orbit mcp serve
 ```
 
 {{< /tab >}}
@@ -113,7 +110,7 @@ To add the server for everyone who checks out the repository, run:
 {{< tab title="orbit" >}}
 
 ```shell
-claude mcp add orbit-local --scope project -- orbit local mcp serve
+claude mcp add orbit-local --scope project -- orbit mcp serve
 ```
 
 {{< /tab >}}
@@ -139,7 +136,7 @@ You can also edit the `.mcp.json` file directly:
   "mcpServers": {
     "orbit-local": {
       "command": "orbit",
-      "args": ["local", "mcp", "serve"]
+      "args": ["mcp", "serve"]
     }
   }
 }
@@ -164,11 +161,18 @@ You can also edit the `.mcp.json` file directly:
 
 {{< /tabs >}}
 
-To confirm the server is connected, run:
+To confirm the MCP server is connected, run:
 
 ```shell
 claude mcp list
 ```
+
+After you connect, [set up your AI assistant](./cli.md).
+
+> [!note]
+> For project-scoped commands, Claude Code asks for approval before
+> creating the `mcp.json` file. Until you approve, `claude mcp list`
+> shows the server as `Pending approval`.
 
 ### Connect Codex
 
@@ -182,7 +186,7 @@ To connect to Codex, run:
 {{< tab title="orbit" >}}
 
 ```shell
-codex mcp add orbit-local -- orbit local mcp serve
+codex mcp add orbit-local -- orbit mcp serve
 ```
 
 {{< /tab >}}
@@ -203,6 +207,8 @@ To confirm the server is registered, run:
 codex mcp list
 ```
 
+After you connect, [set up your AI assistant](./cli.md).
+
 ### Connect Cursor
 
 Cursor reads the MCP server configuration from an `mcp.json` file. Choose the
@@ -213,11 +219,7 @@ scope that matches how widely you want the server available.
 | Project | You only, in the current project | `.cursor/mcp.json` in the repository root |
 | Global | You only, in all projects | `~/.cursor/mcp.json` |
 
-Prerequisites:
-
-- If connecting to a specific project, an `.mcp.json` file in your project root.
-
-To connect to Cursor, edit your `mcp.json` file:
+To connect to Cursor, create or edit the `mcp.json` file for the scope you want:
 
 {{< tabs >}}
 
@@ -229,7 +231,7 @@ To connect to Cursor, edit your `mcp.json` file:
     "orbit-local": {
       "type": "stdio",
       "command": "orbit",
-      "args": ["local", "mcp", "serve"]
+      "args": ["mcp", "serve"]
     }
   }
 }
@@ -276,7 +278,7 @@ Add the MCP server configuration to `opencode.json` in the repository root, or t
   "mcp": {
     "orbit-local": {
       "type": "local",
-      "command": ["orbit", "local", "mcp", "serve"]
+      "command": ["orbit", "mcp", "serve"]
     }
   }
 }
@@ -308,53 +310,96 @@ To confirm the server is connected, run:
 opencode mcp list
 ```
 
+After you connect, [set up your AI assistant](./cli.md).
+
 ### Connect other MCP clients
 
-Any MCP client can connect by running `orbit mcp serve` (or
-`glab orbit local mcp serve`) as a stdio server.
+The GitLab Orbit Local MCP server does not expose a connection URL.
+Clients that require a URL cannot connect to it.
+
+{{< tabs >}}
+
+{{< tab title="orbit" >}}
+
+To connect using the GitLab Orbit CLI,
+edit your client's MCP configuration file:
+
+```json
+{
+  "mcpServers": {
+    "orbit-local": {
+      "command": "orbit",
+      "args": ["mcp", "serve"]
+    }
+  }
+}
+```
+
+{{< /tab >}}
+
+{{< tab title="glab" >}}
+
+To connect using the GitLab CLI:
+
+1. Run `glab orbit local --install`. This command downloads the `orbit` binary.
+1. Then, edit your client's MCP configuration file:
+
+```json
+{
+  "mcpServers": {
+    "orbit-local": {
+      "command": "glab",
+      "args": ["orbit", "local", "mcp", "serve"]
+    }
+  }
+}
+```
+
+{{< /tab >}}
+
+{{< /tabs >}}
+
+To confirm the server is connected, check that your client lists the `run_sql`,
+`get_graph_schema`, and `index` tools.
 
 ## MCP tools
 
-| Tool | Description |
-|------|-------------|
-| `run_sql` | Execute read-only SQL against the local DuckDB graph. Takes an array of statements; returns one JSON row array per statement, at the same index. |
-| `get_graph_schema` | Fetch the schema: table names, columns, and data types present in the local DuckDB. |
-| `index` | Index a repository (or a directory of repositories) into the local graph. |
+The GitLab Orbit Local MCP server provides a set of tools that interact
+with your local DuckDB graph.
 
-The server is stateless: every tool call opens the DuckDB file on demand and
-releases it before returning, so multiple editors can run one server process
-each against the same graph.
+### `index`
 
-Large `run_sql` results are rejected before serialisation (about 1 MB of
-Arrow data) with an error asking the agent to add `LIMIT` or narrow the
-projection, so a runaway `SELECT *` cannot freeze your editor.
+Indexes a repository, or a directory of repositories, into the local DuckDB graph.
 
-## Using the tools
+Example:
 
-Once connected, instruct your AI agent to use GitLab Orbit directly.
+```plaintext
+Index my checked out project.
+```
 
-Discover the schema:
-> "Use `get_graph_schema` to show me what tables are in my local graph."
+### `get_graph_schema`
 
-Find definitions by type:
-> "Use GitLab Orbit to count the definitions in this repository by type, and list the
-> ten largest classes."
+Fetches the schema. Includes table names, columns,
+and data types present in the local DuckDB graph.
 
-Map a module:
-> "Use GitLab Orbit to list every definition declared in `src/auth/` and show its
-> kind."
+Example:
 
-The `_orbit_manifest` table lists the indexed repositories, so "what repos are
-in my local graph?" is one `run_sql` call away.
+```plaintext
+Use `get_graph_schema` tool to show me what tables are in my local graph.
+```
 
-## What's in the local graph
+### `run_sql`
 
-GitLab Orbit Local indexes code only: files, directories, definitions, and
-imported symbols across all 11 supported languages. SDLC data (merge requests,
-pipelines, users, vulnerabilities) is not available locally. That requires
-[GitLab Orbit Remote](../../remote/_index.md).
+Executes read-only SQL against the local DuckDB graph.
+Takes an array of statements and returns one JSON row array per statement,
+at the same index.
 
-## Billing
+A single `run_sql` call returns about 1 MB at most, counting all statements
+in the call together. Larger results fail, and the agent retries with a
+narrower query. If the agent does not recover, ask it for fewer results.
 
-GitLab Orbit Local does not consume GitLab Credits. All local traffic stays on your
-machine.
+Example:
+
+```plaintext
+Show me the most used imports used in this repository.
+```
