@@ -47,13 +47,9 @@ MOCK_URL="http://mock-git-server.${CH_NS}.svc.cluster.local:8090"
 log "Upgrading GKG release: gitlab.baseUrl=${MOCK_URL}"
 
 # Pin to the installed chart version to avoid schema mismatches.
-INSTALLED_VERSION=$($KC get secret -n "${GKG_NS}" -l owner=helm,name=gkg \
-  -o jsonpath='{.items[0].metadata.labels.version}' 2>/dev/null || echo "")
-if [[ -z "${INSTALLED_VERSION}" ]]; then
-  # Fallback: parse from helm list
-  INSTALLED_VERSION=$(helm list --namespace "${GKG_NS}" --kube-context "${KCTX}" \
-    -o json 2>/dev/null | python3 -c "import json,sys; print(json.load(sys.stdin)[0]['chart'].split('-')[-1])" 2>/dev/null || echo "")
-fi
+INSTALLED_VERSION=$(helm list --namespace "${GKG_NS}" --kube-context "${KCTX}" \
+  -f gkg -o json 2>/dev/null \
+  | python3 -c "import json,sys; d=json.load(sys.stdin); print(d[0]['chart'].rsplit('-',1)[-1]) if d else print('')" 2>/dev/null || echo "")
 
 HELM_ARGS=(upgrade gkg
   oci://registry.gitlab.com/gitlab-org/orbit/orbit-helm-charts/gkg
