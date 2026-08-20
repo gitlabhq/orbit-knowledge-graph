@@ -20,6 +20,10 @@ tier() {
   yq eval ".tiers.${TIER}${1}" "${BENCH_DIR}/config/tiers.yaml"
 }
 
+bench() {
+  yq eval "${1}" "${BENCH_DIR}/config/bench.yaml"
+}
+
 heartbeat_start() {
   ( while true; do sleep 30; echo "."; done ) &
   HEARTBEAT_PID=$!
