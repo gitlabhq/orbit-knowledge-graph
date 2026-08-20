@@ -75,7 +75,7 @@ impl TemplateVar {
 
 static MODES: LazyLock<Modes> = LazyLock::new(|| {
     let file = SetupAssets::get("modes.yaml").expect("config/setup/modes.yaml must be embedded");
-    serde_yaml::from_slice(&file.data)
+    orbit_utils::yaml::from_slice(&file.data)
         .unwrap_or_else(|e| panic!("config/setup/modes.yaml is invalid: {e}"))
 });
 
@@ -140,7 +140,7 @@ static SPECS: LazyLock<Vec<AssistantSpec>> = LazyLock::new(|| {
         .filter_map(|path| {
             let stem = path.strip_prefix("agents/")?.strip_suffix(".yaml")?;
             let file = SetupAssets::get(&path).expect("embedded file must be readable");
-            let spec: AssistantSpec = serde_yaml::from_slice(&file.data)
+            let spec: AssistantSpec = orbit_utils::yaml::from_slice(&file.data)
                 .unwrap_or_else(|e| panic!("config/setup/{path} is invalid: {e}"));
             assert_eq!(
                 spec.name, stem,

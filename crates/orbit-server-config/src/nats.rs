@@ -459,7 +459,7 @@ mod tests {
             tls_cert_path: "/etc/nats/client.pem"
             tls_key_path: "/etc/nats/client-key.pem"
         "#;
-        let config: NatsConfiguration = serde_yaml::from_str(yaml).unwrap();
+        let config: NatsConfiguration = orbit_utils::yaml::from_str(yaml).unwrap();
         assert_eq!(config.tls_ca_cert_path.as_deref(), Some("/etc/nats/ca.pem"));
         assert_eq!(
             config.tls_cert_path.as_deref(),
@@ -475,7 +475,7 @@ mod tests {
     #[test]
     fn deserialize_without_tls_fields_uses_defaults() {
         let yaml = r#"url: "localhost:4222""#;
-        let config: NatsConfiguration = serde_yaml::from_str(yaml).unwrap();
+        let config: NatsConfiguration = orbit_utils::yaml::from_str(yaml).unwrap();
         assert!(config.tls_ca_cert_path.is_none());
         assert!(config.tls_cert_path.is_none());
         assert!(config.tls_key_path.is_none());
@@ -485,7 +485,7 @@ mod tests {
     #[test]
     fn fetch_expires_defaults_to_5s() {
         let yaml = r#"url: "localhost:4222""#;
-        let config: NatsConfiguration = serde_yaml::from_str(yaml).unwrap();
+        let config: NatsConfiguration = orbit_utils::yaml::from_str(yaml).unwrap();
         assert_eq!(config.fetch_expires(), Duration::from_secs(5));
     }
 
@@ -495,7 +495,7 @@ mod tests {
             url: "localhost:4222"
             fetch_expires_secs: 0
         "#;
-        let config: NatsConfiguration = serde_yaml::from_str(yaml).unwrap();
+        let config: NatsConfiguration = orbit_utils::yaml::from_str(yaml).unwrap();
         assert_eq!(config.fetch_expires(), Duration::from_secs(1));
     }
 }

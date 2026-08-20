@@ -9,3 +9,4 @@ pub mod strings;
 pub mod traversal_path;
 pub mod version;
 pub mod walk;
+pub mod yaml;
