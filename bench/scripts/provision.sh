@@ -76,6 +76,7 @@ $KC delete statefulset clickhouse -n "${CH_NS}" --cascade=orphan 2>/dev/null || 
 
 log "Deploying standalone ClickHouse in ${CH_NS}"
 export CH_NAMESPACE="${CH_NS}" CH_PASSWORD CH_NODE_SELECTOR CH_TOLERATIONS PVC_DATA_SOURCE
+export CH_IMAGE="$(bench '.images.clickhouse')"
 export CH_STORAGE="$(tier '.clickhouse.storage')"
 export CH_CPU="$(tier '.clickhouse.cpu')"
 export CH_MEMORY="$(tier '.clickhouse.memory')"
