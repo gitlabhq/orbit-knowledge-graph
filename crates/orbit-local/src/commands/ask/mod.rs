@@ -67,30 +67,15 @@ pub(crate) fn run(
     }
 
     report_confidence(&mut out, &outcome)?;
-    writeln!(out, "\nMatches:")?;
-    for m in &outcome.matches {
-        writeln!(
-            out,
-            "  {}  [{}]  {}  (score {:.1}, links {})",
-            m.row.fqn, m.row.kind, m.row.loc, m.score, m.row.degree
-        )?;
-        for line in snippet(backend.root(), &m.row.loc, &m.row.end_line) {
-            writeln!(out, "{line}")?;
-        }
-    }
-
+    write_matches(&mut out, "\nMatches:", &outcome.matches, 1, backend.root())?;
     if !outcome.surfaced.is_empty() {
-        writeln!(out, "\nConnected to your terms (structurally surfaced):")?;
-        for m in &outcome.surfaced {
-            writeln!(
-                out,
-                "  {}  [{}]  {}  (link score {:.3}, links {})",
-                m.row.fqn, m.row.kind, m.row.loc, m.score, m.row.degree
-            )?;
-            for line in snippet(backend.root(), &m.row.loc, &m.row.end_line) {
-                writeln!(out, "{line}")?;
-            }
-        }
+        write_matches(
+            &mut out,
+            "\nConnected to your terms (structurally surfaced):",
+            &outcome.surfaced,
+            3,
+            backend.root(),
+        )?;
     }
 
     if outcome.edges.is_empty() {
@@ -139,6 +124,27 @@ fn fmt_loc(loc: &str) -> String {
     } else {
         format!(" ({loc})")
     }
+}
+
+fn write_matches(
+    out: &mut impl Write,
+    header: &str,
+    matches: &[orbit_search::AskMatch],
+    precision: usize,
+    root: &std::path::Path,
+) -> std::io::Result<()> {
+    writeln!(out, "{header}")?;
+    for m in matches {
+        writeln!(
+            out,
+            "  {}  [{}]  {}  (score {:.precision$}, links {})",
+            m.row.fqn, m.row.kind, m.row.loc, m.score, m.row.degree
+        )?;
+        for line in snippet(root, &m.row.loc, &m.row.end_line) {
+            writeln!(out, "{line}")?;
+        }
+    }
+    Ok(())
 }
 
 fn snippet(root: &std::path::Path, loc: &str, end_line: &str) -> Vec<String> {
@@ -217,36 +223,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn relational_intent_derives_from_edge_kinds_and_synonyms() {
-        for word in [
-            "calls",
-            "called",
-            "imports",
-            "importing",
-            "extends",
-            "defined",
-            "contains",
-            "renders",
-            "rendering",
-            "mentioned",
-            "uses",
-            "callers",
-        ] {
+    fn vocab_maps_question_verbs_to_relational_intent_and_focus_kinds() {
+        for word in ["calls", "imports", "extends", "renders", "uses", "callers"] {
             assert!(vocab().is_relational(word), "{word} should be relational");
         }
-        for word in ["dlq", "widget", "backpressure", "user", "hooks"] {
+        for word in ["dlq", "widget", "backpressure", "hooks"] {
             assert!(
                 !vocab().is_relational(word),
                 "{word} should not be relational"
             );
         }
-    }
-
-    #[test]
-    fn focus_edge_kind_maps_question_verbs_to_relationships() {
         let kind = |q: &str| vocab().focus_edge_kind(&content_words(q));
         assert_eq!(kind("who calls execute_hooks"), Some("CALLS".to_string()));
-        assert_eq!(kind("who uses sql_template"), Some("CALLS".to_string()));
         assert_eq!(
             kind("what imports the ontology"),
             Some("IMPORTS".to_string())

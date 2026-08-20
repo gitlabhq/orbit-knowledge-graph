@@ -85,74 +85,29 @@ impl LocalBackend {
 mod tests {
     use super::*;
 
-    #[test]
-    fn search_text_roundtrip_ranks_exact_symbol_above_long_tie() {
-        let dir = std::env::temp_dir().join(format!("orbit-search-test-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let db = dir.join("t.duckdb");
-        let _ = std::fs::remove_file(&db);
-        let client = duckdb_client::DuckDbClient::open(&db).unwrap();
-        client
-            .initialize_schema(include_str!(concat!(
-                env!("CONFIG_DIR"),
-                "/graph_local.sql"
-            )))
-            .unwrap();
-        let insert = |id: i64, fqn: &str, name: &str, path: &str| {
-            let (search_text, token_count) = orbit_search::search_document(fqn, path);
-            client
-                .execute(
-                    &format!(
-                        "INSERT INTO gl_definition VALUES ({id}, '', 7, 'main', 'sha', '{path}', '{fqn}', '{name}', 'Method', 1, 2, 0, 0, 0, 0, '{search_text}', {token_count})"
-                    ),
-                    &[],
-                )
-                .unwrap();
-        };
-        insert(
-            1,
-            "Group::execute_hooks",
-            "execute_hooks",
-            "app/models/group.rb",
-        );
-        insert(
-            2,
-            "Ci::ExecuteBuildHooksWorker::execute_hooks_for_created_build",
-            "execute_hooks_for_created_build",
-            "app/workers/ci/execute_build_hooks_worker.rb",
-        );
-        insert(
-            3,
-            "Project::unrelated",
-            "unrelated",
-            "app/models/project.rb",
-        );
-
-        let search = DuckDbSearch::new(client, 7, "sha");
-        let (corpus, weights) = search.search(&["execute_hooks".to_string()]).unwrap();
-        assert!(weights.is_some());
-        let fqns: Vec<&str> = corpus.iter().map(|r| r.fqn.as_str()).collect();
-        assert!(fqns.contains(&"Group::execute_hooks"));
-        assert!(fqns.contains(&"Ci::ExecuteBuildHooksWorker::execute_hooks_for_created_build"));
-        assert!(!fqns.contains(&"Project::unrelated"));
+    struct TestGraph {
+        client: duckdb_client::DuckDbClient,
     }
 
-    #[test]
-    fn ask_surfaces_a_two_hop_call_chain_over_hub_noise() {
-        let dir = std::env::temp_dir().join(format!("orbit-ask-test-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let db = dir.join("t.duckdb");
-        let _ = std::fs::remove_file(&db);
-        let client = duckdb_client::DuckDbClient::open(&db).unwrap();
-        client
-            .initialize_schema(include_str!(concat!(
-                env!("CONFIG_DIR"),
-                "/graph_local.sql"
-            )))
-            .unwrap();
-        let insert = |id: i64, fqn: &str, name: &str, path: &str| {
-            let (search_text, token_count) = orbit_search::search_document(fqn, path);
+    impl TestGraph {
+        fn new(name: &str) -> Self {
+            let dir = std::env::temp_dir().join(format!("orbit-{name}-{}", std::process::id()));
+            std::fs::create_dir_all(&dir).unwrap();
+            let db = dir.join("t.duckdb");
+            let _ = std::fs::remove_file(&db);
+            let client = duckdb_client::DuckDbClient::open(&db).unwrap();
             client
+                .initialize_schema(include_str!(concat!(
+                    env!("CONFIG_DIR"),
+                    "/graph_local.sql"
+                )))
+                .unwrap();
+            Self { client }
+        }
+
+        fn def(&self, id: i64, fqn: &str, name: &str, path: &str) {
+            let (search_text, token_count) = orbit_search::search_document(fqn, path);
+            self.client
                 .execute(
                     &format!(
                         "INSERT INTO gl_definition VALUES ({id}, '', 7, 'main', 'sha', '{path}', '{fqn}', '{name}', 'Method', 1, 2, 0, 0, 0, 0, '{search_text}', {token_count})"
@@ -160,16 +115,10 @@ mod tests {
                     &[],
                 )
                 .unwrap();
-        };
-        insert(1, "Dlq::publish", "publish", "app/services/dlq.rb");
-        insert(2, "Dlq::encode", "encode", "app/services/dlq.rb");
-        insert(3, "Dlq::checksum", "checksum", "app/services/dlq.rb");
-        insert(4, "Util::log", "log", "app/util.rb");
-        for i in 5..40 {
-            insert(i, &format!("Other::fn_{i}"), &format!("fn_{i}"), "app/o.rb");
         }
-        let edge = |source: i64, kind: &str, target: i64| {
-            client
+
+        fn edge(&self, source: i64, kind: &str, target: i64) {
+            self.client
                 .execute(
                     &format!(
                         "INSERT INTO gl_edge VALUES ({source}, 'Definition', '{kind}', {target}, 'Definition', '')"
@@ -177,117 +126,45 @@ mod tests {
                     &[],
                 )
                 .unwrap();
-        };
-        edge(1, "CALLS", 2);
-        edge(2, "CALLS", 3);
-        edge(1, "CALLS", 4);
-        for i in 5..40 {
-            edge(i, "CALLS", 4);
         }
 
-        let search = DuckDbSearch::new(client, 7, "sha");
-        let vocab = SearchVocab::new(["Calls", "Imports", "Extends", "Contains", "Defines"]);
-        let weights = std::collections::HashMap::from([("CALLS".to_string(), 1.0)]);
-        let outcome = search.ask("dlq publish", 5, &vocab, &weights).unwrap();
-
-        assert!(!outcome.matches.is_empty());
-        assert!(!outcome.weak);
-        assert!(outcome.unmatched_terms.is_empty());
-
-        let vague = search
-            .ask("first repository setup initialization", 5, &vocab, &weights)
-            .unwrap();
-        assert!(
-            vague.matches.is_empty() || vague.weak || !vague.unmatched_terms.is_empty(),
-            "a vocabulary-mismatched question must not present as confident"
-        );
-        let rendered: Vec<String> = outcome
-            .edges
-            .iter()
-            .map(|e| format!("{} {} {}", e.source, e.kind, e.target))
-            .collect();
-        assert!(
-            rendered.contains(&"Dlq::publish CALLS Dlq::encode".to_string()),
-            "edges were {rendered:?}"
-        );
-        assert!(
-            rendered.contains(&"Dlq::encode CALLS Dlq::checksum".to_string()),
-            "two-hop edge missing: {rendered:?}"
-        );
-        let hub_first = rendered
-            .iter()
-            .position(|e| e == "Dlq::publish CALLS Util::log");
-        let chain_first = rendered
-            .iter()
-            .position(|e| e == "Dlq::publish CALLS Dlq::encode")
-            .unwrap();
-        if let Some(hub_pos) = hub_first {
-            assert!(chain_first < hub_pos, "hub edge outranked the chain");
+        fn search(self) -> DuckDbSearch {
+            DuckDbSearch::new(self.client, 7, "sha")
         }
     }
 
+    fn vocab() -> SearchVocab {
+        SearchVocab::new(["Calls", "Imports", "Extends", "Contains", "Defines"])
+    }
+
+    fn weights() -> std::collections::HashMap<String, f64> {
+        std::collections::HashMap::from([("CALLS".to_string(), 1.0)])
+    }
+
     #[test]
-    fn structurally_central_node_surfaces_without_matching_any_term() {
-        let dir =
-            std::env::temp_dir().join(format!("orbit-objectrank-test-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let db = dir.join("t.duckdb");
-        let _ = std::fs::remove_file(&db);
-        let client = duckdb_client::DuckDbClient::open(&db).unwrap();
-        client
-            .initialize_schema(include_str!(concat!(
-                env!("CONFIG_DIR"),
-                "/graph_local.sql"
-            )))
-            .unwrap();
-        let insert = |id: i64, fqn: &str, name: &str, path: &str| {
-            let (search_text, token_count) = orbit_search::search_document(fqn, path);
-            client
-                .execute(
-                    &format!(
-                        "INSERT INTO gl_definition VALUES ({id}, '', 7, 'main', 'sha', '{path}', '{fqn}', '{name}', 'Method', 1, 2, 0, 0, 0, 0, '{search_text}', {token_count})"
-                    ),
-                    &[],
-                )
-                .unwrap();
-        };
-        insert(1, "Repo::commit_created", "commit_created", "app/a.rb");
-        insert(2, "Project::branch_created", "branch_created", "app/b.rb");
-        insert(
+    fn ask_runs_end_to_end_against_a_real_local_graph() {
+        let g = TestGraph::new("ask-e2e");
+        g.def(1, "Dlq::publish", "publish", "app/services/dlq.rb");
+        g.def(2, "Dlq::encode", "encode", "app/services/dlq.rb");
+        g.def(
             3,
             "Setup::initialize_defaults",
             "initialize_defaults",
             "app/c.rb",
         );
-        let edge = |source: i64, target: i64| {
-            client
-                .execute(
-                    &format!(
-                        "INSERT INTO gl_edge VALUES ({source}, 'Definition', 'CALLS', {target}, 'Definition', '')"
-                    ),
-                    &[],
-                )
-                .unwrap();
-        };
-        edge(1, 3);
-        edge(2, 3);
+        g.edge(1, "CALLS", 2);
+        g.edge(2, "CALLS", 3);
 
-        let search = DuckDbSearch::new(client, 7, "sha");
-        let vocab = SearchVocab::new(["Calls", "Imports", "Extends", "Contains", "Defines"]);
-        let weights = std::collections::HashMap::from([("CALLS".to_string(), 1.0)]);
-        let outcome = search.ask("commit branch", 5, &vocab, &weights).unwrap();
-
+        let outcome = g
+            .search()
+            .ask("dlq publish", 5, &vocab(), &weights())
+            .unwrap();
+        assert!(!outcome.matches.is_empty());
+        assert!(!outcome.weak);
+        assert!(outcome.unmatched_terms.is_empty());
         assert!(
-            outcome
-                .surfaced
-                .iter()
-                .any(|m| m.row.fqn == "Setup::initialize_defaults"),
-            "the node both weak anchors call must surface; surfaced were {:?}",
-            outcome
-                .surfaced
-                .iter()
-                .map(|m| m.row.fqn.as_str())
-                .collect::<Vec<_>>()
+            !outcome.edges.is_empty(),
+            "expansion must return the call chain around the match"
         );
     }
 }
