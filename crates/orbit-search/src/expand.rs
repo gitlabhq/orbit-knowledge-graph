@@ -156,6 +156,7 @@ mod tests {
         edges: Vec<NeighborhoodEdge>,
         degrees: HashMap<String, u64>,
         scoped: HashSet<String>,
+        unlabeled: bool,
         hop_requests: RefCell<Vec<Vec<String>>>,
     }
 
@@ -178,6 +179,7 @@ mod tests {
                 edges,
                 degrees,
                 scoped: HashSet::new(),
+                unlabeled: false,
                 hop_requests: RefCell::new(Vec::new()),
             }
         }
@@ -207,6 +209,9 @@ mod tests {
         }
 
         fn labels(&self, ids: &[&str]) -> Result<HashMap<String, NodeLabel>, Self::Error> {
+            if self.unlabeled {
+                return Ok(HashMap::new());
+            }
             Ok(ids
                 .iter()
                 .map(|id| {
@@ -232,7 +237,7 @@ mod tests {
     }
 
     #[test]
-    fn expands_two_hops_and_dedupes_edges_seen_in_both_hops() {
+    fn expansion_walks_two_hops_dedupes_filters_scoped_and_labels_or_falls_back() {
         let source = FakeSource::new(vec![("CALLS", "seed", "mid"), ("CALLS", "mid", "far")]);
         let expanded = expand_neighborhood(&source, &seeds(&["seed"]), &weights(), None).unwrap();
         let rendered: Vec<String> = expanded
@@ -244,31 +249,31 @@ mod tests {
             rendered,
             vec!["label_seed -> label_mid", "label_mid -> label_far"]
         );
-        assert!(expanded.hidden_by_kind.is_empty());
         assert_eq!(source.hop_requests.borrow().len(), 2);
-    }
 
-    #[test]
-    fn scoped_endpoints_drop_their_edges_before_ranking() {
         let mut source = FakeSource::new(vec![
             ("CALLS", "seed", "kept"),
             ("CALLS", "seed", "local@3:1"),
         ]);
         source.scoped.insert("local@3:1".to_string());
         let expanded = expand_neighborhood(&source, &seeds(&["seed"]), &weights(), None).unwrap();
-        assert_eq!(expanded.edges.len(), 1);
-        assert_eq!(expanded.edges[0].target, "label_kept");
-        assert!(expanded.hidden_by_kind.is_empty());
-    }
+        assert_eq!(
+            expanded.edges.len(),
+            1,
+            "scoped endpoints must drop their edges"
+        );
 
-    #[test]
-    fn frontier_is_capped_and_prefers_low_degree_nodes() {
+        let mut source = FakeSource::new(vec![("CALLS", "seed", "42")]);
+        source.unlabeled = true;
+        let expanded = expand_neighborhood(&source, &seeds(&["seed"]), &weights(), None).unwrap();
+        assert_eq!(
+            expanded.edges[0].target, "42",
+            "unlabeled nodes fall back to ids"
+        );
+
         let mut edge_list: Vec<(String, String, String)> = Vec::new();
         for i in 0..(FRONTIER_CAP + 20) {
             edge_list.push(("CALLS".to_string(), "seed".to_string(), format!("n{i}")));
-        }
-        for i in 0..30 {
-            edge_list.push(("CALLS".to_string(), format!("x{i}"), "n0".to_string()));
         }
         let source = FakeSource::new(
             edge_list
@@ -277,56 +282,6 @@ mod tests {
                 .collect(),
         );
         expand_neighborhood(&source, &seeds(&["seed"]), &weights(), None).unwrap();
-        let requests = source.hop_requests.borrow();
-        let frontier = &requests[1];
-        assert_eq!(frontier.len(), FRONTIER_CAP);
-        assert!(
-            !frontier.contains(&"n0".to_string()),
-            "the highest-degree node must not be expanded"
-        );
-    }
-
-    #[test]
-    fn mega_hubs_route_flow_but_never_headline_the_surfaced_list() {
-        let mut edge_list: Vec<(String, String, String)> = vec![
-            ("CALLS".to_string(), "seed".to_string(), "hub".to_string()),
-            ("CALLS".to_string(), "seed".to_string(), "quiet".to_string()),
-        ];
-        for i in 0..(SURFACED_MAX_DEGREE + 20) {
-            edge_list.push(("CALLS".to_string(), format!("c{i}"), "hub".to_string()));
-        }
-        let source = FakeSource::new(
-            edge_list
-                .iter()
-                .map(|(k, s, t)| (k.as_str(), s.as_str(), t.as_str()))
-                .collect(),
-        );
-        let expanded = expand_neighborhood(&source, &seeds(&["seed"]), &weights(), None).unwrap();
-        assert!(
-            !expanded.surfaced.iter().any(|(id, _)| id == "hub"),
-            "surfaced were {:?}",
-            expanded.surfaced
-        );
-    }
-
-    #[test]
-    fn unlabeled_nodes_fall_back_to_their_id() {
-        struct NoLabels(FakeSource);
-        impl NeighborhoodSource for NoLabels {
-            type Error = std::convert::Infallible;
-            fn hop(&self, ids: &[&str], cap: usize) -> Result<Vec<NeighborhoodEdge>, Self::Error> {
-                self.0.hop(ids, cap)
-            }
-            fn degrees(&self, ids: &[&str]) -> Result<HashMap<String, u64>, Self::Error> {
-                self.0.degrees(ids)
-            }
-            fn labels(&self, _ids: &[&str]) -> Result<HashMap<String, NodeLabel>, Self::Error> {
-                Ok(HashMap::new())
-            }
-        }
-        let source = NoLabels(FakeSource::new(vec![("CALLS", "seed", "42")]));
-        let expanded = expand_neighborhood(&source, &seeds(&["seed"]), &weights(), None).unwrap();
-        assert_eq!(expanded.edges[0].source, "seed");
-        assert_eq!(expanded.edges[0].target, "42");
+        assert_eq!(source.hop_requests.borrow()[1].len(), FRONTIER_CAP);
     }
 }

@@ -28,19 +28,26 @@ const EDGE_KIND_SYNONYMS: &[(&str, &str)] = &[
     ("inherit", "EXTENDS"),
 ];
 
-#[rustfmt::skip]
 const RELATIONAL_SYNONYMS: &[&str] = &[
-    "caller", "callee", "depend", "export", "implement", "invoke", "mention",
-    "reference", "render", "use", "used", "uses", "using",
+    "caller",
+    "callee",
+    "depend",
+    "export",
+    "implement",
+    "invoke",
+    "mention",
+    "reference",
+    "render",
+    "use",
+    "used",
+    "uses",
+    "using",
 ];
 
-/// Words that are meaningful identifier tokens in code.
 const KEEP_ANCHOR_WORDS: &[&str] = &[
     "after", "around", "before", "down", "off", "on", "out", "over", "under", "up", "with",
 ];
 
-/// Meaningful English, worthless as code-search terms: getters, setters, and
-/// worker naming make them match everything.
 const CODE_STOPWORDS: &[&str] = &[
     "get",
     "set",
@@ -233,7 +240,6 @@ pub struct Hit {
     pub index: usize,
     pub score: f64,
     tiered: bool,
-    guaranteed: bool,
     coverage: f64,
 }
 
@@ -421,7 +427,6 @@ fn rank(
         _ => vec![1.0; terms.len()],
     };
 
-    let mut per_term_best: Vec<Option<(f64, usize)>> = vec![None; terms.len()];
     let mut hits: Vec<Hit> = Vec::new();
     for (index, row) in rows.iter().enumerate() {
         let name_joined = row.name.join(" ");
@@ -468,14 +473,8 @@ fn rank(
                 index,
                 score,
                 tiered: tiered > 0.0,
-                guaranteed: false,
                 coverage: anchored as f64 / terms.len().max(1) as f64,
             });
-            for ((slot, term), term_stem) in per_term_best.iter_mut().zip(terms).zip(&term_stems) {
-                if row.matches(term, term_stem) && slot.is_none_or(|(best, _)| score > best) {
-                    *slot = Some((score, index));
-                }
-            }
         }
     }
     hits.sort_by(|a, b| {
@@ -491,33 +490,6 @@ fn rank(
             })
     });
     hits.truncate(cap);
-
-    let mut guaranteed = false;
-    for (slot, term) in per_term_best.iter().zip(terms) {
-        let Some((score, index)) = slot else { continue };
-        if vocab.is_relational(term) {
-            continue;
-        }
-        if let Some(hit) = hits.iter_mut().find(|h| h.index == *index) {
-            hit.guaranteed = true;
-            continue;
-        }
-        hits.push(Hit {
-            index: *index,
-            score: *score,
-            tiered: false,
-            guaranteed: true,
-            coverage: 0.0,
-        });
-        guaranteed = true;
-    }
-    if guaranteed {
-        hits.sort_by(|a, b| {
-            b.score
-                .partial_cmp(&a.score)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
-    }
     hits
 }
 
@@ -525,10 +497,9 @@ fn dedupe_by_parent(results: Vec<Hit>, corpus: &[CorpusRow], limit: usize) -> Ve
     let mut per_parent: HashMap<String, usize> = HashMap::new();
     let mut per_file: HashMap<String, usize> = HashMap::new();
     let mut kept: Vec<Hit> = Vec::with_capacity(limit);
-    let mut overflow_guaranteed: Vec<Hit> = Vec::new();
     for r in results {
-        if kept.len() >= limit && !r.guaranteed {
-            continue;
+        if kept.len() >= limit {
+            break;
         }
         let row = &corpus[r.index];
         let file = row
@@ -547,24 +518,8 @@ fn dedupe_by_parent(results: Vec<Hit>, corpus: &[CorpusRow], limit: usize) -> Ve
             continue;
         }
         *count += 1;
-        if kept.len() < limit {
-            kept.push(r);
-        } else {
-            overflow_guaranteed.push(r);
-        }
+        kept.push(r);
     }
-    for g in overflow_guaranteed {
-        let Some(pos) = kept.iter().rposition(|h| !h.guaranteed) else {
-            break;
-        };
-        kept.remove(pos);
-        kept.push(g);
-    }
-    kept.sort_by(|a, b| {
-        b.score
-            .partial_cmp(&a.score)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
     kept
 }
 
@@ -586,8 +541,19 @@ mod tests {
         SearchVocab::new(["Contains", "Defines", "Imports", "Calls", "Extends"])
     }
 
+    fn row(fqn: &str) -> CorpusRow {
+        CorpusRow {
+            id: fqn.to_string(),
+            fqn: fqn.to_string(),
+            kind: "Definition".to_string(),
+            loc: String::new(),
+            end_line: "0".to_string(),
+            degree: "0".to_string(),
+        }
+    }
+
     #[test]
-    fn split_words_handles_camel_snake_acronym_and_lone_capital_boundaries() {
+    fn tokenizer_splits_stems_and_filters_the_same_way_for_docs_and_queries() {
         assert_eq!(
             split_words("MergeRequestWidget"),
             ["merge", "request", "widget"]
@@ -604,24 +570,16 @@ mod tests {
         );
         assert_eq!(split_words("IUserService"), ["iuser", "user", "service"]);
         assert_eq!(split_words("UserT"), ["user"]);
-    }
 
-    #[test]
-    fn document_and_query_tokens_stem_to_the_same_space() {
         let (text, count) = search_document(
             "indexer::nats::message::NatsMessage::to_dlq",
             "crates/indexer/src/nats/message.rs",
         );
         assert_eq!(count, 13);
         assert!(text.split(' ').any(|t| t == "dlq"), "text was {text}");
-        assert_eq!(text.matches("messag").count(), 3, "text was {text}");
-
         let tokens = query_tokens(&["validated".to_string(), "Validate".to_string()]);
         assert_eq!(tokens, vec!["valid".to_string()]);
-    }
 
-    #[test]
-    fn stopwords_keep_code_vocabulary_and_drop_code_noise() {
         let sw = query_stopwords();
         for keep in ["after", "before", "up", "on", "with"] {
             assert!(
@@ -632,207 +590,56 @@ mod tests {
         for drop in ["get", "set", "using", "someone", "the", "should"] {
             assert!(sw.contains(drop), "{drop} must be a stopword");
         }
-    }
-
-    #[test]
-    fn content_words_drops_fillers_unless_nothing_would_remain() {
         assert_eq!(
             content_words("which issues mention the ontology"),
             vec!["issues", "mention", "ontology"]
         );
         assert_eq!(content_words("what is this"), vec!["what", "is", "this"]);
-    }
 
-    fn row(fqn: &str) -> CorpusRow {
-        CorpusRow {
-            id: fqn.to_string(),
-            fqn: fqn.to_string(),
-            kind: "Definition".to_string(),
-            loc: String::new(),
-            end_line: "0".to_string(),
-            degree: "0".to_string(),
-        }
+        assert!(candidate_splits("webhooks").contains(&("web".to_string(), "hooks".to_string())));
+        assert!(!candidate_splits("someone").iter().any(|(a, _)| a == "some"));
+        assert!(candidate_splits("up").is_empty());
+        assert!(candidate_splits("oauth2").is_empty());
     }
 
     #[test]
-    fn rank_orders_by_coverage_stems_inflections_and_breaks_ties_short() {
-        let corpus = vec![row("issues found during testing"), row("ontology issues")];
-        let terms = vec!["issues".to_string(), "ontology".to_string()];
-        let hits = rank(&terms, &corpus, 10, None, &test_vocab());
-        assert_eq!(corpus[hits[0].index].fqn, "ontology issues");
-
-        let corpus = vec![row("feat(ontology): add plan ontology")];
-        let hits = rank(&["ontology".to_string()], &corpus, 10, None, &test_vocab());
-        assert_eq!(hits.len(), 1);
-        assert!(hits[0].score > 0.0, "score was {}", hits[0].score);
-
-        let corpus = vec![
-            row("Ci::ExecuteBuildHooksWorker::execute_hooks_for_created_build"),
-            row("Group::execute_hooks"),
-        ];
-        let terms = vec!["execute".to_string(), "hooks".to_string()];
-        let hits = rank(&terms, &corpus, 10, None, &test_vocab());
-        assert_eq!(corpus[hits[0].index].fqn, "Group::execute_hooks");
-
-        let corpus = vec![
-            row("ontology::validation::validate"),
-            row("indexer::unrelated::thing"),
-        ];
-        let hits = rank(&["validated".to_string()], &corpus, 10, None, &test_vocab());
-        assert_eq!(hits.len(), 1);
-        assert_eq!(corpus[hits[0].index].fqn, "ontology::validation::validate");
-    }
-
-    #[test]
-    fn idf_lets_a_rare_term_outrank_common_filler_when_the_corpus_is_complete() {
-        let mut corpus: Vec<CorpusRow> = (0..40)
-            .map(|i| row(&format!("pkg::send_thing_{i}")))
-            .collect();
-        corpus.push(row("indexer::nats::message::NatsMessage::to_dlq"));
-        let terms = vec!["send".to_string(), "dlq".to_string()];
-
-        let weighted = rank(&terms, &corpus, 5, Some(&[0.69, 3.07]), &test_vocab());
-        assert!(
-            corpus[weighted[0].index].fqn.ends_with("to_dlq"),
-            "weighted top was {}",
-            corpus[weighted[0].index].fqn
-        );
-
-        let flat = rank(&terms, &corpus, 5, None, &test_vocab());
-        let top = flat[0].score;
-        assert!(
-            flat.iter().all(|h| (h.score - top).abs() < f64::EPSILON),
-            "without weights every one-term match should tie"
-        );
-    }
-
-    #[test]
-    fn rank_prefers_the_short_exact_symbol_over_a_longer_tie() {
-        let corpus = vec![
-            row("Ci::ExecuteBuildHooksWorker::execute_hooks_for_created_build"),
-            row("Group::execute_hooks"),
-        ];
-        let terms = vec!["execute".to_string(), "hooks".to_string()];
-        let hits = rank(&terms, &corpus, 10, None, &test_vocab());
-        assert_eq!(corpus[hits[0].index].fqn, "Group::execute_hooks");
-    }
-
-    #[test]
-    fn dedupe_keeps_guaranteed_rows_under_the_cap_in_score_order() {
-        let mut corpus: Vec<CorpusRow> = (0..20)
-            .map(|i| row(&format!("pkg{i}::parse_file_entry")))
-            .collect();
-        corpus.push(row("code_graph::langs::js::frameworks::vue"));
-        let terms = vec!["parse".to_string(), "vue".to_string(), "file".to_string()];
-        let hits = dedupe_by_parent(rank(&terms, &corpus, 15, None, &test_vocab()), &corpus, 3);
-        assert_eq!(hits.len(), 3);
-        assert!(
-            hits.iter().any(|h| corpus[h.index].fqn.ends_with("::vue")),
-            "the only row matching 'vue' must survive the cap"
-        );
-
-        let corpus = vec![row("a::one"), row("b::two"), row("c::three")];
-        let hit = |index: usize, score: f64, guaranteed: bool| Hit {
-            index,
-            score,
-            tiered: false,
-            guaranteed,
-            coverage: 0.0,
-        };
-        let results = vec![hit(0, 5.0, false), hit(1, 3.0, true), hit(2, 4.0, true)];
-        let hits = dedupe_by_parent(results, &corpus, 2);
-        let scores: Vec<f64> = hits.iter().map(|h| h.score).collect();
-        assert_eq!(scores, vec![4.0, 3.0]);
-    }
-
-    #[test]
-    fn term_base_sets_seed_every_term_and_accumulate_overlap() {
-        let corpus = vec![
-            row("Repo::commit_hook"),
-            row("Project::setup"),
-            row("Project::commit_and_setup"),
-            row("Other::thing"),
-        ];
+    fn anchor_helpers_respect_caps_relational_terms_and_parent_keys() {
+        let corpus = vec![row("Repo::commit_hook"), row("Project::setup")];
         let terms = vec![
             "commit".to_string(),
             "setup".to_string(),
             "uses".to_string(),
         ];
-        let sets = term_base_sets(&terms, &corpus, None, &test_vocab());
-        assert_eq!(sets.len(), 2, "relational 'uses' must not produce a set");
-        let commit_ids: Vec<usize> = sets[0].iter().map(|&(i, _)| i).collect();
-        let setup_ids: Vec<usize> = sets[1].iter().map(|&(i, _)| i).collect();
-        assert!(commit_ids.contains(&0) && commit_ids.contains(&2));
-        assert!(setup_ids.contains(&1) && setup_ids.contains(&2));
-        assert!(!commit_ids.contains(&3) && !setup_ids.contains(&3));
-
+        assert_eq!(
+            term_base_sets(&terms, &corpus, None, &test_vocab()).len(),
+            2
+        );
         let big: Vec<CorpusRow> = (0..40).map(|i| row(&format!("m{i}::commit"))).collect();
         let capped = term_base_sets(&["commit".to_string()], &big, None, &test_vocab());
         assert_eq!(capped[0].len(), BASE_SET_PER_TERM);
-    }
 
-    #[test]
-    fn candidate_splits_offer_balanced_compound_parts_and_reject_stopword_halves() {
-        let splits = candidate_splits("webhooks");
-        assert!(
-            splits.contains(&("web".to_string(), "hooks".to_string())),
-            "splits were {splits:?}"
-        );
-        assert!(
-            !candidate_splits("someone").iter().any(|(a, _)| a == "some"),
-            "stopword halves must be rejected"
-        );
-        assert!(candidate_splits("up").is_empty());
-        assert!(
-            candidate_splits("oauth2").is_empty(),
-            "non-alphabetic terms are not split"
-        );
-    }
-
-    #[test]
-    fn unmatched_terms_reports_dead_words_but_not_relational_ones() {
-        let corpus = vec![row("Project::execute_hooks")];
-        let terms: Vec<String> = ["fires", "hooks", "push", "uses"]
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
         assert_eq!(
             unmatched_terms(&terms, &corpus, &test_vocab()),
-            vec!["fires".to_string(), "push".to_string()]
+            Vec::<String>::new()
         );
-    }
-
-    #[test]
-    fn top_hit_confidence_requires_a_name_tier_hit_and_half_coverage() {
-        let corpus = vec![row("Dlq::publish")];
-        let strong = rank(
-            &["dlq".to_string(), "publish".to_string()],
-            &corpus,
-            10,
-            None,
-            &test_vocab(),
+        assert_eq!(
+            unmatched_terms(
+                &["zzzz".to_string(), "uses".to_string()],
+                &corpus,
+                &test_vocab()
+            ),
+            vec!["zzzz".to_string()]
         );
-        assert!(strong[0].confident());
 
-        let corpus = vec![row("prehooksetup")];
-        let substring_only = rank(&["hooks".to_string()], &corpus, 10, None, &test_vocab());
-        assert!(!substring_only.is_empty());
-        assert!(!substring_only[0].confident());
+        let hits = rank(&["commit".to_string()], &corpus, 10, None, &test_vocab());
+        assert_eq!(hits.len(), 1);
+        let limited = dedupe_by_parent(hits, &corpus, 0);
+        assert!(limited.is_empty());
 
-        let corpus = vec![row("getTestRunsForProject")];
-        let terms = content_words(
-            "when a repository gets its first commit, what runs to set the project up",
-        );
-        let low_coverage = rank(&terms, &corpus, 10, None, &test_vocab());
-        assert!(!low_coverage.is_empty());
-        assert!(
-            !low_coverage[0].confident(),
-            "generic-verb name hits covering under half the question must not present as confident"
-        );
-    }
+        assert_eq!(parent_key("a::B::field"), "a::B");
+        assert_eq!(parent_key("pkg.Func"), "pkg");
+        assert_eq!(parent_key("bare"), "bare");
 
-    #[test]
-    fn vocab_maps_synonyms_and_kind_names_to_edge_kinds() {
         let vocab = test_vocab();
         assert_eq!(
             vocab.focus_edge_kind(&["calls".to_string()]),

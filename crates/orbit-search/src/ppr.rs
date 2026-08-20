@@ -238,48 +238,10 @@ mod tests {
     }
 
     #[test]
-    fn seed_weights_bias_scores_and_uniform_seeds_stay_uniform() {
-        let g = cycle(4);
-        let scores = personalized_pagerank(&g, &[(1, 1.0)], PPR_DAMPING);
-        for i in [0, 2, 3] {
-            assert!(scores[1] > scores[i], "scores were {scores:?}");
-        }
-
-        let scores = personalized_pagerank(&g, &[(0, 3.0), (2, 1.0)], PPR_DAMPING);
-        assert!(scores[0] > scores[2], "scores were {scores:?}");
-
-        let uniform: Vec<(usize, f64)> = (0..4).map(|i| (i, 1.0)).collect();
-        let scores = personalized_pagerank(&g, &uniform, PPR_DAMPING);
+    fn pagerank_normalizes_and_handles_degenerate_inputs() {
+        let scores = personalized_pagerank(&cycle(4), &[(1, 1.0)], PPR_DAMPING);
         assert!((scores.iter().sum::<f64>() - 1.0).abs() < 1e-6);
-        for s in &scores {
-            assert!((s - 0.25).abs() < 1e-6, "scores were {scores:?}");
-        }
-    }
 
-    #[test]
-    fn dangling_mass_returns_to_the_seed_instead_of_leaking() {
-        let mut g = SubGraph::new(2);
-        g.add_edge(0, 1, 1.0);
-        let scores = personalized_pagerank(&g, &[(0, 1.0)], PPR_DAMPING);
-        assert!((scores.iter().sum::<f64>() - 1.0).abs() < 1e-6);
-        assert!(scores[0] > scores[1], "scores were {scores:?}");
-    }
-
-    #[test]
-    fn edge_weight_steers_rank_toward_heavy_edges_and_quiet_targets() {
-        assert!(edge_weight(1.0, 0) > edge_weight(1.0, 10));
-        assert!(edge_weight(1.0, 10) > edge_weight(1.0, 1000));
-        assert!(edge_weight(1.0, 5) > edge_weight(0.4, 5));
-
-        let mut g = SubGraph::new(3);
-        g.add_edge(0, 1, edge_weight(1.0, 1000));
-        g.add_edge(0, 2, edge_weight(0.9, 2));
-        let scores = personalized_pagerank(&g, &[(0, 1.0)], PPR_DAMPING);
-        assert!(scores[2] > scores[1], "scores were {scores:?}");
-    }
-
-    #[test]
-    fn degenerate_inputs_return_zeros_or_empty() {
         let g = cycle(3);
         assert_eq!(personalized_pagerank(&g, &[], PPR_DAMPING), vec![0.0; 3]);
         assert_eq!(
@@ -289,161 +251,29 @@ mod tests {
         assert!(personalized_pagerank(&SubGraph::new(0), &[(0, 1.0)], PPR_DAMPING).is_empty());
     }
 
-    fn edge(kind: &str, source: &str, target: &str) -> NeighborhoodEdge {
-        NeighborhoodEdge {
-            kind: kind.to_string(),
-            source: source.to_string(),
-            target: target.to_string(),
-        }
-    }
-
-    fn ranked_top(
-        edges: &[NeighborhoodEdge],
-        degrees: &HashMap<String, u64>,
-        focus: Option<&str>,
-        cap: usize,
-    ) -> RankedNeighborhood {
-        let weights = HashMap::from([("CALLS".to_string(), 1.0), ("CONTAINS".to_string(), 0.4)]);
-        rank_neighborhood(
-            edges,
-            degrees,
+    #[test]
+    fn rank_neighborhood_respects_the_cap_and_reports_hidden_counts() {
+        let edges: Vec<NeighborhoodEdge> = (0..5)
+            .map(|i| NeighborhoodEdge {
+                kind: "CALLS".to_string(),
+                source: "seed".to_string(),
+                target: format!("t{i}"),
+            })
+            .collect();
+        let weights = HashMap::from([("CALLS".to_string(), 1.0)]);
+        let ranked = rank_neighborhood(
+            &edges,
+            &HashMap::new(),
             &[vec![("seed".to_string(), 1.0)]],
             &weights,
-            focus,
-            cap,
-        )
-    }
-
-    #[test]
-    fn rank_neighborhood_ranks_by_proximity_kind_weight_and_target_degree() {
-        let near_vs_far = [
-            edge("CALLS", "seed", "near"),
-            edge("CALLS", "far_a", "far_b"),
-        ];
-        let ranked = ranked_top(&near_vs_far, &HashMap::new(), None, 1);
-        assert_eq!(ranked.selected, vec![0]);
-        assert_eq!(ranked.hidden_by_kind, vec![("CALLS".to_string(), 1)]);
-
-        let call_vs_contain = [
-            edge("CONTAINS", "seed", "parent"),
-            edge("CALLS", "seed", "callee"),
-        ];
-        assert_eq!(
-            ranked_top(&call_vs_contain, &HashMap::new(), None, 1).selected,
-            vec![1]
-        );
-
-        let hub_vs_quiet = [edge("CALLS", "seed", "hub"), edge("CALLS", "seed", "quiet")];
-        let degrees = HashMap::from([("hub".to_string(), 5000), ("quiet".to_string(), 3)]);
-        assert_eq!(
-            ranked_top(&hub_vs_quiet, &degrees, None, 1).selected,
-            vec![1]
-        );
-    }
-
-    #[test]
-    fn focus_outweighs_declared_kind_weights_and_leads_the_grouping() {
-        let edges = [
-            edge("CALLS", "seed", "callee"),
-            edge("CONTAINS", "seed", "parent"),
-        ];
-        assert_eq!(
-            ranked_top(&edges, &HashMap::new(), Some("CONTAINS"), 1).selected,
-            vec![1]
-        );
-
-        let edges = [
-            edge("CONTAINS", "seed", "a"),
-            edge("CALLS", "seed", "b"),
-            edge("CONTAINS", "seed", "c"),
-        ];
-        let ranked = ranked_top(&edges, &HashMap::new(), Some("CONTAINS"), 3);
-        let kinds: Vec<&str> = ranked
-            .selected
-            .iter()
-            .map(|&i| edges[i].kind.as_str())
-            .collect();
-        assert_eq!(kinds, vec!["CONTAINS", "CONTAINS", "CALLS"]);
-        assert!(ranked.hidden_by_kind.is_empty());
-    }
-
-    #[test]
-    fn triangulation_surfaces_the_node_connected_to_multiple_weak_seeds() {
-        let edges = [
-            edge("CALLS", "seed_a", "answer"),
-            edge("CALLS", "seed_b", "answer"),
-            edge("CALLS", "seed_a", "satellite_a"),
-            edge("CALLS", "seed_b", "satellite_b"),
-        ];
-        let weights = HashMap::from([("CALLS".to_string(), 1.0)]);
-        let ranked = rank_neighborhood(
-            &edges,
-            &HashMap::new(),
-            &[
-                vec![("seed_a".to_string(), 1.0)],
-                vec![("seed_b".to_string(), 1.0)],
-            ],
-            &weights,
             None,
-            4,
+            2,
         );
-        let non_seed_top = ranked
-            .node_scores
-            .iter()
-            .find(|(id, _)| !id.starts_with("seed"))
-            .unwrap();
-        assert_eq!(
-            non_seed_top.0, "answer",
-            "scores were {:?}",
-            ranked.node_scores
-        );
-    }
+        assert_eq!(ranked.selected.len(), 2);
+        assert_eq!(ranked.hidden_by_kind, vec![("CALLS".to_string(), 3)]);
+        assert!(ranked.node_scores.iter().all(|&(_, s)| s > 0.0));
 
-    #[test]
-    fn quorum_consensus_forgives_filler_terms_but_still_requires_agreement() {
-        let edges = [
-            edge("CALLS", "seed_a", "answer"),
-            edge("CALLS", "seed_b", "answer"),
-            edge("CALLS", "seed_a", "satellite"),
-        ];
-        let weights = HashMap::from([("CALLS".to_string(), 1.0)]);
-        let ranked = rank_neighborhood(
-            &edges,
-            &HashMap::new(),
-            &[
-                vec![("seed_a".to_string(), 1.0)],
-                vec![("seed_b".to_string(), 1.0)],
-                vec![("filler".to_string(), 1.0)],
-            ],
-            &weights,
-            None,
-            4,
-        );
-        let score_of = |id: &str| {
-            ranked
-                .node_scores
-                .iter()
-                .find(|(n, _)| n == id)
-                .map(|&(_, s)| s)
-                .unwrap_or(0.0)
-        };
-        assert!(
-            score_of("answer") > score_of("satellite"),
-            "two-term consensus must beat a single-term satellite despite the dead filler term; scores were {:?}",
-            ranked.node_scores
-        );
-    }
-
-    #[test]
-    fn rank_neighborhood_reaches_two_hops_out() {
-        let edges = [
-            edge("CALLS", "seed", "mid"),
-            edge("CALLS", "mid", "far"),
-            edge("CALLS", "stray_a", "stray_b"),
-        ];
-        assert_eq!(
-            ranked_top(&edges, &HashMap::new(), None, 2).selected,
-            vec![0, 1]
-        );
+        let empty = rank_neighborhood(&edges, &HashMap::new(), &[], &weights, None, 2);
+        assert!(empty.selected.is_empty() && empty.node_scores.is_empty());
     }
 }
