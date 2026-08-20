@@ -1,6 +1,9 @@
+use std::collections::HashMap;
+
 pub const PPR_DAMPING: f64 = 0.85;
 pub const DEFAULT_EDGE_WEIGHT: f64 = 0.5;
 pub const REVERSE_EDGE_FACTOR: f64 = 0.5;
+pub const FOCUS_BOOST: f64 = 2.0;
 
 const TOLERANCE: f64 = 1e-6;
 const MAX_ITERATIONS: usize = 100;
@@ -27,6 +30,119 @@ impl SubGraph {
 
 pub fn edge_weight(kind_weight: f64, target_degree: u64) -> f64 {
     kind_weight / (1.0 + (1.0 + target_degree as f64).ln())
+}
+
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub struct NeighborhoodEdge {
+    pub kind: String,
+    pub source: String,
+    pub target: String,
+}
+
+pub struct RankedNeighborhood {
+    pub selected: Vec<usize>,
+    pub hidden_by_kind: Vec<(String, usize)>,
+}
+
+pub fn rank_neighborhood(
+    edges: &[NeighborhoodEdge],
+    degrees: &HashMap<String, u64>,
+    seeds: &[(String, f64)],
+    kind_weights: &HashMap<String, f64>,
+    focus: Option<&str>,
+    cap: usize,
+) -> RankedNeighborhood {
+    let mut index: HashMap<&str, usize> = HashMap::new();
+    let mut node_count = 0usize;
+    for (id, _) in seeds {
+        index.entry(id.as_str()).or_insert_with(|| {
+            node_count += 1;
+            node_count - 1
+        });
+    }
+    for e in edges {
+        for id in [e.source.as_str(), e.target.as_str()] {
+            index.entry(id).or_insert_with(|| {
+                node_count += 1;
+                node_count - 1
+            });
+        }
+    }
+
+    let kind_weight = |kind: &str| -> f64 {
+        if focus == Some(kind) {
+            return FOCUS_BOOST;
+        }
+        kind_weights
+            .get(kind)
+            .copied()
+            .unwrap_or(DEFAULT_EDGE_WEIGHT)
+    };
+    let degree = |id: &str| degrees.get(id).copied().unwrap_or(0);
+
+    let mut graph = SubGraph::new(node_count);
+    for e in edges {
+        let s = index[e.source.as_str()];
+        let t = index[e.target.as_str()];
+        let kw = kind_weight(&e.kind);
+        graph.add_edge(s, t, edge_weight(kw, degree(&e.target)));
+        graph.add_edge(
+            t,
+            s,
+            REVERSE_EDGE_FACTOR * edge_weight(kw, degree(&e.source)),
+        );
+    }
+
+    let seed_indices: Vec<(usize, f64)> = seeds
+        .iter()
+        .map(|(id, w)| (index[id.as_str()], *w))
+        .collect();
+    let scores = personalized_pagerank(&graph, &seed_indices, PPR_DAMPING);
+
+    let mut order: Vec<(usize, f64)> = edges
+        .iter()
+        .enumerate()
+        .map(|(i, e)| {
+            (
+                i,
+                scores[index[e.source.as_str()]] + scores[index[e.target.as_str()]],
+            )
+        })
+        .collect();
+    order.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+    let mut selected: Vec<(usize, f64)> = order.into_iter().take(cap).collect();
+    selected.sort_by(|&(a, sa), &(b, sb)| {
+        let ka = &edges[a].kind;
+        let kb = &edges[b].kind;
+        let fa = focus != Some(ka.as_str());
+        let fb = focus != Some(kb.as_str());
+        fa.cmp(&fb)
+            .then_with(|| ka.cmp(kb))
+            .then_with(|| sb.partial_cmp(&sa).unwrap_or(std::cmp::Ordering::Equal))
+    });
+
+    let mut shown: HashMap<&str, usize> = HashMap::new();
+    for &(i, _) in &selected {
+        *shown.entry(edges[i].kind.as_str()).or_insert(0) += 1;
+    }
+    let mut totals: HashMap<&str, usize> = HashMap::new();
+    for e in edges {
+        *totals.entry(e.kind.as_str()).or_insert(0) += 1;
+    }
+    let mut hidden_by_kind: Vec<(String, usize)> = totals
+        .into_iter()
+        .filter_map(|(kind, total)| {
+            let hidden = total - shown.get(kind).copied().unwrap_or(0);
+            (hidden > 0).then(|| (kind.to_string(), hidden))
+        })
+        .collect();
+    hidden_by_kind.sort();
+
+    RankedNeighborhood {
+        selected: selected.into_iter().map(|(i, _)| i).collect(),
+        hidden_by_kind,
+    }
 }
 
 /// Power iteration with seed-biased teleportation. Dangling mass teleports
@@ -166,5 +282,126 @@ mod tests {
         assert!(edge_weight(1.0, 0) > edge_weight(1.0, 10));
         assert!(edge_weight(1.0, 10) > edge_weight(1.0, 1000));
         assert!(edge_weight(1.0, 5) > edge_weight(0.4, 5));
+    }
+
+    fn edge(kind: &str, source: &str, target: &str) -> NeighborhoodEdge {
+        NeighborhoodEdge {
+            kind: kind.to_string(),
+            source: source.to_string(),
+            target: target.to_string(),
+        }
+    }
+
+    fn weights() -> HashMap<String, f64> {
+        HashMap::from([("CALLS".to_string(), 1.0), ("CONTAINS".to_string(), 0.4)])
+    }
+
+    #[test]
+    fn rank_neighborhood_prefers_edges_near_the_seed() {
+        let edges = vec![
+            edge("CALLS", "seed", "near"),
+            edge("CALLS", "far_a", "far_b"),
+        ];
+        let ranked = rank_neighborhood(
+            &edges,
+            &HashMap::new(),
+            &[("seed".to_string(), 1.0)],
+            &weights(),
+            None,
+            1,
+        );
+        assert_eq!(ranked.selected, vec![0]);
+        assert_eq!(ranked.hidden_by_kind, vec![("CALLS".to_string(), 1)]);
+    }
+
+    #[test]
+    fn rank_neighborhood_prefers_strong_kinds_over_structural_ones() {
+        let edges = vec![
+            edge("CONTAINS", "seed", "parent"),
+            edge("CALLS", "seed", "callee"),
+        ];
+        let ranked = rank_neighborhood(
+            &edges,
+            &HashMap::new(),
+            &[("seed".to_string(), 1.0)],
+            &weights(),
+            None,
+            1,
+        );
+        assert_eq!(ranked.selected, vec![1]);
+    }
+
+    #[test]
+    fn rank_neighborhood_focus_outweighs_the_declared_kind_weight() {
+        let edges = vec![
+            edge("CALLS", "seed", "callee"),
+            edge("CONTAINS", "seed", "parent"),
+        ];
+        let ranked = rank_neighborhood(
+            &edges,
+            &HashMap::new(),
+            &[("seed".to_string(), 1.0)],
+            &weights(),
+            Some("CONTAINS"),
+            1,
+        );
+        assert_eq!(ranked.selected, vec![1]);
+    }
+
+    #[test]
+    fn rank_neighborhood_hub_target_loses_to_quiet_target() {
+        let edges = vec![edge("CALLS", "seed", "hub"), edge("CALLS", "seed", "quiet")];
+        let degrees = HashMap::from([("hub".to_string(), 5000), ("quiet".to_string(), 3)]);
+        let ranked = rank_neighborhood(
+            &edges,
+            &degrees,
+            &[("seed".to_string(), 1.0)],
+            &weights(),
+            None,
+            1,
+        );
+        assert_eq!(ranked.selected, vec![1]);
+    }
+
+    #[test]
+    fn rank_neighborhood_groups_selected_edges_by_kind_with_focus_first() {
+        let edges = vec![
+            edge("CONTAINS", "seed", "a"),
+            edge("CALLS", "seed", "b"),
+            edge("CONTAINS", "seed", "c"),
+        ];
+        let ranked = rank_neighborhood(
+            &edges,
+            &HashMap::new(),
+            &[("seed".to_string(), 1.0)],
+            &weights(),
+            Some("CONTAINS"),
+            3,
+        );
+        let kinds: Vec<&str> = ranked
+            .selected
+            .iter()
+            .map(|&i| edges[i].kind.as_str())
+            .collect();
+        assert_eq!(kinds, vec!["CONTAINS", "CONTAINS", "CALLS"]);
+        assert!(ranked.hidden_by_kind.is_empty());
+    }
+
+    #[test]
+    fn rank_neighborhood_reaches_two_hops_out() {
+        let edges = vec![
+            edge("CALLS", "seed", "mid"),
+            edge("CALLS", "mid", "far"),
+            edge("CALLS", "stray_a", "stray_b"),
+        ];
+        let ranked = rank_neighborhood(
+            &edges,
+            &HashMap::new(),
+            &[("seed".to_string(), 1.0)],
+            &weights(),
+            None,
+            2,
+        );
+        assert_eq!(ranked.selected, vec![0, 1]);
     }
 }

@@ -4,7 +4,8 @@ use std::io::Write;
 use std::path::PathBuf;
 
 use anyhow::Result;
-use orbit_search::{FOCUS_EDGES_PER_KIND, MAX_EDGES_PER_KIND, SearchVocab, content_words};
+use orbit_search::{SearchVocab, content_words};
+use std::collections::HashMap;
 
 use local::LocalBackend;
 
@@ -18,6 +19,23 @@ fn vocab() -> &'static SearchVocab {
         SearchVocab::new(
             code_graph::v2::types::EdgeKind::iter().map(|kind| kind.as_ref().to_string()),
         )
+    })
+}
+
+fn kind_weights() -> &'static HashMap<String, f64> {
+    static WEIGHTS: std::sync::OnceLock<HashMap<String, f64>> = std::sync::OnceLock::new();
+    WEIGHTS.get_or_init(|| {
+        use strum::IntoEnumIterator;
+        let Ok(ontology) = ontology::Ontology::load_embedded() else {
+            return HashMap::new();
+        };
+        code_graph::v2::types::EdgeKind::iter()
+            .filter_map(|kind| {
+                let name = kind.as_ref().to_uppercase();
+                let weight = ontology.edge_search_weight(&name)?;
+                Some((name, weight))
+            })
+            .collect()
     })
 }
 
@@ -39,7 +57,7 @@ pub(crate) fn run(
     let mut out = std::io::stdout().lock();
     writeln!(out, "ask {:?} — {}", question, backend.header())?;
 
-    let outcome = backend.ask(&question, limit, vocab())?;
+    let outcome = backend.ask(&question, limit, vocab(), kind_weights())?;
     writeln!(out, "terms: {}", outcome.terms.join(" "))?;
 
     if outcome.matches.is_empty() {
@@ -66,39 +84,36 @@ pub(crate) fn run(
 
     writeln!(
         out,
-        "\nConnections (1 hop around top {}):",
+        "\nConnections (2 hops around top {}):",
         outcome.seed_count
     )?;
-    let focus = outcome.focus;
-    let kind_cap = |kind: &str| {
-        if focus.as_deref() == Some(kind) {
-            FOCUS_EDGES_PER_KIND
-        } else {
-            MAX_EDGES_PER_KIND
-        }
-    };
+    let hidden: HashMap<&str, usize> = outcome
+        .hidden_by_kind
+        .iter()
+        .map(|(kind, n)| (kind.as_str(), *n))
+        .collect();
     let mut current = "";
-    let mut in_kind = 0usize;
     for e in &outcome.edges {
         if e.kind != current {
-            report_hidden(&mut out, current, in_kind, kind_cap(current))?;
+            report_hidden(&mut out, current, &hidden)?;
             current = &e.kind;
-            in_kind = 0;
             writeln!(out, "  {current}:")?;
         }
-        if in_kind < kind_cap(current) {
-            writeln!(
-                out,
-                "    {}{} --> {}{}",
-                e.source,
-                fmt_loc(&e.source_loc),
-                e.target,
-                fmt_loc(&e.target_loc)
-            )?;
-        }
-        in_kind += 1;
+        writeln!(
+            out,
+            "    {}{} --> {}{}",
+            e.source,
+            fmt_loc(&e.source_loc),
+            e.target,
+            fmt_loc(&e.target_loc)
+        )?;
     }
-    report_hidden(&mut out, current, in_kind, kind_cap(current))?;
+    report_hidden(&mut out, current, &hidden)?;
+    for (kind, n) in &outcome.hidden_by_kind {
+        if !outcome.edges.iter().any(|e| &e.kind == kind) {
+            writeln!(out, "  {kind}: … {n} below the relevance cut")?;
+        }
+    }
     Ok(())
 }
 
@@ -148,11 +163,10 @@ fn snippet(root: &std::path::Path, loc: &str, end_line: &str) -> Vec<String> {
 fn report_hidden(
     out: &mut impl Write,
     kind: &str,
-    total: usize,
-    cap: usize,
+    hidden: &HashMap<&str, usize>,
 ) -> std::io::Result<()> {
-    if !kind.is_empty() && total > cap {
-        writeln!(out, "    … {} more", total - cap)?;
+    if let Some(n) = hidden.get(kind).filter(|_| !kind.is_empty()) {
+        writeln!(out, "    … {n} more")?;
     }
     Ok(())
 }
