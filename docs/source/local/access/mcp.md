@@ -385,7 +385,7 @@ and data types present in the local DuckDB graph.
 Example:
 
 ```plaintext
-Use `get_graph_schema` tool to show me what tables are in my local graph.
+Use the `get_graph_schema` tool to show me what tables are in my local graph.
 ```
 
 ### `run_sql`
@@ -401,5 +401,5 @@ narrower query. If the agent does not recover, ask it for fewer results.
 Example:
 
 ```plaintext
-Show me the most used imports used in this repository.
+Show me the most used imports in this repository.
 ```
