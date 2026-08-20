@@ -456,12 +456,6 @@ impl CodeGraph {
             },
         );
 
-        // Reuse one BFS visit map across every start node. `Bfs::new` allocates
-        // a fresh graph-sized FixedBitSet per call; doing that once per
-        // definition (petgraph has no Bfs::reset) was the single largest source
-        // of peak RSS on big graphs. `reset_map` clears the bits in place, so
-        // each iteration reproduces exactly what `Bfs::new(&extends_only, idx)`
-        // would have built.
         let mut bfs: Bfs<NodeIndex, _> = Bfs {
             stack: VecDeque::new(),
             discovered: extends_only.visit_map(),

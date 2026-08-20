@@ -156,8 +156,7 @@ impl RefPack {
         self.refs.is_empty()
     }
 
-    /// Decode ref `idx`, filling `chain_buf`/`values_buf` (cleared first).
-    /// `chain_buf` is only meaningful when `has_chain` is true.
+    /// Decode ref `idx` into `chain_buf` and `values_buf`, both cleared first.
     pub fn decode(
         &self,
         idx: usize,
@@ -200,9 +199,7 @@ impl RefPack {
         }
     }
 
-    /// Replace ref `idx`'s reaching values with a single `Type(fqn)`,
-    /// mirroring the unresolved-alias patch on raw `CollectedRef`s.
-    /// Out-of-range `idx` is a no-op, like `Vec::get_mut` returning `None`.
+    /// Set ref `idx`'s reaching values to a single `Type(fqn)`; out-of-range `idx` does nothing.
     pub fn set_reaching_type(&mut self, idx: usize, fqn: &str) {
         if idx >= self.refs.len() {
             return;
@@ -218,8 +215,7 @@ impl RefPack {
         self.refs[idx].values_len = 1;
     }
 
-    /// Resolve an optional interned name; empty when absent (only reached for
-    /// name-bearing tags, where the id is always present).
+    /// Return the interned name, or an empty string when `name` is `None`.
     fn sym(&self, name: Option<StrId>) -> SmolStr {
         name.map_or_else(SmolStr::default, |id| SmolStr::from(self.strings.get(id)))
     }
