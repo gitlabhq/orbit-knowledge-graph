@@ -16,9 +16,22 @@ An insert-trigger materialized view copies finished GKG queries out of
 `system.query_log` into a durable table as they are logged:
 
 - `query_log_retention` — an unversioned auxiliary table (`MergeTree`, 30-day
-  `TTL` on `event_time`) holding one row per finished GKG query: `event_time`,
-  `query_id`, `log_comment`, timing, read/result rows and bytes, memory, and the
-  exception code and text.
+  `TTL` on `event_time`) holding one row per finished GKG query. Each row
+  stores:
+
+  | Column | Description |
+  |--------|-------------|
+  | `event_time` | When ClickHouse finished executing the query. |
+  | `query_id` | The sanitized-or-ULID query identifier set by the server. |
+  | `log_comment` | Attribution string, e.g. `gkg;correlation_id=<id>`. |
+  | `query_duration_ms` | Wall-clock execution time in milliseconds. |
+  | `read_rows` | Number of rows read from storage. |
+  | `read_bytes` | Bytes read from storage. |
+  | `result_rows` | Number of rows in the result set. |
+  | `result_bytes` | Bytes in the result set. |
+  | `memory_usage` | Peak memory consumed by the query. |
+  | `exception_code` | ClickHouse error code, 0 on success. |
+  | `exception` | Error message text, empty on success. |
 - `query_log_retention_mv` — an unversioned materialized view that reads
   `system.query_log` directly and writes into the table, filtered to
   `type = 'QueryFinish' AND log_comment LIKE 'gkg%'`.
