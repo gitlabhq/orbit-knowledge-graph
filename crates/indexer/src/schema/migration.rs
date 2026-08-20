@@ -254,8 +254,6 @@ pub async fn create_unversioned_tables(
     graph: &ArrowClickHouseClient,
     ontology: &ontology::Ontology,
 ) -> Result<(), MigrationError> {
-    run_auxiliary_migrations(graph).await?;
-
     for object in generate_unversioned_objects(ontology) {
         graph
             .execute(&object.ddl)
@@ -265,6 +263,9 @@ pub async fn create_unversioned_tables(
                 reason: error.to_string(),
             })?;
     }
+
+    run_auxiliary_migrations(graph).await?;
+
     Ok(())
 }
 
@@ -278,11 +279,11 @@ async fn run_auxiliary_migrations(graph: &ArrowClickHouseClient) -> Result<(), M
     }
 
     graph
-        .execute(
-            "CREATE TABLE IF NOT EXISTS gkg_auxiliary_migrations (\
+        .execute(&format!(
+            "CREATE TABLE IF NOT EXISTS {AUXILIARY_MIGRATION_TABLE} (\
                  id UInt32, applied_at DateTime DEFAULT now()\
-             ) ENGINE = ReplacingMergeTree(applied_at) ORDER BY id",
-        )
+             ) ENGINE = ReplacingMergeTree(applied_at) ORDER BY id"
+        ))
         .await
         .map_err(|e| MigrationError::Ddl {
             table: AUXILIARY_MIGRATION_TABLE.into(),
