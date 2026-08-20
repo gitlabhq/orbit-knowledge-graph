@@ -258,22 +258,18 @@ pub async fn create_unversioned_tables(
     run_auxiliary_migrations(graph).await?;
 
     for object in generate_unversioned_objects(ontology) {
-        graph
-            .execute(&object.ddl)
-            .await
-            .map_err(|error| MigrationError::Ddl {
-                table: object.name,
-                reason: error.to_string(),
-            })?;
+        ddl(graph, &object.name, &object.ddl).await?;
     }
-
     Ok(())
 }
 
-/// Wipes every non-prefixed materialized view so the subsequent CREATE pass
-/// recreates them from the current ontology. Covers both changed definitions
-/// and views removed from the ontology. Safe because MVs are insert triggers
-/// with no stored data; the target tables are untouched.
+async fn ddl(graph: &ArrowClickHouseClient, name: &str, sql: &str) -> Result<(), MigrationError> {
+    graph.execute(sql).await.map_err(|e| MigrationError::Ddl {
+        table: name.to_owned(),
+        reason: e.to_string(),
+    })
+}
+
 async fn drop_all_unversioned_materialized_views(
     graph: &ArrowClickHouseClient,
 ) -> Result<(), MigrationError> {
@@ -293,49 +289,30 @@ async fn drop_all_unversioned_materialized_views(
 
     let names: Vec<String> =
         clickhouse_client::FromArrowColumn::extract_column(&batches, 0).unwrap_or_default();
-
     for name in &names {
-        info!(view = %name, "dropping unversioned materialized view before recreate");
-        graph
-            .execute(&format!("DROP VIEW IF EXISTS {name}"))
-            .await
-            .map_err(|error| MigrationError::Ddl {
-                table: name.clone(),
-                reason: error.to_string(),
-            })?;
+        info!(view = %name, "dropping unversioned materialized view");
+        ddl(graph, name, &format!("DROP VIEW IF EXISTS {name}")).await?;
     }
-
     Ok(())
 }
 
 const AUXILIARY_MIGRATION_TABLE: &str = "gkg_auxiliary_migrations";
 
-const AUXILIARY_MIGRATION_TABLE_DDL: &str = "\
-CREATE TABLE IF NOT EXISTS gkg_auxiliary_migrations (
-    id UInt32,
-    applied_at DateTime DEFAULT now()
-) ENGINE = ReplacingMergeTree(applied_at)
-ORDER BY id";
-
 async fn run_auxiliary_migrations(graph: &ArrowClickHouseClient) -> Result<(), MigrationError> {
-    let ledger = ontology::migrations::AuxiliaryLedger::load_embedded().map_err(|e| {
-        MigrationError::Ddl {
-            table: "auxiliary-migrations.yaml".into(),
-            reason: e,
-        }
-    })?;
-
+    let ledger =
+        ontology::migrations::AuxiliaryLedger::load_embedded().map_err(MigrationError::Ledger)?;
     if ledger.migrations.is_empty() {
         return Ok(());
     }
 
-    graph
-        .execute(AUXILIARY_MIGRATION_TABLE_DDL)
-        .await
-        .map_err(|e| MigrationError::Ddl {
-            table: AUXILIARY_MIGRATION_TABLE.into(),
-            reason: e.to_string(),
-        })?;
+    ddl(
+        graph,
+        AUXILIARY_MIGRATION_TABLE,
+        "CREATE TABLE IF NOT EXISTS gkg_auxiliary_migrations (\
+             id UInt32, applied_at DateTime DEFAULT now()\
+         ) ENGINE = ReplacingMergeTree(applied_at) ORDER BY id",
+    )
+    .await?;
 
     let batches = graph
         .query(&format!("SELECT id FROM {AUXILIARY_MIGRATION_TABLE} FINAL"))
@@ -345,13 +322,11 @@ async fn run_auxiliary_migrations(graph: &ArrowClickHouseClient) -> Result<(), M
             table: AUXILIARY_MIGRATION_TABLE.into(),
             reason: e.to_string(),
         })?;
-
     let applied: std::collections::HashSet<u32> = batches
         .iter()
-        .flat_map(|batch| {
-            (0..batch.num_rows()).filter_map(|row| {
-                ArrowUtils::get_column::<arrow::datatypes::UInt32Type>(batch, "id", row)
-            })
+        .flat_map(|b| {
+            (0..b.num_rows())
+                .filter_map(|r| ArrowUtils::get_column::<arrow::datatypes::UInt32Type>(b, "id", r))
         })
         .collect();
 
@@ -360,25 +335,22 @@ async fn run_auxiliary_migrations(graph: &ArrowClickHouseClient) -> Result<(), M
             continue;
         }
         info!(id = entry.id, sql = %entry.sql, "running auxiliary migration");
-        graph
-            .execute(&entry.sql)
-            .await
-            .map_err(|e| MigrationError::Ddl {
-                table: format!("auxiliary_migration/{}", entry.id),
-                reason: e.to_string(),
-            })?;
-        graph
-            .execute(&format!(
+        ddl(
+            graph,
+            &format!("auxiliary_migration/{}", entry.id),
+            &entry.sql,
+        )
+        .await?;
+        ddl(
+            graph,
+            AUXILIARY_MIGRATION_TABLE,
+            &format!(
                 "INSERT INTO {AUXILIARY_MIGRATION_TABLE} (id) VALUES ({})",
                 entry.id
-            ))
-            .await
-            .map_err(|e| MigrationError::Ddl {
-                table: AUXILIARY_MIGRATION_TABLE.into(),
-                reason: e.to_string(),
-            })?;
+            ),
+        )
+        .await?;
     }
-
     Ok(())
 }
 
