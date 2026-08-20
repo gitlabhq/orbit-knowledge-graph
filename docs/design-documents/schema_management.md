@@ -74,9 +74,11 @@ created once (`CREATE MATERIALIZED VIEW IF NOT EXISTS`) alongside unversioned ta
 version prefix, and is excluded from version-completeness and dead-version GC.
 
 For destructive changes to unversioned tables (DROP, ALTER), add an entry to
-`config/auxiliary-migrations.yaml`. Each entry has a sequential `id` and a `sql` statement that
-runs at most once, tracked by the `gkg_auxiliary_migrations` table. Auxiliary migrations run at
-boot before the normal `CREATE IF NOT EXISTS` pass. The YAML file is validated against
+`config/auxiliary-migrations.yaml`. Each entry has a sequential `id` and an idempotent `sql`
+statement, tracked by the `gkg_auxiliary_migrations` table. SQL must use `IF EXISTS` /
+`IF NOT EXISTS` guards because multiple dispatcher pods may execute the same entry concurrently at
+boot, and a crash between execution and tracking would cause a replay. Auxiliary migrations run
+before the normal `CREATE IF NOT EXISTS` pass. The YAML file is validated against
 `config/schemas/auxiliary-migrations.schema.json` in CI and parsed at compile time via the
 ontology crate.
 

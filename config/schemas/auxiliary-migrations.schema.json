@@ -21,7 +21,7 @@
           "sql": {
             "type": "string",
             "minLength": 1,
-            "description": "The SQL statement to execute (e.g. DROP TABLE IF EXISTS, ALTER TABLE)."
+            "description": "Idempotent SQL statement (must use IF EXISTS / IF NOT EXISTS). May be executed more than once under concurrent boot or crash recovery."
           },
           "note": {
             "type": "string",
