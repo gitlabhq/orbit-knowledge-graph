@@ -43,6 +43,9 @@ ${CH_TOLERATIONS}
             - name: config-overrides
               mountPath: /etc/clickhouse-server/users.d/bench-profile.xml
               subPath: bench-profile.xml
+            - name: config-overrides
+              mountPath: /etc/clickhouse-server/config.d/bench-logging.xml
+              subPath: bench-logging.xml
           resources:
             requests: { cpu: "2", memory: "8Gi" }
             limits: { cpu: "${CH_CPU}", memory: "${CH_MEMORY}" }
@@ -83,6 +86,36 @@ data:
           <max_memory_usage>21474836480</max_memory_usage>
         </default>
       </profiles>
+    </clickhouse>
+  bench-logging.xml: |
+    <clickhouse>
+      <query_log>
+        <ttl>event_date + INTERVAL 3 DAY</ttl>
+      </query_log>
+      <trace_log>
+        <ttl>event_date + INTERVAL 1 DAY</ttl>
+      </trace_log>
+      <text_log>
+        <ttl>event_date + INTERVAL 1 DAY</ttl>
+      </text_log>
+      <metric_log>
+        <ttl>event_date + INTERVAL 3 DAY</ttl>
+      </metric_log>
+      <asynchronous_metric_log>
+        <ttl>event_date + INTERVAL 1 DAY</ttl>
+      </asynchronous_metric_log>
+      <processors_profile_log>
+        <ttl>event_date + INTERVAL 1 DAY</ttl>
+      </processors_profile_log>
+      <query_thread_log>
+        <ttl>event_date + INTERVAL 1 DAY</ttl>
+      </query_thread_log>
+      <part_log>
+        <ttl>event_date + INTERVAL 3 DAY</ttl>
+      </part_log>
+      <opentelemetry_span_log>
+        <ttl>event_date + INTERVAL 1 DAY</ttl>
+      </opentelemetry_span_log>
     </clickhouse>
 ---
 apiVersion: v1
