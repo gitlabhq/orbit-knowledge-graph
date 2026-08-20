@@ -14,9 +14,10 @@ fn common_prefix_len(a: &str, b: &str) -> usize {
     a.bytes().zip(b.bytes()).take_while(|(x, y)| x == y).count()
 }
 use petgraph::graph::{DiGraph, NodeIndex};
-use petgraph::visit::{Bfs, EdgeFiltered};
+use petgraph::visit::{Bfs, EdgeFiltered, VisitMap, Visitable};
 use rustc_hash::{FxHashMap, FxHasher};
 use smallvec::SmallVec;
+use std::collections::VecDeque;
 
 use super::state::{DefinitionRangeIndex, GraphDef, GraphImport, GraphIndexes, StrId, StringPool};
 
@@ -455,6 +456,11 @@ impl CodeGraph {
             },
         );
 
+        let mut bfs: Bfs<NodeIndex, _> = Bfs {
+            stack: VecDeque::new(),
+            discovered: extends_only.visit_map(),
+        };
+
         for idx in self.graph.node_indices() {
             if !matches!(self.graph[idx], GraphNode::Definition { .. }) {
                 continue;
@@ -467,8 +473,12 @@ impl CodeGraph {
                 continue;
             }
 
+            extends_only.reset_map(&mut bfs.discovered);
+            bfs.discovered.visit(idx);
+            bfs.stack.clear();
+            bfs.stack.push_front(idx);
+
             let mut chain: SmallVec<[NodeIndex; 8]> = SmallVec::new();
-            let mut bfs = Bfs::new(&extends_only, idx);
             bfs.next(&extends_only);
             while let Some(ancestor) = bfs.next(&extends_only) {
                 chain.push(ancestor);

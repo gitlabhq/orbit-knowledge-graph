@@ -78,6 +78,13 @@ impl StringPool {
     pub fn is_empty(&self) -> bool {
         self.index.is_empty()
     }
+
+    /// Free the dedup index for a write-once pool; `get` still works, a later `alloc` rebuilds it.
+    pub fn shrink_to_arena(&mut self) {
+        self.intern_map = FxHashMap::default();
+        self.buf.shrink_to_fit();
+        self.index.shrink_to_fit();
+    }
 }
 
 fn fxhash_str(s: &str) -> u64 {

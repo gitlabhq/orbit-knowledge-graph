@@ -1113,7 +1113,7 @@ impl FamilyPipeline {
 
         let pb = progress_bar(file_count as u64, "parse + graph");
 
-        use crate::v2::dsl::engine::{CollectedRef, ParseFullResult};
+        use crate::v2::dsl::engine::ParseFullResult;
         use crate::v2::error::{FaultedFile, FileFault, FileSkip, SkippedFile};
 
         struct FileInfo {
@@ -1123,7 +1123,9 @@ impl FamilyPipeline {
         }
 
         enum ParseOutcome {
-            Ok(ParsedFile),
+            /// Boxed: `ParsedFile` dwarfs the other variants, and one
+            /// `ParseOutcome` per repository file is held across the barrier.
+            Ok(Box<ParsedFile>),
             Skip(SkippedFile),
             Err(FaultedFile),
         }
@@ -1132,6 +1134,9 @@ impl FamilyPipeline {
             path_idx: usize,
             language: Language,
             result: ParseFullResult,
+            /// Compact form of `result.refs`; the raw refs are dropped at
+            /// parse time so only this survives until Phase 2.
+            refs: crate::v2::refpack::RefPack,
             ext: String,
             file_size: u64,
             parse_ms: f64,
@@ -1194,7 +1199,7 @@ impl FamilyPipeline {
                         import_rewriter: import_rewriters.get(&f.language).map(|r| r.as_ref()),
                     },
                 );
-                let result = match result {
+                let mut result = match result {
                     Ok(r) => r,
                     Err(crate::v2::dsl::engine::ParseFullError::Aborted { phase, detail }) => {
                         tracing::warn!(path = f.path, phase = phase.as_ref(), %detail, "parse aborted: per-file CPU budget");
@@ -1221,6 +1226,9 @@ impl FamilyPipeline {
                     cb(f.language, result.phase_cpu);
                 }
 
+                let refs = crate::v2::refpack::RefPack::from_refs(&result.refs);
+                result.refs = Vec::new();
+
                 let ext = f
                     .path
                     .rsplit_once('.')
@@ -1229,14 +1237,15 @@ impl FamilyPipeline {
                     .to_string();
                 let file_size = source.len() as u64;
                 pb.inc(1);
-                Some(ParseOutcome::Ok(ParsedFile {
+                Some(ParseOutcome::Ok(Box::new(ParsedFile {
                     path_idx: idx,
                     language: f.language,
                     result,
+                    refs,
                     ext,
                     file_size,
                     parse_ms,
-                }))
+                })))
             })
             .collect();
 
@@ -1244,7 +1253,7 @@ impl FamilyPipeline {
 
         let mut parsed_skips: Vec<SkippedFile> = Vec::new();
         let mut parsed_faults: Vec<FaultedFile> = Vec::new();
-        let parsed: Vec<Option<ParsedFile>> = parse_outcomes
+        let parsed: Vec<Option<Box<ParsedFile>>> = parse_outcomes
             .into_iter()
             .map(|outcome| match outcome {
                 Some(ParseOutcome::Ok(file)) => Some(file),
@@ -1274,7 +1283,7 @@ impl FamilyPipeline {
         struct FileWithRefs {
             info: FileInfo,
             language: Language,
-            refs: Vec<CollectedRef>,
+            refs: crate::v2::refpack::RefPack,
             inferred_returns: Vec<(u32, String)>,
             unresolved_aliases: Vec<(usize, String)>,
             parse_ms: f64,
@@ -1311,7 +1320,7 @@ impl FamilyPipeline {
                     import_nodes,
                 },
                 language: parsed_file.language,
-                refs: parsed_file.result.refs,
+                refs: parsed_file.refs,
                 inferred_returns: parsed_file.result.inferred_returns,
                 unresolved_aliases: parsed_file.result.unresolved_aliases,
                 parse_ms: parsed_file.parse_ms,
@@ -1337,10 +1346,7 @@ impl FamilyPipeline {
                 if let Some(&n) = nodes.first()
                     && graph.def_kind(n).is_type_container()
                 {
-                    let fqn = graph.def_fqn(n).to_string();
-                    if let Some(r) = fwr.refs.get_mut(*ref_idx) {
-                        r.reaching = vec![crate::v2::types::ssa::ParseValue::Type(fqn.into())];
-                    }
+                    fwr.refs.set_reaching_type(*ref_idx, graph.def_fqn(n));
                 }
             }
         }
@@ -1420,13 +1426,16 @@ impl FamilyPipeline {
                 let mut failed_chains: Vec<FailedChain> = Vec::new();
                 let mut killed = false;
 
-                for r in &fwr.refs {
+                let mut chain_buf: Vec<crate::v2::types::ExpressionStep> = Vec::new();
+                let mut values_buf: Vec<crate::v2::types::ssa::ParseValue> = Vec::new();
+                for i in 0..fwr.refs.len() {
                     let before = edges.len();
+                    let r = fwr.refs.decode(i, &mut chain_buf, &mut values_buf);
                     if resolver
                         .resolve(
-                            &r.name,
-                            r.chain.as_deref(),
-                            &r.reaching,
+                            r.name,
+                            r.has_chain.then_some(chain_buf.as_slice()),
+                            &values_buf,
                             r.enclosing_def,
                             &mut edges,
                         )
@@ -1436,11 +1445,11 @@ impl FamilyPipeline {
                         break;
                     }
                     let import_edges = resolver.drain_import_edges();
-                    if edges.len() == before && r.chain.as_ref().is_some_and(|c| c.len() >= 2) {
+                    if edges.len() == before && r.has_chain && chain_buf.len() >= 2 {
                         failed_chains.push(FailedChain {
                             name: r.name.to_string(),
-                            chain: r.chain.clone().unwrap(),
-                            reaching: r.reaching.clone().into(),
+                            chain: chain_buf.clone(),
+                            reaching: values_buf.as_slice().into(),
                             enclosing_def: r.enclosing_def,
                             pending_import_edges: import_edges,
                         });
