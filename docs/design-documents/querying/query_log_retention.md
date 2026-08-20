@@ -1,9 +1,36 @@
 # Query-log retention
 
-Every ClickHouse query a graph request issues is tagged with the request
-correlation ID: a per-stage `query_id` and a `log_comment` of the form
-`gkg;<kind>;correlation_id=<id>`. ClickHouse records both in `system.query_log`,
-so a request can be traced to the queries it ran.
+Every ClickHouse query a graph request issues is tagged via the
+`log_comment` ClickHouse HTTP setting. The format depends on the query stage:
+
+- **Base query** (the primary execution stage): `gkg;<base64 JSON payload>`.
+  The payload is the entire attribution context, base64-encoded (no padding)
+  from a JSON object:
+
+  ```json
+  {
+    "correlation_id": "req-abc-123",
+    "user_id": 42,
+    "query": "{\"query_type\":\"traversal\", ...}",
+    "versions": {
+      "payload": 1,
+      "dsl": "12.1.0",
+      "schema": 89
+    }
+  }
+  ```
+
+  This carries the raw DSL query JSON, the authenticated user ID, the request
+  correlation ID, and the payload/DSL/schema versions at the time of execution.
+
+- **Sub-queries** (hydration, path resolution, profiler):
+  `gkg;<stage>;correlation_id=<id>`, where `<stage>` is a label like
+  `hydration:static`, `path:dict`, or `path:argmax-id`. These do not carry the
+  full attribution payload.
+
+ClickHouse records `log_comment` in `system.query_log`, so a request can be
+traced to every query it ran. The base query's payload also lets you recover
+the original DSL query and the user who issued it.
 
 `system.query_log` is node-local on ClickHouse Cloud and is discarded when a
 replica scales down or is replaced. Debugging, pricing, and audit lookups that
@@ -23,7 +50,7 @@ An insert-trigger materialized view copies finished GKG queries out of
   |--------|-------------|
   | `event_time` | When ClickHouse finished executing the query. |
   | `query_id` | The sanitized-or-ULID query identifier set by the server. |
-  | `log_comment` | Attribution string, e.g. `gkg;correlation_id=<id>`. |
+  | `log_comment` | Attribution string. Base queries carry a base64-encoded JSON payload (see above); sub-queries carry a stage tag with the correlation ID. |
   | `query_duration_ms` | Wall-clock execution time in milliseconds. |
   | `read_rows` | Number of rows read from storage. |
   | `read_bytes` | Bytes read from storage. |
