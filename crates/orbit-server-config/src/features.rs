@@ -171,9 +171,10 @@ mod tests {
 
     #[test]
     fn deserializes_scoped_flag_from_yaml() {
-        let features: FeaturesConfig =
-            serde_yaml::from_str("stop_merges_on_retire:\n  enabled: true\n  namespaces: [9970]")
-                .unwrap();
+        let features: FeaturesConfig = orbit_utils::yaml::from_str(
+            "stop_merges_on_retire:\n  enabled: true\n  namespaces: [9970]",
+        )
+        .unwrap();
         assert!(features.is_enabled(Feature::StopMergesOnRetire));
         assert_eq!(
             namespaces_of(&features, Feature::StopMergesOnRetire),
@@ -184,7 +185,8 @@ mod tests {
     #[test]
     fn parses_namespaces_from_comma_separated_string() {
         let features: FeaturesConfig =
-            serde_yaml::from_str("stop_merges_on_retire:\n  namespaces: \"9970, 1234\"").unwrap();
+            orbit_utils::yaml::from_str("stop_merges_on_retire:\n  namespaces: \"9970, 1234\"")
+                .unwrap();
         assert_eq!(
             namespaces_of(&features, Feature::StopMergesOnRetire),
             [9970, 1234]
@@ -194,7 +196,7 @@ mod tests {
     #[test]
     fn parses_single_namespace_scalar() {
         let features: FeaturesConfig =
-            serde_yaml::from_str("stop_merges_on_retire:\n  namespaces: 9970").unwrap();
+            orbit_utils::yaml::from_str("stop_merges_on_retire:\n  namespaces: 9970").unwrap();
         assert_eq!(
             namespaces_of(&features, Feature::StopMergesOnRetire),
             [9970]
@@ -203,20 +205,21 @@ mod tests {
 
     #[test]
     fn omitted_block_defaults_off() {
-        let features: FeaturesConfig = serde_yaml::from_str("{}").unwrap();
+        let features: FeaturesConfig = orbit_utils::yaml::from_str("{}").unwrap();
         assert!(!features.is_enabled(Feature::StopMergesOnRetire));
     }
 
     #[test]
     fn unknown_flag_is_rejected() {
-        let result = serde_yaml::from_str::<FeaturesConfig>("not_a_real_flag: true");
+        let result = orbit_utils::yaml::from_str::<FeaturesConfig>("not_a_real_flag: true");
         assert!(result.is_err());
     }
 
     #[test]
     fn unknown_scope_key_is_rejected() {
-        let result =
-            serde_yaml::from_str::<FeaturesConfig>("stop_merges_on_retire:\n  not_a_key: true");
+        let result = orbit_utils::yaml::from_str::<FeaturesConfig>(
+            "stop_merges_on_retire:\n  not_a_key: true",
+        );
         assert!(result.is_err());
     }
 }

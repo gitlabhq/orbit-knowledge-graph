@@ -181,7 +181,7 @@ handlers:
 "#;
 
         let engine: EngineConfiguration =
-            serde_yaml::from_str(yaml).expect("engine config should deserialize");
+            orbit_utils::yaml::from_str(yaml).expect("engine config should deserialize");
 
         assert_eq!(
             engine.topics["global-handler"].concurrency_group.as_deref(),

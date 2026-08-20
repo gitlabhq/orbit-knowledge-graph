@@ -884,7 +884,7 @@ mod tests {
 
     #[test]
     fn empty_schedule_yaml_yields_default_crons() {
-        let cfg: ScheduleConfig = serde_yaml::from_str("tasks: {}\n").expect("valid yaml");
+        let cfg: ScheduleConfig = orbit_utils::yaml::from_str("tasks: {}\n").expect("valid yaml");
         assert_eq!(
             cfg.tasks.global.schedule.cron.as_deref(),
             Some("0 */1 * * * *")
@@ -945,7 +945,7 @@ mod tests {
         let yaml = r#"
 modules: [sdlc, namespace_deletion]
 "#;
-        let cfg: EngineConfiguration = serde_yaml::from_str(yaml).expect("valid yaml");
+        let cfg: EngineConfiguration = orbit_utils::yaml::from_str(yaml).expect("valid yaml");
         assert_eq!(
             cfg.modules,
             vec![IndexerModule::Sdlc, IndexerModule::NamespaceDeletion]
@@ -955,7 +955,7 @@ modules: [sdlc, namespace_deletion]
     #[test]
     fn omitted_modules_field_uses_default() {
         let yaml = "max_concurrent_workers: 8\n";
-        let cfg: EngineConfiguration = serde_yaml::from_str(yaml).expect("valid yaml");
+        let cfg: EngineConfiguration = orbit_utils::yaml::from_str(yaml).expect("valid yaml");
         assert_eq!(cfg.modules, IndexerModule::all());
     }
 
@@ -968,7 +968,7 @@ modules: [sdlc, namespace_deletion]
     #[test]
     fn system_notes_lookup_batch_size_overrides_from_yaml() {
         let yaml = "system_notes_resolve_lookup_batch_size: 2048\n";
-        let cfg: EntityHandlerConfig = serde_yaml::from_str(yaml).expect("valid yaml");
+        let cfg: EntityHandlerConfig = orbit_utils::yaml::from_str(yaml).expect("valid yaml");
         assert_eq!(cfg.system_notes_resolve_lookup_batch_size, 2_048);
     }
 

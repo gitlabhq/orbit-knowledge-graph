@@ -37,7 +37,7 @@ pub enum NamedQueryError {
     Parse {
         path: String,
         #[source]
-        source: serde_yaml::Error,
+        source: Box<orbit_utils::yaml::Error>,
     },
 
     #[error("named query `{name}`: {message}")]

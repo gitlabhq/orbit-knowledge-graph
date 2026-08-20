@@ -119,7 +119,7 @@ fn extend_datasets(into: &mut LanceDatasets, incoming: LanceDatasets) {
 
 /// Panics on any error-severity failure.
 pub async fn run_yaml_suite(yaml: &str) {
-    let suite: TestSuite = serde_yaml::from_str(yaml).expect("Failed to parse YAML suite");
+    let suite: TestSuite = orbit_utils::yaml::from_str(yaml).expect("Failed to parse YAML suite");
 
     if suite.tests.iter().all(|t| t.skip) {
         eprintln!(

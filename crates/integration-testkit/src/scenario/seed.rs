@@ -174,24 +174,24 @@ fn expand_project(row: &Row, location: &str) -> Vec<(String, Row)> {
     ]
 }
 
-fn row_of<const N: usize>(entries: [(&str, serde_yaml::Value); N]) -> Row {
+fn row_of<const N: usize>(entries: [(&str, serde_json::Value); N]) -> Row {
     entries
         .into_iter()
         .map(|(k, v)| (k.to_string(), v))
         .collect()
 }
 
-fn traversal_ids(traversal_path: &TraversalPath) -> serde_yaml::Value {
-    serde_yaml::Value::Sequence(
+fn traversal_ids(traversal_path: &TraversalPath) -> serde_json::Value {
+    serde_json::Value::Array(
         traversal_path
             .segments()
             .filter_map(|s| s.parse::<i64>().ok())
-            .map(serde_yaml::Value::from)
+            .map(serde_json::Value::from)
             .collect(),
     )
 }
 
-fn yaml_i64(value: &serde_yaml::Value, field: &str, location: &str) -> i64 {
+fn yaml_i64(value: &serde_json::Value, field: &str, location: &str) -> i64 {
     value
         .as_i64()
         .unwrap_or_else(|| panic!("{location}: {field} must be an integer, got {value:?}"))
@@ -216,7 +216,7 @@ impl<'a> PseudoFields<'a> {
         }
     }
 
-    fn required(&mut self, key: &'a str) -> serde_yaml::Value {
+    fn required(&mut self, key: &'a str) -> serde_json::Value {
         self.consumed.insert(key);
         self.row.get(key).cloned().unwrap_or_else(|| {
             panic!(
@@ -236,15 +236,15 @@ impl<'a> PseudoFields<'a> {
         })
     }
 
-    fn optional(&mut self, key: &'a str) -> serde_yaml::Value {
+    fn optional(&mut self, key: &'a str) -> serde_json::Value {
         self.consumed.insert(key);
         self.row
             .get(key)
             .cloned()
-            .unwrap_or(serde_yaml::Value::Null)
+            .unwrap_or(serde_json::Value::Null)
     }
 
-    fn optional_or(&mut self, key: &'a str, default: serde_yaml::Value) -> serde_yaml::Value {
+    fn optional_or(&mut self, key: &'a str, default: serde_json::Value) -> serde_json::Value {
         self.consumed.insert(key);
         self.row.get(key).cloned().unwrap_or(default)
     }
@@ -392,46 +392,40 @@ async fn insert_json_rows(
     );
 }
 
-fn render_setting_value(value: &serde_yaml::Value, name: &str, location: &str) -> String {
+fn render_setting_value(value: &serde_json::Value, name: &str, location: &str) -> String {
     match value {
-        serde_yaml::Value::Bool(b) => b.to_string(),
-        serde_yaml::Value::Number(n) => n.to_string(),
-        serde_yaml::Value::String(s) => quote(s),
+        serde_json::Value::Bool(b) => b.to_string(),
+        serde_json::Value::Number(n) => n.to_string(),
+        serde_json::Value::String(s) => quote(s),
         _ => panic!("{location}: seed_settings '{name}' must be a scalar, got {value:?}"),
     }
 }
 
-fn json_value(value: &serde_yaml::Value, location: &str) -> serde_json::Value {
+fn json_value(value: &serde_json::Value, location: &str) -> serde_json::Value {
     match value {
-        serde_yaml::Value::Mapping(_) | serde_yaml::Value::Tagged(_) => panic!(
+        serde_json::Value::Object(_) => panic!(
             "{location}: the {{ sql: ... }} seed-value escape is not supported in steps \
              with seed_settings (JSONEachRow inserts), got {value:?}"
         ),
-        _ => serde_json::to_value(value)
-            .unwrap_or_else(|e| panic!("{location}: seed value is not valid JSON: {e}")),
+        _ => value.clone(),
     }
 }
 
-fn render_value(value: &serde_yaml::Value, location: &str) -> String {
+fn render_value(value: &serde_json::Value, location: &str) -> String {
     match value {
-        serde_yaml::Value::Null => "NULL".to_string(),
-        serde_yaml::Value::Bool(b) => b.to_string(),
-        serde_yaml::Value::Number(n) => n.to_string(),
-        serde_yaml::Value::String(s) => quote(s),
-        serde_yaml::Value::Sequence(items) => {
+        serde_json::Value::Null => "NULL".to_string(),
+        serde_json::Value::Bool(b) => b.to_string(),
+        serde_json::Value::Number(n) => n.to_string(),
+        serde_json::Value::String(s) => quote(s),
+        serde_json::Value::Array(items) => {
             let rendered: Vec<String> = items.iter().map(|v| render_value(v, location)).collect();
             format!("[{}]", rendered.join(", "))
         }
-        serde_yaml::Value::Mapping(m) => {
-            if let (1, Some(serde_yaml::Value::String(sql))) =
-                (m.len(), m.get(serde_yaml::Value::from("sql")))
-            {
+        serde_json::Value::Object(m) => {
+            if let (1, Some(serde_json::Value::String(sql))) = (m.len(), m.get("sql")) {
                 return sql.clone();
             }
             panic!("{location}: seed value mappings must be {{ sql: \"...\" }}, got {value:?}")
-        }
-        serde_yaml::Value::Tagged(_) => {
-            panic!("{location}: tagged YAML values are not supported in seeds")
         }
     }
 }

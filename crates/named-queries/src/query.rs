@@ -140,9 +140,9 @@ pub struct NamedQuery {
 impl NamedQuery {
     pub(crate) fn from_yaml(path: &str, content: &str) -> Result<Self, NamedQueryError> {
         let yaml: NamedQueryYaml =
-            serde_yaml::from_str(content).map_err(|source| NamedQueryError::Parse {
+            orbit_utils::yaml::from_str(content).map_err(|source| NamedQueryError::Parse {
                 path: path.to_string(),
-                source,
+                source: Box::new(source),
             })?;
 
         let stem = Path::new(path).file_stem().unwrap_or_default();
