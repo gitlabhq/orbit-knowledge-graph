@@ -1,9 +1,9 @@
 ---
-stage: Analytics
-group: Knowledge Graph
+stage: Orbit
+group: Context Systems
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Orbit Remoteがどのようにしてデータとソースコードをインデックス作成し、ClickHouseにグラフを構築して、クエリ可能なAPIとして公開するかを説明します。
-title: Orbit Remoteの仕組み
+description: GitLab Orbit Remoteがどのようにしてデータとソースコードをインデックス作成し、ClickHouseにグラフを構築して、クエリ可能なAPIとして公開するかを説明します。
+title: GitLab Orbit Remoteの仕組み
 ---
 
 {{< details >}}
@@ -28,29 +28,29 @@ title: Orbit Remoteの仕組み
 
 ## インデックス作成パイプライン {#indexing-pipeline}
 
-Orbitは2つのソースからデータをインデックス作成し、単一のグラフに統合します。
+GitLab Orbitは2つのソースからデータをインデックス作成し、単一のグラフに統合します。
 
 ### SDLCデータ {#sdlc-data}
 
 GitLabは変更データキャプチャ（CDC）パイプラインを通じて変更イベントをストリーミングし、[GitLab Data Insights Platform](https://handbook.gitlab.com/handbook/engineering/architecture/design-documents/data_insights_platform/)に送信します。
-このプラットフォームはClickHouseテーブルにレコードを書き込み、OrbitはそのデータをもとにグラフをClickHouse上に構築します。
+このプラットフォームはClickHouseテーブルにレコードを書き込み、GitLab OrbitはそのデータをもとにグラフをClickHouse上に構築します。
 
-この処理は継続的に行われます。ユーザーがマージリクエストを作成したり、作業アイテムを作成したり、パイプラインを起動したりすると、その変更は数分以内にOrbitグラフに反映されます。
+この処理は継続的に行われます。ユーザーがマージリクエストを作成したり、作業アイテムを作成したり、パイプラインを起動したりすると、その変更は数分以内にGitLab Orbitグラフに反映されます。
 
 ### ソースコード {#source-code}
 
-OrbitはGitLab Rails内部APIを呼び出し、リポジトリからソースファイルをフェッチします。
+GitLab OrbitはGitLab Rails内部APIを呼び出し、リポジトリからソースファイルをフェッチします。
 各ファイルを言語固有のパーサーで解析し、定義（関数、クラス、モジュール）とインポート参照を抽出して、ノードとエッジとしてグラフに書き込みます。
 
 コードはデフォルトブランチのみからインデックス作成されます。デフォルトブランチが変更されると、再インデックス作成が自動的に実行されます。
 
 ### グラフの構築 {#graph-construction}
 
-SDLCデータとコードを読み込んだ後、Orbitは統合グラフをClickHouseに書き込みます。
+SDLCデータとコードを読み込んだ後、GitLab Orbitは統合グラフをClickHouseに書き込みます。
 各エンティティ（プロジェクト、ユーザー、関数定義）はノードになります。
 各リレーションシップ（ユーザーがマージリクエストを作成した、ファイルがモジュールをインポートしたなど）は有向エッジになります。
 
-クエリを送信すると、OrbitはJSON クエリDSLをClickHouse SQLにコンパイルして実行し、型付きの結果を返します。
+クエリを送信すると、GitLab OrbitはJSON クエリDSLをClickHouse SQLにコンパイルして実行し、型付きの結果を返します。
 
 ## グラフモデル {#the-graph-model}
 
@@ -63,7 +63,7 @@ SDLCデータとコードを読み込んだ後、Orbitは統合グラフをClick
 
 ## パフォーマンス {#performance}
 
-Orbitは独立したKubernetesクラスターで動作し、GitLabインスタンスとコンピューティングやメモリを共有しません。
+GitLab Orbitは独立したKubernetesクラスターで動作し、GitLabインスタンスとコンピューティングやメモリを共有しません。
 
 大規模なグループ（数千のプロジェクト、数百万行のコード）の初回インデックス作成は数分で完了します。変更後の増分再インデックス作成は、変更の規模に応じて数秒から数分で完了します。
 
@@ -71,18 +71,18 @@ Orbitは独立したKubernetesクラスターで動作し、GitLabインスタ�
 
 すべてのクエリは同じパスを経由します。
 
-1. OrbitはJSONクエリペイロードを受信します（REST、MCP、またはGitLab Duo Agent Platform経由）。
+1. GitLab OrbitはJSONクエリペイロードを受信します（REST、MCP、またはGitLab Duo Agent Platform経由）。
 1. クエリエンジンが現在のスキーマに対してクエリを検証します。
-1. OrbitがJSON DSLをClickHouse SQLにコンパイルします。
+1. GitLab OrbitがJSON DSLをClickHouse SQLにコンパイルします。
 1. ClickHouseがグラフテーブルに対してクエリを実行します。
-1. Orbitが認可フィルタリングを適用します。結果は、リクエストしたユーザーがGitLabでアクセス権を持つエンティティにスコープされます。詳細については、[セキュリティ](security.md)を参照してください。
-1. Orbitが型付きJSONの結果を返します。
+1. GitLab Orbitが認可フィルタリングを適用します。結果は、リクエストしたユーザーがGitLabでアクセス権を持つエンティティにスコープされます。詳細については、[セキュリティ](security.md)を参照してください。
+1. GitLab Orbitが型付きJSONの結果を返します。
 
 クエリレスポンスでコンパイル済みSQLを取得するには、`options.include_debug_sql: true`を設定します。
 このフィールドは、インスタンス管理者およびReporter以上のアクセス権を持つGitLab組織の直接メンバーにのみ表示されます。
 
 ## データ保持と削除 {#data-retention-and-deletion}
 
-グループでOrbitを無効にしても、インデックス作成済みのデータはすぐには削除されません。グラフの履歴を失わずに再有効化できるよう、Orbitは30日間データを保持します。猶予期間が終了すると、すべてのノード、エッジ、インデックス作成チェックポイントを含む、そのグループのすべてのグラフデータが完全に削除されます。
+グループでGitLab Orbitを無効にしても、インデックス作成済みのデータはすぐには削除されません。GitLab Orbitは30日間データを保持します。猶予期間が終了すると、すべてのノード、エッジ、インデックス作成チェックポイントを含む、そのグループのすべてのグラフデータが完全に削除されます。
 
-30日が経過する前にOrbitを再有効化した場合、削除はキャンセルされ、中断した箇所からインデックス作成が再開されます。
+30日が経過する前にGitLab Orbitを再有効化した場合、削除はキャンセルされ、中断した箇所からインデックス作成が再開されます。

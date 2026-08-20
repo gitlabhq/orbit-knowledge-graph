@@ -1,8 +1,8 @@
 ---
-stage: Analytics
-group: Knowledge Graph
+stage: Orbit
+group: Context Systems
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Orbitナレッジグラフにクエリを実行して、GitLabのデータ、コード、および関係性を検索します。
+description: GitLab Orbitグラフにクエリを実行して、GitLabのデータ、コード、および関係性を検索します。
 title: クエリ
 ---
 
@@ -26,7 +26,7 @@ title: クエリ
 > 詳細については、履歴を参照してください。
 > この機能はテスト目的で利用可能ですが、本番環境での使用には対応していません。
 
-Orbitクエリは、グラフ操作を記述するJSONオブジェクトです。クエリでは、特定の種類のオブジェクトのフェッチ、オブジェクト間の関係のトラバース、一致するオブジェクトのカウント、パスの検索、またはノードの隣接要素の取得が可能です。
+GitLab Orbitクエリは、グラフ操作を記述するJSONオブジェクトです。クエリでは、特定の種類のオブジェクトのフェッチ、オブジェクト間の関係のトラバース、一致するオブジェクトのカウント、パスの検索、またはノードの隣接要素の取得が可能です。
 
 クエリはGitLabの認可を通じて実行されます。レスポンスには、現在のユーザーがGitLabで読み取り可能なデータのみが含まれます。
 
@@ -40,7 +40,7 @@ Orbitクエリは、グラフ操作を記述するJSONオブジェクトです�
 | 2つの限定されたエンドポイント間のパスを検索する | `path_finding` |
 | 1つの限定されたノードに接続されているものを確認する | `neighbors` |
 
-単一ノードの`traversal`は検索の形式です。Orbitには独立した`search`クエリタイプはありません。
+単一ノードの`traversal`は検索の形式です。GitLab Orbitには独立した`search`クエリタイプはありません。
 
 ## 例: マージリクエストの差分をフェッチする {#example-fetch-a-merge-request-diff}
 
@@ -49,12 +49,12 @@ Orbitクエリは、グラフ操作を記述するJSONオブジェクトです�
 ```json orbit-query
 {
   "query_type": "traversal",
-  "node": {
+  "nodes": [{
     "id": "mr",
     "entity": "MergeRequest",
     "node_ids": [12345],
     "columns": ["iid", "title", "state", "diff"]
-  },
+  }],
   "limit": 1
 }
 ```
@@ -113,16 +113,16 @@ Orbitクエリは、グラフ操作を記述するJSONオブジェクトです�
 ```json orbit-query
 {
   "query_type": "traversal",
-  "node": {
+  "nodes": [{
     "id": "file",
     "entity": "File",
     "filters": {
-      "path": {"op": "ends_with", "value": "app/models/project.rb"}
+      "path": {"ends_with": "app/models/project.rb"}
     },
     "columns": ["path", "language", "content"]
-  },
+  }],
   "limit": 5
 }
 ```
 
-完全な構文、利用可能なフィールド、および検証ルールについては、[Orbitクエリ言語](query-language.md)を参照してください。
+完全な構文、利用可能なフィールド、および検証ルールについては、[GitLab Orbitクエリ言語](query-language.md)を参照してください。

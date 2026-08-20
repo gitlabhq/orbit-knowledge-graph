@@ -1,9 +1,9 @@
 ---
-stage: Analytics
-group: Knowledge Graph
+stage: Orbit
+group: Context Systems
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: GitLab.comでOrbit Remoteを有効にして、最初のクエリを実行します。
-title: Orbit Remoteを使ってみる
+description: GitLab.comでGitLab Orbit Remoteを有効にして、最初のクエリを実行します。
+title: GitLab Orbit Remoteを使ってみる
 ---
 
 {{< details >}}
@@ -28,20 +28,21 @@ title: Orbit Remoteを使ってみる
 
 ## 前提条件 {#prerequisites}
 
-- Orbitを有効にするには、トップレベルグループのオーナーロール
+- GitLab Orbitを有効にするには、トップレベルグループのオーナーロール
 - インデックス作成済みのグループをクエリするには、レポーターロール以上
-- セキュリティデータを表示するには、セキュリティマネージャーロール。詳細については、[Orbitのクエリに必要なロール](security.md#roles-required-to-query-orbit)を参照してください。
+- セキュリティデータを表示するには、セキュリティマネージャーロール。詳細については、[GitLab Orbitのクエリに必要なロール](security.md#roles-required-to-query-gitlab-orbit)を参照してください。
 
-Orbitはトップレベルグループのみをインデックス作成します。サブグループとプロジェクトは自動的にインデックス作成を継承します。
+GitLab Orbitはトップレベルグループのみをインデックス作成します。サブグループとプロジェクトは自動的にインデックス作成を継承します。
 
-## ステップ1: Orbitを有効にする {#step-1-enable-orbit}
+<!-- markdownlint-disable-next-line MD044 -->
+## ステップ1: GitLab Orbitを有効にする {#step-1-enable-gitlab-orbit}
 
 1. 左サイドバーで**マイワーク**を展開します。
 1. **Orbit** > **設定**を選択します。
 1. **インデックス**リストでトップレベルグループを見つけます。
 1. **有効にする**を切り替えます。
 
-Orbitはすぐにインデックス作成を開始します。初回のインデックス作成は、小規模なグループでは数分、数千のプロジェクトを持つグループでは最大30分かかります。
+GitLab Orbitはすぐにインデックス作成を開始します。初回のインデックス作成は、小規模なグループでは数分、数千のプロジェクトを持つグループでは最大30分かかります。
 
 インデックス作成のステータスはいつでも確認できます。
 
@@ -51,7 +52,7 @@ glab orbit remote status
 
 ## ステップ2: 最初のクエリを実行する {#step-2-run-your-first-query}
 
-Orbit Remoteは同じグラフを3つのインターフェースで公開しています。クエリを実行するユーザーに合ったものを選択してください。
+GitLab Orbit Remoteは同じグラフを3つのインターフェースで公開しています。クエリを実行するユーザーに合ったものを選択してください。
 
 | 方法 | 最適な用途 | セットアップ | 課金 |
 |---|---|---|---|
@@ -61,29 +62,30 @@ Orbit Remoteは同じグラフを3つのインターフェースで公開して�
 
 ### GitLab Duo Agent Platform（セットアップ不要） {#gitlab-duo-agent-platform-no-setup-required}
 
-OrbitはGitLab Duo Agent Platformに組み込まれています。GitLab Duo Agent、Planner Agent、Security Analyst Agent、Data Analyst Agent、CI Expert Agent、Developer Flowは、グラフトラバーサルで回答するのが最適な質問に対して、Orbitの`list_commands`と`invoke_command`ツールを自動的に呼び出し、`query_graph`や`get_graph_schema`などのコマンドを実行します。ツールの選択や設定は不要です。
+GitLab OrbitはGitLab Duo Agent Platformに組み込まれています。GitLab Duo Agent、Planner Agent、Security Analyst Agent、Data Analyst Agent、CI Expert Agent、Developer Flowは、グラフトラバーサルで回答するのが最適な質問に対して、GitLab Orbitの`list_commands`と`invoke_command`ツールを自動的に呼び出し、`query_graph`や`get_graph_schema`などのコマンドを実行します。ツールの選択や設定は不要です。
 
-たとえば、`deploy_user`メソッドの名前変更を依頼する作業アイテムを登録すると、Developer FlowはOrbitを使用してそのメソッドを呼び出しているすべてのサービスを特定し、それぞれを更新するMRを作成します。
+たとえば、`deploy_user`メソッドの名前変更を依頼する作業アイテムを登録すると、Developer FlowはGitLab Orbitを使用してそのメソッドを呼び出しているすべてのサービスを特定し、それぞれを更新するMRを作成します。
 
 GitLab Duoのクエリは消費対象外であり、GitLab Creditsを消費しません。
 
 ### MCP（Claude Code、Codex、その他のエージェント） {#mcp-claude-code-codex-other-agents}
 
-セットアップについては[MCPを使用してOrbitにアクセスする](access/mcp.md)を参照してください。設定が完了すると、`query_graph`と`get_graph_schema`の2つのツールが使用できます。
+セットアップについては[MCPを使用してGitLab Orbitにアクセスする](access/mcp.md)を参照してください。設定が完了すると、`query_graph`と`get_graph_schema`の2つのツールが使用できます。
 
-### AIエージェント向けOrbitスキルをインストールする {#install-the-orbit-skill-for-ai-agents}
+<!-- markdownlint-disable-next-line MD044 -->
+### AIエージェント向けGitLab Orbitスキルをインストールする {#install-the-gitlab-orbit-skill-for-ai-agents}
 
-OrbitスキルはAIエージェントにクエリレシピ、DSLガイダンス、トラブルシューティングを提供し、初回から正しいOrbitクエリを作成できるようにします。
+GitLab OrbitスキルはAIエージェントにクエリレシピ、DSLガイダンス、トラブルシューティングを提供し、初回から正しいGitLab Orbitクエリを作成できるようにします。
 
 ```shell
 glab skills install --global orbit
 ```
 
-プロジェクトスコープのインストール、アップデート手順、スキルの内容については、[Orbitスキルを使用してAIコーディングエージェントをセットアップする](../ai_coding_agents.md)を参照してください。
+プロジェクトスコープのインストール、アップデート手順、スキルの内容については、[GitLab Orbitスキルを使用してAIコーディングエージェントをセットアップする](../ai_coding_agents.md)を参照してください。
 <!-- markdownlint-disable-next-line MD044 -->
 ### REST API {#rest-api}
 
-`your-group`をOrbitを有効にしたトップレベルグループのパスに置き換えてください。`full_path`フィルターはクエリのスコープを絞り込み、Orbitの選択性検証を通過させます。
+`your-group`をGitLab Orbitを有効にしたトップレベルグループのパスに置き換えてください。`full_path`フィルターはクエリのスコープを絞り込み、GitLab Orbitの選択性検証を通過させます。
 
 リクエストボディを`request.json`に保存してください。
 
@@ -96,7 +98,7 @@ glab skills install --global orbit
       "entity": "Project",
       "columns": ["name", "full_path"],
       "filters": {
-        "full_path": {"op": "starts_with", "value": "your-group/"}
+        "full_path": {"starts_with": "your-group/"}
       }
     }],
     "limit": 10
@@ -115,7 +117,7 @@ curl --request POST \
 
 ## 次に試すこと {#what-to-try-next}
 
-- [Orbitのインデックス対象](indexing.md) - クエリを作成する前にカバレッジを理解する
+- [GitLab Orbitのインデックス対象](indexing.md) - クエリを作成する前にカバレッジを理解する
 - [スキーマリファレンス](schema.md) - 28種類のノードタイプとそのプロパティを確認する
 - [Cookbook](cookbook.md) - 一般的なユースケース向けのコピー&ペーストクエリ
-- [Orbit Localを使ってみる](../local/getting-started.md) - ローカルリポジトリをオフラインでクエリする
+- [GitLab Orbit Localを使ってみる](../local/getting-started.md) - ローカルリポジトリをオフラインでクエリする

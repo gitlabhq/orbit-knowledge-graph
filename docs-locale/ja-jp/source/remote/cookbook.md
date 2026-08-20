@@ -1,6 +1,6 @@
 ---
-stage: Analytics
-group: Knowledge Graph
+stage: Orbit
+group: Context Systems
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
 description: AIエージェントをコードベース、パイプライン、依存関係、セキュリティの専門家に変える、すぐに使えるプロンプトのライブラリです。Orbitを使用します。
 title: Cookbook

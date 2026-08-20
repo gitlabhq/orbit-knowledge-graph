@@ -1,9 +1,9 @@
 ---
-stage: Analytics
-group: Knowledge Graph
+stage: Orbit
+group: Context Systems
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Claude Code、Codex、OpenCode、またはMCP対応のAIエージェントをローカルのOrbitグラフに接続します。
-title: MCPを使用してOrbit Localに接続する
+description: Claude Code、Codex、OpenCode、またはMCP対応のAIエージェントをローカルのGitLab Orbitグラフに接続します。
+title: MCPを使用してGitLab Orbit Localに接続する
 ---
 
 {{< details >}}
@@ -20,14 +20,14 @@ title: MCPを使用してOrbit Localに接続する
 
 {{< /history >}}
 
-Orbit Localは、GitLabインスタンスではなくローカルのDuckDBグラフを参照し、stdio経由でステートレスなMCPサーバーとして動作します。Orbit Remote（JSON形式のクエリDSLを公開）とは異なり、Orbit LocalはDuckDB SQLをそのまま使用します。エージェントはプロパティグラフのテーブルに対して直接SQLを組み立てます。
+GitLab Orbit Localは、GitLabインスタンスではなくローカルのDuckDBグラフを参照し、stdio経由でステートレスなMCPサーバーとして動作します。GitLab Orbit Remote（JSON形式のクエリDSLを公開）とは異なり、GitLab Orbit LocalはDuckDB SQLをそのまま使用します。エージェントはプロパティグラフのテーブルに対して直接SQLを組み立てます。
 
 > [!note]
 > MCPサーバーは実験的機能です。GAリリース前に、機能や設定の形式が変更される場合があります。
 
 ## 前提条件 {#prerequisites}
 
-- Orbit CLI（`orbit`）がインストールされていること。[Orbit CLIを直接使用する](cli.md)を参照してください。
+- GitLab Orbit CLI（`orbit`）がインストールされていること。[GitLab Orbit CLIを直接使用する](cli.md)を参照してください。
 - ローカルリポジトリのインデックスが作成されていること（`orbit index <path>` または `glab orbit local index <path>`）。エージェントは`index` MCPツールを通じてインデックスを作成することもできます。
 
 ## MCPツール {#mcp-tools}
@@ -89,23 +89,23 @@ codex mcp add orbit-local -- orbit mcp serve
 
 ## ツールの使用方法 {#using-the-tools}
 
-接続後、AIエージェントに対してOrbitを直接使用するよう指示します。
+接続後、AIエージェントに対してGitLab Orbitを直接使用するよう指示します。
 
 スキーマを確認する:
 > "`get_graph_schema`を使用して、ローカルグラフに含まれるテーブルを表示してください。"
 
 種類別に定義を検索する:
-> "Orbitを使用して、このリポジトリ内の定義を種類別に集計し、最も大きいクラスを10件一覧表示してください。"
+> "GitLab Orbitを使用して、このリポジトリ内の定義を種類別に集計し、最も大きいクラスを10件一覧表示してください。"
 
 モジュールをマップする:
-> "Orbitを使用して、`src/auth/`で宣言されているすべての定義とその種類を一覧表示してください。"
+> "GitLab Orbitを使用して、`src/auth/`で宣言されているすべての定義とその種類を一覧表示してください。"
 
 `_orbit_manifest`テーブルにはインデックス作成済みのリポジトリが一覧表示されているため、「ローカルグラフにどのリポジトリがあるか」は`run_sql`を1回呼び出すだけで確認できます。
 
 ## ローカルグラフの内容 {#what-s-in-the-local-graph}
 
-Orbit Localはコードのみをインデックス作成します。対象は、サポートされている11言語すべてにわたるファイル、ディレクトリ、定義、およびインポートされたシンボルです。SDLCデータ（マージリクエスト、パイプライン、ユーザー、脆弱性）はローカルでは利用できません。これらのデータには[Orbit Remote](../../remote/_index.md)が必要です。
+GitLab Orbit Localはコードのみをインデックス作成します。対象は、サポートされている11言語すべてにわたるファイル、ディレクトリ、定義、およびインポートされたシンボルです。SDLCデータ（マージリクエスト、パイプライン、ユーザー、脆弱性）はローカルでは利用できません。これらのデータには[GitLab Orbit Remote](../../remote/_index.md)が必要です。
 
 ## 課金 {#billing}
 
-Orbit LocalはGitLabクレジットを消費しません。すべてのローカルトラフィックはマシン上で処理されます。
+GitLab Orbit LocalはGitLabクレジットを消費しません。すべてのローカルトラフィックはマシン上で処理されます。

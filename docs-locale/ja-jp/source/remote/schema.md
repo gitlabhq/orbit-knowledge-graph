@@ -1,6 +1,6 @@
 ---
-stage: Analytics
-group: Knowledge Graph
+stage: Orbit
+group: Context Systems
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
 description: 6つのドメインにわたる27のOrbitノードタイプの完全なリファレンス（プロパティとその型を含む）。
 title: スキーマリファレンス
@@ -26,7 +26,7 @@ title: スキーマリファレンス
 > 詳細については、履歴を参照してください。
 > この機能はテスト目的で利用可能ですが、本番環境での使用には対応していません。
 
-Orbitは6つのドメインにわたる27のノードタイプのインデックスを作成します。クエリのエンティティ名としてこれらを使用してください。
+GitLab Orbitは6つのドメインにわたる27のノードタイプのインデックスを作成します。クエリのエンティティ名としてこれらを使用してください。
 
 ライブスキーマをいつでもフェッチするには:
 

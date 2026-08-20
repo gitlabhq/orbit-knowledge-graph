@@ -1,6 +1,6 @@
 ---
-stage: Analytics
-group: Knowledge Graph
+stage: Orbit
+group: Context Systems
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
 description: REST APIを使用してOrbitナレッジグラフに直接クエリを実行します。認証要件とリクエスト例を含む全4エンドポイントのリファレンスです。
 title: REST API
@@ -168,7 +168,7 @@ curl --header "Authorization: Bearer <your_token>" \
 
 ## ステータスエンドポイント {#status-endpoint}
 
-Orbitが有効になっているグループのインデックス作成ステータスを返します。
+GitLab Orbitが有効になっているグループのインデックス作成ステータスを返します。
 
 ```shell
 curl --header "Authorization: Bearer <your_token>" \
