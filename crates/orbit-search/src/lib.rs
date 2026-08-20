@@ -34,15 +34,51 @@ const RELATIONAL_SYNONYMS: &[&str] = &[
     "reference", "render", "use", "used", "uses", "using",
 ];
 
-const QUERY_STOPWORDS: &[&str] = &[
-    "a", "about", "all", "an", "and", "any", "are", "be", "been", "being", "but", "can", "could",
-    "did", "do", "does", "for", "from", "had", "has", "have", "here", "how", "in", "into", "is",
-    "get", "it", "its", "may", "might", "must", "not", "of", "off", "on", "onto", "or", "our",
-    "set", "shall", "should", "some", "that", "the", "their", "them", "there", "these", "they",
-    "this", "those", "to", "was", "we", "were", "what", "when", "where", "which", "while", "who",
-    "whom", "whose", "why", "will", "with", "without", "work", "working", "works", "would", "you",
-    "your",
+/// Words that are meaningful identifier tokens in code.
+const KEEP_ANCHOR_WORDS: &[&str] = &[
+    "after", "around", "before", "down", "off", "on", "out", "over", "under", "up", "with",
 ];
+
+/// Meaningful English, worthless as code-search terms: getters, setters, and
+/// worker naming make them match everything.
+const CODE_STOPWORDS: &[&str] = &[
+    "get",
+    "set",
+    "use",
+    "used",
+    "using",
+    "work",
+    "working",
+    "works",
+    "actually",
+    "anybody",
+    "anyone",
+    "anything",
+    "basically",
+    "everybody",
+    "everyone",
+    "everything",
+    "nobody",
+    "really",
+    "somebody",
+    "someone",
+    "something",
+];
+
+fn query_stopwords() -> &'static HashSet<String> {
+    static STOPWORDS: std::sync::OnceLock<HashSet<String>> = std::sync::OnceLock::new();
+    STOPWORDS.get_or_init(|| {
+        let mut words: HashSet<String> = stop_words::get(stop_words::LANGUAGE::English)
+            .iter()
+            .map(|w| (*w).to_string())
+            .collect();
+        for keep in KEEP_ANCHOR_WORDS {
+            words.remove(*keep);
+        }
+        words.extend(CODE_STOPWORDS.iter().map(|w| (*w).to_string()));
+        words
+    })
+}
 
 pub fn split_words(input: &str) -> Vec<String> {
     let mut tokens = Vec::new();
@@ -112,7 +148,7 @@ pub fn content_words(input: &str) -> Vec<String> {
     let words = split_words(input);
     let content: Vec<String> = words
         .iter()
-        .filter(|w| !QUERY_STOPWORDS.contains(&w.as_str()))
+        .filter(|w| !query_stopwords().contains(w.as_str()))
         .cloned()
         .collect();
     if content.is_empty() { words } else { content }
@@ -276,7 +312,7 @@ pub fn candidate_splits(term: &str) -> Vec<(String, String)> {
             )
         })
         .filter(|(a, b)| {
-            !QUERY_STOPWORDS.contains(&a.as_str()) && !QUERY_STOPWORDS.contains(&b.as_str())
+            !query_stopwords().contains(a.as_str()) && !query_stopwords().contains(b.as_str())
         })
         .collect();
     splits.sort_by_key(|(a, b)| std::cmp::Reverse(a.len().min(b.len())));
@@ -582,6 +618,20 @@ mod tests {
 
         let tokens = query_tokens(&["validated".to_string(), "Validate".to_string()]);
         assert_eq!(tokens, vec!["valid".to_string()]);
+    }
+
+    #[test]
+    fn stopwords_keep_code_vocabulary_and_drop_code_noise() {
+        let sw = query_stopwords();
+        for keep in ["after", "before", "up", "on", "with"] {
+            assert!(
+                !sw.contains(keep),
+                "{keep} is identifier vocabulary and must stay anchor-able"
+            );
+        }
+        for drop in ["get", "set", "using", "someone", "the", "should"] {
+            assert!(sw.contains(drop), "{drop} must be a stopword");
+        }
     }
 
     #[test]
