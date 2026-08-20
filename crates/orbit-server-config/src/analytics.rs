@@ -85,7 +85,7 @@ mod tests {
 
     #[test]
     fn parses_full_yaml() {
-        let cfg: AnalyticsConfig = serde_yaml::from_str(
+        let cfg: AnalyticsConfig = orbit_utils::yaml::from_str(
             "enabled: true\n\
              collector_url: https://snowplow.trx.gitlab.net\n\
              deployment:\n  type: com\n  environment: production\n",

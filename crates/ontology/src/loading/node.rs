@@ -1059,7 +1059,7 @@ mod tests {
     }
 
     fn parse_test_node(yaml: &str) -> Result<NodeEntity, OntologyError> {
-        let node: NodeYaml = serde_yaml::from_str(yaml).unwrap();
+        let node: NodeYaml = orbit_utils::yaml::from_str(yaml).unwrap();
         node.into_entity(
             "TestNode".to_string(),
             "nodes/test/test_node.yaml",

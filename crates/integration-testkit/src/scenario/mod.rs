@@ -115,7 +115,7 @@ pub async fn run_dir(ctx: &TestContext, root: &str, handlers: Arc<dyn ScenarioHa
 async fn run_scenario(ctx: &TestContext, file: &Path, name: &str, handlers: &dyn ScenarioHandlers) {
     let raw = std::fs::read_to_string(file)
         .unwrap_or_else(|e| panic!("failed to read {}: {e}", file.display()));
-    let scenario: Scenario = serde_yaml::from_str(&raw)
+    let scenario: Scenario = orbit_utils::yaml::from_str(&raw)
         .unwrap_or_else(|e| panic!("{}: invalid scenario: {e}", file.display()));
     let scope = scenario.scope;
     let steps = scenario.into_steps();

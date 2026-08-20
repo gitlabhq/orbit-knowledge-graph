@@ -198,10 +198,10 @@ fn replication_event(event: &CdcEvent) -> LogicalReplicationEvents {
     }
 }
 
-fn proto_value(value: &serde_yaml::Value) -> Value {
+fn proto_value(value: &serde_json::Value) -> Value {
     let inner = match value {
-        serde_yaml::Value::Number(n) if n.is_i64() => value::Value::Int64Value(n.as_i64().unwrap()),
-        serde_yaml::Value::String(s) => value::Value::StringValue(s.clone()),
+        serde_json::Value::Number(n) if n.is_i64() => value::Value::Int64Value(n.as_i64().unwrap()),
+        serde_json::Value::String(s) => value::Value::StringValue(s.clone()),
         other => panic!("cdc column value must be an integer or string, got {other:?}"),
     };
     Value { value: Some(inner) }

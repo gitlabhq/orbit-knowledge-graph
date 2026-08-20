@@ -57,7 +57,7 @@ targets:
     deployments:
       - siphon-consumer
 "#;
-        let config: HealthCheckConfig = serde_yaml::from_str(yaml).unwrap();
+        let config: HealthCheckConfig = orbit_utils::yaml::from_str(yaml).unwrap();
         assert_eq!(config.targets.len(), 2);
         assert_eq!(config.targets[0].namespace, "gkg");
         assert_eq!(config.targets[0].deployments.len(), 2);
@@ -69,14 +69,14 @@ targets:
     #[test]
     fn empty_targets_is_valid_default() {
         let yaml = "bind_address: \"0.0.0.0:4201\"";
-        let config: HealthCheckConfig = serde_yaml::from_str(yaml).unwrap();
+        let config: HealthCheckConfig = orbit_utils::yaml::from_str(yaml).unwrap();
         assert!(config.targets.is_empty());
     }
 
     #[test]
     fn namespace_target_omits_optional_lists() {
         let yaml = "namespace: gkg";
-        let target: NamespaceTarget = serde_yaml::from_str(yaml).unwrap();
+        let target: NamespaceTarget = orbit_utils::yaml::from_str(yaml).unwrap();
         assert!(target.deployments.is_empty());
         assert!(target.stateful_sets.is_empty());
     }

@@ -448,7 +448,7 @@ default:
 aggregation:
   max_execution_time: 120
 "#;
-        let settings: QuerySettings = serde_yaml::from_str(yaml).unwrap();
+        let settings: QuerySettings = orbit_utils::yaml::from_str(yaml).unwrap();
         assert_eq!(settings.default.max_execution_time, Some(30));
         assert_eq!(settings.overrides.len(), 1);
         assert_eq!(
@@ -463,11 +463,11 @@ aggregation:
         assert_eq!(PathResolverConfig::default().cache_ttl_secs, 60);
         assert_eq!(PathResolverConfig::default().cache_capacity, 10_000);
         let cfg: PathResolverConfig =
-            serde_yaml::from_str("cache_ttl_secs: 120\ncache_capacity: 500").unwrap();
+            orbit_utils::yaml::from_str("cache_ttl_secs: 120\ncache_capacity: 500").unwrap();
         assert_eq!(cfg.cache_ttl_secs, 120);
         assert_eq!(cfg.cache_capacity, 500);
         assert_eq!(
-            serde_yaml::from_str::<PathResolverConfig>("{}").unwrap(),
+            orbit_utils::yaml::from_str::<PathResolverConfig>("{}").unwrap(),
             PathResolverConfig::default()
         );
     }

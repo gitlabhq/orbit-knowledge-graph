@@ -159,29 +159,29 @@ fn format_cell(array: &dyn Array, row: usize) -> String {
     "<?>".into()
 }
 
-fn expected_value_matches(array: &dyn Array, row: usize, expected: &serde_yaml::Value) -> bool {
+fn expected_value_matches(array: &dyn Array, row: usize, expected: &serde_json::Value) -> bool {
     match expected {
-        serde_yaml::Value::Null => array.is_null(row),
-        serde_yaml::Value::Bool(value) => {
+        serde_json::Value::Null => array.is_null(row),
+        serde_json::Value::Bool(value) => {
             !array.is_null(row) && format_cell(array, row) == value.to_string()
         }
-        serde_yaml::Value::Number(value) => {
+        serde_json::Value::Number(value) => {
             !array.is_null(row) && format_cell(array, row) == value.to_string()
         }
-        serde_yaml::Value::String(value) => {
+        serde_json::Value::String(value) => {
             !array.is_null(row) && format_cell(array, row) == *value
         }
         _ => false,
     }
 }
 
-fn expected_value_display(expected: &serde_yaml::Value) -> String {
+fn expected_value_display(expected: &serde_json::Value) -> String {
     match expected {
-        serde_yaml::Value::Null => "null".to_string(),
-        serde_yaml::Value::Bool(value) => value.to_string(),
-        serde_yaml::Value::Number(value) => value.to_string(),
-        serde_yaml::Value::String(value) => value.clone(),
-        _ => match serde_yaml::to_string(expected) {
+        serde_json::Value::Null => "null".to_string(),
+        serde_json::Value::Bool(value) => value.to_string(),
+        serde_json::Value::Number(value) => value.to_string(),
+        serde_json::Value::String(value) => value.clone(),
+        _ => match orbit_utils::yaml::to_string(expected) {
             Ok(value) => value.trim().to_string(),
             Err(_) => "<unsupported>".to_string(),
         },
@@ -441,7 +441,7 @@ fn check_one(
 
 fn check_row(
     batch: &RecordBatch,
-    expected: &HashMap<String, serde_yaml::Value>,
+    expected: &HashMap<String, serde_json::Value>,
     total_rows: usize,
     label: &str,
     severity: Severity,

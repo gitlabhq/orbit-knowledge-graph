@@ -3,9 +3,9 @@ use std::collections::BTreeMap;
 use orbit_utils::traversal_path::TraversalPath;
 use serde::Deserialize;
 
-pub type Row = BTreeMap<String, serde_yaml::Value>;
+pub type Row = BTreeMap<String, serde_json::Value>;
 pub type Seed = BTreeMap<String, Vec<Row>>;
-pub type SeedSettings = BTreeMap<String, serde_yaml::Value>;
+pub type SeedSettings = BTreeMap<String, serde_json::Value>;
 pub type RowMatcher = BTreeMap<String, Matcher>;
 
 #[derive(Debug, Deserialize)]
@@ -240,5 +240,5 @@ pub struct ContainsMatcher {
 #[serde(untagged)]
 pub enum Matcher {
     Contains(ContainsMatcher),
-    Value(serde_yaml::Value),
+    Value(serde_json::Value),
 }

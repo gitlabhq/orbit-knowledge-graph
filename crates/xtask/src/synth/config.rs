@@ -18,13 +18,13 @@ impl Config {
         let path = path.as_ref();
         let contents = std::fs::read_to_string(path)
             .with_context(|| format!("Failed to read config file: {}", path.display()))?;
-        let config: Self = serde_yaml::from_str(&contents)
+        let config: Self = orbit_utils::yaml::from_str(&contents)
             .with_context(|| format!("Failed to parse config file: {}", path.display()))?;
         Ok(config)
     }
 
     pub fn save(&self, path: impl AsRef<Path>) -> Result<()> {
-        let contents = serde_yaml::to_string(self)?;
+        let contents = orbit_utils::yaml::to_string(self)?;
         std::fs::write(path, contents)?;
         Ok(())
     }
@@ -625,7 +625,7 @@ impl FakeDataConfig {
         let path = path.as_ref();
         let contents = std::fs::read_to_string(path)
             .with_context(|| format!("Failed to read fake data file: {}", path.display()))?;
-        let config: Self = serde_yaml::from_str(&contents)
+        let config: Self = orbit_utils::yaml::from_str(&contents)
             .with_context(|| format!("Failed to parse fake data file: {}", path.display()))?;
         config
             .validate()
@@ -782,8 +782,8 @@ mod tests {
     #[test]
     fn test_yaml_roundtrip() {
         let config = Config::default();
-        let yaml = serde_yaml::to_string(&config).unwrap();
-        let parsed: Config = serde_yaml::from_str(&yaml).unwrap();
+        let yaml = orbit_utils::yaml::to_string(&config).unwrap();
+        let parsed: Config = orbit_utils::yaml::from_str(&yaml).unwrap();
         assert_eq!(parsed.clickhouse.url, config.clickhouse.url);
     }
 
@@ -795,7 +795,7 @@ clickhouse:
 generation:
   organizations: 5
 "#;
-        let config: Config = serde_yaml::from_str(yaml).unwrap();
+        let config: Config = orbit_utils::yaml::from_str(yaml).unwrap();
         assert_eq!(config.clickhouse.url, "http://ch:8123");
         assert_eq!(config.generation.organizations, 5);
         assert_eq!(config.evaluation.sample_size, 100);
@@ -847,7 +847,7 @@ generation:
   namespace_entity: Namespace
   organizations: 1
 "#;
-        let config: Config = serde_yaml::from_str(yaml).unwrap();
+        let config: Config = orbit_utils::yaml::from_str(yaml).unwrap();
         assert_eq!(config.generation.namespace_entity, "Namespace");
     }
 
@@ -859,7 +859,7 @@ clickhouse:
 generation:
   organizations: 3
 "#;
-        let config: Config = serde_yaml::from_str(yaml).unwrap();
+        let config: Config = orbit_utils::yaml::from_str(yaml).unwrap();
         assert_eq!(config.generation.namespace_entity, "Group");
         assert_eq!(config.generation.organizations, 3);
     }
@@ -880,7 +880,7 @@ generation:
     IN_PROJECT:
       "MergeRequest -> Project": 30
 "#;
-        let config: Config = serde_yaml::from_str(yaml).unwrap();
+        let config: Config = orbit_utils::yaml::from_str(yaml).unwrap();
 
         assert_eq!(config.generation.roots.get("User"), Some(&100));
         assert_eq!(config.generation.roots.get("Group"), Some(&50));
@@ -929,7 +929,7 @@ strings:
     statuses:
       - "custom1"
 "#;
-        let result: Result<FakeDataConfig, _> = serde_yaml::from_str(yaml);
+        let result: Result<FakeDataConfig, _> = orbit_utils::yaml::from_str(yaml);
         assert!(
             result.is_err(),
             "Partial YAML should be rejected — all fields are mandatory"

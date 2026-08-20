@@ -74,7 +74,7 @@ pub enum OntologyError {
     },
     Yaml {
         path: String,
-        source: serde_yaml::Error,
+        source: Box<orbit_utils::yaml::Error>,
     },
     Validation(String),
 }
@@ -2518,7 +2518,7 @@ properties:
     nullable: false
     description: "Name"
 "#;
-        let node_def: NodeYaml = serde_yaml::from_str(yaml).expect("valid YAML");
+        let node_def: NodeYaml = orbit_utils::yaml::from_str(yaml).expect("valid YAML");
         let default_sort_key = vec!["traversal_path".to_string(), "id".to_string()];
         let etl_settings = EtlSettings {
             watermark: "_siphon_replicated_at".to_string(),
@@ -2558,7 +2558,7 @@ properties:
     nullable: false
     description: "Name"
 "#;
-        let node_def: NodeYaml = serde_yaml::from_str(yaml).expect("valid YAML");
+        let node_def: NodeYaml = orbit_utils::yaml::from_str(yaml).expect("valid YAML");
         let default_sort_key = vec!["traversal_path".to_string(), "id".to_string()];
         let etl_settings = EtlSettings {
             watermark: "_siphon_replicated_at".to_string(),
@@ -2782,7 +2782,7 @@ properties:
     nullable: false
     description: "Name"
 "#;
-        let node_def: NodeYaml = serde_yaml::from_str(yaml).expect("valid YAML");
+        let node_def: NodeYaml = orbit_utils::yaml::from_str(yaml).expect("valid YAML");
         let default_sort_key = vec!["traversal_path".to_string(), "id".to_string()];
         let etl_settings = EtlSettings {
             watermark: "_siphon_replicated_at".to_string(),
@@ -2829,7 +2829,7 @@ properties:
     nullable: false
     description: "Name"
 "#;
-        let node_def: NodeYaml = serde_yaml::from_str(yaml).expect("valid YAML");
+        let node_def: NodeYaml = orbit_utils::yaml::from_str(yaml).expect("valid YAML");
         let default_sort_key = vec!["traversal_path".to_string(), "id".to_string()];
         let etl_settings = EtlSettings {
             watermark: "_siphon_replicated_at".to_string(),
