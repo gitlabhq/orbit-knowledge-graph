@@ -69,12 +69,24 @@ promotion and drops outgoing version-prefixed refreshable views afterward.
 
 Standard materialized views default to `versioned: true`: the view and its `to_table` receive the
 schema-version prefix and are dropped on version rollover, so they must reference version-tracked
-tables via `{table_name}` placeholders. Setting `versioned: false` makes the view durable — it is
-created once (`CREATE MATERIALIZED VIEW IF NOT EXISTS`) alongside unversioned tables, skips the
-version prefix, and is excluded from version-completeness and dead-version GC. An unversioned view
-must target an unversioned auxiliary table; it may read from external system tables (for example
-`system.query_log`) that are not ontology-tracked and therefore not prefixed. Its DDL fingerprint
-lives in the auxiliary snapshot, so a body change requires `mise schema:snapshot`, not a version bump.
+tables via `{table_name}` placeholders. Setting `versioned: false` makes the view durable: it
+skips the version prefix and is excluded from version-completeness and dead-version GC.
+
+At boot, the server compares a SHA-256 fingerprint of each unversioned object's DDL against
+the deployed fingerprint stored in `gkg_unversioned_fingerprints`. Only objects whose definition
+actually changed are acted on:
+
+- **Unchanged:** left alone, no data-loss window.
+- **Changed MV:** dropped and recreated with the new definition.
+- **New object:** created and fingerprinted.
+- **Removed MV:** dropped and its fingerprint deleted.
+- **Changed table:** the new DDL is applied via `CREATE TABLE IF NOT EXISTS` (a no-op for
+  additive changes; destructive changes require an auxiliary migration).
+
+An unversioned view must target an unversioned auxiliary table; it may read from external system
+tables (for example `system.query_log`) that are not ontology-tracked and therefore not prefixed.
+Its DDL fingerprint lives in the auxiliary snapshot, so a body change requires
+`mise schema:snapshot`, not a version bump.
 
 The durable unversioned objects (unversioned tables and unversioned materialized views) are
 tracked in their own committed snapshot, `config/graph_persistent.sql`, separate from the

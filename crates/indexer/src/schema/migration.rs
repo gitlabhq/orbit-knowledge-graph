@@ -29,7 +29,7 @@ use arrow::datatypes::UInt64Type;
 use ontology::migrations::{MigrationLedger, MigrationScope};
 use orbit_utils::arrow::ArrowUtils;
 use query_engine::compiler::{
-    DictionarySource, emit_create_dictionary, emit_create_materialized_view,
+    DictionarySource, UnversionedObject, emit_create_dictionary, emit_create_materialized_view,
     emit_create_refreshable_materialized_view, emit_create_table,
     generate_graph_dictionaries_with_prefix, generate_graph_materialized_views_with_prefix,
     generate_graph_tables_with_prefix, generate_refreshable_materialized_views,
@@ -254,16 +254,147 @@ pub async fn create_unversioned_tables(
     graph: &ArrowClickHouseClient,
     ontology: &ontology::Ontology,
 ) -> Result<(), MigrationError> {
-    for object in generate_unversioned_objects(ontology) {
-        graph
-            .execute(&object.ddl)
-            .await
-            .map_err(|error| MigrationError::Ddl {
-                table: object.name,
-                reason: error.to_string(),
-            })?;
+    sync_unversioned_objects(graph, ontology).await
+}
+
+const FINGERPRINT_TABLE: &str = "gkg_unversioned_fingerprints";
+
+async fn sync_unversioned_objects(
+    graph: &ArrowClickHouseClient,
+    ontology: &ontology::Ontology,
+) -> Result<(), MigrationError> {
+    graph
+        .execute(
+            "CREATE TABLE IF NOT EXISTS gkg_unversioned_fingerprints (\
+                 kind String, name String, hash String\
+             ) ENGINE = ReplacingMergeTree ORDER BY (kind, name)",
+        )
+        .await
+        .map_err(|e| MigrationError::Ddl {
+            table: FINGERPRINT_TABLE.into(),
+            reason: e.to_string(),
+        })?;
+
+    let stored = read_stored_fingerprints(graph).await?;
+    let objects = generate_unversioned_objects(ontology);
+
+    let mut desired: std::collections::HashMap<(String, String), &UnversionedObject> =
+        std::collections::HashMap::new();
+    for obj in &objects {
+        desired.insert((obj.kind.to_owned(), obj.name.clone()), obj);
     }
+
+    // Drop removed MVs and MVs whose definition changed.
+    for (key, old_hash) in &stored {
+        let (kind, name) = key;
+        match desired.get(key) {
+            Some(obj) if ontology::migrations::sha256_hex(&obj.ddl) == *old_hash => continue,
+            Some(_) if kind == "materialized_view" => {
+                info!(view = %name, "recreating changed unversioned materialized view");
+                drop_view(graph, name).await?;
+            }
+            None if kind == "materialized_view" => {
+                info!(view = %name, "dropping removed unversioned materialized view");
+                drop_view(graph, name).await?;
+                delete_fingerprint(graph, kind, name).await?;
+            }
+            _ => {}
+        }
+    }
+
+    // Create or re-create objects and update fingerprints.
+    for obj in &objects {
+        let hash = ontology::migrations::sha256_hex(&obj.ddl);
+        let key = (obj.kind.to_owned(), obj.name.clone());
+
+        if stored.get(&key).is_some_and(|h| *h == hash) {
+            continue;
+        }
+
+        graph
+            .execute(&obj.ddl)
+            .await
+            .map_err(|e| MigrationError::Ddl {
+                table: obj.name.clone(),
+                reason: e.to_string(),
+            })?;
+
+        upsert_fingerprint(graph, obj.kind, &obj.name, &hash).await?;
+    }
+
     Ok(())
+}
+
+async fn read_stored_fingerprints(
+    graph: &ArrowClickHouseClient,
+) -> Result<std::collections::HashMap<(String, String), String>, MigrationError> {
+    let batches = graph
+        .query(&format!(
+            "SELECT kind, name, hash FROM {FINGERPRINT_TABLE} FINAL"
+        ))
+        .fetch_arrow()
+        .await
+        .map_err(|e| MigrationError::Ddl {
+            table: FINGERPRINT_TABLE.into(),
+            reason: e.to_string(),
+        })?;
+
+    let kinds: Vec<String> =
+        clickhouse_client::FromArrowColumn::extract_column(&batches, 0).unwrap_or_default();
+    let names: Vec<String> =
+        clickhouse_client::FromArrowColumn::extract_column(&batches, 1).unwrap_or_default();
+    let hashes: Vec<String> =
+        clickhouse_client::FromArrowColumn::extract_column(&batches, 2).unwrap_or_default();
+
+    Ok(kinds
+        .into_iter()
+        .zip(names)
+        .zip(hashes)
+        .map(|((k, n), h)| ((k, n), h))
+        .collect())
+}
+
+async fn drop_view(graph: &ArrowClickHouseClient, name: &str) -> Result<(), MigrationError> {
+    graph
+        .execute(&format!("DROP VIEW IF EXISTS {name}"))
+        .await
+        .map_err(|e| MigrationError::Ddl {
+            table: name.to_owned(),
+            reason: e.to_string(),
+        })
+}
+
+async fn upsert_fingerprint(
+    graph: &ArrowClickHouseClient,
+    kind: &str,
+    name: &str,
+    hash: &str,
+) -> Result<(), MigrationError> {
+    graph
+        .execute(&format!(
+            "INSERT INTO {FINGERPRINT_TABLE} (kind, name, hash) VALUES ('{kind}', '{name}', '{hash}')"
+        ))
+        .await
+        .map_err(|e| MigrationError::Ddl {
+            table: FINGERPRINT_TABLE.into(),
+            reason: e.to_string(),
+        })
+}
+
+async fn delete_fingerprint(
+    graph: &ArrowClickHouseClient,
+    kind: &str,
+    name: &str,
+) -> Result<(), MigrationError> {
+    graph
+        .execute(&format!(
+            "DELETE FROM {FINGERPRINT_TABLE} WHERE kind = '{kind}' AND name = '{name}'"
+        ))
+        .await
+        .map_err(|e| MigrationError::Ddl {
+            table: FINGERPRINT_TABLE.into(),
+            reason: e.to_string(),
+        })
 }
 
 pub async fn replace_refreshable_views_for_version(

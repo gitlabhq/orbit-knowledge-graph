@@ -22,6 +22,60 @@ struct NamespaceStorageAttributionFixture {
 }
 
 #[tokio::test]
+async fn boot_drops_orphaned_unversioned_materialized_view() {
+    let scenario = NamespaceStorageSnapshotScenario::new().await;
+    scenario.create_schema().await;
+
+    scenario
+        .context
+        .execute(
+            "CREATE TABLE IF NOT EXISTS orphan_target (x UInt32) ENGINE = MergeTree ORDER BY x",
+        )
+        .await;
+    scenario
+        .context
+        .execute(
+            "CREATE MATERIALIZED VIEW IF NOT EXISTS orphan_mv TO orphan_target AS SELECT 1 AS x",
+        )
+        .await;
+    assert_eq!(scenario.get_table_or_view_count("orphan_mv").await, 1);
+
+    scenario.create_schema().await;
+
+    assert_eq!(
+        scenario.get_table_or_view_count("orphan_mv").await,
+        0,
+        "MV removed from ontology should be dropped"
+    );
+}
+
+#[tokio::test]
+async fn boot_leaves_unchanged_mv_in_place() {
+    let scenario = NamespaceStorageSnapshotScenario::new().await;
+    scenario.create_schema().await;
+
+    let ontology_mvs: Vec<String> = scenario
+        .ontology
+        .materialized_views()
+        .iter()
+        .filter(|mv| !mv.versioned)
+        .map(|mv| mv.name.clone())
+        .collect();
+
+    if let Some(mv_name) = ontology_mvs.first() {
+        assert_eq!(scenario.get_table_or_view_count(mv_name).await, 1);
+
+        scenario.create_schema().await;
+
+        assert_eq!(
+            scenario.get_table_or_view_count(mv_name).await,
+            1,
+            "unchanged MV should survive boot"
+        );
+    }
+}
+
+#[tokio::test]
 async fn creates_namespace_storage_table_and_refreshable_view() {
     let scenario = NamespaceStorageSnapshotScenario::new().await;
     scenario.create_schema().await;
