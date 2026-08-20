@@ -2,15 +2,11 @@ use anyhow::{Context, Result};
 use arrow::record_batch::RecordBatch;
 
 use crate::{DuckDbClient, scalar_i64, sql_lit, string_column};
+use orbit_search::ask::{AskSource, ask};
 use orbit_search::corpus::{DEFAULT_SOURCE_EXTS, EXCLUDE_LIKE, EXCLUDE_REGEX, ext_regex};
-use orbit_search::expand::{NeighborhoodSource, NodeLabel, expand_neighborhood};
+use orbit_search::expand::{NeighborhoodSource, NodeLabel};
 use orbit_search::ppr::NeighborhoodEdge;
-use orbit_search::{
-    AskMatch, AskOutcome, BM25_B, BM25_K1, CorpusRow, SearchVocab, candidate_splits, content_words,
-    query_tokens, rank_and_trim, term_base_sets, unmatched_terms,
-};
-
-const SURFACED_LIMIT: usize = 3;
+use orbit_search::{AskOutcome, BM25_B, BM25_K1, CorpusRow, SearchVocab, query_tokens};
 use std::collections::HashMap;
 
 const LOCAL_CANDIDATES: usize = 2000;
@@ -37,96 +33,7 @@ impl DuckDbSearch {
         vocab: &SearchVocab,
         kind_weights: &HashMap<String, f64>,
     ) -> Result<AskOutcome> {
-        let terms = content_words(question);
-        if terms.is_empty() {
-            anyhow::bail!("no usable search terms in question: {question:?}");
-        }
-        let splits = self.accepted_splits(&terms)?;
-        let mut anchor_terms = terms.clone();
-        for (_, a, b) in &splits {
-            anchor_terms.push(a.clone());
-            anchor_terms.push(b.clone());
-        }
-        let (corpus, anchor_weights) = self.search(&anchor_terms)?;
-        let weights = anchor_weights.as_ref().map(|w| w[..terms.len()].to_vec());
-        let hits = rank_and_trim(&terms, &corpus, limit, weights.as_deref(), vocab);
-        let focus = vocab.focus_edge_kind(&terms);
-        let weak = hits.first().is_none_or(|h| !h.confident());
-        let unmatched = unmatched_terms(&terms, &corpus, vocab);
-        let matches: Vec<AskMatch> = hits
-            .into_iter()
-            .map(|h| AskMatch {
-                row: corpus[h.index].clone(),
-                score: h.score,
-            })
-            .collect();
-        let mut term_seeds: Vec<Vec<(String, f64)>> =
-            term_base_sets(&anchor_terms, &corpus, anchor_weights.as_deref(), vocab)
-                .into_iter()
-                .map(|set| {
-                    set.into_iter()
-                        .map(|(i, w)| (corpus[i].id.clone(), w))
-                        .collect()
-                })
-                .collect();
-        if term_seeds.is_empty() && !matches.is_empty() {
-            term_seeds = vec![
-                matches
-                    .iter()
-                    .map(|m| (m.row.id.clone(), m.score))
-                    .collect(),
-            ];
-        }
-        let seed_count = term_seeds
-            .iter()
-            .flatten()
-            .map(|(id, _)| id.as_str())
-            .collect::<std::collections::HashSet<_>>()
-            .len();
-        let (edges, hidden_by_kind, surfaced) = if term_seeds.is_empty() {
-            (Vec::new(), Vec::new(), Vec::new())
-        } else {
-            let expanded = expand_neighborhood(self, &term_seeds, kind_weights, focus.as_deref())?;
-            let shown: std::collections::HashSet<&str> =
-                matches.iter().map(|m| m.row.id.as_str()).collect();
-            let candidates: Vec<(String, f64)> = expanded
-                .surfaced
-                .into_iter()
-                .filter(|(id, _)| !shown.contains(id.as_str()))
-                .take(SURFACED_LIMIT)
-                .collect();
-            let rows = self.rows_by_ids(
-                &candidates
-                    .iter()
-                    .map(|(id, _)| id.as_str())
-                    .collect::<Vec<_>>(),
-            )?;
-            let surfaced = candidates
-                .into_iter()
-                .filter_map(|(id, score)| {
-                    rows.iter().find(|r| r.id == id).map(|r| AskMatch {
-                        row: r.clone(),
-                        score,
-                    })
-                })
-                .collect();
-            (expanded.edges, expanded.hidden_by_kind, surfaced)
-        };
-        Ok(AskOutcome {
-            terms,
-            splits: splits
-                .into_iter()
-                .map(|(term, a, b)| (term, format!("{a} {b}")))
-                .collect(),
-            seed_count,
-            matches,
-            surfaced,
-            focus,
-            edges,
-            hidden_by_kind,
-            weak,
-            unmatched_terms: unmatched,
-        })
+        ask(self, question, limit, vocab, kind_weights).map_err(|e| anyhow::anyhow!("{e}"))
     }
 
     pub fn search(&self, terms: &[String]) -> Result<(Vec<CorpusRow>, Option<Vec<f64>>)> {
@@ -146,52 +53,26 @@ impl DuckDbSearch {
         let corpus = rows_from_batches(&query(&self.client, &sql)?);
         Ok((corpus, Some(weights)))
     }
+}
 
-    fn accepted_splits(&self, terms: &[String]) -> Result<Vec<(String, String, String)>> {
-        let candidates: Vec<(String, String, String)> = terms
-            .iter()
-            .flat_map(|term| {
-                candidate_splits(term)
-                    .into_iter()
-                    .map(|(a, b)| (term.clone(), a, b))
-            })
-            .collect();
-        if candidates.is_empty() {
-            return Ok(Vec::new());
-        }
-        let mut parts: Vec<String> = candidates
-            .iter()
-            .flat_map(|(_, a, b)| [a.clone(), b.clone()])
-            .collect();
-        parts.sort();
-        parts.dedup();
-        let counters: Vec<String> = parts
+impl AskSource for DuckDbSearch {
+    fn corpus(&self, terms: &[String]) -> Result<(Vec<CorpusRow>, Option<Vec<f64>>)> {
+        self.search(terms)
+    }
+
+    fn token_df(&self, tokens: &[String]) -> Result<Vec<i64>> {
+        let counters: Vec<String> = tokens
             .iter()
             .enumerate()
-            .map(|(i, p)| match token_like_sql(p) {
+            .map(|(i, t)| match token_like_sql(t) {
                 Some(matched) => {
                     format!("CAST(COUNT(*) FILTER (WHERE {matched}) AS VARCHAR) AS df_{i}")
                 }
                 None => format!("CAST(0 AS VARCHAR) AS df_{i}"),
             })
             .collect();
-        let (_, dfs) = term_counts(&self.client, self.pid, &self.sha, &parts, &counters)?;
-        let known: std::collections::HashSet<&str> = parts
-            .iter()
-            .zip(&dfs)
-            .filter(|&(_, &df)| df > 0)
-            .map(|(p, _)| p.as_str())
-            .collect();
-        let mut accepted: Vec<(String, String, String)> = Vec::new();
-        for (term, a, b) in candidates {
-            if accepted.iter().any(|(t, _, _)| *t == term) {
-                continue;
-            }
-            if known.contains(a.as_str()) && known.contains(b.as_str()) {
-                accepted.push((term, a, b));
-            }
-        }
-        Ok(accepted)
+        let (_, dfs) = term_counts(&self.client, self.pid, &self.sha, tokens, &counters)?;
+        Ok(dfs)
     }
 
     fn rows_by_ids(&self, ids: &[&str]) -> Result<Vec<CorpusRow>> {
