@@ -254,6 +254,9 @@ pub async fn create_unversioned_tables(
     graph: &ArrowClickHouseClient,
     ontology: &ontology::Ontology,
 ) -> Result<(), MigrationError> {
+    drop_all_unversioned_materialized_views(graph).await?;
+    run_auxiliary_migrations(graph).await?;
+
     for object in generate_unversioned_objects(ontology) {
         graph
             .execute(&object.ddl)
@@ -263,6 +266,119 @@ pub async fn create_unversioned_tables(
                 reason: error.to_string(),
             })?;
     }
+
+    Ok(())
+}
+
+/// Wipes every non-prefixed materialized view so the subsequent CREATE pass
+/// recreates them from the current ontology. Covers both changed definitions
+/// and views removed from the ontology. Safe because MVs are insert triggers
+/// with no stored data; the target tables are untouched.
+async fn drop_all_unversioned_materialized_views(
+    graph: &ArrowClickHouseClient,
+) -> Result<(), MigrationError> {
+    let batches = graph
+        .query(
+            "SELECT name FROM system.tables \
+             WHERE database = currentDatabase() \
+               AND engine = 'MaterializedView' \
+               AND NOT match(name, '^v[0-9]+_')",
+        )
+        .fetch_arrow()
+        .await
+        .map_err(|e| MigrationError::Ddl {
+            table: "system.tables".into(),
+            reason: e.to_string(),
+        })?;
+
+    let names: Vec<String> =
+        clickhouse_client::FromArrowColumn::extract_column(&batches, 0).unwrap_or_default();
+
+    for name in &names {
+        info!(view = %name, "dropping unversioned materialized view before recreate");
+        graph
+            .execute(&format!("DROP VIEW IF EXISTS {name}"))
+            .await
+            .map_err(|error| MigrationError::Ddl {
+                table: name.clone(),
+                reason: error.to_string(),
+            })?;
+    }
+
+    Ok(())
+}
+
+const AUXILIARY_MIGRATION_TABLE: &str = "gkg_auxiliary_migrations";
+
+const AUXILIARY_MIGRATION_TABLE_DDL: &str = "\
+CREATE TABLE IF NOT EXISTS gkg_auxiliary_migrations (
+    id UInt32,
+    applied_at DateTime DEFAULT now()
+) ENGINE = ReplacingMergeTree(applied_at)
+ORDER BY id";
+
+async fn run_auxiliary_migrations(graph: &ArrowClickHouseClient) -> Result<(), MigrationError> {
+    let ledger = ontology::migrations::AuxiliaryLedger::load_embedded().map_err(|e| {
+        MigrationError::Ddl {
+            table: "auxiliary-migrations.yaml".into(),
+            reason: e,
+        }
+    })?;
+
+    if ledger.migrations.is_empty() {
+        return Ok(());
+    }
+
+    graph
+        .execute(AUXILIARY_MIGRATION_TABLE_DDL)
+        .await
+        .map_err(|e| MigrationError::Ddl {
+            table: AUXILIARY_MIGRATION_TABLE.into(),
+            reason: e.to_string(),
+        })?;
+
+    let batches = graph
+        .query(&format!("SELECT id FROM {AUXILIARY_MIGRATION_TABLE} FINAL"))
+        .fetch_arrow()
+        .await
+        .map_err(|e| MigrationError::Ddl {
+            table: AUXILIARY_MIGRATION_TABLE.into(),
+            reason: e.to_string(),
+        })?;
+
+    let applied: std::collections::HashSet<u32> = batches
+        .iter()
+        .flat_map(|batch| {
+            (0..batch.num_rows()).filter_map(|row| {
+                ArrowUtils::get_column::<arrow::datatypes::UInt32Type>(batch, "id", row)
+            })
+        })
+        .collect();
+
+    for entry in &ledger.migrations {
+        if applied.contains(&entry.id) {
+            continue;
+        }
+        info!(id = entry.id, sql = %entry.sql, "running auxiliary migration");
+        graph
+            .execute(&entry.sql)
+            .await
+            .map_err(|e| MigrationError::Ddl {
+                table: format!("auxiliary_migration/{}", entry.id),
+                reason: e.to_string(),
+            })?;
+        graph
+            .execute(&format!(
+                "INSERT INTO {AUXILIARY_MIGRATION_TABLE} (id) VALUES ({})",
+                entry.id
+            ))
+            .await
+            .map_err(|e| MigrationError::Ddl {
+                table: AUXILIARY_MIGRATION_TABLE.into(),
+                reason: e.to_string(),
+            })?;
+    }
+
     Ok(())
 }
 

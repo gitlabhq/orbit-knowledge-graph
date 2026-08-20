@@ -1,0 +1,34 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AuxiliaryMigrationLedger",
+  "description": "config/auxiliary-migrations.yaml. One-time SQL statements for destructive changes to unversioned objects. Each entry runs at most once, tracked by gkg_auxiliary_migrations.",
+  "type": "object",
+  "required": ["migrations"],
+  "additionalProperties": false,
+  "properties": {
+    "migrations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "sql"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Sequential identifier. Must be unique and never reused."
+          },
+          "sql": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The SQL statement to execute (e.g. DROP TABLE IF EXISTS, ALTER TABLE)."
+          },
+          "note": {
+            "type": "string",
+            "description": "Human-facing rationale for the migration."
+          }
+        }
+      }
+    }
+  }
+}

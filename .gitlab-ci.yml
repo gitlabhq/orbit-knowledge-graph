@@ -234,6 +234,17 @@ migration-ledger-schema-validate:
   script:
     - uvx check-jsonschema --verbose --schemafile config/schemas/schema-migrations.schema.json config/schema-migrations.yaml
 
+auxiliary-migration-schema-validate:
+  stage: lint
+  image: ghcr.io/astral-sh/uv:python3.12-alpine
+  tags:
+    - saas-linux-medium-amd64
+  extends:
+    - .mr-and-main-rules
+  needs: []
+  script:
+    - uvx check-jsonschema --verbose --schemafile config/schemas/auxiliary-migrations.schema.json config/auxiliary-migrations.yaml
+
 indexer-scenario-schema-validate:
   stage: lint
   image: ghcr.io/astral-sh/uv:python3.12-alpine
