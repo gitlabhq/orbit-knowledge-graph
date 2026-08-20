@@ -3,13 +3,15 @@ use arrow::record_batch::RecordBatch;
 
 use crate::{DuckDbClient, scalar_i64, sql_lit, string_column};
 use orbit_search::corpus::{DEFAULT_SOURCE_EXTS, EXCLUDE_LIKE, EXCLUDE_REGEX, ext_regex};
+use orbit_search::expand::{NeighborhoodSource, NodeLabel, expand_neighborhood};
+use orbit_search::ppr::NeighborhoodEdge;
 use orbit_search::{
-    AskMatch, AskOutcome, BM25_B, BM25_K1, CorpusRow, Edge, SearchVocab, content_words,
-    query_tokens, rank_and_trim, seed_rows, stem,
+    AskMatch, AskOutcome, BM25_B, BM25_K1, CorpusRow, SearchVocab, content_words, query_tokens,
+    rank_and_trim, stem,
 };
+use std::collections::HashMap;
 
 const LOCAL_CANDIDATES: usize = 2000;
-const EDGE_LIMIT: usize = 40;
 
 pub struct DuckDbSearch {
     client: DuckDbClient,
@@ -26,7 +28,13 @@ impl DuckDbSearch {
         }
     }
 
-    pub fn ask(&self, question: &str, limit: usize, vocab: &SearchVocab) -> Result<AskOutcome> {
+    pub fn ask(
+        &self,
+        question: &str,
+        limit: usize,
+        vocab: &SearchVocab,
+        kind_weights: &HashMap<String, f64>,
+    ) -> Result<AskOutcome> {
         let terms = content_words(question);
         if terms.is_empty() {
             anyhow::bail!("no usable search terms in question: {question:?}");
@@ -34,26 +42,29 @@ impl DuckDbSearch {
         let (corpus, weights) = self.search(&terms)?;
         let hits = rank_and_trim(&terms, &corpus, limit, weights.as_deref(), vocab);
         let focus = vocab.focus_edge_kind(&terms);
-        let (seed_count, edges) = if hits.is_empty() {
-            (0, Vec::new())
-        } else {
-            let seeds = seed_rows(&hits, &corpus);
-            let edges = self.expand(&seeds, focus.as_deref())?;
-            (seeds.len(), edges)
-        };
-        let matches = hits
+        let matches: Vec<AskMatch> = hits
             .into_iter()
             .map(|h| AskMatch {
                 row: corpus[h.index].clone(),
                 score: h.score,
             })
             .collect();
+        let seeds: Vec<(String, f64)> = matches
+            .iter()
+            .map(|m| (m.row.id.clone(), m.score))
+            .collect();
+        let (edges, hidden_by_kind) = if seeds.is_empty() {
+            (Vec::new(), Vec::new())
+        } else {
+            expand_neighborhood(self, &seeds, kind_weights, focus.as_deref())?
+        };
         Ok(AskOutcome {
             terms,
+            seed_count: seeds.len(),
             matches,
-            seed_count,
             focus,
             edges,
+            hidden_by_kind,
         })
     }
 
@@ -84,22 +95,98 @@ impl DuckDbSearch {
         };
         Ok((corpus, Some(weights)))
     }
+}
 
-    pub fn expand(&self, seeds: &[&CorpusRow], focus: Option<&str>) -> Result<Vec<Edge>> {
-        let ids: Vec<&str> = seeds.iter().map(|s| s.id.as_str()).collect();
-        let batches = query(&self.client, &expand_sql(self.pid, &self.sha, &ids, focus))?;
+impl NeighborhoodSource for DuckDbSearch {
+    type Error = anyhow::Error;
+
+    fn hop(&self, ids: &[&str], cap: usize) -> Result<Vec<NeighborhoodEdge>> {
+        let list = ids.join(", ");
+        let batches = query(
+            &self.client,
+            &format!(
+                "SELECT DISTINCT relationship_kind, CAST(source_id AS VARCHAR) AS source_id,
+       CAST(target_id AS VARCHAR) AS target_id
+FROM gl_edge
+WHERE source_id IN ({list}) OR target_id IN ({list})
+LIMIT {cap}"
+            ),
+        )?;
         let kinds = string_column(&batches, "relationship_kind");
-        let sources = string_column(&batches, "source_label");
-        let source_locs = string_column(&batches, "source_loc");
-        let targets = string_column(&batches, "target_label");
-        let target_locs = string_column(&batches, "target_loc");
+        let sources = string_column(&batches, "source_id");
+        let targets = string_column(&batches, "target_id");
         Ok((0..kinds.len())
-            .map(|i| Edge {
+            .map(|i| NeighborhoodEdge {
                 kind: kinds[i].clone(),
                 source: sources[i].clone(),
-                source_loc: source_locs[i].clone(),
                 target: targets[i].clone(),
-                target_loc: target_locs[i].clone(),
+            })
+            .collect())
+    }
+
+    fn degrees(&self, ids: &[&str]) -> Result<HashMap<String, u64>> {
+        if ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let list = ids.join(", ");
+        let batches = query(
+            &self.client,
+            &format!(
+                "SELECT CAST(id AS VARCHAR) AS id, CAST(COUNT(*) AS VARCHAR) AS degree FROM (
+  SELECT source_id AS id FROM gl_edge WHERE source_id IN ({list})
+  UNION ALL
+  SELECT target_id FROM gl_edge WHERE target_id IN ({list})
+) GROUP BY 1"
+            ),
+        )?;
+        let node_ids = string_column(&batches, "id");
+        let counts = string_column(&batches, "degree");
+        Ok((0..node_ids.len())
+            .map(|i| (node_ids[i].clone(), counts[i].parse().unwrap_or(0)))
+            .collect())
+    }
+
+    fn labels(&self, ids: &[&str]) -> Result<HashMap<String, NodeLabel>> {
+        if ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let list = ids.join(", ");
+        let pid = self.pid;
+        let sha = &self.sha;
+        let batches = query(
+            &self.client,
+            &format!(
+                "SELECT CAST(id AS VARCHAR) AS id, label, loc, CAST(scoped AS VARCHAR) AS scoped FROM (
+  SELECT id, fqn AS label,
+         file_path || ':' || CAST(start_line AS VARCHAR) AS loc,
+         fqn LIKE '%@%' AS scoped
+  FROM gl_definition
+  WHERE project_id = {pid} AND commit_sha = {sha}
+  UNION ALL
+  SELECT id, path, '', FALSE FROM gl_file WHERE project_id = {pid} AND commit_sha = {sha}
+  UNION ALL
+  SELECT id, path, '', FALSE FROM gl_directory WHERE project_id = {pid} AND commit_sha = {sha}
+  UNION ALL
+  SELECT id, identifier_name, '', FALSE FROM gl_imported_symbol
+  WHERE project_id = {pid} AND commit_sha = {sha}
+)
+WHERE id IN ({list})"
+            ),
+        )?;
+        let node_ids = string_column(&batches, "id");
+        let node_labels = string_column(&batches, "label");
+        let locs = string_column(&batches, "loc");
+        let scoped = string_column(&batches, "scoped");
+        Ok((0..node_ids.len())
+            .map(|i| {
+                (
+                    node_ids[i].clone(),
+                    NodeLabel {
+                        label: node_labels[i].clone(),
+                        loc: locs[i].clone(),
+                        scoped: scoped[i] == "true",
+                    },
+                )
             })
             .collect())
     }
@@ -448,54 +535,6 @@ fn rows_from_batches(batches: &[RecordBatch]) -> Vec<CorpusRow> {
             degree: degrees[i].clone(),
         })
         .collect()
-}
-
-fn expand_sql(pid: i64, sha: &str, seed_ids: &[&str], focus: Option<&str>) -> String {
-    let ids = seed_ids.join(", ");
-    let order = match focus {
-        Some(kind) => {
-            let lit = sql_lit(kind);
-            format!(
-                "CASE WHEN h.relationship_kind = {lit} THEN 0 ELSE 1 END,
-         h.relationship_kind,
-         CASE WHEN h.relationship_kind = {lit} AND h.target_id IN ({ids}) THEN 0 ELSE 1 END,
-         source_label, target_label"
-            )
-        }
-        None => "h.relationship_kind, source_label, target_label".to_string(),
-    };
-    format!(
-        "WITH hood AS (
-  SELECT DISTINCT relationship_kind, source_id, target_id
-  FROM gl_edge
-  WHERE source_id IN ({ids}) OR target_id IN ({ids})
-),
-labels AS (
-  SELECT id, fqn AS label,
-         file_path || ':' || CAST(start_line AS VARCHAR) AS loc,
-         fqn LIKE '%@%' AS scoped
-  FROM gl_definition
-  WHERE project_id = {pid} AND commit_sha = {sha}
-  UNION ALL
-  SELECT id, path, '', FALSE FROM gl_file WHERE project_id = {pid} AND commit_sha = {sha}
-  UNION ALL
-  SELECT id, path, '', FALSE FROM gl_directory WHERE project_id = {pid} AND commit_sha = {sha}
-  UNION ALL
-  SELECT id, identifier_name, '', FALSE FROM gl_imported_symbol
-  WHERE project_id = {pid} AND commit_sha = {sha}
-)
-SELECT h.relationship_kind,
-       COALESCE(s.label, CAST(h.source_id AS VARCHAR)) AS source_label,
-       COALESCE(s.loc, '') AS source_loc,
-       COALESCE(t.label, CAST(h.target_id AS VARCHAR)) AS target_label,
-       COALESCE(t.loc, '') AS target_loc
-FROM hood h
-LEFT JOIN labels s ON s.id = h.source_id
-LEFT JOIN labels t ON t.id = h.target_id
-WHERE NOT COALESCE(s.scoped, FALSE) AND NOT COALESCE(t.scoped, FALSE)
-ORDER BY {order}
-LIMIT {EDGE_LIMIT}"
-    )
 }
 
 #[cfg(test)]

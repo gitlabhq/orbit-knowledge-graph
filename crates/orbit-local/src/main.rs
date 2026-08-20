@@ -177,7 +177,8 @@ struct IndexArgs {
 #[command(
     long_about = "Answer a plain-language question with a scoped subgraph.\n\n\
                   Ranks indexed definitions by how many distinct question terms they \
-                  match, then shows the connections one hop around the top matches."
+                  match, then shows the most relevant connections within two hops of \
+                  the top matches, ranked by graph proximity."
 )]
 struct AskArgs {
     /// Plain-language question, e.g. "how does the quota gate decide?"

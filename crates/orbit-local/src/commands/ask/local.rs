@@ -75,8 +75,9 @@ impl LocalBackend {
         question: &str,
         limit: usize,
         vocab: &SearchVocab,
+        kind_weights: &std::collections::HashMap<String, f64>,
     ) -> Result<AskOutcome> {
-        self.search.ask(question, limit, vocab)
+        self.search.ask(question, limit, vocab, kind_weights)
     }
 }
 
@@ -134,5 +135,84 @@ mod tests {
         assert!(fqns.contains(&"Group::execute_hooks"));
         assert!(fqns.contains(&"Ci::ExecuteBuildHooksWorker::execute_hooks_for_created_build"));
         assert!(!fqns.contains(&"Project::unrelated"));
+    }
+
+    #[test]
+    fn ask_surfaces_a_two_hop_call_chain_over_hub_noise() {
+        let dir = std::env::temp_dir().join(format!("orbit-ask-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = dir.join("t.duckdb");
+        let _ = std::fs::remove_file(&db);
+        let client = duckdb_client::DuckDbClient::open(&db).unwrap();
+        client
+            .initialize_schema(include_str!(concat!(
+                env!("CONFIG_DIR"),
+                "/graph_local.sql"
+            )))
+            .unwrap();
+        let insert = |id: i64, fqn: &str, name: &str, path: &str| {
+            let (search_text, token_count) = orbit_search::search_document(fqn, path);
+            client
+                .execute(
+                    &format!(
+                        "INSERT INTO gl_definition VALUES ({id}, '', 7, 'main', 'sha', '{path}', '{fqn}', '{name}', 'Method', 1, 2, 0, 0, 0, 0, '{search_text}', {token_count})"
+                    ),
+                    &[],
+                )
+                .unwrap();
+        };
+        insert(1, "Dlq::publish", "publish", "app/services/dlq.rb");
+        insert(2, "Dlq::encode", "encode", "app/services/dlq.rb");
+        insert(3, "Dlq::checksum", "checksum", "app/services/dlq.rb");
+        insert(4, "Util::log", "log", "app/util.rb");
+        for i in 5..40 {
+            insert(i, &format!("Other::fn_{i}"), &format!("fn_{i}"), "app/o.rb");
+        }
+        let edge = |source: i64, kind: &str, target: i64| {
+            client
+                .execute(
+                    &format!(
+                        "INSERT INTO gl_edge VALUES ({source}, 'Definition', '{kind}', {target}, 'Definition', '')"
+                    ),
+                    &[],
+                )
+                .unwrap();
+        };
+        edge(1, "CALLS", 2);
+        edge(2, "CALLS", 3);
+        edge(1, "CALLS", 4);
+        for i in 5..40 {
+            edge(i, "CALLS", 4);
+        }
+
+        let search = DuckDbSearch::new(client, 7, "sha");
+        let vocab = SearchVocab::new(["Calls", "Imports", "Extends", "Contains", "Defines"]);
+        let weights = std::collections::HashMap::from([("CALLS".to_string(), 1.0)]);
+        let outcome = search.ask("dlq publish", 5, &vocab, &weights).unwrap();
+
+        assert!(!outcome.matches.is_empty());
+        let rendered: Vec<String> = outcome
+            .edges
+            .iter()
+            .map(|e| format!("{} {} {}", e.source, e.kind, e.target))
+            .collect();
+        assert!(
+            rendered.contains(&"Dlq::publish CALLS Dlq::encode".to_string()),
+            "edges were {rendered:?}"
+        );
+        assert!(
+            rendered.contains(&"Dlq::encode CALLS Dlq::checksum".to_string()),
+            "two-hop edge missing: {rendered:?}"
+        );
+        let hub_first = rendered
+            .iter()
+            .position(|e| e == "Dlq::publish CALLS Util::log");
+        let chain_first = rendered
+            .iter()
+            .position(|e| e == "Dlq::publish CALLS Dlq::encode")
+            .unwrap();
+        if let Some(hub_pos) = hub_first {
+            assert!(chain_first < hub_pos, "hub edge outranked the chain");
+        }
     }
 }
