@@ -26,6 +26,7 @@ The GitLab CLI also manages updates for you and installs a
 GitLab Orbit skill that updates agents with query recipes,
 GitLab Orbit skill that updates agents with query recipes,
 DSL guidance, and troubleshooting help.
+
 ## GitLab Orbit Local MCP server
 
 Connect the GitLab Orbit Local MCP server to an AI client
