@@ -52,17 +52,24 @@ static DELETED_NAMESPACES_QUERY: LazyLock<String> = LazyLock::new(|| {
         ontology::siphon_deleted_column(),
     );
     format!(
-        "SELECT root_namespace_id AS namespace_id, \
-         state.1 AS traversal_path, \
-         toString(state.3) AS deleted_at \
-         FROM (SELECT root_namespace_id, id, \
-         argMax(tuple(traversal_path, {del}, {version}), {version}) AS state \
-         FROM siphon_knowledge_graph_enabled_namespaces \
-         WHERE {watermark} > {{last_watermark:String}} \
-         AND {watermark} <= {{watermark:String}} \
-         GROUP BY root_namespace_id, id) \
-         WHERE state.2 = true \
-         AND state.1 != ''"
+        r#"
+SELECT
+    root_namespace_id AS namespace_id,
+    state.1 AS traversal_path,
+    toString(state.3) AS deleted_at
+FROM (
+    SELECT
+        root_namespace_id,
+        id,
+        argMax(tuple(traversal_path, {del}, {version}), {version}) AS state
+    FROM siphon_knowledge_graph_enabled_namespaces
+    WHERE {watermark} > {{last_watermark:String}}
+      AND {watermark} <= {{watermark:String}}
+    GROUP BY root_namespace_id, id
+)
+WHERE state.2 = true
+  AND state.1 != ''
+"#
     )
 });
 
