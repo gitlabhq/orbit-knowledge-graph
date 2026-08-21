@@ -48,3 +48,10 @@ Connect the GitLab Orbit Local MCP server to an AI client.
 After you connect
 to a client, you can configure agents to interact with your
 local graph.
+
+## GitLab Orbit Local skill for AI coding agents
+
+Give AI coding agents the `orbit-local` skill, which
+ships inside the GitLab Orbit CLI. The skill covers the
+tables in your local graph, SQL recipes for querying them,
+and the mistakes agents most often make.
