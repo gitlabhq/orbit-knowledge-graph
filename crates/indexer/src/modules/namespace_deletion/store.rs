@@ -17,12 +17,12 @@ use super::lower::{self, DeletionStatement};
 use crate::checkpoint::namespace_position_key;
 
 static IS_NAMESPACE_STILL_DELETED: LazyLock<String> = LazyLock::new(|| {
-    let (wm, del) = (
-        ontology::siphon_watermark_column(),
+    let (version, del) = (
+        ontology::siphon_version_column(),
         ontology::siphon_deleted_column(),
     );
     format!(
-        "SELECT argMax({del}, {wm}) AS is_deleted \
+        "SELECT argMax({del}, {version}) AS is_deleted \
          FROM siphon_knowledge_graph_enabled_namespaces \
          WHERE root_namespace_id = {{namespace_id:Int64}}"
     )
@@ -46,17 +46,24 @@ WHERE deleted = false AND startsWith(traversal_path, {traversal_path:String})
 "#;
 
 static DELETED_NAMESPACES_QUERY: LazyLock<String> = LazyLock::new(|| {
-    let (wm, del) = (
+    let (version, watermark, del) = (
+        ontology::siphon_version_column(),
         ontology::siphon_watermark_column(),
         ontology::siphon_deleted_column(),
     );
     format!(
-        "SELECT root_namespace_id AS namespace_id, traversal_path, \
-         toString({wm}) AS deleted_at \
-         FROM siphon_knowledge_graph_enabled_namespaces \
-         WHERE {del} = true AND traversal_path != '' \
-         AND {wm} > {{last_watermark:String}} \
-         AND {wm} <= {{watermark:String}}"
+        r#"
+SELECT
+    namespaces.root_namespace_id AS namespace_id,
+    argMax(namespaces.traversal_path, namespaces.{version}) AS traversal_path,
+    toString(max(namespaces.{version})) AS deleted_at
+FROM siphon_knowledge_graph_enabled_namespaces AS namespaces
+WHERE namespaces.{watermark} > {{last_watermark:String}}
+  AND namespaces.{watermark} <= {{watermark:String}}
+GROUP BY namespaces.root_namespace_id, namespaces.id
+HAVING argMax(namespaces.{del}, namespaces.{version}) = true
+   AND argMax(namespaces.traversal_path, namespaces.{version}) != ''
+"#
     )
 });
 
@@ -493,6 +500,31 @@ fn extract_deleted_namespace_entries(
             },
         )
         .collect())
+}
+
+#[cfg(test)]
+mod sql_tests {
+    use super::*;
+
+    #[test]
+    fn siphon_state_uses_version_and_windows_use_watermark() {
+        assert!(
+            IS_NAMESPACE_STILL_DELETED.contains("argMax(_siphon_deleted, _siphon_replicated_at)")
+        );
+        assert!(DELETED_NAMESPACES_QUERY.contains(
+            "argMax(namespaces.traversal_path, namespaces._siphon_replicated_at) AS traversal_path"
+        ));
+        assert!(DELETED_NAMESPACES_QUERY.contains(
+            "HAVING argMax(namespaces._siphon_deleted, namespaces._siphon_replicated_at) = true"
+        ));
+        assert!(
+            DELETED_NAMESPACES_QUERY
+                .contains("namespaces._siphon_watermark > {last_watermark:String}")
+        );
+        assert!(
+            DELETED_NAMESPACES_QUERY.contains("namespaces._siphon_watermark <= {watermark:String}")
+        );
+    }
 }
 
 #[cfg(test)]

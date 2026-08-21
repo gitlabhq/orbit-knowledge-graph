@@ -501,7 +501,7 @@ mod tests {
             target: name.to_string(),
             scope: ontology::EtlScope::Namespaced,
             extract_template: crate::modules::sdlc::plan::ExtractTemplate::new(
-                "SELECT id, name, _siphon_watermark AS _version, \
+                "SELECT id, name, _siphon_replicated_at AS _version, \
                  _siphon_deleted AS _deleted \
                  FROM source_table \
                  WHERE 1=1 {{filters}} \

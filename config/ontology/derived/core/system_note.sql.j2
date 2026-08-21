@@ -8,7 +8,7 @@ WITH
     project_id,
     created_at,
     traversal_path,
-    {{watermark_column}} AS _version,
+    {{version_column}} AS _version,
     {{deleted_column}} AS _deleted
   FROM siphon_notes
   WHERE startsWith(traversal_path, {traversal_path:String}) AND (system = true AND {{deleted_column}} = false) {{filters}}
@@ -16,14 +16,14 @@ WITH
   LIMIT {{batch_size}}),
   _e0 AS (SELECT
     note_id AS id,
-    argMax(action, {{watermark_column}}) AS action
+    argMax(action, {{version_column}}) AS action
   FROM siphon_system_note_metadata
   WHERE note_id IN (SELECT
       DISTINCT id
     FROM _batch)
     AND startsWith(traversal_path, {traversal_path:String})
   GROUP BY note_id
-  HAVING argMax({{deleted_column}}, {{watermark_column}}) = false)
+  HAVING argMax({{deleted_column}}, {{version_column}}) = false)
 SELECT
   _batch.id AS id,
   _batch.note AS note,

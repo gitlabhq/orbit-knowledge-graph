@@ -34,6 +34,7 @@ pub struct ClickHouseExtract {
     pub tables: Vec<String>,
     pub fields: Vec<String>,
     pub order_by: Vec<String>,
+    pub version: String,
     pub watermark: String,
     pub deleted: String,
     pub query: ExtractQuery,

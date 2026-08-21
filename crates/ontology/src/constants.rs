@@ -43,6 +43,10 @@ use std::sync::LazyLock;
 static EMBEDDED_ONTOLOGY: LazyLock<crate::Ontology> =
     LazyLock::new(|| crate::Ontology::load_embedded().expect("embedded ontology must be valid"));
 
+pub fn siphon_version_column() -> &'static str {
+    &EMBEDDED_ONTOLOGY.etl_settings.version
+}
+
 /// Siphon datalake watermark column, derived from `schema.yaml`'s
 /// `settings.etl.default_watermark` at runtime.
 pub fn siphon_watermark_column() -> &'static str {
@@ -105,6 +109,7 @@ mod tests {
     #[test]
     fn siphon_columns_derived_from_yaml() {
         let ontology = crate::Ontology::load_embedded().expect("embedded ontology must be valid");
+        assert_eq!(siphon_version_column(), ontology.default_version_column());
         assert_eq!(
             siphon_watermark_column(),
             ontology.default_watermark_column()

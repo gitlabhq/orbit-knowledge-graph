@@ -5,7 +5,7 @@
 # not invalidate indexed graph data. Describes current state only; history
 # lives in git.
 sources:
-  derived/core/system_note.sql.j2: dead510d63808333b07bb3bb03711f35779e54dfe2283c4780513306f824abba
+  derived/core/system_note.sql.j2: dfbdb266e4c1263a7b533302e26e48035a77e8aa7e2bce09602b5788da541636
   derived/core/system_note.yaml: c6c04869ba8395fe7229979be6db0b4583fe2a157846276555e3449a39a063f9
   edges/approved.yaml: c15e78e2aa0bdf00278432257a4f3a8df1c40ed119ff46d81ff02a6aeeffd31b
   edges/assigned.yaml: 61f39b7a5077c293606604b025569d33c37b28e442e512c03bdc751256ab76bc
@@ -39,7 +39,7 @@ sources:
   edges/has_note.yaml: 0801b58e4143d82d6f3f03c1bca3b6cdc9090968a22c61885b0eb51728997124
   edges/has_package_file.yaml: 56bd879ebe823da9850e4aa598c0244fd238aeb951e93d23acffff35052a9804
   edges/has_stage.yaml: 5b81304847467242a12cb96e6542290d7b37e0dc0f5dc60eca9a7a3a27e5d3a5
-  edges/has_vulnerability.sql.j2: 0aa4390d1f4a18979035817e0769b06af5c18b5a76ed9aa1c04f4e72ce641bc0
+  edges/has_vulnerability.sql.j2: 9200fbca276d92a64025b89546cdc5d9dd812a404aceb7e16a0bb2d1fb156a90
   edges/has_vulnerability.yaml: 765b30fe821db350b798df64aab148e168f5ba2b1b5bd5f4a323c321ecfbf926
   edges/imports.yaml: 9ac6d1e588ad01d4238050f95e10622c21b6e48c6e110c664200e617f80d00db
   edges/in_environment.yaml: 6fb240e63a7868c2c54f5a190695aad875d75bc3e605b5689adc6838976e4633
@@ -73,26 +73,26 @@ sources:
   nodes/ci/pipeline.yaml: 3d57804c5cc98460b0ae296bda22a8d0355f892d0a97ae8592c448f058fb0714
   nodes/ci/runner.yaml: 48aaf26d0362c239e78a3c07a5d7cb32cb25b12edb7e985e37232ffed4c36929
   nodes/ci/stage.yaml: e9a31efabee27fe42906c1df54c040f13996ebebf0076d83698d824c0893aac5
-  nodes/code_review/merge_request.sql.j2: 6eb9a97039a810715a96862bfbed22ce0cdaceb30b9e6d124ee41b08833d07e4
+  nodes/code_review/merge_request.sql.j2: ca379e5f1da29a70ed2c27151f5145d9a11fa5baf6f4a18f16aa160f7e6d464d
   nodes/code_review/merge_request.yaml: 6d423ffd33a12e47316dcc37be80ab9719b76ff6c4a925036030cb0c7965a4f0
   nodes/code_review/merge_request_diff.yaml: 5bf7f7b82087fbcd49643daadff581347343e0c6b4fd53f2902b94f8bbc023d4
-  nodes/code_review/merge_request_diff_file.sql.j2: d615f9c49f87eaae344c45552b9176bf0ea3da6ff97a27b14881fdb43d5bb656
+  nodes/code_review/merge_request_diff_file.sql.j2: 2b7decedf7d57af3c7d5080c59c5c0ed85691a373c2aecfa40066f2a1b629d26
   nodes/code_review/merge_request_diff_file.yaml: 5fa6d7cc5a9688905beea55dd3d4904dc4e1b03de969f13c898a99d05f733bee
   nodes/container_registry/container_repository.yaml: 1741a773d71166579a51f3ea0431ef44d93e77bd55493d94d1012f349d7b10a0
-  nodes/core/group.sql.j2: 20da4d8ccfccdc8611e1f936cccc27cfc02c84136f0174ef14108a78e705ab50
+  nodes/core/group.sql.j2: 608ffa4313cca9a42afb186c22bad7a41449a32af25bf017ea10e0d9d6e5412f
   nodes/core/group.yaml: 6b4f41412873d15aa546201fead092e727d2500b963a1881fb30f4c5d48964b8
   nodes/core/note.yaml: 44a92bc24760eb61cf9bf2e180fefd94267023e6bf4881a4a4cca839880ee773
-  nodes/core/project.sql.j2: 696c33014a5279f7b50b0724f961912e5dd795b7ec48ba57c20aa8aebe58b5be
+  nodes/core/project.sql.j2: 1cdbd21aa2ae071d16918148ecf0aa6e67596257d21826c9899c21b1ea223228
   nodes/core/project.yaml: 03146158335aea00945e01aec509b55fc91f9c58fffed7a56910ab959ab06155
   nodes/core/user.yaml: abe50689ae0ceacb4a88c1eba5af00e4276cc9f7bb81ed21367c845747fce333
   nodes/packages/dependency.yaml: ee4ad80a2acaf1dbc347f591aaee13f451c3a67d7da25cf3d2a4d21f87c33eec
   nodes/packages/package.yaml: 7c66e1d2876675a05b12a31698ee859d9dff37cf6c05c6d61250a79a7bacbdc8
-  nodes/packages/package_file.sql.j2: 67e0697fc14fb2cd624c6abb2d611c5c2f2bd3c5d03684161337293a4c72ed36
+  nodes/packages/package_file.sql.j2: 4472d28726b4714b0e615ebe030a3ff4778796c95d3c83cbf7a4ea2a9c298f4f
   nodes/packages/package_file.yaml: abe8f8684ab7b3a037983b953bcbdc1adc9dab9cc94f779857e2cb5b3998364e
   nodes/plan/label.yaml: 1200a0b8bd60399315df59fddddeff2bf87ed1d06993ff8637693dd24476b740
   nodes/plan/milestone.yaml: 60c88f675d125e74cedc27fb38357a9edc375b192bbc1726d06fb3b250f3fffd
   nodes/plan/work_item.yaml: 3e9c9431c5eb0a357900ed8d0552497ba8e7ee23d9db94bc8b8d1104f186b880
-  nodes/security/finding.sql.j2: 849df2250ef59f9fc5b58678ba7a904382148f7a3ea99d733fd2747724cba0e1
+  nodes/security/finding.sql.j2: e59f29ec01ea749387ceb4bf5dfebd732089b9de2f2b6f95e5092af8f5500744
   nodes/security/finding.yaml: 0649343dbc987533ecf9ee0e24e97d43762ddf39d42636b5ddb833b5a243b91e
   nodes/security/identifier.yaml: a1ab83bc13688d0d93ac82d5df4664e5c356361ea78a9fca8af6abd61a1d5f92
   nodes/security/occurrence.yaml: 128b563546e9057cf254a61dc3b8df23ca386d75913f86decacaa09110eb6e7c
@@ -100,14 +100,14 @@ sources:
   nodes/security/security_scan.yaml: 6f45516788b9f0a6c0ecc691dd55fbf2f62c86cc355464b7ae0e28279fdc51e1
   nodes/security/vulnerability.yaml: baa5d90e33286dc8c0478fb1515fa8ec1e3c635bb30072886d5346bc9302f4ba
   nodes/source_code/branch.yaml: 5733c0e9e1f748a91a9f63ea80f996652b23e2a4f3554f6dcc1115f93944dcbe
-  nodes/source_code/commit.sql.j2: d50aa3a787d71a34556c815b96a7a35aea78e54251730b319f21b50f09017d27
+  nodes/source_code/commit.sql.j2: 3846dfaa16525e3ff1c905ae2e8808d939fad0705183acccd8b3ba46743d60d2
   nodes/source_code/commit.yaml: cfb8b5f03cd442b6e50a0b38cb54b46f50fe24bf8021c40e53a3c15d6d17acbf
   nodes/source_code/definition.yaml: 2cfa7f19a8733c352286ec983b777db1823bae3379381689a5fedac1b68de445
   nodes/source_code/directory.yaml: 66df3aaee206a883b3beb2291904ce25a67b249baeeb8ed32e015f7d33d6169f
   nodes/source_code/file.yaml: b9b0c3c8c53315a1ae75ffca2dc1041bb76b458115c352750acd27a04e782f81
   nodes/source_code/imported_symbol.yaml: 6170b93ca5004a5c54dec152d17d5db9d4882ed915ea8504330039a7fcfd3bbf
   reference.yaml: d8c0a796601ace0a0d34c705c36b1a2d6286b3a4e78ecf0d8c9a2fb7763e518b
-  schema.yaml: 4e69a1c66b0fdf378c70da1171246cff63ddc39ceab653841243a70eee13e34e
+  schema.yaml: bc162ff7eddbd3e0e07e44919408a935d25d5a59258b8de9468542dde95f6f1f
 ddl:
   checkpoint: 2ccbd8f9e5b9cab81d102e961784539b04f50748cdbeb6635cbd766e1e3174ee
   code_indexing_checkpoint: ad895eac89a2a477af5d2dde6ad0b0e141edef708b8f298130debf498fa17b45

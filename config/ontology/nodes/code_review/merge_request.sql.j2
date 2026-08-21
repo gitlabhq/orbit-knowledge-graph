@@ -49,7 +49,7 @@ SELECT
   metrics.metric_reviewer_first_assigned_at AS metric_reviewer_first_assigned_at,
   ifNull(reviewers.reviewers, CAST([], 'Array(Tuple(user_id UInt64, state Int16, created_at DateTime64(6, ''UTC'')))')) AS reviewers,
   ifNull(approvals.approvals, CAST([], 'Array(Tuple(user_id UInt64, created_at DateTime64(6, ''UTC'')))')) AS approvals,
-  m.{{watermark_column}} AS _version,
+  m.{{version_column}} AS _version,
   m.{{deleted_column}} AS _deleted
 FROM (
   SELECT
@@ -74,25 +74,25 @@ LEFT JOIN (
   SELECT
     traversal_path AS _mt_tp,
     merge_request_id AS _mt_mr,
-    argMax(latest_build_started_at, {{watermark_column}}) AS metric_latest_build_started_at,
-    argMax(latest_build_finished_at, {{watermark_column}}) AS metric_latest_build_finished_at,
-    argMax(first_deployed_to_production_at, {{watermark_column}}) AS metric_first_deployed_to_production_at,
-    argMax(merged_at, {{watermark_column}}) AS metric_merged_at,
-    argMax(latest_closed_at, {{watermark_column}}) AS metric_latest_closed_at,
-    argMax(latest_closed_by_id, {{watermark_column}}) AS metric_latest_closed_by_id,
-    argMax(first_comment_at, {{watermark_column}}) AS metric_first_comment_at,
-    argMax(first_commit_at, {{watermark_column}}) AS metric_first_commit_at,
-    argMax(last_commit_at, {{watermark_column}}) AS metric_last_commit_at,
-    argMax(diff_size, {{watermark_column}}) AS metric_diff_size,
-    argMax(modified_paths_size, {{watermark_column}}) AS metric_modified_paths_size,
-    argMax(commits_count, {{watermark_column}}) AS metric_commits_count,
-    argMax(first_approved_at, {{watermark_column}}) AS metric_first_approved_at,
-    argMax(first_reassigned_at, {{watermark_column}}) AS metric_first_reassigned_at,
-    argMax(added_lines, {{watermark_column}}) AS metric_added_lines,
-    argMax(removed_lines, {{watermark_column}}) AS metric_removed_lines,
-    argMax(first_contribution, {{watermark_column}}) AS metric_first_contribution,
-    argMax(reviewer_first_assigned_at, {{watermark_column}}) AS metric_reviewer_first_assigned_at,
-    argMax({{deleted_column}}, {{watermark_column}}) AS deleted
+    argMax(latest_build_started_at, {{version_column}}) AS metric_latest_build_started_at,
+    argMax(latest_build_finished_at, {{version_column}}) AS metric_latest_build_finished_at,
+    argMax(first_deployed_to_production_at, {{version_column}}) AS metric_first_deployed_to_production_at,
+    argMax(merged_at, {{version_column}}) AS metric_merged_at,
+    argMax(latest_closed_at, {{version_column}}) AS metric_latest_closed_at,
+    argMax(latest_closed_by_id, {{version_column}}) AS metric_latest_closed_by_id,
+    argMax(first_comment_at, {{version_column}}) AS metric_first_comment_at,
+    argMax(first_commit_at, {{version_column}}) AS metric_first_commit_at,
+    argMax(last_commit_at, {{version_column}}) AS metric_last_commit_at,
+    argMax(diff_size, {{version_column}}) AS metric_diff_size,
+    argMax(modified_paths_size, {{version_column}}) AS metric_modified_paths_size,
+    argMax(commits_count, {{version_column}}) AS metric_commits_count,
+    argMax(first_approved_at, {{version_column}}) AS metric_first_approved_at,
+    argMax(first_reassigned_at, {{version_column}}) AS metric_first_reassigned_at,
+    argMax(added_lines, {{version_column}}) AS metric_added_lines,
+    argMax(removed_lines, {{version_column}}) AS metric_removed_lines,
+    argMax(first_contribution, {{version_column}}) AS metric_first_contribution,
+    argMax(reviewer_first_assigned_at, {{version_column}}) AS metric_reviewer_first_assigned_at,
+    argMax({{deleted_column}}, {{version_column}}) AS deleted
   FROM siphon_merge_request_metrics
   WHERE startsWith(traversal_path, {traversal_path:String})
     AND merge_request_id IN (
@@ -115,10 +115,10 @@ LEFT JOIN (
       traversal_path,
       merge_request_id,
       id,
-      argMax(user_id, {{watermark_column}}) AS user_id,
-      argMax(state, {{watermark_column}}) AS state,
-      argMax(created_at, {{watermark_column}}) AS created_at,
-      argMax({{deleted_column}}, {{watermark_column}}) AS deleted
+      argMax(user_id, {{version_column}}) AS user_id,
+      argMax(state, {{version_column}}) AS state,
+      argMax(created_at, {{version_column}}) AS created_at,
+      argMax({{deleted_column}}, {{version_column}}) AS deleted
     FROM siphon_merge_request_reviewers
     WHERE startsWith(traversal_path, {traversal_path:String})
       AND merge_request_id IN (
@@ -141,9 +141,9 @@ LEFT JOIN (
       traversal_path,
       merge_request_id,
       id,
-      argMax(user_id, {{watermark_column}}) AS user_id,
-      argMax(created_at, {{watermark_column}}) AS created_at,
-      argMax({{deleted_column}}, {{watermark_column}}) AS deleted
+      argMax(user_id, {{version_column}}) AS user_id,
+      argMax(created_at, {{version_column}}) AS created_at,
+      argMax({{deleted_column}}, {{version_column}}) AS deleted
     FROM siphon_approvals
     WHERE startsWith(traversal_path, {traversal_path:String})
       AND merge_request_id IN (

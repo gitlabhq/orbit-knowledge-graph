@@ -12,7 +12,7 @@ SELECT
   project.star_count AS star_count,
   project.last_activity_at AS last_activity_at,
   traversal_paths.current_path AS traversal_path,
-  project.{{watermark_column}} AS _version,
+  project.{{version_column}} AS _version,
   project.{{deleted_column}} AS _deleted
 FROM siphon_projects project
 INNER JOIN (
@@ -25,12 +25,12 @@ INNER JOIN (
 LEFT JOIN (
   SELECT
     toNullable(source_id) AS source_id,
-    argMax(path, {{watermark_column}}) AS path
+    argMax(path, {{version_column}}) AS path
   FROM siphon_routes
   WHERE startsWith(traversal_path, {traversal_path:String})
     AND source_type = 'Project'
-    AND NOT {{deleted_column}}
-  GROUP BY source_id ) route ON project.id = route.source_id
+  GROUP BY source_id
+  HAVING argMax({{deleted_column}}, {{version_column}}) = false ) route ON project.id = route.source_id
 WHERE startsWith(traversal_paths.current_path, {traversal_path:String})
   AND (project.id IN (SELECT
       id
