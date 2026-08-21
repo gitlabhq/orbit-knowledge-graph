@@ -13,7 +13,7 @@ SELECT
   updated_at,
   project_id,
   traversal_path,
-  {{watermark_column}} AS _version,
+  {{version_column}} AS _version,
   {{deleted_column}} AS _deleted
 FROM siphon_packages_package_files
 WHERE startsWith(traversal_path, {traversal_path:String}) {{filters}}

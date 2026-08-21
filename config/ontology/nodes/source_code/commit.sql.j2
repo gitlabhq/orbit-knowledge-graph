@@ -3,7 +3,7 @@ SELECT
   m.decoded_sha AS sha,
   m.target_project_id AS project_id,
   m.traversal_path AS traversal_path,
-  m.{{watermark_column}} AS _version,
+  m.{{version_column}} AS _version,
   m.{{deleted_column}} AS _deleted
 FROM (
   SELECT

@@ -59,8 +59,7 @@ fn validate_migration_ledger() {
         .unwrap_or_else(|e| panic!("{e}"));
 }
 
-/// Fails the build when authored ETL SQL hardcodes a watermark/deleted column
-/// instead of using the `{{watermark_column}}`/`{{deleted_column}}` markers.
+/// Fails the build when authored ETL SQL violates lifecycle-column ownership.
 fn validate_authored_etl_sql() {
     let ontology = ontology::Ontology::load_embedded()
         .unwrap_or_else(|e| panic!("embedded ontology failed to load: {e}"));

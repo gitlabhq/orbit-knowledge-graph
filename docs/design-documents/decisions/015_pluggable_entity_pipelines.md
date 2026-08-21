@@ -185,7 +185,7 @@ and hands each stage exactly its inputs so data flows top-down:
   The final projection exposes only the stable output field aliases from the extract
   declaration.
 - `plan/extract/` produces one `ExtractSpec` (validated `ExtractTemplate` +
-  effective watermark/deleted) from a `ClickHouseExtractDeclaration` that owns
+  effective version/watermark/deleted expressions) from a `ClickHouseExtractDeclaration` that owns
   its source columns, lookup joins, and query configuration. It imports
   **nothing** from the transform stage. `compile_extract_spec` dispatches
   `Generated` to `extract/generated.rs` and `Sql` to `extract/sql.rs`; the generated

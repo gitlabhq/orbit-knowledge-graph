@@ -242,6 +242,7 @@ pub(super) struct DictionaryLifetimeYaml {
 
 #[derive(Debug, Deserialize)]
 pub(super) struct EtlSettingsYaml {
+    pub default_version: String,
     pub default_watermark: String,
     pub default_deleted: String,
     pub default_etl_order_by: Vec<String>,

@@ -14,7 +14,7 @@ WITH
     b_mode,
     relative_order,
     traversal_path,
-    {{watermark_column}} AS _version,
+    {{version_column}} AS _version,
     {{deleted_column}} AS _deleted
   FROM siphon_merge_request_diff_files
   WHERE startsWith(traversal_path, {traversal_path:String}) {{filters}}

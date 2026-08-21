@@ -1,7 +1,5 @@
-//! Build-time guard for authored ETL SQL. Watermark/deleted columns are declared
-//! once per pipeline and can be overridden per entity, so authored SQL must reach
-//! them through `{{watermark_column}}`/`{{deleted_column}}` markers; a hardcoded
-//! literal silently drifts the day an override changes the resolved column.
+//! Build-time guard for authored ETL SQL. Lifecycle columns are declared once
+//! in the ontology, so authored SQL must use the matching template markers.
 
 use crate::etl::{Extract, ExtractQuery, Pipeline};
 use crate::{Ontology, OntologyError};
@@ -13,6 +11,7 @@ pub fn validate_authored_etl_sql(ontology: &Ontology) -> Result<(), OntologyErro
             continue;
         };
         for (kind, column) in [
+            ("version", extract.version.as_str()),
             ("watermark", extract.watermark.as_str()),
             ("deleted", extract.deleted.as_str()),
         ] {
@@ -22,6 +21,25 @@ pub fn validate_authored_etl_sql(ontology: &Ontology) -> Result<(), OntologyErro
                     pipeline.name
                 )));
             }
+        }
+        if raw
+            .lines()
+            .any(|line| line.contains("argMax(") && line.contains("{{watermark_column}}"))
+        {
+            return Err(OntologyError::Validation(format!(
+                "authored SQL for pipeline '{}' uses the watermark column as an argMax key; use {{{{version_column}}}}",
+                pipeline.name
+            )));
+        }
+        if raw.lines().any(|line| {
+            line.contains("{{watermark_column}}")
+                && !line.contains("{last_watermark:String}")
+                && !line.contains("{watermark:String}")
+        }) {
+            return Err(OntologyError::Validation(format!(
+                "authored SQL for pipeline '{}' uses the watermark column outside a window predicate",
+                pipeline.name
+            )));
         }
     }
     Ok(())
@@ -59,17 +77,63 @@ mod tests {
     }
 
     #[test]
-    fn hardcoded_watermark_column_is_rejected() {
+    fn hardcoded_version_column_is_rejected() {
         let mut ontology = Ontology::load_embedded().expect("load embedded");
         let pipeline = first_pipeline(&mut ontology);
         let Extract::ClickHouse(extract) = &mut pipeline.extract;
-        extract.query =
-            ExtractQuery::Sql(format!("SELECT {} AS _version FROM t", extract.watermark));
+        extract.query = ExtractQuery::Sql(format!("SELECT {} AS _version FROM t", extract.version));
 
-        let err = validate_authored_etl_sql(&ontology).expect_err("hardcoded watermark rejected");
+        let err = validate_authored_etl_sql(&ontology).expect_err("hardcoded version rejected");
         assert!(
-            err.to_string().contains("hardcodes watermark column"),
+            err.to_string().contains("hardcodes version column"),
             "got: {err}"
         );
+    }
+
+    #[test]
+    fn watermark_argmax_key_is_rejected() {
+        let mut ontology = Ontology::load_embedded().expect("load embedded");
+        let pipeline = first_pipeline(&mut ontology);
+        let Extract::ClickHouse(extract) = &mut pipeline.extract;
+        extract.query = ExtractQuery::Sql(
+            "SELECT argMax(x, {{watermark_column}}), {{version_column}} AS _version FROM t"
+                .to_string(),
+        );
+
+        let err = validate_authored_etl_sql(&ontology).expect_err("watermark argMax rejected");
+        assert!(
+            err.to_string()
+                .contains("uses the watermark column as an argMax key")
+        );
+    }
+
+    #[test]
+    fn watermark_usage_outside_a_window_is_rejected() {
+        let mut ontology = Ontology::load_embedded().expect("load embedded");
+        let pipeline = first_pipeline(&mut ontology);
+        let Extract::ClickHouse(extract) = &mut pipeline.extract;
+        extract.query = ExtractQuery::Sql(
+            "SELECT {{watermark_column}} AS changed_at, {{version_column}} AS _version FROM t"
+                .to_string(),
+        );
+
+        let err = validate_authored_etl_sql(&ontology).expect_err("non-window watermark rejected");
+        assert!(
+            err.to_string()
+                .contains("uses the watermark column outside a window predicate")
+        );
+    }
+
+    #[test]
+    fn watermark_window_predicates_are_allowed() {
+        let mut ontology = Ontology::load_embedded().expect("load embedded");
+        let pipeline = first_pipeline(&mut ontology);
+        let Extract::ClickHouse(extract) = &mut pipeline.extract;
+        extract.query = ExtractQuery::Sql(
+            "SELECT {{version_column}} AS _version FROM t WHERE {{watermark_column}} > {last_watermark:String} AND {{watermark_column}} <= {watermark:String}"
+                .to_string(),
+        );
+
+        validate_authored_etl_sql(&ontology).expect("window watermark allowed");
     }
 }

@@ -258,7 +258,7 @@ Generated node projections come from their database-backed properties, while gen
   - a declaration with `extract.lookups` becomes a `_batch` CTE over its base table plus one internal `_eN` CTE per point lookup. Each lookup uses `argMax` against the source node's base datalake table, is keyed by `id IN (SELECT DISTINCT <batch ID column> FROM _batch)`, and emits stable output field aliases declared explicitly or expanded from `enrichment_props`. The internal `_eN` names are not part of the `RecordBatch` contract.
 - a `.sql.j2` MiniJinja template next to the YAML — the seven genuinely complex nodes (Group, Project, MergeRequest, Commit, MergeRequestDiffFile, PackageFile, Finding) whose extracts own multi-table joins, materialized arrays, or hex/SHA decoding that are not mechanically derivable, and the SystemNote derived entity. Derived-entity pipelines are always authored SQL: their rows are neither node properties nor edge endpoints, so there is nothing to generate a projection from.
 
-For the `.sql.j2` form the indexer renders `{{watermark_column}}` / `{{deleted_column}}` through MiniJinja at plan build (a generated `filter` may use them too), and fills `{{filters}}` / `{{batch_size}}` at runtime. All ontology SQL templates render through `ontology::sql_template` (strict-undefined MiniJinja). The first table in `extract.tables` is the partition-probe base table; for generated extracts it is the only entry.
+For the `.sql.j2` form the indexer renders `{{version_column}}` / `{{watermark_column}}` / `{{deleted_column}}` through MiniJinja at plan build (a generated `filter` may use the version and deleted markers), and fills `{{filters}}` / `{{batch_size}}` at runtime. The version column resolves row state and becomes graph `_version`; the watermark is only the change signal used by extraction windows. All ontology SQL templates render through `ontology::sql_template` (strict-undefined MiniJinja). The first table in `extract.tables` is the partition-probe base table; for generated extracts it is the only entry.
 
 The Arrow `RecordBatch` schema is the runtime contract between extraction and transformation.
 DataFusion registers each extracted batch with its own schema, so planning does not duplicate a
@@ -300,7 +300,7 @@ SELECT
     state,
     title,
     traversal_path,
-    _siphon_watermark AS _version,
+    _siphon_replicated_at AS _version,
     _siphon_deleted AS _deleted
 FROM sdlc.issues
 WHERE _siphon_watermark > {last_watermark:String}

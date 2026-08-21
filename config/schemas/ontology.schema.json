@@ -959,7 +959,7 @@
         },
         "etl": {
           "$ref": "#/definitions/etlSettingsDefinition",
-          "description": "Default ETL settings for watermark, deleted, and edge order_by columns."
+          "description": "Default ETL settings for version, watermark, deleted, and edge order_by columns."
         },
         "gc_preserve_patterns": {
           "type": "array",
@@ -982,11 +982,15 @@
     },
     "etlSettingsDefinition": {
       "type": "object",
-      "description": "Default ETL settings applied when node/edge YAML omits watermark, deleted, or order_by.",
+      "description": "Default lifecycle and order-by settings for ontology ETL pipelines.",
       "properties": {
         "default_watermark": {
           "type": "string",
           "description": "Default column name for incremental processing watermark."
+        },
+        "default_version": {
+          "type": "string",
+          "description": "Default column name for resolving the latest replicated row state."
         },
         "default_deleted": {
           "type": "string",
@@ -1002,6 +1006,7 @@
         }
       },
       "required": [
+        "default_version",
         "default_watermark",
         "default_deleted",
         "default_etl_order_by"
@@ -1744,7 +1749,7 @@
         },
         "filter": {
           "type": "string",
-          "description": "Extra WHERE predicate appended to the traversal-path scope of the _batch (e.g. 'state = 5'). May use {{watermark_column}}/{{deleted_column}} markers. Used by 'generated' queries."
+          "description": "Extra WHERE predicate appended to the traversal-path scope of the _batch (e.g. 'state = 5'). May use {{version_column}}/{{deleted_column}} markers. Used by 'generated' queries."
         },
         "lookups": {
           "type": "array",

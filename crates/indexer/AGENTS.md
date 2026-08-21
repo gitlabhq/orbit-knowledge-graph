@@ -145,8 +145,8 @@ preventable feedback (see #2772, !1416). Check each of these first:
   co-located `.sql.j2` file (`query: <name>.sql.j2`) only for genuinely complex joins or
   materialized arrays, so rows you discard never cross the wire. The ontology carries a `.sql.j2`
   file's raw content verbatim as `ExtractQuery::Sql`; the indexer's `plan/extract/sql.rs` renders
-  `{{watermark_column}}`/`{{deleted_column}}` through MiniJinja at plan build, recovers the
-  effective watermark/deleted from the file's `AS _version`/`AS _deleted`, and passes `{{filters}}`/
+  `{{version_column}}`/`{{watermark_column}}`/`{{deleted_column}}` through MiniJinja at plan build,
+  derives the qualified watermark expression from the file's `AS _version`, recovers `AS _deleted`, and passes `{{filters}}`/
   `{{batch_size}}` through to query time. All ClickHouse dialect and SQL generation live in the
   indexer's `plan/` module. `build.rs` is the only place that reads `pipeline.transform`: it
   decomposes each pipeline and hands `extract/` transform-neutral inputs (it produces an
@@ -161,10 +161,11 @@ preventable feedback (see #2772, !1416). Check each of these first:
 - **Constants:** prefer deriving values from the ontology or a typed config field over hardcoding
   magic numbers; if a value is environment-dependent, make it a `HandlersConfiguration` field.
 - **Siphon columns:** hand-written datalake SQL must use
-  `ontology::siphon_watermark_column()` and `ontology::siphon_deleted_column()`, never the
-  literal column names. Both are derived at runtime from `schema.yaml`'s
-  `settings.etl.default_watermark` / `default_deleted` via a `LazyLock<Ontology>`, so the
-  ontology YAML is the single source of truth.
+  `ontology::siphon_version_column()`, `ontology::siphon_watermark_column()`, and
+  `ontology::siphon_deleted_column()`, never literal column names. They derive at runtime from
+  `schema.yaml`'s `settings.etl.default_version` / `default_watermark` / `default_deleted` via a
+  `LazyLock<Ontology>`. Use the version column for `_version` and `argMax`; use the watermark only
+  for change-window predicates.
 
 If none of the above fits and you genuinely need new infrastructure, prefer generalizing into a
 shared place (`crates/utils/`, `modules/.../pipeline.rs`) over duplicating logic per handler.

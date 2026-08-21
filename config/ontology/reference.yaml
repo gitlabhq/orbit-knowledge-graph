@@ -5,18 +5,10 @@ domain: core
 description: A GitLab user account
 destination_table: users
 
-# Source definition for ETL
-# source:
-#   table: siphon_users
-#   watermark_column: _siphon_watermark  (use {{watermark_column}} in ETL SQL)
-#   deleted_column: _siphon_deleted           (use {{deleted_column}} in ETL SQL)
-#   primary_key: id
-#
-# ETL SQL fields (select, from, where, watermark, deleted, traversal_path_filter,
-# page_join.where, page_join.watermark) must use the {{watermark_column}} and
-# {{deleted_column}} placeholders instead of hardcoding column names. The loader
-# substitutes them with schema.yaml's default_watermark / default_deleted at
-# load time.
+# Authored ETL SQL uses {{version_column}} for `_version` and every `argMax`
+# state-resolution key, {{watermark_column}} only for change-window predicates,
+# and {{deleted_column}} for the soft-delete flag. The indexer substitutes them
+# from schema.yaml's default_version / default_watermark / default_deleted.
 
 # Output destination
 # destination:

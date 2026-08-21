@@ -16,6 +16,11 @@
 # note-gated `scope: none` entry, the certified output-neutral escape hatch. A
 # version with no entry is treated as "*", which also makes pruning old entries safe.
 migrations:
+- version: 91
+  scope: "*"
+  note: >-
+    Use _siphon_replicated_at for deterministic Siphon state resolution while
+    preserving _siphon_watermark for incremental windows.
 - version: 90
   scope: none
   note: >-
