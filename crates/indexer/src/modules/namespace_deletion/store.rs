@@ -54,21 +54,15 @@ static DELETED_NAMESPACES_QUERY: LazyLock<String> = LazyLock::new(|| {
     format!(
         r#"
 SELECT
-    root_namespace_id AS namespace_id,
-    state.1 AS traversal_path,
-    toString(state.3) AS deleted_at
-FROM (
-    SELECT
-        root_namespace_id,
-        id,
-        argMax(tuple(traversal_path, {del}, {version}), {version}) AS state
-    FROM siphon_knowledge_graph_enabled_namespaces
-    WHERE {watermark} > {{last_watermark:String}}
-      AND {watermark} <= {{watermark:String}}
-    GROUP BY root_namespace_id, id
-)
-WHERE state.2 = true
-  AND state.1 != ''
+    namespaces.root_namespace_id AS namespace_id,
+    argMax(namespaces.traversal_path, namespaces.{version}) AS traversal_path,
+    toString(max(namespaces.{version})) AS deleted_at
+FROM siphon_knowledge_graph_enabled_namespaces AS namespaces
+WHERE namespaces.{watermark} > {{last_watermark:String}}
+  AND namespaces.{watermark} <= {{watermark:String}}
+GROUP BY namespaces.root_namespace_id, namespaces.id
+HAVING argMax(namespaces.{del}, namespaces.{version}) = true
+   AND argMax(namespaces.traversal_path, namespaces.{version}) != ''
 "#
     )
 });
@@ -517,15 +511,19 @@ mod sql_tests {
         assert!(
             IS_NAMESPACE_STILL_DELETED.contains("argMax(_siphon_deleted, _siphon_replicated_at)")
         );
+        assert!(DELETED_NAMESPACES_QUERY.contains(
+            "argMax(namespaces.traversal_path, namespaces._siphon_replicated_at) AS traversal_path"
+        ));
+        assert!(DELETED_NAMESPACES_QUERY.contains(
+            "HAVING argMax(namespaces._siphon_deleted, namespaces._siphon_replicated_at) = true"
+        ));
         assert!(
-            DELETED_NAMESPACES_QUERY.contains(
-                "argMax(tuple(traversal_path, _siphon_deleted, _siphon_replicated_at), _siphon_replicated_at) AS state"
-            )
+            DELETED_NAMESPACES_QUERY
+                .contains("namespaces._siphon_watermark > {last_watermark:String}")
         );
-        assert!(DELETED_NAMESPACES_QUERY.contains("toString(state.3) AS deleted_at"));
-        assert!(DELETED_NAMESPACES_QUERY.contains("WHERE state.2 = true"));
-        assert!(DELETED_NAMESPACES_QUERY.contains("_siphon_watermark > {last_watermark:String}"));
-        assert!(DELETED_NAMESPACES_QUERY.contains("_siphon_watermark <= {watermark:String}"));
+        assert!(
+            DELETED_NAMESPACES_QUERY.contains("namespaces._siphon_watermark <= {watermark:String}")
+        );
     }
 }
 
