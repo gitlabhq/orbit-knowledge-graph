@@ -33,8 +33,8 @@ pub(crate) mod testutil {
             fqn: fqn.to_string(),
             kind: "Definition".to_string(),
             loc: String::new(),
-            end_line: "0".to_string(),
-            degree: "0".to_string(),
+            end_line: 0,
+            degree: 0,
         }
     }
 }

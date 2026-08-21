@@ -4,8 +4,8 @@ pub struct CorpusRow {
     pub fqn: String,
     pub kind: String,
     pub loc: String,
-    pub end_line: String,
-    pub degree: String,
+    pub end_line: i64,
+    pub degree: u64,
 }
 
 pub struct Edge {

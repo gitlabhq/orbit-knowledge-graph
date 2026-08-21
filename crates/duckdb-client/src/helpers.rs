@@ -1,4 +1,4 @@
-use arrow::array::{Int64Array, RecordBatch, StringArray};
+use arrow::array::{BooleanArray, Int64Array, RecordBatch, StringArray};
 
 pub fn sql_lit(s: &str) -> String {
     format!("'{}'", s.replace('\'', "''"))
@@ -21,6 +21,28 @@ pub fn string_column(batches: &[RecordBatch], name: &str) -> Vec<String> {
                 .and_then(|c| c.as_any().downcast_ref::<StringArray>())
         })
         .flat_map(|arr| arr.iter().flatten().map(String::from))
+        .collect()
+}
+
+pub fn i64_column(batches: &[RecordBatch], name: &str) -> Vec<i64> {
+    batches
+        .iter()
+        .filter_map(|b| {
+            b.column_by_name(name)
+                .and_then(|c| c.as_any().downcast_ref::<Int64Array>())
+        })
+        .flat_map(|arr| arr.iter().map(|v| v.unwrap_or(0)))
+        .collect()
+}
+
+pub fn bool_column(batches: &[RecordBatch], name: &str) -> Vec<bool> {
+    batches
+        .iter()
+        .filter_map(|b| {
+            b.column_by_name(name)
+                .and_then(|c| c.as_any().downcast_ref::<BooleanArray>())
+        })
+        .flat_map(|arr| arr.iter().map(|v| v.unwrap_or(false)))
         .collect()
 }
 

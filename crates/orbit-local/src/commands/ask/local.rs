@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use duckdb_client::search::DuckDbSearch;
-use orbit_search::{AskOutcome, SearchVocab};
+use orbit_search::{AskOutcome, KindRates, SearchVocab};
 
 use duckdb_client::scalar_i64;
 
@@ -75,9 +75,9 @@ impl LocalBackend {
         question: &str,
         limit: usize,
         vocab: &SearchVocab,
-        kind_weights: &std::collections::HashMap<String, f64>,
+        kind_rates: &std::collections::HashMap<String, KindRates>,
     ) -> Result<AskOutcome> {
-        self.search.ask(question, limit, vocab, kind_weights)
+        self.search.ask(question, limit, vocab, kind_rates)
     }
 }
 
@@ -137,8 +137,8 @@ mod tests {
         SearchVocab::new(["Calls", "Imports", "Extends", "Contains", "Defines"])
     }
 
-    fn weights() -> std::collections::HashMap<String, f64> {
-        std::collections::HashMap::from([("CALLS".to_string(), 1.0)])
+    fn weights() -> std::collections::HashMap<String, KindRates> {
+        std::collections::HashMap::from([("CALLS".to_string(), KindRates::new(1.0))])
     }
 
     #[test]

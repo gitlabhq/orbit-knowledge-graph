@@ -4,7 +4,7 @@ use std::io::Write;
 use std::path::PathBuf;
 
 use anyhow::Result;
-use orbit_search::{SearchVocab, content_words};
+use orbit_search::{KindRates, SearchVocab, content_words};
 use std::collections::HashMap;
 
 use local::LocalBackend;
@@ -22,9 +22,9 @@ fn vocab() -> &'static SearchVocab {
     })
 }
 
-fn kind_weights() -> &'static HashMap<String, f64> {
-    static WEIGHTS: std::sync::OnceLock<HashMap<String, f64>> = std::sync::OnceLock::new();
-    WEIGHTS.get_or_init(|| {
+fn kind_rates() -> &'static HashMap<String, KindRates> {
+    static RATES: std::sync::OnceLock<HashMap<String, KindRates>> = std::sync::OnceLock::new();
+    RATES.get_or_init(|| {
         use strum::IntoEnumIterator;
         let Ok(ontology) = ontology::Ontology::load_embedded() else {
             return HashMap::new();
@@ -33,7 +33,7 @@ fn kind_weights() -> &'static HashMap<String, f64> {
             .filter_map(|kind| {
                 let name = kind.as_ref().to_uppercase();
                 let weight = ontology.edge_search_weight(&name)?;
-                Some((name, weight))
+                Some((name, KindRates::new(weight)))
             })
             .collect()
     })
@@ -55,7 +55,7 @@ pub(crate) fn run(
     let mut out = std::io::stdout().lock();
     writeln!(out, "ask {:?} — {}", question, backend.header())?;
 
-    let outcome = backend.ask(&question, limit, vocab(), kind_weights())?;
+    let outcome = backend.ask(&question, limit, vocab(), kind_rates())?;
     writeln!(out, "terms: {}", outcome.terms.join(" "))?;
     for (term, parts) in &outcome.splits {
         writeln!(out, "note: also matching {term} as compound of: {parts}")?;
@@ -140,14 +140,14 @@ fn write_matches(
             "  {}  [{}]  {}  (score {:.precision$}, links {})",
             m.row.fqn, m.row.kind, m.row.loc, m.score, m.row.degree
         )?;
-        for line in snippet(root, &m.row.loc, &m.row.end_line) {
+        for line in snippet(root, &m.row.loc, m.row.end_line) {
             writeln!(out, "{line}")?;
         }
     }
     Ok(())
 }
 
-fn snippet(root: &std::path::Path, loc: &str, end_line: &str) -> Vec<String> {
+fn snippet(root: &std::path::Path, loc: &str, end_line: i64) -> Vec<String> {
     let Some((path, start)) = loc.rsplit_once(':') else {
         return Vec::new();
     };
@@ -157,8 +157,7 @@ fn snippet(root: &std::path::Path, loc: &str, end_line: &str) -> Vec<String> {
     let Ok(content) = std::fs::read_to_string(root.join(path)) else {
         return Vec::new();
     };
-    let last = end_line
-        .parse::<usize>()
+    let last = usize::try_from(end_line)
         .ok()
         .filter(|&e| e >= start)
         .unwrap_or(start)
