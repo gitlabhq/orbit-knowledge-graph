@@ -140,9 +140,6 @@ impl GitlabClient {
             "{}/api/v4/internal/orbit/project/{}/repository/archive",
             self.base_url, project_id
         );
-        // Resolving LFS pointers makes Gitaly pull every LFS object out of object storage
-        // through a smudge filter, and code indexing never reads that content. `CodeFilter`
-        // settles the pointer text that arrives instead as a bare node.
         let url = reqwest::Url::parse_with_params(
             &base,
             &[("ref", ref_name), ("include_lfs_blobs", "false")],

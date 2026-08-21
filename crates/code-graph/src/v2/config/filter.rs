@@ -177,11 +177,8 @@ fn minified_skip(content: &[u8]) -> Option<FilterSkip> {
     None
 }
 
-/// A Git LFS pointer is a few lines of valid UTF-8 that would otherwise be
-/// classified by extension and parsed as source. Mirrors Gitaly's
-/// `git.IsLFSPointer` and Rails' `Gitlab::Git::Blob#has_lfs_version_key?`,
-/// including their shared decision not to recognize the pre-release
-/// `hawser.github.com` version URL.
+/// LFS pointers are filtered out until we decide to do something else with
+/// LFS content.
 fn is_lfs_pointer(content: &[u8]) -> bool {
     if content.len() > LFS_POINTER_MAX_BYTES || !content.starts_with(LFS_POINTER_VERSION_PREFIX) {
         return false;
