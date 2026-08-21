@@ -27,13 +27,13 @@ title: GitLab Orbit Local MCP server
 
 With the GitLab Orbit Local [Model Context Protocol](https://modelcontextprotocol.io/)
 (MCP) server, you can securely connect AI tools and applications to your
-local DuckDB graph. AI assistants like Claude Code, Codex, Cursor, and OpenCode
+local graph. AI assistants like Claude Code, Codex, Cursor, and OpenCode
 can then access your graph and write SQL queries
 against it.
 
 The GitLab Orbit Local MCP server is stateless, which means the server:
 
-- Queries your local DuckDB graph, not a GitLab instance
+- Queries your local graph, not a GitLab instance
 - Does not cache results or persist query history
 - Can respond to multiple clients independently
 
@@ -365,11 +365,11 @@ To confirm the server is connected, check that your client lists the `run_sql`,
 ## MCP tools
 
 The GitLab Orbit Local MCP server provides a set of tools that interact
-with your local DuckDB graph.
+with your local graph.
 
 ### `index`
 
-Indexes a repository, or a directory of repositories, into the local DuckDB graph.
+Indexes a repository, or a directory of repositories, into the local graph.
 
 Example:
 
@@ -380,7 +380,7 @@ Index my checked out project.
 ### `get_graph_schema`
 
 Fetches the schema. Includes table names, columns,
-and data types present in the local DuckDB graph.
+and data types present in the local graph.
 
 Example:
 
@@ -390,7 +390,7 @@ Use the `get_graph_schema` tool to show me what tables are in my local graph.
 
 ### `run_sql`
 
-Executes read-only SQL against the local DuckDB graph.
+Executes read-only SQL against the local graph.
 Takes an array of statements and returns one JSON row array per statement,
 at the same index.
 
