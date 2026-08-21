@@ -24,7 +24,6 @@ to consult your graph.
 Extend the GitLab CLI to install and run `orbit` commands.
 The GitLab CLI also manages updates for you and installs a
 GitLab Orbit skill that updates agents with query recipes,
-GitLab Orbit skill that updates agents with query recipes,
 DSL guidance, and troubleshooting help.
 
 ## GitLab Orbit Local MCP server
