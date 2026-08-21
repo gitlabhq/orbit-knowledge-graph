@@ -33,4 +33,3 @@ Connect the GitLab Orbit Local MCP server to an AI client.
 After you connect
 to a client, you can configure agents to interact with your
 local graph.
-
