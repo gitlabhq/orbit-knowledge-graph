@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 
-use crate::anchor::{term_base_sets, unmatched_terms};
+use crate::anchor::{RowTokens, term_base_sets, unmatched_terms};
 use crate::expand::{NeighborhoodSource, expand_neighborhood};
 use crate::ppr::KindRates;
 use crate::rank::rank_and_trim;
@@ -78,14 +78,22 @@ pub fn ask<S: AskSource>(
         anchor_terms.push(b.clone());
     }
     let (corpus, anchor_weights) = source.corpus(&anchor_terms)?;
+    let row_tokens: Vec<RowTokens> = corpus.iter().map(RowTokens::of).collect();
     let weights = anchor_weights
         .as_deref()
         .and_then(|w| w.get(..terms.len()))
         .map(|w| w.to_vec());
-    let hits = rank_and_trim(&terms, &corpus, limit, weights.as_deref(), vocab);
+    let hits = rank_and_trim(
+        &terms,
+        &corpus,
+        &row_tokens,
+        limit,
+        weights.as_deref(),
+        vocab,
+    );
     let focus = vocab.focus_edge_kind(&terms);
     let weak = hits.first().is_none_or(|h| !h.confident());
-    let unmatched = unmatched_terms(&terms, &corpus, vocab);
+    let unmatched = unmatched_terms(&terms, &row_tokens, vocab);
     let matches: Vec<AskMatch> = hits
         .into_iter()
         .map(|h| AskMatch {
@@ -94,7 +102,7 @@ pub fn ask<S: AskSource>(
         })
         .collect();
     let mut term_seeds: Vec<Vec<(String, f64)>> =
-        term_base_sets(&anchor_terms, &corpus, anchor_weights.as_deref(), vocab)
+        term_base_sets(&anchor_terms, &row_tokens, anchor_weights.as_deref(), vocab)
             .into_iter()
             .map(|set| {
                 set.into_iter()

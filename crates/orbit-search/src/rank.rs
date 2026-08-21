@@ -40,12 +40,20 @@ impl Hit {
 pub fn rank_and_trim(
     terms: &[String],
     corpus: &[CorpusRow],
+    rows: &[RowTokens],
     limit: usize,
     weights: Option<&[f64]>,
     vocab: &SearchVocab,
 ) -> Vec<Hit> {
     dedupe_by_parent(
-        rank(terms, corpus, limit * CANDIDATE_FACTOR, weights, vocab),
+        rank(
+            terms,
+            corpus,
+            rows,
+            limit * CANDIDATE_FACTOR,
+            weights,
+            vocab,
+        ),
         corpus,
         limit,
     )
@@ -54,13 +62,13 @@ pub fn rank_and_trim(
 fn rank(
     terms: &[String],
     corpus: &[CorpusRow],
+    rows: &[RowTokens],
     cap: usize,
     weights: Option<&[f64]>,
     vocab: &SearchVocab,
 ) -> Vec<Hit> {
     let joined = terms.join(" ");
     let term_stems: Vec<String> = terms.iter().map(|t| stem(t)).collect();
-    let rows: Vec<RowTokens> = corpus.iter().map(RowTokens::of).collect();
     let weights: Vec<f64> = match weights {
         Some(w) if w.len() == terms.len() => terms
             .iter()
@@ -155,18 +163,20 @@ fn dedupe_by_parent(results: Vec<Hit>, corpus: &[CorpusRow], limit: usize) -> Ve
             .loc
             .rsplit_once(':')
             .map_or(row.loc.clone(), |(f, _)| f.to_string());
-        if !file.is_empty() {
-            let seen = per_file.entry(file).or_insert(0);
-            if *seen >= MAX_PER_FILE {
-                continue;
-            }
-            *seen += 1;
-        }
-        let count = per_parent.entry(parent_key(&row.fqn)).or_insert(0);
-        if *count >= MAX_PER_PARENT {
+        if !file.is_empty() && per_file.get(&file).is_some_and(|&n| n >= MAX_PER_FILE) {
             continue;
         }
-        *count += 1;
+        let parent = parent_key(&row.fqn);
+        if per_parent
+            .get(&parent)
+            .is_some_and(|&n| n >= MAX_PER_PARENT)
+        {
+            continue;
+        }
+        if !file.is_empty() {
+            *per_file.entry(file).or_insert(0) += 1;
+        }
+        *per_parent.entry(parent).or_insert(0) += 1;
         kept.push(r);
     }
     kept
@@ -190,7 +200,15 @@ mod tests {
     #[test]
     fn rank_dedupe_and_parent_keys_respect_limits() {
         let corpus = vec![row("Repo::commit_hook"), row("Project::setup")];
-        let hits = rank(&["commit".to_string()], &corpus, 10, None, &test_vocab());
+        let rows: Vec<RowTokens> = corpus.iter().map(RowTokens::of).collect();
+        let hits = rank(
+            &["commit".to_string()],
+            &corpus,
+            &rows,
+            10,
+            None,
+            &test_vocab(),
+        );
         assert_eq!(hits.len(), 1);
         let limited = dedupe_by_parent(hits, &corpus, 0);
         assert!(limited.is_empty());
@@ -198,5 +216,31 @@ mod tests {
         assert_eq!(parent_key("a::B::field"), "a::B");
         assert_eq!(parent_key("pkg.Func"), "pkg");
         assert_eq!(parent_key("bare"), "bare");
+    }
+
+    #[test]
+    fn parent_rejection_does_not_burn_file_quota() {
+        let row_at = |fqn: &str, loc: &str| {
+            let mut r = row(fqn);
+            r.loc = loc.to_string();
+            r
+        };
+        let corpus = vec![
+            row_at("A::x1", "f.rb:1"),
+            row_at("A::x2", "f.rb:2"),
+            row_at("A::x3", "f.rb:3"),
+            row_at("B::y", "f.rb:4"),
+        ];
+        let hits = (0..4)
+            .map(|index| Hit {
+                index,
+                score: 1.0,
+                tiered: false,
+                coverage: 0.0,
+            })
+            .collect();
+        let kept = dedupe_by_parent(hits, &corpus, 10);
+        let indices: Vec<usize> = kept.iter().map(|h| h.index).collect();
+        assert_eq!(indices, vec![0, 1, 3]);
     }
 }

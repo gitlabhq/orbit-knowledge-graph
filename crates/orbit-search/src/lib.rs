@@ -9,7 +9,7 @@ pub mod types;
 pub mod vocab;
 
 pub use anchor::{
-    BASE_SET_PER_TERM, MAX_SEEDS, MIN_SEEDS_PER_TERM, term_base_sets, unmatched_terms,
+    BASE_SET_PER_TERM, MAX_SEEDS, MIN_SEEDS_PER_TERM, RowTokens, term_base_sets, unmatched_terms,
 };
 pub use ask::{AskMatch, AskOutcome};
 pub use ppr::KindRates;

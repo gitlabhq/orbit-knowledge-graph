@@ -8,11 +8,10 @@ pub const MAX_SEEDS: usize = 50;
 
 pub fn term_base_sets(
     terms: &[String],
-    corpus: &[CorpusRow],
+    rows: &[RowTokens],
     weights: Option<&[f64]>,
     vocab: &SearchVocab,
 ) -> Vec<Vec<(usize, f64)>> {
-    let rows: Vec<RowTokens> = corpus.iter().map(RowTokens::of).collect();
     let searchable = terms
         .iter()
         .filter(|term| !vocab.is_relational(term))
@@ -51,15 +50,13 @@ pub fn term_base_sets(
     sets
 }
 
-pub fn unmatched_terms(terms: &[String], corpus: &[CorpusRow], vocab: &SearchVocab) -> Vec<String> {
+pub fn unmatched_terms(terms: &[String], rows: &[RowTokens], vocab: &SearchVocab) -> Vec<String> {
     terms
         .iter()
         .filter(|term| !vocab.is_relational(term))
         .filter(|term| {
             let term_stem = stem(term);
-            !corpus
-                .iter()
-                .any(|row| RowTokens::of(row).matches(term, &term_stem))
+            !rows.iter().any(|row| row.matches(term, &term_stem))
         })
         .cloned()
         .collect()
@@ -84,14 +81,14 @@ pub(crate) fn tier_of(term: &str, tokens: &[String]) -> Tier {
     }
 }
 
-pub(crate) struct RowTokens {
+pub struct RowTokens {
     pub(crate) name: Vec<String>,
     name_stems: Vec<String>,
     pub(crate) path: Vec<String>,
 }
 
 impl RowTokens {
-    pub(crate) fn of(row: &CorpusRow) -> Self {
+    pub fn of(row: &CorpusRow) -> Self {
         let name = split_words(&row.fqn);
         let name_stems = name.iter().map(|t| stem(t)).collect();
         Self {
@@ -119,6 +116,10 @@ mod tests {
     use super::*;
     use crate::testutil::{row, test_vocab};
 
+    fn tokens(corpus: &[CorpusRow]) -> Vec<RowTokens> {
+        corpus.iter().map(RowTokens::of).collect()
+    }
+
     #[test]
     fn base_sets_skip_relational_terms_and_cap_per_term() {
         let corpus = vec![row("Repo::commit_hook"), row("Project::setup")];
@@ -128,11 +129,11 @@ mod tests {
             "uses".to_string(),
         ];
         assert_eq!(
-            term_base_sets(&terms, &corpus, None, &test_vocab()).len(),
+            term_base_sets(&terms, &tokens(&corpus), None, &test_vocab()).len(),
             2
         );
         let big: Vec<CorpusRow> = (0..40).map(|i| row(&format!("m{i}::commit"))).collect();
-        let capped = term_base_sets(&["commit".to_string()], &big, None, &test_vocab());
+        let capped = term_base_sets(&["commit".to_string()], &tokens(&big), None, &test_vocab());
         assert_eq!(capped[0].len(), BASE_SET_PER_TERM);
     }
 
@@ -146,7 +147,7 @@ mod tests {
                 corpus.push(row(&format!("m{i}::topic{t}_thing")));
             }
         }
-        let sets = term_base_sets(&terms, &corpus, None, &test_vocab());
+        let sets = term_base_sets(&terms, &tokens(&corpus), None, &test_vocab());
         assert_eq!(sets.len(), 8);
         assert!(sets.iter().all(|s| s.len() == MAX_SEEDS / 8));
     }
@@ -160,13 +161,13 @@ mod tests {
             "uses".to_string(),
         ];
         assert_eq!(
-            unmatched_terms(&terms, &corpus, &test_vocab()),
+            unmatched_terms(&terms, &tokens(&corpus), &test_vocab()),
             Vec::<String>::new()
         );
         assert_eq!(
             unmatched_terms(
                 &["zzzz".to_string(), "uses".to_string()],
-                &corpus,
+                &tokens(&corpus),
                 &test_vocab()
             ),
             vec!["zzzz".to_string()]
