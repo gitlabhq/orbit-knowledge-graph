@@ -17,8 +17,10 @@
 # version with no entry is treated as "*", which also makes pruning old entries safe.
 migrations:
 - version: 92
-  scope: code
-  note: gl_definition gains search_text and token_count columns (write-time tokenized identifier text for ranked search); code tables re-derive to populate them
+  scope: "*"
+  note: >-
+    gl_definition gains search_text and token_count columns (write-time tokenized
+    identifier text for ranked search); code tables re-derive to populate them
 - version: 91
   scope: "*"
   note: >-
