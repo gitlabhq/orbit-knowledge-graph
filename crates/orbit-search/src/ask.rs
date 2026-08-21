@@ -1,13 +1,32 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 
+use crate::anchor::{term_base_sets, unmatched_terms};
 use crate::expand::{NeighborhoodSource, expand_neighborhood};
-use crate::{
-    AskMatch, AskOutcome, CorpusRow, SearchVocab, candidate_splits, content_words, query_tokens,
-    rank_and_trim, term_base_sets, unmatched_terms,
-};
+use crate::rank::rank_and_trim;
+use crate::text::{candidate_splits, content_words, query_tokens};
+use crate::types::{CorpusRow, Edge};
+use crate::vocab::SearchVocab;
 
 pub const SURFACED_LIMIT: usize = 3;
+
+pub struct AskOutcome {
+    pub terms: Vec<String>,
+    pub splits: Vec<(String, String)>,
+    pub matches: Vec<AskMatch>,
+    pub surfaced: Vec<AskMatch>,
+    pub seed_count: usize,
+    pub focus: Option<String>,
+    pub edges: Vec<Edge>,
+    pub hidden_by_kind: Vec<(String, usize)>,
+    pub weak: bool,
+    pub unmatched_terms: Vec<String>,
+}
+
+pub struct AskMatch {
+    pub row: CorpusRow,
+    pub score: f64,
+}
 
 pub type Corpus = (Vec<CorpusRow>, Option<Vec<f64>>);
 

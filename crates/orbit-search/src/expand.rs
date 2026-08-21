@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::Edge;
 use crate::ppr::{NeighborhoodEdge, rank_neighborhood};
+use crate::types::Edge;
 
 pub const PER_HOP_EDGE_CAP: usize = 600;
 pub const FRONTIER_CAP: usize = 150;
