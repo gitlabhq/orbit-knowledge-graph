@@ -1,6 +1,3 @@
-//! Build-time guard for authored ETL SQL. Lifecycle columns are declared once
-//! in the ontology, so authored SQL must use the matching template markers.
-
 use crate::etl::{Extract, ExtractQuery, Pipeline};
 use crate::{Ontology, OntologyError};
 

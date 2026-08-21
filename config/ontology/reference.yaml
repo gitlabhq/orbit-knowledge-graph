@@ -5,11 +5,6 @@ domain: core
 description: A GitLab user account
 destination_table: users
 
-# Authored ETL SQL uses {{version_column}} for `_version` and every `argMax`
-# state-resolution key, {{watermark_column}} only for change-window predicates,
-# and {{deleted_column}} for the soft-delete flag. The indexer substitutes them
-# from schema.yaml's default_version / default_watermark / default_deleted.
-
 # Output destination
 # destination:
 #   table: users

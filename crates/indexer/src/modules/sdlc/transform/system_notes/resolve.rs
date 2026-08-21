@@ -54,12 +54,6 @@ pub(super) fn paths_per_routes_query(paths: &[&str]) -> usize {
 /// `(source_id, path, traversal_path)`; `source_type = 'Project'` because an
 /// owning route is always a project.
 ///
-/// `argMax(..., <version>)` rather than `FINAL`: the reconciler re-inserts a
-/// route under a new `traversal_path`, so the stale `0/` and reconciled
-/// `1/22/94/` rows have different sort keys and `FINAL` won't collapse them —
-/// picking the stale row would land the edge in the wrong namespace. (Mirrors
-/// the SDLC entity ETL in `plan/input.rs`; also cheaper.)
-///
 /// `startsWith(traversal_path, {root_prefix})` bounds the scan to the source's
 /// top-level namespace (the leading sort-key column) so it's a range scan, not
 /// a full datalake scan. v1 therefore resolves only same-top-level references;

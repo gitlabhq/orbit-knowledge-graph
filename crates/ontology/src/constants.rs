@@ -43,8 +43,6 @@ use std::sync::LazyLock;
 static EMBEDDED_ONTOLOGY: LazyLock<crate::Ontology> =
     LazyLock::new(|| crate::Ontology::load_embedded().expect("embedded ontology must be valid"));
 
-/// Siphon datalake state-version column, derived from `schema.yaml`'s
-/// `settings.etl.default_version` at runtime.
 pub fn siphon_version_column() -> &'static str {
     &EMBEDDED_ONTOLOGY.etl_settings.version
 }

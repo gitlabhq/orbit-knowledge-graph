@@ -1071,15 +1071,11 @@ impl Ontology {
         &self.internal_column_prefix
     }
 
-    /// Default datalake version column for state resolution. Loaded from
-    /// `schema.yaml`'s `default_version`.
     #[must_use]
     pub fn default_version_column(&self) -> &str {
         &self.etl_settings.version
     }
 
-    /// Default datalake change-watermark column for incremental-pull windowing.
-    /// Loaded from `schema.yaml`'s `default_watermark`.
     #[must_use]
     pub fn default_watermark_column(&self) -> &str {
         &self.etl_settings.watermark

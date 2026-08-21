@@ -1,7 +1,3 @@
-//! Authored-SQL strategy. Marker conformance (no hardcoded lifecycle
-//! column) is a build-time gate in `orbit-server`'s build script via
-//! `ontology::etl_sql::validate_authored_etl_sql`, not a runtime check here.
-
 use super::super::build::PlanError;
 use ontology::constants::{DELETED_COLUMN, VERSION_COLUMN};
 use ontology::sql_template;

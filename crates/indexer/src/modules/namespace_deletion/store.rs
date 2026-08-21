@@ -53,14 +53,16 @@ static DELETED_NAMESPACES_QUERY: LazyLock<String> = LazyLock::new(|| {
     );
     format!(
         "SELECT root_namespace_id AS namespace_id, \
-         argMax(traversal_path, {version}) AS traversal_path, \
-         toString(max({version})) AS deleted_at \
+         state.1 AS traversal_path, \
+         toString(state.3) AS deleted_at \
+         FROM (SELECT root_namespace_id, id, \
+         argMax(tuple(traversal_path, {del}, {version}), {version}) AS state \
          FROM siphon_knowledge_graph_enabled_namespaces \
          WHERE {watermark} > {{last_watermark:String}} \
          AND {watermark} <= {{watermark:String}} \
-         GROUP BY root_namespace_id, id \
-         HAVING argMax({del}, {version}) = true \
-         AND argMax(traversal_path, {version}) != ''"
+         GROUP BY root_namespace_id, id) \
+         WHERE state.2 = true \
+         AND state.1 != ''"
     )
 });
 
@@ -509,12 +511,12 @@ mod sql_tests {
             IS_NAMESPACE_STILL_DELETED.contains("argMax(_siphon_deleted, _siphon_replicated_at)")
         );
         assert!(
-            DELETED_NAMESPACES_QUERY.contains("toString(max(_siphon_replicated_at)) AS deleted_at")
+            DELETED_NAMESPACES_QUERY.contains(
+                "argMax(tuple(traversal_path, _siphon_deleted, _siphon_replicated_at), _siphon_replicated_at) AS state"
+            )
         );
-        assert!(
-            DELETED_NAMESPACES_QUERY
-                .contains("HAVING argMax(_siphon_deleted, _siphon_replicated_at) = true")
-        );
+        assert!(DELETED_NAMESPACES_QUERY.contains("toString(state.3) AS deleted_at"));
+        assert!(DELETED_NAMESPACES_QUERY.contains("WHERE state.2 = true"));
         assert!(DELETED_NAMESPACES_QUERY.contains("_siphon_watermark > {last_watermark:String}"));
         assert!(DELETED_NAMESPACES_QUERY.contains("_siphon_watermark <= {watermark:String}"));
     }

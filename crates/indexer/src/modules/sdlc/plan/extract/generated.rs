@@ -38,7 +38,6 @@ pub(in crate::modules::sdlc) fn compile_generated_extract(
     declaration.build_spec(sql)
 }
 
-/// Substitutes lifecycle-column markers and rejects any other `{{marker}}`.
 fn resolve_filter(
     declaration: &ClickHouseExtractDeclaration,
     filter: Option<&str>,
