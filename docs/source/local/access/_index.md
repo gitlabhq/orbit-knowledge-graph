@@ -15,8 +15,9 @@ coding agents.
 With the GitLab Orbit CLI, you can build a local graph
 and query it without a connection to a GitLab instance.
 
-You can also expose your graph to AI agents with the GitLab
-Orbit Local MCP server and configure AI coding assistants
+You can also expose your graph to
+AI agents with the GitLab Orbit Local MCP
+server and configure AI coding assistants
 to consult your graph.
 
 ## GitLab Orbit Local with the GitLab CLI
