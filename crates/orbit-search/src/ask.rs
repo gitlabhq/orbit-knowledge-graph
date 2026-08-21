@@ -3,6 +3,7 @@ use std::fmt;
 
 use crate::anchor::{term_base_sets, unmatched_terms};
 use crate::expand::{NeighborhoodSource, expand_neighborhood};
+use crate::ppr::KindRates;
 use crate::rank::rank_and_trim;
 use crate::text::{candidate_splits, content_words, query_tokens};
 use crate::types::{CorpusRow, Edge};
@@ -64,7 +65,7 @@ pub fn ask<S: AskSource>(
     question: &str,
     limit: usize,
     vocab: &SearchVocab,
-    kind_weights: &HashMap<String, f64>,
+    kind_rates: &HashMap<String, KindRates>,
 ) -> Result<AskOutcome, AskError<S::Error>> {
     let terms = content_words(question);
     if terms.is_empty() {
@@ -118,7 +119,7 @@ pub fn ask<S: AskSource>(
     let (edges, hidden_by_kind, surfaced) = if term_seeds.is_empty() {
         (Vec::new(), Vec::new(), Vec::new())
     } else {
-        let expanded = expand_neighborhood(source, &term_seeds, kind_weights, focus.as_deref())?;
+        let expanded = expand_neighborhood(source, &term_seeds, kind_rates, focus.as_deref())?;
         let shown: HashSet<&str> = matches.iter().map(|m| m.row.id.as_str()).collect();
         let candidates: Vec<(String, f64)> = expanded
             .surfaced

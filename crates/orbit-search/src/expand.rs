@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::ppr::{NeighborhoodEdge, rank_neighborhood};
+use crate::ppr::{KindRates, NeighborhoodEdge, rank_neighborhood};
 use crate::types::Edge;
 
 pub const PER_HOP_EDGE_CAP: usize = 600;
@@ -34,7 +34,7 @@ pub trait NeighborhoodSource {
 pub fn expand_neighborhood<S: NeighborhoodSource>(
     source: &S,
     term_seeds: &[Vec<(String, f64)>],
-    kind_weights: &HashMap<String, f64>,
+    kind_rates: &HashMap<String, KindRates>,
     focus: Option<&str>,
 ) -> Result<ExpandedNeighborhood, S::Error> {
     let mut seed_ids: Vec<&str> = Vec::new();
@@ -98,14 +98,7 @@ pub fn expand_neighborhood<S: NeighborhoodSource>(
         })
         .collect();
 
-    let ranked = rank_neighborhood(
-        &edges,
-        &degrees,
-        term_seeds,
-        kind_weights,
-        focus,
-        EDGE_LIMIT,
-    );
+    let ranked = rank_neighborhood(&edges, &degrees, term_seeds, kind_rates, focus, EDGE_LIMIT);
     let display = |id: &str| -> (String, String) {
         match labels.get(id) {
             Some(l) => (l.label.clone(), l.loc.clone()),
@@ -239,22 +232,23 @@ mod tests {
         vec![ids.iter().map(|id| ((*id).to_string(), 1.0)).collect()]
     }
 
-    fn weights() -> HashMap<String, f64> {
-        HashMap::from([("CALLS".to_string(), 1.0)])
+    fn weights() -> HashMap<String, KindRates> {
+        HashMap::from([("CALLS".to_string(), KindRates::new(1.0))])
     }
 
     #[test]
     fn expansion_walks_two_hops_dedupes_filters_scoped_and_labels_or_falls_back() {
         let source = FakeSource::new(vec![("CALLS", "seed", "mid"), ("CALLS", "mid", "far")]);
         let expanded = expand_neighborhood(&source, &seeds(&["seed"]), &weights(), None).unwrap();
-        let rendered: Vec<String> = expanded
+        let mut rendered: Vec<String> = expanded
             .edges
             .iter()
             .map(|e| format!("{} -> {}", e.source, e.target))
             .collect();
+        rendered.sort();
         assert_eq!(
             rendered,
-            vec!["label_seed -> label_mid", "label_mid -> label_far"]
+            vec!["label_mid -> label_far", "label_seed -> label_mid"]
         );
         assert_eq!(source.hop_requests.borrow().len(), 2);
         assert!(

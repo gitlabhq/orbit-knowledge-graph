@@ -1,10 +1,9 @@
-use std::collections::HashSet;
-
 use crate::text::{split_words, stem};
 use crate::types::CorpusRow;
 use crate::vocab::SearchVocab;
 
 pub const BASE_SET_PER_TERM: usize = 10;
+pub const MIN_SEEDS_PER_TERM: usize = 3;
 pub const MAX_SEEDS: usize = 50;
 
 pub fn term_base_sets(
@@ -14,8 +13,13 @@ pub fn term_base_sets(
     vocab: &SearchVocab,
 ) -> Vec<Vec<(usize, f64)>> {
     let rows: Vec<RowTokens> = corpus.iter().map(RowTokens::of).collect();
+    let searchable = terms
+        .iter()
+        .filter(|term| !vocab.is_relational(term))
+        .count()
+        .max(1);
+    let per_term = (MAX_SEEDS / searchable).clamp(MIN_SEEDS_PER_TERM, BASE_SET_PER_TERM);
     let mut sets: Vec<Vec<(usize, f64)>> = Vec::new();
-    let mut seeded: HashSet<usize> = HashSet::new();
     for (t, term) in terms.iter().enumerate() {
         if vocab.is_relational(term) {
             continue;
@@ -39,13 +43,9 @@ pub fn term_base_sets(
             })
             .collect();
         matched.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-        matched.truncate(BASE_SET_PER_TERM);
+        matched.truncate(per_term);
         if !matched.is_empty() {
-            seeded.extend(matched.iter().map(|&(i, _)| i));
             sets.push(matched);
-            if seeded.len() >= MAX_SEEDS {
-                break;
-            }
         }
     }
     sets
@@ -134,6 +134,21 @@ mod tests {
         let big: Vec<CorpusRow> = (0..40).map(|i| row(&format!("m{i}::commit"))).collect();
         let capped = term_base_sets(&["commit".to_string()], &big, None, &test_vocab());
         assert_eq!(capped[0].len(), BASE_SET_PER_TERM);
+    }
+
+    #[test]
+    fn shrinks_per_term_budget_instead_of_dropping_terms() {
+        let mut corpus = Vec::new();
+        let mut terms = Vec::new();
+        for t in 0..8 {
+            terms.push(format!("topic{t}"));
+            for i in 0..12 {
+                corpus.push(row(&format!("m{i}::topic{t}_thing")));
+            }
+        }
+        let sets = term_base_sets(&terms, &corpus, None, &test_vocab());
+        assert_eq!(sets.len(), 8);
+        assert!(sets.iter().all(|s| s.len() == MAX_SEEDS / 8));
     }
 
     #[test]
