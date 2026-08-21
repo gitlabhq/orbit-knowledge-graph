@@ -1,3 +1,23 @@
+## [0.105.1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.105.0...v0.105.1) (2026-08-21)
+
+### Fixes
+
+* bound archive entry reads by the pax-corrected size ([a4d0137](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/a4d0137462df6d1ee1fb9685fba07b2323e27f7d)) by Bohdan Parkhomchuk
+* **indexer:** split Siphon version and watermark semantics ([43dfa02](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/43dfa02f1a262a43ac7208c6fb13c5dd8707706f)) by Jean-Gabriel Doyon
+* **indexer:** stop fetching Git LFS object contents for code indexing ([68d6a2c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/68d6a2c019d91d2f597385292c9cb66801c9aa40)) by Bohdan Parkhomchuk
+* **orbit-cli:** call it the Orbit service in the 503 hint ([dbaa1fd](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/dbaa1fde605a6e2c4aebb334f7e1257420e88754)) by Jean-Gabriel Doyon
+
+### Performance
+
+* **code-graph:** pack parse-wave refs and reuse ancestor-table BFS map ([c864e35](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/c864e358bd0b8ac74091888b20b60b6e3f9a177b)) by Jean-Gabriel Doyon
+
+### Other
+
+* **bench:** add README for the RA bench harness ([f4e6f8a](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f4e6f8a78bbb9e14de81528f8efc6954fa25e198)) by Michael Usachenko
+* **i18n:** update ja-jp for commit a5c7fea4 ([3fe69e7](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/3fe69e7b64097fefba6fa8c121aeb56eda69de3b)) by GitLab-Argo Bot
+* **Orbit:** adds access index page ([a1d98be](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/a1d98bed14c14adeba8f1631a8c44808be8f7b63)) by Zachary Painter
+* **Orbit:** adds availability and history to access index page ([a5e9523](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/a5e9523459d9ab7f5d5ee5897dce417289d9809a)) by Zachary Painter
+
 ## [0.105.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.104.0...v0.105.0) (2026-08-20)
 
 ### Features
