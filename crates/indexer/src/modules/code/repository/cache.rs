@@ -473,6 +473,36 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn extract_archive_records_lfs_pointers_without_writing_them() {
+        let (_dir, cache) = create_cache();
+        let pointer = b"version https://git-lfs.github.com/spec/v1\n\
+            oid sha256:4d7a214614ab2935c943f9e0ff69d22eadbb8f32b1258daaa5e2ca24d17e2393\n\
+            size 5242880\n";
+        let archive = build_tar_gz(&[
+            ("project-abc/src/main.rs", b"fn main() {}"),
+            ("project-abc/data/train.csv", pointer),
+        ]);
+
+        let path = cache
+            .extract_archive(archive_stream(archive))
+            .await
+            .unwrap();
+
+        assert!(
+            path.file_inventory
+                .iter()
+                .any(|entry| entry.path == "data/train.csv"),
+            "LFS pointers should still be present in archive inventory"
+        );
+        assert_eq!(
+            path.stream_reasons.get("data/train.csv"),
+            Some(&FilterSkip::LfsPointer)
+        );
+        assert!(path.path().join("src/main.rs").exists());
+        assert!(!path.path().join("data/train.csv").exists());
+    }
+
+    #[tokio::test]
     async fn extract_archive_drops_binary_content_under_size_cap() {
         let (_dir, cache) = create_cache();
         let archive = build_tar_gz(&[

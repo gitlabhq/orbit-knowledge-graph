@@ -1,9 +1,9 @@
 //! The single filtering policy for code indexing, shared by every file source
 //! as a [`FileStreamHooks`] implementation. Per file it produces the full
 //! [`Decision`]: `Parse` (source), `Load` (resolver inputs: on disk, not
-//! parsed), `ListOnly` (excluded/oversize/binary/minified: a node, no bytes), or
-//! `Drop`. Resolver inputs are never in the denylist, so they survive. A
-//! total-bytes [`Counter`] aborts an oversized repo.
+//! parsed), `ListOnly` (excluded/oversize/binary/minified/LFS pointer: a node,
+//! no bytes), or `Drop`. Resolver inputs are never in the denylist, so they
+//! survive. A total-bytes [`Counter`] aborts an oversized repo.
 
 use std::path::Path;
 use std::sync::LazyLock;
@@ -21,6 +21,10 @@ const BINARY_SNIFF_BYTES: usize = 8000;
 const MAX_LINE_LENGTH: usize = 64 * 1024;
 const MAX_AVG_LINE_LENGTH: usize = 16 * 1024;
 const MINIFIED_SIZE_THRESHOLD: usize = 5_000;
+
+/// The LFS spec caps a pointer at 1024 bytes, including extension lines.
+const LFS_POINTER_MAX_BYTES: usize = 1024;
+const LFS_POINTER_VERSION_PREFIX: &[u8] = b"version https://git-lfs.github.com/spec";
 
 /// Why [`CodeFilter`] declined to load a file. Low-cardinality, snake_case for
 /// metric labels.
@@ -45,6 +49,7 @@ pub enum FilterSkip {
     Minified,
     LineTooLong,
     NonRegularFile,
+    LfsPointer,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -117,6 +122,9 @@ impl FileStreamHooks for CodeFilter {
     }
 
     fn on_content(&mut self, file: &FileInventoryEntry, content: &[u8]) -> Decision {
+        if is_lfs_pointer(content) {
+            return self.record(file, FilterSkip::LfsPointer);
+        }
         let sniff = &content[..content.len().min(BINARY_SNIFF_BYTES)];
         if looks_binary(sniff) {
             return self.record(file, FilterSkip::Binary);
@@ -167,6 +175,30 @@ fn minified_skip(content: &[u8]) -> Option<FilterSkip> {
         return Some(FilterSkip::Minified);
     }
     None
+}
+
+/// A Git LFS pointer is a few lines of valid UTF-8 that would otherwise be
+/// classified by extension and parsed as source. Mirrors Gitaly's
+/// `git.IsLFSPointer` and Rails' `Gitlab::Git::Blob#has_lfs_version_key?`,
+/// including their shared decision not to recognize the pre-release
+/// `hawser.github.com` version URL.
+fn is_lfs_pointer(content: &[u8]) -> bool {
+    if content.len() > LFS_POINTER_MAX_BYTES || !content.starts_with(LFS_POINTER_VERSION_PREFIX) {
+        return false;
+    }
+    let Ok(text) = std::str::from_utf8(content) else {
+        return false;
+    };
+    let has_oid = text.lines().any(|line| {
+        line.strip_prefix("oid sha256:").is_some_and(|oid| {
+            oid.len() == 64 && oid.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+        })
+    });
+    let has_size = text.lines().any(|line| {
+        line.strip_prefix("size ")
+            .is_some_and(|size| !size.is_empty() && size.bytes().all(|b| b.is_ascii_digit()))
+    });
+    has_oid && has_size
 }
 
 /// The single denylist of files recorded as a bare node but never loaded or
@@ -250,6 +282,10 @@ mod tests {
         CodeFilter::new(0, 0, detect_language_from_path)
     }
 
+    const POINTER: &[u8] = b"version https://git-lfs.github.com/spec/v1\n\
+        oid sha256:4d7a214614ab2935c943f9e0ff69d22eadbb8f32b1258daaa5e2ca24d17e2393\n\
+        size 5242880\n";
+
     #[test]
     fn records_per_file_reason_only_for_settled_files() {
         let mut f = filter();
@@ -304,6 +340,47 @@ mod tests {
             f.on_content(&entry("bundle.js", 10), &minified),
             Decision::ListOnly
         );
+    }
+
+    #[test]
+    fn lfs_pointers_are_nodes_instead_of_source() {
+        let mut f = filter();
+        for path in ["data/train.csv", "src/model.py"] {
+            assert_eq!(
+                f.on_content(&entry(path, POINTER.len() as u64), POINTER),
+                Decision::ListOnly,
+                "{path}"
+            );
+            assert_eq!(f.file_reasons().get(path), Some(&FilterSkip::LfsPointer));
+        }
+    }
+
+    #[test]
+    fn lfs_lookalikes_are_treated_as_ordinary_files() {
+        let mut f = filter();
+        let oversize = [POINTER, &vec![b'x'; 1024][..]].concat();
+        for (path, content) in [
+            ("no_oid.csv", b"version https://git-lfs.github.com/spec/v1\nsize 12\n".to_vec()),
+            (
+                "no_size.csv",
+                b"version https://git-lfs.github.com/spec/v1\noid sha256:4d7a214614ab2935c943f9e0ff69d22eadbb8f32b1258daaa5e2ca24d17e2393\n".to_vec(),
+            ),
+            (
+                "short_oid.csv",
+                b"version https://git-lfs.github.com/spec/v1\noid sha256:4d7a2146\nsize 12\n".to_vec(),
+            ),
+            ("oversize.csv", oversize),
+            (
+                "docs/lfs.md",
+                b"Pointers start with `version https://git-lfs.github.com/spec/v1`.\n".to_vec(),
+            ),
+        ] {
+            assert_eq!(
+                f.on_content(&entry(path, content.len() as u64), &content),
+                Decision::Load,
+                "{path}"
+            );
+        }
     }
 
     #[test]
