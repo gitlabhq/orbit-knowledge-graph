@@ -1,0 +1,3 @@
+name: ask
+version: 1.0.0
+short: Answer a plain-language question with a scoped subgraph from the local graph

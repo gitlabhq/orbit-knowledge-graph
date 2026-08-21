@@ -173,6 +173,32 @@ struct IndexArgs {
 }
 
 #[derive(Args, Debug, PartialEq)]
+#[command(about = descriptions::short("ask"))]
+#[command(
+    long_about = "Answer a plain-language question with a scoped subgraph.\n\n\
+                  Ranks indexed definitions by how many distinct question terms they \
+                  match, then shows the most relevant connections within two hops of \
+                  the top matches, ranked by graph proximity."
+)]
+struct AskArgs {
+    /// Plain-language question, e.g. "how does the quota gate decide?"
+    #[arg(value_name = "QUESTION")]
+    question: String,
+
+    /// Repository path (default: current directory).
+    #[arg(long, value_name = "PATH")]
+    repo: Option<PathBuf>,
+
+    /// Maximum matched definitions to show.
+    #[arg(long, default_value = "10")]
+    limit: usize,
+
+    /// Override the DuckDB path (default: ~/.orbit/graph.duckdb).
+    #[arg(long, value_name = "PATH")]
+    db: Option<PathBuf>,
+}
+
+#[derive(Args, Debug, PartialEq)]
 #[command(about = descriptions::short("run_sql"))]
 struct SqlArgs {
     /// SQL query, or `-` to read from stdin.
@@ -264,6 +290,8 @@ enum Commands {
     Version,
     #[command(hide = true)]
     Index(IndexArgs),
+    #[command(hide = true)]
+    Ask(AskArgs),
     #[command(hide = true)]
     Sql(SqlArgs),
     #[command(hide = true)]
@@ -367,6 +395,7 @@ enum ConfigCommands {
 #[derive(Subcommand)]
 enum LocalCommands {
     Index(IndexArgs),
+    Ask(AskArgs),
     Sql(SqlArgs),
     Schema(SchemaArgs),
     List(ListArgs),
@@ -482,6 +511,7 @@ async fn dispatch(
             Ok(())
         }
         Commands::Index(args) => dispatch_local(LocalCommands::Index(args)).await,
+        Commands::Ask(args) => dispatch_local(LocalCommands::Ask(args)).await,
         Commands::Sql(args) => dispatch_local(LocalCommands::Sql(args)).await,
         Commands::Schema(args) => dispatch_local(LocalCommands::Schema(args)).await,
         Commands::List(args) => dispatch_local(LocalCommands::List(args)).await,
@@ -549,6 +579,12 @@ async fn dispatch_local(command: LocalCommands) -> Result<()> {
 
             run_index(path, threads, stats, db).await
         }
+        LocalCommands::Ask(AskArgs {
+            question,
+            repo,
+            limit,
+            db,
+        }) => commands::ask::run(question, repo, db, limit),
         LocalCommands::Sql(SqlArgs {
             query,
             file,
@@ -1089,6 +1125,23 @@ mod tests {
                 tables: vec!["gl_edge".to_string()],
             }
         );
+    }
+
+    #[test]
+    fn local_ask_and_top_level_ask_parse_to_same_args() {
+        let grouped = Cli::parse_from(["orbit", "local", "ask", "who calls this", "--limit", "5"]);
+        let top_level = Cli::parse_from(["orbit", "ask", "who calls this", "--limit", "5"]);
+        let grouped_args = match grouped.command {
+            Commands::Local {
+                command: LocalCommands::Ask(args),
+            } => args,
+            _ => panic!("expected local ask command"),
+        };
+        let top_level_args = match top_level.command {
+            Commands::Ask(args) => args,
+            _ => panic!("expected top-level ask command"),
+        };
+        assert_eq!(grouped_args, top_level_args);
     }
 
     #[test]
