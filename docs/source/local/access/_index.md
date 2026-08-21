@@ -28,8 +28,8 @@ DSL guidance, and troubleshooting help.
 
 ## GitLab Orbit Local MCP server
 
-Connect the GitLab Orbit Local MCP server to an AI client
-and interact with your local graph. After you connect
+Connect the GitLab Orbit Local MCP server to an AI client.
+After you connect
 to a client, you can configure agents to interact with your
 local graph.
 
