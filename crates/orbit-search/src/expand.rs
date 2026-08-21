@@ -55,7 +55,9 @@ pub fn expand_neighborhood<S: NeighborhoodSource>(
             }
         }
     }
-    let mut degrees = source.degrees(&refs(&hop1_nodes))?;
+    let mut degree_ids: Vec<&str> = seed_ids.clone();
+    degree_ids.extend(hop1_nodes.iter().map(String::as_str));
+    let mut degrees = source.degrees(&degree_ids)?;
 
     let mut frontier: Vec<&str> = hop1_nodes.iter().map(String::as_str).collect();
     frontier.sort_by_key(|id| degrees.get(*id).copied().unwrap_or(0));
@@ -158,6 +160,7 @@ mod tests {
         scoped: HashSet<String>,
         unlabeled: bool,
         hop_requests: RefCell<Vec<Vec<String>>>,
+        degree_requests: RefCell<Vec<Vec<String>>>,
     }
 
     impl FakeSource {
@@ -181,6 +184,7 @@ mod tests {
                 scoped: HashSet::new(),
                 unlabeled: false,
                 hop_requests: RefCell::new(Vec::new()),
+                degree_requests: RefCell::new(Vec::new()),
             }
         }
     }
@@ -202,6 +206,9 @@ mod tests {
         }
 
         fn degrees(&self, ids: &[&str]) -> Result<HashMap<String, u64>, Self::Error> {
+            self.degree_requests
+                .borrow_mut()
+                .push(ids.iter().map(|s| (*s).to_string()).collect());
             Ok(ids
                 .iter()
                 .filter_map(|id| self.degrees.get(*id).map(|d| ((*id).to_string(), *d)))
@@ -250,6 +257,12 @@ mod tests {
             vec!["label_seed -> label_mid", "label_mid -> label_far"]
         );
         assert_eq!(source.hop_requests.borrow().len(), 2);
+        assert!(
+            source.degree_requests.borrow()[0]
+                .iter()
+                .any(|id| id == "seed"),
+            "seed degrees must be fetched so edges into seeds get hub damping"
+        );
 
         let mut source = FakeSource::new(vec![
             ("CALLS", "seed", "kept"),

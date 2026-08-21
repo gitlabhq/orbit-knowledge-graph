@@ -172,7 +172,11 @@ pub fn rank_neighborhood(
         .map(|(id, i)| (id.to_string(), scores[i]))
         .filter(|&(_, s)| s > CONSENSUS_EPSILON * 1.5)
         .collect();
-    node_scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    node_scores.sort_by(|a, b| {
+        b.1.partial_cmp(&a.1)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.0.cmp(&b.0))
+    });
 
     RankedNeighborhood {
         selected: selected.into_iter().map(|(i, _)| i).collect(),
@@ -249,6 +253,37 @@ mod tests {
             vec![0.0; 3]
         );
         assert!(personalized_pagerank(&SubGraph::new(0), &[(0, 1.0)], PPR_DAMPING).is_empty());
+    }
+
+    #[test]
+    fn node_scores_break_ties_by_id() {
+        let edges: Vec<NeighborhoodEdge> = ["b", "a", "d", "c"]
+            .iter()
+            .map(|t| NeighborhoodEdge {
+                kind: "CALLS".to_string(),
+                source: "seed".to_string(),
+                target: (*t).to_string(),
+            })
+            .collect();
+        let weights = HashMap::from([("CALLS".to_string(), 1.0)]);
+        let ranked = rank_neighborhood(
+            &edges,
+            &HashMap::new(),
+            &[vec![("seed".to_string(), 1.0)]],
+            &weights,
+            None,
+            10,
+        );
+        let pos = |id: &str| {
+            ranked
+                .node_scores
+                .iter()
+                .position(|(n, _)| n == id)
+                .unwrap()
+        };
+        assert!(pos("a") < pos("b"));
+        assert!(pos("b") < pos("c"));
+        assert!(pos("c") < pos("d"));
     }
 
     #[test]

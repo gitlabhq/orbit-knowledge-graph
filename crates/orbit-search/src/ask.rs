@@ -77,7 +77,10 @@ pub fn ask<S: AskSource>(
         anchor_terms.push(b.clone());
     }
     let (corpus, anchor_weights) = source.corpus(&anchor_terms)?;
-    let weights = anchor_weights.as_ref().map(|w| w[..terms.len()].to_vec());
+    let weights = anchor_weights
+        .as_deref()
+        .and_then(|w| w.get(..terms.len()))
+        .map(|w| w.to_vec());
     let hits = rank_and_trim(&terms, &corpus, limit, weights.as_deref(), vocab);
     let focus = vocab.focus_edge_kind(&terms);
     let weak = hits.first().is_none_or(|h| !h.confident());
@@ -204,4 +207,57 @@ fn accepted_splits<S: AskSource>(
         }
     }
     Ok(accepted)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::expand::NodeLabel;
+    use crate::ppr::NeighborhoodEdge;
+    use crate::testutil::{row, test_vocab};
+
+    struct ShortWeightSource;
+
+    impl NeighborhoodSource for ShortWeightSource {
+        type Error = std::convert::Infallible;
+
+        fn hop(&self, _ids: &[&str], _cap: usize) -> Result<Vec<NeighborhoodEdge>, Self::Error> {
+            Ok(Vec::new())
+        }
+
+        fn degrees(&self, _ids: &[&str]) -> Result<HashMap<String, u64>, Self::Error> {
+            Ok(HashMap::new())
+        }
+
+        fn labels(&self, _ids: &[&str]) -> Result<HashMap<String, NodeLabel>, Self::Error> {
+            Ok(HashMap::new())
+        }
+    }
+
+    impl AskSource for ShortWeightSource {
+        fn corpus(&self, _terms: &[String]) -> Result<Corpus, Self::Error> {
+            Ok((vec![row("Repo::commit_hook")], Some(Vec::new())))
+        }
+
+        fn token_df(&self, tokens: &[String]) -> Result<Vec<i64>, Self::Error> {
+            Ok(vec![0; tokens.len()])
+        }
+
+        fn rows_by_ids(&self, _ids: &[&str]) -> Result<Vec<CorpusRow>, Self::Error> {
+            Ok(Vec::new())
+        }
+    }
+
+    #[test]
+    fn short_anchor_weights_fall_back_to_defaults() {
+        let outcome = ask(
+            &ShortWeightSource,
+            "commit hook",
+            5,
+            &test_vocab(),
+            &HashMap::new(),
+        )
+        .unwrap();
+        assert!(!outcome.matches.is_empty());
+    }
 }
