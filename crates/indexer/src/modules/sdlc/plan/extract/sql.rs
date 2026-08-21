@@ -1,7 +1,3 @@
-//! Authored-SQL strategy. Marker conformance (no hardcoded watermark/deleted
-//! column) is a build-time gate in `orbit-server`'s build script via
-//! `ontology::etl_sql::validate_authored_etl_sql`, not a runtime check here.
-
 use super::super::build::PlanError;
 use ontology::constants::{DELETED_COLUMN, VERSION_COLUMN};
 use ontology::sql_template;
@@ -17,6 +13,7 @@ pub(in crate::modules::sdlc) fn compile_authored_extract(
     let rendered = sql_template::render(
         raw,
         sql_template::context! {
+            version_column => declaration.version,
             watermark_column => declaration.watermark,
             deleted_column => declaration.deleted,
             // Re-emit the per-page markers unchanged so `PreparedQuery::to_sql` renders them at extraction time.
@@ -28,8 +25,20 @@ pub(in crate::modules::sdlc) fn compile_authored_extract(
         PlanError::MalformedTemplate(format!("authored SQL for '{}': {e}", declaration.entity))
     })?;
 
-    let watermark = aliased_expression(&rendered, VERSION_COLUMN)
-        .unwrap_or_else(|| declaration.watermark.clone());
+    let version = aliased_expression(&rendered, VERSION_COLUMN).ok_or_else(|| {
+        PlanError::MalformedTemplate(format!(
+            "authored SQL for '{}' must select a version expression AS {VERSION_COLUMN}",
+            declaration.entity
+        ))
+    })?;
+    let watermark =
+        qualified_sibling_column(&version, &declaration.version, &declaration.watermark)
+            .ok_or_else(|| {
+                PlanError::MalformedTemplate(format!(
+                    "authored SQL for '{}' must select [qualifier.]{} AS {VERSION_COLUMN}",
+                    declaration.entity, declaration.version
+                ))
+            })?;
     let deleted = aliased_expression(&rendered, DELETED_COLUMN)
         .unwrap_or_else(|| declaration.deleted.clone());
 
@@ -52,6 +61,15 @@ fn aliased_expression(sql: &str, alias: &str) -> Option<String> {
     Some(prefix[start..].trim().to_string())
 }
 
+fn qualified_sibling_column(expression: &str, column: &str, sibling: &str) -> Option<String> {
+    if expression == column {
+        return Some(sibling.to_string());
+    }
+    expression
+        .strip_suffix(&format!(".{column}"))
+        .map(|qualifier| format!("{qualifier}.{sibling}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -63,6 +81,7 @@ mod tests {
             scope: EtlScope::Namespaced,
             table: "t".to_string(),
             source_columns: vec![],
+            version: "_siphon_replicated_at".to_string(),
             watermark: "_siphon_watermark".to_string(),
             deleted: "_siphon_deleted".to_string(),
             order_by: vec!["traversal_path".to_string(), "id".to_string()],
@@ -75,10 +94,15 @@ mod tests {
     fn markers_are_substituted_and_aliases_recovered() {
         let spec = compile_authored_extract(
             &group_decl(),
-            "SELECT namespace.{{watermark_column}} AS _version, (namespace.{{deleted_column}} OR namespace.type != 'Group') AS _deleted FROM t WHERE 1=1 {{filters}} LIMIT {{batch_size}}",
+            "SELECT namespace.{{version_column}} AS _version, (namespace.{{deleted_column}} OR namespace.type != 'Group') AS _deleted FROM t WHERE 1=1 {{filters}} LIMIT {{batch_size}}",
         )
         .expect("valid authored SQL");
-        assert!(!spec.template.as_str().contains("{{watermark_column}}"));
+        assert!(!spec.template.as_str().contains("{{version_column}}"));
+        assert!(
+            spec.template
+                .as_str()
+                .contains("namespace._siphon_replicated_at AS _version")
+        );
         assert_eq!(spec.watermark, "namespace._siphon_watermark");
         assert_eq!(
             spec.deleted,
@@ -96,6 +120,19 @@ mod tests {
         assert!(
             err.to_string().contains("authored SQL for 'Group'"),
             "got: {err}"
+        );
+    }
+
+    #[test]
+    fn complex_version_expression_is_rejected() {
+        let err = compile_authored_extract(
+            &group_decl(),
+            "SELECT greatest({{version_column}}, now64(6)) AS _version, x AS _deleted FROM t WHERE 1=1 {{filters}} LIMIT {{batch_size}}",
+        )
+        .expect_err("complex version expression should be rejected");
+        assert!(
+            err.to_string()
+                .contains("[qualifier.]_siphon_replicated_at")
         );
     }
 }

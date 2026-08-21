@@ -25,6 +25,7 @@ struct EmbeddedOntology;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct EtlSettings {
+    pub version: String,
     pub watermark: String,
     pub deleted: String,
     pub order_by: Vec<String>,
@@ -163,6 +164,7 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
         .collect();
 
     let etl_settings = EtlSettings {
+        version: schema.settings.etl.default_version,
         watermark: schema.settings.etl.default_watermark,
         deleted: schema.settings.etl.default_deleted,
         order_by: schema.settings.etl.default_etl_order_by,
@@ -1336,6 +1338,7 @@ mod tests {
                     tables: vec!["siphon_notes".to_string()],
                     fields: vec![],
                     order_by: vec![],
+                    version: "v".to_string(),
                     watermark: "w".to_string(),
                     deleted: "d".to_string(),
                     query: crate::etl::ExtractQuery::Generated { filter: None },
@@ -1423,6 +1426,7 @@ mod tests {
                 tables: vec!["siphon_x".to_string()],
                 fields: vec![],
                 order_by: vec![],
+                version: "v".to_string(),
                 watermark: "w".to_string(),
                 deleted: "d".to_string(),
                 query: crate::etl::ExtractQuery::Generated { filter: None },

@@ -38,7 +38,6 @@ pub(in crate::modules::sdlc) fn compile_generated_extract(
     declaration.build_spec(sql)
 }
 
-/// Substitutes `{{watermark_column}}`/`{{deleted_column}}` and rejects any other `{{marker}}`.
 fn resolve_filter(
     declaration: &ClickHouseExtractDeclaration,
     filter: Option<&str>,
@@ -49,7 +48,7 @@ fn resolve_filter(
     let rendered = sql_template::render(
         filter,
         sql_template::context! {
-            watermark_column => declaration.watermark,
+            version_column => declaration.version,
             deleted_column => declaration.deleted,
         },
     )
@@ -96,7 +95,7 @@ fn render_single_table_sql(
             select_columns.push(column.clone());
         }
     }
-    select_columns.push(format!("{} AS _version", declaration.watermark));
+    select_columns.push(format!("{} AS _version", declaration.version));
     select_columns.push(format!("{} AS _deleted", declaration.deleted));
 
     let mut where_clause =
@@ -124,7 +123,7 @@ fn render_with_lookups(
     joins: &[PointLookupJoin],
     filter: Option<&str>,
 ) -> String {
-    let watermark = &declaration.watermark;
+    let version = &declaration.version;
     let deleted = &declaration.deleted;
     let source = &declaration.table;
 
@@ -137,7 +136,7 @@ fn render_with_lookups(
         .iter()
         .map(|c| SelectColumn::typed(c).expression)
         .collect();
-    batch_select.push(format!("{watermark} AS _version"));
+    batch_select.push(format!("{version} AS _version"));
     batch_select.push(format!("{deleted} AS _deleted"));
 
     let mut ctes = vec![format!(
@@ -165,7 +164,7 @@ fn render_with_lookups(
         let mut select_cols = vec![format!("{key} AS id")];
         select_cols.extend(join.output_fields.iter().map(|field| {
             let source_column = &field.source_column;
-            format!("argMax({source_column}, {watermark}) AS {source_column}")
+            format!("argMax({source_column}, {version}) AS {source_column}")
         }));
         let path_scope = if join.has_traversal_path {
             "\n    AND startsWith(traversal_path, {traversal_path:String})"
@@ -173,7 +172,7 @@ fn render_with_lookups(
             ""
         };
         ctes.push(format!(
-            "{alias} AS (SELECT\n    {}\n  FROM {table}\n  WHERE {key} IN (SELECT\n      DISTINCT {}\n    FROM _batch){path_scope}\n  GROUP BY {key}\n  HAVING argMax({deleted}, {watermark}) = false)",
+            "{alias} AS (SELECT\n    {}\n  FROM {table}\n  WHERE {key} IN (SELECT\n      DISTINCT {}\n    FROM _batch){path_scope}\n  GROUP BY {key}\n  HAVING argMax({deleted}, {version}) = false)",
             select_cols.join(",\n    "),
             join.batch_id_column,
         ));

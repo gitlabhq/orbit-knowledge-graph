@@ -342,7 +342,7 @@ mod tests {
             target: "Test".to_string(),
             scope: EtlScope::Namespaced,
             extract_template: ExtractTemplate::new(format!(
-                "SELECT id, name, _siphon_watermark AS _version, \
+                "SELECT id, name, _siphon_replicated_at AS _version, \
                  _siphon_deleted AS _deleted \
                  FROM source_table \
                  WHERE 1=1 {{{{filters}}}} \

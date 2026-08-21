@@ -532,7 +532,15 @@ mod tests {
         assert!(normalized.contains("_e0 AS ("), "sql: {sql}");
         assert!(normalized.contains("FROM _batch"), "sql: {sql}");
         assert!(normalized.contains("LEFT JOIN _e0"), "sql: {sql}");
-        assert!(normalized.contains("argMax("), "sql: {sql}");
+        assert!(
+            normalized.contains("_siphon_replicated_at AS _version"),
+            "sql: {sql}"
+        );
+        assert!(
+            normalized.contains("argMax(state, _siphon_replicated_at)"),
+            "sql: {sql}"
+        );
+        assert!(!normalized.contains("argMax(state, _siphon_watermark)"));
         assert!(normalized.contains("GROUP BY id"), "sql: {sql}");
         assert!(normalized.contains("_e0.state AS user_state"), "sql: {sql}");
         assert!(
@@ -645,7 +653,7 @@ mod tests {
             "sql: {sql}"
         );
         assert!(
-            normalized.contains("note_id IN (SELECT DISTINCT id FROM _batch) AND startsWith(traversal_path, {traversal_path:String}) GROUP BY note_id HAVING argMax(_siphon_deleted, _siphon_watermark) = false"),
+            normalized.contains("note_id IN (SELECT DISTINCT id FROM _batch) AND startsWith(traversal_path, {traversal_path:String}) GROUP BY note_id HAVING argMax(_siphon_deleted, _siphon_replicated_at) = false"),
             "sql: {sql}"
         );
     }
@@ -709,6 +717,10 @@ mod tests {
             assert!(!sql.contains("WHERE WHERE"), "{name}: double-WHERE: {sql}");
             assert!(!sql.contains("AND AND"), "{name}: double-AND: {sql}");
             assert!(sql.contains("_version"), "{name}: missing _version: {sql}");
+            assert!(
+                sql.contains("_siphon_replicated_at"),
+                "{name}: missing state version: {sql}"
+            );
             assert!(sql.contains("_deleted"), "{name}: missing _deleted: {sql}");
             assert!(
                 sql.contains("> {last_watermark:String}"),

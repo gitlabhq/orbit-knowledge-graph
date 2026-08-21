@@ -21,8 +21,8 @@ use std::sync::LazyLock;
 use super::parse::{RefKind, Reference};
 use orbit_utils::traversal_path::TraversalPath;
 
-fn wm() -> &'static str {
-    ontology::siphon_watermark_column()
+fn version() -> &'static str {
+    ontology::siphon_version_column()
 }
 
 fn del() -> &'static str {
@@ -54,23 +54,17 @@ pub(super) fn paths_per_routes_query(paths: &[&str]) -> usize {
 /// `(source_id, path, traversal_path)`; `source_type = 'Project'` because an
 /// owning route is always a project.
 ///
-/// `argMax(..., <watermark>)` rather than `FINAL`: the reconciler re-inserts a
-/// route under a new `traversal_path`, so the stale `0/` and reconciled
-/// `1/22/94/` rows have different sort keys and `FINAL` won't collapse them —
-/// picking the stale row would land the edge in the wrong namespace. (Mirrors
-/// the SDLC entity ETL in `plan/input.rs`; also cheaper.)
-///
 /// `startsWith(traversal_path, {root_prefix})` bounds the scan to the source's
 /// top-level namespace (the leading sort-key column) so it's a range scan, not
 /// a full datalake scan. v1 therefore resolves only same-top-level references;
 /// cross-top-level is deferred to the dictionary lever (ADR 013).
 pub static ROUTES_SQL: LazyLock<String> = LazyLock::new(|| {
-    let (wm, del) = (wm(), del());
+    let (version, del) = (version(), del());
     format!(
         "SELECT source_id, path, traversal_path \
          FROM (SELECT id, source_id, path, \
-         argMax(traversal_path, {wm}) AS traversal_path, \
-         argMax({del}, {wm}) AS {del} \
+         argMax(traversal_path, {version}) AS traversal_path, \
+         argMax({del}, {version}) AS {del} \
          FROM siphon_routes \
          WHERE startsWith(siphon_routes.traversal_path, {{root_prefix:String}}) \
          AND path IN {{paths:Array(String)}} \
@@ -86,11 +80,11 @@ pub static ROUTES_SQL: LazyLock<String> = LazyLock::new(|| {
 /// Params: `{root_prefix:String}`, `{source_ids:Array(Int64)}`. Returns
 /// `(source_id, path)`.
 pub static PROJECT_PATHS_SQL: LazyLock<String> = LazyLock::new(|| {
-    let (wm, del) = (wm(), del());
+    let (version, del) = (version(), del());
     format!(
         "SELECT source_id, path \
          FROM (SELECT id, source_id, path, \
-         argMax({del}, {wm}) AS {del} \
+         argMax({del}, {version}) AS {del} \
          FROM siphon_routes \
          WHERE startsWith(traversal_path, {{root_prefix:String}}) \
          AND source_type = 'Project' \
@@ -108,11 +102,11 @@ pub static PROJECT_PATHS_SQL: LazyLock<String> = LazyLock::new(|| {
 /// param channel serializes a tuple as `[200,5]`, which ClickHouse rejects for
 /// `Array(Tuple(Int64, Int64))`. Returns `(id, target_project_id, iid)`.
 pub static MERGE_REQUESTS_SQL: LazyLock<String> = LazyLock::new(|| {
-    let (wm, del) = (wm(), del());
+    let (version, del) = (version(), del());
     format!(
         "SELECT id, target_project_id, iid \
          FROM (SELECT id, target_project_id, iid, \
-         argMax({del}, {wm}) AS {del} \
+         argMax({del}, {version}) AS {del} \
          FROM merge_requests \
          WHERE startsWith(traversal_path, {{root_prefix:String}}) \
          AND (target_project_id, iid) IN arrayZip({{project_ids:Array(Int64)}}, {{iids:Array(Int64)}}) \
@@ -124,11 +118,11 @@ pub static MERGE_REQUESTS_SQL: LazyLock<String> = LazyLock::new(|| {
 /// Like [`MERGE_REQUESTS_SQL`] but keyed on `project_id`. Returns
 /// `(id, project_id, iid)`.
 pub static WORK_ITEMS_SQL: LazyLock<String> = LazyLock::new(|| {
-    let (wm, del) = (wm(), del());
+    let (version, del) = (version(), del());
     format!(
         "SELECT id, project_id, iid \
          FROM (SELECT id, project_id, iid, \
-         argMax({del}, {wm}) AS {del} \
+         argMax({del}, {version}) AS {del} \
          FROM work_items \
          WHERE startsWith(traversal_path, {{root_prefix:String}}) \
          AND (project_id, iid) IN arrayZip({{project_ids:Array(Int64)}}, {{iids:Array(Int64)}}) \
@@ -358,7 +352,7 @@ mod tests {
         ] {
             assert!(sql.contains("GROUP BY id"), "missing GROUP BY id in: {sql}");
             assert!(
-                sql.contains("argMax(_siphon_deleted, _siphon_watermark)"),
+                sql.contains("argMax(_siphon_deleted, _siphon_replicated_at)"),
                 "missing latest-version _siphon_deleted in: {sql}"
             );
             assert!(
@@ -367,7 +361,7 @@ mod tests {
             );
         }
         assert!(
-            ROUTES_SQL.contains("argMax(traversal_path, _siphon_watermark)"),
+            ROUTES_SQL.contains("argMax(traversal_path, _siphon_replicated_at)"),
             "routes must take the latest traversal_path so a stale 0/ can't win"
         );
     }

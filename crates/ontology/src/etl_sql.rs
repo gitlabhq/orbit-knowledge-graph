@@ -1,8 +1,3 @@
-//! Build-time guard for authored ETL SQL. Watermark/deleted columns are declared
-//! once per pipeline and can be overridden per entity, so authored SQL must reach
-//! them through `{{watermark_column}}`/`{{deleted_column}}` markers; a hardcoded
-//! literal silently drifts the day an override changes the resolved column.
-
 use crate::etl::{Extract, ExtractQuery, Pipeline};
 use crate::{Ontology, OntologyError};
 
@@ -13,6 +8,7 @@ pub fn validate_authored_etl_sql(ontology: &Ontology) -> Result<(), OntologyErro
             continue;
         };
         for (kind, column) in [
+            ("version", extract.version.as_str()),
             ("watermark", extract.watermark.as_str()),
             ("deleted", extract.deleted.as_str()),
         ] {
@@ -69,6 +65,20 @@ mod tests {
         let err = validate_authored_etl_sql(&ontology).expect_err("hardcoded watermark rejected");
         assert!(
             err.to_string().contains("hardcodes watermark column"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn hardcoded_version_column_is_rejected() {
+        let mut ontology = Ontology::load_embedded().expect("load embedded");
+        let pipeline = first_pipeline(&mut ontology);
+        let Extract::ClickHouse(extract) = &mut pipeline.extract;
+        extract.query = ExtractQuery::Sql(format!("SELECT {} AS _version FROM t", extract.version));
+
+        let err = validate_authored_etl_sql(&ontology).expect_err("hardcoded version rejected");
+        assert!(
+            err.to_string().contains("hardcodes version column"),
             "got: {err}"
         );
     }

@@ -32,7 +32,7 @@ pub mod sql_template;
 pub use constants::{
     DEFAULT_PRIMARY_KEY, DELETED_COLUMN, EDGE_RESERVED_COLUMNS, EDGE_TABLE, GL_TABLE_PREFIX,
     NODE_RESERVED_COLUMNS, TRAVERSAL_PATH_COLUMN, VERSION_COLUMN, siphon_deleted_column,
-    siphon_watermark_column,
+    siphon_version_column, siphon_watermark_column,
 };
 pub use entities::{
     AuxiliaryColumn, AuxiliaryDictionary, AuxiliaryTable, DataType, DenormDirection,
@@ -200,6 +200,7 @@ impl Ontology {
             edge_pipelines: BTreeMap::new(),
             edge_reindex_sources: BTreeMap::new(),
             etl_settings: EtlSettings {
+                version: String::new(),
                 watermark: String::new(),
                 deleted: String::new(),
                 order_by: vec![
@@ -1070,9 +1071,11 @@ impl Ontology {
         &self.internal_column_prefix
     }
 
-    /// Default datalake watermark column for `argMax` deduplication and
-    /// incremental-pull windowing. Loaded from `schema.yaml`'s
-    /// `default_watermark`.
+    #[must_use]
+    pub fn default_version_column(&self) -> &str {
+        &self.etl_settings.version
+    }
+
     #[must_use]
     pub fn default_watermark_column(&self) -> &str {
         &self.etl_settings.watermark
@@ -1652,7 +1655,7 @@ mod tests {
         let markers_preserved = all_pipelines(&embedded).iter().any(|pipeline| {
             let Extract::ClickHouse(extract) = &pipeline.extract;
             matches!(&extract.query, ExtractQuery::Sql(sql)
-                if sql.contains("{{watermark_column}}") || sql.contains("{{deleted_column}}"))
+                if sql.contains("{{version_column}}") || sql.contains("{{deleted_column}}"))
         });
         assert!(
             markers_preserved,
@@ -1671,8 +1674,14 @@ mod tests {
             };
 
             assert!(
+                !sql.contains(siphon_version_column()),
+                "{} hardcodes the version column {}; use {{{{version_column}}}} instead",
+                pipeline.name,
+                siphon_version_column()
+            );
+            assert!(
                 !sql.contains(siphon_watermark_column()),
-                "{} hardcodes the watermark column {}; use {{{{watermark_column}}}} instead",
+                "{} uses the watermark column {}; runtime window predicates own it",
                 pipeline.name,
                 siphon_watermark_column()
             );
@@ -2521,7 +2530,8 @@ properties:
         let node_def: NodeYaml = orbit_utils::yaml::from_str(yaml).expect("valid YAML");
         let default_sort_key = vec!["traversal_path".to_string(), "id".to_string()];
         let etl_settings = EtlSettings {
-            watermark: "_siphon_replicated_at".to_string(),
+            version: "_siphon_replicated_at".to_string(),
+            watermark: "_siphon_watermark".to_string(),
             deleted: constants::siphon_deleted_column().to_string(),
             order_by: vec!["traversal_path".to_string(), "id".to_string()],
         };
@@ -2561,7 +2571,8 @@ properties:
         let node_def: NodeYaml = orbit_utils::yaml::from_str(yaml).expect("valid YAML");
         let default_sort_key = vec!["traversal_path".to_string(), "id".to_string()];
         let etl_settings = EtlSettings {
-            watermark: "_siphon_replicated_at".to_string(),
+            version: "_siphon_replicated_at".to_string(),
+            watermark: "_siphon_watermark".to_string(),
             deleted: constants::siphon_deleted_column().to_string(),
             order_by: vec!["traversal_path".to_string(), "id".to_string()],
         };
@@ -2613,7 +2624,8 @@ settings:
         - {name: target_id, type: int64}
         - {name: target_kind, type: string}
   etl:
-    default_watermark: _siphon_replicated_at
+    default_version: _siphon_replicated_at
+    default_watermark: _siphon_watermark
     default_deleted: _siphon_deleted
     default_etl_order_by: [traversal_path, id]
 domains:
@@ -2785,7 +2797,8 @@ properties:
         let node_def: NodeYaml = orbit_utils::yaml::from_str(yaml).expect("valid YAML");
         let default_sort_key = vec!["traversal_path".to_string(), "id".to_string()];
         let etl_settings = EtlSettings {
-            watermark: "_siphon_replicated_at".to_string(),
+            version: "_siphon_replicated_at".to_string(),
+            watermark: "_siphon_watermark".to_string(),
             deleted: constants::siphon_deleted_column().to_string(),
             order_by: vec!["traversal_path".to_string(), "id".to_string()],
         };
@@ -2832,7 +2845,8 @@ properties:
         let node_def: NodeYaml = orbit_utils::yaml::from_str(yaml).expect("valid YAML");
         let default_sort_key = vec!["traversal_path".to_string(), "id".to_string()];
         let etl_settings = EtlSettings {
-            watermark: "_siphon_replicated_at".to_string(),
+            version: "_siphon_replicated_at".to_string(),
+            watermark: "_siphon_watermark".to_string(),
             deleted: constants::siphon_deleted_column().to_string(),
             order_by: vec!["traversal_path".to_string(), "id".to_string()],
         };
