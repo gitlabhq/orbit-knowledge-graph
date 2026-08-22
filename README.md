@@ -38,7 +38,7 @@ Most contributions don't require Rust experience: ontology YAML, docs, cookbook 
 
 Orbit Local runs on your machine. The `orbit` CLI parses a local repository, extracts definitions and cross-file references, and writes a code-only call graph to a single DuckDB file. No GitLab account is required at query time. The install step downloads a release artifact over HTTPS.
 
-What it indexes: directories, files, function and class definitions, and cross-file import references. It indexes the same 11+ languages as Orbit Remote. Multiple repositories share one database at `~/.orbit/graph.duckdb`, each scoped by repository and branch.
+What it indexes: directories, files, function and class definitions, and cross-file import references. It indexes the same 13 languages as Orbit Remote. Multiple repositories share one database at `~/.orbit/graph.duckdb`, each scoped by repository and branch.
 
 | Access method | Use for |
 |---|---|
@@ -52,7 +52,7 @@ Start with [Orbit Local getting started](docs/source/local/getting-started.md).
 
 Enable Orbit on a top-level GitLab.com group. Orbit indexes your SDLC and source code into a managed property graph.
 
-What it indexes: SDLC objects (including groups, projects, users, notes, merge requests, pipelines, jobs, work items, milestones, labels, vulnerabilities, findings) and source code on the default branch across 11+ languages including Ruby, Java, Kotlin, Python, TypeScript, JavaScript, Rust, Go, C#, C, C++, PHP, Bash/Shell, and Elixir.
+What it indexes: SDLC objects (including groups, projects, users, notes, merge requests, pipelines, jobs, work items, milestones, labels, vulnerabilities, findings) and source code on the default branch across 13 languages including Ruby, Java, Kotlin, Python, TypeScript, JavaScript, Rust, Go, C#, C, C++, PHP, and Bash/Shell.
 
 | Access method | Use for |
 |---|---|
