@@ -72,6 +72,14 @@ struct FailedChain {
     pending_import_edges: Vec<EdgeTriple>,
 }
 
+fn failed_chain_bytes(c: &FailedChain) -> usize {
+    use std::mem::size_of;
+    c.name.capacity()
+        + c.chain.capacity() * size_of::<crate::v2::types::ExpressionStep>()
+        + c.reaching.len() * size_of::<crate::v2::types::ssa::ParseValue>()
+        + c.pending_import_edges.capacity() * size_of::<EdgeTriple>()
+}
+
 fn dedupe_edge_triples(edges: &mut Vec<EdgeTriple>) {
     let mut seen = FxHashSet::default();
     edges.retain(|(source, target, edge)| {
@@ -385,6 +393,7 @@ impl BatchTx<'_> {
     pub fn send_graph(&self, mut graph: CodeGraph) {
         graph.release_resolution_state();
         self.stats.record_graph(&graph);
+        let t_convert = std::time::Instant::now();
         let batches = match self.converter.convert(graph) {
             Ok(batches) => batches,
             Err(error) => {
@@ -397,6 +406,19 @@ impl BatchTx<'_> {
                 return;
             }
         };
+        if crate::v2::memprobe::enabled() {
+            for (table, batch) in &batches {
+                tracing::debug!(
+                    target: "codegraph_mem",
+                    stage = "converted",
+                    table,
+                    rows = batch.num_rows(),
+                    bytes_arrow = batch.get_array_memory_size(),
+                    convert_ms = t_convert.elapsed().as_millis() as u64,
+                    "arrow batch"
+                );
+            }
+        }
         for (table, batch) in batches {
             if let Err(error) = (self.on_batch)(&table, batch) {
                 self.errors.lock().unwrap().push(
@@ -433,6 +455,8 @@ fn write_graph_direct(
 ) {
     graph.release_resolution_state();
     stats.record_graph(&graph);
+    crate::v2::memprobe::log_graph("structural", "before_convert", &graph);
+    let t_convert = std::time::Instant::now();
     let batches = match converter.convert(graph) {
         Ok(batches) => batches,
         Err(error) => {
@@ -445,6 +469,20 @@ fn write_graph_direct(
             return;
         }
     };
+    if crate::v2::memprobe::enabled() {
+        for (table, batch) in &batches {
+            tracing::debug!(
+                target: "codegraph_mem",
+                stage = "converted",
+                family = "structural",
+                table,
+                rows = batch.num_rows(),
+                bytes_arrow = batch.get_array_memory_size(),
+                convert_ms = t_convert.elapsed().as_millis() as u64,
+                "arrow batch"
+            );
+        }
+    }
     for (table, batch) in batches {
         if let Err(error) = on_batch(&table, batch) {
             errors.lock().unwrap().push(
@@ -709,6 +747,25 @@ impl Pipeline {
             "Found {total_files} files, {parsable_files} parseable ({})",
             lang_summary.join(", ")
         ));
+
+        if crate::v2::memprobe::enabled() {
+            tracing::debug!(
+                target: "codegraph_mem",
+                stage = "inventory",
+                total_files,
+                parsable_files,
+                total_bytes,
+                families = files_by_family.len(),
+                bytes_inventory = file_inventory.len() * std::mem::size_of::<FileInventoryEntry>()
+                    + file_inventory.iter().map(|e| e.path.capacity()).sum::<usize>(),
+                bytes_family_inputs = files_by_family
+                    .values()
+                    .map(|f| f.capacity() * std::mem::size_of::<FamilyFileInput>()
+                        + f.iter().map(|i| i.path.capacity()).sum::<usize>())
+                    .sum::<usize>(),
+                "inventory"
+            );
+        }
 
         let ctx = Arc::new(PipelineContext {
             config,
@@ -1296,6 +1353,18 @@ impl FamilyPipeline {
             file_size: u64,
         }
 
+        if crate::v2::memprobe::enabled() {
+            crate::v2::memprobe::parse_barrier_bytes(parsed.iter().flatten().map(|pf| {
+                (
+                    crate::v2::memprobe::parse_result_bytes(&pf.result),
+                    pf.refs.heap_bytes() + pf.ext.capacity(),
+                    pf.result.definitions.len(),
+                    pf.result.imports.len(),
+                )
+            }))
+            .log(&format!("{primary_lang}"), file_count, parse_ms);
+        }
+
         let mut graph = CodeGraph::new_with_root(root_path.to_string()).with_rules(primary_rules);
         if ctx.config.emit_file_inventory_graph {
             graph.mark_parsed_only();
@@ -1352,6 +1421,29 @@ impl FamilyPipeline {
         graph.finalize(tracer);
         graph.drop_construction_indexes();
         let graph_build_ms = t0.elapsed().as_secs_f64() * 1000.0 - parse_ms;
+
+        if crate::v2::memprobe::enabled() {
+            let refpack_bytes: usize = files_with_refs
+                .iter()
+                .flatten()
+                .map(|f| {
+                    f.refs.heap_bytes()
+                        + f.info.def_nodes.capacity()
+                            * std::mem::size_of::<petgraph::graph::NodeIndex>()
+                        + f.info.import_nodes.capacity()
+                            * std::mem::size_of::<petgraph::graph::NodeIndex>()
+                })
+                .sum();
+            tracing::debug!(
+                target: "codegraph_mem",
+                family = %primary_lang,
+                stage = "graph_built",
+                graph_build_ms,
+                bytes_files_with_refs = refpack_bytes,
+                "carried refs"
+            );
+            crate::v2::memprobe::log_graph(&format!("{primary_lang}"), "graph_built", &graph);
+        }
 
         for fwr in files_with_refs.iter_mut().flatten() {
             if fwr.unresolved_aliases.is_empty() {
@@ -1507,6 +1599,30 @@ impl FamilyPipeline {
             t2.elapsed()
         ));
 
+        if crate::v2::memprobe::enabled() {
+            let edge_bytes: usize = resolve_results
+                .iter()
+                .map(|(edges, ..)| edges.capacity() * std::mem::size_of::<EdgeTriple>())
+                .sum();
+            let chain_bytes: usize = resolve_results
+                .iter()
+                .map(|(_, _, _, chains, _)| {
+                    chains.capacity() * std::mem::size_of::<FailedChain>()
+                        + chains.iter().map(failed_chain_bytes).sum::<usize>()
+                })
+                .sum();
+            tracing::debug!(
+                target: "codegraph_mem",
+                family = %primary_lang,
+                stage = "resolve_barrier",
+                edges_pending = total_edges.load(std::sync::atomic::Ordering::Relaxed),
+                bytes_pending_edges = edge_bytes,
+                bytes_failed_chains = chain_bytes,
+                bytes_total = edge_bytes + chain_bytes,
+                "resolve barrier"
+            );
+        }
+
         let mut all_inferred: Vec<InferredReturns> = Vec::new();
         let mut all_failed: Vec<(FileInfo, Language, Vec<FailedChain>)> = Vec::new();
 
@@ -1661,6 +1777,7 @@ impl FamilyPipeline {
             "family pipeline complete"
         );
 
+        crate::v2::memprobe::log_graph(&format!("{primary_lang}"), "before_convert", &graph);
         btx.send_graph(graph);
         Ok(())
     }

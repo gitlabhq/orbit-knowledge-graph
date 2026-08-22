@@ -186,8 +186,21 @@ impl LanguagePipeline for RustPipeline {
             }
         }
         let parsed = output.parsed;
+        if crate::v2::memprobe::enabled() {
+            tracing::debug!(
+                target: "codegraph_mem",
+                family = "rust",
+                stage = "parse_barrier",
+                file_count = files.len(),
+                files_held = parsed.len(),
+                edge_candidates = parsed.iter().map(|f| f.edge_candidates.len()).sum::<usize>(),
+                parse_ms,
+                "parse barrier"
+            );
+        }
         let mut graph = build_graph(root_path, &parsed);
         let graph_build_ms = t0.elapsed().as_secs_f64() * 1000.0 - parse_ms;
+        crate::v2::memprobe::log_graph("rust", "graph_built", &graph);
         if ctx.config.emit_file_inventory_graph {
             graph.mark_parsed_only();
         }
@@ -264,6 +277,7 @@ impl LanguagePipeline for RustPipeline {
             total_ms,
         });
 
+        crate::v2::memprobe::log_graph("rust", "before_convert", &graph);
         btx.send_graph(graph);
 
         if let Some((handle, join)) = sentinel_pair {

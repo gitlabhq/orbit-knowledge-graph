@@ -6,6 +6,7 @@ resolver = "3"
 members = [
   "crates/circuit-breaker",
   "crates/code-graph",
+  "crates/code-index-profiler",
   "crates/code-graph/treesitter-visit",
   "crates/clickhouse-client",
   "crates/indexer",
@@ -185,6 +186,13 @@ reqwest = { version = "0.13", default-features = false, features = ["json", "que
 rustls = { version = "0.23.36", default-features = false, features = ["aws_lc_rs"] }
 health-check = { path = "crates/health-check" }
 gitlab-client = { path = "crates/gitlab-client" }
+
+# Release codegen plus line tables, so dhat and Instruments can symbolicate the
+# code-indexing hot paths without changing what `--release` ships.
+[profile.memprofile]
+inherits = "release"
+debug = 1
+strip = false
 
 [profile.fuzz]
 inherits = "dev"

@@ -4,6 +4,7 @@ pub mod error;
 pub mod inventory;
 pub mod langs;
 pub mod linker;
+pub mod memprobe;
 pub mod pipeline;
 pub mod refpack;
 pub mod registry;

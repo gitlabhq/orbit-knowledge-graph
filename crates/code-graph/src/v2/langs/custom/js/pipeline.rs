@@ -38,6 +38,19 @@ impl LanguagePipeline for JsPipeline {
         let (analyzed_files, errors) = analyze_files(files, root_path, sentinel_handle);
         let parse_ms = t0.elapsed().as_secs_f64() * 1000.0;
 
+        if crate::v2::memprobe::enabled() {
+            tracing::debug!(
+                target: "codegraph_mem",
+                family = "java_script",
+                stage = "parse_barrier",
+                file_count = files.len(),
+                files_held = analyzed_files.len(),
+                error_count = errors.len(),
+                parse_ms,
+                "parse barrier"
+            );
+        }
+
         // Route per-file outcomes to the typed collections regardless of
         // whether at least one file analyzed; the orchestrator no longer
         // double-counts skipped/errored at the language boundary.
@@ -85,6 +98,17 @@ impl LanguagePipeline for JsPipeline {
 
         let (mut graph, modules) = builder.into_parts();
         let graph_build_ms = t0.elapsed().as_secs_f64() * 1000.0 - parse_ms;
+        if crate::v2::memprobe::enabled() {
+            tracing::debug!(
+                target: "codegraph_mem",
+                family = "java_script",
+                stage = "graph_built",
+                graph_build_ms,
+                files_held = resolved_files.len(),
+                "carried analyses"
+            );
+            crate::v2::memprobe::log_graph("java_script", "graph_built", &graph);
+        }
         if ctx.config.emit_file_inventory_graph {
             graph.mark_parsed_only();
         }
@@ -120,6 +144,7 @@ impl LanguagePipeline for JsPipeline {
             total_ms,
         });
 
+        crate::v2::memprobe::log_graph("java_script", "before_convert", &graph);
         btx.send_graph(graph);
 
         if let Some((handle, join)) = sentinel {

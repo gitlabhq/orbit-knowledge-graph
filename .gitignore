@@ -67,3 +67,4 @@ e2e/output.xml
 e2e/log.html
 e2e/report.html
 .claude/
+.memprofile/

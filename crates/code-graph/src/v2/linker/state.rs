@@ -104,6 +104,18 @@ impl<const N: usize> VerifiedMap<N> {
     pub fn len(&self) -> usize {
         self.inner.len()
     }
+
+    pub fn heap_bytes(&self) -> usize {
+        use std::mem::size_of;
+        crate::v2::memprobe::map_bytes(
+            self.inner.capacity(),
+            size_of::<StrId>() + size_of::<SmallVec<[NodeIndex; N]>>(),
+        ) + self
+            .inner
+            .values()
+            .map(crate::v2::memprobe::SpilledBytes::spilled_bytes)
+            .sum::<usize>()
+    }
 }
 
 impl<const N: usize> Default for VerifiedMap<N> {
@@ -160,6 +172,25 @@ impl NestedMap {
     pub fn is_empty(&self) -> bool {
         self.inner.is_empty()
     }
+
+    pub fn heap_bytes(&self) -> usize {
+        use std::mem::size_of;
+        let inner_entry = size_of::<StrId>() + size_of::<SmallVec<[NodeIndex; 8]>>();
+        crate::v2::memprobe::map_bytes(
+            self.inner.capacity(),
+            size_of::<StrId>() + size_of::<FxHashMap<StrId, SmallVec<[NodeIndex; 8]>>>(),
+        ) + self
+            .inner
+            .values()
+            .map(|inner| {
+                crate::v2::memprobe::map_bytes(inner.capacity(), inner_entry)
+                    + inner
+                        .values()
+                        .map(crate::v2::memprobe::SpilledBytes::spilled_bytes)
+                        .sum::<usize>()
+            })
+            .sum::<usize>()
+    }
 }
 
 impl Default for NestedMap {
@@ -208,6 +239,12 @@ impl DefinitionRangeIndex {
                 .min_by_key(|interval| interval.stop.saturating_sub(interval.start))
                 .map(|interval| interval.val)
         })
+    }
+}
+
+impl DefinitionRangeIndex {
+    pub fn heap_bytes(&self) -> usize {
+        self.lapper.intervals.capacity() * std::mem::size_of::<Interval<u64, NodeIndex>>()
     }
 }
 

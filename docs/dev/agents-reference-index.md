@@ -56,3 +56,7 @@ Canonical locations for files, schemas, configs, and tools in the knowledge-grap
 | Billing config + observer | `crates/orbit-billing/`, `crates/orbit-server/src/billing_adapter.rs` |
 | SOX billing authoring rules | `docs/dev/sox-billing-boundary.md` |
 | Query profiler CLI | `crates/query-engine/profiler/`, `mise query:profile` |
+| Code-indexing memory profiler | `crates/code-index-profiler/`, `mise memprofile:*`, `docs/dev/runbooks/code_indexing_memory_profiling.md` |
+| Code-indexing memory profile (2026-08) | `docs/dev/reports/2026-08-code-indexing-memory-profile.md` |
+| Code-indexing memory A/B and regression gate | `mise memprofile:ab`, `mise memprofile:regress` |
+| Code-graph structure memory probes | `crates/code-graph/src/v2/memprobe.rs` (`codegraph_mem` tracing target, DEBUG) |
