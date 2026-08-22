@@ -22,9 +22,13 @@ use std::collections::VecDeque;
 use super::state::{DefinitionRangeIndex, GraphDef, GraphImport, GraphIndexes, StrId, StringPool};
 
 #[derive(Debug, Clone)]
+/// Directory and File payloads are boxed because the enum is sized by its
+/// largest variant and petgraph stores it inline in one array. Unboxed,
+/// `CanonicalFile` makes every slot 96 bytes, including the definition and
+/// import nodes that outnumber files by more than 20 to 1 and need 24.
 pub enum GraphNode {
-    Directory(CanonicalDirectory),
-    File(CanonicalFile),
+    Directory(Box<CanonicalDirectory>),
+    File(Box<CanonicalFile>),
     Definition { file_path: Arc<str>, id: DefId },
     Import { file_path: Arc<str>, id: ImportId },
 }
@@ -47,14 +51,14 @@ impl GraphNode {
 
     pub fn as_directory(&self) -> Option<&CanonicalDirectory> {
         match self {
-            GraphNode::Directory(d) => Some(d),
+            GraphNode::Directory(d) => Some(d.as_ref()),
             _ => None,
         }
     }
 
     pub fn as_file(&self) -> Option<&CanonicalFile> {
         match self {
-            GraphNode::File(f) => Some(f),
+            GraphNode::File(f) => Some(f.as_ref()),
             _ => None,
         }
     }
@@ -246,6 +250,33 @@ impl CodeGraph {
         self.strings.get(id)
     }
 
+    /// Pre-size every growable container from counts the caller already knows,
+    /// so the construction loop never pays amortized doubling. Measured on
+    /// elasticsearch, doubling left the node array, `defs` and `imports` each
+    /// carrying 40-80% capacity slop that survives into the Arrow conversion,
+    /// which is where the peak is.
+    pub fn reserve_for(&mut self, files: usize, definitions: usize, imports: usize) {
+        self.graph.reserve_exact_nodes(
+            (files + definitions + imports).saturating_sub(self.graph.node_count()),
+        );
+        self.defs.reserve_exact(definitions);
+        self.imports.reserve_exact(imports);
+    }
+
+    /// Release everything only the resolver needed, right before the graph is
+    /// handed to a [`GraphConverter`]. The converter holds the graph alive for
+    /// the whole Arrow build, which is where the peak is, so freeing the
+    /// resolution indexes and the string pool's dedup map here is worth more
+    /// than freeing them a few milliseconds later on drop.
+    ///
+    /// After this the pool can no longer dedupe: a later `alloc` of an
+    /// already-interned string appends a duplicate and `find` misses it. Only
+    /// call it once resolution is complete.
+    pub fn release_resolution_state(&mut self) {
+        self.indexes.drop_resolution_indexes();
+        self.strings.shrink_to_arena();
+    }
+
     pub fn add_file(
         &mut self,
         path: &str,
@@ -308,14 +339,14 @@ impl CodeGraph {
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_default();
 
-        let file_node = self.graph.add_node(GraphNode::File(CanonicalFile {
+        let file_node = self.graph.add_node(GraphNode::File(Box::new(CanonicalFile {
             path: relative_path.clone(),
             name: file_name,
             extension: extension.to_string(),
             language,
             size: file_size,
             reason,
-        }));
+        })));
         if let Some(fi) = &mut self.indexes.file_index {
             fi.insert(relative_path.clone(), file_node);
         }
@@ -520,10 +551,10 @@ impl CodeGraph {
                     .unwrap_or_else(|| dir_path.clone());
                 let idx = self
                     .graph
-                    .add_node(GraphNode::Directory(CanonicalDirectory {
+                    .add_node(GraphNode::Directory(Box::new(CanonicalDirectory {
                         path: dir_path.clone(),
                         name,
-                    }));
+                    })));
                 dir_index.insert(dir_path.clone(), idx);
 
                 if let Some(parent_dir) = Path::new(dir_path).parent() {

@@ -256,6 +256,18 @@ impl GraphIndexes {
         self.dir_index = None;
         self.file_index = None;
     }
+
+    /// Free every index resolution needed. The Arrow converter reads only
+    /// `defs`, `imports`, `strings` and the petgraph arrays, and it holds the
+    /// graph for the whole conversion, so these would otherwise sit under the
+    /// run's peak doing nothing.
+    pub fn drop_resolution_indexes(&mut self) {
+        self.by_fqn = VerifiedMap::new();
+        self.by_name = VerifiedMap::new();
+        self.nested = NestedMap::new();
+        self.ancestors = FxHashMap::default();
+        self.definition_ranges = FxHashMap::default();
+    }
 }
 
 impl Default for GraphIndexes {

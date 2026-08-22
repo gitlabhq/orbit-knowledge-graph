@@ -84,13 +84,19 @@ fn convert_repository_graph(
     envelope: &IndexerEnvelope,
     specs: &ConverterSpecs,
 ) -> Result<ConvertedGraphData, ArrowError> {
+    let branch = convert_branch_row(envelope, &specs.branch)?;
+    let directories = convert_directories(graph, ids, envelope, &specs.directory)?;
+    let files = convert_files(graph, ids, envelope, &specs.file)?;
+    let definitions = convert_definitions(graph, ids, envelope, &specs.definition)?;
+    let imported_symbols = convert_imports(graph, ids, envelope, &specs.imported_symbol)?;
+    let edges = convert_repository_edges(graph, ids, envelope, specs)?;
     Ok(ConvertedGraphData {
-        branch: convert_branch_row(envelope, &specs.branch)?,
-        directories: convert_directories(graph, ids, envelope, &specs.directory)?,
-        files: convert_files(graph, ids, envelope, &specs.file)?,
-        definitions: convert_definitions(graph, ids, envelope, &specs.definition)?,
-        imported_symbols: convert_imports(graph, ids, envelope, &specs.imported_symbol)?,
-        edges: convert_repository_edges(graph, ids, envelope, specs)?,
+        branch,
+        directories,
+        files,
+        definitions,
+        imported_symbols,
+        edges,
     })
 }
 
@@ -100,13 +106,16 @@ fn convert_semantic_graph(
     envelope: &IndexerEnvelope,
     specs: &ConverterSpecs,
 ) -> Result<ConvertedGraphData, ArrowError> {
+    let definitions = convert_definitions(graph, ids, envelope, &specs.definition)?;
+    let imported_symbols = convert_imports(graph, ids, envelope, &specs.imported_symbol)?;
+    let edges = convert_semantic_edges(graph, ids, envelope, specs)?;
     Ok(ConvertedGraphData {
         branch: convert_empty_branch(&specs.branch)?,
         directories: convert_empty_directories(envelope, &specs.directory)?,
         files: convert_empty_files(envelope, &specs.file)?,
-        definitions: convert_definitions(graph, ids, envelope, &specs.definition)?,
-        imported_symbols: convert_imports(graph, ids, envelope, &specs.imported_symbol)?,
-        edges: convert_semantic_edges(graph, ids, envelope, specs)?,
+        definitions,
+        imported_symbols,
+        edges,
     })
 }
 
@@ -129,13 +138,7 @@ fn entity_specs(ontology: &Ontology, entity_name: &str) -> Vec<ColumnSpec> {
         .filter(|f| !f.is_virtual())
         .map(|f| ColumnSpec {
             name: f.name.clone(),
-            col_type: match f.data_type {
-                OntDataType::Int => ColumnType::Int,
-                OntDataType::Bool => ColumnType::Bool,
-                OntDataType::DateTime => ColumnType::TimestampMicros,
-                _ if dict_fields.contains(&f.name) => ColumnType::DictStr,
-                _ => ColumnType::Str,
-            },
+            col_type: column_type_for(&f.name, f.data_type, &dict_fields),
             nullable: f.nullable,
         })
         .collect();
@@ -150,6 +153,30 @@ fn entity_specs(ontology: &Ontology, entity_name: &str) -> Vec<ColumnSpec> {
         nullable: false,
     });
     specs
+}
+
+/// Columns the [`IndexerEnvelope`] fills with the same value for every row in a
+/// batch. Their ClickHouse type is unchanged; encoding them as a dictionary on
+/// the wire replaces one copy of the string per row with one `i32` key, which on
+/// a multi-million-row edge batch is the difference between tens of MiB and a
+/// few. Whether the indexer writes a constant is an indexer-side fact, not a
+/// graph-shape fact, so it does not belong in the ontology.
+const ENVELOPE_CONSTANT_COLUMNS: [&str; 3] = ["traversal_path", "branch", "commit_sha"];
+
+fn column_type_for(
+    name: &str,
+    data_type: OntDataType,
+    dict_fields: &HashSet<String>,
+) -> ColumnType {
+    match data_type {
+        OntDataType::Int => ColumnType::Int,
+        OntDataType::Bool => ColumnType::Bool,
+        OntDataType::DateTime => ColumnType::TimestampMicros,
+        _ if dict_fields.contains(name) || ENVELOPE_CONSTANT_COLUMNS.contains(&name) => {
+            ColumnType::DictStr
+        }
+        _ => ColumnType::Str,
+    }
 }
 
 fn edge_specs(ontology: &Ontology) -> Vec<ColumnSpec> {
@@ -173,13 +200,7 @@ fn edge_specs(ontology: &Ontology) -> Vec<ColumnSpec> {
                 if seen_cols.insert(c.name.clone()) {
                     specs.push(ColumnSpec {
                         name: c.name.clone(),
-                        col_type: match c.data_type {
-                            OntDataType::Int => ColumnType::Int,
-                            OntDataType::Bool => ColumnType::Bool,
-                            OntDataType::DateTime => ColumnType::TimestampMicros,
-                            _ if dict_fields.contains(&c.name) => ColumnType::DictStr,
-                            _ => ColumnType::Str,
-                        },
+                        col_type: column_type_for(&c.name, c.data_type, &dict_fields),
                         nullable: false,
                     });
                 }
@@ -192,9 +213,13 @@ fn edge_specs(ontology: &Ontology) -> Vec<ColumnSpec> {
         if let Some(config) = ontology.edge_table_config(table_name) {
             for col in &config.storage.denormalized_columns {
                 if seen.insert(col.name.clone()) {
+                    // Denormalized tag lists repeat a handful of values across
+                    // every edge row, and on a large repository the two of them
+                    // are over half the edge batch. The destination column stays
+                    // `Array(String)`; only the wire encoding changes.
                     specs.push(ColumnSpec {
                         name: col.name.clone(),
-                        col_type: ColumnType::StrList,
+                        col_type: ColumnType::DictStrList,
                         nullable: false,
                     });
                 }
@@ -668,40 +693,39 @@ impl code_graph::v2::GraphConverter for IndexerConverter {
         ];
 
         if data.edges.num_rows() > 0 {
-            use arrow::array::AsArray;
             use std::collections::HashMap;
 
+            // Cloning an `ArrayRef` is an `Arc` bump, and it detaches the
+            // routing borrow from `data.edges` so the single-table path can
+            // move the batch out instead of copying it.
             let rel_col = data
                 .edges
                 .column_by_name("relationship_kind")
-                .ok_or_else(|| SinkError("edges batch missing relationship_kind column".into()))?;
-            // The column may be dictionary-encoded (DictStr) or plain Utf8.
-            // Cast to StringArray for uniform access.
-            let rel_col_str = arrow::compute::cast(rel_col, &arrow::datatypes::DataType::Utf8)
-                .map_err(|e| SinkError(format!("cast relationship_kind to string: {e}")))?;
-            let rel_array = rel_col_str.as_string::<i32>();
-
-            let mut table_rows: HashMap<&str, Vec<u32>> = HashMap::new();
-            let mut table_of: HashMap<&str, &str> = HashMap::new();
-            for i in 0..data.edges.num_rows() {
-                let rel_kind = rel_array.value(i);
-                let table = *table_of
-                    .entry(rel_kind)
-                    .or_insert_with(|| self.table_names.edge_table_for(rel_kind));
-                table_rows.entry(table).or_default().push(i as u32);
-            }
+                .ok_or_else(|| SinkError("edges batch missing relationship_kind column".into()))?
+                .clone();
+            let routing = EdgeRouting::resolve(&rel_col, &self.table_names)?;
 
             // Columns that only exist on gl_code_edge. Sub-batches going
             // to other edge tables (gl_edge) must have them stripped.
             let code_only_cols: &[&str] = &["project_id", "branch"];
 
-            if table_rows.len() == 1 {
-                let table = *table_rows.keys().next().unwrap();
-                if table == self.table_names.default_edge_table() {
-                    let batch = drop_columns(&data.edges, code_only_cols);
-                    result.push((table.to_string(), batch));
-                    return Ok(result);
-                }
+            // One destination means the batch already is that table's batch.
+            // `take` would copy all of it while the original is still live, and
+            // on a code repository every semantic edge kind routes to the same
+            // table, so that copy set the whole run's peak.
+            if let Some(table) = routing.single_table() {
+                let batch = if table.contains("code_edge") {
+                    data.edges
+                } else {
+                    drop_columns(&data.edges, code_only_cols)
+                };
+                result.push((table.to_string(), batch));
+                return Ok(result);
+            }
+
+            let mut table_rows: HashMap<&str, Vec<u32>> = HashMap::new();
+            for (i, table) in routing.tables_by_row().enumerate() {
+                table_rows.entry(table).or_default().push(i as u32);
             }
 
             for (table, indices) in table_rows {
@@ -716,6 +740,89 @@ impl code_graph::v2::GraphConverter for IndexerConverter {
         }
 
         Ok(result)
+    }
+}
+
+/// Destination table per edge row, resolved without materialising a string per
+/// row. `relationship_kind` is `LowCardinality(String)` in every edge table, so
+/// the batch carries a dictionary of a handful of kinds; mapping the dictionary
+/// values once and indexing by key avoids both the Utf8 cast of the whole column
+/// and the per-row hash lookup.
+enum EdgeRouting<'a> {
+    Dictionary {
+        keys: &'a [i32],
+        by_key: Vec<&'a str>,
+    },
+    /// The column was not dictionary-encoded after all.
+    PerRow(Vec<&'a str>),
+}
+
+impl<'a> EdgeRouting<'a> {
+    fn resolve(
+        rel_col: &'a arrow::array::ArrayRef,
+        table_names: &'a super::config::CodeTableNames,
+    ) -> Result<Self, SinkError> {
+        use arrow::array::{Array, AsArray};
+        use arrow::datatypes::Int32Type;
+
+        if let Some(dict) = rel_col.as_dictionary_opt::<Int32Type>() {
+            let values = dict.values().as_string_opt::<i32>().ok_or_else(|| {
+                SinkError("relationship_kind dictionary values are not strings".into())
+            })?;
+            let by_key = (0..values.len())
+                .map(|i| table_names.edge_table_for(values.value(i)))
+                .collect();
+            return Ok(Self::Dictionary {
+                keys: dict.keys().values(),
+                by_key,
+            });
+        }
+
+        let plain = rel_col.as_string_opt::<i32>().ok_or_else(|| {
+            SinkError("relationship_kind is neither a dictionary nor a string column".into())
+        })?;
+        Ok(Self::PerRow(
+            (0..plain.len())
+                .map(|i| table_names.edge_table_for(plain.value(i)))
+                .collect(),
+        ))
+    }
+
+    /// `Some` when every row routes to the same table.
+    fn single_table(&self) -> Option<&'a str> {
+        let mut tables = match self {
+            Self::Dictionary { keys, by_key } => {
+                // A dictionary can carry values no row references, so the
+                // distinct set has to come from the keys actually present.
+                let mut seen: Vec<&str> = Vec::new();
+                for &k in *keys {
+                    let table = by_key[k as usize];
+                    if !seen.contains(&table) {
+                        seen.push(table);
+                    }
+                }
+                seen
+            }
+            Self::PerRow(tables) => {
+                let mut seen: Vec<&str> = Vec::new();
+                for &table in tables {
+                    if !seen.contains(&table) {
+                        seen.push(table);
+                    }
+                }
+                seen
+            }
+        };
+        (tables.len() == 1).then(|| tables.pop().expect("length checked"))
+    }
+
+    fn tables_by_row(&self) -> Box<dyn Iterator<Item = &'a str> + '_> {
+        match self {
+            Self::Dictionary { keys, by_key } => {
+                Box::new(keys.iter().map(move |&k| by_key[k as usize]))
+            }
+            Self::PerRow(tables) => Box::new(tables.iter().copied()),
+        }
     }
 }
 

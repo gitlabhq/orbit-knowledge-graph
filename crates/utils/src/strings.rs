@@ -79,7 +79,10 @@ impl StringPool {
         self.index.is_empty()
     }
 
-    /// Free the dedup index for a write-once pool; `get` still works, a later `alloc` rebuilds it.
+    /// Free the dedup index for a write-once pool. `get` still works, but the
+    /// pool stops deduplicating: a later `alloc` of an already-interned string
+    /// appends a second copy and `find` no longer sees the older ones. Only
+    /// call this once nothing will intern into the pool again.
     pub fn shrink_to_arena(&mut self) {
         self.intern_map = FxHashMap::default();
         self.buf.shrink_to_fit();

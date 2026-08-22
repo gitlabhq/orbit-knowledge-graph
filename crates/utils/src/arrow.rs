@@ -291,6 +291,10 @@ pub enum ColumnType {
     TimestampMicros,
     /// `Array(String)` — variable-length list of strings.
     StrList,
+    /// `Array(String)` carried on the wire as a list of dictionary keys. Use it
+    /// when the same handful of values repeat across millions of rows; the
+    /// destination column type is unchanged.
+    DictStrList,
 }
 
 #[derive(Debug, Clone)]
@@ -310,6 +314,12 @@ enum Col {
     Bool(BooleanBuilder, bool),
     Timestamp(TimestampMicrosecondBuilder, bool),
     StrList(arrow::array::ListBuilder<StringBuilder>, bool),
+    DictStrList(
+        arrow::array::ListBuilder<
+            arrow::array::StringDictionaryBuilder<arrow::datatypes::Int32Type>,
+        >,
+        bool,
+    ),
 }
 
 impl std::fmt::Debug for Col {
@@ -327,6 +337,7 @@ impl Col {
             Self::Bool(b, _) => b.len(),
             Self::Timestamp(b, _) => b.len(),
             Self::StrList(b, _) => b.len(),
+            Self::DictStrList(b, _) => b.len(),
         }
     }
 
@@ -338,6 +349,7 @@ impl Col {
             Self::Bool(..) => "Bool",
             Self::Timestamp(..) => "Timestamp",
             Self::StrList(..) => "StrList",
+            Self::DictStrList(..) => "DictStrList",
         }
     }
 
@@ -357,6 +369,10 @@ impl Col {
                 Arc::new(b.finish().with_timezone("UTC")),
             ),
             Self::StrList(mut b, nullable) => {
+                let arr = b.finish();
+                (arr.data_type().clone(), nullable, Arc::new(arr))
+            }
+            Self::DictStrList(mut b, nullable) => {
                 let arr = b.finish();
                 (arr.data_type().clone(), nullable, Arc::new(arr))
             }
@@ -465,6 +481,14 @@ impl ColRef<'_> {
                 b.append(true);
                 Ok(())
             }
+            Col::DictStrList(b, _) => {
+                let vals = b.values();
+                for v in values {
+                    vals.append_value(v);
+                }
+                b.append(true);
+                Ok(())
+            }
             other => Err(batch_err(format!(
                 "push_str_list on {} column '{}'",
                 other.kind(),
@@ -527,6 +551,10 @@ pub struct BatchBuilder {
     index: FxHashMap<String, usize>,
 }
 
+/// Distinct values a `LowCardinality` column is expected to hold before its
+/// dictionary has to grow.
+const DICT_VALUES_HINT: usize = 64;
+
 impl BatchBuilder {
     pub fn new(specs: &[ColumnSpec], cap: usize) -> BatchResult<Self> {
         let mut names = Vec::with_capacity(specs.len());
@@ -543,8 +571,18 @@ impl BatchBuilder {
                 ColumnType::Str => {
                     Col::Str(StringBuilder::with_capacity(cap, cap * 8), spec.nullable)
                 }
+                // The keys buffer is one i32 per row, so it must be sized like
+                // any other fixed-width column; left at zero it doubles its way
+                // up and keeps the last doubling as slop. `DICT_VALUES_HINT` is
+                // a starting size for the distinct values, which grow on their
+                // own if a column turns out to be less low-cardinality than the
+                // ontology says.
                 ColumnType::DictStr => Col::DictStr(
-                    arrow::array::StringDictionaryBuilder::<arrow::datatypes::Int32Type>::new(),
+                    arrow::array::StringDictionaryBuilder::<arrow::datatypes::Int32Type>::with_capacity(
+                        cap,
+                        DICT_VALUES_HINT,
+                        DICT_VALUES_HINT * 16,
+                    ),
                     spec.nullable,
                 ),
                 ColumnType::Bool => Col::Bool(BooleanBuilder::with_capacity(cap), spec.nullable),
@@ -554,6 +592,17 @@ impl BatchBuilder {
                 ),
                 ColumnType::StrList => Col::StrList(
                     arrow::array::ListBuilder::new(StringBuilder::with_capacity(cap, cap * 8)),
+                    spec.nullable,
+                ),
+                ColumnType::DictStrList => Col::DictStrList(
+                    arrow::array::ListBuilder::with_capacity(
+                        arrow::array::StringDictionaryBuilder::<arrow::datatypes::Int32Type>::with_capacity(
+                            cap,
+                            DICT_VALUES_HINT,
+                            DICT_VALUES_HINT * 16,
+                        ),
+                        cap,
+                    ),
                     spec.nullable,
                 ),
             };
