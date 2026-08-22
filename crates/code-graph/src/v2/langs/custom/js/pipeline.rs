@@ -110,9 +110,18 @@ impl LanguagePipeline for JsPipeline {
             })
             .sum();
 
+        let file_count = resolved_files.len();
+        // `attach_resolution_edges` was the last reader of these four. They are
+        // per-file OXC analyses and the workspace manifest set, and the graph
+        // outlives them through the whole Arrow conversion.
+        drop(resolved_files);
+        drop(file_infos);
+        drop(modules);
+        drop(probe);
+
         ctx.record_language_timing(LanguageTimings {
             language: "java_script".to_string(),
-            file_count: resolved_files.len(),
+            file_count,
             total_bytes,
             parse_ms,
             graph_build_ms,

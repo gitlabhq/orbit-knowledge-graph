@@ -1,4 +1,5 @@
 use std::hash::{Hash, Hasher};
+use std::mem::size_of;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -209,6 +210,45 @@ pub struct CodeGraph {
     pub rules: Option<std::sync::Arc<super::rules::ResolutionRules>>,
 }
 
+/// Denormalized tags per node, stored as the distinct tag sets plus one index
+/// per node. Every value comes from a closed set the ontology declares, so a
+/// repository with a million nodes still has only a few hundred distinct sets;
+/// materialising one `Vec<String>` per node instead cost 116 MiB on
+/// elasticsearch and 237 MiB on the Linux kernel, alive across the whole edge
+/// batch build.
+pub struct NodeTags {
+    sets: Vec<Vec<String>>,
+    by_node: Vec<u32>,
+}
+
+impl NodeTags {
+    #[inline]
+    pub fn get(&self, idx: NodeIndex) -> &[String] {
+        &self.sets[self.by_node[idx.index()] as usize]
+    }
+
+    pub fn len(&self) -> usize {
+        self.by_node.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.by_node.is_empty()
+    }
+
+    pub fn heap_bytes(&self) -> usize {
+        self.by_node.capacity() * size_of::<u32>()
+            + self.sets.capacity() * size_of::<Vec<String>>()
+            + self
+                .sets
+                .iter()
+                .map(|t| {
+                    t.capacity() * size_of::<String>()
+                        + t.iter().map(String::capacity).sum::<usize>()
+                })
+                .sum::<usize>()
+    }
+}
+
 impl CodeGraph {
     pub fn new() -> Self {
         Self {
@@ -288,6 +328,18 @@ impl CodeGraph {
         // is 828,736 nodes in 1,640,364 slots and 4,416,851 edges in 8,739,266.
         self.graph.shrink_to_fit_nodes();
         self.graph.shrink_to_fit_edges();
+    }
+
+    /// Drop the definition and import payloads and the string arena. On a
+    /// `ParsedOnly` graph the edge rows read only endpoints, the edge weight and
+    /// the tag cache, so once the definition and import batches and that cache
+    /// exist, these three are dead for the rest of the conversion. They are 140
+    /// MiB on elasticsearch and 242 MiB on the Linux kernel, alive across the
+    /// peak.
+    pub fn release_node_payloads(&mut self) {
+        self.defs = Vec::new();
+        self.imports = Vec::new();
+        self.strings = orbit_utils::strings::StringPool::new();
     }
 
     pub fn add_file(
@@ -898,20 +950,21 @@ impl CodeGraph {
     /// Look up a named property on a graph node. Returns `None` when
     /// the property is unknown or its value is empty (e.g. extension-less
     /// files like Makefile).
-    fn node_property(&self, idx: NodeIndex, property: &str) -> Option<String> {
+    fn node_property(&self, idx: NodeIndex, property: &str) -> Option<std::borrow::Cow<'_, str>> {
+        use std::borrow::Cow;
         let value = match &self.graph[idx] {
             GraphNode::File(f) => match property {
-                "extension" => Some(f.extension.clone()),
-                "language" => Some(f.language_name().to_string()),
-                "reason" => Some(f.reason.to_string()),
+                "extension" => Some(Cow::Borrowed(f.extension.as_str())),
+                "language" => Some(Cow::Borrowed(f.language_name())),
+                "reason" => Some(Cow::Owned(f.reason.to_string())),
                 _ => None,
             },
             GraphNode::Definition { id, .. } => match property {
-                "definition_type" => Some(self.defs[id.0 as usize].definition_type.to_string()),
+                "definition_type" => Some(Cow::Borrowed(self.defs[id.0 as usize].definition_type)),
                 _ => None,
             },
             GraphNode::Import { id, .. } => match property {
-                "import_type" => Some(self.imports[id.0 as usize].import_type.to_string()),
+                "import_type" => Some(Cow::Borrowed(self.imports[id.0 as usize].import_type)),
                 _ => None,
             },
             GraphNode::Directory(_) => None,
@@ -926,28 +979,64 @@ impl CodeGraph {
     pub fn build_node_tags(
         &self,
         tag_properties: &std::collections::HashMap<String, Vec<(String, String)>>,
-    ) -> Vec<Vec<String>> {
-        self.graph
-            .node_indices()
-            .map(|idx| {
-                let node_kind = match &self.graph[idx] {
-                    GraphNode::File(_) => "File",
-                    GraphNode::Definition { .. } => "Definition",
-                    GraphNode::Import { .. } => "ImportedSymbol",
-                    GraphNode::Directory(_) => return Vec::new(),
-                };
-                let Some(props) = tag_properties.get(node_kind) else {
-                    return Vec::new();
-                };
-                props
-                    .iter()
-                    .filter_map(|(tag_key, prop_name)| {
-                        self.node_property(idx, prop_name)
-                            .map(|val| format!("{tag_key}:{val}"))
-                    })
-                    .collect()
-            })
-            .collect()
+    ) -> NodeTags {
+        type TagKey<'a> = (
+            &'static str,
+            smallvec::SmallVec<[(u32, std::borrow::Cow<'a, str>); 4]>,
+        );
+
+        let mut sets: Vec<Vec<String>> = Vec::new();
+        let mut seen: rustc_hash::FxHashMap<TagKey<'_>, u32> = rustc_hash::FxHashMap::default();
+        let mut by_node = Vec::with_capacity(self.graph.node_count());
+        let mut values: smallvec::SmallVec<[(u32, std::borrow::Cow<'_, str>); 4]> =
+            smallvec::SmallVec::new();
+
+        for idx in self.graph.node_indices() {
+            let node_kind = match &self.graph[idx] {
+                GraphNode::File(_) => Some("File"),
+                GraphNode::Definition { .. } => Some("Definition"),
+                GraphNode::Import { .. } => Some("ImportedSymbol"),
+                GraphNode::Directory(_) => None,
+            };
+            let props = node_kind.and_then(|kind| tag_properties.get(kind));
+
+            // The key is the raw property values, not the formatted tags: on a hit
+            // it costs one hash of a couple of borrowed strings, where formatting
+            // first would allocate a `String` per tag per node before discovering
+            // the set already exists.
+            values.clear();
+            if let Some(props) = props {
+                for (i, (_, prop_name)) in props.iter().enumerate() {
+                    if let Some(value) = self.node_property(idx, prop_name) {
+                        values.push((i as u32, value));
+                    }
+                }
+            }
+            // The node kind is part of the key because the same property index
+            // means a different tag name for each kind.
+            let key: TagKey<'_> = (node_kind.unwrap_or(""), values.clone());
+
+            let id = match seen.get(&key) {
+                Some(id) => *id,
+                None => {
+                    let id = sets.len() as u32;
+                    let tags = match props {
+                        Some(props) => key
+                            .1
+                            .iter()
+                            .map(|(i, value)| format!("{}:{value}", props[*i as usize].0))
+                            .collect(),
+                        None => Vec::new(),
+                    };
+                    sets.push(tags);
+                    seen.insert(key, id);
+                    id
+                }
+            };
+            by_node.push(id);
+        }
+
+        NodeTags { sets, by_node }
     }
 
     pub fn definitions(&self) -> impl Iterator<Item = (NodeIndex, &Arc<str>, &GraphDef)> {

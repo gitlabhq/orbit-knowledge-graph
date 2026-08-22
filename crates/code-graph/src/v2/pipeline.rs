@@ -1622,6 +1622,15 @@ impl FamilyPipeline {
         graph.indexes.definition_ranges.clear();
         graph.indexes.definition_ranges.shrink_to_fit();
 
+        // Phase 3 was the last reader of all four. The graph outlives this scope
+        // through the whole Arrow conversion, so holding them to the end of the
+        // function keeps them alive across the peak for nothing. On the Linux
+        // kernel the include index alone is tens of MiB.
+        drop(shared_include_index);
+        drop(shared_reexport_index);
+        drop(import_rewriters);
+        drop(all_inferred);
+
         if let Some((handle, join)) = sentinel {
             handle.shutdown();
             let _ = join.join();
