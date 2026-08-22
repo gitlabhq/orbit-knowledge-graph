@@ -77,10 +77,16 @@ cost more than they save. Capacity for the two arrays, in MiB:
 | linux edges | 152.0 | 96.0 | 76.0 |
 
 Growing by doubling from nothing lands on the next power of two, which is closer
-to the count than a reservation that gets doubled. Reverting the two `reserve`
-calls would recover 26 MiB on Elasticsearch and 94 MiB on linux; counting the
-directories into the node reservation and the phase-3 edges into the edge
-reservation recovers 124 and 127 MiB.
+to the count than a reservation that gets doubled.
+
+Deleting the reservations was tried first and is the wrong fix: it restores
+amortized doubling during graph build, which cost 3 to 6% of indexing time on
+three repositories and left gitlab 4% worse on memory. Keeping both reservations
+and shrinking the arrays to fit in `release_resolution_state`, which already runs
+immediately before conversion, gets exact capacity where it is paid for without
+touching the build. Measured against the merge request as it stood, that is
+-11.1% peak live heap on Elasticsearch and -8.6% on linux, with wall clock
+unchanged or slightly better.
 
 **The tag cache is 116-237 MiB and lives across the peak.** `build_node_tags`
 allocates two `String`s per tag per node, for tags whose cardinality the ontology
