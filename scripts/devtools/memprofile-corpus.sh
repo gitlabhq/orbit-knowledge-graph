@@ -29,6 +29,22 @@ fetch 278964 \
   "https://gitlab.com/gitlab-org/gitlab/-/archive/v18.9.1-ee/gitlab-v18.9.1-ee.tar.gz" \
   "gitlab-org/gitlab v18.9.1-ee (ruby + typescript)"
 
+fetch 100003 \
+  "https://codeload.github.com/torvalds/linux/tar.gz/refs/tags/v6.12" \
+  "torvalds/linux v6.12 (c)"
+
+fetch 100004 \
+  "https://codeload.github.com/microsoft/vscode/tar.gz/refs/tags/1.99.3" \
+  "microsoft/vscode 1.99.3 (typescript)"
+
+fetch 100005 \
+  "https://codeload.github.com/django/django/tar.gz/refs/tags/5.2" \
+  "django/django 5.2 (python)"
+
+fetch 100006 \
+  "https://codeload.github.com/protocolbuffers/protobuf/tar.gz/refs/tags/v30.2" \
+  "protocolbuffers/protobuf v30.2 (c++)"
+
 # A dhat pass over the full Java tree does not finish in a useful time, so the
 # reduced corpus below carries the same shape at a fraction of the block count.
 if [[ ! -s "$DIR/100002.tar.gz" ]]; then

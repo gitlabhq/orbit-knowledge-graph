@@ -263,6 +263,10 @@ description = "Index both corpus repositories and diff each against its baseline
 run = './scripts/devtools/memprofile-regress.sh'
 description = "Correctness gate for a code-indexing memory change"
 
+[tasks."memprofile:verify"]
+run = './scripts/devtools/memprofile-verify.sh "$@"'
+description = "Prove two revisions write identical graph data for one corpus repository"
+
 [tasks."memprofile:compare"]
 run = 'python3 scripts/devtools/memprofile-compare.py "$@"'
 description = "Diff a candidate profiling run against a baseline and flag regressions"
