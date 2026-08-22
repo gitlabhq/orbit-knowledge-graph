@@ -1230,8 +1230,6 @@ impl FamilyPipeline {
 
                 let refs = crate::v2::refpack::RefPack::from_refs(&result.refs);
                 result.refs = Vec::new();
-                // Both are push-grown, so they cross the barrier carrying ~30%
-                // doubling slop, once per file for the whole repository.
                 result.definitions.shrink_to_fit();
                 result.imports.shrink_to_fit();
 

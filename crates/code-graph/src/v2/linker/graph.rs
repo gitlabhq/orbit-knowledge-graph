@@ -22,10 +22,6 @@ use std::collections::VecDeque;
 use super::state::{DefinitionRangeIndex, GraphDef, GraphImport, GraphIndexes, StrId, StringPool};
 
 #[derive(Debug, Clone)]
-/// Directory and File payloads are boxed because the enum is sized by its
-/// largest variant and petgraph stores it inline in one array. Unboxed,
-/// `CanonicalFile` makes every slot 96 bytes, including the definition and
-/// import nodes that outnumber files by more than 20 to 1 and need 24.
 pub enum GraphNode {
     Directory(Box<CanonicalDirectory>),
     File(Box<CanonicalFile>),
@@ -251,16 +247,7 @@ impl CodeGraph {
     }
 
     /// Pre-size every growable container from counts the caller already knows,
-    /// so the construction loop never pays amortized doubling. Measured on
-    /// elasticsearch, doubling left the node array, `defs` and `imports` each
-    /// carrying 40-80% capacity slop.
-    ///
-    /// The node reservation is short by one entry per distinct directory, which
-    /// the caller cannot count, so the array still ends up oversized. That is
-    /// corrected by the shrink in [`release_resolution_state`], which runs before
-    /// the capacity starts costing anything.
-    ///
-    /// [`release_resolution_state`]: Self::release_resolution_state
+    /// so the construction loop never pays amortized doubling.
     pub fn reserve_for(&mut self, files: usize, definitions: usize, imports: usize) {
         self.graph.reserve_exact_nodes(
             (files + definitions + imports).saturating_sub(self.graph.node_count()),
@@ -269,23 +256,11 @@ impl CodeGraph {
         self.imports.reserve_exact(imports);
     }
 
-    /// Release everything only the resolver needed, right before the graph is
-    /// handed to a [`GraphConverter`]. The converter holds the graph alive for
-    /// the whole Arrow build, which is where the peak is, so freeing the
-    /// resolution indexes and the string pool's dedup map here is worth more
-    /// than freeing them a few milliseconds later on drop.
-    ///
-    /// After this the pool can no longer dedupe: a later `alloc` of an
-    /// already-interned string appends a duplicate and `find` misses it. Only
-    /// call it once resolution is complete.
+    /// Drop what only the resolver read, before the converter holds the graph
+    /// across the Arrow build. Sealing stops the pool deduping, so call it once.
     pub fn release_resolution_state(&mut self) {
         self.indexes.drop_resolution_indexes();
         self.strings.seal();
-        // Both arrays are grown past their reservation and then doubled: nodes by
-        // the directory chain, edges by phase 3. Neither count is knowable when the
-        // reservation is made, so the slop is corrected here instead, where one
-        // copy buys exact capacity for the whole conversion. On elasticsearch that
-        // is 828,736 nodes in 1,640,364 slots and 4,416,851 edges in 8,739,266.
         self.graph.shrink_to_fit_nodes();
         self.graph.shrink_to_fit_edges();
     }
