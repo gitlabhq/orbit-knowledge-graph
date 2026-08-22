@@ -392,6 +392,9 @@ impl<'a> BatchTx<'a> {
 impl BatchTx<'_> {
     pub fn send_graph(&self, mut graph: CodeGraph) {
         graph.release_resolution_state();
+        // `before_convert` fires while the resolution indexes are still up, so it
+        // is not the graph the Arrow ramp actually runs alongside. This one is.
+        crate::v2::memprobe::log_graph("", "after_release", &graph);
         self.stats.record_graph(&graph);
         let t_convert = std::time::Instant::now();
         let batches = match self.converter.convert(graph) {

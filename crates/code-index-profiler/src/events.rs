@@ -60,10 +60,14 @@ impl<S: tracing::Subscriber> Layer<S> for EventLayer {
         let mut fields = FieldCollector::default();
         event.record(&mut fields);
 
-        // The archive download and extraction leave no marker the profiler can
-        // see from outside; the first inventory probe is where parsing starts.
-        if fields.0.get("stage").and_then(Value::as_str) == Some("inventory") {
-            set_phase_quiet("parse");
+        // The pipeline's phases leave no marker the profiler can see from outside,
+        // so the probes double as phase boundaries. Without this the peak, which
+        // happens during Arrow conversion, gets reported as happening in `parse`.
+        match fields.0.get("stage").and_then(Value::as_str) {
+            Some("inventory") => set_phase_quiet("parse"),
+            Some("after_release" | "before_convert") => set_phase_quiet("convert"),
+            Some("writer") => set_phase_quiet("write"),
+            _ => {}
         }
 
         let pm = process_memory();

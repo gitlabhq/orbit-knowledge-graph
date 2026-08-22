@@ -3,6 +3,7 @@ mod corpus;
 mod events;
 mod harness;
 mod memory;
+mod tsalloc;
 
 use std::path::PathBuf;
 use std::time::Instant;
@@ -53,9 +54,32 @@ struct Args {
     #[arg(long, default_value = "1/1/")]
     traversal_path: String,
 
-    /// Concurrent indexing lanes, split evenly between the small and big pools.
+    /// Slots in each of the small and big indexing pools, so the number of repos
+    /// that can be in flight at once is twice this.
     #[arg(long, default_value_t = 1)]
     indexing_lanes: usize,
+
+    /// Index the same projects this many times in one process, with an increasing
+    /// task id so every round after the first re-indexes and therefore runs the
+    /// stale sweep. Rounds after the first also show whether memory returns to
+    /// where it was, which is what a long-lived pod's RSS actually depends on.
+    #[arg(long, default_value_t = 1)]
+    repeat: usize,
+
+    /// Seconds to idle between rounds before recording the settled baseline.
+    #[arg(long, default_value_t = 3)]
+    settle_secs: u64,
+
+    /// Drain the write buffer before each settled reading. Production does not do
+    /// this, so it is off by default; turning it on separates rows still pooled in
+    /// the writer from memory the pipeline never gave back.
+    #[arg(long)]
+    flush_between_rounds: bool,
+
+    /// Call `mi_collect(true)` before each settled reading, so the difference against
+    /// a run without it is the memory mimalloc was holding for reuse.
+    #[arg(long)]
+    collect_between_rounds: bool,
 
     #[arg(long, default_value = "http://localhost:18123")]
     clickhouse_url: String,
@@ -122,10 +146,16 @@ struct Args {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
+    tsalloc::install();
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
     let run_dir = args.out_dir.join(&args.label);
     std::fs::create_dir_all(&run_dir)?;
+
+    // Two profilers sharing a database each reset the schema under the other and
+    // write into the other's tables, which corrupts the row counts and the timings
+    // at once. It is not obvious from the output that it happened, so refuse.
+    let lock = Lock::acquire(&args.out_dir, &args.clickhouse_database)?;
 
     #[cfg(feature = "dhat-heap")]
     let _dhat = dhat::Profiler::builder()
@@ -207,32 +237,73 @@ async fn main() -> anyhow::Result<()> {
     memory::set_phase("index");
     let t_index = Instant::now();
     let harness = std::sync::Arc::new(harness);
-    let mut jobs = tokio::task::JoinSet::new();
-    for (i, project_id) in args.project_id.iter().copied().enumerate() {
-        let harness = harness.clone();
-        let branch = args.branch.clone();
-        let commit_sha = args.commit_sha.clone();
-        // Each project needs its own traversal path so the stale sweep and the
-        // checkpoint of one do not touch another's rows.
-        let traversal_path = format!("{}{}/", args.traversal_path, i + 1);
-        jobs.spawn(async move {
-            harness
-                .index(project_id, &branch, &commit_sha, &traversal_path)
-                .await
-        });
-    }
     let mut outcome = Ok(());
-    while let Some(joined) = jobs.join_next().await {
-        match joined {
-            Ok(Ok(())) => {}
-            Ok(Err(e)) => {
-                tracing::error!(error = %e, "indexing failed");
-                outcome = Err(e);
-            }
-            Err(e) => {
-                outcome = Err(anyhow::anyhow!("index task panicked: {e}"));
+    let mut rounds = Vec::new();
+    let rounds_requested = args.repeat.max(1);
+    for round in 1..=rounds_requested {
+        if rounds_requested > 1 {
+            memory::set_round(round);
+        }
+        memory::set_phase("index");
+        let t_round = Instant::now();
+        let mut jobs = tokio::task::JoinSet::new();
+        for (i, project_id) in args.project_id.iter().copied().enumerate() {
+            let harness = harness.clone();
+            let branch = args.branch.clone();
+            let commit_sha = args.commit_sha.clone();
+            // Each project needs its own traversal path so the stale sweep and the
+            // checkpoint of one do not touch another's rows.
+            let traversal_path = format!("{}{}/", args.traversal_path, i + 1);
+            jobs.spawn(async move {
+                harness
+                    .index(
+                        round as i64,
+                        project_id,
+                        &branch,
+                        &commit_sha,
+                        &traversal_path,
+                    )
+                    .await
+            });
+        }
+        while let Some(joined) = jobs.join_next().await {
+            match joined {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => {
+                    tracing::error!(error = %e, "indexing failed");
+                    outcome = Err(e);
+                }
+                Err(e) => {
+                    outcome = Err(anyhow::anyhow!("index task panicked: {e}"));
+                }
             }
         }
+        let round_ms = t_round.elapsed().as_millis() as u64;
+        memory::set_phase("settle");
+        if args.flush_between_rounds {
+            harness.flush().await?;
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(args.settle_secs)).await;
+        if args.collect_between_rounds {
+            memory::allocator_collect();
+        }
+        let settled = memory::process_memory();
+        let settled_alloc = memory::alloc_stats();
+        let settled_allocator = memory::allocator_info();
+        tracing::info!(
+            round,
+            round_ms,
+            settled_footprint = settled.footprint_bytes,
+            settled_live = settled_alloc.live_bytes,
+            "round settled"
+        );
+        rounds.push(serde_json::json!({
+            "round": round,
+            "round_ms": round_ms,
+            "settled": settled,
+            "settled_alloc": settled_alloc,
+            "settled_allocator": settled_allocator,
+        }));
     }
     let index_ms = t_index.elapsed().as_millis() as u64;
 
@@ -244,6 +315,8 @@ async fn main() -> anyhow::Result<()> {
     memory::set_phase("done");
     let final_mem = memory::process_memory();
     let final_alloc = memory::alloc_stats();
+    let final_allocator = memory::allocator_info();
+    let allocator_stats = memory::allocator_stats_json();
     let peaks = sampler.stop();
 
     let row_counts = ch.row_counts(&clickhouse::table_prefix()).await?;
@@ -259,7 +332,13 @@ async fn main() -> anyhow::Result<()> {
         "ok": outcome.is_ok(),
         "error": outcome.as_ref().err().map(|e| e.to_string()),
         "peaks": peaks,
-        "final": { "process": final_mem, "alloc": final_alloc },
+        "rounds": rounds,
+        "final": {
+            "process": final_mem,
+            "alloc": final_alloc,
+            "allocator": final_allocator,
+            "allocator_stats": allocator_stats,
+        },
         "clickhouse_rows": row_counts.iter().map(|(t, n)| serde_json::json!({"table": t, "rows": n})).collect::<Vec<_>>(),
         "clickhouse_total_rows": total_rows,
         "config": {
@@ -270,12 +349,16 @@ async fn main() -> anyhow::Result<()> {
             "max_total_bytes": pipeline_config.max_total_bytes,
             "job_timeout_secs": pipeline_config.job_timeout_secs,
             "indexing_lanes": args.indexing_lanes,
+            "repeat": args.repeat,
             "per_file_timeout_ms": pipeline_config.per_file_timeout_ms,
             "per_file_parse_timeout_ms": pipeline_config.per_file_parse_timeout_ms,
             "per_file_walk_timeout_ms": pipeline_config.per_file_walk_timeout_ms,
             "per_file_ssa_timeout_ms": pipeline_config.per_file_ssa_timeout_ms,
             "allocator": if cfg!(feature = "dhat-heap") { "dhat" } else { "mimalloc" },
             "alloc_tracking": cfg!(feature = "track-alloc"),
+            "alloc_secure": cfg!(feature = "secure-alloc"),
+            "alloc_good_size": cfg!(feature = "good-size"),
+            "alloc_realloc_pessimistic": cfg!(feature = "realloc-pessimistic"),
         },
     });
     std::fs::write(
@@ -284,5 +367,33 @@ async fn main() -> anyhow::Result<()> {
     )?;
 
     println!("{}", serde_json::to_string_pretty(&summary)?);
+    drop(lock);
     outcome
+}
+
+struct Lock(PathBuf);
+
+impl Lock {
+    fn acquire(dir: &std::path::Path, database: &str) -> anyhow::Result<Self> {
+        std::fs::create_dir_all(dir)?;
+        let path = dir.join(format!(".lock-{database}"));
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+        {
+            Ok(_) => Ok(Self(path)),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Err(anyhow::anyhow!(
+                "another profiling run holds {}; wait for it or delete the file if it is stale",
+                path.display()
+            )),
+            Err(e) => Err(e.into()),
+        }
+    }
+}
+
+impl Drop for Lock {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
 }

@@ -456,6 +456,7 @@ fn convert_repository_edges(
 ) -> Result<RecordBatch, ArrowError> {
     let branch_id = compute_branch_id(env.project_id, &env.branch);
     let tag_cache = graph.build_node_tags(&specs.tag_properties);
+    log_tag_cache("edges_by_table", &tag_cache);
     let branch_tags: Vec<String> = specs
         .tag_properties
         .get("Branch")
@@ -531,6 +532,7 @@ fn convert_semantic_edges(
     specs: &ConverterSpecs,
 ) -> Result<RecordBatch, ArrowError> {
     let tag_cache = graph.build_node_tags(&specs.tag_properties);
+    log_tag_cache("edges", &tag_cache);
     let mut builder = BatchBuilder::new(&specs.edge, graph.graph.edge_count())?;
     for ei in graph.graph.edge_indices() {
         if graph.graph[ei].relationship.edge_kind.as_ref() == "CONTAINS" {
@@ -653,6 +655,29 @@ fn repository_on_branch_rows<'a>(
     }));
 
     rows
+}
+
+/// The tag cache lives for the whole of an edge batch build, which is where the
+/// heap peaks, and nothing else reports it.
+fn log_tag_cache(stage: &str, tag_cache: &[Vec<String>]) {
+    if !code_graph::v2::memprobe::enabled() {
+        return;
+    }
+    let bytes: usize = tag_cache
+        .iter()
+        .map(|tags| {
+            tags.capacity() * size_of::<String>() + tags.iter().map(String::capacity).sum::<usize>()
+        })
+        .sum::<usize>()
+        + std::mem::size_of_val(tag_cache);
+    tracing::debug!(
+        target: code_graph::v2::memprobe::TARGET,
+        stage = "tag_cache",
+        entity = stage,
+        rows = tag_cache.len(),
+        bytes_total = bytes,
+        "tag cache"
+    );
 }
 
 fn graph_edge_row<'a>(

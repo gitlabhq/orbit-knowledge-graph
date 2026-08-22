@@ -152,6 +152,47 @@ def render(run_dir):
     w(f"| samples | {p['samples']:,} |")
     w("")
 
+    if p.get("exact_max_footprint"):
+        w("### Exact high-water marks")
+        w("")
+        w("The kernel and the allocator each keep their own high-water mark, so these "
+          "do not depend on the sampler being awake at the right moment. What the "
+          "sampler missed is the difference.")
+        w("")
+        w("| metric | sampled MiB | exact MiB | missed |")
+        w("|---|---:|---:|---:|")
+        w(f"| phys_footprint | {mib(p['max_footprint'])} | {mib(p['exact_max_footprint'])} | "
+          f"{mib(p['exact_max_footprint'] - p['max_footprint'])} |")
+        w(f"| live heap | {mib(p['max_alloc_live'])} | {mib(p['exact_max_alloc_live'])} | "
+          f"{mib(p['exact_max_alloc_live'] - p['max_alloc_live'])} |")
+        w("")
+        w(f"mimalloc peak commit: {mib(p['exact_max_commit'])} MiB. "
+          f"Widest sampler gap: {p.get('max_sample_gap_ms', 0)} ms.")
+        w("")
+        if p.get("max_alloc_live_rounded"):
+            waste = p["max_alloc_live_rounded"] - p["max_alloc_live"]
+            w(f"Size-class rounding at the peak: {mib(waste)} MiB "
+              f"({100.0 * waste / p['max_alloc_live']:.1f}% on top of what was requested).")
+            w("")
+
+    rounds = summary.get("rounds") or []
+    if len(rounds) > 1:
+        w("## Settled memory after each round")
+        w("")
+        w("A round that gives everything back leaves live heap flat. Footprint and "
+          "commit staying high on top of a flat live heap is the allocator holding "
+          "pages, not the pipeline holding data.")
+        w("")
+        w("| round | ms | live MiB | footprint MiB | RSS MiB | commit MiB |")
+        w("|---:|---:|---:|---:|---:|---:|")
+        for r in rounds:
+            w(f"| {r['round']} | {r['round_ms']:,} | "
+              f"{mib(r['settled_alloc']['live_bytes'])} | "
+              f"{mib(r['settled']['footprint_bytes'])} | "
+              f"{mib(r['settled']['resident_bytes'])} | "
+              f"{mib(r['settled_allocator']['current_commit_bytes'])} |")
+        w("")
+
     if samples:
         w("## Timeline (phys_footprint)")
         w("")
