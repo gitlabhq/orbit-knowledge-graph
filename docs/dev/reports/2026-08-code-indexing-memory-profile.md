@@ -639,6 +639,21 @@ ClickHouse databases, and fingerprinting every row of every table.
 | `protocolbuffers/protobuf` v30.2 | C++ | 316,910 | 114 -> 69 MiB (**-39.1%**) | -8.7% | -4.3% | identical |
 | `django/django` 5.2 | Python | 254,571 | 159 -> 98 MiB (**-38.3%**) | -22.3% | -3.0% | identical |
 
+Three runs each on the two largest, to separate the timing change from noise.
+The baseline and optimized ranges do not overlap on either metric, and every one
+of the twelve runs was faster than every baseline run of the same repository:
+
+| Repository | Metric | Baseline (3 runs) | Optimized (3 runs) | Median |
+|---|---|---|---|---|
+| `linux` | wall clock | 42.5 / 42.7 / 43.5 s | 41.4 / 41.9 / 42.6 s | **-1.9%** |
+| `linux` | peak live heap | 2,623 / 2,673 / 2,673 MiB | 1,472 / 1,472 / 1,472 MiB | **-44.9%** |
+| `elasticsearch` | wall clock | 23.5 / 23.9 / 24.3 s | 23.0 / 23.1 / 23.8 s | **-3.1%** |
+| `elasticsearch` | peak live heap | 2,538 / 2,538 / 2,571 MiB | 1,114 / 1,114 / 1,114 MiB | **-56.1%** |
+
+The repository's own CI benchmark also ran its full 25-scenario matrix on
+`linux-x86_64` against this change with no failures, which is the only
+x86_64 evidence here; every number above is from an M3 Max.
+
 Wall clock improves on all six. VS Code gains least because it is almost
 entirely JavaScript and TypeScript, which run through `JsPipeline` rather than
 the shared family pipeline, so only the Arrow-side changes apply to it.
