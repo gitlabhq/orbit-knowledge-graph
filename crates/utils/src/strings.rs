@@ -88,21 +88,16 @@ impl StringPool {
         self.index.is_empty()
     }
 
-    /// Free the dedup index for a write-once pool. `get` still works, but the
-    /// pool stops deduplicating: a later `alloc` of an already-interned string
-    /// appends a second copy and `find` no longer sees the older ones. Only
-    /// call this once nothing will intern into the pool again.
+    /// Free the dedup index for a write-once pool. After this a repeat `alloc`
+    /// appends a second copy and `find` no longer sees the older ones.
     pub fn shrink_to_arena(&mut self) {
         self.intern_map = FxHashMap::default();
         self.buf.shrink_to_fit();
         self.index.shrink_to_fit();
     }
 
-    /// [`shrink_to_arena`](Self::shrink_to_arena) for a pool that is done being
-    /// written to, which additionally makes a later `alloc` trip a debug
-    /// assertion instead of quietly storing a second copy. Use it wherever the
-    /// pool outlives the shrink, since there the duplicate would be a live bug
-    /// rather than a one-off.
+    /// [`shrink_to_arena`](Self::shrink_to_arena) plus a debug assertion on later
+    /// `alloc`. Use it when the pool outlives the shrink, where a dup is a bug.
     pub fn seal(&mut self) {
         self.sealed = true;
         self.shrink_to_arena();

@@ -291,9 +291,8 @@ pub enum ColumnType {
     TimestampMicros,
     /// `Array(String)` — variable-length list of strings.
     StrList,
-    /// `Array(String)` carried on the wire as a list of dictionary keys. Use it
-    /// when the same handful of values repeat across millions of rows; the
-    /// destination column type is unchanged.
+    /// `Array(String)` carried on the wire as dictionary keys. Use it when the
+    /// same handful of values repeat across rows; the column type is unchanged.
     DictStrList,
 }
 
@@ -571,12 +570,8 @@ impl BatchBuilder {
                 ColumnType::Str => {
                     Col::Str(StringBuilder::with_capacity(cap, cap * 8), spec.nullable)
                 }
-                // The keys buffer is one i32 per row, so it must be sized like
-                // any other fixed-width column; left at zero it doubles its way
-                // up and keeps the last doubling as slop. `DICT_VALUES_HINT` is
-                // a starting size for the distinct values, which grow on their
-                // own if a column turns out to be less low-cardinality than the
-                // ontology says.
+                // The keys buffer is one i32 per row, so it needs the row
+                // capacity; left at zero it doubles and keeps the slop.
                 ColumnType::DictStr => Col::DictStr(
                     arrow::array::StringDictionaryBuilder::<arrow::datatypes::Int32Type>::with_capacity(
                         cap,

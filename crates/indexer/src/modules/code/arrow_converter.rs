@@ -155,12 +155,8 @@ fn entity_specs(ontology: &Ontology, entity_name: &str) -> Vec<ColumnSpec> {
     specs
 }
 
-/// Columns the [`IndexerEnvelope`] fills with the same value for every row in a
-/// batch. Their ClickHouse type is unchanged; encoding them as a dictionary on
-/// the wire replaces one copy of the string per row with one `i32` key, which on
-/// a multi-million-row edge batch is the difference between tens of MiB and a
-/// few. Whether the indexer writes a constant is an indexer-side fact, not a
-/// graph-shape fact, so it does not belong in the ontology.
+/// Constant for every row in a batch, so the wire encoding collapses each to one
+/// key. That is an indexer-side fact, not graph shape, so not in the ontology.
 const ENVELOPE_CONSTANT_COLUMNS: [&str; 3] = ["traversal_path", "branch", "commit_sha"];
 
 fn column_type_for(
@@ -213,10 +209,8 @@ fn edge_specs(ontology: &Ontology) -> Vec<ColumnSpec> {
         if let Some(config) = ontology.edge_table_config(table_name) {
             for col in &config.storage.denormalized_columns {
                 if seen.insert(col.name.clone()) {
-                    // Denormalized tag lists repeat a handful of values across
-                    // every edge row, and on a large repository the two of them
-                    // are over half the edge batch. The destination column stays
-                    // `Array(String)`; only the wire encoding changes.
+                    // A handful of tag values repeat across every edge row. Only
+                    // the wire encoding changes; the column stays `Array(String)`.
                     specs.push(ColumnSpec {
                         name: col.name.clone(),
                         col_type: ColumnType::DictStrList,
@@ -695,9 +689,8 @@ impl code_graph::v2::GraphConverter for IndexerConverter {
         if data.edges.num_rows() > 0 {
             use std::collections::HashMap;
 
-            // Cloning an `ArrayRef` is an `Arc` bump, and it detaches the
-            // routing borrow from `data.edges` so the single-table path can
-            // move the batch out instead of copying it.
+            // Cloned so the routing borrow detaches from `data.edges` and the
+            // single-table path can move the batch out instead of copying it.
             let rel_col = data
                 .edges
                 .column_by_name("relationship_kind")
@@ -709,10 +702,8 @@ impl code_graph::v2::GraphConverter for IndexerConverter {
             // to other edge tables (gl_edge) must have them stripped.
             let code_only_cols: &[&str] = &["project_id", "branch"];
 
-            // One destination means the batch already is that table's batch.
-            // `take` would copy all of it while the original is still live, and
-            // on a code repository every semantic edge kind routes to the same
-            // table, so that copy set the whole run's peak.
+            // Every semantic edge kind usually routes to one table, and `take`
+            // would copy the whole batch while the original is still live.
             if let Some(table) = routing.single_table() {
                 let batch = if table.contains("code_edge") {
                     data.edges
@@ -743,11 +734,8 @@ impl code_graph::v2::GraphConverter for IndexerConverter {
     }
 }
 
-/// Destination table per edge row, resolved without materialising a string per
-/// row. `relationship_kind` is `LowCardinality(String)` in every edge table, so
-/// the batch carries a dictionary of a handful of kinds; mapping the dictionary
-/// values once and indexing by key avoids both the Utf8 cast of the whole column
-/// and the per-row hash lookup.
+/// Destination table per edge row. `relationship_kind` is `LowCardinality`, so
+/// mapping the dictionary once beats a Utf8 cast plus a hash lookup per row.
 enum EdgeRouting<'a> {
     Dictionary {
         keys: &'a [i32],
@@ -765,10 +753,8 @@ impl<'a> EdgeRouting<'a> {
         use arrow::array::{Array, AsArray};
         use arrow::datatypes::Int32Type;
 
-        // The dictionary path reads the raw key buffer, whose contents at a null
-        // position are arbitrary and would index `by_key` out of bounds.
-        // `relationship_kind` is non-nullable in every edge table, so this is a
-        // guard against a future schema change rather than a case to handle.
+        // Nulls cannot occur today, but the dictionary path reads the raw key
+        // buffer, where a null position would index `by_key` out of bounds.
         if rel_col.null_count() > 0 {
             return Err(SinkError(
                 "relationship_kind contains nulls, which edge routing cannot resolve".into(),
