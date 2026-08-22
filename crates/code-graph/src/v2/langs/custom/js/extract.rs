@@ -11,9 +11,9 @@ use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::{
-    CjsExport, ExportedBinding, ImportedName, JsAnalyzer, JsDef, JsDefKind, JsExportName,
-    JsFileAnalysis, JsImport, JsImportKind, JsModuleBindingInput, JsModuleBindingTargetInput,
-    JsModuleInfo, JsPhase1File, JsStarReexport,
+    CjsExport, ExportedBinding, ImportedName, JsAnalyzer, JsCallEdge, JsDef, JsDefKind,
+    JsDefSupport, JsExportName, JsFileAnalysis, JsImport, JsImportKind, JsModuleBindingInput,
+    JsModuleBindingTargetInput, JsModuleInfo, JsPendingLocalCall, JsPhase1File, JsStarReexport,
 };
 
 #[derive(Debug, Clone)]
@@ -25,10 +25,35 @@ pub struct AnalyzedJsFile {
     pub parse_ms: f64,
 }
 
+/// What resolution needs from a parsed file. The rest of [`JsFileAnalysis`] --
+/// imports, classes, module info and the definition names and type annotations --
+/// is consumed by the module graph builder and is dead from then on, so it is
+/// dropped here rather than held across resolution.
 #[derive(Debug, Clone)]
 pub struct ResolvedJsFile {
     pub relative_path: String,
-    pub analysis: JsFileAnalysis,
+    pub calls: Vec<JsCallEdge>,
+    pub local_calls: Vec<JsPendingLocalCall>,
+    pub def_support: Vec<JsDefSupport>,
+}
+
+impl ResolvedJsFile {
+    pub fn from_analysis(relative_path: String, analysis: JsFileAnalysis) -> Self {
+        Self {
+            relative_path,
+            calls: analysis.calls,
+            local_calls: analysis.local_calls,
+            def_support: analysis
+                .defs
+                .into_iter()
+                .map(|def| JsDefSupport {
+                    fqn: def.fqn,
+                    byte_offset: def.range.byte_offset,
+                    invocation_support: def.invocation_support,
+                })
+                .collect(),
+        }
+    }
 }
 
 pub type FailedJsFile = (String, AnalyzerError);

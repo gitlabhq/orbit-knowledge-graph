@@ -26,7 +26,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use super::analyze::invocation::invocation_support_for_graph_def_kind;
 use super::types::{JsCallSite, JsImportedBinding};
 use super::{
-    ImportedName, JsCallEdge, JsCallTarget, JsExportName, JsFileAnalysis, JsModuleIndex,
+    ImportedName, JsCallEdge, JsCallTarget, JsDefSupport, JsExportName, JsModuleIndex,
     JsPhase1FileInfo, JsResolutionMode, JsResolvedCallRelationship, WorkspaceProbe,
     extract::ResolvedJsFile,
 };
@@ -86,7 +86,6 @@ pub fn attach_resolution_edges(
         .iter()
         .filter_map(|file| {
             let calls: Vec<_> = file
-                .analysis
                 .calls
                 .iter()
                 .filter(|call| matches!(call.callee, JsCallTarget::ImportedCall { .. }))
@@ -194,7 +193,7 @@ fn resolve_local_call_edges(
     let mut resolved = Vec::new();
     let mut filtered = Vec::new();
     let mut semantic_seen: FxHashSet<(usize, String, EdgeKind)> = FxHashSet::default();
-    for call in &analyzed.analysis.local_calls {
+    for call in &analyzed.local_calls {
         resolved.clear();
         let _ = resolver.resolve(
             &call.name,
@@ -207,7 +206,7 @@ fn resolve_local_call_edges(
         for (source_node, target_node, edge) in &resolved {
             if !local_target_supports_invocation(
                 graph,
-                &analyzed.analysis,
+                &analyzed.def_support,
                 *target_node,
                 call.invocation_kind,
             ) {
@@ -257,16 +256,15 @@ fn js_local_settings() -> &'static ResolveSettings {
 
 fn local_target_supports_invocation(
     graph: &CodeGraph,
-    analysis: &JsFileAnalysis,
+    def_support: &[JsDefSupport],
     target_node: NodeIndex,
     invocation_kind: super::JsInvocationKind,
 ) -> bool {
     let graph_def = graph.def(target_node);
     let target_fqn = graph.def_fqn(target_node);
-    let support = analysis
-        .defs
+    let support = def_support
         .iter()
-        .find(|def| def.fqn == target_fqn || def.range.byte_offset == graph_def.range.byte_offset)
+        .find(|def| def.fqn == target_fqn || def.byte_offset == graph_def.range.byte_offset)
         .and_then(|def| def.invocation_support)
         .or_else(|| invocation_support_for_graph_def_kind(graph_def.kind));
 

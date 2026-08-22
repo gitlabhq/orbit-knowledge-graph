@@ -201,6 +201,16 @@ pub struct JsFileAnalysis {
     pub module_info: JsModuleInfo,
 }
 
+/// The only three fields of a definition that resolution reads, kept without the
+/// name, type annotation and kind payload so the analyses do not survive into the
+/// resolution phase, which is where the JavaScript and TypeScript peaks sit.
+#[derive(Debug, Clone)]
+pub struct JsDefSupport {
+    pub fqn: String,
+    pub byte_offset: (usize, usize),
+    pub invocation_support: Option<JsInvocationSupport>,
+}
+
 #[derive(Debug, Clone)]
 pub struct JsDef {
     pub name: String,
