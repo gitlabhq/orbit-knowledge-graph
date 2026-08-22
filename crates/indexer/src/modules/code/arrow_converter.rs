@@ -765,6 +765,16 @@ impl<'a> EdgeRouting<'a> {
         use arrow::array::{Array, AsArray};
         use arrow::datatypes::Int32Type;
 
+        // The dictionary path reads the raw key buffer, whose contents at a null
+        // position are arbitrary and would index `by_key` out of bounds.
+        // `relationship_kind` is non-nullable in every edge table, so this is a
+        // guard against a future schema change rather than a case to handle.
+        if rel_col.null_count() > 0 {
+            return Err(SinkError(
+                "relationship_kind contains nulls, which edge routing cannot resolve".into(),
+            ));
+        }
+
         if let Some(dict) = rel_col.as_dictionary_opt::<Int32Type>() {
             let values = dict.values().as_string_opt::<i32>().ok_or_else(|| {
                 SinkError("relationship_kind dictionary values are not strings".into())
