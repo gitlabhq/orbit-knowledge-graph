@@ -253,8 +253,14 @@ impl CodeGraph {
     /// Pre-size every growable container from counts the caller already knows,
     /// so the construction loop never pays amortized doubling. Measured on
     /// elasticsearch, doubling left the node array, `defs` and `imports` each
-    /// carrying 40-80% capacity slop that survives into the Arrow conversion,
-    /// which is where the peak is.
+    /// carrying 40-80% capacity slop.
+    ///
+    /// The node reservation is short by one entry per distinct directory, which
+    /// the caller cannot count, so the array still ends up oversized. That is
+    /// corrected by the shrink in [`release_resolution_state`], which runs before
+    /// the capacity starts costing anything.
+    ///
+    /// [`release_resolution_state`]: Self::release_resolution_state
     pub fn reserve_for(&mut self, files: usize, definitions: usize, imports: usize) {
         self.graph.reserve_exact_nodes(
             (files + definitions + imports).saturating_sub(self.graph.node_count()),
@@ -274,7 +280,14 @@ impl CodeGraph {
     /// call it once resolution is complete.
     pub fn release_resolution_state(&mut self) {
         self.indexes.drop_resolution_indexes();
-        self.strings.shrink_to_arena();
+        self.strings.seal();
+        // Both arrays are grown past their reservation and then doubled: nodes by
+        // the directory chain, edges by phase 3. Neither count is knowable when the
+        // reservation is made, so the slop is corrected here instead, where one
+        // copy buys exact capacity for the whole conversion. On elasticsearch that
+        // is 828,736 nodes in 1,640,364 slots and 4,416,851 edges in 8,739,266.
+        self.graph.shrink_to_fit_nodes();
+        self.graph.shrink_to_fit_edges();
     }
 
     pub fn add_file(
