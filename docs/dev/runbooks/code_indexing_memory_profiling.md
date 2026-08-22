@@ -165,6 +165,24 @@ Measured run-to-run spread over three repeats on an M3 Max: peak live heap +/-1%
 Allocation counts reproduce exactly, so they are the sharpest signal for a change
 that removes allocations. Treat a live-heap move under 3% as noise.
 
+## Proving output is unchanged
+
+`mise memprofile:verify <project-id> <name>` indexes one corpus repository with
+two driver binaries into two databases and fingerprints every row of every
+table. Build the binaries first, one per revision:
+
+```shell
+git checkout <revision>
+git checkout <profiler-branch> -- crates/code-index-profiler Cargo.toml Cargo.lock
+cargo build -p code-index-profiler --profile memprofile
+cp target/memprofile/code-index-profiler /tmp/cip-base   # or /tmp/cip-opt
+```
+
+It disables the per-file CPU budgets, and it has to. At production budgets a
+large repository is not reproducible: on the Linux kernel the same binary run
+twice aborted 17 files once and 15 the next, and wrote different definition,
+import and edge counts. Pass `--with-budgets` to see that for yourself.
+
 ## Findings from the first run
 
 [2026-08 code indexing memory profile](../reports/2026-08-code-indexing-memory-profile.md)

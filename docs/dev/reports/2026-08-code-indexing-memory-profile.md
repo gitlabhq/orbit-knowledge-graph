@@ -552,6 +552,10 @@ three times) and 4 MiB on GitLab.
 | GitLab | 1,238 -> **798 MiB (-35.6%)** | 1,623 -> 1,089 (-32.9%) | 1,809 -> 1,360 (-24.8%) | -0.9% |
 | Both, two lanes | 2,553 -> **1,373 MiB (-46.2%)** | 2,904 -> 1,863 (-35.8%) | 3,753 -> 2,216 (-41.0%) | -3.4% |
 
+Verified on four further repositories in
+[Cross-repository verification](#cross-repository-verification), including the
+Linux kernel, with byte-identical output everywhere.
+
 Cumulative allocated bytes fall 12.4% (Elasticsearch) and 6.6% (GitLab); the
 allocation *count* is unchanged to within 0.3%, so the win is smaller
 allocations, not fewer of them.
@@ -619,6 +623,53 @@ parse results, and the pending edge count is already tallied before the merge.
 **Pre-size dictionary key buffers.** `StringDictionaryBuilder::new()` left the
 keys buffer to double from zero, so each of the three dictionary columns on the
 edge batch carried ~15 MiB of slop.
+
+## Cross-repository verification
+
+The eight changes were then verified on six repositories spanning six language
+pipelines, by building a driver binary from each revision, indexing into two
+ClickHouse databases, and fingerprinting every row of every table.
+
+| Repository | Language | Rows | Peak live heap | Peak footprint | Wall clock | Output |
+|---|---|---:|---|---|---|---|
+| `torvalds/linux` v6.12 | C | 4,838,042 | 2,623 -> 1,472 MiB (**-43.9%**) | -35.5% | -2.4% | identical |
+| `elastic/elasticsearch` v9.0.0 | Java | 4,103,145 | 2,538 -> 1,114 MiB (**-56.1%**) | -52.3% | -1.7% | identical |
+| `gitlab-org/gitlab` v18.9.1-ee | Ruby, TypeScript | 2,504,626 | 1,158 -> 796 MiB (**-31.2%**) | -32.4% | -2.8% | identical |
+| `microsoft/vscode` 1.99.3 | TypeScript | 1,234,464 | 980 -> 839 MiB (**-14.4%**) | -14.0% | -0.9% | identical |
+| `protocolbuffers/protobuf` v30.2 | C++ | 316,910 | 114 -> 69 MiB (**-39.1%**) | -8.7% | -4.3% | identical |
+| `django/django` 5.2 | Python | 254,571 | 159 -> 98 MiB (**-38.3%**) | -22.3% | -3.0% | identical |
+
+Wall clock improves on all six. VS Code gains least because it is almost
+entirely JavaScript and TypeScript, which run through `JsPipeline` rather than
+the shared family pipeline, so only the Arrow-side changes apply to it.
+
+"Identical" means the row count, an additive checksum and an XOR checksum of a
+per-row hash over every column all agree, for all 40 tables. Two columns are
+excluded because they are `Utc::now()` at index time and differ between runs by
+construction: `_version` on every graph row and `indexed_at` on the checkpoint.
+Everything else, including every ID, path, name, tag array, edge endpoint and
+file `reason`, is compared. Reproduce with `mise memprofile:verify`.
+
+### Indexing output is not reproducible at production per-file budgets
+
+The first Linux comparison failed, and the control explains why: **the baseline
+binary disagrees with itself.** Run twice at the production budgets
+(`per_file_parse_timeout_ms: 100` and siblings), it aborted 17 files on one run
+and 15 on the next, and wrote a different number of definitions, imported
+symbols and code edges each time, with different `reason` values on the
+corresponding file rows.
+
+A file whose parse lands near its CPU budget aborts or completes depending on
+machine load, so on a repository the size of the Linux kernel the graph is a
+function of how busy the machine was. This also means a faster indexer produces
+*more* graph: the optimized binary aborted 9 files where the baseline aborted
+17, which is why its first Linux run had 1,212 more code edges. That is the
+budget doing its job, not a behaviour change.
+
+Byte-identity is therefore only testable with the per-file budgets disabled,
+which is what the table above does. It is worth knowing independently of this
+work: any before/after comparison of indexing output on a large repository has
+to disable them first.
 
 ## Measured and rejected
 
