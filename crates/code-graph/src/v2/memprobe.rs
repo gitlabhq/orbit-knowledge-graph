@@ -4,6 +4,8 @@
 //! is behind [`enabled`], so a production build that does not enable the target
 //! pays one `Interest` check per phase boundary and never walks the graph.
 
+use std::mem::{align_of, size_of};
+
 use crate::v2::linker::CodeGraph;
 use crate::v2::linker::graph::GraphNode;
 
@@ -14,6 +16,14 @@ const PETGRAPH_NODE_LINKS: usize = 8;
 /// Two `EdgeIndex<u32>` link pointers plus two `NodeIndex<u32>` endpoints.
 const PETGRAPH_EDGE_LINKS: usize = 16;
 
+/// petgraph stores the weight next to `u32` indices in one struct, so the slot is
+/// padded to the wider of the weight's alignment and the index's. A five-byte edge
+/// weight occupies 24 bytes, not 21.
+fn petgraph_slot<T>(links: usize) -> usize {
+    let align = align_of::<T>().max(align_of::<u32>());
+    (size_of::<T>() + links).next_multiple_of(align)
+}
+
 #[inline]
 pub fn enabled() -> bool {
     tracing::enabled!(target: "codegraph_mem", tracing::Level::DEBUG)
@@ -23,6 +33,11 @@ pub fn enabled() -> bool {
 pub struct GraphBytes {
     pub node_count: usize,
     pub edge_count: usize,
+    /// Slots petgraph has allocated. A single push past a reservation doubles
+    /// these, so the spread against the counts is the memory a mis-sized
+    /// `reserve` is holding for nothing.
+    pub node_capacity: usize,
+    pub edge_capacity: usize,
     pub def_count: usize,
     pub import_count: usize,
     pub string_count: usize,
@@ -70,11 +85,13 @@ pub fn graph_bytes(graph: &CodeGraph) -> GraphBytes {
     let mut out = GraphBytes {
         node_count: graph.graph.node_count(),
         edge_count: graph.graph.edge_count(),
+        node_capacity: node_cap,
+        edge_capacity: edge_cap,
         def_count: graph.defs.len(),
         import_count: graph.imports.len(),
         string_count: graph.strings.len(),
-        nodes: node_cap * (size_of::<GraphNode>() + PETGRAPH_NODE_LINKS),
-        edges: edge_cap * (size_of::<crate::v2::linker::graph::GraphEdge>() + PETGRAPH_EDGE_LINKS),
+        nodes: node_cap * petgraph_slot::<GraphNode>(PETGRAPH_NODE_LINKS),
+        edges: edge_cap * petgraph_slot::<crate::v2::linker::graph::GraphEdge>(PETGRAPH_EDGE_LINKS),
         defs: graph.defs.capacity() * size_of::<crate::v2::linker::GraphDef>(),
         imports: graph.imports.capacity() * size_of::<crate::v2::linker::GraphImport>(),
         strings: graph.strings.heap_bytes(),
@@ -147,9 +164,16 @@ pub fn graph_bytes(graph: &CodeGraph) -> GraphBytes {
     out
 }
 
-/// hashbrown stores one control byte per slot next to the entry array.
+/// hashbrown allocates the next power of two at or above `capacity * 8 / 7`,
+/// and stores one control byte per bucket next to the entry array. Charging
+/// `capacity` buckets instead understates a map by between 14% and a factor of
+/// two, depending on where its capacity sits relative to the next power of two.
 pub fn map_bytes(capacity: usize, entry_size: usize) -> usize {
-    capacity * (entry_size + 1)
+    if capacity == 0 {
+        return 0;
+    }
+    let buckets = capacity.saturating_mul(8).div_ceil(7).next_power_of_two();
+    buckets * (entry_size + 1)
 }
 
 fn spilled_node_indexes(v: &smallvec::SmallVec<[petgraph::graph::NodeIndex; 8]>) -> usize {
@@ -299,6 +323,8 @@ pub fn log_graph(family: &str, stage: &str, graph: &CodeGraph) {
         stage,
         node_count = b.node_count,
         edge_count = b.edge_count,
+        node_capacity = b.node_capacity,
+        edge_capacity = b.edge_capacity,
         def_count = b.def_count,
         import_count = b.import_count,
         string_count = b.string_count,

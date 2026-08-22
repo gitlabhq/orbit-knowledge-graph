@@ -98,6 +98,9 @@ def main():
         for k, v in rows:
             print(f"| {LABELS.get(k, k)} | {v / MIB:,.1f} | {100 * v / total:.0f}% |")
         print(f"| **probed total** | **{total / MIB:,.1f}** | |")
+        residual = e["alloc_live"] - total
+        print(f"| **unattributed** | **{residual / MIB:,.1f}** | "
+              f"**{100 * residual / e['alloc_live']:.0f}% of live heap** |")
         print()
 
     if ramp:

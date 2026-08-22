@@ -238,6 +238,93 @@ struct TableBuffer {
     first_buffered_at: Option<Instant>,
 }
 
+/// Allocations held by `write_part` calls that have not returned, keyed by the
+/// start of the allocation so that slices of one batch, which share their parent's
+/// buffers and are submitted as separate parts, are charged once rather than once
+/// per part. Coalesced batches stay alive from submit until ClickHouse
+/// acknowledges the insert, which on a large repository is seconds after the
+/// converter has finished and is the largest holder no structure probe covers.
+static INFLIGHT: std::sync::Mutex<Option<HashMap<usize, (usize, usize)>>> =
+    std::sync::Mutex::new(None);
+
+fn collect_buffers(data: &arrow::array::ArrayData, out: &mut HashMap<usize, usize>) {
+    for buffer in data.buffers() {
+        out.insert(buffer.data_ptr().as_ptr() as usize, buffer.capacity());
+    }
+    if let Some(nulls) = data.nulls() {
+        let buffer = nulls.buffer();
+        out.insert(buffer.data_ptr().as_ptr() as usize, buffer.capacity());
+    }
+    for child in data.child_data() {
+        collect_buffers(child, out);
+    }
+}
+
+fn buffer_map(buf: &TableBuffer) -> HashMap<usize, usize> {
+    let mut out = HashMap::new();
+    for batch in &buf.batches {
+        for column in batch.columns() {
+            collect_buffers(&column.to_data(), &mut out);
+        }
+    }
+    out
+}
+
+fn inflight_enter(buffers: &HashMap<usize, usize>) {
+    let mut guard = INFLIGHT.lock().expect("inflight registry never panics");
+    let map = guard.get_or_insert_with(HashMap::new);
+    for (ptr, capacity) in buffers {
+        let entry = map.entry(*ptr).or_insert((*capacity, 0));
+        entry.1 += 1;
+    }
+}
+
+fn inflight_leave(buffers: &HashMap<usize, usize>) {
+    let mut guard = INFLIGHT.lock().expect("inflight registry never panics");
+    let Some(map) = guard.as_mut() else { return };
+    for ptr in buffers.keys() {
+        if let Some(entry) = map.get_mut(ptr) {
+            entry.1 -= 1;
+            if entry.1 == 0 {
+                map.remove(ptr);
+            }
+        }
+    }
+}
+
+fn log_writer(stage: &str, pending: &HashMap<String, TableBuffer>) {
+    if !code_graph::v2::memprobe::enabled() {
+        return;
+    }
+    let mut union: HashMap<usize, usize> = HashMap::new();
+    for buf in pending.values() {
+        union.extend(buffer_map(buf));
+    }
+    let pending_bytes: usize = union.values().sum();
+    let mut inflight_bytes = 0;
+    if let Ok(guard) = INFLIGHT.lock()
+        && let Some(map) = guard.as_ref()
+    {
+        for (ptr, (capacity, _)) in map {
+            if !union.contains_key(ptr) {
+                inflight_bytes += *capacity;
+            }
+        }
+    }
+    let pending_rows: usize = pending.values().map(|b| b.rows).sum();
+    tracing::debug!(
+        target: code_graph::v2::memprobe::TARGET,
+        stage = "writer",
+        entity = stage,
+        tables = pending.len(),
+        rows = pending_rows,
+        bytes_pending = pending_bytes,
+        bytes_inflight = inflight_bytes,
+        bytes_total = pending_bytes + inflight_bytes,
+        "writer occupancy"
+    );
+}
+
 struct DrainLimits {
     max_rows: usize,
     flush_interval: Duration,
@@ -283,6 +370,7 @@ async fn drain(
                         let buf = pending.remove(&table).unwrap();
                         spawn_write(&mut writes, &sem, &writer, table, buf);
                     }
+                    log_writer("submit", &pending);
                 }
             },
             _ = ticker.tick() => {
@@ -301,6 +389,7 @@ async fn drain(
                     let buf = pending.remove(&table).unwrap();
                     spawn_write(&mut writes, &sem, &writer, table, buf);
                 }
+                log_writer("tick", &pending);
             }
             // Reap finished writes so the JoinSet does not grow unbounded between flushes.
             Some(_) = writes.join_next(), if !writes.is_empty() => {}
@@ -322,12 +411,20 @@ fn spawn_write(
     buf: TableBuffer,
 ) {
     let (writer, sem) = (writer.clone(), sem.clone());
+    let tracked = code_graph::v2::memprobe::enabled().then(|| {
+        let buffers = buffer_map(&buf);
+        inflight_enter(&buffers);
+        buffers
+    });
     writes.spawn(async move {
         let _permit = sem
             .acquire_owned()
             .await
             .expect("write semaphore never closes");
         write_part(&writer, &table, buf).await;
+        if let Some(buffers) = tracked {
+            inflight_leave(&buffers);
+        }
     });
 }
 

@@ -238,6 +238,16 @@ depends = ["memprofile:ch"]
 run = 'cargo run -p code-index-profiler --profile memprofile -- "$@"'
 description = "Profile one repository through the full code-indexing path (use -- to pass args)"
 
+[tasks."memprofile:run:goodsize"]
+depends = ["memprofile:ch"]
+run = 'cargo run -p code-index-profiler --profile memprofile --features good-size -- "$@"'
+description = "Same run with mi_good_size accounting, showing size-class rounding on top of requested bytes"
+
+[tasks."memprofile:run:secure"]
+depends = ["memprofile:ch"]
+run = 'cargo run -p code-index-profiler --profile memprofile --features secure-alloc -- "$@"'
+description = "Same run under the mimalloc configuration orbit-server ships (guard pages, encoded free lists)"
+
 [tasks."memprofile:dhat"]
 depends = ["memprofile:ch"]
 run = 'cargo run -p code-index-profiler --profile memprofile --features dhat-heap -- "$@"'

@@ -13,6 +13,17 @@ track-alloc = []
 # Swaps the global allocator for dhat's, producing dhat-heap.json with
 # per-allocation-site attribution at the global peak. Roughly 30x slower.
 dhat-heap = ["dep:dhat"]
+# Counts mi_good_size(requested) alongside requested bytes, giving a continuous
+# size-class rounding series. Costs an FFI call per allocation, so it is a
+# diagnostic mode rather than the default.
+good-size = []
+# Matches orbit-server, which builds mimalloc with guard pages and free-list
+# encoding. Off by default so the historical baselines stay comparable.
+secure-alloc = ["mimalloc/secure"]
+# Charges a reallocation's new block before the copy, so a grow that moves shows
+# both blocks at the high-water mark. Overstates in-place grows, so it brackets
+# the truth from above rather than replacing the default accounting.
+realloc-pessimistic = []
 
 [lints.rust]
 # Downgraded from workspace `forbid` to `deny` so the RSS probe can call
@@ -33,7 +44,8 @@ dhat = { version = "0.3.3", optional = true }
 gitlab-client = { workspace = true }
 indexer = { path = "../indexer", features = ["testkit"] }
 libc = "0.2.186"
-mimalloc = { workspace = true }
+libmimalloc-sys = { version = "0.1.49", features = ["extended"] }
+mimalloc = { workspace = true, features = ["extended"] }
 ontology = { path = "../ontology" }
 orbit-server-config = { path = "../orbit-server-config" }
 orbit-utils = { path = "../utils" }
@@ -44,6 +56,7 @@ serde_json = { workspace = true }
 tempfile = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
+tree-sitter = "0.26.8"
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 uuid = { workspace = true }

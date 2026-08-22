@@ -83,15 +83,19 @@ impl Harness {
         })
     }
 
+    /// `task_id` must increase across rounds: the handler skips any task whose id
+    /// the checkpoint has already seen, so a fixed id turns every re-index into a
+    /// silent no-op and the stale sweep never runs.
     pub async fn index(
         &self,
+        task_id: i64,
         project_id: i64,
         branch: &str,
         commit_sha: &str,
         traversal_path: &str,
     ) -> anyhow::Result<()> {
         let envelope = Envelope::new(&CodeIndexingTaskRequest {
-            task_id: 1,
+            task_id,
             project_id,
             branch: Some(branch.to_string()),
             commit_sha: Some(commit_sha.to_string()),

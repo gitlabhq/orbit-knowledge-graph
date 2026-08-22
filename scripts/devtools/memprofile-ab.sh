@@ -29,6 +29,6 @@ status=0
 for name in es gl; do
   echo
   python3 scripts/devtools/memprofile-compare.py \
-    ".memprofile/runs/${name}-baseline" ".memprofile/runs/${name}-${LABEL}" || status=1
+    ".memprofile/runs/${name}-baseline" --candidate ".memprofile/runs/${name}-${LABEL}" || status=1
 done
 exit "$status"
