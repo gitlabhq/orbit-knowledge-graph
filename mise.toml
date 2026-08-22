@@ -224,6 +224,53 @@ arg "<repo_path>"
 arg "[interval]" default="0.025" help="Sampling interval in seconds"
 '''
 
+[tasks."memprofile:ch"]
+run = './scripts/devtools/memprofile-clickhouse.sh ${usage_action:-up}'
+description = "Start/stop the ClickHouse container used by code-indexing memory profiling"
+usage = 'arg "[action]" default="up" help="up | down | status"'
+
+[tasks."memprofile:corpus"]
+run = './scripts/devtools/memprofile-corpus.sh'
+description = "Download the code-indexing memory-profiling corpus archives"
+
+[tasks."memprofile:run"]
+depends = ["memprofile:ch"]
+run = 'cargo run -p code-index-profiler --profile memprofile -- "$@"'
+description = "Profile one repository through the full code-indexing path (use -- to pass args)"
+
+[tasks."memprofile:dhat"]
+depends = ["memprofile:ch"]
+run = 'cargo run -p code-index-profiler --profile memprofile --features dhat-heap -- "$@"'
+description = "Same run under dhat, producing per-allocation-site attribution at the heap peak"
+
+[tasks."memprofile:report"]
+run = 'python3 scripts/devtools/memprofile-report.py "$@"'
+description = "Render report.md from a code-index-profiler run directory"
+
+[tasks."memprofile:stages"]
+run = 'python3 scripts/devtools/memprofile-stages.py "$@"'
+description = "Per-stage structure breakdown for a code-index-profiler run directory"
+
+[tasks."memprofile:dhat:report"]
+run = 'python3 scripts/devtools/memprofile-dhat.py "$@"'
+description = "Rank dhat allocation stacks by bytes live at the heap peak"
+
+[tasks."memprofile:ab"]
+run = './scripts/devtools/memprofile-ab.sh "$@"'
+description = "Index both corpus repositories and diff each against its baseline"
+
+[tasks."memprofile:regress"]
+run = './scripts/devtools/memprofile-regress.sh'
+description = "Correctness gate for a code-indexing memory change"
+
+[tasks."memprofile:compare"]
+run = 'python3 scripts/devtools/memprofile-compare.py "$@"'
+description = "Diff a candidate profiling run against a baseline and flag regressions"
+
+[tasks."memprofile:vmregions"]
+run = 'python3 scripts/devtools/memprofile-vmregions.py "$@"'
+description = "Summarise a footprint(1) poll log captured during a profiling run"
+
 [tasks."bench:download-repos"]
 run = "gitlab-xtasks benchmark download-repos --config code-indexing-benchmark.yaml"
 description = "Download benchmark repositories"

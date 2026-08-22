@@ -88,6 +88,21 @@ impl StringPool {
         self.index.is_empty()
     }
 
+    /// Bytes the pool holds on the heap: the string arena, the offset index,
+    /// and the dedup map (buckets plus their spilled `Vec<StrId>`).
+    pub fn heap_bytes(&self) -> usize {
+        use std::mem::size_of;
+        let map_entry = size_of::<(u64, u32)>() + size_of::<Vec<StrId>>() + 1;
+        self.buf.capacity()
+            + self.index.capacity() * size_of::<(u32, u32)>()
+            + self.intern_map.capacity() * map_entry
+            + self
+                .intern_map
+                .values()
+                .map(|v| v.capacity() * size_of::<StrId>())
+                .sum::<usize>()
+    }
+
     /// Free the dedup index for a write-once pool. After this a repeat `alloc`
     /// appends a second copy and `find` no longer sees the older ones.
     pub fn shrink_to_arena(&mut self) {

@@ -72,6 +72,16 @@ pub fn convert_code_graph(
     specs: &ConverterSpecs,
 ) -> Result<ConvertedGraphData, ArrowError> {
     let ids = graph.assign_ids(envelope.project_id, &envelope.branch);
+    if code_graph::v2::memprobe::enabled() {
+        tracing::debug!(
+            target: "codegraph_mem",
+            stage = "convert_entity",
+            entity = "node_ids",
+            rows = ids.len(),
+            bytes_arrow = ids.capacity() * std::mem::size_of::<i64>(),
+            "entity converted"
+        );
+    }
     match graph.output {
         GraphOutput::Complete => convert_repository_graph(graph, &ids, envelope, specs),
         GraphOutput::ParsedOnly => convert_semantic_graph(graph, &ids, envelope, specs),
@@ -86,10 +96,15 @@ fn convert_repository_graph(
 ) -> Result<ConvertedGraphData, ArrowError> {
     let branch = convert_branch_row(envelope, &specs.branch)?;
     let directories = convert_directories(graph, ids, envelope, &specs.directory)?;
+    probe("directories", &directories);
     let files = convert_files(graph, ids, envelope, &specs.file)?;
+    probe("files", &files);
     let definitions = convert_definitions(graph, ids, envelope, &specs.definition)?;
+    probe("definitions", &definitions);
     let imported_symbols = convert_imports(graph, ids, envelope, &specs.imported_symbol)?;
+    probe("imported_symbols", &imported_symbols);
     let edges = convert_repository_edges(graph, ids, envelope, specs)?;
+    probe("edges", &edges);
     Ok(ConvertedGraphData {
         branch,
         directories,
@@ -100,6 +115,68 @@ fn convert_repository_graph(
     })
 }
 
+/// One event per entity as its `RecordBatch` lands, so the profiler's tracing
+/// layer can stamp the heap reading at each step of the conversion ramp. Shares
+/// the `codegraph_mem` target with the `code-graph` probes so a run's structure
+/// timeline is one stream.
+fn probe(entity: &str, batch: &dyn ProbeSized) {
+    if !code_graph::v2::memprobe::enabled() {
+        return;
+    }
+    tracing::debug!(
+        target: "codegraph_mem",
+        stage = "convert_entity",
+        entity,
+        rows = batch.rows(),
+        bytes_arrow = batch.arrow_bytes(),
+        "entity converted"
+    );
+    batch.probe_columns(entity);
+}
+
+/// Per-column Arrow bytes, so a wide batch can be attributed to the columns
+/// that actually cost something rather than to the batch as a whole.
+fn probe_batch_columns(entity: &str, batch: &RecordBatch) {
+    for (field, column) in batch.schema().fields().iter().zip(batch.columns()) {
+        tracing::debug!(
+            target: "codegraph_mem",
+            stage = "convert_column",
+            entity,
+            column = field.name().as_str(),
+            arrow_type = %field.data_type(),
+            bytes_arrow = arrow::array::Array::get_array_memory_size(column.as_ref()),
+            "column converted"
+        );
+    }
+}
+
+trait ProbeSized {
+    fn rows(&self) -> usize;
+    fn arrow_bytes(&self) -> usize;
+    fn probe_columns(&self, _entity: &str) {}
+}
+
+impl ProbeSized for RecordBatch {
+    fn rows(&self) -> usize {
+        self.num_rows()
+    }
+    fn arrow_bytes(&self) -> usize {
+        self.get_array_memory_size()
+    }
+    fn probe_columns(&self, entity: &str) {
+        probe_batch_columns(entity, self);
+    }
+}
+
+impl ProbeSized for arrow::array::ArrayRef {
+    fn rows(&self) -> usize {
+        arrow::array::Array::len(self.as_ref())
+    }
+    fn arrow_bytes(&self) -> usize {
+        arrow::array::Array::get_array_memory_size(self.as_ref())
+    }
+}
+
 fn convert_semantic_graph(
     graph: &code_graph::v2::linker::CodeGraph,
     ids: &[i64],
@@ -107,8 +184,11 @@ fn convert_semantic_graph(
     specs: &ConverterSpecs,
 ) -> Result<ConvertedGraphData, ArrowError> {
     let definitions = convert_definitions(graph, ids, envelope, &specs.definition)?;
+    probe("definitions", &definitions);
     let imported_symbols = convert_imports(graph, ids, envelope, &specs.imported_symbol)?;
+    probe("imported_symbols", &imported_symbols);
     let edges = convert_semantic_edges(graph, ids, envelope, specs)?;
+    probe("edges", &edges);
     Ok(ConvertedGraphData {
         branch: convert_empty_branch(&specs.branch)?,
         directories: convert_empty_directories(envelope, &specs.directory)?,
@@ -710,6 +790,7 @@ impl code_graph::v2::GraphConverter for IndexerConverter {
                 } else {
                     drop_columns(&data.edges, code_only_cols)
                 };
+                probe(&format!("edge_single:{table}"), &batch);
                 result.push((table.to_string(), batch));
                 return Ok(result);
             }
@@ -723,6 +804,7 @@ impl code_graph::v2::GraphConverter for IndexerConverter {
                 let idx_array = arrow::array::UInt32Array::from(indices);
                 let mut batch = arrow::compute::take_record_batch(&data.edges, &idx_array)
                     .map_err(|e| SinkError(format!("edge routing: {e}")))?;
+                probe(&format!("edge_take:{table}"), &batch);
                 if !table.contains("code_edge") {
                     batch = drop_columns(&batch, code_only_cols);
                 }

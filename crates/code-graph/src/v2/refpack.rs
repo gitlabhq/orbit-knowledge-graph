@@ -74,6 +74,15 @@ pub struct DecodedRef<'a> {
 }
 
 impl RefPack {
+    /// Bytes this pack holds: three dense index buffers plus its own string arena.
+    pub fn heap_bytes(&self) -> usize {
+        use std::mem::size_of;
+        self.strings.heap_bytes()
+            + self.refs.capacity() * size_of::<PackedRef>()
+            + self.steps.capacity() * size_of::<PackedStep>()
+            + self.values.capacity() * size_of::<PackedValue>()
+    }
+
     pub fn from_refs(refs: &[CollectedRef]) -> Self {
         let mut pack = RefPack {
             strings: StringPool::new(),

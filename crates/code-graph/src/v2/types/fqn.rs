@@ -34,6 +34,10 @@ impl Fqn {
         &self.cached
     }
 
+    pub fn capacity(&self) -> usize {
+        self.cached.capacity()
+    }
+
     pub fn separator(&self) -> &'static str {
         self.separator
     }

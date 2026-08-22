@@ -1,0 +1,49 @@
+[package]
+name = "code-index-profiler"
+version.workspace = true
+edition = "2024"
+license = "LicenseRef-EE"
+publish = false
+
+[features]
+default = ["track-alloc"]
+# Wraps the global allocator to count requested bytes. Off gives a clean
+# baseline for measuring the counter's own cost against the same workload.
+track-alloc = []
+# Swaps the global allocator for dhat's, producing dhat-heap.json with
+# per-allocation-site attribution at the global peak. Roughly 30x slower.
+dhat-heap = ["dep:dhat"]
+
+[lints.rust]
+# Downgraded from workspace `forbid` to `deny` so the RSS probe can call
+# proc_pid_rusage under a local #[allow(unsafe_code)].
+unsafe_code = "deny"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+
+[dependencies]
+anyhow = { workspace = true }
+arrow = { workspace = true }
+axum = { workspace = true }
+base64 = { workspace = true }
+clap = { workspace = true }
+clickhouse-client = { workspace = true }
+dhat = { version = "0.3.3", optional = true }
+gitlab-client = { workspace = true }
+indexer = { path = "../indexer", features = ["testkit"] }
+libc = "0.2.186"
+mimalloc = { workspace = true }
+ontology = { path = "../ontology" }
+orbit-server-config = { path = "../orbit-server-config" }
+orbit-utils = { path = "../utils" }
+query-engine = { path = "../query-engine" }
+rustls = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tempfile = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+uuid = { workspace = true }
