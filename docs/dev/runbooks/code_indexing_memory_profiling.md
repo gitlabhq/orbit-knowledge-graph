@@ -88,6 +88,57 @@ stay independent.
 The tracking allocator costs about 0-3% wall clock. Build with
 `--no-default-features` to drop it and confirm that on a new workload.
 
+Four of these numbers do not depend on the sampler being awake at the right
+moment, and the report prints them next to the sampled ones:
+
+- **exact peak live heap** comes from a high-water mark the allocator wrapper
+  updates itself, every time a thread has moved 64 KiB. The residual error is one
+  threshold per running thread, against a sampled peak that can miss a spike
+  entirely: the sampler's real cadence is around 30 ms, not the nominal 50 Hz.
+- **exact peak footprint** is `ri_lifetime_max_phys_footprint`, the kernel's own
+  high-water mark for the number jetsam acts on.
+- **peak commit** is mimalloc's high-water mark for bytes it asked the OS for.
+  On macOS it runs well above footprint, because a commit is only charged once
+  the page is touched.
+- **size-class rounding** needs the `good-size` feature, which counts
+  `mi_good_size` of every live block alongside the requested size. It costs
+  around 2% wall clock, so it is a diagnostic mode rather than the default.
+
+Tree-sitter allocates through C `malloc`, which no `GlobalAlloc` wrapper can see.
+The profiler points it at the Rust allocator before anything parses, so parse
+trees are on the same books as everything else. That is worth roughly 8M
+allocations on a Python repository, or 40% of all allocation traffic, which
+earlier runs did not count at all.
+
+`orbit-server` builds mimalloc with `secure`, and the profiler does not. Use
+`mise memprofile:run:secure` to measure under the configuration production
+actually ships.
+
+Runs take a lock on the ClickHouse database they use. Two profilers sharing one
+database reset the schema under each other and write into each other's tables,
+and the resulting row counts and timings look plausible rather than obviously
+broken, so the second run refuses to start. Pass a different
+`--clickhouse-database` to run two at once on purpose.
+
+## Steady state and re-indexing
+
+A single run measures a cold process indexing a project for the first time. It
+cannot see either of the two things that set a long-lived pod's memory: the
+stale sweep, which only runs when a checkpoint already exists, and whether
+memory comes back between tasks.
+
+```shell
+mise memprofile:run -- --project-id 100001 --label es-steady \
+  --repeat 3 --settle-secs 3 --flush-between-rounds
+```
+
+Each round uses the next task id, so rounds after the first re-index and take
+the stale-sweep path. The report gains a settled-memory table with one row per
+round. Read it as: live heap that climbs round on round means the pipeline is
+holding something; live heap flat under a climbing footprint means the allocator
+is holding pages. `--flush-between-rounds` drains the write buffer first, which
+separates rows still pooled in the writer from either of those.
+
 ## Structure-level attribution
 
 `code-graph` emits sizes on the `codegraph_mem` target at DEBUG. Every call site
