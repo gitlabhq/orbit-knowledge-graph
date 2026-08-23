@@ -456,20 +456,6 @@ impl ColRef<'_> {
         }
     }
 
-    pub fn push_empty_str_list(&mut self) -> BatchResult<()> {
-        match &mut *self.col {
-            Col::StrList(b, _) => {
-                b.append(true);
-                Ok(())
-            }
-            other => Err(batch_err(format!(
-                "push_empty_str_list on {} column '{}'",
-                other.kind(),
-                self.name
-            ))),
-        }
-    }
-
     pub fn push_str_list(&mut self, values: &[&str]) -> BatchResult<()> {
         match &mut *self.col {
             Col::StrList(b, _) => {
@@ -1091,13 +1077,7 @@ mod tests {
 
         let batch = BatchBuilder::new(&specs, rows.len())
             .unwrap()
-            .build(&rows, |row, b| {
-                if row.0.is_empty() {
-                    b.col("tags")?.push_empty_str_list()
-                } else {
-                    b.col("tags")?.push_str_list(row.0)
-                }
-            })
+            .build(&rows, |row, b| b.col("tags")?.push_str_list(row.0))
             .unwrap();
         assert_eq!(
             ArrowUtils::get_string_list(&batch, "tags", 0),
