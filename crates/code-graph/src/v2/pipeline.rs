@@ -382,7 +382,8 @@ impl<'a> BatchTx<'a> {
 }
 
 impl BatchTx<'_> {
-    pub fn send_graph(&self, graph: CodeGraph) {
+    pub fn send_graph(&self, mut graph: CodeGraph) {
+        graph.release_resolution_state();
         self.stats.record_graph(&graph);
         let batches = match self.converter.convert(graph) {
             Ok(batches) => batches,
@@ -424,12 +425,13 @@ impl BatchTx<'_> {
 }
 
 fn write_graph_direct(
-    graph: CodeGraph,
+    mut graph: CodeGraph,
     converter: &dyn GraphConverter,
     on_batch: &OnBatch,
     errors: &Mutex<Vec<PipelineError>>,
     stats: GraphStatsCounters<'_>,
 ) {
+    graph.release_resolution_state();
     stats.record_graph(&graph);
     let batches = match converter.convert(graph) {
         Ok(batches) => batches,
@@ -1228,6 +1230,8 @@ impl FamilyPipeline {
 
                 let refs = crate::v2::refpack::RefPack::from_refs(&result.refs);
                 result.refs = Vec::new();
+                result.definitions.shrink_to_fit();
+                result.imports.shrink_to_fit();
 
                 let ext = f
                     .path
@@ -1298,6 +1302,16 @@ impl FamilyPipeline {
         let mut total_imports = 0usize;
         let mut files_with_refs: Vec<Option<FileWithRefs>> =
             (0..file_count).map(|_| None).collect();
+
+        let (parsed_files, parsed_defs, parsed_imports) =
+            parsed.iter().flatten().fold((0, 0, 0), |(f, d, i), pf| {
+                (
+                    f + 1,
+                    d + pf.result.definitions.len(),
+                    i + pf.result.imports.len(),
+                )
+            });
+        graph.reserve_for(parsed_files, parsed_defs, parsed_imports);
 
         for parsed_file in parsed.into_iter().flatten() {
             let path = &files[parsed_file.path_idx].path;
@@ -1469,6 +1483,10 @@ impl FamilyPipeline {
                 });
 
                 dedupe_edge_triples(&mut edges);
+                // `dedupe_edge_triples` retains in place and every file's result
+                // is held until the merge, so the slop is repository-wide.
+                edges.shrink_to_fit();
+                failed_chains.shrink_to_fit();
                 total_edges.fetch_add(edges.len(), std::sync::atomic::Ordering::Relaxed);
                 pb2.inc(1);
                 (
@@ -1489,6 +1507,10 @@ impl FamilyPipeline {
 
         let mut all_inferred: Vec<InferredReturns> = Vec::new();
         let mut all_failed: Vec<(FileInfo, Language, Vec<FailedChain>)> = Vec::new();
+
+        graph
+            .graph
+            .reserve_exact_edges(total_edges.load(std::sync::atomic::Ordering::Relaxed));
 
         for (edges, inferred, info_opt, failed_chains, killed) in resolve_results {
             if killed && let Some((ref info, _)) = info_opt {
@@ -1533,9 +1555,9 @@ impl FamilyPipeline {
 
         if !all_failed.is_empty() {
             let phase3_results: Vec<_> = all_failed
-                .par_iter()
+                .into_par_iter()
                 .map(|(info, lang, failed_chains)| {
-                    let lctx = &member_ctxs[lang];
+                    let lctx = &member_ctxs[&lang];
                     let guard = sentinel
                         .as_ref()
                         .map(|(handle, _)| handle.file_start("phase3"));
@@ -1571,13 +1593,14 @@ impl FamilyPipeline {
                         let import_edges = resolver.drain_import_edges();
                         if edges.len() == before {
                             if import_edges.is_empty() {
-                                edges.extend(failed.pending_import_edges.clone());
+                                edges.extend(failed.pending_import_edges);
                             } else {
                                 edges.extend(import_edges);
                             }
                         }
                     }
                     dedupe_edge_triples(&mut edges);
+                    edges.shrink_to_fit();
                     edges
                 })
                 .collect();

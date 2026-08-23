@@ -291,6 +291,9 @@ pub enum ColumnType {
     TimestampMicros,
     /// `Array(String)` — variable-length list of strings.
     StrList,
+    /// `Array(String)` carried on the wire as dictionary keys. Use it when the
+    /// same handful of values repeat across rows; the column type is unchanged.
+    DictStrList,
 }
 
 #[derive(Debug, Clone)]
@@ -310,6 +313,12 @@ enum Col {
     Bool(BooleanBuilder, bool),
     Timestamp(TimestampMicrosecondBuilder, bool),
     StrList(arrow::array::ListBuilder<StringBuilder>, bool),
+    DictStrList(
+        arrow::array::ListBuilder<
+            arrow::array::StringDictionaryBuilder<arrow::datatypes::Int32Type>,
+        >,
+        bool,
+    ),
 }
 
 impl std::fmt::Debug for Col {
@@ -327,6 +336,7 @@ impl Col {
             Self::Bool(b, _) => b.len(),
             Self::Timestamp(b, _) => b.len(),
             Self::StrList(b, _) => b.len(),
+            Self::DictStrList(b, _) => b.len(),
         }
     }
 
@@ -338,6 +348,7 @@ impl Col {
             Self::Bool(..) => "Bool",
             Self::Timestamp(..) => "Timestamp",
             Self::StrList(..) => "StrList",
+            Self::DictStrList(..) => "DictStrList",
         }
     }
 
@@ -357,6 +368,10 @@ impl Col {
                 Arc::new(b.finish().with_timezone("UTC")),
             ),
             Self::StrList(mut b, nullable) => {
+                let arr = b.finish();
+                (arr.data_type().clone(), nullable, Arc::new(arr))
+            }
+            Self::DictStrList(mut b, nullable) => {
                 let arr = b.finish();
                 (arr.data_type().clone(), nullable, Arc::new(arr))
             }
@@ -441,23 +456,17 @@ impl ColRef<'_> {
         }
     }
 
-    pub fn push_empty_str_list(&mut self) -> BatchResult<()> {
-        match &mut *self.col {
-            Col::StrList(b, _) => {
-                b.append(true);
-                Ok(())
-            }
-            other => Err(batch_err(format!(
-                "push_empty_str_list on {} column '{}'",
-                other.kind(),
-                self.name
-            ))),
-        }
-    }
-
     pub fn push_str_list(&mut self, values: &[&str]) -> BatchResult<()> {
         match &mut *self.col {
             Col::StrList(b, _) => {
+                let vals = b.values();
+                for v in values {
+                    vals.append_value(v);
+                }
+                b.append(true);
+                Ok(())
+            }
+            Col::DictStrList(b, _) => {
                 let vals = b.values();
                 for v in values {
                     vals.append_value(v);
@@ -527,6 +536,10 @@ pub struct BatchBuilder {
     index: FxHashMap<String, usize>,
 }
 
+/// Distinct values a `LowCardinality` column is expected to hold before its
+/// dictionary has to grow.
+const DICT_VALUES_HINT: usize = 64;
+
 impl BatchBuilder {
     pub fn new(specs: &[ColumnSpec], cap: usize) -> BatchResult<Self> {
         let mut names = Vec::with_capacity(specs.len());
@@ -543,8 +556,14 @@ impl BatchBuilder {
                 ColumnType::Str => {
                     Col::Str(StringBuilder::with_capacity(cap, cap * 8), spec.nullable)
                 }
+                // The keys buffer is one i32 per row, so it needs the row
+                // capacity; left at zero it doubles and keeps the slop.
                 ColumnType::DictStr => Col::DictStr(
-                    arrow::array::StringDictionaryBuilder::<arrow::datatypes::Int32Type>::new(),
+                    arrow::array::StringDictionaryBuilder::<arrow::datatypes::Int32Type>::with_capacity(
+                        cap,
+                        DICT_VALUES_HINT,
+                        DICT_VALUES_HINT * 16,
+                    ),
                     spec.nullable,
                 ),
                 ColumnType::Bool => Col::Bool(BooleanBuilder::with_capacity(cap), spec.nullable),
@@ -554,6 +573,17 @@ impl BatchBuilder {
                 ),
                 ColumnType::StrList => Col::StrList(
                     arrow::array::ListBuilder::new(StringBuilder::with_capacity(cap, cap * 8)),
+                    spec.nullable,
+                ),
+                ColumnType::DictStrList => Col::DictStrList(
+                    arrow::array::ListBuilder::with_capacity(
+                        arrow::array::StringDictionaryBuilder::<arrow::datatypes::Int32Type>::with_capacity(
+                            cap,
+                            DICT_VALUES_HINT,
+                            DICT_VALUES_HINT * 16,
+                        ),
+                        cap,
+                    ),
                     spec.nullable,
                 ),
             };
@@ -1047,13 +1077,7 @@ mod tests {
 
         let batch = BatchBuilder::new(&specs, rows.len())
             .unwrap()
-            .build(&rows, |row, b| {
-                if row.0.is_empty() {
-                    b.col("tags")?.push_empty_str_list()
-                } else {
-                    b.col("tags")?.push_str_list(row.0)
-                }
-            })
+            .build(&rows, |row, b| b.col("tags")?.push_str_list(row.0))
             .unwrap();
         assert_eq!(
             ArrowUtils::get_string_list(&batch, "tags", 0),

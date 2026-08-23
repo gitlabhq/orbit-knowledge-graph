@@ -23,8 +23,8 @@ use super::state::{DefinitionRangeIndex, GraphDef, GraphImport, GraphIndexes, St
 
 #[derive(Debug, Clone)]
 pub enum GraphNode {
-    Directory(CanonicalDirectory),
-    File(CanonicalFile),
+    Directory(Box<CanonicalDirectory>),
+    File(Box<CanonicalFile>),
     Definition { file_path: Arc<str>, id: DefId },
     Import { file_path: Arc<str>, id: ImportId },
 }
@@ -47,14 +47,14 @@ impl GraphNode {
 
     pub fn as_directory(&self) -> Option<&CanonicalDirectory> {
         match self {
-            GraphNode::Directory(d) => Some(d),
+            GraphNode::Directory(d) => Some(d.as_ref()),
             _ => None,
         }
     }
 
     pub fn as_file(&self) -> Option<&CanonicalFile> {
         match self {
-            GraphNode::File(f) => Some(f),
+            GraphNode::File(f) => Some(f.as_ref()),
             _ => None,
         }
     }
@@ -246,6 +246,25 @@ impl CodeGraph {
         self.strings.get(id)
     }
 
+    /// Pre-size every growable container from counts the caller already knows,
+    /// so the construction loop never pays amortized doubling.
+    pub fn reserve_for(&mut self, files: usize, definitions: usize, imports: usize) {
+        self.graph.reserve_exact_nodes(
+            (files + definitions + imports).saturating_sub(self.graph.node_count()),
+        );
+        self.defs.reserve_exact(definitions);
+        self.imports.reserve_exact(imports);
+    }
+
+    /// Drop what only the resolver read, before the converter holds the graph
+    /// across the Arrow build. Sealing stops the pool deduping, so call it once.
+    pub fn release_resolution_state(&mut self) {
+        self.indexes.drop_resolution_indexes();
+        self.strings.seal();
+        self.graph.shrink_to_fit_nodes();
+        self.graph.shrink_to_fit_edges();
+    }
+
     pub fn add_file(
         &mut self,
         path: &str,
@@ -308,14 +327,14 @@ impl CodeGraph {
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_default();
 
-        let file_node = self.graph.add_node(GraphNode::File(CanonicalFile {
+        let file_node = self.graph.add_node(GraphNode::File(Box::new(CanonicalFile {
             path: relative_path.clone(),
             name: file_name,
             extension: extension.to_string(),
             language,
             size: file_size,
             reason,
-        }));
+        })));
         if let Some(fi) = &mut self.indexes.file_index {
             fi.insert(relative_path.clone(), file_node);
         }
@@ -520,10 +539,10 @@ impl CodeGraph {
                     .unwrap_or_else(|| dir_path.clone());
                 let idx = self
                     .graph
-                    .add_node(GraphNode::Directory(CanonicalDirectory {
+                    .add_node(GraphNode::Directory(Box::new(CanonicalDirectory {
                         path: dir_path.clone(),
                         name,
-                    }));
+                    })));
                 dir_index.insert(dir_path.clone(), idx);
 
                 if let Some(parent_dir) = Path::new(dir_path).parent() {

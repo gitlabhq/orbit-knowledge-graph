@@ -256,6 +256,15 @@ impl GraphIndexes {
         self.dir_index = None;
         self.file_index = None;
     }
+
+    /// Free the resolution-only indexes; the Arrow converter never reads them.
+    pub fn drop_resolution_indexes(&mut self) {
+        self.by_fqn = VerifiedMap::new();
+        self.by_name = VerifiedMap::new();
+        self.nested = NestedMap::new();
+        self.ancestors = FxHashMap::default();
+        self.definition_ranges = FxHashMap::default();
+    }
 }
 
 impl Default for GraphIndexes {
