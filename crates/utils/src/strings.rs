@@ -12,6 +12,9 @@ pub struct StringPool {
     /// Maps (hash64, byte_len) → list of StrIds with that hash+len.
     /// On lookup, each candidate is verified by full string comparison.
     intern_map: FxHashMap<(u64, u32), Vec<StrId>>,
+    /// Set by [`StringPool::seal`]. Interning after that point silently appends
+    /// duplicates, so for a sealed pool it is a bug rather than a slow path.
+    sealed: bool,
 }
 
 impl Default for StringPool {
@@ -26,6 +29,7 @@ impl StringPool {
             buf: String::new(),
             index: Vec::new(),
             intern_map: FxHashMap::default(),
+            sealed: false,
         }
     }
 
@@ -34,11 +38,16 @@ impl StringPool {
             buf: String::with_capacity(cap * 32),
             index: Vec::with_capacity(cap),
             intern_map: FxHashMap::with_capacity_and_hasher(cap, Default::default()),
+            sealed: false,
         }
     }
 
     /// Intern a string. Returns the same `StrId` for identical content.
     pub fn alloc(&mut self, s: &str) -> StrId {
+        debug_assert!(
+            !self.sealed,
+            "interning into a sealed pool appends a duplicate instead of deduplicating"
+        );
         let key = (fxhash_str(s), s.len() as u32);
 
         if let Some(candidates) = self.intern_map.get(&key) {
@@ -79,11 +88,19 @@ impl StringPool {
         self.index.is_empty()
     }
 
-    /// Free the dedup index for a write-once pool; `get` still works, a later `alloc` rebuilds it.
+    /// Free the dedup index for a write-once pool. After this a repeat `alloc`
+    /// appends a second copy and `find` no longer sees the older ones.
     pub fn shrink_to_arena(&mut self) {
         self.intern_map = FxHashMap::default();
         self.buf.shrink_to_fit();
         self.index.shrink_to_fit();
+    }
+
+    /// [`shrink_to_arena`](Self::shrink_to_arena) plus a debug assertion on later
+    /// `alloc`. Use it when the pool outlives the shrink, where a dup is a bug.
+    pub fn seal(&mut self) {
+        self.sealed = true;
+        self.shrink_to_arena();
     }
 }
 
