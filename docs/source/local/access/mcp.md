@@ -31,15 +31,15 @@ local graph. AI assistants like Claude Code, Codex, Cursor, and OpenCode
 can then access your graph and write SQL queries
 against it.
 
-The GitLab Orbit Local MCP server is stateless, which means the server:
+The GitLab Orbit Local MCP server is stateless. This means the server has the following characteristics:
 
-- Queries your local graph, not a GitLab instance
-- Does not cache results or persist query history
-- Can respond to multiple clients independently
+- It queries your local graph, not a GitLab instance.
+- It does not cache results or persist query history.
+- It can respond to multiple clients independently.
 
 ## Prerequisites
 
-- Install either:
+- Install either of the following tools:
   - The [GitLab Orbit CLI](./cli.md) (`orbit`)
   - The [GitLab CLI](./glab.md) (`glab orbit`)
 
