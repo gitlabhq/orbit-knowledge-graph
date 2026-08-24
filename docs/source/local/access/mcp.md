@@ -20,10 +20,6 @@ title: GitLab Orbit Local MCP server
 
 {{< /history >}}
 
-> [!flag]
-> The availability of this feature is controlled by a feature flag.
-> For more information, see the history.
-> This feature is available for testing, but not ready for production use.
 
 With the GitLab Orbit Local [Model Context Protocol](https://modelcontextprotocol.io/)
 (MCP) server, you can securely connect AI tools and applications to your
