@@ -9,6 +9,10 @@ resource "google_container_cluster" "bench" {
   enable_shielded_nodes = true
   datapath_provider     = "ADVANCED_DATAPATH"
 
+  release_channel {
+    channel = "REGULAR"
+  }
+
   network    = google_compute_network.bench.id
   subnetwork = google_compute_subnetwork.bench.id
 

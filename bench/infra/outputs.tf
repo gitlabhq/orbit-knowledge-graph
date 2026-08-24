@@ -24,11 +24,11 @@ output "node_pool_count" {
 }
 
 output "datalake_dumps_bucket" {
-  value = google_storage_bucket.datalake_dumps.name
+  value = local.bench.buckets.datalake_dumps
 }
 
 output "code_corpus_bucket" {
-  value = google_storage_bucket.code_corpus.name
+  value = local.bench.buckets.code_corpus
 }
 
 output "dedicated_ch_pool" {
