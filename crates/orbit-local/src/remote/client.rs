@@ -1,6 +1,8 @@
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use anyhow::bail;
+use serde::Deserialize;
 
 use super::error::{EXIT_GENERIC, RemoteError, map_http_error};
 
@@ -21,6 +23,7 @@ pub(crate) struct OrbitClient {
     http: reqwest::Client,
 }
 
+#[derive(Clone)]
 struct ResolvedEndpoint {
     base_url: String,
     header_name: String,
@@ -29,7 +32,8 @@ struct ResolvedEndpoint {
 
 impl OrbitClient {
     pub(crate) fn from_env() -> Result<Self, RemoteError> {
-        let endpoint = resolve_endpoint(|key| std::env::var(key).ok())?;
+        let endpoint =
+            resolve_endpoint(|key| std::env::var(key).ok(), resolve_via_credential_helper)?;
 
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
@@ -120,7 +124,23 @@ impl OrbitClient {
     }
 }
 
-fn resolve_endpoint(get_env: impl Fn(&str) -> Option<String>) -> anyhow::Result<ResolvedEndpoint> {
+#[derive(Deserialize)]
+struct CredentialHelperResponse {
+    #[serde(rename = "type")]
+    response_type: String,
+    instance_url: Option<String>,
+    token: Option<CredentialHelperToken>,
+}
+
+#[derive(Deserialize)]
+struct CredentialHelperToken {
+    token: String,
+}
+
+fn resolve_endpoint(
+    get_env: impl Fn(&str) -> Option<String>,
+    credential_helper: impl FnOnce() -> Option<ResolvedEndpoint>,
+) -> anyhow::Result<ResolvedEndpoint> {
     let non_empty = |key: &str| get_env(key).filter(|value| !value.is_empty());
 
     if let (Some(base_url), Some(header_name), Some(header_value)) = (
@@ -150,16 +170,61 @@ fn resolve_endpoint(get_env: impl Fn(&str) -> Option<String>) -> anyhow::Result<
         });
     }
 
+    if let Some(endpoint) = credential_helper() {
+        return Ok(endpoint);
+    }
+
     bail!(
         "no Orbit credential found\n\n\
          Set ORBIT_API_BASE_URL, ORBIT_AUTH_HEADER_NAME, and ORBIT_AUTH_HEADER_VALUE,\n\
-         or set GITLAB_TOKEN with an optional GITLAB_URL. Running through `glab orbit`\n\
-         injects these automatically."
+         set GITLAB_TOKEN with an optional GITLAB_URL, or run `glab auth login` so the\n\
+         credential-helper can provide a token. Running through `glab orbit` works too."
     );
 }
 
+fn resolve_via_credential_helper() -> Option<ResolvedEndpoint> {
+    static CACHED: OnceLock<Option<ResolvedEndpoint>> = OnceLock::new();
+
+    CACHED
+        .get_or_init(|| {
+            let output = std::process::Command::new("glab")
+                .args(["auth", "credential-helper"])
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::null())
+                .output()
+                .ok()?;
+
+            if !output.status.success() {
+                return None;
+            }
+
+            parse_credential_helper_response(&output.stdout)
+        })
+        .clone()
+}
+
+fn parse_credential_helper_response(json: &[u8]) -> Option<ResolvedEndpoint> {
+    let resp: CredentialHelperResponse = serde_json::from_slice(json).ok()?;
+    if resp.response_type != "success" {
+        return None;
+    }
+
+    let token = resp.token?;
+    let base_url = resp
+        .instance_url
+        .unwrap_or_else(|| DEFAULT_GITLAB_BASE_URL.to_string());
+
+    Some(ResolvedEndpoint {
+        base_url,
+        header_name: "Authorization".to_string(),
+        header_value: format!("Bearer {}", token.token),
+    })
+}
+
 pub(crate) fn instance_host() -> Option<String> {
-    let endpoint = resolve_endpoint(|key| std::env::var(key).ok()).ok()?;
+    let endpoint =
+        resolve_endpoint(|key| std::env::var(key).ok(), resolve_via_credential_helper).ok()?;
     host_of(&endpoint.base_url)
 }
 
@@ -223,12 +288,15 @@ mod tests {
 
     #[test]
     fn orbit_triplet_takes_precedence() {
-        let endpoint = resolve_endpoint(env_from(&[
-            ("ORBIT_API_BASE_URL", "https://example.test"),
-            ("ORBIT_AUTH_HEADER_NAME", "Private-Token"),
-            ("ORBIT_AUTH_HEADER_VALUE", "glpat-xyz"),
-            ("GITLAB_TOKEN", "ignored"),
-        ]))
+        let endpoint = resolve_endpoint(
+            env_from(&[
+                ("ORBIT_API_BASE_URL", "https://example.test"),
+                ("ORBIT_AUTH_HEADER_NAME", "Private-Token"),
+                ("ORBIT_AUTH_HEADER_VALUE", "glpat-xyz"),
+                ("GITLAB_TOKEN", "ignored"),
+            ]),
+            || None,
+        )
         .expect("triplet resolves");
         assert_eq!(endpoint.base_url, "https://example.test");
         assert_eq!(endpoint.header_name, "Private-Token");
@@ -237,8 +305,8 @@ mod tests {
 
     #[test]
     fn gitlab_token_falls_back_to_bearer() {
-        let endpoint =
-            resolve_endpoint(env_from(&[("GITLAB_TOKEN", "glpat-abc")])).expect("token resolves");
+        let endpoint = resolve_endpoint(env_from(&[("GITLAB_TOKEN", "glpat-abc")]), || None)
+            .expect("token resolves");
         assert_eq!(endpoint.base_url, "https://gitlab.com");
         assert_eq!(endpoint.header_name, "Authorization");
         assert_eq!(endpoint.header_value, "Bearer glpat-abc");
@@ -246,23 +314,70 @@ mod tests {
 
     #[test]
     fn gitlab_url_overrides_default_base() {
-        let endpoint = resolve_endpoint(env_from(&[
-            ("GITLAB_TOKEN", "glpat-abc"),
-            ("GITLAB_URL", "https://gitlab.example.com"),
-        ]))
+        let endpoint = resolve_endpoint(
+            env_from(&[
+                ("GITLAB_TOKEN", "glpat-abc"),
+                ("GITLAB_URL", "https://gitlab.example.com"),
+            ]),
+            || None,
+        )
         .expect("token resolves");
         assert_eq!(endpoint.base_url, "https://gitlab.example.com");
     }
 
     #[test]
     fn partial_orbit_triplet_falls_through_to_error() {
-        let result = resolve_endpoint(env_from(&[("ORBIT_API_BASE_URL", "https://example.test")]));
+        let result = resolve_endpoint(
+            env_from(&[("ORBIT_API_BASE_URL", "https://example.test")]),
+            || None,
+        );
         assert!(result.is_err());
     }
 
     #[test]
     fn no_credential_is_a_clear_error() {
-        let result = resolve_endpoint(env_from(&[]));
+        let result = resolve_endpoint(env_from(&[]), || None);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn credential_helper_success_with_pat() {
+        let json = br#"{"type":"success","instance_url":"https://gitlab.example.com","token":{"type":"pat","token":"glpat-abc"}}"#;
+        let ep = parse_credential_helper_response(json).expect("parses success");
+        assert_eq!(ep.base_url, "https://gitlab.example.com");
+        assert_eq!(ep.header_name, "Authorization");
+        assert_eq!(ep.header_value, "Bearer glpat-abc");
+    }
+
+    #[test]
+    fn credential_helper_success_with_oauth2() {
+        let json = br#"{"type":"success","instance_url":"https://gitlab.com","token":{"type":"oauth2","token":"oauth-tok","expiry_timestamp":"2026-01-01T00:00:00Z"}}"#;
+        let ep = parse_credential_helper_response(json).expect("parses success");
+        assert_eq!(ep.base_url, "https://gitlab.com");
+        assert_eq!(ep.header_value, "Bearer oauth-tok");
+    }
+
+    #[test]
+    fn credential_helper_defaults_to_gitlab_com_when_instance_url_missing() {
+        let json = br#"{"type":"success","token":{"type":"pat","token":"glpat-xyz"}}"#;
+        let ep = parse_credential_helper_response(json).expect("parses success");
+        assert_eq!(ep.base_url, "https://gitlab.com");
+    }
+
+    #[test]
+    fn credential_helper_error_response_returns_none() {
+        let json = br#"{"type":"error","message":"glab is not authenticated"}"#;
+        assert!(parse_credential_helper_response(json).is_none());
+    }
+
+    #[test]
+    fn credential_helper_malformed_json_returns_none() {
+        assert!(parse_credential_helper_response(b"not json").is_none());
+    }
+
+    #[test]
+    fn credential_helper_missing_token_returns_none() {
+        let json = br#"{"type":"success","instance_url":"https://gitlab.com"}"#;
+        assert!(parse_credential_helper_response(json).is_none());
     }
 }
