@@ -322,6 +322,12 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
                 .insert(edge_name.clone(), desc.clone());
         }
 
+        if let Some(weight) = edge_def.search_weight {
+            ontology
+                .edge_search_weights
+                .insert(edge_name.clone(), weight);
+        }
+
         let (pipelines, reindex_sources) =
             edge_def.into_pipelines(edge_name, edge_path, &etl_settings, reader)?;
         if !pipelines.is_empty() {

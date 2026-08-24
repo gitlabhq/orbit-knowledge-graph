@@ -316,6 +316,7 @@ mod tests {
         let ddl = query_engine::compiler::generate_local_ddl(&ont, MANIFEST_DDL);
         assert!(ddl.contains("CREATE TABLE"));
         assert!(ddl.contains("_orbit_manifest"));
+        assert!(ddl.contains("search_text"));
         assert!(ddl.contains("SCHEMA_VERSION="));
     }
 

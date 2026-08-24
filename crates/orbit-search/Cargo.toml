@@ -1,0 +1,12 @@
+[package]
+name = "orbit-search"
+version.workspace = true
+edition = "2024"
+license = "LicenseRef-EE"
+
+[lints]
+workspace = true
+
+[dependencies]
+rust-stemmers = { workspace = true }
+stop-words = { workspace = true }
