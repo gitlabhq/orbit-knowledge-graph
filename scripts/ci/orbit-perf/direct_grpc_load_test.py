@@ -433,6 +433,44 @@ QUERIES = {
                      "rel_types": ["MEMBER_OF", "CONTAINS", "IN_PROJECT"]},
         },
     },
+    # ---- stress queries: heavier scans to surface ClickHouse memory / large
+    # result-set behaviour (analogues of staging's stress_search_1000 /
+    # stress_neighbors_wide / stress_traversal_wide). The 0.83.1 DSL requires
+    # node_ids on >=1 node, so these scale the *limit* rather than going fully
+    # unbounded (an unbounded aggregation is rejected as a compile error on v72).
+    "stress: search notes (1000)": {
+        "type": "query",
+        "body": {
+            "query_type": "traversal",
+            "node": {"id": "n", "entity": "Note", "node_ids": [1]},
+            "limit": 1000,
+        },
+    },
+    "stress: neighbors (wide)": {
+        "type": "query",
+        "body": {
+            "query_type": "neighbors",
+            "node": {"id": "g", "entity": "Group", "node_ids": [2]},
+            "neighbors": {"node": "g", "direction": "both"},
+            "limit": 1000,
+        },
+    },
+    "stress: traversal (wide 2-join)": {
+        "type": "query",
+        "body": {
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "g", "entity": "Group", "node_ids": [2]},
+                {"id": "p", "entity": "Project"},
+                {"id": "n", "entity": "Note"},
+            ],
+            "relationships": [
+                {"type": "CONTAINS", "from": "g", "to": "p", "direction": "outgoing"},
+                {"type": "IN_PROJECT", "from": "n", "to": "p", "direction": "outgoing"},
+            ],
+            "limit": 2000,
+        },
+    },
 }
 
 # Friendly names mapping for --query flag
