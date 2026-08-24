@@ -1,3 +1,13 @@
+## [0.105.2](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.105.1...v0.105.2) (2026-08-24)
+
+### Performance
+
+* **indexer:** reduce RAM usage by 50% ([88bc45d](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/88bc45d63015a3b03414bdbf06c557cae63604a7)) by Bohdan Parkhomchuk
+
+### Other
+
+* **Orbit:** refactors the gitLab orbit local mcp server page ([8113183](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/8113183f1b4c23d60813ecb1fe26f15c62c89657)) by Zachary Painter
+
 ## [0.105.1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.105.0...v0.105.1) (2026-08-21)
 
 ### Fixes
