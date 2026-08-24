@@ -83,4 +83,3 @@ orbit setup --local <ai_assistant>
 
 For more information, see
 [set up your AI assistant](cli.md#set-up-your-ai-assistant).
-
