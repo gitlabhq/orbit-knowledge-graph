@@ -56,7 +56,7 @@ impl LocalBackend {
         }
 
         Ok(Self {
-            search: DuckDbSearch::new(client, pid, &git.commit_sha),
+            search: DuckDbSearch::new(client, pid, &git.commit_sha)?,
             header: format!("{} @ {}", git.repo_path.display(), git.commit_sha),
             root: git.repo_path,
         })
@@ -129,7 +129,7 @@ mod tests {
         }
 
         fn search(self) -> DuckDbSearch {
-            DuckDbSearch::new(self.client, 7, "sha")
+            DuckDbSearch::new(self.client, 7, "sha").unwrap()
         }
     }
 

@@ -18,12 +18,15 @@ pub struct DuckDbSearch {
 }
 
 impl DuckDbSearch {
-    pub fn new(client: DuckDbClient, project_id: i64, commit_sha: &str) -> Self {
-        Self {
+    pub fn new(client: DuckDbClient, project_id: i64, commit_sha: &str) -> Result<Self> {
+        let sha = sql_lit(commit_sha);
+        ensure_search_text(&client, project_id, &sha)?;
+        client.execute(&corpus_view_sql(project_id, &sha), &[])?;
+        Ok(Self {
             client,
             pid: project_id,
-            sha: sql_lit(commit_sha),
-        }
+            sha,
+        })
     }
 
     pub fn ask(
@@ -40,19 +43,13 @@ impl DuckDbSearch {
     }
 
     pub fn search(&self, terms: &[String]) -> Result<(Vec<CorpusRow>, Option<Vec<f64>>)> {
-        if !has_search_text(&self.client, self.pid, &self.sha)? {
-            anyhow::bail!(
-                "local graph has no ranked-search data for this commit; \
-                 re-index the repository (`orbit index <path>`)"
-            );
-        }
-        let (total, per_term) = term_counts(&self.client, self.pid, &self.sha, terms)?;
+        let (total, per_term) = term_counts(&self.client, terms)?;
         let n = total.max(1) as f64;
         let weights: Vec<f64> = per_term
             .iter()
             .map(|df| (1.0 + n / (1.0 + *df as f64)).ln())
             .collect();
-        let sql = bm25_candidates_sql(self.pid, &self.sha, terms, &weights, LOCAL_CANDIDATES);
+        let sql = bm25_candidates_sql(terms, &weights, LOCAL_CANDIDATES);
         let corpus = rows_from_batches(&query(&self.client, &sql)?);
         Ok((corpus, Some(weights)))
     }
@@ -64,7 +61,7 @@ impl AskSource for DuckDbSearch {
     }
 
     fn token_df(&self, tokens: &[String]) -> Result<Vec<i64>> {
-        let (_, dfs) = term_counts(&self.client, self.pid, &self.sha, tokens)?;
+        let (_, dfs) = term_counts(&self.client, tokens)?;
         Ok(dfs)
     }
 
@@ -90,6 +87,9 @@ impl NeighborhoodSource for DuckDbSearch {
     type Error = anyhow::Error;
 
     fn hop(&self, ids: &[&str], cap: usize) -> Result<Vec<NeighborhoodEdge>> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
         let list = ids.join(", ");
         let batches = query(
             &self.client,
@@ -194,27 +194,35 @@ fn query(client: &DuckDbClient, sql: &str) -> Result<Vec<RecordBatch>> {
     })
 }
 
-fn has_search_text(client: &DuckDbClient, project_id: i64, sha: &str) -> Result<bool> {
+fn ensure_search_text(client: &DuckDbClient, project_id: i64, sha: &str) -> Result<()> {
     let columns = client.query_arrow(
         "SELECT CAST(COUNT(*) AS BIGINT) AS n FROM information_schema.columns
  WHERE table_name = 'gl_definition' AND column_name = 'search_text'",
     )?;
-    if scalar_i64(&columns) == 0 {
-        return Ok(false);
-    }
-    let batches = client.query_arrow(&format!(
-        "SELECT CAST(COUNT(*) AS BIGINT) AS n FROM (
+    let indexed = scalar_i64(&columns) > 0
+        && scalar_i64(&client.query_arrow(&format!(
+            "SELECT CAST(COUNT(*) AS BIGINT) AS n FROM (
   SELECT 1 FROM gl_definition
   WHERE project_id = {project_id} AND commit_sha = {sha} AND token_count > 0
   LIMIT 1
 )"
-    ))?;
-    Ok(scalar_i64(&batches) > 0)
+        ))?) > 0;
+    if !indexed {
+        anyhow::bail!(
+            "local graph has no ranked-search data for this commit; \
+             re-index the repository (`orbit index <path>`)"
+        );
+    }
+    Ok(())
 }
 
-fn corpus_predicate(pid: i64, sha: &str) -> String {
+fn corpus_view_sql(pid: i64, sha: &str) -> String {
     format!(
-        "d.project_id = {pid} AND d.commit_sha = {sha}
+        "CREATE OR REPLACE TEMP VIEW search_corpus AS
+SELECT d.id, d.fqn, d.definition_type, d.file_path, d.start_line, d.end_line,
+       d.search_text, d.token_count
+FROM gl_definition d
+WHERE d.project_id = {pid} AND d.commit_sha = {sha}
   AND regexp_matches(d.file_path, {source_only})
   AND NOT regexp_matches(d.name, '^[0-9]+$')
   AND d.fqn NOT LIKE '%@%'
@@ -244,7 +252,7 @@ fn exclusions(col: &str) -> String {
 }
 
 fn token_like_sql(term: &str) -> Option<String> {
-    let tokens = query_tokens(std::slice::from_ref(&term.to_string()));
+    let tokens = query_tokens(&[term.to_string()]);
     if tokens.is_empty() {
         return None;
     }
@@ -261,7 +269,7 @@ fn token_like_sql(term: &str) -> Option<String> {
 }
 
 fn token_tf_sql(term: &str) -> Option<String> {
-    let tokens = query_tokens(std::slice::from_ref(&term.to_string()));
+    let tokens = query_tokens(&[term.to_string()]);
     if tokens.is_empty() {
         return None;
     }
@@ -296,33 +304,28 @@ LEFT JOIN deg ON deg.id = c.id"
     )
 }
 
-fn bm25_candidates_sql(
-    pid: i64,
-    sha: &str,
-    terms: &[String],
-    weights: &[f64],
-    cap: usize,
-) -> String {
+fn bm25_candidates_sql(terms: &[String], weights: &[f64], cap: usize) -> String {
     let match_clauses: Vec<String> = terms.iter().filter_map(|t| token_like_sql(t)).collect();
     let any_match = if match_clauses.is_empty() {
         "FALSE".to_string()
     } else {
         format!("({})", match_clauses.join(" OR "))
     };
-    let score_parts: Vec<String> = terms
-        .iter()
-        .enumerate()
-        .filter_map(|(i, t)| {
-            let tf = token_tf_sql(t)?;
-            let idf = weights.get(i).copied().unwrap_or(1.0);
-            Some(format!(
-                "{idf:.6} * {tf} * ({k1} + 1)
-           / ({tf} + {k1} * (1 - {b} + {b} * d.token_count / s.avgdl))",
-                k1 = BM25_K1,
-                b = BM25_B,
-            ))
-        })
-        .collect();
+    let mut tf_cols = String::new();
+    let mut score_parts: Vec<String> = Vec::new();
+    for (i, term) in terms.iter().enumerate() {
+        let Some(tf) = token_tf_sql(term) else {
+            continue;
+        };
+        let idf = weights.get(i).copied().unwrap_or(1.0);
+        tf_cols.push_str(&format!(",\n         {tf} AS tf_{i}"));
+        score_parts.push(format!(
+            "{idf:.6} * tf_{i} * ({k1} + 1)
+           / (tf_{i} + {k1} * (1 - {b} + {b} * token_count / avgdl))",
+            k1 = BM25_K1,
+            b = BM25_B,
+        ));
+    }
     let score = if score_parts.is_empty() {
         "0".to_string()
     } else {
@@ -330,29 +333,24 @@ fn bm25_candidates_sql(
     };
     corpus_rows_sql(&format!(
         "stats AS (
-  SELECT GREATEST(AVG(d.token_count), 1) AS avgdl
-  FROM gl_definition d
-  WHERE {pred}
+  SELECT GREATEST(AVG(token_count), 1) AS avgdl FROM search_corpus
+),
+matched AS (
+  SELECT d.id, d.fqn, d.definition_type, d.file_path, d.start_line, d.end_line,
+         d.token_count{tf_cols}
+  FROM search_corpus d
+  WHERE {any_match}
 ),
 cand AS (
-  SELECT d.id, d.fqn, d.definition_type, d.file_path, d.start_line, d.end_line
-  FROM gl_definition d
-  CROSS JOIN stats s
-  WHERE {pred}
-  AND {any_match}
-  ORDER BY ({score}) DESC, length(d.fqn) ASC
+  SELECT id, fqn, definition_type, file_path, start_line, end_line
+  FROM matched CROSS JOIN stats
+  ORDER BY ({score}) DESC, length(fqn) ASC
   LIMIT {cap}
-)",
-        pred = corpus_predicate(pid, sha),
+)"
     ))
 }
 
-fn term_counts(
-    client: &DuckDbClient,
-    pid: i64,
-    sha: &str,
-    terms: &[String],
-) -> Result<(i64, Vec<i64>)> {
+fn term_counts(client: &DuckDbClient, terms: &[String]) -> Result<(i64, Vec<i64>)> {
     let counters: String = terms
         .iter()
         .enumerate()
@@ -363,10 +361,7 @@ fn term_counts(
         .collect();
     let batches = query(
         client,
-        &format!(
-            "SELECT COUNT(*) AS total{counters} FROM gl_definition d WHERE {pred}",
-            pred = corpus_predicate(pid, sha),
-        ),
+        &format!("SELECT COUNT(*) AS total{counters} FROM search_corpus d"),
     )?;
     let count_of = |name: &str| i64_column(&batches, name).first().copied().unwrap_or(0);
     let total = count_of("total");
@@ -401,10 +396,15 @@ mod tests {
 
     #[test]
     fn bm25_sql_embeds_padded_token_matches() {
-        let sql = bm25_candidates_sql(1, "'abc'", &["valid".to_string()], &[1.5], 10);
+        let sql = bm25_candidates_sql(&["valid".to_string()], &[1.5], 10);
         assert!(sql.contains("LIKE '% valid %'"), "sql was {sql}");
         assert!(sql.contains("1.500000"), "sql was {sql}");
         assert!(sql.contains("ORDER BY ("), "sql was {sql}");
+        assert_eq!(
+            sql.matches("list_filter").count(),
+            1,
+            "tf must be computed once as a column, sql was {sql}"
+        );
     }
 
     #[test]
