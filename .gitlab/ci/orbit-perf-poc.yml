@@ -1,0 +1,50 @@
+# PoC: per-MR Orbit performance test against a real (small-scale) caproni + Orbit
+# stack, seeded with an xtask-generated synthetic graph.
+#
+# Flow (all in one job; see scripts/ci/orbit-perf-poc.sh):
+#   1. build xtask + `synth generate` a synthetic graph (Parquet)   -- this repo
+#   2. clone gitlab-caproni + `caproni up` with the orbit fragment  -- real stack
+#   3. bulk-load the Parquet straight into gkg's ClickHouse (v<N>_gl_*)
+#   4. port-forward gkg gRPC + run the direct gRPC load test
+#
+# Synthetic bulk-load deliberately bypasses siphon CDC / project seeding / code
+# indexing (those only exist to populate the graph the slow way). Manual +
+# allow_failure because it is heavy (~30-45 min) and pulls up a full cluster.
+#
+# PoC scope: proves the end-to-end plumbing. Splitting the xtask build into a
+# per-release prebuilt artifact is a follow-up (see the plan).
+orbit-perf-poc:
+  extends:
+    - .job-template      # rust + mise build image
+    - .sccache-template  # shared sccache (fast xtask build)
+  stage: benchmark
+  needs: []
+  interruptible: true
+  timeout: 2h
+  tags: [saas-linux-large-amd64]
+  services:
+    - docker:dind
+  rules:
+    - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
+      when: never
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+      when: manual
+      allow_failure: true
+  variables:
+    # docker:dind (mirrors caproni .integration-base)
+    DOCKER_HOST: tcp://docker:2376
+    DOCKER_TLS_CERTDIR: "/certs"
+    DOCKER_TLS_VERIFY: 1
+    DOCKER_CERT_PATH: "$DOCKER_TLS_CERTDIR/client"
+    FF_NETWORK_PER_BUILD: 1
+    # PoC knobs
+    SYNTH_CONFIG: crates/xtask/simulator_small.yaml   # ~1M edges / ~100k nodes
+    CAPRONI_REF: main
+    ROUNDS: "5"
+    CONCURRENCY: "20"
+  script:
+    - bash scripts/ci/orbit-perf-poc.sh
+  artifacts:
+    when: always
+    paths:
+      - loadtest-results.md
