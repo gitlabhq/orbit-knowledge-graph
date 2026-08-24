@@ -55,6 +55,7 @@ workflow:
 include:
   - template: Jobs/SAST.gitlab-ci.yml
   - template: Jobs/Secret-Detection.gitlab-ci.yml
+  - local: .gitlab/ci/orbit-perf-poc.yml
   - local: .gitlab/ci/release-local.yml
   - local: .gitlab/ci/stale-mr.yml
   - local: .gitlab/ci/e2e-pin-bump.yml
