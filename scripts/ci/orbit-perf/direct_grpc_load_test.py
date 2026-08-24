@@ -468,7 +468,7 @@ QUERIES = {
                 {"type": "CONTAINS", "from": "g", "to": "p", "direction": "outgoing"},
                 {"type": "IN_PROJECT", "from": "n", "to": "p", "direction": "outgoing"},
             ],
-            "limit": 2000,
+            "limit": 1000,  # DSL caps /limit at 1000
         },
     },
 }
