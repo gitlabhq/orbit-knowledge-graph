@@ -1,3 +1,4 @@
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use anyhow::bail;
@@ -22,6 +23,7 @@ pub(crate) struct OrbitClient {
     http: reqwest::Client,
 }
 
+#[derive(Clone)]
 struct ResolvedEndpoint {
     base_url: String,
     header_name: String,
@@ -181,19 +183,29 @@ fn resolve_endpoint(
 }
 
 fn resolve_via_credential_helper() -> Option<ResolvedEndpoint> {
-    let output = std::process::Command::new("glab")
-        .args(["auth", "credential-helper"])
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .output()
-        .ok()?;
+    static CACHED: OnceLock<Option<ResolvedEndpoint>> = OnceLock::new();
 
-    if !output.status.success() {
-        return None;
-    }
+    CACHED
+        .get_or_init(|| {
+            let output = std::process::Command::new("glab")
+                .args(["auth", "credential-helper"])
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::null())
+                .output()
+                .ok()?;
 
-    let resp: CredentialHelperResponse = serde_json::from_slice(&output.stdout).ok()?;
+            if !output.status.success() {
+                return None;
+            }
+
+            parse_credential_helper_response(&output.stdout)
+        })
+        .clone()
+}
+
+fn parse_credential_helper_response(json: &[u8]) -> Option<ResolvedEndpoint> {
+    let resp: CredentialHelperResponse = serde_json::from_slice(json).ok()?;
     if resp.response_type != "success" {
         return None;
     }
@@ -328,26 +340,10 @@ mod tests {
         assert!(result.is_err());
     }
 
-    fn parse_credential_helper(json: &[u8]) -> Option<ResolvedEndpoint> {
-        let resp: CredentialHelperResponse = serde_json::from_slice(json).ok()?;
-        if resp.response_type != "success" {
-            return None;
-        }
-        let token = resp.token?;
-        let base_url = resp
-            .instance_url
-            .unwrap_or_else(|| DEFAULT_GITLAB_BASE_URL.to_string());
-        Some(ResolvedEndpoint {
-            base_url,
-            header_name: "Authorization".to_string(),
-            header_value: format!("Bearer {}", token.token),
-        })
-    }
-
     #[test]
     fn credential_helper_success_with_pat() {
         let json = br#"{"type":"success","instance_url":"https://gitlab.example.com","token":{"type":"pat","token":"glpat-abc"}}"#;
-        let ep = parse_credential_helper(json).expect("parses success");
+        let ep = parse_credential_helper_response(json).expect("parses success");
         assert_eq!(ep.base_url, "https://gitlab.example.com");
         assert_eq!(ep.header_name, "Authorization");
         assert_eq!(ep.header_value, "Bearer glpat-abc");
@@ -356,7 +352,7 @@ mod tests {
     #[test]
     fn credential_helper_success_with_oauth2() {
         let json = br#"{"type":"success","instance_url":"https://gitlab.com","token":{"type":"oauth2","token":"oauth-tok","expiry_timestamp":"2026-01-01T00:00:00Z"}}"#;
-        let ep = parse_credential_helper(json).expect("parses success");
+        let ep = parse_credential_helper_response(json).expect("parses success");
         assert_eq!(ep.base_url, "https://gitlab.com");
         assert_eq!(ep.header_value, "Bearer oauth-tok");
     }
@@ -364,24 +360,24 @@ mod tests {
     #[test]
     fn credential_helper_defaults_to_gitlab_com_when_instance_url_missing() {
         let json = br#"{"type":"success","token":{"type":"pat","token":"glpat-xyz"}}"#;
-        let ep = parse_credential_helper(json).expect("parses success");
+        let ep = parse_credential_helper_response(json).expect("parses success");
         assert_eq!(ep.base_url, "https://gitlab.com");
     }
 
     #[test]
     fn credential_helper_error_response_returns_none() {
         let json = br#"{"type":"error","message":"glab is not authenticated"}"#;
-        assert!(parse_credential_helper(json).is_none());
+        assert!(parse_credential_helper_response(json).is_none());
     }
 
     #[test]
     fn credential_helper_malformed_json_returns_none() {
-        assert!(parse_credential_helper(b"not json").is_none());
+        assert!(parse_credential_helper_response(b"not json").is_none());
     }
 
     #[test]
     fn credential_helper_missing_token_returns_none() {
         let json = br#"{"type":"success","instance_url":"https://gitlab.com"}"#;
-        assert!(parse_credential_helper(json).is_none());
+        assert!(parse_credential_helper_response(json).is_none());
     }
 }
