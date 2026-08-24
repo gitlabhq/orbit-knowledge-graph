@@ -39,7 +39,7 @@ orbit-perf-poc:
     DOCKER_CERT_PATH: "$DOCKER_TLS_CERTDIR/client"
     FF_NETWORK_PER_BUILD: 1
     # PoC knobs
-    SYNTH_CONFIG: crates/xtask/simulator_small.yaml   # ~1M edges / ~100k nodes
+    SYNTH_CONFIG: crates/xtask/simulator_medium.yaml  # ~10M edges / ~3M nodes (staging-scale)
     CAPRONI_REF: main
     ROUNDS: "5"
     CONCURRENCY: "20"
