@@ -9,7 +9,7 @@ title: Use GitLab Orbit with the GitLab CLI (`glab`)
 {{< details >}}
 
 - Tier: Premium, Ultimate
-- Offering: GitLab.com
+- Offering: GitLab.com, GitLab Self-Managed
 - Status: Beta
 
 {{< /details >}}

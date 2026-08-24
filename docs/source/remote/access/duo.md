@@ -9,7 +9,7 @@ title: Use GitLab Orbit with GitLab Duo Agent Platform
 {{< details >}}
 
 - Tier: Premium, Ultimate
-- Offering: GitLab.com
+- Offering: GitLab.com, GitLab Self-Managed
 - Status: Beta
 
 {{< /details >}}
