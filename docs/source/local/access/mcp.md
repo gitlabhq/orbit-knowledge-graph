@@ -20,7 +20,6 @@ title: GitLab Orbit Local MCP server
 
 {{< /history >}}
 
-
 With the GitLab Orbit Local [Model Context Protocol](https://modelcontextprotocol.io/)
 (MCP) server, you can securely connect AI tools and applications to your
 local graph. AI assistants like Claude Code, Codex, Cursor, and OpenCode
