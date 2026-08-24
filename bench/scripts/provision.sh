@@ -17,30 +17,17 @@ for ns in $($KC get ns -o name 2>/dev/null | grep "e2e-${RUN_ID}-" | sed 's|name
   $KC wait --for=delete "ns/${ns}" --timeout=120s 2>/dev/null || true
 done
 
-# --- 2. Dedicated node pool for CH (optional) ---
+# --- 2. Dedicated CH pool (Terraform-managed) ---
 CH_NODE_SELECTOR=""
 CH_TOLERATIONS=""
-if [[ "${RA_DEDICATED_POOL:-}" == "1" ]]; then
-  IFS=_ read -r _ GKE_PROJECT GKE_ZONE GKE_CLUSTER <<< "${KCTX}"
-  POOL_NAME="ra-${RUN_ID}"
-  log "Creating dedicated pool ${POOL_NAME}"
-  if ! gcloud container node-pools describe "${POOL_NAME}" \
-      --cluster "${GKE_CLUSTER}" --project "${GKE_PROJECT}" --zone "${GKE_ZONE}" \
-      >/dev/null 2>&1; then
-    gcloud container node-pools create "${POOL_NAME}" \
-      --cluster "${GKE_CLUSTER}" --project "${GKE_PROJECT}" --zone "${GKE_ZONE}" \
-      --machine-type "$(tier '.nodes.machine')" --num-nodes 1 \
-      --node-taints "ra-run=${RUN_ID}:NoSchedule" \
-      --node-labels "ra-run=${RUN_ID}" --quiet
-  else
-    log "  Pool ${POOL_NAME} already exists, reusing"
-  fi
+DEDICATED=$(cd "${BENCH_DIR}/infra" && terraform output -raw dedicated_ch_pool 2>/dev/null || echo "false")
+if [[ "${DEDICATED}" == "true" ]]; then
   CH_NODE_SELECTOR="      nodeSelector:
-        ra-run: \"${RUN_ID}\""
+        dedicated: clickhouse"
   CH_TOLERATIONS="      tolerations:
-        - key: ra-run
+        - key: dedicated
           operator: Equal
-          value: \"${RUN_ID}\"
+          value: clickhouse
           effect: NoSchedule"
 fi
 
