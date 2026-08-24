@@ -29,16 +29,4 @@ bench() {
   yq eval "${1}" "${BENCH_DIR}/config/bench.yaml"
 }
 
-heartbeat_start() {
-  ( while true; do sleep 30; echo "."; done ) &
-  HEARTBEAT_PID=$!
-  export HEARTBEAT_PID
-}
 
-heartbeat_stop() {
-  if [[ -n "${HEARTBEAT_PID:-}" ]]; then
-    kill "${HEARTBEAT_PID}" 2>/dev/null || true
-    wait "${HEARTBEAT_PID}" 2>/dev/null || true
-    unset HEARTBEAT_PID
-  fi
-}

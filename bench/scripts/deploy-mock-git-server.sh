@@ -10,7 +10,7 @@ source "${BENCH_DIR}/scripts/lib.sh"
 
 CH_NS="${E2E_CH_NAMESPACE:-ra-ch-${RUN_ID}}"
 GKG_NS="e2e-${RUN_ID}-gkg"
-: "${MOCK_GIT_BUCKET:=$(cd "${TF_DIR}" && terraform output -raw code_corpus_bucket 2>/dev/null || echo 'gkg-code-corpus')}"
+: "${MOCK_GIT_BUCKET:=$(cd "${TF_DIR}" && terraform output -raw code_corpus_bucket 2>/dev/null || bench '.buckets.code_corpus')}"
 IMAGE="$(bench '.images.mock_git_server')"
 
 # --- 1. Build and push ---
