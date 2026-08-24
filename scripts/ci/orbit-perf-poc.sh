@@ -33,22 +33,18 @@ log "     synth output: $ORG_DIR ($(ls "$ORG_DIR" | tr '\n' ' ')) "
 # Authoritative parquet-file -> ClickHouse table map, straight from the ontology
 # the generator used. filename = node_type.lower()+'.parquet'; table =
 # destination_table (explicit) or the gl_<name> default. edges.parquet -> gl_edge.
+# Pure shell (the rust build image ships no python3).
 MAP_FILE="$ROOT/.synth_table_map"
-python3 - "$ROOT/config/ontology/nodes" "$MAP_FILE" <<'PY'
-import glob, os, re, sys
-nodes_dir, out = sys.argv[1], sys.argv[2]
-rows = ["edges=gl_edge"]
-for f in glob.glob(os.path.join(nodes_dir, "**", "*.yaml"), recursive=True):
-    txt = open(f).read()
-    nt = re.search(r'^node_type:\s*(\S+)', txt, re.M)
-    if not nt:
-        continue
-    name = nt.group(1)
-    dt = re.search(r'^destination_table:\s*(\S+)', txt, re.M)
-    table = dt.group(1) if dt else "gl_" + name.lower()
-    rows.append(f"{name.lower()}={table}")
-open(out, "w").write("\n".join(rows) + "\n")
-PY
+{
+  echo "edges=gl_edge"
+  find "$ROOT/config/ontology/nodes" -name '*.yaml' | while read -r f; do
+    nt="$(grep -m1 -E '^node_type:' "$f" | awk '{print $2}')"
+    [ -n "$nt" ] || continue
+    dt="$(grep -m1 -E '^destination_table:' "$f" | awk '{print $2}')"
+    lc="$(printf '%s' "$nt" | tr '[:upper:]' '[:lower:]')"
+    echo "${lc}=${dt:-gl_${lc}}"
+  done
+} > "$MAP_FILE"
 
 # ---------------------------------------------------------------------------
 # 2. Bring up caproni + Orbit (real stack). Reuses caproni's proven recipe; no
