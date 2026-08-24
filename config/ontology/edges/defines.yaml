@@ -2,6 +2,7 @@
 
 description: Definition relationships in source code
 table: gl_code_edge
+search_weight: 0.4
 
 variants:
   - from_node: { type: File, id: id }

@@ -124,7 +124,7 @@ impl EdgeTableConfig {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Ontology {
     schema_version: String,
     pub(crate) table_prefix: String,
@@ -136,6 +136,7 @@ pub struct Ontology {
     pub(crate) nodes: BTreeMap<String, NodeEntity>,
     pub(crate) edges: BTreeMap<String, Vec<EdgeEntity>>,
     pub(crate) edge_descriptions: BTreeMap<String, String>,
+    pub(crate) edge_search_weights: BTreeMap<String, f64>,
     pub(crate) edge_pipelines: BTreeMap<String, Vec<Pipeline>>,
     /// Reindex trigger tables per edge relationship kind, resolved from each
     /// edge's `indexer` block. Parallels `edge_pipelines`; the pipeline model
@@ -197,6 +198,7 @@ impl Ontology {
             nodes: BTreeMap::new(),
             edges: BTreeMap::new(),
             edge_descriptions: BTreeMap::new(),
+            edge_search_weights: BTreeMap::new(),
             edge_pipelines: BTreeMap::new(),
             edge_reindex_sources: BTreeMap::new(),
             etl_settings: EtlSettings {
@@ -641,6 +643,11 @@ impl Ontology {
     #[must_use]
     pub fn get_edge(&self, name: &str) -> Option<&[EdgeEntity]> {
         self.edges.get(name).map(|v| v.as_slice())
+    }
+
+    #[must_use]
+    pub fn edge_search_weight(&self, relationship_kind: &str) -> Option<f64> {
+        self.edge_search_weights.get(relationship_kind).copied()
     }
 
     pub fn get_edge_source_types(&self, relationship_kind: &str) -> Vec<String> {
@@ -1634,6 +1641,17 @@ mod tests {
             ontology.edge_count() > 0,
             "ontology should have at least one edge"
         );
+    }
+
+    #[test]
+    fn search_weights_load_for_code_edges_and_stay_absent_elsewhere() {
+        let ontology = Ontology::load_embedded().expect("should load embedded ontology");
+        assert_eq!(ontology.edge_search_weight("CALLS"), Some(1.0));
+        assert_eq!(ontology.edge_search_weight("EXTENDS"), Some(1.0));
+        assert_eq!(ontology.edge_search_weight("IMPORTS"), Some(0.7));
+        assert_eq!(ontology.edge_search_weight("CONTAINS"), Some(0.4));
+        assert_eq!(ontology.edge_search_weight("DEFINES"), Some(0.4));
+        assert_eq!(ontology.edge_search_weight("AUTHORED"), None);
     }
 
     #[test]
