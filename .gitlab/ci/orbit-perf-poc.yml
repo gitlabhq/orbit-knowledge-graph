@@ -27,8 +27,9 @@ orbit-perf-poc:
   rules:
     - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
       when: never
+    # Auto-run on MR pipelines (canonical only). allow_failure keeps this heavy
+    # PoC job from blocking the MR.
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
-      when: manual
       allow_failure: true
   variables:
     # docker:dind (mirrors caproni .integration-base)
