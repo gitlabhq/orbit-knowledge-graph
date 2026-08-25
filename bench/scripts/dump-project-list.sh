@@ -8,7 +8,7 @@ BENCH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "${BENCH_DIR}/scripts/lib.sh"
 
 CH_NS="${E2E_CH_NAMESPACE:-ra-ch-${RUN_ID}}"
-: "${BUCKET:=$(bench '.corpus.bucket')}"
+: "${BUCKET:=gs://$(cd "${TF_DIR}" && terraform output -raw code_corpus_bucket 2>/dev/null || bench '.buckets.code_corpus')}"
 
 PROJECTS=$($KC exec -n "${CH_NS}" clickhouse-0 -- clickhouse-client -q "
 SELECT

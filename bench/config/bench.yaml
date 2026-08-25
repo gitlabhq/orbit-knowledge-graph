@@ -1,10 +1,12 @@
-cluster:
-  project: gl-knowledgegraph-prj-f2eec59d
-  zone: us-central1-a
-  name: ra-bench-smoke
+project: gl-knowledgegraph-prj-f2eec59d
+region: us-central1
+zone: us-central1-a
+
+buckets:
+  datalake_dumps: gkg-datalake-dumps
+  code_corpus: gkg-code-corpus
 
 corpus:
-  bucket: gs://gkg-code-corpus
   archive_timeout: 120
   jobs: 8
 
@@ -13,8 +15,4 @@ images:
   mock_git_server: gcr.io/gl-knowledgegraph-prj-f2eec59d/mock-git-server:latest
 
 gcs:
-  dumps_bucket: gs://gkg-datalake-dumps
   dump_prefix: core-2026-06-25-1115
-
-iam:
-  gcp_service_account: 1079327125344-compute@developer.gserviceaccount.com

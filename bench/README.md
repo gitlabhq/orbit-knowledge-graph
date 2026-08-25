@@ -5,21 +5,27 @@ Measures resource requirements and validates SLOs for Orbit on self-managed depl
 ## Prerequisites
 
 - `gcloud` authenticated with access to `gl-knowledgegraph-prj-f2eec59d`
-- `kubectl` with a context pointing at the `ra-bench-smoke` cluster
+- `terraform` >= 1.5
 - `helm` 3
 - `yq` (for reading config YAML)
 - `docker` with `buildx` (only for code indexing, to build the mock server image)
 - SSH key registered with gitlab.com (only for fetching the code corpus)
 
-Set `KCTX` to your kubectl context before running any script:
-
-```bash
-export KCTX="gke_gl-knowledgegraph-prj-f2eec59d_us-central1-a_ra-bench-smoke"
-```
-
 ## From scratch
 
 Use this when there is no existing datalake snapshot or code corpus. This is the first-time setup.
+
+### 0. Create the cluster
+
+The GKE cluster and node pools are managed by Terraform in `bench/infra/`. The tier variable controls the machine type and node count (from `tiers.yaml`).
+
+```bash
+cd bench/infra
+terraform init
+terraform apply -var tier=small
+```
+
+`KCTX` is auto-derived from `terraform output` by `lib.sh`. You can override it manually if needed.
 
 ### 1. Provision the stack
 
@@ -57,7 +63,7 @@ FETCH_MAX=50 bash bench/scripts/fetch-code-corpus.sh projects.tsv
 The GCS FUSE CSI driver must be enabled on the cluster (one-time):
 
 ```bash
-gcloud container clusters update ra-bench-smoke \
+gcloud container clusters update ra-bench \
   --project gl-knowledgegraph-prj-f2eec59d \
   --zone us-central1-a \
   --update-addons GcsFuseCsiDriver=ENABLED
@@ -107,23 +113,20 @@ Code indexing starts against the existing 7K repo corpus. Both SDLC and code ind
 RUN_ID=bench9 TIER=small bash bench/scripts/slos.sh
 ```
 
-## Cluster management
+## Cluster lifecycle
+
+The cluster is managed by Terraform. To change the tier or tear down:
 
 ```bash
-bash bench/scripts/cluster.sh sleep     # resize to 0 nodes (~$2.40/day)
-bash bench/scripts/cluster.sh wake      # resize back to 3 nodes
-bash bench/scripts/cluster.sh wake 5    # resize to 5 nodes
-bash bench/scripts/cluster.sh teardown  # delete all namespaces for this run
+cd bench/infra
+terraform apply -var tier=medium              # resize to medium
+terraform apply -var dedicated_ch_pool=true   # add a tainted CH node pool
+terraform destroy                             # tear down the cluster
 ```
 
-## Dedicated node pools
+## Dedicated ClickHouse pool
 
-For isolated CH sizing runs, add `RA_DEDICATED_POOL=1`. This creates a tainted node pool that only the CH pod schedules on.
-
-```bash
-RA_DEDICATED_POOL=1 RUN_ID=bench8 TIER=small bash bench/scripts/provision.sh
-RA_DEDICATED_POOL=1 RUN_ID=bench8 bash bench/scripts/cluster.sh teardown
-```
+For isolated CH sizing runs, set `dedicated_ch_pool = true` at plan time. This creates a tainted node pool that only the CH StatefulSet schedules on. `provision.sh` reads this from `terraform output` and sets the node selector and tolerations automatically.
 
 ## Corpus management
 
@@ -144,7 +147,7 @@ The fetch script auto-downloads `projects.tsv` from GCS if no file is given.
 
 All defaults live in two YAML files:
 
-- `bench/config/bench.yaml` -- GCP project, bucket names, image tags, IAM accounts, corpus settings
+- `bench/config/bench.yaml` -- GCP project, region, bucket names, image tags, corpus settings
 - `bench/config/tiers.yaml` -- per-tier resource limits, concurrency, SLO targets
 
 Every env var can override the YAML defaults.
@@ -155,7 +158,6 @@ Every env var can override the YAML defaults.
 |---|---|
 | `provision.sh` | Full stack deploy: CH, e2e, import, checkpoint reset, GMP |
 | `slos.sh` | SLO report from Cloud Monitoring + CH query_log |
-| `cluster.sh` | sleep / wake / teardown |
 | `deploy-mock-git-server.sh` | Build, deploy mock, upgrade GKG, reset code checkpoints |
 | `dump-project-list.sh` | Export project IDs from the datalake |
 | `fetch-code-corpus.sh` | Fetch repo archives from gitlab.com to GCS |
