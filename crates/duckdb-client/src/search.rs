@@ -231,9 +231,6 @@ fn ensure_trigram_index(client: &DuckDbClient, project_id: i64, sha: &str) -> Re
     Ok(())
 }
 
-/// One query for every term: per-(definition, term) sims are capped on the
-/// IDF-weighted combined score, never per term, so a definition matching two
-/// discriminating terms outlives thousands tied at sim 1.0 on one flood term.
 fn recall_sql(pid: i64, sha: &str, term_count: usize) -> String {
     let q_arms: Vec<String> = (0..term_count)
         .map(|i| {

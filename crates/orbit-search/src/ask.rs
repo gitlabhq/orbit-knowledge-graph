@@ -6,7 +6,7 @@ use crate::expand::{GraphSource, expand_neighborhood};
 use crate::ppr::KindRates;
 use crate::rank::rank_and_trim;
 use crate::text::content_words;
-use crate::types::{CorpusRow, Edge};
+use crate::types::{CorpusRow, Edge, TermSeeds};
 use crate::vocab::SearchVocab;
 
 pub const SURFACED_LIMIT: usize = 3;
@@ -128,11 +128,14 @@ pub fn ask<S: AskSource>(
 
     let mut term_seeds = term_base_sets(&recalls);
     if term_seeds.is_empty() && !matches.is_empty() {
-        term_seeds = vec![matches.iter().map(|m| (m.row.id, m.score)).collect()];
+        term_seeds = vec![TermSeeds {
+            seeds: matches.iter().map(|m| (m.row.id, m.score)).collect(),
+            weight: 1.0,
+        }];
     }
     let seed_count = term_seeds
         .iter()
-        .flatten()
+        .flat_map(|t| t.seeds.iter())
         .map(|&(id, _)| id)
         .collect::<HashSet<_>>()
         .len();

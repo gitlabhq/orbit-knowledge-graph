@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::ppr::{KindRates, rank_neighborhood};
-use crate::types::{Edge, Graph};
+use crate::types::{Edge, Graph, TermSeeds};
 
 pub const EDGE_LIMIT: usize = 40;
 
@@ -34,13 +34,13 @@ pub trait GraphSource {
 
 pub fn expand_neighborhood<S: GraphSource>(
     source: &S,
-    term_seeds: &[Vec<(i64, f64)>],
+    term_seeds: &[TermSeeds],
     kind_rates: &HashMap<String, KindRates>,
     focus: Option<&str>,
 ) -> Result<ExpandedNeighborhood, S::Error> {
     let mut seed_ids: Vec<i64> = Vec::new();
     let mut seen_seed: HashSet<i64> = HashSet::new();
-    for &(id, _) in term_seeds.iter().flatten() {
+    for &(id, _) in term_seeds.iter().flat_map(|t| t.seeds.iter()) {
         if seen_seed.insert(id) {
             seed_ids.push(id);
         }
@@ -168,8 +168,11 @@ mod tests {
         }
     }
 
-    fn seeds(ids: &[i64]) -> Vec<Vec<(i64, f64)>> {
-        vec![ids.iter().map(|&id| (id, 1.0)).collect()]
+    fn seeds(ids: &[i64]) -> Vec<TermSeeds> {
+        vec![TermSeeds {
+            seeds: ids.iter().map(|&id| (id, 1.0)).collect(),
+            weight: 1.0,
+        }]
     }
 
     fn weights() -> HashMap<String, KindRates> {
@@ -191,9 +194,9 @@ mod tests {
         let mut source = FakeSource::new(vec![("CALLS", 1, 42)]);
         source.unlabeled = true;
         let expanded = expand_neighborhood(&source, &seeds(&[1]), &weights(), None).unwrap();
-        assert_eq!(
-            expanded.edges[0].target, "42",
-            "unlabeled nodes fall back to ids"
+        assert!(
+            expanded.edges.is_empty(),
+            "edges with unresolvable labels are dropped"
         );
     }
 

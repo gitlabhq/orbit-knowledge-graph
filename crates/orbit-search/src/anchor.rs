@@ -1,4 +1,5 @@
 use crate::ask::TermRecall;
+use crate::types::TermSeeds;
 
 pub const BASE_SET_PER_TERM: usize = 10;
 pub const MIN_SEEDS_PER_TERM: usize = 3;
@@ -10,7 +11,7 @@ fn seeds_consensus(recall: &TermRecall) -> bool {
     !recall.hits.is_empty() && (recall.matched as f64) < recall.corpus as f64 * SEED_DF_CEILING
 }
 
-pub fn term_base_sets(recalls: &[TermRecall]) -> Vec<Vec<(i64, f64)>> {
+pub fn term_base_sets(recalls: &[TermRecall]) -> Vec<TermSeeds> {
     let searchable = recalls.iter().filter(|r| seeds_consensus(r)).count().max(1);
     let per_term = (MAX_SEEDS / searchable).clamp(MIN_SEEDS_PER_TERM, BASE_SET_PER_TERM);
     recalls
@@ -24,7 +25,10 @@ pub fn term_base_sets(recalls: &[TermRecall]) -> Vec<Vec<(i64, f64)>> {
                     .then_with(|| a.0.cmp(&b.0))
             });
             set.truncate(per_term);
-            set
+            TermSeeds {
+                seeds: set,
+                weight: recall.idf(),
+            }
         })
         .collect()
 }
@@ -59,8 +63,8 @@ mod tests {
         };
         let sets = term_base_sets(&[big, recall(&[(100, 0.9)])]);
         assert_eq!(sets.len(), 2);
-        assert_eq!(sets[0].len(), BASE_SET_PER_TERM);
-        assert_eq!(sets[0][0].0, 0);
+        assert_eq!(sets[0].seeds.len(), BASE_SET_PER_TERM);
+        assert_eq!(sets[0].seeds[0].0, 0);
     }
 
     #[test]
@@ -73,7 +77,7 @@ mod tests {
         let rare = recall(&[(2, 0.8)]);
         let sets = term_base_sets(&[generic, rare]);
         assert_eq!(sets.len(), 1);
-        assert_eq!(sets[0][0].0, 2);
+        assert_eq!(sets[0].seeds[0].0, 2);
     }
 
     #[test]
@@ -87,7 +91,7 @@ mod tests {
             .collect();
         let sets = term_base_sets(&recalls);
         assert_eq!(sets.len(), 8);
-        assert!(sets.iter().all(|s| s.len() == MAX_SEEDS / 8));
+        assert!(sets.iter().all(|s| s.seeds.len() == MAX_SEEDS / 8));
     }
 
     #[test]

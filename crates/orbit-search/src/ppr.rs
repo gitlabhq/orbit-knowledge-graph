@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::types::Graph;
+use crate::types::{Graph, TermSeeds};
 
 pub const PPR_DAMPING: f64 = 0.85;
 pub const DEFAULT_EDGE_WEIGHT: f64 = 0.5;
@@ -110,11 +110,12 @@ pub struct RankedNeighborhood {
 
 const CONSENSUS_EPSILON: f64 = 1e-9;
 pub const CONSENSUS_QUORUM: f64 = 0.6;
+pub const SPECIFICITY_EXPONENT: f64 = 0.5;
 pub const SCORED_NODE_POOL: usize = 1024;
 
 pub fn rank_neighborhood(
     graph: &Graph,
-    term_seeds: &[Vec<(i64, f64)>],
+    term_seeds: &[TermSeeds],
     kind_rates: &HashMap<String, KindRates>,
     focus: Option<&str>,
     cap: usize,
@@ -128,7 +129,7 @@ pub fn rank_neighborhood(
                 (ids.len() - 1) as u32
             })
         };
-    for &(id, _) in term_seeds.iter().flatten() {
+    for &(id, _) in term_seeds.iter().flat_map(|t| t.seeds.iter()) {
         intern(id, &mut ids, &mut index);
     }
     let endpoints: Vec<(u32, u32)> = graph
@@ -201,42 +202,63 @@ pub fn rank_neighborhood(
         entries.push((t, s, rev));
     }
     let transitions = Transitions::new(node_count, &entries);
+    let inverse_entries: Vec<(usize, usize, f64)> =
+        entries.iter().map(|&(s, t, w)| (t, s, w)).collect();
+    let inverted = Transitions::new(node_count, &inverse_entries);
+    drop(inverse_entries);
     drop(entries);
 
-    let seed_sets: Vec<Vec<(usize, f64)>> = term_seeds
+    let seed_sets: Vec<(Vec<(usize, f64)>, f64)> = term_seeds
         .iter()
-        .filter(|set| set.iter().any(|&(_, w)| w > 0.0))
-        .map(|set| {
-            set.iter()
+        .filter(|t| t.seeds.iter().any(|&(_, w)| w > 0.0))
+        .map(|t| {
+            let set = t
+                .seeds
+                .iter()
                 .map(|&(id, w)| (index[&id] as usize, w))
-                .collect()
+                .collect();
+            (set, t.weight.max(f64::MIN_POSITIVE))
         })
         .collect();
-    let per_term_scores: Vec<Vec<f64>> = {
+    let per_term_logs: Vec<Vec<f64>> = {
         use rayon::prelude::*;
         seed_sets
             .par_iter()
-            .map(|seeds| personalized_pagerank(&transitions, seeds, PPR_DAMPING))
+            .map(|(seeds, _)| {
+                let relevance = personalized_pagerank(&transitions, seeds, PPR_DAMPING);
+                let specificity = personalized_pagerank(&inverted, seeds, PPR_DAMPING);
+                relevance
+                    .iter()
+                    .zip(&specificity)
+                    .map(|(&r, &p)| {
+                        (r + CONSENSUS_EPSILON).ln()
+                            + SPECIFICITY_EXPONENT * (p + CONSENSUS_EPSILON).ln()
+                    })
+                    .collect()
+            })
             .collect()
     };
-    if per_term_scores.is_empty() {
+    if per_term_logs.is_empty() {
         return RankedNeighborhood {
             selected: Vec::new(),
             hidden_by_kind: Vec::new(),
             node_scores: Vec::new(),
         };
     }
-    let term_count = per_term_scores.len();
+    let term_count = per_term_logs.len();
     let quorum = ((term_count as f64 * CONSENSUS_QUORUM).ceil() as usize).clamp(1, term_count);
     let scores: Vec<f64> = (0..node_count)
         .map(|v| {
-            let mut logs: Vec<f64> = per_term_scores
+            let mut logs: Vec<(f64, f64)> = per_term_logs
                 .iter()
-                .map(|r| (r[v] + CONSENSUS_EPSILON).ln())
+                .zip(&seed_sets)
+                .map(|(term, (_, weight))| (term[v], *weight))
                 .collect();
-            logs.sort_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
-            let quorum_sum: f64 = logs[..quorum].iter().sum();
-            (quorum_sum / quorum as f64).exp()
+            logs.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+            let (log_sum, weight_sum) = logs[..quorum]
+                .iter()
+                .fold((0.0, 0.0), |(ls, ws), &(l, w)| (ls + l * w, ws + w));
+            (log_sum / weight_sum).exp()
         })
         .collect();
 
@@ -454,8 +476,11 @@ mod tests {
         Transitions::new(n, &entries)
     }
 
-    fn seed() -> Vec<Vec<(i64, f64)>> {
-        vec![vec![(0, 1.0)]]
+    fn seed() -> Vec<TermSeeds> {
+        vec![TermSeeds {
+            seeds: vec![(0, 1.0)],
+            weight: 1.0,
+        }]
     }
 
     fn graph(kinds: &[&str], edges: &[(&str, i64, i64)]) -> Graph {

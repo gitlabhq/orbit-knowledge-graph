@@ -39,6 +39,11 @@ pub struct CorpusRow {
     pub grams: u64,
 }
 
+pub struct TermSeeds {
+    pub seeds: Vec<(i64, f64)>,
+    pub weight: f64,
+}
+
 pub struct Edge {
     pub kind: String,
     pub source: String,
