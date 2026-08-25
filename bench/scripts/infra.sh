@@ -34,9 +34,51 @@ fetch_credentials() {
   echo "[infra] Fetching kubectl credentials"
   gcloud container clusters get-credentials \
     "$("$TF" -chdir="${TF_DIR}" output -raw cluster_name)" \
-    --zone "$("$TF" -chdir="${TF_DIR}" output -raw cluster_location)" \
-    --project "$("$TF" -chdir="${TF_DIR}" output -raw project)" \
+    --zone "$(bench '.zone')" \
+    --project "$(bench '.project')" \
     2>/dev/null
+}
+
+ensure_root_ca() {
+  local ctx
+  ctx=$("$TF" -chdir="${TF_DIR}" output -raw kctx 2>/dev/null)
+  if kubectl --context "${ctx}" -n cert-manager get secret root-ca-secret >/dev/null 2>&1; then
+    echo "[infra] root CA already exists"
+    return
+  fi
+  echo "[infra] Creating self-signed root CA"
+  kubectl --context "${ctx}" apply -f - <<'YAML'
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: selfsigned-issuer
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: root-ca
+  namespace: cert-manager
+spec:
+  isCA: true
+  commonName: e2e-root-ca
+  secretName: root-ca-secret
+  duration: 87600h
+  issuerRef:
+    name: selfsigned-issuer
+    kind: ClusterIssuer
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: e2e-ca
+spec:
+  ca:
+    secretName: root-ca-secret
+YAML
+  kubectl --context "${ctx}" -n cert-manager wait certificate/root-ca \
+    --for=condition=Ready --timeout=60s
 }
 
 case "${1:-}" in
@@ -54,8 +96,16 @@ case "${1:-}" in
     ;;
   apply)
     shift
-    "$TF" -chdir="${TF_DIR}" apply -var "tier=${TIER}" "$@"
+    # Two-phase apply: the kubernetes/helm providers need the cluster to
+    # exist before they can plan bootstrap resources (cert-manager, CRDs).
+    # Phase 1 targets the node pool, which pulls in all GCP dependencies.
+    "$TF" -chdir="${TF_DIR}" apply -var "tier=${TIER}" \
+      -target=google_container_node_pool.workload "$@"
     fetch_credentials
+    # Phase 2 applies everything including bootstrap helm releases.
+    "$TF" -chdir="${TF_DIR}" apply -var "tier=${TIER}" "$@"
+    # Phase 3: cert-manager CRs (need CRDs from phase 2).
+    ensure_root_ca
     ;;
   plan)
     shift

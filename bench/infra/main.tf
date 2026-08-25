@@ -10,10 +10,7 @@ terraform {
       source  = "hashicorp/helm"
       version = "~> 2.17"
     }
-    kubernetes = {
-      source  = "hashicorp/kubernetes"
-      version = "~> 2.37"
-    }
+
   }
 
   backend "gcs" {}
@@ -42,7 +39,4 @@ provider "helm" {
   }
 }
 
-provider "kubernetes" {
-  host  = "https://${google_container_cluster.bench.endpoint}"
-  token = data.google_client_config.default.access_token
-}
+

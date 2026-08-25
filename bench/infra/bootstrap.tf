@@ -1,5 +1,9 @@
 # Cluster-level dependencies installed after the GKE cluster is created.
 # These must exist before the e2e workload stack (provision.sh) can deploy.
+#
+# cert-manager CRs (ClusterIssuers, root CA Certificate) are applied by
+# infra.sh after this stack, because kubernetes_manifest does plan-time
+# API discovery which fails when the CRDs do not yet exist.
 
 resource "helm_release" "cert_manager" {
   name             = "cert-manager"
@@ -15,61 +19,6 @@ resource "helm_release" "cert_manager" {
   }
 
   depends_on = [google_container_node_pool.workload]
-}
-
-resource "kubernetes_manifest" "selfsigned_issuer" {
-  manifest = {
-    apiVersion = "cert-manager.io/v1"
-    kind       = "ClusterIssuer"
-    metadata = {
-      name = "selfsigned-issuer"
-    }
-    spec = {
-      selfSigned = {}
-    }
-  }
-
-  depends_on = [helm_release.cert_manager]
-}
-
-resource "kubernetes_manifest" "root_ca" {
-  manifest = {
-    apiVersion = "cert-manager.io/v1"
-    kind       = "Certificate"
-    metadata = {
-      name      = "root-ca"
-      namespace = "cert-manager"
-    }
-    spec = {
-      isCA       = true
-      commonName = "e2e-root-ca"
-      secretName = "root-ca-secret"
-      duration   = "87600h"
-      issuerRef = {
-        name = "selfsigned-issuer"
-        kind = "ClusterIssuer"
-      }
-    }
-  }
-
-  depends_on = [kubernetes_manifest.selfsigned_issuer]
-}
-
-resource "kubernetes_manifest" "ca_issuer" {
-  manifest = {
-    apiVersion = "cert-manager.io/v1"
-    kind       = "ClusterIssuer"
-    metadata = {
-      name = "e2e-ca"
-    }
-    spec = {
-      ca = {
-        secretName = "root-ca-secret"
-      }
-    }
-  }
-
-  depends_on = [kubernetes_manifest.root_ca]
 }
 
 resource "helm_release" "prometheus_operator_crds" {
