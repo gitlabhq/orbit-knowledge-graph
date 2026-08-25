@@ -69,8 +69,8 @@ use self::rust_ast::{
     build_parsed_rust_file, fallback_file_module_parts, file_module_parts_from_workspace,
 };
 use self::workspace::{
-    WorkspaceCatalog, WorkspaceIndex, canonical_root_path, relative_path,
-    relative_path_if_under_root, standalone_workspace, to_absolute_path,
+    WorkspaceIndex, WorkspacePlan, canonical_root_path, relative_path, relative_path_if_under_root,
+    standalone_workspace, to_absolute_path,
 };
 
 pub struct RustPipeline;
@@ -152,9 +152,9 @@ impl LanguagePipeline for RustPipeline {
         let sentinel_handle = sentinel_pair.as_ref().map(|(h, _)| h);
 
         let workspaces = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            WorkspaceCatalog::load(root_path, files)
+            WorkspacePlan::discover(root_path, files)
         })) {
-            Ok(Ok(catalog)) => Some(catalog),
+            Ok(Ok(plan)) => Some(plan),
             Ok(Err(err)) => {
                 tracing::debug!(
                     error = %err,
@@ -172,6 +172,9 @@ impl LanguagePipeline for RustPipeline {
             }
         };
         let output = parse_rust_files(files, root_path, workspaces.as_ref(), sentinel_handle);
+        // Nothing past the parse reads the rust-analyzer databases, and they are
+        // the largest thing this pipeline holds.
+        drop(workspaces);
         let parse_ms = t0.elapsed().as_secs_f64() * 1000.0;
         for (path, error) in &output.errors {
             match error {
@@ -249,14 +252,19 @@ impl LanguagePipeline for RustPipeline {
         if !edge_timed_out {
             add_unresolved_imported_call_edges(&mut graph, &parsed);
         }
+
+        let total_bytes: u64 = parsed.iter().map(|f| f.file_size).sum();
+        let file_count = parsed.len();
+        // The graph owns interned copies of everything resolution needed, so the
+        // Arrow conversion below must not run alongside a second copy.
+        drop(parsed);
         graph.finalize(tracer);
 
         let total_ms = t0.elapsed().as_secs_f64() * 1000.0;
         let resolve_ms = total_ms - parse_ms - graph_build_ms;
-        let total_bytes: u64 = parsed.iter().map(|f| f.file_size).sum();
         ctx.record_language_timing(LanguageTimings {
             language: "rust".to_string(),
-            file_count: parsed.len(),
+            file_count,
             total_bytes,
             parse_ms,
             graph_build_ms,
@@ -278,7 +286,7 @@ impl LanguagePipeline for RustPipeline {
 fn parse_rust_files(
     files: &[FileInput],
     root_path: &str,
-    workspaces: Option<&WorkspaceCatalog>,
+    workspaces: Option<&WorkspacePlan>,
     sentinel: Option<&sentinel::SentinelHandle>,
 ) -> RustParseOutput {
     if let Some(workspaces) = workspaces {
@@ -291,45 +299,64 @@ fn parse_rust_files(
 fn parse_rust_files_with_workspaces(
     files: &[FileInput],
     root_path: &str,
-    workspaces: &WorkspaceCatalog,
+    plan: &WorkspacePlan,
     sentinel: Option<&sentinel::SentinelHandle>,
 ) -> RustParseOutput {
     let mut parsed = Vec::with_capacity(files.len());
     let mut errors = Vec::new();
-    let mut files_by_workspace = vec![Vec::new(); workspaces.workspaces().len()];
-    let mut standalone = Vec::new();
+    let mut claimed = vec![false; files.len()];
 
-    for file in files {
-        let abs_path = to_absolute_path(root_path, file);
-        let relative_path = relative_path(root_path, &abs_path);
-        if let Some((workspace_id, _)) = workspaces.workspace_for_file(&relative_path) {
-            files_by_workspace[workspace_id].push(file.as_str());
-        } else {
-            standalone.push(file.as_str());
-        }
-    }
-
-    for (workspace_id, workspace_files) in files_by_workspace.iter().enumerate() {
-        if workspace_files.is_empty() {
+    for workspace_id in 0..plan.len() {
+        let candidates = plan.candidates(workspace_id);
+        // A root whose files an earlier root already claimed never needs a
+        // rust-analyzer database of its own.
+        if candidates.iter().all(|&idx| claimed[idx]) {
             continue;
         }
 
-        let workspace = &workspaces.workspaces()[workspace_id];
-        let workspace_tasks = workspace_files
-            .iter()
-            .map(|_| workspace.clone())
-            .collect::<Vec<_>>();
-        let workspace_results = workspace_tasks
-            .into_par_iter()
-            .zip(workspace_files.par_iter())
-            .map(|(workspace, file)| {
+        // A rust-analyzer load panic must cost one root, not the whole pass.
+        let loaded = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            plan.load(workspace_id, root_path)
+        }));
+        let workspace = match loaded {
+            Ok(Ok(workspace)) => workspace,
+            Ok(Err(err)) => {
+                tracing::warn!(
+                    manifest = %plan.manifest_path(workspace_id).display(),
+                    error = %err,
+                    "failed to load rust-analyzer workspace; continuing with others"
+                );
+                continue;
+            }
+            Err(payload) => {
+                tracing::warn!(
+                    manifest = %plan.manifest_path(workspace_id).display(),
+                    error = %rust_panic_message(&payload),
+                    "rust-analyzer workspace load panicked; continuing with others"
+                );
+                continue;
+            }
+        };
+
+        let mut workspace_files = Vec::new();
+        for &idx in candidates {
+            if claimed[idx] {
+                continue;
+            }
+            claimed[idx] = true;
+            workspace_files.push(files[idx].as_str());
+        }
+
+        let workspace_results = workspace_files
+            .par_iter()
+            .map_with(workspace.clone(), |workspace, file| {
                 let guard = sentinel.map(|s| s.file_start(file));
                 if let Ok(meta) = std::fs::metadata(to_absolute_path(root_path, file)) {
                     crate::v2::pipeline::breadcrumb_large_file(file, meta.len(), "rust");
                 }
                 let t_file = std::time::Instant::now();
                 let result = catch_rust_file_panic(file, || {
-                    parse_workspace_file(file, root_path, &workspace)
+                    parse_workspace_file(file, root_path, workspace)
                 });
                 let parse_ms = t_file.elapsed().as_secs_f64() * 1000.0;
                 if guard.as_ref().is_some_and(|g| g.is_killed()) {
@@ -355,6 +382,13 @@ fn parse_rust_files_with_workspaces(
             }
         }
     }
+
+    let standalone = files
+        .iter()
+        .enumerate()
+        .filter(|(idx, _)| !claimed[*idx])
+        .map(|(_, file)| file.as_str())
+        .collect::<Vec<_>>();
 
     let standalone_results = standalone
         .par_iter()
