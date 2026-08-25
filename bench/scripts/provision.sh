@@ -80,7 +80,7 @@ export CH_CPU="$(tier '.clickhouse.cpu')"
 export CH_MEMORY="$(tier '.clickhouse.memory')"
 envsubst < "${BENCH_DIR}/manifests/standalone-ch.yaml" | $KC apply -f -
 
-$KC rollout status -n "${CH_NS}" statefulset/clickhouse --timeout=120s
+$KC rollout status -n "${CH_NS}" statefulset/clickhouse --timeout=600s
 log "  ClickHouse ready"
 
 # --- 4. Create databases and users ---
