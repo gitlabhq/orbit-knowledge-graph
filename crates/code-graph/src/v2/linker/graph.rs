@@ -284,7 +284,7 @@ impl CodeGraph {
     pub fn release_node_payloads(&mut self) {
         self.defs = Vec::new();
         self.imports = Vec::new();
-        self.strings = orbit_utils::strings::StringPool::new();
+        self.strings = StringPool::new();
     }
 
     pub fn add_file(
@@ -917,10 +917,8 @@ impl CodeGraph {
         value.filter(|v| !v.is_empty())
     }
 
-    /// Returns a vec indexed by `NodeIndex`, so callers can look up tags by the
-    /// same indices used in the edge list. `tag_properties` maps node kind
-    /// name (e.g. `"File"`) to `(tag_key, property_name)` pairs, typically from
-    /// `ontology.denormalized_properties()`.
+    /// `tag_properties` maps node kind name (e.g. `"File"`) to
+    /// `(tag_key, property_name)` pairs, from `ontology.denormalized_properties()`.
     pub fn build_node_tags(
         &self,
         tag_properties: &std::collections::HashMap<String, Vec<(String, String)>>,
