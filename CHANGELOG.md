@@ -1,3 +1,15 @@
+## [0.106.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.105.2...v0.106.0) (2026-08-25)
+
+### Features
+
+* **bench:** add Terraform for bench cluster setup and teardown ([defd27f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/defd27ffe9b9e1b8da963e340f7cb1d9ba4b0417)) by Michael Usachenko
+* **cli:** resolve credentials via glab auth credential-helper ([7a6f03e](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/7a6f03ef4a553e1025d2956fc80d333173d64fcd)) by Jean-Gabriel Doyon
+* **search:** code definition search with graph-consensus ranking ([6da79f2](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/6da79f24f8924a9af0cb7d9c4ef660fc26e37ff0)) by Aaron Algutifan
+
+### Other
+
+* **orbit:** reframe CLI docs around the glab orbit passthrough ([e5d0814](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/e5d0814acd00d79746d9ab684ff1a79427216bf3)) by Jean-Gabriel Doyon
+
 ## [0.105.2](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.105.1...v0.105.2) (2026-08-24)
 
 ### Performance
