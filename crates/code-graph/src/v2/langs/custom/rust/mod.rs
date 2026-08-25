@@ -253,14 +253,15 @@ impl LanguagePipeline for RustPipeline {
             add_unresolved_imported_call_edges(&mut graph, &parsed);
         }
 
-        let total_ms = t0.elapsed().as_secs_f64() * 1000.0;
-        let resolve_ms = total_ms - parse_ms - graph_build_ms;
         let total_bytes: u64 = parsed.iter().map(|f| f.file_size).sum();
         let file_count = parsed.len();
         // The graph owns interned copies of everything resolution needed, so the
         // Arrow conversion below must not run alongside a second copy.
         drop(parsed);
         graph.finalize(tracer);
+
+        let total_ms = t0.elapsed().as_secs_f64() * 1000.0;
+        let resolve_ms = total_ms - parse_ms - graph_build_ms;
         ctx.record_language_timing(LanguageTimings {
             language: "rust".to_string(),
             file_count,
@@ -303,22 +304,23 @@ fn parse_rust_files_with_workspaces(
 ) -> RustParseOutput {
     let mut parsed = Vec::with_capacity(files.len());
     let mut errors = Vec::new();
-    let mut claimed = vec![false; plan.repo_file_count()];
-    let mut claimed_inventory = vec![false; files.len()];
-    let mut include_crate_name_in_fqn = plan.multiple_roots();
+    let mut claimed = vec![false; files.len()];
 
     for workspace_id in 0..plan.len() {
-        let repo_indexes = plan.candidate_repo_indexes(workspace_id);
-        // Path matching alone decides ownership, so a workspace whose files an
-        // earlier root already claimed never pays for a RootDatabase. On
-        // rust-lang/rust that skips 167 of 197 roots.
-        if repo_indexes.iter().all(|&idx| claimed[idx]) {
+        let candidates = plan.candidates(workspace_id);
+        // A root whose files an earlier root already claimed never needs a
+        // rust-analyzer database of its own.
+        if candidates.iter().all(|&idx| claimed[idx]) {
             continue;
         }
 
-        let mut workspace = match plan.load(workspace_id, root_path, include_crate_name_in_fqn) {
-            Ok(workspace) => workspace,
-            Err(err) => {
+        // A rust-analyzer load panic must cost one root, not the whole pass.
+        let loaded = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            plan.load(workspace_id, root_path)
+        }));
+        let workspace = match loaded {
+            Ok(Ok(workspace)) => workspace,
+            Ok(Err(err)) => {
                 tracing::warn!(
                     manifest = %plan.manifest_path(workspace_id).display(),
                     error = %err,
@@ -326,23 +328,23 @@ fn parse_rust_files_with_workspaces(
                 );
                 continue;
             }
-        };
-        if !include_crate_name_in_fqn && workspace.distinct_crate_names() > 1 {
-            include_crate_name_in_fqn = true;
-            workspace.set_include_crate_name_in_fqn(true);
-        }
-
-        let mut workspace_files = Vec::new();
-        for (&repo_index, &inventory_index) in repo_indexes
-            .iter()
-            .zip(plan.candidate_file_inventory_indexes(workspace_id).iter())
-        {
-            if claimed[repo_index] {
+            Err(payload) => {
+                tracing::warn!(
+                    manifest = %plan.manifest_path(workspace_id).display(),
+                    error = %rust_panic_message(&payload),
+                    "rust-analyzer workspace load panicked; continuing with others"
+                );
                 continue;
             }
-            claimed[repo_index] = true;
-            claimed_inventory[inventory_index] = true;
-            workspace_files.push(files[inventory_index].as_str());
+        };
+
+        let mut workspace_files = Vec::new();
+        for &idx in candidates {
+            if claimed[idx] {
+                continue;
+            }
+            claimed[idx] = true;
+            workspace_files.push(files[idx].as_str());
         }
 
         let workspace_results = workspace_files
@@ -379,14 +381,12 @@ fn parse_rust_files_with_workspaces(
                 Err(err) => errors.push(err),
             }
         }
-
-        drop(workspace);
     }
 
     let standalone = files
         .iter()
         .enumerate()
-        .filter(|(idx, _)| !claimed_inventory[*idx])
+        .filter(|(idx, _)| !claimed[*idx])
         .map(|(_, file)| file.as_str())
         .collect::<Vec<_>>();
 
