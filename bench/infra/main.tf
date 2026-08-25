@@ -15,12 +15,13 @@ terraform {
 }
 
 locals {
-  bench   = yamldecode(file("${path.module}/../config/bench.yaml"))
-  tiers   = yamldecode(file("${path.module}/../config/tiers.yaml"))
-  tier    = local.tiers.tiers[var.tier]
-  project = local.bench.project
-  region  = local.bench.region
-  zone    = local.bench.zone
+  bench        = yamldecode(file("${path.module}/../config/bench.yaml"))
+  tiers        = yamldecode(file("${path.module}/../config/tiers.yaml"))
+  tier         = local.tiers.tiers[var.tier]
+  project      = local.bench.project
+  region       = local.bench.region
+  zone         = local.bench.zone
+  cluster_name = var.cluster_name != "" ? var.cluster_name : "ra-bench-${var.tier}"
 }
 
 provider "google" {

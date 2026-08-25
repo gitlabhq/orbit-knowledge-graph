@@ -1,5 +1,5 @@
 resource "google_container_cluster" "bench" {
-  name     = var.cluster_name
+  name     = local.cluster_name
   location = local.zone
 
   remove_default_node_pool = true
