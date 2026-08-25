@@ -1,36 +1,15 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
-use crate::text::{split_words, stem};
-
-const EDGE_KIND_SYNONYMS: &[(&str, &str)] = &[
-    ("use", "CALLS"),
-    ("invoke", "CALLS"),
-    ("caller", "CALLS"),
-    ("callee", "CALLS"),
-    ("depend", "IMPORTS"),
-    ("implement", "EXTENDS"),
-    ("inherit", "EXTENDS"),
-];
-
-const RELATIONAL_SYNONYMS: &[&str] = &[
-    "caller",
-    "callee",
-    "depend",
-    "export",
-    "implement",
-    "invoke",
-    "mention",
-    "reference",
-    "render",
-    "use",
-    "used",
-    "uses",
-    "using",
-];
+fn stem(word: &str) -> String {
+    thread_local! {
+        static STEMMER: rust_stemmers::Stemmer =
+            rust_stemmers::Stemmer::create(rust_stemmers::Algorithm::English);
+    }
+    STEMMER.with(|s| s.stem(&word.to_lowercase()).into_owned())
+}
 
 pub struct SearchVocab {
     by_stem: HashMap<String, String>,
-    relational: HashSet<String>,
 }
 
 impl SearchVocab {
@@ -40,20 +19,15 @@ impl SearchVocab {
         S: AsRef<str>,
     {
         let mut by_stem: HashMap<String, String> = HashMap::new();
-        let mut relational: HashSet<String> = HashSet::new();
         for kind in edge_kinds {
             let name = kind.as_ref();
-            by_stem.insert(stem(&name.to_lowercase()), name.to_uppercase());
-            relational.extend(split_words(name).iter().map(|word| stem(word)));
+            for part in name.split(|c: char| !c.is_alphanumeric()) {
+                if !part.is_empty() {
+                    by_stem.insert(stem(part), name.to_uppercase());
+                }
+            }
         }
-        for (word, kind) in EDGE_KIND_SYNONYMS {
-            by_stem.insert(stem(word), (*kind).to_string());
-        }
-        relational.extend(RELATIONAL_SYNONYMS.iter().map(|word| stem(word)));
-        Self {
-            by_stem,
-            relational,
-        }
+        Self { by_stem }
     }
 
     pub fn focus_edge_kind(&self, terms: &[String]) -> Option<String> {
@@ -63,7 +37,7 @@ impl SearchVocab {
     }
 
     pub fn is_relational(&self, term: &str) -> bool {
-        self.relational.contains(&stem(term))
+        self.by_stem.contains_key(&stem(term))
     }
 }
 
@@ -72,18 +46,27 @@ mod tests {
     use crate::testutil::test_vocab;
 
     #[test]
-    fn maps_edge_kind_synonyms_and_relational_terms() {
+    fn edge_kind_names_are_the_whole_vocabulary() {
         let vocab = test_vocab();
         assert_eq!(
             vocab.focus_edge_kind(&["calls".to_string()]),
             Some("CALLS".to_string())
         );
         assert_eq!(
-            vocab.focus_edge_kind(&["depend".to_string()]),
+            vocab.focus_edge_kind(&["importing".to_string()]),
             Some("IMPORTS".to_string())
         );
         assert_eq!(vocab.focus_edge_kind(&["dlq".to_string()]), None);
-        assert!(vocab.is_relational("uses"));
-        assert!(!vocab.is_relational("dlq"));
+        for word in [
+            "calls", "called", "calling", "imports", "extends", "defines",
+        ] {
+            assert!(vocab.is_relational(word), "{word} should be relational");
+        }
+        for word in ["dlq", "widget", "userland", "usefulness"] {
+            assert!(
+                !vocab.is_relational(word),
+                "{word} should not be relational"
+            );
+        }
     }
 }

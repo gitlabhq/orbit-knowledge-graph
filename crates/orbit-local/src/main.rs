@@ -882,6 +882,12 @@ fn index_repo(
     client
         .delete_project(git.project_id, &node_tables, edge_table)
         .context("failed to clear existing project data")?;
+    client
+        .execute(
+            "DELETE FROM gl_def_trigram WHERE project_id = ?1",
+            &[serde_json::json!(git.project_id)],
+        )
+        .context("failed to clear existing search index")?;
 
     let converter: std::sync::Arc<dyn code_graph::v2::GraphConverter> =
         std::sync::Arc::new(duckdb_client::DuckDbConverter {
@@ -923,6 +929,20 @@ fn index_repo(
 
     let client =
         duckdb_client::DuckDbClient::open(db_path).context("failed to open DuckDB for status")?;
+    client
+        .execute(
+            "INSERT INTO gl_def_trigram
+             SELECT DISTINCT project_id, commit_sha, id, gram FROM (
+               SELECT project_id, commit_sha, id,
+                      UNNEST(trigrams(fqn || ' ' || file_path)) AS gram
+               FROM gl_definition WHERE project_id = ?1 AND commit_sha = ?2
+             )",
+            &[
+                serde_json::json!(git.project_id),
+                serde_json::json!(git.commit_sha),
+            ],
+        )
+        .context("failed to build the search index")?;
     workspace::set_status(
         &client,
         &key,

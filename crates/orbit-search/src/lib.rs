@@ -9,13 +9,13 @@ pub mod types;
 pub mod vocab;
 
 pub use anchor::{
-    BASE_SET_PER_TERM, MAX_SEEDS, MIN_SEEDS_PER_TERM, RowTokens, term_base_sets, unmatched_terms,
+    BASE_SET_PER_TERM, MAX_SEEDS, MIN_SEEDS_PER_TERM, term_base_sets, unmatched_terms,
 };
-pub use ask::{AskMatch, AskOutcome};
+pub use ask::{AskMatch, AskOutcome, TermRecall};
 pub use ppr::KindRates;
-pub use rank::{BM25_B, BM25_K1, CONFIDENT_COVERAGE, Hit, rank_and_trim};
-pub use text::{candidate_splits, content_words, query_tokens, search_document, split_words, stem};
-pub use types::{CorpusRow, Edge};
+pub use rank::{ANCHOR_SIM, CONFIDENT_COVERAGE, Hit, rank_and_trim};
+pub use text::content_words;
+pub use types::{CorpusRow, Edge, Graph, GraphEdge};
 pub use vocab::SearchVocab;
 
 #[cfg(test)]
@@ -27,14 +27,15 @@ pub(crate) mod testutil {
         SearchVocab::new(["Contains", "Defines", "Imports", "Calls", "Extends"])
     }
 
-    pub fn row(fqn: &str) -> CorpusRow {
+    pub fn row(id: i64, fqn: &str) -> CorpusRow {
         CorpusRow {
-            id: fqn.to_string(),
+            id,
             fqn: fqn.to_string(),
             kind: "Definition".to_string(),
             loc: String::new(),
             end_line: 0,
             degree: 0,
+            grams: 0,
         }
     }
 }

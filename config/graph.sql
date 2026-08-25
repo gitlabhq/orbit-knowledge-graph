@@ -100,8 +100,6 @@ CREATE TABLE IF NOT EXISTS gl_definition (
     end_byte Int64 CODEC(T64, ZSTD(1)),
     start_char Int64 CODEC(T64, ZSTD(1)),
     end_char Int64 CODEC(T64, ZSTD(1)),
-    search_text String DEFAULT '' CODEC(ZSTD(9)),
-    token_count Int64 DEFAULT 0 CODEC(T64, ZSTD(1)),
     _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(Delta(8), ZSTD(1)),
     _deleted Bool DEFAULT false,
     INDEX idx_id id TYPE bloom_filter(0.0001) GRANULARITY 1,

@@ -14,6 +14,21 @@ CREATE TABLE IF NOT EXISTS _orbit_manifest (
     error_message VARCHAR
 );
 
+CREATE TABLE IF NOT EXISTS gl_def_trigram (
+    project_id BIGINT NOT NULL,
+    commit_sha VARCHAR NOT NULL,
+    def_id BIGINT NOT NULL,
+    gram VARCHAR NOT NULL
+);
+
+CREATE OR REPLACE MACRO gram_text(txt) AS
+    ' ' || trim(regexp_replace(lower(txt), '[^0-9a-z]+', ' ', 'g')) || ' ';
+
+CREATE OR REPLACE MACRO trigrams(txt) AS
+    list_distinct(list_transform(
+        range(1, greatest(length(gram_text(txt)) - 1, 1)),
+        i -> substr(gram_text(txt), CAST(i AS INTEGER), 3)));
+
 CREATE TABLE IF NOT EXISTS gl_definition (
     id BIGINT NOT NULL,
     traversal_path VARCHAR NOT NULL,
@@ -29,9 +44,7 @@ CREATE TABLE IF NOT EXISTS gl_definition (
     start_byte BIGINT NOT NULL,
     end_byte BIGINT NOT NULL,
     start_char BIGINT NOT NULL,
-    end_char BIGINT NOT NULL,
-    search_text VARCHAR NOT NULL DEFAULT '',
-    token_count BIGINT NOT NULL DEFAULT 0
+    end_char BIGINT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS gl_directory (

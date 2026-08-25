@@ -1,15 +1,19 @@
 use anyhow::{Context, Result};
 use arrow::record_batch::RecordBatch;
 
-use crate::{DuckDbClient, bool_column, i64_column, scalar_i64, sql_lit, string_column};
+use crate::{
+    DuckDbClient, bool_column, f64_column, i64_column, scalar_i64, sql_lit, string_column,
+};
 use orbit_search::ask::{AskError, AskSource, ask};
 use orbit_search::corpus::{DEFAULT_SOURCE_EXTS, EXCLUDE_LIKE, EXCLUDE_REGEX, ext_regex};
 use orbit_search::expand::{NeighborhoodSource, NodeLabel};
 use orbit_search::ppr::NeighborhoodEdge;
-use orbit_search::{AskOutcome, BM25_B, BM25_K1, CorpusRow, KindRates, SearchVocab, query_tokens};
+use orbit_search::{AskOutcome, CorpusRow, KindRates, SearchVocab, TermRecall};
 use std::collections::HashMap;
 
-const LOCAL_CANDIDATES: usize = 2000;
+pub const RECALL_FLOOR: f64 = 0.5;
+pub const RECALL_LIMIT: usize = 2000;
+pub const LENGTH_NORM_B: f64 = 0.75;
 
 pub struct DuckDbSearch {
     client: DuckDbClient,
@@ -20,7 +24,7 @@ pub struct DuckDbSearch {
 impl DuckDbSearch {
     pub fn new(client: DuckDbClient, project_id: i64, commit_sha: &str) -> Result<Self> {
         let sha = sql_lit(commit_sha);
-        ensure_search_text(&client, project_id, &sha)?;
+        ensure_trigram_index(&client, project_id, &sha)?;
         client.execute(&corpus_view_sql(project_id, &sha), &[])?;
         Ok(Self {
             client,
@@ -41,44 +45,66 @@ impl DuckDbSearch {
             e => anyhow::anyhow!("{e}"),
         })
     }
-
-    pub fn search(&self, terms: &[String]) -> Result<(Vec<CorpusRow>, Option<Vec<f64>>)> {
-        let (total, per_term) = term_counts(&self.client, terms)?;
-        let n = total.max(1) as f64;
-        let weights: Vec<f64> = per_term
-            .iter()
-            .map(|df| (1.0 + n / (1.0 + *df as f64)).ln())
-            .collect();
-        let sql = bm25_candidates_sql(terms, &weights, LOCAL_CANDIDATES);
-        let corpus = rows_from_batches(&query(&self.client, &sql)?);
-        Ok((corpus, Some(weights)))
-    }
 }
 
 impl AskSource for DuckDbSearch {
-    fn corpus(&self, terms: &[String]) -> Result<(Vec<CorpusRow>, Option<Vec<f64>>)> {
-        self.search(terms)
-    }
-
-    fn token_df(&self, tokens: &[String]) -> Result<Vec<i64>> {
-        let (_, dfs) = term_counts(&self.client, tokens)?;
-        Ok(dfs)
+    fn recall(&self, terms: &[String]) -> Result<Vec<TermRecall>> {
+        if terms.is_empty() {
+            return Ok(Vec::new());
+        }
+        let sql = recall_sql(self.pid, &self.sha, terms.len());
+        let params: Vec<serde_json::Value> = terms
+            .iter()
+            .map(|t| serde_json::Value::String(t.clone()))
+            .collect();
+        let batches = self
+            .client
+            .query_arrow_json(&sql, &params)
+            .with_context(|| format!("trigram recall failed for terms {terms:?}"))?;
+        let term_idx = i64_column(&batches, "term_idx");
+        let ids = string_column(&batches, "id");
+        let sims = f64_column(&batches, "sim");
+        let dfs = i64_column(&batches, "df");
+        let totals = i64_column(&batches, "total");
+        let mut recalls: Vec<TermRecall> = terms
+            .iter()
+            .map(|_| TermRecall {
+                hits: Vec::new(),
+                matched: 0,
+                corpus: 0,
+            })
+            .collect();
+        for i in 0..term_idx.len() {
+            let Some(recall) = recalls.get_mut(term_idx[i] as usize) else {
+                continue;
+            };
+            recall.matched = dfs[i] as u64;
+            recall.corpus = totals[i] as u64;
+            if !ids[i].is_empty() {
+                recall.hits.push((ids[i].clone(), sims[i]));
+            }
+        }
+        Ok(recalls)
     }
 
     fn rows_by_ids(&self, ids: &[&str]) -> Result<Vec<CorpusRow>> {
         if ids.is_empty() {
             return Ok(Vec::new());
         }
-        let sql = corpus_rows_sql(&format!(
-            "cand AS (
+        let sql = corpus_rows_sql(
+            &format!(
+                "cand AS (
   SELECT d.id, d.fqn, d.definition_type, d.file_path, d.start_line, d.end_line
   FROM gl_definition d
   WHERE d.project_id = {pid} AND d.commit_sha = {sha} AND d.id IN ({list})
 )",
-            pid = self.pid,
-            sha = self.sha,
-            list = ids.join(", "),
-        ));
+                pid = self.pid,
+                sha = self.sha,
+                list = ids.join(", "),
+            ),
+            self.pid,
+            &self.sha,
+        );
         Ok(rows_from_batches(&query(&self.client, &sql)?))
     }
 }
@@ -194,33 +220,94 @@ fn query(client: &DuckDbClient, sql: &str) -> Result<Vec<RecordBatch>> {
     })
 }
 
-fn ensure_search_text(client: &DuckDbClient, project_id: i64, sha: &str) -> Result<()> {
-    let columns = client.query_arrow(
-        "SELECT CAST(COUNT(*) AS BIGINT) AS n FROM information_schema.columns
- WHERE table_name = 'gl_definition' AND column_name = 'search_text'",
-    )?;
-    let indexed = scalar_i64(&columns) > 0
-        && scalar_i64(&client.query_arrow(&format!(
-            "SELECT CAST(COUNT(*) AS BIGINT) AS n FROM (
-  SELECT 1 FROM gl_definition
-  WHERE project_id = {project_id} AND commit_sha = {sha} AND token_count > 0
+fn ensure_trigram_index(client: &DuckDbClient, project_id: i64, sha: &str) -> Result<()> {
+    let indexed = scalar_i64(&client.query_arrow(&format!(
+        "SELECT CAST(COUNT(*) AS BIGINT) AS n FROM (
+  SELECT 1 FROM gl_def_trigram
+  WHERE project_id = {project_id} AND commit_sha = {sha}
   LIMIT 1
 )"
-        ))?) > 0;
+    ))?) > 0;
     if !indexed {
         anyhow::bail!(
-            "local graph has no ranked-search data for this commit; \
+            "local graph has no search index for this commit; \
              re-index the repository (`orbit index <path>`)"
         );
     }
     Ok(())
 }
 
+/// One query for every term: per-(definition, term) sims are capped on the
+/// IDF-weighted combined score, never per term, so a definition matching two
+/// discriminating terms outlives thousands tied at sim 1.0 on one flood term.
+fn recall_sql(pid: i64, sha: &str, term_count: usize) -> String {
+    let q_arms: Vec<String> = (0..term_count)
+        .map(|i| {
+            format!(
+                "SELECT {i} AS term_idx, UNNEST(trigrams(?{p})) AS gram",
+                p = i + 1
+            )
+        })
+        .collect();
+    format!(
+        "WITH q AS ({q}),
+qn AS (SELECT term_idx, GREATEST(COUNT(*), 1) AS n FROM q GROUP BY term_idx),
+corpus_n AS (SELECT GREATEST(COUNT(*), 1) AS total FROM search_corpus),
+hits AS (
+  SELECT t.def_id, q.term_idx,
+         CAST(COUNT(DISTINCT t.gram) AS DOUBLE) / ANY_VALUE(qn.n) AS sim
+  FROM gl_def_trigram t
+  JOIN q ON q.gram = t.gram
+  JOIN qn ON qn.term_idx = q.term_idx
+  WHERE t.project_id = {pid} AND t.commit_sha = {sha}
+    AND t.def_id IN (SELECT id FROM search_corpus)
+  GROUP BY t.def_id, q.term_idx
+  HAVING COUNT(DISTINCT t.gram) >= CEIL({RECALL_FLOOR} * ANY_VALUE(qn.n))
+),
+df AS (SELECT term_idx, COUNT(*) AS df FROM hits GROUP BY term_idx),
+lens AS (
+  SELECT t.def_id, CAST(COUNT(DISTINCT t.gram) AS DOUBLE) AS len
+  FROM gl_def_trigram t
+  WHERE t.project_id = {pid} AND t.commit_sha = {sha}
+    AND t.def_id IN (SELECT def_id FROM hits)
+  GROUP BY t.def_id
+),
+avgdl AS (SELECT GREATEST(AVG(len), 1) AS avg_len FROM lens),
+top_defs AS (
+  SELECT h.def_id
+  FROM hits h
+  JOIN df ON df.term_idx = h.term_idx
+  JOIN lens ON lens.def_id = h.def_id
+  CROSS JOIN corpus_n
+  CROSS JOIN avgdl
+  GROUP BY h.def_id
+  ORDER BY SUM(h.sim * LN(1 + corpus_n.total / (1.0 + df.df))
+               / (1 - {LENGTH_NORM_B} + {LENGTH_NORM_B} * lens.len / avgdl.avg_len)) DESC,
+           h.def_id
+  LIMIT {RECALL_LIMIT}
+),
+surviving AS (
+  SELECT h.def_id, h.term_idx, h.sim
+  FROM hits h
+  JOIN top_defs ON top_defs.def_id = h.def_id
+)
+SELECT CAST(df.term_idx AS BIGINT) AS term_idx,
+       COALESCE(CAST(s.def_id AS VARCHAR), '') AS id,
+       COALESCE(s.sim, 0.0) AS sim,
+       df.df,
+       corpus_n.total
+FROM df
+CROSS JOIN corpus_n
+LEFT JOIN surviving s ON s.term_idx = df.term_idx
+ORDER BY df.term_idx, sim DESC, id",
+        q = q_arms.join(" UNION ALL ")
+    )
+}
+
 fn corpus_view_sql(pid: i64, sha: &str) -> String {
     format!(
         "CREATE OR REPLACE TEMP VIEW search_corpus AS
-SELECT d.id, d.fqn, d.definition_type, d.file_path, d.start_line, d.end_line,
-       d.search_text, d.token_count
+SELECT d.id, d.fqn, d.definition_type, d.file_path, d.start_line, d.end_line
 FROM gl_definition d
 WHERE d.project_id = {pid} AND d.commit_sha = {sha}
   AND regexp_matches(d.file_path, {source_only})
@@ -251,41 +338,7 @@ fn exclusions(col: &str) -> String {
     s
 }
 
-fn token_like_sql(term: &str) -> Option<String> {
-    let tokens = query_tokens(&[term.to_string()]);
-    if tokens.is_empty() {
-        return None;
-    }
-    let clauses: Vec<String> = tokens
-        .iter()
-        .map(|tok| {
-            format!(
-                "' ' || d.search_text || ' ' LIKE {}",
-                sql_lit(&format!("% {tok} %"))
-            )
-        })
-        .collect();
-    Some(format!("({})", clauses.join(" OR ")))
-}
-
-fn token_tf_sql(term: &str) -> Option<String> {
-    let tokens = query_tokens(&[term.to_string()]);
-    if tokens.is_empty() {
-        return None;
-    }
-    let clauses: Vec<String> = tokens
-        .iter()
-        .map(|tok| {
-            format!(
-                "len(list_filter(string_split(d.search_text, ' '), x -> x = {}))",
-                sql_lit(tok)
-            )
-        })
-        .collect();
-    Some(format!("({})", clauses.join(" + ")))
-}
-
-fn corpus_rows_sql(cand_ctes: &str) -> String {
+fn corpus_rows_sql(cand_ctes: &str, pid: i64, sha: &str) -> String {
     format!(
         "WITH {cand_ctes},
 deg AS (
@@ -294,81 +347,22 @@ deg AS (
     UNION ALL
     SELECT target_id FROM gl_edge WHERE target_id IN (SELECT id FROM cand)
   ) GROUP BY 1
+),
+lens AS (
+  SELECT def_id, COUNT(DISTINCT gram) AS grams FROM gl_def_trigram
+  WHERE project_id = {pid} AND commit_sha = {sha}
+    AND def_id IN (SELECT id FROM cand)
+  GROUP BY def_id
 )
 SELECT CAST(c.id AS VARCHAR) AS id, c.fqn, c.definition_type,
        c.file_path || ':' || CAST(c.start_line AS VARCHAR) AS loc,
        c.end_line,
-       COALESCE(deg.degree, 0) AS degree
+       COALESCE(deg.degree, 0) AS degree,
+       COALESCE(lens.grams, 0) AS grams
 FROM cand c
-LEFT JOIN deg ON deg.id = c.id"
+LEFT JOIN deg ON deg.id = c.id
+LEFT JOIN lens ON lens.def_id = c.id"
     )
-}
-
-fn bm25_candidates_sql(terms: &[String], weights: &[f64], cap: usize) -> String {
-    let match_clauses: Vec<String> = terms.iter().filter_map(|t| token_like_sql(t)).collect();
-    let any_match = if match_clauses.is_empty() {
-        "FALSE".to_string()
-    } else {
-        format!("({})", match_clauses.join(" OR "))
-    };
-    let mut tf_cols = String::new();
-    let mut score_parts: Vec<String> = Vec::new();
-    for (i, term) in terms.iter().enumerate() {
-        let Some(tf) = token_tf_sql(term) else {
-            continue;
-        };
-        let idf = weights.get(i).copied().unwrap_or(1.0);
-        tf_cols.push_str(&format!(",\n         {tf} AS tf_{i}"));
-        score_parts.push(format!(
-            "{idf:.6} * tf_{i} * ({k1} + 1)
-           / (tf_{i} + {k1} * (1 - {b} + {b} * token_count / avgdl))",
-            k1 = BM25_K1,
-            b = BM25_B,
-        ));
-    }
-    let score = if score_parts.is_empty() {
-        "0".to_string()
-    } else {
-        score_parts.join("\n         + ")
-    };
-    corpus_rows_sql(&format!(
-        "stats AS (
-  SELECT GREATEST(AVG(token_count), 1) AS avgdl FROM search_corpus
-),
-matched AS (
-  SELECT d.id, d.fqn, d.definition_type, d.file_path, d.start_line, d.end_line,
-         d.token_count{tf_cols}
-  FROM search_corpus d
-  WHERE {any_match}
-),
-cand AS (
-  SELECT id, fqn, definition_type, file_path, start_line, end_line
-  FROM matched CROSS JOIN stats
-  ORDER BY ({score}) DESC, length(fqn) ASC
-  LIMIT {cap}
-)"
-    ))
-}
-
-fn term_counts(client: &DuckDbClient, terms: &[String]) -> Result<(i64, Vec<i64>)> {
-    let counters: String = terms
-        .iter()
-        .enumerate()
-        .map(|(i, t)| match token_like_sql(t) {
-            Some(matched) => format!(", COUNT(*) FILTER (WHERE {matched}) AS df_{i}"),
-            None => format!(", CAST(0 AS BIGINT) AS df_{i}"),
-        })
-        .collect();
-    let batches = query(
-        client,
-        &format!("SELECT COUNT(*) AS total{counters} FROM search_corpus d"),
-    )?;
-    let count_of = |name: &str| i64_column(&batches, name).first().copied().unwrap_or(0);
-    let total = count_of("total");
-    let per_term = (0..terms.len())
-        .map(|i| count_of(&format!("df_{i}")))
-        .collect();
-    Ok((total, per_term))
 }
 
 fn rows_from_batches(batches: &[RecordBatch]) -> Vec<CorpusRow> {
@@ -378,6 +372,7 @@ fn rows_from_batches(batches: &[RecordBatch]) -> Vec<CorpusRow> {
     let locs = string_column(batches, "loc");
     let end_lines = i64_column(batches, "end_line");
     let degrees = i64_column(batches, "degree");
+    let grams = i64_column(batches, "grams");
     (0..ids.len())
         .map(|i| CorpusRow {
             id: ids[i].clone(),
@@ -386,6 +381,7 @@ fn rows_from_batches(batches: &[RecordBatch]) -> Vec<CorpusRow> {
             loc: locs[i].clone(),
             end_line: end_lines[i],
             degree: degrees[i] as u64,
+            grams: grams[i] as u64,
         })
         .collect()
 }
@@ -395,22 +391,27 @@ mod tests {
     use super::*;
 
     #[test]
-    fn bm25_sql_embeds_padded_token_matches() {
-        let sql = bm25_candidates_sql(&["valid".to_string()], &[1.5], 10);
-        assert!(sql.contains("LIKE '% valid %'"), "sql was {sql}");
-        assert!(sql.contains("1.500000"), "sql was {sql}");
-        assert!(sql.contains("ORDER BY ("), "sql was {sql}");
-        assert_eq!(
-            sql.matches("list_filter").count(),
-            1,
-            "tf must be computed once as a column, sql was {sql}"
+    fn recall_sql_grams_every_term_and_caps_on_the_combined_idf_weighted_score() {
+        let sql = recall_sql(7, "'sha'", 2);
+        assert!(sql.contains("trigrams(?1)"), "sql was {sql}");
+        assert!(
+            sql.contains("1 AS term_idx, UNNEST(trigrams(?2))"),
+            "sql was {sql}"
         );
-    }
-
-    #[test]
-    fn bm25_tf_counts_exact_tokens_not_substrings() {
-        let sql = token_tf_sql("validated").unwrap();
-        assert!(sql.contains("x = 'valid'"), "sql was {sql}");
-        assert!(!sql.contains('%'), "sql was {sql}");
+        assert!(
+            sql.contains("IN (SELECT id FROM search_corpus)"),
+            "sql was {sql}"
+        );
+        assert!(sql.contains("COUNT(DISTINCT t.gram)"), "sql was {sql}");
+        assert!(
+            sql.contains("SUM(h.sim * LN(1 + corpus_n.total / (1.0 + df.df))"),
+            "sql was {sql}"
+        );
+        assert!(sql.contains("lens.len / avgdl.avg_len"), "sql was {sql}");
+        assert!(
+            sql.contains(&format!("LIMIT {RECALL_LIMIT}")),
+            "sql was {sql}"
+        );
+        assert!(sql.contains("CEIL(0.5"), "sql was {sql}");
     }
 }

@@ -57,9 +57,6 @@ pub(crate) fn run(
 
     let outcome = backend.ask(&question, limit, vocab(), kind_rates())?;
     writeln!(out, "terms: {}", outcome.terms.join(" "))?;
-    for (term, parts) in &outcome.splits {
-        writeln!(out, "note: also matching {term} as compound of: {parts}")?;
-    }
 
     if outcome.matches.is_empty() {
         writeln!(out, "\nNo definitions match those terms.")?;
@@ -223,7 +220,9 @@ mod tests {
 
     #[test]
     fn vocab_maps_question_verbs_to_relational_intent_and_focus_kinds() {
-        for word in ["calls", "imports", "extends", "renders", "uses", "callers"] {
+        for word in [
+            "calls", "calling", "imports", "extends", "defines", "contains",
+        ] {
             assert!(vocab().is_relational(word), "{word} should be relational");
         }
         for word in ["dlq", "widget", "backpressure", "hooks"] {

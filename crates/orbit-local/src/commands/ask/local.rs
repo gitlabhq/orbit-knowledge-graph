@@ -106,11 +106,10 @@ mod tests {
         }
 
         fn def(&self, id: i64, fqn: &str, name: &str, path: &str) {
-            let (search_text, token_count) = orbit_search::search_document(fqn, path);
             self.client
                 .execute(
                     &format!(
-                        "INSERT INTO gl_definition VALUES ({id}, '', 7, 'main', 'sha', '{path}', '{fqn}', '{name}', 'Method', 1, 2, 0, 0, 0, 0, '{search_text}', {token_count})"
+                        "INSERT INTO gl_definition VALUES ({id}, '', 7, 'main', 'sha', '{path}', '{fqn}', '{name}', 'Method', 1, 2, 0, 0, 0, 0)"
                     ),
                     &[],
                 )
@@ -129,6 +128,17 @@ mod tests {
         }
 
         fn search(self) -> DuckDbSearch {
+            self.client
+                .execute(
+                    "INSERT INTO gl_def_trigram
+                     SELECT DISTINCT project_id, commit_sha, id, gram FROM (
+                       SELECT project_id, commit_sha, id,
+                              UNNEST(trigrams(fqn || ' ' || file_path)) AS gram
+                       FROM gl_definition
+                     )",
+                    &[],
+                )
+                .unwrap();
             DuckDbSearch::new(self.client, 7, "sha").unwrap()
         }
     }

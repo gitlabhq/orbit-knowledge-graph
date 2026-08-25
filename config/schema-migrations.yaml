@@ -16,6 +16,12 @@
 # note-gated `scope: none` entry, the certified output-neutral escape hatch. A
 # version with no entry is treated as "*", which also makes pruning old entries safe.
 migrations:
+- version: 93
+  scope: code
+  note: >-
+    gl_definition drops search_text and token_count; local ranked search now
+    derives a gl_def_trigram table in DuckDB via SQL macros, and remote text
+    recall is delegated to orbit-next instead of ClickHouse columns
 - version: 92
   scope: "*"
   note: >-

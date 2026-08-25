@@ -1,150 +1,88 @@
 use std::collections::HashMap;
 
-use crate::anchor::{RowTokens, Tier, tier_of};
-use crate::text::stem;
 use crate::types::CorpusRow;
-use crate::vocab::SearchVocab;
-
-pub const BM25_K1: f64 = 1.2;
-pub const BM25_B: f64 = 0.75;
 
 const CANDIDATE_FACTOR: usize = 5;
 
 const MAX_PER_PARENT: usize = 2;
 const MAX_PER_FILE: usize = 3;
 
-const EXACT_BONUS: f64 = 1000.0;
-const PREFIX_BONUS: f64 = 100.0;
-const SUBSTRING_BONUS: f64 = 1.0;
-const SOURCE_BONUS: f64 = 0.5;
+pub const ANCHOR_SIM: f64 = 0.999;
+pub const CONFIDENT_COVERAGE: f64 = 0.5;
+pub const LENGTH_NORM_B: f64 = 0.75;
 
 pub struct Hit {
     pub index: usize,
     pub score: f64,
-    tiered: bool,
+    anchored: bool,
     coverage: f64,
 }
 
-pub const CONFIDENT_COVERAGE: f64 = 0.5;
-
 impl Hit {
-    pub fn tiered(&self) -> bool {
-        self.tiered
+    pub fn anchored(&self) -> bool {
+        self.anchored
     }
 
     pub fn confident(&self) -> bool {
-        self.tiered && self.coverage >= CONFIDENT_COVERAGE
+        self.anchored && self.coverage >= CONFIDENT_COVERAGE
     }
 }
 
 pub fn rank_and_trim(
-    terms: &[String],
     corpus: &[CorpusRow],
-    rows: &[RowTokens],
+    sims: &[Vec<f64>],
+    idfs: &[f64],
     limit: usize,
-    weights: Option<&[f64]>,
-    vocab: &SearchVocab,
 ) -> Vec<Hit> {
     dedupe_by_parent(
-        rank(
-            terms,
-            corpus,
-            rows,
-            limit * CANDIDATE_FACTOR,
-            weights,
-            vocab,
-        ),
+        rank(corpus, sims, idfs, limit * CANDIDATE_FACTOR),
         corpus,
         limit,
     )
 }
 
-fn rank(
-    terms: &[String],
-    corpus: &[CorpusRow],
-    rows: &[RowTokens],
-    cap: usize,
-    weights: Option<&[f64]>,
-    vocab: &SearchVocab,
-) -> Vec<Hit> {
-    let joined = terms.join(" ");
-    let term_stems: Vec<String> = terms.iter().map(|t| stem(t)).collect();
-    let weights: Vec<f64> = match weights {
-        Some(w) if w.len() == terms.len() => terms
-            .iter()
-            .zip(w)
-            .map(|(term, weight)| {
-                if vocab.is_relational(term) {
-                    weight.min(1.0)
-                } else {
-                    *weight
-                }
-            })
-            .collect(),
-        _ => vec![1.0; terms.len()],
+fn rank(corpus: &[CorpusRow], sims: &[Vec<f64>], idfs: &[f64], cap: usize) -> Vec<Hit> {
+    let denominator = idfs.len().max(1) as f64;
+    let measured: Vec<f64> = corpus
+        .iter()
+        .filter(|r| r.grams > 0)
+        .map(|r| r.grams as f64)
+        .collect();
+    let avgdl = if measured.is_empty() {
+        1.0
+    } else {
+        measured.iter().sum::<f64>() / measured.len() as f64
     };
-
     let mut hits: Vec<Hit> = Vec::new();
-    for (index, row) in rows.iter().enumerate() {
-        let name_joined = row.name.join(" ");
-        let mut score = 0.0;
-        if !joined.is_empty() {
-            if name_joined == joined {
-                score += EXACT_BONUS * 10.0;
-            } else if name_joined.starts_with(&joined) {
-                score += PREFIX_BONUS * 10.0;
-            }
+    for (index, row_sims) in sims.iter().enumerate() {
+        let total: f64 = row_sims.iter().zip(idfs).map(|(sim, idf)| sim * idf).sum();
+        if total <= 0.0 {
+            continue;
         }
-        let mut tiered = 0.0;
-        let mut matched = 0usize;
-        let mut anchored = 0usize;
-        for ((term, term_stem), weight) in terms.iter().zip(&term_stems).zip(&weights) {
-            match row.name_tier(term, term_stem) {
-                Tier::Exact => {
-                    tiered += EXACT_BONUS * weight;
-                    matched += 1;
-                    anchored += 1;
-                }
-                Tier::Prefix => {
-                    tiered += PREFIX_BONUS * weight;
-                    matched += 1;
-                    anchored += 1;
-                }
-                Tier::Inner => {
-                    score += SUBSTRING_BONUS * weight;
-                    matched += 1;
-                }
-                Tier::None => {
-                    if matches!(tier_of(term, &row.path), Tier::Exact | Tier::Prefix) {
-                        score += SOURCE_BONUS * weight;
-                    }
-                }
-            }
-        }
-        if tiered > 0.0 {
-            let coverage = matched as f64 / terms.len() as f64;
-            score += tiered * coverage * coverage;
-        }
-        if score > 0.0 {
-            hits.push(Hit {
-                index,
-                score,
-                tiered: tiered > 0.0,
-                coverage: anchored as f64 / terms.len().max(1) as f64,
-            });
-        }
+        let len = corpus[index].grams.max(1) as f64;
+        let length_norm = 1.0 - LENGTH_NORM_B + LENGTH_NORM_B * len / avgdl;
+        let idf_total: f64 = idfs.iter().sum::<f64>().max(f64::MIN_POSITIVE);
+        let matched_idf: f64 = row_sims
+            .iter()
+            .zip(idfs)
+            .filter(|&(&s, _)| s > 0.0)
+            .map(|(_, idf)| idf)
+            .sum();
+        let anchored = row_sims.iter().filter(|&&s| s >= ANCHOR_SIM).count() as f64;
+        let coverage = matched_idf / idf_total;
+        hits.push(Hit {
+            index,
+            score: total * coverage * coverage / length_norm,
+            anchored: anchored > 0.0,
+            coverage: anchored / denominator,
+        });
     }
     hits.sort_by(|a, b| {
         b.score
             .partial_cmp(&a.score)
             .unwrap_or(std::cmp::Ordering::Equal)
-            .then_with(|| {
-                if a.tiered && b.tiered {
-                    corpus[a.index].fqn.len().cmp(&corpus[b.index].fqn.len())
-                } else {
-                    std::cmp::Ordering::Equal
-                }
-            })
+            .then_with(|| corpus[a.index].fqn.len().cmp(&corpus[b.index].fqn.len()))
+            .then_with(|| corpus[a.index].id.cmp(&corpus[b.index].id))
     });
     hits.truncate(cap);
     hits
@@ -195,20 +133,50 @@ fn parent_key(fqn: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testutil::{row, test_vocab};
+    use crate::testutil::row;
+
+    #[test]
+    fn full_sim_outranks_fuzzy_and_coverage_squares_partial_matches() {
+        let corpus = vec![
+            row(1, "Repo::commit"),
+            row(2, "Repo::komit"),
+            row(3, "Repo::other"),
+        ];
+        let sims = vec![
+            vec![1.0, 1.0, 1.0],
+            vec![0.8, 0.8, 0.8],
+            vec![1.0, 0.0, 0.0],
+        ];
+        let hits = rank(&corpus, &sims, &[1.0, 1.0, 1.0], 10);
+        let order: Vec<&str> = hits.iter().map(|h| corpus[h.index].fqn.as_str()).collect();
+        assert_eq!(order, vec!["Repo::commit", "Repo::komit", "Repo::other"]);
+        assert!(hits[0].confident());
+        assert!(!hits[1].anchored());
+        assert!(
+            !hits[2].confident(),
+            "one anchored term of three must stay below the confidence floor"
+        );
+        assert!(hits[0].score > 4.0 * hits[2].score);
+    }
+
+    #[test]
+    fn zero_sim_rows_are_dropped_and_ties_prefer_shorter_fqns() {
+        let corpus = vec![
+            row(4, "Repo::commit_hook"),
+            row(5, "Repo::commit"),
+            row(6, "X::y"),
+        ];
+        let sims = vec![vec![1.0], vec![1.0], vec![0.0]];
+        let hits = rank(&corpus, &sims, &[1.0], 10);
+        assert_eq!(hits.len(), 2);
+        assert_eq!(corpus[hits[0].index].fqn, "Repo::commit");
+    }
 
     #[test]
     fn rank_dedupe_and_parent_keys_respect_limits() {
-        let corpus = vec![row("Repo::commit_hook"), row("Project::setup")];
-        let rows: Vec<RowTokens> = corpus.iter().map(RowTokens::of).collect();
-        let hits = rank(
-            &["commit".to_string()],
-            &corpus,
-            &rows,
-            10,
-            None,
-            &test_vocab(),
-        );
+        let corpus = vec![row(7, "Repo::commit_hook"), row(8, "Project::setup")];
+        let sims = vec![vec![1.0], vec![0.0]];
+        let hits = rank(&corpus, &sims, &[1.0], 10);
         assert_eq!(hits.len(), 1);
         let limited = dedupe_by_parent(hits, &corpus, 0);
         assert!(limited.is_empty());
@@ -219,23 +187,35 @@ mod tests {
     }
 
     #[test]
+    fn idf_weights_rare_terms_above_flood_terms() {
+        let corpus = vec![
+            row(9, "Ci::AutoCancel"),
+            row(10, "Project::Repository::List"),
+        ];
+        let sims = vec![vec![1.0, 0.0], vec![0.0, 1.0]];
+        let hits = rank(&corpus, &sims, &[9.0, 1.1], 10);
+        assert_eq!(corpus[hits[0].index].fqn, "Ci::AutoCancel");
+        assert!(hits[0].score > 5.0 * hits[1].score);
+    }
+
+    #[test]
     fn parent_rejection_does_not_burn_file_quota() {
-        let row_at = |fqn: &str, loc: &str| {
-            let mut r = row(fqn);
+        let row_at = |id: i64, fqn: &str, loc: &str| {
+            let mut r = row(id, fqn);
             r.loc = loc.to_string();
             r
         };
         let corpus = vec![
-            row_at("A::x1", "f.rb:1"),
-            row_at("A::x2", "f.rb:2"),
-            row_at("A::x3", "f.rb:3"),
-            row_at("B::y", "f.rb:4"),
+            row_at(1, "A::x1", "f.rb:1"),
+            row_at(2, "A::x2", "f.rb:2"),
+            row_at(3, "A::x3", "f.rb:3"),
+            row_at(4, "B::y", "f.rb:4"),
         ];
         let hits = (0..4)
             .map(|index| Hit {
                 index,
                 score: 1.0,
-                tiered: false,
+                anchored: false,
                 coverage: 0.0,
             })
             .collect();

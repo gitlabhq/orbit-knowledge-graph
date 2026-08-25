@@ -2103,7 +2103,6 @@ dependencies = [
  "ignore",
  "indicatif",
  "memchr",
- "orbit-search",
  "orbit-utils",
  "oxc",
  "oxc_linter",

@@ -83,8 +83,11 @@ pub fn run_remote(
     }
 }
 
-/// Manifest table DDL for DuckDB. Passed through to the compiler as
-/// external DDL so the codegen crate stays schema-agnostic.
+/// Manifest and search-index DDL for DuckDB. Passed through to the compiler
+/// as external DDL so the codegen crate stays schema-agnostic. The trigram
+/// macros are the single definition of gram extraction: the indexer derives
+/// gl_def_trigram from gl_definition with them and the recall query grams the
+/// question terms with them, so write and read sides cannot drift.
 const MANIFEST_DDL: &str = "\
 CREATE TYPE IF NOT EXISTS repo_status AS ENUM ('pending', 'indexing', 'indexed', 'error');
 
@@ -97,7 +100,22 @@ CREATE TABLE IF NOT EXISTS _orbit_manifest (
     status repo_status NOT NULL DEFAULT 'pending',
     last_indexed_at TIMESTAMP,
     error_message VARCHAR
-);";
+);
+
+CREATE TABLE IF NOT EXISTS gl_def_trigram (
+    project_id BIGINT NOT NULL,
+    commit_sha VARCHAR NOT NULL,
+    def_id BIGINT NOT NULL,
+    gram VARCHAR NOT NULL
+);
+
+CREATE OR REPLACE MACRO gram_text(txt) AS
+    ' ' || trim(regexp_replace(lower(txt), '[^0-9a-z]+', ' ', 'g')) || ' ';
+
+CREATE OR REPLACE MACRO trigrams(txt) AS
+    list_distinct(list_transform(
+        range(1, greatest(length(gram_text(txt)) - 1, 1)),
+        i -> substr(gram_text(txt), CAST(i AS INTEGER), 3)));";
 
 pub fn run_local(ontology_path: Option<PathBuf>) -> Result<()> {
     let ont = load_ontology(ontology_path.as_ref())?;
@@ -316,7 +334,8 @@ mod tests {
         let ddl = query_engine::compiler::generate_local_ddl(&ont, MANIFEST_DDL);
         assert!(ddl.contains("CREATE TABLE"));
         assert!(ddl.contains("_orbit_manifest"));
-        assert!(ddl.contains("search_text"));
+        assert!(ddl.contains("gl_def_trigram"));
+        assert!(!ddl.contains("search_text"));
         assert!(ddl.contains("SCHEMA_VERSION="));
     }
 

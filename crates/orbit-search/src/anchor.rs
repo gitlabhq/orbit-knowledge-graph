@@ -1,176 +1,114 @@
-use crate::text::{split_words, stem};
-use crate::types::CorpusRow;
-use crate::vocab::SearchVocab;
+use crate::ask::TermRecall;
 
 pub const BASE_SET_PER_TERM: usize = 10;
 pub const MIN_SEEDS_PER_TERM: usize = 3;
 pub const MAX_SEEDS: usize = 50;
 
-pub fn term_base_sets(
-    terms: &[String],
-    rows: &[RowTokens],
-    weights: Option<&[f64]>,
-    vocab: &SearchVocab,
-) -> Vec<Vec<(usize, f64)>> {
-    let searchable = terms
-        .iter()
-        .filter(|term| !vocab.is_relational(term))
-        .count()
-        .max(1);
-    let per_term = (MAX_SEEDS / searchable).clamp(MIN_SEEDS_PER_TERM, BASE_SET_PER_TERM);
-    let mut sets: Vec<Vec<(usize, f64)>> = Vec::new();
-    for (t, term) in terms.iter().enumerate() {
-        if vocab.is_relational(term) {
-            continue;
-        }
-        let idf = weights.and_then(|w| w.get(t)).copied().unwrap_or(1.0);
-        let term_stem = stem(term);
-        let mut matched: Vec<(usize, f64)> = rows
-            .iter()
-            .enumerate()
-            .filter_map(|(i, row)| {
-                let tier_factor = match row.name_tier(term, &term_stem) {
-                    Tier::Exact => 1.0,
-                    Tier::Prefix => 0.7,
-                    Tier::Inner => 0.2,
-                    Tier::None => match tier_of(term, &row.path) {
-                        Tier::Exact | Tier::Prefix => 0.3,
-                        _ => return None,
-                    },
-                };
-                Some((i, idf * tier_factor))
-            })
-            .collect();
-        matched.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-        matched.truncate(per_term);
-        if !matched.is_empty() {
-            sets.push(matched);
-        }
-    }
-    sets
+pub const SEED_DF_CEILING: f64 = 0.25;
+
+fn seeds_consensus(recall: &TermRecall) -> bool {
+    !recall.hits.is_empty() && (recall.matched as f64) < recall.corpus as f64 * SEED_DF_CEILING
 }
 
-pub fn unmatched_terms(terms: &[String], rows: &[RowTokens], vocab: &SearchVocab) -> Vec<String> {
-    terms
+pub fn term_base_sets(recalls: &[TermRecall]) -> Vec<Vec<(i64, f64)>> {
+    let searchable = recalls.iter().filter(|r| seeds_consensus(r)).count().max(1);
+    let per_term = (MAX_SEEDS / searchable).clamp(MIN_SEEDS_PER_TERM, BASE_SET_PER_TERM);
+    recalls
         .iter()
-        .filter(|term| !vocab.is_relational(term))
-        .filter(|term| {
-            let term_stem = stem(term);
-            !rows.iter().any(|row| row.matches(term, &term_stem))
+        .filter(|r| seeds_consensus(r))
+        .map(|recall| {
+            let mut set = recall.hits.clone();
+            set.sort_by(|a, b| {
+                b.1.partial_cmp(&a.1)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+                    .then_with(|| a.0.cmp(&b.0))
+            });
+            set.truncate(per_term);
+            set
         })
-        .cloned()
         .collect()
 }
 
-pub(crate) enum Tier {
-    Exact,
-    Prefix,
-    Inner,
-    None,
-}
-
-pub(crate) fn tier_of(term: &str, tokens: &[String]) -> Tier {
-    if tokens.iter().any(|t| t == term) {
-        Tier::Exact
-    } else if tokens.iter().any(|t| t.starts_with(term)) {
-        Tier::Prefix
-    } else if tokens.iter().any(|t| t.contains(term)) {
-        Tier::Inner
-    } else {
-        Tier::None
-    }
-}
-
-pub struct RowTokens {
-    pub(crate) name: Vec<String>,
-    name_stems: Vec<String>,
-    pub(crate) path: Vec<String>,
-}
-
-impl RowTokens {
-    pub fn of(row: &CorpusRow) -> Self {
-        let name = split_words(&row.fqn);
-        let name_stems = name.iter().map(|t| stem(t)).collect();
-        Self {
-            name,
-            name_stems,
-            path: split_words(&row.loc),
-        }
-    }
-
-    pub(crate) fn name_tier(&self, term: &str, term_stem: &str) -> Tier {
-        match tier_of(term, &self.name) {
-            Tier::None if self.name_stems.iter().any(|s| s == term_stem) => Tier::Prefix,
-            tier => tier,
-        }
-    }
-
-    fn matches(&self, term: &str, term_stem: &str) -> bool {
-        !matches!(self.name_tier(term, term_stem), Tier::None)
-            || matches!(tier_of(term, &self.path), Tier::Exact | Tier::Prefix)
-    }
+pub fn unmatched_terms(terms: &[String], recalls: &[TermRecall]) -> Vec<String> {
+    terms
+        .iter()
+        .zip(recalls)
+        .filter(|(_, recall)| recall.hits.is_empty())
+        .map(|(term, _)| term.clone())
+        .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testutil::{row, test_vocab};
 
-    fn tokens(corpus: &[CorpusRow]) -> Vec<RowTokens> {
-        corpus.iter().map(RowTokens::of).collect()
+    fn recall(ids: &[(i64, f64)]) -> TermRecall {
+        TermRecall {
+            hits: ids.to_vec(),
+            matched: ids.len() as u64,
+            corpus: 1000,
+        }
     }
 
     #[test]
-    fn base_sets_skip_relational_terms_and_cap_per_term() {
-        let corpus = vec![row("Repo::commit_hook"), row("Project::setup")];
-        let terms = vec![
-            "commit".to_string(),
-            "setup".to_string(),
-            "uses".to_string(),
-        ];
-        assert_eq!(
-            term_base_sets(&terms, &tokens(&corpus), None, &test_vocab()).len(),
-            2
-        );
-        let big: Vec<CorpusRow> = (0..40).map(|i| row(&format!("m{i}::commit"))).collect();
-        let capped = term_base_sets(&["commit".to_string()], &tokens(&big), None, &test_vocab());
-        assert_eq!(capped[0].len(), BASE_SET_PER_TERM);
+    fn base_sets_sort_by_sim_and_cap_per_term() {
+        let big = TermRecall {
+            hits: (0..40).map(|i| (i, 1.0 / (i + 1) as f64)).collect(),
+            matched: 40,
+            corpus: 1000,
+        };
+        let sets = term_base_sets(&[big, recall(&[(100, 0.9)])]);
+        assert_eq!(sets.len(), 2);
+        assert_eq!(sets[0].len(), BASE_SET_PER_TERM);
+        assert_eq!(sets[0][0].0, 0);
+    }
+
+    #[test]
+    fn generic_terms_do_not_seed_the_consensus() {
+        let generic = TermRecall {
+            hits: vec![(1, 1.0)],
+            matched: 400,
+            corpus: 1000,
+        };
+        let rare = recall(&[(2, 0.8)]);
+        let sets = term_base_sets(&[generic, rare]);
+        assert_eq!(sets.len(), 1);
+        assert_eq!(sets[0][0].0, 2);
     }
 
     #[test]
     fn shrinks_per_term_budget_instead_of_dropping_terms() {
-        let mut corpus = Vec::new();
-        let mut terms = Vec::new();
-        for t in 0..8 {
-            terms.push(format!("topic{t}"));
-            for i in 0..12 {
-                corpus.push(row(&format!("m{i}::topic{t}_thing")));
-            }
-        }
-        let sets = term_base_sets(&terms, &tokens(&corpus), None, &test_vocab());
+        let recalls: Vec<TermRecall> = (0..8)
+            .map(|t| TermRecall {
+                hits: (0..12).map(|i| (t * 100 + i, 0.5)).collect(),
+                matched: 12,
+                corpus: 1000,
+            })
+            .collect();
+        let sets = term_base_sets(&recalls);
         assert_eq!(sets.len(), 8);
         assert!(sets.iter().all(|s| s.len() == MAX_SEEDS / 8));
     }
 
     #[test]
-    fn unmatched_terms_ignore_relational_and_report_misses() {
-        let corpus = vec![row("Repo::commit_hook"), row("Project::setup")];
-        let terms = vec![
-            "commit".to_string(),
-            "setup".to_string(),
-            "uses".to_string(),
-        ];
-        assert_eq!(
-            unmatched_terms(&terms, &tokens(&corpus), &test_vocab()),
-            Vec::<String>::new()
-        );
-        assert_eq!(
-            unmatched_terms(
-                &["zzzz".to_string(), "uses".to_string()],
-                &tokens(&corpus),
-                &test_vocab()
-            ),
-            vec!["zzzz".to_string()]
-        );
+    fn unmatched_terms_report_empty_recalls() {
+        let terms = vec!["commit".to_string(), "zzzz".to_string()];
+        let recalls = vec![recall(&[(1, 1.0)]), recall(&[])];
+        assert_eq!(unmatched_terms(&terms, &recalls), vec!["zzzz".to_string()]);
+    }
+
+    #[test]
+    fn idf_orders_rare_above_flood_terms() {
+        let rare = TermRecall {
+            hits: Vec::new(),
+            matched: 3,
+            corpus: 50_000,
+        };
+        let flood = TermRecall {
+            hits: Vec::new(),
+            matched: 25_000,
+            corpus: 50_000,
+        };
+        assert!(rare.idf() > 5.0 * flood.idf());
     }
 }
