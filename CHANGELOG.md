@@ -1,3 +1,9 @@
+## [0.106.1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.106.0...v0.106.1) (2026-08-25)
+
+### Performance
+
+* **code-graph:** bound Rust indexing memory to one workspace at a time ([81907b2](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/81907b25ff7f83573ec93f656ee6c70ab206a5c7)) by Bohdan Parkhomchuk
+
 ## [0.106.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.105.2...v0.106.0) (2026-08-25)
 
 ### Features
