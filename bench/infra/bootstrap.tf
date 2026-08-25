@@ -60,7 +60,7 @@ resource "kubernetes_manifest" "ca_issuer" {
     apiVersion = "cert-manager.io/v1"
     kind       = "ClusterIssuer"
     metadata = {
-      name = "ca-issuer"
+      name = "e2e-ca"
     }
     spec = {
       ca = {
