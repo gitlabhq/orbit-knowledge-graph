@@ -46,9 +46,7 @@ pub fn expand_neighborhood<S: GraphSource>(
         }
     }
     let graph = source.graph(&seed_ids)?;
-    let degrees = graph.degrees_or_derived();
-
-    let ranked = rank_neighborhood(&graph, &degrees, term_seeds, kind_rates, focus, EDGE_LIMIT);
+    let ranked = rank_neighborhood(&graph, term_seeds, kind_rates, focus, EDGE_LIMIT);
 
     let mut label_ids: Vec<i64> = Vec::new();
     let mut seen: HashSet<i64> = HashSet::new();
@@ -60,37 +58,38 @@ pub fn expand_neighborhood<S: GraphSource>(
         }
     }
     let labels = source.labels(&label_ids)?;
-    let display = |id: i64| -> (String, String) {
-        match labels.get(&id) {
-            Some(l) => (l.label.clone(), l.loc.clone()),
-            None => (id.to_string(), String::new()),
-        }
+    let display = |id: i64| -> Option<(String, String)> {
+        labels
+            .get(&id)
+            .filter(|l| !l.label.trim().is_empty())
+            .map(|l| (l.label.clone(), l.loc.clone()))
     };
     let edges = ranked
         .selected
         .into_iter()
-        .map(|i| {
+        .filter_map(|i| {
             let e = &graph.edges[i];
-            let (source_label, source_loc) = display(e.source);
-            let (target_label, target_loc) = display(e.target);
-            Edge {
+            let (source_label, source_loc) = display(e.source)?;
+            let (target_label, target_loc) = display(e.target)?;
+            Some(Edge {
                 kind: graph.kinds[e.kind as usize].clone(),
                 source: source_label,
                 source_loc,
                 target: target_label,
                 target_loc,
-            }
+            })
         })
         .collect();
     let surfaced = ranked
         .node_scores
         .into_iter()
-        .filter(|&(id, s)| {
-            s >= SURFACED_MIN_SCORE
-                && !seen_seed.contains(&id)
-                && degrees.get(&id).copied().unwrap_or(0) <= SURFACED_MAX_DEGREE
+        .filter(|n| {
+            n.score >= SURFACED_MIN_SCORE
+                && !seen_seed.contains(&n.id)
+                && n.degree <= SURFACED_MAX_DEGREE
         })
         .take(SURFACED_POOL)
+        .map(|n| (n.id, n.score))
         .collect();
     Ok(ExpandedNeighborhood {
         edges,

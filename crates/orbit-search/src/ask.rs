@@ -198,8 +198,19 @@ mod tests {
             })
         }
 
-        fn labels(&self, _ids: &[i64]) -> Result<HashMap<i64, NodeLabel>, Self::Error> {
-            Ok(HashMap::new())
+        fn labels(&self, ids: &[i64]) -> Result<HashMap<i64, NodeLabel>, Self::Error> {
+            Ok(ids
+                .iter()
+                .map(|&id| {
+                    (
+                        id,
+                        NodeLabel {
+                            label: format!("node{id}"),
+                            loc: String::new(),
+                        },
+                    )
+                })
+                .collect())
         }
     }
 

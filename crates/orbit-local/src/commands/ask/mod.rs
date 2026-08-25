@@ -75,6 +75,9 @@ pub(crate) fn run(
         )?;
     }
 
+    if outcome.weak {
+        return Ok(());
+    }
     if outcome.edges.is_empty() {
         writeln!(out, "\nNo connections found around the top matches.")?;
         return Ok(());
@@ -82,7 +85,7 @@ pub(crate) fn run(
 
     writeln!(
         out,
-        "\nConnections (2 hops around {} anchors):",
+        "\nConnections (around {} anchors):",
         outcome.seed_count
     )?;
     let hidden: HashMap<&str, usize> = outcome
@@ -91,21 +94,28 @@ pub(crate) fn run(
         .map(|(kind, n)| (kind.as_str(), *n))
         .collect();
     let mut current = "";
+    let mut grouped: Vec<(String, Vec<String>)> = Vec::new();
+    let flush_group = |out: &mut dyn Write, grouped: &mut Vec<(String, Vec<String>)>| {
+        for (source, targets) in grouped.drain(..) {
+            writeln!(out, "    {source} --> {}", targets.join(", "))?;
+        }
+        std::io::Result::Ok(())
+    };
     for e in &outcome.edges {
         if e.kind != current {
+            flush_group(&mut out, &mut grouped)?;
             report_hidden(&mut out, current, &hidden)?;
             current = &e.kind;
             writeln!(out, "  {current}:")?;
         }
-        writeln!(
-            out,
-            "    {}{} --> {}{}",
-            e.source,
-            fmt_loc(&e.source_loc),
-            e.target,
-            fmt_loc(&e.target_loc)
-        )?;
+        let source = format!("{}{}", e.source, fmt_loc(&e.source_loc));
+        let target = format!("{}{}", e.target, fmt_loc(&e.target_loc));
+        match grouped.iter_mut().find(|(s, _)| *s == source) {
+            Some((_, targets)) => targets.push(target),
+            None => grouped.push((source, vec![target])),
+        }
     }
+    flush_group(&mut out, &mut grouped)?;
     report_hidden(&mut out, current, &hidden)?;
     for (kind, n) in &outcome.hidden_by_kind {
         if !outcome.edges.iter().any(|e| &e.kind == kind) {
@@ -189,8 +199,9 @@ fn report_confidence(
         writeln!(
             out,
             "note: weak matches — too few question terms anchor a symbol name, \
-             so the results below may be coincidental. Rephrase with a code \
-             identifier, or use `orbit local sql` for an exact-name lookup."
+             so the results below may be coincidental and edge details are \
+             omitted. Rephrase with a code identifier, or use `orbit local sql` \
+             for an exact-name lookup."
         )?;
     }
     if !outcome.unmatched_terms.is_empty() {

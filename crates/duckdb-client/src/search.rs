@@ -1,14 +1,11 @@
 use anyhow::{Context, Result};
 use arrow::record_batch::RecordBatch;
 
-use crate::{
-    DuckDbClient, bool_column, f64_column, i64_column, scalar_i64, sql_lit, string_column,
-};
+use crate::{DuckDbClient, f64_column, i64_column, scalar_i64, sql_lit, string_column};
 use orbit_search::ask::{AskError, AskSource, ask};
 use orbit_search::corpus::{DEFAULT_SOURCE_EXTS, EXCLUDE_LIKE, EXCLUDE_REGEX, ext_regex};
-use orbit_search::expand::{NeighborhoodSource, NodeLabel};
-use orbit_search::ppr::NeighborhoodEdge;
-use orbit_search::{AskOutcome, CorpusRow, KindRates, SearchVocab, TermRecall};
+use orbit_search::expand::{GraphSource, NodeLabel};
+use orbit_search::{AskOutcome, CorpusRow, Graph, GraphEdge, KindRates, SearchVocab, TermRecall};
 use std::collections::HashMap;
 
 pub const RECALL_FLOOR: f64 = 0.5;
@@ -25,7 +22,7 @@ impl DuckDbSearch {
     pub fn new(client: DuckDbClient, project_id: i64, commit_sha: &str) -> Result<Self> {
         let sha = sql_lit(commit_sha);
         ensure_trigram_index(&client, project_id, &sha)?;
-        client.execute(&corpus_view_sql(project_id, &sha), &[])?;
+        client.execute(&corpus_table_sql(project_id, &sha), &[])?;
         Ok(Self {
             client,
             pid: project_id,
@@ -62,7 +59,7 @@ impl AskSource for DuckDbSearch {
             .query_arrow_json(&sql, &params)
             .with_context(|| format!("trigram recall failed for terms {terms:?}"))?;
         let term_idx = i64_column(&batches, "term_idx");
-        let ids = string_column(&batches, "id");
+        let ids = i64_column(&batches, "id");
         let sims = f64_column(&batches, "sim");
         let dfs = i64_column(&batches, "df");
         let totals = i64_column(&batches, "total");
@@ -80,14 +77,14 @@ impl AskSource for DuckDbSearch {
             };
             recall.matched = dfs[i] as u64;
             recall.corpus = totals[i] as u64;
-            if !ids[i].is_empty() {
-                recall.hits.push((ids[i].clone(), sims[i]));
+            if ids[i] != 0 {
+                recall.hits.push((ids[i], sims[i]));
             }
         }
         Ok(recalls)
     }
 
-    fn rows_by_ids(&self, ids: &[&str]) -> Result<Vec<CorpusRow>> {
+    fn rows_by_ids(&self, ids: &[i64]) -> Result<Vec<CorpusRow>> {
         if ids.is_empty() {
             return Ok(Vec::new());
         }
@@ -100,7 +97,7 @@ impl AskSource for DuckDbSearch {
 )",
                 pid = self.pid,
                 sha = self.sha,
-                list = ids.join(", "),
+                list = id_list(ids),
             ),
             self.pid,
             &self.sha,
@@ -109,102 +106,99 @@ impl AskSource for DuckDbSearch {
     }
 }
 
-impl NeighborhoodSource for DuckDbSearch {
+fn id_list(ids: &[i64]) -> String {
+    ids.iter()
+        .map(i64::to_string)
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+impl GraphSource for DuckDbSearch {
     type Error = anyhow::Error;
 
-    fn hop(&self, ids: &[&str], cap: usize) -> Result<Vec<NeighborhoodEdge>> {
-        if ids.is_empty() {
-            return Ok(Vec::new());
-        }
-        let list = ids.join(", ");
-        let batches = query(
-            &self.client,
-            &format!(
-                "SELECT DISTINCT relationship_kind, CAST(source_id AS VARCHAR) AS source_id,
-       CAST(target_id AS VARCHAR) AS target_id
-FROM gl_edge
-WHERE source_id IN ({list}) OR target_id IN ({list})
-LIMIT {cap}"
-            ),
-        )?;
-        let kinds = string_column(&batches, "relationship_kind");
-        let sources = string_column(&batches, "source_id");
-        let targets = string_column(&batches, "target_id");
-        Ok(kinds
-            .into_iter()
-            .zip(sources)
-            .zip(targets)
-            .map(|((kind, source), target)| NeighborhoodEdge {
-                kind,
-                source,
-                target,
-            })
-            .collect())
-    }
-
-    fn degrees(&self, ids: &[&str]) -> Result<HashMap<String, u64>> {
-        if ids.is_empty() {
-            return Ok(HashMap::new());
-        }
-        let list = ids.join(", ");
-        let batches = query(
-            &self.client,
-            &format!(
-                "SELECT CAST(id AS VARCHAR) AS id, COUNT(*) AS degree FROM (
-  SELECT source_id AS id FROM gl_edge WHERE source_id IN ({list})
-  UNION ALL
-  SELECT target_id FROM gl_edge WHERE target_id IN ({list})
-) GROUP BY 1"
-            ),
-        )?;
-        let node_ids = string_column(&batches, "id");
-        let counts = i64_column(&batches, "degree");
-        Ok(node_ids
-            .into_iter()
-            .zip(counts)
-            .map(|(id, c)| (id, c as u64))
-            .collect())
-    }
-
-    fn labels(&self, ids: &[&str]) -> Result<HashMap<String, NodeLabel>> {
-        if ids.is_empty() {
-            return Ok(HashMap::new());
-        }
-        let list = ids.join(", ");
+    fn graph(&self, _seeds: &[i64]) -> Result<Graph> {
         let pid = self.pid;
         let sha = &self.sha;
         let batches = query(
             &self.client,
             &format!(
-                "SELECT CAST(id AS VARCHAR) AS id, label, loc, scoped FROM (
+                "WITH nodes AS (
+  SELECT id FROM gl_definition
+  WHERE project_id = {pid} AND commit_sha = {sha} AND fqn NOT LIKE '%@%'
+  UNION ALL
+  SELECT id FROM gl_file WHERE project_id = {pid} AND commit_sha = {sha}
+  UNION ALL
+  SELECT id FROM gl_directory WHERE project_id = {pid} AND commit_sha = {sha}
+  UNION ALL
+  SELECT id FROM gl_imported_symbol WHERE project_id = {pid} AND commit_sha = {sha}
+)
+SELECT relationship_kind, source_id, target_id
+FROM gl_edge
+WHERE source_id IN (SELECT id FROM nodes)
+  AND target_id IN (SELECT id FROM nodes)"
+            ),
+        )?;
+        let kind_names = string_column(&batches, "relationship_kind");
+        let sources = i64_column(&batches, "source_id");
+        let targets = i64_column(&batches, "target_id");
+        let mut kinds: Vec<String> = Vec::new();
+        let mut kind_index: HashMap<String, u16> = HashMap::new();
+        let edges = (0..kind_names.len())
+            .map(|i| {
+                let kind = *kind_index.entry(kind_names[i].clone()).or_insert_with(|| {
+                    kinds.push(kind_names[i].clone());
+                    (kinds.len() - 1) as u16
+                });
+                GraphEdge {
+                    kind,
+                    source: sources[i],
+                    target: targets[i],
+                }
+            })
+            .collect();
+        Ok(Graph {
+            kinds,
+            edges,
+            degrees: None,
+        })
+    }
+
+    fn labels(&self, ids: &[i64]) -> Result<HashMap<i64, NodeLabel>> {
+        if ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let list = id_list(ids);
+        let pid = self.pid;
+        let sha = &self.sha;
+        let batches = query(
+            &self.client,
+            &format!(
+                "SELECT id, label, loc FROM (
   SELECT id, fqn AS label,
-         file_path || ':' || CAST(start_line AS VARCHAR) AS loc,
-         fqn LIKE '%@%' AS scoped
+         file_path || ':' || CAST(start_line AS VARCHAR) AS loc
   FROM gl_definition
   WHERE project_id = {pid} AND commit_sha = {sha}
   UNION ALL
-  SELECT id, path, '', FALSE FROM gl_file WHERE project_id = {pid} AND commit_sha = {sha}
+  SELECT id, path, '' FROM gl_file WHERE project_id = {pid} AND commit_sha = {sha}
   UNION ALL
-  SELECT id, path, '', FALSE FROM gl_directory WHERE project_id = {pid} AND commit_sha = {sha}
+  SELECT id, path, '' FROM gl_directory WHERE project_id = {pid} AND commit_sha = {sha}
   UNION ALL
-  SELECT id, identifier_name, '', FALSE FROM gl_imported_symbol
+  SELECT id, identifier_name, '' FROM gl_imported_symbol
   WHERE project_id = {pid} AND commit_sha = {sha}
 )
 WHERE id IN ({list})"
             ),
         )?;
-        let node_ids = string_column(&batches, "id");
+        let node_ids = i64_column(&batches, "id");
         let node_labels = string_column(&batches, "label");
         let locs = string_column(&batches, "loc");
-        let scoped = bool_column(&batches, "scoped");
         Ok((0..node_ids.len())
             .map(|i| {
                 (
-                    node_ids[i].clone(),
+                    node_ids[i],
                     NodeLabel {
                         label: node_labels[i].clone(),
                         loc: locs[i].clone(),
-                        scoped: scoped[i],
                     },
                 )
             })
@@ -292,7 +286,7 @@ surviving AS (
   JOIN top_defs ON top_defs.def_id = h.def_id
 )
 SELECT CAST(df.term_idx AS BIGINT) AS term_idx,
-       COALESCE(CAST(s.def_id AS VARCHAR), '') AS id,
+       COALESCE(s.def_id, 0) AS id,
        COALESCE(s.sim, 0.0) AS sim,
        df.df,
        corpus_n.total
@@ -304,9 +298,9 @@ ORDER BY df.term_idx, sim DESC, id",
     )
 }
 
-fn corpus_view_sql(pid: i64, sha: &str) -> String {
+fn corpus_table_sql(pid: i64, sha: &str) -> String {
     format!(
-        "CREATE OR REPLACE TEMP VIEW search_corpus AS
+        "CREATE OR REPLACE TEMP TABLE search_corpus AS
 SELECT d.id, d.fqn, d.definition_type, d.file_path, d.start_line, d.end_line
 FROM gl_definition d
 WHERE d.project_id = {pid} AND d.commit_sha = {sha}
@@ -354,7 +348,7 @@ lens AS (
     AND def_id IN (SELECT id FROM cand)
   GROUP BY def_id
 )
-SELECT CAST(c.id AS VARCHAR) AS id, c.fqn, c.definition_type,
+SELECT c.id, c.fqn, c.definition_type,
        c.file_path || ':' || CAST(c.start_line AS VARCHAR) AS loc,
        c.end_line,
        COALESCE(deg.degree, 0) AS degree,
@@ -366,7 +360,7 @@ LEFT JOIN lens ON lens.def_id = c.id"
 }
 
 fn rows_from_batches(batches: &[RecordBatch]) -> Vec<CorpusRow> {
-    let ids = string_column(batches, "id");
+    let ids = i64_column(batches, "id");
     let fqns = string_column(batches, "fqn");
     let kinds = string_column(batches, "definition_type");
     let locs = string_column(batches, "loc");
@@ -375,7 +369,7 @@ fn rows_from_batches(batches: &[RecordBatch]) -> Vec<CorpusRow> {
     let grams = i64_column(batches, "grams");
     (0..ids.len())
         .map(|i| CorpusRow {
-            id: ids[i].clone(),
+            id: ids[i],
             fqn: fqns[i].clone(),
             kind: kinds[i].clone(),
             loc: locs[i].clone(),

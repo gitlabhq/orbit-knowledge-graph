@@ -8,8 +8,9 @@ pub const REVERSE_EDGE_FACTOR: f64 = 0.5;
 pub const FOCUS_WEIGHT: f64 = 1.0;
 pub const MAX_KIND_WEIGHT: f64 = 1.0;
 
-const TOLERANCE: f64 = 1e-6;
-const MAX_ITERATIONS: usize = 100;
+const LAMBDA: f64 = 1e-4;
+const EPOCHS: u32 = 8;
+const MAX_SCANS: usize = 200;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct KindRates {
@@ -33,27 +34,61 @@ impl Default for KindRates {
 }
 
 pub struct Transitions {
-    out: Vec<Vec<(usize, f64)>>,
+    offsets: Vec<u32>,
+    targets: Vec<u32>,
+    weights: Vec<f32>,
     out_totals: Vec<f64>,
 }
 
 impl Transitions {
-    pub fn new(node_count: usize) -> Self {
+    pub fn new(node_count: usize, entries: &[(usize, usize, f64)]) -> Self {
+        let mut counts = vec![0u32; node_count + 1];
+        for &(s, _, w) in entries {
+            if w > 0.0 {
+                counts[s + 1] += 1;
+            }
+        }
+        for i in 0..node_count {
+            counts[i + 1] += counts[i];
+        }
+        let offsets = counts;
+        let total_edges = offsets[node_count] as usize;
+        let mut targets = vec![0u32; total_edges];
+        let mut weights = vec![0f32; total_edges];
+        let mut cursor = offsets.clone();
+        let mut out_totals = vec![0.0; node_count];
+        for &(s, t, w) in entries {
+            if w > 0.0 {
+                let slot = cursor[s] as usize;
+                targets[slot] = t as u32;
+                weights[slot] = w as f32;
+                cursor[s] += 1;
+                out_totals[s] += w;
+            }
+        }
         Self {
-            out: vec![Vec::new(); node_count],
-            out_totals: vec![0.0; node_count],
+            offsets,
+            targets,
+            weights,
+            out_totals,
         }
     }
 
     pub fn node_count(&self) -> usize {
-        self.out.len()
+        self.out_totals.len()
     }
 
-    pub fn add_edge(&mut self, source: usize, target: usize, weight: f64) {
-        if weight > 0.0 {
-            self.out[source].push((target, weight));
-            self.out_totals[source] += weight;
-        }
+    fn edge_count(&self) -> usize {
+        self.targets.len()
+    }
+
+    fn out(&self, v: usize) -> (&[u32], &[f32]) {
+        let range = self.offsets[v] as usize..self.offsets[v + 1] as usize;
+        (&self.targets[range.clone()], &self.weights[range])
+    }
+
+    fn out_len(&self, v: usize) -> usize {
+        (self.offsets[v + 1] - self.offsets[v]) as usize
     }
 }
 
@@ -61,39 +96,67 @@ fn hub_damping(degree: u64) -> f64 {
     1.0 / (1.0 + (1.0 + degree as f64).ln())
 }
 
+pub struct ScoredNode {
+    pub id: i64,
+    pub score: f64,
+    pub degree: u64,
+}
+
 pub struct RankedNeighborhood {
     pub selected: Vec<usize>,
     pub hidden_by_kind: Vec<(String, usize)>,
-    pub node_scores: Vec<(i64, f64)>,
+    pub node_scores: Vec<ScoredNode>,
 }
 
 const CONSENSUS_EPSILON: f64 = 1e-9;
 pub const CONSENSUS_QUORUM: f64 = 0.6;
+pub const SCORED_NODE_POOL: usize = 1024;
 
 pub fn rank_neighborhood(
     graph: &Graph,
-    degrees: &HashMap<i64, u64>,
     term_seeds: &[Vec<(i64, f64)>],
     kind_rates: &HashMap<String, KindRates>,
     focus: Option<&str>,
     cap: usize,
 ) -> RankedNeighborhood {
-    let mut index: HashMap<i64, usize> = HashMap::new();
+    let mut index: rustc_hash::FxHashMap<i64, u32> = rustc_hash::FxHashMap::default();
     let mut ids: Vec<i64> = Vec::new();
-    let mut intern = |id: i64, ids: &mut Vec<i64>, index: &mut HashMap<i64, usize>| -> usize {
-        *index.entry(id).or_insert_with(|| {
-            ids.push(id);
-            ids.len() - 1
-        })
-    };
+    let intern =
+        |id: i64, ids: &mut Vec<i64>, index: &mut rustc_hash::FxHashMap<i64, u32>| -> u32 {
+            *index.entry(id).or_insert_with(|| {
+                ids.push(id);
+                (ids.len() - 1) as u32
+            })
+        };
     for &(id, _) in term_seeds.iter().flatten() {
         intern(id, &mut ids, &mut index);
     }
-    for e in &graph.edges {
-        intern(e.source, &mut ids, &mut index);
-        intern(e.target, &mut ids, &mut index);
-    }
+    let endpoints: Vec<(u32, u32)> = graph
+        .edges
+        .iter()
+        .map(|e| {
+            (
+                intern(e.source, &mut ids, &mut index),
+                intern(e.target, &mut ids, &mut index),
+            )
+        })
+        .collect();
     let node_count = ids.len();
+
+    let degrees: Vec<u64> = match &graph.degrees {
+        Some(map) => ids
+            .iter()
+            .map(|id| map.get(id).copied().unwrap_or(0))
+            .collect(),
+        None => {
+            let mut derived = vec![0u64; node_count];
+            for &(s, t) in &endpoints {
+                derived[s as usize] += 1;
+                derived[t as usize] += 1;
+            }
+            derived
+        }
+    };
 
     let rates_by_kind: Vec<KindRates> = graph
         .kinds
@@ -108,15 +171,13 @@ pub fn rank_neighborhood(
             r
         })
         .collect();
-    let degree = |id: i64| degrees.get(&id).copied().unwrap_or(0);
-
-    let mut fwd_pools: HashMap<(usize, u16), f64> = HashMap::new();
-    let mut rev_pools: HashMap<(usize, u16), f64> = HashMap::new();
-    for e in &graph.edges {
-        let s = index[&e.source];
-        let t = index[&e.target];
-        *fwd_pools.entry((s, e.kind)).or_insert(0.0) += hub_damping(degree(e.target));
-        *rev_pools.entry((t, e.kind)).or_insert(0.0) += hub_damping(degree(e.source));
+    let kind_count = graph.kinds.len().max(1);
+    let damped: Vec<f64> = degrees.iter().map(|&d| hub_damping(d)).collect();
+    let mut fwd_pools = vec![0.0f64; node_count * kind_count];
+    let mut rev_pools = vec![0.0f64; node_count * kind_count];
+    for (e, &(s, t)) in graph.edges.iter().zip(&endpoints) {
+        fwd_pools[s as usize * kind_count + e.kind as usize] += damped[t as usize];
+        rev_pools[t as usize * kind_count + e.kind as usize] += damped[s as usize];
     }
     // ObjectRank Eq. 4: each (node, kind, direction) group is an independent
     // authority budget. The split within a group is proportional to hub
@@ -124,30 +185,40 @@ pub fn rank_neighborhood(
     let placed: Vec<(usize, usize, f64, f64)> = graph
         .edges
         .iter()
-        .map(|e| {
-            let s = index[&e.source];
-            let t = index[&e.target];
+        .zip(&endpoints)
+        .map(|(e, &(s, t))| {
+            let (s, t) = (s as usize, t as usize);
             let r = rates_by_kind[e.kind as usize];
-            let fwd = r.forward * hub_damping(degree(e.target)) / fwd_pools[&(s, e.kind)];
-            let rev = r.reverse * hub_damping(degree(e.source)) / rev_pools[&(t, e.kind)];
+            let kind = e.kind as usize;
+            let fwd = r.forward * damped[t] / fwd_pools[s * kind_count + kind];
+            let rev = r.reverse * damped[s] / rev_pools[t * kind_count + kind];
             (s, t, fwd, rev)
         })
         .collect();
-    let mut transitions = Transitions::new(node_count);
+    let mut entries: Vec<(usize, usize, f64)> = Vec::with_capacity(placed.len() * 2);
     for &(s, t, fwd, rev) in &placed {
-        transitions.add_edge(s, t, fwd);
-        transitions.add_edge(t, s, rev);
+        entries.push((s, t, fwd));
+        entries.push((t, s, rev));
     }
+    let transitions = Transitions::new(node_count, &entries);
+    drop(entries);
 
-    let per_term_scores: Vec<Vec<f64>> = term_seeds
+    let seed_sets: Vec<Vec<(usize, f64)>> = term_seeds
         .iter()
         .filter(|set| set.iter().any(|&(_, w)| w > 0.0))
         .map(|set| {
-            let seed_indices: Vec<(usize, f64)> =
-                set.iter().map(|&(id, w)| (index[&id], w)).collect();
-            personalized_pagerank(&transitions, &seed_indices, PPR_DAMPING)
+            set.iter()
+                .map(|&(id, w)| (index[&id] as usize, w))
+                .collect()
         })
         .collect();
+    let per_term_scores: Vec<Vec<f64>> = {
+        use rayon::prelude::*;
+        seed_sets
+            .par_iter()
+            .map(|seeds| personalized_pagerank(&transitions, seeds, PPR_DAMPING))
+            .collect()
+    };
     if per_term_scores.is_empty() {
         return RankedNeighborhood {
             selected: Vec::new(),
@@ -182,7 +253,14 @@ pub fn rank_neighborhood(
         .enumerate()
         .map(|(i, &(s, t, fwd, rev))| (i, flux(s, fwd) + flux(t, rev)))
         .collect();
-    order.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    let by_flux = |a: &(usize, f64), b: &(usize, f64)| {
+        b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)
+    };
+    if order.len() > cap && cap > 0 {
+        order.select_nth_unstable_by(cap - 1, by_flux);
+        order.truncate(cap);
+    }
+    order.sort_by(by_flux);
 
     let focus_kind: Option<u16> =
         focus.and_then(|f| graph.kinds.iter().position(|k| k == f).map(|i| i as u16));
@@ -214,17 +292,27 @@ pub fn rank_neighborhood(
         .collect();
     hidden_by_kind.sort();
 
-    let mut node_scores: Vec<(i64, f64)> = ids
+    let mut node_scores: Vec<ScoredNode> = ids
         .iter()
         .enumerate()
-        .map(|(i, &id)| (id, scores[i]))
-        .filter(|&(_, s)| s > CONSENSUS_EPSILON * 1.5)
+        .filter(|&(i, _)| scores[i] > CONSENSUS_EPSILON * 1.5)
+        .map(|(i, &id)| ScoredNode {
+            id,
+            score: scores[i],
+            degree: degrees[i],
+        })
         .collect();
-    node_scores.sort_by(|a, b| {
-        b.1.partial_cmp(&a.1)
+    let by_score = |a: &ScoredNode, b: &ScoredNode| {
+        b.score
+            .partial_cmp(&a.score)
             .unwrap_or(std::cmp::Ordering::Equal)
-            .then_with(|| a.0.cmp(&b.0))
-    });
+            .then_with(|| a.id.cmp(&b.id))
+    };
+    if node_scores.len() > SCORED_NODE_POOL {
+        node_scores.select_nth_unstable_by(SCORED_NODE_POOL - 1, by_score);
+        node_scores.truncate(SCORED_NODE_POOL);
+    }
+    node_scores.sort_by(by_score);
 
     RankedNeighborhood {
         selected: selected.into_iter().map(|(i, _)| i).collect(),
@@ -233,50 +321,127 @@ pub fn rank_neighborhood(
     }
 }
 
+/// PowerPush (Wu et al., SIGMOD '21): FIFO forward pushes while the frontier
+/// is sparse, epoch-thresholded sequential scans once it is dense. Adapted to
+/// weighted transitions where a node emitting less than its norm leaks the
+/// difference back to the teleport distribution; per-push seed touching is
+/// avoided by accumulating that leak into one scalar flushed at phase
+/// boundaries. Returned scores include the residual mass, so they always sum
+/// to exactly one and the l1 error stays bounded by the residual.
 pub fn personalized_pagerank(
     transitions: &Transitions,
     seeds: &[(usize, f64)],
     damping: f64,
 ) -> Vec<f64> {
     let n = transitions.node_count();
-    let mut teleport = vec![0.0; n];
     let seed_total: f64 = seeds.iter().map(|&(_, w)| w.max(0.0)).sum();
     if n == 0 || seed_total <= 0.0 {
-        return teleport;
+        return vec![0.0; n];
     }
-    for &(i, w) in seeds {
-        if w > 0.0 {
-            teleport[i] += w / seed_total;
+    let teleport: Vec<(usize, f64)> = seeds
+        .iter()
+        .filter(|&&(_, w)| w > 0.0)
+        .map(|&(i, w)| (i, w / seed_total))
+        .collect();
+    let m = transitions.edge_count().max(1) as f64;
+
+    let mut reserve = vec![0.0; n];
+    let mut residue = vec![0.0; n];
+    for &(i, w) in &teleport {
+        residue[i] += w;
+    }
+    let mut r_sum = 1.0;
+    let mut pending_leak = 0.0;
+
+    let push = |v: usize,
+                reserve: &mut [f64],
+                residue: &mut [f64],
+                r_sum: &mut f64,
+                pending_leak: &mut f64| {
+        let rv = residue[v];
+        residue[v] = 0.0;
+        reserve[v] += (1.0 - damping) * rv;
+        *r_sum -= (1.0 - damping) * rv;
+        let spread = damping * rv;
+        let total = transitions.out_totals[v];
+        let norm = total.max(1.0);
+        let (targets, weights) = transitions.out(v);
+        for k in 0..targets.len() {
+            residue[targets[k] as usize] += spread * f64::from(weights[k]) / norm;
         }
-    }
-    let mut score = teleport.clone();
-    for _ in 0..MAX_ITERATIONS {
-        let mut next = vec![0.0; n];
-        let mut dangling = 0.0;
-        for (i, edges) in transitions.out.iter().enumerate() {
-            let total = transitions.out_totals[i];
-            if total <= 0.0 {
-                dangling += score[i];
-                continue;
+        *pending_leak += spread * (1.0 - total / norm);
+    };
+    let flush = |residue: &mut [f64], pending_leak: &mut f64| {
+        if *pending_leak > 0.0 {
+            for &(i, w) in &teleport {
+                residue[i] += *pending_leak * w;
             }
-            let norm = total.max(1.0);
-            for &(j, w) in edges {
-                next[j] += score[i] * w / norm;
+            *pending_leak = 0.0;
+        }
+    };
+
+    let r_max = LAMBDA / m;
+    let scan_threshold = (n / 4).max(1);
+    let mut queue: std::collections::VecDeque<u32> =
+        teleport.iter().map(|&(i, _)| i as u32).collect();
+    let mut in_queue = vec![false; n];
+    for &(i, _) in &teleport {
+        in_queue[i] = true;
+    }
+    while r_sum > LAMBDA && queue.len() <= scan_threshold {
+        let Some(v) = queue.pop_front() else {
+            flush(&mut residue, &mut pending_leak);
+            let mut refilled = false;
+            for &(i, _) in &teleport {
+                if residue[i] > transitions.out_len(i).max(1) as f64 * r_max && !in_queue[i] {
+                    queue.push_back(i as u32);
+                    in_queue[i] = true;
+                    refilled = true;
+                }
             }
-            dangling += score[i] * (1.0 - total / norm);
-        }
-        let mut delta = 0.0;
-        for i in 0..n {
-            let updated =
-                (1.0 - damping) * teleport[i] + damping * (next[i] + dangling * teleport[i]);
-            delta += (updated - score[i]).abs();
-            score[i] = updated;
-        }
-        if delta < TOLERANCE {
-            break;
+            if !refilled {
+                break;
+            }
+            continue;
+        };
+        let v = v as usize;
+        in_queue[v] = false;
+        push(v, &mut reserve, &mut residue, &mut r_sum, &mut pending_leak);
+        let (targets, _) = transitions.out(v);
+        for &t in targets {
+            let t = t as usize;
+            if !in_queue[t] && residue[t] > transitions.out_len(t).max(1) as f64 * r_max {
+                queue.push_back(t as u32);
+                in_queue[t] = true;
+            }
         }
     }
-    score
+
+    if r_sum > LAMBDA {
+        let mut scans = 0usize;
+        'epochs: for i in 1..=EPOCHS {
+            let epoch_lambda = LAMBDA.powf(f64::from(i) / f64::from(EPOCHS));
+            let epoch_r_max = epoch_lambda / m;
+            while r_sum > epoch_lambda {
+                flush(&mut residue, &mut pending_leak);
+                for v in 0..n {
+                    if residue[v] > transitions.out_len(v).max(1) as f64 * epoch_r_max {
+                        push(v, &mut reserve, &mut residue, &mut r_sum, &mut pending_leak);
+                    }
+                }
+                scans += 1;
+                if scans >= MAX_SCANS {
+                    break 'epochs;
+                }
+            }
+        }
+    }
+
+    flush(&mut residue, &mut pending_leak);
+    for v in 0..n {
+        reserve[v] += residue[v];
+    }
+    reserve
 }
 
 #[cfg(test)]
@@ -285,11 +450,8 @@ mod tests {
     use crate::types::GraphEdge;
 
     fn cycle(n: usize) -> Transitions {
-        let mut g = Transitions::new(n);
-        for i in 0..n {
-            g.add_edge(i, (i + 1) % n, 1.0);
-        }
-        g
+        let entries: Vec<(usize, usize, f64)> = (0..n).map(|i| (i, (i + 1) % n, 1.0)).collect();
+        Transitions::new(n, &entries)
     }
 
     fn seed() -> Vec<Vec<(i64, f64)>> {
@@ -313,10 +475,8 @@ mod tests {
 
     #[test]
     fn low_transfer_rates_leak_mass_back_to_seeds() {
-        let mut full = Transitions::new(2);
-        full.add_edge(0, 1, 1.0);
-        let mut leaky = Transitions::new(2);
-        leaky.add_edge(0, 1, 0.2);
+        let full = Transitions::new(2, &[(0, 1, 1.0)]);
+        let leaky = Transitions::new(2, &[(0, 1, 0.2)]);
         let full_scores = personalized_pagerank(&full, &[(0, 1.0)], PPR_DAMPING);
         let leaky_scores = personalized_pagerank(&leaky, &[(0, 1.0)], PPR_DAMPING);
         assert!(leaky_scores[1] < full_scores[1]);
@@ -340,13 +500,13 @@ mod tests {
             ("CALLS".to_string(), KindRates::new(0.6)),
             ("CONTAINS".to_string(), KindRates::new(0.2)),
         ]);
-        let ranked = rank_neighborhood(&g, &HashMap::new(), &seed(), &rates, None, 20);
+        let ranked = rank_neighborhood(&g, &seed(), &rates, None, 20);
         let score = |id: i64| {
             ranked
                 .node_scores
                 .iter()
-                .find(|&&(n, _)| n == id)
-                .map(|&(_, s)| s)
+                .find(|n| n.id == id)
+                .map(|n| n.score)
                 .unwrap()
         };
         assert!(
@@ -365,12 +525,12 @@ mod tests {
                 reverse: 0.0,
             },
         )]);
-        let ranked = rank_neighborhood(&g, &HashMap::new(), &seed(), &one_way, None, 5);
-        assert!(ranked.node_scores.iter().all(|&(id, _)| id != 1));
+        let ranked = rank_neighborhood(&g, &seed(), &one_way, None, 5);
+        assert!(ranked.node_scores.iter().all(|n| n.id != 1));
 
         let both_ways = HashMap::from([("CITES".to_string(), KindRates::new(0.7))]);
-        let ranked = rank_neighborhood(&g, &HashMap::new(), &seed(), &both_ways, None, 5);
-        assert!(ranked.node_scores.iter().any(|&(id, _)| id == 1));
+        let ranked = rank_neighborhood(&g, &seed(), &both_ways, None, 5);
+        assert!(ranked.node_scores.iter().any(|n| n.id == 1));
     }
 
     #[test]
@@ -383,7 +543,7 @@ mod tests {
             ("CALLS".to_string(), KindRates::new(0.9)),
             ("CONTAINS".to_string(), KindRates::new(0.9)),
         ]);
-        let ranked = rank_neighborhood(&g, &HashMap::new(), &seed(), &rates, Some("CALLS"), 1);
+        let ranked = rank_neighborhood(&g, &seed(), &rates, Some("CALLS"), 1);
         assert_eq!(ranked.selected, vec![1]);
     }
 
@@ -398,7 +558,9 @@ mod tests {
             personalized_pagerank(&g, &[(0, 0.0), (1, -1.0)], PPR_DAMPING),
             vec![0.0; 3]
         );
-        assert!(personalized_pagerank(&Transitions::new(0), &[(0, 1.0)], PPR_DAMPING).is_empty());
+        assert!(
+            personalized_pagerank(&Transitions::new(0, &[]), &[(0, 1.0)], PPR_DAMPING).is_empty()
+        );
     }
 
     #[test]
@@ -413,14 +575,8 @@ mod tests {
             ],
         );
         let rates = HashMap::from([("CALLS".to_string(), KindRates::new(1.0))]);
-        let ranked = rank_neighborhood(&g, &HashMap::new(), &seed(), &rates, None, 10);
-        let pos = |id: i64| {
-            ranked
-                .node_scores
-                .iter()
-                .position(|&(n, _)| n == id)
-                .unwrap()
-        };
+        let ranked = rank_neighborhood(&g, &seed(), &rates, None, 10);
+        let pos = |id: i64| ranked.node_scores.iter().position(|n| n.id == id).unwrap();
         assert!(pos(1) < pos(2));
         assert!(pos(2) < pos(3));
         assert!(pos(3) < pos(4));
@@ -431,12 +587,12 @@ mod tests {
         let edges: Vec<(&str, i64, i64)> = (0..5).map(|i| ("CALLS", 0i64, 10 + i)).collect();
         let g = graph(&["CALLS"], &edges);
         let rates = HashMap::from([("CALLS".to_string(), KindRates::new(1.0))]);
-        let ranked = rank_neighborhood(&g, &HashMap::new(), &seed(), &rates, None, 2);
+        let ranked = rank_neighborhood(&g, &seed(), &rates, None, 2);
         assert_eq!(ranked.selected.len(), 2);
         assert_eq!(ranked.hidden_by_kind, vec![("CALLS".to_string(), 3)]);
-        assert!(ranked.node_scores.iter().all(|&(_, s)| s > 0.0));
+        assert!(ranked.node_scores.iter().all(|n| n.score > 0.0));
 
-        let empty = rank_neighborhood(&g, &HashMap::new(), &[], &rates, None, 2);
+        let empty = rank_neighborhood(&g, &[], &rates, None, 2);
         assert!(empty.selected.is_empty() && empty.node_scores.is_empty());
     }
 }
