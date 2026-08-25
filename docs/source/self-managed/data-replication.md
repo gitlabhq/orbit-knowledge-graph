@@ -10,7 +10,7 @@ title: Set up data replication
 
 - Tier: Premium, Ultimate
 - Offering: GitLab Self-Managed
-- Status: Beta
+- Status: Experiment
 
 {{< /details >}}
 
@@ -21,9 +21,9 @@ title: Set up data replication
 {{< /history >}}
 
 > [!note]
-> GitLab Orbit on GitLab Self-Managed is in
-> [beta](https://docs.gitlab.com/policy/development_stages_support/#beta).
-> This feature is available for testing, but not ready for production use.
+> GitLab Orbit on GitLab Self-Managed is an
+> [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment)
+> available only to design partners. It is not ready for production use.
 
 GitLab Orbit reads GitLab data from a copy of the GitLab database in ClickHouse, not from the
 GitLab database itself. [Siphon](https://gitlab.com/gitlab-org/analytics-section/siphon) keeps

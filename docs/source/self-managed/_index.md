@@ -10,7 +10,7 @@ title: GitLab Orbit on GitLab Self-Managed
 
 - Tier: Premium, Ultimate
 - Offering: GitLab Self-Managed
-- Status: Beta
+- Status: Experiment
 
 {{< /details >}}
 
@@ -21,9 +21,9 @@ title: GitLab Orbit on GitLab Self-Managed
 {{< /history >}}
 
 > [!note]
-> GitLab Orbit on GitLab Self-Managed is in
-> [beta](https://docs.gitlab.com/policy/development_stages_support/#beta).
-> This feature is available for testing, but not ready for production use.
+> GitLab Orbit on GitLab Self-Managed is an
+> [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment)
+> available only to design partners. It is not ready for production use.
 
 On GitLab.com, GitLab Orbit runs on GitLab infrastructure.
 On GitLab Self-Managed, you run GitLab Orbit next to your instance.
@@ -39,8 +39,8 @@ GitLab Orbit.
 GitLab Orbit is distributed only as a Helm chart for Kubernetes. The Linux package does not include it.
 Install the chart on the cluster that runs GitLab, or on a separate cluster next to your instance.
 
-Because GitLab Orbit on GitLab Self-Managed is in beta, contact your account team before you plan a
-deployment to confirm current limitations.
+Because GitLab Orbit on GitLab Self-Managed is an experiment available only to design partners, contact
+your account team before you plan a deployment to confirm current limitations.
 
 ## Architecture
 
@@ -103,6 +103,6 @@ GitLab Orbit does not run on a GitLab Geo secondary site. No FIPS-compliant buil
 Redundancy and recovery for GitLab Orbit are not documented. GitLab Orbit holds no data of its own, so if
 you lose the graph database, you can rebuild it by indexing again.
 
-For the support that applies during beta, see
-[beta](https://docs.gitlab.com/policy/development_stages_support/#beta) and the
+For the support that applies during an experiment, see
+[experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment) and the
 [Statement of Support](https://about.gitlab.com/support/statement-of-support/).
