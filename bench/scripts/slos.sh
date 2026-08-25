@@ -9,7 +9,7 @@ source "${BENCH_DIR}/scripts/lib.sh"
 
 CH_NS="${E2E_CH_NAMESPACE:-ra-ch-${RUN_ID}}"
 GKG_NS="e2e-${RUN_ID}-gkg"
-PROJECT=$(cd "${TF_DIR}" && terraform output -raw project 2>/dev/null)
+PROJECT=$(cd "${TF_DIR}" && "$TF" output -raw project 2>/dev/null)
 : "${SLO_WINDOW_HOURS:=24}"
 
 ch() { timeout 15 $KC exec -n "${CH_NS}" clickhouse-0 -- clickhouse-client -q "$1" 2>/dev/null || echo ""; }

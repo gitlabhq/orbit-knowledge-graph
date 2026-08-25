@@ -14,9 +14,16 @@
 set -euo pipefail
 
 BENCH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO_ROOT="$(cd "${BENCH_DIR}/.." && pwd)"
 TF_DIR="${BENCH_DIR}/infra"
 
 bench() { yq eval "${1}" "${BENCH_DIR}/config/bench.yaml"; }
+
+TF=$(mise which terraform 2>/dev/null || command -v terraform)
+if [[ -z "${TF}" ]]; then
+  echo "ERROR: terraform not found. Install it or run 'mise install terraform'." >&2
+  exit 1
+fi
 
 STATE_BUCKET=$(bench '.buckets.tf_state')
 : "${TIER:=$(bench '.tier')}"
@@ -24,26 +31,26 @@ STATE_BUCKET=$(bench '.buckets.tf_state')
 case "${1:-}" in
   init)
     shift
-    terraform -chdir="${TF_DIR}" init \
+    "$TF" -chdir="${TF_DIR}" init \
       -backend-config="bucket=${STATE_BUCKET}" \
       -backend-config="prefix=bench" \
       "$@"
     ;;
   apply)
     shift
-    terraform -chdir="${TF_DIR}" apply -var "tier=${TIER}" "$@"
+    "$TF" -chdir="${TF_DIR}" apply -var "tier=${TIER}" "$@"
     ;;
   plan)
     shift
-    terraform -chdir="${TF_DIR}" plan -var "tier=${TIER}" "$@"
+    "$TF" -chdir="${TF_DIR}" plan -var "tier=${TIER}" "$@"
     ;;
   destroy)
     shift
-    terraform -chdir="${TF_DIR}" destroy "$@"
+    "$TF" -chdir="${TF_DIR}" destroy "$@"
     ;;
   output)
     shift
-    terraform -chdir="${TF_DIR}" output "$@"
+    "$TF" -chdir="${TF_DIR}" output "$@"
     ;;
   *)
     echo "Usage: $0 init | apply | plan | destroy | output [args...]" >&2

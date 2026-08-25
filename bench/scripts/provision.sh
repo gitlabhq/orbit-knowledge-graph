@@ -20,7 +20,7 @@ done
 # --- 2. Dedicated CH pool (Terraform-managed) ---
 CH_NODE_SELECTOR=""
 CH_TOLERATIONS=""
-DEDICATED=$(cd "${BENCH_DIR}/infra" && terraform output -raw dedicated_ch_pool 2>/dev/null || echo "false")
+DEDICATED=$(cd "${BENCH_DIR}/infra" && "$TF" output -raw dedicated_ch_pool 2>/dev/null || echo "false")
 if [[ "${DEDICATED}" == "true" ]]; then
   CH_NODE_SELECTOR="      nodeSelector:
         dedicated: clickhouse"
