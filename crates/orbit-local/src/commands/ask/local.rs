@@ -131,9 +131,15 @@ mod tests {
             self.client
                 .execute(
                     "INSERT INTO gl_def_trigram
-                     SELECT DISTINCT project_id, commit_sha, id, gram FROM (
+                     SELECT DISTINCT project_id, commit_sha, id, gram, field FROM (
                        SELECT project_id, commit_sha, id,
-                              UNNEST(trigrams(fqn || ' ' || file_path)) AS gram
+                              UNNEST(trigrams(def_name(fqn))) AS gram,
+                              'name' AS field
+                       FROM gl_definition
+                       UNION ALL
+                       SELECT project_id, commit_sha, id,
+                              UNNEST(trigrams(fqn || ' ' || file_path)) AS gram,
+                              'context' AS field
                        FROM gl_definition
                      )",
                     &[],

@@ -6,15 +6,18 @@ local:
   instructions: |
     ## Orbit graph
 
-    Repositories on this machine are indexed into a local Orbit code graph; `orbit local ask` indexes the current repository on demand, so never check coverage first. Query the graph before grep or reading files for any question about how the code fits together: where something is defined or belongs, where a behavior happens, what handles a case, who calls or imports it, what an API looks like. Plain questions count — "where do we send X", "what handles Y", "how does Z work" are all graph questions. Grep matches text and returns noise; the graph returns resolved definitions, callers, and imports.
+    Repositories on this machine are indexed into a local Orbit code graph. Query the graph before grep or reading files for any question about how the code fits together: where something is defined or belongs, where a behavior happens, what handles a case, who calls or imports it, what an API looks like. Plain questions count — "where do we send X", "what handles Y", "how does Z work" are all graph questions. Grep matches text and returns noise; the graph returns resolved definitions, callers, and imports.
 
     Rules:
 
-    - For any question about how this code fits together, run `orbit local ask "<your question>"` FIRST, before grep and before reading files. One command, plain language, no SQL to write.
+    - For any question about how this code fits together, run `orbit local ask "<your question>"` FIRST, before grep and before reading files.
     - Ask in the words you would use with a colleague. "where do we send messages to the dlq", "what handles NATS backpressure" are single `orbit local ask` calls.
+    - If `ask` notes unmatched terms or weak matches, retry once with different wording for those terms — a synonym or an identifier fragment ("throttle" → "rate limit"). If the retry also misses, fall back to grep.
     - Grep and raw file reads come *after* the graph has oriented you, or to modify and debug specific lines.
+    - When `ask` returns confident matches with snippets, answer from them. Verify with at most one file read when the snippet alone is ambiguous — do not re-derive what the graph already resolved.
     - Drop to SQL only for what `ask` does not cover: exact filters, aggregation, or columns it does not print.
     - If two graph queries in a row return nothing useful, the graph likely lacks those edges — fall back to grep immediately instead of reformulating SQL.
+    - Answer tersely: name the mechanism, cite `file:line`, and stop. Do not paste code blocks the reader can open from the citation, and do not restate the question or narrate your search.
 
     Copy-paste recipes (DuckDB SQL):
 

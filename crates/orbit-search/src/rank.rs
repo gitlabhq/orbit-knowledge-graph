@@ -42,7 +42,6 @@ pub fn rank_and_trim(
 }
 
 fn rank(corpus: &[CorpusRow], sims: &[Vec<f64>], idfs: &[f64], cap: usize) -> Vec<Hit> {
-    let denominator = idfs.len().max(1) as f64;
     let measured: Vec<f64> = corpus
         .iter()
         .filter(|r| r.grams > 0)
@@ -68,13 +67,18 @@ fn rank(corpus: &[CorpusRow], sims: &[Vec<f64>], idfs: &[f64], cap: usize) -> Ve
             .filter(|&(&s, _)| s > 0.0)
             .map(|(_, idf)| idf)
             .sum();
-        let anchored = row_sims.iter().filter(|&&s| s >= ANCHOR_SIM).count() as f64;
+        let anchored_idf: f64 = row_sims
+            .iter()
+            .zip(idfs)
+            .filter(|&(&s, _)| s >= ANCHOR_SIM)
+            .map(|(_, idf)| idf)
+            .sum();
         let coverage = matched_idf / idf_total;
         hits.push(Hit {
             index,
             score: total * coverage * coverage / length_norm,
-            anchored: anchored > 0.0,
-            coverage: anchored / denominator,
+            anchored: anchored_idf > 0.0,
+            coverage: anchored_idf / idf_total,
         });
     }
     hits.sort_by(|a, b| {
@@ -134,6 +138,22 @@ fn parent_key(fqn: &str) -> String {
 mod tests {
     use super::*;
     use crate::testutil::row;
+
+    #[test]
+    fn flood_terms_do_not_dilute_confidence() {
+        let corpus = vec![row(1, "Repo::commit_hook")];
+        let sims = vec![vec![1.0, 1.0, 0.0, 0.0, 0.0, 0.0]];
+        let high_idf_anchors = rank(&corpus, &sims, &[5.0, 5.0, 0.2, 0.2, 0.2, 0.2], 10);
+        assert!(
+            high_idf_anchors[0].confident(),
+            "anchoring the informative mass must clear the bar despite four flood terms"
+        );
+        let low_idf_anchors = rank(&corpus, &sims, &[0.2, 0.2, 5.0, 5.0, 5.0, 5.0], 10);
+        assert!(
+            !low_idf_anchors[0].confident(),
+            "anchoring only flood terms must stay weak"
+        );
+    }
 
     #[test]
     fn full_sim_outranks_fuzzy_and_coverage_squares_partial_matches() {

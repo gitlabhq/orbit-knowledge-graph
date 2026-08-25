@@ -178,7 +178,10 @@ struct IndexArgs {
     long_about = "Answer a plain-language question with a scoped subgraph.\n\n\
                   Ranks indexed definitions by how many distinct question terms they \
                   match, then shows the most relevant connections within two hops of \
-                  the top matches, ranked by graph proximity."
+                  the top matches, ranked by graph proximity.\n\n\
+                  When the output notes unmatched terms or weak matches, retry once \
+                  with a synonym or identifier fragment for those terms before \
+                  falling back to grep."
 )]
 struct AskArgs {
     /// Plain-language question, e.g. "how does the quota gate decide?"
@@ -932,9 +935,15 @@ fn index_repo(
     client
         .execute(
             "INSERT INTO gl_def_trigram
-             SELECT DISTINCT project_id, commit_sha, id, gram FROM (
+             SELECT DISTINCT project_id, commit_sha, id, gram, field FROM (
                SELECT project_id, commit_sha, id,
-                      UNNEST(trigrams(fqn || ' ' || file_path)) AS gram
+                      UNNEST(trigrams(def_name(fqn))) AS gram,
+                      'name' AS field
+               FROM gl_definition WHERE project_id = ?1 AND commit_sha = ?2
+               UNION ALL
+               SELECT project_id, commit_sha, id,
+                      UNNEST(trigrams(fqn || ' ' || file_path)) AS gram,
+                      'context' AS field
                FROM gl_definition WHERE project_id = ?1 AND commit_sha = ?2
              )",
             &[

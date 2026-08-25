@@ -197,7 +197,6 @@ mod tests {
                     source: HOOK_ID,
                     target: 8,
                 }],
-                degrees: None,
             })
         }
 

@@ -9,6 +9,7 @@ use orbit_search::{AskOutcome, CorpusRow, Graph, GraphEdge, KindRates, SearchVoc
 use std::collections::HashMap;
 
 pub const RECALL_FLOOR: f64 = 0.5;
+pub const CONTEXT_SIM_WEIGHT: f64 = 0.4;
 pub const RECALL_LIMIT: usize = 2000;
 pub const LENGTH_NORM_B: f64 = 0.75;
 
@@ -156,11 +157,7 @@ WHERE source_id IN (SELECT id FROM nodes)
                 }
             })
             .collect();
-        Ok(Graph {
-            kinds,
-            edges,
-            degrees: None,
-        })
+        Ok(Graph { kinds, edges })
     }
 
     fn labels(&self, ids: &[i64]) -> Result<HashMap<i64, NodeLabel>> {
@@ -244,22 +241,30 @@ fn recall_sql(pid: i64, sha: &str, term_count: usize) -> String {
         "WITH q AS ({q}),
 qn AS (SELECT term_idx, GREATEST(COUNT(*), 1) AS n FROM q GROUP BY term_idx),
 corpus_n AS (SELECT GREATEST(COUNT(*), 1) AS total FROM search_corpus),
-hits AS (
+field_sims AS (
   SELECT t.def_id, q.term_idx,
-         CAST(COUNT(DISTINCT t.gram) AS DOUBLE) / ANY_VALUE(qn.n) AS sim
+         CAST(COUNT(DISTINCT CASE WHEN t.field = 'name' THEN t.gram END) AS DOUBLE)
+           / ANY_VALUE(qn.n) AS name_sim,
+         CAST(COUNT(DISTINCT CASE WHEN t.field = 'context' THEN t.gram END) AS DOUBLE)
+           / ANY_VALUE(qn.n) AS ctx_sim
   FROM gl_def_trigram t
   JOIN q ON q.gram = t.gram
   JOIN qn ON qn.term_idx = q.term_idx
   WHERE t.project_id = {pid} AND t.commit_sha = {sha}
     AND t.def_id IN (SELECT id FROM search_corpus)
   GROUP BY t.def_id, q.term_idx
-  HAVING COUNT(DISTINCT t.gram) >= CEIL({RECALL_FLOOR} * ANY_VALUE(qn.n))
+),
+hits AS (
+  SELECT def_id, term_idx,
+         GREATEST(name_sim, {CONTEXT_SIM_WEIGHT} * ctx_sim) AS sim
+  FROM field_sims
+  WHERE GREATEST(name_sim, ctx_sim) >= {RECALL_FLOOR}
 ),
 df AS (SELECT term_idx, COUNT(*) AS df FROM hits GROUP BY term_idx),
 lens AS (
   SELECT t.def_id, CAST(COUNT(DISTINCT t.gram) AS DOUBLE) AS len
   FROM gl_def_trigram t
-  WHERE t.project_id = {pid} AND t.commit_sha = {sha}
+  WHERE t.project_id = {pid} AND t.commit_sha = {sha} AND t.field = 'context'
     AND t.def_id IN (SELECT def_id FROM hits)
   GROUP BY t.def_id
 ),
@@ -341,7 +346,7 @@ deg AS (
 ),
 lens AS (
   SELECT def_id, COUNT(DISTINCT gram) AS grams FROM gl_def_trigram
-  WHERE project_id = {pid} AND commit_sha = {sha}
+  WHERE project_id = {pid} AND commit_sha = {sha} AND field = 'context'
     AND def_id IN (SELECT id FROM cand)
   GROUP BY def_id
 )
@@ -393,7 +398,20 @@ mod tests {
             sql.contains("IN (SELECT id FROM search_corpus)"),
             "sql was {sql}"
         );
-        assert!(sql.contains("COUNT(DISTINCT t.gram)"), "sql was {sql}");
+        assert!(
+            sql.contains("CASE WHEN t.field = 'name' THEN t.gram END"),
+            "sql was {sql}"
+        );
+        assert!(
+            sql.contains(&format!(
+                "GREATEST(name_sim, {CONTEXT_SIM_WEIGHT} * ctx_sim)"
+            )),
+            "sql was {sql}"
+        );
+        assert!(
+            sql.contains(&format!("GREATEST(name_sim, ctx_sim) >= {RECALL_FLOOR}")),
+            "sql was {sql}"
+        );
         assert!(
             sql.contains("SUM(h.sim * LN(1 + corpus_n.total / (1.0 + df.df))"),
             "sql was {sql}"
@@ -403,6 +421,5 @@ mod tests {
             sql.contains(&format!("LIMIT {RECALL_LIMIT}")),
             "sql was {sql}"
         );
-        assert!(sql.contains("CEIL(0.5"), "sql was {sql}");
     }
 }

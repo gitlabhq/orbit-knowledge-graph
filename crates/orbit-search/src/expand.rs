@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use crate::ppr::{KindRates, rank_neighborhood};
 use crate::types::{Edge, Graph, TermSeeds};
 
-pub const EDGE_LIMIT: usize = 40;
+pub const EDGE_LIMIT: usize = 20;
 
 pub struct NodeLabel {
     pub label: String,
@@ -17,14 +17,11 @@ pub struct ExpandedNeighborhood {
 }
 
 pub const SURFACED_POOL: usize = 10;
-pub const SURFACED_MIN_SCORE: f64 = 1e-3;
-pub const SURFACED_MAX_DEGREE: u64 = 200;
 
 /// Hands over whatever graph it considers relevant for the seeds — the whole
 /// thing, an authorized neighborhood, anything between. Ranking cannot tell
-/// the difference. Sources that return a partial graph must supply true
-/// degrees; `None` means the edge list is complete and degrees derive from it.
-/// Returned edges must already be rankable (scoped/local symbols excluded).
+/// the difference. Returned edges must already be rankable (scoped/local
+/// symbols excluded).
 pub trait GraphSource {
     type Error;
 
@@ -83,11 +80,7 @@ pub fn expand_neighborhood<S: GraphSource>(
     let surfaced = ranked
         .node_scores
         .into_iter()
-        .filter(|n| {
-            n.score >= SURFACED_MIN_SCORE
-                && !seen_seed.contains(&n.id)
-                && n.degree <= SURFACED_MAX_DEGREE
-        })
+        .filter(|n| !seen_seed.contains(&n.id))
         .take(SURFACED_POOL)
         .map(|n| (n.id, n.score))
         .collect();
@@ -145,7 +138,6 @@ mod tests {
                         target,
                     })
                     .collect(),
-                degrees: None,
             })
         }
 
@@ -201,13 +193,8 @@ mod tests {
     }
 
     #[test]
-    fn surfaced_nodes_come_from_consensus_not_from_seeds_or_hubs() {
-        let mut edges = vec![("CALLS", 1, 2)];
-        for i in 0..(SURFACED_MAX_DEGREE + 10) {
-            edges.push(("CALLS", 1000 + i as i64, 3));
-        }
-        edges.push(("CALLS", 2, 3));
-        let source = FakeSource::new(edges);
+    fn surfaced_nodes_exclude_seeds() {
+        let source = FakeSource::new(vec![("CALLS", 1, 2), ("CALLS", 2, 3)]);
         let expanded = expand_neighborhood(&source, &seeds(&[1]), &weights(), None).unwrap();
         assert!(
             expanded.surfaced.iter().any(|&(id, _)| id == 2),
@@ -216,10 +203,6 @@ mod tests {
         assert!(
             expanded.surfaced.iter().all(|&(id, _)| id != 1),
             "seeds never surface"
-        );
-        assert!(
-            expanded.surfaced.iter().all(|&(id, _)| id != 3),
-            "hubs above the degree ceiling never surface"
         );
     }
 }

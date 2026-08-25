@@ -92,14 +92,9 @@ impl Transitions {
     }
 }
 
-fn hub_damping(degree: u64) -> f64 {
-    1.0 / (1.0 + (1.0 + degree as f64).ln())
-}
-
 pub struct ScoredNode {
     pub id: i64,
     pub score: f64,
-    pub degree: u64,
 }
 
 pub struct RankedNeighborhood {
@@ -108,9 +103,7 @@ pub struct RankedNeighborhood {
     pub node_scores: Vec<ScoredNode>,
 }
 
-const CONSENSUS_EPSILON: f64 = 1e-9;
-pub const CONSENSUS_QUORUM: f64 = 0.6;
-pub const SPECIFICITY_EXPONENT: f64 = 0.5;
+const SCORE_EPSILON: f64 = 1e-9;
 pub const SCORED_NODE_POOL: usize = 1024;
 
 pub fn rank_neighborhood(
@@ -144,21 +137,6 @@ pub fn rank_neighborhood(
         .collect();
     let node_count = ids.len();
 
-    let degrees: Vec<u64> = match &graph.degrees {
-        Some(map) => ids
-            .iter()
-            .map(|id| map.get(id).copied().unwrap_or(0))
-            .collect(),
-        None => {
-            let mut derived = vec![0u64; node_count];
-            for &(s, t) in &endpoints {
-                derived[s as usize] += 1;
-                derived[t as usize] += 1;
-            }
-            derived
-        }
-    };
-
     let rates_by_kind: Vec<KindRates> = graph
         .kinds
         .iter()
@@ -173,16 +151,14 @@ pub fn rank_neighborhood(
         })
         .collect();
     let kind_count = graph.kinds.len().max(1);
-    let damped: Vec<f64> = degrees.iter().map(|&d| hub_damping(d)).collect();
     let mut fwd_pools = vec![0.0f64; node_count * kind_count];
     let mut rev_pools = vec![0.0f64; node_count * kind_count];
     for (e, &(s, t)) in graph.edges.iter().zip(&endpoints) {
-        fwd_pools[s as usize * kind_count + e.kind as usize] += damped[t as usize];
-        rev_pools[t as usize * kind_count + e.kind as usize] += damped[s as usize];
+        fwd_pools[s as usize * kind_count + e.kind as usize] += 1.0;
+        rev_pools[t as usize * kind_count + e.kind as usize] += 1.0;
     }
     // ObjectRank Eq. 4: each (node, kind, direction) group is an independent
-    // authority budget. The split within a group is proportional to hub
-    // damping instead of the paper's even 1/OutDeg split.
+    // authority budget, split evenly across the group's edges.
     let placed: Vec<(usize, usize, f64, f64)> = graph
         .edges
         .iter()
@@ -191,8 +167,8 @@ pub fn rank_neighborhood(
             let (s, t) = (s as usize, t as usize);
             let r = rates_by_kind[e.kind as usize];
             let kind = e.kind as usize;
-            let fwd = r.forward * damped[t] / fwd_pools[s * kind_count + kind];
-            let rev = r.reverse * damped[s] / rev_pools[t * kind_count + kind];
+            let fwd = r.forward / fwd_pools[s * kind_count + kind];
+            let rev = r.reverse / rev_pools[t * kind_count + kind];
             (s, t, fwd, rev)
         })
         .collect();
@@ -202,10 +178,6 @@ pub fn rank_neighborhood(
         entries.push((t, s, rev));
     }
     let transitions = Transitions::new(node_count, &entries);
-    let inverse_entries: Vec<(usize, usize, f64)> =
-        entries.iter().map(|&(s, t, w)| (t, s, w)).collect();
-    let inverted = Transitions::new(node_count, &inverse_entries);
-    drop(inverse_entries);
     drop(entries);
 
     let seed_sets: Vec<(Vec<(usize, f64)>, f64)> = term_seeds
@@ -225,15 +197,9 @@ pub fn rank_neighborhood(
         seed_sets
             .par_iter()
             .map(|(seeds, _)| {
-                let relevance = personalized_pagerank(&transitions, seeds, PPR_DAMPING);
-                let specificity = personalized_pagerank(&inverted, seeds, PPR_DAMPING);
-                relevance
+                personalized_pagerank(&transitions, seeds, PPR_DAMPING)
                     .iter()
-                    .zip(&specificity)
-                    .map(|(&r, &p)| {
-                        (r + CONSENSUS_EPSILON).ln()
-                            + SPECIFICITY_EXPONENT * (p + CONSENSUS_EPSILON).ln()
-                    })
+                    .map(|&r| (r + SCORE_EPSILON).ln())
                     .collect()
             })
             .collect()
@@ -245,20 +211,17 @@ pub fn rank_neighborhood(
             node_scores: Vec::new(),
         };
     }
-    let term_count = per_term_logs.len();
-    let quorum = ((term_count as f64 * CONSENSUS_QUORUM).ceil() as usize).clamp(1, term_count);
+    // ObjectRank AND semantics: the weighted geometric mean is a monotone
+    // transform of the paper's product of per-term scores.
+    let weight_total: f64 = seed_sets.iter().map(|(_, w)| w).sum();
     let scores: Vec<f64> = (0..node_count)
         .map(|v| {
-            let mut logs: Vec<(f64, f64)> = per_term_logs
+            let log_sum: f64 = per_term_logs
                 .iter()
                 .zip(&seed_sets)
-                .map(|(term, (_, weight))| (term[v], *weight))
-                .collect();
-            logs.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
-            let (log_sum, weight_sum) = logs[..quorum]
-                .iter()
-                .fold((0.0, 0.0), |(ls, ws), &(l, w)| (ls + l * w, ws + w));
-            (log_sum / weight_sum).exp()
+                .map(|(term, (_, weight))| term[v] * weight)
+                .sum();
+            (log_sum / weight_total).exp()
         })
         .collect();
 
@@ -317,11 +280,10 @@ pub fn rank_neighborhood(
     let mut node_scores: Vec<ScoredNode> = ids
         .iter()
         .enumerate()
-        .filter(|&(i, _)| scores[i] > CONSENSUS_EPSILON * 1.5)
+        .filter(|&(i, _)| scores[i] > SCORE_EPSILON * 1.5)
         .map(|(i, &id)| ScoredNode {
             id,
             score: scores[i],
-            degree: degrees[i],
         })
         .collect();
     let by_score = |a: &ScoredNode, b: &ScoredNode| {
@@ -494,7 +456,6 @@ mod tests {
                     target,
                 })
                 .collect(),
-            degrees: None,
         }
     }
 

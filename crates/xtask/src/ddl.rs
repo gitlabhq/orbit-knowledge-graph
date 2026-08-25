@@ -106,11 +106,15 @@ CREATE TABLE IF NOT EXISTS gl_def_trigram (
     project_id BIGINT NOT NULL,
     commit_sha VARCHAR NOT NULL,
     def_id BIGINT NOT NULL,
-    gram VARCHAR NOT NULL
+    gram VARCHAR NOT NULL,
+    field VARCHAR NOT NULL
 );
 
 CREATE OR REPLACE MACRO gram_text(txt) AS
     ' ' || trim(regexp_replace(lower(txt), '[^0-9a-z]+', ' ', 'g')) || ' ';
+
+CREATE OR REPLACE MACRO def_name(fqn) AS
+    regexp_replace(fqn, '^.*[:.#/]', '');
 
 CREATE OR REPLACE MACRO trigrams(txt) AS
     list_distinct(list_transform(

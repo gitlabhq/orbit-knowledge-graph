@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 pub struct GraphEdge {
     pub kind: u16,
     pub source: i64,
@@ -9,23 +7,6 @@ pub struct GraphEdge {
 pub struct Graph {
     pub kinds: Vec<String>,
     pub edges: Vec<GraphEdge>,
-    pub degrees: Option<HashMap<i64, u64>>,
-}
-
-impl Graph {
-    pub fn degrees_or_derived(&self) -> HashMap<i64, u64> {
-        match &self.degrees {
-            Some(degrees) => degrees.clone(),
-            None => {
-                let mut derived: HashMap<i64, u64> = HashMap::new();
-                for e in &self.edges {
-                    *derived.entry(e.source).or_insert(0) += 1;
-                    *derived.entry(e.target).or_insert(0) += 1;
-                }
-                derived
-            }
-        }
-    }
 }
 
 #[derive(Clone)]

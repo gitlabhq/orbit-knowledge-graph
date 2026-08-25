@@ -60,6 +60,12 @@ pub(crate) fn run(
 
     if outcome.matches.is_empty() {
         writeln!(out, "\nNo definitions match those terms.")?;
+        writeln!(
+            out,
+            "Rephrase and retry once — use synonyms or identifier fragments \
+             from the code (e.g. \"throttle\" → \"rate limit\"). If the retry \
+             also misses, fall back to grep."
+        )?;
         return Ok(());
     }
 
@@ -192,9 +198,6 @@ fn report_confidence(
     out: &mut impl Write,
     outcome: &orbit_search::AskOutcome,
 ) -> std::io::Result<()> {
-    if !outcome.weak && outcome.unmatched_terms.is_empty() {
-        return Ok(());
-    }
     if outcome.weak {
         writeln!(
             out,
@@ -207,7 +210,10 @@ fn report_confidence(
     if !outcome.unmatched_terms.is_empty() {
         writeln!(
             out,
-            "note: no matches for: {}",
+            "note: no matches for: {} — results reflect only the matched terms \
+             and may be incomplete. If they look off, retry once with a synonym \
+             or identifier fragment for each unmatched term (e.g. \"throttle\" \
+             → \"rate limit\").",
             outcome.unmatched_terms.join(", ")
         )?;
     }
@@ -228,6 +234,46 @@ fn report_hidden(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn outcome(unmatched: Vec<&str>, weak: bool) -> orbit_search::AskOutcome {
+        orbit_search::AskOutcome {
+            terms: Vec::new(),
+            matches: Vec::new(),
+            surfaced: Vec::new(),
+            seed_count: 0,
+            focus: None,
+            edges: Vec::new(),
+            hidden_by_kind: Vec::new(),
+            weak,
+            unmatched_terms: unmatched.into_iter().map(String::from).collect(),
+        }
+    }
+
+    #[test]
+    fn partial_anchor_note_lists_unmatched_terms_with_a_retry_instruction() {
+        let mut buf = Vec::new();
+        report_confidence(&mut buf, &outcome(vec!["throttle", "dlq"], false)).unwrap();
+        let text = String::from_utf8(buf).unwrap();
+        assert!(text.contains("no matches for: throttle, dlq"), "{text}");
+        assert!(text.contains("retry once"), "{text}");
+        assert!(!text.contains("weak matches"), "{text}");
+    }
+
+    #[test]
+    fn weak_and_unmatched_notes_stack() {
+        let mut buf = Vec::new();
+        report_confidence(&mut buf, &outcome(vec!["throttle"], true)).unwrap();
+        let text = String::from_utf8(buf).unwrap();
+        assert!(text.contains("weak matches"), "{text}");
+        assert!(text.contains("no matches for: throttle"), "{text}");
+    }
+
+    #[test]
+    fn confident_full_anchor_prints_no_notes() {
+        let mut buf = Vec::new();
+        report_confidence(&mut buf, &outcome(Vec::new(), false)).unwrap();
+        assert!(buf.is_empty());
+    }
 
     #[test]
     fn vocab_maps_question_verbs_to_relational_intent_and_focus_kinds() {
