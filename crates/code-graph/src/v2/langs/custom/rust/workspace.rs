@@ -120,6 +120,7 @@ impl WorkspacePlan {
         let manifest_paths = manifest_cache.manifest_paths.clone();
         let embedded_sysroot = Arc::new(EmbeddedSysroot::materialize()?);
         let (repo_rust_files, inventory_indexes) = collect_abs_rust_files(root_path, files);
+        let by_path = sorted_by_path(&repo_rust_files);
         let mut entries = Vec::new();
         let mut loaded_roots = HashSet::new();
         let mut last_error = None;
@@ -137,7 +138,7 @@ impl WorkspacePlan {
                 embedded_sysroot.as_ref(),
             ) {
                 Ok(workspace) => {
-                    let candidates = candidate_file_indexes(&workspace, &repo_rust_files)
+                    let candidates = candidate_file_indexes(&workspace, &repo_rust_files, &by_path)
                         .into_iter()
                         .map(|idx| inventory_indexes[idx])
                         .collect();
@@ -206,9 +207,16 @@ fn dirs_match(dirs: &loader::Directories, path: &AbsPath) -> bool {
             .any(|ext| Some(ext.as_str()) == path.extension())
 }
 
+fn sorted_by_path(repo_rust_files: &[AbsPathBuf]) -> Vec<usize> {
+    let mut order = (0..repo_rust_files.len()).collect::<Vec<_>>();
+    order.sort_unstable_by_key(|&idx| repo_rust_files[idx].as_str());
+    order
+}
+
 fn candidate_file_indexes(
     workspace: &ProjectWorkspace,
     repo_rust_files: &[AbsPathBuf],
+    by_path: &[usize],
 ) -> Vec<usize> {
     let project_folders = ProjectFolders::new(std::slice::from_ref(workspace), &[], None);
     let mut hit = vec![false; repo_rust_files.len()];
@@ -222,8 +230,19 @@ fn candidate_file_indexes(
                 }
             }
             loader::Entry::Directories(dirs) => {
-                for (idx, abs) in repo_rust_files.iter().enumerate() {
-                    hit[idx] = hit[idx] || dirs_match(dirs, abs);
+                // Every match sits under one include dir, so walking those path
+                // ranges beats rescanning the whole repo per directory.
+                for include in &dirs.include {
+                    let prefix = format!("{}/", include.as_str());
+                    let start = by_path
+                        .partition_point(|&idx| repo_rust_files[idx].as_str() < prefix.as_str());
+                    for &idx in &by_path[start..] {
+                        let path = &repo_rust_files[idx];
+                        if !path.as_str().starts_with(&prefix) {
+                            break;
+                        }
+                        hit[idx] = hit[idx] || dirs_match(dirs, path);
+                    }
                 }
             }
         }
