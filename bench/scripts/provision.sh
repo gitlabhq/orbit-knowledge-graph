@@ -36,14 +36,25 @@ CH_PASSWORD=$(openssl rand -hex 24)
 
 PVC_DATA_SOURCE=""
 if [[ -n "${RA_DATALAKE_SNAPSHOT:-}" ]]; then
-  # VolumeSnapshots are namespace-scoped. To restore across namespaces we
-  # create a pre-provisioned VolumeSnapshotContent + VolumeSnapshot pair
-  # that references the same underlying GCE disk snapshot.
-  ORIG_CONTENT=$($KC get volumesnapshot "${RA_DATALAKE_SNAPSHOT}" \
-    -n "${RA_DATALAKE_SNAPSHOT_NS:-ra-clickhouse}" \
-    -o jsonpath='{.status.boundVolumeSnapshotContentName}')
-  export SNAP_HANDLE=$($KC get volumesnapshotcontent "${ORIG_CONTENT}" \
-    -o jsonpath='{.status.snapshotHandle}')
+  SNAP_NS="${RA_DATALAKE_SNAPSHOT_NS:-ra-clickhouse}"
+
+  if [[ -n "${RA_SNAPSHOT_HANDLE:-}" ]]; then
+    export SNAP_HANDLE="${RA_SNAPSHOT_HANDLE}"
+  else
+    # Resolve the GCE disk snapshot handle from a VolumeSnapshot.
+    # Use RA_SNAPSHOT_SOURCE_CTX if the snapshot lives on a different cluster.
+    SNAP_KC="${KC}"
+    if [[ -n "${RA_SNAPSHOT_SOURCE_CTX:-}" ]]; then
+      SNAP_KC="kubectl --context=${RA_SNAPSHOT_SOURCE_CTX}"
+    fi
+    ORIG_CONTENT=$($SNAP_KC get volumesnapshot "${RA_DATALAKE_SNAPSHOT}" \
+      -n "${SNAP_NS}" \
+      -o jsonpath='{.status.boundVolumeSnapshotContentName}')
+    export SNAP_HANDLE=$($SNAP_KC get volumesnapshotcontent "${ORIG_CONTENT}" \
+      -o jsonpath='{.status.snapshotHandle}')
+  fi
+
+  log "  Restoring from GCE snapshot: ${SNAP_HANDLE}"
   export LOCAL_SNAP="datalake-${RUN_ID}"
   export LOCAL_CONTENT="datalake-content-${RUN_ID}"
   export CH_NAMESPACE="${CH_NS}"

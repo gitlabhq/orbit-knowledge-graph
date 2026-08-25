@@ -19,6 +19,15 @@ Use this when there is no existing datalake snapshot or code corpus. This is the
 
 The GKE cluster and node pools are managed by Terraform in `bench/infra/`, wrapped by `infra.sh`. The tier variable controls the machine type, node count (from `tiers.yaml`), and cluster name (defaults to `ra-bench-{tier}`).
 
+First-time setup requires creating the Terraform state bucket (run once):
+
+```bash
+cd bench/infra/bootstrap
+terraform init && terraform apply
+```
+
+Then create the cluster:
+
 ```bash
 bash bench/scripts/infra.sh init
 bash bench/scripts/infra.sh apply   # reads tier from bench.yaml, creates "ra-bench-small"
@@ -89,10 +98,24 @@ Use this when a golden snapshot and code corpus already exist. Takes ~10 minutes
 
 ### 1. Provision from snapshot
 
+If the snapshot is on the current cluster:
+
 ```bash
 RUN_ID=bench9 RA_DATALAKE_SNAPSHOT=golden-core-2026-06-25-1115 \
   bash bench/scripts/provision.sh
 ```
+
+If the snapshot was created on a different cluster (e.g. provisioning a fresh
+Terraform-managed cluster from a snapshot on the old `ra-bench-smoke`):
+
+```bash
+RUN_ID=bench9 RA_DATALAKE_SNAPSHOT=golden-core-2026-06-25-1115 \
+  RA_SNAPSHOT_SOURCE_CTX=gke_gl-knowledgegraph-prj-f2eec59d_us-central1-a_ra-bench-smoke \
+  bash bench/scripts/provision.sh
+```
+
+You can also pass the GCE disk snapshot handle directly with `RA_SNAPSHOT_HANDLE`
+to skip the VolumeSnapshot lookup entirely.
 
 The datalake restores from the snapshot (~5 minutes). The graph database is dropped and rebuilt from scratch. SDLC indexing starts immediately.
 

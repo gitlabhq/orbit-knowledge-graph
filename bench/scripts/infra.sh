@@ -42,6 +42,11 @@ fetch_credentials() {
 case "${1:-}" in
   init)
     shift
+    if ! gcloud storage buckets describe "gs://${STATE_BUCKET}" --project="$(bench '.project')" >/dev/null 2>&1; then
+      echo "ERROR: State bucket gs://${STATE_BUCKET} does not exist." >&2
+      echo "       Run 'terraform apply' in bench/infra/bootstrap/ first." >&2
+      exit 1
+    fi
     "$TF" -chdir="${TF_DIR}" init \
       -backend-config="bucket=${STATE_BUCKET}" \
       -backend-config="prefix=bench" \
