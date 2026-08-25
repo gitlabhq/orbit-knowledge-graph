@@ -26,7 +26,7 @@ with your local graph. After running the skill,
 agents learn how to find local tables, write SQL queries
 against them, and how to avoid mistakes.
 
-The skill ships inside the GitLab Orbit CLI (`orbit`) binary,
+The skill is included in the GitLab Orbit CLI (`orbit`) binary,
 so it always matches the version you have installed.
 
 This skill is not the same as the `orbit` skill for GitLab Orbit Remote.
@@ -41,7 +41,6 @@ see [set up agents with the GitLab Orbit skill](../../ai_coding_agents.md).
 ## Prerequisites
 
 - Install the [GitLab Orbit CLI (`orbit`)](./cli.md).
-- Index a repository into the local graph.
 
 No GitLab account or network connection is required.
 
@@ -63,7 +62,7 @@ To scope the skill to one project instead of your user account, write to
 
 ### Update the skill
 
-The skill is bundled in the CLI binary. To update the skill:
+The skill is included in the CLI binary. To update the skill:
 
 1. Update the CLI by re-running the
    [installation](../getting-started.md#install) method you used.
@@ -71,10 +70,10 @@ The skill is bundled in the CLI binary. To update the skill:
 
 Your agent then reads the guidance that matches your installed CLI version.
 
-### Configure an agent to prefer the graph
+### Configure an agent to use the graph
 
 The skill tells an agent how to query the graph.
-It does not tell the agent to reach for
+It does not tell the agent to use
 the graph first. To add that instruction to an agent's configuration, run:
 
 ```shell
