@@ -44,6 +44,12 @@ resource "google_container_cluster" "bench" {
       enabled = true
     }
   }
+
+  addons_config {
+    gcs_fuse_csi_driver_config {
+      enabled = true
+    }
+  }
 }
 
 # Workload pool: GKG components, NATS, and the e2e stack run here.
