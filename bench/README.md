@@ -21,17 +21,17 @@ The GKE cluster and node pools are managed by Terraform in `bench/infra/`, wrapp
 
 ```bash
 bash bench/scripts/infra.sh init
-TIER=small bash bench/scripts/infra.sh apply   # creates cluster "ra-bench-small"
+bash bench/scripts/infra.sh apply   # reads tier from bench.yaml, creates "ra-bench-small"
 ```
 
-`KCTX` is auto-derived from `terraform output` by `lib.sh`. You can override the cluster name with `-var cluster_name=custom`.
+The tier is read from `bench.yaml`. Change it there, or override with `TIER=large`. `KCTX` is auto-derived from `terraform output` by `lib.sh`.
 
 ### 1. Provision the stack
 
 Deploys standalone ClickHouse, the full e2e stack (GitLab, NATS, Siphon, GKG), imports the datalake dump from GCS (~15 minutes), and starts SDLC indexing.
 
 ```bash
-TIER=small RUN_ID=bench8 bash bench/scripts/provision.sh
+RUN_ID=bench8 bash bench/scripts/provision.sh
 ```
 
 ### 2. Create a golden snapshot
@@ -80,7 +80,7 @@ This builds the image, deploys the pod with GCS FUSE, upgrades the GKG helm rele
 ### 5. Check SLOs
 
 ```bash
-RUN_ID=bench8 TIER=small bash bench/scripts/slos.sh
+RUN_ID=bench8 bash bench/scripts/slos.sh
 ```
 
 ## From snapshot (fast path)
@@ -90,8 +90,7 @@ Use this when a golden snapshot and code corpus already exist. Takes ~10 minutes
 ### 1. Provision from snapshot
 
 ```bash
-TIER=small RUN_ID=bench9 \
-  RA_DATALAKE_SNAPSHOT=golden-core-2026-06-25-1115 \
+RUN_ID=bench9 RA_DATALAKE_SNAPSHOT=golden-core-2026-06-25-1115 \
   bash bench/scripts/provision.sh
 ```
 
@@ -110,7 +109,7 @@ Code indexing starts against the existing 7K repo corpus. Both SDLC and code ind
 ### 3. Check SLOs
 
 ```bash
-RUN_ID=bench9 TIER=small bash bench/scripts/slos.sh
+RUN_ID=bench9 bash bench/scripts/slos.sh
 ```
 
 ## Cluster lifecycle
@@ -118,12 +117,12 @@ RUN_ID=bench9 TIER=small bash bench/scripts/slos.sh
 Each tier gets its own cluster (`ra-bench-small`, `ra-bench-medium`, `ra-bench-large`). The full lifecycle is create, use, destroy.
 
 ```bash
-TIER=small bash bench/scripts/infra.sh apply                              # create ra-bench-small
-TIER=small bash bench/scripts/infra.sh apply -var dedicated_ch_pool=true  # add CH pool
-bash bench/scripts/infra.sh destroy                                       # tear down everything
+bash bench/scripts/infra.sh apply                              # create ra-bench-{tier}
+bash bench/scripts/infra.sh apply -var dedicated_ch_pool=true  # add CH pool
+bash bench/scripts/infra.sh destroy                            # tear down everything
 ```
 
-To run a different tier, set `TIER` accordingly. Each produces an isolated cluster.
+To change the tier, edit `bench.yaml`. Each tier produces an isolated cluster.
 
 ## Dedicated ClickHouse pool
 
@@ -146,12 +145,12 @@ The fetch script auto-downloads `projects.tsv` from GCS if no file is given.
 
 ## Configuration
 
-All defaults live in two YAML files:
+All config lives in two YAML files:
 
-- `bench/config/bench.yaml` -- GCP project, region, bucket names, image tags, corpus settings
+- `bench/config/bench.yaml` -- active tier, GCP project, region, bucket names, image tags, corpus settings
 - `bench/config/tiers.yaml` -- per-tier resource limits, concurrency, SLO targets
 
-Every env var can override the YAML defaults.
+Env vars (`TIER`, `RUN_ID`) override the YAML values when set.
 
 ## Scripts
 

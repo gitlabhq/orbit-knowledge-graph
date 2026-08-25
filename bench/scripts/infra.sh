@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # Lifecycle wrapper for bench Terraform. Reads all config from bench.yaml.
 #
+# Reads tier, state bucket, and all config from bench.yaml.
+# Override tier with TIER env var or -var tier=... passthrough.
+#
 # Usage:
 #   bench/scripts/infra.sh init
-#   bench/scripts/infra.sh apply                          # uses TIER (default: small)
-#   bench/scripts/infra.sh apply -var tier=large
+#   bench/scripts/infra.sh apply                          # tier from bench.yaml
 #   bench/scripts/infra.sh apply -var cluster_name=custom
 #   bench/scripts/infra.sh destroy
 #   bench/scripts/infra.sh output cluster_name
@@ -17,7 +19,7 @@ TF_DIR="${BENCH_DIR}/infra"
 bench() { yq eval "${1}" "${BENCH_DIR}/config/bench.yaml"; }
 
 STATE_BUCKET=$(bench '.buckets.tf_state')
-: "${TIER:=small}"
+: "${TIER:=$(bench '.tier')}"
 
 case "${1:-}" in
   init)

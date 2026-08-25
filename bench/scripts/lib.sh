@@ -7,7 +7,7 @@ E2E_DIR="${REPO_ROOT}/e2e"
 TF_DIR="${BENCH_DIR}/infra"
 
 : "${RUN_ID:=ra-$(date +%s)}"
-: "${TIER:=small}"
+: "${TIER:=$(yq eval '.tier' "${BENCH_DIR}/config/bench.yaml")}"
 : "${KCTX:=$(cd "${TF_DIR}" && terraform output -raw kctx 2>/dev/null || echo "")}"
 if [[ -z "${KCTX}" ]]; then
   echo "ERROR: KCTX not set and terraform output unavailable. Run 'terraform apply' in bench/infra/ first." >&2
