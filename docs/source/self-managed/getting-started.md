@@ -10,7 +10,7 @@ title: Get started with GitLab Orbit on GitLab Self-Managed
 
 - Tier: Premium, Ultimate
 - Offering: GitLab Self-Managed
-- Status: Beta
+- Status: Experiment
 
 {{< /details >}}
 
@@ -21,9 +21,9 @@ title: Get started with GitLab Orbit on GitLab Self-Managed
 {{< /history >}}
 
 > [!note]
-> GitLab Orbit on GitLab Self-Managed is in
-> [beta](https://docs.gitlab.com/policy/development_stages_support/#beta).
-> This feature is available for testing, but not ready for production use.
+> GitLab Orbit on GitLab Self-Managed is an
+> [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment)
+> available only to design partners. It is not ready for production use.
 
 GitLab Orbit depends on three systems that it does not install: ClickHouse, Kubernetes, and NATS.
 The remaining setup steps require all three systems to exist and be reachable.
