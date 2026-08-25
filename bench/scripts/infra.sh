@@ -19,14 +19,25 @@ TF_DIR="${BENCH_DIR}/infra"
 
 bench() { yq eval "${1}" "${BENCH_DIR}/config/bench.yaml"; }
 
-TF=$(mise which terraform 2>/dev/null || command -v terraform)
-if [[ -z "${TF}" ]]; then
+TF=$(mise which terraform 2>/dev/null \
+  || command -v terraform 2>/dev/null \
+  || echo "$(mise where terraform 2>/dev/null)/terraform")
+if [[ ! -x "${TF}" ]]; then
   echo "ERROR: terraform not found. Install it or run 'mise install terraform'." >&2
   exit 1
 fi
 
 STATE_BUCKET=$(bench '.buckets.tf_state')
 : "${TIER:=$(bench '.tier')}"
+
+fetch_credentials() {
+  echo "[infra] Fetching kubectl credentials"
+  gcloud container clusters get-credentials \
+    "$("$TF" -chdir="${TF_DIR}" output -raw cluster_name)" \
+    --zone "$("$TF" -chdir="${TF_DIR}" output -raw cluster_location)" \
+    --project "$("$TF" -chdir="${TF_DIR}" output -raw project)" \
+    2>/dev/null
+}
 
 case "${1:-}" in
   init)
@@ -39,6 +50,7 @@ case "${1:-}" in
   apply)
     shift
     "$TF" -chdir="${TF_DIR}" apply -var "tier=${TIER}" "$@"
+    fetch_credentials
     ;;
   plan)
     shift

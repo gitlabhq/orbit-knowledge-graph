@@ -5,7 +5,9 @@ BENCH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REPO_ROOT="$(cd "${BENCH_DIR}/.." && pwd)"
 E2E_DIR="${REPO_ROOT}/e2e"
 TF_DIR="${BENCH_DIR}/infra"
-TF=$(mise which terraform 2>/dev/null || command -v terraform || true)
+TF=$(mise which terraform 2>/dev/null \
+  || command -v terraform 2>/dev/null \
+  || echo "$(mise where terraform 2>/dev/null)/terraform")
 
 : "${RUN_ID:=ra-$(date +%s)}"
 : "${TIER:=$(yq eval '.tier' "${BENCH_DIR}/config/bench.yaml")}"

@@ -67,3 +67,10 @@ e2e/output.xml
 e2e/log.html
 e2e/report.html
 .claude/
+
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.backup
+*.tfvars
+!bench/infra/.terraform.lock.hcl

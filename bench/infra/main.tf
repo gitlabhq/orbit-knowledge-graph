@@ -6,6 +6,14 @@ terraform {
       source  = "hashicorp/google"
       version = "~> 6.36"
     }
+    helm = {
+      source  = "hashicorp/helm"
+      version = "~> 2.17"
+    }
+    kubernetes = {
+      source  = "hashicorp/kubernetes"
+      version = "~> 2.37"
+    }
   }
 
   backend "gcs" {}
@@ -23,4 +31,18 @@ locals {
 
 provider "google" {
   project = local.project
+}
+
+data "google_client_config" "default" {}
+
+provider "helm" {
+  kubernetes {
+    host  = "https://${google_container_cluster.bench.endpoint}"
+    token = data.google_client_config.default.access_token
+  }
+}
+
+provider "kubernetes" {
+  host  = "https://${google_container_cluster.bench.endpoint}"
+  token = data.google_client_config.default.access_token
 }
