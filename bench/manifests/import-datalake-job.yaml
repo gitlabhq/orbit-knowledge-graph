@@ -25,7 +25,7 @@ spec:
             - name: DUMP_PREFIX
               value: "${DUMP_PREFIX}"
             - name: BUCKET
-              value: "gs://gkg-datalake-dumps"
+              value: "gs://${DUMPS_BUCKET}"
             - name: GCE_METADATA_HOST
               value: "169.254.169.254"
           command: ["/bin/bash", "-euo", "pipefail", "-c"]
