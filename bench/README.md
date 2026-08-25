@@ -17,15 +17,15 @@ Use this when there is no existing datalake snapshot or code corpus. This is the
 
 ### 0. Create the cluster
 
-The GKE cluster and node pools are managed by Terraform in `bench/infra/`. The tier variable controls the machine type and node count (from `tiers.yaml`).
+The GKE cluster and node pools are managed by Terraform in `bench/infra/`. The tier variable controls the machine type, node count (from `tiers.yaml`), and cluster name (defaults to `ra-bench-{tier}`).
 
 ```bash
 cd bench/infra
 terraform init
-terraform apply -var tier=small
+terraform apply -var tier=small   # creates cluster "ra-bench-small"
 ```
 
-`KCTX` is auto-derived from `terraform output` by `lib.sh`. You can override it manually if needed.
+`KCTX` is auto-derived from `terraform output` by `lib.sh`. You can override the cluster name with `-var cluster_name=custom` if needed.
 
 ### 1. Provision the stack
 
@@ -60,10 +60,11 @@ FETCH_MAX=50 bash bench/scripts/fetch-code-corpus.sh projects.tsv
 
 ### 4. Deploy the mock git server
 
-The GCS FUSE CSI driver must be enabled on the cluster (one-time):
+The GCS FUSE CSI driver must be enabled on the cluster (one-time). Use the cluster name from Terraform output:
 
 ```bash
-gcloud container clusters update ra-bench \
+CLUSTER=$(cd bench/infra && terraform output -raw cluster_name)
+gcloud container clusters update "$CLUSTER" \
   --project gl-knowledgegraph-prj-f2eec59d \
   --zone us-central1-a \
   --update-addons GcsFuseCsiDriver=ENABLED
@@ -115,14 +116,16 @@ RUN_ID=bench9 TIER=small bash bench/scripts/slos.sh
 
 ## Cluster lifecycle
 
-The cluster is managed by Terraform. To change the tier or tear down:
+Each tier gets its own cluster (`ra-bench-small`, `ra-bench-medium`, `ra-bench-large`). The full lifecycle is create, use, destroy.
 
 ```bash
 cd bench/infra
-terraform apply -var tier=medium              # resize to medium
-terraform apply -var dedicated_ch_pool=true   # add a tainted CH node pool
-terraform destroy                             # tear down the cluster
+terraform apply -var tier=small                # create ra-bench-small
+terraform apply -var tier=small -var dedicated_ch_pool=true  # add CH pool
+terraform destroy                              # tear down everything
 ```
+
+To run a different tier, apply with that tier name. Each produces an isolated cluster.
 
 ## Dedicated ClickHouse pool
 
