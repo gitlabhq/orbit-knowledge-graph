@@ -17,15 +17,14 @@ Use this when there is no existing datalake snapshot or code corpus. This is the
 
 ### 0. Create the cluster
 
-The GKE cluster and node pools are managed by Terraform in `bench/infra/`. The tier variable controls the machine type, node count (from `tiers.yaml`), and cluster name (defaults to `ra-bench-{tier}`).
+The GKE cluster and node pools are managed by Terraform in `bench/infra/`, wrapped by `infra.sh`. The tier variable controls the machine type, node count (from `tiers.yaml`), and cluster name (defaults to `ra-bench-{tier}`).
 
 ```bash
-cd bench/infra
-terraform init
-terraform apply -var tier=small   # creates cluster "ra-bench-small"
+bash bench/scripts/infra.sh init
+TIER=small bash bench/scripts/infra.sh apply   # creates cluster "ra-bench-small"
 ```
 
-`KCTX` is auto-derived from `terraform output` by `lib.sh`. You can override the cluster name with `-var cluster_name=custom` if needed.
+`KCTX` is auto-derived from `terraform output` by `lib.sh`. You can override the cluster name with `-var cluster_name=custom`.
 
 ### 1. Provision the stack
 
@@ -60,10 +59,10 @@ FETCH_MAX=50 bash bench/scripts/fetch-code-corpus.sh projects.tsv
 
 ### 4. Deploy the mock git server
 
-The GCS FUSE CSI driver must be enabled on the cluster (one-time). Use the cluster name from Terraform output:
+The GCS FUSE CSI driver must be enabled on the cluster (one-time). Use the cluster name from the infra output:
 
 ```bash
-CLUSTER=$(cd bench/infra && terraform output -raw cluster_name)
+CLUSTER=$(bash bench/scripts/infra.sh output -raw cluster_name)
 gcloud container clusters update "$CLUSTER" \
   --project gl-knowledgegraph-prj-f2eec59d \
   --zone us-central1-a \
@@ -119,13 +118,12 @@ RUN_ID=bench9 TIER=small bash bench/scripts/slos.sh
 Each tier gets its own cluster (`ra-bench-small`, `ra-bench-medium`, `ra-bench-large`). The full lifecycle is create, use, destroy.
 
 ```bash
-cd bench/infra
-terraform apply -var tier=small                # create ra-bench-small
-terraform apply -var tier=small -var dedicated_ch_pool=true  # add CH pool
-terraform destroy                              # tear down everything
+TIER=small bash bench/scripts/infra.sh apply                              # create ra-bench-small
+TIER=small bash bench/scripts/infra.sh apply -var dedicated_ch_pool=true  # add CH pool
+bash bench/scripts/infra.sh destroy                                       # tear down everything
 ```
 
-To run a different tier, apply with that tier name. Each produces an isolated cluster.
+To run a different tier, set `TIER` accordingly. Each produces an isolated cluster.
 
 ## Dedicated ClickHouse pool
 
@@ -159,6 +157,7 @@ Every env var can override the YAML defaults.
 
 | Script | What it does |
 |---|---|
+| `infra.sh` | Terraform lifecycle wrapper: init, apply, plan, destroy, output |
 | `provision.sh` | Full stack deploy: CH, e2e, import, checkpoint reset, GMP |
 | `slos.sh` | SLO report from Cloud Monitoring + CH query_log |
 | `deploy-mock-git-server.sh` | Build, deploy mock, upgrade GKG, reset code checkpoints |

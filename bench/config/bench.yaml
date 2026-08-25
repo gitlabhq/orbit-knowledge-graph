@@ -3,6 +3,7 @@ region: us-central1
 zone: us-central1-a
 
 buckets:
+  tf_state: gkg-tf-state-f2eec59d
   datalake_dumps: gkg-datalake-dumps
   code_corpus: gkg-code-corpus
 

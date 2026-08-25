@@ -8,10 +8,7 @@ terraform {
     }
   }
 
-  backend "gcs" {
-    bucket = "gkg-tf-state-f2eec59d"
-    prefix = "bench"
-  }
+  backend "gcs" {}
 }
 
 locals {
