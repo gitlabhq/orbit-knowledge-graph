@@ -27,7 +27,7 @@ use indexer::orchestrator::dispatch::CodeBackfill;
 use indexer::orchestrator::scheduled::ScheduledTaskMetrics;
 use indexer::schema::version::{SCHEMA_VERSION, prefixed_table_name};
 
-use crate::nats_stub::CountingNats;
+use crate::nats_stub::{CountingNats, Layout};
 use crate::seed::{Seeder, Shape};
 
 #[derive(Parser)]
@@ -52,6 +52,9 @@ struct Args {
     checkpointed_pct: u64,
     #[arg(long, default_value_t = 3)]
     path_depth: usize,
+    /// Share of all projects to place in one namespace, for measuring a skewed fleet.
+    #[arg(long, default_value_t = 0)]
+    big_namespace_pct: u64,
 
     /// Reuse whatever is already in the two databases.
     #[arg(long)]
@@ -75,6 +78,7 @@ struct Args {
 struct Report {
     label: String,
     shape: ReportShape,
+    fairness: Option<Fairness>,
     dispatched: u64,
     skipped: u64,
     published: u64,
@@ -96,6 +100,50 @@ struct ReportShape {
     namespaces: u64,
     checkpointed_pct: u64,
     path_depth: usize,
+    big_namespace_pct: u64,
+}
+
+/// Queue position statistics, in the terms the fleet-wide shuffle was judged on:
+/// how far into the queue a namespace's first request sits, and the longest
+/// stretch the queue is held by one namespace.
+#[derive(serde::Serialize)]
+struct Fairness {
+    max_same_namespace_run: u64,
+    biggest_namespace_first_publish: i64,
+    other_namespaces_first_publish_p50: i64,
+    other_namespaces_first_publish_p95: i64,
+    other_namespaces_first_publish_max: i64,
+    namespaces_published: usize,
+}
+
+fn fairness(order: crate::nats_stub::PublishOrder) -> Fairness {
+    let mut others: Vec<i64> = order
+        .first_publish_index
+        .iter()
+        .enumerate()
+        .filter(|(namespace, index)| *namespace != 0 && **index >= 0)
+        .map(|(_, index)| *index)
+        .collect();
+    others.sort_unstable();
+    let percentile = |fraction: f64| -> i64 {
+        if others.is_empty() {
+            return -1;
+        }
+        let position = ((others.len() as f64 - 1.0) * fraction).round() as usize;
+        others[position]
+    };
+    Fairness {
+        max_same_namespace_run: order.max_same_namespace_run,
+        biggest_namespace_first_publish: order.first_publish_index[0],
+        other_namespaces_first_publish_p50: percentile(0.5),
+        other_namespaces_first_publish_p95: percentile(0.95),
+        other_namespaces_first_publish_max: others.last().copied().unwrap_or(-1),
+        namespaces_published: order
+            .published_per_namespace
+            .iter()
+            .filter(|count| **count > 0)
+            .count(),
+    }
 }
 
 /// After the dispatch has returned and the allocator has been asked to release
@@ -122,6 +170,7 @@ async fn main() -> anyhow::Result<()> {
         projects: args.projects,
         checkpointed_pct: args.checkpointed_pct,
         path_depth: args.path_depth,
+        big_namespace_pct: args.big_namespace_pct,
     };
     let checkpoint_table = prefixed_table_name("code_indexing_checkpoint", *SCHEMA_VERSION);
 
@@ -148,6 +197,11 @@ async fn main() -> anyhow::Result<()> {
         Some(args.publish_delay_us)
             .filter(|d| *d > 0)
             .map(std::time::Duration::from_micros),
+        Some(Layout {
+            first_project_id: seed::FIRST_PROJECT_ID,
+            namespaces: args.namespaces,
+            big_namespace_projects: shape.big_namespace_projects(),
+        }),
     ));
     let backfill = CodeBackfill::new(
         nats.clone(),
@@ -199,7 +253,9 @@ async fn main() -> anyhow::Result<()> {
             namespaces: args.namespaces,
             checkpointed_pct: args.checkpointed_pct,
             path_depth: args.path_depth,
+            big_namespace_pct: args.big_namespace_pct,
         },
+        fairness: nats.publish_order().map(fairness),
         dispatched: outcome.dispatched,
         skipped: outcome.skipped,
         published: nats.published(),
