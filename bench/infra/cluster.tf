@@ -1,5 +1,5 @@
 resource "google_container_cluster" "bench" {
-  name     = var.cluster_name
+  name     = local.cluster_name
   location = local.zone
 
   remove_default_node_pool = true
@@ -41,6 +41,12 @@ resource "google_container_cluster" "bench" {
   monitoring_config {
     enable_components = ["SYSTEM_COMPONENTS"]
     managed_prometheus {
+      enabled = true
+    }
+  }
+
+  addons_config {
+    gcs_fuse_csi_driver_config {
       enabled = true
     }
   }

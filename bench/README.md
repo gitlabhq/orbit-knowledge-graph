@@ -17,22 +17,30 @@ Use this when there is no existing datalake snapshot or code corpus. This is the
 
 ### 0. Create the cluster
 
-The GKE cluster and node pools are managed by Terraform in `bench/infra/`. The tier variable controls the machine type and node count (from `tiers.yaml`).
+The GKE cluster and node pools are managed by Terraform in `bench/infra/`, wrapped by `infra.sh`. The tier variable controls the machine type, node count (from `tiers.yaml`), and cluster name (defaults to `ra-bench-{tier}`).
+
+First-time setup requires creating the Terraform state bucket (run once):
 
 ```bash
-cd bench/infra
-terraform init
-terraform apply -var tier=small
+cd bench/infra/bootstrap
+terraform init && terraform apply
 ```
 
-`KCTX` is auto-derived from `terraform output` by `lib.sh`. You can override it manually if needed.
+Then create the cluster:
+
+```bash
+bash bench/scripts/infra.sh init
+bash bench/scripts/infra.sh apply   # reads tier from bench.yaml, creates "ra-bench-small"
+```
+
+The tier is read from `bench.yaml`. Change it there, or override with `TIER=large`. `KCTX` is auto-derived from `terraform output` by `lib.sh`.
 
 ### 1. Provision the stack
 
 Deploys standalone ClickHouse, the full e2e stack (GitLab, NATS, Siphon, GKG), imports the datalake dump from GCS (~15 minutes), and starts SDLC indexing.
 
 ```bash
-TIER=small RUN_ID=bench8 bash bench/scripts/provision.sh
+RUN_ID=bench8 bash bench/scripts/provision.sh
 ```
 
 ### 2. Create a golden snapshot
@@ -60,10 +68,11 @@ FETCH_MAX=50 bash bench/scripts/fetch-code-corpus.sh projects.tsv
 
 ### 4. Deploy the mock git server
 
-The GCS FUSE CSI driver must be enabled on the cluster (one-time):
+The GCS FUSE CSI driver must be enabled on the cluster (one-time). Use the cluster name from the infra output:
 
 ```bash
-gcloud container clusters update ra-bench \
+CLUSTER=$(bash bench/scripts/infra.sh output -raw cluster_name)
+gcloud container clusters update "$CLUSTER" \
   --project gl-knowledgegraph-prj-f2eec59d \
   --zone us-central1-a \
   --update-addons GcsFuseCsiDriver=ENABLED
@@ -80,7 +89,7 @@ This builds the image, deploys the pod with GCS FUSE, upgrades the GKG helm rele
 ### 5. Check SLOs
 
 ```bash
-RUN_ID=bench8 TIER=small bash bench/scripts/slos.sh
+RUN_ID=bench8 bash bench/scripts/slos.sh
 ```
 
 ## From snapshot (fast path)
@@ -89,11 +98,24 @@ Use this when a golden snapshot and code corpus already exist. Takes ~10 minutes
 
 ### 1. Provision from snapshot
 
+If the snapshot is on the current cluster:
+
 ```bash
-TIER=small RUN_ID=bench9 \
-  RA_DATALAKE_SNAPSHOT=golden-core-2026-06-25-1115 \
+RUN_ID=bench9 RA_DATALAKE_SNAPSHOT=golden-core-2026-06-25-1115 \
   bash bench/scripts/provision.sh
 ```
+
+If the snapshot was created on a different cluster (e.g. provisioning a fresh
+Terraform-managed cluster from a snapshot on the old `ra-bench-smoke`):
+
+```bash
+RUN_ID=bench9 RA_DATALAKE_SNAPSHOT=golden-core-2026-06-25-1115 \
+  RA_SNAPSHOT_SOURCE_CTX=gke_gl-knowledgegraph-prj-f2eec59d_us-central1-a_ra-bench-smoke \
+  bash bench/scripts/provision.sh
+```
+
+You can also pass the GCE disk snapshot handle directly with `RA_SNAPSHOT_HANDLE`
+to skip the VolumeSnapshot lookup entirely.
 
 The datalake restores from the snapshot (~5 minutes). The graph database is dropped and rebuilt from scratch. SDLC indexing starts immediately.
 
@@ -110,19 +132,20 @@ Code indexing starts against the existing 7K repo corpus. Both SDLC and code ind
 ### 3. Check SLOs
 
 ```bash
-RUN_ID=bench9 TIER=small bash bench/scripts/slos.sh
+RUN_ID=bench9 bash bench/scripts/slos.sh
 ```
 
 ## Cluster lifecycle
 
-The cluster is managed by Terraform. To change the tier or tear down:
+Each tier gets its own cluster (`ra-bench-small`, `ra-bench-medium`, `ra-bench-large`). The full lifecycle is create, use, destroy.
 
 ```bash
-cd bench/infra
-terraform apply -var tier=medium              # resize to medium
-terraform apply -var dedicated_ch_pool=true   # add a tainted CH node pool
-terraform destroy                             # tear down the cluster
+bash bench/scripts/infra.sh apply                              # create ra-bench-{tier}
+bash bench/scripts/infra.sh apply -var dedicated_ch_pool=true  # add CH pool
+bash bench/scripts/infra.sh destroy                            # tear down everything
 ```
+
+To change the tier, edit `bench.yaml`. Each tier produces an isolated cluster.
 
 ## Dedicated ClickHouse pool
 
@@ -145,17 +168,18 @@ The fetch script auto-downloads `projects.tsv` from GCS if no file is given.
 
 ## Configuration
 
-All defaults live in two YAML files:
+All config lives in two YAML files:
 
-- `bench/config/bench.yaml` -- GCP project, region, bucket names, image tags, corpus settings
+- `bench/config/bench.yaml` -- active tier, GCP project, region, bucket names, image tags, corpus settings
 - `bench/config/tiers.yaml` -- per-tier resource limits, concurrency, SLO targets
 
-Every env var can override the YAML defaults.
+Env vars (`TIER`, `RUN_ID`) override the YAML values when set.
 
 ## Scripts
 
 | Script | What it does |
 |---|---|
+| `infra.sh` | Terraform lifecycle wrapper: init, apply, plan, destroy, output |
 | `provision.sh` | Full stack deploy: CH, e2e, import, checkpoint reset, GMP |
 | `slos.sh` | SLO report from Cloud Monitoring + CH query_log |
 | `deploy-mock-git-server.sh` | Build, deploy mock, upgrade GKG, reset code checkpoints |

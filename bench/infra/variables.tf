@@ -10,8 +10,9 @@ variable "tier" {
 }
 
 variable "cluster_name" {
-  type    = string
-  default = "ra-bench"
+  description = "Override the cluster name. Defaults to ra-bench-{tier}."
+  type        = string
+  default     = ""
 }
 
 variable "dedicated_ch_pool" {

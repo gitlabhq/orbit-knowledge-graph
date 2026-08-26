@@ -10,7 +10,7 @@ source "${BENCH_DIR}/scripts/lib.sh"
 
 CH_NS="${E2E_CH_NAMESPACE:-ra-ch-${RUN_ID}}"
 GKG_NS="e2e-${RUN_ID}-gkg"
-: "${MOCK_GIT_BUCKET:=$(cd "${TF_DIR}" && terraform output -raw code_corpus_bucket 2>/dev/null || bench '.buckets.code_corpus')}"
+: "${MOCK_GIT_BUCKET:=$(cd "${TF_DIR}" && "$TF" output -raw code_corpus_bucket 2>/dev/null || bench '.buckets.code_corpus')}"
 IMAGE="$(bench '.images.mock_git_server')"
 
 # --- 1. Build and push ---
@@ -18,8 +18,8 @@ log "Building mock-git-server image (linux/amd64)"
 docker buildx build --platform linux/amd64 -t "${IMAGE}" --push "${BENCH_DIR}/mock-git-server"
 
 # --- 2. Create service account + IAM binding for GCS FUSE ---
-GCP_SA=$(cd "${TF_DIR}" && terraform output -raw node_sa_email 2>/dev/null)
-PROJECT=$(cd "${TF_DIR}" && terraform output -raw project 2>/dev/null)
+GCP_SA=$(cd "${TF_DIR}" && "$TF" output -raw node_sa_email 2>/dev/null)
+PROJECT=$(cd "${TF_DIR}" && "$TF" output -raw project 2>/dev/null)
 $KC create sa mock-git-server-sa -n "${CH_NS}" 2>/dev/null || true
 $KC annotate sa mock-git-server-sa -n "${CH_NS}" \
   "iam.gke.io/gcp-service-account=${GCP_SA}" \

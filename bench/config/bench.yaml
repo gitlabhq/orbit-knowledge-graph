@@ -1,8 +1,10 @@
 project: gl-knowledgegraph-prj-f2eec59d
 region: us-central1
 zone: us-central1-a
+tier: small
 
 buckets:
+  tf_state: gkg-tf-state-f2eec59d
   datalake_dumps: gkg-datalake-dumps
   code_corpus: gkg-code-corpus
 
