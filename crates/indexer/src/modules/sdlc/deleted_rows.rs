@@ -2,8 +2,9 @@
 //! `DELETE FROM` statements for rows the datalake marked `_deleted`.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
-use arrow::array::{BooleanArray, Int64Array, LargeStringArray, StringArray};
+use arrow::array::{ArrayRef, BooleanArray, Int64Array, LargeStringArray, StringArray};
 use arrow::compute;
 use arrow::datatypes::DataType;
 use arrow::record_batch::RecordBatch;
@@ -80,8 +81,9 @@ impl DeletedRowSplitter {
 
             let deleted_batch = compute::filter_record_batch(&batch, deleted)
                 .expect("filter with same-length mask cannot fail");
+            let key_columns = sort_key_columns(&deleted_batch, sort_key)?;
             for row in 0..deleted_batch.num_rows() {
-                deleted_key_tuples.push(key_tuple_literal(&deleted_batch, sort_key, row)?);
+                deleted_key_tuples.push(key_tuple_literal(&key_columns, row)?);
             }
         }
 
@@ -114,46 +116,77 @@ fn build_delete_statement(table: &str, sort_key: &[String], tuples: &[String]) -
     )
 }
 
-fn key_tuple_literal(
+/// Resolves each sort key column to a plain array, casting dictionary-encoded
+/// columns (how transforms emit low-cardinality kinds) to their value type.
+fn sort_key_columns(
     batch: &RecordBatch,
     sort_key: &[String],
-    row: usize,
-) -> Result<String, HandlerError> {
-    let values = sort_key
+) -> Result<Vec<ArrayRef>, HandlerError> {
+    sort_key
         .iter()
-        .map(|column| sql_literal(batch, column, row))
+        .map(|column| {
+            let array = batch.column_by_name(column).ok_or_else(|| {
+                HandlerError::Processing(format!("sort key column '{column}' missing from batch"))
+            })?;
+            let plain = match array.data_type() {
+                DataType::Dictionary(_, value_type) => {
+                    compute::cast(array, value_type).map_err(|e| {
+                        HandlerError::Processing(format!(
+                            "failed to cast dictionary sort key column '{column}': {e}"
+                        ))
+                    })?
+                }
+                _ => Arc::clone(array),
+            };
+            match plain.data_type() {
+                DataType::Utf8 | DataType::LargeUtf8 | DataType::Int64 => Ok(plain),
+                other => Err(HandlerError::Processing(format!(
+                    "unsupported sort key type {other:?} for column '{column}'"
+                ))),
+            }
+        })
+        .collect()
+}
+
+fn key_tuple_literal(key_columns: &[ArrayRef], row: usize) -> Result<String, HandlerError> {
+    let values = key_columns
+        .iter()
+        .map(|column| sql_literal(column, row))
         .collect::<Result<Vec<_>, _>>()?;
     Ok(format!("({})", values.join(", ")))
 }
 
-fn sql_literal(batch: &RecordBatch, column: &str, row: usize) -> Result<String, HandlerError> {
-    let missing =
-        || HandlerError::Processing(format!("sort key column '{column}' missing from batch"));
-    let array = batch.column_by_name(column).ok_or_else(missing)?;
+fn sql_literal(array: &ArrayRef, row: usize) -> Result<String, HandlerError> {
+    let downcast_failed = || {
+        HandlerError::Processing(format!(
+            "sort key column does not match its declared type {:?}",
+            array.data_type()
+        ))
+    };
     match array.data_type() {
         DataType::Utf8 => {
             let array = array
                 .as_any()
                 .downcast_ref::<StringArray>()
-                .ok_or_else(missing)?;
+                .ok_or_else(downcast_failed)?;
             Ok(quote_string_literal(array.value(row)))
         }
         DataType::LargeUtf8 => {
             let array = array
                 .as_any()
                 .downcast_ref::<LargeStringArray>()
-                .ok_or_else(missing)?;
+                .ok_or_else(downcast_failed)?;
             Ok(quote_string_literal(array.value(row)))
         }
         DataType::Int64 => {
             let array = array
                 .as_any()
                 .downcast_ref::<Int64Array>()
-                .ok_or_else(missing)?;
+                .ok_or_else(downcast_failed)?;
             Ok(array.value(row).to_string())
         }
         other => Err(HandlerError::Processing(format!(
-            "unsupported sort key type {other:?} for column '{column}'"
+            "unsupported sort key type {other:?}"
         ))),
     }
 }
@@ -277,6 +310,38 @@ mod tests {
         assert_eq!(quote_string_literal(r"a\"), r"'a\\'");
         assert_eq!(quote_string_literal("a'b"), r"'a\'b'");
         assert_eq!(quote_string_literal(r"a\'b"), r"'a\\\'b'");
+    }
+
+    #[test]
+    fn dictionary_encoded_sort_key_columns_cast_to_their_value_type() {
+        use arrow::array::{Array, DictionaryArray};
+        use arrow::datatypes::Int32Type;
+
+        let kinds: DictionaryArray<Int32Type> = vec!["HAS_ITEM", "MENTIONS"].into_iter().collect();
+        let schema = Schema::new(vec![
+            Field::new("relationship_kind", kinds.data_type().clone(), false),
+            Field::new("source_id", DataType::Int64, false),
+            Field::new(ontology::DELETED_COLUMN, DataType::Boolean, false),
+        ]);
+        let batch = RecordBatch::try_new(
+            Arc::new(schema),
+            vec![
+                Arc::new(kinds),
+                Arc::new(Int64Array::from(vec![7_i64, 8])),
+                Arc::new(BooleanArray::from(vec![true, true])),
+            ],
+        )
+        .unwrap();
+        let splitter = splitter_for("t", &["relationship_kind", "source_id"]);
+
+        let split = splitter.split("t", vec![batch]).unwrap();
+
+        assert!(split.live.is_empty());
+        assert!(
+            split.delete_statements[0].contains("(('HAS_ITEM', 7), ('MENTIONS', 8))"),
+            "{}",
+            split.delete_statements[0]
+        );
     }
 
     #[test]
