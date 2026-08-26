@@ -1,3 +1,9 @@
+## [0.106.2](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.106.1...v0.106.2) (2026-08-26)
+
+### Performance
+
+* free the tag cache and graph payloads before the Arrow conversion ([4382809](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/4382809dc468ad55d432cf8cb16e165ad43b17f3)) by Bohdan Parkhomchuk
+
 ## [0.106.1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.106.0...v0.106.1) (2026-08-25)
 
 ### Performance
