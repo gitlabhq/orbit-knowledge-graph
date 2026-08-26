@@ -72,10 +72,10 @@ impl LanguagePipeline for JsPipeline {
             });
             let info = builder.add_file(file.phase1);
             file_infos.insert(file.relative_path.clone(), info);
-            resolved_files.push(ResolvedJsFile {
-                relative_path: file.relative_path,
-                analysis: file.analysis,
-            });
+            resolved_files.push(ResolvedJsFile::from_analysis(
+                file.relative_path,
+                file.analysis,
+            ));
         }
 
         // One probe: every manifest/config file JS resolution cares about
