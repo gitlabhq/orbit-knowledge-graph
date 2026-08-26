@@ -41,6 +41,7 @@ Canonical locations for files, schemas, configs, and tools in the knowledge-grap
 | Server config structure | `crates/orbit-server-config/src/app.rs` (`AppConfig`), `config/default.yaml` |
 | Query settings (timeouts, cache) | `config/default.yaml` (`query:` section), `crates/orbit-server-config/src/query.rs` |
 | Configuration runbook | `docs/dev/runbooks/server_configuration.md` |
+| Dispatcher memory profiling | `docs/dev/runbooks/dispatcher_memory_profiling.md` |
 | Local development guide | `docs/dev/local-development.md` |
 | Local development (`mise run dev`) | `scripts/orbit-native-dev.sh`, `docs/dev/local-development.md` |
 | Operational runbooks | `docs/dev/runbooks/` |
