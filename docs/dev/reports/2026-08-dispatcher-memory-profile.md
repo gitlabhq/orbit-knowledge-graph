@@ -39,7 +39,7 @@ requested bytes and footprint is production's allocator overhead and not a cheap
 
 ## Memory
 
-macOS, mimalloc secure, 2,500 namespaces, 100,000 publish window (the configured default).
+macOS, mimalloc secure, 2,500 namespaces, 100,000 publish window (the default ships at 200,000, which adds about 70 bytes per extra queued project).
 `footprint` is the kernel's lifetime high-water mark, `requested` is bytes the program asked the
 allocator for at the peak.
 
@@ -97,7 +97,7 @@ At 2.33M projects, roughly:
 
 Shipped in [!2328](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/2328).
 
-1. Publish in batches of `schedule.tasks.code-backfill.publish_window` projects (default 100,000)
+1. Publish in batches of `schedule.tasks.code-backfill.publish_window` projects (default 200,000)
    instead of accumulating the fleet.
 2. Cap each namespace at its share of a batch, the window divided by the namespaces that still had
    pending projects on the previous run, so a fleet-wide sweep hands out equal slices and a lone
