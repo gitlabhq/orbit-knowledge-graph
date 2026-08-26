@@ -12,14 +12,23 @@ use local::LocalBackend;
 const SNIPPET_LINES: usize = 4;
 const SNIPPET_LINE_CHARS: usize = 160;
 
-fn vocab() -> &'static SearchVocab {
-    static VOCAB: std::sync::OnceLock<SearchVocab> = std::sync::OnceLock::new();
-    VOCAB.get_or_init(|| {
-        use strum::IntoEnumIterator;
-        SearchVocab::new(
-            code_graph::v2::types::EdgeKind::iter().map(|kind| kind.as_ref().to_string()),
-        )
-    })
+fn build_vocab<S: orbit_search::ask::AskSource>(source: &S) -> Result<SearchVocab, S::Error> {
+    use strum::IntoEnumIterator;
+    let parts: Vec<(String, String)> = code_graph::v2::types::EdgeKind::iter()
+        .flat_map(|kind| {
+            let name = kind.as_ref().to_string();
+            SearchVocab::kind_name_parts(kind.as_ref())
+                .map(|part| (part.to_string(), name.clone()))
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    let words: Vec<String> = parts.iter().map(|(part, _)| part.clone()).collect();
+    let stems = source.stem(&words)?;
+    Ok(SearchVocab::new(
+        stems
+            .into_iter()
+            .zip(parts.into_iter().map(|(_, kind)| kind)),
+    ))
 }
 
 fn kind_rates() -> &'static HashMap<String, KindRates> {
@@ -55,7 +64,8 @@ pub(crate) fn run(
     let mut out = std::io::stdout().lock();
     writeln!(out, "ask {:?} — {}", question, backend.header())?;
 
-    let outcome = backend.ask(&question, limit, vocab(), kind_rates())?;
+    let vocab = build_vocab(backend.search())?;
+    let outcome = backend.ask(&question, limit, &vocab, kind_rates())?;
     writeln!(out, "terms: {}", outcome.terms.join(" "))?;
 
     if outcome.matches.is_empty() {
@@ -273,31 +283,5 @@ mod tests {
         let mut buf = Vec::new();
         report_confidence(&mut buf, &outcome(Vec::new(), false)).unwrap();
         assert!(buf.is_empty());
-    }
-
-    #[test]
-    fn vocab_maps_question_verbs_to_relational_intent_and_focus_kinds() {
-        for word in [
-            "calls", "calling", "imports", "extends", "defines", "contains",
-        ] {
-            assert!(vocab().is_relational(word), "{word} should be relational");
-        }
-        for word in ["dlq", "widget", "backpressure", "hooks"] {
-            assert!(
-                !vocab().is_relational(word),
-                "{word} should not be relational"
-            );
-        }
-        let kind = |q: &str| vocab().focus_edge_kind(&content_words(q));
-        assert_eq!(kind("who calls execute_hooks"), Some("CALLS".to_string()));
-        assert_eq!(
-            kind("what imports the ontology"),
-            Some("IMPORTS".to_string())
-        );
-        assert_eq!(
-            kind("what extends HandlerError"),
-            Some("EXTENDS".to_string())
-        );
-        assert_eq!(kind("where do we send messages to the dlq"), None);
     }
 }

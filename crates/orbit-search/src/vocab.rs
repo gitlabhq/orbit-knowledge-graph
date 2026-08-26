@@ -1,72 +1,60 @@
 use std::collections::HashMap;
 
-fn stem(word: &str) -> String {
-    thread_local! {
-        static STEMMER: rust_stemmers::Stemmer =
-            rust_stemmers::Stemmer::create(rust_stemmers::Algorithm::English);
-    }
-    STEMMER.with(|s| s.stem(&word.to_lowercase()).into_owned())
-}
-
 pub struct SearchVocab {
     by_stem: HashMap<String, String>,
 }
 
 impl SearchVocab {
-    pub fn new<I, S>(edge_kinds: I) -> Self
+    pub fn kind_name_parts(name: &str) -> impl Iterator<Item = &str> {
+        name.split(|c: char| !c.is_alphanumeric())
+            .filter(|part| !part.is_empty())
+    }
+
+    pub fn new<I, A, B>(stemmed_parts: I) -> Self
     where
-        I: IntoIterator<Item = S>,
-        S: AsRef<str>,
+        I: IntoIterator<Item = (A, B)>,
+        A: AsRef<str>,
+        B: AsRef<str>,
     {
-        let mut by_stem: HashMap<String, String> = HashMap::new();
-        for kind in edge_kinds {
-            let name = kind.as_ref();
-            for part in name.split(|c: char| !c.is_alphanumeric()) {
-                if !part.is_empty() {
-                    by_stem.insert(stem(part), name.to_uppercase());
-                }
-            }
+        Self {
+            by_stem: stemmed_parts
+                .into_iter()
+                .map(|(stem, kind)| (stem.as_ref().to_string(), kind.as_ref().to_uppercase()))
+                .collect(),
         }
-        Self { by_stem }
     }
 
-    pub fn focus_edge_kind(&self, terms: &[String]) -> Option<String> {
-        terms
+    pub fn focus_edge_kind(&self, stemmed_terms: &[String]) -> Option<String> {
+        stemmed_terms
             .iter()
-            .find_map(|t| self.by_stem.get(&stem(t)).cloned())
+            .find_map(|s| self.by_stem.get(s).cloned())
     }
 
-    pub fn is_relational(&self, term: &str) -> bool {
-        self.by_stem.contains_key(&stem(term))
+    pub fn is_relational(&self, stemmed_term: &str) -> bool {
+        self.by_stem.contains_key(stemmed_term)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::testutil::test_vocab;
+    use super::*;
 
     #[test]
-    fn edge_kind_names_are_the_whole_vocabulary() {
-        let vocab = test_vocab();
+    fn lookups_use_stemmed_terms_and_kinds_are_uppercased() {
+        let vocab = SearchVocab::new([("call", "Calls"), ("import", "Imports")]);
+        assert!(vocab.is_relational("call"));
+        assert!(!vocab.is_relational("calls"));
+        assert!(!vocab.is_relational("dlq"));
         assert_eq!(
-            vocab.focus_edge_kind(&["calls".to_string()]),
-            Some("CALLS".to_string())
-        );
-        assert_eq!(
-            vocab.focus_edge_kind(&["importing".to_string()]),
+            vocab.focus_edge_kind(&["widget".to_string(), "import".to_string()]),
             Some("IMPORTS".to_string())
         );
-        assert_eq!(vocab.focus_edge_kind(&["dlq".to_string()]), None);
-        for word in [
-            "calls", "called", "calling", "imports", "extends", "defines",
-        ] {
-            assert!(vocab.is_relational(word), "{word} should be relational");
-        }
-        for word in ["dlq", "widget", "userland", "usefulness"] {
-            assert!(
-                !vocab.is_relational(word),
-                "{word} should not be relational"
-            );
-        }
+        assert_eq!(vocab.focus_edge_kind(&["widget".to_string()]), None);
+    }
+
+    #[test]
+    fn kind_name_parts_splits_on_non_alphanumerics() {
+        let parts: Vec<&str> = SearchVocab::kind_name_parts("HAS_TAG").collect();
+        assert_eq!(parts, vec!["HAS", "TAG"]);
     }
 }

@@ -10,6 +10,8 @@ use std::collections::HashMap;
 
 pub const RECALL_LIMIT: usize = 2000;
 
+pub const FTS_STEMMER: &str = "english";
+
 pub fn def_doc_table(project_id: i64) -> String {
     format!("gl_def_doc_{project_id}")
 }
@@ -48,6 +50,25 @@ impl DuckDbSearch {
 }
 
 impl AskSource for DuckDbSearch {
+    fn stem(&self, words: &[String]) -> Result<Vec<String>> {
+        if words.is_empty() {
+            return Ok(Vec::new());
+        }
+        let values = words
+            .iter()
+            .enumerate()
+            .map(|(i, w)| format!("({i}, {})", sql_lit(&w.to_lowercase())))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let batches = query(
+            &self.client,
+            &format!(
+                "SELECT stem(w, '{FTS_STEMMER}') AS s FROM (VALUES {values}) t(i, w) ORDER BY i"
+            ),
+        )?;
+        Ok(string_column(&batches, "s"))
+    }
+
     fn recall(&self, terms: &[String]) -> Result<Vec<TermRecall>> {
         let sql = recall_sql(self.pid, &self.sha);
         terms

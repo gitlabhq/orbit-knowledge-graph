@@ -41,6 +41,7 @@ impl TermRecall {
 }
 
 pub trait AskSource: GraphSource {
+    fn stem(&self, words: &[String]) -> Result<Vec<String>, Self::Error>;
     fn recall(&self, terms: &[String]) -> Result<Vec<TermRecall>, Self::Error>;
     fn rows_by_ids(&self, ids: &[i64]) -> Result<Vec<CorpusRow>, Self::Error>;
 }
@@ -79,10 +80,12 @@ pub fn ask<S: AskSource>(
     if terms.is_empty() {
         return Err(AskError::NoUsableTerms(question.to_string()));
     }
+    let stems = source.stem(&terms)?;
     let searchable: Vec<String> = terms
         .iter()
-        .filter(|t| !vocab.is_relational(t))
-        .cloned()
+        .zip(&stems)
+        .filter(|(_, stem)| !vocab.is_relational(stem))
+        .map(|(term, _)| term.clone())
         .collect();
     let search_terms = if searchable.is_empty() {
         terms.clone()
@@ -116,7 +119,7 @@ pub fn ask<S: AskSource>(
     let idfs: Vec<f64> = recalls.iter().map(TermRecall::idf).collect();
 
     let hits = rank_and_trim(&corpus, &sims, &idfs, limit);
-    let focus = vocab.focus_edge_kind(&terms);
+    let focus = vocab.focus_edge_kind(&stems);
     let weak = hits.first().is_none_or(|h| !h.confident());
     let matches: Vec<AskMatch> = hits
         .into_iter()
@@ -217,6 +220,13 @@ mod tests {
     }
 
     impl AskSource for FakeRecallSource {
+        fn stem(&self, words: &[String]) -> Result<Vec<String>, Self::Error> {
+            Ok(words
+                .iter()
+                .map(|w| crate::testutil::test_stem(w))
+                .collect())
+        }
+
         fn recall(&self, terms: &[String]) -> Result<Vec<TermRecall>, Self::Error> {
             Ok(terms
                 .iter()

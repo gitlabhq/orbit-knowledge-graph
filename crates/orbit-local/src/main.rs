@@ -943,7 +943,7 @@ fn index_repo(
         .execute(
             &format!(
                 "CREATE OR REPLACE TABLE {doc_table} AS
-             SELECT commit_sha, id AS def_id,
+             SELECT DISTINCT commit_sha, id AS def_id,
                     fts_doc(def_name(fqn)) AS name,
                     fts_doc(fqn || ' ' || file_path) AS context
              FROM gl_definition WHERE project_id = ?1 AND commit_sha = ?2"
@@ -957,7 +957,8 @@ fn index_repo(
     client
         .execute(
             &format!(
-                "PRAGMA create_fts_index('{doc_table}', 'def_id', 'name', 'context', overwrite=1)"
+                "PRAGMA create_fts_index('{doc_table}', 'def_id', 'name', 'context', stemmer='{stemmer}', overwrite=1)",
+                stemmer = duckdb_client::search::FTS_STEMMER
             ),
             &[],
         )

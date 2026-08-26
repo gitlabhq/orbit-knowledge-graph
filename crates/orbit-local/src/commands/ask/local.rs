@@ -70,6 +70,10 @@ impl LocalBackend {
         &self.root
     }
 
+    pub(super) fn search(&self) -> &DuckDbSearch {
+        &self.search
+    }
+
     pub(super) fn ask(
         &self,
         question: &str,
@@ -132,7 +136,7 @@ mod tests {
             self.client
                 .execute(
                     "CREATE OR REPLACE TABLE gl_def_doc_7 AS
-                     SELECT commit_sha, id AS def_id,
+                     SELECT DISTINCT commit_sha, id AS def_id,
                             fts_doc(def_name(fqn)) AS name,
                             fts_doc(fqn || ' ' || file_path) AS context
                      FROM gl_definition",
@@ -141,7 +145,10 @@ mod tests {
                 .unwrap();
             self.client
                 .execute(
-                    "PRAGMA create_fts_index('gl_def_doc_7', 'def_id', 'name', 'context', overwrite=1)",
+                    &format!(
+                        "PRAGMA create_fts_index('gl_def_doc_7', 'def_id', 'name', 'context', stemmer='{}', overwrite=1)",
+                        duckdb_client::search::FTS_STEMMER
+                    ),
                     &[],
                 )
                 .unwrap();
@@ -149,8 +156,8 @@ mod tests {
         }
     }
 
-    fn vocab() -> SearchVocab {
-        SearchVocab::new(["Calls", "Imports", "Extends", "Contains", "Defines"])
+    fn vocab(search: &DuckDbSearch) -> SearchVocab {
+        super::super::build_vocab(search).unwrap()
     }
 
     fn weights() -> std::collections::HashMap<String, KindRates> {
@@ -171,10 +178,9 @@ mod tests {
         g.edge(1, "CALLS", 2);
         g.edge(2, "CALLS", 3);
 
-        let outcome = g
-            .search()
-            .ask("dlq publish", 5, &vocab(), &weights())
-            .unwrap();
+        let search = g.search();
+        let vocab = vocab(&search);
+        let outcome = search.ask("dlq publish", 5, &vocab, &weights()).unwrap();
         assert!(!outcome.matches.is_empty());
         assert!(!outcome.weak);
         assert!(outcome.unmatched_terms.is_empty());
@@ -182,5 +188,45 @@ mod tests {
             !outcome.edges.is_empty(),
             "expansion must return the call chain around the match"
         );
+    }
+
+    #[test]
+    fn vocab_maps_question_verbs_through_the_db_stemmer() {
+        use orbit_search::ask::AskSource;
+        use orbit_search::content_words;
+
+        let g = TestGraph::new("vocab-stem");
+        g.def(1, "Dlq::publish", "publish", "app/services/dlq.rb");
+        let search = g.search();
+        let vocab = vocab(&search);
+
+        let stem_all = |q: &str| search.stem(&content_words(q)).unwrap();
+        for word in [
+            "calls", "calling", "imports", "extends", "defines", "contains",
+        ] {
+            let stems = stem_all(word);
+            assert!(
+                vocab.is_relational(&stems[0]),
+                "{word} should be relational"
+            );
+        }
+        for word in ["dlq", "widget", "backpressure", "hooks"] {
+            let stems = stem_all(word);
+            assert!(
+                !vocab.is_relational(&stems[0]),
+                "{word} should not be relational"
+            );
+        }
+        let kind = |q: &str| vocab.focus_edge_kind(&stem_all(q));
+        assert_eq!(kind("who calls execute_hooks"), Some("CALLS".to_string()));
+        assert_eq!(
+            kind("what imports the ontology"),
+            Some("IMPORTS".to_string())
+        );
+        assert_eq!(
+            kind("what extends HandlerError"),
+            Some("EXTENDS".to_string())
+        );
+        assert_eq!(kind("where do we send messages to the dlq"), None);
     }
 }

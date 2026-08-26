@@ -10,5 +10,4 @@ workspace = true
 [dependencies]
 rayon = { workspace = true }
 rustc-hash = { workspace = true }
-rust-stemmers = { workspace = true }
 stop-words = { workspace = true }
