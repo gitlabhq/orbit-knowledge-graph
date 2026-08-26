@@ -6,8 +6,8 @@ backfill sweep: it enumerated every enabled namespace's pending projects into on
 started publishing after the last namespace was read. On gitlab.com that list was 2.33M projects.
 
 Publishing in batches, with each namespace taking an equal share of a batch, cuts peak memory for
-that sweep from 172 MiB to 29 MiB (allocated bytes: 163 MiB to 8.7 MiB) and at the same time makes
-the queue order fairer than the fleet-wide shuffle it replaces.
+that sweep from 172 MiB to 38 MiB at the shipped default (allocated bytes: 163 MiB to 15.6 MiB) and
+at the same time stops any one namespace from holding the queue.
 
 ## What production did
 
@@ -39,16 +39,21 @@ requested bytes and footprint is production's allocator overhead and not a cheap
 
 ## Memory
 
-macOS, mimalloc secure, 2,500 namespaces, 100,000 publish window (the default ships at 200,000, which adds about 70 bytes per extra queued project).
-`footprint` is the kernel's lifetime high-water mark, `requested` is bytes the program asked the
-allocator for at the peak.
+macOS, mimalloc secure, 2,500 namespaces. `footprint` is the kernel's lifetime high-water mark,
+`requested` is bytes the program asked the allocator for at the peak.
 
-| Shape | Version | Dispatched | Footprint MiB | RSS MiB | Requested MiB |
-|---|---|---|---|---|---|
-| 2.33M pending | before | 2,330,000 | 171.9 | 208.4 | 162.6 |
-| 2.33M pending | after | 100,000 | 29.0 | 43.1 | 8.7 |
-| 2.33M rows, 90% checkpointed | before | 233,000 | 34.1 | 50.5 | 17.8 |
-| 2.33M rows, 90% checkpointed | after | 100,000 | 29.7 | 44.6 | 8.6 |
+| Shape | Version | Window | Dispatched | Footprint MiB | RSS MiB | Requested MiB |
+|---|---|---|---|---|---|---|
+| 2.33M pending | before | n/a | 2,330,000 | 171.9 | 208.4 | 162.6 |
+| 2.33M pending | after | 100,000 | 100,000 | 29.0 | 43.1 | 8.7 |
+| 2.33M pending | after | 200,000 (default) | 200,000 | 38.3 | 51.0 | 15.6 |
+| 2.33M rows, 90% checkpointed | before | n/a | 233,000 | 34.1 | 50.5 | 17.8 |
+| 2.33M rows, 90% checkpointed | after | 100,000 | 100,000 | 29.7 | 44.6 | 8.6 |
+| 2.33M rows, 90% checkpointed | after | 200,000 (default) | 200,000 | 36.9 | 51.5 | 15.6 |
+
+Requested bytes track the window at about 70 bytes per queued project, which is what doubling the
+window costs. In the 90%-checkpointed shape the old code's whole pending set (233k) is already close
+to a window, so there is little to win there; the fleet-wide row is where the change matters.
 
 Wall-clock is not reported: the runs were not taken under controlled power and thermal conditions,
 so their timings are not comparable. Memory figures are unaffected by that.
@@ -78,10 +83,15 @@ Same fleet, but with 20% of the 2.33M projects concentrated in one namespace:
 | Batches, no per-namespace share | 50,000 | 2,330,000 | 103.9 | 40.9 | 466,000 | 1,379,133 / 2,190,859 / 2,292,273 |
 | Batches with the share | 50,000 | 50,000 | 40.1 | 7.1 | 2 | 1,701 / 6,742 / 15,810 |
 | Batches with the share | 100,000 | 100,000 | 36.7 | 8.6 | 2 | 1,719 / 7,372 / 19,238 |
+| Batches with the share | 200,000 (default) | 200,000 | 50.4 | 15.6 | 2 | 1,687 / 7,385 / 23,688 |
 
 The share keeps every one of the 2,500 namespaces present in the queue at all times, so no
 namespace waits for another to finish. Window size trades queue depth against how often a run has
-to top it up, not fairness.
+to top it up, not fairness: the longest run stays at 2 across every window tested.
+
+The first-position columns are not comparable across variants with different queue depths, since a
+shallower queue makes every position a smaller number. What is comparable is the longest run, and
+the fact that all 2,500 namespaces appear in the batch.
 
 ## Where the old peak went
 
