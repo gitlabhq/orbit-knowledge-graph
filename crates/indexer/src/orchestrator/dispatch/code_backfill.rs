@@ -5,6 +5,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Instant;
 
+use futures::StreamExt;
 use rand::seq::SliceRandom;
 use tracing::{debug, info};
 use uuid::Uuid;
@@ -23,6 +24,9 @@ use orbit_utils::traversal_path::TraversalPath;
 pub const METRIC_NAME: &str = "dispatch.code_backfill";
 
 const CODE_INDEXING_CHECKPOINT_TABLE: &str = "code_indexing_checkpoint";
+
+/// Holding a full sweep (2.3M projects on gitlab.com) before the first publish OOMed the pod.
+const PENDING_PUBLISH_WINDOW: usize = 50_000;
 
 const CHECKPOINTED_PROJECT_IDS_QUERY: &str = r#"
 SELECT DISTINCT project_id
@@ -82,31 +86,26 @@ impl CodeBackfill {
         namespaces: &[(i64, TraversalPath)],
         dispatch_id: Uuid,
     ) -> Result<DispatchOutcome, TaskError> {
-        let mut all_pending: Vec<PendingProject> = Vec::new();
-        let mut drained_paths: Vec<TraversalPath> = Vec::new();
+        let mut outcome = DispatchOutcome::default();
+        let mut window: Vec<PendingProject> = Vec::new();
         for (namespace_id, traversal_path) in namespaces {
             let pending = self
                 .fetch_pending_for_namespace(*namespace_id, traversal_path)
                 .await?;
             if pending.is_empty() {
-                drained_paths.push(traversal_path.clone());
+                outcome.drained_paths.push(traversal_path.clone());
+                continue;
             }
-            all_pending.extend(pending);
+            window.extend(pending);
+            if window.len() >= PENDING_PUBLISH_WINDOW {
+                self.publish_window(&mut window, dispatch_id, &mut outcome)
+                    .await?;
+            }
         }
-        // Shuffle the flat project list so the NATS queue is interleaved
-        // across namespaces; otherwise FIFO consumption processes one
-        // namespace's entire batch before any other namespace gets a turn.
-        all_pending.shuffle(&mut rand::rng());
-        let outcome = self
-            .publish_pending(&all_pending, drained_paths, dispatch_id)
+        self.publish_window(&mut window, dispatch_id, &mut outcome)
             .await?;
 
         if outcome.dispatched > 0 || outcome.skipped > 0 {
-            self.metrics
-                .record_requests_published(METRIC_NAME, outcome.dispatched);
-            self.metrics
-                .record_requests_skipped(METRIC_NAME, outcome.skipped);
-
             info!(
                 dispatched = outcome.dispatched,
                 skipped = outcome.skipped,
@@ -117,27 +116,35 @@ impl CodeBackfill {
         Ok(outcome)
     }
 
-    /// Returns the set of project IDs whose checkpoint row already exists
-    /// under `traversal_path` for the indexer's current schema version.
+    /// Scoped to the checkpoint table of the indexer's current schema version.
     async fn fetch_checkpointed_project_ids(
         &self,
         traversal_path: &TraversalPath,
     ) -> Result<HashSet<i64>, TaskError> {
         let table = prefixed_table_name(CODE_INDEXING_CHECKPOINT_TABLE, *SCHEMA_VERSION);
-        let batches = self
+        let mut batches = self
             .graph
             .query(CHECKPOINTED_PROJECT_IDS_QUERY)
             .param("table", &table)
             .param("traversal_path", traversal_path.as_str())
-            .fetch_arrow()
+            .fetch_arrow_streamed(None)
             .await
             .map_err(|error| {
                 self.metrics.record_error(METRIC_NAME, "query");
                 TaskError::new(error)
             })?;
 
-        let ids = i64::extract_column(&batches, 0).map_err(TaskError::new)?;
-        Ok(ids.into_iter().collect())
+        let mut ids = HashSet::new();
+        while let Some(batch) = batches.next().await {
+            let batch = batch.map_err(|error| {
+                self.metrics.record_error(METRIC_NAME, "query");
+                TaskError::new(error)
+            })?;
+            ids.extend(
+                i64::extract_column(std::slice::from_ref(&batch), 0).map_err(TaskError::new)?,
+            );
+        }
+        Ok(ids)
     }
 
     pub async fn fetch_enabled_namespaces(&self) -> Result<Vec<(i64, TraversalPath)>, TaskError> {
@@ -164,53 +171,43 @@ impl CodeBackfill {
         namespace_id: i64,
         traversal_path: &TraversalPath,
     ) -> Result<Vec<PendingProject>, TaskError> {
-        let projects = self.fetch_namespace_projects(traversal_path).await?;
-
-        if projects.is_empty() {
-            debug!(namespace_id, "no pending projects in namespace");
-            return Ok(Vec::new());
-        }
-
-        // Skip projects that already have a checkpoint for the current
-        // schema version. Filtering here keeps the publish loop bounded by
-        // the un-indexed remainder rather than the full project set, which
-        // matters at scale: a namespace with thousands of projects produces
-        // O(remaining) NATS publishes per tick, not O(total).
+        // Checkpoints first so each project batch is filtered on arrival, holding only the remainder.
         let checkpointed = self.fetch_checkpointed_project_ids(traversal_path).await?;
-        let pending_count_before_filter = projects.len();
-        let projects: Vec<PendingProject> = projects
-            .into_iter()
-            .filter(|p| !checkpointed.contains(&p.project_id))
-            .collect();
+        let (projects, already_checkpointed) = self
+            .fetch_pending_projects(traversal_path, &checkpointed)
+            .await?;
 
         if projects.is_empty() {
-            debug!(namespace_id, "all projects already checkpointed");
+            debug!(
+                namespace_id,
+                already_checkpointed, "no pending projects in namespace"
+            );
             return Ok(Vec::new());
         }
 
         debug!(
             namespace_id,
             count = projects.len(),
-            already_checkpointed = pending_count_before_filter - projects.len(),
+            already_checkpointed,
             "fetched pending projects for code backfill"
         );
 
         Ok(projects)
     }
 
-    pub async fn publish_pending(
+    /// Shuffled so FIFO consumption interleaves the namespaces in a window instead of draining one first.
+    async fn publish_window(
         &self,
-        projects: &[PendingProject],
-        drained_paths: Vec<TraversalPath>,
+        window: &mut Vec<PendingProject>,
         dispatch_id: Uuid,
-    ) -> Result<DispatchOutcome, TaskError> {
-        let mut outcome = DispatchOutcome {
-            drained_paths,
-            ..Default::default()
-        };
+        outcome: &mut DispatchOutcome,
+    ) -> Result<(), TaskError> {
+        window.shuffle(&mut rand::rng());
         let campaign_id = self.campaign.current();
+        let mut dispatched = 0u64;
+        let mut skipped = 0u64;
 
-        for project in projects {
+        for project in window.iter() {
             let request = CodeIndexingTaskRequest {
                 task_id: 0,
                 project_id: project.project_id,
@@ -228,12 +225,8 @@ impl CodeBackfill {
             })?;
 
             match self.nats.publish(&subscription, &envelope).await {
-                Ok(()) => {
-                    outcome.dispatched += 1;
-                }
-                Err(crate::nats::NatsError::PublishDuplicate) => {
-                    outcome.skipped += 1;
-                }
+                Ok(()) => dispatched += 1,
+                Err(crate::nats::NatsError::PublishDuplicate) => skipped += 1,
                 Err(error) => {
                     self.metrics.record_error(METRIC_NAME, "publish");
                     return Err(TaskError::new(error));
@@ -241,40 +234,61 @@ impl CodeBackfill {
             }
         }
 
-        Ok(outcome)
+        // Recorded per window, so a later namespace's query error cannot drop the counts of what is already published.
+        self.metrics
+            .record_requests_published(METRIC_NAME, dispatched);
+        self.metrics.record_requests_skipped(METRIC_NAME, skipped);
+        outcome.dispatched += dispatched;
+        outcome.skipped += skipped;
+        window.clear();
+        Ok(())
     }
 
-    async fn fetch_namespace_projects(
+    /// Returns the pending projects and how many rows the checkpoints filtered out.
+    async fn fetch_pending_projects(
         &self,
         traversal_path: &TraversalPath,
-    ) -> Result<Vec<PendingProject>, TaskError> {
+        checkpointed: &HashSet<i64>,
+    ) -> Result<(Vec<PendingProject>, usize), TaskError> {
         let query_start = Instant::now();
-        let batches = self
+        let mut batches = self
             .datalake
             .query(NAMESPACE_PROJECTS_QUERY)
             .param("traversal_path", traversal_path.as_str())
-            .fetch_arrow()
+            .fetch_arrow_streamed(None)
             .await
             .map_err(|error| {
                 self.metrics.record_error(METRIC_NAME, "query");
                 TaskError::new(error)
             })?;
+
+        let mut pending: Vec<PendingProject> = Vec::new();
+        let mut already_checkpointed = 0usize;
+        while let Some(batch) = batches.next().await {
+            let batch = batch.map_err(|error| {
+                self.metrics.record_error(METRIC_NAME, "query");
+                TaskError::new(error)
+            })?;
+            let rows = std::slice::from_ref(&batch);
+            let project_ids = i64::extract_column(rows, 0).map_err(TaskError::new)?;
+            let traversal_paths = String::extract_column(rows, 1).map_err(TaskError::new)?;
+            for (project_id, traversal_path) in project_ids.into_iter().zip(traversal_paths) {
+                if checkpointed.contains(&project_id) {
+                    already_checkpointed += 1;
+                    continue;
+                }
+                pending.push(PendingProject {
+                    project_id,
+                    traversal_path: TraversalPath::new_unchecked(traversal_path),
+                });
+            }
+        }
         self.metrics.record_query_duration(
             "namespace_pending_projects",
             query_start.elapsed().as_secs_f64(),
         );
 
-        let project_ids = i64::extract_column(&batches, 0).map_err(TaskError::new)?;
-        let traversal_paths = String::extract_column(&batches, 1).map_err(TaskError::new)?;
-
-        Ok(project_ids
-            .into_iter()
-            .zip(traversal_paths)
-            .map(|(project_id, traversal_path)| PendingProject {
-                project_id,
-                traversal_path: TraversalPath::new_unchecked(traversal_path),
-            })
-            .collect())
+        Ok((pending, already_checkpointed))
     }
 }
 
@@ -317,27 +331,28 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn shuffled_publish_interleaves_two_namespaces() {
+    async fn published_window_interleaves_two_namespaces_and_is_drained() {
         let nats = Arc::new(MockNatsServices::new());
         let backfill = create_backfill(Arc::clone(&nats));
 
-        let mut projects: Vec<PendingProject> = (0..100)
+        let mut window: Vec<PendingProject> = (0..100)
             .map(|i| PendingProject {
                 project_id: 10_000 + i,
                 traversal_path: TraversalPath::new_unchecked("1/A/"),
             })
             .collect();
-        projects.extend((0..100).map(|i| PendingProject {
+        window.extend((0..100).map(|i| PendingProject {
             project_id: 20_000 + i,
             traversal_path: TraversalPath::new_unchecked("1/B/"),
         }));
 
-        projects.shuffle(&mut rand::rng());
-        let outcome = backfill
-            .publish_pending(&projects, Vec::new(), Uuid::new_v4())
+        let mut outcome = DispatchOutcome::default();
+        backfill
+            .publish_window(&mut window, Uuid::new_v4(), &mut outcome)
             .await
             .unwrap();
         assert_eq!(outcome.dispatched, 200);
+        assert!(window.is_empty());
 
         let published = nats.get_published();
         let from_a = |idx: usize| {

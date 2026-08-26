@@ -174,6 +174,8 @@ When a namespace first enables Orbit indexing, its existing projects need to be 
 2. Queries `project_namespace_traversal_paths` to find all projects under that namespace
 3. Publishes a `CodeIndexingTaskRequest` for each project to the `GKG_INDEXER` stream
 
+Pending projects are published in bounded batches rather than after every namespace has been enumerated, so a fleet-wide sweep (every schema migration produces one, since the new version's checkpoint table starts empty) does not have to hold the whole fleet's projects before the first publish. Each batch is shuffled so FIFO consumption alternates between namespaces instead of draining one namespace first.
+
 These backfill requests omit `branch` and `commit_sha`. The handler resolves the default branch from the Rails internal API at processing time.
 
 ##### Handler
