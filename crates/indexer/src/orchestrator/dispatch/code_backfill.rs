@@ -3,8 +3,10 @@
 
 use std::collections::HashSet;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 
+use arrow::record_batch::RecordBatch;
 use futures::StreamExt;
 use rand::seq::SliceRandom;
 use tracing::{debug, info};
@@ -53,6 +55,10 @@ pub struct CodeBackfill {
     datalake: ArrowClickHouseClient,
     metrics: ScheduledTaskMetrics,
     campaign: Arc<CampaignState>,
+    /// Namespaces that still had pending projects on the previous dispatch, so
+    /// the share below widens as the fleet drains and a lone straggler ends up
+    /// with the whole window.
+    namespaces_with_pending: AtomicUsize,
 }
 
 impl CodeBackfill {
@@ -69,7 +75,20 @@ impl CodeBackfill {
             datalake,
             metrics,
             campaign,
+            namespaces_with_pending: AtomicUsize::new(0),
         }
+    }
+
+    /// Each namespace's slice of one publish window. Without a cap, a namespace
+    /// with more pending projects than the window is published as one block, and
+    /// the work queue keeps that order until it drains, which is what the
+    /// fleet-wide shuffle this replaced existed to prevent.
+    fn share_per_namespace(&self, namespaces: usize) -> usize {
+        let active = match self.namespaces_with_pending.load(Ordering::Relaxed) {
+            0 => namespaces,
+            previous => previous,
+        };
+        (PENDING_PUBLISH_WINDOW / active.max(1)).max(1)
     }
 
     pub fn metrics(&self) -> &ScheduledTaskMetrics {
@@ -88,14 +107,22 @@ impl CodeBackfill {
     ) -> Result<DispatchOutcome, TaskError> {
         let mut outcome = DispatchOutcome::default();
         let mut window: Vec<PendingProject> = Vec::new();
-        for (namespace_id, traversal_path) in namespaces {
+        let share = self.share_per_namespace(namespaces.len());
+        let mut with_pending = 0usize;
+        // Visited in a random order so the same namespaces are not always the
+        // ones whose share is trimmed by the remainder or split across windows.
+        let mut order: Vec<usize> = (0..namespaces.len()).collect();
+        order.shuffle(&mut rand::rng());
+        for index in order {
+            let (namespace_id, traversal_path) = &namespaces[index];
             let pending = self
-                .fetch_pending_for_namespace(*namespace_id, traversal_path)
+                .fetch_pending_for_namespace(*namespace_id, traversal_path, share)
                 .await?;
             if pending.is_empty() {
                 outcome.drained_paths.push(traversal_path.clone());
                 continue;
             }
+            with_pending += 1;
             window.extend(pending);
             if window.len() >= PENDING_PUBLISH_WINDOW {
                 self.publish_window(&mut window, dispatch_id, &mut outcome)
@@ -104,6 +131,8 @@ impl CodeBackfill {
         }
         self.publish_window(&mut window, dispatch_id, &mut outcome)
             .await?;
+        self.namespaces_with_pending
+            .store(with_pending, Ordering::Relaxed);
 
         if outcome.dispatched > 0 || outcome.skipped > 0 {
             info!(
@@ -170,11 +199,12 @@ impl CodeBackfill {
         &self,
         namespace_id: i64,
         traversal_path: &TraversalPath,
+        share: usize,
     ) -> Result<Vec<PendingProject>, TaskError> {
         // Checkpoints first so each project batch is filtered on arrival, holding only the remainder.
         let checkpointed = self.fetch_checkpointed_project_ids(traversal_path).await?;
         let (projects, already_checkpointed) = self
-            .fetch_pending_projects(traversal_path, &checkpointed)
+            .fetch_pending_projects(traversal_path, &checkpointed, share)
             .await?;
 
         if projects.is_empty() {
@@ -244,11 +274,13 @@ impl CodeBackfill {
         Ok(())
     }
 
-    /// Returns the pending projects and how many rows the checkpoints filtered out.
+    /// Returns at most `share` pending projects, and how many rows the
+    /// checkpoints filtered out before the share was reached.
     async fn fetch_pending_projects(
         &self,
         traversal_path: &TraversalPath,
         checkpointed: &HashSet<i64>,
+        share: usize,
     ) -> Result<(Vec<PendingProject>, usize), TaskError> {
         let query_start = Instant::now();
         let mut batches = self
@@ -264,23 +296,14 @@ impl CodeBackfill {
 
         let mut pending: Vec<PendingProject> = Vec::new();
         let mut already_checkpointed = 0usize;
-        while let Some(batch) = batches.next().await {
+        'stream: while let Some(batch) = batches.next().await {
             let batch = batch.map_err(|error| {
                 self.metrics.record_error(METRIC_NAME, "query");
                 TaskError::new(error)
             })?;
-            let rows = std::slice::from_ref(&batch);
-            let project_ids = i64::extract_column(rows, 0).map_err(TaskError::new)?;
-            let traversal_paths = String::extract_column(rows, 1).map_err(TaskError::new)?;
-            for (project_id, traversal_path) in project_ids.into_iter().zip(traversal_paths) {
-                if checkpointed.contains(&project_id) {
-                    already_checkpointed += 1;
-                    continue;
-                }
-                pending.push(PendingProject {
-                    project_id,
-                    traversal_path: TraversalPath::new_unchecked(traversal_path),
-                });
+            already_checkpointed += take_pending(&batch, checkpointed, share, &mut pending)?;
+            if pending.len() >= share {
+                break 'stream;
             }
         }
         self.metrics.record_query_duration(
@@ -290,6 +313,35 @@ impl CodeBackfill {
 
         Ok((pending, already_checkpointed))
     }
+}
+
+/// Appends rows with no checkpoint until `share` is reached, returning how many
+/// rows the checkpoints filtered out.
+fn take_pending(
+    batch: &RecordBatch,
+    checkpointed: &HashSet<i64>,
+    share: usize,
+    pending: &mut Vec<PendingProject>,
+) -> Result<usize, TaskError> {
+    let rows = std::slice::from_ref(batch);
+    let project_ids = i64::extract_column(rows, 0).map_err(TaskError::new)?;
+    let traversal_paths = String::extract_column(rows, 1).map_err(TaskError::new)?;
+
+    let mut already_checkpointed = 0usize;
+    for (project_id, traversal_path) in project_ids.into_iter().zip(traversal_paths) {
+        if pending.len() >= share {
+            break;
+        }
+        if checkpointed.contains(&project_id) {
+            already_checkpointed += 1;
+            continue;
+        }
+        pending.push(PendingProject {
+            project_id,
+            traversal_path: TraversalPath::new_unchecked(traversal_path),
+        });
+    }
+    Ok(already_checkpointed)
 }
 
 #[cfg(test)]
@@ -369,5 +421,61 @@ mod tests {
             "expected both halves to contain projects from both namespaces; \
              got A in first half: {first_half_a}, A in second half: {second_half_a}"
         );
+    }
+
+    fn projects_batch(rows: &[(i64, &str)]) -> RecordBatch {
+        let schema = Arc::new(arrow::datatypes::Schema::new(vec![
+            arrow::datatypes::Field::new("project_id", arrow::datatypes::DataType::Int64, false),
+            arrow::datatypes::Field::new("traversal_path", arrow::datatypes::DataType::Utf8, false),
+        ]));
+        let ids =
+            arrow::array::Int64Array::from(rows.iter().map(|(id, _)| *id).collect::<Vec<_>>());
+        let paths =
+            arrow::array::StringArray::from(rows.iter().map(|(_, path)| *path).collect::<Vec<_>>());
+        RecordBatch::try_new(schema, vec![Arc::new(ids), Arc::new(paths)]).unwrap()
+    }
+
+    #[test]
+    fn taking_pending_projects_stops_at_the_share_and_skips_checkpointed() {
+        let batch = projects_batch(&[
+            (11, "1/9/11/"),
+            (22, "1/9/22/"),
+            (33, "1/9/33/"),
+            (44, "1/9/44/"),
+        ]);
+        let checkpointed = HashSet::from([22]);
+
+        let mut pending = Vec::new();
+        let already_checkpointed = take_pending(&batch, &checkpointed, 2, &mut pending).unwrap();
+
+        assert_eq!(already_checkpointed, 1);
+        assert_eq!(
+            pending
+                .iter()
+                .map(|project| project.project_id)
+                .collect::<Vec<_>>(),
+            vec![11, 33]
+        );
+    }
+
+    #[test]
+    fn share_splits_the_window_across_the_namespaces_that_still_have_work() {
+        let backfill = create_backfill(Arc::new(MockNatsServices::new()));
+
+        assert_eq!(
+            backfill.share_per_namespace(2_500),
+            PENDING_PUBLISH_WINDOW / 2_500
+        );
+
+        backfill
+            .namespaces_with_pending
+            .store(1, std::sync::atomic::Ordering::Relaxed);
+        assert_eq!(backfill.share_per_namespace(2_500), PENDING_PUBLISH_WINDOW);
+
+        backfill.namespaces_with_pending.store(
+            PENDING_PUBLISH_WINDOW * 4,
+            std::sync::atomic::Ordering::Relaxed,
+        );
+        assert_eq!(backfill.share_per_namespace(2_500), 1);
     }
 }
