@@ -95,6 +95,25 @@ this branch carries the harness and the measurements only.
 5. **`extend_from_slice` instead of `extend` when buffering a response body.** `Bytes` iterates
    per byte, so every `fetch_arrow` in the process was pushing one byte at a time.
 
+## Fairness of the publish order
+
+Bounding memory by publishing in windows reintroduced the problem the fleet-wide shuffle was added
+to fix ([!1407](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/1407)): a
+namespace with more pending projects than one window is published as a single block, and the work
+queue keeps that order until it drains. Capping each namespace's share of a window fixes both at
+once. Measured on a skewed fleet, 2,500 namespaces and 2.33M pending with 20% of the projects in
+one namespace:
+
+| Variant | Dispatched | Footprint MiB | Requested MiB | Longest single-namespace run | Other namespaces' first queue position p50 / p95 / max |
+|---|---|---|---|---|---|
+| Fleet-wide shuffle | 2,330,000 | 181.7 | 159.9 | 8 | 2,146 / 9,185 / 28,910 |
+| Window, no per-namespace cap | 2,330,000 | 103.9 | 40.9 | 466,000 | 1,379,133 / 2,190,859 / 2,292,273 |
+| Window with per-namespace share | 50,000 | 39.8 | 9.3 | 2 | 1,687 / 7,015 / 19,431 |
+
+The capped run publishes a tick's worth (one window, shared equally) rather than the whole backlog,
+so the queue stays shallow and every one of the 2,500 namespaces is represented in it. Drain rate is
+consumer-bound either way; what changes is that no namespace has to wait for another to finish.
+
 ## Not addressed
 
 - **A single namespace with a very large project count is still unbounded** (1M in one namespace:
