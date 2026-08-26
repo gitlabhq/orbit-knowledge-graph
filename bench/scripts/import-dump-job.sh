@@ -8,7 +8,7 @@ BENCH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "${BENCH_DIR}/scripts/lib.sh"
 
 : "${DUMP_PREFIX:=$(bench '.gcs.dump_prefix')}"
-GCP_SA=$(cd "${TF_DIR}" && terraform output -raw node_sa_email 2>/dev/null)
+GCP_SA=$(cd "${TF_DIR}" && "$TF" output -raw node_sa_email 2>/dev/null)
 : "${CH_NS:=ra-ch-${RUN_ID}}"
 
 # Read credentials from the secret created by provision.sh.
@@ -33,7 +33,7 @@ $KC annotate sa ra-import-sa -n "${CH_NS}" \
 # Delete any previous Job.
 $KC delete job ra-import-dump -n "${CH_NS}" --ignore-not-found=true 2>/dev/null
 
-DUMPS_BUCKET=$(cd "${TF_DIR}" && terraform output -raw datalake_dumps_bucket 2>/dev/null || bench '.buckets.datalake_dumps')
+DUMPS_BUCKET=$(cd "${TF_DIR}" && "$TF" output -raw datalake_dumps_bucket 2>/dev/null || bench '.buckets.datalake_dumps')
 log "Submitting import job (dump=${DUMP_PREFIX}, ch=${CH_NS}, bucket=${DUMPS_BUCKET})"
 
 CH_NAMESPACE="${CH_NS}" DUMP_PREFIX="${DUMP_PREFIX}" DUMPS_BUCKET="${DUMPS_BUCKET}" \

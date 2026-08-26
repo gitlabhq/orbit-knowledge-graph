@@ -1,5 +1,5 @@
 resource "google_service_account" "node" {
-  account_id   = "${var.cluster_name}-node"
+  account_id   = "${local.cluster_name}-node"
   display_name = "RA bench GKE nodes (minimal)"
 }
 

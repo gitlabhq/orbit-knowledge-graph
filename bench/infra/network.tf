@@ -1,10 +1,10 @@
 resource "google_compute_network" "bench" {
-  name                    = var.cluster_name
+  name                    = local.cluster_name
   auto_create_subnetworks = false
 }
 
 resource "google_compute_subnetwork" "bench" {
-  name                     = var.cluster_name
+  name                     = local.cluster_name
   region                   = local.region
   network                  = google_compute_network.bench.id
   ip_cidr_range            = "10.0.0.0/20"
@@ -22,13 +22,13 @@ resource "google_compute_subnetwork" "bench" {
 }
 
 resource "google_compute_router" "bench" {
-  name    = var.cluster_name
+  name    = local.cluster_name
   region  = local.region
   network = google_compute_network.bench.id
 }
 
 resource "google_compute_router_nat" "bench" {
-  name                               = var.cluster_name
+  name                               = local.cluster_name
   router                             = google_compute_router.bench.name
   region                             = local.region
   nat_ip_allocate_option             = "AUTO_ONLY"
