@@ -17,7 +17,7 @@
 # version with no entry is treated as "*", which also makes pruning old entries safe.
 migrations:
 - version: 93
-  scope: code
+  scope: "*"
   note: >-
     gl_definition drops search_text and token_count; local ranked search now
     derives a gl_def_doc document table and a DuckDB FTS (BM25) index, and remote text
