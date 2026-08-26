@@ -26,7 +26,7 @@ struct ReconciliationGroup {
     edge_sort_key: String,
 }
 
-/// Tombstones edges a node's pipeline stopped emitting. Stateless: each run scans a
+/// Deletes edges a node's pipeline stopped emitting. Stateless: each run scans a
 /// fixed lookback rather than resuming from a cursor.
 pub struct StaleEdgeReconciliation {
     graph: ArrowClickHouseClient,
@@ -280,33 +280,43 @@ fn build_delete_statement(group: &ReconciliationGroup, excluded_namespaces: &[i6
         format!(" AND toInt64OrZero(extract(traversal_path, '^[0-9]+/([0-9]+)/')) NOT IN ({ids})")
     };
 
+    let emitter_current_rows = format!(
+        "SELECT id, traversal_path, _version FROM ( \
+           SELECT id, traversal_path, _version, _deleted \
+           FROM {emitting_node_table} \
+           WHERE _version >= {{cursor:String}}{namespace_guard} \
+           ORDER BY traversal_path, id, _version DESC \
+           LIMIT 1 BY traversal_path, id \
+         ) WHERE _deleted = false"
+    );
+
+    let qualified_edge_sort_key = edge_sort_key
+        .split(", ")
+        .map(|column| format!("edge.{column}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    // The DELETE mutation rewriter resolves named CTEs in its WHERE subquery as
+    // database tables (UNKNOWN_TABLE), so the emitter subquery is inlined at
+    // each reference instead of declared once in a WITH clause.
     format!(
         "DELETE FROM {edge_table} \
          WHERE ({edge_sort_key}, _version) IN ( \
-           WITH emitter AS ( \
-             SELECT id, traversal_path, _version FROM ( \
-               SELECT id, traversal_path, _version, _deleted \
-               FROM {emitting_node_table} \
-               WHERE _version >= {{cursor:String}}{namespace_guard} \
-               ORDER BY traversal_path, id, _version DESC \
-               LIMIT 1 BY traversal_path, id \
-             ) WHERE _deleted = false \
-           ), \
-           edge AS ( \
+           SELECT {qualified_edge_sort_key}, edge._version \
+           FROM ( \
              SELECT {edge_sort_key}, _version FROM ( \
                SELECT {edge_sort_key}, _version, _deleted \
                FROM {edge_table} \
                WHERE relationship_kind IN ({kinds}) \
                  AND {emitting_node_kind_column} = '{emitting_node}' \
-                 AND traversal_path IN (SELECT traversal_path FROM emitter) \
-                 AND {emitting_node_id_column} IN (SELECT id FROM emitter) \
+                 AND traversal_path IN (SELECT traversal_path FROM ({emitter_current_rows})) \
+                 AND {emitting_node_id_column} IN (SELECT id FROM ({emitter_current_rows})) \
                ORDER BY {edge_sort_key}, _version DESC \
                LIMIT 1 BY {edge_sort_key} \
              ) WHERE _deleted = false \
-           ) \
-           SELECT {edge_sort_key}, edge._version \
-           FROM edge \
-           JOIN emitter ON emitter.id = edge.{emitting_node_id_column} \
+           ) AS edge \
+           JOIN ({emitter_current_rows}) AS emitter \
+             ON emitter.id = edge.{emitting_node_id_column} \
              AND emitter.traversal_path = edge.traversal_path \
            WHERE edge._version < emitter._version \
          )"
@@ -476,7 +486,14 @@ mod tests {
         let sql = build_delete_statement(&fixture(), &[]);
 
         assert!(!sql.contains("FINAL"), "{sql}");
-        assert_eq!(sql.matches("LIMIT 1 BY").count(), 2, "{sql}");
+        // The emitter dedup appears three times because the subquery is inlined
+        // at each reference (mutations cannot resolve named CTEs).
+        assert_eq!(
+            sql.matches("LIMIT 1 BY traversal_path, id").count(),
+            3,
+            "{sql}"
+        );
+        assert_eq!(sql.matches("LIMIT 1 BY").count(), 4, "{sql}");
 
         for dedup in [
             "LIMIT 1 BY traversal_path, id",
