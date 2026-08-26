@@ -574,15 +574,6 @@ pub struct TableCleanupConfig {
     pub schedule: ScheduleConfiguration,
 }
 
-const TOMBSTONE_SWEEP_LOOKBACK_SLACK: Duration = Duration::from_secs(24 * 60 * 60);
-
-impl TableCleanupConfig {
-    pub fn lookback(&self) -> chrono::TimeDelta {
-        let seconds = (self.schedule.interval_hint() + TOMBSTONE_SWEEP_LOOKBACK_SLACK).as_secs();
-        chrono::TimeDelta::seconds(seconds as i64)
-    }
-}
-
 impl Default for TableCleanupConfig {
     fn default() -> Self {
         Self {
@@ -982,17 +973,6 @@ modules: [sdlc, namespace_deletion]
             cfg.validate(),
             Err(EngineConfigError::ZeroSystemNotesResolveLookupBatchSize)
         ));
-    }
-
-    #[test]
-    fn tombstone_sweep_lookback_follows_the_cadence() {
-        let daily = TableCleanupConfig {
-            schedule: ScheduleConfiguration {
-                cron: Some("0 0 3 * * *".into()),
-            },
-        };
-
-        assert_eq!(daily.lookback(), chrono::TimeDelta::days(2));
     }
 
     #[test]

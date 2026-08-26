@@ -4,6 +4,10 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use std::collections::HashMap;
+
+use arrow::array::BooleanArray;
+use arrow::compute;
 use arrow::record_batch::RecordBatch;
 use chrono::{DateTime, Utc};
 use futures::StreamExt;
@@ -106,6 +110,7 @@ pub(in crate::modules::sdlc) struct Pipeline {
     metrics: SdlcMetrics,
     retry_config: DatalakeRetryConfig,
     registry: Arc<TransformRegistry>,
+    graph_sort_keys: HashMap<String, Vec<String>>,
 }
 
 impl Pipeline {
@@ -114,6 +119,7 @@ impl Pipeline {
         checkpoint_store: Arc<dyn CheckpointStore>,
         metrics: SdlcMetrics,
         retry_config: DatalakeRetryConfig,
+        ontology: &ontology::Ontology,
     ) -> Self {
         Self {
             datalake,
@@ -121,6 +127,7 @@ impl Pipeline {
             metrics,
             retry_config,
             registry: Arc::new(TransformRegistry::default()),
+            graph_sort_keys: build_graph_sort_key_map(ontology),
         }
     }
 
@@ -190,7 +197,14 @@ impl Pipeline {
                 .record_transform_duration(transform_elapsed.as_secs_f64());
             stats.transform_ms += transform_elapsed.as_millis() as u64;
 
-            let mut write_futures = FuturesUnordered::new();
+            type WriteFuture = std::pin::Pin<
+                Box<
+                    dyn std::future::Future<
+                            Output = Result<crate::clickhouse::WriteReport, HandlerError>,
+                        > + Send,
+                >,
+            >;
+            let mut write_futures: FuturesUnordered<WriteFuture> = FuturesUnordered::new();
             for (index, batches) in grouped.into_iter().enumerate() {
                 if batches.is_empty() {
                     continue;
@@ -198,11 +212,38 @@ impl Pipeline {
                 let table = outputs[index].clone();
                 let w = Arc::clone(&context.writer);
                 let d = durability.data_writes;
-                write_futures.push(async move {
-                    w.write(&table, batches, d)
-                        .await
-                        .map_err(|e| HandlerError::Processing(e.to_string()))
-                });
+
+                let sort_key = self
+                    .graph_sort_keys
+                    .get(&table)
+                    .map(|v| v.as_slice())
+                    .unwrap_or(&[]);
+                let (live, delete_sql) = partition_deleted_rows(&table, batches, sort_key);
+
+                if !live.is_empty() {
+                    let w2 = Arc::clone(&w);
+                    let t = table.clone();
+                    write_futures.push(Box::pin(async move {
+                        w2.write(&t, live, d)
+                            .await
+                            .map_err(|e| HandlerError::Processing(e.to_string()))
+                    }));
+                }
+
+                if let Some(sql) = delete_sql {
+                    let w3 = Arc::clone(&w);
+                    let t = table.clone();
+                    write_futures.push(Box::pin(async move {
+                        w3.lightweight_delete(&sql)
+                            .await
+                            .map_err(|e| HandlerError::Processing(e.to_string()))?;
+                        Ok(crate::clickhouse::WriteReport {
+                            table: t,
+                            rows: 0,
+                            bytes: 0,
+                        })
+                    }));
+                }
             }
 
             {
@@ -475,6 +516,139 @@ impl WindowBounds {
     }
 }
 
+fn build_graph_sort_key_map(ontology: &ontology::Ontology) -> HashMap<String, Vec<String>> {
+    use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
+    let mut map = HashMap::new();
+    for node in ontology.nodes() {
+        let prefixed = prefixed_table_name(&node.destination_table, *SCHEMA_VERSION);
+        let sort_key = ontology
+            .sort_key_for_table(&node.destination_table)
+            .unwrap_or(&node.sort_key)
+            .to_vec();
+        map.insert(prefixed, sort_key);
+    }
+    for edge_table in ontology.edge_tables() {
+        if let Some(config) = ontology.edge_table_config(edge_table) {
+            let prefixed = prefixed_table_name(edge_table, *SCHEMA_VERSION);
+            map.insert(prefixed, config.sort_key.clone());
+        }
+    }
+    map
+}
+
+/// Splits transformed batches into live rows (for INSERT) and a lightweight
+/// `DELETE FROM` statement (for deleted rows).
+///
+/// Returns `(live_batches, optional_delete_sql)`. When no rows are deleted,
+/// `live_batches` is the original vec unchanged and the SQL is `None`.
+fn partition_deleted_rows(
+    table: &str,
+    batches: Vec<RecordBatch>,
+    sort_key: &[String],
+) -> (Vec<RecordBatch>, Option<String>) {
+    let mut live = Vec::with_capacity(batches.len());
+    let mut has_deletions = false;
+    let mut deleted = Vec::new();
+
+    for batch in batches {
+        let deleted_col = batch
+            .column_by_name(ontology::DELETED_COLUMN)
+            .and_then(|col| col.as_any().downcast_ref::<BooleanArray>());
+
+        let Some(deleted_array) = deleted_col else {
+            live.push(batch);
+            continue;
+        };
+
+        let any_deleted = (0..deleted_array.len()).any(|i| deleted_array.value(i));
+        if !any_deleted {
+            live.push(batch);
+            continue;
+        }
+
+        has_deletions = true;
+
+        let live_mask = compute::not(deleted_array).expect("boolean NOT cannot fail");
+        let live_batch = compute::filter_record_batch(&batch, &live_mask)
+            .expect("filter_record_batch with same-length mask cannot fail");
+        if live_batch.num_rows() > 0 {
+            live.push(live_batch);
+        }
+
+        let deleted_batch = compute::filter_record_batch(&batch, deleted_array)
+            .expect("filter_record_batch with same-length mask cannot fail");
+        if deleted_batch.num_rows() > 0 {
+            deleted.push(deleted_batch);
+        }
+    }
+
+    if !has_deletions {
+        return (live, None);
+    }
+
+    let delete_sql = build_delete_sql_from_batches(table, &deleted, sort_key);
+    (live, delete_sql)
+}
+
+/// Builds `DELETE FROM {table} WHERE (sort_key_cols) IN ((v1, v2, ...), ...)`
+/// from the sort key column values in the deleted RecordBatches.
+fn build_delete_sql_from_batches(
+    table: &str,
+    batches: &[RecordBatch],
+    sort_key: &[String],
+) -> Option<String> {
+    if batches.is_empty() || sort_key.is_empty() {
+        return None;
+    }
+
+    let mut tuples = Vec::new();
+    for batch in batches {
+        for row in 0..batch.num_rows() {
+            let values: Vec<String> = sort_key
+                .iter()
+                .map(|col_name| extract_sort_key_value(batch, col_name, row))
+                .collect();
+            tuples.push(format!("({})", values.join(", ")));
+        }
+    }
+
+    if tuples.is_empty() {
+        return None;
+    }
+
+    let cols = sort_key.join(", ");
+    Some(format!(
+        "DELETE FROM {table} WHERE ({cols}) IN ({})",
+        tuples.join(", ")
+    ))
+}
+
+/// Extracts a single cell value from a RecordBatch as an SQL literal.
+fn extract_sort_key_value(batch: &RecordBatch, column: &str, row: usize) -> String {
+    use arrow::array::{AsArray, Int64Array, StringArray};
+    use arrow::datatypes::DataType;
+
+    let col = batch
+        .column_by_name(column)
+        .unwrap_or_else(|| panic!("sort key column '{column}' not found in RecordBatch"));
+
+    match col.data_type() {
+        DataType::Utf8 => {
+            let array = col.as_any().downcast_ref::<StringArray>().unwrap();
+            format!("'{}'", array.value(row).replace('\'', "\\'"))
+        }
+        DataType::LargeUtf8 => {
+            let array: &arrow::array::LargeStringArray = col.as_string();
+            format!("'{}'", array.value(row).replace('\'', "\\'"))
+        }
+        DataType::Int64 => {
+            let array = col.as_any().downcast_ref::<Int64Array>().unwrap();
+            array.value(row).to_string()
+        }
+        dt => panic!("unsupported sort key column type {dt:?} for column '{column}'"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::plan::{TransformSpec, Transformation};
@@ -490,6 +664,10 @@ mod tests {
     use async_trait::async_trait;
     use std::collections::HashSet;
     use std::sync::Mutex;
+
+    fn test_ontology() -> ontology::Ontology {
+        ontology::Ontology::load_embedded().expect("ontology must load")
+    }
 
     fn simple_plan(name: &str) -> Plan {
         simple_plan_with_batch_size(name, 1000)
@@ -709,6 +887,7 @@ mod tests {
             Arc::new(RecordingCheckpointStore::new()),
             test_metrics(),
             Default::default(),
+            &test_ontology(),
         );
         let plan = simple_plan("Test");
 
@@ -738,6 +917,7 @@ mod tests {
             store.clone(),
             test_metrics(),
             Default::default(),
+            &test_ontology(),
         );
         let result = pipeline
             .run_plan(
@@ -776,8 +956,9 @@ mod tests {
             Arc::new(RecordingCheckpointStore::new()),
             test_metrics(),
             Default::default(),
+            &test_ontology(),
         );
-        let plan = simple_plan("Failing");
+        let plan = simple_plan("Test");
 
         let result = pipeline
             .run_plan(
@@ -850,6 +1031,7 @@ mod tests {
             Arc::new(RecordingCheckpointStore::new()),
             test_metrics(),
             Default::default(),
+            &test_ontology(),
         );
 
         let plan = simple_plan("Test");
@@ -888,6 +1070,7 @@ mod tests {
                 halving_initial_block_size: 8_000,
                 halving_min_block_size: 1024,
             },
+            &test_ontology(),
         );
 
         let plan = simple_plan("Test");
@@ -927,6 +1110,7 @@ mod tests {
                 halving_initial_block_size: 4_096,
                 halving_min_block_size: 2_048,
             },
+            &test_ontology(),
         );
 
         let plan = simple_plan("Test");
@@ -1007,6 +1191,7 @@ mod tests {
                 halving_initial_block_size: 8_000,
                 halving_min_block_size: 1_024,
             },
+            &test_ontology(),
         );
 
         let plan = simple_plan("Test");
@@ -1048,6 +1233,7 @@ mod tests {
             store,
             test_metrics(),
             Default::default(),
+            &test_ontology(),
         );
         let plan = simple_plan("Test");
 
@@ -1124,6 +1310,7 @@ mod tests {
             Arc::new(RecordingCheckpointStore::new()),
             test_metrics(),
             Default::default(),
+            &test_ontology(),
         );
         let plan = simple_plan("Test");
 
