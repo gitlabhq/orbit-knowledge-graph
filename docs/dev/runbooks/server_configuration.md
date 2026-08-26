@@ -264,7 +264,7 @@ Distributed locking via NATS KV ensures only one dispatcher instance runs each t
 | Namespace dispatch | `schedule.tasks.namespace.cron` | `*/30 * * * * *` (every 30 seconds) | Publishes requests for enabled root namespaces with Siphon changes |
 | Namespace sweep | `schedule.tasks.namespace-sweep.cron` | `0 0 * * * *` (hourly) | Re-dispatches every enabled namespace; backstops migration backfill and missed windows |
 | Code task dispatch | `schedule.tasks.code-indexing-task.cron` | `0 */1 * * * *` (every minute) | Consumes Siphon CDC push events |
-| Code backfill | `schedule.tasks.namespace-code-backfill.cron` | `0 */1 * * * *` (every minute) | Backfills newly enabled namespaces |
+| Code backfill | `schedule.tasks.code-backfill.cron` | `0 */1 * * * *` (every minute) | Backfills newly enabled namespaces |
 | Table cleanup | `schedule.tasks.table-cleanup.cron` | `0 0 3 * * 0` (weekly, Sunday 03:00 UTC) | Sweeps tombstoned keys from every graph table |
 | Namespace deletion | `schedule.tasks.namespace-deletion.cron` | `0 0 3 * * *` (daily 03:00 UTC) | Schedules and executes namespace deletions |
 | Migration completion | `schedule.tasks.migration-completion.cron` | `0 */1 * * * *` (every minute) | Detects completed schema migrations |
@@ -297,6 +297,7 @@ too little.
 
 | Config path | Default | Description |
 |-------------|---------|-------------|
+| `schedule.tasks.code-backfill.publish_window` | `100000` | Pending projects held per publish batch. Also the per-run budget shared between the namespaces that still have pending projects, so it bounds both dispatcher memory (about 70 bytes per project) and how much work one namespace can queue ahead of the others |
 | `schedule.tasks.namespace-code-backfill.events_stream_name` | `siphon_stream_main_db` | NATS stream for namespace events |
 | `schedule.tasks.namespace-code-backfill.batch_size` | `100` | Events to process per cycle |
 

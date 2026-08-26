@@ -27,9 +27,6 @@ pub const METRIC_NAME: &str = "dispatch.code_backfill";
 
 const CODE_INDEXING_CHECKPOINT_TABLE: &str = "code_indexing_checkpoint";
 
-/// Holding a full sweep (2.3M projects on gitlab.com) before the first publish OOMed the pod.
-const PENDING_PUBLISH_WINDOW: usize = 50_000;
-
 const CHECKPOINTED_PROJECT_IDS_QUERY: &str = r#"
 SELECT DISTINCT project_id
 FROM {table:Identifier} FINAL
@@ -55,9 +52,7 @@ pub struct CodeBackfill {
     datalake: ArrowClickHouseClient,
     metrics: ScheduledTaskMetrics,
     campaign: Arc<CampaignState>,
-    /// Namespaces that still had pending projects on the previous dispatch, so
-    /// the share below widens as the fleet drains and a lone straggler ends up
-    /// with the whole window.
+    publish_window: usize,
     namespaces_with_pending: AtomicUsize,
 }
 
@@ -68,6 +63,7 @@ impl CodeBackfill {
         datalake: ArrowClickHouseClient,
         metrics: ScheduledTaskMetrics,
         campaign: Arc<CampaignState>,
+        publish_window: usize,
     ) -> Self {
         Self {
             nats,
@@ -75,20 +71,18 @@ impl CodeBackfill {
             datalake,
             metrics,
             campaign,
+            publish_window,
             namespaces_with_pending: AtomicUsize::new(0),
         }
     }
 
-    /// Each namespace's slice of one publish window. Without a cap, a namespace
-    /// with more pending projects than the window is published as one block, and
-    /// the work queue keeps that order until it drains, which is what the
-    /// fleet-wide shuffle this replaced existed to prevent.
+    /// Uncapped, a namespace larger than the window holds the work queue until it drains.
     fn share_per_namespace(&self, namespaces: usize) -> usize {
         let active = match self.namespaces_with_pending.load(Ordering::Relaxed) {
             0 => namespaces,
             previous => previous,
         };
-        (PENDING_PUBLISH_WINDOW / active.max(1)).max(1)
+        (self.publish_window / active.max(1)).max(1)
     }
 
     pub fn metrics(&self) -> &ScheduledTaskMetrics {
@@ -109,8 +103,7 @@ impl CodeBackfill {
         let mut window: Vec<PendingProject> = Vec::new();
         let share = self.share_per_namespace(namespaces.len());
         let mut with_pending = 0usize;
-        // Visited in a random order so the same namespaces are not always the
-        // ones whose share is trimmed by the remainder or split across windows.
+        // Random order so the remainder does not always fall on the same namespaces.
         let mut order: Vec<usize> = (0..namespaces.len()).collect();
         order.shuffle(&mut rand::rng());
         for index in order {
@@ -124,7 +117,7 @@ impl CodeBackfill {
             }
             with_pending += 1;
             window.extend(pending);
-            if window.len() >= PENDING_PUBLISH_WINDOW {
+            if window.len() >= self.publish_window {
                 self.publish_window(&mut window, dispatch_id, &mut outcome)
                     .await?;
             }
@@ -145,7 +138,6 @@ impl CodeBackfill {
         Ok(outcome)
     }
 
-    /// Scoped to the checkpoint table of the indexer's current schema version.
     async fn fetch_checkpointed_project_ids(
         &self,
         traversal_path: &TraversalPath,
@@ -264,7 +256,7 @@ impl CodeBackfill {
             }
         }
 
-        // Recorded per window, so a later namespace's query error cannot drop the counts of what is already published.
+        // Per window, so a later query error cannot drop the counts of what is already published.
         self.metrics
             .record_requests_published(METRIC_NAME, dispatched);
         self.metrics.record_requests_skipped(METRIC_NAME, skipped);
@@ -274,8 +266,6 @@ impl CodeBackfill {
         Ok(())
     }
 
-    /// Returns at most `share` pending projects, and how many rows the
-    /// checkpoints filtered out before the share was reached.
     async fn fetch_pending_projects(
         &self,
         traversal_path: &TraversalPath,
@@ -315,8 +305,6 @@ impl CodeBackfill {
     }
 }
 
-/// Appends rows with no checkpoint until `share` is reached, returning how many
-/// rows the checkpoints filtered out.
 fn take_pending(
     batch: &RecordBatch,
     checkpointed: &HashSet<i64>,
@@ -379,8 +367,11 @@ mod tests {
             datalake,
             test_metrics(),
             Arc::new(CampaignState::new()),
+            TEST_PUBLISH_WINDOW,
         )
     }
+
+    const TEST_PUBLISH_WINDOW: usize = 50_000;
 
     #[tokio::test]
     async fn published_window_interleaves_two_namespaces_and_is_drained() {
@@ -464,16 +455,16 @@ mod tests {
 
         assert_eq!(
             backfill.share_per_namespace(2_500),
-            PENDING_PUBLISH_WINDOW / 2_500
+            TEST_PUBLISH_WINDOW / 2_500
         );
 
         backfill
             .namespaces_with_pending
             .store(1, std::sync::atomic::Ordering::Relaxed);
-        assert_eq!(backfill.share_per_namespace(2_500), PENDING_PUBLISH_WINDOW);
+        assert_eq!(backfill.share_per_namespace(2_500), TEST_PUBLISH_WINDOW);
 
         backfill.namespaces_with_pending.store(
-            PENDING_PUBLISH_WINDOW * 4,
+            TEST_PUBLISH_WINDOW * 4,
             std::sync::atomic::Ordering::Relaxed,
         );
         assert_eq!(backfill.share_per_namespace(2_500), 1);

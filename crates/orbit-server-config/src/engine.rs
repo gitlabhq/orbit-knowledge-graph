@@ -551,11 +551,18 @@ impl Default for SiphonRouterConfig {
     }
 }
 
-/// Cadence for the coverage-driven code-backfill sweep.
+fn default_code_backfill_publish_window() -> usize {
+    100_000
+}
+
+/// Cadence for the coverage-driven code-backfill sweep and its publish batch size.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct CodeBackfillSweepConfig {
     #[serde(flatten)]
     pub schedule: ScheduleConfiguration,
+
+    #[serde(default = "default_code_backfill_publish_window")]
+    pub publish_window: usize,
 }
 
 impl Default for CodeBackfillSweepConfig {
@@ -564,6 +571,7 @@ impl Default for CodeBackfillSweepConfig {
             schedule: ScheduleConfiguration {
                 cron: Some("0 */1 * * * *".into()),
             },
+            publish_window: default_code_backfill_publish_window(),
         }
     }
 }
