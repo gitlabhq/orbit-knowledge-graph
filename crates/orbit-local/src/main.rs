@@ -177,8 +177,8 @@ struct IndexArgs {
 #[command(
     long_about = "Answer a plain-language question with a scoped subgraph.\n\n\
                   Ranks indexed definitions by how many distinct question terms they \
-                  match, then shows the most relevant connections within two hops of \
-                  the top matches, ranked by graph proximity.\n\n\
+                  match, then shows the most relevant connections to the top matches, \
+                  ranked by graph proximity.\n\n\
                   When the output notes unmatched terms or weak matches, retry once \
                   with a synonym or identifier fragment for those terms before \
                   falling back to grep."
@@ -887,8 +887,11 @@ fn index_repo(
         .context("failed to clear existing project data")?;
     client
         .execute(
-            "DELETE FROM gl_def_doc WHERE project_id = ?1",
-            &[serde_json::json!(git.project_id)],
+            &format!(
+                "DROP TABLE IF EXISTS {}",
+                duckdb_client::search::def_doc_table(git.project_id)
+            ),
+            &[],
         )
         .context("failed to clear existing search index")?;
 
@@ -932,13 +935,19 @@ fn index_repo(
 
     let client =
         duckdb_client::DuckDbClient::open(db_path).context("failed to open DuckDB for status")?;
+    let doc_table = duckdb_client::search::def_doc_table(git.project_id);
+    client
+        .load_fts()
+        .context("failed to load the DuckDB fts extension")?;
     client
         .execute(
-            "INSERT INTO gl_def_doc
-             SELECT project_id, commit_sha, id,
-                    fts_doc(def_name(fqn)),
-                    fts_doc(fqn || ' ' || file_path)
-             FROM gl_definition WHERE project_id = ?1 AND commit_sha = ?2",
+            &format!(
+                "CREATE OR REPLACE TABLE {doc_table} AS
+             SELECT commit_sha, id AS def_id,
+                    fts_doc(def_name(fqn)) AS name,
+                    fts_doc(fqn || ' ' || file_path) AS context
+             FROM gl_definition WHERE project_id = ?1 AND commit_sha = ?2"
+            ),
             &[
                 serde_json::json!(git.project_id),
                 serde_json::json!(git.commit_sha),
@@ -947,7 +956,9 @@ fn index_repo(
         .context("failed to build the search documents")?;
     client
         .execute(
-            "PRAGMA create_fts_index('gl_def_doc', 'def_id', 'name', 'context', overwrite=1)",
+            &format!(
+                "PRAGMA create_fts_index('{doc_table}', 'def_id', 'name', 'context', overwrite=1)"
+            ),
             &[],
         )
         .context("failed to build the search index")?;

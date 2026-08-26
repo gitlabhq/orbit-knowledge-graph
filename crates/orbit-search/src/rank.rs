@@ -52,6 +52,7 @@ fn rank(corpus: &[CorpusRow], sims: &[Vec<f64>], idfs: &[f64], cap: usize) -> Ve
     } else {
         measured.iter().sum::<f64>() / measured.len() as f64
     };
+    let idf_total: f64 = idfs.iter().sum::<f64>().max(f64::MIN_POSITIVE);
     let mut hits: Vec<Hit> = Vec::new();
     for (index, row_sims) in sims.iter().enumerate() {
         let total: f64 = row_sims.iter().zip(idfs).map(|(sim, idf)| sim * idf).sum();
@@ -60,7 +61,6 @@ fn rank(corpus: &[CorpusRow], sims: &[Vec<f64>], idfs: &[f64], cap: usize) -> Ve
         }
         let len = corpus[index].grams.max(1) as f64;
         let length_norm = 1.0 - LENGTH_NORM_B + LENGTH_NORM_B * len / avgdl;
-        let idf_total: f64 = idfs.iter().sum::<f64>().max(f64::MIN_POSITIVE);
         let matched_idf: f64 = row_sims
             .iter()
             .zip(idfs)

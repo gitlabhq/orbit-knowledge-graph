@@ -10,6 +10,10 @@ use std::collections::HashMap;
 
 pub const RECALL_LIMIT: usize = 2000;
 
+pub fn def_doc_table(project_id: i64) -> String {
+    format!("gl_def_doc_{project_id}")
+}
+
 pub struct DuckDbSearch {
     client: DuckDbClient,
     pid: i64,
@@ -19,6 +23,7 @@ pub struct DuckDbSearch {
 impl DuckDbSearch {
     pub fn new(client: DuckDbClient, project_id: i64, commit_sha: &str) -> Result<Self> {
         let sha = sql_lit(commit_sha);
+        client.load_fts()?;
         ensure_search_index(&client, project_id, &sha)?;
         client.execute(&corpus_table_sql(project_id, &sha), &[])?;
         Ok(Self {
@@ -200,13 +205,20 @@ fn query(client: &DuckDbClient, sql: &str) -> Result<Vec<RecordBatch>> {
 }
 
 fn ensure_search_index(client: &DuckDbClient, project_id: i64, sha: &str) -> Result<()> {
-    let indexed = scalar_i64(&client.query_arrow(&format!(
-        "SELECT CAST(COUNT(*) AS BIGINT) AS n FROM (
-  SELECT 1 FROM gl_def_doc
-  WHERE project_id = {project_id} AND commit_sha = {sha}
+    let doc_table = def_doc_table(project_id);
+    let table_exists = scalar_i64(&client.query_arrow(&format!(
+        "SELECT CAST(COUNT(*) AS BIGINT) AS n FROM duckdb_tables()
+  WHERE table_name = {}",
+        sql_lit(&doc_table)
+    ))?) > 0;
+    let indexed = table_exists
+        && scalar_i64(&client.query_arrow(&format!(
+            "SELECT CAST(COUNT(*) AS BIGINT) AS n FROM (
+  SELECT 1 FROM {doc_table}
+  WHERE commit_sha = {sha}
   LIMIT 1
 )"
-    ))?) > 0;
+        ))?) > 0;
     if !indexed {
         anyhow::bail!(
             "local graph has no search index for this commit; \
@@ -217,12 +229,13 @@ fn ensure_search_index(client: &DuckDbClient, project_id: i64, sha: &str) -> Res
 }
 
 fn recall_sql(pid: i64, sha: &str) -> String {
+    let doc_table = def_doc_table(pid);
     format!(
         "WITH scored AS (
   SELECT def_id AS id,
-         fts_main_gl_def_doc.match_bm25(def_id, ?1, fields := 'name,context') AS score
-  FROM gl_def_doc
-  WHERE project_id = {pid} AND commit_sha = {sha}
+         fts_main_{doc_table}.match_bm25(def_id, ?1, fields := 'name,context') AS score
+  FROM {doc_table}
+  WHERE commit_sha = {sha}
     AND def_id IN (SELECT id FROM search_corpus)
 ),
 hits AS (
@@ -280,6 +293,7 @@ fn exclusions(col: &str) -> String {
 }
 
 fn corpus_rows_sql(cand_ctes: &str, pid: i64, sha: &str) -> String {
+    let doc_table = def_doc_table(pid);
     format!(
         "WITH {cand_ctes},
 deg AS (
@@ -291,8 +305,8 @@ deg AS (
 ),
 lens AS (
   SELECT def_id, CAST(len(string_split(context, ' ')) AS BIGINT) AS grams
-  FROM gl_def_doc
-  WHERE project_id = {pid} AND commit_sha = {sha}
+  FROM {doc_table}
+  WHERE commit_sha = {sha}
     AND def_id IN (SELECT id FROM cand)
 )
 SELECT c.id, c.fqn, c.definition_type,
@@ -335,7 +349,7 @@ mod tests {
     fn recall_sql_scores_with_bm25_restricted_to_the_corpus_and_normalizes_by_the_top_score() {
         let sql = recall_sql(7, "'sha'");
         assert!(
-            sql.contains("fts_main_gl_def_doc.match_bm25(def_id, ?1, fields := 'name,context')"),
+            sql.contains("fts_main_gl_def_doc_7.match_bm25(def_id, ?1, fields := 'name,context')"),
             "sql was {sql}"
         );
         assert!(

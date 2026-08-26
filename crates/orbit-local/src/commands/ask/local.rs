@@ -128,19 +128,20 @@ mod tests {
         }
 
         fn search(self) -> DuckDbSearch {
+            self.client.load_fts().unwrap();
             self.client
                 .execute(
-                    "INSERT INTO gl_def_doc
-                     SELECT project_id, commit_sha, id,
-                            fts_doc(def_name(fqn)),
-                            fts_doc(fqn || ' ' || file_path)
+                    "CREATE OR REPLACE TABLE gl_def_doc_7 AS
+                     SELECT commit_sha, id AS def_id,
+                            fts_doc(def_name(fqn)) AS name,
+                            fts_doc(fqn || ' ' || file_path) AS context
                      FROM gl_definition",
                     &[],
                 )
                 .unwrap();
             self.client
                 .execute(
-                    "PRAGMA create_fts_index('gl_def_doc', 'def_id', 'name', 'context', overwrite=1)",
+                    "PRAGMA create_fts_index('gl_def_doc_7', 'def_id', 'name', 'context', overwrite=1)",
                     &[],
                 )
                 .unwrap();

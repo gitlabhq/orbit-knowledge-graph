@@ -18,10 +18,6 @@ pub struct ExpandedNeighborhood {
 
 pub const SURFACED_POOL: usize = 10;
 
-/// Hands over whatever graph it considers relevant for the seeds — the whole
-/// thing, an authorized neighborhood, anything between. Ranking cannot tell
-/// the difference. Returned edges must already be rankable (scoped/local
-/// symbols excluded).
 pub trait GraphSource {
     type Error;
 

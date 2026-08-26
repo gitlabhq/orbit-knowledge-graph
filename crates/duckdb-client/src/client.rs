@@ -22,14 +22,18 @@ fn is_lock_error(e: &duckdb::Error) -> bool {
     msg.contains("could not set lock") || msg.contains("lock on file")
 }
 
-/// INSTALL hits extensions.duckdb.org only when the extension is not yet
-/// cached under ~/.duckdb; after the first fetch both statements are local.
-fn load_fts(conn: &duckdb::Connection) -> Result<()> {
-    conn.execute_batch("INSTALL fts; LOAD fts;")
-        .map_err(|e| DuckDbError::Schema(format!("failed to load the DuckDB fts extension: {e}")))
-}
-
 impl DuckDbClient {
+    /// INSTALL hits extensions.duckdb.org only when the extension is not yet
+    /// cached under ~/.duckdb, so only search paths call this; unrelated
+    /// commands must keep working without network or extension availability.
+    pub fn load_fts(&self) -> Result<()> {
+        self.conn
+            .execute_batch("INSTALL fts; LOAD fts;")
+            .map_err(|e| {
+                DuckDbError::Schema(format!("failed to load the DuckDB fts extension: {e}"))
+            })
+    }
+
     /// Retries with exponential backoff (capped at 5s per attempt, ~26s
     /// total) if another process holds the write lock.
     pub fn open(path: &Path) -> Result<Self> {
@@ -43,10 +47,7 @@ impl DuckDbClient {
                 .access_mode(duckdb::AccessMode::ReadWrite)
                 .map_err(|e| DuckDbError::Schema(e.to_string()))?;
             match duckdb::Connection::open_with_flags(path, config) {
-                Ok(conn) => {
-                    load_fts(&conn)?;
-                    return Ok(Self { conn });
-                }
+                Ok(conn) => return Ok(Self { conn }),
                 Err(e) if attempt < MAX_OPEN_RETRIES && is_lock_error(&e) => {
                     std::thread::sleep(backoff);
                     backoff = (backoff * 2).min(Duration::from_secs(5));
@@ -69,10 +70,7 @@ impl DuckDbClient {
                 .access_mode(duckdb::AccessMode::ReadOnly)
                 .map_err(|e| DuckDbError::Schema(e.to_string()))?;
             match duckdb::Connection::open_with_flags(path, config) {
-                Ok(conn) => {
-                    load_fts(&conn)?;
-                    return Ok(Self { conn });
-                }
+                Ok(conn) => return Ok(Self { conn }),
                 Err(e) if attempt < 5 && is_lock_error(&e) => {
                     std::thread::sleep(Duration::from_millis(50));
                 }
@@ -85,7 +83,6 @@ impl DuckDbClient {
     #[cfg(test)]
     pub(crate) fn open_in_memory() -> Result<Self> {
         let conn = duckdb::Connection::open_in_memory()?;
-        load_fts(&conn)?;
         Ok(Self { conn })
     }
 

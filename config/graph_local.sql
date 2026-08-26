@@ -14,14 +14,6 @@ CREATE TABLE IF NOT EXISTS _orbit_manifest (
     error_message VARCHAR
 );
 
-CREATE TABLE IF NOT EXISTS gl_def_doc (
-    project_id BIGINT NOT NULL,
-    commit_sha VARCHAR NOT NULL,
-    def_id BIGINT NOT NULL,
-    name VARCHAR NOT NULL,
-    context VARCHAR NOT NULL
-);
-
 CREATE OR REPLACE MACRO def_name(fqn) AS
     regexp_replace(fqn, '^.*[:.#/]', '');
 

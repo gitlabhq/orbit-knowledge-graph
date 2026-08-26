@@ -86,8 +86,9 @@ pub fn run_remote(
 /// Manifest and search-index DDL for DuckDB. Passed through to the compiler
 /// as external DDL so the codegen crate stays schema-agnostic. The doc
 /// macros are the single definition of search-document text: the indexer
-/// derives gl_def_doc from gl_definition with them and the FTS index is
-/// built over that table, so write and read sides cannot drift.
+/// derives a per-project gl_def_doc_<pid> table from gl_definition with them
+/// and builds the FTS index over it, so write and read sides cannot drift and
+/// BM25 statistics stay scoped to one project.
 const MANIFEST_DDL: &str = "\
 CREATE TYPE IF NOT EXISTS repo_status AS ENUM ('pending', 'indexing', 'indexed', 'error');
 
@@ -100,14 +101,6 @@ CREATE TABLE IF NOT EXISTS _orbit_manifest (
     status repo_status NOT NULL DEFAULT 'pending',
     last_indexed_at TIMESTAMP,
     error_message VARCHAR
-);
-
-CREATE TABLE IF NOT EXISTS gl_def_doc (
-    project_id BIGINT NOT NULL,
-    commit_sha VARCHAR NOT NULL,
-    def_id BIGINT NOT NULL,
-    name VARCHAR NOT NULL,
-    context VARCHAR NOT NULL
 );
 
 CREATE OR REPLACE MACRO def_name(fqn) AS
@@ -338,7 +331,7 @@ mod tests {
         let ddl = query_engine::compiler::generate_local_ddl(&ont, MANIFEST_DDL);
         assert!(ddl.contains("CREATE TABLE"));
         assert!(ddl.contains("_orbit_manifest"));
-        assert!(ddl.contains("gl_def_doc"));
+        assert!(ddl.contains("MACRO fts_doc"));
         assert!(!ddl.contains("search_text"));
         assert!(ddl.contains("SCHEMA_VERSION="));
     }
