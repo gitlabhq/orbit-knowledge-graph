@@ -84,10 +84,10 @@ pub fn run_remote(
 }
 
 /// Manifest and search-index DDL for DuckDB. Passed through to the compiler
-/// as external DDL so the codegen crate stays schema-agnostic. The trigram
-/// macros are the single definition of gram extraction: the indexer derives
-/// gl_def_trigram from gl_definition with them and the recall query grams the
-/// question terms with them, so write and read sides cannot drift.
+/// as external DDL so the codegen crate stays schema-agnostic. The doc
+/// macros are the single definition of search-document text: the indexer
+/// derives gl_def_doc from gl_definition with them and the FTS index is
+/// built over that table, so write and read sides cannot drift.
 const MANIFEST_DDL: &str = "\
 CREATE TYPE IF NOT EXISTS repo_status AS ENUM ('pending', 'indexing', 'indexed', 'error');
 
@@ -102,24 +102,24 @@ CREATE TABLE IF NOT EXISTS _orbit_manifest (
     error_message VARCHAR
 );
 
-CREATE TABLE IF NOT EXISTS gl_def_trigram (
+CREATE TABLE IF NOT EXISTS gl_def_doc (
     project_id BIGINT NOT NULL,
     commit_sha VARCHAR NOT NULL,
     def_id BIGINT NOT NULL,
-    gram VARCHAR NOT NULL,
-    field VARCHAR NOT NULL
+    name VARCHAR NOT NULL,
+    context VARCHAR NOT NULL
 );
-
-CREATE OR REPLACE MACRO gram_text(txt) AS
-    ' ' || trim(regexp_replace(lower(txt), '[^0-9a-z]+', ' ', 'g')) || ' ';
 
 CREATE OR REPLACE MACRO def_name(fqn) AS
     regexp_replace(fqn, '^.*[:.#/]', '');
 
-CREATE OR REPLACE MACRO trigrams(txt) AS
-    list_distinct(list_transform(
-        range(1, greatest(length(gram_text(txt)) - 1, 1)),
-        i -> substr(gram_text(txt), CAST(i AS INTEGER), 3)));";
+CREATE OR REPLACE MACRO camel_split(txt) AS
+    regexp_replace(regexp_replace(txt, '([A-Z]+)([A-Z][a-z])', '\\1 \\2', 'g'),
+                   '([a-z0-9])([A-Z])', '\\1 \\2', 'g');
+
+CREATE OR REPLACE MACRO fts_doc(txt) AS
+    CASE WHEN camel_split(txt) = txt THEN txt
+         ELSE txt || ' ' || camel_split(txt) END;";
 
 pub fn run_local(ontology_path: Option<PathBuf>) -> Result<()> {
     let ont = load_ontology(ontology_path.as_ref())?;
@@ -338,7 +338,7 @@ mod tests {
         let ddl = query_engine::compiler::generate_local_ddl(&ont, MANIFEST_DDL);
         assert!(ddl.contains("CREATE TABLE"));
         assert!(ddl.contains("_orbit_manifest"));
-        assert!(ddl.contains("gl_def_trigram"));
+        assert!(ddl.contains("gl_def_doc"));
         assert!(!ddl.contains("search_text"));
         assert!(ddl.contains("SCHEMA_VERSION="));
     }

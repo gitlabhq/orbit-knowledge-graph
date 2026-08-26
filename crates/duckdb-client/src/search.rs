@@ -8,10 +8,7 @@ use orbit_search::expand::{GraphSource, NodeLabel};
 use orbit_search::{AskOutcome, CorpusRow, Graph, GraphEdge, KindRates, SearchVocab, TermRecall};
 use std::collections::HashMap;
 
-pub const RECALL_FLOOR: f64 = 0.5;
-pub const CONTEXT_SIM_WEIGHT: f64 = 0.4;
 pub const RECALL_LIMIT: usize = 2000;
-pub const LENGTH_NORM_B: f64 = 0.75;
 
 pub struct DuckDbSearch {
     client: DuckDbClient,
@@ -22,7 +19,7 @@ pub struct DuckDbSearch {
 impl DuckDbSearch {
     pub fn new(client: DuckDbClient, project_id: i64, commit_sha: &str) -> Result<Self> {
         let sha = sql_lit(commit_sha);
-        ensure_trigram_index(&client, project_id, &sha)?;
+        ensure_search_index(&client, project_id, &sha)?;
         client.execute(&corpus_table_sql(project_id, &sha), &[])?;
         Ok(Self {
             client,
@@ -47,42 +44,33 @@ impl DuckDbSearch {
 
 impl AskSource for DuckDbSearch {
     fn recall(&self, terms: &[String]) -> Result<Vec<TermRecall>> {
-        if terms.is_empty() {
-            return Ok(Vec::new());
-        }
-        let sql = recall_sql(self.pid, &self.sha, terms.len());
-        let params: Vec<serde_json::Value> = terms
+        let sql = recall_sql(self.pid, &self.sha);
+        terms
             .iter()
-            .map(|t| serde_json::Value::String(t.clone()))
-            .collect();
-        let batches = self
-            .client
-            .query_arrow_json(&sql, &params)
-            .with_context(|| format!("trigram recall failed for terms {terms:?}"))?;
-        let term_idx = i64_column(&batches, "term_idx");
-        let ids = i64_column(&batches, "id");
-        let sims = f64_column(&batches, "sim");
-        let dfs = i64_column(&batches, "df");
-        let totals = i64_column(&batches, "total");
-        let mut recalls: Vec<TermRecall> = terms
-            .iter()
-            .map(|_| TermRecall {
-                hits: Vec::new(),
-                matched: 0,
-                corpus: 0,
+            .map(|term| {
+                let batches = self
+                    .client
+                    .query_arrow_json(&sql, &[serde_json::Value::String(term.clone())])
+                    .with_context(|| format!("fts recall failed for term {term:?}"))?;
+                let ids = i64_column(&batches, "id");
+                let sims = f64_column(&batches, "sim");
+                let dfs = i64_column(&batches, "df");
+                let totals = i64_column(&batches, "total");
+                let mut recall = TermRecall {
+                    hits: Vec::new(),
+                    matched: 0,
+                    corpus: 0,
+                };
+                for i in 0..ids.len() {
+                    recall.matched = dfs[i] as u64;
+                    recall.corpus = totals[i] as u64;
+                    if ids[i] != 0 {
+                        recall.hits.push((ids[i], sims[i]));
+                    }
+                }
+                Ok(recall)
             })
-            .collect();
-        for i in 0..term_idx.len() {
-            let Some(recall) = recalls.get_mut(term_idx[i] as usize) else {
-                continue;
-            };
-            recall.matched = dfs[i] as u64;
-            recall.corpus = totals[i] as u64;
-            if ids[i] != 0 {
-                recall.hits.push((ids[i], sims[i]));
-            }
-        }
-        Ok(recalls)
+            .collect()
     }
 
     fn rows_by_ids(&self, ids: &[i64]) -> Result<Vec<CorpusRow>> {
@@ -211,10 +199,10 @@ fn query(client: &DuckDbClient, sql: &str) -> Result<Vec<RecordBatch>> {
     })
 }
 
-fn ensure_trigram_index(client: &DuckDbClient, project_id: i64, sha: &str) -> Result<()> {
+fn ensure_search_index(client: &DuckDbClient, project_id: i64, sha: &str) -> Result<()> {
     let indexed = scalar_i64(&client.query_arrow(&format!(
         "SELECT CAST(COUNT(*) AS BIGINT) AS n FROM (
-  SELECT 1 FROM gl_def_trigram
+  SELECT 1 FROM gl_def_doc
   WHERE project_id = {project_id} AND commit_sha = {sha}
   LIMIT 1
 )"
@@ -228,75 +216,32 @@ fn ensure_trigram_index(client: &DuckDbClient, project_id: i64, sha: &str) -> Re
     Ok(())
 }
 
-fn recall_sql(pid: i64, sha: &str, term_count: usize) -> String {
-    let q_arms: Vec<String> = (0..term_count)
-        .map(|i| {
-            format!(
-                "SELECT {i} AS term_idx, UNNEST(trigrams(?{p})) AS gram",
-                p = i + 1
-            )
-        })
-        .collect();
+fn recall_sql(pid: i64, sha: &str) -> String {
     format!(
-        "WITH q AS ({q}),
-qn AS (SELECT term_idx, GREATEST(COUNT(*), 1) AS n FROM q GROUP BY term_idx),
-corpus_n AS (SELECT GREATEST(COUNT(*), 1) AS total FROM search_corpus),
-field_sims AS (
-  SELECT t.def_id, q.term_idx,
-         CAST(COUNT(DISTINCT CASE WHEN t.field = 'name' THEN t.gram END) AS DOUBLE)
-           / ANY_VALUE(qn.n) AS name_sim,
-         CAST(COUNT(DISTINCT CASE WHEN t.field = 'context' THEN t.gram END) AS DOUBLE)
-           / ANY_VALUE(qn.n) AS ctx_sim
-  FROM gl_def_trigram t
-  JOIN q ON q.gram = t.gram
-  JOIN qn ON qn.term_idx = q.term_idx
-  WHERE t.project_id = {pid} AND t.commit_sha = {sha}
-    AND t.def_id IN (SELECT id FROM search_corpus)
-  GROUP BY t.def_id, q.term_idx
+        "WITH scored AS (
+  SELECT def_id AS id,
+         fts_main_gl_def_doc.match_bm25(def_id, ?1, fields := 'name,context') AS score
+  FROM gl_def_doc
+  WHERE project_id = {pid} AND commit_sha = {sha}
+    AND def_id IN (SELECT id FROM search_corpus)
 ),
 hits AS (
-  SELECT def_id, term_idx,
-         GREATEST(name_sim, {CONTEXT_SIM_WEIGHT} * ctx_sim) AS sim
-  FROM field_sims
-  WHERE GREATEST(name_sim, ctx_sim) >= {RECALL_FLOOR}
-),
-df AS (SELECT term_idx, COUNT(*) AS df FROM hits GROUP BY term_idx),
-lens AS (
-  SELECT t.def_id, CAST(COUNT(DISTINCT t.gram) AS DOUBLE) AS len
-  FROM gl_def_trigram t
-  WHERE t.project_id = {pid} AND t.commit_sha = {sha} AND t.field = 'context'
-    AND t.def_id IN (SELECT def_id FROM hits)
-  GROUP BY t.def_id
-),
-avgdl AS (SELECT GREATEST(AVG(len), 1) AS avg_len FROM lens),
-top_defs AS (
-  SELECT h.def_id
-  FROM hits h
-  JOIN df ON df.term_idx = h.term_idx
-  JOIN lens ON lens.def_id = h.def_id
-  CROSS JOIN corpus_n
-  CROSS JOIN avgdl
-  GROUP BY h.def_id
-  ORDER BY SUM(h.sim * LN(1 + corpus_n.total / (1.0 + df.df))
-               / (1 - {LENGTH_NORM_B} + {LENGTH_NORM_B} * lens.len / avgdl.avg_len)) DESC,
-           h.def_id
+  SELECT id, score FROM scored WHERE score IS NOT NULL
+  ORDER BY score DESC, id
   LIMIT {RECALL_LIMIT}
 ),
-surviving AS (
-  SELECT h.def_id, h.term_idx, h.sim
-  FROM hits h
-  JOIN top_defs ON top_defs.def_id = h.def_id
-)
-SELECT CAST(df.term_idx AS BIGINT) AS term_idx,
-       COALESCE(s.def_id, 0) AS id,
-       COALESCE(s.sim, 0.0) AS sim,
-       df.df,
-       corpus_n.total
+df AS (SELECT COUNT(*) AS df FROM scored WHERE score IS NOT NULL),
+mx AS (SELECT MAX(score) AS m FROM hits),
+corpus_n AS (SELECT GREATEST(COUNT(*), 1) AS total FROM search_corpus)
+SELECT COALESCE(h.id, 0) AS id,
+       COALESCE(h.score / mx.m, 0.0) AS sim,
+       CAST(df.df AS BIGINT) AS df,
+       CAST(corpus_n.total AS BIGINT) AS total
 FROM df
 CROSS JOIN corpus_n
-LEFT JOIN surviving s ON s.term_idx = df.term_idx
-ORDER BY df.term_idx, sim DESC, id",
-        q = q_arms.join(" UNION ALL ")
+CROSS JOIN mx
+LEFT JOIN hits h ON TRUE
+ORDER BY sim DESC, id"
     )
 }
 
@@ -345,10 +290,10 @@ deg AS (
   ) GROUP BY 1
 ),
 lens AS (
-  SELECT def_id, COUNT(DISTINCT gram) AS grams FROM gl_def_trigram
-  WHERE project_id = {pid} AND commit_sha = {sha} AND field = 'context'
+  SELECT def_id, CAST(len(string_split(context, ' ')) AS BIGINT) AS grams
+  FROM gl_def_doc
+  WHERE project_id = {pid} AND commit_sha = {sha}
     AND def_id IN (SELECT id FROM cand)
-  GROUP BY def_id
 )
 SELECT c.id, c.fqn, c.definition_type,
        c.file_path || ':' || CAST(c.start_line AS VARCHAR) AS loc,
@@ -387,36 +332,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn recall_sql_grams_every_term_and_caps_on_the_combined_idf_weighted_score() {
-        let sql = recall_sql(7, "'sha'", 2);
-        assert!(sql.contains("trigrams(?1)"), "sql was {sql}");
+    fn recall_sql_scores_with_bm25_restricted_to_the_corpus_and_normalizes_by_the_top_score() {
+        let sql = recall_sql(7, "'sha'");
         assert!(
-            sql.contains("1 AS term_idx, UNNEST(trigrams(?2))"),
+            sql.contains("fts_main_gl_def_doc.match_bm25(def_id, ?1, fields := 'name,context')"),
             "sql was {sql}"
         );
         assert!(
             sql.contains("IN (SELECT id FROM search_corpus)"),
             "sql was {sql}"
         );
-        assert!(
-            sql.contains("CASE WHEN t.field = 'name' THEN t.gram END"),
-            "sql was {sql}"
-        );
-        assert!(
-            sql.contains(&format!(
-                "GREATEST(name_sim, {CONTEXT_SIM_WEIGHT} * ctx_sim)"
-            )),
-            "sql was {sql}"
-        );
-        assert!(
-            sql.contains(&format!("GREATEST(name_sim, ctx_sim) >= {RECALL_FLOOR}")),
-            "sql was {sql}"
-        );
-        assert!(
-            sql.contains("SUM(h.sim * LN(1 + corpus_n.total / (1.0 + df.df))"),
-            "sql was {sql}"
-        );
-        assert!(sql.contains("lens.len / avgdl.avg_len"), "sql was {sql}");
+        assert!(sql.contains("h.score / mx.m"), "sql was {sql}");
         assert!(
             sql.contains(&format!("LIMIT {RECALL_LIMIT}")),
             "sql was {sql}"

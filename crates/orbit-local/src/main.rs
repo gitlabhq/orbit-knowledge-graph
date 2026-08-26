@@ -887,7 +887,7 @@ fn index_repo(
         .context("failed to clear existing project data")?;
     client
         .execute(
-            "DELETE FROM gl_def_trigram WHERE project_id = ?1",
+            "DELETE FROM gl_def_doc WHERE project_id = ?1",
             &[serde_json::json!(git.project_id)],
         )
         .context("failed to clear existing search index")?;
@@ -934,22 +934,21 @@ fn index_repo(
         duckdb_client::DuckDbClient::open(db_path).context("failed to open DuckDB for status")?;
     client
         .execute(
-            "INSERT INTO gl_def_trigram
-             SELECT DISTINCT project_id, commit_sha, id, gram, field FROM (
-               SELECT project_id, commit_sha, id,
-                      UNNEST(trigrams(def_name(fqn))) AS gram,
-                      'name' AS field
-               FROM gl_definition WHERE project_id = ?1 AND commit_sha = ?2
-               UNION ALL
-               SELECT project_id, commit_sha, id,
-                      UNNEST(trigrams(fqn || ' ' || file_path)) AS gram,
-                      'context' AS field
-               FROM gl_definition WHERE project_id = ?1 AND commit_sha = ?2
-             )",
+            "INSERT INTO gl_def_doc
+             SELECT project_id, commit_sha, id,
+                    fts_doc(def_name(fqn)),
+                    fts_doc(fqn || ' ' || file_path)
+             FROM gl_definition WHERE project_id = ?1 AND commit_sha = ?2",
             &[
                 serde_json::json!(git.project_id),
                 serde_json::json!(git.commit_sha),
             ],
+        )
+        .context("failed to build the search documents")?;
+    client
+        .execute(
+            "PRAGMA create_fts_index('gl_def_doc', 'def_id', 'name', 'context', overwrite=1)",
+            &[],
         )
         .context("failed to build the search index")?;
     workspace::set_status(

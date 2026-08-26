@@ -14,24 +14,24 @@ CREATE TABLE IF NOT EXISTS _orbit_manifest (
     error_message VARCHAR
 );
 
-CREATE TABLE IF NOT EXISTS gl_def_trigram (
+CREATE TABLE IF NOT EXISTS gl_def_doc (
     project_id BIGINT NOT NULL,
     commit_sha VARCHAR NOT NULL,
     def_id BIGINT NOT NULL,
-    gram VARCHAR NOT NULL,
-    field VARCHAR NOT NULL
+    name VARCHAR NOT NULL,
+    context VARCHAR NOT NULL
 );
-
-CREATE OR REPLACE MACRO gram_text(txt) AS
-    ' ' || trim(regexp_replace(lower(txt), '[^0-9a-z]+', ' ', 'g')) || ' ';
 
 CREATE OR REPLACE MACRO def_name(fqn) AS
     regexp_replace(fqn, '^.*[:.#/]', '');
 
-CREATE OR REPLACE MACRO trigrams(txt) AS
-    list_distinct(list_transform(
-        range(1, greatest(length(gram_text(txt)) - 1, 1)),
-        i -> substr(gram_text(txt), CAST(i AS INTEGER), 3)));
+CREATE OR REPLACE MACRO camel_split(txt) AS
+    regexp_replace(regexp_replace(txt, '([A-Z]+)([A-Z][a-z])', '\1 \2', 'g'),
+                   '([a-z0-9])([A-Z])', '\1 \2', 'g');
+
+CREATE OR REPLACE MACRO fts_doc(txt) AS
+    CASE WHEN camel_split(txt) = txt THEN txt
+         ELSE txt || ' ' || camel_split(txt) END;
 
 CREATE TABLE IF NOT EXISTS gl_definition (
     id BIGINT NOT NULL,
