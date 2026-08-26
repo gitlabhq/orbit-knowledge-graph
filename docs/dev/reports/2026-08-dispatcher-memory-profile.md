@@ -43,12 +43,15 @@ macOS, mimalloc secure, 2,500 namespaces, 100,000 publish window (the configured
 `footprint` is the kernel's lifetime high-water mark, `requested` is bytes the program asked the
 allocator for at the peak.
 
-| Shape | Version | Dispatched | Footprint MiB | RSS MiB | Requested MiB | ms |
-|---|---|---|---|---|---|---|
-| 2.33M pending | before | 2,330,000 | 171.9 | 208.4 | 162.6 | 12,276 |
-| 2.33M pending | after | 100,000 | 29.0 | 43.1 | 8.7 | 8,239 |
-| 2.33M rows, 90% checkpointed | before | 233,000 | 34.1 | 50.5 | 17.8 | 13,047 |
-| 2.33M rows, 90% checkpointed | after | 100,000 | 29.7 | 44.6 | 8.6 | 12,226 |
+| Shape | Version | Dispatched | Footprint MiB | RSS MiB | Requested MiB |
+|---|---|---|---|---|---|
+| 2.33M pending | before | 2,330,000 | 171.9 | 208.4 | 162.6 |
+| 2.33M pending | after | 100,000 | 29.0 | 43.1 | 8.7 |
+| 2.33M rows, 90% checkpointed | before | 233,000 | 34.1 | 50.5 | 17.8 |
+| 2.33M rows, 90% checkpointed | after | 100,000 | 29.7 | 44.6 | 8.6 |
+
+Wall-clock is not reported: the runs were not taken under controlled power and thermal conditions,
+so their timings are not comparable. Memory figures are unaffected by that.
 
 The "after" rows publish one batch rather than the whole backlog: each namespace takes the batch
 size divided by the namespaces that still have pending projects (40 each here), and the rest of the
@@ -122,8 +125,8 @@ Shipped in [!2328](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_r
   the rows read and remove the wasted round trips, but it does not change peak memory now that the
   batch bounds it, and it changes which path a moved project is dispatched under.
 - The per-run floor is query latency, not publishing: one enabled-namespaces query plus two per
-  namespace, issued sequentially. Locally that is ~8 s for 2,500 namespaces; against ClickHouse
-  Cloud it will be substantially more.
+  namespace, issued sequentially. Against ClickHouse Cloud round trips that is the dominant cost of
+  a run once publishing is capped, and it was never measured under controlled conditions here.
 - The SDLC namespace-change detection path was not profiled. It materialises
   `BTreeMap<(id, path), BTreeSet<String>>` over the change-detection result, which is bounded by
   changed namespaces (~200 per tick, ~2,500 on a sweep) rather than by projects.
