@@ -35,8 +35,14 @@ Results land in `.memprofile/dispatch/<label>.json` (peaks, counts, timings) and
 | `--namespaces` | Enabled root namespaces, projects distributed evenly |
 | `--checkpointed-pct` | Share already checkpointed for the current schema version. `0` is the post-migration sweep, `90` is steady state |
 | `--path-depth` | Segments in a project's traversal path. Longer paths cost one longer `String` per pending project |
+| `--big-namespace-pct` | Concentrates this share of the projects in one namespace, for measuring a skewed fleet |
+| `--publish-window` | Overrides the configured publish batch size |
 | `--seed-only` / `--skip-seed` | Seed once, then A/B several binaries against the same data |
 | `--publish-delay-us` | Sleep per publish, standing in for the JetStream ack round trip |
+
+The report also carries a `fairness` block: the longest stretch of the queue held by one namespace,
+and where each other namespace's first request landed (p50, p95, max). Those are the two numbers the
+fleet-wide shuffle was judged on, so they are what to check when the publish order changes.
 
 ## Reading the numbers
 

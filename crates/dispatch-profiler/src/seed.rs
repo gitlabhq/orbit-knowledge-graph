@@ -1,8 +1,4 @@
-//! Generates a dispatcher-sized datalake and graph in ClickHouse.
-//!
-//! Rows are produced server-side from `numbers()`, so seeding a million
-//! projects never passes through the profiled process and cannot contaminate
-//! the measurement.
+//! Rows are generated server-side, so seeding never passes through the profiled process.
 
 use std::collections::HashMap;
 
@@ -10,9 +6,7 @@ use anyhow::Context;
 use clickhouse_client::ArrowClickHouseClient;
 use orbit_server_config::ClickHouseConfiguration;
 
-/// Copied from `fixtures/siphon.sql`. The projections and the
-/// `ReplacingMergeTree(version, deleted)` engine are what production has, and
-/// both change how much the dispatcher's prefix queries have to read.
+/// Copied from `fixtures/siphon.sql`: engine and projections change what the queries read.
 const NAMESPACE_PATHS_DDL: &str = r#"
 CREATE TABLE IF NOT EXISTS namespace_traversal_paths
 (
@@ -62,9 +56,7 @@ ORDER BY (traversal_path, root_namespace_id, id)
 SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild'
 "#;
 
-/// gitlab.com root namespace and project ids are eight to nine digits, and the
-/// dispatcher holds one `String` per project path, so the digit count is part
-/// of what is being measured.
+/// Digit count matters: the dispatcher holds one `String` per project path.
 const FIRST_NAMESPACE_ID: i64 = 60_000_000;
 pub const FIRST_PROJECT_ID: i64 = 70_000_000;
 const ORGANIZATION_ID: i64 = 1;
@@ -73,14 +65,11 @@ const ORGANIZATION_ID: i64 = 1;
 pub struct Shape {
     pub namespaces: u64,
     pub projects: u64,
-    /// Share of projects that already carry a checkpoint row for the current
-    /// schema version, i.e. the part of the backfill already done.
+    /// The part of the backfill already done.
     pub checkpointed_pct: u64,
-    /// Segments in a project's traversal path. 3 is a project directly under a
-    /// root namespace; 4 and 5 model subgroup nesting.
+    /// 3 is a project under a root namespace; 4 and 5 model subgroup nesting.
     pub path_depth: usize,
-    /// Share of all projects that lands in one namespace, so the dispatcher can
-    /// be measured against a skewed fleet rather than an even one.
+    /// Concentrates this share of the projects in one namespace, for a skewed fleet.
     pub big_namespace_pct: u64,
 }
 
@@ -244,9 +233,7 @@ impl Seeder {
             return Ok(());
         }
 
-        // Checkpoint the low ids so the pending remainder is a contiguous
-        // suffix; which projects are covered does not change the row counts the
-        // dispatcher holds.
+        // Which projects are covered does not change the row counts the dispatcher holds.
         let checkpointed = shape.projects * shape.checkpointed_pct / 100;
         client
             .execute(&format!(
@@ -265,8 +252,7 @@ impl Seeder {
     }
 }
 
-/// Which namespace a project row belongs to, matching the mapping the profiler
-/// reverses to attribute a published request back to its namespace.
+/// The profiler reverses this mapping to attribute a published request to its namespace.
 fn namespace_index_expression(shape: Shape) -> String {
     let spread = shape.spread_namespaces();
     match shape.big_namespace_pct {
@@ -283,17 +269,14 @@ fn namespace_path_expression() -> String {
     format!("concat('{ORGANIZATION_ID}/', toString({FIRST_NAMESPACE_ID} + number), '/')")
 }
 
-/// `<org>/<root namespace>/[subgroup/]*<project namespace>/`, with projects
-/// distributed round-robin over the namespaces so every namespace has the same
-/// number of them.
+/// `<org>/<root namespace>/[subgroup/]*<project namespace>/`.
 fn project_path_expression(shape: Shape) -> String {
     let root = format!(
         "concat('{ORGANIZATION_ID}/', toString({FIRST_NAMESPACE_ID} + {}), '/')",
         namespace_index_expression(shape)
     );
     let mut expression = root;
-    // Subgroup ids are drawn from the project id space so their digit count
-    // matches production, which is what makes the path string realistic.
+    // Subgroup ids come from the project id space so their digit count matches production.
     for depth in 0..shape.path_depth.saturating_sub(3) {
         expression = format!(
             "concat({expression}, toString({} + intDiv(number, {})), '/')",
@@ -304,8 +287,7 @@ fn project_path_expression(shape: Shape) -> String {
     format!("concat({expression}, toString({FIRST_PROJECT_ID} + number), '/')")
 }
 
-/// The checkpoint table's shape comes from the ontology, so the profiler reads
-/// the same DDL the dispatcher's migration would have created.
+/// Same DDL the dispatcher's migration would have created.
 fn checkpoint_table_ddl(prefixed_name: &str) -> anyhow::Result<String> {
     use query_engine::compiler::{emit_create_table, generate_graph_tables_with_prefix};
 
