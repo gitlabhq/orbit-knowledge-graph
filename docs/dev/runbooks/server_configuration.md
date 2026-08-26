@@ -297,7 +297,7 @@ too little.
 
 | Config path | Default | Description |
 |-------------|---------|-------------|
-| `schedule.tasks.code-backfill.publish_window` | `100000` | Pending projects held per publish batch. Also the per-run budget shared between the namespaces that still have pending projects, so it bounds both dispatcher memory (about 70 bytes per project) and how much work one namespace can queue ahead of the others |
+| `schedule.tasks.code-backfill.publish_window` | `200000` | Pending projects held per publish batch. Also the per-run budget shared between the namespaces that still have pending projects, so it bounds both dispatcher memory (about 70 bytes per project) and how much work one namespace can queue ahead of the others |
 | `schedule.tasks.namespace-code-backfill.events_stream_name` | `siphon_stream_main_db` | NATS stream for namespace events |
 | `schedule.tasks.namespace-code-backfill.batch_size` | `100` | Events to process per cycle |
 

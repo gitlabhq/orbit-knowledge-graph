@@ -247,7 +247,7 @@
         "tasks": {
           "code-backfill": {
             "cron": "0 */1 * * * *",
-            "publish_window": 100000
+            "publish_window": 200000
           },
           "global": {
             "cron": "0 */1 * * * *"
@@ -411,7 +411,7 @@
         "publish_window": {
           "type": "integer",
           "format": "uint",
-          "default": 100000,
+          "default": 200000,
           "minimum": 0
         }
       }
@@ -1537,7 +1537,7 @@
           "default": {
             "code-backfill": {
               "cron": "0 */1 * * * *",
-              "publish_window": 100000
+              "publish_window": 200000
             },
             "global": {
               "cron": "0 */1 * * * *"
@@ -1576,7 +1576,7 @@
           "$ref": "#/$defs/CodeBackfillSweepConfig",
           "default": {
             "cron": "0 */1 * * * *",
-            "publish_window": 100000
+            "publish_window": 200000
           }
         },
         "global": {

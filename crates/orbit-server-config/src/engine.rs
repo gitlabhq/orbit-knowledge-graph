@@ -552,7 +552,7 @@ impl Default for SiphonRouterConfig {
 }
 
 fn default_code_backfill_publish_window() -> usize {
-    100_000
+    200_000
 }
 
 /// Cadence for the coverage-driven code-backfill sweep and its publish batch size.
