@@ -91,7 +91,13 @@ impl CodeBackfill {
 
     pub async fn dispatch_enabled(&self, dispatch_id: Uuid) -> Result<DispatchOutcome, TaskError> {
         let enabled = self.fetch_enabled_namespaces().await?;
-        self.dispatch_for_namespaces(&enabled, dispatch_id).await
+        let outcome = self.dispatch_for_namespaces(&enabled, dispatch_id).await?;
+        // Only this path sees the whole fleet; a CDC dispatch carries a handful of namespaces.
+        self.namespaces_with_pending.store(
+            enabled.len().saturating_sub(outcome.drained_paths.len()),
+            Ordering::Relaxed,
+        );
+        Ok(outcome)
     }
 
     pub async fn dispatch_for_namespaces(
@@ -102,7 +108,6 @@ impl CodeBackfill {
         let mut outcome = DispatchOutcome::default();
         let mut window: Vec<PendingProject> = Vec::new();
         let share = self.share_per_namespace(namespaces.len());
-        let mut with_pending = 0usize;
         // Random order so the remainder does not always fall on the same namespaces.
         let mut order: Vec<usize> = (0..namespaces.len()).collect();
         order.shuffle(&mut rand::rng());
@@ -115,7 +120,6 @@ impl CodeBackfill {
                 outcome.drained_paths.push(traversal_path.clone());
                 continue;
             }
-            with_pending += 1;
             window.extend(pending);
             if window.len() >= self.publish_window {
                 self.publish_window(&mut window, dispatch_id, &mut outcome)
@@ -124,8 +128,6 @@ impl CodeBackfill {
         }
         self.publish_window(&mut window, dispatch_id, &mut outcome)
             .await?;
-        self.namespaces_with_pending
-            .store(with_pending, Ordering::Relaxed);
 
         if outcome.dispatched > 0 || outcome.skipped > 0 {
             info!(
@@ -226,8 +228,6 @@ impl CodeBackfill {
     ) -> Result<(), TaskError> {
         window.shuffle(&mut rand::rng());
         let campaign_id = self.campaign.current();
-        let mut dispatched = 0u64;
-        let mut skipped = 0u64;
 
         for project in window.iter() {
             let request = CodeIndexingTaskRequest {
@@ -246,9 +246,16 @@ impl CodeBackfill {
                 TaskError::new(error)
             })?;
 
+            // Recorded as they happen so a failure mid-batch cannot drop what is already on the wire.
             match self.nats.publish(&subscription, &envelope).await {
-                Ok(()) => dispatched += 1,
-                Err(crate::nats::NatsError::PublishDuplicate) => skipped += 1,
+                Ok(()) => {
+                    outcome.dispatched += 1;
+                    self.metrics.record_requests_published(METRIC_NAME, 1);
+                }
+                Err(crate::nats::NatsError::PublishDuplicate) => {
+                    outcome.skipped += 1;
+                    self.metrics.record_requests_skipped(METRIC_NAME, 1);
+                }
                 Err(error) => {
                     self.metrics.record_error(METRIC_NAME, "publish");
                     return Err(TaskError::new(error));
@@ -256,12 +263,6 @@ impl CodeBackfill {
             }
         }
 
-        // Per window, so a later query error cannot drop the counts of what is already published.
-        self.metrics
-            .record_requests_published(METRIC_NAME, dispatched);
-        self.metrics.record_requests_skipped(METRIC_NAME, skipped);
-        outcome.dispatched += dispatched;
-        outcome.skipped += skipped;
         window.clear();
         Ok(())
     }
