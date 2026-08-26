@@ -128,22 +128,6 @@ properties:
     mutable: false
     description: "End column."
 
-  search_text:
-    type: string
-    source: search_text
-    filterable: false
-    nullable: false
-    mutable: false
-    description: "Space-joined lowercase identifier tokens from fqn and file_path, for ranked code search."
-
-  token_count:
-    type: int64
-    source: token_count
-    filterable: false
-    nullable: false
-    mutable: false
-    description: "Number of tokens in search_text (BM25 document length)."
-
   content:
     type: string
     virtual:
@@ -173,8 +157,6 @@ storage:
     - {name: end_byte, type: "Int64", codec: ["T64", "ZSTD(1)"]}
     - {name: start_char, type: "Int64", codec: ["T64", "ZSTD(1)"]}
     - {name: end_char, type: "Int64", codec: ["T64", "ZSTD(1)"]}
-    - {name: search_text, type: "String", default: "''", codec: ["ZSTD(9)"]}
-    - {name: token_count, type: "Int64", default: "0", codec: ["T64", "ZSTD(1)"]}
   indexes:
     - {name: idx_id, column: id, type: "bloom_filter(0.0001)", granularity: 1}
     - {name: idx_project_id, column: project_id, type: "bloom_filter(0.0001)", granularity: 1}

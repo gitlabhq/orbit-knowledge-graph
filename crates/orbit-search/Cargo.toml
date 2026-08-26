@@ -8,5 +8,6 @@ license = "LicenseRef-EE"
 workspace = true
 
 [dependencies]
-rust-stemmers = { workspace = true }
+rayon = { workspace = true }
+rustc-hash = { workspace = true }
 stop-words = { workspace = true }

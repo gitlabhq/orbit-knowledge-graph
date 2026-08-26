@@ -83,8 +83,12 @@ pub fn run_remote(
     }
 }
 
-/// Manifest table DDL for DuckDB. Passed through to the compiler as
-/// external DDL so the codegen crate stays schema-agnostic.
+/// Manifest and search-index DDL for DuckDB. Passed through to the compiler
+/// as external DDL so the codegen crate stays schema-agnostic. The doc
+/// macros are the single definition of search-document text: the indexer
+/// derives a per-project gl_def_doc_<pid> table from gl_definition with them
+/// and builds the FTS index over it, so write and read sides cannot drift and
+/// BM25 statistics stay scoped to one project.
 const MANIFEST_DDL: &str = "\
 CREATE TYPE IF NOT EXISTS repo_status AS ENUM ('pending', 'indexing', 'indexed', 'error');
 
@@ -97,7 +101,18 @@ CREATE TABLE IF NOT EXISTS _orbit_manifest (
     status repo_status NOT NULL DEFAULT 'pending',
     last_indexed_at TIMESTAMP,
     error_message VARCHAR
-);";
+);
+
+CREATE OR REPLACE MACRO def_name(fqn) AS
+    regexp_replace(fqn, '^.*[:.#/]', '');
+
+CREATE OR REPLACE MACRO camel_split(txt) AS
+    regexp_replace(regexp_replace(txt, '([A-Z]+)([A-Z][a-z])', '\\1 \\2', 'g'),
+                   '([a-z0-9])([A-Z])', '\\1 \\2', 'g');
+
+CREATE OR REPLACE MACRO fts_doc(txt) AS
+    CASE WHEN camel_split(txt) = txt THEN txt
+         ELSE txt || ' ' || camel_split(txt) END;";
 
 pub fn run_local(ontology_path: Option<PathBuf>) -> Result<()> {
     let ont = load_ontology(ontology_path.as_ref())?;
@@ -316,7 +331,8 @@ mod tests {
         let ddl = query_engine::compiler::generate_local_ddl(&ont, MANIFEST_DDL);
         assert!(ddl.contains("CREATE TABLE"));
         assert!(ddl.contains("_orbit_manifest"));
-        assert!(ddl.contains("search_text"));
+        assert!(ddl.contains("MACRO fts_doc"));
+        assert!(!ddl.contains("search_text"));
         assert!(ddl.contains("SCHEMA_VERSION="));
     }
 
