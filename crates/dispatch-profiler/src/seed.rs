@@ -66,7 +66,7 @@ SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild'
 /// dispatcher holds one `String` per project path, so the digit count is part
 /// of what is being measured.
 const FIRST_NAMESPACE_ID: i64 = 60_000_000;
-const FIRST_PROJECT_ID: i64 = 70_000_000;
+pub const FIRST_PROJECT_ID: i64 = 70_000_000;
 const ORGANIZATION_ID: i64 = 1;
 
 #[derive(Clone, Copy)]
@@ -79,6 +79,23 @@ pub struct Shape {
     /// Segments in a project's traversal path. 3 is a project directly under a
     /// root namespace; 4 and 5 model subgroup nesting.
     pub path_depth: usize,
+    /// Share of all projects that lands in one namespace, so the dispatcher can
+    /// be measured against a skewed fleet rather than an even one.
+    pub big_namespace_pct: u64,
+}
+
+impl Shape {
+    /// Projects assigned to namespace 0 rather than spread round-robin.
+    pub fn big_namespace_projects(&self) -> u64 {
+        self.projects * self.big_namespace_pct / 100
+    }
+
+    fn spread_namespaces(&self) -> u64 {
+        match self.big_namespace_pct {
+            0 => self.namespaces.max(1),
+            _ => (self.namespaces - 1).max(1),
+        }
+    }
 }
 
 pub struct Databases {
@@ -248,6 +265,19 @@ impl Seeder {
     }
 }
 
+/// Which namespace a project row belongs to, matching the mapping the profiler
+/// reverses to attribute a published request back to its namespace.
+fn namespace_index_expression(shape: Shape) -> String {
+    let spread = shape.spread_namespaces();
+    match shape.big_namespace_pct {
+        0 => format!("(number % {spread})"),
+        _ => {
+            let big = shape.big_namespace_projects();
+            format!("if(number < {big}, 0, 1 + ((number - {big}) % {spread}))")
+        }
+    }
+}
+
 /// `<org>/<root namespace>/`
 fn namespace_path_expression() -> String {
     format!("concat('{ORGANIZATION_ID}/', toString({FIRST_NAMESPACE_ID} + number), '/')")
@@ -257,9 +287,9 @@ fn namespace_path_expression() -> String {
 /// distributed round-robin over the namespaces so every namespace has the same
 /// number of them.
 fn project_path_expression(shape: Shape) -> String {
-    let namespaces = shape.namespaces.max(1);
     let root = format!(
-        "concat('{ORGANIZATION_ID}/', toString({FIRST_NAMESPACE_ID} + (number % {namespaces})), '/')"
+        "concat('{ORGANIZATION_ID}/', toString({FIRST_NAMESPACE_ID} + {}), '/')",
+        namespace_index_expression(shape)
     );
     let mut expression = root;
     // Subgroup ids are drawn from the project id space so their digit count
