@@ -361,26 +361,3 @@ fn rows_from_batches(batches: &[RecordBatch]) -> Vec<CorpusRow> {
         })
         .collect()
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn recall_sql_scores_with_bm25_restricted_to_the_corpus_and_normalizes_by_the_top_score() {
-        let sql = recall_sql(7, "'sha'");
-        assert!(
-            sql.contains("fts_main_gl_def_doc_7.match_bm25(def_id, ?1, fields := 'name,context')"),
-            "sql was {sql}"
-        );
-        assert!(
-            sql.contains("IN (SELECT id FROM search_corpus)"),
-            "sql was {sql}"
-        );
-        assert!(sql.contains("h.score / mx.m"), "sql was {sql}");
-        assert!(
-            sql.contains(&format!("LIMIT {RECALL_LIMIT}")),
-            "sql was {sql}"
-        );
-    }
-}

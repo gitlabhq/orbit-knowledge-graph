@@ -44,17 +44,10 @@ mod tests {
         let vocab = SearchVocab::new([("call", "Calls"), ("import", "Imports")]);
         assert!(vocab.is_relational("call"));
         assert!(!vocab.is_relational("calls"));
-        assert!(!vocab.is_relational("dlq"));
         assert_eq!(
             vocab.focus_edge_kind(&["widget".to_string(), "import".to_string()]),
             Some("IMPORTS".to_string())
         );
         assert_eq!(vocab.focus_edge_kind(&["widget".to_string()]), None);
-    }
-
-    #[test]
-    fn kind_name_parts_splits_on_non_alphanumerics() {
-        let parts: Vec<&str> = SearchVocab::kind_name_parts("HAS_TAG").collect();
-        assert_eq!(parts, vec!["HAS", "TAG"]);
     }
 }

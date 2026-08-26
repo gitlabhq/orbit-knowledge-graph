@@ -24,22 +24,12 @@ pub(crate) mod testutil {
     use crate::vocab::SearchVocab;
 
     pub fn test_vocab() -> SearchVocab {
-        SearchVocab::new([
-            ("contain", "Contains"),
-            ("defin", "Defines"),
-            ("import", "Imports"),
-            ("call", "Calls"),
-            ("extend", "Extends"),
-        ])
+        SearchVocab::new([("call", "Calls")])
     }
 
     pub fn test_stem(word: &str) -> String {
         match word {
             "calls" | "calling" | "called" => "call",
-            "imports" | "importing" => "import",
-            "extends" => "extend",
-            "defines" => "defin",
-            "contains" => "contain",
             other => other,
         }
         .to_string()

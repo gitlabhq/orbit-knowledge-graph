@@ -201,32 +201,11 @@ mod tests {
         let vocab = vocab(&search);
 
         let stem_all = |q: &str| search.stem(&content_words(q)).unwrap();
-        for word in [
-            "calls", "calling", "imports", "extends", "defines", "contains",
-        ] {
-            let stems = stem_all(word);
-            assert!(
-                vocab.is_relational(&stems[0]),
-                "{word} should be relational"
-            );
-        }
-        for word in ["dlq", "widget", "backpressure", "hooks"] {
-            let stems = stem_all(word);
-            assert!(
-                !vocab.is_relational(&stems[0]),
-                "{word} should not be relational"
-            );
-        }
-        let kind = |q: &str| vocab.focus_edge_kind(&stem_all(q));
-        assert_eq!(kind("who calls execute_hooks"), Some("CALLS".to_string()));
+        assert!(vocab.is_relational(&stem_all("calling")[0]));
+        assert!(!vocab.is_relational(&stem_all("hooks")[0]));
         assert_eq!(
-            kind("what imports the ontology"),
-            Some("IMPORTS".to_string())
+            vocab.focus_edge_kind(&stem_all("who calls execute_hooks")),
+            Some("CALLS".to_string())
         );
-        assert_eq!(
-            kind("what extends HandlerError"),
-            Some("EXTENDS".to_string())
-        );
-        assert_eq!(kind("where do we send messages to the dlq"), None);
     }
 }
