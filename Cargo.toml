@@ -39,6 +39,7 @@ members = [
   "crates/utils",
   "crates/integration-tests",
   "crates/duckdb-client",
+  "crates/dispatch-profiler",
   "crates/fuzz",
 ]
 
@@ -187,6 +188,11 @@ reqwest = { version = "0.13", default-features = false, features = ["json", "que
 rustls = { version = "0.23.36", default-features = false, features = ["aws_lc_rs"] }
 health-check = { path = "crates/health-check" }
 gitlab-client = { path = "crates/gitlab-client" }
+
+[profile.memprofile]
+inherits = "release"
+debug = 1
+strip = false
 
 [profile.fuzz]
 inherits = "dev"

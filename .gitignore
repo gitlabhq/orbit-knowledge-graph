@@ -74,3 +74,6 @@ e2e/report.html
 *.tfstate.backup
 *.tfvars
 !bench/infra/.terraform.lock.hcl
+
+# Local memory-profiling output (dispatch-profiler, code-index-profiler)
+.memprofile/
