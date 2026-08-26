@@ -1,11 +1,28 @@
+pub struct GraphEdge {
+    pub kind: u16,
+    pub source: i64,
+    pub target: i64,
+}
+
+pub struct Graph {
+    pub kinds: Vec<String>,
+    pub edges: Vec<GraphEdge>,
+}
+
 #[derive(Clone)]
 pub struct CorpusRow {
-    pub id: String,
+    pub id: i64,
     pub fqn: String,
     pub kind: String,
     pub loc: String,
-    pub end_line: String,
-    pub degree: String,
+    pub end_line: i64,
+    pub degree: u64,
+    pub grams: u64,
+}
+
+pub struct TermSeeds {
+    pub seeds: Vec<(i64, f64)>,
+    pub weight: f64,
 }
 
 pub struct Edge {

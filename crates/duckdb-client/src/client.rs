@@ -23,6 +23,17 @@ fn is_lock_error(e: &duckdb::Error) -> bool {
 }
 
 impl DuckDbClient {
+    /// INSTALL hits extensions.duckdb.org only when the extension is not yet
+    /// cached under ~/.duckdb, so only search paths call this; unrelated
+    /// commands must keep working without network or extension availability.
+    pub fn load_fts(&self) -> Result<()> {
+        self.conn
+            .execute_batch("INSTALL fts; LOAD fts;")
+            .map_err(|e| {
+                DuckDbError::Schema(format!("failed to load the DuckDB fts extension: {e}"))
+            })
+    }
+
     /// Retries with exponential backoff (capped at 5s per attempt, ~26s
     /// total) if another process holds the write lock.
     pub fn open(path: &Path) -> Result<Self> {

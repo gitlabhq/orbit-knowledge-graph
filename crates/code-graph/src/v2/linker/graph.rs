@@ -1328,10 +1328,6 @@ impl<C: orbit_utils::arrow::RowEnvelope> AsRecordBatch<C> for DefinitionRow<'_> 
         b.col("definition_type")?
             .push_str(self.def.definition_type)?;
         write_range(b, &self.def.range)?;
-        let (search_text, token_count) =
-            orbit_search::search_document(self.pool.get(self.def.fqn), self.file_path);
-        b.col("search_text")?.push_str(&search_text)?;
-        b.col("token_count")?.push_int(token_count)?;
         Ok(())
     }
 }
