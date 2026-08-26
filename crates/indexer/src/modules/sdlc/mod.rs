@@ -1,4 +1,5 @@
 mod datalake;
+mod deleted_rows;
 mod handler;
 mod metrics;
 pub(crate) mod observer;
