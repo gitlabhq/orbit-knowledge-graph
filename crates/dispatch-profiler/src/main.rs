@@ -1,8 +1,4 @@
-//! Peak-memory profiler for the dispatcher's code-backfill enumeration.
-//!
-//! Seeds a synthetic datalake at production scale, then runs the same
-//! `CodeBackfill` the `DispatchIndexing` mode runs, with a counting NATS in
-//! place of the broker, while sampling RSS, footprint and requested bytes.
+//! Runs the dispatcher's real code-backfill against a synthetic datalake, sampling memory.
 
 #[cfg(feature = "track-alloc")]
 #[global_allocator]
@@ -65,6 +61,8 @@ struct Args {
     /// Sleep per publish, standing in for the JetStream ack round trip.
     #[arg(long, default_value_t = 0)]
     publish_delay_us: u64,
+    #[arg(long)]
+    publish_window: Option<usize>,
 
     #[arg(long, default_value = "run")]
     label: String,
@@ -87,6 +85,7 @@ struct Report {
     enumerate_ms: u128,
     dispatch_ms: u128,
     total_ms: u128,
+    publish_window: usize,
     peaks: memory::Peaks,
     process: memory::ProcessMemory,
     allocator: memory::AllocatorInfo,
@@ -103,9 +102,7 @@ struct ReportShape {
     big_namespace_pct: u64,
 }
 
-/// Queue position statistics, in the terms the fleet-wide shuffle was judged on:
-/// how far into the queue a namespace's first request sits, and the longest
-/// stretch the queue is held by one namespace.
+/// Queue position statistics, in the terms the fleet-wide shuffle was judged on.
 #[derive(serde::Serialize)]
 struct Fairness {
     max_same_namespace_run: u64,
@@ -146,9 +143,7 @@ fn fairness(order: crate::nats_stub::PublishOrder) -> Fairness {
     }
 }
 
-/// After the dispatch has returned and the allocator has been asked to release
-/// what it is holding: the part of the peak that is retention rather than live
-/// data.
+/// Measured after `mi_collect`, so retention shows up separately from live data.
 #[derive(serde::Serialize)]
 struct Settled {
     process: memory::ProcessMemory,
@@ -203,12 +198,16 @@ async fn main() -> anyhow::Result<()> {
             big_namespace_projects: shape.big_namespace_projects(),
         }),
     ));
+    let publish_window = args
+        .publish_window
+        .unwrap_or_else(|| orbit_server_config::CodeBackfillSweepConfig::default().publish_window);
     let backfill = CodeBackfill::new(
         nats.clone(),
         seeder.configuration(&args.graph_database).build_client(),
         seeder.configuration(&args.datalake_database).build_client(),
         ScheduledTaskMetrics::new(),
         Arc::new(CampaignState::new()),
+        publish_window,
     );
 
     std::fs::create_dir_all(&args.out_dir)?;
@@ -264,6 +263,7 @@ async fn main() -> anyhow::Result<()> {
         enumerate_ms,
         dispatch_ms,
         total_ms,
+        publish_window,
         peaks,
         process,
         allocator,

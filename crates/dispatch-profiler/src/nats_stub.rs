@@ -1,7 +1,4 @@
-//! A `NatsServices` that counts publishes instead of sending them.
-//!
-//! The testkit mock keeps every published envelope, which at a million
-//! dispatches would dominate the very measurement being taken.
+//! Counts publishes instead of keeping envelopes, which would dominate the measurement.
 
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -12,8 +9,7 @@ use indexer::nats::{NatsMessage, NatsServices};
 use indexer::types::{Envelope, Subscription};
 use nats_client::{KvEntry, KvPutOptions, KvPutResult, NatsError};
 
-/// Reverses the seeder's project-to-namespace mapping, so a published subject
-/// can be attributed without the request payload being parsed.
+/// Attributes a subject to a namespace without parsing the request payload.
 pub struct Layout {
     pub first_project_id: i64,
     pub namespaces: u64,
@@ -34,9 +30,7 @@ impl Layout {
     }
 }
 
-/// Publish order per namespace: where each namespace first appears in the queue
-/// and how long a single namespace holds it uninterrupted. These are the two
-/// numbers the fleet-wide shuffle was introduced to move.
+/// The two numbers the fleet-wide shuffle was introduced to move.
 #[derive(serde::Serialize)]
 pub struct PublishOrder {
     pub max_same_namespace_run: u64,

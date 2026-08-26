@@ -1,13 +1,13 @@
-# Dispatcher peak memory, August 2026
+# Dispatcher peak memory and publish fairness, August 2026
 
 The dispatcher OOM-killed four times on 2026-08-24 between 20:30 and 20:40 UTC at its 512 MiB
 limit, and no code backfill was published until the limit was raised. The cause was the code
 backfill sweep: it enumerated every enabled namespace's pending projects into one list and only
 started publishing after the last namespace was read. On gitlab.com that list was 2.33M projects.
 
-Bounding the publish to a 50,000-project window cuts peak memory for that sweep from 172-185 MiB
-to 26-27 MiB (allocated bytes: 163 MiB to 4.5 MiB) with no change in what gets dispatched and no
-change in wall-clock time.
+Publishing in batches, with each namespace taking an equal share of a batch, cuts peak memory for
+that sweep from 172 MiB to 29 MiB (allocated bytes: 163 MiB to 8.7 MiB) and at the same time makes
+the queue order fairer than the fleet-wide shuffle it replaces.
 
 ## What production did
 
@@ -31,41 +31,54 @@ namespace is pending at once. This is not a rare state, it is what every schema 
 (`numbers()`-generated rows, so seeding never runs through the profiled process), then runs the
 same `CodeBackfill` the `DispatchIndexing` mode runs against it with a counting NATS in place of
 the broker. It samples RSS, macOS `phys_footprint` and requested bytes from a tracking allocator,
-and reports the allocator's own peak commit. See
+and attributes every published subject back to its namespace so publish order can be measured. See
 [the runbook](../runbooks/dispatcher_memory_profiling.md).
 
 The profiler builds with mimalloc `secure`, which is what `orbit-server` ships, so the gap between
 requested bytes and footprint is production's allocator overhead and not a cheaper default's.
 
-## Measurements
+## Memory
 
-macOS, mimalloc secure, 2,500 namespaces unless stated. `footprint` is the kernel's lifetime
-high-water mark, `requested` is bytes the program asked the allocator for at the peak.
+macOS, mimalloc secure, 2,500 namespaces, 100,000 publish window (the configured default).
+`footprint` is the kernel's lifetime high-water mark, `requested` is bytes the program asked the
+allocator for at the peak.
 
-| Shape | Version | Dispatched | Footprint MiB | RSS MiB | Requested MiB | Allocations | ms |
-|---|---|---|---|---|---|---|---|
-| 2.33M pending (production) | before | 2,330,000 | 171.9 | 208.4 | 162.6 | 33.6M | 12,276 |
-| 2.33M pending (production) | after | 2,330,000 | **26.3** | 38.5 | **4.5** | 33.5M | 12,122 |
-| 2.33M pending, repeat run | before | 2,330,000 | 185.2 | 220.8 | 162.6 | 33.6M | 13,531 |
-| 2.33M pending, repeat run | after | 2,330,000 | **27.4** | 39.8 | **4.5** | 33.5M | 13,653 |
-| 2.33M, 5-segment paths | before | 2,330,000 | 221.2 | 245.7 | 202.6 | 33.6M | 12,614 |
-| 2.33M, 5-segment paths | after | 2,330,000 | **29.9** | 42.1 | **5.4** | 33.5M | 12,594 |
-| 2.33M, 90% checkpointed | before | 233,000 | 34.9 | 51.1 | 17.8 | 6.4M | 13,110 |
-| 2.33M, 90% checkpointed | after | 233,000 | **25.4** | 38.8 | **5.6** | 4.2M | 12,764 |
-| 2.33M, fully checkpointed | before | 0 | 21.4 | 33.8 | 1.8 | 3.4M | 13,525 |
-| 2.33M, fully checkpointed | after | 0 | 23.3 | 35.7 | 1.8 | **1.0M** | 13,073 |
-| 1M in a single namespace | before | 1,000,000 | 167.0 | 179.1 | 113.6 | 14.0M | 1,596 |
-| 1M in a single namespace | after | 1,000,000 | 142.8 | 154.9 | 83.2 | 14.0M | 1,519 |
+| Shape | Version | Dispatched | Footprint MiB | RSS MiB | Requested MiB | ms |
+|---|---|---|---|---|---|---|
+| 2.33M pending | before | 2,330,000 | 171.9 | 208.4 | 162.6 | 12,276 |
+| 2.33M pending | after | 100,000 | 29.0 | 43.1 | 8.7 | 8,239 |
+| 2.33M rows, 90% checkpointed | before | 233,000 | 34.1 | 50.5 | 17.8 | 13,047 |
+| 2.33M rows, 90% checkpointed | after | 100,000 | 29.7 | 44.6 | 8.6 | 12,226 |
 
-Dispatched counts are identical before and after in every shape, which is the correctness check on
-the checkpoint filter's move from a `HashSet` to a sorted `Vec`.
+The "after" rows publish one batch rather than the whole backlog: each namespace takes the batch
+size divided by the namespaces that still have pending projects (40 each here), and the rest of the
+backlog arrives on later runs as projects are checkpointed. Drain rate stays bound by indexing
+capacity, not by queue depth.
 
 These are macOS readings, so they bound the Linux numbers from above: mimalloc's purge returns
 pages with `MADV_DONTNEED`, which Linux drops out of RSS and macOS keeps in the footprint. The
 requested-bytes column is platform-independent.
 
-Path length matters because the dispatcher holds one heap-allocated `String` per pending project:
-going from 3 to 5 path segments added 40 MiB to the old peak and 3.6 MiB to the new one.
+## Publish fairness
+
+Batching on its own reintroduced the problem the fleet-wide shuffle was added to fix
+([!1407](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/1407)): with a
+namespace's pending list appended whole, a namespace larger than the batch is published as one
+block, and the work queue keeps that order until it drains, because the stream holds one message
+per subject under `WorkQueue` retention. Later runs cannot dilute a block already in the queue.
+
+Same fleet, but with 20% of the 2.33M projects concentrated in one namespace:
+
+| Variant | Window | Dispatched | Footprint MiB | Requested MiB | Longest single-namespace run | Other namespaces' first queue position p50 / p95 / max |
+|---|---|---|---|---|---|---|
+| Fleet-wide shuffle | n/a | 2,330,000 | 181.7 | 159.9 | 8 | 2,146 / 9,185 / 28,910 |
+| Batches, no per-namespace share | 50,000 | 2,330,000 | 103.9 | 40.9 | 466,000 | 1,379,133 / 2,190,859 / 2,292,273 |
+| Batches with the share | 50,000 | 50,000 | 40.1 | 7.1 | 2 | 1,701 / 6,742 / 15,810 |
+| Batches with the share | 100,000 | 100,000 | 36.7 | 8.6 | 2 | 1,719 / 7,372 / 19,238 |
+
+The share keeps every one of the 2,500 namespaces present in the queue at all times, so no
+namespace waits for another to finish. Window size trades queue depth against how often a run has
+to top it up, not fairness.
 
 ## Where the old peak went
 
@@ -75,66 +88,42 @@ At 2.33M projects, roughly:
 - 56-75 MiB for the traversal-path `String`s (one allocation each)
 - the rest in per-namespace transients: the whole HTTP response body buffered as one `Vec<u8>`,
   then all its `RecordBatch`es, then a `Vec<i64>` and a `Vec<String>` extracted from them, then
-  the `Vec<PendingProject>` built from those — four representations of the same rows alive at once.
+  the `Vec<PendingProject>` built from those, four representations of the same rows alive at once.
 
 ## Changes
 
-Shipped separately in [!2328](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/2328);
-this branch carries the harness and the measurements only.
+Shipped in [!2328](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/2328).
 
-1. **Publish in 50,000-project windows** instead of accumulating the fleet. This is the fix; the
-   others are small next to it. The shuffle that interleaves namespaces now runs per window, so
-   FIFO consumption still alternates between namespaces rather than draining one namespace first.
-2. **Read the checkpoints before the projects and filter the project stream as it arrives.** An
-   already-indexed namespace no longer materialises its project list at all, which is what drops
-   the fully-checkpointed run from 3.4M allocations to 1.0M.
-3. **Build `PendingProject` directly from each `RecordBatch`**, dropping the intermediate
-   `Vec<i64>` and `Vec<String>`, and consume batches as they stream instead of collecting them.
-4. **Checkpointed ids as a sorted `Vec` + binary search** rather than a `HashSet`: 8 bytes per id
-   with no empty slots to pay for.
-5. **`extend_from_slice` instead of `extend` when buffering a response body.** `Bytes` iterates
-   per byte, so every `fetch_arrow` in the process was pushing one byte at a time.
-
-## Fairness of the publish order
-
-Bounding memory by publishing in windows reintroduced the problem the fleet-wide shuffle was added
-to fix ([!1407](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/1407)): a
-namespace with more pending projects than one window is published as a single block, and the work
-queue keeps that order until it drains. Capping each namespace's share of a window fixes both at
-once. Measured on a skewed fleet, 2,500 namespaces and 2.33M pending with 20% of the projects in
-one namespace:
-
-| Variant | Dispatched | Footprint MiB | Requested MiB | Longest single-namespace run | Other namespaces' first queue position p50 / p95 / max |
-|---|---|---|---|---|---|
-| Fleet-wide shuffle | 2,330,000 | 181.7 | 159.9 | 8 | 2,146 / 9,185 / 28,910 |
-| Window, no per-namespace cap | 2,330,000 | 103.9 | 40.9 | 466,000 | 1,379,133 / 2,190,859 / 2,292,273 |
-| Window with per-namespace share | 50,000 | 39.8 | 9.3 | 2 | 1,687 / 7,015 / 19,431 |
-
-The capped run publishes a tick's worth (one window, shared equally) rather than the whole backlog,
-so the queue stays shallow and every one of the 2,500 namespaces is represented in it. Drain rate is
-consumer-bound either way; what changes is that no namespace has to wait for another to finish.
+1. Publish in batches of `schedule.tasks.code-backfill.publish_window` projects (default 100,000)
+   instead of accumulating the fleet.
+2. Cap each namespace at its share of a batch, the window divided by the namespaces that still had
+   pending projects on the previous run, so a fleet-wide sweep hands out equal slices and a lone
+   straggler gets the whole batch.
+3. Read the checkpoints before the projects and filter the project stream as it arrives, so an
+   already-indexed namespace never materialises its project list.
+4. Consume the ClickHouse responses as they stream instead of buffering the body and then all of
+   its batches.
+5. Visit namespaces in random order, so the remainder of the division does not always fall on the
+   same ones.
 
 ## Not addressed
 
-- **A single namespace with a very large project count is still unbounded** (1M in one namespace:
-  142.8 MiB). The window only flushes between namespaces, because flushing mid-stream would hold
-  the ClickHouse response open for the length of a publish batch. gitlab.com's enabled namespaces
-  average ~430 projects, so this is a tail risk rather than a live one; keyset pagination on
-  `project_id` is the fix if a namespace ever gets large enough to matter.
-- **The pending-projects query does not deduplicate.** `project_namespace_traversal_paths` is a
-  `ReplacingMergeTree` fed one row per path change, and every other reader of it (the traversal-path
-  dictionaries, the namespace-deletion store) collapses it with `argMax(traversal_path, version)`
-  or `FINAL`. The backfill query reads raw rows, which is why the first successful tick published
-  1.08M requests and had 1.26M rejected as per-subject duplicates: over half the enumerated rows
-  were older versions of a project already dispatched in the same tick. Deduplicating in SQL would
-  halve the rows read and remove ~1.26M pointless NATS round trips per tick (most of that tick's
-  27 minutes), and would stop dispatching stale paths for moved projects. It does not change peak
-  memory now that the window bounds it, so it belongs in its own change.
-- **`current_routes_under_root` in the namespace-deletion store** materialises every distinct path
-  under the namespace being deleted, with the same per-namespace scaling as the point above. It
-  only runs for scheduled deletions, so one namespace at a time.
-- **The SDLC namespace-change detection path was not profiled.** It materialises
+- The per-namespace checkpoint set is still sized by the namespace (~10-16 MiB per million indexed
+  projects, held one namespace at a time). It is the remaining term that scales with a single
+  namespace rather than with the window. Keyset pagination by project id is the fix if a namespace
+  ever gets large enough for it to matter.
+- A project that never reaches a checkpoint keeps occupying one of its namespace's share slots,
+  because the next scan selects it again. It was already re-published on every run before this
+  change; what is new is that it consumes quota.
+- The pending-projects query does not deduplicate. `project_namespace_traversal_paths` is a
+  `ReplacingMergeTree` fed one row per path change, and every other reader of it collapses versions
+  with `argMax(traversal_path, version)` or `FINAL`. That is why more than half of the first
+  production tick's rows were rejected as per-subject duplicates. Deduplicating in SQL would halve
+  the rows read and remove the wasted round trips, but it does not change peak memory now that the
+  batch bounds it, and it changes which path a moved project is dispatched under.
+- The per-run floor is query latency, not publishing: one enabled-namespaces query plus two per
+  namespace, issued sequentially. Locally that is ~8 s for 2,500 namespaces; against ClickHouse
+  Cloud it will be substantially more.
+- The SDLC namespace-change detection path was not profiled. It materialises
   `BTreeMap<(id, path), BTreeSet<String>>` over the change-detection result, which is bounded by
-  changed namespaces (~200 per tick, ~2,500 on a sweep) rather than by projects. The occasional
-  40 MiB spikes in the steady-state graph are the likely candidate, and they are far from the
-  limit.
+  changed namespaces (~200 per tick, ~2,500 on a sweep) rather than by projects.
