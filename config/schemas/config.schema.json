@@ -246,7 +246,8 @@
       "default": {
         "tasks": {
           "code-backfill": {
-            "cron": "0 */1 * * * *"
+            "cron": "0 */1 * * * *",
+            "publish_window": 100000
           },
           "global": {
             "cron": "0 */1 * * * *"
@@ -396,7 +397,7 @@
       ]
     },
     "CodeBackfillSweepConfig": {
-      "description": "Cadence for the coverage-driven code-backfill sweep.",
+      "description": "Cadence for the coverage-driven code-backfill sweep and its publish batch size.",
       "type": "object",
       "properties": {
         "cron": {
@@ -406,6 +407,12 @@
             "null"
           ],
           "default": null
+        },
+        "publish_window": {
+          "type": "integer",
+          "format": "uint",
+          "default": 100000,
+          "minimum": 0
         }
       }
     },
@@ -1529,7 +1536,8 @@
           "$ref": "#/$defs/ScheduledTasksConfiguration",
           "default": {
             "code-backfill": {
-              "cron": "0 */1 * * * *"
+              "cron": "0 */1 * * * *",
+              "publish_window": 100000
             },
             "global": {
               "cron": "0 */1 * * * *"
@@ -1567,7 +1575,8 @@
         "code-backfill": {
           "$ref": "#/$defs/CodeBackfillSweepConfig",
           "default": {
-            "cron": "0 */1 * * * *"
+            "cron": "0 */1 * * * *",
+            "publish_window": 100000
           }
         },
         "global": {
