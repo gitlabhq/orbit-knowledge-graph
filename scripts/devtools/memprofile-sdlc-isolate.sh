@@ -160,7 +160,7 @@ for arm, count in failures.items():
 
 header = ["metric", "baseline"] + [f"{arm}" for arm in arms]
 print("| " + " | ".join(header) + " |")
-print("|" + "---|" * (len(header) - 1) + "---:|")
+print("|---|" + "---:|" * (len(header) - 1))
 
 for name, path, scale, fmt in METRICS:
     base = median_of(baseline, path, scale)
