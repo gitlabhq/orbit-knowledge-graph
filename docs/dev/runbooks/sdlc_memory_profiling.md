@@ -128,3 +128,17 @@ still differ in how much duplicate work merges have collapsed.
 
 Check `graph rows` and the failure warnings before believing any peak: an arm
 that wrote fewer rows did less work, and its peak is not a memory win.
+
+Read the `run-to-run spread of peak` row before believing any delta. At
+production shape the peak lands wherever slot scheduling puts it, and one arm's
+own runs vary by around 10%, so `REPEATS=2` there resolves nothing smaller than
+that. Two ways to get a usable signal:
+
+- Restrict the run to the pipeline a change targets (`--only`). One pipeline
+  removes the scheduling lottery, and the spread drops to a few percent.
+- Prefer the cumulative counters (`alloc total`, `allocs`) for changes that cut
+  transient allocation rather than residency. They do not depend on when the peak
+  landed and are stable to a few percent across runs.
+
+Arms are interleaved one round at a time rather than run back to back, so a long
+sweep's drift falls on every arm equally instead of only on whichever ran last.

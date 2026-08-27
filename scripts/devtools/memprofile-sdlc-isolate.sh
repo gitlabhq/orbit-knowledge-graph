@@ -70,37 +70,42 @@ run_one() {
     "$@" >/dev/null
 }
 
-measure_arm() {
-  local binary="$1" arm="$2"
-  shift 2
-  for run in $(seq 1 "$REPEATS"); do
-    local database="sdlc_graph_${arm}"
-    run_one "$binary" "${arm}-${run}" "$database" "$@"
-    if [[ "$run" == "1" ]]; then
-      if [[ "$arm" == "baseline" ]]; then
-        "$HERE/memprofile-verify-output.py" --url "$CH_URL" --password "$CH_PASSWORD" \
-          --baseline-db "$database" --dump "$FINGERPRINT" >/dev/null
-        echo "   fingerprint dumped"
+measure_one() {
+  local binary="$1" arm="$2" run="$3"
+  shift 3
+  local database="sdlc_graph_${arm}"
+  run_one "$binary" "${arm}-${run}" "$database" "$@"
+  if [[ "$run" == "1" ]]; then
+    if [[ "$arm" == "baseline" ]]; then
+      "$HERE/memprofile-verify-output.py" --url "$CH_URL" --password "$CH_PASSWORD" \
+        --baseline-db "$database" --dump "$FINGERPRINT" >/dev/null
+      echo "   fingerprint dumped"
+    else
+      local verdict
+      verdict=$("$HERE/memprofile-verify-output.py" --url "$CH_URL" \
+        --password "$CH_PASSWORD" --candidate-db "$database" \
+        --expect "$FINGERPRINT")
+      printf '%s\n' "$verdict" > "$OUT_DIR/${arm}.identity.txt"
+      if grep -q "byte-identical" <<<"$verdict"; then
+        echo "   output identical"
       else
-        local verdict
-        verdict=$("$HERE/memprofile-verify-output.py" --url "$CH_URL" \
-          --password "$CH_PASSWORD" --candidate-db "$database" \
-          --expect "$FINGERPRINT")
-        printf '%s\n' "$verdict" > "$OUT_DIR/${arm}.identity.txt"
-        if grep -q "byte-identical" <<<"$verdict"; then
-          echo "   output identical"
-        else
-          echo "   OUTPUT DIFFERS (see $OUT_DIR/${arm}.identity.txt)"
-        fi
+        echo "   OUTPUT DIFFERS (see $OUT_DIR/${arm}.identity.txt)"
       fi
     fi
-    ch "DROP DATABASE IF EXISTS $database" >/dev/null
-  done
+  fi
+  ch "DROP DATABASE IF EXISTS $database" >/dev/null
 }
 
-measure_arm "$BASELINE" baseline "$@"
-for index in "${!ARM_LABELS[@]}"; do
-  measure_arm "${ARM_BINARIES[$index]}" "${ARM_LABELS[$index]}" "$@"
+# Arms are interleaved rather than run back to back, because the peak drifts over
+# a long sweep: which pipelines happen to be mid-page when the peak lands depends
+# on slot scheduling, and the datalake progressively warms the host page cache.
+# Running every arm once per round puts each of them under the same conditions.
+for run in $(seq 1 "$REPEATS"); do
+  echo "########## round $run of $REPEATS"
+  measure_one "$BASELINE" baseline "$run" "$@"
+  for index in "${!ARM_LABELS[@]}"; do
+    measure_one "${ARM_BINARIES[$index]}" "${ARM_LABELS[$index]}" "$run" "$@"
+  done
 done
 
 echo
@@ -129,6 +134,18 @@ def median_of(reports, path, scale):
             value = value[key]
         values.append(value / scale)
     return statistics.median(values) if values else float("nan")
+
+
+def spread(reports, path, scale):
+    values = []
+    for report in reports:
+        value = report
+        for key in path:
+            value = value[key]
+        values.append(value / scale)
+    if len(values) < 2:
+        return float("nan")
+    return (max(values) - min(values)) / statistics.median(values) * 100
 
 
 def identity(arm):
@@ -174,6 +191,15 @@ for name, path, scale, fmt in METRICS:
         delta = (value - base) / base * 100 if base else 0.0
         cells.append(f"{fmt.format(value)} ({delta:+.1f}%)")
     print("| " + " | ".join(cells) + " |")
+
+# Without this row a reader cannot tell which deltas above are resolvable: the
+# peak lands wherever slot scheduling puts it, so one arm's own runs vary.
+peak = ("peaks", "exact_max_footprint")
+cells = ["run-to-run spread of peak", f"{spread(baseline, peak, GIB):.1f}%"]
+for arm in arms:
+    reports = load(arm)
+    cells.append(f"{spread(reports, peak, GIB):.1f}%" if reports else "-")
+print("| " + " | ".join(cells) + " |")
 
 print("| output identical | (reference) | " + " | ".join(identity(arm) for arm in arms) + " |")
 PY
