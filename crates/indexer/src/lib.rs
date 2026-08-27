@@ -334,6 +334,7 @@ pub async fn run_dispatcher(
         config.datalake.build_client(),
         metrics.clone(),
         campaign.clone(),
+        config.schedule.tasks.code_backfill.publish_window,
     ));
 
     let tasks: Vec<Box<dyn ScheduledTask>> = vec![
