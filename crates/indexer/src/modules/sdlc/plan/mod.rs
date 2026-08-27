@@ -346,6 +346,58 @@ mod tests {
     use arrow::datatypes::{DataType, Field, Schema};
     use std::sync::Arc;
 
+    fn partition(index: u32, total: u32) -> PartitionAssignment {
+        PartitionAssignment {
+            index,
+            total,
+            key_columns: vec!["id".to_string()],
+            lower_bound: Some(vec!["100".to_string()]),
+            upper_bound: Some(vec!["500".to_string()]),
+        }
+    }
+
+    #[test]
+    fn into_partitions_divides_the_page_budget_and_renders_it_as_the_limit() {
+        let plan = test_plan(vec!["id"], 1_000_000);
+        let partitions = plan
+            .prepare()
+            .into_partitions((0..4).map(|index| partition(index, 4)).collect());
+
+        assert_eq!(partitions.len(), 4);
+        for (_, query) in &partitions {
+            assert_eq!(query.batch_size(), 250_000);
+            let sql = query.to_sql().expect("renders extract SQL");
+            assert!(sql.contains("LIMIT 250000"), "sql: {sql}");
+        }
+    }
+
+    #[test]
+    fn into_partitions_floors_the_share_at_the_configured_minimum() {
+        let plan = test_plan(vec!["id"], 250_000);
+        let partitions = plan
+            .prepare()
+            .into_partitions((0..3).map(|index| partition(index, 3)).collect());
+
+        for (_, query) in &partitions {
+            assert_eq!(
+                query.batch_size(),
+                orbit_server_config::MIN_DATALAKE_BATCH_SIZE
+            );
+        }
+    }
+
+    // The floor must not raise a share above what the operator configured, or every
+    // partition would read more rows per page than the unpartitioned plan would.
+    #[test]
+    fn into_partitions_never_raises_the_share_above_the_plan_budget() {
+        let plan = test_plan(vec!["id"], 50_000);
+        let partitions = plan.prepare().into_partitions(vec![partition(0, 1)]);
+
+        assert_eq!(partitions[0].1.batch_size(), 50_000);
+        let sql = partitions[0].1.to_sql().expect("renders extract SQL");
+        assert!(sql.contains("LIMIT 50000"), "sql: {sql}");
+    }
+
     fn test_plan(sort_key: Vec<&str>, batch_size: u64) -> Plan {
         let sort_key: Vec<String> = sort_key.iter().map(|s| s.to_string()).collect();
         let sort_key_sql = sort_key.join(", ");

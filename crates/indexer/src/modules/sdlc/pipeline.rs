@@ -502,6 +502,7 @@ mod tests {
     use crate::checkpoint::CheckpointError;
     use crate::durability::WriteDurability;
     use crate::modules::sdlc::datalake::{DatalakeError, RecordBatchStream, ScanStats};
+    use crate::modules::sdlc::partitioning::PartitionAssignment;
     use crate::modules::sdlc::test_helpers::test_metrics;
     use crate::observer::NoOpObserver;
     use crate::testkit::test_writer;
@@ -793,6 +794,60 @@ mod tests {
 
         let final_state = store.current_state().unwrap();
         assert!(final_state.cursor_values.is_none(), "should be completed");
+    }
+
+    // Comparing `has_more` against the plan's budget rather than the query's share ends
+    // a partition after one page and marks it complete with rows unread.
+    #[tokio::test]
+    async fn partitioned_share_pages_against_the_query_budget() {
+        let store = Arc::new(RecordingCheckpointStore::new());
+        let plan = simple_plan_with_batch_size("Test", 200_000);
+        let mut partitions = base_query(&plan).into_partitions(vec![
+            PartitionAssignment {
+                index: 0,
+                total: 2,
+                key_columns: vec!["id".to_string()],
+                lower_bound: None,
+                upper_bound: Some(vec!["500".to_string()]),
+            },
+            PartitionAssignment {
+                index: 1,
+                total: 2,
+                key_columns: vec!["id".to_string()],
+                lower_bound: Some(vec!["500".to_string()]),
+                upper_bound: None,
+            },
+        ]);
+        let (_, query) = partitions.remove(0);
+        assert_eq!(query.batch_size(), 100_000);
+
+        let pipeline = Pipeline::new(
+            Arc::new(MultiBatchDatalake {
+                call_count: Mutex::new(0),
+                batch_size: 100_000,
+            }),
+            store.clone(),
+            test_metrics(),
+            Default::default(),
+            &test_ontology(),
+        );
+        pipeline
+            .run_plan(
+                &noop_context(),
+                &plan,
+                query,
+                &position_key(&plan),
+                test_window(),
+                RunDurability::for_mode(IndexingMode::Full),
+            )
+            .await
+            .expect("partitioned run should succeed");
+
+        assert_eq!(
+            store.progress_history().len(),
+            2,
+            "a full page at the divided share must trigger a second read"
+        );
     }
 
     #[tokio::test]
