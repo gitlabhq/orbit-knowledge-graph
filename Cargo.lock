@@ -4140,8 +4140,7 @@ dependencies = [
  "clap",
  "clickhouse-client",
  "indexer",
- "libc",
- "libmimalloc-sys",
+ "memprofile",
  "mimalloc",
  "nats-client",
  "ontology",
@@ -7474,6 +7473,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "488016bfae457b036d996092f6cb448677611ce4449e970ceaf42695203f218a"
 dependencies = [
  "autocfg",
+]
+
+[[package]]
+name = "memprofile"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "libc",
+ "libmimalloc-sys",
+ "serde",
+ "serde_json",
+ "tracing",
 ]
 
 [[package]]
@@ -11808,6 +11819,30 @@ dependencies = [
  "pbkdf2",
  "salsa20",
  "sha2 0.10.9",
+]
+
+[[package]]
+name = "sdlc-profiler"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "clap",
+ "clickhouse-client",
+ "futures",
+ "indexer",
+ "memprofile",
+ "mimalloc",
+ "ontology",
+ "orbit-server-config",
+ "orbit-utils",
+ "query-engine",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]

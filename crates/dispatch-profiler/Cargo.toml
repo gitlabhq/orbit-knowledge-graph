@@ -10,24 +10,12 @@ publish = false
 # pages and free-list encoding change the allocator overhead on top of the
 # requested bytes, which is most of the gap between the two.
 default = ["track-alloc", "secure-alloc"]
-# Wraps the global allocator to count requested bytes. Off gives a clean
-# baseline for measuring the counter's own cost against the same workload.
-track-alloc = []
-# Counts mi_good_size(requested) alongside requested bytes, giving a continuous
-# size-class rounding series. Costs an FFI call per allocation, so it is a
-# diagnostic mode rather than the default.
-good-size = []
+track-alloc = ["memprofile/track-alloc"]
+good-size = ["memprofile/good-size"]
 # Matches orbit-server, which builds mimalloc with guard pages and free-list
 # encoding.
 secure-alloc = ["mimalloc/secure"]
-# Charges a reallocation's new block before the copy, so a grow that moves shows
-# both blocks at the high-water mark.
-realloc-pessimistic = []
-
-[lints.rust]
-# Downgraded from workspace `forbid` to `deny` so the RSS probe can call
-# proc_pid_rusage under a local #[allow(unsafe_code)].
-unsafe_code = "deny"
+realloc-pessimistic = ["memprofile/realloc-pessimistic"]
 
 [lints.clippy]
 all = { level = "warn", priority = -1 }
@@ -39,8 +27,7 @@ bytes = { workspace = true }
 clap = { workspace = true }
 clickhouse-client = { workspace = true }
 indexer = { path = "../indexer" }
-libc = "0.2.186"
-libmimalloc-sys = { version = "0.1.49", features = ["extended"] }
+memprofile = { path = "../memprofile" }
 mimalloc = { workspace = true, features = ["extended"] }
 nats-client = { workspace = true }
 ontology = { path = "../ontology" }

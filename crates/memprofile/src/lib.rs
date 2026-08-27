@@ -1,3 +1,11 @@
+//! RSS-correlated allocation sampling for the memory-profiling harnesses.
+//!
+//! Pairs a tracking global allocator (requested bytes, sharded so 14 rayon
+//! workers do not serialise on one counter) with a background sampler that
+//! writes an RSS/footprint/live-bytes timeline. Both exact kernel and allocator
+//! high-water marks are reported alongside the sampled maxima, so a peak the
+//! sampler cadence missed is still visible.
+
 use std::io::Write;
 use std::path::Path;
 use std::sync::Mutex;

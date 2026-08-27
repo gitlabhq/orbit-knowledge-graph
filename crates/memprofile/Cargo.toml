@@ -1,0 +1,34 @@
+[package]
+name = "memprofile"
+version.workspace = true
+edition = "2024"
+license = "LicenseRef-EE"
+publish = false
+
+[features]
+# Wraps the global allocator to count requested bytes. Off gives a clean
+# baseline for measuring the counter's own cost against the same workload.
+track-alloc = []
+# Counts mi_good_size(requested) alongside requested bytes, giving a continuous
+# size-class rounding series. Costs an FFI call per allocation, so it is a
+# diagnostic mode rather than the default.
+good-size = []
+# Charges a reallocation's new block before the copy, so a grow that moves shows
+# both blocks at the high-water mark.
+realloc-pessimistic = []
+
+[lints.rust]
+# Downgraded from workspace `forbid` to `deny` so the RSS probe can call
+# proc_pid_rusage under a local #[allow(unsafe_code)].
+unsafe_code = "deny"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+
+[dependencies]
+anyhow = { workspace = true }
+libc = "0.2.186"
+libmimalloc-sys = { version = "0.1.49", features = ["extended"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }

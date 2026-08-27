@@ -8,7 +8,8 @@ static GLOBAL: memory::Tracking<mimalloc::MiMalloc> = memory::Tracking(mimalloc:
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
-mod memory;
+use memprofile as memory;
+
 mod nats_stub;
 mod seed;
 

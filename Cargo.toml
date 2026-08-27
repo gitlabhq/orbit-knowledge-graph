@@ -40,6 +40,8 @@ members = [
   "crates/integration-tests",
   "crates/duckdb-client",
   "crates/dispatch-profiler",
+  "crates/memprofile",
+  "crates/sdlc-profiler",
   "crates/fuzz",
 ]
 
