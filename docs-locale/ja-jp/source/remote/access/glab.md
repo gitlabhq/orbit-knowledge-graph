@@ -32,10 +32,10 @@ title: GitLab CLI（`glab`）でOrbitを使用する
 
 [GitLab CLI（`glab`）](https://docs.gitlab.com/cli/)は、コマンドラインからGitLab Orbitをセットアップおよびクエリするための標準的な方法です。
 
-トップレベルコマンドは2つあります。
+`glab orbit`は管理された`orbit`バイナリを実行します。各コマンドをバイナリに転送し、`glab`がダウンロード、検証、および最新状態の維持を自動で行います。バイナリ独自のコマンドリファレンスは`glab orbit remote <command> --help`で確認できます。
 
-- `glab orbit remote`: GitLab Orbit Remote REST APIを呼び出す型付きサブコマンドです。`glab` 1.94以降で利用可能です。
-- `glab orbit setup`: AIエージェント向けにOrbitスキルとMCP設定をワンコマンドでインストールします。将来の`glab`リリースで提供予定です。リリースまでの間は、[MCPクライアントを手動で設定してください](mcp.md#connect-your-mcp-client)。
+- `glab orbit remote`: GitLab Orbit Remote REST APIをクエリします。`glab`がGitLabの認証情報を自動的に注入します。`glab` 1.94以降で利用可能です。
+- `glab orbit setup`: GitLab OrbitスキルのインストールとAIエージェントの設定をガイド付きオンボーディングで行います。
 
 ## 前提条件 {#prerequisites}
 
@@ -50,19 +50,26 @@ title: GitLab CLI（`glab`）でOrbitを使用する
 
 ## AIエージェントをセットアップする {#set-up-your-ai-agent}
 
-`glab orbit setup`は将来の`glab`リリースで提供予定です。リリース後は、ワンコマンドでGitLab OrbitスキルのインストールとAIエージェント（Claude Code、OpenCode、Cursor、Codex、Gemini CLI）向けのMCP設定の書き込みが行えるようになります。
+`glab orbit setup`は、AIコーディングエージェント（Claude Code、OpenCode、Cursor、Codex、Gemini CLI）がグラフを参照できるよう設定し、GitLab Orbitスキルをインストールします。
 
-リリースまでの間は、[MCPクライアントを手動で設定してください](mcp.md#connect-your-mcp-client)。
+```shell
+glab orbit setup
+```
+
+MCPクライアントを接続する場合は、[手動で設定してください](mcp.md#connect-your-mcp-client)。
 
 <!-- markdownlint-disable-next-line MD044 -->
 ## コマンドラインからGitLab Orbitにクエリを実行する {#query-gitlab-orbit-from-the-command-line}
 
-`glab orbit remote`（またはエイリアス`r`）を使用して、GitLab Orbit Remote APIを直接呼び出します。スクリプト作成、デバッグ、クエリ作成前のスキーマ調査に役立ちます。`glab` 1.94以降が必要です。
+`glab orbit remote`を使用して、GitLab Orbit Remote APIを直接呼び出します。スクリプト作成、デバッグ、クエリ作成前のスキーマ調査に役立ちます。`glab` 1.94以降が必要です。
+
+`glab`が認証情報を解決してバイナリに渡すため、追加の認証手順は不要です。`--hostname`で特定のGitLabインスタンスを指定し、`--yes`でスクリプト内のワンタイム実行確認をスキップできます。
 
 | サブコマンド | エンドポイント | 目的 |
 |------------|----------|---------|
 | `glab orbit remote status` | `GET orbit/status` | クラスターの正常性確認。 |
 | `glab orbit remote schema [node...]` | `GET orbit/schema` | グラフオントロジー。位置引数で特定のノードを展開します。 |
+| `glab orbit remote dsl` | `GET orbit/schema/dsl` | クエリDSL JSONスキーマ。クエリボディの形式に関する信頼できる情報源です。 |
 | `glab orbit remote tools` | `GET orbit/tools` | 完全なDSL JSONスキーマを含むMCPツールマニフェスト。 |
 | `glab orbit remote query [file\|-]` | `POST orbit/query` | ファイルまたは標準入力からクエリを実行します。 |
 | `glab orbit remote graph-status` | `GET orbit/graph_status` | ネームスペース、プロジェクト、またはフルパスのインデックス作成の進捗状況。 |
@@ -73,6 +80,7 @@ title: GitLab CLI（`glab`）でOrbitを使用する
 glab orbit remote status
 glab orbit remote schema
 glab orbit remote schema MergeRequest Project
+glab orbit remote dsl
 glab orbit remote tools
 ```
 
@@ -102,12 +110,12 @@ glab orbit remote tools
 glab orbit remote query query.json
 ```
 
-`--format`フラグはリクエストボディの`response_format`にマップされます。
+`--response-format`フラグはリクエストボディの`response_format`にマップされます。
 
-- `--format llm` - AIエージェントの処理に最適化されたコンパクトなテキスト形式。
-- `--format raw` - `jq`へのパイプに適した構造化されたJSON形式。
+- `--response-format llm` - AIエージェントの処理に最適化されたコンパクトなテキスト形式。
+- `--response-format raw` - `jq`へのパイプに適した構造化されたJSON形式。
 
-`--format`が未設定の場合、ボディの`response_format`が優先され、最終的なフォールバックとして`llm`が使用されます。
+`--response-format`が未設定の場合、ボディの`response_format`が優先され、最終的なフォールバックとして`llm`が使用されます。
 
 ### インデックス作成の進捗状況を確認する {#check-indexing-progress}
 
