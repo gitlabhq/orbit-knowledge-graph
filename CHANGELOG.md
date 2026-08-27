@@ -1,3 +1,19 @@
+## [0.107.1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.107.0...v0.107.1) (2026-08-27)
+
+### Fixes
+
+* **indexer:** create the checkpoint table empty when the active version's table is missing ([175cbf1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/175cbf11067f13f979af1812bd35e8f8d4232a5c)) by Aaron Algutifan
+
+### Performance
+
+* **dispatcher:** bound code-backfill peak memory ([addfd39](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/addfd395f14e080d9c767253753e82c877b2f29d)) by Bohdan Parkhomchuk
+
+### Other
+
+* **i18n:** update ja-jp for commit 42e126b1 ([5fc8529](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/5fc85297dfa1c358118f9aeedeef45b1b2fdcf07)) by GitLab-Argo Bot
+* **i18n:** update ja-jp for commit 822e5c20 ([7513d19](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/7513d19c81aa6e11f36055ba388c63c98f47dc3e)) by GitLab-Argo Bot
+* **i18n:** update ja-jp for commit cb0cd80a ([bb22372](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/bb22372e264364b15f1278786308ee342faf9874)) by GitLab-Argo Bot
+
 ## [0.107.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.106.2...v0.107.0) (2026-08-26)
 
 ### Features
