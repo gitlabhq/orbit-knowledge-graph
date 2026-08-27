@@ -75,6 +75,9 @@ struct Args {
     #[arg(long, value_delimiter = ',')]
     only: Vec<String>,
 
+    /// Reseed only these datalake tables, leaving the rest of the database as is.
+    #[arg(long, value_delimiter = ',')]
+    seed_tables: Vec<String>,
     /// Reuse whatever is already in the datalake database.
     #[arg(long)]
     skip_seed: bool,
@@ -174,7 +177,13 @@ async fn main() -> anyhow::Result<()> {
 
     let mut seeded_rows = 0;
     let mut seed_ms = 0;
-    if !args.skip_seed {
+    if !args.seed_tables.is_empty() {
+        memory::set_phase("seed");
+        let started = Instant::now();
+        seeded_rows = seeder.seed_tables(shape, &args.seed_tables).await?;
+        seed_ms = started.elapsed().as_millis();
+        tracing::info!(ms = seed_ms, rows = seeded_rows, "reseeded tables");
+    } else if !args.skip_seed {
         memory::set_phase("seed");
         let started = Instant::now();
         seeded_rows = seeder.seed_datalake(shape).await?;

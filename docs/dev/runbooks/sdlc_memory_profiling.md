@@ -55,6 +55,7 @@ writes into an empty database its output can be fingerprinted from.
 | `--only` | Restrict the run to named entity targets |
 | `--skip-global` | Profile the namespaced sweep alone, without the `User` and `Runner` pipelines |
 | `--seed-only` / `--skip-seed` | Seed once, then A/B several binaries against the same data |
+| `--seed-tables` | Reseed only these datalake tables. A partitioned plan only splits work once a partition holds more than one page, so measuring it needs one table far larger than the rest |
 
 ## What the seeder generates
 
@@ -92,22 +93,35 @@ pipelines each get a full-width page.
 - The profiler builds with mimalloc `secure` by default because `orbit-server` does. Turning that
   off makes every number look better and none of them comparable to production.
 
-## A/B against a change
+## Measuring a change
 
-Seed once, then run two binaries over the same datalake into two graph databases:
+Seed once, then measure each candidate on its own against one baseline:
 
 ```shell
-./target/memprofile/sdlc-profiler --seed-only --rows-per-table 700000
-./sp-before --skip-seed --label before --graph-database sdlc_graph_before
-./sp-after  --skip-seed --label after  --graph-database sdlc_graph_after
+./target/memprofile/sdlc-profiler --seed-only --rows-per-table 2000000 --namespaces 2
 
-scripts/devtools/memprofile-verify-output.py \
-  --baseline-db sdlc_graph_before --candidate-db sdlc_graph_after
+REPEATS=2 ROWS_PER_TABLE=2000000 scripts/devtools/memprofile-sdlc-isolate.sh \
+  ./sp-baseline pagedrop=./sp-pagedrop noteborrow=./sp-noteborrow -- \
+  --namespaces 2 --datalake-batch-size 500000 --sdlc-concurrency 20
 ```
 
-The verifier fingerprints every column of every graph table except the two that are `Utc::now()` at
-index time (`_version`, and `indexed_at` on the checkpoint). It reads `FINAL`, because two runs that
-wrote identical rows can still differ in how much duplicate work merges have collapsed.
+Each arm is a binary built from the baseline plus exactly one change, so the
+table it prints attributes the delta to that change rather than to a stack of
+them. It ends with a metric-by-arm table and a per-arm output-identity verdict.
 
-Check `graph_rows` and `failures` agree between the arms before comparing peaks: a change that
-writes fewer rows is not a memory win.
+Every run gets an empty graph database, is fingerprinted, and has that database
+dropped before the next run starts. Nothing is retained: a graph database left in
+place merges tens of millions of rows in the background, and then the server, not
+the indexer, is what runs out of memory — which truncates the next arm and makes
+its peak meaningless. That failure is silent apart from the arm's `failures`
+list, which is why the summary warns on any non-empty one. The baseline's
+fingerprints are dumped to `baseline.fingerprint.json` so its database can be
+dropped too, and each arm is compared against that file.
+
+The verifier fingerprints every column of every graph table except the three that
+are `Utc::now()` at index time (`_version`, and `indexed_at` and `watermark` on
+the checkpoint). It reads `FINAL`, because two runs that wrote identical rows can
+still differ in how much duplicate work merges have collapsed.
+
+Check `graph rows` and the failure warnings before believing any peak: an arm
+that wrote fewer rows did less work, and its peak is not a memory win.

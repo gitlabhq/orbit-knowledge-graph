@@ -295,6 +295,32 @@ impl Seeder {
         Ok(())
     }
 
+    /// Seeds only the named tables into an existing datalake, for experiments that
+    /// need one table far larger than the rest (a partitioned plan only splits work
+    /// once a partition holds more than one page).
+    pub async fn seed_tables(&self, shape: Shape, tables: &[String]) -> anyhow::Result<u64> {
+        let client = self.client(&self.datalake);
+        let columns = self.table_columns(&client).await?;
+        let mut seeded = 0;
+        for table in tables {
+            let table_columns = columns
+                .get(table)
+                .with_context(|| format!("{table} is not in {}", self.datalake))?;
+            client
+                .execute(&format!("TRUNCATE TABLE {table}"))
+                .await
+                .with_context(|| format!("truncating {table}"))?;
+            let rows = shape.rows(table);
+            client
+                .execute(&generic_insert(table, table_columns, rows, shape))
+                .await
+                .with_context(|| format!("seeding {table}"))?;
+            seeded += rows;
+            tracing::info!(table, rows, "seeded");
+        }
+        Ok(seeded)
+    }
+
     pub async fn seed_datalake(&self, shape: Shape) -> anyhow::Result<u64> {
         let default = self.client("default");
         default
