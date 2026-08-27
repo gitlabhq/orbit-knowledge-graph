@@ -25,7 +25,7 @@ const DATALAKE_BATCH_MEMORY_ANCHOR_BYTES: u64 = 32 * 1024 * 1024 * 1024;
 const DATALAKE_BATCH_AT_ANCHOR: u64 = 500_000;
 
 /// Matches the retry loop's known-safe re-read block size (`engine::default_halving_initial_block_size`).
-const MIN_DATALAKE_BATCH_SIZE: u64 = 100_000;
+pub const MIN_DATALAKE_BATCH_SIZE: u64 = 100_000;
 
 pub struct CodeIndexingSlots {
     pub small_indexing_slots: usize,

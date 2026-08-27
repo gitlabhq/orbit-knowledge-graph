@@ -179,7 +179,7 @@ impl Pipeline {
                     .expect("non-empty page has a last block"),
                 &plan.sort_key,
             )?;
-            let has_more = rows_in_page >= plan.batch_size;
+            let has_more = rows_in_page >= base_query.batch_size();
 
             let transform_start = Instant::now();
             let grouped = self
