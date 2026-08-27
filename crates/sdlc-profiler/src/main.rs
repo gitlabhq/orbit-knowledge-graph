@@ -183,6 +183,9 @@ async fn main() -> anyhow::Result<()> {
         seeded_rows = seeder.seed_tables(shape, &args.seed_tables).await?;
         seed_ms = started.elapsed().as_millis();
         tracing::info!(ms = seed_ms, rows = seeded_rows, "reseeded tables");
+        // Reshaping one table is a maintenance step before a series of runs, so
+        // it returns rather than profiling whatever the other flags happen to say.
+        return Ok(());
     } else if !args.skip_seed {
         memory::set_phase("seed");
         let started = Instant::now();

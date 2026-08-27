@@ -58,7 +58,7 @@ writes into an empty database its output can be fingerprinted from.
 | `--only` | Restrict the run to named entity targets |
 | `--skip-global` | Profile the namespaced sweep alone, without the `User` and `Runner` pipelines |
 | `--seed-only` / `--skip-seed` | Seed once, then A/B several binaries against the same data |
-| `--seed-tables` | Reseed only these datalake tables. A partitioned plan only splits work once a partition holds more than one page, so measuring it needs one table far larger than the rest |
+| `--seed-tables` | Reseed only these datalake tables, then exit. A partitioned plan only splits work once a partition holds more than one page, so measuring it needs one table far larger than the rest |
 
 ## What the seeder generates
 
