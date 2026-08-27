@@ -329,15 +329,15 @@ helm upgrade gkg orbit-helm-charts/gkg \
 
 ### Stale data accumulation
 
-The cleanup stage runs after indexing but failures are logged as warnings and do not block the pipeline. Over time, stale rows from deleted files may accumulate.
+The stale data cleaner runs after indexing and uses lightweight deletes (`DELETE FROM`) to remove stale rows. Failures are logged as warnings and do not block the pipeline.
 
-To clean up manually:
+To force physical removal of lightweight-deleted rows manually:
 
 ```sql
-OPTIMIZE TABLE `<gkg-database>`.gl_file FINAL CLEANUP;
-OPTIMIZE TABLE `<gkg-database>`.gl_directory FINAL CLEANUP;
-OPTIMIZE TABLE `<gkg-database>`.gl_imported_symbol FINAL CLEANUP;
-OPTIMIZE TABLE `<gkg-database>`.gl_definition FINAL CLEANUP;
+ALTER TABLE `<gkg-database>`.gl_file APPLY DELETED MASK;
+ALTER TABLE `<gkg-database>`.gl_directory APPLY DELETED MASK;
+ALTER TABLE `<gkg-database>`.gl_imported_symbol APPLY DELETED MASK;
+ALTER TABLE `<gkg-database>`.gl_definition APPLY DELETED MASK;
 ```
 
 ## Monitoring

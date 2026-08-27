@@ -4,7 +4,6 @@ mod writer;
 pub use clickhouse_client::{
     ArrowClickHouseClient, ArrowQuery, ClickHouseConfigurationExt, ClickHouseError, QuerySummary,
 };
-pub(crate) use writer::insert_overrides;
 pub use writer::{
     BufferedWriter, BufferedWriterConfig, ClickHouseWriter, FlushToken, WriteError, WriteReport,
 };
