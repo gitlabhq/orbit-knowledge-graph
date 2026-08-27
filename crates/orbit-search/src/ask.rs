@@ -26,6 +26,22 @@ pub struct AskOutcome {
 pub struct AskMatch {
     pub row: CorpusRow,
     pub score: f64,
+    pub callers: Vec<Caller>,
+    pub callers_total: usize,
+}
+
+pub const CALLERS_SHOWN: usize = 4;
+
+#[derive(Clone)]
+pub struct Caller {
+    pub label: String,
+    pub loc: String,
+}
+
+pub struct CallerEdge {
+    pub callee: i64,
+    pub caller: Caller,
+    pub total: usize,
 }
 
 pub struct TermRecall {
@@ -44,6 +60,7 @@ pub trait AskSource: GraphSource {
     fn stem(&self, words: &[String]) -> Result<Vec<String>, Self::Error>;
     fn recall(&self, terms: &[String]) -> Result<Vec<TermRecall>, Self::Error>;
     fn rows_by_ids(&self, ids: &[i64]) -> Result<Vec<CorpusRow>, Self::Error>;
+    fn callers(&self, ids: &[i64]) -> Result<Vec<CallerEdge>, Self::Error>;
 }
 
 #[derive(Debug)]
@@ -121,13 +138,22 @@ pub fn ask<S: AskSource>(
     let hits = rank_and_trim(&corpus, &sims, &idfs, limit);
     let focus = vocab.focus_edge_kind(&stems);
     let weak = hits.first().is_none_or(|h| !h.confident());
-    let matches: Vec<AskMatch> = hits
+    let mut matches: Vec<AskMatch> = hits
         .into_iter()
         .map(|h| AskMatch {
             row: corpus[h.index].clone(),
             score: h.score,
+            callers: Vec::new(),
+            callers_total: 0,
         })
         .collect();
+    let match_ids: Vec<i64> = matches.iter().map(|m| m.row.id).collect();
+    for edge in source.callers(&match_ids)? {
+        if let Some(m) = matches.iter_mut().find(|m| m.row.id == edge.callee) {
+            m.callers.push(edge.caller);
+            m.callers_total = edge.total;
+        }
+    }
 
     let mut term_seeds = term_base_sets(&recalls);
     if term_seeds.is_empty() && !matches.is_empty() {
@@ -160,6 +186,8 @@ pub fn ask<S: AskSource>(
                 rows.iter().find(|r| r.id == id).map(|r| AskMatch {
                     row: r.clone(),
                     score,
+                    callers: Vec::new(),
+                    callers_total: 0,
                 })
             })
             .collect();
@@ -247,6 +275,21 @@ mod tests {
 
         fn rows_by_ids(&self, ids: &[i64]) -> Result<Vec<CorpusRow>, Self::Error> {
             Ok(ids.iter().map(|&id| row(id, "Repo::commit_hook")).collect())
+        }
+
+        fn callers(&self, ids: &[i64]) -> Result<Vec<CallerEdge>, Self::Error> {
+            Ok(ids
+                .iter()
+                .filter(|&&id| id == HOOK_ID)
+                .map(|&id| CallerEdge {
+                    callee: id,
+                    caller: Caller {
+                        label: "Repo::after_commit".to_string(),
+                        loc: "repo.rs:9".to_string(),
+                    },
+                    total: 1,
+                })
+                .collect())
         }
     }
 

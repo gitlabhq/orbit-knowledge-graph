@@ -80,13 +80,12 @@ pub(crate) fn run(
     }
 
     report_confidence(&mut out, &outcome)?;
-    write_matches(&mut out, "\nMatches:", &outcome.matches, 1, backend.root())?;
+    write_matches(&mut out, "\nMatches:", &outcome.matches, backend.root())?;
     if !outcome.surfaced.is_empty() {
         write_matches(
             &mut out,
             "\nConnected to your terms (structurally surfaced):",
             &outcome.surfaced,
-            3,
             backend.root(),
         )?;
     }
@@ -153,16 +152,33 @@ fn write_matches(
     out: &mut impl Write,
     header: &str,
     matches: &[orbit_search::AskMatch],
-    precision: usize,
     root: &std::path::Path,
 ) -> std::io::Result<()> {
     writeln!(out, "{header}")?;
     for m in matches {
         writeln!(
             out,
-            "  {}  [{}]  {}  (score {:.precision$}, links {})",
-            m.row.fqn, m.row.kind, m.row.loc, m.score, m.row.degree
+            "  {}  [{}]  {}  (links {})",
+            m.row.fqn, m.row.kind, m.row.loc, m.row.degree
         )?;
+        if !m.callers.is_empty() {
+            let shown: Vec<String> = m
+                .callers
+                .iter()
+                .take(orbit_search::ask::CALLERS_SHOWN)
+                .map(|c| format!("{} ({})", c.label, c.loc))
+                .collect();
+            let extra = m
+                .callers_total
+                .max(m.callers.len())
+                .saturating_sub(shown.len());
+            let suffix = if extra > 0 {
+                format!(" … +{extra} more")
+            } else {
+                String::new()
+            };
+            writeln!(out, "    called by: {}{suffix}", shown.join(", "))?;
+        }
         for line in snippet(root, &m.row.loc, m.row.end_line) {
             writeln!(out, "{line}")?;
         }
@@ -204,10 +220,21 @@ fn snippet(root: &std::path::Path, loc: &str, end_line: i64) -> Vec<String> {
         .collect()
 }
 
+const COMPOUND_TERM_HINT: usize = 7;
+
 fn report_confidence(
     out: &mut impl Write,
     outcome: &orbit_search::AskOutcome,
 ) -> std::io::Result<()> {
+    if outcome.terms.len() >= COMPOUND_TERM_HINT {
+        writeln!(
+            out,
+            "note: {} search terms — long or compound questions dilute matching. \
+             Ask one question at a time (\"where is X defined\", then \"how is Y \
+             applied\") for sharper results.",
+            outcome.terms.len()
+        )?;
+    }
     if outcome.weak {
         writeln!(
             out,

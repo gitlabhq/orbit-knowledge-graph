@@ -179,9 +179,10 @@ struct IndexArgs {
                   Ranks indexed definitions by how many distinct question terms they \
                   match, then shows the most relevant connections to the top matches, \
                   ranked by graph proximity.\n\n\
-                  When the output notes unmatched terms or weak matches, retry once \
-                  with a synonym or identifier fragment for those terms before \
-                  falling back to grep."
+                  When the output notes unmatched terms or weak matches, read the \
+                  top matches first — they are often still right. Retry with a \
+                  synonym or identifier fragment only if they look off, then fall \
+                  back to grep."
 )]
 struct AskArgs {
     /// Plain-language question, e.g. "how does the quota gate decide?"
