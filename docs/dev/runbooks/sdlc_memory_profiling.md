@@ -8,6 +8,9 @@ sampling memory throughout.
 It shares the sampler with `crates/dispatch-profiler` via `crates/memprofile`. See
 [dispatcher memory profiling](dispatcher_memory_profiling.md) for that harness.
 
+Findings from the first run of this harness:
+[SDLC indexer backfill peak memory, August 2026](../reports/2026-08-sdlc-indexer-memory-profile.md).
+
 ## Why a separate harness
 
 The dispatcher enumerates; the indexer materialises. A backfill's peak comes from the fan-out in
