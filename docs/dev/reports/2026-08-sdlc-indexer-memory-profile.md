@@ -4,9 +4,11 @@ Four of the eight `gkg-indexer-sdlc` pods in `orbit-prd` were OOM-killed (exit 1
 and 07:08 UTC on 2026-08-26 while a full SDLC backfill ran. The pool's working set went from a
 0.44 GiB steady state to 31.74 GiB against its 32 GiB limit.
 
-A backfill saturates all 20 of the pool's SDLC handler slots, and each slot held more than it needed
-to. The changes measured below cut what a slot costs without changing what it does; the numbers for
-each are in the [merge request](PLACEHOLDER_MR).
+A backfill saturates all 20 of the pool's SDLC handler slots. The peak is dominated by the page
+budget those slots hold, and most of it turns out to be inherent to the current design rather than
+waste: at production shape the peak tracks `slots x page size` and no small code change moves it.
+Two places are exceptions, and both are measured below. Every candidate was built on its own and
+measured against the same baseline, so each number is attributable to one change.
 
 ## What production did
 
@@ -66,7 +68,7 @@ from the actions the parser dispatches on rather than random strings it logs and
 
 ## Measurement hygiene
 
-Two things silently invalidate a comparison here, both found by hitting them.
+Three things silently invalidate a comparison here, all found by hitting them.
 
 **A retained graph database poisons the next run.** A production-shape run writes about 198M graph
 rows. Left in place, it merges them in the background, and the next arm then fails with ClickHouse
@@ -81,6 +83,15 @@ that wrote identical rows report different counts depending on merge progress. O
 a per-table fingerprint read `FINAL`: row count, additive checksum and XOR checksum of per-row
 hashes, over every column except the three that are wall-clock at index time (`_version`, and
 `indexed_at` and `watermark` on the checkpoint).
+
+**The peak has a run-to-run spread of about 10% at production shape**, because 46 pipelines race for
+20 slots and which of them are simultaneously mid-page when the peak lands is a scheduling accident.
+Two repeats there resolve nothing smaller than that, so per-change attribution belongs in
+single-pipeline runs, where the spread falls to a few percent and one baseline reproduced its peak to
+the second decimal. Arms are also interleaved one round at a time: the first sweep ran each arm's
+repeats consecutively and reported wall-clock gains of 13 to 14% for several arms, which turned out
+to be an ordering artifact. Re-running the baseline after that sweep put it at 275 s against the
+285 s it measured first, accounting for the whole effect.
 
 ## Results
 
