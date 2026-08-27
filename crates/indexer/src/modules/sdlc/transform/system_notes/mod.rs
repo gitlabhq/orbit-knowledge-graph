@@ -51,14 +51,16 @@ use resolve::{
     ResolvedTarget, RouteRow, WORK_ITEMS_SQL, lookup_chunks, paths_per_routes_query,
 };
 
-struct ExtractedNote {
-    note: String,
+/// Borrows its text from the extracted block, which outlives every stage that
+/// reads it: owning copies of the note bodies doubled the transform's peak.
+struct ExtractedNote<'a> {
+    note: &'a str,
     noteable_id: i64,
-    noteable_type: String,
+    noteable_type: &'a str,
     author_id: Option<i64>,
     project_id: Option<i64>,
-    traversal_path: TraversalPath,
-    action: String,
+    traversal_path: &'a str,
+    action: &'a str,
 }
 
 type DefaultProjectLookup = HashMap<i64, String>;
@@ -99,7 +101,10 @@ impl BlockTransform for SystemNotesTransform {
             return Ok(Vec::new());
         }
 
-        let Some(root_prefix) = notes.iter().find_map(|n| n.traversal_path.root_prefix()) else {
+        let Some(root_prefix) = notes
+            .iter()
+            .find_map(|n| TraversalPath::new_unchecked(n.traversal_path).root_prefix())
+        else {
             warn!("system_notes: block has no valid traversal_path root; skipping resolution");
             return Ok(Vec::new());
         };
@@ -150,7 +155,7 @@ fn col<'a, A: 'static>(block: &'a RecordBatch, name: &str) -> Result<&'a A, Hand
         .ok_or_else(|| HandlerError::Processing(format!("missing or wrong-type column: {name}")))
 }
 
-fn batch_to_notes(block: &RecordBatch) -> Result<Vec<ExtractedNote>, HandlerError> {
+fn batch_to_notes(block: &RecordBatch) -> Result<Vec<ExtractedNote<'_>>, HandlerError> {
     let num_rows = block.num_rows();
     if num_rows == 0 {
         return Ok(Vec::new());
@@ -167,9 +172,9 @@ fn batch_to_notes(block: &RecordBatch) -> Result<Vec<ExtractedNote>, HandlerErro
     let mut notes = Vec::with_capacity(num_rows);
     for i in 0..num_rows {
         notes.push(ExtractedNote {
-            note: note_col.value(i).to_string(),
+            note: note_col.value(i),
             noteable_id: noteable_id_col.value(i),
-            noteable_type: noteable_type_col.value(i).to_string(),
+            noteable_type: noteable_type_col.value(i),
             author_id: if author_id_col.is_null(i) {
                 None
             } else {
@@ -180,19 +185,19 @@ fn batch_to_notes(block: &RecordBatch) -> Result<Vec<ExtractedNote>, HandlerErro
             } else {
                 Some(project_id_col.value(i))
             },
-            traversal_path: TraversalPath::new_unchecked(traversal_path_col.value(i)),
-            action: action_col.value(i).to_string(),
+            traversal_path: traversal_path_col.value(i),
+            action: action_col.value(i),
         });
     }
     Ok(notes)
 }
 
-async fn resolve_and_emit(
+async fn resolve_and_emit<'a>(
     datalake: &dyn DatalakeQuery,
-    notes: &[ExtractedNote],
+    notes: &[ExtractedNote<'a>],
     root_prefix: &TraversalPath,
     resolve_lookup_batch_size: usize,
-) -> Result<Vec<EmittedEdge>, HandlerError> {
+) -> Result<Vec<EmittedEdge<'a>>, HandlerError> {
     let default_projects =
         resolve_default_projects(datalake, notes, root_prefix, resolve_lookup_batch_size).await?;
     let plan = plan_for_batch(notes, &default_projects);
@@ -205,11 +210,11 @@ async fn resolve_and_emit(
     Ok(edges)
 }
 
-fn process_batch<R>(
-    notes: &[ExtractedNote],
+fn process_batch<'a, R>(
+    notes: &[ExtractedNote<'a>],
     default_projects: &DefaultProjectLookup,
     mut resolve: R,
-) -> Vec<EmittedEdge>
+) -> Vec<EmittedEdge<'a>>
 where
     R: FnMut(&Reference, &str) -> Option<ResolvedTarget>,
 {
@@ -217,21 +222,21 @@ where
     let mut dropped_actions = BTreeSet::new();
     let mut dropped_noteables = BTreeSet::new();
     for n in notes {
-        let Some(action) = Action::parse(&n.action) else {
-            dropped_actions.insert(n.action.clone());
+        let Some(action) = Action::parse(n.action) else {
+            dropped_actions.insert(n.action);
             continue;
         };
-        let Some(noteable_kind) = NoteableKind::from_siphon(&n.noteable_type) else {
-            dropped_noteables.insert(n.noteable_type.clone());
+        let Some(noteable_kind) = NoteableKind::from_siphon(n.noteable_type) else {
+            dropped_noteables.insert(n.noteable_type);
             continue;
         };
-        let references = parse_body(action, &n.note);
+        let references = parse_body(action, n.note);
         let default_project = default_projects
             .get(&n.project_id.unwrap_or(0))
-            .cloned()
-            .unwrap_or_default();
+            .map(String::as_str)
+            .unwrap_or("");
         rows.push(NoteRow {
-            traversal_path: n.traversal_path.clone(),
+            traversal_path: n.traversal_path,
             default_project,
             author_id: n.author_id,
             noteable_id: n.noteable_id,
@@ -258,22 +263,22 @@ where
 }
 
 fn plan_for_batch(
-    notes: &[ExtractedNote],
+    notes: &[ExtractedNote<'_>],
     default_projects: &DefaultProjectLookup,
 ) -> ResolutionPlan {
     let mut plan = ResolutionPlan::default();
     for n in notes {
-        let Some(action) = Action::parse(&n.action) else {
+        let Some(action) = Action::parse(n.action) else {
             continue;
         };
-        if NoteableKind::from_siphon(&n.noteable_type).is_none() {
+        if NoteableKind::from_siphon(n.noteable_type).is_none() {
             continue;
         }
         let default_project = default_projects
             .get(&n.project_id.unwrap_or(0))
             .map(String::as_str)
             .unwrap_or("");
-        for r in parse_body(action, &n.note) {
+        for r in parse_body(action, n.note) {
             plan.add_ref(&r, default_project);
         }
     }
@@ -282,7 +287,7 @@ fn plan_for_batch(
 
 async fn resolve_default_projects(
     datalake: &dyn DatalakeQuery,
-    notes: &[ExtractedNote],
+    notes: &[ExtractedNote<'_>],
     root_prefix: &TraversalPath,
     resolve_lookup_batch_size: usize,
 ) -> Result<DefaultProjectLookup, HandlerError> {
@@ -441,7 +446,7 @@ async fn query_entities(
     Ok(rows)
 }
 
-fn edges_to_record_batch(edges: &[EmittedEdge]) -> Result<RecordBatch, HandlerError> {
+fn edges_to_record_batch(edges: &[EmittedEdge<'_>]) -> Result<RecordBatch, HandlerError> {
     let len = edges.len();
     let mut traversal_paths = Vec::with_capacity(len);
     let mut relationship_kinds = Vec::with_capacity(len);
@@ -453,11 +458,11 @@ fn edges_to_record_batch(edges: &[EmittedEdge]) -> Result<RecordBatch, HandlerEr
 
     // Strict ClickHouse rejects an INSERT omitting a no-DEFAULT column, so emit the
     // denormalized tag columns as empty lists even though system notes project no tags.
-    let mut source_tags = ListBuilder::new(StringBuilder::new());
-    let mut target_tags = ListBuilder::new(StringBuilder::new());
+    let mut source_tags = ListBuilder::with_capacity(StringBuilder::new(), len);
+    let mut target_tags = ListBuilder::with_capacity(StringBuilder::new(), len);
 
     for e in edges {
-        traversal_paths.push(e.traversal_path.as_str());
+        traversal_paths.push(e.traversal_path);
         relationship_kinds.push(e.relationship_kind);
         source_ids.push(e.source_id);
         source_kinds.push(e.source_kind);
@@ -519,15 +524,20 @@ mod tests {
     const TEST_RESOLVE_LOOKUP_BATCH_SIZE: usize = 1_000;
     const TEST_ENTITY_ID_PROJECT_FACTOR: i64 = 1_000_000;
 
-    fn make_note(action: &str, body: &str, noteable_type: &str, noteable_id: i64) -> ExtractedNote {
+    fn make_note<'a>(
+        action: &'a str,
+        body: &'a str,
+        noteable_type: &'a str,
+        noteable_id: i64,
+    ) -> ExtractedNote<'a> {
         ExtractedNote {
-            note: body.to_string(),
+            note: body,
             noteable_id,
-            noteable_type: noteable_type.to_string(),
+            noteable_type,
             author_id: Some(7),
             project_id: Some(100),
-            traversal_path: TraversalPath::new_unchecked("1/100/"),
-            action: action.to_string(),
+            traversal_path: "1/100/",
+            action,
         }
     }
 
