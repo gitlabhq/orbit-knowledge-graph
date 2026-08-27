@@ -148,6 +148,7 @@ pub fn rank_neighborhood(
             r.reverse = r.reverse.clamp(0.0, MAX_KIND_WEIGHT);
             if focus == Some(kind.as_str()) {
                 r.forward = FOCUS_WEIGHT;
+                r.reverse = FOCUS_WEIGHT;
             }
             r
         })
@@ -541,6 +542,23 @@ mod tests {
         let both_ways = HashMap::from([("CITES".to_string(), KindRates::new(0.7))]);
         let ranked = rank_neighborhood(&g, &seed(), &both_ways, None, 5);
         assert!(ranked.node_scores.iter().any(|n| n.id == 1));
+    }
+
+    #[test]
+    fn focus_boosts_incoming_edges_so_callers_of_the_seed_surface() {
+        let g = graph(
+            &["CONTAINS", "CALLS"],
+            &[("CONTAINS", 0, 2), ("CALLS", 1, 0)],
+        );
+        let rates = HashMap::from([
+            ("CALLS".to_string(), KindRates::new(0.9)),
+            ("CONTAINS".to_string(), KindRates::new(0.9)),
+        ]);
+        let ranked = rank_neighborhood(&g, &seed(), &rates, Some("CALLS"), 1);
+        assert_eq!(ranked.selected, vec![1]);
+
+        let ranked = rank_neighborhood(&g, &seed(), &rates, None, 1);
+        assert_eq!(ranked.selected, vec![0]);
     }
 
     #[test]

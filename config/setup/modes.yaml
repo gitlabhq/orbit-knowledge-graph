@@ -8,17 +8,21 @@ local:
 
     Repositories on this machine are indexed into a local Orbit code graph. The graph is the lookup tool for any task that touches existing code — answering a question, building a feature, fixing a bug, refactoring, reviewing. Grep matches text and returns noise for structural questions; the graph returns resolved definitions, callers, and imports.
 
+    What the graph contains:
+
+    {{graph_contents}}
+
+    `orbit local ask` recognizes relationship words matching the edge kinds above: "who calls X" focuses the reported connections on `CALLS` edges around X, "what extends Y" on `EXTENDS` — the relationship word steers the connection ranking instead of being matched as a symbol name.
+
     Rules:
 
-    - Start every task with `orbit local ask "<your question>"` — before grep, before reading files, before writing any code.
-    - Ask in the words you would use with a colleague. "where do we send messages to the dlq", "what handles NATS backpressure" are single `orbit local ask` calls.
-    - One question per ask. A compound question ("where is X defined and how is Y applied") dilutes both halves — split it into two asks.
+    - Start every task with `orbit local ask "<your question>"` in order to get an understanding of the code structure from the graph.
+    - Ask using simple queries without fluff in as few words as possible, with one phrase per ask. "dlq message handler", "NATS backpressure", "who calls run_sql", "what extends LocalBackend" are single `orbit local ask` calls.
     - The same default holds while implementing, not just when answering questions: where the code you will change lives, whether machinery already exists (rate limiting, retries, caching), who calls what you are about to modify — those are ask questions, not greps. Do not scaffold new code before checking what already exists.
-    - If `ask` notes unmatched terms or weak matches, retry once with different wording for those terms — a synonym or an identifier fragment ("throttle" → "rate limit"). If the retry also misses, fall back to grep.
+    - If `ask` notes unmatched terms or weak matches, retry with synonyms for those terms — a synonym or an identifier fragment ("throttle" → "rate limit"). If ask is unhelpful after multiple tries, fall back to grep.
     - Files are for editing, or for reading lines the graph's snippets do not cover — not for searching. Every new where/what/who question that comes up mid-task goes to the graph, not grep.
-    - When `ask` returns confident matches with snippets, answer from them. Verify with at most one file read when the snippet alone is ambiguous — do not re-derive what the graph already resolved.
-    - Drop to SQL only for what `ask` does not cover: exact filters, aggregation, or columns it does not print.
-    - If two graph queries in a row return nothing useful, the graph likely lacks those edges — fall back to grep immediately instead of reformulating SQL.
+    - When `ask` returns confident matches with snippets, answer from them. Verify with another ask or one file read when the snippet alone is ambiguous — do not re-derive what the graph already resolved.
+    - Drop to `orbit sql` only for what `ask` does not cover: exact filters, aggregation, or columns it does not print.
     - Answer tersely: name the mechanism, cite `file:line`, and stop. Do not paste code blocks the reader can open from the citation, and do not restate the question or narrate your search.
 
     Copy-paste recipes (DuckDB SQL):

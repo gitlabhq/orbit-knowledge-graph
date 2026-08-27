@@ -161,6 +161,24 @@ fn write_matches(
             "  {}  [{}]  {}  (links {})",
             m.row.fqn, m.row.kind, m.row.loc, m.row.degree
         )?;
+        if !m.callers.is_empty() {
+            let shown: Vec<String> = m
+                .callers
+                .iter()
+                .take(orbit_search::ask::CALLERS_SHOWN)
+                .map(|c| format!("{} ({})", c.label, c.loc))
+                .collect();
+            let extra = m
+                .callers_total
+                .max(m.callers.len())
+                .saturating_sub(shown.len());
+            let suffix = if extra > 0 {
+                format!(" … +{extra} more")
+            } else {
+                String::new()
+            };
+            writeln!(out, "    called by: {}{suffix}", shown.join(", "))?;
+        }
         for line in snippet(root, &m.row.loc, m.row.end_line) {
             writeln!(out, "{line}")?;
         }

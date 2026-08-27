@@ -79,8 +79,55 @@ static MODES: LazyLock<Modes> = LazyLock::new(|| {
         .unwrap_or_else(|e| panic!("config/setup/modes.yaml is invalid: {e}"))
 });
 
+static RENDERED_INSTRUCTIONS: LazyLock<[String; 2]> = LazyLock::new(|| {
+    let graph = graph_contents();
+    Mode::ALL.map(|mode| {
+        mode.texts()
+            .instructions
+            .trim_end()
+            .replace("{{graph_contents}}", &graph)
+    })
+});
+
+fn graph_contents() -> String {
+    use strum::IntoEnumIterator;
+
+    use code_graph::v2::types::{DefKind, EdgeKind, NodeKind};
+
+    let ontology = ontology::Ontology::load_embedded().expect("embedded ontology must load");
+    let mut lines = Vec::new();
+    for kind in NodeKind::iter() {
+        let node = ontology
+            .get_node(kind.as_ref())
+            .unwrap_or_else(|| panic!("ontology must declare node {}", kind.as_ref()));
+        let mut line = format!(
+            "- `{}` \u{2014} {}",
+            node.destination_table, node.description
+        );
+        if matches!(kind, NodeKind::Definition) {
+            let def_types = DefKind::iter()
+                .map(|k| k.to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+            line.push_str(&format!(" (`definition_type`: {def_types})"));
+        }
+        lines.push(line);
+    }
+    lines.push(format!(
+        "- `{}` \u{2014} typed edges between them; `relationship_kind`:",
+        ontology.edge_table()
+    ));
+    for kind in EdgeKind::iter() {
+        let description = ontology
+            .get_edge_description(kind.as_ref())
+            .unwrap_or_else(|| panic!("ontology must describe edge {}", kind.as_ref()));
+        lines.push(format!("  - `{}` \u{2014} {}", kind.as_ref(), description));
+    }
+    lines.join("\n")
+}
+
 pub(crate) fn instructions(mode: Mode) -> &'static str {
-    mode.texts().instructions.trim_end()
+    &RENDERED_INSTRUCTIONS[mode as usize]
 }
 
 pub(crate) fn nudge_search(mode: Mode) -> &'static str {
@@ -237,6 +284,11 @@ mod tests {
             }
             for text in [instructions(mode), nudge_search(mode), nudge_read(mode)] {
                 assert!(!text.trim().is_empty());
+                assert!(
+                    !text.contains("{{"),
+                    "unresolved placeholder in {} texts",
+                    mode.as_str()
+                );
             }
         }
     }

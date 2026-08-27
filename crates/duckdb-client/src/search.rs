@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use arrow::record_batch::RecordBatch;
 
 use crate::{DuckDbClient, f64_column, i64_column, scalar_i64, sql_lit, string_column};
-use orbit_search::ask::{AskError, AskSource, ask};
+use orbit_search::ask::{AskError, AskSource, Caller, CallerEdge, ask};
 use orbit_search::corpus::{DEFAULT_SOURCE_EXTS, EXCLUDE_LIKE, EXCLUDE_REGEX, ext_regex};
 use orbit_search::expand::{GraphSource, NodeLabel};
 use orbit_search::{AskOutcome, CorpusRow, Graph, GraphEdge, KindRates, SearchVocab, TermRecall};
@@ -120,6 +120,49 @@ impl AskSource for DuckDbSearch {
             &self.sha,
         );
         Ok(rows_from_batches(&query(&self.client, &sql)?))
+    }
+
+    fn callers(&self, ids: &[i64]) -> Result<Vec<CallerEdge>> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let batches = query(
+            &self.client,
+            &format!(
+                "WITH callers AS (
+  SELECT DISTINCT e.target_id, s.fqn,
+         s.file_path || ':' || CAST(s.start_line AS VARCHAR) AS loc
+  FROM gl_edge e
+  JOIN gl_definition s ON s.id = e.source_id
+  WHERE e.relationship_kind = 'CALLS'
+    AND e.target_id IN ({list})
+    AND s.project_id = {pid} AND s.commit_sha = {sha}
+)
+SELECT target_id, fqn, loc,
+       COUNT(*) OVER (PARTITION BY target_id) AS total
+FROM callers
+QUALIFY row_number() OVER (PARTITION BY target_id ORDER BY fqn) <= {cap}
+ORDER BY target_id, fqn",
+                list = id_list(ids),
+                pid = self.pid,
+                sha = self.sha,
+                cap = orbit_search::ask::CALLERS_SHOWN,
+            ),
+        )?;
+        let callees = i64_column(&batches, "target_id");
+        let fqns = string_column(&batches, "fqn");
+        let locs = string_column(&batches, "loc");
+        let totals = i64_column(&batches, "total");
+        Ok((0..callees.len())
+            .map(|i| CallerEdge {
+                callee: callees[i],
+                caller: Caller {
+                    label: fqns[i].clone(),
+                    loc: locs[i].clone(),
+                },
+                total: usize::try_from(totals[i]).unwrap_or(0),
+            })
+            .collect())
     }
 }
 
