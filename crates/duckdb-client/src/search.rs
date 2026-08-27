@@ -9,6 +9,8 @@ use orbit_search::{AskOutcome, CorpusRow, Graph, GraphEdge, KindRates, SearchVoc
 use std::collections::HashMap;
 
 pub const RECALL_LIMIT: usize = 2000;
+pub const CONTEXT_SIM_CAP: f64 = 0.99;
+pub const NAME_SIM_FLOOR: f64 = 0.999;
 
 pub const FTS_STEMMER: &str = "english";
 
@@ -260,15 +262,22 @@ fn recall_sql(pid: i64, sha: &str) -> String {
     AND def_id IN (SELECT id FROM search_corpus)
 ),
 hits AS (
-  SELECT id, score FROM scored WHERE score IS NOT NULL
-  ORDER BY score DESC, id
+  SELECT s.id, s.score,
+         list_contains(
+           list_transform(string_split_regex(lower(d.name), '[^0-9a-z]+'), t -> stem(t, '{FTS_STEMMER}')),
+           stem(lower(?1), '{FTS_STEMMER}')) AS name_hit
+  FROM scored s
+  JOIN {doc_table} d ON d.def_id = s.id AND d.commit_sha = {sha}
+  WHERE s.score IS NOT NULL
+  ORDER BY s.score DESC, s.id
   LIMIT {RECALL_LIMIT}
 ),
 df AS (SELECT COUNT(*) AS df FROM scored WHERE score IS NOT NULL),
 mx AS (SELECT MAX(score) AS m FROM hits),
 corpus_n AS (SELECT GREATEST(COUNT(*), 1) AS total FROM search_corpus)
 SELECT COALESCE(h.id, 0) AS id,
-       COALESCE(h.score / mx.m, 0.0) AS sim,
+       COALESCE(CASE WHEN h.name_hit THEN {NAME_SIM_FLOOR} + (1.0 - {NAME_SIM_FLOOR}) * h.score / mx.m
+                     ELSE LEAST(h.score / mx.m, {CONTEXT_SIM_CAP}) END, 0.0) AS sim,
        CAST(df.df AS BIGINT) AS df,
        CAST(corpus_n.total AS BIGINT) AS total
 FROM df

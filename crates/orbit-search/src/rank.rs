@@ -78,7 +78,7 @@ fn rank(corpus: &[CorpusRow], sims: &[Vec<f64>], idfs: &[f64], cap: usize) -> Ve
             index,
             score: total * coverage * coverage / length_norm,
             anchored: anchored_idf > 0.0,
-            coverage: anchored_idf / idf_total,
+            coverage,
         });
     }
     hits.sort_by(|a, b| {
