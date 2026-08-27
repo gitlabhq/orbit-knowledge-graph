@@ -229,8 +229,7 @@ impl Pipeline {
                     stats.written_rows += report.rows;
                     stats.written_bytes += report.bytes;
                 }
-                // Deletes run only after every insert has landed, so a same-key
-                // insert in this page cannot resurrect a row the delete removed.
+                // Deletes run only after every insert has landed, so a same-key insert in this page cannot resurrect a row the delete removed.
                 for statement in delete_statements.drain(..) {
                     context
                         .writer

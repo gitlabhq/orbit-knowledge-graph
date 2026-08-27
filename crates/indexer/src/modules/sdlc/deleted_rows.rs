@@ -45,8 +45,7 @@ impl DeletedRowSplitter {
         Self { sort_keys_by_table }
     }
 
-    /// Tables without a known sort key pass through untouched: their deleted
-    /// rows keep flowing as `_deleted = true` inserts rather than vanishing.
+    /// Tables without a known sort key pass through untouched: deleted rows keep flowing as `_deleted = true` inserts rather than vanishing.
     pub fn split(
         &self,
         table: &str,
@@ -116,8 +115,7 @@ fn build_delete_statement(table: &str, sort_key: &[String], tuples: &[String]) -
     )
 }
 
-/// Resolves each sort key column to a plain array, casting dictionary-encoded
-/// columns (how transforms emit low-cardinality kinds) to their value type.
+/// Resolves each sort key column to a plain array, casting dictionary-encoded columns (how transforms emit low-cardinality kinds) to their value type.
 fn sort_key_columns(
     batch: &RecordBatch,
     sort_key: &[String],
