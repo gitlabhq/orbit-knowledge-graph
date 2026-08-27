@@ -134,6 +134,7 @@ async fn dispatch_enabled_namespace_cdc(
         ctx.config.build_client(),
         ScheduledTaskMetrics::new(),
         Arc::new(CampaignState::new()),
+        orbit_server_config::CodeBackfillSweepConfig::default().publish_window,
     ));
     let route = EnabledNamespacesRoute::new(
         NamespaceIndexingDispatch::new(services.nats),

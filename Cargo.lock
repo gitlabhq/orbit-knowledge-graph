@@ -2103,7 +2103,6 @@ dependencies = [
  "ignore",
  "indicatif",
  "memchr",
- "orbit-search",
  "orbit-utils",
  "oxc",
  "oxc_linter",
@@ -4208,10 +4207,12 @@ dependencies = [
 name = "duckdb-client"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "arrow 58.3.0",
  "code-graph",
  "duckdb",
  "ontology",
+ "orbit-search",
  "orbit-utils",
  "serde_json",
  "tempfile",
@@ -8333,7 +8334,8 @@ dependencies = [
 name = "orbit-search"
 version = "0.1.0"
 dependencies = [
- "rust-stemmers",
+ "rayon",
+ "rustc-hash 2.1.3",
  "stop-words",
 ]
 

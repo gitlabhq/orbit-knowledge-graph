@@ -1,3 +1,13 @@
+## [0.107.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.106.2...v0.107.0) (2026-08-26)
+
+### Features
+
+* **ask:** add orbit ask with DuckDB FTS recall & improved graph ranking ([2f90ac5](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/2f90ac572e9fcda67ea861a49ec8563f098c4c68)) by Aaron Algutifan
+
+### Fixes
+
+* **bench:** config-driven cluster lifecycle, infra.sh wrapper ([2d079c5](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/2d079c52548dd152c0dad7c805120e710557b7dd)) by Michael Usachenko
+
 ## [0.106.2](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.106.1...v0.106.2) (2026-08-26)
 
 ### Performance

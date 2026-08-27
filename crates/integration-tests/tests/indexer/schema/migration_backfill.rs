@@ -185,6 +185,7 @@ async fn migration_triggers_backfill_for_all_enabled_namespaces() {
         context.clickhouse.config.build_client(),
         ScheduledTaskMetrics::new(),
         campaign,
+        orbit_server_config::CodeBackfillSweepConfig::default().publish_window,
     );
 
     backfill
@@ -255,6 +256,7 @@ async fn backfill_skips_projects_with_existing_checkpoints() {
         context.clickhouse.config.build_client(),
         ScheduledTaskMetrics::new(),
         std::sync::Arc::new(indexer::campaign::CampaignState::new()),
+        orbit_server_config::CodeBackfillSweepConfig::default().publish_window,
     );
 
     backfill
