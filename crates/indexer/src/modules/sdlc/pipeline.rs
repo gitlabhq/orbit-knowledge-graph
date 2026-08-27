@@ -187,7 +187,7 @@ impl Pipeline {
 
             let transform_start = Instant::now();
             let grouped = self
-                .transform_page(transform.as_ref(), &page.batches)
+                .transform_page(transform.as_ref(), std::mem::take(&mut page.batches))
                 .await?;
             let transform_elapsed = transform_start.elapsed();
             self.metrics
@@ -415,14 +415,16 @@ impl Pipeline {
     }
 
     /// Groups output rows by destination table so each table is written as one bulk insert.
+    ///
+    /// Consumes the page so none of it survives into the write and read-ahead window.
     async fn transform_page(
         &self,
         transform: &dyn BlockTransform,
-        batches: &[RecordBatch],
+        batches: Vec<RecordBatch>,
     ) -> Result<Vec<Vec<RecordBatch>>, HandlerError> {
         let mut grouped: Vec<Vec<RecordBatch>> = vec![Vec::new(); transform.outputs().len()];
         for block in batches {
-            for output in transform.transform(block).await? {
+            for output in transform.transform(&block).await? {
                 grouped[output.output_index].push(output.batch);
             }
         }
