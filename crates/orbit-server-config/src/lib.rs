@@ -42,6 +42,6 @@ pub use health_check::{HealthCheckConfig, NamespaceTarget};
 pub use metrics::{MetricsConfig, OtelConfig, PrometheusConfig};
 pub use nats::NatsConfiguration;
 pub use query::{CompilerDerivedSettings, PathResolverConfig, QueryConfig, QuerySettings};
-pub use resources::{ContainerResources, derive_concurrency_groups};
+pub use resources::{ContainerResources, MIN_DATALAKE_BATCH_SIZE, derive_concurrency_groups};
 pub use schema::{SchemaConfig, SchemaConfigError};
 pub use tls::TlsConfig;

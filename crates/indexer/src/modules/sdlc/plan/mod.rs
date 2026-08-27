@@ -304,18 +304,30 @@ impl PreparedQuery {
         Value::Object(self.params.clone())
     }
 
+    pub fn batch_size(&self) -> u64 {
+        self.batch_size
+    }
+
+    /// Partitions share the one worker-pool permit the handler holds, so an undivided
+    /// budget puts `partitions.len()` pages in flight for a slot accounted as holding one.
     pub fn into_partitions(
         self,
         partitions: Vec<PartitionAssignment>,
     ) -> Vec<(PartitionAssignment, PreparedQuery)> {
+        // Below the config minimum the extra round trips cost more than the smaller
+        // pages save.
+        let share = (self.batch_size / partitions.len().max(1) as u64)
+            .max(orbit_server_config::MIN_DATALAKE_BATCH_SIZE)
+            .min(self.batch_size);
         partitions
             .into_iter()
             .map(|p| {
-                let query = self.clone().with(CompositeRangeFilter {
+                let mut query = self.clone().with(CompositeRangeFilter {
                     columns: &p.key_columns,
                     lower: p.lower_bound.as_deref(),
                     upper: p.upper_bound.as_deref(),
                 });
+                query.batch_size = share;
                 (p, query)
             })
             .collect()
