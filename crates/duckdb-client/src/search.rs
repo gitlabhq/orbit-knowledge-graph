@@ -2,13 +2,15 @@ use anyhow::{Context, Result};
 use arrow::record_batch::RecordBatch;
 
 use crate::{DuckDbClient, f64_column, i64_column, scalar_i64, sql_lit, string_column};
-use orbit_search::ask::{AskError, AskSource, ask};
+use orbit_search::ask::{AskError, AskSource, Caller, CallerEdge, ask};
 use orbit_search::corpus::{DEFAULT_SOURCE_EXTS, EXCLUDE_LIKE, EXCLUDE_REGEX, ext_regex};
 use orbit_search::expand::{GraphSource, NodeLabel};
 use orbit_search::{AskOutcome, CorpusRow, Graph, GraphEdge, KindRates, SearchVocab, TermRecall};
 use std::collections::HashMap;
 
 pub const RECALL_LIMIT: usize = 2000;
+pub const CONTEXT_SIM_CAP: f64 = 0.99;
+pub const NAME_SIM_FLOOR: f64 = 0.999;
 
 pub const FTS_STEMMER: &str = "english";
 
@@ -118,6 +120,49 @@ impl AskSource for DuckDbSearch {
             &self.sha,
         );
         Ok(rows_from_batches(&query(&self.client, &sql)?))
+    }
+
+    fn callers(&self, ids: &[i64]) -> Result<Vec<CallerEdge>> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let batches = query(
+            &self.client,
+            &format!(
+                "WITH callers AS (
+  SELECT DISTINCT e.target_id, s.fqn,
+         s.file_path || ':' || CAST(s.start_line AS VARCHAR) AS loc
+  FROM gl_edge e
+  JOIN gl_definition s ON s.id = e.source_id
+  WHERE e.relationship_kind = 'CALLS'
+    AND e.target_id IN ({list})
+    AND s.project_id = {pid} AND s.commit_sha = {sha}
+)
+SELECT target_id, fqn, loc,
+       COUNT(*) OVER (PARTITION BY target_id) AS total
+FROM callers
+QUALIFY row_number() OVER (PARTITION BY target_id ORDER BY fqn) <= {cap}
+ORDER BY target_id, fqn",
+                list = id_list(ids),
+                pid = self.pid,
+                sha = self.sha,
+                cap = orbit_search::ask::CALLERS_SHOWN,
+            ),
+        )?;
+        let callees = i64_column(&batches, "target_id");
+        let fqns = string_column(&batches, "fqn");
+        let locs = string_column(&batches, "loc");
+        let totals = i64_column(&batches, "total");
+        Ok((0..callees.len())
+            .map(|i| CallerEdge {
+                callee: callees[i],
+                caller: Caller {
+                    label: fqns[i].clone(),
+                    loc: locs[i].clone(),
+                },
+                total: usize::try_from(totals[i]).unwrap_or(0),
+            })
+            .collect())
     }
 }
 
@@ -260,15 +305,22 @@ fn recall_sql(pid: i64, sha: &str) -> String {
     AND def_id IN (SELECT id FROM search_corpus)
 ),
 hits AS (
-  SELECT id, score FROM scored WHERE score IS NOT NULL
-  ORDER BY score DESC, id
+  SELECT s.id, s.score,
+         list_contains(
+           list_transform(string_split_regex(lower(d.name), '[^0-9a-z]+'), t -> stem(t, '{FTS_STEMMER}')),
+           stem(lower(?1), '{FTS_STEMMER}')) AS name_hit
+  FROM scored s
+  JOIN {doc_table} d ON d.def_id = s.id AND d.commit_sha = {sha}
+  WHERE s.score IS NOT NULL
+  ORDER BY s.score DESC, s.id
   LIMIT {RECALL_LIMIT}
 ),
 df AS (SELECT COUNT(*) AS df FROM scored WHERE score IS NOT NULL),
 mx AS (SELECT MAX(score) AS m FROM hits),
 corpus_n AS (SELECT GREATEST(COUNT(*), 1) AS total FROM search_corpus)
 SELECT COALESCE(h.id, 0) AS id,
-       COALESCE(h.score / mx.m, 0.0) AS sim,
+       COALESCE(CASE WHEN h.name_hit THEN {NAME_SIM_FLOOR} + (1.0 - {NAME_SIM_FLOOR}) * h.score / mx.m
+                     ELSE LEAST(h.score / mx.m, {CONTEXT_SIM_CAP}) END, 0.0) AS sim,
        CAST(df.df AS BIGINT) AS df,
        CAST(corpus_n.total AS BIGINT) AS total
 FROM df
