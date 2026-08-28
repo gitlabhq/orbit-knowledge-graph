@@ -19,44 +19,41 @@ clones).
 ```plantuml
 @startuml
 skinparam componentStyle rectangle
-skinparam defaultTextAlignment center
 
-package "GKE cluster (ra-bench-{tier})" {
-  component "GitLab\n(stub Rails)" as gitlab
-  component "NATS\n(3 replicas)" as nats
-  component "Siphon\n(CDC producer/consumer)" as siphon
+package "GKE cluster  ra-bench-small / medium / large" as cluster {
+  component "GitLab (stub Rails)" as gitlab
+  component "NATS (3 replicas)" as nats
+  component "Siphon (CDC)" as siphon
 
-  package "GKG (Orbit)" {
-    component "Dispatcher\n(1 replica)" as dispatcher
-    component "Indexer\n(N replicas)" as indexer
-    component "Webserver\n(N replicas)" as webserver
-    component "Health Check" as healthcheck
+  package "GKG (Orbit)" as gkg {
+    component "Dispatcher" as dispatcher
+    component "Indexer (N replicas)" as indexer
+    component "Webserver (N replicas)" as webserver
   }
 
-  database "ClickHouse\n(standalone StatefulSet)" as ch {
+  database "ClickHouse" as ch {
     component "datalake DB" as datalake
     component "graph DB" as graph
   }
 
-  component "Mock Git Server\n(GCS FUSE mount)" as mockgit
+  component "Mock Git Server" as mockgit
 }
 
-cloud "GCS" {
-  component "gkg-datalake-dumps\n(Native format)" as gcsdump
-  component "gkg-code-corpus\n(tar.gz archives)" as gcscorpus
+cloud "GCS buckets" as gcs {
+  component "gkg-datalake-dumps" as gcsdump
+  component "gkg-code-corpus" as gcscorpus
 }
 
-gitlab --> indexer : authz lookups
-nats --> dispatcher : task dispatch
+gitlab --> indexer : authz
+nats <--> dispatcher : task dispatch
 nats --> indexer : messages
 siphon --> datalake : CDC writes
-dispatcher --> nats : dispatch tasks
-indexer --> graph : write nodes/edges
-indexer --> datalake : read datalake
+indexer --> graph : write nodes and edges
+indexer --> datalake : read
 webserver --> graph : queries
 mockgit --> indexer : repo archives
-gcsdump --> ch : datalake import\n(K8s Job)
-gcscorpus --> mockgit : FUSE mount
+gcsdump --> ch : datalake import (K8s Job)
+gcscorpus --> mockgit : GCS FUSE mount
 @enduml
 ```
 
