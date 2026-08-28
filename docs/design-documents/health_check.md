@@ -33,8 +33,8 @@ aggregate and component status. This endpoint is network-dependent; it is not a 
 ### `/queue-depth`
 
 The HealthCheck runtime's `/queue-depth` handler reads the NATS JetStream consumer state for the code
-work queue. It returns pending and in-flight counts used by KEDA to scale code indexers. NATS is not
-included in the `/health` aggregate.
+and SDLC work queues. It returns pending and in-flight counts used by KEDA to scale code and SDLC
+indexers. NATS is not included in the `/health` aggregate.
 
 ## Cluster-health endpoint
 
