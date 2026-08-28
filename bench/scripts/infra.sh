@@ -184,6 +184,7 @@ case "${1:-}" in
       --set "image.repository=${IMAGE}"
       --set "image.tag=${TAG}"
       --set "image.pullPolicy=Always"
+      --no-hooks
       --kube-context "${KCTX}")
     [[ -n "${INSTALLED_VERSION}" ]] && HELM_ARGS+=(--version "${INSTALLED_VERSION}")
     helm "${HELM_ARGS[@]}"
