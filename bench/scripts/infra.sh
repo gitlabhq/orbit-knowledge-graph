@@ -131,21 +131,11 @@ case "${1:-}" in
     echo "[infra] Dropping and recreating graph DB (datalake untouched)"
     CH_PASS=$(kubectl --context="${KCTX}" get secret ra-ch-credentials -n "${CH_NS}" \
       -o jsonpath='{.data.default-password}' | base64 -d)
-    CH="kubectl --context=${KCTX} exec -n ${CH_NS} clickhouse-0 -- clickhouse-client --password ${CH_PASS}"
+    kubectl --context="${KCTX}" exec -n "${CH_NS}" clickhouse-0 -- \
+      clickhouse-client --password "${CH_PASS}" --multiquery \
+      --query "DROP DATABASE IF EXISTS gkg; CREATE DATABASE gkg;"
 
-    $CH --multiquery --query "DROP DATABASE IF EXISTS gkg; CREATE DATABASE gkg;"
-
-    echo "[infra] Re-applying user grants"
-    SETUP_SQL=$(sed \
-      -e "s|\${GRAPH_DB}|gkg|g" \
-      -e "s|\${DATALAKE_DB}|datalake|g" \
-      -e "s|\${GKG_WRITER_PASSWORD}|$($CH -q "SELECT currentUser()")|g" \
-      -e "s|\${GKG_READER_PASSWORD}|unused|g" \
-      -e "s|\${GKG_SIPHON_READER_PASSWORD}|unused|g" \
-      "${REPO_ROOT}/config/clickhouse-setup.sql")
-    $CH --multiquery --query "${SETUP_SQL}" 2>/dev/null || true
-
-    echo "[infra] Resetting checkpoints to epoch"
+    echo "[infra] Restarting GKG (schema migration re-creates tables on boot)"
     kubectl --context="${KCTX}" rollout restart -n "${GKG_NS}" \
       deploy/gkg-dispatcher deploy/gkg-indexer-default deploy/gkg-webserver
     kubectl --context="${KCTX}" rollout status -n "${GKG_NS}" \
@@ -166,20 +156,23 @@ case "${1:-}" in
     KCTX=$("$TF" -chdir="${TF_DIR}" output -raw kctx 2>/dev/null)
     GKG_NS="e2e-${RUN_ID}-gkg"
     SHORT_SHA=$(git -C "${REPO_ROOT}" rev-parse --short HEAD)
+    DIRTY=$(git -C "${REPO_ROOT}" diff --quiet HEAD -- 2>/dev/null && echo "" || echo "-dirty")
     IMAGE="registry.gitlab.com/gitlab-org/orbit/knowledge-graph/gkg"
-    TAG="bench-${SHORT_SHA}"
+    TAG="bench-${SHORT_SHA}${DIRTY}"
 
-    echo "[infra] Building GKG image (debug, linux/amd64)"
+    echo "[infra] Building GKG image (debug, linux/amd64) tag=${TAG}"
     (
       cd "${REPO_ROOT}"
+      trap 'rm -f gkg-server' EXIT
       CARGO_PROFILE_DEV_DEBUG=0 cargo build -p orbit-server --locked
       cp target/debug/gkg-server .
-      docker build -t "${IMAGE}:${TAG}" -f e2e/Dockerfile.e2e .
-      docker push "${IMAGE}:${TAG}"
-      rm -f gkg-server
+      docker buildx build --platform linux/amd64 \
+        -t "${IMAGE}:${TAG}" -f e2e/Dockerfile.e2e --push .
     )
 
     echo "[infra] Upgrading GKG Helm release to ${TAG}"
+    kubectl --context="${KCTX}" -n "${GKG_NS}" delete job \
+      -l app.kubernetes.io/component=clickhouse-setup --ignore-not-found 2>/dev/null
     INSTALLED_VERSION=$(helm list --namespace "${GKG_NS}" --kube-context "${KCTX}" \
       -f gkg -o json 2>/dev/null \
       | python3 -c "import json,sys; d=json.load(sys.stdin); print(d[0]['chart'].rsplit('-',1)[-1]) if d else print('')" 2>/dev/null || echo "")
@@ -190,6 +183,7 @@ case "${1:-}" in
       --reuse-values
       --set "image.repository=${IMAGE}"
       --set "image.tag=${TAG}"
+      --set "image.pullPolicy=Always"
       --kube-context "${KCTX}")
     [[ -n "${INSTALLED_VERSION}" ]] && HELM_ARGS+=(--version "${INSTALLED_VERSION}")
     helm "${HELM_ARGS[@]}"
