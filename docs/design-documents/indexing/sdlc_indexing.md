@@ -282,13 +282,15 @@ Each `EntityHandler` invocation runs its plan through a shared `Pipeline` struct
 4. Read each page out of the datalake in full, buffering its Arrow blocks in memory.
    ClickHouse encodes Arrow `String` columns with 32-bit offsets, so an output block whose text column (e.g. a dense page of `description`/`note` text) exceeds ~2 GiB fails the read with error code 1002. `max_block_size` bounds the rows per output block, so a small enough block keeps every column under the cap.
    The happy path pays nothing for this; on a 1002 overflow the extract retry (`Pipeline::extract_batch`) drops `max_block_size` straight to the floor block size and re-reads the page — idempotent from the page's start cursor (point 7) — so no single block can exceed the cap.
-5. Transform each extracted block with the plan's transform. `datafusion` performs row-wise SQL projections for node rows and edge mappings; a registered Rust transform such as `system_notes` can perform custom parsing or lookups. Output rows are grouped by destination table. While the current page's writes are in flight, the next page's read is overlapped via `tokio::join!`, so the next page's query-open latency hides behind the writes; peak memory is roughly two pages.
+5. Transform each extracted block with the plan's transform. `datafusion` performs row-wise SQL projections for node rows and edge mappings; a registered Rust transform such as `system_notes` can perform custom parsing or lookups. Output rows are grouped by destination table. The extracted page is moved into the transform, so each block is released as it is consumed and none of it survives the transform. While the current page's writes are in flight, the next page's read is overlapped via `tokio::join!`, so the next page's query-open latency hides behind the writes; residency during that overlap is the transformed page plus the next extracted page.
 6. Each destination table's transformed rows for a page are written as one bulk `INSERT` per page. The whole transformed page is resident at write time — the trade for throughput on high-latency backends like ClickHouse Cloud, where one large insert per page beats many smaller round-trips. Read-side wire blocks use the ClickHouse server default `max_block_size`; only the 1002 overflow retry (point 4) overrides it per attempt.
    Data-page write durability differs by mode (see **Write durability** below); both modes async-batch to coalesce the many small per-page inserts into fewer parts.
 7. Save the cursor to the checkpoint store after each page completes. If the indexer crashes mid-pagination, the next run picks up from the last written page rather than replaying the entire watermark window. Re-running a page is idempotent: the graph tables are `ReplacingMergeTree`, so any rows re-inserted after a mid-page failure are de-duplicated.
 8. When the final page comes back with fewer rows than the batch size, mark the plan completed: clear the cursor and advance the watermark.
 
-Paging counts *output* rows (points 3 and 8), so extracts must emit at least one output row per driver row: a join that drops driver rows silently truncates the window (#1064) — use `LEFT JOIN` and drop unmatched rows in the transform.
+Paging counts *output* rows (points 3 and 8), so extracts must emit at least one output row per driver row: a join that drops driver rows silently truncates the window (#1064): use `LEFT JOIN` and drop unmatched rows in the transform.
+
+On a backfill (no parent checkpoint) a plan that probes above `PARTITION_MIN_ROWS` runs one of these loops per key range concurrently, under the single worker-pool slot the handler holds. The page budget is divided across those ranges so the slot holds one plan's worth of pages rather than one per range, floored at the smallest page the config layer derives, because below that the extra round trips cost more than the smaller pages save.
 
 ```sql
 --- Example extraction query with keyset pagination
@@ -318,13 +320,13 @@ A run touches three write targets, and each mode (`RunDurability::for_mode`) pic
 
 | Write target | Full load | Incremental |
 |---|---|---|
-| Data pages (graph tables) | configured `insert_settings` (no override) | durable — `async_insert=1, wait_for_async_insert=1` |
+| Data pages (graph tables) | durable: `async_insert=1, wait_for_async_insert=1` | durable: same |
 | Per-page progress checkpoint | fire-and-forget — `async_insert=1, wait_for_async_insert=0` | fire-and-forget |
 | Completion checkpoint | durable | fire-and-forget |
 
-The inversion follows what a lost write costs. A full load re-pulls any lost data page from its watermark window, so its data writes impose no durability and ride the deployment's configured settings, but its completion must persist or the watermark never advances. An incremental advances the watermark with no NATS retry, so each data page must persist before the watermark moves; a lost completion just re-derives next dispatch. Progress checkpoints are always best-effort — a lost one only re-reads from the prior page (`save_progress` hardcodes fire-and-forget; it is not part of `RunDurability`).
+Only the completion durability differs, and it follows what a lost write costs. A full load's completion must persist or the watermark never advances. An incremental advances the watermark with no NATS retry, so a lost completion just re-derives next dispatch. Data pages are durable in both modes, so a page's transformed rows stay resident until ClickHouse has flushed its async-insert buffer. Progress checkpoints are always best-effort — a lost one only re-reads from the prior page (`save_progress` hardcodes fire-and-forget; it is not part of `RunDurability`).
 
-`FireAndForget` and `Durable` both pin `async_insert=1` to coalesce parts and differ only on `wait_for_async_insert`; "no override" is distinct — it imposes nothing and inherits the configured `insert_settings`. Full-load data writes take that no-override path (`RunDurability::data_writes` is `None`).
+`FireAndForget` and `Durable` both pin `async_insert=1` to coalesce parts and differ only on `wait_for_async_insert`. A third state exists in the type (`data_writes` is an `Option`, and `None` imposes nothing and inherits the configured `insert_settings`), but neither mode currently selects it.
 
 **Checkpoint store**
 
