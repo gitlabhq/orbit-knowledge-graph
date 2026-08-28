@@ -551,11 +551,18 @@ impl Default for SiphonRouterConfig {
     }
 }
 
-/// Cadence for the coverage-driven code-backfill sweep.
+fn default_code_backfill_publish_window() -> usize {
+    200_000
+}
+
+/// Cadence for the coverage-driven code-backfill sweep and its publish batch size.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct CodeBackfillSweepConfig {
     #[serde(flatten)]
     pub schedule: ScheduleConfiguration,
+
+    #[serde(default = "default_code_backfill_publish_window")]
+    pub publish_window: usize,
 }
 
 impl Default for CodeBackfillSweepConfig {
@@ -564,6 +571,7 @@ impl Default for CodeBackfillSweepConfig {
             schedule: ScheduleConfiguration {
                 cron: Some("0 */1 * * * *".into()),
             },
+            publish_window: default_code_backfill_publish_window(),
         }
     }
 }
@@ -572,15 +580,6 @@ impl Default for CodeBackfillSweepConfig {
 pub struct TableCleanupConfig {
     #[serde(flatten)]
     pub schedule: ScheduleConfiguration,
-}
-
-const TOMBSTONE_SWEEP_LOOKBACK_SLACK: Duration = Duration::from_secs(24 * 60 * 60);
-
-impl TableCleanupConfig {
-    pub fn lookback(&self) -> chrono::TimeDelta {
-        let seconds = (self.schedule.interval_hint() + TOMBSTONE_SWEEP_LOOKBACK_SLACK).as_secs();
-        chrono::TimeDelta::seconds(seconds as i64)
-    }
 }
 
 impl Default for TableCleanupConfig {
@@ -982,17 +981,6 @@ modules: [sdlc, namespace_deletion]
             cfg.validate(),
             Err(EngineConfigError::ZeroSystemNotesResolveLookupBatchSize)
         ));
-    }
-
-    #[test]
-    fn tombstone_sweep_lookback_follows_the_cadence() {
-        let daily = TableCleanupConfig {
-            schedule: ScheduleConfiguration {
-                cron: Some("0 0 3 * * *".into()),
-            },
-        };
-
-        assert_eq!(daily.lookback(), chrono::TimeDelta::days(2));
     }
 
     #[test]

@@ -201,6 +201,15 @@ pub struct JsFileAnalysis {
     pub module_info: JsModuleInfo,
 }
 
+/// The only fields of a definition resolution reads, so the rest of the analysis
+/// need not survive into the resolution phase, where the JS and TS peaks sit.
+#[derive(Debug, Clone)]
+pub struct JsDefSupport {
+    pub fqn: String,
+    pub byte_offset: (usize, usize),
+    pub invocation_support: Option<JsInvocationSupport>,
+}
+
 #[derive(Debug, Clone)]
 pub struct JsDef {
     pub name: String,

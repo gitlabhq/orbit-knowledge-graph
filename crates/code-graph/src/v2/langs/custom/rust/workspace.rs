@@ -12,22 +12,26 @@ pub(super) struct WorkspaceIndex {
     pub(super) include_crate_name_in_fqn: bool,
 }
 
-pub(super) struct WorkspaceCatalog {
+pub(super) struct WorkspacePlan {
     _embedded_sysroot: Arc<EmbeddedSysroot>,
-    workspaces: Vec<WorkspaceIndex>,
-    workspace_ids_by_relative_path: HashMap<String, usize>,
+    repo_rust_files: Vec<AbsPathBuf>,
+    entries: Vec<PlannedWorkspace>,
+}
+
+struct PlannedWorkspace {
+    manifest_path: PathBuf,
+    workspace: ProjectWorkspace,
+    candidates: Vec<usize>,
 }
 
 impl WorkspaceIndex {
-    fn load_manifest(
+    fn load_planned(
         root_path: &str,
         manifest_path: &Path,
-        manifest_cache: &mut ManifestCache,
+        workspace: &ProjectWorkspace,
         repo_rust_files: &[AbsPathBuf],
-        embedded_sysroot: &EmbeddedSysroot,
+        multiple_roots: bool,
     ) -> Result<Self> {
-        let workspace = build_project_workspace(manifest_path, manifest_cache, embedded_sysroot)?;
-
         let (db, vfs) =
             load_workspace_no_watcher(workspace, repo_rust_files).with_context(|| {
                 format!(
@@ -64,12 +68,19 @@ impl WorkspaceIndex {
             }
         });
 
+        let include_crate_name_in_fqn = multiple_roots
+            || crate_names_by_file_id
+                .values()
+                .collect::<HashSet<_>>()
+                .len()
+                > 1;
+
         Ok(Self {
             db,
             file_ids_by_relative_path: Arc::new(file_ids_by_relative_path),
             paths_by_file_id: Arc::new(paths_by_file_id),
             crate_names_by_file_id: Arc::new(crate_names_by_file_id),
-            include_crate_name_in_fqn: false,
+            include_crate_name_in_fqn,
         })
     }
 
@@ -103,15 +114,14 @@ impl WorkspaceIndex {
     }
 }
 
-impl WorkspaceCatalog {
-    pub(super) fn load(root_path: &str, files: &[FileInput]) -> Result<Self> {
+impl WorkspacePlan {
+    pub(super) fn discover(root_path: &str, files: &[FileInput]) -> Result<Self> {
         let mut manifest_cache = ManifestCache::new(root_path)?;
         let manifest_paths = manifest_cache.manifest_paths.clone();
         let embedded_sysroot = Arc::new(EmbeddedSysroot::materialize()?);
-        let repo_rust_files = collect_abs_rust_files(root_path, files);
-        let mut workspaces = Vec::new();
-        let mut workspace_ids_by_relative_path = HashMap::new();
-        let mut crate_names = HashSet::new();
+        let (repo_rust_files, inventory_indexes) = collect_abs_rust_files(root_path, files);
+        let by_path = sorted_by_path(&repo_rust_files);
+        let mut entries = Vec::new();
         let mut loaded_roots = HashSet::new();
         let mut last_error = None;
 
@@ -122,63 +132,125 @@ impl WorkspaceCatalog {
                 continue;
             }
 
-            match WorkspaceIndex::load_manifest(
-                root_path,
+            match build_project_workspace(
                 &workspace_manifest_path,
                 &mut manifest_cache,
-                &repo_rust_files,
                 embedded_sysroot.as_ref(),
             ) {
                 Ok(workspace) => {
-                    let workspace_id = workspaces.len();
-                    crate_names.extend(workspace.crate_names_by_file_id.values().cloned());
-                    for relative_path in workspace.file_ids_by_relative_path.keys() {
-                        workspace_ids_by_relative_path
-                            .entry(relative_path.clone())
-                            .or_insert(workspace_id);
-                    }
-                    workspaces.push(workspace);
+                    let candidates = candidate_file_indexes(&workspace, &repo_rust_files, &by_path)
+                        .into_iter()
+                        .map(|idx| inventory_indexes[idx])
+                        .collect();
+                    entries.push(PlannedWorkspace {
+                        manifest_path: workspace_manifest_path,
+                        workspace,
+                        candidates,
+                    });
                 }
                 Err(err) => {
                     tracing::warn!(
                         manifest = %workspace_manifest_path.display(),
                         error = %err,
-                        "failed to load rust-analyzer workspace; continuing with others"
+                        "failed to plan rust-analyzer workspace; continuing with others"
                     );
                     last_error = Some(err);
                 }
             }
         }
 
-        if workspaces.is_empty() {
+        if entries.is_empty() {
             return Err(last_error.unwrap_or_else(|| anyhow::anyhow!("no Rust manifests found")));
-        }
-
-        let include_crate_name_in_fqn = workspaces.len() > 1 || crate_names.len() > 1;
-        if include_crate_name_in_fqn {
-            for workspace in &mut workspaces {
-                workspace.include_crate_name_in_fqn = true;
-            }
         }
 
         Ok(Self {
             _embedded_sysroot: embedded_sysroot,
-            workspaces,
-            workspace_ids_by_relative_path,
+            repo_rust_files,
+            entries,
         })
     }
 
-    pub(super) fn workspace_for_file(
-        &self,
-        relative_path: &str,
-    ) -> Option<(usize, &WorkspaceIndex)> {
-        let &workspace_id = self.workspace_ids_by_relative_path.get(relative_path)?;
-        Some((workspace_id, &self.workspaces[workspace_id]))
+    pub(super) fn len(&self) -> usize {
+        self.entries.len()
     }
 
-    pub(super) fn workspaces(&self) -> &[WorkspaceIndex] {
-        &self.workspaces
+    /// Inventory indexes this root would own, decided by path matching alone so
+    /// that no database has to be built to find out.
+    pub(super) fn candidates(&self, idx: usize) -> &[usize] {
+        &self.entries[idx].candidates
     }
+
+    pub(super) fn manifest_path(&self, idx: usize) -> &Path {
+        &self.entries[idx].manifest_path
+    }
+
+    pub(super) fn load(&self, idx: usize, root_path: &str) -> Result<WorkspaceIndex> {
+        let planned = &self.entries[idx];
+        WorkspaceIndex::load_planned(
+            root_path,
+            &planned.manifest_path,
+            &planned.workspace,
+            &self.repo_rust_files,
+            self.entries.len() > 1,
+        )
+    }
+}
+
+/// The candidate filter and the VFS seed must agree, or a root can claim files
+/// its own database never loaded.
+fn dirs_match(dirs: &loader::Directories, path: &AbsPath) -> bool {
+    dirs.include.iter().any(|inc| path.starts_with(inc))
+        && !dirs.exclude.iter().any(|ex| path.starts_with(ex))
+        && dirs
+            .extensions
+            .iter()
+            .any(|ext| Some(ext.as_str()) == path.extension())
+}
+
+fn sorted_by_path(repo_rust_files: &[AbsPathBuf]) -> Vec<usize> {
+    let mut order = (0..repo_rust_files.len()).collect::<Vec<_>>();
+    order.sort_unstable_by_key(|&idx| repo_rust_files[idx].as_str());
+    order
+}
+
+fn candidate_file_indexes(
+    workspace: &ProjectWorkspace,
+    repo_rust_files: &[AbsPathBuf],
+    by_path: &[usize],
+) -> Vec<usize> {
+    let project_folders = ProjectFolders::new(std::slice::from_ref(workspace), &[], None);
+    let mut hit = vec![false; repo_rust_files.len()];
+    for entry in &project_folders.load {
+        match entry {
+            loader::Entry::Files(files) => {
+                for path in files {
+                    if let Some(idx) = repo_rust_files.iter().position(|known| known == path) {
+                        hit[idx] = true;
+                    }
+                }
+            }
+            loader::Entry::Directories(dirs) => {
+                // Every match sits under one include dir, so walking those path
+                // ranges beats rescanning the whole repo per directory.
+                for include in &dirs.include {
+                    let prefix = format!("{}/", include.as_str());
+                    let start = by_path
+                        .partition_point(|&idx| repo_rust_files[idx].as_str() < prefix.as_str());
+                    for &idx in &by_path[start..] {
+                        let path = &repo_rust_files[idx];
+                        if !path.as_str().starts_with(&prefix) {
+                            break;
+                        }
+                        hit[idx] = hit[idx] || dirs_match(dirs, path);
+                    }
+                }
+            }
+        }
+    }
+    hit.iter()
+        .enumerate()
+        .filter_map(|(idx, &matched)| matched.then_some(idx))
+        .collect()
 }
 
 pub(super) fn to_absolute_path(root_path: &str, file_path: &str) -> String {
@@ -322,7 +394,7 @@ fn abs_path_from(path: &Path) -> AbsPathBuf {
 /// watcher; we bypass both by seeding the `Vfs` straight from the file set the
 /// pipeline already discovered.
 fn load_workspace_no_watcher(
-    workspace: ProjectWorkspace,
+    workspace: &ProjectWorkspace,
     repo_rust_files: &[AbsPathBuf],
 ) -> Result<(RootDatabase, Vfs)> {
     // Invariant: this function never starts a proc-macro server.
@@ -330,7 +402,7 @@ fn load_workspace_no_watcher(
 
     let mut db = RootDatabase::new(None);
     let mut vfs = Vfs::default();
-    let project_folders = ProjectFolders::new(std::slice::from_ref(&workspace), &[], None);
+    let project_folders = ProjectFolders::new(std::slice::from_ref(workspace), &[], None);
 
     // `repo_rust_files` was already walked by the pipeline; this is a filter, not a second walk.
     for entry in &project_folders.load {
@@ -376,17 +448,7 @@ fn seed_vfs_from_known_files(vfs: &mut Vfs, entry: &loader::Entry, known: &[AbsP
             }
         }
         loader::Entry::Directories(dirs) => {
-            for abs in known {
-                if !dirs.include.iter().any(|inc| abs.starts_with(inc)) {
-                    continue;
-                }
-                if dirs.exclude.iter().any(|ex| abs.starts_with(ex)) {
-                    continue;
-                }
-                let ext = abs.extension().unwrap_or_default();
-                if !dirs.extensions.iter().any(|e| e == ext) {
-                    continue;
-                }
+            for abs in known.iter().filter(|abs| dirs_match(dirs, abs)) {
                 let contents = std::fs::read(AsRef::<Path>::as_ref(abs)).ok();
                 vfs.set_file_contents(VfsPath::from(abs.clone()), contents);
             }
@@ -394,22 +456,23 @@ fn seed_vfs_from_known_files(vfs: &mut Vfs, entry: &loader::Entry, known: &[AbsP
     }
 }
 
-fn collect_abs_rust_files(root_path: &str, files: &[FileInput]) -> Vec<AbsPathBuf> {
+fn collect_abs_rust_files(root_path: &str, files: &[FileInput]) -> (Vec<AbsPathBuf>, Vec<usize>) {
     let root = Path::new(root_path);
-    files
-        .iter()
-        .filter_map(|file| {
-            let candidate = if Path::new(file).is_absolute() {
-                PathBuf::from(file)
-            } else {
-                root.join(file)
-            };
-            let normalized = normalize_existing_path(&candidate).unwrap_or(candidate);
-            Utf8PathBuf::from_path_buf(normalized)
-                .ok()
-                .map(AbsPathBuf::assert)
-        })
-        .collect()
+    let mut paths = Vec::with_capacity(files.len());
+    let mut indexes = Vec::with_capacity(files.len());
+    for (idx, file) in files.iter().enumerate() {
+        let candidate = if Path::new(file).is_absolute() {
+            PathBuf::from(file)
+        } else {
+            root.join(file)
+        };
+        let normalized = normalize_existing_path(&candidate).unwrap_or(candidate);
+        if let Ok(utf8) = Utf8PathBuf::from_path_buf(normalized) {
+            paths.push(AbsPathBuf::assert(utf8));
+            indexes.push(idx);
+        }
+    }
+    (paths, indexes)
 }
 
 #[cfg(test)]
@@ -431,18 +494,8 @@ mod tests {
         fs::write(root.join("src/lib.rs"), "pub fn hello() -> u32 { 42 }\n").unwrap();
 
         let root_str = root.to_string_lossy().to_string();
-        let mut manifest_cache = ManifestCache::new(&root_str).unwrap();
-        let embedded_sysroot = EmbeddedSysroot::materialize().unwrap();
-        let repo_rust_files = collect_abs_rust_files(&root_str, &["src/lib.rs".to_string()]);
-
-        let index = WorkspaceIndex::load_manifest(
-            &root_str,
-            &root.join("Cargo.toml"),
-            &mut manifest_cache,
-            &repo_rust_files,
-            &embedded_sysroot,
-        )
-        .unwrap();
+        let plan = WorkspacePlan::discover(&root_str, &["src/lib.rs".to_string()]).unwrap();
+        let index = plan.load(0, &root_str).unwrap();
 
         assert!(
             index
@@ -452,6 +505,46 @@ mod tests {
             "expected src/lib.rs to be indexed, got: {:?}",
             index.file_ids_by_relative_path.keys().collect::<Vec<_>>()
         );
+    }
+
+    /// A crate reached only through a path dependency roots itself as well as
+    /// belonging to the workspace, so both roots must not parse it.
+    #[test]
+    fn implicit_member_is_claimed_and_parsed_once_by_the_root_workspace() {
+        let temp = tempdir().unwrap();
+        let root = fs::canonicalize(temp.path()).unwrap();
+        fs::create_dir_all(root.join("a/src")).unwrap();
+        fs::create_dir_all(root.join("b/src")).unwrap();
+        fs::write(root.join("Cargo.toml"), "[workspace]\nmembers = [\"a\"]\n").unwrap();
+        fs::write(
+            root.join("a/Cargo.toml"),
+            "[package]\nname = \"a\"\nversion = \"0.0.0\"\nedition = \"2021\"\n\n[lib]\npath = \"src/lib.rs\"\n\n[dependencies]\nb = { path = \"../b\" }\n",
+        )
+        .unwrap();
+        fs::write(root.join("a/src/lib.rs"), "pub fn from_a() {}\n").unwrap();
+        fs::write(
+            root.join("b/Cargo.toml"),
+            "[package]\nname = \"b\"\nversion = \"0.0.0\"\nedition = \"2021\"\n\n[lib]\npath = \"src/lib.rs\"\n",
+        )
+        .unwrap();
+        fs::write(root.join("b/src/lib.rs"), "pub fn from_b() {}\n").unwrap();
+
+        let root_str = root.to_string_lossy().to_string();
+        let files = vec!["a/src/lib.rs".to_string(), "b/src/lib.rs".to_string()];
+        let plan = WorkspacePlan::discover(&root_str, &files).unwrap();
+
+        assert_eq!(plan.len(), 2);
+        assert_eq!(plan.candidates(0), &[0, 1]);
+
+        let output = parse_rust_files_with_workspaces(&files, &root_str, &plan, None);
+        assert!(output.errors.is_empty(), "{:?}", output.errors);
+        let mut paths = output
+            .parsed
+            .iter()
+            .map(|file| file.relative_path.as_str())
+            .collect::<Vec<_>>();
+        paths.sort_unstable();
+        assert_eq!(paths, ["a/src/lib.rs", "b/src/lib.rs"]);
     }
 
     /// Guards the atomic-polyfill advisory mitigation (RUSTSEC-2023-0089). If

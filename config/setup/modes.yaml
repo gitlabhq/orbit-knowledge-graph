@@ -6,7 +6,24 @@ local:
   instructions: |
     ## Orbit graph
 
-    Repositories on this machine are indexed into a local Orbit code graph (`orbit list` shows which). Query the graph before grep or reading files for any question about how the code fits together: where something is defined or belongs, where a behavior happens, what handles a case, who calls or imports it, what an API looks like. Plain questions count — "where do we send X", "what handles Y", "how does Z work" are all graph questions. Grep matches text and returns noise; the graph returns resolved definitions, callers, and imports.
+    Repositories on this machine are indexed into a local Orbit code graph. The graph is the lookup tool for any task that touches existing code — answering a question, building a feature, fixing a bug, refactoring, reviewing. Grep matches text and returns noise for structural questions; the graph returns resolved definitions, callers, and imports.
+
+    What the graph contains:
+
+    {{graph_contents}}
+
+    `orbit local ask` recognizes relationship words matching the edge kinds above: "who calls X" focuses the reported connections on `CALLS` edges around X, "what extends Y" on `EXTENDS` — the relationship word steers the connection ranking instead of being matched as a symbol name.
+
+    Rules:
+
+    - Start every task with `orbit local ask "<your question>"` in order to get an understanding of the code structure from the graph.
+    - Ask using simple queries without fluff in as few words as possible, with one phrase per ask. "dlq message handler", "NATS backpressure", "who calls run_sql", "what extends LocalBackend" are single `orbit local ask` calls.
+    - The same default holds while implementing, not just when answering questions: where the code you will change lives, whether machinery already exists (rate limiting, retries, caching), who calls what you are about to modify — those are ask questions, not greps. Do not scaffold new code before checking what already exists.
+    - If `ask` notes unmatched terms or weak matches, retry with synonyms for those terms — a synonym or an identifier fragment ("throttle" → "rate limit"). If ask is unhelpful after multiple tries, fall back to grep.
+    - Files are for editing, or for reading lines the graph's snippets do not cover — not for searching. Every new where/what/who question that comes up mid-task goes to the graph, not grep.
+    - When `ask` returns confident matches with snippets, answer from them. Verify with another ask or one file read when the snippet alone is ambiguous — do not re-derive what the graph already resolved.
+    - Drop to `orbit sql` only for what `ask` does not cover: exact filters, aggregation, or columns it does not print.
+    - Answer tersely: name the mechanism, cite `file:line`, and stop. Do not paste code blocks the reader can open from the citation, and do not restate the question or narrate your search.
 
     Copy-paste recipes (DuckDB SQL):
 
@@ -15,30 +32,34 @@ local:
     - Orient in unfamiliar code / where should new code live: `orbit repo-map` (drill down: `tree`, `api <Type>`, `class`, `extends`, `imports`)
     - `orbit schema` lists tables; `orbit skill` prints the full recipe reference
 
-    If orbit reports the current commit is not indexed, run `orbit index .` and retry. Grep and raw file reads are fine once the graph has oriented you, or to modify and debug specific lines. For questions spanning other projects or GitLab entities (merge requests, issues, pipelines, users), use `glab orbit` when available.
+    `ask` indexes the current commit automatically; if `orbit sql` or `orbit repo-map` report it is not indexed, run `orbit index .` and retry. Grep only for literal strings the graph cannot index (log messages, error text, config keys). For questions spanning other projects or GitLab entities (merge requests, issues, pipelines, users), use `glab orbit` when available.
 
     This applies to subagents: put the same rule in any subagent prompt that explores code.
   nudge_search: |
-    MANDATORY: a local Orbit code graph covers this code. You MUST query it before grepping raw files — grep returns textual noise, the graph returns resolved definitions. Start with `orbit sql "SELECT name, definition_type, file_path, start_line FROM gl_definition WHERE name LIKE '%<term>%'"`; caller/import/subtype recipes are in `orbit skill`, and `orbit repo-map` orients you in unfamiliar code. Grep after the graph has oriented you, or to modify/debug specific lines. This applies to subagents too — put the same rule in any subagent prompt that explores code.
+    MANDATORY: a local Orbit code graph covers this code. Before grepping raw files, run `orbit local ask "<your question>"` — one command in plain language, returning resolved definitions and their connections instead of textual noise. This is the default while implementing too: where code lives and what machinery already exists are ask questions. For exact filters or aggregation use `orbit sql "<DuckDB SQL>"` (`orbit skill` prints the recipes), and `orbit repo-map` orients you in unfamiliar code. Grep only for literal strings the graph cannot index (log messages, error text, config keys); code-structure lookups go to the graph at every step, not just the first. This applies to subagents too — put the same rule in any subagent prompt that explores code.
   nudge_read: |
-    MANDATORY: a local Orbit code graph covers this code. You MUST orient with the graph before reading source files one by one — run `orbit sql "<DuckDB SQL>"` (definitions, callers, imports) or `orbit repo-map`. Read raw files after the graph has oriented you, or to modify/debug specific lines. This applies to subagents too — put the same rule in any subagent prompt that explores code.
+    MANDATORY: a local Orbit code graph covers this code. Before reading source files one by one, start with `orbit local ask "<your question>"` — one command in plain language, returning the matching definitions and what connects to them. This is the default while implementing too: where code lives and what machinery already exists are ask questions. For exact filters or aggregation use `orbit sql "<DuckDB SQL>"`, or `orbit repo-map` for a structural overview. Files are for editing, or for reading lines the graph's snippets do not cover — not for searching. This applies to subagents too — put the same rule in any subagent prompt that explores code.
   template_vars:
-    reminder: "[orbit] local code graph available: for code-structure questions run orbit sql or orbit repo-map (scoped results, cheaper than grep); orbit skill prints the query reference."
+    reminder: "[orbit] local code graph available: run orbit local ask with your question before grep — for code-structure questions AND to locate change sites and reusable infrastructure before implementing; orbit sql and orbit repo-map cover exact filters and structure."
     require_local_graph: true
 remote:
   instructions: |
     ## Orbit graph
 
-    GitLab projects are covered by the remote Orbit graph. Query the graph before grep or reading files for any question about how the code fits together: where something is defined, where a behavior happens, what handles a case, who calls or imports it, what an API looks like. Plain questions count — "where do we send X", "what handles Y", "how does Z work" are all graph questions. The same goes for GitLab entities: merge requests, issues, pipelines, users, cross-project dependencies. Grep matches text and returns noise; the graph returns resolved definitions and relationships.
+    This project is covered by the remote Orbit graph: resolved definitions, callers, imports, merge requests, issues, and the relationships between them.
 
-    - Run queries with `glab orbit remote query <file.json|->`; `glab orbit remote schema` lists entities and edges.
-    - The `orbit` agent skill has copy-paste query recipes and the full DSL reference — consult it before writing a query by hand.
-    - Raw grep and file reads are fine once the graph has oriented you, or to modify and debug specific lines.
+    Rules:
+
+    - For any question about this codebase or its GitLab history — where something is defined, who calls it, which merge requests or issues relate to it — query the graph FIRST, before grep and before reading files: `glab orbit remote query <file.json|->`.
+    - The same default holds while implementing: where the code you will change lives and what machinery already exists are graph queries, not greps. Do not scaffold new code before checking what already exists.
+    - `glab orbit remote schema` lists entities and edges, and the `orbit` agent skill has copy-paste query recipes — consult it before writing a query by hand.
+    - Files are for editing, or for reading lines the graph has not already shown you — not for searching. Grep matches text and returns noise; the graph returns resolved relationships.
+    - If two graph queries in a row return nothing useful, the graph likely lacks those edges — fall back to grep immediately instead of reformulating the query.
     - This applies to subagents: put the same rule in any subagent prompt that explores code.
   nudge_search: |
-    MANDATORY: the remote Orbit graph covers this code. You MUST run `glab orbit remote query` before grepping raw files — grep returns textual noise, the graph returns resolved definitions and relationships. `glab orbit remote schema` lists entities and edges; the `orbit` skill has copy-paste recipes. Grep after the graph has oriented you, or to modify/debug specific lines. This applies to subagents too — put the same rule in any subagent prompt that explores code.
+    MANDATORY: the remote Orbit graph covers this code. Before grepping raw files, query it with `glab orbit remote query` (the `orbit` skill has copy-paste recipes) — it returns resolved definitions and their connections instead of textual noise, and covers merge requests, issues, pipelines, and aggregation. Grep only for literal strings the graph cannot index; code-structure lookups go to the graph at every step, not just the first. This applies to subagents too — put the same rule in any subagent prompt that explores code.
   nudge_read: |
-    MANDATORY: the remote Orbit graph covers this code. You MUST orient with the graph before reading source files one by one — run `glab orbit remote query` (definitions, callers, imports; `glab orbit remote schema` lists entities). Read raw files after the graph has oriented you, or to modify/debug specific lines. This applies to subagents too — put the same rule in any subagent prompt that explores code.
+    MANDATORY: the remote Orbit graph covers this code. Before reading source files one by one, start with `glab orbit remote query` (the `orbit` skill has copy-paste recipes) — it returns the matching definitions and what connects to them, and covers merge requests, issues, pipelines, and aggregation. Files are for editing, or for reading lines the graph has not already shown you — not for searching. This applies to subagents too — put the same rule in any subagent prompt that explores code.
   template_vars:
-    reminder: "[orbit] remote Orbit graph available: for code-structure and GitLab-entity questions run glab orbit remote query (scoped results, cheaper than grep); glab orbit remote schema lists entities."
+    reminder: "[orbit] remote Orbit graph available: for code-structure, merge-request, or issue questions use glab orbit remote query (the orbit skill has recipes; cheaper than grep)."
     require_local_graph: false

@@ -70,19 +70,9 @@ HAVING argMax(namespaces.{del}, namespaces.{version}) = true
 fn mark_deletion_complete_sql() -> String {
     let table = prefixed_table_name("namespace_deletion_schedule", *SCHEMA_VERSION);
     format!(
-        r#"
-INSERT INTO {table} (namespace_id, traversal_path, scheduled_deletion_date, _deleted)
-SELECT
-    namespace_id,
-    traversal_path,
-    argMax(scheduled_deletion_date, _version) AS scheduled_deletion_date,
-    true
-FROM {table}
-WHERE namespace_id = {{namespace_id:Int64}}
-  AND traversal_path = {{traversal_path:String}}
-GROUP BY namespace_id, traversal_path
-HAVING argMax(_deleted, _version) = false
-"#
+        "DELETE FROM {table} \
+         WHERE namespace_id = {{namespace_id:Int64}} \
+         AND traversal_path = {{traversal_path:String}}"
     )
 }
 
@@ -99,35 +89,16 @@ VALUES ({{namespace_id:Int64}}, {{traversal_path:String}}, {{scheduled_deletion_
 fn delete_sdlc_checkpoints_sql() -> String {
     let table = prefixed_table_name("checkpoint", *SCHEMA_VERSION);
     format!(
-        r#"
-INSERT INTO {table} (key, watermark, cursor_values, _deleted)
-SELECT key, argMax(watermark, _version), argMax(cursor_values, _version), true
-FROM {table}
-WHERE startsWith(key, {{key_prefix:String}})
-GROUP BY key
-HAVING argMax(_deleted, _version) = false
-"#
+        "DELETE FROM {table} \
+         WHERE startsWith(key, {{key_prefix:String}})"
     )
 }
 
 fn delete_code_checkpoints_sql() -> String {
     let table = prefixed_table_name("code_indexing_checkpoint", *SCHEMA_VERSION);
     format!(
-        r#"
-INSERT INTO {table} (traversal_path, project_id, branch, last_task_id, last_commit, indexed_at, _deleted)
-SELECT
-    traversal_path,
-    project_id,
-    branch,
-    argMax(last_task_id, _version),
-    argMax(last_commit, _version),
-    argMax(indexed_at, _version),
-    true
-FROM {table}
-WHERE startsWith(traversal_path, {{traversal_path:String}})
-GROUP BY traversal_path, project_id, branch
-HAVING argMax(_deleted, _version) = false
-"#
+        "DELETE FROM {table} \
+         WHERE startsWith(traversal_path, {{traversal_path:String}})"
     )
 }
 
@@ -246,7 +217,7 @@ impl ClickHouseNamespaceDeletionStore {
         }
     }
 
-    async fn tombstone(
+    async fn lightweight_delete(
         &self,
         statements: &[DeletionStatement],
         traversal_path: &TraversalPath,
@@ -259,7 +230,7 @@ impl ClickHouseNamespaceDeletionStore {
 
             let mut query = self
                 .graph
-                .insert_query(&statement.sql)
+                .query(&statement.sql)
                 .param("traversal_path", traversal_path.as_str());
             if let Some(current_paths) = current_paths {
                 query = query.param("current_paths", current_paths);
@@ -328,14 +299,14 @@ impl NamespaceDeletionStore for ClickHouseNamespaceDeletionStore {
         let key_prefix = format!("{}.", namespace_position_key(namespace_id));
 
         self.graph
-            .insert_query(&delete_sdlc_checkpoints_sql())
+            .query(&delete_sdlc_checkpoints_sql())
             .param("key_prefix", key_prefix)
             .execute()
             .await
             .map_err(|e| NamespaceDeletionStoreError::Query(e.to_string()))?;
 
         self.graph
-            .insert_query(&delete_code_checkpoints_sql())
+            .query(&delete_code_checkpoints_sql())
             .param("traversal_path", traversal_path.as_str())
             .execute()
             .await
@@ -346,7 +317,7 @@ impl NamespaceDeletionStore for ClickHouseNamespaceDeletionStore {
         &self,
         traversal_path: &TraversalPath,
     ) -> Vec<TableDeletionOutcome> {
-        self.tombstone(&self.deletion_statements, traversal_path, None)
+        self.lightweight_delete(&self.deletion_statements, traversal_path, None)
             .await
     }
 
@@ -385,7 +356,7 @@ impl NamespaceDeletionStore for ClickHouseNamespaceDeletionStore {
             }
         };
 
-        self.tombstone(
+        self.lightweight_delete(
             &self.reconcile_statements,
             root_traversal_path,
             Some(&current_paths),
@@ -399,7 +370,7 @@ impl NamespaceDeletionStore for ClickHouseNamespaceDeletionStore {
         traversal_path: &TraversalPath,
     ) -> Result<(), NamespaceDeletionStoreError> {
         self.graph
-            .insert_query(&mark_deletion_complete_sql())
+            .query(&mark_deletion_complete_sql())
             .param("namespace_id", namespace_id)
             .param("traversal_path", traversal_path.as_str())
             .execute()

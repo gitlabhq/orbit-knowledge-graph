@@ -1,89 +1,53 @@
-use std::collections::{HashMap, HashSet};
-
-use crate::text::{split_words, stem};
-
-const EDGE_KIND_SYNONYMS: &[(&str, &str)] = &[
-    ("use", "CALLS"),
-    ("invoke", "CALLS"),
-    ("caller", "CALLS"),
-    ("callee", "CALLS"),
-    ("depend", "IMPORTS"),
-    ("implement", "EXTENDS"),
-    ("inherit", "EXTENDS"),
-];
-
-const RELATIONAL_SYNONYMS: &[&str] = &[
-    "caller",
-    "callee",
-    "depend",
-    "export",
-    "implement",
-    "invoke",
-    "mention",
-    "reference",
-    "render",
-    "use",
-    "used",
-    "uses",
-    "using",
-];
+use std::collections::HashMap;
 
 pub struct SearchVocab {
     by_stem: HashMap<String, String>,
-    relational: HashSet<String>,
 }
 
 impl SearchVocab {
-    pub fn new<I, S>(edge_kinds: I) -> Self
+    pub fn kind_name_parts(name: &str) -> impl Iterator<Item = &str> {
+        name.split(|c: char| !c.is_alphanumeric())
+            .filter(|part| !part.is_empty())
+    }
+
+    pub fn new<I, A, B>(stemmed_parts: I) -> Self
     where
-        I: IntoIterator<Item = S>,
-        S: AsRef<str>,
+        I: IntoIterator<Item = (A, B)>,
+        A: AsRef<str>,
+        B: AsRef<str>,
     {
-        let mut by_stem: HashMap<String, String> = HashMap::new();
-        let mut relational: HashSet<String> = HashSet::new();
-        for kind in edge_kinds {
-            let name = kind.as_ref();
-            by_stem.insert(stem(&name.to_lowercase()), name.to_uppercase());
-            relational.extend(split_words(name).iter().map(|word| stem(word)));
-        }
-        for (word, kind) in EDGE_KIND_SYNONYMS {
-            by_stem.insert(stem(word), (*kind).to_string());
-        }
-        relational.extend(RELATIONAL_SYNONYMS.iter().map(|word| stem(word)));
         Self {
-            by_stem,
-            relational,
+            by_stem: stemmed_parts
+                .into_iter()
+                .map(|(stem, kind)| (stem.as_ref().to_string(), kind.as_ref().to_uppercase()))
+                .collect(),
         }
     }
 
-    pub fn focus_edge_kind(&self, terms: &[String]) -> Option<String> {
-        terms
+    pub fn focus_edge_kind(&self, stemmed_terms: &[String]) -> Option<String> {
+        stemmed_terms
             .iter()
-            .find_map(|t| self.by_stem.get(&stem(t)).cloned())
+            .find_map(|s| self.by_stem.get(s).cloned())
     }
 
-    pub fn is_relational(&self, term: &str) -> bool {
-        self.relational.contains(&stem(term))
+    pub fn is_relational(&self, stemmed_term: &str) -> bool {
+        self.by_stem.contains_key(stemmed_term)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::testutil::test_vocab;
+    use super::*;
 
     #[test]
-    fn maps_edge_kind_synonyms_and_relational_terms() {
-        let vocab = test_vocab();
+    fn lookups_use_stemmed_terms_and_kinds_are_uppercased() {
+        let vocab = SearchVocab::new([("call", "Calls"), ("import", "Imports")]);
+        assert!(vocab.is_relational("call"));
+        assert!(!vocab.is_relational("calls"));
         assert_eq!(
-            vocab.focus_edge_kind(&["calls".to_string()]),
-            Some("CALLS".to_string())
-        );
-        assert_eq!(
-            vocab.focus_edge_kind(&["depend".to_string()]),
+            vocab.focus_edge_kind(&["widget".to_string(), "import".to_string()]),
             Some("IMPORTS".to_string())
         );
-        assert_eq!(vocab.focus_edge_kind(&["dlq".to_string()]), None);
-        assert!(vocab.is_relational("uses"));
-        assert!(!vocab.is_relational("dlq"));
+        assert_eq!(vocab.focus_edge_kind(&["widget".to_string()]), None);
     }
 }

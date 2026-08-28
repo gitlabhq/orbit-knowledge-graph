@@ -205,6 +205,20 @@ pub struct CodeGraph {
     pub rules: Option<std::sync::Arc<super::rules::ResolutionRules>>,
 }
 
+/// Distinct tag sets plus one index per node. The ontology declares a closed set
+/// of values, so a `Vec<String>` per node would repeat a few hundred sets.
+pub struct NodeTags {
+    sets: Vec<Vec<String>>,
+    by_node: Vec<u32>,
+}
+
+impl NodeTags {
+    #[inline]
+    pub fn get(&self, idx: NodeIndex) -> &[String] {
+        &self.sets[self.by_node[idx.index()] as usize]
+    }
+}
+
 impl CodeGraph {
     pub fn new() -> Self {
         Self {
@@ -263,6 +277,14 @@ impl CodeGraph {
         self.strings.seal();
         self.graph.shrink_to_fit_nodes();
         self.graph.shrink_to_fit_edges();
+    }
+
+    /// Drop what the edge build no longer reads. Only valid once the definition
+    /// and import batches and the tag cache exist.
+    pub fn release_node_payloads(&mut self) {
+        self.defs = Vec::new();
+        self.imports = Vec::new();
+        self.strings = StringPool::new();
     }
 
     pub fn add_file(
@@ -873,20 +895,21 @@ impl CodeGraph {
     /// Look up a named property on a graph node. Returns `None` when
     /// the property is unknown or its value is empty (e.g. extension-less
     /// files like Makefile).
-    fn node_property(&self, idx: NodeIndex, property: &str) -> Option<String> {
+    fn node_property(&self, idx: NodeIndex, property: &str) -> Option<std::borrow::Cow<'_, str>> {
+        use std::borrow::Cow;
         let value = match &self.graph[idx] {
             GraphNode::File(f) => match property {
-                "extension" => Some(f.extension.clone()),
-                "language" => Some(f.language_name().to_string()),
-                "reason" => Some(f.reason.to_string()),
+                "extension" => Some(Cow::Borrowed(f.extension.as_str())),
+                "language" => Some(Cow::Borrowed(f.language_name())),
+                "reason" => Some(Cow::Owned(f.reason.to_string())),
                 _ => None,
             },
             GraphNode::Definition { id, .. } => match property {
-                "definition_type" => Some(self.defs[id.0 as usize].definition_type.to_string()),
+                "definition_type" => Some(Cow::Borrowed(self.defs[id.0 as usize].definition_type)),
                 _ => None,
             },
             GraphNode::Import { id, .. } => match property {
-                "import_type" => Some(self.imports[id.0 as usize].import_type.to_string()),
+                "import_type" => Some(Cow::Borrowed(self.imports[id.0 as usize].import_type)),
                 _ => None,
             },
             GraphNode::Directory(_) => None,
@@ -894,35 +917,67 @@ impl CodeGraph {
         value.filter(|v| !v.is_empty())
     }
 
-    /// Returns a vec indexed by `NodeIndex`, so callers can look up tags by the
-    /// same indices used in the edge list. `tag_properties` maps node kind
-    /// name (e.g. `"File"`) to `(tag_key, property_name)` pairs, typically from
-    /// `ontology.denormalized_properties()`.
+    /// `tag_properties` maps node kind name (e.g. `"File"`) to
+    /// `(tag_key, property_name)` pairs, from `ontology.denormalized_properties()`.
     pub fn build_node_tags(
         &self,
         tag_properties: &std::collections::HashMap<String, Vec<(String, String)>>,
-    ) -> Vec<Vec<String>> {
-        self.graph
-            .node_indices()
-            .map(|idx| {
-                let node_kind = match &self.graph[idx] {
-                    GraphNode::File(_) => "File",
-                    GraphNode::Definition { .. } => "Definition",
-                    GraphNode::Import { .. } => "ImportedSymbol",
-                    GraphNode::Directory(_) => return Vec::new(),
-                };
-                let Some(props) = tag_properties.get(node_kind) else {
-                    return Vec::new();
-                };
-                props
-                    .iter()
-                    .filter_map(|(tag_key, prop_name)| {
-                        self.node_property(idx, prop_name)
-                            .map(|val| format!("{tag_key}:{val}"))
-                    })
-                    .collect()
-            })
-            .collect()
+    ) -> NodeTags {
+        type TagKey<'a> = (
+            &'static str,
+            smallvec::SmallVec<[(u32, std::borrow::Cow<'a, str>); 4]>,
+        );
+
+        let mut sets: Vec<Vec<String>> = Vec::new();
+        let mut seen: rustc_hash::FxHashMap<TagKey<'_>, u32> = rustc_hash::FxHashMap::default();
+        let mut by_node = Vec::with_capacity(self.graph.node_count());
+        let mut values: smallvec::SmallVec<[(u32, std::borrow::Cow<'_, str>); 4]> =
+            smallvec::SmallVec::new();
+
+        for idx in self.graph.node_indices() {
+            let node_kind = match &self.graph[idx] {
+                GraphNode::File(_) => Some("File"),
+                GraphNode::Definition { .. } => Some("Definition"),
+                GraphNode::Import { .. } => Some("ImportedSymbol"),
+                GraphNode::Directory(_) => None,
+            };
+            let props = node_kind.and_then(|kind| tag_properties.get(kind));
+
+            // Keyed on the raw values, not the formatted tags: formatting first
+            // would allocate per node before discovering the set already exists.
+            values.clear();
+            if let Some(props) = props {
+                for (i, (_, prop_name)) in props.iter().enumerate() {
+                    if let Some(value) = self.node_property(idx, prop_name) {
+                        values.push((i as u32, value));
+                    }
+                }
+            }
+            // The node kind is part of the key because the same property index
+            // means a different tag name for each kind.
+            let key: TagKey<'_> = (node_kind.unwrap_or(""), values.clone());
+
+            let id = match seen.get(&key) {
+                Some(id) => *id,
+                None => {
+                    let id = sets.len() as u32;
+                    let tags = match props {
+                        Some(props) => key
+                            .1
+                            .iter()
+                            .map(|(i, value)| format!("{}:{value}", props[*i as usize].0))
+                            .collect(),
+                        None => Vec::new(),
+                    };
+                    sets.push(tags);
+                    seen.insert(key, id);
+                    id
+                }
+            };
+            by_node.push(id);
+        }
+
+        NodeTags { sets, by_node }
     }
 
     pub fn definitions(&self) -> impl Iterator<Item = (NodeIndex, &Arc<str>, &GraphDef)> {
@@ -1273,10 +1328,6 @@ impl<C: orbit_utils::arrow::RowEnvelope> AsRecordBatch<C> for DefinitionRow<'_> 
         b.col("definition_type")?
             .push_str(self.def.definition_type)?;
         write_range(b, &self.def.range)?;
-        let (search_text, token_count) =
-            orbit_search::search_document(self.pool.get(self.def.fqn), self.file_path);
-        b.col("search_text")?.push_str(&search_text)?;
-        b.col("token_count")?.push_int(token_count)?;
         Ok(())
     }
 }

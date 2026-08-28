@@ -67,7 +67,7 @@ pub struct ConvertedGraphData {
 }
 
 pub fn convert_code_graph(
-    graph: &code_graph::v2::linker::CodeGraph,
+    graph: &mut code_graph::v2::linker::CodeGraph,
     envelope: &IndexerEnvelope,
     specs: &ConverterSpecs,
 ) -> Result<ConvertedGraphData, ArrowError> {
@@ -101,14 +101,18 @@ fn convert_repository_graph(
 }
 
 fn convert_semantic_graph(
-    graph: &code_graph::v2::linker::CodeGraph,
+    graph: &mut code_graph::v2::linker::CodeGraph,
     ids: &[i64],
     envelope: &IndexerEnvelope,
     specs: &ConverterSpecs,
 ) -> Result<ConvertedGraphData, ArrowError> {
     let definitions = convert_definitions(graph, ids, envelope, &specs.definition)?;
     let imported_symbols = convert_imports(graph, ids, envelope, &specs.imported_symbol)?;
-    let edges = convert_semantic_edges(graph, ids, envelope, specs)?;
+    let tag_cache = graph.build_node_tags(&specs.tag_properties);
+    // The tag cache is the last reader of the definition and import payloads, so
+    // from here the edge build needs only endpoints, edge weights and the cache.
+    graph.release_node_payloads();
+    let edges = convert_semantic_edges(graph, ids, envelope, specs, &tag_cache)?;
     Ok(ConvertedGraphData {
         branch: convert_empty_branch(&specs.branch)?,
         directories: convert_empty_directories(envelope, &specs.directory)?,
@@ -449,14 +453,14 @@ fn convert_semantic_edges(
     ids: &[i64],
     env: &IndexerEnvelope,
     specs: &ConverterSpecs,
+    tag_cache: &code_graph::v2::linker::graph::NodeTags,
 ) -> Result<RecordBatch, ArrowError> {
-    let tag_cache = graph.build_node_tags(&specs.tag_properties);
     let mut builder = BatchBuilder::new(&specs.edge, graph.graph.edge_count())?;
     for ei in graph.graph.edge_indices() {
         if graph.graph[ei].relationship.edge_kind.as_ref() == "CONTAINS" {
             continue;
         }
-        graph_edge_row(graph, ids, env, &tag_cache, ei).write_row(&mut builder, &())?;
+        graph_edge_row(graph, ids, env, tag_cache, ei).write_row(&mut builder, &())?;
     }
     builder.finish()
 }
@@ -523,7 +527,7 @@ fn branch_contains_file_rows<'a>(
     env: &'a IndexerEnvelope,
     branch_id: i64,
     branch_tags: &'a [String],
-    tag_cache: &'a [Vec<String>],
+    tag_cache: &'a code_graph::v2::linker::graph::NodeTags,
 ) -> Vec<IndexerEdgeRow<'a>> {
     graph
         .files()
@@ -536,7 +540,7 @@ fn branch_contains_file_rows<'a>(
             source_node_kind: "Branch",
             target_node_kind: "File",
             source_tags: branch_tags,
-            target_tags: &tag_cache[idx.index()],
+            target_tags: tag_cache.get(idx),
         })
         .collect()
 }
@@ -547,7 +551,7 @@ fn repository_on_branch_rows<'a>(
     env: &'a IndexerEnvelope,
     branch_id: i64,
     branch_tags: &'a [String],
-    tag_cache: &'a [Vec<String>],
+    tag_cache: &'a code_graph::v2::linker::graph::NodeTags,
 ) -> Vec<IndexerEdgeRow<'a>> {
     let mut rows = Vec::new();
 
@@ -568,7 +572,7 @@ fn repository_on_branch_rows<'a>(
         edge_kind: "ON_BRANCH",
         source_node_kind: "File",
         target_node_kind: "Branch",
-        source_tags: &tag_cache[idx.index()],
+        source_tags: tag_cache.get(idx),
         target_tags: branch_tags,
     }));
 
@@ -579,7 +583,7 @@ fn graph_edge_row<'a>(
     graph: &'a code_graph::v2::linker::CodeGraph,
     ids: &'a [i64],
     env: &'a IndexerEnvelope,
-    tag_cache: &'a [Vec<String>],
+    tag_cache: &'a code_graph::v2::linker::graph::NodeTags,
     ei: petgraph::graph::EdgeIndex,
 ) -> IndexerEdgeRow<'a> {
     let (src, tgt) = graph.graph.edge_endpoints(ei).unwrap();
@@ -591,8 +595,8 @@ fn graph_edge_row<'a>(
         edge_kind: rel.edge_kind.as_ref(),
         source_node_kind: rel.source_node.as_ref(),
         target_node_kind: rel.target_node.as_ref(),
-        source_tags: &tag_cache[src.index()],
-        target_tags: &tag_cache[tgt.index()],
+        source_tags: tag_cache.get(src),
+        target_tags: tag_cache.get(tgt),
     }
 }
 
@@ -671,9 +675,9 @@ impl IndexerConverter {
 impl code_graph::v2::GraphConverter for IndexerConverter {
     fn convert(
         &self,
-        graph: code_graph::v2::linker::CodeGraph,
+        mut graph: code_graph::v2::linker::CodeGraph,
     ) -> Result<Vec<(String, RecordBatch)>, SinkError> {
-        let data = convert_code_graph(&graph, &self.envelope, &self.specs)
+        let data = convert_code_graph(&mut graph, &self.envelope, &self.specs)
             .map_err(|e| SinkError(format!("ClickHouse graph conversion: {e}")))?;
         let mut result = vec![
             (self.table_names.branch.clone(), data.branch),

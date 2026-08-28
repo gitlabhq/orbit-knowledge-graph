@@ -148,6 +148,18 @@ impl ClickHouseWriter {
             bytes,
         })
     }
+
+    /// Issues a `DELETE FROM` statement for rows that should be lightweight-deleted.
+    pub async fn lightweight_delete(&self, sql: &str) -> Result<(), WriteError> {
+        if self.noop {
+            return Ok(());
+        }
+        self.client
+            .query(sql)
+            .execute()
+            .await
+            .map_err(|e| WriteError::Write(e.to_string(), None))
+    }
 }
 
 /// A per-submission completion hook. The buffered writer calls exactly one of these for every

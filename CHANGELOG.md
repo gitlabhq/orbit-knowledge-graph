@@ -1,3 +1,53 @@
+## [0.107.1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.107.0...v0.107.1) (2026-08-27)
+
+### Fixes
+
+* **indexer:** create the checkpoint table empty when the active version's table is missing ([175cbf1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/175cbf11067f13f979af1812bd35e8f8d4232a5c)) by Aaron Algutifan
+
+### Performance
+
+* **dispatcher:** bound code-backfill peak memory ([addfd39](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/addfd395f14e080d9c767253753e82c877b2f29d)) by Bohdan Parkhomchuk
+
+### Other
+
+* **i18n:** update ja-jp for commit 42e126b1 ([5fc8529](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/5fc85297dfa1c358118f9aeedeef45b1b2fdcf07)) by GitLab-Argo Bot
+* **i18n:** update ja-jp for commit 822e5c20 ([7513d19](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/7513d19c81aa6e11f36055ba388c63c98f47dc3e)) by GitLab-Argo Bot
+* **i18n:** update ja-jp for commit cb0cd80a ([bb22372](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/bb22372e264364b15f1278786308ee342faf9874)) by GitLab-Argo Bot
+
+## [0.107.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.106.2...v0.107.0) (2026-08-26)
+
+### Features
+
+* **ask:** add orbit ask with DuckDB FTS recall & improved graph ranking ([2f90ac5](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/2f90ac572e9fcda67ea861a49ec8563f098c4c68)) by Aaron Algutifan
+
+### Fixes
+
+* **bench:** config-driven cluster lifecycle, infra.sh wrapper ([2d079c5](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/2d079c52548dd152c0dad7c805120e710557b7dd)) by Michael Usachenko
+
+## [0.106.2](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.106.1...v0.106.2) (2026-08-26)
+
+### Performance
+
+* free the tag cache and graph payloads before the Arrow conversion ([4382809](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/4382809dc468ad55d432cf8cb16e165ad43b17f3)) by Bohdan Parkhomchuk
+
+## [0.106.1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.106.0...v0.106.1) (2026-08-25)
+
+### Performance
+
+* **code-graph:** bound Rust indexing memory to one workspace at a time ([81907b2](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/81907b25ff7f83573ec93f656ee6c70ab206a5c7)) by Bohdan Parkhomchuk
+
+## [0.106.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.105.2...v0.106.0) (2026-08-25)
+
+### Features
+
+* **bench:** add Terraform for bench cluster setup and teardown ([defd27f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/defd27ffe9b9e1b8da963e340f7cb1d9ba4b0417)) by Michael Usachenko
+* **cli:** resolve credentials via glab auth credential-helper ([7a6f03e](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/7a6f03ef4a553e1025d2956fc80d333173d64fcd)) by Jean-Gabriel Doyon
+* **search:** code definition search with graph-consensus ranking ([6da79f2](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/6da79f24f8924a9af0cb7d9c4ef660fc26e37ff0)) by Aaron Algutifan
+
+### Other
+
+* **orbit:** reframe CLI docs around the glab orbit passthrough ([e5d0814](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/e5d0814acd00d79746d9ab684ff1a79427216bf3)) by Jean-Gabriel Doyon
+
 ## [0.105.2](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.105.1...v0.105.2) (2026-08-24)
 
 ### Performance

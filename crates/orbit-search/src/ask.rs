@@ -1,19 +1,18 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 
-use crate::anchor::{RowTokens, term_base_sets, unmatched_terms};
-use crate::expand::{NeighborhoodSource, expand_neighborhood};
+use crate::anchor::{term_base_sets, unmatched_terms};
+use crate::expand::{GraphSource, expand_neighborhood};
 use crate::ppr::KindRates;
 use crate::rank::rank_and_trim;
-use crate::text::{candidate_splits, content_words, query_tokens};
-use crate::types::{CorpusRow, Edge};
+use crate::text::content_words;
+use crate::types::{CorpusRow, Edge, TermSeeds};
 use crate::vocab::SearchVocab;
 
 pub const SURFACED_LIMIT: usize = 3;
 
 pub struct AskOutcome {
     pub terms: Vec<String>,
-    pub splits: Vec<(String, String)>,
     pub matches: Vec<AskMatch>,
     pub surfaced: Vec<AskMatch>,
     pub seed_count: usize,
@@ -27,14 +26,41 @@ pub struct AskOutcome {
 pub struct AskMatch {
     pub row: CorpusRow,
     pub score: f64,
+    pub callers: Vec<Caller>,
+    pub callers_total: usize,
 }
 
-pub type Corpus = (Vec<CorpusRow>, Option<Vec<f64>>);
+pub const CALLERS_SHOWN: usize = 4;
 
-pub trait AskSource: NeighborhoodSource {
-    fn corpus(&self, terms: &[String]) -> Result<Corpus, Self::Error>;
-    fn token_df(&self, tokens: &[String]) -> Result<Vec<i64>, Self::Error>;
-    fn rows_by_ids(&self, ids: &[&str]) -> Result<Vec<CorpusRow>, Self::Error>;
+#[derive(Clone)]
+pub struct Caller {
+    pub label: String,
+    pub loc: String,
+}
+
+pub struct CallerEdge {
+    pub callee: i64,
+    pub caller: Caller,
+    pub total: usize,
+}
+
+pub struct TermRecall {
+    pub hits: Vec<(i64, f64)>,
+    pub matched: u64,
+    pub corpus: u64,
+}
+
+impl TermRecall {
+    pub fn idf(&self) -> f64 {
+        (1.0 + self.corpus as f64 / (1.0 + self.matched as f64)).ln()
+    }
+}
+
+pub trait AskSource: GraphSource {
+    fn stem(&self, words: &[String]) -> Result<Vec<String>, Self::Error>;
+    fn recall(&self, terms: &[String]) -> Result<Vec<TermRecall>, Self::Error>;
+    fn rows_by_ids(&self, ids: &[i64]) -> Result<Vec<CorpusRow>, Self::Error>;
+    fn callers(&self, ids: &[i64]) -> Result<Vec<CallerEdge>, Self::Error>;
 }
 
 #[derive(Debug)]
@@ -71,82 +97,97 @@ pub fn ask<S: AskSource>(
     if terms.is_empty() {
         return Err(AskError::NoUsableTerms(question.to_string()));
     }
-    let splits = accepted_splits(source, &terms)?;
-    let mut anchor_terms = terms.clone();
-    for (_, a, b) in &splits {
-        anchor_terms.push(a.clone());
-        anchor_terms.push(b.clone());
+    let stems = source.stem(&terms)?;
+    let searchable: Vec<String> = terms
+        .iter()
+        .zip(&stems)
+        .filter(|(_, stem)| !vocab.is_relational(stem))
+        .map(|(term, _)| term.clone())
+        .collect();
+    let search_terms = if searchable.is_empty() {
+        terms.clone()
+    } else {
+        searchable
+    };
+    let recalls = source.recall(&search_terms)?;
+    let unmatched = unmatched_terms(&search_terms, &recalls);
+
+    let mut ids: Vec<i64> = Vec::new();
+    let mut seen: HashSet<i64> = HashSet::new();
+    for &(id, _) in recalls.iter().flat_map(|r| r.hits.iter()) {
+        if seen.insert(id) {
+            ids.push(id);
+        }
     }
-    let (corpus, anchor_weights) = source.corpus(&anchor_terms)?;
-    let row_tokens: Vec<RowTokens> = corpus.iter().map(RowTokens::of).collect();
-    let weights = anchor_weights
-        .as_deref()
-        .and_then(|w| w.get(..terms.len()))
-        .map(|w| w.to_vec());
-    let hits = rank_and_trim(
-        &terms,
-        &corpus,
-        &row_tokens,
-        limit,
-        weights.as_deref(),
-        vocab,
-    );
-    let focus = vocab.focus_edge_kind(&terms);
+    let corpus = source.rows_by_ids(&ids)?;
+    let index: HashMap<i64, usize> = corpus
+        .iter()
+        .enumerate()
+        .map(|(i, row)| (row.id, i))
+        .collect();
+    let mut sims = vec![vec![0.0; search_terms.len()]; corpus.len()];
+    for (t, recall) in recalls.iter().enumerate() {
+        for &(id, sim) in &recall.hits {
+            if let Some(&i) = index.get(&id) {
+                sims[i][t] = sim;
+            }
+        }
+    }
+    let idfs: Vec<f64> = recalls.iter().map(TermRecall::idf).collect();
+
+    let hits = rank_and_trim(&corpus, &sims, &idfs, limit);
+    let focus = vocab.focus_edge_kind(&stems);
     let weak = hits.first().is_none_or(|h| !h.confident());
-    let unmatched = unmatched_terms(&terms, &row_tokens, vocab);
-    let matches: Vec<AskMatch> = hits
+    let mut matches: Vec<AskMatch> = hits
         .into_iter()
         .map(|h| AskMatch {
             row: corpus[h.index].clone(),
             score: h.score,
+            callers: Vec::new(),
+            callers_total: 0,
         })
         .collect();
-    let mut term_seeds: Vec<Vec<(String, f64)>> =
-        term_base_sets(&anchor_terms, &row_tokens, anchor_weights.as_deref(), vocab)
-            .into_iter()
-            .map(|set| {
-                set.into_iter()
-                    .map(|(i, w)| (corpus[i].id.clone(), w))
-                    .collect()
-            })
-            .collect();
+    let match_ids: Vec<i64> = matches.iter().map(|m| m.row.id).collect();
+    for edge in source.callers(&match_ids)? {
+        if let Some(m) = matches.iter_mut().find(|m| m.row.id == edge.callee) {
+            m.callers.push(edge.caller);
+            m.callers_total = edge.total;
+        }
+    }
+
+    let mut term_seeds = term_base_sets(&recalls);
     if term_seeds.is_empty() && !matches.is_empty() {
-        term_seeds = vec![
-            matches
-                .iter()
-                .map(|m| (m.row.id.clone(), m.score))
-                .collect(),
-        ];
+        term_seeds = vec![TermSeeds {
+            seeds: matches.iter().map(|m| (m.row.id, m.score)).collect(),
+            weight: 1.0,
+        }];
     }
     let seed_count = term_seeds
         .iter()
-        .flatten()
-        .map(|(id, _)| id.as_str())
+        .flat_map(|t| t.seeds.iter())
+        .map(|&(id, _)| id)
         .collect::<HashSet<_>>()
         .len();
     let (edges, hidden_by_kind, surfaced) = if term_seeds.is_empty() {
         (Vec::new(), Vec::new(), Vec::new())
     } else {
         let expanded = expand_neighborhood(source, &term_seeds, kind_rates, focus.as_deref())?;
-        let shown: HashSet<&str> = matches.iter().map(|m| m.row.id.as_str()).collect();
-        let candidates: Vec<(String, f64)> = expanded
+        let shown: HashSet<i64> = matches.iter().map(|m| m.row.id).collect();
+        let candidates: Vec<(i64, f64)> = expanded
             .surfaced
             .into_iter()
-            .filter(|(id, _)| !shown.contains(id.as_str()))
+            .filter(|(id, _)| !shown.contains(id))
             .take(SURFACED_LIMIT)
             .collect();
-        let rows = source.rows_by_ids(
-            &candidates
-                .iter()
-                .map(|(id, _)| id.as_str())
-                .collect::<Vec<_>>(),
-        )?;
+        let rows = source.rows_by_ids(&candidates.iter().map(|&(id, _)| id).collect::<Vec<_>>())?;
         let surfaced = candidates
             .into_iter()
             .filter_map(|(id, score)| {
                 rows.iter().find(|r| r.id == id).map(|r| AskMatch {
                     row: r.clone(),
                     score,
+                    callers: Vec::new(),
+                    callers_total: 0,
                 })
             })
             .collect();
@@ -154,10 +195,6 @@ pub fn ask<S: AskSource>(
     };
     Ok(AskOutcome {
         terms,
-        splits: splits
-            .into_iter()
-            .map(|(term, a, b)| (term, format!("{a} {b}")))
-            .collect(),
         seed_count,
         matches,
         surfaced,
@@ -169,104 +206,145 @@ pub fn ask<S: AskSource>(
     })
 }
 
-fn accepted_splits<S: AskSource>(
-    source: &S,
-    terms: &[String],
-) -> Result<Vec<(String, String, String)>, S::Error> {
-    let candidates: Vec<(String, String, String)> = terms
-        .iter()
-        .flat_map(|term| {
-            candidate_splits(term)
-                .into_iter()
-                .map(|(a, b)| (term.clone(), a, b))
-        })
-        .collect();
-    if candidates.is_empty() {
-        return Ok(Vec::new());
-    }
-    let mut parts: Vec<String> = candidates
-        .iter()
-        .flat_map(|(_, a, b)| [a.clone(), b.clone()])
-        .collect();
-    parts.sort();
-    parts.dedup();
-    let tokens: Vec<String> = parts
-        .iter()
-        .map(|p| {
-            query_tokens(std::slice::from_ref(p))
-                .into_iter()
-                .next()
-                .unwrap_or_else(|| p.clone())
-        })
-        .collect();
-    let dfs = source.token_df(&tokens)?;
-    let known: HashSet<&str> = parts
-        .iter()
-        .zip(&dfs)
-        .filter(|&(_, &df)| df > 0)
-        .map(|(p, _)| p.as_str())
-        .collect();
-    let mut accepted: Vec<(String, String, String)> = Vec::new();
-    for (term, a, b) in candidates {
-        if accepted.iter().any(|(t, _, _)| *t == term) {
-            continue;
-        }
-        if known.contains(a.as_str()) && known.contains(b.as_str()) {
-            accepted.push((term, a, b));
-        }
-    }
-    Ok(accepted)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::expand::NodeLabel;
-    use crate::ppr::NeighborhoodEdge;
     use crate::testutil::{row, test_vocab};
+    use crate::types::{Graph, GraphEdge};
 
-    struct ShortWeightSource;
+    const HOOK_ID: i64 = 7;
 
-    impl NeighborhoodSource for ShortWeightSource {
+    struct FakeRecallSource;
+
+    impl GraphSource for FakeRecallSource {
         type Error = std::convert::Infallible;
 
-        fn hop(&self, _ids: &[&str], _cap: usize) -> Result<Vec<NeighborhoodEdge>, Self::Error> {
-            Ok(Vec::new())
+        fn graph(&self, _seeds: &[i64]) -> Result<Graph, Self::Error> {
+            Ok(Graph {
+                kinds: vec!["CALLS".to_string()],
+                edges: vec![GraphEdge {
+                    kind: 0,
+                    source: HOOK_ID,
+                    target: 8,
+                }],
+            })
         }
 
-        fn degrees(&self, _ids: &[&str]) -> Result<HashMap<String, u64>, Self::Error> {
-            Ok(HashMap::new())
-        }
-
-        fn labels(&self, _ids: &[&str]) -> Result<HashMap<String, NodeLabel>, Self::Error> {
-            Ok(HashMap::new())
+        fn labels(&self, ids: &[i64]) -> Result<HashMap<i64, NodeLabel>, Self::Error> {
+            Ok(ids
+                .iter()
+                .map(|&id| {
+                    (
+                        id,
+                        NodeLabel {
+                            label: format!("node{id}"),
+                            loc: String::new(),
+                        },
+                    )
+                })
+                .collect())
         }
     }
 
-    impl AskSource for ShortWeightSource {
-        fn corpus(&self, _terms: &[String]) -> Result<Corpus, Self::Error> {
-            Ok((vec![row("Repo::commit_hook")], Some(Vec::new())))
+    impl AskSource for FakeRecallSource {
+        fn stem(&self, words: &[String]) -> Result<Vec<String>, Self::Error> {
+            Ok(words
+                .iter()
+                .map(|w| crate::testutil::test_stem(w))
+                .collect())
         }
 
-        fn token_df(&self, tokens: &[String]) -> Result<Vec<i64>, Self::Error> {
-            Ok(vec![0; tokens.len()])
+        fn recall(&self, terms: &[String]) -> Result<Vec<TermRecall>, Self::Error> {
+            Ok(terms
+                .iter()
+                .map(|t| {
+                    let hits = if t == "commit" || t == "hook" {
+                        vec![(HOOK_ID, 1.0)]
+                    } else {
+                        Vec::new()
+                    };
+                    TermRecall {
+                        matched: hits.len() as u64,
+                        corpus: 1000,
+                        hits,
+                    }
+                })
+                .collect())
         }
 
-        fn rows_by_ids(&self, _ids: &[&str]) -> Result<Vec<CorpusRow>, Self::Error> {
-            Ok(Vec::new())
+        fn rows_by_ids(&self, ids: &[i64]) -> Result<Vec<CorpusRow>, Self::Error> {
+            Ok(ids.iter().map(|&id| row(id, "Repo::commit_hook")).collect())
+        }
+
+        fn callers(&self, ids: &[i64]) -> Result<Vec<CallerEdge>, Self::Error> {
+            Ok(ids
+                .iter()
+                .filter(|&&id| id == HOOK_ID)
+                .map(|&id| CallerEdge {
+                    callee: id,
+                    caller: Caller {
+                        label: "Repo::after_commit".to_string(),
+                        loc: "repo.rs:9".to_string(),
+                    },
+                    total: 1,
+                })
+                .collect())
         }
     }
 
     #[test]
-    fn short_anchor_weights_fall_back_to_defaults() {
+    fn ask_ranks_recalled_rows_and_expands_around_them() {
         let outcome = ask(
-            &ShortWeightSource,
-            "commit hook",
+            &FakeRecallSource,
+            "who calls commit hook",
             5,
             &test_vocab(),
             &HashMap::new(),
         )
         .unwrap();
-        assert!(!outcome.matches.is_empty());
+        assert_eq!(outcome.matches.len(), 1);
+        assert_eq!(outcome.matches[0].row.id, HOOK_ID);
+        assert!(!outcome.weak, "both terms fully anchor one row");
+        assert_eq!(outcome.focus.as_deref(), Some("CALLS"));
+        assert!(outcome.unmatched_terms.is_empty());
+        assert_eq!(outcome.seed_count, 1);
+        assert!(!outcome.edges.is_empty());
+    }
+
+    #[test]
+    fn unrecalled_terms_are_reported_and_weaken_the_outcome() {
+        let outcome = ask(
+            &FakeRecallSource,
+            "commit zzzz yyyy",
+            5,
+            &test_vocab(),
+            &HashMap::new(),
+        )
+        .unwrap();
+        assert_eq!(
+            outcome.unmatched_terms,
+            vec!["zzzz".to_string(), "yyyy".to_string()]
+        );
+        assert!(outcome.weak, "one anchored term of three must read as weak");
+    }
+
+    #[test]
+    fn relational_only_questions_fall_back_to_all_terms() {
+        let err = ask(&FakeRecallSource, "", 5, &test_vocab(), &HashMap::new())
+            .err()
+            .expect("empty question must fail");
+        assert!(matches!(err, AskError::NoUsableTerms(_)));
+
+        let outcome = ask(
+            &FakeRecallSource,
+            "calls",
+            5,
+            &test_vocab(),
+            &HashMap::new(),
+        )
+        .unwrap();
+        assert_eq!(outcome.focus.as_deref(), Some("CALLS"));
+        assert!(outcome.matches.is_empty());
     }
 }

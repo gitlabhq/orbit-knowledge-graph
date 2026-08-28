@@ -17,6 +17,7 @@ use crate::observer::{IndexingMode, IndexingObserver};
 use crate::retry::{Backoff, LocalRetry, Step, drive_with};
 
 use super::datalake::{DatalakeQuery, ScanStats, is_arrow_string_overflow};
+use super::deleted_rows::DeletedRowSplitter;
 use super::metrics::SdlcMetrics;
 use super::plan::{Cursor, CursorFilter, Plan, PreparedQuery};
 use super::transform::{BlockTransform, TransformRegistry};
@@ -106,6 +107,7 @@ pub(in crate::modules::sdlc) struct Pipeline {
     metrics: SdlcMetrics,
     retry_config: DatalakeRetryConfig,
     registry: Arc<TransformRegistry>,
+    deleted_rows: DeletedRowSplitter,
 }
 
 impl Pipeline {
@@ -114,6 +116,7 @@ impl Pipeline {
         checkpoint_store: Arc<dyn CheckpointStore>,
         metrics: SdlcMetrics,
         retry_config: DatalakeRetryConfig,
+        ontology: &ontology::Ontology,
     ) -> Self {
         Self {
             datalake,
@@ -121,6 +124,7 @@ impl Pipeline {
             metrics,
             retry_config,
             registry: Arc::new(TransformRegistry::default()),
+            deleted_rows: DeletedRowSplitter::from_ontology(ontology),
         }
     }
 
@@ -179,11 +183,11 @@ impl Pipeline {
                     .expect("non-empty page has a last block"),
                 &plan.sort_key,
             )?;
-            let has_more = rows_in_page >= plan.batch_size;
+            let has_more = rows_in_page >= base_query.batch_size();
 
             let transform_start = Instant::now();
             let grouped = self
-                .transform_page(transform.as_ref(), &page.batches)
+                .transform_page(transform.as_ref(), std::mem::take(&mut page.batches))
                 .await?;
             let transform_elapsed = transform_start.elapsed();
             self.metrics
@@ -191,15 +195,21 @@ impl Pipeline {
             stats.transform_ms += transform_elapsed.as_millis() as u64;
 
             let mut write_futures = FuturesUnordered::new();
+            let mut delete_statements = Vec::new();
             for (index, batches) in grouped.into_iter().enumerate() {
                 if batches.is_empty() {
                     continue;
                 }
                 let table = outputs[index].clone();
+                let split = self.deleted_rows.split(&table, batches)?;
+                delete_statements.extend(split.delete_statements);
+                if split.live.is_empty() {
+                    continue;
+                }
                 let w = Arc::clone(&context.writer);
                 let d = durability.data_writes;
                 write_futures.push(async move {
-                    w.write(&table, batches, d)
+                    w.write(&table, split.live, d)
                         .await
                         .map_err(|e| HandlerError::Processing(e.to_string()))
                 });
@@ -218,6 +228,14 @@ impl Pipeline {
                     observer.record_graph_write(&report.table, report.rows, report.bytes);
                     stats.written_rows += report.rows;
                     stats.written_bytes += report.bytes;
+                }
+                // Deletes run only after every insert has landed, so a same-key insert in this page cannot resurrect a row the delete removed.
+                for statement in delete_statements.drain(..) {
+                    context
+                        .writer
+                        .lightweight_delete(&statement)
+                        .await
+                        .map_err(|e| HandlerError::Processing(e.to_string()))?;
                 }
                 Ok::<_, HandlerError>(write_start.elapsed())
             };
@@ -397,14 +415,16 @@ impl Pipeline {
     }
 
     /// Groups output rows by destination table so each table is written as one bulk insert.
+    ///
+    /// Consumes the page so none of it survives into the write and read-ahead window.
     async fn transform_page(
         &self,
         transform: &dyn BlockTransform,
-        batches: &[RecordBatch],
+        batches: Vec<RecordBatch>,
     ) -> Result<Vec<Vec<RecordBatch>>, HandlerError> {
         let mut grouped: Vec<Vec<RecordBatch>> = vec![Vec::new(); transform.outputs().len()];
         for block in batches {
-            for output in transform.transform(block).await? {
+            for output in transform.transform(&block).await? {
                 grouped[output.output_index].push(output.batch);
             }
         }
@@ -482,6 +502,7 @@ mod tests {
     use crate::checkpoint::CheckpointError;
     use crate::durability::WriteDurability;
     use crate::modules::sdlc::datalake::{DatalakeError, RecordBatchStream, ScanStats};
+    use crate::modules::sdlc::partitioning::PartitionAssignment;
     use crate::modules::sdlc::test_helpers::test_metrics;
     use crate::observer::NoOpObserver;
     use crate::testkit::test_writer;
@@ -490,6 +511,10 @@ mod tests {
     use async_trait::async_trait;
     use std::collections::HashSet;
     use std::sync::Mutex;
+
+    fn test_ontology() -> ontology::Ontology {
+        ontology::Ontology::load_embedded().expect("ontology must load")
+    }
 
     fn simple_plan(name: &str) -> Plan {
         simple_plan_with_batch_size(name, 1000)
@@ -709,6 +734,7 @@ mod tests {
             Arc::new(RecordingCheckpointStore::new()),
             test_metrics(),
             Default::default(),
+            &test_ontology(),
         );
         let plan = simple_plan("Test");
 
@@ -738,6 +764,7 @@ mod tests {
             store.clone(),
             test_metrics(),
             Default::default(),
+            &test_ontology(),
         );
         let result = pipeline
             .run_plan(
@@ -769,6 +796,60 @@ mod tests {
         assert!(final_state.cursor_values.is_none(), "should be completed");
     }
 
+    // Comparing `has_more` against the plan's budget rather than the query's share ends
+    // a partition after one page and marks it complete with rows unread.
+    #[tokio::test]
+    async fn partitioned_share_pages_against_the_query_budget() {
+        let store = Arc::new(RecordingCheckpointStore::new());
+        let plan = simple_plan_with_batch_size("Test", 200_000);
+        let mut partitions = base_query(&plan).into_partitions(vec![
+            PartitionAssignment {
+                index: 0,
+                total: 2,
+                key_columns: vec!["id".to_string()],
+                lower_bound: None,
+                upper_bound: Some(vec!["500".to_string()]),
+            },
+            PartitionAssignment {
+                index: 1,
+                total: 2,
+                key_columns: vec!["id".to_string()],
+                lower_bound: Some(vec!["500".to_string()]),
+                upper_bound: None,
+            },
+        ]);
+        let (_, query) = partitions.remove(0);
+        assert_eq!(query.batch_size(), 100_000);
+
+        let pipeline = Pipeline::new(
+            Arc::new(MultiBatchDatalake {
+                call_count: Mutex::new(0),
+                batch_size: 100_000,
+            }),
+            store.clone(),
+            test_metrics(),
+            Default::default(),
+            &test_ontology(),
+        );
+        pipeline
+            .run_plan(
+                &noop_context(),
+                &plan,
+                query,
+                &position_key(&plan),
+                test_window(),
+                RunDurability::for_mode(IndexingMode::Full),
+            )
+            .await
+            .expect("partitioned run should succeed");
+
+        assert_eq!(
+            store.progress_history().len(),
+            2,
+            "a full page at the divided share must trigger a second read"
+        );
+    }
+
     #[tokio::test]
     async fn datalake_failure_surfaces_as_error() {
         let pipeline = Pipeline::new(
@@ -776,6 +857,7 @@ mod tests {
             Arc::new(RecordingCheckpointStore::new()),
             test_metrics(),
             Default::default(),
+            &test_ontology(),
         );
         let plan = simple_plan("Failing");
 
@@ -850,6 +932,7 @@ mod tests {
             Arc::new(RecordingCheckpointStore::new()),
             test_metrics(),
             Default::default(),
+            &test_ontology(),
         );
 
         let plan = simple_plan("Test");
@@ -888,6 +971,7 @@ mod tests {
                 halving_initial_block_size: 8_000,
                 halving_min_block_size: 1024,
             },
+            &test_ontology(),
         );
 
         let plan = simple_plan("Test");
@@ -927,6 +1011,7 @@ mod tests {
                 halving_initial_block_size: 4_096,
                 halving_min_block_size: 2_048,
             },
+            &test_ontology(),
         );
 
         let plan = simple_plan("Test");
@@ -1007,6 +1092,7 @@ mod tests {
                 halving_initial_block_size: 8_000,
                 halving_min_block_size: 1_024,
             },
+            &test_ontology(),
         );
 
         let plan = simple_plan("Test");
@@ -1048,6 +1134,7 @@ mod tests {
             store,
             test_metrics(),
             Default::default(),
+            &test_ontology(),
         );
         let plan = simple_plan("Test");
 
@@ -1124,6 +1211,7 @@ mod tests {
             Arc::new(RecordingCheckpointStore::new()),
             test_metrics(),
             Default::default(),
+            &test_ontology(),
         );
         let plan = simple_plan("Test");
 

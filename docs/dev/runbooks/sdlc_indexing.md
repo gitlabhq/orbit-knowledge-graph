@@ -290,10 +290,10 @@ The handler will restart extraction from epoch for that entity type.
 
 ## Graph table maintenance
 
-The `TableCleanup` scheduled task runs `OPTIMIZE TABLE ... FINAL CLEANUP` on all graph tables every 24 hours. This compacts ReplacingMergeTree tables and physically removes soft-deleted rows.
+Deletions use ClickHouse lightweight deletes (`DELETE FROM`). The `TableCleanup` scheduled task runs `ALTER TABLE ... APPLY DELETED MASK` on all graph tables weekly (Sunday 03:00 UTC by default) to physically remove lightweight-deleted rows from disk.
 
 To trigger manually:
 
 ```sql
-OPTIMIZE TABLE `<gkg-database>`.gl_project FINAL CLEANUP;
+ALTER TABLE `<gkg-database>`.gl_project APPLY DELETED MASK;
 ```
