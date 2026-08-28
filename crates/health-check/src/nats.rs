@@ -71,12 +71,13 @@ impl NatsDepthChecker {
     }
 
     pub async fn check(&self) -> Result<QueueDepth, String> {
-        let code_consumer_name = self.code_consumer_name.as_deref().ok_or_else(|| {
-            "queue-depth endpoint is not configured: nats.consumer_name is unset".to_string()
-        })?;
-        let sdlc_consumer_name = self.sdlc_consumer_name.as_deref().ok_or_else(|| {
-            "queue-depth endpoint is not configured: nats.consumer_name is unset".to_string()
-        })?;
+        let (code_consumer_name, sdlc_consumer_name) = self
+            .code_consumer_name
+            .as_deref()
+            .zip(self.sdlc_consumer_name.as_deref())
+            .ok_or_else(|| {
+                "queue-depth endpoint is not configured: nats.consumer_name is unset".to_string()
+            })?;
 
         let client = self.client().await?;
 
@@ -85,8 +86,10 @@ impl NatsDepthChecker {
             format!("failed to get stream '{}': {e}", self.stream_name)
         })?;
 
-        let code = self.consumer_depth(&stream, code_consumer_name).await?;
-        let sdlc = self.consumer_depth(&stream, sdlc_consumer_name).await?;
+        let (code, sdlc) = tokio::try_join!(
+            self.consumer_depth(&stream, code_consumer_name),
+            self.consumer_depth(&stream, sdlc_consumer_name),
+        )?;
 
         Ok(QueueDepth {
             code_pending: code.pending,
