@@ -119,8 +119,93 @@ case "${1:-}" in
     shift
     "$TF" -chdir="${TF_DIR}" output "$@"
     ;;
+  reload)
+    # Wipe the graph DB (keep datalake), re-apply grants, reset checkpoints,
+    # and restart GKG. The datalake and its imported data are untouched.
+    shift
+    : "${RUN_ID:?RUN_ID is required for reload}"
+    CH_NS="ra-ch-${RUN_ID}"
+    GKG_NS="e2e-${RUN_ID}-gkg"
+    KCTX=$("$TF" -chdir="${TF_DIR}" output -raw kctx 2>/dev/null)
+
+    echo "[infra] Dropping and recreating graph DB (datalake untouched)"
+    CH_PASS=$(kubectl --context="${KCTX}" get secret ra-ch-credentials -n "${CH_NS}" \
+      -o jsonpath='{.data.default-password}' | base64 -d)
+    CH="kubectl --context=${KCTX} exec -n ${CH_NS} clickhouse-0 -- clickhouse-client --password ${CH_PASS}"
+
+    $CH --multiquery --query "DROP DATABASE IF EXISTS gkg; CREATE DATABASE gkg;"
+
+    echo "[infra] Re-applying user grants"
+    SETUP_SQL=$(sed \
+      -e "s|\${GRAPH_DB}|gkg|g" \
+      -e "s|\${DATALAKE_DB}|datalake|g" \
+      -e "s|\${GKG_WRITER_PASSWORD}|$($CH -q "SELECT currentUser()")|g" \
+      -e "s|\${GKG_READER_PASSWORD}|unused|g" \
+      -e "s|\${GKG_SIPHON_READER_PASSWORD}|unused|g" \
+      "${REPO_ROOT}/config/clickhouse-setup.sql")
+    $CH --multiquery --query "${SETUP_SQL}" 2>/dev/null || true
+
+    echo "[infra] Resetting checkpoints to epoch"
+    kubectl --context="${KCTX}" rollout restart -n "${GKG_NS}" \
+      deploy/gkg-dispatcher deploy/gkg-indexer-default deploy/gkg-webserver
+    kubectl --context="${KCTX}" rollout status -n "${GKG_NS}" \
+      deploy/gkg-dispatcher --timeout=120s
+    echo "[infra] Reload complete. GKG will re-create schema and re-index from the datalake."
+    ;;
+  deploy)
+    # Build a GKG image from the local working tree, push it, and upgrade
+    # the Helm release. Pass --reload to also wipe the graph DB.
+    shift
+    : "${RUN_ID:?RUN_ID is required for deploy}"
+    RELOAD=false
+    if [[ "${1:-}" == "--reload" ]]; then
+      RELOAD=true
+      shift
+    fi
+
+    KCTX=$("$TF" -chdir="${TF_DIR}" output -raw kctx 2>/dev/null)
+    GKG_NS="e2e-${RUN_ID}-gkg"
+    SHORT_SHA=$(git -C "${REPO_ROOT}" rev-parse --short HEAD)
+    IMAGE="registry.gitlab.com/gitlab-org/orbit/knowledge-graph/gkg"
+    TAG="bench-${SHORT_SHA}"
+
+    echo "[infra] Building GKG image (debug, linux/amd64)"
+    (
+      cd "${REPO_ROOT}"
+      CARGO_PROFILE_DEV_DEBUG=0 cargo build -p orbit-server --locked
+      cp target/debug/gkg-server .
+      docker build -t "${IMAGE}:${TAG}" -f e2e/Dockerfile.e2e .
+      docker push "${IMAGE}:${TAG}"
+      rm -f gkg-server
+    )
+
+    echo "[infra] Upgrading GKG Helm release to ${TAG}"
+    INSTALLED_VERSION=$(helm list --namespace "${GKG_NS}" --kube-context "${KCTX}" \
+      -f gkg -o json 2>/dev/null \
+      | python3 -c "import json,sys; d=json.load(sys.stdin); print(d[0]['chart'].rsplit('-',1)[-1]) if d else print('')" 2>/dev/null || echo "")
+
+    HELM_ARGS=(upgrade gkg
+      oci://registry.gitlab.com/gitlab-org/orbit/orbit-helm-charts/gkg
+      --namespace "${GKG_NS}"
+      --reuse-values
+      --set "image.repository=${IMAGE}"
+      --set "image.tag=${TAG}"
+      --kube-context "${KCTX}")
+    [[ -n "${INSTALLED_VERSION}" ]] && HELM_ARGS+=(--version "${INSTALLED_VERSION}")
+    helm "${HELM_ARGS[@]}"
+
+    if [[ "${RELOAD}" == "true" ]]; then
+      RUN_ID="${RUN_ID}" "$0" reload
+    else
+      kubectl --context="${KCTX}" rollout restart -n "${GKG_NS}" \
+        deploy/gkg-dispatcher deploy/gkg-indexer-default deploy/gkg-webserver
+      kubectl --context="${KCTX}" rollout status -n "${GKG_NS}" \
+        deploy/gkg-dispatcher --timeout=120s
+    fi
+    echo "[infra] Deploy complete. Running image: ${IMAGE}:${TAG}"
+    ;;
   *)
-    echo "Usage: $0 init | apply | plan | destroy | output [args...]" >&2
+    echo "Usage: $0 init | apply | plan | destroy | reload | deploy [--reload] | output [args...]" >&2
     exit 1
     ;;
 esac
