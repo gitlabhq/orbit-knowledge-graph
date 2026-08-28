@@ -225,6 +225,43 @@ To run multiple clusters in parallel, override the cluster name:
 bash bench/scripts/infra.sh apply -var cluster_name=ra-bench-small-2
 ```
 
+## Iterating on code changes
+
+Two commands support the inner development loop without re-provisioning
+the full stack or re-importing the datalake.
+
+### Reload (wipe graph, keep datalake)
+
+Drops the `gkg` database, restarts GKG. The indexer re-creates the
+schema on boot and re-indexes from the existing datalake data. Use this
+to test schema changes or indexer behavior from a clean graph.
+
+```bash
+RUN_ID=bench1 bash bench/scripts/infra.sh reload
+```
+
+### Deploy new code
+
+Builds a debug GKG image from your local working tree (cross-compiled
+for linux/amd64), pushes it to the GitLab container registry, upgrades
+the Helm release, and restarts the pods. The image tag is
+`bench-<short-sha>`, with `-dirty` appended if the working tree has
+uncommitted changes.
+
+```bash
+RUN_ID=bench1 bash bench/scripts/infra.sh deploy
+```
+
+To deploy and wipe the graph in one step:
+
+```bash
+RUN_ID=bench1 bash bench/scripts/infra.sh deploy --reload
+```
+
+The deploy skips the Helm chart's `clickhouse-setup` pre-upgrade hook
+(`--no-hooks`) because the indexer's schema migration handles table
+creation on boot.
+
 ## Cross-cluster snapshot restore
 
 When provisioning a fresh cluster from a snapshot created on a different
@@ -274,7 +311,7 @@ init time by `infra.sh`.
 
 | Script | Purpose |
 |--------|---------|
-| `infra.sh` | Terraform lifecycle: init, apply, plan, destroy, output |
+| `infra.sh` | Lifecycle wrapper: init, apply, plan, destroy, reload, deploy, output |
 | `provision.sh` | Deploy CH + e2e stack, import datalake, start indexing |
 | `deploy-mock-git-server.sh` | Build/deploy mock, upgrade GKG for code indexing |
 | `slos.sh` | Evaluate SLOs from Cloud Monitoring + CH query_log + kubectl |
