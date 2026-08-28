@@ -119,6 +119,32 @@ impl<'a> FileResolver<'a> {
         std::mem::take(&mut self.import_edges)
     }
 
+    pub fn resolved_import_edges(&mut self) -> Vec<(NodeIndex, NodeIndex, GraphEdge)> {
+        let import_nodes = self.ctx.import_nodes;
+        let mut edges = Vec::new();
+        for &import_node in import_nodes {
+            for target in self.ctx.resolve_import_cached(import_node) {
+                let Some(did) = self.ctx.graph.graph[target].def_id() else {
+                    continue;
+                };
+                edges.push((
+                    import_node,
+                    target,
+                    GraphEdge {
+                        relationship: Relationship {
+                            edge_kind: EdgeKind::Imports,
+                            source_node: NodeKind::ImportedSymbol,
+                            target_node: NodeKind::Definition,
+                            source_def_kind: None,
+                            target_def_kind: Some(self.ctx.graph.defs[did.0 as usize].kind),
+                        },
+                    },
+                ));
+            }
+        }
+        edges
+    }
+
     /// Dumps the collected resolver trace events. Call after all refs are resolved.
     pub fn dump_trace(&self, header: &str) {
         self.ctx.tracer.dump_grouped(header);

@@ -1,0 +1,77 @@
+name: "Java: resolved imports persist ImportedSymbol -> Definition edges"
+fixtures:
+  - path: com/example/models/User.java
+    content: |
+      package com.example.models;
+
+      public class User {
+          public String name() {
+              return "user";
+          }
+      }
+
+  - path: com/example/util/Validators.java
+    content: |
+      package com.example.util;
+
+      public class Validators {
+          public static boolean isValid(String value) {
+              return value != null;
+          }
+      }
+
+  - path: com/example/app/Main.java
+    content: |
+      package com.example.app;
+
+      import java.util.List;
+
+      import com.example.models.User;
+      import static com.example.util.Validators.isValid;
+
+      public class Main {
+          public void run() {
+              User user = new User();
+              isValid(user.name());
+          }
+      }
+
+tests:
+  - name: In-repo class import resolves to its definition
+    query: |
+      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      WHERE i.file_path = 'com/example/app/Main.java'
+        AND i.name = 'User'
+      RETURN i.path AS path, d.fqn AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { path: "com.example.models", target: "com.example.models.User" } }
+
+  - name: In-repo static import resolves to the static method
+    query: |
+      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      WHERE i.file_path = 'com/example/app/Main.java'
+        AND i.name = 'isValid'
+      RETURN d.fqn AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { target: "com.example.util.Validators.isValid" } }
+
+  - name: External import stays a dangling imported symbol
+    query: |
+      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      WHERE i.file_path = 'com/example/app/Main.java'
+        AND i.name = 'List'
+      RETURN d.fqn AS target
+    assert:
+      - { row_count: 0 }
+
+  - name: Import edges do not replace direct call resolution
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.fqn = 'com.example.app.Main.run'
+        AND callee.file_path = 'com/example/models/User.java'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row: { callee: "com.example.models.User" } }

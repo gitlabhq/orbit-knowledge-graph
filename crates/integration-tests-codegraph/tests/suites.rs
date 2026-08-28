@@ -223,6 +223,10 @@ yaml_test!(
     "java/imported_symbol_fallback_matrix.yaml"
 );
 yaml_test!(java_sealed_classes, "java/sealed_classes.yaml");
+yaml_test!(
+    java_import_resolution_edges,
+    "java/import_resolution_edges.yaml"
+);
 yaml_test!(java_enums, "java/enums.yaml");
 
 // Kotlin

@@ -1471,6 +1471,9 @@ impl FamilyPipeline {
                         edges.extend(import_edges);
                     }
                 }
+                if !killed {
+                    edges.extend(resolver.resolved_import_edges());
+                }
                 let resolve_ms = t_resolve.elapsed().as_secs_f64() * 1000.0;
 
                 ctx.record_file_timing(FileTimingEntry {
