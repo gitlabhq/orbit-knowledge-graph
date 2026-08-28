@@ -16,45 +16,48 @@ clones).
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│  GKE cluster (ra-bench-{tier})                                      │
-│                                                                     │
-│  ┌──────────────┐   ┌──────────┐   ┌──────────────────────────┐    │
-│  │  GitLab       │   │  NATS     │   │  Siphon                  │    │
-│  │  (stub Rails) │   │  (3 node) │   │  (CDC producer/consumer) │    │
-│  └──────┬───────┘   └────┬─────┘   └────────────┬─────────────┘    │
-│         │ authz           │ messages              │ datalake writes  │
-│         ▼                 ▼                       ▼                  │
-│  ┌──────────────────────────────────────────────────────────────┐   │
-│  │  GKG (Orbit)                                                  │   │
-│  │  ┌────────────┐  ┌──────────┐  ┌───────────┐  ┌───────────┐ │   │
-│  │  │ Dispatcher  │  │ Indexer   │  │ Webserver  │  │ Health    │ │   │
-│  │  │ (1 replica) │  │ (N repl.) │  │ (N repl.)  │  │ Check     │ │   │
-│  │  └─────┬──────┘  └────┬─────┘  └──────┬────┘  └───────────┘ │   │
-│  │        │ dispatch      │ read/write     │ queries              │   │
-│  │        ▼               ▼                ▼                     │   │
-│  └──────────────────────────────────────────────────────────────┘   │
-│                            │                                        │
-│  ┌─────────────────────────▼────────────────────────────────────┐   │
-│  │  ClickHouse (standalone StatefulSet)                          │   │
-│  │  datalake DB ← dump import     graph DB ← indexer writes     │   │
-│  └──────────────────────────────────────────────────────────────┘   │
-│                                                                     │
-│  ┌─────────────────────────────┐                                    │
-│  │  Mock Git Server             │                                    │
-│  │  (serves archives from GCS   │                                    │
-│  │   via FUSE mount)            │                                    │
-│  └─────────────────────────────┘                                    │
-│                                                                     │
-└─────────────────────────────────────────────────────────────────────┘
-         │                                    │
-         ▼                                    ▼
-  ┌──────────────┐                  ┌──────────────────┐
-  │ GCS bucket    │                  │ GCS bucket        │
-  │ datalake-dumps│                  │ code-corpus       │
-  │ (Native fmt)  │                  │ (tar.gz archives) │
-  └──────────────┘                  └──────────────────┘
+```plantuml
+@startuml
+skinparam componentStyle rectangle
+skinparam defaultTextAlignment center
+
+package "GKE cluster (ra-bench-{tier})" {
+  component "GitLab\n(stub Rails)" as gitlab
+  component "NATS\n(3 replicas)" as nats
+  component "Siphon\n(CDC producer/consumer)" as siphon
+
+  package "GKG (Orbit)" {
+    component "Dispatcher\n(1 replica)" as dispatcher
+    component "Indexer\n(N replicas)" as indexer
+    component "Webserver\n(N replicas)" as webserver
+    component "Health Check" as healthcheck
+  }
+
+  database "ClickHouse\n(standalone StatefulSet)" as ch {
+    component "datalake DB" as datalake
+    component "graph DB" as graph
+  }
+
+  component "Mock Git Server\n(GCS FUSE mount)" as mockgit
+}
+
+cloud "GCS" {
+  component "gkg-datalake-dumps\n(Native format)" as gcsdump
+  component "gkg-code-corpus\n(tar.gz archives)" as gcscorpus
+}
+
+gitlab --> indexer : authz lookups
+nats --> dispatcher : task dispatch
+nats --> indexer : messages
+siphon --> datalake : CDC writes
+dispatcher --> nats : dispatch tasks
+indexer --> graph : write nodes/edges
+indexer --> datalake : read datalake
+webserver --> graph : queries
+mockgit --> indexer : repo archives
+gcsdump --> ch : datalake import\n(K8s Job)
+gcscorpus --> mockgit : FUSE mount
+@enduml
 ```
 
 ### Data flow
