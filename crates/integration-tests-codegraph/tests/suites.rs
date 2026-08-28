@@ -391,6 +391,7 @@ yaml_test!(
     "ruby/imported_symbol_fallback_matrix.yaml"
 );
 yaml_test!(ruby_top_level_constants, "ruby/top_level_constants.yaml");
+yaml_test!(ruby_cbase_constants, "ruby/cbase_constants.yaml");
 yaml_test!(ruby_lambda_defs, "ruby/lambda_defs.yaml");
 yaml_test!(ruby_line_indexing, "ruby/line_indexing.yaml");
 yaml_test!(

@@ -139,7 +139,7 @@ impl DslLanguage for RubyDsl {
         LanguageHooks {
             on_scope: Some(ruby_extract_attr_methods),
             on_import: Some(ruby_extract_imports),
-            ref_name_rewrite: Some(ruby_rewrite_send),
+            ref_name_rewrite: Some(ruby_rewrite_ref),
             ..LanguageHooks::default()
         }
     }
@@ -445,6 +445,9 @@ const RUBY_DSL_METHODS: &[&str] = &[
 /// resolution. `Model.new.save!` needs `Model` to resolve to the
 /// `Model` class so the chain can look up `Model::save!`.
 fn ruby_resolve_ident_type(graph: &CodeGraph, name: &str) -> Option<String> {
+    // FQNs are stored root-relative, so a kept cbase prefix (`::Foo::Bar`)
+    // never resolves and the chain call lands on the enclosing class.
+    let name = name.strip_prefix("::").unwrap_or(name);
     let nodes = graph.resolve_scope_nodes(name);
     for &node in &nodes {
         if let Some(did) = graph.graph[node].def_id() {
@@ -457,9 +460,16 @@ fn ruby_resolve_ident_type(graph: &CodeGraph, name: &str) -> Option<String> {
     None
 }
 
-/// Rewrite `obj.send(:foo, ...)` / `obj.public_send(:foo, ...)` to resolve
-/// as `obj.foo(...)`. Only rewrites when the first argument is a literal
-/// symbol or string.
+/// Strips a leading `::` (cbase) so names match root-relative FQNs, then
+/// falls back to rewriting `obj.send(:foo, ...)` / `obj.public_send(:foo, ...)`
+/// as `obj.foo(...)` when the first argument is a literal symbol or string.
+fn ruby_rewrite_ref(node: &N<'_>, name: &str) -> Option<String> {
+    if name.starts_with("::") {
+        return Some(strip_leading_scope(name));
+    }
+    ruby_rewrite_send(node, name)
+}
+
 fn ruby_rewrite_send(node: &N<'_>, name: &str) -> Option<String> {
     if name != "send" && name != "public_send" && name != "__send__" {
         return None;
@@ -764,6 +774,24 @@ mod tests {
                 imports: r.imports,
             })
             .map_err(|e| crate::v2::pipeline::PipelineError::parse("test.rb", format!("{e:?}")))
+    }
+
+    #[test]
+    fn bare_cbase_references_lose_their_prefix() {
+        let result = RubyDsl::spec()
+            .parse_full_collect(
+                b"class C\n  def m\n    x = ::Projects::TransferService\n    ::Projects::TransferService.new.execute\n  end\nend\n",
+                "test.rb",
+                Language::Ruby,
+                &Tracer::new(false),
+                Default::default(),
+            )
+            .unwrap();
+        assert!(
+            !result.refs.iter().any(|r| r.name.starts_with("::")),
+            "cbase ref names must be root-relative: {:?}",
+            result.refs.iter().map(|r| &r.name).collect::<Vec<_>>()
+        );
     }
 
     #[test]
