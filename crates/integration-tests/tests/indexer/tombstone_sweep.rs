@@ -10,7 +10,9 @@ use orbit_server_config::{ScheduleConfiguration, TombstoneSweepConfig};
 fn drain_everything() -> TombstoneSweepConfig {
     TombstoneSweepConfig {
         schedule: ScheduleConfiguration { cron: None },
-        lookback_secs: 24 * 60 * 60,
+        // Reach back far enough that the window floor never excludes a seeded
+        // tombstone as the calendar advances past its fixed _version.
+        lookback_secs: 3650 * 24 * 60 * 60,
         max_keys_per_run: 1_000_000,
         max_query_size_bytes: 10 * 1024 * 1024,
     }
