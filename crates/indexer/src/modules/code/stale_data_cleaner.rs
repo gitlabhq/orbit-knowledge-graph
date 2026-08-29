@@ -115,26 +115,16 @@ impl ClickHouseStaleDataCleaner {
             );
         }
 
-        // Other edge tables (gl_edge) lack project_id/branch, so scope
-        // via a source_id subquery from the node tables.
-        let source_id_subqueries = node_tables
-            .iter()
-            .map(|t| {
-                format!(
-                    "SELECT id FROM {t} FINAL \
-                     WHERE traversal_path = {{traversal_path:String}} \
-                       AND project_id = {{project_id:Int64}} \
-                       AND branch = {{branch:String}}"
-                )
-            })
-            .collect::<Vec<_>>();
-
-        if source_id_subqueries.is_empty() {
+        if node_tables.is_empty() {
             return String::new();
         }
 
-        let source_id_union = source_id_subqueries.join(" UNION ALL ");
-
+        // gl_edge has no project_id/branch, so scope by code source_kind: a flat
+        // literal needs no source-id subquery (a UNION wedges mutation replay,
+        // #1221) and survives the source node being tombstoned first. Correct only
+        // because the indexer writes one branch per project into gl_edge; a
+        // second branch would tombstone the first's edges below the watermark.
+        let code_source_kinds = CodeTableNames::node_kinds_sql_list();
         format!(
             r#"
             SELECT
@@ -146,10 +136,10 @@ impl ClickHouseStaleDataCleaner {
                 target_kind,
                 {{watermark_time:DateTime64(6, 'UTC')}} - toIntervalMicrosecond(1) AS _version,
                 true AS _deleted
-            FROM {edge_table} FINAL
+            FROM {edge_table} AS s FINAL
             WHERE traversal_path = {{traversal_path:String}}
-              AND source_id IN ({source_id_union})
-              AND _version < {{watermark_time:DateTime64(6, 'UTC')}}
+              AND source_kind IN ({code_source_kinds})
+              AND s._version < {{watermark_time:DateTime64(6, 'UTC')}} - toIntervalMicrosecond(1)
             "#
         )
     }
