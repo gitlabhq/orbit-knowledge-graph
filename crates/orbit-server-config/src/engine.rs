@@ -605,6 +605,14 @@ pub struct TombstoneSweepConfig {
     /// `max_query_size` session setting (a DELETE is parsed from raw bytes).
     #[serde(default = "default_tombstone_max_query_size_bytes")]
     pub max_query_size_bytes: usize,
+    /// Traversal paths per scoped key-select on the tight edge instance. The
+    /// select's `LIMIT 1 BY` sorts the union of all scoped edges, so its cost is
+    /// super-linear in the batch size; keeping the batch small (measured ~3 s at
+    /// ~50 scopes vs ~50 s at ~200 on production) keeps each statement cheap. A run
+    /// with more scopes iterates chunks within the per-run key budget. Unused by
+    /// the weekly backstop, which scans a `_version` window.
+    #[serde(default = "default_tombstone_max_scopes_per_query")]
+    pub max_scopes_per_query: usize,
 }
 
 fn default_tombstone_lookback_secs() -> u64 {
@@ -617,6 +625,10 @@ fn default_tombstone_max_keys_per_run() -> usize {
 
 fn default_tombstone_max_query_size_bytes() -> usize {
     10 * 1024 * 1024
+}
+
+fn default_tombstone_max_scopes_per_query() -> usize {
+    50
 }
 
 impl TombstoneSweepConfig {
@@ -636,6 +648,7 @@ fn default_table_cleanup_config() -> TombstoneSweepConfig {
         lookback_secs: 3650 * 24 * 60 * 60,
         max_keys_per_run: default_tombstone_max_keys_per_run(),
         max_query_size_bytes: default_tombstone_max_query_size_bytes(),
+        max_scopes_per_query: default_tombstone_max_scopes_per_query(),
     }
 }
 
@@ -647,6 +660,7 @@ fn default_edge_tombstone_collapse_config() -> TombstoneSweepConfig {
         lookback_secs: default_tombstone_lookback_secs(),
         max_keys_per_run: default_tombstone_max_keys_per_run(),
         max_query_size_bytes: default_tombstone_max_query_size_bytes(),
+        max_scopes_per_query: default_tombstone_max_scopes_per_query(),
     }
 }
 

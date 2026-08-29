@@ -253,7 +253,8 @@
             "cron": "0 */15 * * * *",
             "lookback_secs": 3600,
             "max_keys_per_run": 100000,
-            "max_query_size_bytes": 10485760
+            "max_query_size_bytes": 10485760,
+            "max_scopes_per_query": 50
           },
           "global": {
             "cron": "0 */1 * * * *"
@@ -280,7 +281,8 @@
             "cron": "0 0 3 * * 0",
             "lookback_secs": 315360000,
             "max_keys_per_run": 100000,
-            "max_query_size_bytes": 10485760
+            "max_query_size_bytes": 10485760,
+            "max_scopes_per_query": 50
           }
         }
       }
@@ -1552,7 +1554,8 @@
               "cron": "0 */15 * * * *",
               "lookback_secs": 3600,
               "max_keys_per_run": 100000,
-              "max_query_size_bytes": 10485760
+              "max_query_size_bytes": 10485760,
+              "max_scopes_per_query": 50
             },
             "global": {
               "cron": "0 */1 * * * *"
@@ -1579,7 +1582,8 @@
               "cron": "0 0 3 * * 0",
               "lookback_secs": 315360000,
               "max_keys_per_run": 100000,
-              "max_query_size_bytes": 10485760
+              "max_query_size_bytes": 10485760,
+              "max_scopes_per_query": 50
             }
           }
         }
@@ -1603,7 +1607,8 @@
             "cron": "0 */15 * * * *",
             "lookback_secs": 3600,
             "max_keys_per_run": 100000,
-            "max_query_size_bytes": 10485760
+            "max_query_size_bytes": 10485760,
+            "max_scopes_per_query": 50
           }
         },
         "global": {
@@ -1651,7 +1656,8 @@
             "cron": "0 0 3 * * 0",
             "lookback_secs": 315360000,
             "max_keys_per_run": 100000,
-            "max_query_size_bytes": 10485760
+            "max_query_size_bytes": 10485760,
+            "max_scopes_per_query": 50
           }
         }
       },
@@ -1826,6 +1832,13 @@
           "type": "integer",
           "format": "uint",
           "default": 10485760,
+          "minimum": 0
+        },
+        "max_scopes_per_query": {
+          "description": "Traversal paths per scoped key-select on the tight edge instance. The\nselect's `LIMIT 1 BY` sorts the union of all scoped edges, so its cost is\nsuper-linear in the batch size; keeping the batch small (measured ~3 s at\n~50 scopes vs ~50 s at ~200 on production) keeps each statement cheap. A run\nwith more scopes iterates chunks within the per-run key budget. Unused by\nthe weekly backstop, which scans a `_version` window.",
+          "type": "integer",
+          "format": "uint",
+          "default": 50,
           "minimum": 0
         }
       },

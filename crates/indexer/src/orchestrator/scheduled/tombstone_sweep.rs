@@ -55,9 +55,6 @@ const CODE_INDEXING_CHECKPOINT_TABLE: &str = "code_indexing_checkpoint";
 /// costs a few cheap re-probes.
 const CHECKPOINT_DISCOVERY_OVERLAP_SECS: i64 = 300;
 
-/// Traversal paths per scoped key-select, to bound the `IN` list size.
-const SCOPES_PER_KEY_SELECT: usize = 500;
-
 /// Fraction of `max_query_size_bytes` a rendered statement may fill before it is
 /// flushed, leaving headroom for the literal timestamp and the settings clause.
 const QUERY_SIZE_SAFETY_NUMERATOR: usize = 9;
@@ -268,7 +265,7 @@ impl TombstoneSweep {
         let mut remaining = budget;
         let mut fully_drained = true;
         'outer: for table in &self.tables {
-            for batch in scopes.chunks(SCOPES_PER_KEY_SELECT) {
+            for batch in scope_chunks(&scopes, self.config.max_scopes_per_query) {
                 let found = self.select_scoped_keys(table, batch, remaining + 1).await?;
                 let tuples = render_key_tuples(&found, &table.sort_key)?;
                 let over_budget = tuples.len() > remaining;
@@ -523,6 +520,12 @@ fn select_scoped_keys_sql(table: &SweptTable, path_list: &str, limit: usize) -> 
     )
 }
 
+/// Batches the discovered scopes for the scoped key-selects, capped at `cap` (a
+/// zero cap is treated as one). The cap bounds the super-linear `LIMIT 1 BY` cost.
+fn scope_chunks(scopes: &[String], cap: usize) -> impl Iterator<Item = &[String]> {
+    scopes.chunks(cap.max(1))
+}
+
 fn scope_paths(batches: &[RecordBatch]) -> Result<Vec<String>, TaskError> {
     let mut paths = Vec::new();
     for batch in batches {
@@ -769,6 +772,20 @@ mod tests {
         assert_eq!(
             checkpoint_window_start(Some(stale), now, lookback),
             stale - overlap
+        );
+    }
+
+    #[test]
+    fn scope_chunks_cap_the_batch_size() {
+        let scopes: Vec<String> = (0..125).map(|i| i.to_string()).collect();
+        let batches: Vec<&[String]> = scope_chunks(&scopes, 50).collect();
+        assert_eq!(batches.len(), 3);
+        assert!(batches.iter().all(|b| b.len() <= 50), "{batches:?}");
+        assert_eq!(batches.iter().map(|b| b.len()).sum::<usize>(), 125);
+        assert_eq!(
+            scope_chunks(&scopes, 0).count(),
+            125,
+            "a zero cap must not panic and must not batch unbounded"
         );
     }
 

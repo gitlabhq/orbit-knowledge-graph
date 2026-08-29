@@ -15,6 +15,7 @@ fn drain_everything() -> TombstoneSweepConfig {
         lookback_secs: 3650 * 24 * 60 * 60,
         max_keys_per_run: 1_000_000,
         max_query_size_bytes: 10 * 1024 * 1024,
+        max_scopes_per_query: 50,
     }
 }
 

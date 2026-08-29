@@ -278,7 +278,9 @@ recent Siphon activity, backstopping migration backfill and missed windows.
 
 Both sweeps are idempotent. The tight edge sweep discovers reindexed scopes from
 `code_indexing_checkpoint` and probes the edge tables by `traversal_path`, so it
-never scans them; the weekly backstop scans a `_version` lookback window
+never scans them; it selects at most `max_scopes_per_query` scopes per statement
+(the `LIMIT 1 BY` cost is super-linear in the batch), iterating chunks within the
+key budget. The weekly backstop scans a `_version` lookback window
 (`lookback_secs`, must exceed the cadence). Each deletes up to `max_keys_per_run`
 keys (draining the rest on later runs), packs the keys into `DELETE`s bounded by
 `max_query_size_bytes`, and records progress in the `checkpoint` table. A failed
