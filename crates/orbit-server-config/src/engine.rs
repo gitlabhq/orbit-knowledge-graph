@@ -576,19 +576,67 @@ impl Default for CodeBackfillSweepConfig {
     }
 }
 
+/// A scheduled sweep that physically removes ReplacingMergeTree tombstones
+/// (`_deleted = true`) that reads already hide. One instance sweeps node tables,
+/// another sweeps edge tables at a tighter cadence.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct TableCleanupConfig {
+#[schemars(deny_unknown_fields)]
+pub struct TombstoneSweepConfig {
     #[serde(flatten)]
     pub schedule: ScheduleConfiguration,
+    /// A tombstone whose `_version` is within this window of now is always a sweep
+    /// candidate, so a run that lands inside the window can never miss it. Must
+    /// exceed the sweep cadence.
+    #[serde(default = "default_tombstone_lookback_secs")]
+    pub lookback_secs: u64,
+    /// Per-run key budget. A run that finds more drains the rest on later runs
+    /// rather than flooding the mutation queue in one pass.
+    #[serde(default = "default_tombstone_max_keys_per_run")]
+    pub max_keys_per_run: usize,
+    /// Byte budget for one flat-literal `DELETE` statement. The key list is packed
+    /// into statements that stay under this, mirroring the graph client's
+    /// `max_query_size` session setting (a DELETE is parsed from raw bytes).
+    #[serde(default = "default_tombstone_max_query_size_bytes")]
+    pub max_query_size_bytes: usize,
 }
 
-impl Default for TableCleanupConfig {
-    fn default() -> Self {
-        Self {
-            schedule: ScheduleConfiguration {
-                cron: Some("0 0 3 * * 0".into()),
-            },
-        }
+fn default_tombstone_lookback_secs() -> u64 {
+    60 * 60
+}
+
+fn default_tombstone_max_keys_per_run() -> usize {
+    100_000
+}
+
+fn default_tombstone_max_query_size_bytes() -> usize {
+    10 * 1024 * 1024
+}
+
+impl TombstoneSweepConfig {
+    pub fn lookback(&self) -> chrono::TimeDelta {
+        chrono::TimeDelta::seconds(self.lookback_secs as i64)
+    }
+}
+
+fn default_table_cleanup_config() -> TombstoneSweepConfig {
+    TombstoneSweepConfig {
+        schedule: ScheduleConfiguration {
+            cron: Some("0 0 3 * * 0".into()),
+        },
+        lookback_secs: 8 * 24 * 60 * 60,
+        max_keys_per_run: default_tombstone_max_keys_per_run(),
+        max_query_size_bytes: default_tombstone_max_query_size_bytes(),
+    }
+}
+
+fn default_edge_tombstone_collapse_config() -> TombstoneSweepConfig {
+    TombstoneSweepConfig {
+        schedule: ScheduleConfiguration {
+            cron: Some("0 */15 * * * *".into()),
+        },
+        lookback_secs: default_tombstone_lookback_secs(),
+        max_keys_per_run: default_tombstone_max_keys_per_run(),
+        max_query_size_bytes: default_tombstone_max_query_size_bytes(),
     }
 }
 
@@ -656,7 +704,7 @@ impl Default for StaleEdgeReconciliationConfig {
 }
 
 /// Typed per-task configuration for all registered scheduled tasks.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 #[schemars(deny_unknown_fields)]
 pub struct ScheduledTasksConfiguration {
@@ -668,14 +716,32 @@ pub struct ScheduledTasksConfiguration {
     pub siphon: SiphonRouterConfig,
     #[serde(default)]
     pub code_backfill: CodeBackfillSweepConfig,
-    #[serde(default)]
-    pub table_cleanup: TableCleanupConfig,
+    #[serde(default = "default_table_cleanup_config")]
+    pub table_cleanup: TombstoneSweepConfig,
+    #[serde(default = "default_edge_tombstone_collapse_config")]
+    pub edge_tombstone_collapse: TombstoneSweepConfig,
     #[serde(default)]
     pub namespace_deletion: NamespaceDeletionSchedulerConfig,
     #[serde(default)]
     pub migration_completion: MigrationCompletionConfig,
     #[serde(default)]
     pub stale_edge_reconciliation: StaleEdgeReconciliationConfig,
+}
+
+impl Default for ScheduledTasksConfiguration {
+    fn default() -> Self {
+        Self {
+            global: GlobalDispatcherConfig::default(),
+            namespace: NamespaceDispatcherConfig::default(),
+            siphon: SiphonRouterConfig::default(),
+            code_backfill: CodeBackfillSweepConfig::default(),
+            table_cleanup: default_table_cleanup_config(),
+            edge_tombstone_collapse: default_edge_tombstone_collapse_config(),
+            namespace_deletion: NamespaceDeletionSchedulerConfig::default(),
+            migration_completion: MigrationCompletionConfig::default(),
+            stale_edge_reconciliation: StaleEdgeReconciliationConfig::default(),
+        }
+    }
 }
 
 // ── Top-level engine config ──────────────────────────────────────────
@@ -868,6 +934,10 @@ mod tests {
             Some("0 0 3 * * 0")
         );
         assert_eq!(
+            tasks.edge_tombstone_collapse.schedule.cron.as_deref(),
+            Some("0 */15 * * * *")
+        );
+        assert_eq!(
             tasks.namespace_deletion.schedule.cron.as_deref(),
             Some("0 0 3 * * *")
         );
@@ -879,6 +949,21 @@ mod tests {
             tasks.stale_edge_reconciliation.schedule.cron.as_deref(),
             Some("0 */30 * * * *")
         );
+    }
+
+    #[test]
+    fn tombstone_sweep_lookback_exceeds_its_cadence() {
+        let tasks = ScheduledTasksConfiguration::default();
+        for sweep in [&tasks.table_cleanup, &tasks.edge_tombstone_collapse] {
+            let cadence = chrono::TimeDelta::from_std(sweep.schedule.interval_hint())
+                .expect("cadence fits a TimeDelta");
+            assert!(
+                sweep.lookback() > cadence,
+                "a run that lands inside the lookback window must always see a tombstone \
+                 created since the last run; lookback {:?} cadence {cadence:?}",
+                sweep.lookback()
+            );
+        }
     }
 
     #[test]

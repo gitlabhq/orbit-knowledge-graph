@@ -7,7 +7,7 @@ pub mod migration_completion;
 pub mod namespace;
 pub mod namespace_deletion;
 pub mod stale_edge_reconciliation;
-pub mod table_cleanup;
+pub mod tombstone_sweep;
 
 pub use backfill_sweep::CodeBackfillSweep;
 pub use code_stale_sweep::CodeStaleSweep;
@@ -17,10 +17,11 @@ pub use migration_completion::MigrationCompletionChecker;
 pub use namespace::NamespaceDispatcher;
 pub use namespace_deletion::NamespaceDeletionScheduler;
 pub use stale_edge_reconciliation::StaleEdgeReconciliation;
-pub use table_cleanup::TableCleanup;
+pub use tombstone_sweep::TombstoneSweep;
 
 use std::str::FromStr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use chrono::Utc;
@@ -45,6 +46,12 @@ impl TaskError {
     }
 }
 
+/// Watchdog ceiling for one task run. A run that exceeds it (e.g. a mutation that
+/// never returns because a synchronous wait held a dropped connection) must not
+/// hang its loop forever. Set above the 2h per-statement `max_execution_time` so
+/// only a genuinely stuck run trips it.
+const DEFAULT_TASK_RUN_TIMEOUT: Duration = Duration::from_secs(4 * 60 * 60);
+
 #[async_trait]
 pub trait ScheduledTask: Send + Sync {
     fn name(&self) -> &str;
@@ -52,6 +59,25 @@ pub trait ScheduledTask: Send + Sync {
     fn schedule(&self) -> &ScheduleConfiguration;
 
     async fn run(&self) -> Result<(), TaskError>;
+
+    fn run_timeout(&self) -> Duration {
+        DEFAULT_TASK_RUN_TIMEOUT
+    }
+}
+
+/// Runs one task iteration under its watchdog. A timeout is logged loudly and
+/// swallowed so a single stuck run can never kill the loop.
+async fn run_once_guarded(task: &dyn ScheduledTask) {
+    let task_name = task.name();
+    match tokio::time::timeout(task.run_timeout(), task.run()).await {
+        Ok(Ok(())) => debug!(task = task_name, "task completed"),
+        Ok(Err(error)) => warn!(task = task_name, %error, "task failed"),
+        Err(_) => warn!(
+            task = task_name,
+            timeout_secs = task.run_timeout().as_secs(),
+            "task run exceeded its watchdog timeout; abandoning this run and continuing"
+        ),
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -174,14 +200,7 @@ async fn run_task_loop(
             }
         }
 
-        match task.run().await {
-            Ok(()) => {
-                debug!(task = task_name, "task completed");
-            }
-            Err(error) => {
-                warn!(task = task_name, %error, "task failed");
-            }
-        }
+        run_once_guarded(task.as_ref()).await;
     }
 
     info!(task = task_name, "task loop stopped");
@@ -209,14 +228,7 @@ pub async fn run_once(
             }
         }
 
-        match task.run().await {
-            Ok(()) => {
-                debug!(task = task_name, "task completed");
-            }
-            Err(error) => {
-                warn!(task = task_name, %error, "task failed");
-            }
-        }
+        run_once_guarded(task.as_ref()).await;
     }
 
     Ok(())
@@ -311,6 +323,44 @@ mod tests {
             self.run_count.fetch_add(1, Ordering::SeqCst);
             Ok(())
         }
+    }
+
+    struct HangingTask {
+        run_timeout: Duration,
+        started: AtomicUsize,
+    }
+
+    #[async_trait]
+    impl ScheduledTask for Arc<HangingTask> {
+        fn name(&self) -> &str {
+            "hanging"
+        }
+
+        fn schedule(&self) -> &ScheduleConfiguration {
+            unreachable!("the watchdog test drives run_once_guarded directly")
+        }
+
+        async fn run(&self) -> Result<(), TaskError> {
+            self.started.fetch_add(1, Ordering::SeqCst);
+            std::future::pending::<()>().await;
+            Ok(())
+        }
+
+        fn run_timeout(&self) -> Duration {
+            self.run_timeout
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn watchdog_abandons_a_run_that_never_returns() {
+        let task = Arc::new(HangingTask {
+            run_timeout: Duration::from_secs(30),
+            started: AtomicUsize::new(0),
+        });
+
+        run_once_guarded(&task).await;
+
+        assert_eq!(task.started.load(Ordering::SeqCst), 1);
     }
 
     /// Lock service that always grants (simulates TTL expiry between runs).

@@ -265,7 +265,8 @@ Distributed locking via NATS KV ensures only one dispatcher instance runs each t
 | Namespace sweep | `schedule.tasks.namespace-sweep.cron` | `0 0 * * * *` (hourly) | Re-dispatches every enabled namespace; backstops migration backfill and missed windows |
 | Code task dispatch | `schedule.tasks.code-indexing-task.cron` | `0 */1 * * * *` (every minute) | Consumes Siphon CDC push events |
 | Code backfill | `schedule.tasks.code-backfill.cron` | `0 */1 * * * *` (every minute) | Backfills newly enabled namespaces |
-| Table cleanup | `schedule.tasks.table-cleanup.cron` | `0 0 3 * * 0` (weekly, Sunday 03:00 UTC) | Runs `APPLY DELETED MASK` on every graph table to physically remove lightweight-deleted rows |
+| Node tombstone sweep | `schedule.tasks.table-cleanup.cron` | `0 0 3 * * 0` (weekly, Sunday 03:00 UTC) | Physically reclaims node-table tombstones with batched flat-literal deletes |
+| Edge tombstone collapse | `schedule.tasks.edge-tombstone-collapse.cron` | `0 */15 * * * *` (every 15 minutes) | Physically reclaims edge-table tombstones; the tight cadence bounds how long a retired edge stays visible to variable-depth traversal |
 | Namespace deletion | `schedule.tasks.namespace-deletion.cron` | `0 0 3 * * *` (daily 03:00 UTC) | Schedules and executes namespace deletions |
 | Migration completion | `schedule.tasks.migration-completion.cron` | `0 */1 * * * *` (every minute) | Detects completed schema migrations |
 
@@ -275,10 +276,14 @@ every later tick queries Siphon changes since that checkpoint, however old it is
 The hourly namespace sweep re-dispatches every enabled namespace regardless of
 recent Siphon activity, backstopping migration backfill and missed windows.
 
-`APPLY DELETED MASK` is idempotent. A failed or skipped run is safe — the next
-run picks up all outstanding masks. Alert on
-`gkg.scheduler.task.errors{task="maintenance.table_cleanup"}`; the task logs a
-failed table and moves on.
+Both sweeps are idempotent. Each selects tombstoned keys in a lookback window
+(`lookback_secs`, must exceed the cadence), deletes up to `max_keys_per_run` keys
+(draining the rest on later runs), packs the keys into `DELETE`s bounded by
+`max_query_size_bytes`, and records progress in the `checkpoint` table. A failed
+or skipped run is safe: the next run resumes from the checkpoint. Alert on
+`gkg.scheduler.task.errors{task="maintenance.table_cleanup"}` and
+`{task="maintenance.edge_tombstone_collapse"}`; each sweep logs a failed table
+and moves on.
 
 ### Code dispatch task settings
 
@@ -645,6 +650,8 @@ schedule:
   tasks:
     table-cleanup:
       cron: "0 0 3 * * 0"
+    edge-tombstone-collapse:
+      cron: "0 */15 * * * *"
     namespace-deletion:
       cron: "0 0 3 * * *"
     migration-completion:

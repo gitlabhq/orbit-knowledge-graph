@@ -71,7 +71,7 @@ use orchestrator::max_deliveries::MaxDeliveriesReconciler;
 use orchestrator::scheduled::{
     CodeBackfillSweep, CodeStaleSweep, GlobalDispatcher, MigrationCompletionChecker,
     NamespaceDeletionScheduler, NamespaceDispatcher, Scheduled, StaleEdgeReconciliation,
-    TableCleanup,
+    TombstoneSweep,
 };
 use orchestrator::scheduled::{ScheduledTask, ScheduledTaskMetrics};
 use orchestrator::siphon::{CodeIndexingTaskRoute, EnabledNamespacesRoute, Route, Siphon};
@@ -365,11 +365,23 @@ pub async fn run_dispatcher(
             ),
             config.schedule.tasks.code_backfill.clone(),
         )),
-        Box::new(TableCleanup::new(
+        Box::new(TombstoneSweep::for_node_tables(
             graph,
             ontology,
+            Arc::new(checkpoint::ClickHouseCheckpointStore::new(Arc::new(
+                config.graph.build_client(),
+            ))),
             metrics.clone(),
             config.schedule.tasks.table_cleanup.clone(),
+        )),
+        Box::new(TombstoneSweep::for_edge_tables(
+            config.graph.build_client(),
+            ontology,
+            Arc::new(checkpoint::ClickHouseCheckpointStore::new(Arc::new(
+                config.graph.build_client(),
+            ))),
+            metrics.clone(),
+            config.schedule.tasks.edge_tombstone_collapse.clone(),
         )),
         Box::new(NamespaceDeletionScheduler::new(
             deletion_store,

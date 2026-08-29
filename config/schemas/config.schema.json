@@ -249,6 +249,12 @@
             "cron": "0 */1 * * * *",
             "publish_window": 200000
           },
+          "edge-tombstone-collapse": {
+            "cron": "0 */15 * * * *",
+            "lookback_secs": 3600,
+            "max_keys_per_run": 100000,
+            "max_query_size_bytes": 10485760
+          },
           "global": {
             "cron": "0 */1 * * * *"
           },
@@ -271,7 +277,10 @@
             "lookback_secs": 3600
           },
           "table-cleanup": {
-            "cron": "0 0 3 * * 0"
+            "cron": "0 0 3 * * 0",
+            "lookback_secs": 691200,
+            "max_keys_per_run": 100000,
+            "max_query_size_bytes": 10485760
           }
         }
       }
@@ -1539,6 +1548,12 @@
               "cron": "0 */1 * * * *",
               "publish_window": 200000
             },
+            "edge-tombstone-collapse": {
+              "cron": "0 */15 * * * *",
+              "lookback_secs": 3600,
+              "max_keys_per_run": 100000,
+              "max_query_size_bytes": 10485760
+            },
             "global": {
               "cron": "0 */1 * * * *"
             },
@@ -1561,7 +1576,10 @@
               "lookback_secs": 3600
             },
             "table-cleanup": {
-              "cron": "0 0 3 * * 0"
+              "cron": "0 0 3 * * 0",
+              "lookback_secs": 691200,
+              "max_keys_per_run": 100000,
+              "max_query_size_bytes": 10485760
             }
           }
         }
@@ -1577,6 +1595,15 @@
           "default": {
             "cron": "0 */1 * * * *",
             "publish_window": 200000
+          }
+        },
+        "edge-tombstone-collapse": {
+          "$ref": "#/$defs/TombstoneSweepConfig",
+          "default": {
+            "cron": "0 */15 * * * *",
+            "lookback_secs": 3600,
+            "max_keys_per_run": 100000,
+            "max_query_size_bytes": 10485760
           }
         },
         "global": {
@@ -1619,9 +1646,12 @@
           }
         },
         "table-cleanup": {
-          "$ref": "#/$defs/TableCleanupConfig",
+          "$ref": "#/$defs/TombstoneSweepConfig",
           "default": {
-            "cron": "0 0 3 * * 0"
+            "cron": "0 0 3 * * 0",
+            "lookback_secs": 691200,
+            "max_keys_per_run": 100000,
+            "max_query_size_bytes": 10485760
           }
         }
       },
@@ -1745,20 +1775,6 @@
       },
       "additionalProperties": false
     },
-    "TableCleanupConfig": {
-      "description": "Per-task schedule configuration.\n\nEach scheduled task embeds this via `#[serde(flatten)]` in its own typed config struct.\nThe scheduler reads it via `task.schedule()`.",
-      "type": "object",
-      "properties": {
-        "cron": {
-          "description": "Cron expression with seconds field (6-field: `sec min hour dom mon dow`).\nWhen absent, the task runs on a default 60-second interval.",
-          "type": [
-            "string",
-            "null"
-          ],
-          "default": null
-        }
-      }
-    },
     "TlsConfig": {
       "type": "object",
       "properties": {
@@ -1775,6 +1791,42 @@
             "null"
           ],
           "default": null
+        }
+      },
+      "additionalProperties": false
+    },
+    "TombstoneSweepConfig": {
+      "description": "A scheduled sweep that physically removes ReplacingMergeTree tombstones\n(`_deleted = true`) that reads already hide. One instance sweeps node tables,\nanother sweeps edge tables at a tighter cadence.",
+      "type": "object",
+      "properties": {
+        "cron": {
+          "description": "Cron expression with seconds field (6-field: `sec min hour dom mon dow`).\nWhen absent, the task runs on a default 60-second interval.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "lookback_secs": {
+          "description": "A tombstone whose `_version` is within this window of now is always a sweep\ncandidate, so a run that lands inside the window can never miss it. Must\nexceed the sweep cadence.",
+          "type": "integer",
+          "format": "uint64",
+          "default": 3600,
+          "minimum": 0
+        },
+        "max_keys_per_run": {
+          "description": "Per-run key budget. A run that finds more drains the rest on later runs\nrather than flooding the mutation queue in one pass.",
+          "type": "integer",
+          "format": "uint",
+          "default": 100000,
+          "minimum": 0
+        },
+        "max_query_size_bytes": {
+          "description": "Byte budget for one flat-literal `DELETE` statement. The key list is packed\ninto statements that stay under this, mirroring the graph client's\n`max_query_size` session setting (a DELETE is parsed from raw bytes).",
+          "type": "integer",
+          "format": "uint",
+          "default": 10485760,
+          "minimum": 0
         }
       },
       "additionalProperties": false

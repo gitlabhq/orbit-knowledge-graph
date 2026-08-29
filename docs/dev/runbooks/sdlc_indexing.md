@@ -290,7 +290,16 @@ The handler will restart extraction from epoch for that entity type.
 
 ## Graph table maintenance
 
-A deletion is a tombstone: the row is re-inserted with `_deleted = true` and a bumped `_version`, and reads hide it at once via FINAL. No deletion path issues a mutation. To physically reclaim tombstoned rows from a table on disk:
+A deletion is a tombstone: the row is re-inserted with `_deleted = true` and a bumped `_version`, and reads hide it at once via FINAL. No deletion path issues a mutation.
+
+Two scheduled sweeps physically reclaim tombstones with batched flat-literal `DELETE`s (never a subquery or `UNION`, which ClickHouse cannot replay as a stored mutation):
+
+- `maintenance.edge_tombstone_collapse` sweeps edge tables every 15 minutes. Variable-depth traversal scans edges without FINAL, so a retired edge stays queryable until its row is gone; the tight cadence bounds that window.
+- `maintenance.table_cleanup` sweeps node tables weekly. Node tombstones only cost storage, so they tolerate the slower cadence.
+
+Each sweep selects tombstoned keys within a lookback window, deletes up to a per-run budget (draining the rest on later runs), and records progress in the `checkpoint` table. Tune both under `schedule.tasks` (see the server configuration runbook).
+
+To reclaim one table immediately:
 
 ```sql
 OPTIMIZE TABLE `<gkg-database>`.gl_project FINAL CLEANUP;

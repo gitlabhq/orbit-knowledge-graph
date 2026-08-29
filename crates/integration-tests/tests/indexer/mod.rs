@@ -8,4 +8,4 @@ mod nats;
 mod nats_tls;
 mod schema;
 mod sdlc;
-mod table_cleanup;
+mod tombstone_sweep;
