@@ -110,12 +110,12 @@ impl ClickHouseStaleDataCleaner {
             return String::new();
         }
 
-        let source_id_predicates = source_id_predicates.join(" OR ");
+        let source_id_match = source_id_predicates.join(" OR ");
 
         format!(
             "DELETE FROM {edge_table} \
              WHERE traversal_path = {{traversal_path:String}} \
-             AND ({source_id_predicates}) \
+             AND ({source_id_match}) \
              AND _version < {{watermark_time:DateTime64(6, 'UTC')}}"
         )
     }
