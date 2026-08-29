@@ -160,15 +160,11 @@ case "${1:-}" in
     IMAGE="registry.gitlab.com/gitlab-org/orbit/knowledge-graph/gkg"
     TAG="bench-${SHORT_SHA}${DIRTY}"
 
-    echo "[infra] Building GKG image (debug, linux/amd64) tag=${TAG}"
-    (
-      cd "${REPO_ROOT}"
-      trap 'rm -f gkg-server' EXIT
-      CARGO_PROFILE_DEV_DEBUG=0 cargo build -p orbit-server --locked
-      cp target/debug/gkg-server .
-      docker buildx build --platform linux/amd64 \
-        -t "${IMAGE}:${TAG}" -f e2e/Dockerfile.e2e --push .
-    )
+    echo "[infra] Building GKG image (linux/amd64) tag=${TAG}"
+    docker buildx build --platform linux/amd64 \
+      -t "${IMAGE}:${TAG}" -f "${REPO_ROOT}/Dockerfile" --push \
+      --build-arg GKG_VERSION="${TAG}" \
+      "${REPO_ROOT}"
 
     echo "[infra] Upgrading GKG Helm release to ${TAG}"
     kubectl --context="${KCTX}" -n "${GKG_NS}" delete job \
