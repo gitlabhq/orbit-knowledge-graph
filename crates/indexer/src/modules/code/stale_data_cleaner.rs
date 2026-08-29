@@ -164,7 +164,11 @@ impl StaleDataCleaner for ClickHouseStaleDataCleaner {
     ) -> Result<(), StaleDataCleanerError> {
         let formatted_watermark = watermark_time.format(TIMESTAMP_FORMAT).to_string();
 
-        for queries in [&self.node_queries, &self.edge_queries] {
+        // Edges first: the edge predicates resolve ownership by looking source ids up in
+        // the node tables, so deleting a node row first takes its id out of scope and
+        // strands the edges that pointed at it. This order also leaves the node rows
+        // intact when an edge delete fails, keeping the next run able to retry.
+        for queries in [&self.edge_queries, &self.node_queries] {
             try_join_all(queries.iter().map(|(table, query)| {
                 self.delete_stale_rows(
                     table,

@@ -1031,6 +1031,100 @@ async fn failed_mutations_on_shared_edge_table(
     result.first().map_or(0, |b| b.num_rows())
 }
 
+#[tokio::test]
+async fn edges_from_a_directory_removed_by_a_reindex_are_cleaned() {
+    let project_id: i64 = 23;
+    let traversal_path = "1/23/";
+
+    let clickhouse = integration_testkit::TestContext::new(&[
+        integration_testkit::SIPHON_SCHEMA_SQL,
+        *integration_testkit::GRAPH_SCHEMA_SQL,
+    ])
+    .await;
+
+    let mock = MockGitlabServer::start().await;
+    mock.add_project(
+        project_id,
+        "main",
+        &[
+            ("src/Alpha.java", "public class Alpha {}"),
+            ("src/legacy/Old.java", "public class Old {}"),
+        ],
+    );
+
+    let deps = CodeIndexingDeps::new(&mock, &clickhouse);
+    let handler = deps.code_indexing_task_handler();
+
+    index_code(
+        &handler,
+        &clickhouse,
+        project_id,
+        "commit1",
+        1,
+        traversal_path,
+    )
+    .await;
+    assert_eq!(
+        count_active_directories_at_path(&clickhouse, project_id, "src/legacy").await,
+        1,
+        "the fixture must produce a directory that the reindex can then remove"
+    );
+
+    mock.replace_archive(project_id, &[("src/Alpha.java", "public class Alpha {}")]);
+    index_code(
+        &handler,
+        &clickhouse,
+        project_id,
+        "commit2",
+        2,
+        traversal_path,
+    )
+    .await;
+
+    assert_eq!(
+        count_active_directories_at_path(&clickhouse, project_id, "src/legacy").await,
+        0,
+        "the removed directory's own row should be gone"
+    );
+    assert_eq!(
+        edges_from_directories_that_no_longer_exist(&clickhouse).await,
+        0,
+        "a shared edge whose source directory the same reindex removed can never be \
+         matched again once that directory's id is no longer resolvable"
+    );
+}
+
+async fn count_active_directories_at_path(
+    clickhouse: &integration_testkit::TestContext,
+    project_id: i64,
+    path: &str,
+) -> usize {
+    let result = clickhouse
+        .query(&format!(
+            "SELECT id FROM {} FINAL \
+             WHERE project_id = {project_id} AND path = '{path}' AND _deleted = false",
+            t("gl_directory")
+        ))
+        .await;
+    result.first().map_or(0, |b| b.num_rows())
+}
+
+async fn edges_from_directories_that_no_longer_exist(
+    clickhouse: &integration_testkit::TestContext,
+) -> usize {
+    let ontology = integration_testkit::load_ontology();
+    let edge_table = ontology.edge_table_for_relationship("CONTAINS");
+    let result = clickhouse
+        .query(&format!(
+            "SELECT source_id FROM {edge_table} FINAL \
+             WHERE _deleted = false AND source_kind = 'Directory' \
+             AND source_id NOT IN (SELECT id FROM {} FINAL WHERE _deleted = false)",
+            t("gl_directory")
+        ))
+        .await;
+    result.first().map_or(0, |b| b.num_rows())
+}
+
 const CANARY_TARGET_ID: i64 = 999_999_998;
 
 async fn first_active_directory_id(
