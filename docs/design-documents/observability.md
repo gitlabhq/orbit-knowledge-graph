@@ -284,7 +284,7 @@ Rails exposes that response to HTTP consumers at `GET /api/v4/orbit/status`. Thi
 GitLab connectivity and JWT authentication, but does not affect the top-level cluster status. It is
 not part of pod readiness or the HealthCheck service's `/health` aggregate.
 
-The HealthCheck service additionally exposes a read-only `/queue-depth` endpoint that connects to NATS and reports the code work-queue's pending and in-flight counts (`{ "code_pending": <n>, "code_in_flight": <n> }`) from JetStream consumer state. The stream and durable consumer names are resolved inside the application using the same versioned naming the indexer uses, so deployment charts stay naming-agnostic. This is the scaling signal consumed by KEDA for the code indexer.
+The HealthCheck service additionally exposes a read-only `/queue-depth` endpoint that connects to NATS and reports the code and SDLC work-queue pending and in-flight counts (`{ "code_pending": <n>, "code_in_flight": <n>, "sdlc_pending": <n>, "sdlc_in_flight": <n> }`) from JetStream consumer state. The code counts come from the code-task consumer; the SDLC counts come from the namespace-indexing consumer, where each message is one namespace job, so `sdlc_pending` is the number of namespaces waiting for a free worker slot. The stream and durable consumer names are resolved inside the application using the same versioned naming the indexer uses, so deployment charts stay naming-agnostic. These are the scaling signals consumed by KEDA for the code and SDLC indexers.
 
 ## Self-Managed Instances
 
