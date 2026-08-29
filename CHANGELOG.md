@@ -1,3 +1,9 @@
+## [0.108.1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.108.0...v0.108.1) (2026-08-29)
+
+### Fixes
+
+* **indexer:** drop the UNION from the code stale edge delete predicate ([23d8fd4](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/23d8fd4f20ae966fe86e10bf22f970578a71a7f8)) by Bohdan Parkhomchuk
+
 ## [0.108.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.107.1...v0.108.0) (2026-08-29)
 
 ### Features
