@@ -1009,6 +1009,26 @@ async fn stale_rows_in_the_shared_edge_table_are_cleaned_on_reindex() {
         "the shared edge table's cleanup did not apply; a delete whose predicate \
          ClickHouse cannot replay leaves the row and stalls the table's mutations"
     );
+    assert_eq!(
+        failed_mutations_on_shared_edge_table(&clickhouse).await,
+        0,
+        "a delete that parses as a statement can still fail when ClickHouse re-parses \
+         it from the stored mutation command, and it then retries forever"
+    );
+}
+
+async fn failed_mutations_on_shared_edge_table(
+    clickhouse: &integration_testkit::TestContext,
+) -> usize {
+    let ontology = integration_testkit::load_ontology();
+    let edge_table = ontology.edge_table_for_relationship("CONTAINS");
+    let result = clickhouse
+        .query(&format!(
+            "SELECT mutation_id FROM system.mutations \
+             WHERE table = '{edge_table}' AND latest_fail_reason != ''"
+        ))
+        .await;
+    result.first().map_or(0, |b| b.num_rows())
 }
 
 const CANARY_TARGET_ID: i64 = 999_999_998;

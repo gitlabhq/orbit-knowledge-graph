@@ -342,24 +342,36 @@ ALTER TABLE `<gkg-database>`.gl_definition APPLY DELETED MASK;
 
 ### Deletes stuck on a failing mutation
 
-ClickHouse turns a lightweight delete into a mutation, stores its `WHERE` predicate, and re-parses that predicate every time it replays the mutation on a part. A predicate that parses once as a statement but not as a stored command therefore fails forever. A `UNION` is the known case: replay fails with `UNION mode UNION_DEFAULT must be normalized` and the mutation retries indefinitely. Keep `UNION` out of every delete predicate.
+ClickHouse does not keep a lightweight delete's original SQL. It rewrites the statement into a mutation command of the form `UPDATE _row_exists = 0 WHERE ...`, stores that text, and re-parses it every time it replays the mutation on a part. A predicate that parses once as a statement but not as a stored command therefore fails on every replay, forever. A `UNION` is the known case: replay fails with `UNION mode UNION_DEFAULT must be normalized`. Keep `UNION` out of every delete predicate.
 
-The consequences are wider than the one statement. Mutations run in order per part, so a permanently failing mutation stalls every later delete on the same table. Because `lightweight_deletes_sync` defaults to `2` and production sets no `max_execution_time`, those callers block with no timeout. Once unfinished mutations reach the per-table cap, ClickHouse switches to rejecting new deletes with `TOO_MANY_MUTATIONS` instead of queueing them.
+The consequences are wider than the one statement. A replica replays all mutation commands queued between a part's current and target version as a single batch, so one unparseable command stalls every later delete on the same table. Because `lightweight_deletes_sync` defaults to `2` and production sets no `max_execution_time`, callers queued behind the stall block with no timeout and log nothing. Once a table reaches `number_of_mutations_to_throw` unfinished mutations (default 1000, with throttling from `number_of_mutations_to_delay`, default 500), ClickHouse stops queueing new deletes and rejects them instead:
 
-Find stuck mutations:
+```plaintext
+Code: 692. DB::Exception: Too many unfinished mutations (1000) in table <db>.<table>
+```
+
+Find stuck mutations. Graph tables are version-prefixed, so match on the prefix rather than the bare name:
 
 ```sql
 SELECT table, mutation_id, parts_to_do, latest_fail_reason
 FROM system.mutations
-WHERE database = '<gkg-database>' AND is_done = 0
+WHERE database = '<gkg-database>' AND is_done = 0 AND latest_fail_reason != ''
 ORDER BY table;
 ```
 
-Drop them once the emitting code no longer produces the bad predicate:
+A failing mutation will not drain on its own and has to be cancelled. Scope the cancel to the mutations that are actually failing: a bare `is_done = 0` also matches healthy mutations that are still working, and cancelling those silently abandons deletes that would have succeeded.
 
 ```sql
-KILL MUTATION WHERE database = '<gkg-database>' AND table = 'gl_edge' AND is_done = 0;
+KILL MUTATION
+WHERE database = '<gkg-database>'
+  AND table = 'v<schema-version>_gl_edge'
+  AND is_done = 0
+  AND latest_fail_reason != '';
 ```
+
+Re-run the query above afterwards and confirm it returns nothing for that table. Cancelling works even while the table is over the threshold and rejecting new deletes, so there is no need to clear the backlog first.
+
+Deploying a fix for the predicate stops new failing mutations, but does not remove the ones already queued. Until they are cancelled, the affected tables stay stalled on the new build as well.
 
 ## Monitoring
 

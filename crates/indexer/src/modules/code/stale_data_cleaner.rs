@@ -214,7 +214,23 @@ mod tests {
                 "{table} must still narrow the delete to this project's code nodes: {sql}"
             );
         }
-        assert_eq!(sql.matches(" OR ").count(), NODE_TABLES.len() - 1, "{sql}");
+    }
+
+    #[test]
+    fn edge_delete_isolates_the_source_id_alternation() {
+        let sql = ClickHouseStaleDataCleaner::build_edge_delete_query("v93_gl_edge", &NODE_TABLES);
+        let alternation = sql
+            .split_once("AND (")
+            .and_then(|(_, rest)| rest.rsplit_once(") AND _version <"))
+            .map(|(inner, _)| inner)
+            .expect("the source-id alternation must be parenthesised: {sql}");
+        assert_eq!(
+            alternation.matches("source_id IN (").count(),
+            NODE_TABLES.len(),
+            "every lookup must sit inside the parentheses. AND binds tighter than OR, so an \
+             unparenthesised alternation reads as (path AND t1) OR t2 OR (t3 AND version) and \
+             deletes rows from other namespaces and above the watermark: {sql}"
+        );
     }
 
     #[test]
