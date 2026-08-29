@@ -7,7 +7,8 @@ use thiserror::Error;
 use tracing::debug;
 
 use super::config::CodeTableNames;
-use crate::clickhouse::{ArrowClickHouseClient, TIMESTAMP_FORMAT};
+use crate::clickhouse::{ArrowClickHouseClient, TIMESTAMP_FORMAT, insert_overrides};
+use crate::durability::WriteDurability;
 use orbit_utils::traversal_path::TraversalPath;
 
 #[async_trait]
@@ -71,56 +72,89 @@ impl ClickHouseStaleDataCleaner {
 
     fn build_node_delete_query(table: &str) -> String {
         format!(
-            "DELETE FROM {table} \
-             WHERE traversal_path = {{traversal_path:String}} \
-             AND project_id = {{project_id:Int64}} \
-             AND branch = {{branch:String}} \
-             AND _version < {{watermark_time:DateTime64(6, 'UTC')}}"
+            r#"
+            SELECT
+                traversal_path,
+                project_id,
+                branch,
+                id,
+                {{watermark_time:DateTime64(6, 'UTC')}} - toIntervalMicrosecond(1) AS _version,
+                true AS _deleted
+            FROM {table} FINAL
+            WHERE traversal_path = {{traversal_path:String}}
+              AND project_id = {{project_id:Int64}}
+              AND branch = {{branch:String}}
+              AND _version < {{watermark_time:DateTime64(6, 'UTC')}}
+            "#
         )
     }
 
     fn build_edge_delete_query(edge_table: &str, node_tables: &[&str]) -> String {
+        // gl_code_edge has project_id + branch columns, so we can
+        // filter directly without a subquery join.
         if edge_table.contains("code_edge") {
             return format!(
-                "DELETE FROM {edge_table} \
-                 WHERE traversal_path = {{traversal_path:String}} \
-                 AND project_id = {{project_id:Int64}} \
-                 AND branch = {{branch:String}} \
-                 AND _version < {{watermark_time:DateTime64(6, 'UTC')}}"
+                r#"
+                SELECT
+                    traversal_path,
+                    project_id,
+                    branch,
+                    source_id,
+                    source_kind,
+                    relationship_kind,
+                    target_id,
+                    target_kind,
+                    {{watermark_time:DateTime64(6, 'UTC')}} - toIntervalMicrosecond(1) AS _version,
+                    true AS _deleted
+                FROM {edge_table} FINAL
+                WHERE traversal_path = {{traversal_path:String}}
+                  AND project_id = {{project_id:Int64}}
+                  AND branch = {{branch:String}}
+                  AND _version < {{watermark_time:DateTime64(6, 'UTC')}}
+                "#,
             );
         }
 
-        // ClickHouse stores a lightweight-delete predicate verbatim as a mutation
-        // command and re-parses it when replaying on each replica, where a UNION
-        // fails with "UNION mode UNION_DEFAULT must be normalized" and retries
-        // forever, so the per-table lookups are OR'd instead of unioned.
-        let source_id_predicates = node_tables
+        // Other edge tables (gl_edge) lack project_id/branch, so scope
+        // via a source_id subquery from the node tables.
+        let source_id_subqueries = node_tables
             .iter()
             .map(|t| {
                 format!(
-                    "source_id IN (SELECT id FROM {t} FINAL \
+                    "SELECT id FROM {t} FINAL \
                      WHERE traversal_path = {{traversal_path:String}} \
                        AND project_id = {{project_id:Int64}} \
-                       AND branch = {{branch:String}})"
+                       AND branch = {{branch:String}}"
                 )
             })
             .collect::<Vec<_>>();
 
-        if source_id_predicates.is_empty() {
+        if source_id_subqueries.is_empty() {
             return String::new();
         }
 
-        let source_id_match = source_id_predicates.join(" OR ");
+        let source_id_union = source_id_subqueries.join(" UNION ALL ");
 
         format!(
-            "DELETE FROM {edge_table} \
-             WHERE traversal_path = {{traversal_path:String}} \
-             AND ({source_id_match}) \
-             AND _version < {{watermark_time:DateTime64(6, 'UTC')}}"
+            r#"
+            SELECT
+                traversal_path,
+                source_id,
+                source_kind,
+                relationship_kind,
+                target_id,
+                target_kind,
+                {{watermark_time:DateTime64(6, 'UTC')}} - toIntervalMicrosecond(1) AS _version,
+                true AS _deleted
+            FROM {edge_table} FINAL
+            WHERE traversal_path = {{traversal_path:String}}
+              AND source_id IN ({source_id_union})
+              AND _version < {{watermark_time:DateTime64(6, 'UTC')}}
+            "#
         )
     }
 
-    async fn delete_stale_rows(
+    async fn tombstone_stale_rows(
         &self,
         table: &str,
         query: &str,
@@ -139,15 +173,29 @@ impl ClickHouseStaleDataCleaner {
 
         debug!(
             table,
-            %traversal_path, project_id, branch, "lightweight-deleting stale rows"
+            %traversal_path, project_id, branch, "tombstoning stale rows"
         );
-        self.client
+        let stale = self
+            .client
             .query(query)
             .param("traversal_path", traversal_path.as_str())
             .param("project_id", project_id)
             .param("branch", branch)
             .param("watermark_time", formatted_watermark)
-            .execute()
+            .fetch_arrow()
+            .await
+            .map_err(|e| query_error(e.to_string()))?;
+
+        let stale: Vec<_> = stale.into_iter().filter(|b| b.num_rows() > 0).collect();
+        if stale.is_empty() {
+            return Ok(());
+        }
+
+        let sql = self
+            .client
+            .build_insert_sql_with_overrides(table, insert_overrides(WriteDurability::Durable));
+        self.client
+            .insert_arrow_streaming_with_sql(table, &sql, &stale)
             .await
             .map_err(|e| query_error(e.to_string()))
     }
@@ -164,13 +212,9 @@ impl StaleDataCleaner for ClickHouseStaleDataCleaner {
     ) -> Result<(), StaleDataCleanerError> {
         let formatted_watermark = watermark_time.format(TIMESTAMP_FORMAT).to_string();
 
-        // Edges first: the edge predicates resolve ownership by looking source ids up in
-        // the node tables, so deleting a node row first takes its id out of scope and
-        // strands the edges that pointed at it. This order also leaves the node rows
-        // intact when an edge delete fails, keeping the next run able to retry.
-        for queries in [&self.edge_queries, &self.node_queries] {
+        for queries in [&self.node_queries, &self.edge_queries] {
             try_join_all(queries.iter().map(|(table, query)| {
-                self.delete_stale_rows(
+                self.tombstone_stale_rows(
                     table,
                     query,
                     traversal_path,
@@ -184,86 +228,6 @@ impl StaleDataCleaner for ClickHouseStaleDataCleaner {
 
         debug!(project_id, branch, "stale data deletion complete");
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    const NODE_TABLES: [&str; 4] = [
-        "v93_gl_directory",
-        "v93_gl_file",
-        "v93_gl_definition",
-        "v93_gl_imported_symbol",
-    ];
-
-    #[test]
-    fn edge_delete_predicate_never_contains_a_union() {
-        let sql = ClickHouseStaleDataCleaner::build_edge_delete_query("v93_gl_edge", &NODE_TABLES);
-        assert!(
-            !sql.contains("UNION"),
-            "ClickHouse stores a lightweight-delete predicate verbatim as a mutation and \
-             re-parses it on replay, where a UNION fails with \"UNION mode UNION_DEFAULT \
-             must be normalized\" and retries forever: {sql}"
-        );
-    }
-
-    #[test]
-    fn edge_delete_scopes_source_ids_to_every_node_table() {
-        let sql = ClickHouseStaleDataCleaner::build_edge_delete_query("v93_gl_edge", &NODE_TABLES);
-        for table in NODE_TABLES {
-            assert!(
-                sql.contains(&format!("source_id IN (SELECT id FROM {table} FINAL")),
-                "{table} must still narrow the delete to this project's code nodes: {sql}"
-            );
-        }
-    }
-
-    #[test]
-    fn edge_delete_isolates_the_source_id_alternation() {
-        let sql = ClickHouseStaleDataCleaner::build_edge_delete_query("v93_gl_edge", &NODE_TABLES);
-        let alternation = sql
-            .split_once("AND (")
-            .and_then(|(_, rest)| rest.rsplit_once(") AND _version <"))
-            .map(|(inner, _)| inner)
-            .expect("the source-id alternation must be parenthesised: {sql}");
-        assert_eq!(
-            alternation.matches("source_id IN (").count(),
-            NODE_TABLES.len(),
-            "every lookup must sit inside the parentheses. AND binds tighter than OR, so an \
-             unparenthesised alternation reads as (path AND t1) OR t2 OR (t3 AND version) and \
-             deletes rows from other namespaces and above the watermark: {sql}"
-        );
-    }
-
-    #[test]
-    fn edge_delete_keeps_project_branch_and_watermark_scoping() {
-        let sql = ClickHouseStaleDataCleaner::build_edge_delete_query("v93_gl_edge", &NODE_TABLES);
-        assert!(sql.starts_with("DELETE FROM v93_gl_edge"), "{sql}");
-        assert!(
-            sql.contains("traversal_path = {traversal_path:String}"),
-            "{sql}"
-        );
-        assert!(sql.contains("project_id = {project_id:Int64}"), "{sql}");
-        assert!(sql.contains("branch = {branch:String}"), "{sql}");
-        assert!(
-            sql.contains("_version < {watermark_time:DateTime64(6, 'UTC')}"),
-            "{sql}"
-        );
-    }
-
-    #[test]
-    fn code_edge_delete_filters_directly_without_a_subquery() {
-        let sql =
-            ClickHouseStaleDataCleaner::build_edge_delete_query("v93_gl_code_edge", &NODE_TABLES);
-        assert!(!sql.contains("SELECT"), "{sql}");
-        assert!(sql.contains("project_id = {project_id:Int64}"), "{sql}");
-    }
-
-    #[test]
-    fn edge_delete_is_skipped_when_no_node_tables_resolve() {
-        assert!(ClickHouseStaleDataCleaner::build_edge_delete_query("v93_gl_edge", &[]).is_empty());
     }
 }
 

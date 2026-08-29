@@ -525,13 +525,11 @@ mod tests {
 
         let datalake: Arc<dyn DatalakeQuery> = Arc::new(EmptyDatalake);
         let checkpoint_store: Arc<dyn CheckpointStore> = Arc::new(MockCheckpointStore);
-        let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
         let pipeline = Arc::new(Pipeline::new(
             Arc::clone(&datalake),
             Arc::clone(&checkpoint_store),
             test_metrics(),
             Default::default(),
-            &ontology,
         ));
         let subscription = match scope {
             EtlScope::Global => GlobalIndexingRequest::subscription(),
