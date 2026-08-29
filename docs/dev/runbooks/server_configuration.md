@@ -276,9 +276,11 @@ every later tick queries Siphon changes since that checkpoint, however old it is
 The hourly namespace sweep re-dispatches every enabled namespace regardless of
 recent Siphon activity, backstopping migration backfill and missed windows.
 
-Both sweeps are idempotent. Each selects tombstoned keys in a lookback window
-(`lookback_secs`, must exceed the cadence), deletes up to `max_keys_per_run` keys
-(draining the rest on later runs), packs the keys into `DELETE`s bounded by
+Both sweeps are idempotent. The tight edge sweep discovers reindexed scopes from
+`code_indexing_checkpoint` and probes the edge tables by `traversal_path`, so it
+never scans them; the weekly backstop scans a `_version` lookback window
+(`lookback_secs`, must exceed the cadence). Each deletes up to `max_keys_per_run`
+keys (draining the rest on later runs), packs the keys into `DELETE`s bounded by
 `max_query_size_bytes`, and records progress in the `checkpoint` table. A failed
 or skipped run is safe: the next run resumes from the checkpoint. Alert on
 `gkg.scheduler.task.errors{task="maintenance.table_cleanup"}` and

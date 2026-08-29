@@ -132,31 +132,102 @@ async fn node_sweep_succeeds_on_empty_tables() {
     all_tables_sweep(&context).run().await.unwrap();
 }
 
-#[tokio::test]
-async fn edge_sweep_physically_removes_tombstoned_edges() {
-    let context = TestContext::new(&[*GRAPH_SCHEMA_SQL]).await;
-    let edge = t("gl_edge");
+async fn seed_edge(
+    context: &TestContext,
+    traversal_path: &str,
+    source_id: i64,
+    version: &str,
+    deleted: bool,
+) {
+    context
+        .execute(&format!(
+            "INSERT INTO {} \
+             (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind, _version, _deleted) \
+             VALUES ('{traversal_path}', {source_id}, 'User', 'MEMBER_OF', {source_id}0, 'Project', '{version}', {deleted})",
+            t("gl_edge")
+        ))
+        .await;
+}
 
-    for (source_id, version, deleted) in [
-        (1_i64, "2020-01-01 00:00:00.000000", false),
-        (2, "2020-01-01 00:00:00.000000", false),
-        (1, "2026-01-01 00:00:00.000000", true),
-    ] {
-        context
-            .execute(&format!(
-                "INSERT INTO {edge} \
-                 (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind, _version, _deleted) \
-                 VALUES ('1/100/', {source_id}, 'User', 'MEMBER_OF', {source_id}0, 'Project', '{version}', {deleted})"
-            ))
-            .await;
-    }
+async fn seed_code_checkpoint(context: &TestContext, traversal_path: &str, indexed_at: &str) {
+    context
+        .execute(&format!(
+            "INSERT INTO {} \
+             (traversal_path, project_id, branch, last_task_id, last_commit, indexed_at) \
+             VALUES ('{traversal_path}', 7, 'main', 1, 'abc', '{indexed_at}')",
+            t("code_indexing_checkpoint")
+        ))
+        .await;
+}
+
+async fn edge_source_ids(context: &TestContext) -> Vec<i64> {
+    physical_ids(
+        context,
+        &format!("SELECT source_id FROM {} ORDER BY source_id", t("gl_edge")),
+    )
+    .await
+}
+
+#[tokio::test]
+async fn edge_sweep_reclaims_tombstones_in_a_reindexed_scope() {
+    let context = TestContext::new(&[*GRAPH_SCHEMA_SQL]).await;
+
+    seed_edge(&context, "1/100/", 1, "2020-01-01 00:00:00.000000", false).await;
+    seed_edge(&context, "1/100/", 2, "2020-01-01 00:00:00.000000", false).await;
+    seed_edge(&context, "1/100/", 1, "2026-01-01 00:00:00.000000", true).await;
+    seed_code_checkpoint(&context, "1/100/", "2026-01-01 00:00:01.000000").await;
 
     edge_sweep(&context).run().await.unwrap();
 
     wait_for_physical_ids(
         &context,
-        &format!("SELECT source_id FROM {edge} ORDER BY source_id"),
+        &format!("SELECT source_id FROM {} ORDER BY source_id", t("gl_edge")),
         vec![2],
     )
     .await;
+}
+
+#[tokio::test]
+async fn edge_sweep_ignores_scopes_absent_from_the_checkpoint() {
+    let context = TestContext::new(&[*GRAPH_SCHEMA_SQL]).await;
+
+    seed_edge(&context, "1/100/", 1, "2020-01-01 00:00:00.000000", false).await;
+    seed_edge(&context, "1/100/", 1, "2026-01-01 00:00:00.000000", true).await;
+
+    edge_sweep(&context).run().await.unwrap();
+    // No checkpoint row for this scope, so the tight sweep never probes it; a scan
+    // would have removed the tombstone. Both physical rows remain.
+    assert_eq!(edge_source_ids(&context).await, vec![1, 1]);
+
+    all_tables_sweep(&context).run().await.unwrap();
+    wait_for_physical_ids(
+        &context,
+        &format!("SELECT source_id FROM {} ORDER BY source_id", t("gl_edge")),
+        Vec::<i64>::new(),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn edge_sweep_keeps_an_edge_re_emitted_by_the_reindex() {
+    let context = TestContext::new(&[*GRAPH_SCHEMA_SQL]).await;
+
+    seed_edge(&context, "1/100/", 1, "2020-01-01 00:00:00.000000", false).await;
+    seed_edge(&context, "1/100/", 1, "2026-01-01 00:00:00.000000", true).await;
+    seed_edge(&context, "1/100/", 1, "2026-02-01 00:00:00.000000", false).await;
+    seed_code_checkpoint(&context, "1/100/", "2026-02-01 00:00:01.000000").await;
+
+    edge_sweep(&context).run().await.unwrap();
+
+    let result = context
+        .query(&format!(
+            "SELECT source_id FROM {} FINAL WHERE _deleted = false ORDER BY source_id",
+            t("gl_edge")
+        ))
+        .await;
+    assert_eq!(
+        i64::extract_column(&result, 0).unwrap(),
+        vec![1],
+        "an edge re-emitted above its tombstone must survive the sweep"
+    );
 }

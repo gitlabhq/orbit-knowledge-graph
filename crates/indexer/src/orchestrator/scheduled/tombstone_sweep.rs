@@ -6,6 +6,19 @@
 //! `_version` dedup, so a retired edge keeps surfacing in k-hop paths until its
 //! row is physically gone. This sweep bounds that window to one sweep interval.
 //!
+//! The tight edge instance discovers the scopes to reclaim from
+//! `code_indexing_checkpoint` (a code reindex records the scope it re-swept) and
+//! probes the edge tables by `traversal_path`, their leading sort-key column, so a
+//! run never scans them. It therefore bounds the visibility of code-reindex edge
+//! tombstones to about one sweep interval. Every other edge-tombstone producer —
+//! the incremental SDLC ETL (CDC deletes: unassign, unlabel, note deletion, …),
+//! namespace deletion, and stale-edge reconciliation — leaves no per-path trace
+//! here and is reclaimed only by the weekly backstop, which scans a `_version`
+//! window over every table. The ETL is the highest-volume producer, so most edge
+//! tombstones are weekly-bounded, matching pre-incident behaviour; the durable fix
+//! for k-hop staleness is `_version` dedup in the variable-depth traversal arm
+//! (follow-up).
+//!
 //! Every delete predicate is a flat literal tuple list (`(keys) IN ((…),(…))`).
 //! ClickHouse stores a delete as a mutation command and re-parses it on replay;
 //! a subquery, a `UNION`, or a reference to a scratch table that is later dropped
@@ -15,7 +28,7 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use arrow::array::ArrayRef;
+use arrow::array::{Array, ArrayRef, StringArray};
 use arrow::compute;
 use arrow::datatypes::DataType;
 use arrow::record_batch::RecordBatch;
@@ -33,6 +46,17 @@ use orbit_server_config::{ScheduleConfiguration, TombstoneSweepConfig};
 
 const CONCURRENT_TABLE_SWEEPS: usize = 4;
 const STATEMENT_TIMEOUT_SECS: u64 = 7200;
+
+const CODE_INDEXING_CHECKPOINT_TABLE: &str = "code_indexing_checkpoint";
+
+/// The edge instance re-discovers scopes this far behind its cursor each run, so a
+/// checkpoint row that became visible only after the previous run's discovery
+/// query is not skipped. The scoped key-select is idempotent, so the overlap only
+/// costs a few cheap re-probes.
+const CHECKPOINT_DISCOVERY_OVERLAP_SECS: i64 = 300;
+
+/// Traversal paths per scoped key-select, to bound the `IN` list size.
+const SCOPES_PER_KEY_SELECT: usize = 500;
 
 /// Fraction of `max_query_size_bytes` a rendered statement may fill before it is
 /// flushed, leaving headroom for the literal timestamp and the settings clause.
@@ -52,6 +76,9 @@ pub struct TombstoneSweep {
     tables: Vec<SweptTable>,
     metrics: ScheduledTaskMetrics,
     config: TombstoneSweepConfig,
+    /// Set on the tight edge instance: it drives checkpoint-based scope discovery.
+    /// `None` on the weekly backstop, which scans a `_version` window instead.
+    code_checkpoint_table: Option<String>,
 }
 
 impl TombstoneSweep {
@@ -80,12 +107,12 @@ impl TombstoneSweep {
             tables,
             metrics,
             config,
+            code_checkpoint_table: None,
         }
     }
 
-    /// Tight-cadence sweep over edge tables: the only tombstones a read path
-    /// (variable-depth traversal) can still see until they are physically gone.
-    /// A small lookback keeps every run's scan bounded (see [`Self::window_start`]).
+    /// Tight-cadence edge sweep driven by checkpoint discovery (see the module doc
+    /// for the coverage split and why it never scans the edge tables).
     pub fn for_edge_tables(
         graph: ArrowClickHouseClient,
         ontology: &ontology::Ontology,
@@ -101,6 +128,10 @@ impl TombstoneSweep {
             tables,
             metrics,
             config,
+            code_checkpoint_table: Some(prefixed_table_name(
+                CODE_INDEXING_CHECKPOINT_TABLE,
+                *SCHEMA_VERSION,
+            )),
         }
     }
 }
@@ -127,6 +158,9 @@ impl ScheduledTask for TombstoneSweep {
 
 impl TombstoneSweep {
     async fn sweep_all_tables(&self) -> Result<(), TaskError> {
+        if let Some(code_checkpoint) = &self.code_checkpoint_table {
+            return self.sweep_edges_from_checkpoint(code_checkpoint).await;
+        }
         let sweeps = self
             .tables
             .iter()
@@ -203,6 +237,112 @@ impl TombstoneSweep {
             );
         }
         Ok(())
+    }
+
+    /// Reclaims code-reindex edge tombstones by `traversal_path` (PK-pruned),
+    /// discovering scopes from `code_indexing_checkpoint`. A single cursor on
+    /// `indexed_at` carries it forward; a budget-truncated run leaves the cursor so
+    /// later runs drain the remainder.
+    async fn sweep_edges_from_checkpoint(&self, code_checkpoint: &str) -> Result<(), TaskError> {
+        let now = Utc::now();
+        let cursor = self
+            .checkpoint_store
+            .load(self.task_name)
+            .await
+            .map_err(TaskError::new)?
+            .map(|c: Checkpoint| c.watermark);
+        let window_start = checkpoint_window_start(cursor, now, self.config.lookback());
+
+        let scopes = self
+            .discover_changed_scopes(code_checkpoint, window_start, now)
+            .await?;
+        if scopes.is_empty() {
+            self.checkpoint_store
+                .save_completed(self.task_name, &now, WriteDurability::Durable)
+                .await
+                .map_err(TaskError::new)?;
+            return Ok(());
+        }
+
+        let budget = self.config.max_keys_per_run;
+        let mut remaining = budget;
+        let mut fully_drained = true;
+        'outer: for table in &self.tables {
+            for batch in scopes.chunks(SCOPES_PER_KEY_SELECT) {
+                let found = self.select_scoped_keys(table, batch, remaining + 1).await?;
+                let tuples = render_key_tuples(&found, &table.sort_key)?;
+                let over_budget = tuples.len() > remaining;
+                let to_delete = &tuples[..tuples.len().min(remaining)];
+                if !to_delete.is_empty() {
+                    self.delete_keys(table, to_delete, now).await?;
+                }
+                remaining -= to_delete.len();
+                if over_budget {
+                    fully_drained = false;
+                    break 'outer;
+                }
+            }
+        }
+
+        if fully_drained {
+            self.checkpoint_store
+                .save_completed(self.task_name, &now, WriteDurability::Durable)
+                .await
+                .map_err(TaskError::new)?;
+        } else {
+            // Leaving the cursor re-discovers this window next run; collapsed keys no
+            // longer match the recheck, so the re-scan is idempotent.
+            warn!(
+                task = self.task_name,
+                budget,
+                scopes = scopes.len(),
+                "edge sweep hit its per-run key budget; draining the remainder on later runs"
+            );
+        }
+        Ok(())
+    }
+
+    async fn discover_changed_scopes(
+        &self,
+        code_checkpoint: &str,
+        window_start: DateTime<Utc>,
+        window_end: DateTime<Utc>,
+    ) -> Result<Vec<String>, TaskError> {
+        let batches = self
+            .graph
+            .query(&discover_scopes_sql(code_checkpoint))
+            .param(
+                "window_start",
+                window_start.format(TIMESTAMP_FORMAT).to_string(),
+            )
+            .param(
+                "window_end",
+                window_end.format(TIMESTAMP_FORMAT).to_string(),
+            )
+            .with_setting("max_execution_time", STATEMENT_TIMEOUT_SECS.to_string())
+            .fetch_arrow()
+            .await
+            .map_err(TaskError::new)?;
+        scope_paths(&batches)
+    }
+
+    async fn select_scoped_keys(
+        &self,
+        table: &SweptTable,
+        paths: &[String],
+        limit: usize,
+    ) -> Result<Vec<RecordBatch>, TaskError> {
+        let path_list = paths
+            .iter()
+            .map(|p| format!("'{}'", p.replace('\'', "''")))
+            .collect::<Vec<_>>()
+            .join(", ");
+        self.graph
+            .query(&select_scoped_keys_sql(table, &path_list, limit))
+            .with_setting("max_execution_time", STATEMENT_TIMEOUT_SECS.to_string())
+            .fetch_arrow()
+            .await
+            .map_err(TaskError::new)
     }
 
     /// Window floor: the checkpoint, clamped to be never *older* than
@@ -308,6 +448,22 @@ fn bounded_window_start(
     checkpoint.map(|c| c.max(floor)).unwrap_or(floor)
 }
 
+/// Discovery floor for the tight edge instance. With a cursor it reaches back only
+/// a small overlap behind it — never forward to `now - lookback` — so a run that
+/// truncated at the key budget always re-discovers the scopes it left unswept
+/// rather than letting a lookback floor jump past them. The lookback only bounds
+/// the very first run, which has no cursor.
+fn checkpoint_window_start(
+    cursor: Option<DateTime<Utc>>,
+    now: DateTime<Utc>,
+    lookback: chrono::TimeDelta,
+) -> DateTime<Utc> {
+    match cursor {
+        Some(cursor) => cursor - chrono::TimeDelta::seconds(CHECKPOINT_DISCOVERY_OVERLAP_SECS),
+        None => now - lookback,
+    }
+}
+
 fn swept_tables<'a>(
     ontology: &ontology::Ontology,
     tables: impl Iterator<Item = &'a str>,
@@ -336,6 +492,59 @@ fn select_tombstoned_keys_sql(table: &SweptTable, limit: usize) -> String {
          ) WHERE _deleted ORDER BY {keys} LIMIT {limit}",
         source = table.name,
     )
+}
+
+/// The scopes a code reindex re-swept since the cursor. `traversal_path` is the
+/// leading sort-key column of every edge table, so the scoped key-select prunes
+/// to these paths' parts instead of scanning.
+fn discover_scopes_sql(code_checkpoint: &str) -> String {
+    format!(
+        "SELECT DISTINCT traversal_path FROM {code_checkpoint} FINAL \
+         WHERE indexed_at > {{window_start:String}} AND indexed_at <= {{window_end:String}} \
+           AND _deleted = false \
+         ORDER BY traversal_path"
+    )
+}
+
+/// Same newest-is-tombstone recheck as [`select_tombstoned_keys_sql`], but scoped
+/// to a batch of `traversal_path` literals so it is PK-pruned rather than a scan.
+/// The recheck (not a `_version` bound) keeps a re-emitted edge, so a batch may mix
+/// scopes with different reindex watermarks safely.
+fn select_scoped_keys_sql(table: &SweptTable, path_list: &str, limit: usize) -> String {
+    let keys = table.sort_key.join(", ");
+    format!(
+        "SELECT {keys} FROM ( \
+           SELECT {keys}, _version, _deleted FROM {source} \
+           WHERE traversal_path IN ({path_list}) \
+           ORDER BY {keys}, _version DESC \
+           LIMIT 1 BY {keys} \
+         ) WHERE _deleted ORDER BY {keys} LIMIT {limit}",
+        source = table.name,
+    )
+}
+
+fn scope_paths(batches: &[RecordBatch]) -> Result<Vec<String>, TaskError> {
+    let mut paths = Vec::new();
+    for batch in batches {
+        let column = batch
+            .column_by_name("traversal_path")
+            .ok_or_else(|| TaskError::new("scope discovery is missing traversal_path"))?;
+        let plain = match column.data_type() {
+            DataType::Dictionary(_, value_type) => compute::cast(column, value_type)
+                .map_err(|e| TaskError::new(format!("cast traversal_path: {e}")))?,
+            _ => Arc::clone(column),
+        };
+        let strings = plain
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .ok_or_else(|| TaskError::new("traversal_path is not a string column"))?;
+        paths.extend(
+            (0..strings.len())
+                .filter(|&row| strings.is_valid(row))
+                .map(|row| strings.value(row).to_string()),
+        );
+    }
+    Ok(paths)
 }
 
 /// Packs rendered key tuples into flat-literal `DELETE`s that each stay under
@@ -530,6 +739,65 @@ mod tests {
         let sql = select_tombstoned_keys_sql(&edge_table(), 500);
         assert!(sql.contains("_version > {window_start:String}"), "{sql}");
         assert!(sql.contains("_version <= {window_end:String}"), "{sql}");
+        assert!(
+            sql.contains("LIMIT 1 BY relationship_kind, source_id, target_id"),
+            "{sql}"
+        );
+        assert!(sql.contains("_version DESC"), "{sql}");
+        assert!(sql.contains(") WHERE _deleted ORDER BY"), "{sql}");
+        assert!(sql.trim_end().ends_with("LIMIT 500"), "{sql}");
+    }
+
+    #[test]
+    fn checkpoint_window_never_jumps_forward_past_an_unswept_backlog() {
+        let now = DateTime::parse_from_rfc3339("2026-08-29T12:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let lookback = chrono::TimeDelta::hours(1);
+        let overlap = chrono::TimeDelta::seconds(CHECKPOINT_DISCOVERY_OVERLAP_SECS);
+
+        assert_eq!(
+            checkpoint_window_start(None, now, lookback),
+            now - lookback,
+            "the first run bounds the initial backlog by the lookback"
+        );
+
+        // A run that truncated at the budget leaves the cursor far behind. The next
+        // run must still reach back to it (minus overlap), never forward to
+        // now - lookback, or the unswept scopes between would be skipped.
+        let stale = now - chrono::TimeDelta::days(30);
+        assert_eq!(
+            checkpoint_window_start(Some(stale), now, lookback),
+            stale - overlap
+        );
+    }
+
+    #[test]
+    fn discovery_reads_changed_scopes_from_the_code_checkpoint() {
+        let sql = discover_scopes_sql("v99_code_indexing_checkpoint");
+        assert!(
+            sql.starts_with(
+                "SELECT DISTINCT traversal_path FROM v99_code_indexing_checkpoint FINAL"
+            ),
+            "{sql}"
+        );
+        assert!(
+            sql.contains(
+                "indexed_at > {window_start:String} AND indexed_at <= {window_end:String}"
+            ),
+            "{sql}"
+        );
+        assert!(sql.contains("_deleted = false"), "{sql}");
+    }
+
+    #[test]
+    fn scoped_select_prunes_by_traversal_path_and_never_scans() {
+        let sql = select_scoped_keys_sql(&edge_table(), "'1/100/', '1/200/'", 500);
+        assert!(
+            sql.contains("WHERE traversal_path IN ('1/100/', '1/200/')"),
+            "{sql}"
+        );
+        assert!(!sql.contains("_version > {window_start"), "{sql}");
         assert!(
             sql.contains("LIMIT 1 BY relationship_kind, source_id, target_id"),
             "{sql}"
