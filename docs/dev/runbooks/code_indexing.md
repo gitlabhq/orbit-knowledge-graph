@@ -340,6 +340,27 @@ ALTER TABLE `<gkg-database>`.gl_imported_symbol APPLY DELETED MASK;
 ALTER TABLE `<gkg-database>`.gl_definition APPLY DELETED MASK;
 ```
 
+### Deletes stuck on a failing mutation
+
+ClickHouse turns a lightweight delete into a mutation, stores its `WHERE` predicate, and re-parses that predicate every time it replays the mutation on a part. A predicate that parses once as a statement but not as a stored command therefore fails forever. A `UNION` is the known case: replay fails with `UNION mode UNION_DEFAULT must be normalized` and the mutation retries indefinitely. Keep `UNION` out of every delete predicate.
+
+The consequences are wider than the one statement. Mutations run in order per part, so a permanently failing mutation stalls every later delete on the same table. Because `lightweight_deletes_sync` defaults to `2` and production sets no `max_execution_time`, those callers block with no timeout. Once unfinished mutations reach the per-table cap, ClickHouse switches to rejecting new deletes with `TOO_MANY_MUTATIONS` instead of queueing them.
+
+Find stuck mutations:
+
+```sql
+SELECT table, mutation_id, parts_to_do, latest_fail_reason
+FROM system.mutations
+WHERE database = '<gkg-database>' AND is_done = 0
+ORDER BY table;
+```
+
+Drop them once the emitting code no longer produces the bad predicate:
+
+```sql
+KILL MUTATION WHERE database = '<gkg-database>' AND table = 'gl_edge' AND is_done = 0;
+```
+
 ## Monitoring
 
 ### Key metrics

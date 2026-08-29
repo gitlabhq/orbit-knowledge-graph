@@ -90,28 +90,32 @@ impl ClickHouseStaleDataCleaner {
             );
         }
 
-        let source_id_subqueries = node_tables
+        // ClickHouse stores a lightweight-delete predicate verbatim as a mutation
+        // command and re-parses it when replaying on each replica, where a UNION
+        // fails with "UNION mode UNION_DEFAULT must be normalized" and retries
+        // forever, so the per-table lookups are OR'd instead of unioned.
+        let source_id_predicates = node_tables
             .iter()
             .map(|t| {
                 format!(
-                    "SELECT id FROM {t} FINAL \
+                    "source_id IN (SELECT id FROM {t} FINAL \
                      WHERE traversal_path = {{traversal_path:String}} \
                        AND project_id = {{project_id:Int64}} \
-                       AND branch = {{branch:String}}"
+                       AND branch = {{branch:String}})"
                 )
             })
             .collect::<Vec<_>>();
 
-        if source_id_subqueries.is_empty() {
+        if source_id_predicates.is_empty() {
             return String::new();
         }
 
-        let source_id_union = source_id_subqueries.join(" UNION ALL ");
+        let source_id_predicates = source_id_predicates.join(" OR ");
 
         format!(
             "DELETE FROM {edge_table} \
              WHERE traversal_path = {{traversal_path:String}} \
-             AND source_id IN ({source_id_union}) \
+             AND ({source_id_predicates}) \
              AND _version < {{watermark_time:DateTime64(6, 'UTC')}}"
         )
     }
@@ -176,6 +180,70 @@ impl StaleDataCleaner for ClickHouseStaleDataCleaner {
 
         debug!(project_id, branch, "stale data deletion complete");
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const NODE_TABLES: [&str; 4] = [
+        "v93_gl_directory",
+        "v93_gl_file",
+        "v93_gl_definition",
+        "v93_gl_imported_symbol",
+    ];
+
+    #[test]
+    fn edge_delete_predicate_never_contains_a_union() {
+        let sql = ClickHouseStaleDataCleaner::build_edge_delete_query("v93_gl_edge", &NODE_TABLES);
+        assert!(
+            !sql.contains("UNION"),
+            "ClickHouse stores a lightweight-delete predicate verbatim as a mutation and \
+             re-parses it on replay, where a UNION fails with \"UNION mode UNION_DEFAULT \
+             must be normalized\" and retries forever: {sql}"
+        );
+    }
+
+    #[test]
+    fn edge_delete_scopes_source_ids_to_every_node_table() {
+        let sql = ClickHouseStaleDataCleaner::build_edge_delete_query("v93_gl_edge", &NODE_TABLES);
+        for table in NODE_TABLES {
+            assert!(
+                sql.contains(&format!("source_id IN (SELECT id FROM {table} FINAL")),
+                "{table} must still narrow the delete to this project's code nodes: {sql}"
+            );
+        }
+        assert_eq!(sql.matches(" OR ").count(), NODE_TABLES.len() - 1, "{sql}");
+    }
+
+    #[test]
+    fn edge_delete_keeps_project_branch_and_watermark_scoping() {
+        let sql = ClickHouseStaleDataCleaner::build_edge_delete_query("v93_gl_edge", &NODE_TABLES);
+        assert!(sql.starts_with("DELETE FROM v93_gl_edge"), "{sql}");
+        assert!(
+            sql.contains("traversal_path = {traversal_path:String}"),
+            "{sql}"
+        );
+        assert!(sql.contains("project_id = {project_id:Int64}"), "{sql}");
+        assert!(sql.contains("branch = {branch:String}"), "{sql}");
+        assert!(
+            sql.contains("_version < {watermark_time:DateTime64(6, 'UTC')}"),
+            "{sql}"
+        );
+    }
+
+    #[test]
+    fn code_edge_delete_filters_directly_without_a_subquery() {
+        let sql =
+            ClickHouseStaleDataCleaner::build_edge_delete_query("v93_gl_code_edge", &NODE_TABLES);
+        assert!(!sql.contains("SELECT"), "{sql}");
+        assert!(sql.contains("project_id = {project_id:Int64}"), "{sql}");
+    }
+
+    #[test]
+    fn edge_delete_is_skipped_when_no_node_tables_resolve() {
+        assert!(ClickHouseStaleDataCleaner::build_edge_delete_query("v93_gl_edge", &[]).is_empty());
     }
 }
 
