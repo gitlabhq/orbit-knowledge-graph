@@ -294,10 +294,10 @@ A deletion is a tombstone: the row is re-inserted with `_deleted = true` and a b
 
 Two scheduled sweeps physically reclaim tombstones with batched flat-literal `DELETE`s (never a subquery or `UNION`, which ClickHouse cannot replay as a stored mutation):
 
-- `maintenance.edge_tombstone_collapse` sweeps edge tables every 15 minutes. Variable-depth traversal scans edges without FINAL, so a retired edge stays queryable until its row is gone; the tight cadence bounds that window.
-- `maintenance.table_cleanup` sweeps node tables weekly. Node tombstones only cost storage, so they tolerate the slower cadence.
+- `maintenance.edge_tombstone_collapse` sweeps edge tables every 15 minutes. Variable-depth traversal scans edges without FINAL, so a retired edge stays queryable until its row is gone; the tight cadence bounds that window. Its lookback is small so a run never falls back to a full scan of the multi-billion-row edge tables.
+- `maintenance.table_cleanup` is the weekly backstop over every node and edge table. Its lookback is effectively unbounded, so its first pass reclaims tombstones that predate the sweep and anything the tight edge instance missed during a long gap; after that the checkpoint carries it forward at the weekly cadence.
 
-Each sweep selects tombstoned keys within a lookback window, deletes up to a per-run budget (draining the rest on later runs), and records progress in the `checkpoint` table. Tune both under `schedule.tasks` (see the server configuration runbook).
+Each sweep reaches back from now by at most its lookback (or to the checkpoint, whichever is more recent), so its scan is always bounded; it deletes up to a per-run budget (draining the rest on later runs) and records progress in the `checkpoint` table. Tune both under `schedule.tasks` (see the server configuration runbook).
 
 To reclaim one table immediately:
 

@@ -143,9 +143,58 @@ impl ParamBindings {
     }
 }
 
+/// Renders one cell of an Arrow column as a ClickHouse SQL literal, reusing
+/// [`render_value`]'s quoting so callers share one escaping convention. Errors on
+/// a null or unsupported type rather than silently emitting `0`/`''`, which would
+/// target the wrong key.
+pub fn render_arrow_sql_literal(
+    array: &arrow::array::ArrayRef,
+    row: usize,
+) -> Result<String, String> {
+    use arrow::array::{Array, Int64Array, LargeStringArray, StringArray};
+    use arrow::datatypes::DataType;
+
+    if array.is_null(row) {
+        return Err(format!(
+            "null value at row {row} in a {:?} sort key column",
+            array.data_type()
+        ));
+    }
+    let downcast_failed = || format!("column is not a {:?}", array.data_type());
+    let value = match array.data_type() {
+        DataType::Utf8 => Value::String(
+            array
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .ok_or_else(downcast_failed)?
+                .value(row)
+                .to_string(),
+        ),
+        DataType::LargeUtf8 => Value::String(
+            array
+                .as_any()
+                .downcast_ref::<LargeStringArray>()
+                .ok_or_else(downcast_failed)?
+                .value(row)
+                .to_string(),
+        ),
+        DataType::Int64 => Value::from(
+            array
+                .as_any()
+                .downcast_ref::<Int64Array>()
+                .ok_or_else(downcast_failed)?
+                .value(row),
+        ),
+        other => return Err(format!("unsupported sort key type {other:?}")),
+    };
+    Ok(render_value(&value))
+}
+
 pub fn render_value(value: &Value) -> String {
     fn quote(s: &str) -> String {
-        format!("'{}'", s.replace('\'', "''"))
+        // ClickHouse reads backslash escapes inside a string literal, so a raw
+        // backslash must be doubled before quotes are escaped.
+        format!("'{}'", s.replace('\\', "\\\\").replace('\'', "''"))
     }
 
     match value {
@@ -256,5 +305,24 @@ mod tests {
             value: json!([]),
         };
         assert_eq!(p.render_literal(), "[]");
+    }
+
+    #[test]
+    fn render_arrow_sql_literal_quotes_and_typechecks() {
+        use arrow::array::{ArrayRef, Int64Array, StringArray};
+        use std::sync::Arc;
+
+        let strings: ArrayRef = Arc::new(StringArray::from(vec![Some("a'b"), None, Some(r"a\b")]));
+        assert_eq!(render_arrow_sql_literal(&strings, 0).unwrap(), "'a''b'");
+        assert_eq!(render_arrow_sql_literal(&strings, 2).unwrap(), r"'a\\b'");
+        assert!(
+            render_arrow_sql_literal(&strings, 1)
+                .unwrap_err()
+                .contains("null"),
+            "a null sort key value must error, not render as empty"
+        );
+
+        let ints: ArrayRef = Arc::new(Int64Array::from(vec![7_i64]));
+        assert_eq!(render_arrow_sql_literal(&ints, 0).unwrap(), "7");
     }
 }

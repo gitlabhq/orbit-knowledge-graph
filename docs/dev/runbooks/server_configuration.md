@@ -265,8 +265,8 @@ Distributed locking via NATS KV ensures only one dispatcher instance runs each t
 | Namespace sweep | `schedule.tasks.namespace-sweep.cron` | `0 0 * * * *` (hourly) | Re-dispatches every enabled namespace; backstops migration backfill and missed windows |
 | Code task dispatch | `schedule.tasks.code-indexing-task.cron` | `0 */1 * * * *` (every minute) | Consumes Siphon CDC push events |
 | Code backfill | `schedule.tasks.code-backfill.cron` | `0 */1 * * * *` (every minute) | Backfills newly enabled namespaces |
-| Node tombstone sweep | `schedule.tasks.table-cleanup.cron` | `0 0 3 * * 0` (weekly, Sunday 03:00 UTC) | Physically reclaims node-table tombstones with batched flat-literal deletes |
-| Edge tombstone collapse | `schedule.tasks.edge-tombstone-collapse.cron` | `0 */15 * * * *` (every 15 minutes) | Physically reclaims edge-table tombstones; the tight cadence bounds how long a retired edge stays visible to variable-depth traversal |
+| Tombstone backstop | `schedule.tasks.table-cleanup.cron` | `0 0 3 * * 0` (weekly, Sunday 03:00 UTC) | Weekly flat-literal reclaim over every node and edge table; unbounded first pass, then checkpoint-forward |
+| Edge tombstone collapse | `schedule.tasks.edge-tombstone-collapse.cron` | `0 */15 * * * *` (every 15 minutes) | Physically reclaims edge-table tombstones on a small bounded window; the tight cadence bounds how long a retired edge stays visible to variable-depth traversal |
 | Namespace deletion | `schedule.tasks.namespace-deletion.cron` | `0 0 3 * * *` (daily 03:00 UTC) | Schedules and executes namespace deletions |
 | Migration completion | `schedule.tasks.migration-completion.cron` | `0 */1 * * * *` (every minute) | Detects completed schema migrations |
 

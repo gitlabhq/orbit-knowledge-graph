@@ -150,23 +150,6 @@ impl ClickHouseWriter {
     }
 }
 
-/// Rejects a delete predicate ClickHouse cannot safely replay. It stores a delete
-/// as a mutation command and re-parses that text on every replay; a subquery or a
-/// `UNION` fails on replay and wedges the table's mutation queue forever (#1221),
-/// and a subquery over a scratch table breaks once that table is dropped. Flat
-/// literal predicates carry no such dependency.
-pub(crate) fn assert_flat_delete_predicate(sql: &str) {
-    let upper = sql.to_ascii_uppercase();
-    debug_assert!(
-        !upper.contains("SELECT"),
-        "delete predicate must be a flat literal, not a subquery: {sql}"
-    );
-    debug_assert!(
-        !upper.contains("UNION"),
-        "delete predicate must not contain UNION; it fails on mutation replay: {sql}"
-    );
-}
-
 /// A per-submission completion hook. The buffered writer calls exactly one of these for every
 /// batch once that batch's part lands (or fails). The producer uses it to learn durability
 /// without the writer knowing anything about what the batch represents.

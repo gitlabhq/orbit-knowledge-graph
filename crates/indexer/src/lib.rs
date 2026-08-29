@@ -365,7 +365,7 @@ pub async fn run_dispatcher(
             ),
             config.schedule.tasks.code_backfill.clone(),
         )),
-        Box::new(TombstoneSweep::for_node_tables(
+        Box::new(TombstoneSweep::for_all_tables(
             graph,
             ontology,
             Arc::new(checkpoint::ClickHouseCheckpointStore::new(Arc::new(

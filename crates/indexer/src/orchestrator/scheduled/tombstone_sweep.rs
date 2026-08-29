@@ -15,7 +15,7 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use arrow::array::{ArrayRef, Int64Array, LargeStringArray, StringArray};
+use arrow::array::ArrayRef;
 use arrow::compute;
 use arrow::datatypes::DataType;
 use arrow::record_batch::RecordBatch;
@@ -25,7 +25,7 @@ use futures::StreamExt;
 use tracing::{info, warn};
 
 use crate::checkpoint::{Checkpoint, CheckpointStore};
-use crate::clickhouse::{ArrowClickHouseClient, TIMESTAMP_FORMAT, assert_flat_delete_predicate};
+use crate::clickhouse::{ArrowClickHouseClient, TIMESTAMP_FORMAT};
 use crate::durability::WriteDurability;
 use crate::orchestrator::scheduled::{ScheduledTask, ScheduledTaskMetrics, TaskError};
 use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
@@ -55,9 +55,11 @@ pub struct TombstoneSweep {
 }
 
 impl TombstoneSweep {
-    /// Weekly sweep over node tables. Node tombstones never affect read
-    /// correctness, only storage, so they tolerate the slower cadence.
-    pub fn for_node_tables(
+    /// Weekly backstop over every node and edge table. Its lookback is so large
+    /// the first pass is effectively unbounded, reclaiming tombstones that predate
+    /// this task and any the edge instance missed during a gap wider than its
+    /// lookback; then the checkpoint carries it forward at the weekly cadence.
+    pub fn for_all_tables(
         graph: ArrowClickHouseClient,
         ontology: &ontology::Ontology,
         checkpoint_store: Arc<dyn CheckpointStore>,
@@ -66,7 +68,10 @@ impl TombstoneSweep {
     ) -> Self {
         let tables = swept_tables(
             ontology,
-            ontology.nodes().map(|n| n.destination_table.as_str()),
+            ontology
+                .nodes()
+                .map(|n| n.destination_table.as_str())
+                .chain(ontology.edge_tables()),
         );
         Self {
             task_name: "maintenance.table_cleanup",
@@ -80,6 +85,7 @@ impl TombstoneSweep {
 
     /// Tight-cadence sweep over edge tables: the only tombstones a read path
     /// (variable-depth traversal) can still see until they are physically gone.
+    /// A small lookback keeps every run's scan bounded (see [`Self::window_start`]).
     pub fn for_edge_tables(
         graph: ArrowClickHouseClient,
         ontology: &ontology::Ontology,
@@ -186,27 +192,44 @@ impl TombstoneSweep {
                 .save_completed(&key, &window_end, WriteDurability::Durable)
                 .await
                 .map_err(TaskError::new)?;
+        } else {
+            // Not advancing the checkpoint re-scans this window next run; already
+            // collapsed keys no longer match, so the re-scan is idempotent.
+            warn!(
+                task = self.task_name,
+                table = table.name,
+                budget,
+                "tombstone sweep hit its per-run key budget; draining the remainder on later runs"
+            );
         }
         Ok(())
     }
 
-    /// Window floor: the checkpoint, but never newer than `now - lookback`, so a
-    /// tombstone whose `_version` sits inside the lookback is always reconsidered
-    /// even if a prior run advanced the checkpoint past it.
+    /// Window floor: the checkpoint, clamped to be never *older* than
+    /// `now - lookback`. This caps every run's scan at `lookback + cadence` no
+    /// matter how stale (or absent) the checkpoint is, so the 15-minute edge
+    /// instance can never fall back to a multi-billion-row full scan. With no
+    /// checkpoint the floor seeds at `now - lookback`; the weekly backstop uses a
+    /// lookback so large that this seed is effectively the epoch (an unbounded
+    /// first pass), after which the checkpoint carries it forward.
+    ///
+    /// A tombstone whose `_version` predates the floor is left for the weekly
+    /// backstop rather than widening the tight instance's scan.
     async fn window_start(
         &self,
         key: &str,
         window_end: DateTime<Utc>,
     ) -> Result<DateTime<Utc>, TaskError> {
-        let lookback_floor = window_end - self.config.lookback();
         let checkpoint = self
             .checkpoint_store
             .load(key)
             .await
             .map_err(TaskError::new)?;
-        Ok(checkpoint
-            .map(|c: Checkpoint| c.watermark.min(lookback_floor))
-            .unwrap_or(lookback_floor))
+        Ok(bounded_window_start(
+            checkpoint.map(|c: Checkpoint| c.watermark),
+            window_end,
+            self.config.lookback(),
+        ))
     }
 
     async fn select_tombstoned_keys(
@@ -242,7 +265,7 @@ impl TombstoneSweep {
             / QUERY_SIZE_SAFETY_DENOMINATOR;
         let window_end = window_end.format(TIMESTAMP_FORMAT).to_string();
         for statement in build_delete_statements(table, tuples, &window_end, budget) {
-            assert_flat_delete_predicate(&statement);
+            ensure_flat_delete_predicate(&statement).map_err(TaskError::new)?;
             self.graph
                 .query(&statement)
                 .with_setting(
@@ -255,6 +278,34 @@ impl TombstoneSweep {
         }
         Ok(())
     }
+}
+
+/// A delete predicate ClickHouse can safely replay. It stores a delete as a
+/// mutation command and re-parses that text on replay; a subquery or `UNION`
+/// fails there and wedges the table's mutation queue forever (#1221). The sweep
+/// only ever builds flat literals, so this is a belt-and-braces guard that, unlike
+/// a `debug_assert`, also fires in release: on a violation the caller fails the
+/// table rather than issuing an unreplayable mutation.
+fn ensure_flat_delete_predicate(sql: &str) -> Result<(), String> {
+    let upper = sql.to_ascii_uppercase();
+    if upper.contains("SELECT") {
+        return Err(format!("delete predicate is not a flat literal: {sql}"));
+    }
+    if upper.contains("UNION") {
+        return Err(format!("delete predicate contains UNION: {sql}"));
+    }
+    Ok(())
+}
+
+/// The checkpoint, clamped never older than `window_end - lookback`. Bounds a
+/// run's scan regardless of how stale or absent the checkpoint is.
+fn bounded_window_start(
+    checkpoint: Option<DateTime<Utc>>,
+    window_end: DateTime<Utc>,
+    lookback: chrono::TimeDelta,
+) -> DateTime<Utc> {
+    let floor = window_end - lookback;
+    checkpoint.map(|c| c.max(floor)).unwrap_or(floor)
 }
 
 fn swept_tables<'a>(
@@ -371,43 +422,11 @@ fn sort_key_columns(batch: &RecordBatch, sort_key: &[String]) -> Result<Vec<Arra
 fn key_tuple_literal(columns: &[ArrayRef], row: usize) -> Result<String, TaskError> {
     let values = columns
         .iter()
-        .map(|column| sql_literal(column, row))
+        .map(|column| {
+            orbit_utils::clickhouse::render_arrow_sql_literal(column, row).map_err(TaskError::new)
+        })
         .collect::<Result<Vec<_>, _>>()?;
     Ok(format!("({})", values.join(", ")))
-}
-
-fn sql_literal(array: &ArrayRef, row: usize) -> Result<String, TaskError> {
-    let downcast_failed =
-        || TaskError::new(format!("sort key column is not {:?}", array.data_type()));
-    match array.data_type() {
-        DataType::Utf8 => Ok(quote_string_literal(
-            array
-                .as_any()
-                .downcast_ref::<StringArray>()
-                .ok_or_else(downcast_failed)?
-                .value(row),
-        )),
-        DataType::LargeUtf8 => Ok(quote_string_literal(
-            array
-                .as_any()
-                .downcast_ref::<LargeStringArray>()
-                .ok_or_else(downcast_failed)?
-                .value(row),
-        )),
-        DataType::Int64 => Ok(array
-            .as_any()
-            .downcast_ref::<Int64Array>()
-            .ok_or_else(downcast_failed)?
-            .value(row)
-            .to_string()),
-        other => Err(TaskError::new(format!(
-            "unsupported sort key type {other:?}"
-        ))),
-    }
-}
-
-fn quote_string_literal(value: &str) -> String {
-    format!("'{}'", value.replace('\\', "\\\\").replace('\'', "\\'"))
 }
 
 #[cfg(test)]
@@ -427,15 +446,22 @@ mod tests {
         }
     }
 
+    fn all_tables(ontology: &ontology::Ontology) -> Vec<SweptTable> {
+        swept_tables(
+            ontology,
+            ontology
+                .nodes()
+                .map(|n| n.destination_table.as_str())
+                .chain(ontology.edge_tables()),
+        )
+    }
+
     #[test]
-    fn node_and_edge_sweeps_cover_disjoint_complete_table_sets() {
+    fn edge_sweep_is_edges_only_and_the_backstop_covers_everything() {
         let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
-        let nodes = swept_tables(
-            &ontology,
-            ontology.nodes().map(|n| n.destination_table.as_str()),
-        );
+        let all = all_tables(&ontology);
         let edges = swept_tables(&ontology, ontology.edge_tables().into_iter());
-        let node_names: Vec<&str> = nodes.iter().map(|t| t.name.as_str()).collect();
+        let all_names: Vec<&str> = all.iter().map(|t| t.name.as_str()).collect();
 
         for edge_table in ontology.edge_tables() {
             let prefixed = prefixed_table_name(edge_table, *SCHEMA_VERSION);
@@ -444,29 +470,57 @@ mod tests {
                 "edge sweep missing {prefixed}"
             );
             assert!(
-                !node_names.contains(&prefixed.as_str()),
-                "node sweep must not touch edge table {prefixed}"
+                all_names.contains(&prefixed.as_str()),
+                "backstop missing edge {prefixed}"
             );
         }
         for node in ontology.nodes() {
             let prefixed = prefixed_table_name(&node.destination_table, *SCHEMA_VERSION);
             assert!(
-                nodes.iter().any(|t| t.name == prefixed),
-                "node sweep missing {prefixed}"
+                all_names.contains(&prefixed.as_str()),
+                "backstop missing node {prefixed}"
+            );
+            assert!(
+                !edges.iter().any(|t| t.name == prefixed),
+                "edge sweep must not touch node table {prefixed}"
             );
         }
-        assert!(!nodes.is_empty() && !edges.is_empty());
+        assert_eq!(
+            all.len(),
+            ontology.nodes().count() + ontology.edge_tables().len()
+        );
+        assert!(!edges.is_empty());
+    }
+
+    #[test]
+    fn window_start_is_bounded_by_lookback_regardless_of_checkpoint() {
+        let now = DateTime::parse_from_rfc3339("2026-08-29T12:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let lookback = chrono::TimeDelta::hours(1);
+        let floor = now - lookback;
+
+        assert_eq!(bounded_window_start(None, now, lookback), floor);
+
+        let recent = now - chrono::TimeDelta::minutes(15);
+        assert_eq!(
+            bounded_window_start(Some(recent), now, lookback),
+            recent,
+            "a fresh checkpoint carries the window forward"
+        );
+
+        let ancient = now - chrono::TimeDelta::days(30);
+        assert_eq!(
+            bounded_window_start(Some(ancient), now, lookback),
+            floor,
+            "a stale checkpoint must never widen the scan past the lookback floor"
+        );
     }
 
     #[test]
     fn every_swept_table_has_a_sort_key() {
         let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
-        let nodes = swept_tables(
-            &ontology,
-            ontology.nodes().map(|n| n.destination_table.as_str()),
-        );
-        let edges = swept_tables(&ontology, ontology.edge_tables().into_iter());
-        for table in nodes.iter().chain(edges.iter()) {
+        for table in all_tables(&ontology).iter() {
             assert!(!table.sort_key.is_empty(), "table '{}'", table.name);
         }
     }
@@ -510,7 +564,19 @@ mod tests {
         assert!(!sql.contains("SELECT"), "{sql}");
         assert!(!sql.contains("UNION"), "{sql}");
         assert!(!sql.contains("allow_nondeterministic_mutations"), "{sql}");
-        assert_flat_delete_predicate(sql);
+        assert!(ensure_flat_delete_predicate(sql).is_ok(), "{sql}");
+    }
+
+    #[test]
+    fn flat_predicate_guard_rejects_subqueries_and_unions() {
+        assert!(ensure_flat_delete_predicate("DELETE FROM t WHERE id IN (1, 2)").is_ok());
+        assert!(
+            ensure_flat_delete_predicate("DELETE FROM t WHERE id IN (SELECT id FROM s)").is_err()
+        );
+        assert!(
+            ensure_flat_delete_predicate("DELETE FROM t WHERE id IN (1) UNION ALL SELECT 2")
+                .is_err()
+        );
     }
 
     #[test]
@@ -571,12 +637,6 @@ mod tests {
         )
         .unwrap();
         assert_eq!(tuples, vec!["('MENTIONS', 1, 2)", "('CONTAINS', 3, 4)"]);
-    }
-
-    #[test]
-    fn string_literals_escape_backslashes_and_quotes() {
-        assert_eq!(quote_string_literal(r"a\"), r"'a\\'");
-        assert_eq!(quote_string_literal("a'b"), r"'a\'b'");
     }
 
     #[test]

@@ -577,20 +577,27 @@ impl Default for CodeBackfillSweepConfig {
 }
 
 /// A scheduled sweep that physically removes ReplacingMergeTree tombstones
-/// (`_deleted = true`) that reads already hide. One instance sweeps node tables,
-/// another sweeps edge tables at a tighter cadence.
+/// (`_deleted = true`) that reads already hide. The edge instance sweeps edge
+/// tables on a tight cadence with a small bounded window; the weekly instance is
+/// an unbounded backstop over every table.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct TombstoneSweepConfig {
     #[serde(flatten)]
     pub schedule: ScheduleConfiguration,
-    /// A tombstone whose `_version` is within this window of now is always a sweep
-    /// candidate, so a run that lands inside the window can never miss it. Must
-    /// exceed the sweep cadence.
+    /// The oldest `_version` a run reaches back to, measured from now. It caps
+    /// every run's scan (a run never reads more than roughly one lookback of
+    /// history) and, on the first run or after a gap, is the seed floor. Must
+    /// exceed the sweep cadence so consecutive windows overlap. The weekly
+    /// backstop sets this so large its first pass is effectively unbounded; the
+    /// tight edge instance keeps it small to stay off the big edge tables' full
+    /// scan. Older tombstones are left for the weekly backstop.
     #[serde(default = "default_tombstone_lookback_secs")]
     pub lookback_secs: u64,
-    /// Per-run key budget. A run that finds more drains the rest on later runs
-    /// rather than flooding the mutation queue in one pass.
+    /// Backpressure valve: caps how many tombstoned keys one run may collapse,
+    /// bounding the number of delete mutations a single pass can enqueue per
+    /// table. A run that finds more keys leaves the checkpoint in place and drains
+    /// the remainder on later runs.
     #[serde(default = "default_tombstone_max_keys_per_run")]
     pub max_keys_per_run: usize,
     /// Byte budget for one flat-literal `DELETE` statement. The key list is packed
@@ -623,7 +630,10 @@ fn default_table_cleanup_config() -> TombstoneSweepConfig {
         schedule: ScheduleConfiguration {
             cron: Some("0 0 3 * * 0".into()),
         },
-        lookback_secs: 8 * 24 * 60 * 60,
+        // Effectively unbounded: the first weekly pass reaches back to ~the epoch
+        // to reclaim pre-existing tombstones, then the checkpoint carries it
+        // forward at the weekly cadence.
+        lookback_secs: 3650 * 24 * 60 * 60,
         max_keys_per_run: default_tombstone_max_keys_per_run(),
         max_query_size_bytes: default_tombstone_max_query_size_bytes(),
     }

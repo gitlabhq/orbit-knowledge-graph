@@ -70,6 +70,8 @@ impl ClickHouseStaleDataCleaner {
         }
     }
 
+    // The WHERE qualifies `s._version`: a bare `_version` binds to the projected
+    // `AS _version` alias (resolver-dependent), collapsing the filter to always-false.
     fn build_node_delete_query(table: &str) -> String {
         format!(
             r#"
@@ -80,18 +82,17 @@ impl ClickHouseStaleDataCleaner {
                 id,
                 {{watermark_time:DateTime64(6, 'UTC')}} - toIntervalMicrosecond(1) AS _version,
                 true AS _deleted
-            FROM {table} FINAL
+            FROM {table} AS s FINAL
             WHERE traversal_path = {{traversal_path:String}}
               AND project_id = {{project_id:Int64}}
               AND branch = {{branch:String}}
-              AND _version < {{watermark_time:DateTime64(6, 'UTC')}}
+              AND s._version < {{watermark_time:DateTime64(6, 'UTC')}} - toIntervalMicrosecond(1)
             "#
         )
     }
 
     fn build_edge_delete_query(edge_table: &str, node_tables: &[&str]) -> String {
-        // gl_code_edge has project_id + branch columns, so we can
-        // filter directly without a subquery join.
+        // gl_code_edge carries project_id + branch; the shared gl_edge does not.
         if edge_table.contains("code_edge") {
             return format!(
                 r#"
@@ -106,11 +107,11 @@ impl ClickHouseStaleDataCleaner {
                     target_kind,
                     {{watermark_time:DateTime64(6, 'UTC')}} - toIntervalMicrosecond(1) AS _version,
                     true AS _deleted
-                FROM {edge_table} FINAL
+                FROM {edge_table} AS s FINAL
                 WHERE traversal_path = {{traversal_path:String}}
                   AND project_id = {{project_id:Int64}}
                   AND branch = {{branch:String}}
-                  AND _version < {{watermark_time:DateTime64(6, 'UTC')}}
+                  AND s._version < {{watermark_time:DateTime64(6, 'UTC')}} - toIntervalMicrosecond(1)
                 "#,
             );
         }
@@ -218,6 +219,68 @@ impl StaleDataCleaner for ClickHouseStaleDataCleaner {
 
         debug!(project_id, branch, "stale data deletion complete");
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const NODE_TABLES: [&str; 4] = [
+        "v93_gl_directory",
+        "v93_gl_file",
+        "v93_gl_definition",
+        "v93_gl_imported_symbol",
+    ];
+
+    #[test]
+    fn node_query_tombstones_below_the_reindex_watermark() {
+        let sql = ClickHouseStaleDataCleaner::build_node_delete_query("v93_gl_file");
+        assert!(sql.contains("true AS _deleted"), "{sql}");
+        assert!(
+            sql.contains("- toIntervalMicrosecond(1) AS _version"),
+            "the tombstone must outrank the row it retires but not the reindex: {sql}"
+        );
+        // The predicate must read the table column (s._version); a bare _version
+        // binds to the projected alias, collapsing the filter to always-false.
+        assert!(
+            sql.contains(
+                "s._version < {watermark_time:DateTime64(6, 'UTC')} - toIntervalMicrosecond(1)"
+            ),
+            "the delete set must sit strictly below the tombstone version so they never tie: {sql}"
+        );
+    }
+
+    #[test]
+    fn shared_edge_query_scopes_by_source_kind_without_a_subquery() {
+        let sql = ClickHouseStaleDataCleaner::build_edge_delete_query("v93_gl_edge", &NODE_TABLES);
+        assert!(
+            sql.contains("source_kind IN ('Directory', 'File', 'Definition', 'ImportedSymbol')"),
+            "{sql}"
+        );
+        assert!(
+            !sql.contains("SELECT id FROM"),
+            "no node-id subquery: {sql}"
+        );
+        assert!(
+            !sql.contains("UNION"),
+            "a UNION cannot replay as a mutation: {sql}"
+        );
+        assert!(sql.contains("true AS _deleted"), "{sql}");
+    }
+
+    #[test]
+    fn code_edge_query_scopes_directly_by_project_and_branch() {
+        let sql =
+            ClickHouseStaleDataCleaner::build_edge_delete_query("v93_gl_code_edge", &NODE_TABLES);
+        assert!(sql.contains("project_id = {project_id:Int64}"), "{sql}");
+        assert!(sql.contains("branch = {branch:String}"), "{sql}");
+        assert!(!sql.contains("source_kind IN"), "{sql}");
+    }
+
+    #[test]
+    fn shared_edge_query_is_skipped_without_code_node_tables() {
+        assert!(ClickHouseStaleDataCleaner::build_edge_delete_query("v93_gl_edge", &[]).is_empty());
     }
 }
 
