@@ -155,16 +155,20 @@ case "${1:-}" in
 
     KCTX=$("$TF" -chdir="${TF_DIR}" output -raw kctx 2>/dev/null)
     GKG_NS="e2e-${RUN_ID}-gkg"
-    SHORT_SHA=$(git -C "${REPO_ROOT}" rev-parse --short HEAD)
-    DIRTY=$(git -C "${REPO_ROOT}" diff --quiet HEAD -- 2>/dev/null && echo "" || echo "-dirty")
     IMAGE="registry.gitlab.com/gitlab-org/orbit/knowledge-graph/gkg"
-    TAG="bench-${SHORT_SHA}${DIRTY}"
 
-    echo "[infra] Building GKG image (linux/amd64) tag=${TAG}"
-    docker buildx build --platform linux/amd64 \
-      -t "${IMAGE}:${TAG}" -f "${REPO_ROOT}/Dockerfile" --push \
-      --build-arg GKG_VERSION="${TAG}" \
-      "${REPO_ROOT}"
+    if [[ -n "${GKG_IMAGE_TAG:-}" ]]; then
+      TAG="${GKG_IMAGE_TAG}"
+      echo "[infra] Using pre-built image tag=${TAG}"
+    else
+      SHORT_SHA=$(git -C "${REPO_ROOT}" rev-parse --short HEAD)
+      DIRTY=$(git -C "${REPO_ROOT}" diff --quiet HEAD -- 2>/dev/null && echo "" || echo "-dirty")
+      TAG="bench-${SHORT_SHA}${DIRTY}"
+      echo "[infra] Building GKG image (linux/amd64) tag=${TAG}"
+      docker buildx build --platform linux/amd64 \
+        -t "${IMAGE}:${TAG}" -f "${BENCH_DIR}/Dockerfile.bench" --push \
+        "${REPO_ROOT}"
+    fi
 
     echo "[infra] Upgrading GKG Helm release to ${TAG}"
     kubectl --context="${KCTX}" -n "${GKG_NS}" delete job \
