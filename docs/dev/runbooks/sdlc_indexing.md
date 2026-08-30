@@ -290,10 +290,8 @@ The handler will restart extraction from epoch for that entity type.
 
 ## Graph table maintenance
 
-Deletions use ClickHouse lightweight deletes (`DELETE FROM`). The `TableCleanup` scheduled task runs `ALTER TABLE ... APPLY DELETED MASK` on all graph tables weekly (Sunday 03:00 UTC by default) to physically remove lightweight-deleted rows from disk.
-
-To trigger manually:
+A deletion is a tombstone: the row is re-inserted with `_deleted = true` and a bumped `_version`, and reads hide it at once via FINAL. No deletion path issues a mutation. To physically reclaim tombstoned rows from a table on disk:
 
 ```sql
-ALTER TABLE `<gkg-database>`.gl_project APPLY DELETED MASK;
+OPTIMIZE TABLE `<gkg-database>`.gl_project FINAL CLEANUP;
 ```
