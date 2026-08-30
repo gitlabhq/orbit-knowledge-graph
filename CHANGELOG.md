@@ -1,3 +1,9 @@
+## [0.108.2](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.108.1...v0.108.2) (2026-08-30)
+
+### Fixes
+
+* **indexer:** revert !2331 — deletion paths back to tombstone inserts ([346f13b](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/346f13b721f367b742012cb29d3581cc7258dc4a)) by Michael Angelo Rivera
+
 ## [0.108.1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.108.0...v0.108.1) (2026-08-29)
 
 ### Fixes
