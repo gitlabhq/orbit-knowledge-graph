@@ -1,3 +1,9 @@
+## [0.108.3](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.108.2...v0.108.3) (2026-08-30)
+
+### Fixes
+
+* **code-graph:** stop custom language pipelines when a job is cancelled ([192ac4a](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/192ac4a76a319021df33d438e6e45068310621bb)) by Bohdan Parkhomchuk
+
 ## [0.108.2](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.108.1...v0.108.2) (2026-08-30)
 
 ### Fixes
