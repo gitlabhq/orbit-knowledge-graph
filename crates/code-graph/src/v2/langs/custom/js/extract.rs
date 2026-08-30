@@ -60,6 +60,7 @@ pub fn analyze_files(
     files: &[String],
     root_path: &str,
     sentinel: Option<&crate::v2::sentinel::SentinelHandle>,
+    cancel: &crate::v2::pipeline::CancellationToken,
 ) -> (Vec<AnalyzedJsFile>, Vec<FailedJsFile>) {
     let root_gone = std::sync::atomic::AtomicBool::new(false);
     // `catch_unwind` isolates per-file panics: a malformed input that trips
@@ -67,7 +68,7 @@ pub fn analyze_files(
     let results: Vec<_> = files
         .par_iter()
         .filter_map(|relative_path| {
-            if root_gone.load(std::sync::atomic::Ordering::Relaxed) {
+            if cancel.is_cancelled() || root_gone.load(std::sync::atomic::Ordering::Relaxed) {
                 return None;
             }
             let guard = sentinel.map(|s| s.file_start(relative_path));
@@ -726,8 +727,12 @@ mod tests {
             "cts/consumer.ts".to_string(),
         ];
 
-        let (analyzed, errors) =
-            analyze_files(&files, root.to_str().expect("utf8 root path"), None);
+        let (analyzed, errors) = analyze_files(
+            &files,
+            root.to_str().expect("utf8 root path"),
+            None,
+            &Default::default(),
+        );
 
         assert!(
             errors.is_empty(),
@@ -750,6 +755,29 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn a_cancelled_analysis_reads_no_files() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let root = temp.path();
+        fs::write(root.join("a.js"), "export const x = 1;\n").unwrap();
+        fs::write(root.join("b.js"), "export const y = 2;\n").unwrap();
+
+        let cancel = crate::v2::pipeline::CancellationToken::new();
+        cancel.cancel();
+        let (analyzed, errors) = analyze_files(
+            &["a.js".to_string(), "b.js".to_string()],
+            root.to_str().expect("utf8 root path"),
+            None,
+            &cancel,
+        );
+
+        assert!(analyzed.is_empty(), "got {} analyzed files", analyzed.len());
+        assert!(
+            errors.is_empty(),
+            "a dropped file is not an error: {errors:?}"
+        );
     }
 
     #[test]
