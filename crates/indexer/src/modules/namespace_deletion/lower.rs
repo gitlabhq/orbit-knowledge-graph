@@ -1,4 +1,4 @@
-use ontology::{DELETED_COLUMN, TRAVERSAL_PATH_COLUMN};
+use ontology::{DELETED_COLUMN, TRAVERSAL_PATH_COLUMN, VERSION_COLUMN};
 
 use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
 
@@ -9,12 +9,14 @@ pub struct DeletionStatement {
     pub sql: String,
 }
 
-/// Builds lightweight `DELETE FROM` statements that remove all rows for a
+/// Builds `INSERT INTO ... SELECT` statements that soft-delete all rows for a
 /// namespace across every ontology-driven table.
 ///
 /// For each namespaced node table and the shared edge table, emits:
 /// ```sql
-/// DELETE FROM {prefixed_table}
+/// INSERT INTO {prefixed_table} ({sort_key..., _deleted, _version})
+/// SELECT {sort_key..., true, now64(6)}
+/// FROM {prefixed_table}
 /// WHERE startsWith(traversal_path, {traversal_path:String})
 ///   AND _deleted = false
 /// ```
@@ -40,19 +42,27 @@ fn build_statements(
         if !node.has_traversal_path {
             continue;
         }
+        let sort_key = ontology
+            .sort_key_for_table(&node.destination_table)
+            .unwrap_or(&node.sort_key);
         let prefixed = prefixed_table_name(&node.destination_table, *SCHEMA_VERSION);
-        statements.push(build_lightweight_delete(
+        statements.push(build_deletion_insert(
             &node.destination_table,
             &prefixed,
+            sort_key,
             extra_predicate,
         ));
     }
 
     for edge_table in ontology.edge_tables() {
+        let config = ontology
+            .edge_table_config(edge_table)
+            .expect("edge_tables() only returns keys present in edge_table_configs");
         let prefixed = prefixed_table_name(edge_table, *SCHEMA_VERSION);
-        statements.push(build_lightweight_delete(
+        statements.push(build_deletion_insert(
             edge_table,
             &prefixed,
+            &config.sort_key,
             extra_predicate,
         ));
     }
@@ -60,16 +70,21 @@ fn build_statements(
     statements
 }
 
-fn build_lightweight_delete(
+fn build_deletion_insert(
     unprefixed_table: &str,
     prefixed_table: &str,
+    sort_key: &[String],
     extra_predicate: Option<&str>,
 ) -> DeletionStatement {
+    let sort_key_cols = sort_key.join(", ");
+    let insert_columns = format!("{sort_key_cols}, {DELETED_COLUMN}, {VERSION_COLUMN}");
     let extra = extra_predicate.map(|p| format!(" {p}")).unwrap_or_default();
     let sql = format!(
-        "DELETE FROM {prefixed_table} \
-         WHERE startsWith({TRAVERSAL_PATH_COLUMN}, {{{TRAVERSAL_PATH_COLUMN}:String}}) \
-         AND {DELETED_COLUMN} = false{extra}"
+        "INSERT INTO {prefixed_table} ({insert_columns}) \
+         SELECT {sort_key_cols}, true, now64(6) \
+         FROM {prefixed_table} \
+         WHERE (startsWith({TRAVERSAL_PATH_COLUMN}, {{{TRAVERSAL_PATH_COLUMN}:String}}) \
+         AND ({DELETED_COLUMN} = false){extra})"
     );
     DeletionStatement {
         table: unprefixed_table.to_string(),
@@ -163,17 +178,64 @@ mod tests {
 
             let prefixed = prefixed_table_name(table, *SCHEMA_VERSION);
             assert!(
-                sql.starts_with(&format!("DELETE FROM {prefixed}")),
-                "{table}: should start with DELETE FROM prefixed table: {sql}"
+                sql.starts_with(&format!("INSERT INTO {prefixed} (")),
+                "{table}: should start with INSERT INTO prefixed table: {sql}"
+            );
+            assert!(
+                sql.contains(&format!("FROM {prefixed}")),
+                "{table}: should SELECT FROM same prefixed table: {sql}"
+            );
+            assert!(
+                sql.contains(", true, now64(6)"),
+                "{table}: should select true (deleted) and now64(6) (version): {sql}"
             );
             assert!(
                 sql.contains("startsWith(traversal_path, {traversal_path:String})"),
                 "{table}: should filter by traversal_path: {sql}"
             );
             assert!(
-                sql.contains("_deleted = false"),
+                sql.contains("(_deleted = false)"),
                 "{table}: should only delete non-deleted rows: {sql}"
             );
+        }
+    }
+
+    #[test]
+    fn node_statement_selects_sort_key_columns() {
+        let ontology = load_ontology();
+        let statements = build_deletion_statements(&ontology);
+        let statement = find_statement(&statements, "gl_project");
+
+        assert!(
+            statement.sql.contains("traversal_path"),
+            "should include traversal_path from sort key: {}",
+            statement.sql
+        );
+        assert!(
+            statement.sql.contains("id"),
+            "should include id from sort key: {}",
+            statement.sql
+        );
+    }
+
+    #[test]
+    fn edge_statements_select_sort_key_columns_for_all_tables() {
+        let ontology = load_ontology();
+        let statements = build_deletion_statements(&ontology);
+
+        for edge_table in ontology.edge_tables() {
+            let config = ontology
+                .edge_table_config(edge_table)
+                .expect("edge table config must exist");
+
+            let statement = find_statement(&statements, edge_table);
+            for column in &config.sort_key {
+                assert!(
+                    statement.sql.contains(column.as_str()),
+                    "{edge_table} deletion should include sort key column {column}: {}",
+                    statement.sql
+                );
+            }
         }
     }
 
@@ -199,8 +261,8 @@ mod tests {
         let statement = find_statement(&statements, "gl_project");
 
         assert!(
-            statement.sql.contains("_deleted = false"),
-            "should keep the non-deleted filter: {}",
+            statement.sql.contains("(_deleted = false)"),
+            "should keep the FINAL-safe non-deleted filter: {}",
             statement.sql
         );
         assert!(

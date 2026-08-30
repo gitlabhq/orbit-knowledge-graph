@@ -17,7 +17,6 @@ use crate::observer::{IndexingMode, IndexingObserver};
 use crate::retry::{Backoff, LocalRetry, Step, drive_with};
 
 use super::datalake::{DatalakeQuery, ScanStats, is_arrow_string_overflow};
-use super::deleted_rows::DeletedRowSplitter;
 use super::metrics::SdlcMetrics;
 use super::plan::{Cursor, CursorFilter, Plan, PreparedQuery};
 use super::transform::{BlockTransform, TransformRegistry};
@@ -107,7 +106,6 @@ pub(in crate::modules::sdlc) struct Pipeline {
     metrics: SdlcMetrics,
     retry_config: DatalakeRetryConfig,
     registry: Arc<TransformRegistry>,
-    deleted_rows: DeletedRowSplitter,
 }
 
 impl Pipeline {
@@ -116,7 +114,6 @@ impl Pipeline {
         checkpoint_store: Arc<dyn CheckpointStore>,
         metrics: SdlcMetrics,
         retry_config: DatalakeRetryConfig,
-        ontology: &ontology::Ontology,
     ) -> Self {
         Self {
             datalake,
@@ -124,7 +121,6 @@ impl Pipeline {
             metrics,
             retry_config,
             registry: Arc::new(TransformRegistry::default()),
-            deleted_rows: DeletedRowSplitter::from_ontology(ontology),
         }
     }
 
@@ -195,21 +191,15 @@ impl Pipeline {
             stats.transform_ms += transform_elapsed.as_millis() as u64;
 
             let mut write_futures = FuturesUnordered::new();
-            let mut delete_statements = Vec::new();
             for (index, batches) in grouped.into_iter().enumerate() {
                 if batches.is_empty() {
                     continue;
                 }
                 let table = outputs[index].clone();
-                let split = self.deleted_rows.split(&table, batches)?;
-                delete_statements.extend(split.delete_statements);
-                if split.live.is_empty() {
-                    continue;
-                }
                 let w = Arc::clone(&context.writer);
                 let d = durability.data_writes;
                 write_futures.push(async move {
-                    w.write(&table, split.live, d)
+                    w.write(&table, batches, d)
                         .await
                         .map_err(|e| HandlerError::Processing(e.to_string()))
                 });
@@ -228,14 +218,6 @@ impl Pipeline {
                     observer.record_graph_write(&report.table, report.rows, report.bytes);
                     stats.written_rows += report.rows;
                     stats.written_bytes += report.bytes;
-                }
-                // Deletes run only after every insert has landed, so a same-key insert in this page cannot resurrect a row the delete removed.
-                for statement in delete_statements.drain(..) {
-                    context
-                        .writer
-                        .lightweight_delete(&statement)
-                        .await
-                        .map_err(|e| HandlerError::Processing(e.to_string()))?;
                 }
                 Ok::<_, HandlerError>(write_start.elapsed())
             };
@@ -512,10 +494,6 @@ mod tests {
     use std::collections::HashSet;
     use std::sync::Mutex;
 
-    fn test_ontology() -> ontology::Ontology {
-        ontology::Ontology::load_embedded().expect("ontology must load")
-    }
-
     fn simple_plan(name: &str) -> Plan {
         simple_plan_with_batch_size(name, 1000)
     }
@@ -734,7 +712,6 @@ mod tests {
             Arc::new(RecordingCheckpointStore::new()),
             test_metrics(),
             Default::default(),
-            &test_ontology(),
         );
         let plan = simple_plan("Test");
 
@@ -764,7 +741,6 @@ mod tests {
             store.clone(),
             test_metrics(),
             Default::default(),
-            &test_ontology(),
         );
         let result = pipeline
             .run_plan(
@@ -829,7 +805,6 @@ mod tests {
             store.clone(),
             test_metrics(),
             Default::default(),
-            &test_ontology(),
         );
         pipeline
             .run_plan(
@@ -857,7 +832,6 @@ mod tests {
             Arc::new(RecordingCheckpointStore::new()),
             test_metrics(),
             Default::default(),
-            &test_ontology(),
         );
         let plan = simple_plan("Failing");
 
@@ -932,7 +906,6 @@ mod tests {
             Arc::new(RecordingCheckpointStore::new()),
             test_metrics(),
             Default::default(),
-            &test_ontology(),
         );
 
         let plan = simple_plan("Test");
@@ -971,7 +944,6 @@ mod tests {
                 halving_initial_block_size: 8_000,
                 halving_min_block_size: 1024,
             },
-            &test_ontology(),
         );
 
         let plan = simple_plan("Test");
@@ -1011,7 +983,6 @@ mod tests {
                 halving_initial_block_size: 4_096,
                 halving_min_block_size: 2_048,
             },
-            &test_ontology(),
         );
 
         let plan = simple_plan("Test");
@@ -1092,7 +1063,6 @@ mod tests {
                 halving_initial_block_size: 8_000,
                 halving_min_block_size: 1_024,
             },
-            &test_ontology(),
         );
 
         let plan = simple_plan("Test");
@@ -1134,7 +1104,6 @@ mod tests {
             store,
             test_metrics(),
             Default::default(),
-            &test_ontology(),
         );
         let plan = simple_plan("Test");
 
@@ -1211,7 +1180,6 @@ mod tests {
             Arc::new(RecordingCheckpointStore::new()),
             test_metrics(),
             Default::default(),
-            &test_ontology(),
         );
         let plan = simple_plan("Test");
 

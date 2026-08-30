@@ -82,6 +82,11 @@ impl CodeTableNames {
 
     /// Ontology node names backing [`Self::node_tables`], in the same order.
     pub const NODE_KINDS: [&'static str; 4] = ["Directory", "File", "Definition", "ImportedSymbol"];
+
+    /// `NODE_KINDS` as a quoted SQL list for a `source_kind IN (...)` predicate.
+    pub fn node_kinds_sql_list() -> String {
+        Self::NODE_KINDS.map(|kind| format!("'{kind}'")).join(", ")
+    }
 }
 
 #[cfg(test)]
