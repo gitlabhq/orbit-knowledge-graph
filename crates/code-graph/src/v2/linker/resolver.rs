@@ -106,6 +106,11 @@ impl<'a> FileResolver<'a> {
         }
     }
 
+    /// `from_parts` has no sentinel guard, so its caller must arm the flag itself.
+    pub fn set_kill_flag(&mut self, kill_flag: Arc<std::sync::atomic::AtomicBool>) {
+        self.ctx.kill_flag = kill_flag;
+    }
+
     pub fn set_include_index(&mut self, idx: std::sync::Arc<super::graph::IncludeIndex>) {
         self.ctx.include_index = Some(idx);
     }
