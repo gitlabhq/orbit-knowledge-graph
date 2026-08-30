@@ -48,7 +48,8 @@ use crate::v2::sentinel;
 
 use crate::v2::inventory::FileInput;
 use crate::v2::pipeline::{
-    BatchTx, FileTimingEntry, LanguagePipeline, LanguageTimings, PipelineContext, PipelineError,
+    BatchTx, CancellationToken, FileTimingEntry, LanguagePipeline, LanguageTimings,
+    PipelineContext, PipelineError,
 };
 use crate::v2::types::{
     CanonicalDefinition, CanonicalImport, DefKind, EdgeKind, Fqn, ImportBindingKind, NodeKind,
@@ -171,7 +172,13 @@ impl LanguagePipeline for RustPipeline {
                 None
             }
         };
-        let output = parse_rust_files(files, root_path, workspaces.as_ref(), sentinel_handle);
+        let output = parse_rust_files(
+            files,
+            root_path,
+            workspaces.as_ref(),
+            sentinel_handle,
+            &ctx.config.cancel,
+        );
         // Nothing past the parse reads the rust-analyzer databases, and they are
         // the largest thing this pipeline holds.
         drop(workspaces);
@@ -188,6 +195,10 @@ impl LanguagePipeline for RustPipeline {
                 }
             }
         }
+        if ctx.is_cancelled() {
+            return Ok(());
+        }
+
         let parsed = output.parsed;
         let mut graph = build_graph(root_path, &parsed);
         let graph_build_ms = t0.elapsed().as_secs_f64() * 1000.0 - parse_ms;
@@ -205,6 +216,9 @@ impl LanguagePipeline for RustPipeline {
         let mut edge_timed_out = false;
 
         'edge_resolve: for file in &parsed {
+            if ctx.is_cancelled() {
+                return Ok(());
+            }
             let t_resolve = std::time::Instant::now();
             for edge in &file.edge_candidates {
                 if deadline.is_some_and(|d| std::time::Instant::now() >= d) {
@@ -288,12 +302,13 @@ fn parse_rust_files(
     root_path: &str,
     workspaces: Option<&WorkspacePlan>,
     sentinel: Option<&sentinel::SentinelHandle>,
+    cancel: &CancellationToken,
 ) -> RustParseOutput {
     if let Some(workspaces) = workspaces {
-        return parse_rust_files_with_workspaces(files, root_path, workspaces, sentinel);
+        return parse_rust_files_with_workspaces(files, root_path, workspaces, sentinel, cancel);
     }
 
-    parse_rust_files_standalone(files, root_path, sentinel)
+    parse_rust_files_standalone(files, root_path, sentinel, cancel)
 }
 
 fn parse_rust_files_with_workspaces(
@@ -301,12 +316,16 @@ fn parse_rust_files_with_workspaces(
     root_path: &str,
     plan: &WorkspacePlan,
     sentinel: Option<&sentinel::SentinelHandle>,
+    cancel: &CancellationToken,
 ) -> RustParseOutput {
     let mut parsed = Vec::with_capacity(files.len());
     let mut errors = Vec::new();
     let mut claimed = vec![false; files.len()];
 
     for workspace_id in 0..plan.len() {
+        if cancel.is_cancelled() {
+            break;
+        }
         let candidates = plan.candidates(workspace_id);
         // A root whose files an earlier root already claimed never needs a
         // rust-analyzer database of its own.
@@ -350,6 +369,9 @@ fn parse_rust_files_with_workspaces(
         let workspace_results = workspace_files
             .par_iter()
             .map_with(workspace.clone(), |workspace, file| {
+                if cancel.is_cancelled() {
+                    return None;
+                }
                 let guard = sentinel.map(|s| s.file_start(file));
                 if let Ok(meta) = std::fs::metadata(to_absolute_path(root_path, file)) {
                     crate::v2::pipeline::breadcrumb_large_file(file, meta.len(), "rust");
@@ -360,22 +382,22 @@ fn parse_rust_files_with_workspaces(
                 });
                 let parse_ms = t_file.elapsed().as_secs_f64() * 1000.0;
                 if guard.as_ref().is_some_and(|g| g.is_killed()) {
-                    return Err((
+                    return Some(Err((
                         file.to_string(),
                         AnalyzerError::skip(
                             FileSkip::Timeout(AbortPhase::Sentinel),
                             "per-file watchdog killed analysis",
                         ),
-                    ));
+                    )));
                 }
-                result.map(|mut f| {
+                Some(result.map(|mut f| {
                     f.parse_ms = parse_ms;
                     f
-                })
+                }))
             })
             .collect::<Vec<_>>();
 
-        for result in workspace_results {
+        for result in workspace_results.into_iter().flatten() {
             match result {
                 Ok(file) => parsed.push(file),
                 Err(err) => errors.push(err),
@@ -392,7 +414,10 @@ fn parse_rust_files_with_workspaces(
 
     let standalone_results = standalone
         .par_iter()
-        .map(|file_path| {
+        .filter_map(|file_path| {
+            if cancel.is_cancelled() {
+                return None;
+            }
             let guard = sentinel.map(|s| s.file_start(file_path));
             let t_file = std::time::Instant::now();
             let result = catch_rust_file_panic(file_path, || {
@@ -400,18 +425,18 @@ fn parse_rust_files_with_workspaces(
             });
             let parse_ms = t_file.elapsed().as_secs_f64() * 1000.0;
             if guard.as_ref().is_some_and(|g| g.is_killed()) {
-                return Err((
+                return Some(Err((
                     file_path.to_string(),
                     AnalyzerError::skip(
                         FileSkip::Timeout(AbortPhase::Sentinel),
                         "per-file watchdog killed analysis",
                     ),
-                ));
+                )));
             }
-            result.map(|mut f| {
+            Some(result.map(|mut f| {
                 f.parse_ms = parse_ms;
                 f
-            })
+            }))
         })
         .collect::<Vec<_>>();
 
@@ -429,10 +454,14 @@ fn parse_rust_files_standalone(
     files: &[FileInput],
     root_path: &str,
     sentinel: Option<&sentinel::SentinelHandle>,
+    cancel: &CancellationToken,
 ) -> RustParseOutput {
     let results = files
         .par_iter()
-        .map(|file_path| {
+        .filter_map(|file_path| {
+            if cancel.is_cancelled() {
+                return None;
+            }
             let guard = sentinel.map(|s| s.file_start(file_path));
             let t_file = std::time::Instant::now();
             let result = catch_rust_file_panic(file_path, || {
@@ -440,18 +469,18 @@ fn parse_rust_files_standalone(
             });
             let parse_ms = t_file.elapsed().as_secs_f64() * 1000.0;
             if guard.as_ref().is_some_and(|g| g.is_killed()) {
-                return Err((
+                return Some(Err((
                     file_path.to_string(),
                     AnalyzerError::skip(
                         FileSkip::Timeout(AbortPhase::Sentinel),
                         "per-file watchdog killed analysis",
                     ),
-                ));
+                )));
             }
-            result.map(|mut f| {
+            Some(result.map(|mut f| {
                 f.parse_ms = parse_ms;
                 f
-            })
+            }))
         })
         .collect::<Vec<_>>();
 
@@ -1511,6 +1540,33 @@ mod tests {
         let inside = repo_local_existing_file(inside_file, &repo_root).unwrap();
         assert!(inside.ends_with("repo/src/lib.rs"));
         assert_eq!(repo_local_existing_file(outside_file, &repo_root), None);
+    }
+
+    #[test]
+    fn a_cancelled_standalone_parse_reads_no_files() {
+        let temp = tempdir().unwrap();
+        let root = fs::canonicalize(temp.path()).unwrap();
+        fs::write(root.join("a.rs"), "pub fn a() {}\n").unwrap();
+
+        let cancel = crate::v2::pipeline::CancellationToken::new();
+        cancel.cancel();
+        let output = super::parse_rust_files_standalone(
+            &["a.rs".to_string()],
+            &root.to_string_lossy(),
+            None,
+            &cancel,
+        );
+
+        assert!(
+            output.parsed.is_empty(),
+            "got {} parsed",
+            output.parsed.len()
+        );
+        assert!(
+            output.errors.is_empty(),
+            "a dropped file is not an error: {:?}",
+            output.errors
+        );
     }
 
     #[test]
