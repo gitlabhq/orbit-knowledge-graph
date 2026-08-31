@@ -1,3 +1,13 @@
+## [0.108.4](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.108.3...v0.108.4) (2026-08-31)
+
+### Performance
+
+* **treesitter-visit:** derive line start from byte column ([0f40507](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/0f405071be2da273d99156a0b9ba0f038b4f0ffc)) by Dmitry Gruzd
+
+### Other
+
+* **Orbit:** moves schema page ([085656e](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/085656e0563a06d0eb01910774a2ea9dd2f4d385)) by Zachary Painter
+
 ## [0.108.3](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.108.2...v0.108.3) (2026-08-30)
 
 ### Fixes
