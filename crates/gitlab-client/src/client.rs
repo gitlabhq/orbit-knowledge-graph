@@ -5,7 +5,11 @@ use std::time::Duration;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use futures::{Stream, StreamExt};
+use gitaly_protos::proto::blob_service_client::BlobServiceClient;
+use gitaly_protos::proto::{ListBlobsRequest as GitalyListBlobsRequest, Repository};
+use gitaly_protos::websocket::connect_channel;
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
+use prost::Message;
 use reqwest::StatusCode;
 use serde::Serialize;
 use tracing::debug;
@@ -56,6 +60,14 @@ pub struct GitlabClient {
     http: reqwest::Client,
     base_url: String,
     signing_key: Vec<u8>,
+    gitaly_poc: Option<GitalyPoc>,
+}
+
+struct GitalyPoc {
+    url: String,
+    grant: String,
+    storage: String,
+    relative_path: String,
 }
 
 impl GitlabClient {
@@ -66,6 +78,7 @@ impl GitlabClient {
             http,
             base_url: config.base_url,
             signing_key,
+            gitaly_poc: GitalyPoc::from_env(),
         })
     }
 
@@ -186,6 +199,9 @@ impl GitlabClient {
         project_id: i64,
         oids: &[String],
     ) -> Result<ByteStream, GitlabClientError> {
+        if let Some(poc) = &self.gitaly_poc {
+            return poc.list_blobs(oids).await;
+        }
         let url = format!(
             "{}/api/v4/internal/orbit/project/{}/repository/list_blobs",
             self.base_url, project_id
@@ -375,6 +391,56 @@ impl GitlabClient {
         let key = EncodingKey::from_secret(&self.signing_key);
         encode(&Header::new(Algorithm::HS256), &claims, &key)
             .map_err(|e| GitlabClientError::JwtSigning(e.to_string()))
+    }
+}
+
+impl GitalyPoc {
+    fn from_env() -> Option<Self> {
+        Some(Self {
+            url: std::env::var("GKG_GITALY_POC_URL").ok()?,
+            grant: std::env::var("GKG_GITALY_POC_GRANT").ok()?,
+            storage: std::env::var("GKG_GITALY_POC_STORAGE").ok()?,
+            relative_path: std::env::var("GKG_GITALY_POC_RELATIVE_PATH").ok()?,
+        })
+    }
+
+    async fn list_blobs(&self, oids: &[String]) -> Result<ByteStream, GitlabClientError> {
+        let channel = connect_channel(&self.url)
+            .await
+            .map_err(|error| GitlabClientError::Unexpected(format!("Gitaly tunnel: {error}")))?;
+        let mut request = tonic::Request::new(GitalyListBlobsRequest {
+            repository: Some(Repository {
+                storage_name: self.storage.clone(),
+                relative_path: self.relative_path.clone(),
+                ..Default::default()
+            }),
+            revisions: oids.to_vec(),
+            limit: 0,
+            bytes_limit: -1,
+            with_paths: true,
+        });
+        request.metadata_mut().insert(
+            "x-gitaly-proxy-grant",
+            self.grant.parse().map_err(|error| {
+                GitlabClientError::Unexpected(format!("invalid Gitaly grant metadata: {error}"))
+            })?,
+        );
+        let stream = BlobServiceClient::new(channel)
+            .list_blobs(request)
+            .await
+            .map_err(|error| GitlabClientError::Unexpected(format!("ListBlobs RPC: {error}")))?
+            .into_inner()
+            .map(|result| {
+                let response = result.map_err(|error| {
+                    GitlabClientError::Unexpected(format!("ListBlobs stream: {error}"))
+                })?;
+                let encoded = response.encode_to_vec();
+                let mut framed = Vec::with_capacity(encoded.len() + 4);
+                framed.extend_from_slice(&(encoded.len() as u32).to_be_bytes());
+                framed.extend_from_slice(&encoded);
+                Ok(bytes::Bytes::from(framed))
+            });
+        Ok(Box::pin(stream))
     }
 }
 

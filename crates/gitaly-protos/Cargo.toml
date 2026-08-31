@@ -16,7 +16,17 @@ protoc-bin-vendored = { workspace = true, optional = true }
 tonic-prost-build = { workspace = true, optional = true }
 
 [dependencies]
+bytes = { workspace = true }
+futures = { workspace = true }
+hyper-util = { workspace = true }
 prost = { workspace = true }
 prost-types = { workspace = true }
+tokio = { workspace = true }
+tokio-tungstenite = { workspace = true }
 tonic = { workspace = true }
 tonic-prost = { workspace = true }
+tower = { workspace = true }
+
+[[example]]
+name = "ws_e2e"
+path = "examples/ws_e2e.rs"

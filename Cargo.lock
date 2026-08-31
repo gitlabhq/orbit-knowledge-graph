@@ -5045,14 +5045,20 @@ dependencies = [
 name = "gitaly-protos"
 version = "0.1.0"
 dependencies = [
+ "bytes",
+ "futures",
+ "hyper-util",
  "prost 0.14.4",
  "prost-build 0.14.3",
  "prost-types 0.14.4",
  "protoc-bin-vendored",
+ "tokio",
+ "tokio-tungstenite",
  "tonic",
  "tonic-build",
  "tonic-prost",
  "tonic-prost-build",
+ "tower",
 ]
 
 [[package]]
@@ -5065,14 +5071,17 @@ dependencies = [
  "chrono",
  "circuit-breaker",
  "futures",
+ "gitaly-protos",
  "jsonwebtoken 10.4.0",
  "orbit-server-config",
+ "prost 0.14.4",
  "reqwest 0.13.4",
  "rustls",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
  "tokio",
+ "tonic",
  "tracing",
 ]
 

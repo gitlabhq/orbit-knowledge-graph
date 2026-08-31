@@ -10,15 +10,22 @@ base64 = { workspace = true }
 bytes = { workspace = true }
 chrono = { workspace = true }
 futures = { workspace = true }
+gitaly-protos = { path = "../gitaly-protos" }
 orbit-server-config = { path = "../orbit-server-config" }
 jsonwebtoken = { workspace = true }
 reqwest = { workspace = true }
+prost = { workspace = true }
 rustls = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+tonic = { workspace = true }
 
 [dev-dependencies]
 axum = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net"] }
+
+[[example]]
+name = "gitaly_list_blobs"
+path = "examples/gitaly_list_blobs.rs"

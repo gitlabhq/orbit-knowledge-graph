@@ -6,3 +6,5 @@ mod gitaly_proto;
 pub mod proto {
     pub use super::gitaly_proto::*;
 }
+
+pub mod websocket;

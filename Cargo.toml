@@ -65,6 +65,7 @@ flate2 = "1.1.9"
 chrono = { version = "0.4.43", features = ["serde"] }
 croner = "3.0.1"
 futures = "0.3.31"
+hyper-util = { version = "0.1.20", features = ["tokio"] }
 mimalloc = { version = "0.1.48", default-features = false }
 parking_lot = "0.12.5"
 petgraph = "0.8.3"
@@ -103,6 +104,7 @@ gitalisk-core = { git = "https://gitlab.com/gitlab-org/rust/gitalisk.git", tag =
 siphon-proto = { git = "https://gitlab.com/gitlab-org/analytics-section/siphon.git", tag = "0.0.103-beta" }
 thiserror = "2.0.18"
 tokio-stream = "0.1.18"
+tokio-tungstenite = "0.28.0"
 toml = "1.0.0"
 toon-format = { version = "0.5.0", default-features = false }
 opentelemetry = { version = "0.32", default-features = false, features = ["metrics"] }
