@@ -137,10 +137,9 @@ impl Content for String {
         &self.as_bytes()[range]
     }
 
-    fn get_char_column(&self, _col: usize, offset: usize) -> usize {
+    fn get_char_column(&self, col: usize, offset: usize) -> usize {
         let src = self.as_bytes();
-        let line_start = memchr::memrchr(b'\n', &src[..offset]).map_or(0, |pos| pos + 1);
-        // Count UTF-8 codepoint lead bytes in the line prefix.
+        let line_start = offset - col;
         src[line_start..offset]
             .iter()
             .filter(|&&b| b & 0b1100_0000 != 0b1000_0000)
