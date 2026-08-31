@@ -139,7 +139,12 @@ impl Content for String {
 
     fn get_char_column(&self, col: usize, offset: usize) -> usize {
         let src = self.as_bytes();
+        debug_assert!(
+            offset >= col,
+            "byte offset must not precede its line-relative column (positions must be paired from the same node)"
+        );
         let line_start = offset - col;
+        // Count UTF-8 codepoint lead bytes (skip continuation bytes) in the line prefix.
         src[line_start..offset]
             .iter()
             .filter(|&&b| b & 0b1100_0000 != 0b1000_0000)
