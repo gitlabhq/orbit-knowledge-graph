@@ -4,6 +4,10 @@ version.workspace = true
 edition = "2024"
 license = "LicenseRef-EE"
 
+[features]
+default = []
+gitaly-poc = []
+
 [dependencies]
 circuit-breaker = { workspace = true }
 base64 = { workspace = true }

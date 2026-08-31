@@ -5,10 +5,14 @@ use std::time::Duration;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use futures::{Stream, StreamExt};
+#[cfg(feature = "gitaly-poc")]
 use gitaly_protos::proto::blob_service_client::BlobServiceClient;
+#[cfg(feature = "gitaly-poc")]
 use gitaly_protos::proto::{ListBlobsRequest as GitalyListBlobsRequest, Repository};
-use gitaly_protos::websocket::connect_channel;
+#[cfg(feature = "gitaly-poc")]
+use gitaly_protos::websocket::{GRANT_HEADER, connect_channel};
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
+#[cfg(feature = "gitaly-poc")]
 use prost::Message;
 use reqwest::StatusCode;
 use serde::Serialize;
@@ -60,9 +64,11 @@ pub struct GitlabClient {
     http: reqwest::Client,
     base_url: String,
     signing_key: Vec<u8>,
+    #[cfg(feature = "gitaly-poc")]
     gitaly_poc: Option<GitalyPoc>,
 }
 
+#[cfg(feature = "gitaly-poc")]
 struct GitalyPoc {
     url: String,
     grant: String,
@@ -78,6 +84,7 @@ impl GitlabClient {
             http,
             base_url: config.base_url,
             signing_key,
+            #[cfg(feature = "gitaly-poc")]
             gitaly_poc: GitalyPoc::from_env(),
         })
     }
@@ -199,6 +206,7 @@ impl GitlabClient {
         project_id: i64,
         oids: &[String],
     ) -> Result<ByteStream, GitlabClientError> {
+        #[cfg(feature = "gitaly-poc")]
         if let Some(poc) = &self.gitaly_poc {
             return poc.list_blobs(oids).await;
         }
@@ -394,6 +402,7 @@ impl GitlabClient {
     }
 }
 
+#[cfg(feature = "gitaly-poc")]
 impl GitalyPoc {
     fn from_env() -> Option<Self> {
         Some(Self {
@@ -420,7 +429,7 @@ impl GitalyPoc {
             with_paths: true,
         });
         request.metadata_mut().insert(
-            "x-gitaly-proxy-grant",
+            GRANT_HEADER,
             self.grant.parse().map_err(|error| {
                 GitlabClientError::Unexpected(format!("invalid Gitaly grant metadata: {error}"))
             })?,

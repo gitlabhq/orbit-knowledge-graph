@@ -12,9 +12,12 @@ use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 use tonic::transport::{Channel, Endpoint};
 use tower::service_fn;
 
+pub const GRANT_HEADER: &str = "x-gitaly-proxy-grant";
+
 pub struct WebSocketIo {
     socket: WebSocketStream<MaybeTlsStream<TcpStream>>,
     pending_read: Bytes,
+    pending_flush: bool,
 }
 
 impl WebSocketIo {
@@ -23,6 +26,7 @@ impl WebSocketIo {
         Ok(Self {
             socket,
             pending_read: Bytes::new(),
+            pending_flush: false,
         })
     }
 }
@@ -34,6 +38,14 @@ impl AsyncRead for WebSocketIo {
         buf: &mut ReadBuf<'_>,
     ) -> Poll<io::Result<()>> {
         loop {
+            if self.pending_flush {
+                match Pin::new(&mut self.socket).poll_flush(cx) {
+                    Poll::Ready(Ok(())) => self.pending_flush = false,
+                    Poll::Ready(Err(error)) => return Poll::Ready(Err(ws_error(error))),
+                    Poll::Pending => return Poll::Pending,
+                }
+            }
+
             if !self.pending_read.is_empty() {
                 let amount = buf.remaining().min(self.pending_read.len());
                 buf.put_slice(&self.pending_read.split_to(amount));
@@ -49,7 +61,8 @@ impl AsyncRead for WebSocketIo {
                     match Pin::new(&mut self.socket).poll_ready(cx) {
                         Poll::Ready(Ok(())) => Pin::new(&mut self.socket)
                             .start_send(Message::Pong(data))
-                            .map_err(ws_error)?,
+                            .map_err(ws_error)
+                            .map(|()| self.pending_flush = true)?,
                         Poll::Ready(Err(error)) => return Poll::Ready(Err(ws_error(error))),
                         Poll::Pending => return Poll::Pending,
                     }

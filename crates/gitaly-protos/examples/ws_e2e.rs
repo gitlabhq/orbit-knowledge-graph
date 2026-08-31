@@ -7,11 +7,9 @@ use gitaly_protos::proto::{
     GetArchiveRequest, ListBlobsRequest, RemoveRepositoryRequest, Repository,
     RepositoryExistsRequest, get_archive_request,
 };
-use gitaly_protos::websocket::connect_channel;
+use gitaly_protos::websocket::{GRANT_HEADER, connect_channel};
 use tonic::metadata::MetadataValue;
 use tonic::{Code, Request};
-
-const GRANT_HEADER: &str = "x-gitaly-proxy-grant";
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
