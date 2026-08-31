@@ -130,7 +130,7 @@ node types.
 | `CALLS` | `Definition` | `Definition` | Definition invokes another definition |
 | `CALLS` | `Definition` | `ImportedSymbol` | Definition invokes an imported symbol that is not resolved to a definition |
 | `CALLS` | `File` | `Definition` or `ImportedSymbol` | Top-level call site outside any enclosing definition |
-| `EXTENDS` <sup>1</sup> | `Definition` | `Definition` | Definition declares a supertype through class extension, interface implementation, struct embedding, or mixin composition |
+| `EXTENDS` <sup>1</sup> | `Definition` | `Definition` | Definition declares a supertype of a function, class, method, module, or other named symbol declared in a file |
 
 **Footnotes**:
 
