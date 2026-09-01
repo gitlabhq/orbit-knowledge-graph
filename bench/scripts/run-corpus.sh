@@ -114,8 +114,10 @@ for yaml in "${CORPUS_DIR}"/*.yaml; do
     QUERY=$(yq eval ".${qname}.query" "${yaml}" | resolve_samples 2>/dev/null || yq eval ".${qname}.query" "${yaml}")
     OUTPUT="${RESULTS_DIR}/${suite}_${qname}.json"
 
+    PROF_ARGS=(-t "${TPATH}" --explain)
+
     if [[ "${EXPECT}" == "error" ]]; then
-      if "${PROFILER}" -t "${TPATH}" "${QUERY}" >/dev/null 2>&1; then
+      if "${PROFILER}" "${PROF_ARGS[@]}" "${QUERY}" >/dev/null 2>&1; then
         log "  FAIL ${qname} (expected error, got success)"
         FAIL=$((FAIL + 1)); ERRORS+=("${suite}/${qname}: expected error")
       else
@@ -123,7 +125,7 @@ for yaml in "${CORPUS_DIR}"/*.yaml; do
         PASS=$((PASS + 1))
       fi
     else
-      if "${PROFILER}" -t "${TPATH}" -o "${OUTPUT}" "${QUERY}" 2>/dev/null; then
+      if "${PROFILER}" "${PROF_ARGS[@]}" -o "${OUTPUT}" "${QUERY}" 2>/dev/null; then
         ROWS=$(python3 -c "import json; d=json.load(open('${OUTPUT}')); print(d.get('summary',{}).get('result_rows',0))" 2>/dev/null || echo "0")
         if [[ "${EXPECT}" == "empty" || "${ROWS}" -gt 0 ]]; then
           log "  PASS ${qname} (${ROWS} rows)"
