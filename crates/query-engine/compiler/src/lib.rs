@@ -1250,6 +1250,32 @@ mod tests {
     }
 
     #[test]
+    fn multi_hop_union_projects_denorm_tag_columns() {
+        let query = r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "a", "entity": "WorkItem", "filters": {"state": {"eq": "opened"}}, "columns": ["iid"]},
+                {"id": "b", "entity": "WorkItem", "columns": ["iid"]}
+            ],
+            "relationships": [{"type": "RELATED_TO", "from": "a", "to": "b", "hops": [1, 2]}],
+            "limit": 50
+        }"#;
+        let sql = compile_sql(query);
+        assert!(
+            sql.contains("AS source_tags"),
+            "multi-hop union must project source_tags, got:\n{sql}"
+        );
+        assert!(
+            sql.contains("AS target_tags"),
+            "multi-hop union must project target_tags, got:\n{sql}"
+        );
+        assert!(
+            sql.contains("source_tags, 'state:opened'"),
+            "anchor state filter must push onto the union's projected source_tags, got:\n{sql}"
+        );
+    }
+
+    #[test]
     fn denorm_skips_rewrite_when_node_ids_present() {
         let query = r#"{
             "query_type": "traversal",
