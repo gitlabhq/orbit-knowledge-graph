@@ -71,10 +71,16 @@ local items = [
     'ms', 8),
 ];
 
+local annotations = [
+  o.deployAnnotation('ORBIT_DS', o.GKG_ANY_SEL),
+  o.migrationAnnotation('ORBIT_DS', o.GKG_DSP_SEL),
+];
+
 o.dashboard(
   'orbit-overview',
   'Orbit — Overview',
   ['overview'],
   'Golden signals for the Orbit stack. Use the sub-dashboards for component-level metrics.',
   items,
+  annotations,
 )

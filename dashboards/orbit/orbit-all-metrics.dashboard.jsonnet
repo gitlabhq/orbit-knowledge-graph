@@ -25,10 +25,16 @@ local items =
   + o.externalSection('Rails KG request path', ext.RAILS_KG_REQUEST, 'RAILS_DS', o.RAILS_SEL)
   + o.externalSection('Rails KG traversal compaction', ext.RAILS_KG_TRAVERSAL, 'RAILS_DS', o.RAILS_SEL);
 
+local annotations = [
+  o.deployAnnotation('ORBIT_DS', o.GKG_ANY_SEL),
+  o.migrationAnnotation('ORBIT_DS', o.GKG_DSP_SEL),
+];
+
 o.dashboard(
   'orbit-all-metrics',
   'Orbit — All metrics (kitchen sink)',
   ['all'],
   'Every metric the Orbit stack emits, grouped by domain. Use the component dashboards for focused views.',
   items,
+  annotations,
 )
