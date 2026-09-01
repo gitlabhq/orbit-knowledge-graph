@@ -154,10 +154,10 @@ the full stack or re-importing the datalake.
 
 ### Reload (wipe graph, keep datalake)
 
-Drops the `gkg` database, re-applies user grants, and restarts GKG.
-The indexer re-creates the schema on boot and re-indexes from the
-existing datalake data. Use this to test schema changes or indexer
-behavior from a clean graph.
+Drops and recreates the `gkg` database, then restarts GKG. The
+checkpoint tables live in the graph DB, so dropping it implicitly
+resets them. The indexer re-creates the schema on boot and re-indexes
+from the existing datalake data. Grants persist across the drop.
 
 ```bash
 RUN_ID=bench1 bash bench/scripts/infra.sh reload
@@ -166,10 +166,12 @@ RUN_ID=bench1 bash bench/scripts/infra.sh reload
 ### Deploy new code
 
 Builds a debug GKG image from your local working tree, pushes it to the
-registry, upgrades the Helm release, and restarts the pods.
+registry, upgrades the Helm release, and restarts the pods. To skip the
+build and use an existing image (e.g. a CI dev tag), set `GKG_IMAGE_TAG`.
 
 ```bash
-RUN_ID=bench1 bash bench/scripts/infra.sh deploy
+RUN_ID=bench1 bash bench/scripts/infra.sh deploy                    # build locally
+GKG_IMAGE_TAG=latest RUN_ID=bench1 bash bench/scripts/infra.sh deploy  # use pre-built
 ```
 
 To deploy and wipe the graph in one step:
@@ -178,7 +180,8 @@ To deploy and wipe the graph in one step:
 RUN_ID=bench1 bash bench/scripts/infra.sh deploy --reload
 ```
 
-The image is tagged `bench-<short-sha>` from your current HEAD.
+The image is tagged `bench-<short-sha>-dirty` when the working tree has
+uncommitted changes, or `bench-<short-sha>` for a clean tree.
 
 ## Dedicated ClickHouse pool
 

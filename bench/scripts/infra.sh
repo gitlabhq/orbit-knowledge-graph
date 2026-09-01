@@ -120,13 +120,16 @@ case "${1:-}" in
     "$TF" -chdir="${TF_DIR}" output "$@"
     ;;
   reload)
-    # Wipe the graph DB (keep datalake), re-apply grants, reset checkpoints,
-    # and restart GKG. The datalake and its imported data are untouched.
+    # Wipe the graph DB (keep datalake) and restart GKG. Dropping and
+    # recreating `gkg` also drops the checkpoint tables (they live in the
+    # graph DB), so on boot the indexer re-creates schema and re-indexes
+    # from the untouched datalake. Grants persist across DROP DATABASE.
     shift
     : "${RUN_ID:?RUN_ID is required for reload}"
     CH_NS="ra-ch-${RUN_ID}"
     GKG_NS="e2e-${RUN_ID}-gkg"
     KCTX=$("$TF" -chdir="${TF_DIR}" output -raw kctx 2>/dev/null)
+    : "${KCTX:?could not resolve kube-context from terraform output; run 'infra.sh apply' first}"
 
     echo "[infra] Dropping and recreating graph DB (datalake untouched)"
     CH_PASS=$(kubectl --context="${KCTX}" get secret ra-ch-credentials -n "${CH_NS}" \
@@ -154,6 +157,7 @@ case "${1:-}" in
     fi
 
     KCTX=$("$TF" -chdir="${TF_DIR}" output -raw kctx 2>/dev/null)
+    : "${KCTX:?could not resolve kube-context from terraform output; run 'infra.sh apply' first}"
     GKG_NS="e2e-${RUN_ID}-gkg"
     IMAGE="registry.gitlab.com/gitlab-org/orbit/knowledge-graph/gkg"
 
