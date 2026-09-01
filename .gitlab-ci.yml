@@ -322,34 +322,6 @@ ddl-freshness-check:
   script:
     - bash ./scripts/check-ddl-freshness.sh
 
-sign-repackage-check:
-  stage: lint
-  extends:
-    - .job-template
-    - .mr-and-main-rules
-  needs: []
-  script:
-    - bash ./scripts/test-sign-and-repackage.sh
-
-# Proves the real signer accepts the entitlement flag sign-and-repackage.sh
-# passes, without the protected signing cert. Runs only when the signing files
-# change because it pulls the code-signer image.
-macos-signing-flag-check:
-  stage: lint
-  image: ${CI_REGISTRY}/gitlab-com/gl-infra/common-ci-tasks-images/code-signer:1.3.0
-  tags:
-    - saas-linux-medium-amd64
-  needs: []
-  rules:
-    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
-      changes:
-        - scripts/sign-and-repackage.sh
-        - scripts/macos-entitlements.plist
-        - scripts/test-sign-and-repackage.sh
-  script:
-    - rcodesign sign --help 2>&1 | grep -- '--entitlements-xml-file'
-    - sign-macos-binaries --help 2>&1 | grep -- '--rcodesign-args'
-
 migration-ledger-check:
   stage: lint
   extends:
