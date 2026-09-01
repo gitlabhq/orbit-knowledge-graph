@@ -502,8 +502,8 @@ local items =
   + reference;
 
 local annotations = [
-  o.deployAnnotation(DS, SEL),
   o.migrationAnnotation(DS, o.GKG_DSP_SEL),
+  o.deployAnnotation(DS, SEL),
 ];
 
 o.dashboard(

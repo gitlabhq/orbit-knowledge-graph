@@ -993,14 +993,39 @@ local deployAnnotation(ds_var, selector, name='Deploys', color='rgba(0, 211, 255
     ds_var, color, '{{version}}', 'Deploy',
   );
 
-// One marker per schema migration phase execution. The counter only moves when
-// a phase actually runs, so `increase() > 0` over the step is already a
-// point event and needs no offset trick.
+// One marker per schema migration.
+//
+// `increase()` alone misses the common case. A migration normally runs during
+// dispatcher startup, so the phase counters are born at 1 on the pod's very
+// first scrape and never move again; with no earlier sample to diff against,
+// `increase()` reports nothing and the migration goes unannotated. Detecting
+// the series appearing is what catches those, and the per-pod grouping keeps a
+// new dispatcher's counters distinct from the outgoing pod's, which are still
+// inside Prometheus' staleness window during a rollover. `increase()` stays as
+// the second arm for the other case: a long-lived dispatcher migrating again
+// without a restart, where the series already exists and only the value moves.
+//
+// Only the terminal `complete` phase is annotated, plus any phase that failed.
+// A migration records all five of its phases in the same second, so annotating
+// each one stacks five markers on one pixel and buys no extra information;
+// the per-phase counters are already charted in the migration row.
+// `result="skipped"` is the no-op every dispatcher records at boot when there
+// is nothing to migrate, so `complete` only counts when it did real work.
+local MIGRATION_EVENTS = ['phase="complete", result!="skipped"', 'result="failure"'];
+
 local migrationAnnotation(ds_var, selector, name='Schema migration', color='rgba(255, 152, 0, 1)') =
+  local series(filter, suffix) =
+    'gkg_schema_migration_phase_total{%s, %s}%s' % [selector, filter, suffix];
+  local union(render) = '(%s)' % std.join(' or ', std.map(render, MIGRATION_EVENTS));
+  local grouped(suffix) =
+    'group by (phase, result, pod) %s' % union(function(f) series(f, suffix));
+  local appeared = 'count by (phase, result) (%s unless %s)'
+                   % [grouped(''), grouped(' offset ' + ANNOTATION_WINDOW)];
+  local incremented = 'sum by (phase, result) %s > 0'
+                      % union(function(f) 'increase(%s[%s])' % [series(f, ''), ANNOTATION_WINDOW]);
   promAnnotation(
     name,
-    'sum by (phase, result) (increase(gkg_schema_migration_phase_total{%s}[%s])) > 0'
-    % [selector, ANNOTATION_WINDOW],
+    '%s or %s' % [appeared, incremented],
     ds_var, color, '{{phase}} / {{result}}', 'Schema migration',
   );
 

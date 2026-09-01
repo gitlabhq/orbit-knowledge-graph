@@ -7,13 +7,13 @@
           "uid": "$ORBIT_DS"
         },
         "enable": true,
-        "expr": "label_replace(group by (image_spec) (kube_pod_container_info{container=\"gkg-webserver\", cluster=~\"$cluster\"}) unless group by (image_spec) (kube_pod_container_info{container=\"gkg-webserver\", cluster=~\"$cluster\"} offset $__interval), \"version\", \"$1\", \"image_spec\", \".*:(.*)\")",
+        "expr": "count by (phase, result) (group by (phase, result, pod) (gkg_schema_migration_phase_total{container=\"gkg-dispatcher\", cluster=~\"$cluster\", phase=\"complete\", result!=\"skipped\"} or gkg_schema_migration_phase_total{container=\"gkg-dispatcher\", cluster=~\"$cluster\", result=\"failure\"}) unless group by (phase, result, pod) (gkg_schema_migration_phase_total{container=\"gkg-dispatcher\", cluster=~\"$cluster\", phase=\"complete\", result!=\"skipped\"} offset $__interval or gkg_schema_migration_phase_total{container=\"gkg-dispatcher\", cluster=~\"$cluster\", result=\"failure\"} offset $__interval)) or sum by (phase, result) (increase(gkg_schema_migration_phase_total{container=\"gkg-dispatcher\", cluster=~\"$cluster\", phase=\"complete\", result!=\"skipped\"}[$__interval]) or increase(gkg_schema_migration_phase_total{container=\"gkg-dispatcher\", cluster=~\"$cluster\", result=\"failure\"}[$__interval])) > 0",
         "hide": false,
-        "iconColor": "rgba(0, 211, 255, 1)",
-        "name": "Deploys",
+        "iconColor": "rgba(255, 152, 0, 1)",
+        "name": "Schema migration",
         "step": "60s",
-        "textFormat": "{{version}}",
-        "titleFormat": "Deploy"
+        "textFormat": "{{phase}} / {{result}}",
+        "titleFormat": "Schema migration"
       },
       {
         "datasource": {
@@ -21,13 +21,13 @@
           "uid": "$ORBIT_DS"
         },
         "enable": true,
-        "expr": "sum by (phase, result) (increase(gkg_schema_migration_phase_total{container=\"gkg-dispatcher\", cluster=~\"$cluster\"}[$__interval])) > 0",
+        "expr": "label_replace(group by (image_spec) (kube_pod_container_info{container=\"gkg-webserver\", cluster=~\"$cluster\"}) unless group by (image_spec) (kube_pod_container_info{container=\"gkg-webserver\", cluster=~\"$cluster\"} offset $__interval), \"version\", \"$1\", \"image_spec\", \".*:(.*)\")",
         "hide": false,
-        "iconColor": "rgba(255, 152, 0, 1)",
-        "name": "Schema migration",
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Deploys",
         "step": "60s",
-        "textFormat": "{{phase}} / {{result}}",
-        "titleFormat": "Schema migration"
+        "textFormat": "{{version}}",
+        "titleFormat": "Deploy"
       }
     ]
   },
