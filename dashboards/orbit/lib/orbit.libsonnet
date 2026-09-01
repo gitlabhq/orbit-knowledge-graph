@@ -979,17 +979,24 @@ local promAnnotation(name, expr, ds_var, color, textFormat, titleFormat='', enab
 };
 
 // Marks the first moment a container image tag the service was not already
-// running shows up. `group by (image_spec)` collapses the per-pod series first,
-// so a rolling update that replaces six pods still annotates once. Reads the
-// image off kube-state-metrics rather than a deploy webhook because Orbit
-// deploys through Argo CD, which posts nothing to Grafana's annotation store.
+// running shows up. Collapsing the per-pod series first means a rolling update
+// that replaces six pods still annotates once. Reads the image off
+// kube-state-metrics rather than a deploy webhook because Orbit deploys through
+// Argo CD, which posts nothing to Grafana's annotation store.
+//
+// `cluster` stays in the grouping because the picker offers an all-clusters
+// option. Grouped on the tag alone, one release rolling to staging before
+// production collapses into a single group, the staging rollout consumes the
+// first appearance, and the production one draws no marker at all. Grouping per
+// cluster is a no-op whenever a single cluster is selected.
 local deployAnnotation(ds_var, selector, name='Deploys', color='rgba(0, 211, 255, 1)') =
-  local info(offset) = 'group by (image_spec) (kube_pod_container_info{%s}%s)' % [selector, offset];
+  local info(offset) =
+    'group by (image_spec, cluster) (kube_pod_container_info{%s}%s)' % [selector, offset];
   promAnnotation(
     name,
     'label_replace(%s unless %s, "version", "$1", "image_spec", ".*:(.*)")'
     % [info(''), info(' offset ' + ANNOTATION_WINDOW)],
-    ds_var, color, '{{version}}', 'Deploy',
+    ds_var, color, '{{version}} on {{cluster}}', 'Deploy',
   );
 
 // ---------- Public surface ----------
