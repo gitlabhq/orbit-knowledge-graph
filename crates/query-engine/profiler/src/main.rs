@@ -52,6 +52,12 @@ struct Cli {
     #[arg(short = 't', long, required = true)]
     traversal_paths: Vec<String>,
 
+    /// GitLab access level tagged onto every traversal path (20 = Reporter,
+    /// 25 = Security Manager, 30 = Developer, 40 = Maintainer, 50 = Owner).
+    /// Nodes whose redaction floor is above this compile to `WHERE false`.
+    #[arg(long, default_value_t = compiler::DEFAULT_PATH_ACCESS_LEVEL)]
+    access_level: u32,
+
     /// Ontology config directory
     #[arg(long, default_value = "config/ontology")]
     ontology: PathBuf,
@@ -404,7 +410,12 @@ async fn main() -> Result<()> {
             .organization_id()
             .context("failed to parse org_id from first traversal path")?;
 
-    let mut security_ctx = SecurityContext::new(org_id, cli.traversal_paths.clone())
+    let authorized_paths = cli
+        .traversal_paths
+        .iter()
+        .map(|p| compiler::AuthorizedPath::new(p.clone(), cli.access_level))
+        .collect();
+    let mut security_ctx = SecurityContext::new_with_roles(org_id, authorized_paths)
         .map_err(|e| anyhow::anyhow!("invalid security context: {e}"))?;
 
     if !cli.scope_prefixes.is_empty() {
