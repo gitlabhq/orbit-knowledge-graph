@@ -25,6 +25,10 @@ use tracing_subscriber::fmt::format::FmtSpan;
 
 const LOCAL_DDL: &str = include_str!(concat!(env!("CONFIG_DIR"), "/graph_local.sql"));
 
+const SKILL_LONG_ABOUT: &str = "Print the bundled, version-matched orbit-local skill content.\n\n\
+                                With no argument, prints SKILL.md (the manifest). Pass a relative path \
+                                such as `references/sql.md` or `references/repo_map.md` to print that file.";
+
 /// Per-file byte cap for local indexing; files above it are recorded as nodes
 /// but not loaded or parsed.
 const MAX_INDEXED_FILE_BYTES: u64 = 5_000_000;
@@ -306,12 +310,7 @@ enum Commands {
     Mcp(McpArgs),
     #[command(name = "repo-map", hide = true)]
     RepoMap(RepoMapArgs),
-    #[command(about = descriptions::short("skill"))]
-    #[command(
-        long_about = "Print the bundled, version-matched orbit-local skill content.\n\n\
-                      With no argument, prints SKILL.md (the manifest). Pass a relative path \
-                      such as `references/sql.md` or `references/repo_map.md` to print that file."
-    )]
+    #[command(about = descriptions::short("skill"), long_about = SKILL_LONG_ABOUT)]
     Skill {
         /// Skill file to print, relative to the skill root (default: SKILL.md).
         #[arg(value_name = "PATH")]
@@ -406,7 +405,9 @@ enum LocalCommands {
     Mcp(McpArgs),
     #[command(name = "repo-map")]
     RepoMap(RepoMapArgs),
+    #[command(about = descriptions::short("skill"), long_about = SKILL_LONG_ABOUT)]
     Skill {
+        /// Skill file to print, relative to the skill root (default: SKILL.md).
         #[arg(value_name = "PATH")]
         path: Option<String>,
     },

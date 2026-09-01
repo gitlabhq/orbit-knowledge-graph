@@ -153,7 +153,9 @@ fn table_exists(client: &DuckDbClient, name: &str) -> Result<bool> {
 }
 
 fn remove_db_files(db_path: &Path) -> Result<()> {
-    for path in [db_path.to_path_buf(), db_path.with_extension("duckdb.wal")] {
+    let mut wal = db_path.as_os_str().to_owned();
+    wal.push(".wal");
+    for path in [db_path.to_path_buf(), PathBuf::from(wal)] {
         if let Err(e) = std::fs::remove_file(&path)
             && e.kind() != std::io::ErrorKind::NotFound
         {
@@ -374,6 +376,20 @@ mod tests {
             .unwrap();
         assert_eq!(status.value(0), "error");
         assert_eq!(msg.value(0), "failed to get current branch");
+    }
+
+    #[test]
+    fn remove_db_files_appends_wal_to_the_full_path() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let db = tmp.path().join("mydb");
+        let wal = tmp.path().join("mydb.wal");
+        std::fs::write(&db, b"").unwrap();
+        std::fs::write(&wal, b"").unwrap();
+
+        remove_db_files(&db).unwrap();
+
+        assert!(!db.exists());
+        assert!(!wal.exists());
     }
 
     #[test]
