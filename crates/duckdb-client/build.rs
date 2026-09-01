@@ -1,7 +1,6 @@
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use sha2::{Digest, Sha256};
 
@@ -104,14 +103,25 @@ fn sha256_of(path: &Path) -> Option<String> {
     Some(digest.iter().map(|b| format!("{b:02x}")).collect())
 }
 
+/// Guard against a hijacked endpoint streaming unbounded data; the largest
+/// real artifact (windows_amd64) is ~8 MB.
+const DOWNLOAD_LIMIT: u64 = 64 * 1024 * 1024;
+
 fn download(url: &str, dest: &Path) {
-    let tmp = dest.with_extension("partial");
-    let status = Command::new("curl")
-        .args(["-fsSL", "--retry", "3", "-o"])
-        .arg(&tmp)
-        .arg(url)
-        .status()
-        .expect("curl is required to fetch the DuckDB fts extension");
-    assert!(status.success(), "failed to download {url}");
-    fs::rename(&tmp, dest).unwrap();
+    let mut last_err = None;
+    for _ in 0..3 {
+        match ureq::get(url).call().and_then(|mut resp| {
+            resp.body_mut()
+                .with_config()
+                .limit(DOWNLOAD_LIMIT)
+                .read_to_vec()
+        }) {
+            Ok(bytes) => {
+                fs::write(dest, bytes).unwrap();
+                return;
+            }
+            Err(e) => last_err = Some(e),
+        }
+    }
+    panic!("failed to download {url}: {}", last_err.unwrap());
 }
