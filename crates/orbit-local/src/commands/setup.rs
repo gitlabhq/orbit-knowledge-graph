@@ -92,7 +92,27 @@ pub(crate) fn run(assistants: Vec<String>, remove: bool, mode: Mode, target: Tar
         }
     }
 
+    if !remove && spec::launcher() == spec::GLAB_LAUNCHER {
+        ensure_glab_auto_run();
+    }
+
     Ok(())
+}
+
+fn ensure_glab_auto_run() {
+    let ok = std::process::Command::new("glab")
+        .args(["config", "set", "orbit_local_auto_run", "true"])
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false);
+    if ok {
+        println!("  glab config  ->  orbit_local_auto_run=true (hooks run without prompting)");
+    } else {
+        eprintln!(
+            "warning: failed to set orbit_local_auto_run; run `glab config set \
+             orbit_local_auto_run true` so the installed hooks never prompt"
+        );
+    }
 }
 
 fn install_extras(spec: &AssistantSpec, target: &Target, mode: Mode) -> Result<()> {
@@ -207,7 +227,10 @@ fn backup_path(path: &Path) -> PathBuf {
 
 fn resolve_mode(value: &Value, mode: Mode) -> Value {
     match value {
-        Value::String(s) => Value::String(s.replace("{mode}", mode.as_str())),
+        Value::String(s) => Value::String(
+            s.replace("{mode}", mode.as_str())
+                .replace("{{orbit}}", spec::launcher()),
+        ),
         Value::Array(items) => Value::Array(items.iter().map(|v| resolve_mode(v, mode)).collect()),
         Value::Object(map) => Value::Object(
             map.iter()
@@ -505,8 +528,9 @@ mod tests {
         .unwrap();
 
         let settings = std::fs::read_to_string(dir.path().join(".claude/settings.json")).unwrap();
-        assert!(settings.contains("orbit hook-guard search --mode remote"));
+        assert!(settings.contains("orbit local hook-guard search --mode remote"));
         assert!(!settings.contains("{mode}"));
+        assert!(!settings.contains("{{orbit}}"));
 
         let plugin =
             std::fs::read_to_string(dir.path().join(".opencode/plugins/orbit.js")).unwrap();

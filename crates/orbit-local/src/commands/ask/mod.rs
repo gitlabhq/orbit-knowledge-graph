@@ -89,6 +89,12 @@ pub(crate) fn run(
             backend.root(),
         )?;
     }
+    let launcher = crate::commands::setup::spec::launcher();
+    writeln!(
+        out,
+        "\nFull body of any match: {launcher} show \"<fqn>\" (instead of reading the file)\n\
+         Every connection of any match: {launcher} describe \"<fqn>\""
+    )?;
 
     if outcome.weak {
         return Ok(());
@@ -240,8 +246,9 @@ fn report_confidence(
             out,
             "note: weak matches — too few question terms anchor a symbol name, \
              so the results below may be coincidental and edge details are \
-             omitted. Rephrase with a code identifier, or use `orbit local sql` \
-             for an exact-name lookup."
+             omitted. Rephrase with a code identifier, or use `{} sql` \
+             for an exact-name lookup.",
+            crate::commands::setup::spec::launcher()
         )?;
     }
     if !outcome.unmatched_terms.is_empty() {

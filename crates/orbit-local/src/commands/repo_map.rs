@@ -185,8 +185,9 @@ impl RepoMap {
         )?;
         if scalar_i64(&batches) == 0 {
             anyhow::bail!(
-                "current commit {} is not indexed in the local graph\n       run:  orbit index .",
-                self.sha
+                "current commit {} is not indexed in the local graph\n       run:  {} index .",
+                self.sha,
+                crate::commands::setup::spec::launcher()
             );
         }
         Ok(())

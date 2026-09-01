@@ -79,13 +79,44 @@ static MODES: LazyLock<Modes> = LazyLock::new(|| {
         .unwrap_or_else(|e| panic!("config/setup/modes.yaml is invalid: {e}"))
 });
 
-static RENDERED_INSTRUCTIONS: LazyLock<[String; 2]> = LazyLock::new(|| {
-    let graph = graph_contents();
-    Mode::ALL.map(|mode| {
-        mode.texts()
+pub(crate) const DIRECT_LAUNCHER: &str = "orbit local";
+pub(crate) const GLAB_LAUNCHER: &str = "glab orbit local";
+
+pub(crate) fn launcher() -> &'static str {
+    static LAUNCHER: LazyLock<&'static str> = LazyLock::new(|| {
+        if std::env::var("GITLAB_ORBIT_DISTRIBUTION").as_deref() == Ok("glab") {
+            GLAB_LAUNCHER
+        } else {
+            DIRECT_LAUNCHER
+        }
+    });
+    &LAUNCHER
+}
+
+fn render_launcher(text: &str, launcher: &str) -> String {
+    text.replace("{{orbit}}", launcher)
+}
+
+fn render_instructions(mode: Mode, launcher: &str) -> String {
+    render_launcher(
+        &mode
+            .texts()
             .instructions
             .trim_end()
-            .replace("{{graph_contents}}", &graph)
+            .replace("{{graph_contents}}", &graph_contents()),
+        launcher,
+    )
+}
+
+static RENDERED_INSTRUCTIONS: LazyLock<[String; 2]> =
+    LazyLock::new(|| Mode::ALL.map(|mode| render_instructions(mode, launcher())));
+
+static RENDERED_NUDGES: LazyLock<[[String; 2]; 2]> = LazyLock::new(|| {
+    Mode::ALL.map(|mode| {
+        [
+            render_launcher(mode.texts().nudge_search.trim_end(), launcher()),
+            render_launcher(mode.texts().nudge_read.trim_end(), launcher()),
+        ]
     })
 });
 
@@ -95,35 +126,34 @@ fn graph_contents() -> String {
     use code_graph::v2::types::{DefKind, EdgeKind, NodeKind};
 
     let ontology = ontology::Ontology::load_embedded().expect("embedded ontology must load");
-    let mut lines = Vec::new();
-    for kind in NodeKind::iter() {
-        let node = ontology
-            .get_node(kind.as_ref())
-            .unwrap_or_else(|| panic!("ontology must declare node {}", kind.as_ref()));
-        let mut line = format!(
-            "- `{}` \u{2014} {}",
-            node.destination_table, node.description
-        );
-        if matches!(kind, NodeKind::Definition) {
-            let def_types = DefKind::iter()
-                .map(|k| k.to_string())
-                .collect::<Vec<_>>()
-                .join(", ");
-            line.push_str(&format!(" (`definition_type`: {def_types})"));
-        }
-        lines.push(line);
-    }
-    lines.push(format!(
-        "- `{}` \u{2014} typed edges between them; `relationship_kind`:",
+    let nodes = NodeKind::iter()
+        .map(|kind| {
+            let node = ontology
+                .get_node(kind.as_ref())
+                .unwrap_or_else(|| panic!("ontology must declare node {}", kind.as_ref()));
+            if matches!(kind, NodeKind::Definition) {
+                let def_types = DefKind::iter()
+                    .map(|k| k.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!(
+                    "`{}` (`definition_type`: {def_types})",
+                    node.destination_table
+                )
+            } else {
+                format!("`{}`", node.destination_table)
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    let edges = EdgeKind::iter()
+        .map(|kind| format!("`{}`", kind.as_ref()))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        "{nodes}; typed edges in `{}` (`relationship_kind`: {edges})",
         ontology.edge_table()
-    ));
-    for kind in EdgeKind::iter() {
-        let description = ontology
-            .get_edge_description(kind.as_ref())
-            .unwrap_or_else(|| panic!("ontology must describe edge {}", kind.as_ref()));
-        lines.push(format!("  - `{}` \u{2014} {}", kind.as_ref(), description));
-    }
-    lines.join("\n")
+    )
 }
 
 pub(crate) fn instructions(mode: Mode) -> &'static str {
@@ -131,11 +161,11 @@ pub(crate) fn instructions(mode: Mode) -> &'static str {
 }
 
 pub(crate) fn nudge_search(mode: Mode) -> &'static str {
-    mode.texts().nudge_search.trim_end()
+    &RENDERED_NUDGES[mode as usize][0]
 }
 
 pub(crate) fn nudge_read(mode: Mode) -> &'static str {
-    mode.texts().nudge_read.trim_end()
+    &RENDERED_NUDGES[mode as usize][1]
 }
 
 #[derive(Debug, Deserialize)]
@@ -215,17 +245,23 @@ pub(crate) fn names() -> Vec<&'static str> {
 
 impl TemplateFile {
     pub(super) fn contents(&self, mode: Mode) -> String {
+        self.contents_with(mode, launcher())
+    }
+
+    fn contents_with(&self, mode: Mode, launcher: &str) -> String {
         let mut rendered = embedded_text(&self.template);
         for (name, value) in &mode.texts().template_vars {
             rendered = rendered.replace(&format!("{{{{{name}}}}}"), &value.rendered());
         }
-        rendered
+        render_launcher(&rendered, launcher)
     }
 
     pub(super) fn is_unmodified(&self, contents: &str) -> bool {
-        Mode::ALL
-            .iter()
-            .any(|mode| self.contents(*mode) == contents)
+        Mode::ALL.iter().any(|mode| {
+            [DIRECT_LAUNCHER, GLAB_LAUNCHER]
+                .iter()
+                .any(|launcher| self.contents_with(*mode, launcher) == contents)
+        })
     }
 }
 
@@ -291,6 +327,20 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn launcher_substitution_renders_both_distributions() {
+        for (launcher, expected) in [
+            (DIRECT_LAUNCHER, "`orbit local ask"),
+            (GLAB_LAUNCHER, "`glab orbit local ask"),
+        ] {
+            let rendered = render_instructions(Mode::Local, launcher);
+            assert!(rendered.contains(expected), "{launcher}: {rendered}");
+            assert!(!rendered.contains("{{orbit}}"), "{launcher}");
+        }
+        let glab = get("claude").unwrap().json_merges[0].entries[0].to_string();
+        assert!(glab.contains("{{orbit}} hook-guard"), "{glab}");
     }
 
     #[test]
