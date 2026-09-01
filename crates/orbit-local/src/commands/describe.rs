@@ -1,42 +1,17 @@
 use std::path::PathBuf;
 
 use anyhow::Result;
-use duckdb_client::{i64_column, string_column};
+use duckdb_client::string_column;
 
-use crate::{sql, workspace};
+use crate::commands::fqn;
 
 pub(crate) fn run(fqn: String, repo: Option<PathBuf>, db: Option<PathBuf>) -> Result<()> {
-    let top_level = workspace::git_toplevel(&repo.unwrap_or_else(|| PathBuf::from(".")))?;
-    let git = workspace::git_info(&top_level)?;
-    let client = sql::open_graph(db)?;
-    let defs = client.query_arrow_json(
-        "SELECT id, definition_type, file_path, start_line, end_line
-         FROM gl_definition
-         WHERE project_id = ?1 AND commit_sha = ?2 AND fqn = ?3
-         ORDER BY file_path, start_line",
-        &[
-            git.project_id.into(),
-            git.commit_sha.clone().into(),
-            fqn.clone().into(),
-        ],
-    )?;
-    let ids = i64_column(&defs, "id");
-    let kinds = string_column(&defs, "definition_type");
-    let files = string_column(&defs, "file_path");
-    let starts = i64_column(&defs, "start_line");
-    let ends = i64_column(&defs, "end_line");
-    if ids.is_empty() {
-        anyhow::bail!(
-            "no definition {fqn:?} for commit {} — pass the exact fqn printed by \
-             `orbit local ask`, and make sure the commit is indexed (`orbit index <path>`)",
-            git.commit_sha
-        );
-    }
-    for i in 0..ids.len() {
+    let resolved = fqn::resolve(&fqn, repo, db)?;
+    for i in 0..resolved.ids.len() {
         if i > 0 {
             println!();
         }
-        let edges = client.query_arrow_json(
+        let edges = resolved.client.query_arrow_json(
             "WITH labels AS (
   SELECT id, fqn AS label,
          file_path || ':' || CAST(start_line AS VARCHAR) AS loc
@@ -57,9 +32,9 @@ JOIN labels l ON l.id = CASE WHEN e.source_id = ?1 THEN e.target_id ELSE e.sourc
 WHERE e.source_id = ?1 OR e.target_id = ?1
 ORDER BY kind, dir DESC, l.label, l.loc",
             &[
-                ids[i].into(),
-                git.project_id.into(),
-                git.commit_sha.clone().into(),
+                resolved.ids[i].into(),
+                resolved.git.project_id.into(),
+                resolved.git.commit_sha.clone().into(),
             ],
         )?;
         let edge_kinds = string_column(&edges, "kind");
@@ -68,10 +43,10 @@ ORDER BY kind, dir DESC, l.label, l.loc",
         let locs = string_column(&edges, "loc");
         println!(
             "{fqn}  [{}]  {}:{}-{}  (links {})",
-            kinds[i],
-            files[i],
-            starts[i],
-            ends[i],
+            resolved.kinds[i],
+            resolved.files[i],
+            resolved.starts[i],
+            resolved.ends[i],
             edge_kinds.len()
         );
         if edge_kinds.is_empty() {

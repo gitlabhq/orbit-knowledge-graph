@@ -85,8 +85,6 @@ fn absolutize(path: PathBuf) -> Result<PathBuf> {
     }
 }
 
-const META_TABLE_DDL: &str =
-    "CREATE TABLE IF NOT EXISTS _orbit_meta (key VARCHAR PRIMARY KEY, value VARCHAR NOT NULL)";
 const LOCAL_DDL_META_KEY: &str = "local_ddl";
 
 pub fn ensure_graph_schema(db_path: &Path, ddl: &str) -> Result<()> {
@@ -110,9 +108,6 @@ pub fn ensure_graph_schema(db_path: &Path, ddl: &str) -> Result<()> {
         .initialize_schema(ddl)
         .context("failed to create schema")?;
     client
-        .execute(META_TABLE_DDL, &[])
-        .context("failed to create _orbit_meta")?;
-    client
         .execute(
             "INSERT INTO _orbit_meta (key, value) VALUES (?1, ?2)",
             &[json!(LOCAL_DDL_META_KEY), json!(ddl)],
@@ -131,25 +126,19 @@ fn stored_local_ddl(client: &DuckDbClient) -> Result<Option<String>> {
             &[json!(LOCAL_DDL_META_KEY)],
         )
         .context("failed to read _orbit_meta")?;
-    let Some(batch) = batches.iter().find(|b| b.num_rows() > 0) else {
-        return Ok(None);
-    };
-    let values = batch
-        .column(0)
-        .as_any()
-        .downcast_ref::<arrow::array::StringArray>()
-        .context("_orbit_meta.value is not a string column")?;
-    Ok(Some(values.value(0).to_string()))
+    Ok(duckdb_client::string_column(&batches, "value")
+        .into_iter()
+        .next())
 }
 
 fn table_exists(client: &DuckDbClient, name: &str) -> Result<bool> {
     let batches = client
         .query_arrow_json(
-            "SELECT 1 FROM information_schema.tables WHERE table_name = ?1",
+            "SELECT CAST(COUNT(*) AS BIGINT) AS n FROM information_schema.tables WHERE table_name = ?1",
             &[json!(name)],
         )
         .context("failed to query information_schema")?;
-    Ok(batches.iter().any(|b| b.num_rows() > 0))
+    Ok(duckdb_client::scalar_i64(&batches) > 0)
 }
 
 fn remove_db_files(db_path: &Path) -> Result<()> {
@@ -424,7 +413,8 @@ mod tests {
     fn ensure_graph_schema_rebuilds_on_ddl_drift() {
         let tmp = tempfile::TempDir::new().unwrap();
         let db = tmp.path().join("graph.duckdb");
-        let old_ddl = "CREATE TABLE IF NOT EXISTS old_table (id BIGINT)";
+        let old_ddl = "CREATE TABLE IF NOT EXISTS _orbit_meta (key VARCHAR PRIMARY KEY, value VARCHAR NOT NULL);
+             CREATE TABLE IF NOT EXISTS old_table (id BIGINT)";
 
         ensure_graph_schema(&db, old_ddl).unwrap();
         ensure_graph_schema(&db, LOCAL_DDL).unwrap();

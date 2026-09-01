@@ -206,17 +206,39 @@ struct AskArgs {
     db: Option<PathBuf>,
 }
 
+fn fqn_arg_help() -> String {
+    format!(
+        "Exact fully qualified name as printed by `{} ask`.",
+        commands::setup::spec::launcher()
+    )
+}
+
+fn show_long_about() -> String {
+    format!(
+        "Print the full source body of an indexed definition.\n\n\
+         Takes the exact fully qualified name as printed by `{} ask` \
+         and prints the definition's source lines from the working tree, so a \
+         follow-up on an ask match needs no file read.",
+        commands::setup::spec::launcher()
+    )
+}
+
+fn describe_long_about() -> String {
+    format!(
+        "Print every graph connection of an indexed definition.\n\n\
+         Takes the exact fully qualified name as printed by `{} ask` \
+         and prints all edges touching it — callers, callees, supertypes, \
+         subtypes, members, importers — so a truncated `called by: … +N more` \
+         line or any full call-graph question needs no SQL follow-up.",
+        commands::setup::spec::launcher()
+    )
+}
+
 #[derive(Args, Debug, PartialEq)]
 #[command(about = "Print the full source body of a definition by exact fqn")]
-#[command(
-    long_about = "Print the full source body of an indexed definition.\n\n\
-                  Takes the exact fully qualified name as printed by `orbit local ask` \
-                  and prints the definition's source lines from the working tree, so a \
-                  follow-up on an ask match needs no file read."
-)]
+#[command(long_about = show_long_about())]
 struct ShowArgs {
-    /// Exact fully qualified name as printed by `orbit local ask`.
-    #[arg(value_name = "FQN")]
+    #[arg(value_name = "FQN", help = fqn_arg_help())]
     fqn: String,
 
     /// Repository path (default: current directory).
@@ -230,16 +252,9 @@ struct ShowArgs {
 
 #[derive(Args, Debug, PartialEq)]
 #[command(about = "Print every connection of a definition, by exact fqn")]
-#[command(
-    long_about = "Print every graph connection of an indexed definition.\n\n\
-                  Takes the exact fully qualified name as printed by `orbit local ask` \
-                  and prints all edges touching it — callers, callees, supertypes, \
-                  subtypes, members, importers — so a truncated `called by: … +N more` \
-                  line or any full call-graph question needs no SQL follow-up."
-)]
+#[command(long_about = describe_long_about())]
 struct DescribeArgs {
-    /// Exact fully qualified name as printed by `orbit local ask`.
-    #[arg(value_name = "FQN")]
+    #[arg(value_name = "FQN", help = fqn_arg_help())]
     fqn: String,
 
     /// Repository path (default: current directory).
@@ -772,12 +787,13 @@ fn run_schema(db: Option<PathBuf>, raw: bool, tables: Vec<String>) -> Result<()>
         let missing: Vec<_> = tables.iter().filter(|t| !found.contains(*t)).collect();
         if !missing.is_empty() {
             anyhow::bail!(
-                "no table named {} in the local graph. Run `orbit schema` to list tables.",
+                "no table named {} in the local graph. Run `{} schema` to list tables.",
                 missing
                     .iter()
                     .map(|t| format!("'{t}'"))
                     .collect::<Vec<_>>()
-                    .join(", ")
+                    .join(", "),
+                commands::setup::spec::launcher()
             );
         }
         batches
@@ -824,8 +840,6 @@ pub(crate) fn index_collect(
 
     let ontology = Ontology::load_embedded().context("failed to load embedded ontology")?;
 
-    // The schema is ensured up front and the connection dropped so the
-    // write lock is not held during parsing.
     workspace::ensure_graph_schema(&db_path, LOCAL_DDL)?;
 
     let pipeline_config = code_graph::v2::PipelineConfig {
