@@ -1,3 +1,13 @@
+## [0.110.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.109.0...v0.110.0) (2026-09-01)
+
+### Features
+
+* **dashboards:** split indexer resources by pool kind ([5c7d130](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/5c7d1308587a798c1667189e364fa77aee6f4422)) by Bohdan Parkhomchuk
+
+### Fixes
+
+* **compiler:** project denorm tags through multi-hop traversal union ([f1ca428](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f1ca428aec9d38e98e461620751478e747f27eab)) by Jean-Gabriel Doyon
+
 ## [0.109.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.108.4...v0.109.0) (2026-09-01)
 
 ### Features
