@@ -2107,6 +2107,7 @@ dependencies = [
  "oxc",
  "oxc_linter",
  "oxc_resolver",
+ "parking_lot",
  "petgraph 0.8.3",
  "ra_ap_cfg",
  "ra_ap_hir",
