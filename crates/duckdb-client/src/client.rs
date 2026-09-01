@@ -252,23 +252,17 @@ fn ensure_fts_on_disk(data_dir: &Path) -> Result<PathBuf> {
     if path.is_file() {
         return Ok(path);
     }
-    let materialize = || -> std::io::Result<()> {
-        std::fs::create_dir_all(&dir)?;
-        let mut bytes = Vec::new();
-        std::io::Read::read_to_end(
-            &mut flate2::read::GzDecoder::new(FTS_EXTENSION_GZ),
-            &mut bytes,
-        )?;
-        // Concurrent orbit processes may race here; each writes a unique
-        // temp file and renames it, so a reader never observes a partial
-        // extension.
-        let tmp = dir.join(format!(".fts.duckdb_extension.{}", std::process::id()));
-        std::fs::write(&tmp, &bytes)?;
-        std::fs::rename(&tmp, &path)
-    };
-    materialize().map_err(|e| {
-        DuckDbError::Schema(format!("failed to materialize bundled fts extension: {e}"))
-    })?;
+    std::fs::create_dir_all(&dir)?;
+    let mut bytes = Vec::new();
+    std::io::Read::read_to_end(
+        &mut flate2::read::GzDecoder::new(FTS_EXTENSION_GZ),
+        &mut bytes,
+    )?;
+    // Concurrent orbit processes may race here; each writes a unique temp
+    // file and renames it, so a reader never observes a partial extension.
+    let tmp = dir.join(format!(".fts.duckdb_extension.{}", std::process::id()));
+    std::fs::write(&tmp, &bytes)?;
+    std::fs::rename(&tmp, &path)?;
     Ok(path)
 }
 

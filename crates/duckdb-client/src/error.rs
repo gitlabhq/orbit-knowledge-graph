@@ -10,4 +10,6 @@ pub enum DuckDbError {
     Arrow(#[from] arrow::error::ArrowError),
     #[error("schema error: {0}")]
     Schema(String),
+    #[error("failed to materialize bundled fts extension: {0}")]
+    FtsMaterialize(#[from] std::io::Error),
 }
