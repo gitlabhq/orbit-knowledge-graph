@@ -1,3 +1,9 @@
+## [0.110.1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.110.0...v0.110.1) (2026-09-01)
+
+### Performance
+
+* **server:** drop mimalloc secure mode ([8c03858](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/8c0385831f12b3e2caa6be8eddd9d1cc4a1951eb)) by Bohdan Parkhomchuk
+
 ## [0.110.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.109.0...v0.110.0) (2026-09-01)
 
 ### Features
