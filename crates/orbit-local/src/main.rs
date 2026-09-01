@@ -406,6 +406,18 @@ enum LocalCommands {
     Mcp(McpArgs),
     #[command(name = "repo-map")]
     RepoMap(RepoMapArgs),
+    Skill {
+        #[arg(value_name = "PATH")]
+        path: Option<String>,
+    },
+    #[command(hide = true)]
+    HookGuard {
+        #[arg(value_name = "KIND")]
+        kind: commands::hook_guard::Kind,
+
+        #[arg(long, default_value = "remote")]
+        mode: commands::setup::spec::Mode,
+    },
 }
 
 #[derive(Subcommand, Debug, PartialEq)]
@@ -466,7 +478,13 @@ async fn main() -> Result<()> {
     let matches = Cli::command().get_matches();
     let cli = Cli::from_arg_matches(&matches).expect("clap already validated the arguments");
 
-    let tracker = if matches!(cli.command, Commands::HookGuard { .. }) {
+    let tracker = if matches!(
+        cli.command,
+        Commands::HookGuard { .. }
+            | Commands::Local {
+                command: LocalCommands::HookGuard { .. }
+            }
+    ) {
         None
     } else {
         telemetry::resolve_from_env().build_tracker()
@@ -623,6 +641,11 @@ async fn dispatch_local(command: LocalCommands) -> Result<()> {
             db,
             command.unwrap_or(commands::repo_map::RepoMapCommand::Overview),
         ),
+        LocalCommands::Skill { path } => skill::run(path),
+        LocalCommands::HookGuard { kind, mode } => {
+            commands::hook_guard::run(kind, mode);
+            Ok(())
+        }
     }
 }
 

@@ -10,13 +10,13 @@ json_merges:
       project: .claude/settings.json
       global: "~/.claude/settings.json"
     path: [hooks, PreToolUse]
-    marker: orbit hook-guard
+    marker: hook-guard
     entries:
       - matcher: "Bash|Grep|Glob"
         hooks:
           - type: command
-            command: orbit hook-guard search --mode {mode}
+            command: "{{orbit}} hook-guard search --mode {mode}"
       - matcher: Read
         hooks:
           - type: command
-            command: orbit hook-guard read --mode {mode}
+            command: "{{orbit}} hook-guard read --mode {mode}"

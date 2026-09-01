@@ -121,7 +121,7 @@ mod tests {
         let updated = splice_block(&existing, &rendered_block(Mode::Local)).unwrap();
         assert!(updated.starts_with("# Before"));
         assert!(updated.ends_with("# After\n"));
-        assert!(updated.contains("orbit repo-map"));
+        assert!(updated.contains("orbit local repo-map"));
         assert!(!updated.contains("old content"));
     }
 
@@ -151,11 +151,11 @@ mod tests {
         upsert_block_in_file(&path, "AGENTS.md", Mode::Remote).unwrap();
         let written = std::fs::read_to_string(&path).unwrap();
         assert!(written.contains("glab orbit remote"));
-        assert!(!written.contains("orbit sql"));
+        assert!(!written.contains("orbit local sql"));
 
         upsert_block_in_file(&path, "AGENTS.md", Mode::Local).unwrap();
         let written = std::fs::read_to_string(&path).unwrap();
-        assert!(written.contains("orbit sql"));
+        assert!(written.contains("orbit local sql"));
         assert!(!written.contains("glab orbit remote"));
         assert_eq!(written.matches(BLOCK_BEGIN).count(), 1);
     }
