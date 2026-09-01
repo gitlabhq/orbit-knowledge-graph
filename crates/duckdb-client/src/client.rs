@@ -26,14 +26,39 @@ impl DuckDbClient {
     /// The fts artifact is embedded at build time (see build.rs) and
     /// materialized under the orbit data dir on first use, so loading never
     /// touches the network. DuckDB's own signature and metadata checks run
-    /// on every LOAD. Only search paths call this; unrelated commands must
-    /// keep working without extension availability (static musl binaries
-    /// cannot dlopen extensions at all).
+    /// on every LOAD. Covered end to end by the ask CLI integration test.
     pub fn load_fts(&self) -> Result<()> {
-        self.load_fts_file(&ensure_fts_on_disk(&fts_data_dir()?)?)
-    }
-
-    fn load_fts_file(&self, path: &Path) -> Result<()> {
+        // Mirrors the ORBIT_DATA_DIR / ~/.orbit convention of
+        // orbit-local::Workspace::default_root. Version and target in the
+        // path so engine upgrades and cross-arch binaries never reuse each
+        // other's artifact.
+        let data_dir = match std::env::var("ORBIT_DATA_DIR") {
+            Ok(dir) if !dir.is_empty() => PathBuf::from(dir),
+            _ => dirs::home_dir()
+                .ok_or_else(|| {
+                    DuckDbError::Schema("could not determine home directory".to_string())
+                })?
+                .join(".orbit"),
+        };
+        let dir = data_dir.join("duckdb-extensions").join(format!(
+            "{DUCKDB_VERSION}-{}-{}",
+            std::env::consts::ARCH,
+            std::env::consts::OS
+        ));
+        let path = dir.join("fts.duckdb_extension");
+        if !path.is_file() {
+            std::fs::create_dir_all(&dir)?;
+            let mut bytes = Vec::new();
+            std::io::Read::read_to_end(
+                &mut flate2::read::GzDecoder::new(FTS_EXTENSION_GZ),
+                &mut bytes,
+            )?;
+            // Unique temp + rename so a concurrent orbit process never
+            // loads a partially written file.
+            let tmp = dir.join(format!(".fts.duckdb_extension.{}", std::process::id()));
+            std::fs::write(&tmp, &bytes)?;
+            std::fs::rename(&tmp, &path)?;
+        }
         let path = path.to_str().ok_or_else(|| {
             DuckDbError::Schema(format!("non-UTF-8 extension path: {}", path.display()))
         })?;
@@ -227,44 +252,6 @@ impl DuckDbClient {
 }
 
 include!(concat!(env!("OUT_DIR"), "/bundled_fts.rs"));
-
-/// Mirrors the `ORBIT_DATA_DIR` / `~/.orbit` convention of
-/// `orbit-local::Workspace::default_root`.
-fn fts_data_dir() -> Result<PathBuf> {
-    match std::env::var("ORBIT_DATA_DIR") {
-        Ok(dir) if !dir.is_empty() => Ok(PathBuf::from(dir)),
-        _ => dirs::home_dir()
-            .map(|home| home.join(".orbit"))
-            .ok_or_else(|| DuckDbError::Schema("could not determine home directory".to_string())),
-    }
-}
-
-/// Decompress the embedded extension under `data_dir` and return its path.
-/// The directory name embeds the DuckDB version and build target so engine
-/// upgrades and cross-arch binaries never reuse each other's artifact.
-fn ensure_fts_on_disk(data_dir: &Path) -> Result<PathBuf> {
-    let dir = data_dir.join("duckdb-extensions").join(format!(
-        "{DUCKDB_VERSION}-{}-{}",
-        std::env::consts::ARCH,
-        std::env::consts::OS
-    ));
-    let path = dir.join("fts.duckdb_extension");
-    if path.is_file() {
-        return Ok(path);
-    }
-    std::fs::create_dir_all(&dir)?;
-    let mut bytes = Vec::new();
-    std::io::Read::read_to_end(
-        &mut flate2::read::GzDecoder::new(FTS_EXTENSION_GZ),
-        &mut bytes,
-    )?;
-    // Concurrent orbit processes may race here; each writes a unique temp
-    // file and renames it, so a reader never observes a partial extension.
-    let tmp = dir.join(format!(".fts.duckdb_extension.{}", std::process::id()));
-    std::fs::write(&tmp, &bytes)?;
-    std::fs::rename(&tmp, &path)?;
-    Ok(path)
-}
 
 fn json_params_to_sql(params: &[serde_json::Value]) -> Vec<Box<dyn duckdb::ToSql>> {
     params
@@ -513,27 +500,6 @@ CREATE TABLE IF NOT EXISTS gl_edge (
             .insert_arrow("evil_table", batch, TEST_TABLES)
             .unwrap_err();
         assert!(err.to_string().contains("unknown table"));
-    }
-
-    #[test]
-    fn bundled_fts_loads_without_network() {
-        let dir = tempfile::tempdir().unwrap();
-        let client = DuckDbClient::open_in_memory().unwrap();
-
-        let path = ensure_fts_on_disk(dir.path()).unwrap();
-        client.load_fts_file(&path).unwrap();
-
-        let batches = client
-            .query_arrow("SELECT stem('running', 'english') AS s")
-            .unwrap();
-        let stems = batches[0]
-            .column(0)
-            .as_any()
-            .downcast_ref::<StringArray>()
-            .unwrap();
-        assert_eq!(stems.value(0), "run");
-
-        assert_eq!(ensure_fts_on_disk(dir.path()).unwrap(), path);
     }
 
     #[test]
