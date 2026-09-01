@@ -5,7 +5,7 @@
 //!
 //! Path filtering strategy:
 //! - 1 path: `startsWith(path)`
-//! - 2+ paths: `startsWith(LCP) AND (startsWith(p1) OR startsWith(p2) OR ...)`
+//! - 2+ paths: `startsWith(p1) OR startsWith(p2) OR ...`
 //!
 //! # Per-entity role scoping
 //!
@@ -31,7 +31,7 @@ use crate::constants::{GL_TABLE_PREFIX, TRAVERSAL_PATH_COLUMN, global_tables};
 use crate::error::Result;
 pub use crate::types::SecurityContext;
 use ontology::Ontology;
-use orbit_utils::traversal_path::{TraversalPath, TraversalPathTrie, lowest_common_prefix};
+use orbit_utils::traversal_path::{TraversalPath, TraversalPathTrie};
 
 /// Matches `gl_*` or `v{N}_gl_*`, captures the unprefixed name.
 static GL_TABLE_RE: OnceLock<Regex> = OnceLock::new();
@@ -151,9 +151,7 @@ fn build_path_filter(alias: &str, paths: &[&TraversalPath]) -> Expr {
             if collapsed.len() == 1 {
                 return starts_with_expr(alias, collapsed[0].as_str());
             }
-            let lcp = lowest_common_prefix(&collapsed);
-            let lcp_filter = starts_with_expr(alias, lcp.as_str());
-            Expr::and(lcp_filter, path_or_filter(alias, &collapsed))
+            path_or_filter(alias, &collapsed)
         }
     }
 }
@@ -298,7 +296,7 @@ mod tests {
     }
 
     #[test]
-    fn multiple_paths_uses_prefix_and_or_starts_with() {
+    fn multiple_paths_use_or_of_starts_with_without_common_prefix() {
         let expr = build_path_filter(
             "u",
             &[
@@ -306,7 +304,10 @@ mod tests {
                 &TraversalPath::from("1/2/5/"),
             ],
         );
-        assert!(matches!(expr, Expr::BinaryOp { op: Op::And, .. }));
+        assert!(matches!(expr, Expr::BinaryOp { op: Op::Or, .. }));
+        let mut paths = starts_with_paths_for_alias(&expr, "u");
+        paths.sort();
+        assert_eq!(paths, vec!["1/2/4/".to_string(), "1/2/5/".to_string()]);
     }
 
     #[test]
@@ -717,6 +718,34 @@ mod tests {
         } else {
             panic!("expected Join");
         }
+    }
+
+    #[test]
+    fn multi_path_authz_omits_redundant_common_prefix() {
+        let ctx = SecurityContext::new(1, vec!["1/9970/".into(), "1/6543/".into()]).unwrap();
+
+        let mut node = Node::Query(Box::new(Query {
+            select: vec![SelectExpr {
+                expr: Expr::col("e", "id"),
+                alias: None,
+            }],
+            from: TableRef::scan("gl_edge", "e"),
+            limit: Some(10),
+            ..Default::default()
+        }));
+
+        apply_security_context(&mut node, &ctx, &Ontology::new()).unwrap();
+
+        let Node::Query(q) = &node else {
+            unreachable!()
+        };
+        let mut got = starts_with_paths_for_alias(q.where_clause.as_ref().unwrap(), "e");
+        got.sort();
+        assert_eq!(
+            got,
+            vec!["1/6543/".to_string(), "1/9970/".to_string()],
+            "multi-path authz must be the OR of real prefixes with no redundant broad LCP, got:\n{got:?}"
+        );
     }
 
     #[test]
