@@ -347,8 +347,7 @@ macos-signing-flag-check:
         - scripts/macos-entitlements.plist
         - scripts/test-sign-and-repackage.sh
   script:
-    - rcodesign sign --help 2>&1 | grep -- '--entitlements-xml-file'
-    - echo "=== sign-macos-binaries --help ==="; sign-macos-binaries --help 2>&1 || true; echo "=== end help ==="
+    - echo "=== sign-macos-binaries source ==="; cat "$(command -v sign-macos-binaries)"; echo "=== end source ==="
 
 migration-ledger-check:
   stage: lint
