@@ -37,7 +37,7 @@ impl ArrowClickHouseClient {
 
     pub async fn explain_plan(&self, sql: &str) -> Result<String, ClickHouseError> {
         self.fetch_text(&format!(
-            "EXPLAIN PLAN indexes=1, actions=1, sorting=1 {sql}"
+            "EXPLAIN PLAN json=1, indexes=1, actions=1, sorting=1 {sql}"
         ))
         .await
     }
