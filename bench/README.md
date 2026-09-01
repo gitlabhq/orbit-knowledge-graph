@@ -147,6 +147,42 @@ bash bench/scripts/infra.sh destroy                            # tear down every
 
 To change the tier, edit `bench.yaml`. Each tier produces an isolated cluster.
 
+## Iterating on code changes
+
+Two commands support the inner development loop without re-provisioning
+the full stack or re-importing the datalake.
+
+### Reload (wipe graph, keep datalake)
+
+Drops and recreates the `gkg` database, then restarts GKG. The
+checkpoint tables live in the graph DB, so dropping it implicitly
+resets them. The indexer re-creates the schema on boot and re-indexes
+from the existing datalake data. Grants persist across the drop.
+
+```bash
+RUN_ID=bench1 bash bench/scripts/infra.sh reload
+```
+
+### Deploy new code
+
+Builds a debug GKG image from your local working tree, pushes it to the
+registry, upgrades the Helm release, and restarts the pods. To skip the
+build and use an existing image (e.g. a CI dev tag), set `GKG_IMAGE_TAG`.
+
+```bash
+RUN_ID=bench1 bash bench/scripts/infra.sh deploy                    # build locally
+GKG_IMAGE_TAG=latest RUN_ID=bench1 bash bench/scripts/infra.sh deploy  # use pre-built
+```
+
+To deploy and wipe the graph in one step:
+
+```bash
+RUN_ID=bench1 bash bench/scripts/infra.sh deploy --reload
+```
+
+The image is tagged `bench-<short-sha>-dirty` when the working tree has
+uncommitted changes, or `bench-<short-sha>` for a clean tree.
+
 ## Dedicated ClickHouse pool
 
 For isolated CH sizing runs, set `dedicated_ch_pool = true` at plan time. This creates a tainted node pool that only the CH StatefulSet schedules on. `provision.sh` reads this from `terraform output` and sets the node selector and tolerations automatically.
