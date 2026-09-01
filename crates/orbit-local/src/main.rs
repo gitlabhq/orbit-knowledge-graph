@@ -766,15 +766,9 @@ pub(crate) fn index_collect(
 
     let ontology = Ontology::load_embedded().context("failed to load embedded ontology")?;
 
-    // Ensure schema exists, then drop the connection so we don't hold
-    // the write lock during parsing.
-    {
-        let client =
-            duckdb_client::DuckDbClient::open(&db_path).context("failed to open DuckDB")?;
-        client
-            .initialize_schema(LOCAL_DDL)
-            .context("failed to create schema")?;
-    }
+    // The schema is ensured up front and the connection dropped so the
+    // write lock is not held during parsing.
+    workspace::ensure_graph_schema(&db_path, LOCAL_DDL)?;
 
     let pipeline_config = code_graph::v2::PipelineConfig {
         worker_threads: threads,
