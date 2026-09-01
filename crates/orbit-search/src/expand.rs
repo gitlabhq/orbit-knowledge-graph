@@ -1,7 +1,7 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use crate::ppr::{KindRates, rank_neighborhood};
-use crate::types::{Edge, Graph, TermSeeds};
+use crate::types::{Edge, Graph, TermSeeds, dedupe_ids};
 
 pub const EDGE_LIMIT: usize = 20;
 
@@ -31,25 +31,20 @@ pub fn expand_neighborhood<S: GraphSource>(
     kind_rates: &HashMap<String, KindRates>,
     focus: Option<&str>,
 ) -> Result<ExpandedNeighborhood, S::Error> {
-    let mut seed_ids: Vec<i64> = Vec::new();
-    let mut seen_seed: HashSet<i64> = HashSet::new();
-    for &(id, _) in term_seeds.iter().flat_map(|t| t.seeds.iter()) {
-        if seen_seed.insert(id) {
-            seed_ids.push(id);
-        }
-    }
+    let seed_ids = dedupe_ids(
+        term_seeds
+            .iter()
+            .flat_map(|t| t.seeds.iter().map(|&(id, _)| id)),
+    );
     let graph = source.graph(&seed_ids)?;
     let ranked = rank_neighborhood(&graph, term_seeds, kind_rates, focus, EDGE_LIMIT);
 
-    let mut label_ids: Vec<i64> = Vec::new();
-    let mut seen: HashSet<i64> = HashSet::new();
-    for &i in &ranked.selected {
-        for id in [graph.edges[i].source, graph.edges[i].target] {
-            if seen.insert(id) {
-                label_ids.push(id);
-            }
-        }
-    }
+    let label_ids = dedupe_ids(
+        ranked
+            .selected
+            .iter()
+            .flat_map(|&i| [graph.edges[i].source, graph.edges[i].target]),
+    );
     let labels = source.labels(&label_ids)?;
     let display = |id: i64| -> Option<(String, String)> {
         labels
@@ -76,7 +71,7 @@ pub fn expand_neighborhood<S: GraphSource>(
     let surfaced = ranked
         .node_scores
         .into_iter()
-        .filter(|n| !seen_seed.contains(&n.id))
+        .filter(|n| !seed_ids.contains(&n.id))
         .take(SURFACED_POOL)
         .map(|n| (n.id, n.score))
         .collect();

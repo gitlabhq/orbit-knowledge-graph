@@ -42,8 +42,15 @@ pub struct Transitions {
 
 impl Transitions {
     pub fn new(node_count: usize, entries: &[(usize, usize, f64)]) -> Self {
+        Self::build(node_count, entries.iter().copied())
+    }
+
+    fn build(
+        node_count: usize,
+        entries: impl Iterator<Item = (usize, usize, f64)> + Clone,
+    ) -> Self {
         let mut counts = vec![0u32; node_count + 1];
-        for &(s, _, w) in entries {
+        for (s, _, w) in entries.clone() {
             if w > 0.0 {
                 counts[s + 1] += 1;
             }
@@ -57,7 +64,7 @@ impl Transitions {
         let mut weights = vec![0f32; total_edges];
         let mut cursor = offsets.clone();
         let mut out_totals = vec![0.0; node_count];
-        for &(s, t, w) in entries {
+        for (s, t, w) in entries {
             if w > 0.0 {
                 let slot = cursor[s] as usize;
                 targets[slot] = t as u32;
@@ -178,17 +185,11 @@ pub fn rank_neighborhood(
             (s, t, fwd, rev)
         })
         .collect();
-    let mut entries: Vec<(usize, usize, f64)> = Vec::with_capacity(placed.len() * 2);
-    for &(s, t, fwd, rev) in &placed {
-        entries.push((s, t, fwd));
-        entries.push((t, s, rev));
-    }
-    let transitions = Transitions::new(node_count, &entries);
-    let inverse_entries: Vec<(usize, usize, f64)> =
-        entries.iter().map(|&(s, t, w)| (t, s, w)).collect();
-    let inverted = Transitions::new(node_count, &inverse_entries);
-    drop(inverse_entries);
-    drop(entries);
+    let entries = placed
+        .iter()
+        .flat_map(|&(s, t, fwd, rev)| [(s, t, fwd), (t, s, rev)]);
+    let transitions = Transitions::build(node_count, entries.clone());
+    let inverted = Transitions::build(node_count, entries.map(|(s, t, w)| (t, s, w)));
 
     let seed_sets: Vec<(Vec<(usize, f64)>, f64)> = term_seeds
         .iter()

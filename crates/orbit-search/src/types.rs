@@ -1,3 +1,10 @@
+use std::collections::HashSet;
+
+pub fn dedupe_ids(ids: impl IntoIterator<Item = i64>) -> Vec<i64> {
+    let mut seen = HashSet::new();
+    ids.into_iter().filter(|&id| seen.insert(id)).collect()
+}
+
 pub struct GraphEdge {
     pub kind: u16,
     pub source: i64,

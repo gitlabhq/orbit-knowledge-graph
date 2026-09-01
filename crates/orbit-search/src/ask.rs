@@ -6,7 +6,7 @@ use crate::expand::{GraphSource, expand_neighborhood};
 use crate::ppr::KindRates;
 use crate::rank::rank_and_trim;
 use crate::text::content_words;
-use crate::types::{CorpusRow, Edge, TermSeeds};
+use crate::types::{CorpusRow, Edge, TermSeeds, dedupe_ids};
 use crate::vocab::SearchVocab;
 
 pub const SURFACED_LIMIT: usize = 3;
@@ -28,6 +28,17 @@ pub struct AskMatch {
     pub score: f64,
     pub callers: Vec<Caller>,
     pub callers_total: usize,
+}
+
+impl AskMatch {
+    fn new(row: CorpusRow, score: f64) -> Self {
+        Self {
+            row,
+            score,
+            callers: Vec::new(),
+            callers_total: 0,
+        }
+    }
 }
 
 pub const CALLERS_SHOWN: usize = 4;
@@ -112,13 +123,11 @@ pub fn ask<S: AskSource>(
     let recalls = source.recall(&search_terms)?;
     let unmatched = unmatched_terms(&search_terms, &recalls);
 
-    let mut ids: Vec<i64> = Vec::new();
-    let mut seen: HashSet<i64> = HashSet::new();
-    for &(id, _) in recalls.iter().flat_map(|r| r.hits.iter()) {
-        if seen.insert(id) {
-            ids.push(id);
-        }
-    }
+    let ids = dedupe_ids(
+        recalls
+            .iter()
+            .flat_map(|r| r.hits.iter().map(|&(id, _)| id)),
+    );
     let corpus = source.rows_by_ids(&ids)?;
     let index: HashMap<i64, usize> = corpus
         .iter()
@@ -140,12 +149,7 @@ pub fn ask<S: AskSource>(
     let weak = hits.first().is_none_or(|h| !h.confident());
     let mut matches: Vec<AskMatch> = hits
         .into_iter()
-        .map(|h| AskMatch {
-            row: corpus[h.index].clone(),
-            score: h.score,
-            callers: Vec::new(),
-            callers_total: 0,
-        })
+        .map(|h| AskMatch::new(corpus[h.index].clone(), h.score))
         .collect();
     let match_ids: Vec<i64> = matches.iter().map(|m| m.row.id).collect();
     for edge in source.callers(&match_ids)? {
@@ -183,12 +187,9 @@ pub fn ask<S: AskSource>(
         let surfaced = candidates
             .into_iter()
             .filter_map(|(id, score)| {
-                rows.iter().find(|r| r.id == id).map(|r| AskMatch {
-                    row: r.clone(),
-                    score,
-                    callers: Vec::new(),
-                    callers_total: 0,
-                })
+                rows.iter()
+                    .find(|r| r.id == id)
+                    .map(|r| AskMatch::new(r.clone(), score))
             })
             .collect();
         (expanded.edges, expanded.hidden_by_kind, surfaced)
