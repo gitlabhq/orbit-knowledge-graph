@@ -237,7 +237,9 @@
           "max_ast_elements": 1000000,
           "max_execution_time": 30,
           "max_expanded_ast_elements": 10000000,
-          "query_cache_ttl": 60
+          "optimize_move_to_prewhere_if_final": true,
+          "query_cache_ttl": 60,
+          "use_index_for_in_with_subqueries_max_values": 100000
         }
       }
     },
@@ -1449,6 +1451,14 @@
           "format": "uint64",
           "minimum": 0
         },
+        "optimize_move_to_prewhere_if_final": {
+          "description": "ClickHouse `optimize_move_to_prewhere_if_final`. Lets the PREWHERE\noptimizer run on `FINAL` scans. ClickHouse only moves predicates over\nsorting-key columns under FINAL (`MergeTreeWhereOptimizer`, since 22.8),\nso dedup semantics are unaffected; the win is skipping non-key columns\nfor granules the `traversal_path` prefix rejects. Default: true.",
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": true
+        },
         "query_cache_ttl": {
           "description": "ClickHouse `query_cache_ttl` in seconds.",
           "type": [
@@ -1457,6 +1467,16 @@
           ],
           "format": "uint32",
           "default": 60,
+          "minimum": 0
+        },
+        "use_index_for_in_with_subqueries_max_values": {
+          "description": "ClickHouse `use_index_for_in_with_subqueries_max_values`. Above this\nmany values, an `IN (subquery)` set is no longer used for primary-key\nand skip-index analysis, only as a row filter. Probing bloom-filter\nindexes with million-element sets costs far more than the granules it\nprunes (prod: 24 s -> 2.7 s on a 909k-element set). Default: 100000.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "default": 100000,
           "minimum": 0
         },
         "use_query_cache": {
@@ -1480,7 +1500,9 @@
             "max_ast_elements": 1000000,
             "max_execution_time": 30,
             "max_expanded_ast_elements": 10000000,
-            "query_cache_ttl": 60
+            "optimize_move_to_prewhere_if_final": true,
+            "query_cache_ttl": 60,
+            "use_index_for_in_with_subqueries_max_values": 100000
           }
         }
       },

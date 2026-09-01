@@ -991,6 +991,39 @@ mod tests {
     }
 
     #[test]
+    fn default_config_emits_final_prewhere_and_in_set_index_cap() {
+        let q = Query {
+            select: vec![SelectExpr {
+                expr: Expr::col("n", "id"),
+                alias: None,
+            }],
+            from: TableRef::scan("nodes", "n"),
+            ..Default::default()
+        };
+
+        let result = codegen(
+            &Node::Query(Box::new(q)),
+            empty_ctx(),
+            QueryConfig::default(),
+        )
+        .unwrap();
+        assert!(
+            result
+                .sql
+                .contains("optimize_move_to_prewhere_if_final = 1"),
+            "{}",
+            result.sql
+        );
+        assert!(
+            result
+                .sql
+                .contains("use_index_for_in_with_subqueries_max_values = 100000"),
+            "{}",
+            result.sql
+        );
+    }
+
+    #[test]
     fn no_query_settings_when_empty() {
         let q = Query {
             select: vec![SelectExpr {
