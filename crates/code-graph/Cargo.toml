@@ -65,7 +65,7 @@ tempfile = { workspace = true }
 # attributes. A crate-local `[lints.clippy]` table replaces (does not merge with) the
 # workspace `[workspace.lints.clippy]` block, so the workspace lints are re-declared here.
 [lints.rust]
-unsafe_code = "forbid"
+unsafe_code = "deny"
 
 [lints.clippy]
 all = { level = "warn", priority = -1 }

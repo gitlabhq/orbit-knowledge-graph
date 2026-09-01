@@ -1,5 +1,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard, TryLockError};
 
 use anyhow::{Context, Result, anyhow, bail};
 use bumpalo::Bump;
@@ -75,6 +77,44 @@ use self::workspace::{
 };
 
 pub struct RustPipeline;
+
+static TY_INTERNER_GC: RwLock<()> = RwLock::new(());
+static RUST_JOBS_SINCE_TY_GC: AtomicUsize = AtomicUsize::new(0);
+const FORCE_TY_GC_AFTER_JOBS: usize = 16;
+
+fn hold_ty_interner() -> RwLockReadGuard<'static, ()> {
+    if RUST_JOBS_SINCE_TY_GC.load(Ordering::Relaxed) >= FORCE_TY_GC_AFTER_JOBS {
+        let exclusive = TY_INTERNER_GC
+            .write()
+            .unwrap_or_else(PoisonError::into_inner);
+        collect_ty_garbage(exclusive);
+    }
+    TY_INTERNER_GC
+        .read()
+        .unwrap_or_else(PoisonError::into_inner)
+}
+
+fn release_ty_interner(held: RwLockReadGuard<'static, ()>) -> bool {
+    drop(held);
+    RUST_JOBS_SINCE_TY_GC.fetch_add(1, Ordering::Relaxed);
+    let exclusive = match TY_INTERNER_GC.try_write() {
+        Ok(exclusive) => exclusive,
+        Err(TryLockError::Poisoned(poisoned)) => poisoned.into_inner(),
+        Err(TryLockError::WouldBlock) => return false,
+    };
+    collect_ty_garbage(exclusive);
+    true
+}
+
+#[allow(
+    unsafe_code,
+    reason = "rust-analyzer exposes the interner sweep only as an unsafe fn"
+)]
+fn collect_ty_garbage(_exclusive: RwLockWriteGuard<'static, ()>) {
+    // SAFETY: the write guard proves no `RootDatabase` exists, so no type is unrecorded.
+    unsafe { ra_ap_hir::collect_ty_garbage() };
+    RUST_JOBS_SINCE_TY_GC.store(0, Ordering::Relaxed);
+}
 
 #[derive(Clone)]
 struct ParsedRustFile {
@@ -152,6 +192,7 @@ impl LanguagePipeline for RustPipeline {
             .and_then(sentinel::spawn_sentinel);
         let sentinel_handle = sentinel_pair.as_ref().map(|(h, _)| h);
 
+        let db_alive = hold_ty_interner();
         let workspaces = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             WorkspacePlan::discover(root_path, files)
         })) {
@@ -182,6 +223,7 @@ impl LanguagePipeline for RustPipeline {
         // Nothing past the parse reads the rust-analyzer databases, and they are
         // the largest thing this pipeline holds.
         drop(workspaces);
+        release_ty_interner(db_alive);
         let parse_ms = t0.elapsed().as_secs_f64() * 1000.0;
         for (path, error) in &output.errors {
             match error {
@@ -1502,6 +1544,7 @@ mod tests {
     use super::manifest::repo_local_existing_file;
     use super::sysroot::{EMBEDDED_RUST_SYSROOT_VERSION, EmbeddedSysroot};
     use super::workspace::relative_path_if_under_root;
+    use super::{hold_ty_interner, release_ty_interner};
     use std::fs;
     use tempfile::tempdir;
 
@@ -1604,5 +1647,13 @@ mod tests {
         assert!(std::fs::metadata(embedded.root_path().join("std/src/lib.rs")).is_ok());
         assert!(std::fs::metadata(embedded.root_path().join("proc_macro/src/lib.rs")).is_ok());
         assert!(embedded.project_workspace_sysroot().unwrap().num_packages() >= 4);
+    }
+
+    #[test]
+    fn ty_interner_sweep_waits_for_other_live_databases() {
+        let first = hold_ty_interner();
+        let second = hold_ty_interner();
+        assert!(!release_ty_interner(first));
+        drop(second);
     }
 }
