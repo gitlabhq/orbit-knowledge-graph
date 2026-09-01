@@ -1,46 +1,47 @@
 # yaml-language-server: $schema=../schemas/setup_modes.schema.json
-# Every string that differs between the local graph (`orbit sql`) and the remote graph
+# Every string that differs between the local graph (`{{orbit}} sql`) and the remote graph
 # (`glab orbit remote`); only the commands and the availability check differ. `template_vars`
 # fill `{{name}}` placeholders in the templates assistants declare.
 local:
   instructions: |
     ## Orbit graph
 
-    Repositories on this machine are indexed into a local Orbit code graph. The graph is the lookup tool for any task that touches existing code — answering a question, building a feature, fixing a bug, refactoring, reviewing. Grep matches text and returns noise for structural questions; the graph returns resolved definitions, callers, and imports.
+    A local Orbit code graph exists on this machine. The graph is the lookup tool for any task that touches existing code in a repository — answering a question, building a feature, fixing a bug, refactoring, reviewing. Grep matches text and returns noise for structural questions; the graph returns resolved definitions, callers, and imports.
 
-    What the graph contains:
+    Tables (for `{{orbit}} sql`): {{graph_contents}}.
 
-    {{graph_contents}}
-
-    `orbit local ask` recognizes relationship words matching the edge kinds above: "who calls X" focuses the reported connections on `CALLS` edges around X, "what extends Y" on `EXTENDS` — the relationship word steers the connection ranking instead of being matched as a symbol name.
+    `{{orbit}} ask` is for discovery: it turns a phrase or an identifier into pinned definitions with exact fqns. It ranks and truncates what it reports; every match has two exact follow-ups that need no file read and no SQL: `{{orbit}} show "<fqn>"` prints the full source body, `{{orbit}} describe "<fqn>"` prints the complete connection list (callers, callees, supertypes, subtypes, members, importers). Relationship questions ("who calls X", "what extends Y") are describe questions, not ask questions: pin X with a discovery ask if its fqn is not already known, then describe it.
 
     Rules:
 
-    - Start every task with `orbit local ask "<your question>"` in order to get an understanding of the code structure from the graph.
-    - Ask using simple queries without fluff in as few words as possible, with one phrase per ask. "dlq message handler", "NATS backpressure", "who calls run_sql", "what extends LocalBackend" are single `orbit local ask` calls.
-    - The same default holds while implementing, not just when answering questions: where the code you will change lives, whether machinery already exists (rate limiting, retries, caching), who calls what you are about to modify — those are ask questions, not greps. Do not scaffold new code before checking what already exists.
+    - Start every task with `{{orbit}} ask "<your question>"` in order to get an understanding of the code structure from the graph.
+    - Ask using simple queries without fluff in as few words as possible, with one phrase per ask. "dlq message handler", "NATS backpressure", "retry backoff policy", "LocalBackend" are single `{{orbit}} ask` calls. A bare exact identifier is the strongest query.
+    - The same default holds while implementing, not just when answering questions: where the code you will change lives, whether machinery already exists (rate limiting, retries, caching) — those are ask questions, not greps. Who calls what you are about to modify is a describe question. Do not scaffold new code before checking what already exists.
     - If `ask` notes unmatched terms or weak matches, retry with synonyms for those terms — a synonym or an identifier fragment ("throttle" → "rate limit"). If ask is unhelpful after multiple tries, fall back to grep.
     - Files are for editing, or for reading lines the graph's snippets do not cover — not for searching. Every new where/what/who question that comes up mid-task goes to the graph, not grep.
     - When `ask` returns confident matches with snippets, answer from them. Verify with another ask or one file read when the snippet alone is ambiguous — do not re-derive what the graph already resolved.
-    - Drop to `orbit sql` only for what `ask` does not cover: exact filters, aggregation, or columns it does not print.
+    - NEVER open a file just to read one definition's body. `{{orbit}} show "<fqn>"` prints the full source of any ask match — the follow-up to every ask snippet that is too short is `show`, not a file read. File reads are only for editing and for lines outside any indexed definition (imports, module-level wiring, comments).
+    - Once a definition is pinned to an exact fqn, relationship questions about it go to `{{orbit}} describe "<fqn>"`, not another ask: it prints every edge touching the definition, including everything behind a truncated `called by: … +N more` line.
+    - Drop to `{{orbit}} sql` only for what `ask`, `show`, and `describe` do not cover: exact filters, aggregation, or columns they do not print.
     - Answer tersely: name the mechanism, cite `file:line`, and stop. Do not paste code blocks the reader can open from the citation, and do not restate the question or narrate your search.
 
-    Copy-paste recipes (DuckDB SQL):
+    Copy-paste recipes:
 
-    - Find a definition: `orbit sql "SELECT name, definition_type, file_path, start_line FROM gl_definition WHERE name LIKE '%Retry%'"`
-    - Who calls X: `orbit sql "SELECT s.name, s.file_path, s.start_line FROM gl_edge e JOIN gl_definition s ON e.source_id=s.id JOIN gl_definition t ON e.target_id=t.id WHERE e.relationship_kind='CALLS' AND t.name='run_sql'"` (flip source/target for what X calls; `EXTENDS` for subtypes)
-    - Orient in unfamiliar code / where should new code live: `orbit repo-map` (drill down: `tree`, `api <Type>`, `class`, `extends`, `imports`)
-    - `orbit schema` lists tables; `orbit skill` prints the full recipe reference
+    - Every connection of a definition (callers, callees, subtypes, members): `{{orbit}} describe "Dlq::publish"` (exact fqn from `ask` output)
+    - Full body of a definition: `{{orbit}} show "Dlq::publish"` (exact fqn from `ask` output)
+    - Orient in unfamiliar code / where should new code live: `{{orbit}} repo-map` (drill down: `tree`, `api <Type>`, `class`, `extends`, `imports`)
+    - `{{orbit}} schema` lists tables; `{{orbit}} skill` prints the full recipe reference
+    - If `{{orbit}} sql` or `{{orbit}} repo-map` report the commit is not indexed: run `{{orbit}} index .` and retry (`ask` handles this automatically)
 
-    `ask` indexes the current commit automatically; if `orbit sql` or `orbit repo-map` report it is not indexed, run `orbit index .` and retry. Grep only for literal strings the graph cannot index (log messages, error text, config keys). For questions spanning other projects or GitLab entities (merge requests, issues, pipelines, users), use `glab orbit` when available.
+    Grep only for literal strings the graph cannot index (log messages, error text, config keys). For questions spanning other projects or GitLab entities (merge requests, issues, pipelines, users), use `glab orbit` when available.
 
     This applies to subagents: put the same rule in any subagent prompt that explores code.
   nudge_search: |
-    MANDATORY: a local Orbit code graph covers this code. Before grepping raw files, run `orbit local ask "<your question>"` — one command in plain language, returning resolved definitions and their connections instead of textual noise. This is the default while implementing too: where code lives and what machinery already exists are ask questions. For exact filters or aggregation use `orbit sql "<DuckDB SQL>"` (`orbit skill` prints the recipes), and `orbit repo-map` orients you in unfamiliar code. Grep only for literal strings the graph cannot index (log messages, error text, config keys); code-structure lookups go to the graph at every step, not just the first. This applies to subagents too — put the same rule in any subagent prompt that explores code.
+    MANDATORY: a local Orbit code graph covers this code. Before grepping raw files, run `{{orbit}} ask "<your question>"` — one command in plain language, returning resolved definitions and their connections instead of textual noise. This is the default while implementing too: where code lives and what machinery already exists are ask questions. To read the full body of a match, run `{{orbit}} show "<fqn>"` instead of opening the file; `{{orbit}} describe "<fqn>"` lists its every connection. For exact filters or aggregation use `{{orbit}} sql "<DuckDB SQL>"` (`{{orbit}} skill` prints the recipes), and `{{orbit}} repo-map` orients you in unfamiliar code. Grep only for literal strings the graph cannot index (log messages, error text, config keys); code-structure lookups go to the graph at every step, not just the first. This applies to subagents too — put the same rule in any subagent prompt that explores code.
   nudge_read: |
-    MANDATORY: a local Orbit code graph covers this code. Before reading source files one by one, start with `orbit local ask "<your question>"` — one command in plain language, returning the matching definitions and what connects to them. This is the default while implementing too: where code lives and what machinery already exists are ask questions. For exact filters or aggregation use `orbit sql "<DuckDB SQL>"`, or `orbit repo-map` for a structural overview. Files are for editing, or for reading lines the graph's snippets do not cover — not for searching. This applies to subagents too — put the same rule in any subagent prompt that explores code.
+    MANDATORY: a local Orbit code graph covers this code. Before reading source files one by one, start with `{{orbit}} ask "<your question>"` — one command in plain language, returning the matching definitions and what connects to them. This is the default while implementing too: where code lives and what machinery already exists are ask questions. When a snippet is too short, `{{orbit}} show "<fqn>"` prints the full definition body — do not open the file for that; `{{orbit}} describe "<fqn>"` lists its every connection. For exact filters or aggregation use `{{orbit}} sql "<DuckDB SQL>"`, or `{{orbit}} repo-map` for a structural overview. Files are for editing, or for reading lines outside any indexed definition — not for searching. This applies to subagents too — put the same rule in any subagent prompt that explores code.
   template_vars:
-    reminder: "[orbit] local code graph available: run orbit local ask with your question before grep — for code-structure questions AND to locate change sites and reusable infrastructure before implementing; orbit sql and orbit repo-map cover exact filters and structure."
+    reminder: "[orbit] local code graph available: run {{orbit}} ask with your question before grep — for code-structure questions AND to locate change sites and reusable infrastructure before implementing; {{orbit}} show <fqn> prints a full definition body instead of a file read; {{orbit}} describe <fqn> lists its every connection; {{orbit}} sql and {{orbit}} repo-map cover exact filters and structure."
     require_local_graph: true
 remote:
   instructions: |

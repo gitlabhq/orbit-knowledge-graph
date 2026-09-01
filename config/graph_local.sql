@@ -14,6 +14,11 @@ CREATE TABLE IF NOT EXISTS _orbit_manifest (
     error_message VARCHAR
 );
 
+CREATE TABLE IF NOT EXISTS _orbit_meta (
+    key VARCHAR PRIMARY KEY,
+    value VARCHAR NOT NULL
+);
+
 CREATE OR REPLACE MACRO def_name(fqn) AS
     regexp_replace(fqn, '^.*[:.#/]', '');
 

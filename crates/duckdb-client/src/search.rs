@@ -8,7 +8,6 @@ use orbit_search::expand::{GraphSource, NodeLabel};
 use orbit_search::{AskOutcome, CorpusRow, Graph, GraphEdge, KindRates, SearchVocab, TermRecall};
 use std::collections::HashMap;
 
-pub const RECALL_LIMIT: usize = 2000;
 pub const CONTEXT_SIM_CAP: f64 = 0.99;
 pub const NAME_SIM_FLOOR: f64 = 0.999;
 
@@ -16,6 +15,12 @@ pub const FTS_STEMMER: &str = "english";
 
 pub fn def_doc_table(project_id: i64) -> String {
     format!("gl_def_doc_{project_id}")
+}
+
+pub fn create_fts_index_sql(doc_table: &str) -> String {
+    format!(
+        "PRAGMA create_fts_index('{doc_table}', 'def_id', 'name', 'context', stemmer='{FTS_STEMMER}', stopwords='none', overwrite=1)"
+    )
 }
 
 pub struct DuckDbSearch {
@@ -313,7 +318,6 @@ hits AS (
   JOIN {doc_table} d ON d.def_id = s.id AND d.commit_sha = {sha}
   WHERE s.score IS NOT NULL
   ORDER BY s.score DESC, s.id
-  LIMIT {RECALL_LIMIT}
 ),
 df AS (SELECT COUNT(*) AS df FROM scored WHERE score IS NOT NULL),
 mx AS (SELECT MAX(score) AS m FROM hits),

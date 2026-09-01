@@ -25,6 +25,10 @@ use tracing_subscriber::fmt::format::FmtSpan;
 
 const LOCAL_DDL: &str = include_str!(concat!(env!("CONFIG_DIR"), "/graph_local.sql"));
 
+const SKILL_LONG_ABOUT: &str = "Print the bundled, version-matched orbit-local skill content.\n\n\
+                                With no argument, prints SKILL.md (the manifest). Pass a relative path \
+                                such as `references/sql.md` or `references/repo_map.md` to print that file.";
+
 /// Per-file byte cap for local indexing; files above it are recorded as nodes
 /// but not loaded or parsed.
 const MAX_INDEXED_FILE_BYTES: u64 = 5_000_000;
@@ -202,6 +206,66 @@ struct AskArgs {
     db: Option<PathBuf>,
 }
 
+fn fqn_arg_help() -> String {
+    format!(
+        "Exact fully qualified name as printed by `{} ask`.",
+        commands::setup::spec::launcher()
+    )
+}
+
+fn show_long_about() -> String {
+    format!(
+        "Print the full source body of an indexed definition.\n\n\
+         Takes the exact fully qualified name as printed by `{} ask` \
+         and prints the definition's source lines from the working tree, so a \
+         follow-up on an ask match needs no file read.",
+        commands::setup::spec::launcher()
+    )
+}
+
+fn describe_long_about() -> String {
+    format!(
+        "Print every graph connection of an indexed definition.\n\n\
+         Takes the exact fully qualified name as printed by `{} ask` \
+         and prints all edges touching it — callers, callees, supertypes, \
+         subtypes, members, importers — so a truncated `called by: … +N more` \
+         line or any full call-graph question needs no SQL follow-up.",
+        commands::setup::spec::launcher()
+    )
+}
+
+#[derive(Args, Debug, PartialEq)]
+#[command(about = "Print the full source body of a definition by exact fqn")]
+#[command(long_about = show_long_about())]
+struct ShowArgs {
+    #[arg(value_name = "FQN", help = fqn_arg_help())]
+    fqn: String,
+
+    /// Repository path (default: current directory).
+    #[arg(long, value_name = "PATH")]
+    repo: Option<PathBuf>,
+
+    /// Override the DuckDB path (default: ~/.orbit/graph.duckdb).
+    #[arg(long, value_name = "PATH")]
+    db: Option<PathBuf>,
+}
+
+#[derive(Args, Debug, PartialEq)]
+#[command(about = "Print every connection of a definition, by exact fqn")]
+#[command(long_about = describe_long_about())]
+struct DescribeArgs {
+    #[arg(value_name = "FQN", help = fqn_arg_help())]
+    fqn: String,
+
+    /// Repository path (default: current directory).
+    #[arg(long, value_name = "PATH")]
+    repo: Option<PathBuf>,
+
+    /// Override the DuckDB path (default: ~/.orbit/graph.duckdb).
+    #[arg(long, value_name = "PATH")]
+    db: Option<PathBuf>,
+}
+
 #[derive(Args, Debug, PartialEq)]
 #[command(about = descriptions::short("run_sql"))]
 struct SqlArgs {
@@ -297,6 +361,10 @@ enum Commands {
     #[command(hide = true)]
     Ask(AskArgs),
     #[command(hide = true)]
+    Show(ShowArgs),
+    #[command(hide = true)]
+    Describe(DescribeArgs),
+    #[command(hide = true)]
     Sql(SqlArgs),
     #[command(hide = true)]
     Schema(SchemaArgs),
@@ -306,12 +374,7 @@ enum Commands {
     Mcp(McpArgs),
     #[command(name = "repo-map", hide = true)]
     RepoMap(RepoMapArgs),
-    #[command(about = descriptions::short("skill"))]
-    #[command(
-        long_about = "Print the bundled, version-matched orbit-local skill content.\n\n\
-                      With no argument, prints SKILL.md (the manifest). Pass a relative path \
-                      such as `references/sql.md` or `references/repo_map.md` to print that file."
-    )]
+    #[command(about = descriptions::short("skill"), long_about = SKILL_LONG_ABOUT)]
     Skill {
         /// Skill file to print, relative to the skill root (default: SKILL.md).
         #[arg(value_name = "PATH")]
@@ -400,12 +463,28 @@ enum ConfigCommands {
 enum LocalCommands {
     Index(IndexArgs),
     Ask(AskArgs),
+    Show(ShowArgs),
+    Describe(DescribeArgs),
     Sql(SqlArgs),
     Schema(SchemaArgs),
     List(ListArgs),
     Mcp(McpArgs),
     #[command(name = "repo-map")]
     RepoMap(RepoMapArgs),
+    #[command(about = descriptions::short("skill"), long_about = SKILL_LONG_ABOUT)]
+    Skill {
+        /// Skill file to print, relative to the skill root (default: SKILL.md).
+        #[arg(value_name = "PATH")]
+        path: Option<String>,
+    },
+    #[command(hide = true)]
+    HookGuard {
+        #[arg(value_name = "KIND")]
+        kind: commands::hook_guard::Kind,
+
+        #[arg(long, default_value = "remote")]
+        mode: commands::setup::spec::Mode,
+    },
 }
 
 #[derive(Subcommand, Debug, PartialEq)]
@@ -466,7 +545,13 @@ async fn main() -> Result<()> {
     let matches = Cli::command().get_matches();
     let cli = Cli::from_arg_matches(&matches).expect("clap already validated the arguments");
 
-    let tracker = if matches!(cli.command, Commands::HookGuard { .. }) {
+    let tracker = if matches!(
+        cli.command,
+        Commands::HookGuard { .. }
+            | Commands::Local {
+                command: LocalCommands::HookGuard { .. }
+            }
+    ) {
         None
     } else {
         telemetry::resolve_from_env().build_tracker()
@@ -516,6 +601,8 @@ async fn dispatch(
         }
         Commands::Index(args) => dispatch_local(LocalCommands::Index(args)).await,
         Commands::Ask(args) => dispatch_local(LocalCommands::Ask(args)).await,
+        Commands::Show(args) => dispatch_local(LocalCommands::Show(args)).await,
+        Commands::Describe(args) => dispatch_local(LocalCommands::Describe(args)).await,
         Commands::Sql(args) => dispatch_local(LocalCommands::Sql(args)).await,
         Commands::Schema(args) => dispatch_local(LocalCommands::Schema(args)).await,
         Commands::List(args) => dispatch_local(LocalCommands::List(args)).await,
@@ -589,6 +676,10 @@ async fn dispatch_local(command: LocalCommands) -> Result<()> {
             limit,
             db,
         }) => commands::ask::run(question, repo, db, limit),
+        LocalCommands::Show(ShowArgs { fqn, repo, db }) => commands::show::run(fqn, repo, db),
+        LocalCommands::Describe(DescribeArgs { fqn, repo, db }) => {
+            commands::describe::run(fqn, repo, db)
+        }
         LocalCommands::Sql(SqlArgs {
             query,
             file,
@@ -623,6 +714,11 @@ async fn dispatch_local(command: LocalCommands) -> Result<()> {
             db,
             command.unwrap_or(commands::repo_map::RepoMapCommand::Overview),
         ),
+        LocalCommands::Skill { path } => skill::run(path),
+        LocalCommands::HookGuard { kind, mode } => {
+            commands::hook_guard::run(kind, mode);
+            Ok(())
+        }
     }
 }
 
@@ -691,12 +787,13 @@ fn run_schema(db: Option<PathBuf>, raw: bool, tables: Vec<String>) -> Result<()>
         let missing: Vec<_> = tables.iter().filter(|t| !found.contains(*t)).collect();
         if !missing.is_empty() {
             anyhow::bail!(
-                "no table named {} in the local graph. Run `orbit schema` to list tables.",
+                "no table named {} in the local graph. Run `{} schema` to list tables.",
                 missing
                     .iter()
                     .map(|t| format!("'{t}'"))
                     .collect::<Vec<_>>()
-                    .join(", ")
+                    .join(", "),
+                commands::setup::spec::launcher()
             );
         }
         batches
@@ -743,15 +840,7 @@ pub(crate) fn index_collect(
 
     let ontology = Ontology::load_embedded().context("failed to load embedded ontology")?;
 
-    // Ensure schema exists, then drop the connection so we don't hold
-    // the write lock during parsing.
-    {
-        let client =
-            duckdb_client::DuckDbClient::open(&db_path).context("failed to open DuckDB")?;
-        client
-            .initialize_schema(LOCAL_DDL)
-            .context("failed to create schema")?;
-    }
+    workspace::ensure_graph_schema(&db_path, LOCAL_DDL)?;
 
     let pipeline_config = code_graph::v2::PipelineConfig {
         worker_threads: threads,
@@ -957,10 +1046,7 @@ fn index_repo(
         .context("failed to build the search documents")?;
     client
         .execute(
-            &format!(
-                "PRAGMA create_fts_index('{doc_table}', 'def_id', 'name', 'context', stemmer='{stemmer}', overwrite=1)",
-                stemmer = duckdb_client::search::FTS_STEMMER
-            ),
+            &duckdb_client::search::create_fts_index_sql(&doc_table),
             &[],
         )
         .context("failed to build the search index")?;

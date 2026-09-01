@@ -15,8 +15,9 @@ pub fn open_graph(db: Option<PathBuf>) -> Result<duckdb_client::DuckDbClient> {
     if !db_path.exists() {
         anyhow::bail!(
             "no local graph found at {}. Index a repository first \
-             (`orbit index <path>`, or the `index` MCP tool).",
-            db_path.display()
+             (`{} index <path>`, or the `index` MCP tool).",
+            db_path.display(),
+            crate::commands::setup::spec::launcher()
         );
     }
     duckdb_client::DuckDbClient::open_read_only(&db_path)

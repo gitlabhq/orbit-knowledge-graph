@@ -607,8 +607,8 @@ fn schema_unknown_table_exits_with_error() {
         "expected unknown-table error: {stderr}"
     );
     assert!(
-        stderr.contains("Run `orbit schema` to list tables"),
-        "expected suggestion to run orbit schema: {stderr}"
+        stderr.contains("Run `orbit local schema` to list tables"),
+        "expected suggestion to run orbit local schema: {stderr}"
     );
 }
 
@@ -731,7 +731,7 @@ fn skill_serves_bundled_content() {
     assert!(manifest.contains("name: orbit-local"));
     assert!(manifest.contains("references/sql.md"));
     assert!(
-        manifest.contains("orbit skill references/sql.md"),
+        manifest.contains("orbit local skill references/sql.md"),
         "served manifest must tell binary users the version-matched access path"
     );
 
@@ -957,7 +957,7 @@ fn repo_map_reports_unindexed_commit() {
     let out = repo_map(&repo.path, dd, &["overview"]);
     assert!(!out.status.success());
     let err = String::from_utf8(out.stderr).unwrap();
-    assert!(err.contains("is not indexed") && err.contains("orbit index"));
+    assert!(err.contains("is not indexed") && err.contains("orbit local index"));
 }
 
 /// Two clones at the same commit SHA indexed into one DB must be completely

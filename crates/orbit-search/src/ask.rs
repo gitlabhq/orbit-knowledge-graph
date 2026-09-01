@@ -133,7 +133,10 @@ pub fn ask<S: AskSource>(
             }
         }
     }
-    let idfs: Vec<f64> = recalls.iter().map(TermRecall::idf).collect();
+    let idfs: Vec<f64> = recalls
+        .iter()
+        .map(|r| if r.hits.is_empty() { 0.0 } else { r.idf() })
+        .collect();
 
     let hits = rank_and_trim(&corpus, &sims, &idfs, limit);
     let focus = vocab.focus_edge_kind(&stems);
@@ -313,7 +316,7 @@ mod tests {
     }
 
     #[test]
-    fn unrecalled_terms_are_reported_and_weaken_the_outcome() {
+    fn unrecalled_terms_are_reported_without_deflating_confidence() {
         let outcome = ask(
             &FakeRecallSource,
             "commit zzzz yyyy",
@@ -326,7 +329,10 @@ mod tests {
             outcome.unmatched_terms,
             vec!["zzzz".to_string(), "yyyy".to_string()]
         );
-        assert!(outcome.weak, "one anchored term of three must read as weak");
+        assert!(
+            !outcome.weak,
+            "terms no row can match must not count against coverage"
+        );
     }
 
     #[test]

@@ -145,10 +145,7 @@ mod tests {
                 .unwrap();
             self.client
                 .execute(
-                    &format!(
-                        "PRAGMA create_fts_index('gl_def_doc_7', 'def_id', 'name', 'context', stemmer='{}', overwrite=1)",
-                        duckdb_client::search::FTS_STEMMER
-                    ),
+                    &duckdb_client::search::create_fts_index_sql("gl_def_doc_7"),
                     &[],
                 )
                 .unwrap();
@@ -188,6 +185,27 @@ mod tests {
             !outcome.edges.is_empty(),
             "expansion must return the call chain around the match"
         );
+    }
+
+    #[test]
+    fn fts_stopword_identifiers_are_findable() {
+        let g = TestGraph::new("ask-stopword");
+        g.def(
+            1,
+            "orbit_search::ask::ask",
+            "ask",
+            "crates/orbit-search/src/ask.rs",
+        );
+        g.def(2, "Dlq::publish", "publish", "app/services/dlq.rb");
+
+        let search = g.search();
+        let vocab = vocab(&search);
+        let outcome = search.ask("ask", 5, &vocab, &weights()).unwrap();
+        assert!(
+            outcome.unmatched_terms.is_empty(),
+            "identifiers colliding with English stopwords must recall"
+        );
+        assert_eq!(outcome.matches[0].row.id, 1);
     }
 
     #[test]

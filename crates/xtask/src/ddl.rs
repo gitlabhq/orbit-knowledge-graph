@@ -103,6 +103,11 @@ CREATE TABLE IF NOT EXISTS _orbit_manifest (
     error_message VARCHAR
 );
 
+CREATE TABLE IF NOT EXISTS _orbit_meta (
+    key VARCHAR PRIMARY KEY,
+    value VARCHAR NOT NULL
+);
+
 CREATE OR REPLACE MACRO def_name(fqn) AS
     regexp_replace(fqn, '^.*[:.#/]', '');
 
@@ -331,6 +336,7 @@ mod tests {
         let ddl = query_engine::compiler::generate_local_ddl(&ont, MANIFEST_DDL);
         assert!(ddl.contains("CREATE TABLE"));
         assert!(ddl.contains("_orbit_manifest"));
+        assert!(ddl.contains("_orbit_meta"));
         assert!(ddl.contains("MACRO fts_doc"));
         assert!(!ddl.contains("search_text"));
         assert!(ddl.contains("SCHEMA_VERSION="));
