@@ -96,20 +96,17 @@ pub struct QueryConfig {
     )]
     pub query_cache_ttl: Option<u32>,
 
-    /// ClickHouse `optimize_move_to_prewhere_if_final`. Lets the PREWHERE
-    /// optimizer run on `FINAL` scans. ClickHouse only moves predicates over
-    /// sorting-key columns under FINAL (`MergeTreeWhereOptimizer`, since 22.8),
-    /// so dedup semantics are unaffected; the win is skipping non-key columns
-    /// for granules the `traversal_path` prefix rejects. Default: true.
+    /// ClickHouse `optimize_move_to_prewhere_if_final`. Safe: under FINAL
+    /// only sorting-key predicates move to PREWHERE. Default: true.
     #[serde(
         default = "default_optimize_move_to_prewhere_if_final",
         skip_serializing_if = "Option::is_none"
     )]
     pub optimize_move_to_prewhere_if_final: Option<bool>,
 
-    /// ClickHouse `use_index_for_in_with_subqueries_max_values`. IN sets
-    /// larger than this skip index analysis; probing bloom filters with them
-    /// costs more than it prunes. Default: 100000.
+    /// ClickHouse `use_index_for_in_with_subqueries_max_values`. Bigger IN
+    /// sets skip index analysis; probing bloom filters costs more than it
+    /// saves. Default: 100000.
     #[serde(
         default = "default_use_index_for_in_with_subqueries_max_values",
         skip_serializing_if = "Option::is_none"
