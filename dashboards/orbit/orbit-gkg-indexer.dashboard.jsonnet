@@ -539,10 +539,7 @@ local items =
   + migration
   + reference;
 
-// Migration is driven by the dispatcher, so its annotation reads that container
-// while deploys read the indexer's own image.
 local annotations = [
-  o.migrationAnnotation(DS, o.GKG_DSP_SEL),
   o.deployAnnotation(DS, SEL),
 ];
 

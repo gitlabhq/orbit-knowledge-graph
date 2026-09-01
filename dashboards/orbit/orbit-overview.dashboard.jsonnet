@@ -72,7 +72,6 @@ local items = [
 ];
 
 local annotations = [
-  o.migrationAnnotation('ORBIT_DS', o.GKG_DSP_SEL),
   o.deployAnnotation('ORBIT_DS', o.GKG_ANY_SEL),
 ];
 
