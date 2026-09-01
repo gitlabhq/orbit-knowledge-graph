@@ -37,21 +37,40 @@ log "Building query-profiler..."
 cargo build -p query-profiler --quiet 2>/dev/null
 PROFILER="${REPO_ROOT}/target/debug/query-profiler"
 
-# Pre-fetch one sample ID per entity type for $sample resolution.
-log "Resolving sample IDs..."
-SAMPLE_JSON=$(kubectl --context="${KCTX}" exec -n "${CH_NS}" clickhouse-0 -- \
-  clickhouse-client --password "${CH_PASS}" --multiquery --query "
-    SELECT 'Project', id FROM gkg.v${SCHEMA_VER}_gl_project LIMIT 3;
-    SELECT 'User', id FROM gkg.v${SCHEMA_VER}_gl_user LIMIT 3;
-    SELECT 'MergeRequest', id FROM gkg.v${SCHEMA_VER}_gl_merge_request LIMIT 3;
-    SELECT 'WorkItem', id FROM gkg.v${SCHEMA_VER}_gl_work_item LIMIT 3;
-    SELECT 'Pipeline', id FROM gkg.v${SCHEMA_VER}_gl_pipeline LIMIT 3;
-    SELECT 'Group', id FROM gkg.v${SCHEMA_VER}_gl_group LIMIT 3;
-    SELECT 'Label', id FROM gkg.v${SCHEMA_VER}_gl_label LIMIT 3;
-    SELECT 'Note', id FROM gkg.v${SCHEMA_VER}_gl_note LIMIT 3;
-    SELECT 'Definition', id FROM gkg.v${SCHEMA_VER}_gl_definition LIMIT 3;
-    SELECT 'File', id FROM gkg.v${SCHEMA_VER}_gl_file LIMIT 3;
-  " -f TSV 2>/dev/null | python3 -c "
+SUITE_FILTER=""
+QUERY_FILTER=""
+for arg in "$@"; do
+  if [[ "${arg}" == *"/"* ]]; then
+    SUITE_FILTER="${arg%%/*}"
+    QUERY_FILTER="${arg#*/}"
+  else
+    SUITE_FILTER="${arg}"
+  fi
+done
+
+CORPUS_DIR="${REPO_ROOT}/fixtures/queries/corpus"
+RESULTS_DIR="${BENCH_DIR}/results/${RUN_ID}/corpus"
+mkdir -p "${RESULTS_DIR}"
+
+# Resolve sample IDs once, cache to disk.
+SAMPLE_CACHE="${RESULTS_DIR}/.sample_ids.json"
+if [[ -f "${SAMPLE_CACHE}" ]]; then
+  SAMPLE_JSON=$(cat "${SAMPLE_CACHE}")
+else
+  log "Resolving sample IDs..."
+  SAMPLE_JSON=$(kubectl --context="${KCTX}" exec -n "${CH_NS}" clickhouse-0 -- \
+    clickhouse-client --password "${CH_PASS}" --multiquery --query "
+      SELECT 'Project', id FROM gkg.v${SCHEMA_VER}_gl_project LIMIT 3;
+      SELECT 'User', id FROM gkg.v${SCHEMA_VER}_gl_user LIMIT 3;
+      SELECT 'MergeRequest', id FROM gkg.v${SCHEMA_VER}_gl_merge_request LIMIT 3;
+      SELECT 'WorkItem', id FROM gkg.v${SCHEMA_VER}_gl_work_item LIMIT 3;
+      SELECT 'Pipeline', id FROM gkg.v${SCHEMA_VER}_gl_pipeline LIMIT 3;
+      SELECT 'Group', id FROM gkg.v${SCHEMA_VER}_gl_group LIMIT 3;
+      SELECT 'Label', id FROM gkg.v${SCHEMA_VER}_gl_label LIMIT 3;
+      SELECT 'Note', id FROM gkg.v${SCHEMA_VER}_gl_note LIMIT 3;
+      SELECT 'Definition', id FROM gkg.v${SCHEMA_VER}_gl_definition LIMIT 3;
+      SELECT 'File', id FROM gkg.v${SCHEMA_VER}_gl_file LIMIT 3;
+    " -f TSV 2>/dev/null | python3 -c "
 import sys, json, collections
 ids = collections.defaultdict(list)
 for line in sys.stdin:
@@ -60,6 +79,8 @@ for line in sys.stdin:
         ids[parts[0]].append(int(parts[1]))
 print(json.dumps(dict(ids)))
 ")
+  echo "${SAMPLE_JSON}" > "${SAMPLE_CACHE}"
+fi
 
 resolve_samples() {
   python3 -c "
@@ -82,20 +103,6 @@ for node in nodes:
 json.dump(query, sys.stdout)
 " "${SAMPLE_JSON}"
 }
-
-SUITE_FILTER=""
-QUERY_FILTER=""
-for arg in "$@"; do
-  if [[ "${arg}" == *"/"* ]]; then
-    SUITE_FILTER="${arg%%/*}"
-    QUERY_FILTER="${arg#*/}"
-  else
-    SUITE_FILTER="${arg}"
-  fi
-done
-CORPUS_DIR="${REPO_ROOT}/fixtures/queries/corpus"
-RESULTS_DIR="${BENCH_DIR}/results/${RUN_ID}/corpus"
-mkdir -p "${RESULTS_DIR}"
 
 TOTAL=0; PASS=0; FAIL=0
 ERRORS=()
