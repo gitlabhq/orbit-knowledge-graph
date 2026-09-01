@@ -1,6 +1,21 @@
 {
   "annotations": {
-    "list": []
+    "list": [
+      {
+        "datasource": {
+          "type": "prometheus",
+          "uid": "$ORBIT_DS"
+        },
+        "enable": true,
+        "expr": "label_replace(group by (image_spec) (kube_pod_container_info{container=\"gkg-indexer\", cluster=~\".*\"}) unless group by (image_spec) (kube_pod_container_info{container=\"gkg-indexer\", cluster=~\".*\"} offset $__interval), \"version\", \"$1\", \"image_spec\", \".*:(.*)\")",
+        "hide": false,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Deploys",
+        "step": "60s",
+        "textFormat": "{{version}}",
+        "titleFormat": "Deploy"
+      }
+    ]
   },
   "description": "GKG indexer dashboard. Top-of-page rows tell the story (health, volume, throughput, latency, reliability, freshness). Bottom rows are the per-domain catalog reference and are collapsed by default.",
   "editable": true,

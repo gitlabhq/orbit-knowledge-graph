@@ -823,8 +823,8 @@ local TEMPLATING = if IS_DEDICATED then {
   ],
 };
 
-local dashboard(uid, title, tags, description, items) = {
-  annotations: { list: [] },
+local dashboard(uid, title, tags, description, items, annotations=[]) = {
+  annotations: { list: annotations },
   editable: true,
   fiscalYearStartMonth: 0,
   graphTooltip: 1,
@@ -950,6 +950,48 @@ local idxKindStat(title, description, expr, calc, ds_var, unit='short', w=PANEL_
   stat(title, description, target(full, '{{%s}}' % IDX_KIND, ds_var), unit, w, h, [exploreLink(full)])
 );
 
+// ---------- Annotations ----------
+
+// Grafana turns every sample a Prometheus annotation query returns into its own
+// marker; there is no region merging and no de-duplication. An expression that
+// stays true for a while therefore draws a smear of markers rather than one
+// event, so every annotation here must be written to be true at exactly one
+// evaluation instant.
+//
+// The `X unless X offset <window>` shape does that, but only when the window
+// matches the step Grafana evaluates at: a window shorter than the step skips
+// the transition entirely and the event is silently lost, and a window longer
+// than the step draws window/step copies of it. `$__interval` is the step
+// Grafana computed for this query, so offsetting by it keeps the two equal at
+// every dashboard range.
+local ANNOTATION_WINDOW = '$__interval';
+
+local promAnnotation(name, expr, ds_var, color, textFormat, titleFormat='', enable=true) = {
+  name: name,
+  datasource: datasource(ds_var),
+  enable: enable,
+  hide: false,
+  iconColor: color,
+  expr: expr,
+  step: '60s',
+  textFormat: textFormat,
+  [if titleFormat != '' then 'titleFormat']: titleFormat,
+};
+
+// Marks the first moment a container image tag the service was not already
+// running shows up. `group by (image_spec)` collapses the per-pod series first,
+// so a rolling update that replaces six pods still annotates once. Reads the
+// image off kube-state-metrics rather than a deploy webhook because Orbit
+// deploys through Argo CD, which posts nothing to Grafana's annotation store.
+local deployAnnotation(ds_var, selector, name='Deploys', color='rgba(0, 211, 255, 1)') =
+  local info(offset) = 'group by (image_spec) (kube_pod_container_info{%s}%s)' % [selector, offset];
+  promAnnotation(
+    name,
+    'label_replace(%s unless %s, "version", "$1", "image_spec", ".*:(.*)")'
+    % [info(''), info(' offset ' + ANNOTATION_WINDOW)],
+    ds_var, color, '{{version}}', 'Deploy',
+  );
+
 // ---------- Public surface ----------
 
 {
@@ -994,6 +1036,9 @@ local idxKindStat(title, description, expr, calc, ds_var, unit='short', w=PANEL_
   urlEncode: urlEncode,
   // External-metric versions
   externalSection: externalSection,
+  // Annotations
+  promAnnotation: promAnnotation,
+  deployAnnotation: deployAnnotation,
   // Dashboard shell
   dashboard: dashboard,
   // Selectors
