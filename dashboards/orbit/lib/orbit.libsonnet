@@ -165,7 +165,7 @@ local target(expr, legend, ds_var, refId='A') = {
   refId: refId,
 };
 
-local timeseries(title, description, targets, unit='short', w=PANEL_W, h=PANEL_H) = {
+local timeseries(title, description, targets, unit='short', w=PANEL_W, h=PANEL_H, legendPlacement='bottom', overrides=[]) = {
   kind: 'panel',
   type: 'timeseries',
   title: title,
@@ -182,10 +182,10 @@ local timeseries(title, description, targets, unit='short', w=PANEL_W, h=PANEL_H
       },
       unit: unit,
     },
-    overrides: [],
+    overrides: overrides,
   },
   options: {
-    legend: { displayMode: 'table', placement: 'bottom', calcs: ['lastNotNull', 'max'] },
+    legend: { displayMode: 'table', placement: legendPlacement, calcs: ['lastNotNull', 'max'] },
     tooltip: { mode: 'multi' },
   },
   gridPos: { x: 0, y: 0, w: w, h: h },
@@ -221,13 +221,14 @@ local rowCollapsed(title) = { kind: 'row', title: title, collapsed: true };
 // data point still represents a count over one Grafana auto-window;
 // `draw='line'` swaps the visual to a smoothed area-line for callers
 // who prefer a trend shape over discrete bars.
-local barTimeseries(title, description, targets, unit='short', w=PANEL_W, h=PANEL_H, stack=true, draw='bars') = {
+local barTimeseries(title, description, targets, unit='short', w=PANEL_W, h=PANEL_H, stack=true, draw='bars', minInterval=null) = {
   kind: 'panel',
   type: 'timeseries',
   title: title,
   description: description,
   datasource: if std.length(targets) > 0 then targets[0].datasource else null,
   targets: targets,
+  [if minInterval != null then 'interval']: minInterval,
   fieldConfig: {
     defaults: {
       custom: {
@@ -389,11 +390,26 @@ local counterRangeStat(prom_name, title, description, ds_var, selector, filter='
 
 // Stacked bar timeseries showing count-per-bucket via increase(). The
 // envelope is total throughput, color is mix.
-local counterIncreaseBars(spec, title, description, ds_var, selector, by=null, filter='', unit=null, w=PANEL_W, h=PANEL_H, range='$__rate_interval', stack=true, or_zero=false, draw='bars') = (
+// `range='$__interval'` plus a `minInterval` floor is the shape to reach for on
+// event-count bars: each bar then covers exactly its own bucket, so bars never
+// overlap and a bar drawn at 10:00 keeps saying what happened at 10:00. A
+// trailing fixed window (`range='1h'`) instead smears one event across the next
+// hour of bars and collapses early when the pod that emitted it is evicted and
+// its series goes stale.
+local counterIncreaseBars(spec, title, description, ds_var, selector, by=null, filter='', unit=null, w=PANEL_W, h=PANEL_H, range='$__rate_interval', stack=true, or_zero=false, draw='bars', minInterval=null, round=false) = (
   local labels = if by == null then spec.labels else by;
   local sel = mergedSelector(selector, filter);
   local prom = spec.prom_name;
-  local expr = counterIncreaseExpr(prom, sel, range, labels);
+  // `increase()` extrapolates to the window edges, so a single event reads as
+  // 1.14 rather than 1. Rounding each series before the sum keeps a bar chart
+  // of discrete events on whole numbers. Wrong for rate-like quantities, hence
+  // opt-in.
+  local expr = if round then
+    (if std.length(labels) == 0 then
+       'sum(round(increase(%s{%s}[%s])))' % [prom, sel, range]
+     else
+       'sum by (%s) (round(increase(%s{%s}[%s])))' % [std.join(', ', labels), prom, sel, range])
+  else counterIncreaseExpr(prom, sel, range, labels);
   // Optional fallback: synthesise a zero-valued series stamped with
   // `<label>="(none)"` for each `by` label. Keeps the panel from going
   // to "No data" during quiet windows for sparse counters.
@@ -413,6 +429,7 @@ local counterIncreaseBars(spec, title, description, ds_var, selector, by=null, f
     h,
     stack,
     draw,
+    minInterval,
   )
 );
 
@@ -847,6 +864,92 @@ local SIPHON_SEL = 'namespace="siphon", ' + CLUSTER_SEL;
 local NATS_SEL = CLUSTER_SEL;
 local RAILS_SEL = if IS_DEDICATED then 'env=~".*"' else 'env=~"$rails_env"';
 
+// ---------- Indexer pool helpers ----------
+
+// The chart classifies every indexer Deployment by the engine modules it
+// registers (`code`, `sdlc`, `universal`, or `custom`) and the PodMonitor
+// promotes that classification onto app metrics as
+// `gkg_gitlab_com_indexer_modules`. cAdvisor and kube-state-metrics are
+// scraped by different jobs and carry no pod labels, so infra series have to
+// recover the kind by joining on pod identity against the app scrape target.
+local IDX_KIND = 'gkg_gitlab_com_indexer_modules';
+
+// `group by` always evaluates to 1, unlike `up` itself which is 0 while a
+// scrape is failing and would zero out anything multiplied by it.
+local idxKindVector = 'group by (cluster, namespace, pod, %s) (up{%s})' % [IDX_KIND, GKG_IDX_SEL];
+
+local withIdxKind(expr) =
+  '(%s) * on (cluster, namespace, pod) group_left(%s) %s' % [expr, IDX_KIND, idxKindVector];
+
+local idxKindSel(kind) = GKG_IDX_SEL + ', %s="%s"' % [IDX_KIND, kind];
+
+// Replica count for one pool kind. Deliberately not `or vector(0)`: a cluster
+// that runs no pool of this kind must render the stat panel's no-value dash,
+// not a zero that reads like "the pool exists and is scaled to nothing".
+local idxReplicaStat(kind, title, description, ds_var, w=PANEL_W, h=STAT_H) = (
+  local expr = 'count(up{%s})' % [idxKindSel(kind)];
+  stat(title, description, target(expr, title, ds_var), 'short', w, h, [exploreLink(expr)])
+);
+
+// Timeseries of an infra expression reduced per pool kind. `series` entries are
+// `{ expr, calc, legend }`; the kind label is appended to every legend so one
+// panel carries every pool without a per-pod series explosion. A cluster can
+// run one, two, or three pool kinds, so the series count is not known up
+// front and the legend sits on the right, where it scrolls instead of
+// clipping against a fixed panel height.
+local idxKindPanel(title, description, series, ds_var, unit='short', w=GRID_WIDTH / 2, h=PANEL_H, overrides=[]) = (
+  timeseries(
+    title,
+    description,
+    std.mapWithIndex(
+      function(i, s) target(
+        '%s by (%s) (%s)' % [s.calc, IDX_KIND, withIdxKind(s.expr)],
+        '%s {{%s}}' % [s.legend, IDX_KIND],
+        ds_var,
+        std.char(65 + i),
+      ),
+      series,
+    ),
+    unit,
+    w,
+    h,
+    'right',
+    overrides,
+  )
+);
+
+// Draws every `limit …` series as an unfilled dashed line so the ceiling reads
+// as a threshold rather than as another measurement.
+local LIMIT_OVERRIDE = [{
+  matcher: { id: 'byRegexp', options: '^limit .*' },
+  properties: [
+    { id: 'custom.lineStyle', value: { fill: 'dash', dash: [10, 10] } },
+    { id: 'custom.fillOpacity', value: 0 },
+    { id: 'custom.lineWidth', value: 1 },
+  ],
+}];
+
+// avg + max of a single infra expression, per pool kind. `max` is what
+// replaces the per-pod breakdown: one hot replica still moves it.
+local idxKindAvgMax(title, description, expr, ds_var, unit='short', w=GRID_WIDTH / 2, h=PANEL_H, limit_expr=null) =
+  local base = [{ expr: expr, calc: 'avg', legend: 'avg' }, { expr: expr, calc: 'max', legend: 'max' }];
+  // Pool kinds are sized independently, so the ceiling is per kind: `max`
+  // rather than `avg` so a mid-rollout pool showing two limits reports the
+  // higher one instead of an average of the two that matches neither.
+  local with_limit = if limit_expr == null then base
+  else base + [{ expr: limit_expr, calc: 'max', legend: 'limit' }];
+  idxKindPanel(
+    title, description, with_limit, ds_var, unit, w, h,
+    if limit_expr == null then [] else LIMIT_OVERRIDE,
+  );
+
+// Stat panel carrying one big number per pool kind. Grafana renders one tile
+// per returned series, so kinds that do not exist simply do not appear.
+local idxKindStat(title, description, expr, calc, ds_var, unit='short', w=PANEL_W, h=STAT_H) = (
+  local full = '%s by (%s) (%s)' % [calc, IDX_KIND, withIdxKind(expr)];
+  stat(title, description, target(full, '{{%s}}' % IDX_KIND, ds_var), unit, w, h, [exploreLink(full)])
+);
+
 // ---------- Public surface ----------
 
 {
@@ -901,6 +1004,15 @@ local RAILS_SEL = if IS_DEDICATED then 'env=~".*"' else 'env=~"$rails_env"';
   SIPHON_SEL: SIPHON_SEL,
   NATS_SEL: NATS_SEL,
   RAILS_SEL: RAILS_SEL,
+  // Indexer pools
+  IDX_KIND: IDX_KIND,
+  withIdxKind: withIdxKind,
+  idxKindSel: idxKindSel,
+  idxReplicaStat: idxReplicaStat,
+  idxKindPanel: idxKindPanel,
+  idxKindAvgMax: idxKindAvgMax,
+  LIMIT_OVERRIDE: LIMIT_OVERRIDE,
+  idxKindStat: idxKindStat,
   // Constants
   GRID_WIDTH: GRID_WIDTH,
   IS_DEDICATED: IS_DEDICATED,

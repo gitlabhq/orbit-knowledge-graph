@@ -1089,7 +1089,7 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
-      "description": "SDLC pipeline rows processed per Grafana auto-window, drawn as a smoothed trend line per entity.",
+      "description": "SDLC pipeline rows processed per bucket, drawn as a smoothed trend line per entity.",
       "fieldConfig": {
         "defaults": {
           "custom": {
@@ -1113,6 +1113,7 @@
         "y": 18
       },
       "id": 25,
+      "interval": "2m",
       "options": {
         "legend": {
           "calcs": [
@@ -1133,7 +1134,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum by (entity) (increase(gkg_indexer_sdlc_pipeline_rows_processed_total{container=\"gkg-indexer\", cluster=~\".*\"}[$__rate_interval]))",
+          "expr": "sum by (entity) (increase(gkg_indexer_sdlc_pipeline_rows_processed_total{container=\"gkg-indexer\", cluster=~\".*\"}[$__interval]))",
           "legendFormat": "{{entity}}",
           "refId": "A"
         }
@@ -1146,7 +1147,7 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
-      "description": "Repository indexing runs, stacked by outcome.",
+      "description": "Repository indexing runs per bucket, stacked by outcome.",
       "fieldConfig": {
         "defaults": {
           "custom": {
@@ -1171,6 +1172,7 @@
         "y": 18
       },
       "id": 26,
+      "interval": "2m",
       "options": {
         "legend": {
           "calcs": [
@@ -1191,7 +1193,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum by (outcome) (increase(gkg_indexer_code_repository_indexing_completed_total{container=\"gkg-indexer\", cluster=~\".*\"}[$__rate_interval]))",
+          "expr": "sum by (outcome) (round(increase(gkg_indexer_code_repository_indexing_completed_total{container=\"gkg-indexer\", cluster=~\".*\"}[$__interval])))",
           "legendFormat": "{{outcome}}",
           "refId": "A"
         }
@@ -1513,7 +1515,7 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
-      "description": "Task-level code indexing failures in rolling 1h windows, stacked by stage. Increments only when a code indexing task ends with a fatal pipeline error (sink write, thread pool, sentinel, internal panic). Per-file failures are charted in `Code: per-file faults by kind` below.",
+      "description": "Task-level code indexing failures, stacked by stage. Each bar counts the failures inside its own bucket, so the shape is where errors happened rather than a trailing total. Increments only when a code indexing task ends with a fatal pipeline error (sink write, thread pool, sentinel, internal panic). Per-file failures are charted in `Code: per-file faults by kind` below.",
       "fieldConfig": {
         "defaults": {
           "custom": {
@@ -1538,6 +1540,7 @@
         "y": 44
       },
       "id": 33,
+      "interval": "2m",
       "options": {
         "legend": {
           "calcs": [
@@ -1558,12 +1561,12 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "(sum by (stage) (increase(gkg_indexer_code_errors_total{container=\"gkg-indexer\", cluster=~\".*\"}[1h]))) or label_replace(vector(0), \"stage\", \"(none)\", \"\", \"\")",
+          "expr": "(sum by (stage) (round(increase(gkg_indexer_code_errors_total{container=\"gkg-indexer\", cluster=~\".*\"}[$__interval])))) or label_replace(vector(0), \"stage\", \"(none)\", \"\", \"\")",
           "legendFormat": "{{stage}}",
           "refId": "A"
         }
       ],
-      "title": "Code: task-level errors by pipeline stage (1h windows)",
+      "title": "Code: task-level errors by pipeline stage",
       "type": "timeseries"
     },
     {
@@ -1596,6 +1599,7 @@
         "y": 44
       },
       "id": 34,
+      "interval": "2m",
       "options": {
         "legend": {
           "calcs": [
@@ -1616,12 +1620,12 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "(sum by (kind) (increase(gkg_indexer_code_file_faults_total{container=\"gkg-indexer\", cluster=~\".*\"}[1h]))) or label_replace(vector(0), \"kind\", \"(none)\", \"\", \"\")",
+          "expr": "(sum by (kind) (round(increase(gkg_indexer_code_file_faults_total{container=\"gkg-indexer\", cluster=~\".*\"}[$__interval])))) or label_replace(vector(0), \"kind\", \"(none)\", \"\", \"\")",
           "legendFormat": "{{kind}}",
           "refId": "A"
         }
       ],
-      "title": "Code: per-file faults by kind (1h windows)",
+      "title": "Code: per-file faults by kind",
       "type": "timeseries"
     },
     {
@@ -1705,6 +1709,7 @@
         "y": 52
       },
       "id": 36,
+      "interval": "2m",
       "options": {
         "legend": {
           "calcs": [
@@ -1725,7 +1730,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum by (reason) (increase(gkg_indexer_code_repository_empty_total{container=\"gkg-indexer\", cluster=~\".*\"}[$__rate_interval]))",
+          "expr": "sum by (reason) (round(increase(gkg_indexer_code_repository_empty_total{container=\"gkg-indexer\", cluster=~\".*\"}[$__interval])))",
           "legendFormat": "{{reason}}",
           "refId": "A"
         }
@@ -1738,7 +1743,7 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
-      "description": "SDLC pipeline errors counted in rolling 1h windows, stacked by error_kind. Falls back to a flat zero line during error-free windows so the panel never goes to \"No data\".",
+      "description": "SDLC pipeline errors, stacked by error_kind. Falls back to a flat zero line during error-free buckets so the panel never goes to \"No data\".",
       "fieldConfig": {
         "defaults": {
           "custom": {
@@ -1763,6 +1768,7 @@
         "y": 60
       },
       "id": 37,
+      "interval": "2m",
       "options": {
         "legend": {
           "calcs": [
@@ -1783,12 +1789,12 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "(sum by (error_kind) (increase(gkg_indexer_sdlc_pipeline_errors_total{container=\"gkg-indexer\", cluster=~\".*\"}[1h]))) or label_replace(vector(0), \"error_kind\", \"(none)\", \"\", \"\")",
+          "expr": "(sum by (error_kind) (round(increase(gkg_indexer_sdlc_pipeline_errors_total{container=\"gkg-indexer\", cluster=~\".*\"}[$__interval])))) or label_replace(vector(0), \"error_kind\", \"(none)\", \"\", \"\")",
           "legendFormat": "{{error_kind}}",
           "refId": "A"
         }
       ],
-      "title": "SDLC: errors by kind (1h windows)",
+      "title": "SDLC: errors by kind",
       "type": "timeseries"
     },
     {
@@ -1916,6 +1922,229 @@
       },
       "id": 41,
       "panels": [],
+      "title": "Fleet",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ORBIT_DS"
+      },
+      "description": "Indexer pods registering only the code module. Dash means no code-only pool is deployed — check the universal tile.",
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "—",
+          "unit": "short"
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 0,
+        "y": 78
+      },
+      "id": 42,
+      "links": [
+        {
+          "targetBlank": false,
+          "title": "Open in Explore",
+          "url": "/explore?orgId=1&left=%7B%22datasource%22%3A%22$%7BORBIT_DS%7D%22%2C%22queries%22%3A%5B%7B%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22$%7BORBIT_DS%7D%22%7D%2C%22expr%22%3A%22count%28up%7Bcontainer%3D\\%22gkg-indexer\\%22%2C%20cluster%3D~\\%22.%2A\\%22%2C%20gkg_gitlab_com_indexer_modules%3D\\%22code\\%22%7D%29%22%2C%22range%22%3Atrue%2C%22refId%22%3A%22A%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22$__from%22%2C%22to%22%3A%22$__to%22%7D%7D"
+        }
+      ],
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value_and_name"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "count(up{container=\"gkg-indexer\", cluster=~\".*\", gkg_gitlab_com_indexer_modules=\"code\"})",
+          "legendFormat": "Code indexer replicas",
+          "refId": "A"
+        }
+      ],
+      "title": "Code indexer replicas",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ORBIT_DS"
+      },
+      "description": "Indexer pods registering the SDLC (and namespace-deletion) modules. Dash means no SDLC-only pool is deployed — check the universal tile.",
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "—",
+          "unit": "short"
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 8,
+        "y": 78
+      },
+      "id": 43,
+      "links": [
+        {
+          "targetBlank": false,
+          "title": "Open in Explore",
+          "url": "/explore?orgId=1&left=%7B%22datasource%22%3A%22$%7BORBIT_DS%7D%22%2C%22queries%22%3A%5B%7B%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22$%7BORBIT_DS%7D%22%7D%2C%22expr%22%3A%22count%28up%7Bcontainer%3D\\%22gkg-indexer\\%22%2C%20cluster%3D~\\%22.%2A\\%22%2C%20gkg_gitlab_com_indexer_modules%3D\\%22sdlc\\%22%7D%29%22%2C%22range%22%3Atrue%2C%22refId%22%3A%22A%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22$__from%22%2C%22to%22%3A%22$__to%22%7D%7D"
+        }
+      ],
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value_and_name"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "count(up{container=\"gkg-indexer\", cluster=~\".*\", gkg_gitlab_com_indexer_modules=\"sdlc\"})",
+          "legendFormat": "SDLC indexer replicas",
+          "refId": "A"
+        }
+      ],
+      "title": "SDLC indexer replicas",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ORBIT_DS"
+      },
+      "description": "Indexer pods registering every engine module in one deployment. Dash is the expected reading on GitLab.com, which runs split code and SDLC pools.",
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "—",
+          "unit": "short"
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 16,
+        "y": 78
+      },
+      "id": 44,
+      "links": [
+        {
+          "targetBlank": false,
+          "title": "Open in Explore",
+          "url": "/explore?orgId=1&left=%7B%22datasource%22%3A%22$%7BORBIT_DS%7D%22%2C%22queries%22%3A%5B%7B%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22$%7BORBIT_DS%7D%22%7D%2C%22expr%22%3A%22count%28up%7Bcontainer%3D\\%22gkg-indexer\\%22%2C%20cluster%3D~\\%22.%2A\\%22%2C%20gkg_gitlab_com_indexer_modules%3D\\%22universal\\%22%7D%29%22%2C%22range%22%3Atrue%2C%22refId%22%3A%22A%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22$__from%22%2C%22to%22%3A%22$__to%22%7D%7D"
+        }
+      ],
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value_and_name"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "count(up{container=\"gkg-indexer\", cluster=~\".*\", gkg_gitlab_com_indexer_modules=\"universal\"})",
+          "legendFormat": "Universal indexer replicas",
+          "refId": "A"
+        }
+      ],
+      "title": "Universal indexer replicas",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ORBIT_DS"
+      },
+      "description": "Scraped indexer pods per pool kind. Steps here are KEDA scaling events; a flat ceiling during a queue backlog means the pool is at its maxReplicaCount.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineInterpolation": "smooth",
+            "showPoints": "auto"
+          },
+          "unit": "short"
+        }
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 24,
+        "x": 0,
+        "y": 82
+      },
+      "id": 45,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "count by (gkg_gitlab_com_indexer_modules) (up{container=\"gkg-indexer\", cluster=~\".*\"})",
+          "legendFormat": "{{gkg_gitlab_com_indexer_modules}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Replicas over time by pool kind",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 89
+      },
+      "id": 46,
+      "panels": [],
       "title": "Resources",
       "type": "row"
     },
@@ -1924,7 +2153,7 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
-      "description": "Aggregate CPU seconds used per second divided by configured CPU limit, across all indexer replicas. 1.0 means the pool is fully consuming its quota.",
+      "description": "Worst replica in each pool, as a fraction of its own CPU limit. Reads per kind because code and SDLC pools are sized differently; 1.0 means that replica is consuming its whole quota.",
       "fieldConfig": {
         "defaults": {
           "noValue": "—",
@@ -1935,14 +2164,14 @@
         "h": 4,
         "w": 6,
         "x": 0,
-        "y": 78
+        "y": 90
       },
-      "id": 42,
+      "id": 47,
       "links": [
         {
           "targetBlank": false,
           "title": "Open in Explore",
-          "url": "/explore?orgId=1&left=%7B%22datasource%22%3A%22$%7BORBIT_DS%7D%22%2C%22queries%22%3A%5B%7B%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22$%7BORBIT_DS%7D%22%7D%2C%22expr%22%3A%22%28sum%28rate%28container_cpu_usage_seconds_total%7Bcontainer%3D\\%22gkg-indexer\\%22%2C%20cluster%3D~\\%22.%2A\\%22%2C%20cpu%3D\\%22total\\%22%7D%5B5m%5D%29%29%29%20%2F%20%28sum%28kube_pod_container_resource_limits%7Bcontainer%3D\\%22gkg-indexer\\%22%2C%20cluster%3D~\\%22.%2A\\%22%2C%20namespace%3D\\%22gkg\\%22%2C%20resource%3D\\%22cpu\\%22%7D%29%20%3E%200%29%22%2C%22range%22%3Atrue%2C%22refId%22%3A%22A%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22$__from%22%2C%22to%22%3A%22$__to%22%7D%7D"
+          "url": "/explore?orgId=1&left=%7B%22datasource%22%3A%22$%7BORBIT_DS%7D%22%2C%22queries%22%3A%5B%7B%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22$%7BORBIT_DS%7D%22%7D%2C%22expr%22%3A%22max%20by%20%28gkg_gitlab_com_indexer_modules%29%20%28%28%28rate%28container_cpu_usage_seconds_total%7Bcontainer%3D\\%22gkg-indexer\\%22%2C%20cluster%3D~\\%22.%2A\\%22%2C%20cpu%3D\\%22total\\%22%7D%5B5m%5D%29%29%20%2F%20on%20%28cluster%2C%20namespace%2C%20pod%29%20%28kube_pod_container_resource_limits%7Bcontainer%3D\\%22gkg-indexer\\%22%2C%20cluster%3D~\\%22.%2A\\%22%2C%20resource%3D\\%22cpu\\%22%7D%29%29%20%2A%20on%20%28cluster%2C%20namespace%2C%20pod%29%20group_left%28gkg_gitlab_com_indexer_modules%29%20group%20by%20%28cluster%2C%20namespace%2C%20pod%2C%20gkg_gitlab_com_indexer_modules%29%20%28up%7Bcontainer%3D\\%22gkg-indexer\\%22%2C%20cluster%3D~\\%22.%2A\\%22%7D%29%29%22%2C%22range%22%3Atrue%2C%22refId%22%3A%22A%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22$__from%22%2C%22to%22%3A%22$__to%22%7D%7D"
         }
       ],
       "options": {
@@ -1964,12 +2193,12 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "((sum(rate(container_cpu_usage_seconds_total{container=\"gkg-indexer\", cluster=~\".*\", cpu=\"total\"}[5m]))) / (sum(kube_pod_container_resource_limits{container=\"gkg-indexer\", cluster=~\".*\", namespace=\"gkg\", resource=\"cpu\"}) > 0)) or vector(0)",
-          "legendFormat": "CPU: usage / limit (5m)",
+          "expr": "max by (gkg_gitlab_com_indexer_modules) (((rate(container_cpu_usage_seconds_total{container=\"gkg-indexer\", cluster=~\".*\", cpu=\"total\"}[5m])) / on (cluster, namespace, pod) (kube_pod_container_resource_limits{container=\"gkg-indexer\", cluster=~\".*\", resource=\"cpu\"})) * on (cluster, namespace, pod) group_left(gkg_gitlab_com_indexer_modules) group by (cluster, namespace, pod, gkg_gitlab_com_indexer_modules) (up{container=\"gkg-indexer\", cluster=~\".*\"}))",
+          "legendFormat": "{{gkg_gitlab_com_indexer_modules}}",
           "refId": "A"
         }
       ],
-      "title": "CPU: usage / limit (5m)",
+      "title": "CPU: peak usage / limit (5m)",
       "type": "stat"
     },
     {
@@ -1977,7 +2206,7 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
-      "description": "Working-set memory across all replicas as a fraction of the aggregate memory limit. Watch for sustained values above ~0.85 — that is OOM-kill territory.",
+      "description": "Worst replica in each pool, as a fraction of its own memory limit. Sustained values above ~0.85 are OOM-kill territory.",
       "fieldConfig": {
         "defaults": {
           "noValue": "—",
@@ -1988,14 +2217,14 @@
         "h": 4,
         "w": 6,
         "x": 6,
-        "y": 78
+        "y": 90
       },
-      "id": 43,
+      "id": 48,
       "links": [
         {
           "targetBlank": false,
           "title": "Open in Explore",
-          "url": "/explore?orgId=1&left=%7B%22datasource%22%3A%22$%7BORBIT_DS%7D%22%2C%22queries%22%3A%5B%7B%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22$%7BORBIT_DS%7D%22%7D%2C%22expr%22%3A%22%28sum%28container_memory_working_set_bytes%7Bcontainer%3D\\%22gkg-indexer\\%22%2C%20cluster%3D~\\%22.%2A\\%22%7D%29%29%20%2F%20%28sum%28kube_pod_container_resource_limits%7Bcontainer%3D\\%22gkg-indexer\\%22%2C%20cluster%3D~\\%22.%2A\\%22%2C%20namespace%3D\\%22gkg\\%22%2C%20resource%3D\\%22memory\\%22%7D%29%20%3E%200%29%22%2C%22range%22%3Atrue%2C%22refId%22%3A%22A%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22$__from%22%2C%22to%22%3A%22$__to%22%7D%7D"
+          "url": "/explore?orgId=1&left=%7B%22datasource%22%3A%22$%7BORBIT_DS%7D%22%2C%22queries%22%3A%5B%7B%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22$%7BORBIT_DS%7D%22%7D%2C%22expr%22%3A%22max%20by%20%28gkg_gitlab_com_indexer_modules%29%20%28%28%28container_memory_working_set_bytes%7Bcontainer%3D\\%22gkg-indexer\\%22%2C%20cluster%3D~\\%22.%2A\\%22%7D%29%20%2F%20on%20%28cluster%2C%20namespace%2C%20pod%29%20%28kube_pod_container_resource_limits%7Bcontainer%3D\\%22gkg-indexer\\%22%2C%20cluster%3D~\\%22.%2A\\%22%2C%20resource%3D\\%22memory\\%22%7D%29%29%20%2A%20on%20%28cluster%2C%20namespace%2C%20pod%29%20group_left%28gkg_gitlab_com_indexer_modules%29%20group%20by%20%28cluster%2C%20namespace%2C%20pod%2C%20gkg_gitlab_com_indexer_modules%29%20%28up%7Bcontainer%3D\\%22gkg-indexer\\%22%2C%20cluster%3D~\\%22.%2A\\%22%7D%29%29%22%2C%22range%22%3Atrue%2C%22refId%22%3A%22A%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22$__from%22%2C%22to%22%3A%22$__to%22%7D%7D"
         }
       ],
       "options": {
@@ -2017,12 +2246,12 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "((sum(container_memory_working_set_bytes{container=\"gkg-indexer\", cluster=~\".*\"})) / (sum(kube_pod_container_resource_limits{container=\"gkg-indexer\", cluster=~\".*\", namespace=\"gkg\", resource=\"memory\"}) > 0)) or vector(0)",
-          "legendFormat": "Memory: working set / limit",
+          "expr": "max by (gkg_gitlab_com_indexer_modules) (((container_memory_working_set_bytes{container=\"gkg-indexer\", cluster=~\".*\"}) / on (cluster, namespace, pod) (kube_pod_container_resource_limits{container=\"gkg-indexer\", cluster=~\".*\", resource=\"memory\"})) * on (cluster, namespace, pod) group_left(gkg_gitlab_com_indexer_modules) group by (cluster, namespace, pod, gkg_gitlab_com_indexer_modules) (up{container=\"gkg-indexer\", cluster=~\".*\"}))",
+          "legendFormat": "{{gkg_gitlab_com_indexer_modules}}",
           "refId": "A"
         }
       ],
-      "title": "Memory: working set / limit",
+      "title": "Memory: peak working set / limit",
       "type": "stat"
     },
     {
@@ -2030,7 +2259,7 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
-      "description": "Total OOM-killer events across indexer replicas in the last hour. Any non-zero value warrants a look at the memory panel below.",
+      "description": "OOM-killer events in the last hour, summed per pool kind. Any non-zero value warrants a look at the memory panels below.",
       "fieldConfig": {
         "defaults": {
           "noValue": "—",
@@ -2041,14 +2270,14 @@
         "h": 4,
         "w": 6,
         "x": 12,
-        "y": 78
+        "y": 90
       },
-      "id": 44,
+      "id": 49,
       "links": [
         {
           "targetBlank": false,
           "title": "Open in Explore",
-          "url": "/explore?orgId=1&left=%7B%22datasource%22%3A%22$%7BORBIT_DS%7D%22%2C%22queries%22%3A%5B%7B%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22$%7BORBIT_DS%7D%22%7D%2C%22expr%22%3A%22sum%28increase%28container_oom_events_total%7Bcontainer%3D\\%22gkg-indexer\\%22%2C%20cluster%3D~\\%22.%2A\\%22%7D%5B1h%5D%29%29%22%2C%22range%22%3Atrue%2C%22refId%22%3A%22A%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22$__from%22%2C%22to%22%3A%22$__to%22%7D%7D"
+          "url": "/explore?orgId=1&left=%7B%22datasource%22%3A%22$%7BORBIT_DS%7D%22%2C%22queries%22%3A%5B%7B%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22$%7BORBIT_DS%7D%22%7D%2C%22expr%22%3A%22sum%20by%20%28gkg_gitlab_com_indexer_modules%29%20%28%28increase%28container_oom_events_total%7Bcontainer%3D\\%22gkg-indexer\\%22%2C%20cluster%3D~\\%22.%2A\\%22%7D%5B1h%5D%29%29%20%2A%20on%20%28cluster%2C%20namespace%2C%20pod%29%20group_left%28gkg_gitlab_com_indexer_modules%29%20group%20by%20%28cluster%2C%20namespace%2C%20pod%2C%20gkg_gitlab_com_indexer_modules%29%20%28up%7Bcontainer%3D\\%22gkg-indexer\\%22%2C%20cluster%3D~\\%22.%2A\\%22%7D%29%29%22%2C%22range%22%3Atrue%2C%22refId%22%3A%22A%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22$__from%22%2C%22to%22%3A%22$__to%22%7D%7D"
         }
       ],
       "options": {
@@ -2070,8 +2299,8 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "(sum(increase(container_oom_events_total{container=\"gkg-indexer\", cluster=~\".*\"}[1h]))) or vector(0)",
-          "legendFormat": "OOM events (1h)",
+          "expr": "sum by (gkg_gitlab_com_indexer_modules) ((increase(container_oom_events_total{container=\"gkg-indexer\", cluster=~\".*\"}[1h])) * on (cluster, namespace, pod) group_left(gkg_gitlab_com_indexer_modules) group by (cluster, namespace, pod, gkg_gitlab_com_indexer_modules) (up{container=\"gkg-indexer\", cluster=~\".*\"}))",
+          "legendFormat": "{{gkg_gitlab_com_indexer_modules}}",
           "refId": "A"
         }
       ],
@@ -2083,7 +2312,7 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
-      "description": "Container restarts across indexer replicas in the last hour. Crash-loops show up here before they show up in the app metrics.",
+      "description": "Container restarts in the last hour, summed per pool kind. Crash-loops show up here before they show up in the app metrics.",
       "fieldConfig": {
         "defaults": {
           "noValue": "—",
@@ -2094,14 +2323,14 @@
         "h": 4,
         "w": 6,
         "x": 18,
-        "y": 78
+        "y": 90
       },
-      "id": 45,
+      "id": 50,
       "links": [
         {
           "targetBlank": false,
           "title": "Open in Explore",
-          "url": "/explore?orgId=1&left=%7B%22datasource%22%3A%22$%7BORBIT_DS%7D%22%2C%22queries%22%3A%5B%7B%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22$%7BORBIT_DS%7D%22%7D%2C%22expr%22%3A%22sum%28increase%28kube_pod_container_status_restarts_total%7Bcontainer%3D\\%22gkg-indexer\\%22%2C%20cluster%3D~\\%22.%2A\\%22%2C%20namespace%3D\\%22gkg\\%22%7D%5B1h%5D%29%29%22%2C%22range%22%3Atrue%2C%22refId%22%3A%22A%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22$__from%22%2C%22to%22%3A%22$__to%22%7D%7D"
+          "url": "/explore?orgId=1&left=%7B%22datasource%22%3A%22$%7BORBIT_DS%7D%22%2C%22queries%22%3A%5B%7B%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22$%7BORBIT_DS%7D%22%7D%2C%22expr%22%3A%22sum%20by%20%28gkg_gitlab_com_indexer_modules%29%20%28%28increase%28kube_pod_container_status_restarts_total%7Bcontainer%3D\\%22gkg-indexer\\%22%2C%20cluster%3D~\\%22.%2A\\%22%7D%5B1h%5D%29%29%20%2A%20on%20%28cluster%2C%20namespace%2C%20pod%29%20group_left%28gkg_gitlab_com_indexer_modules%29%20group%20by%20%28cluster%2C%20namespace%2C%20pod%2C%20gkg_gitlab_com_indexer_modules%29%20%28up%7Bcontainer%3D\\%22gkg-indexer\\%22%2C%20cluster%3D~\\%22.%2A\\%22%7D%29%29%22%2C%22range%22%3Atrue%2C%22refId%22%3A%22A%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22$__from%22%2C%22to%22%3A%22$__to%22%7D%7D"
         }
       ],
       "options": {
@@ -2123,8 +2352,8 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "(sum(increase(kube_pod_container_status_restarts_total{container=\"gkg-indexer\", cluster=~\".*\", namespace=\"gkg\"}[1h]))) or vector(0)",
-          "legendFormat": "Restarts (1h)",
+          "expr": "sum by (gkg_gitlab_com_indexer_modules) ((increase(kube_pod_container_status_restarts_total{container=\"gkg-indexer\", cluster=~\".*\"}[1h])) * on (cluster, namespace, pod) group_left(gkg_gitlab_com_indexer_modules) group by (cluster, namespace, pod, gkg_gitlab_com_indexer_modules) (up{container=\"gkg-indexer\", cluster=~\".*\"}))",
+          "legendFormat": "{{gkg_gitlab_com_indexer_modules}}",
           "refId": "A"
         }
       ],
@@ -2136,7 +2365,7 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
-      "description": "Per-pod CPU seconds consumed per second. The dashed reference line is the per-pod CPU limit from kube-state-metrics; pods bumping against it should be cross-checked with the throttling panel.",
+      "description": "CPU seconds consumed per second. avg is the pool steady state, max is its busiest replica, and the dashed line is that pool own CPU limit. A replica riding its limit is throttled, not evicted — check the throttling panel next to this one.",
       "fieldConfig": {
         "defaults": {
           "custom": {
@@ -2146,15 +2375,43 @@
             "showPoints": "auto"
           },
           "unit": "short"
-        }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^limit .*"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "dash": [
+                    10,
+                    10
+                  ],
+                  "fill": "dash"
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 1
+              }
+            ]
+          }
+        ]
       },
       "gridPos": {
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 82
+        "y": 94
       },
-      "id": 46,
+      "id": 51,
       "options": {
         "legend": {
           "calcs": [
@@ -2162,7 +2419,7 @@
             "max"
           ],
           "displayMode": "table",
-          "placement": "bottom"
+          "placement": "right"
         },
         "tooltip": {
           "mode": "multi"
@@ -2174,8 +2431,8 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum by (pod) (rate(container_cpu_usage_seconds_total{container=\"gkg-indexer\", cluster=~\".*\", cpu=\"total\"}[5m]))",
-          "legendFormat": "{{pod}}",
+          "expr": "avg by (gkg_gitlab_com_indexer_modules) ((rate(container_cpu_usage_seconds_total{container=\"gkg-indexer\", cluster=~\".*\", cpu=\"total\"}[5m])) * on (cluster, namespace, pod) group_left(gkg_gitlab_com_indexer_modules) group by (cluster, namespace, pod, gkg_gitlab_com_indexer_modules) (up{container=\"gkg-indexer\", cluster=~\".*\"}))",
+          "legendFormat": "avg {{gkg_gitlab_com_indexer_modules}}",
           "refId": "A"
         },
         {
@@ -2183,12 +2440,21 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "avg(kube_pod_container_resource_limits{container=\"gkg-indexer\", cluster=~\".*\", namespace=\"gkg\", resource=\"cpu\"})",
-          "legendFormat": "limit",
+          "expr": "max by (gkg_gitlab_com_indexer_modules) ((rate(container_cpu_usage_seconds_total{container=\"gkg-indexer\", cluster=~\".*\", cpu=\"total\"}[5m])) * on (cluster, namespace, pod) group_left(gkg_gitlab_com_indexer_modules) group by (cluster, namespace, pod, gkg_gitlab_com_indexer_modules) (up{container=\"gkg-indexer\", cluster=~\".*\"}))",
+          "legendFormat": "max {{gkg_gitlab_com_indexer_modules}}",
           "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "max by (gkg_gitlab_com_indexer_modules) ((kube_pod_container_resource_limits{container=\"gkg-indexer\", cluster=~\".*\", resource=\"cpu\"}) * on (cluster, namespace, pod) group_left(gkg_gitlab_com_indexer_modules) group by (cluster, namespace, pod, gkg_gitlab_com_indexer_modules) (up{container=\"gkg-indexer\", cluster=~\".*\"}))",
+          "legendFormat": "limit {{gkg_gitlab_com_indexer_modules}}",
+          "refId": "C"
         }
       ],
-      "title": "CPU: cores used per pod",
+      "title": "CPU: cores used",
       "type": "timeseries"
     },
     {
@@ -2196,7 +2462,7 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
-      "description": "Share of CFS periods where the cgroup was throttled. Anything sustained above ~5% means the pod is hitting its CPU quota and pipelines will queue.",
+      "description": "Share of CFS periods where the cgroup was throttled. Anything sustained above ~5% on max means at least one replica is hitting its CPU quota and pipelines will queue behind it.",
       "fieldConfig": {
         "defaults": {
           "custom": {
@@ -2212,9 +2478,9 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 82
+        "y": 94
       },
-      "id": 47,
+      "id": 52,
       "options": {
         "legend": {
           "calcs": [
@@ -2222,7 +2488,7 @@
             "max"
           ],
           "displayMode": "table",
-          "placement": "bottom"
+          "placement": "right"
         },
         "tooltip": {
           "mode": "multi"
@@ -2234,12 +2500,21 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "(sum by (pod) (rate(container_cpu_cfs_throttled_periods_total{container=\"gkg-indexer\", cluster=~\".*\"}[5m]))) / (sum by (pod) (rate(container_cpu_cfs_periods_total{container=\"gkg-indexer\", cluster=~\".*\"}[5m])) > 0)",
-          "legendFormat": "{{pod}}",
+          "expr": "avg by (gkg_gitlab_com_indexer_modules) (((rate(container_cpu_cfs_throttled_periods_total{container=\"gkg-indexer\", cluster=~\".*\"}[5m])) / (rate(container_cpu_cfs_periods_total{container=\"gkg-indexer\", cluster=~\".*\"}[5m]) > 0)) * on (cluster, namespace, pod) group_left(gkg_gitlab_com_indexer_modules) group by (cluster, namespace, pod, gkg_gitlab_com_indexer_modules) (up{container=\"gkg-indexer\", cluster=~\".*\"}))",
+          "legendFormat": "avg {{gkg_gitlab_com_indexer_modules}}",
           "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "max by (gkg_gitlab_com_indexer_modules) (((rate(container_cpu_cfs_throttled_periods_total{container=\"gkg-indexer\", cluster=~\".*\"}[5m])) / (rate(container_cpu_cfs_periods_total{container=\"gkg-indexer\", cluster=~\".*\"}[5m]) > 0)) * on (cluster, namespace, pod) group_left(gkg_gitlab_com_indexer_modules) group by (cluster, namespace, pod, gkg_gitlab_com_indexer_modules) (up{container=\"gkg-indexer\", cluster=~\".*\"}))",
+          "legendFormat": "max {{gkg_gitlab_com_indexer_modules}}",
+          "refId": "B"
         }
       ],
-      "title": "CPU: throttled time fraction per pod",
+      "title": "CPU: throttled time fraction",
       "type": "timeseries"
     },
     {
@@ -2247,7 +2522,7 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
-      "description": "container_memory_working_set_bytes per replica. The dashed reference line is the per-pod memory limit. Working set is what the OOM killer reads, not RSS.",
+      "description": "container_memory_working_set_bytes per replica, reduced per pool kind. Working set is what the OOM killer reads, not RSS, and the dashed line is that pool own memory limit. Code and SDLC pools are sized differently, so each kind gets its own ceiling; max approaching its dashed line is the eviction warning.",
       "fieldConfig": {
         "defaults": {
           "custom": {
@@ -2257,15 +2532,43 @@
             "showPoints": "auto"
           },
           "unit": "bytes"
-        }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^limit .*"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "dash": [
+                    10,
+                    10
+                  ],
+                  "fill": "dash"
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 1
+              }
+            ]
+          }
+        ]
       },
       "gridPos": {
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 90
+        "y": 102
       },
-      "id": 48,
+      "id": 53,
       "options": {
         "legend": {
           "calcs": [
@@ -2273,7 +2576,7 @@
             "max"
           ],
           "displayMode": "table",
-          "placement": "bottom"
+          "placement": "right"
         },
         "tooltip": {
           "mode": "multi"
@@ -2285,8 +2588,8 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum by (pod) (container_memory_working_set_bytes{container=\"gkg-indexer\", cluster=~\".*\"})",
-          "legendFormat": "{{pod}}",
+          "expr": "avg by (gkg_gitlab_com_indexer_modules) ((container_memory_working_set_bytes{container=\"gkg-indexer\", cluster=~\".*\"}) * on (cluster, namespace, pod) group_left(gkg_gitlab_com_indexer_modules) group by (cluster, namespace, pod, gkg_gitlab_com_indexer_modules) (up{container=\"gkg-indexer\", cluster=~\".*\"}))",
+          "legendFormat": "avg {{gkg_gitlab_com_indexer_modules}}",
           "refId": "A"
         },
         {
@@ -2294,12 +2597,21 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "avg(kube_pod_container_resource_limits{container=\"gkg-indexer\", cluster=~\".*\", namespace=\"gkg\", resource=\"memory\"})",
-          "legendFormat": "limit",
+          "expr": "max by (gkg_gitlab_com_indexer_modules) ((container_memory_working_set_bytes{container=\"gkg-indexer\", cluster=~\".*\"}) * on (cluster, namespace, pod) group_left(gkg_gitlab_com_indexer_modules) group by (cluster, namespace, pod, gkg_gitlab_com_indexer_modules) (up{container=\"gkg-indexer\", cluster=~\".*\"}))",
+          "legendFormat": "max {{gkg_gitlab_com_indexer_modules}}",
           "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "max by (gkg_gitlab_com_indexer_modules) ((kube_pod_container_resource_limits{container=\"gkg-indexer\", cluster=~\".*\", resource=\"memory\"}) * on (cluster, namespace, pod) group_left(gkg_gitlab_com_indexer_modules) group by (cluster, namespace, pod, gkg_gitlab_com_indexer_modules) (up{container=\"gkg-indexer\", cluster=~\".*\"}))",
+          "legendFormat": "limit {{gkg_gitlab_com_indexer_modules}}",
+          "refId": "C"
         }
       ],
-      "title": "Memory: working set per pod",
+      "title": "Memory: working set",
       "type": "timeseries"
     },
     {
@@ -2307,7 +2619,7 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
-      "description": "Resident set and page cache, per pod. RSS dominating with a tiny cache often means heap growth; cache dominating typically means Gitaly archive I/O.",
+      "description": "Resident set and page cache per pool kind. RSS dominating with a tiny cache usually means heap growth; cache dominating on the code pool typically means Gitaly archive I/O.",
       "fieldConfig": {
         "defaults": {
           "custom": {
@@ -2323,9 +2635,9 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 90
+        "y": 102
       },
-      "id": 49,
+      "id": 54,
       "options": {
         "legend": {
           "calcs": [
@@ -2333,7 +2645,7 @@
             "max"
           ],
           "displayMode": "table",
-          "placement": "bottom"
+          "placement": "right"
         },
         "tooltip": {
           "mode": "multi"
@@ -2345,8 +2657,8 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum by (pod) (container_memory_rss{container=\"gkg-indexer\", cluster=~\".*\"})",
-          "legendFormat": "rss / {{pod}}",
+          "expr": "avg by (gkg_gitlab_com_indexer_modules) ((container_memory_rss{container=\"gkg-indexer\", cluster=~\".*\"}) * on (cluster, namespace, pod) group_left(gkg_gitlab_com_indexer_modules) group by (cluster, namespace, pod, gkg_gitlab_com_indexer_modules) (up{container=\"gkg-indexer\", cluster=~\".*\"}))",
+          "legendFormat": "rss avg {{gkg_gitlab_com_indexer_modules}}",
           "refId": "A"
         },
         {
@@ -2354,12 +2666,30 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum by (pod) (container_memory_cache{container=\"gkg-indexer\", cluster=~\".*\"})",
-          "legendFormat": "cache / {{pod}}",
+          "expr": "max by (gkg_gitlab_com_indexer_modules) ((container_memory_rss{container=\"gkg-indexer\", cluster=~\".*\"}) * on (cluster, namespace, pod) group_left(gkg_gitlab_com_indexer_modules) group by (cluster, namespace, pod, gkg_gitlab_com_indexer_modules) (up{container=\"gkg-indexer\", cluster=~\".*\"}))",
+          "legendFormat": "rss max {{gkg_gitlab_com_indexer_modules}}",
           "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "avg by (gkg_gitlab_com_indexer_modules) ((container_memory_cache{container=\"gkg-indexer\", cluster=~\".*\"}) * on (cluster, namespace, pod) group_left(gkg_gitlab_com_indexer_modules) group by (cluster, namespace, pod, gkg_gitlab_com_indexer_modules) (up{container=\"gkg-indexer\", cluster=~\".*\"}))",
+          "legendFormat": "cache avg {{gkg_gitlab_com_indexer_modules}}",
+          "refId": "C"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "max by (gkg_gitlab_com_indexer_modules) ((container_memory_cache{container=\"gkg-indexer\", cluster=~\".*\"}) * on (cluster, namespace, pod) group_left(gkg_gitlab_com_indexer_modules) group by (cluster, namespace, pod, gkg_gitlab_com_indexer_modules) (up{container=\"gkg-indexer\", cluster=~\".*\"}))",
+          "legendFormat": "cache max {{gkg_gitlab_com_indexer_modules}}",
+          "refId": "D"
         }
       ],
-      "title": "Memory: RSS and cache per pod",
+      "title": "Memory: RSS and page cache",
       "type": "timeseries"
     },
     {
@@ -2367,7 +2697,7 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
-      "description": "Read and write throughput from cAdvisor. A sustained climb on writes during code indexing usually points at archive extraction; reads spike during ClickHouse query bursts.",
+      "description": "Read and write throughput from cAdvisor, per pool kind. Sustained writes on the code pool are archive extraction under /tmp; the SDLC pool writes nothing to disk, so a signal there is worth investigating.",
       "fieldConfig": {
         "defaults": {
           "custom": {
@@ -2383,9 +2713,9 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 98
+        "y": 110
       },
-      "id": 50,
+      "id": 55,
       "options": {
         "legend": {
           "calcs": [
@@ -2393,7 +2723,7 @@
             "max"
           ],
           "displayMode": "table",
-          "placement": "bottom"
+          "placement": "right"
         },
         "tooltip": {
           "mode": "multi"
@@ -2405,8 +2735,8 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum by (pod) (rate(container_fs_reads_bytes_total{container=\"gkg-indexer\", cluster=~\".*\"}[5m]))",
-          "legendFormat": "read / {{pod}}",
+          "expr": "avg by (gkg_gitlab_com_indexer_modules) ((rate(container_fs_reads_bytes_total{container=\"gkg-indexer\", cluster=~\".*\"}[5m])) * on (cluster, namespace, pod) group_left(gkg_gitlab_com_indexer_modules) group by (cluster, namespace, pod, gkg_gitlab_com_indexer_modules) (up{container=\"gkg-indexer\", cluster=~\".*\"}))",
+          "legendFormat": "read avg {{gkg_gitlab_com_indexer_modules}}",
           "refId": "A"
         },
         {
@@ -2414,12 +2744,30 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum by (pod) (rate(container_fs_writes_bytes_total{container=\"gkg-indexer\", cluster=~\".*\"}[5m]))",
-          "legendFormat": "write / {{pod}}",
+          "expr": "max by (gkg_gitlab_com_indexer_modules) ((rate(container_fs_reads_bytes_total{container=\"gkg-indexer\", cluster=~\".*\"}[5m])) * on (cluster, namespace, pod) group_left(gkg_gitlab_com_indexer_modules) group by (cluster, namespace, pod, gkg_gitlab_com_indexer_modules) (up{container=\"gkg-indexer\", cluster=~\".*\"}))",
+          "legendFormat": "read max {{gkg_gitlab_com_indexer_modules}}",
           "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "avg by (gkg_gitlab_com_indexer_modules) ((rate(container_fs_writes_bytes_total{container=\"gkg-indexer\", cluster=~\".*\"}[5m])) * on (cluster, namespace, pod) group_left(gkg_gitlab_com_indexer_modules) group by (cluster, namespace, pod, gkg_gitlab_com_indexer_modules) (up{container=\"gkg-indexer\", cluster=~\".*\"}))",
+          "legendFormat": "write avg {{gkg_gitlab_com_indexer_modules}}",
+          "refId": "C"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "max by (gkg_gitlab_com_indexer_modules) ((rate(container_fs_writes_bytes_total{container=\"gkg-indexer\", cluster=~\".*\"}[5m])) * on (cluster, namespace, pod) group_left(gkg_gitlab_com_indexer_modules) group by (cluster, namespace, pod, gkg_gitlab_com_indexer_modules) (up{container=\"gkg-indexer\", cluster=~\".*\"}))",
+          "legendFormat": "write max {{gkg_gitlab_com_indexer_modules}}",
+          "refId": "D"
         }
       ],
-      "title": "Filesystem I/O bytes per pod",
+      "title": "Filesystem I/O bytes",
       "type": "timeseries"
     },
     {
@@ -2427,7 +2775,7 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
-      "description": "PSI seconds per second. IO pressure rising means processes are waiting on disk; memory pressure rising means the kernel is reclaiming pages, often the leading edge of an OOM.",
+      "description": "PSI seconds per second, per pool kind. IO pressure rising means processes are waiting on disk; memory pressure rising means the kernel is reclaiming pages, often the leading edge of an OOM.",
       "fieldConfig": {
         "defaults": {
           "custom": {
@@ -2443,9 +2791,9 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 98
+        "y": 110
       },
-      "id": 51,
+      "id": 56,
       "options": {
         "legend": {
           "calcs": [
@@ -2453,7 +2801,7 @@
             "max"
           ],
           "displayMode": "table",
-          "placement": "bottom"
+          "placement": "right"
         },
         "tooltip": {
           "mode": "multi"
@@ -2465,8 +2813,8 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum by (pod) (rate(container_pressure_io_waiting_seconds_total{container=\"gkg-indexer\", cluster=~\".*\"}[5m]))",
-          "legendFormat": "io / {{pod}}",
+          "expr": "avg by (gkg_gitlab_com_indexer_modules) ((rate(container_pressure_io_waiting_seconds_total{container=\"gkg-indexer\", cluster=~\".*\"}[5m])) * on (cluster, namespace, pod) group_left(gkg_gitlab_com_indexer_modules) group by (cluster, namespace, pod, gkg_gitlab_com_indexer_modules) (up{container=\"gkg-indexer\", cluster=~\".*\"}))",
+          "legendFormat": "io avg {{gkg_gitlab_com_indexer_modules}}",
           "refId": "A"
         },
         {
@@ -2474,9 +2822,27 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum by (pod) (rate(container_pressure_memory_waiting_seconds_total{container=\"gkg-indexer\", cluster=~\".*\"}[5m]))",
-          "legendFormat": "mem / {{pod}}",
+          "expr": "max by (gkg_gitlab_com_indexer_modules) ((rate(container_pressure_io_waiting_seconds_total{container=\"gkg-indexer\", cluster=~\".*\"}[5m])) * on (cluster, namespace, pod) group_left(gkg_gitlab_com_indexer_modules) group by (cluster, namespace, pod, gkg_gitlab_com_indexer_modules) (up{container=\"gkg-indexer\", cluster=~\".*\"}))",
+          "legendFormat": "io max {{gkg_gitlab_com_indexer_modules}}",
           "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "avg by (gkg_gitlab_com_indexer_modules) ((rate(container_pressure_memory_waiting_seconds_total{container=\"gkg-indexer\", cluster=~\".*\"}[5m])) * on (cluster, namespace, pod) group_left(gkg_gitlab_com_indexer_modules) group by (cluster, namespace, pod, gkg_gitlab_com_indexer_modules) (up{container=\"gkg-indexer\", cluster=~\".*\"}))",
+          "legendFormat": "mem avg {{gkg_gitlab_com_indexer_modules}}",
+          "refId": "C"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "max by (gkg_gitlab_com_indexer_modules) ((rate(container_pressure_memory_waiting_seconds_total{container=\"gkg-indexer\", cluster=~\".*\"}[5m])) * on (cluster, namespace, pod) group_left(gkg_gitlab_com_indexer_modules) group by (cluster, namespace, pod, gkg_gitlab_com_indexer_modules) (up{container=\"gkg-indexer\", cluster=~\".*\"}))",
+          "legendFormat": "mem max {{gkg_gitlab_com_indexer_modules}}",
+          "refId": "D"
         }
       ],
       "title": "Pressure stall: IO and memory",
@@ -2487,7 +2853,7 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
-      "description": "OS-level concurrency counters. Threads climbing without a corresponding workload increase usually points at a tokio blocking-pool growth event; sockets climbing flags a NATS or ClickHouse connection leak.",
+      "description": "OS-level concurrency counters per pool kind. Threads climbing without a matching workload increase usually points at tokio blocking-pool growth; sockets climbing flags a NATS or ClickHouse connection leak.",
       "fieldConfig": {
         "defaults": {
           "custom": {
@@ -2503,9 +2869,9 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 106
+        "y": 118
       },
-      "id": 52,
+      "id": 57,
       "options": {
         "legend": {
           "calcs": [
@@ -2513,7 +2879,7 @@
             "max"
           ],
           "displayMode": "table",
-          "placement": "bottom"
+          "placement": "right"
         },
         "tooltip": {
           "mode": "multi"
@@ -2525,8 +2891,8 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum by (pod) (container_threads{container=\"gkg-indexer\", cluster=~\".*\"})",
-          "legendFormat": "threads / {{pod}}",
+          "expr": "avg by (gkg_gitlab_com_indexer_modules) ((container_threads{container=\"gkg-indexer\", cluster=~\".*\"}) * on (cluster, namespace, pod) group_left(gkg_gitlab_com_indexer_modules) group by (cluster, namespace, pod, gkg_gitlab_com_indexer_modules) (up{container=\"gkg-indexer\", cluster=~\".*\"}))",
+          "legendFormat": "threads avg {{gkg_gitlab_com_indexer_modules}}",
           "refId": "A"
         },
         {
@@ -2534,13 +2900,447 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum by (pod) (container_sockets{container=\"gkg-indexer\", cluster=~\".*\"})",
-          "legendFormat": "sockets / {{pod}}",
+          "expr": "max by (gkg_gitlab_com_indexer_modules) ((container_threads{container=\"gkg-indexer\", cluster=~\".*\"}) * on (cluster, namespace, pod) group_left(gkg_gitlab_com_indexer_modules) group by (cluster, namespace, pod, gkg_gitlab_com_indexer_modules) (up{container=\"gkg-indexer\", cluster=~\".*\"}))",
+          "legendFormat": "threads max {{gkg_gitlab_com_indexer_modules}}",
           "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "avg by (gkg_gitlab_com_indexer_modules) ((container_sockets{container=\"gkg-indexer\", cluster=~\".*\"}) * on (cluster, namespace, pod) group_left(gkg_gitlab_com_indexer_modules) group by (cluster, namespace, pod, gkg_gitlab_com_indexer_modules) (up{container=\"gkg-indexer\", cluster=~\".*\"}))",
+          "legendFormat": "sockets avg {{gkg_gitlab_com_indexer_modules}}",
+          "refId": "C"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "max by (gkg_gitlab_com_indexer_modules) ((container_sockets{container=\"gkg-indexer\", cluster=~\".*\"}) * on (cluster, namespace, pod) group_left(gkg_gitlab_com_indexer_modules) group by (cluster, namespace, pod, gkg_gitlab_com_indexer_modules) (up{container=\"gkg-indexer\", cluster=~\".*\"}))",
+          "legendFormat": "sockets max {{gkg_gitlab_com_indexer_modules}}",
+          "refId": "D"
         }
       ],
-      "title": "Threads and sockets per pod",
+      "title": "Threads and sockets",
       "type": "timeseries"
+    },
+    {
+      "collapsed": true,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 126
+      },
+      "id": 58,
+      "panels": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "description": "Per-pod CPU seconds consumed per second.",
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "lineInterpolation": "smooth",
+                "showPoints": "auto"
+              },
+              "unit": "short"
+            }
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 127
+          },
+          "id": 59,
+          "options": {
+            "legend": {
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "$ORBIT_DS"
+              },
+              "expr": "sum by (pod) (rate(container_cpu_usage_seconds_total{container=\"gkg-indexer\", cluster=~\".*\", cpu=\"total\"}[5m]))",
+              "legendFormat": "{{pod}}",
+              "refId": "A"
+            }
+          ],
+          "title": "CPU: cores used per pod",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "description": "Share of CFS periods where the cgroup was throttled, per pod.",
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "lineInterpolation": "smooth",
+                "showPoints": "auto"
+              },
+              "unit": "percentunit"
+            }
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 127
+          },
+          "id": 60,
+          "options": {
+            "legend": {
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "$ORBIT_DS"
+              },
+              "expr": "(sum by (pod) (rate(container_cpu_cfs_throttled_periods_total{container=\"gkg-indexer\", cluster=~\".*\"}[5m]))) / (sum by (pod) (rate(container_cpu_cfs_periods_total{container=\"gkg-indexer\", cluster=~\".*\"}[5m])) > 0)",
+              "legendFormat": "{{pod}}",
+              "refId": "A"
+            }
+          ],
+          "title": "CPU: throttled time fraction per pod",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "description": "container_memory_working_set_bytes per replica, against that replica own limit.",
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "lineInterpolation": "smooth",
+                "showPoints": "auto"
+              },
+              "unit": "bytes"
+            }
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 135
+          },
+          "id": 61,
+          "options": {
+            "legend": {
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "$ORBIT_DS"
+              },
+              "expr": "sum by (pod) (container_memory_working_set_bytes{container=\"gkg-indexer\", cluster=~\".*\"})",
+              "legendFormat": "{{pod}}",
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "$ORBIT_DS"
+              },
+              "expr": "sum by (pod) (kube_pod_container_resource_limits{container=\"gkg-indexer\", cluster=~\".*\", resource=\"memory\"})",
+              "legendFormat": "limit / {{pod}}",
+              "refId": "B"
+            }
+          ],
+          "title": "Memory: working set per pod",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "description": "Resident set and page cache, per pod.",
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "lineInterpolation": "smooth",
+                "showPoints": "auto"
+              },
+              "unit": "bytes"
+            }
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 135
+          },
+          "id": 62,
+          "options": {
+            "legend": {
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "$ORBIT_DS"
+              },
+              "expr": "sum by (pod) (container_memory_rss{container=\"gkg-indexer\", cluster=~\".*\"})",
+              "legendFormat": "rss / {{pod}}",
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "$ORBIT_DS"
+              },
+              "expr": "sum by (pod) (container_memory_cache{container=\"gkg-indexer\", cluster=~\".*\"})",
+              "legendFormat": "cache / {{pod}}",
+              "refId": "B"
+            }
+          ],
+          "title": "Memory: RSS and cache per pod",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "description": "Read and write throughput from cAdvisor, per pod.",
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "lineInterpolation": "smooth",
+                "showPoints": "auto"
+              },
+              "unit": "Bps"
+            }
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 143
+          },
+          "id": 63,
+          "options": {
+            "legend": {
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "$ORBIT_DS"
+              },
+              "expr": "sum by (pod) (rate(container_fs_reads_bytes_total{container=\"gkg-indexer\", cluster=~\".*\"}[5m]))",
+              "legendFormat": "read / {{pod}}",
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "$ORBIT_DS"
+              },
+              "expr": "sum by (pod) (rate(container_fs_writes_bytes_total{container=\"gkg-indexer\", cluster=~\".*\"}[5m]))",
+              "legendFormat": "write / {{pod}}",
+              "refId": "B"
+            }
+          ],
+          "title": "Filesystem I/O bytes per pod",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "description": "PSI seconds per second, per pod.",
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "lineInterpolation": "smooth",
+                "showPoints": "auto"
+              },
+              "unit": "s"
+            }
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 143
+          },
+          "id": 64,
+          "options": {
+            "legend": {
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "$ORBIT_DS"
+              },
+              "expr": "sum by (pod) (rate(container_pressure_io_waiting_seconds_total{container=\"gkg-indexer\", cluster=~\".*\"}[5m]))",
+              "legendFormat": "io / {{pod}}",
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "$ORBIT_DS"
+              },
+              "expr": "sum by (pod) (rate(container_pressure_memory_waiting_seconds_total{container=\"gkg-indexer\", cluster=~\".*\"}[5m]))",
+              "legendFormat": "mem / {{pod}}",
+              "refId": "B"
+            }
+          ],
+          "title": "Pressure stall per pod: IO and memory",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "description": "OS-level concurrency counters, per pod.",
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "lineInterpolation": "smooth",
+                "showPoints": "auto"
+              },
+              "unit": "short"
+            }
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 151
+          },
+          "id": 65,
+          "options": {
+            "legend": {
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "$ORBIT_DS"
+              },
+              "expr": "sum by (pod) (container_threads{container=\"gkg-indexer\", cluster=~\".*\"})",
+              "legendFormat": "threads / {{pod}}",
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "$ORBIT_DS"
+              },
+              "expr": "sum by (pod) (container_sockets{container=\"gkg-indexer\", cluster=~\".*\"})",
+              "legendFormat": "sockets / {{pod}}",
+              "refId": "B"
+            }
+          ],
+          "title": "Threads and sockets per pod",
+          "type": "timeseries"
+        }
+      ],
+      "title": "Resources per pod (reference)",
+      "type": "row"
     },
     {
       "collapsed": false,
@@ -2548,9 +3348,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 114
+        "y": 159
       },
-      "id": 53,
+      "id": 66,
       "panels": [],
       "title": "Schema migration",
       "type": "row"
@@ -2576,9 +3376,9 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 115
+        "y": 160
       },
-      "id": 54,
+      "id": 67,
       "options": {
         "legend": {
           "calcs": [
@@ -2627,9 +3427,9 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 115
+        "y": 160
       },
-      "id": 55,
+      "id": 68,
       "options": {
         "legend": {
           "calcs": [
@@ -2678,9 +3478,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 123
+        "y": 168
       },
-      "id": 56,
+      "id": 69,
       "options": {
         "legend": {
           "calcs": [
@@ -2729,9 +3529,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 123
+        "y": 168
       },
-      "id": 57,
+      "id": 70,
       "options": {
         "legend": {
           "calcs": [
@@ -2780,9 +3580,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 123
+        "y": 168
       },
-      "id": 58,
+      "id": 71,
       "options": {
         "legend": {
           "calcs": [
@@ -2816,9 +3616,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 131
+        "y": 176
       },
-      "id": 59,
+      "id": 72,
       "panels": [
         {
           "datasource": {
@@ -2841,9 +3641,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 132
+            "y": 177
           },
-          "id": 60,
+          "id": 73,
           "options": {
             "legend": {
               "calcs": [
@@ -2892,9 +3692,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 132
+            "y": 177
           },
-          "id": 61,
+          "id": 74,
           "options": {
             "legend": {
               "calcs": [
@@ -2943,9 +3743,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 132
+            "y": 177
           },
-          "id": 62,
+          "id": 75,
           "options": {
             "legend": {
               "calcs": [
@@ -3012,9 +3812,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 140
+            "y": 185
           },
-          "id": 63,
+          "id": 76,
           "options": {
             "legend": {
               "calcs": [
@@ -3063,9 +3863,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 140
+            "y": 185
           },
-          "id": 64,
+          "id": 77,
           "options": {
             "legend": {
               "calcs": [
@@ -3114,9 +3914,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 140
+            "y": 185
           },
-          "id": 65,
+          "id": 78,
           "options": {
             "legend": {
               "calcs": [
@@ -3165,9 +3965,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 148
+            "y": 193
           },
-          "id": 66,
+          "id": 79,
           "options": {
             "legend": {
               "calcs": [
@@ -3234,9 +4034,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 148
+            "y": 193
           },
-          "id": 67,
+          "id": 80,
           "options": {
             "legend": {
               "calcs": [
@@ -3285,9 +4085,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 148
+            "y": 193
           },
-          "id": 68,
+          "id": 81,
           "options": {
             "legend": {
               "calcs": [
@@ -3336,9 +4136,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 156
+            "y": 201
           },
-          "id": 69,
+          "id": 82,
           "options": {
             "legend": {
               "calcs": [
@@ -3405,9 +4205,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 156
+            "y": 201
           },
-          "id": 70,
+          "id": 83,
           "options": {
             "legend": {
               "calcs": [
@@ -3456,9 +4256,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 156
+            "y": 201
           },
-          "id": 71,
+          "id": 84,
           "options": {
             "legend": {
               "calcs": [
@@ -3507,9 +4307,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 164
+            "y": 209
           },
-          "id": 72,
+          "id": 85,
           "options": {
             "legend": {
               "calcs": [
@@ -3576,9 +4376,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 164
+            "y": 209
           },
-          "id": 73,
+          "id": 86,
           "options": {
             "legend": {
               "calcs": [
@@ -3627,9 +4427,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 164
+            "y": 209
           },
-          "id": 74,
+          "id": 87,
           "options": {
             "legend": {
               "calcs": [
@@ -3696,9 +4496,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 172
+            "y": 217
           },
-          "id": 75,
+          "id": 88,
           "options": {
             "legend": {
               "calcs": [
@@ -3747,9 +4547,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 172
+            "y": 217
           },
-          "id": 76,
+          "id": 89,
           "options": {
             "legend": {
               "calcs": [
@@ -3787,9 +4587,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 180
+        "y": 225
       },
-      "id": 77,
+      "id": 90,
       "panels": [
         {
           "datasource": {
@@ -3812,9 +4612,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 181
+            "y": 226
           },
-          "id": 78,
+          "id": 91,
           "options": {
             "legend": {
               "calcs": [
@@ -3863,9 +4663,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 181
+            "y": 226
           },
-          "id": 79,
+          "id": 92,
           "options": {
             "legend": {
               "calcs": [
@@ -3914,9 +4714,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 181
+            "y": 226
           },
-          "id": 80,
+          "id": 93,
           "options": {
             "legend": {
               "calcs": [
@@ -3965,9 +4765,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 189
+            "y": 234
           },
-          "id": 81,
+          "id": 94,
           "options": {
             "legend": {
               "calcs": [
@@ -4016,9 +4816,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 189
+            "y": 234
           },
-          "id": 82,
+          "id": 95,
           "options": {
             "legend": {
               "calcs": [
@@ -4085,9 +4885,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 189
+            "y": 234
           },
-          "id": 83,
+          "id": 96,
           "options": {
             "legend": {
               "calcs": [
@@ -4136,9 +4936,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 197
+            "y": 242
           },
-          "id": 84,
+          "id": 97,
           "options": {
             "legend": {
               "calcs": [
@@ -4187,9 +4987,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 197
+            "y": 242
           },
-          "id": 85,
+          "id": 98,
           "options": {
             "legend": {
               "calcs": [
@@ -4238,9 +5038,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 197
+            "y": 242
           },
-          "id": 86,
+          "id": 99,
           "options": {
             "legend": {
               "calcs": [
@@ -4289,9 +5089,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 205
+            "y": 250
           },
-          "id": 87,
+          "id": 100,
           "options": {
             "legend": {
               "calcs": [
@@ -4358,9 +5158,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 205
+            "y": 250
           },
-          "id": 88,
+          "id": 101,
           "options": {
             "legend": {
               "calcs": [
@@ -4409,9 +5209,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 205
+            "y": 250
           },
-          "id": 89,
+          "id": 102,
           "options": {
             "legend": {
               "calcs": [
@@ -4478,9 +5278,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 213
+            "y": 258
           },
-          "id": 90,
+          "id": 103,
           "options": {
             "legend": {
               "calcs": [
@@ -4529,9 +5329,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 213
+            "y": 258
           },
-          "id": 91,
+          "id": 104,
           "options": {
             "legend": {
               "calcs": [
@@ -4580,9 +5380,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 213
+            "y": 258
           },
-          "id": 92,
+          "id": 105,
           "options": {
             "legend": {
               "calcs": [
@@ -4631,9 +5431,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 221
+            "y": 266
           },
-          "id": 93,
+          "id": 106,
           "options": {
             "legend": {
               "calcs": [
@@ -4700,9 +5500,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 221
+            "y": 266
           },
-          "id": 94,
+          "id": 107,
           "options": {
             "legend": {
               "calcs": [
@@ -4751,9 +5551,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 221
+            "y": 266
           },
-          "id": 95,
+          "id": 108,
           "options": {
             "legend": {
               "calcs": [
@@ -4802,9 +5602,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 229
+            "y": 274
           },
-          "id": 96,
+          "id": 109,
           "options": {
             "legend": {
               "calcs": [
@@ -4871,9 +5671,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 229
+            "y": 274
           },
-          "id": 97,
+          "id": 110,
           "options": {
             "legend": {
               "calcs": [
@@ -4922,9 +5722,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 229
+            "y": 274
           },
-          "id": 98,
+          "id": 111,
           "options": {
             "legend": {
               "calcs": [
@@ -4973,9 +5773,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 237
+            "y": 282
           },
-          "id": 99,
+          "id": 112,
           "options": {
             "legend": {
               "calcs": [
@@ -5024,9 +5824,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 237
+            "y": 282
           },
-          "id": 100,
+          "id": 113,
           "options": {
             "legend": {
               "calcs": [
@@ -5093,9 +5893,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 237
+            "y": 282
           },
-          "id": 101,
+          "id": 114,
           "options": {
             "legend": {
               "calcs": [
@@ -5144,9 +5944,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 245
+            "y": 290
           },
-          "id": 102,
+          "id": 115,
           "options": {
             "legend": {
               "calcs": [
@@ -5195,9 +5995,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 245
+            "y": 290
           },
-          "id": 103,
+          "id": 116,
           "options": {
             "legend": {
               "calcs": [
@@ -5246,9 +6046,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 245
+            "y": 290
           },
-          "id": 104,
+          "id": 117,
           "options": {
             "legend": {
               "calcs": [
@@ -5315,9 +6115,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 253
+            "y": 298
           },
-          "id": 105,
+          "id": 118,
           "options": {
             "legend": {
               "calcs": [
@@ -5355,9 +6155,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 261
+        "y": 306
       },
-      "id": 106,
+      "id": 119,
       "panels": [
         {
           "datasource": {
@@ -5380,9 +6180,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 262
+            "y": 307
           },
-          "id": 107,
+          "id": 120,
           "options": {
             "legend": {
               "calcs": [
@@ -5431,9 +6231,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 262
+            "y": 307
           },
-          "id": 108,
+          "id": 121,
           "options": {
             "legend": {
               "calcs": [
@@ -5500,9 +6300,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 262
+            "y": 307
           },
-          "id": 109,
+          "id": 122,
           "options": {
             "legend": {
               "calcs": [
@@ -5551,9 +6351,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 270
+            "y": 315
           },
-          "id": 110,
+          "id": 123,
           "options": {
             "legend": {
               "calcs": [
@@ -5620,9 +6420,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 270
+            "y": 315
           },
-          "id": 111,
+          "id": 124,
           "options": {
             "legend": {
               "calcs": [
@@ -5671,9 +6471,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 270
+            "y": 315
           },
-          "id": 112,
+          "id": 125,
           "options": {
             "legend": {
               "calcs": [
@@ -5740,9 +6540,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 278
+            "y": 323
           },
-          "id": 113,
+          "id": 126,
           "options": {
             "legend": {
               "calcs": [
@@ -5791,9 +6591,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 278
+            "y": 323
           },
-          "id": 114,
+          "id": 127,
           "options": {
             "legend": {
               "calcs": [
@@ -5842,9 +6642,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 278
+            "y": 323
           },
-          "id": 115,
+          "id": 128,
           "options": {
             "legend": {
               "calcs": [
@@ -5893,9 +6693,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 286
+            "y": 331
           },
-          "id": 116,
+          "id": 129,
           "options": {
             "legend": {
               "calcs": [
@@ -5962,9 +6762,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 286
+            "y": 331
           },
-          "id": 117,
+          "id": 130,
           "options": {
             "legend": {
               "calcs": [
@@ -6013,9 +6813,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 286
+            "y": 331
           },
-          "id": 118,
+          "id": 131,
           "options": {
             "legend": {
               "calcs": [
@@ -6053,9 +6853,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 294
+        "y": 339
       },
-      "id": 119,
+      "id": 132,
       "panels": [
         {
           "datasource": {
@@ -6078,9 +6878,9 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 295
+            "y": 340
           },
-          "id": 120,
+          "id": 133,
           "options": {
             "legend": {
               "calcs": [
@@ -6153,9 +6953,10 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 295
+            "y": 340
           },
-          "id": 121,
+          "id": 134,
+          "interval": "2m",
           "options": {
             "legend": {
               "calcs": [
@@ -6176,7 +6977,7 @@
                 "type": "prometheus",
                 "uid": "$ORBIT_DS"
               },
-              "expr": "(sum(increase(gkg_indexer_namespace_deletion_table_errors_total{container=\"gkg-indexer\", cluster=~\".*\"}[$__rate_interval]))) or vector(0)",
+              "expr": "(sum(round(increase(gkg_indexer_namespace_deletion_table_errors_total{container=\"gkg-indexer\", cluster=~\".*\"}[$__interval])))) or vector(0)",
               "legendFormat": "{{instance}}",
               "refId": "A"
             }
@@ -6211,9 +7012,10 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 303
+            "y": 348
           },
-          "id": 122,
+          "id": 135,
+          "interval": "2m",
           "options": {
             "legend": {
               "calcs": [
@@ -6234,7 +7036,7 @@
                 "type": "prometheus",
                 "uid": "$ORBIT_DS"
               },
-              "expr": "(sum by (outcome) (increase(gkg_scheduler_task_runs_total{container=\"gkg-dispatcher\", cluster=~\".*\", task=\"dispatch.namespace_deletion\"}[$__rate_interval]))) or label_replace(vector(0), \"outcome\", \"(none)\", \"\", \"\")",
+              "expr": "(sum by (outcome) (round(increase(gkg_scheduler_task_runs_total{container=\"gkg-dispatcher\", cluster=~\".*\", task=\"dispatch.namespace_deletion\"}[$__interval])))) or label_replace(vector(0), \"outcome\", \"(none)\", \"\", \"\")",
               "legendFormat": "{{outcome}}",
               "refId": "A"
             }
@@ -6263,9 +7065,9 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 303
+            "y": 348
           },
-          "id": 123,
+          "id": 136,
           "options": {
             "legend": {
               "calcs": [
@@ -6338,9 +7140,10 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 311
+            "y": 356
           },
-          "id": 124,
+          "id": 137,
+          "interval": "2m",
           "options": {
             "legend": {
               "calcs": [
@@ -6361,7 +7164,7 @@
                 "type": "prometheus",
                 "uid": "$ORBIT_DS"
               },
-              "expr": "(sum by (outcome) (increase(gkg_scheduler_task_runs_total{container=\"gkg-dispatcher\", cluster=~\".*\", task=\"maintenance.table_cleanup\"}[$__rate_interval]))) or label_replace(vector(0), \"outcome\", \"(none)\", \"\", \"\")",
+              "expr": "(sum by (outcome) (round(increase(gkg_scheduler_task_runs_total{container=\"gkg-dispatcher\", cluster=~\".*\", task=\"maintenance.table_cleanup\"}[$__interval])))) or label_replace(vector(0), \"outcome\", \"(none)\", \"\", \"\")",
               "legendFormat": "{{outcome}}",
               "refId": "A"
             }
@@ -6396,9 +7199,10 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 311
+            "y": 356
           },
-          "id": 125,
+          "id": 138,
+          "interval": "2m",
           "options": {
             "legend": {
               "calcs": [
@@ -6419,7 +7223,7 @@
                 "type": "prometheus",
                 "uid": "$ORBIT_DS"
               },
-              "expr": "(sum by (stage) (increase(gkg_scheduler_task_errors_total{container=\"gkg-dispatcher\", cluster=~\".*\", task=\"maintenance.table_cleanup\"}[$__rate_interval]))) or label_replace(vector(0), \"stage\", \"(none)\", \"\", \"\")",
+              "expr": "(sum by (stage) (round(increase(gkg_scheduler_task_errors_total{container=\"gkg-dispatcher\", cluster=~\".*\", task=\"maintenance.table_cleanup\"}[$__interval])))) or label_replace(vector(0), \"stage\", \"(none)\", \"\", \"\")",
               "legendFormat": "{{stage}}",
               "refId": "A"
             }
@@ -6448,9 +7252,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 319
+            "y": 364
           },
-          "id": 126,
+          "id": 139,
           "options": {
             "legend": {
               "calcs": [
@@ -6517,9 +7321,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 319
+            "y": 364
           },
-          "id": 127,
+          "id": 140,
           "options": {
             "legend": {
               "calcs": [
@@ -6568,9 +7372,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 319
+            "y": 364
           },
-          "id": 128,
+          "id": 141,
           "options": {
             "legend": {
               "calcs": [
@@ -6608,9 +7412,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 327
+        "y": 372
       },
-      "id": 129,
+      "id": 142,
       "panels": [
         {
           "datasource": {
@@ -6633,9 +7437,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 328
+            "y": 373
           },
-          "id": 130,
+          "id": 143,
           "options": {
             "legend": {
               "calcs": [
@@ -6702,9 +7506,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 328
+            "y": 373
           },
-          "id": 131,
+          "id": 144,
           "options": {
             "legend": {
               "calcs": [
@@ -6753,9 +7557,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 328
+            "y": 373
           },
-          "id": 132,
+          "id": 145,
           "options": {
             "legend": {
               "calcs": [
@@ -6804,9 +7608,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 336
+            "y": 381
           },
-          "id": 133,
+          "id": 146,
           "options": {
             "legend": {
               "calcs": [
@@ -6873,9 +7677,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 336
+            "y": 381
           },
-          "id": 134,
+          "id": 147,
           "options": {
             "legend": {
               "calcs": [
@@ -6924,9 +7728,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 336
+            "y": 381
           },
-          "id": 135,
+          "id": 148,
           "options": {
             "legend": {
               "calcs": [
@@ -6975,9 +7779,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 344
+            "y": 389
           },
-          "id": 136,
+          "id": 149,
           "options": {
             "legend": {
               "calcs": [
@@ -7026,9 +7830,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 344
+            "y": 389
           },
-          "id": 137,
+          "id": 150,
           "options": {
             "legend": {
               "calcs": [
