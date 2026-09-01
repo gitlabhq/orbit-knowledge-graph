@@ -89,6 +89,10 @@ pub(crate) fn run(
             backend.root(),
         )?;
     }
+    writeln!(
+        out,
+        "\nFull body of any match: orbit local show \"<fqn>\" (instead of reading the file)"
+    )?;
 
     if outcome.weak {
         return Ok(());

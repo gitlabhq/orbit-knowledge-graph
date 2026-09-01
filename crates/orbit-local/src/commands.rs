@@ -5,3 +5,4 @@ pub(crate) mod config;
 pub(crate) mod hook_guard;
 pub(crate) mod repo_map;
 pub(crate) mod setup;
+pub(crate) mod show;
