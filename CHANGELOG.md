@@ -1,3 +1,50 @@
+## [0.108.4](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.108.3...v0.108.4) (2026-08-31)
+
+### Performance
+
+* **treesitter-visit:** derive line start from byte column ([0f40507](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/0f405071be2da273d99156a0b9ba0f038b4f0ffc)) by Dmitry Gruzd
+
+### Other
+
+* **Orbit:** moves schema page ([085656e](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/085656e0563a06d0eb01910774a2ea9dd2f4d385)) by Zachary Painter
+
+## [0.108.3](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.108.2...v0.108.3) (2026-08-30)
+
+### Fixes
+
+* **code-graph:** stop custom language pipelines when a job is cancelled ([192ac4a](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/192ac4a76a319021df33d438e6e45068310621bb)) by Bohdan Parkhomchuk
+
+## [0.108.2](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.108.1...v0.108.2) (2026-08-30)
+
+### Fixes
+
+* **indexer:** revert !2331 — deletion paths back to tombstone inserts ([346f13b](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/346f13b721f367b742012cb29d3581cc7258dc4a)) by Michael Angelo Rivera
+
+## [0.108.1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.108.0...v0.108.1) (2026-08-29)
+
+### Fixes
+
+* **indexer:** drop the UNION from the code stale edge delete predicate ([23d8fd4](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/23d8fd4f20ae966fe86e10bf22f970578a71a7f8)) by Bohdan Parkhomchuk
+
+## [0.108.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.107.1...v0.108.0) (2026-08-29)
+
+### Features
+
+* **ask:** sharpen ranking, surface callers, and derive prompt graph description ([2187228](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/218722846517ff29177c2e6bdd1f9a6f4405e820)) by Aaron Algutifan
+* **health-check:** expose SDLC queue depth on /queue-depth ([36eb8d7](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/36eb8d74a534b920911a6c47ad73509e019a444a)) by Bohdan Parkhomchuk
+
+### Fixes
+
+* **code-graph:** resolve Ruby ::-prefixed (cbase) constant calls ([0e51bbc](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/0e51bbcdf9de4b99340bd2fca4500c02611f6d97)) by Aaron Algutifan
+
+### Performance
+
+* **indexer:** bound SDLC backfill peak memory on the partitioned load and note transform ([16fc289](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/16fc2896a723c4dc72002adf0835bc86d7fff538)) by Bohdan Parkhomchuk
+
+### Other
+
+* **indexer:** switch all deletion paths to lightweight deletes ([9477761](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/9477761642a19321eb930c8109d234ba858b43d5)) by Jean-Gabriel Doyon
+
 ## [0.107.1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.107.0...v0.107.1) (2026-08-27)
 
 ### Fixes

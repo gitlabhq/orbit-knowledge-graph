@@ -1,0 +1,63 @@
+name: "Ruby: cbase (::-prefixed) constant references resolve like unprefixed ones"
+
+fixtures:
+  - path: app/services/projects/transfer_service.rb
+    content: |
+      module Projects
+        class TransferService
+          def initialize(project, user)
+            @project = project
+            @user = user
+          end
+
+          def execute(namespace)
+            namespace
+          end
+        end
+      end
+
+  - path: app/controllers/projects_controller.rb
+    content: |
+      class ProjectsController
+        def enqueue_async_transfer
+          ::Projects::TransferService.new(project, user).execute(namespace)
+        end
+      end
+
+  - path: app/workers/transfer_worker.rb
+    content: |
+      class TransferWorker
+        def perform
+          Projects::TransferService.new(project, user).execute(namespace)
+        end
+      end
+
+tests:
+  - name: "cbase call site produces a CALLS edge to the service's execute"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'ProjectsController::enqueue_async_transfer'
+        AND callee.fqn = 'Projects::TransferService::execute'
+      RETURN callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { kind: Calls } }
+
+  - name: "cbase and unprefixed call sites resolve identically"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE callee.fqn = 'Projects::TransferService::execute'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller
+    assert:
+      - { row_count: 2 }
+      - { unique: caller }
+
+  - name: "cbase .new is not misattributed to the enclosing class"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'ProjectsController::enqueue_async_transfer'
+        AND callee.fqn = 'ProjectsController::new'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 0 }

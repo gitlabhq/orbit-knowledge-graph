@@ -12,7 +12,6 @@ serde = { workspace = true }
 smallvec = { workspace = true }
 thiserror = { workspace = true }
 cpu-time = { workspace = true }
-memchr = { workspace = true }
 
 # Tree-sitter
 tree-sitter = "0.26.3"

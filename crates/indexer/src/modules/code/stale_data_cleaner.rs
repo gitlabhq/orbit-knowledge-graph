@@ -7,7 +7,8 @@ use thiserror::Error;
 use tracing::debug;
 
 use super::config::CodeTableNames;
-use crate::clickhouse::{ArrowClickHouseClient, TIMESTAMP_FORMAT};
+use crate::clickhouse::{ArrowClickHouseClient, TIMESTAMP_FORMAT, insert_overrides};
+use crate::durability::WriteDurability;
 use orbit_utils::traversal_path::TraversalPath;
 
 #[async_trait]
@@ -71,52 +72,79 @@ impl ClickHouseStaleDataCleaner {
 
     fn build_node_delete_query(table: &str) -> String {
         format!(
-            "DELETE FROM {table} \
-             WHERE traversal_path = {{traversal_path:String}} \
-             AND project_id = {{project_id:Int64}} \
-             AND branch = {{branch:String}} \
-             AND _version < {{watermark_time:DateTime64(6, 'UTC')}}"
+            r#"
+            SELECT
+                traversal_path,
+                project_id,
+                branch,
+                id,
+                {{watermark_time:DateTime64(6, 'UTC')}} - toIntervalMicrosecond(1) AS _version,
+                true AS _deleted
+            FROM {table} FINAL
+            WHERE traversal_path = {{traversal_path:String}}
+              AND project_id = {{project_id:Int64}}
+              AND branch = {{branch:String}}
+              AND _version < {{watermark_time:DateTime64(6, 'UTC')}}
+            "#
         )
     }
 
     fn build_edge_delete_query(edge_table: &str, node_tables: &[&str]) -> String {
+        // gl_code_edge has project_id + branch columns, so we can
+        // filter directly without a subquery join.
         if edge_table.contains("code_edge") {
             return format!(
-                "DELETE FROM {edge_table} \
-                 WHERE traversal_path = {{traversal_path:String}} \
-                 AND project_id = {{project_id:Int64}} \
-                 AND branch = {{branch:String}} \
-                 AND _version < {{watermark_time:DateTime64(6, 'UTC')}}"
+                r#"
+                SELECT
+                    traversal_path,
+                    project_id,
+                    branch,
+                    source_id,
+                    source_kind,
+                    relationship_kind,
+                    target_id,
+                    target_kind,
+                    {{watermark_time:DateTime64(6, 'UTC')}} - toIntervalMicrosecond(1) AS _version,
+                    true AS _deleted
+                FROM {edge_table} FINAL
+                WHERE traversal_path = {{traversal_path:String}}
+                  AND project_id = {{project_id:Int64}}
+                  AND branch = {{branch:String}}
+                  AND _version < {{watermark_time:DateTime64(6, 'UTC')}}
+                "#,
             );
         }
 
-        let source_id_subqueries = node_tables
-            .iter()
-            .map(|t| {
-                format!(
-                    "SELECT id FROM {t} FINAL \
-                     WHERE traversal_path = {{traversal_path:String}} \
-                       AND project_id = {{project_id:Int64}} \
-                       AND branch = {{branch:String}}"
-                )
-            })
-            .collect::<Vec<_>>();
-
-        if source_id_subqueries.is_empty() {
+        if node_tables.is_empty() {
             return String::new();
         }
 
-        let source_id_union = source_id_subqueries.join(" UNION ALL ");
-
+        // gl_edge has no project_id/branch, so scope by code source_kind: a flat
+        // literal needs no source-id subquery (a UNION wedges mutation replay,
+        // #1221) and survives the source node being tombstoned first. Correct only
+        // because the indexer writes one branch per project into gl_edge; a
+        // second branch would tombstone the first's edges below the watermark.
+        let code_source_kinds = CodeTableNames::node_kinds_sql_list();
         format!(
-            "DELETE FROM {edge_table} \
-             WHERE traversal_path = {{traversal_path:String}} \
-             AND source_id IN ({source_id_union}) \
-             AND _version < {{watermark_time:DateTime64(6, 'UTC')}}"
+            r#"
+            SELECT
+                traversal_path,
+                source_id,
+                source_kind,
+                relationship_kind,
+                target_id,
+                target_kind,
+                {{watermark_time:DateTime64(6, 'UTC')}} - toIntervalMicrosecond(1) AS _version,
+                true AS _deleted
+            FROM {edge_table} AS s FINAL
+            WHERE traversal_path = {{traversal_path:String}}
+              AND source_kind IN ({code_source_kinds})
+              AND s._version < {{watermark_time:DateTime64(6, 'UTC')}} - toIntervalMicrosecond(1)
+            "#
         )
     }
 
-    async fn delete_stale_rows(
+    async fn tombstone_stale_rows(
         &self,
         table: &str,
         query: &str,
@@ -135,15 +163,29 @@ impl ClickHouseStaleDataCleaner {
 
         debug!(
             table,
-            %traversal_path, project_id, branch, "lightweight-deleting stale rows"
+            %traversal_path, project_id, branch, "tombstoning stale rows"
         );
-        self.client
+        let stale = self
+            .client
             .query(query)
             .param("traversal_path", traversal_path.as_str())
             .param("project_id", project_id)
             .param("branch", branch)
             .param("watermark_time", formatted_watermark)
-            .execute()
+            .fetch_arrow()
+            .await
+            .map_err(|e| query_error(e.to_string()))?;
+
+        let stale: Vec<_> = stale.into_iter().filter(|b| b.num_rows() > 0).collect();
+        if stale.is_empty() {
+            return Ok(());
+        }
+
+        let sql = self
+            .client
+            .build_insert_sql_with_overrides(table, insert_overrides(WriteDurability::Durable));
+        self.client
+            .insert_arrow_streaming_with_sql(table, &sql, &stale)
             .await
             .map_err(|e| query_error(e.to_string()))
     }
@@ -162,7 +204,7 @@ impl StaleDataCleaner for ClickHouseStaleDataCleaner {
 
         for queries in [&self.node_queries, &self.edge_queries] {
             try_join_all(queries.iter().map(|(table, query)| {
-                self.delete_stale_rows(
+                self.tombstone_stale_rows(
                     table,
                     query,
                     traversal_path,

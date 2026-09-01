@@ -137,10 +137,14 @@ impl Content for String {
         &self.as_bytes()[range]
     }
 
-    fn get_char_column(&self, _col: usize, offset: usize) -> usize {
+    fn get_char_column(&self, col: usize, offset: usize) -> usize {
         let src = self.as_bytes();
-        let line_start = memchr::memrchr(b'\n', &src[..offset]).map_or(0, |pos| pos + 1);
-        // Count UTF-8 codepoint lead bytes in the line prefix.
+        debug_assert!(
+            offset >= col,
+            "byte offset must not precede its line-relative column (positions must be paired from the same node)"
+        );
+        let line_start = offset - col;
+        // Count UTF-8 codepoint lead bytes (skip continuation bytes) in the line prefix.
         src[line_start..offset]
             .iter()
             .filter(|&&b| b & 0b1100_0000 != 0b1000_0000)
