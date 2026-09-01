@@ -17,7 +17,7 @@ use ra_ap_hir::{
     CallableKind, ChangeWithProcMacros, HasSource, InFile, ModuleDef, PathResolution, Semantics,
     attach_db,
 };
-use ra_ap_ide::{CrateGraphBuilder, FileId, RootDatabase, SourceRoot};
+use ra_ap_ide::{AnalysisHost, CrateGraphBuilder, FileId, RootDatabase, SourceRoot};
 use ra_ap_ide_db::base_db::{
     CrateOrigin, CrateWorkspaceData, Env, FileSet, VfsPath,
     target::{Arch, TargetData},
@@ -106,13 +106,8 @@ fn release_ty_interner(held: RwLockReadGuard<'static, ()>) -> bool {
     true
 }
 
-#[allow(
-    unsafe_code,
-    reason = "rust-analyzer exposes the interner sweep only as an unsafe fn"
-)]
 fn collect_ty_garbage(_exclusive: RwLockWriteGuard<'static, ()>) {
-    // SAFETY: the write guard proves no `RootDatabase` exists, so no type is unrecorded.
-    unsafe { ra_ap_hir::collect_ty_garbage() };
+    AnalysisHost::new(None).trigger_garbage_collection();
     RUST_JOBS_SINCE_TY_GC.store(0, Ordering::Relaxed);
 }
 
