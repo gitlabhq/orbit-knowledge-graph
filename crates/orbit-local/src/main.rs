@@ -974,10 +974,7 @@ fn index_repo(
         .context("failed to build the search documents")?;
     client
         .execute(
-            &format!(
-                "PRAGMA create_fts_index('{doc_table}', 'def_id', 'name', 'context', stemmer='{stemmer}', overwrite=1)",
-                stemmer = duckdb_client::search::FTS_STEMMER
-            ),
+            &duckdb_client::search::create_fts_index_sql(&doc_table),
             &[],
         )
         .context("failed to build the search index")?;

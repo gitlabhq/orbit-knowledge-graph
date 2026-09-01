@@ -17,6 +17,12 @@ pub fn def_doc_table(project_id: i64) -> String {
     format!("gl_def_doc_{project_id}")
 }
 
+pub fn create_fts_index_sql(doc_table: &str) -> String {
+    format!(
+        "PRAGMA create_fts_index('{doc_table}', 'def_id', 'name', 'context', stemmer='{FTS_STEMMER}', stopwords='none', overwrite=1)"
+    )
+}
+
 pub struct DuckDbSearch {
     client: DuckDbClient,
     pid: i64,
