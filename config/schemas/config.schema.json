@@ -1470,7 +1470,7 @@
           "minimum": 0
         },
         "use_index_for_in_with_subqueries_max_values": {
-          "description": "ClickHouse `use_index_for_in_with_subqueries_max_values`. Above this\nmany values, an `IN (subquery)` set is no longer used for primary-key\nand skip-index analysis, only as a row filter. Probing bloom-filter\nindexes with million-element sets costs far more than the granules it\nprunes (prod: 24 s -> 2.7 s on a 909k-element set). Default: 100000.",
+          "description": "ClickHouse `use_index_for_in_with_subqueries_max_values`. IN sets\nlarger than this skip index analysis; probing bloom filters with them\ncosts more than it prunes. Default: 100000.",
           "type": [
             "integer",
             "null"

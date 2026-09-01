@@ -107,11 +107,9 @@ pub struct QueryConfig {
     )]
     pub optimize_move_to_prewhere_if_final: Option<bool>,
 
-    /// ClickHouse `use_index_for_in_with_subqueries_max_values`. Above this
-    /// many values, an `IN (subquery)` set is no longer used for primary-key
-    /// and skip-index analysis, only as a row filter. Probing bloom-filter
-    /// indexes with million-element sets costs far more than the granules it
-    /// prunes (prod: 24 s -> 2.7 s on a 909k-element set). Default: 100000.
+    /// ClickHouse `use_index_for_in_with_subqueries_max_values`. IN sets
+    /// larger than this skip index analysis; probing bloom filters with them
+    /// costs more than it prunes. Default: 100000.
     #[serde(
         default = "default_use_index_for_in_with_subqueries_max_values",
         skip_serializing_if = "Option::is_none"
