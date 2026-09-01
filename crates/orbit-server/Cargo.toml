@@ -14,7 +14,7 @@ regenerate-protos = []
 testkit = ["orbit-analytics/testkit"]
 
 [dependencies]
-mimalloc = { workspace = true, features = ["secure"] }
+mimalloc = { workspace = true }
 anyhow = { workspace = true }
 arrow = { workspace = true }
 moka = { workspace = true }
