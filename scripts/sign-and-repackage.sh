@@ -19,9 +19,17 @@ archive=$1
 platform=$2
 binary=$3
 
+script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+
 case "$platform" in
-    macos)   signer=sign-macos-binaries ;;
-    windows) signer=sign-windows-binaries ;;
+    macos)
+        signer=sign-macos-binaries
+        signer_args=(--rcodesign-args "--entitlements-xml-path ${script_dir}/macos-entitlements.plist")
+        ;;
+    windows)
+        signer=sign-windows-binaries
+        signer_args=()
+        ;;
     *) echo "unsupported platform: $platform" >&2; exit 1 ;;
 esac
 
@@ -40,7 +48,7 @@ case "$archive" in
         echo "unsupported archive: $archive" >&2; exit 1 ;;
 esac
 
-"$signer" "$work/$binary"
+"$signer" ${signer_args[@]+"${signer_args[@]}"} "$work/$binary"
 rm -f "$work/${binary}.unsigned"
 
 case "$archive" in
