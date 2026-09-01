@@ -126,35 +126,34 @@ fn graph_contents() -> String {
     use code_graph::v2::types::{DefKind, EdgeKind, NodeKind};
 
     let ontology = ontology::Ontology::load_embedded().expect("embedded ontology must load");
-    let mut lines = Vec::new();
-    for kind in NodeKind::iter() {
-        let node = ontology
-            .get_node(kind.as_ref())
-            .unwrap_or_else(|| panic!("ontology must declare node {}", kind.as_ref()));
-        let mut line = format!(
-            "- `{}` \u{2014} {}",
-            node.destination_table, node.description
-        );
-        if matches!(kind, NodeKind::Definition) {
-            let def_types = DefKind::iter()
-                .map(|k| k.to_string())
-                .collect::<Vec<_>>()
-                .join(", ");
-            line.push_str(&format!(" (`definition_type`: {def_types})"));
-        }
-        lines.push(line);
-    }
-    lines.push(format!(
-        "- `{}` \u{2014} typed edges between them; `relationship_kind`:",
+    let nodes = NodeKind::iter()
+        .map(|kind| {
+            let node = ontology
+                .get_node(kind.as_ref())
+                .unwrap_or_else(|| panic!("ontology must declare node {}", kind.as_ref()));
+            if matches!(kind, NodeKind::Definition) {
+                let def_types = DefKind::iter()
+                    .map(|k| k.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!(
+                    "`{}` (`definition_type`: {def_types})",
+                    node.destination_table
+                )
+            } else {
+                format!("`{}`", node.destination_table)
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    let edges = EdgeKind::iter()
+        .map(|kind| format!("`{}`", kind.as_ref()))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        "{nodes}; typed edges in `{}` (`relationship_kind`: {edges})",
         ontology.edge_table()
-    ));
-    for kind in EdgeKind::iter() {
-        let description = ontology
-            .get_edge_description(kind.as_ref())
-            .unwrap_or_else(|| panic!("ontology must describe edge {}", kind.as_ref()));
-        lines.push(format!("  - `{}` \u{2014} {}", kind.as_ref(), description));
-    }
-    lines.join("\n")
+    )
 }
 
 pub(crate) fn instructions(mode: Mode) -> &'static str {

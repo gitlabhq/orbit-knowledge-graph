@@ -91,7 +91,8 @@ pub(crate) fn run(
     }
     writeln!(
         out,
-        "\nFull body of any match: orbit local show \"<fqn>\" (instead of reading the file)"
+        "\nFull body of any match: orbit local show \"<fqn>\" (instead of reading the file)\n\
+         Every connection of any match: orbit local describe \"<fqn>\""
     )?;
 
     if outcome.weak {

@@ -229,6 +229,29 @@ struct ShowArgs {
 }
 
 #[derive(Args, Debug, PartialEq)]
+#[command(about = "Print every connection of a definition, by exact fqn")]
+#[command(
+    long_about = "Print every graph connection of an indexed definition.\n\n\
+                  Takes the exact fully qualified name as printed by `orbit local ask` \
+                  and prints all edges touching it — callers, callees, supertypes, \
+                  subtypes, members, importers — so a truncated `called by: … +N more` \
+                  line or any full call-graph question needs no SQL follow-up."
+)]
+struct DescribeArgs {
+    /// Exact fully qualified name as printed by `orbit local ask`.
+    #[arg(value_name = "FQN")]
+    fqn: String,
+
+    /// Repository path (default: current directory).
+    #[arg(long, value_name = "PATH")]
+    repo: Option<PathBuf>,
+
+    /// Override the DuckDB path (default: ~/.orbit/graph.duckdb).
+    #[arg(long, value_name = "PATH")]
+    db: Option<PathBuf>,
+}
+
+#[derive(Args, Debug, PartialEq)]
 #[command(about = descriptions::short("run_sql"))]
 struct SqlArgs {
     /// SQL query, or `-` to read from stdin.
@@ -324,6 +347,8 @@ enum Commands {
     Ask(AskArgs),
     #[command(hide = true)]
     Show(ShowArgs),
+    #[command(hide = true)]
+    Describe(DescribeArgs),
     #[command(hide = true)]
     Sql(SqlArgs),
     #[command(hide = true)]
@@ -424,6 +449,7 @@ enum LocalCommands {
     Index(IndexArgs),
     Ask(AskArgs),
     Show(ShowArgs),
+    Describe(DescribeArgs),
     Sql(SqlArgs),
     Schema(SchemaArgs),
     List(ListArgs),
@@ -561,6 +587,7 @@ async fn dispatch(
         Commands::Index(args) => dispatch_local(LocalCommands::Index(args)).await,
         Commands::Ask(args) => dispatch_local(LocalCommands::Ask(args)).await,
         Commands::Show(args) => dispatch_local(LocalCommands::Show(args)).await,
+        Commands::Describe(args) => dispatch_local(LocalCommands::Describe(args)).await,
         Commands::Sql(args) => dispatch_local(LocalCommands::Sql(args)).await,
         Commands::Schema(args) => dispatch_local(LocalCommands::Schema(args)).await,
         Commands::List(args) => dispatch_local(LocalCommands::List(args)).await,
@@ -635,6 +662,9 @@ async fn dispatch_local(command: LocalCommands) -> Result<()> {
             db,
         }) => commands::ask::run(question, repo, db, limit),
         LocalCommands::Show(ShowArgs { fqn, repo, db }) => commands::show::run(fqn, repo, db),
+        LocalCommands::Describe(DescribeArgs { fqn, repo, db }) => {
+            commands::describe::run(fqn, repo, db)
+        }
         LocalCommands::Sql(SqlArgs {
             query,
             file,
