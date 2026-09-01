@@ -62,7 +62,7 @@ test_macos_threads_entitlement_arg() {
 
     assert_eq "${out[0]}" "3" "macos argc"
     assert_eq "${out[1]}" "--rcodesign-args" "macos arg0"
-    assert_eq "${out[2]}" "--entitlements-xml-path ${entitlements}" "macos arg1"
+    assert_eq "${out[2]}" "--entitlements-xml-file ${entitlements}" "macos arg1"
     case "${out[3]}" in
         */orbit) ;;
         *) fail "macos arg2 should be the extracted binary, got <${out[3]}>" ;;

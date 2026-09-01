@@ -24,7 +24,7 @@ script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 case "$platform" in
     macos)
         signer=sign-macos-binaries
-        signer_args=(--rcodesign-args "--entitlements-xml-path ${script_dir}/macos-entitlements.plist")
+        signer_args=(--rcodesign-args "--entitlements-xml-file ${script_dir}/macos-entitlements.plist")
         ;;
     windows)
         signer=sign-windows-binaries
