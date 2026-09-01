@@ -29,7 +29,15 @@ impl Workspace {
     }
 
     pub fn default_root() -> Result<PathBuf> {
-        orbit_utils::paths::orbit_data_dir().context("Could not determine home directory")
+        if let Some(dir) = std::env::var("ORBIT_DATA_DIR")
+            .ok()
+            .filter(|s| !s.is_empty())
+        {
+            Ok(PathBuf::from(dir))
+        } else {
+            let home = dirs::home_dir().context("Could not determine home directory")?;
+            Ok(home.join(".orbit"))
+        }
     }
 
     pub fn open(root: PathBuf) -> Result<Self> {

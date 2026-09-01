@@ -16,10 +16,14 @@ code-graph = { path = "../code-graph" }
 orbit-search = { path = "../orbit-search" }
 orbit-utils = { path = "../utils" }
 anyhow = { workspace = true }
+dirs = { workspace = true }
 flate2 = { workspace = true }
 ontology = { path = "../ontology" }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+
+[build-dependencies]
+sha2 = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
