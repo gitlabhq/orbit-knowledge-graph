@@ -336,7 +336,7 @@ sign-repackage-check:
 # change because it pulls the code-signer image.
 macos-signing-flag-check:
   stage: lint
-  image: ${CI_REGISTRY}/gitlab-com/gl-infra/common-ci-tasks-images/code-signer:1.1.0
+  image: ${CI_REGISTRY}/gitlab-com/gl-infra/common-ci-tasks-images/code-signer:1.3.0
   tags:
     - saas-linux-medium-amd64
   needs: []
@@ -347,7 +347,8 @@ macos-signing-flag-check:
         - scripts/macos-entitlements.plist
         - scripts/test-sign-and-repackage.sh
   script:
-    - echo "=== sign-macos-binaries source ==="; cat "$(command -v sign-macos-binaries)"; echo "=== end source ==="
+    - rcodesign sign --help 2>&1 | grep -- '--entitlements-xml-file'
+    - sign-macos-binaries --help 2>&1 | grep -- '--rcodesign-args'
 
 migration-ledger-check:
   stage: lint
