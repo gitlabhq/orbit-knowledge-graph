@@ -4211,6 +4211,7 @@ dependencies = [
  "arrow 58.3.0",
  "code-graph",
  "duckdb",
+ "flate2",
  "ontology",
  "orbit-search",
  "orbit-utils",
@@ -8419,6 +8420,7 @@ version = "0.1.0"
 dependencies = [
  "arrow 58.3.0",
  "chrono",
+ "dirs",
  "enum-as-inner",
  "flate2",
  "ignore",

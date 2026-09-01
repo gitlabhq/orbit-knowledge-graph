@@ -1,6 +1,8 @@
 mod client;
 mod converter;
 mod error;
+#[cfg(bundled_fts)]
+mod fts;
 mod helpers;
 mod params;
 pub mod search;

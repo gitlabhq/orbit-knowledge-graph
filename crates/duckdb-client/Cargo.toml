@@ -16,6 +16,7 @@ code-graph = { path = "../code-graph" }
 orbit-search = { path = "../orbit-search" }
 orbit-utils = { path = "../utils" }
 anyhow = { workspace = true }
+flate2 = { workspace = true }
 ontology = { path = "../ontology" }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

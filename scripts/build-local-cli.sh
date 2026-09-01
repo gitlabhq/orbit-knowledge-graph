@@ -78,6 +78,10 @@ TOOLCHAIN=$(rustc -vV | awk '/^release:/ { print $2 }')
 rustup target add --toolchain "$TOOLCHAIN" "$TARGET"
 
 echo "Building orbit for $PLATFORM/$ARCH ($TARGET)"
+# Embed the DuckDB fts extension so released binaries never download it at
+# runtime. Exports ORBIT_BUNDLED_FTS* for crates/duckdb-client/build.rs.
+source "$(dirname "$0")/ci/fetch-duckdb-fts.sh" "$TARGET"
+
 # Bundle libduckdb (compile from C++) so the released binary is self-contained.
 if [[ "$TARGET" == *-musl ]]; then
     command -v cargo-zigbuild >/dev/null || {

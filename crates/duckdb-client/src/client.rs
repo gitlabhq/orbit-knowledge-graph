@@ -23,14 +23,40 @@ fn is_lock_error(e: &duckdb::Error) -> bool {
 }
 
 impl DuckDbClient {
-    /// INSTALL hits extensions.duckdb.org only when the extension is not yet
-    /// cached under ~/.duckdb, so only search paths call this; unrelated
+    /// Release binaries (`bundled_fts`) load the embedded extension from
+    /// disk and never touch the network. Dev builds fall back to INSTALL,
+    /// which hits extensions.duckdb.org only when the extension is not yet
+    /// cached under ~/.duckdb. Only search paths call this; unrelated
     /// commands must keep working without network or extension availability.
     pub fn load_fts(&self) -> Result<()> {
+        #[cfg(bundled_fts)]
+        {
+            let data_dir = orbit_utils::paths::orbit_data_dir().ok_or_else(|| {
+                DuckDbError::Schema("could not determine home directory".to_string())
+            })?;
+            self.load_fts_file(&crate::fts::ensure_extension_on_disk(&data_dir)?)
+        }
+        #[cfg(not(bundled_fts))]
+        {
+            self.conn
+                .execute_batch("INSTALL fts; LOAD fts;")
+                .map_err(|e| {
+                    DuckDbError::Schema(format!("failed to load the DuckDB fts extension: {e}"))
+                })
+        }
+    }
+
+    #[cfg(bundled_fts)]
+    fn load_fts_file(&self, path: &Path) -> Result<()> {
+        let path = path.to_str().ok_or_else(|| {
+            DuckDbError::Schema(format!("non-UTF-8 extension path: {}", path.display()))
+        })?;
         self.conn
-            .execute_batch("INSTALL fts; LOAD fts;")
+            .execute_batch(&format!("LOAD {};", crate::sql_lit(path)))
             .map_err(|e| {
-                DuckDbError::Schema(format!("failed to load the DuckDB fts extension: {e}"))
+                DuckDbError::Schema(format!(
+                    "failed to load the bundled DuckDB fts extension from {path}: {e}"
+                ))
             })
     }
 
@@ -461,6 +487,31 @@ CREATE TABLE IF NOT EXISTS gl_edge (
             .insert_arrow("evil_table", batch, TEST_TABLES)
             .unwrap_err();
         assert!(err.to_string().contains("unknown table"));
+    }
+
+    #[cfg(bundled_fts)]
+    #[test]
+    fn bundled_fts_loads_without_network() {
+        let dir = tempfile::tempdir().unwrap();
+        let client = DuckDbClient::open_in_memory().unwrap();
+
+        let path = crate::fts::ensure_extension_on_disk(dir.path()).unwrap();
+        client.load_fts_file(&path).unwrap();
+
+        let batches = client
+            .query_arrow("SELECT stem('running', 'english') AS s")
+            .unwrap();
+        let stems = batches[0]
+            .column(0)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        assert_eq!(stems.value(0), "run");
+
+        assert_eq!(
+            crate::fts::ensure_extension_on_disk(dir.path()).unwrap(),
+            path
+        );
     }
 
     #[test]

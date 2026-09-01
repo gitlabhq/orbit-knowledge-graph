@@ -1,0 +1,16 @@
+# SHA-256 of the official DuckDB fts extension artifacts embedded into
+# release binaries by scripts/ci/fetch-duckdb-fts.sh.
+#
+# extensions.duckdb.org serves over plain HTTP and publishes no out-of-band
+# checksums, so these are recorded at review time and pinned. When the duckdb
+# crate is bumped (or upstream republishes an artifact and a release build
+# fails checksum verification), regenerate with:
+#
+#   scripts/ci/fetch-duckdb-fts.sh --print-checksums > scripts/ci/duckdb-fts-checksums.sha256
+#
+# and review the diff before merging.
+90d6f049e59b592566cfcd228de3001eb679c64e9f144c138dc2cd55dab12cd6  v1.5.5/linux_amd64/fts.duckdb_extension.gz
+87a8c2dddf41d397c617af41e479d4e365dd66a9f115cec7e78374057e80478f  v1.5.5/linux_arm64/fts.duckdb_extension.gz
+c3da1ea86c107650edf06a8296094640b9f4886b8ceab4ad42912b6ff5c880bc  v1.5.5/osx_amd64/fts.duckdb_extension.gz
+b6b8d0a13e0457f3ce368e4e7c2ff8de48637eea5ca61e5ff983c05018e7f315  v1.5.5/osx_arm64/fts.duckdb_extension.gz
+24a328d189aa87a22cd3c2ac6c3f484a49ba30adfd6ce05572fe5841429f2ab5  v1.5.5/windows_amd64/fts.duckdb_extension.gz
