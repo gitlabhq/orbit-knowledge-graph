@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use arrow::record_batch::RecordBatch;
 
 use crate::{DuckDbClient, f64_column, i64_column, scalar_i64, sql_lit, string_column};
-use orbit_search::ask::{AskError, AskSource, Caller, CallerEdge, ask};
+use orbit_search::ask::{AskError, AskSource, Caller, CallerEdge, Reranker, ask};
 use orbit_search::corpus::{DEFAULT_SOURCE_EXTS, EXCLUDE_LIKE, EXCLUDE_REGEX, ext_regex};
 use orbit_search::expand::{GraphSource, NodeLabel};
 use orbit_search::{AskOutcome, CorpusRow, Graph, GraphEdge, KindRates, SearchVocab, TermRecall};
@@ -48,8 +48,9 @@ impl DuckDbSearch {
         limit: usize,
         vocab: &SearchVocab,
         kind_rates: &HashMap<String, KindRates>,
+        reranker: Option<&dyn Reranker>,
     ) -> Result<AskOutcome> {
-        ask(self, question, limit, vocab, kind_rates).map_err(|e| match e {
+        ask(self, question, limit, vocab, kind_rates, reranker).map_err(|e| match e {
             AskError::Source(e) => e,
             e => anyhow::anyhow!("{e}"),
         })

@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use crate::ask::Reranker;
 use crate::types::CorpusRow;
 
 const CANDIDATE_FACTOR: usize = 5;
@@ -11,6 +12,7 @@ pub const ANCHOR_SIM: f64 = 0.999;
 pub const CONFIDENT_COVERAGE: f64 = 0.5;
 pub const LENGTH_NORM_B: f64 = 0.75;
 
+#[derive(Clone)]
 pub struct Hit {
     pub index: usize,
     pub score: f64,
@@ -33,12 +35,33 @@ pub fn rank_and_trim(
     sims: &[Vec<f64>],
     idfs: &[f64],
     limit: usize,
+    question: &str,
+    reranker: Option<&dyn Reranker>,
 ) -> Vec<Hit> {
-    dedupe_by_parent(
-        rank(corpus, sims, idfs, limit * CANDIDATE_FACTOR),
-        corpus,
-        limit,
-    )
+    let mut hits = rank(corpus, sims, idfs, limit * CANDIDATE_FACTOR);
+    if let Some(reranker) = reranker {
+        let rows: Vec<CorpusRow> = hits.iter().map(|h| corpus[h.index].clone()).collect();
+        reorder(&mut hits, &reranker.rescore(question, &rows));
+    }
+    dedupe_by_parent(hits, corpus, limit)
+}
+
+/// Lexical scores stay on the hits: they still drive confidence and seed weights.
+fn reorder(hits: &mut [Hit], scores: &[f64]) {
+    if scores.len() != hits.len() {
+        return;
+    }
+    let mut order: Vec<usize> = (0..hits.len()).collect();
+    order.sort_by(|&a, &b| {
+        scores[b]
+            .partial_cmp(&scores[a])
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.cmp(&b))
+    });
+    let reordered: Vec<Hit> = order.iter().map(|&i| hits[i].clone()).collect();
+    for (slot, hit) in hits.iter_mut().zip(reordered) {
+        *slot = hit;
+    }
 }
 
 fn rank(corpus: &[CorpusRow], sims: &[Vec<f64>], idfs: &[f64], cap: usize) -> Vec<Hit> {
@@ -242,5 +265,37 @@ mod tests {
         let kept = dedupe_by_parent(hits, &corpus, 10);
         let indices: Vec<usize> = kept.iter().map(|h| h.index).collect();
         assert_eq!(indices, vec![0, 1, 3]);
+    }
+
+    #[test]
+    fn rerank_reorders_the_candidate_pool_before_the_parent_cap() {
+        let corpus = vec![
+            row(1, "A::first"),
+            row(2, "A::second"),
+            row(3, "A::third"),
+            row(4, "B::other"),
+        ];
+        let sims = vec![vec![1.0], vec![0.9], vec![0.8], vec![0.7]];
+        let lexical = rank_and_trim(&corpus, &sims, &[1.0], 2, "q", None);
+        assert_eq!(
+            lexical.iter().map(|h| h.index).collect::<Vec<_>>(),
+            vec![0, 1]
+        );
+
+        struct Flip;
+        impl Reranker for Flip {
+            fn rescore(&self, _: &str, rows: &[CorpusRow]) -> Vec<f64> {
+                rows.iter().map(|r| r.id as f64).collect()
+            }
+        }
+        let reranked = rank_and_trim(&corpus, &sims, &[1.0], 2, "q", Some(&Flip));
+        assert_eq!(
+            reranked.iter().map(|h| h.index).collect::<Vec<_>>(),
+            vec![3, 2]
+        );
+        assert!(
+            reranked[0].score < reranked[1].score,
+            "lexical scores must survive the reorder untouched"
+        );
     }
 }

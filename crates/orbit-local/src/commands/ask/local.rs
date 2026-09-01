@@ -80,8 +80,10 @@ impl LocalBackend {
         limit: usize,
         vocab: &SearchVocab,
         kind_rates: &std::collections::HashMap<String, KindRates>,
+        reranker: Option<&dyn orbit_search::Reranker>,
     ) -> Result<AskOutcome> {
-        self.search.ask(question, limit, vocab, kind_rates)
+        self.search
+            .ask(question, limit, vocab, kind_rates, reranker)
     }
 }
 
@@ -177,7 +179,9 @@ mod tests {
 
         let search = g.search();
         let vocab = vocab(&search);
-        let outcome = search.ask("dlq publish", 5, &vocab, &weights()).unwrap();
+        let outcome = search
+            .ask("dlq publish", 5, &vocab, &weights(), None)
+            .unwrap();
         assert!(!outcome.matches.is_empty());
         assert!(!outcome.weak);
         assert!(outcome.unmatched_terms.is_empty());
@@ -200,7 +204,7 @@ mod tests {
 
         let search = g.search();
         let vocab = vocab(&search);
-        let outcome = search.ask("ask", 5, &vocab, &weights()).unwrap();
+        let outcome = search.ask("ask", 5, &vocab, &weights(), None).unwrap();
         assert!(
             outcome.unmatched_terms.is_empty(),
             "identifiers colliding with English stopwords must recall"

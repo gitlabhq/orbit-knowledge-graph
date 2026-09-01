@@ -48,6 +48,8 @@ clickhouse = { workspace = true }
 clickhouse-client = { path = "../clickhouse-client" }
 orbit-utils = { path = "../utils" }
 query-engine = { path = "../query-engine" }
+safetensors = { workspace = true }
+half = { workspace = true }
 
 [dev-dependencies]
 toml = { workspace = true }

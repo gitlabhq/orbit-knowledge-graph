@@ -19,6 +19,7 @@ duckdb-client = { path = "../duckdb-client" }
 labkit-events = { workspace = true }
 orbit-analytics = { path = "../orbit-analytics" }
 orbit-prompts = { path = "../orbit-prompts" }
+orbit-rerank = { path = "../orbit-rerank" }
 orbit-search = { path = "../orbit-search" }
 orbit-utils = { path = "../utils" }
 ontology = { path = "../ontology" }

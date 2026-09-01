@@ -5,6 +5,7 @@ fn main() {
     }
 
     validate_prompts();
+    locate_reranker_bundle();
 
     println!(
         "cargo:rerun-if-changed={}",
@@ -52,4 +53,36 @@ fn validate_prompts() {
     let dir = std::path::Path::new(env!("PROMPTS_DIR")).join("local");
     println!("cargo:rerun-if-changed={}", dir.display());
     orbit_prompts::Prompts::load_dir(&dir).unwrap_or_else(|e| panic!("{e}"));
+}
+
+/// A missing bundle only warns and leaves the cfg unset so plain `cargo build`
+/// and CI work offline; `mise build:cli` and the release script run the xtask first.
+fn locate_reranker_bundle() {
+    println!("cargo::rustc-check-cfg=cfg(orbit_reranker_bundle)");
+    println!("cargo:rerun-if-env-changed=ORBIT_RERANK_BUNDLE_DIR");
+    let dir = std::env::var_os("ORBIT_RERANK_BUNDLE_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| {
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/rerank-bundle")
+        });
+    let files = ["config.json", "tokenizer.json", "model.safetensors"];
+    for file in files {
+        println!("cargo:rerun-if-changed={}", dir.join(file).display());
+    }
+    let Ok(dir) = dir.canonicalize() else {
+        println!(
+            "cargo:warning=no reranker bundle at {}; `ask` will not rerank. Run `cargo xtask rerank-bundle`.",
+            dir.display()
+        );
+        return;
+    };
+    if let Some(missing) = files.iter().find(|f| !dir.join(f).is_file()) {
+        println!(
+            "cargo:warning={} is missing; `ask` will not rerank. Run `cargo xtask rerank-bundle`.",
+            dir.join(missing).display()
+        );
+        return;
+    }
+    println!("cargo:rustc-cfg=orbit_reranker_bundle");
+    println!("cargo:rustc-env=ORBIT_RERANK_BUNDLE_DIR={}", dir.display());
 }

@@ -1,4 +1,5 @@
 mod local;
+mod rerank;
 
 use std::io::Write;
 use std::path::PathBuf;
@@ -65,7 +66,21 @@ pub(crate) fn run(
     writeln!(out, "ask {:?} — {}", question, backend.header())?;
 
     let vocab = build_vocab(backend.search())?;
-    let outcome = backend.ask(&question, limit, &vocab, kind_rates())?;
+    // Offline dev builds cannot fetch the model; degrade to lexical order, not an error.
+    let reranker = match rerank::CrossEncoder::load(backend.root()) {
+        Ok(r) => Some(r),
+        Err(err) => {
+            eprintln!("note: reranker unavailable, using lexical order only: {err:#}");
+            None
+        }
+    };
+    let outcome = backend.ask(
+        &question,
+        limit,
+        &vocab,
+        kind_rates(),
+        reranker.as_ref().map(|r| r as &dyn orbit_search::Reranker),
+    )?;
     writeln!(out, "terms: {}", outcome.terms.join(" "))?;
 
     if outcome.matches.is_empty() {
@@ -199,19 +214,8 @@ fn snippet(root: &std::path::Path, loc: &str, end_line: i64) -> Vec<String> {
     let Ok(start) = start.parse::<usize>() else {
         return Vec::new();
     };
-    let Ok(content) = std::fs::read_to_string(root.join(path)) else {
-        return Vec::new();
-    };
-    let last = usize::try_from(end_line)
-        .ok()
-        .filter(|&e| e >= start)
-        .unwrap_or(start)
-        .min(start + SNIPPET_LINES - 1);
-    content
-        .lines()
-        .enumerate()
-        .skip(start.saturating_sub(1))
-        .take_while(|(i, _)| *i < last)
+    source_lines(root, path, start, end_line, SNIPPET_LINES)
+        .into_iter()
         .map(|(i, text)| {
             let mut text = text.trim_end();
             if text.len() > SNIPPET_LINE_CHARS {
@@ -221,8 +225,35 @@ fn snippet(root: &std::path::Path, loc: &str, end_line: i64) -> Vec<String> {
                 }
                 text = &text[..cut];
             }
-            format!("    {} | {}", i + 1, text)
+            format!("    {i} | {text}")
         })
+        .collect()
+}
+
+fn source_lines(
+    root: &std::path::Path,
+    path: &str,
+    start: usize,
+    end_line: i64,
+    max_lines: usize,
+) -> Vec<(usize, String)> {
+    if start == 0 {
+        return Vec::new();
+    }
+    let Ok(content) = std::fs::read_to_string(root.join(path)) else {
+        return Vec::new();
+    };
+    let last = usize::try_from(end_line)
+        .ok()
+        .filter(|&e| e >= start)
+        .unwrap_or(start)
+        .min(start + max_lines - 1);
+    content
+        .lines()
+        .enumerate()
+        .skip(start - 1)
+        .take_while(|(i, _)| *i < last)
+        .map(|(i, text)| (i + 1, text.to_string()))
         .collect()
 }
 

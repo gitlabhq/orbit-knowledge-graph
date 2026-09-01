@@ -6,6 +6,7 @@ mod ddl;
 mod metrics_catalog;
 mod migration_ledger;
 mod query_docs;
+mod rerank_bundle;
 mod schema;
 mod synth;
 
@@ -75,6 +76,15 @@ enum Command {
     MigrationLedger {
         #[command(subcommand)]
         command: MigrationLedgerCommand,
+    },
+    /// Download the `ask` cross-encoder and convert it to f16 for embedding into the CLI.
+    RerankBundle {
+        /// Hugging Face repo of a BERT cross-encoder that ships `tokenizer.json`.
+        #[arg(long, default_value = rerank_bundle::DEFAULT_MODEL)]
+        model: String,
+        /// Output directory (default: target/rerank-bundle, where the CLI build looks).
+        #[arg(short, long)]
+        out: Option<std::path::PathBuf>,
     },
     /// Regenerate the auto-derived tables in the query language reference doc
     /// from the ontology (currently the text-indexed properties table).
@@ -292,5 +302,6 @@ async fn main() -> Result<()> {
         Command::MetricsCatalog { output, check } => metrics_catalog::run(output, check),
         Command::Dashboards { dir, check } => dashboards::run(dir, check),
         Command::QueryDocs { doc, check } => query_docs::run(doc, check),
+        Command::RerankBundle { model, out } => rerank_bundle::run(&model, out.as_deref()),
     }
 }

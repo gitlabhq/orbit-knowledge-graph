@@ -4,7 +4,7 @@ use std::fmt;
 use crate::anchor::{term_base_sets, unmatched_terms};
 use crate::expand::{GraphSource, expand_neighborhood};
 use crate::ppr::KindRates;
-use crate::rank::rank_and_trim;
+use crate::rank::{Hit, rank_and_trim};
 use crate::text::content_words;
 use crate::types::{CorpusRow, Edge, TermSeeds};
 use crate::vocab::SearchVocab;
@@ -56,6 +56,12 @@ impl TermRecall {
     }
 }
 
+/// Rescores the lexical candidate pool before the per-parent cap. One score per
+/// row, higher is better; scores only order the pool, so any scale works.
+pub trait Reranker {
+    fn rescore(&self, question: &str, rows: &[CorpusRow]) -> Vec<f64>;
+}
+
 pub trait AskSource: GraphSource {
     fn stem(&self, words: &[String]) -> Result<Vec<String>, Self::Error>;
     fn recall(&self, terms: &[String]) -> Result<Vec<TermRecall>, Self::Error>;
@@ -92,6 +98,7 @@ pub fn ask<S: AskSource>(
     limit: usize,
     vocab: &SearchVocab,
     kind_rates: &HashMap<String, KindRates>,
+    reranker: Option<&dyn Reranker>,
 ) -> Result<AskOutcome, AskError<S::Error>> {
     let terms = content_words(question);
     if terms.is_empty() {
@@ -138,9 +145,9 @@ pub fn ask<S: AskSource>(
         .map(|r| if r.hits.is_empty() { 0.0 } else { r.idf() })
         .collect();
 
-    let hits = rank_and_trim(&corpus, &sims, &idfs, limit);
+    let hits = rank_and_trim(&corpus, &sims, &idfs, limit, question, reranker);
     let focus = vocab.focus_edge_kind(&stems);
-    let weak = hits.first().is_none_or(|h| !h.confident());
+    let weak = !hits.iter().any(Hit::confident);
     let mut matches: Vec<AskMatch> = hits
         .into_iter()
         .map(|h| AskMatch {
@@ -304,6 +311,7 @@ mod tests {
             5,
             &test_vocab(),
             &HashMap::new(),
+            None,
         )
         .unwrap();
         assert_eq!(outcome.matches.len(), 1);
@@ -323,6 +331,7 @@ mod tests {
             5,
             &test_vocab(),
             &HashMap::new(),
+            None,
         )
         .unwrap();
         assert_eq!(
@@ -337,9 +346,16 @@ mod tests {
 
     #[test]
     fn relational_only_questions_fall_back_to_all_terms() {
-        let err = ask(&FakeRecallSource, "", 5, &test_vocab(), &HashMap::new())
-            .err()
-            .expect("empty question must fail");
+        let err = ask(
+            &FakeRecallSource,
+            "",
+            5,
+            &test_vocab(),
+            &HashMap::new(),
+            None,
+        )
+        .err()
+        .expect("empty question must fail");
         assert!(matches!(err, AskError::NoUsableTerms(_)));
 
         let outcome = ask(
@@ -348,6 +364,7 @@ mod tests {
             5,
             &test_vocab(),
             &HashMap::new(),
+            None,
         )
         .unwrap();
         assert_eq!(outcome.focus.as_deref(), Some("CALLS"));
