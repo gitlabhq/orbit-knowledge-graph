@@ -37,7 +37,62 @@ log "Building query-profiler..."
 cargo build -p query-profiler --quiet 2>/dev/null
 PROFILER="${REPO_ROOT}/target/debug/query-profiler"
 
-SUITE_FILTER="${1:-}"
+# Pre-fetch one sample ID per entity type for $sample resolution.
+log "Resolving sample IDs..."
+SAMPLE_JSON=$(kubectl --context="${KCTX}" exec -n "${CH_NS}" clickhouse-0 -- \
+  clickhouse-client --password "${CH_PASS}" --multiquery --query "
+    SELECT 'Project', id FROM gkg.v${SCHEMA_VER}_gl_project LIMIT 3;
+    SELECT 'User', id FROM gkg.v${SCHEMA_VER}_gl_user LIMIT 3;
+    SELECT 'MergeRequest', id FROM gkg.v${SCHEMA_VER}_gl_merge_request LIMIT 3;
+    SELECT 'WorkItem', id FROM gkg.v${SCHEMA_VER}_gl_work_item LIMIT 3;
+    SELECT 'Pipeline', id FROM gkg.v${SCHEMA_VER}_gl_pipeline LIMIT 3;
+    SELECT 'Group', id FROM gkg.v${SCHEMA_VER}_gl_group LIMIT 3;
+    SELECT 'Label', id FROM gkg.v${SCHEMA_VER}_gl_label LIMIT 3;
+    SELECT 'Note', id FROM gkg.v${SCHEMA_VER}_gl_note LIMIT 3;
+    SELECT 'Definition', id FROM gkg.v${SCHEMA_VER}_gl_definition LIMIT 3;
+    SELECT 'File', id FROM gkg.v${SCHEMA_VER}_gl_file LIMIT 3;
+  " -f TSV 2>/dev/null | python3 -c "
+import sys, json, collections
+ids = collections.defaultdict(list)
+for line in sys.stdin:
+    parts = line.strip().split('\t')
+    if len(parts) == 2:
+        ids[parts[0]].append(int(parts[1]))
+print(json.dumps(dict(ids)))
+")
+
+resolve_samples() {
+  python3 -c "
+import json, sys
+samples = json.loads(sys.argv[1])
+query = json.loads(sys.stdin.read())
+nodes = query.get('nodes', [])
+if 'node' in query:
+    nodes.append(query['node'])
+for node in nodes:
+    nids = node.get('node_ids', '')
+    if not isinstance(nids, str) or not nids.startswith('\$sample'):
+        continue
+    count = 1
+    if ':' in nids:
+        count = int(nids.split(':')[1])
+    entity = node.get('entity', '')
+    pool = samples.get(entity, [1])
+    node['node_ids'] = pool[:count] if count <= len(pool) else pool
+json.dump(query, sys.stdout)
+" "${SAMPLE_JSON}"
+}
+
+SUITE_FILTER=""
+QUERY_FILTER=""
+for arg in "$@"; do
+  if [[ "${arg}" == *"/"* ]]; then
+    SUITE_FILTER="${arg%%/*}"
+    QUERY_FILTER="${arg#*/}"
+  else
+    SUITE_FILTER="${arg}"
+  fi
+done
 CORPUS_DIR="${REPO_ROOT}/fixtures/queries/corpus"
 RESULTS_DIR="${BENCH_DIR}/results/${RUN_ID}/corpus"
 mkdir -p "${RESULTS_DIR}"
@@ -53,9 +108,10 @@ for yaml in "${CORPUS_DIR}"/*.yaml; do
   log "Suite: ${suite}"
 
   for qname in $(yq eval 'keys | .[]' "${yaml}"); do
+    [[ -n "${QUERY_FILTER}" && "${qname}" != "${QUERY_FILTER}" ]] && continue
     TOTAL=$((TOTAL + 1))
     EXPECT=$(yq eval ".${qname}.expect // \"rows\"" "${yaml}")
-    QUERY=$(yq eval ".${qname}.query" "${yaml}")
+    QUERY=$(yq eval ".${qname}.query" "${yaml}" | resolve_samples 2>/dev/null || yq eval ".${qname}.query" "${yaml}")
     OUTPUT="${RESULTS_DIR}/${suite}_${qname}.json"
 
     if [[ "${EXPECT}" == "error" ]]; then
