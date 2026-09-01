@@ -1,3 +1,17 @@
+## [0.109.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.108.4...v0.109.0) (2026-09-01)
+
+### Features
+
+* **bench:** add reload and deploy commands to infra.sh ([8d50b08](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/8d50b08b873886379067991ff74f2ebfe90e462f)) by Michael Usachenko
+
+### Fixes
+
+* **release:** sign macOS CLI with disable-library-validation entitlement ([473d006](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/473d006a8abd2b4ba976cf1a285295b5b5bc1651)) by Jean-Gabriel Doyon
+
+### Other
+
+* **bench:** rewrite README with architecture and workflow ([5de6e7c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/5de6e7c5629100d3e78a8f56709615a553ae8d2d)) by Michael Usachenko
+
 ## [0.108.4](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.108.3...v0.108.4) (2026-08-31)
 
 ### Performance
