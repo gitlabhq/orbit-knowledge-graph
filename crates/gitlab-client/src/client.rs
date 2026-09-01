@@ -8,7 +8,11 @@ use futures::{Stream, StreamExt};
 #[cfg(feature = "gitaly-poc")]
 use gitaly_protos::proto::blob_service_client::BlobServiceClient;
 #[cfg(feature = "gitaly-poc")]
-use gitaly_protos::proto::{ListBlobsRequest as GitalyListBlobsRequest, Repository};
+use gitaly_protos::proto::repository_service_client::RepositoryServiceClient;
+#[cfg(feature = "gitaly-poc")]
+use gitaly_protos::proto::{
+    GetArchiveRequest, ListBlobsRequest as GitalyListBlobsRequest, Repository, get_archive_request,
+};
 #[cfg(feature = "gitaly-poc")]
 use gitaly_protos::websocket::{GRANT_HEADER, connect_channel};
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
@@ -156,6 +160,10 @@ impl GitlabClient {
         project_id: i64,
         ref_name: &str,
     ) -> Result<ByteStream, GitlabClientError> {
+        #[cfg(feature = "gitaly-poc")]
+        if let Some(poc) = &self.gitaly_poc {
+            return poc.download_archive(ref_name).await;
+        }
         let base = format!(
             "{}/api/v4/internal/orbit/project/{}/repository/archive",
             self.base_url, project_id
@@ -448,6 +456,45 @@ impl GitalyPoc {
                 framed.extend_from_slice(&(encoded.len() as u32).to_be_bytes());
                 framed.extend_from_slice(&encoded);
                 Ok(bytes::Bytes::from(framed))
+            });
+        Ok(Box::pin(stream))
+    }
+
+    async fn download_archive(&self, ref_name: &str) -> Result<ByteStream, GitlabClientError> {
+        let channel = connect_channel(&self.url)
+            .await
+            .map_err(|error| GitlabClientError::Unexpected(format!("Gitaly tunnel: {error}")))?;
+        let mut request = tonic::Request::new(GetArchiveRequest {
+            repository: Some(Repository {
+                storage_name: self.storage.clone(),
+                relative_path: self.relative_path.clone(),
+                ..Default::default()
+            }),
+            commit_id: ref_name.into(),
+            prefix: "repository/".into(),
+            format: get_archive_request::Format::TarGz as i32,
+            path: b".".to_vec(),
+            exclude: Vec::new(),
+            elide_path: false,
+            include_lfs_blobs: false,
+        });
+        request.metadata_mut().insert(
+            GRANT_HEADER,
+            self.grant.parse().map_err(|error| {
+                GitlabClientError::Unexpected(format!("invalid Gitaly grant metadata: {error}"))
+            })?,
+        );
+        let stream = RepositoryServiceClient::new(channel)
+            .get_archive(request)
+            .await
+            .map_err(|error| GitlabClientError::Unexpected(format!("GetArchive RPC: {error}")))?
+            .into_inner()
+            .map(|result| {
+                result
+                    .map(|response| response.data.into())
+                    .map_err(|error| {
+                        GitlabClientError::Unexpected(format!("GetArchive stream: {error}"))
+                    })
             });
         Ok(Box::pin(stream))
     }
