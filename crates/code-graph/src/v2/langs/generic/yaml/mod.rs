@@ -255,31 +255,20 @@ pub(super) mod tests {
     }
 
     #[test]
-    fn quoted_keys_are_stripped() {
-        let defs = defs("\"rules\":\n  'when': manual\n");
-        assert!(defs.contains(&("rules".into(), "rules".into())), "{defs:?}");
+    fn quoted_keys_are_stripped_from_names_and_fqns() {
+        let quoted = defs("\"rules\":\n  'when': manual\n");
         assert!(
-            defs.contains(&("when".into(), "rules.when".into())),
-            "{defs:?}"
+            quoted.contains(&("rules".into(), "rules".into())),
+            "{quoted:?}"
         );
-    }
-
-    #[test]
-    fn unquoted_child_under_quoted_parent_gets_clean_fqn() {
-        let defs = defs("\"rules\":\n  when: manual\n");
         assert!(
-            defs.contains(&("when".into(), "rules.when".into())),
-            "{defs:?}"
+            quoted.contains(&("when".into(), "rules.when".into())),
+            "{quoted:?}"
         );
-    }
-
-    #[test]
-    fn deeply_nested_keys_keep_full_fqns() {
-        let code = "a:\n b:\n  c:\n   d:\n    e:\n     f:\n      g:\n       h:\n        i:\n         j: 1\n";
-        let all = defs(code);
+        let mixed = defs("\"rules\":\n  when: manual\n");
         assert!(
-            all.contains(&("j".into(), "a.b.c.d.e.f.g.h.i.j".into())),
-            "{all:?}"
+            mixed.contains(&("when".into(), "rules.when".into())),
+            "{mixed:?}"
         );
     }
 

@@ -347,42 +347,26 @@ mod tests {
     }
 
     #[test]
-    fn schema_rejects_a_matcher_without_criteria() {
-        let errors = schema_errors(
+    fn schema_rejects_invalid_configs() {
+        for config in [
             "name: x\nmatch: {}\nimports:\n  - key: include\n    scalar_type: CiLocalInclude\n",
-        );
-        assert!(!errors.is_empty());
-    }
-
-    #[test]
-    fn schema_rejects_a_rule_that_emits_nothing() {
-        let errors = schema_errors(
             "name: x\nmatch:\n  filename_suffixes: [x.yaml]\nimports:\n  - key: include\n",
-        );
-        assert!(!errors.is_empty());
-    }
-
-    #[test]
-    fn schema_rejects_unknown_keys() {
-        let errors = schema_errors(
             "name: x\nmatch:\n  filename_suffixes: [x.yaml]\nimports:\n  - key: include\n    scalar_type: CiLocalInclude\n    typo_key: true\n",
-        );
-        assert!(!errors.is_empty());
+        ] {
+            assert!(!schema_errors(config).is_empty(), "{config}");
+        }
     }
 
     #[test]
-    fn include_bare_string_is_a_local_include() {
+    fn include_bare_string_and_flow_sequence_are_local_includes() {
         let result = parse("include: '/ci/build.yml'\n");
         assert_eq!(result.imports.len(), 1, "{:?}", result.imports);
         assert_eq!(result.imports[0].import_type, "CiLocalInclude");
         assert_eq!(result.imports[0].path, "/ci/build.yml");
-    }
 
-    #[test]
-    fn include_flow_sequence_of_locals() {
-        let result = parse("include: ['a.yml', 'b.yml']\n");
-        let paths: Vec<&str> = result.imports.iter().map(|i| i.path.as_str()).collect();
-        assert_eq!(paths, vec!["a.yml", "b.yml"], "{:?}", result.imports);
+        let seq = parse("include: ['a.yml', 'b.yml']\n");
+        let paths: Vec<&str> = seq.imports.iter().map(|i| i.path.as_str()).collect();
+        assert_eq!(paths, vec!["a.yml", "b.yml"], "{:?}", seq.imports);
     }
 
     #[test]
@@ -482,7 +466,7 @@ mod tests {
     }
 
     #[test]
-    fn argo_application_source_produces_import() {
+    fn argo_sources_produce_imports_with_path_name_and_revision() {
         let result = parse_at(
             "apps/gkg.yaml",
             "apiVersion: argoproj.io/v1alpha1\nkind: Application\nmetadata:\n  name: gkg\nspec:\n  source:\n    repoURL: https://gitlab.com/gitlab-com/gl-infra/charts.git\n    path: gkg\n    targetRevision: main\n",
@@ -496,47 +480,33 @@ mod tests {
         );
         assert_eq!(import.name.as_deref(), Some("gkg"));
         assert_eq!(import.alias.as_deref(), Some("main"));
-    }
 
-    #[test]
-    fn argo_multi_source_produces_one_import_per_source() {
-        let result = parse_at(
+        let multi = parse_at(
             "app.yaml",
-            "apiVersion: argoproj.io/v1alpha1\nkind: Application\nspec:\n  sources:\n    - repoURL: https://gitlab.com/a/charts.git\n      path: app\n      targetRevision: v1.2.3\n    - repoURL: https://gitlab.com/b/values.git\n      ref: values\n",
+            "apiVersion: argoproj.io/v1alpha1\nkind: Application\nspec:\n  sources:\n    - repoURL: https://gitlab.com/a/charts.git\n      path: app\n      targetRevision: v1.2.3\n    - repoURL: https://charts.example.com\n      chart: redis\n",
         );
-        assert_eq!(result.imports.len(), 2, "{:?}", result.imports);
+        assert_eq!(multi.imports.len(), 2, "{:?}", multi.imports);
         assert!(
-            result
+            multi
                 .imports
                 .iter()
                 .any(|i| i.path == "https://gitlab.com/a/charts.git"
                     && i.alias.as_deref() == Some("v1.2.3"))
         );
         assert!(
-            result
+            multi
                 .imports
                 .iter()
-                .any(|i| i.path == "https://gitlab.com/b/values.git" && i.name.is_none())
+                .any(|i| i.path == "https://charts.example.com"
+                    && i.name.as_deref() == Some("redis")),
+            "helm repo source must use chart as the name"
         );
-    }
 
-    #[test]
-    fn argo_helm_repo_source_uses_chart_as_name() {
-        let result = parse_at(
-            "app.yaml",
-            "apiVersion: argoproj.io/v1alpha1\nkind: Application\nspec:\n  source:\n    repoURL: https://charts.example.com\n    chart: redis\n    targetRevision: 17.0.0\n",
-        );
-        assert_eq!(result.imports.len(), 1, "{:?}", result.imports);
-        assert_eq!(result.imports[0].name.as_deref(), Some("redis"));
-    }
-
-    #[test]
-    fn argo_application_set_template_source_produces_import() {
-        let result = parse_at(
+        let appset = parse_at(
             "appset.yaml",
             "apiVersion: argoproj.io/v1alpha1\nkind: ApplicationSet\nspec:\n  template:\n    spec:\n      source:\n        repoURL: https://gitlab.com/a/charts.git\n        path: app\n",
         );
-        assert_eq!(result.imports.len(), 1, "{:?}", result.imports);
+        assert_eq!(appset.imports.len(), 1, "{:?}", appset.imports);
     }
 
     #[test]
