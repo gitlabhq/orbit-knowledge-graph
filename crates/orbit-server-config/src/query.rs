@@ -96,17 +96,16 @@ pub struct QueryConfig {
     )]
     pub query_cache_ttl: Option<u32>,
 
-    /// ClickHouse `optimize_move_to_prewhere_if_final`. Safe: under FINAL
-    /// only sorting-key predicates move to PREWHERE. Default: true.
+    /// ClickHouse `optimize_move_to_prewhere_if_final`. Lets FINAL scans
+    /// apply sorting-key filters in PREWHERE. Enabled by default.
     #[serde(
         default = "default_optimize_move_to_prewhere_if_final",
         skip_serializing_if = "Option::is_none"
     )]
     pub optimize_move_to_prewhere_if_final: Option<bool>,
 
-    /// ClickHouse `use_index_for_in_with_subqueries_max_values`. Bigger IN
-    /// sets skip index analysis; probing bloom filters costs more than it
-    /// saves. Default: 100000.
+    /// ClickHouse `use_index_for_in_with_subqueries_max_values`. IN sets with
+    /// more values than this are not used for index pruning. Default: 100,000.
     #[serde(
         default = "default_use_index_for_in_with_subqueries_max_values",
         skip_serializing_if = "Option::is_none"

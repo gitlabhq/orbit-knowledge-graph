@@ -1452,7 +1452,7 @@
           "minimum": 0
         },
         "optimize_move_to_prewhere_if_final": {
-          "description": "ClickHouse `optimize_move_to_prewhere_if_final`. Safe: under FINAL\nonly sorting-key predicates move to PREWHERE. Default: true.",
+          "description": "ClickHouse `optimize_move_to_prewhere_if_final`. Lets FINAL scans\napply sorting-key filters in PREWHERE. Enabled by default.",
           "type": [
             "boolean",
             "null"
@@ -1470,7 +1470,7 @@
           "minimum": 0
         },
         "use_index_for_in_with_subqueries_max_values": {
-          "description": "ClickHouse `use_index_for_in_with_subqueries_max_values`. Bigger IN\nsets skip index analysis; probing bloom filters costs more than it\nsaves. Default: 100000.",
+          "description": "ClickHouse `use_index_for_in_with_subqueries_max_values`. IN sets with\nmore values than this are not used for index pruning. Default: 100,000.",
           "type": [
             "integer",
             "null"
