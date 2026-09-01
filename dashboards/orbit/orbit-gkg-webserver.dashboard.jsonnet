@@ -501,10 +501,15 @@ local items =
   + resources
   + reference;
 
+local annotations = [
+  o.deployAnnotation(DS, SEL),
+];
+
 o.dashboard(
   'orbit-gkg-webserver',
   'Orbit — GKG webserver',
   ['gkg', 'webserver'],
   'GKG webserver dashboard. Top rows tell the latency story: a Rails request lands on GKG over gRPC, the pipeline runs (authorize → compile → execute → hydrate), and Rails redacts before the response goes out. Bottom rows are reliability, resources, and the per-domain catalog reference (collapsed by default).',
   items,
+  annotations,
 )

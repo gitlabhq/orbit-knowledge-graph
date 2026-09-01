@@ -539,10 +539,15 @@ local items =
   + migration
   + reference;
 
+local annotations = [
+  o.deployAnnotation(DS, SEL),
+];
+
 o.dashboard(
   'orbit-gkg-indexer',
   'Orbit — GKG indexer',
   ['gkg', 'indexer'],
   'GKG indexer dashboard. Top-of-page rows tell the story (health, volume, throughput, latency, reliability, freshness). Bottom rows are the per-domain catalog reference and are collapsed by default.',
   items,
+  annotations,
 )

@@ -1,6 +1,21 @@
 {
   "annotations": {
-    "list": []
+    "list": [
+      {
+        "datasource": {
+          "type": "prometheus",
+          "uid": "$ORBIT_DS"
+        },
+        "enable": true,
+        "expr": "label_replace(group by (image_spec) (kube_pod_container_info{container=\"gkg-webserver\", cluster=~\"$cluster\"}) unless group by (image_spec) (kube_pod_container_info{container=\"gkg-webserver\", cluster=~\"$cluster\"} offset $__interval), \"version\", \"$1\", \"image_spec\", \".*:(.*)\")",
+        "hide": false,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Deploys",
+        "step": "60s",
+        "textFormat": "{{version}}",
+        "titleFormat": "Deploy"
+      }
+    ]
   },
   "description": "GKG webserver dashboard. Top rows tell the latency story: a Rails request lands on GKG over gRPC, the pipeline runs (authorize → compile → execute → hydrate), and Rails redacts before the response goes out. Bottom rows are reliability, resources, and the per-domain catalog reference (collapsed by default).",
   "editable": true,

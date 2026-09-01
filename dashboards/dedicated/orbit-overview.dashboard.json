@@ -1,6 +1,21 @@
 {
   "annotations": {
-    "list": []
+    "list": [
+      {
+        "datasource": {
+          "type": "prometheus",
+          "uid": "$ORBIT_DS"
+        },
+        "enable": true,
+        "expr": "label_replace(group by (image_spec) (kube_pod_container_info{container=~\"gkg-.*\", cluster=~\".*\"}) unless group by (image_spec) (kube_pod_container_info{container=~\"gkg-.*\", cluster=~\".*\"} offset $__interval), \"version\", \"$1\", \"image_spec\", \".*:(.*)\")",
+        "hide": false,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Deploys",
+        "step": "60s",
+        "textFormat": "{{version}}",
+        "titleFormat": "Deploy"
+      }
+    ]
   },
   "description": "Golden signals for the Orbit stack. Use the sub-dashboards for component-level metrics.",
   "editable": true,
