@@ -21,9 +21,12 @@ GRAPH_PASS=$(kubectl --context="${KCTX}" -n "e2e-${RUN_ID}-gkg" get secret gkg-s
 SCHEMA_VER=$(kubectl --context="${KCTX}" exec -n "${CH_NS}" clickhouse-0 -- \
   clickhouse-client --password "${CH_PASS}" -q \
   "SELECT max(version) FROM gkg.gkg_schema_version FORMAT TSV" 2>/dev/null)
+# Use a top-level group path so queries see the full namespace, not a single leaf project.
 TPATH=$(kubectl --context="${KCTX}" exec -n "${CH_NS}" clickhouse-0 -- \
   clickhouse-client --password "${CH_PASS}" -q \
-  "SELECT DISTINCT traversal_path FROM gkg.v${SCHEMA_VER}_gl_project LIMIT 1 FORMAT TSV" 2>/dev/null)
+  "SELECT DISTINCT arrayStringConcat(arraySlice(splitByChar('/', traversal_path), 1, 2), '/') || '/'
+   FROM gkg.v${SCHEMA_VER}_gl_project
+   LIMIT 1 FORMAT TSV" 2>/dev/null)
 
 export CLICKHOUSE_URL="http://localhost:18123"
 export CLICKHOUSE_DATABASE=gkg
