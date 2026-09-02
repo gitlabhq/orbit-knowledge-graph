@@ -1,5 +1,5 @@
 name: list_nodes
-description: A sample of nodes of one entity type, for showing an entity type on the map.
+description: A sample of nodes of one entity type
 parameters:
   entity:
     schema: { type: string }
@@ -9,7 +9,6 @@ query:
   nodes:
     - id: n
       entity: { $param: entity }
-      columns: "*"
       filters:
-        id: { gt: 0 }
+        id: { is_not_null: true }
   limit: 50
