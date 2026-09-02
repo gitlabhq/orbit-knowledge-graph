@@ -303,8 +303,6 @@ mod tests {
         }
         let hits = rank_and_trim(&corpus, &sims, &[1.0], 5, "q", Some(&FavourLast));
         let order: Vec<usize> = hits.iter().map(|h| h.index).collect();
-        // Rows 1 and 2 are confident exact matches and stay first whatever the
-        // reranker says; row 5 rises past 3 and 4 but fusion stops it short of them.
         assert_eq!(order, vec![0, 1, 4, 2, 3]);
     }
 }

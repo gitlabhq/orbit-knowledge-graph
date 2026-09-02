@@ -66,7 +66,6 @@ pub(crate) fn run(
     writeln!(out, "ask {:?} — {}", question, backend.header())?;
 
     let vocab = build_vocab(backend.search())?;
-    // Offline dev builds cannot fetch the model; degrade to lexical order, not an error.
     let reranker = match rerank::CrossEncoder::load(backend.root()) {
         Ok(r) => Some(r),
         Err(err) => {

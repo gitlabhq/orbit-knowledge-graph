@@ -56,8 +56,6 @@ impl TermRecall {
     }
 }
 
-/// Rescores the lexical candidate pool before the per-parent cap. One score per
-/// row, higher is better; scores only order the pool, so any scale works.
 pub trait Reranker {
     fn rescore(&self, question: &str, rows: &[CorpusRow]) -> Vec<f64>;
 }

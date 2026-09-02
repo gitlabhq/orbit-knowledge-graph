@@ -78,7 +78,6 @@ TOOLCHAIN=$(rustc -vV | awk '/^release:/ { print $2 }')
 rustup target add --toolchain "$TOOLCHAIN" "$TARGET"
 
 echo "Building orbit for $PLATFORM/$ARCH ($TARGET)"
-# Released binaries embed the `ask` reranker so they never download a model.
 rustup run "$TOOLCHAIN" cargo xtask rerank-bundle
 # Bundle libduckdb (compile from C++) so the released binary is self-contained.
 if [[ "$TARGET" == *-musl ]]; then

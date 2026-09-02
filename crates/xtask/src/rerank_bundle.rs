@@ -1,5 +1,3 @@
-//! f16 halves what the CLI embeds; it upcasts to f32 at load, so scores stay within ~1e-3.
-
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -10,7 +8,6 @@ use safetensors::{Dtype, SafeTensors};
 use sha2::{Digest, Sha256};
 
 pub const MODEL: &str = "cross-encoder/ms-marco-MiniLM-L2-v2";
-/// Upstream commit the scores were validated against; `main` is mutable.
 const REVISION: &str = "1b5cd67b15209f24824c50370e0397743aa9b787";
 const HUB_BASE: &str = "https://huggingface.co";
 const FILES: [(&str, &str); 3] = [
@@ -80,7 +77,6 @@ fn default_out() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/rerank-bundle")
 }
 
-/// Non-F32 tensors (`position_ids` is I64) pass through unchanged.
 fn to_f16(bytes: &[u8]) -> Result<Vec<u8>> {
     let tensors = SafeTensors::deserialize(bytes).context("invalid safetensors file")?;
     let mut converted: Vec<(String, Vec<u8>, Vec<usize>, Dtype)> = Vec::new();

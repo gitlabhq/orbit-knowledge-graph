@@ -1,5 +1,3 @@
-//! MS MARCO BERT cross-encoder scoring on the CPU via candle.
-
 use std::path::Path;
 
 use anyhow::{Context, Result, anyhow};
@@ -8,12 +6,9 @@ use candle_nn::{Linear, VarBuilder, linear};
 use candle_transformers::models::bert::{BertModel, Config};
 use tokenizers::{Encoding, PaddingParams, Tokenizer, TruncationParams, TruncationStrategy};
 
-/// The model accepts 512, but passages rarely need more and attention cost is quadratic.
 const MAX_TOKENS: usize = 256;
 const BATCH_SIZE: usize = 16;
 
-/// `BertForSequenceClassification` with one label: candle's `BertModel` plus the
-/// pooler and classifier that sentence-transformers exports alongside it.
 pub struct Reranker {
     bert: BertModel,
     pooler: Linear,
@@ -22,7 +17,6 @@ pub struct Reranker {
 }
 
 impl Reranker {
-    /// Expects a sentence-transformers export: `config.json`, `model.safetensors`, `tokenizer.json`.
     pub fn load_dir(dir: &Path) -> Result<Self> {
         let read = |name: &str| {
             std::fs::read(dir.join(name))
@@ -36,7 +30,6 @@ impl Reranker {
         )
     }
 
-    /// Weights are upcast to f32 on load, so f16 exports score within ~1e-3 logits of f32.
     pub fn from_parts(
         config_json: &str,
         safetensors: Vec<u8>,
@@ -70,7 +63,6 @@ impl Reranker {
         })
     }
 
-    /// Raw logits, one per passage in order; only the ordering is meaningful.
     pub fn score(&self, query: &str, passages: &[String]) -> Result<Vec<f32>> {
         let mut scores = Vec::with_capacity(passages.len());
         for chunk in passages.chunks(BATCH_SIZE) {
@@ -109,7 +101,6 @@ fn tensor(encodings: &[Encoding], field: fn(&Encoding) -> &[u32]) -> Result<Tens
 mod tests {
     use super::*;
 
-    /// Reference logits come from `sentence_transformers.CrossEncoder(..., max_length=256)`.
     #[test]
     #[ignore = "needs a downloaded model in ORBIT_RERANK_MODEL_DIR"]
     fn matches_sentence_transformers_reference_scores() {

@@ -55,8 +55,6 @@ fn validate_prompts() {
     orbit_prompts::Prompts::load_dir(&dir).unwrap_or_else(|e| panic!("{e}"));
 }
 
-/// A missing bundle only warns and leaves the cfg unset so plain `cargo build`
-/// and CI work offline; `mise build:cli` and the release script run the xtask first.
 fn locate_reranker_bundle() {
     println!("cargo::rustc-check-cfg=cfg(orbit_reranker_bundle)");
     println!("cargo:rerun-if-env-changed=ORBIT_RERANK_BUNDLE_DIR");
