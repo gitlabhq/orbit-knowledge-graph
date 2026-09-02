@@ -582,8 +582,7 @@ pub struct InputRelationship {
     /// The compiler resolves which node has the column from the edge variant's entity types.
     #[serde(skip)]
     pub fk_column: Option<String>,
-    /// This hop's place in a declared denormalized join that a run of the
-    /// query's relationships matched. Set during normalization.
+    /// Set by normalization when this hop is part of a run matching a denormalized join.
     #[serde(skip)]
     pub denormalized: Option<DenormalizedHop>,
     /// Tight `traversal_path` prefix this edge's scan may be confined to. Set by
@@ -601,10 +600,7 @@ pub struct InputRelationship {
     pub scope_preserving: bool,
 }
 
-/// Where a query hop and its endpoints sit in a denormalized join's table
-/// chain, so their columns can be read from that join's table
-/// (`denormalized::column_for`). Hops that matched the same occurrence share a
-/// `group` and one scan.
+/// Chain positions of a hop and its endpoints in a denormalized join; a `group` shares one scan.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DenormalizedHop {
     pub table: String,

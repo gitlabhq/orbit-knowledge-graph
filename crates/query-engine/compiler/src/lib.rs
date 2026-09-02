@@ -1746,9 +1746,7 @@ mod tests {
         assert!(sql.contains("GROUP BY f.old_path"), "got:\n{sql}");
     }
 
-    /// REVIEWER alone, plus REVIEWER then HAS_HEAD_PIPELINE as a two-hop chain.
-    /// Longer joins match first, so a query with both hops folds into the
-    /// two-hop table.
+    /// A one-hop and a two-hop join sharing REVIEWER; the longer one matches first.
     static DENORM_ONTOLOGY: LazyLock<Ontology> = LazyLock::new(|| {
         Ontology::load_embedded()
             .expect("ontology must load")
@@ -1933,8 +1931,7 @@ mod tests {
 
         let sql = compile_sql_denormalized(query);
 
-        // Chain: t0 User (global), t1 gl_edge (anchor), t2 MergeRequest,
-        // t3 gl_ci_edge, t4 Pipeline. Every scoped table's own path is filtered.
+        // Chain: t0 User (global), t1 gl_edge (anchor), t2 MergeRequest, t3 gl_ci_edge, t4 Pipeline.
         for column in [
             "traversal_path",
             "t2_traversal_path",
@@ -1989,8 +1986,7 @@ mod tests {
             !sql.contains("gl_merge_request"),
             "no node-table subquery, got:\n{sql}"
         );
-        // The edge's path (anchor) admits both namespaces; the MR's path only
-        // the one held at Developer, which covers the Security Manager floor.
+        // Only the Developer-held path (1/101/) clears the MergeRequest's Security Manager floor.
         assert!(
             sql.contains("startsWith(e0.traversal_path, '1/100/')")
                 && sql.contains("startsWith(e0.traversal_path, '1/101/')"),
@@ -2084,8 +2080,7 @@ mod tests {
 
     #[test]
     fn denormalized_hop_roots_an_fk_chain_and_is_rotated_first() {
-        // TRIGGERED is listed first so the planner must rotate the chain and
-        // keep e0/e1 paired with the rotated relationships.
+        // TRIGGERED is listed first so the planner must rotate and keep e0/e1 paired with relationships.
         let query = r#"{
             "query_type": "traversal",
             "nodes": [

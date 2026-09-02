@@ -353,9 +353,7 @@ pub(super) fn edge_scope_predicate(hop: &Hop, alias: &str) -> Option<Expr> {
     })
 }
 
-/// Node property filters for a denormalized hop, read from the row's typed
-/// node columns under `alias`. Replaces the edge tag lookups a plain edge
-/// scan would use, since the join table carries the columns themselves.
+/// Node filters on the row's prefixed node columns, replacing edge tag lookups.
 pub(super) fn denormalized_node_predicates(
     alias: &str,
     hop: &Hop,
@@ -378,11 +376,7 @@ pub(super) fn denormalized_node_predicates(
     .collect()
 }
 
-/// Latest-row scan of a denormalized group's join table carrying every
-/// predicate the group's hops and nodes contribute, emitted against each hop's
-/// own `e{i}` alias so the rebind lands them on the owner's prefixed columns.
-/// Every node on the path is answered by this one scan, so a chain can root on
-/// it and join further hops onto its id columns.
+/// `FINAL` scan of a group's join table with every hop's predicates, for an FK chain to root on.
 pub(super) fn denormalized_scan(
     hops: &[Hop],
     owner: usize,

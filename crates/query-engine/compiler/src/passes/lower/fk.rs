@@ -420,9 +420,7 @@ fn node_scan(
     ))
 }
 
-/// The chain root is either the first hop's `from` node table or, when the
-/// planner rotated a denormalized group to the front, that group's join table
-/// scan, which reaches every node in the group at once.
+/// Roots on the first hop's `from` node, or on a denormalized group's scan when one leads.
 fn emit_chain(plan: &Plan) -> Result<EmitOutput> {
     let first = &plan.hops[0];
     let node_plan = |alias: &str| {

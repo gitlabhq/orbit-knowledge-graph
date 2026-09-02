@@ -1,15 +1,5 @@
-//! Rebind node and edge aliases onto a denormalized join scan.
-//!
-//! Lowering emits `<node>.<column>` and `e{i}.<column>` as if every node and
-//! edge had its own scan. Hops in a denormalized group have one scan instead,
-//! owned by the group's first hop, whose columns carry a chain-table prefix
-//! (`denormalized::column_for`). After the query body is built, every
-//! reference into the group is rewritten onto that scan. Derived aliases such
-//! as a cascade anchor's `e{i}p`, which scan the join table under their own
-//! name, keep their alias and only get the column prefix. Passes after
-//! lowering never introduce node-alias columns: `enforce` reads the plan's
-//! node-to-edge mappings, `cursor` derives its seek from the lowered ORDER BY,
-//! and the rest work on scan aliases.
+//! Rewrites `<node>.<col>` and `e{i}.<col>` in a denormalized group onto the owner scan's prefixed columns.
+//! Runs at the end of lowering; no later pass introduces node-alias columns.
 
 use std::collections::HashMap;
 
@@ -29,9 +19,7 @@ struct Bindings<'a> {
 }
 
 impl Bindings<'_> {
-    /// Rebinding for one column reference, or `None` to leave it alone. A
-    /// column already carrying a chain prefix was resolved by the lowerer
-    /// (node filters inside cascade anchors) and only needs its alias kept.
+    /// Already-prefixed columns (node filters inside cascade anchors) keep their alias untouched.
     fn resolve(&self, table: &str, column: &str) -> Option<(String, String)> {
         if already_prefixed(column) {
             return None;

@@ -166,9 +166,7 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
         let (start_col, end_col) = hop.direction.edge_columns();
         let is_multi_hop = hop.max_hops > 1;
 
-        // A later hop of a denormalized group reads the owner's scan: no FROM
-        // entry of its own, but its predicates and node filters still apply
-        // (the rebind lands them on the owner's columns).
+        // A later hop of a denormalized group adds predicates to the owner's scan, not a FROM entry.
         if denormalized_owner(&plan.hops, i).is_some_and(|owner| owner < i) {
             push_edge_predicates(
                 &mut where_parts,
@@ -196,8 +194,7 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
         }
 
         // Single-hop aggregation: use LIMIT BY dedup with -If combinators
-        // instead of FINAL. A denormalized row changes whenever any table in
-        // its chain does, so its filters must run after latest-row resolution.
+        // instead of FINAL. A denormalized row changes with any table in its chain, so it needs FINAL.
         let use_limit_by =
             is_aggregation && !dedup_edges && !is_multi_hop && hop.denormalized.is_none();
 

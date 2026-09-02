@@ -135,9 +135,7 @@ fn build_agg_expr(plan: &Plan, expr: &AggExpr, if_cond: Option<&Expr>) -> Expr {
     }
 }
 
-/// `COUNT(node.prop)` needs the column in FROM. A skipped node's table is not
-/// scanned, so the count degrades to `COUNT()`, unless a denormalized scan
-/// carries the node, in which case the rebind supplies the column.
+/// A skipped node's column is absent unless a denormalized scan carries it, so the count degrades.
 fn counted_column(plan: &Plan, target: &TargetRef) -> Option<Expr> {
     let property = target.property.as_deref()?;
     let skipped = plan

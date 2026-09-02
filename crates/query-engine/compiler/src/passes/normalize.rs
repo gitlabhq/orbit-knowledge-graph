@@ -312,13 +312,8 @@ pub fn normalize(mut input: Input, ontology: &Ontology) -> Result<Input> {
     Ok(input)
 }
 
-/// Match runs of the query's relationships against declared denormalized
-/// joins and record each matched hop's place in the join's table chain.
-/// Longer joins are tried first and matched runs never overlap. A run matches
-/// when each relationship names exactly one kind, is fixed-length and
-/// directed, and its physical source and target aliases carry the declared
-/// kinds; the run may walk the chain backwards. Joins with an FK-realized hop
-/// are not matched yet: such a hop has no edge table to read edge columns from.
+/// Bind non-overlapping runs of relationships to declared joins, longest join first, either direction.
+/// Joins with an FK-realized hop are skipped: the hop has no edge table to read edge columns from.
 fn resolve_denormalized_joins(input: &mut Input, ontology: &Ontology) {
     let entity_for: HashMap<&str, &str> = input
         .nodes
@@ -362,8 +357,7 @@ fn resolve_denormalized_joins(input: &mut Input, ontology: &Ontology) {
     }
 }
 
-/// Chain positions per relationship when `run` walks `join` forwards, or
-/// backwards when `reversed`. `table` and `group` are filled by the caller.
+/// Chain positions per relationship when `run` walks `join` in the given direction.
 fn match_run(
     run: &[InputRelationship],
     join: &DenormalizedJoin,
@@ -384,8 +378,7 @@ fn match_run(
         if *rel_type != hop.relationship_kind {
             return None;
         }
-        // The query walks `rel.from` -> `rel.to`; `direction` says which of
-        // them is the edge's physical source.
+        // `direction` says which of `rel.from`/`rel.to` is the edge's physical source.
         let (source_alias, target_alias) = match rel.direction {
             Direction::Outgoing => (rel.from.as_str(), rel.to.as_str()),
             Direction::Incoming => (rel.to.as_str(), rel.from.as_str()),

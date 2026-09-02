@@ -2,10 +2,9 @@
 //!
 //! Runs after security filter injection to verify invariants that must hold
 //! before the AST is handed to codegen. Checks that every `gl_*` alias has a
-//! `startsWith(alias.<path column>, path)` predicate on each of its
-//! `traversal_path` columns (one for ordinary tables, one per scoped table for
-//! a denormalized join) whose path literal is derivable from the
-//! [`SecurityContext`] — catching both injection bugs and path value mismatches.
+//! `startsWith` on each of its `traversal_path` columns whose path literal is
+//! derivable from the [`SecurityContext`] — catching both injection bugs and
+//! path value mismatches.
 
 use serde_json::Value;
 

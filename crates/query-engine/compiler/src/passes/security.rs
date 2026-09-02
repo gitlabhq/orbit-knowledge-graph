@@ -36,9 +36,7 @@ use orbit_utils::traversal_path::{TraversalPath, TraversalPathTrie};
 /// Matches `gl_*` or `v{N}_gl_*`, captures the unprefixed name.
 static GL_TABLE_RE: OnceLock<Regex> = OnceLock::new();
 
-/// Each alias is filtered on every `traversal_path` column the ontology reports
-/// for its table (`Ontology::traversal_path_columns`), at that column's role
-/// floor; tables without a `redaction` block keep the historical Reporter floor.
+/// Filters each alias on every path column the ontology reports, at that column's role floor.
 pub fn apply_security_context(
     node: &mut Node,
     ctx: &SecurityContext,
@@ -71,11 +69,7 @@ pub fn apply_security_context(
     }
 }
 
-/// A denormalized join carries one `traversal_path` per scoped table in its
-/// chain, so a scan of it gets one filter per column (each at its own table's
-/// role floor); any other table has exactly one. The query's resolved scope
-/// prefix applies only to the unprefixed column, which is the one the prefix
-/// was resolved for.
+/// The resolved scope prefix applies only to the unprefixed column it was resolved for.
 fn apply_to_query(q: &mut Query, ctx: &SecurityContext, ontology: &Ontology) -> Result<()> {
     let aliased_tables = collect_aliased_tables(&q.from);
     if !aliased_tables.is_empty() {
