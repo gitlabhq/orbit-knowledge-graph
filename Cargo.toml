@@ -42,6 +42,8 @@ members = [
   "crates/duckdb-client",
   "crates/fuzz",
 ]
+# Standalone crate with its own workspace; never built, linted, or tested with the main tree.
+exclude = ["crates/code-graph/heavy"]
 
 [workspace.dependencies]
 orbit-observability = { path = "crates/orbit-observability" }

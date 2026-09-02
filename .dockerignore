@@ -11,3 +11,4 @@ fixtures/
 helm/
 scripts/
 tools/
+crates/code-graph/heavy/

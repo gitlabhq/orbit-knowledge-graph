@@ -1,0 +1,17 @@
+[package]
+name = "code-graph-heavy"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+# Own workspace root so cargo stops walking up to the main tree, which excludes this path.
+[workspace]
+
+[dependencies]
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
