@@ -1,5 +1,6 @@
 pub mod bash;
 pub mod c;
+pub mod c_family;
 pub mod cpp;
 pub mod csharp;
 pub mod elixir;

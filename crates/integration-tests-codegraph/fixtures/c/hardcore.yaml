@@ -179,7 +179,7 @@ tests:
       - { unique: fqn }
       - { row: { fqn: "types::uint32" } }
       - { row: { fqn: "types::byte" } }
-      - { row: { fqn: "nested::(*Callback)(int)" } }
+      - { row: { fqn: "nested::Callback" } }
       - { row: { fqn: "nested::Task" } }
 
   - name: "Exact file count"
@@ -332,11 +332,11 @@ tests:
   - name: "Function pointer typedef"
     query: |
       MATCH (d:Definition)
-      WHERE d.fqn = 'nested::(*Callback)(int)'
+      WHERE d.fqn = 'nested::Callback'
       RETURN d.fqn AS fqn, d.definition_type AS type
     assert:
       - { row_count: 1 }
-      - { row: { fqn: "nested::(*Callback)(int)", type: Typedef } }
+      - { row: { fqn: "nested::Callback", type: Typedef } }
 
   - name: "Task typedef struct"
     query: |

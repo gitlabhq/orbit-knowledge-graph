@@ -20,6 +20,8 @@ pub type ImportRewriterBuilder = fn(paths: &[&str], sep: &str) -> Box<ImportRewr
 type N<'a> = Node<'a, StrDoc<SupportLang>>;
 pub type LabelFn = fn(&N<'_>) -> &'static str;
 
+pub type NameHookFn = fn(&N<'_>) -> Option<String>;
+
 pub trait Rule {
     fn kinds(&self) -> &[&'static str];
     fn condition(&self) -> Option<&Pred>;
@@ -45,6 +47,7 @@ pub struct ScopeRule {
     def_kind: DefKind,
     condition: Option<Pred>,
     name: Extract,
+    name_hook: Option<NameHookFn>,
     pub(crate) default_name: Option<&'static str>,
     pub creates_scope: bool,
     pub(crate) metadata_rule: Option<MetadataRule>,
@@ -59,6 +62,13 @@ impl Rule for ScopeRule {
     }
     fn extract(&self) -> &Extract {
         &self.name
+    }
+
+    fn extract_name(&self, node: &N<'_>) -> Option<String> {
+        match self.name_hook {
+            Some(hook) => hook(node),
+            None => self.extract().apply(node),
+        }
     }
 }
 
@@ -77,6 +87,13 @@ impl ScopeRule {
 
     pub fn name_from(mut self, extract: Extract) -> Self {
         self.name = extract;
+        self
+    }
+
+    /// Use this hook only when an `Extract` chain cannot express the name.
+    /// The hook replaces `name_from`. `None` falls back to `default_name`.
+    pub fn name_hook(mut self, hook: NameHookFn) -> Self {
+        self.name_hook = Some(hook);
         self
     }
 
@@ -128,6 +145,7 @@ pub fn scope(kind: &'static str, label: &'static str) -> ScopeRule {
         def_kind: DefKind::Other,
         condition: None,
         name: default_name(),
+        name_hook: None,
         default_name: None,
         creates_scope: true,
         metadata_rule: None,
@@ -141,6 +159,7 @@ pub fn scopes(kinds: &[&'static str], label: &'static str) -> ScopeRule {
         def_kind: DefKind::Other,
         condition: None,
         name: default_name(),
+        name_hook: None,
         default_name: None,
         creates_scope: true,
         metadata_rule: None,
@@ -158,6 +177,7 @@ pub fn scope_fn(kind: &'static str, label_fn: LabelFn) -> ScopeRule {
         def_kind: DefKind::Other,
         condition: None,
         name: default_name(),
+        name_hook: None,
         default_name: None,
         creates_scope: true,
         metadata_rule: None,

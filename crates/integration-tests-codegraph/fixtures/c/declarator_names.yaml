@@ -1,0 +1,105 @@
+name: C declarator name extraction (kg#1115)
+
+fixtures:
+  - path: funcs.c
+    content: |
+      int plain(int a) { return a; }
+      static inline int qualprefixed(int a) { return a; }
+      void *ptr_return(int a) { return 0; }
+      void **dbl_ptr_return(int a) { return 0; }
+      int (paren_decl)(int a) { return a; }
+      int (*fnptr_return(int a))(int) { return 0; }
+      int (/*c*/ commented)(int a) { return a; }
+      int attributed(int a) [[deprecated]] { return a; }
+      void (__cdecl mscall)(int a) { }
+  - path: types.c
+    content: |
+      typedef int *ptr_typedef;
+      typedef int (*fnptr_typedef)(int);
+      typedef char array_typedef[64];
+
+tests:
+  - name: "Plain and storage-qualifier-prefixed functions keep the bare name"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Function' AND d.name IN ['plain', 'qualprefixed']
+      RETURN d.name AS name, d.fqn AS fqn
+    assert:
+      - { row_count: 2 }
+      - { row: { name: "plain", fqn: "funcs::plain" } }
+      - { row: { name: "qualprefixed", fqn: "funcs::qualprefixed" } }
+
+  - name: "Pointer-return function extracts bare identifier (not the whole declarator)"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Function' AND d.fqn = 'funcs::ptr_return'
+      RETURN d.name AS name, d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+      - { row: { name: "ptr_return", fqn: "funcs::ptr_return" } }
+
+  - name: "Double-pointer-return function extracts bare identifier"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Function' AND d.fqn = 'funcs::dbl_ptr_return'
+      RETURN d.name AS name, d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+      - { row: { name: "dbl_ptr_return", fqn: "funcs::dbl_ptr_return" } }
+
+  - name: "Parenthesized declarator extracts bare identifier"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Function' AND d.fqn = 'funcs::paren_decl'
+      RETURN d.name AS name, d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+      - { row: { name: "paren_decl", fqn: "funcs::paren_decl" } }
+
+  - name: "Function-pointer-return extracts bare identifier"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Function' AND d.fqn = 'funcs::fnptr_return'
+      RETURN d.name AS name, d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+      - { row: { name: "fnptr_return", fqn: "funcs::fnptr_return" } }
+
+  - name: "Comment before the declarator is skipped, not captured as the name"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Function' AND d.fqn = 'funcs::commented'
+      RETURN d.name AS name, d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+      - { row: { name: "commented", fqn: "funcs::commented" } }
+
+  - name: "Postfix attribute is unwrapped, not captured as the name"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Function' AND d.fqn = 'funcs::attributed'
+      RETURN d.name AS name, d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+      - { row: { name: "attributed", fqn: "funcs::attributed" } }
+
+  - name: "MSVC call modifier before the declarator is skipped, not captured as the name"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Function' AND d.fqn = 'funcs::mscall'
+      RETURN d.name AS name, d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+      - { row: { name: "mscall", fqn: "funcs::mscall" } }
+
+  - name: "Pointer / function-pointer / array typedefs extract the bare name"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Typedef'
+      RETURN d.name AS name, d.fqn AS fqn
+    assert:
+      - { row_count: 3 }
+      - { unique: fqn }
+      - { row: { name: "ptr_typedef", fqn: "types::ptr_typedef" } }
+      - { row: { name: "fnptr_typedef", fqn: "types::fnptr_typedef" } }
+      - { row: { name: "array_typedef", fqn: "types::array_typedef" } }
