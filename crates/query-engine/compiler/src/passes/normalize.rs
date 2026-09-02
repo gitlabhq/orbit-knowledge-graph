@@ -1,5 +1,7 @@
 use crate::error::{QueryError, Result};
-use crate::input::{ColumnSelection, Direction, EntityAuthConfig, Input, QueryType, TextIndexMeta};
+use crate::input::{
+    ColumnSelection, Direction, EntityAuthConfig, Input, MaterializedEdge, QueryType, TextIndexMeta,
+};
 use crate::passes::hydrate::VirtualColumnRequest;
 use ontology::constants::DEFAULT_PRIMARY_KEY;
 use ontology::{EnumType, Ontology, TraversalPathKind};
@@ -304,7 +306,50 @@ pub fn normalize(mut input: Input, ontology: &Ontology) -> Result<Input> {
     }
     infer_wildcard_relationship_kinds(&mut input, ontology);
     resolve_fk_metadata(&mut input, ontology);
+    resolve_materialized_tables(&mut input, ontology);
     Ok(input)
+}
+
+/// A hop binds to a materialized join table only when it names exactly one
+/// relationship kind and exactly one variant orientation matches the endpoint
+/// entities, so the table's `src_`/`tgt_` sides map unambiguously onto nodes.
+fn resolve_materialized_tables(input: &mut Input, ontology: &Ontology) {
+    let entity_for: HashMap<&str, &str> = input
+        .nodes
+        .iter()
+        .filter_map(|n| Some((n.id.as_str(), n.entity.as_deref()?)))
+        .collect();
+
+    for rel in &mut input.relationships {
+        let [rel_type] = rel.types.as_slice() else {
+            continue;
+        };
+        let (Some(from_entity), Some(to_entity)) = (
+            entity_for.get(rel.from.as_str()),
+            entity_for.get(rel.to.as_str()),
+        ) else {
+            continue;
+        };
+
+        let forward = ontology.materialized_join_table(rel_type, from_entity, to_entity);
+        let reverse = ontology.materialized_join_table(rel_type, to_entity, from_entity);
+        let bound = match rel.direction {
+            Direction::Outgoing => forward.map(|m| (m, &rel.from, &rel.to)),
+            Direction::Incoming => reverse.map(|m| (m, &rel.to, &rel.from)),
+            Direction::Both => match (forward, reverse) {
+                (Some(m), None) => Some((m, &rel.from, &rel.to)),
+                (None, Some(m)) => Some((m, &rel.to, &rel.from)),
+                _ => None,
+            },
+        };
+        if let Some((mat, source_node, target_node)) = bound {
+            rel.materialized = Some(MaterializedEdge {
+                table: mat.table,
+                source_node: source_node.clone(),
+                target_node: target_node.clone(),
+            });
+        }
+    }
 }
 
 fn resolve_fk_metadata(input: &mut Input, ontology: &Ontology) {

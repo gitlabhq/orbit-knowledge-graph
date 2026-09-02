@@ -1126,7 +1126,7 @@ mod tests {
                 {{"id": "u", "entity": "User", "node_ids": [1]}},
                 {{"id": "mr", "entity": "MergeRequest", "filters": {{ {mr_filter} }}}}
             ],
-            "relationships": [{{"type": "REVIEWER", "from": "u", "to": "mr"}}],
+            "relationships": [{{"type": "ASSIGNED", "from": "u", "to": "mr"}}],
             "limit": 10
         }}"#
         );
@@ -1258,7 +1258,7 @@ mod tests {
                 {"id": "mr", "entity": "MergeRequest", "node_ids": [1, 2, 3],
                  "filters": {"state": {"eq": "merged"}}}
             ],
-            "relationships": [{"type": "REVIEWER", "from": "u", "to": "mr"}],
+            "relationships": [{"type": "ASSIGNED", "from": "u", "to": "mr"}],
             "limit": 10
         }"#;
 
@@ -1284,7 +1284,7 @@ mod tests {
                     "state": {"eq": "merged"}
                 }}
             ],
-            "relationships": [{"type": "REVIEWER", "from": "u", "to": "mr"}],
+            "relationships": [{"type": "ASSIGNED", "from": "u", "to": "mr"}],
             "group_by": ["u"],
             "aggregations": [{
                 "count": "mr",
@@ -1689,6 +1689,124 @@ mod tests {
             assert!(sql.contains(on), "expected FK join `{on}`, got:\n{sql}");
         }
         assert!(sql.contains("GROUP BY f.old_path"), "got:\n{sql}");
+    }
+
+    const MAT_REVIEWER: &str = "gl_mat_reviewer__user__merge_request";
+
+    #[test]
+    fn materialized_traversal_is_one_final_scan_with_rebound_columns() {
+        let query = r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User", "columns": ["username"]},
+                {"id": "mr", "entity": "MergeRequest", "columns": ["title"],
+                 "filters": {"state": {"eq": "merged"}}}
+            ],
+            "relationships": [{"type": "REVIEWER", "from": "u", "to": "mr"}],
+            "order_by": "-mr.created_at",
+            "limit": 10
+        }"#;
+
+        let sql = compile_sql(query);
+
+        assert!(
+            sql.contains(&format!("FROM {MAT_REVIEWER} AS e0 FINAL")),
+            "got:\n{sql}"
+        );
+        assert!(
+            !sql.contains("gl_edge")
+                && !sql.contains("gl_user")
+                && !sql.contains("gl_merge_request AS"),
+            "no edge or node table may be scanned, got:\n{sql}"
+        );
+        for fragment in [
+            "e0.src_username AS u_username",
+            "e0.tgt_title AS mr_title",
+            "e0.tgt_state = 'merged'",
+            "ORDER BY e0.tgt_created_at DESC",
+            "e0.src_id AS _gkg_u_id",
+            "e0.tgt_id AS _gkg_mr_id",
+            "e0.traversal_path AS _gkg_mr_tp",
+            "startsWith(e0.traversal_path",
+        ] {
+            assert!(sql.contains(fragment), "expected `{fragment}`, got:\n{sql}");
+        }
+        assert!(
+            !sql.contains("u.") && !sql.contains("mr."),
+            "every node alias must be rebound, got:\n{sql}"
+        );
+    }
+
+    #[test]
+    fn materialized_aggregation_groups_on_rebound_columns() {
+        let query = r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "u", "entity": "User", "columns": ["username"]},
+                {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"eq": "merged"}}}
+            ],
+            "relationships": [{"type": "REVIEWER", "from": "u", "to": "mr"}],
+            "group_by": ["u"],
+            "aggregations": [{"count": "mr", "as": "n"}],
+            "limit": 10
+        }"#;
+
+        let sql = compile_sql(query);
+
+        assert!(
+            sql.contains(&format!("FROM {MAT_REVIEWER} AS e0 FINAL")),
+            "got:\n{sql}"
+        );
+        assert!(
+            sql.contains("GROUP BY e0.src_username, e0.src_id"),
+            "got:\n{sql}"
+        );
+        assert!(
+            !sql.contains("e0_type"),
+            "aggregations carry no edge columns, got:\n{sql}"
+        );
+    }
+
+    #[test]
+    fn materialized_incoming_direction_swaps_sides() {
+        let query = r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "mr", "entity": "MergeRequest", "node_ids": [5]},
+                {"id": "u", "entity": "User"}
+            ],
+            "relationships": [{"type": "REVIEWER", "from": "mr", "to": "u", "direction": "incoming"}],
+            "limit": 10
+        }"#;
+
+        let sql = compile_sql(query);
+
+        assert!(
+            sql.contains(&format!("FROM {MAT_REVIEWER} AS e0 FINAL")),
+            "got:\n{sql}"
+        );
+        assert!(sql.contains("e0.tgt_id = 5"), "got:\n{sql}");
+        assert!(
+            sql.contains("e0.src_id AS e0_src") && sql.contains("'User' AS e0_src_type"),
+            "got:\n{sql}"
+        );
+    }
+
+    #[test]
+    fn materialized_is_skipped_for_multi_kind_and_variable_length_hops() {
+        for rel in [
+            r#"{"type": ["REVIEWER", "ASSIGNED"], "from": "u", "to": "mr"}"#,
+            r#"{"type": "REVIEWER", "from": "u", "to": "mr", "hops": [1, 2]}"#,
+        ] {
+            let query = format!(
+                r#"{{"query_type":"traversal","nodes":[{{"id":"u","entity":"User","node_ids":[1]}},{{"id":"mr","entity":"MergeRequest"}}],"relationships":[{rel}],"limit":10}}"#
+            );
+            let sql = compile_sql(&query);
+            assert!(
+                !sql.contains(MAT_REVIEWER),
+                "rel {rel} must not use the join table, got:\n{sql}"
+            );
+        }
     }
 
     fn compile_sql_scoped(nodes: &str, rels: &str, group: &str, agg: &str) -> String {

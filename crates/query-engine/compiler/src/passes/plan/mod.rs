@@ -13,7 +13,8 @@ use crate::error::{QueryError, Result};
 use crate::input::*;
 
 pub use edge_chain::{
-    FkShape, Hop, HopFk, HydrationStrategy, JoinColumns, NodePlan, Selectivity, Strategy,
+    FkShape, Hop, HopFk, HydrationStrategy, JoinColumns, MATERIALIZED_ALIAS, NodePlan, Selectivity,
+    Strategy,
 };
 pub use hydration::HydrationNodePlan;
 

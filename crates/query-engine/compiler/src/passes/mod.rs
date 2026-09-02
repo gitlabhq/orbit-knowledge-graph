@@ -11,6 +11,7 @@ pub mod lower;
 pub mod normalize;
 pub mod partition;
 pub mod plan;
+pub mod rebind;
 pub mod restrict;
 pub mod security;
 pub mod settings;

@@ -17,6 +17,14 @@ use crate::passes::shared::{
 
 /// Predicates applied after `FINAL` has resolved each node's latest row.
 pub(super) fn latest_node_predicates(alias: &str, np: &NodePlan) -> Vec<Expr> {
+    let mut predicates = node_filter_predicates(alias, np);
+    predicates.push(deleted_false(alias));
+    predicates
+}
+
+/// The node's own selectivity (property filters, pinned ids, id range) with
+/// no liveness predicate; callers add `_deleted` for whichever row carries it.
+pub(super) fn node_filter_predicates(alias: &str, np: &NodePlan) -> Vec<Expr> {
     let mut predicates = Vec::new();
     for (prop, filter) in &np.filters {
         predicates.push(filter_to_expr(alias, prop, filter));
@@ -27,7 +35,6 @@ pub(super) fn latest_node_predicates(alias: &str, np: &NodePlan) -> Vec<Expr> {
     if let Some(ref range) = np.id_range {
         predicates.push(id_range_predicate(alias, range));
     }
-    predicates.push(deleted_false(alias));
     predicates
 }
 

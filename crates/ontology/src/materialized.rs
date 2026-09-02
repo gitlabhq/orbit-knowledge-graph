@@ -88,7 +88,11 @@ pub struct MaterializedJoinTable {
 }
 
 impl MaterializedJoinTable {
-    pub(crate) fn build(edge: &EdgeEntity, source: &NodeEntity, target: &NodeEntity) -> Option<Self> {
+    pub(crate) fn build(
+        edge: &EdgeEntity,
+        source: &NodeEntity,
+        target: &NodeEntity,
+    ) -> Option<Self> {
         let table = edge.materialized_table.clone()?;
         let anchor = if source.global && !target.global {
             Side::Target
@@ -107,14 +111,6 @@ impl MaterializedJoinTable {
             source_columns: copyable_columns(source),
             target_columns: copyable_columns(target),
         })
-    }
-
-    #[must_use]
-    pub fn columns_for(&self, side: Side) -> &[StorageColumn] {
-        match side {
-            Side::Source => &self.source_columns,
-            Side::Target => &self.target_columns,
-        }
     }
 
     /// `(traversal_path, {anchor}_id, {other}_id)`

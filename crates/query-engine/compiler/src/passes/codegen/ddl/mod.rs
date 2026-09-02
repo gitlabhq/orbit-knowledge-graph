@@ -918,12 +918,56 @@ mod tests {
     }
 
     #[test]
-    fn generates_no_materialized_views_by_default() {
-        let views = generate_graph_materialized_views(&ontology());
+    fn materialized_join_table_emits_table_and_three_feeding_views() {
+        let ontology = ontology();
+        let table = "gl_mat_reviewer__user__merge_request";
+
+        let tables = generate_graph_tables(&ontology);
+        let mat = tables
+            .iter()
+            .find(|t| t.name == table)
+            .expect("materialized join table should be generated");
+        assert_eq!(mat.order_by, ["traversal_path", "tgt_id", "src_id"]);
+        let names: Vec<&str> = mat.columns.iter().map(|c| c.name.as_str()).collect();
+        assert!(names.contains(&"src_username") && names.contains(&"tgt_title"));
+        assert_eq!(names.iter().filter(|n| **n == "traversal_path").count(), 1);
+
+        let views = generate_graph_materialized_views(&ontology);
+        let feeding: Vec<&CreateMaterializedView> = views
+            .iter()
+            .filter(|v| v.to_table.as_deref() == Some(table))
+            .collect();
+        assert_eq!(feeding.len(), 3);
+        // Only the triggering table is read as the inserted block; the other
+        // two must resolve their current row with FINAL.
+        let on_edge = feeding
+            .iter()
+            .find(|v| v.name.ends_with("__on_edge"))
+            .unwrap();
         assert!(
-            views.is_empty(),
-            "default ontology should have no materialized views"
+            on_edge
+                .select_query
+                .contains("FROM gl_edge AS e INNER JOIN")
         );
+        assert!(on_edge.select_query.contains("gl_user AS s FINAL"));
+        assert!(on_edge.select_query.contains("gl_merge_request AS t FINAL"));
+        assert!(!on_edge.select_query.contains("AS e FINAL"));
+    }
+
+    #[test]
+    fn materialized_join_table_and_views_share_the_version_prefix() {
+        let ontology = ontology();
+        let views = generate_graph_materialized_views_with_prefix(&ontology, "v7_");
+        let on_source = views
+            .iter()
+            .find(|v| v.name == "v7_gl_mat_reviewer__user__merge_request__on_source")
+            .expect("prefixed feeding view");
+        assert_eq!(
+            on_source.to_table.as_deref(),
+            Some("v7_gl_mat_reviewer__user__merge_request")
+        );
+        assert!(on_source.select_query.contains("FROM v7_gl_user AS s"));
+        assert!(on_source.select_query.contains("v7_gl_edge AS e FINAL"));
     }
 
     #[test]

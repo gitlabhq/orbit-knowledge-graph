@@ -16,6 +16,13 @@
 # note-gated `scope: none` entry, the certified output-neutral escape hatch. A
 # version with no entry is treated as "*", which also makes pruning old entries safe.
 migrations:
+- version: 94
+  scope: "*"
+  note: >-
+    REVIEWER User->MergeRequest opts into a materialized join table
+    (gl_mat_reviewer__user__merge_request) fed by TO materialized views on gl_edge, gl_user, and
+    gl_merge_request; re-deriving the REVIEWER edge backfills the table through the edge
+    view.
 - version: 93
   scope: "*"
   note: >-

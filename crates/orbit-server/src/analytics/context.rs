@@ -608,6 +608,7 @@ mod tests {
                     direction: Direction::Outgoing,
                     filters: Default::default(),
                     fk_column: None,
+                    materialized: None,
                     scope_prefix: None,
                     scope_preserving: false,
                 }],

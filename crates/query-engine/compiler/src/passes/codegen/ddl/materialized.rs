@@ -85,10 +85,8 @@ impl Trigger {
     }
 }
 
-/// `INSERT ... SELECT` body used both for the views and for the one-time
-/// backfill. The triggering table is scanned as-is (a view only sees the
-/// inserted block); the other two are read with `FINAL` for their current
-/// state.
+/// The triggering table is scanned as-is (a view only sees the inserted
+/// block); the other two are read with `FINAL` for their current state.
 fn select_for(mat: &MaterializedJoinTable, trigger: Trigger) -> String {
     let final_unless = |t: Trigger| if trigger == t { "" } else { " FINAL" };
 
@@ -118,21 +116,29 @@ fn select_for(mat: &MaterializedJoinTable, trigger: Trigger) -> String {
         mat.relationship_kind, mat.source_kind, mat.target_kind
     );
     let e = format!("{{{}}} AS e{}", mat.edge_table, final_unless(Trigger::Edge));
-    let s = format!("{{{}}} AS s{}", mat.source_table, final_unless(Trigger::Source));
-    let t = format!("{{{}}} AS t{}", mat.target_table, final_unless(Trigger::Target));
+    let s = format!(
+        "{{{}}} AS s{}",
+        mat.source_table,
+        final_unless(Trigger::Source)
+    );
+    let t = format!(
+        "{{{}}} AS t{}",
+        mat.target_table,
+        final_unless(Trigger::Target)
+    );
     let on_s = format!("e.{SOURCE_ID_COLUMN} = s.id");
     let on_t = format!("e.{TARGET_ID_COLUMN} = t.id");
 
     let from = match trigger {
-        Trigger::Edge => format!(
-            "FROM {e} INNER JOIN {s} ON {on_s} INNER JOIN {t} ON {on_t} WHERE {edge_pred}"
-        ),
-        Trigger::Source => format!(
-            "FROM {s} INNER JOIN {e} ON {on_s} AND {edge_pred} INNER JOIN {t} ON {on_t}"
-        ),
-        Trigger::Target => format!(
-            "FROM {t} INNER JOIN {e} ON {on_t} AND {edge_pred} INNER JOIN {s} ON {on_s}"
-        ),
+        Trigger::Edge => {
+            format!("FROM {e} INNER JOIN {s} ON {on_s} INNER JOIN {t} ON {on_t} WHERE {edge_pred}")
+        }
+        Trigger::Source => {
+            format!("FROM {s} INNER JOIN {e} ON {on_s} AND {edge_pred} INNER JOIN {t} ON {on_t}")
+        }
+        Trigger::Target => {
+            format!("FROM {t} INNER JOIN {e} ON {on_t} AND {edge_pred} INNER JOIN {s} ON {on_s}")
+        }
     };
 
     format!("SELECT {} {from}", cols.join(", "))
