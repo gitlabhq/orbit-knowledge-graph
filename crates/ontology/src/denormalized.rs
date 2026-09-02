@@ -42,6 +42,19 @@ pub fn copies(column: &str) -> bool {
     !matches!(column, VERSION_COLUMN | DELETED_COLUMN)
 }
 
+/// The denormalized column holding `column` of table `i` in a chain whose
+/// anchor is table `anchor`. Row-level system columns are unprefixed, as is
+/// the anchor's `traversal_path`; everything else carries the table prefix.
+#[must_use]
+pub fn column_for(anchor: usize, i: usize, column: &str) -> String {
+    let anchored = column == TRAVERSAL_PATH_COLUMN && i == anchor;
+    if copies(column) && !anchored {
+        format!("{}{column}", prefix(i))
+    } else {
+        column.to_string()
+    }
+}
+
 /// How table `i` joins onto table `i - 1`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JoinOn {
@@ -95,17 +108,10 @@ impl DenormalizedJoin {
             .expect("the loader requires a scoped table")
     }
 
-    /// The denormalized column holding `column` of table `i`. Row-level system
-    /// columns are unprefixed, as is the anchor table's `traversal_path`;
-    /// everything else carries the table prefix.
+    /// See [`column_for`].
     #[must_use]
     pub fn column_for(&self, i: usize, column: &str) -> String {
-        let anchored = column == TRAVERSAL_PATH_COLUMN && i == self.anchor_table();
-        if copies(column) && !anchored {
-            format!("{}{column}", prefix(i))
-        } else {
-            column.to_string()
-        }
+        column_for(self.anchor_table(), i, column)
     }
 
     /// Every `traversal_path` column in the row, one per scoped table, with
