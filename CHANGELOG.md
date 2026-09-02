@@ -1,3 +1,16 @@
+## [0.111.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.110.1...v0.111.0) (2026-09-02)
+
+### Features
+
+* **bench:** query corpus runner for bench clusters ([910662e](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/910662ef007cd47a88fb1c5ee438c4c5469ca97e)) by Michael Usachenko
+* **cli:** glab-aware setup commands and ask confidence calibration ([6428d11](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/6428d11460634c2693810fc913bf46ee32cbf1be)) by Aaron Algutifan
+* **dashboards:** annotate deploys with the released version ([ab9957d](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/ab9957dae58e6e6675eecff2830079edbdb738cf)) by Bohdan Parkhomchuk
+
+### Fixes
+
+* **code-graph:** sweep rust-analyzer type interners between indexing jobs ([7ab1650](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/7ab16502e7d97525692669881b7560e86c1df22d)) by Bohdan Parkhomchuk
+* **dashboards:** group deploy annotations per cluster ([ab95119](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/ab9511999db9fab17934fc6eade81631580607b4)) by Bohdan Parkhomchuk
+
 ## [0.110.1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.110.0...v0.110.1) (2026-09-01)
 
 ### Performance
