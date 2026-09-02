@@ -1,16 +1,16 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use ontology::constants::*;
-use ontology::denormalized::Side;
 
 use crate::ast::*;
 use crate::error::{QueryError, Result};
 
 use super::EmitOutput;
 use super::helpers::{
-    NarrowSource, build_multi_hop_union, dedup_edge_scan, emit_denorm_tags, emit_filter_narrowing,
-    emit_filter_subquery, emit_node_ids_on_edge, emit_node_join_with_narrowing, limit_by_scan,
-    node_id_pin_predicates, node_select_columns, push_edge_predicates,
+    NarrowSource, build_multi_hop_union, dedup_edge_scan, denormalized_node_predicates,
+    edge_scope_predicate, emit_denorm_tags, emit_filter_narrowing, emit_filter_subquery,
+    emit_node_ids_on_edge, emit_node_join_with_narrowing, limit_by_scan, node_id_pin_predicates,
+    node_select_columns, push_edge_predicates,
 };
 use crate::passes::plan::*;
 use crate::passes::shared::filter_to_expr;
@@ -113,47 +113,6 @@ fn build_cascade_anchor(plan: &Plan, i: usize, ctes: &[Cte]) -> Option<Query> {
         from: TableRef::scan(&prev_hop.edge_table, &prev_alias_inner),
         where_clause: Expr::conjoin(prev_preds),
         ..Default::default()
-    })
-}
-
-/// Node property filters for a denormalized hop, read from the row's typed
-/// node columns under `alias`. Replaces the edge tag lookups a plain edge
-/// scan would use, since the join table carries the columns themselves.
-fn denormalized_node_predicates(
-    alias: &str,
-    hop: &Hop,
-    nodes: &HashMap<String, NodePlan>,
-) -> Vec<Expr> {
-    let Some(denorm) = &hop.denormalized else {
-        return vec![];
-    };
-    [
-        (&denorm.source_node, Side::Source),
-        (&denorm.target_node, Side::Target),
-    ]
-    .into_iter()
-    .filter_map(|(node_alias, side)| nodes.get(node_alias).map(|np| (np, side)))
-    .flat_map(|(np, side)| {
-        np.filters
-            .iter()
-            .map(move |(prop, filter)| filter_to_expr(alias, &side.column_for(prop), filter))
-    })
-    .collect()
-}
-
-/// `startsWith(<alias>.traversal_path, '<prefix>')` for a hop confined to a
-/// project/group scope, or `None` when the hop carries no resolved prefix.
-/// Emitted alongside the broad authorization filter so ClickHouse can seek the
-/// edge PK to the project's contiguous range instead of the whole org.
-fn edge_scope_predicate(hop: &Hop, alias: &str) -> Option<Expr> {
-    hop.scope_prefix.as_ref().map(|prefix| {
-        Expr::func(
-            "startsWith",
-            vec![
-                Expr::col(alias, TRAVERSAL_PATH_COLUMN),
-                Expr::string(prefix.as_str()),
-            ],
-        )
     })
 }
 

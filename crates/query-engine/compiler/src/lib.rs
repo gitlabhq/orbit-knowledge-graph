@@ -1796,11 +1796,11 @@ mod tests {
                 {"id": "u", "entity": "User", "columns": ["username"], "node_ids": [7]},
                 {"id": "mr", "entity": "MergeRequest", "columns": ["title"],
                  "filters": {"state": {"eq": "merged"}}},
-                {"id": "p", "entity": "Project", "columns": ["name"]}
+                {"id": "l", "entity": "Label", "columns": ["title"]}
             ],
             "relationships": [
                 {"type": "REVIEWER", "from": "u", "to": "mr"},
-                {"type": "IN_PROJECT", "from": "mr", "to": "p"}
+                {"type": "HAS_LABEL", "from": "mr", "to": "l"}
             ],
             "limit": 10
         }"#;
@@ -1820,6 +1820,47 @@ mod tests {
         assert!(
             !sql.contains("e0p.target_tags") && !sql.contains("e0.target_tags"),
             "the join table has no tag columns, got:\n{sql}"
+        );
+    }
+
+    #[test]
+    fn denormalized_hop_roots_an_fk_chain_and_is_rotated_first() {
+        // TRIGGERED is listed first so the planner must rotate the chain and
+        // keep e0/e1 paired with the rotated relationships.
+        let query = r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "pl", "entity": "Pipeline", "columns": ["status"], "filters": {"status": "failed"}},
+                {"id": "mr", "entity": "MergeRequest", "columns": ["title"]},
+                {"id": "u", "entity": "User", "columns": ["username"], "node_ids": [7]}
+            ],
+            "relationships": [
+                {"type": "TRIGGERED", "from": "mr", "to": "pl"},
+                {"type": "REVIEWER", "from": "u", "to": "mr"}
+            ],
+            "limit": 10
+        }"#;
+
+        let sql = compile_sql(query);
+
+        for fragment in [
+            &format!("FROM (SELECT * FROM {DENORM_REVIEWER} AS e0 FINAL"),
+            "e0.source_id = 7",
+            "INNER JOIN (SELECT * FROM gl_pipeline AS pl FINAL",
+            "ON (pl.merge_request_id = e0.target_id)",
+            "e0.relationship_kind AS e0_type",
+            "'TRIGGERED' AS e1_type",
+            "e0.target_id AS e1_src",
+            "pl.id AS e1_dst",
+            "e0.tgt_title AS mr_title",
+        ] {
+            assert!(sql.contains(fragment), "expected `{fragment}`, got:\n{sql}");
+        }
+        assert!(
+            !sql.contains("gl_ci_edge")
+                && !sql.contains("gl_merge_request AS")
+                && !sql.contains("gl_user AS"),
+            "the FK hop joins the node table and the denormalized hop replaces both node scans, got:\n{sql}"
         );
     }
 

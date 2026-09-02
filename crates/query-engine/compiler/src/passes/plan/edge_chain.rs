@@ -177,6 +177,9 @@ pub fn plan(input: &mut Input) -> Plan {
     let strategy = if hops.is_empty() {
         Strategy::SingleNode
     } else if let Some(shape) = detect_fk(&hops, &nodes) {
+        if matches!(shape, FkShape::Chain) {
+            rotate_denormalized_first(&mut hops, input);
+        }
         Strategy::Fk(shape)
     } else {
         Strategy::Flat
@@ -526,6 +529,10 @@ fn detect_fk_star(hops: &[Hop]) -> Option<String> {
 /// FK-backed, single fixed-length, edge-filter-free, not `Both`, and either
 /// scope-preserving or reaching a global hub; gated out of point-selective endpoints
 /// and non-emittable shapes. The chain must keep one scoped node (the authz anchor).
+///
+/// One hop may instead be denormalized: its join table scan reaches both of its
+/// endpoints at once and becomes the chain root, so the FK hops join onto it.
+/// Pinned endpoints are fine there, since the scan seeks them on its own keys.
 fn detect_fk_chain(hops: &[Hop], nodes: &HashMap<String, NodePlan>) -> bool {
     let point_selective = |alias: &str| {
         nodes
@@ -546,24 +553,47 @@ fn detect_fk_chain(hops: &[Hop], nodes: &HashMap<String, NodePlan>) -> bool {
                 .any(|a| nodes.get(*a).is_some_and(|np| np.has_traversal_path))
         })
     };
+    let fk_hop_ok = |h: &Hop| {
+        h.fk.is_some()
+            && (h.scope_preserving || reaches_global_hub(h))
+            && h.filters.is_empty()
+            && !point_selective(&h.from_node)
+            && !point_selective(&h.to_node)
+    };
+    let denormalized_hops = hops.iter().filter(|h| h.denormalized.is_some()).count();
+    let emittable = || {
+        let mut ordered: Vec<&Hop> = hops.iter().collect();
+        if let Some(k) = ordered.iter().position(|h| h.denormalized.is_some()) {
+            ordered[..=k].rotate_right(1);
+        }
+        is_emittable_fk_chain_of(&ordered)
+    };
     hops.len() >= 2
         && has_scope_anchor()
+        && denormalized_hops <= 1
+        && hops.iter().any(|h| h.fk.is_some())
         && hops.iter().all(|h| {
-            h.fk.is_some()
-                && (h.scope_preserving || reaches_global_hub(h))
-                && h.max_hops == 1
-                && h.filters.is_empty()
+            h.max_hops == 1
                 && !matches!(h.direction, Direction::Both)
-                && !point_selective(&h.from_node)
-                && !point_selective(&h.to_node)
+                && (h.denormalized.is_some() || fk_hop_ok(h))
         })
-        && is_emittable_fk_chain(hops)
+        && emittable()
+}
+
+/// Move the chain's denormalized hop (if any) to the front so `emit_chain`
+/// roots on its scan. `input.relationships` moves with it because the
+/// formatter pairs `e{i}` output columns with relationship `i`.
+fn rotate_denormalized_first(hops: &mut [Hop], input: &mut Input) {
+    if let Some(k) = hops.iter().position(|h| h.denormalized.is_some()) {
+        hops[..=k].rotate_right(1);
+        input.relationships[..=k].rotate_right(1);
+    }
 }
 
 /// `emit_chain` joins each hop's not-yet-reached endpoint onto the running FROM,
 /// so every hop after the first must attach via exactly one already-reached node
 /// (accepts branching trees and either hop orientation; rejects disconnected hops).
-fn is_emittable_fk_chain(hops: &[Hop]) -> bool {
+fn is_emittable_fk_chain_of(hops: &[&Hop]) -> bool {
     let Some(first) = hops.first() else {
         return false;
     };
@@ -753,12 +783,18 @@ fn compute_node_edge_mappings(
             }
         }
         Strategy::Fk(FkShape::Chain) => {
-            // Each node is joined as its own table, so it maps to its own PK.
-            for hop in hops {
-                for node in [&hop.from_node, &hop.to_node] {
-                    mappings
-                        .entry(node.clone())
-                        .or_insert_with(|| (node.clone(), DEFAULT_PRIMARY_KEY.to_string()));
+            // Each node is joined as its own table, so it maps to its own PK,
+            // except the endpoints of a denormalized hop, which live in its scan.
+            for (i, hop) in hops.iter().enumerate() {
+                let (start_col, end_col) = hop.direction.edge_columns();
+                for (node, id_col) in [(&hop.from_node, start_col), (&hop.to_node, end_col)] {
+                    if hop.denormalized.is_some() {
+                        mappings.insert(node.clone(), (format!("e{i}"), id_col.to_string()));
+                    } else {
+                        mappings
+                            .entry(node.clone())
+                            .or_insert_with(|| (node.clone(), DEFAULT_PRIMARY_KEY.to_string()));
+                    }
                 }
             }
         }
