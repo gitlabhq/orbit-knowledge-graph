@@ -188,6 +188,19 @@ mod tests {
     }
 
     #[test]
+    fn hyphenated_whole_name_anchors() {
+        let g = TestGraph::new("ask-hyphen");
+        g.def(1, "mr-title-check", "mr-title-check", ".gitlab-ci.yml");
+        g.def(2, "Mr::title", "title", "app/mr.rb");
+
+        let search = g.search();
+        let vocab = vocab(&search);
+        let outcome = search.ask("mr-title-check", 5, &vocab, &weights()).unwrap();
+        assert_eq!(outcome.matches[0].row.fqn, "mr-title-check");
+        assert!(!outcome.weak);
+    }
+
+    #[test]
     fn fts_stopword_identifiers_are_findable() {
         let g = TestGraph::new("ask-stopword");
         g.def(

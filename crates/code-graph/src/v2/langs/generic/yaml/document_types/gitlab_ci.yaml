@@ -1,10 +1,21 @@
-# GitLab CI configuration: `include:` statements become imports.
-# Columns: path = source (project path, component spec, template name,
-# local path, or URL), name = file within a project include, alias =
-# pinned ref or component version.
+# GitLab CI configuration. Root entries are either global keywords or
+# author-named jobs (hidden `.template` jobs included); global variables
+# and stages are named children; `include:` statements become imports.
+# Import columns: path = source (project path, component spec, template
+# name, local path, or URL), name = file within a project include,
+# alias = pinned ref or component version.
 name: gitlab_ci
 match:
   filename_suffixes: [".gitlab-ci.yml", ".gitlab-ci.yaml"]
+keywords: [default, include, stages, variables, workflow, spec,
+           image, services, cache, before_script, after_script, types]
+definitions:
+  - type: CiVariable
+    children_of: variables
+  - type: CiStage
+    items_of: stages
+  - type: CiJob
+    root_keys: true
 imports:
   - key: include
     also_under: [trigger]

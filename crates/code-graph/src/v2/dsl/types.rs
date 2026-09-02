@@ -734,6 +734,13 @@ pub type ScopeHookFn = fn(
     &[std::sync::Arc<str>],
     &'static str,
 ) -> bool;
+pub type PathScopeHookFn = fn(
+    &N<'_>,
+    &str,
+    &mut Vec<crate::v2::types::CanonicalDefinition>,
+    &[std::sync::Arc<str>],
+    &'static str,
+) -> bool;
 pub type ImportScopeNameHook = fn(&crate::v2::types::CanonicalImport, &str) -> Option<String>;
 pub type ImportTargetPathHook = fn(&crate::v2::types::CanonicalImport, &str) -> Option<String>;
 
@@ -744,6 +751,9 @@ pub struct LanguageHooks {
     pub module_scope: Option<fn(&str, &str) -> Option<String>>,
     /// Inject extra definitions after scope matching (e.g. Ruby attr_reader).
     pub on_scope: Option<ScopeHookFn>,
+    /// Path-aware variant of `on_scope` for definition extraction that
+    /// dispatches on filename (e.g. YAML document types). Takes precedence when set.
+    pub on_scope_with_path: Option<PathScopeHookFn>,
     /// Override import extraction (e.g. Ruby require/require_relative).
     pub on_import: Option<fn(&N<'_>, &mut Vec<crate::v2::types::CanonicalImport>) -> bool>,
     /// Path-aware variant of `on_import` for extraction that dispatches

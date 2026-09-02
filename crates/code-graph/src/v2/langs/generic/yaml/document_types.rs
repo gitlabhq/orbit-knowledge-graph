@@ -1,5 +1,6 @@
 //! Each YAML config in `document_types/` declares how a named
-//! document type matches files and which keys become imports.
+//! document type matches files, which shapes become definitions, and
+//! which keys become imports.
 
 use std::sync::LazyLock;
 
@@ -7,7 +8,9 @@ use rust_embed::Embed;
 use serde::Deserialize;
 
 use super::{N, PAIR_KINDS, child_mapping, child_sequence, item_scalar, pair_key, scalar_text};
-use crate::v2::types::{CanonicalImport, ImportBindingKind, ImportMode};
+use crate::v2::types::{
+    CanonicalDefinition, CanonicalImport, DefKind, Fqn, ImportBindingKind, ImportMode,
+};
 use treesitter_visit::Axis::*;
 use treesitter_visit::Match::*;
 
@@ -21,7 +24,31 @@ struct DocumentType {
     name: String,
     #[serde(rename = "match")]
     matcher: Matcher,
+    #[serde(default)]
+    keywords: Vec<String>,
+    #[serde(default)]
+    definitions: Vec<DefinitionRule>,
+    #[serde(default)]
     imports: Vec<KeyRule>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DefinitionRule {
+    #[serde(rename = "type")]
+    definition_type: String,
+    #[serde(flatten)]
+    shape: Shape,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum Shape {
+    ChildrenOf(String),
+    ItemsOf(String),
+    RootKeys(bool),
+    ValueOf(String),
+    AllKeys(bool),
 }
 
 #[derive(Deserialize)]
@@ -29,6 +56,8 @@ struct DocumentType {
 struct Matcher {
     #[serde(default)]
     filename_suffixes: Vec<String>,
+    #[serde(default)]
+    filename_prefixes: Vec<String>,
     #[serde(default)]
     document_keys: std::collections::BTreeMap<String, KeyCondition>,
 }
@@ -51,8 +80,12 @@ impl KeyCondition {
     }
 }
 
+fn filename(file_path: &str) -> &str {
+    file_path.rsplit('/').next().unwrap_or(file_path)
+}
+
 fn filename_matches(file_path: &str, suffix: &str) -> bool {
-    let filename = file_path.rsplit('/').next().unwrap_or(file_path);
+    let filename = filename(file_path);
     filename == suffix || (suffix.starts_with('.') && filename.ends_with(suffix))
 }
 
@@ -62,6 +95,10 @@ impl Matcher {
             .filename_suffixes
             .iter()
             .any(|suffix| filename_matches(file_path, suffix))
+            || self
+                .filename_prefixes
+                .iter()
+                .any(|prefix| filename(file_path).starts_with(prefix.as_str()))
         {
             return true;
         }
@@ -236,15 +273,185 @@ fn emit_mapping(rule: &'static KeyRule, mapping: &N<'_>, imports: &mut Vec<Canon
     }
 }
 
-fn key_applies(rule: &KeyRule, node: &N<'_>) -> bool {
+fn enclosing_pair<'a>(node: &N<'a>) -> Option<N<'a>> {
     let mut current = node.parent();
     while let Some(parent) = current {
         if PAIR_KINDS.contains(&parent.kind().as_ref()) {
-            return pair_key(&parent).is_some_and(|key| rule.also_under.contains(&key));
+            return Some(parent);
         }
         current = parent.parent();
     }
-    true
+    None
+}
+
+fn key_applies(rule: &KeyRule, node: &N<'_>) -> bool {
+    match enclosing_pair(node) {
+        Some(parent) => pair_key(&parent).is_some_and(|key| rule.also_under.contains(&key)),
+        None => true,
+    }
+}
+
+fn push_definition(
+    defs: &mut Vec<CanonicalDefinition>,
+    rule: &'static DefinitionRule,
+    parts: &[&str],
+    node: &N<'_>,
+    sep: &'static str,
+) {
+    defs.push(CanonicalDefinition {
+        definition_type: rule.definition_type.as_str(),
+        kind: DefKind::Other,
+        name: parts[parts.len() - 1].to_string(),
+        fqn: Fqn::from_parts(parts, sep),
+        range: node_range(node),
+        is_top_level: parts.len() == 1,
+        metadata: None,
+    });
+}
+
+fn emit_shape(
+    doc_type: &'static DocumentType,
+    rule: &'static DefinitionRule,
+    key: &str,
+    pair: &N<'_>,
+    defs: &mut Vec<CanonicalDefinition>,
+    sep: &'static str,
+) -> bool {
+    match &rule.shape {
+        Shape::RootKeys(enabled) => {
+            if !enabled || doc_type.keywords.iter().any(|k| k == key) {
+                return false;
+            }
+            push_definition(defs, rule, &[key], pair, sep);
+            true
+        }
+        Shape::ChildrenOf(parent) => {
+            if parent != key {
+                return false;
+            }
+            let Some(mapping) = pair.field("value").as_ref().and_then(child_mapping) else {
+                return true;
+            };
+            for child in mapping
+                .children()
+                .filter(|c| PAIR_KINDS.contains(&c.kind().as_ref()))
+            {
+                if let Some(name) = pair_key(&child) {
+                    push_definition(defs, rule, &[key, &name], &child, sep);
+                }
+            }
+            true
+        }
+        Shape::ItemsOf(parent) => {
+            if parent != key {
+                return false;
+            }
+            let Some(sequence) = pair.field("value").as_ref().and_then(child_sequence) else {
+                return true;
+            };
+            for item in sequence.children() {
+                if let Some(name) = item_scalar(&item) {
+                    push_definition(defs, rule, &[key, &name], &item, sep);
+                }
+            }
+            true
+        }
+        Shape::ValueOf(path) => {
+            let mut segments = path.split('.');
+            if segments.next() != Some(key) {
+                return false;
+            }
+            let mut current = pair.clone();
+            for segment in segments {
+                let Some(next) = current
+                    .field("value")
+                    .as_ref()
+                    .and_then(child_mapping)
+                    .and_then(|mapping| {
+                        mapping
+                            .children()
+                            .filter(|c| PAIR_KINDS.contains(&c.kind().as_ref()))
+                            .find(|c| pair_key(c).as_deref() == Some(segment))
+                    })
+                else {
+                    return true;
+                };
+                current = next;
+            }
+            if let Some(name) = current.field("value").as_ref().and_then(scalar_text) {
+                let document = pair.find(Ancestor, Kind("document"));
+                push_definition(defs, rule, &[&name], document.as_ref().unwrap_or(pair), sep);
+            }
+            true
+        }
+        Shape::AllKeys(enabled) => {
+            if !enabled {
+                return false;
+            }
+            emit_key_tree(rule, pair, &mut vec![key.to_string()], defs, sep);
+            true
+        }
+    }
+}
+
+fn emit_key_tree(
+    rule: &'static DefinitionRule,
+    pair: &N<'_>,
+    path: &mut Vec<String>,
+    defs: &mut Vec<CanonicalDefinition>,
+    sep: &'static str,
+) {
+    let parts: Vec<&str> = path.iter().map(String::as_str).collect();
+    push_definition(defs, rule, &parts, pair, sep);
+    let Some(value) = pair.field("value") else {
+        return;
+    };
+    let nested: Vec<N<'_>> = if let Some(mapping) = child_mapping(&value) {
+        mapping.children().collect()
+    } else if let Some(sequence) = child_sequence(&value) {
+        sequence
+            .children()
+            .filter_map(|item| child_mapping(&item))
+            .flat_map(|mapping| mapping.children().collect::<Vec<_>>())
+            .collect()
+    } else {
+        return;
+    };
+    for child in nested
+        .iter()
+        .filter(|c| PAIR_KINDS.contains(&c.kind().as_ref()))
+    {
+        if let Some(name) = pair_key(child) {
+            path.push(name);
+            emit_key_tree(rule, child, path, defs, sep);
+            path.pop();
+        }
+    }
+}
+
+pub(super) fn extract_definitions(
+    node: &N<'_>,
+    file_path: &str,
+    defs: &mut Vec<CanonicalDefinition>,
+    _scope_stack: &[std::sync::Arc<str>],
+    sep: &'static str,
+) -> bool {
+    if !PAIR_KINDS.contains(&node.kind().as_ref()) || enclosing_pair(node).is_some() {
+        return false;
+    }
+    let Some(key) = pair_key(node) else {
+        return false;
+    };
+    let document_types: &'static [DocumentType] = &DOCUMENT_TYPES;
+    document_types.iter().any(|doc_type| {
+        !doc_type.definitions.is_empty()
+            && doc_type.matcher.matches(node, file_path)
+            && doc_type
+                .definitions
+                .iter()
+                .any(|rule| emit_shape(doc_type, rule, &key, node, defs, sep))
+    });
+    false
 }
 
 fn extract_with_rule(
@@ -347,9 +554,29 @@ mod tests {
     }
 
     #[test]
+    fn schema_accepts_each_definition_shape() {
+        for shape in [
+            "children_of: variables",
+            "items_of: stages",
+            "root_keys: true",
+        ] {
+            let errors = schema_errors(&format!(
+                "name: x\nmatch:\n  filename_suffixes: [x.yaml]\ndefinitions:\n  - type: Thing\n    {shape}\n"
+            ));
+            assert!(errors.is_empty(), "{shape}: {errors:?}");
+        }
+    }
+
+    #[test]
     fn schema_rejects_invalid_configs() {
         for config in [
             "name: x\nmatch: {}\nimports:\n  - key: include\n    scalar_type: CiLocalInclude\n",
+            "name: x\nmatch:\n  filename_suffixes: [x.yaml]\n",
+            "name: x\nmatch:\n  filename_suffixes: [x.yaml]\ndefinitions:\n  - children_of: a\n",
+            "name: x\nmatch:\n  filename_suffixes: [x.yaml]\ndefinitions:\n  - type: Thing\n",
+            "name: x\nmatch:\n  filename_suffixes: [x.yaml]\ndefinitions:\n  - type: Thing\n    children_of: a\n    items_of: b\n",
+            "name: x\nmatch:\n  filename_suffixes: [x.yaml]\ndefinitions:\n  - type: Thing\n    root_keys: [a]\n",
+            "name: x\nmatch:\n  filename_suffixes: [x.yaml]\nkeywords: []\ndefinitions:\n  - type: Thing\n    root_keys: true\n",
             "name: x\nmatch:\n  filename_suffixes: [x.yaml]\nimports:\n  - key: include\n",
             "name: x\nmatch:\n  filename_suffixes: [x.yaml]\nimports:\n  - key: include\n    scalar_type: CiLocalInclude\n    typo_key: true\n",
         ] {
@@ -463,6 +690,107 @@ mod tests {
     fn nested_ci_config_filename_is_recognized() {
         let result = parse_at("ci/child.gitlab-ci.yml", "include: 'x.yml'\n");
         assert_eq!(result.imports.len(), 1, "{:?}", result.imports);
+    }
+
+    #[test]
+    fn argo_application_name_is_a_definition_spanning_the_document() {
+        let result = parse_at(
+            "apps/gkg.yaml",
+            "apiVersion: argoproj.io/v1alpha1\nkind: Application\nmetadata:\n  name: gkg\n  namespace: argocd\nspec:\n  source:\n    repoURL: https://example.com/x.git\n",
+        );
+        let apps: Vec<_> = result
+            .definitions
+            .iter()
+            .filter(|d| d.definition_type == "ArgoCdApplication")
+            .collect();
+        assert_eq!(apps.len(), 1, "{:?}", result.definitions);
+        assert_eq!(apps[0].fqn.as_str(), "gkg");
+        assert_eq!(apps[0].range.start.line, 0);
+        assert!(apps[0].range.end.line >= 7, "{:?}", apps[0].range);
+    }
+
+    #[test]
+    fn helm_chart_name_is_a_definition() {
+        let result = parse_at("Chart.yaml", "apiVersion: v2\nname: gkg\nversion: 0.1.0\n");
+        let names: Vec<(&str, &str)> = result
+            .definitions
+            .iter()
+            .map(|d| (d.definition_type, d.fqn.as_str()))
+            .collect();
+        assert_eq!(names, vec![("HelmChart", "gkg")]);
+    }
+
+    #[test]
+    fn helm_values_index_every_nested_key() {
+        for path in ["chart/values.yaml", "env/prd/values-vault-secrets.yaml"] {
+            let result = parse_at(
+                path,
+                "image:\n  repository: registry/gkg\n  tag: \"1.0\"\nindexer:\n  resources:\n    limits:\n      memory: 2Gi\n  env:\n    - name: RUST_LOG\n      value: info\n",
+            );
+            let fqns: Vec<&str> = result.definitions.iter().map(|d| d.fqn.as_str()).collect();
+            assert_eq!(
+                fqns,
+                vec![
+                    "image",
+                    "image.repository",
+                    "image.tag",
+                    "indexer",
+                    "indexer.resources",
+                    "indexer.resources.limits",
+                    "indexer.resources.limits.memory",
+                    "indexer.env",
+                    "indexer.env.name",
+                    "indexer.env.value",
+                ],
+                "{path}"
+            );
+            assert!(
+                result
+                    .definitions
+                    .iter()
+                    .all(|d| d.definition_type == "HelmValue")
+            );
+            assert!(result.definitions[0].is_top_level);
+            assert!(!result.definitions[1].is_top_level);
+        }
+    }
+
+    #[test]
+    fn compose_services_volumes_and_networks_are_definitions() {
+        for path in [
+            "docker-compose.yml",
+            "compose.yaml",
+            "docker-compose.override.yml",
+        ] {
+            let result = parse_at(
+                path,
+                "services:\n  postgres:\n    image: postgres:16\n  redis:\n    image: redis\nvolumes:\n  pgdata: {}\nnetworks:\n  backend: {}\n",
+            );
+            let defs: Vec<(&str, &str)> = result
+                .definitions
+                .iter()
+                .map(|d| (d.definition_type, d.fqn.as_str()))
+                .collect();
+            assert_eq!(
+                defs,
+                vec![
+                    ("ComposeService", "services.postgres"),
+                    ("ComposeService", "services.redis"),
+                    ("ComposeVolume", "volumes.pgdata"),
+                    ("ComposeNetwork", "networks.backend"),
+                ],
+                "{path}"
+            );
+        }
+    }
+
+    #[test]
+    fn value_of_missing_path_yields_nothing() {
+        let result = parse_at(
+            "app.yaml",
+            "apiVersion: argoproj.io/v1alpha1\nkind: Application\nmetadata:\n  namespace: argocd\n",
+        );
+        assert!(result.definitions.is_empty(), "{:?}", result.definitions);
     }
 
     #[test]

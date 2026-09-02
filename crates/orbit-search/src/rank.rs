@@ -10,15 +10,6 @@ const MAX_PER_FILE: usize = 3;
 pub const ANCHOR_SIM: f64 = 0.999;
 pub const CONFIDENT_COVERAGE: f64 = 0.5;
 pub const LENGTH_NORM_B: f64 = 0.75;
-pub const MAPPING_KEY_PRIOR: f64 = 0.5;
-
-fn kind_prior(kind: &str) -> f64 {
-    if kind == "MappingKey" {
-        MAPPING_KEY_PRIOR
-    } else {
-        1.0
-    }
-}
 
 pub struct Hit {
     pub index: usize,
@@ -85,7 +76,7 @@ fn rank(corpus: &[CorpusRow], sims: &[Vec<f64>], idfs: &[f64], cap: usize) -> Ve
         let coverage = matched_idf / idf_total;
         hits.push(Hit {
             index,
-            score: total * coverage * coverage / length_norm * kind_prior(&corpus[index].kind),
+            score: total * coverage * coverage / length_norm,
             anchored: anchored_idf > 0.0,
             coverage,
         });

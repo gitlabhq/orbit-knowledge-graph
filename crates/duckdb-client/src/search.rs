@@ -313,7 +313,8 @@ hits AS (
   SELECT s.id, s.score,
          list_contains(
            list_transform(string_split_regex(lower(d.name), '[^0-9a-z]+'), t -> stem(t, '{FTS_STEMMER}')),
-           stem(lower(?1), '{FTS_STEMMER}')) AS name_hit
+           stem(lower(?1), '{FTS_STEMMER}'))
+         OR regexp_replace(lower(d.name), '[^0-9a-z]+', ' ', 'g') = regexp_replace(lower(?1), '[^0-9a-z]+', ' ', 'g') AS name_hit
   FROM scored s
   JOIN {doc_table} d ON d.def_id = s.id AND d.commit_sha = {sha}
   WHERE s.score IS NOT NULL

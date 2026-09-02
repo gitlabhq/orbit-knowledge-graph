@@ -1,9 +1,12 @@
-# Helm Chart.yaml: declared chart dependencies become imports.
-# Columns: path = dependency chart name, name = repository URL,
-# alias = pinned version constraint.
+# Helm Chart.yaml: the chart name is a definition and declared chart
+# dependencies become imports. Import columns: path = dependency chart
+# name, name = repository URL, alias = pinned version constraint.
 name: helm_chart
 match:
   filename_suffixes: ["Chart.yaml", "Chart.yml"]
+definitions:
+  - type: HelmChart
+    value_of: name
 imports:
   - key: dependencies
     mapping_forms:

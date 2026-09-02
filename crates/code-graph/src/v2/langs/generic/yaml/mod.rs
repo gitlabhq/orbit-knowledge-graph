@@ -1,16 +1,17 @@
-//! YAML as a graph language: mapping keys become `MappingKey`
-//! definitions with dotted FQNs, anchors become definitions, aliases
-//! become references. Document types are declared in embedded YAML
-//! configs interpreted by [`document_types`].
+//! YAML as a graph language. Anchors become definitions and aliases
+//! become references in every file; mapping keys become definitions
+//! and imports only where an embedded document-type config claims
+//! them (see [`document_types`]). Unclaimed YAML keeps its `File` node
+//! and nothing else.
 
 mod document_types;
 
 use crate::v2::config::Language;
 use crate::v2::dsl::types::*;
-use crate::v2::types::{DefKind, Fqn};
+use crate::v2::types::DefKind;
 use treesitter_visit::Axis::*;
 use treesitter_visit::Match::*;
-use treesitter_visit::extract::{child_of_kind, field};
+use treesitter_visit::extract::child_of_kind;
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
 
@@ -35,12 +36,6 @@ impl DslLanguage for YamlDsl {
 
     fn scopes() -> Vec<ScopeRule> {
         vec![
-            scope("block_mapping_pair", "MappingKey")
-                .def_kind(DefKind::Property)
-                .name_from(field("key")),
-            scope("flow_pair", "MappingKey")
-                .def_kind(DefKind::Property)
-                .name_from(field("key")),
             scope("anchor", "Anchor")
                 .def_kind(DefKind::Other)
                 .no_scope()
@@ -62,7 +57,7 @@ impl DslLanguage for YamlDsl {
 
     fn hooks() -> LanguageHooks {
         LanguageHooks {
-            on_scope: Some(yaml_strip_key_quotes),
+            on_scope_with_path: Some(document_types::extract_definitions),
             on_import_with_path: Some(document_types::extract_imports),
             ..LanguageHooks::default()
         }
@@ -75,40 +70,6 @@ impl DslLanguage for YamlDsl {
 
 fn strip_quotes(s: &str) -> &str {
     s.trim_matches(|c| c == '"' || c == '\'')
-}
-
-#[expect(
-    clippy::ptr_arg,
-    reason = "signature is dictated by ScopeHookFn, which passes &mut Vec"
-)]
-fn yaml_strip_key_quotes(
-    node: &N<'_>,
-    defs: &mut Vec<crate::v2::types::CanonicalDefinition>,
-    scope_stack: &[std::sync::Arc<str>],
-    sep: &'static str,
-) -> bool {
-    if !PAIR_KINDS.contains(&node.kind().as_ref()) {
-        return false;
-    }
-    if let Some(last) = defs.last_mut()
-        && last.definition_type == "MappingKey"
-        && (last.name.contains('"')
-            || last.name.contains('\'')
-            || scope_stack
-                .iter()
-                .any(|s| s.contains('"') || s.contains('\'')))
-    {
-        let stripped = strip_quotes(&last.name).to_string();
-        let enclosing = scope_stack.len().saturating_sub(1);
-        let mut parts: Vec<&str> = scope_stack[..enclosing]
-            .iter()
-            .map(|s| strip_quotes(s.as_ref()))
-            .collect();
-        parts.push(stripped.as_str());
-        last.fqn = Fqn::from_parts(&parts, sep);
-        last.name = stripped;
-    }
-    false
 }
 
 pub(super) fn scalar_text(node: &N<'_>) -> Option<String> {
@@ -203,73 +164,100 @@ pub(super) mod tests {
         parse_at("test.yml", code)
     }
 
-    fn defs(code: &str) -> Vec<(String, String)> {
-        parse(code)
+    fn defs_at(file_path: &str, code: &str) -> Vec<(String, String, String)> {
+        parse_at(file_path, code)
             .definitions
             .iter()
-            .map(|d| (d.name.clone(), d.fqn.as_str().to_string()))
+            .map(|d| {
+                (
+                    d.definition_type.to_string(),
+                    d.name.clone(),
+                    d.fqn.as_str().to_string(),
+                )
+            })
             .collect()
     }
 
     #[test]
-    fn nested_mapping_keys_produce_dotted_fqns() {
-        let defs = defs("billing:\n  quota:\n    enabled: true\n");
-        assert!(
-            defs.contains(&("billing".into(), "billing".into())),
-            "{defs:?}"
+    fn unclaimed_yaml_emits_no_key_definitions() {
+        let defs = defs_at(
+            "config/default.yaml",
+            "billing:\n  quota:\n    enabled: true\n",
         );
-        assert!(
-            defs.contains(&("quota".into(), "billing.quota".into())),
-            "{defs:?}"
+        assert!(defs.is_empty(), "{defs:?}");
+    }
+
+    #[test]
+    fn ci_shapes_yield_stages_variables_and_jobs_but_not_reserved_keywords() {
+        let defs = defs_at(
+            ".gitlab-ci.yml",
+            "stages: [lint, test]\nvariables:\n  RUNNER_LARGE_ARM: saas-linux-large-arm64\n  CARGO_HOME: .cargo\ndefault:\n  image: alpine\n.base:\n  image: alpine\nmr-title-check:\n  extends: .base\n  script: [true]\n",
         );
-        assert!(
-            defs.contains(&("enabled".into(), "billing.quota.enabled".into())),
-            "{defs:?}"
+        assert_eq!(
+            defs,
+            vec![
+                ("CiStage".into(), "lint".into(), "stages.lint".into()),
+                ("CiStage".into(), "test".into(), "stages.test".into()),
+                (
+                    "CiVariable".into(),
+                    "RUNNER_LARGE_ARM".into(),
+                    "variables.RUNNER_LARGE_ARM".into()
+                ),
+                (
+                    "CiVariable".into(),
+                    "CARGO_HOME".into(),
+                    "variables.CARGO_HOME".into()
+                ),
+                ("CiJob".into(), ".base".into(), ".base".into()),
+                (
+                    "CiJob".into(),
+                    "mr-title-check".into(),
+                    "mr-title-check".into()
+                ),
+            ]
         );
     }
 
     #[test]
-    fn keys_nested_in_sequences_attach_to_parent_key() {
-        let defs = defs("containers:\n  - name: web\n    image: nginx\n");
-        assert!(
-            defs.contains(&("name".into(), "containers.name".into())),
-            "{defs:?}"
+    fn job_level_variables_are_not_definitions() {
+        let defs = defs_at(
+            ".gitlab-ci.yml",
+            "build:\n  variables:\n    FOO: bar\n  script: make\n",
         );
-        assert!(
-            defs.contains(&("image".into(), "containers.image".into())),
-            "{defs:?}"
+        assert_eq!(defs, vec![("CiJob".into(), "build".into(), "build".into())]);
+    }
+
+    #[test]
+    fn children_and_items_shapes_tolerate_scalar_values() {
+        let defs = defs_at(".gitlab-ci.yml", "stages: test\nvariables: null\n");
+        assert!(defs.is_empty(), "{defs:?}");
+    }
+
+    #[test]
+    fn jobs_are_top_level_and_stages_are_not() {
+        let result = parse_at(".gitlab-ci.yml", "stages: [lint]\nbuild:\n  script: make\n");
+        let top: Vec<(&str, bool)> = result
+            .definitions
+            .iter()
+            .map(|d| (d.name.as_str(), d.is_top_level))
+            .collect();
+        assert_eq!(top, vec![("lint", false), ("build", true)]);
+        assert!(result.definitions.iter().all(|d| d.kind == DefKind::Other));
+    }
+
+    #[test]
+    fn quoted_ci_job_keys_are_stripped() {
+        let defs = defs_at(".gitlab-ci.yml", "\"build:linux\":\n  script: make\n");
+        assert_eq!(
+            defs,
+            vec![("CiJob".into(), "build:linux".into(), "build:linux".into())]
         );
     }
 
     #[test]
-    fn flow_mapping_keys_produce_defs() {
-        let defs = defs("job: { stage: test, when: manual }\n");
-        assert!(
-            defs.contains(&("stage".into(), "job.stage".into())),
-            "{defs:?}"
-        );
-        assert!(
-            defs.contains(&("when".into(), "job.when".into())),
-            "{defs:?}"
-        );
-    }
-
-    #[test]
-    fn quoted_keys_are_stripped_from_names_and_fqns() {
-        let quoted = defs("\"rules\":\n  'when': manual\n");
-        assert!(
-            quoted.contains(&("rules".into(), "rules".into())),
-            "{quoted:?}"
-        );
-        assert!(
-            quoted.contains(&("when".into(), "rules.when".into())),
-            "{quoted:?}"
-        );
-        let mixed = defs("\"rules\":\n  when: manual\n");
-        assert!(
-            mixed.contains(&("when".into(), "rules.when".into())),
-            "{mixed:?}"
-        );
+    fn flow_mapping_root_keys_become_jobs() {
+        let defs = defs_at(".gitlab-ci.yml", "{ build: { script: make } }\n");
+        assert_eq!(defs, vec![("CiJob".into(), "build".into(), "build".into())]);
     }
 
     #[test]
@@ -285,8 +273,8 @@ pub(super) mod tests {
 
     #[test]
     fn multi_document_streams_parse_cleanly() {
-        let defs = defs("a: 1\n---\nb:\n  c: 2\n");
-        assert!(defs.contains(&("a".into(), "a".into())), "{defs:?}");
-        assert!(defs.contains(&("c".into(), "b.c".into())), "{defs:?}");
+        let defs = defs_at(".gitlab-ci.yml", "a:\n  script: x\n---\nb:\n  script: y\n");
+        let names: Vec<&str> = defs.iter().map(|(_, n, _)| n.as_str()).collect();
+        assert_eq!(names, vec!["a", "b"]);
     }
 }
