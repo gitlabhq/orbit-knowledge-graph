@@ -1,5 +1,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow, bail};
 use bumpalo::Bump;
@@ -9,13 +11,14 @@ use cargo_util_schemas::manifest as cargo_manifest;
 use either::Either;
 use globset::{Glob, GlobMatcher};
 use ignore::WalkBuilder;
+use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use petgraph::graph::NodeIndex;
 use ra_ap_cfg::CfgAtom;
 use ra_ap_hir::{
     CallableKind, ChangeWithProcMacros, HasSource, InFile, ModuleDef, PathResolution, Semantics,
     attach_db,
 };
-use ra_ap_ide::{CrateGraphBuilder, FileId, RootDatabase, SourceRoot};
+use ra_ap_ide::{AnalysisHost, CrateGraphBuilder, FileId, RootDatabase, SourceRoot};
 use ra_ap_ide_db::base_db::{
     CrateOrigin, CrateWorkspaceData, Env, FileSet, VfsPath,
     target::{Arch, TargetData},
@@ -75,6 +78,54 @@ use self::workspace::{
 };
 
 pub struct RustPipeline;
+
+static TY_INTERNER_GC: RwLock<()> = RwLock::new(());
+static RUST_JOBS_SINCE_TY_GC: AtomicUsize = AtomicUsize::new(0);
+// Sweeping sooner stalls Rust lanes measurably more often for a little less memory.
+const FORCE_TY_GC_AFTER_JOBS: usize = 256;
+const FORCE_TY_GC_MAX_WAIT: Duration = Duration::from_secs(60);
+
+fn hold_ty_interner() -> RwLockReadGuard<'static, ()> {
+    // A second waiting writer would stall every arriving Rust job and sweep nothing.
+    if RUST_JOBS_SINCE_TY_GC.load(Ordering::Relaxed) >= FORCE_TY_GC_AFTER_JOBS
+        && RUST_JOBS_SINCE_TY_GC.swap(0, Ordering::Relaxed) >= FORCE_TY_GC_AFTER_JOBS
+    {
+        let waited = Instant::now();
+        let exclusive = TY_INTERNER_GC.try_write_for(FORCE_TY_GC_MAX_WAIT);
+        let waited_ms = waited.elapsed().as_millis() as u64;
+        let swept = exclusive.is_some_and(|exclusive| {
+            collect_ty_garbage(exclusive);
+            true
+        });
+        tracing::info!(waited_ms, swept, "rust-analyzer type interner sweep forced");
+    }
+    TY_INTERNER_GC.read()
+}
+
+fn release_ty_interner(held: RwLockReadGuard<'static, ()>) -> bool {
+    drop(held);
+    RUST_JOBS_SINCE_TY_GC.fetch_add(1, Ordering::Relaxed);
+    let Some(exclusive) = TY_INTERNER_GC.try_write() else {
+        return false;
+    };
+    collect_ty_garbage(exclusive);
+    true
+}
+
+fn collect_ty_garbage(_exclusive: RwLockWriteGuard<'static, ()>) {
+    RUST_JOBS_SINCE_TY_GC.store(0, Ordering::Relaxed);
+    let started = Instant::now();
+    match std::panic::catch_unwind(|| AnalysisHost::new(None).trigger_garbage_collection()) {
+        Ok(()) => tracing::debug!(
+            sweep_ms = started.elapsed().as_millis() as u64,
+            "rust-analyzer type interner swept"
+        ),
+        Err(payload) => tracing::warn!(
+            error = %rust_panic_message(&payload),
+            "rust-analyzer type interner sweep panicked"
+        ),
+    }
+}
 
 #[derive(Clone)]
 struct ParsedRustFile {
@@ -172,6 +223,7 @@ impl LanguagePipeline for RustPipeline {
                 None
             }
         };
+        let db_alive = hold_ty_interner();
         let output = parse_rust_files(
             files,
             root_path,
@@ -182,6 +234,7 @@ impl LanguagePipeline for RustPipeline {
         // Nothing past the parse reads the rust-analyzer databases, and they are
         // the largest thing this pipeline holds.
         drop(workspaces);
+        release_ty_interner(db_alive);
         let parse_ms = t0.elapsed().as_secs_f64() * 1000.0;
         for (path, error) in &output.errors {
             match error {
@@ -1502,6 +1555,9 @@ mod tests {
     use super::manifest::repo_local_existing_file;
     use super::sysroot::{EMBEDDED_RUST_SYSROOT_VERSION, EmbeddedSysroot};
     use super::workspace::relative_path_if_under_root;
+    use super::{
+        FORCE_TY_GC_AFTER_JOBS, RUST_JOBS_SINCE_TY_GC, hold_ty_interner, release_ty_interner,
+    };
     use std::fs;
     use tempfile::tempdir;
 
@@ -1604,5 +1660,36 @@ mod tests {
         assert!(std::fs::metadata(embedded.root_path().join("std/src/lib.rs")).is_ok());
         assert!(std::fs::metadata(embedded.root_path().join("proc_macro/src/lib.rs")).is_ok());
         assert!(embedded.project_workspace_sysroot().unwrap().num_packages() >= 4);
+    }
+
+    #[test]
+    fn ty_interner_sweep_waits_for_other_live_databases() {
+        RUST_JOBS_SINCE_TY_GC.store(0, std::sync::atomic::Ordering::Relaxed);
+        let (held_tx, held_rx) = std::sync::mpsc::channel();
+        let (done_tx, done_rx) = std::sync::mpsc::channel::<()>();
+        let other_job = std::thread::spawn(move || {
+            let held = hold_ty_interner();
+            held_tx.send(()).unwrap();
+            done_rx.recv().unwrap();
+            drop(held);
+        });
+        held_rx.recv().unwrap();
+
+        let this_job = hold_ty_interner();
+        assert!(!release_ty_interner(this_job));
+
+        done_tx.send(()).unwrap();
+        other_job.join().unwrap();
+    }
+
+    #[test]
+    fn ty_interner_sweep_is_forced_after_enough_unswept_jobs() {
+        RUST_JOBS_SINCE_TY_GC.store(FORCE_TY_GC_AFTER_JOBS, std::sync::atomic::Ordering::Relaxed);
+        let held = hold_ty_interner();
+        assert!(
+            RUST_JOBS_SINCE_TY_GC.load(std::sync::atomic::Ordering::Relaxed)
+                < FORCE_TY_GC_AFTER_JOBS
+        );
+        drop(held);
     }
 }
