@@ -4,13 +4,10 @@ use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
 
-/// DuckDB release linked by the duckdb crate in Cargo.lock. On a duckdb
-/// bump, update this and re-pin the checksums (fetch the URL from the panic
-/// message and sha256 it).
+/// On a duckdb bump, update this and re-pin FTS_ARTIFACTS.
 const DUCKDB_VERSION: &str = "v1.5.5";
 
-/// Rust target, DuckDB extension platform, SHA-256 of fts.duckdb_extension.gz.
-/// extensions.duckdb.org publishes no checksums, so these are pinned at review.
+/// Rust target, DuckDB platform, SHA-256 of fts.duckdb_extension.gz (upstream publishes none).
 const FTS_ARTIFACTS: &str = "
 x86_64-unknown-linux-gnu    linux_amd64       90d6f049e59b592566cfcd228de3001eb679c64e9f144c138dc2cd55dab12cd6
 aarch64-unknown-linux-gnu   linux_arm64       87a8c2dddf41d397c617af41e479d4e365dd66a9f115cec7e78374057e80478f
@@ -22,7 +19,6 @@ x86_64-pc-windows-gnullvm   windows_amd64     24a328d189aa87a22cd3c2ac6c3f484a49
 x86_64-pc-windows-msvc      windows_amd64     24a328d189aa87a22cd3c2ac6c3f484a49ba30adfd6ce05572fe5841429f2ab5
 ";
 
-/// Largest real artifact (windows_amd64) is ~8 MB.
 const DOWNLOAD_LIMIT: u64 = 64 * 1024 * 1024;
 
 fn main() {
@@ -67,8 +63,7 @@ fn main() {
     .unwrap();
 }
 
-/// The duckdb crate encodes the DuckDB release in its minor version:
-/// DuckDB 1.5.5 is crate 1.10505.x.
+/// DuckDB 1.5.5 ships as duckdb crate 1.10505.x.
 fn assert_lockfile_matches_pin() {
     let [major, minor, patch]: [u32; 3] = DUCKDB_VERSION[1..]
         .split('.')

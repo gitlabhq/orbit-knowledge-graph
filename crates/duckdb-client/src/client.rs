@@ -23,15 +23,9 @@ fn is_lock_error(e: &duckdb::Error) -> bool {
 }
 
 impl DuckDbClient {
-    /// The fts artifact is embedded at build time (see build.rs) and
-    /// materialized under the orbit data dir on first use, so loading never
-    /// touches the network. DuckDB's own signature and metadata checks run
-    /// on every LOAD. Covered end to end by the ask CLI integration test.
+    /// Loads the fts extension embedded by build.rs; never touches the network.
     pub fn load_fts(&self) -> Result<()> {
-        // Mirrors the ORBIT_DATA_DIR / ~/.orbit convention of
-        // orbit-local::Workspace::default_root. Version and target in the
-        // path so engine upgrades and cross-arch binaries never reuse each
-        // other's artifact.
+        // Same ORBIT_DATA_DIR / ~/.orbit convention as orbit-local::Workspace::default_root.
         let data_dir = match std::env::var("ORBIT_DATA_DIR") {
             Ok(dir) if !dir.is_empty() => PathBuf::from(dir),
             _ => dirs::home_dir()
@@ -53,8 +47,7 @@ impl DuckDbClient {
                 &mut flate2::read::GzDecoder::new(FTS_EXTENSION_GZ),
                 &mut bytes,
             )?;
-            // Unique temp + rename so a concurrent orbit process never
-            // loads a partially written file.
+            // Temp + rename so a concurrent orbit process never loads a partial file.
             let tmp = dir.join(format!(".fts.duckdb_extension.{}", std::process::id()));
             std::fs::write(&tmp, &bytes)?;
             std::fs::rename(&tmp, &path)?;

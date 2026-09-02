@@ -1192,8 +1192,6 @@ fn repo_map_omitted_subcommand_runs_overview() {
     );
 }
 
-/// A released binary's first search must materialize the embedded fts
-/// extension under a fresh data dir and load it.
 #[test]
 fn ask_loads_bundled_fts_in_fresh_data_dir() {
     let data_dir = tempfile::TempDir::new().unwrap();
