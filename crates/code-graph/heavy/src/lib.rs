@@ -6,3 +6,7 @@
 pub fn spike_marker() -> &'static str {
     "ci.skip push option"
 }
+
+pub fn spike_marker_2() -> &'static str {
+    "[skip ci] commit message"
+}
