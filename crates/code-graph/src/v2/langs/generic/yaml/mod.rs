@@ -4,6 +4,7 @@
 //! them (see [`document_types`]). Unclaimed YAML keeps its `File` node
 //! and nothing else.
 
+mod config;
 mod document_types;
 
 use crate::v2::config::Language;
@@ -20,7 +21,7 @@ use crate::v2::linker::{HasRules, ResolveSettings};
 
 type N<'a> = Node<'a, StrDoc<SupportLang>>;
 
-pub(super) const PAIR_KINDS: &[&str] = &["block_mapping_pair", "flow_pair"];
+const PAIR_KINDS: &[&str] = &["block_mapping_pair", "flow_pair"];
 
 #[derive(Default)]
 pub struct YamlDsl;
@@ -90,24 +91,31 @@ pub(super) fn pair_key(pair: &N<'_>) -> Option<String> {
     pair.field("key").as_ref().and_then(scalar_text)
 }
 
+pub(super) fn is_pair(node: &N<'_>) -> bool {
+    PAIR_KINDS.contains(&node.kind().as_ref())
+}
+
+pub(super) fn pairs<'a>(mapping: &N<'a>) -> impl Iterator<Item = N<'a>> {
+    mapping.children().filter(is_pair)
+}
+
+pub(super) fn find_pair<'a>(mapping: &N<'a>, key: &str) -> Option<N<'a>> {
+    pairs(mapping).find(|pair| pair_key(pair).as_deref() == Some(key))
+}
+
+fn child_of_kinds<'a>(node: &N<'a>, kinds: &'static [&'static str]) -> Option<N<'a>> {
+    node.find(Child, AnyKind(kinds)).or_else(|| {
+        node.find(Child, AnyKind(&["block_node", "flow_node"]))
+            .and_then(|wrapper| wrapper.find(Child, AnyKind(kinds)))
+    })
+}
+
 pub(super) fn child_mapping<'a>(node: &N<'a>) -> Option<N<'a>> {
-    node.find(Child, AnyKind(&["block_mapping", "flow_mapping"]))
-        .or_else(|| {
-            node.find(Child, AnyKind(&["block_node", "flow_node"]))
-                .and_then(|wrapper| {
-                    wrapper.find(Child, AnyKind(&["block_mapping", "flow_mapping"]))
-                })
-        })
+    child_of_kinds(node, &["block_mapping", "flow_mapping"])
 }
 
 pub(super) fn child_sequence<'a>(node: &N<'a>) -> Option<N<'a>> {
-    node.find(Child, AnyKind(&["block_sequence", "flow_sequence"]))
-        .or_else(|| {
-            node.find(Child, AnyKind(&["block_node", "flow_node"]))
-                .and_then(|wrapper| {
-                    wrapper.find(Child, AnyKind(&["block_sequence", "flow_sequence"]))
-                })
-        })
+    child_of_kinds(node, &["block_sequence", "flow_sequence"])
 }
 
 pub(super) fn item_scalar(item: &N<'_>) -> Option<String> {
@@ -160,11 +168,7 @@ pub(super) mod tests {
             .unwrap()
     }
 
-    pub(in super::super) fn parse(code: &str) -> crate::v2::dsl::engine::ParseFullResult {
-        parse_at("test.yml", code)
-    }
-
-    fn defs_at(file_path: &str, code: &str) -> Vec<(String, String, String)> {
+    pub(in super::super) fn defs_at(file_path: &str, code: &str) -> Vec<(String, String, String)> {
         parse_at(file_path, code)
             .definitions
             .iter()
@@ -219,23 +223,11 @@ pub(super) mod tests {
     }
 
     #[test]
-    fn job_level_variables_are_not_definitions() {
-        let defs = defs_at(
-            ".gitlab-ci.yml",
-            "build:\n  variables:\n    FOO: bar\n  script: make\n",
-        );
-        assert_eq!(defs, vec![("CiJob".into(), "build".into(), "build".into())]);
-    }
-
-    #[test]
-    fn children_and_items_shapes_tolerate_scalar_values() {
-        let defs = defs_at(".gitlab-ci.yml", "stages: test\nvariables: null\n");
-        assert!(defs.is_empty(), "{defs:?}");
-    }
-
-    #[test]
     fn jobs_are_top_level_and_stages_are_not() {
-        let result = parse_at(".gitlab-ci.yml", "stages: [lint]\nbuild:\n  script: make\n");
+        let result = parse_at(
+            ".gitlab-ci.yml",
+            "stages: [lint]\nbuild:\n  variables:\n    FOO: bar\n  script: make\n",
+        );
         let top: Vec<(&str, bool)> = result
             .definitions
             .iter()
@@ -246,35 +238,31 @@ pub(super) mod tests {
     }
 
     #[test]
-    fn quoted_ci_job_keys_are_stripped() {
-        let defs = defs_at(".gitlab-ci.yml", "\"build:linux\":\n  script: make\n");
+    fn quoted_flow_and_multi_document_root_keys_become_jobs() {
+        let defs = defs_at(
+            ".gitlab-ci.yml",
+            "\"build:linux\":\n  script: make\nstages: test\nvariables: null\n---\n{ b: { script: y } }\n",
+        );
         assert_eq!(
             defs,
-            vec![("CiJob".into(), "build:linux".into(), "build:linux".into())]
+            vec![
+                ("CiJob".into(), "build:linux".into(), "build:linux".into()),
+                ("CiJob".into(), "b".into(), "b".into()),
+            ]
         );
     }
 
     #[test]
-    fn flow_mapping_root_keys_become_jobs() {
-        let defs = defs_at(".gitlab-ci.yml", "{ build: { script: make } }\n");
-        assert_eq!(defs, vec![("CiJob".into(), "build".into(), "build".into())]);
-    }
-
-    #[test]
     fn anchor_produces_def_and_alias_produces_ref() {
-        let result = parse("defaults: &base\n  retries: 2\njob:\n  <<: *base\n");
+        let result = parse_at(
+            "test.yml",
+            "defaults: &base\n  retries: 2\njob:\n  <<: *base\n",
+        );
         let names: Vec<&str> = result.definitions.iter().map(|d| d.name.as_str()).collect();
         assert!(names.contains(&"base"), "{names:?}");
         assert!(
             result.refs.iter().any(|r| r.name == "base"),
             "alias should produce a ref"
         );
-    }
-
-    #[test]
-    fn multi_document_streams_parse_cleanly() {
-        let defs = defs_at(".gitlab-ci.yml", "a:\n  script: x\n---\nb:\n  script: y\n");
-        let names: Vec<&str> = defs.iter().map(|(_, n, _)| n.as_str()).collect();
-        assert_eq!(names, vec!["a", "b"]);
     }
 }
