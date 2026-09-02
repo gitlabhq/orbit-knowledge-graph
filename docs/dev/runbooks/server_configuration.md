@@ -281,9 +281,10 @@ run picks up all outstanding masks. Alert on
 `gkg.scheduler.task.errors{task="maintenance.table_cleanup"}`; the task logs a
 failed table and moves on.
 
-The edge tombstone collapse is checkpoint-driven and idempotent. It finds the
-traversal paths a code reindex wrote to `code_indexing_checkpoint` since its
-cursor, then deletes the tombstoned edge keys under those paths. It has two
+The edge tombstone collapse is cursor-driven and idempotent. It reads the
+traversal paths that received edge tombstones since its cursor from
+`tombstone_scopes` (Arrow writer) and `code_indexing_checkpoint` (code
+reindexes). It then deletes the tombstoned edge keys under those paths. It has two
 knobs. `lookback_secs` (default 3600) bounds how far the very first run looks
 back. `max_keys_per_run` (default 100000) caps the keys deleted per edge table
 per run. A run that hits the cap keeps its cursor and drains the rest next run. Alert on

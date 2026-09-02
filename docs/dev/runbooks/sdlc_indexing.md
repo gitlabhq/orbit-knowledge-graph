@@ -298,14 +298,14 @@ OPTIMIZE TABLE `<gkg-database>`.gl_project FINAL CLEANUP;
 
 ### Edge tombstone collapse
 
-Variable-depth traversal reads edge tables without FINAL. A retired edge therefore stays visible in k-hop paths until its rows are physically gone. The `maintenance.edge_tombstone_collapse` task closes that gap for code reindexes. Every 15 minutes it:
+Variable-depth traversal reads edge tables without FINAL. A retired edge therefore stays visible in k-hop paths until its rows are physically gone. The `maintenance.edge_tombstone_collapse` task closes that gap. Every 15 minutes it:
 
-1. Reads `code_indexing_checkpoint` for the traversal paths a code reindex wrote since its cursor.
+1. Reads the traversal paths that received edge tombstones since its cursor. Two sources feed this. The Arrow writer appends to `tombstone_scopes` whenever an edge batch carries `_deleted = true` rows (the SDLC ETL path). A code reindex writes `code_indexing_checkpoint` after it tombstones stale code edges.
 2. For each edge table, selects the keys under those paths whose newest row is a tombstone. The select is pruned by `traversal_path`, the leading sort-key column, so it never scans the table.
 3. Deletes those keys with a `DELETE ... WHERE (keys) IN ((...), (...))` statement made only of literals. ClickHouse re-parses a stored delete on replay, so a subquery or `UNION` in the predicate wedges the mutation queue. A literal list cannot.
 4. Saves its cursor once every table drained. A run that hits `max_keys_per_run` on a table keeps the cursor and drains the rest on later runs.
 
-Tombstones from other producers (SDLC CDC deletes, namespace deletion, stale-edge reconciliation) are not collapsed by this task. FINAL and `argMax` reads hide them at once; only variable-depth traversal sees them, and the durable fix for that read path is #1223.
+Stale-edge reconciliation and namespace deletion tombstone through SQL statements and leave no scope row. This task does not collapse them. FINAL and `argMax` reads hide them at once; only variable-depth traversal sees them, and the durable fix for that read path is #1223.
 
 ### Recovering a wedged mutation queue
 

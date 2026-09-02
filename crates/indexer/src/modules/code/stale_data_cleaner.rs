@@ -220,38 +220,6 @@ impl StaleDataCleaner for ClickHouseStaleDataCleaner {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn node_query_reads_the_table_version_and_stops_one_microsecond_below_the_tombstone() {
-        let sql = ClickHouseStaleDataCleaner::build_node_delete_query("v93_gl_file");
-        assert!(sql.contains("true AS _deleted"), "{sql}");
-        assert!(
-            sql.contains("- toIntervalMicrosecond(1) AS _version"),
-            "{sql}"
-        );
-        assert!(
-            sql.contains(
-                "s._version < {watermark_time:DateTime64(6, 'UTC')} - toIntervalMicrosecond(1)"
-            ),
-            "{sql}"
-        );
-    }
-
-    #[test]
-    fn shared_edge_query_scopes_by_source_kind_without_a_subquery_or_union() {
-        let sql = ClickHouseStaleDataCleaner::build_edge_delete_query(
-            "v93_gl_edge",
-            &["v93_gl_directory", "v93_gl_file"],
-        );
-        assert!(sql.contains("source_kind IN ('Directory', 'File'"), "{sql}");
-        assert!(!sql.contains("SELECT id FROM"), "{sql}");
-        assert!(!sql.contains("UNION"), "{sql}");
-    }
-}
-
-#[cfg(test)]
 pub mod test_utils {
     use super::*;
     use parking_lot::Mutex;

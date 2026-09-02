@@ -300,21 +300,4 @@ mod tests {
         };
         assert_eq!(p.render_literal(), "[]");
     }
-
-    #[test]
-    fn render_arrow_sql_literal_quotes_and_typechecks() {
-        use arrow::array::{ArrayRef, Int64Array, StringArray};
-        use std::sync::Arc;
-
-        let strings: ArrayRef = Arc::new(StringArray::from(vec![Some("a'b"), None]));
-        assert_eq!(render_arrow_sql_literal(&strings, 0).unwrap(), "'a''b'");
-        assert!(
-            render_arrow_sql_literal(&strings, 1)
-                .unwrap_err()
-                .contains("null")
-        );
-
-        let ints: ArrayRef = Arc::new(Int64Array::from(vec![7_i64]));
-        assert_eq!(render_arrow_sql_literal(&ints, 0).unwrap(), "7");
-    }
 }

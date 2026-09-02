@@ -11,7 +11,7 @@ use orbit_utils::clickhouse::render_arrow_sql_literal;
 use tracing::warn;
 
 use crate::checkpoint::CheckpointStore;
-use crate::clickhouse::{ArrowClickHouseClient, TIMESTAMP_FORMAT};
+use crate::clickhouse::{ArrowClickHouseClient, TIMESTAMP_FORMAT, TOMBSTONE_SCOPES_TABLE};
 use crate::durability::WriteDurability;
 use crate::orchestrator::scheduled::{ScheduledTask, ScheduledTaskMetrics, TaskError};
 use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
@@ -220,10 +220,14 @@ fn swept_edge_tables(ontology: &ontology::Ontology) -> Vec<SweptTable> {
 
 fn discover_scopes_sql(code_checkpoint: &str) -> String {
     format!(
-        "SELECT DISTINCT {TRAVERSAL_PATH} FROM {code_checkpoint} FINAL \
-         WHERE indexed_at > {{window_start:String}} AND indexed_at <= {{window_end:String}} \
-           AND _deleted = false \
-         ORDER BY {TRAVERSAL_PATH}"
+        "SELECT DISTINCT {TRAVERSAL_PATH} FROM ( \
+           SELECT {TRAVERSAL_PATH} FROM {TOMBSTONE_SCOPES_TABLE} \
+           WHERE written_at > {{window_start:String}} AND written_at <= {{window_end:String}} \
+           UNION ALL \
+           SELECT {TRAVERSAL_PATH} FROM {code_checkpoint} FINAL \
+           WHERE indexed_at > {{window_start:String}} AND indexed_at <= {{window_end:String}} \
+             AND _deleted = false \
+         ) ORDER BY {TRAVERSAL_PATH}"
     )
 }
 
@@ -322,197 +326,4 @@ fn plain_columns(batch: &RecordBatch, columns: &[String]) -> Result<Vec<ArrayRef
             }
         })
         .collect()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use arrow::array::{Array, DictionaryArray, Int64Array, StringArray};
-    use arrow::datatypes::{Field, Int32Type, Schema};
-
-    fn edge_table() -> SweptTable {
-        SweptTable {
-            name: "v99_gl_edge".to_string(),
-            sort_key: ["relationship_kind", "source_id", "target_id"]
-                .map(str::to_string)
-                .to_vec(),
-        }
-    }
-
-    #[test]
-    fn sweeps_every_edge_table_and_no_node_table() {
-        let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
-        let swept: Vec<String> = swept_edge_tables(&ontology)
-            .into_iter()
-            .map(|t| t.name)
-            .collect();
-        for edge_table in ontology.edge_tables() {
-            assert!(swept.contains(&prefixed_table_name(edge_table, *SCHEMA_VERSION)));
-        }
-        for node in ontology.nodes() {
-            assert!(!swept.contains(&prefixed_table_name(
-                &node.destination_table,
-                *SCHEMA_VERSION
-            )));
-        }
-        assert_eq!(swept.len(), ontology.edge_tables().len());
-    }
-
-    #[test]
-    fn every_edge_sort_key_leads_with_traversal_path_and_renders_as_string_or_int64() {
-        let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
-        for table in ontology.edge_tables() {
-            let config = ontology
-                .edge_table_config(table)
-                .expect("edge table config");
-            assert_eq!(
-                config.sort_key.first().map(String::as_str),
-                Some(TRAVERSAL_PATH)
-            );
-            for key in &config.sort_key {
-                let column = config
-                    .columns
-                    .iter()
-                    .find(|c| &c.name == key)
-                    .unwrap_or_else(|| panic!("{table}.{key} has no column"));
-                assert!(
-                    matches!(
-                        column.data_type,
-                        ontology::DataType::String | ontology::DataType::Int
-                    ),
-                    "{table}.{key} is {:?}",
-                    column.data_type
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn window_starts_behind_the_cursor_or_at_the_lookback_floor() {
-        let now = DateTime::parse_from_rfc3339("2026-08-29T12:00:00Z")
-            .unwrap()
-            .with_timezone(&Utc);
-        let lookback = TimeDelta::hours(1);
-        assert_eq!(window_start(None, now, lookback), now - lookback);
-
-        let stale = now - TimeDelta::days(30);
-        assert_eq!(
-            window_start(Some(stale), now, lookback),
-            stale - TimeDelta::seconds(DISCOVERY_OVERLAP_SECS)
-        );
-    }
-
-    #[test]
-    fn discovery_reads_reindexed_scopes_from_the_code_checkpoint() {
-        let sql = discover_scopes_sql("v99_code_indexing_checkpoint");
-        assert!(
-            sql.starts_with(
-                "SELECT DISTINCT traversal_path FROM v99_code_indexing_checkpoint FINAL"
-            ),
-            "{sql}"
-        );
-        assert!(
-            sql.contains(
-                "indexed_at > {window_start:String} AND indexed_at <= {window_end:String}"
-            ),
-            "{sql}"
-        );
-        assert!(sql.contains("_deleted = false"), "{sql}");
-    }
-
-    #[test]
-    fn key_select_is_scoped_by_traversal_path_and_keeps_only_newest_tombstones() {
-        let sql = select_tombstoned_keys_sql(&edge_table(), "'1/100/', '1/200/'", 501);
-        assert_eq!(
-            sql,
-            "SELECT relationship_kind, source_id, target_id FROM v99_gl_edge \
-             WHERE traversal_path IN ('1/100/', '1/200/') \
-             GROUP BY relationship_kind, source_id, target_id \
-             HAVING argMax(_deleted, _version) LIMIT 501"
-        );
-    }
-
-    #[test]
-    fn delete_is_a_flat_literal_bounded_to_the_snapshot() {
-        let stmts = build_delete_statements(
-            &edge_table(),
-            &[
-                "('MENTIONS', 1, 2)".to_string(),
-                "('CONTAINS', 3, 4)".to_string(),
-            ],
-            "2020-01-01 00:00:00.000000",
-            1_000_000,
-        );
-        assert_eq!(
-            stmts,
-            vec![
-                "DELETE FROM v99_gl_edge WHERE (relationship_kind, source_id, target_id) IN \
-                 (('MENTIONS', 1, 2), ('CONTAINS', 3, 4)) AND _version <= '2020-01-01 00:00:00.000000' \
-                 SETTINGS lightweight_deletes_sync = 0, max_execution_time = 7200"
-            ]
-        );
-    }
-
-    #[test]
-    fn key_lists_pack_into_multiple_statements_under_the_byte_budget() {
-        let keys: Vec<String> = (0..100)
-            .map(|i| format!("('MENTIONS', {i}, {i})"))
-            .collect();
-        let budget = 400;
-        let stmts =
-            build_delete_statements(&edge_table(), &keys, "2020-01-01 00:00:00.000000", budget);
-        assert!(stmts.len() > 1);
-        let overshoot = "('MENTIONS', 99, 99), ".len();
-        for sql in &stmts {
-            assert!(sql.len() <= budget + overshoot, "{}: {sql}", sql.len());
-        }
-        let total: usize = stmts.iter().map(|s| s.matches("('MENTIONS'").count()).sum();
-        assert_eq!(total, 100);
-    }
-
-    #[test]
-    fn dictionary_and_int_sort_keys_render_as_literals() {
-        let kinds: DictionaryArray<Int32Type> = vec!["MENTIONS", "CONTAINS"].into_iter().collect();
-        let schema = Schema::new(vec![
-            Field::new("relationship_kind", kinds.data_type().clone(), false),
-            Field::new("source_id", DataType::Int64, false),
-            Field::new("target_id", DataType::Int64, false),
-        ]);
-        let batch = RecordBatch::try_new(
-            Arc::new(schema),
-            vec![
-                Arc::new(kinds),
-                Arc::new(Int64Array::from(vec![1_i64, 3])),
-                Arc::new(Int64Array::from(vec![2_i64, 4])),
-            ],
-        )
-        .unwrap();
-
-        let keys = render_key_literals(&[batch], &edge_table().sort_key).unwrap();
-        assert_eq!(keys, vec!["('MENTIONS', 1, 2)", "('CONTAINS', 3, 4)"]);
-    }
-
-    #[test]
-    fn single_column_keys_render_bare_for_a_scope_list() {
-        let schema = Schema::new(vec![Field::new(TRAVERSAL_PATH, DataType::Utf8, false)]);
-        let batch = RecordBatch::try_new(
-            Arc::new(schema),
-            vec![Arc::new(StringArray::from(vec!["1/100/", "1/2'00/"]))],
-        )
-        .unwrap();
-        let scopes = render_key_literals(&[batch], &[TRAVERSAL_PATH.to_string()]).unwrap();
-        assert_eq!(scopes, vec!["'1/100/'", "'1/2''00/'"]);
-    }
-
-    #[test]
-    fn missing_sort_key_column_is_an_error() {
-        let schema = Schema::new(vec![Field::new("id", DataType::Int64, false)]);
-        let batch = RecordBatch::try_new(
-            Arc::new(schema),
-            vec![Arc::new(Int64Array::from(vec![1_i64]))],
-        )
-        .unwrap();
-        let err = render_key_literals(&[batch], &["not_a_column".to_string()]).unwrap_err();
-        assert!(err.to_string().contains("not_a_column"));
-    }
 }

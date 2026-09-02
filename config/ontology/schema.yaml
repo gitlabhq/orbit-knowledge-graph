@@ -297,6 +297,15 @@ settings:
         - {name: compressed_bytes, type: int64}
       order_by: [logical_table, top_level_namespace, snapshot_date]
       ttl: snapshot_date + INTERVAL 400 DAY
+    - name: tombstone_scopes
+      versioned: false
+      include_system_columns: false
+      engine: MergeTree
+      columns:
+        - {name: traversal_path, type: string, codec: ["zstd(1)"]}
+        - {name: written_at, type: timestamp, default: "now64(6)", codec: ["delta(8)", "zstd(1)"]}
+      order_by: [written_at, traversal_path]
+      ttl: written_at + INTERVAL 7 DAY
     - name: checkpoint
       columns:
         - {name: key, type: string, codec: ["zstd(1)"]}
