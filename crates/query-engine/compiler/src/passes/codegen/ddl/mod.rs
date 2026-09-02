@@ -96,6 +96,7 @@ pub fn generate_graph_tables_with_prefix(ontology: &Ontology, prefix: &str) -> V
             find(&denorm.edge_table),
             find(&denorm.source_table),
             find(&denorm.target_table),
+            partition,
         ));
     }
 
@@ -466,16 +467,16 @@ fn convert_projection(proj: &StorageProjection) -> ProjectionDef {
     }
 }
 
-fn partition_by(
+fn partition_by<'a>(
     partition: Option<&PartitionConfig>,
     table: &str,
-    columns: &[StorageColumn],
+    columns: impl IntoIterator<Item = &'a str>,
 ) -> Vec<String> {
     let Some(p) = partition.filter(|p| p.is_partitioned(table)) else {
         return vec![];
     };
     let column = p.column();
-    if columns.iter().any(|c| c.name == column) {
+    if columns.into_iter().any(|c| c == column) {
         let expr = crate::passes::partition::partition_expr(
             &p.strategy,
             crate::ast::Expr::Identifier(column.to_string()),
@@ -497,7 +498,11 @@ fn build_node_table(
         .map(storage_col_to_def)
         .collect();
     columns.extend(system_columns(None));
-    let partition_by = partition_by(partition, &node.destination_table, &node.storage.columns);
+    let partition_by = partition_by(
+        partition,
+        &node.destination_table,
+        node.storage.columns.iter().map(|c| c.name.as_str()),
+    );
     let partitioned = !partition_by.is_empty();
 
     let indexes: Vec<IndexDef> = node.storage.indexes.iter().map(convert_index).collect();
@@ -553,7 +558,11 @@ fn build_edge_table(
             .map(storage_col_to_def),
     );
     columns.extend(system_columns(None));
-    let partition_by = partition_by(partition, name, &config.storage.columns);
+    let partition_by = partition_by(
+        partition,
+        name,
+        config.storage.columns.iter().map(|c| c.name.as_str()),
+    );
     let partitioned = !partition_by.is_empty();
 
     let mut indexes: Vec<IndexDef> = config.storage.indexes.iter().map(convert_index).collect();
@@ -953,6 +962,29 @@ mod tests {
             "node id is the edge's source_id"
         );
         assert_eq!(names.iter().filter(|n| **n == "traversal_path").count(), 1);
+
+        let idx: Vec<(&str, &str)> = mat
+            .indexes
+            .iter()
+            .map(|i| (i.name.as_str(), i.expression.as_str()))
+            .collect();
+        assert!(idx.contains(&("idx_source_id", "source_id")));
+        assert!(idx.contains(&("idx_src_state", "src_state")));
+        assert!(idx.contains(&("idx_tgt_state", "tgt_state")));
+        assert!(idx.contains(&("idx_tgt_title_ngram", "tgt_title")));
+        let mut idx_names: Vec<&str> = idx.iter().map(|(n, _)| *n).collect();
+        idx_names.sort_unstable();
+        idx_names.dedup();
+        assert_eq!(
+            idx_names.len(),
+            mat.indexes.len(),
+            "index names must be unique"
+        );
+        assert!(
+            mat.settings
+                .iter()
+                .any(|s| s.key == "add_minmax_index_for_temporal_columns")
+        );
 
         let views = generate_graph_materialized_views(&ontology);
         let feeding: Vec<&CreateMaterializedView> = views

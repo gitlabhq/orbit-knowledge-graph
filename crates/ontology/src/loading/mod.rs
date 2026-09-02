@@ -723,6 +723,15 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
                 }
                 partitioned_tables.insert(table.clone());
             }
+            // A denormalized join table carries its edge table's traversal_path,
+            // so it is bucketed whenever the edge table is.
+            for edge in ontology.edges() {
+                if let Some(table) = &edge.denormalized_table
+                    && partitioned_tables.contains(&edge.destination_table)
+                {
+                    partitioned_tables.insert(table.clone());
+                }
+            }
             Ok(crate::entities::PartitionConfig {
                 strategy: crate::entities::PartitionStrategy::HashBucket {
                     buckets: hb.buckets,
