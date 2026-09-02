@@ -1,8 +1,4 @@
-//! DDL for denormalized joins, composed from the already-generated definitions
-//! of every table in the chain so codecs, types, indexes, and defaults stay
-//! identical to the sources. Every table reference in the view bodies is a
-//! `{table}` placeholder so [`CreateMaterializedView::with_prefix`] can
-//! version them.
+//! Denormalized join DDL, composed from the chain's already-generated tables.
 
 use std::collections::BTreeMap;
 
@@ -13,8 +9,7 @@ use ontology::denormalized::{DenormalizedJoin, alias, copies, prefix};
 use super::{partition_by, system_columns, table_settings};
 use crate::ast::ddl::*;
 
-/// Source columns copied under table `i`'s prefix, in source order. The
-/// anchor's `traversal_path` is excluded because it is emitted once, first.
+/// Columns copied under table `i`'s prefix; the anchor's `traversal_path` is emitted once, first.
 fn copied_columns<'a>(
     join: &DenormalizedJoin,
     i: usize,
@@ -27,17 +22,12 @@ fn copied_columns<'a>(
         .filter(move |c| copies(&c.name) && !(is_anchor && c.name == TRAVERSAL_PATH_COLUMN))
 }
 
-/// `source_of(i)` is the generated table at chain index `i`. Columns and index
-/// expressions are renamed through [`DenormalizedJoin::column_for`]; index
-/// names get the table prefix so two tables' `idx_state` stay distinct.
-/// `index_granularity` and the projection merge mode are per-table choices
-/// made here, not inherited.
+/// Index names get the table prefix so two tables' `idx_state` stay distinct.
 pub(super) fn build_table<'a>(
     join: &DenormalizedJoin,
     source_of: impl Fn(usize) -> &'a CreateTable,
     partition: Option<&PartitionConfig>,
 ) -> CreateTable {
-    // The anchor's traversal_path leads, as it leads the sort key.
     let mut columns: Vec<ColumnDef> = source_of(join.anchor_table())
         .columns
         .iter()
@@ -103,11 +93,7 @@ pub(super) fn build_table<'a>(
     }
 }
 
-/// One view per table in the chain, triggered by inserts to that table and
-/// writing complete rows. The trigger is scanned as-is (a view only sees the
-/// inserted block); every other table is read with `FINAL`, joined outward
-/// from the trigger along the chain so each `ON` references an already-joined
-/// alias.
+/// One view per table; the trigger is the inserted block, the rest are joined outward with `FINAL`.
 pub(super) fn build_views<'a>(
     join: &DenormalizedJoin,
     source_of: impl Fn(usize) -> &'a CreateTable,
@@ -173,8 +159,7 @@ fn from_clause(join: &DenormalizedJoin, trigger: usize) -> String {
             .iter()
             .map(move |(col, value)| format!("{}.{col} = '{value}'", alias(i)))
     };
-    // Table `i` joins onto `i - 1` by declaration; walking left of the
-    // trigger reuses the same condition from the other side.
+    // Walking left of the trigger reuses table `i`'s declared link from the other side.
     let on = |i: usize| {
         let j = join.tables[i]
             .join

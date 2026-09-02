@@ -122,8 +122,7 @@ pub(super) struct StatisticsExcludeYaml {
     pub columns: Vec<String>,
 }
 
-/// A linear chain of tables pre-joined into one `gl_denorm_<name>` table. See
-/// [`crate::denormalized`].
+/// A `denormalized_joins` entry; see [`crate::denormalized`].
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct DenormalizedJoinYaml {
@@ -141,8 +140,7 @@ pub(super) struct DenormalizedHopYaml {
     pub via: HopVia,
 }
 
-/// Whether a hop's tables are linked through its edge table or directly
-/// through the variant's FK column.
+/// Link a hop through its edge table or directly through the variant's FK column.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub(super) enum HopVia {

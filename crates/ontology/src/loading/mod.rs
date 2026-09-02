@@ -768,8 +768,7 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
         ontology.denormalized_joins.push(resolved);
     }
     validate_unique_denormalized_joins(&ontology)?;
-    // A denormalized table's sort key leads with its anchor table's
-    // traversal_path, so it is bucketed whenever that table is.
+    // A denormalized table is bucketed whenever its anchor table is.
     if let Some(partition) = ontology.partition.as_mut() {
         let bucketed: Vec<String> = ontology
             .denormalized_joins
@@ -1236,13 +1235,7 @@ pub(crate) struct DeclaredHop<'a> {
     pub via_fk: bool,
 }
 
-/// Resolve a `denormalized_joins` entry into its table chain.
-///
-/// Consecutive hops must share a node. Adjacent tables join only on the id
-/// that links them; every scoped table keeps its own `traversal_path` in the
-/// row and the security pass filters each, so hops may cross namespaces just
-/// as they do in an ordinary edge chain. At least one table must be scoped,
-/// since an all-global row has nothing to filter on.
+/// Resolve a `denormalized_joins` entry into its table chain; at least one table must be scoped.
 pub(crate) fn resolve_denormalized_join(
     ontology: &crate::Ontology,
     name: &str,

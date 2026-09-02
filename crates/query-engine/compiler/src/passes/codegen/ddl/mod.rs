@@ -1240,8 +1240,6 @@ mod tests {
             ));
         }
 
-        // The trigger is read as the inserted block; everything else is FINAL,
-        // joined outward on ids only.
         let on_t2 = &views[2].select_query;
         assert!(
             on_t2.contains(

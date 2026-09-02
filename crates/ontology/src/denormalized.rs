@@ -1,16 +1,5 @@
-//! Denormalized joins: a declared linear chain of tables pre-joined into one
-//! `gl_denorm_<name>` table, kept current by one materialized view per source
-//! table. Adjacent tables join on the id or edge id column that links them. A
-//! hop between two nodes is realized either through its edge table or, when
-//! the variant has an FK column, directly node to node.
-//!
-//! Every scoped table keeps its own `traversal_path` in the row, exactly as
-//! each scan alias keeps its own in an ordinary join, and the security pass
-//! filters each of them. The first scoped table's is the row's unprefixed
-//! `traversal_path`, which leads the sort key and drives partitioning.
-//!
-//! The DDL generator only sees `tables`; the compiler additionally uses
-//! `hops` to map query hops and nodes onto table indices.
+//! A denormalized join is a linear chain of tables pre-joined into one `gl_denorm_<name>` table.
+//! Each scoped table keeps its own `traversal_path` in the row; the first one is the sort-key anchor.
 
 use crate::constants::{
     DEFAULT_PRIMARY_KEY, DELETED_COLUMN, TRAVERSAL_PATH_COLUMN, VERSION_COLUMN,
@@ -35,16 +24,13 @@ pub fn alias(i: usize) -> String {
     format!("t{i}")
 }
 
-/// Whether `column` of a source table is copied into the row. The system
-/// columns are declared once for the whole row.
+/// System columns are declared once per row rather than copied per table.
 #[must_use]
 pub fn copies(column: &str) -> bool {
     !matches!(column, VERSION_COLUMN | DELETED_COLUMN)
 }
 
-/// The denormalized column holding `column` of table `i` in a chain whose
-/// anchor is table `anchor`. Row-level system columns are unprefixed, as is
-/// the anchor's `traversal_path`; everything else carries the table prefix.
+/// Row-level columns (system, and the anchor's `traversal_path`) are unprefixed; the rest get `t{i}_`.
 #[must_use]
 pub fn column_for(anchor: usize, i: usize, column: &str) -> String {
     let anchored = column == TRAVERSAL_PATH_COLUMN && i == anchor;
@@ -66,13 +52,11 @@ pub struct JoinOn {
 pub struct JoinedTable {
     pub table: String,
     pub has_traversal_path: bool,
-    /// Node tables have an `id`; edge tables do not. Only `id` columns enter
-    /// the sort key.
+    /// Only tables with an `id` (nodes, not edges) enter the sort key.
     pub has_id: bool,
     /// `None` for the first table.
     pub join: Option<JoinOn>,
-    /// Equality predicates selecting the rows that belong to this chain, e.g.
-    /// an edge table's relationship and endpoint kinds.
+    /// Equality predicates selecting this chain's rows, e.g. an edge table's kinds.
     pub filter: Vec<(String, String)>,
 }
 
@@ -86,8 +70,7 @@ pub struct JoinHop {
     pub source_table: usize,
     /// Chain index of the target node's table.
     pub target_table: usize,
-    /// Chain index of the edge table, or `None` when the hop is realized
-    /// through the FK column.
+    /// `None` when the hop is realized through the FK column instead of an edge table.
     pub edge_table: Option<usize>,
 }
 
@@ -100,8 +83,7 @@ pub struct DenormalizedJoin {
 }
 
 impl DenormalizedJoin {
-    /// Chain index of the table whose `traversal_path` is the row's unprefixed
-    /// one (the sort key and partition anchor).
+    /// The table whose `traversal_path` leads the sort key and drives partitioning.
     #[must_use]
     pub fn anchor_table(&self) -> usize {
         self.tables
@@ -116,16 +98,14 @@ impl DenormalizedJoin {
         column_for(self.anchor_table(), i, column)
     }
 
-    /// Every `traversal_path` column in the row, one per scoped table, with
-    /// that table's chain index. The security pass filters each of them.
+    /// One `traversal_path` column per scoped table, each filtered by the security pass.
     pub fn traversal_path_columns(&self) -> impl Iterator<Item = (usize, String)> + '_ {
         (0..self.tables.len())
             .filter(|&i| self.tables[i].has_traversal_path)
             .map(|i| (i, self.column_for(i, TRAVERSAL_PATH_COLUMN)))
     }
 
-    /// `traversal_path`, then the `id` of every table that has one, with the
-    /// first scoped table's id leading so seeks within a namespace land on it.
+    /// `traversal_path`, then ids with the anchor's first so in-namespace seeks land on it.
     #[must_use]
     pub fn sort_key(&self) -> Vec<String> {
         let mut ids: Vec<usize> = (0..self.tables.len())

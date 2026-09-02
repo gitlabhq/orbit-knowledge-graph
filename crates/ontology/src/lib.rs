@@ -326,10 +326,7 @@ impl Ontology {
         self
     }
 
-    /// Declare a denormalized join over existing variants, as a
-    /// `denormalized_joins` entry in `schema.yaml` would. `hops` are
-    /// `(relationship, from, to, via_fk)`. Runs the loader's own resolution,
-    /// so a test cannot declare a join the YAML would reject.
+    /// Test builder for a `denormalized_joins` entry; runs the loader's own validation.
     #[must_use]
     pub fn with_denormalized_join(mut self, name: &str, hops: &[(&str, &str, &str, bool)]) -> Self {
         let declared: Vec<loading::DeclaredHop<'_>> = hops
@@ -958,8 +955,7 @@ impl Ontology {
     #[must_use]
     pub fn is_table_path_scopable(&self, table: &str) -> bool {
         let normalized = strip_schema_version_prefix(table);
-        // A denormalized join's sort key always leads with its anchor's
-        // traversal_path, so a startsWith on it prunes granules.
+        // A denormalized join's sort key always leads with its anchor's traversal_path.
         if self.denormalized_join_by_table(normalized).is_some() {
             return true;
         }
@@ -969,11 +965,7 @@ impl Ontology {
             .is_some_and(|(name, _)| self.is_path_scopable(name))
     }
 
-    /// The `traversal_path` columns a scan of `table` is security-filtered on,
-    /// each with the role floor of the table it came from. Any node or edge
-    /// table has its one `traversal_path`; a denormalized join has one per
-    /// scoped table in its chain, since every table keeps its own path in the
-    /// row.
+    /// Path columns a scan of `table` is filtered on, each with its source table's role floor.
     #[must_use]
     pub fn traversal_path_columns(&self, table: &str) -> Vec<(String, Option<u32>)> {
         match self.denormalized_join_by_table(table) {
@@ -2213,9 +2205,7 @@ mod tests {
             .unwrap()
             .required_role = RequiredRole::SecurityManager;
 
-        // User is global, so the edge (t1) is the anchor and MergeRequest (t2)
-        // and Project (t3) keep their own paths. The edge table has no
-        // redaction block, so its floor is the caller's default.
+        // User is global, so the edge is the anchor; an edge table has no redaction floor.
         assert_eq!(
             ontology.traversal_path_columns(&format!("v9_{table}")),
             [
