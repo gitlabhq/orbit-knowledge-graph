@@ -1,3 +1,18 @@
+## [0.113.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.112.0...v0.113.0) (2026-09-02)
+
+### Features
+
+* **indexer:** physically remove edge tombstones within 15 minutes of the delete ([094b4a6](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/094b4a63f0705fc3f1871b578543e3b0f560064b)) by Michael Angelo Rivera
+
+### Fixes
+
+* **code-graph:** descend C/C++ declarator wrappers for function names ([fad2ed3](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/fad2ed3d3e6f6841fcf96850be815ccf4ffe15c9)) by Dmitry Gruzd
+* **named:** harden search_nodes and list_nodes templates ([e550738](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/e5507382138574dd081be70f12592c65b42c2168)) by Aaron Algutifan
+
+### Other
+
+* **config:** consolidate pinned versions into config/versions.yaml ([683e241](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/683e2418db4aa20a0f71300337f2512e0698b258)) by Michael Usachenko
+
 ## [0.112.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.111.0...v0.112.0) (2026-09-02)
 
 ### Features
