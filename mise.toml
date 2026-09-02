@@ -379,11 +379,11 @@ description = "Fail if rust-toolchain.toml is out of sync with mise.toml"
 
 [tasks."schema:bump"]
 run = "cargo xtask migration-ledger bump"
-description = "Bump SCHEMA_VERSION, append a migration ledger entry, and re-snapshot fingerprints"
+description = "Bump the schema pin in config/versions.yaml, append a migration ledger entry, and re-snapshot fingerprints"
 
 [tasks."schema:snapshot"]
 run = "cargo xtask migration-ledger snapshot"
-description = "Snapshot auxiliary tables and refreshable views without bumping SCHEMA_VERSION or the ledger"
+description = "Snapshot auxiliary tables and refreshable views without bumping the schema pin or the ledger"
 
 [tasks."schema:ledger:check"]
 run = "cargo xtask migration-ledger check"

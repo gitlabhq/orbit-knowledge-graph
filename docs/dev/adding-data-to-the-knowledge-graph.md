@@ -257,8 +257,8 @@ edges:
 ### 5.4 Bump the schema version + regenerate DDL
 
 ```bash
-# bump the single integer in:
-config/SCHEMA_VERSION        # e.g. 64 -> 65
+# bump the `schema:` pin in:
+config/versions.yaml         # e.g. schema: 64 -> schema: 65
 
 # regenerate (do NOT hand-edit graph.sql):
 mise run schema:generate:ddl
@@ -349,7 +349,7 @@ knowledge-graph:
 - [ ] Node YAML (every property has `description`; nullable matches source).
 - [ ] Edge YAML (join FKs handled).
 - [ ] **Registered in `schema.yaml`** (nodes map + edges map).
-- [ ] `config/SCHEMA_VERSION` bumped; `mise run schema:generate:ddl` run; `graph.sql` shows the new `gl_<node>`.
+- [ ] `schema` pin in `config/versions.yaml` bumped; `mise run schema:generate:ddl` run; `graph.sql` shows the new `gl_<node>`.
 - [ ] `fixtures/siphon.sql` updated; SDLC YAML scenario(s) added.
 - [ ] `data_model.md` updated.
 - [ ] `cargo test -p ontology` + `scenario_indexing` green (correct toolchain).

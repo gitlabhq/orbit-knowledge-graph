@@ -37,6 +37,7 @@ members = [
   "crates/named-queries",
   "crates/nats-client",
   "crates/utils",
+  "crates/orbit-versions",
   "crates/integration-tests",
   "crates/duckdb-client",
   "crates/fuzz",

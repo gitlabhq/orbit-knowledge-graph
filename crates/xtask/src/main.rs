@@ -102,7 +102,7 @@ enum MigrationLedgerCommand {
         /// Note recorded on the entry.
         #[arg(long)]
         note: Option<String>,
-        /// Ref whose SCHEMA_VERSION decides bump-vs-amend (default origin/main).
+        /// Ref whose schema pin decides bump-vs-amend (default origin/main).
         #[arg(long)]
         base: Option<String>,
         /// Force amend when the base ref is unavailable.
@@ -118,7 +118,7 @@ enum MigrationLedgerCommand {
         #[arg(long)]
         base: Option<String>,
     },
-    /// Snapshot auxiliary tables and refreshable views without changing SCHEMA_VERSION.
+    /// Snapshot auxiliary tables and refreshable views without changing the schema pin.
     Snapshot,
 }
 
