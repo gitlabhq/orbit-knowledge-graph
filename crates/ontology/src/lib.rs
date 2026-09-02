@@ -766,17 +766,6 @@ impl Ontology {
     #[must_use]
     pub fn min_access_level_for_table(&self, table: &str) -> Option<u32> {
         let normalized = strip_schema_version_prefix(table);
-        if let Some(join) = self.denormalized_join_by_table(normalized) {
-            // The row exposes every node in the chain, so the strictest floor applies.
-            return join
-                .hops
-                .iter()
-                .flat_map(|h| [h.source_kind.as_str(), h.target_kind.as_str()])
-                .filter_map(|kind| {
-                    self.min_access_level_for_table(&self.nodes.get(kind)?.destination_table)
-                })
-                .max();
-        }
         self.nodes
             .values()
             .find(|n| strip_schema_version_prefix(&n.destination_table) == normalized)
@@ -2234,7 +2223,6 @@ mod tests {
                 ("t3_traversal_path".to_string(), Some(20)),
             ]
         );
-        assert_eq!(ontology.min_access_level_for_table(table), Some(25));
         assert!(ontology.is_table_path_scopable(table));
         assert_eq!(
             ontology.traversal_path_columns("gl_merge_request"),
