@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 
 use ontology::constants::*;
+use ontology::denormalized::Side;
 use orbit_utils::traversal_path::TraversalPath;
 
 use crate::ast::*;
@@ -17,10 +18,7 @@ use crate::passes::shared::{
 
 /// Predicates applied after `FINAL` has resolved each node's latest row.
 pub(super) fn latest_node_predicates(alias: &str, np: &NodePlan) -> Vec<Expr> {
-    let mut predicates = Vec::new();
-    for (prop, filter) in &np.filters {
-        predicates.push(filter_to_expr(alias, prop, filter));
-    }
+    let mut predicates = node_property_predicates(alias, np);
     if !np.node_ids.is_empty() {
         predicates.push(id_list_predicate(alias, DEFAULT_PRIMARY_KEY, &np.node_ids));
     }
@@ -29,6 +27,13 @@ pub(super) fn latest_node_predicates(alias: &str, np: &NodePlan) -> Vec<Expr> {
     }
     predicates.push(deleted_false(alias));
     predicates
+}
+
+fn node_property_predicates(alias: &str, np: &NodePlan) -> Vec<Expr> {
+    np.filters
+        .iter()
+        .map(|(prop, filter)| filter_to_expr(alias, prop, filter))
+        .collect()
 }
 
 /// Predicates for a candidate-id prefilter. These run before `FINAL`, so they
@@ -332,6 +337,75 @@ pub(super) fn push_edge_predicates(
 }
 
 // FINAL streams the latest edge version in bounded memory; argMax GROUP BY held every key resident and OOM'd on fat rels.
+/// `startsWith(<alias>.traversal_path, '<prefix>')` for a hop confined to a
+/// project/group scope, or `None` when the hop carries no resolved prefix.
+/// Emitted alongside the broad authorization filter so ClickHouse can seek the
+/// edge PK to the project's contiguous range instead of the whole org.
+pub(super) fn edge_scope_predicate(hop: &Hop, alias: &str) -> Option<Expr> {
+    hop.scope_prefix.as_ref().map(|prefix| {
+        Expr::func(
+            "startsWith",
+            vec![
+                Expr::col(alias, TRAVERSAL_PATH_COLUMN),
+                Expr::string(prefix.as_str()),
+            ],
+        )
+    })
+}
+
+/// Node property filters for a denormalized hop, read from the row's typed
+/// node columns under `alias`. Replaces the edge tag lookups a plain edge
+/// scan would use, since the join table carries the columns themselves.
+pub(super) fn denormalized_node_predicates(
+    alias: &str,
+    hop: &Hop,
+    nodes: &HashMap<String, NodePlan>,
+) -> Vec<Expr> {
+    let Some(denorm) = &hop.denormalized else {
+        return vec![];
+    };
+    [
+        (&denorm.source_node, Side::Source),
+        (&denorm.target_node, Side::Target),
+    ]
+    .into_iter()
+    .filter_map(|(node_alias, side)| nodes.get(node_alias).map(|np| (np, side)))
+    .flat_map(|(np, side)| {
+        np.filters
+            .iter()
+            .map(move |(prop, filter)| filter_to_expr(alias, &side.column_for(prop), filter))
+    })
+    .collect()
+}
+
+/// Latest-row scan of a denormalized hop's join table carrying every predicate
+/// the hop and both endpoints contribute. Both endpoints are answered by this
+/// one scan, so a chain can root on it and join further hops onto its id columns.
+pub(super) fn denormalized_scan(
+    alias: &str,
+    hop: &Hop,
+    nodes: &HashMap<String, NodePlan>,
+    table_columns: &HashMap<String, HashSet<String>>,
+) -> TableRef {
+    let mut where_parts = Vec::new();
+    push_edge_predicates(&mut where_parts, alias, hop, nodes, table_columns, false);
+    for (prop, filter) in &hop.filters {
+        where_parts.push(filter_to_expr(alias, prop, filter));
+    }
+    where_parts.extend(node_id_pin_predicates(alias, hop, nodes));
+    where_parts.extend(denormalized_node_predicates(alias, hop, nodes));
+    where_parts.extend(edge_scope_predicate(hop, alias));
+    TableRef::subquery(
+        Query {
+            select: vec![SelectExpr::star()],
+            from: TableRef::scan_final(&hop.edge_table, alias),
+            where_clause: Expr::conjoin(where_parts),
+            ..Default::default()
+        },
+        alias,
+    )
+}
+
 pub(super) fn dedup_edge_scan(
     edge_table: &str,
     alias: &str,

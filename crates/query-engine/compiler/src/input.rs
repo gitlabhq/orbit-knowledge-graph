@@ -582,6 +582,10 @@ pub struct InputRelationship {
     /// The compiler resolves which node has the column from the edge variant's entity types.
     #[serde(skip)]
     pub fk_column: Option<String>,
+    /// Pre-joined edge+node table answering this hop without joins. Set during
+    /// normalization when the single resolved variant opts in.
+    #[serde(skip)]
+    pub denormalized: Option<DenormalizedEdge>,
     /// Tight `traversal_path` prefix this edge's scan may be confined to. Set by
     /// `restrict` when both endpoints resolve to the same project/group scope, so
     /// the edge scan inherits the PK prefix instead of the broad org-wide one.
@@ -595,6 +599,15 @@ pub struct InputRelationship {
     /// the edge scan (an independent entity like a runner can outlive its edge).
     #[serde(skip)]
     pub scope_preserving: bool,
+}
+
+/// Which query node plays the variant's source and target, since the query
+/// may traverse the edge in either direction.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DenormalizedEdge {
+    pub table: String,
+    pub source_node: String,
+    pub target_node: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

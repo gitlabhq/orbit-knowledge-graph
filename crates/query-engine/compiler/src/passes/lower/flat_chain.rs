@@ -7,9 +7,10 @@ use crate::error::{QueryError, Result};
 
 use super::EmitOutput;
 use super::helpers::{
-    NarrowSource, build_multi_hop_union, dedup_edge_scan, emit_denorm_tags, emit_filter_narrowing,
-    emit_filter_subquery, emit_node_ids_on_edge, emit_node_join_with_narrowing, limit_by_scan,
-    node_id_pin_predicates, push_edge_predicates,
+    NarrowSource, build_multi_hop_union, dedup_edge_scan, denormalized_node_predicates,
+    edge_scope_predicate, emit_denorm_tags, emit_filter_narrowing, emit_filter_subquery,
+    emit_node_ids_on_edge, emit_node_join_with_narrowing, limit_by_scan, node_id_pin_predicates,
+    node_select_columns, push_edge_predicates,
 };
 use crate::passes::plan::*;
 use crate::passes::shared::filter_to_expr;
@@ -59,15 +60,23 @@ fn build_cascade_anchor(plan: &Plan, i: usize, ctes: &[Cte]) -> Option<Query> {
     for (prop, filter) in &prev_hop.filters {
         prev_preds.push(filter_to_expr(&prev_alias_inner, prop, filter));
     }
-    emit_denorm_tags(
-        &mut prev_preds,
-        plan,
-        prev_hop,
-        &prev_alias_inner,
-        prev_start,
-        prev_end,
-        &mut anchor_tags,
-    );
+    if prev_hop.denormalized.is_some() {
+        prev_preds.extend(denormalized_node_predicates(
+            &prev_alias_inner,
+            prev_hop,
+            &plan.nodes,
+        ));
+    } else {
+        emit_denorm_tags(
+            &mut prev_preds,
+            plan,
+            prev_hop,
+            &prev_alias_inner,
+            prev_start,
+            prev_end,
+            &mut anchor_tags,
+        );
+    }
     emit_node_ids_on_edge(
         &mut prev_preds,
         &prev_alias_inner,
@@ -104,22 +113,6 @@ fn build_cascade_anchor(plan: &Plan, i: usize, ctes: &[Cte]) -> Option<Query> {
         from: TableRef::scan(&prev_hop.edge_table, &prev_alias_inner),
         where_clause: Expr::conjoin(prev_preds),
         ..Default::default()
-    })
-}
-
-/// `startsWith(<alias>.traversal_path, '<prefix>')` for a hop confined to a
-/// project/group scope, or `None` when the hop carries no resolved prefix.
-/// Emitted alongside the broad authorization filter so ClickHouse can seek the
-/// edge PK to the project's contiguous range instead of the whole org.
-fn edge_scope_predicate(hop: &Hop, alias: &str) -> Option<Expr> {
-    hop.scope_prefix.as_ref().map(|prefix| {
-        Expr::func(
-            "startsWith",
-            vec![
-                Expr::col(alias, TRAVERSAL_PATH_COLUMN),
-                Expr::string(prefix.as_str()),
-            ],
-        )
     })
 }
 
@@ -174,8 +167,10 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
         let is_multi_hop = hop.max_hops > 1;
 
         // Single-hop aggregation: use LIMIT BY dedup with -If combinators
-        // instead of FINAL.
-        let use_limit_by = is_aggregation && !dedup_edges && !is_multi_hop;
+        // instead of FINAL. A denormalized row changes whenever either node
+        // does, so its filters must run after latest-row resolution.
+        let use_limit_by =
+            is_aggregation && !dedup_edges && !is_multi_hop && hop.denormalized.is_none();
 
         if use_limit_by {
             let Some(sort_key) = plan.table_sort_keys.get(&hop.edge_table) else {
@@ -284,7 +279,11 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
             } else {
                 where_parts.extend(narrow_in);
                 where_parts.extend(edge_scope_predicate(hop, &alias));
-                TableRef::scan(&hop.edge_table, &alias)
+                if hop.denormalized.is_some() {
+                    TableRef::scan_final(&hop.edge_table, &alias)
+                } else {
+                    TableRef::scan(&hop.edge_table, &alias)
+                }
             };
 
             if let Some(prev_from) = from.take() {
@@ -320,15 +319,19 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                 where_parts.push(filter_to_expr(&alias, prop, filter));
             }
 
-            emit_denorm_tags(
-                &mut where_parts,
-                plan,
-                hop,
-                &alias,
-                start_col,
-                end_col,
-                &mut tagged_nodes,
-            );
+            if hop.denormalized.is_some() {
+                where_parts.extend(denormalized_node_predicates(&alias, hop, &plan.nodes));
+            } else {
+                emit_denorm_tags(
+                    &mut where_parts,
+                    plan,
+                    hop,
+                    &alias,
+                    start_col,
+                    end_col,
+                    &mut tagged_nodes,
+                );
+            }
             let used_dedup = dedup_edges && !is_multi_hop;
             if !used_dedup {
                 emit_node_ids_on_edge(
@@ -360,6 +363,10 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
             let Some(np) = plan.nodes.get(node_alias) else {
                 continue;
             };
+            if hop.denormalized.is_some() {
+                selects.extend(node_select_columns(node_alias, np));
+                continue;
+            }
             match np.hydration {
                 HydrationStrategy::Join => {
                     let narrow_source = if np.use_narrowing {

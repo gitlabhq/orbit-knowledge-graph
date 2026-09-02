@@ -14,12 +14,12 @@ use crate::input::Direction;
 
 use super::EmitOutput;
 use super::helpers::{
-    NarrowSource, emit_filter_subquery, emit_node_join_with_narrowing,
+    NarrowSource, denormalized_scan, emit_filter_subquery, emit_node_join_with_narrowing,
     fk_values_from_candidate_scan, latest_node_predicates, node_ids_from_candidate_scan,
     node_select_columns,
 };
 use crate::passes::plan::*;
-use crate::passes::shared::id_list_predicate;
+use crate::passes::shared::{edge_select_columns, id_list_predicate};
 
 pub(super) fn emit_fk(plan: &Plan, shape: &FkShape) -> Result<EmitOutput> {
     match shape {
@@ -420,54 +420,69 @@ fn node_scan(
     ))
 }
 
+/// The chain root is either the first hop's `from` node table or, when the
+/// planner rotated a denormalized hop to the front, that hop's join table scan,
+/// which reaches both of its endpoints at once.
 fn emit_chain(plan: &Plan) -> Result<EmitOutput> {
-    let root_alias = &plan.hops[0].from_node;
-    let root_np = plan
-        .nodes
-        .get(root_alias)
-        .ok_or_else(|| QueryError::Lowering(format!("FK chain root '{root_alias}' not found")))?;
+    let first = &plan.hops[0];
+    let node_plan = |alias: &str| {
+        plan.nodes
+            .get(alias)
+            .ok_or_else(|| QueryError::Lowering(format!("FK chain node '{alias}' not found")))
+    };
 
-    let mut from = node_scan(root_np, plan, plan.hops[0].scope_prefix.as_ref())?;
-    let mut selects = node_select_columns(root_alias, root_np);
+    let mut reached: HashSet<&str> = HashSet::new();
+    let mut selects = Vec::new();
+    let mut from = if first.denormalized.is_some() {
+        for alias in [&first.from_node, &first.to_node] {
+            selects.extend(node_select_columns(alias, node_plan(alias)?));
+            reached.insert(alias.as_str());
+        }
+        denormalized_scan("e0", first, &plan.nodes, &plan.table_columns)
+    } else {
+        let root_np = node_plan(&first.from_node)?;
+        selects.extend(node_select_columns(&first.from_node, root_np));
+        reached.insert(first.from_node.as_str());
+        node_scan(root_np, plan, first.scope_prefix.as_ref())?
+    };
     let mut edge_aliases = Vec::new();
 
-    let mut reached: HashSet<&str> = HashSet::from([root_alias.as_str()]);
     for (i, hop) in plan.hops.iter().enumerate() {
-        let fk = hop
-            .fk
-            .as_ref()
-            .ok_or_else(|| QueryError::Lowering("FK chain hop missing FK metadata".into()))?;
-        // Join whichever endpoint isn't reached yet, so the chain emits in any
-        // orientation without a pre-sort.
-        let new_alias = if reached.contains(hop.from_node.as_str()) {
-            &hop.to_node
-        } else {
-            &hop.from_node
-        };
-        let new_np = plan.nodes.get(new_alias).ok_or_else(|| {
-            QueryError::Lowering(format!("FK chain node '{new_alias}' not found"))
-        })?;
+        if let Some(fk) = hop.fk.as_ref() {
+            // Join whichever endpoint isn't reached yet, so the chain emits in any
+            // orientation without a pre-sort.
+            let new_alias = if reached.contains(hop.from_node.as_str()) {
+                &hop.to_node
+            } else {
+                &hop.from_node
+            };
+            let new_np = node_plan(new_alias)?;
 
-        let on = if fk.fk_node == hop.to_node {
-            Expr::eq(
-                Expr::col(&hop.to_node, &fk.fk_column),
-                Expr::col(&hop.from_node, DEFAULT_PRIMARY_KEY),
-            )
-        } else {
-            Expr::eq(
-                Expr::col(&hop.from_node, &fk.fk_column),
-                Expr::col(&hop.to_node, DEFAULT_PRIMARY_KEY),
-            )
-        };
-        from = TableRef::join(
-            JoinType::Inner,
-            from,
-            node_scan(new_np, plan, hop.scope_prefix.as_ref())?,
-            on,
-        );
-        selects.extend(node_select_columns(new_alias, new_np));
-        reached.insert(hop.from_node.as_str());
-        reached.insert(hop.to_node.as_str());
+            let on = if fk.fk_node == hop.to_node {
+                Expr::eq(
+                    Expr::col(&hop.to_node, &fk.fk_column),
+                    Expr::col(&hop.from_node, DEFAULT_PRIMARY_KEY),
+                )
+            } else {
+                Expr::eq(
+                    Expr::col(&hop.from_node, &fk.fk_column),
+                    Expr::col(&hop.to_node, DEFAULT_PRIMARY_KEY),
+                )
+            };
+            from = TableRef::join(
+                JoinType::Inner,
+                from,
+                node_scan(new_np, plan, hop.scope_prefix.as_ref())?,
+                on,
+            );
+            selects.extend(node_select_columns(new_alias, new_np));
+            reached.insert(hop.from_node.as_str());
+            reached.insert(hop.to_node.as_str());
+        } else if hop.denormalized.is_none() {
+            return Err(QueryError::Lowering(
+                "FK chain hop has neither FK metadata nor a denormalized table".into(),
+            ));
+        }
 
         // Aggregations group by node properties only; per-hop edge columns would
         // be unaggregated SELECT items. Emit them solely for traversal output.
@@ -475,9 +490,15 @@ fn emit_chain(plan: &Plan) -> Result<EmitOutput> {
             continue;
         }
 
+        let ea = format!("e{i}");
+        if hop.denormalized.is_some() {
+            selects.extend(edge_select_columns(&ea));
+            edge_aliases.push(ea);
+            continue;
+        }
+
         // Emit edges in physical (source->target) orientation so a reversed hop
         // still reports the same orientation as the edge-scan path.
-        let ea = format!("e{i}");
         let (src_node, dst_node) = match hop.direction {
             Direction::Incoming => (&hop.to_node, &hop.from_node),
             Direction::Outgoing | Direction::Both => (&hop.from_node, &hop.to_node),

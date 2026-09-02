@@ -405,6 +405,7 @@ mod tests {
             direction: crate::input::Direction::Outgoing,
             filters: std::collections::HashMap::new(),
             fk_column: None,
+            denormalized: None,
             scope_prefix: None,
             scope_preserving: false,
         }
@@ -1196,6 +1197,7 @@ mod tests {
             direction: crate::input::Direction::Outgoing,
             filters: std::collections::HashMap::new(),
             fk_column: None,
+            denormalized: None,
             scope_prefix: None,
             scope_preserving: false,
         }
