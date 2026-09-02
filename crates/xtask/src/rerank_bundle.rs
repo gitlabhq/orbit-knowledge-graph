@@ -7,23 +7,43 @@ use std::process::Command;
 use anyhow::{Context, Result, bail};
 use safetensors::tensor::TensorView;
 use safetensors::{Dtype, SafeTensors};
+use sha2::{Digest, Sha256};
 
-pub const DEFAULT_MODEL: &str = "cross-encoder/ms-marco-MiniLM-L2-v2";
+pub const MODEL: &str = "cross-encoder/ms-marco-MiniLM-L2-v2";
+/// Upstream commit the scores were validated against; `main` is mutable.
+const REVISION: &str = "1b5cd67b15209f24824c50370e0397743aa9b787";
 const HUB_BASE: &str = "https://huggingface.co";
-const FILES: [&str; 3] = ["config.json", "tokenizer.json", "model.safetensors"];
+const FILES: [(&str, &str); 3] = [
+    (
+        "config.json",
+        "7868e36c3024c21f7a3ac64e058b36898a331035784cce7ec1496b434aa44c4f",
+    ),
+    (
+        "tokenizer.json",
+        "d241a60d5e8f04cc1b2b3e9ef7a4921b27bf526d9f6050ab90f9267a1f9e5c66",
+    ),
+    (
+        "model.safetensors",
+        "88f11fa671e11c53b5cfe88bb6594139ec4991eaf8cf6a10bd61c9abbc4f691a",
+    ),
+];
 
-pub fn run(model: &str, out: Option<&Path>) -> Result<()> {
+pub fn run(out: Option<&Path>) -> Result<()> {
     let out = out.map_or_else(default_out, Path::to_path_buf);
     let marker = out.join("MODEL");
-    if std::fs::read_to_string(&marker).is_ok_and(|m| m.trim() == model)
-        && FILES.iter().all(|f| out.join(f).is_file())
+    let stamp = format!("{MODEL}@{REVISION}\n");
+    if std::fs::read_to_string(&marker).is_ok_and(|m| m == stamp)
+        && FILES.iter().all(|(f, _)| out.join(f).is_file())
     {
-        println!("bundle for {model} already present in {}", out.display());
+        println!(
+            "bundle for {MODEL}@{REVISION} already present in {}",
+            out.display()
+        );
         return Ok(());
     }
     std::fs::create_dir_all(&out)?;
-    for file in FILES {
-        let url = format!("{HUB_BASE}/{model}/resolve/main/{file}");
+    for (file, sha256) in FILES {
+        let url = format!("{HUB_BASE}/{MODEL}/resolve/{REVISION}/{file}");
         let target = out.join(file);
         let status = Command::new("curl")
             .args(["-sSfL", "--retry", "3", "-o"])
@@ -34,14 +54,21 @@ pub fn run(model: &str, out: Option<&Path>) -> Result<()> {
         if !status.success() {
             bail!("failed to download {url}");
         }
+        let actual: String = Sha256::digest(std::fs::read(&target)?)
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        if actual != sha256 {
+            bail!("{file} from {url} has sha256 {actual}, expected {sha256}");
+        }
     }
     let weights = out.join("model.safetensors");
     let f32_bytes = std::fs::read(&weights)?;
     let f16_bytes = to_f16(&f32_bytes)?;
     std::fs::write(&weights, &f16_bytes)?;
-    std::fs::write(&marker, format!("{model}\n"))?;
+    std::fs::write(&marker, stamp)?;
     println!(
-        "bundled {model} into {} ({} -> {} bytes of weights)",
+        "bundled {MODEL}@{REVISION} into {} ({} -> {} bytes of weights)",
         out.display(),
         f32_bytes.len(),
         f16_bytes.len()

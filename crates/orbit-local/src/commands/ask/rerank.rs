@@ -1,9 +1,9 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use orbit_search::{CorpusRow, Reranker};
 
-/// The header carries the identifier and file; the opening lines carry the signature.
 const PASSAGE_LINES: usize = 12;
 const PASSAGE_LINE_CHARS: usize = 200;
 
@@ -13,7 +13,6 @@ pub(super) struct CrossEncoder {
 }
 
 impl CrossEncoder {
-    /// `ORBIT_RERANK_MODEL_DIR` (experiments) beats the model embedded at build time.
     pub(super) fn load(root: &Path) -> Result<Self> {
         let model = match std::env::var_os("ORBIT_RERANK_MODEL_DIR").filter(|d| !d.is_empty()) {
             Some(dir) => orbit_rerank::Reranker::load_dir(Path::new(&dir))
@@ -26,16 +25,21 @@ impl CrossEncoder {
         })
     }
 
-    fn passage(&self, row: &CorpusRow) -> String {
+    fn passage(&self, row: &CorpusRow, files: &mut HashMap<String, Option<String>>) -> String {
         let (path, start) = row
             .loc
             .rsplit_once(':')
             .and_then(|(p, l)| l.parse::<usize>().ok().map(|l| (p, l)))
             .unwrap_or((row.loc.as_str(), 0));
         let mut text = format!("{} {} in {path}", row.kind, row.fqn);
-        for (_, line) in super::source_lines(&self.root, path, start, row.end_line, PASSAGE_LINES) {
-            text.push('\n');
-            text.extend(line.trim().chars().take(PASSAGE_LINE_CHARS));
+        let content = files
+            .entry(path.to_string())
+            .or_insert_with(|| std::fs::read_to_string(self.root.join(path)).ok());
+        if let Some(content) = content {
+            for (_, line) in super::slice_lines(content, start, row.end_line, PASSAGE_LINES) {
+                text.push('\n');
+                text.extend(line.trim().chars().take(PASSAGE_LINE_CHARS));
+            }
         }
         text
     }
@@ -43,7 +47,8 @@ impl CrossEncoder {
 
 impl Reranker for CrossEncoder {
     fn rescore(&self, question: &str, rows: &[CorpusRow]) -> Vec<f64> {
-        let passages: Vec<String> = rows.iter().map(|r| self.passage(r)).collect();
+        let mut files = HashMap::new();
+        let passages: Vec<String> = rows.iter().map(|r| self.passage(r, &mut files)).collect();
         match self.model.score(question, &passages) {
             Ok(scores) => scores.into_iter().map(f64::from).collect(),
             Err(err) => {

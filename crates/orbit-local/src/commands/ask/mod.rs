@@ -241,12 +241,21 @@ fn source_lines(
     end_line: i64,
     max_lines: usize,
 ) -> Vec<(usize, String)> {
+    match std::fs::read_to_string(root.join(path)) {
+        Ok(content) => slice_lines(&content, start, end_line, max_lines),
+        Err(_) => Vec::new(),
+    }
+}
+
+fn slice_lines(
+    content: &str,
+    start: usize,
+    end_line: i64,
+    max_lines: usize,
+) -> Vec<(usize, String)> {
     if start == 0 {
         return Vec::new();
     }
-    let Ok(content) = std::fs::read_to_string(root.join(path)) else {
-        return Vec::new();
-    };
     let last = usize::try_from(end_line)
         .ok()
         .filter(|&e| e >= start)

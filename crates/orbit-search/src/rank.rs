@@ -46,16 +46,32 @@ pub fn rank_and_trim(
     dedupe_by_parent(hits, corpus, limit)
 }
 
-/// Lexical scores stay on the hits: they still drive confidence and seed weights.
+const RRF_K: f64 = 60.0;
+
 fn reorder(hits: &mut [Hit], scores: &[f64]) {
     if scores.len() != hits.len() {
         return;
     }
-    let mut order: Vec<usize> = (0..hits.len()).collect();
-    order.sort_by(|&a, &b| {
+    let mut by_score: Vec<usize> = (0..hits.len()).collect();
+    by_score.sort_by(|&a, &b| {
         scores[b]
             .partial_cmp(&scores[a])
             .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    let mut fused = vec![0.0; hits.len()];
+    for (rerank_pos, &i) in by_score.iter().enumerate() {
+        fused[i] = 1.0 / (RRF_K + i as f64) + 1.0 / (RRF_K + rerank_pos as f64);
+    }
+    let mut order: Vec<usize> = (0..hits.len()).collect();
+    order.sort_by(|&a, &b| {
+        hits[b]
+            .confident()
+            .cmp(&hits[a].confident())
+            .then_with(|| {
+                fused[b]
+                    .partial_cmp(&fused[a])
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
             .then_with(|| a.cmp(&b))
     });
     let reordered: Vec<Hit> = order.iter().map(|&i| hits[i].clone()).collect();
@@ -268,34 +284,27 @@ mod tests {
     }
 
     #[test]
-    fn rerank_reorders_the_candidate_pool_before_the_parent_cap() {
+    fn rerank_fuses_with_lexical_order_and_keeps_confident_hits_on_top() {
         let corpus = vec![
             row(1, "A::first"),
-            row(2, "A::second"),
-            row(3, "A::third"),
-            row(4, "B::other"),
+            row(2, "B::second"),
+            row(3, "C::third"),
+            row(4, "D::fourth"),
+            row(5, "E::fifth"),
         ];
-        let sims = vec![vec![1.0], vec![0.9], vec![0.8], vec![0.7]];
-        let lexical = rank_and_trim(&corpus, &sims, &[1.0], 2, "q", None);
-        assert_eq!(
-            lexical.iter().map(|h| h.index).collect::<Vec<_>>(),
-            vec![0, 1]
-        );
-
-        struct Flip;
-        impl Reranker for Flip {
+        let sims = vec![vec![1.0], vec![1.0], vec![0.9], vec![0.8], vec![0.7]];
+        struct FavourLast;
+        impl Reranker for FavourLast {
             fn rescore(&self, _: &str, rows: &[CorpusRow]) -> Vec<f64> {
-                rows.iter().map(|r| r.id as f64).collect()
+                rows.iter()
+                    .map(|r| if r.id == 5 { 10.0 } else { 0.0 })
+                    .collect()
             }
         }
-        let reranked = rank_and_trim(&corpus, &sims, &[1.0], 2, "q", Some(&Flip));
-        assert_eq!(
-            reranked.iter().map(|h| h.index).collect::<Vec<_>>(),
-            vec![3, 2]
-        );
-        assert!(
-            reranked[0].score < reranked[1].score,
-            "lexical scores must survive the reorder untouched"
-        );
+        let hits = rank_and_trim(&corpus, &sims, &[1.0], 5, "q", Some(&FavourLast));
+        let order: Vec<usize> = hits.iter().map(|h| h.index).collect();
+        // Rows 1 and 2 are confident exact matches and stay first whatever the
+        // reranker says; row 5 rises past 3 and 4 but fusion stops it short of them.
+        assert_eq!(order, vec![0, 1, 4, 2, 3]);
     }
 }
