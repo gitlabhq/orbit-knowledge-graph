@@ -10,4 +10,6 @@ pub enum DuckDbError {
     Arrow(#[from] arrow::error::ArrowError),
     #[error("schema error: {0}")]
     Schema(String),
+    #[error("failed to load extension: {0}")]
+    LoadExtension(#[from] std::io::Error),
 }

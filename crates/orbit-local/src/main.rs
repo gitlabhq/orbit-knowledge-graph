@@ -1027,7 +1027,7 @@ fn index_repo(
         duckdb_client::DuckDbClient::open(db_path).context("failed to open DuckDB for status")?;
     let doc_table = duckdb_client::search::def_doc_table(git.project_id);
     client
-        .load_fts()
+        .load_extension("fts")
         .context("failed to load the DuckDB fts extension")?;
     client
         .execute(
