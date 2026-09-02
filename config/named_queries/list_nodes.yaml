@@ -1,0 +1,15 @@
+name: list_nodes
+description: A sample of nodes of one entity type, for showing an entity type on the map.
+parameters:
+  entity:
+    schema: { type: string }
+    example: MergeRequest
+query:
+  query_type: traversal
+  nodes:
+    - id: n
+      entity: { $param: entity }
+      columns: "*"
+      filters:
+        id: { gt: 0 }
+  limit: 50
