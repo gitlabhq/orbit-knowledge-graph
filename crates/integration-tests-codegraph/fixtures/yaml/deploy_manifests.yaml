@@ -1,0 +1,120 @@
+name: "YAML: ArgoCD applications, Helm charts, values, and Compose services"
+
+fixtures:
+  - path: apps/gkg.yaml
+    content: |
+      apiVersion: argoproj.io/v1alpha1
+      kind: Application
+      metadata:
+        name: gkg
+      spec:
+        sources:
+          - repoURL: https://gitlab.com/gitlab-org/orbit/orbit-helm-charts.git
+            path: chart
+            targetRevision: v1.2.3
+          - repoURL: https://charts.bitnami.com/bitnami
+            chart: redis
+  - path: apps/plain.yaml
+    content: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: web
+      spec:
+        source:
+          repoURL: https://example.com/not-argo.git
+  - path: chart/Chart.yaml
+    content: |
+      apiVersion: v2
+      name: gkg
+      version: 0.1.0
+      dependencies:
+        - name: redis
+          version: ~17.0.0
+          repository: https://charts.bitnami.com/bitnami
+  - path: chart/values.yaml
+    content: |
+      image:
+        tag: "1.0"
+      indexer:
+        env:
+          - name: RUST_LOG
+  - path: docker-compose.yml
+    content: |
+      services:
+        postgres:
+          image: postgres:16
+      volumes:
+        pgdata: {}
+      networks:
+        backend: {}
+
+tests:
+  - name: "Only argoproj.io Application manifests yield an ArgoCdApplication"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'ArgoCdApplication'
+      RETURN d.fqn AS fqn, d.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: gkg, file: "apps/gkg.yaml" } }
+
+  - name: "A plain Deployment with a source block is left alone"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'apps/plain.yaml'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 0 }
+
+  - name: "ArgoCD sources become imports keyed by repoURL"
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.import_type = 'ArgoCdSource'
+      RETURN i.path AS path, i.name AS name, i.alias AS alias
+    assert:
+      - { row_count: 2 }
+      - { row: { path: "https://gitlab.com/gitlab-org/orbit/orbit-helm-charts.git", name: chart, alias: "v1.2.3" } }
+      - { row: { path: "https://charts.bitnami.com/bitnami", name: redis, alias: null } }
+
+  - name: "Chart.yaml yields the chart and its dependencies"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'HelmChart'
+      RETURN d.fqn AS fqn, d.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: gkg, file: "chart/Chart.yaml" } }
+
+  - name: "Helm dependencies become imports"
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.import_type = 'HelmChartDependency'
+      RETURN i.path AS path, i.name AS name, i.alias AS alias
+    assert:
+      - { row_count: 1 }
+      - { row: { path: redis, name: "https://charts.bitnami.com/bitnami", alias: "~17.0.0" } }
+
+  - name: "values.yaml indexes every key at every depth with dotted FQNs"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'HelmValue'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 5 }
+      - { row: { fqn: image } }
+      - { row: { fqn: "image.tag" } }
+      - { row: { fqn: indexer } }
+      - { row: { fqn: "indexer.env" } }
+      - { row: { fqn: "indexer.env.name" } }
+
+  - name: "Compose sections yield typed named children"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'docker-compose.yml'
+      RETURN d.definition_type AS type, d.fqn AS fqn
+    assert:
+      - { row_count: 3 }
+      - { row: { type: ComposeService, fqn: "services.postgres" } }
+      - { row: { type: ComposeVolume, fqn: "volumes.pgdata" } }
+      - { row: { type: ComposeNetwork, fqn: "networks.backend" } }

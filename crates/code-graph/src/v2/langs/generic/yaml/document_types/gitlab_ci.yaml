@@ -6,7 +6,7 @@
 # alias = pinned ref or component version.
 name: gitlab_ci
 match:
-  filename_suffixes: [".gitlab-ci.yml", ".gitlab-ci.yaml"]
+  filename_suffixes: [.gitlab-ci.yml, .gitlab-ci.yaml]
 keywords: [default, include, stages, variables, workflow, spec,
            image, services, cache, before_script, after_script, types]
 definitions:

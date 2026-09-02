@@ -3,7 +3,7 @@
 # name, name = repository URL, alias = pinned version constraint.
 name: helm_chart
 match:
-  filename_suffixes: ["Chart.yaml", "Chart.yml"]
+  filename_suffixes: [Chart.yaml, Chart.yml]
 definitions:
   - type: HelmChart
     value_of: name
