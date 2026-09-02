@@ -20,10 +20,8 @@ fn validate_migration_ledger() {
     let config_dir = std::path::PathBuf::from(env!("CONFIG_DIR"));
     let ledger_path = config_dir.join(ontology::migrations::LEDGER_FILE);
     let fingerprint_path = config_dir.join(ontology::migrations::FINGERPRINT_FILE);
-    let version_path = config_dir.join("SCHEMA_VERSION");
     println!("cargo:rerun-if-changed={}", ledger_path.display());
     println!("cargo:rerun-if-changed={}", fingerprint_path.display());
-    println!("cargo:rerun-if-changed={}", version_path.display());
     println!("cargo:rerun-if-changed={}/ontology", config_dir.display());
 
     let ontology = ontology::Ontology::load_embedded()
@@ -44,11 +42,7 @@ fn validate_migration_ledger() {
     let committed = ontology::migrations::Fingerprints::parse(&committed_text)
         .unwrap_or_else(|e| panic!("{e}"));
 
-    let version: u32 = std::fs::read_to_string(&version_path)
-        .unwrap_or_else(|e| panic!("reading {}: {e}", version_path.display()))
-        .trim()
-        .parse()
-        .unwrap_or_else(|e| panic!("{} must contain a u32: {e}", version_path.display()));
+    let version = orbit_versions::VERSIONS.schema;
 
     let ledger_text = std::fs::read_to_string(&ledger_path)
         .unwrap_or_else(|e| panic!("reading {}: {e}", ledger_path.display()));

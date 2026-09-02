@@ -55,18 +55,14 @@ pre-commit:
     - name: ontology-schema
       run: mise run ontology:validate
       glob: "fixtures/ontology/**/*.yaml"
-    - name: response-schema-version-check
-      run: bash ./scripts/check-response-schema-version.sh
+    - name: pinned-version-check
+      run: bash ./scripts/check-pinned-version.sh
       glob:
-        - "crates/query-engine/formatters/src/graph.rs"
-        - "crates/query-engine/formatters/src/lib.rs"
+        - "crates/query-engine/formatters/src/**/*.rs"
+        - "crates/query-engine/compiler/src/input.rs"
+        - "crates/query-engine/compiler/src/passes/validate.rs"
         - "config/schemas/query_response.json"
-    - name: goon-format-version-check
-      run: bash ./scripts/check-goon-format-version.sh
-      glob:
-        - "crates/query-engine/formatters/src/goon/**/*.rs"
-        - "crates/query-engine/formatters/src/graph.rs"
-        - "crates/query-engine/formatters/src/lib.rs"
+        - "config/schemas/graph_query.schema.json"
     - name: metrics-catalog-check
       run: mise run metrics:catalog:check
       glob:

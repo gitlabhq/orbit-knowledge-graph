@@ -47,6 +47,7 @@ schemars = { workspace = true }
 clickhouse = { workspace = true }
 clickhouse-client = { path = "../clickhouse-client" }
 orbit-utils = { path = "../utils" }
+orbit-versions = { path = "../orbit-versions" }
 query-engine = { path = "../query-engine" }
 
 [dev-dependencies]

@@ -9,7 +9,6 @@ use base64::engine::general_purpose::STANDARD_NO_PAD;
 use serde::Serialize;
 
 const PAYLOAD_VERSION: u32 = 1;
-const QUERY_DSL_VERSION: &str = include_str!(concat!(env!("CONFIG_DIR"), "/QUERY_DSL_VERSION"));
 
 #[derive(Serialize)]
 struct AttributionPayload<'a> {
@@ -54,7 +53,7 @@ pub(crate) fn log_comment_base(user_id: u64, query_json: &str) -> String {
         query: query_json,
         versions: Versions {
             payload: PAYLOAD_VERSION,
-            dsl: QUERY_DSL_VERSION.trim().to_string(),
+            dsl: orbit_versions::VERSIONS.query_dsl.clone(),
             schema: *indexer::schema::version::SCHEMA_VERSION,
         },
     };
@@ -164,7 +163,7 @@ mod tests {
         assert_eq!(p["user_id"], 42);
         assert_eq!(p["query"], r#"{"query_type":"traversal"}"#);
         assert_eq!(p["versions"]["payload"], PAYLOAD_VERSION);
-        assert_eq!(p["versions"]["dsl"], QUERY_DSL_VERSION.trim());
+        assert_eq!(p["versions"]["dsl"], orbit_versions::VERSIONS.query_dsl);
         assert_eq!(
             p["versions"]["schema"],
             *indexer::schema::version::SCHEMA_VERSION

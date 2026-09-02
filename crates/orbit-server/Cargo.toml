@@ -29,6 +29,7 @@ orbit-observability = { workspace = true }
 orbit-prompts = { path = "../orbit-prompts" }
 orbit-server-config = { path = "../orbit-server-config" }
 orbit-utils = { path = "../utils" }
+orbit-versions = { path = "../orbit-versions" }
 health-check = { workspace = true }
 indexer = { path = "../indexer" }
 minijinja = { workspace = true }
@@ -67,6 +68,7 @@ compiler = { path = "../query-engine/compiler" }
 orbit-prompts = { path = "../orbit-prompts" }
 named-queries = { path = "../named-queries" }
 ontology = { path = "../ontology" }
+orbit-versions = { path = "../orbit-versions" }
 tower = { workspace = true }
 tonic-prost-build = { workspace = true }
 

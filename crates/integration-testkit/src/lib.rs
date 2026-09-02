@@ -28,33 +28,15 @@ pub fn load_ontology() -> ontology::Ontology {
 
 pub const SIPHON_SCHEMA_SQL: &str = include_str!(concat!(env!("FIXTURES_DIR"), "/siphon.sql"));
 
-pub const SCHEMA_VERSION: u32 =
-    const_parse_version(include_str!(concat!(env!("CONFIG_DIR"), "/SCHEMA_VERSION")).as_bytes());
-
 /// Version 0 -> "" (empty), version N -> "vN_".
-pub static TABLE_PREFIX: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
-    if SCHEMA_VERSION == 0 {
-        String::new()
-    } else {
-        format!("v{SCHEMA_VERSION}_")
-    }
-});
+pub static TABLE_PREFIX: std::sync::LazyLock<String> =
+    std::sync::LazyLock::new(|| match orbit_versions::VERSIONS.schema {
+        0 => String::new(),
+        v => format!("v{v}_"),
+    });
 
 pub fn t(table: &str) -> String {
     format!("{}{}", *TABLE_PREFIX, table)
-}
-
-const fn const_parse_version(bytes: &[u8]) -> u32 {
-    let mut n: u32 = 0;
-    let mut i = 0;
-    while i < bytes.len() {
-        let b = bytes[i];
-        if b >= b'0' && b <= b'9' {
-            n = n * 10 + (b - b'0') as u32;
-        }
-        i += 1;
-    }
-    n
 }
 
 /// Generated from the ontology so integration tests create the same prefixed
