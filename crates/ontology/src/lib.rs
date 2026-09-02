@@ -991,10 +991,9 @@ impl Ontology {
         &self,
         edge: &EdgeEntity,
     ) -> Option<denormalized::DenormalizedJoinTable> {
-        let edge_table = self.edge_table_config(&edge.destination_table)?;
         let source = self.nodes.get(&edge.source_kind)?;
         let target = self.nodes.get(&edge.target_kind)?;
-        denormalized::DenormalizedJoinTable::build(edge, edge_table, source, target)
+        denormalized::DenormalizedJoinTable::build(edge, source, target)
     }
 
     /// Returns `(fk_column, anchor_entity)` pairs derived from

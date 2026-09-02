@@ -1,18 +1,21 @@
 //! Denormalized join tables: a pre-joined `gl_denorm_*` table per opted-in
-//! edge variant. Its columns are the edge table's structural columns followed
-//! by every storage column of both endpoint nodes under a side prefix, so the
-//! compiler's edge-chain lowering can scan it exactly like an edge table while
-//! reading node properties from the same row. Three `TO`-style materialized
-//! views (one per source table: edge, source node, target node) keep it
-//! current; a change to any side re-emits the affected rows and the
-//! `ReplacingMergeTree` keeps the latest `_version`.
+//! edge variant. Its columns are the edge table's columns followed by every
+//! column of both endpoint nodes under a side prefix, so the compiler's
+//! edge-chain lowering can scan it exactly like an edge table while reading
+//! node properties from the same row. Three `TO`-style materialized views (one
+//! per source table: edge, source node, target node) keep it current; a change
+//! to any side re-emits the affected rows and the `ReplacingMergeTree` keeps
+//! the latest `_version`.
+//!
+//! This module only names the parts and fixes the column-naming contract. The
+//! DDL generator composes the actual table from the generated definitions of
+//! the three source tables.
 
-use crate::EdgeTableConfig;
 use crate::constants::{
     DEFAULT_PRIMARY_KEY, DELETED_COLUMN, SOURCE_ID_COLUMN, TARGET_ID_COLUMN, TRAVERSAL_PATH_COLUMN,
     VERSION_COLUMN,
 };
-use crate::entities::{EdgeEntity, NodeEntity, StorageColumn};
+use crate::entities::{EdgeEntity, NodeEntity};
 
 pub const SOURCE_PREFIX: &str = "src_";
 pub const TARGET_PREFIX: &str = "tgt_";
@@ -87,10 +90,19 @@ impl Side {
             format!("{}{node_column}", self.prefix())
         }
     }
+
+    /// Inverse of [`Side::column_for`] for prefixed columns: which side a
+    /// join-table column was copied from, and the node column it came from.
+    #[must_use]
+    pub fn of_column(column: &str) -> Option<(Side, &str)> {
+        [Side::Source, Side::Target]
+            .into_iter()
+            .find_map(|side| column.strip_prefix(side.prefix()).map(|c| (side, c)))
+    }
 }
 
-/// Column layout and provenance for one denormalized join table. Built on
-/// demand from the edge variant, its edge table, and its two node entities.
+/// The parts of one denormalized join table: the three source tables and the
+/// side whose id leads the sort key.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DenormalizedJoinTable {
     pub table: String,
@@ -100,22 +112,13 @@ pub struct DenormalizedJoinTable {
     pub source_table: String,
     pub target_kind: String,
     pub target_table: String,
-    /// The side whose id leads the sort key after `traversal_path`. This is
-    /// the scoped side when exactly one side is scoped, else the source.
+    /// The scoped side when exactly one side is scoped, else the source.
     pub anchor: Side,
-    /// The edge table's structural columns, copied verbatim so the table
-    /// answers every predicate an edge scan would.
-    pub edge_columns: Vec<StorageColumn>,
-    /// Node storage columns copied under [`SOURCE_PREFIX`], in DDL order.
-    pub source_columns: Vec<StorageColumn>,
-    /// Node storage columns copied under [`TARGET_PREFIX`], in DDL order.
-    pub target_columns: Vec<StorageColumn>,
 }
 
 impl DenormalizedJoinTable {
     pub(crate) fn build(
         edge: &EdgeEntity,
-        edge_table: &EdgeTableConfig,
         source: &NodeEntity,
         target: &NodeEntity,
     ) -> Option<Self> {
@@ -134,9 +137,6 @@ impl DenormalizedJoinTable {
             target_kind: edge.target_kind.clone(),
             target_table: target.destination_table.clone(),
             anchor,
-            edge_columns: edge_table.storage.columns.clone(),
-            source_columns: copyable_columns(source),
-            target_columns: copyable_columns(target),
         })
     }
 
@@ -149,23 +149,17 @@ impl DenormalizedJoinTable {
             self.anchor.other().id_column().to_string(),
         ]
     }
-}
 
-/// Node columns worth copying: everything except `id` (already the edge's
-/// `source_id`/`target_id`), the edge-owned `traversal_path`, and the system
-/// columns the join table declares once.
-fn copyable_columns(node: &NodeEntity) -> Vec<StorageColumn> {
-    node.storage
-        .columns
-        .iter()
-        .filter(|c| {
-            !matches!(
-                c.name.as_str(),
-                DEFAULT_PRIMARY_KEY | TRAVERSAL_PATH_COLUMN | VERSION_COLUMN | DELETED_COLUMN
-            )
-        })
-        .cloned()
-        .collect()
+    /// Whether a node column is copied into the join table. `id` is already
+    /// the edge's `source_id`/`target_id`; `traversal_path` is the edge's; the
+    /// system columns are declared once for the joined row.
+    #[must_use]
+    pub fn copies_node_column(column: &str) -> bool {
+        !matches!(
+            column,
+            DEFAULT_PRIMARY_KEY | TRAVERSAL_PATH_COLUMN | VERSION_COLUMN | DELETED_COLUMN
+        )
+    }
 }
 
 #[cfg(test)]
@@ -189,5 +183,7 @@ mod tests {
         assert_eq!(Side::Source.column_for("id"), "source_id");
         assert_eq!(Side::Target.column_for("id"), "target_id");
         assert_eq!(Side::Target.column_for("title"), "tgt_title");
+        assert_eq!(Side::of_column("tgt_title"), Some((Side::Target, "title")));
+        assert_eq!(Side::of_column("source_id"), None);
     }
 }

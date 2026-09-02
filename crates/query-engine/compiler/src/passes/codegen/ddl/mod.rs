@@ -73,21 +73,33 @@ pub fn generate_graph_tables_with_prefix(ontology: &Ontology, prefix: &str) -> V
         .iter()
         .filter(|table| table.versioned)
     {
-        tables.push(build_auxiliary_table(aux).with_prefix(prefix));
+        tables.push(build_auxiliary_table(aux));
     }
     for node in ontology.nodes() {
-        tables.push(build_node_table(node, partition).with_prefix(prefix));
+        tables.push(build_node_table(node, partition));
     }
     for name in ontology.edge_tables() {
         if let Some(config) = ontology.edge_table_config(name) {
-            tables.push(build_edge_table(name, config, partition).with_prefix(prefix));
+            tables.push(build_edge_table(name, config, partition));
         }
     }
-    for mat in ontology.denormalized_join_tables() {
-        tables.push(denormalized::build_table(&mat).with_prefix(prefix));
+    // Join tables are composed from the definitions above, so they come last.
+    for denorm in ontology.denormalized_join_tables() {
+        let find = |name: &str| {
+            tables
+                .iter()
+                .find(|t| t.name == name)
+                .unwrap_or_else(|| panic!("denormalized join table source '{name}' not generated"))
+        };
+        tables.push(denormalized::build_table(
+            &denorm,
+            find(&denorm.edge_table),
+            find(&denorm.source_table),
+            find(&denorm.target_table),
+        ));
     }
 
-    tables
+    tables.into_iter().map(|t| t.with_prefix(prefix)).collect()
 }
 
 pub struct UnversionedObject {
@@ -164,9 +176,14 @@ pub fn generate_graph_materialized_views_with_prefix(
         .filter(|mv| mv.versioned)
         .map(|mv| build_materialized_view(mv).with_prefix(prefix, &known_tables))
         .collect();
-    for mat in ontology.denormalized_join_tables() {
+    let tables = generate_graph_tables(ontology);
+    for denorm in ontology.denormalized_join_tables() {
+        let table = tables
+            .iter()
+            .find(|t| t.name == denorm.table)
+            .unwrap_or_else(|| panic!("denormalized join table '{}' not generated", denorm.table));
         views.extend(
-            denormalized::build_views(&mat)
+            denormalized::build_views(&denorm, table)
                 .into_iter()
                 .map(|v| v.with_prefix(prefix, &known_tables)),
         );
@@ -187,8 +204,8 @@ fn collect_table_names(ontology: &Ontology) -> Vec<String> {
     for table_name in ontology.edge_tables() {
         names.push(table_name.to_string());
     }
-    for mat in ontology.denormalized_join_tables() {
-        names.push(mat.table);
+    for denorm in ontology.denormalized_join_tables() {
+        names.push(denorm.table);
     }
     names
 }
