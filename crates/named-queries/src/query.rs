@@ -466,7 +466,7 @@ query:
 
     #[test]
     fn render_substitutes_parameter_used_as_object_key() {
-        let query = parse(VALID_WITH_KEY_PARAM).expect("valid template");
+        let query = parse(VALID_WITH_KEY_PARAM).expect("key usage counts as using the parameter");
         let rendered = query
             .render(
                 &values(),
@@ -480,54 +480,29 @@ query:
     }
 
     #[test]
-    fn key_parameter_must_be_declared() {
-        let yaml = r#"
-name: q
-description: A query.
-query:
-  filters:
-    "$param:field": 1
-"#;
-        let err = parse(yaml).unwrap_err();
+    fn key_parameter_rejects_undeclared_non_string_and_colliding_keys() {
+        let undeclared = VALID_WITH_KEY_PARAM.replace(
+            "  field:\n    schema: { type: string, pattern: \"^[a-z_]+$\" }\n    example: name\n",
+            "",
+        );
+        let err = parse(&undeclared).unwrap_err();
         assert!(
             err.to_string()
                 .contains("key uses undeclared parameter `field`"),
             "{err}"
         );
-    }
 
-    #[test]
-    fn key_parameter_must_render_to_a_string() {
-        let yaml = VALID_WITH_KEY_PARAM
+        let non_string = VALID_WITH_KEY_PARAM
             .replace(
                 "schema: { type: string, pattern: \"^[a-z_]+$\" }",
                 "schema: { type: integer }",
             )
             .replace("example: name", "example: 7");
-        let err = parse(&yaml).unwrap_err();
+        let err = parse(&non_string).unwrap_err();
         assert!(err.to_string().contains("must be a string"), "{err}");
-    }
 
-    #[test]
-    fn key_parameter_counts_as_used() {
-        parse(VALID_WITH_KEY_PARAM).expect("key usage satisfies the unused-parameter check");
-    }
-
-    #[test]
-    fn key_parameter_collision_is_rejected() {
-        let yaml = r#"
-name: q
-description: A query.
-parameters:
-  field:
-    schema: { type: string }
-    example: id
-query:
-  filters:
-    id: 1
-    "$param:field": 2
-"#;
-        let err = parse(yaml).unwrap_err();
+        let colliding = VALID_WITH_KEY_PARAM.replace("  filters:\n", "  filters:\n    name: 1\n");
+        let err = parse(&colliding).unwrap_err();
         assert!(err.to_string().contains("collides"), "{err}");
     }
 

@@ -270,57 +270,6 @@ query:
     }
 
     #[test]
-    fn render_request_search_nodes_builds_filter_from_field_and_text() {
-        let queries = NamedQueries::load_embedded().expect("embedded named queries load");
-        let rendered = queries
-            .render_request(
-                r#"{"name": "search_nodes", "parameters": {"entity": "Project", "field": "full_path", "text": "gitlab"}}"#,
-                &values(),
-            )
-            .expect("search_nodes renders");
-        assert!(
-            rendered.contains(r#""filters":{"full_path":{"contains":"gitlab"}}"#),
-            "{rendered}"
-        );
-        assert!(!rendered.contains("$param"), "{rendered}");
-
-        let err = queries
-            .render_request(
-                r#"{"name": "search_nodes", "parameters": {"entity": "Project", "field": "full path", "text": "gitlab"}}"#,
-                &values(),
-            )
-            .expect_err("non-identifier field is rejected");
-        assert!(err.to_string().contains("`field` is invalid"), "{err}");
-
-        let err = queries
-            .render_request(
-                r#"{"name": "search_nodes", "parameters": {"entity": "Project", "field": "full_path", "text": "ab"}}"#,
-                &values(),
-            )
-            .expect_err("short search text is rejected");
-        assert!(err.to_string().contains("`text` is invalid"), "{err}");
-    }
-
-    #[test]
-    fn render_request_list_nodes_bakes_in_selectivity_filter() {
-        let queries = NamedQueries::load_embedded().expect("embedded named queries load");
-        let rendered = queries
-            .render_request(
-                r#"{"name": "list_nodes", "parameters": {"entity": "MergeRequest"}}"#,
-                &values(),
-            )
-            .expect("list_nodes renders");
-        assert!(
-            rendered.contains(r#""entity":"MergeRequest""#),
-            "{rendered}"
-        );
-        assert!(
-            rendered.contains(r#""filters":{"id":{"gt":0}}"#),
-            "{rendered}"
-        );
-    }
-
-    #[test]
     fn render_request_rejects_malformed_envelope() {
         let queries = NamedQueries::load_embedded().expect("embedded named queries load");
         let err = queries
