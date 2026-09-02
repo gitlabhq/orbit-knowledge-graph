@@ -1,12 +1,15 @@
-# GitLab CI configuration. Root entries are either global keywords or
-# author-named jobs (hidden `.template` jobs included); global variables
-# and stages are named children; `include:` statements become imports.
+# GitLab CI configuration, including `.gitlab-ci-*.yml` fragments that
+# local includes pull in.
+# Root entries are either global keywords or author-named jobs (hidden
+# `.template` jobs included); global variables and stages are named
+# children; `include:` statements become imports.
 # Import columns: path = source (project path, component spec, template
 # name, local path, or URL), name = file within a project include,
 # alias = pinned ref or component version.
 name: gitlab_ci
 match:
   filename_suffixes: [.gitlab-ci.yml, .gitlab-ci.yaml]
+  filename_prefixes: [.gitlab-ci]
 keywords: [default, include, stages, variables, workflow, spec,
            image, services, cache, before_script, after_script, types]
 definitions:

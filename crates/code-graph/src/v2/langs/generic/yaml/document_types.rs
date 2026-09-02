@@ -9,6 +9,7 @@ use super::{
 use crate::v2::types::{
     CanonicalDefinition, CanonicalImport, DefKind, Fqn, ImportBindingKind, ImportMode, Range,
 };
+use std::collections::HashSet;
 use treesitter_visit::Axis::*;
 use treesitter_visit::Match::*;
 
@@ -179,7 +180,14 @@ fn emit_shape(
                 push_definition(defs, rule, &[&name], document.as_ref().unwrap_or(pair), sep);
             }
         }
-        Shape::AllKeys(_) => emit_key_tree(rule, pair, &mut vec![key.to_string()], defs, sep),
+        Shape::AllKeys(_) => emit_key_tree(
+            rule,
+            pair,
+            &mut vec![key.to_string()],
+            &mut HashSet::new(),
+            defs,
+            sep,
+        ),
     }
 }
 
@@ -187,11 +195,14 @@ fn emit_key_tree(
     rule: &'static DefinitionRule,
     pair: &N<'_>,
     path: &mut Vec<String>,
+    seen: &mut HashSet<String>,
     defs: &mut Vec<CanonicalDefinition>,
     sep: &'static str,
 ) {
     let parts: Vec<&str> = path.iter().map(String::as_str).collect();
-    push_definition(defs, rule, &parts, pair, sep);
+    if seen.insert(parts.join(sep)) {
+        push_definition(defs, rule, &parts, pair, sep);
+    }
     let Some(value) = pair.field("value") else {
         return;
     };
@@ -209,7 +220,7 @@ fn emit_key_tree(
     for child in &nested {
         if let Some(name) = pair_key(child) {
             path.push(name);
-            emit_key_tree(rule, child, path, defs, sep);
+            emit_key_tree(rule, child, path, seen, defs, sep);
             path.pop();
         }
     }
@@ -421,10 +432,10 @@ mod tests {
     }
 
     #[test]
-    fn helm_values_index_every_nested_key_including_sequence_items() {
+    fn helm_values_index_every_nested_key_once_across_sequence_items() {
         let defs = defs_at(
             "env/prd/values-vault.yaml",
-            "image:\n  tag: \"1.0\"\nindexer:\n  env:\n    - name: RUST_LOG\n",
+            "image:\n  tag: \"1.0\"\nindexer:\n  env:\n    - name: RUST_LOG\n      value: info\n    - name: RUST_BACKTRACE\n      value: \"1\"\n",
         );
         let fqns: Vec<&str> = defs.iter().map(|(_, _, fqn)| fqn.as_str()).collect();
         assert_eq!(
@@ -434,10 +445,20 @@ mod tests {
                 "image.tag",
                 "indexer",
                 "indexer.env",
-                "indexer.env.name"
+                "indexer.env.name",
+                "indexer.env.value"
             ]
         );
         assert!(defs.iter().all(|(t, _, _)| t == "HelmValue"));
+    }
+
+    #[test]
+    fn ci_fragments_match_by_sibling_prefix() {
+        assert_eq!(
+            defs_at(".gitlab-ci-asdf-versions.yml", "lint:\n  script: [true]\n"),
+            vec![("CiJob".into(), "lint".into(), "lint".into())]
+        );
+        assert!(defs_at(".gitlab/ci/release.yml", "lint:\n  script: [true]\n").is_empty());
     }
 
     #[test]
