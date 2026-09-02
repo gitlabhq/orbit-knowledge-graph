@@ -1,33 +1,30 @@
 //! Rebind node aliases onto a denormalized join table scan.
 //!
-//! Every earlier pass (lowering, enforcement, cursor seek) emits node columns
-//! as `<node>.<column>`, which is what a real node-table scan would expose. A
-//! [`Strategy::Denormalized`] plan has no such scan: both endpoints live in
-//! one row under `src_`/`tgt_` prefixes. This pass runs after the last
-//! alias-producing pass and rewrites `<node>.<column>` to
-//! `<scan>.<prefix><column>`. Columns the join table owns outright
-//! (`traversal_path`, `_deleted`, ...) are rebound without a prefix.
+//! Lowering emits node columns as `<node>.<column>`, which is what a node-table
+//! scan would expose. A [`Strategy::Denormalized`] plan has no such scan: both
+//! endpoints live in one row under `src_`/`tgt_` prefixes, so after the query
+//! body is built every `<node>.<column>` becomes `<scan>.<prefix><column>`.
+//! Columns the join table owns outright (`traversal_path`, `_deleted`, ...)
+//! rebind without a prefix. Passes after lowering never introduce node-alias
+//! columns: `enforce` reads the plan's node-to-edge mappings, `cursor` derives
+//! its seek from the lowered ORDER BY, and the rest work on scan aliases.
 
 use std::collections::HashMap;
 
 use ontology::denormalized::{DenormalizedJoinTable, Side};
 
 use crate::ast::*;
-use crate::error::Result;
-use crate::passes::plan::{DENORMALIZED_ALIAS, Plan, Strategy};
+use crate::input::DenormalizedEdge;
+use crate::passes::plan::DENORMALIZED_ALIAS;
 
-pub fn apply(node: &mut Node, plan: &Plan) -> Result<()> {
-    let Strategy::Denormalized(mat) = &plan.strategy else {
-        return Ok(());
-    };
+pub(super) fn rebind_node_aliases(node: &mut Node, denorm: &DenormalizedEdge) {
     let sides = HashMap::from([
-        (mat.source_node.as_str(), Side::Source),
-        (mat.target_node.as_str(), Side::Target),
+        (denorm.source_node.as_str(), Side::Source),
+        (denorm.target_node.as_str(), Side::Target),
     ]);
     if let Node::Query(q) = node {
         rebind_query(q, &sides);
     }
-    Ok(())
 }
 
 fn rebind_query(q: &mut Query, sides: &HashMap<&str, Side>) {

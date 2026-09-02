@@ -20,7 +20,7 @@ use crate::passes::enforce::ResultContext;
 use crate::passes::hydrate::HydrationPlan;
 use crate::passes::plan::QueryPlan;
 use crate::passes::{
-    check, codegen, cursor, enforce, hydrate, lower, normalize, partition, plan, rebind, restrict,
+    check, codegen, cursor, enforce, hydrate, lower, normalize, partition, plan, restrict,
     security, settings, validate,
 };
 use crate::types::SecurityContext;
@@ -81,9 +81,6 @@ compiler_pipeline_macros::define_compiler_ctx! {
         cursor {
             mutates: [input, node]
         }
-        rebind {
-            mutates: [query_plan, node]
-        }
         check {
             reads_env: [security_ctx]
             reads_state: [node]
@@ -107,12 +104,12 @@ compiler_pipeline_macros::define_compiler_ctx! {
         clickhouse {
             env: [ontology, security_ctx]
             state: [json, input, query_plan, node, result_ctx, query_config, hydration_plan, output]
-            phases: [validate, normalize, restrict, plan, lower, enforce, security, partition, cursor, rebind, check, hydrate_plan, settings, codegen]
+            phases: [validate, normalize, restrict, plan, lower, enforce, security, partition, cursor, check, hydrate_plan, settings, codegen]
         }
         ch_hydration {
             env: [ontology, security_ctx]
             state: [input, query_plan, node, result_ctx, query_config, hydration_plan, output]
-            phases: [restrict, plan, lower, enforce, rebind, settings, codegen]
+            phases: [restrict, plan, lower, enforce, settings, codegen]
         }
         validate_normalize {
             env: [ontology]
@@ -219,15 +216,6 @@ fn cursor(ctx: &mut impl CompilerCtx) -> Result<()> {
     let mut node = require(ctx.take_node(), "node")?;
     cursor::apply(&mut node, &mut input)?;
     ctx.set_input(input);
-    ctx.set_node(node);
-    Ok(())
-}
-
-fn rebind(ctx: &mut impl CompilerCtx) -> Result<()> {
-    let query_plan = require(ctx.take_query_plan(), "query_plan")?;
-    let mut node = require(ctx.take_node(), "node")?;
-    rebind::apply(&mut node, &query_plan)?;
-    ctx.set_query_plan(query_plan);
     ctx.set_node(node);
     Ok(())
 }

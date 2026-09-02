@@ -1,7 +1,7 @@
 //! Emit a single-hop traversal or aggregation as one `FINAL` scan of the
 //! hop's denormalized join table. Node columns are still emitted against the
-//! node aliases here; the `rebind` pass maps them onto the scan's `src_`/`tgt_`
-//! columns after every alias-producing pass has run.
+//! node aliases here; `rebind` maps them onto the scan's `src_`/`tgt_` columns
+//! once the query body is complete.
 
 use ontology::constants::*;
 use ontology::denormalized::Side;

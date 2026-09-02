@@ -8,6 +8,7 @@ mod helpers;
 pub mod hydration;
 pub mod neighbors;
 pub mod pathfinding;
+mod rebind;
 mod single_node;
 pub mod traversal;
 
@@ -63,6 +64,14 @@ impl EmitOutput {
 }
 
 pub fn emit(plan: &Plan, input: &Input) -> Result<Node> {
+    let mut node = emit_body(plan, input)?;
+    if let Strategy::Denormalized(denorm) = &plan.strategy {
+        rebind::rebind_node_aliases(&mut node, denorm);
+    }
+    Ok(node)
+}
+
+fn emit_body(plan: &Plan, input: &Input) -> Result<Node> {
     match &plan.body {
         PlanBody::Traversal => traversal::emit_traversal(plan),
         PlanBody::Aggregation {

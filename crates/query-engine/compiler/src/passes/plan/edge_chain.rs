@@ -148,7 +148,7 @@ pub enum Strategy {
     Fk(FkShape),
     /// Single hop answered by one `FINAL` scan of a pre-joined edge+node table.
     /// Both endpoint aliases are rebound onto the scan's `src_`/`tgt_` columns
-    /// by the `rebind` pass, so no node table is touched.
+    /// after lowering, so no node table is touched.
     Denormalized(DenormalizedEdge),
 }
 
@@ -181,11 +181,11 @@ pub fn plan(input: &mut Input) -> Plan {
 
     let strategy = if hops.is_empty() {
         Strategy::SingleNode
-    } else if let Some(mat) = detect_denormalized(&hops, &nodes, input) {
-        for alias in [&mat.source_node, &mat.target_node] {
+    } else if let Some(denorm) = detect_denormalized(&hops, &nodes, input) {
+        for alias in [&denorm.source_node, &denorm.target_node] {
             nodes.get_mut(alias).unwrap().hydration = HydrationStrategy::Skip;
         }
-        Strategy::Denormalized(mat)
+        Strategy::Denormalized(denorm)
     } else if let Some(shape) = detect_fk(&hops, &nodes) {
         Strategy::Fk(shape)
     } else {
@@ -481,9 +481,9 @@ fn elide_hops<'a>(
 }
 
 /// A single fixed-length hop whose relationship resolved to a denormalized
-/// join table. Elevated-access entities are excluded: their role floor is
-/// enforced through a node-table subquery the single-scan shape has no place
-/// for, and the join table's floor is the max of both sides anyway.
+/// join table. Endpoints that need a node-table read anyway fall back to the
+/// edge chain: an elevated role floor is enforced through a node subquery, and
+/// a non-default redaction id makes `enforce` join the node table.
 fn detect_denormalized(
     hops: &[Hop],
     nodes: &HashMap<String, NodePlan>,
@@ -495,13 +495,15 @@ fn detect_denormalized(
     if hop.max_hops != 1 || !hop.filters.is_empty() {
         return None;
     }
-    let mat = input.relationships.first()?.denormalized.clone()?;
-    let elevated = [&mat.source_node, &mat.target_node].iter().any(|alias| {
-        nodes
-            .get(*alias)
-            .is_some_and(|np| has_elevated_access_level(np, input))
-    });
-    (!elevated).then_some(mat)
+    let denorm = input.relationships.first()?.denormalized.clone()?;
+    let single_scan_ok = [&denorm.source_node, &denorm.target_node]
+        .iter()
+        .all(|alias| {
+            nodes
+                .get(*alias)
+                .is_some_and(|np| np.uses_default_pk() && !has_elevated_access_level(np, input))
+        });
+    single_scan_ok.then_some(denorm)
 }
 
 /// Star first (covers single-hop FK), then chain. Chain applies to aggregations
@@ -750,10 +752,10 @@ fn compute_node_edge_mappings(
                 }
             }
         }
-        Strategy::Denormalized(mat) => {
+        Strategy::Denormalized(denorm) => {
             for (alias, side) in [
-                (&mat.source_node, Side::Source),
-                (&mat.target_node, Side::Target),
+                (&denorm.source_node, Side::Source),
+                (&denorm.target_node, Side::Target),
             ] {
                 mappings.insert(
                     alias.clone(),

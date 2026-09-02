@@ -1211,14 +1211,6 @@ fn validate_denormalized_edges(ontology: &crate::Ontology) -> Result<(), Ontolog
                 edge.relationship_kind, edge.source_kind, edge.target_kind
             )));
         }
-        for kind in [&edge.source_kind, &edge.target_kind] {
-            if ontology.get_node(kind).is_none() {
-                return Err(OntologyError::Validation(format!(
-                    "{} ({}→{}): denormalized endpoint '{kind}' is not a node",
-                    edge.relationship_kind, edge.source_kind, edge.target_kind
-                )));
-            }
-        }
     }
     Ok(())
 }
