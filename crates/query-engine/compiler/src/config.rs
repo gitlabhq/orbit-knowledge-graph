@@ -11,7 +11,6 @@ use orbit_server_config::QueryConfig;
 /// Kept in sync with config/default.yaml `path_finding:` block.
 const PATHFINDING_MAX_EXECUTION_TIME: u64 = 15;
 const PATHFINDING_MAX_MEMORY_USAGE: u64 = 16_106_127_360; // 15 GiB
-const IN_SUBQUERY_INDEX_MAX_VALUES: u64 = 100_000;
 
 use crate::ast::Node;
 use crate::error::{QueryError, Result};
@@ -239,14 +238,10 @@ fn settings(ctx: &mut impl CompilerCtx) -> Result<()> {
     let mut config = settings::resolve(query_type);
 
     let node = require(ctx.node().clone(), "node")?;
-    if let Node::Query(q) = &node {
-        let derived = &mut config.compiler_derived;
-        derived.enable_materialized_cte = q.ctes.iter().any(|c| c.materialized);
-        derived.optimize_move_to_prewhere_if_final = q.has_final_scan();
-        if q.has_in_subquery() {
-            derived.use_index_for_in_with_subqueries_max_values =
-                Some(IN_SUBQUERY_INDEX_MAX_VALUES);
-        }
+    if let Node::Query(q) = &node
+        && q.ctes.iter().any(|c| c.materialized)
+    {
+        config.compiler_derived.enable_materialized_cte = true;
     }
 
     let query_plan = require(ctx.take_query_plan(), "query_plan")?;

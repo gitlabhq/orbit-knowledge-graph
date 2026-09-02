@@ -406,43 +406,6 @@ impl Expr {
         }
     }
 
-    fn any_expr(&self, pred: &dyn Fn(&Expr) -> bool) -> bool {
-        if pred(self) {
-            return true;
-        }
-        match self {
-            Expr::FuncCall { args, .. } => args.iter().any(|a| a.any_expr(pred)),
-            Expr::BinaryOp { left, right, .. } => left.any_expr(pred) || right.any_expr(pred),
-            Expr::UnaryOp { expr, .. }
-            | Expr::Lambda { body: expr, .. }
-            | Expr::InSubquery { expr, .. } => expr.any_expr(pred),
-            Expr::InSelect { expr, query } => expr.any_expr(pred) || query.any_expr(pred),
-            Expr::Column { .. }
-            | Expr::Identifier(_)
-            | Expr::Literal(_)
-            | Expr::Param { .. }
-            | Expr::Star => false,
-        }
-    }
-
-    fn any_table_ref(&self, pred: &dyn Fn(&TableRef) -> bool) -> bool {
-        match self {
-            Expr::FuncCall { args, .. } => args.iter().any(|a| a.any_table_ref(pred)),
-            Expr::BinaryOp { left, right, .. } => {
-                left.any_table_ref(pred) || right.any_table_ref(pred)
-            }
-            Expr::UnaryOp { expr, .. }
-            | Expr::Lambda { body: expr, .. }
-            | Expr::InSubquery { expr, .. } => expr.any_table_ref(pred),
-            Expr::InSelect { expr, query } => expr.any_table_ref(pred) || query.any_table_ref(pred),
-            Expr::Column { .. }
-            | Expr::Identifier(_)
-            | Expr::Literal(_)
-            | Expr::Param { .. }
-            | Expr::Star => false,
-        }
-    }
-
     /// Combine two expressions with AND.
     pub fn and(left: Expr, right: Expr) -> Expr {
         Expr::binary(Op::And, left, right)
@@ -454,72 +417,7 @@ impl Expr {
     }
 }
 
-impl Query {
-    pub fn has_final_scan(&self) -> bool {
-        self.any_table_ref(&|t| matches!(t, TableRef::Scan { final_: true, .. }))
-    }
-
-    pub fn has_in_subquery(&self) -> bool {
-        self.any_expr(&|e| matches!(e, Expr::InSubquery { .. } | Expr::InSelect { .. }))
-    }
-
-    fn any_table_ref(&self, pred: &dyn Fn(&TableRef) -> bool) -> bool {
-        self.from.any_table_ref(pred)
-            || self.nested_queries().any(|q| q.any_table_ref(pred))
-            || self.exprs().any(|e| e.any_table_ref(pred))
-    }
-
-    fn any_expr(&self, pred: &dyn Fn(&Expr) -> bool) -> bool {
-        self.exprs().any(|e| e.any_expr(pred))
-            || self.from.any_expr(pred)
-            || self.nested_queries().any(|q| q.any_expr(pred))
-    }
-
-    fn nested_queries(&self) -> impl Iterator<Item = &Query> {
-        self.ctes
-            .iter()
-            .map(|c| c.query.as_ref())
-            .chain(self.union_all.iter())
-    }
-
-    fn exprs(&self) -> impl Iterator<Item = &Expr> {
-        self.select
-            .iter()
-            .map(|s| &s.expr)
-            .chain(self.where_clause.iter())
-            .chain(self.group_by.iter())
-            .chain(self.having.iter())
-            .chain(self.order_by.iter().map(|o| &o.expr))
-            .chain(self.limit_by.iter().flat_map(|(_, cols)| cols.iter()))
-    }
-}
-
 impl TableRef {
-    fn any_table_ref(&self, pred: &dyn Fn(&TableRef) -> bool) -> bool {
-        if pred(self) {
-            return true;
-        }
-        match self {
-            TableRef::Scan { .. } => false,
-            TableRef::Join {
-                left, right, on, ..
-            } => left.any_table_ref(pred) || right.any_table_ref(pred) || on.any_table_ref(pred),
-            TableRef::Union { queries, .. } => queries.iter().any(|q| q.any_table_ref(pred)),
-            TableRef::Subquery { query, .. } => query.any_table_ref(pred),
-        }
-    }
-
-    fn any_expr(&self, pred: &dyn Fn(&Expr) -> bool) -> bool {
-        match self {
-            TableRef::Scan { .. } => false,
-            TableRef::Join {
-                left, right, on, ..
-            } => on.any_expr(pred) || left.any_expr(pred) || right.any_expr(pred),
-            TableRef::Union { queries, .. } => queries.iter().any(|q| q.any_expr(pred)),
-            TableRef::Subquery { query, .. } => query.any_expr(pred),
-        }
-    }
-
     pub fn scan(table: impl Into<String>, alias: impl Into<String>) -> Self {
         TableRef::Scan {
             table: table.into(),
@@ -557,73 +455,5 @@ impl TableRef {
             query: Box::new(query),
             alias: alias.into(),
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn select_id(from: TableRef, where_clause: Option<Expr>) -> Query {
-        Query {
-            select: vec![SelectExpr::col("t", "id")],
-            from,
-            where_clause,
-            ..Default::default()
-        }
-    }
-
-    #[test]
-    fn has_final_scan_sees_through_ctes_joins_and_in_select() {
-        assert!(!select_id(TableRef::scan("gl_project", "t"), None).has_final_scan());
-
-        let mut via_cte = select_id(TableRef::scan("gl_project", "t"), None);
-        via_cte.ctes.push(Cte::new(
-            "c",
-            select_id(TableRef::scan_final("gl_user", "t"), None),
-        ));
-        assert!(via_cte.has_final_scan());
-
-        let via_join = select_id(
-            TableRef::join(
-                JoinType::Inner,
-                TableRef::scan("gl_project", "t"),
-                TableRef::scan_final("gl_edge", "e"),
-                Expr::eq(Expr::col("t", "id"), Expr::col("e", "target_id")),
-            ),
-            None,
-        );
-        assert!(via_join.has_final_scan());
-
-        let via_in_select = select_id(
-            TableRef::scan("gl_project", "t"),
-            Some(Expr::InSelect {
-                expr: Box::new(Expr::col("t", "id")),
-                query: Box::new(select_id(TableRef::scan_final("gl_user", "t"), None)),
-            }),
-        );
-        assert!(via_in_select.has_final_scan());
-    }
-
-    #[test]
-    fn has_in_subquery_ignores_literal_in_lists() {
-        let literal_in = select_id(
-            TableRef::scan("gl_project", "t"),
-            Expr::col_in("t", "id", ChType::Int64, vec![1.into(), 2.into()]),
-        );
-        assert!(!literal_in.has_in_subquery());
-
-        let nested = select_id(
-            TableRef::scan("gl_project", "t"),
-            Some(Expr::and(
-                Expr::lit(true),
-                Expr::InSubquery {
-                    expr: Box::new(Expr::col("t", "id")),
-                    cte_name: "ids".into(),
-                    column: "id".into(),
-                },
-            )),
-        );
-        assert!(nested.has_in_subquery());
     }
 }

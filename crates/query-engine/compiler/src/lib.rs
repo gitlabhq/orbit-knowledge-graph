@@ -2229,42 +2229,4 @@ mod tests {
         );
         assert!(msg.contains("gt"), "error should name the operator: {msg}");
     }
-
-    #[test]
-    fn final_prewhere_setting_follows_final_scans() {
-        let sql = compile_sql(
-            r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]}],"limit":10}"#,
-        );
-        assert!(sql.contains(" FINAL"), "{sql}");
-        assert!(
-            sql.contains("optimize_move_to_prewhere_if_final = 1"),
-            "{sql}"
-        );
-        assert!(
-            !sql.contains("use_index_for_in_with_subqueries_max_values"),
-            "no IN (subquery) in this query, got:\n{sql}"
-        );
-    }
-
-    #[test]
-    fn in_subquery_index_cap_follows_in_select() {
-        let sql = compile_sql(
-            r#"{
-                "query_type": "aggregation",
-                "nodes": [
-                    {"id": "u", "entity": "User", "node_ids": [116]},
-                    {"id": "mr", "entity": "MergeRequest"}
-                ],
-                "relationships": [{"from": "u", "to": "mr", "type": "AUTHORED"}],
-                "group_by": ["u"],
-                "aggregations": [{"count": "mr", "as": "c"}],
-                "limit": 20
-            }"#,
-        );
-        assert!(sql.contains(" IN (SELECT"), "{sql}");
-        assert!(
-            sql.contains("use_index_for_in_with_subqueries_max_values = 100000"),
-            "{sql}"
-        );
-    }
 }
