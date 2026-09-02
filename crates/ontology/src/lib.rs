@@ -1369,10 +1369,13 @@ impl Ontology {
     /// edges carry which denorm tags; both the read path (compiler) and the
     /// write path (indexer) derive from it.
     ///
-    /// - FK edges (no standalone ETL config) project every column of their
-    ///   node, so they always carry it.
     /// - A standalone edge projects `column` only when the matching literal
     ///   endpoint maps its ontology property to an extracted input field.
+    /// - An FK edge projects only on the side holding the key.
+    /// - A node-pipeline edge projects only the pipeline's own node, on the
+    ///   side that names it literally; derived-entity edges project nothing.
+    /// - An edge no declared pipeline emits has no writer the ontology can
+    ///   consult, so it is assumed to project on both sides.
     pub fn edge_projects_column(
         &self,
         relationship_kind: &str,
@@ -1383,10 +1386,7 @@ impl Ontology {
         if let Some(pipelines) = self.get_edge_etl(relationship_kind) {
             return pipelines.iter().any(|pipeline| {
                 pipeline.transform.edges().iter().any(|mapping| {
-                    let node_ref = match direction {
-                        DenormDirection::Source => &mapping.source,
-                        DenormDirection::Target => &mapping.target,
-                    };
+                    let node_ref = direction.endpoint(mapping);
                     let NodeRefKind::Literal(endpoint_kind) = &node_ref.kind else {
                         return false;
                     };
@@ -1427,7 +1427,33 @@ impl Ontology {
             });
         }
 
-        true
+        let own_pipeline_tags_this_side = self.get_node(node_kind).is_some_and(|node| {
+            node.pipelines
+                .iter()
+                .flat_map(|pipeline| pipeline.transform.edges())
+                .filter(|mapping| mapping.label == relationship_kind)
+                .any(|mapping| {
+                    matches!(&direction.endpoint(mapping).kind, NodeRefKind::Literal(kind) if kind == node_kind)
+                })
+        });
+
+        own_pipeline_tags_this_side || !self.has_declared_emitter(relationship_kind)
+    }
+
+    fn has_declared_emitter(&self, relationship_kind: &str) -> bool {
+        let node_pipelines_emit = self.nodes().any(|node| {
+            node.pipelines
+                .iter()
+                .flat_map(|pipeline| pipeline.transform.edges())
+                .any(|mapping| mapping.label == relationship_kind)
+        });
+        node_pipelines_emit
+            || self.derived_entities().any(|derived| {
+                derived
+                    .emits
+                    .iter()
+                    .any(|emitted| emitted == relationship_kind)
+            })
     }
 
     fn node_has_property(&self, node_kind: &str, property_name: &str) -> bool {
@@ -1912,6 +1938,30 @@ mod tests {
             ),
             "IN_PROJECT (project_id on the MR) projects MergeRequest.state onto source_tags"
         );
+    }
+
+    // Another entity's pipeline writes these edges with empty tags (#1249).
+    #[test]
+    fn denorm_not_declared_on_sides_no_pipeline_tags() {
+        use crate::entities::DenormDirection::{Source, Target};
+        let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
+
+        for (edge, node, direction) in [
+            ("MENTIONS", "WorkItem", Source),
+            ("MENTIONS", "WorkItem", Target),
+            ("HAS_NOTE", "WorkItem", Source),
+            ("HAS_NOTE", "MergeRequest", Source),
+            ("CREATOR", "User", Source),
+            ("OWNER", "User", Source),
+        ] {
+            assert!(
+                !ontology.edge_projects_column(edge, node, direction, "state"),
+                "{edge} must not project {node}.state"
+            );
+        }
+        assert!(ontology.edge_projects_column("HAS_NOTE", "Note", Target, "confidential"));
+        assert!(ontology.edge_projects_column("CREATOR", "Project", Target, "archived"));
+        assert!(ontology.edge_projects_column("CALLS", "Definition", Source, "definition_type"));
     }
 
     #[test]
