@@ -33,7 +33,7 @@ fn fingerprint_path() -> PathBuf {
 }
 
 fn versions_path() -> PathBuf {
-    config_dir().join("versions.yaml")
+    PathBuf::from(env!("VERSIONS_FILE"))
 }
 
 fn current_fingerprints(ontology: &Ontology) -> Fingerprints {

@@ -32,8 +32,8 @@ const EXTENSIONS: &[(&str, &str, &str)] = &[
 const DOWNLOAD_LIMIT: u64 = 64 * 1024 * 1024;
 
 fn main() {
-    println!("cargo:rerun-if-changed=../../Cargo.lock");
-    println!("cargo:rerun-if-changed=../../config/versions.yaml");
+    println!("cargo:rerun-if-changed={}", env!("LOCKFILE"));
+    println!("cargo:rerun-if-changed={}", env!("VERSIONS_FILE"));
     let duckdb_version = pinned_duckdb_version();
     assert_lockfile_matches_pin(&duckdb_version);
 
@@ -73,11 +73,7 @@ fn main() {
 }
 
 fn pinned_duckdb_version() -> String {
-    let versions = fs::read_to_string(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../config/versions.yaml"
-    ))
-    .unwrap();
+    let versions = fs::read_to_string(env!("VERSIONS_FILE")).unwrap();
     versions
         .lines()
         .find_map(|l| l.strip_prefix("duckdb:"))
@@ -98,9 +94,10 @@ fn assert_lockfile_matches_pin(duckdb_version: &str) {
         "name = \"duckdb\"\nversion = \"1.{}.",
         major * 10000 + minor * 100 + patch
     );
-    let lock = concat!(env!("CARGO_MANIFEST_DIR"), "/../../Cargo.lock");
     assert!(
-        fs::read_to_string(lock).unwrap().contains(&entry),
+        fs::read_to_string(env!("LOCKFILE"))
+            .unwrap()
+            .contains(&entry),
         "duckdb crate no longer matches {duckdb_version}; update `duckdb` in config/versions.yaml and re-pin EXTENSIONS in crates/duckdb-client/build.rs"
     );
 }

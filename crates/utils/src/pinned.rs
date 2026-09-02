@@ -1,6 +1,6 @@
 //! Compile-time access to `config/versions.yaml`.
 
-const VERSIONS: &str = include_str!(concat!(env!("CONFIG_DIR"), "/versions.yaml"));
+const VERSIONS: &str = include_str!(env!("VERSIONS_FILE"));
 
 /// Value of `key` in `config/versions.yaml`. Panics at compile time (when
 /// used in a `const`) if the key is missing.
