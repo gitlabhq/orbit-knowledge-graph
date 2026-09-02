@@ -154,8 +154,8 @@ pub struct Ontology {
     pub(crate) auxiliary_dictionaries: Vec<AuxiliaryDictionary>,
     /// Node properties denormalized onto edge tables for query optimization.
     pub(crate) denormalized_properties: Vec<DenormalizedProperty>,
-    /// Declared pre-joined path tables; see [`denormalized`].
-    pub(crate) denormalized_paths: Vec<denormalized::DenormalizedPath>,
+    /// Declared pre-joined table chains; see [`denormalized`].
+    pub(crate) denormalized_joins: Vec<denormalized::DenormalizedJoin>,
     /// Edge-producing entities derived by a Rust transform (keyed by name).
     /// These have no node table; they extract from the datalake and emit edges.
     pub(crate) derived_entities: BTreeMap<String, DerivedEntity>,
@@ -220,7 +220,7 @@ impl Ontology {
             auxiliary_tables: Vec::new(),
             auxiliary_dictionaries: Vec::new(),
             denormalized_properties: Vec::new(),
-            denormalized_paths: Vec::new(),
+            denormalized_joins: Vec::new(),
             derived_entities: BTreeMap::new(),
             materialized_views: Vec::new(),
             refreshable_materialized_views: Vec::new(),
@@ -326,15 +326,24 @@ impl Ontology {
         self
     }
 
-    /// Declare a denormalized path over existing variants, as a
-    /// `denormalized_paths` entry in `schema.yaml` would. Runs the same
-    /// validation as the loader, so a test cannot declare a path the YAML
-    /// would reject.
+    /// Declare a denormalized join over existing variants, as a
+    /// `denormalized_joins` entry in `schema.yaml` would. `hops` are
+    /// `(relationship, from, to, via_fk)`. Runs the loader's own resolution,
+    /// so a test cannot declare a join the YAML would reject.
     #[must_use]
-    pub fn with_denormalized_path(mut self, name: &str, hops: &[(&str, &str, &str)]) -> Self {
-        let path = loading::resolve_denormalized_path(&self, name, hops, None)
-            .unwrap_or_else(|e| panic!("denormalized path {name}: {e}"));
-        self.denormalized_paths.push(path);
+    pub fn with_denormalized_join(mut self, name: &str, hops: &[(&str, &str, &str, bool)]) -> Self {
+        let declared: Vec<loading::DeclaredHop<'_>> = hops
+            .iter()
+            .map(|&(relationship, from, to, via_fk)| loading::DeclaredHop {
+                relationship,
+                from,
+                to,
+                via_fk,
+            })
+            .collect();
+        let join = loading::resolve_denormalized_join(&self, name, &declared)
+            .unwrap_or_else(|e| panic!("denormalized join {name}: {e}"));
+        self.denormalized_joins.push(join);
         self
     }
 
@@ -625,13 +634,10 @@ impl Ontology {
             }
         }
 
-        for path in &mut self.denormalized_paths {
-            path.table = format!("{prefix}{}", path.table);
-            for hop in &mut path.hops {
-                hop.edge_table = format!("{prefix}{}", hop.edge_table);
-            }
-            for node in &mut path.nodes {
-                node.table = format!("{prefix}{}", node.table);
+        for join in &mut self.denormalized_joins {
+            join.table = format!("{prefix}{}", join.table);
+            for t in &mut join.tables {
+                t.table = format!("{prefix}{}", t.table);
             }
         }
 
@@ -760,12 +766,13 @@ impl Ontology {
     #[must_use]
     pub fn min_access_level_for_table(&self, table: &str) -> Option<u32> {
         let normalized = strip_schema_version_prefix(table);
-        if let Some(path) = self.denormalized_path_by_table(normalized) {
-            // The row exposes every node on the path, so the strictest floor applies.
-            return path
-                .nodes
+        if let Some(join) = self.denormalized_join_by_table(normalized) {
+            // The row exposes every node in the chain, so the strictest floor applies.
+            return join
+                .hops
                 .iter()
-                .filter_map(|n| self.nodes.get(&n.kind))
+                .flat_map(|h| [h.source_kind.as_str(), h.target_kind.as_str()])
+                .filter_map(|kind| self.nodes.get(kind))
                 .filter_map(|n| n.redaction.as_ref())
                 .map(|r| r.required_role.as_access_level())
                 .max();
@@ -962,9 +969,9 @@ impl Ontology {
     #[must_use]
     pub fn is_table_path_scopable(&self, table: &str) -> bool {
         let normalized = strip_schema_version_prefix(table);
-        // A path table's traversal_path is its first edge's, which the loader
-        // only permits when every node on the path lives under it.
-        if self.denormalized_path_by_table(normalized).is_some() {
+        // A denormalized row carries the traversal_path every scoped table in
+        // its chain was joined on.
+        if self.denormalized_join_by_table(normalized).is_some() {
             return true;
         }
         self.nodes
@@ -973,22 +980,21 @@ impl Ontology {
             .is_some_and(|(name, _)| self.is_path_scopable(name))
     }
 
-    /// Declared denormalized paths with their resolved source tables.
     #[must_use]
-    pub fn denormalized_paths(&self) -> &[denormalized::DenormalizedPath] {
-        &self.denormalized_paths
+    pub fn denormalized_joins(&self) -> &[denormalized::DenormalizedJoin] {
+        &self.denormalized_joins
     }
 
-    /// The path whose table is `table`, with or without a schema-version prefix.
+    /// The join whose table is `table`, with or without a schema-version prefix.
     #[must_use]
-    pub fn denormalized_path_by_table(
+    pub fn denormalized_join_by_table(
         &self,
         table: &str,
-    ) -> Option<&denormalized::DenormalizedPath> {
+    ) -> Option<&denormalized::DenormalizedJoin> {
         let normalized = strip_schema_version_prefix(table);
-        self.denormalized_paths
+        self.denormalized_joins
             .iter()
-            .find(|p| strip_schema_version_prefix(&p.table) == normalized)
+            .find(|j| strip_schema_version_prefix(&j.table) == normalized)
     }
 
     /// Returns `(fk_column, anchor_entity)` pairs derived from
@@ -2173,20 +2179,20 @@ mod tests {
         assert_eq!(ontology.min_access_level_for_table("gl_project"), Some(25));
     }
 
-    fn reviewer_project_path() -> Ontology {
-        Ontology::load_embedded().unwrap().with_denormalized_path(
+    fn reviewer_project_join() -> Ontology {
+        Ontology::load_embedded().unwrap().with_denormalized_join(
             "reviewer_project",
             &[
-                ("REVIEWER", "User", "MergeRequest"),
-                ("IN_PROJECT", "MergeRequest", "Project"),
+                ("REVIEWER", "User", "MergeRequest", false),
+                ("IN_PROJECT", "MergeRequest", "Project", true),
             ],
         )
     }
 
     #[test]
-    fn denormalized_path_takes_the_strictest_node_floor() {
+    fn denormalized_join_takes_the_strictest_node_floor() {
         let table = "gl_denorm_reviewer_project";
-        let mut ontology = reviewer_project_path();
+        let mut ontology = reviewer_project_join();
         assert_eq!(ontology.min_access_level_for_table(table), Some(20));
         ontology
             .nodes
@@ -2203,23 +2209,25 @@ mod tests {
     }
 
     #[test]
-    fn denormalized_path_follows_the_schema_version_prefix() {
-        let ontology = reviewer_project_path().with_schema_version_prefix("v9_");
-        let path = ontology
-            .denormalized_path_by_table("gl_denorm_reviewer_project")
+    fn denormalized_join_follows_the_schema_version_prefix() {
+        let ontology = reviewer_project_join().with_schema_version_prefix("v9_");
+        let join = ontology
+            .denormalized_join_by_table("gl_denorm_reviewer_project")
             .expect("lookup normalizes the prefix");
-        assert_eq!(path.table, "v9_gl_denorm_reviewer_project");
-        assert_eq!(path.hops[1].edge_table, "v9_gl_edge");
-        assert_eq!(path.nodes[2].table, "v9_gl_project");
+        assert_eq!(join.table, "v9_gl_denorm_reviewer_project");
+        let tables: Vec<&str> = join.tables.iter().map(|t| t.table.as_str()).collect();
         assert_eq!(
-            path.sort_key,
+            tables,
             [
-                "traversal_path",
-                "e1_source_id",
-                "e0_source_id",
-                "e1_target_id"
-            ],
-            "User is global, so the MergeRequest id anchors the key"
+                "v9_gl_user",
+                "v9_gl_edge",
+                "v9_gl_merge_request",
+                "v9_gl_project"
+            ]
+        );
+        assert_eq!(
+            join.sort_key(),
+            ["traversal_path", "t2_id", "t0_id", "t3_id"]
         );
     }
 

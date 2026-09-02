@@ -574,16 +574,13 @@
           ],
           "additionalProperties": false
         },
-        "denormalized_paths": {
+        "denormalized_joins": {
           "type": "array",
-          "description": "Chains of edge variants materialized into pre-joined gl_denorm_<name> tables, kept current by one materialized view per source table. Every hop must be scope-preserving or reach a global node, and at least one node must be scoped, because the row carries only the first edge's traversal_path. Each declaration is a versioned table, so adding one is a schema bump.",
+          "description": "Linear chains of tables pre-joined into gl_denorm_<name> tables, kept current by one materialized view per source table. Adjacent tables join on traversal_path when both carry it and on the id or edge id that links them. Each declaration is a versioned table, so adding one is a schema bump.",
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": [
-              "name",
-              "hops"
-            ],
+            "required": ["name", "hops"],
             "properties": {
               "name": {
                 "type": "string",
@@ -593,34 +590,23 @@
               "hops": {
                 "type": "array",
                 "minItems": 1,
-                "description": "Edge variants in path order; each hop's from must equal the previous hop's to.",
+                "description": "Edge variants in chain order; each hop's from must equal the previous hop's to. A hop between two namespaces (Project, Group) is rejected because their traversal_paths differ.",
                 "items": {
                   "type": "object",
                   "additionalProperties": false,
-                  "required": [
-                    "relationship",
-                    "from",
-                    "to"
-                  ],
+                  "required": ["relationship", "from", "to"],
                   "properties": {
-                    "relationship": {
-                      "type": "string"
-                    },
-                    "from": {
-                      "type": "string"
-                    },
-                    "to": {
-                      "type": "string"
+                    "relationship": { "type": "string" },
+                    "from": { "type": "string" },
+                    "to": { "type": "string" },
+                    "via": {
+                      "type": "string",
+                      "enum": ["edge", "fk"],
+                      "default": "edge",
+                      "description": "edge: include the edge table in the chain. fk: join the two node tables directly on the variant's fk_column."
                     }
                   }
                 }
-              },
-              "sort_key": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                },
-                "description": "Overrides the default (traversal_path, first scoped node id, other node ids). Entries must be traversal_path or node id columns (e{i}_source_id / e{i}_target_id)."
               }
             }
           }

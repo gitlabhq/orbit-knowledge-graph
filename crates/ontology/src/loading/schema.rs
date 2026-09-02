@@ -54,7 +54,7 @@ pub(super) struct SettingsYaml {
     #[serde(default)]
     pub denormalization: Vec<DenormalizationEntryYaml>,
     #[serde(default)]
-    pub denormalized_paths: Vec<DenormalizedPathYaml>,
+    pub denormalized_joins: Vec<DenormalizedJoinYaml>,
     #[serde(default)]
     pub statistics: Option<StatisticsYaml>,
     #[serde(default)]
@@ -122,18 +122,13 @@ pub(super) struct StatisticsExcludeYaml {
     pub columns: Vec<String>,
 }
 
-/// A chain of edge variants materialized into one pre-joined table. See
+/// A linear chain of tables pre-joined into one `gl_denorm_<name>` table. See
 /// [`crate::denormalized`].
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(super) struct DenormalizedPathYaml {
+pub(super) struct DenormalizedJoinYaml {
     pub name: String,
     pub hops: Vec<DenormalizedHopYaml>,
-    /// Overrides the default `(traversal_path, first scoped node id, other
-    /// node ids)` ordering, e.g. to build a second table anchored on another
-    /// node.
-    #[serde(default)]
-    pub sort_key: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -142,6 +137,18 @@ pub(super) struct DenormalizedHopYaml {
     pub relationship: String,
     pub from: String,
     pub to: String,
+    #[serde(default)]
+    pub via: HopVia,
+}
+
+/// Whether a hop's tables are linked through its edge table or directly
+/// through the variant's FK column.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum HopVia {
+    #[default]
+    Edge,
+    Fk,
 }
 
 #[derive(Debug, Clone, Deserialize)]

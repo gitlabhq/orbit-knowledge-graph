@@ -118,23 +118,19 @@ Filter placement rules for node `FINAL` scans:
 
 Edge-only traversals do not join node tables for non-group-by nodes, so they cannot filter out deleted nodes at the query layer. In production this is handled by the SDLC indexer, which soft-deletes FK edge rows in the same ETL batch as their parent node (`crates/indexer/src/modules/sdlc/pipeline.rs`). Cross-entity FK cleanup relies on PostgreSQL's referential integrity propagating through Siphon CDC.
 
-### Denormalized paths
+### Denormalized joins
 
-`settings.denormalized_paths` in `schema.yaml` declares chains of edge variants to pre-join into one table:
+A denormalized join pre-joins a linear chain of tables into one `gl_denorm_<name>` table so the compiler can answer the matching hops with a single scan. It is declared as a chain of edge variants, each realized either through its edge table or, with `via: fk`, directly node to node on the variant's FK column:
 
 ```yaml
-denormalized_paths:
+denormalized_joins:
   - name: reviewer_project
     hops:
       - {relationship: REVIEWER,   from: User,         to: MergeRequest}
-      - {relationship: IN_PROJECT, from: MergeRequest, to: Project}
+      - {relationship: IN_PROJECT, from: MergeRequest, to: Project, via: fk}
 ```
 
-The ontology names a `gl_denorm_<name>` table (`ontology::denormalized`) and the DDL generator composes it from the already-generated definitions of every edge and node table on the path: the first edge's `traversal_path`, then each edge's columns under `e{i}_` and each node's columns under `n{j}_` in path order, then the system columns once. `k` hops give `k` edge blocks and `k + 1` node blocks. A node's `id` is not copied; node `j` is `e{j}_source_id` (or `e{j-1}_target_id` for the last node). Skip indexes come along the same way (renamed `idx_e0_*`, `idx_n1_*`), explicit table settings from all sources are merged, and the table is hash-bucketed whenever the first edge table is. Codecs, types, defaults, and indexes are therefore identical to the source tables by construction. The default sort key is `(traversal_path, first scoped node id, other node ids in path order)`; `sort_key:` overrides it, for example to build a second table anchored on another node. One `TO` materialized view per source table (`2k + 1` of them) keeps the row current: the triggering table is read as the inserted block, the rest are joined outward along the path with `FINAL`, `_version` is the greatest of all, `_deleted` the OR of all, and the `ReplacingMergeTree` keeps the latest.
-
-One row carries one `traversal_path`, the first hop's, and the security pass filters on it. The loader therefore requires every hop to be scope-preserving or to reach a global node (the same rule the FK-chain lowering uses), and at least one node to be scoped. A path through a cross-namespace edge such as `CLOSES` is rejected at load time. `min_access_level_for_table` returns the strictest floor among the path's nodes, and the table is path-scopable.
-
-The table's column contract (`Position::column_for`) is what the compiler will read to fold a matching run of query hops into one scan; that compiler work follows separately (#1250). No path is declared yet; each declaration is its own schema bump.
+That resolves to the table chain `gl_user, gl_edge, gl_merge_request, gl_project`. Adjacent tables join on `traversal_path` when both carry it and always on the id or edge id that links them; the row keeps one `traversal_path`, the first scoped table's, and every column of every table under a `t{i}_` prefix. The DDL generator composes the table from the source tables' already-generated definitions (columns, codecs, indexes, settings, partitioning) and emits one `TO` materialized view per table, joined outward from the trigger with `FINAL`. Because the `traversal_path` joins keep every scoped table in the row on one path, the security pass filters the whole row on that column and `min_access_level_for_table` returns the strictest floor among the chain's nodes. The loader rejects a hop between two namespaces (Project, Group), whose paths differ. No join is declared yet; each declaration is its own schema bump. Compiler support follows separately (#1250).
 
 ### Scope rewrite (traversal_path prefix injection)
 

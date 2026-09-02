@@ -124,8 +124,8 @@ _Avoid_: preset query, query template
 A single **Relationship** traversal in the graph. Multi-hop queries traverse multiple relationships in sequence. Hard-capped at 3 hops for security and performance.
 _Avoid_: depth (ambiguous with tree depth)
 
-**Denormalized Path**:
-A chain of **Relationship** variants declared under `settings.denormalized_paths` and pre-joined into one `gl_denorm_<name>` table holding every edge row and every property of every **Node** on the path. Kept current by ClickHouse materialized views on each source table, so the compiler can answer those **Hops** with one scan instead of edge scans and node joins.
+**Denormalized Join**:
+A linear chain of tables declared under `settings.denormalized_joins` and pre-joined into one `gl_denorm_<name>` table, kept current by ClickHouse materialized views on each source table. Adjacent tables join on **Traversal Path** when both have it and on the id that links them. Lets the compiler answer the matching **Hops** with one scan.
 _Avoid_: materialized table (the ClickHouse materialized views only feed it), projection (ClickHouse feature we deliberately do not use here). Distinct from the edge-tag `denormalization` settings block, which copies selected node properties onto edge rows.
 
 **Hydration**:

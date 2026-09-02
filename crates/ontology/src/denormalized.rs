@@ -1,170 +1,130 @@
-//! Denormalized paths: a pre-joined `gl_denorm_<name>` table per declared
-//! chain of edge variants, holding every edge row on the path and every
-//! column of every node on it. `k` hops give `k` edge blocks and `k + 1` node
-//! blocks in one row, so the compiler can answer those hops with one scan.
-//! One materialized view per source table (`2k + 1` of them) keeps the row
-//! current; a change to any side re-emits the affected rows and the
-//! `ReplacingMergeTree` keeps the latest `_version`.
+//! Denormalized joins: a declared linear chain of tables pre-joined into one
+//! `gl_denorm_<name>` table, kept current by one materialized view per source
+//! table. Adjacent tables join on `traversal_path` when both carry it and
+//! always on the id or edge id column that links them. A hop between two
+//! nodes is realized either through its edge table or, when the variant has
+//! an FK column, directly node to node.
 //!
-//! One row carries one `traversal_path`, the first hop's, and the security
-//! pass filters on it. That is only sound when every node on the path lives
-//! under that path, so the loader requires each hop to be scope-preserving or
-//! to reach a global hub, the same rule the FK-chain lowering uses.
+//! The row carries one `traversal_path`, the first scoped table's; the
+//! `traversal_path` joins make every other scoped table agree with it, which
+//! is what lets the security pass filter the whole row on that one column.
 //!
-//! This module names the parts and fixes the column contract. The DDL
-//! generator composes the table from the source tables' generated
-//! definitions.
+//! The DDL generator only sees `tables`; the compiler additionally uses
+//! `hops` to map query hops and nodes onto table indices.
 
 use crate::constants::{
-    DEFAULT_PRIMARY_KEY, DELETED_COLUMN, SOURCE_ID_COLUMN, TARGET_ID_COLUMN, TRAVERSAL_PATH_COLUMN,
-    VERSION_COLUMN,
+    DEFAULT_PRIMARY_KEY, DELETED_COLUMN, TRAVERSAL_PATH_COLUMN, VERSION_COLUMN,
 };
 
 pub const TABLE_PREFIX: &str = "gl_denorm_";
 
-/// `gl_denorm_reviewer_project`
 #[must_use]
-pub fn table_name(path_name: &str) -> String {
-    format!("{TABLE_PREFIX}{path_name}")
+pub fn table_name(name: &str) -> String {
+    format!("{TABLE_PREFIX}{name}")
 }
 
-/// One position on a path: edge `i` or node `j`. Nodes outnumber edges by
-/// one; edge `i` connects node `i` to node `i + 1`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Position {
-    Edge(usize),
-    Node(usize),
+/// Column prefix for table `i` in the chain.
+#[must_use]
+pub fn prefix(i: usize) -> String {
+    format!("t{i}_")
 }
 
-impl Position {
-    /// Column prefix: `e0_`, `n2_`.
-    #[must_use]
-    pub fn prefix(self) -> String {
-        match self {
-            Position::Edge(i) => format!("e{i}_"),
-            Position::Node(j) => format!("n{j}_"),
-        }
-    }
+/// Alias of table `i` inside the feeding views.
+#[must_use]
+pub fn alias(i: usize) -> String {
+    format!("t{i}")
+}
 
-    /// Alias for this position's source table inside the feeding views.
-    #[must_use]
-    pub fn view_alias(self) -> String {
-        match self {
-            Position::Edge(i) => format!("e{i}"),
-            Position::Node(j) => format!("n{j}"),
-        }
+/// The denormalized column holding `column` of table `i`. The row's single
+/// `traversal_path` is unprefixed; everything else carries the table prefix.
+#[must_use]
+pub fn column_for(i: usize, column: &str) -> String {
+    if column == TRAVERSAL_PATH_COLUMN {
+        column.to_string()
+    } else {
+        format!("{}{column}", prefix(i))
     }
+}
 
-    /// The join-table column a source column at this position resolves to.
-    /// `traversal_path` is unprefixed (the row has exactly one, the first
-    /// hop's). A node's `id` is an edge id column: node `j` is edge `j`'s
-    /// source, or, for the last node, edge `j - 1`'s target. Everything else
-    /// carries the position prefix.
-    #[must_use]
-    pub fn column_for(self, source_column: &str, hop_count: usize) -> String {
-        match (self, source_column) {
-            (_, TRAVERSAL_PATH_COLUMN) => TRAVERSAL_PATH_COLUMN.to_string(),
-            (Position::Node(j), DEFAULT_PRIMARY_KEY) if j < hop_count => {
-                format!("{}{SOURCE_ID_COLUMN}", Position::Edge(j).prefix())
-            }
-            (Position::Node(j), DEFAULT_PRIMARY_KEY) => {
-                format!("{}{TARGET_ID_COLUMN}", Position::Edge(j - 1).prefix())
-            }
-            (pos, col) => format!("{}{col}", pos.prefix()),
-        }
-    }
+/// Whether `column` of a source table is copied into the row. System columns
+/// are declared once for the whole row; `traversal_path` is taken from the
+/// first table that has it (see [`DenormalizedJoin::traversal_path_table`]).
+#[must_use]
+pub fn copies(column: &str) -> bool {
+    !matches!(
+        column,
+        VERSION_COLUMN | DELETED_COLUMN | TRAVERSAL_PATH_COLUMN
+    )
+}
 
-    /// Inverse of [`Position::column_for`] for prefixed columns.
-    #[must_use]
-    pub fn of_column(column: &str) -> Option<(Position, &str)> {
-        let (kind, rest) = column.split_at(1);
-        let (index, col) = rest.split_once('_')?;
-        let index: usize = index.parse().ok()?;
-        match kind {
-            "e" => Some((Position::Edge(index), col)),
-            "n" => Some((Position::Node(index), col)),
-            _ => None,
-        }
-    }
-
-    /// Whether a source column at this position is copied into the row. The
-    /// system columns are declared once for the whole row; a node's `id` is
-    /// already an edge id column; only the first edge's `traversal_path` is
-    /// kept.
-    #[must_use]
-    pub fn copies(self, source_column: &str) -> bool {
-        match source_column {
-            VERSION_COLUMN | DELETED_COLUMN => false,
-            TRAVERSAL_PATH_COLUMN => self == Position::Edge(0),
-            DEFAULT_PRIMARY_KEY => matches!(self, Position::Edge(_)),
-            _ => true,
-        }
-    }
+/// How table `i` joins onto table `i - 1`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JoinOn {
+    pub prev_column: String,
+    pub this_column: String,
+    /// Both tables carry `traversal_path`, so the join also equates it. This
+    /// keeps the row on one path and lets both sides seek their sort key.
+    pub on_traversal_path: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PathHop {
+pub struct JoinedTable {
+    pub table: String,
+    pub has_traversal_path: bool,
+    pub has_id: bool,
+    /// `None` for the first table.
+    pub join: Option<JoinOn>,
+    /// Equality predicates selecting the rows that belong to this chain, e.g.
+    /// an edge table's relationship and endpoint kinds.
+    pub filter: Vec<(String, String)>,
+}
+
+/// How a declared hop is realized in the chain.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JoinHop {
     pub relationship_kind: String,
     pub source_kind: String,
     pub target_kind: String,
-    pub edge_table: String,
+    /// Chain index of the source node's table.
+    pub source_table: usize,
+    /// Chain index of the target node's table.
+    pub target_table: usize,
+    /// Chain index of the edge table, or `None` when the hop is realized
+    /// through the FK column.
+    pub edge_table: Option<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PathNode {
-    pub kind: String,
-    pub table: String,
-    pub global: bool,
-}
-
-/// A declared denormalized path with its resolved source tables.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DenormalizedPath {
+pub struct DenormalizedJoin {
     pub name: String,
     pub table: String,
-    pub hops: Vec<PathHop>,
-    /// `hops.len() + 1` entries; node `j` is hop `j`'s source and hop
-    /// `j - 1`'s target.
-    pub nodes: Vec<PathNode>,
-    pub sort_key: Vec<String>,
+    pub tables: Vec<JoinedTable>,
+    pub hops: Vec<JoinHop>,
 }
 
-impl DenormalizedPath {
+impl DenormalizedJoin {
+    /// Chain index of the table whose `traversal_path` the row carries.
     #[must_use]
-    pub fn hop_count(&self) -> usize {
-        self.hops.len()
+    pub fn traversal_path_table(&self) -> usize {
+        self.tables
+            .iter()
+            .position(|t| t.has_traversal_path)
+            .expect("the loader requires a scoped table")
     }
 
-    /// Every position in path order: `n0, e0, n1, e1, ..., nk`.
-    pub fn positions(&self) -> impl Iterator<Item = Position> + '_ {
-        (0..self.nodes.len()).flat_map(move |j| {
-            std::iter::once(Position::Node(j))
-                .chain((j < self.hops.len()).then_some(Position::Edge(j)))
-        })
-    }
-
+    /// `traversal_path`, then the `id` of every table that has one, with the
+    /// first scoped table's id leading so seeks within a namespace land on it.
     #[must_use]
-    pub fn source_table(&self, pos: Position) -> &str {
-        match pos {
-            Position::Edge(i) => &self.hops[i].edge_table,
-            Position::Node(j) => &self.nodes[j].table,
+    pub fn sort_key(&self) -> Vec<String> {
+        let mut ids: Vec<usize> = (0..self.tables.len())
+            .filter(|&i| self.tables[i].has_id)
+            .collect();
+        if let Some(anchor) = ids.iter().position(|&i| self.tables[i].has_traversal_path) {
+            let anchor = ids.remove(anchor);
+            ids.insert(0, anchor);
         }
-    }
-
-    /// Default sort key: `traversal_path`, then the first scoped node's id,
-    /// then the remaining node ids in path order.
-    #[must_use]
-    pub fn default_sort_key(nodes: &[PathNode], hop_count: usize) -> Vec<String> {
-        let anchor = nodes.iter().position(|n| !n.global).unwrap_or(0);
-        let mut order: Vec<usize> = (0..nodes.len()).collect();
-        order.remove(anchor);
-        order.insert(0, anchor);
         std::iter::once(TRAVERSAL_PATH_COLUMN.to_string())
-            .chain(
-                order
-                    .into_iter()
-                    .map(|j| Position::Node(j).column_for(DEFAULT_PRIMARY_KEY, hop_count)),
-            )
+            .chain(ids.into_iter().map(|i| column_for(i, DEFAULT_PRIMARY_KEY)))
             .collect()
     }
 }
@@ -173,65 +133,43 @@ impl DenormalizedPath {
 mod tests {
     use super::*;
 
-    #[test]
-    fn node_ids_resolve_to_edge_id_columns() {
-        assert_eq!(Position::Node(0).column_for("id", 2), "e0_source_id");
-        assert_eq!(Position::Node(1).column_for("id", 2), "e1_source_id");
-        assert_eq!(Position::Node(2).column_for("id", 2), "e1_target_id");
-        assert_eq!(Position::Node(1).column_for("title", 2), "n1_title");
-        assert_eq!(
-            Position::Edge(1).column_for("traversal_path", 2),
-            "traversal_path"
-        );
-        assert_eq!(
-            Position::Edge(1).column_for("target_kind", 2),
-            "e1_target_kind"
-        );
+    fn table(has_traversal_path: bool, has_id: bool) -> JoinedTable {
+        JoinedTable {
+            table: String::new(),
+            has_traversal_path,
+            has_id,
+            join: None,
+            filter: vec![],
+        }
     }
 
     #[test]
-    fn of_column_inverts_prefixes() {
-        assert_eq!(
-            Position::of_column("n12_title"),
-            Some((Position::Node(12), "title"))
-        );
-        assert_eq!(
-            Position::of_column("e0_source_id"),
-            Some((Position::Edge(0), "source_id"))
-        );
-        assert_eq!(Position::of_column("traversal_path"), None);
-        assert_eq!(Position::of_column("_version"), None);
+    fn columns_are_prefixed_except_the_shared_traversal_path() {
+        assert_eq!(column_for(2, "title"), "t2_title");
+        assert_eq!(column_for(2, "traversal_path"), "traversal_path");
+        assert!(copies("title") && copies("id"));
+        assert!(!copies("_version") && !copies("traversal_path"));
     }
 
     #[test]
-    fn default_sort_key_anchors_on_the_first_scoped_node() {
-        let nodes = |globals: [bool; 3]| {
-            globals
-                .iter()
-                .map(|&global| PathNode {
-                    kind: String::new(),
-                    table: String::new(),
-                    global,
-                })
-                .collect::<Vec<_>>()
+    fn sort_key_leads_with_the_first_scoped_id() {
+        // User (global), REVIEWER edge (no id), MergeRequest, IN_PROJECT edge, Project.
+        let join = DenormalizedJoin {
+            name: String::new(),
+            table: String::new(),
+            tables: vec![
+                table(false, true),
+                table(true, false),
+                table(true, true),
+                table(true, false),
+                table(true, true),
+            ],
+            hops: vec![],
         };
+        assert_eq!(join.traversal_path_table(), 1);
         assert_eq!(
-            DenormalizedPath::default_sort_key(&nodes([true, false, false]), 2),
-            [
-                "traversal_path",
-                "e1_source_id",
-                "e0_source_id",
-                "e1_target_id"
-            ]
-        );
-        assert_eq!(
-            DenormalizedPath::default_sort_key(&nodes([false, false, true]), 2),
-            [
-                "traversal_path",
-                "e0_source_id",
-                "e1_source_id",
-                "e1_target_id"
-            ]
+            join.sort_key(),
+            ["traversal_path", "t2_id", "t0_id", "t4_id"]
         );
     }
 }
