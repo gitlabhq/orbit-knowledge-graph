@@ -263,13 +263,16 @@ such as the External Secrets Operator. Do not store the plaintext elsewhere.
 
 ## Install Siphon
 
-With `configMode: split`, Siphon builds its table list at pod startup from an image that ships with GitLab.
-The list then matches your GitLab version and needs no manual updates.
+With `configMode: split`, Siphon does not ship its own table list. At pod startup it mounts the
+`gitlab-siphon-tables` image, which GitLab publishes for every release and which contains only the table
+definitions from the GitLab source tree. The list then matches your GitLab version and needs no manual
+updates.
 
-`global.gitlabVersion` is the tag of the `gitlab-siphon-tables` image, which pins the replicated table set
-to your GitLab version. Tags start at `v19.2.0-ee`. Confirm the tag exists in the
-[container registry](https://gitlab.com/gitlab-org/gitlab/container_registry) before you install, because a
-tag that does not exist prevents the pods from starting.
+The image is `registry.gitlab.com/gitlab-org/gitlab/gitlab-siphon-tables`. It is not part of the Siphon
+project. `global.gitlabVersion` selects its tag and pins the replicated table set to your GitLab version.
+Tags start at `v19.2.0-ee`. Confirm the tag exists in the
+[`gitlab-siphon-tables` container registry](https://gitlab.com/gitlab-org/gitlab/container_registry/11634641)
+before you install, because a tag that does not exist prevents the pods from starting.
 
 1. Save the following as `siphon-values.yaml` and replace the placeholders:
 
@@ -277,7 +280,7 @@ tag that does not exist prevents the pods from starting.
    configMode: split
 
    global:
-     # Tag of the gitlab-siphon-tables image.
+     # Tag of registry.gitlab.com/gitlab-org/gitlab/gitlab-siphon-tables.
      # Must match your GitLab version exactly, patch level included.
      gitlabVersion: v19.2.2-ee
 
