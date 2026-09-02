@@ -23,11 +23,8 @@ use crate::v2::trace::Tracer;
 // limit; `arrow_overflow` panic recovery keeps that case self-healing.
 const GO_PARSER_MAX_FILE_SIZE: u64 = 10 * 1024 * 1024;
 
-// Hand-written YAML config (helm values, CI definitions, app config) tops
-// out around 40 KiB in the repos surveyed; machine-generated YAML (openapi
-// dumps, ordering todos, queue inventories) starts near 170 KiB and reaches
-// megabytes. 128 KiB separates the two with headroom.
-const YAML_PARSER_MAX_FILE_SIZE: u64 = 128 * 1024;
+// 1 MiB as a parse cost guard to keep machine generated files out
+const YAML_PARSER_MAX_FILE_SIZE: u64 = 1024 * 1024;
 
 /// Log files >= this size before processing so an uncatchable OOM/overflow crash names the in-flight file.
 pub(crate) const LARGE_FILE_BREADCRUMB_BYTES: u64 = 2 * 1024 * 1024;
