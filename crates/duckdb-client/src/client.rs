@@ -59,11 +59,9 @@ impl DuckDbClient {
             std::fs::write(&tmp, &bytes)?;
             std::fs::rename(&tmp, &path)?;
         }
-        let path = path.to_str().ok_or_else(|| {
-            DuckDbError::Schema(format!("non-UTF-8 extension path: {}", path.display()))
-        })?;
+        let path = path.to_string_lossy();
         self.conn
-            .execute_batch(&format!("LOAD {};", crate::sql_lit(path)))
+            .execute_batch(&format!("LOAD {};", crate::sql_lit(&path)))
             .map_err(|e| {
                 DuckDbError::Schema(format!(
                     "failed to load the bundled DuckDB fts extension from {path}: {e}"
