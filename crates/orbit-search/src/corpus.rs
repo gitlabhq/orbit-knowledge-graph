@@ -59,8 +59,20 @@ pub const EXCLUDE_REGEX: &[&str] = &[
 
 pub const DEFAULT_SOURCE_EXTS: &[&str] = &[
     "rs", "rb", "py", "js", "ts", "vue", "jsx", "tsx", "mjs", "cjs", "go", "java", "kt", "kts",
-    "scala", "cs", "cpp", "c", "h", "hpp", "swift", "php", "rake", "yml", "yaml",
+    "scala", "cs", "cpp", "c", "h", "hpp", "swift", "php", "rake",
 ];
+
+/// Config formats whose definitions are searchable but carry no signature
+/// line for `repo-map` to render.
+pub const CONFIG_EXTS: &[&str] = &["yml", "yaml"];
+
+pub fn search_corpus_exts() -> Vec<String> {
+    DEFAULT_SOURCE_EXTS
+        .iter()
+        .chain(CONFIG_EXTS)
+        .map(|s| s.to_string())
+        .collect()
+}
 
 pub fn ext_regex(exts: &[String]) -> String {
     let alt = exts
