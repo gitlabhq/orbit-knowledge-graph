@@ -45,7 +45,6 @@ pub static GRAPH_SCHEMA_SQL: std::sync::LazyLock<&'static str> = std::sync::Lazy
     use query_engine::compiler::{
         emit_create_materialized_view, emit_create_table,
         generate_graph_materialized_views_with_prefix, generate_graph_tables_with_prefix,
-        generate_unversioned_objects,
     };
 
     let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
@@ -58,9 +57,6 @@ pub static GRAPH_SCHEMA_SQL: std::sync::LazyLock<&'static str> = std::sync::Lazy
     let views = generate_graph_materialized_views_with_prefix(&ontology, &TABLE_PREFIX);
     for mv in &views {
         stmts.push(format!("{};", emit_create_materialized_view(mv)));
-    }
-    for object in generate_unversioned_objects(&ontology) {
-        stmts.push(format!("{};", object.ddl));
     }
 
     let sql = stmts.join("\n");

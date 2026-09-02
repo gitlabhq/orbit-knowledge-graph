@@ -81,7 +81,7 @@ impl CodeStaleSweep {
         for (table, sql) in &self.statements {
             let statement_start = Instant::now();
             self.graph
-                .insert_query(sql)
+                .query(sql)
                 .param("path", traversal_path.as_str())
                 .execute()
                 .await
@@ -128,7 +128,7 @@ fn node_sweep(table: &str, checkpoint_table: &str) -> String {
         WHERE startsWith(s.traversal_path, {{path:String}})
           AND s._deleted = false
           AND cp._deleted = false
-          AND s._version < cp.indexed_at - toIntervalMicrosecond(1)
+          AND s._version < cp.indexed_at
         "#
     )
 }
@@ -158,12 +158,14 @@ fn edge_sweep(edge_table: &str, checkpoint_table: &str) -> String {
             WHERE startsWith(s.traversal_path, {{path:String}})
               AND s._deleted = false
               AND cp._deleted = false
-              AND s._version < cp.indexed_at - toIntervalMicrosecond(1)
+              AND s._version < cp.indexed_at
             "#
         );
     }
 
-    let code_source_kinds = CodeTableNames::node_kinds_sql_list();
+    let code_source_kinds = CodeTableNames::NODE_KINDS
+        .map(|kind| format!("'{kind}'"))
+        .join(", ");
 
     format!(
         r#"
@@ -188,7 +190,7 @@ fn edge_sweep(edge_table: &str, checkpoint_table: &str) -> String {
         WHERE startsWith(s.traversal_path, {{path:String}})
           AND s._deleted = false
           AND s.source_kind IN ({code_source_kinds})
-          AND s._version < w.watermark - toIntervalMicrosecond(1)
+          AND s._version < w.watermark
         "#
     )
 }
