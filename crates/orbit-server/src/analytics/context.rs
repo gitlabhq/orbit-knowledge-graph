@@ -6,7 +6,7 @@ use orbit_analytics::{
     OrbitCommonContext, OrbitQueryContext, orbit_common, orbit_query, validation,
 };
 use orbit_server_config::AnalyticsConfig;
-use orbit_utils::pinned::VERSIONS;
+use orbit_versions::VERSIONS;
 use query_engine::compiler::ExecMetrics;
 
 use crate::auth::{Claims, SourceType};

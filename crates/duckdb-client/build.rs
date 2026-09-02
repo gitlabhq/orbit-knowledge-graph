@@ -34,8 +34,8 @@ const DOWNLOAD_LIMIT: u64 = 64 * 1024 * 1024;
 fn main() {
     println!("cargo:rerun-if-changed={}", env!("LOCKFILE"));
     println!("cargo:rerun-if-changed={}", env!("VERSIONS_FILE"));
-    let duckdb_version = pinned_duckdb_version();
-    assert_lockfile_matches_pin(&duckdb_version);
+    let duckdb_version = orbit_versions::VERSIONS.duckdb.as_str();
+    assert_lockfile_matches_pin(duckdb_version);
 
     let target = env::var("TARGET").unwrap();
     let &(_, platform) = TARGETS
@@ -70,16 +70,6 @@ fn main() {
         ),
     )
     .unwrap();
-}
-
-fn pinned_duckdb_version() -> String {
-    let versions = fs::read_to_string(env!("VERSIONS_FILE")).unwrap();
-    versions
-        .lines()
-        .find_map(|l| l.strip_prefix("duckdb:"))
-        .expect("config/versions.yaml must pin `duckdb: vX.Y.Z`")
-        .trim()
-        .to_string()
 }
 
 /// DuckDB 1.5.5 ships as duckdb crate 1.10505.x.

@@ -2205,6 +2205,7 @@ dependencies = [
  "orbit-observability",
  "orbit-server-config",
  "orbit-utils",
+ "orbit-versions",
  "regex",
  "serde",
  "serde_json",
@@ -4217,6 +4218,7 @@ dependencies = [
  "ontology",
  "orbit-search",
  "orbit-utils",
+ "orbit-versions",
  "serde_json",
  "sha2 0.11.0",
  "tempfile",
@@ -4685,6 +4687,7 @@ dependencies = [
  "indexmap 2.14.0",
  "insta",
  "orbit-utils",
+ "orbit-versions",
  "proptest",
  "rand 0.10.2",
  "semver",
@@ -5812,6 +5815,7 @@ dependencies = [
  "orbit-observability",
  "orbit-server-config",
  "orbit-utils",
+ "orbit-versions",
  "parking_lot",
  "petgraph 0.8.3",
  "prost 0.14.4",
@@ -5933,6 +5937,7 @@ dependencies = [
  "orbit-server",
  "orbit-server-config",
  "orbit-utils",
+ "orbit-versions",
  "query-engine",
  "reqwest 0.13.4",
  "rustls",
@@ -8378,6 +8383,7 @@ dependencies = [
  "orbit-prompts",
  "orbit-server-config",
  "orbit-utils",
+ "orbit-versions",
  "prost 0.14.4",
  "query-engine",
  "reqwest 0.13.4",
@@ -8437,6 +8443,14 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tracing",
+]
+
+[[package]]
+name = "orbit-versions"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde-saphyr",
 ]
 
 [[package]]
@@ -9946,6 +9960,7 @@ dependencies = [
  "orbit-server",
  "orbit-server-config",
  "orbit-utils",
+ "orbit-versions",
  "pipeline",
  "regex",
  "rustls",
@@ -14822,6 +14837,7 @@ dependencies = [
  "orbit-observability",
  "orbit-server-config",
  "orbit-utils",
+ "orbit-versions",
  "parquet 58.3.0",
  "query-engine",
  "rand 0.10.2",

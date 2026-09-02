@@ -1,5 +1,5 @@
 # Pinned versions and upstream revisions. Deserialized into
-# orbit_utils::pinned::Versions (every key is required, unknown keys fail
+# orbit_versions::Versions (every key is required, unknown keys fail
 # the build). Shell tooling reads keys with awk, so keep one `key: value`
 # per line.
 

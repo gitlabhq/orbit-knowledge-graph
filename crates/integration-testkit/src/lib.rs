@@ -30,7 +30,7 @@ pub const SIPHON_SCHEMA_SQL: &str = include_str!(concat!(env!("FIXTURES_DIR"), "
 
 /// Version 0 -> "" (empty), version N -> "vN_".
 pub static TABLE_PREFIX: std::sync::LazyLock<String> =
-    std::sync::LazyLock::new(|| match orbit_utils::pinned::VERSIONS.schema {
+    std::sync::LazyLock::new(|| match orbit_versions::VERSIONS.schema {
         0 => String::new(),
         v => format!("v{v}_"),
     });

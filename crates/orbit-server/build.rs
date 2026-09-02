@@ -44,7 +44,7 @@ fn validate_migration_ledger() {
     let committed = ontology::migrations::Fingerprints::parse(&committed_text)
         .unwrap_or_else(|e| panic!("{e}"));
 
-    let version = orbit_utils::pinned::VERSIONS.schema;
+    let version = orbit_versions::VERSIONS.schema;
 
     let ledger_text = std::fs::read_to_string(&ledger_path)
         .unwrap_or_else(|e| panic!("reading {}: {e}", ledger_path.display()));

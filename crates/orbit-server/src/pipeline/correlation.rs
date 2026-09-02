@@ -53,7 +53,7 @@ pub(crate) fn log_comment_base(user_id: u64, query_json: &str) -> String {
         query: query_json,
         versions: Versions {
             payload: PAYLOAD_VERSION,
-            dsl: orbit_utils::pinned::VERSIONS.query_dsl.clone(),
+            dsl: orbit_versions::VERSIONS.query_dsl.clone(),
             schema: *indexer::schema::version::SCHEMA_VERSION,
         },
     };
@@ -163,10 +163,7 @@ mod tests {
         assert_eq!(p["user_id"], 42);
         assert_eq!(p["query"], r#"{"query_type":"traversal"}"#);
         assert_eq!(p["versions"]["payload"], PAYLOAD_VERSION);
-        assert_eq!(
-            p["versions"]["dsl"],
-            orbit_utils::pinned::VERSIONS.query_dsl
-        );
+        assert_eq!(p["versions"]["dsl"], orbit_versions::VERSIONS.query_dsl);
         assert_eq!(
             p["versions"]["schema"],
             *indexer::schema::version::SCHEMA_VERSION

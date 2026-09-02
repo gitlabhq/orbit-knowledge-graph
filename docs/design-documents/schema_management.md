@@ -25,10 +25,10 @@ enforced by `scripts/check-pinned-version.sh raw_output_format`. See
 
 `config/versions.yaml` holds every pinned version in the repo (schema, query DSL, output
 formats, DuckDB release, vendored upstream revisions). It is embedded at compile time and
-deserialized into `orbit_utils::pinned::Versions`; the indexer exposes the `schema` key as:
+deserialized into `orbit_versions::Versions`; the indexer exposes the `schema` key as:
 
 ```rust
-pub static SCHEMA_VERSION: LazyLock<u32> = LazyLock::new(|| orbit_utils::pinned::VERSIONS.schema);
+pub static SCHEMA_VERSION: LazyLock<u32> = LazyLock::new(|| orbit_versions::VERSIONS.schema);
 ```
 
 Version 0 is the initial (V0) schema — the unversioned table layout used since the service launched.

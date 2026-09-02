@@ -18,7 +18,7 @@ pub use graph::{
 pub use raw_row::row_to_json;
 
 pub static RAW_OUTPUT_FORMAT_VERSION: LazyLock<Version> = LazyLock::new(|| {
-    orbit_utils::pinned::VERSIONS
+    orbit_versions::VERSIONS
         .raw_output_format
         .parse()
         .expect("RAW_OUTPUT_FORMAT_VERSION must be valid semver")
