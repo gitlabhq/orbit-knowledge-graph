@@ -1374,7 +1374,8 @@ impl Ontology {
     /// - An FK edge projects only on the side holding the key.
     /// - A node-pipeline edge projects only the pipeline's own node, on the
     ///   side that names it literally; derived-entity edges project nothing.
-    /// - Edges no SDLC entity emits are code-graph edges, tagged on both sides.
+    /// - An edge no declared pipeline emits has no writer the ontology can
+    ///   consult, so it is assumed to project on both sides.
     pub fn edge_projects_column(
         &self,
         relationship_kind: &str,
@@ -1436,16 +1437,23 @@ impl Ontology {
                 })
         });
 
-        let emitted_by_sdlc = self
-            .nodes()
-            .map(|node| node.name.as_str())
-            .chain(self.derived_entities().map(|derived| derived.name.as_str()))
-            .any(|entity| {
-                self.relationship_kinds_emitted_by(entity)
-                    .contains(relationship_kind)
-            });
+        own_pipeline_tags_this_side || !self.has_declared_emitter(relationship_kind)
+    }
 
-        own_pipeline_tags_this_side || !emitted_by_sdlc
+    fn has_declared_emitter(&self, relationship_kind: &str) -> bool {
+        let node_pipelines_emit = self.nodes().any(|node| {
+            node.pipelines
+                .iter()
+                .flat_map(|pipeline| pipeline.transform.edges())
+                .any(|mapping| mapping.label == relationship_kind)
+        });
+        node_pipelines_emit
+            || self.derived_entities().any(|derived| {
+                derived
+                    .emits
+                    .iter()
+                    .any(|emitted| emitted == relationship_kind)
+            })
     }
 
     fn node_has_property(&self, node_kind: &str, property_name: &str) -> bool {
