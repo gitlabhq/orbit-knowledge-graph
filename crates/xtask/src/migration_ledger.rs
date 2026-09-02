@@ -15,7 +15,8 @@ use ontology::migrations::{
 const DEFAULT_BASE: &str = "origin/main";
 
 const FINGERPRINT_REPO_PATH: &str = "config/schema-migrations.fingerprint.yaml";
-const SCHEMA_VERSION_REPO_PATH: &str = "config/SCHEMA_VERSION";
+const VERSIONS_REPO_PATH: &str = "config/versions.yaml";
+const SCHEMA_KEY: &str = "schema";
 
 const REMEDIATION: &str = "Run `mise schema:bump` to record the change and re-snapshot.";
 
@@ -31,8 +32,8 @@ fn fingerprint_path() -> PathBuf {
     config_dir().join(migrations::FINGERPRINT_FILE)
 }
 
-fn schema_version_path() -> PathBuf {
-    config_dir().join("SCHEMA_VERSION")
+fn versions_path() -> PathBuf {
+    config_dir().join("versions.yaml")
 }
 
 fn current_fingerprints(ontology: &Ontology) -> Fingerprints {
@@ -63,17 +64,38 @@ fn read_ledger() -> Result<MigrationLedger> {
 }
 
 fn read_schema_version() -> Result<u32> {
-    let path = schema_version_path();
+    let path = versions_path();
     let content =
         fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
-    content
-        .trim()
-        .parse()
-        .with_context(|| format!("{} must contain a u32", path.display()))
+    parse_schema_version(&content)
+        .with_context(|| format!("{} must pin `{SCHEMA_KEY}: <u32>`", path.display()))
 }
 
+fn parse_schema_version(versions: &str) -> Result<u32> {
+    Ok(orbit_utils::pinned::lookup(versions, SCHEMA_KEY)
+        .ok_or_else(|| anyhow!("no `{SCHEMA_KEY}:` line"))?
+        .parse()?)
+}
+
+/// Rewrites only the `schema:` line so comments and other pins are untouched.
 fn write_schema_version(version: u32) -> Result<()> {
-    fs::write(schema_version_path(), format!("{version}\n")).context("writing SCHEMA_VERSION")
+    let path = versions_path();
+    let content = fs::read_to_string(&path)?;
+    let rewritten: String = content
+        .lines()
+        .map(|l| {
+            if l.starts_with(&format!("{SCHEMA_KEY}:")) {
+                format!("{SCHEMA_KEY}: {version}\n")
+            } else {
+                format!("{l}\n")
+            }
+        })
+        .collect();
+    fs::write(&path, rewritten).with_context(|| format!("writing {}", path.display()))
+}
+
+fn schema_version_at(base: &str) -> Option<u32> {
+    parse_schema_version(&git_show(base, VERSIONS_REPO_PATH)?).ok()
 }
 
 fn git_show(base: &str, repo_path: &str) -> Option<String> {
@@ -197,9 +219,8 @@ fn check_under_declaration(
         return Ok(());
     }
 
-    let base_version: u32 = git_show(base, SCHEMA_VERSION_REPO_PATH)
-        .and_then(|s| s.trim().parse().ok())
-        .ok_or_else(|| anyhow!("could not read {base}:{SCHEMA_VERSION_REPO_PATH}"))?;
+    let base_version: u32 = schema_version_at(base)
+        .ok_or_else(|| anyhow!("could not read {SCHEMA_KEY} from {base}:{VERSIONS_REPO_PATH}"))?;
     // A gap would leave an entry-less version, which the migration path treats
     // as a full rebuild; one MR bumps exactly one version.
     if schema_version != base_version + 1 {
@@ -296,8 +317,7 @@ pub fn bump(
 
     let working_version = read_schema_version()?;
     let base_ref = base.unwrap_or_else(|| DEFAULT_BASE.to_string());
-    let base_version =
-        git_show(&base_ref, SCHEMA_VERSION_REPO_PATH).and_then(|s| s.trim().parse::<u32>().ok());
+    let base_version = schema_version_at(&base_ref);
 
     let is_new = match base_version {
         Some(bv) => working_version == bv,
@@ -308,7 +328,7 @@ pub fn bump(
                 true
             } else {
                 bail!(
-                    "could not read {base_ref}:{SCHEMA_VERSION_REPO_PATH} to decide bump vs amend; \
+                    "could not read {SCHEMA_KEY} from {base_ref}:{VERSIONS_REPO_PATH} to decide bump vs amend; \
                      pass --new or --amend"
                 );
             }

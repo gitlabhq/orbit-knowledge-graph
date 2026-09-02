@@ -372,7 +372,7 @@ The indexer uses the ontology to create the Orbit ClickHouse tables and build th
 
 **Lake to Graph**
 
-The Orbit schema is declared in `config/graph.sql` (generated from the ontology) and versioned via `config/SCHEMA_VERSION`. All graph tables are prefixed with `v<N>_` (e.g. `v58_gl_issue`) so that multiple schema versions can coexist during migration. Migrations are applied to the Orbit graph database by the dispatcher at boot via `schema::migration::run_if_needed()`.
+The Orbit schema is declared in `config/graph.sql` (generated from the ontology) and versioned via the `schema` pin in `config/versions.yaml`. All graph tables are prefixed with `v<N>_` (e.g. `v58_gl_issue`) so that multiple schema versions can coexist during migration. Migrations are applied to the Orbit graph database by the dispatcher at boot via `schema::migration::run_if_needed()`.
 
 The schema is backward compatible with the previous version until the schema migration is complete for every namespace. A migration is considered complete when `MigrationCompletionChecker` detects that all enabled namespaces have been re-indexed into new-prefix tables, then promotes the new version to `active` and retires the old one.
 

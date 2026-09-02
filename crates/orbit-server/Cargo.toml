@@ -67,6 +67,7 @@ compiler = { path = "../query-engine/compiler" }
 orbit-prompts = { path = "../orbit-prompts" }
 named-queries = { path = "../named-queries" }
 ontology = { path = "../ontology" }
+orbit-utils = { path = "../utils" }
 tower = { workspace = true }
 tonic-prost-build = { workspace = true }
 

@@ -1,0 +1,28 @@
+# Pinned versions and upstream revisions, one flat `key: value` per line.
+#
+# Read at compile time by orbit_utils::version::pinned (a const scanner, so
+# keep this file flat: no nesting, no quotes, no inline comments on value
+# lines). Shell tooling reads it with scripts/pinned-version.sh.
+
+# Graph schema version; prefixes every versioned ClickHouse table (vN_).
+# Bump with `mise schema:bump`, which also appends a migration ledger entry.
+schema: 93
+
+# Accepted query-DSL shape. Bump when graph_query.schema.json or the
+# compiler's input/validate passes change what queries are accepted.
+query_dsl: 12.1.0
+
+# Response envelope of the raw (JSON) formatter.
+raw_output_format: 5.0.1
+
+# Response envelope of the GOON formatter.
+goon_output_format: 4.0.1
+
+# DuckDB release linked by the duckdb crate in Cargo.lock; crate 1.10505.x
+# is DuckDB 1.5.5. Vendored extension checksums in
+# crates/duckdb-client/build.rs are pinned against this release.
+duckdb: v1.5.5
+
+# gitlab-org/gitlab commit whose SystemNoteMetadata::ICON_TYPES is vendored
+# in config/vendored/system_note_metadata.actions.
+gitlab_system_note_actions: ea52f8c3adc370db76545ecd82728710f2609800

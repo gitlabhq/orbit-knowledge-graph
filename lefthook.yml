@@ -56,13 +56,13 @@ pre-commit:
       run: mise run ontology:validate
       glob: "fixtures/ontology/**/*.yaml"
     - name: response-schema-version-check
-      run: bash ./scripts/check-response-schema-version.sh
+      run: bash ./scripts/check-pinned-version.sh raw_output_format
       glob:
         - "crates/query-engine/formatters/src/graph.rs"
         - "crates/query-engine/formatters/src/lib.rs"
         - "config/schemas/query_response.json"
     - name: goon-format-version-check
-      run: bash ./scripts/check-goon-format-version.sh
+      run: bash ./scripts/check-pinned-version.sh goon_output_format
       glob:
         - "crates/query-engine/formatters/src/goon/**/*.rs"
         - "crates/query-engine/formatters/src/graph.rs"

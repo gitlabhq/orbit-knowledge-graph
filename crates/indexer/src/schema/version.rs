@@ -37,12 +37,8 @@ const VERSION_TABLE: &str = "gkg_schema_version";
 ///
 /// Bump via `mise schema:bump`; the build and the CI `migration-ledger-check`
 /// job enforce a scope-covering ledger entry.
-pub static SCHEMA_VERSION: LazyLock<u32> = LazyLock::new(|| {
-    include_str!("../../../../config/SCHEMA_VERSION")
-        .trim()
-        .parse()
-        .expect("config/SCHEMA_VERSION must contain a valid u32")
-});
+pub static SCHEMA_VERSION: LazyLock<u32> =
+    LazyLock::new(|| orbit_utils::pinned::pinned_u32("schema"));
 
 fn version_table_ddl() -> CreateTable {
     CreateTable {

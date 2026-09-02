@@ -133,7 +133,7 @@ if [[ -n "$CH_POD" ]]; then
             ORDER BY database, name FORMAT Vertical" \
     > "$DIAG_DIR/clickhouse-schema.txt"
 
-  # Graph DB tables are prefixed at runtime per config/SCHEMA_VERSION
+  # Graph DB tables are prefixed at runtime per the schema pin in config/versions.yaml
   # (e.g. v1_gl_project), so discover them dynamically. Engine filter
   # skips materialized-view definitions; their target tables are still
   # captured. Capped per-table to keep dumps manageable on chatty tables.

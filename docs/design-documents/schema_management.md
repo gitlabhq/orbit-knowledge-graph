@@ -17,24 +17,26 @@ keys, and explicit `SETTINGS` entries that need to be emitted into the generated
 ## Schema Version Tracking
 
 This file covers ClickHouse DDL versioning only. The query **response format** is
-versioned separately as a semver in `config/RAW_OUTPUT_FORMAT_VERSION` and
-enforced by `scripts/check-response-schema-version.sh`. See
+versioned separately as the `raw_output_format` semver pin in `config/versions.yaml` and
+enforced by `scripts/check-pinned-version.sh raw_output_format`. See
 [ADR 004](decisions/004_unified_response_schema.md) for the response format contract.
 
-### `config/SCHEMA_VERSION`
+### The `schema` pin in `config/versions.yaml`
 
-A plain text file at `config/SCHEMA_VERSION` holds the current schema version as a `u32` integer.
-The binary reads this at compile time via `include_bytes!` and exposes it as:
+`config/versions.yaml` is a flat `key: value` file holding every pinned version in the repo
+(schema, query DSL, output formats, DuckDB release, vendored upstream revisions). The `schema`
+key is a `u32`. The binary reads it at compile time through the const scanner in
+`orbit_utils::pinned` and exposes it as:
 
 ```rust
-pub const SCHEMA_VERSION: u32 = /* parsed from config/SCHEMA_VERSION */;
+pub const SCHEMA_VERSION: u32 = orbit_utils::pinned::pinned_u32("schema");
 ```
 
 Version 0 is the initial (V0) schema — the unversioned table layout used since the service launched.
 
 #### When to bump
 
-Bump `config/SCHEMA_VERSION` for any ontology or DDL change that affects what is stored in
+Bump the `schema` pin for any ontology or DDL change that affects what is stored in
 ClickHouse, not just table structure:
 
 - **DDL shape changes**: new columns, type changes, index additions, engine changes.
@@ -220,9 +222,9 @@ The migration ledger is the versioned-schema gate. `orbit-server`'s build script
 ontology sources, generated versioned DDL, or auxiliary schema drift from the committed
 fingerprint snapshot (`config/schema-migrations.fingerprint.yaml`), or if the ledger is malformed.
 Versioned drift requires `mise schema:bump`. Auxiliary-schema drift requires `mise schema:snapshot`
-and does not advance `SCHEMA_VERSION` or re-index graph data. The snapshot command refuses to
+and does not advance the schema pin or re-index graph data. The snapshot command refuses to
 record versioned drift. The CI job `migration-ledger-check` additionally requires versioned
-snapshot changes to bump `config/SCHEMA_VERSION` to exactly base + 1 and add a covering
+snapshot changes to bump the `schema` pin to exactly base + 1 and add a covering
 `config/schema-migrations.yaml` entry.
 Local (DuckDB) DDL is generated from the ontology at runtime, so `config/ontology/`
 changes automatically affect both ClickHouse and DuckDB schemas.

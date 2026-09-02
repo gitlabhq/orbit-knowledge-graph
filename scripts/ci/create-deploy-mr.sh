@@ -50,13 +50,18 @@ done
 
 # The deployed tag predates the shallow CI clone, so fetch it explicitly to
 # read its schema version.
-new_schema="$(cat config/SCHEMA_VERSION)"
+schema_at() {
+  # Tags before the versions.yaml consolidation carried a bare SCHEMA_VERSION file.
+  git show "$1:config/versions.yaml" 2>/dev/null | awk '/^schema:/ { print $2 }' \
+    || git show "$1:config/SCHEMA_VERSION" 2>/dev/null || true
+}
+new_schema="$(awk '/^schema:/ { print $2 }' config/versions.yaml)"
 old_schema=""
 if git fetch --quiet origin "refs/tags/v${deployed}:refs/tags/v${deployed}" --no-tags --depth=1 2>/dev/null; then
-  old_schema="$(git show "v${deployed}:config/SCHEMA_VERSION" 2>/dev/null || true)"
+  old_schema="$(schema_at "v${deployed}")"
 fi
 if [[ -z "$old_schema" ]]; then
-  schema_sentence="Schema impact unknown: could not read config/SCHEMA_VERSION at v${deployed}; compare manually before merging."
+  schema_sentence="Schema impact unknown: could not read the schema pin at v${deployed}; compare manually before merging."
 elif [[ "$old_schema" == "$new_schema" ]]; then
   schema_sentence="No schema migration: both are schema v${new_schema}, plain image swap."
 else

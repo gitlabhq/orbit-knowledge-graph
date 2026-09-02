@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Verify config/vendored/system_note_metadata.actions matches the Rails
-# SystemNoteMetadata::ICON_TYPES at the commit SHA pinned in that file.
+# SystemNoteMetadata::ICON_TYPES at the commit SHA pinned in config/versions.yaml.
 #
 # The vendored list is the runtime union the Rails model exposes:
 # CE `ICON_TYPES` plus EE `EE_ICON_TYPES` (icon_types is overridden in EE as
@@ -24,10 +24,10 @@ if ci_skip_requested "system-note-actions-check"; then
     exit 0
 fi
 
-pinned_sha=$(grep -m1 '^# Pinned:' "$ACTIONS_FILE" | awk '{print $3}')
+pinned_sha=$(awk '/^gitlab_system_note_actions:/ { print $2 }' config/versions.yaml)
 
 if [[ -z "$pinned_sha" ]]; then
-    echo "Could not find '# Pinned:' line in $ACTIONS_FILE"
+    echo "Could not find 'gitlab_system_note_actions:' in config/versions.yaml"
     exit 1
 fi
 

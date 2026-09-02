@@ -6,6 +6,7 @@ use orbit_analytics::{
     OrbitCommonContext, OrbitQueryContext, orbit_common, orbit_query, validation,
 };
 use orbit_server_config::AnalyticsConfig;
+use orbit_utils::pinned::pinned;
 use query_engine::compiler::ExecMetrics;
 
 use crate::auth::{Claims, SourceType};
@@ -202,10 +203,10 @@ fn apply_metrics(
     q.ch_read_bytes = Some(metrics.ch_read_bytes as i64);
     q.ch_memory_usage = Some(metrics.ch_memory_usage as i64);
 
-    q.graph_schema_version = GRAPH_SCHEMA_VERSION.trim().parse().ok();
-    q.query_dsl_version = QUERY_DSL_VERSION.trim().parse().ok();
-    q.raw_output_format_version = RAW_OUTPUT_FORMAT_VERSION.trim().parse().ok();
-    q.goon_output_format_version = GOON_OUTPUT_FORMAT_VERSION.trim().parse().ok();
+    q.graph_schema_version = GRAPH_SCHEMA_VERSION.parse().ok();
+    q.query_dsl_version = QUERY_DSL_VERSION.parse().ok();
+    q.raw_output_format_version = RAW_OUTPUT_FORMAT_VERSION.parse().ok();
+    q.goon_output_format_version = GOON_OUTPUT_FORMAT_VERSION.parse().ok();
 }
 
 /// Build a topology fingerprint like `User-[AUTHORED]->MergeRequest`.
@@ -235,12 +236,10 @@ fn traversal_shape(input: &query_engine::compiler::Input) -> Option<String> {
     Some(parts.join(", "))
 }
 
-const GRAPH_SCHEMA_VERSION: &str = include_str!(concat!(env!("CONFIG_DIR"), "/SCHEMA_VERSION"));
-const QUERY_DSL_VERSION: &str = include_str!(concat!(env!("CONFIG_DIR"), "/QUERY_DSL_VERSION"));
-const RAW_OUTPUT_FORMAT_VERSION: &str =
-    include_str!(concat!(env!("CONFIG_DIR"), "/RAW_OUTPUT_FORMAT_VERSION"));
-const GOON_OUTPUT_FORMAT_VERSION: &str =
-    include_str!(concat!(env!("CONFIG_DIR"), "/GOON_OUTPUT_FORMAT_VERSION"));
+const GRAPH_SCHEMA_VERSION: &str = pinned("schema");
+const QUERY_DSL_VERSION: &str = pinned("query_dsl");
+const RAW_OUTPUT_FORMAT_VERSION: &str = pinned("raw_output_format");
+const GOON_OUTPUT_FORMAT_VERSION: &str = pinned("goon_output_format");
 
 /// Bounds are 255 chars for instance/host fields; exceeding that surfaces a
 /// typed validation error rather than truncating silently.

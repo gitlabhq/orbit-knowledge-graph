@@ -67,7 +67,7 @@ pub fn run_remote(
         ));
     }
 
-    let schema_version = include_str!(concat!(env!("CONFIG_DIR"), "/SCHEMA_VERSION")).trim();
+    let schema_version = orbit_utils::pinned::pinned("schema");
 
     match diff {
         Some(path) => run_schema_diff(&generated, &path),
@@ -137,7 +137,7 @@ pub fn run_persistent(ontology_path: Option<PathBuf>, diff: Option<PathBuf>) -> 
         .map(|object| format!("{};\n", object.ddl))
         .collect();
 
-    let schema_version = include_str!(concat!(env!("CONFIG_DIR"), "/SCHEMA_VERSION")).trim();
+    let schema_version = orbit_utils::pinned::pinned("schema");
 
     match diff {
         Some(path) => run_schema_diff(&generated, &path),
@@ -326,7 +326,7 @@ mod tests {
             .find(|o| o.kind == "table")
             .expect("an unversioned table should be generated");
         assert!(table.ddl.contains("CREATE TABLE"));
-        let schema_version = include_str!(concat!(env!("CONFIG_DIR"), "/SCHEMA_VERSION")).trim();
+        let schema_version = orbit_utils::pinned::pinned("schema");
         assert!(!table.ddl.contains(&format!(" v{schema_version}_")));
     }
 

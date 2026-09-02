@@ -4,9 +4,6 @@ use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
 
-/// On a duckdb bump, update this and re-pin EXTENSIONS.
-const DUCKDB_VERSION: &str = "v1.5.5";
-
 #[rustfmt::skip]
 const TARGETS: &[(&str, &str)] = &[
     ("x86_64-unknown-linux-gnu",   "linux_amd64"),
@@ -19,7 +16,8 @@ const TARGETS: &[(&str, &str)] = &[
     ("x86_64-pc-windows-msvc",     "windows_amd64"),
 ];
 
-/// Extension, DuckDB platform, SHA-256 of <extension>.duckdb_extension.gz (upstream publishes none).
+/// Extension, DuckDB platform, SHA-256 of <extension>.duckdb_extension.gz (upstream publishes
+/// none). Re-pin every row when `duckdb` in config/versions.yaml changes.
 #[rustfmt::skip]
 const EXTENSIONS: &[(&str, &str, &str)] = &[
     ("fts", "linux_amd64",      "90d6f049e59b592566cfcd228de3001eb679c64e9f144c138dc2cd55dab12cd6"),
@@ -35,7 +33,9 @@ const DOWNLOAD_LIMIT: u64 = 64 * 1024 * 1024;
 
 fn main() {
     println!("cargo:rerun-if-changed=../../Cargo.lock");
-    assert_lockfile_matches_pin();
+    println!("cargo:rerun-if-changed=../../config/versions.yaml");
+    let duckdb_version = pinned_duckdb_version();
+    assert_lockfile_matches_pin(&duckdb_version);
 
     let target = env::var("TARGET").unwrap();
     let &(_, platform) = TARGETS
@@ -47,7 +47,7 @@ fn main() {
     let mut entries = String::new();
     for &(name, _, expected) in EXTENSIONS.iter().filter(|(_, p, _)| *p == platform) {
         let url = format!(
-            "http://extensions.duckdb.org/{DUCKDB_VERSION}/{platform}/{name}.duckdb_extension.gz"
+            "http://extensions.duckdb.org/{duckdb_version}/{platform}/{name}.duckdb_extension.gz"
         );
         let gz = out_dir.join(format!("{name}.duckdb_extension.gz"));
         if sha256_of(&gz).as_deref() != Some(expected) {
@@ -65,16 +65,30 @@ fn main() {
     fs::write(
         out_dir.join("bundled_extensions.rs"),
         format!(
-            "pub(crate) const DUCKDB_VERSION: &str = {DUCKDB_VERSION:?};\n\
+            "pub(crate) const DUCKDB_VERSION: &str = {duckdb_version:?};\n\
              pub(crate) const BUNDLED_EXTENSIONS: &[(&str, &[u8])] = &[{entries}];\n"
         ),
     )
     .unwrap();
 }
 
+fn pinned_duckdb_version() -> String {
+    let versions = fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../config/versions.yaml"
+    ))
+    .unwrap();
+    versions
+        .lines()
+        .find_map(|l| l.strip_prefix("duckdb:"))
+        .expect("config/versions.yaml must pin `duckdb: vX.Y.Z`")
+        .trim()
+        .to_string()
+}
+
 /// DuckDB 1.5.5 ships as duckdb crate 1.10505.x.
-fn assert_lockfile_matches_pin() {
-    let [major, minor, patch]: [u32; 3] = DUCKDB_VERSION[1..]
+fn assert_lockfile_matches_pin(duckdb_version: &str) {
+    let [major, minor, patch]: [u32; 3] = duckdb_version[1..]
         .split('.')
         .map(|p| p.parse().unwrap())
         .collect::<Vec<_>>()
@@ -87,7 +101,7 @@ fn assert_lockfile_matches_pin() {
     let lock = concat!(env!("CARGO_MANIFEST_DIR"), "/../../Cargo.lock");
     assert!(
         fs::read_to_string(lock).unwrap().contains(&entry),
-        "duckdb crate no longer matches {DUCKDB_VERSION}; update DUCKDB_VERSION and EXTENSIONS in crates/duckdb-client/build.rs"
+        "duckdb crate no longer matches {duckdb_version}; update `duckdb` in config/versions.yaml and re-pin EXTENSIONS in crates/duckdb-client/build.rs"
     );
 }
 

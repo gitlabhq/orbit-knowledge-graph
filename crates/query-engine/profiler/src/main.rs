@@ -244,10 +244,7 @@ async fn run_raw_sql(
 }
 
 fn embedded_schema_version() -> u32 {
-    include_str!("../../../../config/SCHEMA_VERSION")
-        .trim()
-        .parse()
-        .expect("config/SCHEMA_VERSION must contain a valid u32")
+    orbit_utils::pinned::pinned_u32("schema")
 }
 
 fn seed_scope_prefixes(
