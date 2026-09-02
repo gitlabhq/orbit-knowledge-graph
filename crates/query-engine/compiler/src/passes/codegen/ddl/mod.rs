@@ -4,6 +4,7 @@
 //! with no auto-derivation.
 
 pub mod clickhouse;
+mod denormalized;
 pub mod duckdb;
 
 use std::collections::BTreeMap;
@@ -72,18 +73,34 @@ pub fn generate_graph_tables_with_prefix(ontology: &Ontology, prefix: &str) -> V
         .iter()
         .filter(|table| table.versioned)
     {
-        tables.push(build_auxiliary_table(aux).with_prefix(prefix));
+        tables.push(build_auxiliary_table(aux));
     }
     for node in ontology.nodes() {
-        tables.push(build_node_table(node, partition).with_prefix(prefix));
+        tables.push(build_node_table(node, partition));
     }
     for name in ontology.edge_tables() {
         if let Some(config) = ontology.edge_table_config(name) {
-            tables.push(build_edge_table(name, config, partition).with_prefix(prefix));
+            tables.push(build_edge_table(name, config, partition));
         }
     }
+    // Join tables are composed from the definitions above, so they come last.
+    for denorm in ontology.denormalized_join_tables() {
+        let find = |name: &str| {
+            tables
+                .iter()
+                .find(|t| t.name == name)
+                .unwrap_or_else(|| panic!("denormalized join table source '{name}' not generated"))
+        };
+        tables.push(denormalized::build_table(
+            &denorm,
+            find(&denorm.edge_table),
+            find(&denorm.source_table),
+            find(&denorm.target_table),
+            partition,
+        ));
+    }
 
-    tables
+    tables.into_iter().map(|t| t.with_prefix(prefix)).collect()
 }
 
 pub struct UnversionedObject {
@@ -154,12 +171,25 @@ pub fn generate_graph_materialized_views_with_prefix(
 ) -> Vec<CreateMaterializedView> {
     let known_tables = collect_table_names(ontology);
 
-    ontology
+    let mut views: Vec<CreateMaterializedView> = ontology
         .materialized_views()
         .iter()
         .filter(|mv| mv.versioned)
         .map(|mv| build_materialized_view(mv).with_prefix(prefix, &known_tables))
-        .collect()
+        .collect();
+    let tables = generate_graph_tables(ontology);
+    for denorm in ontology.denormalized_join_tables() {
+        let table = tables
+            .iter()
+            .find(|t| t.name == denorm.table)
+            .unwrap_or_else(|| panic!("denormalized join table '{}' not generated", denorm.table));
+        views.extend(
+            denormalized::build_views(&denorm, table)
+                .into_iter()
+                .map(|v| v.with_prefix(prefix, &known_tables)),
+        );
+    }
+    views
 }
 
 /// Collects table names so `{table_name}` placeholders in materialized view
@@ -174,6 +204,9 @@ fn collect_table_names(ontology: &Ontology) -> Vec<String> {
     }
     for table_name in ontology.edge_tables() {
         names.push(table_name.to_string());
+    }
+    for denorm in ontology.denormalized_join_tables() {
+        names.push(denorm.table);
     }
     names
 }
@@ -434,16 +467,16 @@ fn convert_projection(proj: &StorageProjection) -> ProjectionDef {
     }
 }
 
-fn partition_by(
+fn partition_by<'a>(
     partition: Option<&PartitionConfig>,
     table: &str,
-    columns: &[StorageColumn],
+    columns: impl IntoIterator<Item = &'a str>,
 ) -> Vec<String> {
     let Some(p) = partition.filter(|p| p.is_partitioned(table)) else {
         return vec![];
     };
     let column = p.column();
-    if columns.iter().any(|c| c.name == column) {
+    if columns.into_iter().any(|c| c == column) {
         let expr = crate::passes::partition::partition_expr(
             &p.strategy,
             crate::ast::Expr::Identifier(column.to_string()),
@@ -465,7 +498,11 @@ fn build_node_table(
         .map(storage_col_to_def)
         .collect();
     columns.extend(system_columns(None));
-    let partition_by = partition_by(partition, &node.destination_table, &node.storage.columns);
+    let partition_by = partition_by(
+        partition,
+        &node.destination_table,
+        node.storage.columns.iter().map(|c| c.name.as_str()),
+    );
     let partitioned = !partition_by.is_empty();
 
     let indexes: Vec<IndexDef> = node.storage.indexes.iter().map(convert_index).collect();
@@ -521,7 +558,11 @@ fn build_edge_table(
             .map(storage_col_to_def),
     );
     columns.extend(system_columns(None));
-    let partition_by = partition_by(partition, name, &config.storage.columns);
+    let partition_by = partition_by(
+        partition,
+        name,
+        config.storage.columns.iter().map(|c| c.name.as_str()),
+    );
     let partitioned = !partition_by.is_empty();
 
     let mut indexes: Vec<IndexDef> = config.storage.indexes.iter().map(convert_index).collect();
@@ -902,13 +943,100 @@ mod tests {
         }));
     }
 
+    fn ontology_with_denormalized_reviewer() -> Ontology {
+        ontology().with_denormalized_variant("REVIEWER", "User", "MergeRequest")
+    }
+
     #[test]
-    fn generates_no_materialized_views_by_default() {
-        let views = generate_graph_materialized_views(&ontology());
+    fn no_denormalized_tables_or_views_without_an_opt_in() {
+        let ontology = ontology();
         assert!(
-            views.is_empty(),
-            "default ontology should have no materialized views"
+            generate_graph_tables(&ontology)
+                .iter()
+                .all(|t| !t.name.starts_with("gl_denorm_"))
         );
+        assert!(generate_graph_materialized_views(&ontology).is_empty());
+    }
+
+    #[test]
+    fn denormalized_join_table_emits_table_and_three_feeding_views() {
+        let ontology = ontology_with_denormalized_reviewer();
+        let table = "gl_denorm_reviewer__user__merge_request";
+
+        let tables = generate_graph_tables(&ontology);
+        let mat = tables
+            .iter()
+            .find(|t| t.name == table)
+            .expect("denormalized join table should be generated");
+        assert_eq!(mat.order_by, ["traversal_path", "target_id", "source_id"]);
+        let names: Vec<&str> = mat.columns.iter().map(|c| c.name.as_str()).collect();
+        assert!(names.contains(&"src_username") && names.contains(&"tgt_title"));
+        assert!(names.contains(&"source_id") && names.contains(&"target_kind"));
+        assert!(
+            !names.contains(&"src_id"),
+            "node id is the edge's source_id"
+        );
+        assert_eq!(names.iter().filter(|n| **n == "traversal_path").count(), 1);
+
+        let idx: Vec<(&str, &str)> = mat
+            .indexes
+            .iter()
+            .map(|i| (i.name.as_str(), i.expression.as_str()))
+            .collect();
+        assert!(idx.contains(&("idx_source_id", "source_id")));
+        assert!(idx.contains(&("idx_src_state", "src_state")));
+        assert!(idx.contains(&("idx_tgt_state", "tgt_state")));
+        assert!(idx.contains(&("idx_tgt_title_ngram", "tgt_title")));
+        let mut idx_names: Vec<&str> = idx.iter().map(|(n, _)| *n).collect();
+        idx_names.sort_unstable();
+        idx_names.dedup();
+        assert_eq!(
+            idx_names.len(),
+            mat.indexes.len(),
+            "index names must be unique"
+        );
+        assert!(
+            mat.settings
+                .iter()
+                .any(|s| s.key == "add_minmax_index_for_temporal_columns")
+        );
+
+        let views = generate_graph_materialized_views(&ontology);
+        let feeding: Vec<&CreateMaterializedView> = views
+            .iter()
+            .filter(|v| v.to_table.as_deref() == Some(table))
+            .collect();
+        assert_eq!(feeding.len(), 3);
+        // Only the triggering table is read as the inserted block; the other
+        // two must resolve their current row with FINAL.
+        let on_edge = feeding
+            .iter()
+            .find(|v| v.name.ends_with("__on_edge"))
+            .unwrap();
+        assert!(
+            on_edge
+                .select_query
+                .contains("FROM gl_edge AS e INNER JOIN")
+        );
+        assert!(on_edge.select_query.contains("gl_user AS s FINAL"));
+        assert!(on_edge.select_query.contains("gl_merge_request AS t FINAL"));
+        assert!(!on_edge.select_query.contains("AS e FINAL"));
+    }
+
+    #[test]
+    fn denormalized_join_table_and_views_share_the_version_prefix() {
+        let ontology = ontology_with_denormalized_reviewer();
+        let views = generate_graph_materialized_views_with_prefix(&ontology, "v7_");
+        let on_source = views
+            .iter()
+            .find(|v| v.name == "v7_gl_denorm_reviewer__user__merge_request__on_source")
+            .expect("prefixed feeding view");
+        assert_eq!(
+            on_source.to_table.as_deref(),
+            Some("v7_gl_denorm_reviewer__user__merge_request")
+        );
+        assert!(on_source.select_query.contains("FROM v7_gl_user AS s"));
+        assert!(on_source.select_query.contains("v7_gl_edge AS e FINAL"));
     }
 
     #[test]

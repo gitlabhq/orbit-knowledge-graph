@@ -1243,6 +1243,11 @@
           "$ref": "#/definitions/edgeVariantScope",
           "description": "Namespace scope relationship between endpoints. See edgeVariantScope for values."
         },
+        "denormalized": {
+          "type": "boolean",
+          "default": false,
+          "description": "Emit a pre-joined gl_denorm_* table carrying both endpoints' columns, kept current by materialized views on the edge and node tables. The compiler scans it instead of joining. Requires at least one scoped endpoint."
+        },
         "description": {
           "type": "string",
           "maxLength": 200,

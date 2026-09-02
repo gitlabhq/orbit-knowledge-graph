@@ -236,6 +236,13 @@ etl:
 If either FK column is `Nullable` in the source, the ETL can emit null-target edges —
 filter or document it (reviewers will ask). Prefer NOT-NULL join columns.
 
+A variant may add `denormalized: true` when single-hop queries over it are hot and
+aggregate-heavy. This emits a pre-joined `gl_denorm_*` table plus feeding materialized
+views, composed from the edge and node tables' own DDL. At least one endpoint must be
+scoped, and the table stores every column of both nodes, so weigh write amplification
+before opting in, and treat each opt-in as its own schema bump. Design notes:
+`docs/design-documents/querying/graph_engine.md` (Denormalized join tables).
+
 ### 5.3 Register in `config/ontology/schema.yaml` (the step that's easy to miss)
 
 Node/edge files are **NOT auto-discovered** — they're loaded from a registry in

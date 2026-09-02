@@ -70,10 +70,12 @@ The query compiler transforms a JSON DSL input into parameterized ClickHouse SQL
 | 5 | `lower` | Emits the SQL AST from the query plan (edge-chain-first, nodes lazy) |
 | 6 | `enforce` | Injects ID and type columns required for redaction; builds the result context |
 | 7 | `security` | Injects `startsWith(traversal_path, ?)` predicates on all node-table scans, with per-entity role scoping ([Security](../security.md)) |
-| 8 | `check` | Verifies every node-table alias carries a valid `startsWith` predicate traceable to the `SecurityContext` ([Security](../security.md)) |
-| 9 | `hydrate_plan` | Builds the hydration plan for fetching entity properties after the base query |
-| 10 | `settings` | Resolves ClickHouse query-level settings (timeouts, memory limits, cache) for the query type |
-| 11 | `codegen` | Serializes the AST into parameterized ClickHouse SQL |
+| 8 | `partition` | Adds partition-pruning predicates derived from the traversal path scope |
+| 9 | `cursor` | Applies keyset pagination (seek predicate and readback columns) |
+| 10 | `check` | Verifies every node-table alias carries a valid `startsWith` predicate traceable to the `SecurityContext` ([Security](../security.md)) |
+| 11 | `hydrate_plan` | Builds the hydration plan for fetching entity properties after the base query |
+| 12 | `settings` | Resolves ClickHouse query-level settings (timeouts, memory limits, cache) for the query type |
+| 13 | `codegen` | Serializes the AST into parameterized ClickHouse SQL |
 
 The planner emits ClickHouse SQL similar to these patterns:
 
@@ -115,6 +117,12 @@ Filter placement rules for node `FINAL` scans:
 - **Pinned FK target IDs** are pushed into the FK center `FINAL` subquery when the FK column lives on the center table.
 
 Edge-only traversals do not join node tables for non-group-by nodes, so they cannot filter out deleted nodes at the query layer. In production this is handled by the SDLC indexer, which soft-deletes FK edge rows in the same ETL batch as their parent node (`crates/indexer/src/modules/sdlc/pipeline.rs`). Cross-entity FK cleanup relies on PostgreSQL's referential integrity propagating through Siphon CDC.
+
+### Denormalized join tables
+
+An edge variant can opt in with `denormalized: true` in its YAML. The ontology then names a pre-joined `gl_denorm_{rel}__{src}__{tgt}` table (`ontology::denormalized`) and the DDL generator composes it from the already-generated definitions of the edge table and the two node tables: every edge column as is, then every node column under a `src_`/`tgt_` prefix, then the system columns once. Skip indexes come along the same way (edge indexes verbatim, node indexes renamed to `idx_src_*`/`idx_tgt_*`), explicit table settings from all three sources are merged, and the table is hash-bucketed whenever its edge table is. Codecs, types, defaults, and indexes are therefore identical to the source tables by construction. A node's `id` is not copied, since it is already the edge's `source_id`/`target_id`. The sort key is `(traversal_path, {anchor id}, {other id})` where the anchor is the scoped side when only one side is scoped. The DDL generator emits the table and three `TO` materialized views, one per source table (edge, source node, target node); whichever side receives an insert re-emits the affected join rows, reading the other two with `FINAL`, and the `ReplacingMergeTree` keeps the row with the greatest `_version`. Because the table inherits the edge's `traversal_path`, at least one endpoint must be scoped; the loader rejects a variant whose endpoints are both global.
+
+The table is a strict superset of the edge table, so the compiler will be able to scan it through the ordinary edge-chain lowering rather than a dedicated strategy; that compiler work follows separately (#1250). The security pass already treats the table like any `gl_` table: `min_access_level_for_table` returns the higher of the two endpoints' floors, and the table is path-scopable. No variant is opted in yet; each opt-in is its own schema bump.
 
 ### Scope rewrite (traversal_path prefix injection)
 

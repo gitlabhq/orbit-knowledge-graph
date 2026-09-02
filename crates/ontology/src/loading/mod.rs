@@ -723,6 +723,15 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
                 }
                 partitioned_tables.insert(table.clone());
             }
+            // A denormalized join table carries its edge table's traversal_path,
+            // so it is bucketed whenever the edge table is.
+            for edge in ontology.edges() {
+                if let Some(table) = &edge.denormalized_table
+                    && partitioned_tables.contains(&edge.destination_table)
+                {
+                    partitioned_tables.insert(table.clone());
+                }
+            }
             Ok(crate::entities::PartitionConfig {
                 strategy: crate::entities::PartitionStrategy::HashBucket {
                     buckets: hb.buckets,
@@ -757,6 +766,7 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
     validate_auxiliary_dictionaries(&ontology)?;
     validate_traversal_path_lookups(&ontology)?;
     validate_edge_scope_annotations(&ontology)?;
+    validate_denormalized_edges(&ontology)?;
     validate_derived_emits_registered(&ontology)?;
     validate_etl_edges_match_variants(&ontology)?;
     validate_unique_pipeline_names(&ontology)?;
@@ -1198,6 +1208,22 @@ fn validate_storage_columns(ontology: &crate::Ontology) -> Result<(), OntologyEr
     Ok(())
 }
 
+/// A denormalized join table inherits the edge's `traversal_path` and is
+/// security-filtered on it, so both endpoints being global (edge path `0/`)
+/// would make the filter drop every row.
+fn validate_denormalized_edges(ontology: &crate::Ontology) -> Result<(), OntologyError> {
+    for edge in ontology.edges().filter(|e| e.denormalized_table.is_some()) {
+        let global = |kind: &str| ontology.get_node(kind).is_some_and(|n| n.global);
+        if global(&edge.source_kind) && global(&edge.target_kind) {
+            return Err(OntologyError::Validation(format!(
+                "{} ({}→{}): denormalized requires at least one scoped endpoint",
+                edge.relationship_kind, edge.source_kind, edge.target_kind
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// `namespace_anchor` variants must have an FK column and must target a
 /// namespace anchor (an entity with a `traversal_path_lookup`). Also enforces
 /// that the same FK column name always maps to the same anchor entity.
@@ -1355,6 +1381,29 @@ mod tests {
             }],
             reindex_on: Vec::new(),
         }
+    }
+
+    #[test]
+    fn denormalized_variant_needs_a_scoped_endpoint() {
+        let mut ontology = crate::Ontology::new()
+            .with_nodes(["User", "Runner", "MergeRequest"])
+            .with_edges(["OWNS"])
+            .with_edge_variant(crate::EdgeEntity {
+                relationship_kind: "OWNS".into(),
+                source_kind: "User".into(),
+                target_kind: "Runner".into(),
+                denormalized_table: Some("gl_denorm_owns__user__runner".into()),
+                ..Default::default()
+            });
+        for global in ["User", "Runner"] {
+            ontology.nodes.get_mut(global).unwrap().global = true;
+        }
+
+        let err = validate_denormalized_edges(&ontology).unwrap_err();
+        assert!(err.to_string().contains("OWNS (User→Runner)"), "got: {err}");
+
+        ontology.nodes.get_mut("Runner").unwrap().global = false;
+        validate_denormalized_edges(&ontology).unwrap();
     }
 
     #[test]

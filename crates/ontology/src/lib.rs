@@ -17,6 +17,7 @@
 //! ```
 
 pub mod constants;
+pub mod denormalized;
 mod entities;
 pub mod errors;
 pub mod etl;
@@ -322,6 +323,35 @@ impl Ontology {
         self
     }
 
+    /// Opt an existing variant into a denormalized join table, as
+    /// `denormalized: true` in its YAML would. Panics if the variant is
+    /// missing, so a test cannot silently run against the plain edge path.
+    #[must_use]
+    pub fn with_denormalized_variant(
+        mut self,
+        relationship_kind: &str,
+        source_kind: &str,
+        target_kind: &str,
+    ) -> Self {
+        let variant = self
+            .edges
+            .get_mut(relationship_kind)
+            .and_then(|variants| {
+                variants
+                    .iter_mut()
+                    .find(|e| e.source_kind == source_kind && e.target_kind == target_kind)
+            })
+            .unwrap_or_else(|| {
+                panic!("no {relationship_kind} variant {source_kind} -> {target_kind}")
+            });
+        variant.denormalized_table = Some(denormalized::table_name(
+            relationship_kind,
+            source_kind,
+            target_kind,
+        ));
+        self
+    }
+
     #[must_use]
     pub fn with_edge_variant(mut self, variant: EdgeEntity) -> Self {
         let kind = variant.relationship_kind.clone();
@@ -606,6 +636,9 @@ impl Ontology {
         for edge_list in self.edges.values_mut() {
             for edge in edge_list {
                 edge.destination_table = format!("{prefix}{}", edge.destination_table);
+                if let Some(mat) = edge.denormalized_table.as_mut() {
+                    *mat = format!("{prefix}{mat}");
+                }
             }
         }
 
@@ -734,6 +767,15 @@ impl Ontology {
     #[must_use]
     pub fn min_access_level_for_table(&self, table: &str) -> Option<u32> {
         let normalized = strip_schema_version_prefix(table);
+        if let Some(mat) = self.denormalized_join_table_by_name(normalized) {
+            // The join row exposes both endpoints, so the stricter floor applies.
+            return [mat.source_kind.as_str(), mat.target_kind.as_str()]
+                .into_iter()
+                .filter_map(|kind| self.nodes.get(kind))
+                .filter_map(|n| n.redaction.as_ref())
+                .map(|r| r.required_role.as_access_level())
+                .max();
+        }
         self.nodes
             .values()
             .find(|n| strip_schema_version_prefix(&n.destination_table) == normalized)
@@ -926,10 +968,61 @@ impl Ontology {
     #[must_use]
     pub fn is_table_path_scopable(&self, table: &str) -> bool {
         let normalized = strip_schema_version_prefix(table);
+        // A join table's traversal_path is the edge's, which the loader only
+        // permits when at least one endpoint is scoped, and it always leads
+        // the sort key.
+        if self.denormalized_join_table_by_name(normalized).is_some() {
+            return true;
+        }
         self.nodes
             .iter()
             .find(|(_, n)| strip_schema_version_prefix(&n.destination_table) == normalized)
             .is_some_and(|(name, _)| self.is_path_scopable(name))
+    }
+
+    /// Every opted-in denormalized join table with its resolved column layout.
+    pub fn denormalized_join_tables(&self) -> Vec<denormalized::DenormalizedJoinTable> {
+        self.edges()
+            .filter_map(|e| self.build_denormalized_join_table(e))
+            .collect()
+    }
+
+    /// The denormalized join table for one directed variant, if opted in.
+    #[must_use]
+    pub fn denormalized_join_table(
+        &self,
+        relationship_kind: &str,
+        source_kind: &str,
+        target_kind: &str,
+    ) -> Option<denormalized::DenormalizedJoinTable> {
+        let edge = self
+            .edges
+            .get(relationship_kind)?
+            .iter()
+            .find(|e| e.source_kind == source_kind && e.target_kind == target_kind)?;
+        self.build_denormalized_join_table(edge)
+    }
+
+    fn denormalized_join_table_by_name(
+        &self,
+        unprefixed_table: &str,
+    ) -> Option<denormalized::DenormalizedJoinTable> {
+        self.edges()
+            .find(|e| {
+                e.denormalized_table
+                    .as_deref()
+                    .is_some_and(|t| strip_schema_version_prefix(t) == unprefixed_table)
+            })
+            .and_then(|e| self.build_denormalized_join_table(e))
+    }
+
+    fn build_denormalized_join_table(
+        &self,
+        edge: &EdgeEntity,
+    ) -> Option<denormalized::DenormalizedJoinTable> {
+        let source = self.nodes.get(&edge.source_kind)?;
+        let target = self.nodes.get(&edge.target_kind)?;
+        denormalized::DenormalizedJoinTable::build(edge, source, target)
     }
 
     /// Returns `(fk_column, anchor_entity)` pairs derived from
@@ -2112,6 +2205,51 @@ mod tests {
     fn min_access_level_for_table_reads_redaction_required_role() {
         let ontology = ontology_with_role("Project", RequiredRole::SecurityManager);
         assert_eq!(ontology.min_access_level_for_table("gl_project"), Some(25));
+    }
+
+    #[test]
+    fn denormalized_join_table_takes_the_stricter_endpoint_floor() {
+        let table = "gl_denorm_reviewer__user__merge_request";
+        let mut ontology = Ontology::load_embedded()
+            .unwrap()
+            .with_denormalized_variant("REVIEWER", "User", "MergeRequest");
+        assert_eq!(ontology.min_access_level_for_table(table), Some(20));
+        ontology
+            .nodes
+            .get_mut("MergeRequest")
+            .and_then(|n| n.redaction.as_mut())
+            .unwrap()
+            .required_role = RequiredRole::SecurityManager;
+        assert_eq!(ontology.min_access_level_for_table(table), Some(25));
+        assert_eq!(
+            ontology.min_access_level_for_table(&format!("v9_{table}")),
+            Some(25)
+        );
+        assert!(ontology.is_table_path_scopable(table));
+    }
+
+    #[test]
+    fn denormalized_table_follows_the_schema_version_prefix() {
+        let ontology = Ontology::load_embedded()
+            .unwrap()
+            .with_denormalized_variant("REVIEWER", "User", "MergeRequest")
+            .with_schema_version_prefix("v9_");
+        let tables: Vec<String> = ontology
+            .denormalized_join_tables()
+            .into_iter()
+            .map(|d| d.table)
+            .collect();
+        assert_eq!(tables, ["v9_gl_denorm_reviewer__user__merge_request"]);
+        assert!(
+            ontology
+                .denormalized_join_table("REVIEWER", "User", "MergeRequest")
+                .is_some()
+        );
+        assert!(
+            ontology
+                .denormalized_join_table("ASSIGNED", "User", "MergeRequest")
+                .is_none()
+        );
     }
 
     #[test]
