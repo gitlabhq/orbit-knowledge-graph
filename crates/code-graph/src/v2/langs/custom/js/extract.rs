@@ -454,6 +454,7 @@ fn canonical_def_kind(kind: &JsDefKind) -> DefKind {
         JsDefKind::Method { .. } => DefKind::Method,
         JsDefKind::LifecycleHook { .. } => DefKind::Method,
         JsDefKind::Watcher { .. } => DefKind::Method,
+        JsDefKind::Property { .. } => DefKind::Property,
         JsDefKind::ComputedProperty { .. } => DefKind::Property,
         JsDefKind::Variable => DefKind::Property,
         JsDefKind::EnumMember => DefKind::EnumEntry,

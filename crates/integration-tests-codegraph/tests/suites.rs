@@ -25,6 +25,10 @@ yaml_test!(
     "typescript/js_module_resolution.yaml"
 );
 yaml_test!(
+    typescript_class_field_method_calls,
+    "typescript/class_field_method_calls.yaml"
+);
+yaml_test!(
     javascript_commonjs_module_resolution,
     "javascript/commonjs_module_resolution.yaml"
 );
