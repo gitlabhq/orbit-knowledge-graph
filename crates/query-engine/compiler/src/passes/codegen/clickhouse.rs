@@ -991,6 +991,39 @@ mod tests {
     }
 
     #[test]
+    fn compiler_derived_settings_reach_the_settings_clause() {
+        let q = Query {
+            select: vec![SelectExpr {
+                expr: Expr::col("n", "id"),
+                alias: None,
+            }],
+            from: TableRef::scan_final("nodes", "n"),
+            ..Default::default()
+        };
+        let mut config = QueryConfig::empty();
+        config.compiler_derived.optimize_move_to_prewhere_if_final = true;
+        config
+            .compiler_derived
+            .use_index_for_in_with_subqueries_max_values = Some(100_000);
+
+        let result = codegen(&Node::Query(Box::new(q)), empty_ctx(), config).unwrap();
+        assert!(
+            result
+                .sql
+                .contains("optimize_move_to_prewhere_if_final = 1"),
+            "{}",
+            result.sql
+        );
+        assert!(
+            result
+                .sql
+                .contains("use_index_for_in_with_subqueries_max_values = 100000"),
+            "{}",
+            result.sql
+        );
+    }
+
+    #[test]
     fn no_query_settings_when_empty() {
         let q = Query {
             select: vec![SelectExpr {

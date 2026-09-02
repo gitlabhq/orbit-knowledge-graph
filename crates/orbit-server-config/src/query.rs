@@ -126,6 +126,8 @@ pub struct CompilerDerivedSettings {
     /// enables dynamic-programming join reordering for queries with 3+
     /// JOINs. Experimental in ClickHouse 26.x.
     pub join_order_algorithm: Option<String>,
+    pub optimize_move_to_prewhere_if_final: bool,
+    pub use_index_for_in_with_subqueries_max_values: Option<u64>,
 }
 
 impl CompilerDerivedSettings {
@@ -139,6 +141,15 @@ impl CompilerDerivedSettings {
             out.push((
                 "query_plan_optimize_join_order_algorithm".into(),
                 format!("'{algo}'"),
+            ));
+        }
+        if self.optimize_move_to_prewhere_if_final {
+            out.push(("optimize_move_to_prewhere_if_final".into(), "1".into()));
+        }
+        if let Some(max) = self.use_index_for_in_with_subqueries_max_values {
+            out.push((
+                "use_index_for_in_with_subqueries_max_values".into(),
+                max.to_string(),
             ));
         }
         out
@@ -401,6 +412,34 @@ mod tests {
         assert_eq!(settings[4], ("query_cache_ttl".into(), "60".into()));
         assert_eq!(settings[5], ("use_query_cache".into(), "1".into()));
         Ok(())
+    }
+
+    #[test]
+    fn compiler_derived_renders_only_set_settings() {
+        assert!(
+            CompilerDerivedSettings::default()
+                .to_clickhouse_settings()
+                .is_empty()
+        );
+
+        let derived = CompilerDerivedSettings {
+            optimize_move_to_prewhere_if_final: true,
+            use_index_for_in_with_subqueries_max_values: Some(100_000),
+            ..Default::default()
+        };
+        assert_eq!(
+            derived.to_clickhouse_settings(),
+            vec![
+                (
+                    "optimize_move_to_prewhere_if_final".to_string(),
+                    "1".to_string()
+                ),
+                (
+                    "use_index_for_in_with_subqueries_max_values".to_string(),
+                    "100000".to_string()
+                ),
+            ]
+        );
     }
 
     #[test]
