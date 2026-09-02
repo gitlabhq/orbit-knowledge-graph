@@ -1,7 +1,7 @@
 use std::{collections::BTreeMap, fmt};
 
 use crate::constants::DEFAULT_PRIMARY_KEY;
-use crate::etl::{Pipeline, ReindexSource};
+use crate::etl::{EdgeMapping, NodeRef, Pipeline, ReindexSource};
 use serde::Deserialize;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -437,6 +437,15 @@ pub struct DerivedEntity {
 pub enum DenormDirection {
     Source,
     Target,
+}
+
+impl DenormDirection {
+    pub fn endpoint<'a>(&self, mapping: &'a EdgeMapping) -> &'a NodeRef {
+        match self {
+            Self::Source => &mapping.source,
+            Self::Target => &mapping.target,
+        }
+    }
 }
 
 /// A node property denormalized onto an edge table for query optimization.

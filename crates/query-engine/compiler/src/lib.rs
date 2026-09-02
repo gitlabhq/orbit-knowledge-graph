@@ -1250,6 +1250,35 @@ mod tests {
     }
 
     #[test]
+    fn denorm_filter_not_pushed_onto_edges_written_without_tags() {
+        for (entity, rel, target) in [
+            ("WorkItem", "MENTIONS", "WorkItem"),
+            ("MergeRequest", "HAS_NOTE", "Note"),
+        ] {
+            let query = format!(
+                r#"{{
+                    "query_type": "aggregation",
+                    "nodes": [
+                        {{"id": "a", "entity": "{entity}", "filters": {{"state": {{"eq": "opened"}}}}}},
+                        {{"id": "b", "entity": "{target}"}}
+                    ],
+                    "relationships": [{{"type": "{rel}", "from": "a", "to": "b"}}],
+                    "aggregations": [{{"count": "a", "as": "n"}}]
+                }}"#
+            );
+            let sql = compile_sql(&query);
+            assert!(
+                !sql.contains("source_tags, 'state:opened'"),
+                "{rel} edge rows carry no {entity} tags, filter must not be pushed, got:\n{sql}"
+            );
+            assert!(
+                sql.contains("state = 'opened'"),
+                "{rel}: state filter must be enforced on the node table, got:\n{sql}"
+            );
+        }
+    }
+
+    #[test]
     fn multi_hop_union_projects_denorm_tag_columns() {
         let query = r#"{
             "query_type": "traversal",
