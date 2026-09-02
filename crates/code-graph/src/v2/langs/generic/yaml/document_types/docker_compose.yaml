@@ -1,0 +1,13 @@
+# Docker Compose files: services, volumes, and networks are named
+# children of their top-level sections.
+name: docker_compose
+match:
+  filename_suffixes: [docker-compose.yml, docker-compose.yaml, compose.yml, compose.yaml]
+  filename_prefixes: [docker-compose.]
+definitions:
+  - type: ComposeService
+    children_of: services
+  - type: ComposeVolume
+    children_of: volumes
+  - type: ComposeNetwork
+    children_of: networks

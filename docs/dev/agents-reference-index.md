@@ -21,6 +21,8 @@ Canonical locations for files, schemas, configs, and tools in the knowledge-grap
 | Ontology extraction SQL | Generated from the pipeline (`query: generated`) for nodes and edges; a `.sql.j2` MiniJinja template next to the YAML only for complex nodes (`config/ontology/nodes/`) and derived entities (`config/ontology/derived/`) |
 | Ontology JSON schema | `config/schemas/ontology.schema.json` |
 | Graph query JSON schema | `config/schemas/graph_query.schema.json` |
+| YAML document type configs | `crates/code-graph/src/v2/langs/generic/yaml/document_types/` (one file per document type, embedded via rust-embed, interpreted by `document_types.rs`) |
+| YAML document type JSON schema | `config/schemas/yaml_document_type.schema.json` (configs validated against it when the code-graph YAML pipeline first loads them) |
 | Named query definitions | `config/named_queries/` (parsed/embedded by `crates/named-queries`, compiled against the ontology by `crates/orbit-server/build.rs`, executed via gRPC `QUERY_TYPE_NAMED`, listed via gRPC `ListNamedQueries`) |
 | Named query JSON schema | `config/schemas/named_query.schema.json` (validate with `mise named-queries:validate`; CI gate `named-query-schema-validate`) |
 | Agent prompt files (tool descriptions) | `config/prompts/` (versioned YAML, one file per prompt; `remote/` feeds `orbit-server`, `local/` feeds `orbit-local`; embedded via rust-embed and build-time validated by `crates/orbit-prompts`) |

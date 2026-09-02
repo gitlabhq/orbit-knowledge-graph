@@ -198,6 +198,14 @@ repos:
     commit_sha: 5a267ec4264cdeb529512901119223889463703f
     groups: [terraform]
 
+  # YAML (GitLab Helm chart: Chart.yaml + values files for the umbrella and
+  # every subchart, plus a CI config split across .gitlab/ci/*.gitlab-ci.yml)
+  - name: gitlab-charts
+    source: gitlab
+    project: gitlab-org/charts/gitlab
+    version: v10.3.1
+    groups: [yaml]
+
   # Zig
   - name: zls
     source: github

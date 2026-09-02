@@ -62,6 +62,10 @@ _Avoid_: namespace graph (outdated alias)
 The sub-graph of source code structure and relationships — branches, directories, files, definitions, imported symbols, and their connections (containment, calls, imports, inheritance). Distinguished from **SDLC Data**. Built by parsing repository contents via Gitaly.
 _Avoid_: call graph (refers only to invocation relationships, not the full sub-graph)
 
+**YAML Document Type**:
+A declarative config (one YAML file under `crates/code-graph/src/v2/langs/generic/yaml/document_types/`) that tells the **Code Graph** which YAML files it claims, by filename, directory, or top-level keys, and which of their keys become definitions or imports. Shipped types: GitLab CI, ArgoCD, Helm chart, Helm values, Docker Compose. YAML that no document type claims keeps only its `File` node plus anchor definitions and alias references.
+_Avoid_: YAML dialect, YAML schema (that is the JSON schema the configs are validated against)
+
 **Namespace Partitioning**:
 The physical `PARTITION BY` of every graph table carrying a **Traversal Path**, keyed by a hash bucket of the top-level **Namespace** (`sipHash64(top_level_ns) % N`, declared once in `settings.partition`). Gives each tenant bucket its own ClickHouse part budget so one tenant's reindex burst cannot dead-letter inserts for the rest. A query scoped to a single top-level namespace also prunes to one bucket: the compiler emits the same bucket expression as a predicate. A storage-layer property, distinct from the logical SDLC/Code sub-graphs and from the read-side extraction slices used for parallel initial loads.
 _Avoid_: sharding (Orbit does not shard); conflating with the SDLC/Code "graph partitions" sub-graph split.

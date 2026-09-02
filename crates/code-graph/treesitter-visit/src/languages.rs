@@ -25,6 +25,7 @@ pub enum SupportLang {
     Hcl,
     Swift,
     Lua,
+    Yaml,
     Zig,
 }
 
@@ -138,6 +139,11 @@ impl LanguageExt for SupportLang {
             Self::Lua => tree_sitter_lua::LANGUAGE.into(),
             #[cfg(not(feature = "tree-sitter-lua"))]
             Self::Lua => panic!("tree-sitter-lua feature not enabled"),
+
+            #[cfg(feature = "tree-sitter-yaml")]
+            Self::Yaml => tree_sitter_yaml::LANGUAGE.into(),
+            #[cfg(not(feature = "tree-sitter-yaml"))]
+            Self::Yaml => panic!("tree-sitter-yaml feature not enabled"),
 
             #[cfg(feature = "tree-sitter-zig")]
             Self::Zig => tree_sitter_zig::LANGUAGE.into(),

@@ -23,6 +23,9 @@ use crate::v2::trace::Tracer;
 // limit; `arrow_overflow` panic recovery keeps that case self-healing.
 const GO_PARSER_MAX_FILE_SIZE: u64 = 10 * 1024 * 1024;
 
+// 1 MiB as a parse cost guard to keep machine generated files out
+const YAML_PARSER_MAX_FILE_SIZE: u64 = 1024 * 1024;
+
 /// Log files >= this size before processing so an uncatchable OOM/overflow crash names the in-flight file.
 pub(crate) const LARGE_FILE_BREADCRUMB_BYTES: u64 = 2 * 1024 * 1024;
 
@@ -151,6 +154,7 @@ fn is_offset_overflow_message(message: &str) -> bool {
 fn parser_max_file_size(language: Language) -> Option<u64> {
     match language {
         Language::Go => Some(GO_PARSER_MAX_FILE_SIZE),
+        Language::Yaml => Some(YAML_PARSER_MAX_FILE_SIZE),
         _ => None,
     }
 }
@@ -1804,6 +1808,37 @@ mod tests {
     }
 
     #[test]
+    fn yaml_parser_skips_files_above_parser_size_cap() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let path = root.join("openapi_v3.yaml");
+        let file = std::fs::File::create(&path).unwrap();
+        file.set_len(YAML_PARSER_MAX_FILE_SIZE + 1).unwrap();
+
+        let result = Pipeline::run_with_tracer(
+            root,
+            Arc::from(vec![FileInventoryEntry {
+                path: "openapi_v3.yaml".into(),
+                size: YAML_PARSER_MAX_FILE_SIZE + 1,
+                decision: Decision::Parse,
+            }]),
+            PipelineConfig::default(),
+            &FxHashMap::default(),
+            crate::v2::trace::Tracer::new(false),
+            Arc::new(TestCapture::new()),
+            Arc::new(|_: &str, _: RecordBatch| Ok(())),
+        );
+
+        assert_eq!(result.errors.len(), 0);
+        assert_eq!(result.skipped.len(), 1);
+        assert_eq!(
+            result.skipped[0].kind,
+            crate::v2::error::FileSkip::ParserOversize
+        );
+        assert_eq!(result.skipped[0].path, "openapi_v3.yaml");
+    }
+
+    #[test]
     fn pipeline_records_timeout_skip_when_cpu_budget_is_exhausted() {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path();
@@ -1972,7 +2007,7 @@ mod tests {
                 decision: Decision::Parse,
             },
             FileInventoryEntry {
-                path: "config/app.yml".into(),
+                path: "config/app.toml".into(),
                 size: 9,
                 decision: Decision::Parse,
             },
@@ -2020,7 +2055,7 @@ mod tests {
             vec![
                 ("README.md".into(), "unknown"),
                 ("assets/logo.png".into(), "unknown"),
-                ("config/app.yml".into(), "unknown"),
+                ("config/app.toml".into(), "unknown"),
                 ("src/main.py".into(), "python"),
                 ("vendor/jquery.min.js".into(), "unknown"),
             ]
