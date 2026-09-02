@@ -35,20 +35,22 @@ pub fn alias(i: usize) -> String {
     format!("t{i}")
 }
 
-/// The denormalized column holding `column` of table `i`. The row's single
-/// `traversal_path` is unprefixed; everything else carries the table prefix.
+/// The denormalized column holding `column` of table `i`. Row-level columns
+/// (`traversal_path`, `_version`, `_deleted`) exist once and are unprefixed;
+/// everything else carries the table prefix.
 #[must_use]
 pub fn column_for(i: usize, column: &str) -> String {
-    if column == TRAVERSAL_PATH_COLUMN {
-        column.to_string()
-    } else {
+    if copies(column) {
         format!("{}{column}", prefix(i))
+    } else {
+        column.to_string()
     }
 }
 
-/// Whether `column` of a source table is copied into the row. System columns
-/// are declared once for the whole row; `traversal_path` is taken from the
-/// first table that has it (see [`DenormalizedJoin::traversal_path_table`]).
+/// Whether `column` of a source table is copied under its table prefix. The
+/// system columns are declared once for the whole row and `traversal_path` is
+/// taken once from the first scoped table (see
+/// [`DenormalizedJoin::traversal_path_table`]).
 #[must_use]
 pub fn copies(column: &str) -> bool {
     !matches!(
@@ -147,6 +149,7 @@ mod tests {
     fn columns_are_prefixed_except_the_shared_traversal_path() {
         assert_eq!(column_for(2, "title"), "t2_title");
         assert_eq!(column_for(2, "traversal_path"), "traversal_path");
+        assert_eq!(column_for(2, "_deleted"), "_deleted");
         assert!(copies("title") && copies("id"));
         assert!(!copies("_version") && !copies("traversal_path"));
     }
