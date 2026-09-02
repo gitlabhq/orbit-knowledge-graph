@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "yaml_document_type.schema.json",
   "title": "Orbit YAML document type",
-  "description": "Declares how the YAML language module recognizes a document type, which keys become definitions, and which keys become imports. YAML files that match no document type emit no definitions or imports. Configs live in crates/code-graph/src/v2/langs/generic/yaml/document_types/ and are validated when the module loads them.",
+  "description": "Declares how the YAML language module recognizes a document type, which keys become definitions, and which keys become imports. YAML files that match no document type emit no key definitions or imports; anchors and aliases are indexed in every file. Configs live in crates/code-graph/src/v2/langs/generic/yaml/document_types/ and are validated when the module loads them.",
   "type": "object",
   "additionalProperties": false,
   "required": ["name", "match"],

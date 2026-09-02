@@ -63,7 +63,7 @@ The sub-graph of source code structure and relationships — branches, directori
 _Avoid_: call graph (refers only to invocation relationships, not the full sub-graph)
 
 **YAML Document Type**:
-A declarative config (one YAML file under `crates/code-graph/src/v2/langs/generic/yaml/document_types/`) that tells the **Code Graph** which YAML files it claims, by filename, directory, or top-level keys, and which of their keys become definitions or imports. Shipped types: GitLab CI, ArgoCD, Helm chart, Helm values, Docker Compose. YAML no document type claims is indexed as a file only.
+A declarative config (one YAML file under `crates/code-graph/src/v2/langs/generic/yaml/document_types/`) that tells the **Code Graph** which YAML files it claims, by filename, directory, or top-level keys, and which of their keys become definitions or imports. Shipped types: GitLab CI, ArgoCD, Helm chart, Helm values, Docker Compose. YAML that no document type claims keeps only its `File` node plus anchor definitions and alias references.
 _Avoid_: YAML dialect, YAML schema (that is the JSON schema the configs are validated against)
 
 **Namespace Partitioning**:

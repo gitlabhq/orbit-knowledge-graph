@@ -13,6 +13,8 @@ use std::collections::HashSet;
 use treesitter_visit::Axis::*;
 use treesitter_visit::Match::*;
 
+pub(super) const MAX_KEY_DEPTH: usize = 64;
+
 fn node_range(node: &N<'_>) -> Range {
     crate::v2::dsl::utils::canonical_range(&crate::utils::node_to_range(node))
 }
@@ -199,6 +201,11 @@ fn emit_key_tree(
     defs: &mut Vec<CanonicalDefinition>,
     sep: &'static str,
 ) {
+    if path.len() > MAX_KEY_DEPTH
+        || stacker::remaining_stack().unwrap_or(usize::MAX) < crate::utils::MINIMUM_STACK_REMAINING
+    {
+        return;
+    }
     let parts: Vec<&str> = path.iter().map(String::as_str).collect();
     if seen.insert(parts.join(sep)) {
         push_definition(defs, rule, &parts, pair, sep);
