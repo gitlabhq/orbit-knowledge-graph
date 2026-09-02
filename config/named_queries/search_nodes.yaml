@@ -1,5 +1,5 @@
 name: search_nodes
-description: Nodes of one entity type whose text property contains the search term.
+description: Nodes of one entity type whose text property contains the search term
 parameters:
   entity:
     schema: { type: string }
@@ -15,7 +15,6 @@ query:
   nodes:
     - id: n
       entity: { $param: entity }
-      columns: "*"
       filters:
         "$param:field": { contains: { $param: text } }
   limit: 50
