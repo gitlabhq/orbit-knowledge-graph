@@ -1,3 +1,9 @@
+## [0.113.1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.113.0...v0.113.1) (2026-09-02)
+
+### Fixes
+
+* **query:** stop pushing denorm tag filters onto edges written without tags ([5c7ef28](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/5c7ef28a1e9b09713d548fab5d7455888e02053d)) by Jean-Gabriel Doyon
+
 ## [0.113.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.112.0...v0.113.0) (2026-09-02)
 
 ### Features
