@@ -1,15 +1,16 @@
-//! denormalized join tables: a pre-joined `gl_denorm_*` table per opted-in edge
-//! variant, holding the edge's `traversal_path` plus every storage column of
-//! both endpoint nodes under a side prefix. Three `TO`-style materialized
+//! Denormalized join tables: a pre-joined `gl_denorm_*` table per opted-in
+//! edge variant. Its columns are the edge table's structural columns followed
+//! by every storage column of both endpoint nodes under a side prefix, so the
+//! compiler's edge-chain lowering can scan it exactly like an edge table while
+//! reading node properties from the same row. Three `TO`-style materialized
 //! views (one per source table: edge, source node, target node) keep it
-//! current, so a change to any side re-emits the affected rows and the
+//! current; a change to any side re-emits the affected rows and the
 //! `ReplacingMergeTree` keeps the latest `_version`.
-//!
-//! The compiler can answer a single-hop traversal or aggregation over such a
-//! variant with one `FINAL` scan instead of an edge scan plus two node joins.
 
+use crate::EdgeTableConfig;
 use crate::constants::{
-    DELETED_COLUMN, RELATIONSHIP_KIND_COLUMN, TRAVERSAL_PATH_COLUMN, VERSION_COLUMN,
+    DEFAULT_PRIMARY_KEY, DELETED_COLUMN, SOURCE_ID_COLUMN, TARGET_ID_COLUMN, TRAVERSAL_PATH_COLUMN,
+    VERSION_COLUMN,
 };
 use crate::entities::{EdgeEntity, NodeEntity, StorageColumn};
 
@@ -58,6 +59,15 @@ impl Side {
         }
     }
 
+    /// The edge column holding this side's node id.
+    #[must_use]
+    pub fn id_column(self) -> &'static str {
+        match self {
+            Side::Source => SOURCE_ID_COLUMN,
+            Side::Target => TARGET_ID_COLUMN,
+        }
+    }
+
     #[must_use]
     pub fn other(self) -> Side {
         match self {
@@ -65,10 +75,22 @@ impl Side {
             Side::Target => Side::Source,
         }
     }
+
+    /// The join-table column a node property on this side resolves to. The
+    /// node's `id` is the edge's `source_id`/`target_id`; other node properties
+    /// carry the side prefix.
+    #[must_use]
+    pub fn column_for(self, node_column: &str) -> String {
+        if node_column == DEFAULT_PRIMARY_KEY {
+            self.id_column().to_string()
+        } else {
+            format!("{}{node_column}", self.prefix())
+        }
+    }
 }
 
 /// Column layout and provenance for one denormalized join table. Built on
-/// demand from the edge variant and its two node entities; not stored.
+/// demand from the edge variant, its edge table, and its two node entities.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DenormalizedJoinTable {
     pub table: String,
@@ -78,9 +100,12 @@ pub struct DenormalizedJoinTable {
     pub source_table: String,
     pub target_kind: String,
     pub target_table: String,
-    /// The side whose `id` leads the sort key after `traversal_path`. This is
+    /// The side whose id leads the sort key after `traversal_path`. This is
     /// the scoped side when exactly one side is scoped, else the source.
     pub anchor: Side,
+    /// The edge table's structural columns, copied verbatim so the table
+    /// answers every predicate an edge scan would.
+    pub edge_columns: Vec<StorageColumn>,
     /// Node storage columns copied under [`SOURCE_PREFIX`], in DDL order.
     pub source_columns: Vec<StorageColumn>,
     /// Node storage columns copied under [`TARGET_PREFIX`], in DDL order.
@@ -90,6 +115,7 @@ pub struct DenormalizedJoinTable {
 impl DenormalizedJoinTable {
     pub(crate) fn build(
         edge: &EdgeEntity,
+        edge_table: &EdgeTableConfig,
         source: &NodeEntity,
         target: &NodeEntity,
     ) -> Option<Self> {
@@ -108,34 +134,26 @@ impl DenormalizedJoinTable {
             target_kind: edge.target_kind.clone(),
             target_table: target.destination_table.clone(),
             anchor,
+            edge_columns: edge_table.storage.columns.clone(),
             source_columns: copyable_columns(source),
             target_columns: copyable_columns(target),
         })
     }
 
-    /// `(traversal_path, {anchor}_id, {other}_id)`
+    /// `(traversal_path, {anchor id}, {other id})`
     #[must_use]
     pub fn sort_key(&self) -> Vec<String> {
         vec![
             TRAVERSAL_PATH_COLUMN.to_string(),
-            format!("{}id", self.anchor.prefix()),
-            format!("{}id", self.anchor.other().prefix()),
+            self.anchor.id_column().to_string(),
+            self.anchor.other().id_column().to_string(),
         ]
-    }
-
-    /// Whether `column` is one of the table's own columns rather than a
-    /// prefixed copy of a node column. The compiler leaves these unrewritten.
-    #[must_use]
-    pub fn is_passthrough_column(column: &str) -> bool {
-        matches!(
-            column,
-            TRAVERSAL_PATH_COLUMN | RELATIONSHIP_KIND_COLUMN | VERSION_COLUMN | DELETED_COLUMN
-        )
     }
 }
 
-/// Node columns worth copying: everything except the edge-owned
-/// `traversal_path` and the system columns, which the join table declares once.
+/// Node columns worth copying: everything except `id` (already the edge's
+/// `source_id`/`target_id`), the edge-owned `traversal_path`, and the system
+/// columns the join table declares once.
 fn copyable_columns(node: &NodeEntity) -> Vec<StorageColumn> {
     node.storage
         .columns
@@ -143,7 +161,7 @@ fn copyable_columns(node: &NodeEntity) -> Vec<StorageColumn> {
         .filter(|c| {
             !matches!(
                 c.name.as_str(),
-                TRAVERSAL_PATH_COLUMN | VERSION_COLUMN | DELETED_COLUMN
+                DEFAULT_PRIMARY_KEY | TRAVERSAL_PATH_COLUMN | VERSION_COLUMN | DELETED_COLUMN
             )
         })
         .cloned()
@@ -164,5 +182,12 @@ mod tests {
             table_name("HAS_LABEL", "WorkItem", "Label"),
             "gl_denorm_has_label__work_item__label"
         );
+    }
+
+    #[test]
+    fn node_id_resolves_to_the_edge_id_column() {
+        assert_eq!(Side::Source.column_for("id"), "source_id");
+        assert_eq!(Side::Target.column_for("id"), "target_id");
+        assert_eq!(Side::Target.column_for("title"), "tgt_title");
     }
 }

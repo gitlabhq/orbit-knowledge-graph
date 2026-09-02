@@ -17,25 +17,24 @@ use crate::passes::shared::{
 
 /// Predicates applied after `FINAL` has resolved each node's latest row.
 pub(super) fn latest_node_predicates(alias: &str, np: &NodePlan) -> Vec<Expr> {
-    let mut predicates = node_filter_predicates(alias, np);
-    predicates.push(deleted_false(alias));
-    predicates
-}
-
-/// The node's own selectivity (property filters, pinned ids, id range) with
-/// no liveness predicate; callers add `_deleted` for whichever row carries it.
-pub(super) fn node_filter_predicates(alias: &str, np: &NodePlan) -> Vec<Expr> {
-    let mut predicates = Vec::new();
-    for (prop, filter) in &np.filters {
-        predicates.push(filter_to_expr(alias, prop, filter));
-    }
+    let mut predicates = node_property_predicates(alias, np);
     if !np.node_ids.is_empty() {
         predicates.push(id_list_predicate(alias, DEFAULT_PRIMARY_KEY, &np.node_ids));
     }
     if let Some(ref range) = np.id_range {
         predicates.push(id_range_predicate(alias, range));
     }
+    predicates.push(deleted_false(alias));
     predicates
+}
+
+/// The node's property filters alone; ids and liveness are carried by
+/// whichever scan the caller pins them to.
+pub(super) fn node_property_predicates(alias: &str, np: &NodePlan) -> Vec<Expr> {
+    np.filters
+        .iter()
+        .map(|(prop, filter)| filter_to_expr(alias, prop, filter))
+        .collect()
 }
 
 /// Predicates for a candidate-id prefilter. These run before `FINAL`, so they

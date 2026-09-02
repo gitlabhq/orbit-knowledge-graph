@@ -1,33 +1,41 @@
 //! Rebind node aliases onto a denormalized join table scan.
 //!
 //! Lowering emits node columns as `<node>.<column>`, which is what a node-table
-//! scan would expose. A [`Strategy::Denormalized`] plan has no such scan: both
-//! endpoints live in one row under `src_`/`tgt_` prefixes, so after the query
-//! body is built every `<node>.<column>` becomes `<scan>.<prefix><column>`.
-//! Columns the join table owns outright (`traversal_path`, `_deleted`, ...)
-//! rebind without a prefix. Passes after lowering never introduce node-alias
+//! scan would expose. A denormalized hop has no such scan: both endpoints live
+//! in the hop's edge row, so after the query body is built every
+//! `<node>.<column>` becomes `<edge alias>.<side column>` (see
+//! [`Side::column_for`]). Passes after lowering never introduce node-alias
 //! columns: `enforce` reads the plan's node-to-edge mappings, `cursor` derives
 //! its seek from the lowered ORDER BY, and the rest work on scan aliases.
 
 use std::collections::HashMap;
 
-use ontology::denormalized::{DenormalizedJoinTable, Side};
+use ontology::denormalized::Side;
 
 use crate::ast::*;
-use crate::input::DenormalizedEdge;
-use crate::passes::plan::DENORMALIZED_ALIAS;
+use crate::passes::plan::Hop;
 
-pub(super) fn rebind_node_aliases(node: &mut Node, denorm: &DenormalizedEdge) {
-    let sides = HashMap::from([
-        (denorm.source_node.as_str(), Side::Source),
-        (denorm.target_node.as_str(), Side::Target),
-    ]);
+/// Node alias to the edge alias and side that now carry its columns.
+type Bindings<'a> = HashMap<&'a str, (String, Side)>;
+
+pub(super) fn rebind_node_aliases(node: &mut Node, hops: &[Hop]) {
+    let mut sides = Bindings::new();
+    for (i, hop) in hops.iter().enumerate() {
+        if let Some(denorm) = &hop.denormalized {
+            let alias = format!("e{i}");
+            sides.insert(denorm.source_node.as_str(), (alias.clone(), Side::Source));
+            sides.insert(denorm.target_node.as_str(), (alias, Side::Target));
+        }
+    }
+    if sides.is_empty() {
+        return;
+    }
     if let Node::Query(q) = node {
         rebind_query(q, &sides);
     }
 }
 
-fn rebind_query(q: &mut Query, sides: &HashMap<&str, Side>) {
+fn rebind_query(q: &mut Query, sides: &Bindings) {
     for cte in &mut q.ctes {
         rebind_query(&mut cte.query, sides);
     }
@@ -57,7 +65,7 @@ fn rebind_query(q: &mut Query, sides: &HashMap<&str, Side>) {
     }
 }
 
-fn rebind_table_ref(t: &mut TableRef, sides: &HashMap<&str, Side>) {
+fn rebind_table_ref(t: &mut TableRef, sides: &Bindings) {
     match t {
         TableRef::Scan { .. } => {}
         TableRef::Join {
@@ -76,14 +84,12 @@ fn rebind_table_ref(t: &mut TableRef, sides: &HashMap<&str, Side>) {
     }
 }
 
-fn rebind_expr(e: &mut Expr, sides: &HashMap<&str, Side>) {
+fn rebind_expr(e: &mut Expr, sides: &Bindings) {
     match e {
         Expr::Column { table, column } => {
-            if let Some(side) = sides.get(table.as_str()) {
-                if !DenormalizedJoinTable::is_passthrough_column(column) {
-                    *column = format!("{}{column}", side.prefix());
-                }
-                *table = DENORMALIZED_ALIAS.to_string();
+            if let Some((edge_alias, side)) = sides.get(table.as_str()) {
+                *column = side.column_for(column);
+                *table = edge_alias.clone();
             }
         }
         Expr::Identifier(_) | Expr::Literal(_) | Expr::Param { .. } | Expr::Star => {}

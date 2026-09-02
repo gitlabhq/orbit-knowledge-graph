@@ -6,36 +6,27 @@
 use ontology::StorageColumn;
 use ontology::constants::{
     DELETED_COLUMN, RELATIONSHIP_KIND_COLUMN, SOURCE_ID_COLUMN, SOURCE_KIND_COLUMN,
-    TARGET_ID_COLUMN, TARGET_KIND_COLUMN, TRAVERSAL_PATH_COLUMN, VERSION_COLUMN,
+    TARGET_ID_COLUMN, TARGET_KIND_COLUMN, VERSION_COLUMN,
 };
 use ontology::denormalized::{DenormalizedJoinTable, Side};
 
-use super::{parse_column_type, storage_col_to_def, system_columns, table_settings};
+use super::{storage_col_to_def, system_columns, table_settings};
 use crate::ast::ddl::*;
 
-pub(super) fn build_table(mat: &DenormalizedJoinTable) -> CreateTable {
-    let mut columns = vec![
-        ColumnDef::new(TRAVERSAL_PATH_COLUMN, ColumnType::String)
-            .with_default("'0/'")
-            .with_codec(vec![Codec::ZSTD(1)]),
-        ColumnDef::new(
-            RELATIONSHIP_KIND_COLUMN,
-            parse_column_type("LowCardinality(String)"),
-        )
-        .with_codec(vec![Codec::LZ4]),
-    ];
-    columns.extend(prefixed_defs(Side::Source, &mat.source_columns));
-    columns.extend(prefixed_defs(Side::Target, &mat.target_columns));
+pub(super) fn build_table(denorm: &DenormalizedJoinTable) -> CreateTable {
+    let mut columns: Vec<ColumnDef> = denorm.edge_columns.iter().map(storage_col_to_def).collect();
+    columns.extend(prefixed_defs(Side::Source, &denorm.source_columns));
+    columns.extend(prefixed_defs(Side::Target, &denorm.target_columns));
     columns.extend(system_columns(None));
 
     CreateTable {
-        name: mat.table.clone(),
+        name: denorm.table.clone(),
         columns,
         indexes: vec![],
         projections: vec![],
         engine: Engine::replacing_merge_tree(VERSION_COLUMN, DELETED_COLUMN),
         partition_by: vec![],
-        order_by: mat.sort_key(),
+        order_by: denorm.sort_key(),
         primary_key: None,
         settings: table_settings(Some(1024), false, false, &Default::default()),
         ttl: None,
@@ -54,13 +45,13 @@ fn prefixed_defs(side: Side, cols: &[StorageColumn]) -> impl Iterator<Item = Col
 /// different source. The edge view carries new relationships; the node views
 /// re-emit rows whose endpoint properties changed. All three share one
 /// projection so any of them produces a complete, current row.
-pub(super) fn build_views(mat: &DenormalizedJoinTable) -> Vec<CreateMaterializedView> {
+pub(super) fn build_views(denorm: &DenormalizedJoinTable) -> Vec<CreateMaterializedView> {
     [Trigger::Edge, Trigger::Source, Trigger::Target]
         .into_iter()
         .map(|trigger| CreateMaterializedView {
-            name: format!("{}__on_{}", mat.table, trigger.suffix()),
-            to_table: Some(mat.table.clone()),
-            select_query: select_for(mat, trigger),
+            name: format!("{}__on_{}", denorm.table, trigger.suffix()),
+            to_table: Some(denorm.table.clone()),
+            select_query: select_for(denorm, trigger),
             engine: None,
             order_by: vec![],
             populate: false,
@@ -87,20 +78,23 @@ impl Trigger {
 
 /// The triggering table is scanned as-is (a view only sees the inserted
 /// block); the other two are read with `FINAL` for their current state.
-fn select_for(mat: &DenormalizedJoinTable, trigger: Trigger) -> String {
+fn select_for(denorm: &DenormalizedJoinTable, trigger: Trigger) -> String {
     let final_unless = |t: Trigger| if trigger == t { "" } else { " FINAL" };
 
-    let mut cols = vec![
-        format!("e.{TRAVERSAL_PATH_COLUMN} AS {TRAVERSAL_PATH_COLUMN}"),
-        format!("e.{RELATIONSHIP_KIND_COLUMN} AS {RELATIONSHIP_KIND_COLUMN}"),
-    ];
+    let mut cols: Vec<String> = denorm
+        .edge_columns
+        .iter()
+        .map(|c| format!("e.{0} AS {0}", c.name))
+        .collect();
     cols.extend(
-        mat.source_columns
+        denorm
+            .source_columns
             .iter()
             .map(|c| format!("s.{} AS {}{}", c.name, Side::Source.prefix(), c.name)),
     );
     cols.extend(
-        mat.target_columns
+        denorm
+            .target_columns
             .iter()
             .map(|c| format!("t.{} AS {}{}", c.name, Side::Target.prefix(), c.name)),
     );
@@ -113,17 +107,21 @@ fn select_for(mat: &DenormalizedJoinTable, trigger: Trigger) -> String {
 
     let edge_pred = format!(
         "e.{RELATIONSHIP_KIND_COLUMN} = '{}' AND e.{SOURCE_KIND_COLUMN} = '{}' AND e.{TARGET_KIND_COLUMN} = '{}'",
-        mat.relationship_kind, mat.source_kind, mat.target_kind
+        denorm.relationship_kind, denorm.source_kind, denorm.target_kind
     );
-    let e = format!("{{{}}} AS e{}", mat.edge_table, final_unless(Trigger::Edge));
+    let e = format!(
+        "{{{}}} AS e{}",
+        denorm.edge_table,
+        final_unless(Trigger::Edge)
+    );
     let s = format!(
         "{{{}}} AS s{}",
-        mat.source_table,
+        denorm.source_table,
         final_unless(Trigger::Source)
     );
     let t = format!(
         "{{{}}} AS t{}",
-        mat.target_table,
+        denorm.target_table,
         final_unless(Trigger::Target)
     );
     let on_s = format!("e.{SOURCE_ID_COLUMN} = s.id");

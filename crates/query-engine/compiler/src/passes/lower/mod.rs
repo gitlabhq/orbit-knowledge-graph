@@ -1,7 +1,6 @@
 //! Query lowerer: edge-chain-first, nodes are lazy.
 
 pub mod aggregation;
-mod denormalized;
 mod fk;
 mod flat_chain;
 mod helpers;
@@ -23,7 +22,6 @@ impl Plan {
         match self.strategy {
             Strategy::SingleNode => single_node::emit_single_node(self),
             Strategy::Fk(ref shape) => fk::emit_fk(self, shape),
-            Strategy::Denormalized(ref mat) => denormalized::emit_denormalized(self, mat),
             Strategy::Flat | Strategy::Bidirectional { .. } => flat_chain::emit_flat_chain(self),
         }
     }
@@ -65,9 +63,7 @@ impl EmitOutput {
 
 pub fn emit(plan: &Plan, input: &Input) -> Result<Node> {
     let mut node = emit_body(plan, input)?;
-    if let Strategy::Denormalized(denorm) = &plan.strategy {
-        rebind::rebind_node_aliases(&mut node, denorm);
-    }
+    rebind::rebind_node_aliases(&mut node, &plan.hops);
     Ok(node)
 }
 

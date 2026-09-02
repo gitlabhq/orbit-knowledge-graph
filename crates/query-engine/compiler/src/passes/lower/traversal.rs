@@ -9,13 +9,10 @@ use crate::passes::shared::edge_select_columns_with_prefix;
 use ontology::constants::{DEFAULT_PRIMARY_KEY, SOURCE_ID_COLUMN, TARGET_ID_COLUMN};
 
 /// Deterministic per-row sort suffix: edge id pairs when edges are scanned
-/// (flat/bidirectional chains), node PKs for edge-free shapes (FK and
-/// denormalized scans synthesize their `e0` columns rather than scanning
-/// an edge table).
+/// (flat/bidirectional chains), node PKs for edge-free shapes (FK elides the
+/// edge tables, so its `e0` aliases are synthesized columns, not scans).
 fn tie_breakers(plan: &Plan, edge_aliases: &[String]) -> Vec<OrderExpr> {
-    if edge_aliases.is_empty()
-        || matches!(plan.strategy, Strategy::Fk(_) | Strategy::Denormalized(_))
-    {
+    if edge_aliases.is_empty() || matches!(plan.strategy, Strategy::Fk(_)) {
         let mut aliases: Vec<&String> = plan.nodes.keys().collect();
         aliases.sort();
         aliases

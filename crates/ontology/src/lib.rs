@@ -954,12 +954,7 @@ impl Ontology {
     /// Every opted-in denormalized join table with its resolved column layout.
     pub fn denormalized_join_tables(&self) -> Vec<denormalized::DenormalizedJoinTable> {
         self.edges()
-            .filter(|e| e.denormalized_table.is_some())
-            .filter_map(|e| {
-                let source = self.nodes.get(&e.source_kind)?;
-                let target = self.nodes.get(&e.target_kind)?;
-                denormalized::DenormalizedJoinTable::build(e, source, target)
-            })
+            .filter_map(|e| self.build_denormalized_join_table(e))
             .collect()
     }
 
@@ -971,14 +966,12 @@ impl Ontology {
         source_kind: &str,
         target_kind: &str,
     ) -> Option<denormalized::DenormalizedJoinTable> {
-        let edge = self.edges.get(relationship_kind)?.iter().find(|e| {
-            e.source_kind == source_kind
-                && e.target_kind == target_kind
-                && e.denormalized_table.is_some()
-        })?;
-        let source = self.nodes.get(source_kind)?;
-        let target = self.nodes.get(target_kind)?;
-        denormalized::DenormalizedJoinTable::build(edge, source, target)
+        let edge = self
+            .edges
+            .get(relationship_kind)?
+            .iter()
+            .find(|e| e.source_kind == source_kind && e.target_kind == target_kind)?;
+        self.build_denormalized_join_table(edge)
     }
 
     fn denormalized_join_table_by_name(
@@ -991,11 +984,17 @@ impl Ontology {
                     .as_deref()
                     .is_some_and(|t| strip_schema_version_prefix(t) == unprefixed_table)
             })
-            .and_then(|e| {
-                let source = self.nodes.get(&e.source_kind)?;
-                let target = self.nodes.get(&e.target_kind)?;
-                denormalized::DenormalizedJoinTable::build(e, source, target)
-            })
+            .and_then(|e| self.build_denormalized_join_table(e))
+    }
+
+    fn build_denormalized_join_table(
+        &self,
+        edge: &EdgeEntity,
+    ) -> Option<denormalized::DenormalizedJoinTable> {
+        let edge_table = self.edge_table_config(&edge.destination_table)?;
+        let source = self.nodes.get(&edge.source_kind)?;
+        let target = self.nodes.get(&edge.target_kind)?;
+        denormalized::DenormalizedJoinTable::build(edge, edge_table, source, target)
     }
 
     /// Returns `(fk_column, anchor_entity)` pairs derived from

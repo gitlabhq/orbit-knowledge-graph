@@ -2,16 +2,11 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 
 use ontology::constants::*;
-use ontology::denormalized::Side;
 use orbit_utils::traversal_path::TraversalPath;
 
 use crate::input::*;
 
 use super::{Plan, PlanBody};
-
-/// FROM alias of the denormalized join table scan. Matches the first edge
-/// alias flat chains use, so formatter-facing `e0_*` edge columns line up.
-pub const DENORMALIZED_ALIAS: &str = "e0";
 use crate::passes::shared::{requested_columns, resolve_edge_table};
 
 pub struct Hop {
@@ -26,6 +21,9 @@ pub struct Hop {
     pub max_hops: u32,
     /// When set, the plan can join node tables directly without the edge table.
     pub fk: Option<HopFk>,
+    /// When set, `edge_table` is the pre-joined denormalized table and both
+    /// endpoints read their columns from this hop's scan instead of node tables.
+    pub denormalized: Option<DenormalizedEdge>,
     pub filters: Vec<(String, InputFilter)>,
     /// None for the first hop (it's the initial FROM).
     pub join_prev: Option<JoinColumns>,
@@ -146,10 +144,6 @@ pub enum Strategy {
     /// columns, with zero edge-table scans. The [`FkShape`] selects how the
     /// nodes are joined; both shapes share one emit path (`lower::fk`).
     Fk(FkShape),
-    /// Single hop answered by one `FINAL` scan of a pre-joined edge+node table.
-    /// Both endpoint aliases are rebound onto the scan's `src_`/`tgt_` columns
-    /// after lowering, so no node table is touched.
-    Denormalized(DenormalizedEdge),
 }
 
 /// Single-hop FK is the degenerate one-hop [`FkShape::Star`].
@@ -164,8 +158,9 @@ pub enum FkShape {
 }
 
 pub fn plan(input: &mut Input) -> Plan {
-    let hops = build_hops(input);
+    let mut hops = build_hops(input);
     let mut nodes = build_node_plans(input);
+    bind_denormalized(&mut hops, &nodes, input);
 
     let (mut hops, elided_fks, input) = elide_hops(hops, &mut nodes, input);
 
@@ -181,11 +176,6 @@ pub fn plan(input: &mut Input) -> Plan {
 
     let strategy = if hops.is_empty() {
         Strategy::SingleNode
-    } else if let Some(denorm) = detect_denormalized(&hops, &nodes, input) {
-        for alias in [&denorm.source_node, &denorm.target_node] {
-            nodes.get_mut(alias).unwrap().hydration = HydrationStrategy::Skip;
-        }
-        Strategy::Denormalized(denorm)
     } else if let Some(shape) = detect_fk(&hops, &nodes) {
         Strategy::Fk(shape)
     } else {
@@ -287,6 +277,7 @@ fn build_hops(input: &Input) -> Vec<Hop> {
                 min_hops: rel.hops.min,
                 max_hops: rel.hops.max,
                 fk,
+                denormalized: rel.denormalized.clone(),
                 scope_preserving: rel.scope_preserving,
                 filters: rel
                     .filters
@@ -480,30 +471,32 @@ fn elide_hops<'a>(
     (keep_hops, elided_fks, input)
 }
 
-/// A single fixed-length hop whose relationship resolved to a denormalized
-/// join table. Endpoints that need a node-table read anyway fall back to the
-/// edge chain: an elevated role floor is enforced through a node subquery, and
-/// a non-default redaction id makes `enforce` join the node table.
-fn detect_denormalized(
-    hops: &[Hop],
-    nodes: &HashMap<String, NodePlan>,
-    input: &Input,
-) -> Option<DenormalizedEdge> {
-    let [hop] = hops else {
-        return None;
-    };
-    if hop.max_hops != 1 || !hop.filters.is_empty() {
-        return None;
+/// Point a hop at its denormalized join table when the single-scan shape is
+/// safe: one fixed-length hop whose endpoints need no node-table read anyway.
+/// An elevated role floor is enforced through a node subquery, and a
+/// non-default redaction id makes `enforce` join the node table, so either
+/// falls back to the edge chain. The binding also drops any FK, since the
+/// join table answers the hop directly.
+fn bind_denormalized(hops: &mut [Hop], nodes: &HashMap<String, NodePlan>, input: &Input) {
+    let single_hop = hops.len() == 1;
+    for hop in hops.iter_mut() {
+        let Some(denorm) = hop.denormalized.as_ref() else {
+            continue;
+        };
+        let endpoints_ok = [&denorm.source_node, &denorm.target_node]
+            .iter()
+            .all(|alias| {
+                nodes
+                    .get(*alias)
+                    .is_some_and(|np| np.uses_default_pk() && !has_elevated_access_level(np, input))
+            });
+        if single_hop && hop.max_hops == 1 && endpoints_ok {
+            hop.edge_table = denorm.table.clone();
+            hop.fk = None;
+        } else {
+            hop.denormalized = None;
+        }
     }
-    let denorm = input.relationships.first()?.denormalized.clone()?;
-    let single_scan_ok = [&denorm.source_node, &denorm.target_node]
-        .iter()
-        .all(|alias| {
-            nodes
-                .get(*alias)
-                .is_some_and(|np| np.uses_default_pk() && !has_elevated_access_level(np, input))
-        });
-    single_scan_ok.then_some(denorm)
 }
 
 /// Star first (covers single-hop FK), then chain. Chain applies to aggregations
@@ -619,6 +612,14 @@ fn reorder_by_selectivity(
 
 fn determine_hydration(node_plan: &NodePlan, input: &Input, hops: &[Hop]) -> HydrationStrategy {
     let alias = &node_plan.alias;
+
+    // The denormalized scan carries every column of both endpoints.
+    if hops
+        .iter()
+        .any(|h| h.denormalized.is_some() && (h.from_node == *alias || h.to_node == *alias))
+    {
+        return HydrationStrategy::Skip;
+    }
 
     let is_group_by_node = crate::input::node_group_ids(&input.aggregation.group_by)
         .any(|node| node == alias.as_str());
@@ -750,20 +751,6 @@ fn compute_node_edge_mappings(
                     };
                     mappings.insert(fk.target_node.clone(), (fk_alias, fk.fk_column.clone()));
                 }
-            }
-        }
-        Strategy::Denormalized(denorm) => {
-            for (alias, side) in [
-                (&denorm.source_node, Side::Source),
-                (&denorm.target_node, Side::Target),
-            ] {
-                mappings.insert(
-                    alias.clone(),
-                    (
-                        DENORMALIZED_ALIAS.to_string(),
-                        format!("{}{DEFAULT_PRIMARY_KEY}", side.prefix()),
-                    ),
-                );
             }
         }
         Strategy::Fk(FkShape::Chain) => {
@@ -962,6 +949,7 @@ mod tests {
                 fk_column: "fk_id".to_string(),
                 target_node: to.to_string(),
             }),
+            denormalized: None,
             filters: Vec::new(),
             join_prev: None,
             scope_prefix: None,

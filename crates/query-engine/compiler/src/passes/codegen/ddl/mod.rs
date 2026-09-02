@@ -927,9 +927,14 @@ mod tests {
             .iter()
             .find(|t| t.name == table)
             .expect("denormalized join table should be generated");
-        assert_eq!(mat.order_by, ["traversal_path", "tgt_id", "src_id"]);
+        assert_eq!(mat.order_by, ["traversal_path", "target_id", "source_id"]);
         let names: Vec<&str> = mat.columns.iter().map(|c| c.name.as_str()).collect();
         assert!(names.contains(&"src_username") && names.contains(&"tgt_title"));
+        assert!(names.contains(&"source_id") && names.contains(&"target_kind"));
+        assert!(
+            !names.contains(&"src_id"),
+            "node id is the edge's source_id"
+        );
         assert_eq!(names.iter().filter(|n| **n == "traversal_path").count(), 1);
 
         let views = generate_graph_materialized_views(&ontology);

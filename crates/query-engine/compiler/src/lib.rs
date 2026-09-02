@@ -1724,8 +1724,8 @@ mod tests {
             "e0.tgt_title AS mr_title",
             "e0.tgt_state = 'merged'",
             "ORDER BY e0.tgt_created_at DESC",
-            "e0.src_id AS _gkg_u_id",
-            "e0.tgt_id AS _gkg_mr_id",
+            "e0.source_id AS _gkg_u_id",
+            "e0.target_id AS _gkg_mr_id",
             "e0.traversal_path AS _gkg_mr_tp",
             "startsWith(e0.traversal_path",
         ] {
@@ -1758,12 +1758,8 @@ mod tests {
             "got:\n{sql}"
         );
         assert!(
-            sql.contains("GROUP BY e0.src_username, e0.src_id"),
+            sql.contains("GROUP BY e0.src_username, e0.source_id"),
             "got:\n{sql}"
-        );
-        assert!(
-            !sql.contains("e0_type"),
-            "aggregations carry no edge columns, got:\n{sql}"
         );
     }
 
@@ -1785,9 +1781,9 @@ mod tests {
             sql.contains(&format!("FROM {DENORM_REVIEWER} AS e0 FINAL")),
             "got:\n{sql}"
         );
-        assert!(sql.contains("e0.tgt_id = 5"), "got:\n{sql}");
+        assert!(sql.contains("e0.target_id = 5"), "got:\n{sql}");
         assert!(
-            sql.contains("e0.src_id AS e0_src") && sql.contains("'User' AS e0_src_type"),
+            sql.contains("e0.source_id AS u_id") && sql.contains("e0.target_id AS mr_id"),
             "got:\n{sql}"
         );
     }
