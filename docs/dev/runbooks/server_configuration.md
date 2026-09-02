@@ -389,8 +389,6 @@ query:
 | `query.default.max_rows_in_set` | unset | ClickHouse `max_rows_in_set` (IN subquery cap) |
 | `query.default.use_query_cache` | `false` | Enable ClickHouse query cache |
 | `query.default.query_cache_ttl` | `60` | Query cache TTL in seconds |
-| `query.default.optimize_move_to_prewhere_if_final` | `true` | Let ClickHouse move sorting-key predicates to PREWHERE on `FINAL` scans (non-key predicates are never moved under FINAL) |
-| `query.default.use_index_for_in_with_subqueries_max_values` | `100000` | Stop using `IN (subquery)` sets larger than this for index analysis; avoids bloom-filter probing with million-element sets |
 
 ## Schema management
 

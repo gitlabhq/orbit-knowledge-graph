@@ -991,22 +991,22 @@ mod tests {
     }
 
     #[test]
-    fn default_config_emits_final_prewhere_and_in_set_index_cap() {
+    fn compiler_derived_settings_reach_the_settings_clause() {
         let q = Query {
             select: vec![SelectExpr {
                 expr: Expr::col("n", "id"),
                 alias: None,
             }],
-            from: TableRef::scan("nodes", "n"),
+            from: TableRef::scan_final("nodes", "n"),
             ..Default::default()
         };
+        let mut config = QueryConfig::empty();
+        config.compiler_derived.optimize_move_to_prewhere_if_final = true;
+        config
+            .compiler_derived
+            .use_index_for_in_with_subqueries_max_values = Some(100_000);
 
-        let result = codegen(
-            &Node::Query(Box::new(q)),
-            empty_ctx(),
-            QueryConfig::default(),
-        )
-        .unwrap();
+        let result = codegen(&Node::Query(Box::new(q)), empty_ctx(), config).unwrap();
         assert!(
             result
                 .sql

@@ -96,22 +96,6 @@ pub struct QueryConfig {
     )]
     pub query_cache_ttl: Option<u32>,
 
-    /// ClickHouse `optimize_move_to_prewhere_if_final`. Lets FINAL scans
-    /// apply sorting-key filters in PREWHERE. Enabled by default.
-    #[serde(
-        default = "default_optimize_move_to_prewhere_if_final",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub optimize_move_to_prewhere_if_final: Option<bool>,
-
-    /// ClickHouse `use_index_for_in_with_subqueries_max_values`. IN sets with
-    /// more values than this are not used for index pruning. Default: 100,000.
-    #[serde(
-        default = "default_use_index_for_in_with_subqueries_max_values",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub use_index_for_in_with_subqueries_max_values: Option<u64>,
-
     /// Compiler-derived ClickHouse settings. Set by the compiler's settings
     /// pass based on AST inspection (e.g. materialized CTEs). Invisible to
     /// serde and the JSON schema — never loaded from YAML or user input.
@@ -142,6 +126,8 @@ pub struct CompilerDerivedSettings {
     /// enables dynamic-programming join reordering for queries with 3+
     /// JOINs. Experimental in ClickHouse 26.x.
     pub join_order_algorithm: Option<String>,
+    pub optimize_move_to_prewhere_if_final: bool,
+    pub use_index_for_in_with_subqueries_max_values: Option<u64>,
 }
 
 impl CompilerDerivedSettings {
@@ -157,6 +143,15 @@ impl CompilerDerivedSettings {
                 format!("'{algo}'"),
             ));
         }
+        if self.optimize_move_to_prewhere_if_final {
+            out.push(("optimize_move_to_prewhere_if_final".into(), "1".into()));
+        }
+        if let Some(max) = self.use_index_for_in_with_subqueries_max_values {
+            out.push((
+                "use_index_for_in_with_subqueries_max_values".into(),
+                max.to_string(),
+            ));
+        }
         out
     }
 }
@@ -164,8 +159,6 @@ impl CompilerDerivedSettings {
 const DEFAULT_MAX_AST_ELEMENTS: u64 = 1_000_000;
 const DEFAULT_MAX_EXPANDED_AST_ELEMENTS: u64 = 10_000_000;
 const DEFAULT_MAX_AST_DEPTH: u64 = 10_000;
-const DEFAULT_OPTIMIZE_MOVE_TO_PREWHERE_IF_FINAL: bool = true;
-const DEFAULT_USE_INDEX_FOR_IN_WITH_SUBQUERIES_MAX_VALUES: u64 = 100_000;
 
 fn default_max_execution_time() -> Option<u64> {
     Some(DEFAULT_MAX_EXECUTION_TIME)
@@ -182,12 +175,6 @@ fn default_max_expanded_ast_elements() -> Option<u64> {
 fn default_max_ast_depth() -> Option<u64> {
     Some(DEFAULT_MAX_AST_DEPTH)
 }
-fn default_optimize_move_to_prewhere_if_final() -> Option<bool> {
-    Some(DEFAULT_OPTIMIZE_MOVE_TO_PREWHERE_IF_FINAL)
-}
-fn default_use_index_for_in_with_subqueries_max_values() -> Option<u64> {
-    Some(DEFAULT_USE_INDEX_FOR_IN_WITH_SUBQUERIES_MAX_VALUES)
-}
 
 impl Default for QueryConfig {
     fn default() -> Self {
@@ -202,10 +189,6 @@ impl Default for QueryConfig {
             max_ast_depth: Some(DEFAULT_MAX_AST_DEPTH),
             use_query_cache: None,
             query_cache_ttl: Some(DEFAULT_QUERY_CACHE_TTL),
-            optimize_move_to_prewhere_if_final: Some(DEFAULT_OPTIMIZE_MOVE_TO_PREWHERE_IF_FINAL),
-            use_index_for_in_with_subqueries_max_values: Some(
-                DEFAULT_USE_INDEX_FOR_IN_WITH_SUBQUERIES_MAX_VALUES,
-            ),
             compiler_derived: CompilerDerivedSettings::default(),
             graph_query_cache_enabled: None,
             graph_query_cache_ttl: None,
@@ -227,8 +210,6 @@ impl QueryConfig {
             max_ast_depth: None,
             use_query_cache: None,
             query_cache_ttl: None,
-            optimize_move_to_prewhere_if_final: None,
-            use_index_for_in_with_subqueries_max_values: None,
             compiler_derived: CompilerDerivedSettings::default(),
             graph_query_cache_enabled: None,
             graph_query_cache_ttl: None,
@@ -251,12 +232,6 @@ impl QueryConfig {
             max_ast_depth: overrides.max_ast_depth.or(self.max_ast_depth),
             use_query_cache: overrides.use_query_cache.or(self.use_query_cache),
             query_cache_ttl: overrides.query_cache_ttl.or(self.query_cache_ttl),
-            optimize_move_to_prewhere_if_final: overrides
-                .optimize_move_to_prewhere_if_final
-                .or(self.optimize_move_to_prewhere_if_final),
-            use_index_for_in_with_subqueries_max_values: overrides
-                .use_index_for_in_with_subqueries_max_values
-                .or(self.use_index_for_in_with_subqueries_max_values),
             // compiler_derived is never merged from YAML overrides — it's
             // set by the compiler after merge() runs.
             compiler_derived: self.compiler_derived.clone(),
@@ -426,7 +401,7 @@ mod tests {
         };
         let mut settings = cfg.to_clickhouse_settings()?;
         settings.sort_by(|a, b| a.0.cmp(&b.0));
-        assert_eq!(settings.len(), 8);
+        assert_eq!(settings.len(), 6);
         assert_eq!(settings[0], ("max_ast_depth".into(), "10000".into()));
         assert_eq!(settings[1], ("max_ast_elements".into(), "1000000".into()));
         assert_eq!(settings[2], ("max_execution_time".into(), "30".into()));
@@ -434,20 +409,37 @@ mod tests {
             settings[3],
             ("max_expanded_ast_elements".into(), "10000000".into())
         );
-        assert_eq!(
-            settings[4],
-            ("optimize_move_to_prewhere_if_final".into(), "1".into())
-        );
-        assert_eq!(settings[5], ("query_cache_ttl".into(), "60".into()));
-        assert_eq!(
-            settings[6],
-            (
-                "use_index_for_in_with_subqueries_max_values".into(),
-                "100000".into()
-            )
-        );
-        assert_eq!(settings[7], ("use_query_cache".into(), "1".into()));
+        assert_eq!(settings[4], ("query_cache_ttl".into(), "60".into()));
+        assert_eq!(settings[5], ("use_query_cache".into(), "1".into()));
         Ok(())
+    }
+
+    #[test]
+    fn compiler_derived_renders_only_set_settings() {
+        assert!(
+            CompilerDerivedSettings::default()
+                .to_clickhouse_settings()
+                .is_empty()
+        );
+
+        let derived = CompilerDerivedSettings {
+            optimize_move_to_prewhere_if_final: true,
+            use_index_for_in_with_subqueries_max_values: Some(100_000),
+            ..Default::default()
+        };
+        assert_eq!(
+            derived.to_clickhouse_settings(),
+            vec![
+                (
+                    "optimize_move_to_prewhere_if_final".to_string(),
+                    "1".to_string()
+                ),
+                (
+                    "use_index_for_in_with_subqueries_max_values".to_string(),
+                    "100000".to_string()
+                ),
+            ]
+        );
     }
 
     #[test]
