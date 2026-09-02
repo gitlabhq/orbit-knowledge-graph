@@ -1,0 +1,14 @@
+name: list_nodes
+description: A sample of nodes of one entity type
+parameters:
+  entity:
+    schema: { type: string }
+    example: MergeRequest
+query:
+  query_type: traversal
+  nodes:
+    - id: n
+      entity: { $param: entity }
+      filters:
+        id: { is_not_null: true }
+  limit: 50

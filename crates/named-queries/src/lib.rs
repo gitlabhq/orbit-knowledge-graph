@@ -13,6 +13,8 @@
 //! - `{ "$param": "<name>" }` — selection values supplied by the client
 //!   (e.g. the entity and ids of a clicked node) and validated against the
 //!   JSON Schema each template declares for the parameter.
+//! - `"$param:<name>": ...` — an object key filled from a string parameter,
+//!   so a template can take the property name to filter on.
 
 mod query;
 
@@ -214,6 +216,8 @@ query:
             "top_mr_authors",
             "mrs_fixing_vulnerabilities",
             "expand_neighbors",
+            "search_nodes",
+            "list_nodes",
         ] {
             assert!(queries.get(name).is_some(), "missing named query `{name}`");
         }

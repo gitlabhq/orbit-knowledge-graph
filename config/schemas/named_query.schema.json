@@ -48,12 +48,12 @@
           }
         }
       },
-      "description": "Client-supplied values substituted at render time via {$param: <name>}, validated against each parameter's JSON Schema."
+      "description": "Client-supplied values substituted at render time via {$param: <name>} (whole value) or a \"$param:<name>\" object key (string parameters only), validated against each parameter's JSON Schema."
     },
     "query": {
       "type": "object",
       "required": ["query_type"],
-      "description": "Graph query DSL object. {$binding: <name>} placeholders are replaced whole-value at render time."
+      "description": "Graph query DSL object. {$binding: <name>} and {$param: <name>} placeholders are replaced whole-value at render time; a \"$param:<name>\" object key is replaced by the parameter's string value."
     }
   }
 }

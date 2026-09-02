@@ -1,3 +1,18 @@
+## [0.112.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.111.0...v0.112.0) (2026-09-02)
+
+### Features
+
+* **local:** vendor DuckDB extensions into the binary, starting with fts ([9a8209e](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/9a8209ed2a826d7581b6e055ac34666226497627)) by Michael Usachenko
+* **named:** add search_nodes named query ([b7f1963](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b7f1963f183bba2c59d133384b622fd73f08c127)) by Aaron Algutifan
+
+### Fixes
+
+* **code-graph:** resolve TypeScript method calls through typed class fields ([88757fb](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/88757fb1ae96625ca69bb9309e3da55ee6cc92ce)) by Aryaman Ahluwalia
+
+### Performance
+
+* **query:** emit PREWHERE-under-FINAL and IN-set index cap settings per query ([b05e29f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b05e29ff26084f8acf32e3fa83c2e4882cd224d8)) by Jean-Gabriel Doyon
+
 ## [0.111.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.110.1...v0.111.0) (2026-09-02)
 
 ### Features

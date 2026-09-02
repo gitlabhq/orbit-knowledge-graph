@@ -9,7 +9,7 @@ schema: 93
 
 # Accepted query-DSL shape. Bump when graph_query.schema.json or the
 # compiler's input/validate passes change what queries are accepted.
-query_dsl: 12.1.0
+query_dsl: 12.1.1
 
 # Response envelope of the raw (JSON) formatter.
 raw_output_format: 5.0.1
