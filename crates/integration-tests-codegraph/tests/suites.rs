@@ -305,6 +305,7 @@ yaml_test!(
 yaml_test!(c_resolution, "c/resolution.yaml");
 yaml_test!(c_include_scoping, "c/include_scoping.yaml");
 yaml_test!(c_hardcore, "c/hardcore.yaml");
+yaml_test!(c_declarator_names, "c/declarator_names.yaml");
 yaml_test!(
     c_imported_symbol_fallback_matrix,
     "c/imported_symbol_fallback_matrix.yaml"
@@ -316,6 +317,7 @@ yaml_test!(cpp_cross_language, "cpp/cross_language.yaml");
 yaml_test!(cpp_hardcore, "cpp/hardcore.yaml");
 yaml_test!(cpp_concepts, "cpp/concepts.yaml");
 yaml_test!(cpp_templates, "cpp/templates.yaml");
+yaml_test!(cpp_declarator_names, "cpp/declarator_names.yaml");
 
 // Swift
 yaml_test!(swift_definitions, "swift/definitions.yaml");

@@ -161,8 +161,7 @@ impl LanguageSpec {
             .find(|r| r.condition().is_none_or(|c| c.test(node)))?;
 
         let name = rule
-            .extract()
-            .apply(node)
+            .extract_name(node)
             .or_else(|| rule.default_name.map(|s| s.to_string()))?;
         Some(ScopeMatch {
             name,
