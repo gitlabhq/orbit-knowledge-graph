@@ -40,20 +40,7 @@ workflow:
         RUNNER_LARGE_ARM: saas-linux-medium-arm64
     # Canonical project — original behavior
     - if: $CI_COMMIT_TAG
-    # MRs that only touch crates/code-graph/heavy/ get no pipeline. `changes` has
-    # no negation, so this enumerates the complement of that one directory with
-    # fnmatch character classes. Gaps: a new crate under crates/cod* other than
-    # code-graph, or a new crates/code-graph/h* subdirectory, would also skip CI.
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
-      changes:
-        - "*"
-        - "[!c]*/**/*"
-        - "c[!r]*/**/*"
-        - "crates/[!c]*/**/*"
-        - "crates/c[!o]*/**/*"
-        - "crates/co[!d]*/**/*"
-        - "crates/code-graph/*"
-        - "crates/code-graph/[!h]*/**/*"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_COMMIT_TITLE =~ /^chore\(release\)/
       when: never
     # Security-template jobs can't reference .skip-on-solo-schedule, so solo
@@ -725,11 +712,7 @@ corpus-smoke-test:
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
       changes:
         - crates/orbit-local/**/*
-        # Enumerated instead of crates/code-graph/**/* so the standalone heavy crate never triggers this.
-        - crates/code-graph/*
-        - crates/code-graph/src/**/*
-        - crates/code-graph/assets/**/*
-        - crates/code-graph/treesitter-visit/**/*
+        - crates/code-graph/**/*
         - crates/ontology/**/*
         - crates/duckdb-client/**/*
         - crates/utils/**/*
