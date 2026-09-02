@@ -1239,10 +1239,14 @@ pub(crate) struct DeclaredHop<'a> {
 /// Resolve a `denormalized_joins` entry into its table chain.
 ///
 /// Consecutive hops must share a node. Adjacent tables join on `traversal_path`
-/// when both carry it, so a hop between two namespace anchors is rejected:
-/// a child namespace's path extends its parent's rather than equalling it, and
-/// the equality join would silently produce no rows. At least one table must
-/// be scoped, since the row is filtered on its `traversal_path`.
+/// when both carry it. That equality is what keeps the row on one path for the
+/// security filter, but it also drops any row whose two sides carry different
+/// paths, so the table would silently answer less than the edge chain does.
+/// Every hop must therefore be one where the paths are known equal: a
+/// scope-preserving variant or one reaching a global node (the FK-chain rule),
+/// excluding a hop between two namespaces, whose child path extends the
+/// parent's. At least one table must be scoped, since the row is filtered on
+/// its `traversal_path`.
 pub(crate) fn resolve_denormalized_join(
     ontology: &crate::Ontology,
     name: &str,
@@ -1326,6 +1330,18 @@ pub(crate) fn resolve_denormalized_join(
             return Err(fail(format!(
                 "{} ({} -> {}) links two namespaces, whose traversal_paths differ, so they \
                  cannot share a denormalized row",
+                hop.relationship, hop.from, hop.to
+            )));
+        }
+
+        let global = |kind: &str| ontology.nodes.get(kind).is_some_and(|n| n.global);
+        if !ontology.is_scope_preserving_triple(hop.relationship, hop.from, hop.to)
+            && !global(hop.from)
+            && !global(hop.to)
+        {
+            return Err(fail(format!(
+                "{} ({} -> {}) may cross namespaces; the traversal_path join would silently \
+                 drop those rows, so it cannot be denormalized",
                 hop.relationship, hop.from, hop.to
             )));
         }
@@ -1658,6 +1674,12 @@ mod tests {
         assert!(err(&[hop("REVIEWER", "User", "MergeRequest", true)]).contains("no fk_column"));
         assert!(
             err(&[hop("CONTAINS", "Group", "Project", false)]).contains("links two namespaces")
+        );
+        // CLOSES may point at a work item in another project; the equality join
+        // would drop those rows rather than fail.
+        assert!(
+            err(&[hop("CLOSES", "MergeRequest", "WorkItem", false)])
+                .contains("may cross namespaces")
         );
     }
 
