@@ -1,0 +1,195 @@
+//! Denormalized join DDL, composed from the chain's already-generated tables.
+
+use std::collections::BTreeMap;
+
+use ontology::PartitionConfig;
+use ontology::constants::{DELETED_COLUMN, TRAVERSAL_PATH_COLUMN, VERSION_COLUMN};
+use ontology::denormalized::{DenormalizedJoin, alias, copies, prefix};
+
+use super::{partition_by, system_columns, table_settings};
+use crate::ast::ddl::*;
+
+/// Columns copied under table `i`'s prefix; the anchor's `traversal_path` is emitted once, first.
+fn copied_columns<'a>(
+    join: &DenormalizedJoin,
+    i: usize,
+    table: &'a CreateTable,
+) -> impl Iterator<Item = &'a ColumnDef> + 'a {
+    let is_anchor = i == join.anchor_table();
+    table
+        .columns
+        .iter()
+        .filter(move |c| copies(&c.name) && !(is_anchor && c.name == TRAVERSAL_PATH_COLUMN))
+}
+
+/// Index names get the table prefix so two tables' `idx_state` stay distinct.
+pub(super) fn build_table<'a>(
+    join: &DenormalizedJoin,
+    source_of: impl Fn(usize) -> &'a CreateTable,
+    partition: Option<&PartitionConfig>,
+) -> CreateTable {
+    let mut columns: Vec<ColumnDef> = source_of(join.anchor_table())
+        .columns
+        .iter()
+        .filter(|c| c.name == TRAVERSAL_PATH_COLUMN)
+        .cloned()
+        .collect();
+    let mut indexes = Vec::new();
+    let mut explicit: BTreeMap<String, String> = BTreeMap::new();
+
+    for i in 0..join.tables.len() {
+        let table = source_of(i);
+        columns.extend(copied_columns(join, i, table).map(|c| ColumnDef {
+            name: join.column_for(i, &c.name),
+            ..c.clone()
+        }));
+        indexes.extend(
+            table
+                .indexes
+                .iter()
+                .filter(|idx| copies(&idx.expression))
+                .map(|idx| IndexDef {
+                    name: match idx.name.strip_prefix("idx_") {
+                        Some(rest) => format!("idx_{}{rest}", prefix(i)),
+                        None => format!("{}{}", prefix(i), idx.name),
+                    },
+                    expression: join.column_for(i, &idx.expression),
+                    ..idx.clone()
+                }),
+        );
+        explicit.extend(
+            table
+                .settings
+                .iter()
+                .filter(|s| {
+                    !matches!(
+                        s.key.as_str(),
+                        "index_granularity" | "deduplicate_merge_projection_mode"
+                    )
+                })
+                .map(|s| (s.key.clone(), s.value.clone())),
+        );
+    }
+    columns.extend(system_columns(None));
+
+    let partition_by = partition_by(
+        partition,
+        &join.table,
+        columns.iter().map(|c| c.name.as_str()),
+    );
+    let partitioned = !partition_by.is_empty();
+
+    CreateTable {
+        name: join.table.clone(),
+        columns,
+        indexes,
+        projections: vec![],
+        engine: Engine::replacing_merge_tree(VERSION_COLUMN, DELETED_COLUMN),
+        partition_by,
+        order_by: join.sort_key(),
+        primary_key: None,
+        settings: table_settings(Some(1024), false, partitioned, &explicit),
+        ttl: None,
+    }
+}
+
+/// One view per table; the trigger is the inserted block, the rest are joined outward with `FINAL`.
+pub(super) fn build_views<'a>(
+    join: &DenormalizedJoin,
+    source_of: impl Fn(usize) -> &'a CreateTable,
+) -> Vec<CreateMaterializedView> {
+    let projection = projection(join, &source_of);
+    (0..join.tables.len())
+        .map(|trigger| CreateMaterializedView {
+            name: format!("{}__on_{}", join.table, alias(trigger)),
+            to_table: Some(join.table.clone()),
+            select_query: format!("SELECT {projection} {}", from_clause(join, trigger)),
+            engine: None,
+            order_by: vec![],
+            populate: false,
+        })
+        .collect()
+}
+
+/// Mirrors [`build_table`]'s column order exactly.
+fn projection<'a>(
+    join: &DenormalizedJoin,
+    source_of: &impl Fn(usize) -> &'a CreateTable,
+) -> String {
+    let all = || (0..join.tables.len()).map(alias);
+    let mut cols = vec![format!(
+        "{}.{TRAVERSAL_PATH_COLUMN} AS {TRAVERSAL_PATH_COLUMN}",
+        alias(join.anchor_table())
+    )];
+    for i in 0..join.tables.len() {
+        cols.extend(
+            copied_columns(join, i, source_of(i))
+                .map(|c| format!("{}.{} AS {}", alias(i), c.name, join.column_for(i, &c.name))),
+        );
+    }
+    cols.push(format!(
+        "greatest({}) AS {VERSION_COLUMN}",
+        all()
+            .map(|a| format!("{a}.{VERSION_COLUMN}"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    ));
+    cols.push(format!(
+        "({}) AS {DELETED_COLUMN}",
+        all()
+            .map(|a| format!("{a}.{DELETED_COLUMN}"))
+            .collect::<Vec<_>>()
+            .join(" OR ")
+    ));
+    cols.join(", ")
+}
+
+fn from_clause(join: &DenormalizedJoin, trigger: usize) -> String {
+    let scan = |i: usize, final_: bool| {
+        format!(
+            "{{{}}} AS {}{}",
+            join.tables[i].table,
+            alias(i),
+            if final_ { " FINAL" } else { "" }
+        )
+    };
+    let filter = |i: usize| {
+        join.tables[i]
+            .filter
+            .iter()
+            .map(move |(col, value)| format!("{}.{col} = '{value}'", alias(i)))
+    };
+    // Walking left of the trigger reuses table `i`'s declared link from the other side.
+    let on = |i: usize| {
+        let j = join.tables[i]
+            .join
+            .as_ref()
+            .expect("table 0 is never joined onto");
+        format!(
+            "{}.{} = {}.{}",
+            alias(i - 1),
+            j.prev_column,
+            alias(i),
+            j.this_column
+        )
+    };
+
+    let mut sql = format!("FROM {}", scan(trigger, false));
+    let n = join.tables.len();
+    let outward = (trigger + 1..n)
+        .map(|i| (i, on(i)))
+        .chain((0..trigger).rev().map(|i| (i, on(i + 1))));
+    for (i, link) in outward {
+        let conds: Vec<String> = std::iter::once(link).chain(filter(i)).collect();
+        sql.push_str(&format!(
+            " INNER JOIN {} ON {}",
+            scan(i, true),
+            conds.join(" AND ")
+        ));
+    }
+    let where_parts: Vec<String> = filter(trigger).collect();
+    if !where_parts.is_empty() {
+        sql.push_str(&format!(" WHERE {}", where_parts.join(" AND ")));
+    }
+    sql
+}

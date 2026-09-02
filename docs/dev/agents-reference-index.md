@@ -31,6 +31,7 @@ Canonical locations for files, schemas, configs, and tools in the knowledge-grap
 | Query corpus (categorized YAML) | `fixtures/queries/corpus/` (smoke-tested in CI: `corpus_smoke`) |
 | Graph DDL (ClickHouse, versioned) | `config/graph.sql` |
 | Graph DDL (ClickHouse, persistent) | `config/graph_persistent.sql` (durable unversioned tables + materialized views created once at boot) |
+| Denormalized joins (`settings.denormalized_joins` in `schema.yaml`) | `crates/ontology/src/denormalized.rs` (table chain, column contract), `crates/ontology/src/loading/mod.rs` (`resolve_denormalized_join`), `crates/query-engine/compiler/src/passes/codegen/ddl/denormalized.rs` (table and feeding views composed from the source tables' generated DDL); design in `docs/design-documents/querying/graph_engine.md` |
 | Refreshable-view MiniJinja SQL templates | `config/ontology/sql/*.sql.j2` (ClickHouse SELECT templates rendered from the schema version and ontology-derived graph table metadata) |
 | Pinned versions | `config/versions.yaml` (flat `key: value`; `schema` u32 bumped via `mise schema:bump`; `query_dsl`, `raw_output_format`, `goon_output_format` semvers enforced by `scripts/check-pinned-version.sh`; `duckdb` release; `gitlab_system_note_actions` upstream SHA; embedded at compile time as `orbit_versions::VERSIONS`) |
 | Graph DDL (local DuckDB) | Generated at runtime from ontology via `generate_local_tables()` + `duckdb_ddl` |
