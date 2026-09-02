@@ -2,3 +2,7 @@
 //!
 //! Build from this directory with plain `cargo build`; nothing in the root
 //! workspace, CI, or the release image depends on this crate.
+
+pub fn spike_marker() -> &'static str {
+    "ci.skip push option"
+}
