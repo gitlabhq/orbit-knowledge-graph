@@ -16,7 +16,6 @@ const DEFAULT_BASE: &str = "origin/main";
 
 const FINGERPRINT_REPO_PATH: &str = "config/schema-migrations.fingerprint.yaml";
 const VERSIONS_REPO_PATH: &str = "config/versions.yaml";
-const SCHEMA_KEY: &str = "schema";
 
 const REMEDIATION: &str = "Run `mise schema:bump` to record the change and re-snapshot.";
 
@@ -30,10 +29,6 @@ fn ledger_path() -> PathBuf {
 
 fn fingerprint_path() -> PathBuf {
     config_dir().join(migrations::FINGERPRINT_FILE)
-}
-
-fn versions_path() -> PathBuf {
-    PathBuf::from(env!("VERSIONS_FILE"))
 }
 
 fn current_fingerprints(ontology: &Ontology) -> Fingerprints {
@@ -63,37 +58,23 @@ fn read_ledger() -> Result<MigrationLedger> {
     MigrationLedger::parse(&content).map_err(|e| anyhow!(e))
 }
 
-fn read_schema_version() -> Result<u32> {
-    let path = versions_path();
-    let content =
-        fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
-    parse_schema_version(&content)
-        .with_context(|| format!("{} must pin `{SCHEMA_KEY}: <u32>`", path.display()))
-}
-
-fn parse_schema_version(versions: &str) -> Result<u32> {
-    Ok(orbit_versions::parse(versions)?.schema)
-}
-
-/// Rewrites only the `schema:` line so comments and other pins are untouched.
 fn write_schema_version(version: u32) -> Result<()> {
-    let path = versions_path();
-    let content = fs::read_to_string(&path)?;
-    let rewritten: String = content
-        .lines()
-        .map(|l| {
-            if l.starts_with(&format!("{SCHEMA_KEY}:")) {
-                format!("{SCHEMA_KEY}: {version}\n")
-            } else {
-                format!("{l}\n")
-            }
-        })
-        .collect();
-    fs::write(&path, rewritten).with_context(|| format!("writing {}", path.display()))
+    let path = env!("VERSIONS_FILE");
+    let content = fs::read_to_string(path)?;
+    let current = format!("\nschema: {}\n", orbit_versions::VERSIONS.schema);
+    fs::write(
+        path,
+        content.replace(&current, &format!("\nschema: {version}\n")),
+    )
+    .with_context(|| format!("writing {path}"))
 }
 
 fn schema_version_at(base: &str) -> Option<u32> {
-    parse_schema_version(&git_show(base, VERSIONS_REPO_PATH)?).ok()
+    Some(
+        orbit_versions::parse(&git_show(base, VERSIONS_REPO_PATH)?)
+            .ok()?
+            .schema,
+    )
 }
 
 fn git_show(base: &str, repo_path: &str) -> Option<String> {
@@ -183,7 +164,7 @@ pub fn check(base: Option<String>) -> Result<()> {
         )
     })?;
 
-    let schema_version = read_schema_version()?;
+    let schema_version = orbit_versions::VERSIONS.schema;
     let ledger = read_ledger()?;
 
     migrations::verify_snapshot(&ontology, &current, &committed, &ledger, schema_version)
@@ -218,7 +199,7 @@ fn check_under_declaration(
     }
 
     let base_version: u32 = schema_version_at(base)
-        .ok_or_else(|| anyhow!("could not read {SCHEMA_KEY} from {base}:{VERSIONS_REPO_PATH}"))?;
+        .ok_or_else(|| anyhow!("could not read {base}:{VERSIONS_REPO_PATH}"))?;
     // A gap would leave an entry-less version, which the migration path treats
     // as a full rebuild; one MR bumps exactly one version.
     if schema_version != base_version + 1 {
@@ -313,7 +294,7 @@ pub fn bump(
         }
     };
 
-    let working_version = read_schema_version()?;
+    let working_version = orbit_versions::VERSIONS.schema;
     let base_ref = base.unwrap_or_else(|| DEFAULT_BASE.to_string());
     let base_version = schema_version_at(&base_ref);
 
@@ -326,7 +307,7 @@ pub fn bump(
                 true
             } else {
                 bail!(
-                    "could not read {SCHEMA_KEY} from {base_ref}:{VERSIONS_REPO_PATH} to decide bump vs amend; \
+                    "could not read {base_ref}:{VERSIONS_REPO_PATH} to decide bump vs amend; \
                      pass --new or --amend"
                 );
             }
@@ -419,7 +400,7 @@ fn format_set(values: &BTreeSet<String>) -> String {
 
 /// First-time snapshot: write the fingerprint file without bumping.
 fn write_initial_snapshot(ontology: &Ontology, current: &Fingerprints) -> Result<()> {
-    let version = read_schema_version()?;
+    let version = orbit_versions::VERSIONS.schema;
     let ledger = read_ledger()?;
     ledger.validate(ontology, version).map_err(|e| anyhow!(e))?;
     fs::write(fingerprint_path(), current.render()).context("writing fingerprint snapshot")?;
