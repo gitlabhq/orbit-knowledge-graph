@@ -69,9 +69,9 @@ use orchestrator::Trigger;
 use orchestrator::dispatch::{CodeBackfill, NamespaceIndexingDispatch};
 use orchestrator::max_deliveries::MaxDeliveriesReconciler;
 use orchestrator::scheduled::{
-    CodeBackfillSweep, CodeStaleSweep, EdgeTombstoneCollapse, GlobalDispatcher,
-    MigrationCompletionChecker, NamespaceDeletionScheduler, NamespaceDispatcher, Scheduled,
-    StaleEdgeReconciliation, TableCleanup,
+    CodeBackfillSweep, CodeStaleSweep, GlobalDispatcher, MigrationCompletionChecker,
+    NamespaceDeletionScheduler, NamespaceDispatcher, Scheduled, StaleEdgeReconciliation,
+    TableCleanup,
 };
 use orchestrator::scheduled::{ScheduledTask, ScheduledTaskMetrics};
 use orchestrator::siphon::{CodeIndexingTaskRoute, EnabledNamespacesRoute, Route, Siphon};
@@ -370,13 +370,6 @@ pub async fn run_dispatcher(
             ontology,
             metrics.clone(),
             config.schedule.tasks.table_cleanup.clone(),
-        )),
-        Box::new(EdgeTombstoneCollapse::new(
-            config.graph.build_client(),
-            ontology,
-            checkpoint_store.clone(),
-            metrics.clone(),
-            config.schedule.tasks.edge_tombstone_collapse.clone(),
         )),
         Box::new(NamespaceDeletionScheduler::new(
             deletion_store,

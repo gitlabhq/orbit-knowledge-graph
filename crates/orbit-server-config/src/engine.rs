@@ -592,40 +592,6 @@ impl Default for TableCleanupConfig {
     }
 }
 
-/// Deletes edge tombstones left by code reindexes so retired edges leave variable-depth traversal.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[schemars(deny_unknown_fields)]
-pub struct EdgeTombstoneCollapseConfig {
-    #[serde(flatten)]
-    pub schedule: ScheduleConfiguration,
-    /// How far back the first run, which has no cursor yet, looks for reindexed scopes.
-    #[serde(default = "default_edge_tombstone_lookback_secs")]
-    pub lookback_secs: u64,
-    /// Most tombstoned keys one run deletes per edge table; a run that finds more keeps its cursor.
-    #[serde(default = "default_edge_tombstone_max_keys_per_run")]
-    pub max_keys_per_run: usize,
-}
-
-fn default_edge_tombstone_lookback_secs() -> u64 {
-    60 * 60
-}
-
-fn default_edge_tombstone_max_keys_per_run() -> usize {
-    100_000
-}
-
-impl Default for EdgeTombstoneCollapseConfig {
-    fn default() -> Self {
-        Self {
-            schedule: ScheduleConfiguration {
-                cron: Some("0 */15 * * * *".into()),
-            },
-            lookback_secs: default_edge_tombstone_lookback_secs(),
-            max_keys_per_run: default_edge_tombstone_max_keys_per_run(),
-        }
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct NamespaceDeletionSchedulerConfig {
     #[serde(flatten)]
@@ -704,8 +670,6 @@ pub struct ScheduledTasksConfiguration {
     pub code_backfill: CodeBackfillSweepConfig,
     #[serde(default)]
     pub table_cleanup: TableCleanupConfig,
-    #[serde(default)]
-    pub edge_tombstone_collapse: EdgeTombstoneCollapseConfig,
     #[serde(default)]
     pub namespace_deletion: NamespaceDeletionSchedulerConfig,
     #[serde(default)]
@@ -902,10 +866,6 @@ mod tests {
         assert_eq!(
             tasks.table_cleanup.schedule.cron.as_deref(),
             Some("0 0 3 * * 0")
-        );
-        assert_eq!(
-            tasks.edge_tombstone_collapse.schedule.cron.as_deref(),
-            Some("0 */15 * * * *")
         );
         assert_eq!(
             tasks.namespace_deletion.schedule.cron.as_deref(),
