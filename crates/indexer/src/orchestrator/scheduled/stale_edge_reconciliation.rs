@@ -150,7 +150,7 @@ impl StaleEdgeReconciliation {
         pending_namespaces: &[i64],
     ) -> Result<(), TaskError> {
         self.graph
-            .query(&build_tombstone_statement(group, pending_namespaces))
+            .insert_query(&build_tombstone_statement(group, pending_namespaces))
             .param("cursor", cursor)
             .execute()
             .await

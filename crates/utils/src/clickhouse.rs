@@ -143,6 +143,49 @@ impl ParamBindings {
     }
 }
 
+pub fn render_arrow_sql_literal(
+    array: &arrow::array::ArrayRef,
+    row: usize,
+) -> Result<String, String> {
+    use arrow::array::{Array, Int64Array, LargeStringArray, StringArray};
+    use arrow::datatypes::DataType;
+
+    if array.is_null(row) {
+        return Err(format!(
+            "null value at row {row} in a {:?} sort key column",
+            array.data_type()
+        ));
+    }
+    let downcast_failed = || format!("column is not a {:?}", array.data_type());
+    let value = match array.data_type() {
+        DataType::Utf8 => Value::String(
+            array
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .ok_or_else(downcast_failed)?
+                .value(row)
+                .to_string(),
+        ),
+        DataType::LargeUtf8 => Value::String(
+            array
+                .as_any()
+                .downcast_ref::<LargeStringArray>()
+                .ok_or_else(downcast_failed)?
+                .value(row)
+                .to_string(),
+        ),
+        DataType::Int64 => Value::from(
+            array
+                .as_any()
+                .downcast_ref::<Int64Array>()
+                .ok_or_else(downcast_failed)?
+                .value(row),
+        ),
+        other => return Err(format!("unsupported sort key type {other:?}")),
+    };
+    Ok(render_value(&value))
+}
+
 pub fn render_value(value: &Value) -> String {
     fn quote(s: &str) -> String {
         format!("'{}'", s.replace('\'', "''"))

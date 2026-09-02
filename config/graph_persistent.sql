@@ -13,3 +13,11 @@ ORDER BY (logical_table, top_level_namespace, snapshot_date)
 TTL snapshot_date + INTERVAL 400 DAY
 SETTINGS allow_experimental_replacing_merge_with_cleanup = 1;
 
+CREATE TABLE IF NOT EXISTS tombstone_scopes (
+    traversal_path String CODEC(ZSTD(1)),
+    written_at DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(Delta(8), ZSTD(1))
+) ENGINE = MergeTree
+ORDER BY (written_at, traversal_path)
+TTL written_at + INTERVAL 7 DAY
+SETTINGS allow_experimental_replacing_merge_with_cleanup = 1;
+

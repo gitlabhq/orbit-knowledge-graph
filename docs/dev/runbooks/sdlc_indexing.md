@@ -295,3 +295,27 @@ A deletion is a tombstone: the row is re-inserted with `_deleted = true` and a b
 ```sql
 OPTIMIZE TABLE `<gkg-database>`.gl_project FINAL CLEANUP;
 ```
+
+### Edge tombstone collapse
+
+Variable-depth traversal reads edge tables without FINAL. A retired edge therefore stays visible in k-hop paths until its rows are physically gone. The `maintenance.edge_tombstone_collapse` task closes that gap. Every 15 minutes it:
+
+1. Reads the traversal paths that received edge tombstones since its cursor. Two sources feed this. The Arrow writer appends to `tombstone_scopes` whenever an edge batch carries `_deleted = true` rows (the SDLC ETL path). A code reindex writes `code_indexing_checkpoint` after it tombstones stale code edges.
+2. For each edge table, selects the keys under those paths whose newest row is a tombstone. The select is pruned by `traversal_path`, the leading sort-key column, so it never scans the table.
+3. Deletes those keys with a `DELETE ... WHERE (keys) IN ((...), (...))` statement made only of literals. ClickHouse re-parses a stored delete on replay, so a subquery or `UNION` in the predicate wedges the mutation queue. A literal list cannot.
+4. Saves its cursor once every table drained. A run that hits `max_keys_per_run` on a table keeps the cursor and drains the rest on later runs.
+
+Stale-edge reconciliation and namespace deletion tombstone through SQL statements and leave no scope row. This task does not collapse them. FINAL and `argMax` reads hide them at once; only variable-depth traversal sees them, and the durable fix for that read path is #1223.
+
+### Recovering a wedged mutation queue
+
+ClickHouse stores a `DELETE` as a mutation command and re-parses it on replay. A command it cannot replay blocks every later mutation on that table. Two known signatures:
+
+- `... IN (SELECT ...)` or `UNION` in the command. This comes from an ad-hoc `DELETE`; the collapse task only builds literal lists.
+- `Query tree is too big. Maximum: 500000`. ClickHouse concatenates all pending commands between two part versions into one statement on replay. Tens of thousands of stacked single-key deletes (the 0.108.1 per-call path) exceeded the analyzer cap.
+
+Kill the stuck mutations. The collapse task re-issues its own on the next run:
+
+```sql
+KILL MUTATION WHERE database = '<gkg-database>' AND table = 'gl_edge' AND is_done = 0;
+```

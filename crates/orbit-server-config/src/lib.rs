@@ -29,10 +29,10 @@ pub use billing::{BillingConfig, QuotaConfig};
 pub use clickhouse::{ClickHouseConfiguration, ConfigurationError, ProfilingConfig};
 pub use engine::{
     CodeBackfillSweepConfig, CodeIndexingPipelineConfig, CodeIndexingTaskHandlerConfig,
-    DatalakeRetryConfig, EngineConfigError, EngineConfiguration, EntityHandlerConfig,
-    GlobalDispatcherConfig, HandlersConfiguration, IndexerModule, MigrationCompletionConfig,
-    NamespaceDeletionSchedulerConfig, NamespaceDispatcherConfig, ScheduleConfig,
-    ScheduleConfiguration, ScheduledTasksConfiguration, SiphonRouterConfig,
+    DatalakeRetryConfig, EdgeTombstoneCollapseConfig, EngineConfigError, EngineConfiguration,
+    EntityHandlerConfig, GlobalDispatcherConfig, HandlersConfiguration, IndexerModule,
+    MigrationCompletionConfig, NamespaceDeletionSchedulerConfig, NamespaceDispatcherConfig,
+    ScheduleConfig, ScheduleConfiguration, ScheduledTasksConfiguration, SiphonRouterConfig,
     StaleEdgeReconciliationConfig, SubscriptionConfig, TableCleanupConfig,
 };
 pub use features::{Feature, FeatureScope, FeaturesConfig};
