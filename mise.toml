@@ -99,7 +99,7 @@ run = "cargo build --release"
 description = "Build the crates"
 
 [tasks."build:cli"]
-run = "cargo xtask rerank-bundle && cargo build --bin orbit --release --features duckdb-client/bundled"
+run = "cargo xtask rerank-bundle; cargo build --bin orbit --release --features duckdb-client/bundled"
 description = "Build the CLI (fetches the ask reranker model once)"
 
 [tasks.test]

@@ -36,7 +36,7 @@ impl CrossEncoder {
             .entry(path.to_string())
             .or_insert_with(|| std::fs::read_to_string(self.root.join(path)).ok());
         if let Some(content) = content {
-            for (_, line) in super::slice_lines(content, start, row.end_line, PASSAGE_LINES) {
+            for (_, line) in slice_lines(content, start, row.end_line, PASSAGE_LINES) {
                 text.push('\n');
                 text.extend(line.trim().chars().take(PASSAGE_LINE_CHARS));
             }
@@ -76,4 +76,55 @@ fn bundled() -> Result<orbit_rerank::Reranker> {
 #[cfg(not(orbit_reranker_bundle))]
 fn bundled() -> Result<orbit_rerank::Reranker> {
     anyhow::bail!("no reranker embedded in this build; run `cargo xtask rerank-bundle` and rebuild")
+}
+
+fn slice_lines(
+    content: &str,
+    start: usize,
+    end_line: i64,
+    max_lines: usize,
+) -> Vec<(usize, String)> {
+    if start == 0 {
+        return Vec::new();
+    }
+    let last = usize::try_from(end_line)
+        .ok()
+        .filter(|&e| e >= start)
+        .unwrap_or(start)
+        .min(start + max_lines - 1);
+    content
+        .lines()
+        .enumerate()
+        .skip(start - 1)
+        .take_while(|(i, _)| *i < last)
+        .map(|(i, text)| (i + 1, text.to_string()))
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::slice_lines;
+
+    const CONTENT: &str = "l1\nl2\nl3\nl4\nl5\nl6";
+
+    fn numbers(content: &str, start: usize, end_line: i64, max_lines: usize) -> Vec<usize> {
+        slice_lines(content, start, end_line, max_lines)
+            .into_iter()
+            .map(|(n, _)| n)
+            .collect()
+    }
+
+    #[test]
+    fn slice_lines_edge_cases() {
+        assert!(numbers(CONTENT, 0, 5, 4).is_empty());
+        assert!(numbers(CONTENT, 10, 12, 4).is_empty());
+        assert_eq!(numbers(CONTENT, 3, 1, 4), vec![3]);
+        assert_eq!(numbers(CONTENT, 2, -1, 4), vec![2]);
+        assert_eq!(numbers(CONTENT, 2, 4, 10), vec![2, 3, 4]);
+        assert_eq!(numbers(CONTENT, 1, 100, 2), vec![1, 2]);
+        assert_eq!(
+            slice_lines(CONTENT, 2, 3, 4),
+            vec![(2, "l2".to_string()), (3, "l3".to_string())]
+        );
+    }
 }
