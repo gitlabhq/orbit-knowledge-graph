@@ -33,7 +33,6 @@ const DOWNLOAD_LIMIT: u64 = 64 * 1024 * 1024;
 
 fn main() {
     println!("cargo:rerun-if-changed={}", env!("LOCKFILE"));
-    println!("cargo:rerun-if-changed={}", env!("VERSIONS_FILE"));
     let duckdb_version = orbit_versions::VERSIONS.duckdb.as_str();
     assert_lockfile_matches_pin(duckdb_version);
 

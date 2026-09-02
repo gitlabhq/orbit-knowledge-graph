@@ -333,7 +333,7 @@ migration-ledger-check:
     - git fetch origin "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" --depth=1
     - bash ./scripts/check-migration-ledger.sh "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
 
-response-schema-version-check:
+pinned-version-check:
   stage: lint
   image: alpine:latest
   tags:
@@ -344,33 +344,7 @@ response-schema-version-check:
   script:
     - apk add --no-cache git bash
     - git fetch origin "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" --depth=1
-    - bash ./scripts/check-pinned-version.sh raw_output_format "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
-
-goon-format-version-check:
-  stage: lint
-  image: alpine:latest
-  tags:
-    - saas-linux-medium-amd64
-  extends:
-    - .mr-only-rules
-  needs: []
-  script:
-    - apk add --no-cache git bash
-    - git fetch origin "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" --depth=1
-    - bash ./scripts/check-pinned-version.sh goon_output_format "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
-
-query-dsl-version-check:
-  stage: lint
-  image: alpine:latest
-  tags:
-    - saas-linux-medium-amd64
-  extends:
-    - .mr-only-rules
-  needs: []
-  script:
-    - apk add --no-cache git bash
-    - git fetch origin "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" --depth=1
-    - bash ./scripts/check-pinned-version.sh query_dsl "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
+    - bash ./scripts/check-pinned-version.sh "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
 
 skill-version-bump-check:
   stage: lint

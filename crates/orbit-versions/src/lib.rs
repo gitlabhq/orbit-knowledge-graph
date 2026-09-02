@@ -17,11 +17,11 @@ pub struct Versions {
 }
 
 pub static VERSIONS: LazyLock<Versions> =
-    LazyLock::new(|| parse(include_str!(env!("VERSIONS_FILE"))).unwrap());
+    LazyLock::new(|| parse(include_str!(env!("VERSIONS_FILE"))).expect("config/versions.yaml"));
 
 /// Parses any revision's `versions.yaml` text, e.g. `git show` output.
 pub fn parse(yaml: &str) -> Result<Versions, serde_saphyr::Error> {
-    serde_saphyr::from_str_with_options(yaml, serde_saphyr::options! { strict_booleans: true })
+    serde_saphyr::from_str(yaml)
 }
 
 #[cfg(test)]

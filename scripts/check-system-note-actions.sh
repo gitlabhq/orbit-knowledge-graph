@@ -46,7 +46,7 @@ fetch_rails_src() {
             "$raw_url"; then
         echo "WARNING: could not fetch $raw_url after retries (non-fatal)" >&2
         echo "         Network unavailable, rate-limited, or commit SHA no longer accessible." >&2
-        echo "         If this persists, verify the '# Pinned:' SHA in $ACTIONS_FILE is reachable." >&2
+        echo "         If this persists, verify the gitlab_system_note_actions SHA in config/versions.yaml is reachable." >&2
         return 1
     fi
 }

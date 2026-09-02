@@ -20,10 +20,8 @@ fn validate_migration_ledger() {
     let config_dir = std::path::PathBuf::from(env!("CONFIG_DIR"));
     let ledger_path = config_dir.join(ontology::migrations::LEDGER_FILE);
     let fingerprint_path = config_dir.join(ontology::migrations::FINGERPRINT_FILE);
-    let version_path = std::path::PathBuf::from(env!("VERSIONS_FILE"));
     println!("cargo:rerun-if-changed={}", ledger_path.display());
     println!("cargo:rerun-if-changed={}", fingerprint_path.display());
-    println!("cargo:rerun-if-changed={}", version_path.display());
     println!("cargo:rerun-if-changed={}/ontology", config_dir.display());
 
     let ontology = ontology::Ontology::load_embedded()

@@ -62,6 +62,9 @@ fn write_schema_version(version: u32) -> Result<()> {
     let path = env!("VERSIONS_FILE");
     let content = fs::read_to_string(path)?;
     let current = format!("\nschema: {}\n", orbit_versions::VERSIONS.schema);
+    if !content.contains(&current) {
+        bail!("{path} has no `schema:` line matching the compiled-in version");
+    }
     fs::write(
         path,
         content.replace(&current, &format!("\nschema: {version}\n")),

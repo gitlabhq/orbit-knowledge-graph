@@ -18,7 +18,7 @@ keys, and explicit `SETTINGS` entries that need to be emitted into the generated
 
 This file covers ClickHouse DDL versioning only. The query **response format** is
 versioned separately as the `raw_output_format` semver pin in `config/versions.yaml` and
-enforced by `scripts/check-pinned-version.sh raw_output_format`. See
+enforced by `scripts/check-pinned-version.sh`. See
 [ADR 004](decisions/004_unified_response_schema.md) for the response format contract.
 
 ### The `schema` pin in `config/versions.yaml`
