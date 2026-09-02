@@ -143,10 +143,6 @@ impl ParamBindings {
     }
 }
 
-/// Renders one cell of an Arrow column as a ClickHouse SQL literal, reusing
-/// [`render_value`]'s quoting so callers share one escaping convention. Errors on
-/// a null or unsupported type rather than silently emitting `0`/`''`, which would
-/// target the wrong key.
 pub fn render_arrow_sql_literal(
     array: &arrow::array::ArrayRef,
     row: usize,
@@ -192,9 +188,7 @@ pub fn render_arrow_sql_literal(
 
 pub fn render_value(value: &Value) -> String {
     fn quote(s: &str) -> String {
-        // ClickHouse reads backslash escapes inside a string literal, so a raw
-        // backslash must be doubled before quotes are escaped.
-        format!("'{}'", s.replace('\\', "\\\\").replace('\'', "''"))
+        format!("'{}'", s.replace('\'', "''"))
     }
 
     match value {
@@ -312,14 +306,12 @@ mod tests {
         use arrow::array::{ArrayRef, Int64Array, StringArray};
         use std::sync::Arc;
 
-        let strings: ArrayRef = Arc::new(StringArray::from(vec![Some("a'b"), None, Some(r"a\b")]));
+        let strings: ArrayRef = Arc::new(StringArray::from(vec![Some("a'b"), None]));
         assert_eq!(render_arrow_sql_literal(&strings, 0).unwrap(), "'a''b'");
-        assert_eq!(render_arrow_sql_literal(&strings, 2).unwrap(), r"'a\\b'");
         assert!(
             render_arrow_sql_literal(&strings, 1)
                 .unwrap_err()
-                .contains("null"),
-            "a null sort key value must error, not render as empty"
+                .contains("null")
         );
 
         let ints: ArrayRef = Arc::new(Int64Array::from(vec![7_i64]));

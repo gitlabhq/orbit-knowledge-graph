@@ -576,91 +576,53 @@ impl Default for CodeBackfillSweepConfig {
     }
 }
 
-/// A scheduled sweep that physically removes ReplacingMergeTree tombstones
-/// (`_deleted = true`) that reads already hide. The edge instance sweeps edge
-/// tables on a tight cadence with a small bounded window; the weekly instance is
-/// an unbounded backstop over every table.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[schemars(deny_unknown_fields)]
-pub struct TombstoneSweepConfig {
+pub struct TableCleanupConfig {
     #[serde(flatten)]
     pub schedule: ScheduleConfiguration,
-    /// The oldest `_version` a run reaches back to, measured from now. It caps
-    /// every run's scan (a run never reads more than roughly one lookback of
-    /// history) and, on the first run or after a gap, is the seed floor. Must
-    /// exceed the sweep cadence so consecutive windows overlap. The weekly
-    /// backstop sets this so large its first pass is effectively unbounded; the
-    /// tight edge instance keeps it small to stay off the big edge tables' full
-    /// scan. Older tombstones are left for the weekly backstop.
-    #[serde(default = "default_tombstone_lookback_secs")]
-    pub lookback_secs: u64,
-    /// Backpressure valve: caps how many tombstoned keys one run may collapse,
-    /// bounding the number of delete mutations a single pass can enqueue per
-    /// table. A run that finds more keys leaves the checkpoint in place and drains
-    /// the remainder on later runs.
-    #[serde(default = "default_tombstone_max_keys_per_run")]
-    pub max_keys_per_run: usize,
-    /// Byte budget for one flat-literal `DELETE` statement. The key list is packed
-    /// into statements that stay under this, mirroring the graph client's
-    /// `max_query_size` session setting (a DELETE is parsed from raw bytes).
-    #[serde(default = "default_tombstone_max_query_size_bytes")]
-    pub max_query_size_bytes: usize,
-    /// Traversal paths per scoped key-select on the tight edge instance. The
-    /// select's `LIMIT 1 BY` sorts the union of all scoped edges, so its cost is
-    /// super-linear in the batch size; keeping the batch small (measured ~3 s at
-    /// ~50 scopes vs ~50 s at ~200 on production) keeps each statement cheap. A run
-    /// with more scopes iterates chunks within the per-run key budget. Unused by
-    /// the weekly backstop, which scans a `_version` window.
-    #[serde(default = "default_tombstone_max_scopes_per_query")]
-    pub max_scopes_per_query: usize,
 }
 
-fn default_tombstone_lookback_secs() -> u64 {
+impl Default for TableCleanupConfig {
+    fn default() -> Self {
+        Self {
+            schedule: ScheduleConfiguration {
+                cron: Some("0 0 3 * * 0".into()),
+            },
+        }
+    }
+}
+
+/// Deletes edge tombstones left by code reindexes so retired edges leave variable-depth traversal.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct EdgeTombstoneCollapseConfig {
+    #[serde(flatten)]
+    pub schedule: ScheduleConfiguration,
+    /// How far back the first run, which has no cursor yet, looks for reindexed scopes.
+    #[serde(default = "default_edge_tombstone_lookback_secs")]
+    pub lookback_secs: u64,
+    /// Most tombstoned keys one run deletes per edge table; a run that finds more keeps its cursor.
+    #[serde(default = "default_edge_tombstone_max_keys_per_run")]
+    pub max_keys_per_run: usize,
+}
+
+fn default_edge_tombstone_lookback_secs() -> u64 {
     60 * 60
 }
 
-fn default_tombstone_max_keys_per_run() -> usize {
+fn default_edge_tombstone_max_keys_per_run() -> usize {
     100_000
 }
 
-fn default_tombstone_max_query_size_bytes() -> usize {
-    10 * 1024 * 1024
-}
-
-fn default_tombstone_max_scopes_per_query() -> usize {
-    50
-}
-
-impl TombstoneSweepConfig {
-    pub fn lookback(&self) -> chrono::TimeDelta {
-        chrono::TimeDelta::seconds(self.lookback_secs as i64)
-    }
-}
-
-fn default_table_cleanup_config() -> TombstoneSweepConfig {
-    TombstoneSweepConfig {
-        schedule: ScheduleConfiguration {
-            cron: Some("0 0 3 * * 0".into()),
-        },
-        // Effectively unbounded: the first weekly pass reaches back to ~the epoch
-        // to reclaim pre-existing tombstones, then the checkpoint carries it
-        // forward at the weekly cadence.
-        lookback_secs: 3650 * 24 * 60 * 60,
-        max_keys_per_run: default_tombstone_max_keys_per_run(),
-        max_query_size_bytes: default_tombstone_max_query_size_bytes(),
-        max_scopes_per_query: default_tombstone_max_scopes_per_query(),
-    }
-}
-
-fn default_edge_tombstone_collapse_config() -> TombstoneSweepConfig {
-    TombstoneSweepConfig {
-        schedule: ScheduleConfiguration {
-            cron: Some("0 */15 * * * *".into()),
-        },
-        lookback_secs: default_tombstone_lookback_secs(),
-        max_keys_per_run: default_tombstone_max_keys_per_run(),
-        max_query_size_bytes: default_tombstone_max_query_size_bytes(),
-        max_scopes_per_query: default_tombstone_max_scopes_per_query(),
+impl Default for EdgeTombstoneCollapseConfig {
+    fn default() -> Self {
+        Self {
+            schedule: ScheduleConfiguration {
+                cron: Some("0 */15 * * * *".into()),
+            },
+            lookback_secs: default_edge_tombstone_lookback_secs(),
+            max_keys_per_run: default_edge_tombstone_max_keys_per_run(),
+        }
     }
 }
 
@@ -728,7 +690,7 @@ impl Default for StaleEdgeReconciliationConfig {
 }
 
 /// Typed per-task configuration for all registered scheduled tasks.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 #[schemars(deny_unknown_fields)]
 pub struct ScheduledTasksConfiguration {
@@ -740,32 +702,16 @@ pub struct ScheduledTasksConfiguration {
     pub siphon: SiphonRouterConfig,
     #[serde(default)]
     pub code_backfill: CodeBackfillSweepConfig,
-    #[serde(default = "default_table_cleanup_config")]
-    pub table_cleanup: TombstoneSweepConfig,
-    #[serde(default = "default_edge_tombstone_collapse_config")]
-    pub edge_tombstone_collapse: TombstoneSweepConfig,
+    #[serde(default)]
+    pub table_cleanup: TableCleanupConfig,
+    #[serde(default)]
+    pub edge_tombstone_collapse: EdgeTombstoneCollapseConfig,
     #[serde(default)]
     pub namespace_deletion: NamespaceDeletionSchedulerConfig,
     #[serde(default)]
     pub migration_completion: MigrationCompletionConfig,
     #[serde(default)]
     pub stale_edge_reconciliation: StaleEdgeReconciliationConfig,
-}
-
-impl Default for ScheduledTasksConfiguration {
-    fn default() -> Self {
-        Self {
-            global: GlobalDispatcherConfig::default(),
-            namespace: NamespaceDispatcherConfig::default(),
-            siphon: SiphonRouterConfig::default(),
-            code_backfill: CodeBackfillSweepConfig::default(),
-            table_cleanup: default_table_cleanup_config(),
-            edge_tombstone_collapse: default_edge_tombstone_collapse_config(),
-            namespace_deletion: NamespaceDeletionSchedulerConfig::default(),
-            migration_completion: MigrationCompletionConfig::default(),
-            stale_edge_reconciliation: StaleEdgeReconciliationConfig::default(),
-        }
-    }
 }
 
 // ── Top-level engine config ──────────────────────────────────────────
@@ -973,21 +919,6 @@ mod tests {
             tasks.stale_edge_reconciliation.schedule.cron.as_deref(),
             Some("0 */30 * * * *")
         );
-    }
-
-    #[test]
-    fn tombstone_sweep_lookback_exceeds_its_cadence() {
-        let tasks = ScheduledTasksConfiguration::default();
-        for sweep in [&tasks.table_cleanup, &tasks.edge_tombstone_collapse] {
-            let cadence = chrono::TimeDelta::from_std(sweep.schedule.interval_hint())
-                .expect("cadence fits a TimeDelta");
-            assert!(
-                sweep.lookback() > cadence,
-                "a run that lands inside the lookback window must always see a tombstone \
-                 created since the last run; lookback {:?} cadence {cadence:?}",
-                sweep.lookback()
-            );
-        }
     }
 
     #[test]

@@ -9,9 +9,17 @@ pub struct DeletionStatement {
     pub sql: String,
 }
 
-/// Builds one `INSERT … SELECT` per namespaced node table and the shared edge
-/// table that tombstones every live row under a namespace's traversal path
-/// (`_deleted = true`, `_version = now64(6)`).
+/// Builds `INSERT INTO ... SELECT` statements that soft-delete all rows for a
+/// namespace across every ontology-driven table.
+///
+/// For each namespaced node table and the shared edge table, emits:
+/// ```sql
+/// INSERT INTO {prefixed_table} ({sort_key..., _deleted, _version})
+/// SELECT {sort_key..., true, now64(6)}
+/// FROM {prefixed_table}
+/// WHERE startsWith(traversal_path, {traversal_path:String})
+///   AND _deleted = false
+/// ```
 pub fn build_deletion_statements(ontology: &ontology::Ontology) -> Vec<DeletionStatement> {
     build_statements(ontology, None)
 }

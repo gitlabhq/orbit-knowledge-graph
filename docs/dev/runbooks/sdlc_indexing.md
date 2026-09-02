@@ -290,34 +290,32 @@ The handler will restart extraction from epoch for that entity type.
 
 ## Graph table maintenance
 
-A deletion is a tombstone: the row is re-inserted with `_deleted = true` and a bumped `_version`, and reads hide it at once via FINAL. No deletion path issues a mutation.
-
-Two scheduled sweeps physically reclaim tombstones with batched flat-literal `DELETE`s (never a subquery or `UNION`, which ClickHouse cannot replay as a stored mutation):
-
-- `maintenance.edge_tombstone_collapse` sweeps edge tables every 15 minutes. Variable-depth traversal scans edges without FINAL, so a retired edge stays queryable in k-hop paths until its row is gone; this sweep bounds that window for code-reindex tombstones. It discovers the scopes a code reindex re-swept from `code_indexing_checkpoint` (rows with `indexed_at` past its cursor) and reclaims their tombstones scoped by `traversal_path` (the leading sort-key column, so the probe is PK-pruned), so a run never scans the multi-billion-row edge tables.
-- `maintenance.table_cleanup` is the weekly backstop over every node and edge table. It scans a `_version` window. Its lookback is effectively unbounded, so its first pass reclaims tombstones that predate the sweep and every class the tight edge instance does not cover; after that the checkpoint carries it forward at the weekly cadence.
-
-Coverage split (do not read the 15-minute cadence as the freshness of all deletes): only **code-reindex** edge tombstones are reclaimed within about one tight interval. The incremental SDLC ETL (CDC deletes such as unassign, unlabel, and note deletion), namespace deletion, and stale-edge reconciliation leave no per-path checkpoint trace, so their edge tombstones are reclaimed only by the weekly backstop. The ETL is the highest-volume producer, so most edge tombstones are weekly-bounded — the same behaviour as before the per-call-delete incident. Every version-resolving read (FINAL, `argMax`, hydration) hides all of these instantly; only variable-depth traversal sees them until physically gone, and the durable fix for that is `_version` dedup in the traversal arm (follow-up).
-
-The tight edge instance carries a single cursor on `indexed_at`, re-scanning a small overlap behind it each run for idempotency. When a run truncates at the per-run key budget it does not advance the cursor, so the next run re-discovers the unswept scopes; the cursor never jumps forward past a scope it has not reclaimed. The weekly backstop reaches back by at most its lookback (or to its checkpoint, whichever is more recent). Both delete up to a per-run key budget (draining the rest on later runs) and record progress in the `checkpoint` table. Tune both under `schedule.tasks` (see the server configuration runbook).
-
-To reclaim one table immediately:
+A deletion is a tombstone: the row is re-inserted with `_deleted = true` and a bumped `_version`, and reads hide it at once via FINAL. No deletion path issues a mutation. To physically reclaim tombstoned rows from a table on disk:
 
 ```sql
 OPTIMIZE TABLE `<gkg-database>`.gl_project FINAL CLEANUP;
 ```
 
+### Edge tombstone collapse
+
+Variable-depth traversal reads edge tables without FINAL. A retired edge therefore stays visible in k-hop paths until its rows are physically gone. The `maintenance.edge_tombstone_collapse` task closes that gap for code reindexes. Every 15 minutes it:
+
+1. Reads `code_indexing_checkpoint` for the traversal paths a code reindex wrote since its cursor.
+2. For each edge table, selects the keys under those paths whose newest row is a tombstone. The select is pruned by `traversal_path`, the leading sort-key column, so it never scans the table.
+3. Deletes those keys with a `DELETE ... WHERE (keys) IN ((...), (...))` statement made only of literals. ClickHouse re-parses a stored delete on replay, so a subquery or `UNION` in the predicate wedges the mutation queue. A literal list cannot.
+4. Saves its cursor once every table drained. A run that hits `max_keys_per_run` on a table keeps the cursor and drains the rest on later runs.
+
+Tombstones from other producers (SDLC CDC deletes, namespace deletion, stale-edge reconciliation) are not collapsed by this task. FINAL and `argMax` reads hide them at once; only variable-depth traversal sees them, and the durable fix for that read path is #1223.
+
 ### Recovering a wedged mutation queue
 
-ClickHouse stores a `DELETE` as a mutation command and re-parses it on replay, so a bad command wedges the table's mutation queue and every later mutation behind it. Two signatures, both recovered by killing the poisoned mutations:
+ClickHouse stores a `DELETE` as a mutation command and re-parses it on replay. A command it cannot replay blocks every later mutation on that table. Two known signatures:
 
-- `... IN (SELECT ...)` or `UNION` in the command — a subquery or `UNION` cannot replay as a stored mutation. The sweeps only build flat literal tuple lists, so this comes from an ad-hoc `DELETE`.
-- `Query tree is too big. Maximum: 500000` — ClickHouse concatenates all pending commands between two part versions into one statement on replay, and the accumulated batch blew the analyzer's query-tree cap. This came from the 0.108.1 per-call-delete backlog (tens of thousands of stacked single-key deletes), which the batched sweep replaces.
+- `... IN (SELECT ...)` or `UNION` in the command. This comes from an ad-hoc `DELETE`; the collapse task only builds literal lists.
+- `Query tree is too big. Maximum: 500000`. ClickHouse concatenates all pending commands between two part versions into one statement on replay. Tens of thousands of stacked single-key deletes (the 0.108.1 per-call path) exceeded the analyzer cap.
 
-Recover by killing the stuck mutations on the table; the sweep re-issues its own on the next run:
+Kill the stuck mutations. The collapse task re-issues its own on the next run:
 
 ```sql
 KILL MUTATION WHERE database = '<gkg-database>' AND table = 'gl_edge' AND is_done = 0;
 ```
-
-The sweeps do not reach this cap: each run issues only a handful of flat-literal `DELETE`s (bounded by `max_keys_per_run` and chunked under `max_query_size_bytes`), so the batch ClickHouse concatenates on replay stays far under the analyzer's query-tree limit.

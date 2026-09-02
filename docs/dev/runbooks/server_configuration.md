@@ -265,8 +265,8 @@ Distributed locking via NATS KV ensures only one dispatcher instance runs each t
 | Namespace sweep | `schedule.tasks.namespace-sweep.cron` | `0 0 * * * *` (hourly) | Re-dispatches every enabled namespace; backstops migration backfill and missed windows |
 | Code task dispatch | `schedule.tasks.code-indexing-task.cron` | `0 */1 * * * *` (every minute) | Consumes Siphon CDC push events |
 | Code backfill | `schedule.tasks.code-backfill.cron` | `0 */1 * * * *` (every minute) | Backfills newly enabled namespaces |
-| Tombstone backstop | `schedule.tasks.table-cleanup.cron` | `0 0 3 * * 0` (weekly, Sunday 03:00 UTC) | Weekly flat-literal reclaim over every node and edge table; unbounded first pass, then checkpoint-forward |
-| Edge tombstone collapse | `schedule.tasks.edge-tombstone-collapse.cron` | `0 */15 * * * *` (every 15 minutes) | Physically reclaims edge-table tombstones on a small bounded window; the tight cadence bounds how long a retired edge stays visible to variable-depth traversal |
+| Table cleanup | `schedule.tasks.table-cleanup.cron` | `0 0 3 * * 0` (weekly, Sunday 03:00 UTC) | Runs `APPLY DELETED MASK` on every graph table to physically remove lightweight-deleted rows |
+| Edge tombstone collapse | `schedule.tasks.edge-tombstone-collapse.cron` | `0 */15 * * * *` (every 15 minutes) | Deletes edge tombstones left by code reindexes so retired edges leave variable-depth traversal |
 | Namespace deletion | `schedule.tasks.namespace-deletion.cron` | `0 0 3 * * *` (daily 03:00 UTC) | Schedules and executes namespace deletions |
 | Migration completion | `schedule.tasks.migration-completion.cron` | `0 */1 * * * *` (every minute) | Detects completed schema migrations |
 
@@ -276,18 +276,20 @@ every later tick queries Siphon changes since that checkpoint, however old it is
 The hourly namespace sweep re-dispatches every enabled namespace regardless of
 recent Siphon activity, backstopping migration backfill and missed windows.
 
-Both sweeps are idempotent. The tight edge sweep discovers reindexed scopes from
-`code_indexing_checkpoint` and probes the edge tables by `traversal_path`, so it
-never scans them; it selects at most `max_scopes_per_query` scopes per statement
-(the `LIMIT 1 BY` cost is super-linear in the batch), iterating chunks within the
-key budget. The weekly backstop scans a `_version` lookback window
-(`lookback_secs`, must exceed the cadence). Each deletes up to `max_keys_per_run`
-keys (draining the rest on later runs), packs the keys into `DELETE`s bounded by
-`max_query_size_bytes`, and records progress in the `checkpoint` table. A failed
-or skipped run is safe: the next run resumes from the checkpoint. Alert on
-`gkg.scheduler.task.errors{task="maintenance.table_cleanup"}` and
-`{task="maintenance.edge_tombstone_collapse"}`; each sweep logs a failed table
-and moves on.
+`APPLY DELETED MASK` is idempotent. A failed or skipped run is safe — the next
+run picks up all outstanding masks. Alert on
+`gkg.scheduler.task.errors{task="maintenance.table_cleanup"}`; the task logs a
+failed table and moves on.
+
+The edge tombstone collapse is checkpoint-driven and idempotent. It finds the
+traversal paths a code reindex wrote to `code_indexing_checkpoint` since its
+cursor, then deletes the tombstoned edge keys under those paths. It has two
+knobs. `lookback_secs` (default 3600) bounds how far the very first run looks
+back. `max_keys_per_run` (default 100000) caps the keys deleted per edge table
+per run. A run that hits the cap keeps its cursor and drains the rest next run. Alert on
+`gkg.scheduler.task.errors{task="maintenance.edge_tombstone_collapse"}`. See the
+SDLC indexing runbook for what this task covers and how to recover a wedged
+mutation queue.
 
 ### Code dispatch task settings
 
@@ -656,6 +658,8 @@ schedule:
       cron: "0 0 3 * * 0"
     edge-tombstone-collapse:
       cron: "0 */15 * * * *"
+      lookback_secs: 3600
+      max_keys_per_run: 100000
     namespace-deletion:
       cron: "0 0 3 * * *"
     migration-completion:

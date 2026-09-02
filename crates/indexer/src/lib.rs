@@ -69,9 +69,9 @@ use orchestrator::Trigger;
 use orchestrator::dispatch::{CodeBackfill, NamespaceIndexingDispatch};
 use orchestrator::max_deliveries::MaxDeliveriesReconciler;
 use orchestrator::scheduled::{
-    CodeBackfillSweep, CodeStaleSweep, GlobalDispatcher, MigrationCompletionChecker,
-    NamespaceDeletionScheduler, NamespaceDispatcher, Scheduled, StaleEdgeReconciliation,
-    TombstoneSweep,
+    CodeBackfillSweep, CodeStaleSweep, EdgeTombstoneCollapse, GlobalDispatcher,
+    MigrationCompletionChecker, NamespaceDeletionScheduler, NamespaceDispatcher, Scheduled,
+    StaleEdgeReconciliation, TableCleanup,
 };
 use orchestrator::scheduled::{ScheduledTask, ScheduledTaskMetrics};
 use orchestrator::siphon::{CodeIndexingTaskRoute, EnabledNamespacesRoute, Route, Siphon};
@@ -365,21 +365,16 @@ pub async fn run_dispatcher(
             ),
             config.schedule.tasks.code_backfill.clone(),
         )),
-        Box::new(TombstoneSweep::for_all_tables(
+        Box::new(TableCleanup::new(
             graph,
             ontology,
-            Arc::new(checkpoint::ClickHouseCheckpointStore::new(Arc::new(
-                config.graph.build_client(),
-            ))),
             metrics.clone(),
             config.schedule.tasks.table_cleanup.clone(),
         )),
-        Box::new(TombstoneSweep::for_edge_tables(
+        Box::new(EdgeTombstoneCollapse::new(
             config.graph.build_client(),
             ontology,
-            Arc::new(checkpoint::ClickHouseCheckpointStore::new(Arc::new(
-                config.graph.build_client(),
-            ))),
+            checkpoint_store.clone(),
             metrics.clone(),
             config.schedule.tasks.edge_tombstone_collapse.clone(),
         )),
