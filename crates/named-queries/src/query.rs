@@ -10,6 +10,7 @@ use crate::{NamedQueryError, invalid};
 
 const BINDING_KEY: &str = "$binding";
 const PARAM_KEY: &str = "$param";
+const PARAM_KEY_PREFIX: &str = "$param:";
 const CURRENT_USER_ID: &str = "current_user_id";
 
 #[derive(Debug, Clone, Copy)]
@@ -258,9 +259,17 @@ impl NamedQuery {
                 if let Some(kind) = kind {
                     *value = self.resolve_placeholder(kind, map, ctx)?;
                 } else {
-                    for nested in map.values_mut() {
-                        self.substitute(nested, ctx)?;
+                    let mut rekeyed = Map::with_capacity(map.len());
+                    for (key, mut nested) in std::mem::take(map) {
+                        self.substitute(&mut nested, ctx)?;
+                        let key = self.resolve_key(&key, ctx)?;
+                        if rekeyed.insert(key.clone(), nested).is_some() {
+                            return Err(self.invalid(format!(
+                                "parameter key `{key}` collides with another key in the same object"
+                            )));
+                        }
                     }
+                    *map = rekeyed;
                 }
             }
             Value::Array(items) => {
@@ -271,6 +280,26 @@ impl NamedQuery {
             _ => {}
         }
         Ok(())
+    }
+
+    fn resolve_key(&self, key: &str, ctx: &mut Substitution) -> Result<String, NamedQueryError> {
+        let Some(name) = key.strip_prefix(PARAM_KEY_PREFIX) else {
+            return Ok(key.to_string());
+        };
+        if !self.declares(Placeholder::Param, name) {
+            return Err(self.invalid(format!(
+                "key uses undeclared parameter `{name}`; declare it under `parameters:`"
+            )));
+        }
+        let Some(resolved) = ctx.resolve(Placeholder::Param, name) else {
+            return Err(self.invalid(format!("missing value for parameter `{name}`")));
+        };
+        match resolved {
+            Value::String(s) => Ok(s),
+            other => Err(self.invalid(format!(
+                "parameter `{name}` is used as an object key so it must be a string, got {other}"
+            ))),
+        }
     }
 
     fn resolve_placeholder(
@@ -418,6 +447,63 @@ query:
             .render(&values(), &query.example_parameters())
             .expect("render succeeds");
         assert_eq!(rendered, r#"{"entity":"User","node_ids":[1]}"#);
+    }
+
+    const VALID_WITH_KEY_PARAM: &str = r#"
+name: q
+description: A query.
+parameters:
+  field:
+    schema: { type: string, pattern: "^[a-z_]+$" }
+    example: name
+  text:
+    schema: { type: string, minLength: 3 }
+    example: abc
+query:
+  filters:
+    "$param:field": { contains: { $param: text } }
+"#;
+
+    #[test]
+    fn render_substitutes_parameter_used_as_object_key() {
+        let query = parse(VALID_WITH_KEY_PARAM).expect("key usage counts as using the parameter");
+        let rendered = query
+            .render(
+                &values(),
+                &params(json!({"field": "full_path", "text": "gitlab"})),
+            )
+            .expect("render succeeds");
+        assert_eq!(
+            rendered,
+            r#"{"filters":{"full_path":{"contains":"gitlab"}}}"#
+        );
+    }
+
+    #[test]
+    fn key_parameter_rejects_undeclared_non_string_and_colliding_keys() {
+        let undeclared = VALID_WITH_KEY_PARAM.replace(
+            "  field:\n    schema: { type: string, pattern: \"^[a-z_]+$\" }\n    example: name\n",
+            "",
+        );
+        let err = parse(&undeclared).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("key uses undeclared parameter `field`"),
+            "{err}"
+        );
+
+        let non_string = VALID_WITH_KEY_PARAM
+            .replace(
+                "schema: { type: string, pattern: \"^[a-z_]+$\" }",
+                "schema: { type: integer }",
+            )
+            .replace("example: name", "example: 7");
+        let err = parse(&non_string).unwrap_err();
+        assert!(err.to_string().contains("must be a string"), "{err}");
+
+        let colliding = VALID_WITH_KEY_PARAM.replace("  filters:\n", "  filters:\n    name: 1\n");
+        let err = parse(&colliding).unwrap_err();
+        assert!(err.to_string().contains("collides"), "{err}");
     }
 
     #[test]
