@@ -1,7 +1,7 @@
 # integration-tests
 
-Integration tests for the compiler and gkg-server query/redaction pipeline. This crate
-exists to break the dependency cycle: it depends on `gkg-server`, `compiler`, and
+Integration tests for the compiler and orbit-server query/redaction pipeline. This crate
+exists to break the dependency cycle: it depends on `orbit-server`, `compiler`, and
 `integration-testkit` without any of those needing to depend on each other.
 
 ## Structure

@@ -59,7 +59,7 @@ GKG delegates all authorization to Rails via gRPC bidi streaming. Rails signs a 
 
 On the Rails side (in `~/refs/gitlab`), look under `ee/lib/analytics/knowledge_graph/` for JWT signing, authorization context, and the gRPC client. Batch authorization logic is in `app/services/authz/`.
 
-On the GKG side, auth validation lives in `crates/gkg-server/src/auth/`, the redaction protocol in `crates/gkg-server/src/redaction/`, and the query pipeline has authorization and redaction stages.
+On the GKG side, auth validation lives in `crates/orbit-server/src/auth/`, the redaction protocol in `crates/orbit-server/src/redaction/`, and the query pipeline has authorization and redaction stages.
 
 Things that must hold true:
 

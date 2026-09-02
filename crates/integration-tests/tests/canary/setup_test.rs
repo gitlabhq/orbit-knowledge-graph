@@ -1,5 +1,5 @@
 use arrow::array::UInt64Array;
-use gkg_utils::arrow::ArrowUtils;
+use orbit_utils::arrow::ArrowUtils;
 
 use crate::common::{GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL};
 use integration_testkit::{TestContext, run_subtests, run_subtests_shared, t};

@@ -14,7 +14,7 @@ class Application
   end
 
   def run
-    puts "Starting Knowledge Graph Test Application"
+    puts "Starting Orbit Test Application"
     
     # Demonstrate user creation
     create_sample_users

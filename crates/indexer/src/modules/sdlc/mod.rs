@@ -24,9 +24,9 @@ use crate::topic::{
 };
 use crate::types::Event;
 use datalake::{Datalake, DatalakeQuery};
-use gkg_server_config::{IndexerModule, SubscriptionConfig};
 use handler::entity::EntityHandler;
 use metrics::SdlcMetrics;
+use orbit_server_config::{IndexerModule, SubscriptionConfig};
 use pipeline::Pipeline;
 use tracing::info;
 
@@ -241,7 +241,7 @@ mod tests {
         );
         assert!(template.contains("(system = true AND _siphon_deleted = false)"));
         assert!(
-            normalized_template.contains("note_id IN (SELECT DISTINCT id FROM _batch) AND startsWith(traversal_path, {traversal_path:String}) GROUP BY note_id HAVING argMax(_siphon_deleted, _siphon_watermark) = false"),
+            normalized_template.contains("note_id IN (SELECT DISTINCT id FROM _batch) AND startsWith(traversal_path, {traversal_path:String}) GROUP BY note_id HAVING argMax(_siphon_deleted, _siphon_replicated_at) = false"),
             "enrichment CTE must prune by page and namespace and drop tombstoned rows: {template}"
         );
         assert!(template.contains("ORDER BY traversal_path, id"));

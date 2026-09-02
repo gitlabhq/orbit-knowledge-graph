@@ -1,0 +1,15 @@
+description: The later replicated row wins when a tombstone and reinsert share a watermark
+
+seed:
+  siphon_users:
+    - { id: 1, email: live@t, username: live, name: Live User, state: active, organization_id: 1, _siphon_replicated_at: "2024-01-20 12:00:00.000002", _siphon_watermark: "2024-01-20 12:00:00.000000", _siphon_deleted: false }
+    - { id: 1, email: deleted@t, username: deleted, name: Deleted User, state: active, organization_id: 1, _siphon_replicated_at: "2024-01-20 12:00:00.000001", _siphon_watermark: "2024-01-20 12:00:00.000000", _siphon_deleted: true }
+
+run: global
+
+expect:
+  nodes:
+    gl_user:
+      count: 1
+      rows:
+        - { id: 1, username: live, _deleted: false }

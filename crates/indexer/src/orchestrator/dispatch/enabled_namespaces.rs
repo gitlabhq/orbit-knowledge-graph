@@ -1,13 +1,13 @@
 use std::sync::LazyLock;
 
-use gkg_utils::traversal_path::TOP_LEVEL_PREFIX_REGEX;
+use orbit_utils::traversal_path::TOP_LEVEL_PREFIX_REGEX;
 
 pub const ENABLED_NAMESPACE_TABLE: &str = "siphon_knowledge_graph_enabled_namespaces";
 
 pub const NAMESPACE_PATHS_TABLE: &str = "namespace_traversal_paths";
 
 static RESOLVED_ENABLED_NAMESPACES_SQL: LazyLock<String> = LazyLock::new(|| {
-    let watermark = ontology::siphon_watermark_column();
+    let version = ontology::siphon_version_column();
     let deleted = ontology::siphon_deleted_column();
     format!(
         "SELECT id AS root_namespace_id, \
@@ -17,7 +17,7 @@ WHERE id IN ( \
 SELECT root_namespace_id \
 FROM {ENABLED_NAMESPACE_TABLE} \
 GROUP BY root_namespace_id, id \
-HAVING argMax({deleted}, {watermark}) = false \
+HAVING argMax({deleted}, {version}) = false \
 ) \
 GROUP BY id \
 HAVING argMax(deleted, version) = false \
@@ -63,7 +63,7 @@ mod tests {
     #[test]
     fn sql_keeps_only_the_latest_state_per_row() {
         let sql = resolved_enabled_namespaces_sql();
-        assert!(sql.contains("HAVING argMax(_siphon_deleted, _siphon_watermark) = false"));
+        assert!(sql.contains("HAVING argMax(_siphon_deleted, _siphon_replicated_at) = false"));
         assert!(sql.contains("GROUP BY root_namespace_id, id"));
         assert!(sql.contains("HAVING argMax(deleted, version) = false"));
     }

@@ -16,35 +16,78 @@
 # note-gated `scope: none` entry, the certified output-neutral escape hatch. A
 # version with no entry is treated as "*", which also makes pruning old entries safe.
 migrations:
+- version: 93
+  scope: "*"
+  note: >-
+    gl_definition drops search_text and token_count; local ranked search now
+    derives a gl_def_doc document table and a DuckDB FTS (BM25) index, and remote text
+    recall is delegated to orbit-next instead of ClickHouse columns
+- version: 92
+  scope: "*"
+  note: >-
+    gl_definition gains search_text and token_count columns (write-time tokenized
+    identifier text for ranked search); code tables re-derive to populate them
+- version: 91
+  scope: "*"
+  note: >-
+    Use _siphon_replicated_at for deterministic Siphon state resolution while
+    preserving _siphon_watermark for incremental windows.
+- version: 90
+  scope: none
+  note: >-
+    serde_yaml was replaced with serde-saphyr; source fingerprints now hash
+    canonical JSON instead of re-rendered YAML. Ontology sources and generated DDL are
+    byte-identical; only the fingerprint algorithm changed.
 - version: 89
   scope: none
-  note: MergeRequestDiffFile extract rewritten from bare INNER JOIN to CTE + IN-list. Output is byte-identical in production because both siphon_merge_request_diff_files and siphon_merge_request_diffs carry the same traversal_path for related records.
+  note: >-
+    MergeRequestDiffFile extract rewritten from bare INNER JOIN to CTE + IN-list.
+    Output is byte-identical in production because both
+    siphon_merge_request_diff_files and siphon_merge_request_diffs carry the same traversal_path for related
+    records.
 - version: 88
   scope: none
-  note: Marks 13 edge mappings mutable so the stale-edge sweep reconciles them. The flag is read only by the sweep's group derivation; extract SQL, transform output and DDL are untouched, so every indexed row is byte-identical.
+  note: >-
+    Marks 13 edge mappings mutable so the stale-edge sweep reconciles them. The
+    flag is read only by the sweep's group derivation; extract SQL, transform output and
+    DDL are untouched, so every indexed row is byte-identical.
 - version: 87
-  scope: '*'
-  note: Project/Group extract collapses its traversal-path join with argMax, so a transferred entity indexes once at its current path instead of once per historical path; rebuild drops the already-written stale-path duplicates.
+  scope: "*"
+  note: >-
+    Project/Group extract collapses its traversal-path join with argMax, so a
+    transferred entity indexes once at its current path instead of once per historical
+    path; rebuild drops the already-written stale-path duplicates.
 - version: 86
-  scope: '*'
-  note: HAS_VULNERABILITY extract switched to LEFT JOINs from _batch so paging keys on driver-row cardinality (#1064); windows skipped by the old INNER JOINs must backfill. Deriver widens a .sql.j2 edge change to '*'.
+  scope: "*"
+  note: "HAS_VULNERABILITY extract switched to LEFT JOINs from _batch so paging keys on driver-row cardinality (#1064); windows skipped by the old INNER JOINs must backfill. Deriver widens a .sql.j2 edge change to '*'."
 - version: 85
   scope: sdlc
   entities:
   - HAS_VULNERABILITY
-  note: New HAS_VULNERABILITY edge (Package->Vulnerability); clone carries every prior table intact and only this edge re-derives.
+  note: >-
+    New HAS_VULNERABILITY edge (Package->Vulnerability); clone carries every prior
+    table intact and only this edge re-derives.
 - version: 84
   scope: none
-  note: isValidUTF8 guard on decoded_sha; a no-op for every value already written (raw-binary SHAs previously failed the decode and produced no row), so no indexed row changes.
+  note: >-
+    isValidUTF8 guard on decoded_sha; a no-op for every value already written
+    (raw-binary SHAs previously failed the decode and produced no row), so no indexed row
+    changes.
 - version: 83
   scope: none
-  note: Source-owned base projections and independent stage compilation preserve all 47 serialized plans byte-identically.
+  note: >-
+    Source-owned base projections and independent stage compilation preserve all 47
+    serialized plans byte-identically.
 - version: 82
   scope: none
-  note: Extract lookups and transform property bindings expand independently from node enrichment_props; graph rows remain byte-identical.
+  note: >-
+    Extract lookups and transform property bindings expand independently from node
+    enrichment_props; graph rows remain byte-identical.
 - version: 81
   scope: none
-  note: MR !1931 pipeline/.sql.j2 restructuring plus indexer.reindex explicit-list unification; DDL and reindex_sources() output byte-identical.
+  note: >-
+    MR !1931 pipeline/.sql.j2 restructuring plus indexer.reindex explicit-list
+    unification; DDL and reindex_sources() output byte-identical.
 - version: 80
-  scope: '*'
+  scope: "*"
   note: ledger introduced; earlier versions implicitly "*"

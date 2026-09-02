@@ -17,7 +17,7 @@ use super::super::types::{
     JsImportKind, JsInvocationSupport, JsModuleInfo,
 };
 use super::cjs::{extract_cjs_exports, extract_cjs_imports};
-use super::dataflow::extract_call_edges;
+use super::dataflow::{extract_call_edges, extract_type_name};
 use super::invocation::{invocation_support_for_js_def_kind, invocation_support_for_symbol};
 use super::patterns::for_each_static_object_property;
 use crate::utils::{MAX_NESTING_DEPTH, exceeds_nesting_cap};
@@ -261,7 +261,7 @@ fn extract_class_members(
     semantic: &oxc::semantic::Semantic,
 ) -> (Vec<JsDef>, Vec<JsClassInfo>) {
     let class_table = semantic.classes();
-    let mut method_defs = Vec::new();
+    let mut member_defs = Vec::new();
     let mut classes = Vec::new();
 
     for (class_id, elements) in class_table.elements.iter_enumerated() {
@@ -303,7 +303,7 @@ fn extract_class_members(
                 continue;
             }
 
-            method_defs.push(make_method(
+            member_defs.push(make_method(
                 element.name.to_string(),
                 ctx.lt.span_to_range(element.span),
                 element.r#static,
@@ -320,7 +320,7 @@ fn extract_class_members(
                 && !method.kind.is_constructor()
                 && let Some(method_name) = method.key.static_name()
             {
-                method_defs.push(make_method(
+                member_defs.push(make_method(
                     method_name.to_string(),
                     ctx.lt.span_to_range(method.span),
                     method.r#static,
@@ -328,13 +328,74 @@ fn extract_class_members(
             }
         }
 
+        member_defs.extend(collect_receiver_type_fields(ctx, class_ast, &class_name));
+
         classes.push(JsClassInfo {
             fqn: class_name,
             extends,
         });
     }
 
-    (method_defs, classes)
+    (member_defs, classes)
+}
+
+/// Collects the class fields whose type annotation gives the resolver the receiver
+/// type it needs to take the middle hop of a `this.field.method()` chain.
+///
+/// The class table holds no type annotations, so the fields are read off the raw
+/// AST. Constructor parameter properties (`constructor(private readonly x: T)`)
+/// declare a field without appearing in the class body, so they count too.
+fn collect_receiver_type_fields(
+    ctx: &Ctx,
+    class_ast: &oxc::ast::ast::Class<'_>,
+    class_name: &str,
+) -> Vec<JsDef> {
+    let make_property = |name: String, range, type_annotation| JsDef {
+        fqn: format!("{class_name}::{name}"),
+        name,
+        kind: JsDefKind::Property {
+            class_fqn: class_name.to_string(),
+        },
+        range,
+        is_exported: false,
+        type_annotation,
+        invocation_support: None,
+    };
+
+    let mut fields = Vec::new();
+    for element in &class_ast.body.body {
+        match element {
+            oxc::ast::ast::ClassElement::PropertyDefinition(property) => {
+                if !property.computed
+                    && let Some(property_name) = property.key.static_name()
+                {
+                    fields.push(make_property(
+                        property_name.to_string(),
+                        ctx.lt.span_to_range(property.span),
+                        extract_type_name(property.type_annotation.as_deref()),
+                    ));
+                }
+            }
+            oxc::ast::ast::ClassElement::MethodDefinition(method)
+                if method.kind.is_constructor() =>
+            {
+                for param in &method.value.params.items {
+                    if param.has_modifier()
+                        && let oxc::ast::ast::BindingPattern::BindingIdentifier(binding) =
+                            &param.pattern
+                    {
+                        fields.push(make_property(
+                            binding.name.to_string(),
+                            ctx.lt.span_to_range(param.span),
+                            extract_type_name(param.type_annotation.as_deref()),
+                        ));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    fields
 }
 
 fn collect_symbol_data(ctx: &Ctx, parsed: &oxc::parser::ParserReturn) -> SymbolExtraction {

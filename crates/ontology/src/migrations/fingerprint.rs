@@ -28,12 +28,13 @@ pub struct Fingerprints {
 
 impl Fingerprints {
     pub fn parse(content: &str) -> Result<Self, String> {
-        serde_yaml::from_str(content).map_err(|e| format!("parsing fingerprint snapshot: {e}"))
+        orbit_utils::yaml::from_str(content)
+            .map_err(|e| format!("parsing fingerprint snapshot: {e}"))
     }
 
     #[must_use]
     pub fn render(&self) -> String {
-        let body = serde_yaml::to_string(self).expect("fingerprints serialize");
+        let body = orbit_utils::yaml::to_string(self).expect("fingerprints serialize");
         format!("{FINGERPRINT_HEADER}{body}")
     }
 
@@ -84,11 +85,12 @@ pub fn embedded_sources() -> BTreeMap<String, String> {
 
 #[must_use]
 fn stable_yaml_hash(content: &str) -> String {
-    match serde_yaml::from_str::<serde_yaml::Value>(content) {
+    match orbit_utils::yaml::from_str::<serde_json::Value>(content) {
         Ok(mut value) => {
             remove_runtime_extract_fields(&mut value);
-            sort_yaml_keys(&mut value);
-            match serde_yaml::to_string(&value) {
+            remove_query_time_annotations(&mut value);
+            sort_json_keys(&mut value);
+            match serde_json::to_string(&value) {
                 Ok(rendered) => sha256_hex(&rendered),
                 Err(_) => sha256_hex(content),
             }
@@ -98,12 +100,12 @@ fn stable_yaml_hash(content: &str) -> String {
 }
 
 fn stable_versioned_schema_hash(content: &str) -> String {
-    let Ok(mut value) = serde_yaml::from_str::<serde_yaml::Value>(content) else {
+    let Ok(mut value) = orbit_utils::yaml::from_str::<serde_json::Value>(content) else {
         return sha256_hex(content);
     };
     remove_auxiliary_schema_settings(&mut value);
-    sort_yaml_keys(&mut value);
-    serde_yaml::to_string(&value)
+    sort_json_keys(&mut value);
+    serde_json::to_string(&value)
         .map(|rendered| sha256_hex(&rendered))
         .unwrap_or_else(|_| sha256_hex(content))
 }
@@ -122,30 +124,26 @@ pub fn sha256_hex(input: &str) -> String {
     out
 }
 
-fn sort_yaml_keys(value: &mut serde_yaml::Value) {
+fn sort_json_keys(value: &mut serde_json::Value) {
     match value {
-        serde_yaml::Value::Mapping(map) => {
-            let mut entries: Vec<(serde_yaml::Value, serde_yaml::Value)> =
+        serde_json::Value::Object(map) => {
+            let mut entries: Vec<(String, serde_json::Value)> =
                 std::mem::take(map).into_iter().collect();
             for (_, v) in &mut entries {
-                sort_yaml_keys(v);
+                sort_json_keys(v);
             }
-            entries.sort_by_key(|(key, _)| serialized_key(key));
+            entries.sort_by(|(a, _), (b, _)| a.cmp(b));
             for (k, v) in entries {
                 map.insert(k, v);
             }
         }
-        serde_yaml::Value::Sequence(seq) => {
+        serde_json::Value::Array(seq) => {
             for v in seq {
-                sort_yaml_keys(v);
+                sort_json_keys(v);
             }
         }
         _ => {}
     }
-}
-
-fn serialized_key(key: &serde_yaml::Value) -> String {
-    serde_yaml::to_string(key).unwrap_or_default()
 }
 
 fn get_diff_keys_between(
@@ -167,57 +165,58 @@ fn get_diff_keys_between(
 }
 
 /// Strip runtime-only pipeline knobs (`extract.partition_count`) so changing them is version-neutral: they affect neither the graph schema nor the extracted data.
-fn remove_runtime_extract_fields(value: &mut serde_yaml::Value) {
-    let serde_yaml::Value::Mapping(root) = value else {
+fn remove_runtime_extract_fields(value: &mut serde_json::Value) {
+    let serde_json::Value::Object(root) = value else {
         return;
     };
-    let Some(serde_yaml::Value::Sequence(pipelines)) =
-        root.get_mut(serde_yaml::Value::String("pipelines".to_string()))
-    else {
+    let Some(serde_json::Value::Array(pipelines)) = root.get_mut("pipelines") else {
         return;
     };
     for pipeline in pipelines {
-        let serde_yaml::Value::Mapping(pipeline) = pipeline else {
+        let serde_json::Value::Object(pipeline) = pipeline else {
             continue;
         };
-        let Some(serde_yaml::Value::Mapping(extract)) =
-            pipeline.get_mut(serde_yaml::Value::String("extract".to_string()))
-        else {
+        let Some(serde_json::Value::Object(extract)) = pipeline.get_mut("extract") else {
             continue;
         };
-        extract.remove(serde_yaml::Value::String("partition_count".to_string()));
+        extract.remove("partition_count");
     }
 }
 
-fn remove_auxiliary_schema_settings(value: &mut serde_yaml::Value) {
-    let serde_yaml::Value::Mapping(schema) = value else {
-        return;
-    };
-    let Some(serde_yaml::Value::Mapping(settings)) =
-        schema.get_mut(serde_yaml::Value::String("settings".to_string()))
-    else {
-        return;
-    };
-    retain_versioned_auxiliary_tables(settings);
-    settings.remove(serde_yaml::Value::String(
-        "refreshable_materialized_views".to_string(),
-    ));
+fn remove_query_time_annotations(value: &mut serde_json::Value) {
+    if let serde_json::Value::Object(root) = value {
+        root.remove("search_weight");
+    }
 }
 
-fn retain_versioned_auxiliary_tables(settings: &mut serde_yaml::Mapping) {
-    let key = serde_yaml::Value::String("auxiliary_tables".to_string());
-    let Some(serde_yaml::Value::Sequence(tables)) = settings.get_mut(&key) else {
+fn remove_auxiliary_schema_settings(value: &mut serde_json::Value) {
+    let serde_json::Value::Object(schema) = value else {
         return;
     };
-    tables.retain(|table| {
-        table
-            .as_mapping()
-            .and_then(|mapping| mapping.get(serde_yaml::Value::String("versioned".to_string())))
-            .and_then(serde_yaml::Value::as_bool)
+    let Some(serde_json::Value::Object(settings)) = schema.get_mut("settings") else {
+        return;
+    };
+    let keys: Vec<String> = settings.keys().cloned().collect();
+    for key in &keys {
+        retain_versioned_entries(settings, key);
+    }
+    settings.remove("refreshable_materialized_views");
+}
+
+fn retain_versioned_entries(settings: &mut serde_json::Map<String, serde_json::Value>, key: &str) {
+    let Some(serde_json::Value::Array(entries)) = settings.get_mut(key) else {
+        return;
+    };
+    let had_entries = !entries.is_empty();
+    entries.retain(|entry| {
+        entry
+            .as_object()
+            .and_then(|mapping| mapping.get("versioned"))
+            .and_then(serde_json::Value::as_bool)
             .unwrap_or(true)
     });
-    if tables.is_empty() {
-        settings.remove(&key);
+    if had_entries && entries.is_empty() {
+        settings.remove(key);
     }
 }
 
@@ -242,6 +241,15 @@ mod tests {
             "pipelines:\n  - name: Job\n    extract:\n      tables: [t]\n      order_by: [id]\n";
         let with = "pipelines:\n  - name: Job\n    extract:\n      tables: [t]\n      order_by: [id]\n      partition_count: 5\n";
         assert_eq!(stable_yaml_hash(without), stable_yaml_hash(with));
+    }
+
+    #[test]
+    fn stable_hash_ignores_search_weight() {
+        let without = "description: calls\ntable: gl_code_edge\n";
+        let with = "description: calls\ntable: gl_code_edge\nsearch_weight: 1.0\n";
+        let retuned = "description: calls\ntable: gl_code_edge\nsearch_weight: 0.3\n";
+        assert_eq!(stable_yaml_hash(without), stable_yaml_hash(with));
+        assert_eq!(stable_yaml_hash(with), stable_yaml_hash(retuned));
     }
 
     #[test]
@@ -284,6 +292,17 @@ mod tests {
         assert_ne!(
             stable_versioned_schema_hash(first),
             stable_versioned_schema_hash(second)
+        );
+    }
+
+    #[test]
+    fn versioned_schema_hash_ignores_unversioned_views() {
+        let empty = "settings:\n  internal_column_prefix: _\n";
+        let with_unversioned = "settings:\n  internal_column_prefix: _\n  materialized_views:\n    - name: sink\n      versioned: false\n      to_table: retention\n      select_query: SELECT 1 FROM system.query_log\n";
+
+        assert_eq!(
+            stable_versioned_schema_hash(empty),
+            stable_versioned_schema_hash(with_unversioned)
         );
     }
 

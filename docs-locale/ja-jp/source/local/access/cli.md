@@ -1,9 +1,9 @@
 ---
-stage: Analytics
-group: Knowledge Graph
+stage: Orbit
+group: Context Systems
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Orbit CLI（orbit）バイナリを使用して、ローカルコードグラフを構築・クエリします。GitLabアカウントやネットワーク接続は不要です。
-title: Orbit CLIでOrbit Localを使用する（`orbit`）
+description: GitLab Orbit CLI（orbit）バイナリを使用して、ローカルコードグラフを構築・クエリします。GitLabアカウントやネットワーク接続は不要です。
+title: GitLab Orbit CLIでGitLab Orbit Localを使用する（`orbit`）
 ---
 
 {{< details >}}
@@ -21,7 +21,7 @@ title: Orbit CLIでOrbit Localを使用する（`orbit`）
 
 {{< /history >}}
 
-Orbit CLI（`orbit`）は、任意のローカルリポジトリのコードグラフを構築し、ローカルのDuckDBファイルに対してクエリを実行します。GitLabへの接続は不要です。
+GitLab Orbit CLI（`orbit`）は、任意のローカルリポジトリのコードグラフを構築し、ローカルのDuckDBファイルに対してクエリを実行します。GitLabへの接続は不要です。
 
 ## インストール {#install}
 
@@ -39,11 +39,11 @@ orbit help
 
 `npm install -g @gitlab/orbit`でnpmからインストールすることもできます。
 
-GitLab CLI（`glab`）をすでに使用している場合は、`glab orbit local --install`でマネージドバイナリをインストールすることもできます。そのバイナリは`orbit`を直接使用するのではなく、`glab orbit local <command>`として実行します。詳細は[glabでOrbit Localを使用する](glab.md)を参照してください。
+GitLab CLI（`glab`）をすでに使用している場合は、`glab orbit local --install`でマネージドバイナリをインストールすることもできます。そのバイナリは`orbit`を直接使用するのではなく、`glab orbit local <command>`として実行します。詳細は[glabでGitLab Orbit Localを使用する](glab.md)を参照してください。
 
 ### ソースからビルドする {#build-from-source}
 
-Orbitにコントリビュートする場合や、未リリースのビルドを実行する場合は、バイナリを自分でコンパイルします。
+GitLab Orbitにコントリビュートする場合や、未リリースのビルドを実行する場合は、バイナリを自分でコンパイルします。
 
 前提条件:
 
@@ -65,7 +65,7 @@ mise run build:cli
 orbit index /path/to/your/repo
 ```
 
-Orbitはリポジトリを解析し、DuckDBグラフを`~/.orbit/graph.duckdb`に書き込みます。複数のリポジトリをインデックス作成できます。各リポジトリはマニフェストテーブル内でプロジェクトIDとブランチによってスコープが設定されます。
+GitLab Orbitはリポジトリを解析し、DuckDBグラフを`~/.orbit/graph.duckdb`に書き込みます。複数のリポジトリをインデックス作成できます。各リポジトリはマニフェストテーブル内でプロジェクトIDとブランチによってスコープが設定されます。
 
 | フラグ | 説明 |
 |------|---------|
@@ -148,17 +148,90 @@ orbit mcp serve
 
 `~/.orbit/graph.duckdb`に対して`run_sql`、`get_graph_schema`、`index`を提供します。クライアントごとの設定については[MCPで接続する](mcp.md)を参照してください。
 
+## AIアシスタントをセットアップする {#set-up-your-ai-assistant}
+
+`orbit setup`は、AIコーディングアシスタントがgrepを使用する前にグラフを参照するよう設定します。設定するアシスタントの名前を指定します。
+
+```shell
+orbit setup claude
+```
+
+サポートされているアシスタントは`claude`、`codex`、`opencode`、`pi`です。デフォルトでは、ガイダンスはリモートのGitLab Orbitグラフを参照します。ローカルグラフを参照するよう変更するには、`--local`を渡します。
+
+```shell
+orbit setup claude --local
+```
+
+### 変更内容 {#what-it-changes}
+
+このコマンドはユーザー自身のファイルを変更します。単独では実行されず、ユーザーが呼び出したときのみ実行されます。
+
+指定したアシスタントごとに、`orbit setup`は以下を実行します。
+
+- `CLAUDE.md`や`AGENTS.md`などのアシスタントの指示ファイルにブロックを追加します。ブロックは`<!-- orbit:setup:begin -->`と`<!-- orbit:setup:end -->`マーカーの間に配置され、マーカーの外側はそのまま保持されます。コマンドを再度実行すると、2つ目のコピーを追加するのではなく、既存のブロックが置き換えられます。
+- アシスタントがサポートしている場合、アシスタントのJSON設定にエントリを追加します。Claude Codeの場合は`settings.json`内の`PreToolUse`フック、OpenCodeの場合はプラグインファイルとその登録です。エントリには`orbit`マーカーが付与され、マーカー付きのエントリのみが置き換えまたは削除されます。
+
+デフォルトでは`~/.claude/CLAUDE.md`などのユーザーグローバル設定に書き込みます。現在のプロジェクトに書き込むには`--project`を渡し、特定のプロジェクトディレクトリを対象にするには`--dir <path>`を渡します。
+
+`orbit setup`が既存のファイルを初めて変更する前に、元のファイルを同じ場所に`<name>.orbit-backup`としてコピーします。元の状態に戻したい場合は、そのコピーを手動で復元してください。既存のバックアップは上書きされないため、コピーには常に`orbit`適用前のバージョンが保持されます。
+
+`--project`の使用には注意が必要です。プロジェクトの指示ファイルは通常バージョン管理にコミットされるため、変更が`git status`に表示され、チームメンバーに影響する可能性があります。デフォルトのユーザーグローバルスコープはユーザー自身にのみ影響します。
+
+### 設定を削除する {#remove-it}
+
+変更を元に戻すには、次のコマンドを実行します。
+
+```shell
+orbit setup claude --remove
+```
+
+これにより、マーカーで区切られたブロックとマーカー付きのJSONエントリが削除され、各ファイルの残りの部分はそのまま保持されます。ファイルに`orbit`エントリのみが含まれていた場合、そのファイルは削除されます。アシスタント名を省略すると、すべてのアシスタントのセットアップが削除されます。バックアップファイルは削除されません。
+
+`orbit setup`によるファイルの変更を避けたい場合は、このコマンドをスキップし、同じ指示ブロックとフックを手動で追加してください。
+
 ## ストレージ {#storage}
 
 グラフは`~/.orbit/graph.duckdb`に保存されます。複数のリポジトリが同じデータベースを共有します。最初からやり直すにはファイルを削除してください。
 
+## CLIを設定する {#configure-the-cli}
+
+`orbit config`は`~/.orbit/settings.json`に保存された設定を読み書きします。保存された設定は以降のすべての実行に適用されます。
+
+```shell
+orbit config list                          # all settings and their saved values
+orbit config get telemetry.enabled         # one setting
+orbit config set telemetry.enabled false   # save a setting
+```
+
+| 設定 | 値 | デフォルト | 説明 |
+|---------|--------|---------|---------|
+| `telemetry.enabled` | `true`、`false` | `true` | CLIが使用状況テレメトリを送信するかどうか。 |
+
+## テレメトリ {#telemetry}
+
+CLIはGitLabプロダクト分析サービスに使用状況イベントを送信し、チームがGitLab Orbitの使用状況を把握できるようにします。各イベントには実行されたコマンドのみが記録され、リポジトリの内容、ファイルパス、クエリテキストは送信されません。テレメトリはデフォルトで有効です。
+
+保存された設定またはCI用の環境変数で無効にできます。
+
+```shell
+orbit config set telemetry.enabled false   # persists for every run
+export ORBIT_TELEMETRY_ENABLED=false        # for CI or one shell
+```
+
+環境変数は保存された設定より優先されます。
+
+| 変数 | 説明 |
+|----------|---------|
+| `ORBIT_TELEMETRY_ENABLED` | `false`でテレメトリを無効化、`true`で有効化します。保存された設定より優先されます。 |
+| `ORBIT_TELEMETRY_COLLECTOR_URL` | テスト用に別のコレクターにイベントを送信します。デフォルトはGitLabコレクターです。 |
+
 ## 課金 {#billing}
 
-Orbit LocalはGitLabクレジットを消費しません。すべての処理はローカルで行われます。
+GitLab Orbit LocalはGitLabクレジットを消費しません。すべての処理はローカルで行われます。
 
 ## 次のステップ {#what-to-try-next}
 
 - [MCPで接続する](mcp.md) - Claude Code、Codex、その他のエージェントをローカルグラフに接続します。
-- [glabでOrbit Localを使用する](glab.md) - `glab orbit local`を通じてCLIを呼び出します。
+- [glabでGitLab Orbit Localを使用する](glab.md) - `glab orbit local`を通じてCLIを呼び出します。
 - [スキーマリファレンス](../../remote/schema.md) - 利用可能なノードタイプとプロパティ。
 - [Cookbook](../../remote/cookbook.md) - 一般的なユースケース向けのコピー＆ペーストクエリ。

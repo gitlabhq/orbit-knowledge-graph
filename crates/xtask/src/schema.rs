@@ -1,5 +1,5 @@
 use anyhow::Result;
-use gkg_server_config::AppConfig;
+use orbit_server_config::AppConfig;
 use schemars::schema_for;
 
 pub fn run(output: Option<std::path::PathBuf>) -> Result<()> {

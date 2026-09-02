@@ -211,7 +211,7 @@ total=2347
 
 `GoonFormatter` lives in `crates/query-engine/formatters/src/goon/`. It implements the `ResultFormatter` trait the same way `GraphFormatter` does: `format(&self, output: &PipelineOutput) -> Value`. For LLM responses it composes `GraphFormatter::build_response(output)` with `goon::encode(&response, &GOON_OUTPUT_FORMAT_VERSION)` and wraps the result in `Value::String`.
 
-Wiring at `crates/gkg-server/src/grpc/service.rs` dispatches statically per request: `req.format == ResponseFormat::Llm` calls `GoonFormatter.format_stamped(&output)`; otherwise `GraphFormatter.format_stamped(&output)`. The result rides the gRPC `ExecuteQueryResult.formatted_text` field with format-name and format-version metadata.
+Wiring at `crates/orbit-server/src/grpc/service.rs` dispatches statically per request: `req.format == ResponseFormat::Llm` calls `GoonFormatter.format_stamped(&output)`; otherwise `GraphFormatter.format_stamped(&output)`. The result rides the gRPC `ExecuteQueryResult.formatted_text` field with format-name and format-version metadata.
 
 The encoder reads every field of `GraphResponse` (audited via parallel sub-agents post-implementation). Fields that travel:
 
@@ -308,4 +308,4 @@ Cross-language parity (Rust encoder vs the Python prototype in `gkg-evals-harnes
 - Encoder source: `crates/query-engine/formatters/src/goon/`
 - Wire version constant: `config/GOON_OUTPUT_FORMAT_VERSION`
 - Response JSON Schema: `config/schemas/query_response.json`
-- Proto: `crates/gkg-server/proto/gkg.proto` (`ResponseFormat::RESPONSE_FORMAT_LLM`)
+- Proto: `crates/orbit-server/proto/orbit.proto` (`ResponseFormat::RESPONSE_FORMAT_LLM`)

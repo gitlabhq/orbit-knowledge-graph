@@ -28,6 +28,10 @@ pub const TARGET_ID_COLUMN: &str = "target_id";
 
 pub const TARGET_KIND_COLUMN: &str = "target_kind";
 
+pub const SOURCE_TAGS_COLUMN: &str = "source_tags";
+
+pub const TARGET_TAGS_COLUMN: &str = "target_tags";
+
 pub const GL_TABLE_PREFIX: &str = "gl_";
 
 pub const EDGE_TABLE: &str = concatcp!(GL_TABLE_PREFIX, "edge");
@@ -42,6 +46,10 @@ use std::sync::LazyLock;
 
 static EMBEDDED_ONTOLOGY: LazyLock<crate::Ontology> =
     LazyLock::new(|| crate::Ontology::load_embedded().expect("embedded ontology must be valid"));
+
+pub fn siphon_version_column() -> &'static str {
+    &EMBEDDED_ONTOLOGY.etl_settings.version
+}
 
 /// Siphon datalake watermark column, derived from `schema.yaml`'s
 /// `settings.etl.default_watermark` at runtime.
@@ -105,6 +113,7 @@ mod tests {
     #[test]
     fn siphon_columns_derived_from_yaml() {
         let ontology = crate::Ontology::load_embedded().expect("embedded ontology must be valid");
+        assert_eq!(siphon_version_column(), ontology.default_version_column());
         assert_eq!(
             siphon_watermark_column(),
             ontology.default_watermark_column()

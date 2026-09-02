@@ -607,8 +607,8 @@ fn schema_unknown_table_exits_with_error() {
         "expected unknown-table error: {stderr}"
     );
     assert!(
-        stderr.contains("Run `orbit schema` to list tables"),
-        "expected suggestion to run orbit schema: {stderr}"
+        stderr.contains("Run `orbit local schema` to list tables"),
+        "expected suggestion to run orbit local schema: {stderr}"
     );
 }
 
@@ -731,7 +731,7 @@ fn skill_serves_bundled_content() {
     assert!(manifest.contains("name: orbit-local"));
     assert!(manifest.contains("references/sql.md"));
     assert!(
-        manifest.contains("orbit skill references/sql.md"),
+        manifest.contains("orbit local skill references/sql.md"),
         "served manifest must tell binary users the version-matched access path"
     );
 
@@ -824,7 +824,7 @@ struct RepoMapFixtureCommand {
 }
 
 fn load_repo_map_fixture() -> RepoMapFixture {
-    serde_yaml::from_str(include_str!("fixtures/repo_map.yaml"))
+    orbit_utils::yaml::from_str(include_str!("fixtures/repo_map.yaml"))
         .expect("invalid fixtures/repo_map.yaml")
 }
 
@@ -957,7 +957,7 @@ fn repo_map_reports_unindexed_commit() {
     let out = repo_map(&repo.path, dd, &["overview"]);
     assert!(!out.status.success());
     let err = String::from_utf8(out.stderr).unwrap();
-    assert!(err.contains("is not indexed") && err.contains("orbit index"));
+    assert!(err.contains("is not indexed") && err.contains("orbit local index"));
 }
 
 /// Two clones at the same commit SHA indexed into one DB must be completely
@@ -1190,6 +1190,27 @@ fn repo_map_omitted_subcommand_runs_overview() {
         omitted_text.lines().next(),
         "omitted subcommand must match explicit overview heading"
     );
+}
+
+#[test]
+fn ask_loads_bundled_extension_in_fresh_data_dir() {
+    let data_dir = tempfile::TempDir::new().unwrap();
+    let repo = create_test_repo();
+    let dd = data_dir.path();
+    assert!(orbit_index(&repo.path, dd));
+
+    let out = orbit_cmd()
+        .args(["ask", "how do we read a file", "--repo"])
+        .arg(&repo.path)
+        .env("ORBIT_DATA_DIR", dd)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "ask failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(String::from_utf8_lossy(&out.stdout).contains("read_file"));
 }
 
 #[test]

@@ -1,0 +1,43 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "setup_modes.schema.json",
+  "title": "Orbit setup mode texts",
+  "description": "Every string `orbit setup` writes that differs between the local graph (`orbit sql`) and the remote Orbit graph (`glab orbit remote`): the managed instruction block, the two hook nudges, and the values filling {{name}} placeholders in assistant templates. Read by crates/orbit-local/src/commands/setup/spec.rs.",
+  "type": "object",
+  "required": ["local", "remote"],
+  "additionalProperties": false,
+  "properties": {
+    "local": { "$ref": "#/definitions/mode" },
+    "remote": { "$ref": "#/definitions/mode" }
+  },
+  "definitions": {
+    "mode": {
+      "type": "object",
+      "required": ["instructions", "nudge_search", "nudge_read"],
+      "additionalProperties": false,
+      "properties": {
+        "instructions": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Markdown spliced into each assistant's instruction file between the orbit:setup markers."
+        },
+        "nudge_search": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Context the hook guard returns for a search tool call."
+        },
+        "nudge_read": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Context the hook guard returns for a source-file read."
+        },
+        "template_vars": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": { "type": ["string", "boolean"] },
+          "description": "Values substituted for {{name}} placeholders in the templates assistants declare. String values reach a shell echo, so they must not contain quotes, backticks, or $(."
+        }
+      }
+    }
+  }
+}

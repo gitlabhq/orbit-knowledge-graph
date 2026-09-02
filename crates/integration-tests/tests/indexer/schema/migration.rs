@@ -16,12 +16,15 @@ use indexer::schema::version::{
 use indexer::testkit::MockLockService;
 use integration_testkit::{TestContext, t};
 use ontology::migrations::MigrationScope;
+use orbit_utils::traversal_path::TraversalPath;
 use query_engine::compiler::{
     DictionarySource, emit_create_table, generate_graph_dictionaries_with_prefix,
     generate_graph_tables_with_prefix,
 };
 
-fn dictionary_source(config: &gkg_server_config::ClickHouseConfiguration) -> DictionarySource<'_> {
+fn dictionary_source(
+    config: &orbit_server_config::ClickHouseConfiguration,
+) -> DictionarySource<'_> {
     DictionarySource {
         database: &config.database,
         user: &config.username,
@@ -826,6 +829,16 @@ impl MigrationScenario {
         scenario
     }
 
+    async fn migrating_from_missing_active() -> Self {
+        let (ctx, ontology, metrics) = setup().await;
+        Self {
+            ctx,
+            ontology,
+            metrics,
+            active_version: *SCHEMA_VERSION - 1,
+        }
+    }
+
     async fn at_new_version() -> Self {
         let (ctx, ontology, metrics) = setup().await;
         let scenario = Self {
@@ -1040,7 +1053,7 @@ impl MigrationScenario {
             self.ctx.config.build_client(),
         )));
         CodeStaleSweep::new(self.ctx.config.build_client(), &table_names, store)
-            .run_for_drained(&["1/100/".to_string()])
+            .run_for_drained(&[TraversalPath::new_unchecked("1/100/")])
             .await
             .expect("sweep failed");
     }
@@ -1100,6 +1113,19 @@ async fn table_local_sdlc_scope_seeds_only_unchanged_checkpoints() {
     scenario
         .assert_surviving_checkpoints(&["ns.100.Job.p1of2", "ns.100.Job.p2of2", "ns.100.Note"])
         .await;
+}
+
+#[tokio::test]
+async fn missing_active_checkpoint_table_falls_back_to_an_empty_checkpoint() {
+    let scenario = MigrationScenario::migrating_from_missing_active().await;
+
+    scenario.migrate(MigrationScope::Code).await;
+    scenario.assert_checkpoint_empty().await;
+
+    let scenario = MigrationScenario::migrating_from_missing_active().await;
+
+    scenario.migrate(sdlc(&["User"])).await;
+    scenario.assert_checkpoint_empty().await;
 }
 
 #[tokio::test]

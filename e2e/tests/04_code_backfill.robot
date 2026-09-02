@@ -1,5 +1,5 @@
 *** Settings ***
-Documentation       Verify code-indexing backfill: create a namespace with Knowledge Graph
+Documentation       Verify code-indexing backfill: create a namespace with Orbit
 ...                 disabled, create two projects under it, push ruby and java fixtures, then
 ...                 enable the namespace and confirm NamespaceCodeBackfillDispatcher resolves
 ...                 every pre-existing project via project_namespace_traversal_paths and
@@ -24,7 +24,7 @@ ${JAVA_FILE_COUNT}      ${8}
 
 
 *** Test Cases ***
-Namespace With Code Is Prepared Without Knowledge Graph Enabled
+Namespace With Code Is Prepared Without Orbit Enabled
     [Documentation]    Create a dedicated group with KG disabled, create ruby- and java-weather
     ...                projects under it, and push their fixtures. Leaving KG disabled ensures
     ...                the upcoming enablement is the only trigger for code indexing — any
@@ -46,15 +46,15 @@ Namespace With Code Is Prepared Without Knowledge Graph Enabled
     Push Fixture To Project    ${java}    ${JAVA_FIXTURE_DIR}
     Set Suite Variable    ${BACKFILL_JAVA_PROJECT}    ${java}
 
-Enabling Knowledge Graph Backfills Code For Existing Projects
-    [Documentation]    Flip Knowledge Graph on for the prepared namespace. The
+Enabling Orbit Backfills Code For Existing Projects
+    [Documentation]    Flip Orbit on for the prepared namespace. The
     ...                knowledge_graph_enabled_namespaces CDC event must reach
     ...                NamespaceCodeBackfillDispatcher, which resolves every project under the
     ...                namespace's traversal path and publishes a CodeIndexingTaskRequest per
     ...                project. Both projects' File nodes should appear with the expected
     ...                fixture cardinalities, proving the backfill path ran end-to-end.
     [Tags]    code-backfill
-    Enable Knowledge Graph    ${BACKFILL_NAMESPACE_ID}
+    Enable Orbit    ${BACKFILL_NAMESPACE_ID}
     Start Indexing Budget    240
     Wait For Node Indexed Within Budget    Group    ${BACKFILL_NAMESPACE_ID}    ${BACKFILL_NAMESPACE_NAME}
 

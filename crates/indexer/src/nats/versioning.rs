@@ -32,7 +32,7 @@ fn sanitize_release(raw: &str) -> String {
 }
 
 fn release_segment() -> String {
-    sanitize_release(gkg_utils::version::get())
+    sanitize_release(orbit_utils::version::get())
 }
 
 pub struct NatsVersioner {
@@ -151,6 +151,15 @@ pub fn code_work_stream_name() -> String {
 pub fn code_work_consumer_name(consumer_name: &str) -> String {
     let versioned_subject =
         NATS_VERSIONER.subject(crate::topic::CODE_INDEXING_TASK_SUBJECT_PATTERN);
+    format!(
+        "{consumer_name}-{}",
+        super::broker::escape_subject_for_durable(&versioned_subject)
+    )
+}
+
+pub fn sdlc_work_consumer_name(consumer_name: &str) -> String {
+    let versioned_subject =
+        NATS_VERSIONER.subject(crate::topic::NAMESPACE_INDEXING_SUBJECT_PATTERN);
     format!(
         "{consumer_name}-{}",
         super::broker::escape_subject_for_durable(&versioned_subject)
@@ -337,6 +346,15 @@ mod tests {
         assert_eq!(
             super::code_work_consumer_name("gkg-indexer"),
             format!("gkg-indexer-v{release}-code-task-indexing-requested-wildcard-wildcard")
+        );
+    }
+
+    #[test]
+    fn sdlc_work_consumer_name_matches_handler_durable() {
+        let release = release_segment();
+        assert_eq!(
+            super::sdlc_work_consumer_name("gkg-indexer"),
+            format!("gkg-indexer-v{release}-sdlc-namespace-indexing-requested-wildcard-wildcard")
         );
     }
 }

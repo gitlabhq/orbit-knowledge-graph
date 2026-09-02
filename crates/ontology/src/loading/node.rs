@@ -753,8 +753,7 @@ fn build_pipeline<R: ReadOntologyFile>(b: BuildPipeline<'_, R>) -> Result<Pipeli
     let query =
         b.extract
             .resolve_query(b.reader, &b.name, b.yaml_path, b.extract.filter.clone())?;
-    // Sql pipelines recover their effective watermark/deleted from the authored
-    // `.sql.j2` in the indexer; here both are always the settings defaults.
+    let version = b.etl_settings.version.clone();
     let watermark = b.etl_settings.watermark.clone();
     let deleted = b.etl_settings.deleted.clone();
     let extract = match b.extract.source_type {
@@ -762,6 +761,7 @@ fn build_pipeline<R: ReadOntologyFile>(b: BuildPipeline<'_, R>) -> Result<Pipeli
             tables: b.extract.tables,
             fields: b.extract.fields,
             order_by: b.extract.order_by,
+            version,
             watermark,
             deleted,
             query,
@@ -1025,6 +1025,7 @@ mod tests {
 
     fn test_etl_settings() -> EtlSettings {
         EtlSettings {
+            version: crate::constants::siphon_version_column().to_string(),
             watermark: crate::constants::siphon_watermark_column().to_string(),
             deleted: crate::constants::siphon_deleted_column().to_string(),
             order_by: vec!["id".to_string()],
@@ -1059,7 +1060,7 @@ mod tests {
     }
 
     fn parse_test_node(yaml: &str) -> Result<NodeEntity, OntologyError> {
-        let node: NodeYaml = serde_yaml::from_str(yaml).unwrap();
+        let node: NodeYaml = orbit_utils::yaml::from_str(yaml).unwrap();
         node.into_entity(
             "TestNode".to_string(),
             "nodes/test/test_node.yaml",

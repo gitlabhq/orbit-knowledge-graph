@@ -1,6 +1,6 @@
 use arrow::record_batch::RecordBatch;
-use gkg_utils::arrow::{AsRecordBatch, ColumnSpec, ColumnType};
 use ontology::{DataType as OntDataType, Ontology};
+use orbit_utils::arrow::{AsRecordBatch, ColumnSpec, ColumnType};
 
 use crate::error::Result;
 
@@ -133,35 +133,31 @@ pub fn convert_v2_graph(
         .expect("local_db.edge_table.name must be configured")
         .to_string();
 
-    let mut edge_rows: Vec<_> = graph
+    let edge_indices: Vec<_> = graph
         .graph
         .edge_indices()
         .filter(|&ei| {
             write_repository_structure
                 || graph.graph[ei].relationship.edge_kind.as_ref() != "CONTAINS"
         })
-        .map(|ei| {
-            let (src, tgt) = graph.graph.edge_endpoints(ei).unwrap();
-            let edge = &graph.graph[ei];
-            EdgeRow {
-                source_id: ids[src.index()],
-                target_id: ids[tgt.index()],
-                edge_kind: edge.relationship.edge_kind.as_ref(),
-                source_node_kind: edge.relationship.source_node.as_ref(),
-                target_node_kind: edge.relationship.target_node.as_ref(),
-            }
-        })
         .collect();
 
-    // Sort edges by low-cardinality columns for better encoding.
-    edge_rows.sort_by(|a, b| {
-        a.edge_kind
-            .cmp(b.edge_kind)
-            .then_with(|| a.source_node_kind.cmp(b.source_node_kind))
-            .then_with(|| a.target_node_kind.cmp(b.target_node_kind))
-    });
-
-    let edge_batch = EdgeRow::to_record_batch(&edge_rows, &edge_specs(ontology), &())?;
+    let edge_batch = orbit_utils::arrow::BatchBuilder::new(
+        &edge_specs(ontology),
+        edge_indices.len(),
+    )?
+    .build(&edge_indices, |&ei, b| {
+        let (src, tgt) = graph.graph.edge_endpoints(ei).unwrap();
+        let edge = &graph.graph[ei];
+        EdgeRow {
+            source_id: ids[src.index()],
+            target_id: ids[tgt.index()],
+            edge_kind: edge.relationship.edge_kind.as_ref(),
+            source_node_kind: edge.relationship.source_node.as_ref(),
+            target_node_kind: edge.relationship.target_node.as_ref(),
+        }
+        .write_row(b, &())
+    })?;
     tables.push((edge_table, edge_batch));
 
     Ok(LocalGraphData { tables })

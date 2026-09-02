@@ -8,22 +8,23 @@ use crate::v2::types::{
     CanonicalDefinition, CanonicalDirectory, CanonicalFile, CanonicalImport, EdgeKind, NodeKind,
     Range, Relationship, containment_relationship,
 };
-use gkg_utils::arrow::{AsRecordBatch, BatchBuilder, ColumnSpec, ColumnType};
+use orbit_utils::arrow::{AsRecordBatch, BatchBuilder, ColumnSpec, ColumnType};
 
 fn common_prefix_len(a: &str, b: &str) -> usize {
     a.bytes().zip(b.bytes()).take_while(|(x, y)| x == y).count()
 }
 use petgraph::graph::{DiGraph, NodeIndex};
-use petgraph::visit::{Bfs, EdgeFiltered};
+use petgraph::visit::{Bfs, EdgeFiltered, VisitMap, Visitable};
 use rustc_hash::{FxHashMap, FxHasher};
 use smallvec::SmallVec;
+use std::collections::VecDeque;
 
 use super::state::{DefinitionRangeIndex, GraphDef, GraphImport, GraphIndexes, StrId, StringPool};
 
 #[derive(Debug, Clone)]
 pub enum GraphNode {
-    Directory(CanonicalDirectory),
-    File(CanonicalFile),
+    Directory(Box<CanonicalDirectory>),
+    File(Box<CanonicalFile>),
     Definition { file_path: Arc<str>, id: DefId },
     Import { file_path: Arc<str>, id: ImportId },
 }
@@ -46,14 +47,14 @@ impl GraphNode {
 
     pub fn as_directory(&self) -> Option<&CanonicalDirectory> {
         match self {
-            GraphNode::Directory(d) => Some(d),
+            GraphNode::Directory(d) => Some(d.as_ref()),
             _ => None,
         }
     }
 
     pub fn as_file(&self) -> Option<&CanonicalFile> {
         match self {
-            GraphNode::File(f) => Some(f),
+            GraphNode::File(f) => Some(f.as_ref()),
             _ => None,
         }
     }
@@ -204,6 +205,20 @@ pub struct CodeGraph {
     pub rules: Option<std::sync::Arc<super::rules::ResolutionRules>>,
 }
 
+/// Distinct tag sets plus one index per node. The ontology declares a closed set
+/// of values, so a `Vec<String>` per node would repeat a few hundred sets.
+pub struct NodeTags {
+    sets: Vec<Vec<String>>,
+    by_node: Vec<u32>,
+}
+
+impl NodeTags {
+    #[inline]
+    pub fn get(&self, idx: NodeIndex) -> &[String] {
+        &self.sets[self.by_node[idx.index()] as usize]
+    }
+}
+
 impl CodeGraph {
     pub fn new() -> Self {
         Self {
@@ -243,6 +258,33 @@ impl CodeGraph {
     #[inline]
     pub fn str(&self, id: StrId) -> &str {
         self.strings.get(id)
+    }
+
+    /// Pre-size every growable container from counts the caller already knows,
+    /// so the construction loop never pays amortized doubling.
+    pub fn reserve_for(&mut self, files: usize, definitions: usize, imports: usize) {
+        self.graph.reserve_exact_nodes(
+            (files + definitions + imports).saturating_sub(self.graph.node_count()),
+        );
+        self.defs.reserve_exact(definitions);
+        self.imports.reserve_exact(imports);
+    }
+
+    /// Drop what only the resolver read, before the converter holds the graph
+    /// across the Arrow build. Sealing stops the pool deduping, so call it once.
+    pub fn release_resolution_state(&mut self) {
+        self.indexes.drop_resolution_indexes();
+        self.strings.seal();
+        self.graph.shrink_to_fit_nodes();
+        self.graph.shrink_to_fit_edges();
+    }
+
+    /// Drop what the edge build no longer reads. Only valid once the definition
+    /// and import batches and the tag cache exist.
+    pub fn release_node_payloads(&mut self) {
+        self.defs = Vec::new();
+        self.imports = Vec::new();
+        self.strings = StringPool::new();
     }
 
     pub fn add_file(
@@ -307,14 +349,14 @@ impl CodeGraph {
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_default();
 
-        let file_node = self.graph.add_node(GraphNode::File(CanonicalFile {
+        let file_node = self.graph.add_node(GraphNode::File(Box::new(CanonicalFile {
             path: relative_path.clone(),
             name: file_name,
             extension: extension.to_string(),
             language,
             size: file_size,
             reason,
-        }));
+        })));
         if let Some(fi) = &mut self.indexes.file_index {
             fi.insert(relative_path.clone(), file_node);
         }
@@ -455,6 +497,11 @@ impl CodeGraph {
             },
         );
 
+        let mut bfs: Bfs<NodeIndex, _> = Bfs {
+            stack: VecDeque::new(),
+            discovered: extends_only.visit_map(),
+        };
+
         for idx in self.graph.node_indices() {
             if !matches!(self.graph[idx], GraphNode::Definition { .. }) {
                 continue;
@@ -467,8 +514,12 @@ impl CodeGraph {
                 continue;
             }
 
+            extends_only.reset_map(&mut bfs.discovered);
+            bfs.discovered.visit(idx);
+            bfs.stack.clear();
+            bfs.stack.push_front(idx);
+
             let mut chain: SmallVec<[NodeIndex; 8]> = SmallVec::new();
-            let mut bfs = Bfs::new(&extends_only, idx);
             bfs.next(&extends_only);
             while let Some(ancestor) = bfs.next(&extends_only) {
                 chain.push(ancestor);
@@ -510,10 +561,10 @@ impl CodeGraph {
                     .unwrap_or_else(|| dir_path.clone());
                 let idx = self
                     .graph
-                    .add_node(GraphNode::Directory(CanonicalDirectory {
+                    .add_node(GraphNode::Directory(Box::new(CanonicalDirectory {
                         path: dir_path.clone(),
                         name,
-                    }));
+                    })));
                 dir_index.insert(dir_path.clone(), idx);
 
                 if let Some(parent_dir) = Path::new(dir_path).parent() {
@@ -844,20 +895,21 @@ impl CodeGraph {
     /// Look up a named property on a graph node. Returns `None` when
     /// the property is unknown or its value is empty (e.g. extension-less
     /// files like Makefile).
-    fn node_property(&self, idx: NodeIndex, property: &str) -> Option<String> {
+    fn node_property(&self, idx: NodeIndex, property: &str) -> Option<std::borrow::Cow<'_, str>> {
+        use std::borrow::Cow;
         let value = match &self.graph[idx] {
             GraphNode::File(f) => match property {
-                "extension" => Some(f.extension.clone()),
-                "language" => Some(f.language_name().to_string()),
-                "reason" => Some(f.reason.to_string()),
+                "extension" => Some(Cow::Borrowed(f.extension.as_str())),
+                "language" => Some(Cow::Borrowed(f.language_name())),
+                "reason" => Some(Cow::Owned(f.reason.to_string())),
                 _ => None,
             },
             GraphNode::Definition { id, .. } => match property {
-                "definition_type" => Some(self.defs[id.0 as usize].definition_type.to_string()),
+                "definition_type" => Some(Cow::Borrowed(self.defs[id.0 as usize].definition_type)),
                 _ => None,
             },
             GraphNode::Import { id, .. } => match property {
-                "import_type" => Some(self.imports[id.0 as usize].import_type.to_string()),
+                "import_type" => Some(Cow::Borrowed(self.imports[id.0 as usize].import_type)),
                 _ => None,
             },
             GraphNode::Directory(_) => None,
@@ -865,35 +917,67 @@ impl CodeGraph {
         value.filter(|v| !v.is_empty())
     }
 
-    /// Returns a vec indexed by `NodeIndex`, so callers can look up tags by the
-    /// same indices used in the edge list. `tag_properties` maps node kind
-    /// name (e.g. `"File"`) to `(tag_key, property_name)` pairs, typically from
-    /// `ontology.denormalized_properties()`.
+    /// `tag_properties` maps node kind name (e.g. `"File"`) to
+    /// `(tag_key, property_name)` pairs, from `ontology.denormalized_properties()`.
     pub fn build_node_tags(
         &self,
         tag_properties: &std::collections::HashMap<String, Vec<(String, String)>>,
-    ) -> Vec<Vec<String>> {
-        self.graph
-            .node_indices()
-            .map(|idx| {
-                let node_kind = match &self.graph[idx] {
-                    GraphNode::File(_) => "File",
-                    GraphNode::Definition { .. } => "Definition",
-                    GraphNode::Import { .. } => "ImportedSymbol",
-                    GraphNode::Directory(_) => return Vec::new(),
-                };
-                let Some(props) = tag_properties.get(node_kind) else {
-                    return Vec::new();
-                };
-                props
-                    .iter()
-                    .filter_map(|(tag_key, prop_name)| {
-                        self.node_property(idx, prop_name)
-                            .map(|val| format!("{tag_key}:{val}"))
-                    })
-                    .collect()
-            })
-            .collect()
+    ) -> NodeTags {
+        type TagKey<'a> = (
+            &'static str,
+            smallvec::SmallVec<[(u32, std::borrow::Cow<'a, str>); 4]>,
+        );
+
+        let mut sets: Vec<Vec<String>> = Vec::new();
+        let mut seen: rustc_hash::FxHashMap<TagKey<'_>, u32> = rustc_hash::FxHashMap::default();
+        let mut by_node = Vec::with_capacity(self.graph.node_count());
+        let mut values: smallvec::SmallVec<[(u32, std::borrow::Cow<'_, str>); 4]> =
+            smallvec::SmallVec::new();
+
+        for idx in self.graph.node_indices() {
+            let node_kind = match &self.graph[idx] {
+                GraphNode::File(_) => Some("File"),
+                GraphNode::Definition { .. } => Some("Definition"),
+                GraphNode::Import { .. } => Some("ImportedSymbol"),
+                GraphNode::Directory(_) => None,
+            };
+            let props = node_kind.and_then(|kind| tag_properties.get(kind));
+
+            // Keyed on the raw values, not the formatted tags: formatting first
+            // would allocate per node before discovering the set already exists.
+            values.clear();
+            if let Some(props) = props {
+                for (i, (_, prop_name)) in props.iter().enumerate() {
+                    if let Some(value) = self.node_property(idx, prop_name) {
+                        values.push((i as u32, value));
+                    }
+                }
+            }
+            // The node kind is part of the key because the same property index
+            // means a different tag name for each kind.
+            let key: TagKey<'_> = (node_kind.unwrap_or(""), values.clone());
+
+            let id = match seen.get(&key) {
+                Some(id) => *id,
+                None => {
+                    let id = sets.len() as u32;
+                    let tags = match props {
+                        Some(props) => key
+                            .1
+                            .iter()
+                            .map(|(i, value)| format!("{}:{value}", props[*i as usize].0))
+                            .collect(),
+                        None => Vec::new(),
+                    };
+                    sets.push(tags);
+                    seen.insert(key, id);
+                    id
+                }
+            };
+            by_node.push(id);
+        }
+
+        NodeTags { sets, by_node }
     }
 
     pub fn definitions(&self) -> impl Iterator<Item = (NodeIndex, &Arc<str>, &GraphDef)> {
@@ -1147,7 +1231,7 @@ impl<'a> RowContext<'a> {
     }
 }
 
-impl gkg_utils::arrow::RowEnvelope for RowContext<'_> {
+impl orbit_utils::arrow::RowEnvelope for RowContext<'_> {
     fn write_header(&self, b: &mut BatchBuilder, id: i64) -> Result<(), arrow::error::ArrowError> {
         b.col("id")?.push_int(id)?;
         b.col("project_id")?.push_int(self.project_id)?;
@@ -1203,7 +1287,7 @@ pub struct DirectoryRow<'a> {
     pub dir: &'a CanonicalDirectory,
     pub id: i64,
 }
-impl<C: gkg_utils::arrow::RowEnvelope> AsRecordBatch<C> for DirectoryRow<'_> {
+impl<C: orbit_utils::arrow::RowEnvelope> AsRecordBatch<C> for DirectoryRow<'_> {
     fn write_row(&self, b: &mut BatchBuilder, ctx: &C) -> Result<(), arrow::error::ArrowError> {
         ctx.write_header(b, self.id)?;
         b.col("path")?.push_str(&self.dir.path)?;
@@ -1216,7 +1300,7 @@ pub struct FileRow<'a> {
     pub file: &'a CanonicalFile,
     pub id: i64,
 }
-impl<C: gkg_utils::arrow::RowEnvelope> AsRecordBatch<C> for FileRow<'_> {
+impl<C: orbit_utils::arrow::RowEnvelope> AsRecordBatch<C> for FileRow<'_> {
     fn write_row(&self, b: &mut BatchBuilder, ctx: &C) -> Result<(), arrow::error::ArrowError> {
         ctx.write_header(b, self.id)?;
         b.col("path")?.push_str(&self.file.path)?;
@@ -1235,7 +1319,7 @@ pub struct DefinitionRow<'a> {
     pub pool: &'a StringPool,
     pub id: i64,
 }
-impl<C: gkg_utils::arrow::RowEnvelope> AsRecordBatch<C> for DefinitionRow<'_> {
+impl<C: orbit_utils::arrow::RowEnvelope> AsRecordBatch<C> for DefinitionRow<'_> {
     fn write_row(&self, b: &mut BatchBuilder, ctx: &C) -> Result<(), arrow::error::ArrowError> {
         ctx.write_header(b, self.id)?;
         b.col("file_path")?.push_str(self.file_path)?;
@@ -1254,7 +1338,7 @@ pub struct ImportRow<'a> {
     pub pool: &'a StringPool,
     pub id: i64,
 }
-impl<C: gkg_utils::arrow::RowEnvelope> AsRecordBatch<C> for ImportRow<'_> {
+impl<C: orbit_utils::arrow::RowEnvelope> AsRecordBatch<C> for ImportRow<'_> {
     fn write_row(&self, b: &mut BatchBuilder, ctx: &C) -> Result<(), arrow::error::ArrowError> {
         ctx.write_header(b, self.id)?;
         b.col("file_path")?.push_str(self.file_path)?;

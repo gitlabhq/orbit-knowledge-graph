@@ -2,7 +2,7 @@
 
 ## Overview
 
-The GitLab Knowledge Graph schema evolves over time as new entities and relationships are added.
+The GitLab Orbit schema evolves over time as new entities and relationships are added.
 This document describes the implemented approach to schema version tracking and the
 table-prefix-aware migration orchestrator.
 
@@ -186,7 +186,7 @@ migration window. `ClusterHealthChecker` reads the same `migrating` row to repor
 as `Migrating` (with a `schema_migration` component) instead of Unhealthy, gated on ClickHouse
 being healthy. See [`health_check.md`](health_check.md#migration-awareness).
 
-Implemented in `crates/gkg-server/src/schema_watcher.rs`.
+Implemented in `crates/orbit-server/src/schema_watcher.rs`.
 
 #### Observability
 
@@ -216,7 +216,7 @@ prepare its schema version before exiting non-zero (see "Indexer readiness gate"
 
 ## CI and local enforcement
 
-The migration ledger is the versioned-schema gate. `gkg-server`'s build script fails if versioned
+The migration ledger is the versioned-schema gate. `orbit-server`'s build script fails if versioned
 ontology sources, generated versioned DDL, or auxiliary schema drift from the committed
 fingerprint snapshot (`config/schema-migrations.fingerprint.yaml`), or if the ledger is malformed.
 Versioned drift requires `mise schema:bump`. Auxiliary-schema drift requires `mise schema:snapshot`

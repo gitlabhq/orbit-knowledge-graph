@@ -20,7 +20,7 @@ use datalake::{
     DatalakeChangeDetector, DatalakeEnabledNamespaceReader, EnabledNamespaceReader,
     NamespaceChangeDetector,
 };
-use gkg_server_config::{NamespaceDispatcherConfig, ScheduleConfiguration};
+use orbit_server_config::{NamespaceDispatcherConfig, ScheduleConfiguration};
 
 pub const CHECKPOINT_KEY: &str = "dispatch.sdlc.namespace.changes";
 pub const SWEEP_CHECKPOINT_KEY: &str = "dispatch.sdlc.namespace.sweep";
@@ -220,6 +220,7 @@ mod tests {
     use crate::checkpoint::{Checkpoint, CheckpointError};
     use crate::testkit::mocks::MockNatsServices;
     use chrono::Duration;
+    use orbit_utils::traversal_path::TraversalPath;
     use std::collections::BTreeMap;
     use std::sync::Mutex;
 
@@ -399,7 +400,7 @@ mod tests {
     fn one_namespace() -> Vec<NamespaceDispatchRequest> {
         vec![NamespaceDispatchRequest {
             namespace_id: 9,
-            traversal_path: "1/9/".to_string(),
+            traversal_path: TraversalPath::new_unchecked("1/9/"),
             targets: Vec::new(),
         }]
     }

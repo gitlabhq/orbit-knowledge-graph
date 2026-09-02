@@ -1,6 +1,6 @@
 //! # Indexer
 //!
-//! Message processing framework and domain modules for the GitLab Knowledge Graph.
+//! Message processing framework and domain modules for GitLab Orbit.
 //!
 //! This crate contains both the engine (message routing, concurrency)
 //! and the domain modules (SDLC, Code) that implement indexing logic.
@@ -44,7 +44,7 @@ pub mod testkit;
 
 // Re-export engine submodules at crate root for external API stability.
 pub use config::*;
-pub use engine::{dead_letter, durability, handler, types, worker_pool};
+pub use engine::{dead_letter, durability, handler, retry, types, worker_pool};
 
 /// Re-export metrics from their canonical locations for external API stability.
 pub mod metrics {
@@ -59,12 +59,12 @@ use clickhouse::ClickHouseConfigurationExt;
 use clickhouse::ClickHouseWriter;
 use engine::EngineBuilder;
 use engine::handler::HandlerRegistry;
-use gkg_server_config::IndexerModule;
 use health::run_health_server;
 use indexing_status::{INDEXING_PROGRESS_BUCKET, IndexingStatusStore};
 use locking::INDEXING_LOCKS_BUCKET;
 use modules::namespace_deletion::{ClickHouseNamespaceDeletionStore, NamespaceDeletionStore};
 use nats::{KvBucketConfig, NatsBroker};
+use orbit_server_config::IndexerModule;
 use orchestrator::Trigger;
 use orchestrator::dispatch::{CodeBackfill, NamespaceIndexingDispatch};
 use orchestrator::max_deliveries::MaxDeliveriesReconciler;
@@ -83,7 +83,7 @@ pub async fn run(
     ontology: Arc<ontology::Ontology>,
     shutdown: CancellationToken,
 ) -> Result<(), IndexerError> {
-    let resources = gkg_server_config::ContainerResources::detect();
+    let resources = orbit_server_config::ContainerResources::detect();
     let mut config = config.clone();
     config.engine.resolve_runtime_defaults(&resources);
     let config = &config;
@@ -334,6 +334,7 @@ pub async fn run_dispatcher(
         config.datalake.build_client(),
         metrics.clone(),
         campaign.clone(),
+        config.schedule.tasks.code_backfill.publish_window,
     ));
 
     let tasks: Vec<Box<dyn ScheduledTask>> = vec![

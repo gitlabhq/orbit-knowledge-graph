@@ -4,7 +4,7 @@
 # Do not rename this file. The filename "default" is a deploy contract: the Helm chart
 # (orbit-helm-charts) renders the runtime config into a ConfigMap keyed `default.yaml` mounted
 # at /app/config, and the loader reads it via `config::File::with_name("config/default")`
-# (crates/gkg-server-config/src/app.rs). Renaming breaks config loading in every deployed pod.
+# (crates/orbit-server-config/src/app.rs). Renaming breaks config loading in every deployed pod.
 
 bind_address: "127.0.0.1:4200"
 grpc_bind_address: "127.0.0.1:50054"

@@ -8,7 +8,7 @@ use code_graph::v2::types::EdgeKind;
 use code_graph::v2::{FileInventoryEntry, GraphConverter, Pipeline, PipelineConfig, SinkError};
 use flate2::Compression;
 use flate2::write::GzEncoder;
-use gkg_utils::archive::extract_tar_gz;
+use orbit_utils::archive::extract_tar_gz;
 use rustc_hash::FxHashMap;
 use std::io::Write;
 
@@ -273,6 +273,32 @@ async fn excluded_archive_entries_are_not_materialized_or_parsed() {
         has_def(&run.graphs, "src/app.ts", "run"),
         "materialized source file should still be parsed"
     );
+}
+
+#[tokio::test]
+async fn lfs_pointers_are_nodes_but_never_parsed() {
+    let dir = tempfile::tempdir().unwrap();
+    let pointer = b"version https://git-lfs.github.com/spec/v1\n\
+        oid sha256:4d7a214614ab2935c943f9e0ff69d22eadbb8f32b1258daaa5e2ca24d17e2393\n\
+        size 5242880\n";
+    let entries = [
+        Entry::File("root/src/app.ts", b"export function run() { return 1; }\n"),
+        Entry::File("root/src/model.ts", pointer),
+    ];
+    let (file_inventory, stream_reasons) = extract_via_archive_endpoint(&entries, dir.path()).await;
+
+    assert!(dir.path().join("src/app.ts").exists());
+    assert!(!dir.path().join("src/model.ts").exists());
+
+    let run = run_pipeline(dir.path(), file_inventory, stream_reasons).await;
+    assert_eq!(run.files_discovered, 2);
+    assert_eq!(run.files_indexed, 2);
+    assert_eq!(run.files_parsed, 1);
+    assert_eq!(
+        file_reason(&run.graphs, "src/model.ts").as_deref(),
+        Some("skip_lfs_pointer")
+    );
+    assert_eq!(file_reason(&run.graphs, "src/app.ts").as_deref(), Some(""));
 }
 
 #[tokio::test]

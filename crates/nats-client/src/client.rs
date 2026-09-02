@@ -12,7 +12,7 @@ use tracing::info;
 
 use crate::error::{NatsError, map_connect_error};
 use crate::kv_types::{KvBucketConfig, KvEntry, KvPutOptions, KvPutResult};
-use gkg_server_config::NatsConfiguration;
+use orbit_server_config::NatsConfiguration;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SubjectDedup {

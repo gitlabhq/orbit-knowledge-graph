@@ -40,4 +40,12 @@ engine:
   concurrency_groups:
     sdlc: $(tier ".gkg.concurrency.sdlc")
     code: $(tier ".gkg.concurrency.code")
+$(if [[ "${MOCK_GIT_SERVER:-}" == "1" ]]; then
+CH_NS="${E2E_CH_NAMESPACE:-ra-ch-${RUN_ID}}"
+cat <<MOCK
+
+gitlab:
+  baseUrl: "http://mock-git-server.${CH_NS}.svc.cluster.local:8090"
+MOCK
+fi)
 EOF

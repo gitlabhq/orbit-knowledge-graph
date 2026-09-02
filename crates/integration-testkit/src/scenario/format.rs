@@ -1,10 +1,11 @@
 use std::collections::BTreeMap;
 
+use orbit_utils::traversal_path::TraversalPath;
 use serde::Deserialize;
 
-pub type Row = BTreeMap<String, serde_yaml::Value>;
+pub type Row = BTreeMap<String, serde_json::Value>;
 pub type Seed = BTreeMap<String, Vec<Row>>;
-pub type SeedSettings = BTreeMap<String, serde_yaml::Value>;
+pub type SeedSettings = BTreeMap<String, serde_json::Value>;
 pub type RowMatcher = BTreeMap<String, Matcher>;
 
 #[derive(Debug, Deserialize)]
@@ -218,7 +219,7 @@ pub struct EdgeExpect {
     #[serde(default)]
     pub to: Option<String>,
     #[serde(default)]
-    pub traversal_path: Option<String>,
+    pub traversal_path: Option<TraversalPath>,
     #[serde(default)]
     pub count: Option<usize>,
     #[serde(default)]
@@ -239,5 +240,5 @@ pub struct ContainsMatcher {
 #[serde(untagged)]
 pub enum Matcher {
     Contains(ContainsMatcher),
-    Value(serde_yaml::Value),
+    Value(serde_json::Value),
 }

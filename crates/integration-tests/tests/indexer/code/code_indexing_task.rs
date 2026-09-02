@@ -4,7 +4,6 @@ use std::sync::Arc;
 use arrow::array::{Array, BooleanArray, Int64Array, StringArray};
 use chrono::{TimeZone, Utc};
 use clickhouse_client::ClickHouseConfigurationExt;
-use gkg_utils::arrow::ArrowUtils;
 use indexer::handler::{Handler, HandlerContext};
 use indexer::indexing_status::IndexingStatusStore;
 use indexer::modules::code::{
@@ -15,8 +14,10 @@ use indexer::testkit::{MockLockService, MockNatsServices};
 use indexer::topic::CodeIndexingTaskRequest;
 use indexer::types::Envelope;
 use integration_testkit::{assert_edge_count_for_traversal_path, t};
+use orbit_utils::arrow::ArrowUtils;
 
 use super::helpers::*;
+use orbit_utils::traversal_path::TraversalPath;
 
 #[tokio::test]
 async fn indexes_repository() {
@@ -61,7 +62,7 @@ async fn indexes_repository() {
         "CONTAINS",
         "Branch",
         "File",
-        traversal_path,
+        &TraversalPath::new_unchecked(traversal_path),
         0,
     )
     .await;
@@ -195,7 +196,7 @@ async fn skips_oversized_go_parser_input_and_indexes_repository() {
     let deps = CodeIndexingDeps::new_with_pipeline_config(
         &mock,
         &clickhouse,
-        gkg_server_config::CodeIndexingPipelineConfig {
+        orbit_server_config::CodeIndexingPipelineConfig {
             max_file_size_bytes: u64::MAX,
             ..Default::default()
         },
@@ -529,7 +530,12 @@ async fn stale_cleanup_tombstones_must_not_outrank_rows_versioned_at_the_waterma
 
     let watermark = Utc.with_ymd_and_hms(2026, 1, 2, 0, 0, 0).unwrap();
     cleaner
-        .delete_stale_data(traversal_path, project_id, branch, watermark)
+        .delete_stale_data(
+            &TraversalPath::new_unchecked(traversal_path),
+            project_id,
+            branch,
+            watermark,
+        )
         .await
         .expect("stale data cleanup failed");
 
@@ -948,6 +954,219 @@ async fn stale_edge_cleanup_does_not_affect_other_projects_in_namespace() {
     .await;
 }
 
+#[tokio::test]
+async fn stale_rows_in_the_shared_edge_table_are_cleaned_on_reindex() {
+    let project_id: i64 = 22;
+    let traversal_path = "1/22/";
+
+    let clickhouse = integration_testkit::TestContext::new(&[
+        integration_testkit::SIPHON_SCHEMA_SQL,
+        *integration_testkit::GRAPH_SCHEMA_SQL,
+    ])
+    .await;
+
+    let mock = MockGitlabServer::start().await;
+    mock.add_project(
+        project_id,
+        "main",
+        &[("src/Alpha.java", "public class Alpha {}")],
+    );
+
+    let deps = CodeIndexingDeps::new(&mock, &clickhouse);
+    let handler = deps.code_indexing_task_handler();
+
+    index_code(
+        &handler,
+        &clickhouse,
+        project_id,
+        "commit1",
+        1,
+        traversal_path,
+    )
+    .await;
+
+    let directory_id = first_active_directory_id(&clickhouse, project_id).await;
+    insert_stale_canary_edge(&clickhouse, traversal_path, directory_id).await;
+    assert_eq!(count_canary_edges(&clickhouse, directory_id).await, 1);
+
+    mock.replace_archive(
+        project_id,
+        &[("src/AlphaV2.java", "public class AlphaV2 {}")],
+    );
+    index_code(
+        &handler,
+        &clickhouse,
+        project_id,
+        "commit2",
+        2,
+        traversal_path,
+    )
+    .await;
+
+    assert_eq!(
+        count_canary_edges(&clickhouse, directory_id).await,
+        0,
+        "the reindex must tombstone the stale shared edge so a _deleted = false FINAL \
+         read no longer returns it"
+    );
+}
+
+#[tokio::test]
+async fn edges_from_a_directory_removed_by_a_reindex_are_cleaned() {
+    let project_id: i64 = 23;
+    let traversal_path = "1/23/";
+
+    let clickhouse = integration_testkit::TestContext::new(&[
+        integration_testkit::SIPHON_SCHEMA_SQL,
+        *integration_testkit::GRAPH_SCHEMA_SQL,
+    ])
+    .await;
+
+    let mock = MockGitlabServer::start().await;
+    mock.add_project(
+        project_id,
+        "main",
+        &[
+            ("src/Alpha.java", "public class Alpha {}"),
+            ("src/legacy/Old.java", "public class Old {}"),
+        ],
+    );
+
+    let deps = CodeIndexingDeps::new(&mock, &clickhouse);
+    let handler = deps.code_indexing_task_handler();
+
+    index_code(
+        &handler,
+        &clickhouse,
+        project_id,
+        "commit1",
+        1,
+        traversal_path,
+    )
+    .await;
+    assert_eq!(
+        count_active_directories_at_path(&clickhouse, project_id, "src/legacy").await,
+        1,
+        "the fixture must produce a directory that the reindex can then remove"
+    );
+
+    mock.replace_archive(project_id, &[("src/Alpha.java", "public class Alpha {}")]);
+    index_code(
+        &handler,
+        &clickhouse,
+        project_id,
+        "commit2",
+        2,
+        traversal_path,
+    )
+    .await;
+
+    assert_eq!(
+        count_active_directories_at_path(&clickhouse, project_id, "src/legacy").await,
+        0,
+        "the removed directory's own row should be gone"
+    );
+    assert_eq!(
+        edges_from_directories_that_no_longer_exist(&clickhouse).await,
+        0,
+        "a shared edge whose source directory the same reindex removed can never be \
+         matched again once that directory's id is no longer resolvable"
+    );
+}
+
+async fn count_active_directories_at_path(
+    clickhouse: &integration_testkit::TestContext,
+    project_id: i64,
+    path: &str,
+) -> usize {
+    let result = clickhouse
+        .query(&format!(
+            "SELECT id FROM {} FINAL \
+             WHERE project_id = {project_id} AND path = '{path}' AND _deleted = false",
+            t("gl_directory")
+        ))
+        .await;
+    result.first().map_or(0, |b| b.num_rows())
+}
+
+async fn edges_from_directories_that_no_longer_exist(
+    clickhouse: &integration_testkit::TestContext,
+) -> usize {
+    let ontology = integration_testkit::load_ontology();
+    let edge_table = ontology.edge_table_for_relationship("CONTAINS");
+    let result = clickhouse
+        .query(&format!(
+            "SELECT source_id FROM {edge_table} FINAL \
+             WHERE _deleted = false AND source_kind = 'Directory' \
+             AND source_id NOT IN (SELECT id FROM {} FINAL WHERE _deleted = false)",
+            t("gl_directory")
+        ))
+        .await;
+    result.first().map_or(0, |b| b.num_rows())
+}
+
+const CANARY_TARGET_ID: i64 = 999_999_998;
+
+async fn first_active_directory_id(
+    clickhouse: &integration_testkit::TestContext,
+    project_id: i64,
+) -> i64 {
+    let result = clickhouse
+        .query(&format!(
+            "SELECT id FROM {} FINAL \
+             WHERE project_id = {project_id} AND _deleted = false LIMIT 1",
+            t("gl_directory")
+        ))
+        .await;
+    let batch = result
+        .first()
+        .expect("directory query should return a batch");
+    assert_eq!(
+        batch.num_rows(),
+        1,
+        "indexing must produce directory nodes for the canary to hang off"
+    );
+    ArrowUtils::get_column_by_name::<Int64Array>(batch, "id")
+        .expect("id column")
+        .value(0)
+}
+
+async fn insert_stale_canary_edge(
+    clickhouse: &integration_testkit::TestContext,
+    traversal_path: &str,
+    source_id: i64,
+) {
+    let ontology = integration_testkit::load_ontology();
+    let edge_table = ontology.edge_table_for_relationship("CONTAINS");
+    // The shared edge table carries no project column, so the cleanup resolves
+    // ownership through the code node tables. A canary sourced from anything
+    // other than a real directory id would fall outside the predicate.
+    let sql = format!(
+        "INSERT INTO {edge_table} \
+         (traversal_path, source_id, source_kind, relationship_kind, \
+          target_id, target_kind, _version) \
+         VALUES ('{traversal_path}', {source_id}, 'Directory', 'CONTAINS', \
+                 {CANARY_TARGET_ID}, 'File', '2020-01-01 00:00:00.000000')"
+    );
+    clickhouse.execute(&sql).await;
+}
+
+async fn count_canary_edges(
+    clickhouse: &integration_testkit::TestContext,
+    source_id: i64,
+) -> usize {
+    let ontology = integration_testkit::load_ontology();
+    let edge_table = ontology.edge_table_for_relationship("CONTAINS");
+    let result = clickhouse
+        .query(&format!(
+            "SELECT target_id FROM {edge_table} FINAL \
+             WHERE source_id = {source_id} AND target_id = {CANARY_TARGET_ID} \
+             AND _deleted = false"
+        ))
+        .await;
+    result.first().map_or(0, |b| b.num_rows())
+}
+
 async fn index_code(
     handler: &indexer::modules::code::CodeIndexingTaskHandler,
     _clickhouse: &integration_testkit::TestContext,
@@ -1018,7 +1237,7 @@ fn handler_context_with_status() -> (HandlerContext, Arc<IndexingStatusStore>) {
 fn failing_writer() -> Arc<indexer::clickhouse::ClickHouseWriter> {
     Arc::new(
         indexer::clickhouse::ClickHouseWriter::new(
-            gkg_server_config::ClickHouseConfiguration {
+            orbit_server_config::ClickHouseConfiguration {
                 url: "http://127.0.0.1:1".into(),
                 ..Default::default()
             },
@@ -1062,7 +1281,7 @@ fn code_indexing_task_envelope(
         project_id,
         branch: Some("main".to_string()),
         commit_sha: Some(commit_sha.to_string()),
-        traversal_path: traversal_path.to_string(),
+        traversal_path: TraversalPath::new_unchecked(traversal_path),
         dispatch_id: uuid::Uuid::new_v4(),
         campaign_id: None,
     })
@@ -1079,7 +1298,7 @@ fn code_indexing_backfill_envelope(
         project_id,
         branch: Some("main".to_string()),
         commit_sha: None,
-        traversal_path: traversal_path.to_string(),
+        traversal_path: TraversalPath::new_unchecked(traversal_path),
         dispatch_id: uuid::Uuid::new_v4(),
         campaign_id: None,
     })
@@ -1337,7 +1556,7 @@ async fn assert_branch_indexed(
         "IN_PROJECT",
         "Branch",
         "Project",
-        expected_traversal_path,
+        &TraversalPath::new_unchecked(expected_traversal_path),
         1,
     )
     .await;
@@ -1347,7 +1566,7 @@ async fn assert_branch_indexed(
         "CONTAINS",
         "Project",
         "Branch",
-        expected_traversal_path,
+        &TraversalPath::new_unchecked(expected_traversal_path),
         1,
     )
     .await;
@@ -1357,7 +1576,7 @@ async fn assert_branch_indexed(
         "CONTAINS",
         "Branch",
         "Directory",
-        expected_traversal_path,
+        &TraversalPath::new_unchecked(expected_traversal_path),
         1,
     )
     .await;
@@ -1367,7 +1586,7 @@ async fn assert_branch_indexed(
         "ON_BRANCH",
         "File",
         "Branch",
-        expected_traversal_path,
+        &TraversalPath::new_unchecked(expected_traversal_path),
         1,
     )
     .await;
@@ -1389,7 +1608,7 @@ async fn timed_out_job_writes_no_data() {
     let deps = CodeIndexingDeps::new_with_pipeline_config(
         &mock,
         &clickhouse,
-        gkg_server_config::CodeIndexingPipelineConfig {
+        orbit_server_config::CodeIndexingPipelineConfig {
             job_timeout_secs: 1,
             ..Default::default()
         },
@@ -1486,7 +1705,7 @@ async fn disk_is_clean_after_a_timed_out_job() {
     let deps = CodeIndexingDeps::new_with_pipeline_config(
         &mock,
         &clickhouse,
-        gkg_server_config::CodeIndexingPipelineConfig {
+        orbit_server_config::CodeIndexingPipelineConfig {
             job_timeout_secs: 1,
             ..Default::default()
         },
@@ -1530,7 +1749,7 @@ async fn cancelled_run_that_finishes_writes_no_checkpoint() {
     let request = indexer::modules::code::IndexingRequest {
         project_id,
         branch: "main".to_string(),
-        traversal_path: traversal_path.to_string(),
+        traversal_path: TraversalPath::new_unchecked(traversal_path),
         task_id: 1,
         commit_sha: Some("abc123".to_string()),
         had_prior_checkpoint: false,

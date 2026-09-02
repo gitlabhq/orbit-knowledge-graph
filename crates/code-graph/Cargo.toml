@@ -9,7 +9,7 @@ test-utils = []
 
 [dependencies]
 treesitter-visit = { path = "treesitter-visit", features = ["builtin-parser"] }
-gkg-utils = { path = "../utils" }
+orbit-utils = { path = "../utils" }
 
 # Common
 anyhow = { workspace = true }
@@ -25,6 +25,7 @@ globset = { workspace = true }
 ignore = { workspace = true }
 indicatif = { workspace = true }
 memchr = { workspace = true }
+parking_lot = { workspace = true }
 petgraph = { workspace = true }
 rayon = { workspace = true }
 rust-lapper = { workspace = true }

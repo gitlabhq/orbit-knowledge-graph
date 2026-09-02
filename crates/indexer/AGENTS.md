@@ -1,6 +1,6 @@
 # Indexer
 
-Message processing framework and domain modules for the GitLab Knowledge Graph. Consumes events from NATS JetStream, routes them through handlers, and writes property graph data to ClickHouse.
+Message processing framework and domain modules for GitLab Orbit. Consumes events from NATS JetStream, routes them through handlers, and writes property graph data to ClickHouse.
 
 ## Architecture
 
@@ -92,7 +92,7 @@ ready, connects to NATS and ClickHouse, registers handlers via `sdlc::register_h
 `code::register_handlers()`, and `namespace_deletion::register_handlers()`, builds the engine,
 and runs until shutdown.
 
-`IndexerConfig` holds all configuration (NATS, ClickHouse graph/datalake, engine concurrency, handler configs, GitLab client). Handler configs are typed via `HandlersConfiguration` in `crates/gkg-server-config/src/engine.rs` — no string-keyed lookups.
+`IndexerConfig` holds all configuration (NATS, ClickHouse graph/datalake, engine concurrency, handler configs, GitLab client). Handler configs are typed via `HandlersConfiguration` in `crates/orbit-server-config/src/engine.rs` — no string-keyed lookups.
 
 ## Development
 
@@ -128,7 +128,7 @@ preventable feedback (see #2772, !1416). Check each of these first:
   extraction, keyset cursor persistence (`cursor_values` / `to_checkpoint_values()`), and
   watermark advance. Reuse them before hand-rolling a page loop. For code indexing, reuse the
   checkpoint store in `modules/code/checkpoint.rs`.
-- **Arrow extraction:** decode datalake `RecordBatch` rows with the `gkg_utils::arrow` helpers
+- **Arrow extraction:** decode datalake `RecordBatch` rows with the `orbit_utils::arrow` helpers
   (`get_column`, `get_column_string`, `get_string_list`, `extract_row` in
   `crates/utils/src/arrow.rs`), not bespoke `col_i64` / `col_string` functions.
 - **Edge/node `RecordBatch` specs:** derive column specs from the ontology — `edge_specs(ontology)`
@@ -145,8 +145,8 @@ preventable feedback (see #2772, !1416). Check each of these first:
   co-located `.sql.j2` file (`query: <name>.sql.j2`) only for genuinely complex joins or
   materialized arrays, so rows you discard never cross the wire. The ontology carries a `.sql.j2`
   file's raw content verbatim as `ExtractQuery::Sql`; the indexer's `plan/extract/sql.rs` renders
-  `{{watermark_column}}`/`{{deleted_column}}` through MiniJinja at plan build, recovers the
-  effective watermark/deleted from the file's `AS _version`/`AS _deleted`, and passes `{{filters}}`/
+  `{{version_column}}`/`{{watermark_column}}`/`{{deleted_column}}` through MiniJinja at plan build,
+  derives the qualified watermark expression from the file's `AS _version`, recovers `AS _deleted`, and passes `{{filters}}`/
   `{{batch_size}}` through to query time. All ClickHouse dialect and SQL generation live in the
   indexer's `plan/` module. `build.rs` is the only place that reads `pipeline.transform`: it
   decomposes each pipeline and hands `extract/` transform-neutral inputs (it produces an
@@ -161,10 +161,11 @@ preventable feedback (see #2772, !1416). Check each of these first:
 - **Constants:** prefer deriving values from the ontology or a typed config field over hardcoding
   magic numbers; if a value is environment-dependent, make it a `HandlersConfiguration` field.
 - **Siphon columns:** hand-written datalake SQL must use
-  `ontology::siphon_watermark_column()` and `ontology::siphon_deleted_column()`, never the
-  literal column names. Both are derived at runtime from `schema.yaml`'s
-  `settings.etl.default_watermark` / `default_deleted` via a `LazyLock<Ontology>`, so the
-  ontology YAML is the single source of truth.
+  `ontology::siphon_version_column()`, `ontology::siphon_watermark_column()`, and
+  `ontology::siphon_deleted_column()`, never literal column names. They derive at runtime from
+  `schema.yaml`'s `settings.etl.default_version` / `default_watermark` / `default_deleted` via a
+  `LazyLock<Ontology>`. Use the version column for `_version` and `argMax`; use the watermark only
+  for change-window predicates.
 
 If none of the above fits and you genuinely need new infrastructure, prefer generalizing into a
 shared place (`crates/utils/`, `modules/.../pipeline.rs`) over duplicating logic per handler.
@@ -196,7 +197,7 @@ If the transform is a per-row projection of one extracted batch, express it as a
 2. Define event type implementing `Event`
 3. Create handler implementing `Handler` (`name`, `subscription`, `handle`)
 4. Add topic config to `engine.topics` in `config/default.yaml` for retry/concurrency policy
-5. If handler needs domain config, add a typed config field to `HandlersConfiguration` in `crates/gkg-server-config/src/engine.rs`
+5. If handler needs domain config, add a typed config field to `HandlersConfiguration` in `crates/orbit-server-config/src/engine.rs`
 6. Register in `sdlc::register_handlers()`, `code::register_handlers()`, or `namespace_deletion::register_handlers()`
 
 ### No `#[allow(dead_code)]` in shipped code

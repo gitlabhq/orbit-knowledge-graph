@@ -1,5 +1,5 @@
 use super::helpers::*;
-use query_engine::compiler::{AccessLevel, TraversalPath};
+use query_engine::compiler::{AccessLevel, AuthorizedPath};
 
 pub(super) async fn search_scoped_path_excludes_other_namespaces(ctx: &TestContext) {
     let resp = run_query_with_security(
@@ -921,20 +921,20 @@ pub(super) async fn aggregation_multi_path_sql_contains_both_filters(ctx: &TestC
 // The compiler drops below-floor (e.g. Reporter) paths from the Vulnerability
 // startsWith predicate, neutralizing the count-aggregation oracle (work_items/347).
 
-fn reporter_path(path: &str) -> TraversalPath {
-    TraversalPath::new(path, 20)
+fn reporter_path(path: &str) -> AuthorizedPath {
+    AuthorizedPath::new(path, 20)
 }
 
-fn security_manager_path(path: &str) -> TraversalPath {
-    TraversalPath::new(path, 25)
+fn security_manager_path(path: &str) -> AuthorizedPath {
+    AuthorizedPath::new(path, 25)
 }
 
-fn developer_path(path: &str) -> TraversalPath {
-    TraversalPath::new(path, 30)
+fn developer_path(path: &str) -> AuthorizedPath {
+    AuthorizedPath::new(path, 30)
 }
 
-fn owner_path(path: &str) -> TraversalPath {
-    TraversalPath::new(path, AccessLevel::Owner as u32)
+fn owner_path(path: &str) -> AuthorizedPath {
+    AuthorizedPath::new(path, AccessLevel::Owner as u32)
 }
 
 pub(super) async fn aggregation_vulnerability_reporter_only_sees_zero_counts(ctx: &TestContext) {
@@ -1284,7 +1284,7 @@ pub(super) async fn aggregation_vulnerability_property_grouping_sql_drops_report
         matches!(
             (&p.ch_type, &p.value),
             (
-                gkg_utils::clickhouse::ChType::Bool,
+                orbit_utils::clickhouse::ChType::Bool,
                 serde_json::Value::Bool(false)
             )
         )
@@ -1397,7 +1397,7 @@ pub(super) async fn aggregation_vulnerability_sql_drops_reporter_paths(ctx: &Tes
         matches!(
             (&p.ch_type, &p.value),
             (
-                gkg_utils::clickhouse::ChType::Bool,
+                orbit_utils::clickhouse::ChType::Bool,
                 serde_json::Value::Bool(false)
             )
         )

@@ -256,6 +256,15 @@ impl GraphIndexes {
         self.dir_index = None;
         self.file_index = None;
     }
+
+    /// Free the resolution-only indexes; the Arrow converter never reads them.
+    pub fn drop_resolution_indexes(&mut self) {
+        self.by_fqn = VerifiedMap::new();
+        self.by_name = VerifiedMap::new();
+        self.nested = NestedMap::new();
+        self.ancestors = FxHashMap::default();
+        self.definition_ranges = FxHashMap::default();
+    }
 }
 
 impl Default for GraphIndexes {
@@ -264,7 +273,7 @@ impl Default for GraphIndexes {
     }
 }
 
-pub use gkg_utils::strings::{StrId, StringPool};
+pub use orbit_utils::strings::{StrId, StringPool};
 
 /// Pool-backed definition. All strings are [`StrId`] referencing the graph's
 /// [`StringPool`].
@@ -419,7 +428,7 @@ impl Default for FileArena {
     }
 }
 
-pub use gkg_utils::strings::ScratchBuf;
+pub use orbit_utils::strings::ScratchBuf;
 
 #[cfg(test)]
 mod tests {

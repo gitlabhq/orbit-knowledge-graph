@@ -7,11 +7,11 @@ edition = "2024"
 arrow = { workspace = true }
 async-trait = { workspace = true }
 clickhouse-client = { path = "../clickhouse-client" }
-gkg-server-config = { path = "../gkg-server-config" }
+orbit-server-config = { path = "../orbit-server-config" }
 gitalisk-core = { workspace = true }
-gkg-utils = { path = "../utils" }
+orbit-utils = { path = "../utils" }
 futures = { workspace = true }
-gkg-server = { path = "../gkg-server" }
+orbit-server = { path = "../orbit-server" }
 ontology = { path = "../ontology" }
 query-engine = { path = "../query-engine", features = ["testutils"] }
 reqwest = { workspace = true }
@@ -19,7 +19,6 @@ rustls = { workspace = true }
 sqlparser = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-serde_yaml = { workspace = true }
 testcontainers = { workspace = true }
 tokio = { workspace = true }
 uuid = { workspace = true }

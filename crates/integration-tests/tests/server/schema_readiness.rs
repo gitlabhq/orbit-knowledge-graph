@@ -3,12 +3,12 @@ use std::time::Duration;
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use gkg_server::schema_watcher::{SchemaState, SchemaWatcher};
-use gkg_server::webserver::create_router;
 use indexer::schema::version::{
     ensure_version_table, write_migrating_version, write_schema_version,
 };
 use integration_testkit::TestContext;
+use orbit_server::schema_watcher::{SchemaState, SchemaWatcher};
+use orbit_server::webserver::create_router;
 use tokio::time::{sleep, timeout};
 use tokio_util::sync::CancellationToken;
 use tower::ServiceExt;

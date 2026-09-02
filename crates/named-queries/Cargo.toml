@@ -9,5 +9,5 @@ jsonschema = { workspace = true }
 rust-embed = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-serde_yaml = { workspace = true }
+orbit-utils = { path = "../utils" }
 thiserror = { workspace = true }

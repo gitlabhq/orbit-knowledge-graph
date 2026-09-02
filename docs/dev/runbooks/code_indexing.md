@@ -265,7 +265,7 @@ nats pub 'code.task.indexing.requested.<project_id>._' \
 
 ### Reindex an entire namespace
 
-Trigger a namespace backfill by re-enabling the namespace in GitLab (toggle the Knowledge Graph feature flag off and on), or simulate the Siphon event that the `NamespaceCodeBackfillDispatcher` consumes.
+Trigger a namespace backfill by re-enabling the namespace in GitLab (toggle the Orbit feature flag off and on), or simulate the Siphon event that the `NamespaceCodeBackfillDispatcher` consumes.
 
 ## Retry mechanism
 

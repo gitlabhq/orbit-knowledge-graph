@@ -70,9 +70,9 @@ pre-commit:
     - name: metrics-catalog-check
       run: mise run metrics:catalog:check
       glob:
-        - "crates/gkg-observability/**/*.rs"
+        - "crates/orbit-observability/**/*.rs"
         - "crates/xtask/src/metrics_catalog.rs"
-        - "crates/gkg-observability/orbit-dashboards/gkg-metrics.json"
+        - "crates/orbit-observability/orbit-dashboards/gkg-metrics.json"
     - name: query-language-docs-check
       run: mise run docs:query-language:check
       glob:

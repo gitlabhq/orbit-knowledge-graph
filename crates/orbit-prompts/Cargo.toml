@@ -1,0 +1,12 @@
+[package]
+name = "orbit-prompts"
+version.workspace = true
+edition = "2024"
+license = "MIT"
+
+[dependencies]
+minijinja = { workspace = true }
+rust-embed = { workspace = true }
+semver = { workspace = true }
+serde = { workspace = true }
+orbit-utils = { path = "../utils" }

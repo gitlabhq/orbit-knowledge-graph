@@ -37,7 +37,7 @@ mod tests {
             for column in &table.columns {
                 let arrow_type = ddl_column_type_to_arrow(&column.data_type);
                 assert!(
-                    gkg_utils::arrow::has_logical_byte_size(&arrow_type),
+                    orbit_utils::arrow::has_logical_byte_size(&arrow_type),
                     "table '{}' column '{}' has DDL type {:?} (arrow {arrow_type:?}) with no \
                      logical-byte-size rule; extend the counting rules in \
                      crates/utils/src/arrow_logical_bytes.rs",

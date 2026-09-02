@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use crate::error::{QueryError, Result};
 use crate::input::*;
+use orbit_utils::traversal_path::TraversalPath;
 
 use super::{Plan, PlanBody, Strategy};
 
@@ -14,7 +15,7 @@ pub struct HydrationNodePlan {
     pub columns: Vec<String>,
     /// Traversal paths extracted from the base query, used to narrow hydration
     /// scans via `startsWith(traversal_path, tp)`.
-    pub traversal_paths: Vec<String>,
+    pub traversal_paths: Vec<TraversalPath>,
     /// Table sort key (ReplacingMergeTree ORDER BY) — the dedup identity for the
     /// `LIMIT 1 BY <sort_key>` latest-row scan that replaces `FINAL`. Required.
     pub sort_key: Vec<String>,

@@ -915,7 +915,7 @@ impl Generator {
 }
 
 pub fn run(config_path: &Path, dry_run: bool, force: bool) -> Result<()> {
-    println!("GitLab Knowledge Graph Generator");
+    println!("GitLab Orbit Generator");
     println!("=================================\n");
 
     println!("Loading config from {:?}...", config_path);

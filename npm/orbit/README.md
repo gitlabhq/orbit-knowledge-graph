@@ -1,6 +1,6 @@
 # @gitlab/orbit
 
-The [GitLab Knowledge Graph (Orbit)](https://gitlab.com/gitlab-org/orbit/knowledge-graph)
+[GitLab Orbit](https://gitlab.com/gitlab-org/orbit/knowledge-graph)
 local CLI. Indexes a repository on your machine into a local DuckDB property
 graph and answers code-structure queries (definitions, references, imports,
 files, directories) over it.

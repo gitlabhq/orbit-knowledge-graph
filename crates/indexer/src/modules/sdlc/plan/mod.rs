@@ -10,15 +10,16 @@ pub(in crate::modules::sdlc) const SOURCE_DATA_TABLE: &str = "source_data";
 
 use arrow::record_batch::RecordBatch;
 use chrono::{DateTime, Utc};
-use gkg_utils::arrow::ArrowUtils;
 use ontology::EtlScope;
 use ontology::sql_template;
+use orbit_utils::arrow::ArrowUtils;
 use serde_json::Value;
 
 use super::partitioning::PartitionAssignment;
 use crate::checkpoint::Checkpoint;
 use crate::clickhouse::TIMESTAMP_FORMAT;
 use crate::handler::HandlerError;
+use orbit_utils::traversal_path::TraversalPath;
 
 #[derive(Debug, Clone)]
 pub(in crate::modules::sdlc) struct Cursor {
@@ -124,7 +125,7 @@ impl Filter for WatermarkFilter<'_> {
 }
 
 pub(in crate::modules::sdlc) struct TraversalPathFilter<'a> {
-    pub path: &'a str,
+    pub path: &'a TraversalPath,
 }
 
 pub(in crate::modules::sdlc) struct DeletedFilter<'a> {
@@ -145,7 +146,7 @@ impl Filter for TraversalPathFilter<'_> {
     fn params(&self) -> Vec<(String, Value)> {
         vec![(
             "traversal_path".into(),
-            Value::String(self.path.to_string()),
+            Value::String(self.path.as_str().to_string()),
         )]
     }
 }
@@ -303,18 +304,30 @@ impl PreparedQuery {
         Value::Object(self.params.clone())
     }
 
+    pub fn batch_size(&self) -> u64 {
+        self.batch_size
+    }
+
+    /// Partitions share the one worker-pool permit the handler holds, so an undivided
+    /// budget puts `partitions.len()` pages in flight for a slot accounted as holding one.
     pub fn into_partitions(
         self,
         partitions: Vec<PartitionAssignment>,
     ) -> Vec<(PartitionAssignment, PreparedQuery)> {
+        // Below the config minimum the extra round trips cost more than the smaller
+        // pages save.
+        let share = (self.batch_size / partitions.len().max(1) as u64)
+            .max(orbit_server_config::MIN_DATALAKE_BATCH_SIZE)
+            .min(self.batch_size);
         partitions
             .into_iter()
             .map(|p| {
-                let query = self.clone().with(CompositeRangeFilter {
+                let mut query = self.clone().with(CompositeRangeFilter {
                     columns: &p.key_columns,
                     lower: p.lower_bound.as_deref(),
                     upper: p.upper_bound.as_deref(),
                 });
+                query.batch_size = share;
                 (p, query)
             })
             .collect()
@@ -333,6 +346,58 @@ mod tests {
     use arrow::datatypes::{DataType, Field, Schema};
     use std::sync::Arc;
 
+    fn partition(index: u32, total: u32) -> PartitionAssignment {
+        PartitionAssignment {
+            index,
+            total,
+            key_columns: vec!["id".to_string()],
+            lower_bound: Some(vec!["100".to_string()]),
+            upper_bound: Some(vec!["500".to_string()]),
+        }
+    }
+
+    #[test]
+    fn into_partitions_divides_the_page_budget_and_renders_it_as_the_limit() {
+        let plan = test_plan(vec!["id"], 1_000_000);
+        let partitions = plan
+            .prepare()
+            .into_partitions((0..4).map(|index| partition(index, 4)).collect());
+
+        assert_eq!(partitions.len(), 4);
+        for (_, query) in &partitions {
+            assert_eq!(query.batch_size(), 250_000);
+            let sql = query.to_sql().expect("renders extract SQL");
+            assert!(sql.contains("LIMIT 250000"), "sql: {sql}");
+        }
+    }
+
+    #[test]
+    fn into_partitions_floors_the_share_at_the_configured_minimum() {
+        let plan = test_plan(vec!["id"], 250_000);
+        let partitions = plan
+            .prepare()
+            .into_partitions((0..3).map(|index| partition(index, 3)).collect());
+
+        for (_, query) in &partitions {
+            assert_eq!(
+                query.batch_size(),
+                orbit_server_config::MIN_DATALAKE_BATCH_SIZE
+            );
+        }
+    }
+
+    // The floor must not raise a share above what the operator configured, or every
+    // partition would read more rows per page than the unpartitioned plan would.
+    #[test]
+    fn into_partitions_never_raises_the_share_above_the_plan_budget() {
+        let plan = test_plan(vec!["id"], 50_000);
+        let partitions = plan.prepare().into_partitions(vec![partition(0, 1)]);
+
+        assert_eq!(partitions[0].1.batch_size(), 50_000);
+        let sql = partitions[0].1.to_sql().expect("renders extract SQL");
+        assert!(sql.contains("LIMIT 50000"), "sql: {sql}");
+    }
+
     fn test_plan(sort_key: Vec<&str>, batch_size: u64) -> Plan {
         let sort_key: Vec<String> = sort_key.iter().map(|s| s.to_string()).collect();
         let sort_key_sql = sort_key.join(", ");
@@ -341,7 +406,7 @@ mod tests {
             target: "Test".to_string(),
             scope: EtlScope::Namespaced,
             extract_template: ExtractTemplate::new(format!(
-                "SELECT id, name, _siphon_watermark AS _version, \
+                "SELECT id, name, _siphon_replicated_at AS _version, \
                  _siphon_deleted AS _deleted \
                  FROM source_table \
                  WHERE 1=1 {{{{filters}}}} \
@@ -555,7 +620,9 @@ mod tests {
     #[test]
     fn traversal_path_filter_adds_starts_with_and_param() {
         let plan = test_plan(vec!["id"], 1000);
-        let prepared = plan.prepare().with(TraversalPathFilter { path: "1/2/" });
+        let prepared = plan.prepare().with(TraversalPathFilter {
+            path: &TraversalPath::new_unchecked("1/2/"),
+        });
         let sql = prepared.to_sql().expect("renders extract SQL");
         assert!(
             sql.contains("startsWith(traversal_path, {traversal_path:String})"),
@@ -598,7 +665,9 @@ mod tests {
                 last: Utc::now(),
                 current: Utc::now(),
             })
-            .with(TraversalPathFilter { path: "1/2/" })
+            .with(TraversalPathFilter {
+                path: &TraversalPath::new_unchecked("1/2/"),
+            })
             .to_sql()
             .expect("renders extract SQL");
         assert!(sql.contains(" AND ("), "sql: {sql}");

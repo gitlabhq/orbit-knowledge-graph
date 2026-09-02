@@ -188,7 +188,7 @@ For example: `status.42.9970.MergeRequest`, `status.42.9970.Issue`.
 
 ```rust
 fn entity_status_key(traversal_path: &str, entity_kind: &str) -> String {
-    let dotted = gkg_utils::traversal_path::to_dotted(traversal_path);
+    let dotted = orbit_utils::traversal_path::to_dotted(traversal_path);
     format!("status.{dotted}.{entity_kind}")
 }
 ```

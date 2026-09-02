@@ -1,11 +1,11 @@
 use axum::{Json, Router, routing::get};
-use gkg_server::cluster_health::ClusterHealthChecker;
-use gkg_server::proto::{
+use indexer::schema::version::{ensure_version_table, write_migrating_version};
+use integration_testkit::TestContext;
+use orbit_server::cluster_health::ClusterHealthChecker;
+use orbit_server::proto::{
     ClusterStatus, GetClusterHealthResponse, ResponseFormat, StructuredClusterHealth,
     get_cluster_health_response,
 };
-use indexer::schema::version::{ensure_version_table, write_migrating_version};
-use integration_testkit::TestContext;
 use serde_json::json;
 use tokio::net::TcpListener;
 

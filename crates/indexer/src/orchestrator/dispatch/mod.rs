@@ -8,9 +8,11 @@ pub mod namespace_indexing;
 pub use code_backfill::CodeBackfill;
 pub use namespace_indexing::{NamespaceDispatchRequest, NamespaceIndexingDispatch};
 
+use orbit_utils::traversal_path::TraversalPath;
+
 #[derive(Default)]
 pub struct DispatchOutcome {
     pub dispatched: u64,
     pub skipped: u64,
-    pub drained_paths: Vec<String>,
+    pub drained_paths: Vec<TraversalPath>,
 }

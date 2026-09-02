@@ -1,11 +1,18 @@
 use std::sync::Arc;
+use std::time::Duration;
 
-use tracing::info;
+use tracing::{info, warn};
 
 use super::cache::{CachedRepository, RepositoryCache, RepositoryCacheError};
 use super::service::{RepositoryService, RepositoryServiceError};
 use crate::handler::HandlerError;
+use crate::retry::{Backoff, LocalRetry, RetryExhausted, Step, drive};
 use gitlab_client::GitlabClientError;
+
+const ARCHIVE_DOWNLOAD_RETRY: LocalRetry = LocalRetry {
+    backoff: Backoff::Fixed(&[Duration::from_secs(1), Duration::from_secs(2)]),
+    max_attempts: 3,
+};
 
 /// `EmptyRepository` is a recognized terminal outcome: the project record
 /// exists but has no Gitaly content (no refs, or no repository storage at
@@ -20,6 +27,13 @@ pub enum ResolveError {
 
     #[error(transparent)]
     Other(#[from] HandlerError),
+}
+
+impl From<RetryExhausted> for ResolveError {
+    fn from(e: RetryExhausted) -> Self {
+        // Satisfies the drive bound; full_download GiveUps the real error so the cap is never reached.
+        ResolveError::Other(HandlerError::Processing(e.to_string()))
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -119,40 +133,45 @@ impl RepositoryResolver {
             branch, ref_name, "downloading repository archive"
         );
 
-        let archive_stream = match self
-            .repository_service
-            .download_archive(project_id, ref_name)
-            .await
-        {
-            Ok(stream) => stream,
-            Err(err) => {
-                if let Some((reason, detail)) = classify_download_error(&err) {
-                    return Err(ResolveError::EmptyRepository { reason, detail });
+        drive(&ARCHIVE_DOWNLOAD_RETRY, |attempt| async move {
+            let archive_stream = match self
+                .repository_service
+                .download_archive(project_id, ref_name)
+                .await
+            {
+                Ok(stream) => stream,
+                Err(err) => {
+                    if let Some((reason, detail)) = classify_download_error(&err) {
+                        return Step::GiveUp(ResolveError::EmptyRepository { reason, detail });
+                    }
+                    warn!(project_id, ref_name, attempt = attempt + 1, error = %err, "archive download failed");
+                    let e = HandlerError::Processing(format!("failed to download archive: {err}"));
+                    return ARCHIVE_DOWNLOAD_RETRY.retry_or_give_up(attempt, (), e.into());
                 }
-                return Err(
-                    HandlerError::Processing(format!("failed to download archive: {err}")).into(),
-                );
-            }
-        };
+            };
 
-        match self.cache.extract_archive(archive_stream).await {
-            Ok(path) => Ok(path),
-            Err(RepositoryCacheError::EmptyArchive) => Err(ResolveError::EmptyRepository {
-                reason: EmptyRepositoryReason::EmptyArchive,
-                detail: format!(
-                    "archive contained no entries for project {project_id} ref {ref_name} (200 OK with empty body)"
-                ),
-            }),
-            Err(RepositoryCacheError::RepositoryTooLarge) => Err(ResolveError::EmptyRepository {
-                reason: EmptyRepositoryReason::RepositoryTooLarge,
-                detail: format!(
-                    "repository for project {project_id} ref {ref_name} exceeded the total-bytes cap"
-                ),
-            }),
-            Err(e) => {
-                Err(HandlerError::Processing(format!("failed to extract archive: {e}")).into())
+            match self.cache.extract_archive(archive_stream).await {
+                Ok(path) => Step::Done(path),
+                Err(RepositoryCacheError::EmptyArchive) => Step::GiveUp(ResolveError::EmptyRepository {
+                    reason: EmptyRepositoryReason::EmptyArchive,
+                    detail: format!(
+                        "archive contained no entries for project {project_id} ref {ref_name} (200 OK with empty body)"
+                    ),
+                }),
+                Err(RepositoryCacheError::RepositoryTooLarge) => Step::GiveUp(ResolveError::EmptyRepository {
+                    reason: EmptyRepositoryReason::RepositoryTooLarge,
+                    detail: format!(
+                        "repository for project {project_id} ref {ref_name} exceeded the total-bytes cap"
+                    ),
+                }),
+                Err(e) => {
+                    warn!(project_id, ref_name, attempt = attempt + 1, error = %e, "archive extraction failed");
+                    let e = HandlerError::Processing(format!("failed to extract archive: {e}"));
+                    ARCHIVE_DOWNLOAD_RETRY.retry_or_give_up(attempt, (), e.into())
+                }
             }
-        }
+        })
+        .await
     }
 }
 
@@ -181,39 +200,41 @@ mod tests {
         }
     }
 
+    type ErrorFactory = Box<dyn Fn() -> RepositoryServiceError + Send>;
+
     struct ScriptedRepositoryService {
         archive: Mutex<Vec<u8>>,
         fail_downloads: Mutex<bool>,
-        download_error: Mutex<Option<RepositoryServiceError>>,
+        download_error: Mutex<Option<ErrorFactory>>,
+        transient_failures: AtomicUsize,
         download_count: AtomicUsize,
     }
 
     impl ScriptedRepositoryService {
-        fn with_archive(files: &[(&str, &str)], ref_name: &str) -> Arc<Self> {
-            Arc::new(Self {
-                archive: Mutex::new(build_test_tar_gz(files, ref_name)),
+        fn base(archive: Vec<u8>) -> Self {
+            Self {
+                archive: Mutex::new(archive),
                 fail_downloads: Mutex::new(false),
                 download_error: Mutex::new(None),
+                transient_failures: AtomicUsize::new(0),
                 download_count: AtomicUsize::new(0),
-            })
+            }
+        }
+
+        fn with_archive(files: &[(&str, &str)], ref_name: &str) -> Arc<Self> {
+            Arc::new(Self::base(build_test_tar_gz(files, ref_name)))
         }
 
         fn with_raw_archive(bytes: Vec<u8>) -> Arc<Self> {
-            Arc::new(Self {
-                archive: Mutex::new(bytes),
-                fail_downloads: Mutex::new(false),
-                download_error: Mutex::new(None),
-                download_count: AtomicUsize::new(0),
-            })
+            Arc::new(Self::base(bytes))
         }
 
-        fn with_download_error(error: RepositoryServiceError) -> Arc<Self> {
-            Arc::new(Self {
-                archive: Mutex::new(Vec::new()),
-                fail_downloads: Mutex::new(false),
-                download_error: Mutex::new(Some(error)),
-                download_count: AtomicUsize::new(0),
-            })
+        fn with_download_error(
+            make_error: impl Fn() -> RepositoryServiceError + Send + 'static,
+        ) -> Arc<Self> {
+            let service = Self::base(Vec::new());
+            *service.download_error.lock() = Some(Box::new(make_error));
+            Arc::new(service)
         }
 
         fn set_archive(&self, files: &[(&str, &str)], ref_name: &str) {
@@ -222,6 +243,10 @@ mod tests {
 
         fn set_fail_downloads(&self, fail: bool) {
             *self.fail_downloads.lock() = fail;
+        }
+
+        fn set_transient_failures(&self, count: usize) {
+            self.transient_failures.store(count, Ordering::SeqCst);
         }
 
         fn download_count(&self) -> usize {
@@ -247,8 +272,17 @@ mod tests {
             _ref_name: &str,
         ) -> Result<super::super::service::ByteStream, RepositoryServiceError> {
             self.download_count.fetch_add(1, Ordering::SeqCst);
-            if let Some(err) = self.download_error.lock().take() {
-                return Err(err);
+            if let Some(make_error) = self.download_error.lock().as_ref() {
+                return Err(make_error());
+            }
+            if self
+                .transient_failures
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
+                .is_ok()
+            {
+                return Err(RepositoryServiceError::Archive(
+                    "simulated transient download failure".to_string(),
+                ));
             }
             if *self.fail_downloads.lock() {
                 return Err(RepositoryServiceError::Archive(
@@ -382,7 +416,7 @@ mod tests {
         );
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn resolve_propagates_download_error() {
         let service =
             ScriptedRepositoryService::with_archive(&[("src/main.rs", "fn main() {}")], "abc123");
@@ -396,9 +430,9 @@ mod tests {
 
     #[tokio::test]
     async fn resolve_maps_archive_404_to_empty_repository() {
-        let service = ScriptedRepositoryService::with_download_error(
-            RepositoryServiceError::GitlabApi(gitlab_client::GitlabClientError::NotFound(42)),
-        );
+        let service = ScriptedRepositoryService::with_download_error(|| {
+            RepositoryServiceError::GitlabApi(gitlab_client::GitlabClientError::NotFound(42))
+        });
         let (_dir, resolver) = create_resolver(service);
 
         let err = resolver.resolve(42, "main", None).await.unwrap_err();
@@ -414,12 +448,12 @@ mod tests {
 
     #[tokio::test]
     async fn resolve_maps_archive_5xx_to_empty_repository() {
-        let service = ScriptedRepositoryService::with_download_error(
+        let service = ScriptedRepositoryService::with_download_error(|| {
             RepositoryServiceError::GitlabApi(gitlab_client::GitlabClientError::ServerError {
                 project_id: 42,
                 status: 500,
-            }),
-        );
+            })
+        });
         let (_dir, resolver) = create_resolver(service);
 
         let err = resolver.resolve(42, "main", None).await.unwrap_err();
@@ -452,15 +486,44 @@ mod tests {
         }
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn resolve_non_empty_errors_fall_through_to_other() {
-        let service = ScriptedRepositoryService::with_download_error(
-            RepositoryServiceError::GitlabApi(gitlab_client::GitlabClientError::Unauthorized),
-        );
+        let service = ScriptedRepositoryService::with_download_error(|| {
+            RepositoryServiceError::GitlabApi(gitlab_client::GitlabClientError::Unauthorized)
+        });
         let (_dir, resolver) = create_resolver(service);
 
         let err = resolver.resolve(42, "main", None).await.unwrap_err();
         assert!(matches!(err, ResolveError::Other(_)), "got {err:?}");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn resolve_retries_transient_download_failure_then_succeeds() {
+        let service =
+            ScriptedRepositoryService::with_archive(&[("src/main.rs", "fn main() {}")], "abc123");
+        service.set_transient_failures(2);
+        let (_dir, resolver) = create_resolver(Arc::clone(&service));
+
+        let path = resolver.resolve(1, "main", Some("abc123")).await.unwrap();
+
+        assert!(path.path().join("src/main.rs").exists());
+        assert_eq!(service.download_count(), 3);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn resolve_gives_up_after_exhausting_download_retries() {
+        let service =
+            ScriptedRepositoryService::with_archive(&[("src/main.rs", "fn main() {}")], "abc123");
+        let (_dir, resolver) = create_resolver(Arc::clone(&service));
+
+        service.set_fail_downloads(true);
+        let result = resolver.resolve(1, "main", Some("abc123")).await;
+
+        assert!(matches!(result, Err(ResolveError::Other(_))));
+        assert_eq!(
+            service.download_count(),
+            ARCHIVE_DOWNLOAD_RETRY.max_attempts as usize
+        );
     }
 
     #[tokio::test]

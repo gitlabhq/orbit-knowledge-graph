@@ -6,8 +6,8 @@ license = "LicenseRef-EE"
 
 [dependencies]
 circuit-breaker = { workspace = true }
-gkg-server-config = { path = "../gkg-server-config" }
-gkg-utils = { path = "../utils" }
+orbit-server-config = { path = "../orbit-server-config" }
+orbit-utils = { path = "../utils" }
 arrow = { workspace = true }
 arrow-ipc = { workspace = true, features = ["lz4"] }
 bytes = { workspace = true }

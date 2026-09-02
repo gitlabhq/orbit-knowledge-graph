@@ -1,15 +1,15 @@
 ---
-stage: Analytics
-group: Knowledge Graph
+stage: Orbit
+group: Context Systems
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Query your GitLab instance as a knowledge graph. Find blast radius, trace dependencies, and answer SDLC questions that GitLab alone cannot.
+description: Query your GitLab instance as a property graph. Find blast radius, trace dependencies, and answer SDLC questions that GitLab alone cannot.
 title: GitLab Orbit
 ---
 
 {{< details >}}
 
 - Tier: Premium, Ultimate
-- Offering: GitLab.com
+- Offering: GitLab.com, GitLab Self-Managed
 - Status: Beta
 
 {{< /details >}}
@@ -18,6 +18,7 @@ title: GitLab Orbit
 
 - [Introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) in GitLab 18.10 [with a feature flag](https://docs.gitlab.com/administration/feature_flags/) named `knowledge_graph`. Disabled by default. This feature is an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment).
 - [Changed](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) to [beta](https://docs.gitlab.com/policy/development_stages_support/#beta) in GitLab 19.1.
+- [Introduced](https://gitlab.com/groups/gitlab-org/-/epics/22739) for GitLab Self-Managed in GitLab 19.2.2.
 
 {{< /history >}}
 
@@ -26,7 +27,7 @@ title: GitLab Orbit
 > For more information, see the history.
 > This feature is available for testing, but not ready for production use.
 
-GitLab Orbit indexes your GitLab instance and exposes your entire SDLC as a queryable knowledge graph.
+GitLab Orbit indexes your GitLab instance and exposes your entire SDLC as a queryable property graph.
 Enable it on a group and GitLab Orbit maps everything: projects, users, merge requests, pipelines,
 work items, security findings, and the source code itself, then builds a property graph of how they
 relate to each other.
@@ -39,7 +40,7 @@ Query the graph to answer questions your instance cannot answer directly:
 - Where are the open critical vulnerabilities, and which pipelines introduced them?
 - Which projects depend on this library?
 
-*GitLab Orbit is an analytical system designed for point-in-time SDLC insight, not real-time or transactional use cases. Results reflect the state of your data as of the last index cycle.*
+GitLab Orbit is an analytical system designed for point-in-time SDLC insight, not real-time or transactional use cases. Results reflect the state of your data as of the last index cycle.
 
 For a click-through demo, see [GitLab Orbit](https://click-through-demo-generator-v-2-d63870.gitlab.io/demos/orbit-v2/).
 <!-- Demo published on 2026-06-30 -->
@@ -95,6 +96,14 @@ GitLab Orbit Remote.
 
 [Get started with GitLab Orbit Local](local/getting-started.md)
 
+## GitLab Orbit on GitLab Self-Managed
+
+On GitLab Self-Managed, you run GitLab Orbit on a Kubernetes cluster next to your instance. The deployment
+also includes the data pipeline that feeds the graph: PostgreSQL logical replication, Siphon, NATS, and
+ClickHouse. The graph and the query surfaces match GitLab.com.
+
+[Get started with GitLab Orbit on GitLab Self-Managed](self-managed/getting-started.md)
+
 ## What GitLab Orbit indexes
 
 GitLab Orbit indexes two categories of data:
@@ -113,4 +122,5 @@ GitLab Orbit indexes code in Ruby, Java, Kotlin, Python, TypeScript, JavaScript,
 
 - [Enable GitLab Orbit Remote and run your first query](remote/getting-started.md)
 - [Build a local code graph with GitLab Orbit Local](local/getting-started.md)
+- [Install GitLab Orbit on GitLab Self-Managed](self-managed/getting-started.md)
 - [Set up AI coding agents with the GitLab Orbit skill](ai_coding_agents.md)

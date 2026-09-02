@@ -46,7 +46,7 @@ Split code indexing into a dedicated `--mode=code-indexer` service. The existing
 
 #### 1. New `Mode::CodeIndexer` variant
 
-Add `CodeIndexer` to the `Mode` enum in `crates/gkg-server/src/cli/mod.rs`. The CLI flag value would be `code-indexer`.
+Add `CodeIndexer` to the `Mode` enum in `crates/orbit-server/src/cli/mod.rs`. The CLI flag value would be `code-indexer`.
 
 #### 2. New entry point in the indexer crate
 
@@ -152,4 +152,4 @@ The `code` module could be extracted to its own crate. This is orthogonal to the
 - [Code indexing design document](../indexing/code_indexing.md)
 - [SDLC indexing design document](../indexing/sdlc_indexing.md)
 - [Indexer crate: handler registry](../../../crates/indexer/src/engine/handler.rs)
-- [Server CLI: mode enum](../../../crates/gkg-server/src/cli/mod.rs)
+- [Server CLI: mode enum](../../../crates/orbit-server/src/cli/mod.rs)

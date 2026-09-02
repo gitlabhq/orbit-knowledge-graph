@@ -9,11 +9,12 @@ use crate::nats::{NatsError, NatsServices};
 use crate::orchestrator::scheduled::TaskError;
 use crate::topic::NamespaceIndexingRequest;
 use crate::types::Envelope;
+use orbit_utils::traversal_path::TraversalPath;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NamespaceDispatchRequest {
     pub namespace_id: i64,
-    pub traversal_path: String,
+    pub traversal_path: TraversalPath,
     /// Entity targets to reindex; empty means all (a full sweep).
     pub targets: Vec<String>,
 }
@@ -37,7 +38,7 @@ impl NamespaceIndexingDispatch {
 
         for namespace in namespaces {
             let traversal_path = &namespace.traversal_path;
-            if !gkg_utils::traversal_path::is_valid(traversal_path) {
+            if !traversal_path.is_valid() {
                 warn!(
                     namespace_id = namespace.namespace_id,
                     %traversal_path,
@@ -90,12 +91,12 @@ mod tests {
                 &[
                     NamespaceDispatchRequest {
                         namespace_id: 100,
-                        traversal_path: "1/100/".to_string(),
+                        traversal_path: TraversalPath::new_unchecked("1/100/"),
                         targets: Vec::new(),
                     },
                     NamespaceDispatchRequest {
                         namespace_id: 200,
-                        traversal_path: "2/200/".to_string(),
+                        traversal_path: TraversalPath::new_unchecked("2/200/"),
                         targets: Vec::new(),
                     },
                 ],
@@ -118,7 +119,7 @@ mod tests {
             .dispatch_for_namespaces(
                 &[NamespaceDispatchRequest {
                     namespace_id: 1,
-                    traversal_path: "0/".to_string(),
+                    traversal_path: TraversalPath::new_unchecked("0/"),
                     targets: Vec::new(),
                 }],
                 Utc::now(),

@@ -6,7 +6,7 @@ use std::sync::LazyLock;
 use opentelemetry::KeyValue;
 use opentelemetry::metrics::Counter;
 
-use gkg_observability::query::engine as spec;
+use orbit_observability::query::engine as spec;
 
 use crate::error::QueryError;
 
@@ -26,7 +26,7 @@ pub struct QueryEngineMetrics {
 
 impl QueryEngineMetrics {
     pub fn new() -> Self {
-        let meter = gkg_observability::meter();
+        let meter = orbit_observability::meter();
         Self {
             compiler_rejected: spec::COMPILER_REJECTED.build_counter_u64(&meter),
         }

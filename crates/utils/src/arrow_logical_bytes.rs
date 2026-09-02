@@ -314,6 +314,27 @@ mod tests {
     }
 
     #[test]
+    fn list_dictionary_encoding_counts_identical_to_list_utf8() {
+        let specs = |t| vec![spec("tags", t, false)];
+        let build = |t| {
+            let mut b = BatchBuilder::new(&specs(t), 4).unwrap();
+            for row in [
+                vec!["kind:function", "lang:java"],
+                vec!["kind:function"],
+                vec![],
+                vec!["lang:java", "kind:class", "kind:function"],
+            ] {
+                b.col("tags").unwrap().push_str_list(&row).unwrap();
+            }
+            b.finish().unwrap()
+        };
+        assert_eq!(
+            logical_byte_size(&build(ColumnType::StrList)).unwrap(),
+            logical_byte_size(&build(ColumnType::DictStrList)).unwrap()
+        );
+    }
+
+    #[test]
     fn sliced_batch_counts_only_rows_inside_the_slice() {
         let batch = builder_fixture().project(&[3]).unwrap();
         let sliced = batch.slice(2, 2);

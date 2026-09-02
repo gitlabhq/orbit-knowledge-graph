@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Utc};
 use code_graph::v2::{CancellationToken, Pipeline, PipelineConfig};
-use gkg_server_config::CodeIndexingPipelineConfig;
+use orbit_server_config::CodeIndexingPipelineConfig;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tracing::{debug, info, warn};
 
@@ -20,11 +20,12 @@ use crate::clickhouse::{BufferedWriter, BufferedWriterConfig, ClickHouseWriter, 
 use crate::handler::{HandlerContext, HandlerError};
 use crate::locking::LockGuard;
 use crate::observer::IndexingObserver;
+use orbit_utils::traversal_path::TraversalPath;
 
 pub struct IndexingRequest {
     pub project_id: i64,
     pub branch: String,
-    pub traversal_path: String,
+    pub traversal_path: TraversalPath,
     pub task_id: i64,
     pub commit_sha: Option<String>,
     pub had_prior_checkpoint: bool,
@@ -32,7 +33,7 @@ pub struct IndexingRequest {
 
 pub enum IndexOutcome {
     /// Parsed and streamed to the sink, which checkpoints it after the flush lands.
-    Indexed,
+    Indexed { rows_written: u64 },
     /// Archive endpoint signalled no repository content (404 or 5xx); already checkpointed.
     EmptyRepository,
 }
@@ -40,7 +41,7 @@ pub enum IndexOutcome {
 impl IndexOutcome {
     pub fn metric_label(&self) -> &'static str {
         match self {
-            IndexOutcome::Indexed => "indexed",
+            IndexOutcome::Indexed { .. } => "indexed",
             IndexOutcome::EmptyRepository => "empty_repository",
         }
     }
@@ -160,6 +161,11 @@ impl Drop for ProjectCommit {
     fn drop(&mut self) {
         self.inflight.fetch_sub(1, Ordering::AcqRel);
     }
+}
+
+struct IndexedRun {
+    commit: Arc<ProjectCommit>,
+    rows_written: u64,
 }
 
 pub struct CodeIndexer {
@@ -429,13 +435,15 @@ impl CodeIndexer {
         // `repository` owns a TempDir that removes the extraction tree on drop, so it is reclaimed
         // whether this returns, errors, or is dropped mid-run on the wall-clock timeout.
         self.metrics.record_cleanup("success");
-        let commit = indexing_result?;
+        let run = indexing_result?;
 
         // Drop the pipeline's sentinel hold. If every submitted batch has already flushed, this
         // is the decrement that finalizes; otherwise the writer's last flush will.
-        commit.release();
+        run.commit.release();
 
-        Ok(IndexOutcome::Indexed)
+        Ok(IndexOutcome::Indexed {
+            rows_written: run.rows_written,
+        })
     }
 
     #[allow(
@@ -450,7 +458,7 @@ impl CodeIndexer {
         indexed_at: DateTime<Utc>,
         observer: &mut dyn IndexingObserver,
         cancel: CancellationToken,
-    ) -> Result<Arc<ProjectCommit>, HandlerError> {
+    ) -> Result<IndexedRun, HandlerError> {
         let indexing_start = Instant::now();
         let config = self.build_pipeline_config(context, cancel.clone());
         let (result, commit, metered_bytes) = self
@@ -470,7 +478,7 @@ impl CodeIndexer {
         self.metrics
             .record_indexing_duration(indexing_start.elapsed());
 
-        self.record_indexing_results(
+        let rows_written = self.record_indexing_results(
             &result,
             observer,
             request,
@@ -490,7 +498,10 @@ impl CodeIndexer {
         }
 
         context.progress.notify_in_progress().await;
-        Ok(commit)
+        Ok(IndexedRun {
+            commit,
+            rows_written,
+        })
     }
 
     fn build_pipeline_config(
@@ -594,7 +605,7 @@ impl CodeIndexer {
                 }
                 // logical_byte_size is slice-invariant, so metering the whole batch once equals
                 // summing the slices below.
-                let batch_bytes = match gkg_utils::arrow::logical_byte_size(&batch) {
+                let batch_bytes = match orbit_utils::arrow::logical_byte_size(&batch) {
                     Ok(n) => n,
                     Err(e) => {
                         tracing::error!(table, error = %e, "batch has no logical-byte-size rule; counting 0 bytes");
@@ -664,7 +675,7 @@ impl CodeIndexer {
         request: &IndexingRequest,
         indexing_start: Instant,
         written_bytes: u64,
-    ) {
+    ) -> u64 {
         let parsed_count = result
             .stats
             .files_parsed
@@ -751,6 +762,8 @@ impl CodeIndexer {
         for error in &result.errors {
             self.metrics.record_stage_error(error.stage);
         }
+
+        rows_written
     }
 }
 
@@ -802,7 +815,7 @@ mod tests {
             remaining: AtomicUsize::new(1 + batches),
             failed: AtomicBool::new(false),
             checkpoint: CodeIndexingCheckpoint {
-                traversal_path: "1/7/".into(),
+                traversal_path: TraversalPath::new_unchecked("1/7/"),
                 project_id: 7,
                 branch: "main".into(),
                 last_task_id: 7,
@@ -837,7 +850,7 @@ mod tests {
         commit.clone().release();
         assert!(
             store
-                .get_checkpoint("1/7/", 7, "main")
+                .get_checkpoint(&TraversalPath::new_unchecked("1/7/"), 7, "main")
                 .await
                 .unwrap()
                 .is_none(),
@@ -848,7 +861,7 @@ mod tests {
         settle(&inflight).await;
         assert!(
             store
-                .get_checkpoint("1/7/", 7, "main")
+                .get_checkpoint(&TraversalPath::new_unchecked("1/7/"), 7, "main")
                 .await
                 .unwrap()
                 .is_some(),
@@ -870,7 +883,7 @@ mod tests {
         assert!(cleaner.calls.lock().is_empty());
         assert!(
             store
-                .get_checkpoint("1/7/", 7, "main")
+                .get_checkpoint(&TraversalPath::new_unchecked("1/7/"), 7, "main")
                 .await
                 .unwrap()
                 .is_some(),
@@ -904,7 +917,7 @@ mod tests {
         settle(&inflight).await;
         assert!(
             store
-                .get_checkpoint("1/7/", 7, "main")
+                .get_checkpoint(&TraversalPath::new_unchecked("1/7/"), 7, "main")
                 .await
                 .unwrap()
                 .is_none(),
@@ -955,7 +968,7 @@ mod tests {
         settle(&inflight).await;
         assert!(
             store
-                .get_checkpoint("1/7/", 7, "main")
+                .get_checkpoint(&TraversalPath::new_unchecked("1/7/"), 7, "main")
                 .await
                 .unwrap()
                 .is_none(),

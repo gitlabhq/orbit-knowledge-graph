@@ -7,7 +7,8 @@ set -euo pipefail
 BENCH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "${BENCH_DIR}/scripts/lib.sh"
 
-: "${DUMP_PREFIX:=core-2026-06-25-1115}"
+: "${DUMP_PREFIX:=$(bench '.gcs.dump_prefix')}"
+GCP_SA=$(cd "${TF_DIR}" && "$TF" output -raw node_sa_email 2>/dev/null)
 : "${CH_NS:=ra-ch-${RUN_ID}}"
 
 # Read credentials from the secret created by provision.sh.
@@ -26,16 +27,17 @@ $KC create secret generic ra-import-ch-auth \
 # Ensure the GCS-access KSA exists.
 $KC create sa ra-import-sa -n "${CH_NS}" 2>/dev/null || true
 $KC annotate sa ra-import-sa -n "${CH_NS}" \
-  "iam.gke.io/gcp-service-account=1079327125344-compute@developer.gserviceaccount.com" \
+  "iam.gke.io/gcp-service-account=${GCP_SA}" \
   --overwrite 2>/dev/null
 
 # Delete any previous Job.
 $KC delete job ra-import-dump -n "${CH_NS}" --ignore-not-found=true 2>/dev/null
 
-log "Submitting import job (dump=${DUMP_PREFIX}, ch=${CH_NS})"
+DUMPS_BUCKET=$(cd "${TF_DIR}" && "$TF" output -raw datalake_dumps_bucket 2>/dev/null || bench '.buckets.datalake_dumps')
+log "Submitting import job (dump=${DUMP_PREFIX}, ch=${CH_NS}, bucket=${DUMPS_BUCKET})"
 
-CH_NAMESPACE="${CH_NS}" DUMP_PREFIX="${DUMP_PREFIX}" \
-  envsubst '${CH_NAMESPACE} ${DUMP_PREFIX}' < "${BENCH_DIR}/manifests/import-datalake-job.yaml" | $KC apply -n "${CH_NS}" -f -
+CH_NAMESPACE="${CH_NS}" DUMP_PREFIX="${DUMP_PREFIX}" DUMPS_BUCKET="${DUMPS_BUCKET}" \
+  envsubst '${CH_NAMESPACE} ${DUMP_PREFIX} ${DUMPS_BUCKET}' < "${BENCH_DIR}/manifests/import-datalake-job.yaml" | $KC apply -n "${CH_NS}" -f -
 
 log "Waiting for import job to start..."
 $KC wait -n "${CH_NS}" job/ra-import-dump \

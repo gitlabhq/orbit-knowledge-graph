@@ -1,0 +1,80 @@
+[package]
+name = "orbit-server"
+version.workspace = true
+edition = "2024"
+license = "MIT"
+
+[[bin]]
+name = "gkg-server"
+path = "src/main.rs"
+
+[features]
+default = []
+regenerate-protos = []
+testkit = ["orbit-analytics/testkit"]
+
+[dependencies]
+mimalloc = { workspace = true }
+anyhow = { workspace = true }
+arrow = { workspace = true }
+moka = { workspace = true }
+base64 = { workspace = true }
+async-trait = { workspace = true }
+axum = { workspace = true }
+clap = { workspace = true }
+clickhouse-client = { path = "../clickhouse-client" }
+orbit-analytics = { path = "../orbit-analytics" }
+orbit-billing = { path = "../orbit-billing" }
+orbit-observability = { workspace = true }
+orbit-prompts = { path = "../orbit-prompts" }
+orbit-server-config = { path = "../orbit-server-config" }
+orbit-utils = { path = "../utils" }
+health-check = { workspace = true }
+indexer = { path = "../indexer" }
+minijinja = { workspace = true }
+named-queries = { path = "../named-queries" }
+nats-client = { workspace = true }
+ontology = { path = "../ontology" }
+tower = { workspace = true }
+opentelemetry = { workspace = true }
+prost = { workspace = true }
+reqwest = { workspace = true }
+rustls = { workspace = true }
+query-engine = { path = "../query-engine" }
+gitlab-client = { workspace = true }
+jsonschema = { workspace = true }
+jsonwebtoken = { workspace = true }
+labkit = { workspace = true, features = ["http", "grpc", "otel", "prometheus"] }
+labkit-events = { workspace = true }
+serde = { workspace = true }
+semver = { workspace = true }
+strum = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tokio-util.workspace = true
+tokio-stream = { workspace = true }
+tracing = { workspace = true }
+chrono = { workspace = true }
+futures = { workspace = true }
+tonic = { workspace = true }
+tonic-prost = { workspace = true }
+uuid = { workspace = true, features = ["v4"] }
+toon-format = { workspace = true }
+
+[build-dependencies]
+compiler = { path = "../query-engine/compiler" }
+orbit-prompts = { path = "../orbit-prompts" }
+named-queries = { path = "../named-queries" }
+ontology = { path = "../ontology" }
+tower = { workspace = true }
+tonic-prost-build = { workspace = true }
+
+[dev-dependencies]
+orbit-analytics = { path = "../orbit-analytics", features = ["testkit"] }
+tokio = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[lints.rust]
+# workspace uses `forbid`, downgraded to `deny` so tests can manipulate env vars
+unsafe_code = "deny"

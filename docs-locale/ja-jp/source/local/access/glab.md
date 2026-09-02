@@ -1,6 +1,6 @@
 ---
-stage: Analytics
-group: Knowledge Graph
+stage: Orbit
+group: Context Systems
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
 description: GitLab CLIのglab orbit localとglab orbit setupを使用して、Orbit Localのインストール、インデックス作成、クエリを実行します。
 title: GitLab CLI（`glab`）でOrbit Localを使用する
@@ -31,7 +31,7 @@ title: GitLab CLI（`glab`）でOrbit Localを使用する
 トップレベルのコマンドは2つあります。
 
 - `glab orbit local`: 管理された`orbit`バイナリをラップし、ローカルグラフのインデックス作成とクエリを実行します。
-- `glab orbit setup`: アクセスの確認、Orbitスキルのインストール、ローカルバイナリのインストールをガイド付きで行うオンボーディングコマンドです。
+- `glab orbit setup`: アクセスの確認、GitLab Orbitスキルのインストール、ローカルバイナリのインストールをガイド付きで行うオンボーディングコマンドです。
 
 ## 前提条件 {#prerequisites}
 
@@ -52,29 +52,22 @@ glab orbit local --install
 インストールを確認するには、次のコマンドを実行します。
 
 ```shell
-glab orbit local help
+glab orbit version
 ```
 
 ## AIエージェントをセットアップする {#set-up-your-ai-agent}
 
-`glab orbit setup`はガイド付きオンボーディングを実行します。Orbitへの接続確認、AIコーディングエージェントが検出できるようにするOrbitスキルのインストール、ローカル`orbit`バイナリのインストールを行います。
+`glab orbit setup`は、AIコーディングエージェントがグラフを参照できるよう設定します。各エージェントの指示ファイルに管理セクションを書き込み、GitLab Orbitスキルをインストールします。
 
 ```shell
 glab orbit setup
 ```
 
-| フラグ | 説明 |
-|------|---------|
-| `--yes` | すべてのプロンプトを承認します（非インタラクティブモード）。 |
-| `--global` | 現在のリポジトリではなく、ユーザースコープ（`~/.agents/skills/`）にスキルをインストールします。 |
-| `--path` | 指定したディレクトリにスキルをインストールします。 |
-| `--skip-skill` | スキルのインストール手順をスキップします。 |
-| `--skip-local` | ローカルバイナリのインストール手順をスキップします。 |
-| `--upgrade` | スキルを再取得し、バイナリをその場で更新します。 |
+オプションの全一覧は`glab orbit setup --help`で確認できます。設定対象のエージェント、プロジェクトまたはユーザースコープ、ローカルまたはリモートグラフ、アンインストール用の`--remove`などが含まれます。
 
 スキルは`orbit`バイナリを直接駆動します。MCPクライアントをローカルグラフに接続する場合は、[MCPを使用してOrbitにアクセスする](mcp.md)を参照してください。
 
-`glab skills install --global orbit`を使用して、[Orbitスキルを手動でインストールする](../../ai_coding_agents.md)こともできます。
+`glab skills install --global orbit`を使用して、[GitLab Orbitスキルを手動でインストールする](../../ai_coding_agents.md)こともできます。
 
 ## リポジトリのインデックスを作成する {#index-a-repository}
 

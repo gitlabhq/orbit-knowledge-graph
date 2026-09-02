@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use arrow::datatypes::UInt32Type;
 use clickhouse_client::{ArrowClickHouseClient, ArrowQuery};
-use gkg_utils::arrow::ArrowUtils;
+use orbit_utils::arrow::ArrowUtils;
 use query_engine::compiler::ast::ddl::{ColumnDef, ColumnType, CreateTable, Engine};
 use query_engine::compiler::emit_create_table;
 use query_engine::compiler::emit_simple_query;
@@ -17,7 +17,7 @@ use thiserror::Error;
 use tokio::time::Instant;
 use uuid::Uuid;
 
-use crate::engine::retry::{Backoff, RetryMode, RetryPolicy, Step, drive_until};
+use crate::retry::{Backoff, LocalRetry, Step, drive_until};
 use tracing::{info, warn};
 
 const VERSION_TABLE: &str = "gkg_schema_version";
@@ -73,7 +73,7 @@ fn version_table_ddl() -> CreateTable {
 
 fn read_active_version_query() -> (
     String,
-    std::collections::HashMap<String, gkg_utils::clickhouse::ParamValue>,
+    std::collections::HashMap<String, orbit_utils::clickhouse::ParamValue>,
 ) {
     let query = Query {
         select: vec![SelectExpr {
@@ -97,7 +97,7 @@ fn write_version_query(
     version: u32,
 ) -> (
     String,
-    std::collections::HashMap<String, gkg_utils::clickhouse::ParamValue>,
+    std::collections::HashMap<String, orbit_utils::clickhouse::ParamValue>,
 ) {
     let insert = Insert::new(
         VERSION_TABLE,
@@ -111,7 +111,7 @@ fn write_migrating_version_query(
     version: u32,
 ) -> (
     String,
-    std::collections::HashMap<String, gkg_utils::clickhouse::ParamValue>,
+    std::collections::HashMap<String, orbit_utils::clickhouse::ParamValue>,
 ) {
     let insert = Insert::new(
         VERSION_TABLE,
@@ -452,14 +452,12 @@ pub async fn wait_until_ready(
     );
 
     let deadline = Instant::now() + timeout;
-    let policy = RetryPolicy {
-        mode: RetryMode::Local,
+    let policy = LocalRetry {
         backoff: Backoff::Exponential {
             base: poll_interval,
             cap: MAX_BACKOFF_INTERVAL,
         },
         max_attempts: u32::MAX, // the deadline is the real bound
-        dead_letter: false,
     };
 
     // Carried state is the last-seen (active, migrating), read back by on_deadline for the report.

@@ -4,7 +4,7 @@
 
 use std::path::Path;
 
-use gkg_utils::fs_stream::{Decision, FileInventoryEntry};
+use orbit_utils::fs_stream::{Decision, FileInventoryEntry};
 use rustc_hash::FxHashMap;
 
 use crate::v2::config::{Language, LanguageFamily, detect_language_from_path};

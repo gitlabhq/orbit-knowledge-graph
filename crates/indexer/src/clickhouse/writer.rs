@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use arrow::record_batch::RecordBatch;
 use clickhouse_client::{ArrowClickHouseClient, ClickHouseConfigurationExt};
-use gkg_server_config::ClickHouseConfiguration;
+use orbit_server_config::ClickHouseConfiguration;
 use thiserror::Error;
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
@@ -13,8 +13,8 @@ use tokio::time::Instant;
 use tracing::{error, warn};
 
 use crate::durability::WriteDurability;
-use crate::engine::retry::{Backoff, RetryExhausted, RetryMode, RetryPolicy, Step, drive};
 use crate::metrics::EngineMetrics;
+use crate::retry::{Backoff, LocalRetry, RetryExhausted, Step, drive};
 
 #[derive(Debug, Error)]
 pub enum WriteError {
@@ -99,7 +99,7 @@ impl ClickHouseWriter {
         let rows: u64 = batches.iter().map(|b| b.num_rows() as u64).sum();
         let bytes: u64 = batches
             .iter()
-            .map(|batch| match gkg_utils::arrow::logical_byte_size(batch) {
+            .map(|batch| match orbit_utils::arrow::logical_byte_size(batch) {
                 Ok(n) => n,
                 Err(e) => {
                     self.metrics.record_unmeterable_batch(table);
@@ -147,6 +147,18 @@ impl ClickHouseWriter {
             rows,
             bytes,
         })
+    }
+
+    /// Issues a `DELETE FROM` statement for rows that should be lightweight-deleted.
+    pub async fn lightweight_delete(&self, sql: &str) -> Result<(), WriteError> {
+        if self.noop {
+            return Ok(());
+        }
+        self.client
+            .query(sql)
+            .execute()
+            .await
+            .map_err(|e| WriteError::Write(e.to_string(), None))
     }
 }
 
@@ -351,11 +363,9 @@ impl Drop for NotifyOnDrop {
 }
 
 /// Blanket-retries a transient ClickHouse insert (its error codes are not stable enough to classify).
-const WRITE_RETRY: RetryPolicy = RetryPolicy {
-    mode: RetryMode::Local,
+const WRITE_RETRY: LocalRetry = LocalRetry {
     backoff: Backoff::Fixed(&[Duration::from_secs(2), Duration::from_secs(4)]),
     max_attempts: 3,
-    dead_letter: false,
 };
 
 /// Write one coalesced part, then notify every batch's token whether its rows landed.

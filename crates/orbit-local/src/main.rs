@@ -5,13 +5,16 @@ mod commands;
 mod descriptions;
 mod list;
 mod mcp;
+mod remote;
+mod settings;
 mod skill;
 mod sql;
 mod sql_format;
+mod telemetry;
 mod workspace;
 
 use anyhow::{Context, Result};
-use clap::{Parser, Subcommand};
+use clap::{Args, CommandFactory, FromArgMatches, Parser, Subcommand};
 use ontology::Ontology;
 use serde::Serialize;
 use std::collections::HashMap;
@@ -22,9 +25,15 @@ use tracing_subscriber::fmt::format::FmtSpan;
 
 const LOCAL_DDL: &str = include_str!(concat!(env!("CONFIG_DIR"), "/graph_local.sql"));
 
+const SKILL_LONG_ABOUT: &str = "Print the bundled, version-matched orbit-local skill content.\n\n\
+                                With no argument, prints SKILL.md (the manifest). Pass a relative path \
+                                such as `references/sql.md` or `references/repo_map.md` to print that file.";
+
 /// Per-file byte cap for local indexing; files above it are recorded as nodes
 /// but not loaded or parsed.
 const MAX_INDEXED_FILE_BYTES: u64 = 5_000_000;
+
+const TELEMETRY_FLUSH_TIMEOUT: Duration = Duration::from_millis(500);
 
 #[derive(Serialize)]
 struct IndexOutput {
@@ -143,143 +152,505 @@ struct Cli {
     command: Commands,
 }
 
+#[derive(Args, Debug, PartialEq)]
+#[command(about = descriptions::short("index"))]
+struct IndexArgs {
+    /// Path to the repository to index
+    #[arg(value_name = "PATH")]
+    path: PathBuf,
+
+    /// Number of worker threads (0 = auto-detect based on CPU cores)
+    #[arg(short, long, default_value = "0")]
+    threads: usize,
+
+    /// Include detailed statistics in output
+    #[arg(short, long)]
+    stats: bool,
+
+    /// Verbose logging to stderr
+    #[arg(short, long)]
+    verbose: bool,
+
+    /// Override the DuckDB path (default: ~/.orbit/graph.duckdb).
+    #[arg(long, value_name = "PATH")]
+    db: Option<PathBuf>,
+}
+
+#[derive(Args, Debug, PartialEq)]
+#[command(about = descriptions::short("ask"))]
+#[command(
+    long_about = "Answer a plain-language question with a scoped subgraph.\n\n\
+                  Ranks indexed definitions by how many distinct question terms they \
+                  match, then shows the most relevant connections to the top matches, \
+                  ranked by graph proximity.\n\n\
+                  When the output notes unmatched terms or weak matches, read the \
+                  top matches first — they are often still right. Retry with a \
+                  synonym or identifier fragment only if they look off, then fall \
+                  back to grep."
+)]
+struct AskArgs {
+    /// Plain-language question, e.g. "how does the quota gate decide?"
+    #[arg(value_name = "QUESTION")]
+    question: String,
+
+    /// Repository path (default: current directory).
+    #[arg(long, value_name = "PATH")]
+    repo: Option<PathBuf>,
+
+    /// Maximum matched definitions to show.
+    #[arg(long, default_value = "10")]
+    limit: usize,
+
+    /// Override the DuckDB path (default: ~/.orbit/graph.duckdb).
+    #[arg(long, value_name = "PATH")]
+    db: Option<PathBuf>,
+}
+
+fn fqn_arg_help() -> String {
+    format!(
+        "Exact fully qualified name as printed by `{} ask`.",
+        commands::setup::spec::launcher()
+    )
+}
+
+fn show_long_about() -> String {
+    format!(
+        "Print the full source body of an indexed definition.\n\n\
+         Takes the exact fully qualified name as printed by `{} ask` \
+         and prints the definition's source lines from the working tree, so a \
+         follow-up on an ask match needs no file read.",
+        commands::setup::spec::launcher()
+    )
+}
+
+fn describe_long_about() -> String {
+    format!(
+        "Print every graph connection of an indexed definition.\n\n\
+         Takes the exact fully qualified name as printed by `{} ask` \
+         and prints all edges touching it — callers, callees, supertypes, \
+         subtypes, members, importers — so a truncated `called by: … +N more` \
+         line or any full call-graph question needs no SQL follow-up.",
+        commands::setup::spec::launcher()
+    )
+}
+
+#[derive(Args, Debug, PartialEq)]
+#[command(about = "Print the full source body of a definition by exact fqn")]
+#[command(long_about = show_long_about())]
+struct ShowArgs {
+    #[arg(value_name = "FQN", help = fqn_arg_help())]
+    fqn: String,
+
+    /// Repository path (default: current directory).
+    #[arg(long, value_name = "PATH")]
+    repo: Option<PathBuf>,
+
+    /// Override the DuckDB path (default: ~/.orbit/graph.duckdb).
+    #[arg(long, value_name = "PATH")]
+    db: Option<PathBuf>,
+}
+
+#[derive(Args, Debug, PartialEq)]
+#[command(about = "Print every connection of a definition, by exact fqn")]
+#[command(long_about = describe_long_about())]
+struct DescribeArgs {
+    #[arg(value_name = "FQN", help = fqn_arg_help())]
+    fqn: String,
+
+    /// Repository path (default: current directory).
+    #[arg(long, value_name = "PATH")]
+    repo: Option<PathBuf>,
+
+    /// Override the DuckDB path (default: ~/.orbit/graph.duckdb).
+    #[arg(long, value_name = "PATH")]
+    db: Option<PathBuf>,
+}
+
+#[derive(Args, Debug, PartialEq)]
+#[command(about = descriptions::short("run_sql"))]
+struct SqlArgs {
+    /// SQL query, or `-` to read from stdin.
+    #[arg(value_name = "QUERY", conflicts_with = "file")]
+    query: Option<String>,
+
+    /// Read SQL from a file.
+    #[arg(long, short, value_name = "PATH")]
+    file: Option<PathBuf>,
+
+    /// Output format.
+    #[arg(long, short = 'F', default_value = "table")]
+    format: sql_format::Format,
+
+    /// Override the DuckDB path (default: ~/.orbit/graph.duckdb).
+    #[arg(long, value_name = "PATH")]
+    db: Option<PathBuf>,
+}
+
+#[derive(Args, Debug, PartialEq)]
+#[command(about = descriptions::short("get_graph_schema"))]
+struct SchemaArgs {
+    /// Override the DuckDB path (default: ~/.orbit/graph.duckdb).
+    #[arg(long, value_name = "PATH")]
+    db: Option<PathBuf>,
+
+    /// Emit JSON instead of the default table view.
+    #[arg(long)]
+    raw: bool,
+
+    /// Optional table names to scope the output.
+    /// When provided, only columns for those tables are shown.
+    /// e.g. `orbit local schema gl_definition gl_edge`
+    #[arg(value_name = "TABLE")]
+    tables: Vec<String>,
+}
+
+/// List the repositories indexed in the local DuckDB graph.
+#[derive(Args, Debug, PartialEq)]
+struct ListArgs {
+    /// Output format.
+    #[arg(long, short = 'F', default_value = "table")]
+    format: sql_format::Format,
+
+    /// Override the DuckDB path (default: ~/.orbit/graph.duckdb).
+    #[arg(long, value_name = "PATH")]
+    db: Option<PathBuf>,
+}
+
+#[derive(Args, Debug, PartialEq)]
+#[command(about = descriptions::short("mcp_serve"))]
+#[command(long_about = "Serve the local graph to MCP-compatible AI agents.\n\n\
+                  Plug into editors that support MCP (Claude Code, Cursor, OpenCode, Codex) \
+                  so the agent can call `run_sql`, `get_graph_schema`, and `index`.")]
+struct McpArgs {
+    #[command(subcommand)]
+    command: McpCommands,
+}
+
+#[derive(Args, Debug, PartialEq)]
+#[command(name = "repo-map", about = descriptions::short("repo_map"))]
+#[command(
+    long_about = "Produce a high-level, LLM-oriented map of a locally indexed repository.\n\n\
+                   Scoped to the current commit; if it is not indexed, prints the index \
+                   command and exits. Running with no subcommand defaults to `overview`. \
+                   Drill down with `tree`, `api`, `class`, `extends`, and `imports`."
+)]
+struct RepoMapArgs {
+    /// Repository path (default: current directory).
+    #[arg(long, value_name = "PATH")]
+    repo: Option<PathBuf>,
+
+    /// Limit output to source files with these extensions (repeat or
+    /// comma-separate; a leading dot is optional).
+    #[arg(long = "ext", value_name = "EXT")]
+    extensions: Vec<String>,
+
+    /// Override the DuckDB path (default: ~/.orbit/graph.duckdb).
+    #[arg(long, value_name = "PATH")]
+    db: Option<PathBuf>,
+
+    #[command(subcommand)]
+    command: Option<commands::repo_map::RepoMapCommand>,
+}
+
 #[derive(Subcommand)]
 enum Commands {
     /// Print the version string and exit.
     Version,
-    #[command(about = descriptions::short("index"))]
-    Index {
-        /// Path to the repository to index
-        #[arg(value_name = "PATH")]
-        path: PathBuf,
-
-        /// Number of worker threads (0 = auto-detect based on CPU cores)
-        #[arg(short, long, default_value = "0")]
-        threads: usize,
-
-        /// Include detailed statistics in output
-        #[arg(short, long)]
-        stats: bool,
-
-        /// Verbose logging to stderr
-        #[arg(short, long)]
-        verbose: bool,
-
-        /// Override the DuckDB path (default: ~/.orbit/graph.duckdb).
-        #[arg(long, value_name = "PATH")]
-        db: Option<PathBuf>,
-    },
-    #[command(about = descriptions::short("run_sql"))]
-    Sql {
-        /// SQL query, or `-` to read from stdin.
-        #[arg(value_name = "QUERY", conflicts_with = "file")]
-        query: Option<String>,
-
-        /// Read SQL from a file.
-        #[arg(long, short, value_name = "PATH")]
-        file: Option<PathBuf>,
-
-        /// Output format.
-        #[arg(long, short = 'F', default_value = "table")]
-        format: sql_format::Format,
-
-        /// Override the DuckDB path (default: ~/.orbit/graph.duckdb).
-        #[arg(long, value_name = "PATH")]
-        db: Option<PathBuf>,
-    },
-    #[command(about = descriptions::short("get_graph_schema"))]
-    Schema {
-        /// Override the DuckDB path (default: ~/.orbit/graph.duckdb).
-        #[arg(long, value_name = "PATH")]
-        db: Option<PathBuf>,
-
-        /// Emit JSON instead of the default table view.
-        #[arg(long)]
-        raw: bool,
-
-        /// Optional table names to scope the output.
-        /// When provided, only columns for those tables are shown.
-        /// e.g. `orbit schema gl_definition gl_edge`
-        #[arg(value_name = "TABLE")]
-        tables: Vec<String>,
-    },
-    /// List the repositories indexed in the local DuckDB graph.
-    List {
-        /// Output format.
-        #[arg(long, short = 'F', default_value = "table")]
-        format: sql_format::Format,
-
-        /// Override the DuckDB path (default: ~/.orbit/graph.duckdb).
-        #[arg(long, value_name = "PATH")]
-        db: Option<PathBuf>,
-    },
-    #[command(about = descriptions::short("mcp_serve"))]
-    #[command(long_about = "Serve the local graph to MCP-compatible AI agents.\n\n\
-                      Plug into editors that support MCP (Claude Code, Cursor, OpenCode, Codex) \
-                      so the agent can call `run_sql`, `get_graph_schema`, and `index`.")]
-    Mcp {
-        #[command(subcommand)]
-        command: McpCommands,
-    },
-    #[command(about = descriptions::short("skill"))]
-    #[command(
-        long_about = "Print the bundled, version-matched orbit-local skill content.\n\n\
-                      With no argument, prints SKILL.md (the manifest). Pass a relative path \
-                      such as `references/sql.md` or `references/repo_map.md` to print that file."
-    )]
+    #[command(hide = true)]
+    Index(IndexArgs),
+    #[command(hide = true)]
+    Ask(AskArgs),
+    #[command(hide = true)]
+    Show(ShowArgs),
+    #[command(hide = true)]
+    Describe(DescribeArgs),
+    #[command(hide = true)]
+    Sql(SqlArgs),
+    #[command(hide = true)]
+    Schema(SchemaArgs),
+    #[command(hide = true)]
+    List(ListArgs),
+    #[command(hide = true)]
+    Mcp(McpArgs),
+    #[command(name = "repo-map", hide = true)]
+    RepoMap(RepoMapArgs),
+    #[command(about = descriptions::short("skill"), long_about = SKILL_LONG_ABOUT)]
     Skill {
         /// Skill file to print, relative to the skill root (default: SKILL.md).
         #[arg(value_name = "PATH")]
         path: Option<String>,
     },
-    #[command(name = "repo-map", about = descriptions::short("repo_map"))]
+    /// Configure AI coding assistants to consult the graph.
     #[command(
-        long_about = "Produce a high-level, LLM-oriented map of a locally indexed repository.\n\n\
-                       Scoped to the current commit; if it is not indexed, prints the index \
-                       command and exits. Running with no subcommand defaults to `overview`. \
-                       Drill down with `tree`, `api`, `class`, `extends`, and `imports`."
+        long_about = "Configure AI coding assistants to consult the graph.\n\n\
+                      Writes a managed section into each assistant's user-global \
+                      instruction file (default) or the project's with `--project`/`--dir`, \
+                      telling the assistant to prefer graph queries over grepping raw files, \
+                      plus nudge hooks where the platform supports them (Claude Code, \
+                      OpenCode). The guidance points at the remote Orbit graph \
+                      (`glab orbit remote`) unless `--local` is passed. Pre-existing files \
+                      get a one-time `.orbit-backup` sibling before their first modification. \
+                      Re-running updates the section in place; `--remove` uninstalls."
     )]
-    RepoMap {
-        /// Repository path (default: current directory).
+    Setup {
+        /// Assistants to configure. Required when installing; `--remove`
+        /// without assistants removes the setup for all of them.
+        #[arg(value_name = "ASSISTANT", value_parser = commands::setup::assistant_value_parser(), required_unless_present = "remove")]
+        assistants: Vec<String>,
+
+        /// Remove the configuration written by `orbit setup`.
+        #[arg(long)]
+        remove: bool,
+
+        /// Point the guidance at the local graph (queries run through
+        /// `orbit sql`) instead of the remote Orbit graph.
+        #[arg(long, conflicts_with = "remove")]
+        local: bool,
+
+        /// Write into the current project instead of the user-global config
+        /// files.
+        #[arg(long)]
+        project: bool,
+
+        /// Project directory (implies --project; default: current directory).
         #[arg(long, value_name = "PATH")]
-        repo: Option<PathBuf>,
+        dir: Option<PathBuf>,
+    },
+    #[command(hide = true)]
+    HookGuard {
+        #[arg(value_name = "KIND")]
+        kind: commands::hook_guard::Kind,
 
-        /// Limit output to source files with these extensions (repeat or
-        /// comma-separate; a leading dot is optional).
-        #[arg(long = "ext", value_name = "EXT")]
-        extensions: Vec<String>,
-
-        /// Override the DuckDB path (default: ~/.orbit/graph.duckdb).
-        #[arg(long, value_name = "PATH")]
-        db: Option<PathBuf>,
-
+        #[arg(long, default_value = "remote")]
+        mode: commands::setup::spec::Mode,
+    },
+    /// Query the remote Orbit graph over the GitLab API.
+    Remote {
         #[command(subcommand)]
-        command: Option<commands::repo_map::RepoMapCommand>,
+        command: RemoteCommands,
+    },
+    /// Operate on the local DuckDB code graph.
+    Local {
+        #[command(subcommand)]
+        command: LocalCommands,
+    },
+    /// Read and write persisted CLI settings (`~/.orbit/settings.json`).
+    Config {
+        #[command(subcommand)]
+        command: ConfigCommands,
     },
 }
 
 #[derive(Subcommand)]
+enum ConfigCommands {
+    /// Print the saved value of a setting.
+    Get {
+        #[arg(value_name = "KEY")]
+        key: String,
+    },
+    /// Save a setting, such as `telemetry.enabled false`.
+    Set {
+        #[arg(value_name = "KEY")]
+        key: String,
+        #[arg(value_name = "VALUE")]
+        value: String,
+    },
+    /// List all known settings and their saved values.
+    List,
+}
+
+#[derive(Subcommand)]
+enum LocalCommands {
+    Index(IndexArgs),
+    Ask(AskArgs),
+    Show(ShowArgs),
+    Describe(DescribeArgs),
+    Sql(SqlArgs),
+    Schema(SchemaArgs),
+    List(ListArgs),
+    Mcp(McpArgs),
+    #[command(name = "repo-map")]
+    RepoMap(RepoMapArgs),
+    #[command(about = descriptions::short("skill"), long_about = SKILL_LONG_ABOUT)]
+    Skill {
+        /// Skill file to print, relative to the skill root (default: SKILL.md).
+        #[arg(value_name = "PATH")]
+        path: Option<String>,
+    },
+    #[command(hide = true)]
+    HookGuard {
+        #[arg(value_name = "KIND")]
+        kind: commands::hook_guard::Kind,
+
+        #[arg(long, default_value = "remote")]
+        mode: commands::setup::spec::Mode,
+    },
+}
+
+#[derive(Subcommand, Debug, PartialEq)]
 enum McpCommands {
     /// Start a stateless MCP server over stdio.
     Serve,
 }
 
+#[derive(Subcommand)]
+enum RemoteCommands {
+    /// POST a query envelope to the remote Orbit API and stream the response.
+    Query {
+        /// Query body file, or `-`/omitted to read from stdin.
+        #[arg(value_name = "FILE")]
+        source: Option<String>,
+
+        /// Server response format. Overrides the body's `response_format`;
+        /// defaults to `llm` when neither is set.
+        #[arg(long, value_enum)]
+        response_format: Option<remote::ResponseFormat>,
+    },
+    /// Show Orbit cluster health.
+    Status,
+    /// Show the Orbit ontology.
+    Schema {
+        /// Node names to expand with full properties and edge lists.
+        #[arg(value_name = "NODE")]
+        nodes: Vec<String>,
+    },
+    /// Show the Orbit query DSL JSON Schema.
+    Dsl,
+    /// Show the Orbit MCP tool manifest.
+    Tools,
+    /// Show indexing progress for a namespace or project.
+    #[command(name = "graph-status")]
+    #[command(group(clap::ArgGroup::new("graph_status_scope").required(true).args(["full_path", "namespace_id", "project_id"])))]
+    GraphStatus {
+        /// Full path of a project or group, such as `gitlab-org/gitlab`.
+        #[arg(long)]
+        full_path: Option<String>,
+
+        /// Namespace (group) ID to inspect.
+        #[arg(long)]
+        namespace_id: Option<i64>,
+
+        /// Project ID to inspect.
+        #[arg(long)]
+        project_id: Option<i64>,
+
+        /// Server response format. Defaults to `raw` (structured JSON).
+        #[arg(long, value_enum)]
+        response_format: Option<remote::ResponseFormat>,
+    },
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
-    let cli = Cli::parse();
+    let matches = Cli::command().get_matches();
+    let cli = Cli::from_arg_matches(&matches).expect("clap already validated the arguments");
 
-    match cli.command {
+    let tracker = if matches!(
+        cli.command,
+        Commands::HookGuard { .. }
+            | Commands::Local {
+                command: LocalCommands::HookGuard { .. }
+            }
+    ) {
+        None
+    } else {
+        telemetry::resolve_from_env().build_tracker()
+    };
+    if let Some(tracker) = &tracker {
+        telemetry::emit_command_event(tracker, &subcommand_path(&matches));
+    }
+
+    let result = dispatch(cli.command, tracker.as_ref()).await;
+
+    flush_telemetry(tracker.as_ref()).await;
+    result
+}
+
+fn subcommand_path(matches: &clap::ArgMatches) -> String {
+    let Some((top, sub)) = matches.subcommand() else {
+        return String::new();
+    };
+    if matches!(top, "local" | "remote")
+        && let Some((verb, _)) = sub.subcommand()
+    {
+        return format!("{top}_{}", verb.replace('-', "_"));
+    }
+    top.replace('-', "_")
+}
+
+async fn flush_telemetry(tracker: Option<&orbit_analytics::SnowplowAnalyticsTracker>) {
+    if let Some(tracker) = tracker
+        && tokio::time::timeout(TELEMETRY_FLUSH_TIMEOUT, tracker.shutdown())
+            .await
+            .is_err()
+    {
+        eprintln!(
+            "warning: telemetry flush timed out; set ORBIT_TELEMETRY_ENABLED=false to disable telemetry"
+        );
+    }
+}
+
+async fn dispatch(
+    command: Commands,
+    tracker: Option<&orbit_analytics::SnowplowAnalyticsTracker>,
+) -> Result<()> {
+    match command {
         Commands::Version => {
             println!("{}", env!("ORBIT_VERSION"));
-            return Ok(());
+            Ok(())
         }
-        Commands::Index {
+        Commands::Index(args) => dispatch_local(LocalCommands::Index(args)).await,
+        Commands::Ask(args) => dispatch_local(LocalCommands::Ask(args)).await,
+        Commands::Show(args) => dispatch_local(LocalCommands::Show(args)).await,
+        Commands::Describe(args) => dispatch_local(LocalCommands::Describe(args)).await,
+        Commands::Sql(args) => dispatch_local(LocalCommands::Sql(args)).await,
+        Commands::Schema(args) => dispatch_local(LocalCommands::Schema(args)).await,
+        Commands::List(args) => dispatch_local(LocalCommands::List(args)).await,
+        Commands::Mcp(args) => dispatch_local(LocalCommands::Mcp(args)).await,
+        Commands::RepoMap(args) => dispatch_local(LocalCommands::RepoMap(args)).await,
+        Commands::Local { command } => dispatch_local(command).await,
+        Commands::Config { command } => match command {
+            ConfigCommands::Get { key } => commands::config::get(&key),
+            ConfigCommands::Set { key, value } => commands::config::set(&key, &value),
+            ConfigCommands::List => commands::config::list(),
+        },
+        Commands::Skill { path } => skill::run(path),
+        Commands::Setup {
+            assistants,
+            remove,
+            local,
+            project,
+            dir,
+        } => {
+            let mode = if local {
+                commands::setup::spec::Mode::Local
+            } else {
+                commands::setup::spec::Mode::Remote
+            };
+            let target = if project || dir.is_some() {
+                commands::setup::Target::project(dir)?
+            } else {
+                commands::setup::Target::Global
+            };
+            commands::setup::run(assistants, remove, mode, target)
+        }
+        Commands::HookGuard { kind, mode } => {
+            commands::hook_guard::run(kind, mode);
+            Ok(())
+        }
+        Commands::Remote { command } => run_remote(command, tracker).await,
+    }
+}
+
+async fn dispatch_local(command: LocalCommands) -> Result<()> {
+    match command {
+        LocalCommands::Index(IndexArgs {
             path,
             threads,
             stats,
             verbose,
             db,
-        } => {
+        }) => {
             let level = if verbose { Level::DEBUG } else { Level::WARN };
             let subscriber = tracing_subscriber::fmt()
                 .with_max_level(level)
@@ -299,17 +670,27 @@ async fn main() -> Result<()> {
 
             run_index(path, threads, stats, db).await
         }
-        Commands::Sql {
+        LocalCommands::Ask(AskArgs {
+            question,
+            repo,
+            limit,
+            db,
+        }) => commands::ask::run(question, repo, db, limit),
+        LocalCommands::Show(ShowArgs { fqn, repo, db }) => commands::show::run(fqn, repo, db),
+        LocalCommands::Describe(DescribeArgs { fqn, repo, db }) => {
+            commands::describe::run(fqn, repo, db)
+        }
+        LocalCommands::Sql(SqlArgs {
             query,
             file,
             format,
             db,
-        } => sql::run(query, file, format, db),
-        Commands::Schema { db, raw, tables } => run_schema(db, raw, tables),
-        Commands::List { format, db } => list::run(format, db),
-        Commands::Mcp {
+        }) => sql::run(query, file, format, db),
+        LocalCommands::Schema(SchemaArgs { db, raw, tables }) => run_schema(db, raw, tables),
+        LocalCommands::List(ListArgs { format, db }) => list::run(format, db),
+        LocalCommands::Mcp(McpArgs {
             command: McpCommands::Serve,
-        } => {
+        }) => {
             // Logs must go to stderr only — stdout is the MCP transport.
             let subscriber = tracing_subscriber::fmt()
                 .with_max_level(Level::INFO)
@@ -322,19 +703,52 @@ async fn main() -> Result<()> {
                 .expect("setting default subscriber failed");
             mcp::serve().await
         }
-        Commands::Skill { path } => skill::run(path),
-        Commands::RepoMap {
+        LocalCommands::RepoMap(RepoMapArgs {
             repo,
             extensions,
             db,
             command,
-        } => commands::repo_map::run(
+        }) => commands::repo_map::run(
             repo,
             extensions,
             db,
             command.unwrap_or(commands::repo_map::RepoMapCommand::Overview),
         ),
+        LocalCommands::Skill { path } => skill::run(path),
+        LocalCommands::HookGuard { kind, mode } => {
+            commands::hook_guard::run(kind, mode);
+            Ok(())
+        }
     }
+}
+
+async fn run_remote(
+    command: RemoteCommands,
+    tracker: Option<&orbit_analytics::SnowplowAnalyticsTracker>,
+) -> Result<()> {
+    let result = match command {
+        RemoteCommands::Query {
+            source,
+            response_format,
+        } => remote::run_query(source, response_format).await,
+        RemoteCommands::Status => remote::run_status().await,
+        RemoteCommands::Schema { nodes } => remote::run_schema(nodes).await,
+        RemoteCommands::Dsl => remote::run_dsl().await,
+        RemoteCommands::Tools => remote::run_tools().await,
+        RemoteCommands::GraphStatus {
+            full_path,
+            namespace_id,
+            project_id,
+            response_format,
+        } => remote::run_graph_status(full_path, namespace_id, project_id, response_format).await,
+    };
+
+    if let Err(err) = result {
+        eprintln!("{}", err.message);
+        flush_telemetry(tracker).await;
+        std::process::exit(err.exit_code);
+    }
+    Ok(())
 }
 
 fn run_schema(db: Option<PathBuf>, raw: bool, tables: Vec<String>) -> Result<()> {
@@ -373,12 +787,13 @@ fn run_schema(db: Option<PathBuf>, raw: bool, tables: Vec<String>) -> Result<()>
         let missing: Vec<_> = tables.iter().filter(|t| !found.contains(*t)).collect();
         if !missing.is_empty() {
             anyhow::bail!(
-                "no table named {} in the local graph. Run `orbit schema` to list tables.",
+                "no table named {} in the local graph. Run `{} schema` to list tables.",
                 missing
                     .iter()
                     .map(|t| format!("'{t}'"))
                     .collect::<Vec<_>>()
-                    .join(", ")
+                    .join(", "),
+                commands::setup::spec::launcher()
             );
         }
         batches
@@ -425,15 +840,7 @@ pub(crate) fn index_collect(
 
     let ontology = Ontology::load_embedded().context("failed to load embedded ontology")?;
 
-    // Ensure schema exists, then drop the connection so we don't hold
-    // the write lock during parsing.
-    {
-        let client =
-            duckdb_client::DuckDbClient::open(&db_path).context("failed to open DuckDB")?;
-        client
-            .initialize_schema(LOCAL_DDL)
-            .context("failed to create schema")?;
-    }
+    workspace::ensure_graph_schema(&db_path, LOCAL_DDL)?;
 
     let pipeline_config = code_graph::v2::PipelineConfig {
         worker_threads: threads,
@@ -543,7 +950,7 @@ fn index_repo(
         code_graph::v2::config::detect_language_from_path,
     );
     let file_inventory: std::sync::Arc<[code_graph::v2::FileInventoryEntry]> = std::sync::Arc::from(
-        gkg_utils::walk::walk_dir(&git.repo_path, &mut filter)
+        orbit_utils::walk::walk_dir(&git.repo_path, &mut filter)
             .context("failed to walk repository files")?,
     );
 
@@ -568,6 +975,15 @@ fn index_repo(
     client
         .delete_project(git.project_id, &node_tables, edge_table)
         .context("failed to clear existing project data")?;
+    client
+        .execute(
+            &format!(
+                "DROP TABLE IF EXISTS {}",
+                duckdb_client::search::def_doc_table(git.project_id)
+            ),
+            &[],
+        )
+        .context("failed to clear existing search index")?;
 
     let converter: std::sync::Arc<dyn code_graph::v2::GraphConverter> =
         std::sync::Arc::new(duckdb_client::DuckDbConverter {
@@ -609,6 +1025,31 @@ fn index_repo(
 
     let client =
         duckdb_client::DuckDbClient::open(db_path).context("failed to open DuckDB for status")?;
+    let doc_table = duckdb_client::search::def_doc_table(git.project_id);
+    client
+        .load_extension("fts")
+        .context("failed to load the DuckDB fts extension")?;
+    client
+        .execute(
+            &format!(
+                "CREATE OR REPLACE TABLE {doc_table} AS
+             SELECT DISTINCT commit_sha, id AS def_id,
+                    fts_doc(def_name(fqn)) AS name,
+                    fts_doc(fqn || ' ' || file_path) AS context
+             FROM gl_definition WHERE project_id = ?1 AND commit_sha = ?2"
+            ),
+            &[
+                serde_json::json!(git.project_id),
+                serde_json::json!(git.commit_sha),
+            ],
+        )
+        .context("failed to build the search documents")?;
+    client
+        .execute(
+            &duckdb_client::search::create_fts_index_sql(&doc_table),
+            &[],
+        )
+        .context("failed to build the search index")?;
     workspace::set_status(
         &client,
         &key,
@@ -724,8 +1165,179 @@ fn build_index_output(
 
 #[cfg(test)]
 mod tests {
-    use super::fatal_pipeline_reason;
+    use super::{Cli, Commands, IndexArgs, LocalCommands, SchemaArgs, fatal_pipeline_reason};
+    use clap::{CommandFactory, Parser};
     use code_graph::v2::pipeline::PipelineError;
+
+    #[test]
+    fn cli_command_tree_verifies() {
+        Cli::command().debug_assert();
+    }
+
+    fn action_for(argv: &[&str]) -> String {
+        let matches = Cli::command()
+            .try_get_matches_from(argv)
+            .expect("valid argv");
+        super::subcommand_path(&matches)
+    }
+
+    #[test]
+    fn subcommand_path_names_command_and_namespace_verb() {
+        assert_eq!(action_for(&["orbit", "version"]), "version");
+        assert_eq!(action_for(&["orbit", "remote", "query"]), "remote_query");
+        assert_eq!(
+            action_for(&["orbit", "remote", "graph-status", "--full-path", "a/b"]),
+            "remote_graph_status"
+        );
+        assert_eq!(
+            action_for(&["orbit", "local", "sql", "SELECT 1"]),
+            "local_sql"
+        );
+        assert_eq!(action_for(&["orbit", "config", "set", "k", "v"]), "config");
+        assert_eq!(action_for(&["orbit", "repo-map", "tree"]), "repo_map");
+        assert_eq!(action_for(&["orbit", "mcp", "serve"]), "mcp");
+    }
+
+    #[test]
+    fn local_index_and_top_level_index_parse_to_same_args() {
+        let grouped = Cli::parse_from(["orbit", "local", "index", "/tmp/repo", "--threads", "4"]);
+        let top_level = Cli::parse_from(["orbit", "index", "/tmp/repo", "--threads", "4"]);
+
+        let grouped_args = match grouped.command {
+            Commands::Local {
+                command: LocalCommands::Index(args),
+            } => args,
+            _ => panic!("expected local index command"),
+        };
+        let top_level_args = match top_level.command {
+            Commands::Index(args) => args,
+            _ => panic!("expected top-level index command"),
+        };
+
+        assert_eq!(grouped_args, top_level_args);
+        assert_eq!(
+            grouped_args,
+            IndexArgs {
+                path: "/tmp/repo".into(),
+                threads: 4,
+                stats: false,
+                verbose: false,
+                db: None,
+            }
+        );
+    }
+
+    #[test]
+    fn local_schema_and_top_level_schema_parse_to_same_args() {
+        let grouped = Cli::parse_from(["orbit", "local", "schema", "gl_edge", "--raw"]);
+        let top_level = Cli::parse_from(["orbit", "schema", "gl_edge", "--raw"]);
+
+        let grouped_args = match grouped.command {
+            Commands::Local {
+                command: LocalCommands::Schema(args),
+            } => args,
+            _ => panic!("expected local schema command"),
+        };
+        let top_level_args = match top_level.command {
+            Commands::Schema(args) => args,
+            _ => panic!("expected top-level schema command"),
+        };
+
+        assert_eq!(grouped_args, top_level_args);
+        assert_eq!(
+            grouped_args,
+            SchemaArgs {
+                db: None,
+                raw: true,
+                tables: vec!["gl_edge".to_string()],
+            }
+        );
+    }
+
+    #[test]
+    fn local_ask_and_top_level_ask_parse_to_same_args() {
+        let grouped = Cli::parse_from(["orbit", "local", "ask", "who calls this", "--limit", "5"]);
+        let top_level = Cli::parse_from(["orbit", "ask", "who calls this", "--limit", "5"]);
+        let grouped_args = match grouped.command {
+            Commands::Local {
+                command: LocalCommands::Ask(args),
+            } => args,
+            _ => panic!("expected local ask command"),
+        };
+        let top_level_args = match top_level.command {
+            Commands::Ask(args) => args,
+            _ => panic!("expected top-level ask command"),
+        };
+        assert_eq!(grouped_args, top_level_args);
+    }
+
+    #[test]
+    fn local_sql_and_top_level_sql_parse_to_same_args() {
+        let grouped = Cli::parse_from(["orbit", "local", "sql", "SELECT 1"]);
+        let top_level = Cli::parse_from(["orbit", "sql", "SELECT 1"]);
+        let grouped_args = match grouped.command {
+            Commands::Local {
+                command: LocalCommands::Sql(args),
+            } => args,
+            _ => panic!("expected local sql command"),
+        };
+        let top_level_args = match top_level.command {
+            Commands::Sql(args) => args,
+            _ => panic!("expected top-level sql command"),
+        };
+        assert_eq!(grouped_args, top_level_args);
+    }
+
+    #[test]
+    fn local_list_and_top_level_list_parse_to_same_args() {
+        let grouped = Cli::parse_from(["orbit", "local", "list"]);
+        let top_level = Cli::parse_from(["orbit", "list"]);
+        let grouped_args = match grouped.command {
+            Commands::Local {
+                command: LocalCommands::List(args),
+            } => args,
+            _ => panic!("expected local list command"),
+        };
+        let top_level_args = match top_level.command {
+            Commands::List(args) => args,
+            _ => panic!("expected top-level list command"),
+        };
+        assert_eq!(grouped_args, top_level_args);
+    }
+
+    #[test]
+    fn local_mcp_and_top_level_mcp_parse_to_same_args() {
+        let grouped = Cli::parse_from(["orbit", "local", "mcp", "serve"]);
+        let top_level = Cli::parse_from(["orbit", "mcp", "serve"]);
+        let grouped_args = match grouped.command {
+            Commands::Local {
+                command: LocalCommands::Mcp(args),
+            } => args,
+            _ => panic!("expected local mcp command"),
+        };
+        let top_level_args = match top_level.command {
+            Commands::Mcp(args) => args,
+            _ => panic!("expected top-level mcp command"),
+        };
+        assert_eq!(grouped_args, top_level_args);
+    }
+
+    #[test]
+    fn local_repo_map_and_top_level_repo_map_parse_to_same_args() {
+        let grouped = Cli::parse_from(["orbit", "local", "repo-map", "overview"]);
+        let top_level = Cli::parse_from(["orbit", "repo-map", "overview"]);
+        let grouped_args = match grouped.command {
+            Commands::Local {
+                command: LocalCommands::RepoMap(args),
+            } => args,
+            _ => panic!("expected local repo-map command"),
+        };
+        let top_level_args = match top_level.command {
+            Commands::RepoMap(args) => args,
+            _ => panic!("expected top-level repo-map command"),
+        };
+        assert_eq!(grouped_args, top_level_args);
+    }
 
     fn err(stage: &'static str, msg: &str, fatal: bool) -> PipelineError {
         PipelineError {

@@ -1,5 +1,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow, bail};
 use bumpalo::Bump;
@@ -9,13 +11,14 @@ use cargo_util_schemas::manifest as cargo_manifest;
 use either::Either;
 use globset::{Glob, GlobMatcher};
 use ignore::WalkBuilder;
+use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use petgraph::graph::NodeIndex;
 use ra_ap_cfg::CfgAtom;
 use ra_ap_hir::{
     CallableKind, ChangeWithProcMacros, HasSource, InFile, ModuleDef, PathResolution, Semantics,
     attach_db,
 };
-use ra_ap_ide::{CrateGraphBuilder, FileId, RootDatabase, SourceRoot};
+use ra_ap_ide::{AnalysisHost, CrateGraphBuilder, FileId, RootDatabase, SourceRoot};
 use ra_ap_ide_db::base_db::{
     CrateOrigin, CrateWorkspaceData, Env, FileSet, VfsPath,
     target::{Arch, TargetData},
@@ -48,7 +51,8 @@ use crate::v2::sentinel;
 
 use crate::v2::inventory::FileInput;
 use crate::v2::pipeline::{
-    BatchTx, FileTimingEntry, LanguagePipeline, LanguageTimings, PipelineContext, PipelineError,
+    BatchTx, CancellationToken, FileTimingEntry, LanguagePipeline, LanguageTimings,
+    PipelineContext, PipelineError,
 };
 use crate::v2::types::{
     CanonicalDefinition, CanonicalImport, DefKind, EdgeKind, Fqn, ImportBindingKind, NodeKind,
@@ -69,11 +73,59 @@ use self::rust_ast::{
     build_parsed_rust_file, fallback_file_module_parts, file_module_parts_from_workspace,
 };
 use self::workspace::{
-    WorkspaceCatalog, WorkspaceIndex, canonical_root_path, relative_path,
-    relative_path_if_under_root, standalone_workspace, to_absolute_path,
+    WorkspaceIndex, WorkspacePlan, canonical_root_path, relative_path, relative_path_if_under_root,
+    standalone_workspace, to_absolute_path,
 };
 
 pub struct RustPipeline;
+
+static TY_INTERNER_GC: RwLock<()> = RwLock::new(());
+static RUST_JOBS_SINCE_TY_GC: AtomicUsize = AtomicUsize::new(0);
+// Sweeping sooner stalls Rust lanes measurably more often for a little less memory.
+const FORCE_TY_GC_AFTER_JOBS: usize = 256;
+const FORCE_TY_GC_MAX_WAIT: Duration = Duration::from_secs(60);
+
+fn hold_ty_interner() -> RwLockReadGuard<'static, ()> {
+    // A second waiting writer would stall every arriving Rust job and sweep nothing.
+    if RUST_JOBS_SINCE_TY_GC.load(Ordering::Relaxed) >= FORCE_TY_GC_AFTER_JOBS
+        && RUST_JOBS_SINCE_TY_GC.swap(0, Ordering::Relaxed) >= FORCE_TY_GC_AFTER_JOBS
+    {
+        let waited = Instant::now();
+        let exclusive = TY_INTERNER_GC.try_write_for(FORCE_TY_GC_MAX_WAIT);
+        let waited_ms = waited.elapsed().as_millis() as u64;
+        let swept = exclusive.is_some_and(|exclusive| {
+            collect_ty_garbage(exclusive);
+            true
+        });
+        tracing::info!(waited_ms, swept, "rust-analyzer type interner sweep forced");
+    }
+    TY_INTERNER_GC.read()
+}
+
+fn release_ty_interner(held: RwLockReadGuard<'static, ()>) -> bool {
+    drop(held);
+    RUST_JOBS_SINCE_TY_GC.fetch_add(1, Ordering::Relaxed);
+    let Some(exclusive) = TY_INTERNER_GC.try_write() else {
+        return false;
+    };
+    collect_ty_garbage(exclusive);
+    true
+}
+
+fn collect_ty_garbage(_exclusive: RwLockWriteGuard<'static, ()>) {
+    RUST_JOBS_SINCE_TY_GC.store(0, Ordering::Relaxed);
+    let started = Instant::now();
+    match std::panic::catch_unwind(|| AnalysisHost::new(None).trigger_garbage_collection()) {
+        Ok(()) => tracing::debug!(
+            sweep_ms = started.elapsed().as_millis() as u64,
+            "rust-analyzer type interner swept"
+        ),
+        Err(payload) => tracing::warn!(
+            error = %rust_panic_message(&payload),
+            "rust-analyzer type interner sweep panicked"
+        ),
+    }
+}
 
 #[derive(Clone)]
 struct ParsedRustFile {
@@ -152,9 +204,9 @@ impl LanguagePipeline for RustPipeline {
         let sentinel_handle = sentinel_pair.as_ref().map(|(h, _)| h);
 
         let workspaces = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            WorkspaceCatalog::load(root_path, files)
+            WorkspacePlan::discover(root_path, files)
         })) {
-            Ok(Ok(catalog)) => Some(catalog),
+            Ok(Ok(plan)) => Some(plan),
             Ok(Err(err)) => {
                 tracing::debug!(
                     error = %err,
@@ -171,7 +223,18 @@ impl LanguagePipeline for RustPipeline {
                 None
             }
         };
-        let output = parse_rust_files(files, root_path, workspaces.as_ref(), sentinel_handle);
+        let db_alive = hold_ty_interner();
+        let output = parse_rust_files(
+            files,
+            root_path,
+            workspaces.as_ref(),
+            sentinel_handle,
+            &ctx.config.cancel,
+        );
+        // Nothing past the parse reads the rust-analyzer databases, and they are
+        // the largest thing this pipeline holds.
+        drop(workspaces);
+        release_ty_interner(db_alive);
         let parse_ms = t0.elapsed().as_secs_f64() * 1000.0;
         for (path, error) in &output.errors {
             match error {
@@ -185,6 +248,10 @@ impl LanguagePipeline for RustPipeline {
                 }
             }
         }
+        if ctx.is_cancelled() {
+            return Ok(());
+        }
+
         let parsed = output.parsed;
         let mut graph = build_graph(root_path, &parsed);
         let graph_build_ms = t0.elapsed().as_secs_f64() * 1000.0 - parse_ms;
@@ -202,6 +269,9 @@ impl LanguagePipeline for RustPipeline {
         let mut edge_timed_out = false;
 
         'edge_resolve: for file in &parsed {
+            if ctx.is_cancelled() {
+                return Ok(());
+            }
             let t_resolve = std::time::Instant::now();
             for edge in &file.edge_candidates {
                 if deadline.is_some_and(|d| std::time::Instant::now() >= d) {
@@ -249,14 +319,19 @@ impl LanguagePipeline for RustPipeline {
         if !edge_timed_out {
             add_unresolved_imported_call_edges(&mut graph, &parsed);
         }
+
+        let total_bytes: u64 = parsed.iter().map(|f| f.file_size).sum();
+        let file_count = parsed.len();
+        // The graph owns interned copies of everything resolution needed, so the
+        // Arrow conversion below must not run alongside a second copy.
+        drop(parsed);
         graph.finalize(tracer);
 
         let total_ms = t0.elapsed().as_secs_f64() * 1000.0;
         let resolve_ms = total_ms - parse_ms - graph_build_ms;
-        let total_bytes: u64 = parsed.iter().map(|f| f.file_size).sum();
         ctx.record_language_timing(LanguageTimings {
             language: "rust".to_string(),
-            file_count: parsed.len(),
+            file_count,
             total_bytes,
             parse_ms,
             graph_build_ms,
@@ -278,77 +353,104 @@ impl LanguagePipeline for RustPipeline {
 fn parse_rust_files(
     files: &[FileInput],
     root_path: &str,
-    workspaces: Option<&WorkspaceCatalog>,
+    workspaces: Option<&WorkspacePlan>,
     sentinel: Option<&sentinel::SentinelHandle>,
+    cancel: &CancellationToken,
 ) -> RustParseOutput {
     if let Some(workspaces) = workspaces {
-        return parse_rust_files_with_workspaces(files, root_path, workspaces, sentinel);
+        return parse_rust_files_with_workspaces(files, root_path, workspaces, sentinel, cancel);
     }
 
-    parse_rust_files_standalone(files, root_path, sentinel)
+    parse_rust_files_standalone(files, root_path, sentinel, cancel)
 }
 
 fn parse_rust_files_with_workspaces(
     files: &[FileInput],
     root_path: &str,
-    workspaces: &WorkspaceCatalog,
+    plan: &WorkspacePlan,
     sentinel: Option<&sentinel::SentinelHandle>,
+    cancel: &CancellationToken,
 ) -> RustParseOutput {
     let mut parsed = Vec::with_capacity(files.len());
     let mut errors = Vec::new();
-    let mut files_by_workspace = vec![Vec::new(); workspaces.workspaces().len()];
-    let mut standalone = Vec::new();
+    let mut claimed = vec![false; files.len()];
 
-    for file in files {
-        let abs_path = to_absolute_path(root_path, file);
-        let relative_path = relative_path(root_path, &abs_path);
-        if let Some((workspace_id, _)) = workspaces.workspace_for_file(&relative_path) {
-            files_by_workspace[workspace_id].push(file.as_str());
-        } else {
-            standalone.push(file.as_str());
+    for workspace_id in 0..plan.len() {
+        if cancel.is_cancelled() {
+            break;
         }
-    }
-
-    for (workspace_id, workspace_files) in files_by_workspace.iter().enumerate() {
-        if workspace_files.is_empty() {
+        let candidates = plan.candidates(workspace_id);
+        // A root whose files an earlier root already claimed never needs a
+        // rust-analyzer database of its own.
+        if candidates.iter().all(|&idx| claimed[idx]) {
             continue;
         }
 
-        let workspace = &workspaces.workspaces()[workspace_id];
-        let workspace_tasks = workspace_files
-            .iter()
-            .map(|_| workspace.clone())
-            .collect::<Vec<_>>();
-        let workspace_results = workspace_tasks
-            .into_par_iter()
-            .zip(workspace_files.par_iter())
-            .map(|(workspace, file)| {
+        // A rust-analyzer load panic must cost one root, not the whole pass.
+        let loaded = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            plan.load(workspace_id, root_path)
+        }));
+        let workspace = match loaded {
+            Ok(Ok(workspace)) => workspace,
+            Ok(Err(err)) => {
+                tracing::warn!(
+                    manifest = %plan.manifest_path(workspace_id).display(),
+                    error = %err,
+                    "failed to load rust-analyzer workspace; continuing with others"
+                );
+                continue;
+            }
+            Err(payload) => {
+                tracing::warn!(
+                    manifest = %plan.manifest_path(workspace_id).display(),
+                    error = %rust_panic_message(&payload),
+                    "rust-analyzer workspace load panicked; continuing with others"
+                );
+                continue;
+            }
+        };
+
+        let mut workspace_files = Vec::new();
+        for &idx in candidates {
+            if claimed[idx] {
+                continue;
+            }
+            claimed[idx] = true;
+            workspace_files.push(files[idx].as_str());
+        }
+
+        let workspace_results = workspace_files
+            .par_iter()
+            .map_with(workspace.clone(), |workspace, file| {
+                if cancel.is_cancelled() {
+                    return None;
+                }
                 let guard = sentinel.map(|s| s.file_start(file));
                 if let Ok(meta) = std::fs::metadata(to_absolute_path(root_path, file)) {
                     crate::v2::pipeline::breadcrumb_large_file(file, meta.len(), "rust");
                 }
                 let t_file = std::time::Instant::now();
                 let result = catch_rust_file_panic(file, || {
-                    parse_workspace_file(file, root_path, &workspace)
+                    parse_workspace_file(file, root_path, workspace)
                 });
                 let parse_ms = t_file.elapsed().as_secs_f64() * 1000.0;
                 if guard.as_ref().is_some_and(|g| g.is_killed()) {
-                    return Err((
+                    return Some(Err((
                         file.to_string(),
                         AnalyzerError::skip(
                             FileSkip::Timeout(AbortPhase::Sentinel),
                             "per-file watchdog killed analysis",
                         ),
-                    ));
+                    )));
                 }
-                result.map(|mut f| {
+                Some(result.map(|mut f| {
                     f.parse_ms = parse_ms;
                     f
-                })
+                }))
             })
             .collect::<Vec<_>>();
 
-        for result in workspace_results {
+        for result in workspace_results.into_iter().flatten() {
             match result {
                 Ok(file) => parsed.push(file),
                 Err(err) => errors.push(err),
@@ -356,9 +458,19 @@ fn parse_rust_files_with_workspaces(
         }
     }
 
+    let standalone = files
+        .iter()
+        .enumerate()
+        .filter(|(idx, _)| !claimed[*idx])
+        .map(|(_, file)| file.as_str())
+        .collect::<Vec<_>>();
+
     let standalone_results = standalone
         .par_iter()
-        .map(|file_path| {
+        .filter_map(|file_path| {
+            if cancel.is_cancelled() {
+                return None;
+            }
             let guard = sentinel.map(|s| s.file_start(file_path));
             let t_file = std::time::Instant::now();
             let result = catch_rust_file_panic(file_path, || {
@@ -366,18 +478,18 @@ fn parse_rust_files_with_workspaces(
             });
             let parse_ms = t_file.elapsed().as_secs_f64() * 1000.0;
             if guard.as_ref().is_some_and(|g| g.is_killed()) {
-                return Err((
+                return Some(Err((
                     file_path.to_string(),
                     AnalyzerError::skip(
                         FileSkip::Timeout(AbortPhase::Sentinel),
                         "per-file watchdog killed analysis",
                     ),
-                ));
+                )));
             }
-            result.map(|mut f| {
+            Some(result.map(|mut f| {
                 f.parse_ms = parse_ms;
                 f
-            })
+            }))
         })
         .collect::<Vec<_>>();
 
@@ -395,10 +507,14 @@ fn parse_rust_files_standalone(
     files: &[FileInput],
     root_path: &str,
     sentinel: Option<&sentinel::SentinelHandle>,
+    cancel: &CancellationToken,
 ) -> RustParseOutput {
     let results = files
         .par_iter()
-        .map(|file_path| {
+        .filter_map(|file_path| {
+            if cancel.is_cancelled() {
+                return None;
+            }
             let guard = sentinel.map(|s| s.file_start(file_path));
             let t_file = std::time::Instant::now();
             let result = catch_rust_file_panic(file_path, || {
@@ -406,18 +522,18 @@ fn parse_rust_files_standalone(
             });
             let parse_ms = t_file.elapsed().as_secs_f64() * 1000.0;
             if guard.as_ref().is_some_and(|g| g.is_killed()) {
-                return Err((
+                return Some(Err((
                     file_path.to_string(),
                     AnalyzerError::skip(
                         FileSkip::Timeout(AbortPhase::Sentinel),
                         "per-file watchdog killed analysis",
                     ),
-                ));
+                )));
             }
-            result.map(|mut f| {
+            Some(result.map(|mut f| {
                 f.parse_ms = parse_ms;
                 f
-            })
+            }))
         })
         .collect::<Vec<_>>();
 
@@ -1439,6 +1555,9 @@ mod tests {
     use super::manifest::repo_local_existing_file;
     use super::sysroot::{EMBEDDED_RUST_SYSROOT_VERSION, EmbeddedSysroot};
     use super::workspace::relative_path_if_under_root;
+    use super::{
+        FORCE_TY_GC_AFTER_JOBS, RUST_JOBS_SINCE_TY_GC, hold_ty_interner, release_ty_interner,
+    };
     use std::fs;
     use tempfile::tempdir;
 
@@ -1480,6 +1599,33 @@ mod tests {
     }
 
     #[test]
+    fn a_cancelled_standalone_parse_reads_no_files() {
+        let temp = tempdir().unwrap();
+        let root = fs::canonicalize(temp.path()).unwrap();
+        fs::write(root.join("a.rs"), "pub fn a() {}\n").unwrap();
+
+        let cancel = crate::v2::pipeline::CancellationToken::new();
+        cancel.cancel();
+        let output = super::parse_rust_files_standalone(
+            &["a.rs".to_string()],
+            &root.to_string_lossy(),
+            None,
+            &cancel,
+        );
+
+        assert!(
+            output.parsed.is_empty(),
+            "got {} parsed",
+            output.parsed.len()
+        );
+        assert!(
+            output.errors.is_empty(),
+            "a dropped file is not an error: {:?}",
+            output.errors
+        );
+    }
+
+    #[test]
     fn catch_rust_file_panic_converts_to_analyzer_panic_fault() {
         use crate::v2::error::{AnalyzerError, FileFault};
         let (path, err) = match super::catch_rust_file_panic("src/lib.rs", || {
@@ -1514,5 +1660,36 @@ mod tests {
         assert!(std::fs::metadata(embedded.root_path().join("std/src/lib.rs")).is_ok());
         assert!(std::fs::metadata(embedded.root_path().join("proc_macro/src/lib.rs")).is_ok());
         assert!(embedded.project_workspace_sysroot().unwrap().num_packages() >= 4);
+    }
+
+    #[test]
+    fn ty_interner_sweep_waits_for_other_live_databases() {
+        RUST_JOBS_SINCE_TY_GC.store(0, std::sync::atomic::Ordering::Relaxed);
+        let (held_tx, held_rx) = std::sync::mpsc::channel();
+        let (done_tx, done_rx) = std::sync::mpsc::channel::<()>();
+        let other_job = std::thread::spawn(move || {
+            let held = hold_ty_interner();
+            held_tx.send(()).unwrap();
+            done_rx.recv().unwrap();
+            drop(held);
+        });
+        held_rx.recv().unwrap();
+
+        let this_job = hold_ty_interner();
+        assert!(!release_ty_interner(this_job));
+
+        done_tx.send(()).unwrap();
+        other_job.join().unwrap();
+    }
+
+    #[test]
+    fn ty_interner_sweep_is_forced_after_enough_unswept_jobs() {
+        RUST_JOBS_SINCE_TY_GC.store(FORCE_TY_GC_AFTER_JOBS, std::sync::atomic::Ordering::Relaxed);
+        let held = hold_ty_interner();
+        assert!(
+            RUST_JOBS_SINCE_TY_GC.load(std::sync::atomic::Ordering::Relaxed)
+                < FORCE_TY_GC_AFTER_JOBS
+        );
+        drop(held);
     }
 }

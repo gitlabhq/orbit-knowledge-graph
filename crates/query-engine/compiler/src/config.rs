@@ -4,15 +4,16 @@
 
 use std::sync::Arc;
 
-use gkg_server_config::QueryConfig;
 use ontology::Ontology;
+use orbit_server_config::QueryConfig;
 
 /// Pathfinding hard ceilings. Config can tighten but never exceed these.
 /// Kept in sync with config/default.yaml `path_finding:` block.
 const PATHFINDING_MAX_EXECUTION_TIME: u64 = 15;
 const PATHFINDING_MAX_MEMORY_USAGE: u64 = 16_106_127_360; // 15 GiB
+const IN_SUBQUERY_INDEX_MAX_VALUES: u64 = 100_000;
 
-use crate::ast::Node;
+use crate::ast::{Node, Query, TableRef};
 use crate::error::{QueryError, Result};
 use crate::input::{Input, QueryType};
 use crate::passes::codegen::CompiledQueryContext;
@@ -238,10 +239,15 @@ fn settings(ctx: &mut impl CompilerCtx) -> Result<()> {
     let mut config = settings::resolve(query_type);
 
     let node = require(ctx.node().clone(), "node")?;
-    if let Node::Query(q) = &node
-        && q.ctes.iter().any(|c| c.materialized)
-    {
-        config.compiler_derived.enable_materialized_cte = true;
+    if let Node::Query(q) = &node {
+        let derived = &mut config.compiler_derived;
+        derived.enable_materialized_cte = q.ctes.iter().any(|c| c.materialized);
+        derived.optimize_move_to_prewhere_if_final =
+            scans_final(q) || q.ctes.iter().any(|c| scans_final(&c.query));
+        if !q.ctes.is_empty() {
+            derived.use_index_for_in_with_subqueries_max_values =
+                Some(IN_SUBQUERY_INDEX_MAX_VALUES);
+        }
     }
 
     let query_plan = require(ctx.take_query_plan(), "query_plan")?;
@@ -266,6 +272,10 @@ fn settings(ctx: &mut impl CompilerCtx) -> Result<()> {
     ctx.set_query_plan(query_plan);
     ctx.set_query_config(config);
     Ok(())
+}
+
+fn scans_final(q: &Query) -> bool {
+    matches!(q.from, TableRef::Scan { final_: true, .. })
 }
 
 fn codegen(ctx: &mut impl CompilerCtx) -> Result<()> {

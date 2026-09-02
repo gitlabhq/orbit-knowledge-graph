@@ -97,7 +97,7 @@ fn write_assets(root: &Path) -> Result<()> {
 }
 
 fn asset_output_path(root: &Path, asset_path: &str) -> Result<PathBuf> {
-    if !gkg_utils::fs::is_safe_relative_path(Path::new(asset_path)) {
+    if !orbit_utils::fs::is_safe_relative_path(Path::new(asset_path)) {
         bail!("embedded Rust sysroot asset path `{asset_path}` is invalid");
     }
     Ok(root.join(asset_path))

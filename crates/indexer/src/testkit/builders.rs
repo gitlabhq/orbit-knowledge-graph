@@ -5,7 +5,7 @@ use crate::engine::{Engine, EngineBuilder};
 use crate::handler::{Handler, HandlerRegistry};
 use crate::indexing_status::IndexingStatusStore;
 use crate::nats::{NatsBroker, NatsServices, NatsServicesImpl};
-use gkg_server_config::{
+use orbit_server_config::{
     ClickHouseConfiguration, EngineConfiguration, EntityHandlerConfig, HandlersConfiguration,
 };
 

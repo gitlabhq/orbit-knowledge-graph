@@ -1,5 +1,5 @@
 ---
-title: "GKG ADR 002: Rust as the core runtime for the Knowledge Graph service"
+title: "GKG ADR 002: Rust as the core runtime for the Orbit service"
 creation-date: "2026-02-23"
 authors: [ "@michaelangeloio" ]
 toc_hide: true
@@ -15,9 +15,9 @@ Accepted
 
 ## Context
 
-The Knowledge Graph already has a substantial Rust codebase. The code indexer -- a multi-language static analysis engine built on tree-sitter and SWC -- was written in Rust from day one because Rust has first-class tree-sitter bindings maintained by the tree-sitter organization, compiles to WebAssembly for client-side use (Language Server, Web IDE), and provides the performance needed to parse large repositories in-memory without GC pauses. The "One Parser" initiative ([`gitlab-org/gitlab#534153`](https://gitlab.com/gitlab-org/gitlab/-/issues/534153)) later formalized this choice, establishing Rust as the GitLab standard for static code analysis across the Knowledge Graph, embeddings, and language server features.
+Orbit already has a substantial Rust codebase. The code indexer -- a multi-language static analysis engine built on tree-sitter and SWC -- was written in Rust from day one because Rust has first-class tree-sitter bindings maintained by the tree-sitter organization, compiles to WebAssembly for client-side use (Language Server, Web IDE), and provides the performance needed to parse large repositories in-memory without GC pauses. The "One Parser" initiative ([`gitlab-org/gitlab#534153`](https://gitlab.com/gitlab-org/gitlab/-/issues/534153)) later formalized this choice, establishing Rust as the GitLab standard for static code analysis across Orbit, embeddings, and language server features.
 
-When the Knowledge Graph evolved from a local CLI tool into a server-side service, the question was whether to keep the core runtime in Rust or rewrite the non-parsing components in Go. We originally embedded the Rust code via FFI into the Go-based `gitlab-zoekt-indexer` to satisfy Omnibus packaging constraints. When GitLab committed to its segmentation strategy, that constraint went away and we evaluated FFI vs. standalone service in [#168](https://gitlab.com/gitlab-org/rust/knowledge-graph/-/issues/168). The decision to run as a dedicated Rust process made the language commitment permanent.
+When Orbit evolved from a local CLI tool into a server-side service, the question was whether to keep the core runtime in Rust or rewrite the non-parsing components in Go. We originally embedded the Rust code via FFI into the Go-based `gitlab-zoekt-indexer` to satisfy Omnibus packaging constraints. When GitLab committed to its segmentation strategy, that constraint went away and we evaluated FFI vs. standalone service in [#168](https://gitlab.com/gitlab-org/rust/knowledge-graph/-/issues/168). The decision to run as a dedicated Rust process made the language commitment permanent.
 
 The service now builds a property graph from GitLab instance data and serves queries over gRPC. It runs as a single binary in four modes (webserver, indexer, scheduler, health-check), processes CDC events from NATS, compiles a JSON DSL into parameterized ClickHouse SQL, and handles bidirectional gRPC streaming for authorization exchanges with Rails. It is multi-tenant -- one deployment serves all of GitLab.com. Query workloads must finish under 300ms at p95 for 3-hop traversals.
 
@@ -25,13 +25,13 @@ Choosing Rust for the full runtime also aligns with data engineering trends in t
 
 ## Decision
 
-Use Rust as the core runtime language for the Knowledge Graph service.
+Use Rust as the core runtime language for the Orbit service.
 
 The service is implemented as a Cargo workspace with 16 crates:
 
 | Crate | Purpose |
 |-------|---------|
-| `gkg-server` | HTTP/gRPC server, JWT auth, config loading, 4 execution modes |
+| `orbit-server` | HTTP/gRPC server, JWT auth, config loading, 4 execution modes |
 | `query-engine` | JSON DSL to parameterized ClickHouse SQL compilation |
 | `indexer` | NATS consumer, SDLC + code indexing handlers, worker pools |
 | `ontology` | YAML ontology loading, JSON schema validation, query validators |
@@ -79,7 +79,7 @@ SWC (Rust-native JS/TS parser) runs alongside tree-sitter for JS/TS-specific ana
 
 ### gRPC and protobuf ecosystem
 
-We use Tonic for gRPC (client and server) and Prost for protobuf codegen. `gkg.proto` defines the service contract; `tonic-build` generates Rust server traits and client stubs at compile time. The same proto file generates the `gitlab-gkg-proto` Ruby gem for the Rails client, so the contract is shared between Rust and Ruby. Schema mismatches get caught at compile time on the Rust side.
+We use Tonic for gRPC (client and server) and Prost for protobuf codegen. `orbit.proto` defines the service contract; `tonic-build` generates Rust server traits and client stubs at compile time. The same proto file generates the `gitlab-orbit-proto` Ruby gem for the Rails client, so the contract is shared between Rust and Ruby. Schema mismatches get caught at compile time on the Rust side.
 
 ### Columnar data processing
 
@@ -89,13 +89,13 @@ The `clickhouse-client` crate streams query results as Arrow-IPC batches using t
 
 Beyond memory safety, the type system catches whole categories of bugs before anything runs:
 
-- Exhaustive `match` on protobuf `oneof` enums means every message variant must be handled. Add a new RPC message type to `gkg.proto` and the compiler forces you to update every handler.
+- Exhaustive `match` on protobuf `oneof` enums means every message variant must be handled. Add a new RPC message type to `orbit.proto` and the compiler forces you to update every handler.
 - The ontology crate validates YAML schemas at startup and exposes typed accessors. Invalid ontology references break CI, not production queries.
 - Clippy runs with all warnings as errors in CI. `cargo deny` checks licenses, `cargo audit` checks for known vulnerabilities, `cargo geiger` reports unsafe usage.
 
 ## Why not FFI into Go
 
-Before we decided on a dedicated process, the Knowledge Graph was embedded via FFI in the Go-based `gitlab-zoekt-indexer`. We abandoned this approach for several reasons documented in [#168](https://gitlab.com/gitlab-org/rust/knowledge-graph/-/issues/168):
+Before we decided on a dedicated process, Orbit was embedded via FFI in the Go-based `gitlab-zoekt-indexer`. We abandoned this approach for several reasons documented in [#168](https://gitlab.com/gitlab-org/rust/knowledge-graph/-/issues/168):
 
 Querying through FFI required a multi-step dance: Go calls Rust to build a query, Go executes it, Go calls Rust again to post-process results (mapping integer relationship types back to strings). Every API change required updating Rust code, FFI bindings, and Go service code -- three maintenance points instead of one.
 
@@ -161,7 +161,7 @@ The PREP (Production Readiness) review (MR !64) will evaluate Rust-specific oper
 
 ## References
 
-- [Knowledge Graph repository](https://gitlab.com/gitlab-org/orbit/knowledge-graph) - 16-crate Cargo workspace
+- [Orbit repository](https://gitlab.com/gitlab-org/orbit/knowledge-graph) - 16-crate Cargo workspace
 - [Build images repository](https://gitlab.com/gitlab-org/rust/build-images) - shared Rust CI builder images (GKG uses `orbit-knowledge-graph`) with sccache
 - [Orbit Helm charts](https://gitlab.com/gitlab-org/orbit/orbit-helm-charts) - production Helm chart (v1.0.0)
 - [ADR 001: gRPC communication protocol](001_grpc_communication.md)

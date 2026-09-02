@@ -1,6 +1,6 @@
 ---
-stage: Analytics
-group: Knowledge Graph
+stage: Orbit
+group: Context Systems
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
 description: Build and query a local code graph with the GitLab Orbit CLI (orbit) binary. No GitLab account or network connection required.
 title: Use GitLab Orbit Local with the GitLab Orbit CLI (`orbit`)
@@ -163,10 +163,110 @@ orbit mcp serve
 It serves `run_sql`, `get_graph_schema`, and `index` against
 `~/.orbit/graph.duckdb`. See [Connect via MCP](mcp.md) for per-client config.
 
+## Set up your AI assistant
+
+`orbit setup` configures an AI coding assistant to consult the graph before it
+reaches for grep. Name the assistants you want to configure:
+
+```shell
+orbit setup claude
+```
+
+Supported assistants are `claude`, `codex`, `opencode`, and `pi`. By default the
+guidance points at the remote GitLab Orbit graph. To point it at your local
+graph instead, pass `--local`:
+
+```shell
+orbit setup claude --local
+```
+
+### What it changes
+
+This command modifies files that belong to you. It never runs on its own, only
+when you invoke it.
+
+For every assistant you name, `orbit setup`:
+
+- Adds a block to that assistant's instruction file, such as `CLAUDE.md` or
+  `AGENTS.md`. The block sits between `<!-- orbit:setup:begin -->` and
+  `<!-- orbit:setup:end -->` markers, and anything outside those markers is left
+  alone. Running the command again replaces the block in place instead of adding
+  a second copy.
+- Adds entries to that assistant's JSON configuration, where the assistant
+  supports it. For Claude Code this is a `PreToolUse` hook in
+  `settings.json`; for OpenCode it is a plugin file and its registration.
+  Entries carry an `orbit` marker, and only marked entries are ever replaced or
+  removed.
+
+By default it writes to your user-global configuration, such as
+`~/.claude/CLAUDE.md`. Pass `--project` to write into the current project
+instead, or `--dir <path>` to target a specific project directory.
+
+Before `orbit setup` modifies an existing file for the first time, it copies the
+original to `<name>.orbit-backup` beside it. Restore that copy by hand if you
+want the original back. Existing backups are never overwritten, so the copy
+always holds the pre-`orbit` version.
+
+Prefer `--project` with care: project instruction files are usually committed to
+version control, so the change appears in `git status` and can reach your
+teammates. User-global scope, the default, affects only you.
+
+### Remove it
+
+To undo the changes, run:
+
+```shell
+orbit setup claude --remove
+```
+
+This strips the marker-delimited block and the marked JSON entries, and leaves
+the rest of each file untouched. If a file contained nothing but `orbit`
+entries, it is deleted. Omit the assistant names to remove the setup for all of
+them. Backup files are not deleted.
+
+If you would rather not have `orbit setup` touch your files, skip it and add the
+same instruction block and hooks by hand.
+
 ## Storage
 
 The graph is stored at `~/.orbit/graph.duckdb`. Multiple repositories share
 the same database. Delete the file to start over.
+
+## Configure the CLI
+
+`orbit config` reads and writes persisted settings in `~/.orbit/settings.json`.
+A saved setting applies to every later run.
+
+```shell
+orbit config list                          # all settings and their saved values
+orbit config get telemetry.enabled         # one setting
+orbit config set telemetry.enabled false   # save a setting
+```
+
+| Setting | Values | Default | Purpose |
+|---------|--------|---------|---------|
+| `telemetry.enabled` | `true`, `false` | `true` | Whether the CLI sends usage telemetry. |
+
+## Telemetry
+
+The CLI sends usage events to the GitLab product analytics service so the team
+can see how GitLab Orbit is used. Each event records which command ran, nothing more:
+no repository content, file paths, or query text is sent. Telemetry is on by
+default.
+
+Turn it off with a saved setting, or with the environment variable in CI:
+
+```shell
+orbit config set telemetry.enabled false   # persists for every run
+export ORBIT_TELEMETRY_ENABLED=false        # for CI or one shell
+```
+
+The environment variable overrides the saved setting.
+
+| Variable | Purpose |
+|----------|---------|
+| `ORBIT_TELEMETRY_ENABLED` | `false` disables telemetry, `true` enables it. Overrides the saved setting. |
+| `ORBIT_TELEMETRY_COLLECTOR_URL` | Send events to a different collector, for testing. Defaults to the GitLab collector. |
 
 ## Billing
 

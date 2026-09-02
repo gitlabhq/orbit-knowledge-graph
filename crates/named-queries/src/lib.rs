@@ -2,7 +2,7 @@
 //!
 //! Named queries are graph query templates committed under
 //! `config/named_queries/` so the query text lives with the engine
-//! `gkg-server`'s build script compiles every template against the ontology,
+//! `orbit-server`'s build script compiles every template against the ontology,
 //! and the same files are embedded into the binary so the server can execute
 //! them by name at runtime.
 //!
@@ -13,6 +13,8 @@
 //! - `{ "$param": "<name>" }` — selection values supplied by the client
 //!   (e.g. the entity and ids of a clicked node) and validated against the
 //!   JSON Schema each template declares for the parameter.
+//! - `"$param:<name>": ...` — an object key filled from a string parameter,
+//!   so a template can take the property name to filter on.
 
 mod query;
 
@@ -37,7 +39,7 @@ pub enum NamedQueryError {
     Parse {
         path: String,
         #[source]
-        source: serde_yaml::Error,
+        source: Box<orbit_utils::yaml::Error>,
     },
 
     #[error("named query `{name}`: {message}")]
@@ -214,6 +216,8 @@ query:
             "top_mr_authors",
             "mrs_fixing_vulnerabilities",
             "expand_neighbors",
+            "search_nodes",
+            "list_nodes",
         ] {
             assert!(queries.get(name).is_some(), "missing named query `{name}`");
         }

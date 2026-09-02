@@ -1,5 +1,6 @@
 use arrow::array::StringArray;
-use gkg_utils::arrow::ArrowUtils;
+use orbit_utils::arrow::ArrowUtils;
+use orbit_utils::traversal_path::TraversalPath;
 use std::collections::BTreeSet;
 use std::sync::LazyLock;
 
@@ -53,7 +54,7 @@ pub async fn assert_edge_count_for_traversal_path(
     relationship_kind: &str,
     source_kind: &str,
     target_kind: &str,
-    traversal_path: &str,
+    traversal_path: &TraversalPath,
     expected: usize,
 ) {
     let edge_table = edge_table(relationship_kind);
@@ -77,7 +78,7 @@ pub async fn assert_edges_have_traversal_path(
     relationship_kind: &str,
     source_kind: &str,
     target_kind: &str,
-    expected_traversal_path: &str,
+    expected_traversal_path: &TraversalPath,
     expected_count: usize,
 ) {
     let edge_table = edge_table(relationship_kind);
@@ -102,7 +103,7 @@ pub async fn assert_edges_have_traversal_path(
     for i in 0..batch.num_rows() {
         assert_eq!(
             paths.value(i),
-            expected_traversal_path,
+            expected_traversal_path.as_str(),
             "{relationship_kind} edge row {i} should have traversal_path '{expected_traversal_path}'"
         );
     }

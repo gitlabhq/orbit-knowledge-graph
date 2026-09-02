@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::fmt::Write;
 
-use gkg_utils::strings::{
+use orbit_utils::strings::{
     ascii_alphanumeric_table, bytes_are_allowed, char_count_if_exceeds, quote_escaped,
     truncate_chars,
 };

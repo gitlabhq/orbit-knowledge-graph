@@ -290,9 +290,7 @@ The handler will restart extraction from epoch for that entity type.
 
 ## Graph table maintenance
 
-The `TableCleanup` scheduled task runs `OPTIMIZE TABLE ... FINAL CLEANUP` on all graph tables every 24 hours. This compacts ReplacingMergeTree tables and physically removes soft-deleted rows.
-
-To trigger manually:
+A deletion is a tombstone: the row is re-inserted with `_deleted = true` and a bumped `_version`, and reads hide it at once via FINAL. No deletion path issues a mutation. To physically reclaim tombstoned rows from a table on disk:
 
 ```sql
 OPTIMIZE TABLE `<gkg-database>`.gl_project FINAL CLEANUP;

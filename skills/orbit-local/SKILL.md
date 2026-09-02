@@ -12,7 +12,7 @@ description: >
   production data in GitLab (a project such as gitlab-org/gitlab, cross-project
   blast radius, contributor or merge-request aggregation) use the `orbit` skill;
   for single-entity GitLab lookups or write operations use `glab`.
-version: 0.3.0
+version: 0.3.1
 license: MIT
 metadata:
   audience: developers
@@ -22,8 +22,8 @@ metadata:
 
 # Orbit local CLI skill
 
-Index and query a **local** copy of the GitLab Knowledge Graph (product name
-**Orbit**). The local CLI parses a checked-out repository into a DuckDB property
+Index and query a **local** copy of the GitLab Orbit graph. The local CLI
+parses a checked-out repository into a DuckDB property
 graph and answers questions with **read-only SQL** — a different surface from
 Orbit Remote, which speaks the JSON DSL over gRPC. Use this skill for the
 working tree; use the `orbit` skill for production data.

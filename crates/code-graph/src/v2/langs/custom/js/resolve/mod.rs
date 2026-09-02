@@ -26,7 +26,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use super::analyze::invocation::invocation_support_for_graph_def_kind;
 use super::types::{JsCallSite, JsImportedBinding};
 use super::{
-    ImportedName, JsCallEdge, JsCallTarget, JsExportName, JsFileAnalysis, JsModuleIndex,
+    ImportedName, JsCallEdge, JsCallTarget, JsDefSupport, JsExportName, JsModuleIndex,
     JsPhase1FileInfo, JsResolutionMode, JsResolvedCallRelationship, WorkspaceProbe,
     extract::ResolvedJsFile,
 };
@@ -53,12 +53,16 @@ pub fn attach_resolution_edges(
         analyzed_files
             .par_iter()
             .map(|analyzed| {
+                if ctx.is_cancelled() {
+                    return Vec::new();
+                }
                 let guard = sentinel.map(|s| s.file_start(&analyzed.relative_path));
                 let edges = resolve_local_call_edges(
                     graph,
                     analyzed,
                     file_infos.get(&analyzed.relative_path),
                     tracer,
+                    guard.as_ref().map(|g| g.kill_flag()),
                 );
                 if guard.as_ref().is_some_and(|g| g.is_killed()) {
                     ctx.record_skip(
@@ -78,7 +82,7 @@ pub fn attach_resolution_edges(
         }
     }
 
-    if analyzed_files.is_empty() {
+    if analyzed_files.is_empty() || ctx.is_cancelled() {
         return;
     }
 
@@ -86,7 +90,6 @@ pub fn attach_resolution_edges(
         .iter()
         .filter_map(|file| {
             let calls: Vec<_> = file
-                .analysis
                 .calls
                 .iter()
                 .filter(|call| matches!(call.callee, JsCallTarget::ImportedCall { .. }))
@@ -114,6 +117,9 @@ pub fn attach_resolution_edges(
         import_nodes
             .par_iter()
             .filter_map(|(source_node, source_path)| {
+                if ctx.is_cancelled() {
+                    return None;
+                }
                 if deadline.is_some_and(|d| Instant::now() >= d) {
                     timed_out.store(true, Ordering::Relaxed);
                     return None;
@@ -146,6 +152,10 @@ pub fn attach_resolution_edges(
         }
     }
 
+    if ctx.is_cancelled() {
+        return;
+    }
+
     if timed_out.load(Ordering::Relaxed) {
         tracing::warn!("js cross-file import resolution timed out");
         ctx.record_skip(
@@ -174,6 +184,7 @@ fn resolve_local_call_edges(
     analyzed: &ResolvedJsFile,
     file_info: Option<&JsPhase1FileInfo>,
     tracer: &crate::v2::trace::Tracer,
+    kill_flag: Option<std::sync::Arc<AtomicBool>>,
 ) -> Vec<(NodeIndex, NodeIndex, GraphEdge)> {
     let Some(file_info) = file_info else {
         return Vec::new();
@@ -190,11 +201,14 @@ fn resolve_local_call_edges(
         settings,
         tracer,
     );
+    if let Some(kill_flag) = kill_flag {
+        resolver.set_kill_flag(kill_flag);
+    }
 
     let mut resolved = Vec::new();
     let mut filtered = Vec::new();
     let mut semantic_seen: FxHashSet<(usize, String, EdgeKind)> = FxHashSet::default();
-    for call in &analyzed.analysis.local_calls {
+    for call in &analyzed.local_calls {
         resolved.clear();
         let _ = resolver.resolve(
             &call.name,
@@ -207,7 +221,7 @@ fn resolve_local_call_edges(
         for (source_node, target_node, edge) in &resolved {
             if !local_target_supports_invocation(
                 graph,
-                &analyzed.analysis,
+                &analyzed.def_support,
                 *target_node,
                 call.invocation_kind,
             ) {
@@ -257,16 +271,15 @@ fn js_local_settings() -> &'static ResolveSettings {
 
 fn local_target_supports_invocation(
     graph: &CodeGraph,
-    analysis: &JsFileAnalysis,
+    def_support: &[JsDefSupport],
     target_node: NodeIndex,
     invocation_kind: super::JsInvocationKind,
 ) -> bool {
     let graph_def = graph.def(target_node);
     let target_fqn = graph.def_fqn(target_node);
-    let support = analysis
-        .defs
+    let support = def_support
         .iter()
-        .find(|def| def.fqn == target_fqn || def.range.byte_offset == graph_def.range.byte_offset)
+        .find(|def| def.fqn == target_fqn || def.byte_offset == graph_def.range.byte_offset)
         .and_then(|def| def.invocation_support)
         .or_else(|| invocation_support_for_graph_def_kind(graph_def.kind));
 
@@ -775,5 +788,53 @@ impl GraphLookup {
         }
 
         lookup
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::v2::langs::custom::js::JsModuleGraphBuilder;
+    use crate::v2::langs::custom::js::extract::analyze_files;
+    use std::sync::Arc;
+
+    #[test]
+    fn an_armed_kill_flag_stops_local_call_resolution() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let root = temp.path();
+        std::fs::write(
+            root.join("a.js"),
+            "function target() { return 1; }\nexport function caller() { return target(); }\n",
+        )
+        .unwrap();
+
+        let files = vec!["a.js".to_string()];
+        let root_path = root.to_str().expect("utf8 root path");
+        let (analyzed, _) = analyze_files(&files, root_path, None, &Default::default());
+        let mut builder = JsModuleGraphBuilder::new(root_path.to_string());
+        let mut infos: FxHashMap<String, JsPhase1FileInfo> = FxHashMap::default();
+        let mut resolved = Vec::new();
+        for file in analyzed {
+            infos.insert(file.relative_path.clone(), builder.add_file(file.phase1));
+            resolved.push(ResolvedJsFile::from_analysis(
+                file.relative_path,
+                file.analysis,
+            ));
+        }
+        let (graph, _) = builder.into_parts();
+        let tracer = crate::v2::trace::Tracer::new(false);
+        let info = infos.get("a.js");
+
+        let unarmed = resolve_local_call_edges(&graph, &resolved[0], info, &tracer, None);
+        let armed = resolve_local_call_edges(
+            &graph,
+            &resolved[0],
+            info,
+            &tracer,
+            Some(Arc::new(AtomicBool::new(true))),
+        );
+
+        assert!(!unarmed.is_empty(), "the fixture must resolve a local call");
+        assert!(armed.is_empty(), "got {} edges", armed.len());
     }
 }

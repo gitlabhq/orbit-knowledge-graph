@@ -1,5 +1,5 @@
 [package]
-name = "gkg-fuzz"
+name = "orbit-fuzz"
 version.workspace = true
 edition = "2024"
 publish = false

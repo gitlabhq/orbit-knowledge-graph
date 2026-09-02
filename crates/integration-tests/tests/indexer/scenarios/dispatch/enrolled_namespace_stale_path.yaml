@@ -1,21 +1,23 @@
 description: >
   An enrollment row stored with the '0/' dictionary-race fallback still
   dispatches once namespace_traversal_paths can resolve the namespace, and an
-  unenrolled namespace whose tombstone has not merged does not dispatch.
+  an enrollment reinsert newer than its same-watermark tombstone dispatches.
 
 seed:
   siphon_knowledge_graph_enabled_namespaces:
     - { id: 1, root_namespace_id: 100, traversal_path: "0/", created_at: "2024-01-15", updated_at: "2024-01-15" }
-    - { id: 2, root_namespace_id: 200, traversal_path: "1/200/", created_at: "2024-01-15", updated_at: "2024-01-15", _siphon_watermark: "2024-01-20 12:00:00" }
-    - { id: 2, root_namespace_id: 200, traversal_path: "1/200/", created_at: "2024-01-15", updated_at: "2024-01-16", _siphon_watermark: "2024-01-20 13:00:00", _siphon_deleted: true }
+    - { id: 2, root_namespace_id: 200, traversal_path: "1/200/", created_at: "2024-01-15", updated_at: "2024-01-17", _siphon_replicated_at: "2024-01-20 12:00:00.000002", _siphon_watermark: "2024-01-20 12:00:00.000000" }
+    - { id: 2, root_namespace_id: 200, traversal_path: "1/200/", created_at: "2024-01-15", updated_at: "2024-01-16", _siphon_replicated_at: "2024-01-20 12:00:00.000001", _siphon_watermark: "2024-01-20 12:00:00.000000", _siphon_deleted: true }
   namespace_traversal_paths:
     - { id: 100, traversal_path: "1/100/" }
+    - { id: 200, traversal_path: "1/200/" }
 
 dispatch: namespace
 
 expect:
   dispatched:
     - kind: namespace
-      count: 1
+      count: 2
       rows:
         - { namespace: 100, traversal_path: "1/100/" }
+        - { namespace: 200, traversal_path: "1/200/" }

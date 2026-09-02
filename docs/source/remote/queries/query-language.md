@@ -1,8 +1,8 @@
 ---
-stage: Analytics
-group: Knowledge Graph
+stage: Orbit
+group: Context Systems
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Use the GitLab Orbit query language to search and traverse the knowledge graph.
+description: Use the GitLab Orbit query language to search and traverse the graph.
 title: GitLab Orbit query language
 ---
 
@@ -197,6 +197,7 @@ objects: `{"title": [{"contains": "foo"}, {"contains": "bar"}]}`.
 | `all_tokens` | Text index contains all tokens. |
 | `any_tokens` | Text index contains any token. |
 
+`contains`, `starts_with`, and `ends_with` work only on string, enum, and UUID properties.
 Token operators work only on properties with text indexes.
 
 ### Text-indexed properties

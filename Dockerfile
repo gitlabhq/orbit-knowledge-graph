@@ -18,7 +18,7 @@ RUN --mount=type=secret,id=sccache_gcs_key \
     fi && \
     export RUSTC_WRAPPER="$SCCACHE_BIN" && \
     "$SCCACHE_BIN" --start-server || true && \
-    cargo build --release -p gkg-server --locked && \
+    cargo build --release -p orbit-server --locked && \
     "$SCCACHE_BIN" --show-stats || true && \
     cp target/release/gkg-server /gkg-server
 
@@ -33,5 +33,9 @@ COPY --from=builder /gkg-server /usr/local/bin/gkg-server
 
 # ClickHouse setup contract, shipped in the image so deployments read it at the exact version they run.
 COPY config/clickhouse-setup.sql /usr/share/gkg/clickhouse-setup.sql
+
+# Grafana dashboards, shipped in the image so deployments apply the flavor matching the running code.
+COPY dashboards/dedicated/*.dashboard.json /usr/share/gkg/dashboards/dedicated/
+COPY dashboards/orbit/*.dashboard.json /usr/share/gkg/dashboards/com/
 
 ENTRYPOINT ["gkg-server"]

@@ -14,7 +14,7 @@ pub async fn run(
     no_projections: bool,
     use_cli: bool,
 ) -> Result<()> {
-    println!("GitLab Knowledge Graph Loader");
+    println!("GitLab Orbit Loader");
     println!("=============================\n");
 
     println!("Loading config from {:?}...", config_path);

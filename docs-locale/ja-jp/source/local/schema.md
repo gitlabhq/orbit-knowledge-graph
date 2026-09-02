@@ -1,6 +1,6 @@
 ---
-stage: Analytics
-group: Knowledge Graph
+stage: Orbit
+group: Context Systems
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
 description: Orbit Localコードグラフの4つのノードタイプとその接続方法に関するリファレンス。
 title: スキーマリファレンス
@@ -22,9 +22,9 @@ title: スキーマリファレンス
 {{< /history >}}
 
 > [!note]
-> Orbit Localは実験的機能です。GAリリース前に、機能およびコマンドの形式が変更される場合があります。
+> GitLab Orbit Localは実験的機能です。GAリリース前に、機能およびコマンドの形式が変更される場合があります。
 
-Orbit Localはソースコードドメインに属する4つのノードタイプをインデックス作成します。Orbit LocalはGitLabに接続しないため、SDLCレイヤーはありません。
+GitLab Orbit Localはソースコードドメインに属する4つのノードタイプをインデックス作成します。GitLab Orbit LocalはGitLabに接続しないため、SDLCレイヤーはありません。
 
 ライブのDuckDBスキーマをいつでも確認するには、次のコマンドを実行します。
 
@@ -50,12 +50,13 @@ orbit schema
 - ファイルと、そのファイルがインポートするシンボル
 - インポートされたシンボルと、他のファイル内で解決される定義
 
-## Orbit Remoteとの違い {#differences-from-orbit-remote}
+<!-- markdownlint-disable-next-line MD044 -->
+## GitLab Orbit Remoteとの違い {#differences-from-gitlab-orbit-remote}
 
-[Orbit Remote](../remote/schema.md)は6つのドメインにわたる28のノードタイプをインデックス作成します。Orbit Localはソースコードドメインのみを対象としており、GitLabのデータ（マージリクエスト、パイプライン、ユーザー、脆弱性、作業アイテム）を必要とする機能は利用できません。
+[GitLab Orbit Remote](../remote/schema.md)は6つのドメインにわたる28のノードタイプをインデックス作成します。GitLab Orbit Localはソースコードドメインのみを対象としており、GitLabのデータ（マージリクエスト、パイプライン、ユーザー、脆弱性、作業アイテム）を必要とする機能は利用できません。
 
 ## 注意事項 {#notes}
 
 - 定義IDは、ファイルパスごとにスコープされたコンテンツハッシュ整数です。2つのインデックス作成済みリポジトリに同じ関数が存在する場合、それぞれ異なるIDが割り当てられます。
 - `Definition`ノードおよび`File`ノードの`content`フィールドには、完全なソーステキストが含まれます。これらのフィールドは、エージェントツールが個別のファイル読み取りなしにコードをハイドレートできるよう、値が入力されています。
-- 認可レイヤーはありません。Orbit Localはユーザーごとのアクセス制御を適用しません。`~/.orbit/graph.duckdb`にあるグラフファイルは、ファイルシステムのパーミッションによってのみ保護されています。
+- 認可レイヤーはありません。GitLab Orbit Localはユーザーごとのアクセス制御を適用しません。`~/.orbit/graph.duckdb`にあるグラフファイルは、ファイルシステムのパーミッションによってのみ保護されています。

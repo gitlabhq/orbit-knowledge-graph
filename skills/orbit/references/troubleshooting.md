@@ -129,12 +129,12 @@ Full field reference in [`query_language.md`](query_language.md).
 (after [!241580](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/241580))
 the underlying `GET /api/v4/orbit/status` endpoint returns a nested wrapper —
 `{ "user": { "available": … }, "system": { …health… } | null }` — and always
-responds `200`; `system` is `null` when your user lacks Knowledge Graph access.
+responds `200`; `system` is `null` when your user lacks Orbit access.
 The CLI unwraps this for you: it prints the `system` health object (same output
 as the old flat shape on pre-19.1 instances), and on `user.available == false`
 (or a `404` when the feature flag is off) it exits `2`
 ([exit codes](#cli-exit-codes)). An exit `2` from `status` therefore means
-"no Knowledge Graph access" — work through
+"no Orbit access" — work through
 [Exit `2`](#exit-2--feature-flag-is-off-or-wrong-subcommand).
 
 If the printed `system` health shows any component unhealthy, retry with

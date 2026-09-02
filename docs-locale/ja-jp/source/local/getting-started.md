@@ -1,9 +1,9 @@
 ---
-stage: Analytics
-group: Knowledge Graph
+stage: Orbit
+group: Context Systems
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: アクセス方法を選択して、最初のローカルOrbitグラフを構築します。
-title: Orbit Localを使ってみる
+description: アクセス方法を選択して、最初のローカルGitLab Orbitグラフを構築します。
+title: GitLab Orbit Localを使ってみる
 ---
 
 {{< details >}}
@@ -21,7 +21,7 @@ title: Orbit Localを使ってみる
 
 {{< /history >}}
 
-Orbit Localはお使いのマシン上で動作します。`orbit`バイナリをインストールし、作業スタイルに合ったアクセス方法を選択して、最初のクエリを実行してください。
+GitLab Orbit Localはお使いのマシン上で動作します。`orbit`バイナリをインストールし、作業スタイルに合ったアクセス方法を選択して、最初のクエリを実行してください。
 
 ## インストール {#install}
 
@@ -145,18 +145,18 @@ glab orbit local help
 
 | 方法 | 最適な用途 | セットアップ |
 |---|---|---|
-| [Orbit CLI（`orbit`）](access/cli.md) | CLIの直接使用、スクリプト作成、インデックス作成タスク | ワンラインインストーラーまたは`glab orbit local --install` |
+| [GitLab Orbit CLI（`orbit`）](access/cli.md) | CLIの直接使用、スクリプト作成、インデックス作成タスク | ワンラインインストーラーまたは`glab orbit local --install` |
 | [GitLab CLI（`glab`）](access/glab.md) | すでに`glab`を使用している方 | `glab orbit local --install` |
 | [MCP](access/mcp.md) | Claude Code、Codex、その他のAIエージェント | `claude mcp add orbit-local -- orbit mcp serve` |
 
-3つすべてが同じローカルグラフを参照します。Orbit LocalはDuckDB SQLでクエリを実行します。構造化JSONクエリDSLは[Orbit Remote](../remote/_index.md)専用です。
+3つすべてが同じローカルグラフを参照します。GitLab Orbit LocalはDuckDB SQLでクエリを実行します。構造化JSONクエリDSLは[GitLab Orbit Remote](../remote/_index.md)専用です。
 
 ## 60秒クイックスタート {#60-second-quickstart}
 
 > [!note]
 > `glab orbit local`は管理された`orbit`バイナリをラップします。バイナリは初回使用時にダウンロードされ、チェックサムで検証され、最新の状態に保たれます。`glab` 1.94以降が必要です。バイナリを直接実行する場合は、[`orbit` CLIを直接使用する](access/cli.md)を参照してください。
 
-リポジトリのインデックスを作成して、Orbitが検出した内容を確認します:
+リポジトリのインデックスを作成して、GitLab Orbitが検出した内容を確認します:
 
 ```shell
 glab orbit local index /path/to/your/repo
@@ -167,17 +167,17 @@ glab orbit local schema
 
 次のステップ:
 
-- 実際のクエリを実行する: [glabでOrbit Localを使用する](access/glab.md)。
-- AIエージェントに接続する: `glab orbit setup`を実行してOrbitスキルをインストールするか、手動設定については[MCPで接続する](access/mcp.md)を参照してください。
+- 実際のクエリを実行する: [glabでGitLab Orbit Localを使用する](access/glab.md)。
+- AIエージェントに接続する: `glab orbit setup`を実行してGitLab Orbitスキルをインストールするか、手動設定については[MCPで接続する](access/mcp.md)を参照してください。
 - テーブルレイアウトを確認する: [スキーマリファレンス](schema.md)。
 
 ## 課金 {#billing}
 
-Orbit LocalはGitLabクレジットを消費しません。すべての処理はローカルで行われます。
+GitLab Orbit LocalはGitLabクレジットを消費しません。すべての処理はローカルで行われます。
 
 ## 次に試すこと {#what-to-try-next}
 
-- [Orbit Localのインデックス対象](indexing.md) - 対応言語とカバレッジの範囲。
+- [GitLab Orbit Localのインデックス対象](indexing.md) - 対応言語とカバレッジの範囲。
 - [スキーマリファレンス](schema.md) - ローカルグラフの4つのノードタイプ。
 - [Cookbook](../remote/cookbook.md) - コピー＆ペーストで使えるクエリ集（コードのみのクエリはLocalにも適用可能）。
-- [Orbit Remoteを使ってみる](../remote/getting-started.md) - GitLabインスタンス全体をクエリする。
+- [GitLab Orbit Remoteを使ってみる](../remote/getting-started.md) - GitLabインスタンス全体をクエリする。

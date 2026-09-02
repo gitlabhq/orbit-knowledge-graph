@@ -4,7 +4,7 @@
 
 This document describes how the code indexing ETL pipeline works. Unlike SDLC entities, code versions can exist in parallel across branches, so the same file can look different on `main` vs. a feature branch.
 
-If we want the Knowledge Graph to answer questions about code, it needs to understand relationships at any given branch and commit.
+If we want Orbit to answer questions about code, it needs to understand relationships at any given branch and commit.
 
 The ETL pipeline:
 
@@ -106,7 +106,7 @@ graph LR
 | `code-graph` crate | Single crate containing the v2 pipeline stack in `src/v2/`, the preserved legacy parser/linker stack in `src/legacy/`, and shared code-indexing utilities |
 | `treesitter-visit` crate | Tree-sitter wrapper crate kept separate for compile-time isolation and shared by the legacy and generic v2 language pipelines |
 | `indexer` crate | NATS consumer, ETL engine, Siphon task dispatcher, namespace backfill dispatcher, code indexing task handler, Arrow conversion, ClickHouse writes |
-| `gkg-server` | HTTP/gRPC server, runs in Indexer mode for code indexing |
+| `orbit-server` | HTTP/gRPC server, runs in Indexer mode for code indexing |
 | NATS JetStream | Message broker with durable delivery between Siphon and GKG |
 | NATS KV | Distributed lock store to prevent concurrent indexing of the same project |
 | ClickHouse | Columnar OLAP database storing the data lake and the property graph |
@@ -117,7 +117,7 @@ For background on Siphon CDC, NATS, and ClickHouse architecture, see the
 
 ### Data storage
 
-The Knowledge Graph code data is stored in a separate ClickHouse database.
+Orbit code data is stored in a separate ClickHouse database.
 
 - For `.com` this is expected to run in a separate instance.
 - For small dedicated environments and self-hosted instances, this can be done in the same instance as the main ClickHouse database. This choice ultimately depends on what the operators think is best for their environment.
@@ -152,7 +152,7 @@ The first milestone is indexing the main branch for every repository. This cover
 
 The extract phase uses a two-hop dispatch model to decouple Siphon CDC consumption from indexing.
 
-Rails writes to a dedicated `p_knowledge_graph_code_indexing_tasks` table only when a push lands on the default branch of a namespace with Knowledge Graph indexing enabled. These rows are replicated via Siphon CDC to NATS JetStream:
+Rails writes to a dedicated `p_knowledge_graph_code_indexing_tasks` table only when a push lands on the default branch of a namespace with Orbit indexing enabled. These rows are replicated via Siphon CDC to NATS JetStream:
 
 - `gkg_siphon_stream.p_knowledge_graph_code_indexing_tasks`
 
@@ -168,11 +168,13 @@ This separation lets task dispatching be stopped independently from the indexer 
 
 ##### Namespace backfill dispatch
 
-When a namespace first enables Knowledge Graph indexing, its existing projects need to be indexed even though no push events have occurred yet. The `NamespaceCodeBackfillDispatcher` handles this by consuming `knowledge_graph_enabled_namespaces` CDC events from Siphon. For each newly enabled namespace it:
+When a namespace first enables Orbit indexing, its existing projects need to be indexed even though no push events have occurred yet. The `NamespaceCodeBackfillDispatcher` handles this by consuming `knowledge_graph_enabled_namespaces` CDC events from Siphon. For each newly enabled namespace it:
 
 1. Resolves the namespace's traversal path from `namespace_traversal_paths`
 2. Queries `project_namespace_traversal_paths` to find all projects under that namespace
 3. Publishes a `CodeIndexingTaskRequest` for each project to the `GKG_INDEXER` stream
+
+Pending projects are published in bounded batches rather than after every namespace has been enumerated, so a fleet-wide sweep (every schema migration produces one, since the new version's checkpoint table starts empty) does not have to hold the whole fleet's projects before the first publish. Each namespace contributes at most its share of one batch, where the share is the batch size (`schedule.tasks.code-backfill.publish_window`) divided by the namespaces that still had pending projects on the previous run, and each batch is shuffled before it is published. A namespace with a large backlog therefore takes its turn alongside every other namespace instead of filling the queue, and it is topped back up on each run as its projects are indexed.
 
 These backfill requests omit `branch` and `commit_sha`. The handler resolves the default branch from the Rails internal API at processing time.
 
@@ -186,9 +188,9 @@ Example NATS KV:
 - Value: `{ "worker_id": String, "started_at": Instant }`
 - TTL: 60 seconds
 
-After acquiring the lock, the service downloads the full repository archive from the Rails internal API. Each run extracts into its own unique directory (keyed by a per-run id, not just project + branch), so two workers racing the same repository never share an extraction tree and cannot clobber each other's files. That race happens when the ack deadline lapses mid-unpack and the task is redelivered before the first worker finishes. During archive extraction, the Gitaly archive root directory (`<slug>-<ref>/`) is stripped so that indexed paths are repo-relative and match the paths used by content resolution's `list_blobs` revisions. That run's extraction directory is owned by the cached repository handle, so it is removed from disk as soon as the handle drops, whether indexing completes, errors, or the whole job is dropped mid-run on the wall-clock timeout. A hard pod crash is caught by the startup purge that clears the cache root on boot. This prevents unbounded storage growth across indexer pods.
+After acquiring the lock, the service downloads the full repository archive from the Rails internal API. The request passes `include_lfs_blobs=false`, so Gitaly does not run its LFS smudge filter and the archive carries each LFS file's pointer text instead of its object contents. Nothing in the graph is built from LFS content, and the extractor charges its total-bytes cap before filtering, so resolving those pointers would spend object-storage reads and cap budget on data that is then discarded. Each run extracts into its own unique directory (keyed by a per-run id, not just project + branch), so two workers racing the same repository never share an extraction tree and cannot clobber each other's files. That race happens when the ack deadline lapses mid-unpack and the task is redelivered before the first worker finishes. During archive extraction, the Gitaly archive root directory (`<slug>-<ref>/`) is stripped so that indexed paths are repo-relative and match the paths used by content resolution's `list_blobs` revisions. That run's extraction directory is owned by the cached repository handle, so it is removed from disk as soon as the handle drops, whether indexing completes, errors, or the whole job is dropped mid-run on the wall-clock timeout. A hard pod crash is caught by the startup purge that clears the cache root on boot. This prevents unbounded storage growth across indexer pods.
 
-The extractor records a repository file inventory from archive metadata before it applies byte-level filtering. That inventory drives `File` and `Directory` node creation, so files do not need to be unpacked or parsed to appear in the graph. After inventory recording, extraction filters each regular file in two phases. The header phase uses an exclusion denylist (`code_graph::v2::config::is_excluded_from_indexing`) and the configured per-file size ceiling to drop obvious binary/media/archive/document/datastore blobs or oversized blobs without reading any content. Files that survive the header phase are sniffed: the first 8000 bytes are inspected and the file is dropped as binary when a NUL byte is present (`code_graph::v2::config::looks_binary`, mirroring git's heuristic, with a UTF BOM rescue so BOM-marked UTF-16/32 text is kept). This catches binary blobs that fall under the size ceiling and carry no telltale extension.
+The extractor records a repository file inventory from archive metadata before it applies byte-level filtering. That inventory drives `File` and `Directory` node creation, so files do not need to be unpacked or parsed to appear in the graph. After inventory recording, extraction filters each regular file in two phases. The header phase uses an exclusion denylist (`code_graph::v2::config::is_excluded_from_indexing`) and the configured per-file size ceiling to drop obvious binary/media/archive/document/datastore blobs or oversized blobs without reading any content. Files that survive the header phase are sniffed: the first 8000 bytes are inspected and the file is dropped as binary when a NUL byte is present (`code_graph::v2::config::looks_binary`, mirroring git's heuristic, with a UTF BOM rescue so BOM-marked UTF-16/32 text is kept). This catches binary blobs that fall under the size ceiling and carry no telltale extension. The content phase also recognizes Git LFS pointers, matching Gitaly's `git.IsLFSPointer`: pointer text is valid UTF-8 and would otherwise be classified by extension and parsed as source. Because the size the archive reports for an LFS file is the pointer's size, an LFS file's `size_bytes` on its `File` node is the pointer size, not the size of the object it stands for.
 
 Source files, manifests, lockfiles, dotfiles, unknown extensions, and resolver inputs are intentionally allowed through unless they exceed the size ceiling or look binary. Dropped files remain in the inventory and still appear as `File` nodes; they are simply never written to disk and so are never parsed. Symlinks, hardlinks, and directories bypass the byte filter: symlinks cost negligible disk and may legitimately point at parsable files; directories are created lazily as files are unpacked.
 
@@ -204,7 +206,7 @@ The `code-graph` crate now contains both the v2 pipeline stack under `src/v2/` a
 - **Vue** sources are handled by extracting script blocks into virtual JavaScript or TypeScript sources and routing them through the same OXC-based JS pipeline.
 - **File-backed JS ecosystem imports** such as GraphQL, GQL, and JSON are indexed as module-like files with a synthetic primary export that resolves back to the file node. This keeps module resolution accurate for frontend repositories without pretending those assets contain parsed code definitions.
 - **Webpack alias evaluation** is deliberately partial and bounded. It only evaluates explicit local config modules, enforces file-count, byte, statement, and recursion budgets, treats `process.env` as an empty object, and allows filesystem probes such as `fs.existsSync()` only for repo-contained paths that remain under the checkout root after normalization.
-- **Rust** uses a rust-analyzer-backed custom v2 pipeline with a shell-free synthetic repo-local Cargo workspace model. The loader stays inside the checked-out tree, attaches a pinned embedded Rust `1.95.0` sysroot project plus baked server-side cfg/target data, disables proc macros and build-script execution, and layers parser-time SSA over rust-analyzer for local callable flow such as aliases, rebindings, destructuring, tuple/record field slots, and branch joins. rust-analyzer resolves callable semantics for functions, methods, macros, operators, `?`, and `await`.
+- **Rust** uses a rust-analyzer-backed custom v2 pipeline with a shell-free synthetic repo-local Cargo workspace model. The loader stays inside the checked-out tree, attaches a pinned embedded Rust `1.95.0` sysroot project plus baked server-side cfg/target data, disables proc macros and build-script execution, and layers parser-time SSA over rust-analyzer for local callable flow such as aliases, rebindings, destructuring, tuple/record field slots, and branch joins. rust-analyzer resolves callable semantics for functions, methods, macros, operators, `?`, and `await`. rust-analyzer keeps its type values in process-global interners that only an explicit sweep frees, so a Rust job holds a process-wide read lock while it owns a rust-analyzer database and the job that finishes with no other Rust job in that phase runs the sweep; if enough Rust jobs pass without one, the next job waits a bounded time for exclusive access before it starts and then proceeds either way.
 - **Python, Kotlin, Java, C#, Go, Ruby, C, C++, PHP, Bash, Elixir, Swift, and Lua** use tree-sitter grammars driven by the declarative DSL in `crates/code-graph/src/v2/langs/generic/`. Contributors adding a new language should follow [`docs/dev/adding-a-language.md`](../../dev/adding-a-language.md). Lua indexes top-level, local, and global `function` declarations as `Function` or `Method` definitions and extracts `require()` calls as runtime imports; `setmetatable`-based OOP is out of scope for v1.
 - **Legacy JavaScript and TypeScript** parsing still exists under `src/legacy/` and continues to use SWC while the v2 JS pipeline work is integrated.
 
@@ -306,7 +308,7 @@ Projects whose Gitaly archive endpoint returns 404 (no refs) or 5xx (no reposito
 
 Tasks with no `branch` field resolve the default branch via `GET /api/v4/internal/orbit/project/:id/info`. When that endpoint returns 404 (project deleted in Rails but still referenced by the dispatcher's datalake view), the task is acked with the same `empty_repository{reason=not_found}` counter and no checkpoint is stored — the branch is unknown, so there is no key to write under. The ack avoids DLQ churn; the dispatcher stopping emission for deleted projects is tracked separately.
 
-A job that exceeds its hard wall-clock budget (`job_timeout_secs`, default 250s) gets one retry to absorb a transient slowdown (a busy pod, a slow Gitaly fetch); a job that times out a second time is treated as structurally stuck and dead-lettered, rather than burning the full delivery budget re-attempting a repo that will almost certainly time out again and wasting an indexing slot each time. (A transient write failure is different — that is retried in the writer with backoff, above, and does not dead-letter the job.)
+A job that exceeds its hard wall-clock budget (`job_timeout_secs`, default 1500s) gets one retry to absorb a transient slowdown (a busy pod, a slow Gitaly fetch); a job that times out a second time is treated as structurally stuck and dead-lettered, rather than burning the full delivery budget re-attempting a repo that will almost certainly time out again and wasting an indexing slot each time. (A transient write failure is different — that is retried in the writer with backoff, above, and does not dead-letter the job.) Abandoning the job also stops the indexing work it started, so the pod releases the CPU and memory rather than holding them until it restarts. The stop is not instantaneous: work already in flight on one file finishes first, and a Rust job waiting for the interner sweep described above finishes that wait first.
 
 #### Flow visual representation
 
@@ -431,7 +433,7 @@ tool. Here are the main architectural differences in the current service:
 
 #### The problem
 
-The main branch is the most common branch to index, but a strategy for active branches is worth documenting. The Knowledge Graph also includes a local version that customers can use to query code against their local repository at any version.
+The main branch is the most common branch to index, but a strategy for active branches is worth documenting. Orbit also includes a local version that customers can use to query code against their local repository at any version.
 
 The core issue with indexing active branches is volume: billions of definitions and relationships for repositories the size of the GitLab monolith. The initial release focuses on main-branch indexing; branch-level and commit-level support are planned as follow-on work.
 
@@ -490,7 +492,7 @@ Code Indexing is going to follow the same schema migration strategy as the main 
 
 ### How code querying works today
 
-The Knowledge Graph team originally built dedicated MCP tools for code querying. Each tool wraps a focused workflow on top of the indexed call graph. Reference documentation lives at [Knowledge Graph: tools](https://gitlab-org.gitlab.io/rust/knowledge-graph/mcp/tools/).
+The Orbit team originally built dedicated MCP tools for code querying. Each tool wraps a focused workflow on top of the indexed call graph. Reference documentation lives at [Knowledge Graph: tools](https://gitlab-org.gitlab.io/rust/knowledge-graph/mcp/tools/).
 
 The available tools:
 

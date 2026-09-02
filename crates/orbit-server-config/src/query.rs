@@ -1,0 +1,527 @@
+//! Query execution configuration shared between server and compiler.
+//!
+//! [`QuerySettings`] holds a default [`QueryConfig`] plus optional
+//! per-query-type overrides, loaded from `AppConfig` at startup and
+//! stored in a process-wide global via [`init`] / [`for_query_type`].
+
+use std::collections::HashMap;
+use std::sync::OnceLock;
+
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+/// Escape a string for use as a ClickHouse SETTINGS value.
+/// Single-quotes the value and escapes embedded quotes and backslashes.
+fn escape_setting_str(s: &str) -> String {
+    let escaped = s.replace('\\', "\\\\").replace('\'', "\\'");
+    format!("'{escaped}'")
+}
+
+/// Query execution settings. All fields map to ClickHouse query-level
+/// settings. The closed set of fields prevents arbitrary user input from
+/// reaching the SETTINGS clause (CWE-89).
+///
+/// `None` means "not specified at this layer" -- the merge logic in
+/// [`QuerySettings::resolve`] fills in from the default.
+/// Default max_execution_time: 30 seconds.
+const DEFAULT_MAX_EXECUTION_TIME: u64 = 30;
+/// Default query_cache_ttl: 60 seconds.
+const DEFAULT_QUERY_CACHE_TTL: u32 = 60;
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct QueryConfig {
+    /// ClickHouse `max_execution_time` in seconds.
+    #[serde(
+        default = "default_max_execution_time",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub max_execution_time: Option<u64>,
+
+    /// ClickHouse `max_memory_usage` in bytes. Limits the amount of RAM
+    /// a single query can consume on the ClickHouse server. When exceeded,
+    /// ClickHouse aborts the query with MEMORY_LIMIT_EXCEEDED. Unset by
+    /// default (ClickHouse uses its server-level setting).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_memory_usage: Option<u64>,
+
+    /// ClickHouse `max_bytes_to_read` in bytes. Limits uncompressed data
+    /// read from tables. Unset by default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_bytes_to_read: Option<u64>,
+
+    /// ClickHouse `max_rows_to_read`. Limits the total number of rows
+    /// read from tables during query execution. Unset by default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_rows_to_read: Option<u64>,
+
+    /// ClickHouse `max_rows_in_set`. Limits the size of hash tables built
+    /// for IN (subquery) clauses. Unset by default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_rows_in_set: Option<u64>,
+
+    /// ClickHouse `max_ast_elements`. Limits AST node count after parsing.
+    /// Default: 1,000,000 (20x ClickHouse default, matches Siphon).
+    #[serde(
+        default = "default_max_ast_elements",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub max_ast_elements: Option<u64>,
+
+    /// ClickHouse `max_expanded_ast_elements`. Limits AST node count after
+    /// alias/macro expansion. Default: 10,000,000 (20x ClickHouse default).
+    #[serde(
+        default = "default_max_expanded_ast_elements",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub max_expanded_ast_elements: Option<u64>,
+
+    /// ClickHouse `max_ast_depth`. Limits AST nesting depth.
+    /// Default: 10,000 (10x ClickHouse default of 1,000).
+    #[serde(
+        default = "default_max_ast_depth",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub max_ast_depth: Option<u64>,
+
+    /// ClickHouse `use_query_cache`. Enabled for cursor pagination.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub use_query_cache: Option<bool>,
+
+    /// ClickHouse `query_cache_ttl` in seconds.
+    #[serde(
+        default = "default_query_cache_ttl",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub query_cache_ttl: Option<u32>,
+
+    /// Compiler-derived ClickHouse settings. Set by the compiler's settings
+    /// pass based on AST inspection (e.g. materialized CTEs). Invisible to
+    /// serde and the JSON schema — never loaded from YAML or user input.
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub compiler_derived: CompilerDerivedSettings,
+
+    /// NATS KV cache for graph query results (webserver).
+    /// Excluded from ClickHouse SETTINGS (app-level only).
+    #[serde(default, skip_serializing)]
+    pub graph_query_cache_enabled: Option<bool>,
+
+    /// Graph query cache TTL in seconds.
+    /// Excluded from ClickHouse SETTINGS (app-level only).
+    #[serde(default, skip_serializing)]
+    pub graph_query_cache_ttl: Option<u32>,
+}
+
+/// ClickHouse settings derived from compiler AST inspection. Not
+/// user-configurable — set by the compiler's settings pass and appended
+/// to the SETTINGS clause by codegen.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct CompilerDerivedSettings {
+    /// ClickHouse `enable_materialized_cte`. Required when any CTE uses
+    /// the `MATERIALIZED` keyword (ClickHouse 26.2+).
+    pub enable_materialized_cte: bool,
+    /// ClickHouse `query_plan_optimize_join_order_algorithm`. When set,
+    /// enables dynamic-programming join reordering for queries with 3+
+    /// JOINs. Experimental in ClickHouse 26.x.
+    pub join_order_algorithm: Option<String>,
+    pub optimize_move_to_prewhere_if_final: bool,
+    pub use_index_for_in_with_subqueries_max_values: Option<u64>,
+}
+
+impl CompilerDerivedSettings {
+    /// Render as ClickHouse SETTINGS key-value pairs.
+    pub fn to_clickhouse_settings(&self) -> Vec<(String, String)> {
+        let mut out = Vec::new();
+        if self.enable_materialized_cte {
+            out.push(("enable_materialized_cte".into(), "1".into()));
+        }
+        if let Some(ref algo) = self.join_order_algorithm {
+            out.push((
+                "query_plan_optimize_join_order_algorithm".into(),
+                format!("'{algo}'"),
+            ));
+        }
+        if self.optimize_move_to_prewhere_if_final {
+            out.push(("optimize_move_to_prewhere_if_final".into(), "1".into()));
+        }
+        if let Some(max) = self.use_index_for_in_with_subqueries_max_values {
+            out.push((
+                "use_index_for_in_with_subqueries_max_values".into(),
+                max.to_string(),
+            ));
+        }
+        out
+    }
+}
+
+const DEFAULT_MAX_AST_ELEMENTS: u64 = 1_000_000;
+const DEFAULT_MAX_EXPANDED_AST_ELEMENTS: u64 = 10_000_000;
+const DEFAULT_MAX_AST_DEPTH: u64 = 10_000;
+
+fn default_max_execution_time() -> Option<u64> {
+    Some(DEFAULT_MAX_EXECUTION_TIME)
+}
+fn default_query_cache_ttl() -> Option<u32> {
+    Some(DEFAULT_QUERY_CACHE_TTL)
+}
+fn default_max_ast_elements() -> Option<u64> {
+    Some(DEFAULT_MAX_AST_ELEMENTS)
+}
+fn default_max_expanded_ast_elements() -> Option<u64> {
+    Some(DEFAULT_MAX_EXPANDED_AST_ELEMENTS)
+}
+fn default_max_ast_depth() -> Option<u64> {
+    Some(DEFAULT_MAX_AST_DEPTH)
+}
+
+impl Default for QueryConfig {
+    fn default() -> Self {
+        Self {
+            max_execution_time: Some(DEFAULT_MAX_EXECUTION_TIME),
+            max_memory_usage: None,
+            max_bytes_to_read: None,
+            max_rows_to_read: None,
+            max_rows_in_set: None,
+            max_ast_elements: Some(DEFAULT_MAX_AST_ELEMENTS),
+            max_expanded_ast_elements: Some(DEFAULT_MAX_EXPANDED_AST_ELEMENTS),
+            max_ast_depth: Some(DEFAULT_MAX_AST_DEPTH),
+            use_query_cache: None,
+            query_cache_ttl: Some(DEFAULT_QUERY_CACHE_TTL),
+            compiler_derived: CompilerDerivedSettings::default(),
+            graph_query_cache_enabled: None,
+            graph_query_cache_ttl: None,
+        }
+    }
+}
+
+impl QueryConfig {
+    /// All-`None` config for tests that don't want any SETTINGS emitted.
+    pub fn empty() -> Self {
+        Self {
+            max_execution_time: None,
+            max_memory_usage: None,
+            max_bytes_to_read: None,
+            max_rows_to_read: None,
+            max_rows_in_set: None,
+            max_ast_elements: None,
+            max_expanded_ast_elements: None,
+            max_ast_depth: None,
+            use_query_cache: None,
+            query_cache_ttl: None,
+            compiler_derived: CompilerDerivedSettings::default(),
+            graph_query_cache_enabled: None,
+            graph_query_cache_ttl: None,
+        }
+    }
+
+    /// Merge `overrides` on top of `self`. Fields set in `overrides`
+    /// win; `None` fields fall through to `self`.
+    pub fn merge(&self, overrides: &QueryConfig) -> QueryConfig {
+        QueryConfig {
+            max_execution_time: overrides.max_execution_time.or(self.max_execution_time),
+            max_memory_usage: overrides.max_memory_usage.or(self.max_memory_usage),
+            max_bytes_to_read: overrides.max_bytes_to_read.or(self.max_bytes_to_read),
+            max_rows_to_read: overrides.max_rows_to_read.or(self.max_rows_to_read),
+            max_rows_in_set: overrides.max_rows_in_set.or(self.max_rows_in_set),
+            max_ast_elements: overrides.max_ast_elements.or(self.max_ast_elements),
+            max_expanded_ast_elements: overrides
+                .max_expanded_ast_elements
+                .or(self.max_expanded_ast_elements),
+            max_ast_depth: overrides.max_ast_depth.or(self.max_ast_depth),
+            use_query_cache: overrides.use_query_cache.or(self.use_query_cache),
+            query_cache_ttl: overrides.query_cache_ttl.or(self.query_cache_ttl),
+            // compiler_derived is never merged from YAML overrides — it's
+            // set by the compiler after merge() runs.
+            compiler_derived: self.compiler_derived.clone(),
+            graph_query_cache_enabled: overrides
+                .graph_query_cache_enabled
+                .or(self.graph_query_cache_enabled),
+            graph_query_cache_ttl: overrides
+                .graph_query_cache_ttl
+                .or(self.graph_query_cache_ttl),
+        }
+    }
+
+    /// Returns ClickHouse SETTINGS as key-value string pairs, skipping unset fields.
+    ///
+    /// Uses serde round-trip so that the field names stay in sync with the
+    /// struct definition -- no manual string mapping needed.
+    ///
+    /// Values are formatted as SQL-safe literals: bare integers, `0`/`1`
+    /// for bools, and single-quoted escaped strings. Returns an error if
+    /// a field serializes to a type that cannot be represented as a
+    /// ClickHouse setting (e.g. arrays, objects, or non-u64 numbers).
+    pub fn to_clickhouse_settings(&self) -> Result<Vec<(String, String)>, String> {
+        let map = match serde_json::to_value(self) {
+            Ok(Value::Object(m)) => m,
+            _ => return Ok(Vec::new()),
+        };
+        map.into_iter()
+            .filter(|(_, v)| !v.is_null())
+            .map(|(k, v)| {
+                let formatted = match &v {
+                    Value::Bool(b) => if *b { "1" } else { "0" }.to_string(),
+                    Value::Number(n) => {
+                        n.as_u64()
+                            .ok_or_else(|| format!("setting `{k}` has non-u64 value: {v}"))?;
+                        n.to_string()
+                    }
+                    Value::String(s) => escape_setting_str(s),
+                    _ => return Err(format!("setting `{k}` has unsupported type: {v}")),
+                };
+                Ok((k, formatted))
+            })
+            .collect()
+    }
+}
+
+/// Top-level query settings loaded from YAML. Contains a `default` config
+/// and optional per-query-type overrides keyed by snake_case query type
+/// name (e.g. `traversal`, `aggregation`, `search`).
+///
+/// ```yaml
+/// query:
+///   default:
+///     max_execution_time: 30
+///     use_query_cache: false
+///     query_cache_ttl: 60
+///   aggregation:
+///     max_execution_time: 60
+/// ```
+#[derive(Clone, Debug, Serialize, Deserialize, Default, JsonSchema)]
+pub struct QuerySettings {
+    #[serde(default)]
+    pub default: QueryConfig,
+
+    /// Per-query-type overrides. Keys must match `QueryType` variant names
+    /// in snake_case. Validated at startup by the server.
+    #[serde(flatten)]
+    pub overrides: HashMap<String, QueryConfig>,
+}
+
+impl QuerySettings {
+    /// Resolve the effective config for a query type by merging the
+    /// default with any type-specific override.
+    pub fn resolve(&self, query_type: &str) -> QueryConfig {
+        match self.overrides.get(query_type) {
+            Some(override_cfg) => self.default.merge(override_cfg),
+            None => self.default.clone(),
+        }
+    }
+
+    /// Returns unrecognized override keys sorted alphabetically
+    /// (empty if all valid).
+    pub fn validate_keys(&self, valid_types: &[&str]) -> Vec<String> {
+        let mut invalid: Vec<String> = self
+            .overrides
+            .keys()
+            .filter(|k| !valid_types.contains(&k.as_str()))
+            .cloned()
+            .collect();
+        invalid.sort();
+        invalid
+    }
+}
+
+fn default_path_cache_ttl_secs() -> u64 {
+    60
+}
+fn default_path_cache_capacity() -> u64 {
+    10_000
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct PathResolverConfig {
+    #[serde(default = "default_path_cache_ttl_secs")]
+    pub cache_ttl_secs: u64,
+    #[serde(default = "default_path_cache_capacity")]
+    pub cache_capacity: u64,
+}
+
+impl Default for PathResolverConfig {
+    fn default() -> Self {
+        Self {
+            cache_ttl_secs: default_path_cache_ttl_secs(),
+            cache_capacity: default_path_cache_capacity(),
+        }
+    }
+}
+
+static QUERY_SETTINGS: OnceLock<QuerySettings> = OnceLock::new();
+
+/// Initialize the global query settings. Called once at startup by the
+/// server after loading `AppConfig`.
+pub fn init(settings: QuerySettings) {
+    QUERY_SETTINGS
+        .set(settings)
+        .expect("orbit_server_config::query::init called twice");
+}
+
+/// Resolve the effective [`QueryConfig`] for a given query type from
+/// the global settings. Falls back to a zero-config default if [`init`]
+/// was never called (e.g. in unit tests that don't need config).
+pub fn for_query_type(query_type: &str) -> QueryConfig {
+    match QUERY_SETTINGS.get() {
+        Some(settings) => settings.resolve(query_type),
+        None => QueryConfig::default(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn merge_override_wins() {
+        let base = QueryConfig {
+            max_execution_time: Some(30),
+            use_query_cache: Some(false),
+            query_cache_ttl: Some(60),
+            ..Default::default()
+        };
+        let over = QueryConfig {
+            max_execution_time: Some(120),
+            ..Default::default()
+        };
+        let merged = base.merge(&over);
+        assert_eq!(merged.max_execution_time, Some(120));
+        assert_eq!(merged.use_query_cache, Some(false));
+        assert_eq!(merged.query_cache_ttl, Some(60));
+    }
+
+    #[test]
+    fn to_clickhouse_settings_skips_none_and_formats_bools() -> Result<(), String> {
+        let cfg = QueryConfig {
+            max_execution_time: Some(30),
+            use_query_cache: Some(true),
+            ..Default::default()
+        };
+        let mut settings = cfg.to_clickhouse_settings()?;
+        settings.sort_by(|a, b| a.0.cmp(&b.0));
+        assert_eq!(settings.len(), 6);
+        assert_eq!(settings[0], ("max_ast_depth".into(), "10000".into()));
+        assert_eq!(settings[1], ("max_ast_elements".into(), "1000000".into()));
+        assert_eq!(settings[2], ("max_execution_time".into(), "30".into()));
+        assert_eq!(
+            settings[3],
+            ("max_expanded_ast_elements".into(), "10000000".into())
+        );
+        assert_eq!(settings[4], ("query_cache_ttl".into(), "60".into()));
+        assert_eq!(settings[5], ("use_query_cache".into(), "1".into()));
+        Ok(())
+    }
+
+    #[test]
+    fn compiler_derived_renders_only_set_settings() {
+        assert!(
+            CompilerDerivedSettings::default()
+                .to_clickhouse_settings()
+                .is_empty()
+        );
+
+        let derived = CompilerDerivedSettings {
+            optimize_move_to_prewhere_if_final: true,
+            use_index_for_in_with_subqueries_max_values: Some(100_000),
+            ..Default::default()
+        };
+        assert_eq!(
+            derived.to_clickhouse_settings(),
+            vec![
+                (
+                    "optimize_move_to_prewhere_if_final".to_string(),
+                    "1".to_string()
+                ),
+                (
+                    "use_index_for_in_with_subqueries_max_values".to_string(),
+                    "100000".to_string()
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn escape_setting_str_quotes_and_backslashes() {
+        assert_eq!(escape_setting_str("hello"), "'hello'");
+        assert_eq!(escape_setting_str("it's a test"), "'it\\'s a test'");
+        assert_eq!(escape_setting_str("back\\slash"), "'back\\\\slash'");
+    }
+
+    #[test]
+    fn resolve_merges_type_override_and_falls_back_to_default() {
+        let mut overrides = HashMap::new();
+        overrides.insert(
+            "aggregation".to_string(),
+            QueryConfig {
+                max_execution_time: Some(120),
+                ..Default::default()
+            },
+        );
+        let settings = QuerySettings {
+            default: QueryConfig {
+                max_execution_time: Some(30),
+                use_query_cache: Some(false),
+                query_cache_ttl: Some(60),
+                ..Default::default()
+            },
+            overrides,
+        };
+
+        let agg = settings.resolve("aggregation");
+        assert_eq!(agg.max_execution_time, Some(120));
+        assert_eq!(agg.use_query_cache, Some(false));
+
+        let search = settings.resolve("traversal");
+        assert_eq!(search, settings.default);
+    }
+
+    #[test]
+    fn yaml_round_trip() {
+        let yaml = r#"
+default:
+  max_execution_time: 30
+  use_query_cache: false
+  query_cache_ttl: 60
+aggregation:
+  max_execution_time: 120
+"#;
+        let settings: QuerySettings = orbit_utils::yaml::from_str(yaml).unwrap();
+        assert_eq!(settings.default.max_execution_time, Some(30));
+        assert_eq!(settings.overrides.len(), 1);
+        assert_eq!(
+            settings.resolve("aggregation").max_execution_time,
+            Some(120)
+        );
+        assert_eq!(settings.resolve("aggregation").query_cache_ttl, Some(60));
+    }
+
+    #[test]
+    fn path_resolver_config_defaults_and_yaml() {
+        assert_eq!(PathResolverConfig::default().cache_ttl_secs, 60);
+        assert_eq!(PathResolverConfig::default().cache_capacity, 10_000);
+        let cfg: PathResolverConfig =
+            orbit_utils::yaml::from_str("cache_ttl_secs: 120\ncache_capacity: 500").unwrap();
+        assert_eq!(cfg.cache_ttl_secs, 120);
+        assert_eq!(cfg.cache_capacity, 500);
+        assert_eq!(
+            orbit_utils::yaml::from_str::<PathResolverConfig>("{}").unwrap(),
+            PathResolverConfig::default()
+        );
+    }
+
+    #[test]
+    fn validate_keys_rejects_unknown_types() {
+        let valid = &["traversal", "aggregation"];
+        let mut overrides = HashMap::new();
+        overrides.insert("aggregation".to_string(), QueryConfig::default());
+        overrides.insert("bogus_type".to_string(), QueryConfig::default());
+        let settings = QuerySettings {
+            default: QueryConfig::default(),
+            overrides,
+        };
+        let invalid = settings.validate_keys(valid);
+        assert_eq!(invalid, vec!["bogus_type"]);
+    }
+}

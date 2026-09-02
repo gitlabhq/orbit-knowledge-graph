@@ -9,7 +9,7 @@ use compiler::internal_column_prefix;
 use compiler::{QueryType, RedactionNode, ResultContext};
 
 use super::{ResourceAuthorization, ResourceCheck};
-use gkg_utils::arrow::{ArrowUtils, ColumnValue};
+use orbit_utils::arrow::{ArrowUtils, ColumnValue};
 
 #[derive(Debug, Clone)]
 pub struct NodeRef {

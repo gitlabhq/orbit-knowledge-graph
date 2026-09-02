@@ -4,12 +4,12 @@
 pub mod clickhouse;
 pub mod ddl;
 
-use gkg_server_config::QueryConfig;
+use orbit_server_config::QueryConfig;
 
 use crate::input::{Input, QueryType};
 use crate::passes::enforce::ResultContext;
 use crate::passes::hydrate::HydrationPlan;
-pub use gkg_utils::clickhouse::ParamValue;
+pub use orbit_utils::clickhouse::ParamValue;
 use std::collections::HashMap;
 
 pub use clickhouse::codegen;

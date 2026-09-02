@@ -11,11 +11,11 @@ publish = false
 [dev-dependencies]
 clickhouse-client = { path = "../clickhouse-client" }
 compiler = { path = "../query-engine/compiler" }
-gkg-analytics = { path = "../gkg-analytics" }
+orbit-analytics = { path = "../orbit-analytics" }
 code-graph = { path = "../code-graph" }
-gkg-server = { path = "../gkg-server", features = ["testkit"] }
-gkg-server-config = { path = "../gkg-server-config" }
-gkg-utils = { path = "../utils" }
+orbit-server = { path = "../orbit-server", features = ["testkit"] }
+orbit-server-config = { path = "../orbit-server-config" }
+orbit-utils = { path = "../utils" }
 jsonschema = { workspace = true }
 indexer = { path = "../indexer", features = ["testkit"] }
 named-queries = { path = "../named-queries" }
@@ -42,7 +42,6 @@ rustc-hash = { workspace = true }
 rustls = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-serde_yaml = { workspace = true }
 siphon-proto = { workspace = true }
 regex = { workspace = true }
 tar = { workspace = true }
@@ -51,6 +50,7 @@ testcontainers-modules = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 tonic = { workspace = true }
+tonic-prost = { workspace = true }
 tower = { workspace = true }
 tempfile = { workspace = true }
 cargo_metadata = { workspace = true }

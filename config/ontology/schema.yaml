@@ -344,6 +344,7 @@ settings:
       select_file: sql/namespace_storage_snapshot.sql.j2
   gc_preserve_patterns: []
   etl:
+    default_version: _siphon_replicated_at
     default_watermark: _siphon_watermark
     default_deleted: _siphon_deleted
     default_etl_order_by: [traversal_path, id]

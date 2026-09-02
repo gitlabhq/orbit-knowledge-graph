@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 
 use ontology::constants::*;
+use orbit_utils::traversal_path::TraversalPath;
 
 use crate::ast::*;
 use crate::constants::*;
@@ -560,7 +561,7 @@ pub(super) fn build_multi_hop_union(
                 end_type_col,
                 hop.direction,
                 &type_filter,
-                hop.scope_prefix.as_deref(),
+                hop.scope_prefix.as_ref(),
             )
         })
         .collect();
@@ -597,13 +598,16 @@ pub(super) fn build_depth_arm(
     end_type_col: &str,
     direction: Direction,
     type_filter: &Option<Vec<String>>,
-    scope_prefix: Option<&str>,
+    scope_prefix: Option<&TraversalPath>,
 ) -> Query {
     let scope_pred = |alias: &str| -> Option<Expr> {
         scope_prefix.map(|p| {
             Expr::func(
                 "startsWith",
-                vec![Expr::col(alias, TRAVERSAL_PATH_COLUMN), Expr::string(p)],
+                vec![
+                    Expr::col(alias, TRAVERSAL_PATH_COLUMN),
+                    Expr::string(p.as_str()),
+                ],
             )
         })
     };
@@ -654,20 +658,24 @@ pub(super) fn build_depth_arm(
 
     let last = format!("e{depth}");
 
-    let (rel_kind, src_id, src_kind, tgt_id, tgt_kind) = match direction {
+    let (rel_kind, src_id, src_kind, src_tags, tgt_id, tgt_kind, tgt_tags) = match direction {
         Direction::Outgoing | Direction::Both => (
             Expr::col("e1", RELATIONSHIP_KIND_COLUMN),
             Expr::col("e1", SOURCE_ID_COLUMN),
             Expr::col("e1", SOURCE_KIND_COLUMN),
+            Expr::col("e1", SOURCE_TAGS_COLUMN),
             Expr::col(&last, TARGET_ID_COLUMN),
             Expr::col(&last, TARGET_KIND_COLUMN),
+            Expr::col(&last, TARGET_TAGS_COLUMN),
         ),
         Direction::Incoming => (
             Expr::col(&last, RELATIONSHIP_KIND_COLUMN),
             Expr::col(&last, SOURCE_ID_COLUMN),
             Expr::col(&last, SOURCE_KIND_COLUMN),
+            Expr::col(&last, SOURCE_TAGS_COLUMN),
             Expr::col("e1", TARGET_ID_COLUMN),
             Expr::col("e1", TARGET_KIND_COLUMN),
+            Expr::col("e1", TARGET_TAGS_COLUMN),
         ),
     };
 
@@ -691,8 +699,10 @@ pub(super) fn build_depth_arm(
             SelectExpr::new(rel_kind, RELATIONSHIP_KIND_COLUMN),
             SelectExpr::new(src_id, SOURCE_ID_COLUMN),
             SelectExpr::new(src_kind, SOURCE_KIND_COLUMN),
+            SelectExpr::new(src_tags, SOURCE_TAGS_COLUMN),
             SelectExpr::new(tgt_id, TARGET_ID_COLUMN),
             SelectExpr::new(tgt_kind, TARGET_KIND_COLUMN),
+            SelectExpr::new(tgt_tags, TARGET_TAGS_COLUMN),
             SelectExpr::new(path_nodes, PATH_NODES_COLUMN),
             SelectExpr::new(Expr::int(depth as i64), DEPTH_COLUMN),
             SelectExpr::col("e1", DELETED_COLUMN),

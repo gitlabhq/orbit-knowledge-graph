@@ -8,12 +8,12 @@ use crate::common::{
     GRAPH_SCHEMA_SQL, MockRedactionService, SIPHON_SCHEMA_SQL, TestContext, load_ontology,
     run_redaction, test_security_context,
 };
-use gkg_server::pipeline::HydrationStage;
-use gkg_server::redaction::QueryResult;
 use integration_testkit::load_seed;
 use integration_testkit::visitor::{NodeExt, Requirement, ResponseView};
+use orbit_server::pipeline::HydrationStage;
+use orbit_server::redaction::QueryResult;
 use query_engine::compiler::compile;
-use query_engine::compiler::{SecurityContext, TraversalPath};
+use query_engine::compiler::{AuthorizedPath, SecurityContext};
 use query_engine::formatters::{GraphFormatter, ResultFormatter};
 use query_engine::pipeline::{NoOpObserver, PipelineStage, QueryPipelineContext, TypeMap};
 use query_engine::shared::RedactionOutput;
@@ -48,7 +48,7 @@ async fn query(ctx: &TestContext, json: &str) -> ResponseView {
 /// Vulnerability queries require `required_role: security_manager` (level 25);
 /// the default Reporter-level context is blocked.
 fn security_manager_context() -> SecurityContext {
-    SecurityContext::new_with_roles(1, vec![TraversalPath::new("1/", 25)])
+    SecurityContext::new_with_roles(1, vec![AuthorizedPath::new("1/", 25)])
         .expect("valid security context")
 }
 

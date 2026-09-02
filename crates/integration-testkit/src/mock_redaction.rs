@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use gkg_server::redaction::{ResourceAuthorization, ResourceCheck};
+use orbit_server::redaction::{ResourceAuthorization, ResourceCheck};
 
 pub struct MockRedactionService {
     pub authorizations: HashMap<String, HashMap<i64, bool>>,

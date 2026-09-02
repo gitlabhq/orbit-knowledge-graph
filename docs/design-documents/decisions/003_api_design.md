@@ -158,7 +158,7 @@ All endpoints require authentication (personal access token, session cookie, or 
 
 ### `POST /api/v4/orbit/query`
 
-Execute a Knowledge Graph query.
+Execute an Orbit query.
 
 **Request body (pseudo code):**
 
@@ -210,7 +210,7 @@ Execute a Knowledge Graph query.
 
 ### `GET /api/v4/orbit/schema`
 
-Retrieve the Knowledge Graph schema (ontology).
+Retrieve Orbit schema (ontology).
 
 **Parameters:**
 
@@ -350,7 +350,7 @@ The `query_graph` tool description includes the full TOON-format schema (~15KB) 
     },
     {
       "name": "get_graph_schema",
-      "description": "List Knowledge Graph schema (node/edge discovery with optional expansion)",
+      "description": "List Orbit schema (node/edge discovery with optional expansion)",
       "parameters_json_schema": { "type": "object", "properties": { "expand_nodes": { "type": "array", "items": { "type": "string" } } } },
       "endpoint": "GET /api/v4/orbit/schema"
     }
@@ -452,13 +452,13 @@ Unchanged — pure passthrough from `grpc_client.list_tools`.
 
 ### New proto definition
 
-The proto definition below reflects the end state after [MR !411](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/411). Pseudo code — see the authoritative definition in [`gkg.proto`](../../../crates/gkg-server/proto/gkg.proto).
+The proto definition below reflects the end state after [MR !411](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/411). Pseudo code — see the authoritative definition in [`orbit.proto`](../../../crates/orbit-server/proto/orbit.proto).
 
 > Historical sketch: the shipped proto carries no PaginationInfo message; pagination metadata lives in the formatted JSON/GOON body.
 
 ```protobuf
 syntax = "proto3";
-package gkg.v1;
+package orbit.v1;
 
 enum ResponseFormat {
   RESPONSE_FORMAT_RAW = 0;
@@ -691,7 +691,7 @@ module API
     end
 
     namespace :orbit do
-      desc 'Execute a Knowledge Graph query'
+      desc 'Execute an Orbit query'
       params do
         requires :query, type: Hash, desc: 'Query DSL object'
         optional :query_type, type: String, values: %w[json], default: 'json'
@@ -712,7 +712,7 @@ module API
         service_unavailable!(e.message)
       end
 
-      desc 'Retrieve Knowledge Graph schema'
+      desc 'Retrieve Orbit schema'
       params do
         optional :expand, type: String, desc: 'Comma-separated node names to expand'
         optional :format, type: String, values: %w[raw llm], default: 'raw'
@@ -751,7 +751,7 @@ end
 
 ## References
 
-- [Proto definition: `gkg.proto`](../../../crates/gkg-server/proto/gkg.proto)
+- [Proto definition: `orbit.proto`](../../../crates/orbit-server/proto/orbit.proto)
 - [ADR 001: gRPC Communication Protocol](001_grpc_communication.md)
 - [ADR 002: Rust Core Runtime](002_rust_core_runtime.md)
 - [ADR 011: Agent command surface](011_agent_command_surface.md)

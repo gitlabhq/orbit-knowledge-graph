@@ -10,15 +10,16 @@ use tracing::{debug, info, warn};
 use super::checkpoint::{CodeCheckpointStore, CodeIndexingCheckpoint};
 use super::metrics::CodeMetrics;
 use super::observer::CodeOtelObserver;
-use super::pipeline::{CodeIndexer, IndexError, IndexingRequest};
+use super::pipeline::{CodeIndexer, IndexError, IndexOutcome, IndexingRequest};
 use super::repository::{EmptyRepositoryReason, RepositoryService, RepositoryServiceError};
 use crate::analytics::IndexingAnalytics;
 
-use crate::engine::retry::{Backoff, RetryMode, RetryPolicy};
 use crate::handler::{Handler, HandlerContext, HandlerError};
+use crate::indexing_status::RunRows;
 use crate::locking::{LockError, LockGuard};
 use crate::nats::ProgressNotifier;
 use crate::observer::{self, IndexingMode, IndexingObserver, PipelineType};
+use crate::retry::GlobalRetry;
 use crate::topic::CodeIndexingTaskRequest;
 use crate::types::{Envelope, Subscription};
 
@@ -30,9 +31,7 @@ use crate::types::{Envelope, Subscription};
 const DELETED_PROJECT_BRANCH_SENTINEL: &str = "HEAD";
 
 /// A timed-out job is likely transiently slow: retry once, then dead-letter (engine reads this policy).
-const JOB_TIMEOUT_RETRY: RetryPolicy = RetryPolicy {
-    mode: RetryMode::Global,
-    backoff: Backoff::Fixed(&[]),
+const JOB_TIMEOUT_RETRY: GlobalRetry = GlobalRetry {
     max_attempts: 2,
     dead_letter: true,
 };
@@ -320,12 +319,10 @@ impl CodeIndexingTaskHandler {
         attempt: u32,
         observer: &mut dyn IndexingObserver,
     ) -> Result<Option<&'static str>, HandlerError> {
-        let Some(namespace_id) =
-            gkg_utils::traversal_path::top_level_namespace_id(&request.traversal_path)
-        else {
+        let Some(namespace_id) = request.traversal_path.top_level_namespace_id() else {
             return Err(HandlerError::Processing(format!(
                 "traversal_path {:?} has no namespace_id",
-                request.traversal_path
+                request.traversal_path.as_str()
             )));
         };
         tracing::Span::current().record("namespace_id", namespace_id);
@@ -405,6 +402,17 @@ impl CodeIndexingTaskHandler {
             Err(IndexError::Failed(e)) => Err(e),
         };
 
+        let rows = match &result {
+            Ok(IndexOutcome::Indexed { rows_written }) => RunRows {
+                read: None,
+                written: Some(*rows_written),
+            },
+            Ok(IndexOutcome::EmptyRepository) => RunRows {
+                read: None,
+                written: Some(0),
+            },
+            Err(_) => RunRows::default(),
+        };
         let result = result.map(|outcome| outcome.metric_label());
 
         context
@@ -414,6 +422,7 @@ impl CodeIndexingTaskHandler {
                 started_at,
                 Utc::now(),
                 result.as_ref().err().map(ToString::to_string),
+                rows,
             )
             .await;
 
@@ -455,6 +464,7 @@ mod tests {
     use crate::testkit::{MockLockService, MockNatsServices};
     use crate::types::Event;
     use chrono::Utc;
+    use orbit_utils::traversal_path::TraversalPath;
 
     fn test_metrics() -> CodeMetrics {
         CodeMetrics::with_meter(&crate::testkit::test_meter())
@@ -505,7 +515,7 @@ mod tests {
                 metrics.clone(),
                 table_names,
                 Arc::new(ontology),
-                gkg_server_config::CodeIndexingPipelineConfig::default(),
+                orbit_server_config::CodeIndexingPipelineConfig::default(),
             ));
 
             let handler = CodeIndexingTaskHandler::new(
@@ -554,7 +564,7 @@ mod tests {
                 project_id,
                 branch: Some(branch.to_string()),
                 commit_sha: commit_sha.map(str::to_string),
-                traversal_path: format!("1/{project_id}/"),
+                traversal_path: TraversalPath::new_unchecked(format!("1/{project_id}/")),
                 dispatch_id: uuid::Uuid::new_v4(),
                 campaign_id: None,
             })
@@ -564,13 +574,13 @@ mod tests {
         async fn set_checkpoint(
             &self,
             project_id: i64,
-            traversal_path: &str,
+            traversal_path: &TraversalPath,
             branch: &str,
             last_task_id: i64,
         ) {
             self.mock_checkpoints
                 .set_checkpoint(&CodeIndexingCheckpoint {
-                    traversal_path: traversal_path.to_string(),
+                    traversal_path: traversal_path.clone(),
                     project_id,
                     branch: branch.to_string(),
                     last_task_id,
@@ -595,7 +605,8 @@ mod tests {
     #[tokio::test]
     async fn skips_already_indexed_tasks() {
         let ctx = TestContext::new();
-        ctx.set_checkpoint(123, "1/123/", "main", 100).await;
+        ctx.set_checkpoint(123, &TraversalPath::new_unchecked("1/123/"), "main", 100)
+            .await;
 
         let envelope = TestContext::make_request(50, 123, "main");
         let result = ctx.handler.handle(ctx.handler_context(), envelope).await;
@@ -618,14 +629,15 @@ mod tests {
     #[tokio::test]
     async fn resolves_default_branch_when_branch_is_none() {
         let ctx = TestContext::new();
-        ctx.set_checkpoint(123, "1/123/", "main", 100).await;
+        ctx.set_checkpoint(123, &TraversalPath::new_unchecked("1/123/"), "main", 100)
+            .await;
 
         let envelope = Envelope::new(&CodeIndexingTaskRequest {
             task_id: 0,
             project_id: 123,
             branch: None,
             commit_sha: None,
-            traversal_path: "1/123/".to_string(),
+            traversal_path: TraversalPath::new_unchecked("1/123/"),
             dispatch_id: uuid::Uuid::new_v4(),
             campaign_id: None,
         })
@@ -652,7 +664,7 @@ mod tests {
             project_id: 123,
             branch: None,
             commit_sha: None,
-            traversal_path: "1/123/".to_string(),
+            traversal_path: TraversalPath::new_unchecked("1/123/"),
             dispatch_id: uuid::Uuid::new_v4(),
             campaign_id: None,
         })
@@ -670,7 +682,7 @@ mod tests {
         );
         let checkpoint = ctx
             .mock_checkpoints
-            .get_checkpoint("1/123/", 123, "HEAD")
+            .get_checkpoint(&TraversalPath::new_unchecked("1/123/"), 123, "HEAD")
             .await
             .unwrap()
             .expect("checkpoint should be written for deleted project so the dispatcher dedupes");
@@ -697,7 +709,7 @@ mod tests {
             project_id: 123,
             branch: None,
             commit_sha: None,
-            traversal_path: "1/123/".to_string(),
+            traversal_path: TraversalPath::new_unchecked("1/123/"),
             dispatch_id: uuid::Uuid::new_v4(),
             campaign_id: None,
         })
@@ -728,12 +740,20 @@ mod tests {
         assert!(result.is_ok(), "empty repo should ack, got {result:?}");
         let checkpoint = ctx
             .mock_checkpoints
-            .get_checkpoint("1/123/", 123, "main")
+            .get_checkpoint(&TraversalPath::new_unchecked("1/123/"), 123, "main")
             .await
             .unwrap()
             .expect("checkpoint should be set for empty repo");
         assert_eq!(checkpoint.last_task_id, 42);
         assert!(checkpoint.last_commit.is_none());
+
+        let progress = crate::indexing_status::IndexingStatusStore::new(ctx.mock_nats.clone())
+            .get(&TraversalPath::new_unchecked("1/123/"))
+            .await
+            .unwrap()
+            .expect("progress should be recorded for empty repo");
+        assert_eq!(progress.last_rows_written, Some(0));
+        assert_eq!(progress.last_rows_read, None);
     }
 
     #[tokio::test]
@@ -756,7 +776,7 @@ mod tests {
         );
         let checkpoint = ctx
             .mock_checkpoints
-            .get_checkpoint("1/123/", 123, "main")
+            .get_checkpoint(&TraversalPath::new_unchecked("1/123/"), 123, "main")
             .await
             .unwrap();
         assert!(checkpoint.is_none(), "no checkpoint on the raced attempt");
@@ -782,7 +802,7 @@ mod tests {
         assert!(result.is_ok());
         let checkpoint = ctx
             .mock_checkpoints
-            .get_checkpoint("1/123/", 123, "main")
+            .get_checkpoint(&TraversalPath::new_unchecked("1/123/"), 123, "main")
             .await
             .unwrap()
             .expect("checkpoint should be set for missing repository");

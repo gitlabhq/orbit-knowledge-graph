@@ -55,8 +55,8 @@ pub mod edge_kinds {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct EmittedEdge {
-    pub traversal_path: String,
+pub struct EmittedEdge<'a> {
+    pub traversal_path: &'a str,
     pub relationship_kind: &'static str,
     pub source_id: i64,
     pub source_kind: &'static str,
@@ -64,15 +64,17 @@ pub struct EmittedEdge {
     pub target_kind: &'static str,
 }
 
+/// Two lifetimes because the default-project lookup is dropped before the emitted
+/// edges are returned, while the block they borrow from outlives them.
 #[derive(Debug, Clone)]
-pub struct NoteRow {
-    pub traversal_path: String,
+pub struct NoteRow<'a, 'p> {
+    pub traversal_path: &'a str,
     /// Full path of the source note's owning project (e.g. `gitlab-org/gitlab`).
     /// Substituted for same-project GFM shorthand (`#123`, `!456`) when the
     /// reference carries no explicit project prefix. Empty string when the
     /// owning project is unknown — the resolver then declines to resolve
     /// unqualified references on this row.
-    pub default_project: String,
+    pub default_project: &'p str,
     pub author_id: Option<i64>,
     pub noteable_id: i64,
     pub noteable_kind: NoteableKind,
@@ -93,7 +95,7 @@ fn lifecycle_edge_kind(action: Action) -> Option<&'static str> {
 
 /// The resolver returns `None` for any unresolvable `(project_path, iid)` or
 /// commit SHA — those references are silently dropped.
-pub fn build_edges<R>(rows: &[NoteRow], mut resolve: R) -> Vec<EmittedEdge>
+pub fn build_edges<'a, R>(rows: &[NoteRow<'a, '_>], mut resolve: R) -> Vec<EmittedEdge<'a>>
 where
     R: FnMut(&Reference, &str) -> Option<ResolvedTarget>,
 {
@@ -128,7 +130,7 @@ where
                     continue;
                 };
                 edges.push(EmittedEdge {
-                    traversal_path: row.traversal_path.clone(),
+                    traversal_path: row.traversal_path,
                     relationship_kind: kind,
                     source_id: author_id,
                     source_kind: "User",
@@ -161,7 +163,7 @@ where
             | Action::Commit
             | Action::Merge => {
                 for r in &row.references {
-                    let Some(resolved) = resolve(r, row.default_project.as_str()) else {
+                    let Some(resolved) = resolve(r, row.default_project) else {
                         continue;
                     };
                     // Skip self-loops (MR !100 "mentioned in !100"): they
@@ -171,7 +173,7 @@ where
                         continue;
                     }
                     edges.push(EmittedEdge {
-                        traversal_path: row.traversal_path.clone(),
+                        traversal_path: row.traversal_path,
                         relationship_kind: edge_kinds::MENTIONS,
                         source_id: resolved.id,
                         source_kind: ref_kind.as_str(),
@@ -196,10 +198,10 @@ mod tests {
         body: &str,
         noteable_kind: NoteableKind,
         noteable_id: i64,
-    ) -> NoteRow {
+    ) -> NoteRow<'static, 'static> {
         NoteRow {
-            traversal_path: "1/2/".to_string(),
-            default_project: "src/proj".to_string(),
+            traversal_path: "1/2/",
+            default_project: "src/proj",
             author_id: Some(7),
             noteable_id,
             noteable_kind,
@@ -212,7 +214,7 @@ mod tests {
         id: i64,
         traversal_path: &str,
     ) -> impl FnMut(&Reference, &str) -> Option<ResolvedTarget> + use<> {
-        let tp = traversal_path.to_string();
+        let tp = orbit_utils::traversal_path::TraversalPath::new_unchecked(traversal_path);
         move |_r, _default| {
             Some(ResolvedTarget {
                 id,

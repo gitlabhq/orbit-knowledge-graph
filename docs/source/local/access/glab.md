@@ -1,6 +1,6 @@
 ---
-stage: Analytics
-group: Knowledge Graph
+stage: Orbit
+group: Context Systems
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
 description: Install, index, and query GitLab Orbit Local through the GitLab CLI with glab orbit local and glab orbit setup.
 title: Use GitLab Orbit Local with the GitLab CLI (`glab`)
@@ -58,27 +58,22 @@ glab orbit local --install
 Verify the install:
 
 ```shell
-glab orbit local help
+glab orbit version
 ```
 
 ## Set up your AI agent
 
-`glab orbit setup` runs a guided onboarding: it verifies that GitLab Orbit is
-reachable, installs the GitLab Orbit skill so AI coding agents can discover it, and
-installs the local `orbit` binary.
+`glab orbit setup` configures AI coding agents to consult the graph: it writes a
+managed section into each agent's instruction file and installs the GitLab Orbit
+skill.
 
 ```shell
 glab orbit setup
 ```
 
-| Flag | Purpose |
-|------|---------|
-| `--yes` | Accept every prompt (non-interactive). |
-| `--global` | Install the skill at user scope (`~/.agents/skills/`) instead of the current repository. |
-| `--path` | Install the skill to a specific directory. |
-| `--skip-skill` | Skip the skill install step. |
-| `--skip-local` | Skip the local binary install step. |
-| `--upgrade` | Re-fetch the skill and update the binary in place. |
+Run `glab orbit setup --help` for the full option list: which agents to
+configure, project or user scope, local or remote graph, and `--remove` to
+uninstall.
 
 The skill drives the `orbit` binary directly. To connect an MCP client to the
 local graph instead, see [Connect via MCP](mcp.md).

@@ -1,4 +1,4 @@
-use gkg_utils::clickhouse::{ChType, ParamValue};
+use orbit_utils::clickhouse::{ChType, ParamValue};
 
 pub fn to_sql_params(params: &[&ParamValue]) -> Vec<Box<dyn duckdb::ToSql>> {
     params.iter().map(|p| param_to_sql(p)).collect()

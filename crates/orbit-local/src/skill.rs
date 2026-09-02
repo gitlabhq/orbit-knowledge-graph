@@ -17,7 +17,12 @@ const MANIFEST: &str = "SKILL.md";
 /// served manifest. The on-disk SKILL.md links to `references/*.md` with
 /// working-tree-relative paths that do not resolve when the only artifact is
 /// the binary; this tells the reader the version-matched access path instead.
-const MANIFEST_BINARY_HINT: &str = "\n\n---\n\nYou are viewing this via the `orbit` binary; the links above are relative to the on-disk skill tree. Fetch referenced files with `orbit skill <path>` (e.g. `orbit skill references/sql.md`).\n";
+fn manifest_binary_hint() -> String {
+    let launcher = crate::commands::setup::spec::launcher();
+    format!(
+        "\n\n---\n\nYou are viewing this via the `orbit` binary; the links above are relative to the on-disk skill tree. Fetch referenced files with `{launcher} skill <path>` (e.g. `{launcher} skill references/sql.md`).\n"
+    )
+}
 
 pub(crate) fn run(path: Option<String>) -> Result<()> {
     let requested = path.as_deref().unwrap_or(MANIFEST);
@@ -36,7 +41,7 @@ pub(crate) fn run(path: Option<String>) -> Result<()> {
 fn render(requested: &str) -> Option<String> {
     let contents = lookup(requested)?;
     if requested == MANIFEST {
-        Some(format!("{contents}{MANIFEST_BINARY_HINT}"))
+        Some(format!("{contents}{}", manifest_binary_hint()))
     } else {
         Some(contents)
     }
@@ -100,17 +105,17 @@ mod tests {
     fn served_manifest_carries_binary_hint_but_subfiles_do_not() {
         let manifest = render(MANIFEST).unwrap();
         assert!(manifest.starts_with("---"), "frontmatter must stay first");
-        assert!(manifest.contains("orbit skill references/sql.md"));
+        assert!(manifest.contains("orbit local skill references/sql.md"));
 
         assert!(
             !render("references/sql.md")
                 .unwrap()
-                .contains("orbit skill <path>")
+                .contains("skill <path>")
         );
         assert!(
             !render("references/repo_map.md")
                 .unwrap()
-                .contains("orbit skill <path>")
+                .contains("skill <path>")
         );
     }
 }

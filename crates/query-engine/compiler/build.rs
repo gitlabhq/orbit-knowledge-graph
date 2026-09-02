@@ -1,5 +1,5 @@
 //! Fails the build if `config/schemas/graph_query.schema.json` and the mirrors
-//! in `src/schema_limits.rs` drift. Prior art: `crates/gkg-analytics/build.rs`.
+//! in `src/schema_limits.rs` drift. Prior art: `crates/orbit-analytics/build.rs`.
 
 use std::path::PathBuf;
 

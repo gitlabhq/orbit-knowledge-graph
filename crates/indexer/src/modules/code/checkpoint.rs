@@ -6,7 +6,8 @@ use arrow::array::{Array, Int64Array, StringArray, TimestampMicrosecondArray};
 use arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
 use chrono::{DateTime, TimeZone, Utc};
-use gkg_utils::arrow::ArrowUtils;
+use orbit_utils::arrow::ArrowUtils;
+use orbit_utils::traversal_path::TraversalPath;
 use thiserror::Error;
 
 const CODE_INDEXING_CHECKPOINT_TABLE: &str = "code_indexing_checkpoint";
@@ -25,7 +26,7 @@ pub enum CheckpointError {
 
 #[derive(Debug, Clone)]
 pub struct CodeIndexingCheckpoint {
-    pub traversal_path: String,
+    pub traversal_path: TraversalPath,
     pub project_id: i64,
     pub branch: String,
     pub last_task_id: i64,
@@ -37,7 +38,7 @@ pub struct CodeIndexingCheckpoint {
 pub trait CodeCheckpointStore: Send + Sync {
     async fn get_checkpoint(
         &self,
-        traversal_path: &str,
+        traversal_path: &TraversalPath,
         project_id: i64,
         branch: &str,
     ) -> Result<Option<CodeIndexingCheckpoint>, CheckpointError>;
@@ -61,7 +62,7 @@ impl ClickHouseCodeCheckpointStore {
 
     fn extract_checkpoint(
         batches: Vec<RecordBatch>,
-        traversal_path: &str,
+        traversal_path: &TraversalPath,
         project_id: i64,
         branch: &str,
     ) -> Result<Option<CodeIndexingCheckpoint>, CheckpointError> {
@@ -97,7 +98,7 @@ impl ClickHouseCodeCheckpointStore {
             .ok_or(CheckpointError::InvalidTimestamp)?;
 
         Ok(Some(CodeIndexingCheckpoint {
-            traversal_path: traversal_path.to_string(),
+            traversal_path: traversal_path.clone(),
             project_id,
             branch: branch.to_string(),
             last_task_id,
@@ -111,7 +112,7 @@ impl ClickHouseCodeCheckpointStore {
 impl CodeCheckpointStore for ClickHouseCodeCheckpointStore {
     async fn get_checkpoint(
         &self,
-        traversal_path: &str,
+        traversal_path: &TraversalPath,
         project_id: i64,
         branch: &str,
     ) -> Result<Option<CodeIndexingCheckpoint>, CheckpointError> {
@@ -133,7 +134,7 @@ impl CodeCheckpointStore for ClickHouseCodeCheckpointStore {
         let batches = self
             .client
             .query(&query)
-            .param("traversal_path", traversal_path)
+            .param("traversal_path", traversal_path.as_str())
             .param("project_id", project_id)
             .param("branch", branch)
             .fetch_arrow()
@@ -158,7 +159,7 @@ impl CodeCheckpointStore for ClickHouseCodeCheckpointStore {
                 VALUES ({{traversal_path:String}}, {{project_id:Int64}}, {{branch:String}}, {{last_task_id:Int64}}, {{last_commit:String}}, {{indexed_at:String}})
             "#
             ))
-            .param("traversal_path", &checkpoint.traversal_path)
+            .param("traversal_path", checkpoint.traversal_path.as_str())
             .param("project_id", checkpoint.project_id)
             .param("branch", &checkpoint.branch)
             .param("last_task_id", checkpoint.last_task_id)
@@ -179,7 +180,7 @@ pub mod test_utils {
     use std::collections::HashMap;
 
     pub struct MockCodeCheckpointStore {
-        checkpoints: Mutex<HashMap<(String, i64, String), CodeIndexingCheckpoint>>,
+        checkpoints: Mutex<HashMap<(TraversalPath, i64, String), CodeIndexingCheckpoint>>,
     }
 
     impl MockCodeCheckpointStore {
@@ -200,13 +201,13 @@ pub mod test_utils {
     impl CodeCheckpointStore for MockCodeCheckpointStore {
         async fn get_checkpoint(
             &self,
-            traversal_path: &str,
+            traversal_path: &TraversalPath,
             project_id: i64,
             branch: &str,
         ) -> Result<Option<CodeIndexingCheckpoint>, CheckpointError> {
             let checkpoints = self.checkpoints.lock();
             Ok(checkpoints
-                .get(&(traversal_path.to_string(), project_id, branch.to_string()))
+                .get(&(traversal_path.clone(), project_id, branch.to_string()))
                 .cloned())
         }
 

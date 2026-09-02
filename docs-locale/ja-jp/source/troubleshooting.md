@@ -1,9 +1,9 @@
 ---
-stage: Analytics
-group: Knowledge Graph
+stage: Orbit
+group: Context Systems
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Orbit LocalとOrbit Remoteの一般的なエラーのトラブルシューティング。
-title: Orbitのトラブルシューティング
+description: GitLab Orbit LocalとGitLab Orbit Remoteの一般的なエラーのトラブルシューティング。
+title: GitLab Orbitのトラブルシューティング
 ---
 
 {{< details >}}
@@ -20,11 +20,12 @@ title: Orbitのトラブルシューティング
 
 {{< /history >}}
 
-このページでは、[Orbit Local](local/_index.md)または[Orbit Remote](remote/_index.md)で発生する可能性のあるエラーのトラブルシューティング方法を説明します。
+このページでは、[GitLab Orbit Local](local/_index.md)または[GitLab Orbit Remote](remote/_index.md)で発生する可能性のあるエラーのトラブルシューティング方法を説明します。
 
-## Orbit Local {#orbit-local}
+<!-- markdownlint-disable-next-line MD044 -->
+## GitLab Orbit Local {#gitlab-orbit-local}
 
-Orbit Localのエラーは、`orbit`バイナリを直接実行するか、`glab orbit local`を通じて実行する際に発生します。
+GitLab Orbit Localのエラーは、`orbit`バイナリを直接実行するか、`glab orbit local`を通じて実行する際に発生します。
 
 ### `no local graph found`
 
@@ -34,7 +35,7 @@ Orbit Localのエラーは、`orbit`バイナリを直接実行するか、`glab
 Error: no local graph found at ~/.orbit/graph.duckdb. Run `orbit index` first.
 ```
 
-**原因:** リポジトリがまだインデックス作成されていないか、指定した`--db`パスが存在しません。古いバージョンのOrbit Localでは、このエラーは`Table 'Definition' does not exist`として報告されていました。
+**原因:** リポジトリがまだインデックス作成されていないか、指定した`--db`パスが存在しません。古いバージョンのGitLab Orbit Localでは、このエラーは`Table 'Definition' does not exist`として報告されていました。
 
 **解決策:** 最初にリポジトリのインデックスを作成してください:
 
@@ -46,7 +47,7 @@ glab orbit local index /path/to/your/repo
 
 **症状:** コマンドが一時的に停止したように見えた後、`Could not set lock on file`を含むエラーで失敗します。
 
-**原因:** 別の`orbit`プロセスがすでに実行中で、DuckDBの書き込みロックを保持しています。Orbitは指数バックオフで自動的に再試行しますが、リトライウィンドウ内にロックが解放されない場合は失敗します。
+**原因:** 別の`orbit`プロセスがすでに実行中で、DuckDBの書き込みロックを保持しています。GitLab Orbitは指数バックオフで自動的に再試行しますが、リトライウィンドウ内にロックが解放されない場合は失敗します。
 
 **解決策:** 他のプロセスが終了するまで待つか、停止してください:
 
@@ -72,13 +73,14 @@ pkill orbit
 error: unrecognized subcommand 'mcp'
 ```
 
-**原因:** `orbit mcp serve`サブコマンドはまだ実装されていません。Orbit LocalのMCPサポートはロードマップに含まれていますが、現在のリリースでは利用できません。
+**原因:** `orbit mcp serve`サブコマンドはまだ実装されていません。GitLab Orbit LocalのMCPサポートはロードマップに含まれていますが、現在のリリースでは利用できません。
 
 **解決策:** [サポートされているアクセス方法](local/_index.md)のいずれかを使用してください。
 
-## Orbit Remote {#orbit-remote}
+<!-- markdownlint-disable-next-line MD044 -->
+## GitLab Orbit Remote {#gitlab-orbit-remote}
 
-Orbit Remoteのエラーは、`glab orbit remote`コマンドを実行する際に発生します。Orbit RemoteにはGitLab PremiumまたはUltimateと、インスタンスで有効化された`knowledge_graph`機能フラグが必要です。
+GitLab Orbit Remoteのエラーは、`glab orbit remote`コマンドを実行する際に発生します。GitLab Orbit RemoteにはGitLab PremiumまたはUltimateと、インスタンスで有効化された`knowledge_graph`機能フラグが必要です。
 
 ### 終了コード2 {#exit-code-2}
 
@@ -102,7 +104,7 @@ glab auth login
 
 ### MCPエンドポイントでの`insufficient_scope` {#on-the-mcp-endpoint}
 
-**症状:** OrbitのMCPエンドポイントへの接続が`insufficient_scope`で失敗します。
+**症状:** GitLab OrbitのMCPエンドポイントへの接続が`insufficient_scope`で失敗します。
 
 **原因:** パーソナルアクセストークンまたはOAuthトークンに`mcp_orbit`スコープが含まれていません。MCPトランスポートには`read_api`スコープだけでは不十分です。
 

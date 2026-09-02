@@ -15,7 +15,7 @@ Accepted
 
 ## Context
 
-The code indexer needs to know when code is pushed to the default branch of a Knowledge Graph-enabled project so it can re-index the repository. The previous approach consumed raw `push_event_payloads` from the Siphon CDC stream. That table receives roughly 40 inserts per second on `.com`, but fewer than 1% of those pushes are for KG-enabled projects. The indexer made a Rails API call and a ClickHouse query per event, only to throw away almost everything.
+The code indexer needs to know when code is pushed to the default branch of an Orbit-enabled project so it can re-index the repository. The previous approach consumed raw `push_event_payloads` from the Siphon CDC stream. That table receives roughly 40 inserts per second on `.com`, but fewer than 1% of those pushes are for KG-enabled projects. The indexer made a Rails API call and a ClickHouse query per event, only to throw away almost everything.
 
 The problem: the indexer needs a filtered stream of KG-relevant push events, but only Rails can do the filtering because Rails owns the `EnabledNamespace` records and branch configuration.
 

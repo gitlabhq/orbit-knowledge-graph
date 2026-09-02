@@ -11,9 +11,9 @@ use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::{
-    CjsExport, ExportedBinding, ImportedName, JsAnalyzer, JsDef, JsDefKind, JsExportName,
-    JsFileAnalysis, JsImport, JsImportKind, JsModuleBindingInput, JsModuleBindingTargetInput,
-    JsModuleInfo, JsPhase1File, JsStarReexport,
+    CjsExport, ExportedBinding, ImportedName, JsAnalyzer, JsCallEdge, JsDef, JsDefKind,
+    JsDefSupport, JsExportName, JsFileAnalysis, JsImport, JsImportKind, JsModuleBindingInput,
+    JsModuleBindingTargetInput, JsModuleInfo, JsPendingLocalCall, JsPhase1File, JsStarReexport,
 };
 
 #[derive(Debug, Clone)]
@@ -25,10 +25,33 @@ pub struct AnalyzedJsFile {
     pub parse_ms: f64,
 }
 
+/// What resolution needs from a parsed file. The module graph builder is the last
+/// reader of the rest of [`JsFileAnalysis`], so it is dropped instead of carried.
 #[derive(Debug, Clone)]
 pub struct ResolvedJsFile {
     pub relative_path: String,
-    pub analysis: JsFileAnalysis,
+    pub calls: Vec<JsCallEdge>,
+    pub local_calls: Vec<JsPendingLocalCall>,
+    pub def_support: Vec<JsDefSupport>,
+}
+
+impl ResolvedJsFile {
+    pub fn from_analysis(relative_path: String, analysis: JsFileAnalysis) -> Self {
+        Self {
+            relative_path,
+            calls: analysis.calls,
+            local_calls: analysis.local_calls,
+            def_support: analysis
+                .defs
+                .into_iter()
+                .map(|def| JsDefSupport {
+                    fqn: def.fqn,
+                    byte_offset: def.range.byte_offset,
+                    invocation_support: def.invocation_support,
+                })
+                .collect(),
+        }
+    }
 }
 
 pub type FailedJsFile = (String, AnalyzerError);
@@ -37,6 +60,7 @@ pub fn analyze_files(
     files: &[String],
     root_path: &str,
     sentinel: Option<&crate::v2::sentinel::SentinelHandle>,
+    cancel: &crate::v2::pipeline::CancellationToken,
 ) -> (Vec<AnalyzedJsFile>, Vec<FailedJsFile>) {
     let root_gone = std::sync::atomic::AtomicBool::new(false);
     // `catch_unwind` isolates per-file panics: a malformed input that trips
@@ -44,7 +68,7 @@ pub fn analyze_files(
     let results: Vec<_> = files
         .par_iter()
         .filter_map(|relative_path| {
-            if root_gone.load(std::sync::atomic::Ordering::Relaxed) {
+            if cancel.is_cancelled() || root_gone.load(std::sync::atomic::Ordering::Relaxed) {
                 return None;
             }
             let guard = sentinel.map(|s| s.file_start(relative_path));
@@ -138,7 +162,7 @@ fn safe_repo_join(root_path: &str, relative_path: &str) -> Result<PathBuf, Analy
     } else {
         input
     };
-    if !gkg_utils::fs::is_safe_relative_path(rel) {
+    if !orbit_utils::fs::is_safe_relative_path(rel) {
         return Err(AnalyzerError::skip(
             FileSkip::UnsafePath,
             format!("refusing unsafe path: {relative_path}"),
@@ -430,6 +454,7 @@ fn canonical_def_kind(kind: &JsDefKind) -> DefKind {
         JsDefKind::Method { .. } => DefKind::Method,
         JsDefKind::LifecycleHook { .. } => DefKind::Method,
         JsDefKind::Watcher { .. } => DefKind::Method,
+        JsDefKind::Property { .. } => DefKind::Property,
         JsDefKind::ComputedProperty { .. } => DefKind::Property,
         JsDefKind::Variable => DefKind::Property,
         JsDefKind::EnumMember => DefKind::EnumEntry,
@@ -703,8 +728,12 @@ mod tests {
             "cts/consumer.ts".to_string(),
         ];
 
-        let (analyzed, errors) =
-            analyze_files(&files, root.to_str().expect("utf8 root path"), None);
+        let (analyzed, errors) = analyze_files(
+            &files,
+            root.to_str().expect("utf8 root path"),
+            None,
+            &Default::default(),
+        );
 
         assert!(
             errors.is_empty(),
@@ -727,6 +756,29 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn a_cancelled_analysis_reads_no_files() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let root = temp.path();
+        fs::write(root.join("a.js"), "export const x = 1;\n").unwrap();
+        fs::write(root.join("b.js"), "export const y = 2;\n").unwrap();
+
+        let cancel = crate::v2::pipeline::CancellationToken::new();
+        cancel.cancel();
+        let (analyzed, errors) = analyze_files(
+            &["a.js".to_string(), "b.js".to_string()],
+            root.to_str().expect("utf8 root path"),
+            None,
+            &cancel,
+        );
+
+        assert!(analyzed.is_empty(), "got {} analyzed files", analyzed.len());
+        assert!(
+            errors.is_empty(),
+            "a dropped file is not an error: {errors:?}"
+        );
     }
 
     #[test]

@@ -1,7 +1,7 @@
 ---
 name: orbit
-description: Query the GitLab Knowledge Graph (Orbit) via `glab orbit remote` CLI subcommands or run a local copy with `glab orbit local`. Use for code-structure questions (who calls this function, where is this symbol defined), cross-project dependency and blast-radius analysis, merge-request and contributor queries that require relationship traversal or aggregation, repository map / repo-map generation, and any question spanning relationships, cross-entity joins, or multi-entity aggregation across GitLab entities (projects, users, MRs, issues, pipelines, files, definitions, vulnerabilities). Do not use for single-entity GitLab lookups or write operations that `glab` handles directly (e.g. `glab mr view`, `glab mr create`).
-version: 0.23.0
+description: Query GitLab Orbit via `glab orbit remote` CLI subcommands or run a local copy with `glab orbit local`. Use for code-structure questions (who calls this function, where is this symbol defined), cross-project dependency and blast-radius analysis, merge-request and contributor queries that require relationship traversal or aggregation, repository map / repo-map generation, and any question spanning relationships, cross-entity joins, or multi-entity aggregation across GitLab entities (projects, users, MRs, issues, pipelines, files, definitions, vulnerabilities). Do not use for single-entity GitLab lookups or write operations that `glab` handles directly (e.g. `glab mr view`, `glab mr create`).
+version: 0.26.0
 license: MIT
 metadata:
   audience: developers
@@ -9,9 +9,9 @@ metadata:
   workflow: ai
 ---
 
-# Orbit (GitLab Knowledge Graph) skill
+# Orbit skill
 
-Query the GitLab Knowledge Graph (product name **Orbit**) via the typed
+Query **GitLab Orbit** (previously GitLab Knowledge Graph) via the typed
 `glab orbit remote` CLI subcommands (shipped in glab v1.94.0+). The typed CLI
 handles the `Content-Type` header, response framing, and exit codes for you —
 always go through `glab orbit remote`.
@@ -49,6 +49,13 @@ When editing Orbit docs or skills, fence executable query JSON as
 Write the request body to a file and pass it to `glab orbit remote query`.
 Default output is `llm` (compact, agent-friendly); pass `--format raw` to pipe
 into `jq`. Endpoints are user-scoped — do **not** pass `-R owner/repo`.
+
+Many filters need a numeric project ID. For the repository you are in, let
+`glab` resolve it from the Git remote rather than querying for it:
+
+```shell
+PROJECT_ID=$(glab api projects/:fullpath | jq -r '.id')
+```
 
 Put the request body in `/tmp/q.json`:
 
@@ -155,7 +162,7 @@ indexed in Orbit Remote. See the repository-map rows in
 ## Local CLI (glab orbit local)
 
 `glab orbit local` downloads and runs a managed Orbit CLI binary for indexing
-and querying a local copy of the Knowledge Graph (macOS/Linux only,
+and querying a local copy of the graph (macOS/Linux only,
 x86_64/aarch64). Prefer it over `glab orbit remote` when indexing a local
 repository for offline analysis; use `remote` to query production. Install/run
 with `glab orbit local` (add `--install` or `--update`). Full config keys and

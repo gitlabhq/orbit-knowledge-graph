@@ -39,7 +39,7 @@ pub struct MigrationLedger {
 
 impl MigrationLedger {
     pub fn parse(content: &str) -> Result<Self, String> {
-        serde_yaml::from_str(content).map_err(|e| format!("parsing migration ledger: {e}"))
+        orbit_utils::yaml::from_str(content).map_err(|e| format!("parsing migration ledger: {e}"))
     }
 
     pub fn load_embedded() -> Result<Self, String> {
@@ -78,7 +78,7 @@ impl MigrationLedger {
     /// Serialized YAML with the usage header.
     #[must_use]
     pub fn render(&self) -> String {
-        let body = serde_yaml::to_string(self).expect("ledger serializes");
+        let body = orbit_utils::yaml::to_string(self).expect("ledger serializes");
         format!("{LEDGER_HEADER}{body}")
     }
 

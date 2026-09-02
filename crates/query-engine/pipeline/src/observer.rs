@@ -34,7 +34,7 @@ impl PipelineObserver for NoOpObserver {
 
 /// Run multiple independent observers (e.g. OTel metrics + billing events)
 /// against the same pipeline without coupling them.
-pub type MultiObserver = gkg_utils::observability::MultiObserver<dyn PipelineObserver>;
+pub type MultiObserver = orbit_utils::observability::MultiObserver<dyn PipelineObserver>;
 
 impl PipelineObserver for MultiObserver {
     fn set_query_type(&mut self, query_type: &'static str) {

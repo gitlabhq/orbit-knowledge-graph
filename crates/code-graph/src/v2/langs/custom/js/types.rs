@@ -201,6 +201,15 @@ pub struct JsFileAnalysis {
     pub module_info: JsModuleInfo,
 }
 
+/// The only fields of a definition resolution reads, so the rest of the analysis
+/// need not survive into the resolution phase, where the JS and TS peaks sit.
+#[derive(Debug, Clone)]
+pub struct JsDefSupport {
+    pub fqn: String,
+    pub byte_offset: (usize, usize),
+    pub invocation_support: Option<JsInvocationSupport>,
+}
+
 #[derive(Debug, Clone)]
 pub struct JsDef {
     pub name: String,
@@ -226,6 +235,7 @@ pub enum JsDefKind {
     Class,
     Function,
     Method { class_fqn: String, is_static: bool },
+    Property { class_fqn: String },
     ComputedProperty { class_fqn: String },
     Watcher { class_fqn: String },
     LifecycleHook { class_fqn: String },
@@ -241,6 +251,7 @@ impl JsDefKind {
     pub fn class_fqn(&self) -> Option<&str> {
         match self {
             Self::Method { class_fqn, .. }
+            | Self::Property { class_fqn }
             | Self::ComputedProperty { class_fqn }
             | Self::Watcher { class_fqn }
             | Self::LifecycleHook { class_fqn } => Some(class_fqn),
@@ -258,6 +269,7 @@ impl JsDefKind {
             Self::Method {
                 is_static: false, ..
             } => "Method",
+            Self::Property { .. } => "Property",
             Self::ComputedProperty { .. } => "ComputedProperty",
             Self::Watcher { .. } => "Watcher",
             Self::LifecycleHook { .. } => "LifecycleHook",

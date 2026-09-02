@@ -87,7 +87,7 @@ expression = "LicenseRef-EE"
 license-files = []
 
 [[licenses.clarify]]
-name = "orbit-local"
+name = "orbit-cli"
 expression = "LicenseRef-EE"
 license-files = []
 
@@ -122,12 +122,12 @@ expression = "LicenseRef-EE"
 license-files = []
 
 [[licenses.clarify]]
-name = "gkg-server-config"
+name = "orbit-server-config"
 expression = "LicenseRef-EE"
 license-files = []
 
 [[licenses.clarify]]
-name = "gkg-utils"
+name = "orbit-utils"
 expression = "LicenseRef-EE"
 license-files = []
 

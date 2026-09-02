@@ -3,7 +3,6 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use clickhouse_client::ClickHouseConfigurationExt;
 use futures::StreamExt;
-use gkg_server_config::{GlobalDispatcherConfig, NamespaceDispatcherConfig, NatsConfiguration};
 use indexer::campaign::CampaignState;
 use indexer::checkpoint::ClickHouseCheckpointStore;
 use indexer::nats::versioning::NATS_VERSIONER;
@@ -20,6 +19,7 @@ use integration_testkit::TestContext;
 use integration_testkit::scenario::{
     CdcEvent, CdcOperation, DispatchedMessage, HandlerInput, ScenarioHandlers,
 };
+use orbit_server_config::{GlobalDispatcherConfig, NamespaceDispatcherConfig, NatsConfiguration};
 use siphon_proto::replication_event::{Column, Operation};
 use siphon_proto::{LogicalReplicationEvents, ReplicationEvent, Value, value};
 use testcontainers::ImageExt;
@@ -134,6 +134,7 @@ async fn dispatch_enabled_namespace_cdc(
         ctx.config.build_client(),
         ScheduledTaskMetrics::new(),
         Arc::new(CampaignState::new()),
+        orbit_server_config::CodeBackfillSweepConfig::default().publish_window,
     ));
     let route = EnabledNamespacesRoute::new(
         NamespaceIndexingDispatch::new(services.nats),
@@ -198,10 +199,10 @@ fn replication_event(event: &CdcEvent) -> LogicalReplicationEvents {
     }
 }
 
-fn proto_value(value: &serde_yaml::Value) -> Value {
+fn proto_value(value: &serde_json::Value) -> Value {
     let inner = match value {
-        serde_yaml::Value::Number(n) if n.is_i64() => value::Value::Int64Value(n.as_i64().unwrap()),
-        serde_yaml::Value::String(s) => value::Value::StringValue(s.clone()),
+        serde_json::Value::Number(n) if n.is_i64() => value::Value::Int64Value(n.as_i64().unwrap()),
+        serde_json::Value::String(s) => value::Value::StringValue(s.clone()),
         other => panic!("cdc column value must be an integer or string, got {other:?}"),
     };
     Value { value: Some(inner) }

@@ -32,8 +32,8 @@ use tracing::{debug, info, warn};
 use crate::locking::{INDEXING_LOCKS_BUCKET, LockService, NatsLockService};
 use crate::nats::{KvBucketConfig, NatsBroker, NatsServices, NatsServicesImpl};
 use crate::orchestrator::{Trigger, TriggerError};
-use gkg_server_config::NatsConfiguration;
-use gkg_server_config::ScheduleConfiguration;
+use orbit_server_config::NatsConfiguration;
+use orbit_server_config::ScheduleConfiguration;
 
 #[derive(Debug, thiserror::Error)]
 #[error("{0}")]

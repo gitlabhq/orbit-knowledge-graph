@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use gkg_utils::arrow::ColumnValue;
+use orbit_utils::arrow::ColumnValue;
 use query_engine::compiler::VirtualColumnRequest;
 use query_engine::shared::content::{
     ColumnResolverRegistry, PropertyMap, PropertyRow, ResolverContext, resolve_virtual_columns,

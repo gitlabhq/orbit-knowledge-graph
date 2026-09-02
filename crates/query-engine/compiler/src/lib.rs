@@ -79,7 +79,6 @@ pub use passes::codegen::{
     ddl::generate_graph_tables_with_prefix,
     ddl::generate_local_tables,
     ddl::generate_refreshable_materialized_views,
-    ddl::generate_unversioned_graph_tables,
     ddl::generate_unversioned_objects,
     ddl::{UnversionedObject, auxiliary_schema_fingerprints, ddl_fingerprints},
 };
@@ -90,10 +89,7 @@ pub use passes::hydrate::{
 };
 pub use passes::normalize::{build_entity_auth, normalize};
 pub use scope::{PathResolutionKey, PathScopeId, scope_edges, scope_keys};
-pub use types::{
-    AccessLevel, DEFAULT_PATH_ACCESS_LEVEL, Realm, SecurityContext, TraversalPath,
-    is_valid_traversal_path,
-};
+pub use types::{AccessLevel, AuthorizedPath, DEFAULT_PATH_ACCESS_LEVEL, Realm, SecurityContext};
 
 use metrics::CountErr;
 use std::sync::Arc;
@@ -168,7 +164,7 @@ pub fn compile_input(
 
 #[cfg(test)]
 pub(crate) mod testkit {
-    use crate::types::{AccessLevel, SecurityContext, TraversalPath};
+    use crate::types::{AccessLevel, AuthorizedPath, SecurityContext};
 
     pub fn non_admin_ctx() -> SecurityContext {
         SecurityContext::new(1, vec!["1/".into()]).unwrap()
@@ -177,7 +173,7 @@ pub(crate) mod testkit {
     pub fn admin_ctx() -> SecurityContext {
         SecurityContext::new_with_roles(
             1,
-            vec![TraversalPath::new("1/", AccessLevel::Owner as u32)],
+            vec![AuthorizedPath::new("1/", AccessLevel::Owner as u32)],
         )
         .unwrap()
         .with_role(true, Some(AccessLevel::Owner as u32))
@@ -187,6 +183,7 @@ pub(crate) mod testkit {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use orbit_utils::traversal_path::TraversalPath;
     use std::sync::LazyLock;
 
     static ONTOLOGY: LazyLock<Ontology> =
@@ -1253,6 +1250,32 @@ mod tests {
     }
 
     #[test]
+    fn multi_hop_union_projects_denorm_tag_columns() {
+        let query = r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "a", "entity": "WorkItem", "filters": {"state": {"eq": "opened"}}, "columns": ["iid"]},
+                {"id": "b", "entity": "WorkItem", "columns": ["iid"]}
+            ],
+            "relationships": [{"type": "RELATED_TO", "from": "a", "to": "b", "hops": [1, 2]}],
+            "limit": 50
+        }"#;
+        let sql = compile_sql(query);
+        assert!(
+            sql.contains("AS source_tags"),
+            "multi-hop union must project source_tags, got:\n{sql}"
+        );
+        assert!(
+            sql.contains("AS target_tags"),
+            "multi-hop union must project target_tags, got:\n{sql}"
+        );
+        assert!(
+            sql.contains("source_tags, 'state:opened'"),
+            "anchor state filter must push onto the union's projected source_tags, got:\n{sql}"
+        );
+    }
+
+    #[test]
     fn denorm_skips_rewrite_when_node_ids_present() {
         let query = r#"{
             "query_type": "traversal",
@@ -1700,7 +1723,9 @@ mod tests {
         );
         let ctx = SecurityContext::new(1, vec!["1/".into()])
             .unwrap()
-            .with_scope_prefixes([("g".to_string(), "1/9970/".to_string())].into());
+            .with_scope_prefixes(
+                [("g".to_string(), TraversalPath::new_unchecked("1/9970/"))].into(),
+            );
         compile(&query, &ONTOLOGY, &ctx).unwrap().base.render()
     }
 
@@ -1709,7 +1734,9 @@ mod tests {
         let query = r#"{"query_type":"traversal","nodes":[{"id":"m","entity":"MergeRequest","columns":["id"],"filters":{"state":{"eq":"opened"}}}],"limit":20}"#;
         let ctx = SecurityContext::new(1, vec!["1/".into()])
             .unwrap()
-            .with_scope_prefixes([("m".to_string(), "1/9970/".to_string())].into());
+            .with_scope_prefixes(
+                [("m".to_string(), TraversalPath::new_unchecked("1/9970/"))].into(),
+            );
         let sql = compile(query, &ONTOLOGY, &ctx).unwrap().base.render();
         assert!(
             sql.contains("startsWith(m.traversal_path"),
@@ -1893,7 +1920,7 @@ mod tests {
                 columns: Some(ColumnSelection::List(vec!["id".into(), "state".into()])),
                 node_ids: vec![1],
                 has_traversal_path: true,
-                traversal_paths: vec!["1/".into()],
+                traversal_paths: vec![TraversalPath::new_unchecked("1/")],
                 ..Default::default()
             }],
             limit: 10,
@@ -2201,5 +2228,43 @@ mod tests {
             "error should name the column: {msg}"
         );
         assert!(msg.contains("gt"), "error should name the operator: {msg}");
+    }
+
+    #[test]
+    fn final_prewhere_setting_follows_final_scans() {
+        let sql = compile_sql(
+            r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]}],"limit":10}"#,
+        );
+        assert!(sql.contains(" FINAL"), "{sql}");
+        assert!(
+            sql.contains("optimize_move_to_prewhere_if_final = 1"),
+            "{sql}"
+        );
+        assert!(
+            !sql.contains("use_index_for_in_with_subqueries_max_values"),
+            "no IN (subquery) in this query, got:\n{sql}"
+        );
+    }
+
+    #[test]
+    fn in_subquery_index_cap_follows_in_select() {
+        let sql = compile_sql(
+            r#"{
+                "query_type": "aggregation",
+                "nodes": [
+                    {"id": "u", "entity": "User", "node_ids": [116]},
+                    {"id": "mr", "entity": "MergeRequest"}
+                ],
+                "relationships": [{"from": "u", "to": "mr", "type": "AUTHORED"}],
+                "group_by": ["u"],
+                "aggregations": [{"count": "mr", "as": "c"}],
+                "limit": 20
+            }"#,
+        );
+        assert!(sql.contains(" IN (SELECT"), "{sql}");
+        assert!(
+            sql.contains("use_index_for_in_with_subqueries_max_values = 100000"),
+            "{sql}"
+        );
     }
 }

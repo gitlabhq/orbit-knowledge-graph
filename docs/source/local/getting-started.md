@@ -1,6 +1,6 @@
 ---
-stage: Analytics
-group: Knowledge Graph
+stage: Orbit
+group: Context Systems
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
 description: Pick an access method and build your first local GitLab Orbit graph.
 title: Get started with GitLab Orbit Local
@@ -192,7 +192,9 @@ Next:
 
 - Run a real query: [Use GitLab Orbit Local with glab](access/glab.md).
 - Wire it into your AI agent: run `glab orbit setup` to install the GitLab Orbit
-  skill, or [connect via MCP](access/mcp.md).
+  skill, or [connect via MCP](access/mcp.md). Setup edits your agent's
+  instruction file and hook configuration;
+  [see what it changes](access/cli.md#what-it-changes) before you run it.
 - Browse the table layout: [Schema reference](schema.md).
 
 ## Billing

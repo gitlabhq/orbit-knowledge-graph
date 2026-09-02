@@ -17,30 +17,17 @@ for ns in $($KC get ns -o name 2>/dev/null | grep "e2e-${RUN_ID}-" | sed 's|name
   $KC wait --for=delete "ns/${ns}" --timeout=120s 2>/dev/null || true
 done
 
-# --- 2. Dedicated node pool for CH (optional) ---
+# --- 2. Dedicated CH pool (Terraform-managed) ---
 CH_NODE_SELECTOR=""
 CH_TOLERATIONS=""
-if [[ "${RA_DEDICATED_POOL:-}" == "1" ]]; then
-  IFS=_ read -r _ GKE_PROJECT GKE_ZONE GKE_CLUSTER <<< "${KCTX}"
-  POOL_NAME="ra-${RUN_ID}"
-  log "Creating dedicated pool ${POOL_NAME}"
-  if ! gcloud container node-pools describe "${POOL_NAME}" \
-      --cluster "${GKE_CLUSTER}" --project "${GKE_PROJECT}" --zone "${GKE_ZONE}" \
-      >/dev/null 2>&1; then
-    gcloud container node-pools create "${POOL_NAME}" \
-      --cluster "${GKE_CLUSTER}" --project "${GKE_PROJECT}" --zone "${GKE_ZONE}" \
-      --machine-type "$(tier '.nodes.machine')" --num-nodes 1 \
-      --node-taints "ra-run=${RUN_ID}:NoSchedule" \
-      --node-labels "ra-run=${RUN_ID}" --quiet
-  else
-    log "  Pool ${POOL_NAME} already exists, reusing"
-  fi
+DEDICATED=$(cd "${BENCH_DIR}/infra" && "$TF" output -raw dedicated_ch_pool 2>/dev/null || echo "false")
+if [[ "${DEDICATED}" == "true" ]]; then
   CH_NODE_SELECTOR="      nodeSelector:
-        ra-run: \"${RUN_ID}\""
+        dedicated: clickhouse"
   CH_TOLERATIONS="      tolerations:
-        - key: ra-run
+        - key: dedicated
           operator: Equal
-          value: \"${RUN_ID}\"
+          value: clickhouse
           effect: NoSchedule"
 fi
 
@@ -49,16 +36,28 @@ CH_PASSWORD=$(openssl rand -hex 24)
 
 PVC_DATA_SOURCE=""
 if [[ -n "${RA_DATALAKE_SNAPSHOT:-}" ]]; then
-  # VolumeSnapshots are namespace-scoped. To restore across namespaces we
-  # create a pre-provisioned VolumeSnapshotContent + VolumeSnapshot pair
-  # that references the same underlying GCE disk snapshot.
-  ORIG_CONTENT=$($KC get volumesnapshot "${RA_DATALAKE_SNAPSHOT}" \
-    -n "${RA_DATALAKE_SNAPSHOT_NS:-ra-clickhouse}" \
-    -o jsonpath='{.status.boundVolumeSnapshotContentName}')
-  export SNAP_HANDLE=$($KC get volumesnapshotcontent "${ORIG_CONTENT}" \
-    -o jsonpath='{.status.snapshotHandle}')
+  SNAP_NS="${RA_DATALAKE_SNAPSHOT_NS:-ra-clickhouse}"
+
+  if [[ -n "${RA_SNAPSHOT_HANDLE:-}" ]]; then
+    export SNAP_HANDLE="${RA_SNAPSHOT_HANDLE}"
+  else
+    # Resolve the GCE disk snapshot handle from a VolumeSnapshot.
+    # Use RA_SNAPSHOT_SOURCE_CTX if the snapshot lives on a different cluster.
+    SNAP_KC="${KC}"
+    if [[ -n "${RA_SNAPSHOT_SOURCE_CTX:-}" ]]; then
+      SNAP_KC="kubectl --context=${RA_SNAPSHOT_SOURCE_CTX}"
+    fi
+    ORIG_CONTENT=$($SNAP_KC get volumesnapshot "${RA_DATALAKE_SNAPSHOT}" \
+      -n "${SNAP_NS}" \
+      -o jsonpath='{.status.boundVolumeSnapshotContentName}')
+    export SNAP_HANDLE=$($SNAP_KC get volumesnapshotcontent "${ORIG_CONTENT}" \
+      -o jsonpath='{.status.snapshotHandle}')
+  fi
+
+  log "  Restoring from GCE snapshot: ${SNAP_HANDLE}"
   export LOCAL_SNAP="datalake-${RUN_ID}"
   export LOCAL_CONTENT="datalake-content-${RUN_ID}"
+  export CH_NAMESPACE="${CH_NS}"
   $KC create ns "${CH_NS}" --dry-run=client -o yaml | $KC apply -f -
   envsubst < "${BENCH_DIR}/manifests/snapshot-restore.yaml" | $KC apply -f -
   log "  Waiting for snapshot ${LOCAL_SNAP} to bind"
@@ -75,12 +74,13 @@ $KC delete statefulset clickhouse -n "${CH_NS}" --cascade=orphan 2>/dev/null || 
 
 log "Deploying standalone ClickHouse in ${CH_NS}"
 export CH_NAMESPACE="${CH_NS}" CH_PASSWORD CH_NODE_SELECTOR CH_TOLERATIONS PVC_DATA_SOURCE
+export CH_IMAGE="$(bench '.images.clickhouse')"
 export CH_STORAGE="$(tier '.clickhouse.storage')"
 export CH_CPU="$(tier '.clickhouse.cpu')"
 export CH_MEMORY="$(tier '.clickhouse.memory')"
 envsubst < "${BENCH_DIR}/manifests/standalone-ch.yaml" | $KC apply -f -
 
-$KC rollout status -n "${CH_NS}" statefulset/clickhouse --timeout=120s
+$KC rollout status -n "${CH_NS}" statefulset/clickhouse --timeout=600s
 log "  ClickHouse ready"
 
 # --- 4. Create databases and users ---
@@ -121,6 +121,20 @@ $KC exec -n "${CH_NS}" clickhouse-0 -- \
     ${SETUP_SQL}
   "
 log "  Databases and users created (clean slate)"
+
+# Set TTLs on system log tables to prevent disk exhaustion.
+log "Setting TTLs on system log tables"
+for tbl in text_log trace_log query_log metric_log asynchronous_metric_log processors_profile_log part_log; do
+  $KC exec -n "${CH_NS}" clickhouse-0 -- \
+    clickhouse-client --password "${CH_PASSWORD}" -q \
+    "ALTER TABLE system.${tbl} MODIFY TTL event_date + INTERVAL 1 DAY SETTINGS mutations_sync=0" 2>/dev/null || true
+done
+# Truncate any existing bloat from snapshot restores.
+for tbl in text_log trace_log query_log metric_log asynchronous_metric_log processors_profile_log part_log; do
+  $KC exec -n "${CH_NS}" clickhouse-0 -- \
+    clickhouse-client --password "${CH_PASSWORD}" -q \
+    "TRUNCATE TABLE IF EXISTS system.${tbl}" 2>/dev/null || true
+done
 
 # Store the default password for the import job.
 $KC create secret generic ra-ch-credentials -n "${CH_NS}" \

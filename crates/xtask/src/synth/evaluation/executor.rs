@@ -240,7 +240,7 @@ impl QueryExecutor {
         let traversal_path: Option<String> = security_ctx
             .traversal_paths
             .first()
-            .map(|tp| tp.path.clone());
+            .map(|tp| tp.path.to_string());
 
         let mut sampling_info = SamplingInfo {
             traversal_path: traversal_path.clone(),
@@ -872,7 +872,7 @@ mod tests {
 
     #[test]
     fn test_substitute_params() {
-        use gkg_utils::clickhouse::ChType;
+        use orbit_utils::clickhouse::ChType;
 
         let sql = "SELECT * FROM users WHERE name = {p0:String} AND id = {p1:Int64}";
         let mut params = std::collections::HashMap::new();

@@ -1,4 +1,4 @@
-//! Consumed by both the `gkg-server` MCP `get_graph_schema` tool (full
+//! Consumed by both the `orbit-server` MCP `get_graph_schema` tool (full
 //! ontology) and the local `orbit` CLI `schema` subcommand (filtered to
 //! entities present in the local DuckDB graph).
 

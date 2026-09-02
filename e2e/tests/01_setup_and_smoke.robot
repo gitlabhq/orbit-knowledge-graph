@@ -53,7 +53,7 @@ Provision Smoke Fixtures
     Bootstrap E2E Credentials
     Enable Feature Flag    knowledge_graph_infra
     Enable Feature Flag    knowledge_graph
-    # Verify propagation before Enable Knowledge Graph reads the flags.
+    # Verify propagation before Enable Orbit reads the flags.
     Wait Until Keyword Succeeds    30s    2s    Feature Flag Is Enabled    knowledge_graph_infra
     Wait Until Keyword Succeeds    30s    2s    Feature Flag Is Enabled    knowledge_graph
     ${suffix}=    Random Suffix
@@ -61,7 +61,7 @@ Provision Smoke Fixtures
     ${group}=    Create Group    ${name}
     Set Global Variable    ${SHARED_NAMESPACE_ID}    ${group["id"]}
     Set Global Variable    ${SHARED_NAMESPACE_NAME}    ${name}
-    Enable Knowledge Graph    ${SHARED_NAMESPACE_ID}
+    Enable Orbit    ${SHARED_NAMESPACE_ID}
     ${project}=    Create Project    canary-prj-${suffix}    ${SHARED_NAMESPACE_ID}
     ${issue}=    Create Issue    ${project["id"]}    canary-issue-${suffix}
     ${note}=    Create Note On Issue    ${project["id"]}    ${issue["iid"]}    canary-note-${suffix}

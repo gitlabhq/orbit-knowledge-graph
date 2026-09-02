@@ -3,15 +3,16 @@ use arrow::record_batch::RecordBatch;
 use chrono::{DateTime, Utc};
 use code_graph::v2::SinkError;
 use code_graph::v2::linker::graph::{DefinitionRow, DirectoryRow, FileRow, GraphOutput, ImportRow};
-use gkg_utils::arrow::{AsRecordBatch, BatchBuilder, ColumnSpec, ColumnType, RowEnvelope};
 use ontology::DataType as OntDataType;
 use ontology::Ontology;
+use orbit_utils::arrow::{AsRecordBatch, BatchBuilder, ColumnSpec, ColumnType, RowEnvelope};
+use orbit_utils::traversal_path::TraversalPath;
 use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 pub struct IndexerEnvelope {
-    pub traversal_path: String,
+    pub traversal_path: TraversalPath,
     pub project_id: i64,
     pub branch: String,
     pub commit_sha: String,
@@ -20,7 +21,7 @@ pub struct IndexerEnvelope {
 
 impl IndexerEnvelope {
     pub fn new(
-        traversal_path: String,
+        traversal_path: TraversalPath,
         project_id: i64,
         branch: String,
         commit_sha: String,
@@ -39,7 +40,8 @@ impl IndexerEnvelope {
 impl RowEnvelope for IndexerEnvelope {
     fn write_header(&self, b: &mut BatchBuilder, id: i64) -> Result<(), ArrowError> {
         b.col("id")?.push_int(id)?;
-        b.col("traversal_path")?.push_str(&self.traversal_path)?;
+        b.col("traversal_path")?
+            .push_str(self.traversal_path.as_str())?;
         b.col("project_id")?.push_int(self.project_id)?;
         b.col("branch")?.push_str(&self.branch)?;
         b.col("commit_sha")?.push_str(&self.commit_sha)?;
@@ -65,7 +67,7 @@ pub struct ConvertedGraphData {
 }
 
 pub fn convert_code_graph(
-    graph: &code_graph::v2::linker::CodeGraph,
+    graph: &mut code_graph::v2::linker::CodeGraph,
     envelope: &IndexerEnvelope,
     specs: &ConverterSpecs,
 ) -> Result<ConvertedGraphData, ArrowError> {
@@ -82,29 +84,42 @@ fn convert_repository_graph(
     envelope: &IndexerEnvelope,
     specs: &ConverterSpecs,
 ) -> Result<ConvertedGraphData, ArrowError> {
+    let branch = convert_branch_row(envelope, &specs.branch)?;
+    let directories = convert_directories(graph, ids, envelope, &specs.directory)?;
+    let files = convert_files(graph, ids, envelope, &specs.file)?;
+    let definitions = convert_definitions(graph, ids, envelope, &specs.definition)?;
+    let imported_symbols = convert_imports(graph, ids, envelope, &specs.imported_symbol)?;
+    let edges = convert_repository_edges(graph, ids, envelope, specs)?;
     Ok(ConvertedGraphData {
-        branch: convert_branch_row(envelope, &specs.branch)?,
-        directories: convert_directories(graph, ids, envelope, &specs.directory)?,
-        files: convert_files(graph, ids, envelope, &specs.file)?,
-        definitions: convert_definitions(graph, ids, envelope, &specs.definition)?,
-        imported_symbols: convert_imports(graph, ids, envelope, &specs.imported_symbol)?,
-        edges: convert_repository_edges(graph, ids, envelope, specs)?,
+        branch,
+        directories,
+        files,
+        definitions,
+        imported_symbols,
+        edges,
     })
 }
 
 fn convert_semantic_graph(
-    graph: &code_graph::v2::linker::CodeGraph,
+    graph: &mut code_graph::v2::linker::CodeGraph,
     ids: &[i64],
     envelope: &IndexerEnvelope,
     specs: &ConverterSpecs,
 ) -> Result<ConvertedGraphData, ArrowError> {
+    let definitions = convert_definitions(graph, ids, envelope, &specs.definition)?;
+    let imported_symbols = convert_imports(graph, ids, envelope, &specs.imported_symbol)?;
+    let tag_cache = graph.build_node_tags(&specs.tag_properties);
+    // The tag cache is the last reader of the definition and import payloads, so
+    // from here the edge build needs only endpoints, edge weights and the cache.
+    graph.release_node_payloads();
+    let edges = convert_semantic_edges(graph, ids, envelope, specs, &tag_cache)?;
     Ok(ConvertedGraphData {
         branch: convert_empty_branch(&specs.branch)?,
         directories: convert_empty_directories(envelope, &specs.directory)?,
         files: convert_empty_files(envelope, &specs.file)?,
-        definitions: convert_definitions(graph, ids, envelope, &specs.definition)?,
-        imported_symbols: convert_imports(graph, ids, envelope, &specs.imported_symbol)?,
-        edges: convert_semantic_edges(graph, ids, envelope, specs)?,
+        definitions,
+        imported_symbols,
+        edges,
     })
 }
 
@@ -127,13 +142,7 @@ fn entity_specs(ontology: &Ontology, entity_name: &str) -> Vec<ColumnSpec> {
         .filter(|f| !f.is_virtual())
         .map(|f| ColumnSpec {
             name: f.name.clone(),
-            col_type: match f.data_type {
-                OntDataType::Int => ColumnType::Int,
-                OntDataType::Bool => ColumnType::Bool,
-                OntDataType::DateTime => ColumnType::TimestampMicros,
-                _ if dict_fields.contains(&f.name) => ColumnType::DictStr,
-                _ => ColumnType::Str,
-            },
+            col_type: column_type_for(&f.name, f.data_type, &dict_fields),
             nullable: f.nullable,
         })
         .collect();
@@ -148,6 +157,26 @@ fn entity_specs(ontology: &Ontology, entity_name: &str) -> Vec<ColumnSpec> {
         nullable: false,
     });
     specs
+}
+
+/// Constant for every row in a batch, so the wire encoding collapses each to one
+/// key. That is an indexer-side fact, not graph shape, so not in the ontology.
+const ENVELOPE_CONSTANT_COLUMNS: [&str; 3] = ["traversal_path", "branch", "commit_sha"];
+
+fn column_type_for(
+    name: &str,
+    data_type: OntDataType,
+    dict_fields: &HashSet<String>,
+) -> ColumnType {
+    match data_type {
+        OntDataType::Int => ColumnType::Int,
+        OntDataType::Bool => ColumnType::Bool,
+        OntDataType::DateTime => ColumnType::TimestampMicros,
+        _ if dict_fields.contains(name) || ENVELOPE_CONSTANT_COLUMNS.contains(&name) => {
+            ColumnType::DictStr
+        }
+        _ => ColumnType::Str,
+    }
 }
 
 fn edge_specs(ontology: &Ontology) -> Vec<ColumnSpec> {
@@ -171,13 +200,7 @@ fn edge_specs(ontology: &Ontology) -> Vec<ColumnSpec> {
                 if seen_cols.insert(c.name.clone()) {
                     specs.push(ColumnSpec {
                         name: c.name.clone(),
-                        col_type: match c.data_type {
-                            OntDataType::Int => ColumnType::Int,
-                            OntDataType::Bool => ColumnType::Bool,
-                            OntDataType::DateTime => ColumnType::TimestampMicros,
-                            _ if dict_fields.contains(&c.name) => ColumnType::DictStr,
-                            _ => ColumnType::Str,
-                        },
+                        col_type: column_type_for(&c.name, c.data_type, &dict_fields),
                         nullable: false,
                     });
                 }
@@ -190,9 +213,11 @@ fn edge_specs(ontology: &Ontology) -> Vec<ColumnSpec> {
         if let Some(config) = ontology.edge_table_config(table_name) {
             for col in &config.storage.denormalized_columns {
                 if seen.insert(col.name.clone()) {
+                    // A handful of tag values repeat across every edge row. Only
+                    // the wire encoding changes; the column stays `Array(String)`.
                     specs.push(ColumnSpec {
                         name: col.name.clone(),
-                        col_type: ColumnType::StrList,
+                        col_type: ColumnType::DictStrList,
                         nullable: false,
                     });
                 }
@@ -374,8 +399,8 @@ fn convert_repository_edges(
         edge_kind: "IN_PROJECT",
         source_node_kind: "Branch",
         target_node_kind: "Project",
-        source_tags: branch_tags.clone(),
-        target_tags: Vec::new(),
+        source_tags: &branch_tags,
+        target_tags: &[],
     });
 
     edge_rows.push(IndexerEdgeRow {
@@ -385,8 +410,8 @@ fn convert_repository_edges(
         edge_kind: "CONTAINS",
         source_node_kind: "Project",
         target_node_kind: "Branch",
-        source_tags: Vec::new(),
-        target_tags: branch_tags.clone(),
+        source_tags: &[],
+        target_tags: &branch_tags,
     });
 
     edge_rows.extend(branch_contains_directory_rows(
@@ -412,9 +437,15 @@ fn convert_repository_edges(
         &branch_tags,
         &tag_cache,
     ));
-    edge_rows.extend(graph_edge_rows(graph, ids, env, &tag_cache));
 
-    edge_row_batch(edge_rows, &specs.edge)
+    let mut builder = BatchBuilder::new(&specs.edge, edge_rows.len() + graph.graph.edge_count())?;
+    for row in &edge_rows {
+        row.write_row(&mut builder, &())?;
+    }
+    for ei in graph.graph.edge_indices() {
+        graph_edge_row(graph, ids, env, &tag_cache, ei).write_row(&mut builder, &())?;
+    }
+    builder.finish()
 }
 
 fn convert_semantic_edges(
@@ -422,14 +453,16 @@ fn convert_semantic_edges(
     ids: &[i64],
     env: &IndexerEnvelope,
     specs: &ConverterSpecs,
+    tag_cache: &code_graph::v2::linker::graph::NodeTags,
 ) -> Result<RecordBatch, ArrowError> {
-    let tag_cache = graph.build_node_tags(&specs.tag_properties);
-    let edge_rows: Vec<_> = graph_edge_rows(graph, ids, env, &tag_cache)
-        .into_iter()
-        .filter(|row| row.edge_kind != "CONTAINS")
-        .collect();
-
-    edge_row_batch(edge_rows, &specs.edge)
+    let mut builder = BatchBuilder::new(&specs.edge, graph.graph.edge_count())?;
+    for ei in graph.graph.edge_indices() {
+        if graph.graph[ei].relationship.edge_kind.as_ref() == "CONTAINS" {
+            continue;
+        }
+        graph_edge_row(graph, ids, env, tag_cache, ei).write_row(&mut builder, &())?;
+    }
+    builder.finish()
 }
 
 struct IndexerEdgeRow<'a> {
@@ -439,8 +472,8 @@ struct IndexerEdgeRow<'a> {
     edge_kind: &'a str,
     source_node_kind: &'a str,
     target_node_kind: &'a str,
-    source_tags: Vec<String>,
-    target_tags: Vec<String>,
+    source_tags: &'a [String],
+    target_tags: &'a [String],
 }
 
 impl AsRecordBatch for IndexerEdgeRow<'_> {
@@ -470,7 +503,7 @@ fn branch_contains_directory_rows<'a>(
     ids: &'a [i64],
     env: &'a IndexerEnvelope,
     branch_id: i64,
-    branch_tags: &[String],
+    branch_tags: &'a [String],
 ) -> Vec<IndexerEdgeRow<'a>> {
     graph
         .directories()
@@ -482,8 +515,8 @@ fn branch_contains_directory_rows<'a>(
             edge_kind: "CONTAINS",
             source_node_kind: "Branch",
             target_node_kind: "Directory",
-            source_tags: branch_tags.to_vec(),
-            target_tags: Vec::new(),
+            source_tags: branch_tags,
+            target_tags: &[],
         })
         .collect()
 }
@@ -493,8 +526,8 @@ fn branch_contains_file_rows<'a>(
     ids: &'a [i64],
     env: &'a IndexerEnvelope,
     branch_id: i64,
-    branch_tags: &[String],
-    tag_cache: &[Vec<String>],
+    branch_tags: &'a [String],
+    tag_cache: &'a code_graph::v2::linker::graph::NodeTags,
 ) -> Vec<IndexerEdgeRow<'a>> {
     graph
         .files()
@@ -506,8 +539,8 @@ fn branch_contains_file_rows<'a>(
             edge_kind: "CONTAINS",
             source_node_kind: "Branch",
             target_node_kind: "File",
-            source_tags: branch_tags.to_vec(),
-            target_tags: tag_cache[idx.index()].clone(),
+            source_tags: branch_tags,
+            target_tags: tag_cache.get(idx),
         })
         .collect()
 }
@@ -517,8 +550,8 @@ fn repository_on_branch_rows<'a>(
     ids: &'a [i64],
     env: &'a IndexerEnvelope,
     branch_id: i64,
-    branch_tags: &[String],
-    tag_cache: &[Vec<String>],
+    branch_tags: &'a [String],
+    tag_cache: &'a code_graph::v2::linker::graph::NodeTags,
 ) -> Vec<IndexerEdgeRow<'a>> {
     let mut rows = Vec::new();
 
@@ -529,8 +562,8 @@ fn repository_on_branch_rows<'a>(
         edge_kind: "ON_BRANCH",
         source_node_kind: "Directory",
         target_node_kind: "Branch",
-        source_tags: Vec::new(),
-        target_tags: branch_tags.to_vec(),
+        source_tags: &[],
+        target_tags: branch_tags,
     }));
     rows.extend(graph.files().map(|(idx, _)| IndexerEdgeRow {
         env,
@@ -539,56 +572,32 @@ fn repository_on_branch_rows<'a>(
         edge_kind: "ON_BRANCH",
         source_node_kind: "File",
         target_node_kind: "Branch",
-        source_tags: tag_cache[idx.index()].clone(),
-        target_tags: branch_tags.to_vec(),
+        source_tags: tag_cache.get(idx),
+        target_tags: branch_tags,
     }));
 
     rows
 }
 
-fn graph_edge_rows<'a>(
+fn graph_edge_row<'a>(
     graph: &'a code_graph::v2::linker::CodeGraph,
     ids: &'a [i64],
     env: &'a IndexerEnvelope,
-    tag_cache: &[Vec<String>],
-) -> Vec<IndexerEdgeRow<'a>> {
-    let mut rows = Vec::new();
-    for ei in graph.graph.edge_indices() {
-        let (src, tgt) = graph.graph.edge_endpoints(ei).unwrap();
-        let edge = &graph.graph[ei];
-        rows.push(IndexerEdgeRow {
-            env,
-            source_id: ids[src.index()],
-            target_id: ids[tgt.index()],
-            edge_kind: edge.relationship.edge_kind.as_ref(),
-            source_node_kind: edge.relationship.source_node.as_ref(),
-            target_node_kind: edge.relationship.target_node.as_ref(),
-            source_tags: tag_cache[src.index()].clone(),
-            target_tags: tag_cache[tgt.index()].clone(),
-        });
+    tag_cache: &'a code_graph::v2::linker::graph::NodeTags,
+    ei: petgraph::graph::EdgeIndex,
+) -> IndexerEdgeRow<'a> {
+    let (src, tgt) = graph.graph.edge_endpoints(ei).unwrap();
+    let rel = &graph.graph[ei].relationship;
+    IndexerEdgeRow {
+        env,
+        source_id: ids[src.index()],
+        target_id: ids[tgt.index()],
+        edge_kind: rel.edge_kind.as_ref(),
+        source_node_kind: rel.source_node.as_ref(),
+        target_node_kind: rel.target_node.as_ref(),
+        source_tags: tag_cache.get(src),
+        target_tags: tag_cache.get(tgt),
     }
-    rows
-}
-
-fn edge_row_batch(
-    mut edge_rows: Vec<IndexerEdgeRow<'_>>,
-    specs: &[ColumnSpec],
-) -> Result<RecordBatch, ArrowError> {
-    // Sort edges to match the ClickHouse edge table ORDER BY:
-    // (traversal_path, relationship_kind, source_id, target_id, source_kind, target_kind).
-    // traversal_path is constant within a batch so we skip it. Pre-sorted
-    // inserts create parts that are already in primary key order, reducing
-    // merge work and improving compression via delta encoding on source_id.
-    edge_rows.sort_by(|a, b| {
-        a.edge_kind
-            .cmp(b.edge_kind)
-            .then_with(|| a.source_id.cmp(&b.source_id))
-            .then_with(|| a.target_id.cmp(&b.target_id))
-            .then_with(|| a.source_node_kind.cmp(b.source_node_kind))
-            .then_with(|| a.target_node_kind.cmp(b.target_node_kind))
-    });
-
-    IndexerEdgeRow::to_record_batch(&edge_rows, specs, &())
 }
 
 fn compute_branch_id(project_id: i64, branch: &str) -> i64 {
@@ -666,9 +675,9 @@ impl IndexerConverter {
 impl code_graph::v2::GraphConverter for IndexerConverter {
     fn convert(
         &self,
-        graph: code_graph::v2::linker::CodeGraph,
+        mut graph: code_graph::v2::linker::CodeGraph,
     ) -> Result<Vec<(String, RecordBatch)>, SinkError> {
-        let data = convert_code_graph(&graph, &self.envelope, &self.specs)
+        let data = convert_code_graph(&mut graph, &self.envelope, &self.specs)
             .map_err(|e| SinkError(format!("ClickHouse graph conversion: {e}")))?;
         let mut result = vec![
             (self.table_names.branch.clone(), data.branch),
@@ -682,47 +691,36 @@ impl code_graph::v2::GraphConverter for IndexerConverter {
         ];
 
         if data.edges.num_rows() > 0 {
-            use arrow::array::AsArray;
             use std::collections::HashMap;
 
+            // Cloned so the routing borrow detaches from `data.edges` and the
+            // single-table path can move the batch out instead of copying it.
             let rel_col = data
                 .edges
                 .column_by_name("relationship_kind")
-                .ok_or_else(|| SinkError("edges batch missing relationship_kind column".into()))?;
-            // The column may be dictionary-encoded (DictStr) or plain Utf8.
-            // Cast to StringArray for uniform access.
-            let rel_col_str = arrow::compute::cast(rel_col, &arrow::datatypes::DataType::Utf8)
-                .map_err(|e| SinkError(format!("cast relationship_kind to string: {e}")))?;
-            let rel_array = rel_col_str.as_string::<i32>();
-
-            let mut table_rows: HashMap<&str, Vec<u32>> = HashMap::new();
-            // edge_row_batch sorts edges by edge_kind, so adjacent rows share
-            // rel_kind: cache the last (rel_kind, table) to skip the lookup.
-            let mut last: Option<(&str, &str)> = None;
-            for i in 0..data.edges.num_rows() {
-                let rel_kind = rel_array.value(i);
-                let table = match last {
-                    Some((prev_kind, prev_table)) if prev_kind == rel_kind => prev_table,
-                    _ => {
-                        let t = self.table_names.edge_table_for(rel_kind);
-                        last = Some((rel_kind, t));
-                        t
-                    }
-                };
-                table_rows.entry(table).or_default().push(i as u32);
-            }
+                .ok_or_else(|| SinkError("edges batch missing relationship_kind column".into()))?
+                .clone();
+            let routing = EdgeRouting::resolve(&rel_col, &self.table_names)?;
 
             // Columns that only exist on gl_code_edge. Sub-batches going
             // to other edge tables (gl_edge) must have them stripped.
             let code_only_cols: &[&str] = &["project_id", "branch"];
 
-            if table_rows.len() == 1 {
-                let table = *table_rows.keys().next().unwrap();
-                if table == self.table_names.default_edge_table() {
-                    let batch = drop_columns(&data.edges, code_only_cols);
-                    result.push((table.to_string(), batch));
-                    return Ok(result);
-                }
+            // Every semantic edge kind usually routes to one table, and `take`
+            // would copy the whole batch while the original is still live.
+            if let Some(table) = routing.single_table() {
+                let batch = if table.contains("code_edge") {
+                    data.edges
+                } else {
+                    drop_columns(&data.edges, code_only_cols)
+                };
+                result.push((table.to_string(), batch));
+                return Ok(result);
+            }
+
+            let mut table_rows: HashMap<&str, Vec<u32>> = HashMap::new();
+            for (i, table) in routing.tables_by_row().enumerate() {
+                table_rows.entry(table).or_default().push(i as u32);
             }
 
             for (table, indices) in table_rows {
@@ -737,6 +735,94 @@ impl code_graph::v2::GraphConverter for IndexerConverter {
         }
 
         Ok(result)
+    }
+}
+
+/// Destination table per edge row. `relationship_kind` is `LowCardinality`, so
+/// mapping the dictionary once beats a Utf8 cast plus a hash lookup per row.
+enum EdgeRouting<'a> {
+    Dictionary {
+        keys: &'a [i32],
+        by_key: Vec<&'a str>,
+    },
+    /// The column was not dictionary-encoded after all.
+    PerRow(Vec<&'a str>),
+}
+
+impl<'a> EdgeRouting<'a> {
+    fn resolve(
+        rel_col: &'a arrow::array::ArrayRef,
+        table_names: &'a super::config::CodeTableNames,
+    ) -> Result<Self, SinkError> {
+        use arrow::array::{Array, AsArray};
+        use arrow::datatypes::Int32Type;
+
+        // Nulls cannot occur today, but the dictionary path reads the raw key
+        // buffer, where a null position would index `by_key` out of bounds.
+        if rel_col.null_count() > 0 {
+            return Err(SinkError(
+                "relationship_kind contains nulls, which edge routing cannot resolve".into(),
+            ));
+        }
+
+        if let Some(dict) = rel_col.as_dictionary_opt::<Int32Type>() {
+            let values = dict.values().as_string_opt::<i32>().ok_or_else(|| {
+                SinkError("relationship_kind dictionary values are not strings".into())
+            })?;
+            let by_key = (0..values.len())
+                .map(|i| table_names.edge_table_for(values.value(i)))
+                .collect();
+            return Ok(Self::Dictionary {
+                keys: dict.keys().values(),
+                by_key,
+            });
+        }
+
+        let plain = rel_col.as_string_opt::<i32>().ok_or_else(|| {
+            SinkError("relationship_kind is neither a dictionary nor a string column".into())
+        })?;
+        Ok(Self::PerRow(
+            (0..plain.len())
+                .map(|i| table_names.edge_table_for(plain.value(i)))
+                .collect(),
+        ))
+    }
+
+    /// `Some` when every row routes to the same table.
+    fn single_table(&self) -> Option<&'a str> {
+        let mut tables = match self {
+            Self::Dictionary { keys, by_key } => {
+                // A dictionary can carry values no row references, so the
+                // distinct set has to come from the keys actually present.
+                let mut seen: Vec<&str> = Vec::new();
+                for &k in *keys {
+                    let table = by_key[k as usize];
+                    if !seen.contains(&table) {
+                        seen.push(table);
+                    }
+                }
+                seen
+            }
+            Self::PerRow(tables) => {
+                let mut seen: Vec<&str> = Vec::new();
+                for &table in tables {
+                    if !seen.contains(&table) {
+                        seen.push(table);
+                    }
+                }
+                seen
+            }
+        };
+        (tables.len() == 1).then(|| tables.pop().expect("length checked"))
+    }
+
+    fn tables_by_row(&self) -> Box<dyn Iterator<Item = &'a str> + '_> {
+        match self {
+            Self::Dictionary { keys, by_key } => {
+                Box::new(keys.iter().map(move |&k| by_key[k as usize]))
+            }
+            Self::PerRow(tables) => Box::new(tables.iter().copied()),
+        }
     }
 }
 

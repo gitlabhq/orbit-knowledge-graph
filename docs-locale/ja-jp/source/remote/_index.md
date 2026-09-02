@@ -1,9 +1,9 @@
 ---
-stage: Analytics
-group: Knowledge Graph
+stage: Orbit
+group: Context Systems
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: GitLabがホストするインフラストラクチャ上で動作するOrbit
-title: Orbit Remote
+description: GitLabがホストするインフラストラクチャ上で動作するGitLab Orbit
+title: GitLab Orbit Remote
 ---
 
 {{< details >}}
@@ -26,20 +26,20 @@ title: Orbit Remote
 > 詳細については、履歴を参照してください。
 > この機能はテスト目的で利用可能ですが、本番環境での使用には対応していません。
 
-Orbit RemoteはGitLabがホストするインフラストラクチャ上で動作します。トップレベルグループで有効にすると、グループ、プロジェクト、ユーザー、マージリクエスト、パイプライン、脆弱性、ソースコードなど、SDLC全体とコードをClickHouseプロパティグラフに自動的にインデックス作成します。
+GitLab Orbit RemoteはGitLabがホストするインフラストラクチャ上で動作します。トップレベルグループで有効にすると、グループ、プロジェクト、ユーザー、マージリクエスト、パイプライン、脆弱性、ソースコードなど、SDLC全体とコードをClickHouseプロパティグラフに自動的にインデックス作成します。
 
 - インデックス作成対象: SDLC全体 + コードグラフ
 - ストレージ: ClickHouse（マネージド、セットアップ不要）
 
-[Orbit Remoteを使ってみる](getting-started.md)
+[GitLab Orbit Remoteを使ってみる](getting-started.md)
 
 ## このセクションの内容 {#in-this-section}
 
 | ページ | 説明 |
 |---|---|
-| [はじめに](getting-started.md) | Orbitを有効にして最初のクエリを実行する |
+| [はじめに](getting-started.md) | GitLab Orbitを有効にして最初のクエリを実行する |
 | [仕組み](how-it-works.md) | インデックス作成パイプライン、グラフモデル、クエリ実行 |
-| [Orbitのインデックス作成対象](indexing.md) | SDLCカバレッジ、言語サポート、インデックス作成スコープ |
+| [GitLab Orbitのインデックス作成対象](indexing.md) | SDLCカバレッジ、言語サポート、インデックス作成スコープ |
 | [セキュリティ](security.md) | クエリに必要なロール、認可モデル、プログラムによるアクセス |
 | [スキーマリファレンス](schema.md) | 6つのドメインにわたる28種類のノードタイプ |
 | [Cookbook](cookbook.md) | 一般的なユースケース向けのコピー&ペーストクエリ |

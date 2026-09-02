@@ -38,7 +38,7 @@ The pipeline begins with **Siphon**, the GitLab in-house Change Data Capture (CD
 
 #### Siphon's Architecture
 
-Siphon operates on a producer/consumer model, but for the purpose of the Knowledge Graph's ETL pipeline, we are primarily concerned with the **Siphon Producer**.
+Siphon operates on a producer/consumer model, but for the purpose of Orbit's ETL pipeline, we are primarily concerned with the **Siphon Producer**.
 
 ```mermaid
 flowchart LR
@@ -67,7 +67,7 @@ flowchart LR
 
 - **Replication Manager**: This is the primary component that connects to a PostgreSQL logical replication slot. It uses the `pgoutput` plugin to decode the Write-Ahead Log (WAL) into a stream of logical changes (inserts, updates, deletes). It's responsible for managing the replication slot and acknowledging the WAL position to the database, ensuring that processed data is not sent again.
 
-- **Snapshot Manager**: To bootstrap the data lake, Siphon must first perform an initial, full copy of the existing data. The Snapshot Manager handles this by running `COPY` commands against the tables to be replicated. To avoid impacting the primary database, this snapshot can be configured to run against a separate read-replica (`snapshot_database`). *This aspect is critical to Knowledge Graph to enable backfilling of the data lake in the event of schema migrations, data corruption, or other issues*.
+- **Snapshot Manager**: To bootstrap the data lake, Siphon must first perform an initial, full copy of the existing data. The Snapshot Manager handles this by running `COPY` commands against the tables to be replicated. To avoid impacting the primary database, this snapshot can be configured to run against a separate read-replica (`snapshot_database`). *This aspect is critical to Orbit to enable backfilling of the data lake in the event of schema migrations, data corruption, or other issues*.
 
 - **NATS Publisher**: Both the live replication events and the initial snapshot data are converted into a standardized protobuf format (`LogicalReplicationEvents`) and published to NATS JetStream.
 
@@ -83,7 +83,7 @@ flowchart LR
       subject: merge_requests
   ```
 
-By using Siphon, the Knowledge Graph's indexing pipeline is cleanly decoupled from the production PostgreSQL database. It receives a reliable, real-time stream of data changes without imposing a significant load on the source system.
+By using Siphon, Orbit's indexing pipeline is cleanly decoupled from the production PostgreSQL database. It receives a reliable, real-time stream of data changes without imposing a significant load on the source system.
 
 ### 2. Transform: Shaping Data in the Lake
 
@@ -120,22 +120,22 @@ The transformation from CDC data to the graph schema is handled by the ETL Index
 ##### Core components
 
 - `gkg-indexer`: The ETL pipeline for GitLab SDLC data.
-- `gkg-webserver`: The gRPC and HTTP interface to query the Knowledge Graph.
-- `NATS JetStream`: The message broker for the Knowledge Graph.
-- `NATS KV`: The key-value store for the Knowledge Graph.
-- `ClickHouse`: The OLAP database for GitLab and the Knowledge Graph.
+- `gkg-webserver`: The gRPC and HTTP interface to query Orbit.
+- `NATS JetStream`: The message broker for Orbit.
+- `NATS KV`: The key-value store for Orbit.
+- `ClickHouse`: The OLAP database for GitLab and Orbit.
 - `PostgreSQL`: The main OLTP database for GitLab.
 
 ##### Data storage
 
-The Knowledge Graph data is stored in a separate ClickHouse database.
+The Orbit graph data is stored in a separate ClickHouse database.
 
 - On `.com` this runs in a separate instance.
 - For small dedicated environments and self-hosted instances, this can run in the same instance as the main ClickHouse database. This choice depends on what the operators think is best for their environment.
 
-##### Namespace Knowledge Graph access detection
+##### Namespace Orbit access detection
 
-The first step is to detect which top-level namespaces have access to the Knowledge Graph. Following a similar approach to Zoekt's `zoekt_enabled_namespaces` table, the `knowledge_graph_enabled_namespaces` table in the main PostgreSQL database stores the namespaces that are enabled for the Knowledge Graph and various metadata about the namespaces. Siphon replicates this table into ClickHouse for the Knowledge Graph.
+The first step is to detect which top-level namespaces have access to Orbit. Following a similar approach to Zoekt's `zoekt_enabled_namespaces` table, the `knowledge_graph_enabled_namespaces` table in the main PostgreSQL database stores the namespaces that are enabled for Orbit and various metadata about the namespaces. Siphon replicates this table into ClickHouse for Orbit.
 
 ```sql
 -- PostgreSQL
@@ -162,7 +162,7 @@ CREATE TABLE knowledge_graph_enabled_namespaces (
 );
 ```
 
-If the table is not present, the indexer assumes that no namespaces have access to the Knowledge Graph.
+If the table is not present, the indexer assumes that no namespaces have access to Orbit.
 
 ```sql
 --- ClickHouse
@@ -178,7 +178,7 @@ A namespace whose path is not resolvable yet is skipped until the next sweep.
 
 **Indexing job creation**
 
-The `gkg-indexer` is responsible for getting the namespace data for the Knowledge Graph. A cron-based scheduler (`ScheduledTask`) periodically triggers the indexing process for namespaces that are due for indexing. If a namespace is due for indexing, the scheduler creates a job message and publishes it to the appropriate NATS JetStream subject.
+The `gkg-indexer` is responsible for getting the namespace data for Orbit. A cron-based scheduler (`ScheduledTask`) periodically triggers the indexing process for namespaces that are due for indexing. If a namespace is due for indexing, the scheduler creates a job message and publishes it to the appropriate NATS JetStream subject.
 
 It is important to differentiate between initial and incremental indexing when publishing the jobs. Workers have different priorities for each type of indexing. This prevents resource starvation by big initial indexing jobs and ensures that the indexing process remains efficient.
 
@@ -217,7 +217,7 @@ SET last_indexed_at = {started_at}, result = 'success | error', ...
 WHERE id = '{namespace_id}';
 ```
 
-**Planned:** A `knowledge_graph_indexing_job_events` table would record individual job lifecycle events (started, completed, error) in the Knowledge Graph ClickHouse database for observability. This is not yet implemented; job-level observability currently relies on structured logging and OpenTelemetry metrics. If implemented, the table may need periodic re-creation to remove bloat, triggered by a dedicated cron job.
+**Planned:** A `knowledge_graph_indexing_job_events` table would record individual job lifecycle events (started, completed, error) in the Orbit ClickHouse database for observability. This is not yet implemented; job-level observability currently relies on structured logging and OpenTelemetry metrics. If implemented, the table may need periodic re-creation to remove bloat, triggered by a dedicated cron job.
 
 **Handling errors**
 
@@ -258,7 +258,7 @@ Generated node projections come from their database-backed properties, while gen
   - a declaration with `extract.lookups` becomes a `_batch` CTE over its base table plus one internal `_eN` CTE per point lookup. Each lookup uses `argMax` against the source node's base datalake table, is keyed by `id IN (SELECT DISTINCT <batch ID column> FROM _batch)`, and emits stable output field aliases declared explicitly or expanded from `enrichment_props`. The internal `_eN` names are not part of the `RecordBatch` contract.
 - a `.sql.j2` MiniJinja template next to the YAML — the seven genuinely complex nodes (Group, Project, MergeRequest, Commit, MergeRequestDiffFile, PackageFile, Finding) whose extracts own multi-table joins, materialized arrays, or hex/SHA decoding that are not mechanically derivable, and the SystemNote derived entity. Derived-entity pipelines are always authored SQL: their rows are neither node properties nor edge endpoints, so there is nothing to generate a projection from.
 
-For the `.sql.j2` form the indexer renders `{{watermark_column}}` / `{{deleted_column}}` through MiniJinja at plan build (a generated `filter` may use them too), and fills `{{filters}}` / `{{batch_size}}` at runtime. All ontology SQL templates render through `ontology::sql_template` (strict-undefined MiniJinja). The first table in `extract.tables` is the partition-probe base table; for generated extracts it is the only entry.
+For the `.sql.j2` form the indexer renders `{{version_column}}` / `{{watermark_column}}` / `{{deleted_column}}` through MiniJinja at plan build (a generated `filter` may use the version and deleted markers), and fills `{{filters}}` / `{{batch_size}}` at runtime. The version column resolves row state and becomes graph `_version`; the watermark is only the change signal used by extraction windows. All ontology SQL templates render through `ontology::sql_template` (strict-undefined MiniJinja). The first table in `extract.tables` is the partition-probe base table; for generated extracts it is the only entry.
 
 The Arrow `RecordBatch` schema is the runtime contract between extraction and transformation.
 DataFusion registers each extracted batch with its own schema, so planning does not duplicate a
@@ -282,13 +282,15 @@ Each `EntityHandler` invocation runs its plan through a shared `Pipeline` struct
 4. Read each page out of the datalake in full, buffering its Arrow blocks in memory.
    ClickHouse encodes Arrow `String` columns with 32-bit offsets, so an output block whose text column (e.g. a dense page of `description`/`note` text) exceeds ~2 GiB fails the read with error code 1002. `max_block_size` bounds the rows per output block, so a small enough block keeps every column under the cap.
    The happy path pays nothing for this; on a 1002 overflow the extract retry (`Pipeline::extract_batch`) drops `max_block_size` straight to the floor block size and re-reads the page — idempotent from the page's start cursor (point 7) — so no single block can exceed the cap.
-5. Transform each extracted block with the plan's transform. `datafusion` performs row-wise SQL projections for node rows and edge mappings; a registered Rust transform such as `system_notes` can perform custom parsing or lookups. Output rows are grouped by destination table. While the current page's writes are in flight, the next page's read is overlapped via `tokio::join!`, so the next page's query-open latency hides behind the writes; peak memory is roughly two pages.
+5. Transform each extracted block with the plan's transform. `datafusion` performs row-wise SQL projections for node rows and edge mappings; a registered Rust transform such as `system_notes` can perform custom parsing or lookups. Output rows are grouped by destination table. The extracted page is moved into the transform, so each block is released as it is consumed and none of it survives the transform. While the current page's writes are in flight, the next page's read is overlapped via `tokio::join!`, so the next page's query-open latency hides behind the writes; residency during that overlap is the transformed page plus the next extracted page.
 6. Each destination table's transformed rows for a page are written as one bulk `INSERT` per page. The whole transformed page is resident at write time — the trade for throughput on high-latency backends like ClickHouse Cloud, where one large insert per page beats many smaller round-trips. Read-side wire blocks use the ClickHouse server default `max_block_size`; only the 1002 overflow retry (point 4) overrides it per attempt.
    Data-page write durability differs by mode (see **Write durability** below); both modes async-batch to coalesce the many small per-page inserts into fewer parts.
 7. Save the cursor to the checkpoint store after each page completes. If the indexer crashes mid-pagination, the next run picks up from the last written page rather than replaying the entire watermark window. Re-running a page is idempotent: the graph tables are `ReplacingMergeTree`, so any rows re-inserted after a mid-page failure are de-duplicated.
 8. When the final page comes back with fewer rows than the batch size, mark the plan completed: clear the cursor and advance the watermark.
 
-Paging counts *output* rows (points 3 and 8), so extracts must emit at least one output row per driver row: a join that drops driver rows silently truncates the window (#1064) — use `LEFT JOIN` and drop unmatched rows in the transform.
+Paging counts *output* rows (points 3 and 8), so extracts must emit at least one output row per driver row: a join that drops driver rows silently truncates the window (#1064): use `LEFT JOIN` and drop unmatched rows in the transform.
+
+On a backfill (no parent checkpoint) a plan that probes above `PARTITION_MIN_ROWS` runs one of these loops per key range concurrently, under the single worker-pool slot the handler holds. The page budget is divided across those ranges so the slot holds one plan's worth of pages rather than one per range, floored at the smallest page the config layer derives, because below that the extra round trips cost more than the smaller pages save.
 
 ```sql
 --- Example extraction query with keyset pagination
@@ -300,7 +302,7 @@ SELECT
     state,
     title,
     traversal_path,
-    _siphon_watermark AS _version,
+    _siphon_replicated_at AS _version,
     _siphon_deleted AS _deleted
 FROM sdlc.issues
 WHERE _siphon_watermark > {last_watermark:String}
@@ -318,13 +320,13 @@ A run touches three write targets, and each mode (`RunDurability::for_mode`) pic
 
 | Write target | Full load | Incremental |
 |---|---|---|
-| Data pages (graph tables) | configured `insert_settings` (no override) | durable — `async_insert=1, wait_for_async_insert=1` |
+| Data pages (graph tables) | durable: `async_insert=1, wait_for_async_insert=1` | durable: same |
 | Per-page progress checkpoint | fire-and-forget — `async_insert=1, wait_for_async_insert=0` | fire-and-forget |
 | Completion checkpoint | durable | fire-and-forget |
 
-The inversion follows what a lost write costs. A full load re-pulls any lost data page from its watermark window, so its data writes impose no durability and ride the deployment's configured settings, but its completion must persist or the watermark never advances. An incremental advances the watermark with no NATS retry, so each data page must persist before the watermark moves; a lost completion just re-derives next dispatch. Progress checkpoints are always best-effort — a lost one only re-reads from the prior page (`save_progress` hardcodes fire-and-forget; it is not part of `RunDurability`).
+Only the completion durability differs, and it follows what a lost write costs. A full load's completion must persist or the watermark never advances. An incremental advances the watermark with no NATS retry, so a lost completion just re-derives next dispatch. Data pages are durable in both modes, so a page's transformed rows stay resident until ClickHouse has flushed its async-insert buffer. Progress checkpoints are always best-effort — a lost one only re-reads from the prior page (`save_progress` hardcodes fire-and-forget; it is not part of `RunDurability`).
 
-`FireAndForget` and `Durable` both pin `async_insert=1` to coalesce parts and differ only on `wait_for_async_insert`; "no override" is distinct — it imposes nothing and inherits the configured `insert_settings`. Full-load data writes take that no-override path (`RunDurability::data_writes` is `None`).
+`FireAndForget` and `Durable` both pin `async_insert=1` to coalesce parts and differ only on `wait_for_async_insert`. A third state exists in the type (`data_writes` is an `Option`, and `None` imposes nothing and inherits the configured `insert_settings`), but neither mode currently selects it.
 
 **Checkpoint store**
 
@@ -360,17 +362,17 @@ This runs directly in the dispatcher rather than dispatching to indexer workers 
 
 **Main PostgreSQL to Lake**
 
-The Knowledge Graph `gkg-indexer` accounts for schema changes in the main ClickHouse database used as a data lake. The main ClickHouse database tables may change over time; new columns may be added, columns may be renamed or dropped, etc. If the `gkg-indexer` is not aware of the schema changes, it could lead to service interruptions in production due to queries failing.
+The Orbit `gkg-indexer` accounts for schema changes in the main ClickHouse database used as a data lake. The main ClickHouse database tables may change over time; new columns may be added, columns may be renamed or dropped, etc. If the `gkg-indexer` is not aware of the schema changes, it could lead to service interruptions in production due to queries failing.
 
-The schema is explicitly defined in the ontology YAML (`config/ontology/nodes/` and `config/ontology/edges/`), specifying which tables and columns are needed for the Knowledge Graph. For some columns, additional metadata is exposed where needed, such as Integer-to-Enum mappings (for example: issue status).
+The schema is explicitly defined in the ontology YAML (`config/ontology/nodes/` and `config/ontology/edges/`), specifying which tables and columns are needed for Orbit. For some columns, additional metadata is exposed where needed, such as Integer-to-Enum mappings (for example: issue status).
 
 A CI job (`ddl-freshness-check`) detects schema drift by comparing the committed `config/graph.sql` (versioned graph), `config/graph_persistent.sql` (durable unversioned objects), and `config/graph_local.sql` (DuckDB) against the DDL regenerated from the ontology. This ensures that the schema is always in sync with the ontology definition.
 
-The indexer uses the ontology to create the Knowledge Graph ClickHouse tables and build the indexing queries.
+The indexer uses the ontology to create the Orbit ClickHouse tables and build the indexing queries.
 
 **Lake to Graph**
 
-The Knowledge Graph schema is declared in `config/graph.sql` (generated from the ontology) and versioned via `config/SCHEMA_VERSION`. All graph tables are prefixed with `v<N>_` (e.g. `v58_gl_issue`) so that multiple schema versions can coexist during migration. Migrations are applied to the Knowledge Graph database by the dispatcher at boot via `schema::migration::run_if_needed()`.
+The Orbit schema is declared in `config/graph.sql` (generated from the ontology) and versioned via `config/SCHEMA_VERSION`. All graph tables are prefixed with `v<N>_` (e.g. `v58_gl_issue`) so that multiple schema versions can coexist during migration. Migrations are applied to the Orbit graph database by the dispatcher at boot via `schema::migration::run_if_needed()`.
 
 The schema is backward compatible with the previous version until the schema migration is complete for every namespace. A migration is considered complete when `MigrationCompletionChecker` detects that all enabled namespaces have been re-indexed into new-prefix tables, then promotes the new version to `active` and retires the old one.
 
@@ -378,7 +380,7 @@ There are multiple types of schema changes the system accounts for:
 
 **New node/relationship type**
 
-To add a new entity type to the Knowledge Graph, the new type is defined in the ontology YAML, and the DDL is regenerated. The migration orchestrator creates the new table at dispatcher boot. The table is filled on the next indexing job for each namespace.
+To add a new entity type to Orbit, the new type is defined in the ontology YAML, and the DDL is regenerated. The migration orchestrator creates the new table at dispatcher boot. The table is filled on the next indexing job for each namespace.
 
 ```sql
 CREATE TABLE database_b.<table_name> (
@@ -450,4 +452,4 @@ In contrast, the Rust-based pipeline provides the necessary extensibility and co
 
 - **Monitoring**: The indexer tracks metrics such as processing lag, batch sizes, error rates, and data freshness to ensure the graph database remains current and healthy.
 
-Both strategies leverage ClickHouse's powerful query engine while maintaining the simplicity and debuggability of declarative data transformations. The resulting graph-structured data in ClickHouse serves as the optimized, queryable source for the Knowledge Graph's analysis and insight capabilities.
+Both strategies leverage ClickHouse's powerful query engine while maintaining the simplicity and debuggability of declarative data transformations. The resulting graph-structured data in ClickHouse serves as the optimized, queryable source for Orbit's analysis and insight capabilities.

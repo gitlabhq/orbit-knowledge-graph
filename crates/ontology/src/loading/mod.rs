@@ -25,6 +25,7 @@ struct EmbeddedOntology;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct EtlSettings {
+    pub version: String,
     pub watermark: String,
     pub deleted: String,
     pub order_by: Vec<String>,
@@ -88,9 +89,9 @@ pub(crate) fn parse_yaml<T: for<'de> Deserialize<'de>>(
     content: &str,
     path: &str,
 ) -> Result<T, OntologyError> {
-    serde_yaml::from_str(content).map_err(|e| OntologyError::Yaml {
+    orbit_utils::yaml::from_str(content).map_err(|e| OntologyError::Yaml {
         path: path.to_string(),
-        source: e,
+        source: Box::new(e),
     })
 }
 
@@ -163,6 +164,7 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
         .collect();
 
     let etl_settings = EtlSettings {
+        version: schema.settings.etl.default_version,
         watermark: schema.settings.etl.default_watermark,
         deleted: schema.settings.etl.default_deleted,
         order_by: schema.settings.etl.default_etl_order_by,
@@ -318,6 +320,12 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
             ontology
                 .edge_descriptions
                 .insert(edge_name.clone(), desc.clone());
+        }
+
+        if let Some(weight) = edge_def.search_weight {
+            ontology
+                .edge_search_weights
+                .insert(edge_name.clone(), weight);
         }
 
         let (pipelines, reindex_sources) =
@@ -1336,6 +1344,7 @@ mod tests {
                     tables: vec!["siphon_notes".to_string()],
                     fields: vec![],
                     order_by: vec![],
+                    version: "v".to_string(),
                     watermark: "w".to_string(),
                     deleted: "d".to_string(),
                     query: crate::etl::ExtractQuery::Generated { filter: None },
@@ -1423,6 +1432,7 @@ mod tests {
                 tables: vec!["siphon_x".to_string()],
                 fields: vec![],
                 order_by: vec![],
+                version: "v".to_string(),
                 watermark: "w".to_string(),
                 deleted: "d".to_string(),
                 query: crate::etl::ExtractQuery::Generated { filter: None },

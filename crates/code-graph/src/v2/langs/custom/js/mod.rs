@@ -18,7 +18,7 @@ pub(super) use modules::{
 };
 pub(super) use types::{
     CjsExport, ExportedBinding, ImportedName, JsCallEdge, JsCallTarget, JsDef, JsDefKind,
-    JsFileAnalysis, JsImport, JsImportKind, JsInvocationKind, JsModuleInfo, JsPendingLocalCall,
-    JsResolutionMode, JsResolvedCallRelationship,
+    JsDefSupport, JsFileAnalysis, JsImport, JsImportKind, JsInvocationKind, JsModuleInfo,
+    JsPendingLocalCall, JsResolutionMode, JsResolvedCallRelationship,
 };
 pub(super) use workspace::WorkspaceProbe;

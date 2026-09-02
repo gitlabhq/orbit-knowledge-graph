@@ -12,7 +12,7 @@ use tracing::debug;
 
 use crate::error::GitlabClientError;
 use crate::types::{MergeRequestDiffBatch, ProjectInfo};
-use gkg_server_config::GitlabClientConfiguration;
+use orbit_server_config::GitlabClientConfiguration;
 
 pub type ByteStream = Pin<Box<dyn Stream<Item = Result<bytes::Bytes, GitlabClientError>> + Send>>;
 
@@ -140,8 +140,11 @@ impl GitlabClient {
             "{}/api/v4/internal/orbit/project/{}/repository/archive",
             self.base_url, project_id
         );
-        let url = reqwest::Url::parse_with_params(&base, &[("ref", ref_name)])
-            .map_err(|e| GitlabClientError::Unexpected(format!("invalid URL: {e}")))?;
+        let url = reqwest::Url::parse_with_params(
+            &base,
+            &[("ref", ref_name), ("include_lfs_blobs", "false")],
+        )
+        .map_err(|e| GitlabClientError::Unexpected(format!("invalid URL: {e}")))?;
 
         debug!(project_id, ref_name, url = %url, "downloading archive from GitLab");
 
@@ -459,5 +462,35 @@ mod tests {
         );
         let err = GitlabClient::build_http_client(&config).unwrap_err();
         assert!(err.to_string().contains("failed to resolve"));
+    }
+
+    #[tokio::test]
+    async fn download_archive_asks_for_the_ref_without_lfs_object_contents() {
+        use axum::Router;
+        use axum::extract::RawQuery;
+        use axum::routing::get;
+        use std::sync::{Arc, Mutex};
+
+        let seen = Arc::new(Mutex::new(String::new()));
+        let recorder = Arc::clone(&seen);
+        let app = Router::new().route(
+            "/api/v4/internal/orbit/project/{id}/repository/archive",
+            get(move |RawQuery(query): RawQuery| {
+                let recorder = Arc::clone(&recorder);
+                async move {
+                    *recorder.lock().unwrap() = query.unwrap_or_default();
+                    Vec::<u8>::new()
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+        let client =
+            GitlabClient::new(config_with_resolve(&format!("http://{addr}"), None)).unwrap();
+        let _stream = client.download_archive(7, "abc123").await.unwrap();
+
+        assert_eq!(*seen.lock().unwrap(), "ref=abc123&include_lfs_blobs=false");
     }
 }

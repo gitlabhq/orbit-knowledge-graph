@@ -1,6 +1,6 @@
 # AGENTS.md
 
-GitLab Knowledge Graph (Orbit). Rust service that builds a property graph from GitLab data and serves queries over gRPC/HTTP. 
+GitLab Orbit, previously known as GitLab Knowledge Graph or "gkg". Rust service that builds a property graph from GitLab data and serves queries over gRPC/HTTP. 
 
 ## Quick start
 
@@ -24,15 +24,15 @@ CLI integration tests (concurrency, worktrees): `mise test:cli`.
   Nodes, edges, and derived entities declare `pipelines:` with `extract` and `transform` sections.
   Setting `query: generated` lets the indexer build the extract SQL from the declaration's single base table. Node projections come from database-backed properties; standalone edges declare their base projection under `extract.fields`. Optional `extract.lookups` add point-lookup CTEs whose tables resolve from their node pipelines and are not repeated in `extract.tables`.
   Nodes may declare `enrichment_props`; a slim lookup with only `node` and `id` expands its source fields from that contract, while a transform endpoint with `enrich: true` independently expands its property bindings from the same contract. Extract and transform compile from their own declarations and meet through `RecordBatch` field names. Same-node references derive distinct field namespaces from their ID fields. Explicit lookup `fields` and endpoint `properties` remain escape hatches.
-  An optional `extract.filter` adds a `_batch` predicate (e.g. `state = 5`) and may use `{{watermark_column}}`/`{{deleted_column}}`.
+  An optional `extract.filter` adds a `_batch` predicate (e.g. `state = 5`) and may use `{{version_column}}`/`{{deleted_column}}`.
   Seven genuinely complex nodes (Group, Project, MergeRequest, Commit, MergeRequestDiffFile, PackageFile, Finding) plus the SystemNote derived entity keep a `.sql.j2` MiniJinja template next to the YAML (all ontology SQL templates render through `ontology::sql_template`); derived pipelines are always authored SQL, since their rows are neither node properties nor edge endpoints to generate a projection from.
   New entity types start in the ontology, not in Rust.
   Edge YAML `table:` field + `settings.edge_tables` in `schema.yaml` control which physical table each relationship type writes to and queries from (default: `gl_edge`).
   Unversioned objects (durable tables and materialized views created once at boot, never version-prefixed or GCed) are emitted through one `generate_unversioned_objects` path in `crates/query-engine/compiler/src/passes/codegen/ddl/`; add a new unversioned kind there rather than introducing a parallel per-kind generator.
   Schema: `config/schemas/ontology.schema.json`.
-- **Agent-facing prompts are YAML.** Tool and command descriptions live as versioned YAML under `config/prompts/` (`remote/` = server, `local/` = CLI), embedded via rust-embed and build-time validated by `gkg-prompts`.
+- **Agent-facing prompts are YAML.** Tool and command descriptions live as versioned YAML under `config/prompts/` (`remote/` = server, `local/` = CLI), embedded via rust-embed and build-time validated by `orbit-prompts`.
 - **Single binary, four modes.** `gkg-server --mode` runs as Webserver, Indexer, DispatchIndexing, or HealthCheck.
-- **Layered configuration.** `AppConfig` in `crates/gkg-server-config/` loads three sources (lowest to highest priority): `config/default.yaml`, K8s secret files from `/etc/secrets/`, and `GKG_*` environment variables (`__` separates nested keys, e.g. `GKG_GRAPH__DATABASE`). The CLI (`orbit`) has its own clap-based config and does not use `AppConfig`. See `docs/dev/runbooks/server_configuration.md` for full reference.
+- **Layered configuration.** `AppConfig` in `crates/orbit-server-config/` loads three sources (lowest to highest priority): `config/default.yaml`, K8s secret files from `/etc/secrets/`, and `GKG_*` environment variables (`__` separates nested keys, e.g. `GKG_GRAPH__DATABASE`). The CLI (`orbit`) has its own clap-based config and does not use `AppConfig`. See `docs/dev/runbooks/server_configuration.md` for full reference.
 - **Siphon and NATS are external.** [Siphon](https://gitlab.com/gitlab-org/analytics-section/siphon) (Go, Analytics team) and NATS are consumed, not owned. Use `/related-repositories` for local checkouts.
 
 ## What CI enforces
@@ -40,8 +40,9 @@ CLI integration tests (concurrency, worktrees): `mise test:cli`.
 - `AGENTS.md` and `CLAUDE.md` must be identical (`agent-file-sync-check`)
 - Clippy with all features, warnings as errors (`lint-check`)
 - Ontology YAML validated against JSON schema (`ontology-schema-validate`)
-- Named query YAML validated against JSON schema (`named-query-schema-validate`); each query is also compiled against the ontology by `gkg-server`'s build script, so drift fails every build
-- Migration ledger validated and scope-checked (`migration-ledger-schema-validate`, `migration-ledger-check`, plus `gkg-server` build-time drift checks); full ledger rules in `docs/design-documents/schema_management.md`
+- Named query YAML validated against JSON schema (`named-query-schema-validate`); each query is also compiled against the ontology by `orbit-server`'s build script, so drift fails every build
+- Assistant setup specs and mode texts in `config/setup/` validated against JSON schema (`setup-schema-validate`)
+- Migration ledger validated and scope-checked (`migration-ledger-schema-validate`, `migration-ledger-check`, plus `orbit-server` build-time drift checks); full ledger rules in `docs/design-documents/schema_management.md`
 - `cargo fmt` (`fmt-check`)
 - `cargo shear` detects unused workspace and crate dependencies (`unused-deps-check`)
 - `cargo audit`, `cargo deny`, `cargo geiger` (security stage)
@@ -56,7 +57,7 @@ CLI integration tests (concurrency, worktrees): `mise test:cli`.
 - GOON format version bumped when GOON encoder or shared formatter code changes (`goon-format-version-check`)
 - Skill version bumped when files under `skills/<name>/` change (`skill-version-bump-check`)
 - Prompt version bumped when files under `config/prompts/` change (`prompt-version-bump-check`)
-- Metrics catalog regenerated in sync with `gkg-observability` source (`metrics-catalog-check`)
+- Metrics catalog regenerated in sync with `orbit-observability` source (`metrics-catalog-check`)
 - Query-language text-indexed properties table regenerated in sync with the ontology (`query-language-docs-check`)
 - Vendored Iglu schemas match pinned versions and live Iglu server (`iglu-schema-check`)
 - Vendored system-note action list matches upstream Rails `ICON_TYPES` at the pinned SHA (`system-note-actions-check`)
@@ -82,13 +83,13 @@ Single binary: `gkg-server` (4 modes: Webserver, Indexer, DispatchIndexing, Heal
   - If a comment would survive deleting it without losing *why* information, delete it. The `/remove-llm-comments` skill drives that final pass; it is a backstop for what slipped through, not a license to narrate first.
 - **Reuse existing infrastructure before writing new code.** Before scaffolding a new handler, pipeline, or module, do an explicit "what does the codebase already give me?" pass (cursor/checkpoint, Arrow helpers, ontology-derived specs, SQL filtering, concurrency). Reinventing infra the codebase already provides is the most common class of preventable review feedback. For the indexer, see the checklist in **`crates/indexer/AGENTS.md`**. For code-graph, prefer reusing existing types and constructors in the language module (e.g. `CanonicalDefinition` in `src/v2/types/`, the DSL engine helpers in `src/v2/dsl/`) rather than duplicating construction logic per language.
 - **No `#[allow(dead_code)]` in shipped code.** Production (non-test) modules must not ship dead-code allows to silence scaffold warnings. If a symbol is test-only, gate it with `#[cfg(test)]`; if it is genuinely unused, delete it. Reserve exceptions for an explicit, justified case: use `#[allow(dead_code, reason = "…")]` (ideally linking an issue) or, preferably, `#[expect(dead_code, reason = "…")]`, which fails once the code is used and self-cleans. The `indexer` and `code-graph` crates enforce this mechanically via `clippy::allow_attributes_without_reason = "deny"`.
-- **Prefer build-time validation over CI-only checks** for correctness that can be checked without network or repo context. A `build.rs` that `panic!`s on drift fails locally and in CI even when CI egress is down, and can't be skipped by editing a script. Prior art: `crates/gkg-analytics/build.rs` validates committed Iglu schemas under `config/schemas/iglu/` at build time (asserts each schema's `self` block matches its path/version and runs codegen). Consider this pattern for any vendored-constant or generated-file drift check (e.g. the DDL-freshness check in `scripts/check-ddl-freshness.sh` is a future candidate). Checks that need Git diff context or live network (`scripts/iglu/check.sh`'s upstream-CDN half) stay in CI.
+- **Prefer build-time validation over CI-only checks** for correctness that can be checked without network or repo context. A `build.rs` that `panic!`s on drift fails locally and in CI even when CI egress is down, and can't be skipped by editing a script. Prior art: `crates/orbit-analytics/build.rs` validates committed Iglu schemas under `config/schemas/iglu/` at build time (asserts each schema's `self` block matches its path/version and runs codegen). Consider this pattern for any vendored-constant or generated-file drift check (e.g. the DDL-freshness check in `scripts/check-ddl-freshness.sh` is a future candidate). Checks that need Git diff context or live network (`scripts/iglu/check.sh`'s upstream-CDN half) stay in CI.
 - Prefer `ast-grep` over text-based Grep/Edit for structural code transformations (batch renames, pattern-based rewrites).
 - Fence executable Orbit query JSON in docs and skills as `json orbit-query`; keep shell commands in separate shell fences so docs smoke tests run the query.
 - Check crates.io for latest version before adding dependencies.
 - Non-trivial MRs (features, refactors, architectural changes) should reference an issue in the MR description, for example `Closes #123` or `Relates to #123`.
 - Trivial MRs (typos, minor dependency bumps, formatting-only changes) do not need an issue.
-- Before touching billing-emission code, anything in `crates/gkg-billing/`, `crates/gkg-server/src/billing_adapter.rs`, or wiring billing-relevant data (any field that populates `BillingInputs` in `crates/gkg-billing/src/inputs.rs`), read `docs/dev/sox-billing-boundary.md`. If a task you are given would require breaking any of those rules, stop and surface the conflict rather than working around it.
+- Before touching billing-emission code, anything in `crates/orbit-billing/`, `crates/orbit-server/src/billing_adapter.rs`, or wiring billing-relevant data (any field that populates `BillingInputs` in `crates/orbit-billing/src/inputs.rs`), read `docs/dev/sox-billing-boundary.md`. If a task you are given would require breaking any of those rules, stop and surface the conflict rather than working around it.
 - **Do not hardcode magic numbers or string literals that are environment-dependent or derivable.** Prefer deriving values from the ontology, a typed config field (`HandlersConfiguration`, `QuerySettings`), or a named constant. If a reviewer has to ask "what is this number?" or "should this be configurable?", the value needed a name or a config path. This applies across all crates, not just the indexer.
 - **A graph-shape fact belongs in the ontology, declared once — not mirrored in Rust.** Before adding a Rust flag, config field, ETL tag, or constant that encodes a node/edge property (global-ness, scope, table routing), check whether the ontology YAML already declares it or should. The ontology is the single source of truth; ETL, query validation, and redaction all read from it. If the same fact lands in two places, delete one.
 - **Keep introspected ontology descriptions short.** Node, edge, property, and domain descriptions can be surfaced through schema/introspection paths, so they must be scannable and token-efficient. State what the ontology item represents in one sentence; move rationale, caveats, and examples to YAML comments or design docs. CI enforces a 200-character cap for ontology descriptions below the top-level main schema (domains, nodes, edges, variants, derived entities, properties). The top-level `schema.yaml` `description` is human-facing and not capped because `get_graph_schema` does not introspect it.

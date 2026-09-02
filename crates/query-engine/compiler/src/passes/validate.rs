@@ -15,6 +15,7 @@ use crate::input::{
 };
 use crate::types::SecurityContext;
 use ontology::{DataType, Ontology, TRAVERSAL_PATH_COLUMN};
+use orbit_utils::traversal_path::TraversalPath;
 
 use super::errors::format_schema_error;
 
@@ -568,10 +569,12 @@ impl<'a> Validator<'a> {
     }
 
     fn check_traversal_path_value(label: &str, path: &str) -> Result<()> {
-        SecurityContext::validate_traversal_path(path).map_err(|err| match err {
-            QueryError::Security(msg) => QueryError::Validation(format!("{label}: {msg}")),
-            other => other,
-        })
+        SecurityContext::validate_traversal_path(&TraversalPath::new_unchecked(path)).map_err(
+            |err| match err {
+                QueryError::Security(msg) => QueryError::Validation(format!("{label}: {msg}")),
+                other => other,
+            },
+        )
     }
 
     fn check_one_filter(
@@ -605,6 +608,20 @@ impl<'a> Validator<'a> {
             return Err(QueryError::Validation(format!(
                 "filter on \"{prop}\" for {entity}: \
                  LIKE operators (contains/starts_with/ends_with) are not allowed on this field"
+            )));
+        }
+
+        // ClickHouse rejects positionCaseInsensitive/startsWith on non-string
+        // columns at execution, which would surface as an opaque 500.
+        if is_like_op
+            && !matches!(
+                data_type,
+                DataType::String | DataType::Enum | DataType::Uuid
+            )
+        {
+            return Err(QueryError::Validation(format!(
+                "filter on \"{prop}\" for {entity}: \
+                 LIKE operators (contains/starts_with/ends_with) require a text field, got {data_type}"
             )));
         }
 
@@ -2459,6 +2476,47 @@ mod tests {
             err.to_string().contains("LIKE operators"),
             "expected like_allowed rejection, got: {err}"
         );
+    }
+
+    #[test]
+    fn rejects_like_on_non_text_field() {
+        let ont = Ontology::new()
+            .with_nodes(["User"])
+            .with_edges(["AUTHORED"])
+            .with_fields(
+                "User",
+                [
+                    ("created_at", DataType::DateTime),
+                    ("state", DataType::Enum),
+                ],
+            );
+        let validator = Validator::new(&ont);
+        let input = parse_input(
+            r#"{
+            "query_type": "traversal",
+            "nodes": [{"id": "u", "entity": "User",
+                     "filters": {"created_at": {"contains": "2024"}}}],
+            "limit": 10
+        }"#,
+        )
+        .unwrap();
+
+        let err = validator.check_references(&input).unwrap_err();
+        assert!(
+            err.to_string().contains("require a text field"),
+            "expected non-text rejection, got: {err}"
+        );
+
+        let input = parse_input(
+            r#"{
+            "query_type": "traversal",
+            "nodes": [{"id": "u", "entity": "User",
+                     "filters": {"state": {"contains": "act"}}}],
+            "limit": 10
+        }"#,
+        )
+        .unwrap();
+        assert!(validator.check_references(&input).is_ok());
     }
 
     #[test]
