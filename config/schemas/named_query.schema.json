@@ -53,7 +53,7 @@
     "query": {
       "type": "object",
       "required": ["query_type"],
-      "description": "Graph query DSL object. {$binding: <name>} placeholders are replaced whole-value at render time."
+      "description": "Graph query DSL object. {$binding: <name>} and {$param: <name>} placeholders are replaced whole-value at render time; a \"$param:<name>\" object key is replaced by the parameter's string value."
     }
   }
 }

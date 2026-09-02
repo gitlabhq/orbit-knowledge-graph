@@ -263,11 +263,12 @@ impl NamedQuery {
                     for (key, mut nested) in std::mem::take(map) {
                         self.substitute(&mut nested, ctx)?;
                         let key = self.resolve_key(&key, ctx)?;
-                        if rekeyed.insert(key.clone(), nested).is_some() {
+                        if rekeyed.contains_key(&key) {
                             return Err(self.invalid(format!(
                                 "parameter key `{key}` collides with another key in the same object"
                             )));
                         }
+                        rekeyed.insert(key, nested);
                     }
                     *map = rekeyed;
                 }
@@ -295,6 +296,9 @@ impl NamedQuery {
             return Err(self.invalid(format!("missing value for parameter `{name}`")));
         };
         match resolved {
+            Value::String(s) if s.is_empty() || s.starts_with('$') => Err(self.invalid(format!(
+                "parameter `{name}` is used as an object key so it must not be empty or start with `$`"
+            ))),
             Value::String(s) => Ok(s),
             other => Err(self.invalid(format!(
                 "parameter `{name}` is used as an object key so it must be a string, got {other}"
@@ -504,6 +508,25 @@ query:
         let colliding = VALID_WITH_KEY_PARAM.replace("  filters:\n", "  filters:\n    name: 1\n");
         let err = parse(&colliding).unwrap_err();
         assert!(err.to_string().contains("collides"), "{err}");
+    }
+
+    #[test]
+    fn key_parameter_rejects_placeholder_shaped_values_at_render() {
+        let unconstrained = VALID_WITH_KEY_PARAM.replace(", pattern: \"^[a-z_]+$\"", "");
+        let query = parse(&unconstrained).unwrap();
+        for field in ["$param", "$binding", "$param:text", ""] {
+            let err = query
+                .render(
+                    &values(),
+                    &params(json!({"field": field, "text": "gitlab"})),
+                )
+                .unwrap_err();
+            assert!(
+                err.to_string()
+                    .contains("must not be empty or start with `$`"),
+                "{field:?}: {err}"
+            );
+        }
     }
 
     #[test]

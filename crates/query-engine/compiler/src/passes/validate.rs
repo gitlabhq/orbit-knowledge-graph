@@ -611,6 +611,20 @@ impl<'a> Validator<'a> {
             )));
         }
 
+        // ClickHouse rejects positionCaseInsensitive/startsWith on non-string
+        // columns at execution, which would surface as an opaque 500.
+        if is_like_op
+            && !matches!(
+                data_type,
+                DataType::String | DataType::Enum | DataType::Uuid
+            )
+        {
+            return Err(QueryError::Validation(format!(
+                "filter on \"{prop}\" for {entity}: \
+                 LIKE operators (contains/starts_with/ends_with) require a text field, got {data_type}"
+            )));
+        }
+
         if is_token_op && self.ontology.text_index_tokenizer(entity, prop).is_none() {
             return Err(QueryError::Validation(format!(
                 "filter on \"{prop}\" for {entity}: \
@@ -2462,6 +2476,47 @@ mod tests {
             err.to_string().contains("LIKE operators"),
             "expected like_allowed rejection, got: {err}"
         );
+    }
+
+    #[test]
+    fn rejects_like_on_non_text_field() {
+        let ont = Ontology::new()
+            .with_nodes(["User"])
+            .with_edges(["AUTHORED"])
+            .with_fields(
+                "User",
+                [
+                    ("created_at", DataType::DateTime),
+                    ("state", DataType::Enum),
+                ],
+            );
+        let validator = Validator::new(&ont);
+        let input = parse_input(
+            r#"{
+            "query_type": "traversal",
+            "nodes": [{"id": "u", "entity": "User",
+                     "filters": {"created_at": {"contains": "2024"}}}],
+            "limit": 10
+        }"#,
+        )
+        .unwrap();
+
+        let err = validator.check_references(&input).unwrap_err();
+        assert!(
+            err.to_string().contains("require a text field"),
+            "expected non-text rejection, got: {err}"
+        );
+
+        let input = parse_input(
+            r#"{
+            "query_type": "traversal",
+            "nodes": [{"id": "u", "entity": "User",
+                     "filters": {"state": {"contains": "act"}}}],
+            "limit": 10
+        }"#,
+        )
+        .unwrap();
+        assert!(validator.check_references(&input).is_ok());
     }
 
     #[test]

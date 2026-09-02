@@ -13,7 +13,8 @@
 //! - `{ "$param": "<name>" }` — selection values supplied by the client
 //!   (e.g. the entity and ids of a clicked node) and validated against the
 //!   JSON Schema each template declares for the parameter.
-//!
+//! - `"$param:<name>": ...` — an object key filled from a string parameter,
+//!   so a template can take the property name to filter on.
 
 mod query;
 
