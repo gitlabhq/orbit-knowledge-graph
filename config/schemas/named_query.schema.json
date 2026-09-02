@@ -48,7 +48,7 @@
           }
         }
       },
-      "description": "Client-supplied values substituted at render time via {$param: <name>}, validated against each parameter's JSON Schema."
+      "description": "Client-supplied values substituted at render time via {$param: <name>} (whole value) or a \"$param:<name>\" object key (string parameters only), validated against each parameter's JSON Schema."
     },
     "query": {
       "type": "object",
