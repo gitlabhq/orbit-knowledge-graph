@@ -81,24 +81,27 @@ pub struct RustPipeline;
 
 static TY_INTERNER_GC: RwLock<()> = RwLock::new(());
 static RUST_JOBS_SINCE_TY_GC: AtomicUsize = AtomicUsize::new(0);
-const FORCE_TY_GC_AFTER_JOBS: usize = 64;
+// Measured on a 16-lane Rust-only soak, where the barrier is the only thing that
+// sweeps: 64 costs 2.9% throughput, 256 costs 0.9%, and 256 jobs of garbage is
+// ~128 MiB against a 24 GiB pod. At production's 4 lanes it never fires at all.
+const FORCE_TY_GC_AFTER_JOBS: usize = 256;
 const FORCE_TY_GC_MAX_WAIT: Duration = Duration::from_secs(60);
 
 fn hold_ty_interner() -> RwLockReadGuard<'static, ()> {
-    if RUST_JOBS_SINCE_TY_GC.load(Ordering::Relaxed) >= FORCE_TY_GC_AFTER_JOBS {
+    // The swap claims the sweep for exactly one job: a second job crossing the
+    // threshold at the same time reads 0 back and starts its work instead of
+    // queueing as another writer, which is what makes the barrier cost one lane
+    // drain rather than one per job that noticed.
+    if RUST_JOBS_SINCE_TY_GC.load(Ordering::Relaxed) >= FORCE_TY_GC_AFTER_JOBS
+        && RUST_JOBS_SINCE_TY_GC.swap(0, Ordering::Relaxed) >= FORCE_TY_GC_AFTER_JOBS
+    {
         let waited = Instant::now();
         let exclusive = TY_INTERNER_GC.try_write_for(FORCE_TY_GC_MAX_WAIT);
         let waited_ms = waited.elapsed().as_millis() as u64;
-        let swept = match exclusive {
-            Some(exclusive)
-                if RUST_JOBS_SINCE_TY_GC.load(Ordering::Relaxed) >= FORCE_TY_GC_AFTER_JOBS =>
-            {
-                collect_ty_garbage(exclusive);
-                true
-            }
-            _ => false,
-        };
-        RUST_JOBS_SINCE_TY_GC.store(0, Ordering::Relaxed);
+        let swept = exclusive.is_some_and(|exclusive| {
+            collect_ty_garbage(exclusive);
+            true
+        });
         tracing::info!(waited_ms, swept, "rust-analyzer type interner sweep forced");
     }
     TY_INTERNER_GC.read()
