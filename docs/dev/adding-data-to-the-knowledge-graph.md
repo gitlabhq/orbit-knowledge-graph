@@ -236,6 +236,12 @@ etl:
 If either FK column is `Nullable` in the source, the ETL can emit null-target edges —
 filter or document it (reviewers will ask). Prefer NOT-NULL join columns.
 
+Hot query shapes can be pre-joined by declaring a chain under `settings.denormalized_joins`
+in `schema.yaml` (see `docs/design-documents/querying/graph_engine.md`, Denormalized joins).
+This emits a `gl_denorm_<name>` table composed from the chain's own DDL plus one feeding
+materialized view per table. The table stores every column of every table in the chain and
+each declaration is a schema bump, so weigh write amplification before adding one.
+
 ### 5.3 Register in `config/ontology/schema.yaml` (the step that's easy to miss)
 
 Node/edge files are **NOT auto-discovered** — they're loaded from a registry in

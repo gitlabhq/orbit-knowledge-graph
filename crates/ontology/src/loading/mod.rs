@@ -13,7 +13,7 @@ use crate::{Ontology, OntologyError};
 use derived::DerivedYaml;
 pub(crate) use edge::EdgeYaml;
 pub(crate) use node::NodeYaml;
-use schema::{MaterializedViewYaml, SchemaYaml};
+use schema::{HopVia, MaterializedViewYaml, SchemaYaml};
 
 pub(crate) const ONTOLOGY_SCHEMA_FILE: &str = "schema.yaml";
 
@@ -753,6 +753,36 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
 
     ontology.gc_preserve_patterns = schema.settings.gc_preserve_patterns;
 
+    for join in &schema.settings.denormalized_joins {
+        let hops: Vec<DeclaredHop<'_>> = join
+            .hops
+            .iter()
+            .map(|h| DeclaredHop {
+                relationship: &h.relationship,
+                from: &h.from,
+                to: &h.to,
+                via_fk: h.via == HopVia::Fk,
+            })
+            .collect();
+        let resolved = resolve_denormalized_join(&ontology, &join.name, &hops)?;
+        ontology.denormalized_joins.push(resolved);
+    }
+    validate_unique_denormalized_joins(&ontology)?;
+    // A denormalized table is bucketed whenever its anchor table is.
+    if let Some(partition) = ontology.partition.as_mut() {
+        let bucketed: Vec<String> = ontology
+            .denormalized_joins
+            .iter()
+            .filter(|j| {
+                partition
+                    .partitioned_tables
+                    .contains(&j.tables[j.anchor_table()].table)
+            })
+            .map(|j| j.table.clone())
+            .collect();
+        partition.partitioned_tables.extend(bucketed);
+    }
+
     validate_storage_columns(&ontology)?;
     validate_auxiliary_dictionaries(&ontology)?;
     validate_traversal_path_lookups(&ontology)?;
@@ -1198,6 +1228,162 @@ fn validate_storage_columns(ontology: &crate::Ontology) -> Result<(), OntologyEr
     Ok(())
 }
 
+pub(crate) struct DeclaredHop<'a> {
+    pub relationship: &'a str,
+    pub from: &'a str,
+    pub to: &'a str,
+    pub via_fk: bool,
+}
+
+/// Resolve a `denormalized_joins` entry into its table chain; at least one table must be scoped.
+pub(crate) fn resolve_denormalized_join(
+    ontology: &crate::Ontology,
+    name: &str,
+    hops: &[DeclaredHop<'_>],
+) -> Result<crate::denormalized::DenormalizedJoin, OntologyError> {
+    use crate::constants::{
+        DEFAULT_PRIMARY_KEY, RELATIONSHIP_KIND_COLUMN, SOURCE_ID_COLUMN, SOURCE_KIND_COLUMN,
+        TARGET_ID_COLUMN, TARGET_KIND_COLUMN,
+    };
+    use crate::denormalized::{DenormalizedJoin, JoinHop, JoinOn, JoinedTable, table_name};
+
+    let fail =
+        |msg: String| OntologyError::Validation(format!("denormalized_joins '{name}': {msg}"));
+    if hops.is_empty() {
+        return Err(fail("needs at least one hop".into()));
+    }
+    if !name
+        .chars()
+        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+    {
+        return Err(fail("name must be snake_case".into()));
+    }
+
+    let node = |kind: &str| {
+        ontology
+            .nodes
+            .get(kind)
+            .ok_or_else(|| fail(format!("unknown node '{kind}'")))
+    };
+    let has_column =
+        |n: &crate::NodeEntity, col: &str| n.storage.columns.iter().any(|c| c.name == col);
+    let node_table = |n: &crate::NodeEntity| JoinedTable {
+        table: n.destination_table.clone(),
+        has_traversal_path: n.has_traversal_path,
+        has_id: true,
+        join: None,
+        filter: vec![],
+    };
+    let link = |this: &mut JoinedTable, prev_column: &str, this_column: &str| {
+        this.join = Some(JoinOn {
+            prev_column: prev_column.to_string(),
+            this_column: this_column.to_string(),
+        });
+    };
+
+    let mut tables = vec![node_table(node(hops[0].from)?)];
+    let mut resolved_hops = Vec::with_capacity(hops.len());
+    for (i, hop) in hops.iter().enumerate() {
+        if i > 0 && hops[i - 1].to != hop.from {
+            return Err(fail(format!(
+                "hop {i} starts at '{}' but hop {} ends at '{}'",
+                hop.from,
+                i - 1,
+                hops[i - 1].to
+            )));
+        }
+        let variant = ontology
+            .edges
+            .get(hop.relationship)
+            .and_then(|vs| {
+                vs.iter()
+                    .find(|v| v.source_kind == hop.from && v.target_kind == hop.to)
+            })
+            .ok_or_else(|| {
+                fail(format!(
+                    "no {} variant {} -> {}",
+                    hop.relationship, hop.from, hop.to
+                ))
+            })?;
+        let from_node = node(hop.from)?;
+        let to_node = node(hop.to)?;
+        let source_table = tables.len() - 1;
+        let mut target = node_table(to_node);
+        let edge_table = if hop.via_fk {
+            let fk = variant.fk_column.as_deref().ok_or_else(|| {
+                fail(format!(
+                    "{} ({} -> {}) has no fk_column, so it cannot be realized via fk",
+                    hop.relationship, hop.from, hop.to
+                ))
+            })?;
+            if has_column(from_node, fk) {
+                link(&mut target, fk, DEFAULT_PRIMARY_KEY);
+            } else {
+                link(&mut target, DEFAULT_PRIMARY_KEY, fk);
+            }
+            None
+        } else {
+            let edge_cfg = ontology
+                .edge_table_config(&variant.destination_table)
+                .ok_or_else(|| {
+                    fail(format!(
+                        "unknown edge table '{}'",
+                        variant.destination_table
+                    ))
+                })?;
+            let mut edge = JoinedTable {
+                table: variant.destination_table.clone(),
+                has_traversal_path: edge_cfg.has_traversal_path(),
+                has_id: false,
+                join: None,
+                filter: vec![
+                    (RELATIONSHIP_KIND_COLUMN.into(), hop.relationship.into()),
+                    (SOURCE_KIND_COLUMN.into(), hop.from.into()),
+                    (TARGET_KIND_COLUMN.into(), hop.to.into()),
+                ],
+            };
+            link(&mut edge, DEFAULT_PRIMARY_KEY, SOURCE_ID_COLUMN);
+            tables.push(edge);
+            link(&mut target, TARGET_ID_COLUMN, DEFAULT_PRIMARY_KEY);
+            Some(tables.len() - 1)
+        };
+        tables.push(target);
+        resolved_hops.push(JoinHop {
+            relationship_kind: hop.relationship.to_string(),
+            source_kind: hop.from.to_string(),
+            target_kind: hop.to.to_string(),
+            source_table,
+            target_table: tables.len() - 1,
+            edge_table,
+        });
+    }
+    if !tables.iter().any(|t| t.has_traversal_path) {
+        return Err(fail(
+            "no table carries traversal_path; at least one must be scoped".into(),
+        ));
+    }
+
+    Ok(DenormalizedJoin {
+        name: name.to_string(),
+        table: table_name(name),
+        tables,
+        hops: resolved_hops,
+    })
+}
+
+fn validate_unique_denormalized_joins(ontology: &crate::Ontology) -> Result<(), OntologyError> {
+    let mut seen = std::collections::HashSet::new();
+    for join in &ontology.denormalized_joins {
+        if !seen.insert(join.name.as_str()) {
+            return Err(OntologyError::Validation(format!(
+                "denormalized_joins: duplicate name '{}'",
+                join.name
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// `namespace_anchor` variants must have an FK column and must target a
 /// namespace anchor (an entity with a `traversal_path_lookup`). Also enforces
 /// that the same FK column name always maps to the same anchor entity.
@@ -1355,6 +1541,112 @@ mod tests {
             }],
             reindex_on: Vec::new(),
         }
+    }
+
+    fn hop<'a>(relationship: &'a str, from: &'a str, to: &'a str, via_fk: bool) -> DeclaredHop<'a> {
+        DeclaredHop {
+            relationship,
+            from,
+            to,
+            via_fk,
+        }
+    }
+
+    #[test]
+    fn denormalized_join_resolves_edge_and_fk_hops_into_a_table_chain() {
+        let ontology = crate::Ontology::load_embedded().unwrap();
+        let join = resolve_denormalized_join(
+            &ontology,
+            "reviewer_project",
+            &[
+                hop("REVIEWER", "User", "MergeRequest", false),
+                hop("IN_PROJECT", "MergeRequest", "Project", true),
+            ],
+        )
+        .unwrap();
+
+        let tables: Vec<&str> = join.tables.iter().map(|t| t.table.as_str()).collect();
+        assert_eq!(
+            tables,
+            ["gl_user", "gl_edge", "gl_merge_request", "gl_project"]
+        );
+        let joins: Vec<(&str, &str)> = join
+            .tables
+            .iter()
+            .filter_map(|t| t.join.as_ref())
+            .map(|j| (j.prev_column.as_str(), j.this_column.as_str()))
+            .collect();
+        assert_eq!(
+            joins,
+            [
+                ("id", "source_id"),
+                ("target_id", "id"),
+                ("project_id", "id")
+            ]
+        );
+        assert_eq!(
+            join.tables[1].filter[0],
+            ("relationship_kind".into(), "REVIEWER".into())
+        );
+        assert_eq!(join.hops[0].edge_table, Some(1));
+        assert_eq!(join.hops[1].edge_table, None);
+        assert_eq!(
+            (join.hops[1].source_table, join.hops[1].target_table),
+            (2, 3)
+        );
+        assert_eq!(join.anchor_table(), 1);
+    }
+
+    #[test]
+    fn denormalized_join_rejects_invalid_chains() {
+        let ontology = crate::Ontology::load_embedded().unwrap();
+        let err = |hops: &[DeclaredHop<'_>]| {
+            resolve_denormalized_join(&ontology, "j", hops)
+                .unwrap_err()
+                .to_string()
+        };
+        assert!(
+            err(&[
+                hop("REVIEWER", "User", "MergeRequest", false),
+                hop("HAS_LABEL", "WorkItem", "Label", false)
+            ])
+            .contains("hop 1 starts at 'WorkItem'")
+        );
+        assert!(err(&[hop("REVIEWER", "User", "Project", false)]).contains("no REVIEWER variant"));
+        assert!(err(&[hop("REVIEWER", "User", "MergeRequest", true)]).contains("no fk_column"));
+        // Cross-namespace hops are fine: each table keeps its own path in the row.
+        for (name, hop_) in [
+            ("closes", hop("CLOSES", "MergeRequest", "WorkItem", false)),
+            ("contains", hop("CONTAINS", "Group", "Project", false)),
+        ] {
+            resolve_denormalized_join(&ontology, name, &[hop_]).unwrap();
+        }
+    }
+
+    #[test]
+    fn denormalized_join_needs_a_scoped_table() {
+        let mut ontology = crate::Ontology::new()
+            .with_nodes(["User", "Runner"])
+            .with_edges(["OWNS"])
+            .with_edge_table("gl_edge")
+            .with_edge_for_table("OWNS", "gl_edge")
+            .with_edge_variant(crate::EdgeEntity {
+                relationship_kind: "OWNS".into(),
+                source_kind: "User".into(),
+                target_kind: "Runner".into(),
+                destination_table: "gl_edge".into(),
+                ..Default::default()
+            });
+        for global in ["User", "Runner"] {
+            ontology.nodes.get_mut(global).unwrap().global = true;
+        }
+        let err =
+            resolve_denormalized_join(&ontology, "owns", &[hop("OWNS", "User", "Runner", false)])
+                .unwrap_err();
+        assert!(
+            err.to_string().contains("no table carries traversal_path"),
+            "got: {err}"
+        );
     }
 
     #[test]

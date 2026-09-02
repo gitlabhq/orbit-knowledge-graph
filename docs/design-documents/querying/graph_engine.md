@@ -70,10 +70,12 @@ The query compiler transforms a JSON DSL input into parameterized ClickHouse SQL
 | 5 | `lower` | Emits the SQL AST from the query plan (edge-chain-first, nodes lazy) |
 | 6 | `enforce` | Injects ID and type columns required for redaction; builds the result context |
 | 7 | `security` | Injects `startsWith(traversal_path, ?)` predicates on all node-table scans, with per-entity role scoping ([Security](../security.md)) |
-| 8 | `check` | Verifies every node-table alias carries a valid `startsWith` predicate traceable to the `SecurityContext` ([Security](../security.md)) |
-| 9 | `hydrate_plan` | Builds the hydration plan for fetching entity properties after the base query |
-| 10 | `settings` | Resolves ClickHouse query-level settings (timeouts, memory limits, cache) for the query type |
-| 11 | `codegen` | Serializes the AST into parameterized ClickHouse SQL |
+| 8 | `partition` | Adds partition-pruning predicates derived from the traversal path scope |
+| 9 | `cursor` | Applies keyset pagination (seek predicate and readback columns) |
+| 10 | `check` | Verifies every node-table alias carries a valid `startsWith` predicate traceable to the `SecurityContext` ([Security](../security.md)) |
+| 11 | `hydrate_plan` | Builds the hydration plan for fetching entity properties after the base query |
+| 12 | `settings` | Resolves ClickHouse query-level settings (timeouts, memory limits, cache) for the query type |
+| 13 | `codegen` | Serializes the AST into parameterized ClickHouse SQL |
 
 The planner emits ClickHouse SQL similar to these patterns:
 
@@ -115,6 +117,20 @@ Filter placement rules for node `FINAL` scans:
 - **Pinned FK target IDs** are pushed into the FK center `FINAL` subquery when the FK column lives on the center table.
 
 Edge-only traversals do not join node tables for non-group-by nodes, so they cannot filter out deleted nodes at the query layer. In production this is handled by the SDLC indexer, which soft-deletes FK edge rows in the same ETL batch as their parent node (`crates/indexer/src/modules/sdlc/pipeline.rs`). Cross-entity FK cleanup relies on PostgreSQL's referential integrity propagating through Siphon CDC.
+
+### Denormalized joins
+
+A denormalized join pre-joins a linear chain of tables into one `gl_denorm_<name>` table so the compiler can answer the matching hops with a single scan. It is declared as a chain of edge variants, each realized either through its edge table or, with `via: fk`, directly node to node on the variant's FK column:
+
+```yaml
+denormalized_joins:
+  - name: reviewer_project
+    hops:
+      - {relationship: REVIEWER,   from: User,         to: MergeRequest}
+      - {relationship: IN_PROJECT, from: MergeRequest, to: Project, via: fk}
+```
+
+That resolves to the table chain `gl_user, gl_edge, gl_merge_request, gl_project`. Adjacent tables join on the id or edge id that links them, and every scoped table keeps its own `traversal_path` in the row, exactly as each scan alias keeps its own in an ordinary join. Every other column of every table is copied under a `t{i}_` prefix. The first scoped table's `traversal_path` is the row's unprefixed one and leads the sort key. The DDL generator composes the table from the source tables' already-generated definitions (columns, codecs, indexes, settings, partitioning) and emits one `TO` materialized view per table, joined outward from the trigger with `FINAL`. The security pass filters each path column in the row against the authorized set (see `Ontology::traversal_path_columns`), each at its own table's role floor, so a hop may cross namespaces just as it may in an edge chain: a row is returned only when the caller is authorized for every namespace it touches. The loader only requires that at least one table in the chain is scoped.
 
 ### Scope rewrite (traversal_path prefix injection)
 

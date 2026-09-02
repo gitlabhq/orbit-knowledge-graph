@@ -4,6 +4,7 @@
 //! with no auto-derivation.
 
 pub mod clickhouse;
+mod denormalized;
 pub mod duckdb;
 
 use std::collections::BTreeMap;
@@ -72,18 +73,29 @@ pub fn generate_graph_tables_with_prefix(ontology: &Ontology, prefix: &str) -> V
         .iter()
         .filter(|table| table.versioned)
     {
-        tables.push(build_auxiliary_table(aux).with_prefix(prefix));
+        tables.push(build_auxiliary_table(aux));
     }
     for node in ontology.nodes() {
-        tables.push(build_node_table(node, partition).with_prefix(prefix));
+        tables.push(build_node_table(node, partition));
     }
     for name in ontology.edge_tables() {
         if let Some(config) = ontology.edge_table_config(name) {
-            tables.push(build_edge_table(name, config, partition).with_prefix(prefix));
+            tables.push(build_edge_table(name, config, partition));
         }
     }
+    // Denormalized joins are composed from the definitions above, so they come last.
+    for join in ontology.denormalized_joins() {
+        let source_of = |i: usize| {
+            let name = join.tables[i].table.as_str();
+            tables
+                .iter()
+                .find(|t| t.name == name)
+                .unwrap_or_else(|| panic!("denormalized join source '{name}' not generated"))
+        };
+        tables.push(denormalized::build_table(join, source_of, partition));
+    }
 
-    tables
+    tables.into_iter().map(|t| t.with_prefix(prefix)).collect()
 }
 
 pub struct UnversionedObject {
@@ -154,12 +166,28 @@ pub fn generate_graph_materialized_views_with_prefix(
 ) -> Vec<CreateMaterializedView> {
     let known_tables = collect_table_names(ontology);
 
-    ontology
+    let mut views: Vec<CreateMaterializedView> = ontology
         .materialized_views()
         .iter()
         .filter(|mv| mv.versioned)
         .map(|mv| build_materialized_view(mv).with_prefix(prefix, &known_tables))
-        .collect()
+        .collect();
+    let tables = generate_graph_tables(ontology);
+    for join in ontology.denormalized_joins() {
+        let source_of = |i: usize| {
+            let name = join.tables[i].table.as_str();
+            tables
+                .iter()
+                .find(|t| t.name == name)
+                .unwrap_or_else(|| panic!("denormalized join source '{name}' not generated"))
+        };
+        views.extend(
+            denormalized::build_views(join, source_of)
+                .into_iter()
+                .map(|v| v.with_prefix(prefix, &known_tables)),
+        );
+    }
+    views
 }
 
 /// Collects table names so `{table_name}` placeholders in materialized view
@@ -174,6 +202,9 @@ fn collect_table_names(ontology: &Ontology) -> Vec<String> {
     }
     for table_name in ontology.edge_tables() {
         names.push(table_name.to_string());
+    }
+    for join in ontology.denormalized_joins() {
+        names.push(join.table.clone());
     }
     names
 }
@@ -434,16 +465,16 @@ fn convert_projection(proj: &StorageProjection) -> ProjectionDef {
     }
 }
 
-fn partition_by(
+fn partition_by<'a>(
     partition: Option<&PartitionConfig>,
     table: &str,
-    columns: &[StorageColumn],
+    columns: impl IntoIterator<Item = &'a str>,
 ) -> Vec<String> {
     let Some(p) = partition.filter(|p| p.is_partitioned(table)) else {
         return vec![];
     };
     let column = p.column();
-    if columns.iter().any(|c| c.name == column) {
+    if columns.into_iter().any(|c| c == column) {
         let expr = crate::passes::partition::partition_expr(
             &p.strategy,
             crate::ast::Expr::Identifier(column.to_string()),
@@ -465,7 +496,11 @@ fn build_node_table(
         .map(storage_col_to_def)
         .collect();
     columns.extend(system_columns(None));
-    let partition_by = partition_by(partition, &node.destination_table, &node.storage.columns);
+    let partition_by = partition_by(
+        partition,
+        &node.destination_table,
+        node.storage.columns.iter().map(|c| c.name.as_str()),
+    );
     let partitioned = !partition_by.is_empty();
 
     let indexes: Vec<IndexDef> = node.storage.indexes.iter().map(convert_index).collect();
@@ -521,7 +556,11 @@ fn build_edge_table(
             .map(storage_col_to_def),
     );
     columns.extend(system_columns(None));
-    let partition_by = partition_by(partition, name, &config.storage.columns);
+    let partition_by = partition_by(
+        partition,
+        name,
+        config.storage.columns.iter().map(|c| c.name.as_str()),
+    );
     let partitioned = !partition_by.is_empty();
 
     let mut indexes: Vec<IndexDef> = config.storage.indexes.iter().map(convert_index).collect();
@@ -903,15 +942,6 @@ mod tests {
     }
 
     #[test]
-    fn generates_no_materialized_views_by_default() {
-        let views = generate_graph_materialized_views(&ontology());
-        assert!(
-            views.is_empty(),
-            "default ontology should have no materialized views"
-        );
-    }
-
-    #[test]
     fn materialized_view_prefix_applies_only_to_versioned_views() {
         use super::clickhouse::emit_create_materialized_view;
 
@@ -1110,5 +1140,123 @@ mod tests {
         for table in &tables {
             assert!(!table.columns.is_empty(), "{}: no columns", table.name);
         }
+    }
+    fn reviewer_project_join() -> Ontology {
+        ontology().with_denormalized_join(
+            "reviewer_project",
+            &[
+                ("REVIEWER", "User", "MergeRequest", false),
+                ("IN_PROJECT", "MergeRequest", "Project", true),
+            ],
+        )
+    }
+
+    #[test]
+    fn no_denormalized_tables_or_views_without_a_declared_join() {
+        let ontology = ontology();
+        assert!(
+            generate_graph_tables(&ontology)
+                .iter()
+                .all(|t| !t.name.starts_with("gl_denorm_"))
+        );
+        assert!(generate_graph_materialized_views(&ontology).is_empty());
+    }
+
+    #[test]
+    fn denormalized_join_table_is_composed_from_its_source_tables() {
+        let tables = generate_graph_tables(&reviewer_project_join());
+        let t = tables
+            .iter()
+            .find(|t| t.name == "gl_denorm_reviewer_project")
+            .expect("join table should be generated");
+        let names: Vec<&str> = t.columns.iter().map(|c| c.name.as_str()).collect();
+
+        assert_eq!(names[0], "traversal_path");
+        assert_eq!(names.iter().filter(|n| **n == "traversal_path").count(), 1);
+        assert!(
+            !names.contains(&"t1_traversal_path") && !names.contains(&"t0_traversal_path"),
+            "the anchor's path is the unprefixed one and User has none"
+        );
+        for expected in [
+            "t0_id",
+            "t0_username",
+            "t1_source_id",
+            "t1_relationship_kind",
+            "t2_id",
+            "t2_title",
+            "t2_traversal_path",
+            "t3_name",
+            "t3_traversal_path",
+        ] {
+            assert!(names.contains(&expected), "missing {expected} in {names:?}");
+        }
+        assert_eq!(names.iter().filter(|n| n.ends_with("_version")).count(), 1);
+        assert_eq!(t.order_by, ["traversal_path", "t2_id", "t0_id", "t3_id"]);
+
+        let idx: Vec<(&str, &str)> = t
+            .indexes
+            .iter()
+            .map(|i| (i.name.as_str(), i.expression.as_str()))
+            .collect();
+        assert!(idx.contains(&("idx_t1_source_id", "t1_source_id")));
+        assert!(idx.contains(&("idx_t0_state", "t0_state")));
+        assert!(idx.contains(&("idx_t2_title_ngram", "t2_title")));
+        let mut idx_names: Vec<&str> = idx.iter().map(|(n, _)| *n).collect();
+        idx_names.sort_unstable();
+        idx_names.dedup();
+        assert_eq!(
+            idx_names.len(),
+            t.indexes.len(),
+            "index names must be unique"
+        );
+        assert!(
+            t.settings
+                .iter()
+                .any(|s| s.key == "add_minmax_index_for_temporal_columns")
+        );
+    }
+
+    #[test]
+    fn denormalized_join_emits_one_feeding_view_per_table() {
+        let views = generate_graph_materialized_views_with_prefix(&reviewer_project_join(), "v9_");
+        let names: Vec<&str> = views.iter().map(|v| v.name.as_str()).collect();
+        assert_eq!(
+            names,
+            [
+                "v9_gl_denorm_reviewer_project__on_t0",
+                "v9_gl_denorm_reviewer_project__on_t1",
+                "v9_gl_denorm_reviewer_project__on_t2",
+                "v9_gl_denorm_reviewer_project__on_t3",
+            ]
+        );
+        for v in &views {
+            assert_eq!(v.to_table.as_deref(), Some("v9_gl_denorm_reviewer_project"));
+            assert!(v.select_query.starts_with(
+                "SELECT t1.traversal_path AS traversal_path, t0.id AS t0_id, t0.username AS t0_username"
+            ));
+            assert!(v.select_query.contains("t3.name AS t3_name"));
+            assert!(v.select_query.contains(
+                "greatest(t0._version, t1._version, t2._version, t3._version) AS _version"
+            ));
+        }
+
+        let on_t2 = &views[2].select_query;
+        assert!(
+            on_t2.contains(
+                "FROM v9_gl_merge_request AS t2 \
+                 INNER JOIN v9_gl_project AS t3 FINAL ON t2.project_id = t3.id \
+                 INNER JOIN v9_gl_edge AS t1 FINAL ON t1.target_id = t2.id AND t1.relationship_kind = 'REVIEWER' AND t1.source_kind = 'User' AND t1.target_kind = 'MergeRequest' \
+                 INNER JOIN v9_gl_user AS t0 FINAL ON t0.id = t1.source_id"
+            ),
+            "got:\n{on_t2}"
+        );
+        assert!(on_t2.contains("t2.traversal_path AS t2_traversal_path"));
+        assert!(!on_t2.contains("AS t2 FINAL"));
+
+        let on_t1 = &views[1].select_query;
+        assert!(on_t1.contains("FROM v9_gl_edge AS t1 INNER JOIN"));
+        assert!(on_t1.ends_with(
+            "WHERE t1.relationship_kind = 'REVIEWER' AND t1.source_kind = 'User' AND t1.target_kind = 'MergeRequest'"
+        ));
     }
 }
