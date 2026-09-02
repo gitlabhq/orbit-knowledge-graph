@@ -27,7 +27,7 @@ fn main() {
     assert_lockfile_matches_pin();
 
     let target = env::var("TARGET").unwrap();
-    let (_, platform, expected) = FTS_ARTIFACTS
+    let &(_, platform, expected) = FTS_ARTIFACTS
         .iter()
         .find(|(t, _, _)| *t == target)
         .unwrap_or_else(|| panic!("no pinned fts artifact for target {target}"));
