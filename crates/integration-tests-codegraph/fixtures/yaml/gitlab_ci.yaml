@@ -35,6 +35,10 @@ fixtures:
           include:
             project: gitlab-org/child
             file: /child.yml
+
+      not-an-include:
+        include: /ignored.yml
+        script: [true]
   - path: ci/lint.gitlab-ci.yml
     content: |
       lint:
@@ -49,6 +53,17 @@ fixtures:
     content: |
       not-a-job:
         script: [true]
+  - path: .gitlab-ci-versions.yml
+    content: |
+      versions:
+        script: [true]
+  - path: ci/quoted.gitlab-ci.yml
+    content: |
+      "build:linux":
+        script: make
+      stages: test
+      ---
+      { flow-job: { script: y } }
 
 tests:
   - name: "CI files are indexed as yaml"
@@ -56,11 +71,13 @@ tests:
       MATCH (f:File)
       RETURN f.path AS path, f.language AS language
     assert:
-      - { row_count: 4 }
+      - { row_count: 6 }
       - { row: { path: ".gitlab-ci.yml", language: yaml } }
       - { row: { path: "ci/lint.gitlab-ci.yml", language: yaml } }
       - { row: { path: ".gitlab/ci/release.yml", language: yaml } }
       - { row: { path: "ci/other.yml", language: yaml } }
+      - { row: { path: ".gitlab-ci-versions.yml", language: yaml } }
+      - { row: { path: "ci/quoted.gitlab-ci.yml", language: yaml } }
 
   - name: "Author-named root keys become CiJob definitions; global keywords and unclaimed YAML do not"
     query: |
@@ -68,13 +85,17 @@ tests:
       WHERE d.definition_type = 'CiJob'
       RETURN d.fqn AS fqn, d.file_path AS file
     assert:
-      - { row_count: 5 }
+      - { row_count: 9 }
       - { unique: fqn }
       - { row: { fqn: ".base", file: ".gitlab-ci.yml" } }
       - { row: { fqn: "unit-test", file: ".gitlab-ci.yml" } }
       - { row: { fqn: "deploy", file: ".gitlab-ci.yml" } }
+      - { row: { fqn: "not-an-include", file: ".gitlab-ci.yml" } }
       - { row: { fqn: "lint", file: "ci/lint.gitlab-ci.yml" } }
       - { row: { fqn: "release", file: ".gitlab/ci/release.yml" } }
+      - { row: { fqn: "versions", file: ".gitlab-ci-versions.yml" } }
+      - { row: { fqn: "build:linux", file: "ci/quoted.gitlab-ci.yml" } }
+      - { row: { fqn: "flow-job", file: "ci/quoted.gitlab-ci.yml" } }
 
   - name: "Stages and variables are namespaced under their keyword"
     query: |
@@ -88,7 +109,7 @@ tests:
       - { row: { type: CiVariable, fqn: "variables.CARGO_HOME" } }
       - { row: { type: CiVariable, fqn: "variables.RUST_BACKTRACE" } }
 
-  - name: "Every include flavor becomes a typed import, including child-pipeline triggers"
+  - name: "Every include flavor becomes a typed import, including child-pipeline triggers; include under a job is not one"
     query: |
       MATCH (i:ImportedSymbol)
       RETURN i.import_type AS type, i.path AS path, i.name AS name, i.alias AS alias

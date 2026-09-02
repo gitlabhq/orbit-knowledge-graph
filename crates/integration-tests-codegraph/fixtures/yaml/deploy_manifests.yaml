@@ -6,11 +6,11 @@ fixtures:
       apiVersion: argoproj.io/v1alpha1
       kind: Application
       metadata:
-        name: gkg
+        name: &app gkg
       spec:
         sources:
-          - repoURL: https://gitlab.com/gitlab-org/orbit/orbit-helm-charts.git
-            path: chart
+          - repoURL: &repo https://gitlab.com/gitlab-org/orbit/orbit-helm-charts.git
+            path: !!str chart
             targetRevision: v1.2.3
           - repoURL: https://charts.bitnami.com/bitnami
             chart: redis
@@ -39,6 +39,7 @@ fixtures:
       indexer:
         env:
           - name: RUST_LOG
+          - name: RUST_BACKTRACE
   - path: docker-compose.yml
     content: |
       services:
@@ -67,7 +68,7 @@ tests:
     assert:
       - { row_count: 0 }
 
-  - name: "ArgoCD sources become imports keyed by repoURL"
+  - name: "ArgoCD sources become imports keyed by repoURL; anchors and tags do not leak into values"
     query: |
       MATCH (i:ImportedSymbol)
       WHERE i.import_type = 'ArgoCdSource'
@@ -95,7 +96,7 @@ tests:
       - { row_count: 1 }
       - { row: { path: redis, name: "https://charts.bitnami.com/bitnami", alias: "~17.0.0" } }
 
-  - name: "values.yaml indexes every key at every depth with dotted FQNs"
+  - name: "values.yaml indexes every key at every depth once, collapsing sequence items"
     query: |
       MATCH (d:Definition)
       WHERE d.definition_type = 'HelmValue'

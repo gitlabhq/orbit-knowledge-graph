@@ -186,3 +186,18 @@ pub(super) static DOCUMENT_TYPES: LazyLock<Vec<DocumentType>> = LazyLock::new(||
         })
         .collect()
 });
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn schema_rejects_configs_without_rules_or_with_unknown_keys() {
+        let validator = super::config_validator();
+        for config in [
+            "name: x\nmatch:\n  filename_suffixes: [x.yaml]\n",
+            "name: x\nmatch:\n  filename_suffixes: [x.yaml]\nimports:\n  - key: k\n    scalar_type: T\n    typo: 1\n",
+        ] {
+            let document: serde_json::Value = orbit_utils::yaml::from_str(config).unwrap();
+            assert!(!validator.is_valid(&document), "{config}");
+        }
+    }
+}
