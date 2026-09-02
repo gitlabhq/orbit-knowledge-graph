@@ -266,7 +266,6 @@ Distributed locking via NATS KV ensures only one dispatcher instance runs each t
 | Code task dispatch | `schedule.tasks.code-indexing-task.cron` | `0 */1 * * * *` (every minute) | Consumes Siphon CDC push events |
 | Code backfill | `schedule.tasks.code-backfill.cron` | `0 */1 * * * *` (every minute) | Backfills newly enabled namespaces |
 | Table cleanup | `schedule.tasks.table-cleanup.cron` | `0 0 3 * * 0` (weekly, Sunday 03:00 UTC) | Runs `APPLY DELETED MASK` on every graph table to physically remove lightweight-deleted rows |
-| Edge tombstone collapse | `schedule.tasks.edge-tombstone-collapse.cron` | `0 */15 * * * *` (every 15 minutes) | Deletes edge tombstones left by code reindexes so retired edges leave variable-depth traversal |
 | Namespace deletion | `schedule.tasks.namespace-deletion.cron` | `0 0 3 * * *` (daily 03:00 UTC) | Schedules and executes namespace deletions |
 | Migration completion | `schedule.tasks.migration-completion.cron` | `0 */1 * * * *` (every minute) | Detects completed schema migrations |
 
@@ -280,17 +279,6 @@ recent Siphon activity, backstopping migration backfill and missed windows.
 run picks up all outstanding masks. Alert on
 `gkg.scheduler.task.errors{task="maintenance.table_cleanup"}`; the task logs a
 failed table and moves on.
-
-The edge tombstone collapse is cursor-driven and idempotent. It reads the
-traversal paths that received edge tombstones since its cursor from
-`tombstone_scopes` (Arrow writer) and `code_indexing_checkpoint` (code
-reindexes). It then deletes the tombstoned edge keys under those paths. It has two
-knobs. `lookback_secs` (default 3600) bounds how far the very first run looks
-back. `max_keys_per_run` (default 100000) caps the keys deleted per edge table
-per run. A run that hits the cap keeps its cursor and drains the rest next run. Alert on
-`gkg.scheduler.task.errors{task="maintenance.edge_tombstone_collapse"}`. See the
-SDLC indexing runbook for what this task covers and how to recover a wedged
-mutation queue.
 
 ### Code dispatch task settings
 
@@ -657,10 +645,6 @@ schedule:
   tasks:
     table-cleanup:
       cron: "0 0 3 * * 0"
-    edge-tombstone-collapse:
-      cron: "0 */15 * * * *"
-      lookback_secs: 3600
-      max_keys_per_run: 100000
     namespace-deletion:
       cron: "0 0 3 * * *"
     migration-completion:

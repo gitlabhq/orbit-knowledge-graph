@@ -3,14 +3,9 @@ use std::error::Error as StdError;
 use std::sync::Arc;
 use std::time::Duration;
 
-use arrow::array::{Array, BooleanArray, StringArray};
-use arrow::compute;
-use arrow::datatypes::DataType;
 use arrow::record_batch::RecordBatch;
 use clickhouse_client::{ArrowClickHouseClient, ClickHouseConfigurationExt};
 use orbit_server_config::ClickHouseConfiguration;
-use orbit_utils::clickhouse::render_value;
-use serde_json::Value;
 use thiserror::Error;
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
@@ -20,8 +15,6 @@ use tracing::{error, warn};
 use crate::durability::WriteDurability;
 use crate::metrics::EngineMetrics;
 use crate::retry::{Backoff, LocalRetry, RetryExhausted, Step, drive};
-
-pub const TOMBSTONE_SCOPES_TABLE: &str = "tombstone_scopes";
 
 #[derive(Debug, Error)]
 pub enum WriteError {
@@ -148,7 +141,6 @@ impl ClickHouseWriter {
 
         self.metrics
             .record_write_success(table, start.elapsed().as_secs_f64(), rows, bytes);
-        self.record_tombstone_scopes(&batches, durability).await?;
 
         Ok(WriteReport {
             table: table.to_string(),
@@ -157,62 +149,17 @@ impl ClickHouseWriter {
         })
     }
 
-    async fn record_tombstone_scopes(
-        &self,
-        batches: &[RecordBatch],
-        durability: Option<WriteDurability>,
-    ) -> Result<(), WriteError> {
-        let scopes = tombstoned_edge_scopes(batches);
-        if scopes.is_empty() {
+    /// Issues a `DELETE FROM` statement for rows that should be lightweight-deleted.
+    pub async fn lightweight_delete(&self, sql: &str) -> Result<(), WriteError> {
+        if self.noop {
             return Ok(());
         }
-        let values = scopes
-            .iter()
-            .map(|scope| format!("({})", render_value(&Value::String(scope.clone()))))
-            .collect::<Vec<_>>()
-            .join(", ");
-        let mut query = self.client.insert_query(&format!(
-            "INSERT INTO {TOMBSTONE_SCOPES_TABLE} (traversal_path) VALUES {values}"
-        ));
-        for (key, value) in insert_overrides(durability.unwrap_or(WriteDurability::Durable)) {
-            query = query.with_setting(*key, *value);
-        }
-        query
+        self.client
+            .query(sql)
             .execute()
             .await
-            .map_err(|e| WriteError::Write(e.to_string(), Some(Box::new(e))))
+            .map_err(|e| WriteError::Write(e.to_string(), None))
     }
-}
-
-fn tombstoned_edge_scopes(batches: &[RecordBatch]) -> std::collections::BTreeSet<String> {
-    let mut scopes = std::collections::BTreeSet::new();
-    for batch in batches {
-        if batch.column_by_name("relationship_kind").is_none() {
-            continue;
-        }
-        let (Some(deleted), Some(paths)) = (
-            batch.column_by_name("_deleted"),
-            batch.column_by_name("traversal_path"),
-        ) else {
-            continue;
-        };
-        let (Some(deleted), Ok(paths)) = (
-            deleted.as_any().downcast_ref::<BooleanArray>(),
-            compute::cast(paths, &DataType::Utf8),
-        ) else {
-            continue;
-        };
-        let paths = paths.as_any().downcast_ref::<StringArray>();
-        for row in 0..batch.num_rows() {
-            if deleted.is_valid(row)
-                && deleted.value(row)
-                && let Some(paths) = paths.filter(|p| p.is_valid(row))
-            {
-                scopes.insert(paths.value(row).to_string());
-            }
-        }
-    }
-    scopes
 }
 
 /// A per-submission completion hook. The buffered writer calls exactly one of these for every

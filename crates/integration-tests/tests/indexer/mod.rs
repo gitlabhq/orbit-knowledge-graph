@@ -2,7 +2,6 @@ mod clickhouse;
 mod code;
 mod common;
 mod dispatcher;
-mod edge_tombstone_collapse;
 mod engine;
 mod namespace_deletion;
 mod nats;
