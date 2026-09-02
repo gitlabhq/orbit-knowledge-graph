@@ -49,7 +49,11 @@ impl DuckDbClient {
             let mut bytes = Vec::new();
             std::io::Read::read_to_end(&mut flate2::read::GzDecoder::new(gz), &mut bytes)?;
             // Temp + rename so a concurrent orbit process never loads a partial file.
-            let tmp = dir.join(format!(".{name}.duckdb_extension.{}", std::process::id()));
+            let tmp = dir.join(format!(
+                ".{name}.duckdb_extension.{}.{:?}",
+                std::process::id(),
+                std::thread::current().id()
+            ));
             std::fs::write(&tmp, &bytes)?;
             std::fs::rename(&tmp, &path)?;
         }
