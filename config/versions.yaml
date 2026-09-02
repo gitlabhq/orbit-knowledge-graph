@@ -1,8 +1,7 @@
-# Pinned versions and upstream revisions, one flat `key: value` per line.
-#
-# Read at compile time by orbit_utils::version::pinned (a const scanner, so
-# keep this file flat: no nesting, no quotes, no inline comments on value
-# lines). Shell tooling reads it with scripts/pinned-version.sh.
+# Pinned versions and upstream revisions. Deserialized into
+# orbit_utils::pinned::Versions (every key is required, unknown keys fail
+# the build). Shell tooling reads keys with awk, so keep one `key: value`
+# per line.
 
 # Graph schema version; prefixes every versioned ClickHouse table (vN_).
 # Bump with `mise schema:bump`, which also appends a migration ledger entry.

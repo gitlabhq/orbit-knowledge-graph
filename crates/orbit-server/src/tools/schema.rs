@@ -7,11 +7,9 @@ use toon_format::{EncodeOptions, encode};
 const BASE_SCHEMA: &str = include_str!(concat!(env!("SCHEMA_DIR"), "/graph_query.schema.json"));
 const QUERY_RESPONSE_SCHEMA: &str =
     include_str!(concat!(env!("SCHEMA_DIR"), "/query_response.json"));
-const QUERY_DSL_VERSION_TEXT: &str = orbit_utils::pinned::pinned("query_dsl");
-
 pub static QUERY_DSL_VERSION: LazyLock<Version> = LazyLock::new(|| {
-    QUERY_DSL_VERSION_TEXT
-        .trim()
+    orbit_utils::pinned::VERSIONS
+        .query_dsl
         .parse()
         .expect("QUERY_DSL_VERSION must be valid semver")
 });

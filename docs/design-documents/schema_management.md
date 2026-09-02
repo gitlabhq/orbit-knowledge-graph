@@ -23,13 +23,12 @@ enforced by `scripts/check-pinned-version.sh raw_output_format`. See
 
 ### The `schema` pin in `config/versions.yaml`
 
-`config/versions.yaml` is a flat `key: value` file holding every pinned version in the repo
-(schema, query DSL, output formats, DuckDB release, vendored upstream revisions). The `schema`
-key is a `u32`. The binary reads it at compile time through the const scanner in
-`orbit_utils::pinned` and exposes it as:
+`config/versions.yaml` holds every pinned version in the repo (schema, query DSL, output
+formats, DuckDB release, vendored upstream revisions). It is embedded at compile time and
+deserialized into `orbit_utils::pinned::Versions`; the indexer exposes the `schema` key as:
 
 ```rust
-pub const SCHEMA_VERSION: u32 = orbit_utils::pinned::pinned_u32("schema");
+pub static SCHEMA_VERSION: LazyLock<u32> = LazyLock::new(|| orbit_utils::pinned::VERSIONS.schema);
 ```
 
 Version 0 is the initial (V0) schema — the unversioned table layout used since the service launched.

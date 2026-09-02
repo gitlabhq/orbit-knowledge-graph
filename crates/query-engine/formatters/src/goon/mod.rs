@@ -34,7 +34,8 @@ mod trait_tests {
 }
 
 pub static GOON_OUTPUT_FORMAT_VERSION: LazyLock<Version> = LazyLock::new(|| {
-    orbit_utils::pinned::pinned("goon_output_format")
+    orbit_utils::pinned::VERSIONS
+        .goon_output_format
         .parse()
         .expect("GOON_OUTPUT_FORMAT_VERSION must be valid semver")
 });

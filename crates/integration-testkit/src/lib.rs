@@ -28,16 +28,12 @@ pub fn load_ontology() -> ontology::Ontology {
 
 pub const SIPHON_SCHEMA_SQL: &str = include_str!(concat!(env!("FIXTURES_DIR"), "/siphon.sql"));
 
-pub const SCHEMA_VERSION: u32 = orbit_utils::pinned::pinned_u32("schema");
-
 /// Version 0 -> "" (empty), version N -> "vN_".
-pub static TABLE_PREFIX: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
-    if SCHEMA_VERSION == 0 {
-        String::new()
-    } else {
-        format!("v{SCHEMA_VERSION}_")
-    }
-});
+pub static TABLE_PREFIX: std::sync::LazyLock<String> =
+    std::sync::LazyLock::new(|| match orbit_utils::pinned::VERSIONS.schema {
+        0 => String::new(),
+        v => format!("v{v}_"),
+    });
 
 pub fn t(table: &str) -> String {
     format!("{}{}", *TABLE_PREFIX, table)

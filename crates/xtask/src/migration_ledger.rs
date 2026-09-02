@@ -72,9 +72,8 @@ fn read_schema_version() -> Result<u32> {
 }
 
 fn parse_schema_version(versions: &str) -> Result<u32> {
-    Ok(orbit_utils::pinned::lookup(versions, SCHEMA_KEY)
-        .ok_or_else(|| anyhow!("no `{SCHEMA_KEY}:` line"))?
-        .parse()?)
+    let parsed: orbit_utils::pinned::Versions = orbit_utils::yaml::from_str(versions)?;
+    Ok(parsed.schema)
 }
 
 /// Rewrites only the `schema:` line so comments and other pins are untouched.

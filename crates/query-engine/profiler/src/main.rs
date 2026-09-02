@@ -244,7 +244,7 @@ async fn run_raw_sql(
 }
 
 fn embedded_schema_version() -> u32 {
-    orbit_utils::pinned::pinned_u32("schema")
+    orbit_utils::pinned::VERSIONS.schema
 }
 
 fn seed_scope_prefixes(
