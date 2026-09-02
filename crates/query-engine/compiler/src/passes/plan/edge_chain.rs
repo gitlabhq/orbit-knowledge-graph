@@ -89,7 +89,7 @@ pub fn denormalized_owner(hops: &[Hop], i: usize) -> Option<usize> {
 
 /// `(owner alias, prefixed column)` for a column of a denormalized hop's
 /// endpoint, e.g. `("e0", "t2_id")` for the `id` of the node at chain index 2.
-pub fn denormalized_node_column(
+fn denormalized_node_column(
     hops: &[Hop],
     i: usize,
     node: &str,
@@ -193,7 +193,7 @@ pub enum FkShape {
 pub fn plan(input: &mut Input) -> Plan {
     let mut hops = build_hops(input);
     let mut nodes = build_node_plans(input);
-    bind_denormalized(&mut hops, &nodes, input);
+    bind_denormalized(&mut hops, &nodes);
 
     let (mut hops, elided_fks, input) = elide_hops(hops, &mut nodes, input);
 
@@ -507,17 +507,14 @@ fn elide_hops<'a>(
     (keep_hops, elided_fks, input)
 }
 
-/// Point each matched group of hops at its denormalized join table when every
-/// endpoint in the group needs no node-table read anyway. An elevated role
-/// floor is enforced through a node subquery, and a non-default redaction id
-/// makes `enforce` join the node table, so either drops the whole group back to
-/// the edge chain. Bound hops drop any FK, since the path table answers them.
-fn bind_denormalized(hops: &mut [Hop], nodes: &HashMap<String, NodePlan>, input: &Input) {
-    let endpoint_ok = |alias: &str| {
-        nodes
-            .get(alias)
-            .is_some_and(|np| np.uses_default_pk() && !has_elevated_access_level(np, input))
-    };
+/// Point each matched group of hops at its denormalized join table. A node
+/// with a non-default redaction id makes `enforce` join its node table, which
+/// would defeat the single scan, so such a node drops its whole group back to
+/// the edge chain. Role floors need no gate: the security pass filters each
+/// table's own `traversal_path` column in the row at that table's floor.
+/// Bound hops drop any FK, since the join table answers them.
+fn bind_denormalized(hops: &mut [Hop], nodes: &HashMap<String, NodePlan>) {
+    let endpoint_ok = |alias: &str| nodes.get(alias).is_some_and(NodePlan::uses_default_pk);
     let rejected: HashSet<usize> = hops
         .iter()
         .filter_map(|h| h.denormalized.as_ref().map(|d| (d.group, h)))
@@ -897,6 +894,13 @@ fn resolve_node_flags(hops: &[Hop], nodes: &mut HashMap<String, NodePlan>, input
         }
     }
 
+    // Nodes read from a denormalized scan have their own traversal_path column
+    // in the row, filtered at their floor by the security pass, so they need
+    // no node-table subquery for it.
+    let in_denormalized_group = |alias: &str| {
+        hops.iter()
+            .any(|h| h.denormalized.is_some() && (h.from_node == alias || h.to_node == alias))
+    };
     let elevated: Vec<String> = nodes
         .values()
         .filter(|np| {
@@ -904,6 +908,7 @@ fn resolve_node_flags(hops: &[Hop], nodes: &mut HashMap<String, NodePlan>, input
                 && np.has_traversal_path
                 && np.table.is_some()
                 && has_elevated_access_level(np, input)
+                && !in_denormalized_group(&np.alias)
         })
         .map(|np| np.alias.clone())
         .collect();

@@ -36,8 +36,9 @@ use orbit_utils::traversal_path::{TraversalPath, TraversalPathTrie};
 /// Matches `gl_*` or `v{N}_gl_*`, captures the unprefixed name.
 static GL_TABLE_RE: OnceLock<Regex> = OnceLock::new();
 
-/// Per-alias role floors come from `ontology.min_access_level_for_table`;
-/// tables without a `redaction` block keep the historical Reporter floor.
+/// Each alias is filtered on every `traversal_path` column the ontology reports
+/// for its table (`Ontology::traversal_path_columns`), at that column's role
+/// floor; tables without a `redaction` block keep the historical Reporter floor.
 pub fn apply_security_context(
     node: &mut Node,
     ctx: &SecurityContext,

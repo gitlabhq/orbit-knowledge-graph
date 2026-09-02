@@ -190,6 +190,7 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                 start_col,
                 end_col,
             );
+            where_parts.extend(edge_scope_predicate(hop, &alias));
             edge_aliases.push(alias);
             continue;
         }

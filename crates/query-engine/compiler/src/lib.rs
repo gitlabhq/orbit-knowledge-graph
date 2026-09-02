@@ -1953,6 +1953,79 @@ mod tests {
     }
 
     #[test]
+    fn elevated_node_in_a_denormalized_chain_is_filtered_at_its_own_floor_in_the_row() {
+        let ontology = Ontology::load_embedded()
+            .expect("ontology must load")
+            .with_denormalized_join("reviewer", &[("REVIEWER", "User", "MergeRequest", false)])
+            .with_redaction_role("MergeRequest", ontology::RequiredRole::SecurityManager);
+        let ctx = SecurityContext::new_with_roles(
+            1,
+            vec![
+                AuthorizedPath::new("1/100/", 20),
+                AuthorizedPath::new("1/101/", 30),
+            ],
+        )
+        .unwrap();
+        let query = r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User", "node_ids": [7]},
+                {"id": "mr", "entity": "MergeRequest", "columns": ["title"]}
+            ],
+            "relationships": [{"type": "REVIEWER", "from": "u", "to": "mr"}],
+            "limit": 10
+        }"#;
+
+        let sql = compile(query, &ontology, &ctx)
+            .expect("compile")
+            .base
+            .render();
+
+        assert!(
+            sql.contains("FROM gl_denorm_reviewer AS e0 FINAL"),
+            "got:\n{sql}"
+        );
+        assert!(
+            !sql.contains("gl_merge_request"),
+            "no node-table subquery, got:\n{sql}"
+        );
+        // The edge's path (anchor) admits both namespaces; the MR's path only
+        // the one held at Developer, which covers the Security Manager floor.
+        assert!(
+            sql.contains("startsWith(e0.traversal_path, '1/100/')")
+                && sql.contains("startsWith(e0.traversal_path, '1/101/')"),
+            "got:\n{sql}"
+        );
+        assert!(
+            sql.contains("startsWith(e0.t2_traversal_path, '1/101/')")
+                && !sql.contains("startsWith(e0.t2_traversal_path, '1/100/')"),
+            "got:\n{sql}"
+        );
+    }
+
+    #[test]
+    fn count_of_a_property_on_a_denormalized_node_keeps_its_column() {
+        let query = r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "u", "entity": "User", "columns": ["username"]},
+                {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"eq": "merged"}}}
+            ],
+            "relationships": [{"type": "REVIEWER", "from": "u", "to": "mr"}],
+            "group_by": ["u"],
+            "aggregations": [{"count": "mr.merged_at", "as": "merged"}],
+            "limit": 10
+        }"#;
+
+        let sql = compile_sql_denormalized(query);
+
+        assert!(
+            sql.contains("COUNT(e0.t2_merged_at) AS merged"),
+            "got:\n{sql}"
+        );
+    }
+
+    #[test]
     fn check_pass_rejects_a_denormalized_scan_missing_a_path_column_filter() {
         use crate::ast::*;
         use crate::passes::check::check_ast;
