@@ -47,6 +47,19 @@ pub(super) enum Shape {
     AllKeys(bool),
 }
 
+impl Shape {
+    pub(super) fn claims(&self, doc_type: &DocumentType, root_key: &str) -> bool {
+        match self {
+            Shape::ChildrenOf(parent) | Shape::ItemsOf(parent) => parent == root_key,
+            Shape::ValueOf(path) => path.split('.').next() == Some(root_key),
+            Shape::RootKeys(enabled) => {
+                *enabled && !doc_type.keywords.iter().any(|k| k == root_key)
+            }
+            Shape::AllKeys(enabled) => *enabled,
+        }
+    }
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct Matcher {

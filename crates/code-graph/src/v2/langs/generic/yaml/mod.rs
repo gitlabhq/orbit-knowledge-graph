@@ -73,17 +73,14 @@ fn strip_quotes(s: &str) -> &str {
     s.trim_matches(|c| c == '"' || c == '\'')
 }
 
+const SCALAR_KINDS: &[&str] = &["plain_scalar", "single_quote_scalar", "double_quote_scalar"];
+
 pub(super) fn scalar_text(node: &N<'_>) -> Option<String> {
     if node.kind().as_ref() != "flow_node" {
         return None;
     }
-    if node
-        .find(Child, AnyKind(&["flow_sequence", "flow_mapping"]))
-        .is_some()
-    {
-        return None;
-    }
-    let text = strip_quotes(node.text().as_ref().trim()).to_string();
+    let scalar = node.find(Child, AnyKind(SCALAR_KINDS))?;
+    let text = strip_quotes(scalar.text().as_ref().trim()).to_string();
     (!text.is_empty()).then_some(text)
 }
 

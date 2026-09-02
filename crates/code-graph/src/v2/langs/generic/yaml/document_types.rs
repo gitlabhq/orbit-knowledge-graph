@@ -128,25 +128,16 @@ fn push_definition(
 }
 
 fn emit_shape(
-    doc_type: &'static DocumentType,
     rule: &'static DefinitionRule,
     key: &str,
     pair: &N<'_>,
     defs: &mut Vec<CanonicalDefinition>,
     sep: &'static str,
-) -> bool {
+) {
     let value = pair.field("value");
     match &rule.shape {
-        Shape::RootKeys(enabled) => {
-            if !enabled || doc_type.keywords.iter().any(|k| k == key) {
-                return false;
-            }
-            push_definition(defs, rule, &[key], pair, sep);
-        }
-        Shape::ChildrenOf(parent) => {
-            if parent != key {
-                return false;
-            }
+        Shape::RootKeys(_) => push_definition(defs, rule, &[key], pair, sep),
+        Shape::ChildrenOf(_) => {
             for child in value
                 .as_ref()
                 .and_then(child_mapping)
@@ -158,10 +149,7 @@ fn emit_shape(
                 }
             }
         }
-        Shape::ItemsOf(parent) => {
-            if parent != key {
-                return false;
-            }
+        Shape::ItemsOf(_) => {
             for item in value
                 .as_ref()
                 .and_then(child_sequence)
@@ -174,12 +162,8 @@ fn emit_shape(
             }
         }
         Shape::ValueOf(path) => {
-            let mut segments = path.split('.');
-            if segments.next() != Some(key) {
-                return false;
-            }
             let mut current = Some(pair.clone());
-            for segment in segments {
+            for segment in path.split('.').skip(1) {
                 current = current
                     .and_then(|c| c.field("value"))
                     .as_ref()
@@ -195,14 +179,8 @@ fn emit_shape(
                 push_definition(defs, rule, &[&name], document.as_ref().unwrap_or(pair), sep);
             }
         }
-        Shape::AllKeys(enabled) => {
-            if !enabled {
-                return false;
-            }
-            emit_key_tree(rule, pair, &mut vec![key.to_string()], defs, sep);
-        }
+        Shape::AllKeys(_) => emit_key_tree(rule, pair, &mut vec![key.to_string()], defs, sep),
     }
-    true
 }
 
 fn emit_key_tree(
@@ -252,15 +230,18 @@ pub(super) fn extract_definitions(
     };
     let document_types: &'static [DocumentType] = &DOCUMENT_TYPES;
     for doc_type in document_types {
-        if !doc_type.definitions.is_empty()
-            && doc_type.matcher.matches(node, file_path)
-            && doc_type
-                .definitions
-                .iter()
-                .any(|rule| emit_shape(doc_type, rule, &key, node, defs, sep))
-        {
-            break;
+        let mut claiming = doc_type
+            .definitions
+            .iter()
+            .filter(|rule| rule.shape.claims(doc_type, &key))
+            .peekable();
+        if claiming.peek().is_none() || !doc_type.matcher.matches(node, file_path) {
+            continue;
         }
+        for rule in claiming {
+            emit_shape(rule, &key, node, defs, sep);
+        }
+        break;
     }
     false
 }
@@ -399,6 +380,25 @@ mod tests {
                 ),
                 row("ArgoCdSource", "https://charts.example.com", "redis", ""),
             ]
+        );
+    }
+
+    #[test]
+    fn anchored_and_aliased_scalars_yield_bare_values() {
+        let code = "apiVersion: argoproj.io/v1alpha1\nkind: Application\nmetadata:\n  name: &app gkg\nspec:\n  source:\n    repoURL: &repo https://gitlab.com/a/charts.git\n    path: !!str app\n    targetRevision: *rev\n";
+        let defs = defs_at("apps/gkg.yaml", code);
+        assert!(
+            defs.contains(&("ArgoCdApplication".into(), "gkg".into(), "gkg".into())),
+            "{defs:?}"
+        );
+        assert_eq!(
+            imports_at("apps/gkg.yaml", code),
+            vec![row(
+                "ArgoCdSource",
+                "https://gitlab.com/a/charts.git",
+                "app",
+                ""
+            )]
         );
     }
 
