@@ -243,6 +243,7 @@ fn settings(ctx: &mut impl CompilerCtx) -> Result<()> {
     {
         config.compiler_derived.enable_materialized_cte = true;
     }
+    settings::drop_unused_settings(&mut config, &node);
 
     let query_plan = require(ctx.take_query_plan(), "query_plan")?;
     if query_plan.hops.len() >= 3 {
