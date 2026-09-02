@@ -40,6 +40,15 @@ fixtures:
       lint:
         stage: lint
         script: [true]
+  - path: .gitlab/ci/release.yml
+    content: |
+      release:
+        stage: test
+        script: [true]
+  - path: ci/other.yml
+    content: |
+      not-a-job:
+        script: [true]
 
 tests:
   - name: "CI files are indexed as yaml"
@@ -47,22 +56,25 @@ tests:
       MATCH (f:File)
       RETURN f.path AS path, f.language AS language
     assert:
-      - { row_count: 2 }
+      - { row_count: 4 }
       - { row: { path: ".gitlab-ci.yml", language: yaml } }
       - { row: { path: "ci/lint.gitlab-ci.yml", language: yaml } }
+      - { row: { path: ".gitlab/ci/release.yml", language: yaml } }
+      - { row: { path: "ci/other.yml", language: yaml } }
 
-  - name: "Author-named root keys become CiJob definitions; global keywords do not"
+  - name: "Author-named root keys become CiJob definitions; global keywords and unclaimed YAML do not"
     query: |
       MATCH (d:Definition)
       WHERE d.definition_type = 'CiJob'
       RETURN d.fqn AS fqn, d.file_path AS file
     assert:
-      - { row_count: 4 }
+      - { row_count: 5 }
       - { unique: fqn }
       - { row: { fqn: ".base", file: ".gitlab-ci.yml" } }
       - { row: { fqn: "unit-test", file: ".gitlab-ci.yml" } }
       - { row: { fqn: "deploy", file: ".gitlab-ci.yml" } }
       - { row: { fqn: "lint", file: "ci/lint.gitlab-ci.yml" } }
+      - { row: { fqn: "release", file: ".gitlab/ci/release.yml" } }
 
   - name: "Stages and variables are namespaced under their keyword"
     query: |

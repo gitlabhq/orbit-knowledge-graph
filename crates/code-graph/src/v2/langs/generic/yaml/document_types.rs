@@ -453,12 +453,14 @@ mod tests {
     }
 
     #[test]
-    fn ci_fragments_match_by_sibling_prefix() {
-        assert_eq!(
-            defs_at(".gitlab-ci-asdf-versions.yml", "lint:\n  script: [true]\n"),
-            vec![("CiJob".into(), "lint".into(), "lint".into())]
-        );
-        assert!(defs_at(".gitlab/ci/release.yml", "lint:\n  script: [true]\n").is_empty());
+    fn ci_fragments_match_by_sibling_prefix_or_ci_directory() {
+        let lint_job = vec![("CiJob".into(), "lint".into(), "lint".into())];
+        let code = "lint:\n  script: [true]\n";
+        assert_eq!(defs_at(".gitlab-ci-asdf-versions.yml", code), lint_job);
+        assert_eq!(defs_at(".gitlab/ci/release.yml", code), lint_job);
+        assert_eq!(defs_at(".gitlab/ci/rules/mr.yml", code), lint_job);
+        assert!(defs_at("ci/release.yml", code).is_empty());
+        assert!(defs_at("sub/.gitlab/ci/release.yml", code).is_empty());
     }
 
     #[test]

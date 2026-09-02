@@ -1,5 +1,6 @@
-# GitLab CI configuration, including `.gitlab-ci-*.yml` fragments that
-# local includes pull in.
+# GitLab CI configuration, including `.gitlab-ci-*.yml` fragments and
+# anything under the conventional `.gitlab/ci/` directory that local
+# includes pull in.
 # Root entries are either global keywords or author-named jobs (hidden
 # `.template` jobs included); global variables and stages are named
 # children; `include:` statements become imports.
@@ -10,6 +11,7 @@ name: gitlab_ci
 match:
   filename_suffixes: [.gitlab-ci.yml, .gitlab-ci.yaml]
   filename_prefixes: [.gitlab-ci]
+  directory_prefixes: [.gitlab/ci/]
 keywords: [default, include, stages, variables, workflow, spec,
            image, services, cache, before_script, after_script, types]
 definitions:

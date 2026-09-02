@@ -68,6 +68,8 @@ pub(super) struct Matcher {
     #[serde(default)]
     pub(super) filename_prefixes: Vec<String>,
     #[serde(default)]
+    pub(super) directory_prefixes: Vec<String>,
+    #[serde(default)]
     pub(super) document_keys: std::collections::BTreeMap<String, KeyCondition>,
 }
 
@@ -98,6 +100,10 @@ impl Matcher {
             .filename_prefixes
             .iter()
             .any(|prefix| filename.starts_with(prefix.as_str()))
+            || self
+                .directory_prefixes
+                .iter()
+                .any(|prefix| file_path.starts_with(prefix.as_str()))
         {
             return true;
         }
