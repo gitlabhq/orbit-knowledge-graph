@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 
 use ontology::constants::*;
+use ontology::denormalized::column_for;
 use orbit_utils::traversal_path::TraversalPath;
 
 use crate::input::*;
@@ -21,9 +22,10 @@ pub struct Hop {
     pub max_hops: u32,
     /// When set, the plan can join node tables directly without the edge table.
     pub fk: Option<HopFk>,
-    /// When set, `edge_table` is the pre-joined denormalized table and both
-    /// endpoints read their columns from this hop's scan instead of node tables.
-    pub denormalized: Option<DenormalizedEdge>,
+    /// When set, `edge_table` is a denormalized join table shared by every hop
+    /// in the same group; the group's first hop owns the single scan and the
+    /// others read their edge and node columns from it (see `lower::rebind`).
+    pub denormalized: Option<DenormalizedHop>,
     pub filters: Vec<(String, InputFilter)>,
     /// None for the first hop (it's the initial FROM).
     pub join_prev: Option<JoinColumns>,
@@ -75,6 +77,34 @@ pub struct NodePlan {
     pub needs_elevated_filter: bool,
     pub fk_needs_join: bool,
     pub emit_select: bool,
+}
+
+/// Index of the hop whose scan serves hop `i`'s denormalized group: the
+/// group's first hop in plan order.
+pub fn denormalized_owner(hops: &[Hop], i: usize) -> Option<usize> {
+    let group = hops[i].denormalized.as_ref()?.group;
+    hops.iter()
+        .position(|h| h.denormalized.as_ref().is_some_and(|d| d.group == group))
+}
+
+/// `(owner alias, prefixed column)` for a column of a denormalized hop's
+/// endpoint, e.g. `("e0", "t2_id")` for the `id` of the node at chain index 2.
+pub fn denormalized_node_column(
+    hops: &[Hop],
+    i: usize,
+    node: &str,
+    column: &str,
+) -> Option<(String, String)> {
+    let d = hops[i].denormalized.as_ref()?;
+    let table = if hops[i].from_node == node {
+        d.from_table
+    } else if hops[i].to_node == node {
+        d.to_table
+    } else {
+        return None;
+    };
+    let owner = denormalized_owner(hops, i)?;
+    Some((format!("e{owner}"), column_for(table, column)))
 }
 
 impl NodePlan {
@@ -474,29 +504,32 @@ fn elide_hops<'a>(
     (keep_hops, elided_fks, input)
 }
 
-/// Point a hop at its denormalized join table when its endpoints need no
-/// node-table read anyway. An elevated role floor is enforced through a node
-/// subquery, and a non-default redaction id makes `enforce` join the node
-/// table, so either falls back to the edge chain. Variable-length hops stay on
-/// the edge table because their UNION arms are built per depth from it. The
-/// binding also drops any FK, since the join table answers the hop directly.
+/// Point each matched group of hops at its denormalized join table when every
+/// endpoint in the group needs no node-table read anyway. An elevated role
+/// floor is enforced through a node subquery, and a non-default redaction id
+/// makes `enforce` join the node table, so either drops the whole group back to
+/// the edge chain. Bound hops drop any FK, since the path table answers them.
 fn bind_denormalized(hops: &mut [Hop], nodes: &HashMap<String, NodePlan>, input: &Input) {
+    let endpoint_ok = |alias: &str| {
+        nodes
+            .get(alias)
+            .is_some_and(|np| np.uses_default_pk() && !has_elevated_access_level(np, input))
+    };
+    let rejected: HashSet<usize> = hops
+        .iter()
+        .filter_map(|h| h.denormalized.as_ref().map(|d| (d.group, h)))
+        .filter(|(_, h)| !endpoint_ok(&h.from_node) || !endpoint_ok(&h.to_node))
+        .map(|(group, _)| group)
+        .collect();
     for hop in hops.iter_mut() {
         let Some(denorm) = hop.denormalized.as_ref() else {
             continue;
         };
-        let endpoints_ok = [&denorm.source_node, &denorm.target_node]
-            .iter()
-            .all(|alias| {
-                nodes
-                    .get(*alias)
-                    .is_some_and(|np| np.uses_default_pk() && !has_elevated_access_level(np, input))
-            });
-        if hop.max_hops == 1 && endpoints_ok {
+        if rejected.contains(&denorm.group) {
+            hop.denormalized = None;
+        } else {
             hop.edge_table = denorm.table.clone();
             hop.fk = None;
-        } else {
-            hop.denormalized = None;
         }
     }
 }
@@ -530,8 +563,8 @@ fn detect_fk_star(hops: &[Hop]) -> Option<String> {
 /// scope-preserving or reaching a global hub; gated out of point-selective endpoints
 /// and non-emittable shapes. The chain must keep one scoped node (the authz anchor).
 ///
-/// One hop may instead be denormalized: its join table scan reaches both of its
-/// endpoints at once and becomes the chain root, so the FK hops join onto it.
+/// One group of hops may instead be denormalized: its single scan reaches every
+/// node in its chain at once and becomes the root, so the FK hops join onto it.
 /// Pinned endpoints are fine there, since the scan seeks them on its own keys.
 fn detect_fk_chain(hops: &[Hop], nodes: &HashMap<String, NodePlan>) -> bool {
     let point_selective = |alias: &str| {
@@ -560,17 +593,20 @@ fn detect_fk_chain(hops: &[Hop], nodes: &HashMap<String, NodePlan>) -> bool {
             && !point_selective(&h.from_node)
             && !point_selective(&h.to_node)
     };
-    let denormalized_hops = hops.iter().filter(|h| h.denormalized.is_some()).count();
+    let groups: HashSet<usize> = hops
+        .iter()
+        .filter_map(|h| h.denormalized.as_ref().map(|d| d.group))
+        .collect();
     let emittable = || {
         let mut ordered: Vec<&Hop> = hops.iter().collect();
-        if let Some(k) = ordered.iter().position(|h| h.denormalized.is_some()) {
-            ordered[..=k].rotate_right(1);
+        if let Some((a, b)) = denormalized_span(hops) {
+            ordered[..=b].rotate_right(b - a + 1);
         }
         is_emittable_fk_chain_of(&ordered)
     };
     hops.len() >= 2
         && has_scope_anchor()
-        && denormalized_hops <= 1
+        && groups.len() <= 1
         && hops.iter().any(|h| h.fk.is_some())
         && hops.iter().all(|h| {
             h.max_hops == 1
@@ -580,14 +616,22 @@ fn detect_fk_chain(hops: &[Hop], nodes: &HashMap<String, NodePlan>) -> bool {
         && emittable()
 }
 
-/// Move the chain's denormalized hop (if any) to the front so `emit_chain`
+/// Move the chain's denormalized group (if any) to the front so `emit_chain`
 /// roots on its scan. `input.relationships` moves with it because the
 /// formatter pairs `e{i}` output columns with relationship `i`.
 fn rotate_denormalized_first(hops: &mut [Hop], input: &mut Input) {
-    if let Some(k) = hops.iter().position(|h| h.denormalized.is_some()) {
-        hops[..=k].rotate_right(1);
-        input.relationships[..=k].rotate_right(1);
+    if let Some((a, b)) = denormalized_span(hops) {
+        hops[..=b].rotate_right(b - a + 1);
+        input.relationships[..=b].rotate_right(b - a + 1);
     }
+}
+
+/// First and last index of the denormalized hops. Matched runs are contiguous
+/// in the query and reordering keeps them so.
+fn denormalized_span(hops: &[Hop]) -> Option<(usize, usize)> {
+    let first = hops.iter().position(|h| h.denormalized.is_some())?;
+    let last = hops.iter().rposition(|h| h.denormalized.is_some())?;
+    Some((first, last))
 }
 
 /// `emit_chain` joins each hop's not-yet-reached endpoint onto the running FROM,
@@ -642,7 +686,7 @@ fn reorder_by_selectivity(
 fn determine_hydration(node_plan: &NodePlan, input: &Input, hops: &[Hop]) -> HydrationStrategy {
     let alias = &node_plan.alias;
 
-    // The denormalized scan carries every column of both endpoints.
+    // The denormalized scan carries every column of every table in its chain.
     if hops
         .iter()
         .any(|h| h.denormalized.is_some() && (h.from_node == *alias || h.to_node == *alias))
@@ -723,8 +767,12 @@ fn resolve_cascade_anchors(hops: &mut [Hop]) {
     if hops.len() < 2 {
         return;
     }
-    for hop in hops.iter_mut().skip(1) {
-        hop.cascade_anchor = hop.join_prev.is_some() && hop.max_hops == 1;
+    for i in 1..hops.len() {
+        // A hop reading the same denormalized row as its predecessor has
+        // nothing to narrow against.
+        let shares_scan = denormalized_owner(hops, i).is_some_and(|owner| owner < i);
+        let hop = &mut hops[i];
+        hop.cascade_anchor = hop.join_prev.is_some() && hop.max_hops == 1 && !shares_scan;
     }
 }
 
@@ -784,17 +832,12 @@ fn compute_node_edge_mappings(
         }
         Strategy::Fk(FkShape::Chain) => {
             // Each node is joined as its own table, so it maps to its own PK,
-            // except the endpoints of a denormalized hop, which live in its scan.
+            // except the nodes of a denormalized group, which live in its scan.
             for (i, hop) in hops.iter().enumerate() {
-                let (start_col, end_col) = hop.direction.edge_columns();
-                for (node, id_col) in [(&hop.from_node, start_col), (&hop.to_node, end_col)] {
-                    if hop.denormalized.is_some() {
-                        mappings.insert(node.clone(), (format!("e{i}"), id_col.to_string()));
-                    } else {
-                        mappings
-                            .entry(node.clone())
-                            .or_insert_with(|| (node.clone(), DEFAULT_PRIMARY_KEY.to_string()));
-                    }
+                for node in [&hop.from_node, &hop.to_node] {
+                    let mapping = denormalized_node_column(hops, i, node, DEFAULT_PRIMARY_KEY)
+                        .unwrap_or_else(|| (node.clone(), DEFAULT_PRIMARY_KEY.to_string()));
+                    mappings.entry(node.clone()).or_insert(mapping);
                 }
             }
         }
@@ -802,12 +845,11 @@ fn compute_node_edge_mappings(
             for (i, hop) in hops.iter().enumerate() {
                 let alias = format!("e{i}");
                 let (start_col, end_col) = hop.direction.edge_columns();
-                mappings
-                    .entry(hop.from_node.clone())
-                    .or_insert_with(|| (alias.clone(), start_col.to_string()));
-                mappings
-                    .entry(hop.to_node.clone())
-                    .or_insert_with(|| (alias.clone(), end_col.to_string()));
+                for (node, id_col) in [(&hop.from_node, start_col), (&hop.to_node, end_col)] {
+                    let mapping = denormalized_node_column(hops, i, node, DEFAULT_PRIMARY_KEY)
+                        .unwrap_or_else(|| (alias.clone(), id_col.to_string()));
+                    mappings.entry(node.clone()).or_insert(mapping);
+                }
             }
         }
     }

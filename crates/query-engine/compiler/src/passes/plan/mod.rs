@@ -14,6 +14,7 @@ use crate::input::*;
 
 pub use edge_chain::{
     FkShape, Hop, HopFk, HydrationStrategy, JoinColumns, NodePlan, Selectivity, Strategy,
+    denormalized_node_column, denormalized_owner,
 };
 pub use hydration::HydrationNodePlan;
 

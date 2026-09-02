@@ -421,8 +421,8 @@ fn node_scan(
 }
 
 /// The chain root is either the first hop's `from` node table or, when the
-/// planner rotated a denormalized hop to the front, that hop's join table scan,
-/// which reaches both of its endpoints at once.
+/// planner rotated a denormalized group to the front, that group's join table
+/// scan, which reaches every node in the group at once.
 fn emit_chain(plan: &Plan) -> Result<EmitOutput> {
     let first = &plan.hops[0];
     let node_plan = |alias: &str| {
@@ -434,11 +434,14 @@ fn emit_chain(plan: &Plan) -> Result<EmitOutput> {
     let mut reached: HashSet<&str> = HashSet::new();
     let mut selects = Vec::new();
     let mut from = if first.denormalized.is_some() {
-        for alias in [&first.from_node, &first.to_node] {
-            selects.extend(node_select_columns(alias, node_plan(alias)?));
-            reached.insert(alias.as_str());
+        for hop in plan.hops.iter().filter(|h| h.denormalized.is_some()) {
+            for alias in [&hop.from_node, &hop.to_node] {
+                if reached.insert(alias.as_str()) {
+                    selects.extend(node_select_columns(alias, node_plan(alias)?));
+                }
+            }
         }
-        denormalized_scan("e0", first, &plan.nodes, &plan.table_columns)
+        denormalized_scan(&plan.hops, 0, &plan.nodes, &plan.table_columns)
     } else {
         let root_np = node_plan(&first.from_node)?;
         selects.extend(node_select_columns(&first.from_node, root_np));

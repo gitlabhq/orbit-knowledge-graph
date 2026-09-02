@@ -582,10 +582,10 @@ pub struct InputRelationship {
     /// The compiler resolves which node has the column from the edge variant's entity types.
     #[serde(skip)]
     pub fk_column: Option<String>,
-    /// Pre-joined edge+node table answering this hop without joins. Set during
-    /// normalization when the single resolved variant opts in.
+    /// This hop's place in a declared denormalized join that a run of the
+    /// query's relationships matched. Set during normalization.
     #[serde(skip)]
-    pub denormalized: Option<DenormalizedEdge>,
+    pub denormalized: Option<DenormalizedHop>,
     /// Tight `traversal_path` prefix this edge's scan may be confined to. Set by
     /// `restrict` when both endpoints resolve to the same project/group scope, so
     /// the edge scan inherits the PK prefix instead of the broad org-wide one.
@@ -601,13 +601,20 @@ pub struct InputRelationship {
     pub scope_preserving: bool,
 }
 
-/// Which query node plays the variant's source and target, since the query
-/// may traverse the edge in either direction.
+/// Where a query hop and its endpoints sit in a denormalized join's table
+/// chain, so their columns can be read from that join's table
+/// (`denormalized::column_for`). Hops that matched the same occurrence share a
+/// `group` and one scan.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DenormalizedEdge {
+pub struct DenormalizedHop {
     pub table: String,
-    pub source_node: String,
-    pub target_node: String,
+    pub group: usize,
+    /// Chain index of the hop's edge table.
+    pub edge_table: usize,
+    /// Chain index of the `from` node's table.
+    pub from_table: usize,
+    /// Chain index of the `to` node's table.
+    pub to_table: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

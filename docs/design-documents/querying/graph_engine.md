@@ -107,6 +107,7 @@ Node and edge tables use `ReplacingMergeTree(_version, _deleted)`. Between backg
 | Hydration (UNION ALL arms) | Non-`FINAL` scan with `LIMIT 1 BY <sort_key> ORDER BY <sort_key>, _version DESC`, outer `_deleted = false` | Hydration reads a tiny pinned `id IN (...)` set; dropping `FINAL` lets column pruning and projections apply (`FINAL` reconstructs full rows, defeating both). Dedup identity is the table's full sort key, matching `FINAL`'s per-ORDER-BY-key semantics. Falls back to `FINAL` when a table has no sort key. |
 | Main query node scans | Node table scan with `FINAL` | Keeps traversal, FK, aggregation, and single-node lookup semantics consistent |
 | Edge scans | `_deleted = false` in WHERE | Full-tuple ORDER BY makes RMT merge effective; only soft-delete filtering needed |
+| Denormalized join scans | Single scan with `FINAL`, `_deleted = false` | The row's `_deleted` folds in every table in the chain, so one latest-row read replaces the edge scans and node joins |
 
 Filter placement rules for node `FINAL` scans:
 
@@ -131,6 +132,8 @@ denormalized_joins:
 ```
 
 That resolves to the table chain `gl_user, gl_edge, gl_merge_request, gl_project`. Adjacent tables join on the id or edge id that links them, and every scoped table keeps its own `traversal_path` in the row, exactly as each scan alias keeps its own in an ordinary join. Every other column of every table is copied under a `t{i}_` prefix. The first scoped table's `traversal_path` is the row's unprefixed one and leads the sort key. The DDL generator composes the table from the source tables' already-generated definitions (columns, codecs, indexes, settings, partitioning) and emits one `TO` materialized view per table, joined outward from the trigger with `FINAL`. The security pass filters each path column in the row against the authorized set (see `Ontology::traversal_path_columns`), each at its own table's role floor, so a hop may cross namespaces just as it may in an edge chain: a row is returned only when the caller is authorized for every namespace it touches. The loader only requires that at least one table in the chain is scoped.
+
+The compiler uses a join wherever a run of the query's relationships matches its chain (longest joins first, forwards or backwards, each relationship naming one kind, fixed-length and directed). The matched hops form a group: the first owns the one `FINAL` scan of the join table, the rest add their predicates to it without a FROM entry, every node in the group skips hydration, and lowering finishes by rewriting each `<node>.<column>` and `e{i}.<column>` in the group onto the owner's prefixed columns (`mr.title` becomes `e0.t2_title`, `e1.target_id` becomes `e0.t3_target_id`). A group may sit anywhere in a longer edge chain; when every other hop is FK-backed, the FK chain lowering rotates the group to the front, roots on its scan, and joins the remaining node tables onto it. Endpoints that need a node-table read anyway (a non-default redaction id, an elevated role floor) drop the group back to the edge chain, and joins containing an FK-realized hop are not matched yet.
 
 ### Scope rewrite (traversal_path prefix injection)
 

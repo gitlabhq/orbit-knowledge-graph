@@ -1,9 +1,11 @@
 use crate::error::{QueryError, Result};
 use crate::input::{
-    ColumnSelection, DenormalizedEdge, Direction, EntityAuthConfig, Input, QueryType, TextIndexMeta,
+    ColumnSelection, DenormalizedHop, Direction, EntityAuthConfig, Input, InputRelationship,
+    QueryType, TextIndexMeta,
 };
 use crate::passes::hydrate::VirtualColumnRequest;
 use ontology::constants::DEFAULT_PRIMARY_KEY;
+use ontology::denormalized::DenormalizedJoin;
 use ontology::{EnumType, Ontology, TraversalPathKind};
 use serde_json::Value;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -306,50 +308,112 @@ pub fn normalize(mut input: Input, ontology: &Ontology) -> Result<Input> {
     }
     infer_wildcard_relationship_kinds(&mut input, ontology);
     resolve_fk_metadata(&mut input, ontology);
-    resolve_denormalized_tables(&mut input, ontology);
+    resolve_denormalized_joins(&mut input, ontology);
     Ok(input)
 }
 
-/// A hop binds to a denormalized join table only when it names exactly one
-/// relationship kind and exactly one variant orientation matches the endpoint
-/// entities, so the table's `src_`/`tgt_` sides map unambiguously onto nodes.
-fn resolve_denormalized_tables(input: &mut Input, ontology: &Ontology) {
+/// Match runs of the query's relationships against declared denormalized
+/// joins and record each matched hop's place in the join's table chain.
+/// Longer joins are tried first and matched runs never overlap. A run matches
+/// when each relationship names exactly one kind, is fixed-length and
+/// directed, and its physical source and target aliases carry the declared
+/// kinds; the run may walk the chain backwards. Joins with an FK-realized hop
+/// are not matched yet: such a hop has no edge table to read edge columns from.
+fn resolve_denormalized_joins(input: &mut Input, ontology: &Ontology) {
     let entity_for: HashMap<&str, &str> = input
         .nodes
         .iter()
         .filter_map(|n| Some((n.id.as_str(), n.entity.as_deref()?)))
         .collect();
+    let mut joins: Vec<&DenormalizedJoin> = ontology
+        .denormalized_joins()
+        .iter()
+        .filter(|j| j.hops.iter().all(|h| h.edge_table.is_some()))
+        .collect();
+    joins.sort_by_key(|j| std::cmp::Reverse(j.hops.len()));
 
-    for rel in &mut input.relationships {
-        let [rel_type] = rel.types.as_slice() else {
-            continue;
-        };
-        let (Some(from_entity), Some(to_entity)) = (
-            entity_for.get(rel.from.as_str()),
-            entity_for.get(rel.to.as_str()),
-        ) else {
-            continue;
-        };
-
-        let forward = ontology.denormalized_join_table(rel_type, from_entity, to_entity);
-        let reverse = ontology.denormalized_join_table(rel_type, to_entity, from_entity);
-        let bound = match rel.direction {
-            Direction::Outgoing => forward.map(|m| (m, &rel.from, &rel.to)),
-            Direction::Incoming => reverse.map(|m| (m, &rel.to, &rel.from)),
-            Direction::Both => match (forward, reverse) {
-                (Some(m), None) => Some((m, &rel.from, &rel.to)),
-                (None, Some(m)) => Some((m, &rel.to, &rel.from)),
-                _ => None,
-            },
-        };
-        if let Some((mat, source_node, target_node)) = bound {
-            rel.denormalized = Some(DenormalizedEdge {
-                table: mat.table,
-                source_node: source_node.clone(),
-                target_node: target_node.clone(),
-            });
+    let rels = &mut input.relationships;
+    let mut group = 0;
+    for join in joins {
+        let k = join.hops.len();
+        let mut start = 0;
+        while start + k <= rels.len() {
+            let run = &rels[start..start + k];
+            let matched = if run.iter().any(|r| r.denormalized.is_some()) {
+                None
+            } else {
+                match_run(run, join, &entity_for, false)
+                    .or_else(|| match_run(run, join, &entity_for, true))
+            };
+            let Some(bindings) = matched else {
+                start += 1;
+                continue;
+            };
+            for (rel, hop) in rels[start..start + k].iter_mut().zip(bindings) {
+                rel.denormalized = Some(DenormalizedHop {
+                    table: join.table.clone(),
+                    group,
+                    ..hop
+                });
+            }
+            group += 1;
+            start += k;
         }
     }
+}
+
+/// Chain positions per relationship when `run` walks `join` forwards, or
+/// backwards when `reversed`. `table` and `group` are filled by the caller.
+fn match_run(
+    run: &[InputRelationship],
+    join: &DenormalizedJoin,
+    entity_for: &HashMap<&str, &str>,
+    reversed: bool,
+) -> Option<Vec<DenormalizedHop>> {
+    let k = join.hops.len();
+    let mut out = Vec::with_capacity(k);
+    let mut prev_to: Option<&str> = None;
+    for (m, rel) in run.iter().enumerate() {
+        let [rel_type] = rel.types.as_slice() else {
+            return None;
+        };
+        if rel.hops.max != 1 || rel.direction == Direction::Both {
+            return None;
+        }
+        let hop = &join.hops[if reversed { k - 1 - m } else { m }];
+        if *rel_type != hop.relationship_kind {
+            return None;
+        }
+        // The query walks `rel.from` -> `rel.to`; `direction` says which of
+        // them is the edge's physical source.
+        let (source_alias, target_alias) = match rel.direction {
+            Direction::Outgoing => (rel.from.as_str(), rel.to.as_str()),
+            Direction::Incoming => (rel.to.as_str(), rel.from.as_str()),
+            Direction::Both => unreachable!(),
+        };
+        if entity_for.get(source_alias) != Some(&hop.source_kind.as_str())
+            || entity_for.get(target_alias) != Some(&hop.target_kind.as_str())
+        {
+            return None;
+        }
+        if prev_to.is_some_and(|prev| prev != rel.from) {
+            return None;
+        }
+        prev_to = Some(rel.to.as_str());
+        let (from_table, to_table) = if rel.direction == Direction::Outgoing {
+            (hop.source_table, hop.target_table)
+        } else {
+            (hop.target_table, hop.source_table)
+        };
+        out.push(DenormalizedHop {
+            table: String::new(),
+            group: 0,
+            edge_table: hop.edge_table.expect("fk-realized joins are filtered out"),
+            from_table,
+            to_table,
+        });
+    }
+    Some(out)
 }
 
 fn resolve_fk_metadata(input: &mut Input, ontology: &Ontology) {

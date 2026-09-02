@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 
 use ontology::constants::*;
-use ontology::denormalized::Side;
+use ontology::denormalized::column_for;
 use orbit_utils::traversal_path::TraversalPath;
 
 use crate::ast::*;
@@ -365,44 +365,61 @@ pub(super) fn denormalized_node_predicates(
         return vec![];
     };
     [
-        (&denorm.source_node, Side::Source),
-        (&denorm.target_node, Side::Target),
+        (&hop.from_node, denorm.from_table),
+        (&hop.to_node, denorm.to_table),
     ]
     .into_iter()
-    .filter_map(|(node_alias, side)| nodes.get(node_alias).map(|np| (np, side)))
-    .flat_map(|(np, side)| {
+    .filter_map(|(node_alias, table)| nodes.get(node_alias).map(|np| (np, table)))
+    .flat_map(|(np, table)| {
         np.filters
             .iter()
-            .map(move |(prop, filter)| filter_to_expr(alias, &side.column_for(prop), filter))
+            .map(move |(prop, filter)| filter_to_expr(alias, &column_for(table, prop), filter))
     })
     .collect()
 }
 
-/// Latest-row scan of a denormalized hop's join table carrying every predicate
-/// the hop and both endpoints contribute. Both endpoints are answered by this
-/// one scan, so a chain can root on it and join further hops onto its id columns.
+/// Latest-row scan of a denormalized group's join table carrying every
+/// predicate the group's hops and nodes contribute, emitted against each hop's
+/// own `e{i}` alias so the rebind lands them on the owner's prefixed columns.
+/// Every node on the path is answered by this one scan, so a chain can root on
+/// it and join further hops onto its id columns.
 pub(super) fn denormalized_scan(
-    alias: &str,
-    hop: &Hop,
+    hops: &[Hop],
+    owner: usize,
     nodes: &HashMap<String, NodePlan>,
     table_columns: &HashMap<String, HashSet<String>>,
 ) -> TableRef {
+    let alias = format!("e{owner}");
+    let group = hops[owner].denormalized.as_ref().map(|d| d.group);
     let mut where_parts = Vec::new();
-    push_edge_predicates(&mut where_parts, alias, hop, nodes, table_columns, false);
-    for (prop, filter) in &hop.filters {
-        where_parts.push(filter_to_expr(alias, prop, filter));
+    for (i, hop) in hops.iter().enumerate() {
+        if hop.denormalized.as_ref().map(|d| d.group) != group {
+            continue;
+        }
+        let hop_alias = format!("e{i}");
+        push_edge_predicates(
+            &mut where_parts,
+            &hop_alias,
+            hop,
+            nodes,
+            table_columns,
+            i != owner,
+        );
+        for (prop, filter) in &hop.filters {
+            where_parts.push(filter_to_expr(&hop_alias, prop, filter));
+        }
+        where_parts.extend(node_id_pin_predicates(&hop_alias, hop, nodes));
+        where_parts.extend(denormalized_node_predicates(&alias, hop, nodes));
+        where_parts.extend(edge_scope_predicate(hop, &hop_alias));
     }
-    where_parts.extend(node_id_pin_predicates(alias, hop, nodes));
-    where_parts.extend(denormalized_node_predicates(alias, hop, nodes));
-    where_parts.extend(edge_scope_predicate(hop, alias));
     TableRef::subquery(
         Query {
             select: vec![SelectExpr::star()],
-            from: TableRef::scan_final(&hop.edge_table, alias),
+            from: TableRef::scan_final(&hops[owner].edge_table, &alias),
             where_clause: Expr::conjoin(where_parts),
             ..Default::default()
         },
-        alias,
+        &alias,
     )
 }
 

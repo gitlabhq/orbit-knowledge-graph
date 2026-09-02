@@ -1746,12 +1746,19 @@ mod tests {
         assert!(sql.contains("GROUP BY f.old_path"), "got:\n{sql}");
     }
 
-    const DENORM_REVIEWER: &str = "gl_denorm_reviewer__user__merge_request";
-
+    /// REVIEWER alone, plus REVIEWER then HAS_LABEL as a two-hop chain. Longer
+    /// joins match first, so a query with both hops folds into the two-hop table.
     static DENORM_ONTOLOGY: LazyLock<Ontology> = LazyLock::new(|| {
         Ontology::load_embedded()
             .expect("ontology must load")
-            .with_denormalized_variant("REVIEWER", "User", "MergeRequest")
+            .with_denormalized_join("reviewer", &[("REVIEWER", "User", "MergeRequest", false)])
+            .with_denormalized_join(
+                "reviewer_label",
+                &[
+                    ("REVIEWER", "User", "MergeRequest", false),
+                    ("HAS_LABEL", "MergeRequest", "Label", false),
+                ],
+            )
     });
 
     fn compile_sql_denormalized(query: &str) -> String {
@@ -1778,7 +1785,7 @@ mod tests {
         let sql = compile_sql_denormalized(query);
 
         assert!(
-            sql.contains(&format!("FROM {DENORM_REVIEWER} AS e0 FINAL")),
+            sql.contains("FROM gl_denorm_reviewer AS e0 FINAL"),
             "got:\n{sql}"
         );
         assert!(
@@ -1788,19 +1795,22 @@ mod tests {
             "no edge or node table may be scanned, got:\n{sql}"
         );
         for fragment in [
-            "e0.src_username AS u_username",
-            "e0.tgt_title AS mr_title",
-            "e0.tgt_state = 'merged'",
-            "ORDER BY e0.tgt_created_at DESC",
-            "e0.source_id AS _gkg_u_id",
-            "e0.target_id AS _gkg_mr_id",
+            "e0.t1_relationship_kind AS e0_type",
+            "e0.t1_source_id AS e0_src",
+            "e0.t0_username AS u_username",
+            "e0.t2_title AS mr_title",
+            "e0.t2_state = 'merged'",
+            "ORDER BY e0.t2_created_at DESC",
+            "e0.t0_id AS _gkg_u_id",
+            "e0.t2_id AS _gkg_mr_id",
             "e0.traversal_path AS _gkg_mr_tp",
             "startsWith(e0.traversal_path",
+            "e0._deleted = false",
         ] {
             assert!(sql.contains(fragment), "expected `{fragment}`, got:\n{sql}");
         }
         assert!(
-            !sql.contains("u.") && !sql.contains("mr."),
+            !sql.contains(" u.") && !sql.contains(" mr."),
             "every node alias must be rebound, got:\n{sql}"
         );
     }
@@ -1822,11 +1832,11 @@ mod tests {
         let sql = compile_sql_denormalized(query);
 
         assert!(
-            sql.contains(&format!("FROM {DENORM_REVIEWER} AS e0 FINAL")),
+            sql.contains("FROM gl_denorm_reviewer AS e0 FINAL"),
             "got:\n{sql}"
         );
         assert!(
-            sql.contains("GROUP BY e0.src_username, e0.source_id"),
+            sql.contains("GROUP BY e0.t0_username, e0.t0_id"),
             "got:\n{sql}"
         );
     }
@@ -1846,18 +1856,18 @@ mod tests {
         let sql = compile_sql_denormalized(query);
 
         assert!(
-            sql.contains(&format!("FROM {DENORM_REVIEWER} AS e0 FINAL")),
+            sql.contains("FROM gl_denorm_reviewer AS e0 FINAL"),
             "got:\n{sql}"
         );
-        assert!(sql.contains("e0.target_id = 5"), "got:\n{sql}");
+        assert!(sql.contains("e0.t1_target_id = 5"), "got:\n{sql}");
         assert!(
-            sql.contains("e0.source_id AS u_id") && sql.contains("e0.target_id AS mr_id"),
+            sql.contains("e0.t0_id AS u_id") && sql.contains("e0.t2_id AS mr_id"),
             "got:\n{sql}"
         );
     }
 
     #[test]
-    fn denormalized_hop_in_a_chain_dedups_with_final_and_anchors_on_typed_columns() {
+    fn two_hop_run_folds_into_the_longer_join_with_one_scan() {
         let query = r#"{
             "query_type": "traversal",
             "nodes": [
@@ -1875,18 +1885,68 @@ mod tests {
 
         let sql = compile_sql_denormalized(query);
 
+        assert_eq!(
+            sql.matches("FROM gl_denorm_reviewer_label AS e0 FINAL")
+                .count(),
+            1,
+            "got:\n{sql}"
+        );
+        assert!(
+            !sql.contains("gl_denorm_reviewer AS"),
+            "the longer join wins, got:\n{sql}"
+        );
+        assert!(
+            !sql.contains("INNER JOIN"),
+            "one scan serves both hops, got:\n{sql}"
+        );
         for fragment in [
-            &format!("FROM {DENORM_REVIEWER} AS e0 FINAL"),
-            "e0.tgt_title AS mr_title",
-            "e0.tgt_state = 'merged'",
-            &format!("FROM {DENORM_REVIEWER} AS e0p WHERE"),
-            "e0p.tgt_state = 'merged'",
-            "FROM gl_edge AS e1 FINAL",
+            "e0.t1_relationship_kind AS e0_type",
+            "e0.t3_relationship_kind AS e1_type",
+            "e0.t3_target_id AS e1_dst",
+            "e0.t0_username AS u_username",
+            "e0.t2_title AS mr_title",
+            "e0.t4_title AS l_title",
+            "e0.t2_state = 'merged'",
+            "e0.t1_source_id = 7",
+            "e0.t4_id AS _gkg_l_id",
+        ] {
+            assert!(sql.contains(fragment), "expected `{fragment}`, got:\n{sql}");
+        }
+    }
+
+    #[test]
+    fn denormalized_hop_in_a_chain_dedups_with_final_and_anchors_on_prefixed_columns() {
+        // ASSIGNED has no join, so this is a denormalized hop followed by a plain edge hop.
+        let query = r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User", "columns": ["username"], "node_ids": [7]},
+                {"id": "mr", "entity": "MergeRequest", "columns": ["title"],
+                 "filters": {"state": {"eq": "merged"}}},
+                {"id": "a", "entity": "User", "columns": ["username"]}
+            ],
+            "relationships": [
+                {"type": "REVIEWER", "from": "u", "to": "mr"},
+                {"type": "ASSIGNED", "from": "mr", "to": "a", "direction": "incoming"}
+            ],
+            "limit": 10
+        }"#;
+
+        let sql = compile_sql_denormalized(query);
+
+        for fragment in [
+            "FROM (SELECT * FROM gl_denorm_reviewer AS e0 FINAL",
+            "INNER JOIN (SELECT * FROM gl_edge AS e1 FINAL",
+            "ON (e0.t1_target_id = e1.target_id)",
+            "e0.t2_state = 'merged'",
+            "FROM gl_denorm_reviewer AS e0p WHERE",
+            "e0p.t2_state = 'merged'",
+            "e0p.t1_source_id = 7",
         ] {
             assert!(sql.contains(fragment), "expected `{fragment}`, got:\n{sql}");
         }
         assert!(
-            !sql.contains("e0p.target_tags") && !sql.contains("e0.target_tags"),
+            !sql.contains("e0.target_tags") && !sql.contains("e0p.target_tags"),
             "the join table has no tag columns, got:\n{sql}"
         );
     }
@@ -1912,15 +1972,15 @@ mod tests {
         let sql = compile_sql_denormalized(query);
 
         for fragment in [
-            &format!("FROM (SELECT * FROM {DENORM_REVIEWER} AS e0 FINAL"),
-            "e0.source_id = 7",
+            "FROM (SELECT * FROM gl_denorm_reviewer AS e0 FINAL",
+            "e0.t1_source_id = 7",
             "INNER JOIN (SELECT * FROM gl_pipeline AS pl FINAL",
-            "ON (pl.merge_request_id = e0.target_id)",
-            "e0.relationship_kind AS e0_type",
+            "ON (pl.merge_request_id = e0.t2_id)",
+            "e0.t1_relationship_kind AS e0_type",
             "'TRIGGERED' AS e1_type",
-            "e0.target_id AS e1_src",
+            "e0.t2_id AS e1_src",
             "pl.id AS e1_dst",
-            "e0.tgt_title AS mr_title",
+            "e0.t2_title AS mr_title",
         ] {
             assert!(sql.contains(fragment), "expected `{fragment}`, got:\n{sql}");
         }
@@ -1933,7 +1993,7 @@ mod tests {
     }
 
     #[test]
-    fn variant_without_opt_in_keeps_the_edge_scan() {
+    fn relationship_without_a_declared_join_keeps_the_edge_scan() {
         let query = r#"{
             "query_type": "traversal",
             "nodes": [
@@ -1959,8 +2019,8 @@ mod tests {
             );
             let sql = compile_sql_denormalized(&query);
             assert!(
-                !sql.contains(DENORM_REVIEWER),
-                "rel {rel} must not use the join table, got:\n{sql}"
+                !sql.contains("gl_denorm_"),
+                "rel {rel} must not use a join table, got:\n{sql}"
             );
         }
     }
