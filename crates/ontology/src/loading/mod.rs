@@ -1250,7 +1250,7 @@ pub(crate) fn resolve_denormalized_join(
 ) -> Result<crate::denormalized::DenormalizedJoin, OntologyError> {
     use crate::constants::{
         DEFAULT_PRIMARY_KEY, RELATIONSHIP_KIND_COLUMN, SOURCE_ID_COLUMN, SOURCE_KIND_COLUMN,
-        TARGET_ID_COLUMN, TARGET_KIND_COLUMN, TRAVERSAL_PATH_COLUMN,
+        TARGET_ID_COLUMN, TARGET_KIND_COLUMN,
     };
     use crate::denormalized::{DenormalizedJoin, JoinHop, JoinOn, JoinedTable, table_name};
 
@@ -1276,8 +1276,8 @@ pub(crate) fn resolve_denormalized_join(
         |n: &crate::NodeEntity, col: &str| n.storage.columns.iter().any(|c| c.name == col);
     let node_table = |n: &crate::NodeEntity| JoinedTable {
         table: n.destination_table.clone(),
-        has_traversal_path: has_column(n, TRAVERSAL_PATH_COLUMN),
-        has_id: has_column(n, DEFAULT_PRIMARY_KEY),
+        has_traversal_path: n.has_traversal_path,
+        has_id: true,
         join: None,
         filter: vec![],
     };

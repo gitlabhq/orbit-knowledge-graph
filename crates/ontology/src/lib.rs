@@ -958,7 +958,8 @@ impl Ontology {
     #[must_use]
     pub fn is_table_path_scopable(&self, table: &str) -> bool {
         let normalized = strip_schema_version_prefix(table);
-        // A denormalized row carries its anchor table's traversal_path.
+        // A denormalized join's sort key always leads with its anchor's
+        // traversal_path, so a startsWith on it prunes granules.
         if self.denormalized_join_by_table(normalized).is_some() {
             return true;
         }

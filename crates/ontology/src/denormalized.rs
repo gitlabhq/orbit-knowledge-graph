@@ -16,7 +16,7 @@ use crate::constants::{
     DEFAULT_PRIMARY_KEY, DELETED_COLUMN, TRAVERSAL_PATH_COLUMN, VERSION_COLUMN,
 };
 
-pub const TABLE_PREFIX: &str = "gl_denorm_";
+const TABLE_PREFIX: &str = "gl_denorm_";
 
 #[must_use]
 pub fn table_name(name: &str) -> String {
@@ -66,6 +66,8 @@ pub struct JoinOn {
 pub struct JoinedTable {
     pub table: String,
     pub has_traversal_path: bool,
+    /// Node tables have an `id`; edge tables do not. Only `id` columns enter
+    /// the sort key.
     pub has_id: bool,
     /// `None` for the first table.
     pub join: Option<JoinOn>,
