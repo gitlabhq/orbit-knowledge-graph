@@ -358,6 +358,18 @@ A dual `IN` on `(traversal_path, owner-id)` prunes the edge scan to the changed 
 The swept set is derived entirely from the ontology: an edge is reconciled iff its mapping is marked `mutable: true` (the FK can change, so the edge can orphan); immutable FKs (`project_id`, `author_id`) leave it unset and are never swept. The metadata for each variant (owner table, graph column, edge table, direction, endpoint kinds) is likewise derived from the ontology.
 This runs directly in the dispatcher rather than dispatching to indexer workers — it is one cheap global sweep, not per-namespace fan-out, and keeps the load off the high-throughput insert path.
 
+**Edge tombstone collapse**
+
+Variable-depth traversal reads edge tables without version resolution, so a tombstoned edge stays visible to k-hop queries until its rows are physically removed.
+`EdgeTombstoneCollapse` is a `ScheduledTask` in `DispatchIndexing` mode (default every 15 minutes). Each run has four steps:
+
+1. Read the traversal paths that received edge tombstones since the cursor. The Arrow writer appends a row to the unversioned `tombstone_scopes` table for every edge batch with `_deleted = true` rows. A code reindex writes `code_indexing_checkpoint` after it tombstones stale code edges.
+2. Per edge table, select the keys under those paths whose newest row is a tombstone. `traversal_path` leads every edge sort key, so the select is pruned by primary key.
+3. Remove those keys with a lightweight `DELETE` whose predicate is a literal tuple list. A literal predicate replays safely as a stored mutation; a subquery or `UNION` does not.
+4. Advance the cursor only when every edge table drained within its per-run key budget.
+
+The weekly `TableCleanup` task (`APPLY DELETED MASK`) then materializes those deletes. Stale-edge reconciliation and namespace deletion tombstone through SQL statements and leave no scope row. Every version-resolving read hides those tombstones, and this task does not collapse them.
+
 ##### Zero-downtime schema changes
 
 **Main PostgreSQL to Lake**

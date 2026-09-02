@@ -80,18 +80,16 @@ impl ClickHouseStaleDataCleaner {
                 id,
                 {{watermark_time:DateTime64(6, 'UTC')}} - toIntervalMicrosecond(1) AS _version,
                 true AS _deleted
-            FROM {table} FINAL
+            FROM {table} AS s FINAL
             WHERE traversal_path = {{traversal_path:String}}
               AND project_id = {{project_id:Int64}}
               AND branch = {{branch:String}}
-              AND _version < {{watermark_time:DateTime64(6, 'UTC')}}
+              AND s._version < {{watermark_time:DateTime64(6, 'UTC')}} - toIntervalMicrosecond(1)
             "#
         )
     }
 
     fn build_edge_delete_query(edge_table: &str, node_tables: &[&str]) -> String {
-        // gl_code_edge has project_id + branch columns, so we can
-        // filter directly without a subquery join.
         if edge_table.contains("code_edge") {
             return format!(
                 r#"
@@ -106,11 +104,11 @@ impl ClickHouseStaleDataCleaner {
                     target_kind,
                     {{watermark_time:DateTime64(6, 'UTC')}} - toIntervalMicrosecond(1) AS _version,
                     true AS _deleted
-                FROM {edge_table} FINAL
+                FROM {edge_table} AS s FINAL
                 WHERE traversal_path = {{traversal_path:String}}
                   AND project_id = {{project_id:Int64}}
                   AND branch = {{branch:String}}
-                  AND _version < {{watermark_time:DateTime64(6, 'UTC')}}
+                  AND s._version < {{watermark_time:DateTime64(6, 'UTC')}} - toIntervalMicrosecond(1)
                 "#,
             );
         }

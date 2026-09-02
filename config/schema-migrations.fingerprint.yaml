@@ -152,3 +152,4 @@ ddl:
 auxiliary_schema:
   materialized_view/namespace_storage_snapshot_refresh: f640de1b1ad6a5005c7360028af68a82db8095556b948d1cb96a117ad266cd50
   table/namespace_storage_snapshot: 44134bde951d6ca69941c70d58d840c3b5cd644cf529a7d23124617a26bfe74c
+  table/tombstone_scopes: b3bf3fd5a625ca64735a738b243ac7602627b63313a80b0a34c3103baa964685

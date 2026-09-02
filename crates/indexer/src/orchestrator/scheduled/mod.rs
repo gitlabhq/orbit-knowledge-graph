@@ -2,6 +2,7 @@ mod metrics;
 
 pub mod backfill_sweep;
 pub mod code_stale_sweep;
+pub mod edge_tombstone_collapse;
 pub mod global;
 pub mod migration_completion;
 pub mod namespace;
@@ -11,6 +12,7 @@ pub mod table_cleanup;
 
 pub use backfill_sweep::CodeBackfillSweep;
 pub use code_stale_sweep::CodeStaleSweep;
+pub use edge_tombstone_collapse::EdgeTombstoneCollapse;
 pub use global::GlobalDispatcher;
 pub use metrics::ScheduledTaskMetrics;
 pub use migration_completion::MigrationCompletionChecker;
