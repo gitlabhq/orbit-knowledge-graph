@@ -8,16 +8,17 @@ use sha2::{Digest, Sha256};
 const DUCKDB_VERSION: &str = "v1.5.5";
 
 /// Rust target, DuckDB platform, SHA-256 of fts.duckdb_extension.gz (upstream publishes none).
-const FTS_ARTIFACTS: &str = "
-x86_64-unknown-linux-gnu    linux_amd64       90d6f049e59b592566cfcd228de3001eb679c64e9f144c138dc2cd55dab12cd6
-aarch64-unknown-linux-gnu   linux_arm64       87a8c2dddf41d397c617af41e479d4e365dd66a9f115cec7e78374057e80478f
-x86_64-unknown-linux-musl   linux_amd64_musl  10b1049bffa9cbd85ae1a9e82e330258666780ca79a462829e0d78318b08433f
-aarch64-unknown-linux-musl  linux_arm64_musl  21d81026d1fc06613fd6d0dd63d5ab2de8e61540b9f5d1c441d5d7cc80d9e3f0
-x86_64-apple-darwin         osx_amd64         c3da1ea86c107650edf06a8296094640b9f4886b8ceab4ad42912b6ff5c880bc
-aarch64-apple-darwin        osx_arm64         b6b8d0a13e0457f3ce368e4e7c2ff8de48637eea5ca61e5ff983c05018e7f315
-x86_64-pc-windows-gnullvm   windows_amd64     24a328d189aa87a22cd3c2ac6c3f484a49ba30adfd6ce05572fe5841429f2ab5
-x86_64-pc-windows-msvc      windows_amd64     24a328d189aa87a22cd3c2ac6c3f484a49ba30adfd6ce05572fe5841429f2ab5
-";
+#[rustfmt::skip]
+const FTS_ARTIFACTS: &[(&str, &str, &str)] = &[
+    ("x86_64-unknown-linux-gnu",   "linux_amd64",      "90d6f049e59b592566cfcd228de3001eb679c64e9f144c138dc2cd55dab12cd6"),
+    ("aarch64-unknown-linux-gnu",  "linux_arm64",      "87a8c2dddf41d397c617af41e479d4e365dd66a9f115cec7e78374057e80478f"),
+    ("x86_64-unknown-linux-musl",  "linux_amd64_musl", "10b1049bffa9cbd85ae1a9e82e330258666780ca79a462829e0d78318b08433f"),
+    ("aarch64-unknown-linux-musl", "linux_arm64_musl", "21d81026d1fc06613fd6d0dd63d5ab2de8e61540b9f5d1c441d5d7cc80d9e3f0"),
+    ("x86_64-apple-darwin",        "osx_amd64",        "c3da1ea86c107650edf06a8296094640b9f4886b8ceab4ad42912b6ff5c880bc"),
+    ("aarch64-apple-darwin",       "osx_arm64",        "b6b8d0a13e0457f3ce368e4e7c2ff8de48637eea5ca61e5ff983c05018e7f315"),
+    ("x86_64-pc-windows-gnullvm",  "windows_amd64",    "24a328d189aa87a22cd3c2ac6c3f484a49ba30adfd6ce05572fe5841429f2ab5"),
+    ("x86_64-pc-windows-msvc",     "windows_amd64",    "24a328d189aa87a22cd3c2ac6c3f484a49ba30adfd6ce05572fe5841429f2ab5"),
+];
 
 const DOWNLOAD_LIMIT: u64 = 64 * 1024 * 1024;
 
@@ -26,12 +27,10 @@ fn main() {
     assert_lockfile_matches_pin();
 
     let target = env::var("TARGET").unwrap();
-    let fields: Vec<&str> = FTS_ARTIFACTS
-        .lines()
-        .map(|line| line.split_whitespace().collect())
-        .find(|fields: &Vec<&str>| fields.first() == Some(&target.as_str()))
+    let (_, platform, expected) = FTS_ARTIFACTS
+        .iter()
+        .find(|(t, _, _)| *t == target)
         .unwrap_or_else(|| panic!("no pinned fts artifact for target {target}"));
-    let (platform, expected) = (fields[1], fields[2]);
     let url =
         format!("http://extensions.duckdb.org/{DUCKDB_VERSION}/{platform}/fts.duckdb_extension.gz");
 
