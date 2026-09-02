@@ -609,6 +609,8 @@ pub struct InputRelationship {
 pub struct DenormalizedHop {
     pub table: String,
     pub group: usize,
+    /// Chain index of the table whose `traversal_path` is the row's unprefixed one.
+    pub anchor_table: usize,
     /// Chain index of the hop's edge table.
     pub edge_table: usize,
     /// Chain index of the `from` node's table.

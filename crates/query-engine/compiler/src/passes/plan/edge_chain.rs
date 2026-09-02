@@ -104,7 +104,10 @@ pub fn denormalized_node_column(
         return None;
     };
     let owner = denormalized_owner(hops, i)?;
-    Some((format!("e{owner}"), column_for(table, column)))
+    Some((
+        format!("e{owner}"),
+        column_for(d.anchor_table, table, column),
+    ))
 }
 
 impl NodePlan {

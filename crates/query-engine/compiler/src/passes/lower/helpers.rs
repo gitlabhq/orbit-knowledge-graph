@@ -371,9 +371,9 @@ pub(super) fn denormalized_node_predicates(
     .into_iter()
     .filter_map(|(node_alias, table)| nodes.get(node_alias).map(|np| (np, table)))
     .flat_map(|(np, table)| {
-        np.filters
-            .iter()
-            .map(move |(prop, filter)| filter_to_expr(alias, &column_for(table, prop), filter))
+        np.filters.iter().map(move |(prop, filter)| {
+            filter_to_expr(alias, &column_for(denorm.anchor_table, table, prop), filter)
+        })
     })
     .collect()
 }

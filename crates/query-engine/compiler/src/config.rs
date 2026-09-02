@@ -83,7 +83,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
             mutates: [input, node]
         }
         check {
-            reads_env: [security_ctx]
+            reads_env: [security_ctx, ontology]
             reads_state: [node]
         }
         hydrate_plan {
@@ -223,7 +223,7 @@ fn cursor(ctx: &mut impl CompilerCtx) -> Result<()> {
 
 fn check(ctx: &mut impl CompilerCtx) -> Result<()> {
     let node = require(ctx.node().clone(), "node")?;
-    check::check_ast(&node, ctx.security_ctx())
+    check::check_ast(&node, ctx.security_ctx(), ctx.ontology())
 }
 
 fn hydrate_plan(ctx: &mut impl CompilerCtx) -> Result<()> {

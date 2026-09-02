@@ -1916,6 +1916,63 @@ mod tests {
     }
 
     #[test]
+    fn denormalized_scan_is_filtered_on_every_path_column_in_the_row() {
+        let query = r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User", "node_ids": [7]},
+                {"id": "mr", "entity": "MergeRequest"},
+                {"id": "pl", "entity": "Pipeline"}
+            ],
+            "relationships": [
+                {"type": "REVIEWER", "from": "u", "to": "mr"},
+                {"type": "HAS_HEAD_PIPELINE", "from": "mr", "to": "pl"}
+            ],
+            "limit": 10
+        }"#;
+
+        let sql = compile_sql_denormalized(query);
+
+        // Chain: t0 User (global), t1 gl_edge (anchor), t2 MergeRequest,
+        // t3 gl_ci_edge, t4 Pipeline. Every scoped table's own path is filtered.
+        for column in [
+            "traversal_path",
+            "t2_traversal_path",
+            "t3_traversal_path",
+            "t4_traversal_path",
+        ] {
+            assert!(
+                sql.contains(&format!("startsWith(e0.{column}, '1/')")),
+                "expected a filter on {column}, got:\n{sql}"
+            );
+        }
+        assert!(
+            !sql.contains("t0_traversal_path"),
+            "User has no path, got:\n{sql}"
+        );
+    }
+
+    #[test]
+    fn check_pass_rejects_a_denormalized_scan_missing_a_path_column_filter() {
+        use crate::ast::*;
+        use crate::passes::check::check_ast;
+
+        let ontology = &*DENORM_ONTOLOGY;
+        let filtered_on_anchor_only = Node::Query(Box::new(Query {
+            select: vec![SelectExpr::star()],
+            from: TableRef::scan("gl_denorm_reviewer_pipeline", "e0"),
+            where_clause: Some(Expr::func(
+                "startsWith",
+                vec![Expr::col("e0", "traversal_path"), Expr::string("1/")],
+            )),
+            ..Default::default()
+        }));
+
+        let err = check_ast(&filtered_on_anchor_only, &security_ctx(), ontology).unwrap_err();
+        assert!(err.to_string().contains("t2_traversal_path"), "got: {err}");
+    }
+
+    #[test]
     fn denormalized_hop_in_a_chain_dedups_with_final_and_anchors_on_prefixed_columns() {
         // ASSIGNED has no join, so this is a denormalized hop followed by a plain edge hop.
         let query = r#"{

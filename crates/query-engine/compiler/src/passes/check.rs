@@ -1,69 +1,71 @@
 //! Post-compilation safety checks.
 //!
 //! Runs after security filter injection to verify invariants that must hold
-//! before the AST is handed to codegen. Checks that every node table alias
-//! has a `startsWith(alias.traversal_path, path)` predicate whose path literal
-//! is derivable from the [`SecurityContext`] — catching both injection bugs
-//! and path value mismatches.
+//! before the AST is handed to codegen. Checks that every `gl_*` alias has a
+//! `startsWith(alias.<path column>, path)` predicate on each of its
+//! `traversal_path` columns (one for ordinary tables, one per scoped table for
+//! a denormalized join) whose path literal is derivable from the
+//! [`SecurityContext`] — catching both injection bugs and path value mismatches.
 
 use serde_json::Value;
 
 use crate::ast::{Expr, Node, Query, TableRef};
-use crate::constants::TRAVERSAL_PATH_COLUMN;
 use crate::error::{QueryError, Result};
-use crate::passes::security::{SecurityContext, collect_node_aliases};
+use crate::passes::security::{SecurityContext, collect_aliased_tables};
+use ontology::Ontology;
 use orbit_utils::traversal_path::TraversalPath;
 
 const STARTS_WITH_FNAME: &str = "startsWith";
 
-pub fn check_ast(node: &Node, ctx: &SecurityContext) -> Result<()> {
+pub fn check_ast(node: &Node, ctx: &SecurityContext, ontology: &Ontology) -> Result<()> {
     match node {
         Node::Query(q) => {
             for cte in &q.ctes {
-                check_query(&cte.query, ctx)?;
+                check_query(&cte.query, ctx, ontology)?;
             }
-            check_query(q, ctx)
+            check_query(q, ctx, ontology)
         }
         Node::Insert(_) => Ok(()),
     }
 }
 
-fn check_query(q: &Query, ctx: &SecurityContext) -> Result<()> {
-    let aliases = collect_node_aliases(&q.from);
-    for alias in &aliases {
-        if !has_valid_path_filter(q.where_clause.as_ref(), alias, ctx) {
-            return Err(QueryError::Security(format!(
-                "post-check failed: alias '{alias}' missing valid traversal_path filter"
-            )));
+fn check_query(q: &Query, ctx: &SecurityContext, ontology: &Ontology) -> Result<()> {
+    for (alias, table) in collect_aliased_tables(&q.from) {
+        for (column, _) in ontology.traversal_path_columns(&table) {
+            if !has_valid_path_filter(q.where_clause.as_ref(), &alias, &column, ctx) {
+                return Err(QueryError::Security(format!(
+                    "post-check failed: alias '{alias}' missing valid traversal_path filter on '{column}'"
+                )));
+            }
         }
     }
 
     // Recurse into UNION ALL arms (defense-in-depth: currently only
     // recursive CTE arms which scan CTE names, not gl_* tables).
     for arm in &q.union_all {
-        check_query(arm, ctx)?;
+        check_query(arm, ctx, ontology)?;
     }
 
     if let Some(where_clause) = q.where_clause.as_ref() {
-        check_subqueries_in_expr(where_clause, ctx)?;
+        check_subqueries_in_expr(where_clause, ctx, ontology)?;
     }
 
-    check_derived_tables_in_from(&q.from, ctx)
+    check_derived_tables_in_from(&q.from, ctx, ontology)
 }
 
-fn check_subqueries_in_expr(expr: &Expr, ctx: &SecurityContext) -> Result<()> {
+fn check_subqueries_in_expr(expr: &Expr, ctx: &SecurityContext, ontology: &Ontology) -> Result<()> {
     match expr {
-        Expr::InSelect { query, .. } => check_query(query, ctx),
+        Expr::InSelect { query, .. } => check_query(query, ctx, ontology),
         Expr::BinaryOp { left, right, .. } => {
-            check_subqueries_in_expr(left, ctx)?;
-            check_subqueries_in_expr(right, ctx)
+            check_subqueries_in_expr(left, ctx, ontology)?;
+            check_subqueries_in_expr(right, ctx, ontology)
         }
         Expr::UnaryOp { expr, .. }
         | Expr::Lambda { body: expr, .. }
-        | Expr::InSubquery { expr, .. } => check_subqueries_in_expr(expr, ctx),
+        | Expr::InSubquery { expr, .. } => check_subqueries_in_expr(expr, ctx, ontology),
         Expr::FuncCall { args, .. } => {
             for arg in args {
-                check_subqueries_in_expr(arg, ctx)?;
+                check_subqueries_in_expr(arg, ctx, ontology)?;
             }
             Ok(())
         }
@@ -75,18 +77,22 @@ fn check_subqueries_in_expr(expr: &Expr, ctx: &SecurityContext) -> Result<()> {
     }
 }
 
-fn check_derived_tables_in_from(table_ref: &TableRef, ctx: &SecurityContext) -> Result<()> {
+fn check_derived_tables_in_from(
+    table_ref: &TableRef,
+    ctx: &SecurityContext,
+    ontology: &Ontology,
+) -> Result<()> {
     match table_ref {
-        TableRef::Subquery { query, .. } => check_query(query, ctx),
+        TableRef::Subquery { query, .. } => check_query(query, ctx, ontology),
         TableRef::Union { queries, .. } => {
             for arm in queries {
-                check_query(arm, ctx)?;
+                check_query(arm, ctx, ontology)?;
             }
             Ok(())
         }
         TableRef::Join { left, right, .. } => {
-            check_derived_tables_in_from(left, ctx)?;
-            check_derived_tables_in_from(right, ctx)
+            check_derived_tables_in_from(left, ctx, ontology)?;
+            check_derived_tables_in_from(right, ctx, ontology)
         }
         TableRef::Scan { .. } => Ok(()),
     }
@@ -104,7 +110,12 @@ fn check_derived_tables_in_from(table_ref: &TableRef, ctx: &SecurityContext) -> 
 /// other rows are still reachable, so we must keep requiring an actual
 /// `startsWith` on the alias. Matching it unconditionally would let any
 /// query containing a `= false` filter bypass this defense-in-depth check.
-fn has_valid_path_filter(expr: Option<&Expr>, alias: &str, ctx: &SecurityContext) -> bool {
+fn has_valid_path_filter(
+    expr: Option<&Expr>,
+    alias: &str,
+    column: &str,
+    ctx: &SecurityContext,
+) -> bool {
     let Some(expr) = expr else { return false };
     match expr {
         Expr::Literal(Value::Bool(false))
@@ -117,10 +128,10 @@ fn has_valid_path_filter(expr: Option<&Expr>, alias: &str, ctx: &SecurityContext
             left,
             right,
         } => {
-            has_valid_path_filter(Some(left), alias, ctx)
-                || has_valid_path_filter(Some(right), alias, ctx)
+            has_valid_path_filter(Some(left), alias, column, ctx)
+                || has_valid_path_filter(Some(right), alias, column, ctx)
         }
-        _ => has_matching_starts_with(expr, alias, ctx),
+        _ => has_matching_starts_with(expr, alias, column, ctx),
     }
 }
 
@@ -129,12 +140,12 @@ fn has_valid_path_filter(expr: Option<&Expr>, alias: &str, ctx: &SecurityContext
 /// never treats a bare `Bool(false)` as a satisfying filter, so a
 /// `col = false` comparison or an OR-ed `Bool(false)` does not spoof a
 /// scoping check.
-fn has_matching_starts_with(expr: &Expr, alias: &str, ctx: &SecurityContext) -> bool {
+fn has_matching_starts_with(expr: &Expr, alias: &str, column: &str, ctx: &SecurityContext) -> bool {
     match expr {
         Expr::FuncCall { name, args } if name == STARTS_WITH_FNAME => {
             let has_column = args.iter().any(|a| {
-                matches!(a, Expr::Column { table, column }
-                    if table == alias && column == TRAVERSAL_PATH_COLUMN)
+                matches!(a, Expr::Column { table, column: c }
+                    if table == alias && c == column)
             });
             if !has_column {
                 return false;
@@ -156,10 +167,10 @@ fn has_matching_starts_with(expr: &Expr, alias: &str, ctx: &SecurityContext) -> 
             })
         }
         Expr::BinaryOp { left, right, .. } => {
-            has_matching_starts_with(left, alias, ctx)
-                || has_matching_starts_with(right, alias, ctx)
+            has_matching_starts_with(left, alias, column, ctx)
+                || has_matching_starts_with(right, alias, column, ctx)
         }
-        Expr::UnaryOp { expr: inner, .. } => has_matching_starts_with(inner, alias, ctx),
+        Expr::UnaryOp { expr: inner, .. } => has_matching_starts_with(inner, alias, column, ctx),
         _ => false,
     }
 }
@@ -168,6 +179,11 @@ fn has_matching_starts_with(expr: &Expr, alias: &str, ctx: &SecurityContext) -> 
 mod tests {
     use super::*;
     use crate::ast::{SelectExpr, TableRef};
+    use crate::constants::TRAVERSAL_PATH_COLUMN;
+    use std::sync::LazyLock;
+
+    static ONTOLOGY: LazyLock<Ontology> =
+        LazyLock::new(|| Ontology::load_embedded().expect("ontology must load"));
     fn project_query(where_clause: Option<Expr>) -> Node {
         Node::Query(Box::new(Query {
             select: vec![SelectExpr {
@@ -191,14 +207,14 @@ mod tests {
             &ontology::Ontology::new(),
         )
         .unwrap();
-        assert!(check_ast(&node, &ctx).is_ok());
+        assert!(check_ast(&node, &ctx, &ONTOLOGY).is_ok());
     }
 
     #[test]
     fn fails_without_any_filter() {
         let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
         let node = project_query(Some(Expr::lit(true)));
-        let err = check_ast(&node, &ctx).unwrap_err();
+        let err = check_ast(&node, &ctx, &ONTOLOGY).unwrap_err();
         assert!(
             err.to_string()
                 .contains("missing valid traversal_path filter")
@@ -213,7 +229,7 @@ mod tests {
             vec![Expr::col("p", TRAVERSAL_PATH_COLUMN), Expr::string("99/")],
         );
         let node = project_query(Some(wrong_filter));
-        let err = check_ast(&node, &ctx).unwrap_err();
+        let err = check_ast(&node, &ctx, &ONTOLOGY).unwrap_err();
         assert!(
             err.to_string()
                 .contains("missing valid traversal_path filter")
@@ -230,7 +246,7 @@ mod tests {
             &ontology::Ontology::new(),
         )
         .unwrap();
-        assert!(check_ast(&node, &ctx).is_ok());
+        assert!(check_ast(&node, &ctx, &ONTOLOGY).is_ok());
     }
 
     /// An AND-chain containing `Bool(false)` short-circuits to zero rows, so
@@ -244,7 +260,7 @@ mod tests {
         let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
         let dead = Expr::param(crate::ast::ChType::Bool, false);
         let node = project_query(Some(Expr::binary(Op::And, dead, Expr::lit(true))));
-        assert!(check_ast(&node, &ctx).is_ok());
+        assert!(check_ast(&node, &ctx, &ONTOLOGY).is_ok());
     }
 
     /// A `col = false` comparison (or any other non-AND operator whose
@@ -266,7 +282,7 @@ mod tests {
             Expr::param(crate::ast::ChType::Bool, false),
         );
         let node = project_query(Some(eq_false));
-        let err = check_ast(&node, &ctx).unwrap_err();
+        let err = check_ast(&node, &ctx, &ONTOLOGY).unwrap_err();
         assert!(
             err.to_string()
                 .contains("missing valid traversal_path filter"),
@@ -287,7 +303,7 @@ mod tests {
             Expr::lit(true),
         );
         let node = project_query(Some(or_expr));
-        let err = check_ast(&node, &ctx).unwrap_err();
+        let err = check_ast(&node, &ctx, &ONTOLOGY).unwrap_err();
         assert!(
             err.to_string()
                 .contains("missing valid traversal_path filter"),
@@ -316,7 +332,7 @@ mod tests {
             dead_conjunct,
         );
         let node = project_query(Some(where_expr));
-        assert!(check_ast(&node, &ctx).is_ok());
+        assert!(check_ast(&node, &ctx, &ONTOLOGY).is_ok());
     }
 
     /// Inverse of the previous test: if the AND chain has no Bool(false)
@@ -337,7 +353,7 @@ mod tests {
             Expr::binary(Op::Gt, Expr::col("p", "id"), Expr::lit(0)),
         );
         let node = project_query(Some(where_expr));
-        let err = check_ast(&node, &ctx).unwrap_err();
+        let err = check_ast(&node, &ctx, &ONTOLOGY).unwrap_err();
         assert!(
             err.to_string()
                 .contains("missing valid traversal_path filter"),
@@ -357,7 +373,7 @@ mod tests {
             where_clause: None,
             ..Default::default()
         }));
-        assert!(check_ast(&node, &ctx).is_ok());
+        assert!(check_ast(&node, &ctx, &ONTOLOGY).is_ok());
     }
 
     fn wrap_in_subquery(inner: Query) -> Node {
@@ -388,7 +404,7 @@ mod tests {
     fn rejects_subquery_without_inner_security_filter() {
         let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
         let node = wrap_in_subquery(inner_project_query(None));
-        let err = check_ast(&node, &ctx).unwrap_err();
+        let err = check_ast(&node, &ctx, &ONTOLOGY).unwrap_err();
         assert!(
             err.to_string()
                 .contains("missing valid traversal_path filter")
@@ -414,7 +430,7 @@ mod tests {
         );
         inner.where_clause = Some(filter);
         let node = wrap_in_subquery(inner);
-        assert!(check_ast(&node, &ctx).is_ok());
+        assert!(check_ast(&node, &ctx, &ONTOLOGY).is_ok());
     }
 
     #[test]
@@ -435,7 +451,7 @@ mod tests {
             ..Default::default()
         };
         let node = wrap_in_subquery(inner);
-        let err = check_ast(&node, &ctx).unwrap_err();
+        let err = check_ast(&node, &ctx, &ONTOLOGY).unwrap_err();
         assert!(
             err.to_string()
                 .contains("missing valid traversal_path filter")
@@ -468,7 +484,7 @@ mod tests {
             ..Default::default()
         };
         let node = wrap_in_subquery(inner);
-        assert!(check_ast(&node, &ctx).is_ok());
+        assert!(check_ast(&node, &ctx, &ONTOLOGY).is_ok());
     }
 
     #[test]
@@ -484,7 +500,7 @@ mod tests {
             ..Default::default()
         };
         let node = wrap_in_subquery(inner);
-        assert!(check_ast(&node, &ctx).is_ok());
+        assert!(check_ast(&node, &ctx, &ONTOLOGY).is_ok());
     }
 
     #[test]
@@ -512,7 +528,7 @@ mod tests {
             }],
             ..Default::default()
         }));
-        let err = check_ast(&node, &ctx).unwrap_err();
+        let err = check_ast(&node, &ctx, &ONTOLOGY).unwrap_err();
         assert!(
             err.to_string()
                 .contains("missing valid traversal_path filter")
@@ -546,7 +562,7 @@ mod tests {
             &ontology::Ontology::new(),
         )
         .unwrap();
-        assert!(check_ast(&node, &ctx).is_ok());
+        assert!(check_ast(&node, &ctx, &ONTOLOGY).is_ok());
     }
 
     #[test]
@@ -575,7 +591,7 @@ mod tests {
         }));
 
         let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
-        let err = check_ast(&node, &ctx).unwrap_err();
+        let err = check_ast(&node, &ctx, &ONTOLOGY).unwrap_err();
         assert!(
             err.to_string()
                 .contains("missing valid traversal_path filter"),
@@ -617,7 +633,7 @@ mod tests {
         }));
 
         let ctx = SecurityContext::new(42, vec!["42/43/".into()]).unwrap();
-        assert!(check_ast(&node, &ctx).is_ok());
+        assert!(check_ast(&node, &ctx, &ONTOLOGY).is_ok());
     }
 
     #[test]
@@ -654,7 +670,7 @@ mod tests {
             where_clause: Some(filter),
             ..Default::default()
         }));
-        let err = check_ast(&node, &ctx).unwrap_err();
+        let err = check_ast(&node, &ctx, &ONTOLOGY).unwrap_err();
         assert!(
             err.to_string()
                 .contains("missing valid traversal_path filter"),
@@ -706,6 +722,6 @@ mod tests {
             where_clause: Some(outer_filter),
             ..Default::default()
         }));
-        assert!(check_ast(&node, &ctx).is_ok());
+        assert!(check_ast(&node, &ctx, &ONTOLOGY).is_ok());
     }
 }

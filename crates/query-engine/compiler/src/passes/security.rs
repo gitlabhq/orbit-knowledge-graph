@@ -70,29 +70,42 @@ pub fn apply_security_context(
     }
 }
 
+/// A denormalized join carries one `traversal_path` per scoped table in its
+/// chain, so a scan of it gets one filter per column (each at its own table's
+/// role floor); any other table has exactly one. The query's resolved scope
+/// prefix applies only to the unprefixed column, which is the one the prefix
+/// was resolved for.
 fn apply_to_query(q: &mut Query, ctx: &SecurityContext, ontology: &Ontology) -> Result<()> {
     let aliased_tables = collect_aliased_tables(&q.from);
     if !aliased_tables.is_empty() {
-        let security_conds = aliased_tables.iter().map(|(alias, table)| {
-            let min_role = ontology
-                .min_access_level_for_table(table)
-                .unwrap_or(crate::types::DEFAULT_PATH_ACCESS_LEVEL);
-            let eligible = ctx.paths_at_least(min_role);
-            // Inject the resolved scope prefix as the alias's authorization filter
-            // when it sits within an eligible path; otherwise the broad path set.
-            match ctx.scope_prefixes.get(alias) {
-                Some(prefix)
-                    if ontology.is_table_path_scopable(table)
-                        && eligible.iter().any(|p| prefix.is_descendant_of(p)) =>
-                {
-                    starts_with_expr(alias, prefix.as_str())
-                }
-                Some(prefix) if ontology.is_table_path_scopable(table) => Expr::and(
-                    build_path_filter(alias, &eligible),
-                    starts_with_expr(alias, prefix.as_str()),
-                ),
-                _ => build_path_filter(alias, &eligible),
-            }
+        let security_conds = aliased_tables.iter().flat_map(|(alias, table)| {
+            let scopable = ontology.is_table_path_scopable(table);
+            let scope_prefix = ctx.scope_prefixes.get(alias);
+            ontology
+                .traversal_path_columns(table)
+                .into_iter()
+                .map(move |(column, min_role)| {
+                    let eligible = ctx.paths_at_least(
+                        min_role.unwrap_or(crate::types::DEFAULT_PATH_ACCESS_LEVEL),
+                    );
+                    // Inject the resolved scope prefix as the alias's authorization
+                    // filter when it sits within an eligible path; otherwise the
+                    // broad path set.
+                    match scope_prefix {
+                        Some(prefix)
+                            if scopable
+                                && column == TRAVERSAL_PATH_COLUMN
+                                && eligible.iter().any(|p| prefix.is_descendant_of(p)) =>
+                        {
+                            starts_with_expr(alias, &column, prefix.as_str())
+                        }
+                        Some(prefix) if scopable && column == TRAVERSAL_PATH_COLUMN => Expr::and(
+                            build_path_filter(alias, &column, &eligible),
+                            starts_with_expr(alias, &column, prefix.as_str()),
+                        ),
+                        _ => build_path_filter(alias, &column, &eligible),
+                    }
+                })
         });
         q.where_clause = Expr::and_all(
             security_conds
@@ -142,28 +155,24 @@ fn apply_security_to_expr(
     }
 }
 
-fn build_path_filter(alias: &str, paths: &[&TraversalPath]) -> Expr {
+fn build_path_filter(alias: &str, column: &str, paths: &[&TraversalPath]) -> Expr {
     match paths.len() {
         0 => Expr::Literal(Value::Bool(false)),
-        1 => starts_with_expr(alias, paths[0].as_str()),
+        1 => starts_with_expr(alias, column, paths[0].as_str()),
         _ => {
             let collapsed = TraversalPathTrie::from_paths(paths).to_minimal_prefixes();
             if collapsed.len() == 1 {
-                return starts_with_expr(alias, collapsed[0].as_str());
+                return starts_with_expr(alias, column, collapsed[0].as_str());
             }
-            path_or_filter(alias, &collapsed)
+            path_or_filter(alias, column, &collapsed)
         }
     }
 }
 
-fn starts_with_expr(alias: &str, path: &str) -> Expr {
-    starts_with_value_expr(alias, Expr::string(path))
-}
-
-fn starts_with_value_expr(alias: &str, path: Expr) -> Expr {
+fn starts_with_expr(alias: &str, column: &str, path: &str) -> Expr {
     Expr::func(
         "startsWith",
-        vec![Expr::col(alias, TRAVERSAL_PATH_COLUMN), path],
+        vec![Expr::col(alias, column), Expr::string(path)],
     )
 }
 
@@ -173,13 +182,16 @@ fn starts_with_value_expr(alias: &str, path: Expr) -> Expr {
 /// granule pruning per path prefix. This matters inside `dedup_edge_scan`
 /// FINAL subqueries: PK range pruning reduces the scan from the entire LCP
 /// namespace to only the user's authorized paths.
-fn path_or_filter(alias: &str, paths: &[TraversalPath]) -> Expr {
-    let mut iter = paths.iter().map(|p| starts_with_expr(alias, p.as_str()));
+fn path_or_filter(alias: &str, column: &str, paths: &[TraversalPath]) -> Expr {
+    let mut iter = paths
+        .iter()
+        .map(|p| starts_with_expr(alias, column, p.as_str()));
     let first = iter.next().expect("paths is non-empty (caller checks)");
     iter.fold(first, |a, b| Expr::binary(crate::ast::Op::Or, a, b))
 }
 
-pub(crate) fn collect_node_aliases(table_ref: &TableRef) -> Vec<String> {
+#[cfg(test)]
+fn collect_node_aliases(table_ref: &TableRef) -> Vec<String> {
     collect_aliased_tables(table_ref)
         .into_iter()
         .map(|(a, _)| a)
@@ -291,7 +303,11 @@ mod tests {
 
     #[test]
     fn single_path_uses_starts_with() {
-        let expr = build_path_filter("u", &[&TraversalPath::from("42/43/")]);
+        let expr = build_path_filter(
+            "u",
+            TRAVERSAL_PATH_COLUMN,
+            &[&TraversalPath::from("42/43/")],
+        );
         assert!(matches!(expr, Expr::FuncCall { name, .. } if name == "startsWith"));
     }
 
@@ -299,6 +315,7 @@ mod tests {
     fn multiple_paths_use_or_of_starts_with_without_common_prefix() {
         let expr = build_path_filter(
             "u",
+            TRAVERSAL_PATH_COLUMN,
             &[
                 &TraversalPath::from("1/2/4/"),
                 &TraversalPath::from("1/2/5/"),
@@ -316,7 +333,7 @@ mod tests {
             .map(|i| TraversalPath::from(format!("1/{i}/")))
             .collect();
         let refs: Vec<&TraversalPath> = paths.iter().collect();
-        let expr = build_path_filter("e", &refs);
+        let expr = build_path_filter("e", TRAVERSAL_PATH_COLUMN, &refs);
         let dbg = format!("{expr:?}");
         assert!(
             !dbg.contains("arrayExists"),
@@ -330,7 +347,7 @@ mod tests {
 
     #[test]
     fn empty_paths_produces_false_literal() {
-        let expr = build_path_filter("v", &[]);
+        let expr = build_path_filter("v", TRAVERSAL_PATH_COLUMN, &[]);
         // Literal false guarantees zero rows for this alias. Using a literal
         // (not a parameterized Bool) lets ClickHouse constant-fold it at plan
         // time, avoiding full edge scans on denied entities.
@@ -576,7 +593,7 @@ mod tests {
         let collapsed = TraversalPathTrie::from_paths(&eligible).to_minimal_prefixes();
         assert_eq!(collapsed, vec!["1/100/", "1/300/"]);
 
-        let filter = build_path_filter("t", &eligible);
+        let filter = build_path_filter("t", TRAVERSAL_PATH_COLUMN, &eligible);
         let sql = format!("{filter:?}");
         assert!(
             sql.contains("startsWith"),

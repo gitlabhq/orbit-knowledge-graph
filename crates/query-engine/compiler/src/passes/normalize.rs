@@ -408,6 +408,7 @@ fn match_run(
         out.push(DenormalizedHop {
             table: String::new(),
             group: 0,
+            anchor_table: join.anchor_table(),
             edge_table: hop.edge_table.expect("fk-realized joins are filtered out"),
             from_table,
             to_table,

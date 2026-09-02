@@ -18,11 +18,14 @@ use ontology::denormalized::column_for;
 use crate::ast::*;
 use crate::passes::plan::{Hop, denormalized_owner};
 
+/// `(owner alias, anchor table index, chain table index)`.
+type Target = (String, usize, usize);
+
 struct Bindings<'a> {
-    /// Node alias to `(owner alias, chain table index)`.
-    nodes: HashMap<&'a str, (String, usize)>,
-    /// Hop index to `(owner alias, chain table index of its edge)`.
-    edges: HashMap<usize, (String, usize)>,
+    /// Node alias to the table carrying its columns.
+    nodes: HashMap<&'a str, Target>,
+    /// Hop index to the table carrying its edge columns.
+    edges: HashMap<usize, Target>,
 }
 
 impl Bindings<'_> {
@@ -33,19 +36,19 @@ impl Bindings<'_> {
         if already_prefixed(column) {
             return None;
         }
-        if let Some((owner, idx)) = self.nodes.get(table) {
-            return Some((owner.clone(), column_for(*idx, column)));
+        if let Some((owner, anchor, idx)) = self.nodes.get(table) {
+            return Some((owner.clone(), column_for(*anchor, *idx, column)));
         }
         let rest = table.strip_prefix('e')?;
         let digits = rest.trim_end_matches(|c: char| !c.is_ascii_digit());
         let suffix = &rest[digits.len()..];
-        let (owner, idx) = self.edges.get(&digits.parse::<usize>().ok()?)?;
+        let (owner, anchor, idx) = self.edges.get(&digits.parse::<usize>().ok()?)?;
         let alias = if suffix.is_empty() {
             owner.clone()
         } else {
             table.to_string()
         };
-        Some((alias, column_for(*idx, column)))
+        Some((alias, column_for(*anchor, *idx, column)))
     }
 }
 
@@ -69,11 +72,15 @@ pub(super) fn rebind_node_aliases(node: &mut Node, hops: &[Hop]) {
             "e{}",
             denormalized_owner(hops, i).expect("hop is denormalized")
         );
-        b.nodes
-            .insert(hop.from_node.as_str(), (owner.clone(), d.from_table));
-        b.nodes
-            .insert(hop.to_node.as_str(), (owner.clone(), d.to_table));
-        b.edges.insert(i, (owner, d.edge_table));
+        b.nodes.insert(
+            hop.from_node.as_str(),
+            (owner.clone(), d.anchor_table, d.from_table),
+        );
+        b.nodes.insert(
+            hop.to_node.as_str(),
+            (owner.clone(), d.anchor_table, d.to_table),
+        );
+        b.edges.insert(i, (owner, d.anchor_table, d.edge_table));
     }
     if b.edges.is_empty() {
         return;
