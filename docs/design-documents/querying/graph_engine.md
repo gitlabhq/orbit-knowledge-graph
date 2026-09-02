@@ -69,10 +69,10 @@ The query compiler transforms a JSON DSL input into parameterized ClickHouse SQL
 | 4 | `plan` | Translates validated input into a query plan (hop chain, join strategy, FK shape) |
 | 5 | `lower` | Emits the SQL AST from the query plan (edge-chain-first, nodes lazy) |
 | 6 | `enforce` | Injects ID and type columns required for redaction; builds the result context |
-| 7 | `security` | Injects `startsWith(traversal_path, ?)` predicates on all node-table scans, with per-entity role scoping ([Security](../security.md)) |
+| 7 | `security` | Injects `startsWith(traversal_path, ?)` predicates on all node-table scans, with per-entity role scoping; a denormalized join scan gets one per path column in its row ([Security](../security.md)) |
 | 8 | `partition` | Adds partition-pruning predicates derived from the traversal path scope |
 | 9 | `cursor` | Applies keyset pagination (seek predicate and readback columns) |
-| 10 | `check` | Verifies every node-table alias carries a valid `startsWith` predicate traceable to the `SecurityContext` ([Security](../security.md)) |
+| 10 | `check` | Verifies every node-table alias carries a valid `startsWith` predicate on each of its `traversal_path` columns, traceable to the `SecurityContext` ([Security](../security.md)) |
 | 11 | `hydrate_plan` | Builds the hydration plan for fetching entity properties after the base query |
 | 12 | `settings` | Resolves ClickHouse query-level settings (timeouts, memory limits, cache) for the query type |
 | 13 | `codegen` | Serializes the AST into parameterized ClickHouse SQL |
