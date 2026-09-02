@@ -471,14 +471,13 @@ fn elide_hops<'a>(
     (keep_hops, elided_fks, input)
 }
 
-/// Point a hop at its denormalized join table when the single-scan shape is
-/// safe: one fixed-length hop whose endpoints need no node-table read anyway.
-/// An elevated role floor is enforced through a node subquery, and a
-/// non-default redaction id makes `enforce` join the node table, so either
-/// falls back to the edge chain. The binding also drops any FK, since the
-/// join table answers the hop directly.
+/// Point a hop at its denormalized join table when its endpoints need no
+/// node-table read anyway. An elevated role floor is enforced through a node
+/// subquery, and a non-default redaction id makes `enforce` join the node
+/// table, so either falls back to the edge chain. Variable-length hops stay on
+/// the edge table because their UNION arms are built per depth from it. The
+/// binding also drops any FK, since the join table answers the hop directly.
 fn bind_denormalized(hops: &mut [Hop], nodes: &HashMap<String, NodePlan>, input: &Input) {
-    let single_hop = hops.len() == 1;
     for hop in hops.iter_mut() {
         let Some(denorm) = hop.denormalized.as_ref() else {
             continue;
@@ -490,7 +489,7 @@ fn bind_denormalized(hops: &mut [Hop], nodes: &HashMap<String, NodePlan>, input:
                     .get(*alias)
                     .is_some_and(|np| np.uses_default_pk() && !has_elevated_access_level(np, input))
             });
-        if single_hop && hop.max_hops == 1 && endpoints_ok {
+        if hop.max_hops == 1 && endpoints_ok {
             hop.edge_table = denorm.table.clone();
             hop.fk = None;
         } else {

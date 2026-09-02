@@ -1,6 +1,7 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use ontology::constants::*;
+use ontology::denormalized::Side;
 
 use crate::ast::*;
 use crate::error::{QueryError, Result};
@@ -9,7 +10,7 @@ use super::EmitOutput;
 use super::helpers::{
     NarrowSource, build_multi_hop_union, dedup_edge_scan, emit_denorm_tags, emit_filter_narrowing,
     emit_filter_subquery, emit_node_ids_on_edge, emit_node_join_with_narrowing, limit_by_scan,
-    node_id_pin_predicates, node_property_predicates, node_select_columns, push_edge_predicates,
+    node_id_pin_predicates, node_select_columns, push_edge_predicates,
 };
 use crate::passes::plan::*;
 use crate::passes::shared::filter_to_expr;
@@ -59,15 +60,23 @@ fn build_cascade_anchor(plan: &Plan, i: usize, ctes: &[Cte]) -> Option<Query> {
     for (prop, filter) in &prev_hop.filters {
         prev_preds.push(filter_to_expr(&prev_alias_inner, prop, filter));
     }
-    emit_denorm_tags(
-        &mut prev_preds,
-        plan,
-        prev_hop,
-        &prev_alias_inner,
-        prev_start,
-        prev_end,
-        &mut anchor_tags,
-    );
+    if prev_hop.denormalized.is_some() {
+        prev_preds.extend(denormalized_node_predicates(
+            &prev_alias_inner,
+            prev_hop,
+            &plan.nodes,
+        ));
+    } else {
+        emit_denorm_tags(
+            &mut prev_preds,
+            plan,
+            prev_hop,
+            &prev_alias_inner,
+            prev_start,
+            prev_end,
+            &mut anchor_tags,
+        );
+    }
     emit_node_ids_on_edge(
         &mut prev_preds,
         &prev_alias_inner,
@@ -105,6 +114,31 @@ fn build_cascade_anchor(plan: &Plan, i: usize, ctes: &[Cte]) -> Option<Query> {
         where_clause: Expr::conjoin(prev_preds),
         ..Default::default()
     })
+}
+
+/// Node property filters for a denormalized hop, read from the row's typed
+/// node columns under `alias`. Replaces the edge tag lookups a plain edge
+/// scan would use, since the join table carries the columns themselves.
+fn denormalized_node_predicates(
+    alias: &str,
+    hop: &Hop,
+    nodes: &HashMap<String, NodePlan>,
+) -> Vec<Expr> {
+    let Some(denorm) = &hop.denormalized else {
+        return vec![];
+    };
+    [
+        (&denorm.source_node, Side::Source),
+        (&denorm.target_node, Side::Target),
+    ]
+    .into_iter()
+    .filter_map(|(node_alias, side)| nodes.get(node_alias).map(|np| (np, side)))
+    .flat_map(|(np, side)| {
+        np.filters
+            .iter()
+            .map(move |(prop, filter)| filter_to_expr(alias, &side.column_for(prop), filter))
+    })
+    .collect()
 }
 
 /// `startsWith(<alias>.traversal_path, '<prefix>')` for a hop confined to a
@@ -327,13 +361,7 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
             }
 
             if hop.denormalized.is_some() {
-                // Node filters read the row's typed node columns (rebound
-                // after lowering) rather than the edge's tag arrays.
-                for node_alias in [&hop.from_node, &hop.to_node] {
-                    if let Some(np) = plan.nodes.get(node_alias) {
-                        where_parts.extend(node_property_predicates(node_alias, np));
-                    }
-                }
+                where_parts.extend(denormalized_node_predicates(&alias, hop, &plan.nodes));
             } else {
                 emit_denorm_tags(
                     &mut where_parts,

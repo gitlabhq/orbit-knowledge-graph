@@ -1789,6 +1789,41 @@ mod tests {
     }
 
     #[test]
+    fn denormalized_hop_in_a_chain_dedups_with_final_and_anchors_on_typed_columns() {
+        let query = r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User", "columns": ["username"], "node_ids": [7]},
+                {"id": "mr", "entity": "MergeRequest", "columns": ["title"],
+                 "filters": {"state": {"eq": "merged"}}},
+                {"id": "p", "entity": "Project", "columns": ["name"]}
+            ],
+            "relationships": [
+                {"type": "REVIEWER", "from": "u", "to": "mr"},
+                {"type": "IN_PROJECT", "from": "mr", "to": "p"}
+            ],
+            "limit": 10
+        }"#;
+
+        let sql = compile_sql(query);
+
+        for fragment in [
+            &format!("FROM {DENORM_REVIEWER} AS e0 FINAL"),
+            "e0.tgt_title AS mr_title",
+            "e0.tgt_state = 'merged'",
+            &format!("FROM {DENORM_REVIEWER} AS e0p WHERE"),
+            "e0p.tgt_state = 'merged'",
+            "FROM gl_edge AS e1 FINAL",
+        ] {
+            assert!(sql.contains(fragment), "expected `{fragment}`, got:\n{sql}");
+        }
+        assert!(
+            !sql.contains("e0p.target_tags") && !sql.contains("e0.target_tags"),
+            "the join table has no tag columns, got:\n{sql}"
+        );
+    }
+
+    #[test]
     fn denormalized_is_skipped_for_multi_kind_and_variable_length_hops() {
         for rel in [
             r#"{"type": ["REVIEWER", "ASSIGNED"], "from": "u", "to": "mr"}"#,

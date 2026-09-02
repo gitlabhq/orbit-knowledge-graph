@@ -28,9 +28,7 @@ pub(super) fn latest_node_predicates(alias: &str, np: &NodePlan) -> Vec<Expr> {
     predicates
 }
 
-/// The node's property filters alone; ids and liveness are carried by
-/// whichever scan the caller pins them to.
-pub(super) fn node_property_predicates(alias: &str, np: &NodePlan) -> Vec<Expr> {
+fn node_property_predicates(alias: &str, np: &NodePlan) -> Vec<Expr> {
     np.filters
         .iter()
         .map(|(prop, filter)| filter_to_expr(alias, prop, filter))
