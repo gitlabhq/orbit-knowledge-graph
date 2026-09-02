@@ -33,6 +33,10 @@ struct EdgeVariantYaml {
     fk_column: Option<String>,
     #[serde(default)]
     scope: Option<EdgeVariantScope>,
+    /// Opt in to a pre-joined `gl_mat_*` table carrying both endpoints'
+    /// columns, kept current by materialized views on the edge and node tables.
+    #[serde(default)]
+    materialized: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -60,6 +64,13 @@ impl EdgeYaml {
                 destination_table: table.clone(),
                 fk_column: v.fk_column.clone(),
                 scope: v.scope,
+                materialized_table: v.materialized.then(|| {
+                    crate::materialized::table_name(
+                        &relationship_kind,
+                        &v.from_node.node_type,
+                        &v.to_node.node_type,
+                    )
+                }),
             })
             .collect()
     }

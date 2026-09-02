@@ -5,6 +5,7 @@
 
 pub mod clickhouse;
 pub mod duckdb;
+mod materialized;
 
 use std::collections::BTreeMap;
 
@@ -82,6 +83,9 @@ pub fn generate_graph_tables_with_prefix(ontology: &Ontology, prefix: &str) -> V
             tables.push(build_edge_table(name, config, partition).with_prefix(prefix));
         }
     }
+    for mat in ontology.materialized_join_tables() {
+        tables.push(materialized::build_table(&mat).with_prefix(prefix));
+    }
 
     tables
 }
@@ -154,12 +158,20 @@ pub fn generate_graph_materialized_views_with_prefix(
 ) -> Vec<CreateMaterializedView> {
     let known_tables = collect_table_names(ontology);
 
-    ontology
+    let mut views: Vec<CreateMaterializedView> = ontology
         .materialized_views()
         .iter()
         .filter(|mv| mv.versioned)
         .map(|mv| build_materialized_view(mv).with_prefix(prefix, &known_tables))
-        .collect()
+        .collect();
+    for mat in ontology.materialized_join_tables() {
+        views.extend(
+            materialized::build_views(&mat)
+                .into_iter()
+                .map(|v| v.with_prefix(prefix, &known_tables)),
+        );
+    }
+    views
 }
 
 /// Collects table names so `{table_name}` placeholders in materialized view
@@ -174,6 +186,9 @@ fn collect_table_names(ontology: &Ontology) -> Vec<String> {
     }
     for table_name in ontology.edge_tables() {
         names.push(table_name.to_string());
+    }
+    for mat in ontology.materialized_join_tables() {
+        names.push(mat.table);
     }
     names
 }

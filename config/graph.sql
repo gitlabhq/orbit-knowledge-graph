@@ -1087,6 +1087,76 @@ ORDER BY (traversal_path, relationship_kind, source_id, target_id, source_kind, 
 PRIMARY KEY (traversal_path, relationship_kind, source_id)
 SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_cleanup = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
+CREATE TABLE IF NOT EXISTS gl_mat_reviewer__user__merge_request (
+    traversal_path String DEFAULT '0/' CODEC(ZSTD(1)),
+    relationship_kind LowCardinality(String) CODEC(LZ4),
+    src_id Int64 CODEC(T64, ZSTD(1)),
+    src_username String DEFAULT '' CODEC(ZSTD(1)),
+    src_email String DEFAULT '' CODEC(ZSTD(1)),
+    src_name String DEFAULT '' CODEC(ZSTD(1)),
+    src_first_name String DEFAULT '' CODEC(ZSTD(1)),
+    src_last_name String DEFAULT '' CODEC(ZSTD(1)),
+    src_state LowCardinality(String) DEFAULT '' CODEC(LZ4),
+    src_avatar_url Nullable(String) CODEC(ZSTD(1)),
+    src_public_email String DEFAULT '' CODEC(ZSTD(1)),
+    src_preferred_language String DEFAULT '' CODEC(ZSTD(1)),
+    src_last_activity_on Nullable(Date32) CODEC(Delta(4), ZSTD(1)),
+    src_private_profile Bool DEFAULT false,
+    src_is_admin Bool DEFAULT false,
+    src_is_auditor Bool DEFAULT false,
+    src_is_external Bool DEFAULT false,
+    src_user_type LowCardinality(String) DEFAULT '' CODEC(LZ4),
+    src_created_at Nullable(DateTime64(0, 'UTC')) CODEC(Delta(8), ZSTD(1)),
+    src_updated_at Nullable(DateTime64(0, 'UTC')) CODEC(Delta(8), ZSTD(1)),
+    tgt_id Int64 CODEC(T64, ZSTD(1)),
+    tgt_iid Nullable(Int64) CODEC(Delta(8), LZ4),
+    tgt_title String DEFAULT '' CODEC(ZSTD(1)),
+    tgt_description String DEFAULT '' CODEC(ZSTD(3)),
+    tgt_source_branch String DEFAULT '' CODEC(ZSTD(1)),
+    tgt_target_branch String DEFAULT '' CODEC(ZSTD(1)),
+    tgt_state LowCardinality(String) DEFAULT '' CODEC(LZ4),
+    tgt_merge_status LowCardinality(String) DEFAULT 'unchecked' CODEC(LZ4),
+    tgt_draft Bool DEFAULT false,
+    tgt_squash Bool DEFAULT false,
+    tgt_created_at Nullable(DateTime64(0, 'UTC')) CODEC(Delta(8), ZSTD(1)),
+    tgt_updated_at Nullable(DateTime64(0, 'UTC')) CODEC(Delta(8), ZSTD(1)),
+    tgt_merge_commit_sha String DEFAULT '' CODEC(ZSTD(1)),
+    tgt_discussion_locked Nullable(Bool),
+    tgt_prepared_at Nullable(DateTime64(0, 'UTC')) CODEC(Delta(8), ZSTD(1)),
+    tgt_project_id Int64 CODEC(T64, ZSTD(1)),
+    tgt_latest_build_started_at Nullable(DateTime64(0, 'UTC')) CODEC(Delta(8), ZSTD(1)),
+    tgt_latest_build_finished_at Nullable(DateTime64(0, 'UTC')) CODEC(Delta(8), ZSTD(1)),
+    tgt_first_deployed_to_production_at Nullable(DateTime64(0, 'UTC')) CODEC(Delta(8), ZSTD(1)),
+    tgt_merged_at Nullable(DateTime64(0, 'UTC')) CODEC(Delta(8), ZSTD(1)),
+    tgt_latest_closed_at Nullable(DateTime64(0, 'UTC')) CODEC(Delta(8), ZSTD(1)),
+    tgt_first_comment_at Nullable(DateTime64(0, 'UTC')) CODEC(Delta(8), ZSTD(1)),
+    tgt_first_commit_at Nullable(DateTime64(0, 'UTC')) CODEC(Delta(8), ZSTD(1)),
+    tgt_last_commit_at Nullable(DateTime64(0, 'UTC')) CODEC(Delta(8), ZSTD(1)),
+    tgt_diff_size Nullable(Int64) CODEC(Delta(8), LZ4),
+    tgt_modified_paths_size Nullable(Int64) CODEC(Delta(8), LZ4),
+    tgt_commits_count Nullable(Int64) CODEC(Delta(8), LZ4),
+    tgt_first_approved_at Nullable(DateTime64(0, 'UTC')) CODEC(Delta(8), ZSTD(1)),
+    tgt_first_reassigned_at Nullable(DateTime64(0, 'UTC')) CODEC(Delta(8), ZSTD(1)),
+    tgt_added_lines Nullable(Int64) CODEC(Delta(8), LZ4),
+    tgt_removed_lines Nullable(Int64) CODEC(Delta(8), LZ4),
+    tgt_first_contribution Bool DEFAULT false,
+    tgt_reviewer_first_assigned_at Nullable(DateTime64(0, 'UTC')) CODEC(Delta(8), ZSTD(1)),
+    tgt_author_id Nullable(Int64) CODEC(Delta(8), LZ4),
+    tgt_merge_user_id Nullable(Int64) CODEC(Delta(8), LZ4),
+    tgt_updated_by_id Nullable(Int64) CODEC(Delta(8), LZ4),
+    tgt_last_edited_by_id Nullable(Int64) CODEC(Delta(8), LZ4),
+    tgt_closed_by_id Nullable(Int64) CODEC(Delta(8), LZ4),
+    tgt_milestone_id Nullable(Int64) CODEC(Delta(8), LZ4),
+    tgt_source_project_id Nullable(Int64) CODEC(Delta(8), LZ4),
+    tgt_head_pipeline_id Nullable(Int64) CODEC(Delta(8), LZ4),
+    tgt_latest_merge_request_diff_id Nullable(Int64) CODEC(Delta(8), LZ4),
+    tgt_merged_commit_id Nullable(Int64) CODEC(Delta(8), LZ4),
+    _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(Delta(8), ZSTD(1)),
+    _deleted Bool DEFAULT false
+) ENGINE = ReplacingMergeTree(_version, _deleted)
+ORDER BY (traversal_path, tgt_id, src_id)
+SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_cleanup = 1;
+
 CREATE DICTIONARY IF NOT EXISTS gl_project_traversal_paths_dict (
     id Int64,
     traversal_path String
@@ -1104,4 +1174,16 @@ PRIMARY KEY id
 SOURCE(CLICKHOUSE(USER 'default' QUERY $q$SELECT id, traversal_path FROM (SELECT id, argMax(traversal_path, _version) AS traversal_path FROM `default`.gl_group GROUP BY id HAVING argMax(_deleted, _version) = false)$q$))
 LIFETIME(MIN 60 MAX 300)
 LAYOUT(HASHED());
+
+CREATE MATERIALIZED VIEW IF NOT EXISTS gl_mat_reviewer__user__merge_request__on_edge
+TO gl_mat_reviewer__user__merge_request
+AS SELECT e.traversal_path AS traversal_path, e.relationship_kind AS relationship_kind, s.id AS src_id, s.username AS src_username, s.email AS src_email, s.name AS src_name, s.first_name AS src_first_name, s.last_name AS src_last_name, s.state AS src_state, s.avatar_url AS src_avatar_url, s.public_email AS src_public_email, s.preferred_language AS src_preferred_language, s.last_activity_on AS src_last_activity_on, s.private_profile AS src_private_profile, s.is_admin AS src_is_admin, s.is_auditor AS src_is_auditor, s.is_external AS src_is_external, s.user_type AS src_user_type, s.created_at AS src_created_at, s.updated_at AS src_updated_at, t.id AS tgt_id, t.iid AS tgt_iid, t.title AS tgt_title, t.description AS tgt_description, t.source_branch AS tgt_source_branch, t.target_branch AS tgt_target_branch, t.state AS tgt_state, t.merge_status AS tgt_merge_status, t.draft AS tgt_draft, t.squash AS tgt_squash, t.created_at AS tgt_created_at, t.updated_at AS tgt_updated_at, t.merge_commit_sha AS tgt_merge_commit_sha, t.discussion_locked AS tgt_discussion_locked, t.prepared_at AS tgt_prepared_at, t.project_id AS tgt_project_id, t.latest_build_started_at AS tgt_latest_build_started_at, t.latest_build_finished_at AS tgt_latest_build_finished_at, t.first_deployed_to_production_at AS tgt_first_deployed_to_production_at, t.merged_at AS tgt_merged_at, t.latest_closed_at AS tgt_latest_closed_at, t.first_comment_at AS tgt_first_comment_at, t.first_commit_at AS tgt_first_commit_at, t.last_commit_at AS tgt_last_commit_at, t.diff_size AS tgt_diff_size, t.modified_paths_size AS tgt_modified_paths_size, t.commits_count AS tgt_commits_count, t.first_approved_at AS tgt_first_approved_at, t.first_reassigned_at AS tgt_first_reassigned_at, t.added_lines AS tgt_added_lines, t.removed_lines AS tgt_removed_lines, t.first_contribution AS tgt_first_contribution, t.reviewer_first_assigned_at AS tgt_reviewer_first_assigned_at, t.author_id AS tgt_author_id, t.merge_user_id AS tgt_merge_user_id, t.updated_by_id AS tgt_updated_by_id, t.last_edited_by_id AS tgt_last_edited_by_id, t.closed_by_id AS tgt_closed_by_id, t.milestone_id AS tgt_milestone_id, t.source_project_id AS tgt_source_project_id, t.head_pipeline_id AS tgt_head_pipeline_id, t.latest_merge_request_diff_id AS tgt_latest_merge_request_diff_id, t.merged_commit_id AS tgt_merged_commit_id, greatest(e._version, s._version, t._version) AS _version, (e._deleted OR s._deleted OR t._deleted) AS _deleted FROM gl_edge AS e INNER JOIN gl_user AS s FINAL ON e.source_id = s.id INNER JOIN gl_merge_request AS t FINAL ON e.target_id = t.id WHERE e.relationship_kind = 'REVIEWER' AND e.source_kind = 'User' AND e.target_kind = 'MergeRequest';
+
+CREATE MATERIALIZED VIEW IF NOT EXISTS gl_mat_reviewer__user__merge_request__on_source
+TO gl_mat_reviewer__user__merge_request
+AS SELECT e.traversal_path AS traversal_path, e.relationship_kind AS relationship_kind, s.id AS src_id, s.username AS src_username, s.email AS src_email, s.name AS src_name, s.first_name AS src_first_name, s.last_name AS src_last_name, s.state AS src_state, s.avatar_url AS src_avatar_url, s.public_email AS src_public_email, s.preferred_language AS src_preferred_language, s.last_activity_on AS src_last_activity_on, s.private_profile AS src_private_profile, s.is_admin AS src_is_admin, s.is_auditor AS src_is_auditor, s.is_external AS src_is_external, s.user_type AS src_user_type, s.created_at AS src_created_at, s.updated_at AS src_updated_at, t.id AS tgt_id, t.iid AS tgt_iid, t.title AS tgt_title, t.description AS tgt_description, t.source_branch AS tgt_source_branch, t.target_branch AS tgt_target_branch, t.state AS tgt_state, t.merge_status AS tgt_merge_status, t.draft AS tgt_draft, t.squash AS tgt_squash, t.created_at AS tgt_created_at, t.updated_at AS tgt_updated_at, t.merge_commit_sha AS tgt_merge_commit_sha, t.discussion_locked AS tgt_discussion_locked, t.prepared_at AS tgt_prepared_at, t.project_id AS tgt_project_id, t.latest_build_started_at AS tgt_latest_build_started_at, t.latest_build_finished_at AS tgt_latest_build_finished_at, t.first_deployed_to_production_at AS tgt_first_deployed_to_production_at, t.merged_at AS tgt_merged_at, t.latest_closed_at AS tgt_latest_closed_at, t.first_comment_at AS tgt_first_comment_at, t.first_commit_at AS tgt_first_commit_at, t.last_commit_at AS tgt_last_commit_at, t.diff_size AS tgt_diff_size, t.modified_paths_size AS tgt_modified_paths_size, t.commits_count AS tgt_commits_count, t.first_approved_at AS tgt_first_approved_at, t.first_reassigned_at AS tgt_first_reassigned_at, t.added_lines AS tgt_added_lines, t.removed_lines AS tgt_removed_lines, t.first_contribution AS tgt_first_contribution, t.reviewer_first_assigned_at AS tgt_reviewer_first_assigned_at, t.author_id AS tgt_author_id, t.merge_user_id AS tgt_merge_user_id, t.updated_by_id AS tgt_updated_by_id, t.last_edited_by_id AS tgt_last_edited_by_id, t.closed_by_id AS tgt_closed_by_id, t.milestone_id AS tgt_milestone_id, t.source_project_id AS tgt_source_project_id, t.head_pipeline_id AS tgt_head_pipeline_id, t.latest_merge_request_diff_id AS tgt_latest_merge_request_diff_id, t.merged_commit_id AS tgt_merged_commit_id, greatest(e._version, s._version, t._version) AS _version, (e._deleted OR s._deleted OR t._deleted) AS _deleted FROM gl_user AS s INNER JOIN gl_edge AS e FINAL ON e.source_id = s.id AND e.relationship_kind = 'REVIEWER' AND e.source_kind = 'User' AND e.target_kind = 'MergeRequest' INNER JOIN gl_merge_request AS t FINAL ON e.target_id = t.id;
+
+CREATE MATERIALIZED VIEW IF NOT EXISTS gl_mat_reviewer__user__merge_request__on_target
+TO gl_mat_reviewer__user__merge_request
+AS SELECT e.traversal_path AS traversal_path, e.relationship_kind AS relationship_kind, s.id AS src_id, s.username AS src_username, s.email AS src_email, s.name AS src_name, s.first_name AS src_first_name, s.last_name AS src_last_name, s.state AS src_state, s.avatar_url AS src_avatar_url, s.public_email AS src_public_email, s.preferred_language AS src_preferred_language, s.last_activity_on AS src_last_activity_on, s.private_profile AS src_private_profile, s.is_admin AS src_is_admin, s.is_auditor AS src_is_auditor, s.is_external AS src_is_external, s.user_type AS src_user_type, s.created_at AS src_created_at, s.updated_at AS src_updated_at, t.id AS tgt_id, t.iid AS tgt_iid, t.title AS tgt_title, t.description AS tgt_description, t.source_branch AS tgt_source_branch, t.target_branch AS tgt_target_branch, t.state AS tgt_state, t.merge_status AS tgt_merge_status, t.draft AS tgt_draft, t.squash AS tgt_squash, t.created_at AS tgt_created_at, t.updated_at AS tgt_updated_at, t.merge_commit_sha AS tgt_merge_commit_sha, t.discussion_locked AS tgt_discussion_locked, t.prepared_at AS tgt_prepared_at, t.project_id AS tgt_project_id, t.latest_build_started_at AS tgt_latest_build_started_at, t.latest_build_finished_at AS tgt_latest_build_finished_at, t.first_deployed_to_production_at AS tgt_first_deployed_to_production_at, t.merged_at AS tgt_merged_at, t.latest_closed_at AS tgt_latest_closed_at, t.first_comment_at AS tgt_first_comment_at, t.first_commit_at AS tgt_first_commit_at, t.last_commit_at AS tgt_last_commit_at, t.diff_size AS tgt_diff_size, t.modified_paths_size AS tgt_modified_paths_size, t.commits_count AS tgt_commits_count, t.first_approved_at AS tgt_first_approved_at, t.first_reassigned_at AS tgt_first_reassigned_at, t.added_lines AS tgt_added_lines, t.removed_lines AS tgt_removed_lines, t.first_contribution AS tgt_first_contribution, t.reviewer_first_assigned_at AS tgt_reviewer_first_assigned_at, t.author_id AS tgt_author_id, t.merge_user_id AS tgt_merge_user_id, t.updated_by_id AS tgt_updated_by_id, t.last_edited_by_id AS tgt_last_edited_by_id, t.closed_by_id AS tgt_closed_by_id, t.milestone_id AS tgt_milestone_id, t.source_project_id AS tgt_source_project_id, t.head_pipeline_id AS tgt_head_pipeline_id, t.latest_merge_request_diff_id AS tgt_latest_merge_request_diff_id, t.merged_commit_id AS tgt_merged_commit_id, greatest(e._version, s._version, t._version) AS _version, (e._deleted OR s._deleted OR t._deleted) AS _deleted FROM gl_merge_request AS t INNER JOIN gl_edge AS e FINAL ON e.target_id = t.id AND e.relationship_kind = 'REVIEWER' AND e.source_kind = 'User' AND e.target_kind = 'MergeRequest' INNER JOIN gl_user AS s FINAL ON e.source_id = s.id;
 
