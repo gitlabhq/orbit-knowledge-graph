@@ -757,7 +757,7 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
     validate_auxiliary_dictionaries(&ontology)?;
     validate_traversal_path_lookups(&ontology)?;
     validate_edge_scope_annotations(&ontology)?;
-    validate_materialized_edges(&ontology)?;
+    validate_denormalized_edges(&ontology)?;
     validate_derived_emits_registered(&ontology)?;
     validate_etl_edges_match_variants(&ontology)?;
     validate_unique_pipeline_names(&ontology)?;
@@ -1199,22 +1199,22 @@ fn validate_storage_columns(ontology: &crate::Ontology) -> Result<(), OntologyEr
     Ok(())
 }
 
-/// A materialized join table inherits the edge's `traversal_path` and is
+/// A denormalized join table inherits the edge's `traversal_path` and is
 /// security-filtered on it, so both endpoints being global (edge path `0/`)
 /// would make the filter drop every row.
-fn validate_materialized_edges(ontology: &crate::Ontology) -> Result<(), OntologyError> {
-    for edge in ontology.edges().filter(|e| e.materialized_table.is_some()) {
+fn validate_denormalized_edges(ontology: &crate::Ontology) -> Result<(), OntologyError> {
+    for edge in ontology.edges().filter(|e| e.denormalized_table.is_some()) {
         let global = |kind: &str| ontology.get_node(kind).is_some_and(|n| n.global);
         if global(&edge.source_kind) && global(&edge.target_kind) {
             return Err(OntologyError::Validation(format!(
-                "{} ({}→{}): materialized requires at least one scoped endpoint",
+                "{} ({}→{}): denormalized requires at least one scoped endpoint",
                 edge.relationship_kind, edge.source_kind, edge.target_kind
             )));
         }
         for kind in [&edge.source_kind, &edge.target_kind] {
             if ontology.get_node(kind).is_none() {
                 return Err(OntologyError::Validation(format!(
-                    "{} ({}→{}): materialized endpoint '{kind}' is not a node",
+                    "{} ({}→{}): denormalized endpoint '{kind}' is not a node",
                     edge.relationship_kind, edge.source_kind, edge.target_kind
                 )));
             }

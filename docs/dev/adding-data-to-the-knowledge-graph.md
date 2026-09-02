@@ -236,12 +236,12 @@ etl:
 If either FK column is `Nullable` in the source, the ETL can emit null-target edges —
 filter or document it (reviewers will ask). Prefer NOT-NULL join columns.
 
-A variant may add `materialized: true` when single-hop queries over it are hot and
-aggregate-heavy (see `edges/reviewer.yaml`). This emits a pre-joined `gl_mat_*` table plus
+A variant may add `denormalized: true` when single-hop queries over it are hot and
+aggregate-heavy (see `edges/reviewer.yaml`). This emits a pre-joined `gl_denorm_*` table plus
 feeding materialized views, and the compiler answers that hop with one scan. At least one
 endpoint must be scoped, and the table stores every column of both nodes, so weigh write
 amplification before opting in. Design notes:
-`docs/design-documents/querying/graph_engine.md` (Materialized join tables).
+`docs/design-documents/querying/graph_engine.md` (denormalized join tables).
 
 ### 5.3 Register in `config/ontology/schema.yaml` (the step that's easy to miss)
 

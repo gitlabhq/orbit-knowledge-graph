@@ -1,4 +1,4 @@
-//! DDL for materialized join tables: one `CreateTable` per opted-in edge
+//! DDL for denormalized join tables: one `CreateTable` per opted-in edge
 //! variant plus three `TO` materialized views, one per source table. Every
 //! table reference in the view bodies is a `{table}` placeholder so
 //! [`CreateMaterializedView::with_prefix`] can version them.
@@ -8,12 +8,12 @@ use ontology::constants::{
     DELETED_COLUMN, RELATIONSHIP_KIND_COLUMN, SOURCE_ID_COLUMN, SOURCE_KIND_COLUMN,
     TARGET_ID_COLUMN, TARGET_KIND_COLUMN, TRAVERSAL_PATH_COLUMN, VERSION_COLUMN,
 };
-use ontology::materialized::{MaterializedJoinTable, Side};
+use ontology::denormalized::{DenormalizedJoinTable, Side};
 
 use super::{parse_column_type, storage_col_to_def, system_columns, table_settings};
 use crate::ast::ddl::*;
 
-pub(super) fn build_table(mat: &MaterializedJoinTable) -> CreateTable {
+pub(super) fn build_table(mat: &DenormalizedJoinTable) -> CreateTable {
     let mut columns = vec![
         ColumnDef::new(TRAVERSAL_PATH_COLUMN, ColumnType::String)
             .with_default("'0/'")
@@ -54,7 +54,7 @@ fn prefixed_defs(side: Side, cols: &[StorageColumn]) -> impl Iterator<Item = Col
 /// different source. The edge view carries new relationships; the node views
 /// re-emit rows whose endpoint properties changed. All three share one
 /// projection so any of them produces a complete, current row.
-pub(super) fn build_views(mat: &MaterializedJoinTable) -> Vec<CreateMaterializedView> {
+pub(super) fn build_views(mat: &DenormalizedJoinTable) -> Vec<CreateMaterializedView> {
     [Trigger::Edge, Trigger::Source, Trigger::Target]
         .into_iter()
         .map(|trigger| CreateMaterializedView {
@@ -87,7 +87,7 @@ impl Trigger {
 
 /// The triggering table is scanned as-is (a view only sees the inserted
 /// block); the other two are read with `FINAL` for their current state.
-fn select_for(mat: &MaterializedJoinTable, trigger: Trigger) -> String {
+fn select_for(mat: &DenormalizedJoinTable, trigger: Trigger) -> String {
     let final_unless = |t: Trigger| if trigger == t { "" } else { " FINAL" };
 
     let mut cols = vec![

@@ -1,11 +1,11 @@
 //! Query lowerer: edge-chain-first, nodes are lazy.
 
 pub mod aggregation;
+mod denormalized;
 mod fk;
 mod flat_chain;
 mod helpers;
 pub mod hydration;
-mod materialized;
 pub mod neighbors;
 pub mod pathfinding;
 mod single_node;
@@ -22,7 +22,7 @@ impl Plan {
         match self.strategy {
             Strategy::SingleNode => single_node::emit_single_node(self),
             Strategy::Fk(ref shape) => fk::emit_fk(self, shape),
-            Strategy::Materialized(ref mat) => materialized::emit_materialized(self, mat),
+            Strategy::Denormalized(ref mat) => denormalized::emit_denormalized(self, mat),
             Strategy::Flat | Strategy::Bidirectional { .. } => flat_chain::emit_flat_chain(self),
         }
     }

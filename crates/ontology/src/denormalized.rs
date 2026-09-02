@@ -1,4 +1,4 @@
-//! Materialized join tables: a pre-joined `gl_mat_*` table per opted-in edge
+//! denormalized join tables: a pre-joined `gl_denorm_*` table per opted-in edge
 //! variant, holding the edge's `traversal_path` plus every storage column of
 //! both endpoint nodes under a side prefix. Three `TO`-style materialized
 //! views (one per source table: edge, source node, target node) keep it
@@ -16,11 +16,11 @@ use crate::entities::{EdgeEntity, NodeEntity, StorageColumn};
 pub const SOURCE_PREFIX: &str = "src_";
 pub const TARGET_PREFIX: &str = "tgt_";
 
-/// `gl_mat_reviewer__user__merge_request`
+/// `gl_denorm_reviewer__user__merge_request`
 #[must_use]
 pub fn table_name(relationship_kind: &str, source_kind: &str, target_kind: &str) -> String {
     format!(
-        "gl_mat_{}__{}__{}",
+        "gl_denorm_{}__{}__{}",
         relationship_kind.to_lowercase(),
         snake(source_kind),
         snake(target_kind)
@@ -67,10 +67,10 @@ impl Side {
     }
 }
 
-/// Column layout and provenance for one materialized join table. Built on
+/// Column layout and provenance for one denormalized join table. Built on
 /// demand from the edge variant and its two node entities; not stored.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MaterializedJoinTable {
+pub struct DenormalizedJoinTable {
     pub table: String,
     pub relationship_kind: String,
     pub edge_table: String,
@@ -87,13 +87,13 @@ pub struct MaterializedJoinTable {
     pub target_columns: Vec<StorageColumn>,
 }
 
-impl MaterializedJoinTable {
+impl DenormalizedJoinTable {
     pub(crate) fn build(
         edge: &EdgeEntity,
         source: &NodeEntity,
         target: &NodeEntity,
     ) -> Option<Self> {
-        let table = edge.materialized_table.clone()?;
+        let table = edge.denormalized_table.clone()?;
         let anchor = if source.global && !target.global {
             Side::Target
         } else {
@@ -158,11 +158,11 @@ mod tests {
     fn table_name_snake_cases_camel_kinds() {
         assert_eq!(
             table_name("REVIEWER", "User", "MergeRequest"),
-            "gl_mat_reviewer__user__merge_request"
+            "gl_denorm_reviewer__user__merge_request"
         );
         assert_eq!(
             table_name("HAS_LABEL", "WorkItem", "Label"),
-            "gl_mat_has_label__work_item__label"
+            "gl_denorm_has_label__work_item__label"
         );
     }
 }

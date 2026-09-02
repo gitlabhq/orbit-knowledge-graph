@@ -405,7 +405,7 @@ mod tests {
             direction: crate::input::Direction::Outgoing,
             filters: std::collections::HashMap::new(),
             fk_column: None,
-            materialized: None,
+            denormalized: None,
             scope_prefix: None,
             scope_preserving: false,
         }
@@ -1185,7 +1185,7 @@ mod tests {
             destination_table: edge_table,
             fk_column: None,
             scope: Some(ontology::EdgeVariantScope::PruneToTarget),
-            materialized_table: None,
+            denormalized_table: None,
         })
     }
 
@@ -1198,7 +1198,7 @@ mod tests {
             direction: crate::input::Direction::Outgoing,
             filters: std::collections::HashMap::new(),
             fk_column: None,
-            materialized: None,
+            denormalized: None,
             scope_prefix: None,
             scope_preserving: false,
         }

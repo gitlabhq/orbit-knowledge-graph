@@ -17,6 +17,7 @@
 //! ```
 
 pub mod constants;
+pub mod denormalized;
 mod entities;
 pub mod errors;
 pub mod etl;
@@ -24,7 +25,6 @@ pub mod etl_sql;
 pub mod introspection;
 mod json_schema;
 mod loading;
-pub mod materialized;
 pub mod migrations;
 pub mod pipelines;
 pub mod query_dsl;
@@ -607,7 +607,7 @@ impl Ontology {
         for edge_list in self.edges.values_mut() {
             for edge in edge_list {
                 edge.destination_table = format!("{prefix}{}", edge.destination_table);
-                if let Some(mat) = edge.materialized_table.as_mut() {
+                if let Some(mat) = edge.denormalized_table.as_mut() {
                     *mat = format!("{prefix}{mat}");
                 }
             }
@@ -738,7 +738,7 @@ impl Ontology {
     #[must_use]
     pub fn min_access_level_for_table(&self, table: &str) -> Option<u32> {
         let normalized = strip_schema_version_prefix(table);
-        if let Some(mat) = self.materialized_join_table_by_name(normalized) {
+        if let Some(mat) = self.denormalized_join_table_by_name(normalized) {
             // The join row exposes both endpoints, so the stricter floor applies.
             return [mat.source_kind.as_str(), mat.target_kind.as_str()]
                 .into_iter()
@@ -942,7 +942,7 @@ impl Ontology {
         // A join table's traversal_path is the edge's, which the loader only
         // permits when at least one endpoint is scoped, and it always leads
         // the sort key.
-        if self.materialized_join_table_by_name(normalized).is_some() {
+        if self.denormalized_join_table_by_name(normalized).is_some() {
             return true;
         }
         self.nodes
@@ -951,50 +951,50 @@ impl Ontology {
             .is_some_and(|(name, _)| self.is_path_scopable(name))
     }
 
-    /// Every opted-in materialized join table with its resolved column layout.
-    pub fn materialized_join_tables(&self) -> Vec<materialized::MaterializedJoinTable> {
+    /// Every opted-in denormalized join table with its resolved column layout.
+    pub fn denormalized_join_tables(&self) -> Vec<denormalized::DenormalizedJoinTable> {
         self.edges()
-            .filter(|e| e.materialized_table.is_some())
+            .filter(|e| e.denormalized_table.is_some())
             .filter_map(|e| {
                 let source = self.nodes.get(&e.source_kind)?;
                 let target = self.nodes.get(&e.target_kind)?;
-                materialized::MaterializedJoinTable::build(e, source, target)
+                denormalized::DenormalizedJoinTable::build(e, source, target)
             })
             .collect()
     }
 
-    /// The materialized join table for one directed variant, if opted in.
+    /// The denormalized join table for one directed variant, if opted in.
     #[must_use]
-    pub fn materialized_join_table(
+    pub fn denormalized_join_table(
         &self,
         relationship_kind: &str,
         source_kind: &str,
         target_kind: &str,
-    ) -> Option<materialized::MaterializedJoinTable> {
+    ) -> Option<denormalized::DenormalizedJoinTable> {
         let edge = self.edges.get(relationship_kind)?.iter().find(|e| {
             e.source_kind == source_kind
                 && e.target_kind == target_kind
-                && e.materialized_table.is_some()
+                && e.denormalized_table.is_some()
         })?;
         let source = self.nodes.get(source_kind)?;
         let target = self.nodes.get(target_kind)?;
-        materialized::MaterializedJoinTable::build(edge, source, target)
+        denormalized::DenormalizedJoinTable::build(edge, source, target)
     }
 
-    fn materialized_join_table_by_name(
+    fn denormalized_join_table_by_name(
         &self,
         unprefixed_table: &str,
-    ) -> Option<materialized::MaterializedJoinTable> {
+    ) -> Option<denormalized::DenormalizedJoinTable> {
         self.edges()
             .find(|e| {
-                e.materialized_table
+                e.denormalized_table
                     .as_deref()
                     .is_some_and(|t| strip_schema_version_prefix(t) == unprefixed_table)
             })
             .and_then(|e| {
                 let source = self.nodes.get(&e.source_kind)?;
                 let target = self.nodes.get(&e.target_kind)?;
-                materialized::MaterializedJoinTable::build(e, source, target)
+                denormalized::DenormalizedJoinTable::build(e, source, target)
             })
     }
 

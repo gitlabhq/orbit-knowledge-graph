@@ -6,7 +6,7 @@ variants:
   - from_node: { type: User, id: id }
     to_node: { type: MergeRequest, id: id }
     scope: prune_to_target
-    materialized: true
+    denormalized: true
     description: "User is a reviewer of merge request."
 
 indexer:

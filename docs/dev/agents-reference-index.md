@@ -32,7 +32,7 @@ Canonical locations for files, schemas, configs, and tools in the knowledge-grap
 | Query corpus (categorized YAML) | `fixtures/queries/corpus/` (smoke-tested in CI: `corpus_smoke`) |
 | Graph DDL (ClickHouse, versioned) | `config/graph.sql` |
 | Graph DDL (ClickHouse, persistent) | `config/graph_persistent.sql` (durable unversioned tables + materialized views created once at boot) |
-| Materialized join tables (`materialized: true` edge variants) | `crates/ontology/src/materialized.rs` (naming, layout, sort key), `crates/query-engine/compiler/src/passes/codegen/ddl/materialized.rs` (table + feeding views), `crates/query-engine/compiler/src/passes/lower/materialized.rs` and `passes/rebind.rs` (single-scan lowering); design in `docs/design-documents/querying/graph_engine.md` |
+| denormalized join tables (`denormalized: true` edge variants) | `crates/ontology/src/denormalized.rs` (naming, layout, sort key), `crates/query-engine/compiler/src/passes/codegen/ddl/denormalized.rs` (table + feeding views), `crates/query-engine/compiler/src/passes/lower/denormalized.rs` and `passes/rebind.rs` (single-scan lowering); design in `docs/design-documents/querying/graph_engine.md` |
 | Refreshable-view MiniJinja SQL templates | `config/ontology/sql/*.sql.j2` (ClickHouse SELECT templates rendered from the schema version and ontology-derived graph table metadata) |
 | Schema version file | `config/SCHEMA_VERSION` (bump when `graph.sql` or `config/ontology/` changes) |
 | RAW output format version | `config/RAW_OUTPUT_FORMAT_VERSION` (semver, bump when `graph.rs` or `query_response.json` changes) |

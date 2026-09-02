@@ -1,6 +1,6 @@
 use crate::error::{QueryError, Result};
 use crate::input::{
-    ColumnSelection, Direction, EntityAuthConfig, Input, MaterializedEdge, QueryType, TextIndexMeta,
+    ColumnSelection, DenormalizedEdge, Direction, EntityAuthConfig, Input, QueryType, TextIndexMeta,
 };
 use crate::passes::hydrate::VirtualColumnRequest;
 use ontology::constants::DEFAULT_PRIMARY_KEY;
@@ -306,14 +306,14 @@ pub fn normalize(mut input: Input, ontology: &Ontology) -> Result<Input> {
     }
     infer_wildcard_relationship_kinds(&mut input, ontology);
     resolve_fk_metadata(&mut input, ontology);
-    resolve_materialized_tables(&mut input, ontology);
+    resolve_denormalized_tables(&mut input, ontology);
     Ok(input)
 }
 
-/// A hop binds to a materialized join table only when it names exactly one
+/// A hop binds to a denormalized join table only when it names exactly one
 /// relationship kind and exactly one variant orientation matches the endpoint
 /// entities, so the table's `src_`/`tgt_` sides map unambiguously onto nodes.
-fn resolve_materialized_tables(input: &mut Input, ontology: &Ontology) {
+fn resolve_denormalized_tables(input: &mut Input, ontology: &Ontology) {
     let entity_for: HashMap<&str, &str> = input
         .nodes
         .iter()
@@ -331,8 +331,8 @@ fn resolve_materialized_tables(input: &mut Input, ontology: &Ontology) {
             continue;
         };
 
-        let forward = ontology.materialized_join_table(rel_type, from_entity, to_entity);
-        let reverse = ontology.materialized_join_table(rel_type, to_entity, from_entity);
+        let forward = ontology.denormalized_join_table(rel_type, from_entity, to_entity);
+        let reverse = ontology.denormalized_join_table(rel_type, to_entity, from_entity);
         let bound = match rel.direction {
             Direction::Outgoing => forward.map(|m| (m, &rel.from, &rel.to)),
             Direction::Incoming => reverse.map(|m| (m, &rel.to, &rel.from)),
@@ -343,7 +343,7 @@ fn resolve_materialized_tables(input: &mut Input, ontology: &Ontology) {
             },
         };
         if let Some((mat, source_node, target_node)) = bound {
-            rel.materialized = Some(MaterializedEdge {
+            rel.denormalized = Some(DenormalizedEdge {
                 table: mat.table,
                 source_node: source_node.clone(),
                 target_node: target_node.clone(),

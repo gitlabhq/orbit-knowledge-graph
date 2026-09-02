@@ -124,9 +124,9 @@ _Avoid_: preset query, query template
 A single **Relationship** traversal in the graph. Multi-hop queries traverse multiple relationships in sequence. Hard-capped at 3 hops for security and performance.
 _Avoid_: depth (ambiguous with tree depth)
 
-**Materialized Join Table**:
-A pre-joined `gl_mat_*` table for one **Relationship** variant that opts in with `materialized: true`, holding the edge row plus every property of both endpoint **Nodes** under `src_`/`tgt_` prefixes. Kept current by ClickHouse materialized views on the edge and node tables. The compiler answers a single **Hop** over such a variant with one scan instead of an edge scan plus two node joins.
-_Avoid_: denormalized edge (that is the edge-table tag mechanism), projection (ClickHouse feature we deliberately do not use here)
+**Denormalized Join Table**:
+A pre-joined `gl_denorm_*` table for one **Relationship** variant that opts in with `denormalized: true`, holding the edge row plus every property of both endpoint **Nodes** under `src_`/`tgt_` prefixes. Kept current by ClickHouse materialized views on the edge and node tables. The compiler answers a single **Hop** over such a variant with one scan instead of an edge scan plus two node joins.
+_Avoid_: materialized table (the ClickHouse materialized views only feed it), projection (ClickHouse feature we deliberately do not use here). Distinct from the edge-tag `denormalization` settings block in `schema.yaml`, which copies selected node properties onto edge rows.
 
 **Hydration**:
 Fetching properties for **Nodes** discovered dynamically during query execution. Required for PathFinding and Neighbors queries where the result set's node types aren't known upfront.

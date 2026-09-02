@@ -19,7 +19,7 @@ use ontology::migrations::MigrationScope;
 use orbit_utils::traversal_path::TraversalPath;
 use query_engine::compiler::{
     DictionarySource, emit_create_table, generate_graph_dictionaries_with_prefix,
-    generate_graph_tables_with_prefix,
+    generate_graph_materialized_views_with_prefix, generate_graph_tables_with_prefix,
 };
 
 fn dictionary_source(
@@ -74,19 +74,25 @@ async fn fresh_install_creates_tables_and_records_version() {
 
     let prefix = table_prefix(*SCHEMA_VERSION);
     let expected_tables = generate_graph_tables_with_prefix(&ontology, &prefix);
+    let expected_views = generate_graph_materialized_views_with_prefix(&ontology, &prefix);
 
     let result = ctx
         .query(
-            "SELECT toInt64(count()) AS cnt FROM system.tables \
+            "SELECT toInt64(countIf(engine != 'MaterializedView')) AS tables, \
+             toInt64(countIf(engine = 'MaterializedView')) AS views FROM system.tables \
              WHERE database = 'test' AND name != 'gkg_schema_version' \
              AND engine != 'Dictionary'",
         )
         .await;
-    let count = i64::extract_column(&result, 0).unwrap();
     assert_eq!(
-        count,
+        i64::extract_column(&result, 0).unwrap(),
         vec![expected_tables.len() as i64],
         "fresh install should create all ontology tables"
+    );
+    assert_eq!(
+        i64::extract_column(&result, 1).unwrap(),
+        vec![expected_views.len() as i64],
+        "fresh install should create all versioned materialized views"
     );
 
     let expected_dicts = generate_graph_dictionaries_with_prefix(&ontology, &prefix);
@@ -152,7 +158,7 @@ async fn mismatch_creates_all_ontology_tables_and_marks_migrating() {
         .query(
             "SELECT name FROM system.tables \
              WHERE database = 'test' AND name != 'gkg_schema_version' \
-             AND engine != 'Dictionary' \
+             AND engine NOT IN ('Dictionary', 'MaterializedView') \
              ORDER BY name",
         )
         .await;

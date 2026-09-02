@@ -1691,10 +1691,10 @@ mod tests {
         assert!(sql.contains("GROUP BY f.old_path"), "got:\n{sql}");
     }
 
-    const MAT_REVIEWER: &str = "gl_mat_reviewer__user__merge_request";
+    const DENORM_REVIEWER: &str = "gl_denorm_reviewer__user__merge_request";
 
     #[test]
-    fn materialized_traversal_is_one_final_scan_with_rebound_columns() {
+    fn denormalized_traversal_is_one_final_scan_with_rebound_columns() {
         let query = r#"{
             "query_type": "traversal",
             "nodes": [
@@ -1710,7 +1710,7 @@ mod tests {
         let sql = compile_sql(query);
 
         assert!(
-            sql.contains(&format!("FROM {MAT_REVIEWER} AS e0 FINAL")),
+            sql.contains(&format!("FROM {DENORM_REVIEWER} AS e0 FINAL")),
             "got:\n{sql}"
         );
         assert!(
@@ -1738,7 +1738,7 @@ mod tests {
     }
 
     #[test]
-    fn materialized_aggregation_groups_on_rebound_columns() {
+    fn denormalized_aggregation_groups_on_rebound_columns() {
         let query = r#"{
             "query_type": "aggregation",
             "nodes": [
@@ -1754,7 +1754,7 @@ mod tests {
         let sql = compile_sql(query);
 
         assert!(
-            sql.contains(&format!("FROM {MAT_REVIEWER} AS e0 FINAL")),
+            sql.contains(&format!("FROM {DENORM_REVIEWER} AS e0 FINAL")),
             "got:\n{sql}"
         );
         assert!(
@@ -1768,7 +1768,7 @@ mod tests {
     }
 
     #[test]
-    fn materialized_incoming_direction_swaps_sides() {
+    fn denormalized_incoming_direction_swaps_sides() {
         let query = r#"{
             "query_type": "traversal",
             "nodes": [
@@ -1782,7 +1782,7 @@ mod tests {
         let sql = compile_sql(query);
 
         assert!(
-            sql.contains(&format!("FROM {MAT_REVIEWER} AS e0 FINAL")),
+            sql.contains(&format!("FROM {DENORM_REVIEWER} AS e0 FINAL")),
             "got:\n{sql}"
         );
         assert!(sql.contains("e0.tgt_id = 5"), "got:\n{sql}");
@@ -1793,7 +1793,7 @@ mod tests {
     }
 
     #[test]
-    fn materialized_is_skipped_for_multi_kind_and_variable_length_hops() {
+    fn denormalized_is_skipped_for_multi_kind_and_variable_length_hops() {
         for rel in [
             r#"{"type": ["REVIEWER", "ASSIGNED"], "from": "u", "to": "mr"}"#,
             r#"{"type": "REVIEWER", "from": "u", "to": "mr", "hops": [1, 2]}"#,
@@ -1803,7 +1803,7 @@ mod tests {
             );
             let sql = compile_sql(&query);
             assert!(
-                !sql.contains(MAT_REVIEWER),
+                !sql.contains(DENORM_REVIEWER),
                 "rel {rel} must not use the join table, got:\n{sql}"
             );
         }

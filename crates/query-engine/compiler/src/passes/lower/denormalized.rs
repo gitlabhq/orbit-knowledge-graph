@@ -1,34 +1,34 @@
 //! Emit a single-hop traversal or aggregation as one `FINAL` scan of the
-//! hop's materialized join table. Node columns are still emitted against the
+//! hop's denormalized join table. Node columns are still emitted against the
 //! node aliases here; the `rebind` pass maps them onto the scan's `src_`/`tgt_`
 //! columns after every alias-producing pass has run.
 
 use ontology::constants::*;
-use ontology::materialized::Side;
+use ontology::denormalized::Side;
 
 use crate::ast::*;
 use crate::constants::*;
 use crate::error::{QueryError, Result};
-use crate::input::MaterializedEdge;
+use crate::input::DenormalizedEdge;
 
 use super::EmitOutput;
 use super::helpers::{node_filter_predicates, node_select_columns};
 use crate::passes::plan::*;
 use crate::passes::shared::deleted_false;
 
-pub(super) fn emit_materialized(plan: &Plan, mat: &MaterializedEdge) -> Result<EmitOutput> {
+pub(super) fn emit_denormalized(plan: &Plan, mat: &DenormalizedEdge) -> Result<EmitOutput> {
     let hop = plan
         .hops
         .first()
-        .ok_or_else(|| QueryError::Lowering("materialized plan has no hop".into()))?;
-    let alias = MATERIALIZED_ALIAS;
+        .ok_or_else(|| QueryError::Lowering("denormalized plan has no hop".into()))?;
+    let alias = DENORMALIZED_ALIAS;
 
     // The join row's `_deleted` already folds in both endpoints' liveness.
     let mut where_parts = vec![deleted_false(alias)];
     let mut select = Vec::new();
     for node_alias in [&mat.source_node, &mat.target_node] {
         let np = plan.nodes.get(node_alias).ok_or_else(|| {
-            QueryError::Lowering(format!("materialized endpoint '{node_alias}' not in plan"))
+            QueryError::Lowering(format!("denormalized endpoint '{node_alias}' not in plan"))
         })?;
         where_parts.extend(node_filter_predicates(node_alias, np));
         select.extend(node_select_columns(node_alias, np));
@@ -59,7 +59,7 @@ pub(super) fn emit_materialized(plan: &Plan, mat: &MaterializedEdge) -> Result<E
 
 /// The per-hop edge columns the graph formatter expects, synthesized from the
 /// join row since there is no edge-table scan to select them from.
-fn edge_columns(plan: &Plan, mat: &MaterializedEdge, alias: &str) -> [SelectExpr; 5] {
+fn edge_columns(plan: &Plan, mat: &DenormalizedEdge, alias: &str) -> [SelectExpr; 5] {
     let entity = |node: &str| {
         plan.nodes
             .get(node)

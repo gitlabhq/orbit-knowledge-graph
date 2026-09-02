@@ -2,16 +2,16 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 
 use ontology::constants::*;
-use ontology::materialized::Side;
+use ontology::denormalized::Side;
 use orbit_utils::traversal_path::TraversalPath;
 
 use crate::input::*;
 
 use super::{Plan, PlanBody};
 
-/// FROM alias of the materialized join table scan. Matches the first edge
+/// FROM alias of the denormalized join table scan. Matches the first edge
 /// alias flat chains use, so formatter-facing `e0_*` edge columns line up.
-pub const MATERIALIZED_ALIAS: &str = "e0";
+pub const DENORMALIZED_ALIAS: &str = "e0";
 use crate::passes::shared::{requested_columns, resolve_edge_table};
 
 pub struct Hop {
@@ -149,7 +149,7 @@ pub enum Strategy {
     /// Single hop answered by one `FINAL` scan of a pre-joined edge+node table.
     /// Both endpoint aliases are rebound onto the scan's `src_`/`tgt_` columns
     /// by the `rebind` pass, so no node table is touched.
-    Materialized(MaterializedEdge),
+    Denormalized(DenormalizedEdge),
 }
 
 /// Single-hop FK is the degenerate one-hop [`FkShape::Star`].
@@ -181,11 +181,11 @@ pub fn plan(input: &mut Input) -> Plan {
 
     let strategy = if hops.is_empty() {
         Strategy::SingleNode
-    } else if let Some(mat) = detect_materialized(&hops, &nodes, input) {
+    } else if let Some(mat) = detect_denormalized(&hops, &nodes, input) {
         for alias in [&mat.source_node, &mat.target_node] {
             nodes.get_mut(alias).unwrap().hydration = HydrationStrategy::Skip;
         }
-        Strategy::Materialized(mat)
+        Strategy::Denormalized(mat)
     } else if let Some(shape) = detect_fk(&hops, &nodes) {
         Strategy::Fk(shape)
     } else {
@@ -480,22 +480,22 @@ fn elide_hops<'a>(
     (keep_hops, elided_fks, input)
 }
 
-/// A single fixed-length hop whose relationship resolved to a materialized
+/// A single fixed-length hop whose relationship resolved to a denormalized
 /// join table. Elevated-access entities are excluded: their role floor is
 /// enforced through a node-table subquery the single-scan shape has no place
 /// for, and the join table's floor is the max of both sides anyway.
-fn detect_materialized(
+fn detect_denormalized(
     hops: &[Hop],
     nodes: &HashMap<String, NodePlan>,
     input: &Input,
-) -> Option<MaterializedEdge> {
+) -> Option<DenormalizedEdge> {
     let [hop] = hops else {
         return None;
     };
     if hop.max_hops != 1 || !hop.filters.is_empty() {
         return None;
     }
-    let mat = input.relationships.first()?.materialized.clone()?;
+    let mat = input.relationships.first()?.denormalized.clone()?;
     let elevated = [&mat.source_node, &mat.target_node].iter().any(|alias| {
         nodes
             .get(*alias)
@@ -750,7 +750,7 @@ fn compute_node_edge_mappings(
                 }
             }
         }
-        Strategy::Materialized(mat) => {
+        Strategy::Denormalized(mat) => {
             for (alias, side) in [
                 (&mat.source_node, Side::Source),
                 (&mat.target_node, Side::Target),
@@ -758,7 +758,7 @@ fn compute_node_edge_mappings(
                 mappings.insert(
                     alias.clone(),
                     (
-                        MATERIALIZED_ALIAS.to_string(),
+                        DENORMALIZED_ALIAS.to_string(),
                         format!("{}{DEFAULT_PRIMARY_KEY}", side.prefix()),
                     ),
                 );

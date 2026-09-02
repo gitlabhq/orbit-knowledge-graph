@@ -10,11 +10,11 @@ use ontology::constants::{DEFAULT_PRIMARY_KEY, SOURCE_ID_COLUMN, TARGET_ID_COLUM
 
 /// Deterministic per-row sort suffix: edge id pairs when edges are scanned
 /// (flat/bidirectional chains), node PKs for edge-free shapes (FK and
-/// materialized scans synthesize their `e0` columns rather than scanning
+/// denormalized scans synthesize their `e0` columns rather than scanning
 /// an edge table).
 fn tie_breakers(plan: &Plan, edge_aliases: &[String]) -> Vec<OrderExpr> {
     if edge_aliases.is_empty()
-        || matches!(plan.strategy, Strategy::Fk(_) | Strategy::Materialized(_))
+        || matches!(plan.strategy, Strategy::Fk(_) | Strategy::Denormalized(_))
     {
         let mut aliases: Vec<&String> = plan.nodes.keys().collect();
         aliases.sort();

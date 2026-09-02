@@ -1,8 +1,8 @@
-//! Rebind node aliases onto a materialized join table scan.
+//! Rebind node aliases onto a denormalized join table scan.
 //!
 //! Every earlier pass (lowering, enforcement, cursor seek) emits node columns
 //! as `<node>.<column>`, which is what a real node-table scan would expose. A
-//! [`Strategy::Materialized`] plan has no such scan: both endpoints live in
+//! [`Strategy::Denormalized`] plan has no such scan: both endpoints live in
 //! one row under `src_`/`tgt_` prefixes. This pass runs after the last
 //! alias-producing pass and rewrites `<node>.<column>` to
 //! `<scan>.<prefix><column>`. Columns the join table owns outright
@@ -10,14 +10,14 @@
 
 use std::collections::HashMap;
 
-use ontology::materialized::{MaterializedJoinTable, Side};
+use ontology::denormalized::{DenormalizedJoinTable, Side};
 
 use crate::ast::*;
 use crate::error::Result;
-use crate::passes::plan::{MATERIALIZED_ALIAS, Plan, Strategy};
+use crate::passes::plan::{DENORMALIZED_ALIAS, Plan, Strategy};
 
 pub fn apply(node: &mut Node, plan: &Plan) -> Result<()> {
-    let Strategy::Materialized(mat) = &plan.strategy else {
+    let Strategy::Denormalized(mat) = &plan.strategy else {
         return Ok(());
     };
     let sides = HashMap::from([
@@ -83,10 +83,10 @@ fn rebind_expr(e: &mut Expr, sides: &HashMap<&str, Side>) {
     match e {
         Expr::Column { table, column } => {
             if let Some(side) = sides.get(table.as_str()) {
-                if !MaterializedJoinTable::is_passthrough_column(column) {
+                if !DenormalizedJoinTable::is_passthrough_column(column) {
                     *column = format!("{}{column}", side.prefix());
                 }
-                *table = MATERIALIZED_ALIAS.to_string();
+                *table = DENORMALIZED_ALIAS.to_string();
             }
         }
         Expr::Identifier(_) | Expr::Literal(_) | Expr::Param { .. } | Expr::Star => {}

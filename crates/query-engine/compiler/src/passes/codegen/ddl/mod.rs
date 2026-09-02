@@ -4,8 +4,8 @@
 //! with no auto-derivation.
 
 pub mod clickhouse;
+mod denormalized;
 pub mod duckdb;
-mod materialized;
 
 use std::collections::BTreeMap;
 
@@ -83,8 +83,8 @@ pub fn generate_graph_tables_with_prefix(ontology: &Ontology, prefix: &str) -> V
             tables.push(build_edge_table(name, config, partition).with_prefix(prefix));
         }
     }
-    for mat in ontology.materialized_join_tables() {
-        tables.push(materialized::build_table(&mat).with_prefix(prefix));
+    for mat in ontology.denormalized_join_tables() {
+        tables.push(denormalized::build_table(&mat).with_prefix(prefix));
     }
 
     tables
@@ -164,9 +164,9 @@ pub fn generate_graph_materialized_views_with_prefix(
         .filter(|mv| mv.versioned)
         .map(|mv| build_materialized_view(mv).with_prefix(prefix, &known_tables))
         .collect();
-    for mat in ontology.materialized_join_tables() {
+    for mat in ontology.denormalized_join_tables() {
         views.extend(
-            materialized::build_views(&mat)
+            denormalized::build_views(&mat)
                 .into_iter()
                 .map(|v| v.with_prefix(prefix, &known_tables)),
         );
@@ -187,7 +187,7 @@ fn collect_table_names(ontology: &Ontology) -> Vec<String> {
     for table_name in ontology.edge_tables() {
         names.push(table_name.to_string());
     }
-    for mat in ontology.materialized_join_tables() {
+    for mat in ontology.denormalized_join_tables() {
         names.push(mat.table);
     }
     names
@@ -918,15 +918,15 @@ mod tests {
     }
 
     #[test]
-    fn materialized_join_table_emits_table_and_three_feeding_views() {
+    fn denormalized_join_table_emits_table_and_three_feeding_views() {
         let ontology = ontology();
-        let table = "gl_mat_reviewer__user__merge_request";
+        let table = "gl_denorm_reviewer__user__merge_request";
 
         let tables = generate_graph_tables(&ontology);
         let mat = tables
             .iter()
             .find(|t| t.name == table)
-            .expect("materialized join table should be generated");
+            .expect("denormalized join table should be generated");
         assert_eq!(mat.order_by, ["traversal_path", "tgt_id", "src_id"]);
         let names: Vec<&str> = mat.columns.iter().map(|c| c.name.as_str()).collect();
         assert!(names.contains(&"src_username") && names.contains(&"tgt_title"));
@@ -955,16 +955,16 @@ mod tests {
     }
 
     #[test]
-    fn materialized_join_table_and_views_share_the_version_prefix() {
+    fn denormalized_join_table_and_views_share_the_version_prefix() {
         let ontology = ontology();
         let views = generate_graph_materialized_views_with_prefix(&ontology, "v7_");
         let on_source = views
             .iter()
-            .find(|v| v.name == "v7_gl_mat_reviewer__user__merge_request__on_source")
+            .find(|v| v.name == "v7_gl_denorm_reviewer__user__merge_request__on_source")
             .expect("prefixed feeding view");
         assert_eq!(
             on_source.to_table.as_deref(),
-            Some("v7_gl_mat_reviewer__user__merge_request")
+            Some("v7_gl_denorm_reviewer__user__merge_request")
         );
         assert!(on_source.select_query.contains("FROM v7_gl_user AS s"));
         assert!(on_source.select_query.contains("v7_gl_edge AS e FINAL"));
