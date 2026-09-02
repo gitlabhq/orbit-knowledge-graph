@@ -768,8 +768,8 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
         ontology.denormalized_joins.push(resolved);
     }
     validate_unique_denormalized_joins(&ontology)?;
-    // A denormalized table carries the traversal_path of its first scoped
-    // table, so it is bucketed whenever that table is.
+    // A denormalized table's sort key leads with its anchor table's
+    // traversal_path, so it is bucketed whenever that table is.
     if let Some(partition) = ontology.partition.as_mut() {
         let bucketed: Vec<String> = ontology
             .denormalized_joins
@@ -777,7 +777,7 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
             .filter(|j| {
                 partition
                     .partitioned_tables
-                    .contains(&j.tables[j.traversal_path_table()].table)
+                    .contains(&j.tables[j.anchor_table()].table)
             })
             .map(|j| j.table.clone())
             .collect();
@@ -1238,15 +1238,11 @@ pub(crate) struct DeclaredHop<'a> {
 
 /// Resolve a `denormalized_joins` entry into its table chain.
 ///
-/// Consecutive hops must share a node. Adjacent tables join on `traversal_path`
-/// when both carry it. That equality is what keeps the row on one path for the
-/// security filter, but it also drops any row whose two sides carry different
-/// paths, so the table would silently answer less than the edge chain does.
-/// Every hop must therefore be one where the paths are known equal: a
-/// scope-preserving variant or one reaching a global node (the FK-chain rule),
-/// excluding a hop between two namespaces, whose child path extends the
-/// parent's. At least one table must be scoped, since the row is filtered on
-/// its `traversal_path`.
+/// Consecutive hops must share a node. Adjacent tables join only on the id
+/// that links them; every scoped table keeps its own `traversal_path` in the
+/// row and the security pass filters each, so hops may cross namespaces just
+/// as they do in an ordinary edge chain. At least one table must be scoped,
+/// since an all-global row has nothing to filter on.
 pub(crate) fn resolve_denormalized_join(
     ontology: &crate::Ontology,
     name: &str,
@@ -1276,14 +1272,6 @@ pub(crate) fn resolve_denormalized_join(
             .get(kind)
             .ok_or_else(|| fail(format!("unknown node '{kind}'")))
     };
-    // Nodes that head a namespace (Project, Group): a child's traversal_path
-    // extends its parent's, so two of them never share one. Every other node
-    // carries the path of the namespace it lives in.
-    let defines_namespace = |kind: &str| {
-        ontology.edges().any(|e| {
-            e.scope == Some(crate::EdgeVariantScope::NamespaceAnchor) && e.target_kind == kind
-        })
-    };
     let has_column =
         |n: &crate::NodeEntity, col: &str| n.storage.columns.iter().any(|c| c.name == col);
     let node_table = |n: &crate::NodeEntity| JoinedTable {
@@ -1293,14 +1281,12 @@ pub(crate) fn resolve_denormalized_join(
         join: None,
         filter: vec![],
     };
-    let link =
-        |prev: &JoinedTable, this: &mut JoinedTable, prev_column: &str, this_column: &str| {
-            this.join = Some(JoinOn {
-                prev_column: prev_column.to_string(),
-                this_column: this_column.to_string(),
-                on_traversal_path: prev.has_traversal_path && this.has_traversal_path,
-            });
-        };
+    let link = |this: &mut JoinedTable, prev_column: &str, this_column: &str| {
+        this.join = Some(JoinOn {
+            prev_column: prev_column.to_string(),
+            this_column: this_column.to_string(),
+        });
+    };
 
     let mut tables = vec![node_table(node(hops[0].from)?)];
     let mut resolved_hops = Vec::with_capacity(hops.len());
@@ -1326,26 +1312,6 @@ pub(crate) fn resolve_denormalized_join(
                     hop.relationship, hop.from, hop.to
                 ))
             })?;
-        if defines_namespace(hop.from) && defines_namespace(hop.to) {
-            return Err(fail(format!(
-                "{} ({} -> {}) links two namespaces, whose traversal_paths differ, so they \
-                 cannot share a denormalized row",
-                hop.relationship, hop.from, hop.to
-            )));
-        }
-
-        let global = |kind: &str| ontology.nodes.get(kind).is_some_and(|n| n.global);
-        if !ontology.is_scope_preserving_triple(hop.relationship, hop.from, hop.to)
-            && !global(hop.from)
-            && !global(hop.to)
-        {
-            return Err(fail(format!(
-                "{} ({} -> {}) may cross namespaces; the traversal_path join would silently \
-                 drop those rows, so it cannot be denormalized",
-                hop.relationship, hop.from, hop.to
-            )));
-        }
-
         let from_node = node(hop.from)?;
         let to_node = node(hop.to)?;
         let source_table = tables.len() - 1;
@@ -1358,9 +1324,9 @@ pub(crate) fn resolve_denormalized_join(
                 ))
             })?;
             if has_column(from_node, fk) {
-                link(&tables[source_table], &mut target, fk, DEFAULT_PRIMARY_KEY);
+                link(&mut target, fk, DEFAULT_PRIMARY_KEY);
             } else {
-                link(&tables[source_table], &mut target, DEFAULT_PRIMARY_KEY, fk);
+                link(&mut target, DEFAULT_PRIMARY_KEY, fk);
             }
             None
         } else {
@@ -1383,19 +1349,9 @@ pub(crate) fn resolve_denormalized_join(
                     (TARGET_KIND_COLUMN.into(), hop.to.into()),
                 ],
             };
-            link(
-                &tables[source_table],
-                &mut edge,
-                DEFAULT_PRIMARY_KEY,
-                SOURCE_ID_COLUMN,
-            );
+            link(&mut edge, DEFAULT_PRIMARY_KEY, SOURCE_ID_COLUMN);
             tables.push(edge);
-            link(
-                &tables[tables.len() - 1],
-                &mut target,
-                TARGET_ID_COLUMN,
-                DEFAULT_PRIMARY_KEY,
-            );
+            link(&mut target, TARGET_ID_COLUMN, DEFAULT_PRIMARY_KEY);
             Some(tables.len() - 1)
         };
         tables.push(target);
@@ -1621,25 +1577,18 @@ mod tests {
             tables,
             ["gl_user", "gl_edge", "gl_merge_request", "gl_project"]
         );
-        // User is global, so the edge joins on id only; every later pair shares traversal_path.
-        let joins: Vec<(&str, &str, bool)> = join
+        let joins: Vec<(&str, &str)> = join
             .tables
             .iter()
             .filter_map(|t| t.join.as_ref())
-            .map(|j| {
-                (
-                    j.prev_column.as_str(),
-                    j.this_column.as_str(),
-                    j.on_traversal_path,
-                )
-            })
+            .map(|j| (j.prev_column.as_str(), j.this_column.as_str()))
             .collect();
         assert_eq!(
             joins,
             [
-                ("id", "source_id", false),
-                ("target_id", "id", true),
-                ("project_id", "id", true)
+                ("id", "source_id"),
+                ("target_id", "id"),
+                ("project_id", "id")
             ]
         );
         assert_eq!(
@@ -1652,7 +1601,7 @@ mod tests {
             (join.hops[1].source_table, join.hops[1].target_table),
             (2, 3)
         );
-        assert_eq!(join.traversal_path_table(), 1);
+        assert_eq!(join.anchor_table(), 1);
     }
 
     #[test]
@@ -1672,15 +1621,13 @@ mod tests {
         );
         assert!(err(&[hop("REVIEWER", "User", "Project", false)]).contains("no REVIEWER variant"));
         assert!(err(&[hop("REVIEWER", "User", "MergeRequest", true)]).contains("no fk_column"));
-        assert!(
-            err(&[hop("CONTAINS", "Group", "Project", false)]).contains("links two namespaces")
-        );
-        // CLOSES may point at a work item in another project; the equality join
-        // would drop those rows rather than fail.
-        assert!(
-            err(&[hop("CLOSES", "MergeRequest", "WorkItem", false)])
-                .contains("may cross namespaces")
-        );
+        // Cross-namespace hops are fine: each table keeps its own path in the row.
+        for (name, hop_) in [
+            ("closes", hop("CLOSES", "MergeRequest", "WorkItem", false)),
+            ("contains", hop("CONTAINS", "Group", "Project", false)),
+        ] {
+            resolve_denormalized_join(&ontology, name, &[hop_]).unwrap();
+        }
     }
 
     #[test]

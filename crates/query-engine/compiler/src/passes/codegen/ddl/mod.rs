@@ -1173,6 +1173,10 @@ mod tests {
 
         assert_eq!(names[0], "traversal_path");
         assert_eq!(names.iter().filter(|n| **n == "traversal_path").count(), 1);
+        assert!(
+            !names.contains(&"t1_traversal_path") && !names.contains(&"t0_traversal_path"),
+            "the anchor's path is the unprefixed one and User has none"
+        );
         for expected in [
             "t0_id",
             "t0_username",
@@ -1180,7 +1184,9 @@ mod tests {
             "t1_relationship_kind",
             "t2_id",
             "t2_title",
+            "t2_traversal_path",
             "t3_name",
+            "t3_traversal_path",
         ] {
             assert!(names.contains(&expected), "missing {expected} in {names:?}");
         }
@@ -1235,15 +1241,18 @@ mod tests {
         }
 
         // The trigger is read as the inserted block; everything else is FINAL,
-        // joined outward. User is global, so the edge joins on id only; the
-        // scoped tables also join on traversal_path.
+        // joined outward on ids only.
         let on_t2 = &views[2].select_query;
-        assert!(on_t2.contains(
-            "FROM v9_gl_merge_request AS t2 \
-             INNER JOIN v9_gl_project AS t3 FINAL ON t2.traversal_path = t3.traversal_path AND t2.project_id = t3.id \
-             INNER JOIN v9_gl_edge AS t1 FINAL ON t1.traversal_path = t2.traversal_path AND t1.target_id = t2.id AND t1.relationship_kind = 'REVIEWER' AND t1.source_kind = 'User' AND t1.target_kind = 'MergeRequest' \
-             INNER JOIN v9_gl_user AS t0 FINAL ON t0.id = t1.source_id"
-        ), "got:\n{on_t2}");
+        assert!(
+            on_t2.contains(
+                "FROM v9_gl_merge_request AS t2 \
+                 INNER JOIN v9_gl_project AS t3 FINAL ON t2.project_id = t3.id \
+                 INNER JOIN v9_gl_edge AS t1 FINAL ON t1.target_id = t2.id AND t1.relationship_kind = 'REVIEWER' AND t1.source_kind = 'User' AND t1.target_kind = 'MergeRequest' \
+                 INNER JOIN v9_gl_user AS t0 FINAL ON t0.id = t1.source_id"
+            ),
+            "got:\n{on_t2}"
+        );
+        assert!(on_t2.contains("t2.traversal_path AS t2_traversal_path"));
         assert!(!on_t2.contains("AS t2 FINAL"));
 
         let on_t1 = &views[1].select_query;

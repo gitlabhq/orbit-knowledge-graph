@@ -576,7 +576,7 @@
         },
         "denormalized_joins": {
           "type": "array",
-          "description": "Linear chains of tables pre-joined into gl_denorm_<name> tables, kept current by one materialized view per source table. Adjacent tables join on traversal_path when both carry it and on the id or edge id that links them. Each declaration is a versioned table, so adding one is a schema bump.",
+          "description": "Linear chains of tables pre-joined into gl_denorm_<name> tables, kept current by one materialized view per source table. Adjacent tables join on the id or edge id that links them; every scoped table keeps its own traversal_path in the row and the compiler filters each. Each declaration is a versioned table, so adding one is a schema bump.",
           "items": {
             "type": "object",
             "additionalProperties": false,
@@ -590,7 +590,7 @@
               "hops": {
                 "type": "array",
                 "minItems": 1,
-                "description": "Edge variants in chain order; each hop's from must equal the previous hop's to. A hop between two namespaces (Project, Group) is rejected because their traversal_paths differ.",
+                "description": "Edge variants in chain order; each hop's from must equal the previous hop's to.",
                 "items": {
                   "type": "object",
                   "additionalProperties": false,

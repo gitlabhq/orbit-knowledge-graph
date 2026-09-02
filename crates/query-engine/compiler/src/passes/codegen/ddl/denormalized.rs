@@ -8,21 +8,37 @@ use std::collections::BTreeMap;
 
 use ontology::PartitionConfig;
 use ontology::constants::{DELETED_COLUMN, TRAVERSAL_PATH_COLUMN, VERSION_COLUMN};
-use ontology::denormalized::{DenormalizedJoin, alias, column_for, copies, prefix};
+use ontology::denormalized::{DenormalizedJoin, alias, copies, prefix};
 
 use super::{partition_by, system_columns, table_settings};
 use crate::ast::ddl::*;
 
+/// Source columns copied under table `i`'s prefix, in source order. The
+/// anchor's `traversal_path` is excluded because it is emitted once, first.
+fn copied_columns<'a>(
+    join: &DenormalizedJoin,
+    i: usize,
+    table: &'a CreateTable,
+) -> impl Iterator<Item = &'a ColumnDef> + 'a {
+    let is_anchor = i == join.anchor_table();
+    table
+        .columns
+        .iter()
+        .filter(move |c| copies(&c.name) && !(is_anchor && c.name == TRAVERSAL_PATH_COLUMN))
+}
+
 /// `source_of(i)` is the generated table at chain index `i`. Columns and index
-/// expressions are renamed through [`column_for`]; index names get the table
-/// prefix so two tables' `idx_state` stay distinct. `index_granularity` and the
-/// projection merge mode are per-table choices made here, not inherited.
+/// expressions are renamed through [`DenormalizedJoin::column_for`]; index
+/// names get the table prefix so two tables' `idx_state` stay distinct.
+/// `index_granularity` and the projection merge mode are per-table choices
+/// made here, not inherited.
 pub(super) fn build_table<'a>(
     join: &DenormalizedJoin,
     source_of: impl Fn(usize) -> &'a CreateTable,
     partition: Option<&PartitionConfig>,
 ) -> CreateTable {
-    let mut columns: Vec<ColumnDef> = source_of(join.traversal_path_table())
+    // The anchor's traversal_path leads, as it leads the sort key.
+    let mut columns: Vec<ColumnDef> = source_of(join.anchor_table())
         .columns
         .iter()
         .filter(|c| c.name == TRAVERSAL_PATH_COLUMN)
@@ -33,16 +49,10 @@ pub(super) fn build_table<'a>(
 
     for i in 0..join.tables.len() {
         let table = source_of(i);
-        columns.extend(
-            table
-                .columns
-                .iter()
-                .filter(|c| copies(&c.name))
-                .map(|c| ColumnDef {
-                    name: column_for(i, &c.name),
-                    ..c.clone()
-                }),
-        );
+        columns.extend(copied_columns(join, i, table).map(|c| ColumnDef {
+            name: join.column_for(i, &c.name),
+            ..c.clone()
+        }));
         indexes.extend(
             table
                 .indexes
@@ -53,7 +63,7 @@ pub(super) fn build_table<'a>(
                         Some(rest) => format!("idx_{}{rest}", prefix(i)),
                         None => format!("{}{}", prefix(i), idx.name),
                     },
-                    expression: column_for(i, &idx.expression),
+                    expression: join.column_for(i, &idx.expression),
                     ..idx.clone()
                 }),
         );
@@ -123,15 +133,12 @@ fn projection<'a>(
     let all = || (0..join.tables.len()).map(alias);
     let mut cols = vec![format!(
         "{}.{TRAVERSAL_PATH_COLUMN} AS {TRAVERSAL_PATH_COLUMN}",
-        alias(join.traversal_path_table())
+        alias(join.anchor_table())
     )];
     for i in 0..join.tables.len() {
         cols.extend(
-            source_of(i)
-                .columns
-                .iter()
-                .filter(|c| copies(&c.name))
-                .map(|c| format!("{}.{} AS {}", alias(i), c.name, column_for(i, &c.name))),
+            copied_columns(join, i, source_of(i))
+                .map(|c| format!("{}.{} AS {}", alias(i), c.name, join.column_for(i, &c.name))),
         );
     }
     cols.push(format!(
@@ -173,22 +180,13 @@ fn from_clause(join: &DenormalizedJoin, trigger: usize) -> String {
             .join
             .as_ref()
             .expect("table 0 is never joined onto");
-        let mut parts = Vec::new();
-        if j.on_traversal_path {
-            parts.push(format!(
-                "{}.{TRAVERSAL_PATH_COLUMN} = {}.{TRAVERSAL_PATH_COLUMN}",
-                alias(i - 1),
-                alias(i)
-            ));
-        }
-        parts.push(format!(
+        format!(
             "{}.{} = {}.{}",
             alias(i - 1),
             j.prev_column,
             alias(i),
             j.this_column
-        ));
-        parts
+        )
     };
 
     let mut sql = format!("FROM {}", scan(trigger, false));
@@ -196,8 +194,8 @@ fn from_clause(join: &DenormalizedJoin, trigger: usize) -> String {
     let outward = (trigger + 1..n)
         .map(|i| (i, on(i)))
         .chain((0..trigger).rev().map(|i| (i, on(i + 1))));
-    for (i, mut conds) in outward {
-        conds.extend(filter(i));
+    for (i, link) in outward {
+        let conds: Vec<String> = std::iter::once(link).chain(filter(i)).collect();
         sql.push_str(&format!(
             " INNER JOIN {} ON {}",
             scan(i, true),

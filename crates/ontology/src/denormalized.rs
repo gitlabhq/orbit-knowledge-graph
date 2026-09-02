@@ -1,13 +1,13 @@
 //! Denormalized joins: a declared linear chain of tables pre-joined into one
 //! `gl_denorm_<name>` table, kept current by one materialized view per source
-//! table. Adjacent tables join on `traversal_path` when both carry it and
-//! always on the id or edge id column that links them. A hop between two
-//! nodes is realized either through its edge table or, when the variant has
-//! an FK column, directly node to node.
+//! table. Adjacent tables join on the id or edge id column that links them. A
+//! hop between two nodes is realized either through its edge table or, when
+//! the variant has an FK column, directly node to node.
 //!
-//! The row carries one `traversal_path`, the first scoped table's; the
-//! `traversal_path` joins make every other scoped table agree with it, which
-//! is what lets the security pass filter the whole row on that one column.
+//! Every scoped table keeps its own `traversal_path` in the row, exactly as
+//! each scan alias keeps its own in an ordinary join, and the security pass
+//! filters each of them. The first scoped table's is the row's unprefixed
+//! `traversal_path`, which leads the sort key and drives partitioning.
 //!
 //! The DDL generator only sees `tables`; the compiler additionally uses
 //! `hops` to map query hops and nodes onto table indices.
@@ -35,28 +35,11 @@ pub fn alias(i: usize) -> String {
     format!("t{i}")
 }
 
-/// The denormalized column holding `column` of table `i`. Row-level columns
-/// (`traversal_path`, `_version`, `_deleted`) exist once and are unprefixed;
-/// everything else carries the table prefix.
-#[must_use]
-pub fn column_for(i: usize, column: &str) -> String {
-    if copies(column) {
-        format!("{}{column}", prefix(i))
-    } else {
-        column.to_string()
-    }
-}
-
-/// Whether `column` of a source table is copied under its table prefix. The
-/// system columns are declared once for the whole row and `traversal_path` is
-/// taken once from the first scoped table (see
-/// [`DenormalizedJoin::traversal_path_table`]).
+/// Whether `column` of a source table is copied into the row. The system
+/// columns are declared once for the whole row.
 #[must_use]
 pub fn copies(column: &str) -> bool {
-    !matches!(
-        column,
-        VERSION_COLUMN | DELETED_COLUMN | TRAVERSAL_PATH_COLUMN
-    )
+    !matches!(column, VERSION_COLUMN | DELETED_COLUMN)
 }
 
 /// How table `i` joins onto table `i - 1`.
@@ -64,9 +47,6 @@ pub fn copies(column: &str) -> bool {
 pub struct JoinOn {
     pub prev_column: String,
     pub this_column: String,
-    /// Both tables carry `traversal_path`, so the join also equates it. This
-    /// keeps the row on one path and lets both sides seek their sort key.
-    pub on_traversal_path: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -105,13 +85,35 @@ pub struct DenormalizedJoin {
 }
 
 impl DenormalizedJoin {
-    /// Chain index of the table whose `traversal_path` the row carries.
+    /// Chain index of the table whose `traversal_path` is the row's unprefixed
+    /// one (the sort key and partition anchor).
     #[must_use]
-    pub fn traversal_path_table(&self) -> usize {
+    pub fn anchor_table(&self) -> usize {
         self.tables
             .iter()
             .position(|t| t.has_traversal_path)
             .expect("the loader requires a scoped table")
+    }
+
+    /// The denormalized column holding `column` of table `i`. Row-level system
+    /// columns are unprefixed, as is the anchor table's `traversal_path`;
+    /// everything else carries the table prefix.
+    #[must_use]
+    pub fn column_for(&self, i: usize, column: &str) -> String {
+        let anchored = column == TRAVERSAL_PATH_COLUMN && i == self.anchor_table();
+        if copies(column) && !anchored {
+            format!("{}{column}", prefix(i))
+        } else {
+            column.to_string()
+        }
+    }
+
+    /// Every `traversal_path` column in the row, one per scoped table, with
+    /// that table's chain index. The security pass filters each of them.
+    pub fn traversal_path_columns(&self) -> impl Iterator<Item = (usize, String)> + '_ {
+        (0..self.tables.len())
+            .filter(|&i| self.tables[i].has_traversal_path)
+            .map(|i| (i, self.column_for(i, TRAVERSAL_PATH_COLUMN)))
     }
 
     /// `traversal_path`, then the `id` of every table that has one, with the
@@ -126,7 +128,10 @@ impl DenormalizedJoin {
             ids.insert(0, anchor);
         }
         std::iter::once(TRAVERSAL_PATH_COLUMN.to_string())
-            .chain(ids.into_iter().map(|i| column_for(i, DEFAULT_PRIMARY_KEY)))
+            .chain(
+                ids.into_iter()
+                    .map(|i| self.column_for(i, DEFAULT_PRIMARY_KEY)),
+            )
             .collect()
     }
 }
@@ -145,19 +150,9 @@ mod tests {
         }
     }
 
-    #[test]
-    fn columns_are_prefixed_except_the_shared_traversal_path() {
-        assert_eq!(column_for(2, "title"), "t2_title");
-        assert_eq!(column_for(2, "traversal_path"), "traversal_path");
-        assert_eq!(column_for(2, "_deleted"), "_deleted");
-        assert!(copies("title") && copies("id"));
-        assert!(!copies("_version") && !copies("traversal_path"));
-    }
-
-    #[test]
-    fn sort_key_leads_with_the_first_scoped_id() {
+    fn reviewer_project() -> DenormalizedJoin {
         // User (global), REVIEWER edge (no id), MergeRequest, IN_PROJECT edge, Project.
-        let join = DenormalizedJoin {
+        DenormalizedJoin {
             name: String::new(),
             table: String::new(),
             tables: vec![
@@ -168,10 +163,33 @@ mod tests {
                 table(true, true),
             ],
             hops: vec![],
-        };
-        assert_eq!(join.traversal_path_table(), 1);
+        }
+    }
+
+    #[test]
+    fn only_the_anchor_traversal_path_is_unprefixed() {
+        let join = reviewer_project();
+        assert_eq!(join.anchor_table(), 1);
+        assert_eq!(join.column_for(2, "title"), "t2_title");
+        assert_eq!(join.column_for(1, "traversal_path"), "traversal_path");
+        assert_eq!(join.column_for(2, "traversal_path"), "t2_traversal_path");
+        assert_eq!(join.column_for(2, "_deleted"), "_deleted");
+        let paths: Vec<(usize, String)> = join.traversal_path_columns().collect();
         assert_eq!(
-            join.sort_key(),
+            paths,
+            [
+                (1, "traversal_path".into()),
+                (2, "t2_traversal_path".into()),
+                (3, "t3_traversal_path".into()),
+                (4, "t4_traversal_path".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn sort_key_leads_with_the_first_scoped_id() {
+        assert_eq!(
+            reviewer_project().sort_key(),
             ["traversal_path", "t2_id", "t0_id", "t4_id"]
         );
     }

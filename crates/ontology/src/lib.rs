@@ -772,9 +772,9 @@ impl Ontology {
                 .hops
                 .iter()
                 .flat_map(|h| [h.source_kind.as_str(), h.target_kind.as_str()])
-                .filter_map(|kind| self.nodes.get(kind))
-                .filter_map(|n| n.redaction.as_ref())
-                .map(|r| r.required_role.as_access_level())
+                .filter_map(|kind| {
+                    self.min_access_level_for_table(&self.nodes.get(kind)?.destination_table)
+                })
                 .max();
         }
         self.nodes
@@ -969,8 +969,7 @@ impl Ontology {
     #[must_use]
     pub fn is_table_path_scopable(&self, table: &str) -> bool {
         let normalized = strip_schema_version_prefix(table);
-        // A denormalized row carries the traversal_path every scoped table in
-        // its chain was joined on.
+        // A denormalized row carries its anchor table's traversal_path.
         if self.denormalized_join_by_table(normalized).is_some() {
             return true;
         }
@@ -978,6 +977,30 @@ impl Ontology {
             .iter()
             .find(|(_, n)| strip_schema_version_prefix(&n.destination_table) == normalized)
             .is_some_and(|(name, _)| self.is_path_scopable(name))
+    }
+
+    /// The `traversal_path` columns a scan of `table` is security-filtered on,
+    /// each with the role floor of the table it came from. Any node or edge
+    /// table has its one `traversal_path`; a denormalized join has one per
+    /// scoped table in its chain, since every table keeps its own path in the
+    /// row.
+    #[must_use]
+    pub fn traversal_path_columns(&self, table: &str) -> Vec<(String, Option<u32>)> {
+        match self.denormalized_join_by_table(table) {
+            Some(join) => join
+                .traversal_path_columns()
+                .map(|(i, column)| {
+                    (
+                        column,
+                        self.min_access_level_for_table(&join.tables[i].table),
+                    )
+                })
+                .collect(),
+            None => vec![(
+                TRAVERSAL_PATH_COLUMN.to_string(),
+                self.min_access_level_for_table(table),
+            )],
+        }
     }
 
     #[must_use]
@@ -2190,22 +2213,33 @@ mod tests {
     }
 
     #[test]
-    fn denormalized_join_takes_the_strictest_node_floor() {
+    fn denormalized_join_exposes_one_path_column_per_scoped_table_with_its_floor() {
         let table = "gl_denorm_reviewer_project";
         let mut ontology = reviewer_project_join();
-        assert_eq!(ontology.min_access_level_for_table(table), Some(20));
         ontology
             .nodes
             .get_mut("MergeRequest")
             .and_then(|n| n.redaction.as_mut())
             .unwrap()
             .required_role = RequiredRole::SecurityManager;
-        assert_eq!(ontology.min_access_level_for_table(table), Some(25));
+
+        // User is global, so the edge (t1) is the anchor and MergeRequest (t2)
+        // and Project (t3) keep their own paths. The edge table has no
+        // redaction block, so its floor is the caller's default.
         assert_eq!(
-            ontology.min_access_level_for_table(&format!("v9_{table}")),
-            Some(25)
+            ontology.traversal_path_columns(&format!("v9_{table}")),
+            [
+                ("traversal_path".to_string(), None),
+                ("t2_traversal_path".to_string(), Some(25)),
+                ("t3_traversal_path".to_string(), Some(20)),
+            ]
         );
+        assert_eq!(ontology.min_access_level_for_table(table), Some(25));
         assert!(ontology.is_table_path_scopable(table));
+        assert_eq!(
+            ontology.traversal_path_columns("gl_merge_request"),
+            [("traversal_path".to_string(), Some(25))]
+        );
     }
 
     #[test]
