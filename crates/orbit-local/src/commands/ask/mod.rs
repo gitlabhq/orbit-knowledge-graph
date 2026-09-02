@@ -111,7 +111,7 @@ pub(crate) fn run(
          Every connection of any match: {launcher} describe \"<fqn>\""
     )?;
 
-    if outcome.weak {
+    if !shows_connections(&outcome) {
         return Ok(());
     }
     if outcome.edges.is_empty() {
@@ -167,6 +167,10 @@ fn fmt_loc(loc: &str) -> String {
     } else {
         format!(" ({loc})")
     }
+}
+
+fn shows_connections(outcome: &orbit_search::AskOutcome) -> bool {
+    !outcome.weak && outcome.focus.is_some()
 }
 
 fn write_matches(
@@ -322,6 +326,16 @@ mod tests {
             weak,
             unmatched_terms: unmatched.into_iter().map(String::from).collect(),
         }
+    }
+
+    #[test]
+    fn connections_print_only_for_confident_relational_questions() {
+        let mut relational = outcome(vec![], false);
+        relational.focus = Some("CALLS".to_string());
+        assert!(shows_connections(&relational));
+        assert!(!shows_connections(&outcome(vec![], false)));
+        relational.weak = true;
+        assert!(!shows_connections(&relational));
     }
 
     #[test]
