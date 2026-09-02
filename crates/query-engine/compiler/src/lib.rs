@@ -1746,17 +1746,18 @@ mod tests {
         assert!(sql.contains("GROUP BY f.old_path"), "got:\n{sql}");
     }
 
-    /// REVIEWER alone, plus REVIEWER then HAS_LABEL as a two-hop chain. Longer
-    /// joins match first, so a query with both hops folds into the two-hop table.
+    /// REVIEWER alone, plus REVIEWER then HAS_HEAD_PIPELINE as a two-hop chain.
+    /// Longer joins match first, so a query with both hops folds into the
+    /// two-hop table.
     static DENORM_ONTOLOGY: LazyLock<Ontology> = LazyLock::new(|| {
         Ontology::load_embedded()
             .expect("ontology must load")
             .with_denormalized_join("reviewer", &[("REVIEWER", "User", "MergeRequest", false)])
             .with_denormalized_join(
-                "reviewer_label",
+                "reviewer_pipeline",
                 &[
                     ("REVIEWER", "User", "MergeRequest", false),
-                    ("HAS_LABEL", "MergeRequest", "Label", false),
+                    ("HAS_HEAD_PIPELINE", "MergeRequest", "Pipeline", false),
                 ],
             )
     });
@@ -1874,11 +1875,11 @@ mod tests {
                 {"id": "u", "entity": "User", "columns": ["username"], "node_ids": [7]},
                 {"id": "mr", "entity": "MergeRequest", "columns": ["title"],
                  "filters": {"state": {"eq": "merged"}}},
-                {"id": "l", "entity": "Label", "columns": ["title"]}
+                {"id": "pl", "entity": "Pipeline", "columns": ["status"]}
             ],
             "relationships": [
                 {"type": "REVIEWER", "from": "u", "to": "mr"},
-                {"type": "HAS_LABEL", "from": "mr", "to": "l"}
+                {"type": "HAS_HEAD_PIPELINE", "from": "mr", "to": "pl"}
             ],
             "limit": 10
         }"#;
@@ -1886,7 +1887,7 @@ mod tests {
         let sql = compile_sql_denormalized(query);
 
         assert_eq!(
-            sql.matches("FROM gl_denorm_reviewer_label AS e0 FINAL")
+            sql.matches("FROM gl_denorm_reviewer_pipeline AS e0 FINAL")
                 .count(),
             1,
             "got:\n{sql}"
@@ -1905,10 +1906,10 @@ mod tests {
             "e0.t3_target_id AS e1_dst",
             "e0.t0_username AS u_username",
             "e0.t2_title AS mr_title",
-            "e0.t4_title AS l_title",
+            "e0.t4_status AS pl_status",
             "e0.t2_state = 'merged'",
             "e0.t1_source_id = 7",
-            "e0.t4_id AS _gkg_l_id",
+            "e0.t4_id AS _gkg_pl_id",
         ] {
             assert!(sql.contains(fragment), "expected `{fragment}`, got:\n{sql}");
         }
