@@ -47,6 +47,13 @@ Does this MR close or contribute to any issues/epics? `Closes #N` or
 How did you verify the change? One or two lines plus a CI job link is
 usually enough. Full test transcripts and exploratory notes go in the Agent
 context block.
+
+Compiler / ontology SQL / indexer extract changes: corpus-smoke only checks
+that queries still run. Trigger the manual `e2e` job and run the affected
+queries against a data-rich namespace; link the job and summarize results here.
+
+Changes under docs/source/ are public docs: request a Technical Writing review
+in #docs (Slack) and add ~documentation.
 -->
 
 ### Performance Analysis
@@ -67,6 +74,10 @@ Agents: put extended reasoning here. File-by-file walkthroughs, full
 benchmark tables, raw profiler output, dataflow narratives, alternatives
 considered, and anything else that would bury the sections above belongs in
 this block.
+
+If the change spans layers (extract -> transform -> sink, compiler pass ->
+codegen -> response), start this block with a short dataflow walkthrough or
+diagram. Reviewers ask for one on every multi-layer MR that lacks it.
 -->
 
 %{all_commits}
