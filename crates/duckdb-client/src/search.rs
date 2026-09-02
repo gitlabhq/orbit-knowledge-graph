@@ -3,7 +3,7 @@ use arrow::record_batch::RecordBatch;
 
 use crate::{DuckDbClient, f64_column, i64_column, scalar_i64, sql_lit, string_column};
 use orbit_search::ask::{AskError, AskSource, Caller, CallerEdge, ask};
-use orbit_search::corpus::{DEFAULT_SOURCE_EXTS, EXCLUDE_LIKE, EXCLUDE_REGEX, ext_regex};
+use orbit_search::corpus::{EXCLUDE_LIKE, EXCLUDE_REGEX, ext_regex, search_corpus_exts};
 use orbit_search::expand::{GraphSource, NodeLabel};
 use orbit_search::{AskOutcome, CorpusRow, Graph, GraphEdge, KindRates, SearchVocab, TermRecall};
 use std::collections::HashMap;
@@ -313,7 +313,8 @@ hits AS (
   SELECT s.id, s.score,
          list_contains(
            list_transform(string_split_regex(lower(d.name), '[^0-9a-z]+'), t -> stem(t, '{FTS_STEMMER}')),
-           stem(lower(?1), '{FTS_STEMMER}')) AS name_hit
+           stem(lower(?1), '{FTS_STEMMER}'))
+         OR regexp_replace(lower(d.name), '[^0-9a-z]+', ' ', 'g') = regexp_replace(lower(?1), '[^0-9a-z]+', ' ', 'g') AS name_hit
   FROM scored s
   JOIN {doc_table} d ON d.def_id = s.id AND d.commit_sha = {sha}
   WHERE s.score IS NOT NULL
@@ -345,12 +346,7 @@ WHERE d.project_id = {pid} AND d.commit_sha = {sha}
   AND NOT regexp_matches(d.name, '^[0-9]+$')
   AND d.fqn NOT LIKE '%@%'
 {exclude}",
-        source_only = sql_lit(&ext_regex(
-            &DEFAULT_SOURCE_EXTS
-                .iter()
-                .map(|s| s.to_string())
-                .collect::<Vec<_>>()
-        )),
+        source_only = sql_lit(&ext_regex(&search_corpus_exts())),
         exclude = exclusions("d.file_path"),
     )
 }

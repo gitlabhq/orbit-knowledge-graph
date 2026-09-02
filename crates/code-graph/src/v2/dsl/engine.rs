@@ -1001,10 +1001,17 @@ impl LanguageSpec {
             }
         }
 
-        let custom_handled = self
-            .hooks
-            .on_scope
-            .is_some_and(|f| f(node, &mut state.defs, &state.scope_stack, sep));
+        let custom_handled = match (self.hooks.on_scope_with_path, self.hooks.on_scope) {
+            (Some(f), _) => f(
+                node,
+                state.file_path,
+                &mut state.defs,
+                &state.scope_stack,
+                sep,
+            ),
+            (None, Some(f)) => f(node, &mut state.defs, &state.scope_stack, sep),
+            (None, None) => false,
+        };
 
         // Expression-bodied functions: when a node like `function_body`
         // contains `=`, treat all refs within as implicit returns.
@@ -1040,10 +1047,11 @@ impl LanguageSpec {
             }
 
             let import_count_before = state.imports.len();
-            let handled = self
-                .hooks
-                .on_import
-                .is_some_and(|f| f(node, &mut state.imports));
+            let handled = match (self.hooks.on_import_with_path, self.hooks.on_import) {
+                (Some(f), _) => f(node, state.file_path, &mut state.imports),
+                (None, Some(f)) => f(node, &mut state.imports),
+                (None, None) => false,
+            };
             if !handled {
                 self.evaluate_imports(node, nk, &mut state.imports);
             }

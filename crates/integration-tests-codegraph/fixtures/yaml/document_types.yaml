@@ -1,0 +1,204 @@
+name: "YAML: document types claim CI, ArgoCD, Helm, and Compose keys; everything else stays a file"
+
+fixtures:
+  - path: .gitlab-ci.yml
+    content: |
+      stages: [lint, test]
+
+      variables:
+        CARGO_HOME: .cargo
+        RUST_BACKTRACE: "1"
+
+      include:
+        - '/ci/lint.gitlab-ci.yml'
+        - project: gitlab-org/pipeline-common
+          ref: main
+          file: [/templates/build.yml, /templates/test.yml]
+        - template: Security/SAST.gitlab-ci.yml
+        - component: gitlab.com/components/scan@1.2.0
+        - remote: https://example.com/ci.yml
+
+      default:
+        image: alpine
+
+      .base:
+        image: alpine
+
+      unit-test:
+        extends: .base
+        stage: test
+        script: [true]
+
+      deploy:
+        stage: test
+        trigger:
+          include:
+            project: gitlab-org/child
+            file: /child.yml
+
+      not-an-include:
+        include: /ignored.yml
+        script: [true]
+  - path: .gitlab/ci/release.yml
+    content: |
+      release:
+        stage: test
+        script: [true]
+  - path: .gitlab-ci-versions.yml
+    content: |
+      versions:
+        script: [true]
+  - path: ci/quoted.gitlab-ci.yml
+    content: |
+      "build:linux":
+        script: make
+      stages: test
+      ---
+      { flow-job: { script: y } }
+  - path: config/default.yaml
+    content: |
+      billing:
+        quota:
+          enabled: true
+      defaults: &base
+        retries: 2
+      job:
+        <<: *base
+  - path: config/MyChart.yaml
+    content: |
+      dependencies:
+        - name: redis
+  - path: apps/gkg.yaml
+    content: |
+      apiVersion: argoproj.io/v1alpha1
+      kind: Application
+      metadata:
+        name: &app gkg
+      spec:
+        sources:
+          - repoURL: &repo https://gitlab.com/gitlab-org/orbit/orbit-helm-charts.git
+            path: !!str chart
+            targetRevision: v1.2.3
+          - repoURL: https://charts.bitnami.com/bitnami
+            chart: redis
+  - path: apps/plain.yaml
+    content: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: web
+      spec:
+        source:
+          repoURL: https://example.com/not-argo.git
+  - path: chart/Chart.yaml
+    content: |
+      apiVersion: v2
+      name: gkg
+      version: 0.1.0
+      dependencies:
+        - name: redis
+          version: ~17.0.0
+          repository: https://charts.bitnami.com/bitnami
+  - path: chart/values.yaml
+    content: |
+      image:
+        tag: "1.0"
+      indexer:
+        env:
+          - name: RUST_LOG
+          - name: RUST_BACKTRACE
+  - path: chart/values-deep.yaml
+    content: |
+      {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {x: 1}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}
+  - path: docker-compose.yml
+    content: |
+      services:
+        postgres:
+          image: postgres:16
+      volumes:
+        pgdata: {}
+      networks:
+        backend: {}
+
+tests:
+  - name: "Every .yml/.yaml is a yaml File node, claimed or not"
+    query: |
+      MATCH (f:File)
+      WHERE f.language = 'yaml'
+      RETURN count(f) AS n
+    assert:
+      - { row: { n: 12 } }
+
+  - name: "CI root keys become CiJob (hidden, quoted, flow, multi-document); stages and variables are namespaced; keywords are skipped"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type IN ['CiJob', 'CiStage', 'CiVariable']
+      RETURN d.definition_type AS type, d.fqn AS fqn, d.file_path AS file
+    assert:
+      - { row_count: 12 }
+      - { unique: fqn }
+      - { row: { type: CiJob, fqn: ".base", file: ".gitlab-ci.yml" } }
+      - { row: { type: CiJob, fqn: "unit-test", file: ".gitlab-ci.yml" } }
+      - { row: { type: CiJob, fqn: "deploy", file: ".gitlab-ci.yml" } }
+      - { row: { type: CiJob, fqn: "not-an-include", file: ".gitlab-ci.yml" } }
+      - { row: { type: CiJob, fqn: "release", file: ".gitlab/ci/release.yml" } }
+      - { row: { type: CiJob, fqn: "versions", file: ".gitlab-ci-versions.yml" } }
+      - { row: { type: CiJob, fqn: "build:linux", file: "ci/quoted.gitlab-ci.yml" } }
+      - { row: { type: CiJob, fqn: "flow-job", file: "ci/quoted.gitlab-ci.yml" } }
+      - { row: { type: CiStage, fqn: "stages.lint", file: ".gitlab-ci.yml" } }
+      - { row: { type: CiStage, fqn: "stages.test", file: ".gitlab-ci.yml" } }
+      - { row: { type: CiVariable, fqn: "variables.CARGO_HOME", file: ".gitlab-ci.yml" } }
+      - { row: { type: CiVariable, fqn: "variables.RUST_BACKTRACE", file: ".gitlab-ci.yml" } }
+
+  - name: "Every import: all include flavors plus trigger.include, ArgoCD sources, Helm dependencies; include under a job and MyChart.yaml yield none"
+    query: |
+      MATCH (i:ImportedSymbol)
+      RETURN i.import_type AS type, i.path AS path, i.name AS name, i.alias AS alias
+    assert:
+      - { row_count: 10 }
+      - { row: { type: CiLocalInclude, path: "/ci/lint.gitlab-ci.yml", name: null, alias: null } }
+      - { row: { type: CiProjectInclude, path: "gitlab-org/pipeline-common", name: "/templates/build.yml", alias: main } }
+      - { row: { type: CiProjectInclude, path: "gitlab-org/pipeline-common", name: "/templates/test.yml", alias: main } }
+      - { row: { type: CiTemplateInclude, path: "Security/SAST.gitlab-ci.yml", name: null, alias: null } }
+      - { row: { type: CiComponentInclude, path: "gitlab.com/components/scan", name: null, alias: "1.2.0" } }
+      - { row: { type: CiRemoteInclude, path: "https://example.com/ci.yml", name: null, alias: null } }
+      - { row: { type: CiProjectInclude, path: "gitlab-org/child", name: "/child.yml", alias: null } }
+      - { row: { type: ArgoCdSource, path: "https://gitlab.com/gitlab-org/orbit/orbit-helm-charts.git", name: chart, alias: "v1.2.3" } }
+      - { row: { type: ArgoCdSource, path: "https://charts.bitnami.com/bitnami", name: redis, alias: null } }
+      - { row: { type: HelmChartDependency, path: redis, name: "https://charts.bitnami.com/bitnami", alias: "~17.0.0" } }
+
+  - name: "ArgoCD, Helm chart, Helm values (every key once, sequence items collapsed), and Compose definitions"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type IN ['ArgoCdApplication', 'HelmChart', 'HelmValue', 'ComposeService', 'ComposeVolume', 'ComposeNetwork']
+        AND d.file_path <> 'chart/values-deep.yaml'
+      RETURN d.definition_type AS type, d.fqn AS fqn, d.file_path AS file
+    assert:
+      - { row_count: 10 }
+      - { row: { type: ArgoCdApplication, fqn: gkg, file: "apps/gkg.yaml" } }
+      - { row: { type: HelmChart, fqn: gkg, file: "chart/Chart.yaml" } }
+      - { row: { type: HelmValue, fqn: image, file: "chart/values.yaml" } }
+      - { row: { type: HelmValue, fqn: "image.tag", file: "chart/values.yaml" } }
+      - { row: { type: HelmValue, fqn: indexer, file: "chart/values.yaml" } }
+      - { row: { type: HelmValue, fqn: "indexer.env", file: "chart/values.yaml" } }
+      - { row: { type: HelmValue, fqn: "indexer.env.name", file: "chart/values.yaml" } }
+      - { row: { type: ComposeService, fqn: "services.postgres", file: "docker-compose.yml" } }
+      - { row: { type: ComposeVolume, fqn: "volumes.pgdata", file: "docker-compose.yml" } }
+      - { row: { type: ComposeNetwork, fqn: "networks.backend", file: "docker-compose.yml" } }
+
+  - name: "Unclaimed YAML (plain config, a non-Argo Deployment, MyChart.yaml) yields only anchors"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path IN ['config/default.yaml', 'config/MyChart.yaml', 'apps/plain.yaml']
+      RETURN d.definition_type AS type, d.fqn AS fqn, d.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { type: Anchor, fqn: base, file: "config/default.yaml" } }
+
+  - name: "all_keys stops descending at MAX_KEY_DEPTH"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'chart/values-deep.yaml'
+      RETURN count(d) AS n
+    assert:
+      - { row: { n: 64 } }

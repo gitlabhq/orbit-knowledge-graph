@@ -14,4 +14,5 @@ pub mod python;
 pub mod ruby;
 pub mod scala;
 pub mod swift;
+pub mod yaml;
 pub mod zig;

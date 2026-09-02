@@ -364,6 +364,9 @@ yaml_test!(hcl_edge_cases, "hcl/edge_cases.yaml");
 yaml_test!(hcl_hardcore, "hcl/hardcore.yaml");
 yaml_test!(hcl_cross_file_resolution, "hcl/cross_file_resolution.yaml");
 
+// YAML
+yaml_test!(yaml_document_types, "yaml/document_types.yaml");
+
 // Elixir
 yaml_test!(elixir_definitions, "elixir/definitions.yaml");
 yaml_test!(elixir_imports, "elixir/imports.yaml");

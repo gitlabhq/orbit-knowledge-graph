@@ -88,6 +88,10 @@ async fn indexes_file_nodes_for_all_archive_files() {
             ("src/main.py", "def hello():\n    return 1\n"),
             ("README.md", "# Project\n"),
             ("config/app.yml", "enabled: true\n"),
+            (
+                ".gitlab-ci.yml",
+                "stages: [test]\nvariables:\n  CARGO_HOME: .cargo\nunit-test:\n  script: [true]\n",
+            ),
             ("Dockerfile", "FROM scratch\n"),
             (".gitignore", "target/\n"),
             ("assets/logo.png", "fake png bytes"),
@@ -119,6 +123,7 @@ async fn indexes_file_nodes_for_all_archive_files() {
         unique_paths,
         BTreeSet::from([
             ".gitignore".to_string(),
+            ".gitlab-ci.yml".to_string(),
             "Dockerfile".to_string(),
             "README.md".to_string(),
             "assets/logo.png".to_string(),
@@ -134,6 +139,8 @@ async fn indexes_file_nodes_for_all_archive_files() {
     );
     assert_eq!(language_for(&files, "assets/logo.png"), Some("unknown"));
     assert_eq!(language_for(&files, "src/main.py"), Some("python"));
+    assert_eq!(language_for(&files, "config/app.yml"), Some("yaml"));
+    assert_eq!(language_for(&files, ".gitlab-ci.yml"), Some("yaml"));
 
     assert_eq!(
         file_size_bytes(&clickhouse, project_id, "src/main.py").await,
@@ -159,8 +166,15 @@ async fn indexes_file_nodes_for_all_archive_files() {
     .await;
 
     assert_no_active_definitions(&clickhouse, project_id, "README.md").await;
-    assert_no_active_definitions(&clickhouse, project_id, "config/app.yml").await;
     assert_no_active_definitions(&clickhouse, project_id, "assets/logo.png").await;
+    assert_no_active_definitions(&clickhouse, project_id, "config/app.yml").await;
+    assert_active_definitions(
+        &clickhouse,
+        project_id,
+        ".gitlab-ci.yml",
+        &["test", "CARGO_HOME", "unit-test"],
+    )
+    .await;
     assert_active_definitions(&clickhouse, project_id, "src/main.py", &["hello"]).await;
 }
 

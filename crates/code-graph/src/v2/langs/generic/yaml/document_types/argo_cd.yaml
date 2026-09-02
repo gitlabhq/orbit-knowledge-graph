@@ -1,0 +1,29 @@
+# ArgoCD Application manifests: the application name is a definition
+# spanning the whole document, and deploy sources become imports.
+# Import columns: path = repoURL as written, name = path (or chart for
+# Helm-repo sources) within it, alias = pinned targetRevision.
+name: argo_cd
+match:
+  document_keys:
+    kind:
+      in: [Application, ApplicationSet]
+    apiVersion:
+      starts_with: argoproj.io
+definitions:
+  - type: ArgoCdApplication
+    value_of: metadata.name
+imports:
+  - key: source
+    also_under: [spec]
+    mapping_forms:
+      - type: ArgoCdSource
+        path_key: repoURL
+        name_keys: [path, chart]
+        alias_key: targetRevision
+  - key: sources
+    also_under: [spec]
+    mapping_forms:
+      - type: ArgoCdSource
+        path_key: repoURL
+        name_keys: [path, chart]
+        alias_key: targetRevision
