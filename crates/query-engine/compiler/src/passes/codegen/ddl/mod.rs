@@ -83,21 +83,16 @@ pub fn generate_graph_tables_with_prefix(ontology: &Ontology, prefix: &str) -> V
             tables.push(build_edge_table(name, config, partition));
         }
     }
-    // Join tables are composed from the definitions above, so they come last.
-    for denorm in ontology.denormalized_join_tables() {
-        let find = |name: &str| {
+    // Path tables are composed from the definitions above, so they come last.
+    for path in ontology.denormalized_paths() {
+        let source_of = |pos| {
+            let name = path.source_table(pos);
             tables
                 .iter()
                 .find(|t| t.name == name)
-                .unwrap_or_else(|| panic!("denormalized join table source '{name}' not generated"))
+                .unwrap_or_else(|| panic!("denormalized path source '{name}' not generated"))
         };
-        tables.push(denormalized::build_table(
-            &denorm,
-            find(&denorm.edge_table),
-            find(&denorm.source_table),
-            find(&denorm.target_table),
-            partition,
-        ));
+        tables.push(denormalized::build_table(path, source_of, partition));
     }
 
     tables.into_iter().map(|t| t.with_prefix(prefix)).collect()
@@ -178,13 +173,13 @@ pub fn generate_graph_materialized_views_with_prefix(
         .map(|mv| build_materialized_view(mv).with_prefix(prefix, &known_tables))
         .collect();
     let tables = generate_graph_tables(ontology);
-    for denorm in ontology.denormalized_join_tables() {
+    for path in ontology.denormalized_paths() {
         let table = tables
             .iter()
-            .find(|t| t.name == denorm.table)
-            .unwrap_or_else(|| panic!("denormalized join table '{}' not generated", denorm.table));
+            .find(|t| t.name == path.table)
+            .unwrap_or_else(|| panic!("denormalized path table '{}' not generated", path.table));
         views.extend(
-            denormalized::build_views(&denorm, table)
+            denormalized::build_views(path, table)
                 .into_iter()
                 .map(|v| v.with_prefix(prefix, &known_tables)),
         );
@@ -205,8 +200,8 @@ fn collect_table_names(ontology: &Ontology) -> Vec<String> {
     for table_name in ontology.edge_tables() {
         names.push(table_name.to_string());
     }
-    for denorm in ontology.denormalized_join_tables() {
-        names.push(denorm.table);
+    for path in ontology.denormalized_paths() {
+        names.push(path.table.clone());
     }
     names
 }
@@ -943,102 +938,6 @@ mod tests {
         }));
     }
 
-    fn ontology_with_denormalized_reviewer() -> Ontology {
-        ontology().with_denormalized_variant("REVIEWER", "User", "MergeRequest")
-    }
-
-    #[test]
-    fn no_denormalized_tables_or_views_without_an_opt_in() {
-        let ontology = ontology();
-        assert!(
-            generate_graph_tables(&ontology)
-                .iter()
-                .all(|t| !t.name.starts_with("gl_denorm_"))
-        );
-        assert!(generate_graph_materialized_views(&ontology).is_empty());
-    }
-
-    #[test]
-    fn denormalized_join_table_emits_table_and_three_feeding_views() {
-        let ontology = ontology_with_denormalized_reviewer();
-        let table = "gl_denorm_reviewer__user__merge_request";
-
-        let tables = generate_graph_tables(&ontology);
-        let mat = tables
-            .iter()
-            .find(|t| t.name == table)
-            .expect("denormalized join table should be generated");
-        assert_eq!(mat.order_by, ["traversal_path", "target_id", "source_id"]);
-        let names: Vec<&str> = mat.columns.iter().map(|c| c.name.as_str()).collect();
-        assert!(names.contains(&"src_username") && names.contains(&"tgt_title"));
-        assert!(names.contains(&"source_id") && names.contains(&"target_kind"));
-        assert!(
-            !names.contains(&"src_id"),
-            "node id is the edge's source_id"
-        );
-        assert_eq!(names.iter().filter(|n| **n == "traversal_path").count(), 1);
-
-        let idx: Vec<(&str, &str)> = mat
-            .indexes
-            .iter()
-            .map(|i| (i.name.as_str(), i.expression.as_str()))
-            .collect();
-        assert!(idx.contains(&("idx_source_id", "source_id")));
-        assert!(idx.contains(&("idx_src_state", "src_state")));
-        assert!(idx.contains(&("idx_tgt_state", "tgt_state")));
-        assert!(idx.contains(&("idx_tgt_title_ngram", "tgt_title")));
-        let mut idx_names: Vec<&str> = idx.iter().map(|(n, _)| *n).collect();
-        idx_names.sort_unstable();
-        idx_names.dedup();
-        assert_eq!(
-            idx_names.len(),
-            mat.indexes.len(),
-            "index names must be unique"
-        );
-        assert!(
-            mat.settings
-                .iter()
-                .any(|s| s.key == "add_minmax_index_for_temporal_columns")
-        );
-
-        let views = generate_graph_materialized_views(&ontology);
-        let feeding: Vec<&CreateMaterializedView> = views
-            .iter()
-            .filter(|v| v.to_table.as_deref() == Some(table))
-            .collect();
-        assert_eq!(feeding.len(), 3);
-        // Only the triggering table is read as the inserted block; the other
-        // two must resolve their current row with FINAL.
-        let on_edge = feeding
-            .iter()
-            .find(|v| v.name.ends_with("__on_edge"))
-            .unwrap();
-        assert!(
-            on_edge
-                .select_query
-                .contains("FROM gl_edge AS e INNER JOIN")
-        );
-        assert!(on_edge.select_query.contains("gl_user AS s FINAL"));
-        assert!(on_edge.select_query.contains("gl_merge_request AS t FINAL"));
-        assert!(!on_edge.select_query.contains("AS e FINAL"));
-    }
-
-    #[test]
-    fn denormalized_join_table_and_views_share_the_version_prefix() {
-        let ontology = ontology_with_denormalized_reviewer();
-        let views = generate_graph_materialized_views_with_prefix(&ontology, "v7_");
-        let on_source = views
-            .iter()
-            .find(|v| v.name == "v7_gl_denorm_reviewer__user__merge_request__on_source")
-            .expect("prefixed feeding view");
-        assert_eq!(
-            on_source.to_table.as_deref(),
-            Some("v7_gl_denorm_reviewer__user__merge_request")
-        );
-        assert!(on_source.select_query.contains("FROM v7_gl_user AS s"));
-        assert!(on_source.select_query.contains("v7_gl_edge AS e FINAL"));
-    }
-
     #[test]
     fn materialized_view_prefix_applies_only_to_versioned_views() {
         use super::clickhouse::emit_create_materialized_view;
@@ -1238,5 +1137,124 @@ mod tests {
         for table in &tables {
             assert!(!table.columns.is_empty(), "{}: no columns", table.name);
         }
+    }
+    fn reviewer_project_path() -> Ontology {
+        ontology().with_denormalized_path(
+            "reviewer_project",
+            &[
+                ("REVIEWER", "User", "MergeRequest"),
+                ("IN_PROJECT", "MergeRequest", "Project"),
+            ],
+        )
+    }
+
+    #[test]
+    fn no_denormalized_tables_or_views_without_a_declared_path() {
+        let ontology = ontology();
+        assert!(
+            generate_graph_tables(&ontology)
+                .iter()
+                .all(|t| !t.name.starts_with("gl_denorm_"))
+        );
+        assert!(generate_graph_materialized_views(&ontology).is_empty());
+    }
+
+    #[test]
+    fn denormalized_path_table_is_composed_from_its_source_tables() {
+        let tables = generate_graph_tables(&reviewer_project_path());
+        let t = tables
+            .iter()
+            .find(|t| t.name == "gl_denorm_reviewer_project")
+            .expect("path table should be generated");
+        let names: Vec<&str> = t.columns.iter().map(|c| c.name.as_str()).collect();
+
+        assert_eq!(names[0], "traversal_path");
+        assert_eq!(names.iter().filter(|n| **n == "traversal_path").count(), 1);
+        for expected in [
+            "e0_source_id",
+            "e0_relationship_kind",
+            "e1_target_kind",
+            "n0_username",
+            "n1_title",
+            "n2_name",
+        ] {
+            assert!(names.contains(&expected), "missing {expected} in {names:?}");
+        }
+        assert!(
+            !names
+                .iter()
+                .any(|n| matches!(*n, "n0_id" | "n1_id" | "n2_id")),
+            "node ids are the edge id columns"
+        );
+        assert_eq!(
+            t.order_by,
+            [
+                "traversal_path",
+                "e1_source_id",
+                "e0_source_id",
+                "e1_target_id"
+            ]
+        );
+
+        let idx: Vec<(&str, &str)> = t
+            .indexes
+            .iter()
+            .map(|i| (i.name.as_str(), i.expression.as_str()))
+            .collect();
+        assert!(idx.contains(&("idx_e0_source_id", "e0_source_id")));
+        assert!(idx.contains(&("idx_n0_state", "n0_state")));
+        assert!(idx.contains(&("idx_n1_title_ngram", "n1_title")));
+        let mut idx_names: Vec<&str> = idx.iter().map(|(n, _)| *n).collect();
+        idx_names.sort_unstable();
+        idx_names.dedup();
+        assert_eq!(
+            idx_names.len(),
+            t.indexes.len(),
+            "index names must be unique"
+        );
+        assert!(
+            t.settings
+                .iter()
+                .any(|s| s.key == "add_minmax_index_for_temporal_columns")
+        );
+    }
+
+    #[test]
+    fn denormalized_path_emits_one_feeding_view_per_source_table() {
+        let views = generate_graph_materialized_views_with_prefix(&reviewer_project_path(), "v9_");
+        let names: Vec<&str> = views.iter().map(|v| v.name.as_str()).collect();
+        assert_eq!(
+            names,
+            [
+                "v9_gl_denorm_reviewer_project__on_n0",
+                "v9_gl_denorm_reviewer_project__on_e0",
+                "v9_gl_denorm_reviewer_project__on_n1",
+                "v9_gl_denorm_reviewer_project__on_e1",
+                "v9_gl_denorm_reviewer_project__on_n2",
+            ]
+        );
+        for v in &views {
+            assert_eq!(v.to_table.as_deref(), Some("v9_gl_denorm_reviewer_project"));
+            assert!(
+                v.select_query
+                    .contains("e0.traversal_path AS traversal_path")
+            );
+            assert!(v.select_query.contains("n2.name AS n2_name"));
+            assert!(v.select_query.contains(
+                "greatest(n0._version, e0._version, n1._version, e1._version, n2._version) AS _version"
+            ));
+        }
+
+        // The trigger is read as the inserted block; everything else is FINAL,
+        // joined outward so each ON references an already-joined alias.
+        let on_n1 = &views[2].select_query;
+        assert!(on_n1.contains("FROM v9_gl_merge_request AS n1 INNER JOIN v9_gl_edge AS e1 FINAL ON e1.source_id = n1.id AND e1.relationship_kind = 'IN_PROJECT'"));
+        assert!(on_n1.contains("INNER JOIN v9_gl_edge AS e0 FINAL ON e0.target_id = n1.id AND e0.relationship_kind = 'REVIEWER'"));
+        assert!(on_n1.contains("INNER JOIN v9_gl_user AS n0 FINAL ON e0.source_id = n0.id"));
+        assert!(!on_n1.contains("AS n1 FINAL"));
+
+        let on_e0 = &views[1].select_query;
+        assert!(on_e0.starts_with("SELECT") && on_e0.contains("FROM v9_gl_edge AS e0 INNER JOIN"));
+        assert!(on_e0.ends_with("WHERE e0.relationship_kind = 'REVIEWER' AND e0.source_kind = 'User' AND e0.target_kind = 'MergeRequest'"));
     }
 }

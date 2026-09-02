@@ -236,12 +236,13 @@ etl:
 If either FK column is `Nullable` in the source, the ETL can emit null-target edges —
 filter or document it (reviewers will ask). Prefer NOT-NULL join columns.
 
-A variant may add `denormalized: true` when single-hop queries over it are hot and
-aggregate-heavy. This emits a pre-joined `gl_denorm_*` table plus feeding materialized
-views, composed from the edge and node tables' own DDL. At least one endpoint must be
-scoped, and the table stores every column of both nodes, so weigh write amplification
-before opting in, and treat each opt-in as its own schema bump. Design notes:
-`docs/design-documents/querying/graph_engine.md` (Denormalized join tables).
+Hot query shapes over one or more edges can be pre-joined by declaring a path under
+`settings.denormalized_paths` in `schema.yaml` (see the REVIEWER + IN_PROJECT example in
+`docs/design-documents/querying/graph_engine.md`, Denormalized paths). This emits a
+`gl_denorm_<name>` table composed from the edge and node tables' own DDL plus one feeding
+materialized view per source table. Every hop must be scope-preserving or reach a global
+node, the table stores every column of every node on the path, and each declaration is a
+schema bump, so weigh write amplification before adding one.
 
 ### 5.3 Register in `config/ontology/schema.yaml` (the step that's easy to miss)
 

@@ -419,9 +419,6 @@ pub struct EdgeEntity {
     pub fk_column: Option<String>,
     /// Namespace scope relationship; see [`EdgeVariantScope`].
     pub scope: Option<EdgeVariantScope>,
-    /// Pre-joined table holding both endpoints' columns, when the variant opts
-    /// in with `denormalized: true`. See [`crate::denormalized`].
-    pub denormalized_table: Option<String>,
 }
 
 /// An entity extracted from the datalake and turned into edges by a named

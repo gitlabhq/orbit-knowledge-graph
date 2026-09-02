@@ -118,11 +118,23 @@ Filter placement rules for node `FINAL` scans:
 
 Edge-only traversals do not join node tables for non-group-by nodes, so they cannot filter out deleted nodes at the query layer. In production this is handled by the SDLC indexer, which soft-deletes FK edge rows in the same ETL batch as their parent node (`crates/indexer/src/modules/sdlc/pipeline.rs`). Cross-entity FK cleanup relies on PostgreSQL's referential integrity propagating through Siphon CDC.
 
-### Denormalized join tables
+### Denormalized paths
 
-An edge variant can opt in with `denormalized: true` in its YAML. The ontology then names a pre-joined `gl_denorm_{rel}__{src}__{tgt}` table (`ontology::denormalized`) and the DDL generator composes it from the already-generated definitions of the edge table and the two node tables: every edge column as is, then every node column under a `src_`/`tgt_` prefix, then the system columns once. Skip indexes come along the same way (edge indexes verbatim, node indexes renamed to `idx_src_*`/`idx_tgt_*`), explicit table settings from all three sources are merged, and the table is hash-bucketed whenever its edge table is. Codecs, types, defaults, and indexes are therefore identical to the source tables by construction. A node's `id` is not copied, since it is already the edge's `source_id`/`target_id`. The sort key is `(traversal_path, {anchor id}, {other id})` where the anchor is the scoped side when only one side is scoped. The DDL generator emits the table and three `TO` materialized views, one per source table (edge, source node, target node); whichever side receives an insert re-emits the affected join rows, reading the other two with `FINAL`, and the `ReplacingMergeTree` keeps the row with the greatest `_version`. Because the table inherits the edge's `traversal_path`, at least one endpoint must be scoped; the loader rejects a variant whose endpoints are both global.
+`settings.denormalized_paths` in `schema.yaml` declares chains of edge variants to pre-join into one table:
 
-The table is a strict superset of the edge table, so the compiler will be able to scan it through the ordinary edge-chain lowering rather than a dedicated strategy; that compiler work follows separately (#1250). The security pass already treats the table like any `gl_` table: `min_access_level_for_table` returns the higher of the two endpoints' floors, and the table is path-scopable. No variant is opted in yet; each opt-in is its own schema bump.
+```yaml
+denormalized_paths:
+  - name: reviewer_project
+    hops:
+      - {relationship: REVIEWER,   from: User,         to: MergeRequest}
+      - {relationship: IN_PROJECT, from: MergeRequest, to: Project}
+```
+
+The ontology names a `gl_denorm_<name>` table (`ontology::denormalized`) and the DDL generator composes it from the already-generated definitions of every edge and node table on the path: the first edge's `traversal_path`, then each edge's columns under `e{i}_` and each node's columns under `n{j}_` in path order, then the system columns once. `k` hops give `k` edge blocks and `k + 1` node blocks. A node's `id` is not copied; node `j` is `e{j}_source_id` (or `e{j-1}_target_id` for the last node). Skip indexes come along the same way (renamed `idx_e0_*`, `idx_n1_*`), explicit table settings from all sources are merged, and the table is hash-bucketed whenever the first edge table is. Codecs, types, defaults, and indexes are therefore identical to the source tables by construction. The default sort key is `(traversal_path, first scoped node id, other node ids in path order)`; `sort_key:` overrides it, for example to build a second table anchored on another node. One `TO` materialized view per source table (`2k + 1` of them) keeps the row current: the triggering table is read as the inserted block, the rest are joined outward along the path with `FINAL`, `_version` is the greatest of all, `_deleted` the OR of all, and the `ReplacingMergeTree` keeps the latest.
+
+One row carries one `traversal_path`, the first hop's, and the security pass filters on it. The loader therefore requires every hop to be scope-preserving or to reach a global node (the same rule the FK-chain lowering uses), and at least one node to be scoped. A path through a cross-namespace edge such as `CLOSES` is rejected at load time. `min_access_level_for_table` returns the strictest floor among the path's nodes, and the table is path-scopable.
+
+The table's column contract (`Position::column_for`) is what the compiler will read to fold a matching run of query hops into one scan; that compiler work follows separately (#1250). No path is declared yet; each declaration is its own schema bump.
 
 ### Scope rewrite (traversal_path prefix injection)
 

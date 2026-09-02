@@ -54,6 +54,8 @@ pub(super) struct SettingsYaml {
     #[serde(default)]
     pub denormalization: Vec<DenormalizationEntryYaml>,
     #[serde(default)]
+    pub denormalized_paths: Vec<DenormalizedPathYaml>,
+    #[serde(default)]
     pub statistics: Option<StatisticsYaml>,
     #[serde(default)]
     pub partition: Option<PartitionYaml>,
@@ -118,6 +120,28 @@ pub(super) struct StatisticsYaml {
 pub(super) struct StatisticsExcludeYaml {
     pub node: String,
     pub columns: Vec<String>,
+}
+
+/// A chain of edge variants materialized into one pre-joined table. See
+/// [`crate::denormalized`].
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct DenormalizedPathYaml {
+    pub name: String,
+    pub hops: Vec<DenormalizedHopYaml>,
+    /// Overrides the default `(traversal_path, first scoped node id, other
+    /// node ids)` ordering, e.g. to build a second table anchored on another
+    /// node.
+    #[serde(default)]
+    pub sort_key: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct DenormalizedHopYaml {
+    pub relationship: String,
+    pub from: String,
+    pub to: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]

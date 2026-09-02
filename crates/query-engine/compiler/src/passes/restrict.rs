@@ -1184,7 +1184,6 @@ mod tests {
             destination_table: edge_table,
             fk_column: None,
             scope: Some(ontology::EdgeVariantScope::PruneToTarget),
-            denormalized_table: None,
         })
     }
 

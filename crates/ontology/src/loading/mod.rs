@@ -692,6 +692,18 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
         })
         .transpose()?;
 
+    for path in &schema.settings.denormalized_paths {
+        let hops: Vec<(&str, &str, &str)> = path
+            .hops
+            .iter()
+            .map(|h| (h.relationship.as_str(), h.from.as_str(), h.to.as_str()))
+            .collect();
+        let resolved =
+            resolve_denormalized_path(&ontology, &path.name, &hops, path.sort_key.as_deref())?;
+        ontology.denormalized_paths.push(resolved);
+    }
+    validate_unique_denormalized_paths(&ontology)?;
+
     ontology.partition = schema
         .settings
         .partition
@@ -723,13 +735,11 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
                 }
                 partitioned_tables.insert(table.clone());
             }
-            // A denormalized join table carries its edge table's traversal_path,
-            // so it is bucketed whenever the edge table is.
-            for edge in ontology.edges() {
-                if let Some(table) = &edge.denormalized_table
-                    && partitioned_tables.contains(&edge.destination_table)
-                {
-                    partitioned_tables.insert(table.clone());
+            // A path table carries its first edge's traversal_path, so it is
+            // bucketed whenever that edge table is.
+            for path in &ontology.denormalized_paths {
+                if partitioned_tables.contains(&path.hops[0].edge_table) {
+                    partitioned_tables.insert(path.table.clone());
                 }
             }
             Ok(crate::entities::PartitionConfig {
@@ -766,7 +776,6 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
     validate_auxiliary_dictionaries(&ontology)?;
     validate_traversal_path_lookups(&ontology)?;
     validate_edge_scope_annotations(&ontology)?;
-    validate_denormalized_edges(&ontology)?;
     validate_derived_emits_registered(&ontology)?;
     validate_etl_edges_match_variants(&ontology)?;
     validate_unique_pipeline_names(&ontology)?;
@@ -1208,16 +1217,122 @@ fn validate_storage_columns(ontology: &crate::Ontology) -> Result<(), OntologyEr
     Ok(())
 }
 
-/// A denormalized join table inherits the edge's `traversal_path` and is
-/// security-filtered on it, so both endpoints being global (edge path `0/`)
-/// would make the filter drop every row.
-fn validate_denormalized_edges(ontology: &crate::Ontology) -> Result<(), OntologyError> {
-    for edge in ontology.edges().filter(|e| e.denormalized_table.is_some()) {
-        let global = |kind: &str| ontology.get_node(kind).is_some_and(|n| n.global);
-        if global(&edge.source_kind) && global(&edge.target_kind) {
+/// Resolve a `denormalized_paths` entry against the loaded nodes and edges.
+///
+/// Consecutive hops must share a node. Every hop must be scope-preserving or
+/// reach a global hub, because the row carries only the first edge's
+/// `traversal_path` and the security pass filters on it; a node outside that
+/// path could otherwise leak through the row. At least one node must be
+/// scoped, or the filter would match nothing.
+pub(crate) fn resolve_denormalized_path(
+    ontology: &crate::Ontology,
+    name: &str,
+    hops: &[(&str, &str, &str)],
+    sort_key: Option<&[String]>,
+) -> Result<crate::denormalized::DenormalizedPath, OntologyError> {
+    use crate::denormalized::{DenormalizedPath, PathHop, PathNode, Position, table_name};
+
+    let fail =
+        |msg: String| OntologyError::Validation(format!("denormalized_paths '{name}': {msg}"));
+    if hops.is_empty() {
+        return Err(fail("needs at least one hop".into()));
+    }
+    if !name
+        .chars()
+        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+    {
+        return Err(fail("name must be snake_case".into()));
+    }
+
+    let node = |kind: &str| {
+        ontology
+            .nodes
+            .get(kind)
+            .map(|n| PathNode {
+                kind: kind.to_string(),
+                table: n.destination_table.clone(),
+                global: n.global,
+            })
+            .ok_or_else(|| fail(format!("unknown node '{kind}'")))
+    };
+
+    let mut resolved_hops = Vec::with_capacity(hops.len());
+    let mut nodes = vec![node(hops[0].1)?];
+    for (i, &(kind, from, to)) in hops.iter().enumerate() {
+        if i > 0 && hops[i - 1].2 != from {
+            return Err(fail(format!(
+                "hop {i} starts at '{from}' but hop {} ends at '{}'",
+                i - 1,
+                hops[i - 1].2
+            )));
+        }
+        let variant = ontology
+            .edges
+            .get(kind)
+            .and_then(|vs| {
+                vs.iter()
+                    .find(|v| v.source_kind == from && v.target_kind == to)
+            })
+            .ok_or_else(|| fail(format!("no {kind} variant {from} -> {to}")))?;
+        let to_node = node(to)?;
+        let hub = nodes[i].global || to_node.global;
+        if !ontology.is_scope_preserving_triple(kind, from, to) && !hub {
+            return Err(fail(format!(
+                "{kind} ({from} -> {to}) is not scope-preserving and reaches no global node, \
+                 so its rows cannot share one traversal_path"
+            )));
+        }
+        resolved_hops.push(PathHop {
+            relationship_kind: kind.to_string(),
+            source_kind: from.to_string(),
+            target_kind: to.to_string(),
+            edge_table: variant.destination_table.clone(),
+        });
+        nodes.push(to_node);
+    }
+    if nodes.iter().all(|n| n.global) {
+        return Err(fail(
+            "every node is global; at least one must be scoped".into(),
+        ));
+    }
+
+    let hop_count = resolved_hops.len();
+    let sort_key = match sort_key {
+        Some(cols) => {
+            let id_cols: Vec<String> = (0..nodes.len())
+                .map(|j| {
+                    Position::Node(j).column_for(crate::constants::DEFAULT_PRIMARY_KEY, hop_count)
+                })
+                .collect();
+            for col in cols {
+                if col != crate::constants::TRAVERSAL_PATH_COLUMN && !id_cols.contains(col) {
+                    return Err(fail(format!(
+                        "sort_key column '{col}' is not traversal_path or a node id column ({})",
+                        id_cols.join(", ")
+                    )));
+                }
+            }
+            cols.to_vec()
+        }
+        None => DenormalizedPath::default_sort_key(&nodes, hop_count),
+    };
+
+    Ok(DenormalizedPath {
+        name: name.to_string(),
+        table: table_name(name),
+        hops: resolved_hops,
+        nodes,
+        sort_key,
+    })
+}
+
+fn validate_unique_denormalized_paths(ontology: &crate::Ontology) -> Result<(), OntologyError> {
+    let mut seen = std::collections::HashSet::new();
+    for path in &ontology.denormalized_paths {
+        if !seen.insert(path.name.as_str()) {
             return Err(OntologyError::Validation(format!(
-                "{} ({}→{}): denormalized requires at least one scoped endpoint",
-                edge.relationship_kind, edge.source_kind, edge.target_kind
+                "denormalized_paths: duplicate name '{}'",
+                path.name
             )));
         }
     }
@@ -1384,26 +1499,72 @@ mod tests {
     }
 
     #[test]
-    fn denormalized_variant_needs_a_scoped_endpoint() {
+    fn denormalized_path_rejects_broken_chains_and_cross_namespace_hops() {
+        let ontology = crate::Ontology::load_embedded().unwrap();
+        let err = |hops: &[(&str, &str, &str)]| {
+            resolve_denormalized_path(&ontology, "p", hops, None)
+                .unwrap_err()
+                .to_string()
+        };
+
+        assert!(
+            err(&[
+                ("REVIEWER", "User", "MergeRequest"),
+                ("HAS_LABEL", "WorkItem", "Label")
+            ])
+            .contains("hop 1 starts at 'WorkItem'")
+        );
+        assert!(err(&[("REVIEWER", "User", "Project")]).contains("no REVIEWER variant"));
+        // CLOSES can cross projects, so a row could carry an MR from another namespace.
+        assert!(err(&[("CLOSES", "MergeRequest", "WorkItem")]).contains("not scope-preserving"));
+
+        let ok = resolve_denormalized_path(
+            &ontology,
+            "reviewer_project",
+            &[
+                ("REVIEWER", "User", "MergeRequest"),
+                ("IN_PROJECT", "MergeRequest", "Project"),
+            ],
+            None,
+        )
+        .unwrap();
+        assert_eq!(ok.table, "gl_denorm_reviewer_project");
+        assert_eq!(ok.nodes.len(), 3);
+        assert!(ok.nodes[0].global && !ok.nodes[1].global);
+    }
+
+    #[test]
+    fn denormalized_path_needs_a_scoped_node_and_a_valid_sort_key() {
         let mut ontology = crate::Ontology::new()
-            .with_nodes(["User", "Runner", "MergeRequest"])
+            .with_nodes(["User", "Runner"])
             .with_edges(["OWNS"])
             .with_edge_variant(crate::EdgeEntity {
                 relationship_kind: "OWNS".into(),
                 source_kind: "User".into(),
                 target_kind: "Runner".into(),
-                denormalized_table: Some("gl_denorm_owns__user__runner".into()),
                 ..Default::default()
             });
         for global in ["User", "Runner"] {
             ontology.nodes.get_mut(global).unwrap().global = true;
         }
-
-        let err = validate_denormalized_edges(&ontology).unwrap_err();
-        assert!(err.to_string().contains("OWNS (User→Runner)"), "got: {err}");
+        let hops = [("OWNS", "User", "Runner")];
+        let err = resolve_denormalized_path(&ontology, "owns", &hops, None).unwrap_err();
+        assert!(
+            err.to_string().contains("every node is global"),
+            "got: {err}"
+        );
 
         ontology.nodes.get_mut("Runner").unwrap().global = false;
-        validate_denormalized_edges(&ontology).unwrap();
+        let bad_key = ["traversal_path".to_string(), "n1_name".to_string()];
+        let err = resolve_denormalized_path(&ontology, "owns", &hops, Some(&bad_key)).unwrap_err();
+        assert!(
+            err.to_string().contains("sort_key column 'n1_name'"),
+            "got: {err}"
+        );
+
+        let key = ["traversal_path".to_string(), "e0_target_id".to_string()];
+        let ok = resolve_denormalized_path(&ontology, "owns", &hops, Some(&key)).unwrap();
+        assert_eq!(ok.sort_key, key);
     }
 
     #[test]
