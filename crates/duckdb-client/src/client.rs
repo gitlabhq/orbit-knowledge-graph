@@ -23,8 +23,12 @@ fn is_lock_error(e: &duckdb::Error) -> bool {
 }
 
 impl DuckDbClient {
-    /// Loads the fts extension embedded by build.rs; never touches the network.
-    pub fn load_fts(&self) -> Result<()> {
+    /// Loads a DuckDB extension vendored by build.rs; never touches the network.
+    pub fn load_extension(&self, name: &str) -> Result<()> {
+        let &(_, gz) = BUNDLED_EXTENSIONS
+            .iter()
+            .find(|(n, _)| *n == name)
+            .ok_or_else(|| DuckDbError::Schema(format!("extension {name} is not bundled")))?;
         // Same ORBIT_DATA_DIR / ~/.orbit convention as orbit-local::Workspace::default_root.
         let data_dir = match std::env::var("ORBIT_DATA_DIR") {
             Ok(dir) if !dir.is_empty() => PathBuf::from(dir),
@@ -39,16 +43,13 @@ impl DuckDbClient {
             std::env::consts::ARCH,
             std::env::consts::OS
         ));
-        let path = dir.join("fts.duckdb_extension");
+        let path = dir.join(format!("{name}.duckdb_extension"));
         if !path.is_file() {
             std::fs::create_dir_all(&dir)?;
             let mut bytes = Vec::new();
-            std::io::Read::read_to_end(
-                &mut flate2::read::GzDecoder::new(FTS_EXTENSION_GZ),
-                &mut bytes,
-            )?;
+            std::io::Read::read_to_end(&mut flate2::read::GzDecoder::new(gz), &mut bytes)?;
             // Temp + rename so a concurrent orbit process never loads a partial file.
-            let tmp = dir.join(format!(".fts.duckdb_extension.{}", std::process::id()));
+            let tmp = dir.join(format!(".{name}.duckdb_extension.{}", std::process::id()));
             std::fs::write(&tmp, &bytes)?;
             std::fs::rename(&tmp, &path)?;
         }
@@ -57,7 +58,7 @@ impl DuckDbClient {
             .execute_batch(&format!("LOAD {};", crate::sql_lit(&path)))
             .map_err(|e| {
                 DuckDbError::Schema(format!(
-                    "failed to load the bundled DuckDB fts extension from {path}: {e}"
+                    "failed to load the bundled DuckDB extension {name} from {path}: {e}"
                 ))
             })
     }
@@ -242,7 +243,7 @@ impl DuckDbClient {
     }
 }
 
-include!(concat!(env!("OUT_DIR"), "/bundled_fts.rs"));
+include!(concat!(env!("OUT_DIR"), "/bundled_extensions.rs"));
 
 fn json_params_to_sql(params: &[serde_json::Value]) -> Vec<Box<dyn duckdb::ToSql>> {
     params

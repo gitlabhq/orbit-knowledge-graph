@@ -132,7 +132,7 @@ mod tests {
         }
 
         fn search(self) -> DuckDbSearch {
-            self.client.load_fts().unwrap();
+            self.client.load_extension("fts").unwrap();
             self.client
                 .execute(
                     "CREATE OR REPLACE TABLE gl_def_doc_7 AS

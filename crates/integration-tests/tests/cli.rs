@@ -1193,7 +1193,7 @@ fn repo_map_omitted_subcommand_runs_overview() {
 }
 
 #[test]
-fn ask_loads_bundled_fts_in_fresh_data_dir() {
+fn ask_loads_bundled_extension_in_fresh_data_dir() {
     let data_dir = tempfile::TempDir::new().unwrap();
     let repo = create_test_repo();
     let dd = data_dir.path();

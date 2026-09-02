@@ -27,7 +27,7 @@ pub struct DuckDbSearch {
 impl DuckDbSearch {
     pub fn new(client: DuckDbClient, project_id: i64, commit_sha: &str) -> Result<Self> {
         let sha = sql_lit(commit_sha);
-        client.load_fts()?;
+        client.load_extension("fts")?;
         ensure_search_index(&client, project_id, &sha)?;
         client.execute(&corpus_table_sql(project_id, &sha), &[])?;
         Ok(Self {
