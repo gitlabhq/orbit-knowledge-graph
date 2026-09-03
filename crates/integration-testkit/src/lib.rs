@@ -16,7 +16,7 @@ pub use context::TestContext;
 pub use seed::load_seed;
 pub use seeded_resolver::SeededColumnResolver;
 
-/// `GKG_TEST_ONTOLOGY_OVERLAY=<name>` merges `config/seeds/overlays/<name>.yaml` into the ontology.
+/// `GKG_TEST_ONTOLOGY_OVERLAY=<name>` merges `config/seeds/overlays/<name>/` over the ontology.
 fn load_unprefixed_ontology() -> ontology::Ontology {
     let Some(name) = std::env::var("GKG_TEST_ONTOLOGY_OVERLAY")
         .ok()
@@ -24,10 +24,12 @@ fn load_unprefixed_ontology() -> ontology::Ontology {
     else {
         return ontology::Ontology::load_embedded().expect("embedded ontology should load");
     };
-    let path = format!("{}/overlays/{name}.yaml", env!("SEEDS_DIR"));
-    let overlay = std::fs::read_to_string(&path)
-        .unwrap_or_else(|e| panic!("ontology overlay '{name}' not found at {path}: {e}"));
-    ontology::Ontology::load_embedded_with_settings_overlay(&overlay)
+    let dir = format!("{}/overlays/{name}", env!("SEEDS_DIR"));
+    assert!(
+        std::path::Path::new(&dir).is_dir(),
+        "ontology overlay '{name}' not found at {dir}"
+    );
+    ontology::Ontology::load_embedded_with_overlay(&dir)
         .unwrap_or_else(|e| panic!("ontology overlay '{name}' failed to load: {e}"))
 }
 

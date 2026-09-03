@@ -31,7 +31,7 @@ Canonical locations for files, schemas, configs, and tools in the knowledge-grap
 | Query language reference (text-indexed properties table is generated) | `docs/source/remote/queries/query-language.md` (regenerate the ontology-derived table with `mise docs:query-language`; CI gate `query-language-docs-check`) |
 | Query test fixtures | `fixtures/queries/` |
 | Query corpus (categorized YAML) | `fixtures/queries/corpus/` (smoke-tested in CI: `corpus_smoke`) |
-| Ontology settings overlays for speculative schema shapes | `config/seeds/overlays/*.yaml` (a `settings:` fragment merged into `schema.yaml`; run data correctness against one with `mise test:integration:overlay <name>`) |
+| Ontology overlays for speculative schema shapes | `config/seeds/overlays/<name>/` (a directory mirroring `config/ontology/`, deep-merged over it; run data correctness against one with `mise test:integration:overlay <name>`) |
 | Graph DDL (ClickHouse, versioned) | `config/graph.sql` |
 | Graph DDL (ClickHouse, persistent) | `config/graph_persistent.sql` (durable unversioned tables + materialized views created once at boot) |
 | Denormalized joins (`settings.denormalized_joins` in `schema.yaml`) | `crates/ontology/src/denormalized.rs` (table chain, column contract), `crates/ontology/src/loading/mod.rs` (`resolve_denormalized_join`), `crates/query-engine/compiler/src/passes/codegen/ddl/denormalized.rs` (table and feeding views composed from the source tables' generated DDL); design in `docs/design-documents/querying/graph_engine.md` |
