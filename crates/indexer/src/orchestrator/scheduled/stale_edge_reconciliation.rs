@@ -8,9 +8,9 @@ use ontology::{EdgeMapping, NodeRef, NodeRefKind, Ontology};
 use tracing::{info, warn};
 
 use crate::checkpoint::{CheckpointStore, NAMESPACE_KEY_PREFIX, namespace_id_from_key};
-use crate::clickhouse::{ArrowClickHouseClient, TIMESTAMP_FORMAT};
+use crate::clickhouse::{ArrowClickHouseClient, STALE_ROWS_TABLE, TIMESTAMP_FORMAT};
 use crate::orchestrator::scheduled::{ScheduledTask, ScheduledTaskMetrics, TaskError};
-use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
+use crate::schema::version::{SCHEMA_VERSION, logical_table_name, prefixed_table_name};
 use orbit_server_config::{ScheduleConfiguration, StaleEdgeReconciliationConfig};
 
 const CHECKPOINT_KEY: &str = "maintenance.stale_edge_reconciliation";
@@ -154,6 +154,12 @@ impl StaleEdgeReconciliation {
             .param("cursor", cursor)
             .execute()
             .await
+            .map_err(TaskError::new)?;
+        self.graph
+            .query(&build_ledger_statement(group, pending_namespaces))
+            .param("cursor", cursor)
+            .execute()
+            .await
             .map_err(TaskError::new)
     }
 
@@ -254,44 +260,20 @@ fn find_emitting_node_id_column(mapping: &EdgeMapping, node_name: &str) -> Optio
 
 fn build_tombstone_statement(group: &ReconciliationGroup, excluded_namespaces: &[i64]) -> String {
     let ReconciliationGroup {
-        emitting_node_table,
         edge_table,
         emitting_node_id_column,
         emitting_node_kind_column,
         emitting_node,
-        relationship_kinds,
         edge_sort_key,
+        ..
     } = group;
-
-    let kinds = relationship_kinds
-        .iter()
-        .map(|kind| format!("'{kind}'"))
-        .collect::<Vec<_>>()
-        .join(", ");
-
-    let namespace_guard = if excluded_namespaces.is_empty() {
-        String::new()
-    } else {
-        let ids = excluded_namespaces
-            .iter()
-            .map(i64::to_string)
-            .collect::<Vec<_>>()
-            .join(", ");
-        format!(" AND toInt64OrZero(extract(traversal_path, '^[0-9]+/([0-9]+)/')) NOT IN ({ids})")
-    };
+    let emitter = build_emitter_cte(group, excluded_namespaces);
+    let kinds = quoted_kinds(group);
 
     format!(
         "INSERT INTO {edge_table} \
            (traversal_path, relationship_kind, source_id, source_kind, target_id, target_kind, _version, _deleted) \
-         WITH emitter AS ( \
-           SELECT id, traversal_path, _version FROM ( \
-             SELECT id, traversal_path, _version, _deleted \
-             FROM {emitting_node_table} \
-             WHERE _version >= {{cursor:String}}{namespace_guard} \
-             ORDER BY traversal_path, id, _version DESC \
-             LIMIT 1 BY traversal_path, id \
-           ) WHERE _deleted = false \
-         ), \
+         {emitter}, \
          edge AS ( \
            SELECT {edge_sort_key}, _version FROM ( \
              SELECT {edge_sort_key}, _version, _deleted \
@@ -309,6 +291,69 @@ fn build_tombstone_statement(group: &ReconciliationGroup, excluded_namespaces: &
          FROM edge \
          JOIN emitter ON emitter.id = edge.{emitting_node_id_column} AND emitter.traversal_path = edge.traversal_path \
          WHERE edge._version < emitter._version"
+    )
+}
+
+fn build_ledger_statement(group: &ReconciliationGroup, excluded_namespaces: &[i64]) -> String {
+    let ReconciliationGroup {
+        edge_table,
+        emitting_node_id_column,
+        emitting_node_kind_column,
+        emitting_node,
+        edge_sort_key,
+        ..
+    } = group;
+    let emitter = build_emitter_cte(group, excluded_namespaces);
+    let kinds = quoted_kinds(group);
+    let table_name = logical_table_name(edge_table);
+
+    format!(
+        "INSERT INTO {STALE_ROWS_TABLE} (table_name, row_key, stale_version) \
+         {emitter} \
+         SELECT '{table_name}', toString(tuple({edge_sort_key})), _version \
+         FROM {edge_table} \
+         WHERE relationship_kind IN ({kinds}) \
+           AND {emitting_node_kind_column} = '{emitting_node}' \
+           AND traversal_path IN (SELECT traversal_path FROM emitter) \
+           AND {emitting_node_id_column} IN (SELECT id FROM emitter) \
+           AND _deleted = true \
+           AND _version >= {{cursor:String}}"
+    )
+}
+
+fn quoted_kinds(group: &ReconciliationGroup) -> String {
+    group
+        .relationship_kinds
+        .iter()
+        .map(|kind| format!("'{kind}'"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn build_emitter_cte(group: &ReconciliationGroup, excluded_namespaces: &[i64]) -> String {
+    let emitting_node_table = &group.emitting_node_table;
+
+    let namespace_guard = if excluded_namespaces.is_empty() {
+        String::new()
+    } else {
+        let ids = excluded_namespaces
+            .iter()
+            .map(i64::to_string)
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!(" AND toInt64OrZero(extract(traversal_path, '^[0-9]+/([0-9]+)/')) NOT IN ({ids})")
+    };
+
+    format!(
+        "WITH emitter AS ( \
+           SELECT id, traversal_path, _version FROM ( \
+             SELECT id, traversal_path, _version, _deleted \
+             FROM {emitting_node_table} \
+             WHERE _version >= {{cursor:String}}{namespace_guard} \
+             ORDER BY traversal_path, id, _version DESC \
+             LIMIT 1 BY traversal_path, id \
+           ) WHERE _deleted = false \
+         )"
     )
 }
 

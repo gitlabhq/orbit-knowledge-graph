@@ -249,12 +249,6 @@
             "cron": "0 */1 * * * *",
             "publish_window": 200000
           },
-          "code-stale-reclaim": {
-            "cron": "0 0 * * * *",
-            "max_scopes_per_statement": 5000,
-            "max_unfinished_mutations": 0,
-            "settle_secs": 30
-          },
           "global": {
             "cron": "0 */1 * * * *"
           },
@@ -275,6 +269,13 @@
           "stale-edge-reconciliation": {
             "cron": "0 */30 * * * *",
             "lookback_secs": 3600
+          },
+          "stale-reclaim": {
+            "cron": "0 0 * * * *",
+            "max_keys_per_statement": 5000,
+            "max_statement_bytes": 524288,
+            "max_unfinished_mutations": 0,
+            "settle_secs": 30
           },
           "table-cleanup": {
             "cron": "0 0 3 * * 0"
@@ -602,39 +603,6 @@
             "write_min_flush_rows": 10000,
             "write_slice_rows": 1000000
           }
-        }
-      },
-      "additionalProperties": false
-    },
-    "CodeStaleReclaimConfig": {
-      "description": "Per-task schedule configuration.\n\nEach scheduled task embeds this via `#[serde(flatten)]` in its own typed config struct.\nThe scheduler reads it via `task.schedule()`.",
-      "type": "object",
-      "properties": {
-        "cron": {
-          "description": "Cron expression with seconds field (6-field: `sec min hour dom mon dow`).\nWhen absent, the task runs on a default 60-second interval.",
-          "type": [
-            "string",
-            "null"
-          ],
-          "default": null
-        },
-        "max_scopes_per_statement": {
-          "type": "integer",
-          "format": "uint",
-          "default": 5000,
-          "minimum": 0
-        },
-        "max_unfinished_mutations": {
-          "type": "integer",
-          "format": "uint64",
-          "default": 0,
-          "minimum": 0
-        },
-        "settle_secs": {
-          "type": "integer",
-          "format": "uint64",
-          "default": 30,
-          "minimum": 0
         }
       },
       "additionalProperties": false
@@ -1578,12 +1546,6 @@
               "cron": "0 */1 * * * *",
               "publish_window": 200000
             },
-            "code-stale-reclaim": {
-              "cron": "0 0 * * * *",
-              "max_scopes_per_statement": 5000,
-              "max_unfinished_mutations": 0,
-              "settle_secs": 30
-            },
             "global": {
               "cron": "0 */1 * * * *"
             },
@@ -1605,6 +1567,13 @@
               "cron": "0 */30 * * * *",
               "lookback_secs": 3600
             },
+            "stale-reclaim": {
+              "cron": "0 0 * * * *",
+              "max_keys_per_statement": 5000,
+              "max_statement_bytes": 524288,
+              "max_unfinished_mutations": 0,
+              "settle_secs": 30
+            },
             "table-cleanup": {
               "cron": "0 0 3 * * 0"
             }
@@ -1622,15 +1591,6 @@
           "default": {
             "cron": "0 */1 * * * *",
             "publish_window": 200000
-          }
-        },
-        "code-stale-reclaim": {
-          "$ref": "#/$defs/CodeStaleReclaimConfig",
-          "default": {
-            "cron": "0 0 * * * *",
-            "max_scopes_per_statement": 5000,
-            "max_unfinished_mutations": 0,
-            "settle_secs": 30
           }
         },
         "global": {
@@ -1670,6 +1630,16 @@
           "default": {
             "cron": "0 */30 * * * *",
             "lookback_secs": 3600
+          }
+        },
+        "stale-reclaim": {
+          "$ref": "#/$defs/StaleReclaimConfig",
+          "default": {
+            "cron": "0 0 * * * *",
+            "max_keys_per_statement": 5000,
+            "max_statement_bytes": 524288,
+            "max_unfinished_mutations": 0,
+            "settle_secs": 30
           }
         },
         "table-cleanup": {
@@ -1741,6 +1711,45 @@
           "type": "integer",
           "format": "uint64",
           "default": 3600,
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "StaleReclaimConfig": {
+      "description": "Per-task schedule configuration.\n\nEach scheduled task embeds this via `#[serde(flatten)]` in its own typed config struct.\nThe scheduler reads it via `task.schedule()`.",
+      "type": "object",
+      "properties": {
+        "cron": {
+          "description": "Cron expression with seconds field (6-field: `sec min hour dom mon dow`).\nWhen absent, the task runs on a default 60-second interval.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "max_keys_per_statement": {
+          "type": "integer",
+          "format": "uint",
+          "default": 5000,
+          "minimum": 0
+        },
+        "max_statement_bytes": {
+          "type": "integer",
+          "format": "uint",
+          "default": 524288,
+          "minimum": 0
+        },
+        "max_unfinished_mutations": {
+          "type": "integer",
+          "format": "uint64",
+          "default": 0,
+          "minimum": 0
+        },
+        "settle_secs": {
+          "type": "integer",
+          "format": "uint64",
+          "default": 30,
           "minimum": 0
         }
       },

@@ -329,12 +329,26 @@ settings:
         - {name: retired_at, type: timestamp, default: "now64(6)", codec: ["delta(8)", "zstd(1)"]}
       order_by: [traversal_path, project_id, branch, stale_version]
       ttl: retired_at + INTERVAL 30 DAY
-    - name: code_stale_reclaim_marks
+    - name: stale_rows
+      versioned: false
+      include_system_columns: false
+      engine: MergeTree
+      columns:
+        - {name: table_name, type: string, codec: ["zstd(1)"]}
+        - {name: row_key, type: string, codec: ["zstd(1)"]}
+        - {name: stale_version, type: timestamp, codec: ["delta(8)", "zstd(1)"]}
+        - {name: retired_at, type: timestamp, default: "now64(6)", codec: ["delta(8)", "zstd(1)"]}
+      order_by: [table_name, retired_at, row_key]
+      ttl: retired_at + INTERVAL 30 DAY
+    - name: stale_reclaim_marks
       versioned: false
       columns:
+        - {name: ledger, type: string}
+        - {name: phase, type: string}
         - {name: table_name, type: string}
         - {name: reclaimed_through, type: timestamp}
-      order_by: [table_name]
+        - {name: reclaimed_through_key, type: string, default: "''"}
+      order_by: [ledger, phase, table_name]
   auxiliary_dictionaries:
     - name: gl_project_traversal_paths_dict
       source_table: gl_project

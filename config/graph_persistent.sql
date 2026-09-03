@@ -26,12 +26,25 @@ ORDER BY (traversal_path, project_id, branch, stale_version)
 TTL retired_at + INTERVAL 30 DAY
 SETTINGS allow_experimental_replacing_merge_with_cleanup = 1;
 
-CREATE TABLE IF NOT EXISTS code_stale_reclaim_marks (
+CREATE TABLE IF NOT EXISTS stale_rows (
+    table_name String CODEC(ZSTD(1)),
+    row_key String CODEC(ZSTD(1)),
+    stale_version DateTime64(6, 'UTC') CODEC(Delta(8), ZSTD(1)),
+    retired_at DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(Delta(8), ZSTD(1))
+) ENGINE = MergeTree
+ORDER BY (table_name, retired_at, row_key)
+TTL retired_at + INTERVAL 30 DAY
+SETTINGS allow_experimental_replacing_merge_with_cleanup = 1;
+
+CREATE TABLE IF NOT EXISTS stale_reclaim_marks (
+    ledger String,
+    phase String,
     table_name String,
     reclaimed_through DateTime64(6, 'UTC'),
+    reclaimed_through_key String DEFAULT '',
     _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(Delta(8), ZSTD(1)),
     _deleted Bool DEFAULT false
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
-ORDER BY (table_name)
+ORDER BY (ledger, phase, table_name)
 SETTINGS allow_experimental_replacing_merge_with_cleanup = 1;
 

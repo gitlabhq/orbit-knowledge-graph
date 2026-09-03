@@ -84,6 +84,7 @@ impl CodeIndexingDeps {
             indexer::clickhouse::ClickHouseWriter::new(
                 clickhouse.config.clone(),
                 Arc::new(indexer::metrics::EngineMetrics::new()),
+                &ontology,
             )
             .expect("writer must build"),
         );

@@ -594,32 +594,39 @@ impl Default for TableCleanupConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
-pub struct CodeStaleReclaimConfig {
+pub struct StaleReclaimConfig {
     #[serde(flatten)]
     pub schedule: ScheduleConfiguration,
-    #[serde(default = "default_reclaim_max_scopes")]
-    pub max_scopes_per_statement: usize,
+    #[serde(default = "default_reclaim_max_keys")]
+    pub max_keys_per_statement: usize,
+    #[serde(default = "default_reclaim_max_statement_bytes")]
+    pub max_statement_bytes: usize,
     #[serde(default)]
     pub max_unfinished_mutations: u64,
     #[serde(default = "default_reclaim_settle_secs")]
     pub settle_secs: u64,
 }
 
-fn default_reclaim_max_scopes() -> usize {
+fn default_reclaim_max_keys() -> usize {
     5000
+}
+
+fn default_reclaim_max_statement_bytes() -> usize {
+    512 * 1024
 }
 
 fn default_reclaim_settle_secs() -> u64 {
     30
 }
 
-impl Default for CodeStaleReclaimConfig {
+impl Default for StaleReclaimConfig {
     fn default() -> Self {
         Self {
             schedule: ScheduleConfiguration {
                 cron: Some("0 0 * * * *".into()),
             },
-            max_scopes_per_statement: default_reclaim_max_scopes(),
+            max_keys_per_statement: default_reclaim_max_keys(),
+            max_statement_bytes: default_reclaim_max_statement_bytes(),
             max_unfinished_mutations: 0,
             settle_secs: default_reclaim_settle_secs(),
         }
@@ -711,7 +718,7 @@ pub struct ScheduledTasksConfiguration {
     #[serde(default)]
     pub stale_edge_reconciliation: StaleEdgeReconciliationConfig,
     #[serde(default)]
-    pub code_stale_reclaim: CodeStaleReclaimConfig,
+    pub stale_reclaim: StaleReclaimConfig,
 }
 
 // ── Top-level engine config ──────────────────────────────────────────

@@ -150,6 +150,12 @@ pub fn prefixed_table_name(table: &str, schema_version: u32) -> String {
     format!("{}{}", table_prefix(schema_version), table)
 }
 
+pub fn logical_table_name(table: &str) -> &str {
+    table
+        .strip_prefix(table_prefix(*SCHEMA_VERSION).as_str())
+        .unwrap_or(table)
+}
+
 /// This table is never prefixed or dropped across schema versions — it is the
 /// single source of truth for which version is active.
 pub async fn ensure_version_table(graph: &ArrowClickHouseClient) -> Result<(), SchemaVersionError> {

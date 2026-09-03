@@ -290,7 +290,17 @@ The handler will restart extraction from epoch for that entity type.
 
 ## Graph table maintenance
 
-A deletion is a tombstone: the row is re-inserted with `_deleted = true` and a bumped `_version`, and reads hide it at once via FINAL. No deletion path issues a mutation. To physically reclaim tombstoned rows from a table on disk:
+A deletion is a tombstone: the row is re-inserted with `_deleted = true` and a bumped `_version`, and reads hide it at once via FINAL. No deletion path issues a mutation on the indexing path. Every tombstone written through the Arrow writer or by the stale-edge reconciliation is also recorded in the unversioned `stale_rows` ledger, and the dispatcher's `maintenance.stale_reclaim` task (hourly by default, `schedule.tasks.stale-reclaim`) removes the recorded keys physically with one lightweight `DELETE` per table per pass: the live rows of a tombstoned key in one pass, its tombstones in the next. To see the backlog per table:
+
+```sql
+SELECT table_name, count(), min(retired_at) FROM `<gkg-database>`.stale_rows GROUP BY table_name;
+SELECT ledger, phase, table_name, reclaimed_through, reclaimed_through_key FROM `<gkg-database>`.stale_reclaim_marks FINAL;
+SELECT table, count(), max(latest_fail_reason) FROM system.mutations WHERE database = '<gkg-database>' AND is_done = 0 GROUP BY table;
+```
+
+A table with an unfinished mutation is skipped until that mutation finishes; a mutation with a failure reason never finishes on its own and must be killed as described in the code indexing runbook.
+
+Tombstones written by namespace deletion and by the moved-entity reconcile are not in the ledger. Reads hide them via FINAL and they stay on disk until a CLEANUP merge:
 
 ```sql
 OPTIMIZE TABLE `<gkg-database>`.gl_project FINAL CLEANUP;

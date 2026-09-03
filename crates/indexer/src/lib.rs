@@ -69,9 +69,9 @@ use orchestrator::Trigger;
 use orchestrator::dispatch::{CodeBackfill, NamespaceIndexingDispatch};
 use orchestrator::max_deliveries::MaxDeliveriesReconciler;
 use orchestrator::scheduled::{
-    CodeBackfillSweep, CodeStaleReclaim, CodeStaleSweep, GlobalDispatcher,
-    MigrationCompletionChecker, NamespaceDeletionScheduler, NamespaceDispatcher, Scheduled,
-    StaleEdgeReconciliation, TableCleanup,
+    CodeBackfillSweep, CodeStaleSweep, GlobalDispatcher, MigrationCompletionChecker,
+    NamespaceDeletionScheduler, NamespaceDispatcher, Scheduled, StaleEdgeReconciliation,
+    StaleReclaim, TableCleanup,
 };
 use orchestrator::scheduled::{ScheduledTask, ScheduledTaskMetrics};
 use orchestrator::siphon::{CodeIndexingTaskRoute, EnabledNamespacesRoute, Route, Siphon};
@@ -139,6 +139,10 @@ pub async fn run(
         Duration::from_secs(config.schema.version_poll_interval_secs),
     )
     .await?;
+    if let Err(error) = schema::migration::create_unversioned_tables(&graph_client, &ontology).await
+    {
+        warn!(%error, "failed to create unversioned ontology tables at startup");
+    }
 
     let metrics = Arc::new(engine::metrics::EngineMetrics::new());
 
@@ -146,6 +150,7 @@ pub async fn run(
     let writer = Arc::new(ClickHouseWriter::new(
         config.graph.clone(),
         metrics.clone(),
+        &ontology,
     )?);
 
     let registry = Arc::new(HandlerRegistry::default());
@@ -295,13 +300,10 @@ pub async fn run_dispatcher(
     )
     .await?;
     serving.store(true, std::sync::atomic::Ordering::Relaxed);
+    schema::migration::create_unversioned_tables(&graph, ontology).await?;
 
     match schema::version::read_active_version(&graph).await {
         Ok(Some(active_version)) if active_version == *schema::version::SCHEMA_VERSION => {
-            if let Err(error) = schema::migration::create_unversioned_tables(&graph, ontology).await
-            {
-                warn!(%error, "failed to create unversioned ontology tables at startup");
-            }
             if let Err(error) = schema::migration::replace_refreshable_views_for_version(
                 &graph,
                 ontology,
@@ -314,7 +316,7 @@ pub async fn run_dispatcher(
         }
         Ok(_) => {}
         Err(error) => {
-            warn!(%error, "failed to read active version for auxiliary tables and refreshable views")
+            warn!(%error, "failed to read active version for refreshable views")
         }
     }
 
@@ -365,12 +367,13 @@ pub async fn run_dispatcher(
             ),
             config.schedule.tasks.code_backfill.clone(),
         )),
-        Box::new(CodeStaleReclaim::new(
+        Box::new(StaleReclaim::new(
             config.graph.build_client(),
+            ontology,
             &modules::code::config::CodeTableNames::from_ontology(ontology)
                 .expect("code tables must resolve from the embedded ontology"),
             metrics.clone(),
-            config.schedule.tasks.code_stale_reclaim.clone(),
+            config.schedule.tasks.stale_reclaim.clone(),
         )),
         Box::new(TableCleanup::new(
             graph,

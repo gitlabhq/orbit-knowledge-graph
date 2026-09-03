@@ -3,7 +3,11 @@ use std::error::Error as StdError;
 use std::sync::Arc;
 use std::time::Duration;
 
+use arrow::array::{Array, ArrayRef, BooleanArray, StringArray, UInt32Array};
+use arrow::compute;
+use arrow::datatypes::{DataType, Field, Schema, TimeUnit};
 use arrow::record_batch::RecordBatch;
+use arrow::util::display::array_value_to_string;
 use clickhouse_client::{ArrowClickHouseClient, ClickHouseConfigurationExt};
 use orbit_server_config::ClickHouseConfiguration;
 use thiserror::Error;
@@ -15,6 +19,9 @@ use tracing::{error, warn};
 use crate::durability::WriteDurability;
 use crate::metrics::EngineMetrics;
 use crate::retry::{Backoff, LocalRetry, RetryExhausted, Step, drive};
+use crate::schema::version::{SCHEMA_VERSION, logical_table_name, prefixed_table_name};
+
+pub const STALE_ROWS_TABLE: &str = "stale_rows";
 
 #[derive(Debug, Error)]
 pub enum WriteError {
@@ -50,12 +57,14 @@ pub struct ClickHouseWriter {
     client: ArrowClickHouseClient,
     metrics: Arc<EngineMetrics>,
     noop: bool,
+    stale_row_keys: HashMap<String, Vec<String>>,
 }
 
 impl ClickHouseWriter {
     pub fn new(
         configuration: ClickHouseConfiguration,
         metrics: Arc<EngineMetrics>,
+        ontology: &ontology::Ontology,
     ) -> Result<Self, WriteError> {
         configuration
             .validate()
@@ -65,6 +74,7 @@ impl ClickHouseWriter {
             client,
             metrics,
             noop: false,
+            stale_row_keys: stale_row_keys(ontology),
         })
     }
 
@@ -75,6 +85,7 @@ impl ClickHouseWriter {
             client: ClickHouseConfiguration::default().build_client(),
             metrics: Arc::new(EngineMetrics::new()),
             noop: true,
+            stale_row_keys: HashMap::new(),
         }
     }
 }
@@ -121,6 +132,11 @@ impl ClickHouseWriter {
             });
         }
 
+        let ledger = match self.stale_row_keys.get(table) {
+            Some(sort_key) => stale_rows_batch(logical_table_name(table), sort_key, &batches)
+                .map_err(|e| WriteError::Write(e, None))?,
+            None => None,
+        };
         let insert_sql = match durability {
             Some(d) => self
                 .client
@@ -141,12 +157,29 @@ impl ClickHouseWriter {
 
         self.metrics
             .record_write_success(table, start.elapsed().as_secs_f64(), rows, bytes);
+        if let Some(ledger) = ledger {
+            self.record_stale_rows(ledger).await?;
+        }
 
         Ok(WriteReport {
             table: table.to_string(),
             rows,
             bytes,
         })
+    }
+
+    async fn record_stale_rows(&self, ledger: RecordBatch) -> Result<(), WriteError> {
+        let insert_sql = self.client.build_insert_sql_with_overrides(
+            &format!("{STALE_ROWS_TABLE} (table_name, row_key, stale_version)"),
+            insert_overrides(WriteDurability::Durable),
+        );
+        self.client
+            .insert_arrow_streaming_with_sql(STALE_ROWS_TABLE, &insert_sql, &[ledger])
+            .await
+            .map_err(|error| {
+                self.metrics.record_write_error(STALE_ROWS_TABLE);
+                error.into()
+            })
     }
 
     /// Issues a `DELETE FROM` statement for rows that should be lightweight-deleted.
@@ -160,6 +193,129 @@ impl ClickHouseWriter {
             .await
             .map_err(|e| WriteError::Write(e.to_string(), None))
     }
+}
+
+fn stale_row_keys(ontology: &ontology::Ontology) -> HashMap<String, Vec<String>> {
+    ontology
+        .nodes()
+        .map(|node| node.destination_table.as_str())
+        .chain(ontology.edge_tables())
+        .filter_map(|table| {
+            let sort_key = ontology.sort_key_for_table(table)?.to_vec();
+            Some((prefixed_table_name(table, *SCHEMA_VERSION), sort_key))
+        })
+        .collect()
+}
+
+fn stale_rows_batch(
+    table_name: &str,
+    sort_key: &[String],
+    batches: &[RecordBatch],
+) -> Result<Option<RecordBatch>, String> {
+    let mut row_keys = Vec::new();
+    let mut versions = Vec::new();
+    for batch in batches {
+        let Some(deleted) = batch
+            .column_by_name("_deleted")
+            .and_then(|column| column.as_any().downcast_ref::<BooleanArray>())
+        else {
+            continue;
+        };
+        if deleted.true_count() == 0 {
+            continue;
+        }
+        let columns = sort_key
+            .iter()
+            .map(|name| {
+                let column = batch
+                    .column_by_name(name)
+                    .ok_or_else(|| format!("{table_name}: sort key column {name} missing"))?;
+                plain_array(column)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let version = batch
+            .column_by_name("_version")
+            .ok_or_else(|| format!("{table_name}: _version column missing"))?;
+        let version = compute::cast(version, &DataType::Timestamp(TimeUnit::Microsecond, None))
+            .map_err(|e| e.to_string())?;
+        let indices: Vec<u32> = (0..batch.num_rows())
+            .filter(|&row| deleted.is_valid(row) && deleted.value(row))
+            .map(|row| row as u32)
+            .collect();
+        for &row in &indices {
+            row_keys.push(render_row_key(&columns, row as usize)?);
+        }
+        let indices = UInt32Array::from(indices);
+        versions.push(compute::take(version.as_ref(), &indices, None).map_err(|e| e.to_string())?);
+    }
+    if row_keys.is_empty() {
+        return Ok(None);
+    }
+    let rows = row_keys.len();
+    let stale_version = compute::concat(&versions.iter().map(|a| a.as_ref()).collect::<Vec<_>>())
+        .map_err(|e| e.to_string())?;
+    let schema = Arc::new(Schema::new(vec![
+        Field::new("table_name", DataType::Utf8, false),
+        Field::new("row_key", DataType::Utf8, false),
+        Field::new(
+            "stale_version",
+            DataType::Timestamp(TimeUnit::Microsecond, None),
+            false,
+        ),
+    ]));
+    RecordBatch::try_new(
+        schema,
+        vec![
+            Arc::new(StringArray::from(vec![table_name; rows])),
+            Arc::new(StringArray::from(row_keys)),
+            stale_version,
+        ],
+    )
+    .map(Some)
+    .map_err(|e| e.to_string())
+}
+
+fn plain_array(column: &ArrayRef) -> Result<ArrayRef, String> {
+    match column.data_type() {
+        DataType::Dictionary(_, value_type) => {
+            compute::cast(column, value_type).map_err(|e| e.to_string())
+        }
+        _ => Ok(Arc::clone(column)),
+    }
+}
+
+fn render_row_key(columns: &[ArrayRef], row: usize) -> Result<String, String> {
+    let values = columns
+        .iter()
+        .map(|column| render_key_literal(column, row))
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(match values.as_slice() {
+        [single] => single.clone(),
+        many => format!("({})", many.join(",")),
+    })
+}
+
+fn render_key_literal(column: &ArrayRef, row: usize) -> Result<String, String> {
+    if column.is_null(row) {
+        return Err(format!("null in {:?} sort key column", column.data_type()));
+    }
+    let value = array_value_to_string(column.as_ref(), row).map_err(|e| e.to_string())?;
+    match column.data_type() {
+        DataType::Utf8 | DataType::LargeUtf8 | DataType::Utf8View => Ok(quote_literal(&value)),
+        DataType::Int8
+        | DataType::Int16
+        | DataType::Int32
+        | DataType::Int64
+        | DataType::UInt8
+        | DataType::UInt16
+        | DataType::UInt32
+        | DataType::UInt64 => Ok(value),
+        other => Err(format!("unsupported sort key type {other:?}")),
+    }
+}
+
+fn quote_literal(value: &str) -> String {
+    format!("'{}'", value.replace('\\', "\\\\").replace('\'', "\\'"))
 }
 
 /// A per-submission completion hook. The buffered writer calls exactly one of these for every

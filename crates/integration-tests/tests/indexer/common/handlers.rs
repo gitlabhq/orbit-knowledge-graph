@@ -67,11 +67,15 @@ async fn build_fan_out(
     subscription: Subscription,
 ) -> Arc<dyn Handler> {
     let config = create_test_indexer_config(&ctx.config);
-    let writer = Arc::new(
-        ClickHouseWriter::new(ctx.config.clone(), Arc::new(EngineMetrics::default()))
-            .expect("writer"),
-    );
     let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
+    let writer = Arc::new(
+        ClickHouseWriter::new(
+            ctx.config.clone(),
+            Arc::new(EngineMetrics::default()),
+            &ontology,
+        )
+        .expect("writer"),
+    );
     let registry = HandlerRegistry::default();
     indexer::modules::sdlc::register_handlers(
         &registry,
@@ -111,13 +115,17 @@ pub async fn entity_handler_with_partitions(
     partitions: u32,
 ) -> Arc<dyn Handler> {
     let config: IndexerConfig = create_test_indexer_config(&ctx.config);
-    let writer = Arc::new(
-        ClickHouseWriter::new(ctx.config.clone(), Arc::new(EngineMetrics::default()))
-            .expect("writer"),
-    );
     let ontology = ontology::Ontology::load_embedded()
         .expect("ontology must load")
         .with_partition_count(entity_name, partitions);
+    let writer = Arc::new(
+        ClickHouseWriter::new(
+            ctx.config.clone(),
+            Arc::new(EngineMetrics::default()),
+            &ontology,
+        )
+        .expect("writer"),
+    );
     let registry = HandlerRegistry::default();
     indexer::modules::sdlc::register_handlers(
         &registry,

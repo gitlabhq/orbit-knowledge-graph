@@ -266,7 +266,7 @@ Distributed locking via NATS KV ensures only one dispatcher instance runs each t
 | Code task dispatch | `schedule.tasks.code-indexing-task.cron` | `0 */1 * * * *` (every minute) | Consumes Siphon CDC push events |
 | Code backfill | `schedule.tasks.code-backfill.cron` | `0 */1 * * * *` (every minute) | Backfills newly enabled namespaces |
 | Table cleanup | `schedule.tasks.table-cleanup.cron` | `0 0 3 * * 0` (weekly, Sunday 03:00 UTC) | Runs `APPLY DELETED MASK` on every graph table to physically remove lightweight-deleted rows |
-| Code stale reclaim | `schedule.tasks.code-stale-reclaim.cron` | `0 0 * * * *` (hourly) | Removes retired code snapshots recorded in the stale snapshot ledger with one lightweight `DELETE` per code table; skips a table while it has an unfinished mutation |
+| Stale reclaim | `schedule.tasks.stale-reclaim.cron` | `0 0 * * * *` (hourly) | Removes retired code snapshots and tombstoned SDLC rows recorded in the stale ledgers with one lightweight `DELETE` per graph table; skips a table while it has an unfinished mutation. Each pass re-reads the predicate columns of every part holding a matched row, so a shorter cadence costs IO on large tables |
 | Namespace deletion | `schedule.tasks.namespace-deletion.cron` | `0 0 3 * * *` (daily 03:00 UTC) | Schedules and executes namespace deletions |
 | Migration completion | `schedule.tasks.migration-completion.cron` | `0 */1 * * * *` (every minute) | Detects completed schema migrations |
 
@@ -281,13 +281,14 @@ run picks up all outstanding masks. Alert on
 `gkg.scheduler.task.errors{task="maintenance.table_cleanup"}`; the task logs a
 failed table and moves on.
 
-### Code stale reclaim task settings
+### Stale reclaim task settings
 
 | Config path | Default | Description |
 |-------------|---------|-------------|
-| `schedule.tasks.code-stale-reclaim.max_scopes_per_statement` | `5000` | Retired snapshot versions named in one `DELETE`; ties on `retired_at` are included beyond the limit so a batch never splits one flush |
-| `schedule.tasks.code-stale-reclaim.max_unfinished_mutations` | `0` | Unfinished mutations a table may have before the pass skips it; skips count in `gkg.scheduler.task.requests.skipped` |
-| `schedule.tasks.code-stale-reclaim.settle_secs` | `30` | Ledger rows younger than this are left for the next pass |
+| `schedule.tasks.stale-reclaim.max_keys_per_statement` | `5000` | Ledger rows read per table, ledger and phase per pass |
+| `schedule.tasks.stale-reclaim.max_statement_bytes` | `524288` | Byte cap for the tuple lists of one `DELETE` across both ledgers and phases; rows that do not fit wait for the next pass |
+| `schedule.tasks.stale-reclaim.max_unfinished_mutations` | `0` | Unfinished mutations a table may have before the pass skips it; skips count in `gkg.scheduler.task.requests.skipped` |
+| `schedule.tasks.stale-reclaim.settle_secs` | `30` | Ledger rows younger than this are left for the next pass |
 
 ### Code dispatch task settings
 

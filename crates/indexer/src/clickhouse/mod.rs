@@ -6,7 +6,8 @@ pub use clickhouse_client::{
 };
 pub(crate) use writer::insert_overrides;
 pub use writer::{
-    BufferedWriter, BufferedWriterConfig, ClickHouseWriter, FlushToken, WriteError, WriteReport,
+    BufferedWriter, BufferedWriterConfig, ClickHouseWriter, FlushToken, STALE_ROWS_TABLE,
+    WriteError, WriteReport,
 };
 
 /// ClickHouse microsecond timestamp format used across watermark stores and data cleaners.

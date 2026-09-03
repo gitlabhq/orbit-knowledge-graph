@@ -95,8 +95,12 @@ The pattern of capturing row-level changes from a source database as a stream of
 _Avoid_: replication (too broad)
 
 **Stale Snapshot Ledger**:
-The unversioned table where the code indexer records each retired snapshot of a project (its previous `indexed_at`) after tombstoning the keys the new snapshot no longer contains. The dispatcher's hourly reclaim task removes the recorded snapshots physically with one lightweight delete per code table.
+The unversioned table where the code indexer records each retired snapshot of a project (its previous `indexed_at`) after tombstoning the keys the new snapshot no longer contains. The dispatcher's stale reclaim task removes the recorded snapshots physically with one lightweight delete per table.
 _Avoid_: tombstone table, delete queue
+
+**Stale Row Ledger**:
+The unversioned table where every tombstone written to a graph table through the Arrow writer or by the stale-edge reconciliation is recorded by its sort key, so the dispatcher's stale reclaim task can remove the tombstoned rows physically in the same per-table lightweight delete as retired code snapshots.
+_Avoid_: tombstone queue, delete log
 
 **Dispatch ID**:
 A UUID stamped on each indexing request message, identifying one dispatch unit — per (namespace × cycle) for SDLC namespace dispatch, per cycle for the global and code dispatchers. Propagated to the `IndexingObserver` and tracing spans for correlation.

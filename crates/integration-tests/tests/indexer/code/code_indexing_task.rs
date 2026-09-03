@@ -1257,6 +1257,7 @@ fn failing_writer() -> Arc<indexer::clickhouse::ClickHouseWriter> {
                 ..Default::default()
             },
             Arc::new(indexer::metrics::EngineMetrics::new()),
+            &ontology::Ontology::load_embedded().expect("ontology must load"),
         )
         .expect("config is valid"),
     )

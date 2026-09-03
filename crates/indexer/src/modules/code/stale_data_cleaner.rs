@@ -200,11 +200,9 @@ impl ClickHouseStaleDataCleaner {
         branch: &str,
         prior_watermark: DateTime<Utc>,
     ) -> Result<(), StaleDataCleanerError> {
-        let tombstone_version = prior_watermark - chrono::TimeDelta::microseconds(1);
         let mut insert = self.client.query(&format!(
             "INSERT INTO {STALE_SNAPSHOTS_TABLE} (traversal_path, project_id, branch, stale_version) \
-             VALUES ({{traversal_path:String}}, {{project_id:Int64}}, {{branch:String}}, {{stale_version:String}}), \
-                    ({{traversal_path:String}}, {{project_id:Int64}}, {{branch:String}}, {{tombstone_version:String}})"
+             VALUES ({{traversal_path:String}}, {{project_id:Int64}}, {{branch:String}}, {{stale_version:String}})"
         ));
         for (name, value) in insert_overrides(WriteDurability::Durable) {
             insert = insert.with_setting(*name, *value);
@@ -216,10 +214,6 @@ impl ClickHouseStaleDataCleaner {
             .param(
                 "stale_version",
                 prior_watermark.format(TIMESTAMP_FORMAT).to_string(),
-            )
-            .param(
-                "tombstone_version",
-                tombstone_version.format(TIMESTAMP_FORMAT).to_string(),
             )
             .execute()
             .await

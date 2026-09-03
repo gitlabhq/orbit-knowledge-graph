@@ -248,6 +248,7 @@ impl TestContext {
                     profiling: Default::default(),
                 },
                 Arc::new(EngineMetrics::default()),
+                &ontology::Ontology::load_embedded().expect("ontology must load"),
             )
             .expect("failed to create writer"),
         )
