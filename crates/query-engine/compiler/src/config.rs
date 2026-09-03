@@ -151,6 +151,11 @@ fn validate(ctx: &mut impl CompilerCtx) -> Result<()> {
 
 fn validate_input(ctx: &mut impl CompilerCtx) -> Result<()> {
     let mut input = require(ctx.take_input(), "input")?;
+    if input.cursor.as_ref().is_some_and(|c| c.after.is_some()) {
+        return Err(QueryError::Validation(
+            "cursor.after is not supported for this query language".into(),
+        ));
+    }
     let v = validate::Validator::new(ctx.ontology());
     v.check_references(&input)?;
     v.annotate_filter_types(&mut input);

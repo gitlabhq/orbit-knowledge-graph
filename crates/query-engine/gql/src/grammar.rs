@@ -165,7 +165,7 @@ peg::parser! {
             / "$" name:ident() {?
                 params.get(&name)
                     .and_then(Value::as_array)
-                    .map(|a| a.iter().filter_map(Value::as_i64).collect())
+                    .and_then(|a| a.iter().map(Value::as_i64).collect::<Option<Vec<i64>>>())
                     .ok_or("bound integer list parameter")
             }
 

@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use compiler::Input;
 use compiler::input::{
@@ -58,14 +58,35 @@ struct Graph {
     index: HashMap<String, usize>,
     rels: Vec<InputRelationship>,
     rel_index: HashMap<String, usize>,
+    named: HashSet<String>,
     anonymous: usize,
 }
 
 impl Graph {
+    fn new(patterns: &[Pattern]) -> Self {
+        let mut named = HashSet::new();
+        for pattern in patterns {
+            named.insert(pattern.start.id.clone());
+            for (rel, node) in &pattern.chain {
+                named.insert(node.id.clone());
+                named.extend(rel.var.clone());
+            }
+        }
+        Graph {
+            named,
+            ..Default::default()
+        }
+    }
+
     fn add_node(&mut self, mut node: InputNode) -> Result<String, Error> {
         if node.id.is_empty() {
-            node.id = format!("_n{}", self.anonymous);
-            self.anonymous += 1;
+            node.id = loop {
+                let candidate = format!("_n{}", self.anonymous);
+                self.anonymous += 1;
+                if !self.named.contains(&candidate) {
+                    break candidate;
+                }
+            };
         }
         if let Some(&i) = self.index.get(&node.id) {
             let existing = &mut self.nodes[i];
@@ -163,7 +184,7 @@ pub(crate) fn assemble(
     order: Vec<(OrderTarget, OrderDirection)>,
     limit: Option<u32>,
 ) -> Result<Parsed, Error> {
-    let mut g = Graph::default();
+    let mut g = Graph::new(&patterns);
     let mut endpoints = Vec::new();
     for pattern in patterns {
         let mut prev = g.add_node(pattern.start)?;
