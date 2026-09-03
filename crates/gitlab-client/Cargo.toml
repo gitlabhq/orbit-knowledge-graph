@@ -10,15 +10,23 @@ base64 = { workspace = true }
 bytes = { workspace = true }
 chrono = { workspace = true }
 futures = { workspace = true }
+gitaly-protos = { path = "../gitaly-protos" }
+hyper-util = { workspace = true }
 orbit-server-config = { path = "../orbit-server-config" }
 jsonwebtoken = { workspace = true }
 reqwest = { workspace = true }
 rustls = { workspace = true }
+rustls-platform-verifier = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+tokio = { workspace = true }
+tokio-tungstenite = { workspace = true }
+tonic = { workspace = true }
+tower = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
 axum = { workspace = true }
-tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net"] }
+tokio-stream = { workspace = true }
+tonic-prost = { workspace = true }

@@ -5074,14 +5074,22 @@ dependencies = [
  "chrono",
  "circuit-breaker",
  "futures",
+ "gitaly-protos",
+ "hyper-util",
  "jsonwebtoken 10.4.0",
  "orbit-server-config",
  "reqwest 0.13.4",
  "rustls",
+ "rustls-platform-verifier",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
  "tokio",
+ "tokio-stream",
+ "tokio-tungstenite",
+ "tonic",
+ "tonic-prost",
+ "tower",
  "tracing",
 ]
 
@@ -13139,7 +13147,11 @@ checksum = "d25a406cddcc431a75d3d9afc6a7c0f7428d4891dd973e4d54c56b46127bf857"
 dependencies = [
  "futures-util",
  "log",
+ "rustls",
+ "rustls-native-certs",
+ "rustls-pki-types",
  "tokio",
+ "tokio-rustls",
  "tungstenite",
 ]
 
@@ -13779,6 +13791,8 @@ dependencies = [
  "httparse",
  "log",
  "rand 0.9.4",
+ "rustls",
+ "rustls-pki-types",
  "sha1",
  "thiserror 2.0.18",
  "utf-8",

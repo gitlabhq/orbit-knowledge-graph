@@ -1,5 +1,7 @@
+use std::future::Future;
 use std::net::SocketAddr;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::time::Duration;
 
 use base64::Engine;
@@ -11,6 +13,9 @@ use serde::Serialize;
 use tracing::debug;
 
 use crate::error::GitlabClientError;
+use crate::gitaly_proxy::{
+    GitalyProxyChannel, GitalyProxyChannels, GitalyProxyDialer, GitalyProxyError,
+};
 use crate::types::{MergeRequestDiffBatch, ProjectInfo};
 use orbit_server_config::GitlabClientConfiguration;
 
@@ -26,7 +31,7 @@ pub const JWT_AUDIENCE: &str = "gitlab-knowledge-graph";
 pub const JWT_SUBJECT: &str = "gkg-indexer:code";
 
 /// The raw JWT token is sent directly as this header value (no `Bearer` prefix).
-const AUTH_HEADER: &str = "Gitlab-Orbit-Api-Request";
+pub(crate) const AUTH_HEADER: &str = "Gitlab-Orbit-Api-Request";
 
 const JWT_EXPIRY_SECONDS: i64 = 300;
 
@@ -56,17 +61,50 @@ pub struct GitlabClient {
     http: reqwest::Client,
     base_url: String,
     signing_key: Vec<u8>,
+    gitaly_proxy: GitalyProxyChannels,
 }
 
 impl GitlabClient {
     pub fn new(config: GitlabClientConfiguration) -> Result<Self, GitlabClientError> {
         let signing_key = BASE64.decode(&config.signing_key)?;
         let http = Self::build_http_client(&config)?;
+        let dialer = GitalyProxyDialer::new(
+            &config.base_url,
+            config.resolve_host.as_deref(),
+            signing_key.clone(),
+        )
+        .map_err(|e| GitlabClientError::Unexpected(e.to_string()))?;
         Ok(Self {
             http,
             base_url: config.base_url,
             signing_key,
+            gitaly_proxy: GitalyProxyChannels::new(dialer),
         })
+    }
+
+    /// Opens (or reuses) a WebSocket-tunneled gRPC channel scoped to
+    /// `project_id`. Hold the `Arc` for the life of the stream; the channel is
+    /// rotated behind this method as the session ages.
+    pub async fn gitaly_channel(
+        &self,
+        project_id: i64,
+    ) -> Result<Arc<GitalyProxyChannel>, GitalyProxyError> {
+        self.gitaly_proxy.get(project_id).await
+    }
+
+    /// Runs `rpc` on the project's proxy channel, retrying exactly once on a
+    /// fresh channel if the proxy rejected the stream as stale. See
+    /// [`GitalyProxyChannels::with_channel`] for what is and is not retried.
+    pub async fn with_gitaly_channel<T, F, Fut>(
+        &self,
+        project_id: i64,
+        rpc: F,
+    ) -> Result<T, GitalyProxyError>
+    where
+        F: FnMut(Arc<GitalyProxyChannel>) -> Fut,
+        Fut: Future<Output = Result<T, tonic::Status>>,
+    {
+        self.gitaly_proxy.with_channel(project_id, rpc).await
     }
 
     fn build_http_client(
@@ -363,19 +401,24 @@ impl GitlabClient {
     }
 
     fn sign_jwt(&self) -> Result<String, GitlabClientError> {
-        let now = chrono::Utc::now().timestamp();
-        let claims = JwtClaims {
-            iss: JWT_ISSUER,
-            sub: JWT_SUBJECT,
-            aud: JWT_AUDIENCE,
-            iat: now,
-            exp: now + JWT_EXPIRY_SECONDS,
-        };
-
-        let key = EncodingKey::from_secret(&self.signing_key);
-        encode(&Header::new(Algorithm::HS256), &claims, &key)
-            .map_err(|e| GitlabClientError::JwtSigning(e.to_string()))
+        sign_jwt(&self.signing_key).map_err(GitlabClientError::JwtSigning)
     }
+}
+
+/// Signs a fresh 5-minute KG-JWT. Sign per request (and per proxy dial); never
+/// cache the token.
+pub(crate) fn sign_jwt(signing_key: &[u8]) -> Result<String, String> {
+    let now = chrono::Utc::now().timestamp();
+    let claims = JwtClaims {
+        iss: JWT_ISSUER,
+        sub: JWT_SUBJECT,
+        aud: JWT_AUDIENCE,
+        iat: now,
+        exp: now + JWT_EXPIRY_SECONDS,
+    };
+
+    let key = EncodingKey::from_secret(signing_key);
+    encode(&Header::new(Algorithm::HS256), &claims, &key).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
