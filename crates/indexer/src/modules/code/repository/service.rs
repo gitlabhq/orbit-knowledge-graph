@@ -236,6 +236,12 @@ impl RepositoryService for GitalyRepositoryService {
                     .record_gitaly_transport("workhorse_ws", "fallback");
                 return self.rails.download_archive(project_id, &ref_name).await;
             }
+            Err(GitalyProxyError::StreamDeadline) => {
+                self.metrics.record_gitaly_stream_deadline();
+                self.metrics
+                    .record_gitaly_transport("workhorse_ws", "stream_deadline");
+                return Err(GitalyProxyError::StreamDeadline.into());
+            }
             Err(error) => return Err(error.into()),
         };
 
@@ -263,6 +269,102 @@ fn restart_reason(status: &Status) -> &'static str {
         Code::Internal => "internal",
         Code::Unknown => "unknown",
         _ => "other",
+    }
+}
+
+#[cfg(test)]
+mod gitaly_tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    fn deterministic_retry() -> (ArchiveRetry, Arc<Mutex<Vec<Duration>>>) {
+        let sleeps = Arc::new(Mutex::new(Vec::new()));
+        let observed = Arc::clone(&sleeps);
+        (
+            ArchiveRetry {
+                max_attempts: 3,
+                sleep: Arc::new(move |duration| {
+                    observed.lock().unwrap().push(duration);
+                    Box::pin(async {})
+                }),
+                jitter: Arc::new(|cap| cap),
+            },
+            sleeps,
+        )
+    }
+
+    #[test]
+    fn only_availability_and_policy_errors_fall_back() {
+        let fallback = [
+            GitalyProxyError::Forbidden { project_id: 1 },
+            GitalyProxyError::NotAvailable { project_id: 1 },
+            GitalyProxyError::Busy {
+                status: 503,
+                retry_after: None,
+            },
+            GitalyProxyError::PolicyDenied {
+                reason: "method_not_allowed".into(),
+            },
+        ];
+        for error in &fallback {
+            assert!(GitalyRepositoryService::should_fallback(error));
+        }
+
+        assert!(!GitalyRepositoryService::should_fallback(
+            &GitalyProxyError::Unauthorized
+        ));
+        assert!(!GitalyRepositoryService::should_fallback(
+            &GitalyProxyError::StreamDeadline
+        ));
+    }
+
+    #[test]
+    fn classifies_only_unprefixed_mid_stream_transport_codes_for_restart() {
+        for status in [
+            Status::unavailable("connection reset"),
+            Status::internal("h2 stream error"),
+            Status::unknown("transport error"),
+        ] {
+            assert!(is_restartable_stream_cut(&status));
+        }
+
+        for status in [
+            Status::unavailable("proxy: shutting_down"),
+            Status::deadline_exceeded("proxy: stream_deadline"),
+            Status::not_found("repository not found"),
+            Status::failed_precondition("repository moved"),
+        ] {
+            assert!(!is_restartable_stream_cut(&status));
+        }
+    }
+
+    #[test]
+    fn max_concurrent_streams_is_pre_stream_backpressure_only() {
+        let busy = Status::resource_exhausted("proxy: max_concurrent_streams");
+
+        assert!(is_max_concurrent_streams(&busy));
+        assert!(!is_restartable_stream_cut(&busy));
+        assert!(!is_max_concurrent_streams(&Status::resource_exhausted(
+            "Gitaly limit"
+        )));
+    }
+
+    #[tokio::test]
+    async fn retry_backoff_increases_exponentially() {
+        let (retry, sleeps) = deterministic_retry();
+
+        retry.wait(1).await;
+        retry.wait(2).await;
+        retry.wait(6).await;
+
+        assert_eq!(
+            *sleeps.lock().unwrap(),
+            [
+                Duration::from_secs(1),
+                Duration::from_secs(2),
+                Duration::from_secs(30),
+            ]
+        );
     }
 }
 
