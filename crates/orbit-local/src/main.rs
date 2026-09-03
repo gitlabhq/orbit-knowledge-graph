@@ -177,21 +177,22 @@ struct IndexArgs {
 }
 
 #[derive(Args, Debug, PartialEq)]
-#[command(about = descriptions::short("ask"))]
+#[command(about = descriptions::short("grep"))]
 #[command(
-    long_about = "Answer a plain-language question with a scoped subgraph.\n\n\
-                  Ranks indexed definitions by how many distinct question terms they \
+    long_about = "Search the local graph for definitions matching plain-language terms.\n\n\
+                  Ranks indexed definitions by how many distinct query terms they \
                   match, then shows the most relevant connections to the top matches, \
-                  ranked by graph proximity.\n\n\
+                  ranked by graph proximity. Matches resolved definitions, not text \
+                  lines; takes plain words, not regexes or flags.\n\n\
                   When the output notes unmatched terms or weak matches, read the \
                   top matches first — they are often still right. Retry with a \
                   synonym or identifier fragment only if they look off, then fall \
-                  back to grep."
+                  back to text grep."
 )]
-struct AskArgs {
-    /// Plain-language question, e.g. "how does the quota gate decide?"
-    #[arg(value_name = "QUESTION")]
-    question: String,
+struct GrepArgs {
+    /// Plain-language query, e.g. "NATS message publish"
+    #[arg(value_name = "QUERY")]
+    query: String,
 
     /// Repository path (default: current directory).
     #[arg(long, value_name = "PATH")]
@@ -208,7 +209,7 @@ struct AskArgs {
 
 fn fqn_arg_help() -> String {
     format!(
-        "Exact fully qualified name as printed by `{} ask`.",
+        "Exact fully qualified name as printed by `{} grep`.",
         commands::setup::spec::launcher()
     )
 }
@@ -216,9 +217,9 @@ fn fqn_arg_help() -> String {
 fn show_long_about() -> String {
     format!(
         "Print the full source body of an indexed definition.\n\n\
-         Takes the exact fully qualified name as printed by `{} ask` \
+         Takes the exact fully qualified name as printed by `{} grep` \
          and prints the definition's source lines from the working tree, so a \
-         follow-up on an ask match needs no file read.",
+         follow-up on a grep match needs no file read.",
         commands::setup::spec::launcher()
     )
 }
@@ -226,7 +227,7 @@ fn show_long_about() -> String {
 fn describe_long_about() -> String {
     format!(
         "Print every graph connection of an indexed definition.\n\n\
-         Takes the exact fully qualified name as printed by `{} ask` \
+         Takes the exact fully qualified name as printed by `{} grep` \
          and prints all edges touching it — callers, callees, supertypes, \
          subtypes, members, importers — so a truncated `called by: … +N more` \
          line or any full call-graph question needs no SQL follow-up.",
@@ -358,8 +359,8 @@ enum Commands {
     Version,
     #[command(hide = true)]
     Index(IndexArgs),
-    #[command(hide = true)]
-    Ask(AskArgs),
+    #[command(hide = true, alias = "ask")]
+    Grep(GrepArgs),
     #[command(hide = true)]
     Show(ShowArgs),
     #[command(hide = true)]
@@ -462,7 +463,8 @@ enum ConfigCommands {
 #[derive(Subcommand)]
 enum LocalCommands {
     Index(IndexArgs),
-    Ask(AskArgs),
+    #[command(alias = "ask")]
+    Grep(GrepArgs),
     Show(ShowArgs),
     Describe(DescribeArgs),
     Sql(SqlArgs),
@@ -600,7 +602,7 @@ async fn dispatch(
             Ok(())
         }
         Commands::Index(args) => dispatch_local(LocalCommands::Index(args)).await,
-        Commands::Ask(args) => dispatch_local(LocalCommands::Ask(args)).await,
+        Commands::Grep(args) => dispatch_local(LocalCommands::Grep(args)).await,
         Commands::Show(args) => dispatch_local(LocalCommands::Show(args)).await,
         Commands::Describe(args) => dispatch_local(LocalCommands::Describe(args)).await,
         Commands::Sql(args) => dispatch_local(LocalCommands::Sql(args)).await,
@@ -670,12 +672,12 @@ async fn dispatch_local(command: LocalCommands) -> Result<()> {
 
             run_index(path, threads, stats, db).await
         }
-        LocalCommands::Ask(AskArgs {
-            question,
+        LocalCommands::Grep(GrepArgs {
+            query,
             repo,
             limit,
             db,
-        }) => commands::ask::run(question, repo, db, limit),
+        }) => commands::grep::run(query, repo, db, limit),
         LocalCommands::Show(ShowArgs { fqn, repo, db }) => commands::show::run(fqn, repo, db),
         LocalCommands::Describe(DescribeArgs { fqn, repo, db }) => {
             commands::describe::run(fqn, repo, db)
@@ -1255,20 +1257,38 @@ mod tests {
     }
 
     #[test]
-    fn local_ask_and_top_level_ask_parse_to_same_args() {
-        let grouped = Cli::parse_from(["orbit", "local", "ask", "who calls this", "--limit", "5"]);
-        let top_level = Cli::parse_from(["orbit", "ask", "who calls this", "--limit", "5"]);
+    fn local_grep_and_top_level_grep_parse_to_same_args() {
+        let grouped = Cli::parse_from(["orbit", "local", "grep", "who calls this", "--limit", "5"]);
+        let top_level = Cli::parse_from(["orbit", "grep", "who calls this", "--limit", "5"]);
         let grouped_args = match grouped.command {
             Commands::Local {
-                command: LocalCommands::Ask(args),
+                command: LocalCommands::Grep(args),
             } => args,
-            _ => panic!("expected local ask command"),
+            _ => panic!("expected local grep command"),
         };
         let top_level_args = match top_level.command {
-            Commands::Ask(args) => args,
-            _ => panic!("expected top-level ask command"),
+            Commands::Grep(args) => args,
+            _ => panic!("expected top-level grep command"),
         };
         assert_eq!(grouped_args, top_level_args);
+    }
+
+    #[test]
+    fn ask_alias_still_parses_to_grep() {
+        for argv in [
+            ["orbit", "ask", "who calls this"].as_slice(),
+            ["orbit", "local", "ask", "who calls this"].as_slice(),
+        ] {
+            let cli = Cli::parse_from(argv);
+            let is_grep = matches!(
+                cli.command,
+                Commands::Grep(_)
+                    | Commands::Local {
+                        command: LocalCommands::Grep(_),
+                    }
+            );
+            assert!(is_grep, "{argv:?} must resolve to the grep command");
+        }
     }
 
     #[test]

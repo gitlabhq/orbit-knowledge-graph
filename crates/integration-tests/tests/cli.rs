@@ -1193,21 +1193,21 @@ fn repo_map_omitted_subcommand_runs_overview() {
 }
 
 #[test]
-fn ask_loads_bundled_extension_in_fresh_data_dir() {
+fn grep_loads_bundled_extension_in_fresh_data_dir() {
     let data_dir = tempfile::TempDir::new().unwrap();
     let repo = create_test_repo();
     let dd = data_dir.path();
     assert!(orbit_index(&repo.path, dd));
 
     let out = orbit_cmd()
-        .args(["ask", "how do we read a file", "--repo"])
+        .args(["grep", "how do we read a file", "--repo"])
         .arg(&repo.path)
         .env("ORBIT_DATA_DIR", dd)
         .output()
         .unwrap();
     assert!(
         out.status.success(),
-        "ask failed: {}",
+        "grep failed: {}",
         String::from_utf8_lossy(&out.stderr)
     );
     assert!(String::from_utf8_lossy(&out.stdout).contains("read_file"));
