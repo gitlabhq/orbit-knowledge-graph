@@ -148,7 +148,9 @@ Rails does **not** emit billing events. It acts as a proxy only. Billing events 
 
 ### Billing event transport (orbit/kg#307)
 
-GKG emits billable events as Snowplow structured events through `labkit-rs` (the `labkit_events` tracker). The tracker authenticates to the GitLab Snowplow collector with OIDC tokens minted from the workload identity, so no static egress IP allowlist is required. Each event carries the `iglu:com.gitlab/billable_usage/jsonschema/1-0-2` self-describing context. Downstream, the Data Insights Platform ingests the events and CustomersDot's hourly mediation processes them. The OIDC support in `labkit-rs` is tracked in [orbit/kg#307](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/307).
+GKG emits billable events as Snowplow structured events through `labkit-rs` (the `labkit_events` tracker). Each event carries the `iglu:com.gitlab/billable_usage/jsonschema/1-0-2` self-describing context. Downstream, the Data Insights Platform ingests the events and CustomersDot's hourly mediation processes them. The OIDC support in `labkit-rs` is tracked in [orbit/kg#307](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/307).
+
+The tracker's authentication is selected by `billing.auth_mode`. On GitLab.com (SaaS) it authenticates to the collector with OIDC tokens minted from the workload identity, so no static egress IP allowlist is required. On Self-Managed / Dedicated there is no workload identity, so GKG instead pulls the Cloud Connector instance token (a CustomersDot-minted JWT held in the Rails DB) from a Rails internal route, caches it in memory, and presents it as the collector `Authorization` header. The pull-and-cache design (rather than a per-request JWT claim) is required because indexer-path emission is CDC/cron-driven with no request JWT.
 
 For the equivalent OIDC pattern in Go, see the [labkit-go proof of concept](https://gitlab.com/gitlab-org/analytics-section/platform-insights/core/-/work_items/98#note_3108588468) and the [server-side validation MR](https://gitlab.com/gitlab-org/analytics-section/platform-insights/core/-/merge_requests/106).
 
