@@ -18,6 +18,26 @@ use tonic::{Code, Status};
 
 use crate::modules::code::metrics::CodeMetrics;
 
+trait GitalyMetrics: Send + Sync {
+    fn transport(&self, transport: &'static str, outcome: &'static str);
+    fn restart(&self, reason: &'static str);
+    fn stream_deadline(&self);
+}
+
+impl GitalyMetrics for CodeMetrics {
+    fn transport(&self, transport: &'static str, outcome: &'static str) {
+        self.record_gitaly_transport(transport, outcome);
+    }
+
+    fn restart(&self, reason: &'static str) {
+        self.record_gitaly_restart(reason);
+    }
+
+    fn stream_deadline(&self) {
+        self.record_gitaly_stream_deadline();
+    }
+}
+
 pub type ByteStream =
     Pin<Box<dyn Stream<Item = Result<bytes::Bytes, RepositoryServiceError>> + Send>>;
 
@@ -78,7 +98,7 @@ pub struct GitalyRepositoryService {
     rails: Arc<dyn RepositoryService>,
     with_fallback: bool,
     retry: ArchiveRetry,
-    metrics: CodeMetrics,
+    metrics: Arc<dyn GitalyMetrics>,
 }
 
 impl GitalyRepositoryService {
@@ -94,7 +114,7 @@ impl GitalyRepositoryService {
             rails,
             with_fallback,
             retry: ArchiveRetry::new(stream_retry_max_attempts),
-            metrics,
+            metrics: Arc::new(metrics),
         })
     }
 
@@ -140,7 +160,8 @@ impl GitalyRepositoryService {
             .await
             {
                 Err(GitalyProxyError::Rpc(status))
-                    if is_max_concurrent_streams(&status) && attempt < self.retry.max_attempts =>
+                    if is_proxy_stream_backpressure(&status)
+                        && attempt < self.retry.max_attempts =>
                 {
                     self.retry.wait(attempt).await;
                     attempt += 1;
@@ -178,25 +199,23 @@ impl GitalyRepositoryService {
                     }
                     Ok(None) => {
                         file.rewind().await?;
-                        self.metrics.record_gitaly_transport("workhorse_ws", "ok");
+                        self.metrics.transport("workhorse_ws", "ok");
                         return Ok(Box::pin(ReaderStream::new(file).map(|result| {
                             result
                                 .map_err(|error| RepositoryServiceError::Archive(error.to_string()))
                         })));
                     }
                     Err(status) if classify_status(&status) == StatusClass::StreamDeadline => {
-                        self.metrics.record_gitaly_stream_deadline();
-                        self.metrics
-                            .record_gitaly_transport("workhorse_ws", "stream_deadline");
+                        self.metrics.stream_deadline();
+                        self.metrics.transport("workhorse_ws", "stream_deadline");
                         return Err(GitalyProxyError::StreamDeadline.into());
                     }
                     Err(status) if saw_frame && is_restartable_stream_cut(&status) => {
                         if attempt >= self.retry.max_attempts {
-                            self.metrics
-                                .record_gitaly_transport("workhorse_ws", "retry_exhausted");
+                            self.metrics.transport("workhorse_ws", "retry_exhausted");
                             return Err(GitalyProxyError::Rpc(status).into());
                         }
-                        self.metrics.record_gitaly_restart(restart_reason(&status));
+                        self.metrics.restart(restart_reason(&status));
                         self.retry.wait(attempt).await;
                         attempt += 1;
                         stream = self
@@ -232,14 +251,15 @@ impl RepositoryService for GitalyRepositoryService {
                 if matches!(error, GitalyProxyError::PolicyDenied { .. }) {
                     tracing::warn!(project_id, %error, "Gitaly proxy policy denied GetArchive; falling back to Rails HTTP");
                 }
-                self.metrics
-                    .record_gitaly_transport("workhorse_ws", "fallback");
-                return self.rails.download_archive(project_id, &ref_name).await;
+                self.metrics.transport("workhorse_ws", "fallback");
+                return self
+                    .rails
+                    .download_archive_as_fallback(project_id, &ref_name)
+                    .await;
             }
             Err(GitalyProxyError::StreamDeadline) => {
-                self.metrics.record_gitaly_stream_deadline();
-                self.metrics
-                    .record_gitaly_transport("workhorse_ws", "stream_deadline");
+                self.metrics.stream_deadline();
+                self.metrics.transport("workhorse_ws", "stream_deadline");
                 return Err(GitalyProxyError::StreamDeadline.into());
             }
             Err(error) => return Err(error.into()),
@@ -258,9 +278,8 @@ fn is_restartable_stream_cut(status: &Status) -> bool {
         )
 }
 
-fn is_max_concurrent_streams(status: &Status) -> bool {
-    status.code() == Code::ResourceExhausted
-        && proxy_reason(status) == Some("max_concurrent_streams")
+fn is_proxy_stream_backpressure(status: &Status) -> bool {
+    status.code() == Code::ResourceExhausted && proxy_reason(status).is_some()
 }
 
 fn restart_reason(status: &Status) -> &'static str {
@@ -277,8 +296,55 @@ mod gitaly_tests {
     use super::*;
     use futures::TryStreamExt;
     use gitlab_client::test_support::{FakeWorkhorse, Preauth, StreamPlan, direct, serve};
+    use std::collections::HashMap;
     use std::sync::Mutex;
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[derive(Default)]
+    struct TestGitalyMetrics {
+        transports: Mutex<HashMap<(&'static str, &'static str), u64>>,
+        restarts: Mutex<HashMap<&'static str, u64>>,
+        deadlines: AtomicUsize,
+    }
+
+    impl TestGitalyMetrics {
+        fn transport_count(&self, transport: &'static str, outcome: &'static str) -> u64 {
+            self.transports
+                .lock()
+                .unwrap()
+                .get(&(transport, outcome))
+                .copied()
+                .unwrap_or_default()
+        }
+
+        fn restart_count(&self, reason: &'static str) -> u64 {
+            self.restarts
+                .lock()
+                .unwrap()
+                .get(reason)
+                .copied()
+                .unwrap_or_default()
+        }
+    }
+
+    impl GitalyMetrics for TestGitalyMetrics {
+        fn transport(&self, transport: &'static str, outcome: &'static str) {
+            *self
+                .transports
+                .lock()
+                .unwrap()
+                .entry((transport, outcome))
+                .or_default() += 1;
+        }
+
+        fn restart(&self, reason: &'static str) {
+            *self.restarts.lock().unwrap().entry(reason).or_default() += 1;
+        }
+
+        fn stream_deadline(&self) {
+            self.deadlines.fetch_add(1, Ordering::SeqCst);
+        }
+    }
 
     fn deterministic_retry() -> (ArchiveRetry, Arc<Mutex<Vec<Duration>>>) {
         let sleeps = Arc::new(Mutex::new(Vec::new()));
@@ -342,12 +408,15 @@ mod gitaly_tests {
     }
 
     #[test]
-    fn max_concurrent_streams_is_pre_stream_backpressure_only() {
+    fn proxy_resource_exhausted_is_pre_stream_backpressure_only() {
         let busy = Status::resource_exhausted("proxy: max_concurrent_streams");
 
-        assert!(is_max_concurrent_streams(&busy));
+        assert!(is_proxy_stream_backpressure(&busy));
         assert!(!is_restartable_stream_cut(&busy));
-        assert!(!is_max_concurrent_streams(&Status::resource_exhausted(
+        assert!(is_proxy_stream_backpressure(&Status::resource_exhausted(
+            "proxy: future_backpressure_reason"
+        )));
+        assert!(!is_proxy_stream_backpressure(&Status::resource_exhausted(
             "Gitaly limit"
         )));
     }
@@ -374,18 +443,22 @@ mod gitaly_tests {
         fake: &FakeWorkhorse,
         rails: Arc<dyn RepositoryService>,
         with_fallback: bool,
-    ) -> GitalyRepositoryService {
-        GitalyRepositoryService {
-            gitlab_client: Arc::new(fake.client()),
-            rails,
-            with_fallback,
-            retry: ArchiveRetry {
-                max_attempts: 3,
-                sleep: Arc::new(|_| Box::pin(async {})),
-                jitter: Arc::new(|cap| cap),
+    ) -> (GitalyRepositoryService, Arc<TestGitalyMetrics>) {
+        let metrics = Arc::new(TestGitalyMetrics::default());
+        (
+            GitalyRepositoryService {
+                gitlab_client: Arc::new(fake.client()),
+                rails,
+                with_fallback,
+                retry: ArchiveRetry {
+                    max_attempts: 3,
+                    sleep: Arc::new(|_| Box::pin(async {})),
+                    jitter: Arc::new(|cap| cap),
+                },
+                metrics: metrics.clone(),
             },
-            metrics: CodeMetrics::with_meter(&crate::testkit::test_meter()),
-        }
+            metrics,
+        )
     }
 
     struct CountingRails {
@@ -421,7 +494,7 @@ mod gitaly_tests {
             downloads: AtomicUsize::new(0),
             bytes: bytes::Bytes::from_static(b"archivearchive"),
         });
-        let service = fake_service(&fake, rails.clone(), false);
+        let (service, metrics) = fake_service(&fake, rails.clone(), false);
 
         let bytes = service
             .download_archive(42, "main")
@@ -437,6 +510,7 @@ mod gitaly_tests {
         assert_eq!(bytes, b"archivearchive");
         assert_eq!(rails.downloads.load(Ordering::SeqCst), 0);
         assert_eq!(fake.rpcs(), 1);
+        assert_eq!(metrics.transport_count("workhorse_ws", "ok"), 1);
     }
 
     #[tokio::test]
@@ -450,7 +524,7 @@ mod gitaly_tests {
             downloads: AtomicUsize::new(0),
             bytes: bytes::Bytes::from_static(b"rails"),
         });
-        let service = fake_service(&fake, rails.clone(), true);
+        let (service, metrics) = fake_service(&fake, rails.clone(), true);
 
         let bytes = service
             .download_archive(42, "main")
@@ -462,6 +536,8 @@ mod gitaly_tests {
 
         assert_eq!(bytes.concat(), b"rails");
         assert_eq!(rails.downloads.load(Ordering::SeqCst), 1);
+        assert_eq!(metrics.transport_count("workhorse_ws", "fallback"), 1);
+        assert_eq!(metrics.transport_count("rails_http", "ok"), 0);
     }
 
     #[tokio::test]
@@ -475,7 +551,7 @@ mod gitaly_tests {
             downloads: AtomicUsize::new(0),
             bytes: bytes::Bytes::from_static(b"rails"),
         });
-        let service = fake_service(&fake, rails.clone(), true);
+        let (service, _) = fake_service(&fake, rails.clone(), true);
 
         let result = service.download_archive(42, "main").await;
 
@@ -499,7 +575,7 @@ mod gitaly_tests {
             downloads: AtomicUsize::new(0),
             bytes: bytes::Bytes::from_static(b"rails"),
         });
-        let service = fake_service(&fake, rails.clone(), true);
+        let (service, metrics) = fake_service(&fake, rails.clone(), true);
 
         let chunks = service
             .download_archive(42, "main")
@@ -511,6 +587,7 @@ mod gitaly_tests {
 
         assert_eq!(chunks.concat(), b"rails");
         assert_eq!(rails.downloads.load(Ordering::SeqCst), 1);
+        assert_eq!(metrics.transport_count("workhorse_ws", "fallback"), 1);
     }
 
     #[tokio::test]
@@ -524,7 +601,7 @@ mod gitaly_tests {
             downloads: AtomicUsize::new(0),
             bytes: bytes::Bytes::from_static(b"rails"),
         });
-        let service = fake_service(&fake, rails.clone(), true);
+        let (service, metrics) = fake_service(&fake, rails.clone(), true);
 
         let result = service.download_archive(42, "main").await;
 
@@ -536,6 +613,11 @@ mod gitaly_tests {
         ));
         assert_eq!(fake.rpcs(), 1);
         assert_eq!(rails.downloads.load(Ordering::SeqCst), 0);
+        assert_eq!(metrics.deadlines.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            metrics.transport_count("workhorse_ws", "stream_deadline"),
+            1
+        );
     }
 
     #[tokio::test]
@@ -550,7 +632,7 @@ mod gitaly_tests {
             downloads: AtomicUsize::new(0),
             bytes: bytes::Bytes::from_static(b"rails"),
         });
-        let service = fake_service(&fake, rails.clone(), true);
+        let (service, metrics) = fake_service(&fake, rails.clone(), true);
 
         let result = service.download_archive(42, "main").await;
 
@@ -560,6 +642,11 @@ mod gitaly_tests {
         ));
         assert_eq!(fake.rpcs(), 3);
         assert_eq!(rails.downloads.load(Ordering::SeqCst), 0);
+        assert_eq!(metrics.restart_count("unavailable"), 2);
+        assert_eq!(
+            metrics.transport_count("workhorse_ws", "retry_exhausted"),
+            1
+        );
     }
 }
 
@@ -572,6 +659,14 @@ pub trait RepositoryService: Send + Sync {
         project_id: i64,
         ref_name: &str,
     ) -> Result<ByteStream, RepositoryServiceError>;
+
+    async fn download_archive_as_fallback(
+        &self,
+        project_id: i64,
+        ref_name: &str,
+    ) -> Result<ByteStream, RepositoryServiceError> {
+        self.download_archive(project_id, ref_name).await
+    }
 }
 
 pub struct RailsRepositoryService {
@@ -607,6 +702,20 @@ impl RepositoryService for RailsRepositoryService {
             .await?;
         self.metrics.record_gitaly_transport("rails_http", "ok");
 
+        Ok(Box::pin(
+            stream.map(|r| r.map_err(RepositoryServiceError::GitlabApi)),
+        ))
+    }
+
+    async fn download_archive_as_fallback(
+        &self,
+        project_id: i64,
+        ref_name: &str,
+    ) -> Result<ByteStream, RepositoryServiceError> {
+        let stream = self
+            .gitlab_client
+            .download_archive(project_id, ref_name)
+            .await?;
         Ok(Box::pin(
             stream.map(|r| r.map_err(RepositoryServiceError::GitlabApi)),
         ))

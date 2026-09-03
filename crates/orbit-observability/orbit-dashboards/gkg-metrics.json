@@ -456,7 +456,7 @@
     {
       "otel_name": "gkg.gitaly.transport.calls",
       "prom_name": "gkg_gitaly_transport_calls_total",
-      "description": "Gitaly archive transport calls by transport and outcome.",
+      "description": "Logical Gitaly archive calls by selected transport and final outcome; fallback records only the proxy attempt.",
       "kind": "counter",
       "labels": [
         "transport",

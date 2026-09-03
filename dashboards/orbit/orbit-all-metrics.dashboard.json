@@ -1973,7 +1973,7 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
-      "description": "Gitaly archive transport calls by transport and outcome.",
+      "description": "Logical Gitaly archive calls by selected transport and final outcome; fallback records only the proxy attempt.",
       "fieldConfig": {
         "defaults": {
           "custom": {

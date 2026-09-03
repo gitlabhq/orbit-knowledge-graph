@@ -42,7 +42,7 @@ pub const REPOSITORY_FETCH_DURATION: MetricSpec = MetricSpec::histogram_f64(
 
 pub const GITALY_TRANSPORT_CALLS: MetricSpec = MetricSpec::counter(
     "gkg.gitaly.transport.calls",
-    "Gitaly archive transport calls by transport and outcome.",
+    "Logical Gitaly archive calls by selected transport and final outcome; fallback records only the proxy attempt.",
     None,
     &[labels::TRANSPORT, labels::OUTCOME],
     DOMAIN,
