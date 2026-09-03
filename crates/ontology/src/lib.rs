@@ -582,6 +582,12 @@ impl Ontology {
         loading::load_from_dir(dir.as_ref())
     }
 
+    /// The embedded ontology with a YAML fragment of `schema.yaml`'s `settings:`
+    /// block merged in, so tests can exercise a declaration before it ships.
+    pub fn load_embedded_with_settings_overlay(overlay: &str) -> Result<Self, OntologyError> {
+        loading::load_embedded_with_settings_overlay(overlay)
+    }
+
     /// Load ontology from embedded files compiled into the binary.
     ///
     /// This uses the ontology files from `config/ontology/` that were
@@ -2269,6 +2275,36 @@ mod tests {
             ontology.traversal_path_columns("gl_merge_request"),
             [("traversal_path".to_string(), Some(25))]
         );
+    }
+
+    #[test]
+    fn settings_overlay_adds_declarations_without_restating_the_schema() {
+        let overlay = r#"
+denormalized_joins:
+  - name: reviewer
+    hops:
+      - {relationship: REVIEWER, from: User, to: MergeRequest}
+"#;
+        let base = Ontology::load_embedded().unwrap();
+        let overlaid = Ontology::load_embedded_with_settings_overlay(overlay).unwrap();
+
+        assert_eq!(
+            overlaid.denormalized_joins().len(),
+            base.denormalized_joins().len() + 1
+        );
+        assert!(
+            overlaid
+                .denormalized_join_by_table("gl_denorm_reviewer")
+                .is_some()
+        );
+        assert_eq!(overlaid.edge_tables(), base.edge_tables());
+        assert_eq!(overlaid.nodes().count(), base.nodes().count());
+
+        let err = Ontology::load_embedded_with_settings_overlay(
+            "denormalized_joins: [{name: x, hops: []}]",
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("at least one hop"), "got: {err}");
     }
 
     #[test]

@@ -103,6 +103,52 @@ pub(super) fn load_embedded() -> Result<Ontology, OntologyError> {
     load_with(&EmbeddedReader)
 }
 
+pub(super) fn load_embedded_with_settings_overlay(
+    overlay: &str,
+) -> Result<Ontology, OntologyError> {
+    load_with(&SettingsOverlay {
+        inner: EmbeddedReader,
+        overlay,
+    })
+}
+
+/// Serves `schema.yaml` with a fragment of its `settings:` block deep-merged in.
+/// Maps merge per key and lists append, so an overlay can add a declaration
+/// (a denormalized join, an auxiliary table) without restating the file.
+struct SettingsOverlay<'a, R> {
+    inner: R,
+    overlay: &'a str,
+}
+
+impl<R: ReadOntologyFile> ReadOntologyFile for SettingsOverlay<'_, R> {
+    fn read(&self, path: &str) -> Result<String, OntologyError> {
+        let content = self.inner.read(path)?;
+        if path != ONTOLOGY_SCHEMA_FILE {
+            return Ok(content);
+        }
+        let mut schema: serde_json::Value = parse_yaml(&content, path)?;
+        let overlay: serde_json::Value = parse_yaml(self.overlay, "settings overlay")?;
+        merge_values(&mut schema["settings"], overlay);
+        orbit_utils::yaml::to_string(&schema).map_err(|e| OntologyError::Io {
+            path: path.to_string(),
+            source: std::io::Error::new(std::io::ErrorKind::InvalidData, e),
+        })
+    }
+}
+
+fn merge_values(base: &mut serde_json::Value, overlay: serde_json::Value) {
+    use serde_json::Value::{Array, Object};
+    match (base, overlay) {
+        (Object(b), Object(o)) => {
+            for (k, v) in o {
+                merge_values(b.entry(k).or_insert(serde_json::Value::Null), v);
+            }
+        }
+        (Array(b), Array(o)) => b.extend(o),
+        (b, o) => *b = o,
+    }
+}
+
 pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, OntologyError> {
     let schema_content = reader.read(ONTOLOGY_SCHEMA_FILE)?;
     let schema: SchemaYaml = parse_yaml(&schema_content, ONTOLOGY_SCHEMA_FILE)?;

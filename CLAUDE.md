@@ -7,6 +7,7 @@ GitLab Orbit, previously known as GitLab Knowledge Graph or "gkg". Rust service 
 All tasks use mise. `mise build`, `mise test:fast`, `mise test:local`, `mise lint:code`, `mise server:start`, `mise server:dispatch`.
 Fix linting issues: `mise lint:code:fix`. Validate docs: `mise lint:docs`. Validate ontology: `mise ontology:validate`.
 Integration tests need Docker: `mise test:integration`. Correctness subset: `mise test:integration:server`.
+To trial a schema declaration before it ships, put a `settings:` fragment under `config/seeds/overlays/` and run `mise test:integration:overlay <name>`; the whole data correctness suite runs against the overlaid ontology.
 CLI integration tests (concurrency, worktrees): `mise test:cli`.
 
 **Worktrees:** after creating a Git worktree, run `mise trust` and `git config core.hooksPath "$(git rev-parse --git-common-dir)/hooks"` so that lefthook and mise work correctly.

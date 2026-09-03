@@ -132,6 +132,15 @@ run = "cargo nextest run --all-features --test containers -j 4 --no-fail-fast --
 env = { DOCKER_HOST = "unix://{{env.HOME}}/.colima/gkg/docker.sock" }
 description = "Run server integration tests (data correctness, hydration, redaction, graph formatter)"
 
+[tasks."test:integration:overlay"]
+run = "GKG_TEST_ONTOLOGY_OVERLAY={{arg(name='overlay')}} cargo nextest run --all-features --test containers -j 4 --no-fail-fast --retries 0 -E 'test(data_correctness) | test(schema_readiness)'"
+env = { DOCKER_HOST = "unix://{{env.HOME}}/.colima/gkg/docker.sock" }
+description = "Run data correctness against the ontology plus a settings overlay from config/seeds/overlays/<name>.yaml"
+
+[tasks."test:integration:overlays"]
+run = "for f in config/seeds/overlays/*.yaml; do mise run test:integration:overlay \"$(basename \"$f\" .yaml)\" || exit 1; done"
+description = "Run data correctness once per overlay under config/seeds/overlays/"
+
 [tasks."test:integration:data"]
 run = "cargo nextest run --all-features --test containers --no-fail-fast --retries 0 --no-capture -E 'test(data_correctness)'"
 env = { DOCKER_HOST = "unix://{{env.HOME}}/.colima/gkg/docker.sock" }
