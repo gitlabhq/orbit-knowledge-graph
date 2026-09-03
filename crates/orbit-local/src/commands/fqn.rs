@@ -40,7 +40,7 @@ pub(crate) fn resolve(
         let launcher = spec::launcher();
         anyhow::bail!(
             "no definition {fqn:?} for commit {} — pass the exact fqn printed by \
-             `{launcher} ask`, and make sure the commit is indexed (`{launcher} index <path>`)",
+             `{launcher} grep`, and make sure the commit is indexed (`{launcher} index <path>`)",
             git.commit_sha
         );
     }

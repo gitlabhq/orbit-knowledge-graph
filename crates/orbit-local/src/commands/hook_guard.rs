@@ -203,7 +203,7 @@ mod tests {
 
     #[test]
     fn nudge_text_follows_the_mode() {
-        assert!(nudge_text(Kind::Search, Mode::Local).contains("orbit local sql"));
+        assert!(nudge_text(Kind::Search, Mode::Local).contains("orbit local grep"));
         assert!(nudge_text(Kind::Search, Mode::Remote).contains("glab orbit remote"));
         assert!(nudge_text(Kind::Read, Mode::Remote).contains("glab orbit remote"));
     }

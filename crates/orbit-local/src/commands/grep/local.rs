@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use duckdb_client::search::DuckDbSearch;
-use orbit_search::{AskOutcome, KindRates, SearchVocab};
+use orbit_search::{GrepOutcome, KindRates, SearchVocab};
 
 use duckdb_client::scalar_i64;
 
@@ -12,7 +12,6 @@ use crate::workspace;
 pub(super) struct LocalBackend {
     search: DuckDbSearch,
     header: String,
-    root: PathBuf,
 }
 
 impl LocalBackend {
@@ -45,7 +44,7 @@ impl LocalBackend {
             );
             drop(client);
             crate::index_collect(git.repo_path.clone(), 0, false, Some(db.clone()))
-                .context("failed to index the repository for ask")?;
+                .context("failed to index the repository for grep")?;
             client = sql::open_graph(Some(db))?;
             if indexed_count(&client)? == 0 {
                 anyhow::bail!(
@@ -58,7 +57,6 @@ impl LocalBackend {
         Ok(Self {
             search: DuckDbSearch::new(client, pid, &git.commit_sha)?,
             header: format!("{} @ {}", git.repo_path.display(), git.commit_sha),
-            root: git.repo_path,
         })
     }
 
@@ -66,22 +64,18 @@ impl LocalBackend {
         &self.header
     }
 
-    pub(super) fn root(&self) -> &Path {
-        &self.root
-    }
-
     pub(super) fn search(&self) -> &DuckDbSearch {
         &self.search
     }
 
-    pub(super) fn ask(
+    pub(super) fn grep(
         &self,
-        question: &str,
+        query: &str,
         limit: usize,
         vocab: &SearchVocab,
         kind_rates: &std::collections::HashMap<String, KindRates>,
-    ) -> Result<AskOutcome> {
-        self.search.ask(question, limit, vocab, kind_rates)
+    ) -> Result<GrepOutcome> {
+        self.search.grep(query, limit, vocab, kind_rates)
     }
 }
 
@@ -162,8 +156,8 @@ mod tests {
     }
 
     #[test]
-    fn ask_runs_end_to_end_against_a_real_local_graph() {
-        let g = TestGraph::new("ask-e2e");
+    fn grep_runs_end_to_end_against_a_real_local_graph() {
+        let g = TestGraph::new("grep-e2e");
         g.def(1, "Dlq::publish", "publish", "app/services/dlq.rb");
         g.def(2, "Dlq::encode", "encode", "app/services/dlq.rb");
         g.def(
@@ -177,7 +171,7 @@ mod tests {
 
         let search = g.search();
         let vocab = vocab(&search);
-        let outcome = search.ask("dlq publish", 5, &vocab, &weights()).unwrap();
+        let outcome = search.grep("dlq publish", 5, &vocab, &weights()).unwrap();
         assert!(!outcome.matches.is_empty());
         assert!(!outcome.weak);
         assert!(outcome.unmatched_terms.is_empty());
@@ -189,31 +183,28 @@ mod tests {
 
     #[test]
     fn hyphenated_whole_name_anchors() {
-        let g = TestGraph::new("ask-hyphen");
+        let g = TestGraph::new("grep-hyphen");
         g.def(1, "mr-title-check", "mr-title-check", ".gitlab-ci.yml");
         g.def(2, "Mr::title", "title", "app/mr.rb");
 
         let search = g.search();
         let vocab = vocab(&search);
-        let outcome = search.ask("mr-title-check", 5, &vocab, &weights()).unwrap();
+        let outcome = search
+            .grep("mr-title-check", 5, &vocab, &weights())
+            .unwrap();
         assert_eq!(outcome.matches[0].row.fqn, "mr-title-check");
         assert!(!outcome.weak);
     }
 
     #[test]
     fn fts_stopword_identifiers_are_findable() {
-        let g = TestGraph::new("ask-stopword");
-        g.def(
-            1,
-            "orbit_search::ask::ask",
-            "ask",
-            "crates/orbit-search/src/ask.rs",
-        );
+        let g = TestGraph::new("grep-stopword");
+        g.def(1, "Repo::find", "find", "app/finders/repo.rb");
         g.def(2, "Dlq::publish", "publish", "app/services/dlq.rb");
 
         let search = g.search();
         let vocab = vocab(&search);
-        let outcome = search.ask("ask", 5, &vocab, &weights()).unwrap();
+        let outcome = search.grep("find", 5, &vocab, &weights()).unwrap();
         assert!(
             outcome.unmatched_terms.is_empty(),
             "identifiers colliding with English stopwords must recall"
@@ -223,8 +214,8 @@ mod tests {
 
     #[test]
     fn vocab_maps_question_verbs_through_the_db_stemmer() {
-        use orbit_search::ask::AskSource;
         use orbit_search::content_words;
+        use orbit_search::grep::GrepSource;
 
         let g = TestGraph::new("vocab-stem");
         g.def(1, "Dlq::publish", "publish", "app/services/dlq.rb");

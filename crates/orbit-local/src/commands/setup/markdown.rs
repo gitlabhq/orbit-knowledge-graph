@@ -121,7 +121,7 @@ mod tests {
         let updated = splice_block(&existing, &rendered_block(Mode::Local)).unwrap();
         assert!(updated.starts_with("# Before"));
         assert!(updated.ends_with("# After\n"));
-        assert!(updated.contains("orbit local repo-map"));
+        assert!(updated.contains("orbit local grep"));
         assert!(!updated.contains("old content"));
     }
 
