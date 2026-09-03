@@ -44,8 +44,8 @@ members = [
 
 [workspace.dependencies]
 orbit-observability = { path = "crates/orbit-observability" }
-labkit = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", rev = "1e235f49" }
-labkit-events = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", rev = "1e235f49" }
+labkit = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", rev = "fecb53d5f37754c603cc0f482948501bd337b863" }
+labkit-events = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", rev = "fecb53d5f37754c603cc0f482948501bd337b863" }
 arrow = "58.0.0"
 bumpalo = { version = "3.20.2", features = ["collections"] }
 cargo-platform = "0.3.3"
