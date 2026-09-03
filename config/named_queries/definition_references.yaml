@@ -2,8 +2,8 @@ name: definition_references
 description: Definitions that call the given definition, with location and type columns.
 parameters:
   node_id:
-    schema: { type: integer, minimum: 1 }
-    example: 1
+    schema: { type: string, pattern: "^[1-9][0-9]{0,18}$" }
+    example: "1"
 query:
   query_type: traversal
   nodes:
