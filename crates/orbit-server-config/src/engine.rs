@@ -593,6 +593,40 @@ impl Default for TableCleanupConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct CodeStaleReclaimConfig {
+    #[serde(flatten)]
+    pub schedule: ScheduleConfiguration,
+    #[serde(default = "default_reclaim_max_scopes")]
+    pub max_scopes_per_statement: usize,
+    #[serde(default)]
+    pub max_unfinished_mutations: u64,
+    #[serde(default = "default_reclaim_settle_secs")]
+    pub settle_secs: u64,
+}
+
+fn default_reclaim_max_scopes() -> usize {
+    5000
+}
+
+fn default_reclaim_settle_secs() -> u64 {
+    30
+}
+
+impl Default for CodeStaleReclaimConfig {
+    fn default() -> Self {
+        Self {
+            schedule: ScheduleConfiguration {
+                cron: Some("0 0 * * * *".into()),
+            },
+            max_scopes_per_statement: default_reclaim_max_scopes(),
+            max_unfinished_mutations: 0,
+            settle_secs: default_reclaim_settle_secs(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct NamespaceDeletionSchedulerConfig {
     #[serde(flatten)]
     pub schedule: ScheduleConfiguration,
@@ -676,6 +710,8 @@ pub struct ScheduledTasksConfiguration {
     pub migration_completion: MigrationCompletionConfig,
     #[serde(default)]
     pub stale_edge_reconciliation: StaleEdgeReconciliationConfig,
+    #[serde(default)]
+    pub code_stale_reclaim: CodeStaleReclaimConfig,
 }
 
 // ── Top-level engine config ──────────────────────────────────────────

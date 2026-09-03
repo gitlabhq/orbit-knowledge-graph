@@ -329,7 +329,18 @@ helm upgrade gkg orbit-helm-charts/gkg \
 
 ### Stale data accumulation
 
-The cleanup stage runs after indexing but failures are logged as warnings and do not block the pipeline. Over time, stale rows from deleted files may accumulate.
+The cleanup stage runs after indexing but failures are logged as warnings and do not block the pipeline. It tombstones the keys the new snapshot did not re-emit and records the retired snapshot in the unversioned `code_stale_snapshots` table. The dispatcher's `maintenance.code_stale_reclaim` task (hourly by default, `schedule.tasks.code-stale-reclaim`) then removes the retired snapshots physically with one lightweight `DELETE` per code table, and skips a table while it still has an unfinished mutation.
+
+To see how far reclamation is behind:
+
+```sql
+SELECT table_name, reclaimed_through FROM `<gkg-database>`.code_stale_reclaim_marks FINAL;
+SELECT count(), min(retired_at) FROM `<gkg-database>`.code_stale_snapshots FINAL
+WHERE retired_at > (SELECT min(reclaimed_through) FROM `<gkg-database>`.code_stale_reclaim_marks FINAL);
+SELECT table, count() FROM system.mutations WHERE database = '<gkg-database>' AND is_done = 0 GROUP BY table;
+```
+
+A growing backlog with unfinished mutations means another mutation source is holding the queue; the task resumes on its own once the queue is empty.
 
 To clean up manually:
 

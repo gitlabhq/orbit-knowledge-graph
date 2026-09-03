@@ -19,8 +19,11 @@ pub trait StaleDataCleaner: Send + Sync {
         project_id: i64,
         branch: &str,
         watermark_time: DateTime<Utc>,
+        prior_watermark: DateTime<Utc>,
     ) -> Result<(), StaleDataCleanerError>;
 }
+
+pub const STALE_SNAPSHOTS_TABLE: &str = "code_stale_snapshots";
 
 #[derive(Debug, Error)]
 pub enum StaleDataCleanerError {
@@ -80,11 +83,11 @@ impl ClickHouseStaleDataCleaner {
                 id,
                 {{watermark_time:DateTime64(6, 'UTC')}} - toIntervalMicrosecond(1) AS _version,
                 true AS _deleted
-            FROM {table} FINAL
+            FROM {table} AS s FINAL
             WHERE traversal_path = {{traversal_path:String}}
               AND project_id = {{project_id:Int64}}
               AND branch = {{branch:String}}
-              AND _version < {{watermark_time:DateTime64(6, 'UTC')}}
+              AND s._version < {{watermark_time:DateTime64(6, 'UTC')}}
             "#
         )
     }
@@ -106,11 +109,11 @@ impl ClickHouseStaleDataCleaner {
                     target_kind,
                     {{watermark_time:DateTime64(6, 'UTC')}} - toIntervalMicrosecond(1) AS _version,
                     true AS _deleted
-                FROM {edge_table} FINAL
+                FROM {edge_table} AS s FINAL
                 WHERE traversal_path = {{traversal_path:String}}
                   AND project_id = {{project_id:Int64}}
                   AND branch = {{branch:String}}
-                  AND _version < {{watermark_time:DateTime64(6, 'UTC')}}
+                  AND s._version < {{watermark_time:DateTime64(6, 'UTC')}}
                 "#,
             );
         }
@@ -189,6 +192,45 @@ impl ClickHouseStaleDataCleaner {
             .await
             .map_err(|e| query_error(e.to_string()))
     }
+
+    async fn record_stale_snapshot(
+        &self,
+        traversal_path: &TraversalPath,
+        project_id: i64,
+        branch: &str,
+        prior_watermark: DateTime<Utc>,
+    ) -> Result<(), StaleDataCleanerError> {
+        let tombstone_version = prior_watermark - chrono::TimeDelta::microseconds(1);
+        let mut insert = self.client.query(&format!(
+            "INSERT INTO {STALE_SNAPSHOTS_TABLE} (traversal_path, project_id, branch, stale_version) \
+             VALUES ({{traversal_path:String}}, {{project_id:Int64}}, {{branch:String}}, {{stale_version:String}}), \
+                    ({{traversal_path:String}}, {{project_id:Int64}}, {{branch:String}}, {{tombstone_version:String}})"
+        ));
+        for (name, value) in insert_overrides(WriteDurability::Durable) {
+            insert = insert.with_setting(*name, *value);
+        }
+        insert
+            .param("traversal_path", traversal_path.as_str())
+            .param("project_id", project_id)
+            .param("branch", branch)
+            .param(
+                "stale_version",
+                prior_watermark.format(TIMESTAMP_FORMAT).to_string(),
+            )
+            .param(
+                "tombstone_version",
+                tombstone_version.format(TIMESTAMP_FORMAT).to_string(),
+            )
+            .execute()
+            .await
+            .map_err(|e| StaleDataCleanerError::Query {
+                table: STALE_SNAPSHOTS_TABLE.to_string(),
+                traversal_path: traversal_path.clone(),
+                project_id,
+                branch: branch.to_string(),
+                reason: e.to_string(),
+            })
+    }
 }
 
 #[async_trait]
@@ -199,8 +241,12 @@ impl StaleDataCleaner for ClickHouseStaleDataCleaner {
         project_id: i64,
         branch: &str,
         watermark_time: DateTime<Utc>,
+        prior_watermark: DateTime<Utc>,
     ) -> Result<(), StaleDataCleanerError> {
         let formatted_watermark = watermark_time.format(TIMESTAMP_FORMAT).to_string();
+        let recorded = self
+            .record_stale_snapshot(traversal_path, project_id, branch, prior_watermark)
+            .await;
 
         for queries in [&self.node_queries, &self.edge_queries] {
             try_join_all(queries.iter().map(|(table, query)| {
@@ -215,6 +261,7 @@ impl StaleDataCleaner for ClickHouseStaleDataCleaner {
             }))
             .await?;
         }
+        recorded?;
 
         debug!(project_id, branch, "stale data deletion complete");
         Ok(())
@@ -243,6 +290,7 @@ pub mod test_utils {
             project_id: i64,
             branch: &str,
             watermark_time: DateTime<Utc>,
+            _prior_watermark: DateTime<Utc>,
         ) -> Result<(), StaleDataCleanerError> {
             self.calls.lock().push((
                 traversal_path.clone(),

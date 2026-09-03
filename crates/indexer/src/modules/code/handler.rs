@@ -234,6 +234,7 @@ impl CodeIndexingTaskHandler {
             return Ok(());
         }
         let had_prior_checkpoint = existing_checkpoint.is_some();
+        let prior_indexed_at = existing_checkpoint.as_ref().map(|cp| cp.indexed_at);
 
         info!(
             task_id = request.task_id,
@@ -266,7 +267,7 @@ impl CodeIndexingTaskHandler {
                 context,
                 request,
                 &branch,
-                had_prior_checkpoint,
+                prior_indexed_at,
                 started_at,
                 attempt,
                 &mut observer,
@@ -314,7 +315,7 @@ impl CodeIndexingTaskHandler {
         context: &HandlerContext,
         request: &CodeIndexingTaskRequest,
         branch: &str,
-        had_prior_checkpoint: bool,
+        prior_indexed_at: Option<DateTime<Utc>>,
         started_at: DateTime<Utc>,
         attempt: u32,
         observer: &mut dyn IndexingObserver,
@@ -358,7 +359,7 @@ impl CodeIndexingTaskHandler {
             traversal_path: request.traversal_path.clone(),
             task_id: request.task_id,
             commit_sha: request.commit_sha.clone(),
-            had_prior_checkpoint,
+            prior_indexed_at,
         };
         let cancel = CancellationToken::new();
         let heartbeat_interval = self.lock_ttl / 3;

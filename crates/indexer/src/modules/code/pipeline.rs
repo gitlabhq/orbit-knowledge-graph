@@ -28,7 +28,7 @@ pub struct IndexingRequest {
     pub traversal_path: TraversalPath,
     pub task_id: i64,
     pub commit_sha: Option<String>,
-    pub had_prior_checkpoint: bool,
+    pub prior_indexed_at: Option<DateTime<Utc>>,
 }
 
 pub enum IndexOutcome {
@@ -96,7 +96,7 @@ struct ProjectCommit {
     store: Arc<dyn CodeCheckpointStore>,
     cleaner: Arc<dyn StaleDataCleaner>,
     inflight: Arc<AtomicUsize>,
-    had_prior_checkpoint: bool,
+    prior_indexed_at: Option<DateTime<Utc>>,
 }
 
 impl ProjectCommit {
@@ -120,10 +120,16 @@ impl ProjectCommit {
         let cp = &self.checkpoint;
         // A first index into this schema version (backfill or new project) has no
         // checkpointed prior snapshot to tombstone, so skip the FINAL-scan cleanup.
-        if self.had_prior_checkpoint
+        if let Some(prior) = self.prior_indexed_at
             && let Err(error) = self
                 .cleaner
-                .delete_stale_data(&cp.traversal_path, cp.project_id, &cp.branch, cp.indexed_at)
+                .delete_stale_data(
+                    &cp.traversal_path,
+                    cp.project_id,
+                    &cp.branch,
+                    cp.indexed_at,
+                    prior,
+                )
                 .await
         {
             warn!(
@@ -588,7 +594,7 @@ impl CodeIndexer {
             store: self.checkpoint_store.clone(),
             cleaner: self.stale_data_cleaner.clone(),
             inflight: self.inflight.clone(),
-            had_prior_checkpoint: request.had_prior_checkpoint,
+            prior_indexed_at: request.prior_indexed_at,
         });
 
         let writer = self.writer.clone();
@@ -810,6 +816,7 @@ mod tests {
         batches: usize,
         had_prior_checkpoint: bool,
     ) -> Arc<ProjectCommit> {
+        let prior_indexed_at = had_prior_checkpoint.then(Utc::now);
         inflight.fetch_add(1, Ordering::AcqRel);
         Arc::new(ProjectCommit {
             remaining: AtomicUsize::new(1 + batches),
@@ -825,7 +832,7 @@ mod tests {
             store,
             cleaner,
             inflight,
-            had_prior_checkpoint,
+            prior_indexed_at,
         })
     }
 

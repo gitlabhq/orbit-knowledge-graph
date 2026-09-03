@@ -94,6 +94,10 @@ _Avoid_: filtering (too generic), content masking (misleading — entire rows ar
 The pattern of capturing row-level changes from a source database as a stream of events. In Orbit, CDC flows from the GitLab PostgreSQL database through **Siphon** into the **Datalake**.
 _Avoid_: replication (too broad)
 
+**Stale Snapshot Ledger**:
+The unversioned table where the code indexer records each retired snapshot of a project (its previous `indexed_at`) after tombstoning the keys the new snapshot no longer contains. The dispatcher's hourly reclaim task removes the recorded snapshots physically with one lightweight delete per code table.
+_Avoid_: tombstone table, delete queue
+
 **Dispatch ID**:
 A UUID stamped on each indexing request message, identifying one dispatch unit — per (namespace × cycle) for SDLC namespace dispatch, per cycle for the global and code dispatchers. Propagated to the `IndexingObserver` and tracing spans for correlation.
 _Avoid_: request ID, trace ID (`dispatch_id` groups many requests, not a single one)

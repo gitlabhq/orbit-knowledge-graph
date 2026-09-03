@@ -69,9 +69,9 @@ use orchestrator::Trigger;
 use orchestrator::dispatch::{CodeBackfill, NamespaceIndexingDispatch};
 use orchestrator::max_deliveries::MaxDeliveriesReconciler;
 use orchestrator::scheduled::{
-    CodeBackfillSweep, CodeStaleSweep, GlobalDispatcher, MigrationCompletionChecker,
-    NamespaceDeletionScheduler, NamespaceDispatcher, Scheduled, StaleEdgeReconciliation,
-    TableCleanup,
+    CodeBackfillSweep, CodeStaleReclaim, CodeStaleSweep, GlobalDispatcher,
+    MigrationCompletionChecker, NamespaceDeletionScheduler, NamespaceDispatcher, Scheduled,
+    StaleEdgeReconciliation, TableCleanup,
 };
 use orchestrator::scheduled::{ScheduledTask, ScheduledTaskMetrics};
 use orchestrator::siphon::{CodeIndexingTaskRoute, EnabledNamespacesRoute, Route, Siphon};
@@ -364,6 +364,13 @@ pub async fn run_dispatcher(
                 checkpoint_store.clone(),
             ),
             config.schedule.tasks.code_backfill.clone(),
+        )),
+        Box::new(CodeStaleReclaim::new(
+            config.graph.build_client(),
+            &modules::code::config::CodeTableNames::from_ontology(ontology)
+                .expect("code tables must resolve from the embedded ontology"),
+            metrics.clone(),
+            config.schedule.tasks.code_stale_reclaim.clone(),
         )),
         Box::new(TableCleanup::new(
             graph,

@@ -549,6 +549,7 @@ async fn stale_cleanup_tombstones_must_not_outrank_rows_versioned_at_the_waterma
             project_id,
             branch,
             watermark,
+            watermark - chrono::TimeDelta::days(1),
         )
         .await
         .expect("stale data cleanup failed");
@@ -1766,7 +1767,7 @@ async fn cancelled_run_that_finishes_writes_no_checkpoint() {
         traversal_path: TraversalPath::new_unchecked(traversal_path),
         task_id: 1,
         commit_sha: Some("abc123".to_string()),
-        had_prior_checkpoint: false,
+        prior_indexed_at: None,
     };
 
     let cancel = code_graph::v2::CancellationToken::new();

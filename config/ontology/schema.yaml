@@ -319,6 +319,22 @@ settings:
         - {name: indexed_at, type: timestamp, codec: ["delta(8)", "zstd(1)"]}
       order_by: [traversal_path, project_id, branch]
       version_type: uint64
+    - name: code_stale_snapshots
+      versioned: false
+      columns:
+        - {name: traversal_path, type: string, codec: ["zstd(1)"]}
+        - {name: project_id, type: int64, codec: ["zstd(1)"]}
+        - {name: branch, type: string, codec: ["zstd(1)"]}
+        - {name: stale_version, type: timestamp, codec: ["delta(8)", "zstd(1)"]}
+        - {name: retired_at, type: timestamp, default: "now64(6)", codec: ["delta(8)", "zstd(1)"]}
+      order_by: [traversal_path, project_id, branch, stale_version]
+      ttl: retired_at + INTERVAL 30 DAY
+    - name: code_stale_reclaim_marks
+      versioned: false
+      columns:
+        - {name: table_name, type: string}
+        - {name: reclaimed_through, type: timestamp}
+      order_by: [table_name]
   auxiliary_dictionaries:
     - name: gl_project_traversal_paths_dict
       source_table: gl_project

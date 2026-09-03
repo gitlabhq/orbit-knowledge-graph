@@ -32,7 +32,7 @@ pub use repository::{
     CachingRepositoryService, LocalRepositoryCache, RailsRepositoryService, RepositoryCache,
     RepositoryService, RepositoryServiceError,
 };
-pub use stale_data_cleaner::{ClickHouseStaleDataCleaner, StaleDataCleaner};
+pub use stale_data_cleaner::{ClickHouseStaleDataCleaner, STALE_SNAPSHOTS_TABLE, StaleDataCleaner};
 
 const CODE_CONCURRENCY_GROUP: &str = IndexerModule::Code.concurrency_group();
 

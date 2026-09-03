@@ -13,3 +13,25 @@ ORDER BY (logical_table, top_level_namespace, snapshot_date)
 TTL snapshot_date + INTERVAL 400 DAY
 SETTINGS allow_experimental_replacing_merge_with_cleanup = 1;
 
+CREATE TABLE IF NOT EXISTS code_stale_snapshots (
+    traversal_path String CODEC(ZSTD(1)),
+    project_id Int64 CODEC(ZSTD(1)),
+    branch String CODEC(ZSTD(1)),
+    stale_version DateTime64(6, 'UTC') CODEC(Delta(8), ZSTD(1)),
+    retired_at DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(Delta(8), ZSTD(1)),
+    _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(Delta(8), ZSTD(1)),
+    _deleted Bool DEFAULT false
+) ENGINE = ReplacingMergeTree(_version, _deleted)
+ORDER BY (traversal_path, project_id, branch, stale_version)
+TTL retired_at + INTERVAL 30 DAY
+SETTINGS allow_experimental_replacing_merge_with_cleanup = 1;
+
+CREATE TABLE IF NOT EXISTS code_stale_reclaim_marks (
+    table_name String,
+    reclaimed_through DateTime64(6, 'UTC'),
+    _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(Delta(8), ZSTD(1)),
+    _deleted Bool DEFAULT false
+) ENGINE = ReplacingMergeTree(_version, _deleted)
+ORDER BY (table_name)
+SETTINGS allow_experimental_replacing_merge_with_cleanup = 1;
+

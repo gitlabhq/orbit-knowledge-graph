@@ -249,6 +249,12 @@
             "cron": "0 */1 * * * *",
             "publish_window": 200000
           },
+          "code-stale-reclaim": {
+            "cron": "0 0 * * * *",
+            "max_scopes_per_statement": 5000,
+            "max_unfinished_mutations": 0,
+            "settle_secs": 30
+          },
           "global": {
             "cron": "0 */1 * * * *"
           },
@@ -596,6 +602,39 @@
             "write_min_flush_rows": 10000,
             "write_slice_rows": 1000000
           }
+        }
+      },
+      "additionalProperties": false
+    },
+    "CodeStaleReclaimConfig": {
+      "description": "Per-task schedule configuration.\n\nEach scheduled task embeds this via `#[serde(flatten)]` in its own typed config struct.\nThe scheduler reads it via `task.schedule()`.",
+      "type": "object",
+      "properties": {
+        "cron": {
+          "description": "Cron expression with seconds field (6-field: `sec min hour dom mon dow`).\nWhen absent, the task runs on a default 60-second interval.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "max_scopes_per_statement": {
+          "type": "integer",
+          "format": "uint",
+          "default": 5000,
+          "minimum": 0
+        },
+        "max_unfinished_mutations": {
+          "type": "integer",
+          "format": "uint64",
+          "default": 0,
+          "minimum": 0
+        },
+        "settle_secs": {
+          "type": "integer",
+          "format": "uint64",
+          "default": 30,
+          "minimum": 0
         }
       },
       "additionalProperties": false
@@ -1539,6 +1578,12 @@
               "cron": "0 */1 * * * *",
               "publish_window": 200000
             },
+            "code-stale-reclaim": {
+              "cron": "0 0 * * * *",
+              "max_scopes_per_statement": 5000,
+              "max_unfinished_mutations": 0,
+              "settle_secs": 30
+            },
             "global": {
               "cron": "0 */1 * * * *"
             },
@@ -1577,6 +1622,15 @@
           "default": {
             "cron": "0 */1 * * * *",
             "publish_window": 200000
+          }
+        },
+        "code-stale-reclaim": {
+          "$ref": "#/$defs/CodeStaleReclaimConfig",
+          "default": {
+            "cron": "0 0 * * * *",
+            "max_scopes_per_statement": 5000,
+            "max_unfinished_mutations": 0,
+            "settle_secs": 30
           }
         },
         "global": {
