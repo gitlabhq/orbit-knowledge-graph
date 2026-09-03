@@ -539,8 +539,19 @@ check_docs_i18n_markdown:
       changes:
         - docs-locale/**/*
   script:
-    # Lint prose
-    - vale --minAlertLevel error docs-locale/*/source/
+    # Lint prose with each locale's own Vale config. The root .vale.ini applies
+    # gitlab_base, whose rules encode English typography and misfire on other
+    # languages, so translations must never be linted with it.
+    - |
+      for locale_dir in docs-locale/*/; do
+        [ -d "${locale_dir}source" ] || continue
+        if [ ! -f "${locale_dir}.vale.ini" ]; then
+          echo "ERROR: ${locale_dir} has translations but no ${locale_dir}.vale.ini."
+          echo "Add one before adding a new locale. See docs-locale/ja-jp/.vale.ini."
+          exit 1
+        fi
+        vale --config="${locale_dir}.vale.ini" --minAlertLevel error "${locale_dir}source/"
+      done
     # Lint Markdown
     - markdownlint-cli2 'docs-locale/*/source/**/*.md'
     # Check links
