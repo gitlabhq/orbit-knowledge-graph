@@ -262,8 +262,9 @@ You must also provide a TLS certificate for the gRPC endpoint. For more informat
    ```
 
 The output lists the webserver, indexer, and dispatcher pods in the `Running` state. The chart turns
-everything else off by default, including metrics, autoscaling, analytics, and billing. Leave them off on
-GitLab Self-Managed.
+everything else off by default, including metrics, autoscaling, and billing. Leave them off on
+GitLab Self-Managed. Product analytics are on by default and send usage events to GitLab.
+Set `analytics.enabled: false` in your values to opt out.
 
 ### TLS and network requirements
 

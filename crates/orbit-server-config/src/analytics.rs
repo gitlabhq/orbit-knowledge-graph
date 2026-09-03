@@ -1,6 +1,6 @@
-//! Analytics configuration. `enabled` is false by default — operators must
-//! opt in (Helm values). Self-managed never phones home unless explicitly
-//! switched on.
+//! Analytics configuration. `enabled` is false by default at the code level,
+//! so a bare binary or image never phones home. The Helm chart enables it by
+//! default and operators opt out there.
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};

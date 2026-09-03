@@ -137,7 +137,7 @@ schema:
   indexer_schema_wait_timeout_secs: 300
 
 analytics:
-  enabled: false                         # opt-in. Helm flips on for .com / Dedicated.
+  enabled: false                         # opt-in at code level. The Helm chart flips this on by default.
   collector_url: ""                      # e.g. "https://snowplowprd.trx.gitlab.net" (no path; tracker appends /com.snowplowanalytics.snowplow/tp2)
   deployment:
     type: self_managed        # com | dedicated | self_managed
