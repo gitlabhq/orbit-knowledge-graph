@@ -32,6 +32,7 @@ const ROTATION_MIN_MARGIN: Duration = Duration::from_secs(5);
 /// Holders keep it alive for the life of their stream via the `Arc`; the
 /// socket closes when the last holder drops it. The rotation slot stops
 /// handing it out for new RPCs at [`GitalyProxyChannel::rotate_at`].
+#[derive(Debug)]
 pub struct GitalyProxyChannel {
     project_id: i64,
     channel: Channel,
