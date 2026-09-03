@@ -11,11 +11,11 @@ use crate::vocab::SearchVocab;
 
 pub const SURFACED_LIMIT: usize = 3;
 
-pub struct AskOutcome {
+pub struct GrepOutcome {
     pub terms: Vec<String>,
-    pub matches: Vec<AskMatch>,
+    pub matches: Vec<GrepMatch>,
     /// Neighbours the graph walk pulled in; only populated for relational questions.
-    pub surfaced: Vec<AskMatch>,
+    pub surfaced: Vec<GrepMatch>,
     pub focus: Option<String>,
     /// Edges whose both endpoints are among `matches` and `surfaced`.
     pub edges: Vec<Edge>,
@@ -23,7 +23,7 @@ pub struct AskOutcome {
     pub unmatched_terms: Vec<String>,
 }
 
-pub struct AskMatch {
+pub struct GrepMatch {
     pub row: CorpusRow,
     pub score: f64,
 }
@@ -40,7 +40,7 @@ impl TermRecall {
     }
 }
 
-pub trait AskSource: GraphSource {
+pub trait GrepSource: GraphSource {
     fn stem(&self, words: &[String]) -> Result<Vec<String>, Self::Error>;
     fn recall(&self, terms: &[String]) -> Result<Vec<TermRecall>, Self::Error>;
     fn rows_by_ids(&self, ids: &[i64]) -> Result<Vec<CorpusRow>, Self::Error>;
@@ -48,38 +48,38 @@ pub trait AskSource: GraphSource {
 }
 
 #[derive(Debug)]
-pub enum AskError<E> {
+pub enum GrepError<E> {
     NoUsableTerms(String),
     Source(E),
 }
 
-impl<E: fmt::Display> fmt::Display for AskError<E> {
+impl<E: fmt::Display> fmt::Display for GrepError<E> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::NoUsableTerms(q) => write!(f, "no usable search terms in question: {q:?}"),
+            Self::NoUsableTerms(q) => write!(f, "no usable search terms in query: {q:?}"),
             Self::Source(e) => e.fmt(f),
         }
     }
 }
 
-impl<E: fmt::Debug + fmt::Display> std::error::Error for AskError<E> {}
+impl<E: fmt::Debug + fmt::Display> std::error::Error for GrepError<E> {}
 
-impl<E> From<E> for AskError<E> {
+impl<E> From<E> for GrepError<E> {
     fn from(e: E) -> Self {
         Self::Source(e)
     }
 }
 
-pub fn ask<S: AskSource>(
+pub fn grep<S: GrepSource>(
     source: &S,
-    question: &str,
+    query: &str,
     limit: usize,
     vocab: &SearchVocab,
     kind_rates: &HashMap<String, KindRates>,
-) -> Result<AskOutcome, AskError<S::Error>> {
-    let terms = content_words(question);
+) -> Result<GrepOutcome, GrepError<S::Error>> {
+    let terms = content_words(query);
     if terms.is_empty() {
-        return Err(AskError::NoUsableTerms(question.to_string()));
+        return Err(GrepError::NoUsableTerms(query.to_string()));
     }
     let stems = source.stem(&terms)?;
     let searchable: Vec<String> = terms
@@ -125,9 +125,9 @@ pub fn ask<S: AskSource>(
     let hits = rank_and_trim(&corpus, &sims, &idfs, limit);
     let focus = vocab.focus_edge_kind(&stems);
     let weak = hits.first().is_none_or(|h| !h.confident());
-    let matches: Vec<AskMatch> = hits
+    let matches: Vec<GrepMatch> = hits
         .into_iter()
-        .map(|h| AskMatch {
+        .map(|h| GrepMatch {
             row: corpus[h.index].clone(),
             score: h.score,
         })
@@ -157,7 +157,7 @@ pub fn ask<S: AskSource>(
             candidates
                 .into_iter()
                 .filter_map(|(id, score)| {
-                    rows.iter().find(|r| r.id == id).map(|r| AskMatch {
+                    rows.iter().find(|r| r.id == id).map(|r| GrepMatch {
                         row: r.clone(),
                         score,
                     })
@@ -169,7 +169,7 @@ pub fn ask<S: AskSource>(
     };
     let node_ids: Vec<i64> = matches.iter().chain(&surfaced).map(|m| m.row.id).collect();
     let edges = source.edges_among(&node_ids)?;
-    Ok(AskOutcome {
+    Ok(GrepOutcome {
         terms,
         matches,
         surfaced,
@@ -221,7 +221,7 @@ mod tests {
         }
     }
 
-    impl AskSource for FakeRecallSource {
+    impl GrepSource for FakeRecallSource {
         fn stem(&self, words: &[String]) -> Result<Vec<String>, Self::Error> {
             Ok(words
                 .iter()
@@ -267,8 +267,8 @@ mod tests {
     }
 
     #[test]
-    fn ask_ranks_recalled_rows_and_expands_around_them() {
-        let outcome = ask(
+    fn grep_ranks_recalled_rows_and_expands_around_them() {
+        let outcome = grep(
             &FakeRecallSource,
             "who calls commit hook",
             5,
@@ -286,7 +286,7 @@ mod tests {
 
     #[test]
     fn unrecalled_terms_are_reported_without_deflating_confidence() {
-        let outcome = ask(
+        let outcome = grep(
             &FakeRecallSource,
             "commit zzzz yyyy",
             5,
@@ -306,12 +306,12 @@ mod tests {
 
     #[test]
     fn relational_only_questions_fall_back_to_all_terms() {
-        let err = ask(&FakeRecallSource, "", 5, &test_vocab(), &HashMap::new())
+        let err = grep(&FakeRecallSource, "", 5, &test_vocab(), &HashMap::new())
             .err()
-            .expect("empty question must fail");
-        assert!(matches!(err, AskError::NoUsableTerms(_)));
+            .expect("empty query must fail");
+        assert!(matches!(err, GrepError::NoUsableTerms(_)));
 
-        let outcome = ask(
+        let outcome = grep(
             &FakeRecallSource,
             "calls",
             5,

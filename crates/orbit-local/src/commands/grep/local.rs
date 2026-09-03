@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use duckdb_client::search::DuckDbSearch;
-use orbit_search::{AskOutcome, KindRates, SearchVocab};
+use orbit_search::{GrepOutcome, KindRates, SearchVocab};
 
 use duckdb_client::scalar_i64;
 
@@ -74,8 +74,8 @@ impl LocalBackend {
         limit: usize,
         vocab: &SearchVocab,
         kind_rates: &std::collections::HashMap<String, KindRates>,
-    ) -> Result<AskOutcome> {
-        self.search.ask(query, limit, vocab, kind_rates)
+    ) -> Result<GrepOutcome> {
+        self.search.grep(query, limit, vocab, kind_rates)
     }
 }
 
@@ -171,7 +171,7 @@ mod tests {
 
         let search = g.search();
         let vocab = vocab(&search);
-        let outcome = search.ask("dlq publish", 5, &vocab, &weights()).unwrap();
+        let outcome = search.grep("dlq publish", 5, &vocab, &weights()).unwrap();
         assert!(!outcome.matches.is_empty());
         assert!(!outcome.weak);
         assert!(outcome.unmatched_terms.is_empty());
@@ -189,7 +189,9 @@ mod tests {
 
         let search = g.search();
         let vocab = vocab(&search);
-        let outcome = search.ask("mr-title-check", 5, &vocab, &weights()).unwrap();
+        let outcome = search
+            .grep("mr-title-check", 5, &vocab, &weights())
+            .unwrap();
         assert_eq!(outcome.matches[0].row.fqn, "mr-title-check");
         assert!(!outcome.weak);
     }
@@ -197,17 +199,12 @@ mod tests {
     #[test]
     fn fts_stopword_identifiers_are_findable() {
         let g = TestGraph::new("grep-stopword");
-        g.def(
-            1,
-            "orbit_search::ask::ask",
-            "ask",
-            "crates/orbit-search/src/ask.rs",
-        );
+        g.def(1, "Repo::find", "find", "app/finders/repo.rb");
         g.def(2, "Dlq::publish", "publish", "app/services/dlq.rb");
 
         let search = g.search();
         let vocab = vocab(&search);
-        let outcome = search.ask("ask", 5, &vocab, &weights()).unwrap();
+        let outcome = search.grep("find", 5, &vocab, &weights()).unwrap();
         assert!(
             outcome.unmatched_terms.is_empty(),
             "identifiers colliding with English stopwords must recall"
@@ -217,8 +214,8 @@ mod tests {
 
     #[test]
     fn vocab_maps_question_verbs_through_the_db_stemmer() {
-        use orbit_search::ask::AskSource;
         use orbit_search::content_words;
+        use orbit_search::grep::GrepSource;
 
         let g = TestGraph::new("vocab-stem");
         g.def(1, "Dlq::publish", "publish", "app/services/dlq.rb");

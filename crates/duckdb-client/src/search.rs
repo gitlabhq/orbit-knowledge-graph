@@ -2,11 +2,11 @@ use anyhow::{Context, Result};
 use arrow::record_batch::RecordBatch;
 
 use crate::{DuckDbClient, f64_column, i64_column, scalar_i64, sql_lit, string_column};
-use orbit_search::ask::{AskError, AskSource, ask};
 use orbit_search::corpus::{EXCLUDE_LIKE, EXCLUDE_REGEX, ext_regex, search_corpus_exts};
 use orbit_search::expand::{GraphSource, NodeLabel};
+use orbit_search::grep::{GrepError, GrepSource, grep};
 use orbit_search::{
-    AskOutcome, CorpusRow, Edge, Graph, GraphEdge, KindRates, SearchVocab, TermRecall,
+    CorpusRow, Edge, Graph, GraphEdge, GrepOutcome, KindRates, SearchVocab, TermRecall,
 };
 use std::collections::HashMap;
 
@@ -44,21 +44,21 @@ impl DuckDbSearch {
         })
     }
 
-    pub fn ask(
+    pub fn grep(
         &self,
-        question: &str,
+        query: &str,
         limit: usize,
         vocab: &SearchVocab,
         kind_rates: &HashMap<String, KindRates>,
-    ) -> Result<AskOutcome> {
-        ask(self, question, limit, vocab, kind_rates).map_err(|e| match e {
-            AskError::Source(e) => e,
+    ) -> Result<GrepOutcome> {
+        grep(self, query, limit, vocab, kind_rates).map_err(|e| match e {
+            GrepError::Source(e) => e,
             e => anyhow::anyhow!("{e}"),
         })
     }
 }
 
-impl AskSource for DuckDbSearch {
+impl GrepSource for DuckDbSearch {
     fn stem(&self, words: &[String]) -> Result<Vec<String>> {
         if words.is_empty() {
             return Ok(Vec::new());

@@ -9,7 +9,7 @@ use std::collections::HashMap;
 
 use local::LocalBackend;
 
-fn build_vocab<S: orbit_search::ask::AskSource>(source: &S) -> Result<SearchVocab, S::Error> {
+fn build_vocab<S: orbit_search::grep::GrepSource>(source: &S) -> Result<SearchVocab, S::Error> {
     use strum::IntoEnumIterator;
     let parts: Vec<(String, String)> = code_graph::v2::types::EdgeKind::iter()
         .flat_map(|kind| {
@@ -76,17 +76,7 @@ pub(crate) fn run(
         return Ok(());
     }
 
-    report_confidence(&mut out, &outcome)?;
-    writeln!(out, "\nNodes:")?;
-    for m in outcome.matches.iter().chain(&outcome.surfaced) {
-        writeln!(out, "  {}  [{}]  {}", m.row.fqn, m.row.kind, m.row.loc)?;
-    }
-    if !outcome.edges.is_empty() {
-        writeln!(out, "\nEdges:")?;
-        for e in &outcome.edges {
-            writeln!(out, "  {}  -{}->  {}", e.source, e.kind, e.target)?;
-        }
-    }
+    report_results(&mut out, &outcome)?;
     let launcher = crate::commands::setup::spec::launcher();
     writeln!(
         out,
@@ -95,11 +85,29 @@ pub(crate) fn run(
     Ok(())
 }
 
+fn report_results(
+    out: &mut impl Write,
+    outcome: &orbit_search::GrepOutcome,
+) -> std::io::Result<()> {
+    report_confidence(out, outcome)?;
+    writeln!(out, "\nNodes:")?;
+    for m in outcome.matches.iter().chain(&outcome.surfaced) {
+        writeln!(out, "  {}  [{}]  {}", m.row.fqn, m.row.kind, m.row.loc)?;
+    }
+    if !outcome.weak && !outcome.edges.is_empty() {
+        writeln!(out, "\nEdges:")?;
+        for e in &outcome.edges {
+            writeln!(out, "  {}  -{}->  {}", e.source, e.kind, e.target)?;
+        }
+    }
+    Ok(())
+}
+
 const COMPOUND_TERM_HINT: usize = 7;
 
 fn report_confidence(
     out: &mut impl Write,
-    outcome: &orbit_search::AskOutcome,
+    outcome: &orbit_search::GrepOutcome,
 ) -> std::io::Result<()> {
     if outcome.terms.len() >= COMPOUND_TERM_HINT {
         writeln!(
@@ -137,8 +145,8 @@ fn report_confidence(
 mod tests {
     use super::*;
 
-    fn outcome(unmatched: Vec<&str>, weak: bool) -> orbit_search::AskOutcome {
-        orbit_search::AskOutcome {
+    fn outcome(unmatched: Vec<&str>, weak: bool) -> orbit_search::GrepOutcome {
+        orbit_search::GrepOutcome {
             terms: Vec::new(),
             matches: Vec::new(),
             surfaced: Vec::new(),
@@ -166,6 +174,28 @@ mod tests {
         let text = String::from_utf8(buf).unwrap();
         assert!(text.contains("weak matches"), "{text}");
         assert!(text.contains("no matches for: throttle"), "{text}");
+    }
+
+    #[test]
+    fn weak_results_omit_edges_as_the_note_promises() {
+        let mut o = outcome(Vec::new(), true);
+        o.edges.push(orbit_search::Edge {
+            kind: "CALLS".into(),
+            source: "A::a".into(),
+            source_loc: String::new(),
+            target: "B::b".into(),
+            target_loc: String::new(),
+        });
+        let mut buf = Vec::new();
+        report_results(&mut buf, &o).unwrap();
+        let text = String::from_utf8(buf).unwrap();
+        assert!(text.contains("edge details are omitted"), "{text}");
+        assert!(!text.contains("Edges:"), "{text}");
+
+        o.weak = false;
+        let mut buf = Vec::new();
+        report_results(&mut buf, &o).unwrap();
+        assert!(String::from_utf8(buf).unwrap().contains("Edges:"));
     }
 
     #[test]

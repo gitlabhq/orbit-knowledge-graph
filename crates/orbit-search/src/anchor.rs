@@ -1,4 +1,4 @@
-use crate::ask::TermRecall;
+use crate::grep::TermRecall;
 use crate::types::TermSeeds;
 
 pub const BASE_SET_PER_TERM: usize = 10;
