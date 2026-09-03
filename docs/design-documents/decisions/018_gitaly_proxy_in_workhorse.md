@@ -26,64 +26,114 @@ pattern. It exposes storage topology and credentials to each consumer, expands
 the effect of a compromised consumer, and couples the consumer to Gitaly
 routing. We do not want to repeat that approach for Orbit.
 
-## Decision
+## How it works
 
-Add a consumer-generic Gitaly proxy in Workhorse. A consumer opens one internal
-WebSocket route for a project and speaks ordinary gRPC through the tunnel. It
-uses generated Gitaly clients and never receives a Gitaly address or token.
+Add one consumer-generic Gitaly proxy route in Workhorse. Rails authorizes each
+connection, Workhorse binds and enforces that policy on every gRPC stream, and
+the consumer never receives Gitaly addresses or credentials.
 
-Rails remains the only authorization authority. Workhorse preauthorizes the
-WebSocket upgrade with Rails once per connection. Rails authenticates the
-consumer, authorizes the project, and returns the resolved Gitaly connection
-details and a named policy profile to Workhorse. The authorization stays in
-Workhorse memory and is bound to that connection.
+```mermaid
+sequenceDiagram
+    participant C as Consumer
+    participant W as Workhorse
+    participant R as Rails
+    participant G as Gitaly
 
-Workhorse does not decide consumer policy. It applies the compiled
-`readonly_repository` profile to every stream, then applies the narrower method
-allowlist supplied by Rails. The profile permits only accessor RPCs scoped to
-one repository, requires exactly one target repository matching the connection,
-rejects additional repositories and client-streaming methods, and fails closed
-for unknown methods or unresolved repository scope. A stream without its
-connection's session cannot run, so it cannot inherit another session's policy.
+    C->>W: WebSocket upgrade with service credential
+    W->>R: Preauthorize upgrade
+    R->>R: Authenticate consumer and authorize repository
+    R-->>W: Profile, method allowlist, repository, Gitaly connection
+    W->>W: Validate profile and bind session to connection
+    W-->>C: WebSocket upgrade accepted
+    C->>W: gRPC stream over WebSocket
+    W->>W: Resolve session, enforce profile and allowlist
+    W->>W: Verify target repository from first request frame
+    W->>G: Forward allowlisted gRPC stream
+    G-->>C: Response through Workhorse and WebSocket
+    C->>C: Rotate before session age expires
+    C->>W: Open freshly preauthorized connection
+```
 
-The route and Workhorse implementation do not name Orbit. A consumer is added
-through one credential-header to authorizer registration in Rails, where its
-authentication, project policy, method allowlist, and Gitaly client identity
-live. Orbit is the first registered consumer.
+| Component | Decides | Never sees |
+|---|---|---|
+| Rails | Consumer identity, repository authorization, profile selection, and the narrower RPC allowlist | Proxied gRPC streams and repository bytes |
+| Workhorse | Whether the named profile exists, whether each stream satisfies its compiled rules, and mechanism-wide limits | Consumer-specific authorization logic or a caller-defined policy |
+| Consumer | Transport mode, connection rotation, and bounded retry behavior | Gitaly addresses, credentials, or storage routing |
 
-## Session model
+The v1 `readonly_repository` profile allows only accessor RPCs scoped to one
+target repository. It rejects unknown methods, additional repositories,
+client-streaming methods, and any request whose target does not match the
+connection. The route does not name Orbit. One credential-header to authorizer
+registration in Rails identifies each consumer and supplies a narrower
+allowlist; Orbit is the first registration.
 
-Connection age moves a session from active to draining and gates new streams
-only. Streams already admitted may finish under a separate per-stream deadline,
-while the client proactively opens a freshly preauthorized connection before
-the old one expires. We do not use grpc-go connection age for this because its
-GOAWAY grace ends by closing the connection even when an archive is still in
-flight. Since Gitaly archives cannot resume, that behavior can repeatedly cut a
-large archive and restart it from zero.
+Connection age gates new streams only. An admitted stream may finish under a
+separate deadline, while the client rotates proactively onto a freshly
+preauthorized connection. grpc-go connection age is not used because its
+GOAWAY grace eventually closes in-flight archives, which cannot resume and
+would restart from zero. The accepted consequence is that a revoked caller may
+finish an already-started read for roughly 70 minutes in the worst case with
+the proposed defaults: up to 10 minutes of connection age plus a 60-minute
+stream deadline.
 
-The accepted cost is delayed revocation for an admitted read. With the proposed
-defaults, a caller revoked just after admission may finish an already-started
-stream for roughly 70 minutes in the worst case: up to 10 minutes of connection
-age plus a 60-minute stream deadline. Whether that is acceptable for the first
-version is an open question below.
+## Plan
 
-## Orbit as the first consumer
+The implementation is split so that policy, transport, and the first consumer
+can be reviewed independently. The Draft MRs are evidence that the design is
+implementable; they do not go to maintainer review until this ADR is agreed.
 
-The code indexer calls Gitaly `GetArchive` through the proxy. Transport selection
-is opt-in: the existing Rails HTTP path remains the default, a proxy-only mode
-surfaces proxy failures, and a rollout mode can fall back to Rails when the
-proxy is unavailable before streaming starts.
+| Leg | Draft MR | Depends on |
+|---|---|---|
+| Workhorse transparent proxy core and read-only invariants | [GitLab !253414](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/253414) | ADR agreement |
+| Workhorse route, connection sessions, stream director, and lifecycle | [GitLab !253431](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/253431) | Workhorse core |
+| Rails preauthorization endpoint and consumer authorizer seam | [GitLab !253417](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/253417) | Workhorse preauthorization contract |
+| Orbit WebSocket-tunneled gRPC client transport | [knowledge-graph!2381](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/2381) | Workhorse wire contract |
+| Orbit indexer archive service using Gitaly `GetArchive` | [knowledge-graph!2382](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/2382) | Orbit client transport |
 
-Once proxy archive bytes have started, a transport failure never switches to
-Rails. The indexer retries the proxy within a bounded budget and restarts the
-archive from zero because the RPC has no resume operation. It spools each full
-attempt to a temporary file before extraction so bytes from a failed attempt
-cannot be consumed or combined with its replacement.
+After the implementation legs agree on the contract, a GDK end-to-end run must
+exercise Rails preauthorization, the Workhorse tunnel, a real Gitaly archive,
+policy denials, stream interruption, and fallback behavior.
 
-Rollout has two controls. The instance-level `workhorse_gitaly_proxy` operations
-flag disables the mechanism. The `orbit_gitaly_proxy` flag enables the Orbit
-consumer per root namespace. Turning either off prevents new preauthorizations;
-it does not terminate an already-admitted stream.
+Before staging, we must verify that Orbit's production cluster can reach the
+new internal route through GitLab.com Ingress and that WebSocket upgrades pass
+through it. This topology check precedes staging because a closed prefix or an
+unsupported upgrade blocks the transport regardless of application behavior.
+
+Staging then sizes connection admission, concurrent preauthorization, and the
+Rails preauthorization rate limit. Benchmarks must cover normal archive load,
+many projects opening sessions concurrently, and reconnect churn before those
+limits are accepted.
+
+Rollout starts in the fallback transport mode for selected root namespaces.
+The instance-level `workhorse_gitaly_proxy` operations flag is the mechanism
+kill switch, and `orbit_gitaly_proxy` enables the consumer per root namespace.
+After fallback and restart metrics are stable, selected namespaces move to
+proxy-only mode. Turning either flag off stops new preauthorizations but does
+not terminate an admitted stream.
+
+V1 is done when the implementation legs have passed maintainer and security
+review, GDK end-to-end is green, production route reachability is verified,
+staging limits are measured, and at least one root namespace completes the
+fallback-to-proxy-only rollout with runbooks and monitoring in place.
+
+## Scope of v1 and deferred work
+
+V1 supports only the `readonly_repository` profile and Orbit is its only
+consumer. Zoekt and KAS show that the authorizer seam has plausible future
+consumers; this decision does not commit either service to adopting the proxy.
+
+The indexer uses Gitaly `GetArchive`. The existing Rails path remains the
+default until rollout. In fallback mode it is used only when the proxy fails
+before streaming starts. A mid-stream proxy failure retries from zero over the
+proxy within a bounded budget and never switches to Rails. The archive is
+spooled to a temporary file before extraction so attempts cannot be combined.
+
+Client channel caching, client-side admission control, and query-time blob
+reads are deferred beyond the indexer archive path. An immediate Redis-backed
+revocation hook is deferred unless the team rejects the in-flight window below.
+Per-consumer Workhorse limits are also deferred; they should be added only if
+the Rails rate limit and Gitaly's consumer identity do not provide enough
+isolation.
 
 ## Alternatives considered
 
@@ -115,19 +165,15 @@ credential already selects and authenticates the Rails authorizer.
 
 ## Consequences
 
-Adding an RPC normally becomes a Rails allowlist change, plus a Gitaly module
-bump in Workhorse if its pinned descriptors do not yet contain the RPC. Adding
-a consumer becomes one Rails authorizer registration rather than a new proxy
-route or Workhorse policy implementation. Consumers continue using generated
-Gitaly clients without a bespoke HTTP representation for each operation.
+Adding an RPC normally needs a Rails allowlist change and, when its descriptors
+are newer, a Workhorse Gitaly module bump. Adding a consumer needs one Rails
+authorizer registration, not a new proxy route or HTTP representation.
 
-Workhorse takes on a ported transparent proxy package, WebSocket adaptation,
-per-connection session state, per-stream policy enforcement, and connection
-draining. Rails receives a preauthorization request for each new connection.
-Workhorse's Gitaly module pin becomes an explicit coupling point: methods newer
-than the pin fail closed until the module is updated.
+The cost is a ported proxy package and session state machine in Workhorse, one
+Rails preauthorization per connection, local spooling for Orbit archives, and
+the Workhorse Gitaly module pin as an explicit coupling point.
 
-## Open questions for the team
+## What we are asking the team to decide
 
 Is the roughly 70-minute worst-case window for an already-started read
 acceptable, or must the first version include a Redis-backed hook that lets
