@@ -17,6 +17,7 @@
     "billing": {
       "$ref": "#/$defs/BillingConfig",
       "default": {
+        "auth_mode": "oidc",
         "collector_url": "",
         "enabled": false,
         "quota": {
@@ -315,9 +316,27 @@
       },
       "additionalProperties": false
     },
+    "BillingAuthMode": {
+      "oneOf": [
+        {
+          "description": "GCP workload-identity OIDC. Only works on GitLab.com (SaaS).",
+          "type": "string",
+          "const": "oidc"
+        },
+        {
+          "description": "Cloud Connector instance token, pulled from Rails and cached in memory.\nUsed on Self-Managed / Dedicated.",
+          "type": "string",
+          "const": "cloud_connector"
+        }
+      ]
+    },
     "BillingConfig": {
       "type": "object",
       "properties": {
+        "auth_mode": {
+          "$ref": "#/$defs/BillingAuthMode",
+          "default": "oidc"
+        },
         "collector_url": {
           "type": "string",
           "default": ""

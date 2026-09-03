@@ -241,7 +241,10 @@ async fn run_webserver(
             app_id = orbit_billing::constants::APP_ID,
             "initializing billing event tracker"
         );
-        let tracker = SnowplowBillingTracker::from_config(&config.billing)
+        let cc_token_cache = Some(Arc::new(gitlab_client::CloudConnectorTokenCache::new(
+            gitlab_client.clone(),
+        )));
+        let tracker = SnowplowBillingTracker::from_config(&config.billing, cc_token_cache)
             .map_err(|e| anyhow::anyhow!("billing tracker initialization failed: {e}"))?;
         grpc_server = grpc_server.with_billing(Arc::new(tracker));
     } else {

@@ -1,11 +1,13 @@
 use std::sync::Arc;
 
-use labkit_events::{BillingEvent, DeliveryFailure};
+use gitlab_client::CloudConnectorTokenCache;
+use labkit_events::{BillingEvent, DeliveryFailure, TokenSource};
 use opentelemetry::KeyValue;
 use orbit_observability::billing::events as spec;
-use orbit_server_config::BillingConfig;
+use orbit_server_config::{BillingAuthMode, BillingConfig};
 use uuid::Uuid;
 
+use crate::cc_token_source::CloudConnectorTokenSource;
 use crate::constants::APP_ID;
 use crate::metrics::{
     METRICS, REASON_AUTH, REASON_NON_RETRIABLE_STATUS, REASON_RETRIES_EXHAUSTED, REASON_UNKNOWN,
@@ -22,17 +24,16 @@ pub struct SnowplowBillingTracker {
 }
 
 impl SnowplowBillingTracker {
-    pub fn from_config(config: &BillingConfig) -> Result<Self, labkit_events::Error> {
-        let oidc_config = labkit_events::oidc::ConfigBuilder::new()
-            .skip_if_unsupported_cloud(true)
-            .build();
-        let source = labkit_events::oidc::Source::new(oidc_config)
-            .map_err(|e| labkit_events::Error::Emitter(e.to_string()))?;
+    pub fn from_config(
+        config: &BillingConfig,
+        cc_token_cache: Option<Arc<CloudConnectorTokenCache>>,
+    ) -> Result<Self, labkit_events::Error> {
+        let source = Self::token_source(config, cc_token_cache)?;
 
         let tracker = labkit_events::Tracker::builder(&config.collector_url, APP_ID)
             .batch_size(1)
             .collector_path(labkit_events::AUTH_COLLECTOR_PATH)
-            .token_source(Arc::new(source))
+            .token_source(source)
             .on_success(Arc::new(|event_ids: &[Uuid]| {
                 METRICS.delivered.add(event_ids.len() as u64, &[]);
                 tracing::info!(
@@ -67,6 +68,32 @@ impl SnowplowBillingTracker {
         Ok(Self {
             tracker: Arc::new(tracker),
         })
+    }
+
+    fn token_source(
+        config: &BillingConfig,
+        cc_token_cache: Option<Arc<CloudConnectorTokenCache>>,
+    ) -> Result<Arc<dyn TokenSource>, labkit_events::Error> {
+        match config.auth_mode {
+            BillingAuthMode::Oidc => {
+                let oidc_config = labkit_events::oidc::ConfigBuilder::new()
+                    .skip_if_unsupported_cloud(true)
+                    .build();
+                let source = labkit_events::oidc::Source::new(oidc_config)
+                    .map_err(|e| labkit_events::Error::Emitter(e.to_string()))?;
+                Ok(Arc::new(source))
+            }
+            BillingAuthMode::CloudConnector => {
+                let cache = cc_token_cache.ok_or_else(|| {
+                    labkit_events::Error::Emitter(
+                        "billing.auth_mode=cloud_connector requires a GitLab client to fetch \
+                         the Cloud Connector token"
+                            .to_string(),
+                    )
+                })?;
+                Ok(Arc::new(CloudConnectorTokenSource::new(cache)))
+            }
+        }
     }
 }
 
@@ -127,5 +154,64 @@ impl BillingTracker for FailingBillingTracker {
         self.count
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         Err(labkit_events::Error::Emitter("test failure".into()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::future::Future;
+    use std::pin::Pin;
+
+    use gitlab_client::{CloudConnectorToken, CloudConnectorTokenFetcher, GitlabClientError};
+
+    use super::*;
+
+    struct StubFetcher;
+    impl CloudConnectorTokenFetcher for StubFetcher {
+        fn fetch(
+            &self,
+        ) -> Pin<Box<dyn Future<Output = Result<CloudConnectorToken, GitlabClientError>> + Send + '_>>
+        {
+            Box::pin(async {
+                Ok(CloudConnectorToken {
+                    token: "t".into(),
+                    expires_at: i64::MAX,
+                })
+            })
+        }
+    }
+
+    fn config(auth_mode: BillingAuthMode) -> BillingConfig {
+        BillingConfig {
+            enabled: true,
+            collector_url: "https://collector.example".into(),
+            auth_mode,
+            quota: Default::default(),
+        }
+    }
+
+    #[test]
+    fn oidc_mode_builds_source_without_a_cache() {
+        let source = SnowplowBillingTracker::token_source(&config(BillingAuthMode::Oidc), None);
+        assert!(source.is_ok());
+    }
+
+    #[test]
+    fn cloud_connector_mode_requires_a_cache() {
+        let err =
+            SnowplowBillingTracker::token_source(&config(BillingAuthMode::CloudConnector), None)
+                .err()
+                .unwrap();
+        assert!(err.to_string().contains("cloud_connector"));
+    }
+
+    #[test]
+    fn cloud_connector_mode_builds_source_with_a_cache() {
+        let cache = Arc::new(CloudConnectorTokenCache::new(Arc::new(StubFetcher)));
+        let source = SnowplowBillingTracker::token_source(
+            &config(BillingAuthMode::CloudConnector),
+            Some(cache),
+        );
+        assert!(source.is_ok());
     }
 }

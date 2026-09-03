@@ -275,6 +275,7 @@ mod tests {
         BillingConfig {
             enabled: true,
             collector_url: String::new(),
+            auth_mode: Default::default(),
             quota: QuotaConfig {
                 enabled: true,
                 customers_dot_url,
@@ -302,6 +303,7 @@ mod tests {
         let cfg = BillingConfig {
             enabled: false,
             collector_url: String::new(),
+            auth_mode: Default::default(),
             quota: QuotaConfig {
                 enabled: true,
                 customers_dot_url: url,
@@ -323,6 +325,7 @@ mod tests {
         let cfg = BillingConfig {
             enabled: true,
             collector_url: String::new(),
+            auth_mode: Default::default(),
             quota: QuotaConfig {
                 enabled: false,
                 ..Default::default()
@@ -338,6 +341,7 @@ mod tests {
         let cfg = BillingConfig {
             enabled: true,
             collector_url: String::new(),
+            auth_mode: Default::default(),
             quota: QuotaConfig {
                 enabled: true,
                 customers_dot_url: url,
