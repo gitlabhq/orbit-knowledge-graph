@@ -1,3 +1,10 @@
+## [0.114.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.113.1...v0.114.0) (2026-09-03)
+
+### Features
+
+* **langs:** index YAML with declarative document types ([269e4be](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/269e4be5cfa282e49a7f57ae751b23504225d093)) by Aaron Algutifan
+* **ontology:** declare denormalized joins and generate their DDL ([041a0b6](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/041a0b6ceb2d76cd0b3197c1f41575912fb235f2)) by Michael Usachenko
+
 ## [0.113.1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.113.0...v0.113.1) (2026-09-02)
 
 ### Fixes
