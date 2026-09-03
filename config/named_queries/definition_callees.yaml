@@ -1,0 +1,20 @@
+name: definition_callees
+description: Definitions the given definition calls, with location and type columns.
+parameters:
+  node_id:
+    schema: { type: string, pattern: "^[1-9][0-9]{0,18}$" }
+    example: "1"
+query:
+  query_type: traversal
+  nodes:
+    - id: caller
+      entity: Definition
+      node_ids: [{ $param: node_id }]
+    - id: callee
+      entity: Definition
+      columns: [start_line, file_path, name, fqn, definition_type]
+  relationships:
+    - type: CALLS
+      from: caller
+      to: callee
+  limit: 100
