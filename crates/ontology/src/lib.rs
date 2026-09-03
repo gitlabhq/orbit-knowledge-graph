@@ -584,7 +584,7 @@ impl Ontology {
 
     /// The embedded ontology with a `settings:` YAML fragment merged in.
     pub fn load_embedded_with_settings_overlay(overlay: &str) -> Result<Self, OntologyError> {
-        loading::load_embedded_with_settings_overlay(overlay)
+        loading::load_with(&loading::SettingsOverlay(overlay))
     }
 
     /// Load ontology from embedded files compiled into the binary.

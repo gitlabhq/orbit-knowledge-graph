@@ -103,29 +103,17 @@ pub(super) fn load_embedded() -> Result<Ontology, OntologyError> {
     load_with(&EmbeddedReader)
 }
 
-pub(super) fn load_embedded_with_settings_overlay(
-    overlay: &str,
-) -> Result<Ontology, OntologyError> {
-    load_with(&SettingsOverlay {
-        inner: EmbeddedReader,
-        overlay,
-    })
-}
-
 /// Serves `schema.yaml` with a `settings:` fragment deep-merged in (maps merge, lists append).
-struct SettingsOverlay<'a, R> {
-    inner: R,
-    overlay: &'a str,
-}
+pub(super) struct SettingsOverlay<'a>(pub &'a str);
 
-impl<R: ReadOntologyFile> ReadOntologyFile for SettingsOverlay<'_, R> {
+impl ReadOntologyFile for SettingsOverlay<'_> {
     fn read(&self, path: &str) -> Result<String, OntologyError> {
-        let content = self.inner.read(path)?;
+        let content = EmbeddedReader.read(path)?;
         if path != ONTOLOGY_SCHEMA_FILE {
             return Ok(content);
         }
         let mut schema: serde_json::Value = parse_yaml(&content, path)?;
-        let overlay: serde_json::Value = parse_yaml(self.overlay, "settings overlay")?;
+        let overlay: serde_json::Value = parse_yaml(self.0, "settings overlay")?;
         merge_values(&mut schema["settings"], overlay);
         orbit_utils::yaml::to_string(&schema).map_err(|e| OntologyError::Io {
             path: path.to_string(),

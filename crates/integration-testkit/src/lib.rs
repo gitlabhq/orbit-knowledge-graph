@@ -16,26 +16,23 @@ pub use context::TestContext;
 pub use seed::load_seed;
 pub use seeded_resolver::SeededColumnResolver;
 
-/// Names a `config/seeds/overlays/<name>.yaml` settings fragment to merge into the ontology for this run.
-pub const ONTOLOGY_OVERLAY_ENV: &str = "GKG_TEST_ONTOLOGY_OVERLAY";
-
-pub fn ontology_overlay() -> Option<String> {
-    let name = std::env::var(ONTOLOGY_OVERLAY_ENV)
+/// `GKG_TEST_ONTOLOGY_OVERLAY=<name>` merges `config/seeds/overlays/<name>.yaml` into the ontology.
+fn load_unprefixed_ontology() -> ontology::Ontology {
+    let Some(name) = std::env::var("GKG_TEST_ONTOLOGY_OVERLAY")
         .ok()
-        .filter(|v| !v.is_empty())?;
+        .filter(|v| !v.is_empty())
+    else {
+        return ontology::Ontology::load_embedded().expect("embedded ontology should load");
+    };
     let path = format!("{}/overlays/{name}.yaml", env!("SEEDS_DIR"));
-    Some(
-        std::fs::read_to_string(&path)
-            .unwrap_or_else(|e| panic!("ontology overlay '{name}' not found at {path}: {e}")),
-    )
+    let overlay = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("ontology overlay '{name}' not found at {path}: {e}"));
+    ontology::Ontology::load_embedded_with_settings_overlay(&overlay)
+        .unwrap_or_else(|e| panic!("ontology overlay '{name}' failed to load: {e}"))
 }
 
 pub fn load_ontology() -> ontology::Ontology {
-    let ont = match ontology_overlay() {
-        Some(overlay) => ontology::Ontology::load_embedded_with_settings_overlay(&overlay),
-        None => ontology::Ontology::load_embedded(),
-    }
-    .expect("ontology should load");
+    let ont = load_unprefixed_ontology();
     let prefix = &*TABLE_PREFIX;
     if prefix.is_empty() {
         ont
@@ -65,11 +62,7 @@ pub static GRAPH_SCHEMA_SQL: std::sync::LazyLock<&'static str> = std::sync::Lazy
         generate_graph_materialized_views_with_prefix, generate_graph_tables_with_prefix,
     };
 
-    let ontology = match ontology_overlay() {
-        Some(overlay) => ontology::Ontology::load_embedded_with_settings_overlay(&overlay),
-        None => ontology::Ontology::load_embedded(),
-    }
-    .expect("ontology must load");
+    let ontology = load_unprefixed_ontology();
     let tables = generate_graph_tables_with_prefix(&ontology, &TABLE_PREFIX);
     let mut stmts: Vec<String> = tables
         .iter()
