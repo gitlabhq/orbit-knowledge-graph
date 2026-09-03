@@ -462,7 +462,8 @@ Controls Snowplow billing-event emission and the CDot quota gate that enforces G
 | Config path | Default | Description |
 |-------------|---------|-------------|
 | `billing.enabled` | `false` | Enable Snowplow billing-event emission |
-| `billing.collector_url` | `""` | Snowplow collector endpoint |
+| `billing.collector_url` | `""` | Snowplow collector endpoint. On Self-Managed / Dedicated, point at the host matching the Cloud Connector token audience (`https://billing.prdsub.gitlab.net` / `https://billing.stgsub.gitlab.net`). |
+| `billing.auth_mode` | `oidc` | Authentication for emission. `oidc` uses GCP workload-identity (GitLab.com only). `cloud_connector` pulls the Cloud Connector instance token from Rails and caches it in memory (Self-Managed / Dedicated). |
 
 ### Quota gate
 

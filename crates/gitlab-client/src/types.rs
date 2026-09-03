@@ -5,6 +5,13 @@ pub struct ProjectInfo {
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
+pub struct CloudConnectorToken {
+    pub token: String,
+    /// Unix epoch seconds (UTC) at which the token stops being valid.
+    pub expires_at: i64,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
 pub struct MergeRequestDiffBatch {
     #[serde(rename = "id")]
     pub merge_request_diff_id: i64,
