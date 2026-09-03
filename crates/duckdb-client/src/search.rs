@@ -2,10 +2,12 @@ use anyhow::{Context, Result};
 use arrow::record_batch::RecordBatch;
 
 use crate::{DuckDbClient, f64_column, i64_column, scalar_i64, sql_lit, string_column};
-use orbit_search::ask::{AskError, AskSource, Caller, CallerEdge, ask};
+use orbit_search::ask::{AskError, AskSource, ask};
 use orbit_search::corpus::{EXCLUDE_LIKE, EXCLUDE_REGEX, ext_regex, search_corpus_exts};
 use orbit_search::expand::{GraphSource, NodeLabel};
-use orbit_search::{AskOutcome, CorpusRow, Graph, GraphEdge, KindRates, SearchVocab, TermRecall};
+use orbit_search::{
+    AskOutcome, CorpusRow, Edge, Graph, GraphEdge, KindRates, SearchVocab, TermRecall,
+};
 use std::collections::HashMap;
 
 pub const CONTEXT_SIM_CAP: f64 = 0.99;
@@ -127,45 +129,36 @@ impl AskSource for DuckDbSearch {
         Ok(rows_from_batches(&query(&self.client, &sql)?))
     }
 
-    fn callers(&self, ids: &[i64]) -> Result<Vec<CallerEdge>> {
-        if ids.is_empty() {
+    fn edges_among(&self, ids: &[i64]) -> Result<Vec<Edge>> {
+        if ids.len() < 2 {
             return Ok(Vec::new());
         }
         let batches = query(
             &self.client,
             &format!(
-                "WITH callers AS (
-  SELECT DISTINCT e.target_id, s.fqn,
-         s.file_path || ':' || CAST(s.start_line AS VARCHAR) AS loc
-  FROM gl_edge e
-  JOIN gl_definition s ON s.id = e.source_id
-  WHERE e.relationship_kind = 'CALLS'
-    AND e.target_id IN ({list})
-    AND s.project_id = {pid} AND s.commit_sha = {sha}
-)
-SELECT target_id, fqn, loc,
-       COUNT(*) OVER (PARTITION BY target_id) AS total
-FROM callers
-QUALIFY row_number() OVER (PARTITION BY target_id ORDER BY fqn) <= {cap}
-ORDER BY target_id, fqn",
+                "SELECT DISTINCT e.relationship_kind AS kind, s.fqn AS source, t.fqn AS target
+ FROM gl_edge e
+ JOIN gl_definition s ON s.id = e.source_id
+ JOIN gl_definition t ON t.id = e.target_id
+ WHERE e.source_id IN ({list}) AND e.target_id IN ({list})
+   AND s.project_id = {pid} AND s.commit_sha = {sha}
+   AND t.project_id = {pid} AND t.commit_sha = {sha}
+ ORDER BY kind, source, target",
                 list = id_list(ids),
                 pid = self.pid,
                 sha = self.sha,
-                cap = orbit_search::ask::CALLERS_SHOWN,
             ),
         )?;
-        let callees = i64_column(&batches, "target_id");
-        let fqns = string_column(&batches, "fqn");
-        let locs = string_column(&batches, "loc");
-        let totals = i64_column(&batches, "total");
-        Ok((0..callees.len())
-            .map(|i| CallerEdge {
-                callee: callees[i],
-                caller: Caller {
-                    label: fqns[i].clone(),
-                    loc: locs[i].clone(),
-                },
-                total: usize::try_from(totals[i]).unwrap_or(0),
+        let kinds = string_column(&batches, "kind");
+        let sources = string_column(&batches, "source");
+        let targets = string_column(&batches, "target");
+        Ok((0..kinds.len())
+            .map(|i| Edge {
+                kind: kinds[i].clone(),
+                source: sources[i].clone(),
+                source_loc: String::new(),
+                target: targets[i].clone(),
+                target_loc: String::new(),
             })
             .collect())
     }

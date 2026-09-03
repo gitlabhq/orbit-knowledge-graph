@@ -123,7 +123,7 @@ static RENDERED_NUDGES: LazyLock<[[String; 2]; 2]> = LazyLock::new(|| {
 fn graph_contents() -> String {
     use strum::IntoEnumIterator;
 
-    use code_graph::v2::types::{DefKind, EdgeKind, NodeKind};
+    use code_graph::v2::types::{EdgeKind, NodeKind};
 
     let ontology = ontology::Ontology::load_embedded().expect("embedded ontology must load");
     let nodes = NodeKind::iter()
@@ -132,12 +132,15 @@ fn graph_contents() -> String {
                 .get_node(kind.as_ref())
                 .unwrap_or_else(|| panic!("ontology must declare node {}", kind.as_ref()));
             if matches!(kind, NodeKind::Definition) {
-                let def_types = DefKind::iter()
-                    .map(|k| k.to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ");
+                let def_types = node
+                    .fields
+                    .iter()
+                    .find(|field| field.name == "definition_type")
+                    .and_then(|field| field.description.as_deref())
+                    .expect("ontology Definition must describe definition_type")
+                    .trim_end_matches('.');
                 format!(
-                    "`{}` (`definition_type`: {def_types})",
+                    "`{}` (`definition_type`: {def_types}; not an exhaustive list)",
                     node.destination_table
                 )
             } else {

@@ -14,11 +14,11 @@ pub const SURFACED_LIMIT: usize = 3;
 pub struct AskOutcome {
     pub terms: Vec<String>,
     pub matches: Vec<AskMatch>,
+    /// Neighbours the graph walk pulled in; only populated for relational questions.
     pub surfaced: Vec<AskMatch>,
-    pub seed_count: usize,
     pub focus: Option<String>,
+    /// Edges whose both endpoints are among `matches` and `surfaced`.
     pub edges: Vec<Edge>,
-    pub hidden_by_kind: Vec<(String, usize)>,
     pub weak: bool,
     pub unmatched_terms: Vec<String>,
 }
@@ -26,22 +26,6 @@ pub struct AskOutcome {
 pub struct AskMatch {
     pub row: CorpusRow,
     pub score: f64,
-    pub callers: Vec<Caller>,
-    pub callers_total: usize,
-}
-
-pub const CALLERS_SHOWN: usize = 4;
-
-#[derive(Clone)]
-pub struct Caller {
-    pub label: String,
-    pub loc: String,
-}
-
-pub struct CallerEdge {
-    pub callee: i64,
-    pub caller: Caller,
-    pub total: usize,
 }
 
 pub struct TermRecall {
@@ -60,7 +44,7 @@ pub trait AskSource: GraphSource {
     fn stem(&self, words: &[String]) -> Result<Vec<String>, Self::Error>;
     fn recall(&self, terms: &[String]) -> Result<Vec<TermRecall>, Self::Error>;
     fn rows_by_ids(&self, ids: &[i64]) -> Result<Vec<CorpusRow>, Self::Error>;
-    fn callers(&self, ids: &[i64]) -> Result<Vec<CallerEdge>, Self::Error>;
+    fn edges_among(&self, ids: &[i64]) -> Result<Vec<Edge>, Self::Error>;
 }
 
 #[derive(Debug)]
@@ -141,69 +125,56 @@ pub fn ask<S: AskSource>(
     let hits = rank_and_trim(&corpus, &sims, &idfs, limit);
     let focus = vocab.focus_edge_kind(&stems);
     let weak = hits.first().is_none_or(|h| !h.confident());
-    let mut matches: Vec<AskMatch> = hits
+    let matches: Vec<AskMatch> = hits
         .into_iter()
         .map(|h| AskMatch {
             row: corpus[h.index].clone(),
             score: h.score,
-            callers: Vec::new(),
-            callers_total: 0,
         })
         .collect();
-    let match_ids: Vec<i64> = matches.iter().map(|m| m.row.id).collect();
-    for edge in source.callers(&match_ids)? {
-        if let Some(m) = matches.iter_mut().find(|m| m.row.id == edge.callee) {
-            m.callers.push(edge.caller);
-            m.callers_total = edge.total;
-        }
-    }
 
-    let mut term_seeds = term_base_sets(&recalls);
-    if term_seeds.is_empty() && !matches.is_empty() {
-        term_seeds = vec![TermSeeds {
-            seeds: matches.iter().map(|m| (m.row.id, m.score)).collect(),
-            weight: 1.0,
-        }];
-    }
-    let seed_count = term_seeds
-        .iter()
-        .flat_map(|t| t.seeds.iter())
-        .map(|&(id, _)| id)
-        .collect::<HashSet<_>>()
-        .len();
-    let (edges, hidden_by_kind, surfaced) = if term_seeds.is_empty() {
-        (Vec::new(), Vec::new(), Vec::new())
-    } else {
-        let expanded = expand_neighborhood(source, &term_seeds, kind_rates, focus.as_deref())?;
-        let shown: HashSet<i64> = matches.iter().map(|m| m.row.id).collect();
-        let candidates: Vec<(i64, f64)> = expanded
-            .surfaced
-            .into_iter()
-            .filter(|(id, _)| !shown.contains(id))
-            .take(SURFACED_LIMIT)
-            .collect();
-        let rows = source.rows_by_ids(&candidates.iter().map(|&(id, _)| id).collect::<Vec<_>>())?;
-        let surfaced = candidates
-            .into_iter()
-            .filter_map(|(id, score)| {
-                rows.iter().find(|r| r.id == id).map(|r| AskMatch {
-                    row: r.clone(),
-                    score,
-                    callers: Vec::new(),
-                    callers_total: 0,
+    let surfaced = if focus.is_some() {
+        let mut term_seeds = term_base_sets(&recalls);
+        if term_seeds.is_empty() && !matches.is_empty() {
+            term_seeds = vec![TermSeeds {
+                seeds: matches.iter().map(|m| (m.row.id, m.score)).collect(),
+                weight: 1.0,
+            }];
+        }
+        if term_seeds.is_empty() {
+            Vec::new()
+        } else {
+            let expanded = expand_neighborhood(source, &term_seeds, kind_rates, focus.as_deref())?;
+            let shown: HashSet<i64> = matches.iter().map(|m| m.row.id).collect();
+            let candidates: Vec<(i64, f64)> = expanded
+                .surfaced
+                .into_iter()
+                .filter(|(id, _)| !shown.contains(id))
+                .take(SURFACED_LIMIT)
+                .collect();
+            let rows =
+                source.rows_by_ids(&candidates.iter().map(|&(id, _)| id).collect::<Vec<_>>())?;
+            candidates
+                .into_iter()
+                .filter_map(|(id, score)| {
+                    rows.iter().find(|r| r.id == id).map(|r| AskMatch {
+                        row: r.clone(),
+                        score,
+                    })
                 })
-            })
-            .collect();
-        (expanded.edges, expanded.hidden_by_kind, surfaced)
+                .collect()
+        }
+    } else {
+        Vec::new()
     };
+    let node_ids: Vec<i64> = matches.iter().chain(&surfaced).map(|m| m.row.id).collect();
+    let edges = source.edges_among(&node_ids)?;
     Ok(AskOutcome {
         terms,
-        seed_count,
         matches,
         surfaced,
         focus,
         edges,
-        hidden_by_kind,
         weak,
         unmatched_terms: unmatched,
     })
@@ -280,17 +251,16 @@ mod tests {
             Ok(ids.iter().map(|&id| row(id, "Repo::commit_hook")).collect())
         }
 
-        fn callers(&self, ids: &[i64]) -> Result<Vec<CallerEdge>, Self::Error> {
+        fn edges_among(&self, ids: &[i64]) -> Result<Vec<Edge>, Self::Error> {
             Ok(ids
                 .iter()
                 .filter(|&&id| id == HOOK_ID)
-                .map(|&id| CallerEdge {
-                    callee: id,
-                    caller: Caller {
-                        label: "Repo::after_commit".to_string(),
-                        loc: "repo.rs:9".to_string(),
-                    },
-                    total: 1,
+                .map(|_| Edge {
+                    kind: "CALLS".to_string(),
+                    source: "Repo::after_commit".to_string(),
+                    source_loc: String::new(),
+                    target: "Repo::commit_hook".to_string(),
+                    target_loc: String::new(),
                 })
                 .collect())
         }
@@ -311,7 +281,6 @@ mod tests {
         assert!(!outcome.weak, "both terms fully anchor one row");
         assert_eq!(outcome.focus.as_deref(), Some("CALLS"));
         assert!(outcome.unmatched_terms.is_empty());
-        assert_eq!(outcome.seed_count, 1);
         assert!(!outcome.edges.is_empty());
     }
 

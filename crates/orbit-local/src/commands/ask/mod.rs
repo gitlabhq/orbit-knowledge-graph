@@ -9,9 +9,6 @@ use std::collections::HashMap;
 
 use local::LocalBackend;
 
-const SNIPPET_LINES: usize = 4;
-const SNIPPET_LINE_CHARS: usize = 160;
-
 fn build_vocab<S: orbit_search::ask::AskSource>(source: &S) -> Result<SearchVocab, S::Error> {
     use strum::IntoEnumIterator;
     let parts: Vec<(String, String)> = code_graph::v2::types::EdgeKind::iter()
@@ -80,150 +77,22 @@ pub(crate) fn run(
     }
 
     report_confidence(&mut out, &outcome)?;
-    write_matches(&mut out, "\nMatches:", &outcome.matches, backend.root())?;
-    if !outcome.surfaced.is_empty() {
-        write_matches(
-            &mut out,
-            "\nConnected to your terms (structurally surfaced):",
-            &outcome.surfaced,
-            backend.root(),
-        )?;
+    writeln!(out, "\nNodes:")?;
+    for m in outcome.matches.iter().chain(&outcome.surfaced) {
+        writeln!(out, "  {}  [{}]  {}", m.row.fqn, m.row.kind, m.row.loc)?;
+    }
+    if !outcome.edges.is_empty() {
+        writeln!(out, "\nEdges:")?;
+        for e in &outcome.edges {
+            writeln!(out, "  {}  -{}->  {}", e.source, e.kind, e.target)?;
+        }
     }
     let launcher = crate::commands::setup::spec::launcher();
     writeln!(
         out,
-        "\nFull body of any match: {launcher} show \"<fqn>\" (instead of reading the file)\n\
-         Every connection of any match: {launcher} describe \"<fqn>\""
+        "\n{launcher} show \"<fqn>\" prints a body; {launcher} describe \"<fqn>\" prints every connection."
     )?;
-
-    if outcome.weak {
-        return Ok(());
-    }
-    if outcome.edges.is_empty() {
-        writeln!(out, "\nNo connections found around the top matches.")?;
-        return Ok(());
-    }
-
-    writeln!(
-        out,
-        "\nConnections (around {} anchors):",
-        outcome.seed_count
-    )?;
-    let hidden: HashMap<&str, usize> = outcome
-        .hidden_by_kind
-        .iter()
-        .map(|(kind, n)| (kind.as_str(), *n))
-        .collect();
-    let mut current = "";
-    let mut grouped: Vec<(String, Vec<String>)> = Vec::new();
-    let flush_group = |out: &mut dyn Write, grouped: &mut Vec<(String, Vec<String>)>| {
-        for (source, targets) in grouped.drain(..) {
-            writeln!(out, "    {source} --> {}", targets.join(", "))?;
-        }
-        std::io::Result::Ok(())
-    };
-    for e in &outcome.edges {
-        if e.kind != current {
-            flush_group(&mut out, &mut grouped)?;
-            report_hidden(&mut out, current, &hidden)?;
-            current = &e.kind;
-            writeln!(out, "  {current}:")?;
-        }
-        let source = format!("{}{}", e.source, fmt_loc(&e.source_loc));
-        let target = format!("{}{}", e.target, fmt_loc(&e.target_loc));
-        match grouped.iter_mut().find(|(s, _)| *s == source) {
-            Some((_, targets)) => targets.push(target),
-            None => grouped.push((source, vec![target])),
-        }
-    }
-    flush_group(&mut out, &mut grouped)?;
-    report_hidden(&mut out, current, &hidden)?;
-    for (kind, n) in &outcome.hidden_by_kind {
-        if !outcome.edges.iter().any(|e| &e.kind == kind) {
-            writeln!(out, "  {kind}: … {n} below the relevance cut")?;
-        }
-    }
     Ok(())
-}
-
-fn fmt_loc(loc: &str) -> String {
-    if loc.is_empty() {
-        String::new()
-    } else {
-        format!(" ({loc})")
-    }
-}
-
-fn write_matches(
-    out: &mut impl Write,
-    header: &str,
-    matches: &[orbit_search::AskMatch],
-    root: &std::path::Path,
-) -> std::io::Result<()> {
-    writeln!(out, "{header}")?;
-    for m in matches {
-        writeln!(
-            out,
-            "  {}  [{}]  {}  (links {})",
-            m.row.fqn, m.row.kind, m.row.loc, m.row.degree
-        )?;
-        if !m.callers.is_empty() {
-            let shown: Vec<String> = m
-                .callers
-                .iter()
-                .take(orbit_search::ask::CALLERS_SHOWN)
-                .map(|c| format!("{} ({})", c.label, c.loc))
-                .collect();
-            let extra = m
-                .callers_total
-                .max(m.callers.len())
-                .saturating_sub(shown.len());
-            let suffix = if extra > 0 {
-                format!(" … +{extra} more")
-            } else {
-                String::new()
-            };
-            writeln!(out, "    called by: {}{suffix}", shown.join(", "))?;
-        }
-        for line in snippet(root, &m.row.loc, m.row.end_line) {
-            writeln!(out, "{line}")?;
-        }
-    }
-    Ok(())
-}
-
-fn snippet(root: &std::path::Path, loc: &str, end_line: i64) -> Vec<String> {
-    let Some((path, start)) = loc.rsplit_once(':') else {
-        return Vec::new();
-    };
-    let Ok(start) = start.parse::<usize>() else {
-        return Vec::new();
-    };
-    let Ok(content) = std::fs::read_to_string(root.join(path)) else {
-        return Vec::new();
-    };
-    let last = usize::try_from(end_line)
-        .ok()
-        .filter(|&e| e >= start)
-        .unwrap_or(start)
-        .min(start + SNIPPET_LINES - 1);
-    content
-        .lines()
-        .enumerate()
-        .skip(start.saturating_sub(1))
-        .take_while(|(i, _)| *i < last)
-        .map(|(i, text)| {
-            let mut text = text.trim_end();
-            if text.len() > SNIPPET_LINE_CHARS {
-                let mut cut = SNIPPET_LINE_CHARS;
-                while !text.is_char_boundary(cut) {
-                    cut -= 1;
-                }
-                text = &text[..cut];
-            }
-            format!("    {} | {}", i + 1, text)
-        })
-        .collect()
 }
 
 const COMPOUND_TERM_HINT: usize = 7;
@@ -264,17 +133,6 @@ fn report_confidence(
     Ok(())
 }
 
-fn report_hidden(
-    out: &mut impl Write,
-    kind: &str,
-    hidden: &HashMap<&str, usize>,
-) -> std::io::Result<()> {
-    if let Some(n) = hidden.get(kind).filter(|_| !kind.is_empty()) {
-        writeln!(out, "    … {n} more")?;
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -284,10 +142,8 @@ mod tests {
             terms: Vec::new(),
             matches: Vec::new(),
             surfaced: Vec::new(),
-            seed_count: 0,
             focus: None,
             edges: Vec::new(),
-            hidden_by_kind: Vec::new(),
             weak,
             unmatched_terms: unmatched.into_iter().map(String::from).collect(),
         }

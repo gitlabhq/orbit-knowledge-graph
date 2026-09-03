@@ -11,7 +11,7 @@ pub mod vocab;
 pub use anchor::{
     BASE_SET_PER_TERM, MAX_SEEDS, MIN_SEEDS_PER_TERM, term_base_sets, unmatched_terms,
 };
-pub use ask::{AskMatch, AskOutcome, Caller, CallerEdge, TermRecall};
+pub use ask::{AskMatch, AskOutcome, TermRecall};
 pub use ppr::KindRates;
 pub use rank::{ANCHOR_SIM, CONFIDENT_COVERAGE, Hit, rank_and_trim};
 pub use text::content_words;
