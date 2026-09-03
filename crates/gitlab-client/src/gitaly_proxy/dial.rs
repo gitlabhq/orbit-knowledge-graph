@@ -14,7 +14,7 @@ use tokio_tungstenite::tungstenite::http::{self, HeaderMap, StatusCode, Uri};
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tokio_tungstenite::tungstenite::protocol::frame::CloseFrame;
 use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
-use tokio_tungstenite::{Connector, MaybeTlsStream, WebSocketStream};
+use tokio_tungstenite::{Connector, MaybeTlsStream};
 use tracing::debug;
 
 use super::error::GitalyProxyError;

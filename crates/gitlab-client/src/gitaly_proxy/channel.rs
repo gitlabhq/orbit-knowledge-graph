@@ -253,14 +253,6 @@ impl GitalyProxyChannels {
 }
 
 #[cfg(test)]
-pub(super) fn connect_for_test(
-    dialer: Arc<Dialer>,
-    project_id: i64,
-) -> impl Future<Output = Result<GitalyProxyChannel, GitalyProxyError>> {
-    GitalyProxyChannel::connect(dialer, project_id)
-}
-
-#[cfg(test)]
 mod tests {
     use super::*;
 

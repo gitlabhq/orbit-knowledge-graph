@@ -95,14 +95,14 @@ where
             if self.closed_cleanly {
                 return Poll::Ready(Ok(()));
             }
-            if let Poll::Pending = self.poll_flush_pong(cx)? {
+            if self.poll_flush_pong(cx)?.is_pending() {
                 return Poll::Pending;
             }
 
             match Pin::new(&mut self.socket).poll_next(cx) {
                 Poll::Ready(Some(Ok(Message::Binary(data)))) => self.pending_read = data,
                 Poll::Ready(Some(Ok(Message::Ping(payload)))) => {
-                    if let Poll::Pending = self.queue_pong(cx, payload)? {
+                    if self.queue_pong(cx, payload)?.is_pending() {
                         return Poll::Pending;
                     }
                 }
