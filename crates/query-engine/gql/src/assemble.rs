@@ -3,9 +3,10 @@ use std::collections::{HashMap, HashSet};
 use compiler::Input;
 use compiler::input::{
     AggExpr, ColumnSelection, Direction, HopRange, InputAggSort, InputAggregation,
-    InputAggregationMetric, InputFilter, InputGroupByKey, InputNeighbors, InputNode, InputOrderBy,
-    InputPath, InputRelationship, OrderDirection, PathType, QueryType, TruncateUnit,
+    InputAggregationMetric, InputFilter, InputGroupByKey, InputIdRange, InputNeighbors, InputNode,
+    InputOrderBy, InputPath, InputRelationship, OrderDirection, PathType, QueryType, TruncateUnit,
 };
+use ontology::constants::DEFAULT_PRIMARY_KEY;
 
 use crate::{Error, OutputColumn, Parsed, Projection};
 
@@ -20,13 +21,20 @@ pub(crate) struct RelPart {
     pub quantified: bool,
 }
 
+pub(crate) struct ElementId {
+    pub var: String,
+    pub property: Option<String>,
+}
+
 pub(crate) enum Pred {
     Filter(String, String, InputFilter),
-    Ids(String, Vec<i64>),
+    Ids(ElementId, Vec<i64>),
+    IdRange(ElementId, i64, i64),
 }
 
 pub(crate) enum ReturnItem {
     Var(String),
+    AllProps(String),
     Prop(String, String, Option<String>),
     Trunc(TruncateUnit, String, String, Option<String>),
     Agg(AggExpr, Option<String>),
@@ -134,7 +142,17 @@ impl Graph {
 
     fn apply(&mut self, pred: Pred) -> Result<(), Error> {
         match pred {
-            Pred::Ids(var, ids) => self.node_mut(&var)?.node_ids.extend(ids),
+            Pred::Ids(target, ids) => self.id_target(target)?.node_ids.extend(ids),
+            Pred::IdRange(target, start, end) => {
+                let node = self.id_target(target)?;
+                if node.id_range.is_some() {
+                    return Err(semantic(format!(
+                        "element_id({}) BETWEEN given more than once",
+                        node.id
+                    )));
+                }
+                node.id_range = Some(InputIdRange { start, end });
+            }
             Pred::Filter(var, prop, filter) => {
                 if let Some(&i) = self.rel_index.get(&var) {
                     self.rels[i].filters.entry(prop).or_default().push(filter);
@@ -147,6 +165,28 @@ impl Graph {
                 }
             }
         }
+        Ok(())
+    }
+
+    fn id_target(&mut self, target: ElementId) -> Result<&mut InputNode, Error> {
+        let node = self.node_mut(&target.var)?;
+        let wanted = target
+            .property
+            .unwrap_or_else(|| DEFAULT_PRIMARY_KEY.to_string());
+        let pinned = !node.node_ids.is_empty() || node.id_range.is_some();
+        if pinned && node.id_property != wanted {
+            return Err(semantic(format!(
+                "element_id({}) is matched on both {} and {wanted}",
+                node.id, node.id_property
+            )));
+        }
+        node.id_property = wanted;
+        Ok(node)
+    }
+
+    fn select_all_columns(&mut self, var: &str) -> Result<(), Error> {
+        let node = self.node_mut(var)?;
+        node.columns = Some(ColumnSelection::All);
         Ok(())
     }
 
@@ -170,6 +210,7 @@ impl Graph {
             n.entity.is_none()
                 && n.filters.is_empty()
                 && n.node_ids.is_empty()
+                && n.id_range.is_none()
                 && n.columns.is_none()
         })
     }
@@ -219,6 +260,10 @@ pub(crate) fn assemble(
             }
             ReturnItem::Var(v) => {
                 g.node_mut(&v)?;
+                returned.vars.push(v);
+            }
+            ReturnItem::AllProps(v) => {
+                g.select_all_columns(&v)?;
                 returned.vars.push(v);
             }
             ReturnItem::Prop(v, p, alias) if g.rel_index.contains_key(&v) => {
@@ -452,12 +497,18 @@ fn finish_aggregation(
                 projection.push(OutputColumn::node(v));
             }
             for (v, p, alias) in returned_props {
-                let is_key = keys
-                    .iter()
-                    .any(|k| k.node() == v && k.property() == Some(p.as_str()));
-                projection.push(OutputColumn::property(&v, &p, alias));
-                if !is_key {
-                    g.select_column(&v, p)?;
+                let key = keys
+                    .iter_mut()
+                    .find(|k| k.node() == v && k.property() == Some(p.as_str()));
+                projection.push(OutputColumn::property(&v, &p, alias.clone()));
+                match key {
+                    Some(InputGroupByKey::Property {
+                        alias: key_alias, ..
+                    }) => *key_alias = alias,
+                    Some(InputGroupByKey::Node { .. }) => {
+                        unreachable!("node keys have no property")
+                    }
+                    None => g.select_column(&v, p)?,
                 }
             }
             keys

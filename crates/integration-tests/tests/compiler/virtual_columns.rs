@@ -9,8 +9,11 @@ fn compile_query(json: &str) -> query_engine::compiler::CompiledQueryContext {
 
 #[test]
 fn search_with_wildcard_excludes_virtual_columns_from_sql() {
-    let compiled = compile_query(
+    let compiled = crate::compiler::setup::compile_both(
         r#"{"query_type": "traversal", "nodes": [{"id": "f", "entity": "File", "node_ids": [1], "columns": "*"}], "limit": 5}"#,
+        "MATCH (f:File) WHERE element_id(f) = 1 RETURN f.* LIMIT 5",
+        &Ontology::load_embedded().unwrap(),
+        &SecurityContext::new(1, vec!["1/".into()]).unwrap(),
     );
     let sql = &compiled.base.sql;
     assert!(
@@ -110,13 +113,16 @@ fn aggregation_with_content_produces_hydration_plan() {
 
 #[test]
 fn aggregation_with_wildcard_excludes_virtual_columns_from_sql() {
-    let compiled = compile_query(
+    let compiled = crate::compiler::setup::compile_both(
         r#"{
             "query_type": "aggregation",
             "nodes": [{"id": "f", "entity": "File", "node_ids": [1], "columns": "*"}],
             "aggregations": [{"count": "f", "as": "total"}],
             "limit": 5
         }"#,
+        "MATCH (f:File) WHERE element_id(f) = 1 RETURN count(f) AS total LIMIT 5",
+        &Ontology::load_embedded().unwrap(),
+        &SecurityContext::new(1, vec!["1/".into()]).unwrap(),
     );
     let sql = &compiled.base.sql;
     assert!(

@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use super::setup::{admin_ctx, embedded_ontology, test_ctx};
+use super::setup::{admin_ctx, compile_both, embedded_ontology, test_ctx};
 use compiler::{
     AuthorizedPath, ColumnSelection, HydrationPlan, Input, InputNode, QueryType, compile,
     compile_input,
@@ -398,8 +398,9 @@ fn search_with_wildcard_columns() {
         "nodes": [{ "id": "u", "entity": "User", "node_ids": [1], "columns": "*" }],
         "limit": 10
     }"#;
+    let gql = "MATCH (u:User) WHERE element_id(u) = 1 RETURN u.* LIMIT 10";
 
-    let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
+    let result = compile_both(json, gql, &embedded_ontology(), &test_ctx());
     let rendered = result.base.render();
 
     assert!(rendered.contains("_gkg_u_id"));

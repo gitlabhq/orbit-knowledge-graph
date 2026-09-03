@@ -6,7 +6,7 @@ use serde_json::Value;
 
 use crate::Params;
 
-use crate::assemble::{OrderTarget, Pattern, Pred, RelPart, ReturnItem, assemble};
+use crate::assemble::{ElementId, OrderTarget, Pattern, Pred, RelPart, ReturnItem, assemble};
 
 const MAX_IDENTIFIER_LEN: usize = 64;
 
@@ -176,9 +176,19 @@ peg::parser! {
         rule property() -> (String, String)
             = v:ident() "." p:name() { (v, p) }
 
+        rule element_id() -> ElementId
+            = kw("ELEMENT_ID") _ "(" _ var:ident() property:(_ "," _ p:name() { p })? _ ")" { ElementId { var, property } }
+
+        rule token_fn() -> FilterOp
+            = kw("TOKEN_MATCH") { FilterOp::TokenMatch }
+            / kw("ALL_TOKENS") { FilterOp::AllTokens }
+            / kw("ANY_TOKENS") { FilterOp::AnyTokens }
+
         rule predicate() -> Pred
-            = kw("ELEMENT_ID") _ "(" _ v:ident() _ ")" _ "=" _ id:id_value() { Pred::Ids(v, vec![id]) }
-            / kw("ELEMENT_ID") _ "(" _ v:ident() _ ")" __ kw("IN") __ ids:id_list() { Pred::Ids(v, ids) }
+            = e:element_id() __ kw("BETWEEN") __ start:id_value() __ kw("AND") __ end:id_value() { Pred::IdRange(e, start, end) }
+            / e:element_id() _ "=" _ id:id_value() { Pred::Ids(e, vec![id]) }
+            / e:element_id() __ kw("IN") __ ids:id_list() { Pred::Ids(e, ids) }
+            / op:token_fn() _ "(" _ p:property() _ "," _ v:value() _ ")" { Pred::Filter(p.0, p.1, op_filter(op, Some(v))) }
             / p:property() __ kw("IS") __ kw("NOT") __ kw("NULL") { Pred::Filter(p.0, p.1, op_filter(FilterOp::IsNotNull, None)) }
             / p:property() __ kw("IS") __ kw("NULL") { Pred::Filter(p.0, p.1, op_filter(FilterOp::IsNull, None)) }
             / p:property() __ kw("STARTS") __ kw("WITH") __ v:value() { Pred::Filter(p.0, p.1, op_filter(FilterOp::StartsWith, Some(v))) }
@@ -223,7 +233,8 @@ peg::parser! {
             = kw("DATE_TRUNC") _ "(" _ unit:truncate_unit() _ "," _ p:property() _ ")" { (unit, p.0, p.1) }
 
         rule return_item() -> ReturnItem
-            = t:date_trunc() alias:alias()? { ReturnItem::Trunc(t.0, t.1, t.2, alias) }
+            = v:ident() "." "*" { ReturnItem::AllProps(v) }
+            / t:date_trunc() alias:alias()? { ReturnItem::Trunc(t.0, t.1, t.2, alias) }
             / f:agg_fn() _ "(" _ "*" _ ")" {? Err("count(<variable>) (count(*) is not supported)") }
             / f:agg_fn() _ "(" _ v:ident() p:("." p:name() { p })? _ ")" alias:alias()? {?
                 let expr = match (f, p) {
