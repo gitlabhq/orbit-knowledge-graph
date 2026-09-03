@@ -113,6 +113,10 @@
       "$ref": "#/$defs/GitlabConfig",
       "default": {
         "base_url": null,
+        "gitaly_proxy": {
+          "stream_retry_max_attempts": 3
+        },
+        "gitaly_transport": "rails_http",
         "jwt": {
           "signing_key": null,
           "verifying_key": null
@@ -800,6 +804,26 @@
         "$ref": "#/$defs/FeatureScope"
       }
     },
+    "GitalyProxyConfig": {
+      "type": "object",
+      "properties": {
+        "stream_retry_max_attempts": {
+          "type": "integer",
+          "format": "uint",
+          "default": 3,
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "GitalyTransport": {
+      "type": "string",
+      "enum": [
+        "rails_http",
+        "workhorse_ws",
+        "workhorse_ws_with_fallback"
+      ]
+    },
     "GitlabConfig": {
       "type": "object",
       "properties": {
@@ -809,6 +833,16 @@
             "null"
           ],
           "default": null
+        },
+        "gitaly_proxy": {
+          "$ref": "#/$defs/GitalyProxyConfig",
+          "default": {
+            "stream_retry_max_attempts": 3
+          }
+        },
+        "gitaly_transport": {
+          "$ref": "#/$defs/GitalyTransport",
+          "default": "rails_http"
         },
         "jwt": {
           "$ref": "#/$defs/JwtConfig",
