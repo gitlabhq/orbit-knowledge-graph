@@ -1,7 +1,7 @@
 use crate::error::{QueryError, Result};
 use crate::input::{ColumnSelection, Direction, EntityAuthConfig, Input, QueryType, TextIndexMeta};
 use crate::passes::hydrate::VirtualColumnRequest;
-use ontology::constants::DEFAULT_PRIMARY_KEY;
+use ontology::constants::{DEFAULT_PRIMARY_KEY, NODE_RESERVED_COLUMNS};
 use ontology::{EnumType, Ontology, TraversalPathKind};
 use serde_json::Value;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -205,7 +205,17 @@ pub fn normalize(mut input: Input, ontology: &Ontology) -> Result<Input> {
                     node_entity.fields.iter().map(|f| f.name.clone()).collect();
                 node.columns = Some(ColumnSelection::List(columns));
             }
-            Some(ColumnSelection::List(_)) => {}
+            Some(ColumnSelection::List(cols)) => {
+                let unknown = cols.iter().find(|c| {
+                    !NODE_RESERVED_COLUMNS.contains(&c.as_str())
+                        && !node_entity.fields.iter().any(|f| f.name == **c)
+                });
+                if let Some(col) = unknown {
+                    return Err(QueryError::AllowlistRejected(format!(
+                        "column '{col}' is not a property of {entity}"
+                    )));
+                }
+            }
             None => {
                 let columns = if node_entity.default_columns.is_empty() {
                     node_entity.fields.iter().map(|f| f.name.clone()).collect()
@@ -301,6 +311,18 @@ pub fn normalize(mut input: Input, ontology: &Ontology) -> Result<Input> {
                 filter.value = Some(coerce_value(value, enum_values));
             }
         }
+    }
+    let rel_kinds = input.relationships.iter().flat_map(|r| &r.types);
+    let path_kinds = input.path.iter().flat_map(|p| &p.rel_types);
+    let neighbor_kinds = input.neighbors.iter().flat_map(|n| &n.rel_types);
+    if let Some(kind) = rel_kinds
+        .chain(path_kinds)
+        .chain(neighbor_kinds)
+        .find(|k| !is_wildcard(std::slice::from_ref(k)) && !ontology.has_edge(k))
+    {
+        return Err(QueryError::AllowlistRejected(format!(
+            "relationship type '{kind}' is not in the ontology"
+        )));
     }
     infer_wildcard_relationship_kinds(&mut input, ontology);
     resolve_fk_metadata(&mut input, ontology);

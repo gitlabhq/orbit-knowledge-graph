@@ -8,6 +8,8 @@ use crate::Params;
 
 use crate::assemble::{OrderTarget, Pattern, Pred, RelPart, ReturnItem, assemble};
 
+const MAX_IDENTIFIER_LEN: usize = 64;
+
 const RESERVED: &[&str] = &[
     "MATCH", "WHERE", "FILTER", "RETURN", "GROUP", "BY", "ORDER", "LIMIT", "AND", "OR", "NOT",
     "IN", "IS", "NULL", "TRUE", "FALSE", "STARTS", "ENDS", "WITH", "CONTAINS", "AS", "ASC", "DESC",
@@ -64,14 +66,13 @@ peg::parser! {
             = w:$(['a'..='z' | 'A'..='Z' | '_']+) {? if w.eq_ignore_ascii_case(k) { Ok(()) } else { Err(k) } }
 
         rule ident() -> String
-            = quiet!{ w:$(['a'..='z' | 'A'..='Z' | '_'] ['a'..='z' | 'A'..='Z' | '0'..='9' | '_']*)
-                {? if RESERVED.iter().any(|r| r.eq_ignore_ascii_case(w)) { Err("identifier") } else { Ok(w.to_string()) } } }
-            / "`" w:$([^ '`']+) "`" { w.to_string() }
+            = quiet!{ w:name()
+                {? if RESERVED.iter().any(|r| r.eq_ignore_ascii_case(&w)) { Err("identifier") } else { Ok(w) } } }
             / expected!("identifier")
 
         rule name() -> String
-            = quiet!{ w:$(['a'..='z' | 'A'..='Z' | '_'] ['a'..='z' | 'A'..='Z' | '0'..='9' | '_']*) { w.to_string() } }
-            / "`" w:$([^ '`']+) "`" { w.to_string() }
+            = quiet!{ w:$(['a'..='z' | 'A'..='Z' | '_'] ['a'..='z' | 'A'..='Z' | '0'..='9' | '_']*)
+                {? if w.len() > MAX_IDENTIFIER_LEN { Err("name of at most 64 characters") } else { Ok(w.to_string()) } } }
             / expected!("name")
 
         rule uint() -> u32

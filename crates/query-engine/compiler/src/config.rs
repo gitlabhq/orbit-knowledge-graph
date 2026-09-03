@@ -152,7 +152,6 @@ fn validate(ctx: &mut impl CompilerCtx) -> Result<()> {
 fn validate_input(ctx: &mut impl CompilerCtx) -> Result<()> {
     let mut input = require(ctx.take_input(), "input")?;
     let v = validate::Validator::new(ctx.ontology());
-    v.check_allowlist(&input)?;
     v.check_references(&input)?;
     v.annotate_filter_types(&mut input);
     ctx.set_input(input);

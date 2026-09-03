@@ -11,8 +11,7 @@ use std::sync::OnceLock;
 
 use crate::error::{QueryError, Result};
 use crate::input::{
-    AggFunction, ColumnSelection, FilterOp, Input, InputFilter, InputNode, QueryType,
-    group_by_output_names,
+    AggFunction, FilterOp, Input, InputFilter, InputNode, QueryType, group_by_output_names,
 };
 use crate::types::SecurityContext;
 use ontology::{DataType, Ontology, TRAVERSAL_PATH_COLUMN};
@@ -54,18 +53,6 @@ pub(crate) fn aggregation_sort_regex() -> &'static regex::Regex {
             .as_str()
             .expect("schema.json must define an aggregation_sort pattern");
         regex::Regex::new(pattern).expect("aggregation_sort pattern must be a valid regex")
-    })
-}
-
-pub(crate) fn identifier_regex() -> &'static regex::Regex {
-    static IDENTIFIER_REGEX: OnceLock<regex::Regex> = OnceLock::new();
-    IDENTIFIER_REGEX.get_or_init(|| {
-        let schema: serde_json::Value =
-            serde_json::from_str(BASE_SCHEMA_JSON).expect("schema.json must be valid JSON");
-        let pattern = schema["$defs"]["Identifier"]["pattern"]
-            .as_str()
-            .expect("schema.json must define an Identifier pattern");
-        regex::Regex::new(pattern).expect("Identifier pattern must be a valid regex")
     })
 }
 
@@ -230,55 +217,6 @@ impl<'a> Validator<'a> {
             QueryError::Validation(msg) => QueryError::AllowlistRejected(msg),
             other => other,
         })
-    }
-
-    /// Structural allowlist for an `Input` built by a non-JSON frontend.
-    /// Mirrors what the ontology-derived JSON Schema enforces on the JSON DSL:
-    /// identifier shape, entity and relationship kinds, and property names.
-    pub fn check_allowlist(&self, input: &Input) -> Result<()> {
-        let ident = identifier_regex();
-        let reject = |msg: String| Err(QueryError::AllowlistRejected(msg));
-        for node in &input.nodes {
-            if !ident.is_match(&node.id) {
-                return reject(format!("invalid node id {:?}", node.id));
-            }
-            let Some(entity) = node.entity.as_deref() else {
-                continue;
-            };
-            let Some(ont_node) = self.ontology.get_node(entity) else {
-                return reject(format!("unknown entity {entity:?}"));
-            };
-            let has_field = |name: &str| ont_node.fields.iter().any(|f| f.name == name);
-            if let Some(ColumnSelection::List(cols)) = &node.columns {
-                for col in cols {
-                    if !has_field(col) {
-                        return reject(format!("unknown column {col:?} on {entity}"));
-                    }
-                }
-            }
-            for prop in node.filters.keys() {
-                if !has_field(prop) {
-                    return reject(format!("unknown filter property {prop:?} on {entity}"));
-                }
-            }
-        }
-        for rel in &input.relationships {
-            for kind in &rel.types {
-                if !crate::passes::normalize::is_wildcard(std::slice::from_ref(kind))
-                    && !self.ontology.has_edge(kind)
-                {
-                    return reject(format!("unknown relationship type {kind:?}"));
-                }
-            }
-        }
-        let path_types = input.path.iter().flat_map(|p| p.rel_types.iter());
-        let neighbor_types = input.neighbors.iter().flat_map(|n| n.rel_types.iter());
-        for kind in path_types.chain(neighbor_types) {
-            if !self.ontology.has_edge(kind) {
-                return reject(format!("unknown relationship type {kind:?}"));
-            }
-        }
-        Ok(())
     }
 
     /// Validate cross-node references that JSON Schema cannot express.
