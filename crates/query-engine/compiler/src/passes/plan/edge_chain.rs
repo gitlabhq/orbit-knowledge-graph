@@ -274,16 +274,21 @@ fn build_hops(input: &Input) -> Vec<Hop> {
                 max_hops: rel.hops.max,
                 fk,
                 scope_preserving: rel.scope_preserving,
-                filters: rel
-                    .filters
-                    .iter()
-                    .flat_map(|(k, v)| v.iter().map(move |f| (k.clone(), f.clone())))
-                    .collect(),
+                filters: flatten_filters(&rel.filters),
                 join_prev: None,
                 scope_prefix: rel.scope_prefix.clone(),
                 cascade_anchor: false,
             }
         })
+        .collect()
+}
+
+fn flatten_filters(filters: &HashMap<String, Vec<InputFilter>>) -> Vec<(String, InputFilter)> {
+    let mut props: Vec<&String> = filters.keys().collect();
+    props.sort();
+    props
+        .into_iter()
+        .flat_map(|k| filters[k].iter().map(move |f| (k.clone(), f.clone())))
         .collect()
 }
 
@@ -303,11 +308,7 @@ fn build_node_plans(input: &Input) -> HashMap<String, NodePlan> {
                     has_traversal_path: n.has_traversal_path,
                     is_global: n.is_global,
                     redaction_id_column: n.redaction_id_column.clone(),
-                    filters: n
-                        .filters
-                        .iter()
-                        .flat_map(|(k, v)| v.iter().map(move |f| (k.clone(), f.clone())))
-                        .collect(),
+                    filters: flatten_filters(&n.filters),
                     node_ids: n.node_ids.clone(),
                     id_range: n.id_range.clone(),
                     columns: n.columns.clone(),

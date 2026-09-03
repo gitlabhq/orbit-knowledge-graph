@@ -66,3 +66,29 @@ pub fn compile_to_ast(json_input: &str, ontology: &Ontology) -> compiler::Result
     let node = lower(&mut input)?;
     Ok(node)
 }
+
+pub fn compile_both(
+    json: &str,
+    gql: &str,
+    ontology: &Ontology,
+    ctx: &SecurityContext,
+) -> compiler::passes::codegen::CompiledQueryContext {
+    let from_json = compiler::compile(json, ontology, ctx).unwrap();
+    let from_gql = orbit_gql::compile_gql(gql, &orbit_gql::Params::new(), ontology, ctx)
+        .unwrap_or_else(|e| panic!("GQL twin failed to compile: {e}\n{gql}"));
+    assert_eq!(
+        from_gql.base.sql, from_json.base.sql,
+        "SQL differs for GQL twin:\n{gql}"
+    );
+    assert_eq!(
+        from_gql.base.params, from_json.base.params,
+        "params differ for GQL twin:\n{gql}"
+    );
+    from_json
+}
+
+pub fn gql_error(gql: &str, ontology: &Ontology) -> compiler::QueryError {
+    orbit_gql::compile_gql(gql, &orbit_gql::Params::new(), ontology, &test_ctx())
+        .err()
+        .unwrap_or_else(|| panic!("expected GQL to be rejected:\n{gql}"))
+}

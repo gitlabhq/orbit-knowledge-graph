@@ -124,6 +124,28 @@ pub fn compile(
         .count_err()
 }
 
+/// Compile an [`Input`] assembled by a non-JSON frontend (e.g. GQL).
+///
+/// Runs the same pipeline as [`compile`] except that JSON Schema validation
+/// is replaced by [`passes::validate::Validator::check_allowlist`] over the
+/// struct, so every downstream security pass applies unchanged.
+#[must_use = "the compiled query context should be used"]
+pub fn compile_structured(
+    input: Input,
+    ontology: &Ontology,
+    ctx: &SecurityContext,
+) -> Result<CompiledQueryContext> {
+    let mut ctx = config::StructuredCtx::new(Arc::new(ontology.clone()), ctx.clone());
+    ctx.set_input(input);
+    config::run_structured(&mut ctx)
+        .and_then(|()| {
+            ctx.take_output().ok_or_else(|| {
+                error::QueryError::PipelineInvariant("pipeline did not produce output".into())
+            })
+        })
+        .count_err()
+}
+
 /// Run only `validate` + `normalize`, returning the normalized [`Input`].
 ///
 /// Lets the querying pipeline's path-resolution stage read normalized scope

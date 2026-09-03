@@ -52,6 +52,10 @@ compiler_pipeline_macros::define_compiler_ctx! {
             reads_env: [ontology]
             mutates: [json, input]
         }
+        validate_input {
+            reads_env: [ontology]
+            mutates: [input]
+        }
         normalize {
             reads_env: [ontology]
             mutates: [input]
@@ -107,6 +111,11 @@ compiler_pipeline_macros::define_compiler_ctx! {
             state: [json, input, query_plan, node, result_ctx, query_config, hydration_plan, output]
             phases: [validate, normalize, restrict, plan, lower, enforce, security, partition, cursor, check, hydrate_plan, settings, codegen]
         }
+        structured {
+            env: [ontology, security_ctx]
+            state: [input, query_plan, node, result_ctx, query_config, hydration_plan, output]
+            phases: [validate_input, normalize, restrict, plan, lower, enforce, security, partition, cursor, check, hydrate_plan, settings, codegen]
+        }
         ch_hydration {
             env: [ontology, security_ctx]
             state: [input, query_plan, node, result_ctx, query_config, hydration_plan, output]
@@ -134,6 +143,16 @@ fn validate(ctx: &mut impl CompilerCtx) -> Result<()> {
     {
         c.seek = Some(cursor::decode(after, query_hash)?);
     }
+    v.check_references(&input)?;
+    v.annotate_filter_types(&mut input);
+    ctx.set_input(input);
+    Ok(())
+}
+
+fn validate_input(ctx: &mut impl CompilerCtx) -> Result<()> {
+    let mut input = require(ctx.take_input(), "input")?;
+    let v = validate::Validator::new(ctx.ontology());
+    v.check_allowlist(&input)?;
     v.check_references(&input)?;
     v.annotate_filter_types(&mut input);
     ctx.set_input(input);

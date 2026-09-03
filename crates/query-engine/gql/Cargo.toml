@@ -1,0 +1,15 @@
+[package]
+name = "orbit-gql"
+version.workspace = true
+edition = "2024"
+license = "MIT"
+
+[dependencies]
+compiler = { path = "../compiler" }
+ontology = { path = "../../ontology" }
+peg = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[lints]
+workspace = true

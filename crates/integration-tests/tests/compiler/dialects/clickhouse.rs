@@ -1,4 +1,4 @@
-use crate::compiler::setup::{compile_to_ast, test_ctx, test_ontology};
+use crate::compiler::setup::{compile_both, compile_to_ast, gql_error, test_ctx, test_ontology};
 use crate::compiler::utils::has_param_value;
 use compiler::{Node, QueryError, compile};
 
@@ -9,6 +9,9 @@ fn compile_to_ast_works() {
         "nodes": [{"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]}],
         "limit": 10
     }"#;
+
+    let gql = "MATCH (u:User) WHERE element_id(u) = 1 RETURN u.username LIMIT 10";
+    compile_both(json, gql, &test_ontology(), &test_ctx());
 
     let node = compile_to_ast(json, &test_ontology()).unwrap();
     let Node::Query(ref q) = node else {
@@ -34,8 +37,14 @@ fn traversal_query() {
         "limit": 25,
         "order_by": "-n.created_at"
     }"#;
+    let gql = r#"
+        MATCH (n:Note {confidential: true}), (u:User)-[:AUTHORED]->(n)
+        RETURN n.confidential, u.username
+        ORDER BY n.created_at DESC
+        LIMIT 25
+    "#;
 
-    let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
+    let result = compile_both(json, gql, &test_ontology(), &test_ctx());
     let rendered = result.base.render();
 
     assert!(rendered.contains("gl_edge"));
@@ -59,8 +68,11 @@ fn bool_filter_value_is_preserved() {
         }],
         "limit": 5
     }"#;
+    let gql = r#"
+        MATCH (n:Note) WHERE n.confidential = true RETURN n.confidential LIMIT 5
+    "#;
 
-    let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
+    let result = compile_both(json, gql, &test_ontology(), &test_ctx());
     assert!(has_param_value(
         &result.base.params,
         &serde_json::Value::Bool(true)
@@ -80,8 +92,15 @@ fn aggregation_query() {
         "aggregations": [{"count": "n", "as": "note_count"}],
         "limit": 10
     }"#;
+    let gql = r#"
+        MATCH (n:Note), (u:User)-[:AUTHORED]->(n)
+        WHERE element_id(n) = 1
+        RETURN n.confidential, u.username, count(n) AS note_count
+        GROUP BY u
+        LIMIT 10
+    "#;
 
-    let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
+    let result = compile_both(json, gql, &test_ontology(), &test_ctx());
     let rendered = result.base.render();
 
     assert!(rendered.contains("COUNT()") || rendered.contains("countIf"));
@@ -99,7 +118,12 @@ fn group_by_property_truncate_month_wraps_column() {
         "group_by": [{"key": "u.created_at", "truncate": "month"}],
         "limit": 50
     }"#;
-    let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
+    let gql = r#"
+        MATCH (u:Note {confidential: false})
+        RETURN date_trunc('month', u.created_at), count(u) AS n
+        LIMIT 50
+    "#;
+    let result = compile_both(json, gql, &test_ontology(), &test_ctx());
     let rendered = result.base.render();
     assert!(
         rendered.contains("toDate32(toStartOfMonth(u.created_at))"),
@@ -125,8 +149,10 @@ fn group_by_property_truncate_all_units_compile() {
                 "limit": 10
             }}"#
         );
-        let result = compile(&json, &test_ontology(), &test_ctx())
-            .unwrap_or_else(|e| panic!("compile failed for unit {unit}: {e:?}"));
+        let gql = format!(
+            "MATCH (u:Note) WHERE element_id(u) = 1 RETURN date_trunc('{unit}', u.created_at), count(u) AS n LIMIT 10"
+        );
+        let result = compile_both(&json, &gql, &test_ontology(), &test_ctx());
         let rendered = result.base.render();
         // Sub-daily units cast to DateTime64, daily+ to Date32, so the key
         // crosses Arrow as a typed date/timestamp rather than a bare integer.
@@ -158,12 +184,14 @@ fn group_by_truncate_minute_without_selectivity_rejected() {
         "group_by": [{"key": "u.created_at", "truncate": "minute"}],
         "limit": 10
     }"#;
+    let gql = "MATCH (u:Note) RETURN date_trunc('minute', u.created_at), count(u) AS n LIMIT 10";
     let err = compile(json, &test_ontology(), &test_ctx()).unwrap_err();
     let msg = format!("{err:?}");
     assert!(
         msg.contains("requires either node_ids") && msg.contains("minute"),
         "expected cardinality-guard rejection; got: {msg}"
     );
+    assert_eq!(format!("{:?}", gql_error(gql, &test_ontology())), msg);
 }
 
 #[test]
@@ -177,7 +205,12 @@ fn group_by_truncate_minute_with_node_ids_accepted() {
         "group_by": [{"key": "u.created_at", "truncate": "minute"}],
         "limit": 10
     }"#;
-    let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
+    let gql = r#"
+        MATCH (u:Note) WHERE element_id(u) IN [1, 2]
+        RETURN date_trunc('minute', u.created_at), count(u) AS n
+        LIMIT 10
+    "#;
+    let result = compile_both(json, gql, &test_ontology(), &test_ctx());
     assert!(
         result
             .base
@@ -197,7 +230,13 @@ fn group_by_truncate_hour_with_property_filter_accepted() {
         "group_by": [{"key": "u.created_at", "truncate": "hour"}],
         "limit": 50
     }"#;
-    let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
+    let gql = r#"
+        MATCH (u:Note) WHERE u.created_at >= '2026-04-01T00:00:00Z'
+        RETURN count(u) AS n
+        GROUP BY date_trunc('hour', u.created_at)
+        LIMIT 50
+    "#;
+    let result = compile_both(json, gql, &test_ontology(), &test_ctx());
     assert!(
         result
             .base
@@ -217,12 +256,14 @@ fn group_by_truncate_on_non_date_property_rejected() {
         "group_by": [{"key": "u.confidential", "truncate": "month"}],
         "limit": 10
     }"#;
+    let gql = "MATCH (u:Note) WHERE element_id(u) = 1 RETURN date_trunc('month', u.confidential), count(u) AS n LIMIT 10";
     let err = compile(json, &test_ontology(), &test_ctx()).unwrap_err();
     let msg = format!("{err:?}");
     assert!(
         msg.contains("requires a Date or DateTime property"),
         "expected data-type rejection; got: {msg}"
     );
+    assert_eq!(format!("{:?}", gql_error(gql, &test_ontology())), msg);
 }
 
 #[test]
@@ -236,7 +277,13 @@ fn group_by_truncate_custom_alias_preserved() {
         "group_by": [{"key": "u.created_at", "truncate": "month", "as": "bucket"}],
         "limit": 10
     }"#;
-    let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
+    let gql = r#"
+        MATCH (u:Note) WHERE element_id(u) = 1
+        RETURN date_trunc('month', u.created_at) AS bucket, count(u) AS n
+        GROUP BY date_trunc('month', u.created_at)
+        LIMIT 10
+    "#;
+    let result = compile_both(json, gql, &test_ontology(), &test_ctx());
     let rendered = result.base.render();
     assert!(
         rendered.contains("toDate32(toStartOfMonth(u.created_at)) AS bucket"),
@@ -255,8 +302,13 @@ fn path_finding_query() {
         "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3,
                  "rel_types": ["CONTAINS"]}
     }"#;
+    let gql = r#"
+        MATCH ANY SHORTEST (start:Project)-[:CONTAINS]->{1,3}(end:Project)
+        WHERE element_id(start) = 100 AND element_id(end) = 200
+        RETURN start.name, end.name
+    "#;
 
-    let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
+    let result = compile_both(json, gql, &test_ontology(), &test_ctx());
     let rendered = result.base.render();
 
     assert!(rendered.contains("forward AS"), "should have forward CTE");
@@ -295,13 +347,21 @@ fn path_finding_depth_control() {
         ],
         "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["CONTAINS", "MEMBER_OF"]}
     }"#;
+    let shallow_gql = r#"
+        MATCH ANY SHORTEST (start:Project)-[:CONTAINS|MEMBER_OF]->{1,1}(end:Project)
+        WHERE element_id(start) = 1 AND element_id(end) = 2
+        RETURN start.name, end.name
+    "#;
+    let deep_gql = r#"
+        MATCH ANY SHORTEST (start:Project)-[:CONTAINS|MEMBER_OF]->{1,3}(end:Project)
+        WHERE element_id(start) = 1 AND element_id(end) = 2
+        RETURN start.name, end.name
+    "#;
 
-    let shallow_sql = compile(shallow, &test_ontology(), &test_ctx())
-        .unwrap()
+    let shallow_sql = compile_both(shallow, shallow_gql, &test_ontology(), &test_ctx())
         .base
         .render();
-    let deep_sql = compile(deep, &test_ontology(), &test_ctx())
-        .unwrap()
+    let deep_sql = compile_both(deep, deep_gql, &test_ontology(), &test_ctx())
         .base
         .render();
 
@@ -330,8 +390,11 @@ fn neighbors_query() {
         "nodes": [{"id": "u", "entity": "User", "columns": ["username"], "node_ids": [100]}],
         "neighbors": {"direction": "both"}
     }"#;
+    let gql = r#"
+        MATCH (u:User)-[]-(n) WHERE element_id(u) = 100 RETURN u.username, n
+    "#;
 
-    let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
+    let result = compile_both(json, gql, &test_ontology(), &test_ctx());
     let rendered = result.base.render();
 
     assert!(rendered.contains("_gkg_neighbor_id"));
@@ -368,8 +431,16 @@ fn filter_operators() {
         }],
         "limit": 30
     }"#;
+    let gql = r#"
+        MATCH (u:User)
+        WHERE u.created_at >= '2024-01-01'
+          AND u.state IN ['active', 'blocked']
+          AND u.username CONTAINS 'admin'
+        RETURN u.username, u.state, u.created_at
+        LIMIT 30
+    "#;
 
-    let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
+    let result = compile_both(json, gql, &test_ontology(), &test_ctx());
     let rendered = result.base.render();
 
     // Search uses FINAL for latest-row dedup.
@@ -476,7 +547,14 @@ fn valid_identifiers_produce_renderable_sql() {
             {"type": "MEMBER_OF", "from": "user_node", "to": "node123"}
         ]
     }"#;
-    let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
+    let gql = r#"
+        MATCH (user_node:User)-[:AUTHORED]->(_private:Note),
+              (CamelCase:Project)-[:CONTAINS]->(_private),
+              (user_node)-[:MEMBER_OF]->(node123:Group)
+        WHERE element_id(user_node) = 1 AND element_id(CamelCase) = 1
+        RETURN user_node.username, _private.confidential, CamelCase.name, node123.name
+    "#;
+    let result = compile_both(json, gql, &test_ontology(), &test_ctx());
     let rendered = result.base.render();
 
     assert!(!rendered.contains("{p"));
@@ -518,7 +596,10 @@ fn multi_table_single_type_routes_to_default() {
         "relationships": [{"type": "AUTHORED", "from": "u", "to": "p"}],
         "limit": 25
     }"#;
-    let result = compile(json, &multi_table_ontology(), &test_ctx()).unwrap();
+    let gql = r#"
+        MATCH (u:User)-[:AUTHORED]->(p:Project) WHERE element_id(u) = 1 RETURN p LIMIT 25
+    "#;
+    let result = compile_both(json, gql, &multi_table_ontology(), &test_ctx());
     let rendered = result.base.render();
     assert!(
         rendered.contains("gl_edge"),
@@ -541,7 +622,10 @@ fn multi_table_code_edge_routes_to_code_table() {
         "relationships": [{"type": "DEFINES", "from": "f", "to": "d"}],
         "limit": 25
     }"#;
-    let result = compile(json, &multi_table_ontology(), &test_ctx()).unwrap();
+    let gql = r#"
+        MATCH (f:File)-[:DEFINES]->(d:Definition) WHERE element_id(f) = 1 RETURN d LIMIT 25
+    "#;
+    let result = compile_both(json, gql, &multi_table_ontology(), &test_ctx());
     let rendered = result.base.render();
     assert!(
         rendered.contains("gl_code_edge"),
@@ -566,7 +650,10 @@ fn multi_table_wildcard_scans_all_tables() {
         "relationships": [{"type": "*", "from": "u", "to": "p"}],
         "limit": 25
     }"#;
-    let result = compile(json, &multi_table_ontology(), &test_ctx()).unwrap();
+    let gql = r#"
+        MATCH (u:User)-->(p:Project) WHERE element_id(u) = 1 RETURN p LIMIT 25
+    "#;
+    let result = compile_both(json, gql, &multi_table_ontology(), &test_ctx());
     let rendered = result.base.render();
     assert!(
         rendered.contains("gl_edge"),
@@ -587,7 +674,10 @@ fn multi_table_mixed_types_scans_both_tables() {
         "relationships": [{"type": ["AUTHORED", "DEFINES"], "from": "u", "to": "p"}],
         "limit": 25
     }"#;
-    let result = compile(json, &multi_table_ontology(), &test_ctx()).unwrap();
+    let gql = r#"
+        MATCH (u:User)-[:AUTHORED|DEFINES]->(p:Project) WHERE element_id(u) = 1 RETURN p LIMIT 25
+    "#;
+    let result = compile_both(json, gql, &multi_table_ontology(), &test_ctx());
     let rendered = result.base.render();
     assert!(
         rendered.contains("gl_edge"),
@@ -610,7 +700,10 @@ fn single_table_ontology_no_union() {
         "relationships": [{"type": "AUTHORED", "from": "u", "to": "p"}],
         "limit": 25
     }"#;
-    let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
+    let gql = r#"
+        MATCH (u:User)-[:AUTHORED]->(p:Project) WHERE element_id(u) = 1 RETURN p LIMIT 25
+    "#;
+    let result = compile_both(json, gql, &test_ontology(), &test_ctx());
     let rendered = result.base.render();
     assert!(
         !rendered.contains("UNION ALL"),
@@ -628,7 +721,12 @@ fn multi_table_path_finding_scans_all_tables() {
         ],
         "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["CONTAINS", "DEFINES"]}
     }"#;
-    let result = compile(json, &multi_table_ontology(), &test_ctx()).unwrap();
+    let gql = r#"
+        MATCH SHORTEST (start:User)-[:CONTAINS|DEFINES*..3]-(end:Definition)
+        WHERE element_id(start) = 1 AND element_id(end) = 100
+        RETURN start, end
+    "#;
+    let result = compile_both(json, gql, &multi_table_ontology(), &test_ctx());
     let rendered = result.base.render();
     assert!(
         rendered.contains("gl_edge") && rendered.contains("gl_code_edge"),
@@ -655,7 +753,10 @@ fn neighbors_non_default_pk_with_non_denorm_filter_no_alias_clash() {
         }],
         "neighbors": {"direction": "both"}
     }"#;
-    let result = compile(json, &ontology, &test_ctx()).unwrap();
+    let gql = r#"
+        MATCH (f:File)-[]-(n) WHERE f.path CONTAINS 'labkit' RETURN n
+    "#;
+    let result = compile_both(json, gql, &ontology, &test_ctx());
     let rendered = result.base.render();
 
     let gl_file_refs = rendered.matches("gl_file").count();
@@ -676,7 +777,10 @@ fn multi_table_neighbors_scans_all_tables() {
         "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}],
         "neighbors": {"direction": "both"}
     }"#;
-    let result = compile(json, &multi_table_ontology(), &test_ctx()).unwrap();
+    let gql = r#"
+        MATCH (p:Project)-[]-(n) WHERE element_id(p) = 1 RETURN n
+    "#;
+    let result = compile_both(json, gql, &multi_table_ontology(), &test_ctx());
     let rendered = result.base.render();
     assert!(
         rendered.contains("gl_edge") && rendered.contains("gl_code_edge"),
@@ -697,9 +801,8 @@ fn scoped_ctx() -> compiler::SecurityContext {
     admin_ctx().with_scope_prefixes(prefixes)
 }
 
-fn render_scoped(json: &str) -> String {
-    compile(json, &embedded_ontology(), &scoped_ctx())
-        .unwrap()
+fn render_scoped(json: &str, gql: &str) -> String {
+    compile_both(json, gql, &embedded_ontology(), &scoped_ctx())
         .base
         .render()
 }
@@ -715,7 +818,10 @@ fn scoped_traversal_injects_tight_prefix() {
         "relationships": [{"type": "IN_PROJECT", "from": "wi", "to": "p"}],
         "limit": 100
     }"#;
-    assert!(render_scoped(json).contains(SCOPED_PREFIX));
+    let gql = r#"
+        MATCH (wi:WorkItem)-[:IN_PROJECT]->(p:Project) WHERE p.id = 1 RETURN wi.id LIMIT 100
+    "#;
+    assert!(render_scoped(json, gql).contains(SCOPED_PREFIX));
 }
 
 #[test]
@@ -731,7 +837,13 @@ fn scoped_aggregation_injects_tight_prefix() {
         "aggregations": [{"count": "wi", "as": "c"}],
         "limit": 100
     }"#;
-    assert!(render_scoped(json).contains(SCOPED_PREFIX));
+    let gql = r#"
+        MATCH (wi:WorkItem)-[:IN_PROJECT]->(p:Project) WHERE p.id = 1
+        RETURN wi.id, count(wi) AS c
+        GROUP BY p
+        LIMIT 100
+    "#;
+    assert!(render_scoped(json, gql).contains(SCOPED_PREFIX));
 }
 
 #[test]
@@ -749,8 +861,14 @@ fn cross_namespace_related_to_edge_stays_unscoped() {
         ],
         "limit": 100
     }"#;
+    let gql = r#"
+        MATCH (p:Project), (wi:WorkItem)-[:IN_PROJECT]->(p), (wi)-[:RELATED_TO]->(rel:WorkItem)
+        WHERE p.id = 1
+        RETURN wi.id, rel.id, rel.title
+        LIMIT 100
+    "#;
     let ontology = embedded_ontology();
-    let compiled = compile(json, &ontology, &scoped_ctx()).unwrap();
+    let compiled = compile_both(json, gql, &ontology, &scoped_ctx());
     let sql = compiled.base.render();
 
     let expected = if ontology.partition().is_some() { 5 } else { 3 };
