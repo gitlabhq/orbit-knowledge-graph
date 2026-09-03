@@ -275,7 +275,10 @@ fn restart_reason(status: &Status) -> &'static str {
 #[cfg(test)]
 mod gitaly_tests {
     use super::*;
+    use futures::TryStreamExt;
+    use gitlab_client::test_support::{FakeWorkhorse, Preauth, StreamPlan, direct, serve};
     use std::sync::Mutex;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     fn deterministic_retry() -> (ArchiveRetry, Arc<Mutex<Vec<Duration>>>) {
         let sleeps = Arc::new(Mutex::new(Vec::new()));
@@ -365,6 +368,198 @@ mod gitaly_tests {
                 Duration::from_secs(30),
             ]
         );
+    }
+
+    fn fake_service(
+        fake: &FakeWorkhorse,
+        rails: Arc<dyn RepositoryService>,
+        with_fallback: bool,
+    ) -> GitalyRepositoryService {
+        GitalyRepositoryService {
+            gitlab_client: Arc::new(fake.client()),
+            rails,
+            with_fallback,
+            retry: ArchiveRetry {
+                max_attempts: 3,
+                sleep: Arc::new(|_| Box::pin(async {})),
+                jitter: Arc::new(|cap| cap),
+            },
+            metrics: CodeMetrics::with_meter(&crate::testkit::test_meter()),
+        }
+    }
+
+    struct CountingRails {
+        downloads: AtomicUsize,
+        bytes: bytes::Bytes,
+    }
+
+    #[async_trait]
+    impl RepositoryService for CountingRails {
+        async fn project_info(
+            &self,
+            project_id: i64,
+        ) -> Result<ProjectInfo, RepositoryServiceError> {
+            Ok(test_utils::make_project_info(project_id, "main"))
+        }
+
+        async fn download_archive(
+            &self,
+            _project_id: i64,
+            _ref_name: &str,
+        ) -> Result<ByteStream, RepositoryServiceError> {
+            self.downloads.fetch_add(1, Ordering::SeqCst);
+            Ok(Box::pin(futures::stream::once(std::future::ready(Ok(
+                self.bytes.clone(),
+            )))))
+        }
+    }
+
+    #[tokio::test]
+    async fn get_archive_returns_the_stub_bytes() {
+        let fake = FakeWorkhorse::start(Preauth::ok("600"), serve(2, 0)).await;
+        let rails = Arc::new(CountingRails {
+            downloads: AtomicUsize::new(0),
+            bytes: bytes::Bytes::from_static(b"archivearchive"),
+        });
+        let service = fake_service(&fake, rails.clone(), false);
+
+        let bytes = service
+            .download_archive(42, "main")
+            .await
+            .unwrap()
+            .try_fold(Vec::new(), |mut bytes, chunk| async move {
+                bytes.extend_from_slice(&chunk);
+                Ok(bytes)
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(bytes, b"archivearchive");
+        assert_eq!(rails.downloads.load(Ordering::SeqCst), 0);
+        assert_eq!(fake.rpcs(), 1);
+    }
+
+    #[tokio::test]
+    async fn handshake_not_found_falls_back_per_call() {
+        let fake = FakeWorkhorse::start(
+            Preauth::reject(tokio_tungstenite::tungstenite::http::StatusCode::NOT_FOUND),
+            serve(1, 0),
+        )
+        .await;
+        let rails = Arc::new(CountingRails {
+            downloads: AtomicUsize::new(0),
+            bytes: bytes::Bytes::from_static(b"rails"),
+        });
+        let service = fake_service(&fake, rails.clone(), true);
+
+        let bytes = service
+            .download_archive(42, "main")
+            .await
+            .unwrap()
+            .try_collect::<Vec<_>>()
+            .await
+            .unwrap();
+
+        assert_eq!(bytes.concat(), b"rails");
+        assert_eq!(rails.downloads.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn handshake_unauthorized_never_falls_back() {
+        let fake = FakeWorkhorse::start(
+            Preauth::reject(tokio_tungstenite::tungstenite::http::StatusCode::UNAUTHORIZED),
+            serve(1, 0),
+        )
+        .await;
+        let rails = Arc::new(CountingRails {
+            downloads: AtomicUsize::new(0),
+            bytes: bytes::Bytes::from_static(b"rails"),
+        });
+        let service = fake_service(&fake, rails.clone(), true);
+
+        let result = service.download_archive(42, "main").await;
+
+        assert!(matches!(
+            result,
+            Err(RepositoryServiceError::GitalyProxy(
+                GitalyProxyError::Unauthorized
+            ))
+        ));
+        assert_eq!(rails.downloads.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn policy_denied_before_a_frame_falls_back() {
+        static PLANS: &[StreamPlan] = &[StreamPlan::Reject(
+            Code::PermissionDenied,
+            "proxy: method_not_allowed",
+        )];
+        let fake = FakeWorkhorse::start(Preauth::ok("600"), direct(PLANS)).await;
+        let rails = Arc::new(CountingRails {
+            downloads: AtomicUsize::new(0),
+            bytes: bytes::Bytes::from_static(b"rails"),
+        });
+        let service = fake_service(&fake, rails.clone(), true);
+
+        let chunks = service
+            .download_archive(42, "main")
+            .await
+            .unwrap()
+            .try_collect::<Vec<_>>()
+            .await
+            .unwrap();
+
+        assert_eq!(chunks.concat(), b"rails");
+        assert_eq!(rails.downloads.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn stream_deadline_is_not_retried_or_fallen_back() {
+        static PLANS: &[StreamPlan] = &[StreamPlan::Reject(
+            Code::DeadlineExceeded,
+            "proxy: stream_deadline",
+        )];
+        let fake = FakeWorkhorse::start(Preauth::ok("600"), direct(PLANS)).await;
+        let rails = Arc::new(CountingRails {
+            downloads: AtomicUsize::new(0),
+            bytes: bytes::Bytes::from_static(b"rails"),
+        });
+        let service = fake_service(&fake, rails.clone(), true);
+
+        let result = service.download_archive(42, "main").await;
+
+        assert!(matches!(
+            result,
+            Err(RepositoryServiceError::GitalyProxy(
+                GitalyProxyError::StreamDeadline
+            ))
+        ));
+        assert_eq!(fake.rpcs(), 1);
+        assert_eq!(rails.downloads.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn mid_stream_cuts_make_exactly_three_proxy_attempts_without_fallback() {
+        static PLANS: &[StreamPlan] = &[
+            StreamPlan::Cut(Code::Unavailable),
+            StreamPlan::Cut(Code::Unavailable),
+            StreamPlan::Cut(Code::Unavailable),
+        ];
+        let fake = FakeWorkhorse::start(Preauth::ok("600"), direct(PLANS)).await;
+        let rails = Arc::new(CountingRails {
+            downloads: AtomicUsize::new(0),
+            bytes: bytes::Bytes::from_static(b"rails"),
+        });
+        let service = fake_service(&fake, rails.clone(), true);
+
+        let result = service.download_archive(42, "main").await;
+
+        assert!(matches!(
+            result,
+            Err(RepositoryServiceError::GitalyProxy(_))
+        ));
+        assert_eq!(fake.rpcs(), 3);
+        assert_eq!(rails.downloads.load(Ordering::SeqCst), 0);
     }
 }
 

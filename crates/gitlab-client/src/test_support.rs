@@ -3,6 +3,15 @@
 //! route does (101 + session headers, or an HTTP rejection) and serves a stub
 //! `gitaly.BlobService` over the tunnel through a tonic server per connection.
 
+#![cfg_attr(
+    feature = "testkit",
+    allow(
+        dead_code,
+        unused_imports,
+        reason = "the exported test harness shares this module with its own transport tests"
+    )
+)]
+
 use std::convert::Infallible;
 use std::future::Future;
 use std::net::SocketAddr;
@@ -17,7 +26,10 @@ use base64::engine::general_purpose::{STANDARD as BASE64, URL_SAFE_NO_PAD};
 use bytes::Bytes;
 use futures::{SinkExt, StreamExt};
 use gitaly_protos::proto::blob_service_client::BlobServiceClient;
-use gitaly_protos::proto::{ListBlobsRequest, ListBlobsResponse, Repository, list_blobs_response};
+use gitaly_protos::proto::{
+    GetArchiveRequest, GetArchiveResponse, ListBlobsRequest, ListBlobsResponse, Repository,
+    list_blobs_response,
+};
 use orbit_server_config::GitlabClientConfiguration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -38,14 +50,13 @@ use tonic::transport::server::Connected;
 use tonic::{Code, Status};
 use tower::{Service, service_fn};
 
-use super::dial::{
-    HEADER_EXPIRES_IN, HEADER_PROFILE, HEADER_REPOSITORY, PROFILE_READONLY_REPOSITORY,
-};
-use super::error::GitalyProxyError;
-use super::websocket_io::WebSocketIo;
-use super::{GitalyProxyChannels, GitalyProxyDialer};
 use crate::GitlabClient;
 use crate::client::{AUTH_HEADER, JWT_AUDIENCE, JWT_ISSUER, JWT_SUBJECT};
+use crate::{GitalyProxyChannels, GitalyProxyDialer};
+use crate::{
+    GitalyProxyError, HEADER_EXPIRES_IN, HEADER_PROFILE, HEADER_REPOSITORY,
+    PROFILE_READONLY_REPOSITORY, WebSocketIo,
+};
 
 const SECRET: &[u8] = b"test-secret-that-is-long-enough!";
 const REPO_JSON: &str = r#"{"storage_name":"default","relative_path":"@hashed/6b/86/6b86.git","gl_repository":"project-42","gl_project_path":"group/proj"}"#;
@@ -53,7 +64,7 @@ const PROJECT_ID: i64 = 42;
 
 /// What the fake answers to the upgrade request.
 #[derive(Clone, Debug)]
-enum Preauth {
+pub enum Preauth {
     Upgrade {
         profile: &'static str,
         expires_in: &'static str,
@@ -66,11 +77,18 @@ enum Preauth {
 }
 
 impl Preauth {
-    fn ok(expires_in: &'static str) -> Self {
+    pub fn ok(expires_in: &'static str) -> Self {
         Self::Upgrade {
             profile: PROFILE_READONLY_REPOSITORY,
             expires_in,
             repository: Some(REPO_JSON),
+        }
+    }
+
+    pub fn reject(status: StatusCode) -> Self {
+        Self::Reject {
+            status,
+            retry_after: None,
         }
     }
 }
@@ -124,16 +142,17 @@ impl Callback for Answer {
 
 /// How the stub answers `ListBlobs` on connection number `conn`.
 #[derive(Clone, Debug)]
-enum StreamPlan {
+pub enum StreamPlan {
     /// `count` responses, `interval` apart, each tagged with the connection.
     Serve {
         count: usize,
         interval: Duration,
     },
     Reject(Code, &'static str),
+    Cut(Code),
 }
 
-type Director = Arc<dyn Fn(usize) -> StreamPlan + Send + Sync>;
+pub type Director = Arc<dyn Fn(usize) -> StreamPlan + Send + Sync>;
 type Expectation = fn(&GitalyProxyError) -> bool;
 
 #[derive(Default)]
@@ -154,13 +173,13 @@ enum ConnEnd {
     Error(std::io::ErrorKind),
 }
 
-struct FakeWorkhorse {
+pub struct FakeWorkhorse {
     addr: SocketAddr,
     observed: Arc<Observed>,
 }
 
 impl FakeWorkhorse {
-    async fn start(preauth: Preauth, director: Director) -> Self {
+    pub async fn start(preauth: Preauth, director: Director) -> Self {
         Self::start_with(preauth, director, None).await
     }
 
@@ -221,7 +240,7 @@ impl FakeWorkhorse {
         format!("http://{}", self.addr)
     }
 
-    fn client(&self) -> GitlabClient {
+    pub fn client(&self) -> GitlabClient {
         GitlabClient::new(GitlabClientConfiguration {
             base_url: self.base_url(),
             signing_key: BASE64.encode(SECRET),
@@ -230,11 +249,11 @@ impl FakeWorkhorse {
         .unwrap()
     }
 
-    fn upgrades(&self) -> usize {
+    pub fn upgrades(&self) -> usize {
         self.observed.upgrades.load(Ordering::SeqCst)
     }
 
-    fn rpcs(&self) -> usize {
+    pub fn rpcs(&self) -> usize {
         self.observed.rpcs.load(Ordering::SeqCst)
     }
 }
@@ -287,7 +306,8 @@ where
         ended: false,
     };
     let _ = tonic::transport::Server::builder()
-        .add_service(stub)
+        .add_service(stub.clone())
+        .add_service(StubRepositoryService(stub))
         .serve_with_incoming(futures::stream::once(async { Ok::<_, Infallible>(io) }))
         .await;
 }
@@ -404,6 +424,14 @@ impl Service<http::Request<tonic::body::Body>> for StubBlobService {
             async move {
                 match plan {
                     StreamPlan::Reject(code, message) => Err(Status::new(code, message)),
+                    StreamPlan::Cut(code) => {
+                        let (tx, rx) = tokio::sync::mpsc::channel(2);
+                        tokio::spawn(async move {
+                            let _ = tx.send(Ok(blob_response(conn))).await;
+                            let _ = tx.send(Err(Status::new(code, "stream cut"))).await;
+                        });
+                        Ok(tonic::Response::new(ReceiverStream::new(rx)))
+                    }
                     StreamPlan::Serve { count, interval } => {
                         let (tx, rx) = tokio::sync::mpsc::channel(1);
                         tokio::spawn(async move {
@@ -428,6 +456,74 @@ impl Service<http::Request<tonic::body::Body>> for StubBlobService {
     }
 }
 
+#[derive(Clone)]
+struct StubRepositoryService(StubBlobService);
+
+impl NamedService for StubRepositoryService {
+    const NAME: &'static str = "gitaly.RepositoryService";
+}
+
+impl Service<http::Request<tonic::body::Body>> for StubRepositoryService {
+    type Response = http::Response<tonic::body::Body>;
+    type Error = Infallible;
+    type Future = BoxFuture<Result<Self::Response, Self::Error>>;
+
+    fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, request: http::Request<tonic::body::Body>) -> Self::Future {
+        let conn = self.0.conn;
+        let plan = (self.0.director)(conn);
+        let observed = Arc::clone(&self.0.observed);
+        let handler = service_fn(move |_request: tonic::Request<GetArchiveRequest>| {
+            observed.rpcs.fetch_add(1, Ordering::SeqCst);
+            let plan = plan.clone();
+            async move {
+                match plan {
+                    StreamPlan::Reject(code, message) => Err(Status::new(code, message)),
+                    StreamPlan::Cut(code) => {
+                        let (tx, rx) = tokio::sync::mpsc::channel(2);
+                        tokio::spawn(async move {
+                            let _ = tx
+                                .send(Ok(GetArchiveResponse {
+                                    data: b"partial".to_vec(),
+                                }))
+                                .await;
+                            let _ = tx.send(Err(Status::new(code, "stream cut"))).await;
+                        });
+                        Ok(tonic::Response::new(ReceiverStream::new(rx)))
+                    }
+                    StreamPlan::Serve { count, interval } => {
+                        let (tx, rx) = tokio::sync::mpsc::channel(1);
+                        tokio::spawn(async move {
+                            for _ in 0..count {
+                                tokio::time::sleep(interval).await;
+                                if tx
+                                    .send(Ok(GetArchiveResponse {
+                                        data: b"archive".to_vec(),
+                                    }))
+                                    .await
+                                    .is_err()
+                                {
+                                    return;
+                                }
+                            }
+                        });
+                        Ok(tonic::Response::new(ReceiverStream::new(rx)))
+                    }
+                }
+            }
+        });
+        Box::pin(async move {
+            let codec = tonic_prost::ProstCodec::<GetArchiveResponse, GetArchiveRequest>::default();
+            Ok(tonic::server::Grpc::new(codec)
+                .server_streaming(handler, request)
+                .await)
+        })
+    }
+}
+
 fn blob_response(conn: usize) -> ListBlobsResponse {
     ListBlobsResponse {
         blobs: vec![list_blobs_response::Blob {
@@ -437,14 +533,14 @@ fn blob_response(conn: usize) -> ListBlobsResponse {
     }
 }
 
-fn serve(count: usize, interval_ms: u64) -> Director {
+pub fn serve(count: usize, interval_ms: u64) -> Director {
     Arc::new(move |_| StreamPlan::Serve {
         count,
         interval: Duration::from_millis(interval_ms),
     })
 }
 
-fn direct(plans: &'static [StreamPlan]) -> Director {
+pub fn direct(plans: &'static [StreamPlan]) -> Director {
     Arc::new(move |conn| {
         plans
             .get(conn)
@@ -454,7 +550,7 @@ fn direct(plans: &'static [StreamPlan]) -> Director {
 }
 
 async fn list_blobs(
-    channel: Arc<super::GitalyProxyChannel>,
+    channel: Arc<crate::GitalyProxyChannel>,
 ) -> Result<tonic::Streaming<ListBlobsResponse>, Status> {
     let mut client = BlobServiceClient::new(channel.channel());
     let request = ListBlobsRequest {

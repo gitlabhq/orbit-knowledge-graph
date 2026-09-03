@@ -4,6 +4,14 @@ version.workspace = true
 edition = "2024"
 license = "LicenseRef-EE"
 
+[features]
+testkit = [
+    "dep:rcgen",
+    "dep:tokio-rustls",
+    "dep:tokio-stream",
+    "dep:tonic-prost",
+]
+
 [dependencies]
 circuit-breaker = { workspace = true }
 base64 = { workspace = true }
@@ -25,6 +33,10 @@ tokio-tungstenite = { workspace = true }
 tonic = { workspace = true }
 tower = { workspace = true }
 tracing = { workspace = true }
+tokio-stream = { workspace = true, optional = true }
+tonic-prost = { workspace = true, optional = true }
+rcgen = { workspace = true, optional = true }
+tokio-rustls = { workspace = true, optional = true }
 
 [dev-dependencies]
 axum = { workspace = true }

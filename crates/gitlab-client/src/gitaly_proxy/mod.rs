@@ -22,6 +22,3 @@ pub use error::{
     REASON_STREAM_DEADLINE, StatusClass, classify_status, proxy_reason,
 };
 pub use websocket_io::WebSocketIo;
-
-#[cfg(test)]
-mod tests;

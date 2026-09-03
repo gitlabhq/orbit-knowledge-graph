@@ -4,6 +4,9 @@ mod error;
 mod gitaly_proxy;
 mod types;
 
+#[cfg(any(test, feature = "testkit"))]
+pub mod test_support;
+
 pub use circuit_breaking::CircuitBreakingGitlabClient;
 pub use client::{ByteStream, GitlabClient, JWT_AUDIENCE, JWT_ISSUER, JWT_SUBJECT};
 pub use error::GitlabClientError;
