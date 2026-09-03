@@ -2,10 +2,12 @@ use std::collections::{HashMap, HashSet};
 
 use compiler::Input;
 use compiler::input::{
-    AggExpr, ColumnSelection, Direction, HopRange, InputAggSort, InputAggregation,
+    AggExpr, ColumnSelection, Direction, FilterOp, HopRange, InputAggSort, InputAggregation,
     InputAggregationMetric, InputFilter, InputGroupByKey, InputIdRange, InputNeighbors, InputNode,
-    InputOrderBy, InputPath, InputRelationship, OrderDirection, PathType, QueryType, TruncateUnit,
+    InputOrderBy, InputPath, InputRelationship, OrderDirection, PathType, QueryType, TargetRef,
+    TruncateUnit,
 };
+use compiler::schema_limits::{MAX_FILTER_VALUE_LEN, MAX_IN_VALUES, MAX_LIMIT};
 use ontology::constants::DEFAULT_PRIMARY_KEY;
 
 use crate::{Error, OutputColumn, Parsed, Projection};
@@ -26,14 +28,204 @@ pub(crate) struct ElementId {
     pub property: Option<String>,
 }
 
-pub(crate) enum Pred {
+pub(crate) enum Expr {
+    Or,
+    Not,
+    And(Box<Expr>, Box<Expr>),
+    Cmp(Cmp, Box<Expr>, Box<Expr>),
+    IsNull(Box<Expr>, bool),
+    Between(Box<Expr>, Box<Expr>, Box<Expr>),
+    ElementId(ElementId),
+    Call(String, Vec<Expr>),
+    Prop(String, String),
+    Value(serde_json::Value),
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum Cmp {
+    Eq,
+    Ne,
+    Lt,
+    Lte,
+    Gt,
+    Gte,
+    In,
+    StartsWith,
+    EndsWith,
+    Contains,
+}
+
+enum Pred {
     Filter(String, String, InputFilter),
     Ids(ElementId, Vec<i64>),
     IdRange(ElementId, i64, i64),
 }
 
+fn filter(op: Option<FilterOp>, value: Option<serde_json::Value>) -> InputFilter {
+    InputFilter {
+        op,
+        value,
+        ..Default::default()
+    }
+}
+
+fn lower_where(expr: Expr, out: &mut Vec<Pred>) -> Result<(), Error> {
+    match expr {
+        Expr::And(l, r) => {
+            lower_where(*l, out)?;
+            lower_where(*r, out)
+        }
+        Expr::Or => Err(unsupported("OR")),
+        Expr::Not => Err(unsupported("NOT")),
+        Expr::IsNull(target, negated) => {
+            let (var, prop) = property_of(*target)?;
+            let op = if negated {
+                FilterOp::IsNotNull
+            } else {
+                FilterOp::IsNull
+            };
+            out.push(Pred::Filter(var, prop, filter(Some(op), None)));
+            Ok(())
+        }
+        Expr::Between(target, lo, hi) => match *target {
+            Expr::ElementId(id) => {
+                out.push(Pred::IdRange(id, integer(*lo)?, integer(*hi)?));
+                Ok(())
+            }
+            other => {
+                let (var, prop) = property_of(other)?;
+                out.push(Pred::Filter(
+                    var.clone(),
+                    prop.clone(),
+                    filter(Some(FilterOp::Gte), Some(literal(*lo)?)),
+                ));
+                out.push(Pred::Filter(
+                    var,
+                    prop,
+                    filter(Some(FilterOp::Lte), Some(literal(*hi)?)),
+                ));
+                Ok(())
+            }
+        },
+        Expr::Cmp(op, l, r) => lower_comparison(op, *l, *r, out),
+        Expr::Call(name, args) => {
+            let op = match name.as_str() {
+                "token_match" => FilterOp::TokenMatch,
+                "all_tokens" => FilterOp::AllTokens,
+                "any_tokens" => FilterOp::AnyTokens,
+                _ => return Err(unsupported(format!("function {name}() in WHERE"))),
+            };
+            let mut args = args.into_iter();
+            let (Some(target), Some(pattern), None) = (args.next(), args.next(), args.next())
+            else {
+                return Err(semantic(format!(
+                    "{name}() takes (<variable>.<property>, <string>)"
+                )));
+            };
+            let (var, prop) = property_of(target)?;
+            out.push(Pred::Filter(
+                var,
+                prop,
+                filter(Some(op), Some(literal(pattern)?)),
+            ));
+            Ok(())
+        }
+        Expr::ElementId(_) | Expr::Prop(..) | Expr::Value(_) => {
+            Err(semantic("a WHERE term must be a comparison"))
+        }
+    }
+}
+
+fn lower_comparison(op: Cmp, l: Expr, r: Expr, out: &mut Vec<Pred>) -> Result<(), Error> {
+    if let Expr::ElementId(id) = l {
+        return match (op, r) {
+            (Cmp::Eq, r) => {
+                out.push(Pred::Ids(id, vec![integer(r)?]));
+                Ok(())
+            }
+            (Cmp::In, r) => {
+                let ids = integer_list(r)?;
+                out.push(Pred::Ids(id, ids));
+                Ok(())
+            }
+            _ => Err(unsupported(
+                "element_id() with anything but =, IN, or BETWEEN",
+            )),
+        };
+    }
+    if matches!(r, Expr::Prop(..) | Expr::ElementId(_)) {
+        return Err(unsupported(
+            "comparing two variables (cross-variable predicates)",
+        ));
+    }
+    let (var, prop) = property_of(l)?;
+    let value = literal(r)?;
+    let filter_op = match op {
+        Cmp::Eq => None,
+        Cmp::Ne => return Err(unsupported("<> (inequality)")),
+        Cmp::Lt => Some(FilterOp::Lt),
+        Cmp::Lte => Some(FilterOp::Lte),
+        Cmp::Gt => Some(FilterOp::Gt),
+        Cmp::Gte => Some(FilterOp::Gte),
+        Cmp::In => Some(FilterOp::In),
+        Cmp::StartsWith => Some(FilterOp::StartsWith),
+        Cmp::EndsWith => Some(FilterOp::EndsWith),
+        Cmp::Contains => Some(FilterOp::Contains),
+    };
+    out.push(Pred::Filter(var, prop, filter(filter_op, Some(value))));
+    Ok(())
+}
+
+fn property_of(expr: Expr) -> Result<(String, String), Error> {
+    match expr {
+        Expr::Prop(var, prop) => Ok((var, prop)),
+        Expr::ElementId(_) => Err(unsupported(
+            "element_id() with anything but =, IN, or BETWEEN",
+        )),
+        Expr::Value(_) => Err(semantic("the property must be on the left-hand side")),
+        _ => Err(unsupported("nested expressions as comparison operands")),
+    }
+}
+
+fn literal(expr: Expr) -> Result<serde_json::Value, Error> {
+    match expr {
+        Expr::Value(v) => Ok(v),
+        Expr::Prop(..) | Expr::ElementId(_) => Err(unsupported(
+            "comparing two variables (cross-variable predicates)",
+        )),
+        _ => Err(unsupported("nested expressions as comparison operands")),
+    }
+}
+
+fn integer(expr: Expr) -> Result<i64, Error> {
+    match literal(expr)? {
+        serde_json::Value::Number(n) if n.is_i64() => Ok(n.as_i64().expect("checked")),
+        other => Err(semantic(format!(
+            "element_id() expects an integer, got {other}"
+        ))),
+    }
+}
+
+fn integer_list(expr: Expr) -> Result<Vec<i64>, Error> {
+    let serde_json::Value::Array(items) = literal(expr)? else {
+        return Err(semantic("element_id() IN expects a list of integers"));
+    };
+    if items.is_empty() {
+        return Err(semantic("element_id() IN needs at least one id"));
+    }
+    items
+        .iter()
+        .map(|v| {
+            v.as_i64()
+                .ok_or_else(|| semantic(format!("element_id() expects integers, got {v}")))
+        })
+        .collect()
+}
+
 pub(crate) enum ReturnItem {
-    Var(String),
+    Var(String, Option<String>),
+    /// `count(*)`; a row count, which the DSL spells as `count` of a node.
+    CountAll(Option<String>),
     AllProps(String),
     Prop(String, String, Option<String>),
     Trunc(TruncateUnit, String, String, Option<String>),
@@ -42,7 +234,7 @@ pub(crate) enum ReturnItem {
 
 #[derive(Default)]
 struct Returned {
-    vars: Vec<String>,
+    vars: Vec<(String, Option<String>)>,
     props: Vec<(String, String, Option<String>)>,
     truncs: Vec<InputGroupByKey>,
 }
@@ -141,6 +333,11 @@ impl Graph {
     }
 
     fn apply(&mut self, pred: Pred) -> Result<(), Error> {
+        if let Pred::Filter(_, prop, filter) = &pred
+            && let Some(value) = &filter.value
+        {
+            check_filter_value(prop, value)?;
+        }
         match pred {
             Pred::Ids(target, ids) => self.id_target(target)?.node_ids.extend(ids),
             Pred::IdRange(target, start, end) => {
@@ -219,7 +416,7 @@ impl Graph {
 pub(crate) fn assemble(
     shortest: bool,
     patterns: Vec<Pattern>,
-    preds: Vec<Pred>,
+    filter: Option<Expr>,
     ret: Vec<ReturnItem>,
     group: Option<Vec<InputGroupByKey>>,
     order: Vec<(OrderTarget, OrderDirection)>,
@@ -240,6 +437,10 @@ pub(crate) fn assemble(
             prev = next;
         }
     }
+    let mut preds = Vec::new();
+    if let Some(expr) = filter {
+        lower_where(expr, &mut preds)?;
+    }
     for pred in preds {
         g.apply(pred)?;
     }
@@ -258,13 +459,13 @@ pub(crate) fn assemble(
                     alias,
                 });
             }
-            ReturnItem::Var(v) => {
+            ReturnItem::Var(v, alias) => {
                 g.node_mut(&v)?;
-                returned.vars.push(v);
+                returned.vars.push((v, alias));
             }
             ReturnItem::AllProps(v) => {
                 g.select_all_columns(&v)?;
-                returned.vars.push(v);
+                returned.vars.push((v, None));
             }
             ReturnItem::Prop(v, p, alias) if g.rel_index.contains_key(&v) => {
                 edge_columns.push(OutputColumn::edge_property(&v, &p, alias));
@@ -277,11 +478,28 @@ pub(crate) fn assemble(
                 g.node_mut(expr.node())?;
                 metrics.push(InputAggregationMetric { expr, alias });
             }
+            // With one node, counting it is the row count. With more, the
+            // DSL's per-node count drives hop predicates, so `*` is ambiguous.
+            ReturnItem::CountAll(alias) => {
+                let [node] = g.nodes.as_slice() else {
+                    return Err(unsupported(
+                        "count(*) over more than one node (count a specific variable)",
+                    ));
+                };
+                let expr = AggExpr::Count(TargetRef {
+                    node: node.id.clone(),
+                    property: None,
+                });
+                metrics.push(InputAggregationMetric { expr, alias });
+            }
         }
     }
 
     let mut input = Input::default();
     if let Some(limit) = limit {
+        if !(1..=MAX_LIMIT).contains(&limit) {
+            return Err(semantic(format!("LIMIT must be between 1 and {MAX_LIMIT}")));
+        }
         input.limit = limit;
     }
 
@@ -301,14 +519,15 @@ pub(crate) fn assemble(
         return Err(semantic("GROUP BY requires an aggregate in RETURN"));
     }
     let mut projection = Projection::new();
-    for v in &returned.vars {
-        projection.push(OutputColumn::node(v));
+    for (v, alias) in &returned.vars {
+        projection.push(OutputColumn::node_as(v, alias.clone()));
     }
     for (v, p, alias) in returned.props {
         projection.push(OutputColumn::property(&v, &p, alias));
         g.select_column(&v, p)?;
     }
-    if let Some(neighbors) = detect_neighbors(&mut g, &returned.vars)? {
+    let returned_vars: Vec<String> = returned.vars.into_iter().map(|(v, _)| v).collect();
+    if let Some(neighbors) = detect_neighbors(&mut g, &returned_vars)? {
         input.query_type = QueryType::Neighbors;
         input.neighbors = Some(neighbors);
     } else {
@@ -316,7 +535,7 @@ pub(crate) fn assemble(
         input.relationships = std::mem::take(&mut g.rels);
     }
     input.order_by = traversal_order(order)?;
-    input.nodes = g.nodes;
+    input.nodes = labelled(g.nodes)?;
     projection.extend(edge_columns);
     Ok(Parsed { input, projection })
 }
@@ -444,7 +663,7 @@ fn finish_path(
         forward_first_hop_rel_types: Vec::new(),
         backward_first_hop_rel_types: Vec::new(),
     });
-    input.nodes = g.nodes;
+    input.nodes = labelled(g.nodes)?;
     Ok(Parsed { input, projection })
 }
 
@@ -483,18 +702,20 @@ fn finish_aggregation(
             for key in &keys {
                 g.node_mut(key.node())?;
             }
-            let node_keys: Vec<&str> = keys
-                .iter()
-                .filter(|k| matches!(k, InputGroupByKey::Node { .. }))
-                .map(InputGroupByKey::node)
-                .collect();
-            for v in &returned_vars {
-                if !node_keys.contains(&v.as_str()) {
+            for (v, alias) in returned_vars {
+                let key = keys
+                    .iter_mut()
+                    .find(|k| matches!(k, InputGroupByKey::Node { .. }) && k.node() == v);
+                let Some(InputGroupByKey::Node {
+                    alias: key_alias, ..
+                }) = key
+                else {
                     return Err(semantic(format!(
                         "RETURN {v} is neither aggregated nor a GROUP BY key"
                     )));
-                }
-                projection.push(OutputColumn::node(v));
+                };
+                projection.push(OutputColumn::node_as(&v, alias.clone()));
+                *key_alias = alias;
             }
             for (v, p, alias) in returned_props {
                 let key = keys
@@ -515,9 +736,9 @@ fn finish_aggregation(
         }
         None => {
             let mut keys = Vec::new();
-            for node in returned_vars {
-                projection.push(OutputColumn::node(&node));
-                keys.push(InputGroupByKey::Node { node, alias: None });
+            for (node, alias) in returned_vars {
+                projection.push(OutputColumn::node_as(&node, alias.clone()));
+                keys.push(InputGroupByKey::Node { node, alias });
             }
             for (node, property, alias) in returned_props {
                 projection.push(OutputColumn::property(&node, &property, alias.clone()));
@@ -561,7 +782,7 @@ fn finish_aggregation(
         sort,
     };
     input.relationships = g.rels;
-    input.nodes = g.nodes;
+    input.nodes = labelled(g.nodes)?;
     Ok(Parsed { input, projection })
 }
 
@@ -569,4 +790,31 @@ fn same_truncation(key: &InputGroupByKey, wanted: &InputGroupByKey) -> bool {
     key.node() == wanted.node()
         && key.property() == wanted.property()
         && key.truncate() == wanted.truncate()
+}
+
+/// The DSL requires `entity` on every node; only the neighbours blank may
+/// be unlabelled, and it has been removed from the graph by this point.
+fn labelled(nodes: Vec<InputNode>) -> Result<Vec<InputNode>, Error> {
+    if let Some(node) = nodes.iter().find(|n| n.entity.is_none()) {
+        return Err(semantic(format!(
+            "node {} needs a label, e.g. ({}:Project)",
+            node.id, node.id
+        )));
+    }
+    Ok(nodes)
+}
+
+fn check_filter_value(prop: &str, value: &serde_json::Value) -> Result<(), Error> {
+    match value {
+        serde_json::Value::String(s) if s.len() > MAX_FILTER_VALUE_LEN => Err(semantic(format!(
+            "filter value on {prop} exceeds {MAX_FILTER_VALUE_LEN} characters"
+        ))),
+        serde_json::Value::Array(items) if items.len() > MAX_IN_VALUES => Err(semantic(format!(
+            "filter list on {prop} exceeds {MAX_IN_VALUES} values"
+        ))),
+        serde_json::Value::Array(items) => {
+            items.iter().try_for_each(|v| check_filter_value(prop, v))
+        }
+        _ => Ok(()),
+    }
 }

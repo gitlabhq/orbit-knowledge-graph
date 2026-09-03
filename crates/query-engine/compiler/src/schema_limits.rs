@@ -12,6 +12,8 @@ pub const MAX_FILTERS_PER_REL: usize = 5;
 pub const MAX_COLUMNS: usize = 50;
 pub const MAX_REL_TYPES: usize = 10;
 pub const MAX_FILTER_ENTRIES_PER_PROPERTY: usize = 10;
+pub const MAX_LIMIT: u32 = 1000;
+pub const MAX_FILTER_VALUE_LEN: usize = 1024;
 
 #[allow(dead_code, reason = "consumed by build.rs via include! and by tests")]
 pub const EXPECTED_FILTER_OPS: &[&str] = &[

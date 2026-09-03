@@ -1,14 +1,16 @@
 use compiler::input::{
-    AggExpr, AggFunction, Direction, FilterOp, HopRange, InputFilter, InputGroupByKey, InputNode,
+    AggExpr, AggFunction, Direction, HopRange, InputFilter, InputGroupByKey, InputNode,
     InputRelationship, OrderDirection, PropertyRef, TargetRef, TruncateUnit,
 };
 use serde_json::Value;
 
 use crate::Params;
 
-use crate::assemble::{ElementId, OrderTarget, Pattern, Pred, RelPart, ReturnItem, assemble};
+use crate::assemble::{Cmp, ElementId, Expr, OrderTarget, Pattern, RelPart, ReturnItem, assemble};
 
 const MAX_IDENTIFIER_LEN: usize = 64;
+
+const WILDCARD_RELATIONSHIP: &str = "*";
 
 const RESERVED: &[&str] = &[
     "MATCH", "WHERE", "FILTER", "RETURN", "GROUP", "BY", "ORDER", "LIMIT", "AND", "OR", "NOT",
@@ -20,14 +22,6 @@ fn eq_filter(value: Value) -> InputFilter {
     InputFilter {
         op: None,
         value: Some(value),
-        ..Default::default()
-    }
-}
-
-fn op_filter(op: FilterOp, value: Option<Value>) -> InputFilter {
-    InputFilter {
-        op: Some(op),
-        value,
         ..Default::default()
     }
 }
@@ -117,14 +111,17 @@ peg::parser! {
         rule rel_types() -> Vec<String>
             = ":" _ t:(name() ++ (_ "|" _)) { t }
 
+        rule hop_count() -> u32
+            = n:uint() {? if n == 0 { Err("hop bound of at least 1") } else { Ok(n) } }
+
         rule var_len() -> HopRange
-            = "*" min:uint()? ".." max:uint() { HopRange { min: min.unwrap_or(1), max } }
-            / "*" n:uint() { HopRange { min: n, max: n } }
+            = "*" min:hop_count()? ".." max:hop_count() { HopRange { min: min.unwrap_or(1), max } }
+            / "*" n:hop_count() { HopRange { min: n, max: n } }
             / "*" {? Err("bounded quantifier (`*..N` or `{M,N}`)") }
 
         rule quantifier() -> HopRange
-            = "{" _ min:uint() _ "," _ max:uint() _ "}" { HopRange { min, max } }
-            / "{" _ n:uint() _ "}" { HopRange { min: n, max: n } }
+            = "{" _ min:hop_count() _ "," _ max:hop_count() _ "}" { HopRange { min, max } }
+            / "{" _ n:hop_count() _ "}" { HopRange { min: n, max: n } }
 
         rule rel_body() -> RelBody
             = var:ident()? _ types:rel_types()? _ vl:var_len()? _ props:prop_map()? {
@@ -152,61 +149,51 @@ peg::parser! {
                 (shortest.unwrap_or(false), patterns)
             }
 
-        rule cmp_op() -> Option<FilterOp>
-            = ">=" { Some(FilterOp::Gte) }
-            / "<=" { Some(FilterOp::Lte) }
-            / ("<>" / "!=") {? Err("=, <, <=, >, >= (inequality is not supported)") }
-            / "=" { None }
-            / ">" { Some(FilterOp::Gt) }
-            / "<" { Some(FilterOp::Lt) }
-
-        rule id_list() -> Vec<i64>
-            = "[" _ ids:(int() ++ (_ "," _)) _ "]" { ids }
-            / "$" name:ident() {?
-                params.get(&name)
-                    .and_then(Value::as_array)
-                    .and_then(|a| a.iter().map(Value::as_i64).collect::<Option<Vec<i64>>>())
-                    .ok_or("bound integer list parameter")
-            }
-
-        rule id_value() -> i64
-            = int()
-            / "$" name:ident() {? params.get(&name).and_then(Value::as_i64).ok_or("bound integer parameter") }
-
         rule property() -> (String, String)
             = v:ident() "." p:name() { (v, p) }
 
         rule element_id() -> ElementId
             = kw("ELEMENT_ID") _ "(" _ var:ident() property:(_ "," _ p:name() { p })? _ ")" { ElementId { var, property } }
 
-        rule token_fn() -> FilterOp
-            = kw("TOKEN_MATCH") { FilterOp::TokenMatch }
-            / kw("ALL_TOKENS") { FilterOp::AllTokens }
-            / kw("ANY_TOKENS") { FilterOp::AnyTokens }
-
-        rule predicate() -> Pred
-            = e:element_id() __ kw("BETWEEN") __ start:id_value() __ kw("AND") __ end:id_value() { Pred::IdRange(e, start, end) }
-            / e:element_id() _ "=" _ id:id_value() { Pred::Ids(e, vec![id]) }
-            / e:element_id() __ kw("IN") __ ids:id_list() { Pred::Ids(e, ids) }
-            / op:token_fn() _ "(" _ p:property() _ "," _ v:value() _ ")" { Pred::Filter(p.0, p.1, op_filter(op, Some(v))) }
-            / p:property() __ kw("IS") __ kw("NOT") __ kw("NULL") { Pred::Filter(p.0, p.1, op_filter(FilterOp::IsNotNull, None)) }
-            / p:property() __ kw("IS") __ kw("NULL") { Pred::Filter(p.0, p.1, op_filter(FilterOp::IsNull, None)) }
-            / p:property() __ kw("STARTS") __ kw("WITH") __ v:value() { Pred::Filter(p.0, p.1, op_filter(FilterOp::StartsWith, Some(v))) }
-            / p:property() __ kw("ENDS") __ kw("WITH") __ v:value() { Pred::Filter(p.0, p.1, op_filter(FilterOp::EndsWith, Some(v))) }
-            / p:property() __ kw("CONTAINS") __ v:value() { Pred::Filter(p.0, p.1, op_filter(FilterOp::Contains, Some(v))) }
-            / p:property() __ kw("IN") __ v:value() { Pred::Filter(p.0, p.1, op_filter(FilterOp::In, Some(v))) }
-            / p:property() _ op:cmp_op() _ v:value() {
-                Pred::Filter(p.0, p.1, match op { Some(op) => op_filter(op, Some(v)), None => eq_filter(v) })
+        rule call() -> Expr
+            = f:$(['a'..='z' | 'A'..='Z' | '_']+) _ "(" _ args:(expr() ** (_ "," _)) _ ")" {
+                Expr::Call(f.to_ascii_lowercase(), args)
             }
-            / kw("NOT") {? Err("a property predicate (NOT is not supported)") }
-            / "(" {? Err("a property predicate (parenthesised predicates are not supported)") }
 
-        rule conjunction()
-            = __ kw("AND") __
-            / __ kw("OR") {? Err("AND (OR is not supported)") }
+        rule expr() -> Expr = precedence! {
+            (@) __ kw("OR") __ @ { Expr::Or }
+            --
+            l:(@) __ kw("AND") __ r:@ { Expr::And(Box::new(l), Box::new(r)) }
+            --
+            kw("NOT") __ @ { Expr::Not }
+            --
+            l:(@) __ kw("IS") __ kw("NOT") __ kw("NULL") { Expr::IsNull(Box::new(l), true) }
+            l:(@) __ kw("IS") __ kw("NULL") { Expr::IsNull(Box::new(l), false) }
+            l:(@) __ kw("BETWEEN") __ lo:atom() __ kw("AND") __ hi:atom() { Expr::Between(Box::new(l), Box::new(lo), Box::new(hi)) }
+            l:(@) __ kw("STARTS") __ kw("WITH") __ r:@ { Expr::Cmp(Cmp::StartsWith, Box::new(l), Box::new(r)) }
+            l:(@) __ kw("ENDS") __ kw("WITH") __ r:@ { Expr::Cmp(Cmp::EndsWith, Box::new(l), Box::new(r)) }
+            l:(@) __ kw("CONTAINS") __ r:@ { Expr::Cmp(Cmp::Contains, Box::new(l), Box::new(r)) }
+            l:(@) __ kw("IN") __ r:@ { Expr::Cmp(Cmp::In, Box::new(l), Box::new(r)) }
+            l:(@) _ "<>" _ r:@ { Expr::Cmp(Cmp::Ne, Box::new(l), Box::new(r)) }
+            l:(@) _ "!=" _ r:@ { Expr::Cmp(Cmp::Ne, Box::new(l), Box::new(r)) }
+            l:(@) _ "<=" _ r:@ { Expr::Cmp(Cmp::Lte, Box::new(l), Box::new(r)) }
+            l:(@) _ ">=" _ r:@ { Expr::Cmp(Cmp::Gte, Box::new(l), Box::new(r)) }
+            l:(@) _ "=" _ r:@ { Expr::Cmp(Cmp::Eq, Box::new(l), Box::new(r)) }
+            l:(@) _ "<" _ r:@ { Expr::Cmp(Cmp::Lt, Box::new(l), Box::new(r)) }
+            l:(@) _ ">" _ r:@ { Expr::Cmp(Cmp::Gt, Box::new(l), Box::new(r)) }
+            --
+            a:atom() { a }
+        }
 
-        rule where_clause() -> Vec<Pred>
-            = __ (kw("WHERE") / kw("FILTER")) __ preds:(predicate() ++ conjunction()) { preds }
+        rule atom() -> Expr
+            = "(" _ e:expr() _ ")" { e }
+            / e:element_id() { Expr::ElementId(e) }
+            / c:call() { c }
+            / p:property() { Expr::Prop(p.0, p.1) }
+            / v:value() { Expr::Value(v) }
+
+        rule where_clause() -> Expr
+            = __ (kw("WHERE") / kw("FILTER")) __ e:expr() { e }
 
         rule agg_fn() -> AggFunction
             = f:$(['a'..='z' | 'A'..='Z']+) &(_ "(") {?
@@ -235,7 +222,12 @@ peg::parser! {
         rule return_item() -> ReturnItem
             = v:ident() "." "*" { ReturnItem::AllProps(v) }
             / t:date_trunc() alias:alias()? { ReturnItem::Trunc(t.0, t.1, t.2, alias) }
-            / f:agg_fn() _ "(" _ "*" _ ")" {? Err("count(<variable>) (count(*) is not supported)") }
+            / f:agg_fn() _ "(" _ "*" _ ")" alias:alias()? {?
+                match f {
+                    AggFunction::Count => Ok(ReturnItem::CountAll(alias)),
+                    _ => Err("<variable>.<property> inside a non-count aggregate"),
+                }
+            }
             / f:agg_fn() _ "(" _ v:ident() p:("." p:name() { p })? _ ")" alias:alias()? {?
                 let expr = match (f, p) {
                     (AggFunction::Count, p) => AggExpr::Count(TargetRef { node: v, property: p }),
@@ -250,7 +242,7 @@ peg::parser! {
                 Ok(ReturnItem::Agg(expr, alias))
             }
             / p:property() alias:alias()? { ReturnItem::Prop(p.0, p.1, alias) }
-            / v:ident() { ReturnItem::Var(v) }
+            / v:ident() alias:alias()? { ReturnItem::Var(v, alias) }
 
         rule return_clause() -> Vec<ReturnItem>
             = kw("RETURN") __ items:(return_item() ++ (_ "," _)) { items }
@@ -278,10 +270,10 @@ peg::parser! {
             = __ kw("LIMIT") __ n:uint() { n }
 
         pub rule query() -> Result<crate::Parsed, crate::Error>
-            = _ m:match_clause() preds:where_clause()? _ ret:return_clause()
+            = _ m:match_clause() filter:where_clause()? _ ret:return_clause()
               group:group_by()? order:order_by()? limit:limit()? _ ![_]
             {
-                assemble(m.0, m.1, preds.unwrap_or_default(), ret, group, order.unwrap_or_default(), limit)
+                assemble(m.0, m.1, filter, ret, group, order.unwrap_or_default(), limit)
             }
     }
 }
@@ -307,7 +299,11 @@ impl RelPart {
     fn bare(quantifier: Option<HopRange>, direction: Direction) -> Self {
         RelPart {
             var: None,
-            rel: relationship(Vec::new(), quantifier, direction),
+            rel: relationship(
+                vec![WILDCARD_RELATIONSHIP.to_string()],
+                quantifier,
+                direction,
+            ),
             quantified: quantifier.is_some(),
         }
     }

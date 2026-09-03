@@ -91,6 +91,41 @@ fn main() {
         "/$defs/FilterEntry/oneOf",
         MAX_FILTER_ENTRIES_PER_PROPERTY,
     );
+
+    check_maximum(&schema, "/properties/limit", MAX_LIMIT);
+    check_max_length(&schema, "/$defs/SearchPattern", MAX_FILTER_VALUE_LEN);
+    check_string_branch_max_length(&schema, "/$defs/FilterValue/oneOf", MAX_FILTER_VALUE_LEN);
+}
+
+fn check_max_length(schema: &Value, ptr: &str, expected: usize) {
+    let field = format!("{ptr}/maxLength");
+    let actual = schema
+        .pointer(&field)
+        .and_then(Value::as_u64)
+        .unwrap_or_else(|| panic!("graph_query.schema.json is missing integer `{field}`"));
+    assert_eq!(
+        actual, expected as u64,
+        "DRIFT: `{field}` = {actual} but compiler cap = {expected}. \
+         Update either the schema or src/schema_limits.rs so they match."
+    );
+}
+
+fn check_string_branch_max_length(schema: &Value, ptr: &str, expected: usize) {
+    let branches = schema
+        .pointer(ptr)
+        .and_then(Value::as_array)
+        .unwrap_or_else(|| panic!("graph_query.schema.json is missing array `{ptr}`"));
+    let actual = branches
+        .iter()
+        .find(|b| b.get("type").and_then(Value::as_str) == Some("string"))
+        .and_then(|b| b.get("maxLength"))
+        .and_then(Value::as_u64)
+        .unwrap_or_else(|| panic!("`{ptr}` has no string branch with `maxLength`"));
+    assert_eq!(
+        actual, expected as u64,
+        "DRIFT: string branch of `{ptr}` has maxLength {actual} but compiler cap = {expected}. \
+         Update either the schema or src/schema_limits.rs so they match."
+    );
 }
 
 // Locates the array branch by content, not index, so branch reordering can't skip it.

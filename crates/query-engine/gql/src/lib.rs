@@ -35,9 +35,9 @@ pub enum ColumnSource {
 }
 
 impl OutputColumn {
-    fn node(var: &str) -> Self {
+    fn node_as(var: &str, alias: Option<String>) -> Self {
         Self {
-            name: var.to_string(),
+            name: alias.unwrap_or_else(|| var.to_string()),
             source: ColumnSource::Node(var.to_string()),
         }
     }
