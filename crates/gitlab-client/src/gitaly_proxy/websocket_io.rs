@@ -6,8 +6,9 @@ use bytes::Bytes;
 use futures::{Sink, Stream};
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio_tungstenite::WebSocketStream;
+use tokio_tungstenite::tungstenite::protocol::frame::CloseFrame;
 use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
-use tokio_tungstenite::tungstenite::{Error as WsError, Message};
+use tokio_tungstenite::tungstenite::{Error as WsError, Message, Utf8Bytes};
 
 /// `AsyncRead + AsyncWrite` over a WebSocket carrying a single HTTP/2
 /// connection in binary messages: one `poll_write` is one binary message, one
@@ -26,11 +27,16 @@ use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 /// code, a close without a code, or a socket that ends without a close
 /// handshake is an `io::Error`, so a truncated gRPC stream surfaces as
 /// `Unavailable` instead of a short but "successful" body.
+///
+/// Shutting the adapter down sends a 1000 close frame, so the peer applies the
+/// same rule to us: `SinkExt::close` alone would send a close without a status
+/// code, which the server logs as an abnormal end.
 pub struct WebSocketIo<S> {
     socket: WebSocketStream<S>,
     pending_read: Bytes,
     pong_unflushed: bool,
     closed_cleanly: bool,
+    close_sent: bool,
 }
 
 impl<S> WebSocketIo<S>
@@ -43,6 +49,7 @@ where
             pending_read: Bytes::new(),
             pong_unflushed: false,
             closed_cleanly: false,
+            close_sent: false,
         }
     }
 
@@ -172,6 +179,20 @@ where
     }
 
     fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        if !self.close_sent {
+            let Poll::Ready(ready) = Pin::new(&mut self.socket).poll_ready(cx) else {
+                return Poll::Pending;
+            };
+            self.close_sent = true;
+            // A peer that already closed makes both calls fail; poll_close
+            // below still completes the handshake from our side.
+            if ready.is_ok() {
+                let _ = Pin::new(&mut self.socket).start_send(Message::Close(Some(CloseFrame {
+                    code: CloseCode::Normal,
+                    reason: Utf8Bytes::default(),
+                })));
+            }
+        }
         Pin::new(&mut self.socket).poll_close(cx).map_err(ws_error)
     }
 }
