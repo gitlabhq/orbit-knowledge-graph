@@ -134,6 +134,16 @@ impl Dialer {
         })
     }
 
+    /// Replaces the platform trust store with `config` for every `wss://`
+    /// dial. Production always verifies against the platform roots; this is
+    /// the seam for tests that terminate TLS in-process with their own CA.
+    pub fn with_tls_config(self, config: Arc<rustls::ClientConfig>) -> Self {
+        Self {
+            tls: OnceLock::from(config),
+            ..self
+        }
+    }
+
     /// Built on first use so a host without a CA bundle fails at dial time,
     /// like the reqwest client does, not at construction.
     fn tls_config(&self) -> Result<Arc<rustls::ClientConfig>, GitalyProxyError> {
