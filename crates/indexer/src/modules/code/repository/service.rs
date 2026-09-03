@@ -41,13 +41,13 @@ impl From<std::io::Error> for RepositoryServiceError {
 
 const RETRY_BASE: Duration = Duration::from_secs(1);
 const RETRY_CAP: Duration = Duration::from_secs(30);
+type SleepFuture = Pin<Box<dyn std::future::Future<Output = ()> + Send>>;
+type SleepFn = dyn Fn(Duration) -> SleepFuture + Send + Sync;
 
 #[derive(Clone)]
 struct ArchiveRetry {
     max_attempts: usize,
-    sleep: Arc<
-        dyn Fn(Duration) -> Pin<Box<dyn std::future::Future<Output = ()> + Send>> + Send + Sync,
-    >,
+    sleep: Arc<SleepFn>,
     jitter: Arc<dyn Fn(Duration) -> Duration + Send + Sync>,
 }
 
