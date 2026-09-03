@@ -1,14 +1,19 @@
 //! Each declared denormalized join must hold exactly the rows a live join of its source chain yields.
 
 use clickhouse_client::FromArrowColumn;
+use integration_testkit::{
+    GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL, TestContext, load_ontology, load_seed,
+};
 use ontology::denormalized::DenormalizedJoin;
 
-use super::helpers::*;
+#[tokio::test]
+async fn denormalized_tables_match_their_source_join() {
+    let ctx = TestContext::new(&[SIPHON_SCHEMA_SQL, *GRAPH_SCHEMA_SQL]).await;
+    load_seed(&ctx, "data_correctness").await;
+    ctx.optimize_all().await;
 
-pub(super) async fn denormalized_tables_match_their_source_join(ctx: &TestContext) {
-    let ontology = load_ontology();
-    for join in ontology.denormalized_joins() {
-        let (materialized, expected) = counts(ctx, join).await;
+    for join in load_ontology().denormalized_joins() {
+        let (materialized, expected) = counts(&ctx, join).await;
         assert_eq!(
             materialized, expected,
             "{}: materialized {materialized} rows, source join yields {expected}",

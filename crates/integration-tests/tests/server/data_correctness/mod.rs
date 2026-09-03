@@ -1,6 +1,5 @@
 mod aggregation;
 mod dedup;
-mod denormalized_joins;
 mod edge_cases;
 mod helpers;
 mod neighbors;
@@ -262,7 +261,6 @@ async fn data_correctness() {
         work_items::traversal_work_item_in_milestone_returns_correct_edges,
         work_items::traversal_user_assigned_work_item_returns_correct_edges,
         work_items::traversal_work_item_has_label_returns_correct_edges,
-        denormalized_joins::denormalized_tables_match_their_source_join,
     );
 
     // Dedup tests INSERT extra rows, so they run in forked (isolated) databases
