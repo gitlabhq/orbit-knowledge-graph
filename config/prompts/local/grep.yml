@@ -1,0 +1,3 @@
+name: grep
+version: 1.0.0
+short: Search the local graph for definitions matching plain-language terms

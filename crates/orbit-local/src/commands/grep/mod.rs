@@ -46,23 +46,23 @@ fn kind_rates() -> &'static HashMap<String, KindRates> {
 }
 
 pub(crate) fn run(
-    question: String,
+    query: String,
     repo: Option<PathBuf>,
     db: Option<PathBuf>,
     limit: usize,
 ) -> Result<()> {
-    if content_words(&question).is_empty() {
-        anyhow::bail!("no usable search terms in question: {question:?}");
+    if content_words(&query).is_empty() {
+        anyhow::bail!("no usable search terms in query: {query:?}");
     }
 
     let repo_path = repo.unwrap_or_else(|| PathBuf::from("."));
     let backend = LocalBackend::open(&repo_path, db)?;
 
     let mut out = std::io::stdout().lock();
-    writeln!(out, "ask {:?} — {}", question, backend.header())?;
+    writeln!(out, "grep {:?} — {}", query, backend.header())?;
 
     let vocab = build_vocab(backend.search())?;
-    let outcome = backend.ask(&question, limit, &vocab, kind_rates())?;
+    let outcome = backend.grep(&query, limit, &vocab, kind_rates())?;
     writeln!(out, "terms: {}", outcome.terms.join(" "))?;
 
     if outcome.matches.is_empty() {
@@ -71,7 +71,7 @@ pub(crate) fn run(
             out,
             "Rephrase and retry once — use synonyms or identifier fragments \
              from the code (e.g. \"throttle\" → \"rate limit\"). If the retry \
-             also misses, fall back to grep."
+             also misses, fall back to text grep."
         )?;
         return Ok(());
     }
@@ -104,8 +104,8 @@ fn report_confidence(
     if outcome.terms.len() >= COMPOUND_TERM_HINT {
         writeln!(
             out,
-            "note: {} search terms — long or compound questions dilute matching. \
-             Ask one question at a time (\"where is X defined\", then \"how is Y \
+            "note: {} search terms — long or compound queries dilute matching. \
+             Search one thing at a time (\"where is X defined\", then \"how is Y \
              applied\") for sharper results.",
             outcome.terms.len()
         )?;

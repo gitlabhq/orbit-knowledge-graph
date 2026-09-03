@@ -335,8 +335,8 @@ mod tests {
     #[test]
     fn launcher_substitution_renders_both_distributions() {
         for (launcher, expected) in [
-            (DIRECT_LAUNCHER, "`orbit local ask"),
-            (GLAB_LAUNCHER, "`glab orbit local ask"),
+            (DIRECT_LAUNCHER, "`orbit local grep"),
+            (GLAB_LAUNCHER, "`glab orbit local grep"),
         ] {
             let rendered = render_instructions(Mode::Local, launcher);
             assert!(rendered.contains(expected), "{launcher}: {rendered}");

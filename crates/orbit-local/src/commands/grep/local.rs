@@ -44,7 +44,7 @@ impl LocalBackend {
             );
             drop(client);
             crate::index_collect(git.repo_path.clone(), 0, false, Some(db.clone()))
-                .context("failed to index the repository for ask")?;
+                .context("failed to index the repository for grep")?;
             client = sql::open_graph(Some(db))?;
             if indexed_count(&client)? == 0 {
                 anyhow::bail!(
@@ -68,14 +68,14 @@ impl LocalBackend {
         &self.search
     }
 
-    pub(super) fn ask(
+    pub(super) fn grep(
         &self,
-        question: &str,
+        query: &str,
         limit: usize,
         vocab: &SearchVocab,
         kind_rates: &std::collections::HashMap<String, KindRates>,
     ) -> Result<AskOutcome> {
-        self.search.ask(question, limit, vocab, kind_rates)
+        self.search.ask(query, limit, vocab, kind_rates)
     }
 }
 
@@ -156,8 +156,8 @@ mod tests {
     }
 
     #[test]
-    fn ask_runs_end_to_end_against_a_real_local_graph() {
-        let g = TestGraph::new("ask-e2e");
+    fn grep_runs_end_to_end_against_a_real_local_graph() {
+        let g = TestGraph::new("grep-e2e");
         g.def(1, "Dlq::publish", "publish", "app/services/dlq.rb");
         g.def(2, "Dlq::encode", "encode", "app/services/dlq.rb");
         g.def(
@@ -183,7 +183,7 @@ mod tests {
 
     #[test]
     fn hyphenated_whole_name_anchors() {
-        let g = TestGraph::new("ask-hyphen");
+        let g = TestGraph::new("grep-hyphen");
         g.def(1, "mr-title-check", "mr-title-check", ".gitlab-ci.yml");
         g.def(2, "Mr::title", "title", "app/mr.rb");
 
@@ -196,7 +196,7 @@ mod tests {
 
     #[test]
     fn fts_stopword_identifiers_are_findable() {
-        let g = TestGraph::new("ask-stopword");
+        let g = TestGraph::new("grep-stopword");
         g.def(
             1,
             "orbit_search::ask::ask",
