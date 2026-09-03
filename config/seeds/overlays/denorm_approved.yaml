@@ -1,7 +1,4 @@
-# A settings: fragment merged into schema.yaml for one run of the data
-# correctness suite (mise test:integration:overlay denorm_approved). The
-# generated table and its feeding views are created from the seed, and every
-# query in the suite compiles against the overlaid ontology.
+# Trial declaration; run with `mise test:integration:overlay denorm_approved`.
 denormalized_joins:
   - name: approved
     hops:

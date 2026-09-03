@@ -1,7 +1,4 @@
-//! Every declared denormalized join (in the ontology or a test overlay) must hold
-//! exactly the rows its source chain produces when joined directly over the
-//! seed. This checks the generated table and feeding views, independent of any
-//! query the compiler emits.
+//! Each declared denormalized join must hold exactly the rows a live join of its source chain yields.
 
 use clickhouse_client::FromArrowColumn;
 use ontology::denormalized::DenormalizedJoin;
@@ -25,8 +22,7 @@ pub(super) async fn denormalized_tables_match_their_source_join(ctx: &TestContex
     }
 }
 
-/// `(rows in the join table, rows in the equivalent live join)`, both after
-/// latest-row resolution and with deleted rows excluded.
+/// `(join table rows, live source join rows)`, both `FINAL` and not deleted.
 async fn counts(ctx: &TestContext, join: &DenormalizedJoin) -> (i64, i64) {
     let alias = |i: usize| format!("t{i}");
     let mut sql = format!(

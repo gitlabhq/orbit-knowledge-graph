@@ -112,9 +112,7 @@ pub(super) fn load_embedded_with_settings_overlay(
     })
 }
 
-/// Serves `schema.yaml` with a fragment of its `settings:` block deep-merged in.
-/// Maps merge per key and lists append, so an overlay can add a declaration
-/// (a denormalized join, an auxiliary table) without restating the file.
+/// Serves `schema.yaml` with a `settings:` fragment deep-merged in (maps merge, lists append).
 struct SettingsOverlay<'a, R> {
     inner: R,
     overlay: &'a str,

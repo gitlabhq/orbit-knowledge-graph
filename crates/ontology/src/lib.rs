@@ -582,8 +582,7 @@ impl Ontology {
         loading::load_from_dir(dir.as_ref())
     }
 
-    /// The embedded ontology with a YAML fragment of `schema.yaml`'s `settings:`
-    /// block merged in, so tests can exercise a declaration before it ships.
+    /// The embedded ontology with a `settings:` YAML fragment merged in.
     pub fn load_embedded_with_settings_overlay(overlay: &str) -> Result<Self, OntologyError> {
         loading::load_embedded_with_settings_overlay(overlay)
     }

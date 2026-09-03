@@ -16,10 +16,7 @@ pub use context::TestContext;
 pub use seed::load_seed;
 pub use seeded_resolver::SeededColumnResolver;
 
-/// Set to a file under `config/seeds/overlays/` to run the whole suite against the
-/// embedded ontology plus that `settings:` fragment. Exercises a schema
-/// declaration (its DDL, its materialized views, and every query the suite
-/// compiles) before it is promoted into `schema.yaml`.
+/// Names a `config/seeds/overlays/<name>.yaml` settings fragment to merge into the ontology for this run.
 pub const ONTOLOGY_OVERLAY_ENV: &str = "GKG_TEST_ONTOLOGY_OVERLAY";
 
 pub fn ontology_overlay() -> Option<String> {
