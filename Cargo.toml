@@ -106,7 +106,11 @@ siphon-proto = { git = "https://gitlab.com/gitlab-org/analytics-section/siphon.g
 thiserror = "2.0.18"
 tokio-stream = "0.1.18"
 # 0.28 is pinned to share the tungstenite already pulled in by kube-client.
+# `Connector::Rustls` is only exposed through a roots feature; native-roots is
+# chosen because rustls-native-certs is already in the lockfile (via
+# clickhouse). gitlab-client always supplies its own `rustls::ClientConfig`.
 tokio-tungstenite = { version = "0.28.0", features = ["rustls-tls-native-roots"] }
+tokio-rustls = { version = "0.26.4", default-features = false }
 toml = "1.0.0"
 toon-format = { version = "0.5.0", default-features = false }
 opentelemetry = { version = "0.32", default-features = false, features = ["metrics"] }

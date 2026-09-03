@@ -21,6 +21,8 @@ use gitaly_protos::proto::{ListBlobsRequest, ListBlobsResponse, Repository, list
 use orbit_server_config::GitlabClientConfiguration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
+use tokio_rustls::LazyConfigAcceptor;
+use tokio_rustls::rustls::server::Acceptor;
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::tungstenite::handshake::server::{
@@ -41,6 +43,7 @@ use super::dial::{
 };
 use super::error::GitalyProxyError;
 use super::websocket_io::WebSocketIo;
+use super::{GitalyProxyChannels, GitalyProxyDialer};
 use crate::GitlabClient;
 use crate::client::{AUTH_HEADER, JWT_AUDIENCE, JWT_ISSUER, JWT_SUBJECT};
 
@@ -139,6 +142,16 @@ struct Observed {
     rpcs: AtomicUsize,
     requests: Mutex<Vec<Request>>,
     client_closes: Mutex<Vec<Option<CloseFrame>>>,
+    /// SNI presented on each TLS connection, in accept order.
+    sni: Mutex<Vec<Option<String>>>,
+    /// How the server end of each tunneled connection ended, by connection index.
+    conn_ends: Mutex<Vec<(usize, ConnEnd)>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum ConnEnd {
+    CleanClose,
+    Error(std::io::ErrorKind),
 }
 
 struct FakeWorkhorse {
@@ -148,6 +161,22 @@ struct FakeWorkhorse {
 
 impl FakeWorkhorse {
     async fn start(preauth: Preauth, director: Director) -> Self {
+        Self::start_with(preauth, director, None).await
+    }
+
+    async fn start_tls(
+        preauth: Preauth,
+        director: Director,
+        server_config: Arc<rustls::ServerConfig>,
+    ) -> Self {
+        Self::start_with(preauth, director, Some(server_config)).await
+    }
+
+    async fn start_with(
+        preauth: Preauth,
+        director: Director,
+        tls: Option<Arc<rustls::ServerConfig>>,
+    ) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let observed = Arc::new(Observed::default());
@@ -160,10 +189,32 @@ impl FakeWorkhorse {
                 let preauth = preauth.clone();
                 let director = Arc::clone(&director);
                 let observed = Arc::clone(&accept_observed);
-                tokio::spawn(serve_connection(tcp, preauth, director, observed));
+                match tls.clone() {
+                    None => {
+                        tokio::spawn(serve_connection(tcp, preauth, director, observed));
+                    }
+                    Some(config) => {
+                        tokio::spawn(async move {
+                            let acceptor = LazyConfigAcceptor::new(Acceptor::default(), tcp);
+                            let Ok(start) = acceptor.await else {
+                                return;
+                            };
+                            let sni = start.client_hello().server_name().map(str::to_owned);
+                            observed.sni.lock().unwrap().push(sni);
+                            let Ok(stream) = start.into_stream(config).await else {
+                                return;
+                            };
+                            serve_connection(stream, preauth, director, observed).await;
+                        });
+                    }
+                }
             }
         });
         Self { addr, observed }
+    }
+
+    fn conn_ends(&self) -> Vec<(usize, ConnEnd)> {
+        self.observed.conn_ends.lock().unwrap().clone()
     }
 
     fn base_url(&self) -> String {
@@ -199,12 +250,10 @@ fn preauth_is_acceptable(preauth: &Preauth) -> bool {
     )
 }
 
-async fn serve_connection(
-    tcp: TcpStream,
-    preauth: Preauth,
-    director: Director,
-    observed: Arc<Observed>,
-) {
+async fn serve_connection<S>(tcp: S, preauth: Preauth, director: Director, observed: Arc<Observed>)
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
+{
     let callback = Answer {
         preauth: preauth.clone(),
         observed: Arc::clone(&observed),
@@ -233,6 +282,9 @@ async fn serve_connection(
     };
     let io = ServerIo {
         inner: WebSocketIo::new(socket),
+        conn,
+        observed,
+        ended: false,
     };
     let _ = tonic::transport::Server::builder()
         .add_service(stub)
@@ -242,21 +294,47 @@ async fn serve_connection(
 
 /// Server end of the tunnel. Reusing the client adapter on an accepted socket
 /// is fine here because the fake never writes outside tonic's connection task.
-struct ServerIo {
-    inner: WebSocketIo<TcpStream>,
+struct ServerIo<S> {
+    inner: WebSocketIo<S>,
+    conn: usize,
+    observed: Arc<Observed>,
+    ended: bool,
 }
 
-impl tokio::io::AsyncRead for ServerIo {
+impl<S> tokio::io::AsyncRead for ServerIo<S>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
     fn poll_read(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
         buf: &mut tokio::io::ReadBuf<'_>,
     ) -> Poll<std::io::Result<()>> {
-        Pin::new(&mut self.inner).poll_read(cx, buf)
+        let before = buf.filled().len();
+        let result = Pin::new(&mut self.inner).poll_read(cx, buf);
+        let end = match &result {
+            Poll::Ready(Ok(())) if buf.filled().len() == before => Some(ConnEnd::CleanClose),
+            Poll::Ready(Err(error)) => Some(ConnEnd::Error(error.kind())),
+            _ => None,
+        };
+        if let Some(end) = end
+            && !self.ended
+        {
+            self.ended = true;
+            self.observed
+                .conn_ends
+                .lock()
+                .unwrap()
+                .push((self.conn, end));
+        }
+        result
     }
 }
 
-impl tokio::io::AsyncWrite for ServerIo {
+impl<S> tokio::io::AsyncWrite for ServerIo<S>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
     fn poll_write(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
@@ -274,7 +352,7 @@ impl tokio::io::AsyncWrite for ServerIo {
     }
 }
 
-impl Connected for ServerIo {
+impl<S> Connected for ServerIo<S> {
     type ConnectInfo = ();
 
     fn connect_info(&self) -> Self::ConnectInfo {}
@@ -578,6 +656,30 @@ mod websocket_io {
             [Bytes::from_static(b"first"), Bytes::from_static(b"second")]
         );
     }
+
+    #[tokio::test]
+    async fn shutdown_sends_a_normal_close_frame() {
+        let (close_tx, close_rx) = tokio::sync::oneshot::channel();
+        let mut io = raw_pair(|mut socket| async move {
+            let frame = loop {
+                match socket.next().await {
+                    Some(Ok(Message::Close(frame))) => break frame,
+                    Some(Ok(_)) => continue,
+                    other => panic!("expected a close frame, got {other:?}"),
+                }
+            };
+            close_tx.send(frame).unwrap();
+            while socket.next().await.is_some() {}
+        })
+        .await;
+
+        io.shutdown().await.unwrap();
+        let frame = close_rx
+            .await
+            .unwrap()
+            .expect("close frame with a status code");
+        assert_eq!(frame.code, CloseCode::Normal);
+    }
 }
 
 mod handshake {
@@ -793,6 +895,16 @@ mod rotation {
         assert_eq!(second_paths, vec!["conn-1"; 6]);
         assert_eq!(fake.upgrades(), 2);
         assert_eq!(fake.rpcs(), 2);
+
+        // The slot already let go of conn 0 when it rotated; the test's own
+        // holder is the only thing keeping the old socket open.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(fake.conn_ends().is_empty(), "{:?}", fake.conn_ends());
+
+        drop(first_channel);
+        wait_until(|| !fake.conn_ends().is_empty()).await;
+        assert_eq!(fake.conn_ends(), vec![(0, ConnEnd::CleanClose)]);
+        drop(second_channel);
     }
 
     #[tokio::test]
@@ -937,5 +1049,79 @@ mod retry_once {
         assert_eq!(blob_paths(stream).await, vec!["conn-0"; 3]);
         assert_eq!(fake.upgrades(), 1);
         assert_eq!(fake.rpcs(), 1);
+    }
+}
+
+mod tls {
+    use super::*;
+    use tokio_rustls::rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
+
+    const DOMAIN: &str = "gitlab.example.test";
+
+    /// Self-signed certificate for `san` plus a client config that trusts only
+    /// it, so verification is real but hermetic.
+    fn test_pki(san: &str) -> (Arc<rustls::ServerConfig>, Arc<rustls::ClientConfig>) {
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+        let key = rcgen::KeyPair::generate().unwrap();
+        let cert = rcgen::CertificateParams::new(vec![san.to_owned()])
+            .unwrap()
+            .self_signed(&key)
+            .unwrap();
+        let cert_der: CertificateDer<'static> = cert.der().clone();
+        let key_der = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(key.serialize_der()));
+
+        let server = rustls::ServerConfig::builder()
+            .with_no_client_auth()
+            .with_single_cert(vec![cert_der.clone()], key_der)
+            .unwrap();
+        let mut roots = rustls::RootCertStore::empty();
+        roots.add(cert_der).unwrap();
+        let client = rustls::ClientConfig::builder()
+            .with_root_certificates(roots)
+            .with_no_client_auth();
+        (Arc::new(server), Arc::new(client))
+    }
+
+    /// `.test` never resolves, so a completed handshake proves `resolve_host`
+    /// carried the TCP connect to the fake while the URL kept the domain.
+    fn channels(fake: &FakeWorkhorse, client: Arc<rustls::ClientConfig>) -> GitalyProxyChannels {
+        let base_url = format!("https://{DOMAIN}:{}", fake.addr.port());
+        let dialer = GitalyProxyDialer::new(&base_url, Some("127.0.0.1"), SECRET.to_vec())
+            .unwrap()
+            .with_tls_config(client);
+        GitalyProxyChannels::new(dialer)
+    }
+
+    #[tokio::test]
+    async fn tunnel_completes_over_tls_with_the_configured_domain_as_sni_and_host() {
+        let (server, client) = test_pki(DOMAIN);
+        let fake = FakeWorkhorse::start_tls(Preauth::ok("600"), serve(2, 0), server).await;
+
+        let channel = channels(&fake, client).get(PROJECT_ID).await.unwrap();
+        let paths = blob_paths(list_blobs(channel).await.unwrap()).await;
+
+        assert_eq!(paths, vec!["conn-0"; 2]);
+        assert_eq!(fake.upgrades(), 1);
+        assert_eq!(
+            *fake.observed.sni.lock().unwrap(),
+            vec![Some(DOMAIN.to_owned())]
+        );
+        let request = fake.observed.requests.lock().unwrap()[0].clone();
+        assert_eq!(
+            request.headers()[http::header::HOST].to_str().unwrap(),
+            format!("{DOMAIN}:{}", fake.addr.port())
+        );
+    }
+
+    #[tokio::test]
+    async fn certificate_for_another_name_fails_the_handshake() {
+        let (server, client) = test_pki("other.example.test");
+        let fake = FakeWorkhorse::start_tls(Preauth::ok("600"), serve(1, 0), server).await;
+
+        let error = channels(&fake, client).get(PROJECT_ID).await.unwrap_err();
+
+        assert!(matches!(error, GitalyProxyError::Handshake(_)), "{error}");
+        assert_eq!(fake.upgrades(), 0);
+        assert!(fake.observed.requests.lock().unwrap().is_empty());
     }
 }

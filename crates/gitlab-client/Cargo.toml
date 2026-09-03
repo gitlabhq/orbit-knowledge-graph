@@ -28,5 +28,7 @@ tracing = { workspace = true }
 
 [dev-dependencies]
 axum = { workspace = true }
+rcgen = { workspace = true }
+tokio-rustls = { workspace = true }
 tokio-stream = { workspace = true }
 tonic-prost = { workspace = true }
