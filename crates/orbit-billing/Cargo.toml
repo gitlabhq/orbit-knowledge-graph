@@ -8,6 +8,7 @@ license = "LicenseRef-EE"
 path = "src/lib.rs"
 
 [dependencies]
+gitlab-client = { path = "../gitlab-client" }
 labkit = { workspace = true }
 labkit-events = { workspace = true }
 orbit-observability = { workspace = true }

@@ -204,6 +204,7 @@ analytics:
 billing:
   enabled: false
   collector_url: "http://localhost:9090"
+  auth_mode: oidc
   quota:
     enabled: false
     customers_dot_url: "http://localhost:5000"

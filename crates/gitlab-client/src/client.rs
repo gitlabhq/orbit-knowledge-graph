@@ -11,7 +11,7 @@ use serde::Serialize;
 use tracing::debug;
 
 use crate::error::GitlabClientError;
-use crate::types::{MergeRequestDiffBatch, ProjectInfo};
+use crate::types::{CloudConnectorToken, MergeRequestDiffBatch, ProjectInfo};
 use orbit_server_config::GitlabClientConfiguration;
 
 pub type ByteStream = Pin<Box<dyn Stream<Item = Result<bytes::Bytes, GitlabClientError>> + Send>>;
@@ -129,6 +129,19 @@ impl GitlabClient {
 
         let info: ProjectInfo = response.json().await?;
         Ok(info)
+    }
+
+    pub async fn cloud_connector_token(&self) -> Result<CloudConnectorToken, GitlabClientError> {
+        let url = format!(
+            "{}/api/v4/internal/orbit/cloud_connector_token",
+            self.base_url
+        );
+
+        debug!(url = %url, "fetching cloud connector token from GitLab");
+
+        let response = self.authenticated_get(&url).await?;
+        Self::check_token_response_status(&response)?;
+        Ok(response.json().await?)
     }
 
     pub async fn download_archive(
@@ -336,6 +349,17 @@ impl GitlabClient {
             }),
             _ => Err(GitlabClientError::Unexpected(format!(
                 "unexpected status {status}"
+            ))),
+        }
+    }
+
+    fn check_token_response_status(response: &reqwest::Response) -> Result<(), GitlabClientError> {
+        let status = response.status();
+        match status {
+            StatusCode::OK => Ok(()),
+            StatusCode::UNAUTHORIZED => Err(GitlabClientError::Unauthorized),
+            _ => Err(GitlabClientError::Unexpected(format!(
+                "cloud connector token request returned status {status}"
             ))),
         }
     }
