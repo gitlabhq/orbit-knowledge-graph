@@ -104,6 +104,8 @@ async fn main() -> anyhow::Result<()> {
                 datalake: config.datalake.clone(),
                 engine: config.engine.clone(),
                 gitlab: config.gitlab_client_config(),
+                gitaly_transport: config.gitlab.gitaly_transport,
+                gitaly_proxy: config.gitlab.gitaly_proxy.clone(),
                 schedule: config.schedule.clone(),
                 health_bind_address: config.indexer_health_bind_address,
                 schema: config.schema.clone(),

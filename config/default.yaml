@@ -54,11 +54,15 @@ graph:
     wait_for_async_insert: "1"
     async_insert_deduplicate: "0"
 
-# gitlab:
-#   base_url: "http://localhost:3000"
-#   jwt:
-#     signing_key: ""
-#     verifying_key: ""
+gitlab:
+  # base_url: "http://localhost:3000"
+  gitaly_transport: rails_http
+  gitaly_proxy:
+    stream_retry_max_attempts: 3
+  # jwt:
+  #   signing_key: ""
+  #   verifying_key: ""
+  # resolve_host: ""
 
 # tls:
 #   cert_path: "/path/to/cert.pem"

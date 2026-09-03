@@ -2,7 +2,8 @@ use std::net::SocketAddr;
 
 use orbit_server_config::{
     AnalyticsConfig, ClickHouseConfiguration, EngineConfigError, EngineConfiguration,
-    GitlabClientConfiguration, NatsConfiguration, ScheduleConfig, SchemaConfig,
+    GitalyProxyConfig, GitalyTransport, GitlabClientConfiguration, NatsConfiguration,
+    ScheduleConfig, SchemaConfig,
 };
 use thiserror::Error;
 
@@ -29,6 +30,10 @@ pub struct IndexerConfig {
     #[serde(default)]
     pub gitlab: Option<GitlabClientConfiguration>,
     #[serde(default)]
+    pub gitaly_transport: GitalyTransport,
+    #[serde(default)]
+    pub gitaly_proxy: GitalyProxyConfig,
+    #[serde(default)]
     pub schedule: ScheduleConfig,
     #[serde(default = "default_health_bind_address")]
     pub health_bind_address: SocketAddr,
@@ -46,6 +51,8 @@ impl Default for IndexerConfig {
             datalake: ClickHouseConfiguration::default(),
             engine: EngineConfiguration::default(),
             gitlab: None,
+            gitaly_transport: GitalyTransport::default(),
+            gitaly_proxy: GitalyProxyConfig::default(),
             schedule: ScheduleConfig::default(),
             health_bind_address: default_health_bind_address(),
             schema: SchemaConfig::default(),

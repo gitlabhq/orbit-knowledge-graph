@@ -29,8 +29,8 @@ pub use checkpoint::ClickHouseCodeCheckpointStore;
 pub use handler::CodeIndexingTaskHandler;
 pub use pipeline::{CodeIndexer, IndexError, IndexingRequest};
 pub use repository::{
-    CachingRepositoryService, LocalRepositoryCache, RailsRepositoryService, RepositoryCache,
-    RepositoryService, RepositoryServiceError,
+    CachingRepositoryService, GitalyRepositoryService, LocalRepositoryCache,
+    RailsRepositoryService, RepositoryCache, RepositoryService, RepositoryServiceError,
 };
 pub use stale_data_cleaner::{ClickHouseStaleDataCleaner, StaleDataCleaner};
 
@@ -67,16 +67,35 @@ pub async fn register_handlers(
     let gitlab_client =
         Arc::new(GitlabClient::new(gitlab_config.clone()).map_err(HandlerInitError::new)?);
     let client = Arc::new(config.graph.build_client());
+    let metrics = CodeMetrics::new();
 
+    let rails = RailsRepositoryService::create(Arc::clone(&gitlab_client));
+    let transport: Arc<dyn RepositoryService> = match config.gitaly_transport {
+        orbit_server_config::GitalyTransport::RailsHttp => rails,
+        orbit_server_config::GitalyTransport::WorkhorseWs => GitalyRepositoryService::create(
+            Arc::clone(&gitlab_client),
+            rails,
+            false,
+            config.gitaly_proxy.stream_retry_max_attempts,
+            metrics.clone(),
+        ),
+        orbit_server_config::GitalyTransport::WorkhorseWsWithFallback => {
+            GitalyRepositoryService::create(
+                Arc::clone(&gitlab_client),
+                rails,
+                true,
+                config.gitaly_proxy.stream_retry_max_attempts,
+                metrics.clone(),
+            )
+        }
+    };
     let repository_service: Arc<dyn RepositoryService> =
-        CachingRepositoryService::create(RailsRepositoryService::create(gitlab_client));
+        CachingRepositoryService::create(transport);
     let checkpoint_store: Arc<dyn checkpoint::CodeCheckpointStore> =
         Arc::new(ClickHouseCodeCheckpointStore::new(Arc::clone(&client)));
     let stale_data_cleaner: Arc<dyn stale_data_cleaner::StaleDataCleaner> = Arc::new(
         stale_data_cleaner::ClickHouseStaleDataCleaner::new(client, &table_names),
     );
-    let metrics = CodeMetrics::new();
-
     let local_cache = LocalRepositoryCache::new(
         LocalRepositoryCache::default_dir(),
         code_indexing_task_config.pipeline.max_file_size_bytes,

@@ -434,6 +434,38 @@
       "domain": "indexer.etl"
     },
     {
+      "otel_name": "gkg.gitaly.archive.restart",
+      "prom_name": "gkg_gitaly_archive_restart_total",
+      "description": "Gitaly archive streams restarted from zero after a transport cut.",
+      "kind": "counter",
+      "labels": [
+        "reason"
+      ],
+      "stability": "stable",
+      "domain": "indexer.code"
+    },
+    {
+      "otel_name": "gkg.gitaly.stream.deadline",
+      "prom_name": "gkg_gitaly_stream_deadline_total",
+      "description": "Gitaly archive streams terminated by the proxy stream deadline.",
+      "kind": "counter",
+      "labels": [],
+      "stability": "stable",
+      "domain": "indexer.code"
+    },
+    {
+      "otel_name": "gkg.gitaly.transport.calls",
+      "prom_name": "gkg_gitaly_transport_calls_total",
+      "description": "Gitaly archive transport calls by transport and outcome.",
+      "kind": "counter",
+      "labels": [
+        "transport",
+        "outcome"
+      ],
+      "stability": "stable",
+      "domain": "indexer.code"
+    },
+    {
       "otel_name": "gkg.indexer.code.archive.bytes.skipped",
       "prom_name": "gkg_indexer_code_archive_bytes_skipped_bytes_total",
       "description": "Total bytes that the archive extractor refused to write to disk, summed from the tar header sizes of skipped entries. Same `reason` labels as `gkg.indexer.code.archive.entries.skipped`.",

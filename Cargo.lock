@@ -5841,6 +5841,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tokio-util",
+ "tonic",
  "tower",
  "tracing",
  "uuid",

@@ -3,6 +3,34 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+fn default_stream_retry_max_attempts() -> usize {
+    3
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum GitalyTransport {
+    #[default]
+    RailsHttp,
+    WorkhorseWs,
+    WorkhorseWsWithFallback,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct GitalyProxyConfig {
+    #[serde(default = "default_stream_retry_max_attempts")]
+    pub stream_retry_max_attempts: usize,
+}
+
+impl Default for GitalyProxyConfig {
+    fn default() -> Self {
+        Self {
+            stream_retry_max_attempts: default_stream_retry_max_attempts(),
+        }
+    }
+}
+
 /// Configuration for connecting to the GitLab internal API.
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
@@ -37,6 +65,10 @@ pub struct GitlabConfig {
     pub jwt: JwtConfig,
     #[serde(default)]
     pub resolve_host: Option<String>,
+    #[serde(default)]
+    pub gitaly_transport: GitalyTransport,
+    #[serde(default)]
+    pub gitaly_proxy: GitalyProxyConfig,
 }
 
 impl GitlabConfig {
@@ -48,5 +80,39 @@ impl GitlabConfig {
             signing_key,
             resolve_host: self.resolve_host.clone(),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gitaly_transport_defaults_to_rails_http() {
+        let config: GitlabConfig = serde_json::from_str("{}").unwrap();
+
+        assert_eq!(config.gitaly_transport, GitalyTransport::RailsHttp);
+        assert_eq!(config.gitaly_proxy.stream_retry_max_attempts, 3);
+    }
+
+    #[test]
+    fn parses_all_gitaly_transport_modes() {
+        for (value, expected) in [
+            ("rails_http", GitalyTransport::RailsHttp),
+            ("workhorse_ws", GitalyTransport::WorkhorseWs),
+            (
+                "workhorse_ws_with_fallback",
+                GitalyTransport::WorkhorseWsWithFallback,
+            ),
+        ] {
+            let config: GitlabConfig = serde_json::from_value(serde_json::json!({
+                "gitaly_transport": value,
+                "gitaly_proxy": { "stream_retry_max_attempts": 7 }
+            }))
+            .unwrap();
+
+            assert_eq!(config.gitaly_transport, expected);
+            assert_eq!(config.gitaly_proxy.stream_retry_max_attempts, 7);
+        }
     }
 }

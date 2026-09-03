@@ -7,6 +7,6 @@ pub(crate) mod service;
 pub use cache::{LocalRepositoryCache, RepositoryCache};
 pub use resolver::{EmptyRepositoryReason, RepositoryResolver, ResolveError};
 pub use service::{
-    ByteStream, CachingRepositoryService, RailsRepositoryService, RepositoryService,
-    RepositoryServiceError,
+    ByteStream, CachingRepositoryService, GitalyRepositoryService, RailsRepositoryService,
+    RepositoryService, RepositoryServiceError,
 };

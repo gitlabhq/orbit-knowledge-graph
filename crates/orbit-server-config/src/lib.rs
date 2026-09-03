@@ -36,7 +36,9 @@ pub use engine::{
     StaleEdgeReconciliationConfig, SubscriptionConfig, TableCleanupConfig,
 };
 pub use features::{Feature, FeatureScope, FeaturesConfig};
-pub use gitlab::{GitlabClientConfiguration, GitlabConfig, JwtConfig};
+pub use gitlab::{
+    GitalyProxyConfig, GitalyTransport, GitlabClientConfiguration, GitlabConfig, JwtConfig,
+};
 pub use grpc::GrpcConfig;
 pub use health_check::{HealthCheckConfig, NamespaceTarget};
 pub use metrics::{MetricsConfig, OtelConfig, PrometheusConfig};

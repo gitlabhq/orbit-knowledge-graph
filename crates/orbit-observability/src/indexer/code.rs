@@ -9,6 +9,7 @@ pub mod labels {
     pub const STAGE: &str = "stage";
     pub const LANGUAGE: &str = "language";
     pub const PHASE: &str = "phase";
+    pub const TRANSPORT: &str = "transport";
 }
 
 const DOMAIN: &str = "indexer.code";
@@ -36,6 +37,30 @@ pub const REPOSITORY_FETCH_DURATION: MetricSpec = MetricSpec::histogram_f64(
     Some("s"),
     &[],
     LATENCY_SLOW,
+    DOMAIN,
+);
+
+pub const GITALY_TRANSPORT_CALLS: MetricSpec = MetricSpec::counter(
+    "gkg.gitaly.transport.calls",
+    "Gitaly archive transport calls by transport and outcome.",
+    None,
+    &[labels::TRANSPORT, labels::OUTCOME],
+    DOMAIN,
+);
+
+pub const GITALY_ARCHIVE_RESTART: MetricSpec = MetricSpec::counter(
+    "gkg.gitaly.archive.restart",
+    "Gitaly archive streams restarted from zero after a transport cut.",
+    None,
+    &[labels::REASON],
+    DOMAIN,
+);
+
+pub const GITALY_STREAM_DEADLINE: MetricSpec = MetricSpec::counter(
+    "gkg.gitaly.stream.deadline",
+    "Gitaly archive streams terminated by the proxy stream deadline.",
+    None,
+    &[],
     DOMAIN,
 );
 
@@ -220,6 +245,9 @@ pub const CATALOG: &[&MetricSpec] = &[
     &EVENTS_PROCESSED,
     &HANDLER_DURATION,
     &REPOSITORY_FETCH_DURATION,
+    &GITALY_TRANSPORT_CALLS,
+    &GITALY_ARCHIVE_RESTART,
+    &GITALY_STREAM_DEADLINE,
     &REPOSITORY_RESOLUTION_STRATEGY,
     &REPOSITORY_CLEANUP,
     &REPOSITORY_EMPTY,

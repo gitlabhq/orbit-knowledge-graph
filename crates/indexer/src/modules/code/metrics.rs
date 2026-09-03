@@ -31,6 +31,9 @@ pub struct CodeMetrics {
     pub(in crate::modules::code) language_files: Counter<u64>,
     pub(in crate::modules::code) language_bytes: Counter<u64>,
     pub(in crate::modules::code) pipeline_phase_duration: Histogram<f64>,
+    pub(in crate::modules::code) gitaly_transport_calls: Counter<u64>,
+    pub(in crate::modules::code) gitaly_archive_restart: Counter<u64>,
+    pub(in crate::modules::code) gitaly_stream_deadline: Counter<u64>,
 }
 
 impl CodeMetrics {
@@ -64,6 +67,9 @@ impl CodeMetrics {
             language_files: code::LANGUAGE_FILES.build_counter_u64(meter),
             language_bytes: code::LANGUAGE_BYTES.build_counter_u64(meter),
             pipeline_phase_duration: code::PIPELINE_PHASE_DURATION.build_histogram_f64(meter),
+            gitaly_transport_calls: code::GITALY_TRANSPORT_CALLS.build_counter_u64(meter),
+            gitaly_archive_restart: code::GITALY_ARCHIVE_RESTART.build_counter_u64(meter),
+            gitaly_stream_deadline: code::GITALY_STREAM_DEADLINE.build_counter_u64(meter),
         }
     }
 }
@@ -210,6 +216,29 @@ impl CodeMetrics {
     pub(in crate::modules::code) fn record_fetch_duration(&self, elapsed: Duration) {
         self.repository_fetch_duration
             .record(elapsed.as_secs_f64(), &[]);
+    }
+
+    pub(in crate::modules::code) fn record_gitaly_transport(
+        &self,
+        transport: &'static str,
+        outcome: &'static str,
+    ) {
+        self.gitaly_transport_calls.add(
+            1,
+            &[
+                KeyValue::new(code::labels::TRANSPORT, transport),
+                KeyValue::new(code::labels::OUTCOME, outcome),
+            ],
+        );
+    }
+
+    pub(in crate::modules::code) fn record_gitaly_restart(&self, reason: &'static str) {
+        self.gitaly_archive_restart
+            .add(1, &[KeyValue::new(code::labels::REASON, reason)]);
+    }
+
+    pub(in crate::modules::code) fn record_gitaly_stream_deadline(&self) {
+        self.gitaly_stream_deadline.add(1, &[]);
     }
 
     pub(in crate::modules::code) fn record_indexing_duration(&self, elapsed: Duration) {
