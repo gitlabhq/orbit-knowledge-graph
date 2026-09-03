@@ -576,11 +576,15 @@ pub trait RepositoryService: Send + Sync {
 
 pub struct RailsRepositoryService {
     gitlab_client: Arc<GitlabClient>,
+    metrics: CodeMetrics,
 }
 
 impl RailsRepositoryService {
     pub fn create(gitlab_client: Arc<GitlabClient>) -> Arc<dyn RepositoryService> {
-        Arc::new(Self { gitlab_client })
+        Arc::new(Self {
+            gitlab_client,
+            metrics: CodeMetrics::new(),
+        })
     }
 }
 
@@ -601,6 +605,7 @@ impl RepositoryService for RailsRepositoryService {
             .gitlab_client
             .download_archive(project_id, ref_name)
             .await?;
+        self.metrics.record_gitaly_transport("rails_http", "ok");
 
         Ok(Box::pin(
             stream.map(|r| r.map_err(RepositoryServiceError::GitlabApi)),
