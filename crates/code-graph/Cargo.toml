@@ -16,9 +16,9 @@ anyhow = { workspace = true }
 arrow = { workspace = true }
 bumpalo = { workspace = true }
 cargo-platform = { workspace = true }
-comrak = { workspace = true }
 cargo-util-schemas = { workspace = true }
 cargo_metadata = { workspace = true }
+comrak = { workspace = true }
 cpu-time = { workspace = true }
 crossbeam-channel = "0.5"
 either = { workspace = true }
