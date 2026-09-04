@@ -24,15 +24,23 @@ fn build_cleanup_task(context: &TestContext) -> TableCleanup {
     )
 }
 
+/// Two inserts so the live rows and the tombstones land in separate parts; a single insert would
+/// collapse each key to its newest row before the task ever sees the hidden rows.
 async fn seed_users_with_tombstones(context: &TestContext) {
     context
         .execute(&format!(
             "INSERT INTO {} (id, username, _version, _deleted) VALUES \
              (1, 'u1', now64(6) - INTERVAL 1 DAY, false), \
-             (1, 'u1', now64(6) - INTERVAL 1 HOUR, true), \
              (2, 'u2', now64(6) - INTERVAL 30 DAY, false), \
-             (2, 'u2', now64(6) - INTERVAL 10 DAY, true), \
              (3, 'u3', now64(6) - INTERVAL 1 DAY, false)",
+            t("gl_user")
+        ))
+        .await;
+    context
+        .execute(&format!(
+            "INSERT INTO {} (id, username, _version, _deleted) VALUES \
+             (1, 'u1', now64(6) - INTERVAL 1 HOUR, true), \
+             (2, 'u2', now64(6) - INTERVAL 10 DAY, true)",
             t("gl_user")
         ))
         .await;
@@ -80,7 +88,7 @@ async fn second_pass_leaves_a_clean_table_unchanged() {
 }
 
 #[tokio::test]
-async fn skips_tables_whose_parts_persist_only_the_block_offset() {
+async fn skips_tables_that_do_not_declare_both_block_columns() {
     let context = TestContext::new(&[*GRAPH_SCHEMA_SQL]).await;
     context
         .execute(&format!(
@@ -95,6 +103,42 @@ async fn skips_tables_whose_parts_persist_only_the_block_offset() {
     assert_eq!(
         user_rows(&context).await,
         vec![(1, 0), (1, 1), (2, 0), (2, 1), (3, 0)]
+    );
+}
+
+/// Mirrors ClickHouse Cloud, where merges persist `_block_offset` while `_block_number` stays
+/// virtual: rows from different source blocks then share one patch identity.
+#[tokio::test]
+async fn skips_tables_whose_merged_parts_persist_only_the_block_offset() {
+    let context = TestContext::new(&[*GRAPH_SCHEMA_SQL]).await;
+    context
+        .execute(&format!(
+            "ALTER TABLE {} MODIFY SETTING enable_block_number_column = 0",
+            t("gl_user")
+        ))
+        .await;
+    seed_users_with_tombstones(&context).await;
+    context
+        .execute(&format!(
+            "INSERT INTO {} (id, username, _version, _deleted) VALUES (4, 'u4', now64(6), false)",
+            t("gl_user")
+        ))
+        .await;
+    context
+        .execute(&format!("OPTIMIZE TABLE {} FINAL", t("gl_user")))
+        .await;
+    context
+        .execute(&format!(
+            "ALTER TABLE {} MODIFY SETTING enable_block_number_column = 1",
+            t("gl_user")
+        ))
+        .await;
+
+    build_cleanup_task(&context).run().await.unwrap();
+
+    assert_eq!(
+        user_rows(&context).await,
+        vec![(1, 1), (2, 1), (3, 0), (4, 0)]
     );
 }
 

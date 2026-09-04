@@ -205,7 +205,13 @@ impl TableCleanup {
         }
         let mut unsafe_tables = self.unsafe_tables.lock().await;
         for table in &self.tables {
-            if self.count(&offset_only_parts_sql(&table.name)).await? > 0 {
+            if self.count(&block_settings_missing_sql(&table.name)).await? > 0 {
+                warn!(
+                    table = table.name,
+                    "table does not persist both block columns; skipping table cleanup until its DDL declares them"
+                );
+                unsafe_tables.insert(table.name.clone());
+            } else if self.count(&offset_only_parts_sql(&table.name)).await? > 0 {
                 warn!(
                     table = table.name,
                     "parts persist _block_offset without _block_number, so patch deletes could hit look-alike rows; skipping table cleanup until the table is rebuilt"
@@ -652,6 +658,14 @@ fn escape(literal: &str) -> String {
     literal.replace('\\', "\\\\").replace('\'', "\\'")
 }
 
+fn block_settings_missing_sql(table: &str) -> String {
+    format!(
+        "SELECT 1 FROM system.tables WHERE database = currentDatabase() AND name = '{table}' \
+         AND (engine_full NOT LIKE '%enable_block_number_column = 1%' \
+              OR engine_full NOT LIKE '%enable_block_offset_column = 1%')"
+    )
+}
+
 /// ClickHouse Cloud persists `_block_offset` on merged parts while `_block_number` stays virtual,
 /// so the `(_block_number, _block_offset)` identity a patch joins on repeats inside one part.
 fn offset_only_parts_sql(table: &str) -> String {
@@ -948,6 +962,19 @@ mod tests {
                GROUP BY traversal_path, project_id, name) AS b \
                ON s.traversal_path = b.traversal_path AND s.project_id = b.project_id AND s.branch = b.branch \
              WHERE b.branch_version >= s.bound"
+        );
+    }
+
+    #[test]
+    fn missing_block_settings_are_detected_from_engine_full() {
+        let sql = block_settings_missing_sql("v99_gl_edge");
+        assert!(
+            sql.contains("engine_full NOT LIKE '%enable_block_number_column = 1%'"),
+            "{sql}"
+        );
+        assert!(
+            sql.contains("engine_full NOT LIKE '%enable_block_offset_column = 1%'"),
+            "{sql}"
         );
     }
 
