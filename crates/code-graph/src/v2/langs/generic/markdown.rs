@@ -46,7 +46,7 @@ struct SectionFrame {
     level: u8,
     segment: String,
     def_idx: usize,
-    child_names: rustc_hash::FxHashMap<String, usize>,
+    child_segments: rustc_hash::FxHashSet<String>,
 }
 
 fn section_definitions<'a>(
@@ -61,7 +61,7 @@ fn section_definitions<'a>(
         .unwrap_or(file_path);
 
     let mut stack: Vec<SectionFrame> = Vec::new();
-    let mut root_names: rustc_hash::FxHashMap<String, usize> = rustc_hash::FxHashMap::default();
+    let mut root_segments: rustc_hash::FxHashSet<String> = rustc_hash::FxHashSet::default();
     let mut definitions: Vec<CanonicalDefinition> = Vec::new();
     let close = |stack: &mut Vec<SectionFrame>,
                  definitions: &mut Vec<CanonicalDefinition>,
@@ -90,17 +90,16 @@ fn section_definitions<'a>(
         let start = lines.byte(data.sourcepos.start);
         close(&mut stack, &mut definitions, heading.level, start);
         let segment = {
-            let seen = stack
+            let used = stack
                 .last_mut()
-                .map_or(&mut root_names, |f| &mut f.child_names);
-            let count = seen.entry(name.clone()).or_insert(0);
-            let segment = if *count == 0 {
-                name.clone()
-            } else {
-                format!("{name}-{count}")
-            };
-            *count += 1;
-            segment
+                .map_or(&mut root_segments, |f| &mut f.child_segments);
+            let mut candidate = name.clone();
+            let mut n = 1;
+            while !used.insert(candidate.clone()) {
+                candidate = format!("{name}-{n}");
+                n += 1;
+            }
+            candidate
         };
         let fqn = {
             let parts: Vec<&str> = std::iter::once(stem)
@@ -114,7 +113,7 @@ fn section_definitions<'a>(
             level: heading.level,
             segment,
             def_idx: definitions.len(),
-            child_names: rustc_hash::FxHashMap::default(),
+            child_segments: rustc_hash::FxHashSet::default(),
         });
         definitions.push(CanonicalDefinition {
             definition_type: "Section",
@@ -346,6 +345,20 @@ mod tests {
             ]
         );
         assert!(result.definitions[1..].iter().all(|d| d.name == "Examples"));
+    }
+
+    #[test]
+    fn generated_suffixes_skip_segments_a_real_heading_already_uses() {
+        let result = parse("# Examples\n\n# Examples-1\n\n# Examples\n").unwrap();
+        let fqns: Vec<String> = result
+            .definitions
+            .iter()
+            .map(|d| d.fqn.to_string())
+            .collect();
+        assert_eq!(
+            fqns,
+            vec!["guide#Examples", "guide#Examples-1", "guide#Examples-2"]
+        );
     }
 
     #[test]
