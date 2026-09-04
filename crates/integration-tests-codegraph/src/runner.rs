@@ -228,7 +228,6 @@ pub async fn run_yaml_suite(yaml: &str) {
                 faults: std::sync::Mutex::new(Vec::new()),
                 file_timings: std::sync::Mutex::new(Vec::new()),
                 language_timings: std::sync::Mutex::new(Vec::new()),
-                file_links: std::sync::Mutex::new(Vec::new()),
             });
             let converter = LanceConverter::new();
             let (tx, rx) = crossbeam_channel::unbounded();

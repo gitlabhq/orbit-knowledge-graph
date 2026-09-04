@@ -1,14 +1,11 @@
 use std::path::Path;
 
-use comrak::nodes::{AstNode, LineColumn, NodeValue, Sourcepos};
+use comrak::nodes::{AstNode, LineColumn, NodeValue};
 use comrak::{Arena, Options, parse_document};
 
 use crate::v2::config::Language;
 use crate::v2::dsl::types::*;
-use crate::v2::types::{
-    CanonicalDefinition, CanonicalImport, DefKind, Fqn, ImportBindingKind, ImportMode, Position,
-    Range,
-};
+use crate::v2::types::{CanonicalDefinition, CanonicalImport, DefKind, Fqn, Position, Range};
 
 #[derive(Default)]
 pub struct MarkdownDsl;
@@ -25,17 +22,9 @@ impl DslLanguage for MarkdownDsl {
     fn parser() -> LanguageParser {
         LanguageParser::Custom(parse_markdown)
     }
-
-    fn hooks() -> LanguageHooks {
-        LanguageHooks {
-            lexical_file_links: true,
-            ..LanguageHooks::default()
-        }
-    }
 }
 
 const MAX_SECTIONS_PER_FILE: usize = 10_000;
-const MAX_LINKS_PER_FILE: usize = 10_000;
 
 fn parse_markdown(
     source: &str,
@@ -49,7 +38,7 @@ fn parse_markdown(
 
     (
         section_definitions(root, source, file_path, &lines),
-        link_imports(root, source, file_path, &lines),
+        Vec::new(),
     )
 }
 
@@ -144,48 +133,6 @@ fn section_definitions<'a>(
     definitions
 }
 
-fn link_imports<'a>(
-    root: &'a AstNode<'a>,
-    source: &str,
-    file_path: &str,
-    lines: &LineIndex,
-) -> Vec<CanonicalImport> {
-    let mut imports = Vec::new();
-    for node in root.descendants() {
-        let data = node.data.borrow();
-        let url = match &data.value {
-            NodeValue::Link(link) | NodeValue::Image(link) => &link.url,
-            _ => continue,
-        };
-        let Some(target) = repo_link_target(url) else {
-            continue;
-        };
-        if imports.len() == MAX_LINKS_PER_FILE {
-            tracing::debug!(file_path, cap = MAX_LINKS_PER_FILE, "link cap hit");
-            break;
-        }
-        let name = target
-            .rsplit('/')
-            .next()
-            .map(|f| f.rsplit_once('.').map_or(f, |(base, _)| base))
-            .filter(|s| !s.is_empty())
-            .map(str::to_string);
-        imports.push(CanonicalImport {
-            import_type: "Link",
-            binding_kind: ImportBindingKind::Named,
-            mode: ImportMode::Declarative,
-            path: target,
-            name,
-            alias: None,
-            scope_fqn: None,
-            range: lines.range(data.sourcepos, source),
-            is_type_only: false,
-            wildcard: false,
-        });
-    }
-    imports
-}
-
 fn inline_text<'a>(node: &'a AstNode<'a>) -> String {
     let mut text = String::new();
     for child in node.descendants().skip(1) {
@@ -197,16 +144,6 @@ fn inline_text<'a>(node: &'a AstNode<'a>) -> String {
         }
     }
     text.trim().to_string()
-}
-
-fn repo_link_target(raw: &str) -> Option<String> {
-    let target = raw.trim().trim_start_matches('<').trim_end_matches('>');
-    let target = target.split(['#', '?']).next().unwrap_or("").trim();
-    (!target.is_empty()
-        && !target.starts_with("//")
-        && !target.contains(':')
-        && !target.contains(char::is_whitespace))
-    .then(|| target.to_string())
 }
 
 struct LineIndex {
@@ -242,16 +179,6 @@ impl LineIndex {
             .partition_point(|start| *start <= offset)
             .saturating_sub(1);
         Position::new(line, offset - self.starts[line])
-    }
-
-    fn range(&self, sourcepos: Sourcepos, source: &str) -> Range {
-        let start = self.byte(sourcepos.start);
-        let end_start = self.byte(sourcepos.end);
-        let end = source
-            .get(end_start..)
-            .and_then(|rest| rest.chars().next())
-            .map_or(self.len, |c| end_start + c.len_utf8());
-        Range::new(self.position(start), self.position(end), (start, end))
     }
 }
 
@@ -351,64 +278,12 @@ mod tests {
     }
 
     #[test]
-    fn relative_links_become_imports_and_external_links_are_ignored() {
-        let result = parse(
-            "# Guide\n\nSee [security](../design/security.md#auth) and [the API](https://example.com/api?v=2),\nplus [setup](./setup.md) and [root](/docs/root.md) but not [mail](mailto:x@y.z) or [cdn](//cdn.example.com/x.md).\n",
-        )
-        .unwrap();
-        let links: Vec<(&str, &str)> = result
-            .imports
-            .iter()
-            .map(|i| (i.import_type, i.path.as_str()))
-            .collect();
-        assert_eq!(
-            links,
-            vec![
-                ("Link", "../design/security.md"),
-                ("Link", "./setup.md"),
-                ("Link", "/docs/root.md"),
-            ]
-        );
-        assert_eq!(result.imports[0].name.as_deref(), Some("security"));
-    }
-
-    #[test]
-    fn reference_style_links_resolve_to_their_definition() {
-        let result = parse(
-            "# Guide\n\nSee [the security doc][sec] and [setup] too.\n\n[sec]: ../design/security.md\n[setup]: ./setup.md\n",
-        )
-        .unwrap();
-        let paths: Vec<&str> = result.imports.iter().map(|i| i.path.as_str()).collect();
-        assert_eq!(paths, vec!["../design/security.md", "./setup.md"]);
-    }
-
-    #[test]
-    fn repeated_links_to_one_target_get_distinct_ranges() {
-        let src = "# Guide\n\nIntro [setup](./setup.md) and later [again](./setup.md).\n";
-        let result = parse(src).unwrap();
-        assert_eq!(result.imports.len(), 2);
-        let offsets: Vec<(usize, usize)> =
-            result.imports.iter().map(|i| i.range.byte_offset).collect();
-        assert_ne!(offsets[0], offsets[1]);
-        assert_eq!(&src[offsets[0].0..offsets[0].1], "[setup](./setup.md)");
-        assert_eq!(&src[offsets[1].0..offsets[1].1], "[again](./setup.md)");
-    }
-
-    #[test]
     fn front_matter_does_not_become_a_section() {
         let result =
             parse("---\ntitle: \"ADR 000\"\nauthors: [ \"@x\" ]\n---\n\n# Real Heading\n\nBody.\n")
                 .unwrap();
         let names: Vec<&str> = result.definitions.iter().map(|d| d.name.as_str()).collect();
         assert_eq!(names, vec!["Real Heading"]);
-    }
-
-    #[test]
-    fn image_destinations_are_treated_as_file_links() {
-        let result =
-            parse("# G\n\n![diagram](assets/arch.png) and ![ext](https://x.io/a.png)\n").unwrap();
-        let paths: Vec<&str> = result.imports.iter().map(|i| i.path.as_str()).collect();
-        assert_eq!(paths, vec!["assets/arch.png"]);
     }
 
     #[test]
@@ -419,49 +294,28 @@ mod tests {
     }
 
     #[test]
-    fn multibyte_text_keeps_link_ranges_on_char_boundaries() {
-        let src = "# \u{dc}n\u{ef}code\n\nS\u{e9}e [s\u{e9}tup](./s\u{e9}tup.md) und [zwei](docs/z\u{e4}hler.md).\n";
-        let result = parse(src).unwrap();
-        assert_eq!(result.imports.len(), 2);
-        assert_eq!(
-            &src[result.imports[0].range.byte_offset.0..result.imports[0].range.byte_offset.1],
-            "[s\u{e9}tup](./s\u{e9}tup.md)"
-        );
-        assert_eq!(result.imports[1].path, "docs/z\u{e4}hler.md");
-        assert_eq!(result.definitions[0].name, "\u{dc}n\u{ef}code");
-    }
-
-    #[test]
-    fn section_and_link_emission_is_capped_per_file() {
+    fn section_emission_is_capped_per_file() {
         let headings: String = (0..MAX_SECTIONS_PER_FILE + 50)
             .map(|i| format!("# h{i}\n"))
             .collect();
-        let links: String = (0..MAX_LINKS_PER_FILE + 50)
-            .map(|i| format!("[l{i}](./f{i}.md) "))
-            .collect();
-        let result = parse(&format!("{headings}\n{links}\n")).unwrap();
+        let result = parse(&headings).unwrap();
         assert_eq!(result.definitions.len(), MAX_SECTIONS_PER_FILE);
-        assert_eq!(result.imports.len(), MAX_LINKS_PER_FILE);
     }
 
     #[test]
     fn every_range_is_in_bounds_and_on_char_boundaries() {
         let cases = [
-            "> > > [deep](./a.md) *em [b](./b.md)* `c`\n> > ## Quoted \u{e9}h\n",
-            "- [x] task [t](./t.md)\n  - nested\n    1. [n](./n.md)\n",
-            "| a | b |\n|---|---|\n| [l](./l.md) | \u{4f60}\u{597d} |\n",
-            "# A\n\n***bold em [x](./x.md)*** ~~strike~~ **unclosed [y](./y.md)\n",
-            "Setext \u{e9}\n===\n\ntext [z](./z.md)\n\nSub\n---\n",
-            "\u{feff}# BOM lead\n[a](./a.md)\n",
-            "# No trailing newline [e](./e.md)",
+            "> > > *em* `c`\n> > ## Quoted \u{e9}h\n",
+            "- [x] task\n  - nested\n    1. ### deep\n",
+            "| a | b |\n|---|---|\n| l | \u{4f60}\u{597d} |\n\n## After table\n",
+            "# A\n\n***bold em*** ~~strike~~ **unclosed\n",
+            "Setext \u{e9}\n===\n\ntext\n\nSub\n---\n",
+            "\u{feff}# BOM lead\n",
+            "# No trailing newline",
         ];
         for src in cases {
-            let (definitions, imports) = super::parse_markdown(src, "g.md");
-            for range in definitions
-                .iter()
-                .map(|d| d.range)
-                .chain(imports.iter().map(|i| i.range))
-            {
+            let (definitions, _) = super::parse_markdown(src, "g.md");
+            for range in definitions.iter().map(|d| d.range) {
                 let (start, end) = range.byte_offset;
                 assert!(start <= end, "inverted range {range} in {src:?}");
                 assert!(end <= src.len(), "out of bounds {range} in {src:?}");
@@ -474,16 +328,8 @@ mod tests {
     }
 
     #[test]
-    fn link_names_keep_every_dot_but_the_extension() {
-        let result = parse("# G\n\nSee [v2](docs/reference.v2.md).\n").unwrap();
-        assert_eq!(result.imports[0].name.as_deref(), Some("reference.v2"));
-    }
-
-    #[test]
     fn custom_parse_respects_the_per_file_cpu_budget() {
-        let doc: String = (0..2000)
-            .map(|i| format!("# h{i}\n\ntext [l{i}](./f{i}.md)\n\n"))
-            .collect();
+        let doc: String = (0..2000).map(|i| format!("# h{i}\n\ntext\n\n")).collect();
         let result = MarkdownDsl::spec().parse_full_collect(
             doc.as_bytes(),
             "big.md",

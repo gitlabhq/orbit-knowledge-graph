@@ -202,10 +202,6 @@ pub struct PipelineContext {
     pub faults: std::sync::Mutex<Vec<crate::v2::error::FaultedFile>>,
     pub file_timings: std::sync::Mutex<Vec<FileTimingEntry>>,
     pub language_timings: std::sync::Mutex<Vec<LanguageTimings>>,
-    /// File -> File links collected by family pipelines (see
-    /// [`crate::v2::dsl::types::LanguageHooks::lexical_file_links`]), resolved
-    /// against the full inventory when the structural graph is built.
-    pub file_links: std::sync::Mutex<Vec<crate::v2::linker::PendingFileLink>>,
 }
 
 impl PipelineContext {
@@ -726,7 +722,6 @@ impl Pipeline {
             faults: std::sync::Mutex::new(Vec::new()),
             file_timings: std::sync::Mutex::new(Vec::new()),
             language_timings: std::sync::Mutex::new(Vec::new()),
-            file_links: std::sync::Mutex::new(Vec::new()),
         });
 
         // 2. Process languages with bounded concurrency. At most
@@ -953,18 +948,8 @@ impl Pipeline {
             for f in &faults {
                 reasons.insert(f.path.as_str(), FileReason::Fault(f.kind));
             }
-            let file_links = ctx
-                .file_links
-                .lock()
-                .map(|mut links| std::mem::take(&mut *links))
-                .unwrap_or_default();
-            let structural_graph = build_file_inventory_graph(
-                root,
-                &file_inventory,
-                &parsed_file_languages,
-                &reasons,
-                &file_links,
-            );
+            let structural_graph =
+                build_file_inventory_graph(root, &file_inventory, &parsed_file_languages, &reasons);
             write_graph_direct(
                 structural_graph,
                 converter.as_ref(),
@@ -1332,23 +1317,10 @@ impl FamilyPipeline {
             });
         graph.reserve_for(parsed_files, parsed_defs, parsed_imports);
 
-        let mut file_links = Vec::new();
         for parsed_file in parsed.into_iter().flatten() {
             let path = &files[parsed_file.path_idx].path;
             total_defs += parsed_file.result.definitions.len();
             total_imports += parsed_file.result.imports.len();
-
-            if member_ctxs[&parsed_file.language]
-                .spec
-                .hooks
-                .lexical_file_links
-            {
-                crate::v2::linker::lexical_file_links(
-                    path,
-                    &parsed_file.result.imports,
-                    &mut file_links,
-                );
-            }
 
             let (file_node, def_nodes, import_nodes) = graph.add_file(
                 path,
@@ -1380,11 +1352,6 @@ impl FamilyPipeline {
         ));
 
         graph.finalize(tracer);
-        if !file_links.is_empty()
-            && let Ok(mut pending) = ctx.file_links.lock()
-        {
-            pending.extend(file_links);
-        }
         graph.drop_construction_indexes();
         let graph_build_ms = t0.elapsed().as_secs_f64() * 1000.0 - parse_ms;
 
@@ -1771,7 +1738,6 @@ mod tests {
             faults: std::sync::Mutex::new(Vec::new()),
             file_timings: std::sync::Mutex::new(Vec::new()),
             language_timings: std::sync::Mutex::new(Vec::new()),
-            file_links: std::sync::Mutex::new(Vec::new()),
         });
         let capture = Arc::new(TestCapture::new());
         let noop = |_: &str, _: RecordBatch| Ok(());
@@ -2098,75 +2064,6 @@ mod tests {
     }
 
     #[test]
-    fn markdown_links_resolve_across_language_families() {
-        let tmp = tempfile::tempdir().unwrap();
-        let root = tmp.path();
-        std::fs::create_dir_all(root.join("docs")).unwrap();
-        std::fs::create_dir_all(root.join("src")).unwrap();
-        let readme = "# Hi\n\nSee [guide](docs/guide.md), [main](src/main.py), and [gone](docs/missing.md).\n";
-        let guide = "# Guide\n\nBack to [readme](../README.md), [main](/src/main.py), and [gone](/etc/passwd).\n";
-        let main_py = "def hello(): pass\n";
-        std::fs::write(root.join("README.md"), readme).unwrap();
-        std::fs::write(root.join("docs/guide.md"), guide).unwrap();
-        std::fs::write(root.join("src/main.py"), main_py).unwrap();
-
-        let inventory = vec![
-            FileInventoryEntry {
-                path: "README.md".into(),
-                size: readme.len() as u64,
-                decision: Decision::Parse,
-            },
-            FileInventoryEntry {
-                path: "docs/guide.md".into(),
-                size: guide.len() as u64,
-                decision: Decision::Parse,
-            },
-            FileInventoryEntry {
-                path: "src/main.py".into(),
-                size: main_py.len() as u64,
-                decision: Decision::Parse,
-            },
-        ];
-
-        let capture = Arc::new(TestCapture::new());
-        let result = Pipeline::run_with_tracer(
-            root,
-            Arc::from(inventory),
-            PipelineConfig::default(),
-            &FxHashMap::default(),
-            crate::v2::trace::Tracer::new(false),
-            capture.clone(),
-            Arc::new(|_: &str, _: RecordBatch| Ok(())),
-        );
-        assert_eq!(result.errors.len(), 0, "Should have no errors");
-
-        let graphs = capture.take();
-        let mut links: Vec<(String, String)> = graphs
-            .iter()
-            .filter(|g| g.output.writes_repository_structure())
-            .flat_map(|g| g.edges())
-            .filter_map(|(src, tgt, edge)| match (src, tgt) {
-                (crate::v2::linker::GraphNode::File(s), crate::v2::linker::GraphNode::File(t))
-                    if edge.relationship.edge_kind == crate::v2::types::EdgeKind::Imports =>
-                {
-                    Some((s.path.clone(), t.path.clone()))
-                }
-                _ => None,
-            })
-            .collect();
-        links.sort();
-        assert_eq!(
-            links,
-            vec![
-                ("README.md".into(), "docs/guide.md".into()),
-                ("README.md".into(), "src/main.py".into()),
-                ("docs/guide.md".into(), "README.md".into()),
-                ("docs/guide.md".into(), "src/main.py".into()),
-            ]
-        );
-    }
-
-    #[test]
     fn supplied_inventory_is_the_only_file_list() {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path();
@@ -2433,7 +2330,6 @@ namespace MyApp {
             faults: std::sync::Mutex::new(Vec::new()),
             file_timings: std::sync::Mutex::new(Vec::new()),
             language_timings: std::sync::Mutex::new(Vec::new()),
-            file_links: std::sync::Mutex::new(Vec::new()),
         });
         ctx.record_skip(
             "src/slow.rs",

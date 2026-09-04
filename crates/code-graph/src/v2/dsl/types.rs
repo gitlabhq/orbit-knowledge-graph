@@ -809,11 +809,6 @@ pub struct LanguageHooks {
     /// `None` to keep the original. Used by Ruby to resolve
     /// `obj.send(:foo)` as `obj.foo`.
     pub ref_name_rewrite: Option<fn(&N<'_>, &str) -> Option<String>>,
-    /// Collect this language's relative link imports as pending File ->
-    /// File links after the family graph is finalized. They resolve against
-    /// the full file inventory in the structural graph, so links may target
-    /// files of any language. Used by Markdown for doc links.
-    pub lexical_file_links: bool,
 }
 
 fn build_dispatch(rules: &[ScopeRule]) -> FxHashMap<&'static str, Vec<usize>> {

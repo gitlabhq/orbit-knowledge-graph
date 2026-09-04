@@ -489,29 +489,6 @@ impl CodeGraph {
         self.build_ancestor_table(tracer);
     }
 
-    pub fn link_files(&mut self, links: &[PendingFileLink]) {
-        let Some(file_index) = self.indexes.file_index.as_ref() else {
-            return;
-        };
-        let mut pending: Vec<(NodeIndex, NodeIndex)> = links
-            .iter()
-            .filter_map(|link| {
-                let &source = file_index.get(&link.source)?;
-                let &target = file_index.get(&link.target)?;
-                (source != target).then_some((source, target))
-            })
-            .collect();
-        pending.sort();
-        pending.dedup();
-        for (source, target) in pending {
-            self.graph.add_edge(
-                source,
-                target,
-                GraphEdge::structural(EdgeKind::Imports, NodeKind::File, NodeKind::File),
-            );
-        }
-    }
-
     fn build_ancestor_table(&mut self, tracer: &crate::v2::trace::Tracer) {
         let extends_only = EdgeFiltered(
             &self.graph,
@@ -1702,78 +1679,5 @@ mod tests {
             }
         ));
         assert_eq!(typed.stage(), "graph_node");
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct PendingFileLink {
-    pub source: String,
-    pub target: String,
-}
-
-pub fn lexical_file_links(
-    file_path: &str,
-    imports: &[CanonicalImport],
-    out: &mut Vec<PendingFileLink>,
-) {
-    let dir = Path::new(file_path)
-        .parent()
-        .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_default();
-    for import in imports {
-        if import.import_type != "Link" {
-            continue;
-        }
-        let target = match import.path.strip_prefix('/') {
-            Some(rooted) => normalize_relative_path("", rooted),
-            None => normalize_relative_path(&dir, &import.path),
-        };
-        let Some(target) = target else {
-            continue;
-        };
-        out.push(PendingFileLink {
-            source: file_path.to_string(),
-            target,
-        });
-    }
-}
-
-fn normalize_relative_path(dir: &str, link: &str) -> Option<String> {
-    let mut parts: Vec<&str> = if dir.is_empty() {
-        Vec::new()
-    } else {
-        dir.split('/').collect()
-    };
-    for segment in link.split('/') {
-        match segment {
-            "" | "." => {}
-            ".." => {
-                parts.pop()?;
-            }
-            other => parts.push(other),
-        }
-    }
-    Some(parts.join("/"))
-}
-
-#[cfg(test)]
-mod path_tests {
-    use super::normalize_relative_path;
-
-    #[test]
-    fn resolves_dot_segments_lexically() {
-        assert_eq!(
-            normalize_relative_path("docs/dev", "../design/security.md"),
-            Some("docs/design/security.md".to_string())
-        );
-        assert_eq!(
-            normalize_relative_path("docs", "./guide.md"),
-            Some("docs/guide.md".to_string())
-        );
-        assert_eq!(
-            normalize_relative_path("", "README.md"),
-            Some("README.md".to_string())
-        );
-        assert_eq!(normalize_relative_path("docs", "../../escape.md"), None);
     }
 }
