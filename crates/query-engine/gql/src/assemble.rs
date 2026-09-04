@@ -7,7 +7,6 @@ use compiler::input::{
     InputOrderBy, InputPath, InputRelationship, OrderDirection, PathType, QueryType, TargetRef,
     TruncateUnit,
 };
-use compiler::schema_limits::{MAX_FILTER_VALUE_LEN, MAX_IN_VALUES, MAX_LIMIT};
 use ontology::constants::DEFAULT_PRIMARY_KEY;
 
 use crate::{Error, OutputColumn, Parsed, Projection};
@@ -333,11 +332,6 @@ impl Graph {
     }
 
     fn apply(&mut self, pred: Pred) -> Result<(), Error> {
-        if let Pred::Filter(_, prop, filter) = &pred
-            && let Some(value) = &filter.value
-        {
-            check_filter_value(prop, value)?;
-        }
         match pred {
             Pred::Ids(target, ids) => self.id_target(target)?.node_ids.extend(ids),
             Pred::IdRange(target, start, end) => {
@@ -497,9 +491,6 @@ pub(crate) fn assemble(
 
     let mut input = Input::default();
     if let Some(limit) = limit {
-        if !(1..=MAX_LIMIT).contains(&limit) {
-            return Err(semantic(format!("LIMIT must be between 1 and {MAX_LIMIT}")));
-        }
         input.limit = limit;
     }
 
@@ -802,19 +793,4 @@ fn labelled(nodes: Vec<InputNode>) -> Result<Vec<InputNode>, Error> {
         )));
     }
     Ok(nodes)
-}
-
-fn check_filter_value(prop: &str, value: &serde_json::Value) -> Result<(), Error> {
-    match value {
-        serde_json::Value::String(s) if s.len() > MAX_FILTER_VALUE_LEN => Err(semantic(format!(
-            "filter value on {prop} exceeds {MAX_FILTER_VALUE_LEN} characters"
-        ))),
-        serde_json::Value::Array(items) if items.len() > MAX_IN_VALUES => Err(semantic(format!(
-            "filter list on {prop} exceeds {MAX_IN_VALUES} values"
-        ))),
-        serde_json::Value::Array(items) => {
-            items.iter().try_for_each(|v| check_filter_value(prop, v))
-        }
-        _ => Ok(()),
-    }
 }

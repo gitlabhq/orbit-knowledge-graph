@@ -2,6 +2,7 @@
 
 mod assemble;
 mod grammar;
+pub mod limits;
 
 use std::collections::HashMap;
 
@@ -88,18 +89,30 @@ pub enum Error {
     Unsupported(String),
     #[error("{0}")]
     Semantic(String),
+    #[error("{0}")]
+    Depth(String),
+    #[error("{0}")]
+    Limit(String),
 }
 
 impl From<Error> for QueryError {
     fn from(e: Error) -> Self {
-        QueryError::Validation(e.to_string())
+        match e {
+            Error::Depth(msg) => QueryError::DepthExceeded(msg),
+            Error::Limit(msg) => QueryError::LimitExceeded(msg),
+            other => QueryError::Validation(other.to_string()),
+        }
     }
 }
 
 /// Parse a GQL query into the compiler's [`Input`] without compiling it.
 pub fn parse(gql: &str, params: &Params) -> Result<Parsed, Error> {
     match grammar::gql::query(gql, params) {
-        Ok(parsed) => parsed,
+        Ok(parsed) => {
+            let parsed = parsed?;
+            limits::check(&parsed.input)?;
+            Ok(parsed)
+        }
         Err(e) => Err(Error::Syntax {
             line: e.location.line,
             column: e.location.column,

@@ -5,10 +5,9 @@ use compiler::input::{
 use serde_json::Value;
 
 use crate::Params;
+use crate::limits::MAX_IDENTIFIER_LEN;
 
 use crate::assemble::{Cmp, ElementId, Expr, OrderTarget, Pattern, RelPart, ReturnItem, assemble};
-
-const MAX_IDENTIFIER_LEN: usize = 64;
 
 const WILDCARD_RELATIONSHIP: &str = "*";
 

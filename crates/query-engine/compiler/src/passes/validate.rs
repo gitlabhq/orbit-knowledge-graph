@@ -237,8 +237,9 @@ impl<'a> Validator<'a> {
     }
 
     /// Defense-in-depth: reject queries that exceed hard caps on complexity.
-    /// The JSON schema already enforces these limits via maxItems / maximum /
-    /// maxProperties, so this only fires if schema validation was somehow bypassed.
+    /// Each frontend already enforces its own caps (the JSON schema via
+    /// maxItems / maximum / maxProperties, `orbit-gql` via its `limits`
+    /// module), so this only fires if a frontend was somehow bypassed.
     pub fn check_depth(&self, input: &Input) -> Result<()> {
         use crate::schema_limits::{
             MAX_COLUMNS, MAX_DEPTH_CAP, MAX_FILTER_ENTRIES_PER_PROPERTY, MAX_FILTERS_PER_NODE,

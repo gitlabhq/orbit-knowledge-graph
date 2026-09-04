@@ -127,8 +127,9 @@ pub fn compile(
 /// Compile an [`Input`] assembled by a non-JSON frontend (e.g. GQL).
 ///
 /// Runs the same pipeline as [`compile`] except that JSON Schema validation
-/// is replaced by [`passes::validate::Validator::check_allowlist`] over the
-/// struct, so every downstream security pass applies unchanged.
+/// is skipped: the frontend owns its own syntax and complexity caps, and
+/// [`passes::validate::Validator::check_references`] runs over the struct so
+/// every downstream security pass applies unchanged.
 #[must_use = "the compiled query context should be used"]
 pub fn compile_structured(
     input: Input,
