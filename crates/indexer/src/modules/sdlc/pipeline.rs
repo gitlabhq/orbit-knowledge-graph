@@ -281,7 +281,8 @@ impl Pipeline {
         stats.duration_ms = elapsed.as_millis() as u64;
         self.metrics
             .record_pipeline_completion(&plan.name, elapsed.as_secs_f64());
-        self.metrics.record_watermark_lag(&window.target);
+        self.metrics
+            .record_watermark_lag(&plan.name, &window.target);
 
         {
             let mut observer = context.observer.lock().unwrap();

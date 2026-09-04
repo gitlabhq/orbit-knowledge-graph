@@ -75,7 +75,7 @@ pub const WATERMARK_LAG: MetricSpec = MetricSpec::gauge(
     "gkg.indexer.sdlc.watermark.lag",
     "Seconds between the current watermark and wall-clock time (data freshness).",
     Some("s"),
-    &[],
+    &[labels::ENTITY],
     DOMAIN,
 );
 
