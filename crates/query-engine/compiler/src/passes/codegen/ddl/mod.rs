@@ -468,21 +468,12 @@ fn convert_projection(proj: &StorageProjection) -> ProjectionDef {
 fn partition_by<'a>(
     partition: Option<&PartitionConfig>,
     table: &str,
-    columns: impl IntoIterator<Item = &'a str>,
+    _columns: impl IntoIterator<Item = &'a str>,
 ) -> Vec<String> {
-    let Some(p) = partition.filter(|p| p.is_partitioned(table)) else {
+    let Some(_p) = partition.filter(|p| p.is_partitioned(table)) else {
         return vec![];
     };
-    let column = p.column();
-    if columns.into_iter().any(|c| c == column) {
-        let expr = crate::passes::partition::partition_expr(
-            &p.strategy,
-            crate::ast::Expr::Identifier(column.to_string()),
-        );
-        vec![clickhouse::emit_partition_expr(&expr)]
-    } else {
-        vec![]
-    }
+    vec![]
 }
 
 fn build_node_table(
