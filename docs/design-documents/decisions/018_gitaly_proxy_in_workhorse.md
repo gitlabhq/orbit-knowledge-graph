@@ -230,8 +230,8 @@ the same edge cost.
 ### Add real inbound HTTP/2 to Workhorse
 
 Native gRPC would remove the tunnel. It requires a coordinated edge change
-across the Linux package, charts, GitLab.com, and Dedicated for one current
-consumer. We consider that a separate platform decision.
+across every supported deployment topology for one consumer. We consider that a
+separate platform decision.
 
 ### Reverse tunnel over the existing Workhorse to Orbit connection
 
