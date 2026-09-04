@@ -2,7 +2,6 @@
 
 description: Supertype relationships in source code (inheritance, interface implementation, struct embedding, mixin composition)
 table: gl_code_edge
-search_weight: 1.0
 
 variants:
   - from_node: { type: Definition, id: id }

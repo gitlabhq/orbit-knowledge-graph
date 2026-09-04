@@ -5,7 +5,7 @@ use crate::{DuckDbClient, f64_column, i64_column, scalar_i64, sql_lit, string_co
 use orbit_search::corpus::{EXCLUDE_LIKE, EXCLUDE_REGEX, ext_regex, search_corpus_exts};
 use orbit_search::grep::{GrepError, GrepSource, grep};
 use orbit_search::{
-    ANCHOR_SIM, CorpusRow, EXACT_NAME_SIM, Edge, GrepOutcome, SearchVocab, TermRecall,
+    ANCHOR_SIM, CorpusRow, EXACT_NAME_SIM, Edge, GrepOutcome, RecallFilter, SearchVocab, TermRecall,
 };
 
 pub const CONTEXT_SIM_CAP: f64 = 0.99;
@@ -16,6 +16,16 @@ pub const FTS_STEMMER: &str = "english";
 
 pub fn def_doc_table(project_id: i64) -> String {
     format!("gl_def_doc_{project_id}")
+}
+
+pub fn def_doc_sql(doc_table: &str) -> String {
+    format!(
+        "CREATE OR REPLACE TABLE {doc_table} AS
+SELECT DISTINCT commit_sha, id AS def_id,
+       fts_doc(def_name(fqn)) AS name,
+       fts_doc(fqn || ' ' || file_path) AS context
+FROM gl_definition WHERE project_id = ?1 AND commit_sha = ?2"
+    )
 }
 
 pub fn create_fts_index_sql(doc_table: &str) -> String {
@@ -52,11 +62,48 @@ impl DuckDbSearch {
         })
     }
 
-    pub fn grep(&self, query: &str, limit: usize, vocab: &SearchVocab) -> Result<GrepOutcome> {
-        grep(self, query, limit, vocab).map_err(|e| match e {
+    pub fn grep(
+        &self,
+        query: &str,
+        limit: usize,
+        vocab: &SearchVocab,
+        filter: &RecallFilter,
+    ) -> Result<GrepOutcome> {
+        grep(self, query, limit, vocab, filter).map_err(|e| match e {
             GrepError::Source(e) => e,
             e => anyhow::anyhow!("{e}"),
         })
+    }
+
+    pub fn list_corpus(&self, filter: &RecallFilter) -> Result<Vec<CorpusRow>> {
+        let batches = query(
+            &self.client,
+            &format!(
+                "SELECT id, fqn, definition_type,
+       file_path || ':' || CAST(start_line AS VARCHAR) AS loc, end_line
+FROM search_corpus
+WHERE TRUE
+{}
+ORDER BY file_path, start_line, end_line DESC, fqn",
+                kind_scope("definition_type", &filter.kinds)
+            ),
+        )?;
+        let ids = i64_column(&batches, "id");
+        let fqns = string_column(&batches, "fqn");
+        let kinds = string_column(&batches, "definition_type");
+        let locs = string_column(&batches, "loc");
+        let end_lines = i64_column(&batches, "end_line");
+        Ok((0..ids.len())
+            .map(|i| CorpusRow {
+                id: ids[i],
+                fqn: fqns[i].clone(),
+                kind: kinds[i].clone(),
+                loc: locs[i].clone(),
+                end_line: end_lines[i],
+                degree: 0,
+                grams: 0,
+            })
+            .collect())
     }
 }
 
@@ -82,8 +129,8 @@ impl GrepSource for DuckDbSearch {
         Ok(string_column(&batches, "s"))
     }
 
-    fn recall(&self, terms: &[String]) -> Result<Vec<TermRecall>> {
-        let sql = recall_sql(self.pid, &self.sha);
+    fn recall(&self, terms: &[String], filter: &RecallFilter) -> Result<Vec<TermRecall>> {
+        let sql = recall_sql(self.pid, &self.sha, filter);
         terms
             .iter()
             .map(|term| {
@@ -207,15 +254,19 @@ fn ensure_search_index(client: &DuckDbClient, project_id: i64, sha: &str) -> Res
     Ok(())
 }
 
-fn recall_sql(pid: i64, sha: &str) -> String {
+fn recall_sql(pid: i64, sha: &str, filter: &RecallFilter) -> String {
     let doc_table = def_doc_table(pid);
+    let corpus = format!(
+        "SELECT id FROM search_corpus WHERE TRUE\n{}",
+        kind_scope("definition_type", &filter.kinds)
+    );
     format!(
         "WITH scored AS (
   SELECT def_id AS id,
          fts_main_{doc_table}.match_bm25(def_id, ?1, fields := 'name,context') AS score
   FROM {doc_table}
   WHERE commit_sha = {sha}
-    AND def_id IN (SELECT id FROM search_corpus)
+    AND def_id IN ({corpus})
 ),
 hits AS (
   SELECT s.id, s.score,
@@ -230,7 +281,7 @@ hits AS (
 ),
 df AS (SELECT COUNT(*) AS df FROM scored WHERE score IS NOT NULL),
 mx AS (SELECT MAX(score) AS m FROM hits),
-corpus_n AS (SELECT GREATEST(COUNT(*), 1) AS total FROM search_corpus)
+corpus_n AS (SELECT GREATEST(COUNT(*), 1) AS total FROM ({corpus}))
 SELECT COALESCE(h.id, 0) AS id,
        COALESCE(CASE WHEN h.exact_hit THEN {EXACT_NAME_SIM}
                      WHEN h.token_hit THEN {NAME_SIM_FLOOR} + ({NAME_SIM_CEIL} - {NAME_SIM_FLOOR}) * h.score / mx.m
@@ -254,11 +305,27 @@ WHERE d.project_id = {pid} AND d.commit_sha = {sha}
   AND regexp_matches(d.file_path, {source_only})
   AND NOT regexp_matches(d.name, '^[0-9]+$')
   AND d.fqn NOT LIKE '%@%'
-{exclude}{scope}",
+{exclude}{paths}",
         source_only = sql_lit(&ext_regex(&search_corpus_exts())),
-        exclude = exclusions("d.file_path"),
-        scope = path_scope("d.file_path", paths),
+        exclude = if paths.is_empty() {
+            exclusions("d.file_path")
+        } else {
+            String::new()
+        },
+        paths = path_scope("d.file_path", paths),
     )
+}
+
+fn kind_scope(col: &str, kinds: &[String]) -> String {
+    if kinds.is_empty() {
+        return String::new();
+    }
+    let list = kinds
+        .iter()
+        .map(|k| sql_lit(&k.to_lowercase()))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("  AND lower({col}) IN ({list})\n")
 }
 
 fn path_scope(col: &str, paths: &[String]) -> String {
