@@ -44,6 +44,7 @@ pub(crate) fn build_common(
         host_name: None,
         organization_id: None,
         root_namespace_ids: root_namespace_id.map(|id| vec![id]),
+        coding_agent: None,
         schema_version: None,
     }))
 }

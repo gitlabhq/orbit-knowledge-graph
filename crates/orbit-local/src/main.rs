@@ -576,6 +576,8 @@ async fn main() -> Result<()> {
     let matches = Cli::command().get_matches();
     let cli = Cli::from_arg_matches(&matches).expect("clap already validated the arguments");
 
+    let coding_agent = telemetry::detect_coding_agent(|key| std::env::var(key).ok());
+
     let tracker = if matches!(
         cli.command,
         Commands::HookGuard { .. }
@@ -588,7 +590,7 @@ async fn main() -> Result<()> {
         telemetry::resolve_from_env().build_tracker()
     };
     if let Some(tracker) = &tracker {
-        telemetry::emit_command_event(tracker, &subcommand_path(&matches));
+        telemetry::emit_command_event(tracker, &subcommand_path(&matches), coding_agent.as_deref());
     }
 
     let result = dispatch(cli.command, tracker.as_ref()).await;
