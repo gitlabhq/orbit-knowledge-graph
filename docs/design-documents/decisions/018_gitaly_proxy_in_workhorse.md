@@ -42,7 +42,7 @@ topologies do not carry HTTP/2 to it. GitLab has handled this constraint with
 WebSockets before. Duo Workflow bridges a bidirectional gRPC stream over a
 WebSocket, and the language-server executors moved from gRPC to WebSockets
 because some customers block HTTP/2
-([gitlab-lsp#1219](https://gitlab.com/gitlab-org/editor-extensions/gitlab-lsp/-/issues/1219)).
+([`gitlab-lsp#1219`](https://gitlab.com/gitlab-org/editor-extensions/gitlab-lsp/-/issues/1219)).
 
 ### What the POC established
 
@@ -90,11 +90,11 @@ sequenceDiagram
 
 | Component | Decides | Never sees |
 |---|---|---|
-| Rails | Consumer identity, repository access, profile, and policy limits | Proxied streams and repository bytes |
-| Workhorse | Profile validity, stream policy, and proxy limits | Consumer-specific authorization code |
+| Rails | Consumer identity, repository access, policy selection, and limits | Proxied streams and repository bytes |
+| Workhorse | Profile compilation, policy validity and enforcement, and proxy limits | Consumer-specific authorization code |
 | Consumer | Transport mode, connection rotation, and retries | Gitaly addresses, tokens, and storage routing |
 
-Workhorse is deliberately policy-free. It knows how to enforce a profile, not
+Workhorse is deliberately policy-selection-free. It knows how to enforce a policy, not
 who may use one. Rails owns that decision with the rest of the GitLab
 authorization logic.
 
@@ -117,8 +117,9 @@ never leaves the GitLab deployment.
 
 ### The read-only policy
 
-A profile is a named rule set compiled into Workhorse. Rails selects one by
-name and may only narrow it. V1 has one profile, `readonly_repository`, which
+A profile is the rule set compiled into Workhorse; a policy is that profile as
+selected and narrowed by Rails for one session. V1 has one profile,
+`readonly_repository`, which
 allows accessor RPCs scoped to the repository Rails authorized and rejects all
 other calls. This includes mutators that Rails might allowlist by mistake, such
 as `CommitLanguages`. Target-repository resolution uses the same protobuf
@@ -148,7 +149,7 @@ continue under the same lifetime rules.
 ### Adding a consumer or an RPC
 
 A new consumer adds a Rails authorizer for its own credential, an RPC allowlist,
-and a rollout flag. The shared route needs no Workhorse, ingress, or Cells
+and a rollout flag. The shared route needs no Workhorse, Ingress, or Cells
 routing change. Zoekt and KAS are possible future consumers, but this ADR does
 not implement these.
 
