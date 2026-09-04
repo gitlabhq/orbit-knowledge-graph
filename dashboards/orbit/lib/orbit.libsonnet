@@ -114,11 +114,16 @@ local histogramCountRateExpr(prom_name, selector, interval, by) = (
     'sum by (%s) (rate(%s_count{%s}[%s]))' % [std.join(', ', by), prom_name, selector, interval]
 );
 
-local gaugeExpr(prom_name, selector, by) = (
+// Seconds-valued gauges are ages or lags, and adding those across replicas
+// produces a number nothing emits. Every other gauge is a quantity that does
+// sum meaningfully across the fleet.
+local gaugeAgg(spec) = if std.objectHas(spec, 'unit') && spec.unit == 's' then 'max' else 'sum';
+
+local gaugeExpr(prom_name, selector, by, agg='sum') = (
   if std.length(by) == 0 then
-    'sum(%s{%s})' % [prom_name, selector]
+    '%s(%s{%s})' % [agg, prom_name, selector]
   else
-    'sum by (%s) (%s{%s})' % [std.join(', ', by), prom_name, selector]
+    '%s by (%s) (%s{%s})' % [agg, std.join(', ', by), prom_name, selector]
 );
 
 // Format a Grafana legend like `{{label1}} / {{label2}}`. Falls back to
@@ -354,7 +359,7 @@ local gaugePanels(spec, ds_var, selector, by=null) = (
     timeseries(
       prom,
       spec.description,
-      [target(gaugeExpr(prom, selector, labels), legendFor(labels), ds_var)],
+      [target(gaugeExpr(prom, selector, labels, gaugeAgg(spec)), legendFor(labels), ds_var)],
       unitFor(spec),
     ),
   ]
