@@ -16,6 +16,11 @@
 # note-gated `scope: none` entry, the certified output-neutral escape hatch. A
 # version with no entry is treated as "*", which also makes pruning old entries safe.
 migrations:
+- version: 94
+  scope: none
+  note: >-
+    Definition definition_type description lists Section; descriptions are not
+    stored, so DDL and every indexed row are byte-identical.
 - version: 93
   scope: "*"
   note: >-

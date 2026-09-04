@@ -178,7 +178,7 @@ The Code Graph represents the structure and relationships within the source code
 | `Commit`              | A Git commit, shared target for commit-related edges. | `id`, `sha`, `project_id`                                  |
 | `Directory`           | Represents a directory within a repository.                                                             | `relative_path`, `absolute_path`, `repository_name`                         |
 | `File`                | Represents a file within a repository.                                                                  | `relative_path`, `absolute_path`, `language`, `repository_name`             |
-| `Definition`          | A code definition such as a class, function, method, or module. Markdown headings are `Section` definitions whose FQN is the heading chain joined with `#` under the file stem. | `fqn`, `name`, `definition_type`, `file_path`, `start_line`, `end_line`, `branch`, `commit_sha`, virtual `content` |
+| `Definition`          | A code definition such as a class, function, method, or module.                                         | `fqn`, `name`, `definition_type`, `file_path`, `start_line`, `end_line`, `branch`, `commit_sha`, virtual `content` |
 | `ImportedSymbol`      | An imported symbol or module reference within a file.                                                   | `import_path`, `import_type`, `identifier_name`, `identifier_alias`, `file_path` |
 
 ### Relationship Visualization

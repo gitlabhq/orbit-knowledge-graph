@@ -48,7 +48,7 @@ glab orbit remote schema
 | Node type | Description | Key properties |
 |-----------|-------------|----------------|
 | `Branch` | Git branch | `id`, `project_id`, `name`, `is_default` |
-| `Definition` | Function, class, method, or module definition, or a Markdown heading section | `id`, `file_path`, `fqn`, `name`, `definition_type`, `start_line`, `end_line`, `content` |
+| `Definition` | Function, class, method, module, or Markdown section definition | `id`, `file_path`, `fqn`, `name`, `definition_type`, `start_line`, `end_line`, `content` |
 | `Directory` | Directory in a repository | `id`, `project_id`, `path`, `name` |
 | `File` | Source code file | `id`, `path`, `name`, `extension`, `language`, `content` |
 | `ImportedSymbol` | Import or cross-file symbol reference | `id`, `file_path`, `import_type`, `import_path`, `identifier_name` |

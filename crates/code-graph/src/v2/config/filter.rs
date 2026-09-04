@@ -397,7 +397,7 @@ mod tests {
             ),
             ("oversize.csv", oversize),
             (
-                "docs/lfs.md",
+                "docs/lfs.txt",
                 b"Pointers start with `version https://git-lfs.github.com/spec/v1`.\n".to_vec(),
             ),
         ] {
