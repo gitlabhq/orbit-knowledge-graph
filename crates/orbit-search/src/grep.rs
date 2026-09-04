@@ -1,23 +1,16 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 
-use crate::anchor::{term_base_sets, unmatched_terms};
-use crate::expand::{GraphSource, expand_neighborhood};
-use crate::ppr::KindRates;
 use crate::rank::rank_and_trim;
 use crate::text::content_words;
-use crate::types::{CorpusRow, Edge, TermSeeds};
+use crate::types::{CorpusRow, Edge};
 use crate::vocab::SearchVocab;
-
-pub const SURFACED_LIMIT: usize = 3;
 
 pub struct GrepOutcome {
     pub terms: Vec<String>,
     pub matches: Vec<GrepMatch>,
-    /// Neighbours the graph walk pulled in; only populated for relational questions.
-    pub surfaced: Vec<GrepMatch>,
-    pub focus: Option<String>,
-    /// Edges whose both endpoints are among `matches` and `surfaced`.
+    pub total: usize,
+    /// Edges whose both endpoints are among `matches`.
     pub edges: Vec<Edge>,
     pub weak: bool,
     pub unmatched_terms: Vec<String>,
@@ -40,7 +33,9 @@ impl TermRecall {
     }
 }
 
-pub trait GrepSource: GraphSource {
+pub trait GrepSource {
+    type Error;
+
     fn stem(&self, words: &[String]) -> Result<Vec<String>, Self::Error>;
     fn recall(&self, terms: &[String]) -> Result<Vec<TermRecall>, Self::Error>;
     fn rows_by_ids(&self, ids: &[i64]) -> Result<Vec<CorpusRow>, Self::Error>;
@@ -70,12 +65,20 @@ impl<E> From<E> for GrepError<E> {
     }
 }
 
+pub fn unmatched_terms(terms: &[String], recalls: &[TermRecall]) -> Vec<String> {
+    terms
+        .iter()
+        .zip(recalls)
+        .filter(|(_, recall)| recall.hits.is_empty())
+        .map(|(term, _)| term.clone())
+        .collect()
+}
+
 pub fn grep<S: GrepSource>(
     source: &S,
     query: &str,
     limit: usize,
     vocab: &SearchVocab,
-    kind_rates: &HashMap<String, KindRates>,
 ) -> Result<GrepOutcome, GrepError<S::Error>> {
     let terms = content_words(query);
     if terms.is_empty() {
@@ -123,7 +126,6 @@ pub fn grep<S: GrepSource>(
         .collect();
 
     let hits = rank_and_trim(&corpus, &sims, &idfs, limit);
-    let focus = vocab.focus_edge_kind(&stems);
     let weak = hits.first().is_none_or(|h| !h.confident());
     let matches: Vec<GrepMatch> = hits
         .into_iter()
@@ -132,48 +134,12 @@ pub fn grep<S: GrepSource>(
             score: h.score,
         })
         .collect();
-
-    let surfaced = if focus.is_some() {
-        let mut term_seeds = term_base_sets(&recalls);
-        if term_seeds.is_empty() && !matches.is_empty() {
-            term_seeds = vec![TermSeeds {
-                seeds: matches.iter().map(|m| (m.row.id, m.score)).collect(),
-                weight: 1.0,
-            }];
-        }
-        if term_seeds.is_empty() {
-            Vec::new()
-        } else {
-            let expanded = expand_neighborhood(source, &term_seeds, kind_rates, focus.as_deref())?;
-            let shown: HashSet<i64> = matches.iter().map(|m| m.row.id).collect();
-            let candidates: Vec<(i64, f64)> = expanded
-                .surfaced
-                .into_iter()
-                .filter(|(id, _)| !shown.contains(id))
-                .take(SURFACED_LIMIT)
-                .collect();
-            let rows =
-                source.rows_by_ids(&candidates.iter().map(|&(id, _)| id).collect::<Vec<_>>())?;
-            candidates
-                .into_iter()
-                .filter_map(|(id, score)| {
-                    rows.iter().find(|r| r.id == id).map(|r| GrepMatch {
-                        row: r.clone(),
-                        score,
-                    })
-                })
-                .collect()
-        }
-    } else {
-        Vec::new()
-    };
-    let node_ids: Vec<i64> = matches.iter().chain(&surfaced).map(|m| m.row.id).collect();
+    let node_ids: Vec<i64> = matches.iter().map(|m| m.row.id).collect();
     let edges = source.edges_among(&node_ids)?;
     Ok(GrepOutcome {
         terms,
         matches,
-        surfaced,
-        focus,
+        total: corpus.len(),
         edges,
         weak,
         unmatched_terms: unmatched,
@@ -183,45 +149,16 @@ pub fn grep<S: GrepSource>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::expand::NodeLabel;
     use crate::testutil::{row, test_vocab};
-    use crate::types::{Graph, GraphEdge};
 
     const HOOK_ID: i64 = 7;
+    const CALLER_ID: i64 = 8;
 
     struct FakeRecallSource;
 
-    impl GraphSource for FakeRecallSource {
+    impl GrepSource for FakeRecallSource {
         type Error = std::convert::Infallible;
 
-        fn graph(&self, _seeds: &[i64]) -> Result<Graph, Self::Error> {
-            Ok(Graph {
-                kinds: vec!["CALLS".to_string()],
-                edges: vec![GraphEdge {
-                    kind: 0,
-                    source: HOOK_ID,
-                    target: 8,
-                }],
-            })
-        }
-
-        fn labels(&self, ids: &[i64]) -> Result<HashMap<i64, NodeLabel>, Self::Error> {
-            Ok(ids
-                .iter()
-                .map(|&id| {
-                    (
-                        id,
-                        NodeLabel {
-                            label: format!("node{id}"),
-                            loc: String::new(),
-                        },
-                    )
-                })
-                .collect())
-        }
-    }
-
-    impl GrepSource for FakeRecallSource {
         fn stem(&self, words: &[String]) -> Result<Vec<String>, Self::Error> {
             Ok(words
                 .iter()
@@ -233,10 +170,10 @@ mod tests {
             Ok(terms
                 .iter()
                 .map(|t| {
-                    let hits = if t == "commit" || t == "hook" {
-                        vec![(HOOK_ID, 1.0)]
-                    } else {
-                        Vec::new()
+                    let hits = match t.as_str() {
+                        "commit" => vec![(HOOK_ID, 1.0), (CALLER_ID, 0.9)],
+                        "hook" => vec![(HOOK_ID, 1.0)],
+                        _ => Vec::new(),
                     };
                     TermRecall {
                         matched: hits.len() as u64,
@@ -248,52 +185,54 @@ mod tests {
         }
 
         fn rows_by_ids(&self, ids: &[i64]) -> Result<Vec<CorpusRow>, Self::Error> {
-            Ok(ids.iter().map(|&id| row(id, "Repo::commit_hook")).collect())
+            Ok(ids
+                .iter()
+                .map(|&id| {
+                    if id == HOOK_ID {
+                        row(id, "Repo::commit_hook")
+                    } else {
+                        row(id, "Repo::after_commit")
+                    }
+                })
+                .collect())
         }
 
         fn edges_among(&self, ids: &[i64]) -> Result<Vec<Edge>, Self::Error> {
-            Ok(ids
-                .iter()
-                .filter(|&&id| id == HOOK_ID)
-                .map(|_| Edge {
+            if ids.contains(&HOOK_ID) && ids.contains(&CALLER_ID) {
+                return Ok(vec![Edge {
                     kind: "CALLS".to_string(),
                     source: "Repo::after_commit".to_string(),
                     source_loc: String::new(),
                     target: "Repo::commit_hook".to_string(),
                     target_loc: String::new(),
-                })
-                .collect())
+                }]);
+            }
+            Ok(Vec::new())
         }
     }
 
     #[test]
-    fn grep_ranks_recalled_rows_and_expands_around_them() {
-        let outcome = grep(
-            &FakeRecallSource,
-            "who calls commit hook",
-            5,
-            &test_vocab(),
-            &HashMap::new(),
-        )
-        .unwrap();
-        assert_eq!(outcome.matches.len(), 1);
+    fn grep_ranks_recalled_rows_and_lists_edges_among_them() {
+        let outcome = grep(&FakeRecallSource, "who calls commit hook", 5, &test_vocab()).unwrap();
+        assert_eq!(outcome.matches.len(), 2);
+        assert_eq!(outcome.total, 2);
         assert_eq!(outcome.matches[0].row.id, HOOK_ID);
         assert!(!outcome.weak, "both terms fully anchor one row");
-        assert_eq!(outcome.focus.as_deref(), Some("CALLS"));
         assert!(outcome.unmatched_terms.is_empty());
-        assert!(!outcome.edges.is_empty());
+        assert_eq!(outcome.edges.len(), 1);
+    }
+
+    #[test]
+    fn limit_trims_matches_but_total_reports_every_recalled_row() {
+        let outcome = grep(&FakeRecallSource, "commit", 1, &test_vocab()).unwrap();
+        assert_eq!(outcome.matches.len(), 1);
+        assert_eq!(outcome.total, 2);
+        assert!(outcome.edges.is_empty());
     }
 
     #[test]
     fn unrecalled_terms_are_reported_without_deflating_confidence() {
-        let outcome = grep(
-            &FakeRecallSource,
-            "commit zzzz yyyy",
-            5,
-            &test_vocab(),
-            &HashMap::new(),
-        )
-        .unwrap();
+        let outcome = grep(&FakeRecallSource, "commit zzzz yyyy", 5, &test_vocab()).unwrap();
         assert_eq!(
             outcome.unmatched_terms,
             vec!["zzzz".to_string(), "yyyy".to_string()]
@@ -306,20 +245,12 @@ mod tests {
 
     #[test]
     fn relational_only_questions_fall_back_to_all_terms() {
-        let err = grep(&FakeRecallSource, "", 5, &test_vocab(), &HashMap::new())
+        let err = grep(&FakeRecallSource, "", 5, &test_vocab())
             .err()
             .expect("empty query must fail");
         assert!(matches!(err, GrepError::NoUsableTerms(_)));
 
-        let outcome = grep(
-            &FakeRecallSource,
-            "calls",
-            5,
-            &test_vocab(),
-            &HashMap::new(),
-        )
-        .unwrap();
-        assert_eq!(outcome.focus.as_deref(), Some("CALLS"));
+        let outcome = grep(&FakeRecallSource, "calls", 5, &test_vocab()).unwrap();
         assert!(outcome.matches.is_empty());
     }
 }

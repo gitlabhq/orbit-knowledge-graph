@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use duckdb_client::search::DuckDbSearch;
-use orbit_search::{GrepOutcome, KindRates, SearchVocab};
+use orbit_search::{GrepOutcome, SearchVocab};
 
 use duckdb_client::scalar_i64;
 
@@ -15,7 +15,7 @@ pub(super) struct LocalBackend {
 }
 
 impl LocalBackend {
-    pub(super) fn open(repo_path: &Path, db: Option<PathBuf>) -> Result<Self> {
+    pub(super) fn open(repo_path: &Path, db: Option<PathBuf>, paths: &[String]) -> Result<Self> {
         let db = workspace::resolve_db_path(db)?;
         let top_level = workspace::git_toplevel(repo_path)
             .with_context(|| format!("failed to find git top-level for {}", repo_path.display()))?;
@@ -55,7 +55,7 @@ impl LocalBackend {
         }
 
         Ok(Self {
-            search: DuckDbSearch::new(client, pid, &git.commit_sha)?,
+            search: DuckDbSearch::scoped(client, pid, &git.commit_sha, paths)?,
             header: format!("{} @ {}", git.repo_path.display(), git.commit_sha),
         })
     }
@@ -73,9 +73,8 @@ impl LocalBackend {
         query: &str,
         limit: usize,
         vocab: &SearchVocab,
-        kind_rates: &std::collections::HashMap<String, KindRates>,
     ) -> Result<GrepOutcome> {
-        self.search.grep(query, limit, vocab, kind_rates)
+        self.search.grep(query, limit, vocab)
     }
 }
 
@@ -126,6 +125,10 @@ mod tests {
         }
 
         fn search(self) -> DuckDbSearch {
+            self.scoped_search(&[])
+        }
+
+        fn scoped_search(self, paths: &[&str]) -> DuckDbSearch {
             self.client.load_extension("fts").unwrap();
             self.client
                 .execute(
@@ -143,16 +146,13 @@ mod tests {
                     &[],
                 )
                 .unwrap();
-            DuckDbSearch::new(self.client, 7, "sha").unwrap()
+            let paths: Vec<String> = paths.iter().map(|p| p.to_string()).collect();
+            DuckDbSearch::scoped(self.client, 7, "sha", &paths).unwrap()
         }
     }
 
     fn vocab(search: &DuckDbSearch) -> SearchVocab {
         super::super::build_vocab(search).unwrap()
-    }
-
-    fn weights() -> std::collections::HashMap<String, KindRates> {
-        std::collections::HashMap::from([("CALLS".to_string(), KindRates::new(1.0))])
     }
 
     #[test]
@@ -171,14 +171,76 @@ mod tests {
 
         let search = g.search();
         let vocab = vocab(&search);
-        let outcome = search.grep("dlq publish", 5, &vocab, &weights()).unwrap();
+        let outcome = search.grep("dlq publish", 5, &vocab).unwrap();
         assert!(!outcome.matches.is_empty());
         assert!(!outcome.weak);
         assert!(outcome.unmatched_terms.is_empty());
         assert!(
             !outcome.edges.is_empty(),
-            "expansion must return the call chain around the match"
+            "edges among the matches must be listed"
         );
+    }
+
+    #[test]
+    fn path_scope_limits_recall_to_the_given_subtree() {
+        let g = TestGraph::new("grep-path-scope");
+        g.def(1, "resources.limits", "limits", "e2e/charts/values.yaml");
+        g.def(2, "Input::limit", "limit", "crates/compiler/src/input.rs");
+        g.def(3, "Cli::limit", "limit", "crates/cli/src/main.rs");
+
+        let search = g.scoped_search(&["crates/compiler"]);
+        let vocab = vocab(&search);
+        let outcome = search.grep("limit", 5, &vocab).unwrap();
+        let ids: Vec<i64> = outcome.matches.iter().map(|m| m.row.id).collect();
+        assert_eq!(ids, vec![2]);
+    }
+
+    #[test]
+    fn path_scope_accepts_globs_and_multiple_paths() {
+        let g = TestGraph::new("grep-path-glob");
+        g.def(1, "resources.limits", "limits", "e2e/charts/values.yaml");
+        g.def(2, "Input::limit", "limit", "crates/compiler/src/input.rs");
+        g.def(3, "Cli::limit", "limit", "crates/cli/src/main.rs");
+
+        let search = g.scoped_search(&["crates/*/src/main.rs", "e2e/"]);
+        let vocab = vocab(&search);
+        let outcome = search.grep("limit", 5, &vocab).unwrap();
+        let mut ids: Vec<i64> = outcome.matches.iter().map(|m| m.row.id).collect();
+        ids.sort_unstable();
+        assert_eq!(ids, vec![1, 3]);
+    }
+
+    #[test]
+    fn exact_name_hit_outranks_stem_hit_on_a_hub() {
+        let g = TestGraph::new("grep-exact-name");
+        g.def(
+            1,
+            "compiler::compile",
+            "compile",
+            "crates/compiler/src/lib.rs",
+        );
+        g.def(
+            2,
+            "code_graph::compiled_labels",
+            "compiled_labels",
+            "crates/code-graph/src/edge.rs",
+        );
+        for caller in 10..60 {
+            g.def(
+                caller,
+                &format!("Caller::c{caller}"),
+                "c",
+                "crates/x/src/c.rs",
+            );
+            g.edge(caller, "CALLS", 2);
+        }
+
+        let search = g.search();
+        let vocab = vocab(&search);
+        let outcome = search.grep("compile", 5, &vocab).unwrap();
+        assert_eq!(outcome.matches[0].row.id, 1);
+        assert_eq!(outcome.matches[1].row.id, 2);
+        assert!(!outcome.weak);
     }
 
     #[test]
@@ -189,9 +251,7 @@ mod tests {
 
         let search = g.search();
         let vocab = vocab(&search);
-        let outcome = search
-            .grep("mr-title-check", 5, &vocab, &weights())
-            .unwrap();
+        let outcome = search.grep("mr-title-check", 5, &vocab).unwrap();
         assert_eq!(outcome.matches[0].row.fqn, "mr-title-check");
         assert!(!outcome.weak);
     }
@@ -204,7 +264,7 @@ mod tests {
 
         let search = g.search();
         let vocab = vocab(&search);
-        let outcome = search.grep("find", 5, &vocab, &weights()).unwrap();
+        let outcome = search.grep("find", 5, &vocab).unwrap();
         assert!(
             outcome.unmatched_terms.is_empty(),
             "identifiers colliding with English stopwords must recall"
@@ -225,9 +285,7 @@ mod tests {
         let stem_all = |q: &str| search.stem(&content_words(q)).unwrap();
         assert!(vocab.is_relational(&stem_all("calling")[0]));
         assert!(!vocab.is_relational(&stem_all("hooks")[0]));
-        assert_eq!(
-            vocab.focus_edge_kind(&stem_all("who calls execute_hooks")),
-            Some("CALLS".to_string())
-        );
+        let stems = stem_all("who calls execute_hooks");
+        assert_eq!(stems.iter().filter(|s| vocab.is_relational(s)).count(), 1);
     }
 }

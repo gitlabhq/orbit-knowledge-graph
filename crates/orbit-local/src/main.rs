@@ -202,6 +202,12 @@ struct GrepArgs {
     #[arg(long, default_value = "10")]
     limit: usize,
 
+    /// Only search definitions under this repo-relative directory or file
+    /// (e.g. `crates/query-engine`); repeatable, and accepts globs such as
+    /// `crates/*/src/lib.rs`.
+    #[arg(long, value_name = "PATH")]
+    path: Vec<String>,
+
     /// Override the DuckDB path (default: ~/.orbit/graph.duckdb).
     #[arg(long, value_name = "PATH")]
     db: Option<PathBuf>,
@@ -676,8 +682,9 @@ async fn dispatch_local(command: LocalCommands) -> Result<()> {
             query,
             repo,
             limit,
+            path,
             db,
-        }) => commands::grep::run(query, repo, db, limit),
+        }) => commands::grep::run(query, repo, db, limit, path),
         LocalCommands::Show(ShowArgs { fqn, repo, db }) => commands::show::run(fqn, repo, db),
         LocalCommands::Describe(DescribeArgs { fqn, repo, db }) => {
             commands::describe::run(fqn, repo, db)
