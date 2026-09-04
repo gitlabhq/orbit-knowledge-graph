@@ -1,12 +1,9 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use duckdb_client::search::DuckDbSearch;
 use orbit_search::{GrepOutcome, RecallFilter, SearchVocab};
 
-use duckdb_client::scalar_i64;
-
-use crate::sql;
 use crate::workspace;
 
 pub(super) struct LocalBackend {
@@ -15,48 +12,15 @@ pub(super) struct LocalBackend {
 }
 
 impl LocalBackend {
-    pub(super) fn open(repo_path: &Path, db: Option<PathBuf>, paths: &[String]) -> Result<Self> {
-        let db = workspace::resolve_db_path(db)?;
-        let top_level = workspace::git_toplevel(repo_path)
-            .with_context(|| format!("failed to find git top-level for {}", repo_path.display()))?;
-        let git = workspace::git_info(&top_level)
-            .with_context(|| format!("failed to read git info for {}", top_level.display()))?;
-
-        let mut client = sql::open_graph(Some(db.clone()))?;
-        let pid = git.project_id;
-        let sha = duckdb_client::sql_lit(&git.commit_sha);
-
-        let indexed_count = |client: &duckdb_client::DuckDbClient| -> Result<i64> {
-            let batches = sql::query(
-                client,
-                &format!(
-                    "SELECT COUNT(*) AS n FROM gl_file WHERE project_id = {pid} AND commit_sha = {sha}"
-                ),
-            )?;
-            Ok(scalar_i64(&batches))
-        };
-
-        if indexed_count(&client)? == 0 {
-            eprintln!(
-                "current commit {} is not indexed — indexing {} first",
-                git.commit_sha.get(..8).unwrap_or(&git.commit_sha),
-                git.repo_path.display()
-            );
-            drop(client);
-            crate::index_collect(git.repo_path.clone(), 0, false, Some(db.clone()))
-                .context("failed to index the repository for grep")?;
-            client = sql::open_graph(Some(db))?;
-            if indexed_count(&client)? == 0 {
-                anyhow::bail!(
-                    "indexing finished but commit {} still has no rows in the local graph",
-                    git.commit_sha
-                );
-            }
-        }
-
+    pub(super) fn open(
+        repo: Option<PathBuf>,
+        db: Option<PathBuf>,
+        paths: &[String],
+    ) -> Result<Self> {
+        let workspace::IndexedRepo { git, client } = workspace::open_indexed(repo, db)?;
         Ok(Self {
-            search: DuckDbSearch::scoped(client, pid, &git.commit_sha, paths)?,
-            header: format!("{} @ {}", git.repo_path.display(), git.commit_sha),
+            search: DuckDbSearch::scoped(client, git.project_id, &git.commit_sha, paths)?,
+            header: git.short_sha().to_string(),
         })
     }
 
@@ -184,10 +148,6 @@ mod tests {
         assert!(!outcome.matches.is_empty());
         assert!(!outcome.weak);
         assert!(outcome.unmatched_terms.is_empty());
-        assert!(
-            !outcome.edges.is_empty(),
-            "edges among the matches must be listed"
-        );
     }
 
     #[test]

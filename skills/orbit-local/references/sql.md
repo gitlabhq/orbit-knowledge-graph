@@ -80,9 +80,11 @@ orbit sql "SELECT DISTINCT file_path FROM gl_imported_symbol
 
 ## Notes
 
-- Node tables (`gl_definition`, `gl_file`, `gl_directory`, `gl_imported_symbol`)
-  carry `commit_sha`; filter on it when a repository has been indexed at more
-  than one commit, or re-`index` after checkout. `gl_edge` has no `commit_sha` -
-  join back to a definition to scope edges to a commit.
+- Run from inside an indexed checkout, `orbit sql` scopes every table to that
+  repository's indexed commit (`gl_edge` to that commit's edges), so no
+  `project_id` or `commit_sha` predicate is needed. Pass `--all` to query
+  every indexed commit, or `--repo <path>` to scope to another checkout; only
+  then do the node tables' `commit_sha` columns matter. `gl_edge` has no
+  `commit_sha` - join back to a definition to scope edges by hand.
 - `orbit sql` is read-only; there is no write path into the graph other than
   `index`.

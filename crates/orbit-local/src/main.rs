@@ -15,11 +15,13 @@ mod workspace;
 
 use anyhow::{Context, Result};
 use clap::{Args, CommandFactory, FromArgMatches, Parser, Subcommand};
+use code_graph::v2::types::EdgeKind;
 use ontology::Ontology;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
+use strum::IntoEnumIterator;
 use tracing::{Level, info};
 use tracing_subscriber::fmt::format::FmtSpan;
 
@@ -190,16 +192,18 @@ struct IndexArgs {
                   back to text grep."
 )]
 struct GrepArgs {
-    /// Plain-language query, e.g. "NATS message publish". Omit it with
-    /// --path to list every definition under that path instead.
+    /// Plain-language queries, e.g. "NATS message publish"; several may be
+    /// given and are searched in one call. Omit them with --path to list
+    /// every definition under that path instead.
     #[arg(value_name = "QUERY", required_unless_present = "path")]
-    query: Option<String>,
+    query: Vec<String>,
 
     /// Repository path (default: current directory).
     #[arg(long, value_name = "PATH")]
     repo: Option<PathBuf>,
 
-    /// Maximum matched definitions to show.
+    /// Maximum matched definitions to show, shared across the queries of one
+    /// call (at least three each).
     #[arg(long, default_value = "10")]
     limit: usize,
 
@@ -222,15 +226,17 @@ struct GrepArgs {
 
 fn fqn_arg_help() -> String {
     format!(
-        "Exact fully qualified name as printed by `{} grep`.",
+        "Fully qualified name as printed by `{} grep`, its unqualified tail such as \
+         `Type::method` when that names one definition, or a glob such as `crate::module::*`.",
         commands::setup::spec::launcher()
     )
 }
 
 fn show_fqn_arg_help() -> String {
     format!(
-        "Fully qualified name as printed by `{} grep`, or a glob such as \
-         `crate::module::*` to print every definition it matches.",
+        "Fully qualified names as printed by `{} grep`, their unqualified tails such as \
+         `Type::method` when that names one definition, or globs such as \
+         `crate::module::*` to print every definition they match. Several may be given at once.",
         commands::setup::spec::launcher()
     )
 }
@@ -238,12 +244,15 @@ fn show_fqn_arg_help() -> String {
 fn show_long_about() -> String {
     format!(
         "Print the full source body of indexed definitions.\n\n\
-         Takes the exact fully qualified name as printed by `{launcher} grep` \
-         and prints the definition's source lines from the working tree, so a \
-         follow-up on a grep match needs no file read. A glob fqn such as \
+         Takes one or more fully qualified names as printed by `{launcher} grep`, or \
+         their unqualified tails such as `Type::method` when that names one definition, \
+         and prints each definition's source lines from the working tree, so following \
+         up on several grep matches takes one command and no file read. A glob fqn such as \
          `crate::module::*` prints every matching definition in file order, \
-         and `--file <path>` prints a whole file as its definitions plus the \
-         lines between them, so whole-module reading needs no file read either.",
+         `--file <path>` alone prints a whole file as its definitions plus the \
+         lines between them, and `<name> --file <path>` prints that definition \
+         from that file by bare name, so whole-module reading needs no file read \
+         either.",
         launcher = commands::setup::spec::launcher()
     )
 }
@@ -251,25 +260,61 @@ fn show_long_about() -> String {
 fn describe_long_about() -> String {
     format!(
         "Print every graph connection of an indexed definition.\n\n\
-         Takes the exact fully qualified name as printed by `{} grep` \
+         Takes the fully qualified name as printed by `{} grep`, or its \
+         unqualified tail such as `Type::method` when that names one definition, \
          and prints all edges touching it — callers, callees, supertypes, \
          subtypes, members, importers — so a truncated `called by: … +N more` \
-         line or any full call-graph question needs no SQL follow-up.",
+         line or any full call-graph question needs no SQL follow-up. \
+         Connections from test, fixture, and generated files are collapsed into \
+         a count unless --tests is passed; --edge, --in, and --out narrow the list.",
+        commands::setup::spec::launcher()
+    )
+}
+
+fn edge_kind_names() -> String {
+    EdgeKind::iter()
+        .map(|kind| kind.as_ref().to_lowercase())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn parse_edge_kind(value: &str) -> Result<EdgeKind, String> {
+    value.to_uppercase().parse().map_err(|_| {
+        format!(
+            "unknown edge kind {value:?}; expected one of {}",
+            edge_kind_names()
+        )
+    })
+}
+
+fn sql_long_about() -> String {
+    format!(
+        "Run a read-only SQL query against the local DuckDB graph.\n\n\
+         Tables are pre-filtered to the current checkout's indexed commit, so ad-hoc \
+         SQL needs no project_id or commit_sha predicates; --all queries every indexed \
+         commit and --repo <path> scopes to another checkout. `{} schema` lists the tables.",
         commands::setup::spec::launcher()
     )
 }
 
 #[derive(Args, Debug, PartialEq)]
-#[command(about = "Print the full source body of a definition by exact fqn")]
+#[command(about = "Print the full source bodies of definitions by fqn or unqualified name")]
 #[command(long_about = show_long_about())]
 struct ShowArgs {
     #[arg(value_name = "FQN", help = show_fqn_arg_help(), required_unless_present = "file")]
-    fqn: Option<String>,
+    fqn: Vec<String>,
 
-    /// Print every indexed definition in this repo-relative file, in order,
-    /// with the lines between them, instead of looking up an fqn.
-    #[arg(long, value_name = "PATH", conflicts_with = "fqn")]
+    /// Restrict to this repo-relative file. Alone, prints every indexed
+    /// definition in the file in order with the lines between them; with
+    /// FQNs, also accepts bare definition names.
+    #[arg(long, value_name = "PATH")]
     file: Option<String>,
+
+    /// Only print definitions of this type, as printed in grep's `[Kind]`
+    /// column (e.g. `Function`, `Struct`); repeatable, case-insensitive.
+    /// Narrows a glob or --file and disambiguates a bare name.
+    #[arg(long, value_name = "KIND")]
+    kind: Vec<String>,
 
     /// Repository path (default: current directory).
     #[arg(long, value_name = "PATH")]
@@ -281,11 +326,31 @@ struct ShowArgs {
 }
 
 #[derive(Args, Debug, PartialEq)]
-#[command(about = "Print every connection of a definition, by exact fqn")]
+#[command(about = "Print every connection of a definition, by fqn or unqualified name")]
 #[command(long_about = describe_long_about())]
 struct DescribeArgs {
     #[arg(value_name = "FQN", help = fqn_arg_help())]
     fqn: String,
+
+    #[arg(long, value_name = "KIND", help = format!(
+            "Only connections of this edge kind ({}); repeatable, case-insensitive.",
+            edge_kind_names()
+        ), value_parser = parse_edge_kind)]
+    edge: Vec<EdgeKind>,
+
+    /// Only incoming connections: callers, subtypes, importers, and uses via
+    /// members.
+    #[arg(long = "in")]
+    incoming: bool,
+
+    /// Only outgoing connections: callees, supertypes, imports, and members.
+    #[arg(long = "out")]
+    outgoing: bool,
+
+    /// List connections from test, fixture, and generated files instead of
+    /// collapsing them into a count.
+    #[arg(long)]
+    tests: bool,
 
     /// Repository path (default: current directory).
     #[arg(long, value_name = "PATH")]
@@ -298,6 +363,7 @@ struct DescribeArgs {
 
 #[derive(Args, Debug, PartialEq)]
 #[command(about = descriptions::short("run_sql"))]
+#[command(long_about = sql_long_about())]
 struct SqlArgs {
     /// SQL query, or `-` to read from stdin.
     #[arg(value_name = "QUERY", conflicts_with = "file")]
@@ -310,6 +376,15 @@ struct SqlArgs {
     /// Output format.
     #[arg(long, short = 'F', default_value = "table")]
     format: sql_format::Format,
+
+    /// Checkout whose commit scopes the tables (default: current directory).
+    #[arg(long, value_name = "PATH", conflicts_with = "all")]
+    repo: Option<PathBuf>,
+
+    /// Query every indexed repository and commit instead of the current
+    /// checkout.
+    #[arg(long)]
+    all: bool,
 
     /// Override the DuckDB path (default: ~/.orbit/graph.duckdb).
     #[arg(long, value_name = "PATH")]
@@ -711,7 +786,7 @@ async fn dispatch_local(command: LocalCommands) -> Result<()> {
             kind,
             db,
         }) => commands::grep::run(
-            query.unwrap_or_default(),
+            query,
             repo,
             db,
             limit,
@@ -721,25 +796,45 @@ async fn dispatch_local(command: LocalCommands) -> Result<()> {
         LocalCommands::Show(ShowArgs {
             fqn,
             file,
+            kind,
             repo,
             db,
-        }) => {
-            let target = match (fqn, file) {
-                (_, Some(file)) => commands::show::Target::File(file),
-                (Some(fqn), None) => commands::show::Target::Fqn(fqn),
-                (None, None) => unreachable!("clap requires FQN or --file"),
-            };
-            commands::show::run(target, repo, db)
-        }
-        LocalCommands::Describe(DescribeArgs { fqn, repo, db }) => {
-            commands::describe::run(fqn, repo, db)
-        }
+        }) => commands::show::run(
+            commands::show::Target {
+                fqns: fqn,
+                file,
+                kinds: kind,
+            },
+            repo,
+            db,
+        ),
+        LocalCommands::Describe(DescribeArgs {
+            fqn,
+            edge,
+            incoming,
+            outgoing,
+            tests,
+            repo,
+            db,
+        }) => commands::describe::run(
+            fqn,
+            repo,
+            db,
+            commands::describe::Filter {
+                edges: edge,
+                incoming,
+                outgoing,
+                tests,
+            },
+        ),
         LocalCommands::Sql(SqlArgs {
             query,
             file,
             format,
+            repo,
+            all,
             db,
-        }) => sql::run(query, file, format, db),
+        }) => sql::run(query, file, format, db, repo, all),
         LocalCommands::Schema(SchemaArgs { db, raw, tables }) => run_schema(db, raw, tables),
         LocalCommands::List(ListArgs { format, db }) => list::run(format, db),
         LocalCommands::Mcp(McpArgs {
@@ -809,7 +904,7 @@ fn run_schema(db: Option<PathBuf>, raw: bool, tables: Vec<String>) -> Result<()>
     let client = sql::open_graph(db)?;
 
     let batches = if tables.is_empty() {
-        sql::query(&client, sql::SCHEMA_INTROSPECTION_SQL)?
+        sql::query(&client, &sql::schema_introspection_sql())?
     } else {
         let placeholders = vec!["?"; tables.len()].join(", ");
         let query = format!(
@@ -925,7 +1020,7 @@ pub(crate) fn index_collect(
             "Indexing repository at: {} (branch: {}, commit: {})",
             key,
             git.branch,
-            git.commit_sha.get(..8).unwrap_or(&git.commit_sha)
+            git.short_sha()
         );
 
         {

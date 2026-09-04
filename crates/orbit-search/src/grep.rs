@@ -3,17 +3,16 @@ use std::fmt;
 
 use crate::rank::rank_and_trim;
 use crate::text::content_words;
-use crate::types::{CorpusRow, Edge};
+use crate::types::CorpusRow;
 use crate::vocab::SearchVocab;
 
 pub struct GrepOutcome {
     pub terms: Vec<String>,
     pub matches: Vec<GrepMatch>,
     pub total: usize,
-    /// Edges whose both endpoints are among `matches`.
-    pub edges: Vec<Edge>,
     pub weak: bool,
     pub unmatched_terms: Vec<String>,
+    pub term_anchors: Vec<(String, String)>,
 }
 
 pub struct GrepMatch {
@@ -54,7 +53,6 @@ pub trait GrepSource {
         filter: &RecallFilter,
     ) -> Result<Vec<TermRecall>, Self::Error>;
     fn rows_by_ids(&self, ids: &[i64]) -> Result<Vec<CorpusRow>, Self::Error>;
-    fn edges_among(&self, ids: &[i64]) -> Result<Vec<Edge>, Self::Error>;
 }
 
 #[derive(Debug)]
@@ -141,6 +139,21 @@ pub fn grep<S: GrepSource>(
         .map(|r| if r.hits.is_empty() { 0.0 } else { r.idf() })
         .collect();
 
+    let mut anchored: HashSet<&str> = HashSet::new();
+    let term_anchors: Vec<(String, String)> = search_terms
+        .iter()
+        .zip(&recalls)
+        .filter(|(term, _)| anchored.insert(term.as_str()))
+        .filter_map(|(term, recall)| {
+            recall
+                .hits
+                .iter()
+                .max_by(|a, b| a.1.total_cmp(&b.1))
+                .and_then(|&(id, _)| index.get(&id))
+                .map(|&i| (term.clone(), corpus[i].fqn.clone()))
+        })
+        .collect();
+
     let hits = rank_and_trim(&corpus, &sims, &idfs, limit);
     let weak = hits.first().is_none_or(|h| !h.confident());
     let matches: Vec<GrepMatch> = hits
@@ -150,15 +163,13 @@ pub fn grep<S: GrepSource>(
             score: h.score,
         })
         .collect();
-    let node_ids: Vec<i64> = matches.iter().map(|m| m.row.id).collect();
-    let edges = source.edges_among(&node_ids)?;
     Ok(GrepOutcome {
         terms,
         matches,
         total: corpus.len(),
-        edges,
         weak,
         unmatched_terms: unmatched,
+        term_anchors,
     })
 }
 
@@ -216,23 +227,10 @@ mod tests {
                 })
                 .collect())
         }
-
-        fn edges_among(&self, ids: &[i64]) -> Result<Vec<Edge>, Self::Error> {
-            if ids.contains(&HOOK_ID) && ids.contains(&CALLER_ID) {
-                return Ok(vec![Edge {
-                    kind: "CALLS".to_string(),
-                    source: "Repo::after_commit".to_string(),
-                    source_loc: String::new(),
-                    target: "Repo::commit_hook".to_string(),
-                    target_loc: String::new(),
-                }]);
-            }
-            Ok(Vec::new())
-        }
     }
 
     #[test]
-    fn grep_ranks_recalled_rows_and_lists_edges_among_them() {
+    fn grep_ranks_recalled_rows() {
         let outcome = grep(
             &FakeRecallSource,
             "who calls commit hook",
@@ -246,7 +244,6 @@ mod tests {
         assert_eq!(outcome.matches[0].row.id, HOOK_ID);
         assert!(!outcome.weak, "both terms fully anchor one row");
         assert!(outcome.unmatched_terms.is_empty());
-        assert_eq!(outcome.edges.len(), 1);
     }
 
     #[test]
@@ -261,7 +258,6 @@ mod tests {
         .unwrap();
         assert_eq!(outcome.matches.len(), 1);
         assert_eq!(outcome.total, 2);
-        assert!(outcome.edges.is_empty());
     }
 
     #[test]

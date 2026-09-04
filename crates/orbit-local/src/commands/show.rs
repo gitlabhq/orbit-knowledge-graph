@@ -3,14 +3,15 @@ use std::fmt::Write as _;
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
-use duckdb_client::{i64_column, string_column};
+use duckdb_client::search::kind_scope;
 
-use crate::commands::setup::spec;
-use crate::{sql, workspace};
+use crate::commands::{fqn, setup::spec};
+use crate::workspace;
 
-pub(crate) enum Target {
-    Fqn(String),
-    File(String),
+pub(crate) struct Target {
+    pub fqns: Vec<String>,
+    pub file: Option<String>,
+    pub kinds: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -23,59 +24,67 @@ pub(crate) struct Def {
 }
 
 pub(crate) fn run(target: Target, repo: Option<PathBuf>, db: Option<PathBuf>) -> Result<()> {
-    let top_level = workspace::git_toplevel(&repo.unwrap_or_else(|| PathBuf::from(".")))?;
-    let git = workspace::git_info(&top_level)?;
-    let client = sql::open_graph(db)?;
-
-    let (predicate, value, include_gaps) = match &target {
-        Target::File(path) => ("file_path = ?3", path.trim_end_matches('/'), true),
-        Target::Fqn(fqn) if fqn.contains(['*', '?', '[']) => ("fqn GLOB ?3", fqn.as_str(), false),
-        Target::Fqn(fqn) => ("fqn = ?3", fqn.as_str(), false),
+    let file = target.file.as_deref().map(|p| p.trim_end_matches('/'));
+    let file_mode = target.fqns.is_empty();
+    let workspace::IndexedRepo { git, client } = workspace::open_indexed(repo, db)?;
+    let resolved = match (target.fqns.as_slice(), file) {
+        ([], None) => anyhow::bail!("pass one or more fqns or globs, or --file <path>"),
+        ([], Some(path)) => {
+            let batches = client.query_arrow_json(
+                &format!(
+                    "SELECT id, fqn, definition_type, file_path, start_line, end_line
+                     FROM gl_definition
+                     WHERE project_id = ?1 AND commit_sha = ?2 AND file_path = ?3
+                       AND fqn NOT LIKE '%@%'
+                     {}
+                     ORDER BY start_line, end_line DESC, fqn",
+                    kind_scope("definition_type", &target.kinds)
+                ),
+                &[
+                    git.project_id.into(),
+                    git.commit_sha.clone().into(),
+                    path.into(),
+                ],
+            )?;
+            let resolved = fqn::defs_from(&batches);
+            if resolved.is_empty() {
+                let launcher = spec::launcher();
+                anyhow::bail!(
+                    "no indexed definitions in {path:?}{} for commit {} — pass a repo-relative \
+                     path as printed by `{launcher} grep`, and make sure the commit is indexed \
+                     (`{launcher} index <path>`)",
+                    fqn::kind_suffix(&target.kinds),
+                    git.commit_sha
+                );
+            }
+            resolved
+        }
+        (names, file) => names
+            .iter()
+            .map(|name| fqn::resolve(&client, &git, name, file, &target.kinds))
+            .collect::<Result<Vec<_>>>()?
+            .into_iter()
+            .flatten()
+            .collect(),
     };
-    let defs = client.query_arrow_json(
-        &format!(
-            "SELECT fqn, definition_type, file_path, start_line, end_line
-             FROM gl_definition
-             WHERE project_id = ?1 AND commit_sha = ?2 AND {predicate}
-             ORDER BY file_path, start_line, end_line DESC, fqn"
-        ),
-        &[
-            git.project_id.into(),
-            git.commit_sha.clone().into(),
-            value.into(),
-        ],
-    )?;
-    let fqns = string_column(&defs, "fqn");
-    let kinds = string_column(&defs, "definition_type");
-    let files = string_column(&defs, "file_path");
-    let starts = i64_column(&defs, "start_line");
-    let ends = i64_column(&defs, "end_line");
-    let defs: Vec<Def> = (0..fqns.len())
-        .map(|i| Def {
-            fqn: fqns[i].clone(),
-            kind: kinds[i].clone(),
-            file: files[i].clone(),
-            start: usize::try_from(starts[i]).unwrap_or(1),
-            end: usize::try_from(ends[i]).unwrap_or(0),
+    let mut defs: Vec<Def> = resolved
+        .into_iter()
+        .map(|d| Def {
+            fqn: d.fqn,
+            kind: d.kind,
+            file: d.file,
+            start: usize::try_from(d.start).unwrap_or(1),
+            end: usize::try_from(d.end).unwrap_or(0),
         })
         .collect();
-    if defs.is_empty() {
-        let launcher = spec::launcher();
-        match &target {
-            Target::File(path) => anyhow::bail!(
-                "no indexed definitions in {path:?} for commit {} — pass a repo-relative \
-                 path as printed by `{launcher} grep`, and make sure the commit is indexed \
-                 (`{launcher} index <path>`)",
-                git.commit_sha
-            ),
-            Target::Fqn(fqn) => anyhow::bail!(
-                "no definition {fqn:?} for commit {} — pass the exact fqn printed by \
-                 `{launcher} grep` (or a glob such as `crate::module::*`), and make sure \
-                 the commit is indexed (`{launcher} index <path>`)",
-                git.commit_sha
-            ),
-        }
-    }
+    defs.sort_by(|a, b| {
+        a.file
+            .cmp(&b.file)
+            .then(a.start.cmp(&b.start))
+            .then(b.end.cmp(&a.end))
+            .then(a.fqn.cmp(&b.fqn))
+    });
+    defs.dedup();
 
     let mut out = String::new();
     for (file, file_defs) in outline(&defs) {
@@ -85,7 +94,7 @@ pub(crate) fn run(target: Target, repo: Option<PathBuf>, db: Option<PathBuf>) ->
         if !out.is_empty() {
             out.push('\n');
         }
-        if include_gaps {
+        if file_mode {
             writeln!(
                 out,
                 "{file}  ({} definitions, {} lines)",
@@ -93,7 +102,7 @@ pub(crate) fn run(target: Target, repo: Option<PathBuf>, db: Option<PathBuf>) ->
                 lines.len()
             )?;
         }
-        render(&mut out, &file_defs, &lines, include_gaps)?;
+        render(&mut out, &file_defs, &lines, file_mode)?;
     }
     print!("{out}");
     Ok(())
@@ -151,11 +160,12 @@ pub(crate) fn render(
         }
         prev_single_line = single_line;
         if let Some(def) = def {
-            writeln!(
-                out,
-                "{}  [{}]  {}:{}-{}",
-                def.fqn, def.kind, def.file, def.start, def.end
-            )?;
+            let loc = if include_gaps {
+                format!("L{}-{}", def.start, def.end)
+            } else {
+                format!("{}:{}-{}", def.file, def.start, def.end)
+            };
+            writeln!(out, "{}  [{}]  {loc}", def.fqn, def.kind)?;
         }
         write_lines(out, lines, start, end)?;
     }
@@ -164,7 +174,7 @@ pub(crate) fn render(
 
 fn write_lines(out: &mut String, lines: &[&str], start: usize, end: usize) -> std::fmt::Result {
     for n in start..=end.min(lines.len()) {
-        writeln!(out, "{n} | {}", lines[n - 1])?;
+        writeln!(out, "{n}|{}", lines[n - 1])?;
     }
     Ok(())
 }
@@ -222,9 +232,9 @@ mod tests {
         render(&mut out, &defs, &lines, true).unwrap();
         assert_eq!(
             out,
-            "m::a  [Module]  src/lib.rs:1-1\n1 | pub mod a;\n\
-             m::b  [Module]  src/lib.rs:2-2\n2 | pub mod b;\n\n\
-             m::run  [Function]  src/lib.rs:4-5\n4 | fn run() {\n5 | }\n"
+            "m::a  [Module]  L1-1\n1|pub mod a;\n\
+             m::b  [Module]  L2-2\n2|pub mod b;\n\n\
+             m::run  [Function]  L4-5\n4|fn run() {\n5|}\n"
         );
     }
 
@@ -237,8 +247,8 @@ mod tests {
         ];
         let mut out = String::new();
         render(&mut out, &defs, &lines, true).unwrap();
-        assert!(out.contains("1 | a\n2 | b\n3 | c\n"));
-        assert!(out.contains("m::b  [Function]  src/lib.rs:20-25\n"));
+        assert!(out.contains("1|a\n2|b\n3|c\n"));
+        assert!(out.contains("m::b  [Function]  L20-25\n"));
     }
 
     #[test]
@@ -252,8 +262,8 @@ mod tests {
         render(&mut out, &defs, &lines, false).unwrap();
         assert_eq!(
             out,
-            "m::one  [Function]  src/lib.rs:3-4\n3 | fn one() {\n4 | }\n\n\
-             m::two  [Function]  src/lib.rs:6-7\n6 | fn two() {\n7 | }\n"
+            "m::one  [Function]  src/lib.rs:3-4\n3|fn one() {\n4|}\n\n\
+             m::two  [Function]  src/lib.rs:6-7\n6|fn two() {\n7|}\n"
         );
     }
 
@@ -277,14 +287,14 @@ mod tests {
         render(&mut out, &defs, &lines, true).unwrap();
         let numbered: Vec<usize> = out
             .lines()
-            .filter_map(|l| l.split_once(" | ").and_then(|(n, _)| n.trim().parse().ok()))
+            .filter_map(|l| l.split_once('|').and_then(|(n, _)| n.trim().parse().ok()))
             .collect();
         assert_eq!(
             numbered,
             vec![1, 2, 3, 4, 6, 7, 8],
             "blank-only gaps are skipped"
         );
-        assert!(out.starts_with("1 | use a;\n2 | \n\nm::one  [Function]"));
-        assert!(out.ends_with("7 | }\n\n8 | // tail\n"));
+        assert!(out.starts_with("1|use a;\n2|\n\nm::one  [Function]"));
+        assert!(out.ends_with("7|}\n\n8|// tail\n"));
     }
 }

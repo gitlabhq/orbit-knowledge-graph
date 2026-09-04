@@ -1,9 +1,10 @@
 name: get_graph_schema
-version: 1.0.0
+version: 1.1.0
 short: Describe the schema of the local DuckDB graph
 description: >-
   Describe the schema of the local DuckDB graph
 
 
-  Returns JSON rows of (table_name, column_name, data_type) for every user
-  table in the workspace database.
+  Returns JSON rows of (table_name, column_name, data_type) for every graph
+  table in the workspace database; per-project search-index tables and
+  internal bookkeeping are omitted.

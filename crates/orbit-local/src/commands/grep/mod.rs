@@ -27,8 +27,10 @@ fn build_vocab<S: orbit_search::grep::GrepSource>(source: &S) -> Result<SearchVo
     ))
 }
 
+const MIN_HITS_PER_QUERY: usize = 3;
+
 pub(crate) fn run(
-    query: String,
+    queries: Vec<String>,
     repo: Option<PathBuf>,
     db: Option<PathBuf>,
     limit: usize,
@@ -36,7 +38,7 @@ pub(crate) fn run(
     filter: RecallFilter,
 ) -> Result<()> {
     let launcher = crate::commands::setup::spec::launcher();
-    if content_words(&query).is_empty() && paths.is_empty() {
+    if let Some(query) = queries.iter().find(|q| content_words(q).is_empty()) {
         anyhow::bail!(
             "no usable search terms in query: {query:?} — to list every definition in a \
              file or directory instead, run `{launcher} grep --path <path>`; to print a whole \
@@ -44,14 +46,12 @@ pub(crate) fn run(
         );
     }
 
-    let repo_path = repo.unwrap_or_else(|| PathBuf::from("."));
-    let backend = LocalBackend::open(&repo_path, db, &paths)?;
+    let backend = LocalBackend::open(repo, db, &paths)?;
 
     let mut out = std::io::stdout().lock();
-    if content_words(&query).is_empty() {
+    if queries.is_empty() {
         return report_outline(&mut out, &backend, &paths, &filter, launcher);
     }
-    writeln!(out, "grep {:?} — {}", query, backend.header())?;
     if !paths.is_empty() {
         writeln!(out, "path: {}", paths.join(" "))?;
     }
@@ -60,32 +60,38 @@ pub(crate) fn run(
     }
 
     let vocab = build_vocab(backend.search())?;
-    let outcome = backend.grep(&query, limit, &vocab, &filter)?;
-    writeln!(out, "terms: {}", outcome.terms.join(" "))?;
+    let per_query_limit = (limit / queries.len()).max(MIN_HITS_PER_QUERY.min(limit));
+    for (i, query) in queries.iter().enumerate() {
+        if i > 0 {
+            writeln!(out)?;
+        }
+        writeln!(out, "grep {:?} @ {}", query, backend.header())?;
+        let outcome = backend.grep(query, per_query_limit, &vocab, &filter)?;
+        let typed: Vec<String> = query.split_whitespace().map(str::to_lowercase).collect();
+        if outcome.terms != typed {
+            writeln!(out, "terms: {}", outcome.terms.join(" "))?;
+        }
 
-    if outcome.matches.is_empty() {
-        if paths.is_empty() && filter.is_empty() {
-            writeln!(out, "\nNo definitions match those terms.")?;
-        } else {
+        if outcome.matches.is_empty() {
+            if paths.is_empty() && filter.is_empty() {
+                writeln!(out, "\nNo definitions match those terms.")?;
+            } else {
+                writeln!(
+                    out,
+                    "\nNo definitions match those terms within that scope; drop --path/--kind to widen."
+                )?;
+            }
             writeln!(
                 out,
-                "\nNo definitions match those terms within that scope; drop --path/--kind to widen."
+                "Rephrase and retry once — use synonyms or identifier fragments \
+                 from the code (e.g. \"throttle\" → \"rate limit\"). If the retry \
+                 also misses, fall back to text grep."
             )?;
+            continue;
         }
-        writeln!(
-            out,
-            "Rephrase and retry once — use synonyms or identifier fragments \
-             from the code (e.g. \"throttle\" → \"rate limit\"). If the retry \
-             also misses, fall back to text grep."
-        )?;
-        return Ok(());
-    }
 
-    report_results(&mut out, &outcome)?;
-    writeln!(
-        out,
-        "\n{launcher} show \"<fqn>\" prints a body (\"<module>::*\" or --file <path> prints many); {launcher} describe \"<fqn>\" lists its callers and every other connection."
-    )?;
+        report_results(&mut out, &outcome)?;
+    }
     Ok(())
 }
 
@@ -96,7 +102,7 @@ fn report_outline(
     filter: &RecallFilter,
     launcher: &str,
 ) -> Result<()> {
-    writeln!(out, "outline {} — {}", paths.join(" "), backend.header())?;
+    writeln!(out, "outline {} @ {}", paths.join(" "), backend.header())?;
     if !filter.kinds.is_empty() {
         writeln!(out, "kind: {}", filter.kinds.join(" "))?;
     }
@@ -112,10 +118,6 @@ fn report_outline(
     for r in &rows {
         writeln!(out, "  {}  [{}]  {}", r.fqn, r.kind, r.loc)?;
     }
-    writeln!(
-        out,
-        "\n{launcher} show \"<fqn>\" prints a body; {launcher} show --file <path> prints a whole file."
-    )?;
     Ok(())
 }
 
@@ -129,22 +131,22 @@ fn report_results(
         writeln!(out, "  {}  [{}]  {}", m.row.fqn, m.row.kind, m.row.loc)?;
     }
     let hidden = outcome.total.saturating_sub(outcome.matches.len());
-    if hidden > 0 {
+    if hidden >= BROAD_HIDDEN_HITS {
         writeln!(
             out,
-            "  … {hidden} more candidates not shown — raise --limit or narrow with --path/--kind."
+            "  … {hidden} more — the query is broad; scope with --path <dir>/--kind <Kind> or use a more specific identifier"
         )?;
-    }
-    if !outcome.weak && !outcome.edges.is_empty() {
-        writeln!(out, "\nEdges:")?;
-        for e in &outcome.edges {
-            writeln!(out, "  {}  -{}->  {}", e.source, e.kind, e.target)?;
-        }
+    } else if hidden > 0 {
+        writeln!(
+            out,
+            "  … {hidden} more (narrow with --path/--kind, or raise --limit)"
+        )?;
     }
     Ok(())
 }
 
-const COMPOUND_TERM_HINT: usize = 7;
+const COMPOUND_TERM_HINT: usize = 5;
+const BROAD_HIDDEN_HITS: usize = 100;
 
 fn report_confidence(
     out: &mut impl Write,
@@ -153,20 +155,18 @@ fn report_confidence(
     if outcome.terms.len() >= COMPOUND_TERM_HINT {
         writeln!(
             out,
-            "note: {} search terms — long or compound queries dilute matching. \
-             Search one thing at a time (\"where is X defined\", then \"how is Y \
-             applied\") for sharper results.",
+            "note: {} search terms — long queries dilute matching. grep matches \
+             symbol-name words, so use one to three identifier-like words per \
+             query and batch several queries in one call instead.",
             outcome.terms.len()
         )?;
     }
     if outcome.weak {
         writeln!(
             out,
-            "note: weak matches — too few question terms anchor a symbol name, \
-             so the results below may be coincidental and edge details are \
-             omitted. Rephrase with a code identifier, or use `{} sql` \
-             for an exact-name lookup.",
-            crate::commands::setup::spec::launcher()
+            "note: weak matches — no term anchors a symbol name, so the results \
+             below may be coincidental. Use an identifier fragment the code would \
+             use, or scope with --path/--kind."
         )?;
     }
     if !outcome.unmatched_terms.is_empty() {
@@ -177,6 +177,18 @@ fn report_confidence(
              or identifier fragment for each unmatched term (e.g. \"throttle\" \
              → \"rate limit\").",
             outcome.unmatched_terms.join(", ")
+        )?;
+    }
+    if !outcome.unmatched_terms.is_empty() && !outcome.term_anchors.is_empty() {
+        let anchors: Vec<String> = outcome
+            .term_anchors
+            .iter()
+            .map(|(term, fqn)| format!("{term} → {fqn}"))
+            .collect();
+        writeln!(
+            out,
+            "note: matched terms anchored on: {}",
+            anchors.join(", ")
         )?;
     }
     Ok(())
@@ -191,9 +203,9 @@ mod tests {
             terms: Vec::new(),
             matches: Vec::new(),
             total: 0,
-            edges: Vec::new(),
             weak,
             unmatched_terms: unmatched.into_iter().map(String::from).collect(),
+            term_anchors: Vec::new(),
         }
     }
 
@@ -217,44 +229,18 @@ mod tests {
     }
 
     #[test]
-    fn weak_results_omit_edges_as_the_note_promises() {
-        let mut o = outcome(Vec::new(), true);
-        o.edges.push(orbit_search::Edge {
-            kind: "CALLS".into(),
-            source: "A::a".into(),
-            source_loc: String::new(),
-            target: "B::b".into(),
-            target_loc: String::new(),
-        });
-        let mut buf = Vec::new();
-        report_results(&mut buf, &o).unwrap();
-        let text = String::from_utf8(buf).unwrap();
-        assert!(text.contains("edge details are omitted"), "{text}");
-        assert!(!text.contains("Edges:"), "{text}");
-
-        o.weak = false;
-        let mut buf = Vec::new();
-        report_results(&mut buf, &o).unwrap();
-        assert!(String::from_utf8(buf).unwrap().contains("Edges:"));
-    }
-
-    #[test]
     fn truncated_results_report_how_many_were_hidden() {
         let mut o = outcome(Vec::new(), false);
         o.total = 42;
         let mut buf = Vec::new();
         report_results(&mut buf, &o).unwrap();
         let text = String::from_utf8(buf).unwrap();
-        assert!(text.contains("42 more candidates not shown"), "{text}");
+        assert!(text.contains("42 more (narrow"), "{text}");
 
         o.total = 0;
         let mut buf = Vec::new();
         report_results(&mut buf, &o).unwrap();
-        assert!(
-            !String::from_utf8(buf)
-                .unwrap()
-                .contains("more candidates not shown")
-        );
+        assert!(!String::from_utf8(buf).unwrap().contains(" more"));
     }
 
     #[test]
