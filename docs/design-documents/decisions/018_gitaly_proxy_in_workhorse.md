@@ -101,9 +101,9 @@ one. Rails owns that decision with the rest of the GitLab authorization logic.
 ### A connection's lifecycle
 
 1. The consumer opens `/api/v4/internal/gitaly_proxy/project/:id/ws` with its
-   the consumer's existing service credential - for Orbit, the JWT it already
-   uses against Rails. Workhorse applies admission limits and asks Rails to
-   preauthorize the connection.
+   existing service credential — for Orbit, the JWT it already uses against
+   Rails. Workhorse applies admission limits and asks Rails to preauthorize the
+   connection.
 2. Rails identifies the consumer, authorizes the repository, and returns the
    Gitaly coordinates plus a named policy that it may narrow for this session.
 3. Workhorse validates the policy, binds it and the Gitaly coordinates to the
@@ -119,7 +119,10 @@ never leaves the GitLab deployment.
 Each connection is scoped to one project because Rails resolves that project's
 repository storage and returns Gitaly coordinates that Workhorse binds to the
 connection. A group-scoped tunnel would have to re-resolve storage for every
-stream and route across Gitaly nodes.
+stream and route across Gitaly nodes. A connection costs one Rails
+preauthorization round trip, not a new Gitaly connection: Workhorse pools its
+Gitaly client, so per-project connections do not multiply Gitaly-side
+connections.
 
 ### The read-only policy
 
@@ -151,8 +154,7 @@ streams for 10 minutes, and those streams may run for 60 minutes. The worst
 case is therefore about 70 minutes. Workhorse caps this window at two hours
 regardless of the values Rails requests.
 
-Turning off the `gitaly_proxy` feature flag stops new preauthorizations.
-Existing sessions continue under the same lifetime rules.
+The [feature flag](#feature-flag) governs new preauthorizations.
 
 ### Capacity
 
@@ -168,9 +170,9 @@ Request volume equals today's `GetArchive` traffic through Rails. The difference
 is the connection shape: the connection is held for the archive stream instead
 of a short HTTP request, and Rails leaves the data path.
 
-<!-- TODO: fill from Gitaly dashboards / Kibana, client_name gkg-indexer -->
-
-[Live backfill and incremental archive rates and stream durations: pending.]
+**TODO (before acceptance):** live backfill and incremental archive rates and
+per-stream durations from the Gitaly dashboards / Kibana (`client_name:
+gkg-indexer`).
 
 ### Adding a consumer or an RPC
 
