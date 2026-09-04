@@ -70,7 +70,7 @@ sequenceDiagram
     participant R as Rails
     participant G as Gitaly
 
-    C->>W: WebSocket upgrade + service credential
+    C->>W: Upgrade + consumer's existing service credential (Orbit JWT)
     W->>W: Apply admission limits
     W->>R: Preauthorize the upgrade
     R->>R: Identify consumer, authorize repository, rate limit
@@ -101,7 +101,8 @@ one. Rails owns that decision with the rest of the GitLab authorization logic.
 ### A connection's lifecycle
 
 1. The consumer opens `/api/v4/internal/gitaly_proxy/project/:id/ws` with its
-   service credential. Workhorse applies admission limits and asks Rails to
+   the consumer's existing service credential - for Orbit, the JWT it already
+   uses against Rails. Workhorse applies admission limits and asks Rails to
    preauthorize the connection.
 2. Rails identifies the consumer, authorizes the repository, and returns the
    Gitaly coordinates plus a named policy that it may narrow for this session.
@@ -115,6 +116,11 @@ Rails answers Workhorse directly, and nothing is serialized into a token held
 by the consumer. There is nothing to replay or revoke, and the Gitaly secret
 never leaves the GitLab deployment.
 
+Each connection is scoped to one project because Rails resolves that project's
+repository storage and returns Gitaly coordinates that Workhorse binds to the
+connection. A group-scoped tunnel would have to re-resolve storage for every
+stream and route across Gitaly nodes.
+
 ### The read-only policy
 
 A profile is the rule set compiled into Workhorse; a policy is that profile as
@@ -123,8 +129,10 @@ selected and narrowed by Rails for one session. V1 has one profile,
 allows accessor RPCs scoped to the repository Rails authorized and rejects all
 other calls. This includes mutators that Rails might allowlist by mistake, such
 as `CommitLanguages`. Target-repository resolution uses the same protobuf
-annotation as Gitaly and Praefect. Streams keep the consumer's Gitaly client
-name, so Gitaly's per-client limits and dashboards keep working.
+annotation as Gitaly and Praefect. Workhorse sets and enforces the Gitaly
+`client_name` on every stream from the value Rails returned at preauthorization
+and does not pass through consumer-supplied metadata. Gitaly's per-client
+limits and dashboards therefore keep working.
 
 ### Session lifetime
 
@@ -143,15 +151,33 @@ streams for 10 minutes, and those streams may run for 60 minutes. The worst
 case is therefore about 70 minutes. Workhorse caps this window at two hours
 regardless of the values Rails requests.
 
-Turning off either feature flag stops new preauthorizations. Existing sessions
-continue under the same lifetime rules.
+Turning off the `gitaly_proxy` feature flag stops new preauthorizations.
+Existing sessions continue under the same lifetime rules.
+
+### Capacity
+
+Orbit opens one proxy connection per indexing job, so concurrent Workhorse
+connections track concurrent indexer jobs, not the repository count. Per
+indexer pod, archive fetches are bounded by
+[`engine.handlers.code-indexing-task.pipeline.fetch_concurrency`](../../../crates/orbit-server-config/src/engine.rs),
+which defaults to 10; backfill and incremental indexing share that ceiling.
+Within each connection, concurrency is bounded by the stream cap Rails returns
+at preauthorization.
+
+Request volume equals today's `GetArchive` traffic through Rails. The difference
+is the connection shape: the connection is held for the archive stream instead
+of a short HTTP request, and Rails leaves the data path.
+
+<!-- TODO: fill from Gitaly dashboards / Kibana, client_name gkg-indexer -->
+
+[Live backfill and incremental archive rates and stream durations: pending.]
 
 ### Adding a consumer or an RPC
 
 A new consumer adds a Rails authorizer for its own credential, an RPC allowlist,
-and a rollout flag. The shared route needs no Workhorse, Ingress, or Cells
-routing change. Zoekt and KAS are possible future consumers, but this ADR does
-not implement these.
+and its own feature flag in that authorizer. The shared route needs no
+Workhorse, Ingress, or Cells routing change. Zoekt and KAS are possible future
+consumers, but this ADR does not implement these.
 
 Adding an RPC for an existing consumer is a Rails allowlist change when the RPC
 is already in the Gitaly descriptors vendored into Workhorse. Otherwise,
@@ -174,20 +200,23 @@ stream is cut, the download restarts from zero over the proxy and never switches
 to Rails. Orbit spools the archive to a temporary file before extraction so
 partial bytes do not reach the parser.
 
-### Feature flags
+### Feature flag
 
-| Flag | Type | Default | Scope | Off means |
+| Flag | Type | Default | Actor | Off means |
 |---|---|---|---|---|
-| `workhorse_gitaly_proxy` | ops | enabled | instance | Rails refuses new sessions for every consumer |
-| `orbit_gitaly_proxy` | rollout | disabled | root namespace | Rails refuses new Orbit sessions; fallback mode uses Rails HTTP |
+| `gitaly_proxy` | rollout | disabled | project or root namespace | Rails refuses new preauthorizations; existing sessions drain |
 
-`workhorse_gitaly_proxy` is the mechanism kill switch
-([rollout issue](https://gitlab.com/gitlab-org/gitlab/-/issues/627577)), while
-`orbit_gitaly_proxy` controls the Orbit rollout by root namespace
-([rollout issue](https://gitlab.com/gitlab-org/gitlab/-/issues/627576)). Orbit
-also requires Knowledge Graph indexing to be enabled for the project, the same
-gate the indexing task producer applies, so the proxy cannot read a project the
-indexer would not have been asked to index.
+The Rails preauthorization endpoint checks `gitaly_proxy` with the project or
+its root namespace as the actor. Disabled, it is the kill switch: Rails refuses
+new preauthorizations while existing sessions drain under the lifetime rules.
+Enabling it for selected namespaces provides gradual rollout, and enabling it
+globally is GA. The Orbit transport default, `rails_http`, remains configuration
+rather than a feature flag. Rollout is tracked in
+[rollout issue](https://gitlab.com/gitlab-org/gitlab/-/issues/627576).
+
+Orbit also requires Knowledge Graph indexing to be enabled for the project, the
+same gate the indexing task producer applies, so the proxy cannot read a
+project the indexer would not have been asked to index.
 
 ## Why not the alternatives
 
