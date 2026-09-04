@@ -190,9 +190,10 @@ struct IndexArgs {
                   back to text grep."
 )]
 struct GrepArgs {
-    /// Plain-language query, e.g. "NATS message publish"
-    #[arg(value_name = "QUERY")]
-    query: String,
+    /// Plain-language query, e.g. "NATS message publish". Omit it with
+    /// --path to list every definition under that path instead.
+    #[arg(value_name = "QUERY", required_unless_present = "path")]
+    query: Option<String>,
 
     /// Repository path (default: current directory).
     #[arg(long, value_name = "PATH")]
@@ -208,6 +209,12 @@ struct GrepArgs {
     #[arg(long, value_name = "PATH")]
     path: Vec<String>,
 
+    /// Only search definitions of this type, as printed in grep's `[Kind]`
+    /// column (e.g. `Function`, `Constant`, `Struct`); repeatable,
+    /// case-insensitive.
+    #[arg(long, value_name = "KIND")]
+    kind: Vec<String>,
+
     /// Override the DuckDB path (default: ~/.orbit/graph.duckdb).
     #[arg(long, value_name = "PATH")]
     db: Option<PathBuf>,
@@ -220,13 +227,24 @@ fn fqn_arg_help() -> String {
     )
 }
 
+fn show_fqn_arg_help() -> String {
+    format!(
+        "Fully qualified name as printed by `{} grep`, or a glob such as \
+         `crate::module::*` to print every definition it matches.",
+        commands::setup::spec::launcher()
+    )
+}
+
 fn show_long_about() -> String {
     format!(
-        "Print the full source body of an indexed definition.\n\n\
-         Takes the exact fully qualified name as printed by `{} grep` \
+        "Print the full source body of indexed definitions.\n\n\
+         Takes the exact fully qualified name as printed by `{launcher} grep` \
          and prints the definition's source lines from the working tree, so a \
-         follow-up on a grep match needs no file read.",
-        commands::setup::spec::launcher()
+         follow-up on a grep match needs no file read. A glob fqn such as \
+         `crate::module::*` prints every matching definition in file order, \
+         and `--file <path>` prints a whole file as its definitions plus the \
+         lines between them, so whole-module reading needs no file read either.",
+        launcher = commands::setup::spec::launcher()
     )
 }
 
@@ -245,8 +263,13 @@ fn describe_long_about() -> String {
 #[command(about = "Print the full source body of a definition by exact fqn")]
 #[command(long_about = show_long_about())]
 struct ShowArgs {
-    #[arg(value_name = "FQN", help = fqn_arg_help())]
-    fqn: String,
+    #[arg(value_name = "FQN", help = show_fqn_arg_help(), required_unless_present = "file")]
+    fqn: Option<String>,
+
+    /// Print every indexed definition in this repo-relative file, in order,
+    /// with the lines between them, instead of looking up an fqn.
+    #[arg(long, value_name = "PATH", conflicts_with = "fqn")]
+    file: Option<String>,
 
     /// Repository path (default: current directory).
     #[arg(long, value_name = "PATH")]
@@ -553,6 +576,8 @@ async fn main() -> Result<()> {
     let matches = Cli::command().get_matches();
     let cli = Cli::from_arg_matches(&matches).expect("clap already validated the arguments");
 
+    let coding_agent = telemetry::detect_coding_agent(|key| std::env::var(key).ok());
+
     let tracker = if matches!(
         cli.command,
         Commands::HookGuard { .. }
@@ -565,7 +590,7 @@ async fn main() -> Result<()> {
         telemetry::resolve_from_env().build_tracker()
     };
     if let Some(tracker) = &tracker {
-        telemetry::emit_command_event(tracker, &subcommand_path(&matches));
+        telemetry::emit_command_event(tracker, &subcommand_path(&matches), coding_agent.as_deref());
     }
 
     let result = dispatch(cli.command, tracker.as_ref()).await;
@@ -683,9 +708,29 @@ async fn dispatch_local(command: LocalCommands) -> Result<()> {
             repo,
             limit,
             path,
+            kind,
             db,
-        }) => commands::grep::run(query, repo, db, limit, path),
-        LocalCommands::Show(ShowArgs { fqn, repo, db }) => commands::show::run(fqn, repo, db),
+        }) => commands::grep::run(
+            query.unwrap_or_default(),
+            repo,
+            db,
+            limit,
+            path,
+            orbit_search::RecallFilter { kinds: kind },
+        ),
+        LocalCommands::Show(ShowArgs {
+            fqn,
+            file,
+            repo,
+            db,
+        }) => {
+            let target = match (fqn, file) {
+                (_, Some(file)) => commands::show::Target::File(file),
+                (Some(fqn), None) => commands::show::Target::Fqn(fqn),
+                (None, None) => unreachable!("clap requires FQN or --file"),
+            };
+            commands::show::run(target, repo, db)
+        }
         LocalCommands::Describe(DescribeArgs { fqn, repo, db }) => {
             commands::describe::run(fqn, repo, db)
         }
@@ -1040,13 +1085,7 @@ fn index_repo(
         .context("failed to load the DuckDB fts extension")?;
     client
         .execute(
-            &format!(
-                "CREATE OR REPLACE TABLE {doc_table} AS
-             SELECT DISTINCT commit_sha, id AS def_id,
-                    fts_doc(def_name(fqn)) AS name,
-                    fts_doc(fqn || ' ' || file_path) AS context
-             FROM gl_definition WHERE project_id = ?1 AND commit_sha = ?2"
-            ),
+            &duckdb_client::search::def_doc_sql(&doc_table),
             &[
                 serde_json::json!(git.project_id),
                 serde_json::json!(git.commit_sha),

@@ -33,11 +33,26 @@ impl TermRecall {
     }
 }
 
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct RecallFilter {
+    pub kinds: Vec<String>,
+}
+
+impl RecallFilter {
+    pub fn is_empty(&self) -> bool {
+        self.kinds.is_empty()
+    }
+}
+
 pub trait GrepSource {
     type Error;
 
     fn stem(&self, words: &[String]) -> Result<Vec<String>, Self::Error>;
-    fn recall(&self, terms: &[String]) -> Result<Vec<TermRecall>, Self::Error>;
+    fn recall(
+        &self,
+        terms: &[String],
+        filter: &RecallFilter,
+    ) -> Result<Vec<TermRecall>, Self::Error>;
     fn rows_by_ids(&self, ids: &[i64]) -> Result<Vec<CorpusRow>, Self::Error>;
     fn edges_among(&self, ids: &[i64]) -> Result<Vec<Edge>, Self::Error>;
 }
@@ -79,6 +94,7 @@ pub fn grep<S: GrepSource>(
     query: &str,
     limit: usize,
     vocab: &SearchVocab,
+    filter: &RecallFilter,
 ) -> Result<GrepOutcome, GrepError<S::Error>> {
     let terms = content_words(query);
     if terms.is_empty() {
@@ -96,7 +112,7 @@ pub fn grep<S: GrepSource>(
     } else {
         searchable
     };
-    let recalls = source.recall(&search_terms)?;
+    let recalls = source.recall(&search_terms, filter)?;
     let unmatched = unmatched_terms(&search_terms, &recalls);
 
     let mut ids: Vec<i64> = Vec::new();
@@ -166,7 +182,11 @@ mod tests {
                 .collect())
         }
 
-        fn recall(&self, terms: &[String]) -> Result<Vec<TermRecall>, Self::Error> {
+        fn recall(
+            &self,
+            terms: &[String],
+            _filter: &RecallFilter,
+        ) -> Result<Vec<TermRecall>, Self::Error> {
             Ok(terms
                 .iter()
                 .map(|t| {
@@ -213,7 +233,14 @@ mod tests {
 
     #[test]
     fn grep_ranks_recalled_rows_and_lists_edges_among_them() {
-        let outcome = grep(&FakeRecallSource, "who calls commit hook", 5, &test_vocab()).unwrap();
+        let outcome = grep(
+            &FakeRecallSource,
+            "who calls commit hook",
+            5,
+            &test_vocab(),
+            &RecallFilter::default(),
+        )
+        .unwrap();
         assert_eq!(outcome.matches.len(), 2);
         assert_eq!(outcome.total, 2);
         assert_eq!(outcome.matches[0].row.id, HOOK_ID);
@@ -224,7 +251,14 @@ mod tests {
 
     #[test]
     fn limit_trims_matches_but_total_reports_every_recalled_row() {
-        let outcome = grep(&FakeRecallSource, "commit", 1, &test_vocab()).unwrap();
+        let outcome = grep(
+            &FakeRecallSource,
+            "commit",
+            1,
+            &test_vocab(),
+            &RecallFilter::default(),
+        )
+        .unwrap();
         assert_eq!(outcome.matches.len(), 1);
         assert_eq!(outcome.total, 2);
         assert!(outcome.edges.is_empty());
@@ -232,7 +266,14 @@ mod tests {
 
     #[test]
     fn unrecalled_terms_are_reported_without_deflating_confidence() {
-        let outcome = grep(&FakeRecallSource, "commit zzzz yyyy", 5, &test_vocab()).unwrap();
+        let outcome = grep(
+            &FakeRecallSource,
+            "commit zzzz yyyy",
+            5,
+            &test_vocab(),
+            &RecallFilter::default(),
+        )
+        .unwrap();
         assert_eq!(
             outcome.unmatched_terms,
             vec!["zzzz".to_string(), "yyyy".to_string()]
@@ -245,12 +286,25 @@ mod tests {
 
     #[test]
     fn relational_only_questions_fall_back_to_all_terms() {
-        let err = grep(&FakeRecallSource, "", 5, &test_vocab())
-            .err()
-            .expect("empty query must fail");
+        let err = grep(
+            &FakeRecallSource,
+            "",
+            5,
+            &test_vocab(),
+            &RecallFilter::default(),
+        )
+        .err()
+        .expect("empty query must fail");
         assert!(matches!(err, GrepError::NoUsableTerms(_)));
 
-        let outcome = grep(&FakeRecallSource, "calls", 5, &test_vocab()).unwrap();
+        let outcome = grep(
+            &FakeRecallSource,
+            "calls",
+            5,
+            &test_vocab(),
+            &RecallFilter::default(),
+        )
+        .unwrap();
         assert!(outcome.matches.is_empty());
     }
 }

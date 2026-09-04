@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use duckdb_client::search::DuckDbSearch;
-use orbit_search::{GrepOutcome, SearchVocab};
+use orbit_search::{GrepOutcome, RecallFilter, SearchVocab};
 
 use duckdb_client::scalar_i64;
 
@@ -73,8 +73,9 @@ impl LocalBackend {
         query: &str,
         limit: usize,
         vocab: &SearchVocab,
+        filter: &RecallFilter,
     ) -> Result<GrepOutcome> {
-        self.search.grep(query, limit, vocab)
+        self.search.grep(query, limit, vocab, filter)
     }
 }
 
@@ -103,10 +104,14 @@ mod tests {
         }
 
         fn def(&self, id: i64, fqn: &str, name: &str, path: &str) {
+            self.typed_def(id, fqn, name, path, "Method");
+        }
+
+        fn typed_def(&self, id: i64, fqn: &str, name: &str, path: &str, kind: &str) {
             self.client
                 .execute(
                     &format!(
-                        "INSERT INTO gl_definition VALUES ({id}, '', 7, 'main', 'sha', '{path}', '{fqn}', '{name}', 'Method', 1, 2, 0, 0, 0, 0)"
+                        "INSERT INTO gl_definition VALUES ({id}, '', 7, 'main', 'sha', '{path}', '{fqn}', '{name}', '{kind}', 1, 2, 0, 0, 0, 0)"
                     ),
                     &[],
                 )
@@ -132,12 +137,8 @@ mod tests {
             self.client.load_extension("fts").unwrap();
             self.client
                 .execute(
-                    "CREATE OR REPLACE TABLE gl_def_doc_7 AS
-                     SELECT DISTINCT commit_sha, id AS def_id,
-                            fts_doc(def_name(fqn)) AS name,
-                            fts_doc(fqn || ' ' || file_path) AS context
-                     FROM gl_definition",
-                    &[],
+                    &duckdb_client::search::def_doc_sql("gl_def_doc_7"),
+                    &[serde_json::json!(7), serde_json::json!("sha")],
                 )
                 .unwrap();
             self.client
@@ -153,6 +154,12 @@ mod tests {
 
     fn vocab(search: &DuckDbSearch) -> SearchVocab {
         super::super::build_vocab(search).unwrap()
+    }
+
+    fn kinds(kinds: &[&str]) -> RecallFilter {
+        RecallFilter {
+            kinds: kinds.iter().map(|k| k.to_string()).collect(),
+        }
     }
 
     #[test]
@@ -171,7 +178,9 @@ mod tests {
 
         let search = g.search();
         let vocab = vocab(&search);
-        let outcome = search.grep("dlq publish", 5, &vocab).unwrap();
+        let outcome = search
+            .grep("dlq publish", 5, &vocab, &RecallFilter::default())
+            .unwrap();
         assert!(!outcome.matches.is_empty());
         assert!(!outcome.weak);
         assert!(outcome.unmatched_terms.is_empty());
@@ -190,7 +199,9 @@ mod tests {
 
         let search = g.scoped_search(&["crates/compiler"]);
         let vocab = vocab(&search);
-        let outcome = search.grep("limit", 5, &vocab).unwrap();
+        let outcome = search
+            .grep("limit", 5, &vocab, &RecallFilter::default())
+            .unwrap();
         let ids: Vec<i64> = outcome.matches.iter().map(|m| m.row.id).collect();
         assert_eq!(ids, vec![2]);
     }
@@ -204,10 +215,41 @@ mod tests {
 
         let search = g.scoped_search(&["crates/*/src/main.rs", "e2e/"]);
         let vocab = vocab(&search);
-        let outcome = search.grep("limit", 5, &vocab).unwrap();
+        let outcome = search
+            .grep("limit", 5, &vocab, &RecallFilter::default())
+            .unwrap();
         let mut ids: Vec<i64> = outcome.matches.iter().map(|m| m.row.id).collect();
         ids.sort_unstable();
         assert_eq!(ids, vec![1, 3]);
+    }
+
+    #[test]
+    fn kind_scope_matches_definition_type_case_insensitively() {
+        let g = TestGraph::new("grep-kind-scope");
+        g.typed_def(
+            1,
+            "Input::limit",
+            "limit",
+            "crates/compiler/src/input.rs",
+            "Field",
+        );
+        g.typed_def(
+            2,
+            "MAX_LIMIT",
+            "MAX_LIMIT",
+            "crates/compiler/src/lib.rs",
+            "Constant",
+        );
+        g.typed_def(3, "Cli::limit", "limit", "crates/cli/src/main.rs", "Method");
+
+        let search = g.search();
+        let vocab = vocab(&search);
+        let outcome = search
+            .grep("limit", 5, &vocab, &kinds(&["constant", "Field"]))
+            .unwrap();
+        let mut ids: Vec<i64> = outcome.matches.iter().map(|m| m.row.id).collect();
+        ids.sort_unstable();
+        assert_eq!(ids, vec![1, 2]);
     }
 
     #[test]
@@ -237,7 +279,9 @@ mod tests {
 
         let search = g.search();
         let vocab = vocab(&search);
-        let outcome = search.grep("compile", 5, &vocab).unwrap();
+        let outcome = search
+            .grep("compile", 5, &vocab, &RecallFilter::default())
+            .unwrap();
         assert_eq!(outcome.matches[0].row.id, 1);
         assert_eq!(outcome.matches[1].row.id, 2);
         assert!(!outcome.weak);
@@ -251,7 +295,9 @@ mod tests {
 
         let search = g.search();
         let vocab = vocab(&search);
-        let outcome = search.grep("mr-title-check", 5, &vocab).unwrap();
+        let outcome = search
+            .grep("mr-title-check", 5, &vocab, &RecallFilter::default())
+            .unwrap();
         assert_eq!(outcome.matches[0].row.fqn, "mr-title-check");
         assert!(!outcome.weak);
     }
@@ -264,7 +310,9 @@ mod tests {
 
         let search = g.search();
         let vocab = vocab(&search);
-        let outcome = search.grep("find", 5, &vocab).unwrap();
+        let outcome = search
+            .grep("find", 5, &vocab, &RecallFilter::default())
+            .unwrap();
         assert!(
             outcome.unmatched_terms.is_empty(),
             "identifiers colliding with English stopwords must recall"

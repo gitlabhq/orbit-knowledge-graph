@@ -364,6 +364,67 @@ async fn migration_completion_checker_promotes_rebuilt_rollback_version() {
 }
 
 #[tokio::test]
+async fn migration_completion_checker_promotes_when_no_namespaces_are_enabled() {
+    let context = TestContext::new().await;
+
+    let graph = context.clickhouse.create_client();
+    ensure_version_table(&graph).await.unwrap();
+    write_schema_version(&graph, 0).await.unwrap();
+    write_migrating_version(&graph, *SCHEMA_VERSION)
+        .await
+        .unwrap();
+
+    let checkpoint_table = prefixed_table_name("checkpoint", *SCHEMA_VERSION);
+    let ontology = ontology::Ontology::load_embedded().unwrap();
+    let invalidated = indexer::schema::invalidation::find_invalidated_pipelines(
+        &ontology,
+        &ontology::migrations::MigrationScope::Full,
+    );
+    for plan in &invalidated.global {
+        context
+            .clickhouse
+            .execute(&format!(
+                "INSERT INTO {checkpoint_table} (key, watermark, cursor_values) \
+                 VALUES ('global.{plan}', now(), 'null')"
+            ))
+            .await;
+    }
+
+    let services = indexer::orchestrator::scheduled::connect(&context.nats_config())
+        .await
+        .unwrap();
+
+    let checker = MigrationCompletionChecker::new(
+        context.clickhouse.create_client(),
+        context.clickhouse.create_client(),
+        std::sync::Arc::new(indexer::testkit::MockLockService::new()),
+        std::sync::Arc::new(ontology::Ontology::load_embedded().unwrap()),
+        orbit_server_config::SchemaConfig::default(),
+        orbit_server_config::MigrationCompletionConfig::default(),
+        ScheduledTaskMetrics::new(),
+        std::sync::Arc::new(indexer::campaign::CampaignState::new()),
+        services.nats_client.clone(),
+    );
+
+    checker.run().await.unwrap();
+
+    let result = context
+        .clickhouse
+        .query(&format!(
+            "SELECT CAST(status AS String) AS status \
+             FROM gkg_schema_version FINAL WHERE version = {}",
+            *SCHEMA_VERSION
+        ))
+        .await;
+    let statuses = String::extract_column(&result, 0).unwrap();
+    assert_eq!(
+        statuses,
+        vec!["active"],
+        "an empty enabled set has nothing to reindex, so the migration must promote"
+    );
+}
+
+#[tokio::test]
 async fn migration_completion_checker_does_not_promote_version_it_does_not_embed() {
     let context = TestContext::new().await;
 

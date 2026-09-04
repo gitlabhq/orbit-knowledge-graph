@@ -2,7 +2,6 @@
 
 description: Call relationships in source code representing function/method invocations
 table: gl_code_edge
-search_weight: 1.0
 
 variants:
   - from_node: { type: Definition, id: id }
