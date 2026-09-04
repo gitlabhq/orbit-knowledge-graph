@@ -158,21 +158,53 @@ The [feature flag](#feature-flag) governs new preauthorizations.
 
 ### Capacity
 
-Orbit opens one proxy connection per indexing job, so concurrent Workhorse
-connections track concurrent indexer jobs, not the repository count. Per
-indexer pod, archive fetches are bounded by
+`fetch_concurrency × indexer pods` is the upper bound on active archive proxy
+connections, independent of repository count. Per indexer pod, archive fetches
+are bounded by
 [`engine.handlers.code-indexing-task.pipeline.fetch_concurrency`](../../../crates/orbit-server-config/src/engine.rs),
-which defaults to 10; backfill and incremental indexing share that ceiling.
-Within each connection, concurrency is bounded by the stream cap Rails returns
-at preauthorization.
+which defaults to 10; backfill and incremental indexing share that ceiling. As
+of 2026-09 on GitLab.com, the code-indexer pool has four pods, giving about 40
+concurrent archive-fetch slots. Within each connection, concurrency is also
+bounded by the stream cap Rails returns at preauthorization.
 
-Request volume equals today's `GetArchive` traffic through Rails. The difference
-is the connection shape: the connection is held for the archive stream instead
-of a short HTTP request, and Rails leaves the data path.
+Gitaly's `gitaly_service_client_requests_total` metric for
+`client_name="gkg-indexer"` shows that `GetArchive` dominates, with 2.97 million
+calls over seven days. `ListBlobs` has about 8,000 calls, and other RPCs are
+noise.
 
-**TODO (before acceptance):** live backfill and incremental archive rates and
-per-stream durations from the Gitaly dashboards / Kibana (`client_name:
-gkg-indexer`).
+| Window | p50 | p95 | p99 | Maximum |
+|---|---:|---:|---:|---:|
+| 7 days | 0.63 req/s | 2.07 req/s | - | 196 req/s |
+| 30 days | 0.69 req/s | 1.66 req/s | 18.4 req/s | about 160 req/s |
+
+The incremental steady state is about 0.7 requests per second and rarely rises
+above about 2 requests per second. Backfills produce short bursts of about
+160-200 requests per second.
+
+Kibana data from `pubsub-gitaly-inf-gprd*` for `json.grpc.time_ms` over 24 hours
+(about 81,000 `GetArchive` calls) shows a bimodal duration distribution: most
+archives are small, with a long tail for large repositories.
+
+| p50 | Average | p90 | p95 | p99 |
+|---:|---:|---:|---:|---:|
+| 0.11 s | 2.0 s | 3.4 s | 12.6 s | 36 s |
+
+Incremental indexing therefore uses about one or two concurrent connections.
+During a backfill, concurrency remains bounded by the configured cap, about 40
+connections for the current pool, rather than growing with repository count.
+The 0.11-second median makes backfills look inexpensive, but the 2.0-second
+average and 36-second p99 mean that some slots remain occupied for tens of
+seconds. The 60-minute stream deadline accommodates the largest repositories.
+
+Rails sees a connection rate comparable to today's `GetArchive` rate: about 0.7
+requests per second in steady state and bursts around 200 requests per second.
+It serves inexpensive preauthorization calls instead of handling full archive
+requests through Puma, and it leaves the archive data path.
+
+These measurements are Gitaly-side RPC counts and durations. A proxy connection
+is held slightly longer than its RPC for the upgrade and preauthorization, and
+one connection may carry more than one RPC. Treating the connection rate as the
+`GetArchive` rate is therefore an upper bound.
 
 ### Adding a consumer or an RPC
 
