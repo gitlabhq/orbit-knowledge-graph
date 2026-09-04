@@ -80,11 +80,11 @@ impl ClickHouseStaleDataCleaner {
                 id,
                 {{watermark_time:DateTime64(6, 'UTC')}} - toIntervalMicrosecond(1) AS _version,
                 true AS _deleted
-            FROM {table} FINAL
+            FROM {table} AS s FINAL
             WHERE traversal_path = {{traversal_path:String}}
               AND project_id = {{project_id:Int64}}
               AND branch = {{branch:String}}
-              AND _version < {{watermark_time:DateTime64(6, 'UTC')}}
+              AND s._version < {{watermark_time:DateTime64(6, 'UTC')}}
             "#
         )
     }
@@ -106,11 +106,11 @@ impl ClickHouseStaleDataCleaner {
                     target_kind,
                     {{watermark_time:DateTime64(6, 'UTC')}} - toIntervalMicrosecond(1) AS _version,
                     true AS _deleted
-                FROM {edge_table} FINAL
+                FROM {edge_table} AS s FINAL
                 WHERE traversal_path = {{traversal_path:String}}
                   AND project_id = {{project_id:Int64}}
                   AND branch = {{branch:String}}
-                  AND _version < {{watermark_time:DateTime64(6, 'UTC')}}
+                  AND s._version < {{watermark_time:DateTime64(6, 'UTC')}}
                 "#,
             );
         }
