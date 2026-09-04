@@ -18,79 +18,64 @@ Proposed
 ### The problem: one internal API per Gitaly RPC
 
 Orbit reads repository content through Rails internal endpoints under
-`/api/v4/internal/orbit/project/:id/`. Each endpoint fronts exactly one Gitaly
-RPC: `repository/archive` wraps `GetArchive`, `repository/changed_paths` wraps
-`FindChangedPaths`, `repository/list_blobs` wraps `ListBlobs`, and the
-merge-request diff endpoints wrap the diff RPCs. Rails authorizes the request,
-resolves which Gitaly storage holds the repository, and hands the call to
-Workhorse through a `Gitlab-Workhorse-Send-Data` header. Workhorse performs the
-RPC and streams the bytes back to Orbit.
+`/api/v4/internal/orbit/project/:id/`. Each endpoint fronts one Gitaly RPC. For
+example, the archive endpoint wraps `GetArchive`, while other endpoints wrap
+changed-path, blob, and merge-request diff RPCs. Rails authenticates and
+authorizes the request, resolves the repository storage, and hands the call to
+Workhorse. Workhorse performs the RPC and streams the bytes to Orbit.
 
-Every new Gitaly RPC Orbit needs repeats the same four steps: a Rails endpoint,
-a Workhorse senddata handler, an HTTP encoding of the RPC's response, and a
-matching client in `gitlab-client`. Each step lands in a different codebase
-with its own review path, and the endpoint that comes out has one caller.
-Every read is also a full Rails request: Rails authenticates the caller,
-authorizes the project, and resolves the repository's storage before handing
-off to Workhorse, so an indexing job that fetches ten archives goes through
-Puma ten times. Workhorse releases the Puma worker as soon as the senddata
-header is written, so the cost is per-request overhead, not a held worker.
+Every new RPC requires a Rails endpoint, a Workhorse handler, an HTTP encoding
+of the response, and a matching `gitlab-client` method. Four codebases and
+review paths change to produce an endpoint with one caller. Every read is also
+a full Rails request, so an indexing job that fetches ten archives goes through
+Puma ten times. Rails is done once it writes the handoff header, so the cost is
+per-request overhead, not a held worker.
 
 ### Why Orbit cannot call Gitaly directly
 
-Orbit runs in its own Kubernetes cluster. Gitaly and Praefect are reachable only
-inside the GitLab network, and the only GitLab component Orbit can reach is
-Workhorse. Every read has to go through Workhorse; the question is only what
-shape that path takes.
+Orbit runs in its own Kubernetes cluster. Gitaly and Praefect are reachable
+only inside the GitLab network, while Orbit can reach Workhorse. Every read
+therefore has to pass through Workhorse.
 
-Native gRPC needs HTTP/2, and Workhorse's inbound listener does not speak it: it
-is a plain HTTP/1.1 server behind a TLS-terminating edge, and no supported
-topology carries HTTP/2 to it (Omnibus NGINX pins `proxy_http_version 1.1`, the
-charts use `backend-protocol: HTTPS`). GitLab has routed around this before
-rather than adding inbound HTTP/2: Duo Workflow bridges a bidirectional gRPC
-stream over a WebSocket upgrade at `duo_workflows/ws`, and the language-server
-executors moved from gRPC to WebSockets because customers who block HTTP/2 hit
-gRPC failures ([gitlab-lsp#1219](https://gitlab.com/gitlab-org/editor-extensions/gitlab-lsp/-/issues/1219)).
-A WebSocket tunnel is the established answer.
+Native gRPC needs HTTP/2, which the Workhorse inbound listener does not support.
+The listener receives HTTP/1.1 behind a TLS-terminating edge, and the supported
+topologies do not carry HTTP/2 to it. GitLab has handled this constraint with
+WebSockets before. Duo Workflow bridges a bidirectional gRPC stream over a
+WebSocket, and the language-server executors moved from gRPC to WebSockets
+because some customers block HTTP/2
+([gitlab-lsp#1219](https://gitlab.com/gitlab-org/editor-extensions/gitlab-lsp/-/issues/1219)).
 
 ### What the POC established
 
 The POC in [#1226](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/1226)
-tried several shapes (a framed HTTP route, a dedicated gRPC port, a reverse
-tunnel over the existing Workhorse to Orbit connection) and landed on a
-transparent proxy: Orbit keeps the generated Gitaly stubs, the gRPC connection
-is tunneled inside a WebSocket, and Workhorse forwards any RPC without knowing
-its schema, the way Praefect does. An unmodified Rust `tonic` client ran a real
-code-indexing job over it against a GDK Workhorse, Praefect, and Gitaly: a
-21 MB `GetArchive` with backpressure, concurrent streams, and code-graph rows in
-ClickHouse at the end.
+compared a framed HTTP route, a dedicated gRPC port, and a reverse tunnel. It
+settled on a transparent proxy: generated Gitaly stubs speak gRPC through a
+WebSocket, and Workhorse forwards RPCs without knowing their schema, the way
+Praefect does. An
+unmodified Rust `tonic` client completed a code-indexing job through GDK
+Workhorse, Praefect, and Gitaly, including a 21 MB `GetArchive`, backpressure,
+and concurrent streams.
 
-What the POC did not settle was authorization. It used a short-lived signed
-grant that Orbit held and attached to each call. Review found three problems
-with that model: the grant carried the Gitaly address and token, so the secret
-the proxy exists to protect ended up in Orbit's hands anyway; it was a bearer
-token with no caller binding and no revocation; and repository scope had to be
-enforced by inspecting each request, which the POC initially got wrong (a grant
-for one repository read another). This ADR is about the design that closes
-those gaps.
+The POC left authorization unresolved. Orbit held a signed grant containing
+the Gitaly address and token, so the secret the proxy exists to protect ended
+up in Orbit anyway. The grant was a bearer token with no caller binding or
+revocation, and the first repository-scope check allowed a grant for one
+repository to read another. This ADR replaces that grant model.
 
 ### The pattern we do not want to copy
 
-Other services avoid the per-RPC translation problem by having Rails hand them a
-Gitaly address and token: Zoekt receives them in task payloads and KAS in its
-`agent_info` response. Each consumer then dials Gitaly itself. That exposes
-storage topology and credentials to every consumer, widens what a compromised
-consumer can do to everything the token can reach, and couples the consumer to
-Gitaly routing. Orbit lives in a separate cluster, which makes each of those
-costs worse, so we rule this pattern out up front.
+Rails gives Zoekt and KAS a Gitaly address and token, then each consumer dials
+Gitaly. This exposes storage topology and credentials, broadens the effect of a
+compromised consumer, and couples consumers to Gitaly routing. Orbit is in a
+separate cluster, so we rule out this pattern.
 
 ## Decision
 
-Add one consumer-generic Gitaly proxy route to Workhorse, tunneling gRPC over a
-WebSocket. Rails authorizes each connection before the upgrade and returns the
-Gitaly coordinates plus a read-only policy. Workhorse keeps both in memory,
-bound to that one connection, and enforces the policy on every gRPC stream. The
-consumer speaks stock gRPC and never sees a Gitaly address or token.
+Add one consumer-generic Gitaly proxy route to Workhorse, with gRPC tunneled
+over a WebSocket. Rails authorizes each connection and returns Gitaly
+coordinates plus a read-only policy to Workhorse. Workhorse holds both in
+memory for that connection and enforces the policy on each gRPC stream. The
+consumer uses generated gRPC stubs and never sees a Gitaly address or token.
 
 ```mermaid
 sequenceDiagram
@@ -100,19 +85,19 @@ sequenceDiagram
     participant G as Gitaly
 
     C->>W: WebSocket upgrade + service credential
-    W->>W: Admission limits (503 if over)
+    W->>W: Apply admission limits
     W->>R: Preauthorize the upgrade
-    R->>R: Identify consumer, authorize repository, rate limit (429)
-    R-->>W: Gitaly address + token, repository, profile, allowlist, session age
-    W->>W: Validate profile, bind session to this connection
-    W-->>C: 101 Switching Protocols (profile, repository, expires-in)
+    R->>R: Identify consumer, authorize repository, rate limit
+    R-->>W: Gitaly coordinates + read-only policy
+    W->>W: Validate policy and bind it to this connection
+    W-->>C: Complete WebSocket upgrade
     loop Each gRPC stream
-        C->>W: gRPC request (HTTP/2 inside the WebSocket)
-        W->>W: Look up session, check policy, verify target repository
+        C->>W: gRPC request inside the WebSocket
+        W->>W: Check policy and target repository
         W->>G: Forward the stream
         G-->>C: Response through Workhorse
     end
-    C->>C: Before the session age expires
+    C->>C: Before the session expires
     C->>W: Open a fresh preauthorized connection
 ```
 
@@ -120,144 +105,78 @@ sequenceDiagram
 
 | Component | Decides | Never sees |
 |---|---|---|
-| Rails | Who the consumer is, whether it may read this repository, which profile applies, and how far to narrow it (RPC allowlist, session age, stream cap) | The proxied gRPC streams or repository bytes |
-| Workhorse | Whether the named profile exists, whether each stream satisfies it, and mechanism-wide limits (connections, in-flight preauths, stream deadline) | Consumer-specific code; Rails policy arrives as data that can only narrow a profile |
-| Consumer | Which transport mode to use, when to rotate connections, how to retry | Gitaly addresses, tokens, or storage routing |
+| Rails | Consumer identity, repository access, profile, and policy limits | Proxied streams and repository bytes |
+| Workhorse | Profile validity, stream policy, and proxy limits | Consumer-specific authorization code |
+| Consumer | Transport mode, connection rotation, and retries | Gitaly addresses, tokens, and storage routing |
 
 Workhorse is deliberately policy-free. It knows how to enforce a profile, not
-who is allowed to use one; that knowledge lives in Rails, next to the rest of
-the authorization logic GitLab already has.
+who may use one. Rails owns that decision with the rest of the GitLab
+authorization logic.
 
 ### A connection's lifecycle
 
-1. **The consumer opens a WebSocket upgrade** to
-   `GET /api/v4/internal/gitaly_proxy/project/:id/ws`, carrying its own
-   service credential. For Orbit that is the Knowledge Graph JWT it already
-   presents to Rails today. The project ID is in the path so Cells can route
-   the request to the right cell.
-2. **Workhorse applies its admission limits** (`max_connections`,
-   `max_preauth_inflight`) and answers 503 with `Retry-After` before spending a
-   Rails round trip if either is exceeded.
-3. **Workhorse asks Rails to preauthorize the upgrade** through the existing
-   `PreAuthorizeHandler`, the same path `duo_workflows/ws` uses. Workhorse
-   forwards every header and trusts none of them.
-4. **Rails decides.** It checks the mechanism kill switch, identifies the
-   consumer by which registered credential header is present (exactly one, or
-   401), applies a per-consumer rate limit, loads the project, and hands off to
-   that consumer's authorizer. For Orbit the authorizer validates the JWT,
-   checks the per-namespace rollout flag and that indexing is enabled for the
-   project, runs the standard repository download check, and emits an audit
-   event. On success Rails returns two things: the Gitaly connection details
-   (address, token, call metadata, the same struct every senddata path uses
-   today) and the policy (profile name, repository, allowed RPCs, session age,
-   maximum concurrent streams).
-5. **Workhorse binds the session.** It rejects an unknown or empty profile
-   name with 502 before upgrading, registers a session keyed to this one
-   connection, then completes the upgrade. Three response headers tell the
-   consumer the profile, the repository it may read, and how long the session
-   accepts new streams. The Gitaly address and token stay in Workhorse memory
-   and never appear on the wire to the consumer.
-6. **The consumer runs ordinary gRPC over the tunnel.** HTTP/2 rides inside the
-   WebSocket, so generated stubs, streaming, status codes, and flow control all
-   work unchanged. For every stream Workhorse looks up the session (a miss fails
-   closed), checks the policy, peeks the first request frame to confirm the
-   target repository matches the session's, and only then forwards the stream
-   to Gitaly through its existing connection cache. Consumer-supplied gRPC
-   metadata is dropped; only Rails' call metadata and a correlation ID go out.
-7. **The consumer rotates.** Before the session age runs out it opens a fresh
-   connection, which goes through steps 1 to 5 again. The old session stops
-   accepting new streams and closes once its in-flight streams finish.
+1. The consumer opens `/api/v4/internal/gitaly_proxy/project/:id/ws` with its
+   service credential. Workhorse applies admission limits and asks Rails to
+   preauthorize the connection.
+2. Rails identifies the consumer, authorizes the repository, and returns the
+   Gitaly coordinates plus a named policy that it may narrow for this session.
+3. Workhorse validates the policy, binds it and the Gitaly coordinates to the
+   connection, then enforces the policy and repository scope on each stream.
+4. Before the session expires, the consumer opens a newly preauthorized
+   connection. The old connection stops accepting streams and closes after its
+   in-flight streams finish.
 
-Because Rails answers Workhorse directly and nothing is serialized into a token
-the consumer holds, there is no bearer artifact to replay, bind, or revoke, and
-the Gitaly secret never leaves the GitLab deployment. Those two properties
-are the whole reason for the change from the POC's grant model.
+Rails answers Workhorse directly, and nothing is serialized into a token held
+by the consumer. There is nothing to replay or revoke, and the Gitaly secret
+never leaves the GitLab deployment.
 
 ### The read-only policy
 
-A **profile** is a named rule table compiled into Workhorse. Rails selects a
-profile by name; it cannot define or loosen one. Rails can narrow the profile
-per connection through the RPC allowlist and the stream cap. In v1 exactly one
-profile exists, `readonly_repository`, and the design does not attempt to
-specify what a second one would look like.
-
-Two universal checks apply before any profile: the method must exist in the
-Gitaly protobuf descriptors vendored into Workhorse, and it must not belong to
-an excluded service. `readonly_repository` then requires, for each stream:
-
-| Rule | Why |
-|---|---|
-| RPC is annotated `ACCESSOR` | Mutators are rejected even if Rails allowlists them; `CommitLanguages` is a mutator and a good example of why this cannot be left to the allowlist alone |
-| RPC scope is `REPOSITORY` | Storage-scoped and server-scoped RPCs have no target repository to check against |
-| Not client-streaming or bidirectional | Only the first frame is inspected; later frames could name another repository |
-| No `additional_repository` field | The RPC must touch one repository |
-| Exactly one `target_repository` field, and it equals the session's repository | Ambiguous targets are denied, matching Gitaly's own registry; the check covers the annotated field wherever it sits in the message |
-| Quarantine directory fields are empty | Prevents reading from an object quarantine the consumer did not create |
-
-Target-repository resolution walks the same protobuf annotation Gitaly and
-Praefect use, so the proxy applies Gitaly's notion of "which repository is
-this request about" rather than a hand-written field list. Gitaly maintainers
-must confirm parity as part of the Workhorse core review.
-
-Orbit's v1 allowlist is about 25 accessor RPCs across the Repository, Blob,
-Commit, Diff, and Ref services. Streams keep the `gkg-indexer` client name, so
-Gitaly's existing per-client limits and dashboards keep applying.
+A profile is a named rule set compiled into Workhorse. Rails selects one by
+name and may only narrow it. V1 has one profile, `readonly_repository`, which
+allows accessor RPCs scoped to the repository Rails authorized and rejects all
+other calls. This includes mutators that Rails might allowlist by mistake, such
+as `CommitLanguages`. Target-repository resolution uses the same protobuf
+annotation as Gitaly and Praefect. Streams keep the consumer's Gitaly client
+name, so Gitaly's per-client limits and dashboards keep working.
 
 ### Session lifetime
 
-A session moves through three states: **active** (accepts new streams),
-**draining** (in-flight streams finish, new ones are rejected with
-`Unauthenticated: proxy: session_expired`), and **closed**. Four timers govern
-it:
+A session has three states: **active**, when it accepts new streams;
+**draining**, when existing streams may finish; and **closed**. Rails sets a
+10-minute session age for Orbit. Workhorse gives each stream a 60-minute
+deadline and caps the revocation window at two hours regardless of the value
+Rails requests.
 
-| Timer | Who sets it | Default | Workhorse clamp |
-|---|---|---|---|
-| Session age (active to draining) | Rails, per connection | 10 minutes for Orbit | 30 seconds to 1 hour |
-| Stream deadline (per stream, from its start) | Workhorse config | 60 minutes | 1 minute to 4 hours |
-| Idle timeout (no streams at all) | Workhorse config | 60 seconds | |
-| Hard kill (safety net) | Derived | age + stream deadline + 30 seconds | |
+We do not use grpc-go connection aging because its grace period terminates
+in-flight archives. The indexer would restart each cut archive from byte zero,
+so the largest repositories could never finish. This design instead lets
+in-flight streams run until their own deadline.
 
-The session age gates new streams only. It does not use grpc-go's
-`MaxConnectionAge`, which force-closes the connection 30 seconds after GOAWAY
-regardless of in-flight streams. With that behavior a `GetArchive` on a large
-monorepo would be killed at the age boundary, the indexer would reconnect and
-start from byte zero, and the largest repositories would never finish. Letting
-in-flight streams run to their own deadline avoids the loop; the stream
-deadline is the only thing that cuts a running read, and it is set well above
-any archive we expect.
+After Rails revokes access, a session admitted just before revocation may start
+streams for 10 minutes, and those streams may run for 60 minutes. The worst
+case is therefore about 70 minutes. Whether v1 needs an immediate kill hook is
+[open question 1](#open-questions-for-the-team).
 
-The trade-off is a revocation window. After Rails revokes access, a session
-admitted just before revocation can still start streams until its age expires
-(10 minutes) and each of those can run to its deadline (60 minutes): about 70
-minutes worst case with Orbit's defaults. Independently of what Rails asks
-for, Workhorse's clamps cap the window at two hours. Whether v1 needs an
-immediate kill hook on top of this is [open question 1](#open-questions-for-the-team).
-
-Turning off either feature flag stops new preauthorizations only; live sessions
-finish under the same rules.
+Turning off either feature flag stops new preauthorizations. Existing sessions
+continue under the same lifetime rules.
 
 ### Adding a consumer or an RPC
 
-**A new consumer** registers one Rails authorizer class keyed by its own
-credential header, plus an RPC allowlist and a rollout flag. The registry
-refuses two authorizers on the same header and refuses shared secrets such as
-the GitLab Shell header, so a consumer must have a credential nobody else
-holds. No Workhorse, ingress, or Cells routing change is needed because the
-route is the same for everyone. Zoekt and KAS are plausible future consumers
-(both receive Gitaly credentials from Rails today); this ADR does not commit
-either to adopting the proxy.
+A new consumer adds a Rails authorizer for its own credential, an RPC allowlist,
+and a rollout flag. The shared route needs no Workhorse, ingress, or Cells
+routing change. Zoekt and KAS are possible future consumers, but this ADR does
+not commit them to the proxy.
 
-**A new RPC** for an existing consumer is a Rails allowlist change, provided the
-method is already in the Gitaly descriptors vendored into Workhorse. If it is
-not, the method is denied until Workhorse bumps its Gitaly module, which goes
-through Workhorse maintainer review.
+Adding an RPC for an existing consumer is a Rails allowlist change when the RPC
+is already in the Gitaly descriptors vendored into Workhorse. Otherwise,
+Workhorse must update its Gitaly module before the proxy can allow the method.
 
 ### Orbit as the first consumer
 
-The indexer's archive download is the first read to move. It calls Gitaly's
-`GetArchive` over the proxy instead of `repository/archive` over Rails; project
-metadata still comes from Rails HTTP. A new `gitlab.gitaly_transport` setting
-selects the mode:
+The indexer's archive download moves first. It calls Gitaly `GetArchive` over
+the proxy, while project metadata continues to use Rails HTTP. The
+`gitlab.gitaly_transport` setting selects the mode:
 
 | Mode | Behavior |
 |---|---|
@@ -265,87 +184,67 @@ selects the mode:
 | `workhorse_ws_with_fallback` | Try the proxy; fall back to Rails when the proxy refuses to authorize or admit the connection |
 | `workhorse_ws` | Proxy only |
 
-Fallback happens only before any archive bytes have flowed: a preauth 403 or
-404, an admission 503, or a policy the client does not recognize. Once a stream
-has started, a cut is retried from zero over the proxy, up to three attempts
-with jittered backoff, and never falls back to Rails. To make restart-from-zero
-safe the archive is spooled to a temporary file before extraction, so partial
-bytes from one attempt cannot reach the parser.
-
-The client keeps one WebSocket per project session, rotates it shortly before
-the session age expires, and retries a stream exactly once when the proxy
-rejects it as stale. Query-time blob reads, a channel cache across projects,
-and client-side admission control are deferred (see
-[Non-goals and deferred work](#non-goals-and-deferred-work)).
+Fallback to Rails is allowed only before archive bytes begin to flow. If a
+stream is cut, the download restarts from zero over the proxy and never switches
+to Rails. Orbit spools the archive to a temporary file before extraction so
+partial bytes do not reach the parser.
 
 ### Feature flags
 
 | Flag | Type | Default | Scope | Off means |
 |---|---|---|---|---|
-| `workhorse_gitaly_proxy` | ops | enabled | instance | Rails preauth returns 404 for every consumer; no new sessions anywhere |
-| `orbit_gitaly_proxy` | rollout | disabled | root namespace | Rails preauth returns 404 for Orbit; with fallback mode on, the indexer uses Rails HTTP |
+| `workhorse_gitaly_proxy` | ops | enabled | instance | Rails refuses new sessions for every consumer |
+| `orbit_gitaly_proxy` | rollout | disabled | root namespace | Rails refuses new Orbit sessions; fallback mode uses Rails HTTP |
 
 `workhorse_gitaly_proxy` is the mechanism kill switch
-([rollout issue](https://gitlab.com/gitlab-org/gitlab/-/issues/627577));
-`orbit_gitaly_proxy` gates the consumer per root namespace
-([rollout issue](https://gitlab.com/gitlab-org/gitlab/-/issues/627576)). A
-project also has to have Knowledge Graph indexing enabled for Orbit's
-authorizer to say yes, which is the same gate the indexing task producer
-already applies, so the proxy can never read a project the indexer would not
-have been asked to index.
+([rollout issue](https://gitlab.com/gitlab-org/gitlab/-/issues/627577)), while
+`orbit_gitaly_proxy` controls the Orbit rollout by root namespace
+([rollout issue](https://gitlab.com/gitlab-org/gitlab/-/issues/627576)). Orbit
+also requires Knowledge Graph indexing to be enabled for the project, the same
+gate the indexing task producer applies, so the proxy cannot read a project the
+indexer would not have been asked to index.
 
 ## Why not the alternatives
 
 ### Hand Orbit the Gitaly address and token
 
-Rails could return the address and token to Orbit as it does for Zoekt and
-KAS, and Orbit would dial Gitaly itself. It is the shortest data path, and it
-does not work: Orbit's cluster cannot reach Gitaly. Even if it could, it would
-put routable storage details and credentials in another cluster and make Orbit
-responsible for storage routing and credential handling. The POC's signed-grant
-model was a softer version of this and failed review for the same reason.
+Orbit cannot reach Gitaly from its cluster. This option would also expose
+storage details and credentials in another cluster and make Orbit responsible
+for routing and credential handling. The POC grant had the same problem.
 
 ### Keep adding one Rails endpoint per RPC
 
-The status quo. Rails authorization stays exactly where it is and nothing new
-runs in Workhorse. The cost is the four-codebase change for every RPC, a
-single-caller endpoint for each one, and one Rails request per read. The
-indexer's next steps (blob reads at query time, more diff RPCs) would each add
-another endpoint.
+This preserves the current authorization path. Each RPC would still require
+changes across four codebases, create another single-caller endpoint, and add a
+Rails request for every read. Planned blob and diff reads would repeat that
+work.
 
 ### A framed HTTP route instead of a WebSocket tunnel
 
-The POC's first working transport: the caller POSTs a serialized request and
-Workhorse streams back length-prefixed protobuf frames, generalizing the
-framing `list_blobs` already uses. It needs no upgrade, but the consumer has to
-hand-serialize every request and hand-parse every response instead of using
-generated stubs, and it can only carry unary and server-streaming RPCs. The
-tunnel gives stock gRPC ergonomics at the same edge cost.
+The POC proved that Workhorse can accept a serialized request and return
+length-prefixed protobuf frames. Consumers would have to serialize requests and
+parse responses themselves, and the route supports only unary and
+server-streaming RPCs. A WebSocket tunnel preserves generated gRPC clients at
+the same edge cost.
 
 ### Add real inbound HTTP/2 to Workhorse
 
-Native gRPC into Workhorse would make the tunnel unnecessary. It is a
-coordinated edge change across Omnibus, the charts, GitLab.com, and Dedicated
-that no consumer other than Orbit is asking for, and every service that needed
-gRPC-shaped traffic into Workhorse so far chose a WebSocket instead. It should
-be a separate platform decision if it ever comes up, not a side effect of this
-one.
+Native gRPC would remove the tunnel. It requires a coordinated edge change
+across the Linux package, charts, GitLab.com, and Dedicated for one current
+consumer. We consider that a separate platform decision.
 
 ### Reverse tunnel over the existing Workhorse to Orbit connection
 
-Workhorse already holds a gRPC connection to the Orbit webserver for queries
-(ADR 008). Inverting it as a tunnel would avoid any new inbound route. It does
-not fit the traffic: the indexer is a separate deployment that does not talk to
-the webserver, so its reads would need a three-hop detour, and bulk archive
-downloads would share one multiplexed connection with latency-sensitive query
-lookups.
+Workhorse already connects to the Orbit webserver for queries, but the indexer
+is a separate deployment and does not talk to the webserver. Repository reads
+would take an extra hop, and archive downloads would share a connection with
+query lookups.
 
 ### A shared gRPC server with grpc-go connection aging
 
-One `grpc.Server` per Workhorse process with standard `MaxConnectionAge` is
-simpler than per-connection servers and a session state machine. Its grace
-period terminates in-flight archives, which produces the restart loop described
-under [Session lifetime](#session-lifetime).
+A shared server would avoid per-connection servers and the session state
+machine. Its connection-aging grace period terminates in-flight archives and
+causes the restart loop described under [Session lifetime](#session-lifetime).
 
 ## Open questions for the team
 
