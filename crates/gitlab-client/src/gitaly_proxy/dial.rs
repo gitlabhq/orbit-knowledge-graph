@@ -26,7 +26,7 @@ pub const HEADER_REPOSITORY: &str = "Gitlab-Gitaly-Proxy-Repository";
 pub const HEADER_EXPIRES_IN: &str = "Gitlab-Gitaly-Proxy-Expires-In";
 
 /// The only profile this client implements. Compared byte-for-byte; a newer
-/// server announcing another profile must be refused (wire contract §3, §8).
+/// server announcing another profile must be refused.
 pub const PROFILE_READONLY_REPOSITORY: &str = "readonly_repository";
 
 /// The server closes the connection with 1009 above this; mirroring it on the

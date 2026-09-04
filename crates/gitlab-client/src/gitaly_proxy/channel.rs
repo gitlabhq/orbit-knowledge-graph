@@ -17,13 +17,13 @@ use super::error::{GitalyProxyError, StatusClass, classify_status};
 /// connector; nothing is ever resolved or dialed by name.
 const ENDPOINT_URI: &str = "http://gitaly-proxy.invalid";
 
-/// Client-side h2 PING cadence (wire contract §1: ~20 s, 10 s timeout, also
-/// while idle). Keeps intermediaries from idling the socket out.
+/// Client-side h2 PING cadence: ~20 s, 10 s timeout, also while idle. Keeps
+/// intermediaries from idling the socket out.
 const H2_KEEP_ALIVE_INTERVAL: Duration = Duration::from_secs(20);
 const H2_KEEP_ALIVE_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// Rotation margin (wire contract §6.1): rotate at 90 % of the session age,
-/// but never closer than 5 s to expiry.
+/// Rotation margin: rotate at 90 % of the session age, but never closer than
+/// 5 s to expiry.
 const ROTATION_FRACTION: u32 = 10;
 const ROTATION_MIN_MARGIN: Duration = Duration::from_secs(5);
 

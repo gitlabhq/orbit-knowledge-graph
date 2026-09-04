@@ -1,11 +1,12 @@
 //! Client side of the Workhorse Gitaly proxy: gRPC over a single HTTP/2
 //! connection tunneled through one WebSocket per (process, project) session.
 //!
-//! The wire contract this implements is published as
-//! `doc/development/workhorse/gitaly_proxy.md` in gitlab-org/gitlab. In short:
-//! one upgrade = one preauth = one repository; session parameters arrive only
-//! in the 101 headers; the client rotates at 90 % of the session age and
-//! retries a stale rejection exactly once; only WS close 1000/1001 is EOF.
+//! The wire contract this implements is defined by
+//! [ADR 018](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/design-documents/decisions/018_gitaly_proxy_in_workhorse.md).
+//! In short: one upgrade = one preauth = one repository; session parameters
+//! arrive only in the 101 headers; the client rotates at 90 % of the session
+//! age and retries a stale rejection exactly once; only WS close 1000/1001 is
+//! EOF.
 
 mod channel;
 mod dial;
