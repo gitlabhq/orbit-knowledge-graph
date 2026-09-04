@@ -135,7 +135,9 @@ as `CommitLanguages`. Target-repository resolution uses the same protobuf
 annotation as Gitaly and Praefect. Workhorse sets and enforces the Gitaly
 `client_name` on every stream from the value Rails returned at preauthorization
 and does not pass through consumer-supplied metadata. Gitaly's per-client
-limits and dashboards therefore keep working.
+limits and dashboards therefore keep working. The Rails-vouched consumer
+identity also flows into Workhorse metrics and logs as `consumer`, so dropping
+consumer-supplied metadata does not drop attribution.
 
 ### Session lifetime
 
@@ -152,7 +154,9 @@ in-flight streams run until their own deadline.
 After Rails revokes access, a session admitted just before revocation may start
 streams for 10 minutes, and those streams may run for 60 minutes. The worst
 case is therefore about 70 minutes. Workhorse caps this window at two hours
-regardless of the values Rails requests.
+regardless of the values Rails requests. Workhorse then applies a 30-second
+hard-kill grace (`HardKillGrace`) so in-flight work can close cleanly, which is
+why the observed ceiling can be a few seconds over two hours.
 
 The [feature flag](#feature-flag) governs new preauthorizations.
 
@@ -165,7 +169,10 @@ are bounded by
 which defaults to 10; backfill and incremental indexing share that ceiling. As
 of 2026-09 on GitLab.com, the code-indexer pool has four pods, giving about 40
 concurrent archive-fetch slots. Within each connection, concurrency is also
-bounded by the stream cap Rails returns at preauthorization.
+bounded by the stream cap Rails returns at preauthorization. Workhorse defaults
+to `max_concurrent_streams` 32 per connection, which Rails may narrow,
+`max_connections` 256, `max_preauth_inflight` 64, `idle_timeout` 60 seconds,
+and `read_limit_bytes` 1 MiB.
 
 Gitaly's `gitaly_service_client_requests_total` metric for
 `client_name="gkg-indexer"` shows that `GetArchive` dominates, with 2.97 million
