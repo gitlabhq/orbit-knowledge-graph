@@ -27,11 +27,14 @@ Workhorse through a `Gitlab-Workhorse-Send-Data` header. Workhorse performs the
 RPC and streams the bytes back to Orbit.
 
 Every new Gitaly RPC Orbit needs repeats the same four steps: a Rails endpoint,
-a Workhorse senddata handler, an HTTP representation of the RPC's response, and
-a matching client in `gitlab-client`. Each step lands in a different codebase
-with its own review path, and the result is a bespoke HTTP shape that exists
-only for Orbit. The pattern also holds a Puma worker for every read: an indexing
-job that fetches ten archives makes ten authorized Rails requests.
+a Workhorse senddata handler, an HTTP encoding of the RPC's response, and a
+matching client in `gitlab-client`. Each step lands in a different codebase
+with its own review path, and the endpoint that comes out has one caller.
+Every read is also a full Rails request: Rails authenticates the caller,
+authorizes the project, and resolves the repository's storage before handing
+off to Workhorse, so an indexing job that fetches ten archives goes through
+Puma ten times. Workhorse releases the Puma worker as soon as the senddata
+header is written, so the cost is per-request overhead, not a held worker.
 
 ### Why Orbit cannot call Gitaly directly
 
@@ -305,8 +308,8 @@ model was a softer version of this and failed review for the same reason.
 ### Keep adding one Rails endpoint per RPC
 
 The status quo. Rails authorization stays exactly where it is and nothing new
-runs in Workhorse. The cost is the four-codebase dance for every RPC, an
-Orbit-only HTTP dialect for each one, and one Puma request per read. The
+runs in Workhorse. The cost is the four-codebase change for every RPC, a
+single-caller endpoint for each one, and one Rails request per read. The
 indexer's next steps (blob reads at query time, more diff RPCs) would each add
 another endpoint.
 
