@@ -1,3 +1,18 @@
+## [0.115.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.114.0...v0.115.0) (2026-09-04)
+
+### Features
+
+* **named-queries:** add code intelligence queries ([c72783a](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/c72783ab8153e23205103ddb3e7ff48bb54ac1bd)) by Aaron Algutifan
+
+### Fixes
+
+* **indexer:** tombstone only vanished keys in the code stale cleaner ([ba025b9](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/ba025b97ad9da5443027bb85df38e1c32b3a3701)) by Bohdan Parkhomchuk
+
+### Other
+
+* **local:** rename ask to grep and simplify search output ([a254c3f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/a254c3fabc2d100876ef5ec6d1338e0cb28e6c81)) by Aaron Algutifan
+* run data correctness against ontology overlays ([efe51cb](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/efe51cb8b164d54789322ef23e55a11addd44953)) by Michael Usachenko
+
 ## [0.114.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.113.1...v0.114.0) (2026-09-03)
 
 ### Features

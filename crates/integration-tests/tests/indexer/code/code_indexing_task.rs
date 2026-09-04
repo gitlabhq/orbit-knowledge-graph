@@ -569,6 +569,123 @@ async fn stale_cleanup_tombstones_must_not_outrank_rows_versioned_at_the_waterma
 }
 
 #[tokio::test]
+async fn reindex_tombstones_only_the_vanished_keys() {
+    let project_id: i64 = 23;
+    let traversal_path = "1/23/";
+    let kept = (
+        "src/Kept.java",
+        "public class Kept { public void keep() {} }",
+    );
+
+    let clickhouse = integration_testkit::TestContext::new(&[
+        integration_testkit::SIPHON_SCHEMA_SQL,
+        *integration_testkit::GRAPH_SCHEMA_SQL,
+    ])
+    .await;
+
+    let mock = MockGitlabServer::start().await;
+    mock.add_project(
+        project_id,
+        "main",
+        &[
+            kept,
+            (
+                "src/Gone.java",
+                "public class Gone { public void vanish() {} }",
+            ),
+        ],
+    );
+
+    let deps = CodeIndexingDeps::new(&mock, &clickhouse);
+    let handler = deps.code_indexing_task_handler();
+
+    index_code(
+        &handler,
+        &clickhouse,
+        project_id,
+        "commit1",
+        1,
+        traversal_path,
+    )
+    .await;
+    mock.replace_archive(project_id, &[kept]);
+    index_code(
+        &handler,
+        &clickhouse,
+        project_id,
+        "commit2",
+        2,
+        traversal_path,
+    )
+    .await;
+
+    let file_ids = |path: &str| {
+        format!(
+            "SELECT id FROM {} WHERE project_id = {project_id} AND path = '{path}'",
+            t("gl_file")
+        )
+    };
+    let definition_ids = |path: &str| {
+        format!(
+            "SELECT id FROM {} WHERE project_id = {project_id} AND file_path = '{path}'",
+            t("gl_definition")
+        )
+    };
+    let gone_file = format!("id IN ({})", file_ids("src/Gone.java"));
+    let kept_file = format!("id IN ({})", file_ids("src/Kept.java"));
+    let gone_definitions = format!("id IN ({})", definition_ids("src/Gone.java"));
+    let kept_definitions = format!("id IN ({})", definition_ids("src/Kept.java"));
+
+    assert_eq!(
+        count_tombstones(&clickhouse, "gl_file", project_id, &gone_file).await,
+        1,
+        "the vanished file must get exactly one tombstone"
+    );
+    assert_eq!(
+        count_tombstones(&clickhouse, "gl_file", project_id, &kept_file).await,
+        0,
+        "a file re-emitted by the new snapshot must not be tombstoned"
+    );
+    assert_eq!(
+        count_tombstones(&clickhouse, "gl_directory", project_id, "true").await,
+        0,
+        "directories re-emitted by the new snapshot must not be tombstoned"
+    );
+    assert_eq!(
+        count_tombstones(&clickhouse, "gl_definition", project_id, &gone_definitions).await,
+        2,
+        "each vanished definition must get exactly one tombstone"
+    );
+    assert_eq!(
+        count_tombstones(&clickhouse, "gl_definition", project_id, &kept_definitions).await,
+        0,
+        "definitions re-emitted by the new snapshot must not be tombstoned"
+    );
+
+    let kept_ids = format!(
+        "{} UNION ALL {} UNION ALL SELECT id FROM {} WHERE project_id = {project_id}",
+        file_ids("src/Kept.java"),
+        definition_ids("src/Kept.java"),
+        t("gl_directory")
+    );
+    assert!(
+        count_tombstones(&clickhouse, "gl_code_edge", project_id, "true").await > 0,
+        "edges of the vanished file must be tombstoned"
+    );
+    assert_eq!(
+        count_tombstones(
+            &clickhouse,
+            "gl_code_edge",
+            project_id,
+            &format!("source_id IN ({kept_ids}) AND target_id IN ({kept_ids})")
+        )
+        .await,
+        0,
+        "edges between re-emitted nodes must not be tombstoned"
+    );
+}
+
+#[tokio::test]
 async fn disk_is_clean_after_successful_indexing() {
     let project_id: i64 = 4;
     let commit_sha = "abc123";
@@ -1516,6 +1633,22 @@ async fn count_active_edges(
         ))
         .await;
     result.first().map_or(0, |b| b.num_rows())
+}
+
+async fn count_tombstones(
+    clickhouse: &integration_testkit::TestContext,
+    table: &str,
+    project_id: i64,
+    predicate: &str,
+) -> usize {
+    let result = clickhouse
+        .query(&format!(
+            "SELECT _version FROM {} \
+             WHERE project_id = {project_id} AND _deleted = true AND {predicate}",
+            t(table)
+        ))
+        .await;
+    result.iter().map(|b| b.num_rows()).sum()
 }
 
 async fn assert_no_active_definitions(

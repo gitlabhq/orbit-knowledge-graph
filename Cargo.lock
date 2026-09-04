@@ -8050,6 +8050,7 @@ dependencies = [
  "serde_json",
  "sha2 0.11.0",
  "strum 0.28.0",
+ "tempfile",
 ]
 
 [[package]]
@@ -8347,8 +8348,6 @@ dependencies = [
 name = "orbit-search"
 version = "0.1.0"
 dependencies = [
- "rayon",
- "rustc-hash 2.1.3",
  "stop-words",
 ]
 
@@ -8436,6 +8435,7 @@ dependencies = [
  "enum-as-inner",
  "flate2",
  "ignore",
+ "memchr",
  "regex",
  "rustc-hash 2.1.3",
  "serde",

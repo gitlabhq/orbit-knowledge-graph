@@ -13,3 +13,6 @@ orbit-utils = { path = "../utils" }
 sha2 = { workspace = true }
 rust-embed = { workspace = true, features = ["include-exclude"] }
 strum = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

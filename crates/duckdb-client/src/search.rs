@@ -3,20 +3,29 @@ use arrow::record_batch::RecordBatch;
 
 use crate::{DuckDbClient, f64_column, i64_column, scalar_i64, sql_lit, string_column};
 use orbit_search::corpus::{EXCLUDE_LIKE, EXCLUDE_REGEX, ext_regex, search_corpus_exts};
-use orbit_search::expand::{GraphSource, NodeLabel};
 use orbit_search::grep::{GrepError, GrepSource, grep};
 use orbit_search::{
-    CorpusRow, Edge, Graph, GraphEdge, GrepOutcome, KindRates, SearchVocab, TermRecall,
+    ANCHOR_SIM, CorpusRow, EXACT_NAME_SIM, Edge, GrepOutcome, RecallFilter, SearchVocab, TermRecall,
 };
-use std::collections::HashMap;
 
 pub const CONTEXT_SIM_CAP: f64 = 0.99;
-pub const NAME_SIM_FLOOR: f64 = 0.999;
+pub const NAME_SIM_FLOOR: f64 = ANCHOR_SIM;
+pub const NAME_SIM_CEIL: f64 = 0.9999;
 
 pub const FTS_STEMMER: &str = "english";
 
 pub fn def_doc_table(project_id: i64) -> String {
     format!("gl_def_doc_{project_id}")
+}
+
+pub fn def_doc_sql(doc_table: &str) -> String {
+    format!(
+        "CREATE OR REPLACE TABLE {doc_table} AS
+SELECT DISTINCT commit_sha, id AS def_id,
+       fts_doc(def_name(fqn)) AS name,
+       fts_doc(fqn || ' ' || file_path) AS context
+FROM gl_definition WHERE project_id = ?1 AND commit_sha = ?2"
+    )
 }
 
 pub fn create_fts_index_sql(doc_table: &str) -> String {
@@ -33,10 +42,19 @@ pub struct DuckDbSearch {
 
 impl DuckDbSearch {
     pub fn new(client: DuckDbClient, project_id: i64, commit_sha: &str) -> Result<Self> {
+        Self::scoped(client, project_id, commit_sha, &[])
+    }
+
+    pub fn scoped(
+        client: DuckDbClient,
+        project_id: i64,
+        commit_sha: &str,
+        paths: &[String],
+    ) -> Result<Self> {
         let sha = sql_lit(commit_sha);
         client.load_extension("fts")?;
         ensure_search_index(&client, project_id, &sha)?;
-        client.execute(&corpus_table_sql(project_id, &sha), &[])?;
+        client.execute(&corpus_table_sql(project_id, &sha, paths), &[])?;
         Ok(Self {
             client,
             pid: project_id,
@@ -49,16 +67,49 @@ impl DuckDbSearch {
         query: &str,
         limit: usize,
         vocab: &SearchVocab,
-        kind_rates: &HashMap<String, KindRates>,
+        filter: &RecallFilter,
     ) -> Result<GrepOutcome> {
-        grep(self, query, limit, vocab, kind_rates).map_err(|e| match e {
+        grep(self, query, limit, vocab, filter).map_err(|e| match e {
             GrepError::Source(e) => e,
             e => anyhow::anyhow!("{e}"),
         })
     }
+
+    pub fn list_corpus(&self, filter: &RecallFilter) -> Result<Vec<CorpusRow>> {
+        let batches = query(
+            &self.client,
+            &format!(
+                "SELECT id, fqn, definition_type,
+       file_path || ':' || CAST(start_line AS VARCHAR) AS loc, end_line
+FROM search_corpus
+WHERE TRUE
+{}
+ORDER BY file_path, start_line, end_line DESC, fqn",
+                kind_scope("definition_type", &filter.kinds)
+            ),
+        )?;
+        let ids = i64_column(&batches, "id");
+        let fqns = string_column(&batches, "fqn");
+        let kinds = string_column(&batches, "definition_type");
+        let locs = string_column(&batches, "loc");
+        let end_lines = i64_column(&batches, "end_line");
+        Ok((0..ids.len())
+            .map(|i| CorpusRow {
+                id: ids[i],
+                fqn: fqns[i].clone(),
+                kind: kinds[i].clone(),
+                loc: locs[i].clone(),
+                end_line: end_lines[i],
+                degree: 0,
+                grams: 0,
+            })
+            .collect())
+    }
 }
 
 impl GrepSource for DuckDbSearch {
+    type Error = anyhow::Error;
+
     fn stem(&self, words: &[String]) -> Result<Vec<String>> {
         if words.is_empty() {
             return Ok(Vec::new());
@@ -78,8 +129,8 @@ impl GrepSource for DuckDbSearch {
         Ok(string_column(&batches, "s"))
     }
 
-    fn recall(&self, terms: &[String]) -> Result<Vec<TermRecall>> {
-        let sql = recall_sql(self.pid, &self.sha);
+    fn recall(&self, terms: &[String], filter: &RecallFilter) -> Result<Vec<TermRecall>> {
+        let sql = recall_sql(self.pid, &self.sha, filter);
         terms
             .iter()
             .map(|term| {
@@ -171,95 +222,6 @@ fn id_list(ids: &[i64]) -> String {
         .join(", ")
 }
 
-impl GraphSource for DuckDbSearch {
-    type Error = anyhow::Error;
-
-    fn graph(&self, _seeds: &[i64]) -> Result<Graph> {
-        let pid = self.pid;
-        let sha = &self.sha;
-        let batches = query(
-            &self.client,
-            &format!(
-                "WITH nodes AS (
-  SELECT id FROM gl_definition
-  WHERE project_id = {pid} AND commit_sha = {sha} AND fqn NOT LIKE '%@%'
-  UNION ALL
-  SELECT id FROM gl_file WHERE project_id = {pid} AND commit_sha = {sha}
-  UNION ALL
-  SELECT id FROM gl_directory WHERE project_id = {pid} AND commit_sha = {sha}
-  UNION ALL
-  SELECT id FROM gl_imported_symbol WHERE project_id = {pid} AND commit_sha = {sha}
-)
-SELECT relationship_kind, source_id, target_id
-FROM gl_edge
-WHERE source_id IN (SELECT id FROM nodes)
-  AND target_id IN (SELECT id FROM nodes)"
-            ),
-        )?;
-        let kind_names = string_column(&batches, "relationship_kind");
-        let sources = i64_column(&batches, "source_id");
-        let targets = i64_column(&batches, "target_id");
-        let mut kinds: Vec<String> = Vec::new();
-        let mut kind_index: HashMap<String, u16> = HashMap::new();
-        let edges = (0..kind_names.len())
-            .map(|i| {
-                let kind = *kind_index.entry(kind_names[i].clone()).or_insert_with(|| {
-                    kinds.push(kind_names[i].clone());
-                    (kinds.len() - 1) as u16
-                });
-                GraphEdge {
-                    kind,
-                    source: sources[i],
-                    target: targets[i],
-                }
-            })
-            .collect();
-        Ok(Graph { kinds, edges })
-    }
-
-    fn labels(&self, ids: &[i64]) -> Result<HashMap<i64, NodeLabel>> {
-        if ids.is_empty() {
-            return Ok(HashMap::new());
-        }
-        let list = id_list(ids);
-        let pid = self.pid;
-        let sha = &self.sha;
-        let batches = query(
-            &self.client,
-            &format!(
-                "SELECT id, label, loc FROM (
-  SELECT id, fqn AS label,
-         file_path || ':' || CAST(start_line AS VARCHAR) AS loc
-  FROM gl_definition
-  WHERE project_id = {pid} AND commit_sha = {sha}
-  UNION ALL
-  SELECT id, path, '' FROM gl_file WHERE project_id = {pid} AND commit_sha = {sha}
-  UNION ALL
-  SELECT id, path, '' FROM gl_directory WHERE project_id = {pid} AND commit_sha = {sha}
-  UNION ALL
-  SELECT id, identifier_name, '' FROM gl_imported_symbol
-  WHERE project_id = {pid} AND commit_sha = {sha}
-)
-WHERE id IN ({list})"
-            ),
-        )?;
-        let node_ids = i64_column(&batches, "id");
-        let node_labels = string_column(&batches, "label");
-        let locs = string_column(&batches, "loc");
-        Ok((0..node_ids.len())
-            .map(|i| {
-                (
-                    node_ids[i],
-                    NodeLabel {
-                        label: node_labels[i].clone(),
-                        loc: locs[i].clone(),
-                    },
-                )
-            })
-            .collect())
-    }
-}
-
 fn query(client: &DuckDbClient, sql: &str) -> Result<Vec<RecordBatch>> {
     client.query_arrow(sql).with_context(|| {
         let preview: String = sql.chars().take(120).collect();
@@ -292,22 +254,26 @@ fn ensure_search_index(client: &DuckDbClient, project_id: i64, sha: &str) -> Res
     Ok(())
 }
 
-fn recall_sql(pid: i64, sha: &str) -> String {
+fn recall_sql(pid: i64, sha: &str, filter: &RecallFilter) -> String {
     let doc_table = def_doc_table(pid);
+    let corpus = format!(
+        "SELECT id FROM search_corpus WHERE TRUE\n{}",
+        kind_scope("definition_type", &filter.kinds)
+    );
     format!(
         "WITH scored AS (
   SELECT def_id AS id,
          fts_main_{doc_table}.match_bm25(def_id, ?1, fields := 'name,context') AS score
   FROM {doc_table}
   WHERE commit_sha = {sha}
-    AND def_id IN (SELECT id FROM search_corpus)
+    AND def_id IN ({corpus})
 ),
 hits AS (
   SELECT s.id, s.score,
+         regexp_replace(lower(d.name), '[^0-9a-z]+', ' ', 'g') = regexp_replace(lower(?1), '[^0-9a-z]+', ' ', 'g') AS exact_hit,
          list_contains(
            list_transform(string_split_regex(lower(d.name), '[^0-9a-z]+'), t -> stem(t, '{FTS_STEMMER}')),
-           stem(lower(?1), '{FTS_STEMMER}'))
-         OR regexp_replace(lower(d.name), '[^0-9a-z]+', ' ', 'g') = regexp_replace(lower(?1), '[^0-9a-z]+', ' ', 'g') AS name_hit
+           stem(lower(?1), '{FTS_STEMMER}')) AS token_hit
   FROM scored s
   JOIN {doc_table} d ON d.def_id = s.id AND d.commit_sha = {sha}
   WHERE s.score IS NOT NULL
@@ -315,9 +281,10 @@ hits AS (
 ),
 df AS (SELECT COUNT(*) AS df FROM scored WHERE score IS NOT NULL),
 mx AS (SELECT MAX(score) AS m FROM hits),
-corpus_n AS (SELECT GREATEST(COUNT(*), 1) AS total FROM search_corpus)
+corpus_n AS (SELECT GREATEST(COUNT(*), 1) AS total FROM ({corpus}))
 SELECT COALESCE(h.id, 0) AS id,
-       COALESCE(CASE WHEN h.name_hit THEN {NAME_SIM_FLOOR} + (1.0 - {NAME_SIM_FLOOR}) * h.score / mx.m
+       COALESCE(CASE WHEN h.exact_hit THEN {EXACT_NAME_SIM}
+                     WHEN h.token_hit THEN {NAME_SIM_FLOOR} + ({NAME_SIM_CEIL} - {NAME_SIM_FLOOR}) * h.score / mx.m
                      ELSE LEAST(h.score / mx.m, {CONTEXT_SIM_CAP}) END, 0.0) AS sim,
        CAST(df.df AS BIGINT) AS df,
        CAST(corpus_n.total AS BIGINT) AS total
@@ -329,7 +296,7 @@ ORDER BY sim DESC, id"
     )
 }
 
-fn corpus_table_sql(pid: i64, sha: &str) -> String {
+fn corpus_table_sql(pid: i64, sha: &str, paths: &[String]) -> String {
     format!(
         "CREATE OR REPLACE TEMP TABLE search_corpus AS
 SELECT d.id, d.fqn, d.definition_type, d.file_path, d.start_line, d.end_line
@@ -338,10 +305,50 @@ WHERE d.project_id = {pid} AND d.commit_sha = {sha}
   AND regexp_matches(d.file_path, {source_only})
   AND NOT regexp_matches(d.name, '^[0-9]+$')
   AND d.fqn NOT LIKE '%@%'
-{exclude}",
+{exclude}{paths}",
         source_only = sql_lit(&ext_regex(&search_corpus_exts())),
-        exclude = exclusions("d.file_path"),
+        exclude = if paths.is_empty() {
+            exclusions("d.file_path")
+        } else {
+            String::new()
+        },
+        paths = path_scope("d.file_path", paths),
     )
+}
+
+fn kind_scope(col: &str, kinds: &[String]) -> String {
+    if kinds.is_empty() {
+        return String::new();
+    }
+    let list = kinds
+        .iter()
+        .map(|k| sql_lit(&k.to_lowercase()))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("  AND lower({col}) IN ({list})\n")
+}
+
+fn path_scope(col: &str, paths: &[String]) -> String {
+    if paths.is_empty() {
+        return String::new();
+    }
+    let alternatives = paths
+        .iter()
+        .map(|p| {
+            let p = p.trim_end_matches('/');
+            if p.contains(['*', '?', '[']) {
+                format!("{col} GLOB {}", sql_lit(p))
+            } else {
+                format!(
+                    "{col} = {} OR {col} GLOB {}",
+                    sql_lit(p),
+                    sql_lit(&format!("{p}/*"))
+                )
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" OR ");
+    format!("  AND ({alternatives})\n")
 }
 
 fn exclusions(col: &str) -> String {

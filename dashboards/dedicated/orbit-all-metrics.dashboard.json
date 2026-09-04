@@ -4109,8 +4109,8 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum(gkg_indexer_sdlc_watermark_lag_seconds{container=\"gkg-indexer\", cluster=~\".*\"})",
-          "legendFormat": "{{instance}}",
+          "expr": "max by (entity) (gkg_indexer_sdlc_watermark_lag_seconds{container=\"gkg-indexer\", cluster=~\".*\"})",
+          "legendFormat": "{{entity}}",
           "refId": "A"
         }
       ],
@@ -4967,7 +4967,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum(gkg_schema_migrating_age_seconds{container=\"gkg-dispatcher\", cluster=~\".*\"})",
+          "expr": "max(gkg_schema_migrating_age_seconds{container=\"gkg-dispatcher\", cluster=~\".*\"})",
           "legendFormat": "{{instance}}",
           "refId": "A"
         }

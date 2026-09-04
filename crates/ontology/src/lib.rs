@@ -137,7 +137,6 @@ pub struct Ontology {
     pub(crate) nodes: BTreeMap<String, NodeEntity>,
     pub(crate) edges: BTreeMap<String, Vec<EdgeEntity>>,
     pub(crate) edge_descriptions: BTreeMap<String, String>,
-    pub(crate) edge_search_weights: BTreeMap<String, f64>,
     pub(crate) edge_pipelines: BTreeMap<String, Vec<Pipeline>>,
     /// Reindex trigger tables per edge relationship kind, resolved from each
     /// edge's `indexer` block. Parallels `edge_pipelines`; the pipeline model
@@ -201,7 +200,6 @@ impl Ontology {
             nodes: BTreeMap::new(),
             edges: BTreeMap::new(),
             edge_descriptions: BTreeMap::new(),
-            edge_search_weights: BTreeMap::new(),
             edge_pipelines: BTreeMap::new(),
             edge_reindex_sources: BTreeMap::new(),
             etl_settings: EtlSettings {
@@ -582,6 +580,11 @@ impl Ontology {
         loading::load_from_dir(dir.as_ref())
     }
 
+    /// The embedded ontology with a directory mirroring `config/ontology/` merged over it.
+    pub fn load_embedded_with_overlay(dir: impl AsRef<Path>) -> Result<Self, OntologyError> {
+        loading::load_with(&loading::DirOverlay(dir.as_ref()))
+    }
+
     /// Load ontology from embedded files compiled into the binary.
     ///
     /// This uses the ontology files from `config/ontology/` that were
@@ -672,11 +675,6 @@ impl Ontology {
     #[must_use]
     pub fn get_edge(&self, name: &str) -> Option<&[EdgeEntity]> {
         self.edges.get(name).map(|v| v.as_slice())
-    }
-
-    #[must_use]
-    pub fn edge_search_weight(&self, relationship_kind: &str) -> Option<f64> {
-        self.edge_search_weights.get(relationship_kind).copied()
     }
 
     pub fn get_edge_source_types(&self, relationship_kind: &str) -> Vec<String> {
@@ -1740,17 +1738,6 @@ mod tests {
     }
 
     #[test]
-    fn search_weights_load_for_code_edges_and_stay_absent_elsewhere() {
-        let ontology = Ontology::load_embedded().expect("should load embedded ontology");
-        assert_eq!(ontology.edge_search_weight("CALLS"), Some(1.0));
-        assert_eq!(ontology.edge_search_weight("EXTENDS"), Some(1.0));
-        assert_eq!(ontology.edge_search_weight("IMPORTS"), Some(0.7));
-        assert_eq!(ontology.edge_search_weight("CONTAINS"), Some(0.4));
-        assert_eq!(ontology.edge_search_weight("DEFINES"), Some(0.4));
-        assert_eq!(ontology.edge_search_weight("AUTHORED"), None);
-    }
-
-    #[test]
     fn test_load_embedded() {
         let embedded = Ontology::load_embedded().expect("should load embedded ontology");
         let from_dir = Ontology::load_from_dir(fixtures_dir()).expect("should load from dir");
@@ -2269,6 +2256,50 @@ mod tests {
             ontology.traversal_path_columns("gl_merge_request"),
             [("traversal_path".to_string(), Some(25))]
         );
+    }
+
+    #[test]
+    fn overlay_dir_merges_any_ontology_file_and_adds_new_ones() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("schema.yaml"),
+            "settings:\n  denormalized_joins:\n    - name: approved\n      hops:\n        - {relationship: APPROVED, from: User, to: MergeRequest}\n",
+        )
+        .unwrap();
+        std::fs::create_dir(dir.path().join("edges")).unwrap();
+        std::fs::write(
+            dir.path().join("edges/approved.yaml"),
+            "variants:\n  - from_node: { type: User, id: id }\n    to_node: { type: WorkItem, id: id }\n    scope: prune_to_target\n    description: \"User approved work item.\"\n",
+        )
+        .unwrap();
+
+        let base = Ontology::load_embedded().unwrap();
+        let overlaid = Ontology::load_embedded_with_overlay(dir.path()).unwrap();
+
+        assert_eq!(
+            overlaid.denormalized_joins().len(),
+            base.denormalized_joins().len() + 1
+        );
+        assert!(
+            overlaid
+                .denormalized_join_by_table("gl_denorm_approved")
+                .is_some()
+        );
+        let approved = |o: &Ontology| {
+            o.edges()
+                .filter(|e| e.relationship_kind == "APPROVED")
+                .count()
+        };
+        assert_eq!(approved(&overlaid), approved(&base) + 1);
+        assert_eq!(overlaid.nodes().count(), base.nodes().count());
+
+        std::fs::write(
+            dir.path().join("schema.yaml"),
+            "settings:\n  denormalized_joins: [{name: x, hops: []}]\n",
+        )
+        .unwrap();
+        let err = Ontology::load_embedded_with_overlay(dir.path()).unwrap_err();
+        assert!(err.to_string().contains("at least one hop"), "got: {err}");
     }
 
     #[test]

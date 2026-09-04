@@ -6,22 +6,22 @@ local:
   instructions: |
     ## Orbit
     
-    This project has a code knowledge graph with cross-file relationships and code definitions.
+    This project has a code knowledge graph with code definition nodes and relationship edges.
 
     Rules:
 
     - Never answer a question about this codebase from prior knowledge. Every answer must be grounded in a `{{orbit}} grep` result from this repository.
-    - For any task first run `{{orbit}} grep "<keywords>"` in order to find relevant code definitions. Use `{{orbit}} show "<fqn>"` to show the full body of a definition and `{{orbit}} describe "<fqn>"` for all edge connections to a definition.
-    - NEVER open a file just to read one definition's body. `{{orbit}} grep` only prints `fqn`, `kind`, and `loc` — `{{orbit}} show "<fqn>"` is always the follow-up if you want the full source, not a file read. File reads are only for editing and for lines outside any indexed definition (imports, module-level wiring, comments).
+    - For any task first run `{{orbit}} grep "<keywords>"` in order to find relevant code definitions. Narrow with `--path <dir-or-glob>` and `--kind <Function|Struct|Constant|...>` (both repeatable) when a term is ambiguous across the repo. Use `{{orbit}} show "<fqn>"` to show the full body of a definition, or `{{orbit}} show --file <path>` to show every definition in a file, and `{{orbit}} describe "<fqn>"` to list its callers and every other connection.
+    - NEVER open a file just to read one definition's body. `{{orbit}} grep` only prints `fqn`, `kind`, and `loc` — `{{orbit}} show "<fqn>"` is always the follow-up if you want the full source, not a file read. Read all the definitions in a file with `{{orbit}} show --file <path>`. Manual file reads are only for editing and for lines outside any indexed definition (imports, module-level wiring, comments).
     - Weak or unmatched `grep` terms: retry with a synonym or identifier fragment ("throttle" → "rate limit").
     - Only skip `{{orbit}}` commands if the user explicitly requests not to use it.
     - For aggregations or more complex graph queries, run `{{orbit}} schema` to list tables once and `{{orbit}} sql` to execute raw SQL.
     - When answering from the graph, answer tersely: name the mechanism and cite `file:line`. Do not restate the question or narrate your search.
 
   nudge_search: |
-    MANDATORY: the Orbit code graph covers this code. Before grepping raw files, run `{{orbit}} grep "<terms>"` to find relevant code definitions.
+    MANDATORY: the Orbit code graph covers this code. Before grepping raw files, run `{{orbit}} grep "<terms>"` with `--path <dir-or-glob>` (repeatable) to scope it to find relevant code definitions.
   nudge_read: |
-    MANDATORY: the Orbit code graph covers this code. Before reading source files one by one, start with `{{orbit}} grep "<terms>"`.
+    MANDATORY: the Orbit code graph covers this code. Before reading source files one by one, start with `{{orbit}} grep "<terms>"`; to read a whole file with its definitions labelled, use `{{orbit}} show --file <path>`.
   template_vars:
     reminder: "[orbit] local code graph available: run {{orbit}} grep with your question before text grep"
     require_local_graph: true

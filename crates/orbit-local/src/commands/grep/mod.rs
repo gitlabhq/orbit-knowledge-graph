@@ -4,8 +4,7 @@ use std::io::Write;
 use std::path::PathBuf;
 
 use anyhow::Result;
-use orbit_search::{KindRates, SearchVocab, content_words};
-use std::collections::HashMap;
+use orbit_search::{RecallFilter, SearchVocab, content_words};
 
 use local::LocalBackend;
 
@@ -28,45 +27,51 @@ fn build_vocab<S: orbit_search::grep::GrepSource>(source: &S) -> Result<SearchVo
     ))
 }
 
-fn kind_rates() -> &'static HashMap<String, KindRates> {
-    static RATES: std::sync::OnceLock<HashMap<String, KindRates>> = std::sync::OnceLock::new();
-    RATES.get_or_init(|| {
-        use strum::IntoEnumIterator;
-        let Ok(ontology) = ontology::Ontology::load_embedded() else {
-            return HashMap::new();
-        };
-        code_graph::v2::types::EdgeKind::iter()
-            .filter_map(|kind| {
-                let name = kind.as_ref().to_uppercase();
-                let weight = ontology.edge_search_weight(&name)?;
-                Some((name, KindRates::new(weight)))
-            })
-            .collect()
-    })
-}
-
 pub(crate) fn run(
     query: String,
     repo: Option<PathBuf>,
     db: Option<PathBuf>,
     limit: usize,
+    paths: Vec<String>,
+    filter: RecallFilter,
 ) -> Result<()> {
-    if content_words(&query).is_empty() {
-        anyhow::bail!("no usable search terms in query: {query:?}");
+    let launcher = crate::commands::setup::spec::launcher();
+    if content_words(&query).is_empty() && paths.is_empty() {
+        anyhow::bail!(
+            "no usable search terms in query: {query:?} — to list every definition in a \
+             file or directory instead, run `{launcher} grep --path <path>`; to print a whole \
+             file, `{launcher} show --file <path>`"
+        );
     }
 
     let repo_path = repo.unwrap_or_else(|| PathBuf::from("."));
-    let backend = LocalBackend::open(&repo_path, db)?;
+    let backend = LocalBackend::open(&repo_path, db, &paths)?;
 
     let mut out = std::io::stdout().lock();
+    if content_words(&query).is_empty() {
+        return report_outline(&mut out, &backend, &paths, &filter, launcher);
+    }
     writeln!(out, "grep {:?} — {}", query, backend.header())?;
+    if !paths.is_empty() {
+        writeln!(out, "path: {}", paths.join(" "))?;
+    }
+    if !filter.kinds.is_empty() {
+        writeln!(out, "kind: {}", filter.kinds.join(" "))?;
+    }
 
     let vocab = build_vocab(backend.search())?;
-    let outcome = backend.grep(&query, limit, &vocab, kind_rates())?;
+    let outcome = backend.grep(&query, limit, &vocab, &filter)?;
     writeln!(out, "terms: {}", outcome.terms.join(" "))?;
 
     if outcome.matches.is_empty() {
-        writeln!(out, "\nNo definitions match those terms.")?;
+        if paths.is_empty() && filter.is_empty() {
+            writeln!(out, "\nNo definitions match those terms.")?;
+        } else {
+            writeln!(
+                out,
+                "\nNo definitions match those terms within that scope; drop --path/--kind to widen."
+            )?;
+        }
         writeln!(
             out,
             "Rephrase and retry once — use synonyms or identifier fragments \
@@ -77,10 +82,39 @@ pub(crate) fn run(
     }
 
     report_results(&mut out, &outcome)?;
-    let launcher = crate::commands::setup::spec::launcher();
     writeln!(
         out,
-        "\n{launcher} show \"<fqn>\" prints a body; {launcher} describe \"<fqn>\" prints every connection."
+        "\n{launcher} show \"<fqn>\" prints a body (\"<module>::*\" or --file <path> prints many); {launcher} describe \"<fqn>\" lists its callers and every other connection."
+    )?;
+    Ok(())
+}
+
+fn report_outline(
+    out: &mut impl Write,
+    backend: &LocalBackend,
+    paths: &[String],
+    filter: &RecallFilter,
+    launcher: &str,
+) -> Result<()> {
+    writeln!(out, "outline {} — {}", paths.join(" "), backend.header())?;
+    if !filter.kinds.is_empty() {
+        writeln!(out, "kind: {}", filter.kinds.join(" "))?;
+    }
+    let rows = backend.search().list_corpus(filter)?;
+    if rows.is_empty() {
+        writeln!(
+            out,
+            "\nNo indexed definitions under that path. Paths are repo-relative, as printed by `{launcher} grep`."
+        )?;
+        return Ok(());
+    }
+    writeln!(out, "\nDefinitions ({}):", rows.len())?;
+    for r in &rows {
+        writeln!(out, "  {}  [{}]  {}", r.fqn, r.kind, r.loc)?;
+    }
+    writeln!(
+        out,
+        "\n{launcher} show \"<fqn>\" prints a body; {launcher} show --file <path> prints a whole file."
     )?;
     Ok(())
 }
@@ -91,8 +125,15 @@ fn report_results(
 ) -> std::io::Result<()> {
     report_confidence(out, outcome)?;
     writeln!(out, "\nNodes:")?;
-    for m in outcome.matches.iter().chain(&outcome.surfaced) {
+    for m in &outcome.matches {
         writeln!(out, "  {}  [{}]  {}", m.row.fqn, m.row.kind, m.row.loc)?;
+    }
+    let hidden = outcome.total.saturating_sub(outcome.matches.len());
+    if hidden > 0 {
+        writeln!(
+            out,
+            "  … {hidden} more candidates not shown — raise --limit or narrow with --path/--kind."
+        )?;
     }
     if !outcome.weak && !outcome.edges.is_empty() {
         writeln!(out, "\nEdges:")?;
@@ -149,8 +190,7 @@ mod tests {
         orbit_search::GrepOutcome {
             terms: Vec::new(),
             matches: Vec::new(),
-            surfaced: Vec::new(),
-            focus: None,
+            total: 0,
             edges: Vec::new(),
             weak,
             unmatched_terms: unmatched.into_iter().map(String::from).collect(),
@@ -196,6 +236,25 @@ mod tests {
         let mut buf = Vec::new();
         report_results(&mut buf, &o).unwrap();
         assert!(String::from_utf8(buf).unwrap().contains("Edges:"));
+    }
+
+    #[test]
+    fn truncated_results_report_how_many_were_hidden() {
+        let mut o = outcome(Vec::new(), false);
+        o.total = 42;
+        let mut buf = Vec::new();
+        report_results(&mut buf, &o).unwrap();
+        let text = String::from_utf8(buf).unwrap();
+        assert!(text.contains("42 more candidates not shown"), "{text}");
+
+        o.total = 0;
+        let mut buf = Vec::new();
+        report_results(&mut buf, &o).unwrap();
+        assert!(
+            !String::from_utf8(buf)
+                .unwrap()
+                .contains("more candidates not shown")
+        );
     }
 
     #[test]

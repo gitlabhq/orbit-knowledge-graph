@@ -83,13 +83,20 @@ impl SdlcMetrics {
         );
     }
 
-    pub(in crate::modules::sdlc) fn record_watermark_lag(&self, watermark: &DateTime<Utc>) {
+    pub(in crate::modules::sdlc) fn record_watermark_lag(
+        &self,
+        entity: &str,
+        watermark: &DateTime<Utc>,
+    ) {
         let lag = Utc::now()
             .signed_duration_since(*watermark)
             .num_milliseconds()
             .max(0) as f64
             / 1000.0;
-        self.watermark_lag.record(lag, &[]);
+        self.watermark_lag.record(
+            lag,
+            &[KeyValue::new(sdlc::labels::ENTITY, entity.to_owned())],
+        );
     }
 }
 
