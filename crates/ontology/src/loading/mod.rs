@@ -103,6 +103,52 @@ pub(super) fn load_embedded() -> Result<Ontology, OntologyError> {
     load_with(&EmbeddedReader)
 }
 
+/// Embedded ontology with a directory mirroring `config/ontology/` deep-merged over it.
+/// A file present in both is merged (maps merge, lists append); a file only in the overlay is added.
+pub(super) struct DirOverlay<'a>(pub &'a Path);
+
+impl ReadOntologyFile for DirOverlay<'_> {
+    fn read(&self, path: &str) -> Result<String, OntologyError> {
+        let overlay = match std::fs::read_to_string(self.0.join(path)) {
+            Ok(text) => text,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                return EmbeddedReader.read(path);
+            }
+            Err(source) => {
+                return Err(OntologyError::Io {
+                    path: path.to_string(),
+                    source,
+                });
+            }
+        };
+        let Ok(base) = EmbeddedReader.read(path) else {
+            return Ok(overlay);
+        };
+        if !path.ends_with(".yaml") {
+            return Ok(overlay);
+        }
+        let mut merged: serde_json::Value = parse_yaml(&base, path)?;
+        merge_values(&mut merged, parse_yaml(&overlay, path)?);
+        orbit_utils::yaml::to_string(&merged).map_err(|e| OntologyError::Io {
+            path: path.to_string(),
+            source: std::io::Error::new(std::io::ErrorKind::InvalidData, e),
+        })
+    }
+}
+
+fn merge_values(base: &mut serde_json::Value, overlay: serde_json::Value) {
+    use serde_json::Value::{Array, Object};
+    match (base, overlay) {
+        (Object(b), Object(o)) => {
+            for (k, v) in o {
+                merge_values(b.entry(k).or_insert(serde_json::Value::Null), v);
+            }
+        }
+        (Array(b), Array(o)) => b.extend(o),
+        (b, o) => *b = o,
+    }
+}
+
 pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, OntologyError> {
     let schema_content = reader.read(ONTOLOGY_SCHEMA_FILE)?;
     let schema: SchemaYaml = parse_yaml(&schema_content, ONTOLOGY_SCHEMA_FILE)?;
