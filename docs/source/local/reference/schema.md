@@ -62,7 +62,7 @@ A source code file in an indexed repository.
 
 ### `Definition`
 
-A function, class, method, module, or other named symbol declared in a file.
+A function, class, method, module, or other named symbol declared in a file. Markdown headings are indexed as `Section` definitions.
 
 | Properties | Definition |
 |------------|------------|
@@ -71,9 +71,9 @@ A function, class, method, module, or other named symbol declared in a file.
 | `branch` | Branch the definition was indexed from |
 | `commit_sha` | Commit the definition was indexed at |
 | `file_path` | Path of the file that declares the definition |
-| `fqn` | Fully qualified name of a function, class, module, method, struct, enum, or trait |
+| `fqn` | Fully qualified name of a function, class, module, method, struct, enum, or trait. For Markdown sections, the heading chain joined with `#` under the file stem. |
 | `name` | Short name, without namespace qualification |
-| `definition_type` | Kind of definition, such as `Class`, `Function`, `Method`, or `Struct`. Values are capitalized and language-specific. |
+| `definition_type` | Kind of definition, such as `Class`, `Function`, `Method`, `Struct`, or `Section` for Markdown headings. Values are capitalized and language-specific. |
 | `start_line` | First line of the definition |
 | `end_line` | Last line of the definition |
 | `start_byte` | Byte offset where the definition starts |

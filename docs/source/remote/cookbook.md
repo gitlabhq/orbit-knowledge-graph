@@ -497,6 +497,63 @@ Count vulnerabilities by severity:
 
 </details>
 
+## Audit and read documentation
+
+Markdown headings are indexed as `Section` definitions, so a page's structure and
+each section's text are queryable without cloning the repository.
+
+```plaintext
+Using GitLab Orbit, list every "Troubleshooting" section under <doc/> in
+<my-org/my-project>, then show me the text of the one in <doc/user/project/settings.md>
+so I can check it is still accurate.
+```
+
+<details>
+<summary>See the GitLab Orbit queries behind this</summary>
+
+Find sections by heading text across the documentation tree. The `fqn` is the
+heading chain joined with `#` under the file name, so it tells you where in the
+page the section sits:
+
+```json orbit-query
+{
+  "query_type": "traversal",
+  "nodes": [{
+    "id": "s",
+    "entity": "Definition",
+    "columns": ["name", "fqn", "file_path", "start_line", "end_line"],
+    "filters": {
+      "definition_type": {"eq": "Section"},
+      "file_path": {"starts_with": "doc/"},
+      "name": {"eq": "Troubleshooting"}
+    }
+  }],
+  "limit": 30
+}
+```
+
+Read one section's text. `content` returns only that section, from its heading
+to the next heading of the same or higher level:
+
+```json orbit-query
+{
+  "query_type": "traversal",
+  "nodes": [{
+    "id": "s",
+    "entity": "Definition",
+    "columns": ["fqn", "start_line", "end_line", "content"],
+    "filters": {
+      "definition_type": {"eq": "Section"},
+      "file_path": {"eq": "doc/user/project/settings.md"},
+      "name": {"eq": "Troubleshooting"}
+    }
+  }],
+  "limit": 1
+}
+```
+
+</details>
+
 ## Read the actual source
 
 Pull real code into the conversation without leaving your agent.
