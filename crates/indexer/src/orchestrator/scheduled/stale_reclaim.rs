@@ -175,23 +175,30 @@ impl StaleReclaim {
         Ok(())
     }
 
-    /// Patch-part deletes need ClickHouse 25.8.8 or newer and the block columns on every graph
-    /// table. A table whose parts carry block numbers above their own range was cloned with
+    /// Patch-part deletes need a ClickHouse release that runs their subqueries correctly and the
+    /// block columns on every graph table. A table whose parts carry block numbers above their own range was cloned with
     /// `ATTACH PARTITION FROM`; a patch applied to such a part after a merge can hit a look-alike
     /// row, so the task refuses to touch it until the table is renumbered.
     async fn prepare(&self) -> Result<bool, TaskError> {
         if self.prepared.load(Ordering::Acquire) {
             return Ok(self.supported.load(Ordering::Acquire));
         }
-        let available = self
+        let version = self
+            .rows(self.graph.query("SELECT version()"))
+            .await?
+            .first()
+            .and_then(|row| row.first().cloned())
+            .unwrap_or_default();
+        let has_setting = self
             .count(&format!(
                 "SELECT name FROM system.settings WHERE name = '{REQUIRED_SETTING}'"
             ))
             .await?
             > 0;
-        if !available {
+        if !has_setting || !supports_patch_deletes(&version) {
             warn!(
-                "ClickHouse has no {REQUIRED_SETTING} setting; stale reclaim needs 25.8.8 or newer and stays idle"
+                version,
+                "ClickHouse is older than the first release with working patch-part deletes; stale reclaim stays idle"
             );
             self.prepared.store(true, Ordering::Release);
             return Ok(false);
@@ -436,8 +443,12 @@ impl StaleReclaim {
         let cursor = self.block_cursor(&key).await?;
         let high_block = self.high_block(&table.name).await?.max(cursor.block);
         let cutoff = pass_at - TimeDelta::seconds(self.config.tombstone_retention_secs as i64);
-        if cursor.last_pass.is_none() && self.config.sweep_history {
-            let total = self.sweep_history(table, cutoff).await?;
+        if cursor.last_pass.is_none() {
+            let total = if self.config.sweep_history {
+                self.sweep_history(table, cutoff).await?
+            } else {
+                0
+            };
             let swept = BlockCursor {
                 block: high_block,
                 ..cursor
@@ -500,6 +511,16 @@ impl StaleReclaim {
         // The first pass covers every scope ever checkpointed; a failed chunk is logged and left
         // to the project's next re-index rather than repeating the whole sweep forever.
         let history = cursor.last_pass.is_none();
+        if history && !self.config.sweep_history {
+            let swept = BlockCursor {
+                block: high_block,
+                ..cursor
+            };
+            self.save_block_cursor(&key, pass_at, &swept, high_block, None)
+                .await?;
+            return Ok(0);
+        }
+        let unsafe_tables = self.unsafe_tables.lock().await.clone();
         let after_block = if history {
             None
         } else {
@@ -522,6 +543,10 @@ impl StaleReclaim {
                 (chunks > 1).then_some((chunks, chunk)),
             );
             for table in &self.tables {
+                if unsafe_tables.contains(&table.name) {
+                    self.metrics.record_requests_skipped(TASK_NAME, 1);
+                    continue;
+                }
                 let statement = match table.code {
                     CodeRole::None => continue,
                     CodeRole::Project => code_snapshot_statement(
@@ -553,7 +578,15 @@ impl StaleReclaim {
                 chunks, failed_chunks, history, "reclaimed superseded code snapshots"
             );
         }
-        self.save_block_cursor(&key, pass_at, &cursor, high_block, None)
+        let saved = if history {
+            BlockCursor {
+                block: high_block,
+                ..cursor
+            }
+        } else {
+            cursor
+        };
+        self.save_block_cursor(&key, pass_at, &saved, high_block, None)
             .await?;
         Ok(total)
     }
@@ -597,6 +630,27 @@ impl StaleReclaim {
             *last = Instant::now();
         }
         Ok(())
+    }
+}
+
+/// Lightweight updates with subqueries silently did nothing before ClickHouse PR #87285, which
+/// shipped in 25.10.1 and was backported to 25.7.8, 25.8.8 and 25.9.3.
+fn supports_patch_deletes(version: &str) -> bool {
+    let mut parts = version
+        .split('.')
+        .map(|part| part.parse::<u32>().unwrap_or(0));
+    let (major, minor, patch) = (
+        parts.next().unwrap_or(0),
+        parts.next().unwrap_or(0),
+        parts.next().unwrap_or(0),
+    );
+    match (major, minor) {
+        (26.., _) => true,
+        (25, 10..) => true,
+        (25, 9) => patch >= 3,
+        (25, 8) => patch >= 8,
+        (25, 7) => patch >= 8,
+        _ => false,
     }
 }
 
@@ -809,6 +863,22 @@ impl ScheduledTask for StaleReclaim {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn version_gate_requires_the_subquery_fix() {
+        for ok in [
+            "26.4.1.2212",
+            "25.10.1.3832",
+            "25.9.3.48",
+            "25.8.8.26",
+            "25.7.8.71",
+        ] {
+            assert!(supports_patch_deletes(ok), "{ok}");
+        }
+        for bad in ["25.8.3.1", "25.7.1.1", "25.9.2.5", "24.12.1.1", "garbage"] {
+            assert!(!supports_patch_deletes(bad), "{bad}");
+        }
+    }
 
     #[test]
     fn candidates_are_limited_to_parts_and_rows_above_the_cursor() {
