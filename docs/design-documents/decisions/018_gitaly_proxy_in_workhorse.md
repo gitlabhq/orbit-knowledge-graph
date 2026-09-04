@@ -168,26 +168,29 @@ are bounded by
 [`engine.handlers.code-indexing-task.pipeline.fetch_concurrency`](../../../crates/orbit-server-config/src/engine.rs),
 which defaults to 10; backfill and incremental indexing share that ceiling. As
 of 2026-09 on GitLab.com, the code-indexer pool has four pods, giving about 40
-concurrent archive-fetch slots. Within each connection, concurrency is also
-bounded by the stream cap Rails returns at preauthorization. Workhorse defaults
-to `max_concurrent_streams` 32 per connection, which Rails may narrow,
+concurrent archive-fetch slots. The indexer's `max_concurrent_workers`, set to
+16 in production, bounds concurrent jobs, but each job fetches one archive
+under the `fetch_concurrency` semaphore, so worker slots do not raise the
+archive-connection ceiling. Within each connection, concurrency is also bounded
+by the stream cap Rails returns at preauthorization. Workhorse defaults to
+`max_concurrent_streams` 32 per connection, which Rails may narrow,
 `max_connections` 256, `max_preauth_inflight` 64, `idle_timeout` 60 seconds,
 and `read_limit_bytes` 1 MiB.
 
-Gitaly's `gitaly_service_client_requests_total` metric for
-`client_name="gkg-indexer"` shows that `GetArchive` dominates, with 2.97 million
-calls over seven days. `ListBlobs` has about 8,000 calls, and other RPCs are
-noise.
+Kibana log counts (used because Grafana `increase()` undercounts across indexer
+pod restarts) show that `GetArchive` dominates for
+`client_name="gkg-indexer"`, with 2.97 million calls over seven days.
+`ListBlobs` has about 8,000 calls, and other RPCs are noise.
 
 | Window | p50 | p95 | p99 | Maximum |
 |---|---:|---:|---:|---:|
-| 7 days | 0.63 req/s | 2.07 req/s | N/A[^seven-day-p99] | 196 req/s |
+| 7 days | 0.63 req/s | 2.07 req/s | 95 req/s | 196 req/s |
 | 30 days | 0.69 req/s | 1.66 req/s | 18.4 req/s | about 160 req/s |
 
-[^seven-day-p99]: The 7-day p99 was not available from the query.
-
 The weekly total is dominated by short backfill bursts, so its mean of about 5
-requests per second sits well above the steady-state percentiles.
+requests per second sits well above the steady-state percentiles. Bursts of 50
+requests per second or more carry about two thirds of the weekly volume in
+roughly two hours of wall-clock time per week.
 
 The incremental steady state is about 0.7 requests per second and rarely rises
 above about 2 requests per second. Backfills produce short bursts of about
