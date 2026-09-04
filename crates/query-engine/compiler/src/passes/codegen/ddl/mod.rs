@@ -10,11 +10,10 @@ pub mod duckdb;
 use std::collections::BTreeMap;
 
 use ontology::{
-    AuxiliaryTable, MaterializedViewDefinition, Ontology, PartitionConfig, PartitionStrategy,
+    AuxiliaryTable, MaterializedViewDefinition, Ontology, PartitionConfig,
     RefreshableMaterializedViewDefinition, StorageColumn, StorageIndex, StorageProjection,
 };
 
-use crate::ast::Expr;
 use crate::ast::ddl::*;
 use crate::schema_templates::render_refreshable_materialized_view_select;
 
@@ -469,18 +468,12 @@ fn convert_projection(proj: &StorageProjection) -> ProjectionDef {
 fn partition_by<'a>(
     partition: Option<&PartitionConfig>,
     table: &str,
-    columns: impl IntoIterator<Item = &'a str>,
+    _columns: impl IntoIterator<Item = &'a str>,
 ) -> Vec<String> {
-    let Some(p) = partition.filter(|p| p.is_partitioned(table)) else {
+    let Some(_p) = partition.filter(|p| p.is_partitioned(table)) else {
         return vec![];
     };
-    let column = p.column();
-    if columns.into_iter().any(|c| c == column) {
-        let expr = partition_expr(&p.strategy, Expr::Identifier(column.to_string()));
-        vec![clickhouse::emit_partition_expr(&expr)]
-    } else {
-        vec![]
-    }
+    vec![]
 }
 
 fn build_node_table(
@@ -778,30 +771,6 @@ fn local_data_type_to_column_type(dt: &ontology::DataType) -> ColumnType {
         },
         ontology::DataType::Date => ColumnType::Date32,
         _ => ColumnType::String,
-    }
-}
-
-fn partition_expr(strategy: &PartitionStrategy, input: Expr) -> Expr {
-    match strategy {
-        PartitionStrategy::HashBucket { buckets, .. } => Expr::func(
-            "modulo",
-            vec![
-                Expr::func(
-                    "sipHash64",
-                    vec![Expr::func(
-                        "toUInt64OrZero",
-                        vec![Expr::func(
-                            "arrayElement",
-                            vec![
-                                Expr::func("splitByChar", vec![Expr::string("/"), input]),
-                                Expr::int(2),
-                            ],
-                        )],
-                    )],
-                ),
-                Expr::int(i64::from(*buckets)),
-            ],
-        ),
     }
 }
 
