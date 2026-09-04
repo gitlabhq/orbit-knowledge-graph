@@ -1,5 +1,5 @@
 mod arrow_converter;
-mod checkpoint;
+pub(crate) mod checkpoint;
 pub mod config;
 mod handler;
 pub mod metrics;

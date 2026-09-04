@@ -266,6 +266,7 @@ Distributed locking via NATS KV ensures only one dispatcher instance runs each t
 | Code task dispatch | `schedule.tasks.code-indexing-task.cron` | `0 */1 * * * *` (every minute) | Consumes Siphon CDC push events |
 | Code backfill | `schedule.tasks.code-backfill.cron` | `0 */1 * * * *` (every minute) | Backfills newly enabled namespaces |
 | Table cleanup | `schedule.tasks.table-cleanup.cron` | `0 0 3 * * 0` (weekly, Sunday 03:00 UTC) | Runs `APPLY DELETED MASK` on every graph table to physically remove lightweight-deleted rows |
+| Stale reclaim | `schedule.tasks.stale-reclaim.cron` | `0 */10 * * * *` (every 10 minutes) | Collapses tombstoned keys and superseded code snapshots with patch-part deletes; see settings below |
 | Namespace deletion | `schedule.tasks.namespace-deletion.cron` | `0 0 3 * * *` (daily 03:00 UTC) | Schedules and executes namespace deletions |
 | Migration completion | `schedule.tasks.migration-completion.cron` | `0 */1 * * * *` (every minute) | Detects completed schema migrations |
 
@@ -279,6 +280,20 @@ recent Siphon activity, backstopping migration backfill and missed windows.
 run picks up all outstanding masks. Alert on
 `gkg.scheduler.task.errors{task="maintenance.table_cleanup"}`; the task logs a
 failed table and moves on.
+
+### Stale reclaim task settings
+
+| Config path | Default | Description |
+|-------------|---------|-------------|
+| `schedule.tasks.stale-reclaim.tombstone_retention_secs` | `604800` | Tombstones younger than this keep shadowing their key; older dead keys are purged with every row they hide |
+| `schedule.tasks.stale-reclaim.purge_interval_secs` | `86400` | How often each table's expired tombstones are purged |
+| `schedule.tasks.stale-reclaim.max_candidates_per_statement` | `2000000` | Tombstoned keys per delete statement; larger candidate sets are split by key hash (incremental) or by traversal path (history sweep) |
+| `schedule.tasks.stale-reclaim.statement_timeout_secs` | `600` | `max_execution_time` of each delete statement |
+| `schedule.tasks.stale-reclaim.apply_patches_after_bytes` | `1073741824` | Uncompressed patch-part bytes on a table that trigger `APPLY PATCHES` |
+| `schedule.tasks.stale-reclaim.apply_patches_after_secs` | `21600` | `APPLY PATCHES` is issued for every table with patch parts at least this often |
+| `schedule.tasks.stale-reclaim.sweep_history` | `true` | Collapse every existing tombstoned key the first time a table is seen (one primary-key-pruned statement per group of traversal paths) |
+
+The task needs ClickHouse 25.8.8 or newer; on older servers it logs a warning once and stays idle. It enables `enable_block_number_column` and `enable_block_offset_column` on every graph table at startup with `ALTER TABLE ... MODIFY SETTING`, a metadata-only change. Progress is stored in the `checkpoint` table under `maintenance.stale_reclaim.<versioned table>`; deleting a table's row re-runs its history sweep on the next pass. A table whose parts carry block numbers from another table (a clone attached from a table that already had the block columns) is skipped with a warning until it is renumbered, for example by re-inserting it. Alert on `gkg.scheduler.task.errors{task="maintenance.stale_reclaim"}` and on `gkg.scheduler.requests.skipped{task="maintenance.stale_reclaim"}`.
 
 ### Code dispatch task settings
 
@@ -645,6 +660,8 @@ schedule:
   tasks:
     table-cleanup:
       cron: "0 0 3 * * 0"
+    stale-reclaim:
+      cron: "0 */10 * * * *"
     namespace-deletion:
       cron: "0 0 3 * * *"
     migration-completion:

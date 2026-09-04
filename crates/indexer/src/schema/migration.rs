@@ -703,6 +703,7 @@ async fn clone_table(
     }
 
     info!(from = %old_name, to = %new_name, "cloning table from active version");
+    apply_pending_patches(graph, old_name).await?;
     graph
         .execute(&format!(
             "CREATE TABLE IF NOT EXISTS {new_name} AS {old_name}"
@@ -719,6 +720,47 @@ async fn clone_table(
         .await
         .map_err(|e| MigrationError::Ddl {
             table: new_name.to_string(),
+            reason: e.to_string(),
+        })
+}
+
+/// `ATTACH PARTITION FROM` refuses a source with unapplied patch parts, which the stale reclaim
+/// task leaves behind between its own `APPLY PATCHES` runs.
+async fn apply_pending_patches(
+    graph: &ArrowClickHouseClient,
+    table: &str,
+) -> Result<(), MigrationError> {
+    let pending = graph
+        .query(&format!(
+            "SELECT count() FROM system.parts WHERE database = currentDatabase() \
+             AND table = '{table}' AND active AND startsWith(name, 'patch')"
+        ))
+        .fetch_arrow()
+        .await
+        .map_err(|e| MigrationError::Ddl {
+            table: table.to_string(),
+            reason: e.to_string(),
+        })?
+        .iter()
+        .map(|batch| {
+            batch
+                .column(0)
+                .as_any()
+                .downcast_ref::<arrow::array::UInt64Array>()
+                .map(|counts| counts.value(0))
+                .unwrap_or(0)
+        })
+        .sum::<u64>();
+    if pending == 0 {
+        return Ok(());
+    }
+    graph
+        .execute(&format!(
+            "ALTER TABLE {table} APPLY PATCHES SETTINGS mutations_sync = 2"
+        ))
+        .await
+        .map_err(|e| MigrationError::Ddl {
+            table: table.to_string(),
             reason: e.to_string(),
         })
 }

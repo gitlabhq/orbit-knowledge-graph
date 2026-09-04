@@ -106,6 +106,14 @@ _Avoid_: batch, job (a campaign spans many dispatches and both pipelines)
 `config/schema-migrations.yaml`, one entry per `SCHEMA_VERSION` bump declaring how much of the graph that version invalidates (`scope: "*" | sdlc | code`, optional `entities`). A clone-based **schema migration** reads it to decide what to clone versus rebuild. Entries are auto-derived from a fingerprint snapshot by `mise schema:bump`; humans may only widen them.
 _Avoid_: changelog, migration script (there is no per-version SQL)
 
+**Tombstone**:
+A graph row re-inserted with `_deleted = true` and a newer `_version` to hide a key in a `ReplacingMergeTree` table. Reads resolve versions and drop it; the **Stale reclaim** task removes it and the rows it hides.
+_Avoid_: soft delete (that is the Rails-side `deleted_at` column), delete marker
+
+**Stale reclaim**:
+The dispatcher task that physically removes tombstoned keys and superseded code snapshots with ClickHouse patch-part deletes, driven by recently written parts and by the code checkpoint table. Replaces per-project mutations and `OPTIMIZE ... FINAL CLEANUP`.
+_Avoid_: garbage collection, compaction (those are ClickHouse merges), stale sweep (the post-backfill code sweep that writes tombstones)
+
 **Siphon**:
 The GitLab CDC service. Captures PostgreSQL logical replication events and publishes them to NATS JetStream. External to Orbit — owned by the Analytics team.
 _Avoid_: CDC bridge, producer

@@ -655,6 +655,73 @@ impl Default for StaleEdgeReconciliationConfig {
     }
 }
 
+/// Reclaims tombstoned and superseded graph rows with patch-part deletes.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct StaleReclaimConfig {
+    #[serde(flatten)]
+    pub schedule: ScheduleConfiguration,
+    #[serde(default = "default_stale_reclaim_tombstone_retention_secs")]
+    pub tombstone_retention_secs: u64,
+    #[serde(default = "default_stale_reclaim_purge_interval_secs")]
+    pub purge_interval_secs: u64,
+    #[serde(default = "default_stale_reclaim_max_candidates")]
+    pub max_candidates_per_statement: u64,
+    #[serde(default = "default_stale_reclaim_statement_timeout_secs")]
+    pub statement_timeout_secs: u64,
+    #[serde(default = "default_stale_reclaim_apply_patches_bytes")]
+    pub apply_patches_after_bytes: u64,
+    #[serde(default = "default_stale_reclaim_apply_patches_secs")]
+    pub apply_patches_after_secs: u64,
+    #[serde(default = "default_stale_reclaim_sweep_history")]
+    pub sweep_history: bool,
+}
+
+fn default_stale_reclaim_sweep_history() -> bool {
+    true
+}
+
+fn default_stale_reclaim_tombstone_retention_secs() -> u64 {
+    7 * 24 * 60 * 60
+}
+
+fn default_stale_reclaim_purge_interval_secs() -> u64 {
+    24 * 60 * 60
+}
+
+fn default_stale_reclaim_max_candidates() -> u64 {
+    2_000_000
+}
+
+fn default_stale_reclaim_statement_timeout_secs() -> u64 {
+    600
+}
+
+fn default_stale_reclaim_apply_patches_bytes() -> u64 {
+    1024 * 1024 * 1024
+}
+
+fn default_stale_reclaim_apply_patches_secs() -> u64 {
+    6 * 60 * 60
+}
+
+impl Default for StaleReclaimConfig {
+    fn default() -> Self {
+        Self {
+            schedule: ScheduleConfiguration {
+                cron: Some("0 */10 * * * *".into()),
+            },
+            tombstone_retention_secs: default_stale_reclaim_tombstone_retention_secs(),
+            purge_interval_secs: default_stale_reclaim_purge_interval_secs(),
+            max_candidates_per_statement: default_stale_reclaim_max_candidates(),
+            statement_timeout_secs: default_stale_reclaim_statement_timeout_secs(),
+            apply_patches_after_bytes: default_stale_reclaim_apply_patches_bytes(),
+            apply_patches_after_secs: default_stale_reclaim_apply_patches_secs(),
+            sweep_history: default_stale_reclaim_sweep_history(),
+        }
+    }
+}
+
 /// Typed per-task configuration for all registered scheduled tasks.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
@@ -676,6 +743,8 @@ pub struct ScheduledTasksConfiguration {
     pub migration_completion: MigrationCompletionConfig,
     #[serde(default)]
     pub stale_edge_reconciliation: StaleEdgeReconciliationConfig,
+    #[serde(default)]
+    pub stale_reclaim: StaleReclaimConfig,
 }
 
 // ── Top-level engine config ──────────────────────────────────────────

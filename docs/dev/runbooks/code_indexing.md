@@ -329,16 +329,22 @@ helm upgrade gkg orbit-helm-charts/gkg \
 
 ### Stale data accumulation
 
-The cleanup stage runs after indexing but failures are logged as warnings and do not block the pipeline. Over time, stale rows from deleted files may accumulate.
+The cleanup stage after indexing only tombstones keys that vanished; failures are logged as warnings and do not block the pipeline. The previous snapshot, the tombstones and any rows of runs that never checkpointed are removed physically by the `maintenance.stale_reclaim` task, which deletes every row with `_version` below the project's checkpoint `indexed_at` once the checkpoint lands (see [server configuration](server_configuration.md), "Stale reclaim task settings").
 
-To clean up manually:
+To find rows the task still has to reclaim for recently indexed projects:
 
 ```sql
-OPTIMIZE TABLE `<gkg-database>`.gl_file FINAL CLEANUP;
-OPTIMIZE TABLE `<gkg-database>`.gl_directory FINAL CLEANUP;
-OPTIMIZE TABLE `<gkg-database>`.gl_imported_symbol FINAL CLEANUP;
-OPTIMIZE TABLE `<gkg-database>`.gl_definition FINAL CLEANUP;
+SELECT count()
+FROM `<gkg-database>`.gl_definition AS e
+INNER JOIN (
+  SELECT traversal_path, project_id, branch, max(indexed_at) AS indexed_at
+  FROM `<gkg-database>`.code_indexing_checkpoint WHERE NOT _deleted
+  GROUP BY traversal_path, project_id, branch
+) AS cp USING (traversal_path, project_id, branch)
+WHERE e._version < cp.indexed_at;
 ```
+
+A project that is never re-indexed keeps no garbage except rows written before the task first ran; a re-index of the project reclaims them.
 
 ## Monitoring
 

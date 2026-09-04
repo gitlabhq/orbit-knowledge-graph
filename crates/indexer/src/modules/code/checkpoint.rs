@@ -10,7 +10,7 @@ use orbit_utils::arrow::ArrowUtils;
 use orbit_utils::traversal_path::TraversalPath;
 use thiserror::Error;
 
-const CODE_INDEXING_CHECKPOINT_TABLE: &str = "code_indexing_checkpoint";
+pub(crate) const CODE_INDEXING_CHECKPOINT_TABLE: &str = "code_indexing_checkpoint";
 
 #[derive(Debug, Error)]
 pub enum CheckpointError {
