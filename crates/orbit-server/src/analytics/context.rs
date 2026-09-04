@@ -34,6 +34,7 @@ pub(crate) fn build_common(
         host_name: parse_opt(&claims.host_name, "host_name")?,
         organization_id: claims.organization_id.map(|id| id as i64),
         root_namespace_ids: claims.root_namespace_id.map(|ns| vec![ns]),
+        coding_agent: None,
         schema_version: Some(
             schema_version
                 .parse::<orbit_common::OrbitCommonSchemaVersion>()

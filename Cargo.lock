@@ -8296,6 +8296,7 @@ dependencies = [
  "orbit-prompts",
  "orbit-search",
  "orbit-utils",
+ "regex",
  "reqwest 0.13.4",
  "rmcp",
  "rust-embed",

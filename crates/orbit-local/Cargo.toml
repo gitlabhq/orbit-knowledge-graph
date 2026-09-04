@@ -30,6 +30,7 @@ tracing-subscriber = { workspace = true }
 anyhow = { workspace = true }
 dirs = { workspace = true }
 dunce = { workspace = true }
+regex = { workspace = true }
 reqwest = { workspace = true }
 rmcp = { workspace = true }
 rust-embed = { workspace = true }
