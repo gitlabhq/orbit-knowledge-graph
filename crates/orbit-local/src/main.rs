@@ -5,6 +5,7 @@ mod commands;
 mod descriptions;
 mod list;
 mod mcp;
+mod parquet;
 mod remote;
 mod settings;
 mod skill;
@@ -45,6 +46,8 @@ struct IndexOutput {
     #[serde(skip_serializing_if = "Option::is_none")]
     database_path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    parquet_dir: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     detailed: Option<DetailedStats>,
 }
 
@@ -80,6 +83,7 @@ struct IndexRunResult {
     faulted_files: Vec<code_graph::v2::FaultedFile>,
     graph_stats: IndexGraphStats,
     database_path: Option<String>,
+    parquet_dir: Option<String>,
     slowest_files: Vec<code_graph::v2::FileTimingEntry>,
     language_timings: Vec<code_graph::v2::LanguageTimings>,
     phase_timings: code_graph::v2::PhaseTimings,
@@ -174,6 +178,39 @@ struct IndexArgs {
     /// Override the DuckDB path (default: ~/.orbit/graph.duckdb).
     #[arg(long, value_name = "PATH")]
     db: Option<PathBuf>,
+
+    /// Write one Parquet file per graph table into this directory instead of DuckDB.
+    ///
+    /// Skips the manifest and the full-text search index, so the other commands
+    /// cannot read the result. Re-running with the same directory overwrites it.
+    #[arg(long, value_name = "DIR", conflicts_with = "db")]
+    parquet: Option<PathBuf>,
+}
+
+pub(crate) enum IndexTarget {
+    DuckDb(Option<PathBuf>),
+    Parquet(PathBuf),
+}
+
+enum IndexSink {
+    DuckDb(PathBuf),
+    Parquet(std::sync::Arc<parquet::ParquetSink>),
+}
+
+impl IndexSink {
+    fn db_path(&self) -> Option<&std::path::Path> {
+        match self {
+            Self::DuckDb(path) => Some(path),
+            Self::Parquet(_) => None,
+        }
+    }
+
+    fn parquet_dir(&self) -> Option<&std::path::Path> {
+        match self {
+            Self::DuckDb(_) => None,
+            Self::Parquet(sink) => Some(sink.dir()),
+        }
+    }
 }
 
 #[derive(Args, Debug, PartialEq)]
@@ -652,6 +689,7 @@ async fn dispatch_local(command: LocalCommands) -> Result<()> {
             stats,
             verbose,
             db,
+            parquet,
         }) => {
             let level = if verbose { Level::DEBUG } else { Level::WARN };
             let subscriber = tracing_subscriber::fmt()
@@ -670,7 +708,11 @@ async fn dispatch_local(command: LocalCommands) -> Result<()> {
             tracing::subscriber::set_global_default(subscriber)
                 .expect("setting default subscriber failed");
 
-            run_index(path, threads, stats, db).await
+            let target = match parquet {
+                Some(dir) => IndexTarget::Parquet(dir),
+                None => IndexTarget::DuckDb(db),
+            };
+            run_index(path, threads, stats, target).await
         }
         LocalCommands::Grep(GrepArgs {
             query,
@@ -813,9 +855,9 @@ async fn run_index(
     path: PathBuf,
     threads: usize,
     show_stats: bool,
-    db: Option<PathBuf>,
+    target: IndexTarget,
 ) -> Result<()> {
-    for output in index_collect(path, threads, show_stats, db)? {
+    for output in index_collect(path, threads, show_stats, target)? {
         println!("{}", serde_json::to_string_pretty(&output)?);
     }
     Ok(())
@@ -827,9 +869,8 @@ pub(crate) fn index_collect(
     path: PathBuf,
     threads: usize,
     show_stats: bool,
-    db: Option<PathBuf>,
+    target: IndexTarget,
 ) -> Result<Vec<IndexOutput>> {
-    let db_path = workspace::resolve_db_path(db)?;
     let store = workspace::Workspace::open_default()?;
     let repos = store.resolve_repos(&path)?;
 
@@ -842,7 +883,16 @@ pub(crate) fn index_collect(
 
     let ontology = Ontology::load_embedded().context("failed to load embedded ontology")?;
 
-    workspace::ensure_graph_schema(&db_path, LOCAL_DDL)?;
+    let sink = match target {
+        IndexTarget::DuckDb(db) => {
+            let db_path = workspace::resolve_db_path(db)?;
+            workspace::ensure_graph_schema(&db_path, LOCAL_DDL)?;
+            IndexSink::DuckDb(db_path)
+        }
+        IndexTarget::Parquet(dir) => {
+            IndexSink::Parquet(parquet::ParquetSink::create(workspace::absolutize(dir)?)?)
+        }
+    };
 
     let pipeline_config = code_graph::v2::PipelineConfig {
         worker_threads: threads,
@@ -863,7 +913,9 @@ pub(crate) fn index_collect(
             Err(e) => {
                 tracing::error!("skipping {}: {e:#}", repo_path.display());
                 failed += 1;
-                workspace::record_git_info_failure(&db_path, repo_path, &e.to_string());
+                if let Some(db_path) = sink.db_path() {
+                    workspace::record_git_info_failure(db_path, repo_path, &e.to_string());
+                }
                 continue;
             }
         };
@@ -876,9 +928,9 @@ pub(crate) fn index_collect(
             git.commit_sha.get(..8).unwrap_or(&git.commit_sha)
         );
 
-        {
+        if let Some(db_path) = sink.db_path() {
             let client =
-                duckdb_client::DuckDbClient::open(&db_path).context("failed to open DuckDB")?;
+                duckdb_client::DuckDbClient::open(db_path).context("failed to open DuckDB")?;
             workspace::set_status(
                 &client,
                 &key,
@@ -889,7 +941,7 @@ pub(crate) fn index_collect(
             )?;
         }
 
-        let result = index_repo(&git, &db_path, &ontology, pipeline_config.clone());
+        let result = index_repo(&git, &sink, &ontology, pipeline_config.clone());
         match result {
             Ok(result) => {
                 let repo_name = git
@@ -897,14 +949,13 @@ pub(crate) fn index_collect(
                     .file_name()
                     .map(|n| n.to_string_lossy().to_string())
                     .unwrap_or_else(|| "repository".to_string());
-                let mut output = build_index_output(&repo_name, &key, &result, show_stats);
-                output.database_path = Some(db_path.display().to_string());
-                outputs.push(output);
+                outputs.push(build_index_output(&repo_name, &key, &result, show_stats));
             }
             Err(e) => {
                 tracing::error!("failed to index {key}: {e:#}");
                 failed += 1;
-                if let Ok(client) = duckdb_client::DuckDbClient::open(&db_path)
+                if let Some(db_path) = sink.db_path()
+                    && let Ok(client) = duckdb_client::DuckDbClient::open(db_path)
                     && let Err(manifest_err) = workspace::set_status(
                         &client,
                         &key,
@@ -920,6 +971,9 @@ pub(crate) fn index_collect(
         }
     }
 
+    if let IndexSink::Parquet(parquet) = sink {
+        parquet.close()?;
+    }
     if failed > 0 {
         anyhow::bail!("{failed} of {} repositories failed to index", repos.len());
     }
@@ -937,12 +991,11 @@ fn fatal_pipeline_reason(errors: &[code_graph::v2::pipeline::PipelineError]) -> 
 
 fn index_repo(
     git: &workspace::GitInfo,
-    db_path: &std::path::Path,
+    sink: &IndexSink,
     ontology: &Ontology,
     pipeline_config: code_graph::v2::PipelineConfig,
 ) -> Result<IndexRunResult> {
-    let key = git.repo_path.to_string_lossy().to_string();
-    let root_path = key.clone();
+    let root_path = git.repo_path.to_string_lossy().to_string();
     let start_time = std::time::Instant::now();
 
     let tracer = code_graph::v2::trace::Tracer::new(false);
@@ -956,6 +1009,66 @@ fn index_repo(
             .context("failed to walk repository files")?,
     );
 
+    let converter: std::sync::Arc<dyn code_graph::v2::GraphConverter> =
+        std::sync::Arc::new(duckdb_client::DuckDbConverter {
+            project_id: git.project_id,
+            branch: git.branch.clone(),
+            commit_sha: git.commit_sha.clone(),
+            ontology: std::sync::Arc::new(ontology.clone()),
+        });
+    let on_batch = match sink {
+        IndexSink::DuckDb(db_path) => duckdb_on_batch(db_path, git, ontology)?,
+        IndexSink::Parquet(parquet) => parquet.on_batch(),
+    };
+
+    let v2_result = code_graph::v2::Pipeline::run_with_tracer(
+        std::path::Path::new(&root_path),
+        file_inventory,
+        pipeline_config.clone(),
+        filter.file_reasons(),
+        tracer,
+        converter,
+        on_batch,
+    );
+
+    for err in &v2_result.errors {
+        tracing::warn!(stage = err.stage, error = %err.error, file = %err.file_path, "pipeline error");
+    }
+    if let Some(reason) = fatal_pipeline_reason(&v2_result.errors) {
+        anyhow::bail!(reason);
+    }
+
+    if let IndexSink::DuckDb(db_path) = sink {
+        duckdb_finish_repo(db_path, git)?;
+    }
+
+    Ok(IndexRunResult {
+        total_processing_time: start_time.elapsed(),
+        skipped_files: v2_result.skipped,
+        faulted_files: v2_result.faults,
+        graph_stats: IndexGraphStats {
+            directories: v2_result.stats.directories_indexed,
+            files: v2_result.stats.files_indexed,
+            definitions: v2_result.stats.definitions_count,
+            imported_symbols: v2_result.stats.imports_count,
+            relationships: v2_result.stats.edges_count,
+            relationship_types: HashMap::new(),
+            definition_types: HashMap::new(),
+        },
+        database_path: sink.db_path().map(|p| p.display().to_string()),
+        parquet_dir: sink.parquet_dir().map(|p| p.display().to_string()),
+        slowest_files: v2_result.stats.slowest_files,
+        language_timings: v2_result.stats.language_timings,
+        phase_timings: v2_result.stats.phase_timings,
+    })
+}
+
+/// Clears the project's previous rows first so the appended batches replace them.
+fn duckdb_on_batch(
+    db_path: &std::path::Path,
+    git: &workspace::GitInfo,
+    ontology: &Ontology,
+) -> Result<std::sync::Arc<code_graph::v2::OnBatch>> {
     let client =
         duckdb_client::DuckDbClient::open(db_path).context("failed to open DuckDB for writing")?;
 
@@ -987,15 +1100,8 @@ fn index_repo(
         )
         .context("failed to clear existing search index")?;
 
-    let converter: std::sync::Arc<dyn code_graph::v2::GraphConverter> =
-        std::sync::Arc::new(duckdb_client::DuckDbConverter {
-            project_id: git.project_id,
-            branch: git.branch.clone(),
-            commit_sha: git.commit_sha.clone(),
-            ontology: std::sync::Arc::new(ontology.clone()),
-        });
     let client = std::sync::Mutex::new(client);
-    let on_batch: std::sync::Arc<code_graph::v2::OnBatch> = std::sync::Arc::new(
+    Ok(std::sync::Arc::new(
         move |table: &str, batch: arrow::record_batch::RecordBatch| {
             if batch.num_rows() == 0 {
                 return Ok(());
@@ -1006,25 +1112,11 @@ fn index_repo(
                 .insert_batch(table, &batch)
                 .map_err(|e| code_graph::v2::SinkError(format!("DuckDB write to {table}: {e}")))
         },
-    );
+    ))
+}
 
-    let v2_result = code_graph::v2::Pipeline::run_with_tracer(
-        std::path::Path::new(&root_path),
-        file_inventory,
-        pipeline_config.clone(),
-        filter.file_reasons(),
-        tracer,
-        converter,
-        on_batch,
-    );
-
-    for err in &v2_result.errors {
-        tracing::warn!(stage = err.stage, error = %err.error, file = %err.file_path, "pipeline error");
-    }
-    if let Some(reason) = fatal_pipeline_reason(&v2_result.errors) {
-        anyhow::bail!(reason);
-    }
-
+fn duckdb_finish_repo(db_path: &std::path::Path, git: &workspace::GitInfo) -> Result<()> {
+    let key = git.repo_path.to_string_lossy().to_string();
     let client =
         duckdb_client::DuckDbClient::open(db_path).context("failed to open DuckDB for status")?;
     let doc_table = duckdb_client::search::def_doc_table(git.project_id);
@@ -1059,26 +1151,7 @@ fn index_repo(
         workspace::RepoStatus::Indexed,
         None,
         Some(git),
-    )?;
-
-    Ok(IndexRunResult {
-        total_processing_time: start_time.elapsed(),
-        skipped_files: v2_result.skipped,
-        faulted_files: v2_result.faults,
-        graph_stats: IndexGraphStats {
-            directories: v2_result.stats.directories_indexed,
-            files: v2_result.stats.files_indexed,
-            definitions: v2_result.stats.definitions_count,
-            imported_symbols: v2_result.stats.imports_count,
-            relationships: v2_result.stats.edges_count,
-            relationship_types: HashMap::new(),
-            definition_types: HashMap::new(),
-        },
-        database_path: Some(db_path.display().to_string()),
-        slowest_files: v2_result.stats.slowest_files,
-        language_timings: v2_result.stats.language_timings,
-        phase_timings: v2_result.stats.phase_timings,
-    })
+    )
 }
 
 fn build_index_output(
@@ -1161,6 +1234,7 @@ fn build_index_output(
             errored_files: result.faulted_files.len(),
         },
         database_path: result.database_path.clone(),
+        parquet_dir: result.parquet_dir.clone(),
         detailed,
     }
 }
@@ -1225,6 +1299,7 @@ mod tests {
                 stats: false,
                 verbose: false,
                 db: None,
+                parquet: None,
             }
         );
     }

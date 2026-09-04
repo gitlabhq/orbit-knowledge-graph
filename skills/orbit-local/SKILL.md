@@ -12,7 +12,7 @@ description: >
   production data in GitLab (a project such as gitlab-org/gitlab, cross-project
   blast radius, contributor or merge-request aggregation) use the `orbit` skill;
   for single-entity GitLab lookups or write operations use `glab`.
-version: 0.3.1
+version: 0.3.2
 license: MIT
 metadata:
   audience: developers
@@ -70,7 +70,7 @@ wrapper flags, config keys, and pass-through rules:
 
 | Command | Purpose |
 |---|---|
-| `orbit index <PATH> [--stats] [--db P]` | Parse repos under `PATH` into DuckDB; prints graph stats as JSON |
+| `orbit index <PATH> [--stats] [--db P\|--parquet DIR]` | Parse repos under `PATH` into DuckDB, or into Parquet files; prints graph stats as JSON |
 | `orbit sql [QUERY] [-f FILE] [-F table\|json\|ndjson\|csv]` | Run read-only SQL; `-` reads from stdin |
 | `orbit schema [TABLE…] [--raw]` | Describe tables/columns; scope to table names to trim output |
 | `orbit list [-F …]` | List indexed repositories, branch, commit, status |

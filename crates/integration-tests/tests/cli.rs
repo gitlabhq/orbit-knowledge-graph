@@ -213,6 +213,81 @@ fn index_db_flag_writes_to_custom_path() {
 }
 
 #[test]
+fn index_parquet_matches_duckdb_tables() {
+    let repo = create_test_repo();
+    let data_dir = tempfile::TempDir::new().unwrap();
+    let parquet_tmp = tempfile::TempDir::new().unwrap();
+    let parquet_dir = parquet_tmp.path().join("out");
+
+    let out = orbit_cmd()
+        .args([
+            "index",
+            repo.path.to_str().unwrap(),
+            "--parquet",
+            parquet_dir.to_str().unwrap(),
+        ])
+        .env("ORBIT_DATA_DIR", data_dir.path())
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "index --parquet failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(!data_dir.path().join("graph.duckdb").exists());
+    let output: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(output["parquet_dir"], parquet_dir.to_str().unwrap());
+
+    let tables = [
+        "gl_directory",
+        "gl_file",
+        "gl_definition",
+        "gl_imported_symbol",
+        "gl_edge",
+    ];
+    let files: BTreeSet<String> = std::fs::read_dir(&parquet_dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+        .collect();
+    let expected_files: BTreeSet<String> = tables.iter().map(|t| format!("{t}.parquet")).collect();
+    assert_eq!(files, expected_files);
+
+    let duckdb_dir = tempfile::TempDir::new().unwrap();
+    assert!(orbit_index(&repo.path, duckdb_dir.path()));
+    for table in tables {
+        let file = std::fs::File::open(parquet_dir.join(format!("{table}.parquet"))).unwrap();
+        let reader =
+            parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder::try_new(file).unwrap();
+        let columns: Vec<String> = reader
+            .schema()
+            .fields()
+            .iter()
+            .map(|f| f.name().clone())
+            .collect();
+        let rows_written: usize = reader
+            .build()
+            .unwrap()
+            .map(|batch| batch.unwrap().num_rows())
+            .sum();
+
+        let described = orbit_sql(&format!("DESCRIBE {table}"), duckdb_dir.path());
+        let duckdb_columns: Vec<String> = rows(&described)
+            .iter()
+            .map(|r| r["column_name"].as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(columns, duckdb_columns, "{table} columns");
+
+        let counted = orbit_sql(
+            &format!("SELECT count(*) AS n FROM {table}"),
+            duckdb_dir.path(),
+        );
+        let duckdb_rows = rows(&counted)[0]["n"].as_u64().unwrap() as usize;
+        assert!(duckdb_rows > 0, "{table} fixture must produce rows");
+        assert_eq!(rows_written, duckdb_rows, "{table} row count");
+    }
+}
+
+#[test]
 fn indexes_non_parsable_git_tree_files() {
     let data_dir = tempfile::TempDir::new().unwrap();
     let workspace = tempfile::TempDir::new().unwrap();

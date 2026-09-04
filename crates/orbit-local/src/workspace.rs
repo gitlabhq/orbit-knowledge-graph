@@ -75,7 +75,7 @@ pub fn resolve_db_path(db: Option<PathBuf>) -> Result<PathBuf> {
     absolutize(path)
 }
 
-fn absolutize(path: PathBuf) -> Result<PathBuf> {
+pub fn absolutize(path: PathBuf) -> Result<PathBuf> {
     if path.is_absolute() {
         Ok(path)
     } else {

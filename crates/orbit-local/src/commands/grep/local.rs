@@ -43,8 +43,13 @@ impl LocalBackend {
                 git.repo_path.display()
             );
             drop(client);
-            crate::index_collect(git.repo_path.clone(), 0, false, Some(db.clone()))
-                .context("failed to index the repository for grep")?;
+            crate::index_collect(
+                git.repo_path.clone(),
+                0,
+                false,
+                crate::IndexTarget::DuckDb(Some(db.clone())),
+            )
+            .context("failed to index the repository for grep")?;
             client = sql::open_graph(Some(db))?;
             if indexed_count(&client)? == 0 {
                 anyhow::bail!(

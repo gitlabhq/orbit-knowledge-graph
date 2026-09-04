@@ -36,6 +36,7 @@ futures = { workspace = true }
 gitaly-protos = { path = "../gitaly-protos" }
 gitlab-client = { workspace = true }
 parking_lot = { workspace = true }
+parquet = { workspace = true }
 prost = { workspace = true }
 rcgen = { workspace = true }
 rustc-hash = { workspace = true }

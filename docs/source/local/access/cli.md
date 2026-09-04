@@ -81,6 +81,7 @@ in the manifest table.
 | `--stats` | Include detailed statistics in the JSON output. |
 | `--verbose` | Verbose logging to stderr. |
 | `--db` | Override the DuckDB file path (default: `~/.orbit/graph.duckdb`). |
+| `--parquet` | Write one ZSTD-compressed Parquet file per graph table (`gl_definition.parquet`, `gl_edge.parquet`, ...) into this directory instead of DuckDB. All repositories found under `PATH` land in the same files, distinguished by `project_id`. Re-running with the same directory overwrites the files. Skips the manifest and the full-text search index, so the other `orbit` commands cannot read the result. Conflicts with `--db`. |
 
 ## Inspect the schema
 

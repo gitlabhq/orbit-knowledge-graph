@@ -77,7 +77,7 @@ database (default `~/.orbit/graph.duckdb`).
 
 | Command | Flags |
 |---|---|
-| `index <PATH>` | `-t/--threads <N>` (0 = auto), `-s/--stats` (detailed timings), `-v/--verbose` (stderr logs), `--db` |
+| `index <PATH>` | `-t/--threads <N>` (0 = auto), `-s/--stats` (detailed timings), `-v/--verbose` (stderr logs), `--db`, `--parquet <DIR>` (one Parquet file per table instead of DuckDB; other commands cannot read it) |
 | `sql [QUERY]` | positional `QUERY` or `-` for stdin, `-f/--file <PATH>`, `-F/--format table\|json\|ndjson\|csv` (default `table`), `--db` |
 | `schema [TABLE…]` | optional table names to scope output, `--raw` (JSON instead of table), `--db` |
 | `list` | `-F/--format …`, `--db` |
