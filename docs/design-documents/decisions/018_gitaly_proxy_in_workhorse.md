@@ -50,10 +50,9 @@ The POC in [#1226](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/
 compared a framed HTTP route, a dedicated gRPC port, and a reverse tunnel. It
 settled on a transparent proxy: generated Gitaly stubs speak gRPC through a
 WebSocket, and Workhorse forwards RPCs without knowing their schema, the way
-Praefect does. An
-unmodified Rust `tonic` client completed a code-indexing job through GDK
-Workhorse, Praefect, and Gitaly, including a 21 MB `GetArchive`, backpressure,
-and concurrent streams.
+Praefect does. An unmodified Rust `tonic` client completed a code-indexing job
+through GDK Workhorse, Praefect, and Gitaly, including a 21 MB `GetArchive`,
+backpressure, and concurrent streams.
 
 ## Decision
 
@@ -131,8 +130,7 @@ name, so Gitaly's per-client limits and dashboards keep working.
 A session has three states: **active**, when it accepts new streams;
 **draining**, when existing streams may finish; and **closed**. Rails sets a
 10-minute session age for Orbit. Workhorse gives each stream a 60-minute
-deadline and caps the revocation window at two hours regardless of the value
-Rails requests.
+deadline.
 
 We do not use grpc-go connection aging because its grace period terminates
 in-flight archives. The indexer would restart each cut archive from byte zero,
@@ -141,7 +139,8 @@ in-flight streams run until their own deadline.
 
 After Rails revokes access, a session admitted just before revocation may start
 streams for 10 minutes, and those streams may run for 60 minutes. The worst
-case is therefore about 70 minutes.
+case is therefore about 70 minutes. Workhorse caps this window at two hours
+regardless of the values Rails requests.
 
 Turning off either feature flag stops new preauthorizations. Existing sessions
 continue under the same lifetime rules.
@@ -195,7 +194,7 @@ indexer would not have been asked to index.
 
 Orbit cannot reach Gitaly from its cluster. This option would also expose
 storage details and credentials in another cluster and make Orbit responsible
-for routing and credential handling. The POC grant had the same problem.
+for routing and credential handling.
 
 ### Keep adding one Rails endpoint per RPC
 
