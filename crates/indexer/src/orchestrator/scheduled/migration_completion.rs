@@ -414,15 +414,6 @@ impl MigrationCompletionChecker {
             .map_err(|e| format!("fetch enabled namespaces: {e}"))?;
         let enabled_count = enabled_namespaces.ids.len() as u64;
 
-        if enabled_count == 0 {
-            warn!(
-                version,
-                "enabled namespace count is 0 — skipping promotion to avoid \
-                 premature completion during a datalake outage"
-            );
-            return Ok(false);
-        }
-
         // Code-indexing telemetry. Computed for visibility and emitted as a
         // structured log field below; explicitly NOT part of the promotion
         // predicate. The backfill dispatcher fills
