@@ -821,26 +821,34 @@ impl AggExpr {
     }
 }
 
-#[cfg(test)]
 impl AggExpr {
-    pub(crate) fn from_parts(function: AggFunction, node: &str, property: Option<&str>) -> Self {
-        let prop_ref = |property: &str| PropertyRef {
-            node: node.to_owned(),
-            property: property.to_owned(),
+    /// Build from the function name and target the way the JSON frontend
+    /// deserializes `{"sum": "node.property"}`. `None` when the name is not an
+    /// aggregate or the function needs a property and none was given.
+    pub fn try_new(function: &str, node: &str, property: Option<&str>) -> Option<Self> {
+        let prop_ref = |property: Option<&str>| {
+            property.map(|property| PropertyRef {
+                node: node.to_owned(),
+                property: property.to_owned(),
+            })
         };
-        match function {
-            AggFunction::Count => Self::Count(TargetRef {
+        Some(match function {
+            "count" => Self::Count(TargetRef {
                 node: node.to_owned(),
                 property: property.map(str::to_owned),
             }),
-            AggFunction::Sum => Self::Sum(prop_ref(property.expect("sum needs a property"))),
-            AggFunction::Avg => Self::Avg(prop_ref(property.expect("avg needs a property"))),
-            AggFunction::Min => Self::Min(prop_ref(property.expect("min needs a property"))),
-            AggFunction::Max => Self::Max(prop_ref(property.expect("max needs a property"))),
-            AggFunction::Collect => {
-                Self::Collect(prop_ref(property.expect("collect needs a property")))
-            }
-        }
+            "sum" => Self::Sum(prop_ref(property)?),
+            "avg" => Self::Avg(prop_ref(property)?),
+            "min" => Self::Min(prop_ref(property)?),
+            "max" => Self::Max(prop_ref(property)?),
+            "collect" => Self::Collect(prop_ref(property)?),
+            _ => return None,
+        })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn from_parts(function: AggFunction, node: &str, property: Option<&str>) -> Self {
+        Self::try_new(&function.to_string(), node, property).expect("test aggregate is well-formed")
     }
 }
 

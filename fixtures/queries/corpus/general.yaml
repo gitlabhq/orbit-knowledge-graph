@@ -36,6 +36,11 @@ q1_defines_traversal_file_ends_with_rb:
       ],
       "limit": 20
     }
+  opencypher: |
+    MATCH (f:File)-[:DEFINES]->(d:Definition)
+    WHERE f.path ENDS WITH '.rb' AND d.name STARTS WITH 'process'
+    RETURN f
+    LIMIT 20
 
 q2_datetime_range_filter_on_mr:
   desc: "DateTime range filter on MR"
@@ -69,6 +74,12 @@ q2_datetime_range_filter_on_mr:
       "order_by": "-mr.merged_at",
       "limit": 20
     }
+  opencypher: |
+    MATCH (mr:MergeRequest {state: 'merged'})-[:IN_PROJECT]->(p:Project)
+    WHERE mr.merged_at >= '2026-03-01T00:00:00Z' AND p.id IN $sample
+    RETURN mr
+    ORDER BY mr.merged_at DESC
+    LIMIT 20
 
 q3_bidirectional_neighbors_on_project:
   desc: "Bidirectional neighbors on Project"
@@ -91,6 +102,11 @@ q3_bidirectional_neighbors_on_project:
       },
       "limit": 20
     }
+  opencypher: |
+    MATCH (p:Project)-[:CONTAINS|IN_PROJECT]-(n)
+    WHERE p.id IN $sample
+    RETURN n
+    LIMIT 20
 
 q4_3_node_agg_mr_count_per_author:
   desc: "3-node agg MR count per author"
@@ -139,6 +155,12 @@ q4_3_node_agg_mr_count_per_author:
       "aggregation_sort": "-mr_count",
       "limit": 20
     }
+  opencypher: |
+    MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest {state: 'merged'})-[:IN_PROJECT]->(p:Project)
+    WHERE p.id IN $sample
+    RETURN u, count(mr) AS mr_count
+    ORDER BY mr_count DESC
+    LIMIT 20
 
 q5_source_side_mr_count:
   desc: "Source-side MR count"
@@ -174,6 +196,11 @@ q5_source_side_mr_count:
       ],
       "limit": 10
     }
+  opencypher: |
+    MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project)
+    WHERE p.id IN $sample
+    RETURN p, count(mr) AS mr_count
+    LIMIT 10
 
 q6_user_mrs_in_project_traversal:
   desc: "User MRs in project traversal"
@@ -218,6 +245,12 @@ q6_user_mrs_in_project_traversal:
       "order_by": "-mr.merged_at",
       "limit": 10
     }
+  opencypher: |
+    MATCH (u:User {username: 'stanhu'})-[:AUTHORED]->(mr:MergeRequest {state: 'merged'})-[:IN_PROJECT]->(p:Project)
+    WHERE p.id IN $sample
+    RETURN u
+    ORDER BY mr.merged_at DESC
+    LIMIT 10
 
 q7_path_finding_user_to_project:
   desc: "Path finding User to Project"
@@ -248,6 +281,11 @@ q7_path_finding_user_to_project:
       },
       "limit": 10
     }
+  opencypher: |
+    MATCH p = shortestPath((start:User)-[:AUTHORED|IN_PROJECT|MEMBER_OF*..2]->(`end`:Project))
+    WHERE start.id IN $sample AND `end`.id IN $sample
+    RETURN p
+    LIMIT 10
 
 q8_token_match_on_mr_title:
   desc: "token_match on MR title"
@@ -280,6 +318,12 @@ q8_token_match_on_mr_title:
       "order_by": "-mr.updated_at",
       "limit": 15
     }
+  opencypher: |
+    MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project)
+    WHERE token_match(mr.title, 'security') AND p.id IN $sample
+    RETURN mr
+    ORDER BY mr.updated_at DESC
+    LIMIT 15
 
 q9_contains_on_mr_description:
   desc: "contains on MR description"
@@ -312,6 +356,12 @@ q9_contains_on_mr_description:
       "order_by": "-mr.created_at",
       "limit": 10
     }
+  opencypher: |
+    MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project)
+    WHERE mr.description CONTAINS 'performance regression' AND p.id IN $sample
+    RETURN mr
+    ORDER BY mr.created_at DESC
+    LIMIT 10
 
 q10_multi_hop_group_contains:
   desc: "Multi-hop Group CONTAINS"
@@ -343,6 +393,10 @@ q10_multi_hop_group_contains:
       ],
       "limit": 20
     }
+  opencypher: |
+    MATCH (g:Group {full_path: 'gitlab-org'})-[:CONTAINS*1..3]->(p:Project)
+    RETURN g
+    LIMIT 20
 
 q11_4_node_user_mr_pipeline_project:
   desc: "4-node User MR Pipeline Project"
@@ -397,6 +451,13 @@ q11_4_node_user_mr_pipeline_project:
       ],
       "limit": 10
     }
+  opencypher: |
+    MATCH (u:User {username: 'stanhu'})-[:AUTHORED]->(mr:MergeRequest {state: 'merged'}),
+          (pipe:Pipeline),
+          (mr)-[:IN_PROJECT]->(p:Project {full_path: 'gitlab-org/gitlab'}),
+          (mr)-[:HAS_HEAD_PIPELINE]->(pipe)
+    RETURN u
+    LIMIT 10
 
 q12_failed_pipelines_per_project_in_group:
   desc: "Failed pipelines per project in group"
@@ -447,6 +508,11 @@ q12_failed_pipelines_per_project_in_group:
       "aggregation_sort": "-fail_count",
       "limit": 10
     }
+  opencypher: |
+    MATCH (pipe:Pipeline {status: 'failed'})-[:IN_PROJECT]->(p:Project)<-[:CONTAINS]-(g:Group {full_path: 'gitlab-org'})
+    RETURN p, count(pipe) AS fail_count
+    ORDER BY fail_count DESC
+    LIMIT 10
 
 q13_all_tokens_on_workitem_title:
   desc: "all_tokens on WorkItem title"
@@ -481,6 +547,12 @@ q13_all_tokens_on_workitem_title:
       "order_by": "-wi.updated_at",
       "limit": 10
     }
+  opencypher: |
+    MATCH (wi:WorkItem)-[:IN_PROJECT]->(p:Project {full_path: 'gitlab-org/gitlab'})
+    WHERE all_tokens(wi.title, 'memory leak')
+    RETURN wi
+    ORDER BY wi.updated_at DESC
+    LIMIT 10
 
 q14_multi_agg_avg_diff_size_count:
   desc: "Multi-agg avg diff_size + count"
@@ -533,6 +605,12 @@ q14_multi_agg_avg_diff_size_count:
       "aggregation_sort": "-mr_count",
       "limit": 15
     }
+  opencypher: |
+    MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest {state: 'merged'})-[:IN_PROJECT]->(p:Project)
+    WHERE p.id IN $sample
+    RETURN u, avg(mr.diff_size) AS avg_diff, count(mr) AS mr_count
+    ORDER BY mr_count DESC
+    LIMIT 15
 
 q15_neighbors_many_rel_types:
   desc: "Neighbors many rel_types"
@@ -561,6 +639,11 @@ q15_neighbors_many_rel_types:
       },
       "limit": 20
     }
+  opencypher: |
+    MATCH (u:User)-[:AUTHORED|REVIEWER|APPROVED|MERGED|ASSIGNED|TRIGGERED|MEMBER_OF]-(n)
+    WHERE u.id IN $sample
+    RETURN n
+    LIMIT 20
 
 q16_reviewer_count_per_mr:
   desc: "Reviewer count per MR"
@@ -609,6 +692,12 @@ q16_reviewer_count_per_mr:
       "aggregation_sort": "-reviewer_count",
       "limit": 10
     }
+  opencypher: |
+    MATCH (u:User)-[:REVIEWER]->(mr:MergeRequest {state: 'opened'})-[:IN_PROJECT]->(p:Project)
+    WHERE p.id IN $sample
+    RETURN mr, count(u) AS reviewer_count
+    ORDER BY reviewer_count DESC
+    LIMIT 10
 
 q17_path_finding_user_to_user:
   desc: "Path finding User to User"
@@ -639,6 +728,11 @@ q17_path_finding_user_to_user:
       },
       "limit": 10
     }
+  opencypher: |
+    MATCH p = shortestPath((start:User)-[:AUTHORED|REVIEWER|APPROVED*..2]->(`end`:User))
+    WHERE start.id IN $sample AND `end`.id IN $sample
+    RETURN p
+    LIMIT 10
 
 q18_wide_datetime_pipeline_agg:
   desc: "Wide DateTime pipeline agg"
@@ -678,6 +772,11 @@ q18_wide_datetime_pipeline_agg:
       ],
       "limit": 10
     }
+  opencypher: |
+    MATCH (pipe:Pipeline {status: 'failed'})-[:IN_PROJECT]->(p:Project)
+    WHERE pipe.created_at >= '2025-01-01T00:00:00Z' AND p.id IN $sample
+    RETURN p, count(pipe) AS fail_count
+    LIMIT 10
 
 q19_code_defines_by_node_id:
   desc: "Code DEFINES by node_id"
@@ -708,6 +807,11 @@ q19_code_defines_by_node_id:
       ],
       "limit": 20
     }
+  opencypher: |
+    MATCH (f:File)-[:DEFINES]->(d:Definition)
+    WHERE f.path ENDS WITH '.rb'
+    RETURN f
+    LIMIT 20
 
 q20_vulnerability_count_in_project:
   desc: "Vulnerability count in project"
@@ -743,6 +847,11 @@ q20_vulnerability_count_in_project:
       ],
       "limit": 10
     }
+  opencypher: |
+    MATCH (v:Vulnerability)-[:IN_PROJECT]->(p:Project)
+    WHERE p.id IN $sample
+    RETURN p, count(v) AS vuln_count
+    LIMIT 10
 
 q21_calls_aggregation:
   desc: "CALLS aggregation"
@@ -781,6 +890,12 @@ q21_calls_aggregation:
       "aggregation_sort": "-call_count",
       "limit": 10
     }
+  opencypher: |
+    MATCH (d1:Definition)-[:CALLS]->(d2:Definition)
+    WHERE d1.name STARTS WITH 'create'
+    RETURN d1, count(d2) AS call_count
+    ORDER BY call_count DESC
+    LIMIT 10
 
 q22_imports_traversal:
   desc: "IMPORTS traversal"
@@ -811,6 +926,11 @@ q22_imports_traversal:
       ],
       "limit": 15
     }
+  opencypher: |
+    MATCH (f:File)-[:IMPORTS]->(imp:ImportedSymbol)
+    WHERE f.path ENDS WITH 'controller.rb'
+    RETURN f
+    LIMIT 15
 
 q23_path_finding_with_filters:
   desc: "Path finding with filters"
@@ -850,6 +970,10 @@ q23_path_finding_with_filters:
       },
       "limit": 5
     }
+  opencypher: |
+    MATCH p = shortestPath((start:User {username: 'stanhu'})-[:AUTHORED|IN_PROJECT|MEMBER_OF|REVIEWER*..2]->(`end`:Project {full_path: 'gitlab-org/gitlab'}))
+    RETURN p
+    LIMIT 5
 
 q24_job_pipeline_project_agg:
   desc: "Job Pipeline Project agg"
@@ -900,6 +1024,12 @@ q24_job_pipeline_project_agg:
       "aggregation_sort": "-fail_count",
       "limit": 10
     }
+  opencypher: |
+    MATCH (j:Job {status: 'failed', failure_reason: 'script_failure'})-[:IN_PIPELINE]->(pipe:Pipeline)-[:IN_PROJECT]->(p:Project)
+    WHERE j.created_at >= '2026-01-01T00:00:00Z' AND p.id IN $sample
+    RETURN pipe, count(j) AS fail_count
+    ORDER BY fail_count DESC
+    LIMIT 10
 
 q25_mr_diff_project_traversal:
   desc: "MR Diff Project traversal"
@@ -942,6 +1072,13 @@ q25_mr_diff_project_traversal:
       "order_by": "-mr.merged_at",
       "limit": 10
     }
+  opencypher: |
+    MATCH (mr:MergeRequest {state: 'merged'})-[:HAS_LATEST_DIFF]->(diff:MergeRequestDiff),
+          (mr)-[:IN_PROJECT]->(p:Project)
+    WHERE mr.merged_at >= '2026-04-01T00:00:00Z' AND p.id IN $sample
+    RETURN mr
+    ORDER BY mr.merged_at DESC
+    LIMIT 10
 
 q26_calls_with_token_match:
   desc: "CALLS with token_match"
@@ -972,6 +1109,11 @@ q26_calls_with_token_match:
       ],
       "limit": 10
     }
+  opencypher: |
+    MATCH (d1:Definition)-[:CALLS]->(d2:Definition)
+    WHERE token_match(d1.name, 'initialize')
+    RETURN d1
+    LIMIT 10
 
 q28_multi_hop_contains_agg:
   desc: "Multi-hop CONTAINS agg"
@@ -1010,6 +1152,10 @@ q28_multi_hop_contains_agg:
       ],
       "limit": 10
     }
+  opencypher: |
+    MATCH (g:Group {full_path: 'gitlab-org'})-[:CONTAINS*1..3]->(p:Project)
+    RETURN g, count(p) AS project_count
+    LIMIT 10
 
 q29_workitem_with_label_filter:
   desc: "WorkItem with label filter"
@@ -1054,6 +1200,12 @@ q29_workitem_with_label_filter:
       ],
       "limit": 10
     }
+  opencypher: |
+    MATCH (wi:WorkItem {state: 'opened', work_item_type: 'issue'})-[:HAS_LABEL]->(l:Label),
+          (wi)-[:IN_PROJECT]->(p:Project)
+    WHERE l.title CONTAINS 'bug' AND p.id IN $sample
+    RETURN wi
+    LIMIT 10
 
 q30_pipeline_job_ci_chain:
   desc: "Pipeline Job CI chain"
@@ -1099,6 +1251,13 @@ q30_pipeline_job_ci_chain:
       "order_by": "-pipe.created_at",
       "limit": 10
     }
+  opencypher: |
+    MATCH (pipe:Pipeline {status: 'failed', source: 'push'})-[:HAS_JOB]->(j:Job {status: 'failed'}),
+          (pipe)-[:IN_PROJECT]->(p:Project)
+    WHERE p.id IN $sample
+    RETURN pipe
+    ORDER BY pipe.created_at DESC
+    LIMIT 10
 
 q31_on_branch_code_edge:
   desc: "ON_BRANCH code edge"
@@ -1132,6 +1291,11 @@ q31_on_branch_code_edge:
       ],
       "limit": 10
     }
+  opencypher: |
+    MATCH (f:File)-[:ON_BRANCH]->(b:Branch {name: 'main'})
+    WHERE f.path ENDS WITH '.rb'
+    RETURN f
+    LIMIT 10
 
 q32_extends_traversal:
   desc: "EXTENDS traversal"
@@ -1162,6 +1326,11 @@ q32_extends_traversal:
       ],
       "limit": 10
     }
+  opencypher: |
+    MATCH (d1:Definition)<-[:EXTENDS]-(d2:Definition)
+    WHERE token_match(d1.name, 'BaseService')
+    RETURN d1
+    LIMIT 10
 
 q33_vulnerability_occurrence_chain:
   desc: "Vulnerability Occurrence chain"
@@ -1202,6 +1371,12 @@ q33_vulnerability_occurrence_chain:
       ],
       "limit": 10
     }
+  opencypher: |
+    MATCH (v:Vulnerability)-[:HAS_FINDING]->(occ:VulnerabilityOccurrence),
+          (v)-[:IN_PROJECT]->(p:Project)
+    WHERE v.state IN ['detected', 'confirmed'] AND p.id IN $sample
+    RETURN v
+    LIMIT 10
 
 q34_any_tokens_on_mr_description:
   desc: "any_tokens on MR description"
@@ -1236,6 +1411,12 @@ q34_any_tokens_on_mr_description:
       "order_by": "-mr.updated_at",
       "limit": 10
     }
+  opencypher: |
+    MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {full_path: 'gitlab-org/gitlab'})
+    WHERE any_tokens(mr.description, 'timeout regression slowdown')
+    RETURN mr
+    ORDER BY mr.updated_at DESC
+    LIMIT 10
 
 q35_group_project_mr_agg:
   desc: "Group Project MR agg"
@@ -1286,6 +1467,11 @@ q35_group_project_mr_agg:
       "aggregation_sort": "-open_mrs",
       "limit": 10
     }
+  opencypher: |
+    MATCH (g:Group {full_path: 'gitlab-org'})-[:CONTAINS]->(p:Project)<-[:IN_PROJECT]-(mr:MergeRequest {state: 'opened'})
+    RETURN p, count(mr) AS open_mrs
+    ORDER BY open_mrs DESC
+    LIMIT 10
 
 a1_note_count_per_project_in_group:
   desc: "Note count per project in group"
@@ -1333,6 +1519,11 @@ a1_note_count_per_project_in_group:
       "aggregation_sort": "-note_count",
       "limit": 10
     }
+  opencypher: |
+    MATCH (n:Note)-[:IN_PROJECT]->(p:Project)<-[:CONTAINS]-(g:Group {full_path: 'gitlab-org'})
+    RETURN p, count(n) AS note_count
+    ORDER BY note_count DESC
+    LIMIT 10
 
 a2_stage_count_per_pipeline:
   desc: "Stage count per Pipeline"
@@ -1381,6 +1572,12 @@ a2_stage_count_per_pipeline:
       "aggregation_sort": "-stage_count",
       "limit": 10
     }
+  opencypher: |
+    MATCH (s:Stage)<-[:HAS_STAGE]-(pipe:Pipeline {status: 'success'})-[:IN_PROJECT]->(p:Project)
+    WHERE p.id IN $sample
+    RETURN pipe, count(s) AS stage_count
+    ORDER BY stage_count DESC
+    LIMIT 10
 
 a3_user_membership_count:
   desc: "User membership count"
@@ -1418,6 +1615,10 @@ a3_user_membership_count:
       ],
       "limit": 10
     }
+  opencypher: |
+    MATCH (u:User)-[:MEMBER_OF]->(g:Group {full_path: 'gitlab-org'})
+    RETURN g, count(u) AS member_count
+    LIMIT 10
 
 b1_incoming_reviewer_for_user:
   desc: "Incoming REVIEWER for user"
@@ -1450,6 +1651,12 @@ b1_incoming_reviewer_for_user:
       "order_by": "-mr.updated_at",
       "limit": 10
     }
+  opencypher: |
+    MATCH (mr:MergeRequest {state: 'merged'})<-[:REVIEWER]-(u:User)
+    WHERE u.id IN $sample
+    RETURN mr
+    ORDER BY mr.updated_at DESC
+    LIMIT 10
 
 b2_bidirectional_neighbors_group:
   desc: "Bidirectional neighbors Group"
@@ -1468,6 +1675,11 @@ b2_bidirectional_neighbors_group:
       },
       "limit": 20
     }
+  opencypher: |
+    MATCH (g:Group)--(n)
+    WHERE g.id IN $sample
+    RETURN n
+    LIMIT 20
 
 c1_triple_filter_mr:
   desc: "Triple filter MR"
@@ -1503,6 +1715,11 @@ c1_triple_filter_mr:
       ],
       "limit": 10
     }
+  opencypher: |
+    MATCH (mr:MergeRequest {state: 'opened', draft: true})-[:IN_PROJECT]->(p:Project {full_path: 'gitlab-org/gitlab'})
+    WHERE mr.created_at >= '2026-01-01T00:00:00Z'
+    RETURN mr
+    LIMIT 10
 
 c2_large_in_list_50_pipeline_ids:
   desc: "Large IN list 50 pipeline IDs"
@@ -1534,6 +1751,11 @@ c2_large_in_list_50_pipeline_ids:
       ],
       "limit": 20
     }
+  opencypher: |
+    MATCH (pipe:Pipeline)-[:HAS_JOB]->(j:Job {status: 'failed'})
+    WHERE pipe.id IN $sample_50
+    RETURN pipe
+    LIMIT 20
 
 c3_mr_source_branch_contains:
   desc: "MR source_branch contains"
@@ -1566,6 +1788,12 @@ c3_mr_source_branch_contains:
       "order_by": "-mr.created_at",
       "limit": 10
     }
+  opencypher: |
+    MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project)
+    WHERE mr.source_branch CONTAINS 'fix' AND p.id IN $sample
+    RETURN mr
+    ORDER BY mr.created_at DESC
+    LIMIT 10
 
 c4_workitem_multi_text_filter:
   desc: "WorkItem multi text filter"
@@ -1601,6 +1829,11 @@ c4_workitem_multi_text_filter:
       ],
       "limit": 10
     }
+  opencypher: |
+    MATCH (wi:WorkItem {state: 'opened', work_item_type: 'issue'})-[:IN_PROJECT]->(p:Project {full_path: 'gitlab-org/gitlab'})
+    WHERE any_tokens(wi.title, 'security vulnerability CVE exploit')
+    RETURN wi
+    LIMIT 10
 
 d1_4_hop_user_mr_pipeline_job:
   desc: "4-hop User MR Pipeline Job"
@@ -1656,6 +1889,10 @@ d1_4_hop_user_mr_pipeline_job:
       ],
       "limit": 10
     }
+  opencypher: |
+    MATCH (u:User {username: 'stanhu'})-[:AUTHORED]->(mr:MergeRequest {state: 'merged'})-[:HAS_HEAD_PIPELINE]->(pipe:Pipeline)-[:HAS_JOB]->(j:Job {status: 'failed'})
+    RETURN u
+    LIMIT 10
 
 d2_group_project_mr_user_authors:
   desc: "Group Project MR User authors"
@@ -1708,6 +1945,11 @@ d2_group_project_mr_user_authors:
       ],
       "limit": 10
     }
+  opencypher: |
+    MATCH (g:Group {full_path: 'gitlab-org'})-[:CONTAINS]->(p:Project)<-[:IN_PROJECT]-(mr:MergeRequest {state: 'merged'})<-[:AUTHORED]-(u:User)
+    WHERE mr.merged_at >= '2026-04-01T00:00:00Z'
+    RETURN g
+    LIMIT 10
 
 d3_mr_pipeline_job_runner:
   desc: "MR Pipeline Job Runner"
@@ -1755,6 +1997,11 @@ d3_mr_pipeline_job_runner:
       ],
       "limit": 20
     }
+  opencypher: |
+    MATCH (mr:MergeRequest)-[:HAS_HEAD_PIPELINE]->(pipe:Pipeline)-[:HAS_JOB]->(j:Job)-[:RUNS_ON]->(r:Runner)
+    WHERE mr.id IN $sample
+    RETURN mr
+    LIMIT 20
 
 d4_vulnerability_occurrence_securityscan:
   desc: "Vulnerability Occurrence SecurityScan"
@@ -1803,6 +2050,13 @@ d4_vulnerability_occurrence_securityscan:
       ],
       "limit": 10
     }
+  opencypher: |
+    MATCH (v:Vulnerability)-[:HAS_FINDING]->(occ:VulnerabilityOccurrence),
+          (scan:SecurityScan),
+          (v)-[:IN_PROJECT]->(p:Project {full_path: 'gitlab-org/gitlab'}),
+          (scan)-[:IN_PROJECT]->(p)
+    RETURN v
+    LIMIT 10
 
 e1_avg_count_pipeline_duration:
   desc: "avg+count Pipeline duration"
@@ -1846,6 +2100,11 @@ e1_avg_count_pipeline_duration:
       ],
       "limit": 5
     }
+  opencypher: |
+    MATCH (pipe:Pipeline {status: 'success'})-[:IN_PROJECT]->(p:Project)
+    WHERE pipe.created_at >= '2026-04-01T00:00:00Z' AND p.id IN $sample
+    RETURN p, avg(pipe.duration) AS avg_dur, count(pipe) AS pipe_count
+    LIMIT 5
 
 e2_sum_lines_per_user:
   desc: "sum lines per user"
@@ -1899,6 +2158,12 @@ e2_sum_lines_per_user:
       "aggregation_sort": "-total_added",
       "limit": 10
     }
+  opencypher: |
+    MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest {state: 'merged'})-[:IN_PROJECT]->(p:Project)
+    WHERE mr.merged_at >= '2026-01-01T00:00:00Z' AND p.id IN $sample
+    RETURN u, sum(mr.added_lines) AS total_added, sum(mr.removed_lines) AS total_removed
+    ORDER BY total_added DESC
+    LIMIT 10
 
 f1_workitem_epic_contains:
   desc: "WorkItem epic CONTAINS"
@@ -1929,6 +2194,10 @@ f1_workitem_epic_contains:
       ],
       "limit": 15
     }
+  opencypher: |
+    MATCH (parent:WorkItem {work_item_type: 'epic'})-[:CONTAINS]->(child:WorkItem)
+    RETURN parent
+    LIMIT 15
 
 f2_milestone_mr_count:
   desc: "Milestone MR count"
@@ -1977,6 +2246,12 @@ f2_milestone_mr_count:
       "aggregation_sort": "-mr_count",
       "limit": 10
     }
+  opencypher: |
+    MATCH (m:Milestone)<-[:IN_MILESTONE]-(mr:MergeRequest {state: 'merged'})-[:IN_PROJECT]->(p:Project)
+    WHERE p.id IN $sample
+    RETURN m, count(mr) AS mr_count
+    ORDER BY mr_count DESC
+    LIMIT 10
 
 g1_3_hop_code_chain_file_def_def:
   desc: "3-hop code chain File Def Def"
@@ -2016,6 +2291,10 @@ g1_3_hop_code_chain_file_def_def:
       ],
       "limit": 10
     }
+  opencypher: |
+    MATCH (f:File {path: 'app/models/user.rb'})-[:DEFINES]->(d1:Definition)-[:CALLS]->(d2:Definition)
+    RETURN f
+    LIMIT 10
 
 g2_directory_file_count:
   desc: "Directory File count"
@@ -2054,6 +2333,12 @@ g2_directory_file_count:
       "aggregation_sort": "-file_count",
       "limit": 10
     }
+  opencypher: |
+    MATCH (dir:Directory)-[:CONTAINS]->(f:File)
+    WHERE dir.path STARTS WITH 'app/'
+    RETURN dir, count(f) AS file_count
+    ORDER BY file_count DESC
+    LIMIT 10
 
 g3_importedsymbol_resolve:
   desc: "ImportedSymbol resolve"
@@ -2084,6 +2369,10 @@ g3_importedsymbol_resolve:
       ],
       "limit": 10
     }
+  opencypher: |
+    MATCH (imp:ImportedSymbol {identifier_name: 'ApplicationController'})-[:IMPORTS]->(def:Definition)
+    RETURN imp
+    LIMIT 10
 
 h1_path_finding_group_to_group:
   desc: "Path finding Group to Group"
@@ -2114,6 +2403,11 @@ h1_path_finding_group_to_group:
       },
       "limit": 5
     }
+  opencypher: |
+    MATCH p = shortestPath((start:Group)-[:CONTAINS*..2]->(`end`:Group))
+    WHERE start.id IN $sample AND `end`.id IN $sample
+    RETURN p
+    LIMIT 5
 
 h3_pipeline_child_of_pipeline:
   desc: "Pipeline CHILD_OF Pipeline"
@@ -2157,6 +2451,13 @@ h3_pipeline_child_of_pipeline:
       "order_by": "-parent.created_at",
       "limit": 10
     }
+  opencypher: |
+    MATCH (parent:Pipeline {source: 'push', status: 'success'})<-[:CHILD_OF]-(child:Pipeline),
+          (parent)-[:IN_PROJECT]->(p:Project)
+    WHERE p.id IN $sample
+    RETURN parent
+    ORDER BY parent.created_at DESC
+    LIMIT 10
 
 h4_job_auto_canceled_by_job:
   desc: "Job AUTO_CANCELED_BY Job"
@@ -2197,6 +2498,12 @@ h4_job_auto_canceled_by_job:
       ],
       "limit": 10
     }
+  opencypher: |
+    MATCH (j1:Job {status: 'canceled'})-[:AUTO_CANCELED_BY]->(j2:Job),
+          (j1)-[:IN_PROJECT]->(p:Project)
+    WHERE p.id IN $sample
+    RETURN j1
+    LIMIT 10
 
 h5_deployment_environment:
   desc: "Deployment Environment"
@@ -2235,6 +2542,13 @@ h5_deployment_environment:
       "order_by": "-dep.id",
       "limit": 10
     }
+  opencypher: |
+    MATCH (dep:Deployment)-[:IN_ENVIRONMENT]->(env:Environment),
+          (dep)-[:IN_PROJECT]->(p:Project)
+    WHERE p.id IN $sample
+    RETURN dep
+    ORDER BY dep.id DESC
+    LIMIT 10
 
 h7_mr_diff_difffile_chain:
   desc: "MR Diff DiffFile chain"
@@ -2272,6 +2586,11 @@ h7_mr_diff_difffile_chain:
       ],
       "limit": 20
     }
+  opencypher: |
+    MATCH (mr:MergeRequest)-[:HAS_LATEST_DIFF]->(diff:MergeRequestDiff)-[:HAS_FILE]->(df:MergeRequestDiffFile)
+    WHERE mr.id IN $sample
+    RETURN mr
+    LIMIT 20
 
 h8_workitem_related_to_workitem:
   desc: "WorkItem RELATED_TO WorkItem"
@@ -2312,6 +2631,12 @@ h8_workitem_related_to_workitem:
       ],
       "limit": 10
     }
+  opencypher: |
+    MATCH (wi1:WorkItem {state: 'opened'})-[:RELATED_TO]->(wi2:WorkItem),
+          (wi1)-[:IN_PROJECT]->(p:Project)
+    WHERE p.id IN $sample
+    RETURN wi1
+    LIMIT 10
 
 i1_job_count_by_failure:
   desc: "Job count by failure"
@@ -2351,6 +2676,12 @@ i1_job_count_by_failure:
       "aggregation_sort": "-fail_count",
       "limit": 20
     }
+  opencypher: |
+    MATCH (j:Job {status: 'failed'})-[:IN_PROJECT]->(p:Project)
+    WHERE p.id IN $sample
+    RETURN j, count(j) AS fail_count
+    ORDER BY fail_count DESC
+    LIMIT 20
 
 i2_mr_count_by_target_branch:
   desc: "MR count by target_branch"
@@ -2391,6 +2722,12 @@ i2_mr_count_by_target_branch:
       "aggregation_sort": "-mr_count",
       "limit": 20
     }
+  opencypher: |
+    MATCH (mr:MergeRequest {state: 'merged'})-[:IN_PROJECT]->(p:Project)
+    WHERE mr.merged_at >= '2025-01-01T00:00:00Z' AND p.id IN $sample
+    RETURN mr, count(mr) AS mr_count
+    ORDER BY mr_count DESC
+    LIMIT 20
 
 i3_pipeline_count_by_source:
   desc: "Pipeline count by source"
@@ -2427,6 +2764,12 @@ i3_pipeline_count_by_source:
       "aggregation_sort": "-pipe_count",
       "limit": 20
     }
+  opencypher: |
+    MATCH (pipe:Pipeline)-[:IN_PROJECT]->(p:Project)
+    WHERE p.id IN $sample
+    RETURN pipe, count(pipe) AS pipe_count
+    ORDER BY pipe_count DESC
+    LIMIT 20
 
 i4_vulnoccurrence_per_vulnerability:
   desc: "VulnOccurrence per Vulnerability"
@@ -2472,6 +2815,12 @@ i4_vulnoccurrence_per_vulnerability:
       "aggregation_sort": "-occ_count",
       "limit": 10
     }
+  opencypher: |
+    MATCH (occ:VulnerabilityOccurrence)-[:OCCURRENCE_OF]->(v:Vulnerability)-[:IN_PROJECT]->(p:Project)
+    WHERE p.id IN $sample
+    RETURN v, count(occ) AS occ_count
+    ORDER BY occ_count DESC
+    LIMIT 10
 
 i5_note_count_per_mr:
   desc: "Note count per MR"
@@ -2519,6 +2868,11 @@ i5_note_count_per_mr:
       "aggregation_sort": "-note_count",
       "limit": 10
     }
+  opencypher: |
+    MATCH (n:Note)<-[:HAS_NOTE]-(mr:MergeRequest)-[:IN_PROJECT]->(p:Project {full_path: 'gitlab-org/gitlab'})
+    RETURN mr, count(n) AS note_count
+    ORDER BY note_count DESC
+    LIMIT 10
 
 i6_label_usage_workitem_per_label:
   desc: "Label usage WorkItem per Label"
@@ -2567,6 +2921,12 @@ i6_label_usage_workitem_per_label:
       "aggregation_sort": "-wi_count",
       "limit": 10
     }
+  opencypher: |
+    MATCH (l:Label)<-[:HAS_LABEL]-(wi:WorkItem {state: 'opened'})-[:IN_PROJECT]->(p:Project)
+    WHERE p.id IN $sample
+    RETURN l, count(wi) AS wi_count
+    ORDER BY wi_count DESC
+    LIMIT 10
 
 i7_vulnerability_count_by_severity:
   desc: "Vulnerability count by severity"
@@ -2594,6 +2954,12 @@ i7_vulnerability_count_by_severity:
       "aggregation_sort": "-vuln_count",
       "limit": 20
     }
+  opencypher: |
+    MATCH (v:Vulnerability)
+    WHERE v.state IN ['detected', 'confirmed', 'resolved', 'dismissed']
+    RETURN v.severity, count(v) AS vuln_count
+    ORDER BY vuln_count DESC
+    LIMIT 20
 
 i8_security_scan_count_by_scan_type:
   desc: "Security scan count by scan type"
@@ -2621,6 +2987,11 @@ i8_security_scan_count_by_scan_type:
       "aggregation_sort": "-scan_count",
       "limit": 20
     }
+  opencypher: |
+    MATCH (s:SecurityScan {latest: true})
+    RETURN s.scan_type, count(s) AS scan_count
+    ORDER BY scan_count DESC
+    LIMIT 20
 
 i9_pipeline_count_by_status_and_source:
   desc: "Pipeline count by status and source"
@@ -2651,6 +3022,12 @@ i9_pipeline_count_by_status_and_source:
       "aggregation_sort": "-pipe_count",
       "limit": 30
     }
+  opencypher: |
+    MATCH (pipe:Pipeline)
+    WHERE pipe.status IN ['success', 'failed', 'running', 'pending']
+    RETURN pipe.status, pipe.source, count(pipe) AS pipe_count
+    ORDER BY pipe_count DESC
+    LIMIT 30
 
 i10_merge_request_state_draft_matrix:
   desc: "Merge request state draft matrix"
@@ -2685,6 +3062,12 @@ i10_merge_request_state_draft_matrix:
       "aggregation_sort": "-mr_count",
       "limit": 30
     }
+  opencypher: |
+    MATCH (mr:MergeRequest)
+    WHERE mr.state IN ['opened', 'closed', 'merged']
+    RETURN mr.state, mr.draft, count(mr) AS mr_count, avg(mr.diff_size) AS avg_diff_size
+    ORDER BY mr_count DESC
+    LIMIT 30
 
 i11_project_visibility_and_mr_state:
   desc: "Project visibility and MR state"
@@ -2729,6 +3112,12 @@ i11_project_visibility_and_mr_state:
       "aggregation_sort": "-mr_count",
       "limit": 30
     }
+  opencypher: |
+    MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {archived: false})
+    WHERE mr.state IN ['opened', 'closed', 'merged']
+    RETURN p.visibility_level, mr.state, count(mr) AS mr_count
+    ORDER BY mr_count DESC
+    LIMIT 30
 
 i12_project_and_vulnerability_severity:
   desc: "Project and vulnerability severity"
@@ -2774,4 +3163,10 @@ i12_project_and_vulnerability_severity:
       "aggregation_sort": "-vuln_count",
       "limit": 20
     }
+  opencypher: |
+    MATCH (v:Vulnerability)-[:IN_PROJECT]->(p:Project)
+    WHERE v.state IN ['detected', 'confirmed']
+    RETURN p, p.name, p.full_path, v.severity, count(v) AS vuln_count
+    ORDER BY vuln_count DESC
+    LIMIT 20
 

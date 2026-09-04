@@ -16,6 +16,10 @@ View the [Graph Query Engine](graph_engine.md) design document for more details 
 
 View the [Intermediate Query Language](./intermediary_llm_query_language.md) design document for more details on the intermediate LLM query language.
 
+### openCypher Frontend
+
+View the [openCypher Frontend](./opencypher_frontend.md) design document for the text surface over the same queries: a read-only openCypher 9 subset that lowers straight to the compiler's `Input`, so a JSON query and its `MATCH ... RETURN` twin compile to byte-identical SQL.
+
 ### Unified Response Schema
 
 All four query types (traversal, aggregation, path_finding, neighbors) return a unified JSON response in the shape `{ format_version, query_type, nodes, edges, columns?, group_columns?, rows?, pagination? }`. Deduplicated entity objects and instance-level edges replace the previous flat tabular rows, giving callers a single contract for rendering graphs, tables, or analytics views. Aggregation queries include a `columns` array describing each computed value, `group_columns` describing grouping keys, and tabular `rows` carrying group values plus metric values. Every response includes a `pagination` object with `has_more`, `truncated`, and (for cursor queries with more pages) `next_cursor`.

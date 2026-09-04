@@ -1,4 +1,13 @@
-use crate::compiler::setup::{compile_to_ast, test_ctx, test_ontology};
+//! Each JSON fixture is paired with its openCypher twin. `compile_both`
+//! asserts the two frontends compile to byte-identical SQL and parameters,
+//! so this file doubles as the frontend's conformance suite. Where a twin's
+//! JSON differs from the fixture it accompanies, the difference is a form the
+//! frontend canonicalizes (`filters.id` becomes `node_ids`) and a comment
+//! says so.
+
+use crate::compiler::setup::{
+    compile_both, compile_to_ast_both, reject_both, reject_opencypher, test_ctx, test_ontology,
+};
 use crate::compiler::utils::has_param_value;
 use compiler::{Node, QueryError, compile};
 
@@ -10,7 +19,11 @@ fn compile_to_ast_works() {
         "limit": 10
     }"#;
 
-    let node = compile_to_ast(json, &test_ontology()).unwrap();
+    let node = compile_to_ast_both(
+        json,
+        "MATCH (u:User {id: 1}) RETURN u.username LIMIT 10",
+        &test_ontology(),
+    );
     let Node::Query(ref q) = node else {
         unreachable!()
     };
@@ -35,7 +48,15 @@ fn traversal_query() {
         "order_by": "-n.created_at"
     }"#;
 
-    let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
+    let result = compile_both(
+        json,
+        "MATCH (n:Note {confidential: true})<-[:AUTHORED]-(u:User)
+         RETURN n.confidential, u.username
+         ORDER BY n.created_at DESC
+         LIMIT 25",
+        &test_ontology(),
+        &test_ctx(),
+    );
     let rendered = result.base.render();
 
     assert!(rendered.contains("gl_edge"));
@@ -60,7 +81,12 @@ fn bool_filter_value_is_preserved() {
         "limit": 5
     }"#;
 
-    let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
+    let result = compile_both(
+        json,
+        "MATCH (n:Note {confidential: true}) RETURN n.confidential LIMIT 5",
+        &test_ontology(),
+        &test_ctx(),
+    );
     assert!(has_param_value(
         &result.base.params,
         &serde_json::Value::Bool(true)
@@ -69,6 +95,8 @@ fn bool_filter_value_is_preserved() {
 
 #[test]
 fn aggregation_query() {
+    // `n.columns` has no surface in openCypher (n is counted, not grouped);
+    // the compiler ignores columns on a non-grouped node, so the SQL matches.
     let json = r#"{
         "query_type": "aggregation",
         "nodes": [
@@ -81,7 +109,14 @@ fn aggregation_query() {
         "limit": 10
     }"#;
 
-    let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
+    let result = compile_both(
+        json,
+        "MATCH (n:Note {id: 1})<-[:AUTHORED]-(u:User)
+         RETURN u, u.username, count(n) AS note_count
+         LIMIT 10",
+        &test_ontology(),
+        &test_ctx(),
+    );
     let rendered = result.base.render();
 
     assert!(rendered.contains("COUNT()") || rendered.contains("countIf"));
@@ -99,7 +134,14 @@ fn group_by_property_truncate_month_wraps_column() {
         "group_by": [{"key": "u.created_at", "truncate": "month"}],
         "limit": 50
     }"#;
-    let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
+    let result = compile_both(
+        json,
+        "MATCH (u:Note {confidential: false})
+         RETURN date_trunc('month', u.created_at), count(u) AS n
+         LIMIT 50",
+        &test_ontology(),
+        &test_ctx(),
+    );
     let rendered = result.base.render();
     assert!(
         rendered.contains("toDate32(toStartOfMonth(u.created_at))"),
@@ -125,8 +167,10 @@ fn group_by_property_truncate_all_units_compile() {
                 "limit": 10
             }}"#
         );
-        let result = compile(&json, &test_ontology(), &test_ctx())
-            .unwrap_or_else(|e| panic!("compile failed for unit {unit}: {e:?}"));
+        let statement = format!(
+            "MATCH (u:Note {{id: 1}}) RETURN date_trunc('{unit}', u.created_at), count(u) AS n LIMIT 10"
+        );
+        let result = compile_both(&json, &statement, &test_ontology(), &test_ctx());
         let rendered = result.base.render();
         // Sub-daily units cast to DateTime64, daily+ to Date32, so the key
         // crosses Arrow as a typed date/timestamp rather than a bare integer.
@@ -158,12 +202,19 @@ fn group_by_truncate_minute_without_selectivity_rejected() {
         "group_by": [{"key": "u.created_at", "truncate": "minute"}],
         "limit": 10
     }"#;
-    let err = compile(json, &test_ontology(), &test_ctx()).unwrap_err();
-    let msg = format!("{err:?}");
-    assert!(
-        msg.contains("requires either node_ids") && msg.contains("minute"),
-        "expected cardinality-guard rejection; got: {msg}"
+    let errors = reject_both(
+        json,
+        "MATCH (u:Note) RETURN date_trunc('minute', u.created_at), count(u) AS n LIMIT 10",
+        &test_ontology(),
+        &test_ctx(),
     );
+    for err in [errors.0, errors.1] {
+        let msg = format!("{err:?}");
+        assert!(
+            msg.contains("requires either node_ids") && msg.contains("minute"),
+            "expected cardinality-guard rejection; got: {msg}"
+        );
+    }
 }
 
 #[test]
@@ -177,7 +228,14 @@ fn group_by_truncate_minute_with_node_ids_accepted() {
         "group_by": [{"key": "u.created_at", "truncate": "minute"}],
         "limit": 10
     }"#;
-    let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
+    let result = compile_both(
+        json,
+        "MATCH (u:Note) WHERE u.id IN [1, 2]
+         RETURN date_trunc('minute', u.created_at), count(u) AS n
+         LIMIT 10",
+        &test_ontology(),
+        &test_ctx(),
+    );
     assert!(
         result
             .base
@@ -197,7 +255,14 @@ fn group_by_truncate_hour_with_property_filter_accepted() {
         "group_by": [{"key": "u.created_at", "truncate": "hour"}],
         "limit": 50
     }"#;
-    let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
+    let result = compile_both(
+        json,
+        "MATCH (u:Note) WHERE u.created_at >= '2026-04-01T00:00:00Z'
+         RETURN date_trunc('hour', u.created_at), count(u) AS n
+         LIMIT 50",
+        &test_ontology(),
+        &test_ctx(),
+    );
     assert!(
         result
             .base
@@ -217,12 +282,19 @@ fn group_by_truncate_on_non_date_property_rejected() {
         "group_by": [{"key": "u.confidential", "truncate": "month"}],
         "limit": 10
     }"#;
-    let err = compile(json, &test_ontology(), &test_ctx()).unwrap_err();
-    let msg = format!("{err:?}");
-    assert!(
-        msg.contains("requires a Date or DateTime property"),
-        "expected data-type rejection; got: {msg}"
+    let errors = reject_both(
+        json,
+        "MATCH (u:Note {id: 1}) RETURN date_trunc('month', u.confidential), count(u) AS n LIMIT 10",
+        &test_ontology(),
+        &test_ctx(),
     );
+    for err in [errors.0, errors.1] {
+        let msg = format!("{err:?}");
+        assert!(
+            msg.contains("requires a Date or DateTime property"),
+            "expected data-type rejection; got: {msg}"
+        );
+    }
 }
 
 #[test]
@@ -236,7 +308,14 @@ fn group_by_truncate_custom_alias_preserved() {
         "group_by": [{"key": "u.created_at", "truncate": "month", "as": "bucket"}],
         "limit": 10
     }"#;
-    let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
+    let result = compile_both(
+        json,
+        "MATCH (u:Note {id: 1})
+         RETURN date_trunc('month', u.created_at) AS bucket, count(u) AS n
+         LIMIT 10",
+        &test_ontology(),
+        &test_ctx(),
+    );
     let rendered = result.base.render();
     assert!(
         rendered.contains("toDate32(toStartOfMonth(u.created_at)) AS bucket"),
@@ -256,7 +335,14 @@ fn path_finding_query() {
                  "rel_types": ["CONTAINS"]}
     }"#;
 
-    let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
+    // `end` is reserved in openCypher (CASE ... END), hence the backticks.
+    let result = compile_both(
+        json,
+        "MATCH p = shortestPath((start:Project {id: 100})-[:CONTAINS*1..3]->(`end`:Project {id: 200}))
+         RETURN p, start.name, `end`.name",
+        &test_ontology(),
+        &test_ctx(),
+    );
     let rendered = result.base.render();
 
     assert!(rendered.contains("forward AS"), "should have forward CTE");
@@ -278,32 +364,54 @@ fn path_finding_query() {
 
 #[test]
 fn path_finding_depth_control() {
-    let shallow = r#"{
-        "query_type": "path_finding",
-        "nodes": [
-            {"id": "start", "entity": "Project", "columns": ["name"], "node_ids": [1]},
-            {"id": "end", "entity": "Project", "columns": ["name"], "node_ids": [2]}
-        ],
-        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 1, "rel_types": ["CONTAINS", "MEMBER_OF"]}
-    }"#;
+    let path_json = |max_depth: u32| {
+        format!(
+            r#"{{
+            "query_type": "path_finding",
+            "nodes": [
+                {{"id": "start", "entity": "Project", "columns": ["name"], "node_ids": [1]}},
+                {{"id": "end", "entity": "Project", "columns": ["name"], "node_ids": [2]}}
+            ],
+            "path": {{"type": "shortest", "from": "start", "to": "end", "max_depth": {max_depth}, "rel_types": ["CONTAINS", "MEMBER_OF"]}}
+        }}"#
+        )
+    };
+    let path_statement = |range: &str| {
+        format!(
+            "MATCH shortestPath((start:Project {{id: 1}})-[:CONTAINS|MEMBER_OF{range}]->(`end`:Project {{id: 2}}))
+             RETURN start.name, `end`.name"
+        )
+    };
 
-    let deep = r#"{
-        "query_type": "path_finding",
-        "nodes": [
-            {"id": "start", "entity": "Project", "columns": ["name"], "node_ids": [1]},
-            {"id": "end", "entity": "Project", "columns": ["name"], "node_ids": [2]}
-        ],
-        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["CONTAINS", "MEMBER_OF"]}
-    }"#;
-
-    let shallow_sql = compile(shallow, &test_ontology(), &test_ctx())
-        .unwrap()
-        .base
-        .render();
-    let deep_sql = compile(deep, &test_ontology(), &test_ctx())
-        .unwrap()
-        .base
-        .render();
+    let shallow_sql = compile_both(
+        &path_json(1),
+        &path_statement("*1"),
+        &test_ontology(),
+        &test_ctx(),
+    )
+    .base
+    .render();
+    let deep_sql = compile_both(
+        &path_json(3),
+        &path_statement("*1..3"),
+        &test_ontology(),
+        &test_ctx(),
+    )
+    .base
+    .render();
+    // `*..3` and no range at all both mean max_depth 3.
+    compile_both(
+        &path_json(3),
+        &path_statement("*..3"),
+        &test_ontology(),
+        &test_ctx(),
+    );
+    compile_both(
+        &path_json(3),
+        &path_statement(""),
+        &test_ontology(),
+        &test_ctx(),
+    );
 
     assert!(
         shallow_sql.contains("forward AS"),
@@ -331,7 +439,12 @@ fn neighbors_query() {
         "neighbors": {"direction": "both"}
     }"#;
 
-    let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
+    let result = compile_both(
+        json,
+        "MATCH (u:User {id: 100})--(n) RETURN u.username, n",
+        &test_ontology(),
+        &test_ctx(),
+    );
     let rendered = result.base.render();
 
     assert!(rendered.contains("_gkg_neighbor_id"));
@@ -369,7 +482,15 @@ fn filter_operators() {
         "limit": 30
     }"#;
 
-    let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
+    let result = compile_both(
+        json,
+        "MATCH (u:User)
+         WHERE u.created_at >= '2024-01-01' AND u.state IN ['active', 'blocked'] AND u.username CONTAINS 'admin'
+         RETURN u.username, u.state, u.created_at
+         LIMIT 30",
+        &test_ontology(),
+        &test_ctx(),
+    );
     let rendered = result.base.render();
 
     // Search uses FINAL for latest-row dedup.
@@ -383,6 +504,9 @@ fn filter_operators() {
 #[test]
 fn invalid_json_rejected() {
     assert!(compile("not valid json", &test_ontology(), &test_ctx()).is_err());
+    let err = reject_opencypher("not valid cypher", &test_ontology());
+    assert!(matches!(err, QueryError::Syntax(_)), "{err:?}");
+    assert!(err.to_string().contains("line 1, column 1"), "{err}");
 }
 
 #[test]
@@ -395,6 +519,9 @@ fn missing_required_fields_rejected() {
         )
         .is_err()
     );
+    let err = reject_opencypher("MATCH (u:User)", &test_ontology());
+    assert!(matches!(err, QueryError::Syntax(_)), "{err:?}");
+    assert!(err.to_string().contains("RETURN"), "{err}");
 }
 
 #[test]
@@ -406,6 +533,12 @@ fn sql_injection_in_node_id() {
     )
     .unwrap_err();
     assert!(matches!(err, QueryError::Validation(_)));
+
+    let err = reject_opencypher(
+        "MATCH (`n; DROP TABLE users; --`:User {id: 1}) RETURN `n; DROP TABLE users; --`",
+        &test_ontology(),
+    );
+    assert!(matches!(err, QueryError::Validation(_)), "{err:?}");
 }
 
 #[test]
@@ -421,6 +554,12 @@ fn sql_injection_in_relationship() {
     )
     .unwrap_err();
     assert!(matches!(err, QueryError::Validation(_)));
+
+    let err = reject_opencypher(
+        "MATCH (a:User {id: 1})-[:AUTHORED]->(`b' OR '1'='1`:Note) RETURN a",
+        &test_ontology(),
+    );
+    assert!(matches!(err, QueryError::Validation(_)), "{err:?}");
 }
 
 #[test]
@@ -433,6 +572,8 @@ fn empty_node_id_rejected() {
         )
         .is_err()
     );
+    let err = reject_opencypher("MATCH (``:User {id: 1}) RETURN ``", &test_ontology());
+    assert!(matches!(err, QueryError::Validation(_)), "{err:?}");
 }
 
 #[test]
@@ -444,6 +585,12 @@ fn id_starting_with_number_rejected() {
     )
     .unwrap_err();
     assert!(matches!(err, QueryError::Validation(_)));
+
+    let err = reject_opencypher(
+        "MATCH (123abc:User {id: 1}) RETURN 123abc",
+        &test_ontology(),
+    );
+    assert!(matches!(err, QueryError::Syntax(_)), "{err:?}");
 }
 
 #[test]
@@ -458,6 +605,12 @@ fn sql_injection_in_filter_property() {
     )
     .unwrap_err();
     assert!(matches!(err, QueryError::Validation(_)));
+
+    let err = reject_opencypher(
+        "MATCH (u:User {`foo; DROP TABLE--`: 'value'}) RETURN u",
+        &test_ontology(),
+    );
+    assert!(matches!(err, QueryError::Validation(_)), "{err:?}");
 }
 
 #[test]
@@ -476,7 +629,17 @@ fn valid_identifiers_produce_renderable_sql() {
             {"type": "MEMBER_OF", "from": "user_node", "to": "node123"}
         ]
     }"#;
-    let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
+    // Comma-separated pattern parts sharing variables spell the star shape in
+    // the fixture's own node and relationship order.
+    let result = compile_both(
+        json,
+        "MATCH (user_node:User {id: 1})-[:AUTHORED]->(_private:Note),
+               (CamelCase:Project {id: 1})-[:CONTAINS]->(_private),
+               (user_node)-[:MEMBER_OF]->(node123:Group)
+         RETURN user_node.username, _private.confidential, CamelCase.name, node123.name",
+        &test_ontology(),
+        &test_ctx(),
+    );
     let rendered = result.base.render();
 
     assert!(!rendered.contains("{p"));
@@ -507,18 +670,24 @@ fn multi_table_ontology() -> ontology::Ontology {
         .with_default_columns("Definition", ["name"])
 }
 
+const USER_PROJECT_JSON: &str = r#"{
+    "query_type": "traversal",
+    "nodes": [
+        {"id": "u", "entity": "User", "node_ids": [1]},
+        {"id": "p", "entity": "Project"}
+    ],
+    "relationships": [{"type": "AUTHORED", "from": "u", "to": "p"}],
+    "limit": 25
+}"#;
+
 #[test]
 fn multi_table_single_type_routes_to_default() {
-    let json = r#"{
-        "query_type": "traversal",
-        "nodes": [
-            {"id": "u", "entity": "User", "node_ids": [1]},
-            {"id": "p", "entity": "Project"}
-        ],
-        "relationships": [{"type": "AUTHORED", "from": "u", "to": "p"}],
-        "limit": 25
-    }"#;
-    let result = compile(json, &multi_table_ontology(), &test_ctx()).unwrap();
+    let result = compile_both(
+        USER_PROJECT_JSON,
+        "MATCH (u:User {id: 1})-[:AUTHORED]->(p:Project) RETURN u LIMIT 25",
+        &multi_table_ontology(),
+        &test_ctx(),
+    );
     let rendered = result.base.render();
     assert!(
         rendered.contains("gl_edge"),
@@ -541,7 +710,12 @@ fn multi_table_code_edge_routes_to_code_table() {
         "relationships": [{"type": "DEFINES", "from": "f", "to": "d"}],
         "limit": 25
     }"#;
-    let result = compile(json, &multi_table_ontology(), &test_ctx()).unwrap();
+    let result = compile_both(
+        json,
+        "MATCH (f:File {id: 1})-[:DEFINES]->(d:Definition) RETURN f LIMIT 25",
+        &multi_table_ontology(),
+        &test_ctx(),
+    );
     let rendered = result.base.render();
     assert!(
         rendered.contains("gl_code_edge"),
@@ -557,16 +731,13 @@ fn multi_table_code_edge_routes_to_code_table() {
 fn multi_table_wildcard_scans_all_tables() {
     // v2 planner routes wildcard to the default edge table for a single hop.
     // It does not generate UNION ALL across edge tables per hop.
-    let json = r#"{
-        "query_type": "traversal",
-        "nodes": [
-            {"id": "u", "entity": "User", "node_ids": [1]},
-            {"id": "p", "entity": "Project"}
-        ],
-        "relationships": [{"type": "*", "from": "u", "to": "p"}],
-        "limit": 25
-    }"#;
-    let result = compile(json, &multi_table_ontology(), &test_ctx()).unwrap();
+    let json = USER_PROJECT_JSON.replace(r#""type": "AUTHORED""#, r#""type": "*""#);
+    let result = compile_both(
+        &json,
+        "MATCH (u:User {id: 1})-->(p:Project) RETURN u LIMIT 25",
+        &multi_table_ontology(),
+        &test_ctx(),
+    );
     let rendered = result.base.render();
     assert!(
         rendered.contains("gl_edge"),
@@ -578,16 +749,16 @@ fn multi_table_wildcard_scans_all_tables() {
 fn multi_table_mixed_types_scans_both_tables() {
     // v2 planner routes a single hop to one table (the first matched).
     // Mixed edge types in a single relationship entry go to one table.
-    let json = r#"{
-        "query_type": "traversal",
-        "nodes": [
-            {"id": "u", "entity": "User", "node_ids": [1]},
-            {"id": "p", "entity": "Project"}
-        ],
-        "relationships": [{"type": ["AUTHORED", "DEFINES"], "from": "u", "to": "p"}],
-        "limit": 25
-    }"#;
-    let result = compile(json, &multi_table_ontology(), &test_ctx()).unwrap();
+    let json = USER_PROJECT_JSON.replace(
+        r#""type": "AUTHORED""#,
+        r#""type": ["AUTHORED", "DEFINES"]"#,
+    );
+    let result = compile_both(
+        &json,
+        "MATCH (u:User {id: 1})-[:AUTHORED|DEFINES]->(p:Project) RETURN u LIMIT 25",
+        &multi_table_ontology(),
+        &test_ctx(),
+    );
     let rendered = result.base.render();
     assert!(
         rendered.contains("gl_edge"),
@@ -601,16 +772,12 @@ fn multi_table_mixed_types_scans_both_tables() {
 
 #[test]
 fn single_table_ontology_no_union() {
-    let json = r#"{
-        "query_type": "traversal",
-        "nodes": [
-            {"id": "u", "entity": "User", "node_ids": [1]},
-            {"id": "p", "entity": "Project"}
-        ],
-        "relationships": [{"type": "AUTHORED", "from": "u", "to": "p"}],
-        "limit": 25
-    }"#;
-    let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
+    let result = compile_both(
+        USER_PROJECT_JSON,
+        "MATCH (u:User {id: 1})-[:AUTHORED]->(p:Project) RETURN u LIMIT 25",
+        &test_ontology(),
+        &test_ctx(),
+    );
     let rendered = result.base.render();
     assert!(
         !rendered.contains("UNION ALL"),
@@ -628,7 +795,12 @@ fn multi_table_path_finding_scans_all_tables() {
         ],
         "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["CONTAINS", "DEFINES"]}
     }"#;
-    let result = compile(json, &multi_table_ontology(), &test_ctx()).unwrap();
+    let result = compile_both(
+        json,
+        "MATCH p = shortestPath((start:User {id: 1})-[:CONTAINS|DEFINES*..3]->(`end`:Definition {id: 100})) RETURN p",
+        &multi_table_ontology(),
+        &test_ctx(),
+    );
     let rendered = result.base.render();
     assert!(
         rendered.contains("gl_edge") && rendered.contains("gl_code_edge"),
@@ -655,7 +827,12 @@ fn neighbors_non_default_pk_with_non_denorm_filter_no_alias_clash() {
         }],
         "neighbors": {"direction": "both"}
     }"#;
-    let result = compile(json, &ontology, &test_ctx()).unwrap();
+    let result = compile_both(
+        json,
+        "MATCH (f:File)--(n) WHERE f.path CONTAINS 'labkit' RETURN n",
+        &ontology,
+        &test_ctx(),
+    );
     let rendered = result.base.render();
 
     let gl_file_refs = rendered.matches("gl_file").count();
@@ -676,7 +853,12 @@ fn multi_table_neighbors_scans_all_tables() {
         "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}],
         "neighbors": {"direction": "both"}
     }"#;
-    let result = compile(json, &multi_table_ontology(), &test_ctx()).unwrap();
+    let result = compile_both(
+        json,
+        "MATCH (p:Project {id: 1})--(n) RETURN n",
+        &multi_table_ontology(),
+        &test_ctx(),
+    );
     let rendered = result.base.render();
     assert!(
         rendered.contains("gl_edge") && rendered.contains("gl_code_edge"),
@@ -704,6 +886,12 @@ fn render_scoped(json: &str) -> String {
         .render()
 }
 
+/// `{id: 1}` lowers to `node_ids`, which lets the planner push the FK onto
+/// the joined side; `filters.id` does not, so the twin JSON uses `node_ids`.
+fn pinned(json: &str) -> String {
+    json.replace(r#""filters": {"id": {"eq": 1}}"#, r#""node_ids": [1]"#)
+}
+
 #[test]
 fn scoped_traversal_injects_tight_prefix() {
     let json = r#"{
@@ -716,6 +904,14 @@ fn scoped_traversal_injects_tight_prefix() {
         "limit": 100
     }"#;
     assert!(render_scoped(json).contains(SCOPED_PREFIX));
+
+    let result = compile_both(
+        &pinned(json),
+        "MATCH (wi:WorkItem)-[:IN_PROJECT]->(p:Project {id: 1}) RETURN wi.id LIMIT 100",
+        &embedded_ontology(),
+        &scoped_ctx(),
+    );
+    assert!(result.base.render().contains(SCOPED_PREFIX));
 }
 
 #[test]
@@ -732,6 +928,14 @@ fn scoped_aggregation_injects_tight_prefix() {
         "limit": 100
     }"#;
     assert!(render_scoped(json).contains(SCOPED_PREFIX));
+
+    let result = compile_both(
+        &pinned(json),
+        "MATCH (wi:WorkItem)-[:IN_PROJECT]->(p:Project {id: 1}) RETURN p, count(wi) AS c LIMIT 100",
+        &embedded_ontology(),
+        &scoped_ctx(),
+    );
+    assert!(result.base.render().contains(SCOPED_PREFIX));
 }
 
 #[test]
@@ -773,4 +977,21 @@ fn cross_namespace_related_to_edge_stays_unscoped() {
     let rel = templates.iter().find(|t| t.node_alias == "rel").unwrap();
     assert!(rel.injected_columns.is_empty());
     assert_eq!(rel.destination_table, "gl_work_item");
+
+    let twin = compile_both(
+        &pinned(json),
+        "MATCH (p:Project {id: 1})<-[:IN_PROJECT]-(wi:WorkItem)-[:RELATED_TO]->(rel:WorkItem)
+         RETURN wi.id, rel.id, rel.title
+         LIMIT 100",
+        &ontology,
+        &scoped_ctx(),
+    );
+    let twin_sql = twin.base.render();
+    assert!(
+        !twin_sql
+            .split("RELATED_TO")
+            .nth(1)
+            .unwrap()
+            .contains(SCOPED_PREFIX)
+    );
 }

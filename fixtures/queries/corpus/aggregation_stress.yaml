@@ -30,6 +30,12 @@ security_vulnerability_001_by_severity:
       "aggregation_sort": "-vulnerability_count",
       "limit": 20
     }
+  opencypher: |
+    MATCH (v:Vulnerability)
+    WHERE v.state IN ['detected', 'confirmed', 'resolved', 'dismissed']
+    RETURN v.severity, count(v) AS vulnerability_count
+    ORDER BY vulnerability_count DESC
+    LIMIT 20
 
 security_vulnerability_002_by_state:
   desc: "Security vulnerability 002 by state"
@@ -57,6 +63,12 @@ security_vulnerability_002_by_state:
       "aggregation_sort": "-vulnerability_count",
       "limit": 20
     }
+  opencypher: |
+    MATCH (v:Vulnerability)
+    WHERE v.severity IN ['critical', 'high', 'medium', 'low', 'unknown', 'info']
+    RETURN v.state, count(v) AS vulnerability_count
+    ORDER BY vulnerability_count DESC
+    LIMIT 20
 
 security_vulnerability_003_by_report_type:
   desc: "Security vulnerability 003 by report type"
@@ -84,6 +96,11 @@ security_vulnerability_003_by_report_type:
       "aggregation_sort": "-vulnerability_count",
       "limit": 20
     }
+  opencypher: |
+    MATCH (v:Vulnerability {state: 'detected'})
+    RETURN v.report_type, count(v) AS vulnerability_count
+    ORDER BY vulnerability_count DESC
+    LIMIT 20
 
 security_vulnerability_004_by_resolution_flags:
   desc: "Security vulnerability 004 by resolution flags"
@@ -114,6 +131,12 @@ security_vulnerability_004_by_resolution_flags:
       "aggregation_sort": "-vulnerability_count",
       "limit": 20
     }
+  opencypher: |
+    MATCH (v:Vulnerability)
+    WHERE v.severity IN ['critical', 'high', 'medium']
+    RETURN v.resolved_on_default_branch, v.present_on_default_branch, count(v) AS vulnerability_count
+    ORDER BY vulnerability_count DESC
+    LIMIT 20
 
 security_vulnerability_005_by_severity_state:
   desc: "Security vulnerability 005 by severity state"
@@ -144,6 +167,12 @@ security_vulnerability_005_by_severity_state:
       "aggregation_sort": "-vulnerability_count",
       "limit": 30
     }
+  opencypher: |
+    MATCH (v:Vulnerability)
+    WHERE v.report_type IN ['sast', 'dependency_scanning', 'container_scanning', 'secret_detection']
+    RETURN v.severity, v.state, count(v) AS vulnerability_count
+    ORDER BY vulnerability_count DESC
+    LIMIT 30
 
 security_vulnerability_006_by_report_type_severity_state:
   desc: "Security vulnerability 006 by report type severity state"
@@ -175,6 +204,11 @@ security_vulnerability_006_by_report_type_severity_state:
       "aggregation_sort": "-vulnerability_count",
       "limit": 50
     }
+  opencypher: |
+    MATCH (v:Vulnerability {present_on_default_branch: true})
+    RETURN v.report_type, v.severity, v.state, count(v) AS vulnerability_count
+    ORDER BY vulnerability_count DESC
+    LIMIT 50
 
 security_vulnerability_007_by_project_id:
   desc: "Security vulnerability 007 by project id"
@@ -202,6 +236,11 @@ security_vulnerability_007_by_project_id:
       "aggregation_sort": "-critical_count",
       "limit": 50
     }
+  opencypher: |
+    MATCH (v:Vulnerability {severity: 'critical'})
+    RETURN v.project_id, count(v) AS critical_count
+    ORDER BY critical_count DESC
+    LIMIT 50
 
 security_vulnerability_008_latest_detected_by_project:
   desc: "Security vulnerability 008 latest detected by project"
@@ -233,6 +272,11 @@ security_vulnerability_008_latest_detected_by_project:
       "aggregation_sort": "-detected_count",
       "limit": 50
     }
+  opencypher: |
+    MATCH (v:Vulnerability {state: 'detected'})
+    RETURN v.project_id, count(v) AS detected_count, max(v.updated_at) AS latest_update
+    ORDER BY detected_count DESC
+    LIMIT 50
 
 security_scan_009_by_scan_type:
   desc: "Security scan 009 by scan type"
@@ -260,6 +304,11 @@ security_scan_009_by_scan_type:
       "aggregation_sort": "-scan_count",
       "limit": 20
     }
+  opencypher: |
+    MATCH (s:SecurityScan {latest: true})
+    RETURN s.scan_type, count(s) AS scan_count
+    ORDER BY scan_count DESC
+    LIMIT 20
 
 security_scan_010_by_status:
   desc: "Security scan 010 by status"
@@ -287,6 +336,11 @@ security_scan_010_by_status:
       "aggregation_sort": "-scan_count",
       "limit": 20
     }
+  opencypher: |
+    MATCH (s:SecurityScan {latest: true})
+    RETURN s.status, count(s) AS scan_count
+    ORDER BY scan_count DESC
+    LIMIT 20
 
 security_scan_011_by_type_status:
   desc: "Security scan 011 by type status"
@@ -317,6 +371,11 @@ security_scan_011_by_type_status:
       "aggregation_sort": "-scan_count",
       "limit": 50
     }
+  opencypher: |
+    MATCH (s:SecurityScan {latest: true})
+    RETURN s.scan_type, s.status, count(s) AS scan_count
+    ORDER BY scan_count DESC
+    LIMIT 50
 
 security_scan_012_by_project_id:
   desc: "Security scan 012 by project id"
@@ -344,6 +403,11 @@ security_scan_012_by_project_id:
       "aggregation_sort": "-scan_count",
       "limit": 50
     }
+  opencypher: |
+    MATCH (s:SecurityScan {latest: true})
+    RETURN s.project_id, count(s) AS scan_count
+    ORDER BY scan_count DESC
+    LIMIT 50
 
 security_scan_013_by_pipeline_id:
   desc: "Security scan 013 by pipeline id"
@@ -371,6 +435,12 @@ security_scan_013_by_pipeline_id:
       "aggregation_sort": "-scan_count",
       "limit": 50
     }
+  opencypher: |
+    MATCH (s:SecurityScan)
+    WHERE s.status IN ['succeeded', 'job_failed', 'report_error']
+    RETURN s.pipeline_id, count(s) AS scan_count
+    ORDER BY scan_count DESC
+    LIMIT 50
 
 security_finding_014_by_severity:
   desc: "Security finding 014 by severity"
@@ -398,6 +468,11 @@ security_finding_014_by_severity:
       "aggregation_sort": "-finding_count",
       "limit": 20
     }
+  opencypher: |
+    MATCH (f:Finding {deduplicated: true})
+    RETURN f.severity, count(f) AS finding_count
+    ORDER BY finding_count DESC
+    LIMIT 20
 
 security_finding_015_by_deduplicated:
   desc: "Security finding 015 by deduplicated"
@@ -425,6 +500,12 @@ security_finding_015_by_deduplicated:
       "aggregation_sort": "-finding_count",
       "limit": 20
     }
+  opencypher: |
+    MATCH (f:Finding)
+    WHERE f.severity IN ['critical', 'high', 'medium', 'low']
+    RETURN f.deduplicated, count(f) AS finding_count
+    ORDER BY finding_count DESC
+    LIMIT 20
 
 security_finding_016_by_project_id:
   desc: "Security finding 016 by project id"
@@ -452,6 +533,11 @@ security_finding_016_by_project_id:
       "aggregation_sort": "-finding_count",
       "limit": 50
     }
+  opencypher: |
+    MATCH (f:Finding {severity: 'critical'})
+    RETURN f.project_id, count(f) AS finding_count
+    ORDER BY finding_count DESC
+    LIMIT 50
 
 security_finding_017_by_scan_id:
   desc: "Security finding 017 by scan id"
@@ -479,6 +565,11 @@ security_finding_017_by_scan_id:
       "aggregation_sort": "-finding_count",
       "limit": 50
     }
+  opencypher: |
+    MATCH (f:Finding {deduplicated: true})
+    RETURN f.scan_id, count(f) AS finding_count
+    ORDER BY finding_count DESC
+    LIMIT 50
 
 security_finding_018_by_scanner_id:
   desc: "Security finding 018 by scanner id"
@@ -506,6 +597,12 @@ security_finding_018_by_scanner_id:
       "aggregation_sort": "-finding_count",
       "limit": 50
     }
+  opencypher: |
+    MATCH (f:Finding)
+    WHERE f.severity IN ['critical', 'high']
+    RETURN f.scanner_id, count(f) AS finding_count
+    ORDER BY finding_count DESC
+    LIMIT 50
 
 security_occurrence_019_by_severity:
   desc: "Security occurrence 019 by severity"
@@ -533,6 +630,12 @@ security_occurrence_019_by_severity:
       "aggregation_sort": "-occurrence_count",
       "limit": 20
     }
+  opencypher: |
+    MATCH (o:VulnerabilityOccurrence)
+    WHERE o.report_type IN ['sast', 'dependency_scanning', 'container_scanning', 'secret_detection']
+    RETURN o.severity, count(o) AS occurrence_count
+    ORDER BY occurrence_count DESC
+    LIMIT 20
 
 security_occurrence_020_by_report_type:
   desc: "Security occurrence 020 by report type"
@@ -560,6 +663,12 @@ security_occurrence_020_by_report_type:
       "aggregation_sort": "-occurrence_count",
       "limit": 20
     }
+  opencypher: |
+    MATCH (o:VulnerabilityOccurrence)
+    WHERE o.severity IN ['critical', 'high', 'medium']
+    RETURN o.report_type, count(o) AS occurrence_count
+    ORDER BY occurrence_count DESC
+    LIMIT 20
 
 security_occurrence_021_by_severity_report_type:
   desc: "Security occurrence 021 by severity report type"
@@ -590,6 +699,12 @@ security_occurrence_021_by_severity_report_type:
       "aggregation_sort": "-occurrence_count",
       "limit": 50
     }
+  opencypher: |
+    MATCH (o:VulnerabilityOccurrence)
+    WHERE o.severity IN ['critical', 'high', 'medium', 'low']
+    RETURN o.severity, o.report_type, count(o) AS occurrence_count
+    ORDER BY occurrence_count DESC
+    LIMIT 50
 
 security_occurrence_022_by_project_id:
   desc: "Security occurrence 022 by project id"
@@ -617,6 +732,11 @@ security_occurrence_022_by_project_id:
       "aggregation_sort": "-occurrence_count",
       "limit": 50
     }
+  opencypher: |
+    MATCH (o:VulnerabilityOccurrence {severity: 'critical'})
+    RETURN o.project_id, count(o) AS occurrence_count
+    ORDER BY occurrence_count DESC
+    LIMIT 50
 
 security_occurrence_023_by_scanner_id:
   desc: "Security occurrence 023 by scanner id"
@@ -644,6 +764,11 @@ security_occurrence_023_by_scanner_id:
       "aggregation_sort": "-occurrence_count",
       "limit": 50
     }
+  opencypher: |
+    MATCH (o:VulnerabilityOccurrence {report_type: 'sast'})
+    RETURN o.scanner_id, count(o) AS occurrence_count
+    ORDER BY occurrence_count DESC
+    LIMIT 50
 
 security_identifier_024_by_external_type:
   desc: "Security identifier 024 by external type"
@@ -671,6 +796,12 @@ security_identifier_024_by_external_type:
       "aggregation_sort": "-identifier_count",
       "limit": 50
     }
+  opencypher: |
+    MATCH (i:VulnerabilityIdentifier)
+    WHERE i.external_type CONTAINS 'cve'
+    RETURN i.external_type, count(i) AS identifier_count
+    ORDER BY identifier_count DESC
+    LIMIT 50
 
 security_identifier_025_by_project_id:
   desc: "Security identifier 025 by project id"
@@ -698,6 +829,12 @@ security_identifier_025_by_project_id:
       "aggregation_sort": "-identifier_count",
       "limit": 50
     }
+  opencypher: |
+    MATCH (i:VulnerabilityIdentifier)
+    WHERE i.name CONTAINS 'CVE'
+    RETURN i.project_id, count(i) AS identifier_count
+    ORDER BY identifier_count DESC
+    LIMIT 50
 
 security_scanner_026_by_vendor:
   desc: "Security scanner 026 by vendor"
@@ -725,6 +862,12 @@ security_scanner_026_by_vendor:
       "aggregation_sort": "-scanner_count",
       "limit": 20
     }
+  opencypher: |
+    MATCH (scanner:VulnerabilityScanner)
+    WHERE scanner.vendor CONTAINS 'Git'
+    RETURN scanner.vendor, count(scanner) AS scanner_count
+    ORDER BY scanner_count DESC
+    LIMIT 20
 
 security_scanner_027_by_project_id:
   desc: "Security scanner 027 by project id"
@@ -752,6 +895,12 @@ security_scanner_027_by_project_id:
       "aggregation_sort": "-scanner_count",
       "limit": 50
     }
+  opencypher: |
+    MATCH (scanner:VulnerabilityScanner)
+    WHERE scanner.vendor CONTAINS 'Git'
+    RETURN scanner.project_id, count(scanner) AS scanner_count
+    ORDER BY scanner_count DESC
+    LIMIT 50
 
 ci_pipeline_028_by_status:
   desc: "Ci pipeline 028 by status"
@@ -779,6 +928,12 @@ ci_pipeline_028_by_status:
       "aggregation_sort": "-pipeline_count",
       "limit": 20
     }
+  opencypher: |
+    MATCH (pipe:Pipeline)
+    WHERE pipe.source IN ['push', 'web', 'schedule', 'merge_request_event', 'parent_pipeline']
+    RETURN pipe.status, count(pipe) AS pipeline_count
+    ORDER BY pipeline_count DESC
+    LIMIT 20
 
 ci_pipeline_029_by_source:
   desc: "Ci pipeline 029 by source"
@@ -806,6 +961,12 @@ ci_pipeline_029_by_source:
       "aggregation_sort": "-pipeline_count",
       "limit": 20
     }
+  opencypher: |
+    MATCH (pipe:Pipeline)
+    WHERE pipe.status IN ['success', 'failed', 'running', 'pending', 'canceled']
+    RETURN pipe.source, count(pipe) AS pipeline_count
+    ORDER BY pipeline_count DESC
+    LIMIT 20
 
 ci_pipeline_030_by_status_source:
   desc: "Ci pipeline 030 by status source"
@@ -836,6 +997,12 @@ ci_pipeline_030_by_status_source:
       "aggregation_sort": "-pipeline_count",
       "limit": 50
     }
+  opencypher: |
+    MATCH (pipe:Pipeline)
+    WHERE pipe.status IN ['success', 'failed', 'running', 'pending', 'canceled']
+    RETURN pipe.status, pipe.source, count(pipe) AS pipeline_count
+    ORDER BY pipeline_count DESC
+    LIMIT 50
 
 ci_pipeline_031_by_protected:
   desc: "Ci pipeline 031 by protected"
@@ -863,6 +1030,12 @@ ci_pipeline_031_by_protected:
       "aggregation_sort": "-pipeline_count",
       "limit": 20
     }
+  opencypher: |
+    MATCH (pipe:Pipeline)
+    WHERE pipe.status IN ['success', 'failed']
+    RETURN pipe.protected, count(pipe) AS pipeline_count
+    ORDER BY pipeline_count DESC
+    LIMIT 20
 
 ci_pipeline_032_by_project_id:
   desc: "Ci pipeline 032 by project id"
@@ -890,6 +1063,11 @@ ci_pipeline_032_by_project_id:
       "aggregation_sort": "-failed_pipeline_count",
       "limit": 50
     }
+  opencypher: |
+    MATCH (pipe:Pipeline {status: 'failed'})
+    RETURN pipe.project_id, count(pipe) AS failed_pipeline_count
+    ORDER BY failed_pipeline_count DESC
+    LIMIT 50
 
 ci_pipeline_033_avg_duration_by_status:
   desc: "Ci pipeline 033 avg duration by status"
@@ -921,6 +1099,12 @@ ci_pipeline_033_avg_duration_by_status:
       "aggregation_sort": "-pipeline_count",
       "limit": 20
     }
+  opencypher: |
+    MATCH (pipe:Pipeline)
+    WHERE pipe.status IN ['success', 'failed']
+    RETURN pipe.status, count(pipe) AS pipeline_count, avg(pipe.duration) AS avg_duration
+    ORDER BY pipeline_count DESC
+    LIMIT 20
 
 ci_pipeline_034_by_ref:
   desc: "Ci pipeline 034 by ref"
@@ -948,6 +1132,11 @@ ci_pipeline_034_by_ref:
       "aggregation_sort": "-pipeline_count",
       "limit": 50
     }
+  opencypher: |
+    MATCH (pipe:Pipeline {status: 'success'})
+    RETURN pipe.ref, count(pipe) AS pipeline_count
+    ORDER BY pipeline_count DESC
+    LIMIT 50
 
 ci_job_035_by_status:
   desc: "Ci job 035 by status"
@@ -975,6 +1164,12 @@ ci_job_035_by_status:
       "aggregation_sort": "-job_count",
       "limit": 20
     }
+  opencypher: |
+    MATCH (job:Job)
+    WHERE job.when IN ['on_success', 'manual', 'delayed']
+    RETURN job.status, count(job) AS job_count
+    ORDER BY job_count DESC
+    LIMIT 20
 
 ci_job_036_by_when:
   desc: "Ci job 036 by when"
@@ -1002,6 +1197,12 @@ ci_job_036_by_when:
       "aggregation_sort": "-job_count",
       "limit": 20
     }
+  opencypher: |
+    MATCH (job:Job)
+    WHERE job.status IN ['success', 'failed', 'running', 'pending']
+    RETURN job.when, count(job) AS job_count
+    ORDER BY job_count DESC
+    LIMIT 20
 
 ci_job_037_by_status_when:
   desc: "Ci job 037 by status when"
@@ -1032,6 +1233,12 @@ ci_job_037_by_status_when:
       "aggregation_sort": "-job_count",
       "limit": 50
     }
+  opencypher: |
+    MATCH (job:Job)
+    WHERE job.status IN ['success', 'failed', 'running', 'pending']
+    RETURN job.status, job.when, count(job) AS job_count
+    ORDER BY job_count DESC
+    LIMIT 50
 
 ci_job_038_by_allow_failure:
   desc: "Ci job 038 by allow failure"
@@ -1059,6 +1266,12 @@ ci_job_038_by_allow_failure:
       "aggregation_sort": "-job_count",
       "limit": 20
     }
+  opencypher: |
+    MATCH (job:Job)
+    WHERE job.status IN ['success', 'failed']
+    RETURN job.allow_failure, count(job) AS job_count
+    ORDER BY job_count DESC
+    LIMIT 20
 
 ci_job_039_by_retried:
   desc: "Ci job 039 by retried"
@@ -1086,6 +1299,12 @@ ci_job_039_by_retried:
       "aggregation_sort": "-job_count",
       "limit": 20
     }
+  opencypher: |
+    MATCH (job:Job)
+    WHERE job.status IN ['success', 'failed']
+    RETURN job.retried, count(job) AS job_count
+    ORDER BY job_count DESC
+    LIMIT 20
 
 ci_job_040_by_failure_reason:
   desc: "Ci job 040 by failure reason"
@@ -1113,6 +1332,11 @@ ci_job_040_by_failure_reason:
       "aggregation_sort": "-failed_job_count",
       "limit": 50
     }
+  opencypher: |
+    MATCH (job:Job {status: 'failed'})
+    RETURN job.failure_reason, count(job) AS failed_job_count
+    ORDER BY failed_job_count DESC
+    LIMIT 50
 
 ci_job_041_by_project_id:
   desc: "Ci job 041 by project id"
@@ -1140,6 +1364,11 @@ ci_job_041_by_project_id:
       "aggregation_sort": "-failed_job_count",
       "limit": 50
     }
+  opencypher: |
+    MATCH (job:Job {status: 'failed'})
+    RETURN job.project_id, count(job) AS failed_job_count
+    ORDER BY failed_job_count DESC
+    LIMIT 50
 
 ci_job_042_by_runner_id:
   desc: "Ci job 042 by runner id"
@@ -1167,6 +1396,11 @@ ci_job_042_by_runner_id:
       "aggregation_sort": "-job_count",
       "limit": 50
     }
+  opencypher: |
+    MATCH (job:Job {status: 'success'})
+    RETURN job.runner_id, count(job) AS job_count
+    ORDER BY job_count DESC
+    LIMIT 50
 
 ci_job_043_by_ref:
   desc: "Ci job 043 by ref"
@@ -1194,6 +1428,11 @@ ci_job_043_by_ref:
       "aggregation_sort": "-job_count",
       "limit": 50
     }
+  opencypher: |
+    MATCH (job:Job {status: 'success'})
+    RETURN job.ref, count(job) AS job_count
+    ORDER BY job_count DESC
+    LIMIT 50
 
 ci_stage_044_by_status:
   desc: "Ci stage 044 by status"
@@ -1221,6 +1460,12 @@ ci_stage_044_by_status:
       "aggregation_sort": "-stage_count",
       "limit": 20
     }
+  opencypher: |
+    MATCH (stage:Stage)
+    WHERE stage.status IN ['success', 'failed', 'running', 'pending']
+    RETURN stage.status, count(stage) AS stage_count
+    ORDER BY stage_count DESC
+    LIMIT 20
 
 ci_stage_045_by_name:
   desc: "Ci stage 045 by name"
@@ -1248,6 +1493,11 @@ ci_stage_045_by_name:
       "aggregation_sort": "-stage_count",
       "limit": 50
     }
+  opencypher: |
+    MATCH (stage:Stage {status: 'success'})
+    RETURN stage.name, count(stage) AS stage_count
+    ORDER BY stage_count DESC
+    LIMIT 50
 
 ci_stage_046_by_position:
   desc: "Ci stage 046 by position"
@@ -1275,6 +1525,12 @@ ci_stage_046_by_position:
       "aggregation_sort": "-stage_count",
       "limit": 20
     }
+  opencypher: |
+    MATCH (stage:Stage)
+    WHERE stage.status IN ['success', 'failed']
+    RETURN stage.position, count(stage) AS stage_count
+    ORDER BY stage_count DESC
+    LIMIT 20
 
 ci_deployment_047_by_status:
   desc: "Ci deployment 047 by status"
@@ -1302,6 +1558,11 @@ ci_deployment_047_by_status:
       "aggregation_sort": "-deployment_count",
       "limit": 20
     }
+  opencypher: |
+    MATCH (dep:Deployment {archived: false})
+    RETURN dep.status, count(dep) AS deployment_count
+    ORDER BY deployment_count DESC
+    LIMIT 20
 
 ci_deployment_048_by_ref:
   desc: "Ci deployment 048 by ref"
@@ -1329,6 +1590,12 @@ ci_deployment_048_by_ref:
       "aggregation_sort": "-deployment_count",
       "limit": 50
     }
+  opencypher: |
+    MATCH (dep:Deployment)
+    WHERE dep.status IN ['success', 'failed', 'running']
+    RETURN dep.ref, count(dep) AS deployment_count
+    ORDER BY deployment_count DESC
+    LIMIT 50
 
 ci_deployment_049_by_archived:
   desc: "Ci deployment 049 by archived"
@@ -1356,6 +1623,12 @@ ci_deployment_049_by_archived:
       "aggregation_sort": "-deployment_count",
       "limit": 20
     }
+  opencypher: |
+    MATCH (dep:Deployment)
+    WHERE dep.status IN ['success', 'failed', 'running']
+    RETURN dep.archived, count(dep) AS deployment_count
+    ORDER BY deployment_count DESC
+    LIMIT 20
 
 ci_environment_050_by_state:
   desc: "Ci environment 050 by state"
@@ -1383,6 +1656,12 @@ ci_environment_050_by_state:
       "aggregation_sort": "-environment_count",
       "limit": 20
     }
+  opencypher: |
+    MATCH (env:Environment)
+    WHERE env.tier IN ['production', 'staging', 'testing', 'development', 'other']
+    RETURN env.state, count(env) AS environment_count
+    ORDER BY environment_count DESC
+    LIMIT 20
 
 ci_environment_051_by_tier:
   desc: "Ci environment 051 by tier"
@@ -1410,6 +1689,12 @@ ci_environment_051_by_tier:
       "aggregation_sort": "-environment_count",
       "limit": 20
     }
+  opencypher: |
+    MATCH (env:Environment)
+    WHERE env.state IN ['available', 'stopping', 'stopped']
+    RETURN env.tier, count(env) AS environment_count
+    ORDER BY environment_count DESC
+    LIMIT 20
 
 ci_environment_052_by_state_tier:
   desc: "Ci environment 052 by state tier"
@@ -1440,6 +1725,12 @@ ci_environment_052_by_state_tier:
       "aggregation_sort": "-environment_count",
       "limit": 50
     }
+  opencypher: |
+    MATCH (env:Environment)
+    WHERE env.state IN ['available', 'stopping', 'stopped']
+    RETURN env.state, env.tier, count(env) AS environment_count
+    ORDER BY environment_count DESC
+    LIMIT 50
 
 code_review_mr_056_by_state:
   desc: "Code review mr 056 by state"
@@ -1467,6 +1758,12 @@ code_review_mr_056_by_state:
       "aggregation_sort": "-merge_request_count",
       "limit": 20
     }
+  opencypher: |
+    MATCH (mr:MergeRequest)
+    WHERE mr.state IN ['opened', 'closed', 'merged', 'locked']
+    RETURN mr.state, count(mr) AS merge_request_count
+    ORDER BY merge_request_count DESC
+    LIMIT 20
 
 code_review_mr_057_by_merge_status:
   desc: "Code review mr 057 by merge status"
@@ -1494,6 +1791,12 @@ code_review_mr_057_by_merge_status:
       "aggregation_sort": "-merge_request_count",
       "limit": 50
     }
+  opencypher: |
+    MATCH (mr:MergeRequest)
+    WHERE mr.state IN ['opened', 'merged']
+    RETURN mr.merge_status, count(mr) AS merge_request_count
+    ORDER BY merge_request_count DESC
+    LIMIT 50
 
 code_review_mr_058_by_draft:
   desc: "Code review mr 058 by draft"
@@ -1521,6 +1824,12 @@ code_review_mr_058_by_draft:
       "aggregation_sort": "-merge_request_count",
       "limit": 20
     }
+  opencypher: |
+    MATCH (mr:MergeRequest)
+    WHERE mr.state IN ['opened', 'merged']
+    RETURN mr.draft, count(mr) AS merge_request_count
+    ORDER BY merge_request_count DESC
+    LIMIT 20
 
 code_review_mr_059_by_squash:
   desc: "Code review mr 059 by squash"
@@ -1548,6 +1857,12 @@ code_review_mr_059_by_squash:
       "aggregation_sort": "-merge_request_count",
       "limit": 20
     }
+  opencypher: |
+    MATCH (mr:MergeRequest)
+    WHERE mr.state IN ['opened', 'merged']
+    RETURN mr.squash, count(mr) AS merge_request_count
+    ORDER BY merge_request_count DESC
+    LIMIT 20
 
 code_review_mr_060_by_state_draft:
   desc: "Code review mr 060 by state draft"
@@ -1578,6 +1893,12 @@ code_review_mr_060_by_state_draft:
       "aggregation_sort": "-merge_request_count",
       "limit": 50
     }
+  opencypher: |
+    MATCH (mr:MergeRequest)
+    WHERE mr.state IN ['opened', 'closed', 'merged']
+    RETURN mr.state, mr.draft, count(mr) AS merge_request_count
+    ORDER BY merge_request_count DESC
+    LIMIT 50
 
 code_review_mr_061_by_project_id:
   desc: "Code review mr 061 by project id"
@@ -1605,6 +1926,11 @@ code_review_mr_061_by_project_id:
       "aggregation_sort": "-merge_request_count",
       "limit": 50
     }
+  opencypher: |
+    MATCH (mr:MergeRequest {state: 'merged'})
+    RETURN mr.project_id, count(mr) AS merge_request_count
+    ORDER BY merge_request_count DESC
+    LIMIT 50
 
 code_review_mr_062_by_author_id:
   desc: "Code review mr 062 by author id"
@@ -1632,6 +1958,11 @@ code_review_mr_062_by_author_id:
       "aggregation_sort": "-merge_request_count",
       "limit": 50
     }
+  opencypher: |
+    MATCH (mr:MergeRequest {state: 'merged'})
+    RETURN mr.author_id, count(mr) AS merge_request_count
+    ORDER BY merge_request_count DESC
+    LIMIT 50
 
 code_review_mr_063_by_target_branch:
   desc: "Code review mr 063 by target branch"
@@ -1659,6 +1990,11 @@ code_review_mr_063_by_target_branch:
       "aggregation_sort": "-merge_request_count",
       "limit": 50
     }
+  opencypher: |
+    MATCH (mr:MergeRequest {state: 'merged'})
+    RETURN mr.target_branch, count(mr) AS merge_request_count
+    ORDER BY merge_request_count DESC
+    LIMIT 50
 
 code_review_mr_064_avg_diff_by_state:
   desc: "Code review mr 064 avg diff by state"
@@ -1690,6 +2026,12 @@ code_review_mr_064_avg_diff_by_state:
       "aggregation_sort": "-merge_request_count",
       "limit": 20
     }
+  opencypher: |
+    MATCH (mr:MergeRequest)
+    WHERE mr.state IN ['opened', 'merged']
+    RETURN mr.state, count(mr) AS merge_request_count, avg(mr.diff_size) AS avg_diff_size
+    ORDER BY merge_request_count DESC
+    LIMIT 20
 
 planning_work_item_065_by_state:
   desc: "Planning work item 065 by state"
@@ -1717,6 +2059,12 @@ planning_work_item_065_by_state:
       "aggregation_sort": "-work_item_count",
       "limit": 20
     }
+  opencypher: |
+    MATCH (wi:WorkItem)
+    WHERE wi.work_item_type IN ['issue', 'incident', 'task', 'epic']
+    RETURN wi.state, count(wi) AS work_item_count
+    ORDER BY work_item_count DESC
+    LIMIT 20
 
 planning_work_item_066_by_type:
   desc: "Planning work item 066 by type"
@@ -1744,6 +2092,12 @@ planning_work_item_066_by_type:
       "aggregation_sort": "-work_item_count",
       "limit": 20
     }
+  opencypher: |
+    MATCH (wi:WorkItem)
+    WHERE wi.state IN ['opened', 'closed']
+    RETURN wi.work_item_type, count(wi) AS work_item_count
+    ORDER BY work_item_count DESC
+    LIMIT 20
 
 planning_work_item_067_by_confidential:
   desc: "Planning work item 067 by confidential"
@@ -1771,6 +2125,12 @@ planning_work_item_067_by_confidential:
       "aggregation_sort": "-work_item_count",
       "limit": 20
     }
+  opencypher: |
+    MATCH (wi:WorkItem)
+    WHERE wi.state IN ['opened', 'closed']
+    RETURN wi.confidential, count(wi) AS work_item_count
+    ORDER BY work_item_count DESC
+    LIMIT 20
 
 planning_work_item_068_by_state_type:
   desc: "Planning work item 068 by state type"
@@ -1801,6 +2161,12 @@ planning_work_item_068_by_state_type:
       "aggregation_sort": "-work_item_count",
       "limit": 50
     }
+  opencypher: |
+    MATCH (wi:WorkItem)
+    WHERE wi.state IN ['opened', 'closed']
+    RETURN wi.state, wi.work_item_type, count(wi) AS work_item_count
+    ORDER BY work_item_count DESC
+    LIMIT 50
 
 planning_work_item_069_by_project_id:
   desc: "Planning work item 069 by project id"
@@ -1828,6 +2194,11 @@ planning_work_item_069_by_project_id:
       "aggregation_sort": "-open_work_item_count",
       "limit": 50
     }
+  opencypher: |
+    MATCH (wi:WorkItem {state: 'opened'})
+    RETURN wi.project_id, count(wi) AS open_work_item_count
+    ORDER BY open_work_item_count DESC
+    LIMIT 50
 
 planning_work_item_070_by_namespace_id:
   desc: "Planning work item 070 by namespace id"
@@ -1855,6 +2226,11 @@ planning_work_item_070_by_namespace_id:
       "aggregation_sort": "-open_work_item_count",
       "limit": 50
     }
+  opencypher: |
+    MATCH (wi:WorkItem {state: 'opened'})
+    RETURN wi.namespace_id, count(wi) AS open_work_item_count
+    ORDER BY open_work_item_count DESC
+    LIMIT 50
 
 project_071_by_visibility:
   desc: "Project 071 by visibility"
@@ -1882,6 +2258,12 @@ project_071_by_visibility:
       "aggregation_sort": "-project_count",
       "limit": 20
     }
+  opencypher: |
+    MATCH (p:Project)
+    WHERE p.visibility_level IN ['private', 'internal', 'public']
+    RETURN p.visibility_level, count(p) AS project_count
+    ORDER BY project_count DESC
+    LIMIT 20
 
 project_072_by_archived:
   desc: "Project 072 by archived"
@@ -1909,6 +2291,12 @@ project_072_by_archived:
       "aggregation_sort": "-project_count",
       "limit": 20
     }
+  opencypher: |
+    MATCH (p:Project)
+    WHERE p.visibility_level IN ['private', 'internal', 'public']
+    RETURN p.archived, count(p) AS project_count
+    ORDER BY project_count DESC
+    LIMIT 20
 
 project_073_by_visibility_archived:
   desc: "Project 073 by visibility archived"
@@ -1943,6 +2331,12 @@ project_073_by_visibility_archived:
       "aggregation_sort": "-project_count",
       "limit": 20
     }
+  opencypher: |
+    MATCH (p:Project)
+    WHERE p.visibility_level IN ['private', 'internal', 'public']
+    RETURN p.visibility_level, p.archived, count(p) AS project_count, max(p.updated_at) AS latest_update
+    ORDER BY project_count DESC
+    LIMIT 20
 
 join_vulnerability_project_074_by_project_visibility:
   desc: "Join vulnerability project 074 by project visibility"
@@ -1981,6 +2375,11 @@ join_vulnerability_project_074_by_project_visibility:
       "aggregation_sort": "-vulnerability_count",
       "limit": 20
     }
+  opencypher: |
+    MATCH (v:Vulnerability {state: 'detected'})-[:IN_PROJECT]->(p:Project)
+    RETURN p.visibility_level, count(v) AS vulnerability_count
+    ORDER BY vulnerability_count DESC
+    LIMIT 20
 
 join_vulnerability_project_075_by_vulnerability_and_visibility:
   desc: "Join vulnerability project 075 by vulnerability and visibility"
@@ -2022,6 +2421,11 @@ join_vulnerability_project_075_by_vulnerability_and_visibility:
       "aggregation_sort": "-vulnerability_count",
       "limit": 50
     }
+  opencypher: |
+    MATCH (v:Vulnerability {state: 'detected'})-[:IN_PROJECT]->(p:Project)
+    RETURN v.severity, p.visibility_level, count(v) AS vulnerability_count
+    ORDER BY vulnerability_count DESC
+    LIMIT 50
 
 join_security_scan_project_076_by_project_visibility:
   desc: "Join security scan project 076 by project visibility"
@@ -2060,6 +2464,11 @@ join_security_scan_project_076_by_project_visibility:
       "aggregation_sort": "-scan_count",
       "limit": 20
     }
+  opencypher: |
+    MATCH (s:SecurityScan {latest: true})-[:IN_PROJECT]->(p:Project)
+    RETURN p.visibility_level, count(s) AS scan_count
+    ORDER BY scan_count DESC
+    LIMIT 20
 
 join_security_scan_pipeline_077_by_pipeline_status:
   desc: "Join security scan pipeline 077 by pipeline status"
@@ -2098,6 +2507,11 @@ join_security_scan_pipeline_077_by_pipeline_status:
       "aggregation_sort": "-scan_count",
       "limit": 20
     }
+  opencypher: |
+    MATCH (s:SecurityScan {latest: true})-[:IN_PIPELINE]->(pipe:Pipeline)
+    RETURN pipe.status, count(s) AS scan_count
+    ORDER BY scan_count DESC
+    LIMIT 20
 
 join_security_scan_job_078_by_job_status:
   desc: "Join security scan job 078 by job status (scoped to one project to keep the SecurityScan x Job join under the memory cap)"
@@ -2137,6 +2551,11 @@ join_security_scan_job_078_by_job_status:
       "aggregation_sort": "-scan_count",
       "limit": 20
     }
+  opencypher: |
+    MATCH (s:SecurityScan {latest: true, project_id: {{PROJECT_ID}}})-[:RAN_BY]->(job:Job)
+    RETURN job.status, count(s) AS scan_count
+    ORDER BY scan_count DESC
+    LIMIT 20
 
 join_finding_project_079_by_project_visibility:
   desc: "Join finding project 079 by project visibility"
@@ -2175,6 +2594,11 @@ join_finding_project_079_by_project_visibility:
       "aggregation_sort": "-finding_count",
       "limit": 20
     }
+  opencypher: |
+    MATCH (f:Finding {deduplicated: true})-[:IN_PROJECT]->(p:Project)
+    RETURN p.visibility_level, count(f) AS finding_count
+    ORDER BY finding_count DESC
+    LIMIT 20
 
 join_finding_scanner_080_by_scanner_vendor:
   desc: "Join finding scanner 080 by scanner vendor"
@@ -2213,6 +2637,11 @@ join_finding_scanner_080_by_scanner_vendor:
       "aggregation_sort": "-finding_count",
       "limit": 20
     }
+  opencypher: |
+    MATCH (f:Finding {deduplicated: true})-[:DETECTED_BY]->(scanner:VulnerabilityScanner)
+    RETURN scanner.vendor, count(f) AS finding_count
+    ORDER BY finding_count DESC
+    LIMIT 20
 
 join_occurrence_project_082_by_project_visibility:
   desc: "Join occurrence project 082 by project visibility"
@@ -2251,6 +2680,12 @@ join_occurrence_project_082_by_project_visibility:
       "aggregation_sort": "-occurrence_count",
       "limit": 20
     }
+  opencypher: |
+    MATCH (o:VulnerabilityOccurrence)-[:IN_PROJECT]->(p:Project)
+    WHERE o.severity IN ['critical', 'high']
+    RETURN p.visibility_level, count(o) AS occurrence_count
+    ORDER BY occurrence_count DESC
+    LIMIT 20
 
 join_occurrence_vulnerability_083_by_vulnerability_state:
   desc: "Join occurrence vulnerability 083 by vulnerability state"
@@ -2289,6 +2724,12 @@ join_occurrence_vulnerability_083_by_vulnerability_state:
       "aggregation_sort": "-occurrence_count",
       "limit": 20
     }
+  opencypher: |
+    MATCH (o:VulnerabilityOccurrence)-[:OCCURRENCE_OF]->(v:Vulnerability)
+    WHERE o.severity IN ['critical', 'high']
+    RETURN v.state, count(o) AS occurrence_count
+    ORDER BY occurrence_count DESC
+    LIMIT 20
 
 join_occurrence_identifier_084_by_identifier_type:
   desc: "Join occurrence identifier 084 by identifier type"
@@ -2327,6 +2768,12 @@ join_occurrence_identifier_084_by_identifier_type:
       "aggregation_sort": "-occurrence_count",
       "limit": 50
     }
+  opencypher: |
+    MATCH (o:VulnerabilityOccurrence)-[:HAS_IDENTIFIER]->(i:VulnerabilityIdentifier)
+    WHERE o.severity IN ['critical', 'high']
+    RETURN i.external_type, count(o) AS occurrence_count
+    ORDER BY occurrence_count DESC
+    LIMIT 50
 
 join_pipeline_project_085_by_project_visibility:
   desc: "Join pipeline project 085 by project visibility"
@@ -2365,6 +2812,12 @@ join_pipeline_project_085_by_project_visibility:
       "aggregation_sort": "-pipeline_count",
       "limit": 20
     }
+  opencypher: |
+    MATCH (pipe:Pipeline)-[:IN_PROJECT]->(p:Project)
+    WHERE pipe.status IN ['success', 'failed']
+    RETURN p.visibility_level, count(pipe) AS pipeline_count
+    ORDER BY pipeline_count DESC
+    LIMIT 20
 
 join_job_pipeline_086_by_pipeline_status:
   desc: "Join job pipeline 086 by pipeline status"
@@ -2403,6 +2856,12 @@ join_job_pipeline_086_by_pipeline_status:
       "aggregation_sort": "-job_count",
       "limit": 20
     }
+  opencypher: |
+    MATCH (job:Job)-[:IN_PIPELINE]->(pipe:Pipeline)
+    WHERE job.status IN ['success', 'failed']
+    RETURN pipe.status, count(job) AS job_count
+    ORDER BY job_count DESC
+    LIMIT 20
 
 join_job_project_087_by_project_visibility:
   desc: "Join job project 087 by project visibility"
@@ -2441,6 +2900,11 @@ join_job_project_087_by_project_visibility:
       "aggregation_sort": "-failed_job_count",
       "limit": 20
     }
+  opencypher: |
+    MATCH (job:Job {status: 'failed'})-[:IN_PROJECT]->(p:Project)
+    RETURN p.visibility_level, count(job) AS failed_job_count
+    ORDER BY failed_job_count DESC
+    LIMIT 20
 
 join_pipeline_job_088_by_job_status:
   desc: "Join pipeline job 088 by job status"
@@ -2479,6 +2943,12 @@ join_pipeline_job_088_by_job_status:
       "aggregation_sort": "-job_count",
       "limit": 20
     }
+  opencypher: |
+    MATCH (pipe:Pipeline)-[:HAS_JOB]->(job:Job)
+    WHERE pipe.status IN ['success', 'failed']
+    RETURN job.status, count(job) AS job_count
+    ORDER BY job_count DESC
+    LIMIT 20
 
 join_pipeline_stage_089_by_stage_status:
   desc: "Join pipeline stage 089 by stage status"
@@ -2517,6 +2987,12 @@ join_pipeline_stage_089_by_stage_status:
       "aggregation_sort": "-stage_count",
       "limit": 20
     }
+  opencypher: |
+    MATCH (pipe:Pipeline)-[:HAS_STAGE]->(stage:Stage)
+    WHERE pipe.status IN ['success', 'failed']
+    RETURN stage.status, count(stage) AS stage_count
+    ORDER BY stage_count DESC
+    LIMIT 20
 
 join_stage_job_090_by_job_status:
   desc: "Join stage job 090 by job status"
@@ -2555,6 +3031,12 @@ join_stage_job_090_by_job_status:
       "aggregation_sort": "-job_count",
       "limit": 20
     }
+  opencypher: |
+    MATCH (stage:Stage)-[:HAS_JOB]->(job:Job)
+    WHERE stage.status IN ['success', 'failed']
+    RETURN job.status, count(job) AS job_count
+    ORDER BY job_count DESC
+    LIMIT 20
 
 join_merge_request_project_091_by_project_visibility:
   desc: "Join merge request project 091 by project visibility"
@@ -2593,6 +3075,11 @@ join_merge_request_project_091_by_project_visibility:
       "aggregation_sort": "-merge_request_count",
       "limit": 20
     }
+  opencypher: |
+    MATCH (mr:MergeRequest {state: 'merged'})-[:IN_PROJECT]->(p:Project)
+    RETURN p.visibility_level, count(mr) AS merge_request_count
+    ORDER BY merge_request_count DESC
+    LIMIT 20
 
 join_merge_request_pipeline_092_by_pipeline_status:
   desc: "Join merge request pipeline 092 by pipeline status"
@@ -2631,6 +3118,11 @@ join_merge_request_pipeline_092_by_pipeline_status:
       "aggregation_sort": "-merge_request_count",
       "limit": 20
     }
+  opencypher: |
+    MATCH (mr:MergeRequest {state: 'merged'})-[:HAS_HEAD_PIPELINE]->(pipe:Pipeline)
+    RETURN pipe.status, count(mr) AS merge_request_count
+    ORDER BY merge_request_count DESC
+    LIMIT 20
 
 join_work_item_project_093_by_project_visibility:
   desc: "Join work item project 093 by project visibility"
@@ -2669,6 +3161,11 @@ join_work_item_project_093_by_project_visibility:
       "aggregation_sort": "-work_item_count",
       "limit": 20
     }
+  opencypher: |
+    MATCH (wi:WorkItem {state: 'opened'})-[:IN_PROJECT]->(p:Project)
+    RETURN p.visibility_level, count(wi) AS work_item_count
+    ORDER BY work_item_count DESC
+    LIMIT 20
 
 join_work_item_group_094_by_group_visibility:
   desc: "Join work item group 094 by group visibility"
@@ -2707,6 +3204,11 @@ join_work_item_group_094_by_group_visibility:
       "aggregation_sort": "-work_item_count",
       "limit": 20
     }
+  opencypher: |
+    MATCH (wi:WorkItem {state: 'opened'})-[:IN_GROUP]->(g:Group)
+    RETURN g.visibility_level, count(wi) AS work_item_count
+    ORDER BY work_item_count DESC
+    LIMIT 20
 
 join_deployment_environment_095_by_environment_tier:
   desc: "Join deployment environment 095 by environment tier"
@@ -2745,6 +3247,12 @@ join_deployment_environment_095_by_environment_tier:
       "aggregation_sort": "-deployment_count",
       "limit": 20
     }
+  opencypher: |
+    MATCH (dep:Deployment)-[:IN_ENVIRONMENT]->(env:Environment)
+    WHERE dep.status IN ['success', 'failed', 'running']
+    RETURN env.tier, count(dep) AS deployment_count
+    ORDER BY deployment_count DESC
+    LIMIT 20
 
 join_deployment_project_096_by_project_visibility:
   desc: "Join deployment project 096 by project visibility"
@@ -2783,6 +3291,12 @@ join_deployment_project_096_by_project_visibility:
       "aggregation_sort": "-deployment_count",
       "limit": 20
     }
+  opencypher: |
+    MATCH (dep:Deployment)-[:IN_PROJECT]->(p:Project)
+    WHERE dep.status IN ['success', 'failed', 'running']
+    RETURN p.visibility_level, count(dep) AS deployment_count
+    ORDER BY deployment_count DESC
+    LIMIT 20
 
 join_environment_project_097_by_project_visibility:
   desc: "Join environment project 097 by project visibility"
@@ -2821,6 +3335,11 @@ join_environment_project_097_by_project_visibility:
       "aggregation_sort": "-environment_count",
       "limit": 20
     }
+  opencypher: |
+    MATCH (env:Environment {state: 'available'})-[:IN_PROJECT]->(p:Project)
+    RETURN p.visibility_level, count(env) AS environment_count
+    ORDER BY environment_count DESC
+    LIMIT 20
 
 join_vulnerability_finding_098_by_finding_severity:
   desc: "Join vulnerability HAS_FINDING VulnerabilityOccurrence 098, grouped by occurrence severity"
@@ -2859,6 +3378,11 @@ join_vulnerability_finding_098_by_finding_severity:
       "aggregation_sort": "-vulnerability_count",
       "limit": 20
     }
+  opencypher: |
+    MATCH (v:Vulnerability {state: 'detected'})-[:HAS_FINDING]->(f:VulnerabilityOccurrence)
+    RETURN f.severity, count(v) AS vulnerability_count
+    ORDER BY vulnerability_count DESC
+    LIMIT 20
 
 join_security_scan_finding_099_by_finding_severity:
   desc: "Join security scan finding 099 by finding severity"
@@ -2897,6 +3421,11 @@ join_security_scan_finding_099_by_finding_severity:
       "aggregation_sort": "-finding_count",
       "limit": 20
     }
+  opencypher: |
+    MATCH (s:SecurityScan {latest: true})-[:HAS_FINDING]->(f:Finding)
+    RETURN f.severity, count(f) AS finding_count
+    ORDER BY finding_count DESC
+    LIMIT 20
 
 join_pipeline_project_100_by_status_and_visibility:
   desc: "Join pipeline project 100 by status and visibility"
@@ -2942,4 +3471,10 @@ join_pipeline_project_100_by_status_and_visibility:
       "aggregation_sort": "-pipeline_count",
       "limit": 50
     }
+  opencypher: |
+    MATCH (pipe:Pipeline)-[:IN_PROJECT]->(p:Project)
+    WHERE pipe.status IN ['success', 'failed', 'running', 'pending']
+    RETURN pipe.status, p.visibility_level, count(pipe) AS pipeline_count, avg(pipe.duration) AS avg_duration
+    ORDER BY pipeline_count DESC
+    LIMIT 50
 

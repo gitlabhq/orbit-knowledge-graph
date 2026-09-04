@@ -12,12 +12,17 @@
 //! Design: `docs/design-documents/querying/opencypher_frontend.md`.
 
 mod lower;
+mod pattern;
+mod syntax;
+#[cfg(test)]
+mod tests;
+mod tree;
 
 use compiler::input::InputCursor;
 use compiler::{CompiledQueryContext, Input, QueryError, SecurityContext};
 use ontology::Ontology;
 
-pub use lower::is_valid_identifier;
+pub use tree::is_valid_identifier;
 
 /// Request-level parameter bindings for `$name` placeholders.
 pub type Parameters = serde_json::Map<String, serde_json::Value>;
@@ -137,7 +142,7 @@ fn check_nesting(statement: &str) -> compiler::Result<()> {
             '(' | '[' | '{' => {
                 depth += 1;
                 if depth > MAX_NESTING_DEPTH {
-                    let (line, col) = lower::line_col(statement, offset);
+                    let (line, col) = syntax::line_col(statement, offset);
                     return Err(QueryError::Syntax(format!(
                         "line {line}, column {col}: brackets nest deeper than {MAX_NESTING_DEPTH}"
                     )));

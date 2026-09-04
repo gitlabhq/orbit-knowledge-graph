@@ -14,6 +14,11 @@ nb_group_both_many_ids:
       "neighbors": {"direction": "both"},
       "limit": 500
     }
+  opencypher: |
+    MATCH (g:Group)--(n)
+    WHERE g.id IN $sample_20
+    RETURN n, g.id, g.full_path
+    LIMIT 500
 
 nb_group_incoming:
   desc: "Group center, incoming-only (members, work items, labels pointing at the group)."
@@ -26,6 +31,11 @@ nb_group_incoming:
       "neighbors": {"direction": "incoming"},
       "limit": 500
     }
+  opencypher: |
+    MATCH (g:Group)<--(n)
+    WHERE g.id IN $sample_20
+    RETURN n
+    LIMIT 500
 
 nb_group_outgoing:
   desc: "Group center, outgoing-only (CONTAINS subgroups and projects)."
@@ -38,6 +48,11 @@ nb_group_outgoing:
       "neighbors": {"direction": "outgoing"},
       "limit": 500
     }
+  opencypher: |
+    MATCH (g:Group)-->(n)
+    WHERE g.id IN $sample_20
+    RETURN n
+    LIMIT 500
 
 nb_group_single_both:
   desc: "Single Group center, both directions (control for the many-id variant)."
@@ -50,6 +65,11 @@ nb_group_single_both:
       "neighbors": {"direction": "both"},
       "limit": 500
     }
+  opencypher: |
+    MATCH (g:Group)--(n)
+    WHERE g.id IN $sample
+    RETURN n
+    LIMIT 500
 
 nb_project_both:
   desc: "Project center, both directions, no rel filter."
@@ -62,6 +82,11 @@ nb_project_both:
       "neighbors": {"direction": "both"},
       "limit": 500
     }
+  opencypher: |
+    MATCH (p:Project)--(n)
+    WHERE p.id IN $sample_5
+    RETURN n
+    LIMIT 500
 
 nb_project_incoming:
   desc: "Project center, incoming (MRs, work items, pipelines pointing at the project)."
@@ -74,6 +99,11 @@ nb_project_incoming:
       "neighbors": {"direction": "incoming"},
       "limit": 500
     }
+  opencypher: |
+    MATCH (p:Project)<--(n)
+    WHERE p.id IN $sample_5
+    RETURN n
+    LIMIT 500
 
 nb_project_outgoing:
   desc: "Project center, outgoing (CONTAINS files, IN_GROUP namespace)."
@@ -86,6 +116,11 @@ nb_project_outgoing:
       "neighbors": {"direction": "outgoing"},
       "limit": 500
     }
+  opencypher: |
+    MATCH (p:Project)-->(n)
+    WHERE p.id IN $sample_5
+    RETURN n
+    LIMIT 500
 
 nb_file_both:
   desc: "File center, both directions (DEFINES definitions; CONTAINS from project)."
@@ -98,6 +133,11 @@ nb_file_both:
       "neighbors": {"direction": "both"},
       "limit": 200
     }
+  opencypher: |
+    MATCH (f:File)--(n)
+    WHERE f.id IN $sample_5
+    RETURN n
+    LIMIT 200
 
 nb_file_outgoing_defines:
   desc: "File outgoing DEFINES: every definition declared in the file."
@@ -110,6 +150,11 @@ nb_file_outgoing_defines:
       "neighbors": {"direction": "outgoing", "rel_types": ["DEFINES"]},
       "limit": 200
     }
+  opencypher: |
+    MATCH (f:File)-[:DEFINES]->(n)
+    WHERE f.id IN $sample_5
+    RETURN n
+    LIMIT 200
 
 nb_definition_both:
   desc: "Definition center, both directions (CALLS, DEFINES, IMPORTS)."
@@ -122,6 +167,11 @@ nb_definition_both:
       "neighbors": {"direction": "both"},
       "limit": 200
     }
+  opencypher: |
+    MATCH (d:Definition)--(n)
+    WHERE d.id IN $sample_5
+    RETURN n
+    LIMIT 200
 
 nb_definition_calls_outgoing:
   desc: "Definition outgoing CALLS: direct callees."
@@ -134,6 +184,11 @@ nb_definition_calls_outgoing:
       "neighbors": {"direction": "outgoing", "rel_types": ["CALLS"]},
       "limit": 200
     }
+  opencypher: |
+    MATCH (d:Definition)-[:CALLS]->(n)
+    WHERE d.id IN $sample_5
+    RETURN n
+    LIMIT 200
 
 nb_definition_callers_incoming:
   desc: "Definition incoming CALLS: direct callers (find-usages shape)."
@@ -146,6 +201,11 @@ nb_definition_callers_incoming:
       "neighbors": {"direction": "incoming", "rel_types": ["CALLS"]},
       "limit": 200
     }
+  opencypher: |
+    MATCH (d:Definition)<-[:CALLS]-(n)
+    WHERE d.id IN $sample_5
+    RETURN n
+    LIMIT 200
 
 nb_merge_request_both:
   desc: "MergeRequest center, both directions."
@@ -158,6 +218,11 @@ nb_merge_request_both:
       "neighbors": {"direction": "both"},
       "limit": 200
     }
+  opencypher: |
+    MATCH (mr:MergeRequest)--(n)
+    WHERE mr.id IN $sample_5
+    RETURN n
+    LIMIT 200
 
 nb_work_item_both:
   desc: "WorkItem center, both directions."
@@ -170,3 +235,8 @@ nb_work_item_both:
       "neighbors": {"direction": "both"},
       "limit": 200
     }
+  opencypher: |
+    MATCH (wi:WorkItem)--(n)
+    WHERE wi.id IN $sample_5
+    RETURN n
+    LIMIT 200

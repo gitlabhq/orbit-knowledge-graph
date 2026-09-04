@@ -20,6 +20,7 @@ fi
 # pin, regex of files that require a bump when changed
 COVERS='
 query_dsl          ^(config/schemas/graph_query\.schema\.json|crates/query-engine/compiler/src/(input\.rs|passes/validate\.rs))$
+opencypher_dialect ^crates/query-engine/opencypher/src/.*$
 raw_output_format  ^(crates/query-engine/formatters/src/(graph|lib)\.rs|config/schemas/query_response\.json)$
 goon_output_format ^(crates/query-engine/formatters/src/goon/[^/]+\.rs|crates/query-engine/formatters/src/(graph|lib)\.rs)$
 '

@@ -124,6 +124,14 @@ _Avoid_: intermediate query language, intermediary LLM query language, JSON quer
 A graph query defined in YAML under `config/named_queries/` and invoked by name, instead of the client authoring the **Query DSL** string. Compiled against the ontology at `orbit-server` build time so drift fails the build.
 _Avoid_: preset query, query template
 
+**openCypher Frontend**:
+The text surface for the **Query DSL**: a read-only openCypher 9 subset (`MATCH ... RETURN`) that lowers straight to the compiler's `Input`, so a statement and its JSON query compile to byte-identical SQL. Versioned by the `opencypher_dialect` pin.
+_Avoid_: Cypher frontend, GQL frontend, text DSL
+
+**Twin**:
+The openCypher statement paired with a **Query DSL** query in a test fixture or corpus entry (`opencypher:` field). A twin must compile to the same SQL, parameters, and hydration plan as its JSON.
+_Avoid_: mirror query, translation
+
 **Hop**:
 A single **Relationship** traversal in the graph. Multi-hop queries traverse multiple relationships in sequence. Hard-capped at 3 hops for security and performance.
 _Avoid_: depth (ambiguous with tree depth)

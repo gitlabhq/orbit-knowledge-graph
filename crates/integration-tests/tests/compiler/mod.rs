@@ -1,3 +1,4 @@
+mod corpus;
 mod dialects;
 mod ontology;
 mod setup;

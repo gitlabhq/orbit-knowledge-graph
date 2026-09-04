@@ -5,12 +5,6 @@
 // string/list/null predicates, parameters, escaped symbolic names, and
 // comments. Read-only by construction: the only statement shape is
 // MATCH ... RETURN.
-//
-// Several constructs the DSL cannot express are still parsed where that is
-// cheap (OPTIONAL, DISTINCT, SKIP, OR/XOR/NOT, <>, count(*), unbounded ranges,
-// GQL quantifiers and temporal literals, single-dash GQL arrows, inline WHERE)
-// so the lowering step can reject them with a hint that names the DSL
-// limitation instead of a parser state.
 
 WHITESPACE = _{ " " | "\t" | "\r" | "\n" }
 COMMENT    = _{ ("//" ~ (!NEWLINE ~ ANY)*) | ("/*" ~ (!"*/" ~ ANY)* ~ "*/") }
@@ -39,7 +33,7 @@ path_fn_name  = @{ (^"shortestPath" | ^"allShortestPaths") ~ !ident_char }
 chain         = { node_pattern ~ (edge_pattern ~ node_pattern)* }
 
 node_pattern = { "(" ~ ident? ~ node_label* ~ property_map? ~ inline_where? ~ ")" }
-node_label   = { (":" | kw_is) ~ ident }
+node_label   = { (":" | kw_is) ~ schema_name }
 inline_where = { kw_where ~ condition }
 
 edge_pattern     = { (bracket_edge | arrow_edge) ~ gql_quantifier? }
@@ -57,11 +51,11 @@ gql_dash         = { "-" }
 gql_quantifier   = { "{" ~ integer? ~ ("," ~ integer?)? ~ "}" }
 
 edge_body     = { ident? ~ type_spec? ~ range_literal? ~ property_map? ~ inline_where? }
-type_spec     = { ":" ~ ident ~ ("|" ~ ":"? ~ ident)* }
+type_spec     = { ":" ~ schema_name ~ ("|" ~ ":"? ~ schema_name)* }
 range_literal = { "*" ~ integer? ~ (".." ~ integer?)? }
 
 property_map = { "{" ~ (property_kv ~ ("," ~ property_kv)*)? ~ "}" }
-property_kv  = { ident ~ ":" ~ value }
+property_kv  = { schema_name ~ ":" ~ value }
 
 // ── Conditions ──────────────────────────────────────────────────────────────
 
@@ -84,7 +78,7 @@ comp_op         = { "<>" | "!=" | "<=" | ">=" | "=~" | "=" | "<" | ">" }
 operand         = { gql_temporal | func_call | property_ref | value | ident }
 func_call       = { ident ~ "(" ~ kw_distinct? ~ (func_arg ~ ("," ~ func_arg)*)? ~ ")" }
 func_arg        = { star | operand }
-property_ref    = { ident ~ "." ~ ident }
+property_ref    = { ident ~ "." ~ schema_name }
 gql_temporal    = ${ gql_temporal_kw ~ WHITESPACE+ ~ string }
 gql_temporal_kw = @{ (^"DATETIME" | ^"TIMESTAMP" | ^"DATE") ~ !ident_char }
 star            = { "*" }
@@ -109,6 +103,9 @@ escape    = @{ "\\" ~ ANY }
 
 ident          = @{ backtick_ident | plain_ident }
 plain_ident    = @{ !reserved_word ~ ident_start ~ ident_char* }
+// Labels, relationship types, and property keys are `SchemaName` in the
+// EBNF: a symbolic name or a reserved word, so `:CONTAINS` is a valid type.
+schema_name    = @{ backtick_ident | (ident_start ~ ident_char*) }
 backtick_ident = @{ "`" ~ (!"`" ~ ANY)* ~ "`" }
 ident_start    = _{ ASCII_ALPHA | "_" }
 ident_char     = _{ ASCII_ALPHANUMERIC | "_" }

@@ -45,6 +45,10 @@
         "page_size": 10
       }
     }
+  opencypher: |
+    MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest {state: 'merged'})-[:IN_PROJECT]->(p:Project)
+    WHERE u.id IN $sample_3
+    RETURN u
 
 02_cascading_sip_4node_fan_out_cursor:
   desc: "Cascading sip 4node fan out cursor"
@@ -96,6 +100,11 @@
         "page_size": 10
       }
     }
+  opencypher: |
+    MATCH (p:Project)<-[:IN_PROJECT]-(mr:MergeRequest {state: 'merged'})<-[:AUTHORED]-(author:User),
+          (mr)-[:HAS_NOTE]->(note:Note)
+    WHERE p.id IN $sample
+    RETURN p
 
 03_neighbors_both_directions_cursor:
   desc: "Neighbors both directions cursor"
@@ -116,6 +125,10 @@
         "page_size": 20
       }
     }
+  opencypher: |
+    MATCH (mr:MergeRequest)--(n)
+    WHERE mr.id IN $sample_3
+    RETURN n
 
 04_neighbors_outgoing_rel_filter_cursor:
   desc: "Neighbors outgoing rel filter cursor"
@@ -139,6 +152,10 @@
         "page_size": 10
       }
     }
+  opencypher: |
+    MATCH (p:Project)-[:CONTAINS]->(n)
+    WHERE p.id IN $sample
+    RETURN n
 
 05_aggregation_count_merged_mrs_cursor:
   desc: "Aggregation count merged mrs cursor"
@@ -182,6 +199,10 @@
         "page_size": 5
       }
     }
+  opencypher: |
+    MATCH (mr:MergeRequest {state: 'merged'})-[:IN_PROJECT]->(p:Project)
+    RETURN p, p.name, count(mr) AS merged_mr_count
+    ORDER BY merged_mr_count DESC
 
 06_aggregation_sum_pipeline_duration_cursor:
   desc: "Aggregation sum pipeline duration cursor"
@@ -225,6 +246,10 @@
         "page_size": 5
       }
     }
+  opencypher: |
+    MATCH (pipe:Pipeline {status: 'success'})-[:IN_PROJECT]->(p:Project)
+    RETURN p, p.name, sum(pipe.duration) AS total_pipeline_seconds
+    ORDER BY total_pipeline_seconds DESC
 
 07_traversal_user_to_group_cursor:
   desc: "Traversal user to group cursor"
@@ -255,6 +280,10 @@
         "page_size": 10
       }
     }
+  opencypher: |
+    MATCH (u:User)-[:MEMBER_OF]->(g:Group)
+    WHERE u.id IN $sample
+    RETURN u
 
 08_traversal_project_pipelines_jobs_cursor:
   desc: "Traversal project pipelines jobs cursor"
@@ -300,6 +329,10 @@
         "page_size": 10
       }
     }
+  opencypher: |
+    MATCH (p:Project)<-[:IN_PROJECT]-(pipe:Pipeline {status: 'failed'})<-[:IN_PIPELINE]-(j:Job {status: 'failed'})
+    WHERE p.id IN $sample
+    RETURN p
 
 09_ns_traversal_all_mrs_cursor:
   desc: "Ns traversal all mrs cursor"
@@ -332,6 +365,10 @@
         "page_size": 10
       }
     }
+  opencypher: |
+    MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest)
+    WHERE mr.state IN ['opened', 'closed', 'merged']
+    RETURN u
 
 10_search_pipelines_failed_cursor:
   desc: "Search pipelines failed cursor"
@@ -356,6 +393,9 @@
         "page_size": 10
       }
     }
+  opencypher: |
+    MATCH (pipe:Pipeline {status: 'failed'})
+    RETURN pipe.id, pipe.status, pipe.ref
 
 11_search_all_mrs_cursor:
   desc: "Search all mrs cursor"
@@ -380,6 +420,10 @@
         "page_size": 20
       }
     }
+  opencypher: |
+    MATCH (mr:MergeRequest)
+    WHERE mr.state IN ['opened', 'closed', 'merged']
+    RETURN mr.id, mr.title, mr.state
 
 12_complex_mr_full_context_cursor:
   desc: "Complex mr full context cursor"
@@ -421,6 +465,10 @@
         "page_size": 20
       }
     }
+  opencypher: |
+    MATCH (mr:MergeRequest {state: 'merged'})<-[:AUTHORED]-(author:User),
+          (mr)-[:IN_PROJECT]->(p:Project)
+    RETURN mr
 
 13_large_result_traversal_all_jobs_cursor:
   desc: "Large result traversal all jobs cursor"
@@ -453,6 +501,10 @@
         "page_size": 50
       }
     }
+  opencypher: |
+    MATCH (j:Job)-[:IN_PIPELINE]->(pipe:Pipeline)
+    WHERE j.status IN ['success', 'failed', 'running', 'pending']
+    RETURN j
 
 14_aggregation_no_sort_cursor:
   desc: "Aggregation no sort cursor"
@@ -495,6 +547,10 @@
         "page_size": 5
       }
     }
+  opencypher: |
+    MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project)
+    WHERE mr.state IN ['opened', 'closed', 'merged']
+    RETURN p, p.name, count(mr) AS mr_count
 
 15_path_finding_depth2_user_to_project:
   desc: "Path finding depth2 user to project"
@@ -524,6 +580,10 @@
         "rel_types": ["AUTHORED", "IN_PROJECT"]
       }
     }
+  opencypher: |
+    MATCH p = shortestPath((start:User)-[:AUTHORED|IN_PROJECT*..2]->(`end`:Project))
+    WHERE start.id IN $sample AND `end`.id IN $sample
+    RETURN p
 
 16_path_finding_depth3:
   desc: "Path finding depth3 work item containment chain"
@@ -553,6 +613,10 @@
         "rel_types": ["CONTAINS"]
       }
     }
+  opencypher: |
+    MATCH p = shortestPath((start:WorkItem)-[:CONTAINS*..3]->(`end`:WorkItem))
+    WHERE start.id IN $sample AND `end`.id IN $sample
+    RETURN p
 
 17_property_group_vulnerabilities_by_severity_cursor:
   desc: "Property group vulnerabilities by severity cursor"
@@ -582,6 +646,11 @@
         "page_size": 5
       }
     }
+  opencypher: |
+    MATCH (v:Vulnerability)
+    WHERE v.state IN ['detected', 'confirmed', 'resolved', 'dismissed']
+    RETURN v.severity, count(v) AS vulnerability_count
+    ORDER BY vulnerability_count DESC
 
 18_property_group_pipeline_status_source_cursor:
   desc: "Property group pipeline status source cursor"
@@ -614,6 +683,11 @@
         "page_size": 10
       }
     }
+  opencypher: |
+    MATCH (pipe:Pipeline)
+    WHERE pipe.status IN ['success', 'failed', 'running', 'pending']
+    RETURN pipe.status, pipe.source, count(pipe) AS pipeline_count
+    ORDER BY pipeline_count DESC
 
 19_node_property_group_project_pipeline_status_cursor:
   desc: "Node property group project pipeline status cursor"
@@ -661,4 +735,9 @@
         "page_size": 10
       }
     }
+  opencypher: |
+    MATCH (pipe:Pipeline)-[:IN_PROJECT]->(p:Project)
+    WHERE pipe.status IN ['success', 'failed']
+    RETURN p, p.name, p.full_path, pipe.status, count(pipe) AS pipeline_count
+    ORDER BY pipeline_count DESC
 

@@ -20,7 +20,7 @@ pub enum SqlDialect {
     ClickHouse,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ParameterizedQuery {
     pub sql: String,
     pub params: HashMap<String, ParamValue>,

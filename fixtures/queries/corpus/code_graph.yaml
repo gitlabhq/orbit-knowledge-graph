@@ -33,6 +33,11 @@ q1:
       ],
       "limit": 30
     }
+  opencypher: |
+    MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+    WHERE caller.definition_type IN ['Class', 'Module', 'Method', 'Function']
+    RETURN caller
+    LIMIT 30
 
 q2:
   desc: "Calls into an imported symbol"
@@ -63,6 +68,11 @@ q2:
       ],
       "limit": 30
     }
+  opencypher: |
+    MATCH (caller:Definition)-[:CALLS]->(sym:ImportedSymbol)
+    WHERE caller.definition_type IN ['Class', 'Module', 'Method', 'Function']
+    RETURN caller
+    LIMIT 30
 
 q3:
   desc: "Class inheritance chain"
@@ -93,6 +103,10 @@ q3:
       ],
       "limit": 30
     }
+  opencypher: |
+    MATCH (child:Definition {definition_type: 'Class'})-[:EXTENDS]->(parent:Definition)
+    RETURN child
+    LIMIT 30
 
 q4:
   desc: "Count callers of a definition (aggregation)"
@@ -127,6 +141,11 @@ q4:
       ],
       "limit": 1
     }
+  opencypher: |
+    MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+    WHERE callee.id IN $sample
+    RETURN count(caller) AS caller_count
+    LIMIT 1
 
 q5:
   desc: "Definitions by type"
@@ -154,6 +173,12 @@ q5:
       "aggregation_sort": "-definition_count",
       "limit": 20
     }
+  opencypher: |
+    MATCH (d:Definition)
+    WHERE d.definition_type IN ['Class', 'Module', 'Method', 'Function']
+    RETURN d.definition_type, count(d) AS definition_count
+    ORDER BY definition_count DESC
+    LIMIT 20
 
 q6:
   desc: "Files by language"
@@ -181,6 +206,12 @@ q6:
       "aggregation_sort": "-file_count",
       "limit": 20
     }
+  opencypher: |
+    MATCH (f:File)
+    WHERE f.language IN ['ruby', 'javascript', 'typescript', 'python']
+    RETURN f.language, count(f) AS file_count
+    ORDER BY file_count DESC
+    LIMIT 20
 
 q7:
   desc: "Definitions by file and type"
@@ -226,6 +257,12 @@ q7:
       "aggregation_sort": "-definition_count",
       "limit": 20
     }
+  opencypher: |
+    MATCH (f:File)-[:DEFINES]->(d:Definition)
+    WHERE f.language IN ['ruby', 'javascript', 'typescript', 'python']
+    RETURN f, f.path, f.language, d.definition_type, count(d) AS definition_count
+    ORDER BY definition_count DESC
+    LIMIT 20
 
 q8:
   desc: "Imported symbols by type"
@@ -253,4 +290,10 @@ q8:
       "aggregation_sort": "-import_count",
       "limit": 20
     }
+  opencypher: |
+    MATCH (sym:ImportedSymbol)
+    WHERE sym.import_type IN ['Import', 'NamedImport', 'DefaultImport', 'FromImport', 'Require', 'Include', 'WildcardImport']
+    RETURN sym.import_type, count(sym) AS import_count
+    ORDER BY import_count DESC
+    LIMIT 20
 

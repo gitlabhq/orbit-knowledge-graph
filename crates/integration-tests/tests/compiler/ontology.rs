@@ -1,9 +1,17 @@
+//! Compiler fixtures against the embedded ontology, each paired with its
+//! openCypher twin through the helpers in `setup.rs`. JSON-shape error tests
+//! keep their schema-message assertions and gain the frontend's own rejection
+//! beside them. The hydration fixtures build the internal `Hydration` query
+//! type directly and have no twin.
+
 use std::sync::Arc;
 
-use super::setup::{admin_ctx, embedded_ontology, test_ctx};
+use super::setup::{
+    admin_ctx, compile_both, embedded_ontology, reject_both, reject_opencypher, test_ctx,
+};
 use compiler::{
-    AuthorizedPath, ColumnSelection, HydrationPlan, Input, InputNode, QueryType, compile,
-    compile_input,
+    AuthorizedPath, ColumnSelection, HydrationPlan, Input, InputNode, QueryError, QueryType,
+    compile, compile_input,
 };
 use orbit_utils::traversal_path::TraversalPath;
 
@@ -15,23 +23,32 @@ fn valid_column_in_order_by() {
         "limit": 10,
         "order_by": "u.username"
     }"#;
-    assert!(compile(json, &embedded_ontology(), &test_ctx()).is_ok());
+    compile_both(
+        json,
+        "MATCH (u:User {id: 1}) RETURN u.username ORDER BY u.username LIMIT 10",
+        &embedded_ontology(),
+        &test_ctx(),
+    );
 }
 
 #[test]
 fn invalid_column_in_order_by() {
-    let err = compile(
+    let (json_err, cypher_err) = reject_both(
         r#"{
             "query_type": "traversal",
             "nodes": [{"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]}],
             "limit": 10,
             "order_by": "u.nonexistent_column"
         }"#,
+        "MATCH (u:User {id: 1}) RETURN u.username ORDER BY u.nonexistent_column LIMIT 10",
         &embedded_ontology(),
         &test_ctx(),
-    )
-    .unwrap_err();
-    assert!(err.to_string().contains("does not exist"));
+    );
+    assert!(json_err.to_string().contains("does not exist"));
+    assert!(
+        cypher_err.to_string().contains("does not exist"),
+        "{cypher_err}"
+    );
 }
 
 #[test]
@@ -41,53 +58,66 @@ fn valid_column_in_filter() {
         "nodes": [{"id": "u", "entity": "User", "columns": ["username"], "filters": {"username": "admin"}}],
         "limit": 10
     }"#;
-    assert!(compile(json, &embedded_ontology(), &test_ctx()).is_ok());
+    compile_both(
+        json,
+        "MATCH (u:User {username: 'admin'}) RETURN u.username LIMIT 10",
+        &embedded_ontology(),
+        &test_ctx(),
+    );
 }
 
 #[test]
 fn invalid_column_in_filter() {
-    let err = compile(
+    let (json_err, cypher_err) = reject_both(
         r#"{
             "query_type": "traversal",
             "nodes": [{"id": "u", "entity": "User", "columns": ["username"], "filters": {"nonexistent_column": "value"}}],
             "limit": 10
         }"#,
-        &embedded_ontology(), &test_ctx(),
-    ).unwrap_err();
-    assert!(err.to_string().contains("nonexistent_column"));
+        "MATCH (u:User {nonexistent_column: 'value'}) RETURN u.username LIMIT 10",
+        &embedded_ontology(),
+        &test_ctx(),
+    );
+    assert!(json_err.to_string().contains("nonexistent_column"));
+    assert!(
+        cypher_err.to_string().contains("nonexistent_column"),
+        "{cypher_err}"
+    );
 }
 
 #[test]
 fn valid_column_in_aggregation() {
-    assert!(
-        compile(
-            r#"{
+    compile_both(
+        r#"{
             "query_type": "aggregation",
             "nodes": [{"id": "p", "entity": "Project", "node_ids": [1], "columns": ["name"]}],
             "aggregations": [{"count": "p.name", "as": "name_count"}],
             "limit": 10
         }"#,
-            &embedded_ontology(),
-            &test_ctx(),
-        )
-        .is_ok()
+        "MATCH (p:Project {id: 1}) RETURN count(p.name) AS name_count LIMIT 10",
+        &embedded_ontology(),
+        &test_ctx(),
     );
 }
 
 #[test]
 fn invalid_column_in_aggregation() {
-    let err = compile(
+    let (json_err, cypher_err) = reject_both(
         r#"{
             "query_type": "aggregation",
             "nodes": [{"id": "p", "entity": "Project", "node_ids": [1], "columns": ["name"]}],
             "aggregations": [{"sum": "p.invalid_property", "as": "total"}],
             "limit": 10
         }"#,
+        "MATCH (p:Project {id: 1}) RETURN sum(p.invalid_property) AS total LIMIT 10",
         &embedded_ontology(),
         &test_ctx(),
-    )
-    .unwrap_err();
-    assert!(err.to_string().contains("does not exist"));
+    );
+    assert!(json_err.to_string().contains("does not exist"));
+    assert!(
+        cypher_err.to_string().contains("does not exist"),
+        "{cypher_err}"
+    );
 }
 
 #[test]
@@ -109,6 +139,19 @@ fn invalid_entity_type_rejected() {
     assert!(msg.contains("Branch"), "got: {msg}");
     assert!(msg.contains("WorkItem"), "got: {msg}");
     assert!(!msg.contains("more —"), "got: {msg}");
+
+    let err = reject_opencypher(
+        "MATCH (n:NonexistentType {id: 1}) RETURN n.name LIMIT 10",
+        &embedded_ontology(),
+    );
+    assert!(matches!(err, QueryError::AllowlistRejected(_)), "{err:?}");
+    let msg = err.to_string();
+    assert!(msg.contains("NonexistentType"), "got: {msg}");
+    assert!(msg.contains("Valid values:"), "got: {msg}");
+    assert!(
+        msg.contains("Branch") && msg.contains("WorkItem"),
+        "got: {msg}"
+    );
 }
 
 #[test]
@@ -131,11 +174,22 @@ fn invalid_filter_key_lists_valid_candidates() {
     assert!(!msg.contains("more —"), "got: {msg}");
     // The opaque "or N other candidates" truncation must not leak through.
     assert!(!msg.contains("other candidates"), "got: {msg}");
+
+    let err = reject_opencypher(
+        "MATCH (u:User {project_full_path: 'x'}) RETURN u.username LIMIT 10",
+        &embedded_ontology(),
+    );
+    let msg = err.to_string();
+    assert!(msg.contains("project_full_path"), "got: {msg}");
+    assert!(
+        msg.contains("Valid values:") && msg.contains("username"),
+        "got: {msg}"
+    );
 }
 
 #[test]
 fn invalid_group_by_property_lists_valid_fields() {
-    let err = compile(
+    let (json_err, cypher_err) = reject_both(
         r#"{
             "query_type": "aggregation",
             "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}],
@@ -143,15 +197,17 @@ fn invalid_group_by_property_lists_valid_fields() {
             "aggregations": [{"count": "p", "as": "c"}],
             "limit": 10
         }"#,
+        "MATCH (p:Project {id: 1}) RETURN p.reviewer_count, count(p) AS c LIMIT 10",
         &embedded_ontology(),
         &test_ctx(),
-    )
-    .unwrap_err();
-    let msg = err.to_string();
-    assert!(msg.contains("reviewer_count"), "got: {msg}");
-    assert!(msg.contains("does not exist"), "got: {msg}");
-    assert!(msg.contains("Valid fields"), "got: {msg}");
-    assert!(msg.contains("name"), "got: {msg}");
+    );
+    for err in [json_err, cypher_err] {
+        let msg = err.to_string();
+        assert!(msg.contains("reviewer_count"), "got: {msg}");
+        assert!(msg.contains("does not exist"), "got: {msg}");
+        assert!(msg.contains("Valid fields"), "got: {msg}");
+        assert!(msg.contains("name"), "got: {msg}");
+    }
 }
 
 #[test]
@@ -196,6 +252,13 @@ fn bare_string_group_by_dotted_garbage_shows_expected_shapes() {
         msg.contains("\"<node-id>\"") && msg.contains("\"<node-id>.<property>\""),
         "got: {msg}"
     );
+
+    let err = reject_opencypher(
+        "MATCH (p:Project {id: 1}) RETURN p.name.x, count(p) AS c LIMIT 10",
+        &embedded_ontology(),
+    );
+    assert!(matches!(err, QueryError::Syntax(_)), "{err:?}");
+    assert!(err.to_string().contains("Nested property access"), "{err}");
 }
 
 #[test]
@@ -214,6 +277,13 @@ fn bare_string_group_by_unknown_node_names_the_reference() {
     .unwrap_err();
     let msg = err.to_string();
     assert!(msg.contains("undefined node \"name\""), "got: {msg}");
+
+    let err = reject_opencypher(
+        "MATCH (p:Project {id: 1}) RETURN name, count(p) AS c LIMIT 10",
+        &embedded_ontology(),
+    );
+    assert!(matches!(err, QueryError::ReferenceError(_)), "{err:?}");
+    assert!(err.to_string().contains("`name` is not bound"), "{err}");
 }
 
 #[test]
@@ -235,6 +305,17 @@ fn invalid_column_lists_valid_candidates() {
     assert!(msg.contains("username"), "got: {msg}");
     // The opaque oneOf fallthrough must not leak through.
     assert!(!msg.contains("under any of the schemas"), "got: {msg}");
+
+    let err = reject_opencypher(
+        "MATCH (u:User) RETURN u.bogus_col LIMIT 10",
+        &embedded_ontology(),
+    );
+    assert!(matches!(err, QueryError::AllowlistRejected(_)), "{err:?}");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("bogus_col") && msg.contains("username"),
+        "got: {msg}"
+    );
 }
 
 #[test]
@@ -259,6 +340,17 @@ fn invalid_relationship_type_lists_valid_candidates() {
     assert!(msg.contains("Valid values"), "got: {msg}");
     assert!(msg.contains("AUTHORED"), "got: {msg}");
     assert!(!msg.contains("under any of the schemas"), "got: {msg}");
+
+    let err = reject_opencypher(
+        "MATCH (u:User {id: 1})-[:BOGUS_REL]->(n:Note) RETURN u LIMIT 10",
+        &embedded_ontology(),
+    );
+    assert!(matches!(err, QueryError::AllowlistRejected(_)), "{err:?}");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("BOGUS_REL") && msg.contains("AUTHORED"),
+        "got: {msg}"
+    );
 }
 
 #[test]
@@ -274,7 +366,15 @@ fn full_pipeline() {
         "order_by": "-n.created_at"
     }"#;
 
-    let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
+    let result = compile_both(
+        json,
+        "MATCH (n:Note {confidential: true})<-[:AUTHORED]-(u:User)
+         RETURN n.confidential, u.username
+         ORDER BY n.created_at DESC
+         LIMIT 25",
+        &embedded_ontology(),
+        &test_ctx(),
+    );
     let rendered = result.base.render();
 
     // AUTHORED is FK-elided via author_id — no edge table scan.
@@ -295,7 +395,14 @@ fn package_built_by_pipeline_traversal() {
         "limit": 25
     }"#;
 
-    let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
+    let result = compile_both(
+        json,
+        "MATCH (pkg:Package {package_type: 'npm'})-[:BUILT_BY]->(pl:Pipeline)
+         RETURN pkg.name, pkg.version, pkg.package_type, pl.id, pl.status
+         LIMIT 25",
+        &embedded_ontology(),
+        &test_ctx(),
+    );
     let rendered = result.base.render();
 
     assert!(rendered.contains("gl_package"));
@@ -319,7 +426,12 @@ fn basic_search_query() {
         "limit": 10
     }"#;
 
-    let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
+    let result = compile_both(
+        json,
+        "MATCH (u:User {username: 'admin'}) RETURN u.username LIMIT 10",
+        &embedded_ontology(),
+        &test_ctx(),
+    );
     let rendered = result.base.render();
 
     assert!(
@@ -356,7 +468,16 @@ fn complex_search_query() {
         "order_by": "-u.created_at"
     }"#;
 
-    let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
+    let result = compile_both(
+        json,
+        "MATCH (u:User)
+         WHERE u.username STARTS WITH 'admin' AND u.state IN ['active', 'blocked'] AND u.created_at >= '2024-01-01'
+         RETURN u.username, u.state, u.created_at
+         ORDER BY u.created_at DESC
+         LIMIT 50",
+        &embedded_ontology(),
+        &test_ctx(),
+    );
     // Uses ClickHouse `IN [...]` array syntax which sqlparser can't parse.
     let rendered = result.base.render();
 
@@ -382,7 +503,12 @@ fn search_with_specific_columns() {
         "limit": 10
     }"#;
 
-    let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
+    let result = compile_both(
+        json,
+        "MATCH (u:User {id: 1}) RETURN u.username, u.state LIMIT 10",
+        &embedded_ontology(),
+        &test_ctx(),
+    );
     let rendered = result.base.render();
 
     assert!(rendered.contains("_gkg_u_id"));
@@ -399,7 +525,12 @@ fn search_with_wildcard_columns() {
         "limit": 10
     }"#;
 
-    let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
+    let result = compile_both(
+        json,
+        "MATCH (u:User {id: 1}) RETURN * LIMIT 10",
+        &embedded_ontology(),
+        &test_ctx(),
+    );
     let rendered = result.base.render();
 
     assert!(rendered.contains("_gkg_u_id"));
@@ -407,19 +538,27 @@ fn search_with_wildcard_columns() {
     assert!(matches!(result.hydration, HydrationPlan::None));
 }
 
+const USER_CONTAINS_PROJECT_JSON: &str = r#"{
+    "query_type": "traversal",
+    "nodes": [
+        {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
+        {"id": "p", "entity": "Project", "columns": ["name"]}
+    ],
+    "relationships": [{"type": "CONTAINS", "from": "u", "to": "p"}],
+    "limit": 10
+}"#;
+
+const USER_CONTAINS_PROJECT_STATEMENT: &str =
+    "MATCH (u:User {id: 1})-[:CONTAINS]->(p:Project) RETURN u.username, p.name LIMIT 10";
+
 #[test]
 fn traversal_with_columns() {
-    let json = r#"{
-        "query_type": "traversal",
-        "nodes": [
-            {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
-            {"id": "p", "entity": "Project", "columns": ["name"]}
-        ],
-        "relationships": [{"type": "CONTAINS", "from": "u", "to": "p"}],
-        "limit": 10
-    }"#;
-
-    let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
+    let result = compile_both(
+        USER_CONTAINS_PROJECT_JSON,
+        USER_CONTAINS_PROJECT_STATEMENT,
+        &embedded_ontology(),
+        &test_ctx(),
+    );
     let rendered = result.base.render();
 
     assert!(rendered.contains("_gkg_u_id"));
@@ -430,6 +569,8 @@ fn traversal_with_columns() {
 
 #[test]
 fn aggregation_includes_mandatory_columns_for_group_by_node() {
+    // `mr.columns` has no surface: mr is counted, not grouped, and the
+    // compiler ignores columns on such a node, so the SQL matches.
     let json = r#"{
         "query_type": "aggregation",
         "nodes": [
@@ -442,7 +583,14 @@ fn aggregation_includes_mandatory_columns_for_group_by_node() {
         "limit": 10
     }"#;
 
-    let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
+    let result = compile_both(
+        json,
+        "MATCH (u:User {id: 1})-[:AUTHORED]->(mr:MergeRequest)
+         RETURN u, u.username, count(mr) AS mr_count
+         LIMIT 10",
+        &embedded_ontology(),
+        &test_ctx(),
+    );
     let rendered = result.base.render();
 
     assert!(rendered.contains("_gkg_u_id"));
@@ -465,7 +613,13 @@ fn path_finding_uses_gkg_path_not_node_columns() {
                  "rel_types": ["CONTAINS"]}
     }"#;
 
-    let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
+    let result = compile_both(
+        json,
+        "MATCH p = shortestPath((start:Project {id: 100})-[:CONTAINS*..3]->(`end`:Project {id: 200}))
+         RETURN p, start.name, `end`.name",
+        &embedded_ontology(),
+        &test_ctx(),
+    );
     let rendered = result.base.render();
 
     assert!(rendered.contains("_gkg_path"));
@@ -474,17 +628,12 @@ fn path_finding_uses_gkg_path_not_node_columns() {
 
 #[test]
 fn result_context_populated() {
-    let json = r#"{
-        "query_type": "traversal",
-        "nodes": [
-            {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
-            {"id": "p", "entity": "Project", "columns": ["name"]}
-        ],
-        "relationships": [{"type": "CONTAINS", "from": "u", "to": "p"}],
-        "limit": 10
-    }"#;
-
-    let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
+    let result = compile_both(
+        USER_CONTAINS_PROJECT_JSON,
+        USER_CONTAINS_PROJECT_STATEMENT,
+        &embedded_ontology(),
+        &test_ctx(),
+    );
     let rendered = result.base.render();
 
     assert_eq!(result.base.result_context.len(), 2);
@@ -517,7 +666,12 @@ fn multi_hop_traversal_generates_union_subquery() {
         "limit": 25
     }"#;
 
-    let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
+    let result = compile_both(
+        json,
+        "MATCH (u:User {id: 1})-[:MEMBER_OF*1..3]->(p:Project) RETURN u.username, p.name LIMIT 25",
+        &embedded_ontology(),
+        &test_ctx(),
+    );
     let rendered = result.base.render();
 
     assert!(rendered.contains("UNION ALL"));
@@ -537,7 +691,12 @@ fn multi_hop_with_floor_filter() {
         "limit": 10
     }"#;
 
-    let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
+    let result = compile_both(
+        json,
+        "MATCH (u:User {id: 1})-[:MEMBER_OF*2..3]->(p:Project) RETURN u.username, p.name LIMIT 10",
+        &embedded_ontology(),
+        &test_ctx(),
+    );
     let rendered = result.base.render();
 
     assert!(rendered.contains("depth"));
@@ -555,7 +714,12 @@ fn single_hop_does_not_generate_recursive_cte() {
         "limit": 25
     }"#;
 
-    let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
+    let result = compile_both(
+        json,
+        "MATCH (u:User {id: 1})-[:AUTHORED*1..1]->(n:Note) RETURN u.username, n.confidential LIMIT 25",
+        &embedded_ontology(),
+        &test_ctx(),
+    );
     let rendered = result.base.render();
 
     assert!(
@@ -578,7 +742,14 @@ fn multi_hop_aggregation() {
         "limit": 10
     }"#;
 
-    let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
+    let result = compile_both(
+        json,
+        "MATCH (u:User {id: 1})-[:MEMBER_OF*1..2]->(p:Project)
+         RETURN u, u.username, count(p) AS project_count
+         LIMIT 10",
+        &embedded_ontology(),
+        &test_ctx(),
+    );
     let rendered = result.base.render();
 
     assert!(rendered.contains("UNION ALL"));
@@ -594,7 +765,12 @@ fn definition_uses_project_id_for_redaction() {
         "limit": 10
     }"#;
 
-    let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
+    let result = compile_both(
+        json,
+        "MATCH (d:Definition {id: 1}) RETURN d.name, d.project_id LIMIT 10",
+        &embedded_ontology(),
+        &test_ctx(),
+    );
     let rendered = result.base.render();
 
     assert!(rendered.contains("_gkg_d_id"));
@@ -613,7 +789,12 @@ fn project_still_uses_id_for_redaction() {
         "limit": 10
     }"#;
 
-    let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
+    let result = compile_both(
+        json,
+        "MATCH (p:Project {id: 1}) RETURN p.name LIMIT 10",
+        &embedded_ontology(),
+        &test_ctx(),
+    );
     let rendered = result.base.render();
 
     assert!(rendered.contains("_gkg_p_id"));
@@ -625,8 +806,8 @@ fn project_still_uses_id_for_redaction() {
 
 #[test]
 fn cursor_pagination_validation() {
-    use compiler::QueryError;
     use compiler::passes::cursor::{canonical_hash, encode};
+    use compiler::{CompiledQueryContext, compile_from_input};
 
     let ontology = embedded_ontology();
     let ctx = test_ctx();
@@ -638,7 +819,8 @@ fn cursor_pagination_validation() {
     }"#;
     let result = compile(json, &ontology, &ctx);
     assert!(result.is_ok(), "valid cursor should compile: {result:?}");
-    let rendered = result.unwrap().base.render();
+    let first_page = result.unwrap();
+    let rendered = first_page.base.render();
     assert!(
         rendered.contains("LIMIT 21"),
         "cursor fetches page_size + 1 probe row: {rendered}"
@@ -659,7 +841,8 @@ fn cursor_pagination_validation() {
         result.is_ok(),
         "after token from same query should compile: {result:?}"
     );
-    let rendered = result.unwrap().base.render();
+    let second_page = result.unwrap();
+    let rendered = second_page.base.render();
     assert!(
         rendered.contains("u.id >"),
         "after token should lower to a seek predicate: {rendered}"
@@ -680,6 +863,36 @@ fn cursor_pagination_validation() {
         matches!(err, QueryError::PaginationError(_)),
         "malformed token should be a pagination error, got: {err}"
     );
+
+    // The openCypher frontend takes the cursor beside the statement and binds
+    // `after` to its own query hash; the compiled pages match the JSON ones.
+    let statement = "MATCH (u:User {id: 1}) RETURN u.username";
+    let cypher = |page_size: u32,
+                  after: Option<String>|
+     -> compiler::Result<CompiledQueryContext> {
+        let mut input = opencypher::lower(statement, &opencypher::Parameters::new(), &ontology)?;
+        opencypher::attach_cursor(&mut input, page_size, after)?;
+        compile_from_input(input, &ontology, &ctx)
+    };
+    let cypher_first = cypher(20, None).unwrap();
+    assert_eq!(cypher_first.base, first_page.base);
+    let cypher_hash = cypher_first.input.compiler.query_hash;
+    let cypher_second = cypher(20, Some(encode(cypher_hash, &[Some("7".into())]))).unwrap();
+    assert_eq!(cypher_second.base, second_page.base);
+    let err = cypher(20, Some(encode(hash, &[Some("7".into())]))).unwrap_err();
+    assert!(
+        matches!(err, QueryError::PaginationError(_)),
+        "a JSON-issued token must not transfer to the openCypher frontend, got: {err}"
+    );
+    let err = cypher(20, Some("not-base64!".into())).unwrap_err();
+    assert!(matches!(err, QueryError::PaginationError(_)), "{err}");
+    for page_size in [0, 1001] {
+        let err = cypher(page_size, None).unwrap_err();
+        assert!(
+            matches!(err, QueryError::Validation(_)),
+            "page_size {page_size}: {err}"
+        );
+    }
 
     let err = compile(
         r#"{
@@ -725,16 +938,15 @@ fn cursor_pagination_validation() {
     );
     assert!(err.is_err(), "page_size above 1000 should fail");
 
-    let result = compile(
+    let result = compile_both(
         r#"{
         "query_type": "traversal",
         "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}]
     }"#,
+        "MATCH (u:User {id: 1}) RETURN u",
         &ontology,
         &ctx,
     );
-    assert!(result.is_ok(), "no cursor should compile fine");
-    let result = result.unwrap();
     let rendered = result.base.render();
     assert!(
         rendered.contains("LIMIT 31"),
@@ -747,22 +959,27 @@ fn cursor_pagination_validation() {
     );
 }
 
+const OPENED_MR_AUTHOR_JSON: &str = r#"{
+    "query_type": "traversal",
+    "nodes": [
+        {"id": "mr", "entity": "MergeRequest", "filters": {"state": "opened"}},
+        {"id": "u", "entity": "User"}
+    ],
+    "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
+    "limit": 10
+}"#;
+
+const OPENED_MR_AUTHOR_STATEMENT: &str =
+    "MATCH (mr:MergeRequest {state: 'opened'})<-[:AUTHORED]-(u:User) RETURN mr LIMIT 10";
+
 #[test]
 fn render_traversal_inlines_all_params() {
-    let rendered = compile(
-        r#"{
-        "query_type": "traversal",
-        "nodes": [
-            {"id": "mr", "entity": "MergeRequest", "filters": {"state": "opened"}},
-            {"id": "u", "entity": "User"}
-        ],
-        "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
-        "limit": 10
-    }"#,
+    let rendered = compile_both(
+        OPENED_MR_AUTHOR_JSON,
+        OPENED_MR_AUTHOR_STATEMENT,
         &embedded_ontology(),
         &test_ctx(),
     )
-    .unwrap()
     .base
     .render();
 
@@ -779,7 +996,7 @@ fn render_traversal_inlines_all_params() {
 
 #[test]
 fn render_in_filter_inlines_array() {
-    let rendered = compile(
+    let rendered = compile_both(
         r#"{
         "query_type": "traversal",
         "nodes": [{"id": "u", "entity": "User", "filters": {
@@ -787,10 +1004,10 @@ fn render_in_filter_inlines_array() {
         }}],
         "limit": 10
     }"#,
+        "MATCH (u:User) WHERE u.user_type IN ['project_bot', 'service_account'] RETURN u LIMIT 10",
         &embedded_ontology(),
         &test_ctx(),
     )
-    .unwrap()
     .base
     .render();
 
@@ -803,16 +1020,16 @@ fn render_in_filter_inlines_array() {
 
 #[test]
 fn render_node_ids_inlines_array() {
-    let rendered = compile(
+    let rendered = compile_both(
         r#"{
         "query_type": "traversal",
         "nodes": [{"id": "u", "entity": "User", "node_ids": [100, 200, 300]}],
         "limit": 10
     }"#,
+        "MATCH (u:User) WHERE u.id IN [100, 200, 300] RETURN u LIMIT 10",
         &embedded_ontology(),
         &test_ctx(),
     )
-    .unwrap()
     .base
     .render();
 
@@ -825,20 +1042,12 @@ fn render_node_ids_inlines_array() {
 
 #[test]
 fn debug_json_round_trip() {
-    let compiled = compile(
-        r#"{
-        "query_type": "traversal",
-        "nodes": [
-            {"id": "mr", "entity": "MergeRequest", "filters": {"state": "opened"}},
-            {"id": "u", "entity": "User"}
-        ],
-        "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
-        "limit": 10
-    }"#,
+    let compiled = compile_both(
+        OPENED_MR_AUTHOR_JSON,
+        OPENED_MR_AUTHOR_STATEMENT,
         &embedded_ontology(),
         &test_ctx(),
-    )
-    .unwrap();
+    );
 
     let rendered = compiled.base.render();
     assert!(
@@ -1162,101 +1371,89 @@ fn hydration_id_column_included_in_map() {
     );
 }
 
+/// Both frontends reject with the same compiler message.
+fn reject_both_with(json: &str, statement: &str, ctx: &compiler::SecurityContext, expected: &str) {
+    let (json_err, cypher_err) = reject_both(json, statement, &embedded_ontology(), ctx);
+    for err in [json_err, cypher_err] {
+        assert!(
+            err.to_string().contains(expected),
+            "expected {expected:?}, got: {err}"
+        );
+    }
+}
+
 #[test]
 fn like_rejects_short_contains_pattern() {
-    let err = compile(
+    reject_both_with(
         r#"{
             "query_type": "traversal",
             "nodes": [{"id": "u", "entity": "User",
                      "filters": {"username": {"contains": "ab"}}}],
             "limit": 10
         }"#,
-        &embedded_ontology(),
+        "MATCH (u:User) WHERE u.username CONTAINS 'ab' RETURN u LIMIT 10",
         &test_ctx(),
-    )
-    .unwrap_err();
-    assert!(
-        err.to_string()
-            .contains("search pattern must be at least 3"),
-        "expected min length error, got: {err}"
+        "search pattern must be at least 3",
     );
 }
 
 #[test]
 fn like_rejects_single_char_starts_with() {
-    let err = compile(
+    reject_both_with(
         r#"{
             "query_type": "traversal",
             "nodes": [{"id": "u", "entity": "User",
                      "filters": {"username": {"starts_with": "a"}}}],
             "limit": 10
         }"#,
-        &embedded_ontology(),
+        "MATCH (u:User) WHERE u.username STARTS WITH 'a' RETURN u LIMIT 10",
         &test_ctx(),
-    )
-    .unwrap_err();
-    assert!(
-        err.to_string()
-            .contains("search pattern must be at least 3"),
-        "expected min length error, got: {err}"
+        "search pattern must be at least 3",
     );
 }
 
 #[test]
 fn like_rejects_empty_ends_with() {
-    let err = compile(
+    reject_both_with(
         r#"{
             "query_type": "traversal",
             "nodes": [{"id": "u", "entity": "User",
                      "filters": {"username": {"ends_with": ""}}}],
             "limit": 10
         }"#,
-        &embedded_ontology(),
+        "MATCH (u:User) WHERE u.username ENDS WITH '' RETURN u LIMIT 10",
         &test_ctx(),
-    )
-    .unwrap_err();
-    assert!(
-        err.to_string()
-            .contains("search pattern must be at least 3"),
-        "expected min length error, got: {err}"
+        "search pattern must be at least 3",
     );
 }
 
 #[test]
 fn like_rejects_contains_on_email() {
-    let err = compile(
+    reject_both_with(
         r#"{
             "query_type": "traversal",
             "nodes": [{"id": "u", "entity": "User",
                      "filters": {"email": {"contains": "example"}}}],
             "limit": 10
         }"#,
-        &embedded_ontology(),
+        "MATCH (u:User) WHERE u.email CONTAINS 'example' RETURN u LIMIT 10",
         &test_ctx(),
-    )
-    .unwrap_err();
-    assert!(
-        err.to_string().contains("LIKE operators"),
-        "expected like_allowed rejection, got: {err}"
+        "LIKE operators",
     );
 }
 
 #[test]
 fn like_rejects_starts_with_on_email() {
-    let err = compile(
+    reject_both_with(
         r#"{
             "query_type": "traversal",
             "nodes": [{"id": "u", "entity": "User",
                      "filters": {"email": {"starts_with": "alice"}}}],
             "limit": 10
         }"#,
-        &embedded_ontology(),
+        "MATCH (u:User) WHERE u.email STARTS WITH 'alice' RETURN u LIMIT 10",
         &test_ctx(),
-    )
-    .unwrap_err();
-    assert!(
-        err.to_string().contains("LIKE operators"),
-        "expected like_allowed rejection, got: {err}"
+        "LIKE operators",
     );
 }
 
@@ -1265,197 +1462,175 @@ fn like_equality_on_email_compiles_for_admin() {
     // `like_allowed: false` blocks LIKE operators but not equality. Admin context
     // is used because User.email is also gated by `admin_only`, which the
     // RestrictPass enforces ahead of like_allowed.
-    assert!(
-        compile(
-            r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User",
-                     "filters": {"email": "alice@example.com"}}],
-            "limit": 10
-        }"#,
-            &embedded_ontology(),
-            &admin_ctx(),
-        )
-        .is_ok()
-    );
-}
-
-#[test]
-fn equality_on_email_rejected_for_non_admin() {
-    let err = compile(
+    compile_both(
         r#"{
             "query_type": "traversal",
             "nodes": [{"id": "u", "entity": "User",
                      "filters": {"email": "alice@example.com"}}],
             "limit": 10
         }"#,
+        "MATCH (u:User {email: 'alice@example.com'}) RETURN u LIMIT 10",
         &embedded_ontology(),
-        &test_ctx(),
-    )
-    .unwrap_err();
-    let msg = err.to_string();
-    assert!(
-        msg.contains("email") && msg.contains("administrator"),
-        "expected admin-only rejection on User.email, got: {msg}"
+        &admin_ctx(),
     );
 }
 
 #[test]
+fn equality_on_email_rejected_for_non_admin() {
+    let (json_err, cypher_err) = reject_both(
+        r#"{
+            "query_type": "traversal",
+            "nodes": [{"id": "u", "entity": "User",
+                     "filters": {"email": "alice@example.com"}}],
+            "limit": 10
+        }"#,
+        "MATCH (u:User {email: 'alice@example.com'}) RETURN u LIMIT 10",
+        &embedded_ontology(),
+        &test_ctx(),
+    );
+    for err in [json_err, cypher_err] {
+        let msg = err.to_string();
+        assert!(
+            msg.contains("email") && msg.contains("administrator"),
+            "expected admin-only rejection on User.email, got: {msg}"
+        );
+    }
+}
+
+#[test]
 fn filterable_allows_traversal_path_starts_with_inside_scope() {
-    compile(
+    compile_both(
         r#"{
             "query_type": "traversal",
             "nodes": [{"id": "g", "entity": "Group",
                      "filters": {"traversal_path": {"starts_with": "1/100/"}}}],
             "limit": 10
         }"#,
+        "MATCH (g:Group) WHERE g.traversal_path STARTS WITH '1/100/' RETURN g LIMIT 10",
         &embedded_ontology(),
         &test_ctx(),
-    )
-    .expect("traversal_path starts_with inside JWT scope should compile");
+    );
 }
 
 #[test]
 fn filterable_allows_traversal_path_root_starts_with_inside_scope() {
-    compile(
+    compile_both(
         r#"{
             "query_type": "traversal",
             "nodes": [{"id": "g", "entity": "Group",
                      "filters": {"traversal_path": {"starts_with": "1/"}}}],
             "limit": 10
         }"#,
+        "MATCH (g:Group) WHERE g.traversal_path STARTS WITH '1/' RETURN g LIMIT 10",
         &embedded_ontology(),
         &test_ctx(),
-    )
-    .expect("traversal_path root starts_with inside JWT scope should compile");
+    );
 }
 
 #[test]
 fn filterable_allows_traversal_path_equality_inside_scope() {
-    compile(
+    compile_both(
         r#"{
             "query_type": "traversal",
             "nodes": [{"id": "p", "entity": "Project",
                      "filters": {"traversal_path": "1/100/1000/"}}],
             "limit": 10
         }"#,
+        "MATCH (p:Project {traversal_path: '1/100/1000/'}) RETURN p LIMIT 10",
         &embedded_ontology(),
         &test_ctx(),
-    )
-    .expect("traversal_path equality inside JWT scope should compile");
+    );
 }
 
 #[test]
 fn filterable_rejects_traversal_path_outside_scope() {
-    let err = compile(
+    reject_both_with(
         r#"{
             "query_type": "traversal",
             "nodes": [{"id": "mr", "entity": "MergeRequest",
                      "filters": {"traversal_path": "2/"}}],
             "limit": 10
         }"#,
-        &embedded_ontology(),
+        "MATCH (mr:MergeRequest {traversal_path: '2/'}) RETURN mr LIMIT 10",
         &test_ctx(),
-    )
-    .unwrap_err();
-    assert!(
-        err.to_string().contains("authorized traversal_path scope"),
-        "expected traversal_path scope rejection, got: {err}"
+        "authorized traversal_path scope",
     );
 }
 
 #[test]
 fn filterable_rejects_traversal_path_above_scope() {
-    let err = compile(
+    reject_both_with(
         r#"{
             "query_type": "traversal",
             "nodes": [{"id": "p", "entity": "Project",
                      "filters": {"traversal_path": "1/"}}],
             "limit": 10
         }"#,
-        &embedded_ontology(),
+        "MATCH (p:Project {traversal_path: '1/'}) RETURN p LIMIT 10",
         &compiler::SecurityContext::new(1, vec!["1/100/".into()]).unwrap(),
-    )
-    .unwrap_err();
-    assert!(
-        err.to_string().contains("authorized traversal_path scope"),
-        "expected traversal_path scope rejection, got: {err}"
+        "authorized traversal_path scope",
     );
 }
 
 #[test]
 fn filterable_rejects_traversal_path_without_trailing_slash() {
-    let err = compile(
+    reject_both_with(
         r#"{
             "query_type": "traversal",
             "nodes": [{"id": "g", "entity": "Group",
                      "filters": {"traversal_path": {"starts_with": "1/100"}}}],
             "limit": 10
         }"#,
-        &embedded_ontology(),
+        "MATCH (g:Group) WHERE g.traversal_path STARTS WITH '1/100' RETURN g LIMIT 10",
         &test_ctx(),
-    )
-    .unwrap_err();
-    assert!(
-        err.to_string().contains("invalid traversal_path format"),
-        "expected traversal_path format rejection, got: {err}"
+        "invalid traversal_path format",
     );
 }
 
 #[test]
 fn filterable_rejects_traversal_path_contains_operator() {
-    let err = compile(
+    reject_both_with(
         r#"{
             "query_type": "traversal",
             "nodes": [{"id": "p", "entity": "Project",
                      "filters": {"traversal_path": {"contains": "100"}}}],
             "limit": 10
         }"#,
-        &embedded_ontology(),
+        "MATCH (p:Project) WHERE p.traversal_path CONTAINS '100' RETURN p LIMIT 10",
         &test_ctx(),
-    )
-    .unwrap_err();
-    assert!(
-        err.to_string().contains("only eq, in, and starts_with"),
-        "expected traversal_path operator rejection, got: {err}"
+        "only eq, in, and starts_with",
     );
 }
 
 #[test]
 fn filterable_rejects_traversal_path_below_entity_role_floor() {
-    let err = compile(
+    reject_both_with(
         r#"{
             "query_type": "traversal",
             "nodes": [{"id": "v", "entity": "Vulnerability",
                      "filters": {"traversal_path": "1/100/1000/"}}],
             "limit": 10
         }"#,
-        &embedded_ontology(),
+        "MATCH (v:Vulnerability {traversal_path: '1/100/1000/'}) RETURN v LIMIT 10",
         &compiler::SecurityContext::new_with_roles(1, vec![AuthorizedPath::new("1/100/", 20)])
             .unwrap(),
-    )
-    .unwrap_err();
-    assert!(
-        err.to_string().contains("authorized traversal_path scope"),
-        "expected traversal_path role-scope rejection, got: {err}"
+        "authorized traversal_path scope",
     );
 }
 
 #[test]
 fn filterable_allows_traversal_path_in_columns() {
-    assert!(
-        compile(
-            r#"{
+    compile_both(
+        r#"{
             "query_type": "traversal",
             "nodes": [{"id": "g", "entity": "Group",
                      "columns": ["name", "traversal_path"],
                      "node_ids": [100]}],
             "limit": 10
         }"#,
-            &embedded_ontology(),
-            &test_ctx(),
-        )
-        .is_ok()
+        "MATCH (g:Group {id: 100}) RETURN g.name, g.traversal_path LIMIT 10",
+        &embedded_ontology(),
+        &test_ctx(),
     );
 }
 
@@ -1471,7 +1646,12 @@ fn aggregation_count_pushes_project_id_into_dedup_subquery() {
                    "filters": {"project_id": {"eq": 278964}}}],
         "aggregations": [{"count": "d", "as": "total"}]
     }"#;
-    let result = compile(json, &embedded_ontology(), &admin_ctx()).unwrap();
+    let result = compile_both(
+        json,
+        "MATCH (d:Definition {project_id: 278964}) RETURN count(d) AS total",
+        &embedded_ontology(),
+        &admin_ctx(),
+    );
     let rendered = result.base.render();
 
     assert!(
@@ -1504,7 +1684,12 @@ fn pinned_traversal_narrows_joined_node_via_nf_cte() {
         "relationships": [{"type": "DEFINES", "from": "f", "to": "d"}],
         "limit": 50
     }"#;
-    let result = compile(json, &embedded_ontology(), &admin_ctx()).unwrap();
+    let result = compile_both(
+        json,
+        "MATCH (f:File {id: '12345'})-[:DEFINES]->(d:Definition) RETURN f.path, d.name LIMIT 50",
+        &embedded_ontology(),
+        &admin_ctx(),
+    );
     let rendered = result.base.render();
 
     assert!(
@@ -1533,7 +1718,12 @@ fn calls_traversal_compiles_against_embedded_ontology() {
         "limit": 25
     }"#;
 
-    let result = compile(json, &embedded_ontology(), &admin_ctx()).unwrap();
+    let result = compile_both(
+        json,
+        "MATCH (caller:Definition {id: 1})-[:CALLS]->(callee:Definition) RETURN caller.name, callee.name LIMIT 25",
+        &embedded_ontology(),
+        &admin_ctx(),
+    );
     let rendered = result.base.render();
     assert!(
         rendered.contains("gl_code_edge"),
@@ -1553,7 +1743,12 @@ fn aggregation_count_in_clause_pushes_project_id() {
                    "filters": {"project_id": {"in": [69095239, 278964, 74646916]}}}],
         "aggregations": [{"count": "d", "as": "total"}]
     }"#;
-    let result = compile(json, &embedded_ontology(), &admin_ctx()).unwrap();
+    let result = compile_both(
+        json,
+        "MATCH (d:Definition) WHERE d.project_id IN [69095239, 278964, 74646916] RETURN count(d) AS total",
+        &embedded_ontology(),
+        &admin_ctx(),
+    );
     let rendered = result.base.render();
 
     let inner = rendered
@@ -1578,7 +1773,12 @@ fn extends_traversal_compiles_against_embedded_ontology() {
         "limit": 25
     }"#;
 
-    let result = compile(json, &embedded_ontology(), &admin_ctx()).unwrap();
+    let result = compile_both(
+        json,
+        "MATCH (child:Definition {id: 1})-[:EXTENDS]->(parent:Definition) RETURN child.name, parent.name LIMIT 25",
+        &embedded_ontology(),
+        &admin_ctx(),
+    );
     let rendered = result.base.render();
     assert!(
         rendered.contains("gl_code_edge"),
@@ -1602,7 +1802,12 @@ fn calls_to_imported_symbol_variant_compiles() {
         "limit": 10
     }"#;
 
-    assert!(compile(json, &embedded_ontology(), &admin_ctx()).is_ok());
+    compile_both(
+        json,
+        "MATCH (caller:Definition {id: 1})-[:CALLS]->(sym:ImportedSymbol) RETURN caller.name, sym.identifier_name LIMIT 10",
+        &embedded_ontology(),
+        &admin_ctx(),
+    );
 }
 
 #[test]
@@ -1619,7 +1824,12 @@ fn calls_aggregation_compiles() {
         "limit": 1
     }"#;
 
-    assert!(compile(json, &embedded_ontology(), &admin_ctx()).is_ok());
+    compile_both(
+        json,
+        "MATCH (caller:Definition {id: 1})-[:CALLS]->(callee:Definition) RETURN callee, count(caller) AS callers LIMIT 1",
+        &embedded_ontology(),
+        &admin_ctx(),
+    );
 }
 
 #[test]
@@ -1636,7 +1846,12 @@ fn code_graph_edge_union_routes_to_code_table() {
         "limit": 25
     }"#;
 
-    let result = compile(json, &embedded_ontology(), &admin_ctx()).unwrap();
+    let result = compile_both(
+        json,
+        "MATCH (a:Definition {id: 1})-[:CALLS|EXTENDS|DEFINES]->(b:Definition) RETURN a LIMIT 25",
+        &embedded_ontology(),
+        &admin_ctx(),
+    );
     let rendered = result.base.render();
     assert!(
         rendered.contains("gl_code_edge"),

@@ -21,6 +21,11 @@ q1:
       "limit": 30,
       "order_by": "-u.created_at"
     }
+  opencypher: |
+    MATCH (u:User {state: 'active'})
+    RETURN u
+    ORDER BY u.created_at DESC
+    LIMIT 30
 
 q2:
   desc: "Open merge requests in a project"
@@ -53,6 +58,12 @@ q2:
       "limit": 25,
       "order_by": "-mr.created_at"
     }
+  opencypher: |
+    MATCH (mr:MergeRequest {state: 'opened'})-[:IN_PROJECT]->(p:Project)
+    WHERE p.id IN $sample
+    RETURN mr
+    ORDER BY mr.created_at DESC
+    LIMIT 25
 
 q3:
   desc: "Draft MRs awaiting review"
@@ -84,6 +95,10 @@ q3:
       ],
       "limit": 20
     }
+  opencypher: |
+    MATCH (mr:MergeRequest {state: 'opened', draft: true})<-[:AUTHORED]-(author:User)
+    RETURN mr
+    LIMIT 20
 
 q4:
   desc: "MRs merged by a specific user"
@@ -116,6 +131,12 @@ q4:
       "limit": 30,
       "order_by": "-mr.updated_at"
     }
+  opencypher: |
+    MATCH (mr:MergeRequest {state: 'merged'})<-[:MERGED]-(merger:User)
+    WHERE merger.id IN $sample
+    RETURN mr
+    ORDER BY mr.updated_at DESC
+    LIMIT 30
 
 q5:
   desc: "Count MRs per project"
@@ -154,6 +175,12 @@ q5:
       "aggregation_sort": "-mr_count",
       "limit": 10
     }
+  opencypher: |
+    MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project)
+    WHERE mr.state IN ['opened', 'closed', 'merged']
+    RETURN p, count(mr) AS mr_count
+    ORDER BY mr_count DESC
+    LIMIT 10
 
 q6:
   desc: "Failed pipelines recently"
@@ -185,6 +212,11 @@ q6:
       "limit": 30,
       "order_by": "-pipe.created_at"
     }
+  opencypher: |
+    MATCH (pipe:Pipeline {status: 'failed'})-[:IN_PROJECT]->(p:Project)
+    RETURN pipe
+    ORDER BY pipe.created_at DESC
+    LIMIT 30
 
 q7:
   desc: "Pipeline success rate by project"
@@ -222,6 +254,11 @@ q7:
       ],
       "limit": 20
     }
+  opencypher: |
+    MATCH (pipe:Pipeline)-[:IN_PROJECT]->(p:Project)
+    WHERE pipe.status IN ['success', 'failed']
+    RETURN p, count(pipe) AS total_pipelines
+    LIMIT 20
 
 q8:
   desc: "Long-running pipelines"
@@ -241,6 +278,12 @@ q8:
       "limit": 20,
       "order_by": "-pipe.duration"
     }
+  opencypher: |
+    MATCH (pipe:Pipeline {status: 'success'})
+    WHERE pipe.duration > 60
+    RETURN pipe
+    ORDER BY pipe.duration DESC
+    LIMIT 20
 
 q9:
   desc: "Critical vulnerabilities detected"
@@ -273,6 +316,11 @@ q9:
       "limit": 30,
       "order_by": "-v.detected_at"
     }
+  opencypher: |
+    MATCH (v:Vulnerability {severity: 'critical', state: 'detected'})-[:IN_PROJECT]->(p:Project)
+    RETURN v
+    ORDER BY v.detected_at DESC
+    LIMIT 30
 
 q10:
   desc: "Unresolved high-severity vulns by report type"
@@ -299,6 +347,11 @@ q10:
       ],
       "limit": 10
     }
+  opencypher: |
+    MATCH (v:Vulnerability)
+    WHERE v.severity IN ['high', 'critical'] AND v.state IN ['detected', 'confirmed']
+    RETURN count(v) AS vuln_count
+    LIMIT 10
 
 q11:
   desc: "Vulnerabilities fixed by MRs"
@@ -332,6 +385,10 @@ q11:
       ],
       "limit": 25
     }
+  opencypher: |
+    MATCH (v:Vulnerability {state: 'resolved'})<-[:FIXES]-(mr:MergeRequest {state: 'merged'})
+    RETURN v
+    LIMIT 25
 
 q12:
   desc: "Open work items (issues) by type"
@@ -357,6 +414,10 @@ q12:
       ],
       "limit": 10
     }
+  opencypher: |
+    MATCH (wi:WorkItem {state: 'opened'})
+    RETURN count(wi) AS count
+    LIMIT 10
 
 q13:
   desc: "Overdue work items"
@@ -375,6 +436,11 @@ q13:
       "limit": 30,
       "order_by": "wi.due_date"
     }
+  opencypher: |
+    MATCH (wi:WorkItem {state: 'opened'})
+    RETURN wi
+    ORDER BY wi.due_date
+    LIMIT 30
 
 q14:
   desc: "High weight work items assigned to user"
@@ -407,6 +473,11 @@ q14:
       ],
       "limit": 20
     }
+  opencypher: |
+    MATCH (wi:WorkItem {state: 'opened'})<-[:ASSIGNED]-(assignee:User)
+    WHERE wi.weight >= 1 AND assignee.id IN $sample
+    RETURN wi
+    LIMIT 20
   expect: empty  # only ~6% of opened gitlab-org work items have weight>=1; a random sample user rarely has one assigned
 
 q15:
@@ -438,6 +509,10 @@ q15:
       ],
       "limit": 30
     }
+  opencypher: |
+    MATCH (mr:MergeRequest {state: 'merged'})-[:CLOSES]->(wi:WorkItem)
+    RETURN mr
+    LIMIT 30
 
 q16:
   desc: "Notes (comments) on MRs by user"
@@ -470,6 +545,12 @@ q16:
       "limit": 30,
       "order_by": "-note.created_at"
     }
+  opencypher: |
+    MATCH (note:Note {noteable_type: 'MergeRequest'})<-[:AUTHORED]-(author:User)
+    WHERE author.id IN $sample
+    RETURN note
+    ORDER BY note.created_at DESC
+    LIMIT 30
   expect: empty  # most sampled users have no MR-noteable_type notes in gitlab-org; verified rows for hand-picked MR commenters only
 
 q17:
@@ -509,6 +590,11 @@ q17:
       "aggregation_sort": "-note_count",
       "limit": 20
     }
+  opencypher: |
+    MATCH (note:Note {noteable_type: 'MergeRequest'})<-[:AUTHORED]-(author:User)
+    RETURN author, count(note) AS note_count
+    ORDER BY note_count DESC
+    LIMIT 20
 
 q18:
   desc: "Projects in a group"
@@ -541,6 +627,12 @@ q18:
       "limit": 30,
       "order_by": "-p.last_activity_at"
     }
+  opencypher: |
+    MATCH (p:Project {archived: false})<-[:CONTAINS]-(g:Group)
+    WHERE g.id IN $sample
+    RETURN p
+    ORDER BY p.last_activity_at DESC
+    LIMIT 30
 
 q19:
   desc: "Public projects"
@@ -560,6 +652,11 @@ q19:
       "limit": 20,
       "order_by": "-p.star_count"
     }
+  opencypher: |
+    MATCH (p:Project {visibility_level: 'public', archived: false})
+    RETURN p
+    ORDER BY p.star_count DESC
+    LIMIT 20
 
 q20:
   desc: "User contributions: authored MRs"
@@ -598,6 +695,12 @@ q20:
       "aggregation_sort": "-mr_count",
       "limit": 20
     }
+  opencypher: |
+    MATCH (mr:MergeRequest)<-[:AUTHORED]-(author:User)
+    WHERE mr.state IN ['opened', 'closed', 'merged']
+    RETURN author, count(mr) AS mr_count
+    ORDER BY mr_count DESC
+    LIMIT 20
 
 q21:
   desc: "MR reviewers per project"
@@ -644,6 +747,12 @@ q21:
       ],
       "limit": 15
     }
+  opencypher: |
+    MATCH (mr:MergeRequest)<-[:REVIEWER]-(reviewer:User),
+          (mr)-[:IN_PROJECT]->(p:Project)
+    WHERE mr.state IN ['opened', 'closed', 'merged']
+    RETURN p, count(reviewer) AS reviewer_count
+    LIMIT 15
 
 q22:
   desc: "Work items in milestone"
@@ -675,6 +784,11 @@ q22:
       ],
       "limit": 30
     }
+  opencypher: |
+    MATCH (wi:WorkItem {state: 'opened'})-[:IN_MILESTONE]->(m:Milestone)
+    WHERE m.id IN $sample
+    RETURN wi
+    LIMIT 30
 
 q23:
   desc: "Work items with specific label"
@@ -706,6 +820,11 @@ q23:
       ],
       "limit": 30
     }
+  opencypher: |
+    MATCH (wi:WorkItem {state: 'opened'})-[:HAS_LABEL]->(lbl:Label)
+    WHERE lbl.id IN $sample
+    RETURN wi
+    LIMIT 30
 
 q24:
   desc: "Pipeline triggered by MR"
@@ -738,6 +857,12 @@ q24:
       "limit": 10,
       "order_by": "-pipe.created_at"
     }
+  opencypher: |
+    MATCH (pipe:Pipeline {source: 'merge_request_event'})<-[:TRIGGERED]-(mr:MergeRequest)
+    WHERE mr.id IN $sample
+    RETURN pipe
+    ORDER BY pipe.created_at DESC
+    LIMIT 10
   expect: empty  # random sampled MRs in gitlab-org rarely have a TRIGGERED Pipeline edge; structurally verified against a known MR
 
 q25:
@@ -767,6 +892,10 @@ q25:
         "rel_types": ["CONTAINS"]
       }
     }
+  opencypher: |
+    MATCH p = shortestPath((start:Project)-[:CONTAINS*..2]->(`end`:Project))
+    WHERE start.id IN $sample AND `end`.id IN $sample
+    RETURN p
   expect: empty  # CONTAINS is parent->child only; two random gitlab-org projects share a Group parent and have no directed CONTAINS path between them
 
 q26:
@@ -785,6 +914,10 @@ q26:
       }],
       "limit": 20
     }
+  opencypher: |
+    MATCH (u:User {state: 'active'})
+    RETURN u
+    LIMIT 20
 
 q27:
   desc: "Bot accounts"
@@ -803,6 +936,12 @@ q27:
       "limit": 30,
       "order_by": "-u.created_at"
     }
+  opencypher: |
+    MATCH (u:User)
+    WHERE u.user_type IN ['project_bot', 'service_account', 'automation_bot']
+    RETURN u
+    ORDER BY u.created_at DESC
+    LIMIT 30
 
 q28:
   desc: "Confidential work items"
@@ -834,6 +973,10 @@ q28:
       ],
       "limit": 20
     }
+  opencypher: |
+    MATCH (wi:WorkItem {confidential: true, state: 'opened'})-[:IN_PROJECT]->(p:Project)
+    RETURN wi
+    LIMIT 20
 
 q29:
   desc: "SAST vulnerabilities by severity"
@@ -861,6 +1004,11 @@ q29:
       "aggregation_sort": "-total",
       "limit": 10
     }
+  opencypher: |
+    MATCH (v:Vulnerability {report_type: 'sast'})
+    RETURN v.severity, count(v) AS total
+    ORDER BY total DESC
+    LIMIT 10
 
 q30:
   desc: "Merge requests by state"
@@ -888,6 +1036,12 @@ q30:
       "aggregation_sort": "-mr_count",
       "limit": 10
     }
+  opencypher: |
+    MATCH (mr:MergeRequest)
+    WHERE mr.state IN ['opened', 'closed', 'merged']
+    RETURN mr.state, count(mr) AS mr_count
+    ORDER BY mr_count DESC
+    LIMIT 10
 
 q31:
   desc: "Pipeline duration by status"
@@ -919,6 +1073,12 @@ q31:
       "aggregation_sort": "-pipeline_count",
       "limit": 10
     }
+  opencypher: |
+    MATCH (pipe:Pipeline)
+    WHERE pipe.status IN ['success', 'failed']
+    RETURN pipe.status, count(pipe) AS pipeline_count, avg(pipe.duration) AS avg_duration
+    ORDER BY pipeline_count DESC
+    LIMIT 10
 
 q32:
   desc: "Jobs by status and when"
@@ -949,6 +1109,12 @@ q32:
       "aggregation_sort": "-job_count",
       "limit": 20
     }
+  opencypher: |
+    MATCH (job:Job)
+    WHERE job.status IN ['success', 'failed', 'running', 'pending']
+    RETURN job.status, job.when, count(job) AS job_count
+    ORDER BY job_count DESC
+    LIMIT 20
 
 q33:
   desc: "Vulnerabilities by severity and state"
@@ -979,6 +1145,12 @@ q33:
       "aggregation_sort": "-vuln_count",
       "limit": 30
     }
+  opencypher: |
+    MATCH (v:Vulnerability)
+    WHERE v.report_type IN ['sast', 'dependency_scanning', 'container_scanning', 'secret_detection']
+    RETURN v.severity, v.state, count(v) AS vuln_count
+    ORDER BY vuln_count DESC
+    LIMIT 30
 
 q34:
   desc: "Merge request state by project"
@@ -1021,4 +1193,10 @@ q34:
       "aggregation_sort": "-mr_count",
       "limit": 20
     }
+  opencypher: |
+    MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project)
+    WHERE mr.state IN ['opened', 'closed', 'merged'] AND p.id IN $sample
+    RETURN p, mr.state, count(mr) AS mr_count
+    ORDER BY mr_count DESC
+    LIMIT 20
 

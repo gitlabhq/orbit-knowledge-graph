@@ -12,7 +12,19 @@ mrs_open_in_project:
   expect: rows               # optional: rows (default) | empty | error
   query: |
     { ...inline GKG DSL JSON... }
+  opencypher: |
+    MATCH ...openCypher twin of the query...
 ```
+
+`opencypher` is the same query in the openCypher frontend's dialect. The
+`compiler::corpus` test in `crates/integration-tests/tests/compiler/` asserts
+it compiles to byte-identical SQL, so every entry needs one; an entry the
+frontend cannot spell carries `opencypher_skip: <reason>` instead. `$sample`
+and `$sample:N` appear in a twin as the parameters `$sample` and `$sample_N`,
+bound to the same `node_ids` the JSON side resolves to.
+An `id` equality or `in` filter is spelled `{id: v}` / `x.id IN [...]` in the
+twin and compared against the query with that filter folded into `node_ids`,
+the form the frontend lowers it to.
 
 `category` is the query *shape* and is independent of which file the entry lives
 in. Two placeholder kinds keep the queries portable across environments:

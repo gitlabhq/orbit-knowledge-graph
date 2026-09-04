@@ -10,6 +10,10 @@ use serde::Deserialize;
 pub struct Versions {
     pub schema: u32,
     pub query_dsl: String,
+    /// Absent from revisions before the openCypher frontend; `xtask` parses
+    /// the merge base's file with this struct.
+    #[serde(default)]
+    pub opencypher_dialect: String,
     pub raw_output_format: String,
     pub goon_output_format: String,
     pub duckdb: String,

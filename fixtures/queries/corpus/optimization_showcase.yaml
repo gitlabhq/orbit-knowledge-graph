@@ -43,6 +43,11 @@
       ],
       "limit": 50
     }
+  opencypher: |
+    MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest {state: 'merged'})-[:IN_PROJECT]->(p:Project)
+    WHERE u.id IN $sample_3
+    RETURN u
+    LIMIT 50
 
 02_cascading_sip_4node_fan_out:
   desc: "Cascading sip 4node fan out"
@@ -92,6 +97,12 @@
       ],
       "limit": 30
     }
+  opencypher: |
+    MATCH (p:Project)<-[:IN_PROJECT]-(mr:MergeRequest {state: 'merged'})<-[:AUTHORED]-(author:User),
+          (mr)-[:HAS_NOTE]->(note:Note)
+    WHERE p.id IN $sample
+    RETURN p
+    LIMIT 30
 
 03_neighbors_both_directions:
   desc: "Neighbors both directions"
@@ -110,6 +121,11 @@
       },
       "limit": 100
     }
+  opencypher: |
+    MATCH (mr:MergeRequest)--(n)
+    WHERE mr.id IN $sample_3
+    RETURN n
+    LIMIT 100
 
 04_neighbors_outgoing_with_rel_filter:
   desc: "Neighbors incoming with rel filter"
@@ -131,6 +147,11 @@
       },
       "limit": 50
     }
+  opencypher: |
+    MATCH (p:Project)<-[:IN_PROJECT]-(n)
+    WHERE p.id IN $sample
+    RETURN n
+    LIMIT 50
 
 05_path_finding_depth3:
   desc: "Path finding depth3"
@@ -162,6 +183,10 @@
         ]
       }
     }
+  opencypher: |
+    MATCH p = shortestPath((start:Project)-[:IN_PROJECT|AUTHORED*..2]->(`end`:Project))
+    WHERE start.id IN $sample AND `end`.id IN $sample
+    RETURN p
   expect: empty  # two random Projects don't share a 2-hop directed path; every entity->Project edge goes IN_PROJECT inbound, so Project->Project via [AUTHORED, IN_PROJECT] loops back to self
 
 06_path_finding_depth2_user_to_project:
@@ -195,6 +220,10 @@
         ]
       }
     }
+  opencypher: |
+    MATCH p = shortestPath((start:User)-[:AUTHORED|IN_PROJECT*..2]->(`end`:Project))
+    WHERE start.id IN $sample AND `end`.id IN $sample
+    RETURN p
 
 07_aggregation_count_merged_mrs:
   desc: "Aggregation count merged mrs"
@@ -236,6 +265,11 @@
       "aggregation_sort": "-merged_mr_count",
       "limit": 20
     }
+  opencypher: |
+    MATCH (mr:MergeRequest {state: 'merged'})-[:IN_PROJECT]->(p:Project)
+    RETURN p, p.name, count(mr) AS merged_mr_count
+    ORDER BY merged_mr_count DESC
+    LIMIT 20
 
 08_aggregation_sum_pipeline_duration:
   desc: "Aggregation sum pipeline duration"
@@ -277,6 +311,11 @@
       "aggregation_sort": "-total_pipeline_seconds",
       "limit": 15
     }
+  opencypher: |
+    MATCH (pipe:Pipeline {status: 'success'})-[:IN_PROJECT]->(p:Project)
+    RETURN p, p.name, sum(pipe.duration) AS total_pipeline_seconds
+    ORDER BY total_pipeline_seconds DESC
+    LIMIT 15
 
 09_cascading_sip_aggregation_mr_count_pinned:
   desc: "Cascading sip aggregation mr count pinned"
@@ -319,6 +358,12 @@
       "aggregation_sort": "-merged_mr_count",
       "limit": 10
     }
+  opencypher: |
+    MATCH (p:Project)<-[:IN_PROJECT]-(mr:MergeRequest {state: 'merged'})
+    WHERE p.id IN $sample_3
+    RETURN p, p.name, count(mr) AS merged_mr_count
+    ORDER BY merged_mr_count DESC
+    LIMIT 10
 
 10_traversal_user_to_group:
   desc: "Traversal user to group"
@@ -347,6 +392,11 @@
       ],
       "limit": 50
     }
+  opencypher: |
+    MATCH (u:User)-[:MEMBER_OF]->(g:Group)
+    WHERE u.id IN $sample
+    RETURN u
+    LIMIT 50
 
 11_traversal_project_pipelines_jobs:
   desc: "Traversal project pipelines jobs"
@@ -391,6 +441,11 @@
       ],
       "limit": 20
     }
+  opencypher: |
+    MATCH (p:Project)<-[:IN_PROJECT]-(pipe:Pipeline {status: 'failed'})<-[:IN_PIPELINE]-(j:Job {status: 'failed'})
+    WHERE p.id IN $sample
+    RETURN p
+    LIMIT 20
 
 12_ns_traversal_all_mrs_in_group:
   desc: "Ns traversal all mrs in group"
@@ -421,6 +476,11 @@
       ],
       "limit": 50
     }
+  opencypher: |
+    MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest)
+    WHERE mr.state IN ['opened', 'closed', 'merged']
+    RETURN u
+    LIMIT 50
 
 13_ns_traversal_merged_mrs_with_notes:
   desc: "Ns traversal merged mrs with notes"
@@ -451,6 +511,10 @@
       ],
       "limit": 50
     }
+  opencypher: |
+    MATCH (mr:MergeRequest {state: 'merged'})-[:HAS_NOTE]->(n:Note)
+    RETURN mr
+    LIMIT 50
   expect: empty  # #582 silent-empty: state filter is pushed onto the HAS_NOTE edge denorm, which encodes no MR state, yielding zero rows
 
 14_ns_aggregation_mr_count_by_project_no_ids:
@@ -493,6 +557,12 @@
       "aggregation_sort": "-mr_count",
       "limit": 20
     }
+  opencypher: |
+    MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project)
+    WHERE mr.state IN ['opened', 'closed', 'merged']
+    RETURN p, p.name, count(mr) AS mr_count
+    ORDER BY mr_count DESC
+    LIMIT 20
 
 15_ns_aggregation_jobs_by_status:
   desc: "Ns aggregation jobs by status"
@@ -534,6 +604,12 @@
       "aggregation_sort": "-job_count",
       "limit": 20
     }
+  opencypher: |
+    MATCH (j:Job)-[:IN_PROJECT]->(p:Project)
+    WHERE j.status IN ['success', 'failed', 'running', 'pending']
+    RETURN p, p.name, count(j) AS job_count
+    ORDER BY job_count DESC
+    LIMIT 20
 
 16_ns_search_pipelines_failed:
   desc: "Ns search pipelines failed"
@@ -556,6 +632,10 @@
       }],
       "limit": 50
     }
+  opencypher: |
+    MATCH (pipe:Pipeline {status: 'failed'})
+    RETURN pipe.id, pipe.status, pipe.ref
+    LIMIT 50
 
 17_ns_traversal_narrow_group_authored:
   desc: "Ns traversal narrow group authored"
@@ -586,6 +666,11 @@
       ],
       "limit": 50
     }
+  opencypher: |
+    MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest)
+    WHERE mr.state IN ['opened', 'closed', 'merged']
+    RETURN u
+    LIMIT 50
 
 18_ns_aggregation_narrow_group_pipeline_duration:
   desc: "Ns aggregation narrow group pipeline duration"
@@ -627,6 +712,12 @@
       "aggregation_sort": "-pipeline_count",
       "limit": 20
     }
+  opencypher: |
+    MATCH (pipe:Pipeline)-[:IN_PROJECT]->(p:Project)
+    WHERE pipe.status IN ['success', 'failed', 'running', 'pending']
+    RETURN p, p.name, count(pipe) AS pipeline_count
+    ORDER BY pipeline_count DESC
+    LIMIT 20
 
 19_complex_mr_full_context:
   desc: "Complex mr full context"
@@ -666,6 +757,11 @@
       ],
       "limit": 100
     }
+  opencypher: |
+    MATCH (mr:MergeRequest {state: 'merged'})<-[:AUTHORED]-(author:User),
+          (mr)-[:IN_PROJECT]->(p:Project)
+    RETURN mr
+    LIMIT 100
 
 20_complex_pipeline_chain_no_ids:
   desc: "Complex pipeline chain no ids"
@@ -705,6 +801,13 @@
       ],
       "limit": 50
     }
+  opencypher: |
+    MATCH (pipe:Pipeline {status: 'failed'}),
+          (j:Job),
+          (pipe)-[:IN_PROJECT]->(p:Project),
+          (pipe)-[:HAS_JOB]->(j)
+    RETURN pipe
+    LIMIT 50
 
 21_complex_aggregation_multi_filter:
   desc: "Complex aggregation multi filter"
@@ -747,6 +850,11 @@
       "aggregation_sort": "-merged_non_draft_count",
       "limit": 20
     }
+  opencypher: |
+    MATCH (mr:MergeRequest {state: 'merged', draft: false})-[:IN_PROJECT]->(p:Project)
+    RETURN p, p.name, count(mr) AS merged_non_draft_count
+    ORDER BY merged_non_draft_count DESC
+    LIMIT 20
 
 22_complex_narrow_3node_no_ids:
   desc: "Complex narrow 3node no ids"
@@ -786,6 +894,10 @@
       ],
       "limit": 50
     }
+  opencypher: |
+    MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest {state: 'merged'})-[:IN_PROJECT]->(p:Project)
+    RETURN u
+    LIMIT 50
 
 23_complex_narrow_aggregation_jobs_per_project:
   desc: "Complex narrow aggregation jobs per project"
@@ -827,6 +939,11 @@
       "aggregation_sort": "-failed_job_count",
       "limit": 20
     }
+  opencypher: |
+    MATCH (j:Job {status: 'failed'})-[:IN_PROJECT]->(p:Project)
+    RETURN p, p.name, count(j) AS failed_job_count
+    ORDER BY failed_job_count DESC
+    LIMIT 20
 
 24_large_result_traversal_all_jobs:
   desc: "Large result traversal all jobs"
@@ -857,6 +974,11 @@
       ],
       "limit": 500
     }
+  opencypher: |
+    MATCH (j:Job)-[:IN_PIPELINE]->(pipe:Pipeline)
+    WHERE j.status IN ['success', 'failed', 'running', 'pending']
+    RETURN j
+    LIMIT 500
 
 25_ns_search_all_mrs:
   desc: "Ns search all mrs"
@@ -879,6 +1001,11 @@
       }],
       "limit": 100
     }
+  opencypher: |
+    MATCH (mr:MergeRequest)
+    WHERE mr.state IN ['opened', 'closed', 'merged']
+    RETURN mr.id, mr.title, mr.state
+    LIMIT 100
 
 26_property_group_vulnerabilities_by_severity:
   desc: "Property group vulnerabilities by severity"
@@ -906,6 +1033,12 @@
       "aggregation_sort": "-vulnerability_count",
       "limit": 20
     }
+  opencypher: |
+    MATCH (v:Vulnerability)
+    WHERE v.state IN ['detected', 'confirmed', 'resolved', 'dismissed']
+    RETURN v.severity, count(v) AS vulnerability_count
+    ORDER BY vulnerability_count DESC
+    LIMIT 20
 
 27_property_group_security_scans_by_type:
   desc: "Property group security scans by type"
@@ -933,6 +1066,11 @@
       "aggregation_sort": "-scan_count",
       "limit": 20
     }
+  opencypher: |
+    MATCH (s:SecurityScan {latest: true})
+    RETURN s.scan_type, count(s) AS scan_count
+    ORDER BY scan_count DESC
+    LIMIT 20
 
 28_property_group_pipeline_status_source:
   desc: "Property group pipeline status source"
@@ -963,6 +1101,12 @@
       "aggregation_sort": "-pipeline_count",
       "limit": 30
     }
+  opencypher: |
+    MATCH (pipe:Pipeline)
+    WHERE pipe.status IN ['success', 'failed', 'running', 'pending']
+    RETURN pipe.status, pipe.source, count(pipe) AS pipeline_count
+    ORDER BY pipeline_count DESC
+    LIMIT 30
 
 29_node_and_property_group_project_pipeline_status:
   desc: "Node and property group project pipeline status"
@@ -1012,4 +1156,10 @@
       "aggregation_sort": "-pipeline_count",
       "limit": 30
     }
+  opencypher: |
+    MATCH (pipe:Pipeline)-[:IN_PROJECT]->(p:Project)
+    WHERE pipe.status IN ['success', 'failed']
+    RETURN p, p.name, p.full_path, pipe.status, count(pipe) AS pipeline_count, avg(pipe.duration) AS avg_duration
+    ORDER BY pipeline_count DESC
+    LIMIT 30
 

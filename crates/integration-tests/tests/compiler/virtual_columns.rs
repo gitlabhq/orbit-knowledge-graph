@@ -1,16 +1,25 @@
-use ontology::Ontology;
-use query_engine::compiler::{HydrationPlan, SecurityContext, compile};
+//! Virtual-column fixtures paired with their openCypher twins; `compile_both`
+//! also asserts the hydration plans match. The two aggregation fixtures keep
+//! `columns` on a counted, ungrouped node, which has no openCypher spelling,
+//! so they stay JSON-only.
 
-fn compile_query(json: &str) -> query_engine::compiler::CompiledQueryContext {
-    let ontology = Ontology::load_embedded().unwrap();
-    let security_ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
-    compile(json, &ontology, &security_ctx).unwrap()
+use compiler::{CompiledQueryContext, HydrationPlan, compile};
+
+use super::setup::{compile_both, embedded_ontology, test_ctx};
+
+fn compile_query(json: &str) -> CompiledQueryContext {
+    compile(json, &embedded_ontology(), &test_ctx()).unwrap()
+}
+
+fn compile_twins(json: &str, statement: &str) -> CompiledQueryContext {
+    compile_both(json, statement, &embedded_ontology(), &test_ctx())
 }
 
 #[test]
 fn search_with_wildcard_excludes_virtual_columns_from_sql() {
-    let compiled = compile_query(
+    let compiled = compile_twins(
         r#"{"query_type": "traversal", "nodes": [{"id": "f", "entity": "File", "node_ids": [1], "columns": "*"}], "limit": 5}"#,
+        "MATCH (f:File {id: 1}) RETURN * LIMIT 5",
     );
     let sql = &compiled.base.sql;
     assert!(
@@ -25,8 +34,9 @@ fn search_with_wildcard_excludes_virtual_columns_from_sql() {
 
 #[test]
 fn search_with_explicit_content_excludes_from_sql() {
-    let compiled = compile_query(
+    let compiled = compile_twins(
         r#"{"query_type": "traversal", "nodes": [{"id": "f", "entity": "File", "node_ids": [1], "columns": ["id", "name", "content"]}], "limit": 5}"#,
+        "MATCH (f:File {id: 1}) RETURN f.id, f.name, f.content LIMIT 5",
     );
     let sql = &compiled.base.sql;
     assert!(
@@ -38,8 +48,9 @@ fn search_with_explicit_content_excludes_from_sql() {
 
 #[test]
 fn search_with_content_produces_hydration_plan() {
-    let compiled = compile_query(
+    let compiled = compile_twins(
         r#"{"query_type": "traversal", "nodes": [{"id": "f", "entity": "File", "node_ids": [1], "columns": ["id", "name", "content"]}], "limit": 5}"#,
+        "MATCH (f:File {id: 1}) RETURN f.id, f.name, f.content LIMIT 5",
     );
     match &compiled.hydration {
         HydrationPlan::Static(templates) => {
@@ -72,8 +83,9 @@ fn search_with_content_produces_hydration_plan() {
 
 #[test]
 fn search_without_content_has_no_hydration_plan() {
-    let compiled = compile_query(
+    let compiled = compile_twins(
         r#"{"query_type": "traversal", "nodes": [{"id": "f", "entity": "File", "node_ids": [1], "columns": ["id", "name", "path"]}], "limit": 5}"#,
+        "MATCH (f:File {id: 1}) RETURN f.id, f.name, f.path LIMIT 5",
     );
     assert!(
         matches!(&compiled.hydration, HydrationPlan::None),
@@ -127,7 +139,7 @@ fn aggregation_with_wildcard_excludes_virtual_columns_from_sql() {
 
 #[test]
 fn traversal_with_content_includes_virtual_in_hydration_plan() {
-    let compiled = compile_query(
+    let compiled = compile_twins(
         r#"{
             "query_type": "traversal",
             "nodes": [
@@ -137,6 +149,9 @@ fn traversal_with_content_includes_virtual_in_hydration_plan() {
             "relationships": [{"type": "ON_BRANCH", "from": "f", "to": "b"}],
             "limit": 5
         }"#,
+        "MATCH (f:File {id: 1})-[:ON_BRANCH]->(b:Branch)
+         RETURN f.id, f.name, f.content, b.id, b.name
+         LIMIT 5",
     );
 
     let sql = &compiled.base.sql;
@@ -165,7 +180,7 @@ fn traversal_with_content_includes_virtual_in_hydration_plan() {
 
 #[test]
 fn traversal_hydration_injects_depends_on_columns() {
-    let compiled = compile_query(
+    let compiled = compile_twins(
         r#"{
             "query_type": "traversal",
             "nodes": [
@@ -175,6 +190,9 @@ fn traversal_hydration_injects_depends_on_columns() {
             "relationships": [{"type": "ON_BRANCH", "from": "f", "to": "b"}],
             "limit": 5
         }"#,
+        "MATCH (b:Branch {id: 1})<-[:ON_BRANCH]-(f:File)
+         RETURN b.id, b.name, f.id, f.content
+         LIMIT 5",
     );
 
     match &compiled.hydration {
@@ -198,7 +216,7 @@ fn traversal_hydration_injects_depends_on_columns() {
 
 #[test]
 fn definition_content_also_handled() {
-    let compiled = compile_query(
+    let compiled = compile_twins(
         r#"{
             "query_type": "traversal",
             "nodes": [
@@ -208,6 +226,9 @@ fn definition_content_also_handled() {
             "relationships": [{"type": "DEFINES", "from": "f", "to": "def"}],
             "limit": 5
         }"#,
+        "MATCH (f:File {id: 1})-[:DEFINES]->(def:Definition)
+         RETURN f.id, f.path, def.id, def.name, def.content
+         LIMIT 5",
     );
 
     match &compiled.hydration {
@@ -242,12 +263,13 @@ fn definition_content_also_handled() {
 
 #[test]
 fn merge_request_diff_virtual_column_hydration() {
-    let compiled = compile_query(
+    let compiled = compile_twins(
         r#"{
             "query_type": "traversal",
             "nodes": [{"id": "mr", "entity": "MergeRequest", "node_ids": [1], "columns": ["id", "title", "diff"]}],
             "limit": 5
         }"#,
+        "MATCH (mr:MergeRequest {id: 1}) RETURN mr.id, mr.title, mr.diff LIMIT 5",
     );
 
     let sql = &compiled.base.sql;
@@ -288,7 +310,7 @@ fn merge_request_diff_virtual_column_hydration() {
 
 #[test]
 fn multiple_virtual_entities_in_same_query() {
-    let compiled = compile_query(
+    let compiled = compile_twins(
         r#"{
             "query_type": "traversal",
             "nodes": [
@@ -298,6 +320,9 @@ fn multiple_virtual_entities_in_same_query() {
             "relationships": [{"type": "DEFINES", "from": "f", "to": "def"}],
             "limit": 5
         }"#,
+        "MATCH (f:File {id: 1})-[:DEFINES]->(def:Definition)
+         RETURN f.id, f.path, f.content, def.id, def.name, def.content
+         LIMIT 5",
     );
 
     match &compiled.hydration {

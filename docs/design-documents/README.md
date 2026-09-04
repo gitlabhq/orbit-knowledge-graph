@@ -70,6 +70,7 @@ Please see the following design documents for more details on the Orbit architec
 
 - [Orbit Indexing Service](indexing/)
 - [Orbit Querying Service](querying/)
+- [Orbit openCypher Frontend](querying/opencypher_frontend.md)
 - [Orbit Data Model](data_model.md)
 - [Orbit Schema Management](schema_management.md)
 - [Orbit Security](security.md)

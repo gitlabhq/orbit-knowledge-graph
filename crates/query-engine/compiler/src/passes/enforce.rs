@@ -31,7 +31,7 @@ pub struct RedactionNode {
 
 /// Metadata for an edge relationship in the query, used by formatters to extract
 /// edge columns without scanning column names.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EdgeMeta {
     /// Column prefix for this edge (e.g. "e0_", "hop_e1_").
     pub column_prefix: String,
@@ -47,7 +47,7 @@ pub struct EdgeMeta {
     pub dst_type_column: String,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct ResultContext {
     pub query_type: Option<QueryType>,
     nodes: HashMap<String, RedactionNode>,

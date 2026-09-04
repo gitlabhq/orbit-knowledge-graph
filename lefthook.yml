@@ -61,6 +61,7 @@ pre-commit:
         - "crates/query-engine/formatters/src/**/*.rs"
         - "crates/query-engine/compiler/src/input.rs"
         - "crates/query-engine/compiler/src/passes/validate.rs"
+        - "crates/query-engine/opencypher/src/**"
         - "config/schemas/query_response.json"
         - "config/schemas/graph_query.schema.json"
     - name: metrics-catalog-check

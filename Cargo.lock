@@ -5978,6 +5978,7 @@ dependencies = [
  "named-queries",
  "nats-client",
  "ontology",
+ "opencypher",
  "opentelemetry",
  "opentelemetry_sdk",
  "orbit-analytics",
