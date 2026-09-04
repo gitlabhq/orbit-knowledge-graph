@@ -95,7 +95,7 @@ impl OrbitLocalServer {
         blocking_tool(move || {
             batches_to_json(&sql::query(
                 &sql::open_graph(args.db)?,
-                sql::SCHEMA_INTROSPECTION_SQL,
+                &sql::schema_introspection_sql(),
             )?)
         })
         .await

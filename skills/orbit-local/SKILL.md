@@ -12,7 +12,7 @@ description: >
   production data in GitLab (a project such as gitlab-org/gitlab, cross-project
   blast radius, contributor or merge-request aggregation) use the `orbit` skill;
   for single-entity GitLab lookups or write operations use `glab`.
-version: 0.3.1
+version: 0.4.0
 license: MIT
 metadata:
   audience: developers
@@ -71,8 +71,8 @@ wrapper flags, config keys, and pass-through rules:
 | Command | Purpose |
 |---|---|
 | `orbit index <PATH> [--stats] [--db P]` | Parse repos under `PATH` into DuckDB; prints graph stats as JSON |
-| `orbit sql [QUERY] [-f FILE] [-F table\|json\|ndjson\|csv]` | Run read-only SQL; `-` reads from stdin |
-| `orbit schema [TABLE…] [--raw]` | Describe tables/columns; scope to table names to trim output |
+| `orbit sql [QUERY] [-f FILE] [-F table\|json\|ndjson\|csv] [--all] [--repo P]` | Run read-only SQL scoped to the current checkout's commit; `-` reads from stdin, `--all` spans every indexed commit |
+| `orbit schema [TABLE…] [--raw]` | Describe graph tables/columns (index-storage tables hidden); scope to table names to trim output |
 | `orbit list [-F …]` | List indexed repositories, branch, commit, status |
 | `orbit mcp serve` | Serve the local graph to MCP agents (`run_sql`, `get_graph_schema`, `index`) |
 | `orbit repo-map <SUBCOMMAND> [--repo P] [--ext E]` | High-level, LLM-oriented repo map (`overview`, `tree`, `api`, `class`, `extends`, `imports`) |

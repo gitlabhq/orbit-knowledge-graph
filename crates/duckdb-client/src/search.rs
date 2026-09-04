@@ -5,7 +5,7 @@ use crate::{DuckDbClient, f64_column, i64_column, scalar_i64, sql_lit, string_co
 use orbit_search::corpus::{EXCLUDE_LIKE, EXCLUDE_REGEX, ext_regex, search_corpus_exts};
 use orbit_search::grep::{GrepError, GrepSource, grep};
 use orbit_search::{
-    ANCHOR_SIM, CorpusRow, EXACT_NAME_SIM, Edge, GrepOutcome, RecallFilter, SearchVocab, TermRecall,
+    ANCHOR_SIM, CorpusRow, EXACT_NAME_SIM, GrepOutcome, RecallFilter, SearchVocab, TermRecall,
 };
 
 pub const CONTEXT_SIM_CAP: f64 = 0.99;
@@ -14,8 +14,12 @@ pub const NAME_SIM_CEIL: f64 = 0.9999;
 
 pub const FTS_STEMMER: &str = "english";
 
+pub const DEF_DOC_PREFIX: &str = "gl_def_doc_";
+
+pub const GLOB_CHARS: [char; 3] = ['*', '?', '['];
+
 pub fn def_doc_table(project_id: i64) -> String {
-    format!("gl_def_doc_{project_id}")
+    format!("{DEF_DOC_PREFIX}{project_id}")
 }
 
 pub fn def_doc_sql(doc_table: &str) -> String {
@@ -179,40 +183,6 @@ impl GrepSource for DuckDbSearch {
         );
         Ok(rows_from_batches(&query(&self.client, &sql)?))
     }
-
-    fn edges_among(&self, ids: &[i64]) -> Result<Vec<Edge>> {
-        if ids.len() < 2 {
-            return Ok(Vec::new());
-        }
-        let batches = query(
-            &self.client,
-            &format!(
-                "SELECT DISTINCT e.relationship_kind AS kind, s.fqn AS source, t.fqn AS target
- FROM gl_edge e
- JOIN gl_definition s ON s.id = e.source_id
- JOIN gl_definition t ON t.id = e.target_id
- WHERE e.source_id IN ({list}) AND e.target_id IN ({list})
-   AND s.project_id = {pid} AND s.commit_sha = {sha}
-   AND t.project_id = {pid} AND t.commit_sha = {sha}
- ORDER BY kind, source, target",
-                list = id_list(ids),
-                pid = self.pid,
-                sha = self.sha,
-            ),
-        )?;
-        let kinds = string_column(&batches, "kind");
-        let sources = string_column(&batches, "source");
-        let targets = string_column(&batches, "target");
-        Ok((0..kinds.len())
-            .map(|i| Edge {
-                kind: kinds[i].clone(),
-                source: sources[i].clone(),
-                source_loc: String::new(),
-                target: targets[i].clone(),
-                target_loc: String::new(),
-            })
-            .collect())
-    }
 }
 
 fn id_list(ids: &[i64]) -> String {
@@ -316,7 +286,7 @@ WHERE d.project_id = {pid} AND d.commit_sha = {sha}
     )
 }
 
-fn kind_scope(col: &str, kinds: &[String]) -> String {
+pub fn kind_scope(col: &str, kinds: &[String]) -> String {
     if kinds.is_empty() {
         return String::new();
     }
@@ -336,7 +306,7 @@ fn path_scope(col: &str, paths: &[String]) -> String {
         .iter()
         .map(|p| {
             let p = p.trim_end_matches('/');
-            if p.contains(['*', '?', '[']) {
+            let scope = if p.contains(GLOB_CHARS) {
                 format!("{col} GLOB {}", sql_lit(p))
             } else {
                 format!(
@@ -344,7 +314,16 @@ fn path_scope(col: &str, paths: &[String]) -> String {
                     sql_lit(p),
                     sql_lit(&format!("{p}/*"))
                 )
-            }
+            };
+            let opted_in = format!(
+                "{} OR {}",
+                excluded_path_predicate(&sql_lit(p)),
+                excluded_path_predicate(&sql_lit(&format!("{p}/")))
+            );
+            format!(
+                "(({scope}) AND ({opted_in} OR NOT {}))",
+                excluded_path_predicate(col)
+            )
         })
         .collect::<Vec<_>>()
         .join(" OR ");
@@ -352,17 +331,20 @@ fn path_scope(col: &str, paths: &[String]) -> String {
 }
 
 fn exclusions(col: &str) -> String {
-    let mut s = String::new();
-    for pat in EXCLUDE_LIKE {
-        s.push_str(&format!("  AND {col} NOT LIKE {}\n", sql_lit(pat)));
-    }
-    for re in EXCLUDE_REGEX {
-        s.push_str(&format!(
-            "  AND NOT regexp_matches({col}, {})\n",
-            sql_lit(re)
-        ));
-    }
-    s
+    format!("  AND NOT {}\n", excluded_path_predicate(col))
+}
+
+pub fn excluded_path_predicate(col: &str) -> String {
+    let likes = EXCLUDE_LIKE
+        .iter()
+        .map(|pat| format!("{col} LIKE {}", sql_lit(pat)));
+    let regexes = EXCLUDE_REGEX
+        .iter()
+        .map(|re| format!("regexp_matches({col}, {})", sql_lit(re)));
+    format!(
+        "({})",
+        likes.chain(regexes).collect::<Vec<_>>().join(" OR ")
+    )
 }
 
 fn corpus_rows_sql(cand_ctes: &str, pid: i64, sha: &str) -> String {
