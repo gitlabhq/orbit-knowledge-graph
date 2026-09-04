@@ -27,8 +27,9 @@ Workhorse. Workhorse performs the RPC and streams the bytes to Orbit.
 Every new RPC requires a Rails endpoint, a Workhorse handler, an HTTP encoding
 of the response, and a matching `gitlab-client` method. Four codebases and
 review paths change to produce an endpoint with one caller. Every read is also
-a full Rails request, so an indexing job that fetches ten archives goes through
-Puma ten times.
+a full Rails request. That is acceptable for one archive per project, but once
+we start reading individual blobs at query time it becomes one Puma request per
+blob.
 
 ### Why Orbit cannot call Gitaly directly
 
@@ -199,9 +200,9 @@ for routing and credential handling.
 ### Keep adding one Rails endpoint per RPC
 
 This preserves the current authorization path. Each RPC would still require
-changes across four codebases, create another single-caller endpoint, and add a
-Rails request for every read. Planned blob and diff reads would repeat that
-work.
+changes across four codebases and create another single-caller endpoint, and
+every read would stay a Rails request, which does not scale to per-blob reads.
+Planned blob and diff reads would repeat that work.
 
 ### A framed HTTP route instead of a WebSocket tunnel
 
