@@ -181,8 +181,13 @@ noise.
 
 | Window | p50 | p95 | p99 | Maximum |
 |---|---:|---:|---:|---:|
-| 7 days | 0.63 req/s | 2.07 req/s | - | 196 req/s |
+| 7 days | 0.63 req/s | 2.07 req/s | N/A[^seven-day-p99] | 196 req/s |
 | 30 days | 0.69 req/s | 1.66 req/s | 18.4 req/s | about 160 req/s |
+
+[^seven-day-p99]: The 7-day p99 was not available from the query.
+
+The weekly total is dominated by short backfill bursts, so its mean of about 5
+requests per second sits well above the steady-state percentiles.
 
 The incremental steady state is about 0.7 requests per second and rarely rises
 above about 2 requests per second. Backfills produce short bursts of about
