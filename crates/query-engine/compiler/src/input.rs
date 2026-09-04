@@ -4,7 +4,7 @@ use ontology::constants::{DEFAULT_PRIMARY_KEY, SOURCE_ID_COLUMN, TARGET_ID_COLUM
 use orbit_utils::traversal_path::TraversalPath;
 use serde::{Deserialize, Deserializer};
 use serde_json::Value;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use strum::VariantNames;
 
 /// Controls which columns are fetched for dynamically-discovered entities
@@ -245,6 +245,13 @@ impl Input {
     pub fn fetch_limit(&self) -> u32 {
         self.cursor.as_ref().map_or(self.limit, |c| c.page_size) + 1
     }
+
+    /// Bind `cursor.after` tokens to this query. The JSON frontend hashes the
+    /// canonical document; other frontends hash their own parsed form.
+    pub fn with_query_hash(mut self, query_hash: u64) -> Self {
+        self.compiler.query_hash = query_hash;
+        self
+    }
 }
 
 impl Default for Input {
@@ -281,6 +288,16 @@ pub struct InputCursor {
     pub after: Option<String>,
     #[serde(skip)]
     pub seek: Option<Vec<Option<String>>>,
+}
+
+impl InputCursor {
+    pub fn new(page_size: u32, after: Option<String>) -> Self {
+        Self {
+            page_size,
+            after,
+            seek: None,
+        }
+    }
 }
 
 #[derive(
@@ -325,7 +342,7 @@ pub struct InputNode {
     #[serde(default, deserialize_with = "deserialize_columns")]
     pub columns: Option<ColumnSelection>,
     #[serde(default, deserialize_with = "deserialize_filters")]
-    pub filters: HashMap<String, Vec<InputFilter>>,
+    pub filters: BTreeMap<String, Vec<InputFilter>>,
     #[serde(default, deserialize_with = "deserialize_id_vec")]
     pub node_ids: Vec<i64>,
     pub id_range: Option<InputIdRange>,
@@ -364,7 +381,7 @@ impl Default for InputNode {
             entity: None,
             table: None,
             columns: None,
-            filters: HashMap::new(),
+            filters: BTreeMap::new(),
             node_ids: Vec::new(),
             id_range: None,
             id_property: DEFAULT_PRIMARY_KEY.to_string(),
@@ -462,6 +479,18 @@ pub struct InputFilter {
     pub selectivity: ontology::FieldSelectivity,
 }
 
+impl InputFilter {
+    /// A filter as the JSON frontend deserializes it: operator and value only.
+    /// `is_null`/`is_not_null` carry no value.
+    pub fn new(op: FilterOp, value: Option<Value>) -> Self {
+        Self {
+            op: Some(op),
+            value,
+            ..Default::default()
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, strum::AsRefStr, strum::VariantNames)]
 #[serde(rename_all = "snake_case")]
 #[strum(serialize_all = "snake_case")]
@@ -487,11 +516,11 @@ pub enum FilterOp {
 
 fn deserialize_filters<'de, D>(
     deserializer: D,
-) -> Result<HashMap<String, Vec<InputFilter>>, D::Error>
+) -> Result<BTreeMap<String, Vec<InputFilter>>, D::Error>
 where
     D: Deserializer<'de>,
 {
-    let raw: HashMap<String, Value> = HashMap::deserialize(deserializer)?;
+    let raw: BTreeMap<String, Value> = BTreeMap::deserialize(deserializer)?;
     raw.into_iter()
         .map(|(k, v)| match parse_filter_entry(v) {
             Ok(filters) => Ok((k, filters)),
@@ -577,7 +606,7 @@ pub struct InputRelationship {
     #[serde(default)]
     pub direction: Direction,
     #[serde(default, deserialize_with = "deserialize_filters")]
-    pub filters: HashMap<String, Vec<InputFilter>>,
+    pub filters: BTreeMap<String, Vec<InputFilter>>,
     /// FK column on a node table that encodes this relationship. Set during normalization.
     /// The compiler resolves which node has the column from the edge variant's entity types.
     #[serde(skip)]
@@ -595,6 +624,32 @@ pub struct InputRelationship {
     /// the edge scan (an independent entity like a runner can outlive its edge).
     #[serde(skip)]
     pub scope_preserving: bool,
+}
+
+impl InputRelationship {
+    /// A relationship as the JSON frontend deserializes it. Compiler-populated
+    /// fields (`fk_column`, `scope_prefix`, `scope_preserving`) stay at their
+    /// defaults.
+    pub fn new(
+        types: Vec<String>,
+        from: String,
+        to: String,
+        hops: HopRange,
+        direction: Direction,
+        filters: BTreeMap<String, Vec<InputFilter>>,
+    ) -> Self {
+        Self {
+            types,
+            from,
+            to,
+            hops,
+            direction,
+            filters,
+            fk_column: None,
+            scope_prefix: None,
+            scope_preserving: false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1098,6 +1153,28 @@ pub struct InputPath {
     pub forward_first_hop_rel_types: Vec<String>,
     #[serde(skip)]
     pub backward_first_hop_rel_types: Vec<String>,
+}
+
+impl InputPath {
+    /// A path search as the JSON frontend deserializes it; the per-direction
+    /// first-hop kinds are filled in by normalize.
+    pub fn new(
+        path_type: PathType,
+        from: String,
+        to: String,
+        max_depth: u32,
+        rel_types: Vec<String>,
+    ) -> Self {
+        Self {
+            path_type,
+            from,
+            to,
+            max_depth,
+            rel_types,
+            forward_first_hop_rel_types: Vec::new(),
+            backward_first_hop_rel_types: Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, strum::VariantNames)]

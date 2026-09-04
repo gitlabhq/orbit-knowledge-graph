@@ -43,6 +43,7 @@ impl Default for QueryEngineMetrics {
 pub(crate) fn failure_reason(err: &QueryError) -> &'static str {
     match err {
         QueryError::Parse(_) => "parse",
+        QueryError::Syntax(_) => "syntax",
         QueryError::Validation(_) => "schema",
         QueryError::ReferenceError(_) => "reference",
         QueryError::PaginationError(_) => "pagination",

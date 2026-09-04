@@ -5,7 +5,8 @@
 //! # Pipeline
 //!
 //! ```text
-//! JSON → Validate → Normalize → Restrict → Plan → Lower → Enforce → Security → Check → Codegen → SQL
+//! JSON → ParseJson → ValidateInput → Normalize → Restrict → Plan → Lower → Enforce → Security → Check → Codegen → SQL
+//! Input ─────────────┘  (text frontends enter here via `compile_from_input`)
 //! ```
 //!
 //! # Example
@@ -60,6 +61,7 @@ pub use input::{
 };
 pub use metrics::{METRICS, QueryEngineMetrics};
 pub use ontology::{Ontology, OntologyError};
+pub use passes::validate::Validator;
 
 pub use analytics::ExecMetrics;
 pub use passes::codegen::{
@@ -105,7 +107,7 @@ use config::CompilerCtx as _;
 /// produces flat edge-chain JOINs with inline dedup.
 ///
 /// ```text
-/// JSON → Validate → Normalize → Restrict → Lower → Enforce → Security → Check → HydratePlan → Settings → Codegen
+/// JSON → ParseJson → ValidateInput → Normalize → Restrict → Lower → Enforce → Security → Check → HydratePlan → Settings → Codegen
 /// ```
 #[must_use = "the compiled query context should be used"]
 pub fn compile(
@@ -136,6 +138,36 @@ pub fn validate_normalize(json_input: &str, ontology: &Ontology) -> Result<Input
         .and_then(|()| {
             ctx.take_input().ok_or_else(|| {
                 error::QueryError::PipelineInvariant("validate_normalize produced no input".into())
+            })
+        })
+        .count_err()
+}
+
+/// Compile an [`Input`] built by a non-JSON frontend into a [`CompiledQueryContext`].
+///
+/// Enters the ClickHouse pipeline where the JSON frontend has finished
+/// deserializing, so the Input-level validators and every later pass run
+/// unchanged:
+///
+/// ```text
+/// Input → ValidateInput → Normalize → Restrict → Plan → Lower → Enforce → Security → Check → HydratePlan → Settings → Codegen
+/// ```
+///
+/// The caller is responsible for the checks the JSON schema layers provide
+/// (identifier shape, `limit` and `cursor.page_size` bounds) and for setting
+/// the query hash with [`Input::with_query_hash`] when a cursor is attached.
+#[must_use = "the compiled query context should be used"]
+pub fn compile_from_input(
+    input: Input,
+    ontology: &Ontology,
+    ctx: &SecurityContext,
+) -> Result<CompiledQueryContext> {
+    let mut ctx = config::FromInputCtx::new(Arc::new(ontology.clone()), ctx.clone());
+    ctx.set_input(input);
+    config::run_from_input(&mut ctx)
+        .and_then(|()| {
+            ctx.take_output().ok_or_else(|| {
+                error::QueryError::PipelineInvariant("pipeline did not produce output".into())
             })
         })
         .count_err()

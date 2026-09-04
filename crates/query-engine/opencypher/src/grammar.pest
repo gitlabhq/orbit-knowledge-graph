@@ -1,0 +1,162 @@
+// openCypher 9 (M23) subset with DSL-parity extensions.
+//
+// Productions follow the M23 EBNF (cypher.ebnf) for MATCH, WHERE, RETURN,
+// ORDER BY, LIMIT, node/relationship patterns, range literals, property maps,
+// string/list/null predicates, parameters, escaped symbolic names, and
+// comments. Read-only by construction: the only statement shape is
+// MATCH ... RETURN.
+//
+// Several constructs the DSL cannot express are still parsed where that is
+// cheap (OPTIONAL, DISTINCT, SKIP, OR/XOR/NOT, <>, count(*), unbounded ranges,
+// GQL quantifiers and temporal literals, single-dash GQL arrows, inline WHERE)
+// so the lowering step can reject them with a hint that names the DSL
+// limitation instead of a parser state.
+
+WHITESPACE = _{ " " | "\t" | "\r" | "\n" }
+COMMENT    = _{ ("//" ~ (!NEWLINE ~ ANY)*) | ("/*" ~ (!"*/" ~ ANY)* ~ "*/") }
+
+statement = { SOI ~ match_clause+ ~ return_clause ~ ";"? ~ EOI }
+
+// ── Clauses ─────────────────────────────────────────────────────────────────
+
+match_clause    = { kw_optional? ~ kw_match ~ pattern ~ ("," ~ pattern)* ~ where_clause? }
+where_clause    = { kw_where ~ condition }
+return_clause   = { kw_return ~ kw_distinct? ~ return_body ~ order_by_clause? ~ skip_clause? ~ limit_clause? }
+return_body     = { star | return_item ~ ("," ~ return_item)* }
+return_item     = { operand ~ (kw_as ~ ident)? }
+order_by_clause = { kw_order ~ kw_by ~ sort_item ~ ("," ~ sort_item)* }
+sort_item       = { operand ~ sort_direction? ~ nulls_order? }
+sort_direction  = { kw_descending | kw_desc | kw_ascending | kw_asc }
+nulls_order     = { nulls_kw ~ (first_kw | last_kw) }
+skip_clause     = { (kw_skip | offset_kw) ~ value }
+limit_clause    = { kw_limit ~ value }
+
+// ── Patterns ────────────────────────────────────────────────────────────────
+
+pattern       = { (ident ~ "=")? ~ (path_function | chain) }
+path_function = { path_fn_name ~ "(" ~ chain ~ ")" }
+path_fn_name  = @{ (^"shortestPath" | ^"allShortestPaths") ~ !ident_char }
+chain         = { node_pattern ~ (edge_pattern ~ node_pattern)* }
+
+node_pattern = { "(" ~ ident? ~ node_label* ~ property_map? ~ inline_where? ~ ")" }
+node_label   = { (":" | kw_is) ~ ident }
+inline_where = { kw_where ~ condition }
+
+edge_pattern     = { (bracket_edge | arrow_edge) ~ gql_quantifier? }
+bracket_edge     = { edge_left | edge_right | edge_undirected }
+edge_left        = { "<-[" ~ edge_body ~ "]-" }
+edge_right       = { "-[" ~ edge_body ~ "]->" }
+edge_undirected  = { "-[" ~ edge_body ~ "]-" }
+arrow_edge       = { arrow_left | gql_arrow_left | arrow_right | gql_arrow_right | arrow_undirected | gql_dash }
+arrow_left       = { "<--" }
+gql_arrow_left   = { "<-" }
+arrow_right      = { "-->" }
+gql_arrow_right  = { "->" }
+arrow_undirected = { "--" }
+gql_dash         = { "-" }
+gql_quantifier   = { "{" ~ integer? ~ ("," ~ integer?)? ~ "}" }
+
+edge_body     = { ident? ~ type_spec? ~ range_literal? ~ property_map? ~ inline_where? }
+type_spec     = { ":" ~ ident ~ ("|" ~ ":"? ~ ident)* }
+range_literal = { "*" ~ integer? ~ (".." ~ integer?)? }
+
+property_map = { "{" ~ (property_kv ~ ("," ~ property_kv)*)? ~ "}" }
+property_kv  = { ident ~ ":" ~ value }
+
+// ── Conditions ──────────────────────────────────────────────────────────────
+
+condition       = { kw_not* ~ term ~ (bool_op ~ kw_not* ~ term)* }
+bool_op         = { kw_and | kw_or | kw_xor }
+term            = { paren_condition | predicate }
+paren_condition = { "(" ~ condition ~ ")" }
+predicate       = { operand ~ predicate_tail? }
+predicate_tail  = { comp_op ~ operand
+                  | kw_in ~ operand
+                  | null_test
+                  | kw_starts ~ kw_with ~ operand
+                  | kw_ends ~ kw_with ~ operand
+                  | kw_contains ~ operand }
+null_test       = { kw_is ~ kw_not? ~ kw_null }
+comp_op         = { "<>" | "!=" | "<=" | ">=" | "=~" | "=" | "<" | ">" }
+
+// ── Operands ────────────────────────────────────────────────────────────────
+
+operand         = { gql_temporal | func_call | property_ref | value | ident }
+func_call       = { ident ~ "(" ~ kw_distinct? ~ (func_arg ~ ("," ~ func_arg)*)? ~ ")" }
+func_arg        = { star | operand }
+property_ref    = { ident ~ "." ~ ident }
+gql_temporal    = ${ gql_temporal_kw ~ WHITESPACE+ ~ string }
+gql_temporal_kw = @{ (^"DATETIME" | ^"TIMESTAMP" | ^"DATE") ~ !ident_char }
+star            = { "*" }
+
+// ── Values ──────────────────────────────────────────────────────────────────
+
+value     = { string | float | integer | boolean | null | list | parameter }
+list      = { "[" ~ (value ~ ("," ~ value)*)? ~ "]" }
+boolean   = @{ (^"TRUE" | ^"FALSE") ~ !ident_char }
+null      = @{ ^"NULL" ~ !ident_char }
+parameter = ${ "$" ~ parameter_name }
+parameter_name = @{ ident_start ~ ident_char* }
+integer   = @{ "-"? ~ ASCII_DIGIT+ }
+float     = @{ "-"? ~ ASCII_DIGIT+ ~ (("." ~ ASCII_DIGIT+ ~ exponent?) | exponent) }
+exponent  = @{ ^"e" ~ ("+" | "-")? ~ ASCII_DIGIT+ }
+string    = ${ sq_string | dq_string }
+sq_string = @{ "'" ~ (escape | "''" | (!("'" | "\\") ~ ANY))* ~ "'" }
+dq_string = @{ "\"" ~ (escape | "\"\"" | (!("\"" | "\\") ~ ANY))* ~ "\"" }
+escape    = @{ "\\" ~ ANY }
+
+// ── Identifiers and keywords ────────────────────────────────────────────────
+
+ident          = @{ backtick_ident | plain_ident }
+plain_ident    = @{ !reserved_word ~ ident_start ~ ident_char* }
+backtick_ident = @{ "`" ~ (!"`" ~ ANY)* ~ "`" }
+ident_start    = _{ ASCII_ALPHA | "_" }
+ident_char     = _{ ASCII_ALPHANUMERIC | "_" }
+
+// openCypher M23 ReservedWord, longest first so no alternative is a prefix of
+// a later one.
+reserved_word = @{
+    ( ^"CONSTRAINT" | ^"DESCENDING"
+    | ^"ASCENDING" | ^"MANDATORY"
+    | ^"CONTAINS" | ^"DISTINCT" | ^"OPTIONAL"
+    | ^"REQUIRE"
+    | ^"CREATE" | ^"DELETE" | ^"DETACH" | ^"EXISTS" | ^"REMOVE" | ^"RETURN" | ^"SCALAR" | ^"STARTS" | ^"UNIQUE" | ^"UNWIND"
+    | ^"FALSE" | ^"LIMIT" | ^"MATCH" | ^"MERGE" | ^"ORDER" | ^"UNION" | ^"WHERE"
+    | ^"CASE" | ^"DESC" | ^"DROP" | ^"ELSE" | ^"ENDS" | ^"NULL" | ^"SKIP" | ^"THEN" | ^"TRUE" | ^"WHEN" | ^"WITH"
+    | ^"ADD" | ^"ALL" | ^"AND" | ^"ASC" | ^"END" | ^"FOR" | ^"NOT" | ^"SET" | ^"XOR"
+    | ^"AS" | ^"BY" | ^"DO" | ^"IN" | ^"IS" | ^"OF" | ^"ON" | ^"OR"
+    ) ~ !ident_char
+}
+
+kw_match      = @{ ^"MATCH" ~ !ident_char }
+kw_optional   = @{ ^"OPTIONAL" ~ !ident_char }
+kw_where      = @{ ^"WHERE" ~ !ident_char }
+kw_return     = @{ ^"RETURN" ~ !ident_char }
+kw_distinct   = @{ ^"DISTINCT" ~ !ident_char }
+kw_as         = @{ ^"AS" ~ !ident_char }
+kw_order      = @{ ^"ORDER" ~ !ident_char }
+kw_by         = @{ ^"BY" ~ !ident_char }
+kw_asc        = @{ ^"ASC" ~ !ident_char }
+kw_ascending  = @{ ^"ASCENDING" ~ !ident_char }
+kw_desc       = @{ ^"DESC" ~ !ident_char }
+kw_descending = @{ ^"DESCENDING" ~ !ident_char }
+kw_skip       = @{ ^"SKIP" ~ !ident_char }
+kw_limit      = @{ ^"LIMIT" ~ !ident_char }
+kw_and        = @{ ^"AND" ~ !ident_char }
+kw_or         = @{ ^"OR" ~ !ident_char }
+kw_xor        = @{ ^"XOR" ~ !ident_char }
+kw_not        = @{ ^"NOT" ~ !ident_char }
+kw_in         = @{ ^"IN" ~ !ident_char }
+kw_is         = @{ ^"IS" ~ !ident_char }
+kw_null       = @{ ^"NULL" ~ !ident_char }
+kw_starts     = @{ ^"STARTS" ~ !ident_char }
+kw_ends       = @{ ^"ENDS" ~ !ident_char }
+kw_with       = @{ ^"WITH" ~ !ident_char }
+kw_contains   = @{ ^"CONTAINS" ~ !ident_char }
+
+// GQL words that are legal openCypher identifiers; only recognised in the one
+// position where the GQL form would appear, so they can be rejected with a hint.
+nulls_kw  = @{ ^"NULLS" ~ !ident_char }
+first_kw  = @{ ^"FIRST" ~ !ident_char }
+last_kw   = @{ ^"LAST" ~ !ident_char }
+offset_kw = @{ ^"OFFSET" ~ !ident_char }

@@ -48,9 +48,13 @@ compiler_pipeline_macros::define_compiler_ctx! {
     }
 
     phases {
-        validate {
+        parse_json {
             reads_env: [ontology]
             mutates: [json, input]
+        }
+        validate_input {
+            reads_env: [ontology]
+            mutates: [input]
         }
         normalize {
             reads_env: [ontology]
@@ -105,7 +109,12 @@ compiler_pipeline_macros::define_compiler_ctx! {
         clickhouse {
             env: [ontology, security_ctx]
             state: [json, input, query_plan, node, result_ctx, query_config, hydration_plan, output]
-            phases: [validate, normalize, restrict, plan, lower, enforce, security, partition, cursor, check, hydrate_plan, settings, codegen]
+            phases: [parse_json, validate_input, normalize, restrict, plan, lower, enforce, security, partition, cursor, check, hydrate_plan, settings, codegen]
+        }
+        from_input {
+            env: [ontology, security_ctx]
+            state: [input, query_plan, node, result_ctx, query_config, hydration_plan, output]
+            phases: [validate_input, normalize, restrict, plan, lower, enforce, security, partition, cursor, check, hydrate_plan, settings, codegen]
         }
         ch_hydration {
             env: [ontology, security_ctx]
@@ -115,24 +124,33 @@ compiler_pipeline_macros::define_compiler_ctx! {
         validate_normalize {
             env: [ontology]
             state: [json, input]
-            phases: [validate, normalize]
+            phases: [parse_json, validate_input, normalize]
         }
     }
 }
 
-fn validate(ctx: &mut impl CompilerCtx) -> Result<()> {
+/// JSON frontend only: schema checks, then deserialize into [`Input`] with
+/// the cursor-binding hash of the canonical document.
+fn parse_json(ctx: &mut impl CompilerCtx) -> Result<()> {
     let json = require(ctx.take_json(), "json")?;
-    let ontology = ctx.ontology();
-    let v = validate::Validator::new(ontology);
+    let v = validate::Validator::new(ctx.ontology());
     let value = v.check_json(&json)?;
     v.check_ontology(&value)?;
     let query_hash = cursor::canonical_hash(&value);
-    let mut input: Input = serde_json::from_value(value)?;
-    input.compiler.query_hash = query_hash;
+    let input: Input = serde_json::from_value(value)?;
+    ctx.set_input(input.with_query_hash(query_hash));
+    Ok(())
+}
+
+/// Shared by every frontend: decode the cursor against the query hash, check
+/// cross-references and caps, and annotate filters with ontology types.
+fn validate_input(ctx: &mut impl CompilerCtx) -> Result<()> {
+    let mut input = require(ctx.take_input(), "input")?;
+    let v = validate::Validator::new(ctx.ontology());
     if let Some(c) = &mut input.cursor
         && let Some(after) = &c.after
     {
-        c.seek = Some(cursor::decode(after, query_hash)?);
+        c.seek = Some(cursor::decode(after, input.compiler.query_hash)?);
     }
     v.check_references(&input)?;
     v.annotate_filter_types(&mut input);

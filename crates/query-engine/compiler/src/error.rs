@@ -12,6 +12,11 @@ pub enum QueryError {
     #[error("parse error: {0}")]
     Parse(#[from] serde_json::Error),
 
+    /// A text-frontend statement did not parse. Carries the line, column, and
+    /// what was expected there; never echoes compiler internals.
+    #[error("syntax error: {0}")]
+    Syntax(String),
+
     #[error("schema violation: {0}")]
     Validation(String),
 
@@ -62,6 +67,7 @@ impl QueryError {
         matches!(
             self,
             Self::Parse(_)
+                | Self::Syntax(_)
                 | Self::Validation(_)
                 | Self::ReferenceError(_)
                 | Self::PaginationError(_)
@@ -90,6 +96,7 @@ mod tests {
                 QueryError::Parse(serde_json::from_str::<()>("!").unwrap_err()),
                 true,
             ),
+            (QueryError::Syntax("bad".into()), true),
             (QueryError::Validation("bad".into()), true),
             (QueryError::ReferenceError("bad".into()), true),
             (QueryError::PaginationError("bad".into()), true),

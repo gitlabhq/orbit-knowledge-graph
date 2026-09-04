@@ -367,7 +367,7 @@ mod tests {
     use ontology::{DataType, RequiredRole};
     use orbit_utils::traversal_path::TraversalPath;
     use serde_json::Value;
-    use std::collections::HashMap;
+    use std::collections::{BTreeMap, HashMap};
 
     fn ontology() -> Ontology {
         Ontology::new()
@@ -403,7 +403,7 @@ mod tests {
             to: to.into(),
             hops: crate::input::HopRange::default(),
             direction: crate::input::Direction::Outgoing,
-            filters: std::collections::HashMap::new(),
+            filters: std::collections::BTreeMap::new(),
             fk_column: None,
             scope_prefix: None,
             scope_preserving: false,
@@ -428,7 +428,7 @@ mod tests {
     }
 
     fn input_with_filter(field: &str, value: Value) -> Input {
-        let mut filters = HashMap::new();
+        let mut filters = BTreeMap::new();
         filters.insert(
             field.to_string(),
             vec![InputFilter {
@@ -451,7 +451,7 @@ mod tests {
     }
 
     fn input_with_traversal_path_filter(entity: &str, filter: InputFilter) -> Input {
-        let mut filters = HashMap::new();
+        let mut filters = BTreeMap::new();
         filters.insert(TRAVERSAL_PATH_COLUMN.to_string(), vec![filter]);
         Input {
             query_type: QueryType::Traversal,
@@ -580,7 +580,7 @@ mod tests {
                 },
             ],
             relationships: vec![crate::input::InputRelationship {
-                filters: HashMap::from([(
+                filters: BTreeMap::from([(
                     TRAVERSAL_PATH_COLUMN.to_string(),
                     vec![traversal_path_filter(
                         FilterOp::Eq,
@@ -1011,7 +1011,7 @@ mod tests {
     ];
 
     fn user_filter_input(field: &str, value: Value) -> Input {
-        let mut filters = HashMap::new();
+        let mut filters = BTreeMap::new();
         filters.insert(
             field.to_string(),
             vec![InputFilter {
@@ -1194,7 +1194,7 @@ mod tests {
             to: to.into(),
             hops: crate::input::HopRange::default(),
             direction: crate::input::Direction::Outgoing,
-            filters: std::collections::HashMap::new(),
+            filters: std::collections::BTreeMap::new(),
             fk_column: None,
             scope_prefix: None,
             scope_preserving: false,
