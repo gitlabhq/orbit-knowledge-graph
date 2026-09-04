@@ -253,14 +253,16 @@ partial bytes do not reach the parser.
 
 | Flag | Type | Default | Actor | Off means |
 |---|---|---|---|---|
-| `gitaly_proxy` | rollout | disabled | project or root namespace | Rails refuses new preauthorizations; existing sessions drain |
+| `workhorse_gitaly_proxy` | rollout | disabled | project or root namespace | Rails refuses new preauthorizations; existing sessions drain |
 
-The Rails preauthorization endpoint checks `gitaly_proxy` with the project or
-its root namespace as the actor. Disabled, it is the kill switch: Rails refuses
-new preauthorizations while existing sessions drain under the lifetime rules.
-Enabling it for selected namespaces provides gradual rollout, and enabling it
-globally is GA. The Orbit transport default, `rails_http`, remains configuration
-rather than a feature flag. Rollout is tracked in
+The Rails preauthorization endpoint checks `workhorse_gitaly_proxy` with the
+project or its root namespace as the actor. Flags prefixed `gitaly_` are treated
+by Rails as Gitaly server flags and forwarded to Gitaly, so the proxy's flag
+lives in the `workhorse_` namespace. Disabled, it is the kill switch: Rails
+refuses new preauthorizations while existing sessions drain under the lifetime
+rules. Enabling it for selected namespaces provides gradual rollout, and
+enabling it globally is GA. The Orbit transport default, `rails_http`, remains
+configuration rather than a feature flag. Rollout is tracked in
 [rollout issue](https://gitlab.com/gitlab-org/gitlab/-/issues/627576).
 
 Orbit also requires Knowledge Graph indexing to be enabled for the project, the
