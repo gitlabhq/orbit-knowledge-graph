@@ -8346,8 +8346,6 @@ dependencies = [
 name = "orbit-search"
 version = "0.1.0"
 dependencies = [
- "rayon",
- "rustc-hash 2.1.3",
  "stop-words",
 ]
 

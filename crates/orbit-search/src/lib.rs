@@ -1,21 +1,14 @@
-pub mod anchor;
 pub mod corpus;
-pub mod expand;
 pub mod grep;
-pub mod ppr;
 pub mod rank;
 pub mod text;
 pub mod types;
 pub mod vocab;
 
-pub use anchor::{
-    BASE_SET_PER_TERM, MAX_SEEDS, MIN_SEEDS_PER_TERM, term_base_sets, unmatched_terms,
-};
-pub use grep::{GrepMatch, GrepOutcome, TermRecall};
-pub use ppr::KindRates;
-pub use rank::{ANCHOR_SIM, CONFIDENT_COVERAGE, Hit, rank_and_trim};
+pub use grep::{GrepMatch, GrepOutcome, TermRecall, unmatched_terms};
+pub use rank::{ANCHOR_SIM, CONFIDENT_COVERAGE, EXACT_NAME_SIM, Hit, rank_and_trim};
 pub use text::content_words;
-pub use types::{CorpusRow, Edge, Graph, GraphEdge};
+pub use types::{CorpusRow, Edge};
 pub use vocab::SearchVocab;
 
 #[cfg(test)]

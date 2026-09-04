@@ -24,12 +24,6 @@ impl SearchVocab {
         }
     }
 
-    pub fn focus_edge_kind(&self, stemmed_terms: &[String]) -> Option<String> {
-        stemmed_terms
-            .iter()
-            .find_map(|s| self.by_stem.get(s).cloned())
-    }
-
     pub fn is_relational(&self, stemmed_term: &str) -> bool {
         self.by_stem.contains_key(stemmed_term)
     }
@@ -44,10 +38,7 @@ mod tests {
         let vocab = SearchVocab::new([("call", "Calls"), ("import", "Imports")]);
         assert!(vocab.is_relational("call"));
         assert!(!vocab.is_relational("calls"));
-        assert_eq!(
-            vocab.focus_edge_kind(&["widget".to_string(), "import".to_string()]),
-            Some("IMPORTS".to_string())
-        );
-        assert_eq!(vocab.focus_edge_kind(&["widget".to_string()]), None);
+        assert!(vocab.is_relational("import"));
+        assert!(!vocab.is_relational("widget"));
     }
 }

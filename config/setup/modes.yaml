@@ -11,7 +11,7 @@ local:
     Rules:
 
     - Never answer a question about this codebase from prior knowledge. Every answer must be grounded in a `{{orbit}} grep` result from this repository.
-    - For any task first run `{{orbit}} grep "<keywords>"` in order to find relevant code definitions. Use `{{orbit}} show "<fqn>"` to show the full body of a definition and `{{orbit}} describe "<fqn>"` for all edge connections to a definition.
+    - For any task first run `{{orbit}} grep "<keywords>"` in order to find relevant code definitions. Use `{{orbit}} show "<fqn>"` with an optional --path <dir> param that accepts globs to show the full body of a definition and `{{orbit}} describe "<fqn>"` to list its callers and every other connection.
     - NEVER open a file just to read one definition's body. `{{orbit}} grep` only prints `fqn`, `kind`, and `loc` — `{{orbit}} show "<fqn>"` is always the follow-up if you want the full source, not a file read. File reads are only for editing and for lines outside any indexed definition (imports, module-level wiring, comments).
     - Weak or unmatched `grep` terms: retry with a synonym or identifier fragment ("throttle" → "rate limit").
     - Only skip `{{orbit}}` commands if the user explicitly requests not to use it.
