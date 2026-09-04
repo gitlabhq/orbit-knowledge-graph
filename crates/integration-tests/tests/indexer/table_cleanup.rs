@@ -1,4 +1,8 @@
+use std::sync::Arc;
+
 use clickhouse_client::{ClickHouseConfigurationExt, FromArrowColumn};
+use indexer::checkpoint::ClickHouseCheckpointStore;
+use indexer::modules::code::config::CodeTableNames;
 use indexer::orchestrator::scheduled::table_cleanup::TableCleanup;
 use indexer::orchestrator::scheduled::{ScheduledTask, ScheduledTaskMetrics};
 use integration_testkit::{GRAPH_SCHEMA_SQL, TestContext, t};
@@ -6,100 +10,117 @@ use orbit_server_config::TableCleanupConfig;
 
 fn build_cleanup_task(context: &TestContext) -> TableCleanup {
     let ontology = ontology::Ontology::load_embedded().unwrap();
+    let code_tables = CodeTableNames::from_ontology(&ontology).unwrap();
+    let checkpoints = Arc::new(ClickHouseCheckpointStore::new(Arc::new(
+        context.config.build_client(),
+    )));
     TableCleanup::new(
         context.config.build_client(),
         &ontology,
+        &code_tables,
+        checkpoints,
         ScheduledTaskMetrics::new(),
         TableCleanupConfig::default(),
     )
 }
 
-async fn seed_user(context: &TestContext, id: i64) {
+async fn seed_users_with_tombstones(context: &TestContext) {
     context
         .execute(&format!(
-            "INSERT INTO {} (id, username, _version, _deleted) \
-             VALUES ({id}, 'u{id}', now(), false)",
+            "INSERT INTO {} (id, username, _version, _deleted) VALUES \
+             (1, 'u1', now64(6) - INTERVAL 1 DAY, false), \
+             (1, 'u1', now64(6) - INTERVAL 1 HOUR, true), \
+             (2, 'u2', now64(6) - INTERVAL 30 DAY, false), \
+             (2, 'u2', now64(6) - INTERVAL 10 DAY, true), \
+             (3, 'u3', now64(6) - INTERVAL 1 DAY, false)",
             t("gl_user")
         ))
         .await;
 }
 
-async fn lightweight_delete_user(context: &TestContext, id: i64) {
-    context
-        .execute(&format!(
-            "DELETE FROM {} WHERE id = {id} \
-             SETTINGS lightweight_deletes_sync = 1",
-            t("gl_user")
-        ))
-        .await;
-}
-
-async fn live_user_ids(context: &TestContext) -> Vec<i64> {
+async fn user_rows(context: &TestContext) -> Vec<(i64, i64)> {
     let result = context
         .query(&format!(
-            "SELECT id FROM {} FINAL WHERE _deleted = false ORDER BY id",
+            "SELECT id, toInt64(_deleted) FROM {} ORDER BY id, _version",
             t("gl_user")
         ))
         .await;
-    i64::extract_column(&result, 0).unwrap()
+    let ids = i64::extract_column(&result, 0).unwrap();
+    let deleted = i64::extract_column(&result, 1).unwrap();
+    ids.into_iter().zip(deleted).collect()
 }
 
 #[tokio::test]
-async fn apply_deleted_mask_succeeds_on_every_table() {
+async fn runs_on_every_table_of_an_empty_schema() {
     let context = TestContext::new(&[*GRAPH_SCHEMA_SQL]).await;
 
     build_cleanup_task(&context).run().await.unwrap();
 }
 
 #[tokio::test]
-async fn apply_deleted_mask_removes_lightweight_deleted_rows() {
+async fn collapses_fresh_tombstones_and_purges_expired_ones() {
     let context = TestContext::new(&[*GRAPH_SCHEMA_SQL]).await;
-
-    seed_user(&context, 1).await;
-    seed_user(&context, 2).await;
-    lightweight_delete_user(&context, 1).await;
-
-    assert_eq!(live_user_ids(&context).await, vec![2]);
+    seed_users_with_tombstones(&context).await;
 
     build_cleanup_task(&context).run().await.unwrap();
 
-    assert_eq!(live_user_ids(&context).await, vec![2]);
+    assert_eq!(user_rows(&context).await, vec![(1, 1), (3, 0)]);
 }
 
 #[tokio::test]
-async fn apply_deleted_mask_is_idempotent() {
+async fn second_pass_leaves_a_clean_table_unchanged() {
     let context = TestContext::new(&[*GRAPH_SCHEMA_SQL]).await;
+    seed_users_with_tombstones(&context).await;
+    let task = build_cleanup_task(&context);
 
-    seed_user(&context, 1).await;
-    seed_user(&context, 2).await;
-    lightweight_delete_user(&context, 1).await;
+    task.run().await.unwrap();
+    task.run().await.unwrap();
 
-    build_cleanup_task(&context).run().await.unwrap();
-    build_cleanup_task(&context).run().await.unwrap();
-
-    assert_eq!(live_user_ids(&context).await, vec![2]);
+    assert_eq!(user_rows(&context).await, vec![(1, 1), (3, 0)]);
 }
 
 #[tokio::test]
-async fn apply_deleted_mask_removes_lightweight_deleted_edges() {
+async fn skips_tables_whose_parts_persist_only_the_block_offset() {
     let context = TestContext::new(&[*GRAPH_SCHEMA_SQL]).await;
-
-    for source_id in [1, 2] {
-        context
-            .execute(&format!(
-                "INSERT INTO {} \
-                 (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind, _version, _deleted) \
-                 VALUES ('1/100/', {source_id}, 'User', 'MEMBER_OF', {source_id}0, 'Project', now(), false)",
-                t("gl_edge")
-            ))
-            .await;
-    }
-
     context
         .execute(&format!(
-            "DELETE FROM {} WHERE source_id = 1 \
-             SETTINGS lightweight_deletes_sync = 1",
-            t("gl_edge")
+            "ALTER TABLE {} MODIFY SETTING enable_block_number_column = 0",
+            t("gl_user")
+        ))
+        .await;
+    seed_users_with_tombstones(&context).await;
+
+    build_cleanup_task(&context).run().await.unwrap();
+
+    assert_eq!(
+        user_rows(&context).await,
+        vec![(1, 0), (1, 1), (2, 0), (2, 1), (3, 0)]
+    );
+}
+
+#[tokio::test]
+async fn removes_the_superseded_code_snapshot_of_a_checkpointed_project() {
+    let context = TestContext::new(&[*GRAPH_SCHEMA_SQL]).await;
+    context
+        .execute(&format!(
+            "INSERT INTO {} (traversal_path, project_id, branch, last_task_id, last_commit, indexed_at, _version) \
+             VALUES ('1/100/', 100, 'main', 7, 'abc', '2026-01-02 00:00:00', 1)",
+            t("code_indexing_checkpoint")
+        ))
+        .await;
+    context
+        .execute(&format!(
+            "INSERT INTO {} (id, traversal_path, project_id, name, _version) \
+             VALUES (1, '1/100/', 100, 'main', '2026-01-02 00:00:05')",
+            t("gl_branch")
+        ))
+        .await;
+    context
+        .execute(&format!(
+            "INSERT INTO {} (id, traversal_path, project_id, branch, fqn, name, _version) VALUES \
+             (1, '1/100/', 100, 'main', 'old', 'old', '2026-01-01 00:00:00'), \
+             (2, '1/100/', 100, 'main', 'new', 'new', '2026-01-02 00:00:00')",
+            t("gl_definition")
         ))
         .await;
 
@@ -107,8 +128,8 @@ async fn apply_deleted_mask_removes_lightweight_deleted_edges() {
 
     let result = context
         .query(&format!(
-            "SELECT source_id FROM {} FINAL WHERE _deleted = false ORDER BY source_id",
-            t("gl_edge")
+            "SELECT id FROM {} ORDER BY id",
+            t("gl_definition")
         ))
         .await;
     assert_eq!(i64::extract_column(&result, 0).unwrap(), vec![2]);

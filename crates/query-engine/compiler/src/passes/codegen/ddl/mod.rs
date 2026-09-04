@@ -408,6 +408,8 @@ fn table_settings(
         "allow_experimental_replacing_merge_with_cleanup",
         "1",
     );
+    upsert_setting(&mut s, "enable_block_number_column", "1");
+    upsert_setting(&mut s, "enable_block_offset_column", "1");
     if partitioned {
         upsert_setting(&mut s, "min_age_to_force_merge_seconds", "3600");
         upsert_setting(&mut s, "min_age_to_force_merge_on_partition_only", "1");

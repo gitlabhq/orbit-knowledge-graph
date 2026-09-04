@@ -290,14 +290,14 @@ The handler will restart extraction from epoch for that entity type.
 
 ## Graph table maintenance
 
-A deletion is a tombstone: the row is re-inserted with `_deleted = true` and a bumped `_version`, and reads hide it at once via FINAL. No deletion path issues a mutation. The `maintenance.stale_reclaim` task removes tombstones and the rows they hide every 10 minutes with patch-part deletes (see [server configuration](server_configuration.md), "Stale reclaim task settings"). To check its state:
+A deletion is a tombstone: the row is re-inserted with `_deleted = true` and a bumped `_version`, and reads hide it at once via FINAL. No deletion path issues a mutation. The `maintenance.table_cleanup` task removes tombstones and the rows they hide every 10 minutes with patch-part deletes (see [server configuration](server_configuration.md), "Table cleanup task settings"). To check its state:
 
 ```sql
 SELECT key, argMax(watermark, _version) AS last_pass, argMax(cursor_values, _version) AS blocks
-FROM `<gkg-database>`.checkpoint WHERE key LIKE 'maintenance.stale_reclaim.%' GROUP BY key;
+FROM `<gkg-database>`.checkpoint WHERE key LIKE 'maintenance.table_cleanup.%' GROUP BY key;
 
 SELECT table, count() AS parts, sum(rows) AS rows, formatReadableSize(sum(data_uncompressed_bytes)) AS pending
 FROM system.parts WHERE database = '<gkg-database>' AND active AND startsWith(name, 'patch') GROUP BY table;
 ```
 
-Tombstones stay for `tombstone_retention_secs` (7 days by default) and are purged daily with the rows they hide; the rows a fresh tombstone supersedes go within one pass. Deleting the table's `maintenance.stale_reclaim.<versioned table>` checkpoint row (a tombstone insert into the `checkpoint` table) makes the next pass sweep the table's whole history. Do not run `OPTIMIZE ... FINAL CLEANUP` on the large tables: a cleanup merge of a multi-billion-row part does not finish inside any client timeout.
+Tombstones stay for `tombstone_retention_secs` (7 days by default) and are purged daily with the rows they hide; the rows a fresh tombstone supersedes go within one pass. Deleting the table's `maintenance.table_cleanup.<versioned table>` checkpoint row (a tombstone insert into the `checkpoint` table) makes the next pass sweep the table's whole history. Do not run `OPTIMIZE ... FINAL CLEANUP` on the large tables: a cleanup merge of a multi-billion-row part does not finish inside any client timeout.

@@ -329,7 +329,7 @@ helm upgrade gkg orbit-helm-charts/gkg \
 
 ### Stale data accumulation
 
-The cleanup stage after indexing only tombstones keys that vanished; failures are logged as warnings and do not block the pipeline. The previous snapshot, the tombstones and any rows of runs that never checkpointed are removed physically by the `maintenance.stale_reclaim` task, which deletes every row with `_version` below the project's checkpoint `indexed_at` once the checkpoint lands (see [server configuration](server_configuration.md), "Stale reclaim task settings").
+The cleanup stage after indexing only tombstones keys that vanished; failures are logged as warnings and do not block the pipeline. The previous snapshot, the tombstones and any rows of runs that never checkpointed are removed physically by the `maintenance.table_cleanup` task, which deletes every row with `_version` below the project's checkpoint `indexed_at` once the checkpoint lands (see [server configuration](server_configuration.md), "Table cleanup task settings").
 
 To find rows the task still has to reclaim for recently indexed projects:
 

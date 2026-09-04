@@ -270,7 +270,7 @@
             "cron": "0 */30 * * * *",
             "lookback_secs": 3600
           },
-          "stale-reclaim": {
+          "table-cleanup": {
             "apply_patches_after_bytes": 1073741824,
             "apply_patches_after_secs": 21600,
             "cron": "0 */10 * * * *",
@@ -279,9 +279,6 @@
             "statement_timeout_secs": 600,
             "sweep_history": true,
             "tombstone_retention_secs": 604800
-          },
-          "table-cleanup": {
-            "cron": "0 0 3 * * 0"
           }
         }
       }
@@ -1570,7 +1567,7 @@
               "cron": "0 */30 * * * *",
               "lookback_secs": 3600
             },
-            "stale-reclaim": {
+            "table-cleanup": {
               "apply_patches_after_bytes": 1073741824,
               "apply_patches_after_secs": 21600,
               "cron": "0 */10 * * * *",
@@ -1579,9 +1576,6 @@
               "statement_timeout_secs": 600,
               "sweep_history": true,
               "tombstone_retention_secs": 604800
-            },
-            "table-cleanup": {
-              "cron": "0 0 3 * * 0"
             }
           }
         }
@@ -1638,8 +1632,8 @@
             "lookback_secs": 3600
           }
         },
-        "stale-reclaim": {
-          "$ref": "#/$defs/StaleReclaimConfig",
+        "table-cleanup": {
+          "$ref": "#/$defs/TableCleanupConfig",
           "default": {
             "apply_patches_after_bytes": 1073741824,
             "apply_patches_after_secs": 21600,
@@ -1649,12 +1643,6 @@
             "statement_timeout_secs": 600,
             "sweep_history": true,
             "tombstone_retention_secs": 604800
-          }
-        },
-        "table-cleanup": {
-          "$ref": "#/$defs/TableCleanupConfig",
-          "default": {
-            "cron": "0 0 3 * * 0"
           }
         }
       },
@@ -1725,61 +1713,6 @@
       },
       "additionalProperties": false
     },
-    "StaleReclaimConfig": {
-      "description": "Reclaims tombstoned and superseded graph rows with patch-part deletes.",
-      "type": "object",
-      "properties": {
-        "apply_patches_after_bytes": {
-          "type": "integer",
-          "format": "uint64",
-          "default": 1073741824,
-          "minimum": 0
-        },
-        "apply_patches_after_secs": {
-          "type": "integer",
-          "format": "uint64",
-          "default": 21600,
-          "minimum": 0
-        },
-        "cron": {
-          "description": "Cron expression with seconds field (6-field: `sec min hour dom mon dow`).\nWhen absent, the task runs on a default 60-second interval.",
-          "type": [
-            "string",
-            "null"
-          ],
-          "default": null
-        },
-        "max_candidates_per_statement": {
-          "type": "integer",
-          "format": "uint64",
-          "default": 2000000,
-          "minimum": 0
-        },
-        "purge_interval_secs": {
-          "type": "integer",
-          "format": "uint64",
-          "default": 86400,
-          "minimum": 0
-        },
-        "statement_timeout_secs": {
-          "type": "integer",
-          "format": "uint64",
-          "default": 600,
-          "minimum": 0
-        },
-        "sweep_history": {
-          "type": "boolean",
-          "default": true
-        },
-        "tombstone_retention_secs": {
-          "type": "integer",
-          "format": "uint64",
-          "default": 604800,
-          "minimum": 0
-        }
-      },
-      "additionalProperties": false
-    },
     "SubscriptionConfig": {
       "description": "Sparse per-subscription policy override (retry, concurrency, DLQ).\n\nThe correct default policy for each topic is declared in Rust by the indexer\nmodule that owns the topic (see `crates/indexer/src/modules/*`). A\n`engine.topics.<name>` entry in YAML is a *field-wise override* layered on top\nof that declared default via [`SubscriptionConfig::with_optional_override`]: only the\nfields the entry sets change; every unset field keeps the module default. Each\nfield is therefore `Option`, so \"unset\" is distinguishable from an explicit\nvalue (notably `dead_letter_on_exhaustion: false`).",
       "type": "object",
@@ -1834,9 +1767,21 @@
       "additionalProperties": false
     },
     "TableCleanupConfig": {
-      "description": "Per-task schedule configuration.\n\nEach scheduled task embeds this via `#[serde(flatten)]` in its own typed config struct.\nThe scheduler reads it via `task.schedule()`.",
+      "description": "Reclaims tombstoned and superseded graph rows with patch-part deletes.",
       "type": "object",
       "properties": {
+        "apply_patches_after_bytes": {
+          "type": "integer",
+          "format": "uint64",
+          "default": 1073741824,
+          "minimum": 0
+        },
+        "apply_patches_after_secs": {
+          "type": "integer",
+          "format": "uint64",
+          "default": 21600,
+          "minimum": 0
+        },
         "cron": {
           "description": "Cron expression with seconds field (6-field: `sec min hour dom mon dow`).\nWhen absent, the task runs on a default 60-second interval.",
           "type": [
@@ -1844,8 +1789,37 @@
             "null"
           ],
           "default": null
+        },
+        "max_candidates_per_statement": {
+          "type": "integer",
+          "format": "uint64",
+          "default": 2000000,
+          "minimum": 0
+        },
+        "purge_interval_secs": {
+          "type": "integer",
+          "format": "uint64",
+          "default": 86400,
+          "minimum": 0
+        },
+        "statement_timeout_secs": {
+          "type": "integer",
+          "format": "uint64",
+          "default": 600,
+          "minimum": 0
+        },
+        "sweep_history": {
+          "type": "boolean",
+          "default": true
+        },
+        "tombstone_retention_secs": {
+          "type": "integer",
+          "format": "uint64",
+          "default": 604800,
+          "minimum": 0
         }
-      }
+      },
+      "additionalProperties": false
     },
     "TlsConfig": {
       "type": "object",

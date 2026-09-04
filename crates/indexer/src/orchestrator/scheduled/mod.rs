@@ -7,7 +7,6 @@ pub mod migration_completion;
 pub mod namespace;
 pub mod namespace_deletion;
 pub mod stale_edge_reconciliation;
-pub mod stale_reclaim;
 pub mod table_cleanup;
 
 pub use backfill_sweep::CodeBackfillSweep;
@@ -18,7 +17,6 @@ pub use migration_completion::MigrationCompletionChecker;
 pub use namespace::NamespaceDispatcher;
 pub use namespace_deletion::NamespaceDeletionScheduler;
 pub use stale_edge_reconciliation::StaleEdgeReconciliation;
-pub use stale_reclaim::StaleReclaim;
 pub use table_cleanup::TableCleanup;
 
 use std::str::FromStr;

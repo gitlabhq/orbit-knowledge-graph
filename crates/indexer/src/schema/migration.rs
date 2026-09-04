@@ -724,7 +724,7 @@ async fn clone_table(
         })
 }
 
-/// `ATTACH PARTITION FROM` refuses a source with unapplied patch parts, which the stale reclaim
+/// `ATTACH PARTITION FROM` refuses a source with unapplied patch parts, which the table cleanup
 /// task leaves behind between its own `APPLY PATCHES` runs.
 async fn apply_pending_patches(
     graph: &ArrowClickHouseClient,

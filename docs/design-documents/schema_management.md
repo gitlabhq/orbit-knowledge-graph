@@ -291,6 +291,12 @@ back, not a mistake to refuse. Indexers do not run DDL; they gate on the version
    `maintenance.code_stale_sweep.*` gates so each namespace re-sweeps against the clone. Control tables such as `gkg_schema_version` are never
    prefixed or cloned.
 
+   Patch-part deletes (the table cleanup task) need every row's `(_block_number, _block_offset)`
+   identity to be unique within a table. Inserts under the schema 94 DDL guarantee that; attached
+   parts do not, because they keep the source table's numbering while the new table numbers its own
+   inserts from zero. After a clone-based migration the task therefore skips the cloned tables until
+   the next full (`*`) rebuild (see [SDLC indexing](indexing/sdlc_indexing.md), "Table cleanup").
+
 5. **Mark migrating** — Insert the new version with status `migrating` in `gkg_schema_version`.
    This signals indexers that the new-prefix tables exist. A newly deployed webserver whose
    embedded version matches this `migrating` row reports readiness state `Migrating`

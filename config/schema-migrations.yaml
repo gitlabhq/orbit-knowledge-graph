@@ -16,6 +16,12 @@
 # note-gated `scope: none` entry, the certified output-neutral escape hatch. A
 # version with no entry is treated as "*", which also makes pruning old entries safe.
 migrations:
+- version: 94
+  scope: "*"
+  note: >-
+    Versioned tables declare enable_block_number_column and
+    enable_block_offset_column so every row carries a unique persisted block identity for patch-part
+    deletes; a full rebuild is required because attached parts keep foreign block numbers
 - version: 93
   scope: "*"
   note: >-
