@@ -94,9 +94,8 @@ sequenceDiagram
 | Workhorse | Profile compilation, policy validity and enforcement, and proxy limits | Consumer-specific authorization code |
 | Consumer | Transport mode, connection rotation, and retries | Gitaly addresses, tokens, and storage routing |
 
-Workhorse is deliberately policy-selection-free. It knows how to enforce a policy, not
-who may use one. Rails owns that decision with the rest of the GitLab
-authorization logic.
+Workhorse does not select policies. It knows how to enforce one, not who may use
+one. Rails owns that decision with the rest of the GitLab authorization logic.
 
 ### A connection's lifecycle
 
