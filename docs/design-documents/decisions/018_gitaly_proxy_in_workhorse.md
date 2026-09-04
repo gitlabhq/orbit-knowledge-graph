@@ -28,8 +28,7 @@ Every new RPC requires a Rails endpoint, a Workhorse handler, an HTTP encoding
 of the response, and a matching `gitlab-client` method. Four codebases and
 review paths change to produce an endpoint with one caller. Every read is also
 a full Rails request, so an indexing job that fetches ten archives goes through
-Puma ten times. Rails is done once it writes the handoff header, so the cost is
-per-request overhead, not a held worker.
+Puma ten times.
 
 ### Why Orbit cannot call Gitaly directly
 
@@ -55,19 +54,6 @@ Praefect does. An
 unmodified Rust `tonic` client completed a code-indexing job through GDK
 Workhorse, Praefect, and Gitaly, including a 21 MB `GetArchive`, backpressure,
 and concurrent streams.
-
-The POC left authorization unresolved. Orbit held a signed grant containing
-the Gitaly address and token, so the secret the proxy exists to protect ended
-up in Orbit anyway. The grant was a bearer token with no caller binding or
-revocation, and the first repository-scope check allowed a grant for one
-repository to read another. This ADR replaces that grant model.
-
-### The pattern we do not want to copy
-
-Rails gives Zoekt and KAS a Gitaly address and token, then each consumer dials
-Gitaly. This exposes storage topology and credentials, broadens the effect of a
-compromised consumer, and couples consumers to Gitaly routing. Orbit is in a
-separate cluster, so we rule out this pattern.
 
 ## Decision
 
@@ -155,8 +141,7 @@ in-flight streams run until their own deadline.
 
 After Rails revokes access, a session admitted just before revocation may start
 streams for 10 minutes, and those streams may run for 60 minutes. The worst
-case is therefore about 70 minutes. Whether v1 needs an immediate kill hook is
-[open question 1](#open-questions-for-the-team).
+case is therefore about 70 minutes.
 
 Turning off either feature flag stops new preauthorizations. Existing sessions
 continue under the same lifetime rules.
@@ -166,7 +151,7 @@ continue under the same lifetime rules.
 A new consumer adds a Rails authorizer for its own credential, an RPC allowlist,
 and a rollout flag. The shared route needs no Workhorse, ingress, or Cells
 routing change. Zoekt and KAS are possible future consumers, but this ADR does
-not commit them to the proxy.
+not implement these.
 
 Adding an RPC for an existing consumer is a Rails allowlist change when the RPC
 is already in the Gitaly descriptors vendored into Workhorse. Otherwise,
@@ -232,59 +217,6 @@ the same edge cost.
 Native gRPC would remove the tunnel. It requires a coordinated edge change
 across every supported deployment topology for one consumer. We consider that a
 separate platform decision.
-
-### Reverse tunnel over the existing Workhorse to Orbit connection
-
-Workhorse already connects to the Orbit webserver for queries, but the indexer
-is a separate deployment and does not talk to the webserver. Repository reads
-would take an extra hop, and archive downloads would share a connection with
-query lookups.
-
-### A shared gRPC server with grpc-go connection aging
-
-A shared server would avoid per-connection servers and the session state
-machine. Its connection-aging grace period terminates in-flight archives and
-causes the restart loop described under [Session lifetime](#session-lifetime).
-
-## Open questions for the team
-
-_Numbered list, each with a recommendation._
-
-## Consequences
-
-### What improves
-
-_Placeholder._
-
-### What gets harder
-
-_Placeholder._
-
-## Non-goals and deferred work
-
-_Placeholder._
-
-## Implementation plan
-
-### Merge requests
-
-_Leg / MR / depends-on table._
-
-### Gates before staging
-
-_Placeholder._
-
-### Staging sizing
-
-_Placeholder._
-
-### Rollout
-
-_Placeholder._
-
-### Definition of done
-
-_Placeholder._
 
 ## References
 
