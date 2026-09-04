@@ -582,6 +582,11 @@ impl Ontology {
         loading::load_from_dir(dir.as_ref())
     }
 
+    /// The embedded ontology with a directory mirroring `config/ontology/` merged over it.
+    pub fn load_embedded_with_overlay(dir: impl AsRef<Path>) -> Result<Self, OntologyError> {
+        loading::load_with(&loading::DirOverlay(dir.as_ref()))
+    }
+
     /// Load ontology from embedded files compiled into the binary.
     ///
     /// This uses the ontology files from `config/ontology/` that were
@@ -2269,6 +2274,50 @@ mod tests {
             ontology.traversal_path_columns("gl_merge_request"),
             [("traversal_path".to_string(), Some(25))]
         );
+    }
+
+    #[test]
+    fn overlay_dir_merges_any_ontology_file_and_adds_new_ones() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("schema.yaml"),
+            "settings:\n  denormalized_joins:\n    - name: approved\n      hops:\n        - {relationship: APPROVED, from: User, to: MergeRequest}\n",
+        )
+        .unwrap();
+        std::fs::create_dir(dir.path().join("edges")).unwrap();
+        std::fs::write(
+            dir.path().join("edges/approved.yaml"),
+            "variants:\n  - from_node: { type: User, id: id }\n    to_node: { type: WorkItem, id: id }\n    scope: prune_to_target\n    description: \"User approved work item.\"\n",
+        )
+        .unwrap();
+
+        let base = Ontology::load_embedded().unwrap();
+        let overlaid = Ontology::load_embedded_with_overlay(dir.path()).unwrap();
+
+        assert_eq!(
+            overlaid.denormalized_joins().len(),
+            base.denormalized_joins().len() + 1
+        );
+        assert!(
+            overlaid
+                .denormalized_join_by_table("gl_denorm_approved")
+                .is_some()
+        );
+        let approved = |o: &Ontology| {
+            o.edges()
+                .filter(|e| e.relationship_kind == "APPROVED")
+                .count()
+        };
+        assert_eq!(approved(&overlaid), approved(&base) + 1);
+        assert_eq!(overlaid.nodes().count(), base.nodes().count());
+
+        std::fs::write(
+            dir.path().join("schema.yaml"),
+            "settings:\n  denormalized_joins: [{name: x, hops: []}]\n",
+        )
+        .unwrap();
+        let err = Ontology::load_embedded_with_overlay(dir.path()).unwrap_err();
+        assert!(err.to_string().contains("at least one hop"), "got: {err}");
     }
 
     #[test]

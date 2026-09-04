@@ -1,0 +1,6 @@
+# Trial declaration; run with `mise test:integration:overlay denorm_approved`.
+settings:
+  denormalized_joins:
+    - name: approved
+      hops:
+        - {relationship: APPROVED, from: User, to: MergeRequest}
