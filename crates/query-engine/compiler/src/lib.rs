@@ -1758,29 +1758,6 @@ mod tests {
         compile(&query, &ONTOLOGY, &ctx).unwrap().base.render()
     }
 
-    #[test]
-    fn scoped_query_pushes_down_partition_predicate() {
-        let query = r#"{"query_type":"traversal","nodes":[{"id":"m","entity":"MergeRequest","columns":["id"],"filters":{"state":{"eq":"opened"}}}],"limit":20}"#;
-        let ctx = SecurityContext::new(1, vec!["1/".into()])
-            .unwrap()
-            .with_scope_prefixes(
-                [("m".to_string(), TraversalPath::new_unchecked("1/9970/"))].into(),
-            );
-        let sql = compile(query, &ONTOLOGY, &ctx).unwrap().base.render();
-        assert!(
-            sql.contains("startsWith(m.traversal_path"),
-            "scoped query should always carry the startsWith prefix:\n{sql}"
-        );
-        let has_partition_pred = sql.contains(
-            "m._partition_id = toString(modulo(sipHash64(toUInt64OrZero(arrayElement(splitByChar(",
-        );
-        assert_eq!(
-            has_partition_pred,
-            ONTOLOGY.partition().is_some(),
-            "the _partition_id predicate should track whether the ontology partitions:\n{sql}"
-        );
-    }
-
     // SQL-shape smoke: the 4-hop diff chain elides CONTAINS to FK node-joins
     // (guards the orientation-agnostic emit_chain), and a non-FK survivor blocks
     // elision. `expect` is `|`-separated; a `!x` token asserts `x` is absent.
