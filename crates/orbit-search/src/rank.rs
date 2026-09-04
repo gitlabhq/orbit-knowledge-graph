@@ -13,6 +13,7 @@ pub const EXACT_NAME_BOOST: f64 = 2.0;
 pub const CONFIDENT_COVERAGE: f64 = 0.5;
 pub const LENGTH_NORM_B: f64 = 0.75;
 pub const DEGREE_WEIGHT: f64 = 0.5;
+pub const DEGREE_CAP: u64 = 200;
 
 pub struct Hit {
     pub index: usize,
@@ -84,7 +85,8 @@ fn rank(corpus: &[CorpusRow], sims: &[Vec<f64>], idfs: &[f64], cap: usize) -> Ve
             .sum();
         let coverage = matched_idf / idf_total;
         let exactness = 1.0 + EXACT_NAME_BOOST * exact_idf / idf_total;
-        let connectedness = 1.0 + DEGREE_WEIGHT * (1.0 + corpus[index].degree as f64).ln();
+        let degree = corpus[index].degree.min(DEGREE_CAP) as f64;
+        let connectedness = 1.0 + DEGREE_WEIGHT * (1.0 + degree).ln();
         hits.push(Hit {
             index,
             score: total * coverage * coverage * exactness * connectedness / length_norm,
@@ -238,7 +240,7 @@ mod tests {
         let mut exact = row(1, "compiler::compile");
         exact.degree = 2;
         let mut stem = row(2, "code_graph::STRUCTURAL_LABELS");
-        stem.degree = 1000;
+        stem.degree = 1_000_000;
         let corpus = vec![stem, exact];
         let sims = vec![vec![ANCHOR_SIM], vec![EXACT_NAME_SIM]];
         let hits = rank(&corpus, &sims, &[1.0], 10);
