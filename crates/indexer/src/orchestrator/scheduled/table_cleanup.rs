@@ -786,7 +786,10 @@ fn hash_chunk_sql(table: &str, key: &str, filter: &str, chunks: usize, chunk: us
     format!("SELECT {key} FROM {table} WHERE {filter}{chunk}")
 }
 
-/// Deletes every row of the candidate keys except the newest one. With `keep_newest_tombstone`
+/// Deletes every row of the candidate keys except the newest one. `update_sequential_consistency`
+/// is off: with it a lightweight update waits behind every pending replication-queue entry (300 s
+/// timeouts on the bench after a restart), and the cursor overlap already covers parts a replica
+/// fetches late. With `keep_newest_tombstone`
 /// the newest row survives whatever its flag; without it a key whose newest row is a tombstone
 /// loses all its rows. A live row tied with a tombstone at the same `_version` counts as live.
 fn collapse_statement(
@@ -810,7 +813,7 @@ fn collapse_statement(
          AND ({key}, _version) NOT IN (\
            SELECT {key}, max(_version) FROM {table} WHERE {prune}({key}) IN ({candidates}) \
            GROUP BY {key}{having}) \
-         SETTINGS lightweight_delete_mode = '{PATCH_DELETE_MODE}', max_execution_time = {timeout_secs}"
+         SETTINGS lightweight_delete_mode = '{PATCH_DELETE_MODE}', update_sequential_consistency = 0, max_execution_time = {timeout_secs}"
     )
 }
 
@@ -849,7 +852,7 @@ fn code_snapshot_statement(table: &str, scopes: &str, prune: &str, timeout_secs:
              ON e.traversal_path = c.traversal_path AND e.project_id = c.project_id AND e.branch = c.branch \
            WHERE e.{prune} AND (e.traversal_path, e.project_id, e.branch) IN (SELECT {CODE_SCOPE} FROM ({scopes})) \
              AND e._version < c.bound) \
-         SETTINGS lightweight_delete_mode = '{PATCH_DELETE_MODE}', max_execution_time = {timeout_secs}"
+         SETTINGS lightweight_delete_mode = '{PATCH_DELETE_MODE}', update_sequential_consistency = 0, max_execution_time = {timeout_secs}"
     )
 }
 
@@ -878,7 +881,7 @@ fn shared_edge_snapshot_statement(
            INNER JOIN ({paths}) AS c ON e.traversal_path = c.traversal_path \
            WHERE e.{prune} AND e.traversal_path IN (SELECT traversal_path FROM ({paths})) \
              AND e.source_kind IN ({kinds}) AND e._version < c.bound) \
-         SETTINGS lightweight_delete_mode = '{PATCH_DELETE_MODE}', max_execution_time = {timeout_secs}"
+         SETTINGS lightweight_delete_mode = '{PATCH_DELETE_MODE}', update_sequential_consistency = 0, max_execution_time = {timeout_secs}"
     )
 }
 
@@ -1008,7 +1011,7 @@ mod tests {
         ));
         assert!(sql.contains("GROUP BY a, b) SETTINGS"));
         assert!(sql.ends_with(
-            "SETTINGS lightweight_delete_mode = 'lightweight_update_force', max_execution_time = 30"
+            "SETTINGS lightweight_delete_mode = 'lightweight_update_force', update_sequential_consistency = 0, max_execution_time = 30"
         ));
     }
 
