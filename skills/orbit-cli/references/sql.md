@@ -3,17 +3,18 @@
 The local graph is a DuckDB database (`~/.orbit/graph.duckdb` by default) that
 you query with read-only SQL via `orbit sql` (or `glab orbit local --yes sql`).
 Run `orbit schema [TABLE…]` to see live columns; the tables below are the ones
-you query directly (`_orbit_manifest` is bookkeeping).
+you query directly.
 
 ## Tables
 
 | Table | Row = | Key columns |
 |---|---|---|
-| `gl_definition` | a defined symbol | `id`, `name`, `fqn`, `definition_type`, `file_path`, `start_line`, `end_line`, `commit_sha` |
+| `gl_definition` | a defined symbol | `id`, `name`, `fqn`, `definition_type`, `file_path`, `start_line`, `end_line`, `project_id`, `commit_sha` |
 | `gl_file` | an indexed file | `id`, `path`, `language`, `commit_sha` |
 | `gl_directory` | a directory | `id`, `path`, `name` |
-| `gl_imported_symbol` | an import occurrence | `id`, `identifier_name`, `import_path`, `file_path` |
+| `gl_imported_symbol` | an import occurrence | `id`, `identifier_name`, `import_path`, `file_path`, `project_id` |
 | `gl_edge` | a relationship | `source_id`, `source_kind`, `relationship_kind`, `target_id`, `target_kind` |
+| `_orbit_manifest` | an indexed repository | `repo_path`, `project_id`, `branch`, `commit_sha`, `status` |
 
 `relationship_kind` values: `DEFINES`, `CALLS`, `IMPORTS`, `CONTAINS`,
 `EXTENDS`. Edges are id-to-id — join `source_id`/`target_id` back to
@@ -78,6 +79,20 @@ orbit sql "SELECT DISTINCT file_path FROM gl_imported_symbol
            WHERE identifier_name LIKE '%Workspace%' ORDER BY file_path"
 ```
 
+Where an imported symbol is defined in another indexed repository:
+
+```bash
+orbit sql --all "SELECT im.repo_path AS importing_repo, i.identifier_name AS symbol,
+                 dm.repo_path AS defining_repo, d.file_path AS defining_file,
+                 d.start_line AS defining_line
+                 FROM gl_imported_symbol i
+                 JOIN _orbit_manifest im ON im.project_id = i.project_id
+                 JOIN gl_definition d ON d.name = i.identifier_name
+                 JOIN _orbit_manifest dm ON dm.project_id = d.project_id
+                 WHERE dm.repo_path <> im.repo_path
+                 ORDER BY importing_repo, symbol"
+```
+
 ## Notes
 
 - Run from inside an indexed checkout, `orbit sql` scopes every table to that
@@ -86,5 +101,11 @@ orbit sql "SELECT DISTINCT file_path FROM gl_imported_symbol
   every indexed commit, or `--repo <path>` to scope to another checkout; only
   then do the node tables' `commit_sha` columns matter. `gl_edge` has no
   `commit_sha` - join back to a definition to scope edges by hand.
+- Edges stay within one repository: `gl_edge` links nodes that share a
+  `project_id`. A question that spans repositories is a join through
+  `_orbit_manifest`, as in the last recipe. That table is not scoped to the
+  checkout, so the join needs `--all` to match anything. It matches on symbol
+  name, so narrow on `im.repo_path` or `i.import_path` when several indexed
+  repositories define the same name.
 - `orbit sql` is read-only; there is no write path into the graph other than
   `index`.
