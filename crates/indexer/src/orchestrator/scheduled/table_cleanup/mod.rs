@@ -232,15 +232,10 @@ impl TableCleanup {
 
     async fn safe_tables(&self, role: impl Fn(CodeRole) -> bool) -> Vec<&CleanupTable> {
         let unsafe_tables = self.unsafe_tables.lock().await;
-        let mut safe = Vec::new();
-        for table in self.tables.iter().filter(|table| role(table.code)) {
-            if unsafe_tables.contains(&table.name) {
-                self.metrics.record_requests_skipped(TASK_NAME, 1);
-            } else {
-                safe.push(table);
-            }
-        }
-        safe
+        self.tables
+            .iter()
+            .filter(|table| role(table.code) && !unsafe_tables.contains(&table.name))
+            .collect()
     }
 
     fn cursor_key(table: &str) -> String {
@@ -566,6 +561,9 @@ impl TableCleanup {
             .into_iter()
             .map(|table| table.name.clone())
             .collect();
+        if names.is_empty() {
+            return Ok(());
+        }
         let pending: BTreeSet<String> = self
             .column(sql::pending_apply_patches_sql())
             .await?
@@ -703,6 +701,10 @@ impl ScheduledTask for TableCleanup {
         if !supported {
             self.metrics.record_requests_skipped(TASK_NAME, 1);
             return Ok(());
+        }
+        let skipped = self.unsafe_tables.lock().await.len() as u64;
+        if skipped > 0 {
+            self.metrics.record_requests_skipped(TASK_NAME, skipped);
         }
         let pass_at = Utc::now();
         let mut failed = 0usize;

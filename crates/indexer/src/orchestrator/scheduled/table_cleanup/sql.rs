@@ -170,11 +170,14 @@ pub(super) fn collapse_statement(
     let prune = prune
         .map(|prune| format!("{prune} AND "))
         .unwrap_or_default();
+    // Positive list: a row that lands between the subquery snapshot and the outer read is never matched.
     format!(
         "DELETE FROM {table} WHERE {prune}({key}) IN ({candidates}) \
-         AND ({key}, _version) NOT IN (\
-           SELECT {key}, max(_version) FROM {table} WHERE {prune}({key}) IN ({candidates}) \
-           GROUP BY {key}{having}) {}",
+         AND ({key}, _version) IN (\
+           SELECT {key}, _version FROM {table} WHERE {prune}({key}) IN ({candidates}) \
+           AND ({key}, _version) NOT IN (\
+             SELECT {key}, max(_version) FROM {table} WHERE {prune}({key}) IN ({candidates}) \
+             GROUP BY {key}{having})) {}",
         settings(timeout_secs)
     )
 }
@@ -319,10 +322,11 @@ mod tests {
             30,
         );
         assert!(sql.starts_with(
-            "DELETE FROM t WHERE traversal_path IN ('1/2/') AND (a, b) IN (SELECT a, b FROM t WHERE _deleted) AND (a, b, _version) NOT IN (\
+            "DELETE FROM t WHERE traversal_path IN ('1/2/') AND (a, b) IN (SELECT a, b FROM t WHERE _deleted) AND (a, b, _version) IN (\
+             SELECT a, b, _version FROM t WHERE traversal_path IN ('1/2/') AND (a, b) IN (SELECT a, b FROM t WHERE _deleted) AND (a, b, _version) NOT IN (\
              SELECT a, b, max(_version) FROM t WHERE traversal_path IN ('1/2/') AND (a, b) IN ("
         ));
-        assert!(sql.contains("GROUP BY a, b) SETTINGS"));
+        assert!(sql.contains("GROUP BY a, b)) SETTINGS"));
         assert!(sql.ends_with(
             "SETTINGS lightweight_delete_mode = 'lightweight_update_force', update_sequential_consistency = 0, max_execution_time = 30"
         ));
@@ -343,7 +347,7 @@ mod tests {
         );
         assert!(sql.starts_with("DELETE FROM t WHERE (a, b) IN ("));
         assert!(sql.contains(
-            "GROUP BY a, b HAVING maxIf(_version, NOT _deleted) = max(_version) OR max(_version) >= toDateTime64('2026-01-01 00:00:00.000000', 6, 'UTC'))"
+            "GROUP BY a, b HAVING maxIf(_version, NOT _deleted) = max(_version) OR max(_version) >= toDateTime64('2026-01-01 00:00:00.000000', 6, 'UTC')))"
         ));
     }
 

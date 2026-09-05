@@ -1767,7 +1767,7 @@
       "additionalProperties": false
     },
     "TableCleanupConfig": {
-      "description": "Reclaims tombstoned and superseded graph rows with patch-part deletes.",
+      "description": "Removes tombstoned and superseded graph rows with patch-part deletes.",
       "type": "object",
       "properties": {
         "apply_patches_after_bytes": {

@@ -639,7 +639,7 @@ impl Default for StaleEdgeReconciliationConfig {
     }
 }
 
-/// Reclaims tombstoned and superseded graph rows with patch-part deletes.
+/// Removes tombstoned and superseded graph rows with patch-part deletes.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct TableCleanupConfig {
