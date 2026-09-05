@@ -293,7 +293,7 @@ async fn migration_completion_checker_promotes_rebuilt_rollback_version() {
     let ontology = ontology::Ontology::load_embedded().unwrap();
     let invalidated = indexer::schema::invalidation::find_invalidated_pipelines(
         &ontology,
-        &ontology::migrations::MigrationScope::Full,
+        &orbit_migrations::scope::MigrationScope::Full,
     );
     for plan in &invalidated.namespaced {
         context
@@ -378,7 +378,7 @@ async fn migration_completion_checker_promotes_when_no_namespaces_are_enabled() 
     let ontology = ontology::Ontology::load_embedded().unwrap();
     let invalidated = indexer::schema::invalidation::find_invalidated_pipelines(
         &ontology,
-        &ontology::migrations::MigrationScope::Full,
+        &orbit_migrations::scope::MigrationScope::Full,
     );
     for plan in &invalidated.global {
         context

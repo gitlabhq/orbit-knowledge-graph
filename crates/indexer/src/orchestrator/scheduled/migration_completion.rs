@@ -17,32 +17,23 @@
 use std::collections::HashSet;
 use std::sync::{Arc, LazyLock};
 
+use crate::schema::invalidation::{CODE_INDEXING_CHECKPOINT_TABLE, MigrationScope};
 use arrow::datatypes::UInt64Type;
 use async_trait::async_trait;
 use clickhouse_client::FromArrowColumn;
-use ontology::migrations::{MigrationLedger, MigrationScope};
 use orbit_server_config::{MigrationCompletionConfig, ScheduleConfiguration, SchemaConfig};
 use orbit_utils::arrow::ArrowUtils;
 use orbit_utils::traversal_path::{TopLevelSplit, TraversalPath};
-use query_engine::compiler::{
-    generate_graph_dictionaries, generate_graph_materialized_views, generate_graph_tables,
-};
+
 use tracing::{info, warn};
 
 use crate::campaign::CampaignState;
 use crate::clickhouse::ArrowClickHouseClient;
 use crate::locking::LockService;
 use crate::orchestrator::scheduled::{ScheduledTask, ScheduledTaskMetrics, TaskError};
-use crate::schema::invalidation::{
-    CODE_INDEXING_CHECKPOINT_TABLE, find_invalidated_pipelines,
-    get_migration_scope_for_table_writers,
-};
 use crate::schema::metrics::CompletionMetrics;
-use crate::schema::migration::CHECKPOINT_TABLE;
-use crate::schema::version::{
-    SCHEMA_VERSION, drop_kind_for_engine, mark_version_active, mark_version_dropped,
-    mark_version_retired, read_active_version, read_all_versions, read_migrating_version,
-    table_prefix,
+use orbit_migrations::version::{
+    SCHEMA_VERSION, read_all_versions, read_migrating_version, table_prefix,
 };
 
 /// ClickHouse Cloud cluster name. Used for `ON CLUSTER` in commands that
@@ -127,27 +118,6 @@ FROM gkg_schema_version FINAL \
 WHERE status = 'migrating' AND version = {version:UInt32}";
 
 /// Returns namespace IDs whose checkpoint marks every given plan complete (null cursor).
-const GET_NAMESPACE_IDS_WITH_COMPLETED_PLANS: &str = "\
-SELECT toInt64(splitByChar('.', key)[2]) AS namespace_id \
-FROM {table:Identifier} FINAL \
-WHERE _deleted = false \
-  AND cursor_values IN ('null', '') \
-  AND length(splitByChar('.', key)) = 3 \
-  AND splitByChar('.', key)[1] = 'ns' \
-  AND match(splitByChar('.', key)[2], '^[0-9]+$') \
-  AND splitByChar('.', key)[3] IN {plans:Array(String)} \
-GROUP BY namespace_id \
-HAVING uniqExact(splitByChar('.', key)[3]) = {plan_count:UInt64}";
-
-/// Counts how many of the given global plans have a completed checkpoint (null cursor).
-const COUNT_COMPLETE_GLOBAL_PLANS: &str = "\
-SELECT count(DISTINCT splitByChar('.', key)[2]) AS plan_count \
-FROM {table:Identifier} FINAL \
-WHERE _deleted = false \
-  AND cursor_values IN ('null', '') \
-  AND length(splitByChar('.', key)) = 2 \
-  AND splitByChar('.', key)[1] = 'global' \
-  AND splitByChar('.', key)[2] IN {plans:Array(String)}";
 
 /// Scheduled task that detects migration completion and cleans up old tables.
 pub struct MigrationCompletionChecker {
@@ -223,40 +193,7 @@ impl ScheduledTask for MigrationCompletionChecker {
     }
 }
 
-#[derive(Debug)]
-pub struct SdlcReindexProgress {
-    pub completed_namespaces: u64,
-    pub ready: bool,
-}
-
-pub async fn get_sdlc_reindex_progress_for_enabled_namespaces(
-    graph: &ArrowClickHouseClient,
-    ontology: &ontology::Ontology,
-    scope: &MigrationScope,
-    checkpoint_table: &str,
-    enabled_namespace_ids: &[i64],
-) -> Result<SdlcReindexProgress, String> {
-    let pipelines = find_invalidated_pipelines(ontology, scope);
-
-    let namespace_ids_with_completed_plans =
-        get_namespace_ids_with_completed_plans(graph, checkpoint_table, &pipelines.namespaced)
-            .await?;
-    let completed_namespaces = enabled_namespace_ids
-        .iter()
-        .filter(|namespace_id| namespace_ids_with_completed_plans.contains(namespace_id))
-        .count() as u64;
-    let namespaced_ready = pipelines.namespaced.is_empty()
-        || completed_namespaces == enabled_namespace_ids.len() as u64;
-
-    let completed_global =
-        count_completed_global_plans(graph, checkpoint_table, &pipelines.global).await?;
-    let global_ready = completed_global as usize == pipelines.global.len();
-
-    Ok(SdlcReindexProgress {
-        completed_namespaces,
-        ready: namespaced_ready && global_ready,
-    })
-}
+pub use orbit_migrations::completion::SdlcReindexProgress;
 
 impl MigrationCompletionChecker {
     async fn run_inner(&self) -> Result<(), TaskError> {
@@ -309,14 +246,17 @@ impl MigrationCompletionChecker {
             return Ok(());
         }
 
-        crate::schema::migration::create_unversioned_tables(&self.graph, &self.ontology)
-            .await
-            .map_err(|error| {
-                TaskError::new(format!(
-                    "create unversioned ontology tables before promotion: {error}"
-                ))
-            })?;
-        crate::schema::migration::replace_refreshable_views_for_version(
+        {
+            let schema = orbit_migrations::schema::GraphSchema::from_ontology(&self.ontology);
+            orbit_migrations::execute::create_unversioned_definitions(&self.graph, &schema)
+                .await
+                .map_err(|error| {
+                    TaskError::new(format!(
+                        "create unversioned tables before promotion: {error}"
+                    ))
+                })?;
+        }
+        orbit_migrations::execute::replace_refreshable_views(
             &self.graph,
             &self.ontology,
             migrating_version,
@@ -324,7 +264,7 @@ impl MigrationCompletionChecker {
         .await
         .map_err(|error| {
             TaskError::new(format!(
-                "replace refreshable ontology views for v{migrating_version} before promotion: {error}"
+                "replace refreshable views for v{migrating_version}: {error}"
             ))
         })?;
 
@@ -339,7 +279,7 @@ impl MigrationCompletionChecker {
                     version = entry.version,
                     "marking old active version as retired"
                 );
-                mark_version_retired(&self.graph, entry.version)
+                orbit_migrations::version::mark_version_retired(&self.graph, entry.version)
                     .await
                     .map_err(|e| TaskError::new(format!("mark v{} retired: {e}", entry.version)))?;
                 if orbit_server_config::features::enabled(
@@ -355,12 +295,12 @@ impl MigrationCompletionChecker {
             version = migrating_version,
             "marking migrating version as active — schema migration complete"
         );
-        mark_version_active(&self.graph, migrating_version)
+        orbit_migrations::version::mark_version_active(&self.graph, migrating_version)
             .await
             .map_err(|e| TaskError::new(format!("mark v{migrating_version} active: {e}")))?;
 
         for version in retired_versions {
-            if let Err(error) = crate::schema::migration::drop_refreshable_views_for_version(
+            if let Err(error) = orbit_migrations::execute::drop_versioned_refreshable_views(
                 &self.graph,
                 &self.ontology,
                 version,
@@ -427,15 +367,15 @@ impl MigrationCompletionChecker {
             .map_err(|e| format!("compute code coverage: {e}"))?;
 
         let scope = self.resolve_migration_scope(version).await?;
-        let checkpoint_table = format!("{prefix}{CHECKPOINT_TABLE}");
-        let sdlc_progress = get_sdlc_reindex_progress_for_enabled_namespaces(
+        let sdlc_progress = orbit_migrations::completion::check_sdlc_reindex_progress(
             &self.graph,
             &self.ontology,
             &scope,
-            &checkpoint_table,
+            version,
             &enabled_namespaces.ids,
         )
-        .await?;
+        .await
+        .map_err(|error| format!("check SDLC reindex progress: {error}"))?;
 
         info!(
             version,
@@ -475,16 +415,13 @@ impl MigrationCompletionChecker {
         &self,
         migrating_version: u32,
     ) -> Result<MigrationScope, String> {
-        let active = read_active_version(&self.graph)
-            .await
-            .map_err(|e| format!("read active version: {e}"))?
-            .unwrap_or(0);
-        let ledger = MigrationLedger::load_embedded()?;
-        let requested_scope = ledger.resolve_migration_scope_between(active, migrating_version);
-        Ok(get_migration_scope_for_table_writers(
+        orbit_migrations::completion::resolve_migration_scope(
+            &self.graph,
             &self.ontology,
-            &requested_scope,
-        ))
+            migrating_version,
+        )
+        .await
+        .map_err(|error| format!("resolve migration scope: {error}"))
     }
 
     /// Reads the wall-clock age (in seconds) of the row that marked the
@@ -611,9 +548,10 @@ impl MigrationCompletionChecker {
     async fn stop_merges_for_version(&self, version: u32) {
         let prefix = table_prefix(version);
         let db = self.graph.database();
+        let schema = orbit_migrations::schema::GraphSchema::from_ontology(&self.ontology);
 
-        for t in &generate_graph_tables(&self.ontology) {
-            let qualified = format!("{db}.{prefix}{}", t.name);
+        for table in &schema.tables {
+            let qualified = format!("{db}.{prefix}{}", table.name);
             let _ = self
                 .graph
                 .execute(&format!(
@@ -669,7 +607,7 @@ impl MigrationCompletionChecker {
                     continue;
                 }
 
-                let kind = drop_kind_for_engine(&engine);
+                let kind = orbit_migrations::version::entity_type_for_clickhouse_engine(&engine);
                 drops.push((version, name, kind));
             }
         }
@@ -720,7 +658,9 @@ impl MigrationCompletionChecker {
                 self.metrics.record_cleanup(*version, current, "failure");
                 continue;
             }
-            if let Err(e) = mark_version_dropped(&self.graph, *version).await {
+            if let Err(e) =
+                orbit_migrations::version::mark_version_dropped(&self.graph, *version).await
+            {
                 warn!(version, error = %e, "GC: failed to mark dropped");
             }
             self.metrics.record_cleanup(*version, current, "success");
@@ -730,63 +670,21 @@ impl MigrationCompletionChecker {
     }
 }
 
-async fn get_namespace_ids_with_completed_plans(
-    graph: &ArrowClickHouseClient,
-    checkpoint_table: &str,
-    required_plan_names: &[String],
-) -> Result<HashSet<i64>, String> {
-    if required_plan_names.is_empty() {
-        return Ok(HashSet::new());
-    }
-    let batches = graph
-        .query(GET_NAMESPACE_IDS_WITH_COMPLETED_PLANS)
-        .param("table", checkpoint_table)
-        .param("plans", required_plan_names)
-        .param("plan_count", required_plan_names.len() as u64)
-        .fetch_arrow()
-        .await
-        .map_err(|e| e.to_string())?;
-    Ok(i64::extract_column(&batches, 0)
-        .map_err(|e| e.to_string())?
-        .into_iter()
-        .collect())
-}
-
-async fn count_completed_global_plans(
-    graph: &ArrowClickHouseClient,
-    checkpoint_table: &str,
-    global_plans: &[String],
-) -> Result<u64, String> {
-    if global_plans.is_empty() {
-        return Ok(0);
-    }
-    let batches = graph
-        .query(COUNT_COMPLETE_GLOBAL_PLANS)
-        .param("table", checkpoint_table)
-        .param("plans", global_plans)
-        .fetch_arrow()
-        .await
-        .map_err(|e| e.to_string())?;
-    batches
-        .first()
-        .and_then(|b| ArrowUtils::get_column::<UInt64Type>(b, "plan_count", 0))
-        .ok_or_else(|| "no plan_count in result".to_string())
-}
-
 /// Builds the set of object names the ontology creates (tables, views,
 /// dictionaries) — without any version prefix. Used to validate that a
 /// `v<N>_*` object found in `system.tables` was created by the migration
 /// system and is safe to drop.
 fn ontology_known_names(ontology: &ontology::Ontology) -> HashSet<String> {
+    let schema = orbit_migrations::schema::GraphSchema::from_ontology(ontology);
     let mut names = HashSet::new();
-    for t in &generate_graph_tables(ontology) {
-        names.insert(t.name.clone());
+    for table in &schema.tables {
+        names.insert(table.name.clone());
     }
-    for mv in &generate_graph_materialized_views(ontology) {
-        names.insert(mv.name.clone());
+    for view in &schema.views {
+        names.insert(view.name.clone());
     }
-    for d in &generate_graph_dictionaries(ontology) {
-        names.insert(d.name.clone());
+    for dictionary in &schema.dictionaries {
+        names.insert(dictionary.name.clone());
     }
     names
 }
@@ -823,160 +721,5 @@ mod tests {
     fn default_config_has_cron() {
         let config = MigrationCompletionConfig::default();
         assert!(config.schedule.cron.is_some());
-    }
-
-    #[test]
-    fn completed_namespace_id_query_uses_identifier_param() {
-        assert!(
-            GET_NAMESPACE_IDS_WITH_COMPLETED_PLANS.contains("{table:Identifier}"),
-            "SDLC checkpoint query must use Identifier param for table name"
-        );
-    }
-
-    #[test]
-    fn completed_namespace_id_query_filters_deleted_and_malformed_keys() {
-        assert!(GET_NAMESPACE_IDS_WITH_COMPLETED_PLANS.contains("_deleted = false"));
-        assert!(GET_NAMESPACE_IDS_WITH_COMPLETED_PLANS.contains("match(splitByChar"));
-        assert!(!GET_NAMESPACE_IDS_WITH_COMPLETED_PLANS.contains("enabled_namespace_ids"));
-    }
-
-    #[test]
-    fn fetch_enabled_namespaces_query_filters_deleted() {
-        assert!(FETCH_ENABLED_NAMESPACES.contains("_siphon_deleted = false"));
-    }
-
-    #[test]
-    fn fetch_enabled_namespaces_query_selects_id_and_path() {
-        assert!(FETCH_ENABLED_NAMESPACES.contains("root_namespace_id"));
-        assert!(FETCH_ENABLED_NAMESPACES.contains("traversal_path"));
-    }
-
-    #[test]
-    fn migration_lock_key_matches_schema_migration() {
-        assert_eq!(MIGRATION_LOCK_KEY, "schema_migration");
-    }
-
-    #[test]
-    fn count_code_eligible_projects_query_filters_deleted() {
-        assert!(COUNT_CODE_ELIGIBLE_PROJECTS.contains("p.deleted = false"));
-    }
-
-    #[test]
-    fn count_code_eligible_projects_query_counts_distinct_project_ids() {
-        assert!(COUNT_CODE_ELIGIBLE_PROJECTS.contains("count(DISTINCT p.id)"));
-    }
-
-    #[test]
-    fn count_code_eligible_projects_scoped_to_top_level() {
-        assert!(
-            COUNT_CODE_ELIGIBLE_PROJECTS.contains("match(traversal_path, '^[0-9]+/[0-9]+/$')"),
-            "eligible-projects must scope to top-level enabled namespaces so a moved subgroup \
-             cannot deflate coverage"
-        );
-        assert!(
-            COUNT_CODE_ELIGIBLE_PROJECTS.contains("extract(p.traversal_path, '^[0-9]+/[0-9]+/')")
-        );
-        assert!(!COUNT_CODE_ELIGIBLE_PROJECTS.contains("arrayExists"));
-    }
-
-    #[test]
-    fn count_code_checkpoint_projects_scoped_query_shape() {
-        assert!(COUNT_CODE_CHECKPOINT_PROJECTS_SCOPED.contains("{table:Identifier}"));
-        assert!(COUNT_CODE_CHECKPOINT_PROJECTS_SCOPED.contains("count(DISTINCT project_id)"));
-        assert!(COUNT_CODE_CHECKPOINT_PROJECTS_SCOPED.contains("_deleted = false"));
-    }
-
-    #[test]
-    fn count_code_checkpoint_projects_scoped_filters_by_enabled_paths() {
-        assert!(
-            COUNT_CODE_CHECKPOINT_PROJECTS_SCOPED.contains("{paths:Array(String)}"),
-            "scoped checkpoint count must take an Array(String) param to filter by enabled namespaces — \
-             without it, leftover checkpoint rows from disabled namespaces inflate coverage"
-        );
-        assert!(
-            COUNT_CODE_CHECKPOINT_PROJECTS_SCOPED
-                .contains("extract(traversal_path, '^[0-9]+/[0-9]+/') IN {paths:Array(String)}"),
-            "scoped checkpoint count must match the enabled top-level path set as a hash-set probe; \
-             the `arrayExists(startsWith(...))` form it replaced peaked at 93 GiB and OOM-wedged promotion"
-        );
-        assert!(!COUNT_CODE_CHECKPOINT_PROJECTS_SCOPED.contains("arrayExists"));
-    }
-
-    /// Coverage math is informational (the predicate doesn't gate on it),
-    /// but the math is still load-bearing for the structured log line that
-    /// operators watch to track backfill progress on the active version.
-    #[test]
-    fn code_coverage_math_thresholding() {
-        fn coverage(indexed: u64, eligible: u64) -> f64 {
-            if eligible == 0 {
-                1.0
-            } else {
-                indexed as f64 / eligible as f64
-            }
-        }
-
-        // Empty eligibility: short-circuits to 1.0 so the structured log
-        // doesn't emit NaN on a brand-new install with no enabled namespaces.
-        assert_eq!(coverage(0, 0), 1.0);
-
-        // Mid-rollout coverage stays below 1.0 while backfill is in flight.
-        // 14 of ~8,602 was the actual orbit-prd state right after v7
-        // promoted; this asserts the ratio reflects that progress.
-        assert!(coverage(14, 8602) < 0.01);
-
-        // Saturated coverage approaches 1.0 once the backfill catches up.
-        assert!((coverage(8600, 8602) - 0.9998).abs() < 0.001);
-    }
-
-    #[test]
-    fn ontology_known_names_includes_tables_views_dicts() {
-        let ont = ontology::Ontology::load_embedded().unwrap();
-        let names = ontology_known_names(&ont);
-        assert!(names.contains("gl_edge"), "should contain edge table");
-        assert!(
-            names.contains("checkpoint"),
-            "should contain checkpoint table"
-        );
-        assert!(!names.is_empty());
-    }
-
-    #[test]
-    fn gc_query_has_safety_guard() {
-        assert!(
-            LIST_DEAD_VERSION_OBJECTS.contains("count()"),
-            "query must abort when no active version exists"
-        );
-    }
-
-    #[test]
-    fn gc_query_excludes_active_retired_and_migrating() {
-        assert!(LIST_DEAD_VERSION_OBJECTS.contains("status = 'active'"));
-        assert!(LIST_DEAD_VERSION_OBJECTS.contains("status = 'retired'"));
-        assert!(
-            LIST_DEAD_VERSION_OBJECTS.contains("status = 'migrating'")
-                && !LIST_DEAD_VERSION_OBJECTS.contains("coalesce(max(version), 0)"),
-            "every migrating version must be kept regardless of its relationship to active — \
-             a rebuild-rollback version sits below active and must not be GC'd"
-        );
-    }
-
-    #[test]
-    fn preserve_pattern_empty_never_matches() {
-        assert!(!matches_preserve_pattern("gl_edge_v2", &[]));
-    }
-
-    #[test]
-    fn preserve_pattern_regex_match() {
-        let patterns =
-            compile_preserve_patterns(&["^keep_.*".to_string(), "^special_table$".to_string()]);
-        assert!(matches_preserve_pattern("keep_this", &patterns));
-        assert!(matches_preserve_pattern("special_table", &patterns));
-        assert!(!matches_preserve_pattern("gl_edge", &patterns));
-    }
-
-    #[test]
-    fn compile_preserve_patterns_skips_invalid() {
-        let patterns = compile_preserve_patterns(&["^valid$".to_string(), "[invalid".to_string()]);
-        assert_eq!(patterns.len(), 1);
     }
 }

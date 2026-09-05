@@ -37,7 +37,7 @@ use crate::modules::sdlc::datalake::DatalakeQuery;
 use crate::modules::sdlc::transform::{
     BlockTransform, TableBatch, TransformFactory, TransformRegistry,
 };
-use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
+use orbit_migrations::version::{SCHEMA_VERSION, prefixed_table_name};
 use orbit_utils::traversal_path::TraversalPath;
 
 /// Registry key for this transform; also the `etl.transform` value in

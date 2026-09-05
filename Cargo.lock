@@ -5813,6 +5813,7 @@ dependencies = [
  "ontology",
  "opentelemetry",
  "orbit-analytics",
+ "orbit-migrations",
  "orbit-observability",
  "orbit-server-config",
  "orbit-utils",
@@ -5935,6 +5936,7 @@ dependencies = [
  "futures",
  "gitalisk-core",
  "ontology",
+ "orbit-migrations",
  "orbit-server",
  "orbit-server-config",
  "orbit-utils",
@@ -5981,6 +5983,7 @@ dependencies = [
  "opentelemetry",
  "opentelemetry_sdk",
  "orbit-analytics",
+ "orbit-migrations",
  "orbit-server",
  "orbit-server-config",
  "orbit-utils",
@@ -8323,6 +8326,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "orbit-migrations"
+version = "0.1.0"
+dependencies = [
+ "arrow 58.3.0",
+ "async-nats",
+ "clickhouse-client",
+ "ontology",
+ "orbit-utils",
+ "orbit-versions",
+ "regex",
+ "serde",
+ "serde-saphyr",
+ "thiserror 2.0.18",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "orbit-observability"
 version = "0.1.0"
 dependencies = [
@@ -8380,6 +8401,7 @@ dependencies = [
  "opentelemetry",
  "orbit-analytics",
  "orbit-billing",
+ "orbit-migrations",
  "orbit-observability",
  "orbit-prompts",
  "orbit-server-config",
@@ -14847,6 +14869,7 @@ dependencies = [
  "clickhouse-client",
  "futures",
  "ontology",
+ "orbit-migrations",
  "orbit-observability",
  "orbit-server-config",
  "orbit-utils",

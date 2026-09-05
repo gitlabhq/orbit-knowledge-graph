@@ -10,9 +10,9 @@ use tracing::{debug, info, warn};
 use crate::dead_letter::DEAD_LETTER_STREAM;
 use crate::indexing_status::INDEXING_PROGRESS_BUCKET;
 use crate::locking::INDEXING_LOCKS_BUCKET;
-use crate::schema::version::SCHEMA_VERSION;
 use crate::topic::INDEXER_STREAM;
 use crate::types::Subscription;
+use orbit_migrations::version::SCHEMA_VERSION;
 
 pub const MANAGED_STREAMS: &[&str] = &[INDEXER_STREAM, DEAD_LETTER_STREAM];
 

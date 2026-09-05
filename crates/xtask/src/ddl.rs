@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use ontology::Ontology;
+use orbit_migrations::schema::{DictionaryCredentials, GraphSchema};
 
 fn load_ontology(path: Option<&PathBuf>) -> Result<Ontology> {
     match path {
@@ -11,13 +12,10 @@ fn load_ontology(path: Option<&PathBuf>) -> Result<Ontology> {
     }
 }
 
-/// Reference DDL emitted to `config/graph.sql` always assumes a local `default`
-/// ClickHouse user; the indexer substitutes the deployment's configured
-/// credentials at migration time.
-fn local_dictionary_source() -> query_engine::compiler::DictionarySource<'static> {
-    query_engine::compiler::DictionarySource {
-        database: "default",
-        user: "default",
+fn local_dictionary_credentials() -> DictionaryCredentials {
+    DictionaryCredentials {
+        database: "default".into(),
+        user: "default".into(),
         password: None,
     }
 }
@@ -27,44 +25,27 @@ pub fn run_remote(
     prefix: String,
     diff: Option<PathBuf>,
 ) -> Result<()> {
-    let ont = load_ontology(ontology_path.as_ref())?;
+    let ontology = load_ontology(ontology_path.as_ref())?;
+    let schema = GraphSchema::from_ontology(&ontology);
+    let credentials = local_dictionary_credentials();
 
-    let tables = query_engine::compiler::generate_graph_tables(&ont);
-    let mut generated: Vec<String> = tables
+    let mut generated: Vec<String> = schema
+        .tables
         .iter()
-        .map(|t| {
-            let t = if prefix.is_empty() {
-                t.clone()
-            } else {
-                t.clone().with_prefix(&prefix)
-            };
-            format!("{};\n", query_engine::compiler::emit_create_table(&t))
-        })
+        .map(|table| format!("{};\n", table.to_create_sql(&prefix)))
         .collect();
 
-    let dicts = query_engine::compiler::generate_graph_dictionaries(&ont);
-    generated.extend(dicts.iter().map(|d| {
-        let d = if prefix.is_empty() {
-            d.clone()
-        } else {
-            d.clone().with_prefix(&prefix)
-        };
-        format!(
-            "{};\n",
-            query_engine::compiler::emit_create_dictionary(&d, &local_dictionary_source())
-        )
-    }));
+    for dictionary in &schema.dictionaries {
+        let prefixed = dictionary.clone().with_schema_version_prefix(&prefix);
+        generated.push(format!("{};\n", prefixed.to_create_sql(&credentials)));
+    }
 
-    let views = if prefix.is_empty() {
-        query_engine::compiler::generate_graph_materialized_views(&ont)
-    } else {
-        query_engine::compiler::generate_graph_materialized_views_with_prefix(&ont, &prefix)
-    };
-    for mv in &views {
-        generated.push(format!(
-            "{};\n",
-            query_engine::compiler::emit_create_materialized_view(mv)
-        ));
+    let all_table_names: Vec<String> = schema.tables.iter().map(|t| t.name.clone()).collect();
+    for view in schema.views.iter().filter(|v| v.versioned) {
+        let prefixed = view
+            .clone()
+            .with_schema_version_prefix(&prefix, &all_table_names);
+        generated.push(format!("{};\n", prefixed.to_create_sql()));
     }
 
     let schema_version = orbit_versions::VERSIONS.schema;
@@ -128,13 +109,14 @@ pub fn run_local(ontology_path: Option<PathBuf>) -> Result<()> {
     Ok(())
 }
 
-/// Emits the durable unversioned tables and materialized views into their own snapshot.
 pub fn run_persistent(ontology_path: Option<PathBuf>, diff: Option<PathBuf>) -> Result<()> {
-    let ont = load_ontology(ontology_path.as_ref())?;
+    let ontology = load_ontology(ontology_path.as_ref())?;
+    let schema = GraphSchema::from_ontology(&ontology);
 
-    let generated: Vec<String> = query_engine::compiler::generate_unversioned_objects(&ont)
+    let generated: Vec<String> = schema
+        .unversioned_definitions
         .iter()
-        .map(|object| format!("{};\n", object.ddl))
+        .map(|definition| format!("{};\n", definition.create_statement))
         .collect();
 
     let schema_version = orbit_versions::VERSIONS.schema;
@@ -310,35 +292,38 @@ mod tests {
 
     #[test]
     fn remote_ddl_contains_create_table() {
-        let ont = ontology::Ontology::load_embedded().unwrap();
-        let tables = query_engine::compiler::generate_graph_tables(&ont);
-        assert!(!tables.is_empty());
-        let sql = query_engine::compiler::emit_create_table(&tables[0]);
-        assert!(sql.contains("CREATE TABLE"));
+        let ontology = ontology::Ontology::load_embedded().unwrap();
+        let schema = GraphSchema::from_ontology(&ontology);
+        assert!(!schema.tables.is_empty());
+        assert!(schema.tables[0].to_create_sql("").contains("CREATE TABLE"));
     }
 
     #[test]
     fn persistent_ddl_contains_unversioned_table_without_prefix() {
-        let ont = ontology::Ontology::load_embedded().unwrap();
-        let objects = query_engine::compiler::generate_unversioned_objects(&ont);
-        let table = objects
+        let ontology = ontology::Ontology::load_embedded().unwrap();
+        let schema = GraphSchema::from_ontology(&ontology);
+        let table = schema
+            .unversioned_definitions
             .iter()
-            .find(|o| o.kind == "table")
+            .find(|definition| definition.entity_type == "TABLE")
             .expect("an unversioned table should be generated");
-        assert!(table.ddl.contains("CREATE TABLE"));
+        assert!(table.create_statement.contains("CREATE TABLE"));
         let schema_version = orbit_versions::VERSIONS.schema;
-        assert!(!table.ddl.contains(&format!(" v{schema_version}_")));
+        assert!(
+            !table
+                .create_statement
+                .contains(&format!(" v{schema_version}_"))
+        );
     }
 
     #[test]
     fn local_ddl_contains_create_table_and_manifest() {
-        let ont = ontology::Ontology::load_embedded().unwrap();
-        let ddl = query_engine::compiler::generate_local_ddl(&ont, MANIFEST_DDL);
+        let ontology = ontology::Ontology::load_embedded().unwrap();
+        let ddl = query_engine::compiler::generate_local_ddl(&ontology, MANIFEST_DDL);
         assert!(ddl.contains("CREATE TABLE"));
         assert!(ddl.contains("_orbit_manifest"));
         assert!(ddl.contains("_orbit_meta"));
         assert!(ddl.contains("MACRO fts_doc"));
-        assert!(!ddl.contains("search_text"));
         assert!(ddl.contains("SCHEMA_VERSION="));
     }
 

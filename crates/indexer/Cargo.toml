@@ -35,6 +35,7 @@ labkit-events = { workspace = true }
 moka = { workspace = true }
 nats-client = { workspace = true }
 ontology = { path = "../ontology" }
+orbit-migrations = { path = "../orbit-migrations" }
 query-engine = { path = "../query-engine" }
 opentelemetry = { workspace = true }
 parking_lot = { workspace = true }
