@@ -724,8 +724,7 @@ async fn clone_table(
         })
 }
 
-/// `ATTACH PARTITION FROM` refuses a source with unapplied patch parts, which the table cleanup
-/// task leaves behind between its own `APPLY PATCHES` runs.
+/// `ATTACH PARTITION FROM` refuses a source with unapplied patch parts.
 async fn apply_pending_patches(
     graph: &ArrowClickHouseClient,
     table: &str,

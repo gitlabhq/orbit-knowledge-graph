@@ -24,8 +24,7 @@ fn build_cleanup_task(context: &TestContext) -> TableCleanup {
     )
 }
 
-/// Two inserts so the live rows and the tombstones land in separate parts; a single insert would
-/// collapse each key to its newest row before the task ever sees the hidden rows.
+/// Two inserts, so the hidden rows survive insert-time collapsing and land in a part of their own.
 async fn seed_users_with_tombstones(context: &TestContext) {
     context
         .execute(&format!(
@@ -106,8 +105,7 @@ async fn skips_tables_that_do_not_declare_both_block_columns() {
     );
 }
 
-/// Mirrors ClickHouse Cloud, where merges persist `_block_offset` while `_block_number` stays
-/// virtual: rows from different source blocks then share one patch identity.
+/// Mirrors ClickHouse Cloud, where merges persist `_block_offset` alone and rows from different blocks share a patch identity.
 #[tokio::test]
 async fn skips_tables_whose_merged_parts_persist_only_the_block_offset() {
     let context = TestContext::new(&[*GRAPH_SCHEMA_SQL]).await;
