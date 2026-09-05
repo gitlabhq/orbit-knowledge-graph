@@ -280,7 +280,7 @@ recent Siphon activity, backstopping migration backfill and missed windows.
 | Config path | Default | Description |
 |-------------|---------|-------------|
 | `schedule.tasks.table-cleanup.tombstone_retention_secs` | `604800` | Tombstones younger than this keep shadowing their key; older dead keys are purged with every row they hide |
-| `schedule.tasks.table-cleanup.purge_interval_secs` | `86400` | How often each table's expired tombstones are purged |
+| `schedule.tasks.table-cleanup.purge_interval_secs` | `86400` | How often each table's expired tombstones are purged. Each purge scans the table's `_deleted`, `_version` and `traversal_path` columns once to group candidates by path (3.5 to 5 minutes and 2.5 GiB on a 1B-row bench table); the incremental passes in between read only new parts |
 | `schedule.tasks.table-cleanup.max_candidates_per_statement` | `2000000` | Tombstoned keys per delete statement; larger candidate sets are split by key hash (incremental) or by traversal path (history sweep) |
 | `schedule.tasks.table-cleanup.statement_timeout_secs` | `600` | `max_execution_time` of each delete statement |
 | `schedule.tasks.table-cleanup.apply_patches_after_bytes` | `1073741824` | Uncompressed patch-part bytes on a table that trigger `APPLY PATCHES` |
