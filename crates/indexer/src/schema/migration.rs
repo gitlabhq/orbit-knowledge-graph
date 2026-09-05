@@ -41,7 +41,7 @@ use tracing::{info, warn};
 use super::metrics::MigrationMetrics;
 
 use crate::campaign::{CampaignState, campaign_id_for_version};
-use crate::clickhouse::ArrowClickHouseClient;
+use crate::clickhouse::{ArrowClickHouseClient, PATCH_PART_PREFIX};
 use crate::locking::{LockError, LockService};
 use crate::orchestrator::scheduled::code_stale_sweep::CHECKPOINT_KEY_PREFIX as CODE_STALE_SWEEP_CHECKPOINT_KEY_PREFIX;
 use crate::schema::invalidation::find_invalidated_pipelines;
@@ -724,7 +724,9 @@ async fn clone_table(
         })
 }
 
-/// `ATTACH PARTITION FROM` refuses a source with unapplied patch parts.
+/// `ATTACH PARTITION FROM` refuses a source with unapplied patch parts; a join-mode patch on a huge part can take hours, so the wait is bounded and the migration retried.
+const APPLY_PATCHES_TIMEOUT_SECS: u64 = 3600;
+
 async fn apply_pending_patches(
     graph: &ArrowClickHouseClient,
     table: &str,
@@ -732,7 +734,7 @@ async fn apply_pending_patches(
     let pending = graph
         .query(&format!(
             "SELECT count() FROM system.parts WHERE database = currentDatabase() \
-             AND table = '{table}' AND active AND startsWith(name, 'patch')"
+             AND table = '{table}' AND active AND startsWith(name, '{PATCH_PART_PREFIX}')"
         ))
         .fetch_arrow()
         .await
@@ -755,7 +757,7 @@ async fn apply_pending_patches(
     }
     graph
         .execute(&format!(
-            "ALTER TABLE {table} APPLY PATCHES SETTINGS mutations_sync = 2"
+            "ALTER TABLE {table} APPLY PATCHES SETTINGS mutations_sync = 2, max_execution_time = {APPLY_PATCHES_TIMEOUT_SECS}"
         ))
         .await
         .map_err(|e| MigrationError::Ddl {

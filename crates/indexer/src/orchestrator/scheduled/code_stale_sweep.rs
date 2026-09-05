@@ -8,14 +8,13 @@ use tracing::{debug, info};
 use crate::checkpoint::CheckpointStore;
 use crate::clickhouse::ArrowClickHouseClient;
 use crate::durability::WriteDurability;
+use crate::modules::code::checkpoint::CODE_INDEXING_CHECKPOINT_TABLE;
 use crate::modules::code::config::CodeTableNames;
 use crate::orchestrator::scheduled::TaskError;
 use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
 use orbit_utils::traversal_path::TraversalPath;
 
 pub(crate) const CHECKPOINT_KEY_PREFIX: &str = "maintenance.code_stale_sweep";
-
-const CODE_INDEXING_CHECKPOINT_TABLE: &str = "code_indexing_checkpoint";
 
 fn namespace_checkpoint_key(traversal_path: &TraversalPath) -> String {
     format!("{CHECKPOINT_KEY_PREFIX}.{traversal_path}")

@@ -9,7 +9,7 @@ use arrow::array::{Array, StringArray};
 use async_trait::async_trait;
 use chrono::{DateTime, TimeDelta, Utc};
 use tokio::sync::Mutex;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 use crate::checkpoint::{Checkpoint, CheckpointStore};
 use crate::clickhouse::{ArrowClickHouseClient, ArrowQuery};
@@ -21,7 +21,10 @@ use orbit_server_config::{ScheduleConfiguration, TableCleanupConfig};
 
 const TASK_NAME: &str = "maintenance.table_cleanup";
 const CURSOR_KEY_PREFIX: &str = "maintenance.table_cleanup.";
+/// Bounds the scope tuples and path literals inlined into one code statement.
 const SCOPES_PER_STATEMENT: u64 = 2000;
+/// Each path literal appears four times per statement; 500 keeps it under ClickHouse's default 256 KiB `max_query_size`.
+const PATHS_PER_STATEMENT: usize = 500;
 /// Cron passes land a few seconds after the minute, so an exact interval would skip a pass.
 const PURGE_SLACK: TimeDelta = TimeDelta::seconds(60);
 
@@ -32,13 +35,13 @@ enum CodeRole {
     SharedEdge,
 }
 
-struct ReclaimTable {
+struct CleanupTable {
     name: String,
     key: String,
     code: CodeRole,
 }
 
-impl ReclaimTable {
+impl CleanupTable {
     fn has_path(&self) -> bool {
         self.key.starts_with(sql::PATH_COLUMN)
     }
@@ -65,7 +68,7 @@ struct BlockCursor {
 pub struct TableCleanup {
     graph: ArrowClickHouseClient,
     checkpoints: Arc<dyn CheckpointStore>,
-    tables: Vec<ReclaimTable>,
+    tables: Vec<CleanupTable>,
     code_checkpoint_table: String,
     code_branch_table: String,
     metrics: ScheduledTaskMetrics,
@@ -73,6 +76,7 @@ pub struct TableCleanup {
     prepared: AtomicBool,
     supported: AtomicBool,
     unsafe_tables: Mutex<BTreeSet<String>>,
+    /// Seeded at start so a restart never triggers `APPLY PATCHES` on every table at once.
     last_patch_apply: Mutex<Instant>,
 }
 
@@ -85,26 +89,10 @@ impl TableCleanup {
         metrics: ScheduledTaskMetrics,
         config: TableCleanupConfig,
     ) -> Self {
-        let mut tables: Vec<ReclaimTable> = ontology
-            .nodes()
-            .map(|node| node.destination_table.as_str())
-            .chain(ontology.edge_tables())
-            .filter_map(|logical| {
-                let sort_key = ontology.sort_key_for_table(logical)?;
-                let name = prefixed_table_name(logical, *SCHEMA_VERSION);
-                let code = code_role(code_tables, &name, sort_key);
-                Some(ReclaimTable {
-                    name,
-                    key: sort_key.join(", "),
-                    code,
-                })
-            })
-            .collect();
-        tables.sort_by(|a, b| a.name.cmp(&b.name));
         Self {
             graph,
             checkpoints,
-            tables,
+            tables: cleanup_tables(ontology, code_tables),
             code_checkpoint_table: prefixed_table_name(
                 CODE_INDEXING_CHECKPOINT_TABLE,
                 *SCHEMA_VERSION,
@@ -173,7 +161,7 @@ impl TableCleanup {
             .map_err(TaskError::new)?;
         let elapsed = started.elapsed().as_secs_f64();
         self.metrics.record_query_duration(table, elapsed);
-        info!(
+        debug!(
             table,
             statement_bytes = sql.len(),
             duration_ms = (elapsed * 1000.0) as u64,
@@ -242,6 +230,19 @@ impl TableCleanup {
         Ok(None)
     }
 
+    async fn safe_tables(&self, role: impl Fn(CodeRole) -> bool) -> Vec<&CleanupTable> {
+        let unsafe_tables = self.unsafe_tables.lock().await;
+        let mut safe = Vec::new();
+        for table in self.tables.iter().filter(|table| role(table.code)) {
+            if unsafe_tables.contains(&table.name) {
+                self.metrics.record_requests_skipped(TASK_NAME, 1);
+            } else {
+                safe.push(table);
+            }
+        }
+        safe
+    }
+
     fn cursor_key(table: &str) -> String {
         format!("{CURSOR_KEY_PREFIX}{table}")
     }
@@ -300,9 +301,9 @@ impl TableCleanup {
 
     async fn run_collapse(
         &self,
-        table: &ReclaimTable,
+        table: &CleanupTable,
         candidate_sets: &[CandidateSet],
-        keep_newest_tombstone: bool,
+        keep: impl Fn() -> sql::Keep,
     ) -> Result<(), TaskError> {
         for candidates in candidate_sets {
             let statement = sql::collapse_statement(
@@ -310,7 +311,7 @@ impl TableCleanup {
                 &table.key,
                 &candidates.sql,
                 candidates.prune.as_deref(),
-                keep_newest_tombstone,
+                keep(),
                 self.config.statement_timeout_secs,
             );
             self.execute(&table.name, &statement).await?;
@@ -321,10 +322,10 @@ impl TableCleanup {
     /// Path groups keep every statement primary-key-pruned; tables without a path column fall back to key hashes.
     async fn candidate_sets(
         &self,
-        table: &ReclaimTable,
+        table: &CleanupTable,
         filter: &str,
     ) -> Result<(u64, Vec<CandidateSet>), TaskError> {
-        let limit = self.config.max_candidates_per_statement;
+        let limit = self.config.max_candidates_per_statement.max(1);
         if !table.has_path() {
             let total = self
                 .count(&sql::tombstone_count_sql(&table.name, filter))
@@ -377,13 +378,16 @@ impl TableCleanup {
     /// Younger tombstones stay so a late row with an older `_version` cannot resurface behind them.
     async fn purge_tombstones(
         &self,
-        table: &ReclaimTable,
+        table: &CleanupTable,
         cutoff: DateTime<Utc>,
     ) -> Result<u64, TaskError> {
         let (total, sets) = self
             .candidate_sets(table, &sql::version_filter("<", cutoff))
             .await?;
-        self.run_collapse(table, &sets, false).await?;
+        self.run_collapse(table, &sets, || {
+            sql::Keep::NewestUnlessExpiredTombstone(cutoff)
+        })
+        .await?;
         info!(
             table = table.name,
             tombstones = total,
@@ -396,14 +400,15 @@ impl TableCleanup {
     /// Rows written before the block columns existed report their part's first block, invisible to the incremental window.
     async fn sweep_history(
         &self,
-        table: &ReclaimTable,
+        table: &CleanupTable,
         cutoff: DateTime<Utc>,
     ) -> Result<u64, TaskError> {
         let purged = self.purge_tombstones(table, cutoff).await?;
         let (total, sets) = self
             .candidate_sets(table, &sql::version_filter(">=", cutoff))
             .await?;
-        self.run_collapse(table, &sets, true).await?;
+        self.run_collapse(table, &sets, || sql::Keep::Newest)
+            .await?;
         info!(
             table = table.name,
             tombstones = total,
@@ -413,10 +418,10 @@ impl TableCleanup {
         Ok(purged + total)
     }
 
-    /// Project-scoped code tables are left to `reclaim_code_snapshots`, which removes whole previous snapshots.
+    /// Project-scoped code tables are left to `cleanup_code_snapshots`, which removes whole previous snapshots.
     async fn collapse_tombstones(
         &self,
-        table: &ReclaimTable,
+        table: &CleanupTable,
         pass_at: DateTime<Utc>,
     ) -> Result<u64, TaskError> {
         let key = Self::cursor_key(&table.name);
@@ -441,7 +446,8 @@ impl TableCleanup {
             .candidate_sets(table, &sql::new_rows_filter(cursor.previous_block))
             .await?;
         if total > 0 {
-            self.run_collapse(table, &sets, true).await?;
+            self.run_collapse(table, &sets, || sql::Keep::Newest)
+                .await?;
             info!(
                 table = table.name,
                 candidates = total,
@@ -449,23 +455,23 @@ impl TableCleanup {
                 "collapsed tombstoned keys"
             );
         }
+        // Saved before the purge so a failing purge cannot stall the incremental window.
+        self.save_block_cursor(&key, pass_at, &cursor, high_block, cursor.last_purge)
+            .await?;
         let purge_due = cursor.last_purge.is_none_or(|at| {
             pass_at - at >= TimeDelta::seconds(self.config.purge_interval_secs as i64) - PURGE_SLACK
         });
-        let mut purged = 0;
-        let last_purge = if purge_due {
-            purged = self.purge_tombstones(table, cutoff).await?;
-            Some(pass_at)
-        } else {
-            cursor.last_purge
-        };
-        self.save_block_cursor(&key, pass_at, &cursor, high_block, last_purge)
+        if !purge_due {
+            return Ok(total);
+        }
+        let purged = self.purge_tombstones(table, cutoff).await?;
+        self.save_block_cursor(&key, pass_at, &cursor, high_block, Some(pass_at))
             .await?;
         Ok(total + purged)
     }
 
     /// Scopes come from checkpoint rows by `_block_number`: a checkpoint lands at job end while `indexed_at` is the job start.
-    async fn reclaim_code_snapshots(&self, pass_at: DateTime<Utc>) -> Result<u64, TaskError> {
+    async fn cleanup_code_snapshots(&self, pass_at: DateTime<Utc>) -> Result<u64, TaskError> {
         let key = Self::cursor_key(&self.code_checkpoint_table);
         let cursor = self.block_cursor(&key).await?;
         let high_block = self
@@ -493,6 +499,7 @@ impl TableCleanup {
         };
         let total = self.count(&scopes(None)).await?;
         let chunks = total.div_ceil(SCOPES_PER_STATEMENT) as usize;
+        let tables = self.safe_tables(|role| role != CodeRole::None).await;
         let mut failed_chunks = 0usize;
         for chunk in 0..chunks {
             let scopes = scopes((chunks > 1).then_some((chunks, chunk)));
@@ -501,7 +508,7 @@ impl TableCleanup {
                 continue;
             }
             let prune = sql::path_prune_sql(&paths);
-            for table in self.code_tables().await {
+            for table in &tables {
                 let statement = match table.code {
                     CodeRole::Project => sql::code_snapshot_statement(
                         &table.name,
@@ -533,7 +540,7 @@ impl TableCleanup {
         if total > 0 {
             info!(
                 scopes = total,
-                chunks, failed_chunks, history, "reclaimed superseded code snapshots"
+                chunks, failed_chunks, history, "removed superseded code snapshots"
             );
         }
         let saved = if history {
@@ -549,26 +556,16 @@ impl TableCleanup {
         Ok(total)
     }
 
-    async fn code_tables(&self) -> Vec<&ReclaimTable> {
-        let unsafe_tables = self.unsafe_tables.lock().await;
-        self.tables
-            .iter()
-            .filter(|table| table.code != CodeRole::None)
-            .filter(|table| {
-                let safe = !unsafe_tables.contains(&table.name);
-                if !safe {
-                    self.metrics.record_requests_skipped(TASK_NAME, 1);
-                }
-                safe
-            })
-            .collect()
-    }
-
     /// The largest parts never merge, so their patches are folded in by size or age.
     async fn apply_patches_if_due(&self) -> Result<(), TaskError> {
         let mut last = self.last_patch_apply.lock().await;
         let overdue = last.elapsed().as_secs() >= self.config.apply_patches_after_secs;
-        let names: Vec<String> = self.tables.iter().map(|table| table.name.clone()).collect();
+        let names: Vec<String> = self
+            .safe_tables(|_| true)
+            .await
+            .into_iter()
+            .map(|table| table.name.clone())
+            .collect();
         let pending: BTreeSet<String> = self
             .column(sql::pending_apply_patches_sql())
             .await?
@@ -580,9 +577,8 @@ impl TableCleanup {
             .await?
         {
             let bytes: u64 = row[1].parse().unwrap_or(0);
-            if pending.contains(&row[0])
-                || !(overdue || bytes >= self.config.apply_patches_after_bytes)
-            {
+            let due = overdue || bytes >= self.config.apply_patches_after_bytes;
+            if pending.contains(&row[0]) || !due {
                 continue;
             }
             self.graph
@@ -602,6 +598,29 @@ impl TableCleanup {
     }
 }
 
+fn cleanup_tables(
+    ontology: &ontology::Ontology,
+    code_tables: &CodeTableNames,
+) -> Vec<CleanupTable> {
+    let mut tables: Vec<CleanupTable> = ontology
+        .nodes()
+        .map(|node| node.destination_table.as_str())
+        .chain(ontology.edge_tables())
+        .filter_map(|logical| {
+            let sort_key = ontology.sort_key_for_table(logical)?;
+            let name = prefixed_table_name(logical, *SCHEMA_VERSION);
+            let code = code_role(code_tables, &name, sort_key);
+            Some(CleanupTable {
+                name,
+                key: sort_key.join(", "),
+                code,
+            })
+        })
+        .collect();
+    tables.sort_by(|a, b| a.name.cmp(&b.name));
+    tables
+}
+
 fn code_role(code_tables: &CodeTableNames, table: &str, sort_key: &[String]) -> CodeRole {
     if code_tables.node_tables().contains(&table) {
         CodeRole::Project
@@ -617,7 +636,7 @@ fn code_role(code_tables: &CodeTableNames, table: &str, sort_key: &[String]) -> 
 }
 
 fn candidate_set(
-    table: &ReclaimTable,
+    table: &CleanupTable,
     paths: &[String],
     filter: &str,
     chunk: Option<(usize, usize)>,
@@ -646,7 +665,8 @@ fn group_paths(counts: Vec<(String, u64)>, limit: u64) -> (u64, Vec<PathGroup>) 
             groups.push(PathGroup::Chunked { path, chunks });
             continue;
         }
-        if !group.is_empty() && group_size + count > limit {
+        let full = group.len() >= PATHS_PER_STATEMENT || group_size + count > limit;
+        if !group.is_empty() && full {
             groups.push(PathGroup::Paths(std::mem::take(&mut group)));
             group_size = 0;
         }
@@ -671,30 +691,31 @@ impl ScheduledTask for TableCleanup {
 
     async fn run(&self) -> Result<(), TaskError> {
         let started = Instant::now();
-        if !self.prepare().await? {
+        let supported = match self.prepare().await {
+            Ok(supported) => supported,
+            Err(error) => {
+                self.metrics.record_error(TASK_NAME, "prepare");
+                self.metrics
+                    .record_run(TASK_NAME, "error", started.elapsed().as_secs_f64());
+                return Err(error);
+            }
+        };
+        if !supported {
             self.metrics.record_requests_skipped(TASK_NAME, 1);
             return Ok(());
         }
         let pass_at = Utc::now();
         let mut failed = 0usize;
         let mut candidates = 0u64;
-        match self.reclaim_code_snapshots(pass_at).await {
+        match self.cleanup_code_snapshots(pass_at).await {
             Ok(scopes) => candidates += scopes,
             Err(error) => {
                 failed += 1;
                 self.metrics.record_error(TASK_NAME, "code_snapshots");
-                warn!(%error, "code snapshot reclaim failed");
+                warn!(%error, "code snapshot cleanup failed");
             }
         }
-        let unsafe_tables = self.unsafe_tables.lock().await.clone();
-        for table in &self.tables {
-            if table.code == CodeRole::Project {
-                continue;
-            }
-            if unsafe_tables.contains(&table.name) {
-                self.metrics.record_requests_skipped(TASK_NAME, 1);
-                continue;
-            }
+        for table in self.safe_tables(|role| role != CodeRole::Project).await {
             match self.collapse_tombstones(table, pass_at).await {
                 Ok(count) => candidates += count,
                 Err(error) => {
@@ -714,7 +735,7 @@ impl ScheduledTask for TableCleanup {
             .record_run(TASK_NAME, outcome, started.elapsed().as_secs_f64());
         info!(candidates, failed, "table cleanup pass complete");
         if failed > 0 {
-            return Err(TaskError::new(format!("{failed} reclaim steps failed")));
+            return Err(TaskError::new(format!("{failed} cleanup steps failed")));
         }
         Ok(())
     }
@@ -729,6 +750,32 @@ mod tests {
             PathGroup::Paths(paths) => paths.iter().map(String::as_str).collect(),
             PathGroup::Chunked { path, .. } => vec![path.as_str()],
         }
+    }
+
+    #[test]
+    fn every_node_and_edge_table_is_cleaned_and_no_auxiliary_table_is() {
+        let ontology = ontology::Ontology::load_embedded().unwrap();
+        let code_tables = CodeTableNames::from_ontology(&ontology).unwrap();
+        let tables = cleanup_tables(&ontology, &code_tables);
+        assert_eq!(
+            tables.len(),
+            ontology.nodes().count() + ontology.edge_tables().len()
+        );
+        assert!(
+            tables
+                .iter()
+                .all(|table| !table.name.contains("checkpoint"))
+        );
+        assert!(
+            tables.iter().any(
+                |table| table.name.ends_with("gl_code_edge") && table.code == CodeRole::Project
+            )
+        );
+        assert!(
+            tables
+                .iter()
+                .any(|table| table.name.ends_with("_gl_edge") && table.code == CodeRole::SharedEdge)
+        );
     }
 
     #[test]
@@ -750,8 +797,24 @@ mod tests {
     }
 
     #[test]
+    fn a_group_never_holds_more_paths_than_one_statement_can_carry() {
+        let counts = (0..PATHS_PER_STATEMENT * 2 + 1)
+            .map(|i| (format!("1/{i}/"), 1))
+            .collect();
+        let (total, groups) = group_paths(counts, 1_000_000);
+        assert_eq!(total, (PATHS_PER_STATEMENT * 2 + 1) as u64);
+        assert_eq!(
+            groups
+                .iter()
+                .map(|group| paths(group).len())
+                .collect::<Vec<_>>(),
+            [PATHS_PER_STATEMENT, PATHS_PER_STATEMENT, 1]
+        );
+    }
+
+    #[test]
     fn a_chunked_candidate_set_prunes_by_its_single_path() {
-        let table = ReclaimTable {
+        let table = CleanupTable {
             name: "t".to_string(),
             key: "traversal_path, id".to_string(),
             code: CodeRole::None,

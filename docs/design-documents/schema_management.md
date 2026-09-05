@@ -291,6 +291,10 @@ back, not a mistake to refuse. Indexers do not run DDL; they gate on the version
    `maintenance.code_stale_sweep.*` gates so each namespace re-sweeps against the clone. Control tables such as `gkg_schema_version` are never
    prefixed or cloned.
 
+   Before attaching partitions the migration applies pending patch parts on the source table with a
+   synchronous `APPLY PATCHES`, bounded to one hour, because `ATTACH PARTITION FROM` refuses a
+   source that still has them; a timeout fails the migration and the next dispatcher start retries.
+
    Patch-part deletes (the table cleanup task) need every row's `(_block_number, _block_offset)`
    identity to be unique within a table. Inserts under the schema 94 DDL guarantee that; attached
    parts do not, because they keep the source table's numbering while the new table numbers its own

@@ -331,7 +331,7 @@ helm upgrade gkg orbit-helm-charts/gkg \
 
 The cleanup stage after indexing only tombstones keys that vanished; failures are logged as warnings and do not block the pipeline. The previous snapshot, the tombstones and any rows of runs that never checkpointed are removed physically by the `maintenance.table_cleanup` task, which deletes every row with `_version` below the project's checkpoint `indexed_at` once the checkpoint lands (see [server configuration](server_configuration.md), "Table cleanup task settings").
 
-To find rows the task still has to reclaim for recently indexed projects:
+To find rows the task still has to remove for recently indexed projects:
 
 ```sql
 SELECT count()
@@ -344,7 +344,7 @@ INNER JOIN (
 WHERE e._version < cp.indexed_at;
 ```
 
-A project that is never re-indexed keeps no garbage except rows written before the task first ran; a re-index of the project reclaims them.
+With `sweep_history` on (the default) the first pass covers every checkpointed project; with it off, rows written before the task first ran stay until the project is re-indexed.
 
 ## Monitoring
 

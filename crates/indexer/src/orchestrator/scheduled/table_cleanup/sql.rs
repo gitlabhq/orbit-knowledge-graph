@@ -1,9 +1,8 @@
 use chrono::{DateTime, Utc};
 
-use crate::clickhouse::TIMESTAMP_FORMAT;
+use crate::clickhouse::{PATCH_PART_PREFIX, TIMESTAMP_FORMAT};
 use crate::modules::code::config::CodeTableNames;
 
-pub(super) const PATCH_PART_PREFIX: &str = "patch";
 pub(super) const PATH_COLUMN: &str = "traversal_path";
 const PATCH_DELETE_MODE: &str = "lightweight_update_force";
 const CODE_SCOPE: &str = "traversal_path, project_id, branch";
@@ -146,19 +145,27 @@ pub(super) fn candidates_sql(
     format!("SELECT {key} FROM {table} WHERE {filter}{chunk}")
 }
 
+/// Which row of a candidate key survives a collapse.
+pub(super) enum Keep {
+    Newest,
+    NewestUnlessExpiredTombstone(DateTime<Utc>),
+}
+
 pub(super) fn collapse_statement(
     table: &str,
     key: &str,
     candidates: &str,
     prune: Option<&str>,
-    keep_newest_tombstone: bool,
+    keep: Keep,
     timeout_secs: u64,
 ) -> String {
     // A live row tied with a tombstone at the same `_version` counts as live.
-    let having = if keep_newest_tombstone {
-        ""
-    } else {
-        " HAVING maxIf(_version, NOT _deleted) = max(_version)"
+    let having = match keep {
+        Keep::Newest => String::new(),
+        Keep::NewestUnlessExpiredTombstone(cutoff) => format!(
+            " HAVING maxIf(_version, NOT _deleted) = max(_version) OR max(_version) >= toDateTime64('{}', 6, 'UTC')",
+            cutoff.format(TIMESTAMP_FORMAT)
+        ),
     };
     let prune = prune
         .map(|prune| format!("{prune} AND "))
@@ -308,7 +315,7 @@ mod tests {
             "a, b",
             "SELECT a, b FROM t WHERE _deleted",
             Some("traversal_path IN ('1/2/')"),
-            true,
+            Keep::Newest,
             30,
         );
         assert!(sql.starts_with(
@@ -322,19 +329,22 @@ mod tests {
     }
 
     #[test]
-    fn purge_collapse_drops_dead_keys_entirely_and_keeps_ties_alive() {
+    fn purge_collapse_drops_expired_dead_keys_and_keeps_ties_and_young_tombstones() {
+        let cutoff = DateTime::parse_from_rfc3339("2026-01-01T00:00:00Z")
+            .unwrap()
+            .to_utc();
         let sql = collapse_statement(
             "t",
             "a, b",
             "SELECT a, b FROM t WHERE _deleted",
             None,
-            false,
+            Keep::NewestUnlessExpiredTombstone(cutoff),
             30,
         );
         assert!(sql.starts_with("DELETE FROM t WHERE (a, b) IN ("));
-        assert!(
-            sql.contains("GROUP BY a, b HAVING maxIf(_version, NOT _deleted) = max(_version))")
-        );
+        assert!(sql.contains(
+            "GROUP BY a, b HAVING maxIf(_version, NOT _deleted) = max(_version) OR max(_version) >= toDateTime64('2026-01-01 00:00:00.000000', 6, 'UTC'))"
+        ));
     }
 
     #[test]

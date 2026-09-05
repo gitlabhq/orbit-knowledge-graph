@@ -301,3 +301,10 @@ FROM system.parts WHERE database = '<gkg-database>' AND active AND startsWith(na
 ```
 
 Tombstones stay for `tombstone_retention_secs` (7 days by default) and are purged daily with the rows they hide; the rows a fresh tombstone supersedes go within one pass. Deleting the table's `maintenance.table_cleanup.<versioned table>` checkpoint row (a tombstone insert into the `checkpoint` table) makes the next pass sweep the table's whole history. Do not run `OPTIMIZE ... FINAL CLEANUP` on the large tables: a cleanup merge of a multi-billion-row part does not finish inside any client timeout.
+
+Before reverting or disabling the task, apply its pending patch parts, because no other code path does and the next clone-based migration would refuse to attach the source partitions:
+
+```sql
+SELECT DISTINCT table FROM system.parts WHERE database = '<gkg-database>' AND active AND startsWith(name, 'patch');
+ALTER TABLE `<gkg-database>`.<table> APPLY PATCHES SETTINGS mutations_sync = 2;
+```

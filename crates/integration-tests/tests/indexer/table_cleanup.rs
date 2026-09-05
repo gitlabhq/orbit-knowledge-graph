@@ -87,6 +87,57 @@ async fn second_pass_leaves_a_clean_table_unchanged() {
 }
 
 #[tokio::test]
+async fn tombstones_written_after_a_pass_are_collapsed_on_the_next_pass() {
+    let context = TestContext::new(&[*GRAPH_SCHEMA_SQL]).await;
+    seed_users_with_tombstones(&context).await;
+    let task = build_cleanup_task(&context);
+    task.run().await.unwrap();
+    context
+        .execute(&format!(
+            "INSERT INTO {} (id, username, _version, _deleted) VALUES (4, 'u4', now64(6) - INTERVAL 2 HOUR, false)",
+            t("gl_user")
+        ))
+        .await;
+    context
+        .execute(&format!(
+            "INSERT INTO {} (id, username, _version, _deleted) VALUES (4, 'u4', now64(6) - INTERVAL 1 HOUR, true)",
+            t("gl_user")
+        ))
+        .await;
+
+    task.run().await.unwrap();
+
+    assert_eq!(user_rows(&context).await, vec![(1, 1), (3, 0), (4, 1)]);
+}
+
+#[tokio::test]
+async fn purge_keeps_a_young_tombstone_over_an_expired_one_of_the_same_key() {
+    let context = TestContext::new(&[*GRAPH_SCHEMA_SQL]).await;
+    context
+        .execute(&format!(
+            "INSERT INTO {} (id, username, _version, _deleted) VALUES (5, 'u5', now64(6) - INTERVAL 30 DAY, false)",
+            t("gl_user")
+        ))
+        .await;
+    context
+        .execute(&format!(
+            "INSERT INTO {} (id, username, _version, _deleted) VALUES (5, 'u5', now64(6) - INTERVAL 10 DAY, true)",
+            t("gl_user")
+        ))
+        .await;
+    context
+        .execute(&format!(
+            "INSERT INTO {} (id, username, _version, _deleted) VALUES (5, 'u5', now64(6) - INTERVAL 1 HOUR, true)",
+            t("gl_user")
+        ))
+        .await;
+
+    build_cleanup_task(&context).run().await.unwrap();
+
+    assert_eq!(user_rows(&context).await, vec![(5, 1)]);
+}
+
+#[tokio::test]
 async fn skips_tables_that_do_not_declare_both_block_columns() {
     let context = TestContext::new(&[*GRAPH_SCHEMA_SQL]).await;
     context
