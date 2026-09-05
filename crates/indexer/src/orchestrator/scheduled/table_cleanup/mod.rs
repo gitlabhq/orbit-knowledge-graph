@@ -21,6 +21,10 @@ use orbit_server_config::{ScheduleConfiguration, TableCleanupConfig};
 
 const TASK_NAME: &str = "maintenance.table_cleanup";
 const CURSOR_KEY_PREFIX: &str = "maintenance.table_cleanup.";
+/// A refusal must outlive the condition that caused it: attached parts stop looking foreign once the table's own numbering passes them.
+const IDENTITY_KEY_PREFIX: &str = "maintenance.table_cleanup.identity.";
+const REFUSED: &str = "refused";
+const ADMITTED: &str = "admitted";
 /// Bounds the scope tuples and path literals inlined into one code statement.
 const SCOPES_PER_STATEMENT: u64 = 2000;
 /// Each path literal appears four times per statement; 500 keeps it under ClickHouse's default 256 KiB `max_query_size`.
@@ -193,17 +197,39 @@ impl TableCleanup {
         }
         let mut unsafe_tables = self.unsafe_tables.lock().await;
         for table in &self.tables {
-            if let Some(reason) = self.unsafe_reason(&table.name).await? {
-                warn!(
-                    table = table.name,
-                    reason, "skipping table cleanup for this table"
-                );
+            if self.refused(&table.name).await? {
                 unsafe_tables.insert(table.name.clone());
             }
         }
         self.supported.store(true, Ordering::Release);
         self.prepared.store(true, Ordering::Release);
         Ok(true)
+    }
+
+    /// The verdict is stored per schema version; delete the identity row to re-check a rebuilt table.
+    async fn refused(&self, table: &str) -> Result<bool, TaskError> {
+        let key = format!("{IDENTITY_KEY_PREFIX}{table}");
+        let stored = self.checkpoints.load(&key).await.map_err(TaskError::new)?;
+        if let Some(verdict) = stored.and_then(|checkpoint| checkpoint.cursor_values) {
+            return Ok(verdict.first().is_some_and(|value| value == REFUSED));
+        }
+        let reason = self.unsafe_reason(table).await?;
+        if let Some(reason) = reason {
+            warn!(table, reason, "refusing table cleanup for this table");
+        }
+        let verdict = if reason.is_some() { REFUSED } else { ADMITTED };
+        self.checkpoints
+            .save_progress(
+                &key,
+                &Checkpoint {
+                    watermark: Utc::now(),
+                    cursor_values: Some(vec![verdict.to_string()]),
+                    resume_floor: None,
+                },
+            )
+            .await
+            .map_err(TaskError::new)?;
+        Ok(reason.is_some())
     }
 
     /// A patch applied after a merge matches rows by `(_block_number, _block_offset)`, so that pair must be unique.
@@ -298,7 +324,7 @@ impl TableCleanup {
         &self,
         table: &CleanupTable,
         candidate_sets: &[CandidateSet],
-        keep: impl Fn() -> sql::Keep,
+        keep: sql::Keep,
     ) -> Result<(), TaskError> {
         for candidates in candidate_sets {
             let statement = sql::collapse_statement(
@@ -306,7 +332,7 @@ impl TableCleanup {
                 &table.key,
                 &candidates.sql,
                 candidates.prune.as_deref(),
-                keep(),
+                keep,
                 self.config.statement_timeout_secs,
             );
             self.execute(&table.name, &statement).await?;
@@ -379,9 +405,11 @@ impl TableCleanup {
         let (total, sets) = self
             .candidate_sets(table, &sql::version_filter("<", cutoff))
             .await?;
-        self.run_collapse(table, &sets, || {
-            sql::Keep::NewestUnlessExpiredTombstone(cutoff)
-        })
+        self.run_collapse(
+            table,
+            &sets,
+            sql::Keep::NewestUnlessExpiredTombstone(cutoff),
+        )
         .await?;
         info!(
             table = table.name,
@@ -402,8 +430,7 @@ impl TableCleanup {
         let (total, sets) = self
             .candidate_sets(table, &sql::version_filter(">=", cutoff))
             .await?;
-        self.run_collapse(table, &sets, || sql::Keep::Newest)
-            .await?;
+        self.run_collapse(table, &sets, sql::Keep::Newest).await?;
         info!(
             table = table.name,
             tombstones = total,
@@ -441,8 +468,7 @@ impl TableCleanup {
             .candidate_sets(table, &sql::new_rows_filter(cursor.previous_block))
             .await?;
         if total > 0 {
-            self.run_collapse(table, &sets, || sql::Keep::Newest)
-                .await?;
+            self.run_collapse(table, &sets, sql::Keep::Newest).await?;
             info!(
                 table = table.name,
                 candidates = total,

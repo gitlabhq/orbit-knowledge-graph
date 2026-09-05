@@ -146,6 +146,7 @@ pub(super) fn candidates_sql(
 }
 
 /// Which row of a candidate key survives a collapse.
+#[derive(Clone, Copy)]
 pub(super) enum Keep {
     Newest,
     NewestUnlessExpiredTombstone(DateTime<Utc>),

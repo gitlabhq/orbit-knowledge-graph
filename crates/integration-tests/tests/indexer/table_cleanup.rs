@@ -156,6 +156,32 @@ async fn skips_tables_that_do_not_declare_both_block_columns() {
     );
 }
 
+#[tokio::test]
+async fn a_refusal_outlives_the_condition_that_caused_it() {
+    let context = TestContext::new(&[*GRAPH_SCHEMA_SQL]).await;
+    context
+        .execute(&format!(
+            "ALTER TABLE {} MODIFY SETTING enable_block_number_column = 0",
+            t("gl_user")
+        ))
+        .await;
+    seed_users_with_tombstones(&context).await;
+    build_cleanup_task(&context).run().await.unwrap();
+    context
+        .execute(&format!(
+            "ALTER TABLE {} MODIFY SETTING enable_block_number_column = 1",
+            t("gl_user")
+        ))
+        .await;
+
+    build_cleanup_task(&context).run().await.unwrap();
+
+    assert_eq!(
+        user_rows(&context).await,
+        vec![(1, 0), (1, 1), (2, 0), (2, 1), (3, 0)]
+    );
+}
+
 /// Mirrors ClickHouse Cloud, where merges persist `_block_offset` alone and rows from different blocks share a patch identity.
 #[tokio::test]
 async fn skips_tables_whose_merged_parts_persist_only_the_block_offset() {
