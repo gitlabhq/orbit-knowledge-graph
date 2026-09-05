@@ -109,7 +109,7 @@ pub(super) fn pending_apply_patches_sql() -> &'static str {
      WHERE database = currentDatabase() AND NOT is_done AND command LIKE '%APPLY PATCHES%'"
 }
 
-pub(super) fn tombstone_count_sql(table: &str, filter: &str) -> String {
+pub(super) fn tombstone_rows_sql(table: &str, filter: &str) -> String {
     format!("SELECT 1 FROM {table} WHERE _deleted{filter}")
 }
 

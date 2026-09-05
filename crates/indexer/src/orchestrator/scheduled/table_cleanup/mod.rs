@@ -197,7 +197,7 @@ impl TableCleanup {
         }
         let mut unsafe_tables = self.unsafe_tables.lock().await;
         for table in &self.tables {
-            if self.refused(&table.name).await? {
+            if self.load_or_record_refusal(&table.name).await? {
                 unsafe_tables.insert(table.name.clone());
             }
         }
@@ -207,7 +207,7 @@ impl TableCleanup {
     }
 
     /// The verdict is stored per schema version; delete the identity row to re-check a rebuilt table.
-    async fn refused(&self, table: &str) -> Result<bool, TaskError> {
+    async fn load_or_record_refusal(&self, table: &str) -> Result<bool, TaskError> {
         let key = format!("{IDENTITY_KEY_PREFIX}{table}");
         let stored = self.checkpoints.load(&key).await.map_err(TaskError::new)?;
         if let Some(verdict) = stored.and_then(|checkpoint| checkpoint.cursor_values) {
@@ -349,7 +349,7 @@ impl TableCleanup {
         let limit = self.config.max_candidates_per_statement.max(1);
         if !table.has_path() {
             let total = self
-                .count(&sql::tombstone_count_sql(&table.name, filter))
+                .count(&sql::tombstone_rows_sql(&table.name, filter))
                 .await?;
             let chunks = total.div_ceil(limit) as usize;
             let sets = (0..chunks)
@@ -451,16 +451,16 @@ impl TableCleanup {
         let high_block = self.high_block(&table.name).await?.max(cursor.block);
         let cutoff = pass_at - TimeDelta::seconds(self.config.tombstone_retention_secs as i64);
         if cursor.last_pass.is_none() {
-            let total = if self.config.sweep_history {
-                self.sweep_history(table, cutoff).await?
+            let (total, purged_at) = if self.config.sweep_history {
+                (self.sweep_history(table, cutoff).await?, Some(pass_at))
             } else {
-                0
+                (0, None)
             };
             let swept = BlockCursor {
                 block: high_block,
                 ..cursor
             };
-            self.save_block_cursor(&key, pass_at, &swept, high_block, Some(pass_at))
+            self.save_block_cursor(&key, pass_at, &swept, high_block, purged_at)
                 .await?;
             return Ok(total);
         }
@@ -510,7 +510,7 @@ impl TableCleanup {
             return Ok(0);
         }
         let after_block = (!history).then_some(cursor.previous_block);
-        let scopes = |chunk| {
+        let scopes_sql = |chunk| {
             sql::code_scopes_sql(
                 &self.code_checkpoint_table,
                 &self.code_branch_table,
@@ -518,12 +518,12 @@ impl TableCleanup {
                 chunk,
             )
         };
-        let total = self.count(&scopes(None)).await?;
+        let total = self.count(&scopes_sql(None)).await?;
         let chunks = total.div_ceil(SCOPES_PER_STATEMENT) as usize;
         let tables = self.safe_tables(|role| role != CodeRole::None).await;
         let mut failed_chunks = 0usize;
         for chunk in 0..chunks {
-            let scopes = scopes((chunks > 1).then_some((chunks, chunk)));
+            let scopes = scopes_sql((chunks > 1).then_some((chunks, chunk)));
             let paths = self.column(&sql::scope_paths_sql(&scopes)).await?;
             if paths.is_empty() {
                 continue;
