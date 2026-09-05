@@ -57,6 +57,7 @@ mod tests {
             group_traversal_ids,
             source_type: crate::auth::SourceType::Rest,
             ai_session_id: None,
+            request_id: None,
             instance_id: None,
             unique_instance_id: None,
             instance_version: None,

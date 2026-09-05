@@ -108,19 +108,26 @@ impl OrbitClient {
         &self,
         request: reqwest::RequestBuilder,
     ) -> Result<reqwest::Response, RemoteError> {
+        let request_id = Uuid::new_v4().to_string();
+        let session_id = agent_session_id();
+
         let mut builder = request
-            .header("X-Request-ID", Uuid::new_v4().to_string())
+            .header("X-Request-ID", &request_id)
+            .header("X-Orbit-Request-Id", &request_id)
             .header(
                 self.endpoint.header_name.as_str(),
                 self.endpoint.header_value.as_str(),
             );
 
+        if let Some(session_id) = &session_id {
+            builder = builder.header("X-Orbit-Session-Id", session_id);
+        }
         if let Ok(val) = std::env::var("TRACEPARENT") {
             builder = builder.header("traceparent", val);
         }
         if let Ok(val) = std::env::var("BAGGAGE") {
             builder = builder.header("baggage", val);
-        } else if let Some(session_id) = agent_session_id() {
+        } else if let Some(session_id) = &session_id {
             builder = builder.header("baggage", format!("session.id={session_id}"));
         }
 
@@ -271,7 +278,11 @@ fn build_user_agent(get_env: impl Fn(&str) -> Option<String>) -> String {
 fn agent_session_id() -> Option<String> {
     ["CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID"]
         .iter()
-        .find_map(|key| std::env::var(key).ok().filter(|v| !v.is_empty()))
+        .find_map(|key| {
+            std::env::var(key)
+                .ok()
+                .filter(|value| crate::telemetry::is_safe_identifier(value))
+        })
 }
 
 async fn read_body(response: reqwest::Response) -> Result<Vec<u8>, RemoteError> {

@@ -144,6 +144,7 @@ mod tests {
             group_traversal_ids: vec![],
             source_type: crate::auth::SourceType::Mcp,
             ai_session_id: Some("sess".into()),
+            request_id: None,
             instance_id: Some("inst".into()),
             unique_instance_id: Some("uniq".into()),
             instance_version: None,

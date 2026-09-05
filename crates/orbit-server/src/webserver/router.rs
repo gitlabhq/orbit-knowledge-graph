@@ -121,4 +121,36 @@ mod tests {
         assert_eq!(json["status"], "ok");
         assert!(json.get("unhealthy_components").is_none());
     }
+
+    #[tokio::test]
+    async fn serves_requests_carrying_w3c_trace_context() {
+        let router = create_router(ready_watcher());
+        let traced = Request::get("/live")
+            .header(
+                "traceparent",
+                "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+            )
+            .header("baggage", "session.id=abc-123")
+            .body(Body::empty())
+            .unwrap();
+
+        let (status, json) = parse_response(router.oneshot(traced).await.unwrap()).await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(json["status"], "ok");
+    }
+
+    #[tokio::test]
+    async fn serves_requests_whose_trace_context_is_malformed() {
+        let router = create_router(ready_watcher());
+        let traced = Request::get("/live")
+            .header("traceparent", "not-a-valid-traceparent")
+            .body(Body::empty())
+            .unwrap();
+
+        let (status, json) = parse_response(router.oneshot(traced).await.unwrap()).await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(json["status"], "ok");
+    }
 }

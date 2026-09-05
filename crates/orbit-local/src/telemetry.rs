@@ -16,8 +16,12 @@ const CATEGORY: &str = "orbit_cli";
 const ENABLED_ENV: &str = "ORBIT_TELEMETRY_ENABLED";
 const COLLECTOR_URL_ENV: &str = "ORBIT_TELEMETRY_COLLECTOR_URL";
 
-static AGENT_VALUE_RE: LazyLock<Regex> =
+static SAFE_IDENTIFIER_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^[A-Za-z0-9._-]{1,64}$").expect("static regex"));
+
+pub fn is_safe_identifier(value: &str) -> bool {
+    SAFE_IDENTIFIER_RE.is_match(value)
+}
 
 fn invocation_id() -> String {
     static ID: OnceLock<String> = OnceLock::new();
@@ -83,7 +87,7 @@ fn build_common_context(action: &str, coding_agent: Option<&str>) -> OrbitCommon
 
 pub fn detect_coding_agent(get_env: impl Fn(&str) -> Option<String>) -> Option<String> {
     if let Some(v) = get_env("AI_AGENT")
-        && AGENT_VALUE_RE.is_match(&v)
+        && is_safe_identifier(&v)
     {
         return Some(v);
     }
