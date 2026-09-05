@@ -289,7 +289,7 @@ recent Siphon activity, backstopping migration backfill and missed windows.
 
 The task needs ClickHouse 25.8.8, 25.9.3, 25.10.1 or newer (the releases where lightweight deletes with subqueries work); on older servers it logs a warning once and stays idle. Tables must persist both `_block_number` and `_block_offset`, which the generated DDL declares since schema 94. A table whose parts persist only `_block_offset` (ClickHouse Cloud enables that setting service-wide) or whose parts carry block numbers from another table (a clone attached by a non-`*` migration) is skipped with a warning until a full migration rebuilds it from inserts.
 
-The writer role needs `SELECT` on `system.parts`, `system.parts_columns`, `system.tables` and `system.settings` for these checks. Progress is stored in the `checkpoint` table under `maintenance.table_cleanup.<versioned table>`; deleting a table's row re-runs its history sweep on the next pass. Alert on `gkg.scheduler.task.errors{task="maintenance.table_cleanup"}`; skipped tables and unsupported servers count on `gkg.scheduler.task.requests.skipped{task="maintenance.table_cleanup"}`.
+The writer role needs `SELECT` on `system.parts`, `system.parts_columns`, `system.tables`, `system.settings` and `system.mutations` for these checks. Progress is stored in the `checkpoint` table under `maintenance.table_cleanup.<versioned table>`; deleting a table's row re-runs its history sweep on the next pass. Alert on `gkg.scheduler.task.errors{task="maintenance.table_cleanup"}`; skipped tables and unsupported servers count on `gkg.scheduler.task.requests.skipped{task="maintenance.table_cleanup"}`.
 
 ### Code dispatch task settings
 

@@ -625,9 +625,18 @@ impl TableCleanup {
                     .join(", ")
             )))
             .await?;
+        let pending: BTreeSet<String> = self
+            .rows(self.graph.query(&pending_apply_patches_sql()))
+            .await?
+            .into_iter()
+            .map(|row| row[0].clone())
+            .collect();
         let mut applied = 0usize;
         for row in rows {
             let bytes: u64 = row[1].parse().unwrap_or(0);
+            if pending.contains(&row[0]) {
+                continue;
+            }
             if overdue || bytes >= self.config.apply_patches_after_bytes {
                 self.graph
                     .query(&apply_patches_statement(&row[0]))
@@ -693,6 +702,14 @@ fn offset_only_parts_sql(table: &str) -> String {
 
 fn apply_patches_statement(table: &str) -> String {
     format!("ALTER TABLE {table} APPLY PATCHES SETTINGS mutations_sync = 0")
+}
+
+/// A large join-mode patch can take hours to fold into a big part; issuing another `APPLY PATCHES`
+/// meanwhile only queues a duplicate mutation.
+fn pending_apply_patches_sql() -> String {
+    "SELECT DISTINCT table FROM system.mutations \
+     WHERE database = currentDatabase() AND NOT is_done AND command LIKE '%APPLY PATCHES%'"
+        .to_string()
 }
 
 fn foreign_block_numbers_sql(table: &str) -> String {
@@ -1005,6 +1022,16 @@ mod tests {
                GROUP BY traversal_path, project_id, name) AS b \
                ON s.traversal_path = b.traversal_path AND s.project_id = b.project_id AND s.branch = b.branch \
              WHERE b.branch_version >= s.bound"
+        );
+    }
+
+    #[test]
+    fn pending_patch_applications_are_read_from_system_mutations() {
+        let sql = pending_apply_patches_sql();
+        assert!(sql.contains("FROM system.mutations"), "{sql}");
+        assert!(
+            sql.contains("NOT is_done AND command LIKE '%APPLY PATCHES%'"),
+            "{sql}"
         );
     }
 
