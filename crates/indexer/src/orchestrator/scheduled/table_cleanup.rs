@@ -28,6 +28,9 @@ const SCOPES_PER_STATEMENT: u64 = 2000;
 const PURGE_SLACK: TimeDelta = TimeDelta::seconds(60);
 /// Part names are `<partition>_<min block>_<max block>_<level>[_<mutation>]`.
 const PART_MAX_BLOCK: &str = "toUInt64OrZero(splitByChar('_', _part)[3])";
+/// Lightweight deletes only prune parts by literal predicates, not by `IN (subquery)` sets, so
+/// every statement names its traversal paths; above this many paths the list is dropped.
+const MAX_PRUNE_PATHS: usize = 2000;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum CodeRole {
@@ -40,6 +43,11 @@ struct ReclaimTable {
     name: String,
     key: String,
     code: CodeRole,
+}
+
+struct CandidateSet {
+    sql: String,
+    prune: Option<String>,
 }
 
 #[derive(Default)]
@@ -294,20 +302,44 @@ impl TableCleanup {
     async fn run_collapse(
         &self,
         table: &ReclaimTable,
-        candidate_sets: &[String],
+        candidate_sets: &[CandidateSet],
         keep_newest_tombstone: bool,
     ) -> Result<(), TaskError> {
         for candidates in candidate_sets {
             let statement = collapse_statement(
                 &table.name,
                 &table.key,
-                candidates,
+                &candidates.sql,
+                candidates.prune.as_deref(),
                 keep_newest_tombstone,
                 self.config.statement_timeout_secs,
             );
             self.execute(&table.name, &statement).await?;
         }
         Ok(())
+    }
+
+    /// Literal traversal paths of a candidate query, or `None` when the table has no path column or
+    /// the list would be too long to inline.
+    async fn prune_paths(
+        &self,
+        table: &ReclaimTable,
+        candidates: &str,
+    ) -> Result<Option<String>, TaskError> {
+        if !table.key.starts_with(PATH_COLUMN) {
+            return Ok(None);
+        }
+        let rows = self
+            .rows(self.graph.query(&format!(
+                "SELECT DISTINCT {PATH_COLUMN} FROM ({candidates}) ORDER BY {PATH_COLUMN} LIMIT {}",
+                MAX_PRUNE_PATHS + 1
+            )))
+            .await?;
+        if rows.is_empty() || rows.len() > MAX_PRUNE_PATHS {
+            return Ok(None);
+        }
+        let paths: Vec<String> = rows.into_iter().map(|row| row[0].clone()).collect();
+        Ok(Some(path_prune_sql(&paths)))
     }
 
     /// Candidate sets for every tombstoned key matching `filter`, each bounded by
@@ -317,7 +349,7 @@ impl TableCleanup {
         &self,
         table: &ReclaimTable,
         filter: &str,
-    ) -> Result<(u64, Vec<String>), TaskError> {
+    ) -> Result<(u64, Vec<CandidateSet>), TaskError> {
         let limit = self.config.max_candidates_per_statement;
         if !table.key.starts_with(PATH_COLUMN) {
             let total = self
@@ -328,14 +360,15 @@ impl TableCleanup {
                 .await?;
             let chunks = total.div_ceil(limit) as usize;
             let sets = (0..chunks)
-                .map(|chunk| {
-                    hash_chunk_sql(
+                .map(|chunk| CandidateSet {
+                    sql: hash_chunk_sql(
                         &table.name,
                         &table.key,
                         &format!("_deleted{filter}"),
                         chunks,
                         chunk,
-                    )
+                    ),
+                    prune: None,
                 })
                 .collect();
             return Ok((total, sets));
@@ -359,18 +392,18 @@ impl TableCleanup {
                 let path_filter =
                     format!("{PATH_COLUMN} = '{}' AND _deleted{filter}", escape(&row[0]));
                 for chunk in 0..chunks {
-                    sets.push(hash_chunk_sql(
-                        &table.name,
-                        &table.key,
-                        &path_filter,
-                        chunks,
-                        chunk,
-                    ));
+                    sets.push(CandidateSet {
+                        sql: hash_chunk_sql(&table.name, &table.key, &path_filter, chunks, chunk),
+                        prune: Some(path_prune_sql(std::slice::from_ref(&row[0]))),
+                    });
                 }
                 continue;
             }
             if !group.is_empty() && group_size + count > limit {
-                sets.push(path_group_sql(&table.name, &table.key, &group, filter));
+                sets.push(CandidateSet {
+                    sql: path_group_sql(&table.name, &table.key, &group, filter),
+                    prune: Some(path_prune_sql(&group)),
+                });
                 group.clear();
                 group_size = 0;
             }
@@ -378,7 +411,10 @@ impl TableCleanup {
             group_size += count;
         }
         if !group.is_empty() {
-            sets.push(path_group_sql(&table.name, &table.key, &group, filter));
+            sets.push(CandidateSet {
+                sql: path_group_sql(&table.name, &table.key, &group, filter),
+                prune: Some(path_prune_sql(&group)),
+            });
         }
         Ok((total, sets))
     }
@@ -460,15 +496,17 @@ impl TableCleanup {
         let candidates = candidates_sql(&table.name, &table.key, cursor.previous_block, None);
         let total = self.count(&candidates).await?;
         if total > 0 {
+            let prune = self.prune_paths(table, &candidates).await?;
             let chunks = total.div_ceil(self.config.max_candidates_per_statement) as usize;
-            let sets: Vec<String> = (0..chunks)
-                .map(|chunk| {
-                    candidates_sql(
+            let sets: Vec<CandidateSet> = (0..chunks)
+                .map(|chunk| CandidateSet {
+                    sql: candidates_sql(
                         &table.name,
                         &table.key,
                         cursor.previous_block,
                         (chunks > 1).then_some((chunks, chunk)),
-                    )
+                    ),
+                    prune: prune.clone(),
                 })
                 .collect();
             self.run_collapse(table, &sets, true).await?;
@@ -542,6 +580,18 @@ impl TableCleanup {
                 after_block,
                 (chunks > 1).then_some((chunks, chunk)),
             );
+            let paths: Vec<String> = self
+                .rows(self.graph.query(&format!(
+                    "SELECT DISTINCT {PATH_COLUMN} FROM ({scopes}) ORDER BY {PATH_COLUMN}"
+                )))
+                .await?
+                .into_iter()
+                .map(|row| row[0].clone())
+                .collect();
+            if paths.is_empty() {
+                continue;
+            }
+            let prune = path_prune_sql(&paths);
             for table in &self.tables {
                 if unsafe_tables.contains(&table.name) {
                     self.metrics.record_requests_skipped(TASK_NAME, 1);
@@ -552,12 +602,14 @@ impl TableCleanup {
                     CodeRole::Project => code_snapshot_statement(
                         &table.name,
                         &scopes,
+                        &prune,
                         self.config.statement_timeout_secs,
                     ),
                     CodeRole::SharedEdge => shared_edge_snapshot_statement(
                         &table.name,
                         &self.code_checkpoint_table,
                         &scopes,
+                        &prune,
                         self.config.statement_timeout_secs,
                     ),
                 };
@@ -706,13 +758,23 @@ fn candidates_sql(
     )
 }
 
-fn path_group_sql(table: &str, key: &str, paths: &[String], filter: &str) -> String {
-    let paths = paths
+fn path_list_sql(paths: &[String]) -> String {
+    paths
         .iter()
         .map(|path| format!("'{}'", escape(path)))
         .collect::<Vec<_>>()
-        .join(", ");
-    format!("SELECT {key} FROM {table} WHERE {PATH_COLUMN} IN ({paths}) AND _deleted{filter}")
+        .join(", ")
+}
+
+fn path_prune_sql(paths: &[String]) -> String {
+    format!("{PATH_COLUMN} IN ({})", path_list_sql(paths))
+}
+
+fn path_group_sql(table: &str, key: &str, paths: &[String], filter: &str) -> String {
+    format!(
+        "SELECT {key} FROM {table} WHERE {} AND _deleted{filter}",
+        path_prune_sql(paths)
+    )
 }
 
 fn hash_chunk_sql(table: &str, key: &str, filter: &str, chunks: usize, chunk: usize) -> String {
@@ -731,6 +793,7 @@ fn collapse_statement(
     table: &str,
     key: &str,
     candidates: &str,
+    prune: Option<&str>,
     keep_newest_tombstone: bool,
     timeout_secs: u64,
 ) -> String {
@@ -739,10 +802,13 @@ fn collapse_statement(
     } else {
         " HAVING maxIf(_version, NOT _deleted) = max(_version)"
     };
+    let prune = prune
+        .map(|prune| format!("{prune} AND "))
+        .unwrap_or_default();
     format!(
-        "DELETE FROM {table} WHERE ({key}) IN ({candidates}) \
+        "DELETE FROM {table} WHERE {prune}({key}) IN ({candidates}) \
          AND ({key}, _version) NOT IN (\
-           SELECT {key}, max(_version) FROM {table} WHERE ({key}) IN ({candidates}) \
+           SELECT {key}, max(_version) FROM {table} WHERE {prune}({key}) IN ({candidates}) \
            GROUP BY {key}{having}) \
          SETTINGS lightweight_delete_mode = '{PATCH_DELETE_MODE}', max_execution_time = {timeout_secs}"
     )
@@ -774,14 +840,14 @@ fn code_scopes_sql(
     )
 }
 
-fn code_snapshot_statement(table: &str, scopes: &str, timeout_secs: u64) -> String {
+fn code_snapshot_statement(table: &str, scopes: &str, prune: &str, timeout_secs: u64) -> String {
     format!(
-        "DELETE FROM {table} WHERE ({CODE_SCOPE}) IN (SELECT {CODE_SCOPE} FROM ({scopes})) \
+        "DELETE FROM {table} WHERE {prune} AND ({CODE_SCOPE}) IN (SELECT {CODE_SCOPE} FROM ({scopes})) \
          AND ({CODE_SCOPE}, _version) IN (\
            SELECT e.traversal_path, e.project_id, e.branch, e._version FROM {table} AS e \
            INNER JOIN ({scopes}) AS c \
              ON e.traversal_path = c.traversal_path AND e.project_id = c.project_id AND e.branch = c.branch \
-           WHERE (e.traversal_path, e.project_id, e.branch) IN (SELECT {CODE_SCOPE} FROM ({scopes})) \
+           WHERE e.{prune} AND (e.traversal_path, e.project_id, e.branch) IN (SELECT {CODE_SCOPE} FROM ({scopes})) \
              AND e._version < c.bound) \
          SETTINGS lightweight_delete_mode = '{PATCH_DELETE_MODE}', max_execution_time = {timeout_secs}"
     )
@@ -793,6 +859,7 @@ fn shared_edge_snapshot_statement(
     table: &str,
     checkpoint_table: &str,
     scopes: &str,
+    prune: &str,
     timeout_secs: u64,
 ) -> String {
     let kinds = CodeTableNames::node_kinds_sql_list();
@@ -804,12 +871,12 @@ fn shared_edge_snapshot_statement(
          GROUP BY traversal_path HAVING count() = 1"
     );
     format!(
-        "DELETE FROM {table} WHERE traversal_path IN (SELECT traversal_path FROM ({paths})) \
+        "DELETE FROM {table} WHERE {prune} AND traversal_path IN (SELECT traversal_path FROM ({paths})) \
          AND source_kind IN ({kinds}) \
          AND (traversal_path, _version) IN (\
            SELECT e.traversal_path, e._version FROM {table} AS e \
            INNER JOIN ({paths}) AS c ON e.traversal_path = c.traversal_path \
-           WHERE e.traversal_path IN (SELECT traversal_path FROM ({paths})) \
+           WHERE e.{prune} AND e.traversal_path IN (SELECT traversal_path FROM ({paths})) \
              AND e.source_kind IN ({kinds}) AND e._version < c.bound) \
          SETTINGS lightweight_delete_mode = '{PATCH_DELETE_MODE}', max_execution_time = {timeout_secs}"
     )
@@ -927,9 +994,17 @@ mod tests {
 
     #[test]
     fn incremental_collapse_keeps_the_newest_row_of_each_key() {
-        let sql = collapse_statement("t", "a, b", "SELECT a, b FROM t WHERE _deleted", true, 30);
+        let sql = collapse_statement(
+            "t",
+            "a, b",
+            "SELECT a, b FROM t WHERE _deleted",
+            Some("traversal_path IN ('1/2/')"),
+            true,
+            30,
+        );
         assert!(sql.starts_with(
-            "DELETE FROM t WHERE (a, b) IN (SELECT a, b FROM t WHERE _deleted) AND (a, b, _version) NOT IN ("
+            "DELETE FROM t WHERE traversal_path IN ('1/2/') AND (a, b) IN (SELECT a, b FROM t WHERE _deleted) AND (a, b, _version) NOT IN (\
+             SELECT a, b, max(_version) FROM t WHERE traversal_path IN ('1/2/') AND (a, b) IN ("
         ));
         assert!(sql.contains("GROUP BY a, b) SETTINGS"));
         assert!(sql.ends_with(
@@ -939,7 +1014,15 @@ mod tests {
 
     #[test]
     fn purge_collapse_drops_dead_keys_entirely_and_keeps_ties_alive() {
-        let sql = collapse_statement("t", "a, b", "SELECT a, b FROM t WHERE _deleted", false, 30);
+        let sql = collapse_statement(
+            "t",
+            "a, b",
+            "SELECT a, b FROM t WHERE _deleted",
+            None,
+            false,
+            30,
+        );
+        assert!(sql.starts_with("DELETE FROM t WHERE (a, b) IN ("));
         assert!(
             sql.contains("GROUP BY a, b HAVING maxIf(_version, NOT _deleted) = max(_version))")
         );
@@ -1006,11 +1089,17 @@ mod tests {
     #[test]
     fn code_snapshot_delete_is_bounded_by_each_scope_checkpoint() {
         let scopes = "SELECT traversal_path, project_id, branch, bound FROM cp";
-        let sql = code_snapshot_statement("v1_gl_definition", scopes, 60);
+        let sql = code_snapshot_statement(
+            "v1_gl_definition",
+            scopes,
+            "traversal_path IN ('1/2/', '1/3/')",
+            60,
+        );
         assert!(sql.contains("AND e._version < c.bound"));
         assert!(sql.contains(
-            "WHERE (traversal_path, project_id, branch) IN (SELECT traversal_path, project_id, branch FROM (SELECT traversal_path, project_id, branch, bound FROM cp))"
+            "WHERE traversal_path IN ('1/2/', '1/3/') AND (traversal_path, project_id, branch) IN (SELECT traversal_path, project_id, branch FROM (SELECT traversal_path, project_id, branch, bound FROM cp))"
         ));
+        assert!(sql.contains("WHERE e.traversal_path IN ('1/2/', '1/3/') AND (e.traversal_path"));
     }
 
     #[test]
@@ -1019,8 +1108,13 @@ mod tests {
             "v1_gl_edge",
             "v1_code_indexing_checkpoint",
             "SELECT 1",
+            "traversal_path IN ('1/2/')",
             60,
         );
+        assert!(sql.starts_with(
+            "DELETE FROM v1_gl_edge WHERE traversal_path IN ('1/2/') AND traversal_path IN (SELECT"
+        ));
+        assert!(sql.contains("WHERE e.traversal_path IN ('1/2/') AND e.traversal_path IN (SELECT"));
         assert!(sql.contains("GROUP BY traversal_path HAVING count() = 1"));
         assert!(
             sql.contains("source_kind IN ('Directory', 'File', 'Definition', 'ImportedSymbol')")
