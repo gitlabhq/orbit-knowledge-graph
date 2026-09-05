@@ -28,9 +28,6 @@ const SCOPES_PER_STATEMENT: u64 = 2000;
 const PURGE_SLACK: TimeDelta = TimeDelta::seconds(60);
 /// Part names are `<partition>_<min block>_<max block>_<level>[_<mutation>]`.
 const PART_MAX_BLOCK: &str = "toUInt64OrZero(splitByChar('_', _part)[3])";
-/// Lightweight deletes only prune parts by literal predicates, not by `IN (subquery)` sets, so
-/// every statement names its traversal paths; above this many paths the list is dropped.
-const MAX_PRUNE_PATHS: usize = 2000;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum CodeRole {
@@ -319,29 +316,6 @@ impl TableCleanup {
         Ok(())
     }
 
-    /// Literal traversal paths of a candidate query, or `None` when the table has no path column or
-    /// the list would be too long to inline.
-    async fn prune_paths(
-        &self,
-        table: &ReclaimTable,
-        candidates: &str,
-    ) -> Result<Option<String>, TaskError> {
-        if !table.key.starts_with(PATH_COLUMN) {
-            return Ok(None);
-        }
-        let rows = self
-            .rows(self.graph.query(&format!(
-                "SELECT DISTINCT {PATH_COLUMN} FROM ({candidates}) ORDER BY {PATH_COLUMN} LIMIT {}",
-                MAX_PRUNE_PATHS + 1
-            )))
-            .await?;
-        if rows.is_empty() || rows.len() > MAX_PRUNE_PATHS {
-            return Ok(None);
-        }
-        let paths: Vec<String> = rows.into_iter().map(|row| row[0].clone()).collect();
-        Ok(Some(path_prune_sql(&paths)))
-    }
-
     /// Candidate sets for every tombstoned key matching `filter`, each bounded by
     /// `max_candidates_per_statement`: grouped by traversal path where the sort key lets the
     /// primary key prune, split by key hash otherwise.
@@ -493,27 +467,15 @@ impl TableCleanup {
                 .await?;
             return Ok(total);
         }
-        let candidates = candidates_sql(&table.name, &table.key, cursor.previous_block, None);
-        let total = self.count(&candidates).await?;
+        let (total, sets) = self
+            .candidate_sets(table, &new_rows_filter(cursor.previous_block))
+            .await?;
         if total > 0 {
-            let prune = self.prune_paths(table, &candidates).await?;
-            let chunks = total.div_ceil(self.config.max_candidates_per_statement) as usize;
-            let sets: Vec<CandidateSet> = (0..chunks)
-                .map(|chunk| CandidateSet {
-                    sql: candidates_sql(
-                        &table.name,
-                        &table.key,
-                        cursor.previous_block,
-                        (chunks > 1).then_some((chunks, chunk)),
-                    ),
-                    prune: prune.clone(),
-                })
-                .collect();
             self.run_collapse(table, &sets, true).await?;
             info!(
                 table = table.name,
                 candidates = total,
-                chunks,
+                statements = sets.len(),
                 "collapsed tombstoned keys"
             );
         }
@@ -743,19 +705,9 @@ fn foreign_block_numbers_sql(table: &str) -> String {
     )
 }
 
-fn candidates_sql(
-    table: &str,
-    key: &str,
-    after_block: u64,
-    chunk: Option<(usize, usize)>,
-) -> String {
-    let chunk = chunk
-        .map(|(chunks, index)| format!(" AND cityHash64({key}) % {chunks} = {index}"))
-        .unwrap_or_default();
-    format!(
-        "SELECT {key} FROM {table} WHERE {PART_MAX_BLOCK} > {after_block} \
-         AND _block_number > {after_block} AND _deleted{chunk}"
-    )
+/// Rows written since the cursor: only parts whose name ends above it are read at all.
+fn new_rows_filter(after_block: u64) -> String {
+    format!(" AND {PART_MAX_BLOCK} > {after_block} AND _block_number > {after_block}")
 }
 
 fn path_list_sql(paths: &[String]) -> String {
@@ -968,17 +920,22 @@ mod tests {
 
     #[test]
     fn candidates_are_limited_to_parts_and_rows_above_the_cursor() {
-        let sql = candidates_sql("v1_gl_edge", "traversal_path, id", 42, None);
+        let sql = path_group_sql(
+            "v1_gl_edge",
+            "traversal_path, id",
+            &["1/2/".to_string()],
+            &new_rows_filter(42),
+        );
         assert_eq!(
             sql,
-            "SELECT traversal_path, id FROM v1_gl_edge WHERE toUInt64OrZero(splitByChar('_', _part)[3]) > 42 AND _block_number > 42 AND _deleted"
+            "SELECT traversal_path, id FROM v1_gl_edge WHERE traversal_path IN ('1/2/') AND _deleted AND toUInt64OrZero(splitByChar('_', _part)[3]) > 42 AND _block_number > 42"
         );
     }
 
     #[test]
     fn candidate_chunks_partition_by_key_hash() {
-        let sql = candidates_sql("t", "k", 0, Some((4, 3)));
-        assert!(sql.ends_with("AND _deleted AND cityHash64(k) % 4 = 3"));
+        let sql = hash_chunk_sql("t", "k", &format!("_deleted{}", new_rows_filter(0)), 4, 3);
+        assert!(sql.ends_with("AND _block_number > 0 AND cityHash64(k) % 4 = 3"));
     }
 
     #[test]
