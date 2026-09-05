@@ -8309,6 +8309,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]
@@ -8378,6 +8379,7 @@ dependencies = [
  "nats-client",
  "ontology",
  "opentelemetry",
+ "opentelemetry_sdk",
  "orbit-analytics",
  "orbit-billing",
  "orbit-observability",
@@ -8403,6 +8405,7 @@ dependencies = [
  "toon-format",
  "tower",
  "tracing",
+ "tracing-opentelemetry",
  "tracing-subscriber",
  "uuid",
 ]

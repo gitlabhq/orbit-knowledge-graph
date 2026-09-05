@@ -107,7 +107,9 @@ tokio-stream = "0.1.18"
 toml = "1.0.0"
 toon-format = { version = "0.5.0", default-features = false }
 opentelemetry = { version = "0.32", default-features = false, features = ["metrics"] }
+opentelemetry_sdk = { version = "0.32", default-features = false, features = ["rt-tokio"] }
 tracing = "0.1.44"
+tracing-opentelemetry = "0.33"
 # Build-time fetch over plain HTTP; integrity comes from pinned checksums.
 ureq = { version = "3", default-features = false }
 uuid = { version = "1.19.0", features = ["v4", "serde"] }

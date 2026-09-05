@@ -7,6 +7,7 @@ use axum::{Json, Router, routing::get};
 use labkit::http::{CorrelationLayer, GitlabTraceLayer, HttpMetricsLayer};
 use serde::Serialize;
 
+use super::trace_context_layer::InboundTraceContextLayer;
 use crate::schema_watcher::{SchemaState, SchemaWatcher};
 
 #[derive(Serialize)]
@@ -69,6 +70,7 @@ pub fn create_router(schema_watcher: Arc<SchemaWatcher>) -> Router {
         .route("/ready", get(ready))
         .with_state(schema_watcher)
         .layer(HttpMetricsLayer::new())
+        .layer(InboundTraceContextLayer)
         .layer(GitlabTraceLayer::new())
         .layer(CorrelationLayer::new())
 }
