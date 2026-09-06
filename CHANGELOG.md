@@ -1,3 +1,28 @@
+## [0.116.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.115.0...v0.116.0) (2026-09-06)
+
+### Features
+
+* **orbit-local:** scope and rank grep by path, kind, and connectedness; bulk show ([fc20172](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/fc2017285c795df331c1b31a894222668d4c9bad)) by Aaron Algutifan
+* **telemetry:** detect coding agent in CLI analytics ([7a6ab87](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/7a6ab87a18f3c484cd92d5cd6a379f62ccf3dec6)) by Jean-Gabriel Doyon
+
+### Fixes
+
+* **indexer:** label SDLC watermark lag per entity ([14aca30](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/14aca30976436d028df1ffbf2803eef63d78493f)) by Bohdan Parkhomchuk
+* **indexer:** promote schema migration when zero namespaces are enabled ([3c5199b](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/3c5199b8fcee574b5b107941c552f994dd70f7d3)) by Jean-Gabriel Doyon
+
+### Performance
+
+* **query-engine:** memchr fast paths for GOON encoder ([1fcdbaf](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/1fcdbaf76e78d2b8b15a2c8085fab7003b9ed330)) by Dmitry Gruzd
+
+### Other
+
+* **adr:** propose Gitaly proxy in Workhorse (ADR 018) ([83a58f3](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/83a58f373ad30c9027427df6d9e8cfdb3a42a321)) by Dmitry Gruzd
+* **ci:** skip community contributions in stale-MR sweeper ([de54573](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/de545736033648d0febb1e98b1f4b96aacfdce9a)) by Jean-Gabriel Doyon
+* **compiler:** remove partition-pruning query pass ([85e528b](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/85e528bc13edd502a02de4360c22d965c3d7ed90)) by Michael Usachenko
+* disable orbit telemetry in CI ([81ec6a1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/81ec6a15e7f104caa9f24b17c174333c0078e162)) by Jean-Gabriel Doyon
+* **e2e:** auto-bump siphon, gitlab, and gkg pins to current ([7ecb0a1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/7ecb0a11128db051c610a4f329486626afc6c571)) by Orbit automation bot
+* **search:** simplify grep ranking and remove PPR expansion ([6ef37d0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/6ef37d0704ca72a3337b562ad4c0dd46a8edc3dd)) by Aaron Algutifan
+
 ## [0.115.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.114.0...v0.115.0) (2026-09-04)
 
 ### Features
