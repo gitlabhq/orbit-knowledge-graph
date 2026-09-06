@@ -91,6 +91,7 @@ impl RedactionService {
                 resource_type: r.resource_type.clone(),
                 resource_ids: r.ids.clone(),
                 abilities: vec![r.ability.clone()],
+                permission: String::new(),
             })
             .collect();
 
@@ -104,6 +105,7 @@ impl RedactionService {
             content: Some(redaction_exchange::Content::Required(RedactionRequired {
                 result_id: result_id.clone(),
                 resources: proto_resources,
+                check_boundaries: false,
             })),
         };
 
