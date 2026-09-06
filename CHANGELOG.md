@@ -1,3 +1,9 @@
+## [0.117.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.116.0...v0.117.0) (2026-09-06)
+
+### Features
+
+* **indexer:** remove dead graph rows with patch-part deletes in the table cleanup task ([e907041](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/e907041aea030a83c70fd1eb384cc5f6b0b87f3e)) by Bohdan Parkhomchuk
+
 ## [0.116.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.115.0...v0.116.0) (2026-09-06)
 
 ### Features
