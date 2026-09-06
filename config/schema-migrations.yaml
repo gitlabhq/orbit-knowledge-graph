@@ -16,6 +16,11 @@
 # note-gated `scope: none` entry, the certified output-neutral escape hatch. A
 # version with no entry is treated as "*", which also makes pruning old entries safe.
 migrations:
+- version: 94
+  scope: none
+  note: >-
+    Exclude runtime authorization metadata from storage fingerprints; no graph data
+    or DDL changes.
 - version: 93
   scope: "*"
   note: >-

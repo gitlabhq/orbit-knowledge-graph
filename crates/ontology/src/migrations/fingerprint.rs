@@ -87,7 +87,7 @@ pub fn embedded_sources() -> BTreeMap<String, String> {
 fn stable_yaml_hash(content: &str) -> String {
     match orbit_utils::yaml::from_str::<serde_json::Value>(content) {
         Ok(mut value) => {
-            remove_runtime_extract_fields(&mut value);
+            remove_runtime_fields(&mut value);
             sort_json_keys(&mut value);
             match serde_json::to_string(&value) {
                 Ok(rendered) => sha256_hex(&rendered),
@@ -163,11 +163,13 @@ fn get_diff_keys_between(
     changed
 }
 
-/// Strip runtime-only pipeline knobs (`extract.partition_count`) so changing them is version-neutral: they affect neither the graph schema nor the extracted data.
-fn remove_runtime_extract_fields(value: &mut serde_json::Value) {
+fn remove_runtime_fields(value: &mut serde_json::Value) {
     let serde_json::Value::Object(root) = value else {
         return;
     };
+    if root.contains_key("node_type") {
+        root.remove("redaction");
+    }
     let Some(serde_json::Value::Array(pipelines)) = root.get_mut("pipelines") else {
         return;
     };
@@ -234,6 +236,22 @@ mod tests {
             "pipelines:\n  - name: Job\n    extract:\n      tables: [t]\n      order_by: [id]\n";
         let with = "pipelines:\n  - name: Job\n    extract:\n      tables: [t]\n      order_by: [id]\n      partition_count: 5\n";
         assert_eq!(stable_yaml_hash(without), stable_yaml_hash(with));
+    }
+
+    #[test]
+    fn node_redaction_changes_are_storage_neutral() {
+        let original =
+            "node_type: Project\ndestination_table: gl_project\nredaction: {ability: read_code}\n";
+        let changed = "node_type: Project\ndestination_table: gl_project\nredaction: {ability: read_project, permission: read_project, token_boundary: namespace}\n";
+        assert_eq!(stable_yaml_hash(original), stable_yaml_hash(changed));
+        assert_ne!(
+            stable_yaml_hash(original),
+            stable_yaml_hash(&changed.replace("gl_project", "gl_other"))
+        );
+        assert_ne!(
+            stable_yaml_hash("redaction: {a: 1}"),
+            stable_yaml_hash("redaction: {a: 2}")
+        );
     }
 
     #[test]
