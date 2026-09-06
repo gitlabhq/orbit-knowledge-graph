@@ -161,6 +161,13 @@ impl GraphSchema {
             .collect()
     }
 
+    pub fn prefixed_table_names(&self, prefix: &str) -> Vec<String> {
+        self.tables
+            .iter()
+            .map(|table| format!("{prefix}{}", table.name))
+            .collect()
+    }
+
     pub fn entity_base_names(&self) -> std::collections::HashSet<String> {
         let mut names = std::collections::HashSet::new();
         for table in &self.tables {

@@ -9,7 +9,7 @@ use tracing::{info, warn};
 use super::metrics::MigrationMetrics;
 use crate::campaign::{CampaignState, campaign_id_for_version};
 use crate::clickhouse::ArrowClickHouseClient;
-use crate::locking::{LockError, LockService};
+use crate::locking::{LockError, LockGuard, LockService};
 use orbit_migrations::ledger::MigrationLedger;
 use orbit_migrations::version::{
     SCHEMA_VERSION, SchemaVersionError, mark_version_active, mark_version_migrating,
@@ -67,70 +67,63 @@ pub async fn run_if_needed(
             );
             metrics.record("complete", "skipped");
         }
-        Some(active_version) if active_version > *SCHEMA_VERSION => {
-            warn!(
-                active_version,
-                embedded_version = *SCHEMA_VERSION,
-                "active version newer than binary — rolling back"
-            );
-            run_rollback(
-                graph,
-                credentials,
-                lock_service,
-                ontology,
-                &schema,
-                metrics,
-                campaign,
-                active_version,
-            )
-            .await?;
-        }
         Some(active_version) => {
-            info!(
-                active_version,
-                target_version = *SCHEMA_VERSION,
-                "version mismatch — starting migration"
-            );
-            run_forward_migration(
-                graph,
-                credentials,
-                lock_service,
-                ontology,
-                &schema,
-                metrics,
-                campaign,
-                active_version,
-            )
-            .await?;
+            let guard = acquire_migration_lock(lock_service, metrics).await?;
+            let result = if active_version > *SCHEMA_VERSION {
+                warn!(
+                    active_version,
+                    embedded_version = *SCHEMA_VERSION,
+                    "active version newer than binary — rolling back"
+                );
+                run_rollback(
+                    graph,
+                    credentials,
+                    ontology,
+                    &schema,
+                    metrics,
+                    campaign,
+                    active_version,
+                )
+                .await
+            } else {
+                info!(
+                    active_version,
+                    target_version = *SCHEMA_VERSION,
+                    "version mismatch — starting migration"
+                );
+                run_forward_migration(
+                    graph,
+                    credentials,
+                    ontology,
+                    &schema,
+                    metrics,
+                    campaign,
+                    active_version,
+                )
+                .await
+            };
+            let _ = guard.release().await;
+            result?;
         }
     }
 
     Ok(())
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "migration orchestration wires all collaborators explicitly; grouping into a struct would just move the arity"
-)]
 async fn run_forward_migration(
     graph: &ArrowClickHouseClient,
     credentials: &DictionaryCredentials,
-    lock_service: &Arc<dyn LockService>,
     ontology: &ontology::Ontology,
     schema: &GraphSchema,
     metrics: &MigrationMetrics,
     campaign: &CampaignState,
     active_version: u32,
 ) -> Result<(), DispatcherMigrationError> {
-    acquire_migration_lock(lock_service, metrics).await?;
-
-    let current_active = read_active_version(graph).await?;
-    if current_active == Some(*SCHEMA_VERSION) {
+    if read_active_version(graph).await? == Some(*SCHEMA_VERSION) {
         info!(
             version = *SCHEMA_VERSION,
             "migration already completed by another pod"
         );
-        let _ = lock_service.release(MIGRATION_LOCK_KEY).await;
         metrics.record("complete", "skipped");
         return Ok(());
     }
@@ -139,7 +132,7 @@ async fn run_forward_migration(
     let requested_scope = ledger.resolve_scope_between(active_version, *SCHEMA_VERSION);
     info!(version = *SCHEMA_VERSION, %requested_scope, "preparing tables for migration");
 
-    let create_result = execute::create_tables_with_selective_cloning(
+    execute::create_tables_with_selective_cloning(
         graph,
         ontology,
         schema,
@@ -148,19 +141,12 @@ async fn run_forward_migration(
         active_version,
         *SCHEMA_VERSION,
     )
-    .await;
-
-    if let Err(ref error) = create_result {
-        warn!(%error, "failed to create new-prefix tables — releasing lock");
-        let _ = lock_service.release(MIGRATION_LOCK_KEY).await;
-        return Ok(create_result?);
-    }
+    .await?;
 
     mark_version_migrating(graph, *SCHEMA_VERSION).await?;
     metrics.record("mark_migrating", "success");
 
     campaign.set(campaign_id_for_version(*SCHEMA_VERSION));
-    let _ = lock_service.release(MIGRATION_LOCK_KEY).await;
     metrics.record("complete", "success");
 
     info!(
@@ -172,50 +158,33 @@ async fn run_forward_migration(
     Ok(())
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "migration orchestration wires all collaborators explicitly; grouping into a struct would just move the arity"
-)]
 async fn run_rollback(
     graph: &ArrowClickHouseClient,
     credentials: &DictionaryCredentials,
-    lock_service: &Arc<dyn LockService>,
     ontology: &ontology::Ontology,
     schema: &GraphSchema,
     metrics: &MigrationMetrics,
     campaign: &CampaignState,
     active_version: u32,
 ) -> Result<(), DispatcherMigrationError> {
-    acquire_migration_lock(lock_service, metrics).await?;
-
-    let current_active = read_active_version(graph).await?;
-    if current_active == Some(*SCHEMA_VERSION) {
+    if read_active_version(graph).await? == Some(*SCHEMA_VERSION) {
         info!(
             version = *SCHEMA_VERSION,
             "rollback already completed by another pod"
         );
-        let _ = lock_service.release(MIGRATION_LOCK_KEY).await;
         metrics.record("complete", "skipped");
         return Ok(());
     }
 
-    let prefix = table_prefix(*SCHEMA_VERSION);
-    let expected_names: Vec<String> = schema
-        .tables
-        .iter()
-        .map(|table| format!("{prefix}{}", table.name))
-        .collect();
+    let expected_names = schema.prefixed_table_names(&table_prefix(*SCHEMA_VERSION));
 
-    let tables_complete = version_tables_complete(graph, *SCHEMA_VERSION, &expected_names).await?;
-
-    if tables_complete {
+    if version_tables_complete(graph, *SCHEMA_VERSION, &expected_names).await? {
         info!(
             active_version,
             target_version = *SCHEMA_VERSION,
             "table set intact — rolling back via re-activation"
         );
         execute::reactivate_version(graph, *SCHEMA_VERSION).await?;
-        let _ = lock_service.release(MIGRATION_LOCK_KEY).await;
         metrics.record("complete", "rollback_reactivated");
         return Ok(());
     }
@@ -230,7 +199,6 @@ async fn run_rollback(
     run_forward_migration(
         graph,
         credentials,
-        lock_service,
         ontology,
         schema,
         metrics,
@@ -243,24 +211,19 @@ async fn run_rollback(
 async fn acquire_migration_lock(
     lock_service: &Arc<dyn LockService>,
     metrics: &MigrationMetrics,
-) -> Result<(), DispatcherMigrationError> {
+) -> Result<LockGuard, DispatcherMigrationError> {
     for attempt in 0..MAX_LOCK_WAIT_ITERATIONS {
-        match lock_service
-            .try_acquire(MIGRATION_LOCK_KEY, MIGRATION_LOCK_TTL)
-            .await?
+        if let Some(guard) =
+            LockGuard::acquire(lock_service.clone(), MIGRATION_LOCK_KEY, MIGRATION_LOCK_TTL).await?
         {
-            true => {
-                info!("acquired schema migration lock");
-                metrics.record("acquire_lock", "success");
-                return Ok(());
-            }
-            false => {
-                if attempt == 0 {
-                    info!("migration lock held by another pod — waiting");
-                }
-                tokio::time::sleep(LOCK_POLL_INTERVAL).await;
-            }
+            info!("acquired schema migration lock");
+            metrics.record("acquire_lock", "success");
+            return Ok(guard);
         }
+        if attempt == 0 {
+            info!("migration lock held by another pod — waiting");
+        }
+        tokio::time::sleep(LOCK_POLL_INTERVAL).await;
     }
 
     let seconds = MAX_LOCK_WAIT_ITERATIONS as u64 * LOCK_POLL_INTERVAL.as_secs();

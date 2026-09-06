@@ -162,11 +162,10 @@ async fn mismatch_creates_all_ontology_tables_and_marks_migrating() {
         created_names.len(),
     );
 
-    for table in &expected_schema.tables {
+    for name in &expected_schema.prefixed_table_names(&table_prefix(*SCHEMA_VERSION)) {
         assert!(
-            created_names.contains(&table.name),
-            "missing table '{}' — created: {created_names:?}",
-            table.name
+            created_names.contains(name),
+            "missing table '{name}' — created: {created_names:?}"
         );
     }
 
@@ -468,11 +467,10 @@ async fn rollback_rebuilds_when_embedded_tables_are_gone() {
         )
         .await;
     let created_names = String::extract_column(&result, 0).unwrap();
-    for table in &expected_schema.tables {
+    for name in &expected_schema.prefixed_table_names(&table_prefix(*SCHEMA_VERSION)) {
         assert!(
-            created_names.contains(&table.name),
-            "rebuild rollback must recreate table '{}' — created: {created_names:?}",
-            table.name
+            created_names.contains(name),
+            "rebuild rollback must recreate table '{name}' — created: {created_names:?}"
         );
     }
 }
@@ -542,11 +540,10 @@ async fn rollback_rebuild_clears_stale_objects_before_recreating() {
         ))
         .await;
     let created_names = String::extract_column(&result, 0).unwrap();
-    for table in &expected_schema.tables {
+    for name in &expected_schema.prefixed_table_names(&prefix) {
         assert!(
-            created_names.contains(&table.name),
-            "rebuild must recreate '{}' — created: {created_names:?}",
-            table.name
+            created_names.contains(name),
+            "rebuild must recreate '{name}' — created: {created_names:?}"
         );
     }
 
