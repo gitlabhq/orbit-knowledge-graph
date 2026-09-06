@@ -189,6 +189,31 @@ graph TD
 
 This is an efficient first pass that reduces the result set, but it does not account for resource-specific permissions like confidential issues. That is why Layer 3 exists.
 
+### Fine-grained personal access tokens
+
+Rails adds a signed Boolean claim when a request uses a fine-grained personal
+access token. The JWT does not contain the access token or its permissions.
+Classic tokens omit this claim and do not run the token prequery.
+
+The ontology maps each graph type to an existing Rails permission and boundary.
+For namespace checks, Orbit reads live Project and Group catalog rows in the
+user's scope. Rails checks each exact leaf namespace ID. Orbit does not expand an
+allowed group path to child paths. Missing, deleted, or malformed catalog data
+stays hidden until Orbit indexes it. These checks do not create grants.
+
+The global User type uses the current user's `:user` boundary. Runner checks use
+each runner's actual owner boundary. SecurityScan is unavailable to fine-grained
+tokens because Rails has no assignable read grant for it.
+
+The compiler combines the user scope and token scope before all node and edge
+reads. This includes counts, hidden inputs, edge endpoints, and nested scans.
+Final redaction requires the GitLab ability and token permission for each item.
+
+Graph status uses each graph type's permission. Project counts use
+`read_project`; both code coverage fields use `read_code`. Exact project status
+keeps stored progress only for an allowed feature. Group status omits combined
+stored progress because Orbit cannot filter that value by project.
+
 ### Additional Query Safeguards
 
 **Component**: Orbit Query Engine (`gkg-webserver`)
@@ -213,7 +238,11 @@ In addition to authorization filtering, the query engine implements further safe
 
 ## Layer 3: Final Redaction Layer via Rails Authorization
 
-The final and most authoritative security layer is executed by the Orbit service calling back to GitLab Rails for granular permission checks. After the query engine returns pre-filtered results (from Layers 1 and 2), the Orbit service performs a final authorization pass before returning data to the client.
+Orbit calls GitLab Rails for final resource checks. This is the last and most
+authoritative security layer. The query engine first applies Layers 1 and 2.
+Orbit then runs a final authorization pass before it returns data. For a
+fine-grained token, Rails requires both the GitLab ability and the existing
+token permission.
 
 ### Why This Layer Is Necessary
 
@@ -253,10 +282,10 @@ The redaction exchange occurs inside a bidirectional gRPC stream between Workhor
 1. Rails authenticates the user, builds a JWT, and returns a SendData header to Workhorse.
 2. Workhorse opens a bidirectional `ExecuteQuery` gRPC stream to GKG.
 3. GKG runs the query on ClickHouse and identifies redactable columns from the ontology.
-4. GKG sends a `RedactionExchange.required` message back through the stream with `ResourceToAuthorize[]` entries, grouped by entity type and ability (e.g., all issues that need `read_issue` checks).
-5. Workhorse calls `POST /api/v4/internal/orbit/redaction` with the resource IDs and the user's forwarded auth headers. Rails calls `Ability.allowed?` for each resource and returns the authorization map.
+4. GKG sends a `RedactionExchange.required` message back through the stream with `ResourceToAuthorize[]` entries, grouped by entity type, ability, and token permission (e.g., all issues that need `read_issue` checks).
+5. Workhorse calls `POST /api/v4/internal/orbit/redaction` with the resource IDs and the user's forwarded auth headers. Rails checks the GitLab ability and, for a fine-grained token, its current boundary permission. Rails then returns the authorization map.
 6. Workhorse sends the `RedactionResponse` back on the gRPC stream.
-7. GKG applies those authorizations, marks unauthorized rows, and drops them from the result set.
+7. GKG matches each authorization by resource type and ability. It marks unauthorized rows and drops them from the result set.
 8. GKG returns the redacted results to Workhorse as an `ExecuteQueryResult`.
 
 **Code Review Requirements**:
