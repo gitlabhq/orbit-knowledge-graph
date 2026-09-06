@@ -85,6 +85,16 @@ to the changed set by a dual `IN` on the edge PK; the swept set is ontology-deri
 one cheap global sweep, off the insert hot path. See
 `docs/design-documents/indexing/sdlc_indexing.md` ("Stale FK-edge reconciliation").
 
+### Table cleanup
+
+`orchestrator::scheduled::TableCleanup` is a DispatchIndexing-mode `ScheduledTask` that removes dead
+rows from the versioned graph tables with patch-part lightweight deletes: rows hidden behind tombstones,
+tombstones older than the retention window, and code rows older than their project's checkpoint. It
+keeps a block-number cursor per table in the `checkpoint` table, refuses tables whose parts do not carry
+a unique `(_block_number, _block_offset)` identity, and periodically issues `APPLY PATCHES`. SQL lives in
+`table_cleanup/sql.rs`, orchestration in `table_cleanup/mod.rs`. See
+`docs/design-documents/indexing/sdlc_indexing.md` ("Table cleanup").
+
 ### Entry point
 
 The `run()` function in `lib.rs` wires everything together: waits for the schema version to be
