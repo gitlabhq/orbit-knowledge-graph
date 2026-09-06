@@ -173,7 +173,7 @@ pub async fn drop_versioned_refreshable_views(
     for view in ontology
         .refreshable_materialized_views()
         .iter()
-        .filter(|v| v.versioned)
+        .filter(|view| view.versioned)
     {
         run_ddl(
             graph,

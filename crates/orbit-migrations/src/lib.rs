@@ -2,7 +2,7 @@ pub mod campaign;
 pub mod completion;
 pub mod execute;
 pub mod fingerprint;
-pub mod gc;
+pub mod garbage_collection;
 pub mod ledger;
 pub mod nats;
 pub mod schema;

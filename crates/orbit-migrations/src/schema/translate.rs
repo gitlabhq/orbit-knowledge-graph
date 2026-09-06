@@ -14,7 +14,11 @@ use super::types::{
 pub fn build_all_tables(ontology: &Ontology) -> Vec<Table> {
     let mut tables = Vec::new();
 
-    for auxiliary_table in ontology.auxiliary_tables().iter().filter(|t| t.versioned) {
+    for auxiliary_table in ontology
+        .auxiliary_tables()
+        .iter()
+        .filter(|table| table.versioned)
+    {
         tables.push(table_from_auxiliary(auxiliary_table));
     }
     for node in ontology.nodes() {
@@ -110,7 +114,11 @@ pub fn build_unversioned_definitions(
 ) -> Vec<UnversionedDefinition> {
     let mut definitions = Vec::new();
 
-    for auxiliary_table in ontology.auxiliary_tables().iter().filter(|t| !t.versioned) {
+    for auxiliary_table in ontology
+        .auxiliary_tables()
+        .iter()
+        .filter(|table| !table.versioned)
+    {
         let table = table_from_auxiliary(auxiliary_table);
         definitions.push(UnversionedDefinition {
             entity_type: "TABLE".into(),
@@ -122,7 +130,7 @@ pub fn build_unversioned_definitions(
     for definition in ontology
         .materialized_views()
         .iter()
-        .filter(|d| !d.versioned)
+        .filter(|definition| !definition.versioned)
     {
         let view = view_from_ontology(definition).with_schema_version_prefix("", all_table_names);
         definitions.push(UnversionedDefinition {

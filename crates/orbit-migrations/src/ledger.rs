@@ -60,7 +60,8 @@ impl MigrationEntry {
 
 impl MigrationLedger {
     pub fn parse(content: &str) -> Result<Self, String> {
-        orbit_utils::yaml::from_str(content).map_err(|e| format!("parsing migration ledger: {e}"))
+        orbit_utils::yaml::from_str(content)
+            .map_err(|error| format!("parsing migration ledger: {error}"))
     }
 
     pub fn load_embedded() -> Result<Self, String> {
@@ -111,18 +112,18 @@ impl MigrationLedger {
             return Err("migration ledger has no entries".into());
         }
 
-        let mut prev: Option<u32> = None;
+        let mut previous_version: Option<u32> = None;
         for entry in &self.migrations {
-            if let Some(prev) = prev
-                && entry.version >= prev
+            if let Some(previous) = previous_version
+                && entry.version >= previous
             {
                 return Err(format!(
                     "ledger versions must strictly decrease (newest first): \
-                     {prev} is followed by {}",
+                     {previous} is followed by {}",
                     entry.version
                 ));
             }
-            prev = Some(entry.version);
+            previous_version = Some(entry.version);
 
             if !entry.entities.is_empty() && entry.scope != LedgerScope::Sdlc {
                 return Err(format!(

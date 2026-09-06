@@ -7,7 +7,7 @@ use orbit_migrations::schema::{DictionaryCredentials, GraphSchema};
 
 fn load_ontology(path: Option<&PathBuf>) -> Result<Ontology> {
     match path {
-        Some(p) => Ontology::load_from_dir(p).context("failed to load ontology"),
+        Some(path) => Ontology::load_from_dir(path).context("failed to load ontology"),
         None => Ontology::load_embedded().context("failed to load embedded ontology"),
     }
 }
@@ -40,8 +40,12 @@ pub fn run_remote(
         generated.push(format!("{};\n", prefixed.to_create_sql(&credentials)));
     }
 
-    let all_table_names: Vec<String> = schema.tables.iter().map(|t| t.name.clone()).collect();
-    for view in schema.views.iter().filter(|v| v.versioned) {
+    let all_table_names: Vec<String> = schema
+        .tables
+        .iter()
+        .map(|table| table.name.clone())
+        .collect();
+    for view in schema.views.iter().filter(|view| view.versioned) {
         let prefixed = view
             .clone()
             .with_schema_version_prefix(&prefix, &all_table_names);
@@ -101,10 +105,10 @@ CREATE OR REPLACE MACRO fts_doc(txt) AS
          ELSE txt || ' ' || camel_split(txt) END;";
 
 pub fn run_local(ontology_path: Option<PathBuf>) -> Result<()> {
-    let ont = load_ontology(ontology_path.as_ref())?;
+    let ontology = load_ontology(ontology_path.as_ref())?;
     print!(
         "{}",
-        query_engine::compiler::generate_local_ddl(&ont, MANIFEST_DDL)
+        query_engine::compiler::generate_local_ddl(&ontology, MANIFEST_DDL)
     );
     Ok(())
 }

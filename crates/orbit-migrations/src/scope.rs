@@ -133,8 +133,8 @@ pub fn widen_scope_for_shared_table_writers(
         }
 
         let writers = entities_writing_to_table(ontology, &table);
-        let scope_writes_to_table = writers.iter().any(|w| invalidated.contains(w));
-        let has_writer_outside_scope = writers.iter().any(|w| !invalidated.contains(w));
+        let scope_writes_to_table = writers.iter().any(|writer| invalidated.contains(writer));
+        let has_writer_outside_scope = writers.iter().any(|writer| !invalidated.contains(writer));
 
         if table == ontology.edge_table() && scope_writes_to_table {
             return MigrationScope::Full;
@@ -172,7 +172,7 @@ pub fn find_invalidated_pipelines(
     for entity in &invalidated {
         if !descriptors
             .iter()
-            .any(|d| d.reindex_targets.contains(entity))
+            .any(|descriptor| descriptor.reindex_targets.contains(entity))
         {
             tracing::warn!(
                 entity = %entity,
@@ -212,9 +212,9 @@ fn invalidated_entities(ontology: &Ontology, scope: &MigrationScope) -> BTreeSet
 fn versioned_table_names(ontology: &Ontology) -> Vec<String> {
     let mut names = Vec::new();
 
-    for aux in ontology.auxiliary_tables() {
-        if aux.versioned {
-            names.push(aux.name.clone());
+    for auxiliary_table in ontology.auxiliary_tables() {
+        if auxiliary_table.versioned {
+            names.push(auxiliary_table.name.clone());
         }
     }
     for node in ontology.nodes() {
@@ -245,7 +245,7 @@ fn migration_action_for_table(
     }
 
     let writers = entities_writing_to_table(ontology, table);
-    if !writers.is_empty() && writers.iter().all(|w| invalidated.contains(w)) {
+    if !writers.is_empty() && writers.iter().all(|writer| invalidated.contains(writer)) {
         TableMigrationAction::RebuildEmpty
     } else {
         TableMigrationAction::CloneFromActive
@@ -284,7 +284,7 @@ fn emits_edge_to_table(ontology: &Ontology, entity: &str, table: &str) -> bool {
 fn is_code_domain_table(ontology: &Ontology, table: &str) -> bool {
     ontology
         .nodes()
-        .any(|n| n.pipelines.is_empty() && n.destination_table == table)
+        .any(|node| node.pipelines.is_empty() && node.destination_table == table)
         || table == "gl_code_edge"
 }
 
@@ -436,7 +436,7 @@ mod tests {
             .filter(|entity| {
                 !descriptors
                     .iter()
-                    .any(|d| d.reindex_targets.contains(entity))
+                    .any(|descriptor| descriptor.reindex_targets.contains(entity))
             })
             .collect();
         assert_eq!(orphans, BTreeSet::new());

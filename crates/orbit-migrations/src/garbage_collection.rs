@@ -25,7 +25,7 @@ WHERE database = {database:String} \
       SELECT version FROM gkg_schema_version FINAL WHERE status = 'migrating') \
   AND (SELECT count() FROM gkg_schema_version FINAL WHERE status = 'active') > 0";
 
-pub struct GcResult {
+pub struct GarbageCollectionResult {
     pub dropped_versions: Vec<u32>,
     pub dropped_entity_count: usize,
 }
@@ -34,8 +34,8 @@ pub async fn collect_dead_versions(
     graph: &ArrowClickHouseClient,
     schema: &GraphSchema,
     max_retained_versions: u32,
-    gc_preserve_patterns: &[String],
-) -> Result<GcResult, MigrationError> {
+    preserve_pattern_strings: &[String],
+) -> Result<GarbageCollectionResult, MigrationError> {
     let retained_count = max_retained_versions.saturating_sub(1);
 
     let batches = graph
@@ -50,7 +50,7 @@ pub async fn collect_dead_versions(
         })?;
 
     let known_names = ontology_known_entity_names(schema);
-    let preserve_patterns = compile_preserve_patterns(gc_preserve_patterns);
+    let preserve_patterns = compile_preserve_patterns(preserve_pattern_strings);
 
     let mut drops: Vec<(u32, String, &str)> = Vec::new();
     for batch in &batches {
@@ -116,7 +116,7 @@ pub async fn collect_dead_versions(
         dropped_versions.push(*version);
     }
 
-    Ok(GcResult {
+    Ok(GarbageCollectionResult {
         dropped_versions,
         dropped_entity_count,
     })
