@@ -20,6 +20,49 @@ use crate::redaction::RedactionService;
 
 const BATCH_SIZE: usize = 1000;
 
+pub struct TokenCandidates {
+    pub entities: HashSet<String>,
+    pub resource_ids: HashMap<String, Vec<i64>>,
+}
+
+pub fn query_candidates(input: &Input, ontology: &Ontology) -> TokenCandidates {
+    let entities = query_entities(input, ontology);
+    let mut resource_ids = HashMap::new();
+    if input.path.is_none()
+        && input.neighbors.is_none()
+        && input
+            .relationships
+            .iter()
+            .all(|relationship| relationship.hops.max == 1)
+        && input.nodes.iter().all(|node| node.entity.is_some())
+    {
+        for entity in &entities {
+            if !ontology
+                .get_redaction_config(entity)
+                .is_some_and(|auth| auth.token_boundary == TokenBoundary::Resource)
+            {
+                continue;
+            }
+            let ids = input
+                .nodes
+                .iter()
+                .filter(|node| node.entity.as_ref() == Some(entity))
+                .map(|node| (!node.node_ids.is_empty()).then_some(node.node_ids.as_slice()))
+                .collect::<Option<Vec<_>>>();
+            if let Some(ids) = ids {
+                let mut ids: Vec<i64> = ids.into_iter().flatten().copied().collect();
+                ids.sort_unstable();
+                ids.dedup();
+                resource_ids.insert(entity.clone(), ids);
+            }
+        }
+    }
+    TokenCandidates {
+        entities,
+        resource_ids,
+    }
+}
+
 pub fn query_entities(input: &Input, ontology: &Ontology) -> HashSet<String> {
     use query_engine::compiler::input::Direction;
     let entity_for = |alias: &str| {
@@ -176,7 +219,7 @@ pub async fn authorize(
     security: &mut SecurityContext,
     ontology: &Ontology,
     client: &Arc<ArrowClickHouseClient>,
-    entities: &HashSet<String>,
+    candidates: &TokenCandidates,
     tx: &mpsc::Sender<Result<ExecuteQueryMessage, Status>>,
     stream: &mut Streaming<ExecuteQueryMessage>,
 ) -> Result<HashSet<TraversalPath>, Status> {
@@ -186,7 +229,7 @@ pub async fn authorize(
     let mut project_paths = HashSet::new();
     let mut scoped: BTreeMap<String, Vec<String>> = BTreeMap::new();
     let mut scopes = HashMap::new();
-    for entity in entities {
+    for entity in &candidates.entities {
         let Some(node) = ontology.get_node(entity) else {
             continue;
         };
@@ -219,12 +262,13 @@ pub async fn authorize(
                 );
             }
             TokenBoundary::Resource if node.global => {
-                let sql = format!(
-                    "SELECT id FROM {} FINAL WHERE _deleted = false",
-                    node.destination_table
-                );
-                let mut batches = client
-                    .query(&sql)
+                let ids = candidates.resource_ids.get(entity);
+                let sql = resource_sql(&node.destination_table, ids.is_some());
+                let mut query = client.query(&sql);
+                if let Some(ids) = ids {
+                    query = query.param("ids", ids.clone());
+                }
+                let mut batches = query
                     .with_setting("query_id", correlation::query_id("token-resources"))
                     .with_setting(
                         "log_comment",
@@ -361,6 +405,15 @@ pub async fn authorize(
     Ok(project_paths)
 }
 
+fn resource_sql(table: &str, pinned: bool) -> String {
+    let filter = if pinned {
+        " AND id IN {ids:Array(Int64)}"
+    } else {
+        ""
+    };
+    format!("SELECT id FROM {table} FINAL WHERE _deleted = false{filter}")
+}
+
 fn catalog_sql(tables: &[&str]) -> String {
     let arms = tables.iter().enumerate().map(|(index, table)| format!(
         "SELECT traversal_path, {} AS is_project FROM {table} FINAL WHERE _deleted = false AND arrayExists(p -> startsWith(traversal_path, p), {{paths:Array(String)}})", if index == 1 {"true"} else {"false"}
@@ -409,6 +462,33 @@ fn database_error(error: clickhouse_client::ClickHouseError) -> Status {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pinned_runner_checks_only_requested_ids() {
+        let ontology = Ontology::load_embedded().unwrap();
+        let mut input = query_engine::compiler::validate_normalize(
+            r#"{"query_type":"traversal","nodes":[{"id":"r","entity":"Runner","node_ids":[42]}]}"#,
+            &ontology,
+        )
+        .unwrap();
+        let candidates = query_candidates(&input, &ontology);
+        assert_eq!(candidates.resource_ids.get("Runner"), Some(&vec![42]));
+        assert!(resource_sql("gl_runner", true).contains("id IN {ids:Array(Int64)}"));
+        let mut other_runner = input.nodes[0].clone();
+        other_runner.id = "other".into();
+        other_runner.node_ids = vec![43, 42];
+        input.nodes.push(other_runner);
+        assert_eq!(
+            query_candidates(&input, &ontology)
+                .resource_ids
+                .get("Runner"),
+            Some(&vec![42, 43])
+        );
+        input.nodes[1].node_ids.clear();
+        assert!(query_candidates(&input, &ontology).resource_ids.is_empty());
+        let input = query_engine::compiler::validate_normalize(r#"{"query_type":"neighbors","nodes":[{"id":"r","entity":"Runner","node_ids":[42]}],"neighbors":{"direction":"both"}}"#, &ontology).unwrap();
+        assert!(query_candidates(&input, &ontology).resource_ids.is_empty());
+    }
 
     #[test]
     fn group_neighbors_exclude_unrelated_code_components() {

@@ -79,7 +79,10 @@ impl GraphStatusService {
             &mut security,
             &self.ontology,
             &self.client,
-            &entities,
+            &crate::token_authorization::TokenCandidates {
+                entities,
+                resource_ids: HashMap::new(),
+            },
             tx,
             stream,
         )

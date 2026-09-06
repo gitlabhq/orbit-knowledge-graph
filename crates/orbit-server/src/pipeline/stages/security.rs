@@ -56,7 +56,7 @@ impl PipelineStage for TokenAuthorizationStage {
         }
         let input = query_engine::compiler::validate_normalize(&ctx.query_json, &ctx.ontology)
             .map_err(|e| PipelineError::Security(e.to_string()))?;
-        let entities = crate::token_authorization::query_entities(&input, &ctx.ontology);
+        let candidates = crate::token_authorization::query_candidates(&input, &ctx.ontology);
         let client = ctx
             .server_extensions
             .get::<Arc<ArrowClickHouseClient>>()
@@ -81,7 +81,7 @@ impl PipelineStage for TokenAuthorizationStage {
             security,
             &ctx.ontology,
             &client,
-            &entities,
+            &candidates,
             &tx,
             stream,
         )
