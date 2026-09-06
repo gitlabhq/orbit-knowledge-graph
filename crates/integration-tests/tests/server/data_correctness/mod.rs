@@ -7,12 +7,27 @@ mod pagination;
 mod path_finding;
 mod search;
 mod security;
+mod token_permissions;
 mod traversal;
 mod traversal_scoping;
 mod work_items;
 
 use helpers::{GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL, TestContext, seed};
 use integration_testkit::{run_subtests, run_subtests_shared};
+
+#[tokio::test]
+async fn token_permissions() {
+    let ctx = TestContext::new(&[SIPHON_SCHEMA_SQL, *GRAPH_SCHEMA_SQL]).await;
+    seed(&ctx).await;
+    run_subtests_shared!(
+        &ctx,
+        token_permissions::exact_leaf_and_empty_grants,
+        token_permissions::aggregate_filters_unreturned_input,
+        token_permissions::dynamic_neighbors_filter_each_endpoint,
+        token_permissions::path_requires_intermediate_permission,
+        token_permissions::denied_page_omits_cursor,
+    );
+}
 
 #[tokio::test]
 async fn data_correctness() {
