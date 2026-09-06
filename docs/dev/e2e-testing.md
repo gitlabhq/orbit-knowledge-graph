@@ -61,6 +61,7 @@ In CI the `e2e` job runs automatically on `main` and manually on MRs.
 | `11_security_graph.robot` | Vulnerability node plus IN_PROJECT/AUTHORED/OCCURRENCE_OF edges |
 | `12_membership_graph.robot` | MEMBER_OF (User→Group) and CREATOR (User→Project) edges |
 | `13_cross_namespace_traversal.robot` | Scoped-query traversal-path pruning must not drop cross-namespace related entities |
+| `14_fine_grained_tokens.robot` | Token creation, gateway access, selected projects and groups, feature reads, private code, counts, cursors, graph status, and MCP parity |
 
 ## Parallel execution
 
@@ -89,6 +90,29 @@ other suite runs in a parallel worker pool.
   `e2e/Dockerfile.robot` by the `e2e-robot-image` job whenever that file
   changes, tagged by its content hash). Local runs default to
   `python:3.12-slim` and install Robot Framework at pod startup.
+
+## Local token regression tests
+
+Suite 14 requires GitLab and GKG versions with fine-grained token authorization support.
+Local traversal-path dictionaries need the direct layouts from the [dictionary setup](../../e2e/scripts/patch-ch-dicts.sh).
+Run suite 01 first in the same Robot process to create the shared fixture.
+Set `GITLAB_URL` and `GITLAB_ROOT_PAT` in the environment.
+For a local TLS certificate, set `REQUESTS_CA_BUNDLE` and `GIT_SSL_CAINFO` to its CA file.
+
+```shell
+uv run --with robotframework==7.4.2 \
+  --with robotframework-requests==0.9.7 --with robotframework-pabot==5.2.2 \
+  python -m robot --loglevel WARN --outputdir /tmp/orbit-token-results \
+  --variable TOKEN_CODE_FIXTURE:"$PWD/e2e/fixtures/ruby/weather-app" \
+  e2e/tests/01_setup_and_smoke.robot e2e/tests/14_fine_grained_tokens.robot
+```
+
+On a GDK that simulates GitLab.com, also set `GITLAB_HOSTED_PLAN=ultimate`.
+The fixture helpers assign that plan through the admin namespace API and allow enrollment for each new root group.
+Each suite admin joins the shared group as Reporter.
+The default empty setting leaves instance licensing in control.
+Suite 14 creates private code projects and deletes its test groups and readers after the run.
+Keep Robot output private because failed requests can contain credentials.
 
 ## Setup phases
 

@@ -17,6 +17,7 @@ ${E2E_BOT_EMAIL}                    e2e-bot@example.com
 ${E2E_BOT_NAME}                     E2E Bot
 ${E2E_BOT_PASSWORD}                 E2eB0tP@ssw0rd!
 ${PAT_NAME}                         e2e-pat
+${GITLAB_HOSTED_PLAN}               %{GITLAB_HOSTED_PLAN=}
 
 
 *** Keywords ***
@@ -57,6 +58,9 @@ Attach To Shared Fixture
     ${pat}=    Issue PAT For User    ${root_headers}    ${user_id}
     Set Global Variable    ${GITLAB_PAT}    ${pat}
     Set Global Variable    ${E2E_BOT_USER_ID}    ${user_id}
+    IF    $GITLAB_HOSTED_PLAN
+        Add Group Member    ${SHARED_NAMESPACE_ID}    ${user_id}    20
+    END
     Wait For Node Indexed    User    ${user_id}    ${username}    label_field=username    timeout=240s
 
 Ensure E2E Bot User
@@ -91,9 +95,27 @@ Issue PAT For User
     ...    headers=${root_headers}    json=${pat_data}    expected_status=201
     RETURN    ${resp.json()["token"]}
 
+Issue Fine Grained PAT
+    [Arguments]    ${user_pat}    ${granular_scopes}
+    ${token}=    Wait Until Keyword Succeeds    90s    3s
+    ...    Issue Fine Grained PAT Once    ${user_pat}    ${granular_scopes}
+    RETURN    ${token}
+
+Issue Fine Grained PAT Once
+    [Arguments]    ${user_pat}    ${granular_scopes}
+    ${headers}=    GitLab Auth Headers    ${user_pat}
+    ${expiry}=    Get Current Date    increment=30 days    result_format=%Y-%m-%d
+    ${body}=    Create Dictionary    name=${PAT_NAME}    expires_at=${expiry}    granular_scopes=${granular_scopes}
+    ${resp}=    POST    ${GITLAB_URL}/api/v4/user/personal_access_tokens
+    ...    headers=${headers}    json=${body}    expected_status=201
+    Should Be Equal    ${resp.json()["scopes"]}    ${{["granular"]}}
+    RETURN    ${resp.json()["token"]}
+
 GitLab Auth Headers
-    [Documentation]    Standard JSON headers authenticated with the e2e-bot PAT.
-    RETURN    ${{{"PRIVATE-TOKEN": "${GITLAB_PAT}", "Content-Type": "application/json"}}}
+    [Documentation]    JSON headers authenticated with the supplied PAT or the suite admin PAT.
+    [Arguments]    ${token}=${GITLAB_PAT}
+    ${headers}=    Create Dictionary    PRIVATE-TOKEN=${token}    Content-Type=application/json
+    RETURN    ${headers}
 
 Random Suffix
     [Documentation]    Six-char lowercase+digit suffix for unique resource names.
@@ -101,9 +123,15 @@ Random Suffix
     RETURN    ${rand}
 
 Enable Feature Flag
-    [Arguments]    ${flag}
+    [Arguments]    ${flag}    ${group}=${None}    ${user}=${None}
     ${headers}=    Create Dictionary    PRIVATE-TOKEN=${GITLAB_PAT}
     ${data}=    Create Dictionary    value=true
+    IF    $group is not None
+        Set To Dictionary    ${data}    group=${group}
+    END
+    IF    $user is not None
+        Set To Dictionary    ${data}    user=${user}
+    END
     ${resp}=    POST    ${GITLAB_URL}/api/v4/features/${flag}
     ...    headers=${headers}    data=${data}    expected_status=any
     Should Be True    ${resp.status_code} in [200, 201]
@@ -123,12 +151,25 @@ Feature Flag Is Enabled
     Fail    Feature flag ${flag} not found
 
 Create Group
-    [Arguments]    ${name}    ${path}=${name}
+    [Arguments]    ${name}    ${path}=${name}    ${visibility}=public
     ${headers}=    GitLab Auth Headers
-    ${body}=    Create Dictionary    name=${name}    path=${path}    visibility=public
+    ${body}=    Create Dictionary    name=${name}    path=${path}    visibility=${visibility}
     ${resp}=    POST    ${GITLAB_URL}/api/v4/groups
     ...    headers=${headers}    json=${body}    expected_status=201
-    RETURN    ${resp.json()}
+    ${group}=    Set Variable    ${resp.json()}
+    IF    $GITLAB_HOSTED_PLAN
+        Set Hosted Group Plan    ${group}
+        Enable Feature Flag    orbit_enroll_namespace    group=${group}[full_path]
+    END
+    RETURN    ${group}
+
+Set Hosted Group Plan
+    [Arguments]    ${group}    ${plan}=${GITLAB_HOSTED_PLAN}
+    ${headers}=    Root Auth Headers
+    ${subscription}=    Create Dictionary    plan_code=${plan}
+    ${body}=    Create Dictionary    gitlab_subscription_attributes=${subscription}
+    PUT    ${GITLAB_URL}/api/v4/namespaces/${group}[id]
+    ...    headers=${headers}    json=${body}    expected_status=200
 
 Enable Orbit
     [Arguments]    ${namespace_id}
@@ -196,16 +237,12 @@ Open Closing Merge Request
     ${resp}=    POST    ${GITLAB_URL}/api/v4/projects/${project_id}/merge_requests
     ...    headers=${headers}    json=${mr}    expected_status=201
     ${iid}=    Set Variable    ${resp.json()["iid"]}
-    # The cross-project closing relationship registers on merge, so merge the MR
-    # (retry while GitLab is still computing merge_status / settling the branch).
     ${merged}=    Wait Until Keyword Succeeds    90s    3s    Merge The MR    ${project_id}    ${iid}
     RETURN    ${merged}
 
 Merge The MR
     [Arguments]    ${project_id}    ${iid}
     ${headers}=    GitLab Auth Headers
-    # gitlab@master requires the sha guard on the merge API (400 "SHA must be
-    # provided when merging" without it), so pass the current head sha.
     ${mr}=    GET    ${GITLAB_URL}/api/v4/projects/${project_id}/merge_requests/${iid}
     ...    headers=${headers}    expected_status=200
     ${body}=    Create Dictionary    sha=${mr.json()["sha"]}
@@ -260,10 +297,10 @@ Create User
 
 Create Subgroup
     [Documentation]    Create a child group under ${parent_id}. Returns the parsed group dict.
-    [Arguments]    ${parent_id}    ${name}    ${path}=${name}
+    [Arguments]    ${parent_id}    ${name}    ${path}=${name}    ${visibility}=public
     ${headers}=    GitLab Auth Headers
     ${body}=    Create Dictionary    name=${name}    path=${path}    parent_id=${parent_id}
-    ...    visibility=public
+    ...    visibility=${visibility}
     ${resp}=    POST    ${GITLAB_URL}/api/v4/groups
     ...    headers=${headers}    json=${body}    expected_status=201
     RETURN    ${resp.json()}
@@ -295,8 +332,6 @@ Create Vulnerability
     ...    ${description}=role scoped authz fixture
     ${headers}=    GitLab Auth Headers
     ${project_gid}=    Set Variable    gid://gitlab/Project/${project_id}
-    # VulnerabilityScannerInputType: id+name+url+version required; vendor is an
-    # object {name: String}, not a bare string.
     ${vendor}=    Create Dictionary    name=GitLab
     ${scanner}=    Create Dictionary    id=role-scoped-authz-e2e
     ...    name=role-scoped-authz-e2e    url=https://gitlab.com    version=1.0.0
@@ -304,8 +339,6 @@ Create Vulnerability
     ${identifier}=    Create Dictionary    name=CWE-89    url=https://cwe.mitre.org/data/definitions/89.html
     ...    externalType=cwe    externalId=CWE-89
     ${identifiers}=    Create List    ${identifier}
-    # severity must be the uppercase enum value (CRITICAL/HIGH/...) per
-    # VulnerabilitySeverity GraphQL enum.
     ${severity_upper}=    Convert To Upper Case    ${severity}
     ${input}=    Create Dictionary    project=${project_gid}    name=${title}    description=${description}
     ...    severity=${severity_upper}    state=${state}    scanner=${scanner}    identifiers=${identifiers}

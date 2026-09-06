@@ -34,13 +34,9 @@ Shared Namespace Is Enabled And Indexed
     Set Parallel Value For Key    SHARED_NAMESPACE_NAME    ${SHARED_NAMESPACE_NAME}
 
 Pipeline Is At Steady State
-    [Documentation]    The canary project + issue + note are created in suite setup so they index
-    ...                while earlier tests run; wait for each within a single shared budget. Once
-    ...                this passes, Siphon's initial snapshot has reached the slowest tables we
-    ...                depend on (notes, work_items) and downstream suites can use short
-    ...                per-call timeouts.
+    [Documentation]    The canary project indexes before its issue and note are created.
+    ...                Wait for all three nodes within the shared setup budget.
     [Tags]    smoke    setup
-    Start Indexing Budget    300
     Wait For Node Indexed Within Budget    Project    ${CANARY_PROJECT_ID}    ${CANARY_PROJECT_NAME}
     Wait For Node Indexed Within Budget    WorkItem    ${CANARY_ISSUE_ID}    ${CANARY_ISSUE_TITLE}    label_field=title
     Wait For Node Indexed Within Budget    Note    ${CANARY_NOTE_ID}
@@ -48,12 +44,11 @@ Pipeline Is At Steady State
 
 *** Keywords ***
 Provision Smoke Fixtures
-    [Documentation]    Provision everything up front so the shared group and the canary trio
-    ...                index concurrently instead of serially across test cases.
+    [Documentation]    Index the project before creating its issue so the namespace path is available.
+    ...                Keep all canary waits within one shared budget.
     Bootstrap E2E Credentials
     Enable Feature Flag    knowledge_graph_infra
     Enable Feature Flag    knowledge_graph
-    # Verify propagation before Enable Orbit reads the flags.
     Wait Until Keyword Succeeds    30s    2s    Feature Flag Is Enabled    knowledge_graph_infra
     Wait Until Keyword Succeeds    30s    2s    Feature Flag Is Enabled    knowledge_graph
     ${suffix}=    Random Suffix
@@ -62,7 +57,9 @@ Provision Smoke Fixtures
     Set Global Variable    ${SHARED_NAMESPACE_ID}    ${group["id"]}
     Set Global Variable    ${SHARED_NAMESPACE_NAME}    ${name}
     Enable Orbit    ${SHARED_NAMESPACE_ID}
+    Start Indexing Budget    300
     ${project}=    Create Project    canary-prj-${suffix}    ${SHARED_NAMESPACE_ID}
+    Wait For Node Indexed Within Budget    Project    ${project}[id]    ${project}[name]
     ${issue}=    Create Issue    ${project["id"]}    canary-issue-${suffix}
     ${note}=    Create Note On Issue    ${project["id"]}    ${issue["iid"]}    canary-note-${suffix}
     Set Suite Variable    ${CANARY_PROJECT_ID}    ${project["id"]}
