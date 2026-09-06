@@ -1,6 +1,5 @@
 mod health_client;
 mod router;
-mod trace_context_layer;
 
 use std::net::SocketAddr;
 use std::sync::Arc;

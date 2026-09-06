@@ -38,7 +38,6 @@ nats-client = { workspace = true }
 ontology = { path = "../ontology" }
 tower = { workspace = true }
 opentelemetry = { workspace = true }
-opentelemetry_sdk = { workspace = true }
 prost = { workspace = true }
 reqwest = { workspace = true }
 rustls = { workspace = true }
@@ -57,7 +56,6 @@ tokio = { workspace = true }
 tokio-util.workspace = true
 tokio-stream = { workspace = true }
 tracing = { workspace = true }
-tracing-opentelemetry = { workspace = true }
 chrono = { workspace = true }
 futures = { workspace = true }
 tonic = { workspace = true }

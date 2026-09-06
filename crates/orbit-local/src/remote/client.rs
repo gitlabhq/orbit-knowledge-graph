@@ -122,14 +122,6 @@ impl OrbitClient {
         if let Some(session_id) = &session_id {
             builder = builder.header("X-Orbit-Session-Id", session_id);
         }
-        if let Ok(val) = std::env::var("TRACEPARENT") {
-            builder = builder.header("traceparent", val);
-        }
-        if let Ok(val) = std::env::var("BAGGAGE") {
-            builder = builder.header("baggage", val);
-        } else if let Some(session_id) = &session_id {
-            builder = builder.header("baggage", format!("session.id={session_id}"));
-        }
 
         let response = builder
             .send()

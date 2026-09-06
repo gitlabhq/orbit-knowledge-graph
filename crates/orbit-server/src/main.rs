@@ -69,15 +69,6 @@ async fn main() -> anyhow::Result<()> {
     }
     let _guard = builder.init().expect("labkit init");
 
-    if config.metrics.otel.enabled {
-        opentelemetry::global::set_text_map_propagator(
-            opentelemetry::propagation::TextMapCompositePropagator::new(vec![
-                Box::new(opentelemetry_sdk::propagation::TraceContextPropagator::new()),
-                Box::new(opentelemetry_sdk::propagation::BaggagePropagator::new()),
-            ]),
-        );
-    }
-
     let ontology = Arc::new(ontology::Ontology::load_embedded().expect("ontology must load"));
     ontology::constants::validate_ontology_constants(&ontology);
 
