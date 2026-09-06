@@ -3,7 +3,6 @@ use std::time::Duration;
 
 use anyhow::bail;
 use serde::Deserialize;
-use uuid::Uuid;
 
 use super::error::{EXIT_GENERIC, RemoteError, map_http_error};
 
@@ -108,7 +107,7 @@ impl OrbitClient {
         &self,
         request: reqwest::RequestBuilder,
     ) -> Result<reqwest::Response, RemoteError> {
-        let request_id = Uuid::new_v4().to_string();
+        let request_id = crate::telemetry::invocation_id();
         let session_id = agent_session_id();
 
         let mut builder = request

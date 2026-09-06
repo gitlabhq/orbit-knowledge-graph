@@ -23,7 +23,8 @@ pub fn is_safe_identifier(value: &str) -> bool {
     SAFE_IDENTIFIER_RE.is_match(value)
 }
 
-fn invocation_id() -> String {
+/// Shared with the request trace id so analytics and server spans join.
+pub(crate) fn invocation_id() -> String {
     static ID: OnceLock<String> = OnceLock::new();
     ID.get_or_init(|| Uuid::new_v4().to_string()).clone()
 }
@@ -232,6 +233,12 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].category(), CATEGORY);
         assert_eq!(events[0].action(), "remote_query");
+    }
+
+    #[test]
+    fn invocation_id_is_stable_within_a_process() {
+        assert_eq!(invocation_id(), invocation_id());
+        assert!(is_safe_identifier(&invocation_id()));
     }
 
     #[test]
