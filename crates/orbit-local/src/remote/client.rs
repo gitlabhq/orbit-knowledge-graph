@@ -38,6 +38,7 @@ impl OrbitClient {
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
         let http = reqwest::Client::builder()
+            .user_agent(build_user_agent(|key| std::env::var(key).ok()))
             .connect_timeout(CONNECT_TIMEOUT)
             .read_timeout(READ_TIMEOUT)
             .timeout(REQUEST_TIMEOUT)
@@ -240,6 +241,20 @@ fn host_of(base_url: &str) -> Option<String> {
     (!host.is_empty()).then(|| host.to_ascii_lowercase())
 }
 
+fn build_user_agent(get_env: impl Fn(&str) -> Option<String>) -> String {
+    let mut ua = format!(
+        "orbit/{} ({}, {})",
+        env!("ORBIT_VERSION"),
+        std::env::consts::OS,
+        std::env::consts::ARCH,
+    );
+    if let Some(agent) = crate::telemetry::detect_coding_agent(get_env) {
+        ua.push_str(" Coding-Agent/");
+        ua.push_str(&agent);
+    }
+    ua
+}
+
 async fn read_body(response: reqwest::Response) -> Result<Vec<u8>, RemoteError> {
     response
         .bytes()
@@ -379,5 +394,26 @@ mod tests {
     fn credential_helper_missing_token_returns_none() {
         let json = br#"{"type":"success","instance_url":"https://gitlab.com"}"#;
         assert!(parse_credential_helper_response(json).is_none());
+    }
+
+    #[test]
+    fn user_agent_without_coding_agent() {
+        let ua = build_user_agent(env_from(&[]));
+        let expected = format!(
+            "orbit/{} ({}, {})",
+            env!("ORBIT_VERSION"),
+            std::env::consts::OS,
+            std::env::consts::ARCH,
+        );
+        assert_eq!(ua, expected);
+    }
+
+    #[test]
+    fn user_agent_with_coding_agent() {
+        let ua = build_user_agent(env_from(&[("CLAUDECODE", "1")]));
+        assert!(
+            ua.ends_with(" Coding-Agent/claude-code"),
+            "expected Coding-Agent suffix, got: {ua}"
+        );
     }
 }
