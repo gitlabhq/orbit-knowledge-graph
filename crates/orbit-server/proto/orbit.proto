@@ -94,6 +94,8 @@ message ExecuteQueryMessage {
     RedactionExchange redaction = 2;
     ExecuteQueryResult result = 3;
     ExecuteQueryError error = 4;
+    GetGraphStatusRequest graph_status_request = 5;
+    GetGraphStatusResponse graph_status_result = 6;
   }
 }
 
@@ -287,6 +289,7 @@ message RedactionExchange {
 message RedactionRequired {
   string result_id = 1;                       // correlates request with response
   repeated ResourceToAuthorize resources = 2;
+  bool check_boundaries = 3;
 }
 
 // A batch of resource IDs that need authorization checks.
@@ -294,6 +297,7 @@ message ResourceToAuthorize {
   string resource_type = 1;      // e.g. "project", "merge_request"
   repeated int64 resource_ids = 2;
   repeated string abilities = 3; // e.g. ["read_project"]
+  string permission = 4;
 }
 
 // Rails responds with per-resource authorization decisions.
@@ -307,6 +311,7 @@ message RedactionResponse {
 message ResourceAuthorization {
   string resource_type = 1;
   map<int64, bool> authorized = 2;
+  string ability = 3;
 }
 
 // ---------------------------------------------------------------------------

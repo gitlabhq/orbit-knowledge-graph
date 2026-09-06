@@ -3,7 +3,7 @@
 /// request (client initial), redaction exchange (server/client), result, or error.
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ExecuteQueryMessage {
-    #[prost(oneof = "execute_query_message::Content", tags = "1, 2, 3, 4")]
+    #[prost(oneof = "execute_query_message::Content", tags = "1, 2, 3, 4, 5, 6")]
     pub content: ::core::option::Option<execute_query_message::Content>,
 }
 /// Nested message and enum types in `ExecuteQueryMessage`.
@@ -18,6 +18,10 @@ pub mod execute_query_message {
         Result(super::ExecuteQueryResult),
         #[prost(message, tag = "4")]
         Error(super::ExecuteQueryError),
+        #[prost(message, tag = "5")]
+        GraphStatusRequest(super::GetGraphStatusRequest),
+        #[prost(message, tag = "6")]
+        GraphStatusResult(super::GetGraphStatusResponse),
     }
 }
 /// Client-sent initial message to start a query.
@@ -316,6 +320,8 @@ pub struct RedactionRequired {
     pub result_id: ::prost::alloc::string::String,
     #[prost(message, repeated, tag = "2")]
     pub resources: ::prost::alloc::vec::Vec<ResourceToAuthorize>,
+    #[prost(bool, tag = "3")]
+    pub check_boundaries: bool,
 }
 /// A batch of resource IDs that need authorization checks.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
@@ -328,6 +334,8 @@ pub struct ResourceToAuthorize {
     /// e.g. \["read_project"\]
     #[prost(string, repeated, tag = "3")]
     pub abilities: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    #[prost(string, tag = "4")]
+    pub permission: ::prost::alloc::string::String,
 }
 /// Rails responds with per-resource authorization decisions.
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -345,6 +353,8 @@ pub struct ResourceAuthorization {
     pub resource_type: ::prost::alloc::string::String,
     #[prost(map = "int64, bool", tag = "2")]
     pub authorized: ::std::collections::HashMap<i64, bool>,
+    #[prost(string, tag = "3")]
+    pub ability: ::prost::alloc::string::String,
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ListToolsRequest {}

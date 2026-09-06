@@ -342,6 +342,8 @@ type ExecuteQueryMessage struct {
 	//	*ExecuteQueryMessage_Redaction
 	//	*ExecuteQueryMessage_Result
 	//	*ExecuteQueryMessage_Error
+	//	*ExecuteQueryMessage_GraphStatusRequest
+	//	*ExecuteQueryMessage_GraphStatusResult
 	Content       isExecuteQueryMessage_Content `protobuf_oneof:"content"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -420,6 +422,24 @@ func (x *ExecuteQueryMessage) GetError() *ExecuteQueryError {
 	return nil
 }
 
+func (x *ExecuteQueryMessage) GetGraphStatusRequest() *GetGraphStatusRequest {
+	if x != nil {
+		if x, ok := x.Content.(*ExecuteQueryMessage_GraphStatusRequest); ok {
+			return x.GraphStatusRequest
+		}
+	}
+	return nil
+}
+
+func (x *ExecuteQueryMessage) GetGraphStatusResult() *GetGraphStatusResponse {
+	if x != nil {
+		if x, ok := x.Content.(*ExecuteQueryMessage_GraphStatusResult); ok {
+			return x.GraphStatusResult
+		}
+	}
+	return nil
+}
+
 type isExecuteQueryMessage_Content interface {
 	isExecuteQueryMessage_Content()
 }
@@ -440,6 +460,14 @@ type ExecuteQueryMessage_Error struct {
 	Error *ExecuteQueryError `protobuf:"bytes,4,opt,name=error,proto3,oneof"`
 }
 
+type ExecuteQueryMessage_GraphStatusRequest struct {
+	GraphStatusRequest *GetGraphStatusRequest `protobuf:"bytes,5,opt,name=graph_status_request,json=graphStatusRequest,proto3,oneof"`
+}
+
+type ExecuteQueryMessage_GraphStatusResult struct {
+	GraphStatusResult *GetGraphStatusResponse `protobuf:"bytes,6,opt,name=graph_status_result,json=graphStatusResult,proto3,oneof"`
+}
+
 func (*ExecuteQueryMessage_Request) isExecuteQueryMessage_Content() {}
 
 func (*ExecuteQueryMessage_Redaction) isExecuteQueryMessage_Content() {}
@@ -447,6 +475,10 @@ func (*ExecuteQueryMessage_Redaction) isExecuteQueryMessage_Content() {}
 func (*ExecuteQueryMessage_Result) isExecuteQueryMessage_Content() {}
 
 func (*ExecuteQueryMessage_Error) isExecuteQueryMessage_Content() {}
+
+func (*ExecuteQueryMessage_GraphStatusRequest) isExecuteQueryMessage_Content() {}
+
+func (*ExecuteQueryMessage_GraphStatusResult) isExecuteQueryMessage_Content() {}
 
 // Client-sent initial message to start a query.
 type ExecuteQueryRequest struct {
@@ -1897,11 +1929,12 @@ func (*RedactionExchange_Response) isRedactionExchange_Content() {}
 
 // Server asks Rails to authorize a set of resources before returning results.
 type RedactionRequired struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	ResultId      string                 `protobuf:"bytes,1,opt,name=result_id,json=resultId,proto3" json:"result_id,omitempty"` // correlates request with response
-	Resources     []*ResourceToAuthorize `protobuf:"bytes,2,rep,name=resources,proto3" json:"resources,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	ResultId        string                 `protobuf:"bytes,1,opt,name=result_id,json=resultId,proto3" json:"result_id,omitempty"` // correlates request with response
+	Resources       []*ResourceToAuthorize `protobuf:"bytes,2,rep,name=resources,proto3" json:"resources,omitempty"`
+	CheckBoundaries bool                   `protobuf:"varint,3,opt,name=check_boundaries,json=checkBoundaries,proto3" json:"check_boundaries,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *RedactionRequired) Reset() {
@@ -1948,12 +1981,20 @@ func (x *RedactionRequired) GetResources() []*ResourceToAuthorize {
 	return nil
 }
 
+func (x *RedactionRequired) GetCheckBoundaries() bool {
+	if x != nil {
+		return x.CheckBoundaries
+	}
+	return false
+}
+
 // A batch of resource IDs that need authorization checks.
 type ResourceToAuthorize struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	ResourceType  string                 `protobuf:"bytes,1,opt,name=resource_type,json=resourceType,proto3" json:"resource_type,omitempty"` // e.g. "project", "merge_request"
 	ResourceIds   []int64                `protobuf:"varint,2,rep,packed,name=resource_ids,json=resourceIds,proto3" json:"resource_ids,omitempty"`
 	Abilities     []string               `protobuf:"bytes,3,rep,name=abilities,proto3" json:"abilities,omitempty"` // e.g. ["read_project"]
+	Permission    string                 `protobuf:"bytes,4,opt,name=permission,proto3" json:"permission,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2007,6 +2048,13 @@ func (x *ResourceToAuthorize) GetAbilities() []string {
 		return x.Abilities
 	}
 	return nil
+}
+
+func (x *ResourceToAuthorize) GetPermission() string {
+	if x != nil {
+		return x.Permission
+	}
+	return ""
 }
 
 // Rails responds with per-resource authorization decisions.
@@ -2068,6 +2116,7 @@ type ResourceAuthorization struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	ResourceType  string                 `protobuf:"bytes,1,opt,name=resource_type,json=resourceType,proto3" json:"resource_type,omitempty"`
 	Authorized    map[int64]bool         `protobuf:"bytes,2,rep,name=authorized,proto3" json:"authorized,omitempty" protobuf_key:"varint,1,opt,name=key" protobuf_val:"varint,2,opt,name=value"`
+	Ability       string                 `protobuf:"bytes,3,opt,name=ability,proto3" json:"ability,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2114,6 +2163,13 @@ func (x *ResourceAuthorization) GetAuthorized() map[int64]bool {
 		return x.Authorized
 	}
 	return nil
+}
+
+func (x *ResourceAuthorization) GetAbility() string {
+	if x != nil {
+		return x.Ability
+	}
+	return ""
 }
 
 type ListToolsRequest struct {
@@ -3299,12 +3355,14 @@ var File_orbit_proto protoreflect.FileDescriptor
 
 const file_orbit_proto_rawDesc = "" +
 	"\n" +
-	"\vorbit.proto\x12\borbit.v1\"\x85\x02\n" +
+	"\vorbit.proto\x12\borbit.v1\"\xae\x03\n" +
 	"\x13ExecuteQueryMessage\x129\n" +
 	"\arequest\x18\x01 \x01(\v2\x1d.orbit.v1.ExecuteQueryRequestH\x00R\arequest\x12;\n" +
 	"\tredaction\x18\x02 \x01(\v2\x1b.orbit.v1.RedactionExchangeH\x00R\tredaction\x126\n" +
 	"\x06result\x18\x03 \x01(\v2\x1c.orbit.v1.ExecuteQueryResultH\x00R\x06result\x123\n" +
-	"\x05error\x18\x04 \x01(\v2\x1b.orbit.v1.ExecuteQueryErrorH\x00R\x05errorB\t\n" +
+	"\x05error\x18\x04 \x01(\v2\x1b.orbit.v1.ExecuteQueryErrorH\x00R\x05error\x12S\n" +
+	"\x14graph_status_request\x18\x05 \x01(\v2\x1f.orbit.v1.GetGraphStatusRequestH\x00R\x12graphStatusRequest\x12R\n" +
+	"\x13graph_status_result\x18\x06 \x01(\v2 .orbit.v1.GetGraphStatusResponseH\x00R\x11graphStatusResultB\t\n" +
 	"\acontent\"\x91\x01\n" +
 	"\x13ExecuteQueryRequest\x12\x14\n" +
 	"\x05query\x18\x01 \x01(\tR\x05query\x120\n" +
@@ -3410,22 +3468,27 @@ const file_orbit_proto_rawDesc = "" +
 	"\x11RedactionExchange\x129\n" +
 	"\brequired\x18\x01 \x01(\v2\x1b.orbit.v1.RedactionRequiredH\x00R\brequired\x129\n" +
 	"\bresponse\x18\x02 \x01(\v2\x1b.orbit.v1.RedactionResponseH\x00R\bresponseB\t\n" +
-	"\acontent\"m\n" +
+	"\acontent\"\x98\x01\n" +
 	"\x11RedactionRequired\x12\x1b\n" +
 	"\tresult_id\x18\x01 \x01(\tR\bresultId\x12;\n" +
-	"\tresources\x18\x02 \x03(\v2\x1d.orbit.v1.ResourceToAuthorizeR\tresources\"{\n" +
+	"\tresources\x18\x02 \x03(\v2\x1d.orbit.v1.ResourceToAuthorizeR\tresources\x12)\n" +
+	"\x10check_boundaries\x18\x03 \x01(\bR\x0fcheckBoundaries\"\x9b\x01\n" +
 	"\x13ResourceToAuthorize\x12#\n" +
 	"\rresource_type\x18\x01 \x01(\tR\fresourceType\x12!\n" +
 	"\fresource_ids\x18\x02 \x03(\x03R\vresourceIds\x12\x1c\n" +
-	"\tabilities\x18\x03 \x03(\tR\tabilities\"y\n" +
+	"\tabilities\x18\x03 \x03(\tR\tabilities\x12\x1e\n" +
+	"\n" +
+	"permission\x18\x04 \x01(\tR\n" +
+	"permission\"y\n" +
 	"\x11RedactionResponse\x12\x1b\n" +
 	"\tresult_id\x18\x01 \x01(\tR\bresultId\x12G\n" +
-	"\x0eauthorizations\x18\x02 \x03(\v2\x1f.orbit.v1.ResourceAuthorizationR\x0eauthorizations\"\xcc\x01\n" +
+	"\x0eauthorizations\x18\x02 \x03(\v2\x1f.orbit.v1.ResourceAuthorizationR\x0eauthorizations\"\xe6\x01\n" +
 	"\x15ResourceAuthorization\x12#\n" +
 	"\rresource_type\x18\x01 \x01(\tR\fresourceType\x12O\n" +
 	"\n" +
 	"authorized\x18\x02 \x03(\v2/.orbit.v1.ResourceAuthorization.AuthorizedEntryR\n" +
-	"authorized\x1a=\n" +
+	"authorized\x12\x18\n" +
+	"\aability\x18\x03 \x01(\tR\aability\x1a=\n" +
 	"\x0fAuthorizedEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\x03R\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\bR\x05value:\x028\x01\"\x12\n" +
@@ -3634,73 +3697,75 @@ var file_orbit_proto_depIdxs = []int32{
 	28, // 1: orbit.v1.ExecuteQueryMessage.redaction:type_name -> orbit.v1.RedactionExchange
 	8,  // 2: orbit.v1.ExecuteQueryMessage.result:type_name -> orbit.v1.ExecuteQueryResult
 	10, // 3: orbit.v1.ExecuteQueryMessage.error:type_name -> orbit.v1.ExecuteQueryError
-	0,  // 4: orbit.v1.ExecuteQueryRequest.format:type_name -> orbit.v1.ResponseFormat
-	2,  // 5: orbit.v1.ExecuteQueryRequest.query_type:type_name -> orbit.v1.QueryType
-	9,  // 6: orbit.v1.ExecuteQueryResult.metadata:type_name -> orbit.v1.QueryMetadata
-	1,  // 7: orbit.v1.QueryMetadata.format_name:type_name -> orbit.v1.FormatName
-	0,  // 8: orbit.v1.GetGraphSchemaRequest.format:type_name -> orbit.v1.ResponseFormat
-	13, // 9: orbit.v1.GetGraphSchemaResponse.structured:type_name -> orbit.v1.StructuredSchema
-	14, // 10: orbit.v1.StructuredSchema.domains:type_name -> orbit.v1.SchemaDomain
-	15, // 11: orbit.v1.StructuredSchema.nodes:type_name -> orbit.v1.SchemaNode
-	17, // 12: orbit.v1.StructuredSchema.edges:type_name -> orbit.v1.SchemaEdge
-	16, // 13: orbit.v1.SchemaNode.properties:type_name -> orbit.v1.SchemaProperty
-	19, // 14: orbit.v1.SchemaNode.style:type_name -> orbit.v1.SchemaNodeStyle
-	18, // 15: orbit.v1.SchemaEdge.variants:type_name -> orbit.v1.SchemaEdgeVariant
-	0,  // 16: orbit.v1.GetQueryDslRequest.format:type_name -> orbit.v1.ResponseFormat
-	0,  // 17: orbit.v1.GetResponseFormatRequest.format:type_name -> orbit.v1.ResponseFormat
-	24, // 18: orbit.v1.GetResponseFormatResponse.structured:type_name -> orbit.v1.ResponseFormatSchema
-	27, // 19: orbit.v1.ListNamedQueriesResponse.queries:type_name -> orbit.v1.NamedQueryDefinition
-	29, // 20: orbit.v1.RedactionExchange.required:type_name -> orbit.v1.RedactionRequired
-	31, // 21: orbit.v1.RedactionExchange.response:type_name -> orbit.v1.RedactionResponse
-	30, // 22: orbit.v1.RedactionRequired.resources:type_name -> orbit.v1.ResourceToAuthorize
-	32, // 23: orbit.v1.RedactionResponse.authorizations:type_name -> orbit.v1.ResourceAuthorization
-	52, // 24: orbit.v1.ResourceAuthorization.authorized:type_name -> orbit.v1.ResourceAuthorization.AuthorizedEntry
-	35, // 25: orbit.v1.ListToolsResponse.tools:type_name -> orbit.v1.ToolDefinition
-	0,  // 26: orbit.v1.ListAgentCommandsRequest.format:type_name -> orbit.v1.ResponseFormat
-	35, // 27: orbit.v1.ListAgentCommandsResponse.commands:type_name -> orbit.v1.ToolDefinition
-	0,  // 28: orbit.v1.GetClusterHealthRequest.format:type_name -> orbit.v1.ResponseFormat
-	42, // 29: orbit.v1.GetClusterHealthResponse.structured:type_name -> orbit.v1.StructuredClusterHealth
-	3,  // 30: orbit.v1.StructuredClusterHealth.status:type_name -> orbit.v1.ClusterStatus
-	43, // 31: orbit.v1.StructuredClusterHealth.components:type_name -> orbit.v1.ComponentHealth
-	3,  // 32: orbit.v1.ComponentHealth.status:type_name -> orbit.v1.ClusterStatus
-	44, // 33: orbit.v1.ComponentHealth.replicas:type_name -> orbit.v1.ReplicaStatus
-	53, // 34: orbit.v1.ComponentHealth.metrics:type_name -> orbit.v1.ComponentHealth.MetricsEntry
-	4,  // 35: orbit.v1.GetGraphStatusRequest.source_type:type_name -> orbit.v1.SourceType
-	0,  // 36: orbit.v1.GetGraphStatusRequest.format:type_name -> orbit.v1.ResponseFormat
-	5,  // 37: orbit.v1.IndexingStatus.state:type_name -> orbit.v1.IndexingState
-	48, // 38: orbit.v1.GetGraphStatusResponse.structured:type_name -> orbit.v1.StructuredGraphStatus
-	49, // 39: orbit.v1.StructuredGraphStatus.projects:type_name -> orbit.v1.ProjectsStatus
-	50, // 40: orbit.v1.StructuredGraphStatus.domains:type_name -> orbit.v1.GraphStatusDomain
-	46, // 41: orbit.v1.StructuredGraphStatus.indexing:type_name -> orbit.v1.IndexingStatus
-	46, // 42: orbit.v1.StructuredGraphStatus.sdlc_indexing:type_name -> orbit.v1.IndexingStatus
-	46, // 43: orbit.v1.StructuredGraphStatus.code_indexing:type_name -> orbit.v1.IndexingStatus
-	51, // 44: orbit.v1.GraphStatusDomain.items:type_name -> orbit.v1.GraphStatusItem
-	5,  // 45: orbit.v1.GraphStatusItem.state:type_name -> orbit.v1.IndexingState
-	33, // 46: orbit.v1.OrbitService.ListTools:input_type -> orbit.v1.ListToolsRequest
-	36, // 47: orbit.v1.OrbitService.ListAgentCommands:input_type -> orbit.v1.ListAgentCommandsRequest
-	38, // 48: orbit.v1.OrbitService.InvokeAgentCommand:input_type -> orbit.v1.InvokeAgentCommandRequest
-	6,  // 49: orbit.v1.OrbitService.ExecuteQuery:input_type -> orbit.v1.ExecuteQueryMessage
-	11, // 50: orbit.v1.OrbitService.GetGraphSchema:input_type -> orbit.v1.GetGraphSchemaRequest
-	20, // 51: orbit.v1.OrbitService.GetQueryDsl:input_type -> orbit.v1.GetQueryDslRequest
-	25, // 52: orbit.v1.OrbitService.ListNamedQueries:input_type -> orbit.v1.ListNamedQueriesRequest
-	22, // 53: orbit.v1.OrbitService.GetResponseFormat:input_type -> orbit.v1.GetResponseFormatRequest
-	40, // 54: orbit.v1.OrbitService.GetClusterHealth:input_type -> orbit.v1.GetClusterHealthRequest
-	45, // 55: orbit.v1.OrbitService.GetGraphStatus:input_type -> orbit.v1.GetGraphStatusRequest
-	34, // 56: orbit.v1.OrbitService.ListTools:output_type -> orbit.v1.ListToolsResponse
-	37, // 57: orbit.v1.OrbitService.ListAgentCommands:output_type -> orbit.v1.ListAgentCommandsResponse
-	39, // 58: orbit.v1.OrbitService.InvokeAgentCommand:output_type -> orbit.v1.InvokeAgentCommandResponse
-	6,  // 59: orbit.v1.OrbitService.ExecuteQuery:output_type -> orbit.v1.ExecuteQueryMessage
-	12, // 60: orbit.v1.OrbitService.GetGraphSchema:output_type -> orbit.v1.GetGraphSchemaResponse
-	21, // 61: orbit.v1.OrbitService.GetQueryDsl:output_type -> orbit.v1.GetQueryDslResponse
-	26, // 62: orbit.v1.OrbitService.ListNamedQueries:output_type -> orbit.v1.ListNamedQueriesResponse
-	23, // 63: orbit.v1.OrbitService.GetResponseFormat:output_type -> orbit.v1.GetResponseFormatResponse
-	41, // 64: orbit.v1.OrbitService.GetClusterHealth:output_type -> orbit.v1.GetClusterHealthResponse
-	47, // 65: orbit.v1.OrbitService.GetGraphStatus:output_type -> orbit.v1.GetGraphStatusResponse
-	56, // [56:66] is the sub-list for method output_type
-	46, // [46:56] is the sub-list for method input_type
-	46, // [46:46] is the sub-list for extension type_name
-	46, // [46:46] is the sub-list for extension extendee
-	0,  // [0:46] is the sub-list for field type_name
+	45, // 4: orbit.v1.ExecuteQueryMessage.graph_status_request:type_name -> orbit.v1.GetGraphStatusRequest
+	47, // 5: orbit.v1.ExecuteQueryMessage.graph_status_result:type_name -> orbit.v1.GetGraphStatusResponse
+	0,  // 6: orbit.v1.ExecuteQueryRequest.format:type_name -> orbit.v1.ResponseFormat
+	2,  // 7: orbit.v1.ExecuteQueryRequest.query_type:type_name -> orbit.v1.QueryType
+	9,  // 8: orbit.v1.ExecuteQueryResult.metadata:type_name -> orbit.v1.QueryMetadata
+	1,  // 9: orbit.v1.QueryMetadata.format_name:type_name -> orbit.v1.FormatName
+	0,  // 10: orbit.v1.GetGraphSchemaRequest.format:type_name -> orbit.v1.ResponseFormat
+	13, // 11: orbit.v1.GetGraphSchemaResponse.structured:type_name -> orbit.v1.StructuredSchema
+	14, // 12: orbit.v1.StructuredSchema.domains:type_name -> orbit.v1.SchemaDomain
+	15, // 13: orbit.v1.StructuredSchema.nodes:type_name -> orbit.v1.SchemaNode
+	17, // 14: orbit.v1.StructuredSchema.edges:type_name -> orbit.v1.SchemaEdge
+	16, // 15: orbit.v1.SchemaNode.properties:type_name -> orbit.v1.SchemaProperty
+	19, // 16: orbit.v1.SchemaNode.style:type_name -> orbit.v1.SchemaNodeStyle
+	18, // 17: orbit.v1.SchemaEdge.variants:type_name -> orbit.v1.SchemaEdgeVariant
+	0,  // 18: orbit.v1.GetQueryDslRequest.format:type_name -> orbit.v1.ResponseFormat
+	0,  // 19: orbit.v1.GetResponseFormatRequest.format:type_name -> orbit.v1.ResponseFormat
+	24, // 20: orbit.v1.GetResponseFormatResponse.structured:type_name -> orbit.v1.ResponseFormatSchema
+	27, // 21: orbit.v1.ListNamedQueriesResponse.queries:type_name -> orbit.v1.NamedQueryDefinition
+	29, // 22: orbit.v1.RedactionExchange.required:type_name -> orbit.v1.RedactionRequired
+	31, // 23: orbit.v1.RedactionExchange.response:type_name -> orbit.v1.RedactionResponse
+	30, // 24: orbit.v1.RedactionRequired.resources:type_name -> orbit.v1.ResourceToAuthorize
+	32, // 25: orbit.v1.RedactionResponse.authorizations:type_name -> orbit.v1.ResourceAuthorization
+	52, // 26: orbit.v1.ResourceAuthorization.authorized:type_name -> orbit.v1.ResourceAuthorization.AuthorizedEntry
+	35, // 27: orbit.v1.ListToolsResponse.tools:type_name -> orbit.v1.ToolDefinition
+	0,  // 28: orbit.v1.ListAgentCommandsRequest.format:type_name -> orbit.v1.ResponseFormat
+	35, // 29: orbit.v1.ListAgentCommandsResponse.commands:type_name -> orbit.v1.ToolDefinition
+	0,  // 30: orbit.v1.GetClusterHealthRequest.format:type_name -> orbit.v1.ResponseFormat
+	42, // 31: orbit.v1.GetClusterHealthResponse.structured:type_name -> orbit.v1.StructuredClusterHealth
+	3,  // 32: orbit.v1.StructuredClusterHealth.status:type_name -> orbit.v1.ClusterStatus
+	43, // 33: orbit.v1.StructuredClusterHealth.components:type_name -> orbit.v1.ComponentHealth
+	3,  // 34: orbit.v1.ComponentHealth.status:type_name -> orbit.v1.ClusterStatus
+	44, // 35: orbit.v1.ComponentHealth.replicas:type_name -> orbit.v1.ReplicaStatus
+	53, // 36: orbit.v1.ComponentHealth.metrics:type_name -> orbit.v1.ComponentHealth.MetricsEntry
+	4,  // 37: orbit.v1.GetGraphStatusRequest.source_type:type_name -> orbit.v1.SourceType
+	0,  // 38: orbit.v1.GetGraphStatusRequest.format:type_name -> orbit.v1.ResponseFormat
+	5,  // 39: orbit.v1.IndexingStatus.state:type_name -> orbit.v1.IndexingState
+	48, // 40: orbit.v1.GetGraphStatusResponse.structured:type_name -> orbit.v1.StructuredGraphStatus
+	49, // 41: orbit.v1.StructuredGraphStatus.projects:type_name -> orbit.v1.ProjectsStatus
+	50, // 42: orbit.v1.StructuredGraphStatus.domains:type_name -> orbit.v1.GraphStatusDomain
+	46, // 43: orbit.v1.StructuredGraphStatus.indexing:type_name -> orbit.v1.IndexingStatus
+	46, // 44: orbit.v1.StructuredGraphStatus.sdlc_indexing:type_name -> orbit.v1.IndexingStatus
+	46, // 45: orbit.v1.StructuredGraphStatus.code_indexing:type_name -> orbit.v1.IndexingStatus
+	51, // 46: orbit.v1.GraphStatusDomain.items:type_name -> orbit.v1.GraphStatusItem
+	5,  // 47: orbit.v1.GraphStatusItem.state:type_name -> orbit.v1.IndexingState
+	33, // 48: orbit.v1.OrbitService.ListTools:input_type -> orbit.v1.ListToolsRequest
+	36, // 49: orbit.v1.OrbitService.ListAgentCommands:input_type -> orbit.v1.ListAgentCommandsRequest
+	38, // 50: orbit.v1.OrbitService.InvokeAgentCommand:input_type -> orbit.v1.InvokeAgentCommandRequest
+	6,  // 51: orbit.v1.OrbitService.ExecuteQuery:input_type -> orbit.v1.ExecuteQueryMessage
+	11, // 52: orbit.v1.OrbitService.GetGraphSchema:input_type -> orbit.v1.GetGraphSchemaRequest
+	20, // 53: orbit.v1.OrbitService.GetQueryDsl:input_type -> orbit.v1.GetQueryDslRequest
+	25, // 54: orbit.v1.OrbitService.ListNamedQueries:input_type -> orbit.v1.ListNamedQueriesRequest
+	22, // 55: orbit.v1.OrbitService.GetResponseFormat:input_type -> orbit.v1.GetResponseFormatRequest
+	40, // 56: orbit.v1.OrbitService.GetClusterHealth:input_type -> orbit.v1.GetClusterHealthRequest
+	45, // 57: orbit.v1.OrbitService.GetGraphStatus:input_type -> orbit.v1.GetGraphStatusRequest
+	34, // 58: orbit.v1.OrbitService.ListTools:output_type -> orbit.v1.ListToolsResponse
+	37, // 59: orbit.v1.OrbitService.ListAgentCommands:output_type -> orbit.v1.ListAgentCommandsResponse
+	39, // 60: orbit.v1.OrbitService.InvokeAgentCommand:output_type -> orbit.v1.InvokeAgentCommandResponse
+	6,  // 61: orbit.v1.OrbitService.ExecuteQuery:output_type -> orbit.v1.ExecuteQueryMessage
+	12, // 62: orbit.v1.OrbitService.GetGraphSchema:output_type -> orbit.v1.GetGraphSchemaResponse
+	21, // 63: orbit.v1.OrbitService.GetQueryDsl:output_type -> orbit.v1.GetQueryDslResponse
+	26, // 64: orbit.v1.OrbitService.ListNamedQueries:output_type -> orbit.v1.ListNamedQueriesResponse
+	23, // 65: orbit.v1.OrbitService.GetResponseFormat:output_type -> orbit.v1.GetResponseFormatResponse
+	41, // 66: orbit.v1.OrbitService.GetClusterHealth:output_type -> orbit.v1.GetClusterHealthResponse
+	47, // 67: orbit.v1.OrbitService.GetGraphStatus:output_type -> orbit.v1.GetGraphStatusResponse
+	58, // [58:68] is the sub-list for method output_type
+	48, // [48:58] is the sub-list for method input_type
+	48, // [48:48] is the sub-list for extension type_name
+	48, // [48:48] is the sub-list for extension extendee
+	0,  // [0:48] is the sub-list for field type_name
 }
 
 func init() { file_orbit_proto_init() }
@@ -3713,6 +3778,8 @@ func file_orbit_proto_init() {
 		(*ExecuteQueryMessage_Redaction)(nil),
 		(*ExecuteQueryMessage_Result)(nil),
 		(*ExecuteQueryMessage_Error)(nil),
+		(*ExecuteQueryMessage_GraphStatusRequest)(nil),
+		(*ExecuteQueryMessage_GraphStatusResult)(nil),
 	}
 	file_orbit_proto_msgTypes[2].OneofWrappers = []any{
 		(*ExecuteQueryResult_ResultJson)(nil),
