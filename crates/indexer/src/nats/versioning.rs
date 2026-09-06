@@ -166,6 +166,7 @@ pub fn sdlc_work_consumer_name(consumer_name: &str) -> String {
     )
 }
 
+#[cfg(test)]
 fn schema_bucket_stream_names(schema_version: u32) -> Vec<String> {
     let versioner = NatsVersioner::new("", schema_version);
     MANAGED_BUCKETS
@@ -206,18 +207,6 @@ async fn delete_streams(
     } else {
         Err(CleanupError(errors))
     }
-}
-
-pub async fn cleanup_schema_state(
-    nats_client: &async_nats::Client,
-    schema_version: u32,
-) -> Result<(), CleanupError> {
-    delete_streams(
-        nats_client,
-        &schema_bucket_stream_names(schema_version),
-        &format!("schema_v{schema_version}"),
-    )
-    .await
 }
 
 #[derive(Debug)]

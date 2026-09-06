@@ -24,7 +24,7 @@
 //! - [`modules::code`] - Code indexing (call graphs, definitions, references)
 //!
 pub mod analytics;
-pub mod campaign;
+pub use orbit_migrations::campaign;
 pub mod checkpoint;
 pub mod clickhouse;
 pub mod config;

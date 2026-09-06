@@ -10,10 +10,10 @@ use super::metrics::MigrationMetrics;
 use crate::campaign::{CampaignState, campaign_id_for_version};
 use crate::clickhouse::ArrowClickHouseClient;
 use crate::locking::{LockError, LockService};
-use crate::schema::invalidation::MigrationLedger;
+use orbit_migrations::ledger::MigrationLedger;
 use orbit_migrations::version::{
-    SCHEMA_VERSION, SchemaVersionError, read_active_version, table_prefix, version_tables_complete,
-    write_migrating_version, write_schema_version,
+    SCHEMA_VERSION, SchemaVersionError, mark_version_active, mark_version_migrating,
+    read_active_version, table_prefix, version_tables_complete,
 };
 
 pub use orbit_migrations::execute::CHECKPOINT_TABLE;
@@ -57,7 +57,7 @@ pub async fn run_if_needed(
             );
             let prefix = table_prefix(*SCHEMA_VERSION);
             execute::create_all_versioned_tables(graph, &schema, credentials, &prefix).await?;
-            write_schema_version(graph, *SCHEMA_VERSION).await?;
+            mark_version_active(graph, *SCHEMA_VERSION).await?;
             metrics.record("complete", "fresh_install");
         }
         Some(version) if version == *SCHEMA_VERSION => {
@@ -108,6 +108,10 @@ pub async fn run_if_needed(
     Ok(())
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "migration orchestration wires all collaborators explicitly; grouping into a struct would just move the arity"
+)]
 async fn run_forward_migration(
     graph: &ArrowClickHouseClient,
     credentials: &DictionaryCredentials,
@@ -152,7 +156,7 @@ async fn run_forward_migration(
         return Ok(create_result?);
     }
 
-    write_migrating_version(graph, *SCHEMA_VERSION).await?;
+    mark_version_migrating(graph, *SCHEMA_VERSION).await?;
     metrics.record("mark_migrating", "success");
 
     campaign.set(campaign_id_for_version(*SCHEMA_VERSION));
@@ -168,6 +172,10 @@ async fn run_forward_migration(
     Ok(())
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "migration orchestration wires all collaborators explicitly; grouping into a struct would just move the arity"
+)]
 async fn run_rollback(
     graph: &ArrowClickHouseClient,
     credentials: &DictionaryCredentials,
@@ -258,14 +266,4 @@ async fn acquire_migration_lock(
     let seconds = MAX_LOCK_WAIT_ITERATIONS as u64 * LOCK_POLL_INTERVAL.as_secs();
     metrics.record("acquire_lock", "failure");
     Err(DispatcherMigrationError::LockTimeout { seconds })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn lock_key_is_stable() {
-        assert_eq!(MIGRATION_LOCK_KEY, "schema_migration");
-    }
 }

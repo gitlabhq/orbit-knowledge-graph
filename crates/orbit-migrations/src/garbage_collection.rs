@@ -25,17 +25,35 @@ WHERE database = {database:String} \
       SELECT version FROM gkg_schema_version FINAL WHERE status = 'migrating') \
   AND (SELECT count() FROM gkg_schema_version FINAL WHERE status = 'active') > 0";
 
-pub struct GarbageCollectionResult {
-    pub dropped_versions: Vec<u32>,
-    pub dropped_entity_count: usize,
+#[derive(Debug, Clone)]
+pub struct DroppableEntity {
+    pub version: u32,
+    pub name: String,
+    pub entity_type: &'static str,
 }
 
-pub async fn collect_dead_versions(
+pub struct DropResult {
+    pub succeeded_versions: HashSet<u32>,
+    pub failed_versions: HashSet<u32>,
+    pub entity_count: usize,
+}
+
+impl DropResult {
+    pub fn fully_dropped_versions(&self) -> Vec<u32> {
+        self.succeeded_versions
+            .iter()
+            .filter(|version| !self.failed_versions.contains(version))
+            .copied()
+            .collect()
+    }
+}
+
+pub async fn find_droppable_entities(
     graph: &ArrowClickHouseClient,
     schema: &GraphSchema,
     max_retained_versions: u32,
     preserve_pattern_strings: &[String],
-) -> Result<GarbageCollectionResult, MigrationError> {
+) -> Result<Vec<DroppableEntity>, MigrationError> {
     let retained_count = max_retained_versions.saturating_sub(1);
 
     let batches = graph
@@ -49,10 +67,10 @@ pub async fn collect_dead_versions(
             reason: error.to_string(),
         })?;
 
-    let known_names = ontology_known_entity_names(schema);
+    let known_names = schema.entity_base_names();
     let preserve_patterns = compile_preserve_patterns(preserve_pattern_strings);
 
-    let mut drops: Vec<(u32, String, &str)> = Vec::new();
+    let mut entities = Vec::new();
     for batch in &batches {
         for row in 0..batch.num_rows() {
             let name = ArrowUtils::get_column_string(batch, "name", row).unwrap_or_default();
@@ -71,69 +89,65 @@ pub async fn collect_dead_versions(
                 continue;
             }
 
-            let entity_type = version::entity_type_for_clickhouse_engine(&engine);
-            drops.push((dead_version, name, entity_type));
+            entities.push(DroppableEntity {
+                version: dead_version,
+                name,
+                entity_type: version::entity_type_for_clickhouse_engine(&engine),
+            });
         }
     }
 
-    drops.sort_by_key(|(_, _, entity_type)| match *entity_type {
+    entities.sort_by_key(|entity| match entity.entity_type {
         "DICTIONARY" => 0,
         "VIEW" => 1,
         _ => 2,
     });
 
-    let mut succeeded_versions: HashSet<u32> = HashSet::new();
-    let mut failed_versions: HashSet<u32> = HashSet::new();
-    let dropped_entity_count = drops.len();
+    Ok(entities)
+}
 
-    for (dead_version, entity_name, entity_type) in &drops {
-        let drop_sql = schema::drop_entity_sql(entity_name, entity_type);
+pub async fn drop_entities(
+    graph: &ArrowClickHouseClient,
+    entities: &[DroppableEntity],
+) -> DropResult {
+    let mut succeeded_versions = HashSet::new();
+    let mut failed_versions = HashSet::new();
+
+    for entity in entities {
+        let drop_sql = schema::drop_entity_sql(&entity.name, entity.entity_type);
         match graph.execute(&drop_sql).await {
             Ok(()) => {
-                succeeded_versions.insert(*dead_version);
+                succeeded_versions.insert(entity.version);
             }
             Err(error) => {
                 tracing::warn!(
-                    version = dead_version,
-                    entity = %entity_name,
+                    version = entity.version,
+                    entity = %entity.name,
                     %error,
                     "GC: drop failed"
                 );
-                failed_versions.insert(*dead_version);
+                failed_versions.insert(entity.version);
             }
         }
     }
 
-    let mut dropped_versions = Vec::new();
-    for version in &succeeded_versions {
-        if failed_versions.contains(version) {
-            continue;
-        }
-        if let Err(error) = mark_version_dropped(graph, *version).await {
+    DropResult {
+        succeeded_versions,
+        failed_versions,
+        entity_count: entities.len(),
+    }
+}
+
+pub async fn mark_dropped_versions(graph: &ArrowClickHouseClient, versions: &[u32]) -> Vec<u32> {
+    let mut marked = Vec::new();
+    for &version in versions {
+        if let Err(error) = mark_version_dropped(graph, version).await {
             tracing::warn!(version, %error, "GC: failed to mark version as dropped");
             continue;
         }
-        dropped_versions.push(*version);
+        marked.push(version);
     }
-
-    Ok(GarbageCollectionResult {
-        dropped_versions,
-        dropped_entity_count,
-    })
-}
-
-fn ontology_known_entity_names(schema: &GraphSchema) -> HashSet<String> {
-    let mut names = HashSet::new();
-    for table in &schema.tables {
-        names.insert(table.name.clone());
-    }
-    for view in &schema.views {
-        names.insert(view.name.clone());
-    }
-    for dictionary in &schema.dictionaries {
-        names.insert(dictionary.name.clone());
-    }
-    names
+    marked
 }
 
 fn matches_preserve_pattern(name: &str, patterns: &[regex::Regex]) -> bool {

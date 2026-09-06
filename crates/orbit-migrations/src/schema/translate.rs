@@ -6,7 +6,7 @@ use ontology::{
     StorageProjection,
 };
 
-use super::types::{
+use super::{
     Column, Dictionary, Engine, Index, Projection, RefreshableView, Table, UnversionedDefinition,
     View,
 };

@@ -4,6 +4,7 @@ use std::sync::LazyLock;
 use arrow::datatypes::UInt64Type;
 use clickhouse_client::{ArrowClickHouseClient, FromArrowColumn};
 use orbit_utils::arrow::ArrowUtils;
+use orbit_utils::traversal_path::TopLevelSplit;
 
 use crate::execute::{CHECKPOINT_TABLE, MigrationError};
 use crate::ledger::MigrationLedger;
@@ -62,9 +63,9 @@ pub async fn resolve_migration_scope(
     ))
 }
 
-pub async fn fetch_enabled_namespace_ids(
+pub async fn fetch_enabled_top_level_namespaces(
     datalake: &ArrowClickHouseClient,
-) -> Result<Vec<i64>, MigrationError> {
+) -> Result<TopLevelSplit, MigrationError> {
     let batches = datalake
         .query(&FETCH_ENABLED_NAMESPACES)
         .fetch_arrow()
@@ -99,7 +100,7 @@ pub async fn fetch_enabled_namespace_ids(
         );
     }
 
-    Ok(split.ids)
+    Ok(split)
 }
 
 pub async fn check_sdlc_reindex_progress(

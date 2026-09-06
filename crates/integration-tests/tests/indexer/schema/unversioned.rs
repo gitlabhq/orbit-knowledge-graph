@@ -1,7 +1,7 @@
 use std::{collections::BTreeSet, time::Duration};
 
 use clickhouse_client::FromArrowColumn;
-use indexer::schema::version::{SCHEMA_VERSION, ensure_version_table, write_schema_version};
+use indexer::schema::version::{SCHEMA_VERSION, ensure_version_table, mark_version_active};
 use integration_testkit::{GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL, TestContext, t};
 
 const GLOBAL_TOP_LEVEL_NAMESPACE: &str = "0/";
@@ -69,9 +69,7 @@ impl NamespaceStorageSnapshotScenario {
         let context = TestContext::new(&[SIPHON_SCHEMA_SQL, &GRAPH_SCHEMA_SQL]).await;
         let client = context.create_client();
         ensure_version_table(&client).await.unwrap();
-        write_schema_version(&client, *SCHEMA_VERSION)
-            .await
-            .unwrap();
+        mark_version_active(&client, *SCHEMA_VERSION).await.unwrap();
         Self {
             context,
             ontology: ontology::Ontology::load_embedded().unwrap(),

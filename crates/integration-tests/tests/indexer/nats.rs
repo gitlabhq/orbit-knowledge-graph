@@ -9,7 +9,7 @@ use indexer::indexing_status::INDEXING_PROGRESS_BUCKET;
 use indexer::metrics::EngineMetrics;
 use indexer::nats::NatsBroker;
 use indexer::nats::versioning::{
-    NATS_VERSIONER, NatsVersioner, cleanup_schema_state, gc_idle_release_streams,
+    MANAGED_BUCKETS, NATS_VERSIONER, NatsVersioner, gc_idle_release_streams,
 };
 use indexer::orchestrator::Trigger;
 use indexer::orchestrator::max_deliveries::MaxDeliveriesReconciler;
@@ -773,9 +773,13 @@ async fn release_gc_and_schema_cleanup_delete_their_own_entities() {
     gc_idle_release_streams(&client, Duration::ZERO)
         .await
         .expect("gc_idle_release_streams failed");
-    cleanup_schema_state(&client, schema_version)
-        .await
-        .expect("cleanup_schema_state failed");
+    orbit_migrations::nats::cleanup_schema_version_buckets(
+        &client,
+        schema_version,
+        MANAGED_BUCKETS,
+    )
+    .await
+    .expect("cleanup_schema_version_buckets failed");
 
     for name in &stream_names {
         assert!(
@@ -855,9 +859,9 @@ async fn cleanup_is_idempotent() {
     gc_idle_release_streams(&client, Duration::ZERO)
         .await
         .expect("gc_idle_release_streams failed with no gkg streams present");
-    cleanup_schema_state(&client, 888)
+    orbit_migrations::nats::cleanup_schema_version_buckets(&client, 888, MANAGED_BUCKETS)
         .await
-        .expect("cleanup_schema_state failed for non-existent schema version");
+        .expect("cleanup_schema_version_buckets failed for non-existent schema version");
 }
 
 /// A message that's never ack'd/nack'd/term'd across every `max_deliver` attempt leaves NATS

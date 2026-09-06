@@ -6,12 +6,12 @@ use indexer::checkpoint::ClickHouseCheckpointStore;
 use indexer::locking::LockService;
 use indexer::metrics::MigrationMetrics;
 use indexer::modules::code::config::CodeTableNames;
-use indexer::orchestrator::scheduled::{CodeStaleSweep, migration_completion};
+use indexer::orchestrator::scheduled::CodeStaleSweep;
 use indexer::schema::migration;
 use indexer::schema::version::{
-    SCHEMA_VERSION, SchemaWaitError, ensure_version_table, prefixed_table_name,
-    read_active_version, table_prefix, wait_until_ready, write_migrating_version,
-    write_schema_version,
+    SCHEMA_VERSION, SchemaWaitError, ensure_version_table, mark_version_active,
+    mark_version_migrating, prefixed_table_name, read_active_version, table_prefix,
+    wait_until_ready,
 };
 use indexer::testkit::MockLockService;
 use integration_testkit::{TestContext, t};
@@ -73,7 +73,6 @@ async fn fresh_install_creates_tables_and_records_version() {
         Some(*SCHEMA_VERSION)
     );
 
-    let prefix = table_prefix(*SCHEMA_VERSION);
     let expected_schema = test_schema(&ontology);
 
     let result = ctx
@@ -105,9 +104,7 @@ async fn fresh_install_creates_tables_and_records_version() {
 async fn matching_version_is_noop() {
     let (ctx, ontology, metrics) = setup().await;
     let client = ctx.create_client();
-    write_schema_version(&client, *SCHEMA_VERSION)
-        .await
-        .unwrap();
+    mark_version_active(&client, *SCHEMA_VERSION).await.unwrap();
 
     migration::run_if_needed(
         &client,
@@ -130,7 +127,7 @@ async fn matching_version_is_noop() {
 async fn mismatch_creates_all_ontology_tables_and_marks_migrating() {
     let (ctx, ontology, metrics) = setup().await;
     let client = ctx.create_client();
-    write_schema_version(&client, *SCHEMA_VERSION - 1)
+    mark_version_active(&client, *SCHEMA_VERSION - 1)
         .await
         .unwrap();
 
@@ -145,7 +142,6 @@ async fn mismatch_creates_all_ontology_tables_and_marks_migrating() {
     .await
     .unwrap();
 
-    let prefix = table_prefix(*SCHEMA_VERSION);
     let expected_schema = test_schema(&ontology);
 
     let result = ctx
@@ -189,7 +185,7 @@ async fn mismatch_creates_all_ontology_tables_and_marks_migrating() {
 async fn created_tables_have_correct_columns() {
     let (ctx, ontology, metrics) = setup().await;
     let client = ctx.create_client();
-    write_schema_version(&client, *SCHEMA_VERSION - 1)
+    mark_version_active(&client, *SCHEMA_VERSION - 1)
         .await
         .unwrap();
 
@@ -226,7 +222,7 @@ async fn created_tables_have_correct_columns() {
 async fn idempotent_rerun_succeeds() {
     let (ctx, ontology, metrics) = setup().await;
     let client = ctx.create_client();
-    write_schema_version(&client, *SCHEMA_VERSION - 1)
+    mark_version_active(&client, *SCHEMA_VERSION - 1)
         .await
         .unwrap();
 
@@ -259,7 +255,7 @@ async fn idempotent_rerun_succeeds() {
 async fn lock_released_after_migration() {
     let (ctx, ontology, metrics) = setup().await;
     let client = ctx.create_client();
-    write_schema_version(&client, *SCHEMA_VERSION - 1)
+    mark_version_active(&client, *SCHEMA_VERSION - 1)
         .await
         .unwrap();
 
@@ -284,7 +280,7 @@ async fn lock_released_after_migration() {
 async fn held_lock_causes_timeout() {
     let (ctx, ontology, metrics) = setup().await;
     let client = ctx.create_client();
-    write_schema_version(&client, *SCHEMA_VERSION - 1)
+    mark_version_active(&client, *SCHEMA_VERSION - 1)
         .await
         .unwrap();
 
@@ -316,7 +312,7 @@ async fn held_lock_causes_timeout() {
 async fn mismatch_opens_campaign_steady_state_does_not() {
     let (ctx, ontology, metrics) = setup().await;
     let client = ctx.create_client();
-    write_schema_version(&client, *SCHEMA_VERSION - 1)
+    mark_version_active(&client, *SCHEMA_VERSION - 1)
         .await
         .unwrap();
 
@@ -338,9 +334,7 @@ async fn mismatch_opens_campaign_steady_state_does_not() {
     );
 
     let matching_campaign = campaign();
-    write_schema_version(&client, *SCHEMA_VERSION)
-        .await
-        .unwrap();
+    mark_version_active(&client, *SCHEMA_VERSION).await.unwrap();
     migration::run_if_needed(
         &client,
         &dictionary_credentials(&ctx.config),
@@ -374,7 +368,7 @@ async fn rollback_reactivates_directly_when_embedded_tables_are_intact() {
     .await
     .unwrap();
 
-    write_schema_version(&client, *SCHEMA_VERSION + 1)
+    mark_version_active(&client, *SCHEMA_VERSION + 1)
         .await
         .unwrap();
 
@@ -429,7 +423,7 @@ async fn rollback_rebuilds_when_embedded_tables_are_gone() {
     let (ctx, ontology, metrics) = setup().await;
     let client = ctx.create_client();
 
-    write_schema_version(&client, *SCHEMA_VERSION + 1)
+    mark_version_active(&client, *SCHEMA_VERSION + 1)
         .await
         .unwrap();
 
@@ -464,7 +458,6 @@ async fn rollback_rebuilds_when_embedded_tables_are_gone() {
         "a rebuild rollback marks the embedded version migrating, same as a forward migration"
     );
 
-    let prefix = table_prefix(*SCHEMA_VERSION);
     let expected_schema = test_schema(&ontology);
     let result = ctx
         .query(
@@ -500,7 +493,7 @@ async fn rollback_rebuild_clears_stale_objects_before_recreating() {
     .await
     .unwrap();
 
-    write_schema_version(&client, *SCHEMA_VERSION + 1)
+    mark_version_active(&client, *SCHEMA_VERSION + 1)
         .await
         .unwrap();
 
@@ -586,7 +579,7 @@ async fn lock_released_after_rollback_reactivation() {
     .await
     .unwrap();
 
-    write_schema_version(&client, *SCHEMA_VERSION + 1)
+    mark_version_active(&client, *SCHEMA_VERSION + 1)
         .await
         .unwrap();
 
@@ -617,7 +610,7 @@ async fn lock_released_after_rollback_rebuild() {
     let (ctx, ontology, metrics) = setup().await;
     let client = ctx.create_client();
 
-    write_schema_version(&client, *SCHEMA_VERSION + 1)
+    mark_version_active(&client, *SCHEMA_VERSION + 1)
         .await
         .unwrap();
 
@@ -668,7 +661,7 @@ async fn read_active_version_returns_some_after_write() {
     let client = ctx.create_client();
     ensure_version_table(&client).await.unwrap();
 
-    write_schema_version(&client, 1).await.unwrap();
+    mark_version_active(&client, 1).await.unwrap();
     let version = read_active_version(&client).await.unwrap();
     assert_eq!(version, Some(1));
 }
@@ -689,8 +682,8 @@ async fn repeated_status_write_survives_insert_block_dedup() {
     )
     .await;
 
-    write_migrating_version(&client, 83).await.unwrap();
-    write_migrating_version(&client, 83).await.unwrap();
+    mark_version_migrating(&client, 83).await.unwrap();
+    mark_version_migrating(&client, 83).await.unwrap();
 
     let result = ctx
         .query("SELECT toInt64(count()) AS c FROM gkg_schema_version")
@@ -708,9 +701,7 @@ async fn wait_until_ready_returns_when_version_active() {
     let ctx = TestContext::new(&[]).await;
     let client = ctx.create_client();
     ensure_version_table(&client).await.unwrap();
-    write_schema_version(&client, *SCHEMA_VERSION)
-        .await
-        .unwrap();
+    mark_version_active(&client, *SCHEMA_VERSION).await.unwrap();
 
     wait_until_ready(
         &client,
@@ -727,7 +718,7 @@ async fn wait_until_ready_returns_when_version_migrating() {
     let ctx = TestContext::new(&[]).await;
     let client = ctx.create_client();
     ensure_version_table(&client).await.unwrap();
-    write_migrating_version(&client, *SCHEMA_VERSION)
+    mark_version_migrating(&client, *SCHEMA_VERSION)
         .await
         .unwrap();
 
@@ -763,7 +754,7 @@ async fn wait_until_ready_fails_fast_when_outdated() {
     let ctx = TestContext::new(&[]).await;
     let client = ctx.create_client();
     ensure_version_table(&client).await.unwrap();
-    write_schema_version(&client, *SCHEMA_VERSION + 1)
+    mark_version_active(&client, *SCHEMA_VERSION + 1)
         .await
         .unwrap();
 
@@ -783,10 +774,10 @@ async fn wait_until_ready_ready_when_rebuilding_below_active() {
     let ctx = TestContext::new(&[]).await;
     let client = ctx.create_client();
     ensure_version_table(&client).await.unwrap();
-    write_schema_version(&client, *SCHEMA_VERSION + 1)
+    mark_version_active(&client, *SCHEMA_VERSION + 1)
         .await
         .unwrap();
-    write_migrating_version(&client, *SCHEMA_VERSION)
+    mark_version_migrating(&client, *SCHEMA_VERSION)
         .await
         .unwrap();
 
@@ -807,10 +798,10 @@ fn sdlc(entities: &[&str]) -> MigrationScope {
     MigrationScope::Sdlc(entities.iter().map(|s| s.to_string()).collect())
 }
 
-/// Drives a clone-based migration and its promotion gate, hiding table prefixes and seed timestamps.
 struct MigrationScenario {
     ctx: TestContext,
     ontology: ontology::Ontology,
+    #[expect(dead_code, reason = "held to keep Prometheus metrics registered")]
     metrics: MigrationMetrics,
     active_version: u32,
 }

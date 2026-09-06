@@ -14,8 +14,8 @@ use indexer::orchestrator::scheduled::{
     MigrationCompletionChecker, ScheduledTask, ScheduledTaskMetrics,
 };
 use indexer::schema::version::{
-    SCHEMA_VERSION, ensure_version_table, prefixed_table_name, write_migrating_version,
-    write_schema_version,
+    SCHEMA_VERSION, ensure_version_table, mark_version_active, mark_version_migrating,
+    prefixed_table_name,
 };
 use indexer::topic::{CODE_INDEXING_TASK_SUBJECT_PATTERN, INDEXER_STREAM};
 use orbit_server_config::NatsConfiguration;
@@ -169,8 +169,8 @@ async fn migration_triggers_backfill_for_all_enabled_namespaces() {
 
     let graph = context.clickhouse.create_client();
     ensure_version_table(&graph).await.unwrap();
-    write_schema_version(&graph, 0).await.unwrap();
-    write_migrating_version(&graph, 1).await.unwrap();
+    mark_version_active(&graph, 0).await.unwrap();
+    mark_version_migrating(&graph, 1).await.unwrap();
 
     let services = indexer::orchestrator::scheduled::connect(&context.nats_config())
         .await
@@ -231,8 +231,8 @@ async fn backfill_skips_projects_with_existing_checkpoints() {
 
     let graph = context.clickhouse.create_client();
     ensure_version_table(&graph).await.unwrap();
-    write_schema_version(&graph, 0).await.unwrap();
-    write_migrating_version(&graph, *SCHEMA_VERSION)
+    mark_version_active(&graph, 0).await.unwrap();
+    mark_version_migrating(&graph, *SCHEMA_VERSION)
         .await
         .unwrap();
 
@@ -282,16 +282,16 @@ async fn migration_completion_checker_promotes_rebuilt_rollback_version() {
 
     let graph = context.clickhouse.create_client();
     ensure_version_table(&graph).await.unwrap();
-    write_schema_version(&graph, *SCHEMA_VERSION + 1)
+    mark_version_active(&graph, *SCHEMA_VERSION + 1)
         .await
         .unwrap();
-    write_migrating_version(&graph, *SCHEMA_VERSION)
+    mark_version_migrating(&graph, *SCHEMA_VERSION)
         .await
         .unwrap();
 
     let checkpoint_table = prefixed_table_name("checkpoint", *SCHEMA_VERSION);
     let ontology = ontology::Ontology::load_embedded().unwrap();
-    let invalidated = indexer::schema::invalidation::find_invalidated_pipelines(
+    let invalidated = orbit_migrations::scope::find_invalidated_pipelines(
         &ontology,
         &orbit_migrations::scope::MigrationScope::Full,
     );
@@ -369,14 +369,14 @@ async fn migration_completion_checker_promotes_when_no_namespaces_are_enabled() 
 
     let graph = context.clickhouse.create_client();
     ensure_version_table(&graph).await.unwrap();
-    write_schema_version(&graph, 0).await.unwrap();
-    write_migrating_version(&graph, *SCHEMA_VERSION)
+    mark_version_active(&graph, 0).await.unwrap();
+    mark_version_migrating(&graph, *SCHEMA_VERSION)
         .await
         .unwrap();
 
     let checkpoint_table = prefixed_table_name("checkpoint", *SCHEMA_VERSION);
     let ontology = ontology::Ontology::load_embedded().unwrap();
-    let invalidated = indexer::schema::invalidation::find_invalidated_pipelines(
+    let invalidated = orbit_migrations::scope::find_invalidated_pipelines(
         &ontology,
         &orbit_migrations::scope::MigrationScope::Full,
     );
@@ -433,8 +433,8 @@ async fn migration_completion_checker_does_not_promote_version_it_does_not_embed
 
     let graph = context.clickhouse.create_client();
     ensure_version_table(&graph).await.unwrap();
-    write_schema_version(&graph, *SCHEMA_VERSION).await.unwrap();
-    write_migrating_version(&graph, *SCHEMA_VERSION + 1)
+    mark_version_active(&graph, *SCHEMA_VERSION).await.unwrap();
+    mark_version_migrating(&graph, *SCHEMA_VERSION + 1)
         .await
         .unwrap();
 
@@ -500,10 +500,10 @@ async fn migration_completion_checker_guards_against_two_migrating_versions() {
 
     let graph = context.clickhouse.create_client();
     ensure_version_table(&graph).await.unwrap();
-    write_schema_version(&graph, *SCHEMA_VERSION + 1)
+    mark_version_active(&graph, *SCHEMA_VERSION + 1)
         .await
         .unwrap();
-    write_migrating_version(&graph, *SCHEMA_VERSION)
+    mark_version_migrating(&graph, *SCHEMA_VERSION)
         .await
         .unwrap();
     // created_at is second-precision; +1s prevents a same-second tie with the embedded row.

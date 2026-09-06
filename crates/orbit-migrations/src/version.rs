@@ -98,20 +98,6 @@ pub const STATUS_MIGRATING: &str = "migrating";
 pub const STATUS_RETIRED: &str = "retired";
 pub const STATUS_DROPPED: &str = "dropped";
 
-pub async fn write_schema_version(
-    graph: &ArrowClickHouseClient,
-    version: u32,
-) -> Result<(), SchemaVersionError> {
-    set_version_status(graph, version, STATUS_ACTIVE).await
-}
-
-pub async fn write_migrating_version(
-    graph: &ArrowClickHouseClient,
-    version: u32,
-) -> Result<(), SchemaVersionError> {
-    set_version_status(graph, version, STATUS_MIGRATING).await
-}
-
 pub async fn mark_version_active(
     graph: &ArrowClickHouseClient,
     version: u32,
@@ -126,22 +112,18 @@ pub async fn mark_version_retired(
     set_version_status(graph, version, STATUS_RETIRED).await
 }
 
+pub async fn mark_version_migrating(
+    graph: &ArrowClickHouseClient,
+    version: u32,
+) -> Result<(), SchemaVersionError> {
+    set_version_status(graph, version, STATUS_MIGRATING).await
+}
+
 pub async fn mark_version_dropped(
     graph: &ArrowClickHouseClient,
     version: u32,
 ) -> Result<(), SchemaVersionError> {
     set_version_status(graph, version, STATUS_DROPPED).await
-}
-
-pub fn drop_kind_for_engine(engine: &str) -> &'static str {
-    entity_type_for_clickhouse_engine(engine)
-}
-
-pub async fn list_version_objects(
-    graph: &ArrowClickHouseClient,
-    version: u32,
-) -> Result<Vec<VersionEntity>, SchemaVersionError> {
-    list_version_entities(graph, version).await
 }
 
 async fn set_version_status(

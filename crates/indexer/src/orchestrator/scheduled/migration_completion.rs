@@ -1,30 +1,14 @@
-//! Migration completion detection and dead-version GC.
-//!
-//! Runs as a scheduled task in the DispatchIndexing mode. On each tick:
-//!
-//! 1. **Completion detection** — If a version is in `migrating` state, check
-//!    whether all enabled namespaces have checkpoint entries in the new-prefix
-//!    tables. If so, promote the version to `active` and demote the previously
-//!    active version to `retired`.
-//!
-//! 2. **Version GC** — A single SQL query computes the keep-set (active +
-//!    retained retired + every migrating version) and enumerates all
-//!    `v<N>_*` objects in `system.tables` whose version falls outside it.
-//!    Ontology-known objects are always dropped. Objects not in the
-//!    ontology (rename-orphans, removed entities) are also dropped unless
-//!    their base name matches a `gc_preserve_patterns` regex.
-
-use std::collections::HashSet;
 use std::sync::{Arc, LazyLock};
 
-use crate::schema::invalidation::{CODE_INDEXING_CHECKPOINT_TABLE, MigrationScope};
 use arrow::datatypes::UInt64Type;
 use async_trait::async_trait;
-use clickhouse_client::FromArrowColumn;
+use orbit_migrations::scope::{CODE_INDEXING_CHECKPOINT_TABLE, MigrationScope};
+use orbit_migrations::version::{
+    SCHEMA_VERSION, read_all_versions, read_migrating_version, table_prefix,
+};
 use orbit_server_config::{MigrationCompletionConfig, ScheduleConfiguration, SchemaConfig};
 use orbit_utils::arrow::ArrowUtils;
 use orbit_utils::traversal_path::{TopLevelSplit, TraversalPath};
-
 use tracing::{info, warn};
 
 use crate::campaign::CampaignState;
@@ -32,31 +16,10 @@ use crate::clickhouse::ArrowClickHouseClient;
 use crate::locking::LockService;
 use crate::orchestrator::scheduled::{ScheduledTask, ScheduledTaskMetrics, TaskError};
 use crate::schema::metrics::CompletionMetrics;
-use orbit_migrations::version::{
-    SCHEMA_VERSION, read_all_versions, read_migrating_version, table_prefix,
-};
 
-/// ClickHouse Cloud cluster name. Used for `ON CLUSTER` in commands that
-/// need cross-replica propagation (e.g. `SYSTEM STOP MERGES`).
-const CLICKHOUSE_CLUSTER: &str = "default";
-
-/// NATS KV key used to serialize migration-completion checks across pods.
 const MIGRATION_LOCK_KEY: &str = "schema_migration";
-
-/// NATS KV lock TTL for the completion check.
 const LOCK_TTL: std::time::Duration = std::time::Duration::from_secs(120);
 
-/// Enabled namespaces (id + traversal path) from the datalake.
-static FETCH_ENABLED_NAMESPACES: LazyLock<String> = LazyLock::new(|| {
-    let del = ontology::siphon_deleted_column();
-    format!(
-        "SELECT DISTINCT root_namespace_id, traversal_path \
-         FROM siphon_knowledge_graph_enabled_namespaces \
-         WHERE {del} = false"
-    )
-});
-
-/// Count distinct projects whose top-level namespace is enabled.
 static COUNT_CODE_ELIGIBLE_PROJECTS: LazyLock<String> = LazyLock::new(|| {
     let del = ontology::siphon_deleted_column();
     let top = orbit_utils::traversal_path::TOP_LEVEL_PREFIX_REGEX;
@@ -70,14 +33,6 @@ static COUNT_CODE_ELIGIBLE_PROJECTS: LazyLock<String> = LazyLock::new(|| {
     )
 });
 
-/// SQL to count distinct projects in the new-prefix code indexing
-/// checkpoint table that fall under at least one currently-enabled
-/// namespace traversal path. The numerator of the code-coverage telemetry.
-///
-/// Scoping by the enabled-path set keeps the reported coverage honest:
-/// without it, leftover checkpoint rows from disabled namespaces would
-/// inflate the numerator and produce a misleading "approaching 100%" log
-/// line while currently-enabled namespaces were still under-indexed.
 static COUNT_CODE_CHECKPOINT_PROJECTS_SCOPED: LazyLock<String> = LazyLock::new(|| {
     let top = orbit_utils::traversal_path::TOP_LEVEL_PREFIX_REGEX;
     format!(
@@ -88,38 +43,11 @@ static COUNT_CODE_CHECKPOINT_PROJECTS_SCOPED: LazyLock<String> = LazyLock::new(|
     )
 });
 
-/// Returns every `v<N>_*` object outside the keep-set (active + newest `retired_slots`
-/// retired + every migrating version — a rebuild-rollback migrates *below* active), and
-/// zero rows if no active version exists (safety guard).
-const LIST_DEAD_VERSION_OBJECTS: &str = "\
-SELECT \
-  name, engine, \
-  toUInt32OrZero(extractAll(name, '^v([0-9]+)_')[1]) AS dead_version \
-FROM system.tables \
-WHERE database = {db:String} \
-  AND match(name, '^v[0-9]+_') \
-  AND toUInt32OrZero(extractAll(name, '^v([0-9]+)_')[1]) NOT IN (\
-      SELECT version FROM gkg_schema_version FINAL WHERE status = 'active' \
-      UNION ALL \
-      SELECT version FROM (\
-          SELECT version FROM gkg_schema_version FINAL \
-          WHERE status = 'retired' ORDER BY version DESC LIMIT {retired_slots:UInt32}) \
-      UNION ALL \
-      SELECT version FROM gkg_schema_version FINAL WHERE status = 'migrating') \
-  AND (SELECT count() FROM gkg_schema_version FINAL WHERE status = 'active') > 0";
-
-/// SQL to read the wall-clock age of the row that marked the given version
-/// as `migrating`. Used to populate the `migrating_age_seconds` gauge so
-/// operators can alert on migrations stuck in the migrating state for too
-/// long.
 const READ_MIGRATING_AGE: &str = "\
 SELECT toUInt64(dateDiff('second', created_at, now())) AS age_seconds \
 FROM gkg_schema_version FINAL \
 WHERE status = 'migrating' AND version = {version:UInt32}";
 
-/// Returns namespace IDs whose checkpoint marks every given plan complete (null cursor).
-
-/// Scheduled task that detects migration completion and cleans up old tables.
 pub struct MigrationCompletionChecker {
     graph: ArrowClickHouseClient,
     datalake: ArrowClickHouseClient,
@@ -202,8 +130,6 @@ impl MigrationCompletionChecker {
         Ok(())
     }
 
-    /// Checks whether a `migrating` version has been fully re-indexed and
-    /// should be promoted to `active`.
     async fn check_completion(&self) -> Result<(), TaskError> {
         let migrating = read_migrating_version(&self.graph)
             .await
@@ -214,14 +140,10 @@ impl MigrationCompletionChecker {
             return Ok(());
         };
 
-        // Surface "is migration stuck?" as a direct gauge. A bounded query
-        // failure here shouldn't block completion; log and continue with an
-        // unrecorded age this tick.
         if let Ok(age) = self.fetch_migrating_age(migrating_version).await {
             self.metrics.record_migrating_age(age);
         }
 
-        // Only promote a version this binary embeds; promoting one we don't run would flip us Outdated.
         if migrating_version != *SCHEMA_VERSION {
             return Ok(());
         }
@@ -282,11 +204,6 @@ impl MigrationCompletionChecker {
                 orbit_migrations::version::mark_version_retired(&self.graph, entry.version)
                     .await
                     .map_err(|e| TaskError::new(format!("mark v{} retired: {e}", entry.version)))?;
-                if orbit_server_config::features::enabled(
-                    orbit_server_config::Feature::StopMergesOnRetire,
-                ) {
-                    self.stop_merges_for_version(entry.version).await;
-                }
                 retired_versions.push(entry.version);
             }
         }
@@ -322,44 +239,15 @@ impl MigrationCompletionChecker {
         Ok(())
     }
 
-    /// Returns `true` if all enabled namespaces have checkpoint entries in both
-    /// the new-prefix SDLC and code indexing checkpoint tables.
-    ///
-    /// Migration completion is **SDLC-only**. Code-indexing coverage is
-    /// observed and reported but does not gate promotion: code data fills
-    /// `v{N}_code_indexing_checkpoint` continuously via the `Migration`
-    /// trigger's active backfill sweep regardless of migration state, so
-    /// gating promotion on it would couple a slow process (per-repo archive
-    /// download + indexing) to a fast one (per-namespace SDLC pull) and risk
-    /// stalling rollouts indefinitely when individual projects can't be
-    /// indexed (see the analysis on gitlab-org/orbit/knowledge-graph!1035
-    /// note 3286051182).
-    ///
-    /// Completion is checkpoint-based, not row-count-based. A checkpoint
-    /// entry means the SDLC pipeline ran for that namespace; it does not
-    /// validate the output tables contain the expected number of rows. This
-    /// is the standard pattern for CDC/ETL systems: the checkpoint proves
-    /// the pipeline executed and committed, but silent data-loss bugs
-    /// would not be caught. Full data correctness validation is deferred
-    /// to staging E2E tests (issue #443).
     async fn is_migration_complete(&self, version: u32) -> Result<bool, String> {
         let prefix = table_prefix(version);
 
-        // Enabled top-level namespaces (the reference set). Subgroup paths are
-        // dropped and logged in fetch_enabled_top_level_namespaces; they are never
-        // dispatched, so counting them would wedge the gate forever.
         let enabled_namespaces = self
             .fetch_enabled_top_level_namespaces()
             .await
             .map_err(|e| format!("fetch enabled namespaces: {e}"))?;
         let enabled_count = enabled_namespaces.ids.len() as u64;
 
-        // Code-indexing telemetry. Computed for visibility and emitted as a
-        // structured log field below; explicitly NOT part of the promotion
-        // predicate. The backfill dispatcher fills
-        // `v{N}_code_indexing_checkpoint` after promotion until coverage
-        // approaches 100%, and operators watch the `code_coverage` field on
-        // the "migration completion status" log line to track progress.
         let code_table = format!("{prefix}{CODE_INDEXING_CHECKPOINT_TABLE}");
         let (eligible_projects, indexed_projects, coverage) = self
             .compute_code_coverage(&code_table, &enabled_namespaces.paths)
@@ -388,10 +276,6 @@ impl MigrationCompletionChecker {
             "migration completion status"
         );
 
-        // Story-telling gauges: indexed/eligible per scope, labeled by
-        // version_band. Dashboards compute the ratio; alerts fire on
-        // per-scope thresholds (sdlc < 100% during migration window, code
-        // < 95% for >24h post-promotion, etc.).
         let current = *SCHEMA_VERSION;
         self.metrics.record_units(
             "sdlc",
@@ -424,9 +308,6 @@ impl MigrationCompletionChecker {
         .map_err(|error| format!("resolve migration scope: {error}"))
     }
 
-    /// Reads the wall-clock age (in seconds) of the row that marked the
-    /// given version as `migrating`. Used to populate the
-    /// `gkg.schema.migrating_age_seconds` gauge.
     async fn fetch_migrating_age(&self, version: u32) -> Result<u64, String> {
         let batches = self
             .graph
@@ -442,10 +323,6 @@ impl MigrationCompletionChecker {
             .ok_or_else(|| "no age_seconds in result".to_string())
     }
 
-    /// Returns `(eligible_projects, indexed_projects, coverage_ratio)` for
-    /// the given checkpoint table. Used for telemetry only — the migration
-    /// promotion predicate does not gate on coverage. See [`is_migration_complete`]
-    /// for the rationale.
     async fn compute_code_coverage(
         &self,
         code_table: &str,
@@ -469,33 +346,10 @@ impl MigrationCompletionChecker {
         Ok((eligible_projects, indexed_projects, coverage))
     }
 
-    /// Counts distinct namespaces in a checkpoint table using the given query.
     async fn fetch_enabled_top_level_namespaces(&self) -> Result<TopLevelSplit, String> {
-        let batches = self
-            .datalake
-            .query(&FETCH_ENABLED_NAMESPACES)
-            .fetch_arrow()
+        orbit_migrations::completion::fetch_enabled_top_level_namespaces(&self.datalake)
             .await
-            .map_err(|e| e.to_string())?;
-
-        let ids = i64::extract_column(&batches, 0).map_err(|e| e.to_string())?;
-        let paths = String::extract_column(&batches, 1).map_err(|e| e.to_string())?;
-
-        let split = orbit_utils::traversal_path::split_top_level(
-            ids,
-            paths
-                .into_iter()
-                .map(TraversalPath::new_unchecked)
-                .collect(),
-        );
-        if !split.skipped.is_empty() {
-            warn!(
-                skipped = ?split.skipped,
-                reason = "traversal_path is not a top-level org/namespace path",
-                "excluding enabled namespaces from migration completion gate"
-            );
-        }
-        Ok(split)
+            .map_err(|e| format!("fetch enabled namespaces: {e}"))
     }
 
     async fn count_eligible_projects(&self) -> Result<u64, String> {
@@ -512,10 +366,6 @@ impl MigrationCompletionChecker {
             .ok_or_else(|| "no ns_count in result".to_string())
     }
 
-    /// Counts distinct projects in `code_table` whose `traversal_path` falls
-    /// under at least one of `enabled_paths`. Empty `enabled_paths` short-
-    /// circuits to 0 so the coverage ratio behaves correctly when no
-    /// namespaces are enabled.
     async fn count_scoped_checkpoint_projects(
         &self,
         code_table: &str,
@@ -539,173 +389,49 @@ impl MigrationCompletionChecker {
             .ok_or_else(|| "no ns_count in result".to_string())
     }
 
-    /// Stops background merges on all graph tables for a version so the merge
-    /// pool is reserved for the active version. Best-effort: failures are
-    /// logged but never propagated.
-    ///
-    /// `SYSTEM STOP MERGES` is node-local runtime state (unlike DDL which
-    /// auto-replicates), so it is issued `ON CLUSTER` to reach every replica.
-    async fn stop_merges_for_version(&self, version: u32) {
-        let prefix = table_prefix(version);
-        let db = self.graph.database();
+    async fn reconcile_dead_versions(&self) -> Result<(), TaskError> {
         let schema = orbit_migrations::schema::GraphSchema::from_ontology(&self.ontology);
 
-        for table in &schema.tables {
-            let qualified = format!("{db}.{prefix}{}", table.name);
-            let _ = self
-                .graph
-                .execute(&format!(
-                    "SYSTEM STOP MERGES ON CLUSTER '{CLICKHOUSE_CLUSTER}' {qualified}"
-                ))
-                .await
-                .inspect_err(
-                    |e| warn!(version, table = %qualified, error = %e, "failed to stop merges"),
-                );
-        }
-    }
+        let entities = orbit_migrations::garbage_collection::find_droppable_entities(
+            &self.graph,
+            &schema,
+            self.schema_config.max_retained_versions,
+            self.ontology.gc_preserve_patterns(),
+        )
+        .await
+        .map_err(|e| TaskError::new(format!("find droppable entities: {e}")))?;
 
-    /// Enumerates dead-version objects via `system.tables` (keep-set computed
-    /// in SQL). Ontology-known objects are always dropped. Objects not in the
-    /// ontology are also dropped unless they match a `gc_preserve_patterns`
-    /// regex.
-    async fn reconcile_dead_versions(&self) -> Result<(), TaskError> {
-        let retired_slots = self.schema_config.max_retained_versions.saturating_sub(1);
-        let db = self.graph.database();
+        let result =
+            orbit_migrations::garbage_collection::drop_entities(&self.graph, &entities).await;
 
-        let batches = self
-            .graph
-            .query(LIST_DEAD_VERSION_OBJECTS)
-            .param("db", db)
-            .param("retired_slots", retired_slots)
-            .fetch_arrow()
-            .await
-            .map_err(|e| TaskError::new(format!("list dead version objects: {e}")))?;
-
-        let known_names = ontology_known_names(&self.ontology);
-        let preserve = compile_preserve_patterns(self.ontology.gc_preserve_patterns());
         let current = *SCHEMA_VERSION;
-
-        let mut drops: Vec<(u32, String, &'static str)> = Vec::new();
-        for batch in &batches {
-            for i in 0..batch.num_rows() {
-                let name = ArrowUtils::get_column_string(batch, "name", i)
-                    .ok_or_else(|| TaskError::new("missing name".to_string()))?;
-                let engine = ArrowUtils::get_column_string(batch, "engine", i)
-                    .ok_or_else(|| TaskError::new("missing engine".to_string()))?;
-                let version = ArrowUtils::get_column::<arrow::datatypes::UInt32Type>(
-                    batch,
-                    "dead_version",
-                    i,
-                )
-                .ok_or_else(|| TaskError::new("missing dead_version".to_string()))?;
-
-                let base_name = name.strip_prefix(&format!("v{version}_")).unwrap_or(&name);
-                if !known_names.contains(base_name)
-                    && matches_preserve_pattern(base_name, &preserve)
-                {
-                    info!(version, object = %name, "GC: preserving (matches gc_preserve_patterns)");
-                    continue;
-                }
-
-                let kind = orbit_migrations::version::entity_type_for_clickhouse_engine(&engine);
-                drops.push((version, name, kind));
-            }
-        }
-
-        // Fixed drop order: dictionaries, views, tables. Works for the
-        // current ontology shape (dicts source from tables, no cross-type
-        // cycles). A general migration framework should topo-sort using
-        // system.tables loading_dependencies columns instead.
-        drops.sort_by_key(|(_, _, kind)| match *kind {
-            "DICTIONARY" => 0,
-            "VIEW" => 1,
-            _ => 2,
-        });
-
-        if orbit_server_config::features::enabled(orbit_server_config::Feature::StopMergesOnRetire)
-        {
-            let dead_versions: HashSet<u32> = drops.iter().map(|(v, _, _)| *v).collect();
-            for version in &dead_versions {
-                self.stop_merges_for_version(*version).await;
-            }
-        }
-
-        let mut succeeded: HashSet<u32> = HashSet::new();
-        let mut failed: HashSet<u32> = HashSet::new();
-
-        for (version, name, kind) in &drops {
-            if let Err(e) = self
-                .graph
-                .execute(&format!("DROP {kind} IF EXISTS {name}"))
-                .await
+        for version in result.fully_dropped_versions() {
+            if let Err(e) = orbit_migrations::nats::cleanup_schema_version_buckets(
+                &self.nats_client,
+                version,
+                crate::nats::versioning::MANAGED_BUCKETS,
+            )
+            .await
             {
-                warn!(version, object = %name, error = %e, "GC: drop failed");
-                failed.insert(*version);
-            } else {
-                succeeded.insert(*version);
-            }
-        }
-
-        for version in &succeeded {
-            if failed.contains(version) {
-                self.metrics.record_cleanup(*version, current, "failure");
-                continue;
-            }
-            if let Err(e) =
-                crate::nats::versioning::cleanup_schema_state(&self.nats_client, *version).await
-            {
+                let e = e.to_string();
                 warn!(version, error = %e, "GC: NATS cleanup failed, skipping mark_version_dropped");
-                self.metrics.record_cleanup(*version, current, "failure");
+                self.metrics.record_cleanup(version, current, "failure");
                 continue;
             }
             if let Err(e) =
-                orbit_migrations::version::mark_version_dropped(&self.graph, *version).await
+                orbit_migrations::version::mark_version_dropped(&self.graph, version).await
             {
                 warn!(version, error = %e, "GC: failed to mark dropped");
             }
-            self.metrics.record_cleanup(*version, current, "success");
+            self.metrics.record_cleanup(version, current, "success");
+        }
+
+        for version in &result.failed_versions {
+            self.metrics.record_cleanup(*version, current, "failure");
         }
 
         Ok(())
     }
-}
-
-/// Builds the set of object names the ontology creates (tables, views,
-/// dictionaries) — without any version prefix. Used to validate that a
-/// `v<N>_*` object found in `system.tables` was created by the migration
-/// system and is safe to drop.
-fn ontology_known_names(ontology: &ontology::Ontology) -> HashSet<String> {
-    let schema = orbit_migrations::schema::GraphSchema::from_ontology(ontology);
-    let mut names = HashSet::new();
-    for table in &schema.tables {
-        names.insert(table.name.clone());
-    }
-    for view in &schema.views {
-        names.insert(view.name.clone());
-    }
-    for dictionary in &schema.dictionaries {
-        names.insert(dictionary.name.clone());
-    }
-    names
-}
-
-/// Returns `true` if `name` matches any of the preserve `patterns` (regexes).
-fn matches_preserve_pattern(name: &str, patterns: &[regex::Regex]) -> bool {
-    patterns.iter().any(|re| re.is_match(name))
-}
-
-/// Compiles `gc_preserve_patterns` strings into regexes. Invalid patterns
-/// are logged and skipped so a typo cannot disable the entire GC sweep.
-fn compile_preserve_patterns(raw: &[String]) -> Vec<regex::Regex> {
-    raw.iter()
-        .filter_map(|p| {
-            regex::Regex::new(p)
-                .inspect_err(|e| {
-                    warn!(pattern = %p, error = %e, "gc_preserve_patterns: invalid regex, skipping")
-                })
-                .ok()
-        })
-        .collect()
 }
 
 #[cfg(test)]
