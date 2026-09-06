@@ -24,6 +24,7 @@ stale-mr-sweep:
     STALE_IDLE_DAYS: "14"
     STALE_GRACE_DAYS: "3"
     STALE_LABEL_PREFIX: "stale"
+    STALE_EXCLUDE_LABEL: "Community contribution"
     DRY_RUN: "false"
   rules:
     - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
