@@ -291,6 +291,10 @@ back, not a mistake to refuse. Indexers do not run DDL; they gate on the version
    `maintenance.code_stale_sweep.*` gates so each namespace re-sweeps against the clone. Control tables such as `gkg_schema_version` are never
    prefixed or cloned.
 
+   Before attaching partitions the migration applies pending patch parts on the source table with a
+   synchronous `APPLY PATCHES`, bounded to one hour, because `ATTACH PARTITION FROM` refuses a
+   source that still has them; a timeout fails the migration and the next dispatcher start retries.
+
 5. **Mark migrating** — Insert the new version with status `migrating` in `gkg_schema_version`.
    This signals indexers that the new-prefix tables exist. A newly deployed webserver whose
    embedded version matches this `migrating` row reports readiness state `Migrating`

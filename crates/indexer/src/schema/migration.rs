@@ -41,7 +41,7 @@ use tracing::{info, warn};
 use super::metrics::MigrationMetrics;
 
 use crate::campaign::{CampaignState, campaign_id_for_version};
-use crate::clickhouse::ArrowClickHouseClient;
+use crate::clickhouse::{ArrowClickHouseClient, PATCH_PART_PREFIX};
 use crate::locking::{LockError, LockService};
 use crate::orchestrator::scheduled::code_stale_sweep::CHECKPOINT_KEY_PREFIX as CODE_STALE_SWEEP_CHECKPOINT_KEY_PREFIX;
 use crate::schema::invalidation::find_invalidated_pipelines;
@@ -703,6 +703,7 @@ async fn clone_table(
     }
 
     info!(from = %old_name, to = %new_name, "cloning table from active version");
+    apply_pending_patches(graph, old_name).await?;
     graph
         .execute(&format!(
             "CREATE TABLE IF NOT EXISTS {new_name} AS {old_name}"
@@ -719,6 +720,41 @@ async fn clone_table(
         .await
         .map_err(|e| MigrationError::Ddl {
             table: new_name.to_string(),
+            reason: e.to_string(),
+        })
+}
+
+/// `ATTACH PARTITION FROM` refuses a source with unapplied patch parts; a join-mode patch on a huge part can take hours, so the wait is bounded and the migration retried.
+const APPLY_PATCHES_TIMEOUT_SECS: u64 = 3600;
+
+async fn apply_pending_patches(
+    graph: &ArrowClickHouseClient,
+    table: &str,
+) -> Result<(), MigrationError> {
+    let pending = graph
+        .query(&format!(
+            "SELECT count() AS cnt FROM system.parts WHERE database = currentDatabase() \
+             AND table = '{table}' AND active AND startsWith(name, '{PATCH_PART_PREFIX}')"
+        ))
+        .fetch_arrow()
+        .await
+        .map_err(|e| MigrationError::Ddl {
+            table: table.to_string(),
+            reason: e.to_string(),
+        })?
+        .first()
+        .and_then(|batch| ArrowUtils::get_column::<UInt64Type>(batch, "cnt", 0))
+        .unwrap_or(0);
+    if pending == 0 {
+        return Ok(());
+    }
+    graph
+        .execute(&format!(
+            "ALTER TABLE {table} APPLY PATCHES SETTINGS mutations_sync = 2, max_execution_time = {APPLY_PATCHES_TIMEOUT_SECS}"
+        ))
+        .await
+        .map_err(|e| MigrationError::Ddl {
+            table: table.to_string(),
             reason: e.to_string(),
         })
 }
