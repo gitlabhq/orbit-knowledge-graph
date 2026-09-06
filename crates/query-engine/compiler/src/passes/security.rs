@@ -205,9 +205,7 @@ fn token_nodes_cte(ctx: &SecurityContext, ontology: &Ontology) -> Cte {
         ..Default::default()
     });
     query.union_all.extend(arms);
-    let mut cte = Cte::new("_token_nodes", query);
-    cte.materialized = true;
-    cte
+    Cte::new("_token_nodes", query)
 }
 
 fn endpoint_filter(alias: &str, kind_column: &str, id_column: &str, ctx: &SecurityContext) -> Expr {
@@ -528,7 +526,8 @@ mod tests {
         }));
         apply_security_context(&mut ast, &ctx, &ontology).unwrap();
         let (sql, _) = crate::emit_simple_query(&ast).unwrap();
-        assert!(sql.contains("_token_nodes AS MATERIALIZED"), "{sql}");
+        assert!(sql.contains("_token_nodes AS ("), "{sql}");
+        assert!(!sql.contains("MATERIALIZED"), "{sql}");
         assert!(sql.contains("tuple(e.source_kind, e.source_id)"), "{sql}");
         assert!(sql.contains("tuple(e.target_kind, e.target_id)"), "{sql}");
     }
