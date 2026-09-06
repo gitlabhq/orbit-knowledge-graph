@@ -27,8 +27,8 @@ const REFUSED: &str = "refused";
 const ADMITTED: &str = "admitted";
 /// Bounds the scope tuples and path literals inlined into one code statement.
 const SCOPES_PER_STATEMENT: u64 = 2000;
-/// Each path literal appears four times per statement; 500 keeps it under ClickHouse's default 256 KiB `max_query_size`.
-const PATHS_PER_STATEMENT: usize = 500;
+/// The path list is inlined six times per statement; 32 KiB of literals keeps it under ClickHouse's default 256 KiB `max_query_size`.
+const PATH_LIST_BYTES_PER_STATEMENT: usize = 32 * 1024;
 /// Cron passes land a few seconds after the minute, so an exact interval would skip a pass.
 const PURGE_SLACK: TimeDelta = TimeDelta::seconds(60);
 
@@ -681,6 +681,7 @@ fn group_paths(counts: Vec<(String, u64)>, limit: u64) -> (u64, Vec<PathGroup>) 
     let mut groups = Vec::new();
     let mut group = Vec::new();
     let mut group_size = 0u64;
+    let mut group_bytes = 0usize;
     let mut total = 0u64;
     for (path, count) in counts {
         total += count;
@@ -689,13 +690,17 @@ fn group_paths(counts: Vec<(String, u64)>, limit: u64) -> (u64, Vec<PathGroup>) 
             groups.push(PathGroup::Chunked { path, chunks });
             continue;
         }
-        let full = group.len() >= PATHS_PER_STATEMENT || group_size + count > limit;
+        let bytes = sql::list_item_len(&path);
+        let full =
+            group_bytes + bytes > PATH_LIST_BYTES_PER_STATEMENT || group_size + count > limit;
         if !group.is_empty() && full {
             groups.push(PathGroup::Paths(std::mem::take(&mut group)));
             group_size = 0;
+            group_bytes = 0;
         }
         group.push(path);
         group_size += count;
+        group_bytes += bytes;
     }
     if !group.is_empty() {
         groups.push(PathGroup::Paths(group));
@@ -825,18 +830,18 @@ mod tests {
     }
 
     #[test]
-    fn a_group_never_holds_more_paths_than_one_statement_can_carry() {
-        let counts = (0..PATHS_PER_STATEMENT * 2 + 1)
-            .map(|i| (format!("1/{i}/"), 1))
-            .collect();
+    fn a_group_never_exceeds_the_path_list_byte_budget() {
+        let path = "1/".repeat(50);
+        let per_group = PATH_LIST_BYTES_PER_STATEMENT / sql::list_item_len(&path);
+        let counts = (0..per_group * 2 + 1).map(|_| (path.clone(), 1)).collect();
         let (total, groups) = group_paths(counts, 1_000_000);
-        assert_eq!(total, (PATHS_PER_STATEMENT * 2 + 1) as u64);
+        assert_eq!(total, (per_group * 2 + 1) as u64);
         assert_eq!(
             groups
                 .iter()
                 .map(|group| paths(group).len())
                 .collect::<Vec<_>>(),
-            [PATHS_PER_STATEMENT, PATHS_PER_STATEMENT, 1]
+            [per_group, per_group, 1]
         );
     }
 

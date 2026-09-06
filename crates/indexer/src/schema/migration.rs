@@ -733,7 +733,7 @@ async fn apply_pending_patches(
 ) -> Result<(), MigrationError> {
     let pending = graph
         .query(&format!(
-            "SELECT count() FROM system.parts WHERE database = currentDatabase() \
+            "SELECT count() AS cnt FROM system.parts WHERE database = currentDatabase() \
              AND table = '{table}' AND active AND startsWith(name, '{PATCH_PART_PREFIX}')"
         ))
         .fetch_arrow()
@@ -742,16 +742,9 @@ async fn apply_pending_patches(
             table: table.to_string(),
             reason: e.to_string(),
         })?
-        .iter()
-        .map(|batch| {
-            batch
-                .column(0)
-                .as_any()
-                .downcast_ref::<arrow::array::UInt64Array>()
-                .map(|counts| counts.value(0))
-                .unwrap_or(0)
-        })
-        .sum::<u64>();
+        .first()
+        .and_then(|batch| ArrowUtils::get_column::<UInt64Type>(batch, "cnt", 0))
+        .unwrap_or(0);
     if pending == 0 {
         return Ok(());
     }

@@ -129,6 +129,11 @@ fn list_sql(literals: &[String]) -> String {
 }
 
 /// Lightweight deletes prune parts only by literal predicates, never by `IN (subquery)` sets.
+/// Bytes one literal adds to a `list_sql` rendering, quotes and separator included.
+pub(super) fn list_item_len(literal: &str) -> usize {
+    escape(literal).len() + "'', ".len()
+}
+
 pub(super) fn path_prune_sql(paths: &[String]) -> String {
     format!("{PATH_COLUMN} IN ({})", list_sql(paths))
 }
