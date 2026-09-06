@@ -30,6 +30,13 @@ async fn token_permissions() {
 }
 
 #[tokio::test]
+async fn token_permissions_cost() {
+    let ctx = TestContext::new(&[SIPHON_SCHEMA_SQL, *GRAPH_SCHEMA_SQL]).await;
+    seed(&ctx).await;
+    token_permissions::pinned_edge_permissions_bound_ownership_reads(&ctx).await;
+}
+
+#[tokio::test]
 async fn data_correctness() {
     let ctx = TestContext::new(&[SIPHON_SCHEMA_SQL, *GRAPH_SCHEMA_SQL]).await;
     seed(&ctx).await;

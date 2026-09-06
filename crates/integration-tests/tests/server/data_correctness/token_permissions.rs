@@ -83,3 +83,93 @@ pub(super) async fn denied_page_omits_cursor(ctx: &TestContext) {
     assert!(!pagination.has_more);
     assert!(pagination.next_cursor.is_none());
 }
+
+pub(super) async fn pinned_edge_permissions_bound_ownership_reads(ctx: &TestContext) {
+    use integration_testkit::t;
+
+    let definition = t("gl_definition");
+    ctx.execute(&format!(
+        "INSERT INTO {} (traversal_path, project_id, branch, source_id, source_kind, relationship_kind, target_id, target_kind) VALUES \
+         ('1/100/1000/', 1000, 'main', 13000, 'File', 'DEFINES', 12000, 'Definition'), \
+         ('1/100/1000/', 1000, 'main', 13000, 'File', 'DEFINES', 12001, 'Definition'), \
+         ('1/100/1000/', 1000, 'main', 13000, 'File', 'DEFINES', 12100, 'Definition')",
+        t("gl_code_edge")
+    )).await;
+    let ontology = load_ontology();
+    let entities = ["File", "Definition"];
+    let edge_granularity = ontology
+        .edge_table_config(ontology.edge_table_for_relationship("DEFINES"))
+        .unwrap()
+        .storage
+        .index_granularity
+        .unwrap();
+    let endpoint_checks = 2;
+    let ownership_read_budget = endpoint_checks
+        * entities
+            .iter()
+            .map(|entity| {
+                let node = ontology.get_node(entity).unwrap();
+                let node_granularity = node.storage.settings["index_granularity"]
+                    .parse::<u64>()
+                    .unwrap();
+                u64::from(edge_granularity) + node_granularity
+            })
+            .sum::<u64>();
+    let classic = SecurityContext::new(1, vec!["1/".into()]).unwrap();
+    let mut restricted = classic.clone();
+    restricted.token_scopes = Some(HashMap::from_iter(entities.map(|entity| {
+        (
+            entity.into(),
+            TokenScope::Namespaces(vec!["1/100/1000/".into()].into()),
+        )
+    })));
+    let queries = [
+        r#"{"query_type":"neighbors","nodes":[{"id":"f","entity":"File","node_ids":[13000]}],"neighbors":{"direction":"outgoing","rel_types":["DEFINES"]}}"#,
+        r#"{"query_type":"traversal","nodes":[{"id":"f","entity":"File","node_ids":[13000]},{"id":"d","entity":"Definition"}],"relationships":[{"type":"DEFINES","from":"f","to":"d"}]}"#,
+    ];
+    for (start, unrelated_rows) in [(1_000_000, 10_000), (1_010_000, 100_000)] {
+        ctx.execute(&format!(
+            "INSERT INTO {definition} (id, traversal_path, project_id, branch) \
+             SELECT number + {start}, '1/100/1000/', 1000, 'main' FROM numbers({unrelated_rows})"
+        ))
+        .await;
+        ctx.optimize_all().await;
+        for json in queries {
+            let mut rows_read = Vec::new();
+            for security in [&classic, &restricted] {
+                let compiled = compile(json, &ontology, security).unwrap();
+                let (batches, summary) = ctx
+                    .create_client()
+                    .query(&compiled.base.render())
+                    .with_setting("use_query_cache", "0")
+                    .with_setting("max_threads", "1")
+                    .fetch_arrow_with_summary()
+                    .await
+                    .unwrap();
+                let summary = summary.unwrap();
+                assert_eq!(
+                    batches.iter().map(|batch| batch.num_rows()).sum::<usize>(),
+                    if security.token_scopes.is_some() {
+                        2
+                    } else {
+                        3
+                    }
+                );
+                rows_read.push(summary.read_rows().unwrap());
+            }
+            eprintln!(
+                "unrelated={unrelated_rows} classic_rows={} token_rows={}",
+                rows_read[0], rows_read[1]
+            );
+            assert!(
+                rows_read[1] <= rows_read[0] + ownership_read_budget,
+                "authorization reads exceeded the {ownership_read_budget}-row lookup budget"
+            );
+            let response =
+                run_query_with_security(ctx, json, &allow_all(), restricted.clone()).await;
+            response.assert_node_count(3);
+            response.assert_node_ids("Definition", &[12000, 12001]);
+            response.assert_edge_set("DEFINES", &[(13000, 12000), (13000, 12001)]);
+        }
+    }
+}

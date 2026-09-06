@@ -4,7 +4,7 @@ use regex::Regex;
 
 use serde_json::Value;
 
-use crate::ast::{ChType, Cte, Expr, Node, Query, SelectExpr, TableRef};
+use crate::ast::{ChType, Cte, Expr, Node, Op, Query, SelectExpr, TableRef};
 use crate::constants::{GL_TABLE_PREFIX, TRAVERSAL_PATH_COLUMN, global_tables};
 use crate::error::Result;
 pub use crate::types::SecurityContext;
@@ -43,13 +43,22 @@ pub fn apply_security_context(
     }
     match node {
         Node::Query(q) => {
-            let mut has_edges = false;
-            apply_to_query(q, ctx, ontology, &mut has_edges)?;
-            if has_edges && ctx.token_scopes.is_some() {
-                let mut cte = token_nodes_cte(ctx, ontology);
+            let mut inputs = TokenEdgeInputs::default();
+            apply_to_query(q, ctx, ontology, &mut inputs)?;
+            if ctx.token_scopes.is_some() {
                 let scope = ctx.clone().with_scope_prefixes(Default::default());
-                apply_to_query(&mut cte.query, &scope, ontology, &mut false)?;
-                q.ctes.insert(0, cte);
+                let mut ctes = Vec::new();
+                for (index, query) in inputs.bounded.into_iter().enumerate() {
+                    let name = format!("_token_candidates_{index}");
+                    ctes.push(Cte::new(&name, query));
+                    let mut nodes = token_nodes_cte(&scope, ontology, Some(&name))?;
+                    nodes.name = format!("_token_nodes_{index}");
+                    ctes.push(nodes);
+                }
+                if inputs.unbounded {
+                    ctes.push(token_nodes_cte(&scope, ontology, None)?);
+                }
+                q.ctes.splice(0..0, ctes);
             }
             Ok(())
         }
@@ -61,10 +70,10 @@ fn apply_to_query(
     q: &mut Query,
     ctx: &SecurityContext,
     ontology: &Ontology,
-    has_edges: &mut bool,
+    inputs: &mut TokenEdgeInputs,
 ) -> Result<()> {
     for cte in &mut q.ctes {
-        apply_to_query(&mut cte.query, ctx, ontology, has_edges)?;
+        apply_to_query(&mut cte.query, ctx, ontology, inputs)?;
     }
     let aliased_tables = collect_aliased_tables(&q.from);
     if ctx.token_scopes.is_none() {
@@ -76,10 +85,10 @@ fn apply_to_query(
         );
     }
 
-    apply_security_to_from(&mut q.from, ctx, ontology, has_edges)?;
+    apply_security_to_from(&mut q.from, q.where_clause.as_ref(), ctx, ontology, inputs)?;
 
     if let Some(where_clause) = &mut q.where_clause {
-        apply_security_to_expr(where_clause, ctx, ontology, has_edges)?;
+        apply_security_to_expr(where_clause, ctx, ontology, inputs)?;
     }
 
     for expr in q
@@ -90,10 +99,10 @@ fn apply_to_query(
         .chain(q.order_by.iter_mut().map(|order| &mut order.expr))
         .chain(q.having.iter_mut())
     {
-        apply_security_to_expr(expr, ctx, ontology, has_edges)?;
+        apply_security_to_expr(expr, ctx, ontology, inputs)?;
     }
     for arm in &mut q.union_all {
-        apply_to_query(arm, ctx, ontology, has_edges)?;
+        apply_to_query(arm, ctx, ontology, inputs)?;
     }
 
     Ok(())
@@ -103,20 +112,20 @@ fn apply_security_to_expr(
     expr: &mut Expr,
     ctx: &SecurityContext,
     ontology: &Ontology,
-    has_edges: &mut bool,
+    inputs: &mut TokenEdgeInputs,
 ) -> Result<()> {
     match expr {
-        Expr::InSelect { query, .. } => apply_to_query(query, ctx, ontology, has_edges),
+        Expr::InSelect { query, .. } => apply_to_query(query, ctx, ontology, inputs),
         Expr::BinaryOp { left, right, .. } => {
-            apply_security_to_expr(left, ctx, ontology, has_edges)?;
-            apply_security_to_expr(right, ctx, ontology, has_edges)
+            apply_security_to_expr(left, ctx, ontology, inputs)?;
+            apply_security_to_expr(right, ctx, ontology, inputs)
         }
         Expr::UnaryOp { expr, .. }
         | Expr::Lambda { body: expr, .. }
-        | Expr::InSubquery { expr, .. } => apply_security_to_expr(expr, ctx, ontology, has_edges),
+        | Expr::InSubquery { expr, .. } => apply_security_to_expr(expr, ctx, ontology, inputs),
         Expr::FuncCall { args, .. } => {
             for arg in args {
-                apply_security_to_expr(arg, ctx, ontology, has_edges)?;
+                apply_security_to_expr(arg, ctx, ontology, inputs)?;
             }
             Ok(())
         }
@@ -165,7 +174,104 @@ fn role_filter(alias: &str, table: &str, ctx: &SecurityContext, ontology: &Ontol
     }
 }
 
-fn token_nodes_cte(ctx: &SecurityContext, ontology: &Ontology) -> Cte {
+#[derive(Default)]
+struct TokenEdgeInputs {
+    bounded: Vec<Query>,
+    unbounded: bool,
+}
+
+impl TokenEdgeInputs {
+    fn register(&mut self, scan: TableRef, predicate: Option<&Expr>, role: Expr) -> String {
+        let TableRef::Scan { alias, .. } = &scan else {
+            unreachable!()
+        };
+        let Some(predicate) = predicate
+            .and_then(|expr| local_predicate(expr, alias))
+            .filter(has_id_bound)
+        else {
+            self.unbounded = true;
+            return "_token_nodes".into();
+        };
+        let endpoints = [
+            (SOURCE_KIND_COLUMN, SOURCE_ID_COLUMN),
+            (TARGET_KIND_COLUMN, TARGET_ID_COLUMN),
+        ]
+        .map(|(kind, id)| Expr::func("tuple", vec![Expr::col(alias, kind), Expr::col(alias, id)]));
+        let query = Query {
+            select: vec![SelectExpr::new(
+                Expr::func("arrayJoin", vec![Expr::func("array", endpoints.into())]),
+                "endpoint",
+            )],
+            from: scan,
+            where_clause: Some(Expr::and(role, predicate)),
+            ..Default::default()
+        };
+        let index = self
+            .bounded
+            .iter()
+            .position(|existing| existing == &query)
+            .unwrap_or_else(|| {
+                self.bounded.push(query);
+                self.bounded.len() - 1
+            });
+        format!("_token_nodes_{index}")
+    }
+}
+
+fn local_predicate(expr: &Expr, alias: &str) -> Option<Expr> {
+    match expr {
+        Expr::BinaryOp {
+            op: Op::And,
+            left,
+            right,
+        } => Expr::and_all([local_predicate(left, alias), local_predicate(right, alias)]),
+        _ if is_local_scalar(expr, alias) => Some(expr.clone()),
+        _ => None,
+    }
+}
+
+fn is_local_scalar(expr: &Expr, alias: &str) -> bool {
+    match expr {
+        Expr::Column { table, .. } => table == alias,
+        Expr::Literal(_) | Expr::Param { .. } => true,
+        Expr::BinaryOp { left, right, .. } => {
+            is_local_scalar(left, alias) && is_local_scalar(right, alias)
+        }
+        Expr::UnaryOp { expr, .. } => is_local_scalar(expr, alias),
+        Expr::FuncCall { args, .. } => args.iter().all(|arg| is_local_scalar(arg, alias)),
+        _ => false,
+    }
+}
+
+fn has_id_bound(expr: &Expr) -> bool {
+    match expr {
+        Expr::BinaryOp {
+            op: Op::And,
+            left,
+            right,
+        } => has_id_bound(left) || has_id_bound(right),
+        Expr::BinaryOp {
+            op: Op::Or,
+            left,
+            right,
+        } => has_id_bound(left) && has_id_bound(right),
+        Expr::BinaryOp {
+            op: Op::Eq | Op::In,
+            left,
+            right,
+        } => {
+            matches!(left.as_ref(), Expr::Column { column, .. } if column == SOURCE_ID_COLUMN || column == TARGET_ID_COLUMN)
+                && matches!(right.as_ref(), Expr::Literal(_) | Expr::Param { .. })
+        }
+        _ => false,
+    }
+}
+
+fn token_nodes_cte(
+    ctx: &SecurityContext,
+    ontology: &Ontology,
+    candidates: Option<&str>,
+) -> Result<Cte> {
     let mut arms = ontology
         .nodes()
         .filter(|node| {
@@ -185,10 +291,30 @@ fn token_nodes_cte(ctx: &SecurityContext, ontology: &Ontology) -> Cte {
                 alias: "n".into(),
                 final_: true,
             },
-            where_clause: Some(Expr::eq(
-                Expr::col("n", "_deleted"),
-                Expr::Literal(Value::Bool(false)),
-            )),
+            where_clause: Expr::and_all([
+                Some(crate::passes::shared::deleted_false("n")),
+                candidates.map(|name| Expr::InSelect {
+                    expr: Box::new(Expr::col("n", "id")),
+                    query: Box::new(Query {
+                        select: vec![SelectExpr::new(
+                            Expr::func(
+                                "tupleElement",
+                                vec![Expr::col("c", "endpoint"), Expr::int(2)],
+                            ),
+                            "id",
+                        )],
+                        from: TableRef::scan(name, "c"),
+                        where_clause: Some(Expr::eq(
+                            Expr::func(
+                                "tupleElement",
+                                vec![Expr::col("c", "endpoint"), Expr::int(1)],
+                            ),
+                            Expr::string(&node.name),
+                        )),
+                        ..Default::default()
+                    }),
+                }),
+            ]),
             ..Default::default()
         });
     let mut query = arms.next().unwrap_or_else(|| Query {
@@ -205,10 +331,17 @@ fn token_nodes_cte(ctx: &SecurityContext, ontology: &Ontology) -> Cte {
         ..Default::default()
     });
     query.union_all.extend(arms);
-    Cte::new("_token_nodes", query)
+    apply_to_query(&mut query, ctx, ontology, &mut TokenEdgeInputs::default())?;
+    Ok(Cte::new("_token_nodes", query))
 }
 
-fn endpoint_filter(alias: &str, kind_column: &str, id_column: &str, ctx: &SecurityContext) -> Expr {
+fn endpoint_filter(
+    alias: &str,
+    kind_column: &str,
+    id_column: &str,
+    nodes: &str,
+    ctx: &SecurityContext,
+) -> Expr {
     let membership = Expr::InSelect {
         expr: Box::new(Expr::func(
             "tuple",
@@ -217,7 +350,7 @@ fn endpoint_filter(alias: &str, kind_column: &str, id_column: &str, ctx: &Securi
         query: Box::new(Query {
             select: vec![SelectExpr::col("t", "kind"), SelectExpr::col("t", "id")],
             from: TableRef::Scan {
-                table: "_token_nodes".into(),
+                table: nodes.into(),
                 alias: "t".into(),
                 final_: false,
             },
@@ -311,35 +444,48 @@ pub(crate) fn collect_aliased_tables(table_ref: &TableRef) -> Vec<(String, Strin
 
 fn apply_security_to_from(
     table_ref: &mut TableRef,
+    where_clause: Option<&Expr>,
     ctx: &SecurityContext,
     ontology: &Ontology,
-    has_edges: &mut bool,
+    inputs: &mut TokenEdgeInputs,
 ) -> Result<()> {
     match table_ref {
         TableRef::Union { queries, .. } => {
             for arm in queries {
-                apply_to_query(arm, ctx, ontology, has_edges)?;
+                apply_to_query(arm, ctx, ontology, inputs)?;
             }
         }
-        TableRef::Subquery { query, .. } => apply_to_query(query, ctx, ontology, has_edges)?,
+        TableRef::Subquery { query, .. } => apply_to_query(query, ctx, ontology, inputs)?,
         TableRef::Join {
             left, right, on, ..
         } => {
-            apply_security_to_from(left, ctx, ontology, has_edges)?;
-            apply_security_to_from(right, ctx, ontology, has_edges)?;
-            apply_security_to_expr(on, ctx, ontology, has_edges)?;
+            apply_security_to_from(left, where_clause, ctx, ontology, inputs)?;
+            apply_security_to_from(right, where_clause, ctx, ontology, inputs)?;
+            apply_security_to_expr(on, ctx, ontology, inputs)?;
         }
-        TableRef::Scan { table, alias, .. } => {
+        TableRef::Scan {
+            table,
+            alias,
+            final_,
+        } => {
             let Some(scopes) = &ctx.token_scopes else {
                 return Ok(());
             };
             let token_filter = if let Some(node) = ontology.node_for_table(table) {
                 token_scope_filter(alias, scopes.get(&node.name))
             } else if ontology.is_edge_table(table) {
-                *has_edges = true;
+                let nodes = inputs.register(
+                    TableRef::Scan {
+                        table: table.clone(),
+                        alias: alias.clone(),
+                        final_: *final_,
+                    },
+                    where_clause,
+                    role_filter(alias, table, ctx, ontology),
+                );
                 Expr::and(
-                    endpoint_filter(alias, SOURCE_KIND_COLUMN, SOURCE_ID_COLUMN, ctx),
-                    endpoint_filter(alias, TARGET_KIND_COLUMN, TARGET_ID_COLUMN, ctx),
+                    endpoint_filter(alias, SOURCE_KIND_COLUMN, SOURCE_ID_COLUMN, &nodes, ctx),
+                    endpoint_filter(alias, TARGET_KIND_COLUMN, TARGET_ID_COLUMN, &nodes, ctx),
                 )
             } else {
                 return Ok(());
@@ -465,6 +611,90 @@ mod tests {
             compiled.base.render().contains("false"),
             "{}",
             compiled.base.sql
+        );
+    }
+
+    #[test]
+    fn pinned_edge_permission_scans_use_candidate_ids() {
+        let ontology = Ontology::load_embedded().unwrap();
+        let mut ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
+        ctx.token_scopes = Some(std::collections::HashMap::from_iter(
+            ["File", "Definition"].map(|entity| {
+                (
+                    entity.into(),
+                    TokenScope::Namespaces(vec!["1/10/".into()].into()),
+                )
+            }),
+        ));
+        for json in [
+            r#"{"query_type":"neighbors","nodes":[{"id":"f","entity":"File","node_ids":[42]}],"neighbors":{"direction":"outgoing","rel_types":["DEFINES"]}}"#,
+            r#"{"query_type":"traversal","nodes":[{"id":"f","entity":"File","node_ids":[42]},{"id":"d","entity":"Definition"}],"relationships":[{"type":"DEFINES","from":"f","to":"d"}]}"#,
+        ] {
+            let compiled = crate::compile(json, &ontology, &ctx).unwrap();
+            let sql = &compiled.base.sql;
+            assert!(sql.contains("_token_candidates_0 AS ("), "{sql}");
+            assert_eq!(sql.matches("n.id IN (SELECT").count(), 2, "{sql}");
+            assert!(!sql.contains("MATERIALIZED"), "{sql}");
+        }
+    }
+
+    #[test]
+    fn edge_candidates_exclude_correlated_predicates_and_reuse_identical_scans() {
+        let scan = TableRef::scan("gl_edge", "e");
+        let bound = Expr::eq(Expr::col("e", SOURCE_ID_COLUMN), Expr::int(42));
+        let correlated = Expr::eq(Expr::col("e", TARGET_ID_COLUMN), Expr::col("p", "id"));
+        let nested = Expr::InSelect {
+            expr: Box::new(Expr::col("e", TARGET_ID_COLUMN)),
+            query: Box::new(Query {
+                select: vec![SelectExpr::col("p", "id")],
+                from: TableRef::scan("gl_project", "p"),
+                ..Default::default()
+            }),
+        };
+        let role = starts_with_expr("e", "1/");
+        let mut inputs = TokenEdgeInputs::default();
+        for extra in [correlated, nested] {
+            let predicate = Expr::and(bound.clone(), extra);
+            assert_eq!(
+                inputs.register(scan.clone(), Some(&predicate), role.clone()),
+                "_token_nodes_0"
+            );
+        }
+        assert_eq!(inputs.bounded.len(), 1);
+        assert_eq!(inputs.bounded[0].where_clause, Some(Expr::and(role, bound)));
+    }
+
+    #[test]
+    fn partially_bounded_disjunction_keeps_full_endpoint_checks() {
+        let bound = Expr::eq(Expr::col("e", SOURCE_ID_COLUMN), Expr::int(42));
+        let unbounded = Expr::eq(Expr::col("e", SOURCE_KIND_COLUMN), Expr::string("File"));
+        let predicate = Expr::binary(Op::Or, bound, unbounded);
+        let mut inputs = TokenEdgeInputs::default();
+        assert_eq!(
+            inputs.register(
+                TableRef::scan("gl_edge", "e"),
+                Some(&predicate),
+                starts_with_expr("e", "1/")
+            ),
+            "_token_nodes"
+        );
+        assert!(inputs.unbounded);
+        assert!(inputs.bounded.is_empty());
+    }
+
+    #[test]
+    fn candidate_disjunction_keeps_all_local_branches() {
+        let bound = Expr::eq(Expr::col("e", SOURCE_ID_COLUMN), Expr::int(42));
+        let local = Expr::eq(Expr::col("e", TARGET_ID_COLUMN), Expr::int(43));
+        let other = Expr::eq(Expr::col("p", "id"), Expr::int(44));
+        let predicate = Expr::binary(Op::Or, bound.clone(), local);
+        assert_eq!(local_predicate(&predicate, "e"), Some(predicate.clone()));
+        assert!(has_id_bound(&predicate));
+        let mixed = Expr::binary(Op::Or, bound.clone(), other);
+        assert_eq!(local_predicate(&mixed, "e"), None);
+        assert_eq!(
+            local_predicate(&Expr::and(bound.clone(), mixed), "e"),
+            Some(bound)
         );
     }
 
