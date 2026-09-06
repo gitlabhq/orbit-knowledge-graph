@@ -13,7 +13,6 @@ orbit-versions = { path = "../orbit-versions" }
 orbit-utils = { path = "../utils" }
 regex = { workspace = true }
 serde = { workspace = true }
-serde-saphyr = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true }
