@@ -5,10 +5,12 @@ pub struct ResourceCheck {
     pub resource_type: String,
     pub ids: Vec<i64>,
     pub ability: String,
+    pub permission: String,
 }
 
 #[derive(Debug, Clone)]
 pub struct ResourceAuthorization {
     pub resource_type: String,
+    pub ability: String,
     pub authorized: HashMap<i64, bool>,
 }

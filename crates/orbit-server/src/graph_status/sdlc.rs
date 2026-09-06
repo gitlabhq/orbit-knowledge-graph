@@ -4,6 +4,7 @@ use futures::stream::{FuturesUnordered, StreamExt};
 use indexer::indexing_status::{IndexingProgress, IndexingStatusStore};
 use ontology::{EtlScope, Ontology};
 use orbit_utils::traversal_path::TraversalPath;
+use query_engine::compiler::SecurityContext;
 use tracing::warn;
 
 use super::{state_priority, status_with_state, unknown_status};
@@ -20,6 +21,8 @@ pub async fn get_sdlc_indexing_state(
     store: Option<&IndexingStatusStore>,
     ontology: &Ontology,
     traversal_path: &TraversalPath,
+    security: &SecurityContext,
+    project_scope: bool,
 ) -> SdlcIndexingState {
     let Some(store) = store else {
         return SdlcIndexingState {
@@ -28,7 +31,14 @@ pub async fn get_sdlc_indexing_state(
         };
     };
 
-    let reads = fetch_pipeline_progress(store, ontology, traversal_path).await;
+    let names = visible_pipeline_names(ontology, traversal_path, security, project_scope);
+    if names.is_empty() {
+        return SdlcIndexingState {
+            aggregate: None,
+            node_states: HashMap::new(),
+        };
+    }
+    let reads = fetch_pipeline_progress(store, &names, traversal_path).await;
 
     if reads.pipelines.is_empty() && reads.read_errors > 0 {
         return SdlcIndexingState {
@@ -41,6 +51,32 @@ pub async fn get_sdlc_indexing_state(
     SdlcIndexingState {
         aggregate: Some(aggregate_status(&reads)),
         node_states: resolve_node_states(ontology, &pipeline_states),
+    }
+}
+
+fn visible_pipeline_names(
+    ontology: &Ontology,
+    traversal_path: &TraversalPath,
+    security: &SecurityContext,
+    project_scope: bool,
+) -> Vec<String> {
+    if security.token_scopes.is_some() {
+        ontology
+            .nodes()
+            .filter(|node| {
+                project_scope && super::token_allows_path(security, &node.name, traversal_path)
+            })
+            .flat_map(|node| {
+                node.pipelines
+                    .iter()
+                    .filter(|pipeline| pipeline.scope == EtlScope::Namespaced)
+                    .map(|p| p.name.clone())
+            })
+            .collect::<std::collections::HashSet<_>>()
+            .into_iter()
+            .collect()
+    } else {
+        namespaced_pipeline_names(ontology)
     }
 }
 
@@ -57,13 +93,11 @@ struct PipelineProgress {
 
 async fn fetch_pipeline_progress(
     store: &IndexingStatusStore,
-    ontology: &Ontology,
+    names: &[String],
     traversal_path: &TraversalPath,
 ) -> PipelineReads {
-    let names = namespaced_pipeline_names(ontology);
-
     let mut futures = FuturesUnordered::new();
-    for name in &names {
+    for name in names {
         futures.push(async move { (name.as_str(), store.get_entity(traversal_path, name).await) });
     }
 
@@ -208,6 +242,21 @@ mod tests {
                 .collect(),
             read_errors: 0,
         }
+    }
+
+    #[test]
+    fn restricted_progress_excludes_group_aggregates_and_denied_features() {
+        let ontology = Ontology::load_embedded().unwrap();
+        let path = TraversalPath::from("1/10/");
+        let mut security = SecurityContext::new(1, vec!["1/".into()]).unwrap();
+        security.token_scopes = Some(HashMap::from([(
+            "MergeRequest".into(),
+            query_engine::compiler::TokenScope::Namespaces(vec![path.clone()].into()),
+        )]));
+        assert!(visible_pipeline_names(&ontology, &path, &security, false).is_empty());
+        let names = visible_pipeline_names(&ontology, &path, &security, true);
+        assert!(names.iter().any(|name| name == "MergeRequest"));
+        assert!(!names.iter().any(|name| name == "Vulnerability"));
     }
 
     #[test]

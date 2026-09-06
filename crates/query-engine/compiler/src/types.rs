@@ -74,6 +74,15 @@ impl AuthorizedPath {
     }
 }
 
+#[derive(Debug, Clone, Default)]
+pub enum TokenScope {
+    #[default]
+    Denied,
+    All,
+    Namespaces(std::sync::Arc<Vec<TraversalPath>>),
+    Resources(std::sync::Arc<Vec<i64>>),
+}
+
 /// Security context for request-level isolation.
 ///
 /// Contains the org ID and traversal paths used to scope queries to
@@ -87,6 +96,7 @@ impl AuthorizedPath {
 /// only have Reporter access.
 #[derive(Debug, Clone)]
 pub struct SecurityContext {
+    pub token_scopes: Option<HashMap<String, TokenScope>>,
     pub org_id: i64,
     pub traversal_paths: Vec<AuthorizedPath>,
     pub admin: bool,
@@ -130,6 +140,7 @@ impl SecurityContext {
             }
         }
         Ok(Self {
+            token_scopes: None,
             org_id,
             traversal_paths,
             admin: false,

@@ -80,6 +80,8 @@ pub struct RedactionService;
 impl RedactionService {
     pub async fn request_authorization<M: RedactionMessage>(
         resources: &[ResourceCheck],
+        check_boundaries: bool,
+        require_ability: bool,
         tx: &mpsc::Sender<Result<M, Status>>,
         stream: &mut Streaming<M>,
     ) -> Result<RedactionExchangeResult, RedactionExchangeError> {
@@ -91,7 +93,7 @@ impl RedactionService {
                 resource_type: r.resource_type.clone(),
                 resource_ids: r.ids.clone(),
                 abilities: vec![r.ability.clone()],
-                permission: String::new(),
+                permission: r.permission.clone(),
             })
             .collect();
 
@@ -105,7 +107,7 @@ impl RedactionService {
             content: Some(redaction_exchange::Content::Required(RedactionRequired {
                 result_id: result_id.clone(),
                 resources: proto_resources,
-                check_boundaries: false,
+                check_boundaries,
             })),
         };
 
@@ -145,19 +147,65 @@ impl RedactionService {
         let authorizations = redaction_response
             .authorizations
             .into_iter()
-            .map(|a| ResourceAuthorization {
-                resource_type: a.resource_type,
-                authorized: a.authorized,
+            .map(|a| {
+                let ability =
+                    response_ability(&a.resource_type, &a.ability, resources, require_ability)?;
+                Ok(ResourceAuthorization {
+                    resource_type: a.resource_type,
+                    ability,
+                    authorized: a.authorized,
+                })
             })
-            .collect();
+            .collect::<Result<Vec<_>, RedactionExchangeError>>()?;
 
         Ok(RedactionExchangeResult { authorizations })
+    }
+}
+
+fn response_ability(
+    resource_type: &str,
+    ability: &str,
+    resources: &[ResourceCheck],
+    require_ability: bool,
+) -> Result<String, RedactionExchangeError> {
+    if !ability.is_empty() {
+        return Ok(ability.to_string());
+    }
+    let mut matching = resources
+        .iter()
+        .filter(|r| r.resource_type == resource_type);
+    match (require_ability, matching.next(), matching.next()) {
+        (false, Some(resource), None) => Ok(resource.ability.clone()),
+        _ => Err(RedactionExchangeError::InvalidMessage(
+            "authorization response must identify its ability",
+        )),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn legacy_response_ability_requires_one_classic_operation() {
+        let project = ResourceCheck {
+            resource_type: "project".into(),
+            ability: "read_project".into(),
+            permission: "read_project".into(),
+            ids: vec![1],
+        };
+        let code = ResourceCheck {
+            ability: "read_code".into(),
+            permission: "read_code".into(),
+            ..project.clone()
+        };
+        assert_eq!(
+            response_ability("project", "", std::slice::from_ref(&project), false).unwrap(),
+            "read_project"
+        );
+        assert!(response_ability("project", "", std::slice::from_ref(&project), true).is_err());
+        assert!(response_ability("project", "", &[project, code], false).is_err());
+    }
 
     #[test]
     fn test_redaction_exchange_error_into_status() {

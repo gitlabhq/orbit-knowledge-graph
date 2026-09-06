@@ -48,6 +48,7 @@ impl DummyClaims for orbit_server::auth::Claims {
             user_id: 1,
             username: "test".into(),
             admin: true,
+            token_authorization_required: false,
             organization_id: Some(1),
             min_access_level: Some(AccessLevel::Owner as u32),
             group_traversal_ids: vec![orbit_server::auth::TraversalPathClaim {

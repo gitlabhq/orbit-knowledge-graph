@@ -270,7 +270,7 @@ impl QueryResult {
     }
 
     pub fn resource_checks(&self) -> Vec<ResourceCheck> {
-        let mut ids: HashMap<(&str, &str), HashSet<i64>> = HashMap::new();
+        let mut ids: HashMap<(&str, &str, &str), HashSet<i64>> = HashMap::new();
 
         for row in &self.rows {
             for redaction_node in self.ctx.nodes() {
@@ -280,9 +280,13 @@ impl QueryResult {
                 let Some(auth) = self.ctx.get_entity_auth(&node_ref.entity_type) else {
                     continue;
                 };
-                ids.entry((auth.resource_type.as_str(), auth.ability.as_str()))
-                    .or_default()
-                    .insert(node_ref.id);
+                ids.entry((
+                    auth.resource_type.as_str(),
+                    auth.ability.as_str(),
+                    auth.permission.as_str(),
+                ))
+                .or_default()
+                .insert(node_ref.id);
             }
 
             for node_ref in &row.dynamic_nodes {
@@ -297,18 +301,25 @@ impl QueryResult {
                 } else {
                     node_ref.id
                 };
-                ids.entry((auth.resource_type.as_str(), auth.ability.as_str()))
-                    .or_default()
-                    .insert(auth_id);
+                ids.entry((
+                    auth.resource_type.as_str(),
+                    auth.ability.as_str(),
+                    auth.permission.as_str(),
+                ))
+                .or_default()
+                .insert(auth_id);
             }
         }
 
         ids.into_iter()
-            .map(|((resource_type, ability), ids)| ResourceCheck {
-                resource_type: resource_type.to_string(),
-                ids: ids.into_iter().collect(),
-                ability: ability.to_string(),
-            })
+            .map(
+                |((resource_type, ability, permission), ids)| ResourceCheck {
+                    resource_type: resource_type.to_string(),
+                    ids: ids.into_iter().collect(),
+                    ability: ability.to_string(),
+                    permission: permission.to_string(),
+                },
+            )
             .collect()
     }
 
@@ -381,7 +392,7 @@ fn is_authorized(
     };
     let Some(auth) = authorizations
         .iter()
-        .find(|a| a.resource_type == auth_config.resource_type)
+        .find(|a| a.resource_type == auth_config.resource_type && a.ability == auth_config.ability)
     else {
         return false;
     };
@@ -474,6 +485,7 @@ mod tests {
             EntityAuthConfig {
                 resource_type: "user".to_string(),
                 ability: "read_user".to_string(),
+                permission: "read_user".to_string(),
                 auth_id_column: "id".to_string(),
                 owner_entity: None,
                 required_access_level: 20,
@@ -484,6 +496,7 @@ mod tests {
             EntityAuthConfig {
                 resource_type: "project".to_string(),
                 ability: "read".to_string(),
+                permission: "read".to_string(),
                 auth_id_column: "id".to_string(),
                 owner_entity: None,
                 required_access_level: 20,
@@ -496,10 +509,12 @@ mod tests {
         vec![
             ResourceAuthorization {
                 resource_type: "user".to_string(),
+                ability: "read_user".to_string(),
                 authorized: [(1, true), (2, true), (3, true)].into_iter().collect(),
             },
             ResourceAuthorization {
                 resource_type: "project".to_string(),
+                ability: "read".to_string(),
                 authorized: [(100, true), (200, true), (300, true)]
                     .into_iter()
                     .collect(),
@@ -541,6 +556,15 @@ mod tests {
             let cloned = original.clone();
             assert_eq!(original, cloned);
         }
+    }
+
+    #[test]
+    fn authorization_does_not_cross_resource_abilities() {
+        let mut result = QueryResult::from_batches(&[make_test_batch()], &test_ctx());
+        let mut authorizations = full_auth();
+        authorizations[1].ability = "read_code".to_string();
+        assert_eq!(result.apply_authorizations(&authorizations), 3);
+        assert_eq!(result.authorized_count(), 0);
     }
 
     mod query_result_row_tests {
@@ -811,10 +835,12 @@ mod tests {
             let authorizations = vec![
                 ResourceAuthorization {
                     resource_type: "user".to_string(),
+                    ability: "read_user".to_string(),
                     authorized: [(1, true), (2, true), (3, true)].into_iter().collect(),
                 },
                 ResourceAuthorization {
                     resource_type: "project".to_string(),
+                    ability: "read".to_string(),
                     authorized: [(100, true), (200, false), (300, true)]
                         .into_iter()
                         .collect(),
@@ -837,10 +863,12 @@ mod tests {
             let authorizations = vec![
                 ResourceAuthorization {
                     resource_type: "user".to_string(),
+                    ability: "read_user".to_string(),
                     authorized: [(1, false), (2, true), (3, false)].into_iter().collect(),
                 },
                 ResourceAuthorization {
                     resource_type: "project".to_string(),
+                    ability: "read".to_string(),
                     authorized: [(100, true), (200, true), (300, true)]
                         .into_iter()
                         .collect(),
@@ -881,6 +909,7 @@ mod tests {
 
             let authorizations = vec![ResourceAuthorization {
                 resource_type: "user".to_string(),
+                ability: "read_user".to_string(),
                 authorized: [(1, true), (2, true), (3, true)].into_iter().collect(),
             }];
 
@@ -897,10 +926,12 @@ mod tests {
             let authorizations = vec![
                 ResourceAuthorization {
                     resource_type: "user".to_string(),
+                    ability: "read_user".to_string(),
                     authorized: [(1, true)].into_iter().collect(),
                 },
                 ResourceAuthorization {
                     resource_type: "project".to_string(),
+                    ability: "read".to_string(),
                     authorized: [(100, true), (200, true), (300, true)]
                         .into_iter()
                         .collect(),
@@ -937,6 +968,7 @@ mod tests {
                 EntityAuthConfig {
                     resource_type: "user".to_string(),
                     ability: "read_user".to_string(),
+                    permission: "read_user".to_string(),
                     auth_id_column: "id".to_string(),
                     owner_entity: None,
                     required_access_level: 20,
@@ -947,6 +979,7 @@ mod tests {
                 EntityAuthConfig {
                     resource_type: "project".to_string(),
                     ability: "read_code".to_string(),
+                    permission: "read_code".to_string(),
                     auth_id_column: "project_id".to_string(),
                     owner_entity: Some("Project".to_string()),
                     required_access_level: 20,
@@ -959,10 +992,12 @@ mod tests {
             let authorizations = vec![
                 ResourceAuthorization {
                     resource_type: "user".to_string(),
+                    ability: "read_user".to_string(),
                     authorized: [(1, true)].into_iter().collect(),
                 },
                 ResourceAuthorization {
                     resource_type: "project".to_string(),
+                    ability: "read_code".to_string(),
                     authorized: [(1000, true)].into_iter().collect(),
                 },
             ];
@@ -990,6 +1025,7 @@ mod tests {
                 EntityAuthConfig {
                     resource_type: "project".to_string(),
                     ability: "read_code".to_string(),
+                    permission: "read_code".to_string(),
                     auth_id_column: "id".to_string(),
                     owner_entity: None,
                     required_access_level: 20,
@@ -1000,6 +1036,7 @@ mod tests {
                 EntityAuthConfig {
                     resource_type: "project".to_string(),
                     ability: "read_code".to_string(),
+                    permission: "read_code".to_string(),
                     auth_id_column: "project_id".to_string(),
                     owner_entity: Some("Project".to_string()),
                     required_access_level: 20,
@@ -1011,6 +1048,7 @@ mod tests {
 
             let authorizations = vec![ResourceAuthorization {
                 resource_type: "project".to_string(),
+                ability: "read_code".to_string(),
                 authorized: [(1000, true)].into_iter().collect(),
             }];
 
@@ -1037,6 +1075,7 @@ mod tests {
                 EntityAuthConfig {
                     resource_type: "project".to_string(),
                     ability: "read_code".to_string(),
+                    permission: "read_code".to_string(),
                     auth_id_column: "project_id".to_string(),
                     owner_entity: Some("Project".to_string()),
                     required_access_level: 20,
@@ -1047,6 +1086,7 @@ mod tests {
                 EntityAuthConfig {
                     resource_type: "project".to_string(),
                     ability: "read_code".to_string(),
+                    permission: "read_code".to_string(),
                     auth_id_column: "project_id".to_string(),
                     owner_entity: Some("Project".to_string()),
                     required_access_level: 20,
@@ -1058,6 +1098,7 @@ mod tests {
 
             let authorizations = vec![ResourceAuthorization {
                 resource_type: "project".to_string(),
+                ability: "read_code".to_string(),
                 authorized: [(1000, true)].into_iter().collect(),
             }];
 

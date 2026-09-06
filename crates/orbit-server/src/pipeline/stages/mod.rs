@@ -10,4 +10,4 @@ pub use execution::ClickHouseExecutor;
 pub use hydration::HydrationStage;
 pub use path_resolution::PathResolutionStage;
 pub use redaction::RedactionStage;
-pub use security::SecurityStage;
+pub use security::{SecurityStage, TokenAuthorizationStage};

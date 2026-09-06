@@ -306,6 +306,15 @@
           "type": "string",
           "description": "Rails ability to check (e.g., 'read_project'). If not specified, uses the default ability for the resource type."
         },
+        "token_boundary": {
+          "type": "string",
+          "enum": ["namespace", "user", "resource", "unsupported"]
+        },
+        "permission": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Token permission for this entity. Defaults to the Rails ability."
+        },
         "required_role": {
           "type": "string",
           "enum": [

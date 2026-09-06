@@ -67,6 +67,7 @@ mod tests {
             EntityAuthConfig {
                 resource_type: "project".to_string(),
                 ability: "read".to_string(),
+                permission: "read".to_string(),
                 auth_id_column: "id".to_string(),
                 owner_entity: None,
                 required_access_level: 20,
@@ -92,6 +93,7 @@ mod tests {
     async fn denied_rows_are_redacted() {
         let auth = vec![ResourceAuthorization {
             resource_type: "project".to_string(),
+            ability: "read".to_string(),
             authorized: [(10, true), (20, false), (30, true)].into_iter().collect(),
         }];
         let mut ctx = seed_ctx(auth);

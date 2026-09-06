@@ -42,7 +42,7 @@ pub use entities::{
     FieldSource, MaterializedViewDefinition, NodeEntity, NodeStorage, NodeStyle, PartitionConfig,
     PartitionStrategy, RedactionConfig, RefreshableMaterializedViewDefinition, RequiredRole,
     StatisticsConfig, StatisticsExclude, StorageColumn, StorageIndex, StorageProjection,
-    TraversalPathKind, TraversalPathLookup, TraversalPathLookupSpec, VirtualSource,
+    TokenBoundary, TraversalPathKind, TraversalPathLookup, TraversalPathLookupSpec, VirtualSource,
 };
 pub use etl::{
     ClickHouseExtract, ClickHouseExtractLookup, ClickHouseExtractLookupSource, DEFAULT_TRANSFORM,
@@ -539,6 +539,8 @@ impl Ontology {
             resource_type: resource_type.into(),
             id_column: id_column.into(),
             ability: "read".to_string(),
+            permission: None,
+            token_boundary: TokenBoundary::Namespace,
             required_role: RequiredRole::Reporter,
         });
         self
@@ -760,12 +762,16 @@ impl Ontology {
     /// role.
     #[must_use]
     pub fn min_access_level_for_table(&self, table: &str) -> Option<u32> {
+        self.node_for_table(table)
+            .and_then(|n| n.redaction.as_ref())
+            .map(|r| r.required_role.as_access_level())
+    }
+
+    pub fn node_for_table(&self, table: &str) -> Option<&NodeEntity> {
         let normalized = strip_schema_version_prefix(table);
         self.nodes
             .values()
-            .find(|n| strip_schema_version_prefix(&n.destination_table) == normalized)
-            .and_then(|n| n.redaction.as_ref())
-            .map(|r| r.required_role.as_access_level())
+            .find(|node| strip_schema_version_prefix(&node.destination_table) == normalized)
     }
 
     /// Iterator over names of `admin_only` fields on the given entity.
@@ -2479,9 +2485,7 @@ mod tests {
     fn redaction_config_core_nodes() {
         let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
 
-        // Temporary: aligned with source-code entities to avoid duplicate
-        // resource_type entries in the redaction callback. See #570.
-        assert_redaction(&ontology, "Project", "project", "id", "read_code");
+        assert_redaction(&ontology, "Project", "project", "id", "read_project");
         assert_redaction(&ontology, "Group", "group", "id", "read_group");
         assert_redaction(&ontology, "User", "user", "id", "read_user");
         assert_redaction(&ontology, "Note", "note", "id", "read_note");

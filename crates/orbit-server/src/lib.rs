@@ -13,5 +13,6 @@ pub mod redaction;
 pub mod schema_watcher;
 pub mod shutdown;
 pub mod tls;
+mod token_authorization;
 pub mod tools;
 pub mod webserver;

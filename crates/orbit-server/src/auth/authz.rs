@@ -31,7 +31,8 @@ pub fn build_security_context(claims: &Claims) -> Result<SecurityContext, String
         .and_then(|s| serde_json::from_value(serde_json::Value::String(s.to_string())).ok());
 
     SecurityContext::new_with_roles(org_id, traversal_paths)
-        .map(|sc| {
+        .map(|mut sc| {
+            sc.token_scopes = claims.token_authorization_required.then(Default::default);
             sc.with_role(claims.admin, claims.min_access_level)
                 .with_realm(realm)
                 .with_team_member(claims.is_gitlab_team_member.unwrap_or(false))
@@ -59,6 +60,7 @@ mod tests {
             user_id: 1,
             username: "test_user".to_string(),
             admin,
+            token_authorization_required: false,
             organization_id,
             min_access_level: Some(20),
             group_traversal_ids,

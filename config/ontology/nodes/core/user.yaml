@@ -15,6 +15,7 @@ style:
   color: "#10B981"
 
 redaction:
+  token_boundary: user
   resource_type: user
   id_column: id
   ability: read_user

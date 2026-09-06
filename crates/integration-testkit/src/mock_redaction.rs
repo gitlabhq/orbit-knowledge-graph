@@ -59,6 +59,7 @@ impl MockRedactionService {
 
                 ResourceAuthorization {
                     resource_type: check.resource_type.clone(),
+                    ability: check.ability.clone(),
                     authorized,
                 }
             })

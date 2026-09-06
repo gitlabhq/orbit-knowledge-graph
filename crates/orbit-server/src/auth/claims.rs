@@ -28,6 +28,8 @@ pub struct Claims {
     #[serde(default)]
     pub admin: bool,
     #[serde(default)]
+    pub token_authorization_required: bool,
+    #[serde(default)]
     pub organization_id: Option<u64>,
     #[serde(default)]
     pub min_access_level: Option<u32>,

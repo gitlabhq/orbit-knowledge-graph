@@ -287,30 +287,36 @@ impl RequiredRole {
 
 /// Redaction configuration for an entity.
 ///
-/// Defines how this entity should be validated against Rails' RedactionService
-/// to ensure users have permission to view the entity.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TokenBoundary {
+    #[default]
+    Namespace,
+    User,
+    Resource,
+    Unsupported,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct RedactionConfig {
-    /// Rails resource type (e.g., "projects", "merge_requests", "groups", "users").
-    /// This maps to the key used in `Authz::RedactionService::RESOURCE_CLASSES`.
     pub resource_type: String,
-    /// Column containing the ID for redaction (defaults to "id").
     #[serde(default = "RedactionConfig::default_id_column")]
     pub id_column: String,
-    /// The ability to check for this resource (e.g., "read_project", "read_group").
-    /// Defaults to "read".
     #[serde(default = "RedactionConfig::default_ability")]
     pub ability: String,
-    /// Minimum GitLab role required on a traversal path for rows of this
-    /// entity to survive the compiler security pass. Defaults to `Reporter`
-    /// to preserve the pre-role-scoping behavior for entities that did not
-    /// opt in. Set to `SecurityManager` (or stricter) for entities whose
-    /// ability is only granted at that level, e.g. `read_vulnerability`.
+    #[serde(default)]
+    pub permission: Option<String>,
+    #[serde(default)]
+    pub token_boundary: TokenBoundary,
     #[serde(default = "RedactionConfig::default_required_role")]
     pub required_role: RequiredRole,
 }
 
 impl RedactionConfig {
+    pub fn permission(&self) -> &str {
+        self.permission.as_deref().unwrap_or(&self.ability)
+    }
+
     fn default_id_column() -> String {
         "id".to_string()
     }

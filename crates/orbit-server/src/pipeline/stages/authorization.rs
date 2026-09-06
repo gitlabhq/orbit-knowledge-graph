@@ -46,6 +46,10 @@ impl PipelineStage for AuthorizationStage {
                 })
                 .inspect_err(|e| obs.record_error(e))?
                 .clone();
+            let require_ability = ctx
+                .security_context
+                .as_ref()
+                .is_some_and(|sc| sc.token_scopes.is_some());
             let stream = ctx
                 .server_extensions
                 .get_mut::<Streaming<ExecuteQueryMessage>>()
@@ -53,11 +57,17 @@ impl PipelineStage for AuthorizationStage {
                     PipelineError::Authorization("stream not available in server_extensions".into())
                 })
                 .inspect_err(|e| obs.record_error(e))?;
-            RedactionService::request_authorization(&resources_to_check, &tx, stream)
-                .await
-                .map_err(|e| PipelineError::Authorization(format!("{e:?}")))
-                .inspect_err(|e| obs.record_error(e))?
-                .authorizations
+            RedactionService::request_authorization(
+                &resources_to_check,
+                false,
+                require_ability,
+                &tx,
+                stream,
+            )
+            .await
+            .map_err(|e| PipelineError::Authorization(format!("{e:?}")))
+            .inspect_err(|e| obs.record_error(e))?
+            .authorizations
         };
 
         obs.authorized(t.elapsed());

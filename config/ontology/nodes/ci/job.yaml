@@ -16,6 +16,7 @@ redaction:
   resource_type: ci_build
   id_column: id
   ability: read_build
+  permission: read_job
 
 properties:
   id:

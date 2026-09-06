@@ -22,7 +22,7 @@ use super::metrics::OTelPipelineObserver;
 use super::path_resolver::PathResolver;
 use super::stages::{
     AuthorizationStage, ClickHouseExecutor, HydrationStage, PathResolutionStage, RedactionStage,
-    SecurityStage,
+    SecurityStage, TokenAuthorizationStage,
 };
 
 #[derive(Clone)]
@@ -138,6 +138,8 @@ impl QueryPipelineService {
                 .then(&SecurityStage)
                 .await?
                 .then(&PathResolutionStage)
+                .await?
+                .then(&TokenAuthorizationStage)
                 .await?
                 .then(&CompilationStage)
                 .await?

@@ -15,6 +15,7 @@ redaction:
   resource_type: container_repository
   id_column: id
   ability: read_container_image
+  permission: read_container_repository
 
 properties:
   id:

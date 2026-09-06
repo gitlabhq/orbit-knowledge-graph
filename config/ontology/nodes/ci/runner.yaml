@@ -14,6 +14,7 @@ style:
   color: "#A78BFA"
 
 redaction:
+  token_boundary: resource
   resource_type: ci_runner
   id_column: id
   ability: read_runner

@@ -97,7 +97,7 @@ pub struct PaginationMeta {
 /// last scanned row to keep pagination progressing rather than stall.
 pub fn paginate(query_result: &mut QueryResult, input: &compiler::Input) -> PaginationMeta {
     let window = input.cursor.as_ref().map_or(input.limit, |c| c.page_size) as usize;
-    let has_more = query_result.len() > window;
+    let mut has_more = query_result.len() > window;
     if has_more {
         query_result.truncate(window);
     }
@@ -112,7 +112,11 @@ pub fn paginate(query_result: &mut QueryResult, input: &compiler::Input) -> Pagi
                 .iter()
                 .rev()
                 .find(|r| r.is_authorized())
-                .or_else(|| query_result.rows().last())?;
+                .or_else(|| {
+                    (!input.compiler.token_authorization_required)
+                        .then(|| query_result.rows().last())
+                        .flatten()
+                })?;
             (0..key_count)
                 .map(|i| {
                     // A present-but-NULL readback is a real NULL sort key and
@@ -128,6 +132,9 @@ pub fn paginate(query_result: &mut QueryResult, input: &compiler::Input) -> Pagi
                 .collect::<Option<Vec<Option<String>>>>()
         })
         .map(|keys| compiler::passes::cursor::encode(input.compiler.query_hash, &keys));
+    if input.compiler.token_authorization_required && query_result.authorized_count() == 0 {
+        has_more = false;
+    }
     PaginationMeta {
         has_more,
         truncated: has_more,

@@ -13,7 +13,7 @@ use ontology::Ontology;
 use orbit_server_config::QueryConfig;
 use orbit_utils::arrow::ArrowUtils;
 use orbit_utils::traversal_path::TraversalPath;
-use query_engine::compiler::SecurityContext;
+use query_engine::compiler::{SecurityContext, TokenScope};
 use tonic::Status;
 use tracing::{debug, info, warn};
 
@@ -24,10 +24,11 @@ use crate::proto::{
 
 use self::input::GraphStatusInput;
 
+#[derive(Clone)]
 pub struct GraphStatusService {
     client: Arc<ArrowClickHouseClient>,
     ontology: Arc<Ontology>,
-    indexing_status: Option<IndexingStatusStore>,
+    indexing_status: Option<Arc<IndexingStatusStore>>,
 }
 
 fn graph_status_query_config() -> QueryConfig {
@@ -47,8 +48,44 @@ impl GraphStatusService {
     }
 
     pub fn with_indexing_status(mut self, store: IndexingStatusStore) -> Self {
-        self.indexing_status = Some(store);
+        self.indexing_status = Some(Arc::new(store));
         self
+    }
+
+    pub async fn get_status_on_stream(
+        &self,
+        claims: &crate::auth::Claims,
+        path: &TraversalPath,
+        format: i32,
+        tx: &tokio::sync::mpsc::Sender<Result<crate::proto::ExecuteQueryMessage, Status>>,
+        stream: &mut tonic::Streaming<crate::proto::ExecuteQueryMessage>,
+    ) -> Result<GetGraphStatusResponse, Status> {
+        let mut security =
+            crate::auth::build_security_context(claims).map_err(Status::unauthenticated)?;
+        if claims.token_authorization_required {
+            crate::token_authorization::narrow_to_prefixes(
+                &mut security,
+                std::slice::from_ref(path),
+            );
+        }
+        let entities = self
+            .ontology
+            .nodes()
+            .filter(|node| node.has_traversal_path)
+            .map(|node| node.name.clone())
+            .collect();
+        let projects = crate::token_authorization::authorize(
+            claims,
+            &mut security,
+            &self.ontology,
+            &self.client,
+            &entities,
+            tx,
+            stream,
+        )
+        .await?;
+        self.get_status_for_scope(path, format, &security, projects.contains(path))
+            .await
     }
 
     pub async fn get_status(
@@ -56,6 +93,17 @@ impl GraphStatusService {
         traversal_path: &TraversalPath,
         format: i32,
         security_context: &SecurityContext,
+    ) -> Result<GetGraphStatusResponse, Status> {
+        self.get_status_for_scope(traversal_path, format, security_context, false)
+            .await
+    }
+
+    async fn get_status_for_scope(
+        &self,
+        traversal_path: &TraversalPath,
+        format: i32,
+        security_context: &SecurityContext,
+        project_scope: bool,
     ) -> Result<GetGraphStatusResponse, Status> {
         if traversal_path.is_empty() {
             return Err(Status::invalid_argument("traversal_path is required"));
@@ -69,7 +117,7 @@ impl GraphStatusService {
             if input.nodes.is_empty() {
                 return HashMap::new();
             }
-            let sql = entity_counts_sql(&input);
+            let sql = entity_counts_sql(&input, security_context);
             execute_count_query(&self.client, &sql, traversal_path)
                 .await
                 .unwrap_or_else(|error| {
@@ -77,12 +125,18 @@ impl GraphStatusService {
                     HashMap::new()
                 })
         };
-        let code_future =
-            code::get_code_indexing_state(&self.client, &self.ontology, traversal_path);
-        let sdlc_future = sdlc::get_sdlc_indexing_state(
-            self.indexing_status.as_ref(),
+        let code_future = code::get_code_indexing_state(
+            &self.client,
             &self.ontology,
             traversal_path,
+            security_context,
+        );
+        let sdlc_future = sdlc::get_sdlc_indexing_state(
+            self.indexing_status.as_deref(),
+            &self.ontology,
+            traversal_path,
+            security_context,
+            project_scope,
         );
 
         let (entity_counts, code, sdlc) =
@@ -131,7 +185,7 @@ impl GraphStatusService {
     }
 }
 
-fn entity_counts_sql(input: &GraphStatusInput) -> String {
+fn entity_counts_sql(input: &GraphStatusInput, security: &SecurityContext) -> String {
     input
         .nodes
         .iter()
@@ -139,13 +193,43 @@ fn entity_counts_sql(input: &GraphStatusInput) -> String {
             format!(
                 "SELECT '{name}' AS entity, uniqIf(d.id, d._deleted = 0) AS cnt \
                    FROM {table} AS d \
-                  WHERE startsWith(d.traversal_path, {{path:String}})",
+                  WHERE startsWith(d.traversal_path, {{path:String}}){token_filter}",
                 name = node.name,
                 table = node.table,
+                token_filter = token_path_filter(security, &node.name, "d"),
             )
         })
         .collect::<Vec<_>>()
         .join(" UNION ALL ")
+}
+
+pub(super) fn token_path_filter(security: &SecurityContext, entity: &str, alias: &str) -> String {
+    let Some(scopes) = &security.token_scopes else {
+        return String::new();
+    };
+    match scopes.get(entity) {
+        Some(TokenScope::Namespaces(paths))
+            if !paths.is_empty() && paths.iter().all(|path| path.validate().is_ok()) =>
+        {
+            let values = paths
+                .iter()
+                .map(|path| format!("'{}'", path.as_str()))
+                .collect::<Vec<_>>()
+                .join(",");
+            format!(" AND {alias}.traversal_path IN ({values})")
+        }
+        _ => " AND false".into(),
+    }
+}
+
+pub(super) fn token_allows_path(
+    security: &SecurityContext,
+    entity: &str,
+    path: &TraversalPath,
+) -> bool {
+    security.token_scopes.as_ref().is_none_or(|scopes| {
+        matches!(scopes.get(entity), Some(TokenScope::Namespaces(paths)) if paths.contains(path))
+    })
 }
 
 async fn execute_count_query(
@@ -297,6 +381,23 @@ mod tests {
 
     fn all_node_names(ontology: &Ontology) -> HashSet<&str> {
         ontology.nodes().map(|n| n.name.as_str()).collect()
+    }
+
+    #[test]
+    fn status_preserves_separate_project_and_code_permissions() {
+        let mut security = admin_context();
+        security.token_scopes = Some(HashMap::from([(
+            "File".into(),
+            TokenScope::Namespaces(vec!["1/10/".into()].into()),
+        )]));
+        assert_eq!(token_path_filter(&security, "Project", "p"), " AND false");
+        assert_eq!(
+            token_path_filter(&security, "File", "p"),
+            " AND p.traversal_path IN ('1/10/')"
+        );
+        let sql = entity_counts_sql(&counts_input(), &security);
+        assert!(sql.contains("AND false"));
+        assert!(!sql.contains("1/11/"));
     }
 
     #[test]
@@ -495,7 +596,7 @@ mod tests {
 
     #[test]
     fn entity_counts_produces_union_all() {
-        let sql = entity_counts_sql(&counts_input());
+        let sql = entity_counts_sql(&counts_input(), &admin_context());
 
         assert!(sql.contains("UNION ALL"), "SQL: {sql}");
         assert!(sql.contains("v1_gl_project"), "SQL: {sql}");
@@ -507,7 +608,7 @@ mod tests {
     #[test]
     fn entity_counts_binds_traversal_path_per_subquery() {
         let input = counts_input();
-        let sql = entity_counts_sql(&input);
+        let sql = entity_counts_sql(&input, &admin_context());
 
         assert_eq!(
             sql.matches("startsWith").count(),
@@ -519,7 +620,7 @@ mod tests {
 
     #[test]
     fn entity_counts_deduplicates_by_id() {
-        let sql = entity_counts_sql(&counts_input());
+        let sql = entity_counts_sql(&counts_input(), &admin_context());
 
         assert!(!sql.contains("argMax("), "SQL: {sql}");
         assert!(!sql.contains("GROUP BY"), "SQL: {sql}");
@@ -528,7 +629,7 @@ mod tests {
     #[test]
     fn entity_counts_exclude_deleted_uniformly_without_final() {
         let input = counts_input();
-        let sql = entity_counts_sql(&input);
+        let sql = entity_counts_sql(&input, &admin_context());
 
         assert_eq!(
             sql.matches("uniqIf(d.id, d._deleted = 0)").count(),

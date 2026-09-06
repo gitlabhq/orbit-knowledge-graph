@@ -12,6 +12,7 @@ style:
   color: "#B91C1C"
 
 redaction:
+  token_boundary: unsupported
   resource_type: security_scan
   id_column: id
   ability: read_scan

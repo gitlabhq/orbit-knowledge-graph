@@ -9,12 +9,6 @@ use query_engine::pipeline::PipelineError;
 
 use crate::pipeline::metrics::failure_reason;
 
-pub struct QueryRequest {
-    pub query: String,
-    pub format: i32,
-    pub query_type: i32,
-}
-
 pub async fn send_invalid_request_error(
     tx: &mpsc::Sender<Result<ExecuteQueryMessage, Status>>,
     message: String,
@@ -33,7 +27,7 @@ pub async fn send_invalid_request_error(
 pub async fn receive_query_request(
     stream: &mut Streaming<ExecuteQueryMessage>,
     tx: &mpsc::Sender<Result<ExecuteQueryMessage, Status>>,
-) -> Option<QueryRequest> {
+) -> Option<execute_query_message::Content> {
     let first_msg = match stream.next().await {
         Some(Ok(msg)) => msg,
         Some(Err(e)) => {
@@ -49,11 +43,10 @@ pub async fn receive_query_request(
     };
 
     match first_msg.content {
-        Some(execute_query_message::Content::Request(r)) => Some(QueryRequest {
-            query: r.query,
-            format: r.format,
-            query_type: r.query_type,
-        }),
+        Some(
+            content @ (execute_query_message::Content::Request(_)
+            | execute_query_message::Content::GraphStatusRequest(_)),
+        ) => Some(content),
         _ => {
             warn!("Expected ExecuteQueryRequest as first message");
             let _ = tx

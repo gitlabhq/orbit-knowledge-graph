@@ -91,6 +91,7 @@ impl PipelineStage for AuthorizeAllStage {
             .iter()
             .map(|c| ResourceAuthorization {
                 resource_type: c.resource_type.clone(),
+                ability: c.ability.clone(),
                 authorized: c
                     .ids
                     .iter()

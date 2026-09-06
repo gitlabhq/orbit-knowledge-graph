@@ -29,6 +29,68 @@ impl PipelineStage for SecurityStage {
     }
 }
 
+#[derive(Clone)]
+pub struct TokenAuthorizationStage;
+
+impl PipelineStage for TokenAuthorizationStage {
+    type Input = ();
+    type Output = ();
+
+    async fn execute(
+        &self,
+        ctx: &mut QueryPipelineContext,
+        _obs: &mut dyn PipelineObserver,
+    ) -> Result<(), PipelineError> {
+        use crate::proto::ExecuteQueryMessage;
+        use clickhouse_client::ArrowClickHouseClient;
+        use std::sync::Arc;
+        use tokio::sync::mpsc;
+        use tonic::{Status, Streaming};
+        let claims = ctx
+            .server_extensions
+            .get::<Claims>()
+            .ok_or_else(|| PipelineError::Security("Claims not found".into()))?
+            .clone();
+        if !claims.token_authorization_required {
+            return Ok(());
+        }
+        let input = query_engine::compiler::validate_normalize(&ctx.query_json, &ctx.ontology)
+            .map_err(|e| PipelineError::Security(e.to_string()))?;
+        let entities = crate::token_authorization::query_entities(&input, &ctx.ontology);
+        let client = ctx
+            .server_extensions
+            .get::<Arc<ArrowClickHouseClient>>()
+            .ok_or_else(|| PipelineError::Security("ClickHouse client not found".into()))?
+            .clone();
+        let tx = ctx
+            .server_extensions
+            .get::<mpsc::Sender<Result<ExecuteQueryMessage, Status>>>()
+            .ok_or_else(|| PipelineError::Security("Authorization sender not found".into()))?
+            .clone();
+        let stream = ctx
+            .server_extensions
+            .get_mut::<Streaming<ExecuteQueryMessage>>()
+            .ok_or_else(|| PipelineError::Security("Authorization stream not found".into()))?;
+        let security = ctx
+            .security_context
+            .as_mut()
+            .ok_or_else(|| PipelineError::Security("Security context not found".into()))?;
+        crate::token_authorization::narrow_query_scope(&input, &ctx.ontology, security);
+        crate::token_authorization::authorize(
+            &claims,
+            security,
+            &ctx.ontology,
+            &client,
+            &entities,
+            &tx,
+            stream,
+        )
+        .await
+        .map(|_| ())
+        .map_err(|e| PipelineError::Authorization(e.to_string()))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
@@ -52,6 +114,7 @@ mod tests {
             user_id: 1,
             username: "test_user".to_string(),
             admin,
+            token_authorization_required: false,
             organization_id,
             min_access_level: Some(20),
             group_traversal_ids,

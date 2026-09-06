@@ -5,6 +5,7 @@ use clickhouse_client::ArrowClickHouseClient;
 use ontology::Ontology;
 use orbit_utils::arrow::ArrowUtils;
 use orbit_utils::traversal_path::TraversalPath;
+use query_engine::compiler::SecurityContext;
 use tonic::Status;
 use tracing::warn;
 
@@ -24,8 +25,9 @@ pub async fn get_code_indexing_state(
     client: &ArrowClickHouseClient,
     ontology: &Ontology,
     traversal_path: &TraversalPath,
+    security: &SecurityContext,
 ) -> CodeIndexingState {
-    let projects = match fetch_project_coverage(client, ontology, traversal_path).await {
+    let projects = match fetch_project_coverage(client, ontology, traversal_path, security).await {
         Ok(projects) => projects,
         Err(error) => {
             warn!(%traversal_path, %error, "Graph status branch failed");
@@ -77,9 +79,11 @@ async fn fetch_project_coverage(
     client: &ArrowClickHouseClient,
     ontology: &Ontology,
     traversal_path: &TraversalPath,
+    security: &SecurityContext,
 ) -> Result<ProjectsStatus, Status> {
     let tables = project_tables(ontology)?;
-    let sql = projects_sql(&tables.project, &tables.code_checkpoint);
+    let filter = super::token_path_filter(security, "File", "p");
+    let sql = projects_sql(&tables.project, &tables.code_checkpoint, &filter);
     let batches = execute_query(client, &sql, traversal_path, "projects").await?;
 
     let mut projects = ProjectsStatus::default();
@@ -135,16 +139,16 @@ fn project_tables(ontology: &Ontology) -> Result<ProjectTables, Status> {
     })
 }
 
-fn projects_sql(project_table: &str, code_checkpoint_table: &str) -> String {
+fn projects_sql(project_table: &str, code_checkpoint_table: &str, token_filter: &str) -> String {
     format!(
         "SELECT 'total_known' AS metric, uniqExact(p.id) AS cnt \
            FROM {project_table} AS p FINAL \
-          WHERE p._deleted = 0 AND startsWith(p.traversal_path, {{path:String}}) \
+          WHERE p._deleted = 0 AND startsWith(p.traversal_path, {{path:String}}){token_filter} \
          UNION ALL \
          SELECT 'indexed' AS metric, uniqExact(c.project_id) AS cnt \
            FROM {code_checkpoint_table} AS c FINAL \
            INNER JOIN {project_table} AS p FINAL ON c.project_id = p.id \
-          WHERE p._deleted = 0 AND startsWith(p.traversal_path, {{path:String}}) \
+          WHERE p._deleted = 0 AND startsWith(p.traversal_path, {{path:String}}){token_filter} \
             AND c._deleted = 0 AND startsWith(c.traversal_path, {{path:String}})"
     )
 }
@@ -215,7 +219,7 @@ mod tests {
     }
 
     fn test_projects_sql() -> String {
-        projects_sql("v1_gl_project", "v1_code_indexing_checkpoint")
+        projects_sql("v1_gl_project", "v1_code_indexing_checkpoint", "")
     }
 
     #[test]

@@ -137,6 +137,7 @@ mod tests {
                 user_id: 0,
                 username: String::new(),
                 admin: false,
+                token_authorization_required: false,
                 organization_id: None,
                 min_access_level: None,
                 group_traversal_ids: vec![],

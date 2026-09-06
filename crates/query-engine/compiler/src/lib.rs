@@ -89,7 +89,9 @@ pub use passes::hydrate::{
 };
 pub use passes::normalize::{build_entity_auth, normalize};
 pub use scope::{PathResolutionKey, PathScopeId, scope_edges, scope_keys};
-pub use types::{AccessLevel, AuthorizedPath, DEFAULT_PATH_ACCESS_LEVEL, Realm, SecurityContext};
+pub use types::{
+    AccessLevel, AuthorizedPath, DEFAULT_PATH_ACCESS_LEVEL, Realm, SecurityContext, TokenScope,
+};
 
 use metrics::CountErr;
 use std::sync::Arc;

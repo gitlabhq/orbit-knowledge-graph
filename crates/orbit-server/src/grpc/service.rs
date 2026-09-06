@@ -300,6 +300,7 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
         let (tx, rx) = mpsc::channel(4);
 
         let pipeline = self.pipeline.clone();
+        let graph_status = self.graph_status.clone();
         let named_queries = Arc::clone(&self.named_queries);
         let stream_timeout = self.stream_timeout_secs;
         let span = tracing::Span::current();
@@ -307,8 +308,33 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
         tokio::spawn(
             async move {
                 let req = match receive_query_request(&mut stream, &tx).await {
-                    Some(r) => r,
-                    None => return,
+                    Some(execute_query_message::Content::Request(r)) => r,
+                    Some(execute_query_message::Content::GraphStatusRequest(r)) => {
+                        let path = TraversalPath::new_unchecked(r.traversal_path);
+                        let result = async {
+                            authorize_traversal_path(&claims, &path)?;
+                            graph_status
+                                .get_status_on_stream(&claims, &path, r.format, &tx, &mut stream)
+                                .await
+                        };
+                        let result = match tokio::time::timeout(
+                            std::time::Duration::from_secs(stream_timeout),
+                            result,
+                        )
+                        .await
+                        {
+                            Ok(result) => result,
+                            Err(_) => Err(Status::deadline_exceeded("graph status timed out")),
+                        };
+                        let message = result.map(|response| ExecuteQueryMessage {
+                            content: Some(execute_query_message::Content::GraphStatusResult(
+                                response,
+                            )),
+                        });
+                        let _ = tx.send(message).await;
+                        return;
+                    }
+                    _ => return,
                 };
 
                 let resolved = match QueryType::try_from(req.query_type) {
@@ -564,6 +590,11 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
         ctx.record_in_current_span();
         let claims = ctx.claims;
 
+        if claims.token_authorization_required {
+            return Err(Status::failed_precondition(
+                "token authorization requires the graph status stream",
+            ));
+        }
         let req = request.get_ref();
         let traversal_path = TraversalPath::new_unchecked(req.traversal_path.clone());
         authorize_traversal_path(&claims, &traversal_path)?;
@@ -1265,6 +1296,7 @@ mod tests {
             user_id: 1,
             username: "test".into(),
             admin: false,
+            token_authorization_required: false,
             organization_id: Some(1),
             min_access_level: None,
             group_traversal_ids: vec![],
@@ -1286,6 +1318,7 @@ mod tests {
     fn authorize_traversal_path_grants_and_denies_correctly() {
         let admin = |org| Claims {
             admin: true,
+            token_authorization_required: false,
             organization_id: Some(org),
             ..test_claims()
         };

@@ -139,6 +139,7 @@ mod tests {
             user_id: 1,
             username: "t".into(),
             admin: false,
+            token_authorization_required: false,
             organization_id: Some(42),
             min_access_level: None,
             group_traversal_ids: vec![],

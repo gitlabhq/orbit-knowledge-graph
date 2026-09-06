@@ -295,6 +295,7 @@ mod tests {
             user_id: 1,
             username: "t".into(),
             admin: false,
+            token_authorization_required: false,
             organization_id: Some(1),
             min_access_level: None,
             group_traversal_ids: paths
