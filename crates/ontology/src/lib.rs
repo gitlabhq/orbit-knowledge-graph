@@ -760,12 +760,16 @@ impl Ontology {
     /// role.
     #[must_use]
     pub fn min_access_level_for_table(&self, table: &str) -> Option<u32> {
+        self.node_for_table(table)
+            .and_then(|n| n.redaction.as_ref())
+            .map(|r| r.required_role.as_access_level())
+    }
+
+    pub fn node_for_table(&self, table: &str) -> Option<&NodeEntity> {
         let normalized = strip_schema_version_prefix(table);
         self.nodes
             .values()
-            .find(|n| strip_schema_version_prefix(&n.destination_table) == normalized)
-            .and_then(|n| n.redaction.as_ref())
-            .map(|r| r.required_role.as_access_level())
+            .find(|node| strip_schema_version_prefix(&node.destination_table) == normalized)
     }
 
     /// Iterator over names of `admin_only` fields on the given entity.

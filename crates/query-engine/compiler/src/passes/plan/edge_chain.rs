@@ -367,6 +367,9 @@ fn elide_hops<'a>(
     nodes: &mut HashMap<String, NodePlan>,
     input: &'a mut Input,
 ) -> (Vec<Hop>, Vec<(String, String, String)>, &'a mut Input) {
+    if input.compiler.token_authorization_required {
+        return (hops, Vec::new(), input);
+    }
     let mut keep_hops = Vec::new();
     let mut keep_rels = Vec::new();
     let mut elided_fks = Vec::new();
@@ -780,9 +783,9 @@ fn resolve_node_flags(hops: &[Hop], nodes: &mut HashMap<String, NodePlan>, input
         .values()
         .filter(|np| {
             np.hydration == HydrationStrategy::Skip
-                && np.has_traversal_path
                 && np.table.is_some()
-                && has_elevated_access_level(np, input)
+                && (input.compiler.token_authorization_required
+                    || (np.has_traversal_path && has_elevated_access_level(np, input)))
         })
         .map(|np| np.alias.clone())
         .collect();

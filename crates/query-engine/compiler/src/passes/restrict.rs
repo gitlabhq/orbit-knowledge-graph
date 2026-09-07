@@ -281,6 +281,7 @@ pub fn restrict(
     ontology: &Ontology,
     security_ctx: &SecurityContext,
 ) -> Result<()> {
+    input.compiler.token_authorization_required = security_ctx.token_scopes.is_some();
     enforce_traversal_path_filters(input, ontology, security_ctx)?;
     stamp_edge_scope_prefixes(input, ontology, security_ctx);
     stamp_scope_preserving(input, ontology);

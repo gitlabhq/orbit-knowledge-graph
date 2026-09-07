@@ -122,6 +122,7 @@ pub struct TextIndexMeta {
 /// optimize, enforce, SIP, fold, etc.).
 #[derive(Debug, Clone)]
 pub struct CompilerMetadata {
+    pub token_authorization_required: bool,
     /// Maps node alias → (edge_alias, edge_column) for edge-only nodes.
     /// Written by lower, read by enforce to emit `_gkg_*` redaction columns
     /// from edge columns instead of node table columns. Also used by SIP
@@ -179,6 +180,7 @@ pub struct CompilerMetadata {
 impl Default for CompilerMetadata {
     fn default() -> Self {
         Self {
+            token_authorization_required: false,
             node_edge_col: HashMap::new(),
             edge_tables: HashSet::from([ontology::constants::EDGE_TABLE.to_string()]),
             default_edge_table: ontology::constants::EDGE_TABLE.to_string(),
