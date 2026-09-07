@@ -218,6 +218,12 @@ impl TableCleanup {
             duration_ms = (elapsed * 1000.0) as u64,
             "table cleanup statement finished"
         );
+        // A first pass over a multi-billion-row table runs for hours; waiting for the pass to end would leave
+        // every patch written against a merged part in join mode for that long.
+        if let Err(error) = self.apply_patches_if_due().await {
+            self.metrics.record_error(TASK_NAME, "apply_patches");
+            warn!(%error, "applying patch parts failed");
+        }
         Ok(())
     }
 
