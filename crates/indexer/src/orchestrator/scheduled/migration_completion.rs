@@ -249,10 +249,16 @@ impl MigrationCompletionChecker {
         let enabled_count = enabled_namespaces.ids.len() as u64;
 
         let code_table = format!("{prefix}{CODE_INDEXING_CHECKPOINT_TABLE}");
-        let (eligible_projects, indexed_projects, coverage) = self
+        let code_coverage = match self
             .compute_code_coverage(&code_table, &enabled_namespaces.paths)
             .await
-            .map_err(|e| format!("compute code coverage: {e}"))?;
+        {
+            Ok(coverage) => Some(coverage),
+            Err(error) => {
+                warn!(version, %error, "code coverage telemetry unavailable this tick");
+                None
+            }
+        };
 
         let scope = self.resolve_migration_scope(version).await?;
         let sdlc_progress = orbit_migrations::completion::check_sdlc_reindex_progress(
@@ -269,9 +275,9 @@ impl MigrationCompletionChecker {
             version,
             sdlc_indexed_namespaces = sdlc_progress.completed_namespaces,
             enabled_namespaces = enabled_count,
-            code_indexed_projects = indexed_projects,
-            code_eligible_projects = eligible_projects,
-            code_coverage = coverage,
+            code_indexed_projects = code_coverage.map(|(_, indexed, _)| indexed),
+            code_eligible_projects = code_coverage.map(|(eligible, _, _)| eligible),
+            code_coverage = code_coverage.map(|(_, _, ratio)| ratio),
             migration_scope = %scope,
             "migration completion status"
         );
@@ -284,13 +290,15 @@ impl MigrationCompletionChecker {
             sdlc_progress.completed_namespaces,
             enabled_count,
         );
-        self.metrics.record_units(
-            "code",
-            version,
-            current,
-            indexed_projects,
-            eligible_projects,
-        );
+        if let Some((eligible_projects, indexed_projects, _)) = code_coverage {
+            self.metrics.record_units(
+                "code",
+                version,
+                current,
+                indexed_projects,
+                eligible_projects,
+            );
+        }
 
         Ok(sdlc_progress.ready)
     }
