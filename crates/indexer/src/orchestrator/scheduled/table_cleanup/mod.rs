@@ -59,11 +59,6 @@ impl CleanupTable {
     }
 }
 
-struct CandidateSet {
-    prune: Option<String>,
-    chunk: Option<(usize, usize)>,
-}
-
 enum PathGroup {
     Paths(Vec<String>),
     Chunked { path: String, chunks: usize },
@@ -458,7 +453,7 @@ impl TableCleanup {
     async fn run_collapse(
         &self,
         table: &CleanupTable,
-        candidate_sets: &[CandidateSet],
+        candidate_sets: &[sql::CandidateSet],
         filter: &str,
         keep: sql::Keep,
         exclude: &str,
@@ -468,8 +463,7 @@ impl TableCleanup {
                 &table.name,
                 &table.key,
                 filter,
-                candidates.prune.as_deref(),
-                candidates.chunk,
+                candidates,
                 keep,
                 exclude,
                 self.config.statement_timeout_secs,
@@ -484,7 +478,7 @@ impl TableCleanup {
         &self,
         table: &CleanupTable,
         filter: &str,
-    ) -> Result<(u64, Vec<CandidateSet>), TaskError> {
+    ) -> Result<(u64, Vec<sql::CandidateSet>), TaskError> {
         let limit = self.config.max_candidates_per_statement.max(1);
         if !table.has_path() {
             let total = self
@@ -492,7 +486,7 @@ impl TableCleanup {
                 .await?;
             let chunks = total.div_ceil(limit) as usize;
             let sets = (0..chunks)
-                .map(|chunk| CandidateSet {
+                .map(|chunk| sql::CandidateSet {
                     prune: None,
                     chunk: (chunks > 1).then_some((chunks, chunk)),
                 })
@@ -514,13 +508,13 @@ impl TableCleanup {
         let mut sets = Vec::new();
         for group in groups {
             match group {
-                PathGroup::Paths(paths) => sets.push(CandidateSet {
+                PathGroup::Paths(paths) => sets.push(sql::CandidateSet {
                     prune: Some(path_prune(&paths, dense)),
                     chunk: None,
                 }),
                 PathGroup::Chunked { path, chunks } => {
                     for chunk in 0..chunks {
-                        sets.push(CandidateSet {
+                        sets.push(sql::CandidateSet {
                             prune: Some(sql::path_prune_sql(std::slice::from_ref(&path))),
                             chunk: Some((chunks, chunk)),
                         });

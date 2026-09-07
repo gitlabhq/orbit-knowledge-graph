@@ -184,6 +184,12 @@ pub(super) fn path_range_sql(first: &str, last: &str) -> String {
     )
 }
 
+/// A pruned slice of a table (path list or range, optionally one hash chunk of a single path) that one statement collapses.
+pub(super) struct CandidateSet {
+    pub(super) prune: Option<String>,
+    pub(super) chunk: Option<(usize, usize)>,
+}
+
 /// Which row of a candidate key survives a collapse.
 #[derive(Clone, Copy)]
 pub(super) enum Keep {
@@ -198,12 +204,13 @@ pub(super) fn collapse_statement(
     table: &str,
     key: &str,
     filter: &str,
-    prune: Option<&str>,
-    chunk: Option<(usize, usize)>,
+    candidates: &CandidateSet,
     keep: Keep,
     exclude: &str,
     timeout_secs: u64,
 ) -> String {
+    let prune = candidates.prune.as_deref();
+    let chunk = candidates.chunk;
     // A live row tied with a tombstone at the same `_version` counts as live.
     let keep = match keep {
         Keep::Newest => "1".to_string(),
@@ -392,8 +399,10 @@ mod tests {
             "t",
             "a, b",
             &new_rows_filter(42),
-            Some("traversal_path IN ('1/2/')"),
-            None,
+            &CandidateSet {
+                prune: Some("traversal_path IN ('1/2/')".to_string()),
+                chunk: None,
+            },
             Keep::Newest,
             "",
             30,
@@ -420,8 +429,10 @@ mod tests {
             "t",
             "a, b",
             &version_filter("<", cutoff),
-            None,
-            Some((4, 3)),
+            &CandidateSet {
+                prune: None,
+                chunk: Some((4, 3)),
+            },
             Keep::NewestUnlessExpiredTombstone(cutoff),
             "",
             30,
@@ -444,8 +455,10 @@ mod tests {
             "t",
             "a",
             " AND _deleted",
-            None,
-            None,
+            &CandidateSet {
+                prune: None,
+                chunk: None,
+            },
             Keep::Newest,
             &exclude,
             30,
