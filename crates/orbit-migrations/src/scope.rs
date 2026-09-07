@@ -76,7 +76,7 @@ pub enum TableMigrationAction {
     CloneFromActive,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct InvalidatedPipelines {
     pub namespaced: Vec<String>,
     pub global: Vec<String>,

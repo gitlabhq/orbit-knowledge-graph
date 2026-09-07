@@ -5,7 +5,7 @@ use clickhouse_client::ArrowClickHouseClient;
 use orbit_utils::arrow::ArrowUtils;
 use thiserror::Error;
 
-use crate::schema::{self, DictionaryCredentials, GraphSchema, Table};
+use crate::schema::{self, DictionaryCredentials, GraphSchema};
 use crate::scope::{
     InvalidatedPipelines, MigrationScope, TableMigrationAction, classify_tables_for_scope,
     find_invalidated_pipelines, widen_scope_for_shared_table_writers,
@@ -17,22 +17,23 @@ use crate::version::{
 
 pub const CHECKPOINT_TABLE: &str = "checkpoint";
 
+const DISPATCH_CURSOR_PREFIX: &str = "dispatch.";
 const CODE_STALE_SWEEP_GATE_PREFIX: &str = "maintenance.code_stale_sweep";
 
-const SEED_SDLC_CHECKPOINT_SQL: &str = "\
+const SEED_CHECKPOINT_SQL: &str = "\
 INSERT INTO {new_table:Identifier} \
 SELECT * FROM {old_table:Identifier} FINAL \
 WHERE _deleted = false \
-  AND NOT startsWith(key, 'dispatch.') \
+  AND NOT startsWith(key, {excluded_key_prefix:String}) \
   AND NOT ( \
     (splitByChar('.', key)[1] = 'ns' AND splitByChar('.', key)[3] IN {namespaced_plans:Array(String)}) \
     OR (splitByChar('.', key)[1] = 'global' AND splitByChar('.', key)[2] IN {global_plans:Array(String)}) \
   )";
 
-const SEED_CODE_CHECKPOINT_SQL: &str = "\
-INSERT INTO {new_table:Identifier} \
-SELECT * FROM {old_table:Identifier} FINAL \
-WHERE _deleted = false AND NOT startsWith(key, {sweep_gate_prefix:String})";
+struct CheckpointSeed {
+    excluded_key_prefix: &'static str,
+    pipelines: InvalidatedPipelines,
+}
 
 #[derive(Debug, Error)]
 pub enum MigrationError {
@@ -53,8 +54,14 @@ pub async fn create_all_versioned_tables(
     version_prefix: &str,
 ) -> Result<(), MigrationError> {
     for table in &schema.tables {
+        tracing::info!(table = %table.name, "creating table");
         run_ddl(graph, &table.name, table.to_create_sql(version_prefix)).await?;
     }
+    tracing::info!(
+        count = schema.tables.len(),
+        prefix = %version_prefix,
+        "new-prefix tables created"
+    );
     create_dictionaries_and_views(graph, schema, credentials, version_prefix).await
 }
 
@@ -84,33 +91,38 @@ pub async fn create_tables_with_selective_cloning(
     let table_actions = classify_tables_for_scope(ontology, &scope);
     let active_entities = existing_entity_names(graph, active_version).await?;
     let target_entities = existing_entity_names(graph, target_version).await?;
-    let invalidated_pipelines = find_invalidated_pipelines(ontology, &scope);
+    let seed = checkpoint_seed(ontology, &scope);
 
+    let mut cloned = 0;
+    let mut rebuilt = 0;
+    let mut seeded = 0;
     for table in &schema.tables {
-        let base_name = table
-            .name
-            .strip_prefix(&target_prefix)
-            .unwrap_or(&table.name);
-        let active_name = format!("{active_prefix}{base_name}");
+        let active_name = format!("{active_prefix}{}", table.name);
+        let target_name = format!("{target_prefix}{}", table.name);
 
-        if base_name == CHECKPOINT_TABLE {
-            create_and_seed_checkpoint(
-                graph,
-                table,
-                &target_prefix,
-                &active_prefix,
-                &scope,
-                &active_entities,
-                &invalidated_pipelines,
-            )
-            .await?;
-        } else if should_clone(base_name, &active_name, &table_actions, &active_entities) {
-            let target_name = format!("{target_prefix}{base_name}");
+        if table.name == CHECKPOINT_TABLE
+            && let Some(seed) = &seed
+            && active_entities.contains(&active_name)
+        {
+            run_ddl(graph, &target_name, table.to_create_sql(&target_prefix)).await?;
+            seed_checkpoint(graph, seed, &active_name, &target_name).await?;
+            seeded += 1;
+        } else if should_clone(&table.name, &active_name, &table_actions, &active_entities) {
             clone_from_active(graph, &active_name, &target_name, &target_entities).await?;
+            cloned += 1;
         } else {
-            run_ddl(graph, &table.name, table.to_create_sql(&target_prefix)).await?;
+            tracing::info!(table = %target_name, "rebuilding table empty");
+            run_ddl(graph, &target_name, table.to_create_sql(&target_prefix)).await?;
+            rebuilt += 1;
         }
     }
+    tracing::info!(
+        cloned,
+        rebuilt,
+        seeded,
+        prefix = %target_prefix,
+        "clone-based migration tables prepared"
+    );
 
     create_dictionaries_and_views(graph, schema, credentials, &target_prefix).await
 }
@@ -309,6 +321,7 @@ async fn clone_from_active(
         .await?;
     }
 
+    tracing::info!(from = %source_name, to = %target_name, "cloning table from active version");
     run_ddl(
         graph,
         target_name,
@@ -323,58 +336,46 @@ async fn clone_from_active(
     .await
 }
 
-async fn create_and_seed_checkpoint(
-    graph: &ArrowClickHouseClient,
-    checkpoint_table: &Table,
-    target_prefix: &str,
-    active_prefix: &str,
+fn checkpoint_seed(
+    ontology: &ontology::Ontology,
     scope: &MigrationScope,
-    active_entities: &HashSet<String>,
-    invalidated_pipelines: &InvalidatedPipelines,
-) -> Result<(), MigrationError> {
-    let target_name = format!("{target_prefix}{CHECKPOINT_TABLE}");
-    let active_name = format!("{active_prefix}{CHECKPOINT_TABLE}");
-
-    run_ddl(
-        graph,
-        &target_name,
-        checkpoint_table.to_create_sql(target_prefix),
-    )
-    .await?;
-
-    if !active_entities.contains(&active_name) {
-        tracing::warn!(missing = %active_name, "active checkpoint missing, starting empty");
-        return Ok(());
-    }
-
+) -> Option<CheckpointSeed> {
     match scope {
-        MigrationScope::Sdlc(_) => {
-            run_parameterized_query(
-                &target_name,
-                graph
-                    .query(SEED_SDLC_CHECKPOINT_SQL)
-                    .param("new_table", &target_name)
-                    .param("old_table", &active_name)
-                    .param("namespaced_plans", &invalidated_pipelines.namespaced)
-                    .param("global_plans", &invalidated_pipelines.global),
-            )
-            .await?;
-        }
-        MigrationScope::Code => {
-            run_parameterized_query(
-                &target_name,
-                graph
-                    .query(SEED_CODE_CHECKPOINT_SQL)
-                    .param("new_table", &target_name)
-                    .param("old_table", &active_name)
-                    .param("sweep_gate_prefix", CODE_STALE_SWEEP_GATE_PREFIX),
-            )
-            .await?;
-        }
-        _ => {}
+        MigrationScope::Sdlc(_) => Some(CheckpointSeed {
+            excluded_key_prefix: DISPATCH_CURSOR_PREFIX,
+            pipelines: find_invalidated_pipelines(ontology, scope),
+        }),
+        MigrationScope::Code => Some(CheckpointSeed {
+            excluded_key_prefix: CODE_STALE_SWEEP_GATE_PREFIX,
+            pipelines: InvalidatedPipelines::default(),
+        }),
+        MigrationScope::Full | MigrationScope::None => None,
     }
+}
 
-    Ok(())
+async fn seed_checkpoint(
+    graph: &ArrowClickHouseClient,
+    seed: &CheckpointSeed,
+    active_name: &str,
+    target_name: &str,
+) -> Result<(), MigrationError> {
+    tracing::info!(
+        from = %active_name,
+        to = %target_name,
+        excluded_key_prefix = seed.excluded_key_prefix,
+        "seeding checkpoint from active version"
+    );
+    run_parameterized_query(
+        target_name,
+        graph
+            .query(SEED_CHECKPOINT_SQL)
+            .param("new_table", target_name)
+            .param("old_table", active_name)
+            .param("excluded_key_prefix", seed.excluded_key_prefix)
+            .param("namespaced_plans", &seed.pipelines.namespaced)
+            .param("global_plans", &seed.pipelines.global),
+    )
+    .await
 }
 
 async fn create_dictionaries_and_views(
@@ -387,6 +388,7 @@ async fn create_dictionaries_and_views(
         let prefixed = dictionary
             .clone()
             .with_schema_version_prefix(version_prefix);
+        tracing::info!(dictionary = %prefixed.name, source = %prefixed.source_table, "creating dictionary");
         run_ddl(graph, &prefixed.name, prefixed.to_create_sql(credentials)).await?;
     }
 
@@ -399,8 +401,10 @@ async fn create_dictionaries_and_views(
         let prefixed = view
             .clone()
             .with_schema_version_prefix(version_prefix, &all_table_names);
+        tracing::info!(view = %prefixed.name, "creating materialized view");
         run_ddl(graph, &prefixed.name, prefixed.to_create_sql()).await?;
     }
+    tracing::info!(prefix = %version_prefix, "dictionaries and materialized views created");
 
     Ok(())
 }

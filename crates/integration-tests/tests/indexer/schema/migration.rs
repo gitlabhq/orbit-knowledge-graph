@@ -1214,6 +1214,40 @@ async fn code_scope_clones_sdlc_intact_and_drops_only_the_code_stale_sweep_gate(
 }
 
 #[tokio::test]
+async fn none_scope_clones_every_table_and_every_checkpoint_key() {
+    let scenario = MigrationScenario::migrating_from_active().await;
+    scenario.seed_note().await;
+    scenario.seed_checkpoint("ns.100.Note").await;
+    scenario.seed_checkpoint("global.User").await;
+    scenario
+        .seed_checkpoint("dispatch.sdlc.namespace.sweep")
+        .await;
+    scenario
+        .seed_checkpoint("maintenance.code_stale_sweep")
+        .await;
+    scenario.seed_code_checkpoint(42).await;
+    scenario
+        .seed_edge("CONTAINS", (1, "Directory"), (2, "File"))
+        .await;
+
+    scenario.migrate(MigrationScope::None).await;
+
+    scenario.assert_table_row_count("gl_note", 1).await;
+    scenario.assert_table_row_count("gl_edge", 1).await;
+    scenario
+        .assert_table_row_count("code_indexing_checkpoint", 1)
+        .await;
+    scenario
+        .assert_surviving_checkpoints(&[
+            "dispatch.sdlc.namespace.sweep",
+            "global.User",
+            "maintenance.code_stale_sweep",
+            "ns.100.Note",
+        ])
+        .await;
+}
+
+#[tokio::test]
 async fn code_migration_clone_converges_after_reindex_and_sweep() {
     let scenario = MigrationScenario::migrating_from_active().await;
     scenario
