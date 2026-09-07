@@ -19,9 +19,11 @@ migrations:
 - version: 96
   scope: none
   note: >-
-    MergeRequestDiffFile lookup CTE deduplicated per diff id by version (argMax),
-    mirroring generated lookups. Live graph rows are byte-identical; only join fan-out
-    from superseded datalake versions is removed.
+    MergeRequestDiffFile lookup CTE collapses the parent diff's datalake versions
+    to the latest one (argMax, GROUP BY id) instead of joining every unmerged version.
+    Each output row is one of the rows the previous join already produced, and the
+    survivor among duplicate rows is now deterministic instead of insertion-order
+    dependent, so no re-index is needed.
 - version: 95
   scope: none
   note: "cosmetic: normalize auxiliary table codec casing to match canonical PascalCase"
