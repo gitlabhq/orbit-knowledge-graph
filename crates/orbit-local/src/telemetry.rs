@@ -8,7 +8,7 @@ use regex::Regex;
 
 use crate::settings;
 
-const DEFAULT_COLLECTOR_URL: &str = "https://snowplowprd.trx.gitlab.net";
+const DEFAULT_COLLECTOR_URL: &str = "https://events.gitlab.net";
 const APP_ID: &str = "orbit";
 const CATEGORY: &str = "orbit_cli";
 
