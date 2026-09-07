@@ -1,8 +1,8 @@
 mod sql;
 
 use std::collections::BTreeSet;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, OnceLock};
 use std::time::Instant;
 
 use arrow::array::{Array, StringArray};
@@ -16,7 +16,7 @@ use crate::clickhouse::{ArrowClickHouseClient, ArrowQuery};
 use crate::modules::code::checkpoint::CODE_INDEXING_CHECKPOINT_TABLE;
 use crate::modules::code::config::CodeTableNames;
 use crate::orchestrator::scheduled::{ScheduledTask, ScheduledTaskMetrics, TaskError};
-use orbit_migrations::version::{SCHEMA_VERSION, prefixed_table_name};
+use orbit_migrations::version::{SCHEMA_VERSION, prefixed_table_name, read_active_version};
 use orbit_server_config::{ScheduleConfiguration, TableCleanupConfig};
 
 const TASK_NAME: &str = "maintenance.table_cleanup";
@@ -31,6 +31,7 @@ const SCOPES_PER_STATEMENT: u64 = 2000;
 const PATH_LIST_BYTES_PER_STATEMENT: usize = 32 * 1024;
 /// Cron passes land a few seconds after the minute, so an exact interval would skip a pass.
 const PURGE_SLACK: TimeDelta = TimeDelta::seconds(60);
+const NO_HOLD: i64 = -1;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum CodeRole {
@@ -61,12 +62,50 @@ enum PathGroup {
     Chunked { path: String, chunks: usize },
 }
 
-#[derive(Default)]
+/// Parts a statement must leave alone this pass: a patch written against a merging or mutating part
+/// is applied to the result by `(_block_number, _block_offset)` join, the slow path on multi-billion-row parts.
+enum Busy {
+    Mutating,
+    Parts(Vec<String>),
+}
+
+impl Busy {
+    fn defers(&self) -> bool {
+        match self {
+            Busy::Mutating => true,
+            Busy::Parts(parts) => !parts.is_empty(),
+        }
+    }
+}
+
+#[derive(Default, Clone, Copy, PartialEq, Eq, Debug)]
 struct BlockCursor {
     last_pass: Option<DateTime<Utc>>,
     block: u64,
     previous_block: u64,
     last_purge: Option<DateTime<Utc>>,
+    /// Start of the oldest window a pass could not finish because parts were busy; re-run once nothing is.
+    hold_block: Option<u64>,
+}
+
+impl BlockCursor {
+    /// Busy passes keep their normal window and remember where the backlog starts;
+    /// the first quiet pass re-reads from there so rows skipped in merging parts are caught up once.
+    fn window_start(&self, busy: bool) -> u64 {
+        match self.hold_block {
+            Some(hold) if !busy => hold,
+            _ => self.previous_block,
+        }
+    }
+
+    fn next_hold(&self, busy: bool) -> Option<u64> {
+        busy.then_some(self.hold_block.unwrap_or(self.previous_block))
+    }
+}
+
+struct Topology {
+    database: String,
+    cluster: Option<String>,
 }
 
 pub struct TableCleanup {
@@ -75,10 +114,12 @@ pub struct TableCleanup {
     tables: Vec<CleanupTable>,
     code_checkpoint_table: String,
     code_branch_table: String,
+    code_file_table: String,
     metrics: ScheduledTaskMetrics,
     config: TableCleanupConfig,
     prepared: AtomicBool,
     supported: AtomicBool,
+    topology: OnceLock<Topology>,
     unsafe_tables: Mutex<BTreeSet<String>>,
     /// Seeded at start so a restart never triggers `APPLY PATCHES` on every table at once.
     last_patch_apply: Mutex<Instant>,
@@ -102,10 +143,12 @@ impl TableCleanup {
                 *SCHEMA_VERSION,
             ),
             code_branch_table: code_tables.branch.clone(),
+            code_file_table: code_tables.file.clone(),
             metrics,
             config,
             prepared: AtomicBool::new(false),
             supported: AtomicBool::new(false),
+            topology: OnceLock::new(),
             unsafe_tables: Mutex::new(BTreeSet::new()),
             last_patch_apply: Mutex::new(Instant::now()),
         }
@@ -174,6 +217,14 @@ impl TableCleanup {
         Ok(())
     }
 
+    /// Tables under construction are left to the migration; the first pass after activation sweeps them whole.
+    async fn version_active(&self) -> Result<bool, TaskError> {
+        let active = read_active_version(&self.graph)
+            .await
+            .map_err(TaskError::new)?;
+        Ok(active == Some(*SCHEMA_VERSION))
+    }
+
     async fn prepare(&self) -> Result<bool, TaskError> {
         if self.prepared.load(Ordering::Acquire) {
             return Ok(self.supported.load(Ordering::Acquire));
@@ -195,6 +246,20 @@ impl TableCleanup {
             self.prepared.store(true, Ordering::Release);
             return Ok(false);
         }
+        let cluster = self
+            .count(&sql::cluster_exists_sql(&self.config.merges_cluster))
+            .await?
+            > 0;
+        if !cluster {
+            warn!(
+                cluster = self.config.merges_cluster,
+                "cluster is not defined; only merges on this replica are excluded from deletes"
+            );
+        }
+        let _ = self.topology.set(Topology {
+            database: self.graph.database().to_string(),
+            cluster: cluster.then(|| self.config.merges_cluster.clone()),
+        });
         let mut unsafe_tables = self.unsafe_tables.lock().await;
         for table in &self.tables {
             if self.load_or_record_refusal(&table.name).await? {
@@ -217,10 +282,15 @@ impl TableCleanup {
         if let Some(reason) = reason {
             warn!(table, reason, "refusing table cleanup for this table");
         }
-        let verdict = if reason.is_some() { REFUSED } else { ADMITTED };
+        self.record_verdict(table, reason.is_some()).await?;
+        Ok(reason.is_some())
+    }
+
+    async fn record_verdict(&self, table: &str, refused: bool) -> Result<(), TaskError> {
+        let verdict = if refused { REFUSED } else { ADMITTED };
         self.checkpoints
             .save_progress(
-                &key,
+                &format!("{IDENTITY_KEY_PREFIX}{table}"),
                 &Checkpoint {
                     watermark: Utc::now(),
                     cursor_values: Some(vec![verdict.to_string()]),
@@ -228,8 +298,7 @@ impl TableCleanup {
                 },
             )
             .await
-            .map_err(TaskError::new)?;
-        Ok(reason.is_some())
+            .map_err(TaskError::new)
     }
 
     /// A patch applied after a merge matches rows by `(_block_number, _block_offset)`, so that pair must be unique.
@@ -256,12 +325,55 @@ impl TableCleanup {
         Ok(None)
     }
 
+    /// Merges on ClickHouse Cloud persist `_block_offset` alone unless the table DDL says otherwise; a table that starts doing so is refused for good.
+    async fn ratchet_identity(&self) -> Result<(), TaskError> {
+        let admitted: Vec<String> = self
+            .safe_tables(|_| true)
+            .await
+            .into_iter()
+            .map(|table| table.name.clone())
+            .collect();
+        for table in admitted {
+            if self.count(&sql::offset_only_parts_sql(&table)).await? > 0 {
+                warn!(
+                    table,
+                    "merged parts persist _block_offset without _block_number; refusing table cleanup for this table"
+                );
+                self.record_verdict(&table, true).await?;
+                self.unsafe_tables.lock().await.insert(table);
+            }
+        }
+        Ok(())
+    }
+
     async fn safe_tables(&self, role: impl Fn(CodeRole) -> bool) -> Vec<&CleanupTable> {
         let unsafe_tables = self.unsafe_tables.lock().await;
         self.tables
             .iter()
             .filter(|table| role(table.code) && !unsafe_tables.contains(&table.name))
             .collect()
+    }
+
+    async fn busy(&self, table: &str) -> Result<Busy, TaskError> {
+        let topology = self
+            .topology
+            .get()
+            .ok_or_else(|| TaskError::new("table cleanup topology is not prepared"))?;
+        if self
+            .count(&sql::pending_mutations_sql(&topology.database, table))
+            .await?
+            > 0
+        {
+            return Ok(Busy::Mutating);
+        }
+        let parts = self
+            .column(&sql::busy_parts_sql(
+                &topology.database,
+                table,
+                topology.cluster.as_deref(),
+            ))
+            .await?;
+        Ok(Busy::Parts(parts))
     }
 
     fn cursor_key(table: &str) -> String {
@@ -286,6 +398,10 @@ impl TableCleanup {
                         .get(2)
                         .filter(|secs| **secs > 0)
                         .and_then(|secs| DateTime::<Utc>::from_timestamp(*secs, 0)),
+                    hold_block: values
+                        .get(3)
+                        .filter(|block| **block >= 0)
+                        .map(|block| *block as u64),
                 }
             })
             .unwrap_or_default())
@@ -298,6 +414,7 @@ impl TableCleanup {
         cursor: &BlockCursor,
         high_block: u64,
         last_purge: Option<DateTime<Utc>>,
+        hold_block: Option<u64>,
     ) -> Result<(), TaskError> {
         self.checkpoints
             .save_progress(
@@ -308,6 +425,10 @@ impl TableCleanup {
                         high_block.to_string(),
                         cursor.block.to_string(),
                         last_purge.map(|at| at.timestamp()).unwrap_or(0).to_string(),
+                        hold_block
+                            .map(|block| block as i64)
+                            .unwrap_or(NO_HOLD)
+                            .to_string(),
                     ]),
                     resume_floor: None,
                 },
@@ -325,6 +446,7 @@ impl TableCleanup {
         table: &CleanupTable,
         candidate_sets: &[CandidateSet],
         keep: sql::Keep,
+        exclude: &str,
     ) -> Result<(), TaskError> {
         for candidates in candidate_sets {
             let statement = sql::collapse_statement(
@@ -333,6 +455,7 @@ impl TableCleanup {
                 &candidates.sql,
                 candidates.prune.as_deref(),
                 keep,
+                exclude,
                 self.config.statement_timeout_secs,
             );
             self.execute(&table.name, &statement).await?;
@@ -401,6 +524,7 @@ impl TableCleanup {
         &self,
         table: &CleanupTable,
         cutoff: DateTime<Utc>,
+        exclude: &str,
     ) -> Result<u64, TaskError> {
         let (total, sets) = self
             .candidate_sets(table, &sql::version_filter("<", cutoff))
@@ -409,6 +533,7 @@ impl TableCleanup {
             table,
             &sets,
             sql::Keep::NewestUnlessExpiredTombstone(cutoff),
+            exclude,
         )
         .await?;
         info!(
@@ -425,12 +550,14 @@ impl TableCleanup {
         &self,
         table: &CleanupTable,
         cutoff: DateTime<Utc>,
+        exclude: &str,
     ) -> Result<u64, TaskError> {
-        let purged = self.purge_tombstones(table, cutoff).await?;
+        let purged = self.purge_tombstones(table, cutoff, exclude).await?;
         let (total, sets) = self
             .candidate_sets(table, &sql::version_filter(">=", cutoff))
             .await?;
-        self.run_collapse(table, &sets, sql::Keep::Newest).await?;
+        self.run_collapse(table, &sets, sql::Keep::Newest, exclude)
+            .await?;
         info!(
             table = table.name,
             tombstones = total,
@@ -450,43 +577,66 @@ impl TableCleanup {
         let cursor = self.block_cursor(&key).await?;
         let high_block = self.high_block(&table.name).await?.max(cursor.block);
         let cutoff = pass_at - TimeDelta::seconds(self.config.tombstone_retention_secs as i64);
+        let busy = self.busy(&table.name).await?;
+        let (exclude, deferred) = match &busy {
+            Busy::Mutating => {
+                info!(
+                    table = table.name,
+                    "a mutation is pending; deferring tombstone collapse"
+                );
+                (String::new(), true)
+            }
+            Busy::Parts(parts) => (sql::exclude_parts_sql(parts), !parts.is_empty()),
+        };
         if cursor.last_pass.is_none() {
-            let (total, purged_at) = if self.config.sweep_history {
-                (self.sweep_history(table, cutoff).await?, Some(pass_at))
-            } else {
-                (0, None)
+            let (total, purged_at) = match (self.config.sweep_history, &busy) {
+                (false, _) | (_, Busy::Mutating) => (0, None),
+                (true, Busy::Parts(_)) => (
+                    self.sweep_history(table, cutoff, &exclude).await?,
+                    Some(pass_at),
+                ),
             };
             let swept = BlockCursor {
                 block: high_block,
                 ..cursor
             };
-            self.save_block_cursor(&key, pass_at, &swept, high_block, purged_at)
+            let hold = (deferred || matches!(busy, Busy::Mutating)).then_some(0);
+            self.save_block_cursor(&key, pass_at, &swept, high_block, purged_at, hold)
                 .await?;
             return Ok(total);
         }
-        let (total, sets) = self
-            .candidate_sets(table, &sql::new_rows_filter(cursor.previous_block))
-            .await?;
-        if total > 0 {
-            self.run_collapse(table, &sets, sql::Keep::Newest).await?;
-            info!(
-                table = table.name,
-                candidates = total,
-                statements = sets.len(),
-                "collapsed tombstoned keys"
-            );
+        let mut total = 0;
+        if !matches!(busy, Busy::Mutating) {
+            let after = cursor.window_start(deferred);
+            let (found, sets) = self
+                .candidate_sets(table, &sql::new_rows_filter(after))
+                .await?;
+            total = found;
+            if total > 0 {
+                self.run_collapse(table, &sets, sql::Keep::Newest, &exclude)
+                    .await?;
+                info!(
+                    table = table.name,
+                    candidates = total,
+                    statements = sets.len(),
+                    catching_up = after < cursor.previous_block,
+                    excluded_parts = !exclude.is_empty(),
+                    "collapsed tombstoned keys"
+                );
+            }
         }
+        let hold = cursor.next_hold(deferred);
         // Saved before the purge so a failing purge cannot stall the incremental window.
-        self.save_block_cursor(&key, pass_at, &cursor, high_block, cursor.last_purge)
+        self.save_block_cursor(&key, pass_at, &cursor, high_block, cursor.last_purge, hold)
             .await?;
         let purge_due = cursor.last_purge.is_none_or(|at| {
             pass_at - at >= TimeDelta::seconds(self.config.purge_interval_secs as i64) - PURGE_SLACK
         });
-        if !purge_due {
+        if !purge_due || matches!(busy, Busy::Mutating) {
             return Ok(total);
         }
-        let purged = self.purge_tombstones(table, cutoff).await?;
-        self.save_block_cursor(&key, pass_at, &cursor, high_block, Some(pass_at))
+        let purged = self.purge_tombstones(table, cutoff, &exclude).await?;
+        self.save_block_cursor(&key, pass_at, &cursor, high_block, Some(pass_at), hold)
             .await?;
         Ok(total + purged)
     }
@@ -505,22 +655,42 @@ impl TableCleanup {
                 block: high_block,
                 ..cursor
             };
-            self.save_block_cursor(&key, pass_at, &swept, high_block, None)
+            self.save_block_cursor(&key, pass_at, &swept, high_block, None, None)
                 .await?;
             return Ok(0);
         }
-        let after_block = (!history).then_some(cursor.previous_block);
+        let tables = self.safe_tables(|role| role != CodeRole::None).await;
+        let mut excludes = Vec::with_capacity(tables.len());
+        let mut deferred = false;
+        for table in &tables {
+            let busy = self.busy(&table.name).await?;
+            deferred |= busy.defers();
+            excludes.push(match busy {
+                Busy::Mutating => {
+                    info!(
+                        table = table.name,
+                        "a mutation is pending; deferring code snapshot cleanup"
+                    );
+                    None
+                }
+                Busy::Parts(parts) => Some(sql::exclude_parts_sql(&parts)),
+            });
+        }
+        let changed = if history {
+            sql::multi_snapshot_scopes_sql(&self.code_file_table)
+        } else {
+            sql::changed_scopes_sql(&self.code_checkpoint_table, cursor.window_start(deferred))
+        };
         let scopes_sql = |chunk| {
             sql::code_scopes_sql(
                 &self.code_checkpoint_table,
                 &self.code_branch_table,
-                after_block,
+                &changed,
                 chunk,
             )
         };
         let total = self.count(&scopes_sql(None)).await?;
         let chunks = total.div_ceil(SCOPES_PER_STATEMENT) as usize;
-        let tables = self.safe_tables(|role| role != CodeRole::None).await;
         let mut failed_chunks = 0usize;
         for chunk in 0..chunks {
             let scopes = scopes_sql((chunks > 1).then_some((chunks, chunk)));
@@ -529,12 +699,16 @@ impl TableCleanup {
                 continue;
             }
             let prune = sql::path_prune_sql(&paths);
-            for table in &tables {
+            for (table, exclude) in tables.iter().zip(&excludes) {
+                let Some(exclude) = exclude else {
+                    continue;
+                };
                 let statement = match table.code {
                     CodeRole::Project => sql::code_snapshot_statement(
                         &table.name,
                         &scopes,
                         &prune,
+                        exclude,
                         self.config.statement_timeout_secs,
                     ),
                     CodeRole::SharedEdge => sql::shared_edge_snapshot_statement(
@@ -542,6 +716,7 @@ impl TableCleanup {
                         &self.code_checkpoint_table,
                         &scopes,
                         &prune,
+                        exclude,
                         self.config.statement_timeout_secs,
                     ),
                     CodeRole::None => continue,
@@ -561,7 +736,7 @@ impl TableCleanup {
         if total > 0 {
             info!(
                 scopes = total,
-                chunks, failed_chunks, history, "removed superseded code snapshots"
+                chunks, failed_chunks, history, deferred, "removed superseded code snapshots"
             );
         }
         let saved = if history {
@@ -572,7 +747,12 @@ impl TableCleanup {
         } else {
             cursor
         };
-        self.save_block_cursor(&key, pass_at, &saved, high_block, None)
+        let hold = if history {
+            deferred.then_some(0)
+        } else {
+            cursor.next_hold(deferred)
+        };
+        self.save_block_cursor(&key, pass_at, &saved, high_block, None, hold)
             .await?;
         Ok(total)
     }
@@ -720,7 +900,18 @@ impl ScheduledTask for TableCleanup {
 
     async fn run(&self) -> Result<(), TaskError> {
         let started = Instant::now();
-        let supported = match self.prepare().await {
+        let ready = match self.version_active().await {
+            Ok(true) => self.prepare().await,
+            Ok(false) => {
+                info!(
+                    version = *SCHEMA_VERSION,
+                    "schema version is not active yet; table cleanup waits for the migration"
+                );
+                Ok(false)
+            }
+            Err(error) => Err(error),
+        };
+        let supported = match ready {
             Ok(supported) => supported,
             Err(error) => {
                 self.metrics.record_error(TASK_NAME, "prepare");
@@ -733,12 +924,17 @@ impl ScheduledTask for TableCleanup {
             self.metrics.record_requests_skipped(TASK_NAME, 1);
             return Ok(());
         }
+        let mut failed = 0usize;
+        if let Err(error) = self.ratchet_identity().await {
+            failed += 1;
+            self.metrics.record_error(TASK_NAME, "identity");
+            warn!(%error, "block identity check failed");
+        }
         let skipped = self.unsafe_tables.lock().await.len() as u64;
         if skipped > 0 {
             self.metrics.record_requests_skipped(TASK_NAME, skipped);
         }
         let pass_at = Utc::now();
-        let mut failed = 0usize;
         let mut candidates = 0u64;
         match self.cleanup_code_snapshots(pass_at).await {
             Ok(scopes) => candidates += scopes,
@@ -858,5 +1054,29 @@ mod tests {
             set.sql,
             "SELECT traversal_path, id FROM t WHERE traversal_path IN ('1/2/') AND _deleted AND x AND cityHash64(traversal_path, id) % 3 = 1"
         );
+    }
+
+    #[test]
+    fn busy_passes_keep_their_window_and_the_first_quiet_pass_catches_up_from_the_hold() {
+        let quiet = BlockCursor {
+            block: 90,
+            previous_block: 70,
+            ..Default::default()
+        };
+        assert_eq!(quiet.window_start(false), 70);
+        assert_eq!(quiet.next_hold(false), None);
+        assert_eq!(quiet.window_start(true), 70);
+        assert_eq!(quiet.next_hold(true), Some(70));
+
+        let held = BlockCursor {
+            block: 120,
+            previous_block: 90,
+            hold_block: Some(70),
+            ..Default::default()
+        };
+        assert_eq!(held.window_start(true), 90);
+        assert_eq!(held.next_hold(true), Some(70));
+        assert_eq!(held.window_start(false), 70);
+        assert_eq!(held.next_hold(false), None);
     }
 }

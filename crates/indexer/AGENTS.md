@@ -91,7 +91,9 @@ one cheap global sweep, off the insert hot path. See
 rows from the versioned graph tables with patch-part lightweight deletes: rows hidden behind tombstones,
 tombstones older than the retention window, and code rows older than their project's checkpoint. It
 keeps a block-number cursor per table in the `checkpoint` table, refuses tables whose parts do not carry
-a unique `(_block_number, _block_offset)` identity, and periodically issues `APPLY PATCHES`. SQL lives in
+a unique `(_block_number, _block_offset)` identity, waits for the pinned schema version to become active,
+excludes parts of in-flight merges from every statement (catching them up once the table is quiet), and
+periodically issues `APPLY PATCHES`. SQL lives in
 `table_cleanup/sql.rs`, orchestration in `table_cleanup/mod.rs`. See
 `docs/design-documents/indexing/sdlc_indexing.md` ("Table cleanup").
 

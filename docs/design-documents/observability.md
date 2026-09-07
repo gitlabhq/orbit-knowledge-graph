@@ -67,7 +67,7 @@ Permanent errors (`error_kind="permanent"` or `"deserialization"`) skip retries 
 | `gkg.scheduler.task.requests.published` | Counter | count | `task` | Requests successfully published |
 | `gkg.scheduler.task.requests.skipped` | Counter | count | `task` | Requests skipped (already in-flight; for table cleanup, tables refused by the identity guards or an unsupported ClickHouse release) |
 | `gkg.scheduler.task.query.duration` | Histogram | s | `query` | Duration of a scheduled task ClickHouse query |
-| `gkg.scheduler.task.errors` | Counter | count | `task`, `stage` (publish/query; table cleanup: prepare, code_snapshots, code_history, collapse, apply_patches) | Scheduled task errors by stage |
+| `gkg.scheduler.task.errors` | Counter | count | `task`, `stage` (publish/query; table cleanup: prepare, identity, code_snapshots, code_history, collapse, apply_patches) | Scheduled task errors by stage |
 
 *SDLC module metrics:*
 

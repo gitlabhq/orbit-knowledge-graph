@@ -275,6 +275,7 @@
             "apply_patches_after_secs": 21600,
             "cron": "0 */10 * * * *",
             "max_candidates_per_statement": 2000000,
+            "merges_cluster": "default",
             "purge_interval_secs": 86400,
             "statement_timeout_secs": 600,
             "sweep_history": true,
@@ -1572,6 +1573,7 @@
               "apply_patches_after_secs": 21600,
               "cron": "0 */10 * * * *",
               "max_candidates_per_statement": 2000000,
+              "merges_cluster": "default",
               "purge_interval_secs": 86400,
               "statement_timeout_secs": 600,
               "sweep_history": true,
@@ -1639,6 +1641,7 @@
             "apply_patches_after_secs": 21600,
             "cron": "0 */10 * * * *",
             "max_candidates_per_statement": 2000000,
+            "merges_cluster": "default",
             "purge_interval_secs": 86400,
             "statement_timeout_secs": 600,
             "sweep_history": true,
@@ -1795,6 +1798,10 @@
           "format": "uint64",
           "default": 2000000,
           "minimum": 0
+        },
+        "merges_cluster": {
+          "type": "string",
+          "default": "default"
         },
         "purge_interval_secs": {
           "type": "integer",

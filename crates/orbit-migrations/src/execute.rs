@@ -322,6 +322,7 @@ async fn clone_from_active(
     }
 
     tracing::info!(from = %source_name, to = %target_name, "cloning table from active version");
+    apply_pending_patches(graph, source_name).await?;
     run_ddl(
         graph,
         target_name,
@@ -332,6 +333,36 @@ async fn clone_from_active(
         graph,
         target_name,
         schema::attach_partitions_sql(source_name, target_name),
+    )
+    .await
+}
+
+const APPLY_PATCHES_TIMEOUT_SECS: u64 = 3600;
+
+async fn apply_pending_patches(
+    graph: &ArrowClickHouseClient,
+    table: &str,
+) -> Result<(), MigrationError> {
+    let batches = graph
+        .query(&schema::pending_patch_parts_sql(table))
+        .fetch_arrow()
+        .await
+        .map_err(|error| MigrationError::Ddl {
+            entity_name: table.to_string(),
+            reason: error.to_string(),
+        })?;
+    let pending = batches
+        .first()
+        .and_then(|batch| ArrowUtils::get_column::<UInt64Type>(batch, "pending", 0))
+        .unwrap_or(0);
+    if pending == 0 {
+        return Ok(());
+    }
+    tracing::info!(table, pending, "applying patch parts before cloning");
+    run_ddl(
+        graph,
+        table,
+        schema::apply_patches_sql(table, APPLY_PATCHES_TIMEOUT_SECS),
     )
     .await
 }

@@ -440,6 +440,23 @@ impl RefreshableView {
     }
 }
 
+/// Patch parts of lightweight updates are named `patch-<columns hash>-<partition>_...`.
+pub const PATCH_PART_PREFIX: &str = "patch";
+
+pub fn pending_patch_parts_sql(table: &str) -> String {
+    format!(
+        "SELECT count() AS pending FROM system.parts WHERE database = currentDatabase() \
+         AND table = '{table}' AND active AND startsWith(name, '{PATCH_PART_PREFIX}')"
+    )
+}
+
+/// `ATTACH PARTITION FROM` refuses a source with unapplied patch parts; a join-mode patch on a huge part can take hours, so the wait is bounded and the migration retried.
+pub fn apply_patches_sql(table: &str, timeout_secs: u64) -> String {
+    format!(
+        "ALTER TABLE {table} APPLY PATCHES SETTINGS mutations_sync = 2, max_execution_time = {timeout_secs}"
+    )
+}
+
 pub fn clone_table_sql(source_table: &str, target_table: &str) -> String {
     format!("CREATE TABLE IF NOT EXISTS {target_table} AS {source_table}")
 }

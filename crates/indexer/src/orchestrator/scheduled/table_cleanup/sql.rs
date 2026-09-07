@@ -90,6 +90,42 @@ pub(super) fn high_block_sql(table: &str) -> String {
     )
 }
 
+pub(super) fn cluster_exists_sql(cluster: &str) -> String {
+    format!(
+        "SELECT 1 FROM system.clusters WHERE cluster = '{}'",
+        escape(cluster)
+    )
+}
+
+/// A patch written while one of its parts is merging or mutating is applied to the result in join mode.
+/// Merges are local to the replica that runs them, so the cluster view is needed wherever one exists.
+pub(super) fn busy_parts_sql(database: &str, table: &str, cluster: Option<&str>) -> String {
+    let merges = match cluster {
+        Some(cluster) => format!("clusterAllReplicas('{}', system.merges)", escape(cluster)),
+        None => "system.merges".to_string(),
+    };
+    format!(
+        "SELECT DISTINCT arrayJoin(source_part_names) FROM {merges} \
+         WHERE database = '{}' AND table = '{table}'",
+        escape(database)
+    )
+}
+
+/// A part still queued for a mutation is renamed when its turn comes, so every patch written before that turns into join mode.
+pub(super) fn pending_mutations_sql(database: &str, table: &str) -> String {
+    format!(
+        "SELECT 1 FROM system.mutations WHERE database = '{}' AND table = '{table}' AND NOT is_done",
+        escape(database)
+    )
+}
+
+pub(super) fn exclude_parts_sql(parts: &[String]) -> String {
+    if parts.is_empty() {
+        return String::new();
+    }
+    format!(" AND _part NOT IN ({})", list_sql(parts))
+}
+
 pub(super) fn patch_bytes_sql(tables: &[String]) -> String {
     format!(
         "SELECT table, toString(sum(data_uncompressed_bytes)) FROM system.parts \
@@ -163,6 +199,7 @@ pub(super) fn collapse_statement(
     candidates: &str,
     prune: Option<&str>,
     keep: Keep,
+    exclude: &str,
     timeout_secs: u64,
 ) -> String {
     // A live row tied with a tombstone at the same `_version` counts as live.
@@ -183,8 +220,19 @@ pub(super) fn collapse_statement(
            SELECT {key}, _version FROM {table} WHERE {prune}({key}) IN ({candidates}) \
            AND ({key}, _version) NOT IN (\
              SELECT {key}, max(_version) FROM {table} WHERE {prune}({key}) IN ({candidates}) \
-             GROUP BY {key}{having})) {}",
+             GROUP BY {key}{having})){exclude} {}",
         settings(timeout_secs)
+    )
+}
+
+pub(super) fn changed_scopes_sql(checkpoint_table: &str, after_block: u64) -> String {
+    format!("SELECT {CODE_SCOPE} FROM {checkpoint_table} WHERE _block_number > {after_block}")
+}
+
+/// Every snapshot of a scope carries its own `_version`, so a second version in the file table marks a scope with history to remove.
+pub(super) fn multi_snapshot_scopes_sql(file_table: &str) -> String {
+    format!(
+        "SELECT {CODE_SCOPE} FROM {file_table} GROUP BY {CODE_SCOPE} HAVING uniqExact(_version) > 1"
     )
 }
 
@@ -192,16 +240,13 @@ pub(super) fn collapse_statement(
 pub(super) fn code_scopes_sql(
     checkpoint_table: &str,
     branch_table: &str,
-    after_block: Option<u64>,
+    changed: &str,
     chunk: Option<(usize, usize)>,
 ) -> String {
-    let block = after_block
-        .map(|block| format!("_block_number > {block}"))
-        .unwrap_or_else(|| "1".to_string());
     let chunk = chunk
         .map(|(chunks, index)| format!(" AND cityHash64({CODE_SCOPE}) % {chunks} = {index}"))
         .unwrap_or_default();
-    let changed = format!("SELECT {CODE_SCOPE} FROM {checkpoint_table} WHERE {block}{chunk}");
+    let changed = format!("SELECT {CODE_SCOPE} FROM ({changed}) WHERE 1{chunk}");
     format!(
         "SELECT s.traversal_path AS traversal_path, s.project_id AS project_id, s.branch AS branch, s.bound AS bound FROM (\
            SELECT {CODE_SCOPE}, max(indexed_at) AS bound FROM {checkpoint_table} \
@@ -219,20 +264,23 @@ pub(super) fn scope_paths_sql(scopes: &str) -> String {
     format!("SELECT DISTINCT {PATH_COLUMN} FROM ({scopes}) ORDER BY {PATH_COLUMN}")
 }
 
+/// The target is joined through a pre-filtered derived table: joining it directly made the lightweight update read the whole table once more without a key condition.
 pub(super) fn code_snapshot_statement(
     table: &str,
     scopes: &str,
     prune: &str,
+    exclude: &str,
     timeout_secs: u64,
 ) -> String {
+    let in_scope = format!("({CODE_SCOPE}) IN (SELECT {CODE_SCOPE} FROM ({scopes}))");
     format!(
-        "DELETE FROM {table} WHERE {prune} AND ({CODE_SCOPE}) IN (SELECT {CODE_SCOPE} FROM ({scopes})) \
+        "DELETE FROM {table} WHERE {prune} AND {in_scope} \
          AND ({CODE_SCOPE}, _version) IN (\
-           SELECT e.traversal_path, e.project_id, e.branch, e._version FROM {table} AS e \
+           SELECT v.traversal_path, v.project_id, v.branch, v._version FROM (\
+             SELECT DISTINCT {CODE_SCOPE}, _version FROM {table} WHERE {prune} AND {in_scope}) AS v \
            INNER JOIN ({scopes}) AS c \
-             ON e.traversal_path = c.traversal_path AND e.project_id = c.project_id AND e.branch = c.branch \
-           WHERE e.{prune} AND (e.traversal_path, e.project_id, e.branch) IN (SELECT {CODE_SCOPE} FROM ({scopes})) \
-             AND e._version < c.bound) {}",
+             ON v.traversal_path = c.traversal_path AND v.project_id = c.project_id AND v.branch = c.branch \
+           WHERE v._version < c.bound){exclude} {}",
         settings(timeout_secs)
     )
 }
@@ -243,6 +291,7 @@ pub(super) fn shared_edge_snapshot_statement(
     checkpoint_table: &str,
     scopes: &str,
     prune: &str,
+    exclude: &str,
     timeout_secs: u64,
 ) -> String {
     let kinds = CodeTableNames::node_kinds_sql_list();
@@ -253,14 +302,16 @@ pub(super) fn shared_edge_snapshot_statement(
          WHERE traversal_path IN (SELECT DISTINCT traversal_path FROM ({scopes})) \
          GROUP BY traversal_path HAVING count() = 1"
     );
+    let in_paths = format!(
+        "traversal_path IN (SELECT traversal_path FROM ({paths})) AND source_kind IN ({kinds})"
+    );
     format!(
-        "DELETE FROM {table} WHERE {prune} AND traversal_path IN (SELECT traversal_path FROM ({paths})) \
-         AND source_kind IN ({kinds}) \
+        "DELETE FROM {table} WHERE {prune} AND {in_paths} \
          AND (traversal_path, _version) IN (\
-           SELECT e.traversal_path, e._version FROM {table} AS e \
-           INNER JOIN ({paths}) AS c ON e.traversal_path = c.traversal_path \
-           WHERE e.{prune} AND e.traversal_path IN (SELECT traversal_path FROM ({paths})) \
-             AND e.source_kind IN ({kinds}) AND e._version < c.bound) {}",
+           SELECT v.traversal_path, v._version FROM (\
+             SELECT DISTINCT traversal_path, _version FROM {table} WHERE {prune} AND {in_paths}) AS v \
+           INNER JOIN ({paths}) AS c ON v.traversal_path = c.traversal_path \
+           WHERE v._version < c.bound){exclude} {}",
         settings(timeout_secs)
     )
 }
@@ -325,6 +376,7 @@ mod tests {
             "SELECT a, b FROM t WHERE _deleted",
             Some("traversal_path IN ('1/2/')"),
             Keep::Newest,
+            "",
             30,
         );
         assert!(sql.starts_with(
@@ -349,6 +401,7 @@ mod tests {
             "SELECT a, b FROM t WHERE _deleted",
             None,
             Keep::NewestUnlessExpiredTombstone(cutoff),
+            "",
             30,
         );
         assert!(sql.starts_with("DELETE FROM t WHERE (a, b) IN ("));
@@ -358,19 +411,57 @@ mod tests {
     }
 
     #[test]
+    fn busy_parts_are_excluded_from_the_outer_predicate_only() {
+        let exclude = exclude_parts_sql(&["all_1_5_1".to_string(), "all_6_6_0".to_string()]);
+        assert_eq!(exclude, " AND _part NOT IN ('all_1_5_1', 'all_6_6_0')");
+        let sql = collapse_statement(
+            "t",
+            "a",
+            "SELECT a FROM t WHERE _deleted",
+            None,
+            Keep::Newest,
+            &exclude,
+            30,
+        );
+        assert!(sql.contains("GROUP BY a)) AND _part NOT IN ('all_1_5_1', 'all_6_6_0') SETTINGS"));
+        assert_eq!(sql.matches("_part NOT IN").count(), 1);
+        assert_eq!(exclude_parts_sql(&[]), "");
+    }
+
+    #[test]
+    fn busy_parts_come_from_every_replica_when_a_cluster_is_known() {
+        assert_eq!(
+            busy_parts_sql("gkg", "v1_gl_edge", Some("default")),
+            "SELECT DISTINCT arrayJoin(source_part_names) FROM clusterAllReplicas('default', system.merges) WHERE database = 'gkg' AND table = 'v1_gl_edge'"
+        );
+        assert_eq!(
+            busy_parts_sql("gkg", "v1_gl_edge", None),
+            "SELECT DISTINCT arrayJoin(source_part_names) FROM system.merges WHERE database = 'gkg' AND table = 'v1_gl_edge'"
+        );
+        assert_eq!(
+            pending_mutations_sql("gkg", "v1_gl_edge"),
+            "SELECT 1 FROM system.mutations WHERE database = 'gkg' AND table = 'v1_gl_edge' AND NOT is_done"
+        );
+        assert_eq!(
+            cluster_exists_sql("default"),
+            "SELECT 1 FROM system.clusters WHERE cluster = 'default'"
+        );
+    }
+
+    #[test]
     fn code_scopes_require_a_branch_row_at_or_after_the_checkpoint_bound() {
-        let sql = code_scopes_sql("cp", "br", Some(17), None);
+        let sql = code_scopes_sql("cp", "br", &changed_scopes_sql("cp", 17), None);
         assert_eq!(
             sql,
             "SELECT s.traversal_path AS traversal_path, s.project_id AS project_id, s.branch AS branch, s.bound AS bound FROM (\
                SELECT traversal_path, project_id, branch, max(indexed_at) AS bound FROM cp \
                WHERE NOT _deleted AND (traversal_path, project_id, branch) IN (\
-                 SELECT traversal_path, project_id, branch FROM cp WHERE _block_number > 17) \
+                 SELECT traversal_path, project_id, branch FROM (SELECT traversal_path, project_id, branch FROM cp WHERE _block_number > 17) WHERE 1) \
                GROUP BY traversal_path, project_id, branch) AS s \
              INNER JOIN (\
                SELECT traversal_path, project_id, name AS branch, max(_version) AS branch_version FROM br \
                WHERE (traversal_path, project_id, name) IN (\
-                 SELECT traversal_path, project_id, branch FROM cp WHERE _block_number > 17) AND NOT _deleted \
+                 SELECT traversal_path, project_id, branch FROM (SELECT traversal_path, project_id, branch FROM cp WHERE _block_number > 17) WHERE 1) AND NOT _deleted \
                GROUP BY traversal_path, project_id, name) AS b \
                ON s.traversal_path = b.traversal_path AND s.project_id = b.project_id AND s.branch = b.branch \
              WHERE b.branch_version >= s.bound"
@@ -378,33 +469,43 @@ mod tests {
     }
 
     #[test]
-    fn code_history_covers_every_checkpointed_scope() {
-        let sql = code_scopes_sql("cp", "br", None, None);
-        assert!(sql.contains("SELECT traversal_path, project_id, branch FROM cp WHERE 1)"));
-    }
-
-    #[test]
-    fn code_scope_chunks_partition_by_scope_hash() {
-        let sql = code_scopes_sql("cp", "br", Some(0), Some((3, 1)));
+    fn code_history_covers_only_scopes_with_more_than_one_snapshot() {
+        let sql = code_scopes_sql("cp", "br", &multi_snapshot_scopes_sql("v1_gl_file"), None);
         assert!(sql.contains(
-            "_block_number > 0 AND cityHash64(traversal_path, project_id, branch) % 3 = 1)"
+            "(SELECT traversal_path, project_id, branch FROM v1_gl_file GROUP BY traversal_path, project_id, branch HAVING uniqExact(_version) > 1) WHERE 1)"
         ));
     }
 
     #[test]
-    fn code_snapshot_delete_is_bounded_by_each_scope_checkpoint() {
+    fn code_scope_chunks_partition_by_scope_hash() {
+        let sql = code_scopes_sql("cp", "br", &changed_scopes_sql("cp", 0), Some((3, 1)));
+        assert!(sql.contains(
+            "WHERE _block_number > 0) WHERE 1 AND cityHash64(traversal_path, project_id, branch) % 3 = 1)"
+        ));
+    }
+
+    #[test]
+    fn code_snapshot_delete_joins_a_prefiltered_view_of_the_target() {
         let scopes = "SELECT traversal_path, project_id, branch, bound FROM cp";
         let sql = code_snapshot_statement(
             "v1_gl_definition",
             scopes,
             "traversal_path IN ('1/2/', '1/3/')",
+            " AND _part NOT IN ('all_1_1_0')",
             60,
         );
-        assert!(sql.contains("AND e._version < c.bound"));
-        assert!(sql.contains(
-            "WHERE traversal_path IN ('1/2/', '1/3/') AND (traversal_path, project_id, branch) IN (SELECT traversal_path, project_id, branch FROM (SELECT traversal_path, project_id, branch, bound FROM cp))"
-        ));
-        assert!(sql.contains("WHERE e.traversal_path IN ('1/2/', '1/3/') AND (e.traversal_path"));
+        assert_eq!(
+            sql,
+            "DELETE FROM v1_gl_definition WHERE traversal_path IN ('1/2/', '1/3/') AND (traversal_path, project_id, branch) IN (SELECT traversal_path, project_id, branch FROM (SELECT traversal_path, project_id, branch, bound FROM cp)) \
+             AND (traversal_path, project_id, branch, _version) IN (\
+               SELECT v.traversal_path, v.project_id, v.branch, v._version FROM (\
+                 SELECT DISTINCT traversal_path, project_id, branch, _version FROM v1_gl_definition WHERE traversal_path IN ('1/2/', '1/3/') AND (traversal_path, project_id, branch) IN (SELECT traversal_path, project_id, branch FROM (SELECT traversal_path, project_id, branch, bound FROM cp))) AS v \
+               INNER JOIN (SELECT traversal_path, project_id, branch, bound FROM cp) AS c \
+                 ON v.traversal_path = c.traversal_path AND v.project_id = c.project_id AND v.branch = c.branch \
+               WHERE v._version < c.bound) AND _part NOT IN ('all_1_1_0') \
+             SETTINGS lightweight_delete_mode = 'lightweight_update_force', update_sequential_consistency = 0, max_execution_time = 60"
+        );
+        assert!(!sql.contains("FROM v1_gl_definition AS e"));
     }
 
     #[test]
@@ -414,17 +515,24 @@ mod tests {
             "v1_code_indexing_checkpoint",
             "SELECT 1",
             "traversal_path IN ('1/2/')",
+            "",
             60,
         );
         assert!(sql.starts_with(
             "DELETE FROM v1_gl_edge WHERE traversal_path IN ('1/2/') AND traversal_path IN (SELECT"
         ));
-        assert!(sql.contains("WHERE e.traversal_path IN ('1/2/') AND e.traversal_path IN (SELECT"));
+        assert!(sql.contains(
+            "SELECT DISTINCT traversal_path, _version FROM v1_gl_edge WHERE traversal_path IN ('1/2/') AND traversal_path IN (SELECT"
+        ));
         assert!(sql.contains("GROUP BY traversal_path HAVING count() = 1"));
         assert!(
             sql.contains("source_kind IN ('Directory', 'File', 'Definition', 'ImportedSymbol')")
         );
-        assert!(sql.contains("AND e._version < c.bound"));
+        assert!(
+            sql.contains(") AS v INNER JOIN (")
+                && sql.contains("WHERE v._version < c.bound) SETTINGS")
+        );
+        assert!(!sql.contains("FROM v1_gl_edge AS e"));
     }
 
     #[test]

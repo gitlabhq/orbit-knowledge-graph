@@ -9,3 +9,4 @@ mod nats_tls;
 mod schema;
 mod sdlc;
 mod table_cleanup;
+mod table_cleanup_pruning;

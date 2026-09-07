@@ -659,10 +659,16 @@ pub struct TableCleanupConfig {
     pub apply_patches_after_secs: u64,
     #[serde(default = "default_table_cleanup_sweep_history")]
     pub sweep_history: bool,
+    #[serde(default = "default_table_cleanup_merges_cluster")]
+    pub merges_cluster: String,
 }
 
 fn default_table_cleanup_sweep_history() -> bool {
     true
+}
+
+fn default_table_cleanup_merges_cluster() -> String {
+    "default".to_string()
 }
 
 fn default_table_cleanup_tombstone_retention_secs() -> u64 {
@@ -702,6 +708,7 @@ impl Default for TableCleanupConfig {
             apply_patches_after_bytes: default_table_cleanup_apply_patches_bytes(),
             apply_patches_after_secs: default_table_cleanup_apply_patches_secs(),
             sweep_history: default_table_cleanup_sweep_history(),
+            merges_cluster: default_table_cleanup_merges_cluster(),
         }
     }
 }
