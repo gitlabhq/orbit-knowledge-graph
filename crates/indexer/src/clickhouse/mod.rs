@@ -11,5 +11,3 @@ pub use writer::{
 
 /// ClickHouse microsecond timestamp format used across watermark stores and data cleaners.
 pub const TIMESTAMP_FORMAT: &str = "%Y-%m-%d %H:%M:%S%.6f";
-/// Patch parts of a lightweight update live in partitions named `patch-<hash>-<partition>`.
-pub const PATCH_PART_PREFIX: &str = "patch";
