@@ -609,7 +609,7 @@ impl TableCleanup {
                 block: high_block,
                 ..cursor
             };
-            let hold = (deferred || matches!(busy, Busy::Mutating)).then_some(0);
+            let hold = (self.config.sweep_history && deferred).then_some(0);
             self.save_block_cursor(&key, pass_at, &swept, high_block, purged_at, hold)
                 .await?;
             return Ok(total);
