@@ -229,19 +229,11 @@ pub(super) fn changed_scopes_sql(checkpoint_table: &str, after_block: u64) -> St
     format!("SELECT {CODE_SCOPE} FROM {checkpoint_table} WHERE _block_number > {after_block}")
 }
 
-/// Every snapshot of a scope carries its own `_version`, so a scope with two versions in any project table has history to remove.
-pub(super) fn multi_snapshot_scopes_sql(project_tables: &[String]) -> String {
-    let per_table: Vec<String> = project_tables
-        .iter()
-        .map(|table| {
-            format!(
-                "SELECT {CODE_SCOPE} FROM {table} GROUP BY {CODE_SCOPE} HAVING min(_version) < max(_version)"
-            )
-        })
-        .collect();
+/// Every snapshot writes file rows with its own `_version`, so two versions of a scope in the file table mark history to remove;
+/// the file table is the smallest project table that every snapshot touches, and a scope missed here is swept at its next re-index.
+pub(super) fn multi_snapshot_scopes_sql(file_table: &str) -> String {
     format!(
-        "SELECT DISTINCT {CODE_SCOPE} FROM ({})",
-        per_table.join(" UNION ALL ")
+        "SELECT {CODE_SCOPE} FROM {file_table} GROUP BY {CODE_SCOPE} HAVING min(_version) < max(_version)"
     )
 }
 
@@ -497,16 +489,13 @@ mod tests {
 
     #[test]
     fn code_history_covers_only_scopes_with_more_than_one_snapshot() {
-        let changed =
-            multi_snapshot_scopes_sql(&["v1_gl_file".to_string(), "v1_gl_definition".to_string()]);
+        let changed = multi_snapshot_scopes_sql("v1_gl_file");
         assert_eq!(
             changed,
-            "SELECT DISTINCT traversal_path, project_id, branch FROM (\
-             SELECT traversal_path, project_id, branch FROM v1_gl_file GROUP BY traversal_path, project_id, branch HAVING min(_version) < max(_version) UNION ALL \
-             SELECT traversal_path, project_id, branch FROM v1_gl_definition GROUP BY traversal_path, project_id, branch HAVING min(_version) < max(_version))"
+            "SELECT traversal_path, project_id, branch FROM v1_gl_file GROUP BY traversal_path, project_id, branch HAVING min(_version) < max(_version)"
         );
         let sql = code_scopes_sql("cp", "br", &changed);
-        assert!(sql.contains("HAVING min(_version) < max(_version)))"));
+        assert!(sql.contains("HAVING min(_version) < max(_version))"));
     }
 
     #[test]

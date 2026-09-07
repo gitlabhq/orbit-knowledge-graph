@@ -8,6 +8,7 @@ use std::time::Instant;
 use arrow::array::{Array, StringArray};
 use async_trait::async_trait;
 use chrono::{DateTime, TimeDelta, Utc};
+use futures::StreamExt;
 use tokio::sync::Mutex;
 use tracing::{debug, info, warn};
 
@@ -117,6 +118,7 @@ pub struct TableCleanup {
     tables: Vec<CleanupTable>,
     code_checkpoint_table: String,
     code_branch_table: String,
+    code_file_table: String,
     metrics: ScheduledTaskMetrics,
     config: TableCleanupConfig,
     prepared: AtomicBool,
@@ -146,6 +148,7 @@ impl TableCleanup {
                 *SCHEMA_VERSION,
             ),
             code_branch_table: code_tables.branch.clone(),
+            code_file_table: code_tables.file.clone(),
             metrics,
             config,
             prepared: AtomicBool::new(false),
@@ -686,12 +689,7 @@ impl TableCleanup {
             });
         }
         let changed = if history {
-            let project_tables: Vec<String> = tables
-                .iter()
-                .filter(|table| table.code == CodeRole::Project)
-                .map(|table| table.name.clone())
-                .collect();
-            sql::multi_snapshot_scopes_sql(&project_tables)
+            sql::multi_snapshot_scopes_sql(&self.code_file_table)
         } else {
             sql::changed_scopes_sql(&self.code_checkpoint_table, cursor.window_start(deferred))
         };
@@ -966,8 +964,16 @@ impl ScheduledTask for TableCleanup {
                 warn!(%error, "code snapshot cleanup failed");
             }
         }
+        let mut sweeps = Vec::new();
         for table in self.safe_tables(|role| role != CodeRole::Project).await {
-            match self.collapse_tombstones(table, pass_at).await {
+            sweeps.push(async move { (table, self.collapse_tombstones(table, pass_at).await) });
+        }
+        let outcomes: Vec<(&CleanupTable, Result<u64, TaskError>)> = futures::stream::iter(sweeps)
+            .buffer_unordered(self.config.concurrent_tables.max(1))
+            .collect()
+            .await;
+        for (table, outcome) in outcomes {
+            match outcome {
                 Ok(count) => candidates += count,
                 Err(error) => {
                     failed += 1;

@@ -273,6 +273,7 @@
           "table-cleanup": {
             "apply_patches_after_bytes": 1073741824,
             "apply_patches_after_secs": 21600,
+            "concurrent_tables": 4,
             "cron": "0 */10 * * * *",
             "max_candidates_per_statement": 2000000,
             "merges_cluster": "default",
@@ -1571,6 +1572,7 @@
             "table-cleanup": {
               "apply_patches_after_bytes": 1073741824,
               "apply_patches_after_secs": 21600,
+              "concurrent_tables": 4,
               "cron": "0 */10 * * * *",
               "max_candidates_per_statement": 2000000,
               "merges_cluster": "default",
@@ -1639,6 +1641,7 @@
           "default": {
             "apply_patches_after_bytes": 1073741824,
             "apply_patches_after_secs": 21600,
+            "concurrent_tables": 4,
             "cron": "0 */10 * * * *",
             "max_candidates_per_statement": 2000000,
             "merges_cluster": "default",
@@ -1783,6 +1786,12 @@
           "type": "integer",
           "format": "uint64",
           "default": 21600,
+          "minimum": 0
+        },
+        "concurrent_tables": {
+          "type": "integer",
+          "format": "uint",
+          "default": 4,
           "minimum": 0
         },
         "cron": {

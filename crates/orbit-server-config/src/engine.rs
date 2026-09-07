@@ -661,6 +661,12 @@ pub struct TableCleanupConfig {
     pub sweep_history: bool,
     #[serde(default = "default_table_cleanup_merges_cluster")]
     pub merges_cluster: String,
+    #[serde(default = "default_table_cleanup_concurrent_tables")]
+    pub concurrent_tables: usize,
+}
+
+fn default_table_cleanup_concurrent_tables() -> usize {
+    4
 }
 
 fn default_table_cleanup_sweep_history() -> bool {
@@ -709,6 +715,7 @@ impl Default for TableCleanupConfig {
             apply_patches_after_secs: default_table_cleanup_apply_patches_secs(),
             sweep_history: default_table_cleanup_sweep_history(),
             merges_cluster: default_table_cleanup_merges_cluster(),
+            concurrent_tables: default_table_cleanup_concurrent_tables(),
         }
     }
 }
