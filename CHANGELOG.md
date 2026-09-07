@@ -1,3 +1,9 @@
+## [0.118.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.117.0...v0.118.0) (2026-09-07)
+
+### Features
+
+* **cli:** forward coding agent in User-Agent header ([b0dc749](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b0dc749522b517620ed4f88455c00173af5145c2)) by Jean-Gabriel Doyon
+
 ## [0.117.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.116.0...v0.117.0) (2026-09-06)
 
 ### Features
