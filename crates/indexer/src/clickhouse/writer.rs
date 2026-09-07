@@ -132,7 +132,7 @@ impl ClickHouseWriter {
 
         if let Err(error) = self
             .client
-            .insert_arrow_streaming_with_sql(table, &insert_sql, &batches)
+            .insert_arrow_streaming_with_sql(table, &insert_sql, batches)
             .await
         {
             self.metrics.record_write_error(table);

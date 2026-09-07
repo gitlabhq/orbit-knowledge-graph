@@ -185,7 +185,7 @@ impl ClickHouseStaleDataCleaner {
             .client
             .build_insert_sql_with_overrides(table, insert_overrides(WriteDurability::Durable));
         self.client
-            .insert_arrow_streaming_with_sql(table, &sql, &stale)
+            .insert_arrow_streaming_with_sql(table, &sql, stale)
             .await
             .map_err(|e| query_error(e.to_string()))
     }
