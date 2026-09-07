@@ -1,7 +1,7 @@
 mod sql;
 
 use std::collections::BTreeSet;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::Instant;
 
@@ -27,8 +27,11 @@ const REFUSED: &str = "refused";
 const ADMITTED: &str = "admitted";
 /// Scope tuples are inlined three times per code statement; 500 keep a statement well under ClickHouse's default 256 KiB `max_query_size`.
 const SCOPES_PER_STATEMENT: usize = 500;
-/// The path list is inlined six times per statement; 32 KiB of literals keeps it under ClickHouse's default 256 KiB `max_query_size`.
-const PATH_LIST_BYTES_PER_STATEMENT: usize = 32 * 1024;
+/// The path list is inlined six times per statement, so it gets an eighth of the session's `max_query_size`:
+/// 32 KiB under ClickHouse's default 256 KiB, capped so a statement never grows past a few MiB.
+const MIN_PATH_LIST_BYTES: usize = 32 * 1024;
+const MAX_PATH_LIST_BYTES: usize = 1024 * 1024;
+const PATH_LIST_SHARE: usize = 8;
 /// Cron passes land a few seconds after the minute, so an exact interval would skip a pass.
 const PURGE_SLACK: TimeDelta = TimeDelta::seconds(60);
 const NO_HOLD: i64 = -1;
@@ -118,6 +121,7 @@ pub struct TableCleanup {
     config: TableCleanupConfig,
     prepared: AtomicBool,
     supported: AtomicBool,
+    path_list_bytes: AtomicUsize,
     topology: OnceLock<Topology>,
     unsafe_tables: Mutex<BTreeSet<String>>,
     /// Seeded at start so a restart never triggers `APPLY PATCHES` on every table at once.
@@ -146,6 +150,7 @@ impl TableCleanup {
             config,
             prepared: AtomicBool::new(false),
             supported: AtomicBool::new(false),
+            path_list_bytes: AtomicUsize::new(MIN_PATH_LIST_BYTES),
             topology: OnceLock::new(),
             unsafe_tables: Mutex::new(BTreeSet::new()),
             last_patch_apply: Mutex::new(Instant::now()),
@@ -244,6 +249,11 @@ impl TableCleanup {
             self.prepared.store(true, Ordering::Release);
             return Ok(false);
         }
+        let max_query_size = self
+            .scalar("SELECT value FROM system.settings WHERE name = 'max_query_size'")
+            .await?;
+        self.path_list_bytes
+            .store(path_list_bytes(max_query_size as usize), Ordering::Release);
         let cluster = self
             .count(&sql::cluster_exists_sql(&self.config.merges_cluster))
             .await?
@@ -495,7 +505,8 @@ impl TableCleanup {
             .into_iter()
             .map(|row| (row[0].clone(), row[1].parse().unwrap_or(0)))
             .collect();
-        let (total, groups) = group_paths(counts, limit);
+        let (total, groups) =
+            group_paths(counts, limit, self.path_list_bytes.load(Ordering::Acquire));
         let mut sets = Vec::new();
         for group in groups {
             match group {
@@ -865,7 +876,11 @@ fn candidate_set(
     }
 }
 
-fn group_paths(counts: Vec<(String, u64)>, limit: u64) -> (u64, Vec<PathGroup>) {
+fn path_list_bytes(max_query_size: usize) -> usize {
+    (max_query_size / PATH_LIST_SHARE).clamp(MIN_PATH_LIST_BYTES, MAX_PATH_LIST_BYTES)
+}
+
+fn group_paths(counts: Vec<(String, u64)>, limit: u64, list_bytes: usize) -> (u64, Vec<PathGroup>) {
     let mut groups = Vec::new();
     let mut group = Vec::new();
     let mut group_size = 0u64;
@@ -879,8 +894,7 @@ fn group_paths(counts: Vec<(String, u64)>, limit: u64) -> (u64, Vec<PathGroup>) 
             continue;
         }
         let bytes = sql::list_item_len(&path);
-        let full =
-            group_bytes + bytes > PATH_LIST_BYTES_PER_STATEMENT || group_size + count > limit;
+        let full = group_bytes + bytes > list_bytes || group_size + count > limit;
         if !group.is_empty() && full {
             groups.push(PathGroup::Paths(std::mem::take(&mut group)));
             group_size = 0;
@@ -1024,7 +1038,7 @@ mod tests {
             ("d".to_string(), 1),
             ("e".to_string(), 4),
         ];
-        let (total, groups) = group_paths(counts, 5);
+        let (total, groups) = group_paths(counts, 5, MIN_PATH_LIST_BYTES);
         assert_eq!(total, 23);
         assert_eq!(groups.len(), 4);
         assert_eq!(paths(&groups[0]), ["a"]);
@@ -1036,9 +1050,9 @@ mod tests {
     #[test]
     fn a_group_never_exceeds_the_path_list_byte_budget() {
         let path = "1/".repeat(50);
-        let per_group = PATH_LIST_BYTES_PER_STATEMENT / sql::list_item_len(&path);
+        let per_group = MIN_PATH_LIST_BYTES / sql::list_item_len(&path);
         let counts = (0..per_group * 2 + 1).map(|_| (path.clone(), 1)).collect();
-        let (total, groups) = group_paths(counts, 1_000_000);
+        let (total, groups) = group_paths(counts, 1_000_000, MIN_PATH_LIST_BYTES);
         assert_eq!(total, (per_group * 2 + 1) as u64);
         assert_eq!(
             groups
@@ -1047,6 +1061,14 @@ mod tests {
                 .collect::<Vec<_>>(),
             [per_group, per_group, 1]
         );
+    }
+
+    #[test]
+    fn the_path_list_budget_follows_the_session_query_size_within_bounds() {
+        assert_eq!(path_list_bytes(256 * 1024), 32 * 1024);
+        assert_eq!(path_list_bytes(1024), 32 * 1024);
+        assert_eq!(path_list_bytes(10 * 1024 * 1024), 1024 * 1024);
+        assert_eq!(path_list_bytes(64 * 1024 * 1024), 1024 * 1024);
     }
 
     #[test]
