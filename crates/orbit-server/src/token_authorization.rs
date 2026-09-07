@@ -28,14 +28,7 @@ pub struct TokenCandidates {
 pub fn query_candidates(input: &Input, ontology: &Ontology) -> TokenCandidates {
     let entities = query_entities(input, ontology);
     let mut resource_ids = HashMap::new();
-    if input.path.is_none()
-        && input.neighbors.is_none()
-        && input
-            .relationships
-            .iter()
-            .all(|relationship| relationship.hops.max == 1)
-        && input.nodes.iter().all(|node| node.entity.is_some())
-    {
+    if has_static_endpoints(input) {
         for entity in &entities {
             if !ontology
                 .get_redaction_config(entity)
@@ -167,12 +160,15 @@ fn reachable_entities(
     entities
 }
 
+fn has_static_endpoints(input: &Input) -> bool {
+    input.path.is_none()
+        && input.neighbors.is_none()
+        && input.relationships.iter().all(|r| r.hops.max == 1)
+        && input.nodes.iter().all(|node| node.entity.is_some())
+}
+
 pub fn narrow_query_scope(input: &Input, ontology: &Ontology, security: &mut SecurityContext) {
-    if input.path.is_some()
-        || input.neighbors.is_some()
-        || input.relationships.iter().any(|r| r.hops.max > 1)
-        || input.nodes.iter().any(|node| node.entity.is_none())
-    {
+    if !has_static_endpoints(input) {
         return;
     }
     let prefixes = input
@@ -374,7 +370,6 @@ pub async fn authorize(
                 callback_count += 1;
                 for permission in scoped.keys() {
                     let decision = output
-                        .authorizations
                         .iter()
                         .find(|a| a.resource_type == "namespace" && a.ability == *permission);
                     accepted.entry(permission.clone()).or_default().extend(
@@ -424,10 +419,8 @@ fn catalog_sql(tables: &[&str]) -> String {
 fn namespace_path(value: &str) -> Option<(i64, TraversalPath)> {
     let path = TraversalPath::new_unchecked(value);
     path.validate().ok()?;
-    let mut segments = value.trim_end_matches('/').split('/');
-    segments.next()?;
-    let id = segments.next_back()?.parse::<i64>().ok()?;
-    (id > 0).then_some((id, path))
+    let id = path.leaf_id()?;
+    (path.segment_count() > 1 && id > 0).then_some((id, path))
 }
 
 async fn check_ids(
@@ -445,7 +438,6 @@ async fn check_ids(
     .await
     .map_err(|error| error.into_status())?;
     let allowed = output
-        .authorizations
         .iter()
         .find(|a| a.resource_type == check.resource_type && a.ability == check.ability);
     Ok(check
