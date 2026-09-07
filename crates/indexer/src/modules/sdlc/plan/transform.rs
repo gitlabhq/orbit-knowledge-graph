@@ -8,7 +8,7 @@ use ontology::{
     constants::{DEFAULT_PRIMARY_KEY, DELETED_COLUMN, VERSION_COLUMN},
 };
 
-use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
+use orbit_migrations::version::{SCHEMA_VERSION, prefixed_table_name};
 
 use super::SOURCE_DATA_TABLE;
 

@@ -367,11 +367,6 @@ handlers:
             .env("GKG_GRAPH__DATABASE", "env_graph_db")
             .env("GKG_DATALAKE__DATABASE", "env_datalake_db")
             .env("GKG_NATS__URL", "nats://env-host:4222")
-            .env("GKG_FEATURES__STOP_MERGES_ON_RETIRE__ENABLED", "true")
-            .env(
-                "GKG_FEATURES__STOP_MERGES_ON_RETIRE__NAMESPACES",
-                "9970,1234",
-            )
             .output()
             .expect("failed to spawn subprocess");
 
@@ -408,22 +403,6 @@ handlers:
             values["nats_url"], "nats://env-host:4222",
             "GKG_NATS__URL should override config/default.yaml"
         );
-        assert_eq!(
-            values["flag_enabled"], true,
-            "GKG_FEATURES__STOP_MERGES_ON_RETIRE__ENABLED should override config/default.yaml"
-        );
-        assert_eq!(
-            values["flag_for_9970"], true,
-            "GKG_FEATURES__STOP_MERGES_ON_RETIRE__NAMESPACES should parse the comma-separated list"
-        );
-        assert_eq!(
-            values["flag_for_1234"], true,
-            "second list entry should parse"
-        );
-        assert_eq!(
-            values["flag_for_5555"], false,
-            "a namespace outside the list should not be enabled"
-        );
     }
 
     /// Subprocess helper: loads config with real process env vars and prints
@@ -440,17 +419,12 @@ handlers:
             }
         };
 
-        use crate::features::Feature;
         println!(
             "{}",
             serde_json::json!({
                 "graph_database": config.graph.database,
                 "datalake_database": config.datalake.database,
                 "nats_url": config.nats.url,
-                "flag_enabled": config.features.is_enabled(Feature::StopMergesOnRetire),
-                "flag_for_9970": config.features.is_enabled_for(Feature::StopMergesOnRetire, Some(9970)),
-                "flag_for_1234": config.features.is_enabled_for(Feature::StopMergesOnRetire, Some(1234)),
-                "flag_for_5555": config.features.is_enabled_for(Feature::StopMergesOnRetire, Some(5555)),
             })
         );
     }

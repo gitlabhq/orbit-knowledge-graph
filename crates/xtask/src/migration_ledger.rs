@@ -34,8 +34,8 @@ fn fingerprint_path() -> PathBuf {
 fn current_fingerprints(ontology: &Ontology) -> Fingerprints {
     Fingerprints {
         sources: migrations::source_fingerprints(),
-        ddl: query_engine::compiler::ddl_fingerprints(ontology),
-        auxiliary_schema: query_engine::compiler::auxiliary_schema_fingerprints(ontology),
+        ddl: orbit_migrations::fingerprint::ddl_fingerprints(ontology),
+        auxiliary_schema: orbit_migrations::fingerprint::auxiliary_schema_fingerprints(ontology),
     }
 }
 

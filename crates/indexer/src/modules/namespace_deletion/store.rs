@@ -7,8 +7,8 @@ use thiserror::Error;
 use arrow::record_batch::RecordBatch;
 
 use crate::clickhouse::ArrowClickHouseClient;
-use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
 use clickhouse_client::FromArrowColumn;
+use orbit_migrations::version::{SCHEMA_VERSION, prefixed_table_name};
 use orbit_utils::traversal_path::TraversalPath;
 
 use std::sync::LazyLock;

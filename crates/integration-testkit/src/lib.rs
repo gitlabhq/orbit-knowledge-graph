@@ -59,21 +59,21 @@ pub fn t(table: &str) -> String {
 /// Generated from the ontology so integration tests create the same prefixed
 /// tables and materialized views the indexer writes to at runtime.
 pub static GRAPH_SCHEMA_SQL: std::sync::LazyLock<&'static str> = std::sync::LazyLock::new(|| {
-    use query_engine::compiler::{
-        emit_create_materialized_view, emit_create_table,
-        generate_graph_materialized_views_with_prefix, generate_graph_tables_with_prefix,
-    };
-
     let ontology = load_unprefixed_ontology();
-    let tables = generate_graph_tables_with_prefix(&ontology, &TABLE_PREFIX);
-    let mut stmts: Vec<String> = tables
+    let schema = orbit_migrations::schema::GraphSchema::from_ontology(&ontology);
+
+    let mut stmts: Vec<String> = schema
+        .tables
         .iter()
-        .map(|t| format!("{};", emit_create_table(t)))
+        .map(|table| format!("{};", table.to_create_sql(&TABLE_PREFIX)))
         .collect();
 
-    let views = generate_graph_materialized_views_with_prefix(&ontology, &TABLE_PREFIX);
-    for mv in &views {
-        stmts.push(format!("{};", emit_create_materialized_view(mv)));
+    let all_table_names: Vec<String> = schema.tables.iter().map(|t| t.name.clone()).collect();
+    for view in schema.views.iter().filter(|v| v.versioned) {
+        let prefixed = view
+            .clone()
+            .with_schema_version_prefix(&TABLE_PREFIX, &all_table_names);
+        stmts.push(format!("{};", prefixed.to_create_sql()));
     }
 
     let sql = stmts.join("\n");

@@ -1,259 +1,9 @@
-//! Ontology-driven DDL generator. The storage metadata in each
-//! node/edge/auxiliary YAML is fully explicit: every column, codec, default,
-//! index, and projection is specified. The generator is a thin pass-through
-//! with no auto-derivation.
-
-pub mod clickhouse;
-mod denormalized;
 pub mod duckdb;
 
-use std::collections::BTreeMap;
-
-use ontology::{
-    AuxiliaryTable, MaterializedViewDefinition, Ontology, PartitionConfig,
-    RefreshableMaterializedViewDefinition, StorageColumn, StorageIndex, StorageProjection,
-};
+use ontology::{Ontology, StorageColumn};
 
 use crate::ast::ddl::*;
-use crate::schema_templates::render_refreshable_materialized_view_select;
 
-/// Tables are returned unprefixed. Call `.with_prefix()` on each to apply
-/// a schema version prefix before codegen.
-pub fn generate_graph_tables(ontology: &Ontology) -> Vec<CreateTable> {
-    generate_graph_tables_with_prefix(ontology, "")
-}
-
-/// Per-table hash of the emitted (unprefixed) `CREATE TABLE` DDL, keyed by table name.
-pub fn ddl_fingerprints(ontology: &Ontology) -> BTreeMap<String, String> {
-    let mut fingerprints = BTreeMap::new();
-    for table in generate_graph_tables(ontology) {
-        fingerprints.insert(
-            table.name.clone(),
-            ontology::migrations::sha256_hex(&clickhouse::emit_create_table(&table)),
-        );
-    }
-    for view in generate_graph_materialized_views(ontology) {
-        fingerprints.insert(
-            format!("materialized_view/{}", view.name),
-            ontology::migrations::sha256_hex(&clickhouse::emit_create_materialized_view(&view)),
-        );
-    }
-    fingerprints
-}
-
-pub fn auxiliary_schema_fingerprints(ontology: &Ontology) -> BTreeMap<String, String> {
-    let mut fingerprints = BTreeMap::new();
-    for object in generate_unversioned_objects(ontology) {
-        fingerprints.insert(
-            format!("{}/{}", object.kind, object.name),
-            ontology::migrations::sha256_hex(&object.ddl),
-        );
-    }
-    for (definition, view) in ontology
-        .refreshable_materialized_views()
-        .iter()
-        .zip(generate_refreshable_materialized_views(ontology, 1))
-    {
-        fingerprints.insert(
-            format!("materialized_view/{}", definition.name),
-            ontology::migrations::sha256_hex(
-                &clickhouse::emit_create_refreshable_materialized_view(&view),
-            ),
-        );
-    }
-    fingerprints
-}
-
-pub fn generate_graph_tables_with_prefix(ontology: &Ontology, prefix: &str) -> Vec<CreateTable> {
-    let mut tables: Vec<CreateTable> = Vec::new();
-
-    let partition = ontology.partition();
-    for aux in ontology
-        .auxiliary_tables()
-        .iter()
-        .filter(|table| table.versioned)
-    {
-        tables.push(build_auxiliary_table(aux));
-    }
-    for node in ontology.nodes() {
-        tables.push(build_node_table(node, partition));
-    }
-    for name in ontology.edge_tables() {
-        if let Some(config) = ontology.edge_table_config(name) {
-            tables.push(build_edge_table(name, config, partition));
-        }
-    }
-    // Denormalized joins are composed from the definitions above, so they come last.
-    for join in ontology.denormalized_joins() {
-        let source_of = |i: usize| {
-            let name = join.tables[i].table.as_str();
-            tables
-                .iter()
-                .find(|t| t.name == name)
-                .unwrap_or_else(|| panic!("denormalized join source '{name}' not generated"))
-        };
-        tables.push(denormalized::build_table(join, source_of, partition));
-    }
-
-    tables.into_iter().map(|t| t.with_prefix(prefix)).collect()
-}
-
-pub struct UnversionedObject {
-    pub kind: &'static str,
-    pub name: String,
-    pub ddl: String,
-}
-
-pub fn generate_unversioned_objects(ontology: &Ontology) -> Vec<UnversionedObject> {
-    let mut objects: Vec<UnversionedObject> = ontology
-        .auxiliary_tables()
-        .iter()
-        .filter(|table| !table.versioned)
-        .map(|table| {
-            let table = build_auxiliary_table(table);
-            UnversionedObject {
-                kind: "table",
-                name: table.name.clone(),
-                ddl: clickhouse::emit_create_table(&table),
-            }
-        })
-        .collect();
-
-    let known_tables = collect_table_names(ontology);
-    objects.extend(
-        ontology
-            .materialized_views()
-            .iter()
-            .filter(|mv| !mv.versioned)
-            .map(|mv| {
-                let view = build_materialized_view(mv).with_prefix("", &known_tables);
-                UnversionedObject {
-                    kind: "materialized_view",
-                    name: view.name.clone(),
-                    ddl: clickhouse::emit_create_materialized_view(&view),
-                }
-            }),
-    );
-
-    objects
-}
-
-pub fn generate_refreshable_materialized_views(
-    ontology: &Ontology,
-    version: u32,
-) -> Vec<CreateRefreshableMaterializedView> {
-    let prefix = if version == 0 {
-        String::new()
-    } else {
-        format!("v{version}_")
-    };
-    ontology
-        .refreshable_materialized_views()
-        .iter()
-        .map(|view| build_refreshable_materialized_view(ontology, view, version, &prefix))
-        .collect()
-}
-
-/// Versioned views only, returned unprefixed; unversioned views come from [`generate_unversioned_objects`].
-pub fn generate_graph_materialized_views(ontology: &Ontology) -> Vec<CreateMaterializedView> {
-    generate_graph_materialized_views_with_prefix(ontology, "")
-}
-
-/// Versioned views only, prefixing view names, `TO` targets, and `{table_name}` placeholders (e.g. `{gl_edge}` becomes `v54_gl_edge`).
-pub fn generate_graph_materialized_views_with_prefix(
-    ontology: &Ontology,
-    prefix: &str,
-) -> Vec<CreateMaterializedView> {
-    let known_tables = collect_table_names(ontology);
-
-    let mut views: Vec<CreateMaterializedView> = ontology
-        .materialized_views()
-        .iter()
-        .filter(|mv| mv.versioned)
-        .map(|mv| build_materialized_view(mv).with_prefix(prefix, &known_tables))
-        .collect();
-    let tables = generate_graph_tables(ontology);
-    for join in ontology.denormalized_joins() {
-        let source_of = |i: usize| {
-            let name = join.tables[i].table.as_str();
-            tables
-                .iter()
-                .find(|t| t.name == name)
-                .unwrap_or_else(|| panic!("denormalized join source '{name}' not generated"))
-        };
-        views.extend(
-            denormalized::build_views(join, source_of)
-                .into_iter()
-                .map(|v| v.with_prefix(prefix, &known_tables)),
-        );
-    }
-    views
-}
-
-/// Collects table names so `{table_name}` placeholders in materialized view
-/// queries can be resolved.
-fn collect_table_names(ontology: &Ontology) -> Vec<String> {
-    let mut names: Vec<String> = Vec::new();
-    for aux in ontology.auxiliary_tables() {
-        names.push(aux.name.clone());
-    }
-    for node in ontology.nodes() {
-        names.push(node.destination_table.clone());
-    }
-    for table_name in ontology.edge_tables() {
-        names.push(table_name.to_string());
-    }
-    for join in ontology.denormalized_joins() {
-        names.push(join.table.clone());
-    }
-    names
-}
-
-pub fn generate_graph_dictionaries(ontology: &Ontology) -> Vec<CreateDictionary> {
-    generate_graph_dictionaries_with_prefix(ontology, "")
-}
-
-pub fn generate_graph_dictionaries_with_prefix(
-    ontology: &Ontology,
-    prefix: &str,
-) -> Vec<CreateDictionary> {
-    ontology
-        .auxiliary_dictionaries()
-        .iter()
-        .map(|d| {
-            let key = ColumnDef::new(
-                &d.key,
-                parse_column_type(&aux_col_ch_type(
-                    d.key_type.as_ref().unwrap_or(&ontology::DataType::Int),
-                    false,
-                )),
-            );
-            let attributes: Vec<ColumnDef> = std::iter::once(key)
-                .chain(d.attributes.iter().map(|c| {
-                    let col_type = parse_column_type(&aux_col_ch_type(&c.data_type, c.nullable));
-                    ColumnDef::new(&c.name, col_type)
-                }))
-                .collect();
-            CreateDictionary {
-                name: d.name.clone(),
-                source_table: d.source_table.clone(),
-                key: d.key.clone(),
-                attributes,
-                layout: DictLayout {
-                    kind: d.layout.kind.clone(),
-                    size_in_cells: d.layout.size_in_cells,
-                },
-                lifetime_min: d.lifetime.min,
-                lifetime_max: d.lifetime.max,
-            }
-            .with_prefix(prefix)
-        })
-        .collect()
-}
-/// Stripped-down versions of the ClickHouse tables: no system columns
-/// (`_version`, `_deleted`), and any entity-specific excluded properties
-/// are filtered out. The engine/indexes/projections fields are set to empty
-/// defaults since DuckDB codegen ignores them.
 pub fn generate_local_tables(ontology: &Ontology) -> Vec<CreateTable> {
     let mut tables: Vec<CreateTable> = Vec::new();
 
@@ -270,69 +20,42 @@ pub fn generate_local_tables(ontology: &Ontology) -> Vec<CreateTable> {
     tables
 }
 
-/// SAFETY: `default` and `ch_type` are emitted as raw SQL in the DDL output.
-/// This is safe because the ontology YAML is developer-controlled configuration
-/// embedded at compile time -- not user input. If the trust boundary changes
-/// (e.g. dynamic schema from an API), these fields need validation.
 fn storage_col_to_def(col: &StorageColumn) -> ColumnDef {
     let col_type = parse_column_type(&col.ch_type);
     let mut def = ColumnDef::new(&col.name, col_type);
-    if let Some(ref d) = col.default {
-        def = def.with_default(d);
+    if let Some(ref default) = col.default {
+        def = def.with_default(default);
     }
     if let Some(ref codecs) = col.codec {
-        def = def.with_codec(codecs.iter().map(|s| parse_codec(s)).collect());
+        def = def.with_codec(codecs.iter().map(|codec| parse_codec(codec)).collect());
     }
     def
 }
 
-fn system_columns(version_type: Option<&str>) -> Vec<ColumnDef> {
-    let version = match version_type {
-        Some("uint64") => ColumnDef::new("_version", ColumnType::UInt64),
-        _ => ColumnDef::new(
-            "_version",
-            ColumnType::Timestamp {
-                precision: 6,
-                timezone: Some("UTC".into()),
-            },
-        )
-        .with_default("now64(6)")
-        // _version is batch-shared (one now64() per insert) and contiguous within a
-        // traversal_path, so it's piecewise-constant: Delta yields runs of zeros that
-        // ZSTD compresses well, beating both raw ZSTD and DoubleDelta here.
-        .with_codec(vec![Codec::Delta(8), Codec::ZSTD(1)]),
-    };
-    vec![
-        version,
-        ColumnDef::new("_deleted", ColumnType::Bool).with_default("false"),
-    ]
-}
-
-fn parse_column_type(s: &str) -> ColumnType {
-    let s = s.trim();
-    if let Some(inner) = strip_wrapper(s, "Nullable") {
+fn parse_column_type(column_type: &str) -> ColumnType {
+    let column_type = column_type.trim();
+    if let Some(inner) = strip_wrapper(column_type, "Nullable") {
         return ColumnType::Nullable(Box::new(parse_column_type(inner)));
     }
-    if let Some(inner) = strip_wrapper(s, "LowCardinality") {
+    if let Some(inner) = strip_wrapper(column_type, "LowCardinality") {
         return ColumnType::LowCardinality(Box::new(parse_column_type(inner)));
     }
-    if let Some(inner) = strip_wrapper(s, "Array") {
+    if let Some(inner) = strip_wrapper(column_type, "Array") {
         return ColumnType::Array(Box::new(parse_column_type(inner)));
     }
-    if s.starts_with("DateTime64") {
-        // DateTime64(6, 'UTC') or DateTime64(6)
-        let inner = &s[11..s.len() - 1]; // strip "DateTime64(" and ")"
+    if column_type.starts_with("DateTime64") {
+        let inner = &column_type[11..column_type.len() - 1];
         let parts: Vec<&str> = inner.splitn(2, ',').collect();
         let precision: u8 = parts[0].trim().parse().unwrap_or(6);
-        let tz = parts
+        let timezone = parts
             .get(1)
-            .map(|t| t.trim().trim_matches('\'').to_string());
+            .map(|tz| tz.trim().trim_matches('\'').to_string());
         return ColumnType::Timestamp {
             precision,
-            timezone: tz,
+            timezone,
         };
     }
-    match s {
+    match column_type {
         "Int64" => ColumnType::Int64,
         "UInt64" => ColumnType::UInt64,
         "Bool" => ColumnType::Bool,
@@ -342,360 +65,30 @@ fn parse_column_type(s: &str) -> ColumnType {
     }
 }
 
-fn parse_codec(s: &str) -> Codec {
-    let s = s.to_lowercase();
-    match s.as_str() {
+fn parse_codec(codec: &str) -> Codec {
+    let lower = codec.to_lowercase();
+    match lower.as_str() {
         "lz4" => Codec::LZ4,
-        _ if s.starts_with("zstd(") => Codec::ZSTD(s[5..s.len() - 1].parse().unwrap_or(1)),
-        _ if s.starts_with("delta(") => Codec::Delta(s[6..s.len() - 1].parse().unwrap_or(8)),
         "doubledelta" => Codec::DoubleDelta,
         "t64" => Codec::T64,
+        _ if lower.starts_with("zstd(") => {
+            Codec::ZSTD(lower[5..lower.len() - 1].parse().unwrap_or(1))
+        }
+        _ if lower.starts_with("delta(") => {
+            Codec::Delta(lower[6..lower.len() - 1].parse().unwrap_or(8))
+        }
         _ => Codec::ZSTD(1),
     }
 }
 
-fn parse_index_type(s: &str) -> IndexType {
-    let lower = s.to_lowercase();
-    match lower.as_str() {
-        "minmax" => IndexType::MinMax,
-        _ if lower.starts_with("set(") => {
-            IndexType::Set(lower[4..lower.len() - 1].parse().unwrap_or(10))
-        }
-        _ if lower.starts_with("bloom_filter(") => {
-            IndexType::BloomFilter(lower[13..lower.len() - 1].parse().unwrap_or(0.01))
-        }
-        _ if lower.starts_with("text(") => {
-            // Preserve original casing for tokenizer/preprocessor params.
-            let inner = &s[5..s.len() - 1];
-            IndexType::Text(inner.to_string())
-        }
-        _ if lower.starts_with("ngrambf_v1(") => {
-            let inner = &s[11..s.len() - 1];
-            IndexType::NgramBF(inner.to_string())
-        }
-        _ if lower.starts_with("tokenbf_v1(") => {
-            let inner = &s[11..s.len() - 1];
-            IndexType::TokenBF(inner.to_string())
-        }
-        _ => IndexType::MinMax,
-    }
-}
-
-fn strip_wrapper<'a>(s: &'a str, prefix: &str) -> Option<&'a str> {
-    if s.starts_with(prefix) && s.ends_with(')') {
-        let start = prefix.len() + 1;
-        Some(&s[start..s.len() - 1])
+fn strip_wrapper<'input>(input: &'input str, prefix: &str) -> Option<&'input str> {
+    if input.starts_with(prefix) && input.ends_with(')') {
+        Some(&input[prefix.len() + 1..input.len() - 1])
     } else {
         None
     }
 }
 
-fn table_settings(
-    index_granularity: Option<u32>,
-    has_projections: bool,
-    partitioned: bool,
-    explicit_settings: &BTreeMap<String, String>,
-) -> Vec<TableSetting> {
-    let mut s = Vec::new();
-    if let Some(g) = index_granularity {
-        upsert_setting(&mut s, "index_granularity", g.to_string());
-    }
-    if has_projections {
-        upsert_setting(&mut s, "deduplicate_merge_projection_mode", "'rebuild'");
-    }
-    upsert_setting(
-        &mut s,
-        "allow_experimental_replacing_merge_with_cleanup",
-        "1",
-    );
-    upsert_setting(&mut s, "enable_block_number_column", "1");
-    upsert_setting(&mut s, "enable_block_offset_column", "1");
-    if partitioned {
-        upsert_setting(&mut s, "min_age_to_force_merge_seconds", "3600");
-        upsert_setting(&mut s, "min_age_to_force_merge_on_partition_only", "1");
-    }
-    for (key, value) in explicit_settings {
-        upsert_setting(&mut s, key, value);
-    }
-    s
-}
-
-fn upsert_setting(
-    settings: &mut Vec<TableSetting>,
-    key: impl Into<String>,
-    value: impl Into<String>,
-) {
-    let key = key.into();
-    let value = value.into();
-    if let Some(existing) = settings.iter_mut().find(|s| s.key == key) {
-        existing.value = value;
-    } else {
-        settings.push(TableSetting { key, value });
-    }
-}
-
-fn convert_index(idx: &StorageIndex) -> IndexDef {
-    IndexDef {
-        name: idx.name.clone(),
-        expression: idx.column.clone(),
-        index_type: parse_index_type(&idx.index_type),
-        granularity: idx.granularity,
-    }
-}
-
-/// SAFETY: `select` and `group_by` entries are emitted as raw SQL expressions.
-/// Same trust assumption as `storage_col_to_def` -- ontology YAML is developer-controlled.
-fn convert_projection(proj: &StorageProjection) -> ProjectionDef {
-    match proj {
-        StorageProjection::Reorder { name, order_by } => ProjectionDef::Reorder {
-            name: name.clone(),
-            order_by: order_by.clone(),
-        },
-        StorageProjection::Lightweight { name, order_by } => ProjectionDef::Lightweight {
-            name: name.clone(),
-            order_by: order_by.clone(),
-        },
-        StorageProjection::Aggregate {
-            name,
-            select,
-            group_by,
-        } => ProjectionDef::Aggregate {
-            name: name.clone(),
-            select: select.clone(),
-            group_by: group_by.clone(),
-        },
-    }
-}
-
-fn partition_by<'a>(
-    partition: Option<&PartitionConfig>,
-    table: &str,
-    _columns: impl IntoIterator<Item = &'a str>,
-) -> Vec<String> {
-    let Some(_p) = partition.filter(|p| p.is_partitioned(table)) else {
-        return vec![];
-    };
-    vec![]
-}
-
-fn build_node_table(
-    node: &ontology::NodeEntity,
-    partition: Option<&PartitionConfig>,
-) -> CreateTable {
-    let mut columns: Vec<ColumnDef> = node
-        .storage
-        .columns
-        .iter()
-        .map(storage_col_to_def)
-        .collect();
-    columns.extend(system_columns(None));
-    let partition_by = partition_by(
-        partition,
-        &node.destination_table,
-        node.storage.columns.iter().map(|c| c.name.as_str()),
-    );
-    let partitioned = !partition_by.is_empty();
-
-    let indexes: Vec<IndexDef> = node.storage.indexes.iter().map(convert_index).collect();
-    let projections: Vec<ProjectionDef> = node
-        .storage
-        .projections
-        .iter()
-        .map(convert_projection)
-        .collect();
-
-    let engine = if node.storage.version_only_engine {
-        Engine::replacing_merge_tree_version_only("_version")
-    } else {
-        Engine::replacing_merge_tree("_version", "_deleted")
-    };
-
-    CreateTable {
-        name: node.destination_table.clone(),
-        columns,
-        indexes,
-        projections: projections.clone(),
-        engine,
-        settings: table_settings(
-            Some(1024),
-            !projections.is_empty(),
-            partitioned,
-            &node.storage.settings,
-        ),
-        partition_by,
-        order_by: node.sort_key.clone(),
-        primary_key: node.storage.primary_key.clone(),
-        ttl: None,
-    }
-}
-
-fn build_edge_table(
-    name: &str,
-    config: &ontology::EdgeTableConfig,
-    partition: Option<&PartitionConfig>,
-) -> CreateTable {
-    let mut columns: Vec<ColumnDef> = config
-        .storage
-        .columns
-        .iter()
-        .map(storage_col_to_def)
-        .collect();
-    // Denormalized node properties follow structural columns, before system columns.
-    columns.extend(
-        config
-            .storage
-            .denormalized_columns
-            .iter()
-            .map(storage_col_to_def),
-    );
-    columns.extend(system_columns(None));
-    let partition_by = partition_by(
-        partition,
-        name,
-        config.storage.columns.iter().map(|c| c.name.as_str()),
-    );
-    let partitioned = !partition_by.is_empty();
-
-    let mut indexes: Vec<IndexDef> = config.storage.indexes.iter().map(convert_index).collect();
-    indexes.extend(
-        config
-            .storage
-            .denormalized_indexes
-            .iter()
-            .map(convert_index),
-    );
-    let projections: Vec<ProjectionDef> = config
-        .storage
-        .projections
-        .iter()
-        .map(convert_projection)
-        .collect();
-
-    CreateTable {
-        name: name.into(),
-        columns,
-        indexes,
-        projections: projections.clone(),
-        engine: Engine::replacing_merge_tree("_version", "_deleted"),
-        partition_by,
-        order_by: config.sort_key.clone(),
-        primary_key: config.storage.primary_key.clone(),
-        settings: table_settings(
-            Some(config.storage.index_granularity.unwrap_or(1024)),
-            !projections.is_empty(),
-            partitioned,
-            &config.storage.settings,
-        ),
-        ttl: None,
-    }
-}
-
-fn build_auxiliary_table(aux: &AuxiliaryTable) -> CreateTable {
-    let mut columns: Vec<ColumnDef> = aux
-        .columns
-        .iter()
-        .map(|c| {
-            let col_type = parse_column_type(&aux_col_ch_type(&c.data_type, c.nullable));
-            let mut def = ColumnDef::new(&c.name, col_type);
-            if let Some(ref codecs) = c.codec {
-                def = def.with_codec(codecs.iter().map(|s| parse_codec(s)).collect());
-            }
-            if let Some(ref d) = c.default {
-                def = def.with_default(d);
-            }
-            def
-        })
-        .collect();
-
-    if aux.include_system_columns {
-        columns.extend(system_columns(aux.version_type.as_deref()));
-    }
-
-    let engine = if let Some(name) = &aux.engine {
-        Engine {
-            name: name.clone(),
-            args: vec![],
-        }
-    } else if aux.version_only_engine {
-        Engine::replacing_merge_tree_version_only("_version")
-    } else {
-        Engine::replacing_merge_tree("_version", "_deleted")
-    };
-
-    let projections: Vec<ProjectionDef> = aux.projections.iter().map(convert_projection).collect();
-    let empty_settings = BTreeMap::new();
-
-    CreateTable {
-        name: aux.name.clone(),
-        columns,
-        indexes: vec![],
-        projections: projections.clone(),
-        engine,
-        partition_by: vec![],
-        order_by: aux.order_by.clone(),
-        primary_key: None,
-        settings: table_settings(None, !projections.is_empty(), false, &empty_settings),
-        ttl: aux.ttl.clone(),
-    }
-}
-
-/// Auxiliary tables have no explicit `StorageColumn` definitions, so map the
-/// ontology `DataType` to a ClickHouse type string directly.
-fn aux_col_ch_type(dt: &ontology::DataType, nullable: bool) -> String {
-    let base = match dt {
-        ontology::DataType::String | ontology::DataType::Uuid => "String",
-        ontology::DataType::Int => "Int64",
-        ontology::DataType::Bool => "Bool",
-        ontology::DataType::DateTime => "DateTime64(6, 'UTC')",
-        ontology::DataType::Date => "Date32",
-        _ => "String",
-    };
-    if nullable {
-        format!("Nullable({base})")
-    } else {
-        base.to_string()
-    }
-}
-
-fn build_materialized_view(mv: &MaterializedViewDefinition) -> CreateMaterializedView {
-    CreateMaterializedView {
-        name: mv.name.clone(),
-        to_table: mv.to_table.clone(),
-        select_query: mv.select_query.clone(),
-        engine: mv.engine.as_ref().map(|name| Engine {
-            name: name.clone(),
-            args: mv.engine_args.clone(),
-        }),
-        order_by: mv.order_by.clone(),
-        populate: mv.populate,
-    }
-}
-
-fn build_refreshable_materialized_view(
-    ontology: &Ontology,
-    view: &RefreshableMaterializedViewDefinition,
-    version: u32,
-    prefix: &str,
-) -> CreateRefreshableMaterializedView {
-    CreateRefreshableMaterializedView {
-        name: if view.versioned {
-            format!("{prefix}{}", view.name)
-        } else {
-            view.name.clone()
-        },
-        select_query: render_refreshable_materialized_view_select(
-            &view.select_query,
-            ontology,
-            version,
-            prefix,
-        )
-        .expect("refreshable materialized view SELECT template must render"),
-        append_to: view.append_to.clone(),
-        refresh: view.refresh.clone(),
-    }
-}
-
-/// Filters out properties listed in the entity's `exclude_properties`.
 fn build_local_node_table(ontology: &Ontology, entity_name: &str) -> Option<CreateTable> {
     let exclude = ontology.local_entity_excludes(entity_name)?;
     let node = ontology.get_node(entity_name)?;
@@ -704,7 +97,7 @@ fn build_local_node_table(ontology: &Ontology, entity_name: &str) -> Option<Crea
         .storage
         .columns
         .iter()
-        .filter(|col| !exclude.iter().any(|e| e == &col.name))
+        .filter(|column| !exclude.iter().any(|excluded| excluded == &column.name))
         .map(storage_col_to_def)
         .collect();
 
@@ -721,7 +114,7 @@ fn build_local_node_table(ontology: &Ontology, entity_name: &str) -> Option<Crea
         order_by: node
             .sort_key
             .iter()
-            .filter(|k| !exclude.iter().any(|e| e == *k))
+            .filter(|key| !exclude.iter().any(|excluded| excluded == *key))
             .cloned()
             .collect(),
         primary_key: None,
@@ -735,9 +128,9 @@ fn build_local_edge_table(ontology: &Ontology) -> Option<CreateTable> {
     let columns: Vec<ColumnDef> = ontology
         .local_edge_columns()
         .iter()
-        .map(|c| {
-            let col_type = local_data_type_to_column_type(&c.data_type);
-            ColumnDef::new(&c.name, col_type)
+        .map(|column| {
+            let column_type = local_data_type_to_column_type(&column.data_type);
+            ColumnDef::new(&column.name, column_type)
         })
         .collect();
 
@@ -754,7 +147,7 @@ fn build_local_edge_table(ontology: &Ontology) -> Option<CreateTable> {
         order_by: ontology
             .local_edge_columns()
             .iter()
-            .map(|c| c.name.clone())
+            .map(|column| column.name.clone())
             .collect(),
         primary_key: None,
         settings: vec![],
@@ -762,8 +155,8 @@ fn build_local_edge_table(ontology: &Ontology) -> Option<CreateTable> {
     })
 }
 
-fn local_data_type_to_column_type(dt: &ontology::DataType) -> ColumnType {
-    match dt {
+fn local_data_type_to_column_type(data_type: &ontology::DataType) -> ColumnType {
+    match data_type {
         ontology::DataType::String | ontology::DataType::Uuid => ColumnType::String,
         ontology::DataType::Int => ColumnType::Int64,
         ontology::DataType::Bool => ColumnType::Bool,
@@ -773,483 +166,5 @@ fn local_data_type_to_column_type(dt: &ontology::DataType) -> ColumnType {
         },
         ontology::DataType::Date => ColumnType::Date32,
         _ => ColumnType::String,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn ontology() -> Ontology {
-        Ontology::load_embedded().expect("embedded ontology must load")
-    }
-
-    #[test]
-    fn generates_tables() {
-        let tables = generate_graph_tables(&ontology());
-        let names: Vec<&str> = tables.iter().map(|t| t.name.as_str()).collect();
-        for expected in ["checkpoint", "gl_user", "gl_project", "gl_edge"] {
-            assert!(names.contains(&expected), "missing {expected}: {names:?}");
-        }
-    }
-
-    #[test]
-    fn every_table_has_system_columns() {
-        for table in &generate_graph_tables(&ontology()) {
-            let cols: Vec<&str> = table.columns.iter().map(|c| c.name.as_str()).collect();
-            assert!(
-                cols.contains(&"_version"),
-                "{}: missing _version",
-                table.name
-            );
-            assert!(
-                cols.contains(&"_deleted"),
-                "{}: missing _deleted",
-                table.name
-            );
-        }
-    }
-
-    #[test]
-    fn prefix_applies_to_all() {
-        for table in generate_graph_tables(&ontology()) {
-            let prefixed = table.with_prefix("v1_");
-            assert!(prefixed.name.starts_with("v1_"), "{}", prefixed.name);
-        }
-    }
-
-    #[test]
-    fn generated_ddl_snapshot() {
-        use super::clickhouse::{DictionarySource, emit_create_dictionary, emit_create_table};
-
-        let tables = generate_graph_tables(&ontology());
-        let full_ddl: String = tables
-            .iter()
-            .map(|t| format!("{};\n", emit_create_table(t)))
-            .collect::<Vec<_>>()
-            .join("\n");
-
-        eprintln!("\n--- GENERATED DDL ---\n{full_ddl}\n--- END ---\n");
-
-        for table in &tables {
-            assert!(!table.columns.is_empty(), "{}: no columns", table.name);
-            assert!(!table.order_by.is_empty(), "{}: no ORDER BY", table.name);
-        }
-
-        let dicts = generate_graph_dictionaries(&ontology());
-        let dict_names: Vec<&str> = dicts.iter().map(|d| d.name.as_str()).collect();
-        for expected in [
-            "gl_project_traversal_paths_dict",
-            "gl_group_traversal_paths_dict",
-        ] {
-            assert!(
-                dict_names.contains(&expected),
-                "missing dictionary {expected}: {dict_names:?}"
-            );
-        }
-
-        let default_source = DictionarySource {
-            database: "default",
-            user: "default",
-            password: None,
-        };
-        for dict in &dicts {
-            let sql = emit_create_dictionary(dict, &default_source);
-            eprintln!("\n--- GENERATED DICTIONARY DDL ---\n{sql};\n--- END ---\n");
-            assert!(sql.contains("CREATE DICTIONARY IF NOT EXISTS"), "{sql}");
-            assert!(sql.contains("id Int64"), "Int64 key: {sql}");
-            assert!(sql.contains("PRIMARY KEY id"), "{sql}");
-            assert!(
-                sql.contains("SOURCE(CLICKHOUSE(USER 'default' QUERY"),
-                "explicit source user: {sql}"
-            );
-            assert!(
-                sql.contains("argMax(traversal_path, _version) AS traversal_path"),
-                "argMax dedup: {sql}"
-            );
-            assert!(
-                sql.contains("HAVING argMax(_deleted, _version) = false"),
-                "tombstone dedup: {sql}"
-            );
-            assert!(sql.contains("LAYOUT(HASHED())"), "HASHED layout: {sql}");
-            assert!(sql.contains("LIFETIME(MIN 60 MAX 300)"), "{sql}");
-        }
-    }
-
-    #[test]
-    fn namespaced_tables_partition_global_tables_do_not() {
-        let ontology = ontology();
-        let tables = generate_graph_tables(&ontology);
-        let partition_of = |name: &str| {
-            tables
-                .iter()
-                .find(|t| t.name == name)
-                .unwrap_or_else(|| panic!("missing {name}"))
-                .partition_by
-                .clone()
-        };
-        assert!(partition_of("gl_user").is_empty());
-        assert!(partition_of("gl_runner").is_empty());
-        assert!(partition_of("gl_project").is_empty());
-
-        let expected = usize::from(ontology.partition().is_some());
-        assert_eq!(partition_of("gl_edge").len(), expected);
-        assert_eq!(partition_of("gl_merge_request").len(), expected);
-    }
-
-    #[test]
-    fn partition_by_is_emitted_between_engine_and_order_by() {
-        use super::clickhouse::emit_create_table;
-        let ontology = ontology();
-        let tables = generate_graph_tables(&ontology);
-        let edge = tables.iter().find(|t| t.name == "gl_edge").unwrap();
-        let sql = emit_create_table(edge);
-        let engine_at = sql.find("ENGINE =").unwrap();
-        let order_at = sql.find("ORDER BY").unwrap();
-        match sql.find("PARTITION BY") {
-            Some(partition_at) => {
-                assert!(
-                    ontology.partition().is_some(),
-                    "unexpected PARTITION BY: {sql}"
-                );
-                assert!(engine_at < partition_at && partition_at < order_at, "{sql}");
-            }
-            None => assert!(
-                ontology.partition().is_none(),
-                "missing PARTITION BY: {sql}"
-            ),
-        }
-    }
-
-    #[test]
-    fn forwards_explicit_table_settings_from_ontology() {
-        let tables = generate_graph_tables(&ontology());
-        let merge_request = tables
-            .iter()
-            .find(|table| table.name == "gl_merge_request")
-            .expect("gl_merge_request table should be generated");
-
-        assert!(merge_request.settings.iter().any(|setting| {
-            setting.key == "add_minmax_index_for_temporal_columns" && setting.value == "1"
-        }));
-    }
-
-    #[test]
-    fn materialized_view_prefix_applies_only_to_versioned_views() {
-        use super::clickhouse::emit_create_materialized_view;
-
-        let versioned = ontology::MaterializedViewDefinition {
-            name: "mv_edge_summary".into(),
-            versioned: true,
-            to_table: None,
-            select_query:
-                "SELECT traversal_path, count() AS cnt FROM {gl_edge} GROUP BY traversal_path"
-                    .into(),
-            engine: Some("SummingMergeTree".into()),
-            engine_args: vec![],
-            order_by: vec!["traversal_path".into()],
-            populate: false,
-        };
-        let known_tables = vec!["gl_edge".into(), "gl_project".into()];
-        let mv = build_materialized_view(&versioned).with_prefix("v5_", &known_tables);
-
-        assert_eq!(mv.name, "v5_mv_edge_summary");
-        assert!(mv.select_query.contains("v5_gl_edge"));
-        assert!(!mv.select_query.contains("{gl_edge}"));
-
-        let sql = emit_create_materialized_view(&mv);
-        assert!(sql.contains("CREATE MATERIALIZED VIEW IF NOT EXISTS v5_mv_edge_summary"));
-        assert!(sql.contains("ENGINE = SummingMergeTree"));
-        assert!(sql.contains("ORDER BY (traversal_path)"));
-
-        // Unversioned views generate with the empty prefix: name and TO target stay bare.
-        let unversioned = ontology::MaterializedViewDefinition {
-            name: "query_log_sink".into(),
-            versioned: false,
-            to_table: Some("query_log_retention".into()),
-            select_query: "SELECT query_id, log_comment FROM system.query_log".into(),
-            engine: None,
-            engine_args: vec![],
-            order_by: vec![],
-            populate: false,
-        };
-        let mv =
-            build_materialized_view(&unversioned).with_prefix("", &["query_log_retention".into()]);
-
-        assert_eq!(mv.name, "query_log_sink");
-        assert_eq!(mv.to_table.as_deref(), Some("query_log_retention"));
-        assert!(mv.select_query.contains("system.query_log"));
-    }
-
-    #[test]
-    fn unversioned_objects_tag_kind_and_emit_ddl() {
-        let objects = generate_unversioned_objects(&ontology());
-
-        // The embedded ontology's only unversioned object is the storage-snapshot table.
-        let snapshot = objects
-            .iter()
-            .find(|o| o.name == "namespace_storage_snapshot")
-            .expect("unversioned snapshot table should be generated");
-        assert_eq!(snapshot.kind, "table");
-        assert!(snapshot.ddl.contains("CREATE TABLE"));
-        assert!(objects.iter().all(|o| !o.ddl.is_empty()));
-    }
-
-    #[test]
-    fn refreshable_materialized_view_uses_versioned_name() {
-        let view = ontology::RefreshableMaterializedViewDefinition {
-            name: "daily_summary".into(),
-            versioned: true,
-            select_query: "SELECT 1".into(),
-            append_to: "summary_snapshots".into(),
-            refresh: "EVERY 1 DAY".into(),
-        };
-
-        let generated = build_refreshable_materialized_view(&ontology(), &view, 7, "v7_");
-
-        assert_eq!(generated.name, "v7_daily_summary");
-        assert_eq!(generated.select_query, "SELECT 1");
-        assert_eq!(generated.append_to, "summary_snapshots");
-    }
-
-    #[test]
-    fn auxiliary_table_supports_unversioned_snapshot_storage() {
-        let table = build_auxiliary_table(&ontology::AuxiliaryTable {
-            name: "daily_snapshots".into(),
-            versioned: false,
-            columns: vec![ontology::AuxiliaryColumn {
-                name: "snapshot_date".into(),
-                data_type: ontology::DataType::Date,
-                nullable: false,
-                codec: None,
-                default: None,
-            }],
-            order_by: vec!["snapshot_date".into()],
-            version_only_engine: false,
-            version_type: None,
-            projections: vec![],
-            include_system_columns: false,
-            engine: Some("ReplacingMergeTree".into()),
-            ttl: Some("snapshot_date + INTERVAL 400 DAY".into()),
-        });
-
-        assert_eq!(table.engine.name, "ReplacingMergeTree");
-        assert_eq!(
-            table.ttl.as_deref(),
-            Some("snapshot_date + INTERVAL 400 DAY")
-        );
-        assert!(
-            table
-                .columns
-                .iter()
-                .all(|column| !column.name.starts_with('_'))
-        );
-    }
-
-    #[test]
-    fn local_tables_include_expected_entities() {
-        let tables = generate_local_tables(&ontology());
-        let names: Vec<&str> = tables.iter().map(|t| t.name.as_str()).collect();
-        for expected in [
-            "gl_directory",
-            "gl_file",
-            "gl_definition",
-            "gl_imported_symbol",
-            "gl_edge",
-        ] {
-            assert!(
-                names.contains(&expected),
-                "missing local table {expected}: {names:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn local_node_tables_include_traversal_path() {
-        for table in &generate_local_tables(&ontology()) {
-            if table.name == "gl_edge" {
-                continue;
-            }
-            let cols: Vec<&str> = table.columns.iter().map(|c| c.name.as_str()).collect();
-            assert!(
-                cols.contains(&"traversal_path"),
-                "{}: should contain traversal_path for hydration TP narrowing",
-                table.name
-            );
-        }
-    }
-
-    #[test]
-    fn local_tables_have_no_system_columns() {
-        for table in &generate_local_tables(&ontology()) {
-            let cols: Vec<&str> = table.columns.iter().map(|c| c.name.as_str()).collect();
-            assert!(
-                !cols.contains(&"_version"),
-                "{}: should not contain _version",
-                table.name
-            );
-            assert!(
-                !cols.contains(&"_deleted"),
-                "{}: should not contain _deleted",
-                table.name
-            );
-        }
-    }
-
-    #[test]
-    fn local_tables_have_no_clickhouse_features() {
-        for table in &generate_local_tables(&ontology()) {
-            assert!(
-                table.indexes.is_empty(),
-                "{}: should have no indexes",
-                table.name
-            );
-            assert!(
-                table.projections.is_empty(),
-                "{}: should have no projections",
-                table.name
-            );
-            assert!(
-                table.settings.is_empty(),
-                "{}: should have no settings",
-                table.name
-            );
-        }
-    }
-
-    #[test]
-    fn local_ddl_snapshot() {
-        use super::duckdb::emit_create_table as emit_duckdb;
-
-        let tables = generate_local_tables(&ontology());
-        let full_ddl: String = tables
-            .iter()
-            .map(|t| format!("{};\n", emit_duckdb(t)))
-            .collect::<Vec<_>>()
-            .join("\n");
-
-        eprintln!("\n--- LOCAL DDL ---\n{full_ddl}\n--- END ---\n");
-
-        for table in &tables {
-            assert!(!table.columns.is_empty(), "{}: no columns", table.name);
-        }
-    }
-    fn reviewer_project_join() -> Ontology {
-        ontology().with_denormalized_join(
-            "reviewer_project",
-            &[
-                ("REVIEWER", "User", "MergeRequest", false),
-                ("IN_PROJECT", "MergeRequest", "Project", true),
-            ],
-        )
-    }
-
-    #[test]
-    fn no_denormalized_tables_or_views_without_a_declared_join() {
-        let ontology = ontology();
-        assert!(
-            generate_graph_tables(&ontology)
-                .iter()
-                .all(|t| !t.name.starts_with("gl_denorm_"))
-        );
-        assert!(generate_graph_materialized_views(&ontology).is_empty());
-    }
-
-    #[test]
-    fn denormalized_join_table_is_composed_from_its_source_tables() {
-        let tables = generate_graph_tables(&reviewer_project_join());
-        let t = tables
-            .iter()
-            .find(|t| t.name == "gl_denorm_reviewer_project")
-            .expect("join table should be generated");
-        let names: Vec<&str> = t.columns.iter().map(|c| c.name.as_str()).collect();
-
-        assert_eq!(names[0], "traversal_path");
-        assert_eq!(names.iter().filter(|n| **n == "traversal_path").count(), 1);
-        assert!(
-            !names.contains(&"t1_traversal_path") && !names.contains(&"t0_traversal_path"),
-            "the anchor's path is the unprefixed one and User has none"
-        );
-        for expected in [
-            "t0_id",
-            "t0_username",
-            "t1_source_id",
-            "t1_relationship_kind",
-            "t2_id",
-            "t2_title",
-            "t2_traversal_path",
-            "t3_name",
-            "t3_traversal_path",
-        ] {
-            assert!(names.contains(&expected), "missing {expected} in {names:?}");
-        }
-        assert_eq!(names.iter().filter(|n| n.ends_with("_version")).count(), 1);
-        assert_eq!(t.order_by, ["traversal_path", "t2_id", "t0_id", "t3_id"]);
-
-        let idx: Vec<(&str, &str)> = t
-            .indexes
-            .iter()
-            .map(|i| (i.name.as_str(), i.expression.as_str()))
-            .collect();
-        assert!(idx.contains(&("idx_t1_source_id", "t1_source_id")));
-        assert!(idx.contains(&("idx_t0_state", "t0_state")));
-        assert!(idx.contains(&("idx_t2_title_ngram", "t2_title")));
-        let mut idx_names: Vec<&str> = idx.iter().map(|(n, _)| *n).collect();
-        idx_names.sort_unstable();
-        idx_names.dedup();
-        assert_eq!(
-            idx_names.len(),
-            t.indexes.len(),
-            "index names must be unique"
-        );
-        assert!(
-            t.settings
-                .iter()
-                .any(|s| s.key == "add_minmax_index_for_temporal_columns")
-        );
-    }
-
-    #[test]
-    fn denormalized_join_emits_one_feeding_view_per_table() {
-        let views = generate_graph_materialized_views_with_prefix(&reviewer_project_join(), "v9_");
-        let names: Vec<&str> = views.iter().map(|v| v.name.as_str()).collect();
-        assert_eq!(
-            names,
-            [
-                "v9_gl_denorm_reviewer_project__on_t0",
-                "v9_gl_denorm_reviewer_project__on_t1",
-                "v9_gl_denorm_reviewer_project__on_t2",
-                "v9_gl_denorm_reviewer_project__on_t3",
-            ]
-        );
-        for v in &views {
-            assert_eq!(v.to_table.as_deref(), Some("v9_gl_denorm_reviewer_project"));
-            assert!(v.select_query.starts_with(
-                "SELECT t1.traversal_path AS traversal_path, t0.id AS t0_id, t0.username AS t0_username"
-            ));
-            assert!(v.select_query.contains("t3.name AS t3_name"));
-            assert!(v.select_query.contains(
-                "greatest(t0._version, t1._version, t2._version, t3._version) AS _version"
-            ));
-        }
-
-        let on_t2 = &views[2].select_query;
-        assert!(
-            on_t2.contains(
-                "FROM v9_gl_merge_request AS t2 \
-                 INNER JOIN v9_gl_project AS t3 FINAL ON t2.project_id = t3.id \
-                 INNER JOIN v9_gl_edge AS t1 FINAL ON t1.target_id = t2.id AND t1.relationship_kind = 'REVIEWER' AND t1.source_kind = 'User' AND t1.target_kind = 'MergeRequest' \
-                 INNER JOIN v9_gl_user AS t0 FINAL ON t0.id = t1.source_id"
-            ),
-            "got:\n{on_t2}"
-        );
-        assert!(on_t2.contains("t2.traversal_path AS t2_traversal_path"));
-        assert!(!on_t2.contains("AS t2 FINAL"));
-
-        let on_t1 = &views[1].select_query;
-        assert!(on_t1.contains("FROM v9_gl_edge AS t1 INNER JOIN"));
-        assert!(on_t1.ends_with(
-            "WHERE t1.relationship_kind = 'REVIEWER' AND t1.source_kind = 'User' AND t1.target_kind = 'MergeRequest'"
-        ));
     }
 }

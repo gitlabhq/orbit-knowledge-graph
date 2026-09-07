@@ -3,8 +3,8 @@ use std::sync::atomic::{AtomicU8, Ordering};
 use std::time::Duration;
 
 use clickhouse_client::ArrowClickHouseClient;
-use indexer::schema::version::{read_active_version, read_migrating_version};
 use opentelemetry::KeyValue;
+use orbit_migrations::version::{read_active_version, read_migrating_version};
 use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
