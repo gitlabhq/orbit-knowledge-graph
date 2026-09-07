@@ -35,6 +35,9 @@ const MAX_PATH_LIST_BYTES: usize = 1024 * 1024;
 const PATH_LIST_SHARE: usize = 8;
 /// Cron passes land a few seconds after the minute, so an exact interval would skip a pass.
 const PURGE_SLACK: TimeDelta = TimeDelta::seconds(60);
+/// A table that needs this many statements has tombstones on most of its paths; from there on each statement
+/// is pruned by a contiguous path range, so the sweep reads the table a few times in total instead of once per statement.
+const RANGE_MODE_MIN_STATEMENTS: usize = 8;
 const NO_HOLD: i64 = -1;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -510,17 +513,23 @@ impl TableCleanup {
             .collect();
         let (total, groups) =
             group_paths(counts, limit, self.path_list_bytes.load(Ordering::Acquire));
+        let dense = groups.len() > RANGE_MODE_MIN_STATEMENTS;
         let mut sets = Vec::new();
         for group in groups {
             match group {
                 PathGroup::Paths(paths) => {
-                    sets.push(candidate_set(table, &paths, filter, None));
+                    sets.push(candidate_set(
+                        table,
+                        path_prune(&paths, dense),
+                        filter,
+                        None,
+                    ));
                 }
                 PathGroup::Chunked { path, chunks } => {
                     for chunk in 0..chunks {
                         sets.push(candidate_set(
                             table,
-                            std::slice::from_ref(&path),
+                            sql::path_prune_sql(std::slice::from_ref(&path)),
                             filter,
                             Some((chunks, chunk)),
                         ));
@@ -856,13 +865,20 @@ fn code_role(code_tables: &CodeTableNames, table: &str, sort_key: &[String]) -> 
     }
 }
 
+/// Paths arrive sorted, so a group is a contiguous run of the key space.
+fn path_prune(paths: &[String], dense: bool) -> String {
+    match (dense, paths.first(), paths.last()) {
+        (true, Some(first), Some(last)) => sql::path_range_sql(first, last),
+        _ => sql::path_prune_sql(paths),
+    }
+}
+
 fn candidate_set(
     table: &CleanupTable,
-    paths: &[String],
+    prune: String,
     filter: &str,
     chunk: Option<(usize, usize)>,
 ) -> CandidateSet {
-    let prune = sql::path_prune_sql(paths);
     CandidateSet {
         sql: sql::candidates_sql(
             &table.name,
@@ -1078,13 +1094,31 @@ mod tests {
     }
 
     #[test]
+    fn dense_tables_prune_each_statement_by_a_path_range() {
+        let paths = ["1/2/".to_string(), "1/5/".to_string(), "1/9/".to_string()];
+        assert_eq!(
+            path_prune(&paths, true),
+            "traversal_path >= '1/2/' AND traversal_path <= '1/9/'"
+        );
+        assert_eq!(
+            path_prune(&paths, false),
+            "traversal_path IN ('1/2/', '1/5/', '1/9/')"
+        );
+    }
+
+    #[test]
     fn a_chunked_candidate_set_prunes_by_its_single_path() {
         let table = CleanupTable {
             name: "t".to_string(),
             key: "traversal_path, id".to_string(),
             code: CodeRole::None,
         };
-        let set = candidate_set(&table, &["1/2/".to_string()], " AND x", Some((3, 1)));
+        let set = candidate_set(
+            &table,
+            sql::path_prune_sql(&["1/2/".to_string()]),
+            " AND x",
+            Some((3, 1)),
+        );
         assert_eq!(set.prune.as_deref(), Some("traversal_path IN ('1/2/')"));
         assert_eq!(
             set.sql,

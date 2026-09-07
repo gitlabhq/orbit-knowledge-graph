@@ -174,6 +174,16 @@ pub(super) fn path_prune_sql(paths: &[String]) -> String {
     format!("{PATH_COLUMN} IN ({})", list_sql(paths))
 }
 
+/// Consecutive candidate paths as one primary-key range: when tombstones sit on most paths a literal list
+/// covers most of the table anyway, and a range keeps each statement to its own slice of the key space.
+pub(super) fn path_range_sql(first: &str, last: &str) -> String {
+    format!(
+        "{PATH_COLUMN} >= '{}' AND {PATH_COLUMN} <= '{}'",
+        escape(first),
+        escape(last)
+    )
+}
+
 pub(super) fn candidates_sql(
     table: &str,
     key: &str,
@@ -376,6 +386,14 @@ mod tests {
             Some((4, 3)),
         );
         assert!(sql.ends_with("AND _block_number > 0 AND cityHash64(k) % 4 = 3"));
+    }
+
+    #[test]
+    fn path_ranges_are_closed_and_escaped() {
+        assert_eq!(
+            path_range_sql("1/2/", "1/9'/"),
+            "traversal_path >= '1/2/' AND traversal_path <= '1/9\\'/'"
+        );
     }
 
     #[test]
