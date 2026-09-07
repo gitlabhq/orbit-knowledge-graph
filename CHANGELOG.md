@@ -1,3 +1,15 @@
+## [0.118.1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.118.0...v0.118.1) (2026-09-07)
+
+### Fixes
+
+* **indexer:** keep code coverage telemetry from blocking schema promotion ([2a0d810](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/2a0d810cfcfe4d4b5036d6f452e0d74154c37193)) by Bohdan Parkhomchuk
+
+### Other
+
+* **adr:** name the proxy flag workhorse_gitaly_proxy ([e123f86](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/e123f86af00b60b8df5fe2714ec536231685e894)) by Dmitry Gruzd
+* link gitlab-siphon-tables container registry ([bac8bab](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/bac8bab3ea78578e7ed6d54e4942a9413bcd85fc)) by Bohdan Parkhomchuk
+* **migrations:** extract orbit-migrations crate ([e3f6b35](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/e3f6b352de79b0ad272e69f7479696be10eee640)) by Jean-Gabriel Doyon
+
 ## [0.118.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.117.0...v0.118.0) (2026-09-07)
 
 ### Features
