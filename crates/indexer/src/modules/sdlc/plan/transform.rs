@@ -442,7 +442,10 @@ fn edge_table_metadata(relationship_kind: &str, ontology: &Ontology) -> EdgeTabl
 fn low_cardinality_columns(columns: &[ontology::StorageColumn]) -> HashSet<String> {
     columns
         .iter()
-        .filter(|col| col.ch_type.starts_with("LowCardinality"))
+        .filter(|col| {
+            col.ch_type.starts_with("LowCardinality")
+                || col.ch_type.starts_with("Array(LowCardinality")
+        })
         .map(|col| col.name.clone())
         .collect()
 }

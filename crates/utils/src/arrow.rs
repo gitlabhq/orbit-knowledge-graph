@@ -705,7 +705,8 @@ fn date_to_string(d: Option<chrono::NaiveDate>) -> ColumnValue {
 /// - Casts `Utf8View` / `List<Utf8View>` to `Utf8` / `List<Utf8>` (ClickHouse
 ///   26.x rejects `utf8_view` in Arrow IPC).
 /// - Dictionary-encodes `Utf8` columns named in `dict_columns` to
-///   `Dictionary<Int32, Utf8>` for smaller IPC payloads.
+///   `Dictionary<Int32, Utf8>`, and `List<Utf8>` / `List<Utf8View>` columns
+///   named there to `List<Dictionary<Int32, Utf8>>`, for smaller IPC payloads.
 pub fn prepare_batches(batches: &mut [RecordBatch], dict_columns: &HashSet<String>) {
     let dict_type = DataType::Dictionary(Box::new(DataType::Int32), Box::new(DataType::Utf8));
 
@@ -728,6 +729,28 @@ pub fn prepare_batches(batches: &mut [RecordBatch], dict_columns: &HashSet<Strin
                 new_columns.push(
                     compute::cast(col, &DataType::Utf8)
                         .expect("StringView -> Utf8 cast should not fail"),
+                );
+                changed = true;
+                continue;
+            }
+
+            if let DataType::List(inner) = field.data_type()
+                && matches!(inner.data_type(), DataType::Utf8 | DataType::Utf8View)
+                && dict_columns.contains(field.name().as_str())
+            {
+                let target = DataType::List(Arc::new(Field::new(
+                    inner.name(),
+                    dict_type.clone(),
+                    inner.is_nullable(),
+                )));
+                new_fields.push(Field::new(
+                    field.name(),
+                    target.clone(),
+                    field.is_nullable(),
+                ));
+                new_columns.push(
+                    compute::cast(col, &target)
+                        .expect("List<Utf8> -> List<Dictionary> cast should not fail"),
                 );
                 changed = true;
                 continue;
@@ -1365,5 +1388,101 @@ mod tests {
         let schema = batch.schema();
         let names: Vec<&str> = schema.fields().iter().map(|f| f.name().as_str()).collect();
         assert_eq!(names, vec!["c", "a", "b"]);
+    }
+
+    fn string_list(rows: &[&[&str]]) -> Arc<dyn Array> {
+        let mut builder = ListBuilder::new(StringBuilder::new());
+        for row in rows {
+            for value in *row {
+                builder.values().append_value(value);
+            }
+            builder.append(true);
+        }
+        Arc::new(builder.finish())
+    }
+
+    fn list_of(item: DataType) -> DataType {
+        DataType::List(Arc::new(Field::new("item", item, true)))
+    }
+
+    fn dict_utf8() -> DataType {
+        DataType::Dictionary(Box::new(DataType::Int32), Box::new(DataType::Utf8))
+    }
+
+    fn dictionary_values_len(list: &dyn Array) -> usize {
+        list.as_any()
+            .downcast_ref::<ListArray>()
+            .unwrap()
+            .values()
+            .as_any()
+            .downcast_ref::<arrow::array::DictionaryArray<arrow::datatypes::Int32Type>>()
+            .unwrap()
+            .values()
+            .len()
+    }
+
+    #[test]
+    fn prepare_batches_dictionary_encodes_utf8_list_named_in_dict_columns() {
+        let rows: &[&[&str]] = &[
+            &["state:merged", "draft:false"],
+            &[],
+            &["state:merged", "draft:false"],
+            &["state:merged"],
+        ];
+        let tags = string_list(rows);
+        let mut batches = vec![make_batch(vec![
+            ("source_tags", Arc::clone(&tags)),
+            ("other", Arc::clone(&tags)),
+        ])];
+
+        prepare_batches(&mut batches, &HashSet::from(["source_tags".to_string()]));
+
+        let batch = &batches[0];
+        assert_eq!(*batch.schema().field(0).data_type(), list_of(dict_utf8()));
+        assert_eq!(
+            *batch.schema().field(1).data_type(),
+            list_of(DataType::Utf8)
+        );
+        assert_eq!(dictionary_values_len(batch.column(0).as_ref()), 2);
+        let decoded = compute::cast(batch.column(0), &list_of(DataType::Utf8)).unwrap();
+        assert_eq!(decoded.as_ref(), tags.as_ref());
+        assert_eq!(batch.column(1).as_ref(), tags.as_ref());
+    }
+
+    #[test]
+    fn prepare_batches_dictionary_encodes_utf8view_list_named_in_dict_columns() {
+        let rows: &[&[&str]] = &[&["state:merged", "draft:false"], &[], &["state:merged"]];
+        let tags = string_list(rows);
+        let view_tags = compute::cast(&tags, &list_of(DataType::Utf8View)).unwrap();
+        let mut batches = vec![make_batch(vec![
+            ("target_tags", Arc::clone(&view_tags)),
+            ("other", view_tags),
+        ])];
+
+        prepare_batches(&mut batches, &HashSet::from(["target_tags".to_string()]));
+
+        let batch = &batches[0];
+        assert_eq!(*batch.schema().field(0).data_type(), list_of(dict_utf8()));
+        assert_eq!(
+            *batch.schema().field(1).data_type(),
+            list_of(DataType::Utf8)
+        );
+        let decoded = compute::cast(batch.column(0), &list_of(DataType::Utf8)).unwrap();
+        assert_eq!(decoded.as_ref(), tags.as_ref());
+        assert_eq!(batch.column(1).as_ref(), tags.as_ref());
+    }
+
+    #[test]
+    fn prepare_batches_dictionary_encodes_utf8_named_in_dict_columns() {
+        let kinds: Arc<dyn Array> =
+            Arc::new(StringArray::from(vec!["MergeRequest", "MergeRequest"]));
+        let mut batches = vec![make_batch(vec![("source_kind", Arc::clone(&kinds))])];
+
+        prepare_batches(&mut batches, &HashSet::from(["source_kind".to_string()]));
+
+        let batch = &batches[0];
+        assert_eq!(*batch.schema().field(0).data_type(), dict_utf8());
+        let decoded = compute::cast(batch.column(0), &DataType::Utf8).unwrap();
+        assert_eq!(decoded.as_ref(), kinds.as_ref());
     }
 }
