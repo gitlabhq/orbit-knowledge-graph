@@ -16,13 +16,13 @@ title: GitLab Orbit Local MCPサーバー
 
 {{< history >}}
 
-- GitLab 19.2で[実験的機能](https://docs.gitlab.com/policy/development_stages_support/#experiment)として[導入されました](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/643)。
+- GitLab 19.2で[実験的機能](https://docs.gitlab.com/policy/development_stages_support/#experiment)として[導入](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/643)されました。
 
 {{< /history >}}
 
 GitLab Orbit Local [Model Context Protocol](https://modelcontextprotocol.io/)（MCP）サーバーを使用すると、AIツールやアプリケーションをローカルグラフに安全に接続できます。Claude Code、Codex、Cursor、OpenCodeなどのAIアシスタントは、グラフにアクセスしてSQLクエリを実行できます。
 
-GitLab Orbit Local MCPサーバーはステートレスです。これは、サーバーが以下の特性を持つことを意味します。
+GitLab Orbit Local MCPサーバーはステートレスです。これは、サーバーが以下の特性を持つことを意味します:
 
 - ローカルグラフを参照し、GitLabインスタンスは参照しません。
 - 結果をキャッシュしたり、クエリ履歴を保持したりしません。
@@ -30,12 +30,11 @@ GitLab Orbit Local MCPサーバーはステートレスです。これは、サ�
 
 ## 前提条件 {#prerequisites}
 
-- 以下のいずれかのツールをインストールします。
+- 以下のいずれかのツールをインストールします:
   - [GitLab Orbit CLI](./cli.md)（`orbit`）
   - [GitLab CLI](./glab.md)（`glab orbit`）
 
-<!-- markdownlint-disable-next-line MD044 -->
-## GitLab Orbit Local MCPサーバーへのクライアント接続 {#connect-a-client-to-the-gitlab-orbit-local-mcp-server}
+## GitLab Orbit Local MCPサーバーにクライアントを接続する {#connect-a-client-to-the-gitlab-orbit-local-mcp-server}
 
 GitLab Orbit Local MCPサーバーはstdioトランスポートをサポートしています。引数とコマンドは、MCPクライアントおよびローカル環境によって異なります。
 
@@ -45,15 +44,15 @@ Claude CodeはMCPサーバーの設定を3つのスコープのいずれかに�
 
 | スコープ | 利用可能範囲 | 保存先 |
 | ----- | ------------ | --------- |
-| `local`（デフォルト） | 現在のプロジェクトでのみ、自分のみ | `~/.claude.json` |
-| `user` | すべてのプロジェクトで、自分のみ | `~/.claude.json` |
+| `local`（デフォルト） | 現在のプロジェクトで自分のみ | `~/.claude.json` |
+| `user` | すべてのプロジェクトで自分のみ | `~/.claude.json` |
 | `project` | リポジトリをチェックアウトした全員 | リポジトリルートの`.mcp.json` |
 
-現在のプロジェクトにMCPサーバーを追加するには、次のコマンドを実行します。
+現在のプロジェクトにMCPサーバーを追加するには、次のコマンドを実行します:
 
 {{< tabs >}}
 
-{{< tab title="GitLab Orbit CLI (orbit)" >}}
+{{< tab title="GitLab Orbit CLI（orbit）" >}}
 
 ```shell
 claude mcp add orbit-local -- orbit mcp serve
@@ -61,7 +60,7 @@ claude mcp add orbit-local -- orbit mcp serve
 
 {{< /tab >}}
 
-{{< tab title="GitLab CLI (glab orbit)" >}}
+{{< tab title="GitLab CLI（glab orbit）" >}}
 
 ```shell
 claude mcp add orbit-local -- glab orbit local mcp serve
@@ -71,11 +70,11 @@ claude mcp add orbit-local -- glab orbit local mcp serve
 
 {{< /tabs >}}
 
-すべてのプロジェクトにサーバーを追加するには、次のコマンドを実行します。
+すべてのプロジェクトにサーバーを追加するには、次のコマンドを実行します:
 
 {{< tabs >}}
 
-{{< tab title="GitLab Orbit CLI (orbit)" >}}
+{{< tab title="GitLab Orbit CLI（orbit）" >}}
 
 ```shell
 claude mcp add orbit-local --scope user -- orbit mcp serve
@@ -83,7 +82,7 @@ claude mcp add orbit-local --scope user -- orbit mcp serve
 
 {{< /tab >}}
 
-{{< tab title="GitLab CLI (glab orbit)" >}}
+{{< tab title="GitLab CLI（glab orbit）" >}}
 
 ```shell
 claude mcp add orbit-local --scope user -- glab orbit local mcp serve
@@ -93,11 +92,11 @@ claude mcp add orbit-local --scope user -- glab orbit local mcp serve
 
 {{< /tabs >}}
 
-リポジトリをチェックアウトした全員にサーバーを追加するには、次のコマンドを実行します。
+リポジトリをチェックアウトした全員にサーバーを追加するには、次のコマンドを実行します:
 
 {{< tabs >}}
 
-{{< tab title="GitLab Orbit CLI (orbit)" >}}
+{{< tab title="GitLab Orbit CLI（orbit）" >}}
 
 ```shell
 claude mcp add orbit-local --scope project -- orbit mcp serve
@@ -105,7 +104,7 @@ claude mcp add orbit-local --scope project -- orbit mcp serve
 
 {{< /tab >}}
 
-{{< tab title="GitLab CLI (glab orbit)" >}}
+{{< tab title="GitLab CLI（glab orbit）" >}}
 
 ```shell
 claude mcp add orbit-local --scope project -- glab orbit local mcp serve
@@ -115,11 +114,11 @@ claude mcp add orbit-local --scope project -- glab orbit local mcp serve
 
 {{< /tabs >}}
 
-`.mcp.json`ファイルを直接編集することもできます。
+`.mcp.json`ファイルを直接編集することもできます:
 
 {{< tabs >}}
 
-{{< tab title="GitLab Orbit CLI (orbit)" >}}
+{{< tab title="GitLab Orbit CLI（orbit）" >}}
 
 ```json
 {
@@ -134,7 +133,7 @@ claude mcp add orbit-local --scope project -- glab orbit local mcp serve
 
 {{< /tab >}}
 
-{{< tab title="GitLab CLI (glab orbit)" >}}
+{{< tab title="GitLab CLI（glab orbit）" >}}
 
 ```json
 {
@@ -151,26 +150,26 @@ claude mcp add orbit-local --scope project -- glab orbit local mcp serve
 
 {{< /tabs >}}
 
-MCPサーバーが接続されていることを確認するには、次のコマンドを実行します。
+MCPサーバーが接続されていることを確認するには、次のコマンドを実行します:
 
 ```shell
 claude mcp list
 ```
 
-接続後、[AIアシスタントをセットアップします](./cli.md)。
+接続後、[AIアシスタントをセットアップ](./cli.md)します。
 
 > [!note]
-> プロジェクトスコープのコマンドの場合、Claude Codeは`mcp.json`ファイルを作成する前に承認を求めます。承認するまで、`claude mcp list`にはサーバーが`Pending approval`として表示されます。
+ プロジェクトスコープのコマンドの場合、Claude Codeは`mcp.json`ファイルを作成する前に承認を求めます。承認するまで、`claude mcp list`にはサーバーが`Pending approval`として表示されます。
 
 ### Codexに接続する {#connect-codex}
 
 Codexは`~/.codex/config.toml`にMCPサーバーの設定を保存します。Codexは常にすべてのプロジェクトに対してサーバーを設定します。
 
-Codexに接続するには、次のコマンドを実行します。
+Codexに接続するには、次のコマンドを実行します:
 
 {{< tabs >}}
 
-{{< tab title="GitLab Orbit CLI (orbit)" >}}
+{{< tab title="GitLab Orbit CLI（orbit）" >}}
 
 ```shell
 codex mcp add orbit-local -- orbit mcp serve
@@ -178,7 +177,7 @@ codex mcp add orbit-local -- orbit mcp serve
 
 {{< /tab >}}
 
-{{< tab title="GitLab CLI (glab orbit)" >}}
+{{< tab title="GitLab CLI（glab orbit）" >}}
 
 ```shell
 codex mcp add orbit-local -- glab orbit local mcp serve
@@ -188,28 +187,28 @@ codex mcp add orbit-local -- glab orbit local mcp serve
 
 {{< /tabs >}}
 
-サーバーが登録されていることを確認するには、次のコマンドを実行します。
+サーバーが登録されていることを確認するには、次のコマンドを実行します:
 
 ```shell
 codex mcp list
 ```
 
-接続後、[AIアシスタントをセットアップします](./cli.md)。
+接続後、[AIアシスタントをセットアップ](./cli.md)します。
 
 ### Cursorに接続する {#connect-cursor}
 
-Cursorは`mcp.json`ファイルからMCPサーバーの設定を読み込みます。サーバーをどの範囲で利用可能にするかに応じてスコープを選択してください。
+Cursorは`mcp.json`ファイルからMCPサーバーの設定を読み取ります。サーバーの利用範囲に応じてスコープを選択してください。
 
 | スコープ | 利用可能範囲 | 保存先 |
 | ----- | ------------ | --------- |
-| プロジェクト | 現在のプロジェクトでのみ、自分のみ | リポジトリルートの`.cursor/mcp.json` |
-| グローバル | すべてのプロジェクトで、自分のみ | `~/.cursor/mcp.json` |
+| プロジェクト | 現在のプロジェクトで自分のみ | リポジトリルートの`.cursor/mcp.json` |
+| グローバル | すべてのプロジェクトで自分のみ | `~/.cursor/mcp.json` |
 
-Cursorに接続するには、使用するスコープの`mcp.json`ファイルを作成または編集します。
+Cursorに接続するには、使用するスコープの`mcp.json`ファイルを作成または編集します:
 
 {{< tabs >}}
 
-{{< tab title="GitLab Orbit CLI (orbit)" >}}
+{{< tab title="GitLab Orbit CLI（orbit）" >}}
 
 ```json
 {
@@ -225,7 +224,7 @@ Cursorに接続するには、使用するスコープの`mcp.json`ファイル�
 
 {{< /tab >}}
 
-{{< tab title="GitLab CLI (glab orbit)" >}}
+{{< tab title="GitLab CLI（glab orbit）" >}}
 
 ```json
 {
@@ -243,7 +242,7 @@ Cursorに接続するには、使用するスコープの`mcp.json`ファイル�
 
 {{< /tabs >}}
 
-サーバーが接続されていることを確認するには、次のコマンドを実行します。
+サーバーが接続されていることを確認するには、次のコマンドを実行します:
 
 ```shell
 agent mcp list
@@ -255,7 +254,7 @@ agent mcp list
 
 {{< tabs >}}
 
-{{< tab title="GitLab Orbit CLI (orbit)" >}}
+{{< tab title="GitLab Orbit CLI（orbit）" >}}
 
 ```json
 {
@@ -271,7 +270,7 @@ agent mcp list
 
 {{< /tab >}}
 
-{{< tab title="GitLab CLI (glab orbit)" >}}
+{{< tab title="GitLab CLI（glab orbit）" >}}
 
 ```json
 {
@@ -289,13 +288,13 @@ agent mcp list
 
 {{< /tabs >}}
 
-サーバーが接続されていることを確認するには、次のコマンドを実行します。
+サーバーが接続されていることを確認するには、次のコマンドを実行します:
 
 ```shell
 opencode mcp list
 ```
 
-接続後、[AIアシスタントをセットアップします](./cli.md)。
+接続後、[AIアシスタントをセットアップ](./cli.md)します。
 
 ### その他のMCPクライアントに接続する {#connect-other-mcp-clients}
 
@@ -303,9 +302,9 @@ GitLab Orbit Local MCPサーバーは接続URLを公開していません。URL�
 
 {{< tabs >}}
 
-{{< tab title="GitLab Orbit CLI (orbit)" >}}
+{{< tab title="GitLab Orbit CLI（orbit）" >}}
 
-GitLab Orbit CLIを使用して接続するには、クライアントのMCP設定ファイルを編集します。
+GitLab Orbit CLIを使用して接続するには、クライアントのMCP設定ファイルを編集します:
 
 ```json
 {
@@ -320,12 +319,12 @@ GitLab Orbit CLIを使用して接続するには、クライアントのMCP設�
 
 {{< /tab >}}
 
-{{< tab title="GitLab CLI (glab orbit)" >}}
+{{< tab title="GitLab CLI（glab orbit）" >}}
 
-GitLab CLIを使用して接続するには、次の手順を実行します。
+GitLab CLIを使用して接続するには、次の手順を実行します:
 
 1. `glab orbit local --install`を実行します。このコマンドは`orbit`バイナリをダウンロードします。
-1. 次に、クライアントのMCP設定ファイルを編集します。
+1. 次に、クライアントのMCP設定ファイルを編集します:
 
 ```json
 {
@@ -348,34 +347,34 @@ GitLab CLIを使用して接続するには、次の手順を実行します。
 
 GitLab Orbit Local MCPサーバーは、ローカルグラフと連携するツールセットを提供します。
 
-### `index`
+### `index` {#index}
 
-リポジトリ（またはリポジトリのディレクトリ）をローカルグラフにインデックス作成します。
-
-例:
-
-```plaintext
-チェックアウト済みのプロジェクトをインデックス作成してください。
-```
-
-### `get_graph_schema`
-
-スキーマをフェッチします。ローカルグラフに存在するテーブル名、カラム、データ型が含まれます。
+リポジトリ（または複数のリポジトリを含むディレクトリ）をローカルグラフにインデックス化します。
 
 例:
 
 ```plaintext
-`get_graph_schema`ツールを使って、ローカルグラフに存在するテーブルを表示してください。
+Index my checked out project.
 ```
 
-### `run_sql`
+### `get_graph_schema` {#get_graph_schema}
 
-ローカルグラフに対して読み取り専用のSQLを実行します。ステートメントの配列を受け取り、同じインデックス位置にあるステートメントごとに1つのJSON行配列を返します。
+スキーマをフェッチします。ローカルグラフに存在するテーブル名、列、データ型が含まれます。
+
+例:
+
+```plaintext
+Use the `get_graph_schema` tool to show me what tables are in my local graph.
+```
+
+### `run_sql` {#run_sql}
+
+ローカルグラフに対して読み取り専用のSQLを実行します。ステートメントの配列を受け取り、各ステートメントについて、同じインデックス位置に1つのJSON行配列を返します。
 
 1回の`run_sql`呼び出しで返されるデータは、呼び出し内のすべてのステートメントを合計して最大約1 MBです。それより大きい結果は失敗し、エージェントはより絞り込んだクエリで再試行します。エージェントが回復しない場合は、より少ない結果を要求してください。
 
 例:
 
 ```plaintext
-このリポジトリで最もよく使われているインポートを教えてください。
+Show me the most used imports in this repository.
 ```
