@@ -67,7 +67,6 @@ impl PipelineStage for AuthorizationStage {
             .await
             .map_err(|e| PipelineError::Authorization(format!("{e:?}")))
             .inspect_err(|e| obs.record_error(e))?
-            .authorizations
         };
 
         obs.authorized(t.elapsed());

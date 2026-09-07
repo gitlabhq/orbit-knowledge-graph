@@ -40,51 +40,16 @@ impl RedactionExchangeError {
     }
 }
 
-pub struct RedactionExchangeResult {
-    pub authorizations: Vec<ResourceAuthorization>,
-}
-
-pub trait RedactionMessage: Sized + Send {
-    fn wrap_redaction(exchange: RedactionExchange) -> Self;
-    fn unwrap_redaction(self) -> Result<RedactionExchange, RedactionExchangeError>;
-}
-
-impl RedactionMessage for ExecuteQueryMessage {
-    fn wrap_redaction(exchange: RedactionExchange) -> Self {
-        Self {
-            content: Some(execute_query_message::Content::Redaction(exchange)),
-        }
-    }
-
-    fn unwrap_redaction(self) -> Result<RedactionExchange, RedactionExchangeError> {
-        match self.content {
-            Some(execute_query_message::Content::Redaction(r)) => Ok(r),
-            Some(execute_query_message::Content::Error(e)) => {
-                Err(RedactionExchangeError::ClientError {
-                    code: e.code,
-                    message: e.message,
-                })
-            }
-            _ => {
-                warn!("Expected RedactionExchange");
-                Err(RedactionExchangeError::InvalidMessage(
-                    "Expected RedactionExchange",
-                ))
-            }
-        }
-    }
-}
-
 pub struct RedactionService;
 
 impl RedactionService {
-    pub async fn request_authorization<M: RedactionMessage>(
+    pub async fn request_authorization(
         resources: &[ResourceCheck],
         check_boundaries: bool,
         require_ability: bool,
-        tx: &mpsc::Sender<Result<M, Status>>,
-        stream: &mut Streaming<M>,
-    ) -> Result<RedactionExchangeResult, RedactionExchangeError> {
+        tx: &mpsc::Sender<Result<ExecuteQueryMessage, Status>>,
+        stream: &mut Streaming<ExecuteQueryMessage>,
+    ) -> Result<Vec<ResourceAuthorization>, RedactionExchangeError> {
         let result_id = Uuid::new_v4().to_string();
 
         let proto_resources: Vec<ProtoResourceToAuthorize> = resources
@@ -111,7 +76,13 @@ impl RedactionService {
             })),
         };
 
-        let _ = tx.send(Ok(M::wrap_redaction(redaction_required))).await;
+        let _ = tx
+            .send(Ok(ExecuteQueryMessage {
+                content: Some(execute_query_message::Content::Redaction(
+                    redaction_required,
+                )),
+            }))
+            .await;
 
         let redaction_msg = match stream.next().await {
             Some(Ok(msg)) => msg,
@@ -125,7 +96,21 @@ impl RedactionService {
             }
         };
 
-        let redaction_exchange = redaction_msg.unwrap_redaction()?;
+        let redaction_exchange = match redaction_msg.content {
+            Some(execute_query_message::Content::Redaction(r)) => r,
+            Some(execute_query_message::Content::Error(e)) => {
+                return Err(RedactionExchangeError::ClientError {
+                    code: e.code,
+                    message: e.message,
+                });
+            }
+            _ => {
+                warn!("Expected RedactionExchange");
+                return Err(RedactionExchangeError::InvalidMessage(
+                    "Expected RedactionExchange",
+                ));
+            }
+        };
 
         let redaction_response = match redaction_exchange.content {
             Some(redaction_exchange::Content::Response(r)) => r,
@@ -144,7 +129,7 @@ impl RedactionService {
             });
         }
 
-        let authorizations = redaction_response
+        redaction_response
             .authorizations
             .into_iter()
             .map(|a| {
@@ -156,9 +141,7 @@ impl RedactionService {
                     authorized: a.authorized,
                 })
             })
-            .collect::<Result<Vec<_>, RedactionExchangeError>>()?;
-
-        Ok(RedactionExchangeResult { authorizations })
+            .collect()
     }
 }
 
