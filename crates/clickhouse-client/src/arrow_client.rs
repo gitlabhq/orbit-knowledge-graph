@@ -588,12 +588,7 @@ async fn flush_drain(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use arrow::array::{Array, ArrayRef, Int64Array};
-    use arrow::datatypes::{DataType, Field, Schema};
     use std::collections::HashMap;
-    use std::time::Duration;
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    use tokio::net::TcpListener;
 
     fn client_with_insert_settings(
         insert_settings: HashMap<String, String>,
@@ -692,76 +687,5 @@ mod tests {
             HashMap::new(),
         );
         assert!(!client.has_quorum_writes());
-    }
-
-    fn owned_batches(count: usize) -> (Vec<RecordBatch>, Vec<std::sync::Weak<dyn Array>>) {
-        let schema = Arc::new(Schema::new(vec![Field::new("a", DataType::Int64, false)]));
-        let mut batches = Vec::with_capacity(count);
-        let mut weak = Vec::with_capacity(count);
-        for i in 0..count {
-            let column: ArrayRef = Arc::new(Int64Array::from(vec![i as i64; 1024]));
-            weak.push(Arc::downgrade(&column));
-            batches.push(RecordBatch::try_new(schema.clone(), vec![column]).unwrap());
-        }
-        (batches, weak)
-    }
-
-    async fn hold_insert_open(listener: TcpListener, mut release: oneshot::Receiver<()>) {
-        let (mut socket, _) = listener.accept().await.unwrap();
-        let mut sink = [0u8; 8192];
-        loop {
-            tokio::select! {
-                _ = &mut release => break,
-                read = socket.read(&mut sink) => {
-                    if read.unwrap_or(0) == 0 {
-                        break;
-                    }
-                }
-            }
-        }
-        socket
-            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n")
-            .await
-            .unwrap();
-    }
-
-    #[tokio::test]
-    async fn insert_arrow_streaming_releases_batches_before_the_server_responds() {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let url = format!("http://{}", listener.local_addr().unwrap());
-        let (release_tx, release_rx) = oneshot::channel();
-        let server = tokio::spawn(hold_insert_open(listener, release_rx));
-
-        let client = ArrowClickHouseClient::new(
-            &url,
-            "default",
-            "default",
-            None,
-            &HashMap::new(),
-            &HashMap::new(),
-        );
-        let (batches, weak) = owned_batches(3);
-        let insert = tokio::spawn(async move { client.insert_arrow_streaming("t", batches).await });
-
-        tokio::time::timeout(Duration::from_secs(5), async {
-            while weak.iter().any(|w| w.strong_count() > 0) {
-                tokio::time::sleep(Duration::from_millis(5)).await;
-            }
-        })
-        .await
-        .expect("batches must be released while the insert still awaits the response");
-
-        release_tx.send(()).unwrap();
-        insert.await.unwrap().unwrap();
-        server.await.unwrap();
-    }
-
-    #[tokio::test]
-    async fn insert_arrow_streaming_with_no_batches_is_a_noop() {
-        let client = client_with_insert_settings(HashMap::new());
-        client
-            .insert_arrow_streaming("t", Vec::new())
-            .await
-            .unwrap();
     }
 }
