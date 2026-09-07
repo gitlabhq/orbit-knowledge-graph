@@ -193,7 +193,7 @@ impl ArrowClickHouseClient {
     pub async fn insert_arrow_streaming(
         &self,
         table: &str,
-        batches: &[RecordBatch],
+        batches: Vec<RecordBatch>,
     ) -> Result<(), ClickHouseError> {
         let sql = self.build_insert_sql(table);
         self.insert_arrow_streaming_with_sql(table, &sql, batches)
@@ -204,7 +204,7 @@ impl ArrowClickHouseClient {
         &self,
         table: &str,
         sql: &str,
-        batches: &[RecordBatch],
+        batches: Vec<RecordBatch>,
     ) -> Result<(), ClickHouseError> {
         if batches.is_empty() {
             return Ok(());
@@ -225,11 +225,12 @@ impl ArrowClickHouseClient {
 
         flush_drain(&mut insert, &drain).await?;
 
-        for (batch_index, batch) in batches.iter().enumerate() {
+        for (batch_index, batch) in batches.into_iter().enumerate() {
             if batch.schema() != schema {
                 warn!(table, batch_index, "RecordBatch schema mismatch");
             }
-            writer.write(batch).map_err(ClickHouseError::ArrowEncode)?;
+            writer.write(&batch).map_err(ClickHouseError::ArrowEncode)?;
+            drop(batch);
             flush_drain(&mut insert, &drain).await?;
         }
 
