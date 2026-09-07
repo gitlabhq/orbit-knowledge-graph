@@ -211,7 +211,7 @@ fn edge_transformation(
     filters.extend(source_filter);
     filters.extend(target_filter);
 
-    let meta = edge_table_metadata(relationship_kind, ontology);
+    let dict_encode_columns = edge_dict_columns(relationship_kind, ontology);
     let sql = build_edge_transform_sql(
         &edge_id_sql(&resolve_edge_id(
             &mapping.source,
@@ -227,7 +227,6 @@ fn edge_transformation(
         namespaced,
         &denormalized,
         &filters,
-        &meta.sort_key,
     );
     Transformation {
         sql,
@@ -235,7 +234,7 @@ fn edge_transformation(
             ontology.edge_table_for_relationship(relationship_kind),
             *SCHEMA_VERSION,
         ),
-        dict_encode_columns: meta.dict_columns,
+        dict_encode_columns,
     }
 }
 
@@ -418,25 +417,12 @@ fn node_column_sql(column: &NodeColumn) -> String {
     }
 }
 
-struct EdgeTableMetadata {
-    sort_key: Vec<String>,
-    dict_columns: HashSet<String>,
-}
-
-fn edge_table_metadata(relationship_kind: &str, ontology: &Ontology) -> EdgeTableMetadata {
+fn edge_dict_columns(relationship_kind: &str, ontology: &Ontology) -> HashSet<String> {
     let table = ontology.edge_table_for_relationship(relationship_kind);
-    let sort_key = ontology
-        .sort_key_for_table(table)
-        .map(|keys| keys.to_vec())
-        .unwrap_or_default();
-    let dict_columns = ontology
+    ontology
         .edge_table_config(table)
         .map(|config| low_cardinality_columns(&config.storage.columns))
-        .unwrap_or_default();
-    EdgeTableMetadata {
-        sort_key,
-        dict_columns,
-    }
+        .unwrap_or_default()
 }
 
 fn low_cardinality_columns(columns: &[ontology::StorageColumn]) -> HashSet<String> {
@@ -512,7 +498,6 @@ fn build_edge_transform_sql(
     namespaced: bool,
     denormalized: &[DenormalizedColumnProjection],
     filters: &[EdgeFilter],
-    sort_key: &[String],
 ) -> String {
     let select_list = edge_select_list(
         source_id,
@@ -527,10 +512,6 @@ fn build_edge_transform_sql(
     if let Some(where_sql) = edge_filters_sql(filters) {
         sql.push_str(" WHERE ");
         sql.push_str(&where_sql);
-    }
-    if !sort_key.is_empty() {
-        sql.push_str(" ORDER BY ");
-        sql.push_str(&sort_key.join(", "));
     }
     sql
 }
@@ -740,6 +721,7 @@ mod tests {
         assert!(sql.contains("owner_id AS target_id"));
         assert!(sql.contains("'User' AS target_kind"));
         assert!(sql.contains("(owner_id IS NOT NULL)"));
+        assert!(!sql.contains("ORDER BY"), "sql: {sql}");
     }
 
     #[test]
