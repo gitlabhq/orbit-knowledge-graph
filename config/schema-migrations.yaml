@@ -16,6 +16,12 @@
 # note-gated `scope: none` entry, the certified output-neutral escape hatch. A
 # version with no entry is treated as "*", which also makes pruning old entries safe.
 migrations:
+- version: 96
+  scope: none
+  note: >-
+    MergeRequestDiffFile lookup CTE deduplicated per diff id by version (argMax),
+    mirroring generated lookups. Live graph rows are byte-identical; only join fan-out
+    from superseded datalake versions is removed.
 - version: 95
   scope: none
   note: "cosmetic: normalize auxiliary table codec casing to match canonical PascalCase"
