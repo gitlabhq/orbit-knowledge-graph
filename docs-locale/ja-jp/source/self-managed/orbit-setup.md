@@ -21,11 +21,9 @@ title: GitLab Orbitをセットアップする
 {{< /history >}}
 
 > [!note]
-> GitLab Self-ManagedのGitLab Orbitは
-> [ベータ版](https://docs.gitlab.com/policy/development_stages_support/#beta)です。
-> この機能はテスト目的で利用可能ですが、本番環境での使用には対応していません。
+ GitLab Self-ManagedのGitLab Orbitは [ベータ版](https://docs.gitlab.com/policy/development_stages_support/#beta)です。この機能はテスト目的で利用可能ですが、本番環境での使用には対応していません。
 
-GitLab Orbitは、インスタンスの隣にHelmリリースとして動作します。IndexerはClickHouseデータレイクを読み取り、GitLab内部APIを通じてソースコードをフェッチします。Webサーバーはグラフへのクエリに応答します。
+GitLab Orbitは、インスタンスの隣にHelmリリースとして動作します。インデクサーはClickHouseデータレイクを読み取り、GitLab内部APIを通じてソースコードをフェッチします。Webサーバーはグラフへのクエリに応答します。
 
 GitLab OrbitはHTTP経由でGitLabを呼び出し、GitLabはポート50054のgRPC経由でGitLab Orbitを呼び出します。両方向が開いている必要があります。GitLab OrbitはGitalyに直接接続しません。
 
@@ -81,7 +79,6 @@ GitLab Orbitには専用のグラフデータベースと3つのユーザーが�
 
 GitLab OrbitはHTTPインターフェース（ポート8123）またはTLS使用時はポート8443でClickHouseに接続します。Siphonはポート9000のネイティブプロトコルを使用するため、HTTPポートとポート9000の両方がクラスターから到達可能である必要があります。
 
-<!-- markdownlint-disable-next-line MD044 -->
 ## GitLabでGitLab Orbitを有効にする {#turn-on-gitlab-orbit-in-gitlab}
 
 GitLabとGitLab Orbitは1つの対称キーで相互に認証し、GitLabがそのキーを所有します。後のステップでクラスターにキーをコピーする前にキーが存在するよう、まずGitLabでGitLab Orbitを有効にします。
@@ -90,7 +87,7 @@ GitLabとGitLab Orbitは1つの対称キーで相互に認証し、GitLabがそ�
 
 {{< tabs >}}
 
-{{< tab title="Linux package (Omnibus)" >}}
+{{< tab title="Linuxパッケージ（Omnibus）" >}}
 
 1. `/etc/gitlab/gitlab.rb`を編集します:
 
@@ -105,8 +102,7 @@ GitLabとGitLab Orbitは1つの対称キーで相互に認証し、GitLabがそ�
    sudo gitlab-ctl reconfigure
    ```
 
-   GitLabは共有キーを生成し、
-   `/var/opt/gitlab/gitlab-rails/etc/gitlab_knowledge_graph_secret`に書き込みます。
+   GitLabは共有キーを生成し、 `/var/opt/gitlab/gitlab-rails/etc/gitlab_knowledge_graph_secret`に書き込みます。
 
 1. キーを読み取ります。再エンコードやトリミングをせず、値を正確にコピーします:
 
@@ -118,7 +114,7 @@ GitLabとGitLab Orbitは1つの対称キーで相互に認証し、GitLabがそ�
 
 {{< /tab >}}
 
-{{< tab title="Helm chart (Kubernetes)" >}}
+{{< tab title="Helmチャート（Kubernetes）" >}}
 
 GitLabチャートはキーを生成しないため、自分で作成します。GitLabをアップグレードする前にSecretが存在している必要があります。チャートは`optional`フラグなしでSecretをマウントするため、Secretがない場合、すべての新しいポッドが`ContainerCreating`状態のままになります。
 
@@ -149,7 +145,6 @@ GitLabチャートはキーを生成しないため、自分で作成します�
 
 GitLab Orbitチャートをインストールするまで、GitLabはGitLab Orbitに接続できません。それ以前の接続エラーは想定内です。
 
-<!-- markdownlint-disable-next-line MD044 -->
 ## 認証情報をGitLab Orbitで利用可能にする {#make-the-credentials-available-to-gitlab-orbit}
 
 GitLab OrbitはKubernetes Secretの各キーから認証情報を読み取ります。Secretを作成する前にネームスペースが存在している必要があります。次のセクションのvaluesファイルは、GitLab Orbitネームスペース内に`gkg-secrets`という名前のSecretが1つあり、以下のキーを持つことを想定しています:
@@ -168,7 +163,6 @@ GitLab OrbitはKubernetes Secretの各キーから認証情報を読み取りま
 
 gRPCエンドポイント用のTLS証明書も提供する必要があります。詳細については、[TLSとネットワーク要件](#tls-and-network-requirements)を参照してください。
 
-<!-- markdownlint-disable-next-line MD044 -->
 ## GitLab Orbitをインストールする {#install-gitlab-orbit}
 
 1. 以下を`orbit-values.yaml`として保存し、プレースホルダーを置き換えます:
@@ -242,7 +236,7 @@ gRPCエンドポイント用のTLS証明書も提供する必要があります�
    kubectl -n gitlab-orbit get pods
    ```
 
-出力には、`Running`状態のWebサーバー、Indexer、ディスパッチャーのポッドが一覧表示されます。チャートはメトリクス、オートスケール、アナリティクス、課金を含む他のすべてをデフォルトで無効にしています。GitLab Self-Managedではそれらを無効のままにしてください。
+出力には、`Running`状態のWebサーバー、インデクサー、ディスパッチャーのポッドが一覧表示されます。チャートはメトリクス、オートスケール、アナリティクス、課金を含む他のすべてをデフォルトで無効にしています。GitLab Self-Managedではそれらを無効のままにしてください。
 
 ### TLSとネットワーク要件 {#tls-and-network-requirements}
 
@@ -250,17 +244,17 @@ GitLabはポート50054のTLS経由でgRPCエンドポイントに接続しま�
 
 TLSは2か所のいずれかで終端できます: `gkg-webserver`サービスの前にあるロードバランサー、またはWebサーバー自体（`tls.enabled`と`tls.existingSecret`を使用）。証明書がクラスター内に必要なのはWebサーバーの場合のみです。
 
-公的に信頼された認証局（CA）が発行した証明書は、GitLabで追加設定は不要です。独自のCAからの証明書の場合は、CA証明書をGitLabトラストストアに追加します。詳細については、[カスタム公開証明書のインストール](https://docs.gitlab.com/omnibus/settings/ssl/#install-custom-public-certificates)を参照してください。
+公的に信頼された認証局（CA）が発行した証明書は、GitLabで追加設定は不要です。独自のCAからの証明書の場合は、CA証明書をGitLabトラストストアに追加します。詳細については、[カスタム公開証明書をインストールする](https://docs.gitlab.com/omnibus/settings/ssl/#install-custom-public-certificates)を参照してください。
 
 GitLabが同じクラスター内で動作している場合、`ClusterIP`で十分で、エンドポイントは`tls://gkg-webserver.gitlab-orbit.svc.cluster.local:50054`です。証明書はGitLabが接続するホスト名に対して有効である必要があります。それ以外の場合は、クラスターがサポートする方法でサービスを公開し、アドレスをプライベートネットワーク上に保持します。
 
 ### リソース要件 {#resource-requirements}
 
-チャートのデフォルト値はほとんどのインストールに適しています。3つのWebサーバーレプリカはそれぞれ500m CPUと4 GiBをリクエストします。3つのIndexerレプリカはそれぞれ2 CPU、4 GiB、および5 GiBの一時的なストレージをリクエストします。これらのリクエストの合計は、SiphonとNATSを除いて約8 CPUと24 GiBになります。
+チャートのデフォルト値はほとんどのインストールに適しています。3つのWebサーバーレプリカはそれぞれ500m CPUと4 GiBをリクエストします。3つのインデクサーレプリカはそれぞれ2 CPU、4 GiB、および5 GiBの一時的なストレージをリクエストします。これらのリクエストの合計は、SiphonとNATSを除いて約8 CPUと24 GiBになります。
 
-Indexerには少なくとも8 CPUと16 GiBのメモリを確保してください。多数の同時インデックス作成タスクがそのすべてを使用する可能性があります。チャートの制限はデフォルトでそのヘッドルームを許容します。
+インデクサーには少なくとも8 CPUと16 GiBのメモリを確保してください。多数の同時インデックス作成タスクがそのすべてを使用する可能性があります。チャートの制限はデフォルトでそのヘッドルームを許容します。
 
-Indexerはコードアーカイブをダウンロードするために、各ノードに十分な一時的なストレージも必要です。チャートはそのスクラッチスペースを`indexer.tmpSizeLimit`（デフォルトは10 GiB）とIndexerの一時的なストレージのリクエストおよび制限でサイズ設定します。
+インデクサーはコードアーカイブをダウンロードするために、各ノードに十分な一時的なストレージも必要です。チャートはそのスクラッチスペースを`indexer.tmpSizeLimit`（デフォルトは10 GiB）とインデクサーの一時的なストレージのリクエストおよび制限でサイズ設定します。
 
 ## グループのインデックス作成を有効にする {#turn-on-indexing-for-a-group}
 
@@ -319,7 +313,7 @@ curl --request POST \
 
 ## 関連トピック {#related-topics}
 
-- [GitLab Orbitがインデックス作成する内容](../remote/indexing.md)
+- [GitLab Orbitがインデックスを作成する対象](../remote/indexing.md)
 - [スキーマリファレンス](../remote/schema.md)
 - [Cookbook](../remote/cookbook.md)
 - [クエリ言語](../remote/queries/_index.md)
