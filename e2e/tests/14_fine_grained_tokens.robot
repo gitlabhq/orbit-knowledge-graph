@@ -159,10 +159,6 @@ Build Token Fixture
     ${b}=    Create Project    fgpat-${suffix}-b    ${sibling}[id]    visibility=private
     Set Suite Variable    ${PROJECT_A}    ${a}
     Set Suite Variable    ${PROJECT_B}    ${b}
-    ${issue_a}=    Create Issue    ${a}[id]    fgpat-${suffix}-issue-a
-    ${issue_b}=    Create Issue    ${b}[id]    fgpat-${suffix}-issue-b
-    Set Suite Variable    ${ISSUE_A}    ${issue_a}
-    Set Suite Variable    ${ISSUE_B}    ${issue_b}
     ${user}=    Create User    fgpat-${suffix}-reader
     Set Suite Variable    ${TOKEN_USER}    ${user}
     Enable Feature Flag    granular_personal_access_tokens    user=${user}[username]
@@ -172,8 +168,15 @@ Build Token Fixture
     Set Suite Variable    ${CLASSIC_TOKEN}    ${classic}
     Push Fixture To Project    ${a}    ${TOKEN_CODE_FIXTURE}
     Push Fixture To Project    ${b}    ${TOKEN_CODE_FIXTURE}
-    Seed Token Pipeline
     Enable Orbit    ${root}[id]
+    Start Indexing Budget    600
+    Wait For Node Indexed Within Budget    Project    ${a}[id]    ${a}[name]
+    Wait For Node Indexed Within Budget    Project    ${b}[id]    ${b}[name]
+    Seed Token Pipeline
+    ${issue_a}=    Create Issue    ${a}[id]    fgpat-${suffix}-issue-a
+    ${issue_b}=    Create Issue    ${b}[id]    fgpat-${suffix}-issue-b
+    Set Suite Variable    ${ISSUE_A}    ${issue_a}
+    Set Suite Variable    ${ISSUE_B}    ${issue_b}
     Provision Feature Tokens    ${allowed}[id]
     Provision Disabled Orbit Caller    ${suffix}
     Wait For Token Fixture Indexed
@@ -253,10 +256,7 @@ Provision Disabled Orbit Caller
     Set Suite Variable    ${DISABLED_TOKEN}    ${token}
 
 Wait For Token Fixture Indexed
-    Start Indexing Budget    600
     Wait For Node Indexed Within Budget    User        ${TOKEN_USER}[id]    ${TOKEN_USER}[username]    label_field=username
-    Wait For Node Indexed Within Budget    Project     ${PROJECT_A}[id]     ${PROJECT_A}[name]
-    Wait For Node Indexed Within Budget    Project     ${PROJECT_B}[id]     ${PROJECT_B}[name]
     Wait For Node Indexed Within Budget    WorkItem    ${ISSUE_A}[id]       ${ISSUE_A}[title]          label_field=title
     Wait For Node Indexed Within Budget    WorkItem    ${ISSUE_B}[id]       ${ISSUE_B}[title]          label_field=title
     Wait For Edge Indexed Within Budget    WorkItem    ${ISSUE_A}[id]    IN_PROJECT    Project    ${PROJECT_A}[id]
