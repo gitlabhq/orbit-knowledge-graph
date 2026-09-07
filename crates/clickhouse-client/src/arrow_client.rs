@@ -1,8 +1,10 @@
 use std::io::Cursor;
 use std::sync::{Arc, Mutex};
 
-use arrow::buffer::Buffer as ArrowBuffer;
-use arrow::record_batch::RecordBatch;
+use arrow::array::{Array, ArrayData, make_array};
+use arrow::buffer::{BooleanBuffer, Buffer as ArrowBuffer, NullBuffer};
+use arrow::error::ArrowError;
+use arrow::record_batch::{RecordBatch, RecordBatchOptions};
 use arrow_ipc::reader::{StreamDecoder, StreamReader};
 use arrow_ipc::writer::StreamWriter;
 use bytes::Bytes;
@@ -390,7 +392,11 @@ impl ArrowQuery {
             StreamReader::try_new(data_cursor, None).map_err(ClickHouseError::ArrowDecode)?;
 
         let batches: Result<Vec<_>, _> = reader
-            .map(|result| result.map_err(ClickHouseError::ArrowDecode))
+            .map(|result| {
+                result
+                    .and_then(unpin_ipc_body)
+                    .map_err(ClickHouseError::ArrowDecode)
+            })
             .collect();
         Ok((batches?, summary))
     }
@@ -420,7 +426,11 @@ impl ArrowQuery {
         let reader =
             StreamReader::try_new(data_cursor, None).map_err(ClickHouseError::ArrowDecode)?;
 
-        let batch_iter = reader.map(|result| result.map_err(ClickHouseError::ArrowDecode));
+        let batch_iter = reader.map(|result| {
+            result
+                .and_then(unpin_ipc_body)
+                .map_err(ClickHouseError::ArrowDecode)
+        });
         Ok(Box::pin(stream::iter(batch_iter)))
     }
 
@@ -453,8 +463,9 @@ impl ArrowQuery {
             };
 
             for batch_result in reader {
-                let mapped: Result<RecordBatch, ClickHouseError> =
-                    batch_result.map_err(ClickHouseError::ArrowDecode);
+                let mapped: Result<RecordBatch, ClickHouseError> = batch_result
+                    .and_then(unpin_ipc_body)
+                    .map_err(ClickHouseError::ArrowDecode);
                 if tx.blocking_send(mapped).is_err() {
                     break;
                 }
@@ -499,7 +510,10 @@ impl ArrowQuery {
                     Ok(Some(chunk)) => {
                         let mut buffer = ArrowBuffer::from(chunk.as_ref());
                         while !buffer.is_empty() {
-                            match decoder.decode(&mut buffer) {
+                            let decoded = decoder
+                                .decode(&mut buffer)
+                                .and_then(|batch| batch.map(unpin_ipc_body).transpose());
+                            match decoded {
                                 Ok(Some(batch)) => {
                                     if tx.send(Ok(batch)).await.is_err() {
                                         return;
@@ -525,6 +539,75 @@ impl ArrowQuery {
 
         Ok((ReceiverStream::new(rx).boxed(), summary_rx))
     }
+}
+
+const PINNED_ALLOCATION_SLACK: usize = 64 * 1024;
+
+fn unpin_ipc_body(batch: RecordBatch) -> Result<RecordBatch, ArrowError> {
+    let (schema, columns, row_count) = batch.into_parts();
+    let columns = columns
+        .into_iter()
+        .map(|column| {
+            let data = column.to_data();
+            if !pins_larger_allocation(&data) {
+                return Ok(column);
+            }
+            copy_pinned_buffers(data).map(make_array)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let options = RecordBatchOptions::new().with_row_count(Some(row_count));
+    RecordBatch::try_new_with_options(schema, columns, &options)
+}
+
+fn pins_larger_allocation(data: &ArrayData) -> bool {
+    data.buffers()
+        .iter()
+        .chain(data.nulls().map(NullBuffer::buffer))
+        .any(is_pinning)
+        || data.child_data().iter().any(pins_larger_allocation)
+}
+
+fn is_pinning(buffer: &ArrowBuffer) -> bool {
+    buffer.capacity().saturating_sub(buffer.len()) > PINNED_ALLOCATION_SLACK
+}
+
+fn copy_pinned_buffers(data: ArrayData) -> Result<ArrayData, ArrowError> {
+    if !pins_larger_allocation(&data) {
+        return Ok(data);
+    }
+    let nulls = data.nulls().map(|nulls| {
+        if !is_pinning(nulls.buffer()) {
+            return nulls.clone();
+        }
+        let bits = BooleanBuffer::new(tight_copy(nulls.buffer()), nulls.offset(), nulls.len());
+        NullBuffer::new(bits)
+    });
+    let buffers = data
+        .buffers()
+        .iter()
+        .map(|buffer| {
+            if is_pinning(buffer) {
+                tight_copy(buffer)
+            } else {
+                buffer.clone()
+            }
+        })
+        .collect();
+    let child_data = data
+        .child_data()
+        .iter()
+        .cloned()
+        .map(copy_pinned_buffers)
+        .collect::<Result<Vec<_>, _>>()?;
+    data.into_builder()
+        .nulls(nulls)
+        .buffers(buffers)
+        .child_data(child_data)
+        .build()
+}
+
+fn tight_copy(buffer: &ArrowBuffer) -> ArrowBuffer {
+    ArrowBuffer::from(buffer.as_slice())
 }
 
 /// Write target for `StreamWriter` that allows draining the accumulated bytes
@@ -588,8 +671,10 @@ async fn flush_drain(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use arrow::array::{Array, ArrayRef, Int64Array};
+    use arrow::array::{Array, ArrayRef, Int64Array, StringArray};
     use arrow::datatypes::{DataType, Field, Schema};
+    use arrow_ipc::writer::IpcWriteOptions;
+    use arrow_ipc::{CompressionType, MetadataVersion};
     use std::collections::HashMap;
     use std::time::Duration;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -763,5 +848,74 @@ mod tests {
             .insert_arrow_streaming("t", Vec::new())
             .await
             .unwrap();
+    }
+
+    fn max_allocation_slack(data: &ArrayData) -> usize {
+        let own = data
+            .buffers()
+            .iter()
+            .chain(data.nulls().map(NullBuffer::buffer))
+            .map(|buffer| buffer.capacity().saturating_sub(buffer.len()))
+            .max()
+            .unwrap_or(0);
+        data.child_data()
+            .iter()
+            .map(max_allocation_slack)
+            .fold(own, usize::max)
+    }
+
+    fn batch_allocation_slack(batch: &RecordBatch) -> usize {
+        batch
+            .columns()
+            .iter()
+            .map(|column| max_allocation_slack(&column.to_data()))
+            .max()
+            .unwrap_or(0)
+    }
+
+    fn lz4_ipc_stream(batch: &RecordBatch) -> Vec<u8> {
+        let options = IpcWriteOptions::try_new(8, false, MetadataVersion::V5)
+            .unwrap()
+            .try_with_compression(Some(CompressionType::LZ4_FRAME))
+            .unwrap();
+        let mut writer =
+            StreamWriter::try_new_with_options(Vec::new(), &batch.schema(), options).unwrap();
+        writer.write(batch).unwrap();
+        writer.finish().unwrap();
+        writer.into_inner().unwrap()
+    }
+
+    #[test]
+    fn unpin_ipc_body_copies_only_body_aliasing_buffers() {
+        let rows = 32_768;
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("all_null", DataType::Utf8, true),
+            Field::new("all_empty", DataType::Utf8, false),
+            Field::new("ids", DataType::Int64, false),
+        ]));
+        let ids: Vec<i64> = (0..rows as u64)
+            .map(|i| (i.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ (i >> 7)) as i64)
+            .collect();
+        let batch = RecordBatch::try_new(
+            schema,
+            vec![
+                Arc::new(StringArray::from(vec![None::<&str>; rows])),
+                Arc::new(StringArray::from(vec![""; rows])),
+                Arc::new(Int64Array::from(ids)),
+            ],
+        )
+        .unwrap();
+
+        let stream = lz4_ipc_stream(&batch);
+        let mut buffer = ArrowBuffer::from(stream.as_slice());
+        let mut decoder = StreamDecoder::new();
+        let decoded = decoder.decode(&mut buffer).unwrap().unwrap();
+        assert!(batch_allocation_slack(&decoded) > PINNED_ALLOCATION_SLACK);
+
+        let unpinned = unpin_ipc_body(decoded.clone()).unwrap();
+
+        assert_eq!(unpinned, batch);
+        assert!(batch_allocation_slack(&unpinned) <= PINNED_ALLOCATION_SLACK);
+        assert!(Arc::ptr_eq(unpinned.column(2), decoded.column(2)));
     }
 }
