@@ -332,6 +332,8 @@ pub async fn run_dispatcher(
             ontology,
         ));
     let checkpoint_store = Arc::new(checkpoint::ClickHouseCheckpointStore::new(deletion_graph));
+    let code_tables = modules::code::config::CodeTableNames::from_ontology(ontology)
+        .expect("code tables must resolve from the embedded ontology");
 
     let backfill = Arc::new(CodeBackfill::new(
         services.nats.clone(),
@@ -364,24 +366,25 @@ pub async fn run_dispatcher(
             backfill.clone(),
             CodeStaleSweep::new(
                 config.graph.build_client(),
-                &modules::code::config::CodeTableNames::from_ontology(ontology)
-                    .expect("code tables must resolve from the embedded ontology"),
+                &code_tables,
                 checkpoint_store.clone(),
             ),
             config.schedule.tasks.code_backfill.clone(),
         )),
-        Box::new(TableCleanup::new(
-            graph,
-            ontology,
-            metrics.clone(),
-            config.schedule.tasks.table_cleanup.clone(),
-        )),
         Box::new(NamespaceDeletionScheduler::new(
             deletion_store,
-            checkpoint_store,
+            checkpoint_store.clone(),
             services.nats.clone(),
             metrics.clone(),
             config.schedule.tasks.namespace_deletion.clone(),
+        )),
+        Box::new(TableCleanup::new(
+            graph,
+            ontology,
+            &code_tables,
+            checkpoint_store.clone(),
+            metrics.clone(),
+            config.schedule.tasks.table_cleanup.clone(),
         )),
         Box::new(StaleEdgeReconciliation::new(
             config.graph.build_client(),

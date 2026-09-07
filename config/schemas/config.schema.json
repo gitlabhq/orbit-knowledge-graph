@@ -271,7 +271,14 @@
             "lookback_secs": 3600
           },
           "table-cleanup": {
-            "cron": "0 0 3 * * 0"
+            "apply_patches_after_bytes": 1073741824,
+            "apply_patches_after_secs": 21600,
+            "cron": "0 */10 * * * *",
+            "max_candidates_per_statement": 2000000,
+            "purge_interval_secs": 86400,
+            "statement_timeout_secs": 600,
+            "sweep_history": true,
+            "tombstone_retention_secs": 604800
           }
         }
       }
@@ -1561,7 +1568,14 @@
               "lookback_secs": 3600
             },
             "table-cleanup": {
-              "cron": "0 0 3 * * 0"
+              "apply_patches_after_bytes": 1073741824,
+              "apply_patches_after_secs": 21600,
+              "cron": "0 */10 * * * *",
+              "max_candidates_per_statement": 2000000,
+              "purge_interval_secs": 86400,
+              "statement_timeout_secs": 600,
+              "sweep_history": true,
+              "tombstone_retention_secs": 604800
             }
           }
         }
@@ -1621,7 +1635,14 @@
         "table-cleanup": {
           "$ref": "#/$defs/TableCleanupConfig",
           "default": {
-            "cron": "0 0 3 * * 0"
+            "apply_patches_after_bytes": 1073741824,
+            "apply_patches_after_secs": 21600,
+            "cron": "0 */10 * * * *",
+            "max_candidates_per_statement": 2000000,
+            "purge_interval_secs": 86400,
+            "statement_timeout_secs": 600,
+            "sweep_history": true,
+            "tombstone_retention_secs": 604800
           }
         }
       },
@@ -1746,9 +1767,21 @@
       "additionalProperties": false
     },
     "TableCleanupConfig": {
-      "description": "Per-task schedule configuration.\n\nEach scheduled task embeds this via `#[serde(flatten)]` in its own typed config struct.\nThe scheduler reads it via `task.schedule()`.",
+      "description": "Removes tombstoned and superseded graph rows with patch-part deletes.",
       "type": "object",
       "properties": {
+        "apply_patches_after_bytes": {
+          "type": "integer",
+          "format": "uint64",
+          "default": 1073741824,
+          "minimum": 0
+        },
+        "apply_patches_after_secs": {
+          "type": "integer",
+          "format": "uint64",
+          "default": 21600,
+          "minimum": 0
+        },
         "cron": {
           "description": "Cron expression with seconds field (6-field: `sec min hour dom mon dow`).\nWhen absent, the task runs on a default 60-second interval.",
           "type": [
@@ -1756,8 +1789,37 @@
             "null"
           ],
           "default": null
+        },
+        "max_candidates_per_statement": {
+          "type": "integer",
+          "format": "uint64",
+          "default": 2000000,
+          "minimum": 0
+        },
+        "purge_interval_secs": {
+          "type": "integer",
+          "format": "uint64",
+          "default": 86400,
+          "minimum": 0
+        },
+        "statement_timeout_secs": {
+          "type": "integer",
+          "format": "uint64",
+          "default": 600,
+          "minimum": 0
+        },
+        "sweep_history": {
+          "type": "boolean",
+          "default": true
+        },
+        "tombstone_retention_secs": {
+          "type": "integer",
+          "format": "uint64",
+          "default": 604800,
+          "minimum": 0
         }
-      }
+      },
+      "additionalProperties": false
     },
     "TlsConfig": {
       "type": "object",
