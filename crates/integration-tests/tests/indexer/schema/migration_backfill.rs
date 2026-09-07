@@ -425,6 +425,85 @@ async fn migration_completion_checker_promotes_when_no_namespaces_are_enabled() 
 }
 
 #[tokio::test]
+async fn migration_completion_checker_promotes_when_code_coverage_telemetry_fails() {
+    let context = TestContext::new().await;
+
+    common::create_namespace(&context.clickhouse, 100, None, 20, "1/100/").await;
+    context.given_enabled_namespaces([100]).await;
+
+    let graph = context.clickhouse.create_client();
+    ensure_version_table(&graph).await.unwrap();
+    mark_version_active(&graph, 0).await.unwrap();
+    mark_version_migrating(&graph, *SCHEMA_VERSION)
+        .await
+        .unwrap();
+
+    let checkpoint_table = prefixed_table_name("checkpoint", *SCHEMA_VERSION);
+    let ontology = ontology::Ontology::load_embedded().unwrap();
+    let invalidated = orbit_migrations::scope::find_invalidated_pipelines(
+        &ontology,
+        &orbit_migrations::scope::MigrationScope::Full,
+    );
+    for plan in &invalidated.namespaced {
+        context
+            .clickhouse
+            .execute(&format!(
+                "INSERT INTO {checkpoint_table} (key, watermark, cursor_values) \
+                 VALUES ('ns.100.{plan}', now(), 'null')"
+            ))
+            .await;
+    }
+    for plan in &invalidated.global {
+        context
+            .clickhouse
+            .execute(&format!(
+                "INSERT INTO {checkpoint_table} (key, watermark, cursor_values) \
+                 VALUES ('global.{plan}', now(), 'null')"
+            ))
+            .await;
+    }
+
+    let code_table = prefixed_table_name("code_indexing_checkpoint", *SCHEMA_VERSION);
+    context
+        .clickhouse
+        .execute(&format!("DROP TABLE {code_table}"))
+        .await;
+
+    let services = indexer::orchestrator::scheduled::connect(&context.nats_config())
+        .await
+        .unwrap();
+
+    let checker = MigrationCompletionChecker::new(
+        context.clickhouse.create_client(),
+        context.clickhouse.create_client(),
+        std::sync::Arc::new(indexer::testkit::MockLockService::new()),
+        std::sync::Arc::new(ontology::Ontology::load_embedded().unwrap()),
+        orbit_server_config::SchemaConfig::default(),
+        orbit_server_config::MigrationCompletionConfig::default(),
+        ScheduledTaskMetrics::new(),
+        std::sync::Arc::new(indexer::campaign::CampaignState::new()),
+        services.nats_client.clone(),
+    );
+
+    checker.run().await.unwrap();
+
+    let result = context
+        .clickhouse
+        .query(&format!(
+            "SELECT CAST(status AS String) AS status \
+             FROM gkg_schema_version FINAL WHERE version = {}",
+            *SCHEMA_VERSION
+        ))
+        .await;
+    let statuses = String::extract_column(&result, 0).unwrap();
+    assert_eq!(
+        statuses,
+        vec!["active"],
+        "code coverage is telemetry only, so a failing coverage query must not block promotion"
+    );
+}
+
+#[tokio::test]
 async fn migration_completion_checker_does_not_promote_version_it_does_not_embed() {
     let context = TestContext::new().await;
 
