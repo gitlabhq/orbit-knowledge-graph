@@ -577,6 +577,22 @@ impl Default for CodeBackfillSweepConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct TableCleanupConfig {
+    #[serde(flatten)]
+    pub schedule: ScheduleConfiguration,
+}
+
+impl Default for TableCleanupConfig {
+    fn default() -> Self {
+        Self {
+            schedule: ScheduleConfiguration {
+                cron: Some("0 0 3 * * 0".into()),
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct NamespaceDeletionSchedulerConfig {
     #[serde(flatten)]
     pub schedule: ScheduleConfiguration,
@@ -635,73 +651,6 @@ impl Default for StaleEdgeReconciliationConfig {
                 cron: Some("0 */30 * * * *".into()),
             },
             lookback_secs: default_stale_edge_lookback_secs(),
-        }
-    }
-}
-
-/// Removes tombstoned and superseded graph rows with patch-part deletes.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[schemars(deny_unknown_fields)]
-pub struct TableCleanupConfig {
-    #[serde(flatten)]
-    pub schedule: ScheduleConfiguration,
-    #[serde(default = "default_table_cleanup_tombstone_retention_secs")]
-    pub tombstone_retention_secs: u64,
-    #[serde(default = "default_table_cleanup_purge_interval_secs")]
-    pub purge_interval_secs: u64,
-    #[serde(default = "default_table_cleanup_max_candidates")]
-    pub max_candidates_per_statement: u64,
-    #[serde(default = "default_table_cleanup_statement_timeout_secs")]
-    pub statement_timeout_secs: u64,
-    #[serde(default = "default_table_cleanup_apply_patches_bytes")]
-    pub apply_patches_after_bytes: u64,
-    #[serde(default = "default_table_cleanup_apply_patches_secs")]
-    pub apply_patches_after_secs: u64,
-    #[serde(default = "default_table_cleanup_sweep_history")]
-    pub sweep_history: bool,
-}
-
-fn default_table_cleanup_sweep_history() -> bool {
-    true
-}
-
-fn default_table_cleanup_tombstone_retention_secs() -> u64 {
-    7 * 24 * 60 * 60
-}
-
-fn default_table_cleanup_purge_interval_secs() -> u64 {
-    24 * 60 * 60
-}
-
-fn default_table_cleanup_max_candidates() -> u64 {
-    2_000_000
-}
-
-fn default_table_cleanup_statement_timeout_secs() -> u64 {
-    600
-}
-
-fn default_table_cleanup_apply_patches_bytes() -> u64 {
-    1024 * 1024 * 1024
-}
-
-fn default_table_cleanup_apply_patches_secs() -> u64 {
-    6 * 60 * 60
-}
-
-impl Default for TableCleanupConfig {
-    fn default() -> Self {
-        Self {
-            schedule: ScheduleConfiguration {
-                cron: Some("0 */10 * * * *".into()),
-            },
-            tombstone_retention_secs: default_table_cleanup_tombstone_retention_secs(),
-            purge_interval_secs: default_table_cleanup_purge_interval_secs(),
-            max_candidates_per_statement: default_table_cleanup_max_candidates(),
-            statement_timeout_secs: default_table_cleanup_statement_timeout_secs(),
-            apply_patches_after_bytes: default_table_cleanup_apply_patches_bytes(),
-            apply_patches_after_secs: default_table_cleanup_apply_patches_secs(),
-            sweep_history: default_table_cleanup_sweep_history(),
         }
     }
 }
@@ -916,7 +865,7 @@ mod tests {
         );
         assert_eq!(
             tasks.table_cleanup.schedule.cron.as_deref(),
-            Some("0 */10 * * * *")
+            Some("0 0 3 * * 0")
         );
         assert_eq!(
             tasks.namespace_deletion.schedule.cron.as_deref(),
