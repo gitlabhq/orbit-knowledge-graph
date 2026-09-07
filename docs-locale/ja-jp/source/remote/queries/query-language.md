@@ -16,21 +16,19 @@ title: GitLab Orbitクエリ言語
 
 {{< history >}}
 
-- GitLab 18.10で`knowledge_graph`という名前の[機能フラグ](https://docs.gitlab.com/administration/feature_flags/)とともに[導入](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676)されました。デフォルトでは無効です。この機能は[実験的機能](https://docs.gitlab.com/policy/development_stages_support/#experiment)です。
+- GitLab 18.10で`knowledge_graph`[機能フラグ](https://docs.gitlab.com/administration/feature_flags/)とともに[導入](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676)されました。デフォルトでは無効です。この機能は[実験的機能](https://docs.gitlab.com/policy/development_stages_support/#experiment)です。
 - GitLab 19.1で[ベータ版](https://docs.gitlab.com/policy/development_stages_support/#beta)に[変更](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676)されました。
 
 {{< /history >}}
 
 > [!flag]
-> この機能の利用可否は機能フラグによって制御されています。
-> 詳細については、履歴を参照してください。
-> この機能はテスト目的で利用可能ですが、本番環境での使用には対応していません。
+ この機能の利用可否は機能フラグによって制御されています。詳細については、履歴を参照してください。この機能はテスト目的で利用可能ですが、本番環境での使用には対応していません。
 
 フラットなAPIレスポンスではなくグラフとしてGitLabデータが必要な場合は、GitLab Orbitクエリ言語を使用してください。クエリはJSONオブジェクトで、マッチするエンティティ、辿るリレーションシップ、返すプロパティを指定します。
 
 ## リクエストエンベロープ {#request-envelope}
 
-REST APIまたは`glab orbit remote query`でクエリを送信する場合は、クエリオブジェクトをトップレベルの`query`フィールドでラップしてください。
+REST APIまたは`glab orbit remote query`でクエリを送信する場合は、クエリオブジェクトをトップレベルの`query`フィールドでラップしてください:
 
 ```json orbit-query
 {
@@ -144,7 +142,7 @@ REST APIまたは`glab orbit remote query`でクエリを送信する場合は�
 
 ## フィルター {#filters}
 
-フィルターは単純な等値比較を使用できます。
+フィルターは単純な等値比較を使用できます:
 
 ```json
 {
@@ -154,7 +152,7 @@ REST APIまたは`glab orbit remote query`でクエリを送信する場合は�
 }
 ```
 
-または演算子オブジェクトを使用できます。同じプロパティに複数の演算子キーを指定するとAND結合になり、範囲指定に使用できます。
+または演算子オブジェクトを使用できます。同じプロパティに複数の演算子キーを指定するとAND結合になり、範囲指定に使用できます:
 
 ```json
 {
@@ -185,8 +183,7 @@ REST APIまたは`glab orbit remote query`でクエリを送信する場合は�
 
 ### テキストインデックス付きプロパティ {#text-indexed-properties}
 
-以下のプロパティは`token_match`、`all_tokens`、および`any_tokens`をサポートしています。
-これらの演算子を他のプロパティに使用すると、完全な文字列スキャンにフォールバックするため、処理が遅くなります。
+以下のプロパティは`token_match`、`all_tokens`、および`any_tokens`をサポートしています。これらの演算子を他のプロパティに使用すると、完全な文字列スキャンにフォールバックするため、処理が遅くなります。
 
 <!-- The table below is generated from the ontology's `text(...)` storage indexes. -->
 <!-- Do not edit it by hand: run `mise run docs:query-language` and commit. CI fails on drift. -->
@@ -315,7 +312,7 @@ REST APIまたは`glab orbit remote query`でクエリを送信する場合は�
 }
 ```
 
-特定の関数またはクラス定義のソーステキストをフェッチする。`content`列はファイル全体ではなく、その定義のrawソーステキストのみを返します。完全一致には`fqn`（完全修飾名）を使用し、より広い検索には`name`と`contains`を使用してください。
+特定の関数またはクラス定義のソーステキストをフェッチする。`content`列はファイル全体ではなく、その定義のrawソーステキストのみを返します。完全一致には`fqn`（完全修飾名）を使用し、より広い検索には`name`と`contains`を使用してください:
 
 ```json orbit-query
 {
@@ -358,7 +355,7 @@ REST APIまたは`glab orbit remote query`でクエリを送信する場合は�
 }
 ```
 
-1つのマージリクエストに対して実行されたすべてのパイプラインを検索する。マージリクエストの**パイプライン**タブに表示される内容と一致させるために、常に`Pipeline.source = "merge_request_event"`でフィルタリングしてください。
+1つのマージリクエストに対して実行されたすべてのパイプラインを検索する。マージリクエストの**パイプライン**タブに表示される内容と一致させるために、常に`Pipeline.source = "merge_request_event"`でフィルタリングしてください:
 
 ```json orbit-query
 {
@@ -379,7 +376,8 @@ REST APIまたは`glab orbit remote query`でクエリを送信する場合は�
 
 `merge_request_id`はマージリクエストの内部数値`id`であり、プロジェクトスコープの`iid`ではありません。まず`iid`と`project_id`でフィルタリングする`MergeRequest`トラバーサルで調べてから、その`id`を上記のクエリに使用してください。
 
-`Pipeline.merge_request_id`と`MergeRequest --TRIGGERED--> Pipeline`エッジはどちらも、MRのコンテキストで起動されたすべてのCIパイプライン（トップレベルのMRパイプラインがトリガーするダウンストリームの子パイプライン（`source = "parent_pipeline"`）を含む）にMRをリンクします。`source = "merge_request_event"`フィルターなしでは、親子パイプラインのファンアウトを使用するMRで大幅に過剰カウントになり、MRの**パイプライン**タブに表示される内容と一致しません。マルチノードクエリで`MergeRequest --TRIGGERED--> Pipeline`をトラバースする場合も同じフィルターを適用してください。
+`Pipeline.merge_request_id`と`MergeRequest --TRIGGERED-->
+Pipeline`エッジはどちらも、MRのコンテキストで起動されたすべてのCIパイプライン（トップレベルのMRパイプラインがトリガーするダウンストリームの子パイプライン（`source = "parent_pipeline"`）を含む）にMRをリンクします。`source = "merge_request_event"`フィルターなしでは、親子パイプラインのファンアウトを使用するMRで大幅に過剰カウントになり、MRの**パイプライン**タブに表示される内容と一致しません。マルチノードクエリで`MergeRequest --TRIGGERED--> Pipeline`をトラバースする場合も同じフィルターを適用してください。
 
 `MergeRequest --HAS_HEAD_PIPELINE--> Pipeline`は別のエッジです。マージリクエストのソースブランチの先端に対して実行されている最新の単一パイプラインを指します。パイプラインの履歴ではなく、「現在実行中のもの」を確認する場合に使用してください。
 
@@ -401,7 +399,7 @@ REST APIまたは`glab orbit remote query`でクエリを送信する場合は�
 
 トップレベルの`group_by`を使用して集計行をグループ化します。これはクエリ内のすべての集計に適用されます。個々の集計内にグループ化を入れないでください。
 
-グループキーは以下の形式をサポートしています。
+グループキーは以下の形式をサポートしています:
 
 | グループキー | 形式 | 結果の値 |
 |-----------|-------|--------------|
@@ -411,7 +409,9 @@ REST APIまたは`glab orbit remote query`でクエリを送信する場合は�
 
 出力列名は導出されます。ノードキーはノードID（`p`）を使用し、プロパティキーは`<node>_<property>`（`mr_state`）を使用し、切り捨てキーは単位を付加します（`mr_created_at_month`）。これらの名前を`aggregation_sort`で参照してください。グループまたは集計の出力名が重複している場合は拒否されます。
 
-導出された名前を使用してください。コンシューマーが特定の列名を必要とする場合のみ、オブジェクト形式のオプション`as`でリネームしてください: `{"key": "mr.state", "as": "state"}`、または切り捨てを使用する場合は`{"key": "mr.created_at", "truncate": "month", "as": "month"}`。
+導出された名前を使用してください。コンシューマーが特定の列名を必要とする場合のみ、オブジェクト形式のオプション`as`でリネームしてください: `{"key": "mr.state", "as":
+"state"}`、または切り捨てを使用する場合は`{"key": "mr.created_at", "truncate": "month",
+"as": "month"}`。
 
 切り捨て単位は`minute`、`hour`、`day`、`week`、`month`、`quarter`、`year`で、`Date`/`DateTime`プロパティにのみ適用されます。`minute`と`hour`は、バケットのカーディナリティを制限するために`node_ids`または切り捨てプロパティへのフィルターが必要です。
 
@@ -483,7 +483,7 @@ REST APIまたは`glab orbit remote query`でクエリを送信する場合は�
 | `max_depth` | `integer` | 最大パス長。最大3。 |
 | `rel_types` | `array` | トラバースするリレーションシップタイプ。両方のエンドポイントが`node_ids`を使用する場合を除き必須。 |
 
-両方のエンドポイントは`node_ids`、フィルター、または500以下のスパンを持つ`id_range`で有界である必要があります。いずれかのエンドポイントがフィルターまたは`id_range`を使用する場合は、`rel_types`を指定してください。
+両方のエンドポイントは`node_ids`、フィルター、または500以下のスパンを持つ`id_range`で有界である必要があります。いずれかのエンドポイントがフィルターまたは`id_range`を使用する場合は、`rel_types`を指定します。
 
 ```json orbit-query
 {
@@ -538,7 +538,7 @@ GitLab OrbitはSQLをコンパイルする前に、広範または曖昧なク�
 | クエリあたりのリレーションシップ数 | 5 |
 | クエリあたりの集計数 | 10 |
 | セレクターあたりの`node_ids`数 | 500 |
-| `in`フィルターの値数 | 100 |
+| `in`フィルター内の値の数 | 100 |
 | ノードセレクターあたりの列数 | 50 |
 | セレクターあたりのリレーションシップタイプ数 | 10 |
 | リレーションシップホップ数 | 3 |
