@@ -246,6 +246,14 @@ async fn removes_the_superseded_code_snapshot_of_a_checkpointed_project() {
             t("gl_definition")
         ))
         .await;
+    context
+        .execute(&format!(
+            "INSERT INTO {} (id, traversal_path, project_id, branch, path, name, _version) VALUES \
+             (1, '1/100/', 100, 'main', 'a.rb', 'a.rb', '2026-01-01 00:00:00'), \
+             (2, '1/100/', 100, 'main', 'a.rb', 'a.rb', '2026-01-02 00:00:00')",
+            t("gl_file")
+        ))
+        .await;
 
     build_cleanup_task(&context).await.run().await.unwrap();
 

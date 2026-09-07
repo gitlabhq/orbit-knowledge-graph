@@ -69,6 +69,15 @@ async fn seed_definitions(context: &TestContext) {
         .await;
     context
         .execute(&format!(
+            "INSERT INTO {} (id, traversal_path, project_id, branch, path, name, _version) VALUES \
+             (1, '{1}', 1000, 'main', 'a.rb', 'a.rb', '2026-01-01 00:00:00'), \
+             (2, '{1}', 1000, 'main', 'a.rb', 'a.rb', '2026-01-02 00:00:00')",
+            t("gl_file"),
+            scope_path(0)
+        ))
+        .await;
+    context
+        .execute(&format!(
             "INSERT INTO {} (traversal_path, project_id, branch, last_task_id, last_commit, indexed_at, _version) \
              VALUES ('{}', 1000, 'main', 7, 'abc', '2026-01-02 00:00:00', 1)",
             t("code_indexing_checkpoint"),
