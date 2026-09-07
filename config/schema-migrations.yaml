@@ -16,6 +16,14 @@
 # note-gated `scope: none` entry, the certified output-neutral escape hatch. A
 # version with no entry is treated as "*", which also makes pruning old entries safe.
 migrations:
+- version: 96
+  scope: none
+  note: >-
+    MergeRequestDiffFile lookup CTE collapses the parent diff's datalake versions
+    to the latest one (argMax, GROUP BY id) instead of joining every unmerged version.
+    Each output row is one of the rows the previous join already produced, and the
+    survivor among duplicate rows is now deterministic instead of insertion-order
+    dependent, so no re-index is needed.
 - version: 95
   scope: none
   note: "cosmetic: normalize auxiliary table codec casing to match canonical PascalCase"

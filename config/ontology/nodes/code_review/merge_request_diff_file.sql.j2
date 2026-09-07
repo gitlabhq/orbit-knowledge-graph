@@ -20,15 +20,18 @@ WITH
   WHERE startsWith(traversal_path, {traversal_path:String}) {{filters}}
   ORDER BY traversal_path, merge_request_diff_id, relative_order
   LIMIT {{batch_size}}),
+  -- Collapses to the latest version only; a tombstoned parent still joins (unlike generated
+  -- lookups) so the file keeps its merge_request_id and this stays output-neutral.
   _e0 AS (SELECT
     id,
-    merge_request_id,
-    project_id
+    argMax(merge_request_id, {{version_column}}) AS merge_request_id,
+    argMax(project_id, {{version_column}}) AS project_id
   FROM siphon_merge_request_diffs
   WHERE id IN (SELECT
-      merge_request_diff_id
+      DISTINCT merge_request_diff_id
     FROM _batch)
-    AND startsWith(traversal_path, {traversal_path:String}))
+    AND startsWith(traversal_path, {traversal_path:String})
+  GROUP BY id)
 SELECT
   _batch.id AS id,
   _e0.merge_request_id AS merge_request_id,
