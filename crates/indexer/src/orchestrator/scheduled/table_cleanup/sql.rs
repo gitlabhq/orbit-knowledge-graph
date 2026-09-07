@@ -229,26 +229,26 @@ pub(super) fn changed_scopes_sql(checkpoint_table: &str, after_block: u64) -> St
     format!("SELECT {CODE_SCOPE} FROM {checkpoint_table} WHERE _block_number > {after_block}")
 }
 
-/// Every snapshot of a scope carries its own `_version`, so a second version in the file table marks a scope with history to remove.
-pub(super) fn multi_snapshot_scopes_sql(file_table: &str) -> String {
+/// Every snapshot of a scope carries its own `_version`, so a scope with two versions in any project table has history to remove.
+pub(super) fn multi_snapshot_scopes_sql(project_tables: &[String]) -> String {
+    let per_table: Vec<String> = project_tables
+        .iter()
+        .map(|table| {
+            format!(
+                "SELECT {CODE_SCOPE} FROM {table} GROUP BY {CODE_SCOPE} HAVING min(_version) < max(_version)"
+            )
+        })
+        .collect();
     format!(
-        "SELECT {CODE_SCOPE} FROM {file_table} GROUP BY {CODE_SCOPE} HAVING uniqExact(_version) > 1"
+        "SELECT DISTINCT {CODE_SCOPE} FROM ({})",
+        per_table.join(" UNION ALL ")
     )
 }
 
 /// An "indexed empty" checkpoint has no branch row at or after its bound, so its scope is left alone.
-pub(super) fn code_scopes_sql(
-    checkpoint_table: &str,
-    branch_table: &str,
-    changed: &str,
-    chunk: Option<(usize, usize)>,
-) -> String {
-    let chunk = chunk
-        .map(|(chunks, index)| format!(" AND cityHash64({CODE_SCOPE}) % {chunks} = {index}"))
-        .unwrap_or_default();
-    let changed = format!("SELECT {CODE_SCOPE} FROM ({changed}) WHERE 1{chunk}");
+pub(super) fn code_scopes_sql(checkpoint_table: &str, branch_table: &str, changed: &str) -> String {
     format!(
-        "SELECT s.traversal_path AS traversal_path, s.project_id AS project_id, s.branch AS branch, s.bound AS bound FROM (\
+        "SELECT s.traversal_path AS traversal_path, toString(s.project_id) AS project_id, s.branch AS branch, toString(s.bound) AS bound FROM (\
            SELECT {CODE_SCOPE}, max(indexed_at) AS bound FROM {checkpoint_table} \
            WHERE NOT _deleted AND ({CODE_SCOPE}) IN ({changed}) GROUP BY {CODE_SCOPE}) AS s \
          INNER JOIN (\
@@ -256,12 +256,38 @@ pub(super) fn code_scopes_sql(
            WHERE (traversal_path, project_id, name) IN ({changed}) AND NOT _deleted \
            GROUP BY traversal_path, project_id, name) AS b \
            ON s.traversal_path = b.traversal_path AND s.project_id = b.project_id AND s.branch = b.branch \
-         WHERE b.branch_version >= s.bound"
+         WHERE b.branch_version >= s.bound \
+         ORDER BY traversal_path, project_id, branch"
     )
 }
 
-pub(super) fn scope_paths_sql(scopes: &str) -> String {
-    format!("SELECT DISTINCT {PATH_COLUMN} FROM ({scopes}) ORDER BY {PATH_COLUMN}")
+pub(super) struct Scope {
+    pub(super) path: String,
+    pub(super) project_id: String,
+    pub(super) branch: String,
+    pub(super) bound: String,
+}
+
+/// Scopes travel as literals: a subquery here would run the checkpoint join once per embedding, and a `UNION` inside a lightweight update is rejected.
+pub(super) fn scopes_literal_sql(scopes: &[Scope]) -> String {
+    let tuples: Vec<String> = scopes
+        .iter()
+        .map(|scope| {
+            format!(
+                "('{}', toInt64({}), '{}', toDateTime64('{}', 6, 'UTC'))",
+                escape(&scope.path),
+                scope.project_id.parse::<i64>().unwrap_or(0),
+                escape(&scope.branch),
+                escape(&scope.bound)
+            )
+        })
+        .collect();
+    format!(
+        "SELECT tupleElement(t, 1) AS traversal_path, tupleElement(t, 2) AS project_id, \
+         tupleElement(t, 3) AS branch, tupleElement(t, 4) AS bound \
+         FROM (SELECT arrayJoin([{}]) AS t)",
+        tuples.join(", ")
+    )
 }
 
 /// The target is joined through a pre-filtered derived table: joining it directly made the lightweight update read the whole table once more without a key condition.
@@ -450,38 +476,60 @@ mod tests {
 
     #[test]
     fn code_scopes_require_a_branch_row_at_or_after_the_checkpoint_bound() {
-        let sql = code_scopes_sql("cp", "br", &changed_scopes_sql("cp", 17), None);
+        let sql = code_scopes_sql("cp", "br", &changed_scopes_sql("cp", 17));
         assert_eq!(
             sql,
-            "SELECT s.traversal_path AS traversal_path, s.project_id AS project_id, s.branch AS branch, s.bound AS bound FROM (\
+            "SELECT s.traversal_path AS traversal_path, toString(s.project_id) AS project_id, s.branch AS branch, toString(s.bound) AS bound FROM (\
                SELECT traversal_path, project_id, branch, max(indexed_at) AS bound FROM cp \
                WHERE NOT _deleted AND (traversal_path, project_id, branch) IN (\
-                 SELECT traversal_path, project_id, branch FROM (SELECT traversal_path, project_id, branch FROM cp WHERE _block_number > 17) WHERE 1) \
+                 SELECT traversal_path, project_id, branch FROM cp WHERE _block_number > 17) \
                GROUP BY traversal_path, project_id, branch) AS s \
              INNER JOIN (\
                SELECT traversal_path, project_id, name AS branch, max(_version) AS branch_version FROM br \
                WHERE (traversal_path, project_id, name) IN (\
-                 SELECT traversal_path, project_id, branch FROM (SELECT traversal_path, project_id, branch FROM cp WHERE _block_number > 17) WHERE 1) AND NOT _deleted \
+                 SELECT traversal_path, project_id, branch FROM cp WHERE _block_number > 17) AND NOT _deleted \
                GROUP BY traversal_path, project_id, name) AS b \
                ON s.traversal_path = b.traversal_path AND s.project_id = b.project_id AND s.branch = b.branch \
-             WHERE b.branch_version >= s.bound"
+             WHERE b.branch_version >= s.bound \
+             ORDER BY traversal_path, project_id, branch"
         );
     }
 
     #[test]
     fn code_history_covers_only_scopes_with_more_than_one_snapshot() {
-        let sql = code_scopes_sql("cp", "br", &multi_snapshot_scopes_sql("v1_gl_file"), None);
-        assert!(sql.contains(
-            "(SELECT traversal_path, project_id, branch FROM v1_gl_file GROUP BY traversal_path, project_id, branch HAVING uniqExact(_version) > 1) WHERE 1)"
-        ));
+        let changed =
+            multi_snapshot_scopes_sql(&["v1_gl_file".to_string(), "v1_gl_definition".to_string()]);
+        assert_eq!(
+            changed,
+            "SELECT DISTINCT traversal_path, project_id, branch FROM (\
+             SELECT traversal_path, project_id, branch FROM v1_gl_file GROUP BY traversal_path, project_id, branch HAVING min(_version) < max(_version) UNION ALL \
+             SELECT traversal_path, project_id, branch FROM v1_gl_definition GROUP BY traversal_path, project_id, branch HAVING min(_version) < max(_version))"
+        );
+        let sql = code_scopes_sql("cp", "br", &changed);
+        assert!(sql.contains("HAVING min(_version) < max(_version)))"));
     }
 
     #[test]
-    fn code_scope_chunks_partition_by_scope_hash() {
-        let sql = code_scopes_sql("cp", "br", &changed_scopes_sql("cp", 0), Some((3, 1)));
-        assert!(sql.contains(
-            "WHERE _block_number > 0) WHERE 1 AND cityHash64(traversal_path, project_id, branch) % 3 = 1)"
-        ));
+    fn scopes_are_embedded_as_literal_tuples() {
+        let scopes = vec![
+            Scope {
+                path: "1/2/".to_string(),
+                project_id: "2".to_string(),
+                branch: "main".to_string(),
+                bound: "2026-01-02 00:00:00.000000".to_string(),
+            },
+            Scope {
+                path: "1/3/".to_string(),
+                project_id: "3".to_string(),
+                branch: "it's".to_string(),
+                bound: "2026-01-03 00:00:00.000000".to_string(),
+            },
+        ];
+        assert_eq!(
+            scopes_literal_sql(&scopes),
+            "SELECT tupleElement(t, 1) AS traversal_path, tupleElement(t, 2) AS project_id, tupleElement(t, 3) AS branch, tupleElement(t, 4) AS bound \
+             FROM (SELECT arrayJoin([('1/2/', toInt64(2), 'main', toDateTime64('2026-01-02 00:00:00.000000', 6, 'UTC')), ('1/3/', toInt64(3), 'it\\'s', toDateTime64('2026-01-03 00:00:00.000000', 6, 'UTC'))]) AS t)"
+        );
     }
 
     #[test]

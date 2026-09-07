@@ -6,9 +6,13 @@ use indexer::modules::code::config::CodeTableNames;
 use indexer::orchestrator::scheduled::table_cleanup::TableCleanup;
 use indexer::orchestrator::scheduled::{ScheduledTask, ScheduledTaskMetrics};
 use integration_testkit::{GRAPH_SCHEMA_SQL, TestContext, t};
+use orbit_migrations::version::{SCHEMA_VERSION, ensure_version_table, mark_version_active};
 use orbit_server_config::TableCleanupConfig;
 
-fn build_cleanup_task(context: &TestContext) -> TableCleanup {
+async fn build_cleanup_task(context: &TestContext) -> TableCleanup {
+    let client = context.config.build_client();
+    ensure_version_table(&client).await.unwrap();
+    mark_version_active(&client, *SCHEMA_VERSION).await.unwrap();
     let ontology = ontology::Ontology::load_embedded().unwrap();
     let code_tables = CodeTableNames::from_ontology(&ontology).unwrap();
     let checkpoints = Arc::new(ClickHouseCheckpointStore::new(Arc::new(
@@ -61,7 +65,7 @@ async fn user_rows(context: &TestContext) -> Vec<(i64, i64)> {
 async fn runs_on_every_table_of_an_empty_schema() {
     let context = TestContext::new(&[*GRAPH_SCHEMA_SQL]).await;
 
-    build_cleanup_task(&context).run().await.unwrap();
+    build_cleanup_task(&context).await.run().await.unwrap();
 }
 
 #[tokio::test]
@@ -69,7 +73,7 @@ async fn collapses_fresh_tombstones_and_purges_expired_ones() {
     let context = TestContext::new(&[*GRAPH_SCHEMA_SQL]).await;
     seed_users_with_tombstones(&context).await;
 
-    build_cleanup_task(&context).run().await.unwrap();
+    build_cleanup_task(&context).await.run().await.unwrap();
 
     assert_eq!(user_rows(&context).await, vec![(1, 1), (3, 0)]);
 }
@@ -78,7 +82,7 @@ async fn collapses_fresh_tombstones_and_purges_expired_ones() {
 async fn second_pass_leaves_a_clean_table_unchanged() {
     let context = TestContext::new(&[*GRAPH_SCHEMA_SQL]).await;
     seed_users_with_tombstones(&context).await;
-    let task = build_cleanup_task(&context);
+    let task = build_cleanup_task(&context).await;
 
     task.run().await.unwrap();
     task.run().await.unwrap();
@@ -90,7 +94,7 @@ async fn second_pass_leaves_a_clean_table_unchanged() {
 async fn tombstones_written_after_a_pass_are_collapsed_on_the_next_pass() {
     let context = TestContext::new(&[*GRAPH_SCHEMA_SQL]).await;
     seed_users_with_tombstones(&context).await;
-    let task = build_cleanup_task(&context);
+    let task = build_cleanup_task(&context).await;
     task.run().await.unwrap();
     context
         .execute(&format!(
@@ -132,7 +136,7 @@ async fn purge_keeps_a_young_tombstone_over_an_expired_one_of_the_same_key() {
         ))
         .await;
 
-    build_cleanup_task(&context).run().await.unwrap();
+    build_cleanup_task(&context).await.run().await.unwrap();
 
     assert_eq!(user_rows(&context).await, vec![(5, 1)]);
 }
@@ -148,7 +152,7 @@ async fn skips_tables_that_do_not_declare_both_block_columns() {
         .await;
     seed_users_with_tombstones(&context).await;
 
-    build_cleanup_task(&context).run().await.unwrap();
+    build_cleanup_task(&context).await.run().await.unwrap();
 
     assert_eq!(
         user_rows(&context).await,
@@ -166,7 +170,7 @@ async fn a_refusal_outlives_the_condition_that_caused_it() {
         ))
         .await;
     seed_users_with_tombstones(&context).await;
-    build_cleanup_task(&context).run().await.unwrap();
+    build_cleanup_task(&context).await.run().await.unwrap();
     context
         .execute(&format!(
             "ALTER TABLE {} MODIFY SETTING enable_block_number_column = 1",
@@ -174,7 +178,7 @@ async fn a_refusal_outlives_the_condition_that_caused_it() {
         ))
         .await;
 
-    build_cleanup_task(&context).run().await.unwrap();
+    build_cleanup_task(&context).await.run().await.unwrap();
 
     assert_eq!(
         user_rows(&context).await,
@@ -209,7 +213,7 @@ async fn skips_tables_whose_merged_parts_persist_only_the_block_offset() {
         ))
         .await;
 
-    build_cleanup_task(&context).run().await.unwrap();
+    build_cleanup_task(&context).await.run().await.unwrap();
 
     assert_eq!(
         user_rows(&context).await,
@@ -243,7 +247,7 @@ async fn removes_the_superseded_code_snapshot_of_a_checkpointed_project() {
         ))
         .await;
 
-    build_cleanup_task(&context).run().await.unwrap();
+    build_cleanup_task(&context).await.run().await.unwrap();
 
     let result = context
         .query(&format!(

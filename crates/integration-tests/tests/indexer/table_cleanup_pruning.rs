@@ -141,7 +141,11 @@ async fn code_snapshot_delete_reads_only_the_granules_of_its_scopes() {
     seed_definitions(&context).await;
     let before = count_rows(&context, "gl_definition").await;
 
-    build_cleanup_task(&context, true).await.run().await.unwrap();
+    build_cleanup_task(&context, true)
+        .await
+        .run()
+        .await
+        .unwrap();
 
     assert_eq!(
         count_rows(&context, "gl_definition").await,
@@ -161,7 +165,11 @@ async fn tombstone_collapse_reads_only_the_granules_of_its_paths() {
     seed_notes(&context).await;
     let before = count_rows(&context, "gl_note").await;
 
-    build_cleanup_task(&context, true).await.run().await.unwrap();
+    build_cleanup_task(&context, true)
+        .await
+        .run()
+        .await
+        .unwrap();
 
     assert_eq!(count_rows(&context, "gl_note").await, before - 100);
     let (selected, total) = selected_marks(&context, "gl_note").await;
@@ -178,7 +186,11 @@ async fn waits_while_the_schema_version_is_still_migrating() {
     seed_notes(&context).await;
     let before = count_rows(&context, "gl_note").await;
 
-    build_cleanup_task(&context, false).await.run().await.unwrap();
+    build_cleanup_task(&context, false)
+        .await
+        .run()
+        .await
+        .unwrap();
 
     assert_eq!(count_rows(&context, "gl_note").await, before);
 }

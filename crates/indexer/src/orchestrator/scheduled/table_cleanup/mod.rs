@@ -25,8 +25,8 @@ const CURSOR_KEY_PREFIX: &str = "maintenance.table_cleanup.";
 const IDENTITY_KEY_PREFIX: &str = "maintenance.table_cleanup.identity.";
 const REFUSED: &str = "refused";
 const ADMITTED: &str = "admitted";
-/// Bounds the scope tuples and path literals inlined into one code statement.
-const SCOPES_PER_STATEMENT: u64 = 2000;
+/// Scope tuples are inlined three times per code statement; 500 keep a statement well under ClickHouse's default 256 KiB `max_query_size`.
+const SCOPES_PER_STATEMENT: usize = 500;
 /// The path list is inlined six times per statement; 32 KiB of literals keeps it under ClickHouse's default 256 KiB `max_query_size`.
 const PATH_LIST_BYTES_PER_STATEMENT: usize = 32 * 1024;
 /// Cron passes land a few seconds after the minute, so an exact interval would skip a pass.
@@ -114,7 +114,6 @@ pub struct TableCleanup {
     tables: Vec<CleanupTable>,
     code_checkpoint_table: String,
     code_branch_table: String,
-    code_file_table: String,
     metrics: ScheduledTaskMetrics,
     config: TableCleanupConfig,
     prepared: AtomicBool,
@@ -143,7 +142,6 @@ impl TableCleanup {
                 *SCHEMA_VERSION,
             ),
             code_branch_table: code_tables.branch.clone(),
-            code_file_table: code_tables.file.clone(),
             metrics,
             config,
             prepared: AtomicBool::new(false),
@@ -677,28 +675,38 @@ impl TableCleanup {
             });
         }
         let changed = if history {
-            sql::multi_snapshot_scopes_sql(&self.code_file_table)
+            let project_tables: Vec<String> = tables
+                .iter()
+                .filter(|table| table.code == CodeRole::Project)
+                .map(|table| table.name.clone())
+                .collect();
+            sql::multi_snapshot_scopes_sql(&project_tables)
         } else {
             sql::changed_scopes_sql(&self.code_checkpoint_table, cursor.window_start(deferred))
         };
-        let scopes_sql = |chunk| {
-            sql::code_scopes_sql(
+        let scopes: Vec<sql::Scope> = self
+            .rows(self.graph.query(&sql::code_scopes_sql(
                 &self.code_checkpoint_table,
                 &self.code_branch_table,
                 &changed,
-                chunk,
-            )
-        };
-        let total = self.count(&scopes_sql(None)).await?;
-        let chunks = total.div_ceil(SCOPES_PER_STATEMENT) as usize;
+            )))
+            .await?
+            .into_iter()
+            .map(|row| sql::Scope {
+                path: row[0].clone(),
+                project_id: row[1].clone(),
+                branch: row[2].clone(),
+                bound: row[3].clone(),
+            })
+            .collect();
+        let total = scopes.len() as u64;
+        let chunks = scopes.chunks(SCOPES_PER_STATEMENT).count();
         let mut failed_chunks = 0usize;
-        for chunk in 0..chunks {
-            let scopes = scopes_sql((chunks > 1).then_some((chunks, chunk)));
-            let paths = self.column(&sql::scope_paths_sql(&scopes)).await?;
-            if paths.is_empty() {
-                continue;
-            }
+        for (chunk, scopes) in scopes.chunks(SCOPES_PER_STATEMENT).enumerate() {
+            let mut paths: Vec<String> = scopes.iter().map(|scope| scope.path.clone()).collect();
+            paths.dedup();
             let prune = sql::path_prune_sql(&paths);
+            let scopes = sql::scopes_literal_sql(scopes);
             for (table, exclude) in tables.iter().zip(&excludes) {
                 let Some(exclude) = exclude else {
                     continue;
