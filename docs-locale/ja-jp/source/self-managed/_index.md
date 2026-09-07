@@ -1,6 +1,6 @@
 ---
-stage: Orbit
-group: Context Systems
+stage: Analytics
+group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
 description: GitLab Orbitを自社のGitLabインスタンスで実行します。
 title: GitLab Self-ManagedにおけるGitLab Orbit
@@ -21,22 +21,18 @@ title: GitLab Self-ManagedにおけるGitLab Orbit
 {{< /history >}}
 
 > [!note]
-> GitLab Self-ManagedにおけるGitLab Orbitは
-> [ベータ版](https://docs.gitlab.com/policy/development_stages_support/#beta)です。
-> この機能はテスト目的で利用可能ですが、本番環境での使用には対応していません。
+ GitLab Self-ManagedにおけるGitLab Orbitは[ベータ版](https://docs.gitlab.com/policy/development_stages_support/#beta)です。この機能はテスト目的で利用可能ですが、本番環境での使用には対応していません。
 
-GitLab.comでは、GitLab OrbitはGitLabのインフラストラクチャ上で動作します。
-GitLab Self-Managedでは、GitLab Orbitをインスタンスの隣で実行します。
+GitLab.comでは、GitLab OrbitはGitLabのインフラストラクチャ上で動作します。GitLab Self-Managedでは、GitLab Orbitをインスタンスの隣で実行します。
 
-GitLab Orbitのデプロイは2つの部分で構成されます。
+GitLab Orbitのデプロイは2つの部分で構成されます:
 
 - GitLabデータベースをClickHouseにコピーするデータパイプライン。
 - そのコピーをクエリ可能なグラフに変換するGitLab Orbit。
 
 データパイプラインはGitLab Orbitに依存しないため、GitLab Orbitをインストールする前にパイプラインを検証できます。
 
-GitLab OrbitはKubernetes向けのHelmチャートとしてのみ配布されています。Linuxパッケージには含まれていません。
-GitLabを実行しているクラスター、またはインスタンスの隣にある別のクラスターにチャートをインストールしてください。
+GitLab OrbitはKubernetes向けのHelmチャートとしてのみ配布されています。Linuxパッケージには含まれていません。GitLabを実行しているクラスター、またはインスタンスの隣にある別のクラスターにチャートをインストールしてください。
 
 GitLab Self-ManagedにおけるGitLab Orbitはベータ版であるため、デプロイを計画する前に担当のアカウントチームに連絡して現在の制限事項を確認してください。
 
@@ -100,6 +96,4 @@ GitLab OrbitはGitLab GeoのセカンダリサイトでFIPSに準拠したビル
 
 GitLab Orbitの冗長性とリカバリーについてはドキュメント化されていません。GitLab Orbitは独自のデータを保持しないため、グラフデータベースが失われた場合は、再度インデックス作成を行うことで再構築できます。
 
-ベータ版期間中に適用されるサポートについては、
-[ベータ版](https://docs.gitlab.com/policy/development_stages_support/#beta)および
-[サポートに関する声明](https://about.gitlab.com/support/statement-of-support/)を参照してください。
+ベータ版期間中に適用されるサポートについては、[ベータ版](https://docs.gitlab.com/policy/development_stages_support/#beta)および[サポートに関する声明](https://about.gitlab.com/support/statement-of-support/)を参照してください。
