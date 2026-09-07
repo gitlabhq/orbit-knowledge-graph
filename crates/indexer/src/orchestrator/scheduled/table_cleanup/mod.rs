@@ -450,27 +450,42 @@ impl TableCleanup {
         self.scalar(&sql::high_block_sql(table)).await
     }
 
+    /// The busy set is read right before each statement: a sweep of a large table runs for a long time, and a snapshot
+    /// taken at its start would let later statements patch parts whose merge began in between.
     async fn run_collapse(
         &self,
         table: &CleanupTable,
         candidate_sets: &[sql::CandidateSet],
         filter: &str,
         keep: sql::Keep,
-        exclude: &str,
-    ) -> Result<(), TaskError> {
+    ) -> Result<bool, TaskError> {
+        let mut deferred = false;
         for candidates in candidate_sets {
+            let exclude = match self.busy(&table.name).await? {
+                Busy::Mutating => {
+                    info!(
+                        table = table.name,
+                        "a mutation is pending; deferring the rest of this table's statements"
+                    );
+                    return Ok(true);
+                }
+                Busy::Parts(parts) => {
+                    deferred |= !parts.is_empty();
+                    sql::exclude_parts_sql(&parts)
+                }
+            };
             let statement = sql::collapse_statement(
                 &table.name,
                 &table.key,
                 filter,
                 candidates,
                 keep,
-                exclude,
+                &exclude,
                 self.config.statement_timeout_secs,
             );
             self.execute(&table.name, &statement).await?;
         }
-        Ok(())
+        Ok(deferred)
     }
 
     /// Path groups keep every statement primary-key-pruned; tables without a path column fall back to key hashes.
@@ -530,25 +545,25 @@ impl TableCleanup {
         &self,
         table: &CleanupTable,
         cutoff: DateTime<Utc>,
-        exclude: &str,
-    ) -> Result<u64, TaskError> {
+    ) -> Result<(u64, bool), TaskError> {
         let filter = sql::version_filter("<", cutoff);
         let (total, sets) = self.candidate_sets(table, &filter).await?;
-        self.run_collapse(
-            table,
-            &sets,
-            &filter,
-            sql::Keep::NewestUnlessExpiredTombstone(cutoff),
-            exclude,
-        )
-        .await?;
+        let deferred = self
+            .run_collapse(
+                table,
+                &sets,
+                &filter,
+                sql::Keep::NewestUnlessExpiredTombstone(cutoff),
+            )
+            .await?;
         info!(
             table = table.name,
             tombstones = total,
             statements = sets.len(),
+            deferred,
             "purged expired tombstones"
         );
-        Ok(total)
+        Ok((total, deferred))
     }
 
     /// Rows written before the block columns existed report their part's first block, invisible to the incremental window.
@@ -556,20 +571,21 @@ impl TableCleanup {
         &self,
         table: &CleanupTable,
         cutoff: DateTime<Utc>,
-        exclude: &str,
-    ) -> Result<u64, TaskError> {
-        let purged = self.purge_tombstones(table, cutoff, exclude).await?;
+    ) -> Result<(u64, bool), TaskError> {
+        let (purged, purge_deferred) = self.purge_tombstones(table, cutoff).await?;
         let filter = sql::version_filter(">=", cutoff);
         let (total, sets) = self.candidate_sets(table, &filter).await?;
-        self.run_collapse(table, &sets, &filter, sql::Keep::Newest, exclude)
+        let deferred = self
+            .run_collapse(table, &sets, &filter, sql::Keep::Newest)
             .await?;
         info!(
             table = table.name,
             tombstones = total,
             statements = sets.len(),
+            deferred,
             "collapsed historical tombstoned keys"
         );
-        Ok(purged + total)
+        Ok((purged + total, purge_deferred || deferred))
     }
 
     /// Project-scoped code tables are left to `cleanup_code_snapshots`, which removes whole previous snapshots.
@@ -582,24 +598,13 @@ impl TableCleanup {
         let cursor = self.block_cursor(&key).await?;
         let high_block = self.high_block(&table.name).await?.max(cursor.block);
         let cutoff = pass_at - TimeDelta::seconds(self.config.tombstone_retention_secs as i64);
-        let busy = self.busy(&table.name).await?;
-        let (exclude, deferred) = match &busy {
-            Busy::Mutating => {
-                info!(
-                    table = table.name,
-                    "a mutation is pending; deferring tombstone collapse"
-                );
-                (String::new(), true)
-            }
-            Busy::Parts(parts) => (sql::exclude_parts_sql(parts), !parts.is_empty()),
-        };
+        let busy_before = self.busy(&table.name).await?.defers();
         if cursor.last_pass.is_none() {
-            let (total, purged_at) = match (self.config.sweep_history, &busy) {
-                (false, _) | (_, Busy::Mutating) => (0, None),
-                (true, Busy::Parts(_)) => (
-                    self.sweep_history(table, cutoff, &exclude).await?,
-                    Some(pass_at),
-                ),
+            let (total, purged_at, deferred) = if self.config.sweep_history {
+                let (total, deferred) = self.sweep_history(table, cutoff).await?;
+                (total, Some(pass_at), busy_before || deferred)
+            } else {
+                (0, None, false)
             };
             let swept = BlockCursor {
                 block: high_block,
@@ -610,24 +615,22 @@ impl TableCleanup {
                 .await?;
             return Ok(total);
         }
-        let mut total = 0;
-        if !matches!(busy, Busy::Mutating) {
-            let after = cursor.window_start(deferred);
-            let filter = sql::new_rows_filter(after);
-            let (found, sets) = self.candidate_sets(table, &filter).await?;
-            total = found;
-            if total > 0 {
-                self.run_collapse(table, &sets, &filter, sql::Keep::Newest, &exclude)
-                    .await?;
-                info!(
-                    table = table.name,
-                    candidates = total,
-                    statements = sets.len(),
-                    catching_up = after < cursor.previous_block,
-                    excluded_parts = !exclude.is_empty(),
-                    "collapsed tombstoned keys"
-                );
-            }
+        let after = cursor.window_start(busy_before);
+        let filter = sql::new_rows_filter(after);
+        let (total, sets) = self.candidate_sets(table, &filter).await?;
+        let mut deferred = busy_before;
+        if total > 0 {
+            deferred |= self
+                .run_collapse(table, &sets, &filter, sql::Keep::Newest)
+                .await?;
+            info!(
+                table = table.name,
+                candidates = total,
+                statements = sets.len(),
+                catching_up = after < cursor.previous_block,
+                deferred,
+                "collapsed tombstoned keys"
+            );
         }
         let hold = cursor.next_hold(deferred);
         // Saved before the purge so a failing purge cannot stall the incremental window.
@@ -636,10 +639,10 @@ impl TableCleanup {
         let purge_due = cursor.last_purge.is_none_or(|at| {
             pass_at - at >= TimeDelta::seconds(self.config.purge_interval_secs as i64) - PURGE_SLACK
         });
-        if !purge_due || matches!(busy, Busy::Mutating) {
+        if !purge_due {
             return Ok(total);
         }
-        let purged = self.purge_tombstones(table, cutoff, &exclude).await?;
+        let (purged, _) = self.purge_tombstones(table, cutoff).await?;
         self.save_block_cursor(&key, pass_at, &cursor, high_block, Some(pass_at), hold)
             .await?;
         Ok(total + purged)
@@ -664,21 +667,9 @@ impl TableCleanup {
             return Ok(0);
         }
         let tables = self.safe_tables(|role| role != CodeRole::None).await;
-        let mut excludes = Vec::with_capacity(tables.len());
         let mut deferred = false;
         for table in &tables {
-            let busy = self.busy(&table.name).await?;
-            deferred |= busy.defers();
-            excludes.push(match busy {
-                Busy::Mutating => {
-                    info!(
-                        table = table.name,
-                        "a mutation is pending; deferring code snapshot cleanup"
-                    );
-                    None
-                }
-                Busy::Parts(parts) => Some(sql::exclude_parts_sql(&parts)),
-            });
+            deferred |= self.busy(&table.name).await?.defers();
         }
         let changed = if history {
             sql::multi_snapshot_scopes_sql(&self.code_file_table)
@@ -708,16 +699,23 @@ impl TableCleanup {
             paths.dedup();
             let prune = sql::path_prune_sql(&paths);
             let scopes = sql::scopes_literal_sql(scopes);
-            for (table, exclude) in tables.iter().zip(&excludes) {
-                let Some(exclude) = exclude else {
-                    continue;
+            for table in &tables {
+                let exclude = match self.busy(&table.name).await? {
+                    Busy::Mutating => {
+                        deferred = true;
+                        continue;
+                    }
+                    Busy::Parts(parts) => {
+                        deferred |= !parts.is_empty();
+                        sql::exclude_parts_sql(&parts)
+                    }
                 };
                 let statement = match table.code {
                     CodeRole::Project => sql::code_snapshot_statement(
                         &table.name,
                         &scopes,
                         &prune,
-                        exclude,
+                        &exclude,
                         self.config.statement_timeout_secs,
                     ),
                     CodeRole::SharedEdge => sql::shared_edge_snapshot_statement(
@@ -725,7 +723,7 @@ impl TableCleanup {
                         &self.code_checkpoint_table,
                         &scopes,
                         &prune,
-                        exclude,
+                        &exclude,
                         self.config.statement_timeout_secs,
                     ),
                     CodeRole::None => continue,
