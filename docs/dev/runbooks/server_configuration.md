@@ -265,7 +265,7 @@ Distributed locking via NATS KV ensures only one dispatcher instance runs each t
 | Namespace sweep | `schedule.tasks.namespace-sweep.cron` | `0 0 * * * *` (hourly) | Re-dispatches every enabled namespace; backstops migration backfill and missed windows |
 | Code task dispatch | `schedule.tasks.code-indexing-task.cron` | `0 */1 * * * *` (every minute) | Consumes Siphon CDC push events |
 | Code backfill | `schedule.tasks.code-backfill.cron` | `0 */1 * * * *` (every minute) | Backfills newly enabled namespaces |
-| Table cleanup | `schedule.tasks.table-cleanup.cron` | `0 */10 * * * *` (every 10 minutes) | Removes tombstoned keys and superseded code snapshots with patch-part deletes; see settings below |
+| Table cleanup | `schedule.tasks.table-cleanup.cron` | `0 0 3 * * 0` (weekly, Sunday 03:00 UTC) | Runs `APPLY DELETED MASK` on every graph table to physically remove lightweight-deleted rows |
 | Namespace deletion | `schedule.tasks.namespace-deletion.cron` | `0 0 3 * * *` (daily 03:00 UTC) | Schedules and executes namespace deletions |
 | Migration completion | `schedule.tasks.migration-completion.cron` | `0 */1 * * * *` (every minute) | Detects completed schema migrations |
 
@@ -275,23 +275,10 @@ every later tick queries Siphon changes since that checkpoint, however old it is
 The hourly namespace sweep re-dispatches every enabled namespace regardless of
 recent Siphon activity, backstopping migration backfill and missed windows.
 
-### Table cleanup task settings
-
-| Config path | Default | Description |
-|-------------|---------|-------------|
-| `schedule.tasks.table-cleanup.tombstone_retention_secs` | `604800` | Tombstones younger than this keep shadowing their key; older dead keys are purged with every row they hide |
-| `schedule.tasks.table-cleanup.purge_interval_secs` | `86400` | How often each table's expired tombstones are purged. Each purge scans the table's `_deleted`, `_version` and `traversal_path` columns once to group candidates by path (3.5 to 5 minutes and 2.5 GiB on a 1B-row bench table); the incremental passes in between read only new parts |
-| `schedule.tasks.table-cleanup.max_candidates_per_statement` | `2000000` | Tombstoned keys per delete statement. Tables with a traversal path column are grouped by path up to this many keys and 32 KiB of path literals per statement; a single path above the limit is split by key hash; tables without a path column are split by key hash |
-| `schedule.tasks.table-cleanup.statement_timeout_secs` | `600` | `max_execution_time` of each delete statement |
-| `schedule.tasks.table-cleanup.apply_patches_after_bytes` | `1073741824` | Uncompressed patch-part bytes on a table that trigger `APPLY PATCHES` |
-| `schedule.tasks.table-cleanup.apply_patches_after_secs` | `21600` | `APPLY PATCHES` is issued for every table with patch parts at least this often |
-| `schedule.tasks.table-cleanup.sweep_history` | `true` | Remove every existing tombstoned key and every checkpointed project the first time a table is seen; `false` starts from the current parts and leaves history to re-indexes and the daily purge |
-
-The task needs ClickHouse 25.7.8, 25.8.8, 25.9.3, 25.10.1 or newer (the releases where lightweight deletes with subqueries work) and a writer profile with `enable_lightweight_update = 1`; on older servers it logs a warning once and stays idle. Tables must persist both `_block_number` and `_block_offset`, which the generated DDL declares since schema 94. A table whose parts persist only `_block_offset` (ClickHouse Cloud enables that setting service-wide) or whose parts carry block numbers from another table (a clone attached by a non-`*` migration) is skipped with a warning until a full migration rebuilds it from inserts.
-
-The writer role needs `SELECT` on `system.parts`, `system.parts_columns`, `system.tables`, `system.settings` and `system.mutations` for these checks. Progress is stored in the `checkpoint` table under `maintenance.table_cleanup.<versioned table>`; deleting a table's row re-runs its history sweep on the next pass.
-
-The identity verdict is stored under `maintenance.table_cleanup.identity.<versioned table>` for the whole schema version; delete it to re-check a table that was rebuilt. Alert on `gkg.scheduler.task.errors{task="maintenance.table_cleanup"}` (stages `prepare`, `code_snapshots`, `code_history`, `collapse`, `apply_patches`); skipped tables and unsupported servers count on `gkg.scheduler.task.requests.skipped{task="maintenance.table_cleanup"}`; each delete statement's duration lands on `gkg.scheduler.task.query.duration` with the versioned table name as the `query` label.
+`APPLY DELETED MASK` is idempotent. A failed or skipped run is safe — the next
+run picks up all outstanding masks. Alert on
+`gkg.scheduler.task.errors{task="maintenance.table_cleanup"}`; the task logs a
+failed table and moves on.
 
 ### Code dispatch task settings
 
@@ -657,7 +644,7 @@ engine:
 schedule:
   tasks:
     table-cleanup:
-      cron: "0 */10 * * * *"
+      cron: "0 0 3 * * 0"
     namespace-deletion:
       cron: "0 0 3 * * *"
     migration-completion:
