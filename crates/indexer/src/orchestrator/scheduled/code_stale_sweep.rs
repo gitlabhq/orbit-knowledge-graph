@@ -10,7 +10,7 @@ use crate::clickhouse::ArrowClickHouseClient;
 use crate::durability::WriteDurability;
 use crate::modules::code::config::CodeTableNames;
 use crate::orchestrator::scheduled::TaskError;
-use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
+use orbit_migrations::version::{SCHEMA_VERSION, prefixed_table_name};
 use orbit_utils::traversal_path::TraversalPath;
 
 pub(crate) const CHECKPOINT_KEY_PREFIX: &str = "maintenance.code_stale_sweep";

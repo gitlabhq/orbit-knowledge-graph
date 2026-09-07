@@ -54,7 +54,7 @@ pub(crate) fn log_comment_base(user_id: u64, query_json: &str) -> String {
         versions: Versions {
             payload: PAYLOAD_VERSION,
             dsl: orbit_versions::VERSIONS.query_dsl.clone(),
-            schema: *indexer::schema::version::SCHEMA_VERSION,
+            schema: *orbit_migrations::version::SCHEMA_VERSION,
         },
     };
     let json = serde_json::to_vec(&payload).unwrap_or_default();
@@ -166,7 +166,7 @@ mod tests {
         assert_eq!(p["versions"]["dsl"], orbit_versions::VERSIONS.query_dsl);
         assert_eq!(
             p["versions"]["schema"],
-            *indexer::schema::version::SCHEMA_VERSION
+            *orbit_migrations::version::SCHEMA_VERSION
         );
     }
 

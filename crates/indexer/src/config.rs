@@ -72,7 +72,7 @@ pub enum IndexerError {
     Health(#[from] std::io::Error),
 
     #[error("Schema version error: {0}")]
-    SchemaVersion(#[from] crate::schema::version::SchemaVersionError),
+    SchemaVersion(#[from] orbit_migrations::version::SchemaVersionError),
 
     #[error("Schema readiness wait failed: {0}")]
     SchemaWait(#[from] crate::schema::version::SchemaWaitError),
@@ -112,7 +112,7 @@ pub enum DispatcherError {
     Trigger(#[from] crate::orchestrator::TriggerError),
 
     #[error("schema migration error: {0}")]
-    Migration(#[from] crate::schema::migration::MigrationError),
+    Migration(#[from] crate::schema::migration::DispatcherMigrationError),
 
     #[error("health server failed: {0}")]
     Health(#[from] std::io::Error),

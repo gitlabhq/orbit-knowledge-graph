@@ -2,10 +2,10 @@ use std::sync::Arc;
 
 use crate::clickhouse::{ArrowClickHouseClient, ArrowQuery, TIMESTAMP_FORMAT};
 use crate::durability::WriteDurability;
-use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use clickhouse_client::FromArrowColumn;
+use orbit_migrations::version::{SCHEMA_VERSION, prefixed_table_name};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 

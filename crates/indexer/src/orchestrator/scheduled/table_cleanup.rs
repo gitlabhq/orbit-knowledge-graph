@@ -6,7 +6,7 @@ use tracing::{info, warn};
 
 use crate::clickhouse::ArrowClickHouseClient;
 use crate::orchestrator::scheduled::{ScheduledTask, ScheduledTaskMetrics, TaskError};
-use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
+use orbit_migrations::version::{SCHEMA_VERSION, prefixed_table_name};
 use orbit_server_config::{ScheduleConfiguration, TableCleanupConfig};
 
 const TASK_NAME: &str = "maintenance.table_cleanup";

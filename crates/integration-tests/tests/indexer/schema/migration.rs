@@ -6,29 +6,26 @@ use indexer::checkpoint::ClickHouseCheckpointStore;
 use indexer::locking::LockService;
 use indexer::metrics::MigrationMetrics;
 use indexer::modules::code::config::CodeTableNames;
-use indexer::orchestrator::scheduled::{CodeStaleSweep, migration_completion};
+use indexer::orchestrator::scheduled::CodeStaleSweep;
 use indexer::schema::migration;
 use indexer::schema::version::{
-    SCHEMA_VERSION, SchemaWaitError, ensure_version_table, prefixed_table_name,
-    read_active_version, table_prefix, wait_until_ready, write_migrating_version,
-    write_schema_version,
+    SCHEMA_VERSION, SchemaWaitError, ensure_version_table, mark_version_active,
+    mark_version_migrating, prefixed_table_name, read_active_version, table_prefix,
+    wait_until_ready,
 };
 use indexer::testkit::MockLockService;
 use integration_testkit::{TestContext, t};
-use ontology::migrations::MigrationScope;
+use orbit_migrations::schema::{DictionaryCredentials, GraphSchema};
+use orbit_migrations::scope::MigrationScope;
 use orbit_utils::traversal_path::TraversalPath;
-use query_engine::compiler::{
-    DictionarySource, emit_create_table, generate_graph_dictionaries_with_prefix,
-    generate_graph_tables_with_prefix,
-};
 
-fn dictionary_source(
+fn dictionary_credentials(
     config: &orbit_server_config::ClickHouseConfiguration,
-) -> DictionarySource<'_> {
-    DictionarySource {
-        database: &config.database,
-        user: &config.username,
-        password: config.password.as_deref(),
+) -> DictionaryCredentials {
+    DictionaryCredentials {
+        database: config.database.clone(),
+        user: config.username.clone(),
+        password: config.password.clone(),
     }
 }
 
@@ -41,6 +38,10 @@ async fn setup() -> (TestContext, ontology::Ontology, MigrationMetrics) {
     ensure_version_table(&ctx.create_client()).await.unwrap();
 
     (ctx, ontology, metrics)
+}
+
+fn test_schema(ontology: &ontology::Ontology) -> GraphSchema {
+    GraphSchema::from_ontology(ontology)
 }
 
 fn lock() -> Arc<dyn LockService> {
@@ -58,7 +59,7 @@ async fn fresh_install_creates_tables_and_records_version() {
 
     migration::run_if_needed(
         &client,
-        &dictionary_source(&ctx.config),
+        &dictionary_credentials(&ctx.config),
         &lock(),
         &ontology,
         &metrics,
@@ -72,8 +73,7 @@ async fn fresh_install_creates_tables_and_records_version() {
         Some(*SCHEMA_VERSION)
     );
 
-    let prefix = table_prefix(*SCHEMA_VERSION);
-    let expected_tables = generate_graph_tables_with_prefix(&ontology, &prefix);
+    let expected_schema = test_schema(&ontology);
 
     let result = ctx
         .query(
@@ -85,18 +85,17 @@ async fn fresh_install_creates_tables_and_records_version() {
     let count = i64::extract_column(&result, 0).unwrap();
     assert_eq!(
         count,
-        vec![expected_tables.len() as i64],
+        vec![expected_schema.tables.len() as i64],
         "fresh install should create all ontology tables"
     );
 
-    let expected_dicts = generate_graph_dictionaries_with_prefix(&ontology, &prefix);
     let result = ctx
         .query("SELECT toInt64(count()) AS cnt FROM system.dictionaries WHERE database = 'test'")
         .await;
     let dict_count = i64::extract_column(&result, 0).unwrap();
     assert_eq!(
         dict_count,
-        vec![expected_dicts.len() as i64],
+        vec![expected_schema.dictionaries.len() as i64],
         "fresh install should create all ontology dictionaries"
     );
 }
@@ -105,13 +104,11 @@ async fn fresh_install_creates_tables_and_records_version() {
 async fn matching_version_is_noop() {
     let (ctx, ontology, metrics) = setup().await;
     let client = ctx.create_client();
-    write_schema_version(&client, *SCHEMA_VERSION)
-        .await
-        .unwrap();
+    mark_version_active(&client, *SCHEMA_VERSION).await.unwrap();
 
     migration::run_if_needed(
         &client,
-        &dictionary_source(&ctx.config),
+        &dictionary_credentials(&ctx.config),
         &lock(),
         &ontology,
         &metrics,
@@ -130,13 +127,13 @@ async fn matching_version_is_noop() {
 async fn mismatch_creates_all_ontology_tables_and_marks_migrating() {
     let (ctx, ontology, metrics) = setup().await;
     let client = ctx.create_client();
-    write_schema_version(&client, *SCHEMA_VERSION - 1)
+    mark_version_active(&client, *SCHEMA_VERSION - 1)
         .await
         .unwrap();
 
     migration::run_if_needed(
         &client,
-        &dictionary_source(&ctx.config),
+        &dictionary_credentials(&ctx.config),
         &lock(),
         &ontology,
         &metrics,
@@ -145,8 +142,7 @@ async fn mismatch_creates_all_ontology_tables_and_marks_migrating() {
     .await
     .unwrap();
 
-    let prefix = table_prefix(*SCHEMA_VERSION);
-    let expected_tables = generate_graph_tables_with_prefix(&ontology, &prefix);
+    let expected_schema = test_schema(&ontology);
 
     let result = ctx
         .query(
@@ -160,17 +156,16 @@ async fn mismatch_creates_all_ontology_tables_and_marks_migrating() {
 
     assert_eq!(
         created_names.len(),
-        expected_tables.len(),
+        expected_schema.tables.len(),
         "expected {} tables from ontology, got {}: {created_names:?}",
-        expected_tables.len(),
+        expected_schema.tables.len(),
         created_names.len(),
     );
 
-    for table in &expected_tables {
+    for name in &expected_schema.prefixed_table_names(&table_prefix(*SCHEMA_VERSION)) {
         assert!(
-            created_names.contains(&table.name),
-            "missing table '{}' — created: {created_names:?}",
-            table.name
+            created_names.contains(name),
+            "missing table '{name}' — created: {created_names:?}"
         );
     }
 
@@ -189,13 +184,13 @@ async fn mismatch_creates_all_ontology_tables_and_marks_migrating() {
 async fn created_tables_have_correct_columns() {
     let (ctx, ontology, metrics) = setup().await;
     let client = ctx.create_client();
-    write_schema_version(&client, *SCHEMA_VERSION - 1)
+    mark_version_active(&client, *SCHEMA_VERSION - 1)
         .await
         .unwrap();
 
     migration::run_if_needed(
         &client,
-        &dictionary_source(&ctx.config),
+        &dictionary_credentials(&ctx.config),
         &lock(),
         &ontology,
         &metrics,
@@ -226,7 +221,7 @@ async fn created_tables_have_correct_columns() {
 async fn idempotent_rerun_succeeds() {
     let (ctx, ontology, metrics) = setup().await;
     let client = ctx.create_client();
-    write_schema_version(&client, *SCHEMA_VERSION - 1)
+    mark_version_active(&client, *SCHEMA_VERSION - 1)
         .await
         .unwrap();
 
@@ -234,7 +229,7 @@ async fn idempotent_rerun_succeeds() {
 
     migration::run_if_needed(
         &client,
-        &dictionary_source(&ctx.config),
+        &dictionary_credentials(&ctx.config),
         &lock_svc,
         &ontology,
         &metrics,
@@ -245,7 +240,7 @@ async fn idempotent_rerun_succeeds() {
 
     migration::run_if_needed(
         &client,
-        &dictionary_source(&ctx.config),
+        &dictionary_credentials(&ctx.config),
         &lock_svc,
         &ontology,
         &metrics,
@@ -259,7 +254,7 @@ async fn idempotent_rerun_succeeds() {
 async fn lock_released_after_migration() {
     let (ctx, ontology, metrics) = setup().await;
     let client = ctx.create_client();
-    write_schema_version(&client, *SCHEMA_VERSION - 1)
+    mark_version_active(&client, *SCHEMA_VERSION - 1)
         .await
         .unwrap();
 
@@ -268,7 +263,7 @@ async fn lock_released_after_migration() {
 
     migration::run_if_needed(
         &client,
-        &dictionary_source(&ctx.config),
+        &dictionary_credentials(&ctx.config),
         &lock_svc,
         &ontology,
         &metrics,
@@ -284,7 +279,7 @@ async fn lock_released_after_migration() {
 async fn held_lock_causes_timeout() {
     let (ctx, ontology, metrics) = setup().await;
     let client = ctx.create_client();
-    write_schema_version(&client, *SCHEMA_VERSION - 1)
+    mark_version_active(&client, *SCHEMA_VERSION - 1)
         .await
         .unwrap();
 
@@ -297,7 +292,7 @@ async fn held_lock_causes_timeout() {
 
     let result = migration::run_if_needed(
         &client,
-        &dictionary_source(&ctx.config),
+        &dictionary_credentials(&ctx.config),
         &lock_svc,
         &ontology,
         &metrics,
@@ -316,14 +311,14 @@ async fn held_lock_causes_timeout() {
 async fn mismatch_opens_campaign_steady_state_does_not() {
     let (ctx, ontology, metrics) = setup().await;
     let client = ctx.create_client();
-    write_schema_version(&client, *SCHEMA_VERSION - 1)
+    mark_version_active(&client, *SCHEMA_VERSION - 1)
         .await
         .unwrap();
 
     let migrating_campaign = campaign();
     migration::run_if_needed(
         &client,
-        &dictionary_source(&ctx.config),
+        &dictionary_credentials(&ctx.config),
         &lock(),
         &ontology,
         &metrics,
@@ -338,12 +333,10 @@ async fn mismatch_opens_campaign_steady_state_does_not() {
     );
 
     let matching_campaign = campaign();
-    write_schema_version(&client, *SCHEMA_VERSION)
-        .await
-        .unwrap();
+    mark_version_active(&client, *SCHEMA_VERSION).await.unwrap();
     migration::run_if_needed(
         &client,
-        &dictionary_source(&ctx.config),
+        &dictionary_credentials(&ctx.config),
         &lock(),
         &ontology,
         &metrics,
@@ -365,7 +358,7 @@ async fn rollback_reactivates_directly_when_embedded_tables_are_intact() {
 
     migration::run_if_needed(
         &client,
-        &dictionary_source(&ctx.config),
+        &dictionary_credentials(&ctx.config),
         &lock(),
         &ontology,
         &metrics,
@@ -374,13 +367,13 @@ async fn rollback_reactivates_directly_when_embedded_tables_are_intact() {
     .await
     .unwrap();
 
-    write_schema_version(&client, *SCHEMA_VERSION + 1)
+    mark_version_active(&client, *SCHEMA_VERSION + 1)
         .await
         .unwrap();
 
     migration::run_if_needed(
         &client,
-        &dictionary_source(&ctx.config),
+        &dictionary_credentials(&ctx.config),
         &lock(),
         &ontology,
         &metrics,
@@ -429,13 +422,13 @@ async fn rollback_rebuilds_when_embedded_tables_are_gone() {
     let (ctx, ontology, metrics) = setup().await;
     let client = ctx.create_client();
 
-    write_schema_version(&client, *SCHEMA_VERSION + 1)
+    mark_version_active(&client, *SCHEMA_VERSION + 1)
         .await
         .unwrap();
 
     migration::run_if_needed(
         &client,
-        &dictionary_source(&ctx.config),
+        &dictionary_credentials(&ctx.config),
         &lock(),
         &ontology,
         &metrics,
@@ -464,8 +457,7 @@ async fn rollback_rebuilds_when_embedded_tables_are_gone() {
         "a rebuild rollback marks the embedded version migrating, same as a forward migration"
     );
 
-    let prefix = table_prefix(*SCHEMA_VERSION);
-    let expected_tables = generate_graph_tables_with_prefix(&ontology, &prefix);
+    let expected_schema = test_schema(&ontology);
     let result = ctx
         .query(
             "SELECT name FROM system.tables \
@@ -475,11 +467,10 @@ async fn rollback_rebuilds_when_embedded_tables_are_gone() {
         )
         .await;
     let created_names = String::extract_column(&result, 0).unwrap();
-    for table in &expected_tables {
+    for name in &expected_schema.prefixed_table_names(&table_prefix(*SCHEMA_VERSION)) {
         assert!(
-            created_names.contains(&table.name),
-            "rebuild rollback must recreate table '{}' — created: {created_names:?}",
-            table.name
+            created_names.contains(name),
+            "rebuild rollback must recreate table '{name}' — created: {created_names:?}"
         );
     }
 }
@@ -491,7 +482,7 @@ async fn rollback_rebuild_clears_stale_objects_before_recreating() {
 
     migration::run_if_needed(
         &client,
-        &dictionary_source(&ctx.config),
+        &dictionary_credentials(&ctx.config),
         &lock(),
         &ontology,
         &metrics,
@@ -500,7 +491,7 @@ async fn rollback_rebuild_clears_stale_objects_before_recreating() {
     .await
     .unwrap();
 
-    write_schema_version(&client, *SCHEMA_VERSION + 1)
+    mark_version_active(&client, *SCHEMA_VERSION + 1)
         .await
         .unwrap();
 
@@ -515,7 +506,7 @@ async fn rollback_rebuild_clears_stale_objects_before_recreating() {
 
     migration::run_if_needed(
         &client,
-        &dictionary_source(&ctx.config),
+        &dictionary_credentials(&ctx.config),
         &lock(),
         &ontology,
         &metrics,
@@ -539,7 +530,7 @@ async fn rollback_rebuild_clears_stale_objects_before_recreating() {
     );
 
     let prefix = table_prefix(*SCHEMA_VERSION);
-    let expected_tables = generate_graph_tables_with_prefix(&ontology, &prefix);
+    let expected_schema = test_schema(&ontology);
     let result = ctx
         .query(&format!(
             "SELECT name FROM system.tables \
@@ -549,11 +540,10 @@ async fn rollback_rebuild_clears_stale_objects_before_recreating() {
         ))
         .await;
     let created_names = String::extract_column(&result, 0).unwrap();
-    for table in &expected_tables {
+    for name in &expected_schema.prefixed_table_names(&prefix) {
         assert!(
-            created_names.contains(&table.name),
-            "rebuild must recreate '{}' — created: {created_names:?}",
-            table.name
+            created_names.contains(name),
+            "rebuild must recreate '{name}' — created: {created_names:?}"
         );
     }
 
@@ -577,7 +567,7 @@ async fn lock_released_after_rollback_reactivation() {
 
     migration::run_if_needed(
         &client,
-        &dictionary_source(&ctx.config),
+        &dictionary_credentials(&ctx.config),
         &lock(),
         &ontology,
         &metrics,
@@ -586,7 +576,7 @@ async fn lock_released_after_rollback_reactivation() {
     .await
     .unwrap();
 
-    write_schema_version(&client, *SCHEMA_VERSION + 1)
+    mark_version_active(&client, *SCHEMA_VERSION + 1)
         .await
         .unwrap();
 
@@ -595,7 +585,7 @@ async fn lock_released_after_rollback_reactivation() {
 
     migration::run_if_needed(
         &client,
-        &dictionary_source(&ctx.config),
+        &dictionary_credentials(&ctx.config),
         &lock_svc,
         &ontology,
         &metrics,
@@ -617,7 +607,7 @@ async fn lock_released_after_rollback_rebuild() {
     let (ctx, ontology, metrics) = setup().await;
     let client = ctx.create_client();
 
-    write_schema_version(&client, *SCHEMA_VERSION + 1)
+    mark_version_active(&client, *SCHEMA_VERSION + 1)
         .await
         .unwrap();
 
@@ -626,7 +616,7 @@ async fn lock_released_after_rollback_rebuild() {
 
     migration::run_if_needed(
         &client,
-        &dictionary_source(&ctx.config),
+        &dictionary_credentials(&ctx.config),
         &lock_svc,
         &ontology,
         &metrics,
@@ -668,7 +658,7 @@ async fn read_active_version_returns_some_after_write() {
     let client = ctx.create_client();
     ensure_version_table(&client).await.unwrap();
 
-    write_schema_version(&client, 1).await.unwrap();
+    mark_version_active(&client, 1).await.unwrap();
     let version = read_active_version(&client).await.unwrap();
     assert_eq!(version, Some(1));
 }
@@ -689,8 +679,8 @@ async fn repeated_status_write_survives_insert_block_dedup() {
     )
     .await;
 
-    write_migrating_version(&client, 83).await.unwrap();
-    write_migrating_version(&client, 83).await.unwrap();
+    mark_version_migrating(&client, 83).await.unwrap();
+    mark_version_migrating(&client, 83).await.unwrap();
 
     let result = ctx
         .query("SELECT toInt64(count()) AS c FROM gkg_schema_version")
@@ -708,9 +698,7 @@ async fn wait_until_ready_returns_when_version_active() {
     let ctx = TestContext::new(&[]).await;
     let client = ctx.create_client();
     ensure_version_table(&client).await.unwrap();
-    write_schema_version(&client, *SCHEMA_VERSION)
-        .await
-        .unwrap();
+    mark_version_active(&client, *SCHEMA_VERSION).await.unwrap();
 
     wait_until_ready(
         &client,
@@ -727,7 +715,7 @@ async fn wait_until_ready_returns_when_version_migrating() {
     let ctx = TestContext::new(&[]).await;
     let client = ctx.create_client();
     ensure_version_table(&client).await.unwrap();
-    write_migrating_version(&client, *SCHEMA_VERSION)
+    mark_version_migrating(&client, *SCHEMA_VERSION)
         .await
         .unwrap();
 
@@ -763,7 +751,7 @@ async fn wait_until_ready_fails_fast_when_outdated() {
     let ctx = TestContext::new(&[]).await;
     let client = ctx.create_client();
     ensure_version_table(&client).await.unwrap();
-    write_schema_version(&client, *SCHEMA_VERSION + 1)
+    mark_version_active(&client, *SCHEMA_VERSION + 1)
         .await
         .unwrap();
 
@@ -783,10 +771,10 @@ async fn wait_until_ready_ready_when_rebuilding_below_active() {
     let ctx = TestContext::new(&[]).await;
     let client = ctx.create_client();
     ensure_version_table(&client).await.unwrap();
-    write_schema_version(&client, *SCHEMA_VERSION + 1)
+    mark_version_active(&client, *SCHEMA_VERSION + 1)
         .await
         .unwrap();
-    write_migrating_version(&client, *SCHEMA_VERSION)
+    mark_version_migrating(&client, *SCHEMA_VERSION)
         .await
         .unwrap();
 
@@ -807,10 +795,10 @@ fn sdlc(entities: &[&str]) -> MigrationScope {
     MigrationScope::Sdlc(entities.iter().map(|s| s.to_string()).collect())
 }
 
-/// Drives a clone-based migration and its promotion gate, hiding table prefixes and seed timestamps.
 struct MigrationScenario {
     ctx: TestContext,
     ontology: ontology::Ontology,
+    #[expect(dead_code, reason = "held to keep Prometheus metrics registered")]
     metrics: MigrationMetrics,
     active_version: u32,
 }
@@ -910,27 +898,30 @@ impl MigrationScenario {
     }
 
     async fn precreate_empty_target(&self, unprefixed: &str) {
-        let new_prefix = table_prefix(*SCHEMA_VERSION);
-        let target = prefixed_table_name(unprefixed, *SCHEMA_VERSION);
-        let table = generate_graph_tables_with_prefix(&self.ontology, &new_prefix)
-            .into_iter()
-            .find(|table| table.name == target)
+        let prefix = table_prefix(*SCHEMA_VERSION);
+        let schema = test_schema(&self.ontology);
+        let table = schema
+            .tables
+            .iter()
+            .find(|table| table.name == unprefixed)
             .unwrap();
         self.ctx
             .create_client()
-            .execute(&emit_create_table(&table))
+            .execute(&table.to_create_sql(&prefix))
             .await
             .unwrap();
     }
 
     async fn migrate(&self, scope: MigrationScope) {
-        migration::prepare_tables_for_migration(
+        let schema = test_schema(&self.ontology);
+        orbit_migrations::execute::create_tables_with_selective_cloning(
             &self.ctx.create_client(),
-            &dictionary_source(&self.ctx.config),
             &self.ontology,
-            &self.metrics,
+            &schema,
+            &dictionary_credentials(&self.ctx.config),
             &scope,
             self.active_version,
+            *SCHEMA_VERSION,
         )
         .await
         .unwrap();
@@ -1007,12 +998,12 @@ impl MigrationScenario {
         &self,
         scope: MigrationScope,
         enabled_namespace_ids: &[i64],
-    ) -> migration_completion::SdlcReindexProgress {
-        migration_completion::get_sdlc_reindex_progress_for_enabled_namespaces(
+    ) -> orbit_migrations::completion::SdlcReindexProgress {
+        orbit_migrations::completion::check_sdlc_reindex_progress(
             &self.ctx.create_client(),
             &self.ontology,
             &scope,
-            &prefixed_table_name("checkpoint", *SCHEMA_VERSION),
+            *SCHEMA_VERSION,
             enabled_namespace_ids,
         )
         .await
@@ -1021,8 +1012,9 @@ impl MigrationScenario {
 
     async fn create_tables(&self, prefix: &str) {
         let client = self.ctx.create_client();
-        for table in generate_graph_tables_with_prefix(&self.ontology, prefix) {
-            client.execute(&emit_create_table(&table)).await.unwrap();
+        let schema = test_schema(&self.ontology);
+        for table in &schema.tables {
+            client.execute(&table.to_create_sql(prefix)).await.unwrap();
         }
     }
 
@@ -1219,6 +1211,40 @@ async fn code_scope_clones_sdlc_intact_and_drops_only_the_code_stale_sweep_gate(
         .assert_surviving_checkpoints(&["dispatch.sdlc.namespace.sweep", "ns.100.Note"])
         .await;
     scenario.assert_code_checkpoint_empty().await;
+}
+
+#[tokio::test]
+async fn none_scope_clones_every_table_and_every_checkpoint_key() {
+    let scenario = MigrationScenario::migrating_from_active().await;
+    scenario.seed_note().await;
+    scenario.seed_checkpoint("ns.100.Note").await;
+    scenario.seed_checkpoint("global.User").await;
+    scenario
+        .seed_checkpoint("dispatch.sdlc.namespace.sweep")
+        .await;
+    scenario
+        .seed_checkpoint("maintenance.code_stale_sweep")
+        .await;
+    scenario.seed_code_checkpoint(42).await;
+    scenario
+        .seed_edge("CONTAINS", (1, "Directory"), (2, "File"))
+        .await;
+
+    scenario.migrate(MigrationScope::None).await;
+
+    scenario.assert_table_row_count("gl_note", 1).await;
+    scenario.assert_table_row_count("gl_edge", 1).await;
+    scenario
+        .assert_table_row_count("code_indexing_checkpoint", 1)
+        .await;
+    scenario
+        .assert_surviving_checkpoints(&[
+            "dispatch.sdlc.namespace.sweep",
+            "global.User",
+            "maintenance.code_stale_sweep",
+            "ns.100.Note",
+        ])
+        .await;
 }
 
 #[tokio::test]

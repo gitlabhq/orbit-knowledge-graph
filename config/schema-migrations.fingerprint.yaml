@@ -107,7 +107,7 @@ sources:
   nodes/source_code/file.yaml: b9b0c3c8c53315a1ae75ffca2dc1041bb76b458115c352750acd27a04e782f81
   nodes/source_code/imported_symbol.yaml: 6170b93ca5004a5c54dec152d17d5db9d4882ed915ea8504330039a7fcfd3bbf
   reference.yaml: d8c0a796601ace0a0d34c705c36b1a2d6286b3a4e78ecf0d8c9a2fb7763e518b
-  schema.yaml: bc162ff7eddbd3e0e07e44919408a935d25d5a59258b8de9468542dde95f6f1f
+  schema.yaml: 179c8a60a49a55e190762c58ce8da46c8b41104537d9554b239d87b771634800
 ddl:
   checkpoint: 6bc0dc8be477343b3ec25272ae756229a9e5ff14791563454b12c4aeb85718ce
   code_indexing_checkpoint: 0667484059b215985ff897f42ac8ba9c385233a652ed3ca35f28daa3a7c4fa69

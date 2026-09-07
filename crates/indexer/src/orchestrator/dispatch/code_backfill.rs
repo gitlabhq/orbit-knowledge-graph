@@ -17,10 +17,10 @@ use super::enabled_namespaces::resolved_enabled_namespaces_sql;
 use crate::campaign::CampaignState;
 use crate::clickhouse::ArrowClickHouseClient;
 use crate::orchestrator::scheduled::{ScheduledTaskMetrics, TaskError};
-use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
 use crate::topic::CodeIndexingTaskRequest;
 use crate::types::Envelope;
 use clickhouse_client::FromArrowColumn;
+use orbit_migrations::version::{SCHEMA_VERSION, prefixed_table_name};
 use orbit_utils::traversal_path::TraversalPath;
 
 pub const METRIC_NAME: &str = "dispatch.code_backfill";
