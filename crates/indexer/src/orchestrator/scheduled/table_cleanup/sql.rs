@@ -184,18 +184,6 @@ pub(super) fn path_range_sql(first: &str, last: &str) -> String {
     )
 }
 
-pub(super) fn candidates_sql(
-    table: &str,
-    key: &str,
-    filter: &str,
-    chunk: Option<(usize, usize)>,
-) -> String {
-    let chunk = chunk
-        .map(|(chunks, index)| format!(" AND cityHash64({key}) % {chunks} = {index}"))
-        .unwrap_or_default();
-    format!("SELECT {key} FROM {table} WHERE {filter}{chunk}")
-}
-
 /// Which row of a candidate key survives a collapse.
 #[derive(Clone, Copy)]
 pub(super) enum Keep {
@@ -203,34 +191,52 @@ pub(super) enum Keep {
     NewestUnlessExpiredTombstone(DateTime<Utc>),
 }
 
+/// One aggregation of the pruned range decides what every candidate key keeps; the rows to delete come from a
+/// pre-filtered view of the same range joined to it, so a statement reads its range three times, not once per subquery.
+/// Positive list: a row that lands between the subquery snapshot and the outer read is never matched.
 pub(super) fn collapse_statement(
     table: &str,
     key: &str,
-    candidates: &str,
+    filter: &str,
     prune: Option<&str>,
+    chunk: Option<(usize, usize)>,
     keep: Keep,
     exclude: &str,
     timeout_secs: u64,
 ) -> String {
     // A live row tied with a tombstone at the same `_version` counts as live.
-    let having = match keep {
-        Keep::Newest => String::new(),
+    let keep = match keep {
+        Keep::Newest => "1".to_string(),
         Keep::NewestUnlessExpiredTombstone(cutoff) => format!(
-            " HAVING maxIf(_version, NOT _deleted) = max(_version) OR max(_version) >= toDateTime64('{}', 6, 'UTC')",
+            "maxIf(_version, NOT _deleted) = max(_version) OR max(_version) >= toDateTime64('{}', 6, 'UTC')",
             cutoff.format(TIMESTAMP_FORMAT)
         ),
     };
-    let prune = prune
+    let mut scope = prune
         .map(|prune| format!("{prune} AND "))
         .unwrap_or_default();
-    // Positive list: a row that lands between the subquery snapshot and the outer read is never matched.
+    if let Some((chunks, index)) = chunk {
+        scope.push_str(&format!("cityHash64({key}) % {chunks} = {index} AND "));
+    }
+    let columns: Vec<&str> = key.split(", ").collect();
+    let projection = columns
+        .iter()
+        .map(|column| format!("v.{column}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let on = columns
+        .iter()
+        .map(|column| format!("v.{column} = a.{column}"))
+        .collect::<Vec<_>>()
+        .join(" AND ");
     format!(
-        "DELETE FROM {table} WHERE {prune}({key}) IN ({candidates}) \
-         AND ({key}, _version) IN (\
-           SELECT {key}, _version FROM {table} WHERE {prune}({key}) IN ({candidates}) \
-           AND ({key}, _version) NOT IN (\
-             SELECT {key}, max(_version) FROM {table} WHERE {prune}({key}) IN ({candidates}) \
-             GROUP BY {key}{having})){exclude} {}",
+        "DELETE FROM {table} WHERE {scope}({key}, _version) IN (\
+           SELECT {projection}, v._version FROM (SELECT {key}, _version FROM {table} WHERE {scope}1) AS v \
+           INNER JOIN (\
+             SELECT {key}, max(_version) AS newest, {keep} AS keep FROM {table} WHERE {scope}1 \
+             GROUP BY {key} HAVING countIf(_deleted{filter}) > 0) AS a \
+             ON {on} \
+           WHERE NOT (a.keep AND v._version = a.newest)){exclude} {}",
         settings(timeout_secs)
     )
 }
@@ -365,30 +371,6 @@ mod tests {
     }
 
     #[test]
-    fn candidates_are_limited_to_parts_and_rows_above_the_cursor() {
-        let filter = format!(
-            "{} AND _deleted{}",
-            path_prune_sql(&["1/2/".to_string()]),
-            new_rows_filter(42)
-        );
-        assert_eq!(
-            candidates_sql("v1_gl_edge", "traversal_path, id", &filter, None),
-            "SELECT traversal_path, id FROM v1_gl_edge WHERE traversal_path IN ('1/2/') AND _deleted AND toUInt64OrZero(splitByChar('_', _part)[3]) > 42 AND _block_number > 42"
-        );
-    }
-
-    #[test]
-    fn candidate_chunks_partition_by_key_hash() {
-        let sql = candidates_sql(
-            "t",
-            "k",
-            &format!("_deleted{}", new_rows_filter(0)),
-            Some((4, 3)),
-        );
-        assert!(sql.ends_with("AND _block_number > 0 AND cityHash64(k) % 4 = 3"));
-    }
-
-    #[test]
     fn path_ranges_are_closed_and_escaped() {
         assert_eq!(
             path_range_sql("1/2/", "1/9'/"),
@@ -409,21 +391,24 @@ mod tests {
         let sql = collapse_statement(
             "t",
             "a, b",
-            "SELECT a, b FROM t WHERE _deleted",
+            &new_rows_filter(42),
             Some("traversal_path IN ('1/2/')"),
+            None,
             Keep::Newest,
             "",
             30,
         );
-        assert!(sql.starts_with(
-            "DELETE FROM t WHERE traversal_path IN ('1/2/') AND (a, b) IN (SELECT a, b FROM t WHERE _deleted) AND (a, b, _version) IN (\
-             SELECT a, b, _version FROM t WHERE traversal_path IN ('1/2/') AND (a, b) IN (SELECT a, b FROM t WHERE _deleted) AND (a, b, _version) NOT IN (\
-             SELECT a, b, max(_version) FROM t WHERE traversal_path IN ('1/2/') AND (a, b) IN ("
-        ));
-        assert!(sql.contains("GROUP BY a, b)) SETTINGS"));
-        assert!(sql.ends_with(
-            "SETTINGS lightweight_delete_mode = 'lightweight_update_force', update_sequential_consistency = 0, max_execution_time = 30"
-        ));
+        assert_eq!(
+            sql,
+            "DELETE FROM t WHERE traversal_path IN ('1/2/') AND (a, b, _version) IN (\
+               SELECT v.a, v.b, v._version FROM (SELECT a, b, _version FROM t WHERE traversal_path IN ('1/2/') AND 1) AS v \
+               INNER JOIN (\
+                 SELECT a, b, max(_version) AS newest, 1 AS keep FROM t WHERE traversal_path IN ('1/2/') AND 1 \
+                 GROUP BY a, b HAVING countIf(_deleted AND toUInt64OrZero(splitByChar('_', _part)[3]) > 42 AND _block_number > 42) > 0) AS a \
+                 ON v.a = a.a AND v.b = a.b \
+               WHERE NOT (a.keep AND v._version = a.newest)) \
+             SETTINGS lightweight_delete_mode = 'lightweight_update_force', update_sequential_consistency = 0, max_execution_time = 30"
+        );
     }
 
     #[test]
@@ -434,15 +419,20 @@ mod tests {
         let sql = collapse_statement(
             "t",
             "a, b",
-            "SELECT a, b FROM t WHERE _deleted",
+            &version_filter("<", cutoff),
             None,
+            Some((4, 3)),
             Keep::NewestUnlessExpiredTombstone(cutoff),
             "",
             30,
         );
-        assert!(sql.starts_with("DELETE FROM t WHERE (a, b) IN ("));
+        assert!(
+            sql.starts_with(
+                "DELETE FROM t WHERE cityHash64(a, b) % 4 = 3 AND (a, b, _version) IN ("
+            )
+        );
         assert!(sql.contains(
-            "GROUP BY a, b HAVING maxIf(_version, NOT _deleted) = max(_version) OR max(_version) >= toDateTime64('2026-01-01 00:00:00.000000', 6, 'UTC')))"
+            "max(_version) AS newest, maxIf(_version, NOT _deleted) = max(_version) OR max(_version) >= toDateTime64('2026-01-01 00:00:00.000000', 6, 'UTC') AS keep FROM t WHERE cityHash64(a, b) % 4 = 3 AND 1 GROUP BY a, b HAVING countIf(_deleted AND _version < toDateTime64('2026-01-01 00:00:00.000000', 6, 'UTC')) > 0"
         ));
     }
 
@@ -453,13 +443,16 @@ mod tests {
         let sql = collapse_statement(
             "t",
             "a",
-            "SELECT a FROM t WHERE _deleted",
+            " AND _deleted",
+            None,
             None,
             Keep::Newest,
             &exclude,
             30,
         );
-        assert!(sql.contains("GROUP BY a)) AND _part NOT IN ('all_1_5_1', 'all_6_6_0') SETTINGS"));
+        assert!(sql.contains(
+            "v._version = a.newest)) AND _part NOT IN ('all_1_5_1', 'all_6_6_0') SETTINGS"
+        ));
         assert_eq!(sql.matches("_part NOT IN").count(), 1);
         assert_eq!(exclude_parts_sql(&[]), "");
     }

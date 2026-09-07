@@ -60,8 +60,8 @@ impl CleanupTable {
 }
 
 struct CandidateSet {
-    sql: String,
     prune: Option<String>,
+    chunk: Option<(usize, usize)>,
 }
 
 enum PathGroup {
@@ -459,6 +459,7 @@ impl TableCleanup {
         &self,
         table: &CleanupTable,
         candidate_sets: &[CandidateSet],
+        filter: &str,
         keep: sql::Keep,
         exclude: &str,
     ) -> Result<(), TaskError> {
@@ -466,8 +467,9 @@ impl TableCleanup {
             let statement = sql::collapse_statement(
                 &table.name,
                 &table.key,
-                &candidates.sql,
+                filter,
                 candidates.prune.as_deref(),
+                candidates.chunk,
                 keep,
                 exclude,
                 self.config.statement_timeout_secs,
@@ -491,13 +493,8 @@ impl TableCleanup {
             let chunks = total.div_ceil(limit) as usize;
             let sets = (0..chunks)
                 .map(|chunk| CandidateSet {
-                    sql: sql::candidates_sql(
-                        &table.name,
-                        &table.key,
-                        &format!("_deleted{filter}"),
-                        (chunks > 1).then_some((chunks, chunk)),
-                    ),
                     prune: None,
+                    chunk: (chunks > 1).then_some((chunks, chunk)),
                 })
                 .collect();
             return Ok((total, sets));
@@ -517,22 +514,16 @@ impl TableCleanup {
         let mut sets = Vec::new();
         for group in groups {
             match group {
-                PathGroup::Paths(paths) => {
-                    sets.push(candidate_set(
-                        table,
-                        path_prune(&paths, dense),
-                        filter,
-                        None,
-                    ));
-                }
+                PathGroup::Paths(paths) => sets.push(CandidateSet {
+                    prune: Some(path_prune(&paths, dense)),
+                    chunk: None,
+                }),
                 PathGroup::Chunked { path, chunks } => {
                     for chunk in 0..chunks {
-                        sets.push(candidate_set(
-                            table,
-                            sql::path_prune_sql(std::slice::from_ref(&path)),
-                            filter,
-                            Some((chunks, chunk)),
-                        ));
+                        sets.push(CandidateSet {
+                            prune: Some(sql::path_prune_sql(std::slice::from_ref(&path))),
+                            chunk: Some((chunks, chunk)),
+                        });
                     }
                 }
             }
@@ -547,12 +538,12 @@ impl TableCleanup {
         cutoff: DateTime<Utc>,
         exclude: &str,
     ) -> Result<u64, TaskError> {
-        let (total, sets) = self
-            .candidate_sets(table, &sql::version_filter("<", cutoff))
-            .await?;
+        let filter = sql::version_filter("<", cutoff);
+        let (total, sets) = self.candidate_sets(table, &filter).await?;
         self.run_collapse(
             table,
             &sets,
+            &filter,
             sql::Keep::NewestUnlessExpiredTombstone(cutoff),
             exclude,
         )
@@ -574,10 +565,9 @@ impl TableCleanup {
         exclude: &str,
     ) -> Result<u64, TaskError> {
         let purged = self.purge_tombstones(table, cutoff, exclude).await?;
-        let (total, sets) = self
-            .candidate_sets(table, &sql::version_filter(">=", cutoff))
-            .await?;
-        self.run_collapse(table, &sets, sql::Keep::Newest, exclude)
+        let filter = sql::version_filter(">=", cutoff);
+        let (total, sets) = self.candidate_sets(table, &filter).await?;
+        self.run_collapse(table, &sets, &filter, sql::Keep::Newest, exclude)
             .await?;
         info!(
             table = table.name,
@@ -629,12 +619,11 @@ impl TableCleanup {
         let mut total = 0;
         if !matches!(busy, Busy::Mutating) {
             let after = cursor.window_start(deferred);
-            let (found, sets) = self
-                .candidate_sets(table, &sql::new_rows_filter(after))
-                .await?;
+            let filter = sql::new_rows_filter(after);
+            let (found, sets) = self.candidate_sets(table, &filter).await?;
             total = found;
             if total > 0 {
-                self.run_collapse(table, &sets, sql::Keep::Newest, &exclude)
+                self.run_collapse(table, &sets, &filter, sql::Keep::Newest, &exclude)
                     .await?;
                 info!(
                     table = table.name,
@@ -873,23 +862,6 @@ fn path_prune(paths: &[String], dense: bool) -> String {
     }
 }
 
-fn candidate_set(
-    table: &CleanupTable,
-    prune: String,
-    filter: &str,
-    chunk: Option<(usize, usize)>,
-) -> CandidateSet {
-    CandidateSet {
-        sql: sql::candidates_sql(
-            &table.name,
-            &table.key,
-            &format!("{prune} AND _deleted{filter}"),
-            chunk,
-        ),
-        prune: Some(prune),
-    }
-}
-
 fn path_list_bytes(max_query_size: usize) -> usize {
     (max_query_size / PATH_LIST_SHARE).clamp(MIN_PATH_LIST_BYTES, MAX_PATH_LIST_BYTES)
 }
@@ -1103,26 +1075,6 @@ mod tests {
         assert_eq!(
             path_prune(&paths, false),
             "traversal_path IN ('1/2/', '1/5/', '1/9/')"
-        );
-    }
-
-    #[test]
-    fn a_chunked_candidate_set_prunes_by_its_single_path() {
-        let table = CleanupTable {
-            name: "t".to_string(),
-            key: "traversal_path, id".to_string(),
-            code: CodeRole::None,
-        };
-        let set = candidate_set(
-            &table,
-            sql::path_prune_sql(&["1/2/".to_string()]),
-            " AND x",
-            Some((3, 1)),
-        );
-        assert_eq!(set.prune.as_deref(), Some("traversal_path IN ('1/2/')"));
-        assert_eq!(
-            set.sql,
-            "SELECT traversal_path, id FROM t WHERE traversal_path IN ('1/2/') AND _deleted AND x AND cityHash64(traversal_path, id) % 3 = 1"
         );
     }
 
