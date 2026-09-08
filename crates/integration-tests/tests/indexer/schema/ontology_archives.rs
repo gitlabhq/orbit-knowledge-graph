@@ -29,15 +29,16 @@ async fn published_archives_survive_a_nats_restart() {
 }
 
 #[tokio::test]
-async fn concurrent_identical_publications_succeed() {
+async fn concurrent_identical_publications_return_the_archived_ontology() {
     let context = TestContext::new().await;
     let catalog = context.catalog("graph").await;
-    let archive = embedded_archive(1);
+    let archive = archive_with_distinct_ontology(1);
+    let expected = archive.load_ontology().unwrap();
 
     let (first, retry) = tokio::join!(catalog.publish(&archive), catalog.publish(&archive));
 
-    first.unwrap();
-    retry.unwrap();
+    assert_eq!(first.unwrap(), expected);
+    assert_eq!(retry.unwrap(), expected);
     assert_eq!(catalog.load(1).await.unwrap().bytes(), archive.bytes());
 }
 
@@ -202,5 +203,14 @@ fn archive_with_extra_newline(version: u32) -> OntologyArchive {
 fn archive_with_invalid_schema(version: u32) -> OntologyArchive {
     let mut sources = embedded_sources();
     sources.insert("schema.yaml".into(), "[".into());
+    OntologyArchive::from_sources(version, &sources).unwrap()
+}
+
+fn archive_with_distinct_ontology(version: u32) -> OntologyArchive {
+    let mut sources = embedded_sources();
+    let schema = sources.get_mut("schema.yaml").unwrap();
+    let mut document: serde_json::Value = orbit_utils::yaml::from_str(schema).unwrap();
+    document["schema_version"] = serde_json::json!("archived-schema");
+    *schema = orbit_utils::yaml::to_string(&document).unwrap();
     OntologyArchive::from_sources(version, &sources).unwrap()
 }

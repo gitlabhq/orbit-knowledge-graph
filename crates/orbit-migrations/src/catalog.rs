@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use nats_client::{KvBucketConfig, KvPutOptions, KvPutResult, NatsClient};
+use ontology::Ontology;
 use ontology::archive::{ArchiveError, OntologyArchive};
 
 #[derive(Debug, thiserror::Error)]
@@ -42,8 +43,8 @@ impl OntologyCatalog {
         Ok(Self { client, bucket })
     }
 
-    pub async fn publish(&self, archive: &OntologyArchive) -> Result<(), CatalogError> {
-        archive.load_ontology()?;
+    pub async fn publish(&self, archive: &OntologyArchive) -> Result<Ontology, CatalogError> {
+        let ontology = archive.load_ontology()?;
         let limit = self.client.nats_client().max_payload();
         if archive.bytes().len() > limit {
             return Err(CatalogError::TooLarge {
@@ -62,13 +63,13 @@ impl OntologyCatalog {
             )
             .await?;
         match result {
-            KvPutResult::Success(_) => Ok(()),
+            KvPutResult::Success(_) => Ok(ontology),
             KvPutResult::AlreadyExists => {
                 let stored = self.load(version).await?;
                 if stored.bytes() != archive.bytes() {
                     return Err(CatalogError::Conflict(version));
                 }
-                Ok(())
+                Ok(ontology)
             }
             KvPutResult::RevisionMismatch => Err(CatalogError::RevisionMismatch),
         }

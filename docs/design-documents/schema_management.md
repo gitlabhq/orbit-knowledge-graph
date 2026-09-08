@@ -125,7 +125,7 @@ convention). The prefix is applied at the call site when constructing ClickHouse
 
 - `mise schema:bump` creates `config/ontology-archives/v<N>.tar.gz`; amendments refresh it. Builds validate the current archive.
 - `mise schema:snapshot` seeds the current archive without replacing an existing one.
-- The dispatcher publishes to durable, database-scoped NATS KV, then migrates using the archived ontology.
+- Publication validates and stores the archive in durable, database-scoped NATS KV. The dispatcher reuses that ontology for migration.
 - Identical retries succeed; different bytes for a published version fail. Published archives stay immutable.
 - Restore historical archives from their exact release, never from current sources.
 - Serving, readiness, and promotion are unchanged. Older archives are not required at startup.

@@ -64,7 +64,7 @@ use indexing_status::{INDEXING_PROGRESS_BUCKET, IndexingStatusStore};
 use locking::INDEXING_LOCKS_BUCKET;
 use modules::namespace_deletion::{ClickHouseNamespaceDeletionStore, NamespaceDeletionStore};
 use nats::{KvBucketConfig, NatsBroker};
-use orbit_migrations::catalog::{CatalogError, OntologyCatalog};
+use orbit_migrations::catalog::OntologyCatalog;
 use orbit_server_config::IndexerModule;
 use orchestrator::Trigger;
 use orchestrator::dispatch::{CodeBackfill, NamespaceIndexingDispatch};
@@ -247,12 +247,11 @@ pub async fn run_dispatcher(
     archive: &ontology::archive::OntologyArchive,
     shutdown: CancellationToken,
 ) -> Result<(), DispatcherError> {
-    let ontology = archive.load_ontology().map_err(CatalogError::from)?;
     let services = orchestrator::scheduled::connect(&config.nats).await?;
 
     let catalog =
         OntologyCatalog::open(services.nats_client.clone(), &config.graph.database).await?;
-    catalog.publish(archive).await?;
+    let ontology = catalog.publish(archive).await?;
 
     if let Err(error) = nats::versioning::gc_idle_release_streams(
         &services.nats_connection,
