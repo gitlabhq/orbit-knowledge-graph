@@ -319,16 +319,15 @@ fn resolve_preset<T: Clone + serde::de::DeserializeOwned>(
         None => None,
         Some(PresetOr::Inline(v)) => Some(v.clone()),
         Some(PresetOr::Preset(name)) => {
-            let path = presets.join(kind).join(format!("{name}.yaml"));
-            let raw = std::fs::read_to_string(&path).unwrap_or_else(|e| {
-                panic!(
-                    "{scenario}: preset {kind}/{name} not found at {}: {e}",
-                    path.display()
-                )
-            });
+            let path = presets.join(format!("{kind}.yaml"));
+            let raw = std::fs::read_to_string(&path)
+                .unwrap_or_else(|e| panic!("{scenario}: preset file {}: {e}", path.display()));
+            let map: std::collections::BTreeMap<String, T> = orbit_utils::yaml::from_str(&raw)
+                .unwrap_or_else(|e| panic!("{scenario}: invalid {kind} presets: {e}"));
             Some(
-                orbit_utils::yaml::from_str(&raw)
-                    .unwrap_or_else(|e| panic!("{scenario}: invalid preset {kind}/{name}: {e}")),
+                map.get(name.as_str())
+                    .unwrap_or_else(|| panic!("{scenario}: unknown {kind} preset '{name}'"))
+                    .clone(),
             )
         }
     }

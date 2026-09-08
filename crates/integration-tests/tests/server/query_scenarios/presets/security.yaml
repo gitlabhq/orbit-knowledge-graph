@@ -1,0 +1,5 @@
+default:
+  paths: ["1/"]
+
+admin:
+  admin: true
