@@ -53,7 +53,7 @@ pub(crate) async fn build_query_response(
         let candidate_rows = &rows[..candidate_row_count];
         let response = encode_query_response(output, candidate_rows, None, formatter);
 
-        // Let the request timeout be polled between response-size probes.
+        // Give the request timeout a chance to run between encoding attempts.
         tokio::task::yield_now().await;
 
         let response_fits = response.encoded_len() <= options.max_response_bytes;

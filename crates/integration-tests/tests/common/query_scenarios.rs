@@ -19,8 +19,7 @@ struct QueryScenario {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Expectations {
-    paginated: bool,
-    nodes: BTreeMap<String, Vec<i64>>,
+    pages: Vec<BTreeMap<String, Vec<i64>>>,
 }
 
 pub async fn run_scenarios(context: &TestContext, yaml: &str) {
@@ -36,16 +35,21 @@ pub async fn run_scenarios(context: &TestContext, yaml: &str) {
 }
 
 async fn run_scenario(context: &TestContext, scenario: QueryScenario, name: &str) {
-    let mut expected_nodes: Vec<_> = scenario
-        .expect
-        .nodes
-        .into_iter()
-        .flat_map(|(entity, ids)| ids.into_iter().map(move |id| (entity.clone(), id)))
-        .collect();
-    expected_nodes.sort();
+    let expected_pages = scenario.expect.pages;
+    assert!(
+        !expected_pages.is_empty(),
+        "{name}: declare at least one expected page"
+    );
+    let expected_node_count: usize = expected_pages
+        .iter()
+        .flat_map(|page| page.values())
+        .map(Vec::len)
+        .sum();
 
+    let mut full_query = scenario.query.clone();
+    full_query["cursor"]["page_size"] = expected_node_count.max(1).into();
     let unrestricted = QueryClient::new(context, GrpcConfig::default().max_query_response_bytes);
-    let mut full_page = unrestricted.query(&scenario.query).await;
+    let mut full_page = unrestricted.query(&full_query).await;
     assert!(
         !full_page.response.pagination.as_ref().unwrap().has_more,
         "{name}: reference must contain all results"
@@ -56,40 +60,43 @@ async fn run_scenario(context: &TestContext, scenario: QueryScenario, name: &str
     );
     assert_eq!(
         full_page.encoded_bytes > scenario.max_response_bytes,
-        scenario.expect.paginated,
+        expected_pages.len() > 1,
         "{name}: fixture size must exercise the expected budget behavior"
     );
 
     let limited = QueryClient::new(context, scenario.max_response_bytes);
     let mut query = scenario.query;
     let mut page = limited.query(&query).await;
-    assert_eq!(
-        page.response.pagination.as_ref().unwrap().has_more,
-        scenario.expect.paginated,
-        "{name}: first-page pagination"
-    );
-    if scenario.expect.paginated {
-        assert!(
-            page.response.nodes.len() < full_page.response.nodes.len(),
-            "{name}: first page must be smaller"
-        );
-    }
 
     let mut returned_nodes = Vec::new();
     let mut seen_cursors = BTreeSet::new();
 
-    for page_number in 0..expected_nodes.len().max(1) {
+    for (page_index, expected_nodes) in expected_pages.iter().enumerate() {
         assert!(
             page.encoded_bytes <= scenario.max_response_bytes,
             "{name}: response exceeds byte budget"
         );
-        assert!(
-            !page.response.nodes.is_empty() || expected_nodes.is_empty(),
-            "{name}: nonempty results must make progress"
+        let mut actual_nodes: BTreeMap<String, Vec<i64>> = BTreeMap::new();
+        for node in &page.response.nodes {
+            actual_nodes
+                .entry(node.entity_type.clone())
+                .or_default()
+                .push(node.id);
+        }
+        assert_eq!(
+            &actual_nodes,
+            expected_nodes,
+            "{name}: page {} node IDs",
+            page_index + 1
         );
         returned_nodes.extend(page.response.nodes);
 
         let pagination = page.response.pagination.unwrap();
+        let more_pages_expected = page_index + 1 < expected_pages.len();
+        assert_eq!(
+            pagination.has_more, more_pages_expected,
+            "{name}: page exhaustion"
+        );
         assert_eq!(
             pagination.has_more,
             pagination.next_cursor.is_some(),
@@ -104,10 +111,6 @@ async fn run_scenario(context: &TestContext, scenario: QueryScenario, name: &str
             break;
         };
         assert!(
-            page_number + 1 < expected_nodes.len(),
-            "{name}: pagination must terminate"
-        );
-        assert!(
             seen_cursors.insert(cursor.clone()),
             "{name}: cursor must advance"
         );
@@ -116,15 +119,6 @@ async fn run_scenario(context: &TestContext, scenario: QueryScenario, name: &str
     }
 
     returned_nodes.sort_by_key(|node| (node.entity_type.clone(), node.id));
-    let identities: Vec<_> = returned_nodes
-        .iter()
-        .map(|node| (node.entity_type.clone(), node.id))
-        .collect();
-    assert_eq!(
-        identities, expected_nodes,
-        "{name}: every expected node must appear exactly once"
-    );
-
     full_page
         .response
         .nodes

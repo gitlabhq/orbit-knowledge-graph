@@ -84,7 +84,7 @@ between them.
 ### Query response scenarios
 
 Add cases to `tests/server/data_correctness/scenarios/query_responses.yaml`
-using `seed`, `query`, `max_response_bytes`, and `expect`.
+using `seed`, `query`, `max_response_bytes`, and `expect.pages`.
 The shared runner checks byte limits and lossless pagination through gRPC;
 no Rust registration is needed.
 

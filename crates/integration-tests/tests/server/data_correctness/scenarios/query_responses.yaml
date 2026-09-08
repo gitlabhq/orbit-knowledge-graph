@@ -1,23 +1,27 @@
-oversized_response_preserves_every_user:
+byte_limit_resumes_from_last_returned_user:
   seed: |
     INSERT INTO gl_user (id, username, name, state, user_type)
     SELECT 8001 + number, concat('user', toString(8001 + number)),
            repeat('x', 4096), 'active', 'human'
-    FROM numbers(4);
+    FROM numbers(6);
   max_response_bytes: 8192
   query:
     query_type: traversal
     nodes:
       - id: user
         entity: User
-        node_ids: [8001, 8002, 8003, 8004]
+        node_ids: [8001, 8002, 8003, 8004, 8005, 8006]
         columns: [username, name]
     order_by: user.id
     cursor: {page_size: 4}
   expect:
-    paginated: true
-    nodes:
-      User: [8001, 8002, 8003, 8004]
+    pages:
+      - User: [8001]
+      - User: [8002]
+      - User: [8003]
+      - User: [8004]
+      - User: [8005]
+      - User: [8006]
 
 fitting_response_needs_no_continuation:
   seed: |
@@ -34,6 +38,5 @@ fitting_response_needs_no_continuation:
     order_by: user.id
     cursor: {page_size: 4}
   expect:
-    paginated: false
-    nodes:
-      User: [9001]
+    pages:
+      - User: [9001]
