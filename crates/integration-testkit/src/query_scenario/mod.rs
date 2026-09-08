@@ -21,13 +21,14 @@ use crate::mock_redaction::MockRedactionService;
 use crate::visitor::{NodeExt, Requirement, ResponseView};
 use crate::{SeededColumnResolver, collect_subtest_results, load_ontology};
 
-pub use format::{QueryExpect, QueryScenario, RedactionConfig, SecurityOverride};
+pub use format::{PresetOr, QueryExpect, QueryScenario, RedactionConfig, SecurityOverride};
 
 use orbit_server::pipeline::HydrationStage;
 use orbit_server::redaction::QueryResult;
 
-pub async fn run_dir(ctx: &TestContext, root: &str) {
+pub async fn run_dir(ctx: &TestContext, root: &str, presets: &str) {
     let root = Path::new(root);
+    let presets: Arc<Path> = Arc::from(Path::new(presets));
     let mut files = Vec::new();
     discover(root, &mut files);
     files.sort();
@@ -61,12 +62,13 @@ pub async fn run_dir(ctx: &TestContext, root: &str) {
         let name = scenario_name(root, &file);
         let semaphore = Arc::clone(&semaphore);
         let ctx = Arc::clone(&ctx);
+        let presets = Arc::clone(&presets);
         let task_name = name.clone();
         let handle = tokio::task::spawn(async move {
             let _permit = semaphore.acquire_owned().await.unwrap();
             let started = std::time::Instant::now();
             eprintln!("--- {task_name}");
-            run_scenario(&ctx, &file, &task_name).await;
+            run_scenario(&ctx, &file, &task_name, &presets).await;
             eprintln!("    {task_name} {:.2?}", started.elapsed());
         });
         handles.push((name, handle));
@@ -75,14 +77,16 @@ pub async fn run_dir(ctx: &TestContext, root: &str) {
     collect_subtest_results(handles).await;
 }
 
-async fn run_scenario(ctx: &TestContext, file: &Path, name: &str) {
+async fn run_scenario(ctx: &TestContext, file: &Path, name: &str, presets: &Path) {
     let raw = std::fs::read_to_string(file)
         .unwrap_or_else(|e| panic!("failed to read {}: {e}", file.display()));
     let scenario: QueryScenario = orbit_utils::yaml::from_str(&raw)
         .unwrap_or_else(|e| panic!("{name}: invalid scenario: {e}"));
 
-    let security = build_security(&scenario.security);
-    let redaction = build_redaction(&scenario.redaction);
+    let security_override = resolve_preset("security", &scenario.security, presets, name);
+    let redaction_config = resolve_preset("redaction", &scenario.redaction, presets, name);
+    let security = build_security(&security_override);
+    let redaction = build_redaction(&redaction_config);
 
     for (frontend_key, query_str) in &scenario.query {
         let Some(language) = QueryLanguage::from_name(frontend_key) else {
@@ -302,6 +306,31 @@ fn assert_property(
             );
         }
         _ => panic!("{label}: unsupported property value type for {prop}"),
+    }
+}
+
+fn resolve_preset<T: Clone + serde::de::DeserializeOwned>(
+    kind: &str,
+    spec: &Option<PresetOr<T>>,
+    presets: &Path,
+    scenario: &str,
+) -> Option<T> {
+    match spec {
+        None => None,
+        Some(PresetOr::Inline(v)) => Some(v.clone()),
+        Some(PresetOr::Preset(name)) => {
+            let path = presets.join(kind).join(format!("{name}.yaml"));
+            let raw = std::fs::read_to_string(&path).unwrap_or_else(|e| {
+                panic!(
+                    "{scenario}: preset {kind}/{name} not found at {}: {e}",
+                    path.display()
+                )
+            });
+            Some(
+                orbit_utils::yaml::from_str(&raw)
+                    .unwrap_or_else(|e| panic!("{scenario}: invalid preset {kind}/{name}: {e}")),
+            )
+        }
     }
 }
 

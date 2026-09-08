@@ -1,6 +1,5 @@
 description: Admin can filter on is_admin
-security:
-  admin: true
+security: admin
 query:
   json: |
     {

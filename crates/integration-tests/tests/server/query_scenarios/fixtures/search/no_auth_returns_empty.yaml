@@ -1,4 +1,5 @@
 description: No redaction authorization returns zero nodes
+redaction: none
 query:
   json: |
     {
@@ -7,6 +8,5 @@ query:
                  "columns": ["username"]}],
       "limit": 10
     }
-redaction: {}
 expect:
   node_count: 0

@@ -9,14 +9,22 @@ pub struct QueryScenario {
     pub description: Option<String>,
     pub query: BTreeMap<String, String>,
     #[serde(default)]
-    pub security: Option<SecurityOverride>,
+    pub security: Option<PresetOr<SecurityOverride>>,
     #[serde(default)]
-    pub redaction: Option<RedactionConfig>,
+    pub redaction: Option<PresetOr<RedactionConfig>>,
     #[serde(default)]
     pub expect: QueryExpect,
 }
 
-#[derive(Debug, Default, Deserialize)]
+/// Either a preset name (string) or an inline value.
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+pub enum PresetOr<T> {
+    Preset(String),
+    Inline(T),
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SecurityOverride {
     #[serde(default)]
@@ -29,7 +37,7 @@ pub struct SecurityOverride {
     pub access_level: Option<u32>,
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RedactionConfig {
     #[serde(default)]
