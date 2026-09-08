@@ -2,6 +2,8 @@ use std::collections::BTreeMap;
 
 use serde::Deserialize;
 
+use crate::scenario::Seed;
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct QueryScenario {
@@ -10,7 +12,7 @@ pub struct QueryScenario {
     #[serde(default)]
     pub seed: Option<String>,
     #[serde(default)]
-    pub extra_seed: BTreeMap<String, Vec<BTreeMap<String, serde_json::Value>>>,
+    pub extra_seed: Seed,
     pub query: BTreeMap<String, String>,
     #[serde(default)]
     pub security: Option<PresetOr<SecurityOverride>>,

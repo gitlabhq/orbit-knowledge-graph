@@ -4,7 +4,7 @@
 
 mod expect;
 mod format;
-mod seed;
+pub(crate) mod seed;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
