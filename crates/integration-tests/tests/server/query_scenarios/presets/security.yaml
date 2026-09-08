@@ -3,3 +3,4 @@ default:
 
 admin:
   admin: true
+  access_level: 50
