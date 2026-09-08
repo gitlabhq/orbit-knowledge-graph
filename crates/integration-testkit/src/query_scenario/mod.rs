@@ -83,6 +83,20 @@ async fn run_scenario(ctx: &TestContext, file: &Path, name: &str, presets: &Path
     let scenario: QueryScenario = orbit_utils::yaml::from_str(&raw)
         .unwrap_or_else(|e| panic!("{name}: invalid scenario: {e}"));
 
+    let needs_fork = !scenario.extra_seed.is_empty();
+    let ctx = if needs_fork {
+        let db_name = name
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+            .collect::<String>();
+        let forked = ctx.fork(&db_name).await;
+        apply_extra_seed(&forked, &scenario.extra_seed, name).await;
+        forked.optimize_all().await;
+        forked
+    } else {
+        ctx.clone()
+    };
+
     let security_override = resolve_preset("security", &scenario.security, presets, name);
     let redaction_config = resolve_preset("redaction", &scenario.redaction, presets, name);
     let security = build_security(&security_override);
@@ -95,7 +109,7 @@ async fn run_scenario(ctx: &TestContext, file: &Path, name: &str, presets: &Path
         };
         let label = format!("{name} [{frontend_key}]");
         run_frontend(
-            ctx,
+            &ctx,
             language,
             query_str,
             &security,
@@ -104,6 +118,39 @@ async fn run_scenario(ctx: &TestContext, file: &Path, name: &str, presets: &Path
             &label,
         )
         .await;
+    }
+}
+
+async fn apply_extra_seed(
+    ctx: &TestContext,
+    seed: &std::collections::BTreeMap<
+        String,
+        Vec<std::collections::BTreeMap<String, serde_json::Value>>,
+    >,
+    _scenario: &str,
+) {
+    for (table, rows) in seed {
+        let prefixed = crate::t(table);
+        for row in rows {
+            let cols: Vec<&str> = row.keys().map(String::as_str).collect();
+            let vals: Vec<String> = row.values().map(sql_literal).collect();
+            let sql = format!(
+                "INSERT INTO {prefixed} ({}) VALUES ({})",
+                cols.join(", "),
+                vals.join(", ")
+            );
+            ctx.execute(&sql).await;
+        }
+    }
+}
+
+fn sql_literal(v: &serde_json::Value) -> String {
+    match v {
+        serde_json::Value::String(s) => format!("'{}'", s.replace('\'', "\\'")),
+        serde_json::Value::Number(n) => n.to_string(),
+        serde_json::Value::Bool(b) => if *b { "1" } else { "0" }.to_string(),
+        serde_json::Value::Null => "NULL".to_string(),
+        other => panic!("unsupported seed value: {other}"),
     }
 }
 

@@ -7,6 +7,10 @@ use serde::Deserialize;
 pub struct QueryScenario {
     #[serde(default)]
     pub description: Option<String>,
+    #[serde(default)]
+    pub seed: Option<String>,
+    #[serde(default)]
+    pub extra_seed: BTreeMap<String, Vec<BTreeMap<String, serde_json::Value>>>,
     pub query: BTreeMap<String, String>,
     #[serde(default)]
     pub security: Option<PresetOr<SecurityOverride>>,
