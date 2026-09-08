@@ -209,9 +209,9 @@ total=2347
 
 ## Implementation
 
-`GoonFormatter` lives in `crates/query-engine/formatters/src/goon/`. Both formatters implement `ResultFormatter::format_rows`, which accepts borrowed rows and pagination metadata. The default `format` method delegates with the full result. For LLM responses, `GoonFormatter` composes `GraphFormatter::build_response_from_rows` with `goon::encode` and wraps the result in `Value::String`.
+`GoonFormatter` implements `ResultFormatter` by passing graph responses to `goon::encode`. Both formatters accept borrowed row prefixes and pagination metadata.
 
-`crates/orbit-server/src/grpc/query_response.rs` selects the formatter and calls `ResultFormatter::serialize_rows` to build the complete gRPC response, including format-name and format-version metadata. RAW serializes the graph directly into JSON text; GOON reuses its formatted text. GOON uses `ExecuteQueryResult.formatted_text`; RAW uses `result_json`. Responses are measured against the configured byte budget before the pipeline reports success. Oversized cursor pages are shortened at a safe continuation boundary without re-executing SQL.
+`crates/orbit-server/src/grpc/query_response.rs` selects the formatter and enforces the response byte budget. RAW serializes directly into `result_json`; GOON uses `formatted_text`.
 
 The encoder reads every field of `GraphResponse` (audited via parallel sub-agents post-implementation). Fields that travel:
 

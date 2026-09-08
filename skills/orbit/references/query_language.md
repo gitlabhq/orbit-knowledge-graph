@@ -105,13 +105,10 @@ query type.
 | `aggregation_sort` | `string` | Sort aggregation rows by output column (aggregation or group-key alias): `"column"` (asc) or `"-column"` (desc). |
 | `options` | `object` | Presentation and debug options. |
 
-GitLab Orbit Remote can return fewer rows than `page_size` to keep the complete response
-within its configured byte limit. Follow `next_cursor` even when a page is short.
-Accept the complete response before advancing the cursor; after an interrupted
-or discarded response, retry with the same incoming cursor. Byte-limited pages
-keep omitted rows reachable and do not split rows sharing a complete cursor key.
-If a row or cursor-key group cannot fit, the server returns `result_too_large`;
-request fewer columns. Oversized queries without a cursor return the same error.
+Response byte limits can shorten pages. Follow `next_cursor`; retry the incoming
+cursor after an interrupted response. Oversized results without a cursor, or rows
+and cursor-key groups that cannot fit, return `result_too_large`; use cursor
+pagination or request fewer columns.
 
 Pagination reads live data at request time; there is no snapshot. Each page
 independently resolves the latest version of every row and filters out

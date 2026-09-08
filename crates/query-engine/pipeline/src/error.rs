@@ -29,9 +29,7 @@ pub enum PipelineError {
     #[error("Query exceeded the configured stream timeout")]
     Timeout,
 
-    #[error(
-        "The query result exceeds the response byte limit. Use cursor pagination or request fewer columns; an individual row or cursor-key group may be too large to return."
-    )]
+    #[error("Query result exceeds byte limit; use cursor pagination or request fewer columns.")]
     ResultTooLarge,
 
     #[error("{0}")]
