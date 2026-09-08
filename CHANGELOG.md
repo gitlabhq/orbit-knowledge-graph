@@ -1,3 +1,19 @@
+## [0.118.2](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.118.1...v0.118.2) (2026-09-08)
+
+### Fixes
+
+* **cli:** default the Snowplow collector to events.gitlab.net ([e1fd586](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/e1fd586df7b5fcaba75f4160b1c5919a47bb418b)) by Ashwin Bilgi
+* **ontology:** deduplicate the merge request diff lookup by version ([3dd2ebc](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/3dd2ebc9fa277e2da746b8fc58187eff74053bfe)) by Bohdan Parkhomchuk
+* **skills:** align Orbit examples with the CLI ([7f637f4](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/7f637f481607129c1e1a4c1fb7cc3a7ec60ae2dc)) by Dmitry Gruzd
+
+### Performance
+
+* **indexer:** release arrow batches once encoded into the insert body ([602702f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/602702f3cbc7282cc6f1a5e2faa386692a05a2ab)) by Bohdan Parkhomchuk
+
+### Other
+
+* **orbit:** sync Local and Remote overviews ([47cdd18](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/47cdd182daf65fb9e5c3c384c99a80ba5f94db2e)) by Dmitry Gruzd
+
 ## [0.118.1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.118.0...v0.118.1) (2026-09-07)
 
 ### Fixes
