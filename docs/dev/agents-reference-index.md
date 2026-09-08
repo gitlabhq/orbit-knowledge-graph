@@ -9,6 +9,7 @@ Canonical locations for files, schemas, configs, and tools in the knowledge-grap
 | Architecture and data model | `docs/design-documents/data_model.md` |
 | Security / AuthZ design | `docs/design-documents/security.md` |
 | Query DSL spec | `docs/design-documents/querying/` |
+| Orbit query frontend | `crates/query-engine/opencypher/`; design in `docs/design-documents/querying/orbit_query_frontend.md` |
 | SDLC indexing pipeline | `docs/design-documents/indexing/sdlc_indexing.md` |
 | Code indexing pipeline | `docs/design-documents/indexing/code_indexing.md` |
 | Namespace deletion pipeline | `docs/design-documents/indexing/namespace_deletion.md` |

@@ -8,7 +8,7 @@ Today, the repository includes the following major components:
 
 - A single Rust workspace with one primary service binary, `gkg-server`, that runs in four modes: `Webserver`, `Indexer`, `DispatchIndexing`, and `HealthCheck`.
 - A ClickHouse-backed graph runtime with ontology-driven schema, ETL, and query validation. The authoritative schema lives in `config/ontology/` and `config/graph.sql`.
-- A deployed query surface that serves HTTP, gRPC, and MCP requests from the webserver mode and compiles the intermediate JSON query language into parameterized ClickHouse SQL.
+- A deployed query surface that serves HTTP, gRPC, and MCP requests from the webserver mode and compiles the JSON Query DSL into parameterized ClickHouse SQL. The [Orbit query frontend](querying/orbit_query_frontend.md) provides a separate compiler-level text API.
 - A distributed indexing pipeline that consumes Siphon CDC through NATS JetStream, dispatches indexing work, and writes SDLC and code graph data into ClickHouse.
 - Shared crates for indexing, query compilation, formatting, ontology loading, ClickHouse access, GitLab API access, health checks, and integration testing.
 
@@ -148,7 +148,7 @@ flowchart TD
 
 ### Database & Database Ops
 
-As a first iteration, the team aims to build **a [Graph Query Engine](querying/graph_engine.md) on ClickHouse** that translates basic Cypher (aka GQL) queries into SQL-compatible multi-hop graph traversals.
+The [Graph Query Engine](querying/graph_engine.md) compiles logical graph operations into parameterized ClickHouse SQL. The JSON Query DSL and the compiler-level Orbit query frontend share the same compiler pipeline.
 
 The current implementation has already standardized on ClickHouse for deployed graph storage and query execution. In the current repository state:
 
