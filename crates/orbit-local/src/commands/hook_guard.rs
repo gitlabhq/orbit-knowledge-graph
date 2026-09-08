@@ -21,6 +21,8 @@ const SEARCH_COMMANDS: &[&str] = &[
     "ack", "ag", "egrep", "fd", "fgrep", "find", "grep", "rg", "ripgrep",
 ];
 
+const READ_COMMANDS: &[&str] = &["bat", "cat", "head", "less", "more", "sed", "tail"];
+
 const COMMAND_WRAPPERS: &[&str] = &[
     "command", "env", "git", "nice", "nohup", "sudo", "time", "xargs",
 ];
@@ -80,7 +82,7 @@ fn should_nudge(kind: Kind, call: &Value) -> bool {
                     .get("pattern")
                     .and_then(Value::as_str)
                     .is_some_and(|p| !p.is_empty());
-            is_pattern_tool || invokes_search(command)
+            is_pattern_tool || invokes_search(command) || reads_source(command)
         }
         Kind::Read => {
             let path = tool_input
@@ -110,6 +112,18 @@ fn segment_invokes_search(segment: &str) -> bool {
         return SEARCH_COMMANDS.contains(&name);
     }
     false
+}
+
+fn reads_source(command: &str) -> bool {
+    command
+        .split(['|', ';', '&', '\n', '(', ')', '`'])
+        .any(|segment| {
+            let mut tokens = segment.split_whitespace().filter(|t| !t.starts_with('-'));
+            let is_reader = tokens
+                .find(|t| !COMMAND_WRAPPERS.contains(&basename(t)))
+                .is_some_and(|t| READ_COMMANDS.contains(&basename(t)));
+            is_reader && tokens.any(is_source_path)
+        })
 }
 
 fn basename(token: &str) -> &str {
@@ -156,6 +170,19 @@ mod tests {
     }
 
     #[test]
+    fn bash_source_reads_nudge() {
+        for command in [
+            "cat src/main.rs",
+            "head -50 crates/foo/src/lib.rs",
+            "sed -n '1,40p' app/models/user.rb",
+            "cd repo && cat lib/x.py",
+        ] {
+            let call = json!({"tool_input": {"command": command}});
+            assert!(should_nudge(Kind::Search, &call), "{command}");
+        }
+    }
+
+    #[test]
     fn non_search_bash_does_not_nudge() {
         for command in [
             "cargo build",
@@ -166,6 +193,9 @@ mod tests {
             "npm run build --flag foo",
             "git log --grep=foo",
             "echo storage",
+            "cat README.md",
+            "cat Cargo.toml",
+            "tail -f server.log",
         ] {
             let call = json!({"tool_input": {"command": command}});
             assert!(!should_nudge(Kind::Search, &call), "{command}");

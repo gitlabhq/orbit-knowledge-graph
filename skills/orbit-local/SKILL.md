@@ -73,10 +73,10 @@ wrapper flags, config keys, and pass-through rules:
 | Command | Purpose |
 |---|---|
 | `orbit index <PATH> [--stats] [--db P]` | Parse repos under `PATH` into DuckDB; prints graph stats as JSON |
-| `orbit grep [QUERY…] [--path P] [--kind K]` | Find definitions by name, or list definitions under a path |
+| `orbit grep [QUERY…] [--path P] [--kind K,K]` | Find definitions by name, or list definitions under a path |
 | `orbit grep FQN --related-to [--edge K] [--in] [--out]` | List connections, including uses through members |
 | `orbit grep FQN --callers` / `--callees` | List incoming or outgoing calls |
-| `orbit context [FQN…] [--file P] [--kind K]` | Read source bodies by FQN, unique tail, glob, or file |
+| `orbit context [FQN…] [--file P] [--kind K,K] [--outline]` | Read source bodies by FQN, unique tail, glob, or file; `--outline` prints signatures and members only |
 | `orbit sql [QUERY] [-f FILE] [-F table\|json\|ndjson\|csv] [--all] [--repo P]` | Run read-only SQL scoped to the current checkout's commit; `-` reads from stdin, `--all` spans every indexed commit |
 | `orbit schema [TABLE…] [--raw]` | Describe graph tables/columns (index-storage tables hidden); scope to table names to trim output |
 | `orbit list [-F …]` | List indexed repositories, branch, commit, status |
@@ -87,9 +87,10 @@ wrapper flags, config keys, and pass-through rules:
 ## Definitions and relationships
 
 ```bash
-orbit grep "rateLimit" --path src --kind Method
+orbit grep "rateLimit" --path src --kind Method,Function
 orbit context "Type::method"
 orbit context --file src/lib.rs
+orbit context "Type" --outline
 orbit grep "Type::method" --callers --path src --kind Method
 orbit grep "Type::method" --callees
 orbit grep "Type" --related-to --edge extends --in
@@ -106,6 +107,11 @@ unless `--tests` is passed. Incoming lookups include uses through members.
 `context` accepts several names or globs in one call. `--file` alone reads
 all definitions and the lines between them. With names, it restricts lookup
 to that file and accepts bare names; `--kind` narrows the selection.
+`--outline` replaces bodies with each definition's signature and its nested
+members, so a large type or file can be mapped before reading one method.
+
+`--kind` is one comma-separated list (`Class,Method`); a quoted pipe list
+(`"Class|Method"`) also works. It is not repeatable.
 
 ## Quick start
 

@@ -15,7 +15,10 @@ pub(crate) struct Target {
     pub fqns: Vec<String>,
     pub file: Option<String>,
     pub kinds: Vec<String>,
+    pub outline: bool,
 }
+
+const SIGNATURE_LINES: usize = 3;
 
 pub(crate) fn run(target: Target, repo: Option<PathBuf>, db: Option<PathBuf>) -> Result<()> {
     let file = target.file.as_deref().map(|p| p.trim_end_matches('/'));
@@ -24,23 +27,7 @@ pub(crate) fn run(target: Target, repo: Option<PathBuf>, db: Option<PathBuf>) ->
     let mut defs = match (target.fqns.as_slice(), file) {
         ([], None) => anyhow::bail!("pass one or more fqns or globs, or --file <path>"),
         ([], Some(path)) => {
-            let batches = client.query_arrow_json(
-                &format!(
-                    "SELECT id, fqn, definition_type, file_path, start_line, end_line
-                     FROM gl_definition
-                     WHERE project_id = ?1 AND commit_sha = ?2 AND file_path = ?3
-                       AND fqn NOT LIKE '%@%'
-                     {}
-                     ORDER BY start_line, end_line DESC, fqn",
-                    kind_scope("definition_type", &target.kinds)
-                ),
-                &[
-                    git.project_id.into(),
-                    git.commit_sha.clone().into(),
-                    path.into(),
-                ],
-            )?;
-            let resolved = fqn::defs_from(&batches);
+            let resolved = definitions_in_file(&client, &git, path, &target.kinds)?;
             if resolved.is_empty() {
                 let launcher = spec::launcher();
                 anyhow::bail!(
@@ -86,9 +73,101 @@ pub(crate) fn run(target: Target, repo: Option<PathBuf>, db: Option<PathBuf>) ->
                 lines.len()
             )?;
         }
-        render(&mut out, &file_defs, &lines, file_mode)?;
+        if target.outline {
+            let members = definitions_in_file(&client, &git, &file, &[])?;
+            render_outline(&mut out, &file_defs, &members, &lines)?;
+        } else {
+            render(&mut out, &file_defs, &lines, file_mode)?;
+        }
     }
     print!("{out}");
+    Ok(())
+}
+
+fn definitions_in_file(
+    client: &duckdb_client::DuckDbClient,
+    git: &workspace::GitInfo,
+    path: &str,
+    kinds: &[String],
+) -> Result<Vec<Def>> {
+    let batches = client.query_arrow_json(
+        &format!(
+            "SELECT id, fqn, definition_type, file_path, start_line, end_line
+             FROM gl_definition
+             WHERE project_id = ?1 AND commit_sha = ?2 AND file_path = ?3
+               AND fqn NOT LIKE '%@%'
+             {}
+             ORDER BY start_line, end_line DESC, fqn",
+            kind_scope("definition_type", kinds)
+        ),
+        &[
+            git.project_id.into(),
+            git.commit_sha.clone().into(),
+            path.into(),
+        ],
+    )?;
+    Ok(fqn::defs_from(&batches))
+}
+
+pub(crate) fn render_outline(
+    out: &mut String,
+    defs: &[Def],
+    members: &[Def],
+    lines: &[&str],
+) -> std::fmt::Result {
+    for (i, def) in defs.iter().enumerate() {
+        if i > 0 {
+            out.push('\n');
+        }
+        writeln!(
+            out,
+            "{}  [{}]  {}:{}-{}",
+            def.fqn, def.kind, def.file, def.start, def.end
+        )?;
+        write_signature(out, lines, def.start, def.end)?;
+        let mut nested: Vec<&Def> = members
+            .iter()
+            .filter(|m| m != &def && belongs_to(def, m))
+            .collect();
+        nested.sort_by(|a, b| a.start.cmp(&b.start).then(b.end.cmp(&a.end)));
+        let mut covered_until = 0;
+        for member in nested {
+            if member.start <= covered_until {
+                continue;
+            }
+            covered_until = member.end;
+            writeln!(
+                out,
+                "  {}  [{}]  L{}-{}",
+                member.fqn, member.kind, member.start, member.end
+            )?;
+            write_signature(out, lines, member.start, member.end)?;
+        }
+    }
+    Ok(())
+}
+
+fn belongs_to(def: &Def, member: &Def) -> bool {
+    let by_range = member.start >= def.start && member.end <= def.end;
+    let by_name = member
+        .fqn
+        .strip_prefix(&def.fqn)
+        .is_some_and(|rest| rest.starts_with([':', '.', '#']));
+    by_range || by_name
+}
+
+fn write_signature(out: &mut String, lines: &[&str], start: usize, end: usize) -> std::fmt::Result {
+    let last = end.min(start + SIGNATURE_LINES - 1).min(lines.len());
+    for n in start..=last {
+        let line = lines[n - 1];
+        writeln!(out, "{n}|{line}")?;
+        if line.trim_end().ends_with(['{', ':', ';']) {
+            return Ok(());
+        }
+    }
+    if last < end {
+        writeln!(out, "{}|…", last + 1)?;
+    }
     Ok(())
 }
 

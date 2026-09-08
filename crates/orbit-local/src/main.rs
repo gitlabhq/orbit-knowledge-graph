@@ -189,7 +189,8 @@ struct IndexArgs {
                   or --callees to a positional FQN for relationship lookups. An \
                   explicit target after the flag takes precedence over positional \
                   terms. Targets accept FQNs, unique unqualified tails, or globs; \
-                  --path and --kind filter connected definitions, not the target.\n\n\
+                  --path and --kind filter connected definitions, not the target. \
+                  --kind takes one comma-separated list, e.g. `Class,Method`.\n\n\
                   When the output notes unmatched terms or weak matches, read the \
                   top matches first — they are often still right. Retry with a \
                   synonym or identifier fragment only if they look off, then fall \
@@ -220,15 +221,35 @@ struct GrepArgs {
     #[arg(long, value_name = "PATH")]
     path: Vec<String>,
 
-    /// Only search definitions of this type, as printed in grep's `[Kind]`
-    /// column (e.g. `Function`, `Constant`, `Struct`); repeatable,
-    /// case-insensitive.
-    #[arg(long, value_name = "KIND")]
-    kind: Vec<String>,
+    /// Only search definitions of these types, as printed in grep's `[Kind]`
+    /// column: one kind or a comma-separated list such as `Class,Method`
+    /// (`"Class|Method"` also works when quoted); case-insensitive.
+    #[arg(long, value_name = "KINDS", value_parser = parse_kinds)]
+    kind: Option<Kinds>,
 
     /// Override the DuckDB path (default: ~/.orbit/graph.duckdb).
     #[arg(long, value_name = "PATH")]
     db: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct Kinds(Vec<String>);
+
+fn parse_kinds(value: &str) -> Result<Kinds, String> {
+    let kinds: Vec<String> = value
+        .split([',', '|'])
+        .map(str::trim)
+        .filter(|kind| !kind.is_empty())
+        .map(str::to_string)
+        .collect();
+    if kinds.is_empty() {
+        return Err("expected one kind or a comma-separated list such as `Class,Method`".into());
+    }
+    Ok(Kinds(kinds))
+}
+
+fn kind_names(kinds: Option<Kinds>) -> Vec<String> {
+    kinds.map(|Kinds(names)| names).unwrap_or_default()
 }
 
 fn fqn_arg_help() -> String {
@@ -259,7 +280,8 @@ fn context_long_about() -> String {
          `--file <path>` alone prints a whole file as its definitions plus the \
          lines between them, and `<name> --file <path>` prints that definition \
          from that file by bare name, so whole-module reading needs no file read \
-         either.",
+         either. `--outline` prints each definition's signature and nested members \
+         without bodies, so large types can be mapped before reading one method.",
         launcher = commands::setup::spec::launcher()
     )
 }
@@ -303,11 +325,16 @@ struct ContextArgs {
     #[arg(long, value_name = "PATH")]
     file: Option<String>,
 
-    /// Only print definitions of this type, as printed in grep's `[Kind]`
-    /// column (e.g. `Function`, `Struct`); repeatable, case-insensitive.
+    /// Only print definitions of these types, as printed in grep's `[Kind]`
+    /// column: one kind or a comma-separated list such as `Class,Method`
+    /// (`"Class|Method"` also works when quoted); case-insensitive.
     /// Narrows a glob or --file and disambiguates a bare name.
-    #[arg(long, value_name = "KIND")]
-    kind: Vec<String>,
+    #[arg(long, value_name = "KINDS", value_parser = parse_kinds)]
+    kind: Option<Kinds>,
+
+    /// Print signatures and nested members instead of full bodies.
+    #[arg(long)]
+    outline: bool,
 
     /// Repository path (default: current directory).
     #[arg(long, value_name = "PATH")]
@@ -830,30 +857,35 @@ async fn dispatch_local(command: LocalCommands) -> Result<()> {
             path,
             kind,
             db,
-        }) => match relations.into_target(&query)? {
-            Some((fqn, filter)) => {
-                commands::grep::relations::run(fqn, repo, db, filter, &path, &kind)
+        }) => {
+            let kind = kind_names(kind);
+            match relations.into_target(&query)? {
+                Some((fqn, filter)) => {
+                    commands::grep::relations::run(fqn, repo, db, filter, &path, &kind)
+                }
+                None => commands::grep::run(
+                    query,
+                    repo,
+                    db,
+                    limit,
+                    path,
+                    orbit_search::RecallFilter { kinds: kind },
+                ),
             }
-            None => commands::grep::run(
-                query,
-                repo,
-                db,
-                limit,
-                path,
-                orbit_search::RecallFilter { kinds: kind },
-            ),
-        },
+        }
         LocalCommands::Context(ContextArgs {
             fqn,
             file,
             kind,
+            outline,
             repo,
             db,
         }) => commands::context::run(
             commands::context::Target {
                 fqns: fqn,
                 file,
-                kinds: kind,
+                kinds: kind_names(kind),
+                outline,
             },
             repo,
             db,
