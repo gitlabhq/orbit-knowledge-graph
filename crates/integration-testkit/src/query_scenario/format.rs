@@ -10,16 +10,23 @@ pub struct QueryScenario {
     #[serde(default)]
     pub description: Option<String>,
     #[serde(default)]
+    pub config: ScenarioConfig,
+    pub query: BTreeMap<String, String>,
+    #[serde(default)]
+    pub expect: QueryExpect,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ScenarioConfig {
+    #[serde(default)]
     pub seed: Option<String>,
     #[serde(default)]
     pub extra_seed: Seed,
-    pub query: BTreeMap<String, String>,
     #[serde(default)]
     pub security: Option<PresetOr<SecurityOverride>>,
     #[serde(default)]
     pub redaction: Option<PresetOr<RedactionConfig>>,
-    #[serde(default)]
-    pub expect: QueryExpect,
 }
 
 /// Either a preset name (string) or an inline value.

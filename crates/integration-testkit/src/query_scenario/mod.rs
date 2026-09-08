@@ -22,7 +22,9 @@ use crate::scenario::Seed;
 use crate::visitor::{NodeExt, Requirement, ResponseView};
 use crate::{SeededColumnResolver, collect_subtest_results, load_ontology};
 
-pub use format::{PresetOr, QueryExpect, QueryScenario, RedactionConfig, SecurityOverride};
+pub use format::{
+    PresetOr, QueryExpect, QueryScenario, RedactionConfig, ScenarioConfig, SecurityOverride,
+};
 
 use orbit_server::pipeline::HydrationStage;
 use orbit_server::redaction::QueryResult;
@@ -114,7 +116,9 @@ async fn run_scenario(ctx: &TestContext, file: &Path, name: &str, presets: &Path
     let scenario: QueryScenario = orbit_utils::yaml::from_str(&raw)
         .unwrap_or_else(|e| panic!("{name}: invalid scenario: {e}"));
 
-    let needs_fork = !scenario.extra_seed.is_empty();
+    let cfg = &scenario.config;
+
+    let needs_fork = !cfg.extra_seed.is_empty();
     let ctx = if needs_fork {
         let db_name = name
             .chars()
@@ -124,7 +128,7 @@ async fn run_scenario(ctx: &TestContext, file: &Path, name: &str, presets: &Path
         let columns = crate::scenario::seed::fetch_table_columns(&forked).await;
         crate::scenario::seed::apply_seed(
             &forked,
-            &scenario.extra_seed,
+            &cfg.extra_seed,
             &Default::default(),
             &columns,
             name,
@@ -136,8 +140,8 @@ async fn run_scenario(ctx: &TestContext, file: &Path, name: &str, presets: &Path
         ctx.clone()
     };
 
-    let security_override = resolve_preset("security", &scenario.security, presets, name);
-    let redaction_with_default = scenario
+    let security_override = resolve_preset("security", &cfg.security, presets, name);
+    let redaction_with_default = cfg
         .redaction
         .clone()
         .unwrap_or(PresetOr::Preset("allow_all".into()));

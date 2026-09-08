@@ -1,6 +1,7 @@
 # source: crates/integration-tests/tests/server/data_correctness/search.rs::search_no_auth_returns_empty
 description: No redaction authorization returns zero nodes
-redaction: none
+config:
+  redaction: none
 query:
   json: |
     {
