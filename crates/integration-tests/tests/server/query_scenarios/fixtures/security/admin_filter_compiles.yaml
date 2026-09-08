@@ -13,6 +13,5 @@ query:
 expect:
   node_count: 1
   nodes:
-    - entity: User
-      id: 1
-      properties: { username: alice }
+    User:
+      1: { username: alice }

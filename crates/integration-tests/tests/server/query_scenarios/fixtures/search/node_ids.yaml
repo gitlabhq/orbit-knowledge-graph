@@ -11,11 +11,8 @@ expect:
   node_ids:
     Group: [100, 102]
   nodes:
-    - entity: Group
-      id: 100
-      properties: { name: Public Group }
-    - entity: Group
-      id: 102
-      properties: { name: Internal Group }
+    Group:
+      100: { name: Public Group }
+      102: { name: Internal Group }
   node_absent:
     Group: [101]

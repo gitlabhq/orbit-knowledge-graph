@@ -49,12 +49,13 @@ pub struct QueryExpect {
     pub node_order: BTreeMap<String, Vec<i64>>,
     #[serde(default)]
     pub node_ids: BTreeMap<String, Vec<i64>>,
+    /// `nodes: { Entity: { id: { prop: val } } }`
     #[serde(default)]
-    pub nodes: Vec<NodeExpect>,
+    pub nodes: BTreeMap<String, BTreeMap<i64, BTreeMap<String, serde_json::Value>>>,
     #[serde(default)]
     pub node_absent: BTreeMap<String, Vec<i64>>,
     #[serde(default)]
-    pub edge_set: BTreeMap<String, Vec<[i64; 2]>>,
+    pub edges: BTreeMap<String, Vec<[i64; 2]>>,
     #[serde(default)]
     pub edge_count: BTreeMap<String, usize>,
     #[serde(default)]
@@ -70,13 +71,4 @@ pub struct QueryExpect {
 pub enum CompileErrorExpect {
     Flag(bool),
     Substring(String),
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct NodeExpect {
-    pub entity: String,
-    pub id: i64,
-    #[serde(default)]
-    pub properties: BTreeMap<String, serde_json::Value>,
 }

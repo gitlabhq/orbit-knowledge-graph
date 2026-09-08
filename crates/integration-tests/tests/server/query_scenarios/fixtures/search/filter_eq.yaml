@@ -11,6 +11,5 @@ query:
 expect:
   node_count: 1
   nodes:
-    - entity: User
-      id: 5
-      properties: { username: eve, state: blocked }
+    User:
+      5: { username: eve, state: blocked }

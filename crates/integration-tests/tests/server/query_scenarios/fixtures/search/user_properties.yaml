@@ -13,12 +13,7 @@ expect:
   node_order:
     User: [1, 2, 3, 4, 5, 6, 7]
   nodes:
-    - entity: User
-      id: 1
-      properties: { username: alice, name: Alice Admin, state: active, user_type: human }
-    - entity: User
-      id: 2
-      properties: { username: bob, name: Bob Builder }
-    - entity: User
-      id: 5
-      properties: { username: eve, state: blocked, user_type: service_account }
+    User:
+      1: { username: alice, name: Alice Admin, state: active, user_type: human }
+      2: { username: bob, name: Bob Builder }
+      5: { username: eve, state: blocked, user_type: service_account }

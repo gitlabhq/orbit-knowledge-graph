@@ -10,9 +10,6 @@ query:
 expect:
   node_count: 6
   nodes:
-    - entity: Project
-      id: 1000
-      properties: { name: Public Project, visibility_level: public }
-    - entity: Project
-      id: 1003
-      properties: { name: Secret Project, visibility_level: private }
+    Project:
+      1000: { name: Public Project, visibility_level: public }
+      1003: { name: Secret Project, visibility_level: private }

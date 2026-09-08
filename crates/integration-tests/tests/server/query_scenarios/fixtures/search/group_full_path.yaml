@@ -13,12 +13,7 @@ expect:
   node_order:
     Group: [100, 101, 102, 200, 300]
   nodes:
-    - entity: Group
-      id: 100
-      properties: { full_path: public-group }
-    - entity: Group
-      id: 200
-      properties: { full_path: public-group/deep-a }
-    - entity: Group
-      id: 300
-      properties: { full_path: public-group/deep-a/deep-b }
+    Group:
+      100: { full_path: public-group }
+      200: { full_path: public-group/deep-a }
+      300: { full_path: public-group/deep-a/deep-b }

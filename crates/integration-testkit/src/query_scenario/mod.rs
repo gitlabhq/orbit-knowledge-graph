@@ -21,7 +21,7 @@ use crate::mock_redaction::MockRedactionService;
 use crate::visitor::{NodeExt, Requirement, ResponseView};
 use crate::{SeededColumnResolver, collect_subtest_results, load_ontology};
 
-pub use format::{NodeExpect, QueryExpect, QueryScenario, RedactionConfig, SecurityOverride};
+pub use format::{QueryExpect, QueryScenario, RedactionConfig, SecurityOverride};
 
 use orbit_server::pipeline::HydrationStage;
 use orbit_server::redaction::QueryResult;
@@ -223,41 +223,32 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
     for (entity, ids) in &expect.node_ids {
         view.assert_node_ids(entity, ids);
     }
-    for node in &expect.nodes {
-        let found = view.find_node(&node.entity, node.id);
-        assert!(
-            found.is_some(),
-            "{label}: node {}/{} not found",
-            node.entity,
-            node.id
-        );
-        let found = found.unwrap();
-        for (prop, expected) in &node.properties {
-            match expected {
-                serde_json::Value::String(s) => found.assert_str(prop, s),
-                serde_json::Value::Number(n) => {
-                    if let Some(i) = n.as_i64() {
-                        found.assert_i64(prop, i);
+    for (entity, by_id) in &expect.nodes {
+        for (id, props) in by_id {
+            let found = view
+                .find_node(entity, *id)
+                .unwrap_or_else(|| panic!("{label}: node {entity}/{id} not found"));
+            for (prop, expected) in props {
+                match expected {
+                    serde_json::Value::String(s) => found.assert_str(prop, s),
+                    serde_json::Value::Number(n) if n.is_i64() => {
+                        found.assert_i64(prop, n.as_i64().unwrap());
                     }
+                    serde_json::Value::Bool(b) => {
+                        assert_eq!(
+                            found.prop_bool(prop),
+                            Some(*b),
+                            "{label}: {entity}/{id}.{prop} expected {b}",
+                        );
+                    }
+                    serde_json::Value::Null => {
+                        assert!(
+                            !found.has_prop(prop),
+                            "{label}: {entity}/{id}.{prop} expected null but has value",
+                        );
+                    }
+                    _ => panic!("{label}: unsupported property value type for {prop}"),
                 }
-                serde_json::Value::Bool(b) => {
-                    assert_eq!(
-                        found.prop_bool(prop),
-                        Some(*b),
-                        "{label}: {}/{}.{prop} expected {b}",
-                        node.entity,
-                        node.id,
-                    );
-                }
-                serde_json::Value::Null => {
-                    assert!(
-                        !found.has_prop(prop),
-                        "{label}: {}/{}.{prop} expected null but has value",
-                        node.entity,
-                        node.id,
-                    );
-                }
-                _ => panic!("{label}: unsupported property value type for {prop}"),
             }
         }
     }
@@ -266,7 +257,7 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
             view.assert_node_absent(entity, *id);
         }
     }
-    for (kind, tuples) in &expect.edge_set {
+    for (kind, tuples) in &expect.edges {
         let pairs: Vec<(i64, i64)> = tuples.iter().map(|[a, b]| (*a, *b)).collect();
         view.assert_edge_set(kind, &pairs);
     }
