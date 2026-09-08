@@ -294,14 +294,20 @@ The Query DSL makes these traversals first-class through typed relationships and
 #### 3. Aggregations and Analytics Are Essential
 
 Orbit is not just a document API—it is an analytical OLAP system.
-We routinely need aggregations such as:
+For example, this query counts work items by project within a group. Replace
+`your-group/` with your group's full path before running it.
 
 ```json orbit-query
 {
   "query": {
     "query_type": "aggregation",
     "nodes": [
-      {"id": "p", "entity": "Project", "columns": ["name"]},
+      {
+        "id": "p",
+        "entity": "Project",
+        "columns": ["name"],
+        "filters": {"full_path": {"starts_with": "your-group/"}}
+      },
       {"id": "w", "entity": "WorkItem"}
     ],
     "relationships": [
