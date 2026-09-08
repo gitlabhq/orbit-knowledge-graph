@@ -38,13 +38,13 @@ Most contributions don't require Rust experience: ontology YAML, docs, cookbook 
 
 Orbit Local runs on your machine. The `orbit` CLI parses a local repository, extracts definitions and cross-file references, and writes a code-only call graph to a single DuckDB file. No GitLab account is required at query time. The install step downloads a release artifact over HTTPS.
 
-What it indexes: directories, files, function and class definitions, and cross-file import references. It indexes the same 11+ languages as Orbit Remote. Multiple repositories share one database at `~/.orbit/graph.duckdb`, each scoped by repository and branch.
+What it indexes: directories, files, function and class definitions, and cross-file import references. It indexes the same 11+ languages as Orbit Remote. Multiple checkouts share one database at `~/.orbit/graph.duckdb`, each identified by its filesystem path. Reindexing after switching branches replaces that checkout's previous graph; use separate worktrees to retain multiple branches.
 
 | Access method | Use for |
 |---|---|
-| [`orbit` CLI](docs/source/local/access/cli.md) | Index, query, and inspect the local graph today |
-| [`glab orbit local`](docs/source/local/access/glab.md) (planned) | Drive Orbit Local through `glab` |
-| [MCP](docs/source/local/access/mcp.md) (planned) | Expose the local graph to AI coding agents |
+| [`orbit` CLI](docs/source/local/access/cli.md) | Index, query, and inspect the local graph |
+| [`glab orbit local`](docs/source/local/access/glab.md) | Install and run Orbit Local through `glab` |
+| [MCP](docs/source/local/access/mcp.md) | Expose the local graph to AI coding agents over stdio |
 
 Start with [Orbit Local getting started](docs/source/local/getting-started.md).
 
@@ -138,7 +138,7 @@ Orbit Local exposes raw SQL, so traversals are expressed as joins. Orbit Remote 
 
 ## Architecture
 
-Orbit is a single Rust binary backed by ClickHouse (Remote) or DuckDB (Local), driven by a YAML ontology. The server serves results over HTTP and gRPC, with MCP and REST surfaces layered on top. See the [design documents](docs/design-documents/) and the [data model](docs/design-documents/data_model.md) for the full picture.
+Orbit shares a Rust workspace and YAML ontology across two runtimes. Orbit Remote runs the `gkg-server` service modes against ClickHouse and serves HTTP, gRPC, REST, and MCP requests. Orbit Local runs the standalone `orbit` CLI against DuckDB and exposes direct commands plus a stdio MCP server. See the [design documents](docs/design-documents/) and the [data model](docs/design-documents/data_model.md) for the full picture.
 
 ## Documentation
 
