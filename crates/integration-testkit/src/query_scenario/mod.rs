@@ -138,7 +138,10 @@ async fn run_scenario(ctx: &TestContext, file: &Path, name: &str, presets: &Path
     };
 
     let security_override = resolve_preset("security", &scenario.security, presets, name);
-    let redaction_config = resolve_preset("redaction", &scenario.redaction, presets, name);
+    let default_redaction = PresetOr::Preset("allow_all".to_string());
+    let redaction_spec = scenario.redaction.as_ref().unwrap_or(&default_redaction);
+    let redaction_config: Option<RedactionConfig> =
+        resolve_preset("redaction", &Some(redaction_spec.clone()), presets, name);
     let security = build_security(&security_override);
     let redaction = build_redaction(&redaction_config);
 
@@ -408,23 +411,13 @@ fn build_security(overrides: &Option<SecurityOverride>) -> SecurityContext {
 
 fn build_redaction(config: &Option<RedactionConfig>) -> MockRedactionService {
     let mut svc = MockRedactionService::new();
-    let Some(config) = config else {
-        // Default: allow all seeded entities.
-        svc.allow("user", &[1, 2, 3, 4, 5, 6, 7]);
-        svc.allow("group", &[100, 101, 102, 200, 300, 900]);
-        svc.allow("project", &[1000, 1001, 1002, 1003, 1004, 1010, 9000]);
-        svc.allow("merge_request", &[2000, 2001, 2002, 2003, 2004, 2005, 9100]);
-        svc.allow("note", &[3000, 3001, 3002, 3003]);
-        svc.allow("work_item", &[4000, 4001, 4002, 4003, 4010]);
-        svc.allow("milestone", &[6000, 6001]);
-        svc.allow("label", &[7000, 7001, 7002]);
-        return svc;
-    };
-    for (resource, ids) in &config.allow {
-        svc.allow(resource, ids);
-    }
-    for (resource, ids) in &config.deny {
-        svc.deny(resource, ids);
+    if let Some(config) = config {
+        for (resource, ids) in &config.allow {
+            svc.allow(resource, ids);
+        }
+        for (resource, ids) in &config.deny {
+            svc.deny(resource, ids);
+        }
     }
     svc
 }

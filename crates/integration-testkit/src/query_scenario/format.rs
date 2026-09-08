@@ -23,7 +23,7 @@ pub struct QueryScenario {
 }
 
 /// Either a preset name (string) or an inline value.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
 pub enum PresetOr<T> {
     Preset(String),
