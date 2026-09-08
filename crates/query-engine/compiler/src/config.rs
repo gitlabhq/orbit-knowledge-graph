@@ -117,14 +117,33 @@ compiler_pipeline_macros::define_compiler_ctx! {
 }
 
 fn validate(ctx: &mut impl CompilerCtx) -> Result<()> {
-    let json = require(ctx.take_json(), "json")?;
-    let ontology = ctx.ontology();
-    let v = validate::Validator::new(ontology);
-    let value = v.check_json(&json)?;
-    v.check_ontology(&value)?;
-    let query_hash = cursor::canonical_hash(&value);
-    let mut input: Input = serde_json::from_value(value)?;
-    input.compiler.query_hash = query_hash;
+    let (json, input) = (ctx.take_json(), ctx.take_input());
+    let v = validate::Validator::new(ctx.ontology());
+    let mut input = match (json, input) {
+        (Some(json), None) => {
+            let value = v.check_json(&json)?;
+            v.check_ontology(&value)?;
+            let query_hash = cursor::canonical_hash(&value);
+            let mut input: Input = serde_json::from_value(value)?;
+            input.compiler.query_hash = query_hash;
+            input
+        }
+        (None, Some(input)) => {
+            if input.cursor.is_some() {
+                return Err(QueryError::PaginationError(
+                    "typed frontend cursor binding is not supported yet".into(),
+                ));
+            }
+            crate::input_validation::check(&input, ctx.ontology())?;
+            input
+        }
+        _ => {
+            return Err(QueryError::PipelineInvariant(
+                "expected either JSON or typed input".into(),
+            ));
+        }
+    };
+    let query_hash = input.compiler.query_hash;
     if let Some(c) = &mut input.cursor
         && let Some(after) = &c.after
     {
