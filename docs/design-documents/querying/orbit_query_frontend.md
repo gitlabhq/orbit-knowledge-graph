@@ -43,7 +43,8 @@ Both compiler entry points run the same ClickHouse pipeline in the same pass ord
 
 The validation phase accepts exactly one input source. JSON retains its existing schema and ontology checks.
 Typed input uses `input_validation` for shape, identifier, and ontology checks that JSON deserialization would otherwise provide.
-The adapter reuses schema-defined scalar bounds and reports them in the same error category as the JSON schema.
+It does not read the JSON schema. Its limits are Rust constants in `schema_limits`, and the compiler's build script asserts that the schema still matches them.
+That keeps the typed path independent of the schema file, so retiring the JSON DSL later does not change what the frontend enforces.
 Both sources then run the existing reference and filter-type checks.
 
 Normalization, restriction, security checks, hydration planning, and SQL generation remain shared.

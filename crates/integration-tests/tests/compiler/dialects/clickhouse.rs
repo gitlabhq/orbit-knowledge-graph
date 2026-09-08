@@ -1223,6 +1223,33 @@ fn orbit_query_schema_caps_reject_with_the_json_category() {
     for (json, orbit_query) in cases {
         compile_pair(json, orbit_query, &test_ontology(), &test_ctx()).unwrap_err();
     }
+
+    let long_identifier = "a".repeat(65);
+    let long_string = "x".repeat(1025);
+    let bounded = [
+        (
+            format!(
+                r#"{{"query_type":"traversal","nodes":[{{"id":"{long_identifier}","entity":"User","node_ids":[1]}}]}}"#
+            ),
+            format!("MATCH ({long_identifier}:User {{id: 1}}) RETURN {long_identifier}"),
+        ),
+        (
+            format!(
+                r#"{{"query_type":"traversal","nodes":[{{"id":"u","entity":"User","filters":{{"username":"{long_string}"}}}}]}}"#
+            ),
+            format!("MATCH (u:User {{username: '{long_string}'}}) RETURN u"),
+        ),
+    ];
+    for (json, orbit_query) in &bounded {
+        compile_pair(json, orbit_query, &test_ontology(), &test_ctx()).unwrap_err();
+    }
+    compile_pair(
+        r#"{"query_type":"traversal","nodes":[{"id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","entity":"User","node_ids":[1]}]}"#,
+        "MATCH (aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:User {id: 1}) RETURN aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        &test_ontology(),
+        &test_ctx(),
+    )
+    .unwrap();
 }
 
 #[test]

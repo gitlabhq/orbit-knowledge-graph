@@ -1,20 +1,25 @@
 use std::collections::HashMap;
-use std::sync::OnceLock;
 
 use serde_json::Value;
 
 use crate::error::{QueryError, Result};
 use crate::input::{ColumnSelection, FilterOp, Input, InputFilter, InputGroupByKey, QueryType};
-use crate::schema_limits::{MAX_HOPS_CAP, MAX_IN_VALUES, MAX_REL_TYPES};
+use crate::schema_limits::{
+    MAX_COLUMNS, MAX_FILTER_ENTRIES_PER_PROPERTY, MAX_FILTER_STRING_LEN, MAX_FILTERS_PER_NODE,
+    MAX_FILTERS_PER_REL, MAX_HOPS_CAP, MAX_IDENTIFIER_LEN, MAX_IN_VALUES, MAX_LIMIT, MAX_NODE_IDS,
+    MAX_NODES_CAP, MAX_REL_TYPES, MAX_RELS_CAP,
+};
 
 use crate::Ontology;
-use crate::passes::validate::{BASE_SCHEMA_JSON, node_ref_regex};
 
 pub fn validate_identifier(identifier: &str) -> Result<()> {
-    if node_ref_regex()
-        .captures(identifier)
-        .is_some_and(|parts| parts.name("property").is_none())
-    {
+    let mut chars = identifier.chars();
+    let valid = identifier.len() <= MAX_IDENTIFIER_LEN
+        && chars
+            .next()
+            .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_');
+    if valid {
         Ok(())
     } else {
         Err(QueryError::Validation(format!(
@@ -30,27 +35,50 @@ pub(crate) fn check(input: &Input, ontology: &Ontology) -> Result<()> {
                 .into(),
         ));
     }
-    let max_limit = schema()["properties"]["limit"]["maximum"]
-        .as_u64()
-        .expect("limit maximum");
-    if input.limit == 0 || u64::from(input.limit) > max_limit {
+    if input.limit == 0 || input.limit > MAX_LIMIT {
         return Err(QueryError::Validation(format!(
-            "limit must be between 1 and {max_limit}"
+            "limit must be between 1 and {MAX_LIMIT}"
+        )));
+    }
+    if input.nodes.len() > MAX_NODES_CAP {
+        return Err(QueryError::Validation(format!(
+            "nodes count ({}) must not exceed {MAX_NODES_CAP}",
+            input.nodes.len()
+        )));
+    }
+    if input.relationships.len() > MAX_RELS_CAP {
+        return Err(QueryError::Validation(format!(
+            "relationships count ({}) must not exceed {MAX_RELS_CAP}",
+            input.relationships.len()
         )));
     }
     for node in &input.nodes {
         validate_identifier(&node.id)?;
         validate_identifier(&node.id_property)?;
+        if node.node_ids.len() > MAX_NODE_IDS {
+            return Err(QueryError::Validation(format!(
+                "node_ids count ({}) for node {:?} must not exceed {MAX_NODE_IDS}",
+                node.node_ids.len(),
+                node.id
+            )));
+        }
+        if node.filters.len() > MAX_FILTERS_PER_NODE {
+            return Err(QueryError::Validation(format!(
+                "filter property count ({}) for node {:?} must not exceed {MAX_FILTERS_PER_NODE}",
+                node.filters.len(),
+                node.id
+            )));
+        }
         let entity = node
             .entity
             .as_deref()
             .ok_or_else(|| QueryError::Validation("each node requires an entity".into()))?;
         check_input_field(ontology, entity, &node.id_property)?;
         if let Some(ColumnSelection::List(columns)) = &node.columns {
-            if columns.is_empty() {
-                return Err(QueryError::Validation(
-                    "column selection must not be empty".into(),
-                ));
+            if columns.is_empty() || columns.len() > MAX_COLUMNS {
+                return Err(QueryError::Validation(format!(
+                    "column selection must list between 1 and {MAX_COLUMNS} columns"
+                )));
             }
             for column in columns {
                 check_input_field(ontology, entity, column)?;
@@ -72,6 +100,12 @@ pub(crate) fn check(input: &Input, ontology: &Ontology) -> Result<()> {
             )));
         }
         check_input_relationship_types(ontology, &edge.types)?;
+        if edge.filters.len() > MAX_FILTERS_PER_REL {
+            return Err(QueryError::Validation(format!(
+                "relationship filter property count ({}) must not exceed {MAX_FILTERS_PER_REL}",
+                edge.filters.len()
+            )));
+        }
         check_filters(&edge.filters)?;
     }
     if let Some(path) = &input.path {
@@ -135,7 +169,7 @@ fn check_input_field(ontology: &Ontology, entity: &str, property: &str) -> Resul
 
 fn check_input_relationship_types(ontology: &Ontology, types: &[String]) -> Result<()> {
     if types.len() > MAX_REL_TYPES {
-        return Err(QueryError::LimitExceeded(format!(
+        return Err(QueryError::Validation(format!(
             "relationship types must not exceed {MAX_REL_TYPES}"
         )));
     }
@@ -149,31 +183,24 @@ fn check_input_relationship_types(ontology: &Ontology, types: &[String]) -> Resu
     Ok(())
 }
 
-fn schema() -> &'static Value {
-    static SCHEMA: OnceLock<Value> = OnceLock::new();
-    SCHEMA.get_or_init(|| serde_json::from_str(BASE_SCHEMA_JSON).expect("valid query schema"))
-}
-
-fn filter_value_validator() -> &'static jsonschema::Validator {
-    static VALIDATOR: OnceLock<jsonschema::Validator> = OnceLock::new();
-    VALIDATOR.get_or_init(|| {
-        let mut schema = schema().clone();
-        schema
-            .as_object_mut()
-            .expect("schema object")
-            .retain(|key, _| matches!(key.as_str(), "$schema" | "$defs"));
-        schema["$ref"] = Value::from("#/$defs/FilterValue");
-        jsonschema::validator_for(&schema).expect("valid filter value schema")
-    })
+fn is_valid_filter_value(value: &Value) -> bool {
+    match value {
+        Value::Number(_) | Value::Bool(_) => true,
+        Value::String(text) => text.chars().count() <= MAX_FILTER_STRING_LEN,
+        Value::Array(values) => {
+            values.len() <= MAX_IN_VALUES && values.iter().all(is_valid_filter_value)
+        }
+        Value::Null | Value::Object(_) => false,
+    }
 }
 
 fn check_filters(filters: &HashMap<String, Vec<InputFilter>>) -> Result<()> {
     for (property, predicates) in filters {
         validate_identifier(property)?;
-        if predicates.is_empty() {
-            return Err(QueryError::Validation(
-                "filter needs at least one predicate".into(),
-            ));
+        if predicates.is_empty() || predicates.len() > MAX_FILTER_ENTRIES_PER_PROPERTY {
+            return Err(QueryError::Validation(format!(
+                "filter on {property:?} needs between 1 and {MAX_FILTER_ENTRIES_PER_PROPERTY} predicates"
+            )));
         }
         for filter in predicates {
             let op = filter.op.unwrap_or(FilterOp::Eq);
@@ -189,9 +216,9 @@ fn check_filters(filters: &HashMap<String, Vec<InputFilter>>) -> Result<()> {
                 .value
                 .as_ref()
                 .ok_or_else(|| QueryError::Validation("predicate requires a value".into()))?;
-            if !filter_value_validator().is_valid(value) {
+            if !is_valid_filter_value(value) {
                 return Err(QueryError::Validation(format!(
-                    "invalid filter value for {property:?}; values must obey the query schema's type, string, and list bounds"
+                    "invalid filter value for {property:?}; values must be numbers, booleans, strings up to {MAX_FILTER_STRING_LEN} characters, or lists of up to {MAX_IN_VALUES} such values"
                 )));
             }
             if op == FilterOp::In
