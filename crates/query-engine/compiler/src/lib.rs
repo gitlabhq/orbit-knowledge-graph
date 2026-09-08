@@ -293,6 +293,35 @@ mod tests {
     }
 
     #[test]
+    fn security_filters_follow_the_supplied_ontology_not_the_embedded_one() {
+        let mut sources = ontology::migrations::embedded_sources();
+        let user = sources.get_mut("nodes/core/user.yaml").unwrap();
+        *user = user.replace(
+            "destination_table: gl_user",
+            "destination_table: gl_archived_user",
+        );
+        let global = ontology::archive::OntologyArchive::from_sources(1, &sources)
+            .unwrap()
+            .load_ontology()
+            .unwrap()
+            .with_schema_version_prefix("v1_");
+        let namespaced = ONTOLOGY.clone().with_schema_version_prefix("v2_");
+        let query = r#"{"query_type":"traversal","nodes":[{"id":"project","entity":"Project","node_ids":[1],"columns":["name"]}],"limit":1}"#;
+
+        let global_query = r#"{"query_type":"traversal","nodes":[{"id":"user","entity":"User","node_ids":[1],"columns":["username"]}],"limit":1}"#;
+        let global_sql = compile(global_query, &global, &security_ctx())
+            .unwrap()
+            .base
+            .render();
+        let namespaced_sql = compile(query, &namespaced, &security_ctx())
+            .unwrap()
+            .base
+            .render();
+        assert!(!global_sql.contains("startsWith("), "{global_sql}");
+        assert!(namespaced_sql.contains("startsWith("), "{namespaced_sql}");
+    }
+
+    #[test]
     fn compile_with_prefixed_ontology_prefixes_edge_table() {
         let prefixed = ONTOLOGY.clone().with_schema_version_prefix("v1_");
 

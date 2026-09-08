@@ -249,9 +249,6 @@ pub async fn run_dispatcher(
 ) -> Result<(), DispatcherError> {
     let services = orchestrator::scheduled::connect(&config.nats).await?;
 
-    let catalog = OntologyCatalog::open(services.nats_client.clone()).await?;
-    let ontology = catalog.publish(archive).await?;
-
     if let Err(error) = nats::versioning::gc_idle_release_streams(
         &services.nats_connection,
         config.nats.release_gc_idle_threshold(),
@@ -263,6 +260,16 @@ pub async fn run_dispatcher(
 
     let graph = config.graph.build_client();
     let datalake = config.datalake.build_client();
+    let catalog =
+        OntologyCatalog::open(services.nats_client.clone(), &config.graph.database).await?;
+    let ontology = catalog.publish(archive).await?;
+    if let Some(active) = orbit_migrations::version::read_active_version(&graph).await? {
+        catalog
+            .load(active)
+            .await?
+            .load_ontology()
+            .map_err(orbit_migrations::catalog::CatalogError::from)?;
+    }
     let metrics = ScheduledTaskMetrics::new();
     let lock_service = services.lock_service.clone();
 
@@ -338,7 +345,7 @@ pub async fn run_dispatcher(
     let checkpoint_store = Arc::new(checkpoint::ClickHouseCheckpointStore::new(deletion_graph));
 
     let backfill = Arc::new(CodeBackfill::new(
-        services.nats.clone(),
+        services.nats_services.clone(),
         config.graph.build_client(),
         config.datalake.build_client(),
         metrics.clone(),
@@ -348,13 +355,13 @@ pub async fn run_dispatcher(
 
     let tasks: Vec<Box<dyn ScheduledTask>> = vec![
         Box::new(GlobalDispatcher::new(
-            services.nats.clone(),
+            services.nats_services.clone(),
             metrics.clone(),
             config.schedule.tasks.global.clone(),
             campaign.clone(),
         )),
         Box::new(NamespaceDispatcher::new(
-            services.nats.clone(),
+            services.nats_services.clone(),
             datalake,
             Arc::new(checkpoint::ClickHouseCheckpointStore::new(Arc::new(
                 config.graph.build_client(),
@@ -383,7 +390,7 @@ pub async fn run_dispatcher(
         Box::new(NamespaceDeletionScheduler::new(
             deletion_store,
             checkpoint_store,
-            services.nats.clone(),
+            services.nats_services.clone(),
             metrics.clone(),
             config.schedule.tasks.namespace_deletion.clone(),
         )),
@@ -406,16 +413,17 @@ pub async fn run_dispatcher(
             metrics.clone(),
             campaign.clone(),
             services.nats_connection.clone(),
+            catalog,
         )),
     ];
 
     let routes: Vec<Arc<dyn Route>> = vec![
         Arc::new(CodeIndexingTaskRoute::new(
-            services.nats.clone(),
+            services.nats_services.clone(),
             metrics.clone(),
         )),
         Arc::new(EnabledNamespacesRoute::new(
-            NamespaceIndexingDispatch::new(services.nats.clone()),
+            NamespaceIndexingDispatch::new(services.nats_services.clone()),
             backfill.clone(),
             config.datalake.build_client(),
         )),
@@ -423,7 +431,7 @@ pub async fn run_dispatcher(
 
     let scheduled = Scheduled::new(tasks, lock_service);
     let siphon = Siphon::new(
-        services.nats.clone(),
+        services.nats_services.clone(),
         metrics,
         config.schedule.tasks.siphon.clone(),
         campaign.clone(),

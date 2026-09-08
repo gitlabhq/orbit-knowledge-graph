@@ -108,6 +108,9 @@ pub enum DispatcherError {
     #[error("ontology archive error: {0}")]
     Archive(#[from] orbit_migrations::catalog::CatalogError),
 
+    #[error(transparent)]
+    SchemaVersion(#[from] orbit_migrations::version::SchemaVersionError),
+
     #[error("scheduler error: {0}")]
     Scheduler(#[from] crate::orchestrator::scheduled::SchedulerError),
 

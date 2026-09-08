@@ -45,7 +45,13 @@ impl PipelineStage for ClickHouseExecutor {
             .get::<crate::auth::Claims>()
             .map(|c| c.user_id)
             .unwrap_or(0);
-        let log_comment = correlation::log_comment_base(user_id, &ctx.query_json);
+        let schema_version = ctx
+            .server_extensions
+            .get::<crate::pipeline::service::ServingSchemaVersion>()
+            .ok_or_else(|| {
+                PipelineError::Execution("serving schema version not available".into())
+            })?;
+        let log_comment = correlation::log_comment_base(user_id, &ctx.query_json, schema_version.0);
 
         let (prepared, result_context) = {
             let compiled = ctx.compiled().inspect_err(|e| obs.record_error(e))?;

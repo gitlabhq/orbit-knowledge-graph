@@ -2,7 +2,6 @@
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 use std::sync::Arc;
-use std::time::Duration;
 
 use clap::Parser;
 use clickhouse_client::ClickHouseConfigurationExt;
@@ -15,9 +14,8 @@ use orbit_server::auth::JwtValidator;
 use orbit_server::cli::{Args, Mode};
 use orbit_server::cluster_health::ClusterHealthChecker;
 use orbit_server::content;
-use orbit_server::grpc::GrpcServer;
+use orbit_server::grpc::{GrpcServer, OrbitServiceImpl};
 use orbit_server::health_check as health_check_mode;
-use orbit_server::pipeline::PathResolver;
 use orbit_server::schema_watcher::SchemaWatcher;
 use orbit_server::shutdown;
 use orbit_server::webserver::Server as HttpServer;
@@ -69,7 +67,11 @@ async fn main() -> anyhow::Result<()> {
     }
     let _guard = builder.init().expect("labkit init");
 
-    let ontology = Arc::new(ontology::Ontology::load_embedded().expect("ontology must load"));
+    let archive = ontology::archive::OntologyArchive::from_bytes(
+        *SCHEMA_VERSION,
+        include_bytes!(env!("ONTOLOGY_ARCHIVE_PATH")),
+    )?;
+    let ontology = Arc::new(ontology::Ontology::load_embedded()?);
     ontology::constants::validate_ontology_constants(&ontology);
 
     info!(mode = ?args.mode, "starting");
@@ -120,22 +122,7 @@ async fn main() -> anyhow::Result<()> {
         }
         Mode::Webserver => {
             config.schema.validate()?;
-            let graph = config.graph.build_client();
-
-            let embedded = *SCHEMA_VERSION;
-            let prefix = schema::version::table_prefix(embedded);
-            info!(version = embedded, table_prefix = %prefix, "pinned to embedded schema version");
-            let ontology =
-                Arc::new(Arc::unwrap_or_clone(ontology).with_schema_version_prefix(&prefix));
-
-            let watcher = SchemaWatcher::spawn(
-                graph,
-                embedded,
-                Duration::from_secs(config.schema.version_poll_interval_secs),
-                shutdown.clone(),
-            );
-
-            run_webserver(&config, ontology, watcher, shutdown.clone()).await
+            run_webserver(&config, ontology, archive, shutdown.clone()).await
         }
     };
 
@@ -147,7 +134,7 @@ async fn main() -> anyhow::Result<()> {
 async fn run_webserver(
     config: &AppConfig,
     ontology: Arc<ontology::Ontology>,
-    schema_watcher: Arc<SchemaWatcher>,
+    archive: ontology::archive::OntologyArchive,
     shutdown: CancellationToken,
 ) -> anyhow::Result<()> {
     let validator = Arc::new(JwtValidator::new(
@@ -180,32 +167,17 @@ async fn run_webserver(
     );
     info!("Content resolution enabled (GitlabClient configured)");
 
-    let path_resolver = Arc::new(
-        PathResolver::new(
-            Arc::new(config.graph.build_client()),
-            &ontology,
-            &config.path_resolver,
-        )
-        .await,
-    );
-
-    let http_server = HttpServer::bind(config.bind_address, schema_watcher).await?;
-    info!(addr = %config.bind_address, "HTTP server bound");
-
     let tls_config = orbit_server::tls::load_tls_config(&config.tls).await?;
 
-    let mut grpc_server = GrpcServer::new(
-        config.grpc_bind_address,
+    let mut service = OrbitServiceImpl::new(
         validator,
         ontology,
         &config.graph,
         cluster_health,
-        tls_config,
-        config.grpc.clone(),
+        config.grpc.stream_timeout_secs,
         Arc::new(config.analytics.clone()),
     )
-    .with_resolver_registry(Arc::new(resolver_registry))
-    .with_path_resolver(path_resolver);
+    .with_resolver_registry(Arc::new(resolver_registry));
 
     info!("initializing NATS connection");
     let nats = Arc::new(
@@ -225,11 +197,11 @@ async fn run_webserver(
         )
         .await?;
     let indexing_status_store = indexer::indexing_status::IndexingStatusStore::new(broker);
-    grpc_server = grpc_server.with_indexing_status(indexing_status_store);
+    service = service.with_indexing_status(indexing_status_store);
 
     if config.query.default.graph_query_cache_enabled == Some(true) {
         info!("graph query cache enabled");
-        grpc_server = grpc_server.with_cache_broker(nats);
+        service = service.with_cache_broker(nats.clone());
     }
 
     orbit_billing::register_metrics();
@@ -248,7 +220,7 @@ async fn run_webserver(
         );
         let tracker = SnowplowBillingTracker::from_config(&config.billing)
             .map_err(|e| anyhow::anyhow!("billing tracker initialization failed: {e}"))?;
-        grpc_server = grpc_server.with_billing(Arc::new(tracker));
+        service = service.with_billing(Arc::new(tracker));
     } else {
         info!("billing tracker disabled (billing.enabled=false): no events will be emitted");
     }
@@ -272,7 +244,7 @@ async fn run_webserver(
         );
         let quota = QuotaService::from_config(&config.billing)
             .map_err(|e| anyhow::anyhow!("quota service initialization failed: {e}"))?;
-        grpc_server = grpc_server.with_quota(Arc::new(quota));
+        service = service.with_quota(Arc::new(quota));
     }
 
     if config.analytics.enabled {
@@ -290,8 +262,19 @@ async fn run_webserver(
         );
         let tracker = SnowplowAnalyticsTracker::from_config(&config.analytics)
             .map_err(|e| anyhow::anyhow!("analytics tracker initialization failed: {e}"))?;
-        grpc_server = grpc_server.with_analytics(Arc::new(tracker));
+        service = service.with_analytics(Arc::new(tracker));
     }
+
+    let catalog =
+        orbit_migrations::catalog::OntologyCatalog::open(nats, &config.graph.database).await?;
+    let watcher = SchemaWatcher::spawn(service, archive, catalog, config, shutdown.clone());
+    let http_server = HttpServer::bind(config.bind_address, watcher.clone()).await?;
+    let grpc_server = GrpcServer::new(
+        config.grpc_bind_address,
+        watcher,
+        tls_config,
+        config.grpc.clone(),
+    );
 
     info!(addr = %config.grpc_bind_address, "gRPC server starting");
 

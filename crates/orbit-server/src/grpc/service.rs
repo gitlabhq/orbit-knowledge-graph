@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use clickhouse_client::ClickHouseConfigurationExt;
 use ontology::Ontology;
-use orbit_server_config::{AnalyticsConfig, ClickHouseConfiguration};
+use orbit_server_config::{AnalyticsConfig, ClickHouseConfiguration, PathResolverConfig};
 use orbit_utils::traversal_path::TraversalPath;
 use query_engine::pipeline::PipelineError;
 use query_engine::shared::content::ColumnResolverRegistry;
@@ -74,6 +74,53 @@ pub struct OrbitServiceImpl {
 }
 
 impl OrbitServiceImpl {
+    pub async fn for_schema(
+        &self,
+        archive: &ontology::archive::OntologyArchive,
+        graph: Arc<clickhouse_client::ArrowClickHouseClient>,
+        path_config: &PathResolverConfig,
+    ) -> anyhow::Result<Self> {
+        let version = archive.schema_version();
+        let prefix = orbit_migrations::version::table_prefix(version);
+        let ontology = Arc::new(archive.load_ontology()?.with_schema_version_prefix(&prefix));
+        let path_resolver =
+            Arc::new(crate::pipeline::PathResolver::new(graph, &ontology, path_config).await);
+
+        let mut named_queries = named_queries::NamedQueries::load_embedded()?;
+        let example_bindings = named_queries::BindingValues { current_user_id: 1 };
+        let example_security = query_engine::compiler::SecurityContext::new(1, vec!["1/".into()])?;
+        named_queries.retain(|query| {
+            let example_query = query.render(&example_bindings, &query.example_parameters());
+            let compatible = match example_query {
+                Ok(rendered) => {
+                    query_engine::compiler::compile(&rendered, &ontology, &example_security).is_ok()
+                }
+                Err(_) => false,
+            };
+
+            if !compatible {
+                tracing::warn!(query = %query.name, version, "named query unavailable in serving schema");
+            }
+            compatible
+        });
+
+        Ok(Self {
+            validator: self.validator.clone(),
+            tool_service: ToolService::new(ontology.clone()),
+            named_queries: Arc::new(named_queries),
+            pipeline: self
+                .pipeline
+                .clone()
+                .with_schema(ontology.clone(), version)
+                .with_path_resolver(path_resolver),
+            graph_status: self.graph_status.clone().with_ontology(ontology.clone()),
+            ontology,
+            cluster_health: self.cluster_health.clone(),
+            stream_timeout_secs: self.stream_timeout_secs,
+            quota: self.quota.clone(),
+        })
+    }
+
     pub fn new(
         validator: Arc<JwtValidator>,
         ontology: Arc<Ontology>,
@@ -145,6 +192,81 @@ impl OrbitServiceImpl {
 
 type ExecuteQueryStream =
     Pin<Box<dyn futures::Stream<Item = Result<ExecuteQueryMessage, Status>> + Send>>;
+
+#[tonic::async_trait]
+impl crate::proto::orbit_service_server::OrbitService for crate::schema_watcher::SchemaWatcher {
+    type ExecuteQueryStream = ExecuteQueryStream;
+
+    async fn list_tools(
+        &self,
+        request: Request<ListToolsRequest>,
+    ) -> Result<Response<ListToolsResponse>, Status> {
+        self.serving()?.list_tools(request).await
+    }
+
+    async fn list_agent_commands(
+        &self,
+        request: Request<ListAgentCommandsRequest>,
+    ) -> Result<Response<ListAgentCommandsResponse>, Status> {
+        self.serving()?.list_agent_commands(request).await
+    }
+
+    async fn invoke_agent_command(
+        &self,
+        request: Request<InvokeAgentCommandRequest>,
+    ) -> Result<Response<InvokeAgentCommandResponse>, Status> {
+        self.serving()?.invoke_agent_command(request).await
+    }
+
+    async fn execute_query(
+        &self,
+        request: Request<Streaming<ExecuteQueryMessage>>,
+    ) -> Result<Response<Self::ExecuteQueryStream>, Status> {
+        self.serving()?.execute_query(request).await
+    }
+
+    async fn get_graph_schema(
+        &self,
+        request: Request<GetGraphSchemaRequest>,
+    ) -> Result<Response<GetGraphSchemaResponse>, Status> {
+        self.serving()?.get_graph_schema(request).await
+    }
+
+    async fn get_response_format(
+        &self,
+        request: Request<GetResponseFormatRequest>,
+    ) -> Result<Response<GetResponseFormatResponse>, Status> {
+        self.serving()?.get_response_format(request).await
+    }
+
+    async fn get_query_dsl(
+        &self,
+        request: Request<GetQueryDslRequest>,
+    ) -> Result<Response<GetQueryDslResponse>, Status> {
+        self.serving()?.get_query_dsl(request).await
+    }
+
+    async fn list_named_queries(
+        &self,
+        request: Request<ListNamedQueriesRequest>,
+    ) -> Result<Response<ListNamedQueriesResponse>, Status> {
+        self.serving()?.list_named_queries(request).await
+    }
+
+    async fn get_cluster_health(
+        &self,
+        request: Request<GetClusterHealthRequest>,
+    ) -> Result<Response<GetClusterHealthResponse>, Status> {
+        self.serving()?.get_cluster_health(request).await
+    }
+
+    async fn get_graph_status(
+        &self,
+        request: Request<GetGraphStatusRequest>,
+    ) -> Result<Response<GetGraphStatusResponse>, Status> {
+        self.serving()?.get_graph_status(request).await
+    }
+}
 
 #[tonic::async_trait]
 impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
@@ -301,14 +423,24 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
 
         let pipeline = self.pipeline.clone();
         let named_queries = Arc::clone(&self.named_queries);
-        let stream_timeout = self.stream_timeout_secs;
+        let stream_timeout = std::time::Duration::from_secs(self.stream_timeout_secs);
+        let deadline = tokio::time::Instant::now() + stream_timeout;
         let span = tracing::Span::current();
 
         tokio::spawn(
             async move {
-                let req = match receive_query_request(&mut stream, &tx).await {
-                    Some(r) => r,
-                    None => return,
+                let req = match tokio::time::timeout_at(
+                    deadline,
+                    receive_query_request(&mut stream, &tx),
+                )
+                .await
+                {
+                    Ok(Some(request)) => request,
+                    Ok(None) => return,
+                    Err(_) => {
+                        send_query_error(&tx, PipelineError::Timeout).await;
+                        return;
+                    }
                 };
 
                 let resolved = match QueryType::try_from(req.query_type) {
@@ -335,7 +467,7 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
 
                 let use_llm_format = req.format == ResponseFormat::Llm as i32;
 
-                let timeout = std::time::Duration::from_secs(stream_timeout);
+                let timeout = deadline.saturating_duration_since(tokio::time::Instant::now());
                 let result = pipeline
                     .run_query(
                         claims,

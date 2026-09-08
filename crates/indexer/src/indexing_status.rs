@@ -44,6 +44,7 @@ pub struct RunRows {
     pub written: Option<u64>,
 }
 
+#[derive(Clone)]
 pub struct IndexingStatusStore {
     kv: Arc<dyn nats_client::KvServices>,
 }

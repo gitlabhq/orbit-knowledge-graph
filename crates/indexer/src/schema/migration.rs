@@ -191,7 +191,7 @@ async fn run_rollback(
             target_version = *SCHEMA_VERSION,
             "embedded version's table set is complete — rolling back via direct re-activation"
         );
-        execute::reactivate_version(graph, *SCHEMA_VERSION).await?;
+        orbit_migrations::version::promote_version(graph, *SCHEMA_VERSION).await?;
         metrics.record("complete", "rollback_reactivated");
         info!(
             version = *SCHEMA_VERSION,

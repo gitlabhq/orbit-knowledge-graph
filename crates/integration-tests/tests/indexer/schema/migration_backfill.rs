@@ -55,6 +55,27 @@ impl TestContext {
         }
     }
 
+    async fn ontology_catalog(&self) -> orbit_migrations::catalog::OntologyCatalog {
+        let client = std::sync::Arc::new(
+            nats_client::NatsClient::connect(&self.nats_config())
+                .await
+                .unwrap(),
+        );
+        let catalog = orbit_migrations::catalog::OntologyCatalog::open(
+            client,
+            &self.clickhouse.config.database,
+        )
+        .await
+        .unwrap();
+        let archive = ontology::archive::OntologyArchive::from_sources(
+            *SCHEMA_VERSION,
+            &ontology::migrations::embedded_sources(),
+        )
+        .unwrap();
+        catalog.publish(&archive).await.unwrap();
+        catalog
+    }
+
     fn nats_config(&self) -> NatsConfiguration {
         NatsConfiguration {
             url: self.nats_url.clone(),
@@ -180,7 +201,7 @@ async fn migration_triggers_backfill_for_all_enabled_namespaces() {
     campaign.set(indexer::campaign::campaign_id_for_version(1));
 
     let backfill = CodeBackfill::new(
-        services.nats.clone(),
+        services.nats_services.clone(),
         context.clickhouse.create_client(),
         context.clickhouse.config.build_client(),
         ScheduledTaskMetrics::new(),
@@ -251,7 +272,7 @@ async fn backfill_skips_projects_with_existing_checkpoints() {
         .unwrap();
 
     let backfill = CodeBackfill::new(
-        services.nats.clone(),
+        services.nats_services.clone(),
         context.clickhouse.create_client(),
         context.clickhouse.config.build_client(),
         ScheduledTaskMetrics::new(),
@@ -328,6 +349,7 @@ async fn migration_completion_checker_promotes_rebuilt_rollback_version() {
         ScheduledTaskMetrics::new(),
         std::sync::Arc::new(indexer::campaign::CampaignState::new()),
         services.nats_connection.clone(),
+        context.ontology_catalog().await,
     );
 
     checker.run().await.unwrap();
@@ -404,6 +426,7 @@ async fn migration_completion_checker_promotes_when_no_namespaces_are_enabled() 
         ScheduledTaskMetrics::new(),
         std::sync::Arc::new(indexer::campaign::CampaignState::new()),
         services.nats_connection.clone(),
+        context.ontology_catalog().await,
     );
 
     checker.run().await.unwrap();
@@ -471,6 +494,7 @@ async fn migration_completion_checker_does_not_promote_version_it_does_not_embed
         ScheduledTaskMetrics::new(),
         std::sync::Arc::new(indexer::campaign::CampaignState::new()),
         services.nats_connection.clone(),
+        context.ontology_catalog().await,
     );
 
     checker.run().await.unwrap();
@@ -539,6 +563,7 @@ async fn migration_completion_checker_guards_against_two_migrating_versions() {
         ScheduledTaskMetrics::new(),
         std::sync::Arc::new(indexer::campaign::CampaignState::new()),
         services.nats_connection.clone(),
+        context.ontology_catalog().await,
     );
 
     checker.run().await.unwrap();

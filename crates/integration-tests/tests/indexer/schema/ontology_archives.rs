@@ -149,7 +149,9 @@ impl TestContext {
         .await
         .expect("NATS did not become ready");
 
-        OntologyCatalog::open(client).await.unwrap()
+        OntologyCatalog::open(client, &self.config.graph.database)
+            .await
+            .unwrap()
     }
 
     async fn restart_nats(&mut self) {

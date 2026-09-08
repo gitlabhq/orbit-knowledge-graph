@@ -3,9 +3,10 @@ use std::sync::Arc;
 
 use orbit_server::auth::JwtValidator;
 use orbit_server::cluster_health::ClusterHealthChecker;
-use orbit_server::grpc::GrpcServer;
+use orbit_server::grpc::{GrpcServer, OrbitServiceImpl};
 use orbit_server::proto::GetClusterHealthRequest;
 use orbit_server::proto::orbit_service_client::OrbitServiceClient;
+use orbit_server::schema_watcher::SchemaWatcher;
 use orbit_server_config::{AnalyticsConfig, ClickHouseConfiguration, GrpcConfig};
 use tonic::transport::server::ServerTlsConfig;
 use tonic::transport::{Certificate, ClientTlsConfig, Endpoint, Identity};
@@ -35,15 +36,19 @@ fn build_grpc_server(addr: SocketAddr, tls_config: Option<ServerTlsConfig>) -> G
     let ontology = Arc::new(ontology::Ontology::load_embedded().expect("ontology must load"));
     let clickhouse_config = ClickHouseConfiguration::default();
     let cluster_health = ClusterHealthChecker::default().into_arc();
-    GrpcServer::new(
-        addr,
+    let service = OrbitServiceImpl::new(
         validator,
         ontology,
         &clickhouse_config,
         cluster_health,
+        GrpcConfig::default().stream_timeout_secs,
+        Arc::new(AnalyticsConfig::default()),
+    );
+    GrpcServer::new(
+        addr,
+        SchemaWatcher::fixed(service),
         tls_config,
         GrpcConfig::default(),
-        Arc::new(AnalyticsConfig::default()),
     )
 }
 

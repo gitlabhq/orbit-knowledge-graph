@@ -59,6 +59,7 @@ pub struct MigrationCompletionChecker {
     _task_metrics: ScheduledTaskMetrics,
     campaign: Arc<CampaignState>,
     nats_client: async_nats::Client,
+    catalog: orbit_migrations::catalog::OntologyCatalog,
 }
 
 impl MigrationCompletionChecker {
@@ -76,6 +77,7 @@ impl MigrationCompletionChecker {
         task_metrics: ScheduledTaskMetrics,
         campaign: Arc<CampaignState>,
         nats_client: async_nats::Client,
+        catalog: orbit_migrations::catalog::OntologyCatalog,
     ) -> Self {
         Self {
             graph,
@@ -88,6 +90,7 @@ impl MigrationCompletionChecker {
             _task_metrics: task_metrics,
             campaign,
             nats_client,
+            catalog,
         }
     }
 }
@@ -194,25 +197,28 @@ impl MigrationCompletionChecker {
             .await
             .map_err(|e| TaskError::new(format!("read all versions: {e}")))?;
 
-        let mut retired_versions = Vec::new();
-        for entry in &versions {
-            if entry.status == "active" && entry.version != migrating_version {
-                info!(
-                    version = entry.version,
-                    "marking old active version as retired"
-                );
-                orbit_migrations::version::mark_version_retired(&self.graph, entry.version)
-                    .await
-                    .map_err(|e| TaskError::new(format!("mark v{} retired: {e}", entry.version)))?;
-                retired_versions.push(entry.version);
-            }
-        }
+        self.catalog
+            .load(migrating_version)
+            .await
+            .map_err(|error| {
+                TaskError::new(format!("verify ontology archive before promotion: {error}"))
+            })?
+            .load_ontology()
+            .map_err(|error| {
+                TaskError::new(format!(
+                    "validate ontology archive before promotion: {error}"
+                ))
+            })?;
+        let retired_versions = versions
+            .iter()
+            .filter(|entry| entry.status == "active" && entry.version != migrating_version)
+            .map(|entry| entry.version);
 
         info!(
             version = migrating_version,
             "marking migrating version as active — schema migration complete"
         );
-        orbit_migrations::version::mark_version_active(&self.graph, migrating_version)
+        orbit_migrations::version::promote_version(&self.graph, migrating_version)
             .await
             .map_err(|e| TaskError::new(format!("mark v{migrating_version} active: {e}")))?;
 

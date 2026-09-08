@@ -24,6 +24,7 @@ use crate::proto::{
 
 use self::input::GraphStatusInput;
 
+#[derive(Clone)]
 pub struct GraphStatusService {
     client: Arc<ArrowClickHouseClient>,
     ontology: Arc<Ontology>,
@@ -48,6 +49,11 @@ impl GraphStatusService {
 
     pub fn with_indexing_status(mut self, store: IndexingStatusStore) -> Self {
         self.indexing_status = Some(store);
+        self
+    }
+
+    pub fn with_ontology(mut self, ontology: Arc<Ontology>) -> Self {
+        self.ontology = ontology;
         self
     }
 

@@ -46,7 +46,7 @@ pub(crate) fn log_comment(suffix: Option<&str>) -> String {
 
 /// Base-query `log_comment`: the `gkg` prefix plus a base64 attribution payload
 /// carrying correlation ID, user, DSL query, and the compiler/schema versions.
-pub(crate) fn log_comment_base(user_id: u64, query_json: &str) -> String {
+pub(crate) fn log_comment_base(user_id: u64, query_json: &str, schema_version: u32) -> String {
     let payload = AttributionPayload {
         correlation_id: labkit::correlation::current(),
         user_id,
@@ -54,7 +54,7 @@ pub(crate) fn log_comment_base(user_id: u64, query_json: &str) -> String {
         versions: Versions {
             payload: PAYLOAD_VERSION,
             dsl: orbit_versions::VERSIONS.query_dsl.clone(),
-            schema: *orbit_migrations::version::SCHEMA_VERSION,
+            schema: schema_version,
         },
     };
     let json = serde_json::to_vec(&payload).unwrap_or_default();
@@ -155,7 +155,7 @@ mod tests {
     #[test]
     fn base_payload_carries_attribution_and_versions() {
         let comment = with_correlation("req-abc-123", || {
-            log_comment_base(42, r#"{"query_type":"traversal"}"#)
+            log_comment_base(42, r#"{"query_type":"traversal"}"#, 7)
         });
         let p = decode_base_payload(&comment);
 
@@ -164,15 +164,12 @@ mod tests {
         assert_eq!(p["query"], r#"{"query_type":"traversal"}"#);
         assert_eq!(p["versions"]["payload"], PAYLOAD_VERSION);
         assert_eq!(p["versions"]["dsl"], orbit_versions::VERSIONS.query_dsl);
-        assert_eq!(
-            p["versions"]["schema"],
-            *orbit_migrations::version::SCHEMA_VERSION
-        );
+        assert_eq!(p["versions"]["schema"], 7);
     }
 
     #[test]
     fn base_payload_omits_correlation_when_absent() {
-        let p = decode_base_payload(&log_comment_base(1, "{}"));
+        let p = decode_base_payload(&log_comment_base(1, "{}", 7));
         assert!(p.get("correlation_id").is_none());
         assert_eq!(p["user_id"], 1);
     }

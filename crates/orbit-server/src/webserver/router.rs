@@ -35,8 +35,6 @@ async fn ready(State(schema_watcher): State<Arc<SchemaWatcher>>) -> impl IntoRes
     match schema_watcher.current() {
         SchemaState::Ready => {}
         SchemaState::Pending => unhealthy_components.push("schema_pending"),
-        SchemaState::Outdated => unhealthy_components.push("schema_outdated"),
-        SchemaState::Migrating => unhealthy_components.push("schema_migrating"),
     }
 
     let healthy = unhealthy_components.is_empty();
@@ -45,13 +43,7 @@ async fn ready(State(schema_watcher): State<Arc<SchemaWatcher>>) -> impl IntoRes
     } else {
         StatusCode::SERVICE_UNAVAILABLE
     };
-    let label = if healthy {
-        "ok"
-    } else if unhealthy_components == ["schema_migrating"] {
-        "migrating"
-    } else {
-        "unhealthy"
-    };
+    let label = if healthy { "ok" } else { "unhealthy" };
 
     (
         status_code,

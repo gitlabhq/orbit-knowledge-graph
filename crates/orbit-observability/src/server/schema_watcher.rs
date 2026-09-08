@@ -8,7 +8,7 @@ const DOMAIN: &str = "server.schema_watcher";
 
 pub const STATE: MetricSpec = MetricSpec::observable_gauge(
     "gkg.webserver.schema.state",
-    "Webserver readiness gate state (pending|ready|outdated|migrating); 1 indicates the active state per `state` label.",
+    "Webserver serving snapshot state (pending|ready); 1 indicates the current state per `state` label.",
     None,
     &[labels::STATE],
     DOMAIN,

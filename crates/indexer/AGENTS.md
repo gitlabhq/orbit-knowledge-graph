@@ -36,10 +36,9 @@ NATS JetStream → Engine → Handler Registry → ClickHouse
 
 ### Schema migration
 
-The **dispatcher** publishes its ontology archive to durable NATS KV before migration.
-See `docs/design-documents/schema_management.md` for archive retention and recovery.
+The **dispatcher** publishes the current ontology archive to a durable, graph-database-scoped NATS KV catalog before migration. Identical publication retries succeed; conflicting bytes for a published version fail. The webserver serves the database’s active archive during backfill and switches snapshots in-process after promotion.
 
-The dispatcher owns schema migration. At boot, `schema::migration::run_if_needed()` compares
+The **dispatcher** owns schema migration. At boot, `schema::migration::run_if_needed()` compares
 the embedded `SCHEMA_VERSION` with the active version in ClickHouse. On a mismatch, it acquires a
 NATS KV distributed lock and reads the requested scope from the migration ledger. A table-local
 SDLC change rebuilds the affected table and clones unaffected tables from the active version. If an
@@ -66,11 +65,10 @@ table-set.
 `migration_completion::MigrationCompletionChecker` runs as a scheduled task in DispatchIndexing
 mode. It checks the IDs of currently enabled top-level namespaces against completed checkpoints for
 every required namespaced pipeline. Disabled namespace checkpoints do not count. Required global
-pipelines must also be complete. The checker then promotes the `migrating` version to `active`,
-retires the old active version, and clears the re-index campaign.
+pipelines must also be complete. The checker verifies the incoming archive, promotes the `migrating` version to `active` and retires the outgoing version in one ClickHouse insert, then clears the re-index campaign.
 
 A single SQL query then enumerates all `v<N>_*` objects in `system.tables` whose version falls
-outside a keep-set computed in the same query (active + newest retired within
+outside a keep-set computed in the same query (active + most recently retired within
 `max_retained_versions` + migrating above active). Ontology-known objects are always dropped. Objects not in the ontology
 (rename-orphans like `v56_gl_edge_v2`, removed entities) are also dropped unless their base name
 (after stripping the `v<N>_` prefix) matches a `gc_preserve_patterns` regex from the ontology

@@ -241,7 +241,16 @@ WHERE id = '{namespace_id}';
 
 If the worker fails unexpectedly, the unacked message is redelivered by NATS to another worker. If the message exceeds `max_deliver`, the outcome depends on the subscription's `dead_letter_on_exhaustion` setting: subscriptions with `dead_letter_on_exhaustion: true` (e.g. Siphon CDC) publish the message to the `GKG_DEAD_LETTERS` stream for inspection and replay, while subscriptions with `dead_letter_on_exhaustion: false` (internal dispatch, the default) term-ack the message since the next dispatch cycle re-creates the request. This leverages eventual consistency which is acceptable since the system does not aim for real-time consistency.
 
-The term-ack path assumes the worker is alive to term the message. When a worker crashes or is killed after the final delivery attempt, JetStream gives up on the message without ever receiving an ack, nack, or term. Because GKG's versioned streams use `discard_new_per_subject` (one message per subject), that abandoned message permanently blocks its subject: the sweep and backfill dispatchers keep re-publishing the same request, but the stream discards every new copy. The `MaxDeliveriesReconciler` (an orchestrator trigger) closes this gap. It queue-subscribes to JetStream's `MAX_DELIVERIES` advisory across all replicas, and on each advisory for a GKG-managed stream it deletes the exhausted message, unblocking the subject so the next dispatch cycle can re-deliver the request. It ignores advisories for foreign streams (e.g. Siphon) and treats an already-deleted message as a no-op, so duplicate advisories and concurrent replicas are safe.
+The term-ack path assumes the worker is alive to term the message. When a worker crashes or is killed
+after the final delivery attempt, JetStream gives up on the message without ever receiving an ack,
+nack, or term. Because GKG's versioned streams use `discard_new_per_subject` (one message per subject),
+that abandoned message permanently blocks its subject: the sweep and backfill dispatchers keep
+re-publishing the same request, but the stream discards every new copy. The `MaxDeliveriesReconciler`
+(an orchestrator trigger) closes this gap. It queue-subscribes to JetStream's `MAX_DELIVERIES` advisory
+across all replicas, and on each advisory for a GKG-managed stream it deletes the exhausted message,
+unblocking the subject so the next dispatch cycle can re-deliver the request. It ignores advisories
+for foreign streams (e.g. Siphon) and treats an already-deleted message as a no-op, so duplicate
+advisories and concurrent replicas are safe.
 
 ##### ETL
 
@@ -434,9 +443,16 @@ Indexers then fill the rebuilt tables through the normal global and namespace sw
 
 **Schema update coordination**
 
-When indexing requires a schema update, the `gkg-webserver` must detect the new version so it can serve queries from the correct tables. The `SchemaWatcher` in the webserver polls the `gkg_schema_version` control table in ClickHouse at a configurable interval. When the active version transitions (e.g. from pending to ready, or outdated), the webserver updates its internal state accordingly. If the active version exceeds the binary's embedded version, the watcher requests a graceful shutdown so the pod restarts with a newer binary.
+Before migrating, the dispatcher publishes its versioned ontology archive to durable NATS KV.
+The Webserver's `SchemaWatcher` polls `gkg_schema_version` and loads the database's active ontology,
+so queries keep using the outgoing tables while the incoming version backfills.
 
-The system does not perform any breaking action on the schema until all namespaces have been migrated to the latest version.
+Once the required SDLC checkpoints are complete, promotion marks the incoming version active and
+the outgoing version retired in one insert. Each Webserver then replaces its serving snapshot;
+in-flight requests finish using their original snapshot and retained tables. Cutover needs neither
+a restart nor a blue-green deployment. A missing or invalid active archive stops new queries until
+the archive becomes available. See [schema management](../schema_management.md) for rollout and
+retention requirements.
 
 **Closing notes**
 

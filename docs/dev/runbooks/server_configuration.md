@@ -394,7 +394,15 @@ query:
 
 | Config path | Default | Description |
 |-------------|---------|-------------|
-| `schema.max_retained_versions` | `2` | Number of schema version table-sets to retain (min 2) |
+| `schema.max_retained_versions` | `2` | Active table-set plus retained rollback generations (min 2) |
+| `schema.version_poll_interval_secs` | `5` | Webserver active-ontology refresh interval (min 1 second) |
+| `schema.indexer_schema_wait_timeout_secs` | `300` | Indexer wait budget for its writable schema |
+
+The webserver stays ready during backfill by serving the active version's ontology archive.
+Promotion replaces its serving snapshot without restarting it. Missing archives fail readiness
+and RPCs closed; restore the exact release archive in the durable NATS catalog. Publish the
+existing schema with a preparatory release before the first archive-aware upgrade. See
+[Schema Management](../../design-documents/schema_management.md#ontology-archives).
 
 ## Analytics
 

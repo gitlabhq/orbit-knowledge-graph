@@ -28,6 +28,7 @@ use super::stages::{
 #[derive(Clone)]
 pub struct QueryPipelineService {
     ontology: Arc<Ontology>,
+    schema_version: u32,
     client: Arc<ArrowClickHouseClient>,
     resolver_registry: Option<Arc<ColumnResolverRegistry>>,
     cache_broker: Option<Arc<NatsClient>>,
@@ -45,6 +46,7 @@ impl QueryPipelineService {
     ) -> Self {
         Self {
             ontology,
+            schema_version: *SCHEMA_VERSION,
             client,
             resolver_registry: None,
             cache_broker: None,
@@ -67,6 +69,12 @@ impl QueryPipelineService {
 
     pub fn with_path_resolver(mut self, resolver: Arc<PathResolver>) -> Self {
         self.path_resolver = Some(resolver);
+        self
+    }
+
+    pub fn with_schema(mut self, ontology: Arc<Ontology>, version: u32) -> Self {
+        self.ontology = ontology;
+        self.schema_version = version;
         self
     }
 
@@ -101,7 +109,7 @@ impl QueryPipelineService {
                 claims.clone(),
                 "query_graph",
                 coding_agent,
-                SCHEMA_VERSION.to_string(),
+                self.schema_version.to_string(),
             )),
         ]);
 
@@ -110,6 +118,7 @@ impl QueryPipelineService {
         server_extensions.insert(claims);
         server_extensions.insert(tx);
         server_extensions.insert(stream);
+        server_extensions.insert(ServingSchemaVersion(self.schema_version));
         if let Some(registry) = &self.resolver_registry {
             server_extensions.insert(ColumnResolverRegistry::clone(registry));
         }
@@ -171,3 +180,5 @@ impl QueryPipelineService {
         Ok(output)
     }
 }
+
+pub(crate) struct ServingSchemaVersion(pub u32);

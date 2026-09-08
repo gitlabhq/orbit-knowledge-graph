@@ -90,7 +90,7 @@ async fn run_namespace_dispatcher(ctx: &TestContext, nats_url: &str) -> Vec<Disp
     )));
     let ontology = ontology::Ontology::load_embedded().unwrap();
     let dispatcher = NamespaceDispatcher::new(
-        services.nats,
+        services.nats_services,
         ctx.config.build_client(),
         checkpoint_store,
         ScheduledTaskMetrics::new(),
@@ -109,7 +109,7 @@ async fn run_global_dispatcher(nats_url: &str) -> Vec<DispatchedMessage> {
         .await
         .unwrap();
     let dispatcher = GlobalDispatcher::new(
-        services.nats,
+        services.nats_services,
         ScheduledTaskMetrics::new(),
         GlobalDispatcherConfig::default(),
         Arc::new(CampaignState::new()),
@@ -129,7 +129,7 @@ async fn dispatch_enabled_namespace_cdc(
         .await
         .unwrap();
     let backfill = Arc::new(CodeBackfill::new(
-        services.nats.clone(),
+        services.nats_services.clone(),
         ctx.config.build_client(),
         ctx.config.build_client(),
         ScheduledTaskMetrics::new(),
@@ -137,7 +137,7 @@ async fn dispatch_enabled_namespace_cdc(
         orbit_server_config::CodeBackfillSweepConfig::default().publish_window,
     ));
     let route = EnabledNamespacesRoute::new(
-        NamespaceIndexingDispatch::new(services.nats),
+        NamespaceIndexingDispatch::new(services.nats_services),
         backfill,
         ctx.config.build_client(),
     );

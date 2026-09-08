@@ -71,9 +71,9 @@ pub enum SchedulerError {
 }
 
 pub struct SchedulerServices {
-    pub nats: Arc<dyn NatsServices>,
-    pub lock_service: Arc<dyn LockService>,
     pub nats_client: Arc<nats_client::NatsClient>,
+    pub nats_services: Arc<dyn NatsServices>,
+    pub lock_service: Arc<dyn LockService>,
     pub nats_connection: async_nats::Client,
 }
 
@@ -85,13 +85,13 @@ pub async fn connect(nats_config: &NatsConfiguration) -> Result<SchedulerService
 
     let nats_connection = broker.nats_client().clone();
     let nats_client = broker.client().clone();
-    let nats: Arc<dyn NatsServices> = Arc::new(NatsServicesImpl::new(broker));
-    let lock_service: Arc<dyn LockService> = Arc::new(NatsLockService::new(Arc::clone(&nats)));
+    let nats_services: Arc<dyn NatsServices> = Arc::new(NatsServicesImpl::new(broker));
+    let lock_service: Arc<dyn LockService> = Arc::new(NatsLockService::new(nats_services.clone()));
 
     Ok(SchedulerServices {
-        nats,
-        lock_service,
         nats_client,
+        nats_services,
+        lock_service,
         nats_connection,
     })
 }
