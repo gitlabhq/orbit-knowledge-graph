@@ -3,9 +3,37 @@ fn main() {
     validate_prompts();
     validate_named_queries();
     validate_migration_ledger();
+    validate_ontology_archive();
     validate_authored_etl_sql();
     #[cfg(feature = "regenerate-protos")]
     regenerate_protos();
+}
+
+fn validate_ontology_archive() {
+    let version = orbit_versions::VERSIONS.schema;
+    let path =
+        ontology::archive::OntologyArchive::path(std::path::Path::new(env!("CONFIG_DIR")), version);
+    println!("cargo:rerun-if-changed={}", path.display());
+    let bytes = std::fs::read(&path).unwrap_or_else(|error| {
+        panic!(
+            "{}: {error}. Run `mise schema:snapshot` to seed the current archive.",
+            path.display()
+        )
+    });
+    let archive = ontology::archive::OntologyArchive::from_bytes(version, &bytes)
+        .unwrap_or_else(|error| panic!("{error}"));
+    archive
+        .load_ontology()
+        .unwrap_or_else(|error| panic!("{error}"));
+    let current_sources = ontology::migrations::embedded_sources();
+    assert!(
+        archive.matches_sources(&current_sources),
+        "ontology archive is stale; run `mise schema:bump`"
+    );
+    println!(
+        "cargo:rustc-env=ONTOLOGY_ARCHIVE_PATH={}",
+        path.canonicalize().unwrap().display()
+    );
 }
 
 fn validate_prompts() {
