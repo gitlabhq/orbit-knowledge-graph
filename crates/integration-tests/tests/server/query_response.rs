@@ -20,25 +20,21 @@ use orbit_server::redaction::RedactionMessage;
 use orbit_server_config::{AnalyticsConfig, GrpcConfig};
 use prost::Message;
 use serde_json::{Value, json};
-use tokio::net::TcpListener;
 use tokio::sync::mpsc;
-use tokio::task::JoinSet;
-use tokio_stream::wrappers::{ReceiverStream, TcpListenerStream};
+use tokio_stream::wrappers::ReceiverStream;
 use tonic::Request;
-use tonic::transport::{Channel, Server};
 
 use crate::common::{DummyClaims, GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL};
 
 const TEST_SECRET: &str = "response-budget-test-secret-at-least-32-bytes";
 
 struct QueryServer {
-    client: OrbitServiceClient<Channel>,
-    _server_tasks: JoinSet<()>,
+    client: OrbitServiceClient<OrbitServiceServer<OrbitServiceImpl>>,
     response_budget: usize,
 }
 
 impl QueryServer {
-    async fn start(context: &TestContext, response_budget: usize) -> Self {
+    fn new(context: &TestContext, response_budget: usize) -> Self {
         let service = OrbitServiceImpl::new(
             Arc::new(JwtValidator::new(TEST_SECRET, 0).unwrap()),
             Arc::new(load_ontology()),
@@ -48,23 +44,10 @@ impl QueryServer {
             Arc::new(AnalyticsConfig::default()),
         )
         .with_max_query_response_bytes(response_budget);
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let address = listener.local_addr().unwrap();
-        let mut server_tasks = JoinSet::new();
-        server_tasks.spawn(async move {
-            Server::builder()
-                .add_service(OrbitServiceServer::new(service))
-                .serve_with_incoming(TcpListenerStream::new(listener))
-                .await
-                .unwrap();
-        });
-        let client = OrbitServiceClient::connect(format!("http://{address}"))
-            .await
-            .unwrap()
+        let client = OrbitServiceClient::new(OrbitServiceServer::new(service))
             .max_decoding_message_size(GrpcConfig::default().max_query_response_bytes);
         Self {
             client,
-            _server_tasks: server_tasks,
             response_budget,
         }
     }
@@ -213,8 +196,7 @@ async fn assert_lossless_pages(
     first_page_rows: usize,
     denied: &[i64],
 ) {
-    let reference =
-        QueryServer::start(context, GrpcConfig::default().max_query_response_bytes).await;
+    let reference = QueryServer::new(context, GrpcConfig::default().max_query_response_bytes);
     for format in [ResponseFormat::Raw, ResponseFormat::Llm] {
         let full = reference.query(&query, format, denied).await;
         let mut prefix_query = query.clone();
@@ -226,7 +208,7 @@ async fn assert_lossless_pages(
             "fixture must exceed byte limit: format={format:?}, full={}, budget={budget}, query={query}",
             full.encoded_bytes,
         );
-        let limited = QueryServer::start(context, budget).await;
+        let limited = QueryServer::new(context, budget);
         let mut current = query.clone();
         let mut seen_rows = 0;
         let mut cursors = BTreeSet::new();
@@ -288,13 +270,12 @@ async fn nullable_descending_keys(context: &TestContext) {
 async fn denied_rows_do_not_lose_authorized_suffix(context: &TestContext) {
     assert_lossless_pages(context, users_query(), 4, &[2, 4]).await;
 
-    let reference =
-        QueryServer::start(context, GrpcConfig::default().max_query_response_bytes).await;
+    let reference = QueryServer::new(context, GrpcConfig::default().max_query_response_bytes);
     let mut query = users_query();
     query["cursor"]["page_size"] = 2.into();
     let denied = [1, 2, 3, 4, 5, 6, 7];
     let first = reference.query(&query, ResponseFormat::Raw, &denied).await;
-    let limited = QueryServer::start(context, first.encoded_bytes).await;
+    let limited = QueryServer::new(context, first.encoded_bytes);
     let mut cursors = BTreeSet::new();
     loop {
         let page = limited.query(&query, ResponseFormat::Raw, &denied).await;
@@ -313,20 +294,19 @@ async fn denied_rows_do_not_lose_authorized_suffix(context: &TestContext) {
 }
 
 async fn exact_limit_and_oversized_results(context: &TestContext) {
-    let reference =
-        QueryServer::start(context, GrpcConfig::default().max_query_response_bytes).await;
+    let reference = QueryServer::new(context, GrpcConfig::default().max_query_response_bytes);
     for format in [ResponseFormat::Raw, ResponseFormat::Llm] {
         let mut query = users_query();
         query["cursor"]["page_size"] = 4.into();
         let expected = reference.query(&query, format, &[]).await;
-        let exact = QueryServer::start(context, expected.encoded_bytes).await;
+        let exact = QueryServer::new(context, expected.encoded_bytes);
         assert_eq!(exact.query(&query, format, &[]).await, expected);
-        let smaller = QueryServer::start(context, expected.encoded_bytes - 1).await;
+        let smaller = QueryServer::new(context, expected.encoded_bytes - 1);
         assert!(smaller.query(&query, format, &[]).await.row_count() < expected.row_count());
 
         query["nodes"][0]["id_range"] = json!({"start": 1, "end": 1});
         let single = reference.query(&query, format, &[]).await;
-        let too_small = QueryServer::start(context, single.encoded_bytes - 1).await;
+        let too_small = QueryServer::new(context, single.encoded_bytes - 1);
         for _ in 0..2 {
             too_small
                 .query(&query, format, &[])
@@ -341,8 +321,7 @@ async fn exact_limit_and_oversized_results(context: &TestContext) {
 }
 
 async fn equal_cursor_keys_are_not_split(context: &TestContext) {
-    let reference =
-        QueryServer::start(context, GrpcConfig::default().max_query_response_bytes).await;
+    let reference = QueryServer::new(context, GrpcConfig::default().max_query_response_bytes);
     let query = json!({
         "query_type": "traversal",
         "nodes": [
@@ -362,14 +341,14 @@ async fn equal_cursor_keys_are_not_split(context: &TestContext) {
         assert_eq!(first.next_cursor(), group.next_cursor());
         assert!(first.encoded_bytes < group.encoded_bytes);
 
-        let too_small = QueryServer::start(context, first.encoded_bytes).await;
+        let too_small = QueryServer::new(context, first.encoded_bytes);
         for _ in 0..2 {
             too_small
                 .query(&query, format, &[])
                 .await
                 .assert_too_large();
         }
-        let exact_group = QueryServer::start(context, group.encoded_bytes).await;
+        let exact_group = QueryServer::new(context, group.encoded_bytes);
         assert_eq!(exact_group.query(&query, format, &[]).await, group);
     }
     assert_lossless_pages(context, query, 2, &[]).await;
