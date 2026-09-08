@@ -2,33 +2,35 @@
 
 ## Current State
 
-This repository now implements the deployed service architecture described in the rest of this design document. The current codebase is no longer centered on the original local Kuzu-backed desktop tool.
+This repository implements both Orbit Remote and Orbit Local. They share the Rust workspace, Code Graph pipeline, and ontology, but use different storage and query surfaces.
 
 Today, the repository includes the following major components:
 
-- A single Rust workspace with one primary service binary, `gkg-server`, that runs in four modes: `Webserver`, `Indexer`, `DispatchIndexing`, and `HealthCheck`.
-- A ClickHouse-backed graph runtime with ontology-driven schema, ETL, and query validation. The authoritative schema lives in `config/ontology/` and `config/graph.sql`.
-- A deployed query surface that serves HTTP, gRPC, and MCP requests from the webserver mode and compiles the intermediate JSON query language into parameterized ClickHouse SQL.
-- A distributed indexing pipeline that consumes Siphon CDC through NATS JetStream, dispatches indexing work, and writes SDLC and code graph data into ClickHouse.
-- Shared crates for indexing, query compilation, formatting, ontology loading, ClickHouse access, GitLab API access, health checks, and integration testing.
+- Orbit Remote's `gkg-server` binary, which runs in four modes: `Webserver`, `Indexer`, `DispatchIndexing`, and `HealthCheck`.
+- A ClickHouse-backed remote graph runtime with ontology-driven schema, ETL, authorization metadata, and Query DSL validation. The authoritative ontology lives in `config/ontology/`.
+- Remote HTTP, gRPC, REST, and MCP query surfaces that compile the JSON Query DSL into parameterized ClickHouse SQL.
+- A distributed remote indexing pipeline that consumes Siphon CDC through NATS JetStream, dispatches indexing work, and writes SDLC and code graph data into ClickHouse.
+- Orbit Local's standalone `orbit` CLI, which indexes a repository into DuckDB and supports direct SQL, schema inspection, repository maps, and a stateless stdio MCP server.
+- Shared crates for indexing, query compilation, formatting, ontology loading, database access, GitLab API access, health checks, and integration testing.
 
-The legacy local-only tooling from the earlier `gitlab-org/rust/knowledge-graph` project remains useful as historical context, but it is not the best description of the current Orbit knowledge-graph service. Where the service intentionally differs from that earlier tool, the service architecture in this repository is the source of truth.
+The Kuzu-backed local desktop architecture from the earlier `gitlab-org/rust/knowledge-graph` project remains historical context. It is distinct from the current DuckDB-backed Orbit Local product implemented in this repository.
 
 ## Orbit Architecture High-Level Overview
 
-Building Orbit is a ***data engineering problem***. The Orbit service will build off of the **Data Insights Platform** to power both indexing code and SDLC metadata as a distributed system. For an end-to-end overview of the Data Insights Platform (logical replication, NATS JetStream, ClickHouse), see the [Data Insights Platform design doc](https://handbook.gitlab.com/handbook/engineering/architecture/design-documents/data_insights_platform/).
+Orbit Remote is primarily a ***data engineering system***. It builds on the **Data Insights Platform** to index code and SDLC metadata as a distributed system. For an end-to-end overview of the Data Insights Platform (logical replication, NATS JetStream, ClickHouse), see the [Data Insights Platform design doc](https://handbook.gitlab.com/handbook/engineering/architecture/design-documents/data_insights_platform/).
 
-We will then build a secure query layer on top of the Data Insights Platform to allow developers and AI agents to query the graph for various product use cases. The Orbit tech stack will look like the following:
+A secure query layer on top of the graph lets developers and AI agents query that data. The current runtime components are:
 
-- [Siphon](https://gitlab.com/gitlab-org/analytics-section/siphon) acts as the CDC bridge, streaming PostgreSQL logical replication events into NATS.
-- [NATS](https://docs.nats.io/) acts as the durable message broker between Siphon and ClickHouse. Additionally, we will leverage NATS to power all event-driven logic, high availability, and queuing, such as consuming [`p_knowledge_graph_code_indexing_tasks`](https://gitlab.com/gitlab-org/gitlab/-/blob/master/db/docs/p_knowledge_graph_code_indexing_tasks.yml) for code indexing (see [ADR 005](decisions/005_code_indexing_task_table.md)).
-- [ClickHouse](https://clickhouse.com/) will act as the primary data store and data lake. With ClickHouse, we will build namespace property graphs and project-level indexes. We will never establish a direct connection to the OLTP database.
-- **Orbit service** as a unified binary with four runtime modes:
-  - **`Webserver`** (`gkg-server --mode Webserver`): Serves HTTP, gRPC, and MCP traffic; validates graph queries against the JSON schema and ontology; compiles them to ClickHouse SQL; and applies authorization and formatting before returning results.
+- [Siphon](https://gitlab.com/gitlab-org/analytics-section/siphon), the CDC bridge that streams PostgreSQL logical replication events into NATS.
+- [NATS](https://docs.nats.io/), the durable message broker for CDC and event-driven work such as consuming [`p_knowledge_graph_code_indexing_tasks`](https://gitlab.com/gitlab-org/gitlab/-/blob/master/db/docs/p_knowledge_graph_code_indexing_tasks.yml) for code indexing (see [ADR 005](decisions/005_code_indexing_task_table.md)).
+- [ClickHouse](https://clickhouse.com/), the remote datalake and property-graph store. Orbit does not connect directly to the GitLab OLTP database.
+- **Orbit Remote's service binary**, with four runtime modes:
+  - **`Webserver`** (`gkg-server --mode Webserver`): Serves HTTP, gRPC, REST, and MCP traffic; validates Query DSL requests against the JSON schema and ontology; compiles them to ClickHouse SQL; and applies authorization and formatting before returning results.
   - **`Indexer`** (`gkg-server --mode Indexer`): Runs the shared indexing engine, consumes SDLC and code indexing requests from NATS JetStream, and writes graph data into ClickHouse.
-  - **`DispatchIndexing`** (`gkg-server --mode DispatchIndexing`): On a schedule, detects enabled root namespaces with recent Siphon changes and publishes deduplicated per-namespace indexing requests to the internal `GKG_INDEXER` stream. Also runs scheduled dispatchers for code indexing tasks, namespace deletion, stale-edge reconciliation, and schema-migration lifecycle.
+  - **`DispatchIndexing`** (`gkg-server --mode DispatchIndexing`): On a schedule, detects enabled root namespaces with recent Siphon changes and publishes deduplicated per-namespace indexing requests to the internal `GKG_INDEXER` stream. It also runs scheduled dispatchers for code indexing tasks, namespace deletion, stale-edge reconciliation, and schema-migration lifecycle.
   - **`HealthCheck`** (`gkg-server --mode HealthCheck`): Aggregates cluster health by probing Kubernetes deployments and ClickHouse instances, and exposes the result on a single `/health` endpoint.
-- **UI and product experiences** are downstream consumers of this service. The current repository contains the graph/querying service and indexing platform rather than an embedded desktop UI.
+- **Orbit Local's `orbit` CLI**, which parses a local repository, stores its code graph in DuckDB, accepts read-only DuckDB SQL, and serves local MCP tools over stdio. `glab orbit local` installs and runs this binary.
+- **UI and product experiences**, which consume Orbit Remote through GitLab APIs and the GitLab Duo Agent Platform.
 
 ```mermaid
 graph TD
@@ -77,9 +79,9 @@ Please see the following design documents for more details on the Orbit architec
 - [Duo / Orbit Prompt Routing Architecture](duo_orbit_prompt_routing.md)
 - [Architecture Decision Records](decisions/) — numbered ADRs covering storage choice, communication protocols, API design, indexing triggers, and more
 
-## Binary Breakdown
+## Runtime Breakdown
 
-Below is a breakdown of the deployed components and runtime modes used by the current codebase.
+Orbit Remote deploys the four `gkg-server` modes shown below. Orbit Local runs separately as the `orbit` CLI on a user's machine and stores its graph in `~/.orbit/graph.duckdb`.
 
 ```mermaid
 flowchart TD
@@ -148,14 +150,16 @@ flowchart TD
 
 ### Database & Database Ops
 
-As a first iteration, the team aims to build **a [Graph Query Engine](querying/graph_engine.md) on ClickHouse** that translates basic Cypher (aka GQL) queries into SQL-compatible multi-hop graph traversals.
+Orbit Remote's [Graph Query Engine](querying/graph_engine.md) validates the JSON Query DSL against the ontology and compiles traversal, aggregation, neighbors, and path-finding requests into parameterized ClickHouse SQL. Cypher was evaluated during the storage and query-engine design, but it is not a current query surface.
 
-The current implementation has already standardized on ClickHouse for deployed graph storage and query execution. In the current repository state:
+The current implementation uses ClickHouse for remote graph storage and query execution. In the current repository state:
 
 - Graph nodes live in typed `gl_*` ClickHouse tables such as `gl_group`, `gl_project`, `gl_merge_request`, `gl_pipeline`, `gl_job`, `gl_vulnerability`, `gl_branch`, `gl_file`, `gl_definition`, and `gl_imported_symbol`.
 - Relationships are stored in ontology-configured edge tables (defaulting to `gl_edge`) with adjacency-optimized ordering and projections. Each edge YAML can specify a `table:` field to route relationship types to dedicated tables; `settings.edge_tables` in `schema.yaml` defines available tables.
 - Code indexing progress is tracked in `code_indexing_checkpoint`.
 - The ontology in `config/ontology/` defines the mapping between entity names, properties, redaction metadata, ETL sources, and relationship kinds.
+
+Orbit Local generates its DuckDB tables from the same ontology, then writes Code Graph nodes and relationships into a workspace database. Local queries use read-only DuckDB SQL directly rather than the remote Query DSL and authorization pipeline.
 
 ClickHouse was chosen over dedicated graph databases (Neo4j, FalkorDB, Memgraph, Neptune, SpannerGraph) after KuzuDB was archived in October 2025. The full evaluation, benchmarking results, and legal/procurement context are recorded in [ADR 000: ClickHouse as graph storage](decisions/000_clickhouse_graph_storage.md).
 
@@ -171,17 +175,16 @@ GitLab has hundreds of REST APIs and GraphQL Schema Elements. AI agents and data
 
 ### Solution
 
-We aim to build ***Orbit as a service***, which will be a separate service outside of GitLab Rails to index and query metadata. This service will expose a **unified** **data** **API layer** that enables developers and AI agents to query across the entire software development lifecycle.
+Orbit Remote runs outside GitLab Rails and exposes a unified data API for developers and AI agents to query across the software development lifecycle. Orbit Local brings the same Code Graph model to a repository on the user's machine without requiring the remote service.
 
-What underlying technology will power this unified data layer? Graph technology empowers analytics, users, and AI agents to reason across a **wide range of data types**. We will model GitLab data in a [**Property Graph**](https://pg-format.github.io/) format, which will be queried via a high-performance Graph Query Engine built on ClickHouse that we are calling **GitLab GraphHouse**.
+Both products represent connected data as a [**Property Graph**](https://pg-format.github.io/). Orbit Remote uses a ClickHouse-backed Graph Query Engine, while Orbit Local exposes its DuckDB graph through read-only SQL and MCP tools.
 
-The service will index three types of conceptual data in Property Graph Format:
+The current products index two types of conceptual data in property-graph form:
 
-- **Code:** Using our [high-performance Call Graph engine](https://gitlab.com/gitlab-org/rust/knowledge-graph) and the Data Insights Platform, we will index GitLab projects, code definitions, code references, and repository metadata.
-- **SDLC**: Using the Data Insights Platform, we will index GitLab entities like MRs, CI Pipelines, Issues, Work Items, Groups, and Projects.
-- **Custom Entities**: In the future, we intend to enable flexible data modeling to allow users to add arbitrary nodes to the graph.
+- **Code:** The shared Code Graph engine indexes repositories, definitions, references, imports, and filesystem structure. Orbit Remote indexes default branches from GitLab, while Orbit Local indexes checked-out repositories.
+- **SDLC:** Orbit Remote indexes GitLab entities such as merge requests, pipelines, Work Items, groups, projects, and their relationships through the Data Insights Platform.
 
-With this service, we strive to transform how teams understand, navigate, and automate their software ecosystem.
+User-defined graph entities remain a possible future extension and are not part of the current product.
 
 ### Why a Property Graph? Why not a REST and GraphQL layer?
 
@@ -274,14 +277,9 @@ graph TD
 
 #### 1. AI Works Best with Property Graph Data Models
 
-Our [research and live prototypes](https://gitlab.com/gitlab-org/rust/knowledge-graph/-/issues/263) showed that LLMs reliably generate property graph tool calls because their syntax directly mirrors natural “find-things-connected-to-X” reasoning.
-For example, “find all issues closed by merge requests authored by @user within two hops of project Y” translates deterministically into a pattern like `MATCH (p:Project)<-[:CLOSES]-(m:MergeRequest)<-[:AUTHORED]-(u:User)`.
+Our [research and live prototypes](https://gitlab.com/gitlab-org/rust/knowledge-graph/-/issues/263) showed that LLMs reliably generate property graph tool calls because their structure mirrors natural “find-things-connected-to-X” reasoning. The current Query DSL represents that structure with explicit node selectors, typed relationships, filters, and bounded hops.
 
-By contrast:
-
-- GraphQL and REST require schema introspection and nested field expansion.
-  LLMs struggle to reason about variable-depth recursion or dynamic joins inside those structures.
-- Cypher exposes explicit graph patterns and bounded hop limits (*1..3) that match the mental model of “neighbor exploration.”
+By contrast, GraphQL and REST require schema introspection and nested field expansion. LLMs struggle to reason about variable-depth recursion or dynamic joins inside those structures.
 
 #### 2. We Need Arbitrary Neighbor Exploration and Path Finding (N-Hop Queries)
 
@@ -291,45 +289,55 @@ Neither REST nor GraphQL provides a clean or efficient way to express variable-l
 - REST would require chained requests or recursive pagination.
 - GraphQL can express limited nesting but not dynamic-depth traversal (*..N); resolvers explode in complexity and performance cost.
 
-Cypher’s MATCH (a)-[*1..N]->(b) semantics make such traversals first-class, optimized at the storage layer, and declarative.
+The Query DSL makes these traversals first-class through typed relationships and bounded `hops`, and the compiler turns them into authorization-scoped ClickHouse SQL.
 
 #### 3. Aggregations and Analytics Are Essential
 
 Orbit is not just a document API—it is an analytical OLAP system.
 We routinely need aggregations such as:
 
-```cypher
-MATCH (p:Project)-[:HAS_ISSUE]->(i:Issue)
-
-RETURN p.name, count(i) AS issue_count ORDER BY issue_count DESC;
+```json orbit-query
+{
+  "query_type": "aggregation",
+  "nodes": [
+    {"id": "p", "entity": "Project", "columns": ["name"]},
+    {"id": "w", "entity": "WorkItem"}
+  ],
+  "relationships": [
+    {"type": "IN_PROJECT", "from": "w", "to": "p"}
+  ],
+  "group_by": ["p"],
+  "aggregations": [
+    {"count": "w", "as": "work_item_count"}
+  ],
+  "aggregation_sort": "-work_item_count",
+  "limit": 10
+}
 ```
 
-Implementing equivalent groupings via GraphQL or REST would either require bespoke endpoints or push heavy joins into the application layer. GitLab postgres times out on these queries today.
-
-Cypher allows server-side execution with optimized graph planners, leveraging adjacency lists and columnar execution with ClickHouse.
+Implementing equivalent groupings via GraphQL or REST would either require bespoke endpoints or push heavy joins into the application layer. Orbit executes the compiled aggregation in ClickHouse, using adjacency-oriented graph tables and columnar execution.
 
 #### 4. Schema Flexibility and Evolution are Essential
 
 Customers will eventually need to be able to add their own data to the graph. Additionally, Orbit’s schema must evolve rapidly as new GitLab SDLC entities (e.g., vulnerabilities, packages, runners) appear.
 
-GraphQL schemas require explicit type registration and backfilling, creating friction for iteration.
-Cypher, being label-based, allows us to introduce new node or relationship labels without altering existing queries—`MATCH (n:Vulnerability)` returns zero rows until those labels exist. We can also use this to add custom data types in the future—something customers have shown strong interest in.
+Orbit declares node types, relationships, properties, and pipelines in one ontology. The same declarations drive indexing, query validation, authorization metadata, and storage code generation, so existing Query DSL requests remain stable as the graph grows. User-defined data types remain a possible future extension.
 
-This makes property graphs a far more flexible and schema-tolerant choice for both AI-driven analytics and human consumers.
+This makes property graphs a flexible choice for both AI-driven analytics and human consumers.
 
-#### 5. Open Cypher (GQL) and Property Graphs are now Standard
+#### 5. Property Graphs are Standard
 
-The Orbit service is intentionally aligned with Open Cypher (GQL) and, most importantly, with Property Graphs, which are now standardized by [SQL 2023’s ISO/IEC 9075-16:2023)](https://www.iso.org/standard/79473.html). Cypher-like patterns are the de facto standard for property-graph databases and Knowledge Graphs (Neo4j, Memgraph, Kùzu). By adopting it, we inherit a well-understood, declarative language for expressing complex traversals, aggregations, and pattern matching over graph data—operations required to fully leverage the GitLab SDLC and code metadata.
+Property graphs are standardized by [SQL 2023's ISO/IEC 9075-16:2023](https://www.iso.org/standard/79473.html). The team evaluated Cypher and dedicated graph databases during the original storage and query-language design; those decisions remain documented in [ADR 000](decisions/000_clickhouse_graph_storage.md). The implemented client contract is the JSON Query DSL, which expresses traversals, aggregations, neighbors, and path finding without exposing generated SQL.
 
-> You can read more about how we will enable all LLMs to query under the [querying](./querying) documentation.
+See the [querying design documents](./querying/) for the current query architecture.
 
 ### Orbit is OLAP, not OLTP
 
-Orbit is an **OLAP application** over an OLTP one. The service is not required to provide transaction guarantees or real-time data for the first iteration. The initial Orbit iteration will serve as a **read-only** analytical data store and a data retrieval API for users and AI agents, providing access to code and SDLC metadata.
+Orbit is an **OLAP application** over an OLTP one. Orbit Remote is a **read-only** analytical data store and retrieval API for code and SDLC metadata; it provides point-in-time indexed results rather than transaction guarantees or real-time data. Orbit Local is also read-only at query time, while explicit indexing commands update its DuckDB graph.
 
 ## Architecture Goals
 
-We aim to build the Orbit service with the following goals in mind:
+The architecture is guided by the following goals. The linked design documents describe the implemented controls and any remaining gaps:
 
 ### Security
 

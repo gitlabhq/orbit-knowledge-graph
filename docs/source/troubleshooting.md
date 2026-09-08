@@ -80,10 +80,18 @@ the `source_tags` property.
 error: unrecognized subcommand 'mcp'
 ```
 
-**Cause:** The `orbit mcp serve` subcommand is not yet implemented. MCP support
-for GitLab Orbit Local is on the roadmap but is not available in the current release.
+**Cause:** Your installed `orbit` binary predates the GitLab Orbit Local MCP
+server.
 
-**Resolution:** Use one of the [supported access methods](local/_index.md).
+**Resolution:** Update the managed binary, then start the stdio MCP server:
+
+```shell
+glab orbit --update
+glab orbit local mcp serve
+```
+
+If you installed `orbit` directly, rerun the installer from the
+[GitLab Orbit CLI instructions](local/access/cli.md#install).
 
 ## GitLab Orbit Remote
 
