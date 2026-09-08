@@ -72,8 +72,10 @@ orbit index /path/to/your/repo
 ```
 
 GitLab Orbit parses the repository and writes a DuckDB graph to `~/.orbit/graph.duckdb`.
-You can index multiple repositories. Each is scoped by project ID and branch
-in the manifest table.
+You can index multiple repository checkout paths. The canonical checkout path
+determines the project ID. Reindexing the same path replaces its previous graph,
+including when you switch branches. To retain multiple branches at the same time,
+index each branch from a separate checkout or worktree path.
 
 | Flag | Purpose |
 |------|---------|

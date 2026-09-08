@@ -89,22 +89,32 @@ GitLab Orbit Remote and GitLab Orbit Local do not index:
 | Multiple repositories | {{< yes >}} | {{< no >}} |
 | Branch selection | {{< no >}} | {{< no >}} |
 
-## Supported languages
+## Language parser coverage
 
-GitLab Orbit Remote and Local index data for the following languages:
+The current source tree registers parsers for the following languages in the
+code-indexing pipeline used by GitLab Orbit Local and GitLab Orbit Remote.
+Definitions, imports, and cross-file relationship coverage vary by language and
+syntax.
 
-| Language | Definitions | Cross-file references |
-|----------|-------------|----------------------|
-| Ruby | {{< yes >}} | {{< yes >}} |
-| Java | {{< yes >}} | {{< yes >}} |
-| Kotlin | {{< yes >}} | {{< yes >}} |
-| Python | {{< yes >}} | {{< yes >}} |
-| TypeScript | {{< yes >}} | {{< yes >}} |
-| JavaScript | {{< yes >}} | {{< yes >}} |
-| Rust | {{< yes >}} | {{< yes >}} |
-| Go | {{< yes >}} | {{< yes >}} |
-| C# | {{< yes >}} | {{< yes >}} |
-| C | {{< yes >}} | {{< yes >}} |
-| C++ | {{< yes >}} | {{< yes >}} |
-| PHP | {{< yes >}} | {{< yes >}} |
-| Bash/Shell | {{< yes >}} | {{< no >}} |
+| Language |
+|----------|
+| Bash/Shell |
+| C |
+| C++ |
+| C# |
+| Elixir |
+| Go |
+| HCL/Terraform |
+| Java |
+| JavaScript |
+| Kotlin |
+| Lua |
+| PHP |
+| Python |
+| Ruby |
+| Rust |
+| Scala |
+| Swift |
+| TypeScript |
+| YAML |
+| Zig |

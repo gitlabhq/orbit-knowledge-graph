@@ -63,15 +63,22 @@ All data in the graph is accessible to whoever runs the CLI.
 
 ## Storage
 
-The graph is stored in a single DuckDB file at `~/.orbit/graph.duckdb`. Multiple repositories share the same database. Each repository is scoped by its project ID and branch in the manifest table.
+The graph is stored in a single DuckDB file at `~/.orbit/graph.duckdb`. Multiple
+repository checkout paths can share the database. The canonical checkout path
+determines the project ID. Reindexing the same path replaces its previous graph,
+including when you switch branches. To retain multiple branches at the same time,
+index each branch from a separate checkout or worktree path.
 
-## Supported languages
+## Language parser coverage
 
-All 13 languages supported by GitLab Orbit Remote are also supported locally:
-Ruby, Java, Kotlin, Python, TypeScript, JavaScript, Rust, Go, C#, C, C++, PHP,
-and Bash/Shell.
+The current source tree registers GitLab Orbit Local parsers for 20 languages:
+Bash/Shell, C, C++, C#, Elixir, Go, HCL/Terraform, Java, JavaScript, Kotlin,
+Lua, PHP, Python, Ruby, Rust, Scala, Swift, TypeScript, YAML, and Zig.
+Definitions, imports, and cross-file relationship coverage vary by language and
+syntax.
 
-See [index data with GitLab Orbit](../indexed-data.md#supported-languages) for the full language support table.
+See [index data with GitLab Orbit](../indexed-data.md#language-parser-coverage) for
+more information.
 
 ## Billing
 
