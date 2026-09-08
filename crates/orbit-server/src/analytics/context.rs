@@ -306,6 +306,7 @@ mod tests {
                 .collect(),
             source_type: crate::auth::SourceType::Mcp,
             ai_session_id: None,
+            request_id: None,
             instance_id: None,
             unique_instance_id: None,
             instance_version: None,

@@ -107,11 +107,22 @@ impl OrbitClient {
         &self,
         request: reqwest::RequestBuilder,
     ) -> Result<reqwest::Response, RemoteError> {
-        let response = request
+        let request_id = crate::telemetry::invocation_id();
+        let session_id = agent_session_id();
+
+        let mut builder = request
+            .header("X-Request-ID", &request_id)
+            .header("X-Orbit-Request-Id", &request_id)
             .header(
                 self.endpoint.header_name.as_str(),
                 self.endpoint.header_value.as_str(),
-            )
+            );
+
+        if let Some(session_id) = &session_id {
+            builder = builder.header("X-Orbit-Session-Id", session_id);
+        }
+
+        let response = builder
             .send()
             .await
             .map_err(|e| RemoteError::new(EXIT_GENERIC, format!("Orbit request failed: {e}")))?;
@@ -253,6 +264,16 @@ fn build_user_agent(get_env: impl Fn(&str) -> Option<String>) -> String {
         ua.push_str(&agent);
     }
     ua
+}
+
+fn agent_session_id() -> Option<String> {
+    ["CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID"]
+        .iter()
+        .find_map(|key| {
+            std::env::var(key)
+                .ok()
+                .filter(|value| crate::telemetry::is_safe_identifier(value))
+        })
 }
 
 async fn read_body(response: reqwest::Response) -> Result<Vec<u8>, RemoteError> {

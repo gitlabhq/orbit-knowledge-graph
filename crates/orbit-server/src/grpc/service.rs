@@ -150,7 +150,7 @@ type ExecuteQueryStream =
 impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
     #[instrument(
         skip(self, request),
-        fields(user_id, source_type, ai_session_id, coding_agent)
+        fields(user_id, source_type, ai_session_id, client_request_id, coding_agent)
     )]
     async fn list_tools(
         &self,
@@ -171,7 +171,7 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
 
     #[instrument(
         skip(self, request),
-        fields(user_id, source_type, ai_session_id, coding_agent)
+        fields(user_id, source_type, ai_session_id, client_request_id, coding_agent)
     )]
     async fn list_agent_commands(
         &self,
@@ -231,7 +231,7 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
 
     #[instrument(
         skip(self, request),
-        fields(user_id, source_type, ai_session_id, coding_agent)
+        fields(user_id, source_type, ai_session_id, client_request_id, coding_agent)
     )]
     async fn invoke_agent_command(
         &self,
@@ -283,7 +283,7 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
 
     #[instrument(
         skip(self, request),
-        fields(user_id, source_type, ai_session_id, coding_agent)
+        fields(user_id, source_type, ai_session_id, client_request_id, coding_agent)
     )]
     async fn execute_query(
         &self,
@@ -413,7 +413,7 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
 
     #[instrument(
         skip(self, request),
-        fields(user_id, source_type, ai_session_id, coding_agent)
+        fields(user_id, source_type, ai_session_id, client_request_id, coding_agent)
     )]
     async fn get_graph_schema(
         &self,
@@ -445,7 +445,7 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
 
     #[instrument(
         skip(self, request),
-        fields(user_id, source_type, ai_session_id, coding_agent)
+        fields(user_id, source_type, ai_session_id, client_request_id, coding_agent)
     )]
     async fn get_response_format(
         &self,
@@ -482,7 +482,7 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
 
     #[instrument(
         skip(self, request),
-        fields(user_id, source_type, ai_session_id, coding_agent)
+        fields(user_id, source_type, ai_session_id, client_request_id, coding_agent)
     )]
     async fn get_query_dsl(
         &self,
@@ -515,7 +515,7 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
 
     #[instrument(
         skip(self, request),
-        fields(user_id, source_type, ai_session_id, coding_agent)
+        fields(user_id, source_type, ai_session_id, client_request_id, coding_agent)
     )]
     async fn list_named_queries(
         &self,
@@ -536,7 +536,7 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
 
     #[instrument(
         skip(self, request),
-        fields(user_id, source_type, ai_session_id, coding_agent)
+        fields(user_id, source_type, ai_session_id, client_request_id, coding_agent)
     )]
     async fn get_cluster_health(
         &self,
@@ -554,7 +554,7 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
 
     #[instrument(
         skip(self, request),
-        fields(user_id, source_type, ai_session_id, coding_agent)
+        fields(user_id, source_type, ai_session_id, client_request_id, coding_agent)
     )]
     async fn get_graph_status(
         &self,
@@ -1270,6 +1270,7 @@ mod tests {
             group_traversal_ids: vec![],
             source_type: crate::auth::SourceType::Rest,
             ai_session_id: None,
+            request_id: None,
             instance_id: None,
             unique_instance_id: None,
             instance_version: None,
