@@ -12,4 +12,4 @@ expect:
   node_count: 1
   nodes:
     User:
-      5: { username: eve, state: blocked }
+      - { id: 5, username: eve, state: blocked }

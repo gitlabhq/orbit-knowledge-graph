@@ -223,12 +223,19 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
     for (entity, ids) in &expect.node_ids {
         view.assert_node_ids(entity, ids);
     }
-    for (entity, by_id) in &expect.nodes {
-        for (id, props) in by_id {
+    for (entity, rows) in &expect.nodes {
+        for row in rows {
+            let id = row
+                .get("id")
+                .and_then(|v| v.as_i64())
+                .unwrap_or_else(|| panic!("{label}: node {entity} row missing integer 'id'"));
             let found = view
-                .find_node(entity, *id)
+                .find_node(entity, id)
                 .unwrap_or_else(|| panic!("{label}: node {entity}/{id} not found"));
-            for (prop, expected) in props {
+            for (prop, expected) in row {
+                if prop == "id" {
+                    continue;
+                }
                 match expected {
                     serde_json::Value::String(s) => found.assert_str(prop, s),
                     serde_json::Value::Number(n) if n.is_i64() => {

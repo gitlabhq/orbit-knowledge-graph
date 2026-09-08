@@ -14,6 +14,6 @@ expect:
     Group: [100, 101, 102, 200, 300]
   nodes:
     Group:
-      100: { full_path: public-group }
-      200: { full_path: public-group/deep-a }
-      300: { full_path: public-group/deep-a/deep-b }
+      - { id: 100, full_path: public-group }
+      - { id: 200, full_path: public-group/deep-a }
+      - { id: 300, full_path: public-group/deep-a/deep-b }

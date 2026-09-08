@@ -14,6 +14,6 @@ expect:
     User: [1, 2, 3, 4, 5, 6, 7]
   nodes:
     User:
-      1: { username: alice, name: Alice Admin, state: active, user_type: human }
-      2: { username: bob, name: Bob Builder }
-      5: { username: eve, state: blocked, user_type: service_account }
+      - { id: 1, username: alice, name: Alice Admin, state: active, user_type: human }
+      - { id: 2, username: bob, name: Bob Builder }
+      - { id: 5, username: eve, state: blocked, user_type: service_account }

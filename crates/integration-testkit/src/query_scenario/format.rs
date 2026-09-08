@@ -49,9 +49,9 @@ pub struct QueryExpect {
     pub node_order: BTreeMap<String, Vec<i64>>,
     #[serde(default)]
     pub node_ids: BTreeMap<String, Vec<i64>>,
-    /// `nodes: { Entity: { id: { prop: val } } }`
+    /// `nodes: { Entity: [{ id: 1, prop: val }] }`
     #[serde(default)]
-    pub nodes: BTreeMap<String, BTreeMap<i64, BTreeMap<String, serde_json::Value>>>,
+    pub nodes: BTreeMap<String, Vec<BTreeMap<String, serde_json::Value>>>,
     #[serde(default)]
     pub node_absent: BTreeMap<String, Vec<i64>>,
     #[serde(default)]

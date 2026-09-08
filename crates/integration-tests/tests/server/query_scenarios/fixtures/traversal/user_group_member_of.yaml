@@ -17,7 +17,7 @@ expect:
   referential_integrity: true
   nodes:
     User:
-      1: { username: alice }
+      - { id: 1, username: alice }
     Group:
-      100: { name: Public Group }
-      101: { name: Private Group }
+      - { id: 100, name: Public Group }
+      - { id: 101, name: Private Group }

@@ -12,7 +12,7 @@ expect:
     Group: [100, 102]
   nodes:
     Group:
-      100: { name: Public Group }
-      102: { name: Internal Group }
+      - { id: 100, name: Public Group }
+      - { id: 102, name: Internal Group }
   node_absent:
     Group: [101]
