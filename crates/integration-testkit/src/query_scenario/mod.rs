@@ -18,6 +18,7 @@ use query_engine::shared::{PipelineOutput, RedactionOutput};
 
 use crate::context::TestContext;
 use crate::mock_redaction::MockRedactionService;
+use crate::scenario::Seed;
 use crate::visitor::{NodeExt, Requirement, ResponseView};
 use crate::{SeededColumnResolver, collect_subtest_results, load_ontology};
 
@@ -25,8 +26,6 @@ pub use format::{PresetOr, QueryExpect, QueryScenario, RedactionConfig, Security
 
 use orbit_server::pipeline::HydrationStage;
 use orbit_server::redaction::QueryResult;
-
-use crate::scenario::Seed;
 
 /// Parse all YAML scenario files under `root` without executing them.
 /// Catches syntax errors and serde mismatches in `cargo nextest --lib`
@@ -138,10 +137,12 @@ async fn run_scenario(ctx: &TestContext, file: &Path, name: &str, presets: &Path
     };
 
     let security_override = resolve_preset("security", &scenario.security, presets, name);
-    let default_redaction = PresetOr::Preset("allow_all".to_string());
-    let redaction_spec = scenario.redaction.as_ref().unwrap_or(&default_redaction);
-    let redaction_config: Option<RedactionConfig> =
-        resolve_preset("redaction", &Some(redaction_spec.clone()), presets, name);
+    let redaction_with_default = scenario
+        .redaction
+        .clone()
+        .unwrap_or(PresetOr::Preset("allow_all".into()));
+    let redaction_config =
+        resolve_preset("redaction", &Some(redaction_with_default), presets, name);
     let security = build_security(&security_override);
     let redaction = build_redaction(&redaction_config);
 
@@ -281,24 +282,8 @@ fn apply_expect(
     }
     satisfy_filter_requirements(view, input);
 
-    if let Some(n) = expect.node_count {
+    if let Some(n) = expect.node_count.or_else(|| expect.derived_node_count()) {
         view.assert_node_count(n);
-    } else {
-        let total: usize = expect
-            .nodes
-            .values()
-            .filter_map(|ne| {
-                ne.count.or_else(|| {
-                    ne.order
-                        .as_ref()
-                        .map(|o| o.len())
-                        .or_else(|| ne.ids.as_ref().map(|i| i.len()))
-                })
-            })
-            .sum();
-        if total > 0 {
-            view.assert_node_count(total);
-        }
     }
     for (entity, ne) in &expect.nodes {
         if let Some(order) = &ne.order {

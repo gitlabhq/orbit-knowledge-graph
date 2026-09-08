@@ -88,6 +88,24 @@ pub struct NodeExpect {
     pub rows: Vec<BTreeMap<String, serde_json::Value>>,
 }
 
+impl QueryExpect {
+    /// Derive a total node count from per-entity specs when `node_count` is
+    /// not set explicitly. Returns `None` when no entity carries a countable
+    /// spec (count, order, or ids).
+    pub fn derived_node_count(&self) -> Option<usize> {
+        let total: usize = self
+            .nodes
+            .values()
+            .filter_map(|ne| {
+                ne.count
+                    .or(ne.order.as_ref().map(Vec::len))
+                    .or(ne.ids.as_ref().map(Vec::len))
+            })
+            .sum();
+        (total > 0).then_some(total)
+    }
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
 pub enum CompileErrorExpect {
