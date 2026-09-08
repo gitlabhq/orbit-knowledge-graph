@@ -14,7 +14,7 @@ pub use assertions::{
     assert_node_count,
 };
 pub use context::TestContext;
-pub use seed::load_seed;
+pub use seed::{load_seed, load_seed_sql};
 pub use seeded_resolver::SeededColumnResolver;
 
 /// `GKG_TEST_ONTOLOGY_OVERLAY=<name>` merges `config/seeds/overlays/<name>/` over the ontology.

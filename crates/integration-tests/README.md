@@ -81,6 +81,22 @@ between them.
 
 ## Adding tests
 
+### Query response scenarios
+
+Add cases to `tests/server/data_correctness/scenarios/query_responses.yaml`.
+Each case declares INSERT-only SQL under `seed`, an Orbit query under `query`,
+`max_response_bytes`, and expected pagination and node IDs under `expect`.
+The correctness suite runs each case through the public in-memory gRPC client,
+requesting RAW responses and authorizing all requested resources.
+Each case gets a forked copy of the correctness seed; use distinct IDs for added rows.
+
+The shared runner checks byte limits, cursor progress, exhaustion, and exact node
+identities across pages. It also compares node properties with a response using
+the normal server limit. Use node-only queries whose complete results fit that
+normal limit and the requested page size. No Rust registration is needed per case.
+
+### Rust tests
+
 1. Write an `async fn my_test(ctx: &TestContext)` in the appropriate module.
 2. If it only reads seeded data, add it to the `run_subtests_shared!` block.
 3. If it writes extra data, add it to the `run_subtests!` block and call the seed
