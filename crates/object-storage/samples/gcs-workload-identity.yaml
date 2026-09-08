@@ -1,0 +1,7 @@
+# GitLab.com and Dedicated on GCP: the pod's Kubernetes ServiceAccount is bound
+# to a Google service account through Workload Identity, so no credential is
+# configured. Staging today: KSA gkg/gkg -> orbit-workloads@gl-orbit-stg.
+object_storage:
+  provider: gcs
+  bucket: gitlab-orbit-stg-storage
+  prefix: orbit

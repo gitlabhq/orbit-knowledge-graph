@@ -1,0 +1,13 @@
+# Self-hosted S3-compatible store (MinIO, Ceph RGW) behind a private CA.
+# MinIO needs path-style addressing unless MINIO_DOMAIN is configured.
+# Static keys come from /etc/secrets/object_storage/s3/{access_key_id,secret_access_key}.
+object_storage:
+  provider: s3
+  bucket: orbit
+  prefix: orbit
+  s3:
+    endpoint: https://minio.internal:9000
+    path_style: true
+    auth: static
+  tls:
+    ca_cert_path: /etc/orbit/tls/private-ca.pem

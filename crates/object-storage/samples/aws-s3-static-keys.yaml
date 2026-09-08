@@ -1,0 +1,10 @@
+# AWS S3 with an access key pair. Keys are not written into this file: mount them as
+# /etc/secrets/object_storage/s3/access_key_id and /etc/secrets/object_storage/s3/secret_access_key,
+# or set GKG_OBJECT_STORAGE__S3__ACCESS_KEY_ID and GKG_OBJECT_STORAGE__S3__SECRET_ACCESS_KEY.
+object_storage:
+  provider: s3
+  bucket: example-orbit-storage
+  prefix: orbit
+  s3:
+    region: eu-central-1
+    auth: static

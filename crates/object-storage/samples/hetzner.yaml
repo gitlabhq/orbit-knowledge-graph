@@ -1,0 +1,12 @@
+# Hetzner Object Storage: the location code doubles as the signing region and the
+# endpoint is the location's service host. Virtual-hosted addressing is the default,
+# so the bucket is prepended to the endpoint host automatically.
+# Static keys come from /etc/secrets/object_storage/s3/{access_key_id,secret_access_key}.
+object_storage:
+  provider: s3
+  bucket: example-orbit-storage
+  prefix: orbit
+  s3:
+    endpoint: https://fsn1.your-objectstorage.com
+    region: fsn1
+    auth: static

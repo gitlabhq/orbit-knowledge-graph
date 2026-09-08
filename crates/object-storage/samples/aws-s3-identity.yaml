@@ -1,0 +1,10 @@
+# GitLab Dedicated and self-managed on EKS: credentials come from IRSA or EKS Pod
+# Identity (env vars injected into the pod), from the ECS task role, or from the
+# EC2 instance profile. Nothing secret is configured.
+object_storage:
+  provider: s3
+  bucket: example-orbit-storage
+  prefix: orbit
+  s3:
+    region: us-east-1
+    sse_kms_key_id: arn:aws:kms:us-east-1:123456789012:key/00000000-0000-0000-0000-000000000000

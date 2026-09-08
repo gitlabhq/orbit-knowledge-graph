@@ -26,6 +26,7 @@ members = [
   "crates/orbit-search",
   "crates/orbit-migrations",
   "crates/orbit-server-config",
+  "crates/object-storage",
   "crates/orbit-server",
   "crates/ontology",
 
@@ -56,6 +57,8 @@ cargo-util-schemas = "0.14.0"
 cargo_metadata = "0.23.1"
 enum-as-inner = "0.7.0"
 either = "1.15.0"
+# object_store must stay on the version datafusion requires so stores can be shared with it.
+object_store = { version = "0.13.2", features = ["aws", "gcp"] }
 datafusion = { version = "54.1.0", default-features = false, features = ["sql", "nested_expressions"] }
 clap = { version = "4.5.57", features = ["derive", "env"] }
 comrak = { version = "0.53.0", default-features = false }
