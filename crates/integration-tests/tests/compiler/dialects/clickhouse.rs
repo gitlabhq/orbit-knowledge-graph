@@ -1037,6 +1037,67 @@ fn orbit_query_preserves_ontology_validation_and_security() {
 }
 
 #[test]
+fn orbit_query_nesting_guard_sees_through_escaped_names() {
+    let hidden = format!(
+        "MATCH (u:User) WHERE u.`'` = 1 AND {}u.id = 1{} AND u.`'` = 2 RETURN u",
+        "(".repeat(2_000),
+        ")".repeat(2_000)
+    );
+    let error = orbit_query::parse(&hidden, &orbit_query::Parameters::new()).unwrap_err();
+    assert!(error.to_string().contains("nesting is too deep"), "{error}");
+
+    let json = r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]}],"limit":5}"#;
+    let orbit_query = "MATCH (`u`:`User` {`id`: 1}) RETURN `u` LIMIT 5";
+    compile_pair(json, orbit_query, &test_ontology(), &test_ctx()).unwrap();
+}
+
+#[test]
+fn orbit_query_charges_every_parameter_reference() {
+    let ids: Vec<u64> = (0..2_000).collect();
+    let parameters =
+        orbit_query::Parameters::from([("ids".to_owned(), serde_json::Value::from(ids))]);
+    let query = |references: usize| {
+        let predicates = vec!["u.id IN $ids"; references].join(" AND ");
+        format!("MATCH (u:User) WHERE {predicates} RETURN u LIMIT 5")
+    };
+
+    orbit_query::parse(&query(2), &parameters).unwrap();
+    let error = orbit_query::parse(&query(200), &parameters).unwrap_err();
+    assert!(matches!(error, QueryError::LimitExceeded(_)), "{error}");
+}
+
+#[test]
+fn orbit_query_escaped_parameter_names_are_unescaped() {
+    use crate::compiler::setup::compile_pair_with_parameters;
+    let json = r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[7]}],"limit":5}"#;
+    let orbit_query = "MATCH (u:User {id: $`a``b`}) RETURN u LIMIT 5";
+    let parameters = orbit_query::Parameters::from([
+        ("a`b".to_owned(), serde_json::Value::from(7)),
+        ("ab".to_owned(), serde_json::Value::from(99)),
+    ]);
+    let result = compile_pair_with_parameters(
+        json,
+        orbit_query,
+        &parameters,
+        &test_ontology(),
+        &test_ctx(),
+    )
+    .unwrap();
+    assert!(has_param_value(
+        &result.base.params,
+        &serde_json::Value::from(7)
+    ));
+
+    let only_trimmed =
+        orbit_query::Parameters::from([("ab".to_owned(), serde_json::Value::from(99))]);
+    let error = orbit_query::parse(orbit_query, &only_trimmed).unwrap_err();
+    assert!(
+        error.to_string().contains("missing parameter $a`b"),
+        "{error}"
+    );
+}
+
+#[test]
 fn orbit_query_bounds_input_before_recursive_parsing() {
     let nested = format!(
         "MATCH (u:User) WHERE {}u.id = 1{} RETURN u",

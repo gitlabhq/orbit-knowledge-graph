@@ -24,7 +24,7 @@ pub fn parse(query: &str, parameters: &Parameters) -> Result<Input> {
             "query must not exceed {MAX_QUERY_BYTES} bytes"
         )));
     }
-    check_parameters(parameters)?;
+    let footprints = check_parameters(parameters)?;
     check_nesting(query)?;
     let statement = QueryParser::parse(Rule::Query, query)
         .map_err(|error| {
@@ -34,7 +34,7 @@ pub fn parse(query: &str, parameters: &Parameters) -> Result<Input> {
         })?
         .next()
         .expect("Query produces one pair");
-    lower::lower(statement, parameters)
+    lower::lower(statement, value::Bindings::new(parameters, footprints))
 }
 
 pub fn compile(
@@ -46,34 +46,40 @@ pub fn compile(
     compiler::compile_from_input(parse(query, parameters)?, ontology, context)
 }
 
-fn check_parameters(parameters: &Parameters) -> Result<()> {
-    let mut bytes: usize = parameters.keys().map(String::len).sum();
-    let mut pending: Vec<_> = parameters.values().map(|v| (v, 0)).collect();
-    while let Some((value, depth)) = pending.pop() {
-        if depth > MAX_NESTING || bytes > MAX_QUERY_BYTES || pending.len() > MAX_QUERY_BYTES {
-            return Err(QueryError::LimitExceeded(
-                "parameter payload is too large or too deeply nested".into(),
-            ));
-        }
-        bytes = bytes.saturating_add(1);
-        match value {
-            Value::Array(values) => pending.extend(values.iter().map(|v| (v, depth + 1))),
-            Value::String(text) => bytes = bytes.saturating_add(text.len()),
-            Value::Number(number) => bytes = bytes.saturating_add(number.to_string().len()),
-            Value::Bool(_) => {}
-            _ => {
-                return Err(QueryError::Validation(
-                    "parameters must be strings, numbers, booleans, or lists".into(),
+fn check_parameters(parameters: &Parameters) -> Result<HashMap<&str, usize>> {
+    let mut total: usize = 0;
+    let mut footprints = HashMap::with_capacity(parameters.len());
+    for (key, root) in parameters {
+        let mut bytes = key.len();
+        let mut pending = vec![(root, 0)];
+        while let Some((value, depth)) = pending.pop() {
+            if depth > MAX_NESTING || bytes > MAX_QUERY_BYTES || pending.len() > MAX_QUERY_BYTES {
+                return Err(QueryError::LimitExceeded(
+                    "parameter payload is too large or too deeply nested".into(),
                 ));
             }
+            bytes = bytes.saturating_add(1);
+            match value {
+                Value::Array(values) => pending.extend(values.iter().map(|v| (v, depth + 1))),
+                Value::String(text) => bytes = bytes.saturating_add(text.len()),
+                Value::Number(number) => bytes = bytes.saturating_add(number.to_string().len()),
+                Value::Bool(_) => {}
+                _ => {
+                    return Err(QueryError::Validation(
+                        "parameters must be strings, numbers, booleans, or lists".into(),
+                    ));
+                }
+            }
         }
+        total = total.saturating_add(bytes);
+        if total > MAX_QUERY_BYTES {
+            return Err(QueryError::LimitExceeded(
+                "parameter payload is too large".into(),
+            ));
+        }
+        footprints.insert(key.as_str(), bytes);
     }
-    if bytes > MAX_QUERY_BYTES {
-        return Err(QueryError::LimitExceeded(
-            "parameter payload is too large".into(),
-        ));
-    }
-    Ok(())
+    Ok(footprints)
 }
 
 fn check_nesting(query: &str) -> Result<()> {
@@ -103,14 +109,16 @@ fn invalid(pair: &Pair<'_, Rule>, message: &str) -> QueryError {
 }
 
 fn name(pair: Pair<'_, Rule>) -> Result<String> {
-    let raw = pair.as_str();
-    let name = raw
-        .strip_prefix('`')
-        .and_then(|s| s.strip_suffix('`'))
-        .map_or_else(|| raw.to_owned(), |s| s.replace("``", "`"));
+    let name = unescape(pair.as_str());
     compiler::input_validation::validate_identifier(&name)
         .map_err(|error| invalid(&pair, &error.to_string()))?;
     Ok(name)
+}
+
+fn unescape(raw: &str) -> String {
+    raw.strip_prefix('`')
+        .and_then(|s| s.strip_suffix('`'))
+        .map_or_else(|| raw.to_owned(), |s| s.replace("``", "`"))
 }
 
 fn property(pair: Pair<'_, Rule>) -> Result<compiler::input::PropertyRef> {

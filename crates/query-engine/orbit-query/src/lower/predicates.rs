@@ -6,12 +6,13 @@ use pest::iterators::Pair;
 use serde_json::Value;
 
 use super::Lowering;
-use crate::{Parameters, Rule, invalid, name, property, value::value};
+use crate::value::{Bindings, value};
+use crate::{Rule, invalid, name, property};
 
 impl Lowering<'_> {
     pub(super) fn map_filters(
         pair: Pair<'_, Rule>,
-        parameters: &Parameters,
+        bindings: &Bindings<'_>,
         filters: &mut HashMap<String, Vec<InputFilter>>,
     ) -> Result<()> {
         let mut keys = HashSet::new();
@@ -21,7 +22,7 @@ impl Lowering<'_> {
             if !keys.insert(key.clone()) {
                 return Err(invalid(&entry, "duplicate property in a map"));
             }
-            let val = value(parts.next().expect("map entry has a value"), parameters)?;
+            let val = value(parts.next().expect("map entry has a value"), bindings)?;
             filters.entry(key).or_default().push(InputFilter {
                 op: Some(FilterOp::Eq),
                 value: Some(val),
@@ -83,10 +84,7 @@ impl Lowering<'_> {
                         _ => return Err(invalid(&operator, "unsupported predicate operator")),
                     },
                 };
-                let value = parts
-                    .next()
-                    .map(|p| value(p, self.parameters))
-                    .transpose()?;
+                let value = parts.next().map(|p| value(p, &self.bindings)).transpose()?;
                 let filter = InputFilter {
                     op: Some(op),
                     value,

@@ -117,7 +117,7 @@ It also rejects OR, general NOT, not-equal, DISTINCT, count(*), arbitrary expres
 Unsupported syntax or lowering returns a client-safe error rather than dropping the unsupported part.
 
 Query text is limited to 32 KiB. A flat Pest scan checks nesting before recursive parsing, with a limit of 32 levels.
-Parameters have bounded size and nesting. Existing compiler limits still apply after lowering.
+Parameters have bounded size and nesting, and every `$parameter` reference is charged against the same 32 KiB budget so repeated references cannot expand past it. Existing compiler limits still apply after lowering.
 
 Cursor binding is not implemented for the typed entry point. It rejects cursor input rather than accepting an unbound cursor.
 Cursor support, custom ID-property spellings, and presentation-option syntax remain outside this first frontend slice.

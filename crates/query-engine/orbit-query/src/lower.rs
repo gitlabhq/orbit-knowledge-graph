@@ -9,12 +9,13 @@ use compiler::input::{
 use compiler::{Input, InputNode, QueryError, Result};
 use pest::iterators::Pair;
 
-use crate::{Parameters, Rule, invalid, name};
+use crate::value::Bindings;
+use crate::{Rule, invalid, name};
 
-pub(super) fn lower(statement: Pair<'_, Rule>, parameters: &Parameters) -> Result<Input> {
+pub(super) fn lower(statement: Pair<'_, Rule>, bindings: Bindings<'_>) -> Result<Input> {
     let mut lowering = Lowering {
         input: Input::default(),
-        parameters,
+        bindings,
         edges: HashMap::new(),
         path: None,
         neighbor: None,
@@ -31,7 +32,7 @@ pub(super) fn lower(statement: Pair<'_, Rule>, parameters: &Parameters) -> Resul
                         .into_inner()
                         .next()
                         .expect("LIMIT has a value"),
-                    parameters,
+                    &lowering.bindings,
                 )?;
                 lowering.input.limit = value
                     .as_u64()
@@ -47,7 +48,7 @@ pub(super) fn lower(statement: Pair<'_, Rule>, parameters: &Parameters) -> Resul
 
 struct Lowering<'a> {
     input: Input,
-    parameters: &'a Parameters,
+    bindings: Bindings<'a>,
     edges: HashMap<String, usize>,
     path: Option<String>,
     neighbor: Option<String>,
@@ -102,7 +103,7 @@ impl Lowering<'_> {
                 Rule::NodeLabel => {
                     node.entity = Some(name(part.into_inner().next().expect("label has a name"))?)
                 }
-                Rule::MapLiteral => Self::map_filters(part, self.parameters, &mut node.filters)?,
+                Rule::MapLiteral => Self::map_filters(part, &self.bindings, &mut node.filters)?,
                 _ => return Err(invalid(&part, "unsupported node pattern")),
             }
         }
@@ -158,9 +159,7 @@ impl Lowering<'_> {
                         edge.types = part.into_inner().map(name).collect::<Result<_>>()?
                     }
                     Rule::RangeLiteral => edge.hops = hop_range(part)?,
-                    Rule::MapLiteral => {
-                        Self::map_filters(part, self.parameters, &mut edge.filters)?
-                    }
+                    Rule::MapLiteral => Self::map_filters(part, &self.bindings, &mut edge.filters)?,
                     _ => return Err(invalid(&part, "unsupported relationship pattern")),
                 }
             }
