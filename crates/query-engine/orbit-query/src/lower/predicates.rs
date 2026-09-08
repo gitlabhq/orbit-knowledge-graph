@@ -7,7 +7,7 @@ use serde_json::Value;
 
 use super::Lowering;
 use crate::value::{Bindings, value};
-use crate::{Rule, invalid, name, property};
+use crate::{Rule, invalid, name, property, unexpected};
 
 impl Lowering<'_> {
     pub(super) fn map_filters(
@@ -81,7 +81,7 @@ impl Lowering<'_> {
                         "token_match" => FilterOp::TokenMatch,
                         "all_tokens" => FilterOp::AllTokens,
                         "any_tokens" => FilterOp::AnyTokens,
-                        _ => return Err(invalid(&operator, "unsupported predicate operator")),
+                        _ => return Err(unexpected(&operator)),
                     },
                 };
                 let value = parts.next().map(|p| value(p, &self.bindings)).transpose()?;
@@ -105,12 +105,7 @@ impl Lowering<'_> {
                     return Err(invalid(&pair, &format!("undefined variable {}", prop.node)));
                 }
             }
-            _ => {
-                return Err(invalid(
-                    &pair,
-                    "only AND-combined property predicates are supported",
-                ));
-            }
+            _ => return Err(unexpected(&pair)),
         }
         Ok(())
     }

@@ -5,7 +5,7 @@ use compiler::{QueryError, Result};
 use pest::iterators::Pair;
 use serde_json::{Number, Value};
 
-use crate::{MAX_QUERY_BYTES, Parameters, Rule, invalid, unescape};
+use crate::{MAX_QUERY_BYTES, Parameters, Rule, invalid, unescape, unexpected};
 
 pub(crate) struct Bindings<'a> {
     parameters: &'a Parameters,
@@ -59,9 +59,7 @@ pub(crate) fn value(pair: Pair<'_, Rule>, bindings: &Bindings<'_>) -> Result<Val
         .map(Value::String),
         Rule::ListLiteral => pair.into_inner().map(|p| value(p, bindings)).collect(),
         Rule::Parameter => bindings.resolve(&pair),
-        rule => Err(QueryError::PipelineInvariant(format!(
-            "unexpected value rule {rule:?}"
-        ))),
+        _ => Err(unexpected(&pair)),
     }
 }
 
@@ -103,7 +101,7 @@ pub(crate) fn string(pair: Pair<'_, Rule>) -> Result<String> {
                     char::from_u32(code).ok_or_else(|| invalid(&pair, "invalid Unicode scalar"))?,
                 );
             }
-            _ => return Err(invalid(&pair, "unsupported escape")),
+            _ => return Err(unexpected(&pair)),
         }
     }
     Ok(result)

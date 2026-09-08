@@ -1253,6 +1253,98 @@ fn orbit_query_schema_caps_reject_with_the_json_category() {
 }
 
 #[test]
+fn orbit_query_structural_caps_reject_with_the_json_category() {
+    let chain = |count: usize| {
+        let nodes: Vec<String> = (0..count)
+            .map(|i| format!(r#"{{"id":"n{i}","entity":"User"}}"#))
+            .collect();
+        let edges: Vec<String> = (1..count)
+            .map(|i| format!(r#"{{"type":"MEMBER_OF","from":"n{}","to":"n{i}"}}"#, i - 1))
+            .collect();
+        let json = format!(
+            r#"{{"query_type":"traversal","nodes":[{{"id":"n0","entity":"User","node_ids":[1]}},{}],"relationships":[{}]}}"#,
+            nodes[1..].join(","),
+            edges.join(",")
+        );
+        let pattern: Vec<String> = (1..count).map(|i| format!("(n{i}:User)")).collect();
+        let text = format!(
+            "MATCH (n0:User {{id: 1}})-[:MEMBER_OF]->{} RETURN n0",
+            pattern.join("-[:MEMBER_OF]->")
+        );
+        (json, text)
+    };
+    let ids = |count: usize| {
+        let list: Vec<String> = (1..=count).map(|i| i.to_string()).collect();
+        (
+            format!(
+                r#"{{"query_type":"traversal","nodes":[{{"id":"u","entity":"User","node_ids":[{}]}}]}}"#,
+                list.join(",")
+            ),
+            format!(
+                "MATCH (u:User) WHERE u.id IN [{}] RETURN u",
+                list.join(", ")
+            ),
+        )
+    };
+    let repeated_predicates = |count: usize| {
+        let json_entries: Vec<String> = (0..count)
+            .map(|i| format!(r#"{{"contains":"abc{i}"}}"#))
+            .collect();
+        let text_entries: Vec<String> = (0..count)
+            .map(|i| format!("u.username CONTAINS 'abc{i}'"))
+            .collect();
+        (
+            format!(
+                r#"{{"query_type":"traversal","nodes":[{{"id":"u","entity":"User","filters":{{"username":[{}]}}}}]}}"#,
+                json_entries.join(",")
+            ),
+            format!(
+                "MATCH (u:User) WHERE {} RETURN u",
+                text_entries.join(" AND ")
+            ),
+        )
+    };
+
+    let rel_types = |count: usize| {
+        let kinds = &[
+            "MEMBER_OF",
+            "AUTHORED",
+            "CONTAINS",
+            "IN_PROJECT",
+            "REVIEWER",
+            "ASSIGNED",
+            "HAS_HEAD_PIPELINE",
+            "ON_BRANCH",
+            "DEFINES",
+            "CALLS",
+            "EXTENDS",
+        ][..count];
+        let quoted: Vec<String> = kinds.iter().map(|k| format!("\"{k}\"")).collect();
+        (
+            format!(
+                r#"{{"query_type":"traversal","nodes":[{{"id":"a","entity":"User","node_ids":[1]}},{{"id":"b","entity":"Project"}}],"relationships":[{{"type":[{}],"from":"a","to":"b"}}]}}"#,
+                quoted.join(",")
+            ),
+            format!(
+                "MATCH (a:User {{id: 1}})-[:{}]->(b:Project) RETURN a, b",
+                kinds.join("|")
+            ),
+        )
+    };
+
+    for (json, text) in [chain(5), ids(500), repeated_predicates(10), rel_types(10)] {
+        compile_pair(&json, &text, &embedded_ontology(), &test_ctx()).unwrap();
+    }
+    for (json, text) in [chain(6), ids(501), repeated_predicates(11), rel_types(11)] {
+        let error = compile_pair(&json, &text, &embedded_ontology(), &test_ctx()).unwrap_err();
+        assert!(
+            matches!(error, QueryError::Validation(_)),
+            "{text}: {error}"
+        );
+    }
+}
+
+#[test]
 fn orbit_query_incoming_arrows_lower_to_the_outgoing_fk_plan() {
     let json = r#"{"query_type":"traversal","nodes":[{"id":"n","entity":"Note","node_ids":[1],"columns":["confidential"]},{"id":"u","entity":"User","columns":["username"]}],"relationships":[{"type":"AUTHORED","from":"u","to":"n"}]}"#;
     let orbit_query =

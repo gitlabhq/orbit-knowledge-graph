@@ -10,7 +10,7 @@ use compiler::{Input, InputNode, QueryError, Result};
 use pest::iterators::Pair;
 
 use crate::value::Bindings;
-use crate::{Rule, invalid, name};
+use crate::{Rule, invalid, name, unexpected};
 
 pub(super) fn lower(statement: Pair<'_, Rule>, bindings: Bindings<'_>) -> Result<Input> {
     let mut lowering = Lowering {
@@ -40,7 +40,7 @@ pub(super) fn lower(statement: Pair<'_, Rule>, bindings: Bindings<'_>) -> Result
                     .ok_or_else(|| invalid(&clause, "LIMIT must be a positive integer"))?;
             }
             Rule::EOI => {}
-            _ => return Err(invalid(&clause, "unsupported clause")),
+            _ => return Err(unexpected(&clause)),
         }
     }
     Ok(lowering.input)
@@ -104,7 +104,7 @@ impl Lowering<'_> {
                     node.entity = Some(name(part.into_inner().next().expect("label has a name"))?)
                 }
                 Rule::MapLiteral => Self::map_filters(part, &self.bindings, &mut node.filters)?,
-                _ => return Err(invalid(&part, "unsupported node pattern")),
+                _ => return Err(unexpected(&part)),
             }
         }
         if let Some(filters) = node.filters.get("id")
@@ -127,7 +127,7 @@ impl Lowering<'_> {
             Rule::Outgoing => Direction::Outgoing,
             Rule::Incoming => Direction::Incoming,
             Rule::Undirected => Direction::Both,
-            _ => return Err(invalid(&shape, "unsupported relationship direction")),
+            _ => return Err(unexpected(&shape)),
         };
         let mut edge = InputRelationship {
             types: vec!["*".into()],
@@ -168,7 +168,7 @@ impl Lowering<'_> {
                         }
                         Self::map_filters(part, &self.bindings, &mut edge.filters)?;
                     }
-                    _ => return Err(invalid(&part, "unsupported relationship pattern")),
+                    _ => return Err(unexpected(&part)),
                 }
             }
         }

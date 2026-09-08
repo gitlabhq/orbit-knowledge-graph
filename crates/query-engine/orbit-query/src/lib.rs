@@ -108,6 +108,13 @@ fn invalid(pair: &Pair<'_, Rule>, message: &str) -> QueryError {
     QueryError::Validation(format!("line {line}, column {column}: {message}"))
 }
 
+fn unexpected(pair: &Pair<'_, Rule>) -> QueryError {
+    QueryError::PipelineInvariant(format!(
+        "grammar produced {:?} where the lowering has no arm",
+        pair.as_rule()
+    ))
+}
+
 fn name(pair: Pair<'_, Rule>) -> Result<String> {
     let name = unescape(pair.as_str());
     compiler::input_validation::validate_identifier(&name)

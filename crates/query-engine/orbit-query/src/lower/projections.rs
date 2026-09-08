@@ -8,7 +8,7 @@ use compiler::input::{
 use pest::iterators::Pair;
 
 use super::Lowering;
-use crate::{Rule, invalid, name, property, value::string};
+use crate::{Rule, invalid, name, property, unexpected, value::string};
 
 impl Lowering<'_> {
     pub(super) fn project(&mut self, clause: Pair<'_, Rule>) -> Result<()> {
@@ -293,7 +293,7 @@ impl Lowering<'_> {
                         ));
                     }
                 }
-                _ => return Err(invalid(&expression, "unsupported projection")),
+                _ => return Err(unexpected(&expression)),
             }
         }
         Ok(())
