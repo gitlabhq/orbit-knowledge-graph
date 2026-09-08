@@ -9,4 +9,7 @@ query:
 expect:
   node_count: 9
   referential_integrity: true
+  nodes:
+    User:
+      ids: [1]
   skip_requirements: [neighbors]

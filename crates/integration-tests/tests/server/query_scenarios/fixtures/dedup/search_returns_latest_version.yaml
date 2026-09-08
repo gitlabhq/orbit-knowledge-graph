@@ -17,6 +17,6 @@ query:
 expect:
   nodes:
     User:
-      count: 1
+      ids: [9001]
       rows:
         - { id: 9001, username: fresh_name, name: Fresh Name, state: active }
