@@ -33,7 +33,7 @@ CLI integration tests (concurrency, worktrees): `mise test:cli`.
   Schema: `config/schemas/ontology.schema.json`.
 - **Agent-facing prompts are YAML.** Tool and command descriptions live as versioned YAML under `config/prompts/` (`remote/` = server, `local/` = CLI), embedded via rust-embed and build-time validated by `orbit-prompts`.
 - **Single binary, four modes.** `gkg-server --mode` runs as Webserver, Indexer, DispatchIndexing, or HealthCheck.
-- **Layered configuration.** `AppConfig` in `crates/orbit-server-config/` loads three sources (lowest to highest priority): `config/default.yaml`, K8s secret files from `/etc/secrets/`, and `GKG_*` environment variables (`__` separates nested keys, e.g. `GKG_GRAPH__DATABASE`). The CLI (`orbit`) has its own clap-based config and does not use `AppConfig`. See `docs/dev/runbooks/server_configuration.md` for full reference.
+- **Layered configuration.** `AppConfig` in `crates/orbit-server-config/` loads four sources (lowest to highest priority): `config/default.yaml`, an overlay file (`--config <path>`, else `config/config.yaml` when present), K8s secret files from `/etc/secrets/`, and `GKG_*` environment variables (`__` separates nested keys, e.g. `GKG_GRAPH__DATABASE`). The CLI (`orbit`) has its own clap-based config and does not use `AppConfig`. See `docs/dev/runbooks/server_configuration.md` for full reference.
 - **Siphon and NATS are external.** [Siphon](https://gitlab.com/gitlab-org/analytics-section/siphon) (Go, Analytics team) and NATS are consumed, not owned. Use `/related-repositories` for local checkouts.
 
 ## What CI enforces
