@@ -3,7 +3,7 @@
 
 These cover the partition / hop-bound logic without touching the network: the
 helpers are exercised against canned `nodes`/`edges` payloads shaped like a
-`glab orbit remote query --format raw` (graph) response.
+`glab orbit remote query --response-format raw` response.
 
 Run with: python3 -m unittest skills.orbit.scripts.test_remote_repo_map
       or:  python3 skills/orbit/scripts/test_remote_repo_map.py
@@ -13,6 +13,7 @@ from __future__ import annotations
 import importlib.util
 import unittest
 from pathlib import Path
+from unittest import mock
 
 _SPEC = importlib.util.spec_from_file_location(
     "remote_repo_map", Path(__file__).with_name("remote_repo_map.py")
@@ -39,6 +40,25 @@ def edge(from_id, to_id, depth=None):
     if depth is not None:
         e["depth"] = depth
     return e
+
+
+class QueryTest(unittest.TestCase):
+    @mock.patch.object(rrm.subprocess, "run")
+    def test_uses_current_raw_response_flag_and_parses_response(self, run):
+        run.return_value = rrm.subprocess.CompletedProcess(
+            args=[], returncode=0,
+            stdout='{"result":{"nodes":[],"edges":[]},"row_count":0}',
+            stderr="",
+        )
+
+        response = rrm._query({"query": {"query_type": "traversal"}})
+
+        command = run.call_args.args[0]
+        self.assertEqual(command[:6], [
+            "glab", "orbit", "remote", "query", "--response-format", "raw",
+        ])
+        self.assertEqual(rrm._nodes(response), [])
+        self.assertEqual(rrm._edges(response), [])
 
 
 class FilterByPrefixTest(unittest.TestCase):
