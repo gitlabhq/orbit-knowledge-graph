@@ -25,7 +25,8 @@ GitLab Orbit Local runs entirely on your machine. Build a code graph for any loc
 repository and query its DuckDB tables with read-only SQL. GitLab Orbit Remote uses
 the Query DSL instead. No GitLab account or network connection is required.
 
-- Indexes: Code only, including files, definitions, cross-file references.
+- Indexes: Code in the current working tree, including files, definitions, and
+  cross-file references.
 - Storage: DuckDB (local file at `~/.orbit/graph.duckdb`)
 
 [Get started with GitLab Orbit Local](getting-started.md)

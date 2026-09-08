@@ -29,10 +29,13 @@ title: How GitLab Orbit Local works
 
 When you run `orbit index`, GitLab Orbit Local:
 
-1. Walks the repository directory tree, respecting `.gitignore`.
+1. Walks the current working tree, including uncommitted files and respecting `.gitignore`.
 1. Passes each source file to a language-specific parser (rust-analyzer, tree-sitter, or a custom parser depending on language).
 1. Extracts definitions (functions, classes, modules), import declarations, and cross-file symbol references.
 1. Writes the results as nodes and edges into a local DuckDB file at `~/.orbit/graph.duckdb`.
+
+Indexing does not enumerate or check out other Git branches. Each checkout or
+worktree is indexed from the files currently on disk.
 
 The v2 pipeline runs all language parsers in parallel. Indexing a medium-sized repository typically completes in seconds.
 
@@ -65,20 +68,15 @@ All data in the graph is accessible to whoever runs the CLI.
 
 The graph is stored in a single DuckDB file at `~/.orbit/graph.duckdb`. Multiple
 repository checkout paths can share the database. The canonical checkout path
-determines the project ID. Reindexing the same path replaces its previous graph,
-including when you switch branches. To retain multiple branches at the same time,
-index each branch from a separate checkout or worktree path.
+determines the project ID. Switching branches alone does not update the stored
+graph. Reindexing the same checkout replaces its previous graph in that database
+with the current working-tree contents. To retain graphs for multiple branches,
+index them from separate checkout or worktree paths.
 
 ## Supported languages
 
-The current source tree registers GitLab Orbit Local parsers for 20 languages:
-Bash/Shell, C, C++, C#, Elixir, Go, HCL/Terraform, Java, JavaScript, Kotlin,
-Lua, PHP, Python, Ruby, Rust, Scala, Swift, TypeScript, YAML, and Zig.
-Definitions, imports, and cross-file relationship coverage vary by language and
-syntax.
-
-See [index data with GitLab Orbit](../indexed-data.md#supported-languages) for
-more information.
+See [index data with GitLab Orbit](../indexed-data.md#supported-languages) for the
+shared language-support table.
 
 ## Billing
 

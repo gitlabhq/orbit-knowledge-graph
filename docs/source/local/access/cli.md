@@ -71,11 +71,16 @@ invoke it directly.
 orbit index /path/to/your/repo
 ```
 
-GitLab Orbit parses the repository and writes a DuckDB graph to `~/.orbit/graph.duckdb`.
-You can index multiple repository checkout paths. The canonical checkout path
-determines the project ID. Reindexing the same path replaces its previous graph,
-including when you switch branches. To retain multiple branches at the same time,
-index each branch from a separate checkout or worktree path.
+GitLab Orbit Local indexes the current working tree, including uncommitted source
+files not excluded by `.gitignore`. It does not enumerate or check out other Git
+branches.
+
+The graph is stored in `~/.orbit/graph.duckdb` by default. Multiple checkout paths
+can share one database, with each canonical checkout path determining its project
+ID. Switching branches alone does not update the stored graph. Reindexing the same
+checkout replaces its previous graph in that database with the current working-tree
+contents. To retain graphs for multiple branches, index them from separate checkout
+or worktree paths.
 
 | Flag | Purpose |
 |------|---------|
