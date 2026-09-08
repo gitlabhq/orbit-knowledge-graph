@@ -4,7 +4,7 @@
 
 mod format;
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 
 use query_engine::compiler::{
@@ -18,7 +18,7 @@ use query_engine::shared::{PipelineOutput, RedactionOutput};
 
 use crate::context::TestContext;
 use crate::mock_redaction::MockRedactionService;
-use crate::scenario::Seed;
+use crate::scenario::{self, Seed};
 use crate::visitor::{NodeExt, Requirement, ResponseView};
 use crate::{SeededColumnResolver, collect_subtest_results, load_ontology};
 
@@ -35,7 +35,7 @@ use orbit_server::redaction::QueryResult;
 pub fn validate_parse(root: &str) {
     let root = Path::new(root);
     let mut files = Vec::new();
-    discover(root, &mut files);
+    scenario::discover(root, &mut files);
     assert!(!files.is_empty(), "no files found under {}", root.display());
     for file in &files {
         let raw =
@@ -63,7 +63,7 @@ pub async fn run_dir(ctx: &TestContext, root: &str, presets: &str) {
     let root = Path::new(root);
     let presets: Arc<Path> = Arc::from(Path::new(presets));
     let mut files = Vec::new();
-    discover(root, &mut files);
+    scenario::discover(root, &mut files);
     files.sort();
     assert!(
         !files.is_empty(),
@@ -74,7 +74,7 @@ pub async fn run_dir(ctx: &TestContext, root: &str, presets: &str) {
     if let Ok(filter) = std::env::var("SCENARIO_FILTER") {
         let filter = filter.trim();
         if !filter.is_empty() {
-            files.retain(|f| scenario_name(root, f).contains(filter));
+            files.retain(|f| scenario::scenario_name(root, f).contains(filter));
             assert!(
                 !files.is_empty(),
                 "SCENARIO_FILTER='{filter}' matched no query scenarios under {}",
@@ -92,7 +92,7 @@ pub async fn run_dir(ctx: &TestContext, root: &str, presets: &str) {
 
     let mut handles = Vec::new();
     for file in files {
-        let name = scenario_name(root, &file);
+        let name = scenario::scenario_name(root, &file);
         let semaphore = Arc::clone(&semaphore);
         let ctx = Arc::clone(&ctx);
         let presets = Arc::clone(&presets);
@@ -450,34 +450,4 @@ fn parse_requirement(name: &str) -> Option<Requirement> {
         "path_finding" => Some(Requirement::PathFinding),
         _ => None,
     }
-}
-
-fn discover(dir: &Path, files: &mut Vec<PathBuf>) {
-    let entries = match std::fs::read_dir(dir) {
-        Ok(e) => e,
-        Err(e) => panic!("failed to read {}: {e}", dir.display()),
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_dir() {
-            discover(&path, files);
-        } else if path
-            .extension()
-            .is_some_and(|ext| ext == "yaml" || ext == "yml")
-        {
-            files.push(path);
-        }
-    }
-}
-
-fn scenario_name(root: &Path, file: &Path) -> String {
-    let relative = file
-        .strip_prefix(root)
-        .expect("file is under root")
-        .with_extension("");
-    let prefix = root
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    format!("{prefix}/{}", relative.display())
 }

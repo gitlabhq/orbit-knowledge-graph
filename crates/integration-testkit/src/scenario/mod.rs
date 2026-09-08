@@ -139,7 +139,7 @@ async fn run_scenario(ctx: &TestContext, file: &Path, name: &str, handlers: &dyn
     }
 }
 
-fn discover(dir: &Path, files: &mut Vec<PathBuf>) {
+pub(crate) fn discover(dir: &Path, files: &mut Vec<PathBuf>) {
     let entries = match std::fs::read_dir(dir) {
         Ok(entries) => entries,
         Err(e) => panic!("failed to read scenario directory {}: {e}", dir.display()),
@@ -157,7 +157,7 @@ fn discover(dir: &Path, files: &mut Vec<PathBuf>) {
     }
 }
 
-fn scenario_name(root: &Path, file: &Path) -> String {
+pub(crate) fn scenario_name(root: &Path, file: &Path) -> String {
     let relative = file
         .strip_prefix(root)
         .expect("scenario file is under root")
