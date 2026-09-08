@@ -370,6 +370,10 @@ description = "Validate named query YAML files against JSON schema"
 run = "find crates/integration-tests/tests/indexer/scenarios -name '*.yaml' | xargs uvx check-jsonschema --verbose --schemafile config/schemas/indexer_scenario.schema.json"
 description = "Validate indexer test scenario YAML files against JSON schema"
 
+[tasks."query-scenarios:validate"]
+run = "find crates/integration-tests/tests/server/query_scenarios/fixtures -name '*.yaml' | xargs uvx check-jsonschema --verbose --schemafile config/schemas/query_scenario.schema.json"
+description = "Validate query test scenario YAML files against JSON schema"
+
 [tasks."schema:generate"]
 run = "cargo xtask schema -o config/schemas/config.schema.json"
 description = "Generate JSON Schema for the server configuration"

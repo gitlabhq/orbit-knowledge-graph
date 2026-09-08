@@ -1,5 +1,6 @@
 # source: crates/integration-tests/tests/server/data_correctness/dedup.rs::search_returns_latest_version
 description: ReplacingMergeTree dedup returns the latest version
+
 config:
   extra_seed:
     gl_user:
@@ -8,6 +9,7 @@ config:
   redaction:
     allow:
       user: [1, 2, 3, 4, 5, 6, 7, 9001]
+
 query:
   json: |
     {
@@ -16,6 +18,7 @@ query:
                  "node_ids": [9001]}],
       "limit": 10
     }
+
 expect:
   nodes:
     User:

@@ -1,5 +1,6 @@
 # source: crates/integration-tests/tests/server/data_correctness/security.rs::admin_only_non_admin_filter_rejects_at_compile
 description: Non-admin filtering on is_admin rejects at compile time
+
 query:
   json: |
     {
@@ -8,5 +9,6 @@ query:
                  "filters": {"is_admin": true}}],
       "limit": 10
     }
+
 expect:
   compile_error: true

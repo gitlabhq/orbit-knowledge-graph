@@ -1,8 +1,10 @@
 # source: crates/integration-tests/tests/server/data_correctness/aggregation.rs::aggregation_count_returns_correct_values
 description: Count MRs authored per user
+
 config:
   security:
     paths: ["1/"]
+
 query:
   json: |
     {
@@ -16,5 +18,6 @@ query:
       "aggregations": [{"count": "mr", "as": "mr_count"}],
       "limit": 10
     }
+
 expect:
   skip_requirements: [aggregation]

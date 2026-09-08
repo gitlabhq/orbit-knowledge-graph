@@ -1,0 +1,135 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "query_scenario.schema.json",
+  "title": "Orbit query pipeline integration-test scenario",
+  "description": "Declarative integration-test scenario for the query pipeline: configure security and redaction, compile a query, execute, and assert on the response. Executed by integration_testkit::query_scenario::run_dir.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["query"],
+  "properties": {
+    "description": { "type": "string" },
+    "config": { "$ref": "#/definitions/config" },
+    "query": { "$ref": "#/definitions/query" },
+    "expect": { "$ref": "#/definitions/expect" }
+  },
+  "definitions": {
+    "config": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "seed": { "type": "string" },
+        "extra_seed": { "$ref": "#/definitions/seed" },
+        "security": { "$ref": "#/definitions/presetOrSecurity" },
+        "redaction": { "$ref": "#/definitions/presetOrRedaction" }
+      }
+    },
+    "query": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": { "type": "string" },
+      "description": "One key per query language (json, cypher). Each value is the query string."
+    },
+    "seed": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "array",
+        "items": { "$ref": "#/definitions/row" }
+      }
+    },
+    "row": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "presetOrSecurity": {
+      "oneOf": [
+        { "type": "string" },
+        { "$ref": "#/definitions/security" }
+      ]
+    },
+    "presetOrRedaction": {
+      "oneOf": [
+        { "type": "string" },
+        { "$ref": "#/definitions/redaction" }
+      ]
+    },
+    "security": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "admin": { "type": "boolean" },
+        "paths": { "type": "array", "items": { "type": "string" } },
+        "org_id": { "type": "integer" },
+        "access_level": { "type": "integer" }
+      }
+    },
+    "redaction": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "allow": { "$ref": "#/definitions/idsByResource" },
+        "deny": { "$ref": "#/definitions/idsByResource" }
+      }
+    },
+    "idsByResource": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "array",
+        "items": { "type": "integer" }
+      }
+    },
+    "expect": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "compile_error": {
+          "oneOf": [
+            { "type": "boolean" },
+            { "type": "string" }
+          ]
+        },
+        "node_count": { "type": "integer", "minimum": 0 },
+        "nodes": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/definitions/nodeExpect" }
+        },
+        "edges": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": { "type": "integer" },
+              "minItems": 2,
+              "maxItems": 2
+            }
+          }
+        },
+        "edge_count": {
+          "type": "object",
+          "additionalProperties": { "type": "integer", "minimum": 0 }
+        },
+        "referential_integrity": { "type": "boolean" },
+        "has_more": { "type": "boolean" },
+        "skip_requirements": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "nodeExpect": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "count": { "type": "integer", "minimum": 0 },
+        "order": { "type": "array", "items": { "type": "integer" } },
+        "ids": { "type": "array", "items": { "type": "integer" } },
+        "absent": { "type": "array", "items": { "type": "integer" } },
+        "filters": { "type": "object", "additionalProperties": true },
+        "rows": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/row" }
+        }
+      }
+    }
+  }
+}
