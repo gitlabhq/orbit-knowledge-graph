@@ -26,6 +26,22 @@ pub use format::{PresetOr, QueryExpect, QueryScenario, RedactionConfig, Security
 use orbit_server::pipeline::HydrationStage;
 use orbit_server::redaction::QueryResult;
 
+use crate::scenario::Seed;
+
+/// Load a named seed preset from `presets/seed.yaml` and apply it.
+pub async fn load_yaml_seed(ctx: &TestContext, presets_dir: &str, name: &str) {
+    let path = Path::new(presets_dir).join("seed.yaml");
+    let raw = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("seed presets at {}: {e}", path.display()));
+    let map: std::collections::BTreeMap<String, Seed> =
+        orbit_utils::yaml::from_str(&raw).unwrap_or_else(|e| panic!("invalid seed presets: {e}"));
+    let seed = map
+        .get(name)
+        .unwrap_or_else(|| panic!("unknown seed preset '{name}'"));
+    let columns = crate::scenario::seed::fetch_table_columns(ctx).await;
+    crate::scenario::seed::apply_seed(ctx, seed, &Default::default(), &columns, name).await;
+}
+
 pub async fn run_dir(ctx: &TestContext, root: &str, presets: &str) {
     let root = Path::new(root);
     let presets: Arc<Path> = Arc::from(Path::new(presets));
