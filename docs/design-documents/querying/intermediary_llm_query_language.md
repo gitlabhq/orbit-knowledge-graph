@@ -488,7 +488,7 @@ Security context is injected into all queries via `traversal_path` filtering:
 - Single path: `startsWith(traversal_path, "{path}")`
 - Multiple paths: Optimized with longest common prefix
 
-This filtering is applied to node tables (not edge tables) and injected into the WHERE clause for short-circuit filtering. Tables whose visibility is determined through relationships rather than path hierarchy (e.g., `gl_users`) are excluded from path-based filtering. Permission predicates are injected based on the caller's JWT, so the resulting query is still subject to the GitLab authorization model.
+This filtering is applied to every namespaced node and edge table scan and injected into the WHERE clause for short-circuit filtering. Global node tables declared by the ontology, such as `gl_user` and `gl_runner`, have no `traversal_path` column and are excluded from path-based filtering. Their results rely on Rails redaction, while joins through namespaced relationships retain path filtering. Permission predicates come from the caller's JWT, so the resulting query remains subject to the GitLab authorization model.
 
 ### Read-Only Execution
 
