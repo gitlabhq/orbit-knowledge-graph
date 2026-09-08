@@ -78,7 +78,7 @@ fn aggregation_query() {
         "query_type": "aggregation",
         "nodes": [
             {"id": "n", "entity": "Note", "node_ids": [1], "columns": ["confidential"]},
-            {"id": "u", "entity": "User", "columns": ["username"]}
+            {"id": "u", "entity": "User", "columns": ["id", "username"]}
         ],
         "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
         "group_by": ["u"],
@@ -1189,20 +1189,74 @@ fn orbit_query_bounds_input_before_recursive_parsing() {
     for query in [nested, oversized] {
         assert!(orbit_query::parse(&query, &orbit_query::Parameters::new()).is_err());
     }
-    for query in [
-        "MATCH (u:User) RETURN u LIMIT 0",
-        "MATCH (u:User) RETURN u LIMIT 1001",
-        "MATCH (u:User) WHERE u.id IN [] RETURN u",
-    ] {
-        assert!(
-            orbit_query::compile(
-                query,
-                &orbit_query::Parameters::new(),
-                &test_ontology(),
-                &test_ctx()
-            )
-            .is_err(),
-            "{query}"
-        );
+    assert!(
+        orbit_query::compile(
+            "MATCH (u:User) WHERE u.id IN [] RETURN u",
+            &orbit_query::Parameters::new(),
+            &test_ontology(),
+            &test_ctx()
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn orbit_query_schema_caps_reject_with_the_json_category() {
+    let cases = [
+        (
+            r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]}],"limit":0}"#,
+            "MATCH (u:User {id: 1}) RETURN u LIMIT 0",
+        ),
+        (
+            r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]}],"limit":1001}"#,
+            "MATCH (u:User {id: 1}) RETURN u LIMIT 1001",
+        ),
+        (
+            r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"p","entity":"Project"}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"p","hops":[1,4]}]}"#,
+            "MATCH (u:User {id: 1})-[:MEMBER_OF*1..4]->(p:Project) RETURN u, p",
+        ),
+        (
+            r#"{"query_type":"aggregation","nodes":[{"id":"u","entity":"User","node_ids":[1]}],"group_by":["ghost"],"aggregations":[{"count":"u"}]}"#,
+            "MATCH (u:User {id: 1}) RETURN ghost, count(u)",
+        ),
+    ];
+    for (json, orbit_query) in cases {
+        compile_pair(json, orbit_query, &test_ontology(), &test_ctx()).unwrap_err();
+    }
+}
+
+#[test]
+fn orbit_query_incoming_arrows_lower_to_the_outgoing_fk_plan() {
+    let json = r#"{"query_type":"traversal","nodes":[{"id":"n","entity":"Note","node_ids":[1],"columns":["confidential"]},{"id":"u","entity":"User","columns":["username"]}],"relationships":[{"type":"AUTHORED","from":"u","to":"n"}]}"#;
+    let orbit_query =
+        "MATCH (n:Note {id: 1})<-[:AUTHORED]-(u:User) RETURN n.confidential, u.username";
+    let compiled = compile_pair(json, orbit_query, &embedded_ontology(), &test_ctx()).unwrap();
+    assert!(
+        compiled.base.sql.contains("_narrow_u"),
+        "AUTHORED should resolve to the FK plan: {}",
+        compiled.base.sql
+    );
+    assert!(
+        compiled.base.sql.contains("n.author_id AS e0_src"),
+        "edge source must be the User side: {}",
+        compiled.base.sql
+    );
+}
+
+#[test]
+fn orbit_query_digit_string_ids_and_aggregated_identity_columns() {
+    let cases = [
+        (
+            r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":["7"]}]}"#,
+            "MATCH (u:User) WHERE u.id IN ['7'] RETURN u",
+        ),
+        (
+            r#"{"query_type":"aggregation","nodes":[{"id":"f","entity":"File","node_ids":[1,2],"columns":["id","content"]}],"group_by":["f"],"aggregations":[{"count":"f","as":"total"}],"limit":5}"#,
+            "MATCH (f:File) WHERE f.id IN [1, 2] RETURN f{.id, .content}, count(f) AS total LIMIT 5",
+        ),
+    ];
+    for (json, orbit_query) in cases {
+        let compiled = compile_pair(json, orbit_query, &embedded_ontology(), &test_ctx()).unwrap();
+        assert!(!compiled.base.sql.contains("COUNT()") || compiled.base.sql.contains("GROUP BY"));
     }
 }

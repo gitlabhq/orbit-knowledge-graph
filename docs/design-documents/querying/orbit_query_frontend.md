@@ -43,7 +43,8 @@ Both compiler entry points run the same ClickHouse pipeline in the same pass ord
 
 The validation phase accepts exactly one input source. JSON retains its existing schema and ontology checks.
 Typed input uses `input_validation` for shape, identifier, and ontology checks that JSON deserialization would otherwise provide.
-The adapter reuses schema-defined scalar bounds. Both sources then run the existing reference and filter-type checks.
+The adapter reuses schema-defined scalar bounds and reports them in the same error category as the JSON schema.
+Both sources then run the existing reference and filter-type checks.
 
 Normalization, restriction, security checks, hydration planning, and SQL generation remain shared.
 Shared normalization makes equality explicit in virtual-column filters before building hydration plans.
@@ -90,7 +91,7 @@ The compiler still includes graph identity and relationship metadata.
 
 Aggregates support `count`, `sum`, `avg`, `min`, and `max`.
 Non-aggregate return items become group keys. Property groups and metrics can have aliases.
-An aggregated node projection must include `.id` so grouping preserves node identity.
+An aggregated node projection must include `.id` so grouping preserves node identity; every listed property, including `.id`, becomes a requested column.
 
 ```plaintext
 MATCH (u:User)-[:AUTHORED]->(n:Note {id: 1})

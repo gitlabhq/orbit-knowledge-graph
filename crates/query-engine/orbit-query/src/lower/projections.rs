@@ -127,7 +127,7 @@ impl Lowering<'_> {
                     }
                     let mut parts = expression.clone().into_inner();
                     let variable = name(parts.next().expect("node projection has a variable"))?;
-                    let mut columns = parts
+                    let columns = parts
                         .map(|p| {
                             name(
                                 p.into_inner()
@@ -150,9 +150,6 @@ impl Lowering<'_> {
                                 &expression,
                                 "an aggregated node projection must include .id to preserve node identity; use a scalar property for property grouping",
                             ));
-                        }
-                        if columns.len() > 1 {
-                            columns.retain(|c| c != "id");
                         }
                     } else if alias.is_some() {
                         return Err(invalid(
@@ -269,7 +266,12 @@ impl Lowering<'_> {
                         ));
                     }
                     let node = self.input.nodes.iter_mut().find(|n| n.id == variable)
-                        .ok_or_else(|| invalid(&expression, "projection references an undefined node or unsupported relationship value"))?;
+                        .ok_or_else(|| {
+                            let (line, column) = expression.line_col();
+                            compiler::QueryError::ReferenceError(format!(
+                                "line {line}, column {column}: projection references undefined node \"{variable}\""
+                            ))
+                        })?;
                     if !selected.insert(variable.clone()) {
                         return Err(invalid(
                             &expression,

@@ -134,11 +134,13 @@ impl Lowering<'_> {
                     node.node_ids = values
                         .iter()
                         .map(|v| {
-                            v.as_i64().ok_or_else(|| {
-                                QueryError::Validation(
-                                    "node IDs must be signed 64-bit integers".into(),
-                                )
-                            })
+                            v.as_i64()
+                                .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
+                                .ok_or_else(|| {
+                                    QueryError::Validation(
+                                        "node IDs must be signed 64-bit integers".into(),
+                                    )
+                                })
                         })
                         .collect::<Result<_>>()?;
                     node.filters.remove("id");

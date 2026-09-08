@@ -5,7 +5,7 @@ use serde_json::Value;
 
 use crate::error::{QueryError, Result};
 use crate::input::{ColumnSelection, FilterOp, Input, InputFilter, InputGroupByKey, QueryType};
-use crate::schema_limits::{MAX_IN_VALUES, MAX_REL_TYPES};
+use crate::schema_limits::{MAX_HOPS_CAP, MAX_IN_VALUES, MAX_REL_TYPES};
 
 use crate::Ontology;
 use crate::passes::validate::{BASE_SCHEMA_JSON, node_ref_regex};
@@ -34,7 +34,7 @@ pub(crate) fn check(input: &Input, ontology: &Ontology) -> Result<()> {
         .as_u64()
         .expect("limit maximum");
     if input.limit == 0 || u64::from(input.limit) > max_limit {
-        return Err(QueryError::LimitExceeded(format!(
+        return Err(QueryError::Validation(format!(
             "limit must be between 1 and {max_limit}"
         )));
     }
@@ -62,10 +62,14 @@ pub(crate) fn check(input: &Input, ontology: &Ontology) -> Result<()> {
         check_filters(&node.filters)?;
     }
     for edge in &input.relationships {
-        if edge.types.is_empty() || edge.hops.min == 0 || edge.hops.min > edge.hops.max {
-            return Err(QueryError::Validation(
-                "relationships require types and positive, ordered hop bounds".into(),
-            ));
+        if edge.types.is_empty()
+            || edge.hops.min == 0
+            || edge.hops.min > edge.hops.max
+            || edge.hops.max > MAX_HOPS_CAP
+        {
+            return Err(QueryError::Validation(format!(
+                "relationships require types and ordered hop bounds between 1 and {MAX_HOPS_CAP}"
+            )));
         }
         check_input_relationship_types(ontology, &edge.types)?;
         check_filters(&edge.filters)?;
