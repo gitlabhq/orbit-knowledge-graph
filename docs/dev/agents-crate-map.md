@@ -11,7 +11,7 @@ Single binary: `gkg-server` (4 modes: Webserver, Indexer, DispatchIndexing, Heal
 | `orbit-prompts` | Embeds the versioned YAML prompts under `config/prompts/` via rust-embed and validates them (consumer build scripts fail the build on a malformed prompt) |
 | `query-engine` | Parent crate for all query subsystem crates; re-exports `compiler` |
 | `query-engine/compiler` | JSON DSL and typed Input -> parameterized ClickHouse SQL, composable pipeline passes, security context enforcement |
-| `query-engine/opencypher` | Orbit query frontend, based on openCypher 9: Pest pairs -> compiler Input |
+| `query-engine/orbit-query` | Orbit query frontend: Pest pairs -> compiler Input |
 | `query-engine/compiler-pipeline-macros` | Proc-macro derives (`PipelineEnv`, `PipelineState`) for compiler pipeline |
 | `query-engine/types` | Type-safe result schema for redaction processing |
 | `query-engine/pipeline` | Pipeline abstraction (stages, observers, context) |

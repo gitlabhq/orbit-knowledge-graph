@@ -1,5 +1,6 @@
 [package]
 name = "orbit-query"
+description = "Orbit query frontend based on openCypher 9 syntax, with Orbit-specific restrictions and extensions"
 version.workspace = true
 edition = "2024"
 publish = false
