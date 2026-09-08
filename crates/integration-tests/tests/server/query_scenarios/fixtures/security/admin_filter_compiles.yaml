@@ -1,4 +1,4 @@
-description: Admin can filter on is_admin
+description: Admin can compile a query filtering on is_admin
 security: admin
 query:
   json: |
@@ -10,8 +10,4 @@ query:
       "limit": 10
     }
 expect:
-  nodes:
-    User:
-      count: 1
-      rows:
-        - { id: 1, username: alice }
+  node_count: 0

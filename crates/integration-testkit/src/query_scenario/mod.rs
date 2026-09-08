@@ -376,7 +376,7 @@ fn satisfy_filter_requirements(view: &ResponseView, input: &query_engine::compil
             let field_name = field.clone();
             view.assert_filter(entity, field, move |n| {
                 filters.iter().all(|f| match (f.op, &f.value) {
-                    (Some(FilterOp::Eq), Some(v)) => n.prop(&field_name) == Some(v),
+                    (Some(FilterOp::Eq) | None, Some(v)) => n.prop(&field_name) == Some(v),
                     (Some(FilterOp::In), Some(serde_json::Value::Array(vs))) => {
                         n.prop(&field_name).is_some_and(|p| vs.contains(p))
                     }
