@@ -89,7 +89,7 @@ GitLab Orbit Remote and GitLab Orbit Local do not index:
 | Multiple repositories | {{< yes >}} | {{< no >}} |
 | Branch selection | {{< no >}} | {{< no >}} |
 
-## Language parser coverage
+## Supported languages
 
 The current source tree registers parsers for the following languages in the
 code-indexing pipeline used by GitLab Orbit Local and GitLab Orbit Remote.

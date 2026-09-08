@@ -69,7 +69,7 @@ determines the project ID. Reindexing the same path replaces its previous graph,
 including when you switch branches. To retain multiple branches at the same time,
 index each branch from a separate checkout or worktree path.
 
-## Language parser coverage
+## Supported languages
 
 The current source tree registers GitLab Orbit Local parsers for 20 languages:
 Bash/Shell, C, C++, C#, Elixir, Go, HCL/Terraform, Java, JavaScript, Kotlin,
@@ -77,7 +77,7 @@ Lua, PHP, Python, Ruby, Rust, Scala, Swift, TypeScript, YAML, and Zig.
 Definitions, imports, and cross-file relationship coverage vary by language and
 syntax.
 
-See [index data with GitLab Orbit](../indexed-data.md#language-parser-coverage) for
+See [index data with GitLab Orbit](../indexed-data.md#supported-languages) for
 more information.
 
 ## Billing
