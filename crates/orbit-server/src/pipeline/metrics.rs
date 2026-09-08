@@ -58,6 +58,7 @@ pub(crate) fn failure_reason(err: &PipelineError) -> Option<&'static str> {
         PipelineError::ContentResolution(_) => Some("content_resolution"),
         PipelineError::Streaming(_) => Some("streaming"),
         PipelineError::Timeout => Some("timeout"),
+        PipelineError::ResultTooLarge => Some("result_too_large"),
         PipelineError::Custom(_) => Some("custom"),
     }
 }

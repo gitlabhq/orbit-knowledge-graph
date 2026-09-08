@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use clickhouse_client::ClickHouseConfigurationExt;
 use ontology::Ontology;
-use orbit_server_config::{AnalyticsConfig, ClickHouseConfiguration};
+use orbit_server_config::{AnalyticsConfig, ClickHouseConfiguration, GrpcConfig};
 use orbit_utils::traversal_path::TraversalPath;
 use query_engine::pipeline::PipelineError;
 use query_engine::shared::content::ColumnResolverRegistry;
@@ -14,6 +14,7 @@ use tonic::{Request, Response, Status, Streaming};
 use tracing::{Instrument, info, instrument};
 
 use super::auth::extract_request_context;
+use super::query_response::QueryResponseOptions;
 use crate::analytics::AnalyticsTracker;
 use crate::auth::{Claims, JwtValidator, build_security_context};
 use crate::cluster_health::ClusterHealthChecker;
@@ -22,28 +23,18 @@ use crate::pipeline::{
     QueryPipelineService, receive_query_request, send_invalid_request_error, send_query_error,
 };
 use crate::proto::{
-    ExecuteQueryMessage, ExecuteQueryResult, FormatName as ProtoFormatName,
-    GetClusterHealthRequest, GetClusterHealthResponse, GetGraphSchemaRequest,
+    ExecuteQueryMessage, GetClusterHealthRequest, GetClusterHealthResponse, GetGraphSchemaRequest,
     GetGraphSchemaResponse, GetGraphStatusRequest, GetGraphStatusResponse, GetQueryDslRequest,
     GetQueryDslResponse, GetResponseFormatRequest, GetResponseFormatResponse,
     InvokeAgentCommandRequest, InvokeAgentCommandResponse, ListAgentCommandsRequest,
     ListAgentCommandsResponse, ListNamedQueriesRequest, ListNamedQueriesResponse, ListToolsRequest,
-    ListToolsResponse, NamedQueryDefinition, QueryMetadata, QueryType, ResponseFormat,
-    ResponseFormatSchema, SchemaDomain, SchemaEdge, SchemaEdgeVariant, SchemaNode, SchemaNodeStyle,
-    SchemaProperty, StructuredSchema, ToolDefinition as ProtoToolDefinition, execute_query_message,
-    get_graph_schema_response, get_query_dsl_response, get_response_format_response,
-    invoke_agent_command_response,
+    ListToolsResponse, NamedQueryDefinition, QueryType, ResponseFormat, ResponseFormatSchema,
+    SchemaDomain, SchemaEdge, SchemaEdgeVariant, SchemaNode, SchemaNodeStyle, SchemaProperty,
+    StructuredSchema, ToolDefinition as ProtoToolDefinition, get_graph_schema_response,
+    get_query_dsl_response, get_response_format_response, invoke_agent_command_response,
 };
 use crate::tools::{ExecutorError, ToolPlan, ToolService, V2CommandRegistry, V2ToolRegistry};
 use orbit_billing::{BillingTracker, QuotaCheckInputs, QuotaService};
-use query_engine::formatters::{FormatName, GoonFormatter, GraphFormatter, ResultFormatter};
-
-fn proto_format_name(name: FormatName) -> ProtoFormatName {
-    match name {
-        FormatName::Raw => ProtoFormatName::Raw,
-        FormatName::Goon => ProtoFormatName::Goon,
-    }
-}
 
 fn proto_tool_definition(t: crate::tools::ToolDefinition) -> ProtoToolDefinition {
     ProtoToolDefinition {
@@ -70,6 +61,7 @@ pub struct OrbitServiceImpl {
     cluster_health: Arc<ClusterHealthChecker>,
     graph_status: GraphStatusService,
     stream_timeout_secs: u64,
+    max_query_response_bytes: usize,
     quota: Arc<QuotaService>,
 }
 
@@ -100,8 +92,14 @@ impl OrbitServiceImpl {
             cluster_health,
             graph_status,
             stream_timeout_secs,
+            max_query_response_bytes: GrpcConfig::default().max_query_response_bytes,
             quota: Arc::new(QuotaService::disabled()),
         }
+    }
+
+    pub fn with_max_query_response_bytes(mut self, max_query_response_bytes: usize) -> Self {
+        self.max_query_response_bytes = max_query_response_bytes;
+        self
     }
 
     pub fn with_quota(mut self, quota: Arc<QuotaService>) -> Self {
@@ -302,6 +300,7 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
         let pipeline = self.pipeline.clone();
         let named_queries = Arc::clone(&self.named_queries);
         let stream_timeout = self.stream_timeout_secs;
+        let max_response_bytes = self.max_query_response_bytes;
         let span = tracing::Span::current();
 
         tokio::spawn(
@@ -333,9 +332,11 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
 
                 info!(query_len = query_json.len(), "Executing query");
 
-                let use_llm_format = req.format == ResponseFormat::Llm as i32;
-
-                let timeout = std::time::Duration::from_secs(stream_timeout);
+                let response_options = QueryResponseOptions {
+                    format: ResponseFormat::try_from(req.format).unwrap_or(ResponseFormat::Raw),
+                    max_response_bytes,
+                    timeout: std::time::Duration::from_secs(stream_timeout),
+                };
                 let result = pipeline
                     .run_query(
                         claims,
@@ -343,53 +344,13 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
                         &query_json,
                         tx.clone(),
                         stream,
-                        timeout,
+                        response_options,
                     )
                     .await;
 
                 match result {
-                    Ok(output) => {
-                        info!("Sending final query result");
-
-                        use crate::proto::execute_query_result::Content;
-
-                        let (formatted, format_version, format_name) = if use_llm_format {
-                            GoonFormatter.format_stamped(&output)
-                        } else {
-                            GraphFormatter.format_stamped(&output)
-                        };
-
-                        let content = if use_llm_format {
-                            // GoonFormatter::format returns Value::String(raw_goon_bytes).
-                            // `to_string()` on a Value JSON-encodes it (adds quotes + \n
-                            // escapes). Workhorse then JSON-encodes again when wrapping
-                            // into the {result, ...} envelope, producing literal `\n` in
-                            // the UI. Extract the inner string so the gRPC field carries
-                            // raw goon text.
-                            let text = match formatted {
-                                serde_json::Value::String(s) => s,
-                                other => other.to_string(),
-                            };
-                            Some(Content::FormattedText(text))
-                        } else {
-                            Some(Content::ResultJson(formatted.to_string()))
-                        };
-
-                        let metadata = Some(QueryMetadata {
-                            query_type: output.query_type,
-                            raw_query_strings: output.raw_query_strings,
-                            row_count: i32::try_from(output.row_count).unwrap_or(i32::MAX),
-                            format_version,
-                            format_name: proto_format_name(format_name).into(),
-                        });
-
-                        let _ = tx
-                            .send(Ok(ExecuteQueryMessage {
-                                content: Some(execute_query_message::Content::Result(
-                                    ExecuteQueryResult { content, metadata },
-                                )),
-                            }))
-                            .await;
+                    Ok(response) => {
+                        let _ = tx.send(Ok(response)).await;
                     }
                     Err(e @ PipelineError::Timeout) => {
                         // run_query already logged via send_query_error and

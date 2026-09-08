@@ -43,7 +43,8 @@ impl GrpcServer {
             cluster_health,
             grpc_config.stream_timeout_secs,
             analytics_config,
-        );
+        )
+        .with_max_query_response_bytes(grpc_config.max_query_response_bytes);
         Self {
             addr,
             service,

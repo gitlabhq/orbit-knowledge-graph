@@ -7,8 +7,8 @@ use indexmap::IndexMap;
 use serde::Serialize;
 use serde_json::{Map, Value};
 
-use shared::PipelineOutput;
-use types::{QueryResult, QueryResultRow};
+use shared::{PaginationMeta, PipelineOutput};
+use types::QueryResultRow;
 
 use semver::Version;
 
@@ -137,18 +137,41 @@ impl ResultFormatter for GraphFormatter {
         Some(&super::RAW_OUTPUT_FORMAT_VERSION)
     }
 
-    fn format(&self, output: &PipelineOutput) -> Value {
+    fn format_rows(
+        &self,
+        output: &PipelineOutput,
+        rows: &[QueryResultRow],
+        pagination: Option<&PaginationMeta>,
+    ) -> Value {
         // GraphResponse holds only strings, primitives, and Values that
         // already came from `column_value_to_json` (which filters non-finite
         // floats). Serialization is infallible.
-        serde_json::to_value(self.build_response(output))
+        serde_json::to_value(self.build_response_from_rows(output, rows, pagination))
             .expect("GraphResponse serialization is infallible")
     }
 }
 
 impl GraphFormatter {
-    pub fn build_response(&self, output: &PipelineOutput) -> GraphResponse {
-        let result = &output.query_result;
+    #[cfg(test)]
+    fn build_response(&self, output: &PipelineOutput) -> GraphResponse {
+        self.build_response_from_rows(
+            output,
+            output.query_result.rows(),
+            output.pagination.as_ref(),
+        )
+    }
+
+    pub(crate) fn build_response_from_rows(
+        &self,
+        output: &PipelineOutput,
+        query_rows: &[QueryResultRow],
+        pagination: Option<&PaginationMeta>,
+    ) -> GraphResponse {
+        let authorized_rows: Vec<_> = query_rows
+            .iter()
+            .filter(|row| row.is_authorized())
+            .collect();
+        let result = authorized_rows.as_slice();
         let result_context = &output.result_context;
 
         let query_type = result_context
@@ -162,9 +185,6 @@ impl GraphFormatter {
         let mut columns: Option<Vec<ColumnDescriptor>> = None;
         let mut group_columns: Option<Vec<GroupColumnDescriptor>> = None;
         let mut rows: Option<Vec<Map<String, Value>>> = None;
-        let aggregations = Some(&output.compiled.input.aggregation.metrics);
-        let group_by = &output.compiled.input.aggregation.group_by;
-
         let edge_prefixes: Vec<&str> = result_context
             .edges()
             .iter()
@@ -182,20 +202,20 @@ impl GraphFormatter {
                 );
             }
             Some(QueryType::Aggregation) => {
-                if let Some(aggs) = aggregations {
-                    columns = Some(Self::build_column_descriptors(aggs));
-                    group_columns = Some(Self::build_group_column_descriptors(
-                        group_by,
-                        &output.compiled.input.nodes,
-                    ));
-                    rows = Some(Self::extract_aggregation_rows(
-                        result,
-                        result_context,
-                        &edge_prefixes,
-                        aggs,
-                        group_by,
-                    ));
-                }
+                let aggregation = &output.compiled.input.aggregation;
+
+                columns = Some(Self::build_column_descriptors(&aggregation.metrics));
+                group_columns = Some(Self::build_group_column_descriptors(
+                    &aggregation.group_by,
+                    &output.compiled.input.nodes,
+                ));
+                rows = Some(Self::extract_aggregation_rows(
+                    result,
+                    result_context,
+                    &edge_prefixes,
+                    &aggregation.metrics,
+                    &aggregation.group_by,
+                ));
             }
             Some(QueryType::PathFinding) => {
                 self.extract_path_finding(result, &mut node_map, &mut edges);
@@ -214,7 +234,7 @@ impl GraphFormatter {
             Some(QueryType::Hydration) | None => {}
         }
 
-        let pagination = output.pagination.as_ref().map(|p| PaginationResponse {
+        let pagination = pagination.map(|p| PaginationResponse {
             has_more: p.has_more,
             truncated: p.truncated,
             next_cursor: p.next_cursor.clone(),
@@ -234,12 +254,12 @@ impl GraphFormatter {
 
     fn extract_search_nodes(
         &self,
-        result: &QueryResult,
+        result: &[&QueryResultRow],
         result_context: &ResultContext,
         edge_prefixes: &[&str],
         node_map: &mut IndexMap<(String, i64), GraphNode>,
     ) {
-        for row in result.authorized_rows() {
+        for row in result {
             for node in result_context.nodes() {
                 let Some(id) = row.get_public_id(node) else {
                     continue;
@@ -274,12 +294,12 @@ impl GraphFormatter {
 
     fn extract_traversal_edges(
         &self,
-        result: &QueryResult,
+        result: &[&QueryResultRow],
         edge_metas: &[EdgeMeta],
         edges: &mut Vec<GraphEdge>,
         edge_set: &mut HashSet<EdgeKey>,
     ) {
-        for row in result.authorized_rows() {
+        for row in result {
             for meta in edge_metas {
                 let Some(edge_type) = row.get_column_string(&meta.type_column) else {
                     continue;
@@ -363,7 +383,7 @@ impl GraphFormatter {
     }
 
     fn extract_aggregation_rows(
-        result: &QueryResult,
+        result: &[&QueryResultRow],
         result_context: &ResultContext,
         edge_prefixes: &[&str],
         aggs: &[compiler::input::InputAggregationMetric],
@@ -373,7 +393,7 @@ impl GraphFormatter {
         let agg_col_names = Self::agg_col_names(aggs);
         let mut rows = Vec::new();
 
-        for row in result.authorized_rows() {
+        for row in result {
             let mut obj = Map::new();
 
             for (group, col_name) in groups.iter().zip(&group_col_names) {
@@ -438,7 +458,7 @@ impl GraphFormatter {
 
     fn extract_path_finding(
         &self,
-        result: &QueryResult,
+        result: &[&QueryResultRow],
         node_map: &mut IndexMap<(String, i64), GraphNode>,
         edges: &mut Vec<GraphEdge>,
     ) {
@@ -450,7 +470,7 @@ impl GraphFormatter {
         let mut seen_paths: HashSet<PathKey> = HashSet::new();
         let mut path_id_counter: usize = 0;
 
-        for row in result.authorized_rows() {
+        for row in result {
             let dynamic_nodes = row.dynamic_nodes();
             let edge_kinds = row.edge_kinds();
 
@@ -503,7 +523,7 @@ impl GraphFormatter {
     #[allow(clippy::too_many_arguments)]
     fn extract_neighbors(
         &self,
-        result: &QueryResult,
+        result: &[&QueryResultRow],
         result_context: &ResultContext,
         edge_prefixes: &[&str],
         output: &PipelineOutput,
@@ -518,7 +538,7 @@ impl GraphFormatter {
             .as_ref()
             .map(|n| n.direction);
 
-        for row in result.authorized_rows() {
+        for row in result {
             let mut center: Option<(String, i64)> = None;
             for node in result_context.nodes() {
                 let Some(id) = row.get_public_id(node) else {
@@ -620,6 +640,7 @@ impl GraphFormatter {
 mod tests {
     use super::*;
     use std::collections::HashMap;
+    use types::QueryResult;
 
     use arrow::array::{Int64Array, StringArray};
     use arrow::datatypes::{DataType, Field, Schema};

@@ -12,10 +12,10 @@ schema: 96
 query_dsl: 12.1.1
 
 # Response envelope of the raw (JSON) formatter.
-raw_output_format: 5.0.1
+raw_output_format: 5.0.2
 
 # Response envelope of the GOON formatter.
-goon_output_format: 4.0.1
+goon_output_format: 4.0.2
 
 # DuckDB release linked by the duckdb crate in Cargo.lock; crate 1.10505.x
 # is DuckDB 1.5.5. Vendored extension checksums in

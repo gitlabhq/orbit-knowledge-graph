@@ -8,7 +8,8 @@ use semver::Version;
 use serde_json::{Value, json};
 
 use orbit_utils::arrow::ColumnValue;
-use shared::PipelineOutput;
+use shared::{PaginationMeta, PipelineOutput};
+use types::QueryResultRow;
 
 pub use goon::{GOON_OUTPUT_FORMAT_VERSION, GoonFormatter, encode as goon_encode};
 pub use graph::{
@@ -35,20 +36,20 @@ pub enum FormatName {
 
 pub trait ResultFormatter: Send + Sync {
     fn format_name(&self) -> FormatName;
-    /// `None` for stubs that have not yet defined their own version
-    /// (e.g. `GoonFormatter` before ADR 009 ships).
     fn format_version(&self) -> Option<&Version>;
-    fn format(&self, output: &PipelineOutput) -> Value;
+    fn format_rows(
+        &self,
+        output: &PipelineOutput,
+        rows: &[QueryResultRow],
+        pagination: Option<&PaginationMeta>,
+    ) -> Value;
 
-    /// Stamps the formatted output with its version string and format name so
-    /// callers build transport metadata in one call.
-    fn format_stamped(&self, output: &PipelineOutput) -> (Value, String, FormatName) {
-        let formatted = self.format(output);
-        let version = self
-            .format_version()
-            .map(|v| v.to_string())
-            .unwrap_or_default();
-        (formatted, version, self.format_name())
+    fn format(&self, output: &PipelineOutput) -> Value {
+        self.format_rows(
+            output,
+            output.query_result.rows(),
+            output.pagination.as_ref(),
+        )
     }
 }
 

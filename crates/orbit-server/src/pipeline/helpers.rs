@@ -123,6 +123,7 @@ fn sanitize_error_message(error: &PipelineError) -> String {
         }
         PipelineError::Streaming(_) => "An internal error occurred during streaming.".to_string(),
         PipelineError::Timeout => "Query exceeded the configured stream timeout.".to_string(),
+        PipelineError::ResultTooLarge => error.to_string(),
         PipelineError::Custom(_) => "An internal error occurred.".to_string(),
     }
 }

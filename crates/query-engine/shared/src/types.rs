@@ -3,7 +3,7 @@ use compiler::{CompiledQueryContext, ResultContext};
 use orbit_utils::arrow::ColumnValue;
 use serde::Serialize;
 use std::sync::Arc;
-use types::{QueryResult, ResourceAuthorization};
+use types::{QueryResult, QueryResultRow, ResourceAuthorization};
 
 pub struct ExecutionOutput {
     pub batches: Vec<RecordBatch>,
@@ -96,33 +96,38 @@ pub struct PaginationMeta {
 /// denied there is no authorized row to advance past, so it falls back to the
 /// last scanned row to keep pagination progressing rather than stall.
 pub fn paginate(query_result: &mut QueryResult, input: &compiler::Input) -> PaginationMeta {
-    let window = input.cursor.as_ref().map_or(input.limit, |c| c.page_size) as usize;
+    let window = input
+        .cursor
+        .as_ref()
+        .map_or(input.limit, |cursor| cursor.page_size) as usize;
     let has_more = query_result.len() > window;
     if has_more {
         query_result.truncate(window);
     }
+    pagination_for_rows(query_result.rows(), input, has_more)
+}
+
+pub fn pagination_for_rows(
+    rows: &[QueryResultRow],
+    input: &compiler::Input,
+    has_more: bool,
+) -> PaginationMeta {
     let key_count = input.compiler.cursor_key_count;
     let next_cursor = input
         .cursor
         .as_ref()
         .filter(|_| has_more && key_count > 0)
         .and_then(|_| {
-            let anchor = query_result
-                .rows()
+            let anchor_row = rows
                 .iter()
                 .rev()
-                .find(|r| r.is_authorized())
-                .or_else(|| query_result.rows().last())?;
+                .find(|row| row.is_authorized())
+                .or_else(|| rows.last())?;
             (0..key_count)
-                .map(|i| {
-                    // A present-but-NULL readback is a real NULL sort key and
-                    // stays paginable; an absent column means the readback was
-                    // lost upstream, so withhold the token rather than seek on
-                    // a wrong boundary.
-                    match anchor.column(&compiler::passes::cursor::cursor_column(i)) {
-                        Some(ColumnValue::Null) => Some(None),
-                        Some(v) => v.as_string().cloned().map(Some),
-                        None => None,
+                .map(|key_index| {
+                    match anchor_row.column(&compiler::passes::cursor::cursor_column(key_index))? {
+                        ColumnValue::Null => Some(None),
+                        value => value.as_string().cloned().map(Some),
                     }
                 })
                 .collect::<Option<Vec<Option<String>>>>()

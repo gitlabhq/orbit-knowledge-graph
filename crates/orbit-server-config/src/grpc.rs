@@ -20,6 +20,7 @@ pub struct GrpcConfig {
     pub max_connection_age_grace_secs: u64,
     pub stream_timeout_secs: u64,
     pub max_header_list_size_bytes: u32,
+    pub max_query_response_bytes: usize,
 }
 
 impl Default for GrpcConfig {
@@ -35,6 +36,7 @@ impl Default for GrpcConfig {
             max_connection_age_grace_secs: 30,
             stream_timeout_secs: 60,
             max_header_list_size_bytes: 64 * 1024,
+            max_query_response_bytes: 8 * 1024 * 1024,
         }
     }
 }

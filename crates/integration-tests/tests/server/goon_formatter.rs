@@ -136,7 +136,7 @@ fn goon_str(value: &Value) -> &str {
         .expect("GoonFormatter must return Value::String, not a JSON object")
 }
 
-async fn format_stamped_returns_goon_name_and_version(ctx: &TestContext) {
+async fn goon_format_reports_name_and_version(ctx: &TestContext) {
     let output = run_pipeline(
         ctx,
         r#"{"query_type": "traversal",
@@ -147,9 +147,12 @@ async fn format_stamped_returns_goon_name_and_version(ctx: &TestContext) {
     )
     .await;
 
-    let (formatted, version, name) = GoonFormatter.format_stamped(&output);
-    assert_eq!(name, FormatName::Goon);
-    assert_eq!(version, GOON_OUTPUT_FORMAT_VERSION.to_string());
+    let formatted = GoonFormatter.format(&output);
+    assert_eq!(GoonFormatter.format_name(), FormatName::Goon);
+    assert_eq!(
+        GoonFormatter.format_version(),
+        Some(&*GOON_OUTPUT_FORMAT_VERSION)
+    );
     assert!(
         formatted.is_string(),
         "GoonFormatter must wrap its output in Value::String so the gRPC \
@@ -464,7 +467,7 @@ async fn goon_formatter_e2e() {
     run_subtests_shared!(
         &ctx,
         pagination_header_carries_cursor_and_pages_forward,
-        format_stamped_returns_goon_name_and_version,
+        goon_format_reports_name_and_version,
         traversal_emits_header_nodes_and_edges_sections,
         empty_result_still_emits_section_markers,
         quoting_handles_strings_with_spaces_and_escapes,

@@ -209,9 +209,9 @@ total=2347
 
 ## Implementation
 
-`GoonFormatter` lives in `crates/query-engine/formatters/src/goon/`. It implements the `ResultFormatter` trait the same way `GraphFormatter` does: `format(&self, output: &PipelineOutput) -> Value`. For LLM responses it composes `GraphFormatter::build_response(output)` with `goon::encode(&response, &GOON_OUTPUT_FORMAT_VERSION)` and wraps the result in `Value::String`.
+`GoonFormatter` lives in `crates/query-engine/formatters/src/goon/`. Both formatters implement `ResultFormatter::format_rows`, which accepts borrowed rows and pagination metadata. The default `format` method delegates with the full result. For LLM responses, `GoonFormatter` composes `GraphFormatter::build_response_from_rows` with `goon::encode` and wraps the result in `Value::String`.
 
-Wiring at `crates/orbit-server/src/grpc/service.rs` dispatches statically per request: `req.format == ResponseFormat::Llm` calls `GoonFormatter.format_stamped(&output)`; otherwise `GraphFormatter.format_stamped(&output)`. The result rides the gRPC `ExecuteQueryResult.formatted_text` field with format-name and format-version metadata.
+`crates/orbit-server/src/grpc/query_response.rs` selects the formatter and builds the complete gRPC response, including format-name and format-version metadata. GOON uses `ExecuteQueryResult.formatted_text`; RAW uses `result_json`. Responses are measured against the configured byte budget before the pipeline reports success. Oversized cursor pages are shortened at a safe continuation boundary without re-executing SQL.
 
 The encoder reads every field of `GraphResponse` (audited via parallel sub-agents post-implementation). Fields that travel:
 
@@ -250,7 +250,7 @@ Locked by property tests with 64 cases each:
 | Unit | `crates/query-engine/formatters/src/goon/tests.rs` | 51 | Header structure, sections, quoting, escape rules, datetime normalization, truncation, numerics, edges, dedup, path-finding, aggregation shapes (property + node + ungrouped), `Value::Null` row cells, depth on variable-length edges |
 | Property (`proptest`) | `tests/goon_properties.rs` | 4 × 64 | Shuffle invariance, idempotence, header prefix, no unescaped control chars |
 | Snapshot (`insta`) | `tests/goon_snapshots.rs` | 7 | One golden file per query shape + pagination |
-| Integration | `crates/integration-tests/tests/server/goon_formatter.rs` | 8 subtests | Full compile → execute → redact → hydrate → format path against ClickHouse testcontainers; asserts `format_stamped` returns `(Value::String, version, FormatName::Goon)`, headers carry `goon_version`, escape behavior, aggregation shapes, raw/goon count agreement |
+| Integration | `crates/integration-tests/tests/server/goon_formatter.rs` | 10 subtests | Full compile → execute → redact → hydrate → format path against ClickHouse testcontainers; verifies format name, version and string output, cursor continuation, headers, escaping, aggregation shapes, raw/goon count agreement |
 
 ## Why not the alternatives
 

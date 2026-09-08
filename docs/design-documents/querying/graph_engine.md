@@ -157,6 +157,12 @@ The server fetches one probe row beyond the requested window, trims it, and deri
 Aggregation queries include `columns`, `group_columns`, and `rows` for table-shaped analytics output.
 A `GraphFormatter` handles the transformation, and a JSON Schema defines the response contract between server and frontend.
 
+Orbit Remote also bounds each query result by `grpc.max_query_response_bytes` (8 MiB by default). The budget covers the complete encoded `ExecuteQueryMessage`, including RAW or GOON content, pagination, format metadata, and debug SQL. After hydration, response construction reuses borrowed row prefixes without issuing additional queries. A binary search over payload sizes without pagination finds an upper bound; candidates are then checked from largest to smallest with their actual cursors, whose lengths need not increase with the row count.
+
+When a cursor page exceeds the budget, the server returns the largest fitting prefix with a safe continuation boundary. It rebuilds the cursor from the retained rows using the existing authorization-aware anchor and sets `has_more` and `truncated` to `true`, even if the original fetched page was terminal. It does not split rows sharing a complete cursor key. If no complete row or cursor-key group fits, or a query without a cursor exceeds the budget, it returns the in-band `result_too_large` error rather than dropping rows. Missing cursor readback keys fail the query instead of returning an unsafe continuation.
+
+Clients advance to `next_cursor` only after accepting a complete response. Retrying with the same incoming cursor does not consume it, so a discarded or interrupted response can be requested again. This preserves continuation across byte-limited pages for unchanged data; it does not add snapshot isolation or prevent omissions caused by concurrent changes to sort keys or filters. Response sizing runs within the query timeout and completes before observers record success and the final returned row count.
+
 Namespace graph updates arrive via an ETL worker, described in [SDLC Indexing](../indexing/sdlc_indexing.md). The indexer publishes a small state record (namespace → active state). The web tier caches namespace metadata and injects appropriate filters into queries; no file swapping is required.
 
 ## Authorization and Safety

@@ -29,6 +29,11 @@ pub enum PipelineError {
     #[error("Query exceeded the configured stream timeout")]
     Timeout,
 
+    #[error(
+        "The query result exceeds the response byte limit. Use cursor pagination or request fewer columns; an individual row or cursor-key group may be too large to return."
+    )]
+    ResultTooLarge,
+
     #[error("{0}")]
     Custom(Box<dyn std::error::Error + Send + Sync>),
 }
@@ -43,6 +48,7 @@ impl PipelineError {
             Self::ContentResolution(_) => "content_resolution_error",
             Self::Streaming(_) => "streaming_error",
             Self::Timeout => "timeout",
+            Self::ResultTooLarge => "result_too_large",
             Self::Custom(_) => "custom_error",
         }
     }

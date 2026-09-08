@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use crate::analytics::{AnalyticsObserver, AnalyticsTracker};
 use crate::auth::Claims;
+use crate::grpc::query_response::{QueryResponseOptions, build_query_response};
 use crate::proto::ExecuteQueryMessage;
 use clickhouse_client::ArrowClickHouseClient;
 use nats_client::NatsClient;
@@ -80,15 +81,15 @@ impl QueryPipelineService {
         self
     }
 
-    pub async fn run_query(
+    pub(crate) async fn run_query(
         &self,
         claims: Claims,
         coding_agent: Option<String>,
         query_json: &str,
         tx: mpsc::Sender<Result<ExecuteQueryMessage, Status>>,
         stream: Streaming<ExecuteQueryMessage>,
-        timeout: std::time::Duration,
-    ) -> Result<PipelineOutput, PipelineError> {
+        response_options: QueryResponseOptions,
+    ) -> Result<ExecuteQueryMessage, PipelineError> {
         let mut obs = MultiObserver::new(vec![
             Box::new(OTelPipelineObserver::start()),
             Box::new(BillingObserver::new(
@@ -134,7 +135,7 @@ impl QueryPipelineService {
         // tore down the observer before record_error could run, leaving
         // timed-out queries invisible to every metric.
         let pipeline = async {
-            PipelineRunner::start(&mut ctx, &mut obs)
+            let mut output: PipelineOutput = PipelineRunner::start(&mut ctx, &mut obs)
                 .then(&SecurityStage)
                 .await?
                 .then(&PathResolutionStage)
@@ -154,20 +155,27 @@ impl QueryPipelineService {
                 .then(&OutputStage)
                 .await?
                 .finish()
-                .ok_or_else(|| PipelineError::custom("OutputStage did not produce PipelineOutput"))
+                .ok_or_else(|| {
+                    PipelineError::custom("OutputStage did not produce PipelineOutput")
+                })?;
+            let response = build_query_response(&mut output, &response_options)
+                .await
+                .inspect_err(|error| obs.record_error(error))?;
+            Ok((output, response))
         };
 
-        let output = match tokio::time::timeout(timeout, pipeline).await {
-            Ok(Ok(output)) => output,
-            Ok(Err(e)) => return Err(e),
-            Err(_) => {
-                let e = PipelineError::Timeout;
-                obs.record_error(&e);
-                return Err(e);
-            }
-        };
+        let (output, response) =
+            match tokio::time::timeout(response_options.timeout, pipeline).await {
+                Ok(Ok(result)) => result,
+                Ok(Err(e)) => return Err(e),
+                Err(_) => {
+                    let e = PipelineError::Timeout;
+                    obs.record_error(&e);
+                    return Err(e);
+                }
+            };
 
         obs.finish(output.row_count, output.redacted_count);
-        Ok(output)
+        Ok(response)
     }
 }

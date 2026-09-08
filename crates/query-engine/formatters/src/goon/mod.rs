@@ -2,7 +2,8 @@ use std::sync::LazyLock;
 
 use semver::Version;
 use serde_json::Value;
-use shared::PipelineOutput;
+use shared::{PaginationMeta, PipelineOutput};
+use types::QueryResultRow;
 
 use super::graph::GraphFormatter;
 use super::{FormatName, ResultFormatter};
@@ -52,8 +53,13 @@ impl ResultFormatter for GoonFormatter {
         Some(&GOON_OUTPUT_FORMAT_VERSION)
     }
 
-    fn format(&self, output: &PipelineOutput) -> Value {
-        let response = GraphFormatter.build_response(output);
+    fn format_rows(
+        &self,
+        output: &PipelineOutput,
+        rows: &[QueryResultRow],
+        pagination: Option<&PaginationMeta>,
+    ) -> Value {
+        let response = GraphFormatter.build_response_from_rows(output, rows, pagination);
         Value::String(encode::encode(&response, &GOON_OUTPUT_FORMAT_VERSION))
     }
 }

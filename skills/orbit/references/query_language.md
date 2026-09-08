@@ -105,6 +105,14 @@ query type.
 | `aggregation_sort` | `string` | Sort aggregation rows by output column (aggregation or group-key alias): `"column"` (asc) or `"-column"` (desc). |
 | `options` | `object` | Presentation and debug options. |
 
+GitLab Orbit Remote can return fewer rows than `page_size` to keep the complete response
+within its configured byte limit. Follow `next_cursor` even when a page is short.
+Accept the complete response before advancing the cursor; after an interrupted
+or discarded response, retry with the same incoming cursor. Byte-limited pages
+keep omitted rows reachable and do not split rows sharing a complete cursor key.
+If a row or cursor-key group cannot fit, the server returns `result_too_large`;
+request fewer columns. Oversized queries without a cursor return the same error.
+
 Pagination reads live data at request time; there is no snapshot. Each page
 independently resolves the latest version of every row and filters out
 soft-deleted rows, so version churn and tombstone cleanup between pages do not
@@ -197,6 +205,7 @@ objects: `{"title": [{"contains": "foo"}, {"contains": "bar"}]}`.
 | `all_tokens` | Text index contains all tokens. |
 | `any_tokens` | Text index contains any token. |
 
+`contains`, `starts_with`, and `ends_with` work only on string, enum, and UUID properties.
 Token operators work only on properties with text indexes.
 
 ### Text-indexed properties
