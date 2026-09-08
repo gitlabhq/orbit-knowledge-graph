@@ -46,7 +46,7 @@ def _query(body: dict) -> dict:
         with os.fdopen(fd, "w") as f:
             json.dump(body, f)
         cp = subprocess.run(
-            ["glab", "orbit", "remote", "query", "--format", "raw", tmp],
+            ["glab", "orbit", "remote", "query", "--response-format", "raw", tmp],
             capture_output=True, text=True,
             timeout=QUERY_TIMEOUT_SECONDS,
         )
