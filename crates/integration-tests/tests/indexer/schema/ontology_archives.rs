@@ -18,12 +18,12 @@ use super::super::common::dispatch::start_nats;
 async fn published_archives_survive_a_nats_restart() {
     let mut context = TestContext::new().await;
     let archive = embedded_archive(1);
-    let catalog = context.catalog("graph").await;
+    let catalog = context.catalog().await;
     catalog.publish(&archive).await.unwrap();
     drop(catalog);
 
     context.restart_nats().await;
-    let catalog = context.catalog("graph").await;
+    let catalog = context.catalog().await;
 
     assert_eq!(catalog.load(1).await.unwrap().bytes(), archive.bytes());
 }
@@ -31,7 +31,7 @@ async fn published_archives_survive_a_nats_restart() {
 #[tokio::test]
 async fn concurrent_identical_publications_return_the_archived_ontology() {
     let context = TestContext::new().await;
-    let catalog = context.catalog("graph").await;
+    let catalog = context.catalog().await;
     let archive = archive_with_distinct_ontology(1);
     let expected = archive.load_ontology().unwrap();
 
@@ -45,7 +45,7 @@ async fn concurrent_identical_publications_return_the_archived_ontology() {
 #[tokio::test]
 async fn published_versions_cannot_be_overwritten() {
     let context = TestContext::new().await;
-    let catalog = context.catalog("graph").await;
+    let catalog = context.catalog().await;
     let archive = embedded_archive(1);
     let conflicting = archive_with_extra_newline(1);
     catalog.publish(&archive).await.unwrap();
@@ -60,7 +60,7 @@ async fn published_versions_cannot_be_overwritten() {
 #[tokio::test]
 async fn new_versions_do_not_replace_previous_archives() {
     let context = TestContext::new().await;
-    let catalog = context.catalog("graph").await;
+    let catalog = context.catalog().await;
     let archive = embedded_archive(1);
     let next_version = archive_with_extra_newline(2);
     catalog.publish(&archive).await.unwrap();
@@ -72,32 +72,9 @@ async fn new_versions_do_not_replace_previous_archives() {
 }
 
 #[tokio::test]
-async fn graph_databases_have_independent_archives() {
-    let context = TestContext::new().await;
-    let first_graph = context.catalog("first_graph").await;
-    let second_graph = context.catalog("second_graph").await;
-    let archive = embedded_archive(1);
-    let different_archive = archive_with_extra_newline(1);
-    first_graph.publish(&archive).await.unwrap();
-
-    assert!(matches!(
-        second_graph.load(1).await,
-        Err(CatalogError::Missing(1))
-    ));
-
-    second_graph.publish(&different_archive).await.unwrap();
-
-    assert_eq!(first_graph.load(1).await.unwrap().bytes(), archive.bytes());
-    assert_eq!(
-        second_graph.load(1).await.unwrap().bytes(),
-        different_archive.bytes()
-    );
-}
-
-#[tokio::test]
 async fn dispatcher_rejects_conflicting_archives_before_migration() {
     let context = TestContext::new().await;
-    let catalog = context.catalog(&context.config.graph.database).await;
+    let catalog = context.catalog().await;
     let archive = embedded_archive(*SCHEMA_VERSION);
     let conflicting = archive_with_extra_newline(*SCHEMA_VERSION);
     catalog.publish(&archive).await.unwrap();
@@ -118,7 +95,7 @@ async fn dispatcher_rejects_conflicting_archives_before_migration() {
 #[tokio::test]
 async fn dispatcher_rejects_invalid_archives_before_migration() {
     let context = TestContext::new().await;
-    let catalog = context.catalog(&context.config.graph.database).await;
+    let catalog = context.catalog().await;
     let archive = embedded_archive(*SCHEMA_VERSION);
     let invalid = archive_with_invalid_schema(*SCHEMA_VERSION);
     catalog.publish(&archive).await.unwrap();
@@ -157,7 +134,7 @@ impl TestContext {
         Self { server, config }
     }
 
-    async fn catalog(&self, graph_database: &str) -> OntologyCatalog {
+    async fn catalog(&self) -> OntologyCatalog {
         const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
         const RETRY_INTERVAL: Duration = Duration::from_millis(100);
 
@@ -172,7 +149,7 @@ impl TestContext {
         .await
         .expect("NATS did not become ready");
 
-        OntologyCatalog::open(client, graph_database).await.unwrap()
+        OntologyCatalog::open(client).await.unwrap()
     }
 
     async fn restart_nats(&mut self) {

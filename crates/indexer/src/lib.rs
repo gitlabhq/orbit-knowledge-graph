@@ -249,8 +249,7 @@ pub async fn run_dispatcher(
 ) -> Result<(), DispatcherError> {
     let services = orchestrator::scheduled::connect(&config.nats).await?;
 
-    let catalog =
-        OntologyCatalog::open(services.nats_client.clone(), &config.graph.database).await?;
+    let catalog = OntologyCatalog::open(services.nats_client.clone()).await?;
     let ontology = catalog.publish(archive).await?;
 
     if let Err(error) = nats::versioning::gc_idle_release_streams(

@@ -5,6 +5,8 @@ use nats_client::{KvBucketConfig, KvPutOptions, KvPutResult, NatsClient};
 use ontology::Ontology;
 use ontology::archive::{ArchiveError, OntologyArchive};
 
+const ONTOLOGY_ARCHIVES_BUCKET: &str = "orbit_ontology_archives";
+
 #[derive(Debug, thiserror::Error)]
 pub enum CatalogError {
     #[error(transparent)]
@@ -28,19 +30,14 @@ pub enum CatalogError {
 #[derive(Clone)]
 pub struct OntologyCatalog {
     client: Arc<NatsClient>,
-    bucket: String,
 }
 
 impl OntologyCatalog {
-    pub async fn open(client: Arc<NatsClient>, graph_database: &str) -> Result<Self, CatalogError> {
-        let bucket = format!(
-            "ontology_archives_{}",
-            ontology::migrations::sha256_hex(graph_database)
-        );
+    pub async fn open(client: Arc<NatsClient>) -> Result<Self, CatalogError> {
         client
-            .ensure_kv_bucket_exists(&bucket, KvBucketConfig::default())
+            .ensure_kv_bucket_exists(ONTOLOGY_ARCHIVES_BUCKET, KvBucketConfig::default())
             .await?;
-        Ok(Self { client, bucket })
+        Ok(Self { client })
     }
 
     pub async fn publish(&self, archive: &OntologyArchive) -> Result<Ontology, CatalogError> {
@@ -56,7 +53,7 @@ impl OntologyCatalog {
         let result = self
             .client
             .kv_put(
-                &self.bucket,
+                ONTOLOGY_ARCHIVES_BUCKET,
                 &version.to_string(),
                 Bytes::copy_from_slice(archive.bytes()),
                 KvPutOptions::create_only(),
@@ -78,7 +75,7 @@ impl OntologyCatalog {
     pub async fn load(&self, version: u32) -> Result<OntologyArchive, CatalogError> {
         let entry = self
             .client
-            .kv_get(&self.bucket, &version.to_string())
+            .kv_get(ONTOLOGY_ARCHIVES_BUCKET, &version.to_string())
             .await?
             .ok_or(CatalogError::Missing(version))?;
         Ok(OntologyArchive::from_bytes(version, &entry.value)?)
