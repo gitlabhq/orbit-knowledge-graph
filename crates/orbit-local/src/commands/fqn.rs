@@ -12,8 +12,8 @@ pub(crate) struct Def {
     pub fqn: String,
     pub kind: String,
     pub file: String,
-    pub start: i64,
-    pub end: i64,
+    pub start: usize,
+    pub end: usize,
 }
 
 pub(crate) fn defs_from(batches: &[RecordBatch]) -> Vec<Def> {
@@ -29,8 +29,8 @@ pub(crate) fn defs_from(batches: &[RecordBatch]) -> Vec<Def> {
             fqn: fqns[i].clone(),
             kind: kinds[i].clone(),
             file: files[i].clone(),
-            start: starts[i],
-            end: ends[i],
+            start: usize::try_from(starts[i]).unwrap_or(1),
+            end: usize::try_from(ends[i]).unwrap_or(0),
         })
         .collect()
 }

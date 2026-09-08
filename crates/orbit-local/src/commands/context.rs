@@ -5,7 +5,10 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 use duckdb_client::search::kind_scope;
 
-use crate::commands::{fqn, setup::spec};
+use crate::commands::{
+    fqn::{self, Def},
+    setup::spec,
+};
 use crate::workspace;
 
 pub(crate) struct Target {
@@ -14,20 +17,11 @@ pub(crate) struct Target {
     pub kinds: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct Def {
-    pub fqn: String,
-    pub kind: String,
-    pub file: String,
-    pub start: usize,
-    pub end: usize,
-}
-
 pub(crate) fn run(target: Target, repo: Option<PathBuf>, db: Option<PathBuf>) -> Result<()> {
     let file = target.file.as_deref().map(|p| p.trim_end_matches('/'));
     let file_mode = target.fqns.is_empty();
     let workspace::IndexedRepo { git, client } = workspace::open_indexed(repo, db)?;
-    let resolved = match (target.fqns.as_slice(), file) {
+    let mut defs = match (target.fqns.as_slice(), file) {
         ([], None) => anyhow::bail!("pass one or more fqns or globs, or --file <path>"),
         ([], Some(path)) => {
             let batches = client.query_arrow_json(
@@ -67,16 +61,6 @@ pub(crate) fn run(target: Target, repo: Option<PathBuf>, db: Option<PathBuf>) ->
             .flatten()
             .collect(),
     };
-    let mut defs: Vec<Def> = resolved
-        .into_iter()
-        .map(|d| Def {
-            fqn: d.fqn,
-            kind: d.kind,
-            file: d.file,
-            start: usize::try_from(d.start).unwrap_or(1),
-            end: usize::try_from(d.end).unwrap_or(0),
-        })
-        .collect();
     defs.sort_by(|a, b| {
         a.file
             .cmp(&b.file)
@@ -185,6 +169,7 @@ mod tests {
 
     fn def(fqn: &str, kind: &str, start: usize, end: usize) -> Def {
         Def {
+            id: 0,
             fqn: fqn.to_string(),
             kind: kind.to_string(),
             file: "src/lib.rs".to_string(),

@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use anyhow::Result;
 use arrow::record_batch::RecordBatch;
 use code_graph::v2::types::EdgeKind;
-use duckdb_client::search::{excluded_path_predicate, kind_scope};
+use duckdb_client::search::{excluded_path_predicate, kind_scope, path_scope};
 use duckdb_client::{bool_column, string_column};
 
 use crate::commands::fqn;
@@ -11,14 +11,15 @@ use crate::workspace;
 
 const LABELS_CTE: &str = "labels AS (
   SELECT id, fqn AS label,
-         file_path || ':' || CAST(start_line AS VARCHAR) AS loc, file_path AS path
+         file_path || ':' || CAST(start_line AS VARCHAR) AS loc, file_path AS path,
+         definition_type
   FROM gl_definition WHERE project_id = ?2 AND commit_sha = ?3
   UNION ALL
-  SELECT id, path, '', path FROM gl_file WHERE project_id = ?2 AND commit_sha = ?3
+  SELECT id, path, '', path, NULL FROM gl_file WHERE project_id = ?2 AND commit_sha = ?3
   UNION ALL
-  SELECT id, path, '', path FROM gl_directory WHERE project_id = ?2 AND commit_sha = ?3
+  SELECT id, path, '', path, NULL FROM gl_directory WHERE project_id = ?2 AND commit_sha = ?3
   UNION ALL
-  SELECT id, identifier_name, '', file_path FROM gl_imported_symbol
+  SELECT id, identifier_name, '', file_path, NULL FROM gl_imported_symbol
   WHERE project_id = ?2 AND commit_sha = ?3
 )";
 
@@ -97,12 +98,16 @@ pub(crate) fn run(
     repo: Option<PathBuf>,
     db: Option<PathBuf>,
     filter: Filter,
+    paths: &[String],
+    kinds: &[String],
 ) -> Result<()> {
     let workspace::IndexedRepo { git, client } = workspace::open_indexed(repo, db)?;
     let defs = fqn::resolve(&client, &git, &fqn, None, &[])?;
     let hidden_expr = format!("COALESCE({}, FALSE)", excluded_path_predicate("l.path"));
     let edge_predicate = filter.edge_predicate();
     let direction_predicate = filter.direction_predicate();
+    let paths = path_scope("l.path", paths, true);
+    let kinds = kind_scope("l.definition_type", kinds);
     for (i, def) in defs.iter().enumerate() {
         if i > 0 {
             println!();
@@ -121,7 +126,7 @@ SELECT DISTINCT e.relationship_kind AS kind,
 FROM gl_edge e
 JOIN labels l ON l.id = CASE WHEN e.source_id = ?1 THEN e.target_id ELSE e.source_id END
 WHERE (e.source_id = ?1 OR e.target_id = ?1)
-{edge_predicate}{direction_predicate}
+{edge_predicate}{direction_predicate}{paths}{kinds}
 ORDER BY kind, dir DESC, l.path, l.label"
             ),
             &params,
@@ -146,7 +151,7 @@ JOIN labels l ON l.id = e.source_id
 WHERE e.relationship_kind <> 'DEFINES'
   AND e.source_id <> ?1
   AND e.source_id NOT IN (SELECT id FROM members)
-{edge_predicate}
+{edge_predicate}{paths}{kinds}
 GROUP BY kind, l.label, l.loc, l.path
 ORDER BY kind, l.path, l.label"
                 ),
@@ -175,7 +180,7 @@ ORDER BY kind, l.path, l.label"
                     "\nNo connections outside test, fixture, or generated files \
                      ({hidden} hidden; pass --tests to show them)."
                 );
-            } else if filter.is_active() {
+            } else if filter.is_active() || !paths.is_empty() || !kinds.is_empty() {
                 println!("\nNo connections match the filter.");
             } else {
                 println!("\nNo connections.");

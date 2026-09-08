@@ -1,4 +1,5 @@
 mod local;
+pub(crate) mod relations;
 
 use std::io::Write;
 use std::path::PathBuf;
@@ -42,7 +43,7 @@ pub(crate) fn run(
         anyhow::bail!(
             "no usable search terms in query: {query:?} — to list every definition in a \
              file or directory instead, run `{launcher} grep --path <path>`; to print a whole \
-             file, `{launcher} show --file <path>`"
+             file, `{launcher} context --file <path>`"
         );
     }
 

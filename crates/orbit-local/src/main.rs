@@ -185,7 +185,11 @@ struct IndexArgs {
                   Ranks indexed definitions by how many distinct query terms they \
                   match, then shows the most relevant connections to the top matches, \
                   ranked by graph proximity. Matches resolved definitions, not text \
-                  lines; takes plain words, not regexes or flags.\n\n\
+                  lines; takes plain words, not regexes. Add --related-to, --callers, \
+                  or --callees to a positional FQN for relationship lookups. An \
+                  explicit target after the flag takes precedence over positional \
+                  terms. Targets accept FQNs, unique unqualified tails, or globs; \
+                  --path and --kind filter connected definitions, not the target.\n\n\
                   When the output notes unmatched terms or weak matches, read the \
                   top matches first — they are often still right. Retry with a \
                   synonym or identifier fragment only if they look off, then fall \
@@ -195,8 +199,11 @@ struct GrepArgs {
     /// Plain-language queries, e.g. "NATS message publish"; several may be
     /// given and are searched in one call. Omit them with --path to list
     /// every definition under that path instead.
-    #[arg(value_name = "QUERY", required_unless_present = "path")]
+    #[arg(value_name = "QUERY", required_unless_present_any = ["path", "related_to", "callers_of", "callees_of"])]
     query: Vec<String>,
+
+    #[command(flatten)]
+    relations: RelationArgs,
 
     /// Repository path (default: current directory).
     #[arg(long, value_name = "PATH")]
@@ -204,7 +211,7 @@ struct GrepArgs {
 
     /// Maximum matched definitions to show, shared across the queries of one
     /// call (at least three each).
-    #[arg(long, default_value = "10")]
+    #[arg(long, default_value = "10", conflicts_with_all = ["relation_target", "edge", "incoming", "outgoing", "tests"])]
     limit: usize,
 
     /// Only search definitions under this repo-relative directory or file
@@ -232,7 +239,7 @@ fn fqn_arg_help() -> String {
     )
 }
 
-fn show_fqn_arg_help() -> String {
+fn context_fqn_arg_help() -> String {
     format!(
         "Fully qualified names as printed by `{} grep`, their unqualified tails such as \
          `Type::method` when that names one definition, or globs such as \
@@ -241,7 +248,7 @@ fn show_fqn_arg_help() -> String {
     )
 }
 
-fn show_long_about() -> String {
+fn context_long_about() -> String {
     format!(
         "Print the full source body of indexed definitions.\n\n\
          Takes one or more fully qualified names as printed by `{launcher} grep`, or \
@@ -254,20 +261,6 @@ fn show_long_about() -> String {
          from that file by bare name, so whole-module reading needs no file read \
          either.",
         launcher = commands::setup::spec::launcher()
-    )
-}
-
-fn describe_long_about() -> String {
-    format!(
-        "Print every graph connection of an indexed definition.\n\n\
-         Takes the fully qualified name as printed by `{} grep`, or its \
-         unqualified tail such as `Type::method` when that names one definition, \
-         and prints all edges touching it — callers, callees, supertypes, \
-         subtypes, members, importers — so a truncated `called by: … +N more` \
-         line or any full call-graph question needs no SQL follow-up. \
-         Connections from test, fixture, and generated files are collapsed into \
-         a count unless --tests is passed; --edge, --in, and --out narrow the list.",
-        commands::setup::spec::launcher()
     )
 }
 
@@ -299,9 +292,9 @@ fn sql_long_about() -> String {
 
 #[derive(Args, Debug, PartialEq)]
 #[command(about = "Print the full source bodies of definitions by fqn or unqualified name")]
-#[command(long_about = show_long_about())]
-struct ShowArgs {
-    #[arg(value_name = "FQN", help = show_fqn_arg_help(), required_unless_present = "file")]
+#[command(long_about = context_long_about())]
+struct ContextArgs {
+    #[arg(value_name = "FQN", help = context_fqn_arg_help(), required_unless_present = "file")]
     fqn: Vec<String>,
 
     /// Restrict to this repo-relative file. Alone, prints every indexed
@@ -326,39 +319,94 @@ struct ShowArgs {
 }
 
 #[derive(Args, Debug, PartialEq)]
-#[command(about = "Print every connection of a definition, by fqn or unqualified name")]
-#[command(long_about = describe_long_about())]
-struct DescribeArgs {
-    #[arg(value_name = "FQN", help = fqn_arg_help())]
-    fqn: String,
+#[group(skip)]
+struct RelationArgs {
+    #[arg(long, value_name = "FQN", group = "relation_target", conflicts_with = "limit", help = format!("List all connections of a definition. {}", fqn_arg_help()))]
+    related_to: Option<Option<String>>,
 
-    #[arg(long, value_name = "KIND", help = format!(
+    #[arg(
+        long = "callers",
+        value_name = "FQN",
+        group = "relation_target",
+        conflicts_with = "limit",
+        help = "List callers of a definition, including calls to its members."
+    )]
+    callers_of: Option<Option<String>>,
+
+    #[arg(
+        long = "callees",
+        value_name = "FQN",
+        group = "relation_target",
+        conflicts_with = "limit",
+        help = "List definitions and imported symbols called by a definition."
+    )]
+    callees_of: Option<Option<String>>,
+
+    #[arg(long, value_name = "KIND", requires = "related_to", conflicts_with_all = ["callers_of", "callees_of"], help = format!(
             "Only connections of this edge kind ({}); repeatable, case-insensitive.",
             edge_kind_names()
         ), value_parser = parse_edge_kind)]
     edge: Vec<EdgeKind>,
 
-    /// Only incoming connections: callers, subtypes, importers, and uses via
-    /// members.
-    #[arg(long = "in")]
+    #[arg(
+        long = "in",
+        requires = "related_to",
+        conflicts_with_all = ["callers_of", "callees_of"],
+        help = "Only incoming connections, including uses via members."
+    )]
     incoming: bool,
 
-    /// Only outgoing connections: callees, supertypes, imports, and members.
-    #[arg(long = "out")]
+    #[arg(
+        long = "out",
+        requires = "related_to",
+        conflicts_with_all = ["callers_of", "callees_of"],
+        help = "Only outgoing connections."
+    )]
     outgoing: bool,
 
-    /// List connections from test, fixture, and generated files instead of
-    /// collapsing them into a count.
-    #[arg(long)]
+    #[arg(
+        long,
+        requires = "relation_target",
+        help = "List test, fixture, and generated connections instead of collapsing them into a count."
+    )]
     tests: bool,
+}
 
-    /// Repository path (default: current directory).
-    #[arg(long, value_name = "PATH")]
-    repo: Option<PathBuf>,
-
-    /// Override the DuckDB path (default: ~/.orbit/graph.duckdb).
-    #[arg(long, value_name = "PATH")]
-    db: Option<PathBuf>,
+impl RelationArgs {
+    fn into_target(
+        self,
+        query: &[String],
+    ) -> Result<Option<(String, commands::grep::relations::Filter)>> {
+        let (fqn, edges, incoming, outgoing) = if let Some(fqn) = self.callers_of {
+            (fqn, vec![EdgeKind::Calls], true, false)
+        } else if let Some(fqn) = self.callees_of {
+            (fqn, vec![EdgeKind::Calls], false, true)
+        } else if let Some(fqn) = self.related_to {
+            (fqn, self.edge, self.incoming, self.outgoing)
+        } else {
+            return Ok(None);
+        };
+        let fqn = match fqn {
+            Some(fqn) => fqn,
+            None => {
+                let [fqn] = query else {
+                    anyhow::bail!(
+                        "pass one definition before the relationship flag, or a target after it"
+                    );
+                };
+                fqn.clone()
+            }
+        };
+        Ok(Some((
+            fqn,
+            commands::grep::relations::Filter {
+                edges,
+                incoming,
+                outgoing,
+                tests: self.tests,
+            },
+        )))
+    }
 }
 
 #[derive(Args, Debug, PartialEq)]
@@ -466,9 +514,7 @@ enum Commands {
     #[command(hide = true, alias = "ask")]
     Grep(GrepArgs),
     #[command(hide = true)]
-    Show(ShowArgs),
-    #[command(hide = true)]
-    Describe(DescribeArgs),
+    Context(ContextArgs),
     #[command(hide = true)]
     Sql(SqlArgs),
     #[command(hide = true)]
@@ -569,8 +615,7 @@ enum LocalCommands {
     Index(IndexArgs),
     #[command(alias = "ask")]
     Grep(GrepArgs),
-    Show(ShowArgs),
-    Describe(DescribeArgs),
+    Context(ContextArgs),
     Sql(SqlArgs),
     Schema(SchemaArgs),
     List(ListArgs),
@@ -709,8 +754,7 @@ async fn dispatch(
         }
         Commands::Index(args) => dispatch_local(LocalCommands::Index(args)).await,
         Commands::Grep(args) => dispatch_local(LocalCommands::Grep(args)).await,
-        Commands::Show(args) => dispatch_local(LocalCommands::Show(args)).await,
-        Commands::Describe(args) => dispatch_local(LocalCommands::Describe(args)).await,
+        Commands::Context(args) => dispatch_local(LocalCommands::Context(args)).await,
         Commands::Sql(args) => dispatch_local(LocalCommands::Sql(args)).await,
         Commands::Schema(args) => dispatch_local(LocalCommands::Schema(args)).await,
         Commands::List(args) => dispatch_local(LocalCommands::List(args)).await,
@@ -780,27 +824,33 @@ async fn dispatch_local(command: LocalCommands) -> Result<()> {
         }
         LocalCommands::Grep(GrepArgs {
             query,
+            relations,
             repo,
             limit,
             path,
             kind,
             db,
-        }) => commands::grep::run(
-            query,
-            repo,
-            db,
-            limit,
-            path,
-            orbit_search::RecallFilter { kinds: kind },
-        ),
-        LocalCommands::Show(ShowArgs {
+        }) => match relations.into_target(&query)? {
+            Some((fqn, filter)) => {
+                commands::grep::relations::run(fqn, repo, db, filter, &path, &kind)
+            }
+            None => commands::grep::run(
+                query,
+                repo,
+                db,
+                limit,
+                path,
+                orbit_search::RecallFilter { kinds: kind },
+            ),
+        },
+        LocalCommands::Context(ContextArgs {
             fqn,
             file,
             kind,
             repo,
             db,
-        }) => commands::show::run(
-            commands::show::Target {
+        }) => commands::context::run(
+            commands::context::Target {
                 fqns: fqn,
                 file,
                 kinds: kind,
@@ -808,25 +858,7 @@ async fn dispatch_local(command: LocalCommands) -> Result<()> {
             repo,
             db,
         ),
-        LocalCommands::Describe(DescribeArgs {
-            fqn,
-            edge,
-            incoming,
-            outgoing,
-            tests,
-            repo,
-            db,
-        }) => commands::describe::run(
-            fqn,
-            repo,
-            db,
-            commands::describe::Filter {
-                edges: edge,
-                incoming,
-                outgoing,
-                tests,
-            },
-        ),
+
         LocalCommands::Sql(SqlArgs {
             query,
             file,
