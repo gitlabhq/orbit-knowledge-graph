@@ -81,6 +81,7 @@ instance, and `--yes` to skip the one-time run confirmation in scripts.
 | `glab orbit remote dsl` | `GET orbit/schema/dsl` | Query DSL JSON Schema. The source of truth for the query body shape. |
 | `glab orbit remote tools` | `GET orbit/tools` | MCP tool manifest with the full DSL JSON Schema. |
 | `glab orbit remote query [file\|-]` | `POST orbit/query` | Run a query from a file or stdin. |
+| `glab orbit remote context <ref>...` | `GET orbit/context` | Show compact, type-specific context for GitLab entities. |
 | `glab orbit remote graph-status` | `GET orbit/graph_status` | Indexing progress for a namespace, project, or full path. |
 
 ### Discover the schema
@@ -128,6 +129,20 @@ The `--response-format` flag maps to the body's `response_format`:
 If `--response-format` is unset, the body's `response_format` wins, with `llm`
 as the final fallback.
 
+### Get entity context
+
+Pass one or more entity references in `Type[id]` form. Repeat positional
+arguments, or use a comma-separated list:
+
+```shell
+glab orbit remote context 'MergeRequest[123]' 'Issue[456]'
+glab orbit remote context 'MergeRequest[123],Issue[456]' --format raw
+```
+
+The default `llm` format is compact plain text. Use `--format raw` for the
+versioned JSON response. References stay in input order, and entries that
+cannot be resolved include an error instead of failing the whole request.
+
 ### Check indexing progress
 
 Pass exactly one scope flag:
@@ -155,4 +170,4 @@ can branch on them without parsing stderr.
 ## Billing
 
 `glab orbit remote query` consumes GitLab Credits the same way as MCP queries.
-`status`, `schema`, `tools`, and `graph-status` calls are free.
+`context`, `status`, `schema`, `tools`, and `graph-status` calls are free.

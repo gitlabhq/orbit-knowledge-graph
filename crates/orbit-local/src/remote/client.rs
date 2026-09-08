@@ -16,6 +16,7 @@ const SCHEMA_PATH: &str = "/api/v4/orbit/schema";
 const DSL_PATH: &str = "/api/v4/orbit/schema/dsl";
 const TOOLS_PATH: &str = "/api/v4/orbit/tools";
 const QUERY_PATH: &str = "/api/v4/orbit/query";
+const CONTEXT_PATH: &str = "/api/v4/orbit/context";
 const GRAPH_STATUS_PATH: &str = "/api/v4/orbit/graph_status";
 
 pub(crate) struct OrbitClient {
@@ -74,6 +75,13 @@ impl OrbitClient {
         params: &[(&str, String)],
     ) -> Result<Vec<u8>, RemoteError> {
         self.get_bytes(GRAPH_STATUS_PATH, params).await
+    }
+
+    pub(crate) async fn get_context(
+        &self,
+        params: &[(&str, String)],
+    ) -> Result<Vec<u8>, RemoteError> {
+        self.get_bytes(CONTEXT_PATH, params).await
     }
 
     pub(crate) async fn query_raw(&self, body: Vec<u8>) -> Result<Vec<u8>, RemoteError> {

@@ -28,6 +28,7 @@ Canonical locations for files, schemas, configs, and tools in the knowledge-grap
 | Agent prompt files (tool descriptions) | `config/prompts/` (versioned YAML, one file per prompt; `remote/` feeds `orbit-server`, `local/` feeds `orbit-local`; embedded via rust-embed and build-time validated by `crates/orbit-prompts`) |
 | Server config JSON schema | `config/schemas/config.schema.json` (generated via `mise schema:generate`) |
 | Query response JSON schema | `config/schemas/query_response.json` |
+| Entity context response JSON schema | `config/schemas/context_response.schema.json` |
 | Query language reference (text-indexed properties table is generated) | `docs/source/remote/queries/query-language.md` (regenerate the ontology-derived table with `mise docs:query-language`; CI gate `query-language-docs-check`) |
 | Query test fixtures | `fixtures/queries/` |
 | Query corpus (categorized YAML) | `fixtures/queries/corpus/` (smoke-tested in CI: `corpus_smoke`) |

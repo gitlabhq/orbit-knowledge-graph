@@ -2,7 +2,7 @@
 stage: Orbit
 group: Context Systems
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Query the GitLab Orbit graph directly using the REST API. Reference for all four endpoints with authentication requirements and example requests.
+description: Query GitLab Orbit directly using the REST API, including graph queries, entity context, schema, and status endpoints.
 title: REST API
 ---
 
@@ -50,6 +50,7 @@ API calls consume GitLab Credits from your subscription. Each call to
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `POST` | `/api/v4/orbit/query` | Execute a graph query |
+| `GET` | `/api/v4/orbit/context` | Fetch compact context for GitLab entities |
 | `GET` | `/api/v4/orbit/schema` | Fetch the current schema |
 | `GET` | `/api/v4/orbit/status` | Check indexing status |
 | `GET` | `/api/v4/orbit/tools` | List available MCP tool definitions |
@@ -75,6 +76,30 @@ curl --request POST \
 ```
 
 See the [query language reference](../queries/query-language.md) for the full DSL.
+
+## Context endpoint
+
+Return compact, type-specific summaries for one or more GitLab entities. Rails
+resolves the references and applies the caller's GitLab permissions.
+
+Provide each reference in `Type[id]` form as a repeated `refs[]` query
+parameter. Set `response_format` to `llm` for plain text or `raw` for structured
+JSON. The default is `llm`.
+
+```shell
+curl --get \
+  --header "Authorization: Bearer <your_token>" \
+  --data-urlencode 'refs[]=MergeRequest[123]' \
+  --data-urlencode 'refs[]=Issue[456]' \
+  --data-urlencode 'response_format=raw' \
+  "https://gitlab.com/api/v4/orbit/context"
+```
+
+Raw responses have a separately versioned contract defined by
+[`context_response.schema.json`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/config/schemas/context_response.schema.json).
+Results preserve input order. Each unresolved reference has one of these
+errors: `not_found`, `unsupported_type`, or `invalid_ref`. Summary objects are
+type-specific and can gain additive fields in later compatible versions.
 
 ### Example request
 

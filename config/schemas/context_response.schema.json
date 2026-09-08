@@ -1,0 +1,170 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gitlab.com/gitlab-org/orbit/knowledge-graph/schemas/context_response/v1",
+  "title": "Orbit entity context response",
+  "description": "Structured response returned by GET /api/v4/orbit/context when response_format is raw.",
+  "type": "object",
+  "required": ["version", "entities"],
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "const": "1.0.0"
+    },
+    "entities": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/entity" }
+    }
+  },
+  "$defs": {
+    "user": {
+      "type": "object",
+      "required": ["id", "username", "name"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "integer" },
+        "username": { "type": "string" },
+        "name": { "type": "string" }
+      }
+    },
+    "linked_entity": {
+      "type": "object",
+      "required": ["ref", "iid", "project_path", "title"],
+      "additionalProperties": false,
+      "properties": {
+        "ref": { "type": "string" },
+        "iid": { "type": "integer" },
+        "project_path": { "type": "string" },
+        "title": { "type": "string" }
+      }
+    },
+    "merge_request_summary": {
+      "type": "object",
+      "required": [
+        "title",
+        "state",
+        "iid",
+        "project_path",
+        "web_url",
+        "author",
+        "source_branch",
+        "target_branch",
+        "head_pipeline_status",
+        "reviewers",
+        "linked_issues"
+      ],
+      "properties": {
+        "title": { "type": "string" },
+        "state": { "type": "string" },
+        "iid": { "type": "integer" },
+        "project_path": { "type": "string" },
+        "web_url": { "type": "string", "format": "uri" },
+        "author": { "$ref": "#/$defs/user" },
+        "source_branch": { "type": "string" },
+        "target_branch": { "type": "string" },
+        "head_pipeline_status": { "type": ["string", "null"] },
+        "reviewers": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/user" }
+        },
+        "linked_issues": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/linked_entity" }
+        }
+      },
+      "additionalProperties": true
+    },
+    "issue_summary": {
+      "type": "object",
+      "required": [
+        "title",
+        "state",
+        "iid",
+        "project_path",
+        "web_url",
+        "labels",
+        "assignees",
+        "milestone",
+        "linked_merge_requests"
+      ],
+      "properties": {
+        "title": { "type": "string" },
+        "state": { "type": "string" },
+        "iid": { "type": "integer" },
+        "project_path": { "type": "string" },
+        "web_url": { "type": "string", "format": "uri" },
+        "labels": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "assignees": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/user" }
+        },
+        "milestone": {
+          "type": ["object", "null"],
+          "required": ["title"],
+          "properties": { "title": { "type": "string" } },
+          "additionalProperties": false
+        },
+        "linked_merge_requests": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/linked_entity" }
+        }
+      },
+      "additionalProperties": true
+    },
+    "entity": {
+      "type": "object",
+      "required": ["ref", "type", "id", "found"],
+      "additionalProperties": false,
+      "properties": {
+        "ref": { "type": "string" },
+        "type": { "type": ["string", "null"] },
+        "id": { "type": ["integer", "null"] },
+        "found": { "type": "boolean" },
+        "summary": { "type": "object" },
+        "error": {
+          "enum": ["not_found", "unsupported_type", "invalid_ref"]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "found": { "const": true } },
+            "required": ["found"]
+          },
+          "then": {
+            "required": ["summary"],
+            "not": { "required": ["error"] }
+          },
+          "else": {
+            "required": ["error"],
+            "not": { "required": ["summary"] }
+          }
+        },
+        {
+          "if": {
+            "properties": { "type": { "const": "MergeRequest" } },
+            "required": ["type"]
+          },
+          "then": {
+            "properties": {
+              "summary": { "$ref": "#/$defs/merge_request_summary" }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "type": { "const": "Issue" } },
+            "required": ["type"]
+          },
+          "then": {
+            "properties": {
+              "summary": { "$ref": "#/$defs/issue_summary" }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

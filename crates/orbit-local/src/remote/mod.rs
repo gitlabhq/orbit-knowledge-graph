@@ -3,6 +3,7 @@ use std::io::Write;
 use self::error::{EXIT_GENERIC, RemoteError};
 
 pub(crate) mod client;
+pub(crate) mod context;
 pub(crate) mod dsl;
 pub(crate) mod error;
 pub(crate) mod graph_status;
@@ -11,6 +12,7 @@ pub(crate) mod schema;
 pub(crate) mod status;
 pub(crate) mod tools;
 
+pub(crate) use context::{parse_entity_ref, run_context};
 pub(crate) use dsl::run_dsl;
 pub(crate) use graph_status::run_graph_status;
 pub(crate) use query::run_query;
@@ -25,7 +27,7 @@ pub(crate) enum ResponseFormat {
 }
 
 impl ResponseFormat {
-    fn as_str(self) -> &'static str {
+    pub(super) fn as_str(self) -> &'static str {
         match self {
             ResponseFormat::Llm => "llm",
             ResponseFormat::Raw => "raw",

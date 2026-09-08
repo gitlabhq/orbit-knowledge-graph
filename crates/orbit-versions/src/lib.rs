@@ -12,6 +12,7 @@ pub struct Versions {
     pub query_dsl: String,
     pub raw_output_format: String,
     pub goon_output_format: String,
+    pub context_response_format: String,
     pub duckdb: String,
     pub gitlab_system_note_actions: String,
 }
@@ -32,6 +33,7 @@ mod tests {
     fn parses_every_pin() {
         assert!(VERSIONS.schema > 0);
         assert!(VERSIONS.duckdb.starts_with('v'));
+        assert_eq!(VERSIONS.context_response_format, "1.0.0");
         assert_eq!(VERSIONS.gitlab_system_note_actions.len(), 40);
     }
 }

@@ -17,6 +17,9 @@ raw_output_format: 5.0.1
 # Response envelope of the GOON formatter.
 goon_output_format: 4.0.1
 
+# Response envelope of the raw entity context endpoint.
+context_response_format: 1.0.0
+
 # DuckDB release linked by the duckdb crate in Cargo.lock; crate 1.10505.x
 # is DuckDB 1.5.5. Vendored extension checksums in
 # crates/duckdb-client/build.rs are pinned against this release.

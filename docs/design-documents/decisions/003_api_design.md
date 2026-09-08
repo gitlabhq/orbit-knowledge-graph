@@ -208,6 +208,17 @@ Execute an Orbit query.
 
 ---
 
+### `GET /api/v4/orbit/context`
+
+Resolve one or more `Type[id]` references to compact, type-specific summaries.
+Rails owns resolution and authorization because these summaries come from fresh
+GitLab records rather than the property graph. The `refs[]` parameter is
+repeatable, output order matches input order, and `response_format` selects
+`raw` structured JSON or `llm` plain text. Raw responses use the separately
+versioned `config/schemas/context_response.schema.json` contract.
+
+---
+
 ### `GET /api/v4/orbit/schema`
 
 Retrieve Orbit schema (ontology).

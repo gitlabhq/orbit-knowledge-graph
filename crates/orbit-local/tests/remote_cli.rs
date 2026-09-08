@@ -177,6 +177,34 @@ fn query_posts_envelope_with_resolved_response_format() {
 }
 
 #[test]
+fn context_sends_repeated_refs_and_response_format() {
+    let (base_url, handle) = serve_once("entity context", "text/plain");
+    let output = run_orbit(
+        &base_url,
+        &[
+            "remote",
+            "context",
+            "MergeRequest[123],Issue[456]",
+            "--format",
+            "llm",
+        ],
+    );
+    let request = handle.join().expect("join mock");
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        request.request_line,
+        "GET /api/v4/orbit/context?refs%5B%5D=MergeRequest%5B123%5D&refs%5B%5D=Issue%5B456%5D&response_format=llm HTTP/1.1"
+    );
+    assert_eq!(request.auth_header.as_deref(), Some("glpat-test"));
+    assert_eq!(output.stdout, b"entity context");
+}
+
+#[test]
 fn http_403_exits_with_code_four() {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
     let addr = listener.local_addr().unwrap();
@@ -199,7 +227,7 @@ fn http_403_exits_with_code_four() {
         stream.write_all(response.as_bytes()).unwrap();
     });
 
-    let output = run_orbit(&base_url, &["remote", "status"]);
+    let output = run_orbit(&base_url, &["remote", "context", "Issue[456]"]);
     handle.join().unwrap();
 
     assert_eq!(output.status.code(), Some(4));

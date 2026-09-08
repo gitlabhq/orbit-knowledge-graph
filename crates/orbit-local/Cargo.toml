@@ -44,5 +44,7 @@ strum = { workspace = true }
 orbit-prompts = { path = "../orbit-prompts" }
 
 [dev-dependencies]
+jsonschema = { workspace = true }
+orbit-versions = { path = "../orbit-versions" }
 orbit-analytics = { path = "../orbit-analytics", features = ["testkit"] }
 tempfile = { workspace = true }

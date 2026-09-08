@@ -537,6 +537,19 @@ enum RemoteCommands {
         #[arg(long, value_enum)]
         response_format: Option<remote::ResponseFormat>,
     },
+    /// Show compact, type-specific context for GitLab entities.
+    #[command(
+        after_long_help = "Example: glab orbit remote context 'MergeRequest[123]' 'Issue[456]' --format raw"
+    )]
+    Context {
+        /// Entity references. Repeat arguments or separate references with commas.
+        #[arg(value_name = "REF (example: MergeRequest[123])", required = true, value_delimiter = ',', value_parser = remote::parse_entity_ref)]
+        refs: Vec<String>,
+
+        /// Server response format. Defaults to `llm`.
+        #[arg(long, value_enum, default_value = "llm")]
+        format: remote::ResponseFormat,
+    },
     /// Show Orbit cluster health.
     Status,
     /// Show the Orbit ontology.
@@ -785,6 +798,7 @@ async fn run_remote(
             source,
             response_format,
         } => remote::run_query(source, response_format).await,
+        RemoteCommands::Context { refs, format } => remote::run_context(refs, format).await,
         RemoteCommands::Status => remote::run_status().await,
         RemoteCommands::Schema { nodes } => remote::run_schema(nodes).await,
         RemoteCommands::Dsl => remote::run_dsl().await,
@@ -1213,7 +1227,10 @@ fn build_index_output(
 
 #[cfg(test)]
 mod tests {
-    use super::{Cli, Commands, IndexArgs, LocalCommands, SchemaArgs, fatal_pipeline_reason};
+    use super::{
+        Cli, Commands, IndexArgs, LocalCommands, RemoteCommands, SchemaArgs, fatal_pipeline_reason,
+    };
+    use crate::remote::ResponseFormat;
     use clap::{CommandFactory, Parser};
     use code_graph::v2::pipeline::PipelineError;
 
@@ -1403,6 +1420,63 @@ mod tests {
             _ => panic!("expected top-level repo-map command"),
         };
         assert_eq!(grouped_args, top_level_args);
+    }
+
+    #[test]
+    fn remote_context_accepts_repeated_and_comma_separated_refs() {
+        let cli = Cli::parse_from([
+            "orbit",
+            "remote",
+            "context",
+            "MergeRequest[123],Issue[456]",
+            "WorkItem[789]",
+            "--format",
+            "raw",
+        ]);
+
+        let Commands::Remote {
+            command: RemoteCommands::Context { refs, format },
+        } = cli.command
+        else {
+            panic!("expected remote context command");
+        };
+        assert_eq!(refs, ["MergeRequest[123]", "Issue[456]", "WorkItem[789]"]);
+        assert_eq!(format, ResponseFormat::Raw);
+    }
+
+    #[test]
+    fn remote_context_rejects_invalid_refs() {
+        for value in ["garbage", "Issue[abc]", "Issue[1]extra", "Issue-1"] {
+            let error = Cli::try_parse_from(["orbit", "remote", "context", value])
+                .err()
+                .expect("invalid reference must fail argument parsing");
+            assert_eq!(error.kind(), clap::error::ErrorKind::ValueValidation);
+            assert!(error.to_string().contains("expected Type[id]"));
+        }
+    }
+
+    #[test]
+    fn remote_context_requires_at_least_one_ref_and_shows_example() {
+        let error = Cli::try_parse_from(["orbit", "remote", "context"])
+            .err()
+            .expect("missing reference must fail argument parsing");
+        assert_eq!(
+            error.kind(),
+            clap::error::ErrorKind::MissingRequiredArgument
+        );
+        assert!(error.to_string().contains("MergeRequest[123]"));
+    }
+
+    #[test]
+    fn remote_context_defaults_to_llm_format() {
+        let cli = Cli::parse_from(["orbit", "remote", "context", "Issue[456]"]);
+        let Commands::Remote {
+            command: RemoteCommands::Context { format, .. },
+        } = cli.command
+        else {
+            panic!("expected remote context command");
+        };
+        assert_eq!(format, ResponseFormat::Llm);
     }
 
     fn err(stage: &'static str, msg: &str, fatal: bool) -> PipelineError {
