@@ -3,7 +3,6 @@ use std::time::Duration;
 
 use indexer::config::DispatcherError;
 use nats_client::NatsClient;
-use ontology::Ontology;
 use ontology::archive::OntologyArchive;
 use ontology::migrations::embedded_sources;
 use orbit_migrations::catalog::{CatalogError, OntologyCatalog};
@@ -105,7 +104,7 @@ async fn publication_is_idempotent_immutable_and_scoped_to_the_graph_database() 
 }
 
 #[tokio::test]
-async fn dispatcher_stops_before_migration_if_the_archive_conflicts() {
+async fn dispatcher_rejects_invalid_or_conflicting_archives_before_migration() {
     let (_server, url) = start_nats().await;
     let config = indexer::DispatcherConfig {
         nats: NatsConfiguration {
@@ -128,17 +127,25 @@ async fn dispatcher_stops_before_migration_if_the_archive_conflicts() {
     let mut changed_sources = embedded_sources();
     changed_sources.get_mut("schema.yaml").unwrap().push('\n');
     let conflicting = OntologyArchive::from_sources(*SCHEMA_VERSION, &changed_sources).unwrap();
-    let result = indexer::run_dispatcher(
-        &config,
-        &Ontology::load_embedded().unwrap(),
-        &conflicting,
-        CancellationToken::new(),
-    )
-    .await;
+    let result = indexer::run_dispatcher(&config, &conflicting, CancellationToken::new()).await;
 
     assert!(matches!(
         result,
         Err(DispatcherError::Archive(CatalogError::Conflict(_)))
+    ));
+    assert_eq!(
+        catalog.load(*SCHEMA_VERSION).await.unwrap().bytes(),
+        archive.bytes()
+    );
+
+    let mut invalid_sources = embedded_sources();
+    invalid_sources.insert("schema.yaml".into(), "[".into());
+    let invalid = OntologyArchive::from_sources(*SCHEMA_VERSION, &invalid_sources).unwrap();
+    let result = indexer::run_dispatcher(&config, &invalid, CancellationToken::new()).await;
+
+    assert!(matches!(
+        result,
+        Err(DispatcherError::Archive(CatalogError::Archive(_)))
     ));
     assert_eq!(
         catalog.load(*SCHEMA_VERSION).await.unwrap().bytes(),

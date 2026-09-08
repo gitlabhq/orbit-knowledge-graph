@@ -64,6 +64,7 @@ use indexing_status::{INDEXING_PROGRESS_BUCKET, IndexingStatusStore};
 use locking::INDEXING_LOCKS_BUCKET;
 use modules::namespace_deletion::{ClickHouseNamespaceDeletionStore, NamespaceDeletionStore};
 use nats::{KvBucketConfig, NatsBroker};
+use orbit_migrations::catalog::{CatalogError, OntologyCatalog};
 use orbit_server_config::IndexerModule;
 use orchestrator::Trigger;
 use orchestrator::dispatch::{CodeBackfill, NamespaceIndexingDispatch};
@@ -243,17 +244,14 @@ pub async fn run(
 
 pub async fn run_dispatcher(
     config: &DispatcherConfig,
-    ontology: &ontology::Ontology,
     archive: &ontology::archive::OntologyArchive,
     shutdown: CancellationToken,
 ) -> Result<(), DispatcherError> {
+    let ontology = archive.load_ontology().map_err(CatalogError::from)?;
     let services = orchestrator::scheduled::connect(&config.nats).await?;
 
-    let catalog = orbit_migrations::catalog::OntologyCatalog::open(
-        services.nats_client.clone(),
-        &config.graph.database,
-    )
-    .await?;
+    let catalog =
+        OntologyCatalog::open(services.nats_client.clone(), &config.graph.database).await?;
     catalog.publish(archive).await?;
 
     if let Err(error) = nats::versioning::gc_idle_release_streams(
@@ -297,7 +295,7 @@ pub async fn run_dispatcher(
         &graph,
         &dictionary_credentials,
         &lock_service,
-        ontology,
+        &ontology,
         &migration_metrics,
         &campaign,
     )
@@ -307,7 +305,7 @@ pub async fn run_dispatcher(
     match schema::version::read_active_version(&graph).await {
         Ok(Some(active_version)) if active_version == *schema::version::SCHEMA_VERSION => {
             {
-                let graph_schema = orbit_migrations::schema::GraphSchema::from_ontology(ontology);
+                let graph_schema = orbit_migrations::schema::GraphSchema::from_ontology(&ontology);
                 if let Err(error) =
                     orbit_migrations::execute::create_unversioned_definitions(&graph, &graph_schema)
                         .await
@@ -317,7 +315,7 @@ pub async fn run_dispatcher(
             }
             if let Err(error) = orbit_migrations::execute::replace_refreshable_views(
                 &graph,
-                ontology,
+                &ontology,
                 active_version,
             )
             .await
@@ -337,7 +335,7 @@ pub async fn run_dispatcher(
         Arc::new(ClickHouseNamespaceDeletionStore::new(
             deletion_datalake,
             Arc::clone(&deletion_graph),
-            ontology,
+            &ontology,
         ));
     let checkpoint_store = Arc::new(checkpoint::ClickHouseCheckpointStore::new(deletion_graph));
 
@@ -366,21 +364,21 @@ pub async fn run_dispatcher(
             metrics.clone(),
             config.schedule.tasks.namespace.clone(),
             campaign.clone(),
-            ontology,
+            &ontology,
         )),
         Box::new(CodeBackfillSweep::new(
             backfill.clone(),
             CodeStaleSweep::new(
                 config.graph.build_client(),
-                &modules::code::config::CodeTableNames::from_ontology(ontology)
-                    .expect("code tables must resolve from the embedded ontology"),
+                &modules::code::config::CodeTableNames::from_ontology(&ontology)
+                    .expect("code tables must resolve from the archived ontology"),
                 checkpoint_store.clone(),
             ),
             config.schedule.tasks.code_backfill.clone(),
         )),
         Box::new(TableCleanup::new(
             graph,
-            ontology,
+            &ontology,
             metrics.clone(),
             config.schedule.tasks.table_cleanup.clone(),
         )),
@@ -393,7 +391,7 @@ pub async fn run_dispatcher(
         )),
         Box::new(StaleEdgeReconciliation::new(
             config.graph.build_client(),
-            ontology,
+            &ontology,
             Arc::new(checkpoint::ClickHouseCheckpointStore::new(Arc::new(
                 config.graph.build_client(),
             ))),
@@ -404,7 +402,7 @@ pub async fn run_dispatcher(
             config.graph.build_client(),
             config.datalake.build_client(),
             lock_service.clone(),
-            Arc::new(ontology.clone()),
+            Arc::new(ontology),
             config.schema.clone(),
             config.schedule.tasks.migration_completion.clone(),
             metrics.clone(),

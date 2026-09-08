@@ -97,7 +97,7 @@ async fn main() -> anyhow::Result<()> {
                 schema: config.schema.clone(),
                 health_bind_address: config.dispatcher_health_bind_address,
             };
-            indexer::run_dispatcher(&dispatcher_config, &ontology, &archive, shutdown)
+            indexer::run_dispatcher(&dispatcher_config, &archive, shutdown)
                 .await
                 .map_err(Into::into)
         }
