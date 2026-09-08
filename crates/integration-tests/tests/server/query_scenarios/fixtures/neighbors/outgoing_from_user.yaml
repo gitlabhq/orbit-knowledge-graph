@@ -1,0 +1,12 @@
+description: Outgoing neighbors from User 1
+query:
+  json: |
+    {
+      "query_type": "neighbors",
+      "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
+      "neighbors": {"direction": "outgoing"}
+    }
+expect:
+  node_count: 9
+  referential_integrity: true
+  skip_requirements: [neighbors]

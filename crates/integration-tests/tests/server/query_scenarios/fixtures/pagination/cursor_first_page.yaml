@@ -1,14 +1,15 @@
-description: Descending order_by reverses result ordering
+description: First page with cursor returns correct count and has_more
 query:
   json: |
     {
       "query_type": "traversal",
       "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000},
                  "columns": ["username"]}],
-      "order_by": "-u.id",
-      "limit": 10
+      "order_by": "u.id",
+      "cursor": {"page_size": 2}
     }
 expect:
   nodes:
     User:
-      order: [7, 6, 5, 4, 3, 2, 1]
+      order: [1, 2]
+  has_more: true
