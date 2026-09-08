@@ -1428,7 +1428,7 @@ mod tests {
             "orbit",
             "remote",
             "context",
-            "MergeRequest[123],Issue[456]",
+            "MergeRequest[123], Issue[456]",
             "WorkItem[789]",
             "--format",
             "raw",

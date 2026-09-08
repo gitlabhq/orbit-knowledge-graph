@@ -24,16 +24,17 @@ fn context_response_example_matches_versioned_schema() {
                     "iid": 42,
                     "project_path": "gitlab-org/gitlab",
                     "web_url": "https://gitlab.com/gitlab-org/gitlab/-/merge_requests/42",
-                    "author": {"id": 1, "username": "author", "name": "Author"},
+                    "author": {"id": 1, "username": "author", "name": "Author", "avatar_url": "https://example.com/author.png"},
                     "source_branch": "context-endpoint",
                     "target_branch": "master",
                     "head_pipeline_status": "success",
-                    "reviewers": [{"id": 2, "username": "reviewer", "name": "Reviewer"}],
+                    "reviewers": [{"id": 2, "username": "reviewer", "name": "Reviewer", "state": "active"}],
                     "linked_issues": [{
                         "ref": "Issue[456]",
                         "iid": 7,
                         "project_path": "gitlab-org/gitlab",
-                        "title": "Add entity context"
+                        "title": "Add entity context",
+                        "state": "opened"
                     }],
                     "future_additive_field": true
                 }
@@ -51,7 +52,7 @@ fn context_response_example_matches_versioned_schema() {
                     "web_url": "https://gitlab.com/gitlab-org/gitlab/-/issues/7",
                     "labels": ["type::feature"],
                     "assignees": [{"id": 3, "username": "assignee", "name": "Assignee"}],
-                    "milestone": {"title": "19.2"},
+                    "milestone": {"title": "19.2", "web_url": "https://gitlab.com/groups/gitlab-org/-/milestones/1"},
                     "linked_merge_requests": [{
                         "ref": "MergeRequest[123]",
                         "iid": 42,

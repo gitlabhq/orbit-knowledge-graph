@@ -19,7 +19,7 @@
     "user": {
       "type": "object",
       "required": ["id", "username", "name"],
-      "additionalProperties": false,
+      "additionalProperties": true,
       "properties": {
         "id": { "type": "integer" },
         "username": { "type": "string" },
@@ -29,7 +29,7 @@
     "linked_entity": {
       "type": "object",
       "required": ["ref", "iid", "project_path", "title"],
-      "additionalProperties": false,
+      "additionalProperties": true,
       "properties": {
         "ref": { "type": "string" },
         "iid": { "type": "integer" },
@@ -104,7 +104,7 @@
           "type": ["object", "null"],
           "required": ["title"],
           "properties": { "title": { "type": "string" } },
-          "additionalProperties": false
+          "additionalProperties": true
         },
         "linked_merge_requests": {
           "type": "array",

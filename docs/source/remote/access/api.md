@@ -77,30 +77,6 @@ curl --request POST \
 
 See the [query language reference](../queries/query-language.md) for the full DSL.
 
-## Context endpoint
-
-Return compact, type-specific summaries for one or more GitLab entities. Rails
-resolves the references and applies the caller's GitLab permissions.
-
-Provide each reference in `Type[id]` form as a repeated `refs[]` query
-parameter. Set `response_format` to `llm` for plain text or `raw` for structured
-JSON. The default is `llm`.
-
-```shell
-curl --get \
-  --header "Authorization: Bearer <your_token>" \
-  --data-urlencode 'refs[]=MergeRequest[123]' \
-  --data-urlencode 'refs[]=Issue[456]' \
-  --data-urlencode 'response_format=raw' \
-  "https://gitlab.com/api/v4/orbit/context"
-```
-
-Raw responses have a separately versioned contract defined by
-[`context_response.schema.json`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/config/schemas/context_response.schema.json).
-Results preserve input order. Each unresolved reference has one of these
-errors: `not_found`, `unsupported_type`, or `invalid_ref`. Summary objects are
-type-specific and can gain additive fields in later compatible versions.
-
 ### Example request
 
 For example, a request to find projects with the most pipeline failures:
@@ -183,6 +159,30 @@ An example response:
   "row_count": 1
 }
 ```
+
+## Context endpoint
+
+Return compact, type-specific summaries for one or more GitLab entities. Rails
+resolves the references and applies the caller's GitLab permissions.
+
+Provide each reference in `Type[id]` form as a repeated `refs[]` query
+parameter. Set `response_format` to `llm` for plain text or `raw` for structured
+JSON. The default is `llm`.
+
+```shell
+curl --get \
+  --header "Authorization: Bearer <your_token>" \
+  --data-urlencode 'refs[]=MergeRequest[123]' \
+  --data-urlencode 'refs[]=Issue[456]' \
+  --data-urlencode 'response_format=raw' \
+  "https://gitlab.com/api/v4/orbit/context"
+```
+
+Raw responses have a separately versioned contract defined by
+[`context_response.schema.json`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/config/schemas/context_response.schema.json).
+Results preserve input order. Each unresolved reference has one of these
+errors: `not_found`, `unsupported_type`, or `invalid_ref`. Summary objects and
+their nested objects can gain additive fields in later compatible versions.
 
 ## Schema endpoint
 

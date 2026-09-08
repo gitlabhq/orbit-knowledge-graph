@@ -22,6 +22,7 @@ pub(crate) fn parse_entity_ref(value: &str) -> Result<String, String> {
         Regex::new(r"^[A-Za-z]+\[\d+\]$").expect("entity reference regex is valid")
     });
 
+    let value = value.trim();
     if pattern.is_match(value) {
         Ok(value.to_string())
     } else {
