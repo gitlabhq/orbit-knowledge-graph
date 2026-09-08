@@ -449,7 +449,9 @@ Cleanup behavior:
    cleanup is not transactional.
 3. For a version whose object drops all succeeded, remove its schema-version NATS KV buckets. Mark
    the version `dropped` only after that NATS cleanup succeeds.
-4. Retry failed or partially completed cleanup on the next migration-completion run.
+4. On the next run, enumerate the remaining version-prefixed ClickHouse objects and retry their
+   drops. NATS cleanup or dropped-marker failures are logged, but are not independently queued for
+   retry once no droppable ClickHouse objects remain for that version.
 
 ### Safety guarantees
 
