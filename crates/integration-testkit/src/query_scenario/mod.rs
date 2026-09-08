@@ -28,6 +28,22 @@ use orbit_server::redaction::QueryResult;
 
 use crate::scenario::Seed;
 
+/// Parse all YAML scenario files under `root` without executing them.
+/// Catches syntax errors and serde mismatches in `cargo nextest --lib`
+/// before the integration stage spins up Docker.
+pub fn validate_parse(root: &str) {
+    let root = Path::new(root);
+    let mut files = Vec::new();
+    discover(root, &mut files);
+    assert!(!files.is_empty(), "no files found under {}", root.display());
+    for file in &files {
+        let raw =
+            std::fs::read_to_string(file).unwrap_or_else(|e| panic!("{}: {e}", file.display()));
+        let _: QueryScenario =
+            orbit_utils::yaml::from_str(&raw).unwrap_or_else(|e| panic!("{}: {e}", file.display()));
+    }
+}
+
 /// Load a named seed preset from `presets/seed.yaml` and apply it.
 pub async fn load_yaml_seed(ctx: &TestContext, presets_dir: &str, name: &str) {
     let path = Path::new(presets_dir).join("seed.yaml");
