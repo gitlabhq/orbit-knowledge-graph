@@ -203,7 +203,7 @@ async fn run_frontend(
         serde_json::from_value(resp).expect("response should deserialize");
     let view = ResponseView::for_query(&compiled.input, response);
 
-    apply_expect(&view, expect, &compiled.input, label);
+    apply_expect(&view, expect, label);
 }
 
 async fn execute_pipeline(
@@ -269,19 +269,12 @@ async fn execute_pipeline(
     GraphFormatter.format(&output)
 }
 
-fn apply_expect(
-    view: &ResponseView,
-    expect: &QueryExpect,
-    input: &query_engine::compiler::Input,
-    label: &str,
-) {
+fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
     for req_name in &expect.skip_requirements {
         if let Some(req) = parse_requirement(req_name) {
             view.skip_requirement(req);
         }
     }
-    satisfy_filter_requirements(view, input);
-
     if let Some(n) = expect.node_count.or_else(|| expect.derived_node_count()) {
         view.assert_node_count(n);
     }
@@ -318,6 +311,13 @@ fn apply_expect(
                 view.assert_node_absent(entity, *id);
             }
         }
+        for (field, expected) in &ne.filters {
+            let expected = expected.clone();
+            let field_name = field.clone();
+            view.assert_filter(entity, field, move |n| {
+                n.prop(&field_name) == Some(&expected)
+            });
+        }
     }
     for (kind, tuples) in &expect.edges {
         let pairs: Vec<(i64, i64)> = tuples.iter().map(|[a, b]| (*a, *b)).collect();
@@ -340,46 +340,6 @@ fn apply_expect(
             expected,
             "{label}: has_more mismatch"
         );
-    }
-}
-
-/// Satisfy `Filter` requirements by deriving predicates from the compiled
-/// input's filter operators. The YAML format doesn't express filter predicates
-/// directly, so we reconstruct them from the query.
-fn satisfy_filter_requirements(view: &ResponseView, input: &query_engine::compiler::Input) {
-    use query_engine::compiler::FilterOp;
-    for node in &input.nodes {
-        let entity = node.entity.as_deref().unwrap_or("");
-        for (field, filters) in &node.filters {
-            if view.nodes_of_type(entity).is_empty() {
-                view.skip_requirement(Requirement::Filter {
-                    field: field.clone(),
-                });
-                continue;
-            }
-            let filters = filters.clone();
-            let field_name = field.clone();
-            view.assert_filter(entity, field, move |n| {
-                filters.iter().all(|f| match (f.op, &f.value) {
-                    (Some(FilterOp::Eq) | None, Some(v)) => n.prop(&field_name) == Some(v),
-                    (Some(FilterOp::In), Some(serde_json::Value::Array(vs))) => {
-                        n.prop(&field_name).is_some_and(|p| vs.contains(p))
-                    }
-                    (Some(FilterOp::StartsWith), Some(serde_json::Value::String(s))) => n
-                        .prop_str(&field_name)
-                        .is_some_and(|v| v.starts_with(s.as_str())),
-                    (Some(FilterOp::Contains), Some(serde_json::Value::String(s))) => n
-                        .prop_str(&field_name)
-                        .is_some_and(|v| v.contains(s.as_str())),
-                    (Some(FilterOp::EndsWith), Some(serde_json::Value::String(s))) => n
-                        .prop_str(&field_name)
-                        .is_some_and(|v| v.ends_with(s.as_str())),
-                    (Some(FilterOp::IsNull), _) => !n.has_prop(&field_name),
-                    (Some(FilterOp::IsNotNull), _) => n.has_prop(&field_name),
-                    _ => true,
-                })
-            });
-        }
     }
 }
 

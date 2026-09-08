@@ -12,5 +12,7 @@ expect:
   nodes:
     User:
       count: 1
+      filters:
+        state: blocked
       rows:
         - { id: 5, username: eve, state: blocked }

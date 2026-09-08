@@ -84,6 +84,10 @@ pub struct NodeExpect {
     pub ids: Option<Vec<i64>>,
     #[serde(default)]
     pub absent: Option<Vec<i64>>,
+    /// Per-field filter assertions: `{ state: blocked }` verifies every
+    /// returned node of this entity has `state == "blocked"`.
+    #[serde(default)]
+    pub filters: BTreeMap<String, serde_json::Value>,
     #[serde(default)]
     pub rows: Vec<BTreeMap<String, serde_json::Value>>,
 }
