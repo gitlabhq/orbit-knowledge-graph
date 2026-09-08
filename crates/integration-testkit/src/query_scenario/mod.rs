@@ -430,6 +430,11 @@ fn build_redaction(config: &Option<RedactionConfig>) -> MockRedactionService {
 }
 
 fn parse_requirement(name: &str) -> Option<Requirement> {
+    if let Some(field) = name.strip_prefix("filter:") {
+        return Some(Requirement::Filter {
+            field: field.to_string(),
+        });
+    }
     match name {
         "node_ids" => Some(Requirement::NodeIds),
         "node_count" => Some(Requirement::NodeCount),

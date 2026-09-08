@@ -1,3 +1,4 @@
+# source: crates/integration-tests/tests/server/data_correctness/aggregation.rs::aggregation_count_returns_correct_values
 description: Count MRs authored per user
 security:
   paths: ["1/"]

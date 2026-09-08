@@ -1,4 +1,5 @@
-description: Admin can compile a query filtering on is_admin
+# source: crates/integration-tests/tests/server/data_correctness/security.rs::admin_only_admin_filter_compiles
+description: Admin can filter on is_admin and get matching results
 security: admin
 query:
   json: |
@@ -6,8 +7,12 @@ query:
       "query_type": "traversal",
       "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000},
                  "columns": ["username", "is_admin"],
-                 "filters": {"is_admin": true}}],
+                 "filters": {"is_admin": false}, "node_ids": [1]}],
       "limit": 10
     }
 expect:
-  node_count: 0
+  nodes:
+    User:
+      ids: [1]
+      filters:
+        is_admin: false

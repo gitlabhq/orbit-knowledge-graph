@@ -1,3 +1,4 @@
+# source: crates/integration-tests/tests/server/data_correctness/traversal.rs::traversal_user_group_returns_correct_pairs_and_edges
 description: User-Group MEMBER_OF traversal returns correct pairs and edges
 query:
   json: |

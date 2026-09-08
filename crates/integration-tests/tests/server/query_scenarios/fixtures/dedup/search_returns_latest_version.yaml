@@ -1,3 +1,4 @@
+# source: crates/integration-tests/tests/server/data_correctness/dedup.rs::search_returns_latest_version
 description: ReplacingMergeTree dedup returns the latest version
 extra_seed:
   gl_user:
