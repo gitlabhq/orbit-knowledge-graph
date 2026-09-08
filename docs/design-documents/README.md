@@ -298,20 +298,22 @@ We routinely need aggregations such as:
 
 ```json orbit-query
 {
-  "query_type": "aggregation",
-  "nodes": [
-    {"id": "p", "entity": "Project", "columns": ["name"]},
-    {"id": "w", "entity": "WorkItem"}
-  ],
-  "relationships": [
-    {"type": "IN_PROJECT", "from": "w", "to": "p"}
-  ],
-  "group_by": ["p"],
-  "aggregations": [
-    {"count": "w", "as": "work_item_count"}
-  ],
-  "aggregation_sort": "-work_item_count",
-  "limit": 10
+  "query": {
+    "query_type": "aggregation",
+    "nodes": [
+      {"id": "p", "entity": "Project", "columns": ["name"]},
+      {"id": "w", "entity": "WorkItem"}
+    ],
+    "relationships": [
+      {"type": "IN_PROJECT", "from": "w", "to": "p"}
+    ],
+    "group_by": ["p"],
+    "aggregations": [
+      {"count": "w", "as": "work_item_count"}
+    ],
+    "aggregation_sort": "-work_item_count",
+    "limit": 10
+  }
 }
 ```
 
