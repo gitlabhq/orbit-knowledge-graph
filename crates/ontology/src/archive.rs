@@ -136,8 +136,8 @@ impl OntologyArchive {
         &self.bytes
     }
 
-    pub fn source_fingerprints(&self) -> BTreeMap<String, String> {
-        crate::migrations::source_fingerprints_from(&self.sources)
+    pub fn matches_sources(&self, sources: &BTreeMap<String, String>) -> bool {
+        &self.sources == sources
     }
 
     pub fn load_ontology(&self) -> Result<Ontology, ArchiveError> {
@@ -209,7 +209,7 @@ mod tests {
 
     use super::{ArchiveError, OntologyArchive};
     use crate::Ontology;
-    use crate::migrations::{embedded_sources, source_fingerprints};
+    use crate::migrations::embedded_sources;
 
     const SCHEMA_VERSION: u32 = 42;
 
@@ -230,11 +230,42 @@ mod tests {
 
         assert_eq!(restored.bytes(), archive.bytes());
         assert_eq!(restored.schema_version(), SCHEMA_VERSION);
-        assert_eq!(restored.source_fingerprints(), source_fingerprints());
+        assert!(restored.matches_sources(&embedded_sources()));
         assert_eq!(
             restored.load_ontology().unwrap(),
             Ontology::load_embedded().unwrap()
         );
+    }
+
+    #[test]
+    fn changed_source_contents_require_a_new_archive() {
+        let sources = embedded_sources();
+        let archive = embedded_archive();
+
+        for source_path in sources.keys() {
+            let mut changed_sources = sources.clone();
+            changed_sources.get_mut(source_path).unwrap().push('\n');
+
+            assert!(!archive.matches_sources(&changed_sources), "{source_path}");
+        }
+    }
+
+    #[test]
+    fn added_source_files_require_a_new_archive() {
+        let archive = embedded_archive();
+        let mut sources = embedded_sources();
+        sources.insert("sql/new_query.sql.j2".into(), "SELECT 1".into());
+
+        assert!(!archive.matches_sources(&sources));
+    }
+
+    #[test]
+    fn removed_source_files_require_a_new_archive() {
+        let archive = embedded_archive();
+        let mut sources = embedded_sources();
+        sources.remove("sql/namespace_storage_snapshot.sql.j2");
+
+        assert!(!archive.matches_sources(&sources));
     }
 
     #[test]

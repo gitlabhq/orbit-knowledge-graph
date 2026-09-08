@@ -9,7 +9,6 @@ mod verify;
 
 pub use fingerprint::{
     FINGERPRINT_FILE, Fingerprints, embedded_sources, sha256_hex, source_fingerprints,
-    source_fingerprints_from,
 };
 pub use ledger::{LEDGER_FILE, MigrationEntry, MigrationLedger};
 pub use scope::{LedgerScope, MigrationScope, code_entity_names, derive_scope, sdlc_entity_names};

@@ -25,9 +25,9 @@ fn validate_ontology_archive() {
     archive
         .load_ontology()
         .unwrap_or_else(|error| panic!("{error}"));
-    assert_eq!(
-        archive.source_fingerprints(),
-        ontology::migrations::source_fingerprints(),
+    let current_sources = ontology::migrations::embedded_sources();
+    assert!(
+        archive.matches_sources(&current_sources),
         "ontology archive is stale; run `mise schema:bump`"
     );
     println!(

@@ -175,8 +175,17 @@ pub fn check(base: Option<String>) -> Result<()> {
         .map_err(|e| anyhow!(e))?;
 
     let archive_path = OntologyArchive::path(&config_dir(), schema_version);
-    let archive = OntologyArchive::from_bytes(schema_version, &fs::read(&archive_path)?)?;
-    if archive.source_fingerprints() != current.sources {
+    let archive_bytes = fs::read(&archive_path).with_context(|| {
+        format!(
+            "reading {}. Run `mise schema:snapshot` to recreate a missing archive.",
+            archive_path.display()
+        )
+    })?;
+
+    let archive = OntologyArchive::from_bytes(schema_version, &archive_bytes)?;
+    let current_sources = migrations::embedded_sources();
+
+    if !archive.matches_sources(&current_sources) {
         bail!("ontology archive is stale. {REMEDIATION}");
     }
 
@@ -360,16 +369,23 @@ pub fn bump(
         .validate(&ontology, final_version)
         .map_err(|e| anyhow!(e))?;
 
-    let archive_path = OntologyArchive::path(&config_dir(), final_version);
-    if is_new && archive_path.exists() {
-        bail!(
-            "ontology archive already exists: {}",
-            archive_path.display()
-        );
-    }
-
     let archive = OntologyArchive::from_sources(final_version, &source_contents)?;
     archive.load_ontology()?;
+
+    let archive_path = OntologyArchive::path(&config_dir(), final_version);
+
+    if is_new && archive_path.exists() {
+        let existing_bytes = fs::read(&archive_path)
+            .with_context(|| format!("reading {}", archive_path.display()))?;
+
+        if existing_bytes != archive.bytes() {
+            bail!(
+                "ontology archive already exists with different contents: {}",
+                archive_path.display()
+            );
+        }
+    }
+
     archive.write_atomic(&archive_path)?;
 
     if is_new {
