@@ -311,6 +311,91 @@ mod tests {
     }
 
     #[test]
+    fn compile_uses_supplied_ontology_for_scoped_user_table() {
+        let scoped_user = ONTOLOGY.clone().with_path_scopable_nodes(["User"]);
+        let query = r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":["id"]}],"limit":1}"#;
+
+        for (ontology, expected_table) in [
+            (scoped_user.clone(), "gl_user"),
+            (scoped_user.with_schema_version_prefix("v1_"), "v1_gl_user"),
+        ] {
+            let sql = compile(query, &ontology, &security_ctx())
+                .expect("should compile")
+                .base
+                .render();
+            assert!(
+                sql.contains("startsWith(u.traversal_path"),
+                "supplied ontology must keep the User alias scoped, got:\n{sql}"
+            );
+            assert!(
+                sql.contains(expected_table),
+                "ontology should render {expected_table}, got:\n{sql}"
+            );
+        }
+    }
+
+    #[test]
+    fn compile_uses_each_ontologys_global_tables_and_keeps_join_filters() {
+        let query = r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "user", "entity": "User", "node_ids": [1], "filters": {"username": "alice"}},
+                {"id": "project", "entity": "Project", "filters": {"name": "orbit"}}
+            ],
+            "relationships": [{
+                "type": "MEMBER_OF",
+                "from": "user",
+                "to": "project"
+            }],
+            "limit": 1
+        }"#;
+
+        let mut sources = ontology::migrations::embedded_sources();
+        let user_source = sources.get_mut("nodes/core/user.yaml").unwrap();
+        *user_source = user_source.replace(
+            "destination_table: gl_user",
+            "destination_table: gl_renamed_user",
+        );
+        let archived_ontology = ontology::archive::OntologyArchive::from_sources(1, &sources)
+            .expect("renamed archive should build")
+            .load_ontology()
+            .expect("renamed archive should load");
+        let prefixed = archived_ontology.clone().with_schema_version_prefix("v1_");
+
+        for (ontology, expected_user_table) in [
+            (archived_ontology.clone(), "gl_renamed_user"),
+            (ONTOLOGY.clone(), "gl_user"),
+            (prefixed, "v1_gl_renamed_user"),
+            (
+                ONTOLOGY.clone().with_schema_version_prefix("v2_"),
+                "v2_gl_user",
+            ),
+            (archived_ontology, "gl_renamed_user"),
+        ] {
+            let sql = compile(query, &ontology, &security_ctx())
+                .expect("should compile")
+                .base
+                .render();
+            assert!(
+                sql.contains(expected_user_table),
+                "compiled SQL should use {expected_user_table}, got:\n{sql}"
+            );
+            assert!(
+                !sql.contains("startsWith(user.traversal_path"),
+                "global User must stay unscoped, got:\n{sql}"
+            );
+            assert!(
+                sql.contains("startsWith(project.traversal_path"),
+                "joined Project alias must remain scoped, got:\n{sql}"
+            );
+            assert!(
+                sql.contains("startsWith(e0.traversal_path"),
+                "edge alias e0 must remain scoped, got:\n{sql}"
+            );
+        }
+    }
+
+    #[test]
     fn aggregation_with_relationship_emits_no_bare_node_ref() {
         let query = r#"{
             "query_type": "aggregation",
