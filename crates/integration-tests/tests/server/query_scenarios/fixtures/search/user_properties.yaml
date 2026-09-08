@@ -9,11 +9,10 @@ query:
       "limit": 10
     }
 expect:
-  node_count: 7
-  node_order:
-    User: [1, 2, 3, 4, 5, 6, 7]
   nodes:
     User:
-      - { id: 1, username: alice, name: Alice Admin, state: active, user_type: human }
-      - { id: 2, username: bob, name: Bob Builder }
-      - { id: 5, username: eve, state: blocked, user_type: service_account }
+      order: [1, 2, 3, 4, 5, 6, 7]
+      rows:
+        - { id: 1, username: alice, name: Alice Admin, state: active, user_type: human }
+        - { id: 2, username: bob, name: Bob Builder }
+        - { id: 5, username: eve, state: blocked, user_type: service_account }

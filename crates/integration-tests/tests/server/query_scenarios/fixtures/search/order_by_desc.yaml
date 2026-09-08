@@ -9,6 +9,6 @@ query:
       "limit": 10
     }
 expect:
-  node_count: 7
-  node_order:
-    User: [7, 6, 5, 4, 3, 2, 1]
+  nodes:
+    User:
+      order: [7, 6, 5, 4, 3, 2, 1]

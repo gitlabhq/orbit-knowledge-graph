@@ -8,8 +8,9 @@ query:
       "limit": 10
     }
 expect:
-  node_count: 6
   nodes:
     Project:
-      - { id: 1000, name: Public Project, visibility_level: public }
-      - { id: 1003, name: Secret Project, visibility_level: private }
+      count: 6
+      rows:
+        - { id: 1000, name: Public Project, visibility_level: public }
+        - { id: 1003, name: Secret Project, visibility_level: private }

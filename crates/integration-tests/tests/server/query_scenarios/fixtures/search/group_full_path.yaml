@@ -9,11 +9,10 @@ query:
       "limit": 10
     }
 expect:
-  node_count: 5
-  node_order:
-    Group: [100, 101, 102, 200, 300]
   nodes:
     Group:
-      - { id: 100, full_path: public-group }
-      - { id: 200, full_path: public-group/deep-a }
-      - { id: 300, full_path: public-group/deep-a/deep-b }
+      order: [100, 101, 102, 200, 300]
+      rows:
+        - { id: 100, full_path: public-group }
+        - { id: 200, full_path: public-group/deep-a }
+        - { id: 300, full_path: public-group/deep-a/deep-b }

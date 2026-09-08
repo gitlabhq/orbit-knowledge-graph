@@ -7,12 +7,10 @@ query:
       "limit": 10
     }
 expect:
-  node_count: 2
-  node_ids:
-    Group: [100, 102]
   nodes:
     Group:
-      - { id: 100, name: Public Group }
-      - { id: 102, name: Internal Group }
-  node_absent:
-    Group: [101]
+      ids: [100, 102]
+      absent: [101]
+      rows:
+        - { id: 100, name: Public Group }
+        - { id: 102, name: Internal Group }

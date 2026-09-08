@@ -217,14 +217,20 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
     if let Some(n) = expect.node_count {
         view.assert_node_count(n);
     }
-    for (entity, ids) in &expect.node_order {
-        view.assert_node_order(entity, ids);
-    }
-    for (entity, ids) in &expect.node_ids {
-        view.assert_node_ids(entity, ids);
-    }
-    for (entity, rows) in &expect.nodes {
-        for row in rows {
+    for (entity, ne) in &expect.nodes {
+        if let Some(order) = &ne.order {
+            view.assert_node_order(entity, order);
+        } else if let Some(ids) = &ne.ids {
+            view.assert_node_ids(entity, ids);
+        }
+        if let Some(count) = ne.count {
+            assert_eq!(
+                view.nodes_of_type(entity).len(),
+                count,
+                "{label}: {entity} count mismatch"
+            );
+        }
+        for row in &ne.rows {
             let id = row
                 .get("id")
                 .and_then(|v| v.as_i64())
@@ -236,32 +242,13 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
                 if prop == "id" {
                     continue;
                 }
-                match expected {
-                    serde_json::Value::String(s) => found.assert_str(prop, s),
-                    serde_json::Value::Number(n) if n.is_i64() => {
-                        found.assert_i64(prop, n.as_i64().unwrap());
-                    }
-                    serde_json::Value::Bool(b) => {
-                        assert_eq!(
-                            found.prop_bool(prop),
-                            Some(*b),
-                            "{label}: {entity}/{id}.{prop} expected {b}",
-                        );
-                    }
-                    serde_json::Value::Null => {
-                        assert!(
-                            !found.has_prop(prop),
-                            "{label}: {entity}/{id}.{prop} expected null but has value",
-                        );
-                    }
-                    _ => panic!("{label}: unsupported property value type for {prop}"),
-                }
+                assert_property(found, prop, expected, entity, id, label);
             }
         }
-    }
-    for (entity, ids) in &expect.node_absent {
-        for id in ids {
-            view.assert_node_absent(entity, *id);
+        if let Some(absent) = &ne.absent {
+            for id in absent {
+                view.assert_node_absent(entity, *id);
+            }
         }
     }
     for (kind, tuples) in &expect.edges {
@@ -285,6 +272,36 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
             expected,
             "{label}: has_more mismatch"
         );
+    }
+}
+
+fn assert_property(
+    node: &dyn NodeExt,
+    prop: &str,
+    expected: &serde_json::Value,
+    entity: &str,
+    id: i64,
+    label: &str,
+) {
+    match expected {
+        serde_json::Value::String(s) => node.assert_str(prop, s),
+        serde_json::Value::Number(n) if n.is_i64() => {
+            node.assert_i64(prop, n.as_i64().unwrap());
+        }
+        serde_json::Value::Bool(b) => {
+            assert_eq!(
+                node.prop_bool(prop),
+                Some(*b),
+                "{label}: {entity}/{id}.{prop} expected {b}",
+            );
+        }
+        serde_json::Value::Null => {
+            assert!(
+                !node.has_prop(prop),
+                "{label}: {entity}/{id}.{prop} expected null but has value",
+            );
+        }
+        _ => panic!("{label}: unsupported property value type for {prop}"),
     }
 }
 

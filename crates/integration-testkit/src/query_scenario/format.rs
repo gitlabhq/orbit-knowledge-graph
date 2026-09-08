@@ -46,14 +46,7 @@ pub struct QueryExpect {
     #[serde(default)]
     pub node_count: Option<usize>,
     #[serde(default)]
-    pub node_order: BTreeMap<String, Vec<i64>>,
-    #[serde(default)]
-    pub node_ids: BTreeMap<String, Vec<i64>>,
-    /// `nodes: { Entity: [{ id: 1, prop: val }] }`
-    #[serde(default)]
-    pub nodes: BTreeMap<String, Vec<BTreeMap<String, serde_json::Value>>>,
-    #[serde(default)]
-    pub node_absent: BTreeMap<String, Vec<i64>>,
+    pub nodes: BTreeMap<String, NodeExpect>,
     #[serde(default)]
     pub edges: BTreeMap<String, Vec<[i64; 2]>>,
     #[serde(default)]
@@ -64,6 +57,21 @@ pub struct QueryExpect {
     pub has_more: Option<bool>,
     #[serde(default)]
     pub skip_requirements: Vec<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NodeExpect {
+    #[serde(default)]
+    pub count: Option<usize>,
+    #[serde(default)]
+    pub order: Option<Vec<i64>>,
+    #[serde(default)]
+    pub ids: Option<Vec<i64>>,
+    #[serde(default)]
+    pub absent: Option<Vec<i64>>,
+    #[serde(default)]
+    pub rows: Vec<BTreeMap<String, serde_json::Value>>,
 }
 
 #[derive(Debug, Deserialize)]

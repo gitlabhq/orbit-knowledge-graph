@@ -11,8 +11,7 @@ redaction:
   allow:
     user: [1, 3]
 expect:
-  node_count: 2
-  node_ids:
-    User: [1, 3]
-  node_absent:
-    User: [2, 5]
+  nodes:
+    User:
+      ids: [1, 3]
+      absent: [2, 5]

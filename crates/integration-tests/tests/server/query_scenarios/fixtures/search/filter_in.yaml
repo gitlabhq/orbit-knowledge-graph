@@ -9,6 +9,6 @@ query:
       "limit": 10
     }
 expect:
-  node_count: 4
-  node_ids:
-    Project: [1000, 1002, 1004, 1010]
+  nodes:
+    Project:
+      ids: [1000, 1002, 1004, 1010]

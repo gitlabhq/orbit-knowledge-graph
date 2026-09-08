@@ -9,7 +9,8 @@ query:
       "limit": 10
     }
 expect:
-  node_count: 1
   nodes:
     User:
-      - { id: 5, username: eve, state: blocked }
+      count: 1
+      rows:
+        - { id: 5, username: eve, state: blocked }

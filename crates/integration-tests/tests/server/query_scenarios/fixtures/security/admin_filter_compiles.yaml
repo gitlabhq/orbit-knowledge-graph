@@ -11,7 +11,8 @@ query:
       "limit": 10
     }
 expect:
-  node_count: 1
   nodes:
     User:
-      - { id: 1, username: alice }
+      count: 1
+      rows:
+        - { id: 1, username: alice }
