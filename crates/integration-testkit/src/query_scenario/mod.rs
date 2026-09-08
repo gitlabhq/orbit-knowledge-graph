@@ -8,7 +8,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use query_engine::compiler::{
-    AccessLevel, AuthorizedPath, CompiledQueryContext, Frontend, SecurityContext,
+    AccessLevel, AuthorizedPath, CompiledQueryContext, QueryLanguage, SecurityContext,
+    compile_query,
 };
 use query_engine::formatters::{GraphFormatter, ResultFormatter};
 use query_engine::pipeline::{NoOpObserver, PipelineStage, QueryPipelineContext, TypeMap};
@@ -84,14 +85,14 @@ async fn run_scenario(ctx: &TestContext, file: &Path, name: &str) {
     let redaction = build_redaction(&scenario.redaction);
 
     for (frontend_key, query_str) in &scenario.query {
-        let Some(frontend) = Frontend::from_name(frontend_key) else {
-            eprintln!("    {name}: skipping unregistered frontend '{frontend_key}'");
+        let Some(language) = QueryLanguage::from_name(frontend_key) else {
+            eprintln!("    {name}: skipping unknown query language '{frontend_key}'");
             continue;
         };
         let label = format!("{name} [{frontend_key}]");
         run_frontend(
             ctx,
-            frontend,
+            language,
             query_str,
             &security,
             &redaction,
@@ -104,7 +105,7 @@ async fn run_scenario(ctx: &TestContext, file: &Path, name: &str) {
 
 async fn run_frontend(
     ctx: &TestContext,
-    frontend: Frontend,
+    language: QueryLanguage,
     query: &str,
     security: &SecurityContext,
     redaction: &MockRedactionService,
@@ -113,7 +114,7 @@ async fn run_frontend(
 ) {
     let ontology = Arc::new(load_ontology());
 
-    let compiled = match frontend.compile(query, &ontology, security) {
+    let compiled = match compile_query(query, language, &ontology, security) {
         Ok(c) => {
             assert!(
                 expect.compile_error.is_none(),
