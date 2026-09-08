@@ -37,12 +37,7 @@ impl OntologyCatalog {
             ontology::migrations::sha256_hex(graph_database)
         );
         client
-            .ensure_kv_bucket_exists(
-                &bucket,
-                KvBucketConfig {
-                    replicas: Some(client.config().stream_replicas),
-                },
-            )
+            .ensure_kv_bucket_exists(&bucket, KvBucketConfig::default())
             .await?;
         Ok(Self { client, bucket })
     }

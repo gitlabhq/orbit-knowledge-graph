@@ -199,3 +199,113 @@ fn append_file<W: Write>(
     builder.append_data(&mut header, Path::new(ARCHIVE_ROOT).join(path), content)?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use std::io::Write;
+
+    use flate2::{Compression, write::GzEncoder};
+    use orbit_utils::fs_stream::StreamError;
+
+    use super::{ArchiveError, OntologyArchive};
+    use crate::Ontology;
+    use crate::migrations::{embedded_sources, source_fingerprints};
+
+    const SCHEMA_VERSION: u32 = 42;
+
+    #[test]
+    fn identical_sources_produce_identical_archive_bytes() {
+        assert_eq!(embedded_archive().bytes(), embedded_archive().bytes());
+    }
+
+    #[test]
+    fn retained_archives_reproduce_the_complete_ontology() {
+        let archive = embedded_archive();
+        let directory = tempfile::tempdir().unwrap();
+        let archive_path = OntologyArchive::path(directory.path(), SCHEMA_VERSION);
+
+        archive.write_atomic(&archive_path).unwrap();
+        let saved_bytes = std::fs::read(archive_path).unwrap();
+        let restored = OntologyArchive::from_bytes(SCHEMA_VERSION, &saved_bytes).unwrap();
+
+        assert_eq!(restored.bytes(), archive.bytes());
+        assert_eq!(restored.schema_version(), SCHEMA_VERSION);
+        assert_eq!(restored.source_fingerprints(), source_fingerprints());
+        assert_eq!(
+            restored.load_ontology().unwrap(),
+            Ontology::load_embedded().unwrap()
+        );
+    }
+
+    #[test]
+    fn an_incomplete_archive_never_uses_embedded_files() {
+        let archive = archive_missing_a_node();
+
+        assert!(archive.load_ontology().is_err());
+    }
+
+    #[test]
+    fn an_archive_cannot_be_loaded_as_another_schema_version() {
+        let archive = embedded_archive();
+
+        assert!(matches!(
+            OntologyArchive::from_bytes(SCHEMA_VERSION + 1, archive.bytes()),
+            Err(ArchiveError::Version { expected, actual })
+                if expected == SCHEMA_VERSION + 1 && actual == SCHEMA_VERSION
+        ));
+    }
+
+    #[test]
+    fn truncated_archives_are_rejected() {
+        let archive = embedded_archive();
+        let truncated = &archive.bytes()[..archive.bytes().len() / 2];
+
+        assert!(OntologyArchive::from_bytes(SCHEMA_VERSION, truncated).is_err());
+    }
+
+    #[test]
+    fn oversized_files_are_rejected_before_their_contents_are_read() {
+        const OVERSIZED_SOURCE_BYTES: u64 = 32 * 1024 * 1024;
+        let bytes = archive_with_header_only("ontology/schema.yaml", OVERSIZED_SOURCE_BYTES);
+
+        assert!(matches!(
+            OntologyArchive::from_bytes(SCHEMA_VERSION, &bytes),
+            Err(ArchiveError::Extraction(StreamError::Cap(_)))
+        ));
+    }
+
+    #[test]
+    fn archives_cannot_traverse_outside_the_extraction_directory() {
+        let bytes = archive_with_header_only("ontology/../schema.yaml", 0);
+
+        let error = OntologyArchive::from_bytes(SCHEMA_VERSION, &bytes).unwrap_err();
+
+        assert!(error.to_string().contains("path traversal"), "{error}");
+    }
+
+    fn embedded_archive() -> OntologyArchive {
+        OntologyArchive::from_sources(SCHEMA_VERSION, &embedded_sources()).unwrap()
+    }
+
+    fn archive_missing_a_node() -> OntologyArchive {
+        let mut sources = embedded_sources();
+        let missing_node = sources
+            .keys()
+            .find(|path| path.starts_with("nodes/"))
+            .unwrap()
+            .clone();
+        sources.remove(&missing_node);
+        OntologyArchive::from_sources(SCHEMA_VERSION, &sources).unwrap()
+    }
+
+    fn archive_with_header_only(path: &str, declared_size: u64) -> Vec<u8> {
+        let mut header = tar::Header::new_gnu();
+        header.as_mut_bytes()[..path.len()].copy_from_slice(path.as_bytes());
+        header.set_size(declared_size);
+        header.set_cksum();
+
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(header.as_bytes()).unwrap();
+        encoder.finish().unwrap()
+    }
+}
