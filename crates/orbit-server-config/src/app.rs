@@ -16,6 +16,7 @@ use crate::grpc::GrpcConfig;
 use crate::health_check::HealthCheckConfig;
 use crate::metrics::MetricsConfig;
 use crate::nats::NatsConfiguration;
+use crate::object_storage::ObjectStorageConfig;
 use crate::query::{PathResolverConfig, QuerySettings};
 use crate::schema::SchemaConfig;
 use crate::secret_file_source::SecretFileSource;
@@ -90,6 +91,9 @@ pub struct AppConfig {
     pub billing: BillingConfig,
     #[serde(default)]
     pub features: FeaturesConfig,
+    /// Absent means Orbit opens no object store.
+    #[serde(default)]
+    pub object_storage: Option<ObjectStorageConfig>,
 }
 
 impl AppConfig {
@@ -98,8 +102,13 @@ impl AppConfig {
     }
 
     fn load_with_secret_dir(secret_dir: &str) -> Result<Self, ConfigError> {
+        Self::load_from_sources("config/default", secret_dir)
+    }
+
+    /// Same three layers as [`AppConfig::load`] with an explicit config file and secret directory.
+    pub fn load_from_sources(config_path: &str, secret_dir: &str) -> Result<Self, ConfigError> {
         let config = config::Config::builder()
-            .add_source(config::File::with_name("config/default").required(false))
+            .add_source(config::File::with_name(config_path).required(false))
             .add_source(SecretFileSource::new(secret_dir))
             .add_source(
                 config::Environment::with_prefix("GKG")

@@ -222,6 +222,18 @@
         "username": null
       }
     },
+    "object_storage": {
+      "description": "Absent means Orbit opens no object store.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ObjectStorageConfig"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
     "path_resolver": {
       "$ref": "#/$defs/PathResolverConfig",
       "default": {
@@ -800,6 +812,55 @@
         "$ref": "#/$defs/FeatureScope"
       }
     },
+    "GcsAuth": {
+      "oneOf": [
+        {
+          "description": "Credentials come from the runtime: GKE Workload Identity / GCE metadata\nserver, or an Application Default Credentials file.",
+          "type": "string",
+          "const": "identity"
+        },
+        {
+          "description": "Service account JSON key from a file or inline.",
+          "type": "string",
+          "const": "service_account_key"
+        }
+      ]
+    },
+    "GcsConfig": {
+      "description": "Settings read when `provider` is `gcs`.",
+      "type": "object",
+      "properties": {
+        "auth": {
+          "$ref": "#/$defs/GcsAuth",
+          "default": "identity"
+        },
+        "endpoint": {
+          "description": "Alternative API base URL, for emulators or private endpoints.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "service_account_key": {
+          "description": "Service account JSON key content.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "service_account_key_path": {
+          "description": "Path to a service account JSON key file.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false
+    },
     "GitlabConfig": {
       "type": "object",
       "properties": {
@@ -1277,6 +1338,151 @@
         "url"
       ]
     },
+    "ObjectStorageConfig": {
+      "type": "object",
+      "properties": {
+        "bucket": {
+          "type": "string"
+        },
+        "gcs": {
+          "$ref": "#/$defs/GcsConfig",
+          "default": {
+            "auth": "identity",
+            "endpoint": null,
+            "service_account_key": null,
+            "service_account_key_path": null
+          }
+        },
+        "http": {
+          "$ref": "#/$defs/ObjectStorageHttpConfig",
+          "default": {
+            "connect_timeout_secs": 5,
+            "request_timeout_secs": 30
+          }
+        },
+        "prefix": {
+          "description": "Key prefix inside the bucket; every path Orbit reads or writes is placed under it.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "provider": {
+          "$ref": "#/$defs/ObjectStorageProvider"
+        },
+        "retry": {
+          "$ref": "#/$defs/ObjectStorageRetryConfig",
+          "default": {
+            "max_backoff_secs": 15,
+            "max_retries": 10,
+            "retry_timeout_secs": 180
+          }
+        },
+        "s3": {
+          "$ref": "#/$defs/S3Config",
+          "default": {
+            "access_key_id": null,
+            "auth": "identity",
+            "endpoint": null,
+            "path_style": false,
+            "region": null,
+            "secret_access_key": null,
+            "session_token": null,
+            "sse_kms_key_id": null
+          }
+        },
+        "tls": {
+          "$ref": "#/$defs/ObjectStorageTlsConfig",
+          "default": {
+            "allow_http": false,
+            "ca_cert_path": null
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "provider",
+        "bucket"
+      ]
+    },
+    "ObjectStorageHttpConfig": {
+      "type": "object",
+      "properties": {
+        "connect_timeout_secs": {
+          "type": "integer",
+          "format": "uint64",
+          "default": 5,
+          "minimum": 0
+        },
+        "request_timeout_secs": {
+          "description": "Per-request timeout; covers a single HTTP round trip, not a whole multipart upload.",
+          "type": "integer",
+          "format": "uint64",
+          "default": 30,
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "ObjectStorageProvider": {
+      "oneOf": [
+        {
+          "description": "AWS S3 or any S3-compatible store (MinIO, Ceph RGW, Hetzner, ...).",
+          "type": "string",
+          "const": "s3"
+        },
+        {
+          "description": "Google Cloud Storage.",
+          "type": "string",
+          "const": "gcs"
+        }
+      ]
+    },
+    "ObjectStorageRetryConfig": {
+      "type": "object",
+      "properties": {
+        "max_backoff_secs": {
+          "type": "integer",
+          "format": "uint64",
+          "default": 15,
+          "minimum": 0
+        },
+        "max_retries": {
+          "type": "integer",
+          "format": "uint",
+          "default": 10,
+          "minimum": 0
+        },
+        "retry_timeout_secs": {
+          "description": "Total time budget for one operation including retries.",
+          "type": "integer",
+          "format": "uint64",
+          "default": 180,
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "ObjectStorageTlsConfig": {
+      "type": "object",
+      "properties": {
+        "allow_http": {
+          "description": "Permit `http://` endpoints. Local development only.",
+          "type": "boolean",
+          "default": false
+        },
+        "ca_cert_path": {
+          "description": "PEM bundle of extra root certificates, for stores behind a private CA.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false
+    },
     "OtelConfig": {
       "type": "object",
       "properties": {
@@ -1524,6 +1730,81 @@
           "format": "uint64",
           "default": 1000,
           "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "S3Auth": {
+      "oneOf": [
+        {
+          "description": "Credentials come from the runtime: IRSA / EKS Pod Identity, ECS task role,\nEC2 instance profile, or `AWS_*` environment variables.",
+          "type": "string",
+          "const": "identity"
+        },
+        {
+          "description": "Access key pair from config, secret files, or environment.",
+          "type": "string",
+          "const": "static"
+        }
+      ]
+    },
+    "S3Config": {
+      "description": "Settings read when `provider` is `s3`.",
+      "type": "object",
+      "properties": {
+        "access_key_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "auth": {
+          "$ref": "#/$defs/S3Auth",
+          "default": "identity"
+        },
+        "endpoint": {
+          "description": "Only for S3-compatible stores; leave unset for AWS S3.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "path_style": {
+          "description": "Address the bucket as `endpoint/bucket/key` instead of `bucket.endpoint/key`.",
+          "type": "boolean",
+          "default": false
+        },
+        "region": {
+          "description": "Required for AWS S3. Optional for S3-compatible stores, which mostly ignore the signing region.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "secret_access_key": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "session_token": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "sse_kms_key_id": {
+          "description": "KMS key for SSE-KMS on writes. Unset keeps the bucket default encryption.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
         }
       },
       "additionalProperties": false

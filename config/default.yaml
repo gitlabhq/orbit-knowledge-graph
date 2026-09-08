@@ -64,6 +64,21 @@ graph:
 #   cert_path: "/path/to/cert.pem"
 #   key_path: "/path/to/key.pem"
 
+# object_storage:
+#   provider: gcs              # s3 | gcs
+#   bucket: ""
+#   prefix: orbit
+#   s3:
+#     region: ""               # required for AWS S3 when endpoint is unset
+#     endpoint: null           # S3-compatible stores only, without the bucket host
+#     path_style: false
+#     auth: identity           # identity | static (keys from /etc/secrets/object_storage/s3/)
+#   gcs:
+#     auth: identity           # identity | service_account_key (key from /etc/secrets/object_storage/gcs/)
+#   tls:
+#     ca_cert_path: null
+#     allow_http: false
+
 engine:
   handlers:
     entity-handler:
