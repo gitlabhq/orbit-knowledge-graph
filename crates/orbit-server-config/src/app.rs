@@ -1,6 +1,7 @@
 //! Top-level application configuration.
 
 use std::net::SocketAddr;
+use std::path::Path;
 use std::sync::Arc;
 
 use schemars::JsonSchema;
@@ -22,6 +23,8 @@ use crate::secret_file_source::SecretFileSource;
 use crate::tls::TlsConfig;
 
 pub const SECRET_FILE_DIR: &str = "/etc/secrets";
+pub const DEFAULT_CONFIG_FILE: &str = "config/default";
+pub const OVERLAY_CONFIG_FILE: &str = "config/config";
 
 fn default_bind_address() -> SocketAddr {
     "127.0.0.1:4200".parse().unwrap()
@@ -93,13 +96,21 @@ pub struct AppConfig {
 }
 
 impl AppConfig {
-    pub fn load() -> Result<Self, ConfigError> {
-        Self::load_with_secret_dir(SECRET_FILE_DIR)
+    /// Layers, lowest to highest priority: `config/default.yaml`, the overlay
+    /// (`--config <path>`, else `config/config.yaml` when present), secret
+    /// files, `GKG_*` environment variables.
+    pub fn load(overlay: Option<&Path>) -> Result<Self, ConfigError> {
+        Self::load_from(overlay, Path::new(SECRET_FILE_DIR))
     }
 
-    fn load_with_secret_dir(secret_dir: &str) -> Result<Self, ConfigError> {
+    fn load_from(overlay: Option<&Path>, secret_dir: &Path) -> Result<Self, ConfigError> {
+        let overlay_file = match overlay {
+            Some(path) => config::File::from(path.to_path_buf()).required(true),
+            None => config::File::with_name(OVERLAY_CONFIG_FILE).required(false),
+        };
         let config = config::Config::builder()
-            .add_source(config::File::with_name("config/default").required(false))
+            .add_source(config::File::with_name(DEFAULT_CONFIG_FILE).required(false))
+            .add_source(overlay_file)
             .add_source(SecretFileSource::new(secret_dir))
             .add_source(
                 config::Environment::with_prefix("GKG")
@@ -146,6 +157,62 @@ pub enum ConfigError {
 mod tests {
     use super::*;
     use crate::engine::EngineConfiguration;
+
+    const OVERLAY_BASE: &str = r#"
+nats:
+  url: "nats://overlay:4222"
+datalake:
+  url: "http://127.0.0.1:8123"
+  database: "overlay-datalake"
+  username: "default"
+graph:
+  url: "http://127.0.0.1:8123"
+  database: "overlay-graph"
+  username: "default"
+  password: "overlay-password"
+gitlab:
+  jwt:
+    verifying_key: "overlay-secret-at-least-32-bytes-long"
+"#;
+
+    #[test]
+    fn explicit_overlay_file_overrides_defaults() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let overlay = dir.path().join("custom.yaml");
+        std::fs::write(&overlay, OVERLAY_BASE).unwrap();
+        let secrets = dir.path().join("secrets");
+        std::fs::create_dir(&secrets).unwrap();
+
+        let config = AppConfig::load_from(Some(&overlay), &secrets).unwrap();
+
+        assert_eq!(config.nats.url, "nats://overlay:4222");
+        assert_eq!(config.graph.database, "overlay-graph");
+        assert_eq!(config.datalake.database, "overlay-datalake");
+    }
+
+    #[test]
+    fn explicit_overlay_file_must_exist() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let missing = dir.path().join("missing.yaml");
+
+        let err = AppConfig::load_from(Some(&missing), dir.path()).unwrap_err();
+
+        assert!(matches!(err, ConfigError::Config(_)), "{err}");
+    }
+
+    #[test]
+    fn secret_files_override_overlay_values() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let overlay = dir.path().join("custom.yaml");
+        std::fs::write(&overlay, OVERLAY_BASE).unwrap();
+        let secrets = dir.path().join("secrets");
+        std::fs::create_dir_all(secrets.join("graph")).unwrap();
+        std::fs::write(secrets.join("graph/password"), "secret-password").unwrap();
+
+        let config = AppConfig::load_from(Some(&overlay), &secrets).unwrap();
+
+        assert_eq!(config.graph.password.as_deref(), Some("secret-password"));
+    }
 
     #[test]
     fn engine_config_deserializes_from_kebab_case_yaml() {
@@ -411,7 +478,7 @@ handlers:
     #[ignore]
     fn subprocess_env_config_loader() {
         let dir = tempfile::TempDir::new().unwrap();
-        let config = match AppConfig::load_with_secret_dir(dir.path().to_str().unwrap()) {
+        let config = match AppConfig::load_from(None, dir.path()) {
             Ok(c) => c,
             Err(e) => {
                 println!("{}", serde_json::json!({"error": e.to_string()}));

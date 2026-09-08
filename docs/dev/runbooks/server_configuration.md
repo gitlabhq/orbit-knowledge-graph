@@ -6,9 +6,20 @@ Reference for all configurable knobs in the GKG server. All four modes (Webserve
 
 Config is loaded in layers, each overriding the previous:
 
-1. **Configuration file**: Example `config/default.yaml`
-2. **Secrets**: Files in `/etc/secrets/` (Kubernetes secret mounts)
-3. **Environment variables**: Prefixed with `GKG_`, using `__` as a separator for nested keys and `,` for lists
+1. **Base configuration file**: `config/default.yaml`
+2. **Overlay file**: the path given with `--config <path>`, otherwise `config/config.yaml` when it exists.
+   An explicit `--config` path must exist; the default overlay is optional and Git ignores it.
+3. **Secrets**: Files in `/etc/secrets/` (Kubernetes secret mounts)
+4. **Environment variables**: Prefixed with `GKG_`, using `__` as a separator for nested keys and `,` for lists
+
+Overlay example for local development (`config/config.yaml`):
+
+```yaml
+graph:
+  database: "gkg-development"
+gitlab:
+  base_url: "http://gdk.test:3000"
+```
 
 Environment variable examples:
 

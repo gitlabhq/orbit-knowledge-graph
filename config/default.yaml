@@ -1,4 +1,5 @@
 # Local-development defaults, loaded automatically at startup (required: false).
+# Local overrides go in config/config.yaml (Git-ignored) or a file passed with --config.
 # Production values come from Helm chart values, GKG_* env vars, and /etc/secrets/ mounts.
 #
 # Do not rename this file. The filename "default" is a deploy contract: the Helm chart
