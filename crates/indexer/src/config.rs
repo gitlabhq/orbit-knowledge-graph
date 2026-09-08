@@ -105,6 +105,9 @@ pub struct DispatcherConfig {
 
 #[derive(Debug, Error)]
 pub enum DispatcherError {
+    #[error("ontology archive publication failed: {0}")]
+    Archive(#[from] orbit_migrations::catalog::CatalogError),
+
     #[error("scheduler error: {0}")]
     Scheduler(#[from] crate::orchestrator::scheduled::SchedulerError),
 

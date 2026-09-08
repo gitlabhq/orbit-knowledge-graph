@@ -48,4 +48,6 @@ pub struct KvEntry {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct KvBucketConfig {}
+pub struct KvBucketConfig {
+    pub replicas: Option<usize>,
+}

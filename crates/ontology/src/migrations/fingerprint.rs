@@ -62,18 +62,22 @@ impl Fingerprints {
 
 #[must_use]
 pub fn source_fingerprints() -> BTreeMap<String, String> {
-    crate::loading::embedded_files()
-        .into_iter()
+    source_fingerprints_from(&embedded_sources())
+}
+
+pub fn source_fingerprints_from(sources: &BTreeMap<String, String>) -> BTreeMap<String, String> {
+    sources
+        .iter()
         .filter(|(path, _)| !path.starts_with("sql/"))
         .map(|(path, content)| {
             let hash = if path == ONTOLOGY_SCHEMA_FILE {
-                stable_versioned_schema_hash(&content)
+                stable_versioned_schema_hash(content)
             } else if path.ends_with(".yaml") || path.ends_with(".yml") {
-                stable_yaml_hash(&content)
+                stable_yaml_hash(content)
             } else {
-                sha256_hex(&content)
+                sha256_hex(content)
             };
-            (path, hash)
+            (path.clone(), hash)
         })
         .collect()
 }

@@ -36,7 +36,10 @@ NATS JetStream → Engine → Handler Registry → ClickHouse
 
 ### Schema migration
 
-The **dispatcher** owns schema migration. At boot, `schema::migration::run_if_needed()` compares
+The **dispatcher** publishes its ontology archive to durable NATS KV before migration.
+See `docs/design-documents/schema_management.md` for archive retention and recovery.
+
+The dispatcher owns schema migration. At boot, `schema::migration::run_if_needed()` compares
 the embedded `SCHEMA_VERSION` with the active version in ClickHouse. On a mismatch, it acquires a
 NATS KV distributed lock and reads the requested scope from the migration ledger. A table-local
 SDLC change rebuilds the affected table and clones unaffected tables from the active version. If an

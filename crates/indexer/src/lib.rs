@@ -244,12 +244,20 @@ pub async fn run(
 pub async fn run_dispatcher(
     config: &DispatcherConfig,
     ontology: &ontology::Ontology,
+    archive: &ontology::archive::OntologyArchive,
     shutdown: CancellationToken,
 ) -> Result<(), DispatcherError> {
     let services = orchestrator::scheduled::connect(&config.nats).await?;
 
+    let catalog = orbit_migrations::catalog::OntologyCatalog::open(
+        services.nats_client.clone(),
+        &config.graph.database,
+    )
+    .await?;
+    catalog.publish(archive).await?;
+
     if let Err(error) = nats::versioning::gc_idle_release_streams(
-        &services.nats_client,
+        &services.nats_connection,
         config.nats.release_gc_idle_threshold(),
     )
     .await
@@ -401,7 +409,7 @@ pub async fn run_dispatcher(
             config.schedule.tasks.migration_completion.clone(),
             metrics.clone(),
             campaign.clone(),
-            services.nats_client.clone(),
+            services.nats_connection.clone(),
         )),
     ];
 
@@ -425,7 +433,7 @@ pub async fn run_dispatcher(
         campaign.clone(),
         routes,
     );
-    let max_deliveries_reconciler = MaxDeliveriesReconciler::new(services.nats_client.clone());
+    let max_deliveries_reconciler = MaxDeliveriesReconciler::new(services.nats_connection.clone());
     let triggers: Vec<Box<dyn Trigger>> = vec![
         Box::new(scheduled),
         Box::new(siphon),

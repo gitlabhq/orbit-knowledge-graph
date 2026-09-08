@@ -197,10 +197,14 @@ impl NatsClient {
     async fn create_or_update_kv_bucket(
         &self,
         bucket: &str,
-        _config: &KvBucketConfig,
+        config: &KvBucketConfig,
     ) -> Result<KvStore, NatsError> {
         let kv_config = async_nats::jetstream::kv::Config {
             bucket: bucket.to_string(),
+            num_replicas: config.replicas.unwrap_or_default(),
+            storage: async_nats::jetstream::stream::StorageType::File,
+            history: 1,
+            max_age: Duration::ZERO,
             ..Default::default()
         };
 

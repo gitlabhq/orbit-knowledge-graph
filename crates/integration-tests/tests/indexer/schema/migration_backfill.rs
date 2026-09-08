@@ -327,7 +327,7 @@ async fn migration_completion_checker_promotes_rebuilt_rollback_version() {
         orbit_server_config::MigrationCompletionConfig::default(),
         ScheduledTaskMetrics::new(),
         std::sync::Arc::new(indexer::campaign::CampaignState::new()),
-        services.nats_client.clone(),
+        services.nats_connection.clone(),
     );
 
     checker.run().await.unwrap();
@@ -403,7 +403,7 @@ async fn migration_completion_checker_promotes_when_no_namespaces_are_enabled() 
         orbit_server_config::MigrationCompletionConfig::default(),
         ScheduledTaskMetrics::new(),
         std::sync::Arc::new(indexer::campaign::CampaignState::new()),
-        services.nats_client.clone(),
+        services.nats_connection.clone(),
     );
 
     checker.run().await.unwrap();
@@ -470,7 +470,7 @@ async fn migration_completion_checker_does_not_promote_version_it_does_not_embed
         orbit_server_config::MigrationCompletionConfig::default(),
         ScheduledTaskMetrics::new(),
         std::sync::Arc::new(indexer::campaign::CampaignState::new()),
-        services.nats_client.clone(),
+        services.nats_connection.clone(),
     );
 
     checker.run().await.unwrap();
@@ -538,7 +538,7 @@ async fn migration_completion_checker_guards_against_two_migrating_versions() {
         orbit_server_config::MigrationCompletionConfig::default(),
         ScheduledTaskMetrics::new(),
         std::sync::Arc::new(indexer::campaign::CampaignState::new()),
-        services.nats_client.clone(),
+        services.nats_connection.clone(),
     );
 
     checker.run().await.unwrap();

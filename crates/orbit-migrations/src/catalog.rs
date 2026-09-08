@@ -1,0 +1,90 @@
+use std::sync::Arc;
+
+use bytes::Bytes;
+use nats_client::{KvBucketConfig, KvPutOptions, KvPutResult, NatsClient};
+use ontology::archive::{ArchiveError, OntologyArchive};
+
+#[derive(Debug, thiserror::Error)]
+pub enum CatalogError {
+    #[error(transparent)]
+    Nats(#[from] nats_client::NatsError),
+    #[error(transparent)]
+    Archive(#[from] ArchiveError),
+    #[error(
+        "ontology archive v{0} is missing; seed the catalog from the exact deployed release before upgrading"
+    )]
+    Missing(u32),
+    #[error("ontology archive v{0} conflicts with the published archive; use a new schema version")]
+    Conflict(u32),
+    #[error(
+        "ontology archive contains {size} bytes, exceeding NATS payload limit {limit}; archive publication aborted"
+    )]
+    TooLarge { size: usize, limit: usize },
+    #[error("unexpected revision mismatch publishing ontology archive")]
+    RevisionMismatch,
+}
+
+#[derive(Clone)]
+pub struct OntologyCatalog {
+    client: Arc<NatsClient>,
+    bucket: String,
+}
+
+impl OntologyCatalog {
+    pub async fn open(client: Arc<NatsClient>, graph_database: &str) -> Result<Self, CatalogError> {
+        let bucket = format!(
+            "ontology_archives_{}",
+            ontology::migrations::sha256_hex(graph_database)
+        );
+        client
+            .ensure_kv_bucket_exists(
+                &bucket,
+                KvBucketConfig {
+                    replicas: Some(client.config().stream_replicas),
+                },
+            )
+            .await?;
+        Ok(Self { client, bucket })
+    }
+
+    pub async fn publish(&self, archive: &OntologyArchive) -> Result<(), CatalogError> {
+        archive.load_ontology()?;
+        let limit = self.client.nats_client().max_payload();
+        if archive.bytes().len() > limit {
+            return Err(CatalogError::TooLarge {
+                size: archive.bytes().len(),
+                limit,
+            });
+        }
+        let version = archive.schema_version();
+        let result = self
+            .client
+            .kv_put(
+                &self.bucket,
+                &version.to_string(),
+                Bytes::copy_from_slice(archive.bytes()),
+                KvPutOptions::create_only(),
+            )
+            .await?;
+        match result {
+            KvPutResult::Success(_) => Ok(()),
+            KvPutResult::AlreadyExists => {
+                let stored = self.load(version).await?;
+                if stored.bytes() != archive.bytes() {
+                    return Err(CatalogError::Conflict(version));
+                }
+                Ok(())
+            }
+            KvPutResult::RevisionMismatch => Err(CatalogError::RevisionMismatch),
+        }
+    }
+
+    pub async fn load(&self, version: u32) -> Result<OntologyArchive, CatalogError> {
+        let entry = self
+            .client
+            .kv_get(&self.bucket, &version.to_string())
+            .await?
+            .ok_or(CatalogError::Missing(version))?;
+        Ok(OntologyArchive::from_bytes(version, &entry.value)?)
+    }
+}

@@ -8,6 +8,7 @@ use std::process::Command;
 
 use anyhow::{Context, Result, anyhow, bail};
 use ontology::Ontology;
+use ontology::archive::OntologyArchive;
 use ontology::migrations::{
     self, Fingerprints, LedgerScope, MigrationEntry, MigrationLedger, MigrationScope, derive_scope,
 };
@@ -173,7 +174,32 @@ pub fn check(base: Option<String>) -> Result<()> {
     migrations::verify_snapshot(&ontology, &current, &committed, &ledger, schema_version)
         .map_err(|e| anyhow!(e))?;
 
+    let archive_path = OntologyArchive::path(&config_dir(), schema_version);
+    let archive = OntologyArchive::from_bytes(schema_version, &fs::read(&archive_path)?)?;
+    if archive.source_fingerprints() != current.sources {
+        bail!("ontology archive is stale. {REMEDIATION}");
+    }
+
     if let Some(base) = base {
+        let output = Command::new("git")
+            .args([
+                "diff",
+                "--name-only",
+                "--diff-filter=DMRT",
+                &base,
+                "--",
+                "config/ontology-archives",
+            ])
+            .output()?;
+        if !output.status.success() {
+            bail!("could not compare historical archives against {base}");
+        }
+        if !output.stdout.is_empty() {
+            bail!(
+                "published ontology archives must not be modified or deleted: {}",
+                String::from_utf8_lossy(&output.stdout)
+            );
+        }
         check_under_declaration(&ontology, &committed, &ledger, schema_version, &base)?;
     }
 
@@ -353,6 +379,20 @@ pub fn bump(
         .validate(&ontology, final_version)
         .map_err(|e| anyhow!(e))?;
 
+    let archive_path = OntologyArchive::path(&config_dir(), final_version);
+    let archive_repo_path = format!("config/ontology-archives/v{final_version}.tar.gz");
+    let published = Command::new("git")
+        .args(["cat-file", "-e", &format!("{base_ref}:{archive_repo_path}")])
+        .output()?;
+    if published.status.success() {
+        bail!(
+            "ontology archive v{final_version} is already published; create a new schema version"
+        );
+    }
+    let archive = OntologyArchive::from_sources(final_version, &source_contents)?;
+    archive.load_ontology()?;
+    archive.write_atomic(&archive_path)?;
+
     if is_new {
         write_schema_version(final_version)?;
     }
@@ -385,6 +425,12 @@ pub fn snapshot() -> Result<()> {
             format_set(&changed_tables),
         );
     }
+    let version = orbit_versions::VERSIONS.schema;
+    let archive_path = OntologyArchive::path(&config_dir(), version);
+    if !archive_path.exists() {
+        OntologyArchive::from_sources(version, &migrations::embedded_sources())?
+            .write_atomic(&archive_path)?;
+    }
     fs::write(fingerprint_path(), current.render()).context("writing fingerprint snapshot")?;
     println!(
         "regenerated fingerprint snapshot at {}",
@@ -406,6 +452,8 @@ fn write_initial_snapshot(ontology: &Ontology, current: &Fingerprints) -> Result
     let version = orbit_versions::VERSIONS.schema;
     let ledger = read_ledger()?;
     ledger.validate(ontology, version).map_err(|e| anyhow!(e))?;
+    OntologyArchive::from_sources(version, &migrations::embedded_sources())?
+        .write_atomic(&OntologyArchive::path(&config_dir(), version))?;
     fs::write(fingerprint_path(), current.render()).context("writing fingerprint snapshot")?;
     println!("wrote initial fingerprint snapshot for version {version}");
     Ok(())

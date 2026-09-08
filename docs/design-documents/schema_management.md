@@ -121,6 +121,15 @@ Version 0 uses no prefix for backward compatibility. Functions `table_prefix(ver
 Unprefixed names are stored in the ontology (the ontology validation enforces the `gl_` prefix
 convention). The prefix is applied at the call site when constructing ClickHouse queries.
 
+### Ontology archives
+
+- `mise schema:bump` retains `config/ontology-archives/v<N>.tar.gz`; builds validate the current archive.
+- `mise schema:snapshot` seeds the current archive without replacing an existing one.
+- The dispatcher publishes before migration to durable, database-scoped NATS KV.
+- Identical retries succeed; different bytes for a published version fail. Published archives stay immutable.
+- Restore historical archives from their exact release, never from current sources.
+- Serving, readiness, and promotion are unchanged. Older archives are not required at startup.
+
 ### Webserver prefix injection
 
 The webserver pins the table prefix to its **embedded** `SCHEMA_VERSION` at startup. The prefix
