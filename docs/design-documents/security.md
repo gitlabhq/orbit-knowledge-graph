@@ -61,7 +61,7 @@ sequenceDiagram
 
 The first security boundary is logical tenant segregation enforced through the `traversal_path` column on every graph table. The `traversal_path` encodes the full namespace hierarchy as a `/`-delimited string where the first segment is the organization ID (e.g., `"42/100/1000/"`). A user's `SecurityContext` carries the exact set of traversal paths that Rails authorized. The compiler injects `startsWith(traversal_path, ?)` predicates for each path, so queries are scoped to exactly those namespaces — regardless of which organization(s) the paths belong to.
 
-This layer ensures that queries can read only the organization paths that Rails authorized. A user's authorized paths can span more than one organization.
+This layer limits queries to data within the traversal paths that Rails authorized. A user's authorized paths can span more than one organization.
 
 **Component**: Orbit Query Engine (`gkg-webserver`)
 
