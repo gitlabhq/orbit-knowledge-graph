@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use anyhow::Result;
 use orbit_search::{RecallFilter, SearchVocab, content_words};
 
+use crate::commands::{context, fqn::Def};
 use local::LocalBackend;
 
 fn build_vocab<S: orbit_search::grep::GrepSource>(source: &S) -> Result<SearchVocab, S::Error> {
@@ -29,6 +30,7 @@ fn build_vocab<S: orbit_search::grep::GrepSource>(source: &S) -> Result<SearchVo
 }
 
 const MIN_HITS_PER_QUERY: usize = 3;
+const BODY_LIMIT: usize = 3;
 
 pub(crate) fn run(
     queries: Vec<String>,
@@ -37,6 +39,7 @@ pub(crate) fn run(
     limit: usize,
     paths: Vec<String>,
     filter: RecallFilter,
+    body: bool,
 ) -> Result<()> {
     let launcher = crate::commands::setup::spec::launcher();
     if let Some(query) = queries.iter().find(|q| content_words(q).is_empty()) {
@@ -61,6 +64,7 @@ pub(crate) fn run(
     }
 
     let vocab = build_vocab(backend.search())?;
+    let limit = if body { limit.min(BODY_LIMIT) } else { limit };
     let per_query_limit = (limit / queries.len()).max(MIN_HITS_PER_QUERY.min(limit));
     for (i, query) in queries.iter().enumerate() {
         if i > 0 {
@@ -92,8 +96,34 @@ pub(crate) fn run(
         }
 
         report_results(&mut out, &outcome)?;
+        if body || outcome.total <= BODY_LIMIT {
+            let defs: Vec<Def> = outcome
+                .matches
+                .iter()
+                .take(BODY_LIMIT)
+                .map(|m| def_from(&m.row))
+                .collect();
+            writeln!(out)?;
+            write!(
+                out,
+                "{}",
+                context::render_bodies(backend.search().client(), backend.git(), &defs)?
+            )?;
+        }
     }
     Ok(())
+}
+
+fn def_from(row: &orbit_search::CorpusRow) -> Def {
+    let (file, start) = row.loc.rsplit_once(':').unwrap_or((&row.loc, "1"));
+    Def {
+        id: row.id,
+        fqn: row.fqn.clone(),
+        kind: row.kind.clone(),
+        file: file.to_string(),
+        start: start.parse().unwrap_or(1),
+        end: usize::try_from(row.end_line).unwrap_or(0),
+    }
 }
 
 fn report_outline(

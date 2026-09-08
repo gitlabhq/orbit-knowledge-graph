@@ -66,6 +66,10 @@ impl DuckDbSearch {
         })
     }
 
+    pub fn client(&self) -> &DuckDbClient {
+        &self.client
+    }
+
     pub fn grep(
         &self,
         query: &str,

@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::fmt;
 
 use crate::rank::rank_and_trim;
-use crate::text::content_words;
+use crate::text::{camel_words, content_words};
 use crate::types::CorpusRow;
 use crate::vocab::SearchVocab;
 
@@ -110,7 +110,28 @@ pub fn grep<S: GrepSource>(
     } else {
         searchable
     };
-    let recalls = source.recall(&search_terms, filter)?;
+    let mut recalls = source.recall(&search_terms, filter)?;
+    let split: Vec<(usize, String)> = query
+        .split_whitespace()
+        .filter_map(|raw| {
+            let term = raw
+                .trim_matches(|c: char| !c.is_alphanumeric())
+                .to_lowercase();
+            let i = search_terms.iter().position(|t| *t == term)?;
+            recalls[i]
+                .hits
+                .is_empty()
+                .then(|| camel_words(raw))
+                .flatten()
+                .map(|w| (i, w))
+        })
+        .collect();
+    if !split.is_empty() {
+        let words: Vec<String> = split.iter().map(|(_, w)| w.clone()).collect();
+        for ((i, _), recall) in split.iter().zip(source.recall(&words, filter)?) {
+            recalls[*i] = recall;
+        }
+    }
     let unmatched = unmatched_terms(&search_terms, &recalls);
 
     let mut ids: Vec<i64> = Vec::new();

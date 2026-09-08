@@ -73,7 +73,7 @@ wrapper flags, config keys, and pass-through rules:
 | Command | Purpose |
 |---|---|
 | `orbit index <PATH> [--stats] [--db P]` | Parse repos under `PATH` into DuckDB; prints graph stats as JSON |
-| `orbit grep [QUERY…] [--path P] [--kind K,K]` | Find definitions by name, or list definitions under a path |
+| `orbit grep [QUERY…] [--path P] [--kind K,K] [--body]` | Find definitions by name, or list definitions under a path; `--body` also prints the top three bodies |
 | `orbit grep FQN --related-to [--edge K] [--in] [--out]` | List connections, including uses through members |
 | `orbit grep FQN --callers` / `--callees` | List incoming or outgoing calls |
 | `orbit context [FQN…] [--file P] [--kind K,K] [--outline]` | Read source bodies by FQN, unique tail, glob, or file; `--outline` prints signatures and members only |
@@ -104,7 +104,11 @@ relationship selector per call, without `--limit`.
 Connections from test, fixture, and generated files are counted but hidden
 unless `--tests` is passed. Incoming lookups include uses through members.
 
-`context` accepts several names or globs in one call. `--file` alone reads
+`grep --body` prints the bodies of the top matches (at most three) in the
+same call, for the common case where the first hit is the one you want.
+
+`context` accepts several names or globs in one call. `--file` takes a
+repo-relative or absolute path inside the checkout. `--file` alone reads
 all definitions and the lines between them. With names, it restricts lookup
 to that file and accepts bare names; `--kind` narrows the selection.
 `--outline` replaces bodies with each definition's signature and its nested

@@ -206,6 +206,11 @@ struct GrepArgs {
     #[command(flatten)]
     relations: RelationArgs,
 
+    /// Print the source bodies of the top three matches even when the search
+    /// is broad; searches with three or fewer hits include bodies automatically.
+    #[arg(long, requires = "query", conflicts_with = "relation_target")]
+    body: bool,
+
     /// Repository path (default: current directory).
     #[arg(long, value_name = "PATH")]
     repo: Option<PathBuf>,
@@ -319,10 +324,10 @@ struct ContextArgs {
     #[arg(value_name = "FQN", help = context_fqn_arg_help(), required_unless_present = "file")]
     fqn: Vec<String>,
 
-    /// Restrict to this repo-relative file. Alone, prints every indexed
-    /// definition in the file in order with the lines between them; with
-    /// FQNs, also accepts bare definition names.
-    #[arg(long, value_name = "PATH")]
+    /// Restrict to this file (repo-relative or absolute). Alone, prints every
+    /// indexed definition in the file in order with the lines between them;
+    /// with FQNs, also accepts bare definition names.
+    #[arg(long, value_name = "PATH", visible_alias = "path")]
     file: Option<String>,
 
     /// Only print definitions of these types, as printed in grep's `[Kind]`
@@ -852,6 +857,7 @@ async fn dispatch_local(command: LocalCommands) -> Result<()> {
         LocalCommands::Grep(GrepArgs {
             query,
             relations,
+            body,
             repo,
             limit,
             path,
@@ -870,6 +876,7 @@ async fn dispatch_local(command: LocalCommands) -> Result<()> {
                     limit,
                     path,
                     orbit_search::RecallFilter { kinds: kind },
+                    body,
                 ),
             }
         }

@@ -21,9 +21,14 @@ pub(crate) struct Target {
 const SIGNATURE_LINES: usize = 3;
 
 pub(crate) fn run(target: Target, repo: Option<PathBuf>, db: Option<PathBuf>) -> Result<()> {
-    let file = target.file.as_deref().map(|p| p.trim_end_matches('/'));
     let file_mode = target.fqns.is_empty();
     let workspace::IndexedRepo { git, client } = workspace::open_indexed(repo, db)?;
+    let file = target
+        .file
+        .as_deref()
+        .map(|p| repo_relative(&git.repo_path, p))
+        .transpose()?;
+    let file = file.as_deref();
     let mut defs = match (target.fqns.as_slice(), file) {
         ([], None) => anyhow::bail!("pass one or more fqns or globs, or --file <path>"),
         ([], Some(path)) => {
@@ -82,6 +87,52 @@ pub(crate) fn run(target: Target, repo: Option<PathBuf>, db: Option<PathBuf>) ->
     }
     print!("{out}");
     Ok(())
+}
+
+pub(crate) const INLINE_BODY_LINES: usize = 120;
+
+pub(crate) fn render_bodies(
+    client: &duckdb_client::DuckDbClient,
+    git: &workspace::GitInfo,
+    defs: &[Def],
+) -> Result<String> {
+    let mut out = String::new();
+    for (file, file_defs) in outline(defs) {
+        let content = std::fs::read_to_string(git.repo_path.join(&file))
+            .with_context(|| format!("failed to read {file}"))?;
+        let lines: Vec<&str> = content.lines().collect();
+        let (short, long): (Vec<Def>, Vec<Def>) = file_defs
+            .into_iter()
+            .partition(|d| d.end.saturating_sub(d.start) < INLINE_BODY_LINES);
+        if !out.is_empty() {
+            out.push('\n');
+        }
+        render(&mut out, &short, &lines, false)?;
+        if !long.is_empty() {
+            let members = definitions_in_file(client, git, &file, &[])?;
+            if !short.is_empty() {
+                out.push('\n');
+            }
+            render_outline(&mut out, &long, &members, &lines)?;
+        }
+    }
+    Ok(out)
+}
+
+fn repo_relative(repo_path: &std::path::Path, path: &str) -> Result<String> {
+    let trimmed = path.trim_end_matches('/');
+    if !std::path::Path::new(trimmed).is_absolute() {
+        return Ok(trimmed.trim_start_matches("./").to_string());
+    }
+    let canonical =
+        dunce::canonicalize(trimmed).with_context(|| format!("{trimmed} does not exist"))?;
+    let relative = canonical.strip_prefix(repo_path).with_context(|| {
+        format!(
+            "{trimmed} is outside the indexed repository {}",
+            repo_path.display()
+        )
+    })?;
+    Ok(relative.to_string_lossy().replace('\\', "/"))
 }
 
 fn definitions_in_file(

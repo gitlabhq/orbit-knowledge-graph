@@ -9,6 +9,7 @@ use crate::workspace;
 pub(super) struct LocalBackend {
     search: DuckDbSearch,
     header: String,
+    git: workspace::GitInfo,
 }
 
 impl LocalBackend {
@@ -21,11 +22,16 @@ impl LocalBackend {
         Ok(Self {
             search: DuckDbSearch::scoped(client, git.project_id, &git.commit_sha, paths)?,
             header: git.short_sha().to_string(),
+            git,
         })
     }
 
     pub(super) fn header(&self) -> &str {
         &self.header
+    }
+
+    pub(super) fn git(&self) -> &workspace::GitInfo {
+        &self.git
     }
 
     pub(super) fn search(&self) -> &DuckDbSearch {
