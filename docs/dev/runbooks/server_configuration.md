@@ -403,7 +403,7 @@ Controls Snowplow product-analytics event emission. Events carry `orbit_common` 
 | Config path | Env var | Default | Description |
 |-------------|---------|---------|-------------|
 | `analytics.enabled` | `GKG_ANALYTICS__ENABLED` | `false` | Enable Snowplow analytics event emission |
-| `analytics.collector_url` | `GKG_ANALYTICS__COLLECTOR_URL` | `""` | Snowplow collector endpoint (e.g. `https://snowplowprd.trx.gitlab.net`) |
+| `analytics.collector_url` | `GKG_ANALYTICS__COLLECTOR_URL` | `""` | Snowplow collector endpoint (e.g. `https://events.gitlab.net`) |
 | `analytics.deployment.type` | `GKG_ANALYTICS__DEPLOYMENT__TYPE` | `self_managed` | `com`, `dedicated`, or `self_managed` |
 | `analytics.deployment.environment` | `GKG_ANALYTICS__DEPLOYMENT__ENVIRONMENT` | `development` | `development`, `staging`, or `production` |
 
@@ -412,7 +412,7 @@ Example for the .com staging cluster:
 ```yaml
 analytics:
   enabled: true
-  collector_url: "https://snowplowprd.trx.gitlab.net"
+  collector_url: "https://events.gitlab.net"
   deployment:
     type: com
     environment: staging
