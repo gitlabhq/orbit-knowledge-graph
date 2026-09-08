@@ -397,8 +397,8 @@ s3:
   endpoint: http://localhost:9010
   path_style: true
   auth: static
-  access_key_id: orbitprobe
-  secret_access_key: orbitprobe-secret-1
+  access_key_id: example-key-id
+  secret_access_key: example-secret
 tls:
   allow_http: {allow_http}
 "#
