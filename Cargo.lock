@@ -8053,6 +8053,7 @@ name = "ontology"
 version = "0.1.0"
 dependencies = [
  "const_format",
+ "flate2",
  "indexmap 2.14.0",
  "minijinja",
  "orbit-utils",
@@ -8061,7 +8062,9 @@ dependencies = [
  "serde_json",
  "sha2 0.11.0",
  "strum 0.28.0",
+ "tar",
  "tempfile",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -8341,7 +8344,9 @@ version = "0.1.0"
 dependencies = [
  "arrow 58.3.0",
  "async-nats",
+ "bytes",
  "clickhouse-client",
+ "nats-client",
  "ontology",
  "orbit-utils",
  "orbit-versions",

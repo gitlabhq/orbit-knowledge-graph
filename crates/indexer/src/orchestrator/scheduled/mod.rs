@@ -73,7 +73,8 @@ pub enum SchedulerError {
 pub struct SchedulerServices {
     pub nats: Arc<dyn NatsServices>,
     pub lock_service: Arc<dyn LockService>,
-    pub nats_client: async_nats::Client,
+    pub nats_client: Arc<nats_client::NatsClient>,
+    pub nats_connection: async_nats::Client,
 }
 
 pub async fn connect(nats_config: &NatsConfiguration) -> Result<SchedulerServices, SchedulerError> {
@@ -82,7 +83,8 @@ pub async fn connect(nats_config: &NatsConfiguration) -> Result<SchedulerService
         .ensure_kv_bucket_exists(INDEXING_LOCKS_BUCKET, KvBucketConfig::default())
         .await?;
 
-    let nats_client = broker.nats_client().clone();
+    let nats_connection = broker.nats_client().clone();
+    let nats_client = broker.client().clone();
     let nats: Arc<dyn NatsServices> = Arc::new(NatsServicesImpl::new(broker));
     let lock_service: Arc<dyn LockService> = Arc::new(NatsLockService::new(Arc::clone(&nats)));
 
@@ -90,6 +92,7 @@ pub async fn connect(nats_config: &NatsConfiguration) -> Result<SchedulerService
         nats,
         lock_service,
         nats_client,
+        nats_connection,
     })
 }
 

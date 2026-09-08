@@ -80,6 +80,11 @@ async fn main() -> anyhow::Result<()> {
     let result = match args.mode {
         Mode::DispatchIndexing => {
             config.schema.validate()?;
+            let archive = ontology::archive::OntologyArchive::from_bytes(
+                *schema::version::SCHEMA_VERSION,
+                include_bytes!(env!("ONTOLOGY_ARCHIVE_PATH")),
+            )?;
+
             let graph = config.graph.build_client();
             info!("initializing schema version table");
             schema::version::init(&graph).await?;
@@ -92,7 +97,7 @@ async fn main() -> anyhow::Result<()> {
                 schema: config.schema.clone(),
                 health_bind_address: config.dispatcher_health_bind_address,
             };
-            indexer::run_dispatcher(&dispatcher_config, &ontology, shutdown)
+            indexer::run_dispatcher(&dispatcher_config, &archive, shutdown)
                 .await
                 .map_err(Into::into)
         }
