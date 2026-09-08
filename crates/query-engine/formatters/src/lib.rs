@@ -44,6 +44,18 @@ pub trait ResultFormatter: Send + Sync {
         pagination: Option<&PaginationMeta>,
     ) -> Value;
 
+    fn serialize_rows(
+        &self,
+        output: &PipelineOutput,
+        rows: &[QueryResultRow],
+        pagination: Option<&PaginationMeta>,
+    ) -> String {
+        match self.format_rows(output, rows, pagination) {
+            Value::String(text) => text,
+            value => value.to_string(),
+        }
+    }
+
     fn format(&self, output: &PipelineOutput) -> Value {
         self.format_rows(
             output,

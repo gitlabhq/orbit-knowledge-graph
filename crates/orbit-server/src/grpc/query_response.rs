@@ -30,32 +30,50 @@ pub(crate) async fn build_query_response(
 
     tokio::task::yield_now().await;
 
-    if response.encoded_len() <= options.max_response_bytes {
+    let response_bytes = response.encoded_len();
+    if response_bytes <= options.max_response_bytes {
         return Ok(response);
     }
     drop(response);
 
-    if output.compiled.input.cursor.is_none() {
+    if output.compiled.input.cursor.is_none() || rows.len() < 2 {
         return Err(PipelineError::ResultTooLarge);
     }
 
-    let mut largest_payload_fit = 0;
-    let mut prefix_upper_bound = rows.len();
+    let estimated_row_count = ((rows.len() as u128 * options.max_response_bytes as u128)
+        / response_bytes as u128) as usize;
+    let estimated_row_count = estimated_row_count.clamp(1, rows.len() - 1);
 
-    while largest_payload_fit + 1 < prefix_upper_bound {
-        let candidate_count = largest_payload_fit + (prefix_upper_bound - largest_payload_fit) / 2;
-        let response = encode_query_response(output, &rows[..candidate_count], None, formatter);
+    let mut fitting_row_count = 0;
+    let mut upper_row_bound = rows.len();
+    let mut candidate_row_count = estimated_row_count;
+
+    while fitting_row_count + 1 < upper_row_bound {
+        let candidate_rows = &rows[..candidate_row_count];
+        let response = encode_query_response(output, candidate_rows, None, formatter);
 
         tokio::task::yield_now().await;
 
-        if response.encoded_len() <= options.max_response_bytes {
-            largest_payload_fit = candidate_count;
+        let response_fits = response.encoded_len() <= options.max_response_bytes;
+
+        if response_fits {
+            fitting_row_count = candidate_row_count;
         } else {
-            prefix_upper_bound = candidate_count;
+            upper_row_bound = candidate_row_count;
         }
+
+        let is_initial_probe = candidate_row_count == estimated_row_count;
+
+        candidate_row_count = if !is_initial_probe {
+            fitting_row_count + (upper_row_bound - fitting_row_count) / 2
+        } else if response_fits {
+            candidate_row_count + 1
+        } else {
+            candidate_row_count - 1
+        };
     }
 
-    for candidate_count in (1..=largest_payload_fit).rev() {
+    for candidate_count in (1..=fitting_row_count).rev() {
         let candidate_rows = &rows[..candidate_count];
         let pagination = pagination_for_rows(candidate_rows, &output.compiled.input, true);
         let response = encode_query_response(output, candidate_rows, Some(&pagination), formatter);
@@ -101,19 +119,10 @@ fn encode_query_response(
 ) -> ExecuteQueryMessage {
     use execute_query_result::Content;
 
-    let formatted = formatter.format_rows(output, rows, pagination);
+    let formatted = formatter.serialize_rows(output, rows, pagination);
     let (content, format_name) = match formatter.format_name() {
-        FormatName::Raw => (
-            Content::ResultJson(formatted.to_string()),
-            ProtoFormatName::Raw,
-        ),
-        FormatName::Goon => {
-            let text = match formatted {
-                serde_json::Value::String(text) => text,
-                other => other.to_string(),
-            };
-            (Content::FormattedText(text), ProtoFormatName::Goon)
-        }
+        FormatName::Raw => (Content::ResultJson(formatted), ProtoFormatName::Raw),
+        FormatName::Goon => (Content::FormattedText(formatted), ProtoFormatName::Goon),
     };
     let row_count = rows.iter().filter(|row| row.is_authorized()).count();
 

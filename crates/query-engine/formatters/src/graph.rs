@@ -149,6 +149,16 @@ impl ResultFormatter for GraphFormatter {
         serde_json::to_value(self.build_response_from_rows(output, rows, pagination))
             .expect("GraphResponse serialization is infallible")
     }
+
+    fn serialize_rows(
+        &self,
+        output: &PipelineOutput,
+        rows: &[QueryResultRow],
+        pagination: Option<&PaginationMeta>,
+    ) -> String {
+        serde_json::to_string(&self.build_response_from_rows(output, rows, pagination))
+            .expect("GraphResponse serialization is infallible")
+    }
 }
 
 impl GraphFormatter {

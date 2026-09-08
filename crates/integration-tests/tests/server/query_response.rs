@@ -448,6 +448,22 @@ async fn variable_length_cursors_still_choose_fullest_page(context: &TestContext
     assert_lossless_pages(context, query, 4, &[]).await;
 }
 
+async fn uneven_rows_still_choose_fullest_page(context: &TestContext) {
+    let mut query = json!({
+        "query_type": "traversal",
+        "nodes": [{
+            "id": "user", "entity": "User", "id_range": {"start": 900, "end": 915},
+            "columns": ["username", "name"]
+        }],
+        "order_by": "user.id",
+        "cursor": {"page_size": 20}
+    });
+    assert_lossless_pages(context, query.clone(), 8, &[]).await;
+
+    query["order_by"] = "-user.id".into();
+    assert_lossless_pages(context, query, 8, &[]).await;
+}
+
 async fn equal_cursor_keys_are_not_split(context: &TestContext) {
     let reference =
         QueryServer::start(context, GrpcConfig::default().max_query_response_bytes).await;
@@ -535,6 +551,10 @@ async fn grpc_query_response_byte_budget() {
         t("gl_user"),
     )).await;
     context.execute(&format!(
+        "INSERT INTO {} (id, username, name, state, user_type) SELECT 900 + number, repeat('x', multiIf(number = 0, 1500, number = 15, 5000, 500)), 'Uneven row', 'active', 'human' FROM numbers(16)",
+        t("gl_user"),
+    )).await;
+    context.execute(&format!(
         "INSERT INTO {} (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind) VALUES ('1/100/1000/', 1, 'User', 'APPROVED', 2000, 'MergeRequest')",
         t("gl_edge"),
     )).await;
@@ -549,6 +569,7 @@ async fn grpc_query_response_byte_budget() {
         denied_rows_do_not_lose_authorized_suffix,
         exact_limit_and_oversized_results,
         variable_length_cursors_still_choose_fullest_page,
+        uneven_rows_still_choose_fullest_page,
         equal_cursor_keys_are_not_split,
     );
     sizing_does_not_execute_more_sql(&context).await;
