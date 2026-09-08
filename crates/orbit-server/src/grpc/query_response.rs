@@ -28,6 +28,7 @@ pub(crate) async fn build_query_response(
     let rows = output.query_result.rows();
     let response = encode_query_response(output, rows, output.pagination.as_ref(), formatter);
 
+    // Let the request timeout be polled after synchronous response encoding.
     tokio::task::yield_now().await;
 
     let response_bytes = response.encoded_len();
@@ -52,6 +53,7 @@ pub(crate) async fn build_query_response(
         let candidate_rows = &rows[..candidate_row_count];
         let response = encode_query_response(output, candidate_rows, None, formatter);
 
+        // Let the request timeout be polled between response-size probes.
         tokio::task::yield_now().await;
 
         let response_fits = response.encoded_len() <= options.max_response_bytes;
@@ -78,6 +80,7 @@ pub(crate) async fn build_query_response(
         let pagination = pagination_for_rows(candidate_rows, &output.compiled.input, true);
         let response = encode_query_response(output, candidate_rows, Some(&pagination), formatter);
 
+        // Let the request timeout be polled while searching for a safe page boundary.
         tokio::task::yield_now().await;
 
         if response.encoded_len() > options.max_response_bytes {
