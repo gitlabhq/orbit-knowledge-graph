@@ -36,6 +36,7 @@ pub mod ast;
 pub mod constants;
 pub mod error;
 pub mod input;
+pub mod input_validation;
 pub mod metrics;
 pub(crate) mod schema_limits;
 mod schema_templates;
@@ -122,6 +123,21 @@ pub fn compile(
             })
         })
         .count_err()
+}
+
+pub fn compile_from_input(
+    input: Input,
+    ontology: &Ontology,
+    security: &SecurityContext,
+) -> Result<CompiledQueryContext> {
+    let result = (|| {
+        let mut ctx = config::ClickhouseCtx::new(Arc::new(ontology.clone()), security.clone());
+        ctx.set_input(input);
+        config::run_clickhouse(&mut ctx)?;
+        ctx.take_output()
+            .ok_or_else(|| QueryError::PipelineInvariant("pipeline did not produce output".into()))
+    })();
+    result.count_err()
 }
 
 /// Run only `validate` + `normalize`, returning the normalized [`Input`].

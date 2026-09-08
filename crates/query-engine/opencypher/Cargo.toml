@@ -1,0 +1,14 @@
+[package]
+name = "opencypher"
+version.workspace = true
+edition = "2024"
+publish = false
+
+[dependencies]
+compiler = { path = "../compiler" }
+pest.workspace = true
+pest_derive.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

@@ -56,6 +56,61 @@ pub fn embedded_ontology() -> Ontology {
     Ontology::load_embedded().expect("Failed to load embedded ontology")
 }
 
+pub fn compile_pair(
+    json: &str,
+    opencypher: &str,
+    ontology: &Ontology,
+    context: &SecurityContext,
+) -> compiler::Result<compiler::CompiledQueryContext> {
+    compile_pair_with_parameters(
+        json,
+        opencypher,
+        &opencypher::Parameters::new(),
+        ontology,
+        context,
+    )
+}
+
+pub fn compile_pair_with_parameters(
+    json: &str,
+    opencypher: &str,
+    parameters: &opencypher::Parameters,
+    ontology: &Ontology,
+    context: &SecurityContext,
+) -> compiler::Result<compiler::CompiledQueryContext> {
+    let json_result = compiler::compile(json, ontology, context);
+    let opencypher_result = opencypher::compile(opencypher, parameters, ontology, context);
+    match (json_result, opencypher_result) {
+        (Ok(json), Ok(opencypher_result)) => {
+            assert_eq!(
+                json.base.sql, opencypher_result.base.sql,
+                "SQL differs for {opencypher}"
+            );
+            assert_eq!(
+                json.base.params, opencypher_result.base.params,
+                "parameters differ for {opencypher}"
+            );
+            assert_eq!(json.query_type, opencypher_result.query_type);
+            assert_eq!(
+                json.hydration, opencypher_result.hydration,
+                "hydration differs for {opencypher}"
+            );
+            Ok(json)
+        }
+        (Err(json), Err(opencypher_result)) => {
+            assert_eq!(
+                std::mem::discriminant(&json),
+                std::mem::discriminant(&opencypher_result),
+                "rejection differs for {opencypher}: JSON={json}; Orbit={opencypher_result}"
+            );
+            Err(json)
+        }
+        (json, opencypher_result) => panic!(
+            "frontend acceptance differs for {opencypher}: JSON={json:?}; Orbit={opencypher_result:?}"
+        ),
+    }
+}
+
 pub fn compile_to_ast(json_input: &str, ontology: &Ontology) -> compiler::Result<Node> {
     let v = Validator::new(ontology);
     let value = v.check_json(json_input)?;
