@@ -159,7 +159,15 @@ impl Lowering<'_> {
                         edge.types = part.into_inner().map(name).collect::<Result<_>>()?
                     }
                     Rule::RangeLiteral => edge.hops = hop_range(part)?,
-                    Rule::MapLiteral => Self::map_filters(part, &self.bindings, &mut edge.filters)?,
+                    Rule::MapLiteral => {
+                        if edge.hops.max > 1 && part.clone().into_inner().next().is_some() {
+                            return Err(invalid(
+                                &part,
+                                "property filters on variable-length relationships are unsupported",
+                            ));
+                        }
+                        Self::map_filters(part, &self.bindings, &mut edge.filters)?;
+                    }
                     _ => return Err(invalid(&part, "unsupported relationship pattern")),
                 }
             }

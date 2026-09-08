@@ -249,7 +249,7 @@ impl Lowering<'_> {
                     if self.path.as_ref() == Some(&variable)
                         || self.neighbor.as_ref() == Some(&variable)
                         || (self.input.query_type == QueryType::Neighbors
-                            && self.edges.contains_key(&variable))
+                            && (all || self.edges.contains_key(&variable)))
                     {
                         if alias.is_some() || all {
                             return Err(invalid(

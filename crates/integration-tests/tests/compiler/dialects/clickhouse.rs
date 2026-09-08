@@ -824,6 +824,18 @@ fn orbit_query_bounded_hops_and_relationship_filters() {
             r#"{"query_type":"traversal","nodes":[{"id":"a","entity":"User","node_ids":[1]},{"id":"b","entity":"Project"}],"relationships":[{"type":"MEMBER_OF","from":"a","to":"b","filters":{"target_id":{"gte":2}}}]}"#,
             "MATCH (a:User {id: 1})-[r:MEMBER_OF]->(b:Project) WHERE r.target_id >= 2 RETURN a, b",
         ),
+        (
+            r#"{"query_type":"traversal","nodes":[{"id":"a","entity":"User","node_ids":[1]},{"id":"b","entity":"Project"}],"relationships":[{"type":"MEMBER_OF","from":"a","to":"b","filters":{"target_id":2}}]}"#,
+            "MATCH (a:User {id: 1})-[:MEMBER_OF {target_id: 2}]->(b:Project) RETURN a, b",
+        ),
+        (
+            r#"{"query_type":"traversal","nodes":[{"id":"a","entity":"User","node_ids":[1]},{"id":"b","entity":"Project"}],"relationships":[{"type":"MEMBER_OF","from":"a","to":"b","filters":{"target_id":2}}]}"#,
+            "MATCH (a:User {id: 1})-[:MEMBER_OF*1..1 {target_id: 2}]->(b:Project) RETURN a, b",
+        ),
+        (
+            r#"{"query_type":"traversal","nodes":[{"id":"a","entity":"User","node_ids":[1]},{"id":"b","entity":"Project"}],"relationships":[{"type":"MEMBER_OF","from":"a","to":"b","hops":[1,3]}]}"#,
+            "MATCH (a:User {id: 1})-[:MEMBER_OF*1..3 {}]->(b:Project) RETURN a, b",
+        ),
     ];
     for (json, orbit_query) in cases {
         compile_pair(json, orbit_query, &embedded_ontology(), &test_ctx()).unwrap();
@@ -932,6 +944,72 @@ fn orbit_query_m23_literals_and_comments() {
     ];
     for (json, orbit_query) in cases {
         compile_pair(json, orbit_query, &test_ontology(), &test_ctx()).unwrap();
+    }
+}
+
+#[test]
+fn orbit_query_rejects_inline_filters_on_variable_length_relationships() {
+    for query in [
+        "MATCH (a:Group {id: 1})-[:CONTAINS*2 {source_id: 1}]->(b:Group) RETURN a, b",
+        "MATCH (a:Group {id: 1})-[:CONTAINS*1..2 {source_id: 1}]->(b:Group) RETURN a, b",
+        "MATCH (a:Group {id: 1})<-[r:CONTAINS*2..3 {target_id: 1}]-(b:Group) RETURN a, b",
+    ] {
+        let error = orbit_query::parse(query, &orbit_query::Parameters::new()).expect_err(query);
+        assert!(
+            error
+                .to_string()
+                .contains("property filters on variable-length relationships are unsupported"),
+            "{query}: {error}"
+        );
+    }
+}
+
+#[test]
+fn orbit_query_rejects_neighbors_center_all_properties() {
+    for query in [
+        "MATCH (center:User {id: 1})--(n) RETURN properties(center), n",
+        "MATCH (center:File {id: 1})-->(n) RETURN properties(center)",
+        "MATCH (center:User {id: 1})<--(n) RETURN n, properties(center)",
+    ] {
+        let error = orbit_query::parse(query, &orbit_query::Parameters::new()).expect_err(query);
+        assert!(
+            error
+                .to_string()
+                .contains("dynamic graph results cannot be renamed or projected as properties"),
+            "{query}: {error}"
+        );
+    }
+    let json = r#"{"query_type":"neighbors","nodes":[{"id":"center","entity":"User","node_ids":[1]}],"neighbors":{"direction":"both"}}"#;
+    let query = "MATCH (center:User {id: 1})--(n) RETURN center, n";
+    compile_pair(json, query, &embedded_ontology(), &test_ctx()).unwrap();
+}
+
+#[test]
+fn orbit_query_virtual_filter_equality_hydration_parity() {
+    let ontology = embedded_ontology();
+    for (json, query) in [
+        (
+            r#"{"query_type":"traversal","nodes":[{"id":"f","entity":"File","node_ids":[1],"filters":{"content":"abc"}}]}"#,
+            "MATCH (f:File {id: 1}) WHERE f.content = 'abc' RETURN f",
+        ),
+        (
+            r#"{"query_type":"traversal","nodes":[{"id":"f","entity":"File","node_ids":[1],"filters":{"content":{"eq":"abc"}}}]}"#,
+            "MATCH (f:File {id: 1, content: 'abc'}) RETURN f",
+        ),
+    ] {
+        let compiled = compile_pair(json, query, &ontology, &test_ctx()).unwrap();
+        let compiler::HydrationPlan::Static(templates) = compiled.hydration else {
+            panic!("expected static hydration for {query}");
+        };
+        let filters = &templates
+            .iter()
+            .find(|t| t.node_alias == "f")
+            .unwrap()
+            .virtual_filters;
+        assert_eq!(filters.len(), 1);
+        assert_eq!(filters[0].0, "content");
+        assert_eq!(filters[0].1.op, Some(compiler::input::FilterOp::Eq));
+        assert_eq!(filters[0].1.value, Some(serde_json::Value::from("abc")));
     }
 }
 

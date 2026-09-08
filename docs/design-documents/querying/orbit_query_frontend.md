@@ -46,6 +46,7 @@ Typed input uses `input_validation` for shape, identifier, and ontology checks t
 The adapter reuses schema-defined scalar bounds. Both sources then run the existing reference and filter-type checks.
 
 Normalization, restriction, security checks, hydration planning, and SQL generation remain shared.
+Shared normalization makes equality explicit in virtual-column filters before building hydration plans.
 The hydration-only `compile_input` entry point is not used for query text.
 
 Filter maps become ordered predicate lists through one shared helper.
@@ -74,6 +75,7 @@ The frontend infers the query type:
 
 Path finding supports outgoing paths from one hop to an explicit maximum.
 Variable-length traversal accepts exact lengths and bounded ranges. Each range has the compiler's three-hop cap.
+Relationship property filters, including inline maps, require a maximum of one hop.
 
 ```plaintext
 MATCH (u:User {id: 1})-[:AUTHORED]->(mr:MergeRequest {state: 'merged'})
@@ -83,6 +85,7 @@ LIMIT 10
 
 RETURN controls the existing graph response, not a general-purpose table of arbitrary expressions.
 Traversal properties select node columns. Whole nodes use ontology defaults; `properties(node)` selects all allowed columns.
+Neighbors queries reject `properties(node)`, including projections of the center, because their hydration uses dynamic column specifications instead of per-node selections.
 The compiler still includes graph identity and relationship metadata.
 
 Aggregates support `count`, `sum`, `avg`, `min`, and `max`.
