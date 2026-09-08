@@ -78,15 +78,6 @@ pub(crate) async fn build_query_response(
     for candidate_count in (1..=fitting_row_count).rev() {
         let candidate_rows = &rows[..candidate_count];
         let pagination = pagination_for_rows(candidate_rows, &output.compiled.input, true);
-        let response = encode_query_response(output, candidate_rows, Some(&pagination), formatter);
-
-        // Let the request timeout be polled while searching for a safe page boundary.
-        tokio::task::yield_now().await;
-
-        if response.encoded_len() > options.max_response_bytes {
-            continue;
-        }
-
         let first_omitted = pagination_for_rows(
             &rows[candidate_count..candidate_count + 1],
             &output.compiled.input,
@@ -98,6 +89,15 @@ pub(crate) async fn build_query_response(
             ));
         }
         if pagination.next_cursor == first_omitted.next_cursor {
+            continue;
+        }
+
+        let response = encode_query_response(output, candidate_rows, Some(&pagination), formatter);
+
+        // Let the request timeout be polled while searching for a safe page boundary.
+        tokio::task::yield_now().await;
+
+        if response.encoded_len() > options.max_response_bytes {
             continue;
         }
 
