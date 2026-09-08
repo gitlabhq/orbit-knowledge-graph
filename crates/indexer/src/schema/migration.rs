@@ -13,7 +13,7 @@ use crate::locking::{LockError, LockGuard, LockService};
 use orbit_migrations::ledger::MigrationLedger;
 use orbit_migrations::version::{
     SCHEMA_VERSION, SchemaVersionError, mark_version_active, mark_version_migrating,
-    read_active_version, table_prefix, version_tables_complete,
+    promote_version, read_active_version, table_prefix, version_tables_complete,
 };
 
 pub use orbit_migrations::execute::CHECKPOINT_TABLE;
@@ -191,7 +191,7 @@ async fn run_rollback(
             target_version = *SCHEMA_VERSION,
             "embedded version's table set is complete — rolling back via direct re-activation"
         );
-        execute::reactivate_version(graph, *SCHEMA_VERSION).await?;
+        promote_version(graph, *SCHEMA_VERSION).await?;
         metrics.record("complete", "rollback_reactivated");
         info!(
             version = *SCHEMA_VERSION,

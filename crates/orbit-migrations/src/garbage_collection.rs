@@ -20,7 +20,7 @@ WHERE database = {database:String} \
       UNION ALL \
       SELECT version FROM (\
           SELECT version FROM gkg_schema_version FINAL \
-          WHERE status = 'retired' ORDER BY version DESC LIMIT {retained_version_count:UInt32}) \
+          WHERE status = 'retired' ORDER BY created_at DESC, version DESC LIMIT {retained_version_count:UInt32}) \
       UNION ALL \
       SELECT version FROM gkg_schema_version FINAL WHERE status = 'migrating') \
   AND (SELECT count() FROM gkg_schema_version FINAL WHERE status = 'active') > 0";

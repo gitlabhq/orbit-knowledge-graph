@@ -6,8 +6,12 @@
 //! newly-enabled ones arriving via CDC events.
 
 use std::collections::HashSet;
+use std::sync::Arc;
+use std::time::Duration;
 
+use bytes::Bytes;
 use clickhouse_client::{ClickHouseConfigurationExt, FromArrowColumn};
+use indexer::config::{DispatcherConfig, DispatcherError};
 use indexer::nats::versioning::NATS_VERSIONER;
 use indexer::orchestrator::dispatch::CodeBackfill;
 use indexer::orchestrator::scheduled::{
@@ -18,12 +22,17 @@ use indexer::schema::version::{
     prefixed_table_name,
 };
 use indexer::topic::{CODE_INDEXING_TASK_SUBJECT_PATTERN, INDEXER_STREAM};
+use nats_client::{KvPutOptions, NatsClient};
+use ontology::archive::OntologyArchive;
+use ontology::migrations::embedded_sources;
+use orbit_migrations::catalog::OntologyCatalog;
 use orbit_server_config::NatsConfiguration;
 use serde::Deserialize;
 use testcontainers::ImageExt;
 use testcontainers::core::{ContainerPort, WaitFor};
 use testcontainers::runners::AsyncRunner;
 use testcontainers_modules::nats::{Nats, NatsServerCmd};
+use tokio_util::sync::CancellationToken;
 
 use super::super::common;
 use common::TestContext as ClickHouseContext;
@@ -60,6 +69,12 @@ impl TestContext {
             url: self.nats_url.clone(),
             ..orbit_server_config::AppConfig::embedded_defaults().nats
         }
+    }
+
+    async fn ontology_catalog(&self, client: Arc<NatsClient>) -> OntologyCatalog {
+        OntologyCatalog::open(client, &self.clickhouse.config.database)
+            .await
+            .unwrap()
     }
 
     async fn given_enabled_namespaces(&self, namespace_ids: impl IntoIterator<Item = i64>) {
@@ -325,6 +340,11 @@ async fn migration_completion_checker_promotes_rebuilt_rollback_version() {
     let services = indexer::orchestrator::scheduled::connect(&context.nats_config())
         .await
         .unwrap();
+    let catalog = context.ontology_catalog(services.nats_client.clone()).await;
+    catalog
+        .publish(&embedded_archive(*SCHEMA_VERSION))
+        .await
+        .unwrap();
 
     let checker = MigrationCompletionChecker::new(
         context.clickhouse.create_client(),
@@ -339,6 +359,7 @@ async fn migration_completion_checker_promotes_rebuilt_rollback_version() {
         ScheduledTaskMetrics::new(),
         std::sync::Arc::new(indexer::campaign::CampaignState::new()),
         services.nats_connection.clone(),
+        catalog,
     );
 
     checker.run().await.unwrap();
@@ -404,6 +425,11 @@ async fn migration_completion_checker_promotes_when_no_namespaces_are_enabled() 
     let services = indexer::orchestrator::scheduled::connect(&context.nats_config())
         .await
         .unwrap();
+    let catalog = context.ontology_catalog(services.nats_client.clone()).await;
+    catalog
+        .publish(&embedded_archive(*SCHEMA_VERSION))
+        .await
+        .unwrap();
 
     let checker = MigrationCompletionChecker::new(
         context.clickhouse.create_client(),
@@ -418,6 +444,7 @@ async fn migration_completion_checker_promotes_when_no_namespaces_are_enabled() 
         ScheduledTaskMetrics::new(),
         std::sync::Arc::new(indexer::campaign::CampaignState::new()),
         services.nats_connection.clone(),
+        catalog,
     );
 
     checker.run().await.unwrap();
@@ -474,6 +501,7 @@ async fn migration_completion_checker_does_not_promote_version_it_does_not_embed
     let services = indexer::orchestrator::scheduled::connect(&context.nats_config())
         .await
         .unwrap();
+    let catalog = context.ontology_catalog(services.nats_client.clone()).await;
 
     let checker = MigrationCompletionChecker::new(
         context.clickhouse.create_client(),
@@ -488,6 +516,7 @@ async fn migration_completion_checker_does_not_promote_version_it_does_not_embed
         ScheduledTaskMetrics::new(),
         std::sync::Arc::new(indexer::campaign::CampaignState::new()),
         services.nats_connection.clone(),
+        catalog,
     );
 
     checker.run().await.unwrap();
@@ -545,6 +574,11 @@ async fn migration_completion_checker_guards_against_two_migrating_versions() {
     let services = indexer::orchestrator::scheduled::connect(&context.nats_config())
         .await
         .unwrap();
+    let catalog = context.ontology_catalog(services.nats_client.clone()).await;
+    catalog
+        .publish(&embedded_archive(*SCHEMA_VERSION))
+        .await
+        .unwrap();
 
     let checker = MigrationCompletionChecker::new(
         context.clickhouse.create_client(),
@@ -559,6 +593,7 @@ async fn migration_completion_checker_guards_against_two_migrating_versions() {
         ScheduledTaskMetrics::new(),
         std::sync::Arc::new(indexer::campaign::CampaignState::new()),
         services.nats_connection.clone(),
+        catalog,
     );
 
     checker.run().await.unwrap();
@@ -607,4 +642,281 @@ async fn migration_completion_checker_guards_against_two_migrating_versions() {
         vec!["active"],
         "the active version must remain unchanged"
     );
+}
+
+#[tokio::test]
+async fn migration_completion_preserves_state_until_target_archive_is_usable() {
+    let context = TestContext::new().await;
+
+    let graph = context.clickhouse.create_client();
+    ensure_version_table(&graph).await.unwrap();
+    mark_version_active(&graph, 0).await.unwrap();
+    mark_version_migrating(&graph, *SCHEMA_VERSION)
+        .await
+        .unwrap();
+
+    let checkpoint_table = prefixed_table_name("checkpoint", *SCHEMA_VERSION);
+    let ontology = ontology::Ontology::load_embedded().unwrap();
+    let view = ontology
+        .refreshable_materialized_views()
+        .iter()
+        .find(|view| view.versioned)
+        .unwrap();
+    let view_name = prefixed_table_name(&view.name, *SCHEMA_VERSION);
+    context
+        .clickhouse
+        .execute(&format!("DROP VIEW IF EXISTS {view_name}"))
+        .await;
+    let invalidated = orbit_migrations::scope::find_invalidated_pipelines(
+        &ontology,
+        &orbit_migrations::scope::MigrationScope::Full,
+    );
+    for plan in &invalidated.global {
+        context
+            .clickhouse
+            .execute(&format!(
+                "INSERT INTO {checkpoint_table} (key, watermark, cursor_values) \
+                 VALUES ('global.{plan}', now(), 'null')"
+            ))
+            .await;
+    }
+
+    let services = indexer::orchestrator::scheduled::connect(&context.nats_config())
+        .await
+        .unwrap();
+    let catalog = context.ontology_catalog(services.nats_client.clone()).await;
+    let campaign = Arc::new(indexer::campaign::CampaignState::new());
+    let campaign_id = indexer::campaign::campaign_id_for_version(*SCHEMA_VERSION);
+    campaign.set(campaign_id.clone());
+    let checker = MigrationCompletionChecker::new(
+        context.clickhouse.create_client(),
+        context.clickhouse.create_client(),
+        Arc::new(indexer::testkit::MockLockService::new()),
+        Arc::new(ontology),
+        orbit_server_config::SchemaConfig::default(),
+        orbit_server_config::MigrationCompletionConfig::default(),
+        ScheduledTaskMetrics::new(),
+        campaign.clone(),
+        services.nats_connection.clone(),
+        catalog.clone(),
+    );
+
+    let mut invalid_sources = embedded_sources();
+    invalid_sources.insert("schema.yaml".into(), "not: [valid yaml".into());
+    let invalid_ontology =
+        OntologyArchive::from_sources(*SCHEMA_VERSION, &invalid_sources).unwrap();
+    let bucket = archive_bucket(&context.clickhouse.config.database);
+    let archive_key = SCHEMA_VERSION.to_string();
+
+    for (payload, expected_error) in [
+        (None, "load ontology archive before promotion"),
+        (
+            Some(Bytes::from_static(b"not an ontology archive")),
+            "load ontology archive before promotion",
+        ),
+        (
+            Some(Bytes::copy_from_slice(invalid_ontology.bytes())),
+            "validate ontology archive before promotion",
+        ),
+    ] {
+        if let Some(payload) = payload {
+            services
+                .nats_client
+                .kv_put(&bucket, &archive_key, payload, KvPutOptions::default())
+                .await
+                .unwrap();
+        }
+
+        let error = checker.run().await.unwrap_err();
+        assert!(error.to_string().contains(expected_error), "{error}");
+        assert_eq!(
+            orbit_migrations::version::read_active_version(&graph)
+                .await
+                .unwrap(),
+            Some(0)
+        );
+        assert_eq!(
+            orbit_migrations::version::read_migrating_version(&graph)
+                .await
+                .unwrap(),
+            Some(*SCHEMA_VERSION)
+        );
+        assert_eq!(campaign.current(), Some(campaign_id.clone()));
+        assert!(
+            orbit_migrations::version::list_version_entities(&graph, *SCHEMA_VERSION)
+                .await
+                .unwrap()
+                .iter()
+                .all(|entity| entity.name != view_name)
+        );
+    }
+
+    services
+        .nats_client
+        .kv_delete(&bucket, &archive_key)
+        .await
+        .unwrap();
+    catalog
+        .publish(&embedded_archive(*SCHEMA_VERSION))
+        .await
+        .unwrap();
+
+    checker.run().await.unwrap();
+
+    let versions = orbit_migrations::version::read_all_versions(&graph)
+        .await
+        .unwrap();
+    assert_eq!(versions.len(), 2);
+    assert!(
+        versions
+            .iter()
+            .any(|entry| entry.version == 0 && entry.status == "retired")
+    );
+    assert!(
+        versions
+            .iter()
+            .any(|entry| entry.version == *SCHEMA_VERSION && entry.status == "active")
+    );
+    assert_eq!(campaign.current(), None);
+    assert!(
+        orbit_migrations::version::list_version_entities(&graph, *SCHEMA_VERSION)
+            .await
+            .unwrap()
+            .iter()
+            .any(|entity| entity.name == view_name)
+    );
+}
+
+#[tokio::test]
+async fn dispatcher_rejects_missing_active_archive_before_migration() {
+    let context = TestContext::new().await;
+
+    let graph = context.clickhouse.create_client();
+    ensure_version_table(&graph).await.unwrap();
+    mark_version_active(&graph, *SCHEMA_VERSION - 1)
+        .await
+        .unwrap();
+
+    let archive = embedded_archive(*SCHEMA_VERSION);
+    let result = tokio::time::timeout(
+        Duration::from_secs(10),
+        indexer::run_dispatcher(
+            &dispatcher_config(&context),
+            &archive,
+            CancellationToken::new(),
+        ),
+    )
+    .await
+    .expect("dispatcher must reject the missing archive before starting");
+
+    assert!(matches!(
+        result,
+        Err(DispatcherError::Archive(orbit_migrations::catalog::CatalogError::Missing(version)))
+        if version == *SCHEMA_VERSION - 1
+    ));
+
+    let services = indexer::orchestrator::scheduled::connect(&context.nats_config())
+        .await
+        .unwrap();
+    let catalog = context.ontology_catalog(services.nats_client.clone()).await;
+    assert_eq!(
+        catalog.load(*SCHEMA_VERSION).await.unwrap().bytes(),
+        archive.bytes()
+    );
+    assert_eq!(
+        orbit_migrations::version::read_active_version(&graph)
+            .await
+            .unwrap(),
+        Some(*SCHEMA_VERSION - 1)
+    );
+    assert_eq!(
+        orbit_migrations::version::read_migrating_version(&graph)
+            .await
+            .unwrap(),
+        None
+    );
+}
+
+#[tokio::test]
+async fn dispatcher_rejects_corrupt_active_archive_before_migration() {
+    let context = TestContext::new().await;
+
+    let graph = context.clickhouse.create_client();
+    ensure_version_table(&graph).await.unwrap();
+    mark_version_active(&graph, *SCHEMA_VERSION - 1)
+        .await
+        .unwrap();
+
+    let services = indexer::orchestrator::scheduled::connect(&context.nats_config())
+        .await
+        .unwrap();
+    let catalog = context.ontology_catalog(services.nats_client.clone()).await;
+    let bucket = archive_bucket(&context.clickhouse.config.database);
+    services
+        .nats_client
+        .kv_put(
+            &bucket,
+            &(*SCHEMA_VERSION - 1).to_string(),
+            Bytes::from_static(b"not an ontology archive"),
+            KvPutOptions::create_only(),
+        )
+        .await
+        .unwrap();
+
+    let archive = embedded_archive(*SCHEMA_VERSION);
+    let result = tokio::time::timeout(
+        Duration::from_secs(10),
+        indexer::run_dispatcher(
+            &dispatcher_config(&context),
+            &archive,
+            CancellationToken::new(),
+        ),
+    )
+    .await
+    .expect("dispatcher must reject the corrupt archive before starting");
+
+    assert!(matches!(
+        result,
+        Err(DispatcherError::Archive(
+            orbit_migrations::catalog::CatalogError::Archive(_)
+        ))
+    ));
+    assert_eq!(
+        catalog.load(*SCHEMA_VERSION).await.unwrap().bytes(),
+        archive.bytes()
+    );
+    assert_eq!(
+        orbit_migrations::version::read_active_version(&graph)
+            .await
+            .unwrap(),
+        Some(*SCHEMA_VERSION - 1)
+    );
+    assert_eq!(
+        orbit_migrations::version::read_migrating_version(&graph)
+            .await
+            .unwrap(),
+        None
+    );
+}
+
+fn embedded_archive(version: u32) -> OntologyArchive {
+    OntologyArchive::from_sources(version, &embedded_sources()).unwrap()
+}
+
+fn dispatcher_config(context: &TestContext) -> DispatcherConfig {
+    DispatcherConfig {
+        nats: context.nats_config(),
+        graph: context.clickhouse.config.clone(),
+        datalake: context.clickhouse.config.clone(),
+        schedule: orbit_server_config::AppConfig::embedded_defaults().schedule,
+        schema: orbit_server_config::AppConfig::embedded_defaults().schema,
+        health_bind_address: "127.0.0.1:0".parse().unwrap(),
+    }
+}
+
+fn archive_bucket(graph_database: &str) -> String {
+    format!(
+        "ontology_archives_{}",
+        ontology::migrations::sha256_hex(graph_database)
+    )
 }
