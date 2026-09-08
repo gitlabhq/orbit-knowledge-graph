@@ -383,9 +383,7 @@ The indexer uses the ontology to create the Orbit ClickHouse tables and build th
 
 The Orbit schema is declared in `config/graph.sql` (generated from the ontology) and versioned via the `schema` pin in `config/versions.yaml`. All graph tables are prefixed with `v<N>_` (e.g. `v58_gl_issue`) so that multiple schema versions can coexist during migration. Migrations are applied to the Orbit graph database by the dispatcher at boot via `schema::migration::run_if_needed()`.
 
-The dispatcher publishes its [ontology archive](../schema_management.md#ontology-archives) before migration.
-It also requires the current active version's archive before changing versioned tables.
-Existing installations need a preparatory archive-publishing release before upgrading.
+Migration requires usable [ontology archives](../schema_management.md#ontology-archives) for both the active and target versions.
 
 The schema is backward compatible with the previous version until the schema migration is complete for every namespace. A migration is considered complete when `MigrationCompletionChecker` detects that all enabled namespaces have been re-indexed into new-prefix tables, then promotes the new version to `active` and retires the old one.
 
@@ -432,8 +430,7 @@ re-sweeps against the clone.
 `MigrationCompletionChecker` promotes the new version only after every currently enabled top-level
 namespace ID has completed all required namespaced pipelines and every required global pipeline is
 complete. A checkpoint from a namespace that has since been disabled does not satisfy the gate.
-The target archive must also load successfully. Promotion records the target as active and previous
-active versions as retired in one insert; archive failure leaves the migration pending for a later retry.
+An unusable target archive blocks promotion until a later scheduled check succeeds.
 
 **Initial schema creation**
 

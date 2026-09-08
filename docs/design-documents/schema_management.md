@@ -129,11 +129,8 @@ convention). The prefix is applied at the call site when constructing ClickHouse
 - Publication validates and stores archives by schema version in the durable `orbit_ontology_archives` NATS KV bucket. The dispatcher reuses that ontology for migration.
 - Identical retries succeed; different bytes for a published version fail. Published archives stay immutable.
 - Restore historical archives from their exact release, never from current sources.
-- Before migration or rollback, the dispatcher requires a usable archive for the current active version.
-  Publication already validates its target archive. A missing or invalid active archive stops startup before versioned-table changes.
-- Migration completion validates the target archive again before promotion. Failure leaves the old version active and retries later.
-- Existing installations need a preparatory release that publishes their current archive before upgrading to a different schema version.
-- Serving and readiness are unchanged: webservers still use their embedded ontology and table prefix.
+- Migration and rollback require usable active and target archives before changing versioned tables.
+- Existing installations need an archive-publishing release before upgrading to a different schema version.
 
 ### Webserver prefix injection
 
@@ -414,19 +411,12 @@ not run, promoting it and immediately flipping itself `Outdated`. A `migrating` 
 running dispatcher embeds parks (visible in `migrating_age_seconds`) until one that embeds it
 runs or an operator aborts it.
 
-When completion is detected:
+The checker validates the target archive under the migration lock before changing views or version metadata.
+An invalid archive leaves both versions and the campaign unchanged; the next scheduled check retries.
 
-1. The target ontology archive is loaded and validated while the migration lock is held.
-2. One synchronous insert marks the target `active` and all previous active versions `retired`.
-3. The `gkg_schema_migration_completed_total` counter is incremented.
-
-If archive validation fails, the old active version and the migration campaign remain unchanged.
-The next scheduled check retries; restoring the correct archive does not require restarting the dispatcher.
-Retained-table rollback uses the same status-write operation. This removes the gap between separate
-retirement and activation writes; it does not make archive storage, view changes, and version metadata a distributed transaction.
-The version table has no partition key. ClickHouse's
-[single-block insert guarantee](https://clickhouse.com/docs/guides/developer/transactional)
-applies to the status batch, not to all steps of the migration.
+Promotion and retained-table rollback change active/retired statuses in one
+[synchronous insert](https://clickhouse.com/docs/guides/developer/transactional).
+Archive storage and view changes are not transactional with that write. Promotion then clears the campaign.
 
 Webserver behavior on promotion is automatic: pods built for the new version flip to `Ready`
 on the next poll, and pods built for an older version detect `active > embedded` and exit via
@@ -490,8 +480,7 @@ Cleanup behavior:
 Deploying an older binary is the rollback mechanism: when the dispatcher finds `active >
 SCHEMA_VERSION`, `schema::migration::run_rollback` rolls back to the embedded version
 automatically, after taking the migration lock and re-checking that another pod hasn't already
-done it. Dispatcher startup validates both the active archive and its own published target archive
-before entering this path. The rollback picks between two cases based on table-set *completeness* rather than
+done it. The rollback picks between two cases based on table-set *completeness* rather than
 `gkg_schema_version` status, since status rows can lag under concurrent writers: GC
 (`reconcile_dead_versions`) drops a dead version's objects one by one and only marks it `dropped`
 once every drop succeeds, so a version can be left `retired` with some but not all of its objects
