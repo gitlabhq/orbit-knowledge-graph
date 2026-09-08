@@ -1,0 +1,18 @@
+description: Partial redaction returns only allowed IDs
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000},
+                 "columns": ["username"]}],
+      "limit": 10
+    }
+redaction:
+  allow:
+    user: [1, 3]
+expect:
+  node_count: 2
+  node_ids:
+    User: [1, 3]
+  node_absent:
+    User: [2, 5]

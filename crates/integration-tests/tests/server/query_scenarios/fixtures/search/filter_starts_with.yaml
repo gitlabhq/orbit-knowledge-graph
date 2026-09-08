@@ -1,0 +1,16 @@
+description: starts_with filter returns prefix matches
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000},
+                 "columns": ["username"],
+                 "filters": {"username": {"starts_with": "ali"}}}],
+      "limit": 10
+    }
+expect:
+  node_count: 1
+  nodes:
+    - entity: User
+      id: 1
+      properties: { username: alice }

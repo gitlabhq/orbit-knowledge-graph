@@ -1,0 +1,18 @@
+description: Project search returns correct properties
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [{"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000},
+                 "columns": ["name", "visibility_level"]}],
+      "limit": 10
+    }
+expect:
+  node_count: 6
+  nodes:
+    - entity: Project
+      id: 1000
+      properties: { name: Public Project, visibility_level: public }
+    - entity: Project
+      id: 1003
+      properties: { name: Secret Project, visibility_level: private }

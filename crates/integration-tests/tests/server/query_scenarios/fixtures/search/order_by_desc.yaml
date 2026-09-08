@@ -1,0 +1,14 @@
+description: Descending order_by reverses result ordering
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000},
+                 "columns": ["username"]}],
+      "order_by": "-u.id",
+      "limit": 10
+    }
+expect:
+  node_count: 7
+  node_order:
+    User: [7, 6, 5, 4, 3, 2, 1]

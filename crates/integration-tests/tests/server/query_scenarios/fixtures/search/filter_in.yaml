@@ -1,0 +1,14 @@
+description: IN filter returns rows matching any listed value
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [{"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000},
+                 "columns": ["name", "visibility_level"],
+                 "filters": {"visibility_level": {"in": ["public", "internal"]}}}],
+      "limit": 10
+    }
+expect:
+  node_count: 4
+  node_ids:
+    Project: [1000, 1002, 1004, 1010]

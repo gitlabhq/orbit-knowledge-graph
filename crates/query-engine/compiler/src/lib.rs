@@ -82,6 +82,42 @@ use std::sync::Arc;
 
 use config::CompilerCtx as _;
 
+/// Query frontend selector. Each variant maps to a compiler pipeline preset.
+///
+/// `Json` uses the full `run_clickhouse` pipeline (validate through codegen).
+/// Future variants (e.g. Cypher) would use a preset starting at `normalize`
+/// with a pre-built [`Input`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Frontend {
+    Json,
+}
+
+impl Frontend {
+    pub fn compile(
+        self,
+        query: &str,
+        ontology: &Ontology,
+        security: &SecurityContext,
+    ) -> Result<CompiledQueryContext> {
+        match self {
+            Frontend::Json => compile(query, ontology, security),
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Frontend::Json => "json",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "json" => Some(Self::Json),
+            _ => None,
+        }
+    }
+}
+
 /// Compile a JSON query into a [`CompiledQueryContext`].
 ///
 /// The context contains the parameterized SQL, bind parameters, result context

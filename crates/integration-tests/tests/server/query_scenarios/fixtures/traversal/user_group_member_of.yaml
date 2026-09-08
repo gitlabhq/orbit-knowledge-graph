@@ -1,0 +1,36 @@
+description: User-Group MEMBER_OF traversal returns correct pairs and edges
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+        {"id": "g", "entity": "Group", "columns": ["name"]}
+      ],
+      "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+      "limit": 20
+    }
+expect:
+  node_count: 9
+  edge_set:
+    MEMBER_OF:
+      - [1, 100]
+      - [1, 102]
+      - [2, 100]
+      - [3, 101]
+      - [4, 101]
+      - [4, 102]
+      - [5, 101]
+      - [6, 100]
+      - [6, 101]
+  referential_integrity: true
+  nodes:
+    - entity: User
+      id: 1
+      properties: { username: alice }
+    - entity: Group
+      id: 100
+      properties: { name: Public Group }
+    - entity: Group
+      id: 101
+      properties: { name: Private Group }

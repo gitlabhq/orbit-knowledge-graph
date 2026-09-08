@@ -16,6 +16,7 @@ mod server {
     pub mod graph_status;
     pub mod grpc_tls;
     pub mod hydration;
+    pub mod query_scenarios;
     pub mod redaction;
     pub mod schema_readiness;
     pub mod telemetry;

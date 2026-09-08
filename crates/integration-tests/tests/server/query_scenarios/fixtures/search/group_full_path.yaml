@@ -1,0 +1,24 @@
+description: Group full_path reflects namespace hierarchy
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [{"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000},
+                 "columns": ["name", "full_path"]}],
+      "order_by": "g.id",
+      "limit": 10
+    }
+expect:
+  node_count: 5
+  node_order:
+    Group: [100, 101, 102, 200, 300]
+  nodes:
+    - entity: Group
+      id: 100
+      properties: { full_path: public-group }
+    - entity: Group
+      id: 200
+      properties: { full_path: public-group/deep-a }
+    - entity: Group
+      id: 300
+      properties: { full_path: public-group/deep-a/deep-b }

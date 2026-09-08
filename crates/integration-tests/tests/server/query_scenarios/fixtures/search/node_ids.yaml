@@ -1,0 +1,21 @@
+description: node_ids returns only specified IDs
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [{"id": "g", "entity": "Group", "columns": ["name"], "node_ids": [100, 102]}],
+      "limit": 10
+    }
+expect:
+  node_count: 2
+  node_ids:
+    Group: [100, 102]
+  nodes:
+    - entity: Group
+      id: 100
+      properties: { name: Public Group }
+    - entity: Group
+      id: 102
+      properties: { name: Internal Group }
+  node_absent:
+    Group: [101]

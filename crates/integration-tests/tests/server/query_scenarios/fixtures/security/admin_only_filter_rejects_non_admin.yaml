@@ -1,0 +1,11 @@
+description: Non-admin filtering on is_admin rejects at compile time
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000},
+                 "filters": {"is_admin": true}}],
+      "limit": 10
+    }
+expect:
+  compile_error: true
