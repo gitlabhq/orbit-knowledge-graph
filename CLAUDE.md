@@ -34,6 +34,7 @@ CLI integration tests (concurrency, worktrees): `mise test:cli`.
 - **Agent-facing prompts are YAML.** Tool and command descriptions live as versioned YAML under `config/prompts/` (`remote/` = server, `local/` = CLI), embedded via rust-embed and build-time validated by `orbit-prompts`.
 - **Single binary, four modes.** `gkg-server --mode` runs as Webserver, Indexer, DispatchIndexing, or HealthCheck.
 - **Layered configuration.** `AppConfig` in `crates/orbit-server-config/` loads three sources (lowest to highest priority): `config/default.yaml`, K8s secret files from `/etc/secrets/`, and `GKG_*` environment variables (`__` separates nested keys, e.g. `GKG_GRAPH__DATABASE`). The CLI (`orbit`) has its own clap-based config and does not use `AppConfig`. See `docs/dev/runbooks/server_configuration.md` for full reference.
+- **Object storage is optional and config-driven.** The `object_storage` section of `AppConfig` names one bucket on AWS S3, an S3-compatible store, or GCS with an explicit auth mode; `orbit-object-storage` turns it into an `object_store` client. Runtime identity (Workload Identity, IRSA) is the default; keys come from `/etc/secrets/object_storage/`. See `docs/design-documents/object_storage.md`.
 - **Siphon and NATS are external.** [Siphon](https://gitlab.com/gitlab-org/analytics-section/siphon) (Go, Analytics team) and NATS are consumed, not owned. Use `/related-repositories` for local checkouts.
 
 ## What CI enforces

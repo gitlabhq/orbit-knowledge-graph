@@ -441,6 +441,68 @@ When enabled, every metered Orbit query (`mcp`, `rest` source types) is checked 
 | `billing.quota.api_user` | `GKG_BILLING__QUOTA__API_USER` | None | CDot admin email. Mounted from `/etc/secrets/billing/quota/api_user`. |
 | `billing.quota.api_token` | `GKG_BILLING__QUOTA__API_TOKEN` | None | CDot admin token. Mounted from `/etc/secrets/billing/quota/api_token`. |
 
+## Object storage
+
+Optional. When the `object_storage` section is absent, Orbit opens no object store. The section
+describes one bucket on AWS S3, an S3-compatible store (MinIO, Ceph RGW, Hetzner Object Storage) or
+Google Cloud Storage, and how the process authenticates to it. `orbit-object-storage` turns the
+section into an `object_store` client; see [the design doc](../../design-documents/object_storage.md).
+
+Prefer runtime identity over keys: GKE Workload Identity on GitLab.com, IRSA or EKS Pod Identity on
+AWS. Static keys and service account JSON keys are for installations without a workload identity and
+belong under `/etc/secrets/object_storage/`, not in the YAML. The Helm chart does not expose object
+storage values yet.
+
+| Config path | Env var | Default | Description |
+|-------------|---------|---------|-------------|
+| `object_storage.provider` | `GKG_OBJECT_STORAGE__PROVIDER` | (required) | `s3` for AWS S3 and S3-compatible stores, or `gcs`. |
+| `object_storage.bucket` | `GKG_OBJECT_STORAGE__BUCKET` | (required) | Bucket name. Orbit never creates buckets. |
+| `object_storage.prefix` | `GKG_OBJECT_STORAGE__PREFIX` | None | Key prefix. Every object Orbit reads or writes lives under it. |
+| `object_storage.s3.region` | `GKG_OBJECT_STORAGE__S3__REGION` | None | Required for AWS S3 when `endpoint` is unset. Signing region for S3-compatible stores; Hetzner uses the location code, for example `fsn1`. |
+| `object_storage.s3.endpoint` | `GKG_OBJECT_STORAGE__S3__ENDPOINT` | None | Service endpoint of an S3-compatible store, without the bucket host. Leave unset for AWS S3. |
+| `object_storage.s3.path_style` | `GKG_OBJECT_STORAGE__S3__PATH_STYLE` | `false` | `true` addresses `endpoint/bucket/key`, `false` addresses `bucket.endpoint/key`. MinIO and Ceph RGW usually need `true`. |
+| `object_storage.s3.auth` | `GKG_OBJECT_STORAGE__S3__AUTH` | `identity` | `identity`: IRSA, EKS Pod Identity, ECS task role, EC2 instance profile or `AWS_*` environment variables. `static`: the key pair below. |
+| `object_storage.s3.access_key_id` | `GKG_OBJECT_STORAGE__S3__ACCESS_KEY_ID` | None | Static auth only. Mounted from `/etc/secrets/object_storage/s3/access_key_id`. |
+| `object_storage.s3.secret_access_key` | `GKG_OBJECT_STORAGE__S3__SECRET_ACCESS_KEY` | None | Static auth only. Mounted from `/etc/secrets/object_storage/s3/secret_access_key`. |
+| `object_storage.s3.session_token` | `GKG_OBJECT_STORAGE__S3__SESSION_TOKEN` | None | Static auth only, for temporary credentials. Mounted from `/etc/secrets/object_storage/s3/session_token`. |
+| `object_storage.s3.sse_kms_key_id` | `GKG_OBJECT_STORAGE__S3__SSE_KMS_KEY_ID` | None | Encrypt writes with this KMS key (SSE-KMS). Unset keeps the bucket default encryption. |
+| `object_storage.gcs.auth` | `GKG_OBJECT_STORAGE__GCS__AUTH` | `identity` | `identity`: Workload Identity or the GCE metadata server, or an Application Default Credentials file (`GOOGLE_APPLICATION_CREDENTIALS` or the gcloud default). `service_account_key`: a JSON key. |
+| `object_storage.gcs.service_account_key_path` | `GKG_OBJECT_STORAGE__GCS__SERVICE_ACCOUNT_KEY_PATH` | None | Path to a service account JSON key file. |
+| `object_storage.gcs.service_account_key` | `GKG_OBJECT_STORAGE__GCS__SERVICE_ACCOUNT_KEY` | None | Service account JSON key content. Mounted from `/etc/secrets/object_storage/gcs/service_account_key`. Set exactly one of the two key fields. |
+| `object_storage.gcs.endpoint` | `GKG_OBJECT_STORAGE__GCS__ENDPOINT` | None | Alternative API base URL for emulators or private endpoints. |
+| `object_storage.tls.ca_cert_path` | `GKG_OBJECT_STORAGE__TLS__CA_CERT_PATH` | None | PEM bundle of extra root certificates for stores behind a private CA. Added to the system trust store, not replacing it. |
+| `object_storage.tls.allow_http` | `GKG_OBJECT_STORAGE__TLS__ALLOW_HTTP` | `false` | Permit `http://` endpoints. Local development only. |
+| `object_storage.http.connect_timeout_secs` | | `5` | TCP and TLS connect timeout. |
+| `object_storage.http.request_timeout_secs` | | `30` | Timeout for one HTTP request, not for a whole multipart upload. |
+| `object_storage.retry.max_retries` | | `10` | Retries on 5xx, 429 and connection errors. |
+| `object_storage.retry.retry_timeout_secs` | | `180` | Total time budget for one operation including retries. Keep below 300: retried requests reuse the original signature. |
+| `object_storage.retry.max_backoff_secs` | | `15` | Upper bound of the exponential backoff. |
+
+Startup validation rejects: a missing region on AWS S3, `static` auth without both keys, keys
+together with `identity` auth, a GCS key given both as a path and inline, an `http://` endpoint
+without `allow_http`, a configured section for the other provider, and referenced files that do not
+exist.
+
+Known limits of the client library: it does not read `~/.aws/config` profiles or SSO caches, and it
+does not accept `external_account` (Workload Identity Federation) credential files. In-cluster
+identity on GKE and EKS is not affected.
+
+```yaml
+# GitLab.com staging: Workload Identity, no credential in the config
+object_storage:
+  provider: gcs
+  bucket: gitlab-orbit-stg-storage
+  prefix: orbit
+```
+
+More shapes (AWS with identity or static keys, MinIO behind a private CA, Hetzner) are in
+`crates/object-storage/samples/`. Check any of them against a real bucket with the probe, which loads
+the file through the same three layers as the server:
+
+```shell
+cargo run -p orbit-object-storage --bin probe -- --config crates/object-storage/samples/minio.yaml --secrets-dir /etc/secrets
+```
+
 ## Health check
 
 | Config path | Default | Description |
