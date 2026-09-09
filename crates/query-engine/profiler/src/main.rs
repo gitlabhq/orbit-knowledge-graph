@@ -19,7 +19,7 @@ use tracing_subscriber::{EnvFilter, Layer};
 use executor::enrich_output;
 use formatters::{GoonFormatter, GraphFormatter, ResultFormatter};
 use orbit_server::pipeline::PathResolver;
-use orbit_server_config::{PathResolverConfig, ProfilingConfig};
+use orbit_server_config::{AppConfig, ProfilingConfig};
 use output::{ProfilerOutput, build_output};
 use service::ProfilerPipelineService;
 
@@ -434,7 +434,8 @@ async fn main() -> Result<()> {
         enabled: true,
         explain: cli.explain,
         instance_health: cli.health,
-        ..Default::default()
+        query_log: false,
+        processors: false,
     };
 
     if cli.raw_sql {
@@ -462,7 +463,7 @@ async fn main() -> Result<()> {
         PathResolver::new(
             Arc::clone(&client),
             &ontology,
-            &PathResolverConfig::default(),
+            &AppConfig::embedded_defaults().path_resolver,
         )
         .await,
     ));

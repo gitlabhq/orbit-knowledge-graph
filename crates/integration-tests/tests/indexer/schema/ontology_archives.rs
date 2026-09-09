@@ -120,15 +120,16 @@ struct TestContext {
 impl TestContext {
     async fn new() -> Self {
         let (server, url) = start_nats().await;
+        let defaults = orbit_server_config::AppConfig::embedded_defaults();
         let config = DispatcherConfig {
             nats: NatsConfiguration {
                 url,
-                ..Default::default()
+                ..defaults.nats
             },
-            graph: Default::default(),
-            datalake: Default::default(),
-            schedule: Default::default(),
-            schema: Default::default(),
+            graph: defaults.graph,
+            datalake: defaults.datalake,
+            schedule: defaults.schedule,
+            schema: defaults.schema,
             health_bind_address: "127.0.0.1:0".parse().unwrap(),
         };
         Self { server, config }

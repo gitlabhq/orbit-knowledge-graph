@@ -134,6 +134,7 @@ impl WorkerPool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testkit::builders::test_engine_configuration;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
 
@@ -170,7 +171,7 @@ mod tests {
     async fn test_global_semaphore_limits_concurrent_workers() {
         let config = EngineConfiguration {
             max_concurrent_workers: Some(2),
-            ..Default::default()
+            ..test_engine_configuration()
         };
 
         let max =
@@ -189,7 +190,7 @@ mod tests {
         let config = EngineConfiguration {
             max_concurrent_workers: Some(10),
             concurrency_groups: HashMap::from([("limited".into(), 2)]),
-            ..Default::default()
+            ..test_engine_configuration()
         };
 
         let max = measure_max_concurrency(
@@ -211,7 +212,7 @@ mod tests {
         let pool = Arc::new(WorkerPool::new(
             &EngineConfiguration {
                 max_concurrent_workers: Some(1),
-                ..Default::default()
+                ..test_engine_configuration()
             },
             test_metrics(),
         ));
@@ -232,7 +233,7 @@ mod tests {
         let config = EngineConfiguration {
             max_concurrent_workers: Some(3),
             concurrency_groups: HashMap::from([("group-a".into(), 2)]),
-            ..Default::default()
+            ..test_engine_configuration()
         };
         let pool = Arc::new(WorkerPool::new(&config, test_metrics()));
 
@@ -299,7 +300,7 @@ mod tests {
         let config = EngineConfiguration {
             max_concurrent_workers: Some(2),
             concurrency_groups: HashMap::from([("group-a".into(), 1)]),
-            ..Default::default()
+            ..test_engine_configuration()
         };
         let pool = Arc::new(WorkerPool::new(&config, test_metrics()));
 
@@ -335,7 +336,7 @@ mod tests {
         let config = EngineConfiguration {
             max_concurrent_workers: Some(2),
             concurrency_groups: HashMap::from([("known".into(), 1)]),
-            ..Default::default()
+            ..test_engine_configuration()
         };
 
         let max = measure_max_concurrency(
@@ -357,7 +358,7 @@ mod tests {
         let pool = Arc::new(WorkerPool::new(
             &EngineConfiguration {
                 max_concurrent_workers: Some(1),
-                ..Default::default()
+                ..test_engine_configuration()
             },
             test_metrics(),
         ));

@@ -17,11 +17,11 @@ pub enum Feature {}
 
 /// A feature flag scoped to root namespaces: `enabled` toggles it, an empty
 /// `namespaces` list means every namespace, otherwise only those ids.
-#[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema)]
-#[serde(default, deny_unknown_fields)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct FeatureScope {
     pub enabled: bool,
-    #[serde(deserialize_with = "deserialize_namespaces")]
+    #[serde(default, deserialize_with = "deserialize_namespaces")]
     pub namespaces: Vec<i64>,
 }
 

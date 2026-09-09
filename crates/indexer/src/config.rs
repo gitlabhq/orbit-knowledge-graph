@@ -1,55 +1,38 @@
 use std::net::SocketAddr;
 
 use orbit_server_config::{
-    AnalyticsConfig, ClickHouseConfiguration, EngineConfigError, EngineConfiguration,
+    AnalyticsConfig, AppConfig, ClickHouseConfiguration, EngineConfigError, EngineConfiguration,
     GitlabClientConfiguration, NatsConfiguration, ScheduleConfig, SchemaConfig,
 };
 use thiserror::Error;
 
 use crate::engine::handler::HandlerInitError;
 
-fn default_health_bind_address() -> SocketAddr {
-    "0.0.0.0:4202".parse().unwrap()
-}
-
-fn default_dispatcher_health_bind_address() -> SocketAddr {
-    "0.0.0.0:4203".parse().unwrap()
-}
-
-#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Debug)]
 pub struct IndexerConfig {
-    #[serde(default)]
     pub nats: NatsConfiguration,
-    #[serde(default)]
     pub graph: ClickHouseConfiguration,
-    #[serde(default)]
     pub datalake: ClickHouseConfiguration,
-    #[serde(default)]
     pub engine: EngineConfiguration,
-    #[serde(default)]
     pub gitlab: Option<GitlabClientConfiguration>,
-    #[serde(default)]
     pub schedule: ScheduleConfig,
-    #[serde(default = "default_health_bind_address")]
     pub health_bind_address: SocketAddr,
-    #[serde(default)]
     pub schema: SchemaConfig,
-    #[serde(default)]
     pub analytics: AnalyticsConfig,
 }
 
-impl Default for IndexerConfig {
-    fn default() -> Self {
+impl From<&AppConfig> for IndexerConfig {
+    fn from(config: &AppConfig) -> Self {
         Self {
-            nats: NatsConfiguration::default(),
-            graph: ClickHouseConfiguration::default(),
-            datalake: ClickHouseConfiguration::default(),
-            engine: EngineConfiguration::default(),
-            gitlab: None,
-            schedule: ScheduleConfig::default(),
-            health_bind_address: default_health_bind_address(),
-            schema: SchemaConfig::default(),
-            analytics: AnalyticsConfig::default(),
+            nats: config.nats.clone(),
+            graph: config.graph.clone(),
+            datalake: config.datalake.clone(),
+            engine: config.engine.clone(),
+            gitlab: config.gitlab_client_config(),
+            schedule: config.schedule.clone(),
+            health_bind_address: config.indexer_health_bind_address,
+            schema: config.schema.clone(),
+            analytics: config.analytics.clone(),
         }
     }
 }
@@ -87,20 +70,27 @@ pub enum IndexerError {
     Analytics(#[from] labkit_events::Error),
 }
 
-#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Debug)]
 pub struct DispatcherConfig {
-    #[serde(default)]
     pub nats: NatsConfiguration,
-    #[serde(default)]
     pub graph: ClickHouseConfiguration,
-    #[serde(default)]
     pub datalake: ClickHouseConfiguration,
-    #[serde(default)]
     pub schedule: ScheduleConfig,
-    #[serde(default)]
     pub schema: SchemaConfig,
-    #[serde(default = "default_dispatcher_health_bind_address")]
     pub health_bind_address: SocketAddr,
+}
+
+impl From<&AppConfig> for DispatcherConfig {
+    fn from(config: &AppConfig) -> Self {
+        Self {
+            nats: config.nats.clone(),
+            graph: config.graph.clone(),
+            datalake: config.datalake.clone(),
+            schedule: config.schedule.clone(),
+            schema: config.schema.clone(),
+            health_bind_address: config.dispatcher_health_bind_address,
+        }
+    }
 }
 
 #[derive(Debug, Error)]

@@ -212,7 +212,7 @@ async fn skips_oversized_go_parser_input_and_indexes_repository() {
         &clickhouse,
         orbit_server_config::CodeIndexingPipelineConfig {
             max_file_size_bytes: u64::MAX,
-            ..Default::default()
+            ..indexer::testkit::test_pipeline_configuration()
         },
     );
     let handler = deps.code_indexing_task_handler();
@@ -1370,7 +1370,7 @@ fn failing_writer() -> Arc<indexer::clickhouse::ClickHouseWriter> {
         indexer::clickhouse::ClickHouseWriter::new(
             orbit_server_config::ClickHouseConfiguration {
                 url: "http://127.0.0.1:1".into(),
-                ..Default::default()
+                ..orbit_server_config::AppConfig::embedded_defaults().graph
             },
             Arc::new(indexer::metrics::EngineMetrics::new()),
         )
@@ -1757,7 +1757,7 @@ async fn timed_out_job_writes_no_data() {
         &clickhouse,
         orbit_server_config::CodeIndexingPipelineConfig {
             job_timeout_secs: 1,
-            ..Default::default()
+            ..indexer::testkit::test_pipeline_configuration()
         },
     );
     let handler = deps.code_indexing_task_handler();
@@ -1854,7 +1854,7 @@ async fn disk_is_clean_after_a_timed_out_job() {
         &clickhouse,
         orbit_server_config::CodeIndexingPipelineConfig {
             job_timeout_secs: 1,
-            ..Default::default()
+            ..indexer::testkit::test_pipeline_configuration()
         },
     );
     let cache_dir = deps.cache_dir_path().to_path_buf();

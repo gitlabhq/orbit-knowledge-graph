@@ -72,7 +72,9 @@ impl ClickHouseWriter {
     #[cfg(any(test, feature = "testkit"))]
     pub fn noop() -> Self {
         Self {
-            client: ClickHouseConfiguration::default().build_client(),
+            client: orbit_server_config::AppConfig::embedded_defaults()
+                .graph
+                .build_client(),
             metrics: Arc::new(EngineMetrics::new()),
             noop: true,
         }

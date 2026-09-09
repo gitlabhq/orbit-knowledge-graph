@@ -492,6 +492,7 @@ mod tests {
     use crate::testkit::{MockLockService, MockNatsServices, TestEnvelopeFactory};
     use crate::types::Event;
     use ontology::Ontology;
+    use orbit_server_config::AppConfig;
 
     fn handler_context() -> HandlerContext {
         let mock_nats = Arc::new(MockNatsServices::new());
@@ -529,7 +530,7 @@ mod tests {
             Arc::clone(&datalake),
             Arc::clone(&checkpoint_store),
             test_metrics(),
-            Default::default(),
+            AppConfig::embedded_defaults().engine.datalake_retry,
         ));
         let subscription = match scope {
             EtlScope::Global => GlobalIndexingRequest::subscription(),

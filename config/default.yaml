@@ -1,15 +1,25 @@
-# Local-development defaults, loaded automatically at startup (required: false).
-# Local overrides go in config/config.yaml (Git-ignored) or a file passed with --config.
-# Production values come from Helm chart values, GKG_* env vars, and /etc/secrets/ mounts.
+# Single source of truth for every server setting. Compiled into gkg-server (include_str!) as the
+# lowest configuration layer, so the binary never depends on this file being present at runtime.
+# Every section and scalar the server reads is declared here; the Rust config structs carry no
+# fallback values, so removing a key from this file fails startup with a "missing field" error.
 #
-# Do not rename this file. The filename "default" is a deploy contract: the Helm chart
-# (orbit-helm-charts) renders the runtime config into a ConfigMap keyed `default.yaml` mounted
-# at /app/config, and the loader reads it via `config::File::with_name("config/default")`
-# (crates/orbit-server-config/src/app.rs). Renaming breaks config loading in every deployed pod.
+# Overrides, in increasing priority: an on-disk config/default.yaml (compatibility overlay for the
+# Helm chart's ConfigMap key), the overlay file (--config <path>, else config/config.yaml when
+# present), K8s secret files under /etc/secrets/, and GKG_* environment variables.
+#
+# The values below are deployment defaults: what any environment gets when nothing overrides them.
+# They must equal the settings a production pod would run on, so this file can underlay a partial
+# Helm ConfigMap without changing behaviour. config-rs deep-merges maps, so a map entry here that
+# the ConfigMap does not set leaks into production; keep the maps below empty unless the entry is a
+# genuine universal default. Local-development-only tuning lives in config/dev.yaml (loaded by the
+# mise dev tasks via --config), not here.
 
 bind_address: "127.0.0.1:4200"
 grpc_bind_address: "127.0.0.1:50054"
+indexer_health_bind_address: "0.0.0.0:4202"
+dispatcher_health_bind_address: "0.0.0.0:4203"
 jwt_clock_skew_secs: 60
+# health_check_url: "http://localhost:4201"
 
 nats:
   url: "localhost:4222"
@@ -18,59 +28,79 @@ nats:
   # tls_ca_cert_path: "/etc/nats/ca.pem"
   # tls_cert_path: "/etc/nats/client.pem"
   # tls_key_path: "/etc/nats/client-key.pem"
-  # connection_timeout_secs: 10
-  # request_timeout_secs: 5
-  # ack_wait_secs: 300
-  # max_deliver: 5
-  # subscription_buffer_size: 100
-  # consumer_name: null
-  # batch_size: 10
-  # auto_create_streams: true
-  # stream_replicas: 1
-  # release_gc_idle_threshold_secs: 3600
-  stream_max_age_secs: 14400
-  # stream_max_bytes: null
-  # stream_max_messages: null
-  # consumer_inactive_threshold_secs: 3600
+  connection_timeout_secs: 10
+  request_timeout_secs: 5
+  ack_wait_secs: 300
+  max_deliver: 5                   # unset = unlimited redeliveries
+  subscription_buffer_size: 100
+  # consumer_name: ""              # unset = ephemeral consumer
+  batch_size: 10
+  auto_create_streams: true
+  stream_replicas: 1               # production: 3
+  stream_max_age_secs: 14400       # unset = messages never age out
+  # stream_max_bytes: 0            # unset = unlimited
+  # stream_max_messages: 0         # unset = unlimited
+  fetch_expires_secs: 5
+  consumer_inactive_threshold_secs: 3600
+  release_gc_idle_threshold_secs: 3600
 
 datalake:
   url: "http://127.0.0.1:8123"
   database: default
   username: default
   # password: ""
-  session_settings:
-    max_execution_time: "900"
-    max_query_size: "10485760"
+  quorum_writes: false
+  session_settings: {}
+  insert_settings: {}
+  profiling:
+    enabled: false
+    explain: false
+    query_log: false
+    processors: false
+    instance_health: false
 
 graph:
   url: "http://127.0.0.1:8123"
   database: default
   username: default
   # password: ""
+  quorum_writes: false
+  # Universal graph defaults, also set by the Helm chart in production.
   session_settings:
-    optimize_on_insert: "0"
     max_query_size: "10485760"
   insert_settings:
-    async_insert: "1"
-    wait_for_async_insert: "1"
-    async_insert_deduplicate: "0"
+    optimize_on_insert: "0"
+  profiling:
+    enabled: false
+    explain: false
+    query_log: false
+    processors: false
+    instance_health: false
 
-# gitlab:
-#   base_url: "http://localhost:3000"
-#   jwt:
-#     signing_key: ""
-#     verifying_key: ""
+gitlab:
+  # base_url: "http://localhost:3000"
+  # resolve_host: ""
+  jwt: {}
+    # signing_key: ""
+    # verifying_key: ""
 
-# tls:
-#   cert_path: "/path/to/cert.pem"
-#   key_path: "/path/to/key.pem"
+tls: {}
+  # cert_path: "/path/to/cert.pem"
+  # key_path: "/path/to/key.pem"
 
 engine:
+  # max_concurrent_workers: 16     # unset = derived from container CPU count and memory limit
+  concurrency_groups: {}           # empty = derived from `modules` and the worker cap
+  topics: {}                       # sparse per-topic overrides of the module-declared policies
+  modules: [sdlc, code, namespace_deletion]
+  datalake_retry:
+    halving_initial_block_size: 100000
+    halving_min_block_size: 1024
   handlers:
     entity-handler:
+      # datalake_batch_size: 500000  # unset = derived from the container memory limit
       system_notes_resolve_lookup_batch_size: 1000
-      batch_size_overrides:
-        WorkItem: 50000
+      batch_size_overrides: {}       # per-entity overrides; deployments set their own
     code-indexing-task:
       pipeline:
         max_file_size_bytes: 5000000
@@ -92,6 +122,32 @@ engine:
         write_max_flush_age_secs: 120
         write_max_concurrent: 4
         small_repo_max_files: 650
+        # small_indexing_slots: 6  # unset = derived from container CPU count and memory limit
+        # big_indexing_slots: 2    # unset = derived from container CPU count and memory limit
+
+# Six-field cron expressions: sec min hour dom mon dow.
+schedule:
+  tasks:
+    global:
+      cron: "0 */1 * * * *"
+    namespace:
+      cron: "*/30 * * * * *"
+      sweep_interval_secs: 3600
+    siphon:
+      events_stream_name: "siphon_stream_main_db"
+      batch_size: 100
+    code-backfill:
+      cron: "0 */1 * * * *"
+      publish_window: 200000
+    table-cleanup:
+      cron: "0 0 3 * * 0"
+    namespace-deletion:
+      cron: "0 0 3 * * *"
+    migration-completion:
+      cron: "0 */1 * * * *"
+    stale-edge-reconciliation:
+      cron: "0 */30 * * * *"
+      lookback_secs: 3600
 
 health_check:
   bind_address: "0.0.0.0:4201"
@@ -109,22 +165,23 @@ grpc:
   stream_timeout_secs: 60
   max_header_list_size_bytes: 65536 # 64 KiB; tonic/hyper default of 16 KiB is too small for GitLab JWTs carrying many traversal IDs
 
+# `default` applies to every query type; a sibling block keyed by query type (e.g. `path_finding`,
+# `aggregation`) overrides individual fields for that type only. Optional query knobs (cache flags,
+# per-type overrides, memory caps) stay unset here so a deployment opts into them explicitly.
 query:
   default:
     max_execution_time: 30
-    use_query_cache: false
+    max_ast_elements: 1000000          # 20x ClickHouse default, matches Siphon
+    max_expanded_ast_elements: 10000000
+    max_ast_depth: 10000
     query_cache_ttl: 60
-    graph_query_cache_enabled: false
-    graph_query_cache_ttl: 60
-  path_finding:
-    max_execution_time: 15
-    max_memory_usage: 16106127360
 
 path_resolver:
   cache_ttl_secs: 60
   cache_capacity: 10000
 
 metrics:
+  # log_level: "info"
   otel:
     enabled: false
     endpoint: "http://localhost:4317"
@@ -154,3 +211,5 @@ billing:
     fallback_cache_ttl_secs: 3600
     # api_user: ""
     # api_token: ""
+
+features: {}

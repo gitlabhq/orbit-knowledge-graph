@@ -70,7 +70,7 @@ async fn start_nats_container() -> (testcontainers::ContainerAsync<Nats>, String
 fn default_config(url: &str) -> NatsConfiguration {
     NatsConfiguration {
         url: url.to_string(),
-        ..Default::default()
+        ..orbit_server_config::AppConfig::embedded_defaults().nats
     }
 }
 
@@ -516,7 +516,7 @@ async fn auto_creates_stream_with_configured_settings() {
         auto_create_streams: true,
         stream_replicas: 1,
         stream_max_age_secs: Some(3600),
-        ..Default::default()
+        ..orbit_server_config::AppConfig::embedded_defaults().nats
     };
 
     let broker = connect_broker(&config).await;
@@ -547,7 +547,7 @@ async fn skips_creation_when_disabled() {
     let config = NatsConfiguration {
         url: url.clone(),
         auto_create_streams: false,
-        ..Default::default()
+        ..orbit_server_config::AppConfig::embedded_defaults().nats
     };
 
     let broker = connect_broker(&config).await;
@@ -571,7 +571,7 @@ async fn updates_stream_config_during_rolling_update() {
         url: url.clone(),
         auto_create_streams: true,
         stream_max_age_secs: Some(3600),
-        ..Default::default()
+        ..orbit_server_config::AppConfig::embedded_defaults().nats
     };
 
     let broker_old = connect_broker(&config_v1).await;
@@ -590,7 +590,7 @@ async fn updates_stream_config_during_rolling_update() {
         url: url.clone(),
         auto_create_streams: true,
         stream_max_age_secs: Some(7200),
-        ..Default::default()
+        ..orbit_server_config::AppConfig::embedded_defaults().nats
     };
 
     let broker_new = connect_broker(&config_v2).await;
@@ -643,7 +643,7 @@ async fn in_progress_prevents_redelivery() {
     let config = NatsConfiguration {
         url,
         ack_wait_secs: ack_wait.as_secs(),
-        ..Default::default()
+        ..orbit_server_config::AppConfig::embedded_defaults().nats
     };
 
     let broker = NatsBroker::connect(&config)
@@ -703,7 +703,7 @@ async fn subscribe_with_multi_level_wildcard_does_not_reject_durable_name() {
         url,
         auto_create_streams: true,
         consumer_name: Some("gkg-indexer".to_string()),
-        ..Default::default()
+        ..orbit_server_config::AppConfig::embedded_defaults().nats
     };
     let broker = connect_broker(&config).await;
 
@@ -878,7 +878,7 @@ async fn exhausted_message_blocks_redispatch_until_manually_deleted() {
         ack_wait_secs: ack_wait.as_secs(),
         max_deliver: Some(max_deliver),
         fetch_expires_secs: 1,
-        ..Default::default()
+        ..orbit_server_config::AppConfig::embedded_defaults().nats
     };
     let broker = connect_broker(&config).await;
 
@@ -951,7 +951,7 @@ async fn max_deliveries_reconciler_deletes_stuck_message_and_unblocks_subject() 
         ack_wait_secs: ack_wait.as_secs(),
         max_deliver: Some(max_deliver),
         fetch_expires_secs: 1,
-        ..Default::default()
+        ..orbit_server_config::AppConfig::embedded_defaults().nats
     };
     let broker = connect_broker(&config).await;
 

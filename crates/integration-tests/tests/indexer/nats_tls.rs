@@ -142,7 +142,7 @@ fn client_config(pki: &TestPki, url: &str, temp_dir: &TempDir) -> NatsConfigurat
         tls_ca_cert_path: Some(ca_path.to_str().unwrap().into()),
         tls_cert_path: Some(cert_path.to_str().unwrap().into()),
         tls_key_path: Some(key_path.to_str().unwrap().into()),
-        ..Default::default()
+        ..orbit_server_config::AppConfig::embedded_defaults().nats
     }
 }
 
@@ -243,7 +243,7 @@ async fn mtls_rejects_without_client_cert() {
     let config = NatsConfiguration {
         url: url.to_string(),
         tls_ca_cert_path: Some(ca_path.to_str().unwrap().into()),
-        ..Default::default()
+        ..orbit_server_config::AppConfig::embedded_defaults().nats
     };
 
     let result = NatsBroker::connect(&config).await;
@@ -279,7 +279,7 @@ async fn connect_fails_on_cert_without_key() {
     let config = NatsConfiguration {
         url: "localhost:4222".into(),
         tls_cert_path: Some(cert_path.to_str().unwrap().into()),
-        ..Default::default()
+        ..orbit_server_config::AppConfig::embedded_defaults().nats
     };
 
     let result = NatsBroker::connect(&config).await;
@@ -295,7 +295,7 @@ async fn connect_fails_on_missing_ca_file() {
     let config = NatsConfiguration {
         url: "localhost:4222".into(),
         tls_ca_cert_path: Some("/nonexistent/ca.pem".into()),
-        ..Default::default()
+        ..orbit_server_config::AppConfig::embedded_defaults().nats
     };
 
     let result = NatsBroker::connect(&config).await;

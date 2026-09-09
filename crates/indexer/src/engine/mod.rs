@@ -9,7 +9,8 @@
 //! use etl_engine::configuration::EngineConfiguration;
 //! use std::sync::Arc;
 //!
-//! let config = NatsConfiguration { url: "localhost:4222".into(), ..Default::default() };
+//! let app_config = AppConfig::load(None)?;
+//! let config = app_config.nats;
 //! let broker = Arc::new(NatsBroker::connect(&config).await?);
 //! let nats_services = Arc::new(NatsServicesImpl::new(broker.clone()));
 //!
@@ -20,7 +21,7 @@
 //!     .nats_services(nats_services)
 //!     .build();
 //!
-//! engine.run(&EngineConfiguration::default()).await?;
+//! engine.run(&app_config.engine).await?;
 //!
 //! // From another task:
 //! engine.stop();
@@ -555,6 +556,7 @@ async fn run_handlers(
 mod tests {
     use super::*;
     use crate::nats::ProgressNotifier;
+    use crate::testkit::builders::test_engine_configuration;
     use crate::testkit::mocks::{
         MockHandler, MockLockService, MockNatsServices, TestEnvelopeFactory,
     };
@@ -593,7 +595,7 @@ mod tests {
             });
 
         let envelope = TestEnvelopeFactory::with_attempt("payload", 1);
-        let runtime = test_runtime(&EngineConfiguration::default());
+        let runtime = test_runtime(&test_engine_configuration());
         let outcome = run_handlers(
             &handlers,
             &test_context(),
@@ -623,7 +625,7 @@ mod tests {
             });
 
         let envelope = TestEnvelopeFactory::with_attempt("payload", 3);
-        let runtime = test_runtime(&EngineConfiguration::default());
+        let runtime = test_runtime(&test_engine_configuration());
         let outcome = run_handlers(
             &handlers,
             &test_context(),
@@ -652,7 +654,7 @@ mod tests {
             });
 
         let envelope = TestEnvelopeFactory::with_attempt("payload", 3);
-        let runtime = test_runtime(&EngineConfiguration::default());
+        let runtime = test_runtime(&test_engine_configuration());
         let outcome = run_handlers(
             &handlers,
             &test_context(),
@@ -688,7 +690,7 @@ mod tests {
             });
 
         let envelope = TestEnvelopeFactory::with_attempt("payload", 3);
-        let runtime = test_runtime(&EngineConfiguration::default());
+        let runtime = test_runtime(&test_engine_configuration());
         let outcome = run_handlers(
             &handlers,
             &test_context(),
@@ -718,7 +720,7 @@ mod tests {
         let subscription = Subscription::new("stream", "subject");
 
         let envelope = TestEnvelopeFactory::with_attempt("payload", 1);
-        let runtime = test_runtime(&EngineConfiguration::default());
+        let runtime = test_runtime(&test_engine_configuration());
         let outcome = run_handlers(
             &handlers,
             &test_context(),
@@ -746,7 +748,7 @@ mod tests {
         let subscription = Subscription::new("stream", "subject");
 
         let envelope = TestEnvelopeFactory::simple("payload");
-        let runtime = test_runtime(&EngineConfiguration::default());
+        let runtime = test_runtime(&test_engine_configuration());
 
         let start = Instant::now();
         run_handlers(
@@ -786,7 +788,7 @@ mod tests {
         let subscription = Subscription::new("stream", "subject");
 
         let envelope = TestEnvelopeFactory::simple("payload");
-        let runtime = test_runtime(&EngineConfiguration::default());
+        let runtime = test_runtime(&test_engine_configuration());
         run_handlers(
             &handlers,
             &test_context(),
@@ -825,7 +827,7 @@ mod tests {
         let subscription = Subscription::new("stream", "subject");
 
         let envelope = TestEnvelopeFactory::simple("payload");
-        let runtime = test_runtime(&EngineConfiguration::default());
+        let runtime = test_runtime(&test_engine_configuration());
         let outcome = run_handlers(
             &handlers,
             &test_context(),
@@ -863,7 +865,7 @@ mod tests {
             });
 
         let envelope = TestEnvelopeFactory::with_attempt("payload", 1);
-        let runtime = test_runtime(&EngineConfiguration::default());
+        let runtime = test_runtime(&test_engine_configuration());
         let outcome = run_handlers(
             &handlers,
             &test_context(),
@@ -889,7 +891,7 @@ mod tests {
         let subscription = Subscription::new("stream", "subject");
 
         let envelope = TestEnvelopeFactory::simple("payload");
-        let runtime = test_runtime(&EngineConfiguration::default());
+        let runtime = test_runtime(&test_engine_configuration());
         let outcome = run_handlers(
             &handlers,
             &test_context(),
@@ -915,7 +917,7 @@ mod tests {
         let subscription = Subscription::new("stream", "subject");
 
         let envelope = TestEnvelopeFactory::simple("payload");
-        let runtime = test_runtime(&EngineConfiguration::default());
+        let runtime = test_runtime(&test_engine_configuration());
         let outcome = run_handlers(
             &handlers,
             &test_context(),
@@ -953,7 +955,7 @@ mod tests {
             });
 
         let envelope = TestEnvelopeFactory::with_attempt("payload", 1);
-        let runtime = test_runtime(&EngineConfiguration::default());
+        let runtime = test_runtime(&test_engine_configuration());
         let outcome = run_handlers(
             &handlers,
             &test_context(),
@@ -988,7 +990,7 @@ mod tests {
 
         let runtime = test_runtime(&EngineConfiguration {
             max_concurrent_workers: Some(max_inflight),
-            ..Default::default()
+            ..test_engine_configuration()
         });
 
         let (tx, rx) = tokio::sync::mpsc::channel::<usize>(total_messages);
@@ -1054,7 +1056,7 @@ mod tests {
     async fn handler_bypassing_worker_pool_runs_when_pool_exhausted() {
         let runtime = test_runtime(&EngineConfiguration {
             max_concurrent_workers: Some(1),
-            ..Default::default()
+            ..test_engine_configuration()
         });
 
         let _blocker = runtime

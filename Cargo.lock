@@ -5799,7 +5799,6 @@ dependencies = [
  "clickhouse",
  "clickhouse-client",
  "code-graph",
- "croner",
  "datafusion 54.1.0",
  "flate2",
  "futures",
