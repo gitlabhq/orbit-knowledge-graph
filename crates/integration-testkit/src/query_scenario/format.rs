@@ -40,12 +40,23 @@ pub enum PresetOr<T> {
 pub struct SecurityOverride {
     #[serde(default)]
     pub admin: Option<bool>,
+    /// Uniform paths (all share the same access_level).
     #[serde(default)]
     pub paths: Option<Vec<String>>,
+    /// Per-path access levels: `[{path: "1/100/", access_level: 20}]`
+    #[serde(default)]
+    pub authorized_paths: Option<Vec<AuthorizedPathSpec>>,
     #[serde(default)]
     pub org_id: Option<i64>,
     #[serde(default)]
     pub access_level: Option<u32>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AuthorizedPathSpec {
+    pub path: String,
+    pub access_level: u32,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -81,6 +92,12 @@ pub struct QueryExpect {
     pub groups: BTreeMap<String, GroupExpect>,
     #[serde(default)]
     pub empty_aggregation: bool,
+    /// Assert row count for ungrouped/property-grouped aggregation results.
+    #[serde(default)]
+    pub row_count: Option<usize>,
+    /// Assert values on rows by index: `[{index: 0, col: val}]`
+    #[serde(default)]
+    pub row_values: Vec<BTreeMap<String, serde_json::Value>>,
     #[serde(default)]
     pub sql_contains: Vec<String>,
     #[serde(default)]

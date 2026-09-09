@@ -443,6 +443,22 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
     if expect.referential_integrity {
         view.assert_referential_integrity();
     }
+    if let Some(n) = expect.row_count {
+        view.assert_row_count(n);
+    }
+    for (i, row) in expect.row_values.iter().enumerate() {
+        for (col, expected) in row {
+            match expected {
+                serde_json::Value::Number(n) if n.is_i64() => {
+                    view.assert_row_value_i64(i, col, n.as_i64().unwrap());
+                }
+                serde_json::Value::String(s) => {
+                    view.assert_row_value_str(i, col, s);
+                }
+                _ => panic!("{label}: unsupported row_values type for {col}"),
+            }
+        }
+    }
     if let Some(expected) = expect.has_more {
         let pagination = view.response.pagination.as_ref();
         assert!(
@@ -516,12 +532,18 @@ fn build_security(overrides: &Option<SecurityOverride>) -> SecurityContext {
         return SecurityContext::new(1, vec!["1/".into()]).unwrap();
     };
     let org = ov.org_id.unwrap_or(1);
-    let paths: Vec<String> = ov.paths.clone().unwrap_or_else(|| vec!["1/".into()]);
-    let access = ov.access_level.unwrap_or(AccessLevel::Reporter as u32);
-    let authorized: Vec<AuthorizedPath> = paths
-        .iter()
-        .map(|p| AuthorizedPath::new(p.as_str(), access))
-        .collect();
+    let authorized: Vec<AuthorizedPath> = if let Some(ap) = &ov.authorized_paths {
+        ap.iter()
+            .map(|a| AuthorizedPath::new(a.path.as_str(), a.access_level))
+            .collect()
+    } else {
+        let paths: Vec<String> = ov.paths.clone().unwrap_or_else(|| vec!["1/".into()]);
+        let access = ov.access_level.unwrap_or(AccessLevel::Reporter as u32);
+        paths
+            .iter()
+            .map(|p| AuthorizedPath::new(p.as_str(), access))
+            .collect()
+    };
 
     let mut ctx = SecurityContext::new_with_roles(org, authorized).unwrap();
     if let Some(true) = ov.admin {
