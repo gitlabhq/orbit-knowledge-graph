@@ -19,4 +19,4 @@ expect:
       count: 3
       ids: [4000, 4002, 4010]
       filters:
-        work_item_type: [issue, task]
+        work_item_type: { in: [issue, task] }

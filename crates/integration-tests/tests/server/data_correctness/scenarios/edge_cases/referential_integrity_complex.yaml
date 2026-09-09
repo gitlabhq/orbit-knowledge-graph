@@ -20,3 +20,6 @@ query:
 expect:
   node_count: 14
   referential_integrity: true
+  edge_exists:
+    MEMBER_OF: [[1, 100]]
+    CONTAINS: [[100, 1000]]

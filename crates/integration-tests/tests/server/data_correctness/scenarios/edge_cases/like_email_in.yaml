@@ -18,3 +18,5 @@ expect:
   nodes:
     User:
       count: 2
+      filters:
+        email: { in: ["alice@example.com", "bob@example.com"] }
