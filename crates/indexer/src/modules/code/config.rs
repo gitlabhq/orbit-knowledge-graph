@@ -12,6 +12,7 @@ pub struct CodeTableNames {
     pub file: String,
     pub definition: String,
     pub imported_symbol: String,
+    pub code_line: String,
     edge_tables: HashMap<String, String>,
     default_edge_table: String,
 }
@@ -47,6 +48,7 @@ impl CodeTableNames {
                 ontology.table_name("ImportedSymbol")?,
                 *SCHEMA_VERSION,
             ),
+            code_line: prefixed_table_name(ontology.table_name("CodeLine")?, *SCHEMA_VERSION),
             edge_tables,
             default_edge_table,
         })
@@ -77,11 +79,18 @@ impl CodeTableNames {
             &self.file,
             &self.definition,
             &self.imported_symbol,
+            &self.code_line,
         ]
     }
 
     /// Ontology node names backing [`Self::node_tables`], in the same order.
-    pub const NODE_KINDS: [&'static str; 4] = ["Directory", "File", "Definition", "ImportedSymbol"];
+    pub const NODE_KINDS: [&'static str; 5] = [
+        "Directory",
+        "File",
+        "Definition",
+        "ImportedSymbol",
+        "CodeLine",
+    ];
 }
 
 #[cfg(test)]

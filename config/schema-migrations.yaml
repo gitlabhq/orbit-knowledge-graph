@@ -16,6 +16,12 @@
 # note-gated `scope: none` entry, the certified output-neutral escape hatch. A
 # version with no entry is treated as "*", which also makes pruning old entries safe.
 migrations:
+- version: 94
+  scope: "*"
+  note: >-
+    New gl_code_line table (CodeLine ontology node, source_code domain) storing one
+    row per physical source line including its text; purely additive, so clone
+    carries every prior table intact and no indexed row is rewritten.
 - version: 93
   scope: "*"
   note: >-

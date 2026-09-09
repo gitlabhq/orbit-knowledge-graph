@@ -9,7 +9,7 @@ use orbit_server_config::CodeIndexingPipelineConfig;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tracing::{debug, info, warn};
 
-use super::arrow_converter::{IndexerConverter, IndexerEnvelope};
+use super::arrow_converter::{IndexerConverter, IndexerEnvelope, convert_code_lines};
 use super::checkpoint::{CodeCheckpointStore, CodeIndexingCheckpoint};
 use super::config::CodeTableNames;
 use super::metrics::{CodeMetrics, RecordStageError};
@@ -547,7 +547,7 @@ impl CodeIndexer {
         request: &IndexingRequest,
         repository: &CachedRepository,
         indexed_at: DateTime<Utc>,
-        config: PipelineConfig,
+        mut config: PipelineConfig,
     ) -> Result<
         (
             code_graph::v2::PipelineResult,
@@ -565,11 +565,19 @@ impl CodeIndexer {
             indexed_at,
         );
 
-        let converter: Arc<dyn code_graph::v2::GraphConverter> = Arc::new(IndexerConverter::new(
-            envelope,
-            &self.ontology,
-            self.table_names.clone(),
+        // A second envelope for the per-file line batches: the first is moved into
+        // the converter, and `IndexerEnvelope` is deliberately not `Clone`.
+        let line_envelope = Arc::new(IndexerEnvelope::new(
+            request.traversal_path.clone(),
+            request.project_id,
+            request.branch.clone(),
+            request.commit_sha.as_deref().unwrap_or("").to_string(),
+            indexed_at,
         ));
+        let indexer_converter =
+            IndexerConverter::new(envelope, &self.ontology, self.table_names.clone());
+        let line_specs = Arc::new(indexer_converter.code_line_specs().to_vec());
+        let converter: Arc<dyn code_graph::v2::GraphConverter> = Arc::new(indexer_converter);
 
         // remaining starts at 1: a sentinel the pipeline releases after the parse finishes, so
         // the commit can't finalize mid-stream even if every flushed part drains first.
@@ -628,6 +636,52 @@ impl CodeIndexer {
                 Ok(())
             }
         });
+
+        let on_file_lines: code_graph::v2::FileLinesObserver = Arc::new({
+            let writer = self.writer.clone();
+            let token = commit.clone();
+            let table = self.table_names.code_line.clone();
+            let metered_bytes = metered_bytes.clone();
+            move |path: &str, text: &str| {
+                let batch = match convert_code_lines(&line_envelope, &line_specs, path, text) {
+                    Ok(batch) => batch,
+                    Err(e) => {
+                        tracing::error!(path, error = %e, "failed to build code_line batch");
+                        return;
+                    }
+                };
+                if batch.num_rows() == 0 {
+                    return;
+                }
+                match orbit_utils::arrow::logical_byte_size(&batch) {
+                    Ok(n) => {
+                        metered_bytes.fetch_add(n, Ordering::Relaxed);
+                    }
+                    Err(e) => {
+                        tracing::error!(table, error = %e, "code_line batch has no logical-byte-size rule; counting 0 bytes");
+                    }
+                }
+
+                let mut offset = 0;
+                while offset < batch.num_rows() {
+                    let len = (batch.num_rows() - offset).min(max_rows);
+                    token.remaining.fetch_add(1, Ordering::AcqRel);
+                    let slice_token: Arc<dyn FlushToken> = token.clone();
+                    if let Err(e) =
+                        writer.submit(table.clone(), batch.slice(offset, len), slice_token)
+                    {
+                        // The observer cannot fail the pipeline, so balance the count we
+                        // just added and fail the commit; the project is re-indexed.
+                        tracing::error!(table, error = %e, "failed to submit code_line part");
+                        FlushToken::on_failed(token.clone());
+                        return;
+                    }
+                    offset += len;
+                }
+            }
+        });
+
+        config.on_file_lines = Some(on_file_lines);
 
         let code_graph_start = Instant::now();
         let repo_dir = repository.path().to_path_buf();

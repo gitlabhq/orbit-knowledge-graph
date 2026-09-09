@@ -510,10 +510,19 @@ pub struct PipelineConfig {
     /// Called once per successfully-parsed file with its per-phase CPU time, so
     /// the consumer can record a distribution. Fires from parallel workers.
     pub on_phase_cpu: Option<PhaseCpuObserver>,
+    /// Called once per successfully-parsed file with its full text. The source
+    /// buffer dies at the end of the parse closure, so a consumer that needs
+    /// line-level content must copy what it wants here. Fires from parallel
+    /// workers; keep the work per call small.
+    pub on_file_lines: Option<FileLinesObserver>,
 }
 
 /// Observer for per-file parse/walk/ssa CPU time. See [`PipelineConfig::on_phase_cpu`].
 pub type PhaseCpuObserver = Arc<dyn Fn(Language, crate::v2::dsl::engine::PhaseCpu) + Send + Sync>;
+
+/// Observer for the full text of each parsed file, as `(repo-relative path, text)`.
+/// See [`PipelineConfig::on_file_lines`].
+pub type FileLinesObserver = Arc<dyn Fn(&str, &str) + Send + Sync>;
 
 impl Default for PipelineConfig {
     fn default() -> Self {
@@ -530,6 +539,7 @@ impl Default for PipelineConfig {
             emit_file_inventory_graph: false,
             on_progress: None,
             on_phase_cpu: None,
+            on_file_lines: None,
         }
     }
 }
@@ -1226,6 +1236,14 @@ impl FamilyPipeline {
 
                 if let Some(cb) = &ctx.config.on_phase_cpu {
                     cb(f.language, result.phase_cpu);
+                }
+
+                // The parse above already validated UTF-8, so this only fails
+                // for a language pipeline that tolerates invalid bytes.
+                if let Some(cb) = &ctx.config.on_file_lines
+                    && let Ok(text) = std::str::from_utf8(&source)
+                {
+                    cb(&f.path, text);
                 }
 
                 let refs = crate::v2::refpack::RefPack::from_refs(&result.refs);

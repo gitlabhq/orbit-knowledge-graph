@@ -608,6 +608,58 @@ fn compute_branch_id(project_id: i64, branch: &str) -> i64 {
     (hasher.finish() & 0x7FFF_FFFF_FFFF_FFFF) as i64
 }
 
+fn compute_code_line_id(project_id: i64, branch: &str, path: &str, line_number: i64) -> i64 {
+    let mut hasher = rustc_hash::FxHasher::default();
+    project_id.hash(&mut hasher);
+    branch.hash(&mut hasher);
+    "code_line".hash(&mut hasher);
+    path.hash(&mut hasher);
+    line_number.hash(&mut hasher);
+    // Mask clears the sign bit so the result is always a positive i64.
+    (hasher.finish() & 0x7FFF_FFFF_FFFF_FFFF) as i64
+}
+
+struct CodeLineRow<'a> {
+    path: &'a str,
+    line_number: i64,
+    content: &'a str,
+    id: i64,
+}
+
+impl<C: RowEnvelope> AsRecordBatch<C> for CodeLineRow<'_> {
+    fn write_row(&self, b: &mut BatchBuilder, ctx: &C) -> Result<(), ArrowError> {
+        ctx.write_header(b, self.id)?;
+        b.col("path")?.push_str(self.path)?;
+        b.col("line_number")?.push_int(self.line_number)?;
+        b.col("content")?.push_str(self.content)?;
+        Ok(())
+    }
+}
+
+/// One row per physical line of `text`. Line numbers are 1-based and the
+/// trailing newline is not part of `content`.
+pub fn convert_code_lines(
+    env: &IndexerEnvelope,
+    specs: &[ColumnSpec],
+    path: &str,
+    text: &str,
+) -> Result<RecordBatch, ArrowError> {
+    let rows: Vec<CodeLineRow<'_>> = text
+        .lines()
+        .enumerate()
+        .map(|(idx, content)| {
+            let line_number = idx as i64 + 1;
+            CodeLineRow {
+                path,
+                line_number,
+                content,
+                id: compute_code_line_id(env.project_id, &env.branch, path, line_number),
+            }
+        })
+        .collect();
+    CodeLineRow::to_record_batch(&rows, specs, env)
+}
+
 /// Per-node-kind list of `(tag_key, property_name)` pairs derived from
 /// the ontology's denormalization declarations. Deduplicated because the
 /// ontology expands one declaration per edge relationship, but the tag
@@ -634,6 +686,7 @@ pub struct ConverterSpecs {
     file: Vec<ColumnSpec>,
     definition: Vec<ColumnSpec>,
     imported_symbol: Vec<ColumnSpec>,
+    code_line: Vec<ColumnSpec>,
     edge: Vec<ColumnSpec>,
     tag_properties: TagProperties,
 }
@@ -646,6 +699,7 @@ impl ConverterSpecs {
             file: entity_specs(ontology, "File"),
             definition: entity_specs(ontology, "Definition"),
             imported_symbol: entity_specs(ontology, "ImportedSymbol"),
+            code_line: entity_specs(ontology, "CodeLine"),
             edge: edge_specs(ontology),
             tag_properties: build_tag_properties(ontology),
         }
@@ -669,6 +723,12 @@ impl IndexerConverter {
             table_names,
             specs: ConverterSpecs::from_ontology(ontology),
         }
+    }
+}
+
+impl IndexerConverter {
+    pub fn code_line_specs(&self) -> &[ColumnSpec] {
+        &self.specs.code_line
     }
 }
 

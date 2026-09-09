@@ -20,6 +20,62 @@ use super::helpers::*;
 use orbit_utils::traversal_path::TraversalPath;
 
 #[tokio::test]
+async fn indexes_code_lines() {
+    let project_id: i64 = 4242;
+    let commit_sha = "def456";
+    let traversal_path = "1/4242/";
+    let path = "src/App.java";
+    let source = "public class App {\n    int x = 1;\n}";
+
+    let clickhouse = integration_testkit::TestContext::new(&[
+        integration_testkit::SIPHON_SCHEMA_SQL,
+        *integration_testkit::GRAPH_SCHEMA_SQL,
+    ])
+    .await;
+
+    let mock = MockGitlabServer::start().await;
+    mock.add_project(project_id, "main", &[(path, source)]);
+
+    let deps = CodeIndexingDeps::new(&mock, &clickhouse);
+    let handler = deps.code_indexing_task_handler();
+    let envelope = code_indexing_task_envelope(project_id, commit_sha, 1, traversal_path);
+
+    let result = handler.handle(handler_context(), envelope).await;
+    assert!(result.is_ok(), "handler failed: {:?}", result);
+    handler.flush().await.expect("flush");
+
+    let batches = clickhouse
+        .query(&format!(
+            "SELECT line_number, content FROM {} \
+             WHERE project_id = {project_id} AND path = '{path}' \
+             ORDER BY line_number",
+            t("gl_code_line")
+        ))
+        .await;
+
+    let mut lines: Vec<(i64, String)> = Vec::new();
+    for batch in &batches {
+        let numbers = ArrowUtils::get_column_by_name::<Int64Array>(batch, "line_number")
+            .expect("line_number column");
+        let contents = ArrowUtils::get_column_by_name::<StringArray>(batch, "content")
+            .expect("content column");
+        for i in 0..batch.num_rows() {
+            lines.push((numbers.value(i), contents.value(i).to_string()));
+        }
+    }
+
+    assert_eq!(
+        lines,
+        vec![
+            (1, "public class App {".to_string()),
+            (2, "    int x = 1;".to_string()),
+            (3, "}".to_string()),
+        ],
+        "gl_code_line should hold one 1-based row per physical source line"
+    );
+}
+
+#[tokio::test]
 async fn indexes_repository() {
     let project_id: i64 = 1;
     let commit_sha = "abc123";
