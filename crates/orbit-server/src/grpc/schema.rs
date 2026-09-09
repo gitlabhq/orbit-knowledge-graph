@@ -23,12 +23,25 @@ pub(super) fn build_structured_schema(
     let nodes: Vec<SchemaNode> = ontology
         .nodes()
         .map(|node| {
-            let should_expand = expand_nodes
-                .iter()
-                .any(|name| name == "*" || name == &node.name);
+            let mut schema = SchemaNode {
+                name: node.name.clone(),
+                domain: node.domain.clone(),
+                description: node.description.clone(),
+                primary_key: node
+                    .primary_keys
+                    .first()
+                    .cloned()
+                    .unwrap_or_else(|| "id".to_string()),
+                label_field: node.label.clone(),
+                ..Default::default()
+            };
 
-            let properties = if should_expand {
-                node.fields
+            if expand_nodes
+                .iter()
+                .any(|name| name == "*" || name == &node.name)
+            {
+                schema.properties = node
+                    .fields
                     .iter()
                     .map(|field| SchemaProperty {
                         name: field.name.clone(),
@@ -41,68 +54,36 @@ pub(super) fn build_structured_schema(
                             .unwrap_or_default(),
                         description: field.description.clone().unwrap_or_default(),
                     })
-                    .collect()
-            } else {
-                vec![]
-            };
-
-            let style = if should_expand {
-                Some(SchemaNodeStyle {
+                    .collect();
+                schema.style = Some(SchemaNodeStyle {
                     size: node.style.size,
                     color: node.style.color.clone(),
-                })
-            } else {
-                None
-            };
-
-            let (outgoing_edges, incoming_edges) = if should_expand {
-                get_node_edge_names(ontology, &node.name)
-            } else {
-                (vec![], vec![])
-            };
-
-            SchemaNode {
-                name: node.name.clone(),
-                domain: node.domain.clone(),
-                description: node.description.clone(),
-                primary_key: node
-                    .primary_keys
-                    .first()
-                    .cloned()
-                    .unwrap_or_else(|| "id".to_string()),
-                label_field: node.label.clone(),
-                properties,
-                style,
-                outgoing_edges,
-                incoming_edges,
+                });
+                (schema.outgoing_edges, schema.incoming_edges) =
+                    get_node_edge_names(ontology, &node.name);
             }
+
+            schema
         })
         .collect();
 
     let edges: Vec<SchemaEdge> = ontology
         .edge_names()
-        .map(|name| {
-            let variants: Vec<SchemaEdgeVariant> = ontology
+        .map(|name| SchemaEdge {
+            name: name.to_string(),
+            description: ontology
+                .get_edge_description(name)
+                .unwrap_or_default()
+                .to_string(),
+            variants: ontology
                 .get_edge(name)
-                .map(|edges| {
-                    edges
-                        .iter()
-                        .map(|edge| SchemaEdgeVariant {
-                            source_type: edge.source_kind.clone(),
-                            target_type: edge.target_kind.clone(),
-                        })
-                        .collect()
+                .unwrap_or_default()
+                .iter()
+                .map(|edge| SchemaEdgeVariant {
+                    source_type: edge.source_kind.clone(),
+                    target_type: edge.target_kind.clone(),
                 })
-                .unwrap_or_default();
-
-            SchemaEdge {
-                name: name.to_string(),
-                description: ontology
-                    .get_edge_description(name)
-                    .unwrap_or_default()
-                    .to_string(),
-                variants,
-            }
+                .collect(),
         })
         .collect();
 
