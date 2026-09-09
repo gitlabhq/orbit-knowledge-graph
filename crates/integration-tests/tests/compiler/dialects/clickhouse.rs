@@ -1,6 +1,6 @@
 use crate::compiler::setup::{compile_pair, compile_to_ast, test_ctx, test_ontology};
 use crate::compiler::utils::has_param_value;
-use compiler::{Node, QueryError, compile};
+use compiler::{Frontend, Node, QueryError, compile};
 
 #[test]
 fn compile_to_ast_works() {
@@ -403,7 +403,15 @@ fn filter_operators() {
 
 #[test]
 fn invalid_json_rejected() {
-    assert!(compile("not valid json", &test_ontology(), &test_ctx()).is_err());
+    assert!(
+        compile(
+            "not valid json",
+            Frontend::JsonDsl,
+            &test_ontology(),
+            &test_ctx()
+        )
+        .is_err()
+    );
 }
 
 #[test]
@@ -411,6 +419,7 @@ fn missing_required_fields_rejected() {
     assert!(
         compile(
             r#"{"query_type": "traversal"}"#,
+            Frontend::JsonDsl,
             &test_ontology(),
             &test_ctx()
         )
@@ -422,6 +431,7 @@ fn missing_required_fields_rejected() {
 fn sql_injection_in_node_id() {
     let err = compile(
         r#"{"query_type": "traversal", "nodes": [{"id": "n; DROP TABLE users; --"}]}"#,
+        Frontend::JsonDsl,
         &test_ontology(),
         &test_ctx(),
     )
@@ -433,10 +443,11 @@ fn sql_injection_in_node_id() {
 fn sql_injection_in_relationship() {
     let err = compile(
         r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "a"}, {"id": "b"}],
-            "relationships": [{"type": "REL", "from": "a' OR '1'='1", "to": "b"}]
-        }"#,
+        "query_type": "traversal",
+        "nodes": [{"id": "a"}, {"id": "b"}],
+        "relationships": [{"type": "REL", "from": "a' OR '1'='1", "to": "b"}]
+    }"#,
+        Frontend::JsonDsl,
         &test_ontology(),
         &test_ctx(),
     )
@@ -449,6 +460,7 @@ fn empty_node_id_rejected() {
     assert!(
         compile(
             r#"{"query_type": "traversal", "nodes": [{"id": ""}]}"#,
+            Frontend::JsonDsl,
             &test_ontology(),
             &test_ctx(),
         )
@@ -460,6 +472,7 @@ fn empty_node_id_rejected() {
 fn id_starting_with_number_rejected() {
     let err = compile(
         r#"{"query_type": "traversal", "nodes": [{"id": "123abc"}]}"#,
+        Frontend::JsonDsl,
         &test_ontology(),
         &test_ctx(),
     )
@@ -471,9 +484,10 @@ fn id_starting_with_number_rejected() {
 fn sql_injection_in_filter_property() {
     let err = compile(
         r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User", "filters": {"foo; DROP TABLE--": "value"}}]
-        }"#,
+        "query_type": "traversal",
+        "nodes": [{"id": "u", "entity": "User", "filters": {"foo; DROP TABLE--": "value"}}]
+    }"#,
+        Frontend::JsonDsl,
         &test_ontology(),
         &test_ctx(),
     )
@@ -497,7 +511,7 @@ fn valid_identifiers_produce_renderable_sql() {
             {"type": "MEMBER_OF", "from": "user_node", "to": "node123"}
         ]
     }"#;
-    let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
+    let result = compile(json, Frontend::JsonDsl, &test_ontology(), &test_ctx()).unwrap();
     let rendered = result.base.render();
 
     assert!(!rendered.contains("{p"));
@@ -893,36 +907,6 @@ fn orbit_query_null_predicates_and_all_columns() {
 }
 
 #[test]
-fn orbit_query_parameters_are_bound_as_values() {
-    use crate::compiler::setup::compile_pair_with_parameters;
-    let attack = "'; DROP TABLE gl_user; //";
-    let json = serde_json::json!({
-        "query_type":"traversal",
-        "nodes":[{"id":"u","entity":"User","filters":{"username":{"eq":attack}}}],
-        "limit":5
-    })
-    .to_string();
-    let orbit_query = "MATCH (u:User) WHERE u.username = $name RETURN u LIMIT $limit";
-    let parameters = orbit_query::Parameters::from([
-        ("name".into(), serde_json::Value::from(attack)),
-        ("limit".into(), serde_json::Value::from(5)),
-    ]);
-    let result = compile_pair_with_parameters(
-        &json,
-        orbit_query,
-        &parameters,
-        &test_ontology(),
-        &test_ctx(),
-    )
-    .unwrap();
-    assert!(!result.base.sql.contains(attack));
-    assert!(has_param_value(
-        &result.base.params,
-        &serde_json::Value::from(attack)
-    ));
-}
-
-#[test]
 fn orbit_query_m23_literals_and_comments() {
     let cases = [
         (
@@ -958,7 +942,7 @@ fn orbit_query_rejects_inline_filters_on_variable_length_relationships() {
         "MATCH (a:Group {id: 1})-[:CONTAINS*1..2 {source_id: 1}]->(b:Group) RETURN a, b",
         "MATCH (a:Group {id: 1})<-[r:CONTAINS*2..3 {target_id: 1}]-(b:Group) RETURN a, b",
     ] {
-        let error = orbit_query::parse(query, &orbit_query::Parameters::new()).expect_err(query);
+        let error = compiler::passes::frontend::gql::parse(query).expect_err(query);
         assert!(
             error
                 .to_string()
@@ -975,7 +959,7 @@ fn orbit_query_rejects_neighbors_center_all_properties() {
         "MATCH (center:File {id: 1})-->(n) RETURN properties(center)",
         "MATCH (center:User {id: 1})<--(n) RETURN n, properties(center)",
     ] {
-        let error = orbit_query::parse(query, &orbit_query::Parameters::new()).expect_err(query);
+        let error = compiler::passes::frontend::gql::parse(query).expect_err(query);
         assert!(
             error
                 .to_string()
@@ -1014,6 +998,45 @@ fn orbit_query_virtual_filter_equality_hydration_parity() {
         assert_eq!(filters[0].0, "content");
         assert_eq!(filters[0].1.op, Some(compiler::input::FilterOp::Eq));
         assert_eq!(filters[0].1.value, Some(serde_json::Value::from("abc")));
+    }
+}
+
+#[test]
+fn orbit_query_undirected_relationships_require_neighbors() {
+    let ontology = embedded_ontology();
+    let ctx = test_ctx();
+    for query in [
+        "MATCH (g:Group {id: 1})-[:MEMBER_OF]-(u:User) RETURN g, u",
+        "MATCH (g:Group {id: 1})--(u:User) RETURN g, u",
+        "MATCH (g:Group {id: 1})-[:MEMBER_OF*1..2]-(u:User) RETURN g, u",
+        "MATCH (u:User {id: 1})-[:MEMBER_OF]->(g:Group)-[:CONTAINS]-(p:Project) RETURN u, g, p",
+        "MATCH (g:Group {id: 1})-[:MEMBER_OF]-(u:User) RETURN count(u)",
+    ] {
+        let error = compile(query, Frontend::Gql, &ontology, &ctx).expect_err(query);
+        assert!(
+            matches!(error, QueryError::Validation(ref message) if message.contains("undirected relationships are only supported for neighbors")),
+            "{query}: {error}"
+        );
+    }
+    for (json, query) in [
+        (
+            r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"g","entity":"Group"}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"g"}]}"#,
+            "MATCH (u:User {id: 1})-[:MEMBER_OF]->(g:Group) RETURN u, g",
+        ),
+        (
+            r#"{"query_type":"traversal","nodes":[{"id":"g","entity":"Group","node_ids":[1]},{"id":"u","entity":"User"}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"g"}]}"#,
+            "MATCH (g:Group {id: 1})<-[:MEMBER_OF]-(u:User) RETURN g, u",
+        ),
+        (
+            r#"{"query_type":"neighbors","nodes":[{"id":"g","entity":"Group","node_ids":[1]}],"neighbors":{"direction":"both","rel_types":["MEMBER_OF"]}}"#,
+            "MATCH (g:Group {id: 1})-[:MEMBER_OF]-(n) RETURN n",
+        ),
+        (
+            r#"{"query_type":"neighbors","nodes":[{"id":"g","entity":"Group","node_ids":[1]}],"neighbors":{"direction":"both"}}"#,
+            "MATCH (g:Group {id: 1})--(n) RETURN n",
+        ),
+    ] {
+        compile_pair(json, query, &ontology, &ctx).unwrap();
     }
 }
 
@@ -1065,9 +1088,9 @@ fn orbit_query_rejects_unsupported_syntax_and_shapes() {
         "MATCH (u:User {username: '\\uD800'}) RETURN u",
     ];
     for query in queries {
-        let error = orbit_query::compile(
+        let error = compiler::compile(
             query,
-            &orbit_query::Parameters::new(),
+            compiler::Frontend::Gql,
             &test_ontology(),
             &test_ctx(),
         )
@@ -1125,58 +1148,12 @@ fn orbit_query_nesting_guard_sees_through_escaped_names() {
         "(".repeat(2_000),
         ")".repeat(2_000)
     );
-    let error = orbit_query::parse(&hidden, &orbit_query::Parameters::new()).unwrap_err();
+    let error = compiler::passes::frontend::gql::parse(&hidden).unwrap_err();
     assert!(error.to_string().contains("nesting is too deep"), "{error}");
 
     let json = r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]}],"limit":5}"#;
     let orbit_query = "MATCH (`u`:`User` {`id`: 1}) RETURN `u` LIMIT 5";
     compile_pair(json, orbit_query, &test_ontology(), &test_ctx()).unwrap();
-}
-
-#[test]
-fn orbit_query_charges_every_parameter_reference() {
-    let ids: Vec<u64> = (0..2_000).collect();
-    let parameters =
-        orbit_query::Parameters::from([("ids".to_owned(), serde_json::Value::from(ids))]);
-    let query = |references: usize| {
-        let predicates = vec!["u.id IN $ids"; references].join(" AND ");
-        format!("MATCH (u:User) WHERE {predicates} RETURN u LIMIT 5")
-    };
-
-    orbit_query::parse(&query(2), &parameters).unwrap();
-    let error = orbit_query::parse(&query(200), &parameters).unwrap_err();
-    assert!(matches!(error, QueryError::LimitExceeded(_)), "{error}");
-}
-
-#[test]
-fn orbit_query_escaped_parameter_names_are_unescaped() {
-    use crate::compiler::setup::compile_pair_with_parameters;
-    let json = r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[7]}],"limit":5}"#;
-    let orbit_query = "MATCH (u:User {id: $`a``b`}) RETURN u LIMIT 5";
-    let parameters = orbit_query::Parameters::from([
-        ("a`b".to_owned(), serde_json::Value::from(7)),
-        ("ab".to_owned(), serde_json::Value::from(99)),
-    ]);
-    let result = compile_pair_with_parameters(
-        json,
-        orbit_query,
-        &parameters,
-        &test_ontology(),
-        &test_ctx(),
-    )
-    .unwrap();
-    assert!(has_param_value(
-        &result.base.params,
-        &serde_json::Value::from(7)
-    ));
-
-    let only_trimmed =
-        orbit_query::Parameters::from([("ab".to_owned(), serde_json::Value::from(99))]);
-    let error = orbit_query::parse(orbit_query, &only_trimmed).unwrap_err();
-    assert!(
-        error.to_string().contains("missing parameter $a`b"),
-        "{error}"
-    );
 }
 
 #[test]
@@ -1191,12 +1168,12 @@ fn orbit_query_bounds_input_before_recursive_parsing() {
         "x".repeat(40_000)
     );
     for query in [nested, oversized] {
-        assert!(orbit_query::parse(&query, &orbit_query::Parameters::new()).is_err());
+        assert!(compiler::passes::frontend::gql::parse(&query).is_err());
     }
     assert!(
-        orbit_query::compile(
+        compiler::compile(
             "MATCH (u:User) WHERE u.id IN [] RETURN u",
-            &orbit_query::Parameters::new(),
+            compiler::Frontend::Gql,
             &test_ontology(),
             &test_ctx()
         )
@@ -1254,6 +1231,26 @@ fn orbit_query_schema_caps_reject_with_the_json_category() {
         &test_ctx(),
     )
     .unwrap();
+}
+
+#[test]
+fn orbit_query_path_depth_caps_match_json() {
+    let ontology = test_ontology();
+    let ctx = test_ctx();
+    for depth in [0, 1, 3, 4, u32::MAX] {
+        let json = format!(
+            r#"{{"query_type":"path_finding","nodes":[{{"id":"a","entity":"Project","node_ids":[1]}},{{"id":"b","entity":"Project","node_ids":[2]}}],"path":{{"type":"shortest","from":"a","to":"b","max_depth":{depth},"rel_types":["CONTAINS"]}}}}"#
+        );
+        let query = format!(
+            "MATCH p = shortestPath((a:Project {{id: 1}})-[:CONTAINS*1..{depth}]->(b:Project {{id: 2}})) RETURN p"
+        );
+        let result = compile_pair(&json, &query, &ontology, &ctx);
+        if (1..=3).contains(&depth) {
+            result.unwrap();
+        } else {
+            assert!(matches!(result.unwrap_err(), QueryError::Validation(_)));
+        }
+    }
 }
 
 #[test]

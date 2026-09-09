@@ -280,8 +280,13 @@ fn compile_one(
     ontology: &Ontology,
     security_ctx: &SecurityContext,
 ) -> Result<compiler::CompiledQueryContext> {
-    compiler::compile(query_json, ontology, security_ctx)
-        .map_err(|e| anyhow::anyhow!("compilation failed: {e}"))
+    compiler::compile(
+        query_json,
+        compiler::Frontend::JsonDsl,
+        ontology,
+        security_ctx,
+    )
+    .map_err(|e| anyhow::anyhow!("compilation failed: {e}"))
 }
 
 fn format_hydration(plan: &compiler::HydrationPlan) -> String {

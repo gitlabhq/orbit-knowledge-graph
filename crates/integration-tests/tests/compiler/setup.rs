@@ -62,24 +62,9 @@ pub fn compile_pair(
     ontology: &Ontology,
     context: &SecurityContext,
 ) -> compiler::Result<compiler::CompiledQueryContext> {
-    compile_pair_with_parameters(
-        json,
-        orbit_query,
-        &orbit_query::Parameters::new(),
-        ontology,
-        context,
-    )
-}
-
-pub fn compile_pair_with_parameters(
-    json: &str,
-    orbit_query: &str,
-    parameters: &orbit_query::Parameters,
-    ontology: &Ontology,
-    context: &SecurityContext,
-) -> compiler::Result<compiler::CompiledQueryContext> {
-    let json_result = compiler::compile(json, ontology, context);
-    let orbit_query_result = orbit_query::compile(orbit_query, parameters, ontology, context);
+    let json_result = compiler::compile(json, compiler::Frontend::JsonDsl, ontology, context);
+    let orbit_query_result =
+        compiler::compile(orbit_query, compiler::Frontend::Gql, ontology, context);
     match (json_result, orbit_query_result) {
         (Ok(json), Ok(orbit_query_result)) => {
             assert_eq!(

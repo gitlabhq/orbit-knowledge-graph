@@ -5,7 +5,7 @@
 The Orbit query frontend accepts a read-only graph language based on openCypher 9 syntax.
 It includes Orbit-specific restrictions and extensions and supports only the operations that Orbit's compiler can express.
 
-The `orbit-query` crate provides a compiler-level API. The JSON Query DSL remains the default for remote requests.
+The frontend is a compiler pipeline preset, `clickhouse_gql`. The JSON Query DSL remains the default for remote requests.
 This implementation does not change MCP tools, protocol messages, Rails, or glab.
 
 A **Pest pair** is a matched grammar rule and its source span.
@@ -13,10 +13,10 @@ The compiler's **Input** contains node selectors, predicates, and the other logi
 
 ## Grammar source
 
-`crates/query-engine/orbit-query/src/query.pest` adapts selected productions from the official openCypher 9 M23 EBNF grammar to Pest.
+`crates/query-engine/compiler/src/passes/frontend/gql/query.pest` adapts selected productions from the official openCypher 9 M23 EBNF grammar to Pest.
 Retained rule names follow the source where practical. PEG alternatives put longer operators and more specific expressions first.
 
-The crate's `LICENSE` contains the Apache-2.0 license and upstream attribution for the adapted grammar.
+The module's `LICENSE` contains the Apache-2.0 license and upstream attribution for the adapted grammar.
 The new Rust implementation remains under the repository's license.
 
 The grammar restricts identifiers and arrows to ASCII. Escaped identifiers must still pass the compiler's identifier rules.
@@ -26,27 +26,28 @@ Keywords are case insensitive; identifiers are case sensitive. Strings support M
 
 ```mermaid
 flowchart LR
-    Text[Orbit query text] --> Pest[Pest pairs]
-    Pest --> Input[Compiler Input]
-    JSON[JSON Query DSL] --> FromJson[Input::from_json]
-    FromJson --> Input
-    Input --> Pipeline[ClickHouse compiler pipeline]
+    Gql[Orbit query text] --> GqlParse[gql_parse]
+    JSON[JSON Query DSL] --> JsonDslParse[json_dsl_parse]
+    GqlParse --> Input[Compiler Input]
+    JsonDslParse --> Input
+    Input --> Validate[validate]
+    Validate --> Pipeline[Shared compiler phases]
     Pipeline --> SQL[Parameterized ClickHouse SQL]
 ```
 
-Lowering walks Pest pairs directly into Input. It does not construct another query AST or serialize a JSON query.
+Each query language is one module under `crates/query-engine/compiler/src/passes/frontend/` and one phase in the pipeline declaration in `config.rs`.
+`json_dsl_parse` runs the JSON schema check, the ontology-derived schema check, and cursor hashing, then deserializes.
+`gql_parse` walks Pest pairs directly into Input; it does not construct another query AST or serialize a JSON query.
 Scalar values use the same value type as the compiler's filters.
 
-`orbit_query::parse` takes query text and parameters and returns Input.
-`orbit_query::compile` passes that Input to `compiler::compile_from_input`.
+The `clickhouse_json_dsl` and `clickhouse_gql` presets differ only in that first phase. Both parse phases read the one `raw` state and write `Input`; `validate` and everything after it can reach only `Input`, so no shared phase can depend on the source language.
 
-The compiler pipeline starts from `Input` and has no notion of a source language. The JSON Query DSL is one way to produce an `Input`: `Input::from_json` runs the JSON schema check, the ontology-derived schema check, and cursor hashing, then deserializes. `compiler::compile` is that conversion followed by `compile_from_input`.
-The text frontend is the other way, and it calls `compile_from_input` directly.
+`compiler::compile` takes the raw text and a `Frontend` and runs that frontend's preset.
 
-The pipeline's first phase, `validate`, runs `input_validation` on every Input. That module checks shape, identifiers, limits, and ontology membership natively; it does not read the JSON schema.
+`validate` runs `input_validation` on every Input. That module checks shape, identifiers, limits, and ontology membership natively; it does not read the JSON schema.
 Its limits are Rust constants in `schema_limits`, and the compiler's build script asserts that the schema still matches them.
 JSON is therefore checked twice, once by schema and once natively; the redundancy is cheap and means every JSON test also exercises the shared validator.
-Retiring the JSON DSL later deletes `Input::from_json` and the schema file; the pipeline does not change.
+Retiring the JSON DSL later deletes the `json_dsl` module, its phase, its `Frontend` variant, and the schema file; the shared phases do not change.
 
 Normalization, restriction, security checks, hydration planning, and SQL generation remain shared.
 Shared normalization makes equality explicit in virtual-column filters before building hydration plans.
@@ -77,7 +78,8 @@ The frontend infers the query type:
 | Other supported patterns | Traversal |
 
 Path finding supports outgoing paths from one hop to an explicit maximum.
-Variable-length traversal accepts exact lengths and bounded ranges. Each range has the compiler's three-hop cap.
+Variable-length traversal accepts exact lengths and bounded ranges. Traversal and path finding share the compiler's three-hop cap.
+Undirected relationships are supported only for neighbors queries. Between labeled nodes, use `->` or `<-`.
 Relationship property filters, including inline maps, require a maximum of one hop.
 
 ```plaintext
@@ -106,7 +108,7 @@ The implementation adds node projections, `shortestPath` pattern syntax, `date_t
 These are implementation extensions, not changes to the official grammar.
 
 Predicates support AND, comparisons, IN, string matching, null checks, and the compiler's three token predicates.
-A `$parameter` supplies a value, never an identifier or query fragment.
+Values are literals; the frontend has no parameter binding, so callers keep untrusted values out of the query text themselves.
 
 ID forms preserve the compiler's distinct selector and filter representations:
 
@@ -123,7 +125,7 @@ It also rejects OR, general NOT, not-equal, DISTINCT, count(*), arbitrary expres
 Unsupported syntax or lowering returns a client-safe error rather than dropping the unsupported part.
 
 Query text is limited to 32 KiB. A flat Pest scan checks nesting before recursive parsing, with a limit of 32 levels.
-Parameters have bounded size and nesting, and every `$parameter` reference is charged against the same 32 KiB budget so repeated references cannot expand past it. Existing compiler limits still apply after lowering.
+Existing compiler limits still apply after lowering.
 
 Cursor binding is not implemented for the typed entry point. It rejects cursor input rather than accepting an unbound cursor.
 Cursor support, custom ID-property spellings, and presentation-option syntax remain outside this first frontend slice.
@@ -132,11 +134,11 @@ Cursor support, custom ID-property spellings, and presentation-option syntax rem
 
 Handwritten text queries sit beside JSON fixtures in `crates/integration-tests/tests/compiler/dialects/clickhouse.rs`.
 The shared test helper compares SQL byte for byte, parameter names and typed values, query type, and hydration plans.
-Existing SQL assertions remain in place. Other tests cover syntax rejection, literals, parameter binding, and authorization.
+Existing SQL assertions remain in place. Other tests cover syntax rejection, literals, and authorization.
 
 The YAML query scenarios under `crates/integration-tests/tests/server/data_correctness/scenarios/` run against ClickHouse in CI.
-Each scenario declares its query once per frontend under `query:`, keyed `json` and `cypher`, and every frontend present is checked against the same result expectations.
-The runner retains `compiler::QueryLanguage` and dispatches `Cypher` to `orbit-query` in the testkit, which can depend on both crates.
+Each scenario declares its query once per frontend under `query:`, keyed `json` and `gql`, and every frontend present is checked against the same result expectations.
+The runner passes each key through `Frontend::from_name` to `compiler::compile`.
 A scenario with no text spelling, such as cursor pagination, carries only the `json` key.
 
 JSON syntax-error tests remain JSON-only.

@@ -108,7 +108,7 @@ fn validate_named_queries() {
         let rendered = query
             .render(&values, &query.example_parameters())
             .unwrap_or_else(|e| panic!("named query failed to render: {e}"));
-        if let Err(e) = compiler::compile(&rendered, &ontology, &ctx) {
+        if let Err(e) = compiler::compile(&rendered, compiler::Frontend::JsonDsl, &ontology, &ctx) {
             panic!("named query `{}` failed to compile: {e}", query.name);
         }
     }

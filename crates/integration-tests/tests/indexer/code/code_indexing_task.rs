@@ -323,7 +323,8 @@ async fn indexes_calls_and_extends_edges() {
     let security_ctx = compiler::SecurityContext::new(1, vec!["1/".into()])
         .expect("security context")
         .with_role(true, None);
-    let compiled = compiler::compile(json, &ontology, &security_ctx).expect("CALLS query compiles");
+    let compiled = compiler::compile(json, compiler::Frontend::JsonDsl, &ontology, &security_ctx)
+        .expect("CALLS query compiles");
     let sql = compiled.base.render();
     assert!(
         sql.contains("gl_code_edge"),

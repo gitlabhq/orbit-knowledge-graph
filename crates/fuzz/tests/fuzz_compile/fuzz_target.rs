@@ -1,5 +1,5 @@
 use bolero::check;
-use compiler::{Ontology, SecurityContext, compile};
+use compiler::{Frontend, Ontology, SecurityContext, compile};
 use std::str::from_utf8;
 use std::sync::OnceLock;
 
@@ -16,7 +16,7 @@ fn ctx() -> &'static SecurityContext {
 fn main() {
     check!().for_each(|input: &[u8]| {
         if let Ok(s) = from_utf8(input) {
-            let _ = compile(s, ontology(), ctx());
+            let _ = compile(s, Frontend::JsonDsl, ontology(), ctx());
         }
     });
 }

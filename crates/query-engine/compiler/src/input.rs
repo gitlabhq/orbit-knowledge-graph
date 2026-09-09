@@ -1201,18 +1201,6 @@ pub fn parse_input(json: &str) -> Result<Input, serde_json::Error> {
     serde_json::from_str(json)
 }
 
-impl Input {
-    pub fn from_json(json: &str, ontology: &ontology::Ontology) -> crate::error::Result<Self> {
-        let validator = crate::passes::validate::Validator::new(ontology);
-        let value = validator.check_json(json)?;
-        validator.check_ontology(&value)?;
-        let query_hash = crate::passes::cursor::canonical_hash(&value);
-        let mut input: Self = serde_json::from_value(value)?;
-        input.compiler.query_hash = query_hash;
-        Ok(input)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

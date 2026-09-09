@@ -1,52 +1,10 @@
-use std::cell::Cell;
-use std::collections::HashMap;
-
-use compiler::{QueryError, Result};
+use crate::Result;
 use pest::iterators::Pair;
 use serde_json::{Number, Value};
 
-use crate::{MAX_QUERY_BYTES, Parameters, Rule, invalid, unescape, unexpected};
+use super::{Rule, invalid, unexpected};
 
-pub(crate) struct Bindings<'a> {
-    parameters: &'a Parameters,
-    footprints: HashMap<&'a str, usize>,
-    expanded: Cell<usize>,
-}
-
-impl<'a> Bindings<'a> {
-    pub(crate) fn new(parameters: &'a Parameters, footprints: HashMap<&'a str, usize>) -> Self {
-        Self {
-            parameters,
-            footprints,
-            expanded: Cell::new(0),
-        }
-    }
-
-    fn resolve(&self, pair: &Pair<'_, Rule>) -> Result<Value> {
-        let key = unescape(
-            pair.clone()
-                .into_inner()
-                .next()
-                .expect("parameter has a name")
-                .as_str(),
-        );
-        let value = self
-            .parameters
-            .get(&key)
-            .ok_or_else(|| invalid(pair, &format!("missing parameter ${key}")))?;
-        let footprint = self.footprints.get(key.as_str()).copied().unwrap_or(0);
-        let expanded = self.expanded.get().saturating_add(footprint);
-        if expanded > MAX_QUERY_BYTES {
-            return Err(QueryError::LimitExceeded(format!(
-                "expanded parameter values must not exceed {MAX_QUERY_BYTES} bytes"
-            )));
-        }
-        self.expanded.set(expanded);
-        Ok(value.clone())
-    }
-}
-
-pub(crate) fn value(pair: Pair<'_, Rule>, bindings: &Bindings<'_>) -> Result<Value> {
+pub(crate) fn value(pair: Pair<'_, Rule>) -> Result<Value> {
     match pair.as_rule() {
         Rule::StringLiteral => string(pair).map(Value::String),
         Rule::BooleanLiteral => Ok(Value::Bool(pair.as_str().eq_ignore_ascii_case("true"))),
@@ -57,8 +15,7 @@ pub(crate) fn value(pair: Pair<'_, Rule>, bindings: &Bindings<'_>) -> Result<Val
                 .expect("temporal literal has a string"),
         )
         .map(Value::String),
-        Rule::ListLiteral => pair.into_inner().map(|p| value(p, bindings)).collect(),
-        Rule::Parameter => bindings.resolve(&pair),
+        Rule::ListLiteral => pair.into_inner().map(value).collect(),
         _ => Err(unexpected(&pair)),
     }
 }

@@ -5,9 +5,9 @@ use serde_json::Value;
 use crate::error::{QueryError, Result};
 use crate::input::{ColumnSelection, FilterOp, Input, InputFilter, InputGroupByKey, QueryType};
 use crate::schema_limits::{
-    MAX_COLUMNS, MAX_FILTER_ENTRIES_PER_PROPERTY, MAX_FILTER_STRING_LEN, MAX_FILTERS_PER_NODE,
-    MAX_FILTERS_PER_REL, MAX_HOPS_CAP, MAX_IDENTIFIER_LEN, MAX_IN_VALUES, MAX_LIMIT, MAX_NODE_IDS,
-    MAX_NODES_CAP, MAX_REL_TYPES, MAX_RELS_CAP,
+    MAX_COLUMNS, MAX_DEPTH_CAP, MAX_FILTER_ENTRIES_PER_PROPERTY, MAX_FILTER_STRING_LEN,
+    MAX_FILTERS_PER_NODE, MAX_FILTERS_PER_REL, MAX_HOPS_CAP, MAX_IDENTIFIER_LEN, MAX_IN_VALUES,
+    MAX_LIMIT, MAX_NODE_IDS, MAX_NODES_CAP, MAX_REL_TYPES, MAX_RELS_CAP,
 };
 
 use crate::Ontology;
@@ -109,10 +109,10 @@ pub(crate) fn check(input: &Input, ontology: &Ontology) -> Result<()> {
         check_filters(&edge.filters)?;
     }
     if let Some(path) = &input.path {
-        if path.max_depth == 0 {
-            return Err(QueryError::Validation(
-                "path max_depth must be positive".into(),
-            ));
+        if path.max_depth == 0 || path.max_depth > MAX_DEPTH_CAP {
+            return Err(QueryError::Validation(format!(
+                "path max_depth must be between 1 and {MAX_DEPTH_CAP}"
+            )));
         }
         check_input_relationship_types(ontology, &path.rel_types)?;
     }

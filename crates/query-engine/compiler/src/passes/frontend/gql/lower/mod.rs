@@ -3,19 +3,17 @@ mod projections;
 
 use std::collections::HashMap;
 
-use compiler::input::{
+use crate::input::{
     Direction, HopRange, InputNeighbors, InputPath, InputRelationship, PathType, QueryType,
 };
-use compiler::{Input, InputNode, QueryError, Result};
+use crate::{Input, InputNode, QueryError, Result};
 use pest::iterators::Pair;
 
-use crate::value::Bindings;
-use crate::{Rule, invalid, name, unexpected};
+use super::{Rule, invalid, name, unexpected};
 
-pub(super) fn lower(statement: Pair<'_, Rule>, bindings: Bindings<'_>) -> Result<Input> {
+pub(super) fn lower(statement: Pair<'_, Rule>) -> Result<Input> {
     let mut lowering = Lowering {
         input: Input::default(),
-        bindings,
         edges: HashMap::new(),
         path: None,
         neighbor: None,
@@ -26,13 +24,12 @@ pub(super) fn lower(statement: Pair<'_, Rule>, bindings: Bindings<'_>) -> Result
             Rule::Return => lowering.project(clause)?,
             Rule::Order => lowering.order(clause)?,
             Rule::Limit => {
-                let value = crate::value::value(
+                let value = super::value::value(
                     clause
                         .clone()
                         .into_inner()
                         .next()
                         .expect("LIMIT has a value"),
-                    &lowering.bindings,
                 )?;
                 lowering.input.limit = value
                     .as_u64()
@@ -46,15 +43,14 @@ pub(super) fn lower(statement: Pair<'_, Rule>, bindings: Bindings<'_>) -> Result
     Ok(lowering.input)
 }
 
-struct Lowering<'a> {
+struct Lowering {
     input: Input,
-    bindings: Bindings<'a>,
     edges: HashMap<String, usize>,
     path: Option<String>,
     neighbor: Option<String>,
 }
 
-impl Lowering<'_> {
+impl Lowering {
     fn pattern(&mut self, clause: Pair<'_, Rule>) -> Result<()> {
         let mut parts = clause.into_inner();
         let pattern = parts.next().expect("MATCH has a pattern");
@@ -103,7 +99,7 @@ impl Lowering<'_> {
                 Rule::NodeLabel => {
                     node.entity = Some(name(part.into_inner().next().expect("label has a name"))?)
                 }
-                Rule::MapLiteral => Self::map_filters(part, &self.bindings, &mut node.filters)?,
+                Rule::MapLiteral => Self::map_filters(part, &mut node.filters)?,
                 _ => return Err(unexpected(&part)),
             }
         }
@@ -166,7 +162,7 @@ impl Lowering<'_> {
                                 "property filters on variable-length relationships are unsupported",
                             ));
                         }
-                        Self::map_filters(part, &self.bindings, &mut edge.filters)?;
+                        Self::map_filters(part, &mut edge.filters)?;
                     }
                     _ => return Err(unexpected(&part)),
                 }
@@ -233,6 +229,11 @@ impl Lowering<'_> {
                 ));
             }
             for edge in &mut self.input.relationships {
+                if edge.direction == Direction::Both {
+                    return Err(QueryError::Validation(
+                        "undirected relationships are only supported for neighbors; use -> or <- between labeled nodes".into(),
+                    ));
+                }
                 if edge.direction == Direction::Incoming {
                     std::mem::swap(&mut edge.from, &mut edge.to);
                     edge.direction = Direction::Outgoing;

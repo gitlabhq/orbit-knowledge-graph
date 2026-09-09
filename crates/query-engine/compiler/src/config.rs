@@ -18,6 +18,7 @@ use crate::error::{QueryError, Result};
 use crate::input::{Input, QueryType};
 use crate::passes::codegen::CompiledQueryContext;
 use crate::passes::enforce::ResultContext;
+use crate::passes::frontend;
 use crate::passes::hydrate::HydrationPlan;
 use crate::passes::plan::QueryPlan;
 use crate::passes::{
@@ -37,6 +38,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
     }
 
     state {
+        pub raw: String,
         pub input: Input,
         pub query_plan: QueryPlan,
         pub node: Node,
@@ -47,6 +49,13 @@ compiler_pipeline_macros::define_compiler_ctx! {
     }
 
     phases {
+        json_dsl_parse {
+            reads_env: [ontology]
+            mutates: [raw, input]
+        }
+        gql_parse {
+            mutates: [raw, input]
+        }
         validate {
             reads_env: [ontology]
             mutates: [input]
@@ -97,10 +106,15 @@ compiler_pipeline_macros::define_compiler_ctx! {
     }
 
     pipelines {
-        clickhouse {
+        clickhouse_json_dsl {
             env: [ontology, security_ctx]
-            state: [input, query_plan, node, result_ctx, query_config, hydration_plan, output]
-            phases: [validate, normalize, restrict, plan, lower, enforce, security, cursor, check, hydrate_plan, settings, codegen]
+            state: [raw, input, query_plan, node, result_ctx, query_config, hydration_plan, output]
+            phases: [json_dsl_parse, validate, normalize, restrict, plan, lower, enforce, security, cursor, check, hydrate_plan, settings, codegen]
+        }
+        clickhouse_gql {
+            env: [ontology, security_ctx]
+            state: [raw, input, query_plan, node, result_ctx, query_config, hydration_plan, output]
+            phases: [gql_parse, validate, normalize, restrict, plan, lower, enforce, security, cursor, check, hydrate_plan, settings, codegen]
         }
         ch_hydration {
             env: [ontology, security_ctx]
@@ -109,10 +123,22 @@ compiler_pipeline_macros::define_compiler_ctx! {
         }
         validate_normalize {
             env: [ontology]
-            state: [input]
-            phases: [validate, normalize]
+            state: [raw, input]
+            phases: [json_dsl_parse, validate, normalize]
         }
     }
+}
+
+fn json_dsl_parse(ctx: &mut impl CompilerCtx) -> Result<()> {
+    let raw = require(ctx.take_raw(), "raw")?;
+    ctx.set_input(frontend::json_dsl::parse(&raw, ctx.ontology())?);
+    Ok(())
+}
+
+fn gql_parse(ctx: &mut impl CompilerCtx) -> Result<()> {
+    let raw = require(ctx.take_raw(), "raw")?;
+    ctx.set_input(frontend::gql::parse(&raw)?);
+    Ok(())
 }
 
 fn validate(ctx: &mut impl CompilerCtx) -> Result<()> {

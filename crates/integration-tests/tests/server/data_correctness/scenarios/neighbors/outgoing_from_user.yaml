@@ -8,7 +8,7 @@ query:
       "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
       "neighbors": {"direction": "outgoing"}
     }
-  cypher: |
+  gql: |
     MATCH (u:User {id: 1})-->(n) RETURN n
 
 expect:

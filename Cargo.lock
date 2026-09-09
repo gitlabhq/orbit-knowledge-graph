@@ -2208,6 +2208,8 @@ dependencies = [
  "orbit-server-config",
  "orbit-utils",
  "orbit-versions",
+ "pest",
+ "pest_derive",
  "regex",
  "serde",
  "serde_json",
@@ -5935,7 +5937,6 @@ dependencies = [
  "gitalisk-core",
  "ontology",
  "orbit-migrations",
- "orbit-query",
  "orbit-server",
  "orbit-server-config",
  "orbit-utils",
@@ -5983,7 +5984,6 @@ dependencies = [
  "opentelemetry_sdk",
  "orbit-analytics",
  "orbit-migrations",
- "orbit-query",
  "orbit-server",
  "orbit-server-config",
  "orbit-utils",
@@ -8346,16 +8346,6 @@ dependencies = [
  "rust-embed",
  "semver",
  "serde",
-]
-
-[[package]]
-name = "orbit-query"
-version = "0.1.0"
-dependencies = [
- "compiler",
- "pest",
- "pest_derive",
- "serde_json",
 ]
 
 [[package]]

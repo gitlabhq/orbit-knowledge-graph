@@ -18,7 +18,7 @@ query:
                  "node_ids": [9001]}],
       "limit": 10
     }
-  cypher: |
+  gql: |
     MATCH (u:User {id: 9001}) RETURN u.username, u.name, u.state LIMIT 10
 
 expect:

@@ -1,18 +1,17 @@
 use std::collections::{HashMap, HashSet};
 
-use compiler::input::{FilterOp, InputFilter, InputIdRange};
-use compiler::{QueryError, Result};
+use crate::input::{FilterOp, InputFilter, InputIdRange};
+use crate::{QueryError, Result};
 use pest::iterators::Pair;
 use serde_json::Value;
 
+use super::super::value::value;
+use super::super::{Rule, invalid, name, property, unexpected};
 use super::Lowering;
-use crate::value::{Bindings, value};
-use crate::{Rule, invalid, name, property, unexpected};
 
-impl Lowering<'_> {
+impl Lowering {
     pub(super) fn map_filters(
         pair: Pair<'_, Rule>,
-        bindings: &Bindings<'_>,
         filters: &mut HashMap<String, Vec<InputFilter>>,
     ) -> Result<()> {
         let mut keys = HashSet::new();
@@ -22,7 +21,7 @@ impl Lowering<'_> {
             if !keys.insert(key.clone()) {
                 return Err(invalid(&entry, "duplicate property in a map"));
             }
-            let val = value(parts.next().expect("map entry has a value"), bindings)?;
+            let val = value(parts.next().expect("map entry has a value"))?;
             filters.entry(key).or_default().push(InputFilter {
                 op: Some(FilterOp::Eq),
                 value: Some(val),
@@ -84,7 +83,7 @@ impl Lowering<'_> {
                         _ => return Err(unexpected(&operator)),
                     },
                 };
-                let value = parts.next().map(|p| value(p, &self.bindings)).transpose()?;
+                let value = parts.next().map(value).transpose()?;
                 let filter = InputFilter {
                     op: Some(op),
                     value,

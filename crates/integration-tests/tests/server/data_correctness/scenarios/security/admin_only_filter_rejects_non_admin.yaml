@@ -9,7 +9,7 @@ query:
                  "filters": {"is_admin": true}}],
       "limit": 10
     }
-  cypher: |
+  gql: |
     MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 AND u.is_admin = true RETURN u LIMIT 10
 
 expect:

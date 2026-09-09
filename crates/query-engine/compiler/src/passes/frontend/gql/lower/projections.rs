@@ -1,16 +1,16 @@
 use std::collections::HashSet;
 
-use compiler::Result;
-use compiler::input::{
+use crate::Result;
+use crate::input::{
     AggExpr, ColumnSelection, InputAggSort, InputAggregationMetric, InputGroupByKey, InputOrderBy,
     OrderDirection, PropertyRef, QueryType, TargetRef, TruncateUnit,
 };
 use pest::iterators::Pair;
 
+use super::super::{Rule, invalid, name, property, unexpected, value::string};
 use super::Lowering;
-use crate::{Rule, invalid, name, property, unexpected, value::string};
 
-impl Lowering<'_> {
+impl Lowering {
     pub(super) fn project(&mut self, clause: Pair<'_, Rule>) -> Result<()> {
         let items = clause.into_inner().next().expect("RETURN has projections");
         let aggregate = items.clone().into_inner().any(|item| {
@@ -268,7 +268,7 @@ impl Lowering<'_> {
                     let node = self.input.nodes.iter_mut().find(|n| n.id == variable)
                         .ok_or_else(|| {
                             let (line, column) = expression.line_col();
-                            compiler::QueryError::ReferenceError(format!(
+                            crate::QueryError::ReferenceError(format!(
                                 "line {line}, column {column}: projection references undefined node \"{variable}\""
                             ))
                         })?;

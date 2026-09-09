@@ -11,7 +11,6 @@ publish = false
 [dev-dependencies]
 clickhouse-client = { path = "../clickhouse-client" }
 compiler = { path = "../query-engine/compiler" }
-orbit-query = { path = "../query-engine/orbit-query" }
 orbit-analytics = { path = "../orbit-analytics" }
 code-graph = { path = "../code-graph" }
 orbit-server = { path = "../orbit-server", features = ["testkit"] }

@@ -10,7 +10,7 @@ query:
       "order_by": "u.id",
       "limit": 10
     }
-  cypher: |
+  gql: |
     MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username, u.name, u.state, u.user_type ORDER BY u.id LIMIT 10
 
 expect:
