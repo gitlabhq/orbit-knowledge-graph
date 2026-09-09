@@ -93,7 +93,11 @@ GRAPH_URL="http://127.0.0.1:${GDK_CLICKHOUSE_HTTP_PORT}"
 GRAPH_DATABASE="gkg-development"
 GRAPH_USERNAME="default"
 GITLAB_BASE_URL="$GDK_GITLAB_URL"
-SIPHON_STREAM_NAME="siphon_stream_main_db"
+# GDK templates its own Siphon stream name (siphon_stream), which differs from the server default.
+SIPHON_STREAM_NAME="$(yq '.producers[0].queueing.stream_name' "$GDK_ROOT/siphon/config_main.yml" 2>/dev/null || true)"
+if [[ -z "$SIPHON_STREAM_NAME" || "$SIPHON_STREAM_NAME" == "null" ]]; then
+  SIPHON_STREAM_NAME="siphon_stream_main_db"
+fi
 
 GITALY_TCP_ADDR="$(python3 - "$GDK_ROOT/gitaly/gitaly.config.toml" <<'PY'
 import re

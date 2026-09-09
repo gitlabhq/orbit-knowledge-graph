@@ -34,8 +34,8 @@ The mise dev tasks (`server:start`, `server:dispatch`, `dev:web`, `dev:indexer`,
 and passes it as the single `--config` file. The file is a `yq` deep merge of, in increasing priority:
 
 1. `config/dev.yaml`: committed local-development tuning.
-2. Connection details derived from `gdk.yml` and the GitLab secret files: URLs, databases, JWT keys,
-   ClickHouse password.
+2. Connection details derived from `gdk.yml`, GDK's Siphon config, and the GitLab secret files: URLs,
+   databases, the Siphon stream name, JWT keys, ClickHouse password.
 3. The mode's ports and names (webserver bind addresses, indexer health port and consumer name,
    health-check bind address), so the processes `mise run dev` starts side by side do not collide.
 4. `config/dev.local.yaml`: personal overrides, when the file exists. Git ignores it.
