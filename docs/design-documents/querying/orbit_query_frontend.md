@@ -44,7 +44,7 @@ The `clickhouse_json_dsl` and `clickhouse_gql` presets differ only in that first
 
 `compiler::compile` takes the raw text and a `Frontend` and runs that frontend's preset.
 
-`validate` runs `input_validation` on every Input. That module checks shape, identifiers, limits, and ontology membership natively; it does not read the JSON schema.
+`validate` runs the validator's shape check on every Input. It checks identifiers, limits, and ontology membership natively; it does not read the JSON schema.
 Its limits are Rust constants in `schema_limits`, and the compiler's build script asserts that the schema still matches them.
 JSON is therefore checked twice, once by schema and once natively; the redundancy is cheap and means every JSON test also exercises the shared validator.
 Retiring the JSON DSL later deletes the `json_dsl` module, its phase, its `Frontend` variant, and the schema file; the shared phases do not change.
@@ -138,7 +138,7 @@ Existing SQL assertions remain in place. Other tests cover syntax rejection, lit
 
 The YAML query scenarios under `crates/integration-tests/tests/server/data_correctness/scenarios/` run against ClickHouse in CI.
 Each scenario declares its query once per frontend under `query:`, keyed `json` and `gql`, and every frontend present is checked against the same result expectations.
-The runner passes each key through `Frontend::from_name` to `compiler::compile`.
+The runner parses each key into a `Frontend` and passes it to `compiler::compile`.
 A scenario with no text spelling, such as cursor pagination, carries only the `json` key.
 
 JSON syntax-error tests remain JSON-only.

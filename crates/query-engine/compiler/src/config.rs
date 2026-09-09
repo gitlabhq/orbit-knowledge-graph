@@ -144,7 +144,7 @@ fn gql_parse(ctx: &mut impl CompilerCtx) -> Result<()> {
 fn validate(ctx: &mut impl CompilerCtx) -> Result<()> {
     let mut input = require(ctx.take_input(), "input")?;
     let v = validate::Validator::new(ctx.ontology());
-    crate::input_validation::check(&input, ctx.ontology())?;
+    v.check_shape(&input)?;
     if let Some(c) = &mut input.cursor
         && let Some(after) = &c.after
     {

@@ -66,7 +66,7 @@ fn unexpected(pair: &Pair<'_, Rule>) -> QueryError {
 
 fn name(pair: Pair<'_, Rule>) -> Result<String> {
     let name = unescape(pair.as_str());
-    crate::input_validation::validate_identifier(&name)
+    crate::passes::validate::validate_identifier(&name)
         .map_err(|error| invalid(&pair, &error.to_string()))?;
     Ok(name)
 }

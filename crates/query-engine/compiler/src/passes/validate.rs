@@ -1,17 +1,24 @@
 //! Query validation.
 //!
-//! Two-phase validation via [`Validator`]:
-//! 1. **Schema validation** — structural correctness via JSON Schema (base + ontology-derived).
-//!    Entity types, columns, filters, relationship types, and hop ranges are all enforced here.
-//! 2. **Cross-reference validation** — node ID references that JSON Schema cannot express
-//!    (e.g. relationship from/to must reference a declared node ID).
+//! [`Validator`] checks in three layers:
+//! 1. **Schema validation** — JSON-only: the raw text against the base and
+//!    ontology-derived JSON Schemas, before deserialization.
+//! 2. **Shape validation** — every [`Input`] regardless of frontend: identifiers,
+//!    ontology membership, limits, and filter value shapes.
+//! 3. **Cross-reference validation** — node ID references, complexity caps, and
+//!    filter typing that neither layer above can express.
 
 use std::collections::HashSet;
 use std::sync::OnceLock;
 
 use crate::error::{QueryError, Result};
 use crate::input::{
-    AggFunction, FilterOp, Input, InputFilter, InputNode, QueryType, group_by_output_names,
+    AggFunction, ColumnSelection, FilterOp, Input, InputFilter, InputGroupByKey, InputNode,
+    QueryType, group_by_output_names,
+};
+use crate::schema_limits::{
+    MAX_DEPTH_CAP, MAX_FILTER_ENTRIES_PER_PROPERTY, MAX_FILTER_STRING_LEN, MAX_HOPS_CAP,
+    MAX_IDENTIFIER_LEN, MAX_IN_VALUES, MAX_LIMIT,
 };
 use crate::types::SecurityContext;
 use ontology::{DataType, Ontology, TRAVERSAL_PATH_COLUMN};
@@ -219,6 +226,125 @@ impl<'a> Validator<'a> {
         })
     }
 
+    /// Validate what the JSON schema used to enforce, natively on `Input`, so
+    /// every frontend is held to the same rules. Complexity caps live in
+    /// [`Self::check_depth`].
+    pub fn check_shape(&self, input: &Input) -> Result<()> {
+        if input.nodes.is_empty() || input.query_type == QueryType::Hydration {
+            return Err(QueryError::Validation(
+                "a public query requires at least one node and cannot request internal hydration"
+                    .into(),
+            ));
+        }
+        if input.limit == 0 || input.limit > MAX_LIMIT {
+            return Err(QueryError::Validation(format!(
+                "limit must be between 1 and {MAX_LIMIT}"
+            )));
+        }
+        for node in &input.nodes {
+            validate_identifier(&node.id)?;
+            let entity = node
+                .entity
+                .as_deref()
+                .ok_or_else(|| QueryError::Validation("each node requires an entity".into()))?;
+            self.check_field(entity, &node.id_property)?;
+            if let Some(ColumnSelection::List(columns)) = &node.columns {
+                if columns.is_empty() {
+                    return Err(QueryError::Validation(
+                        "column selection must list at least one column".into(),
+                    ));
+                }
+                for column in columns {
+                    self.check_field(entity, column)?;
+                }
+            }
+            for property in node.filters.keys() {
+                self.check_field(entity, property)?;
+            }
+            check_filters(&node.filters)?;
+        }
+        for edge in &input.relationships {
+            if edge.types.is_empty()
+                || edge.hops.min == 0
+                || edge.hops.min > edge.hops.max
+                || edge.hops.max > MAX_HOPS_CAP
+            {
+                return Err(QueryError::Validation(format!(
+                    "relationships require types and ordered hop bounds between 1 and {MAX_HOPS_CAP}"
+                )));
+            }
+            self.check_relationship_types(&edge.types)?;
+            check_filters(&edge.filters)?;
+        }
+        if let Some(path) = &input.path {
+            if path.max_depth == 0 || path.max_depth > MAX_DEPTH_CAP {
+                return Err(QueryError::Validation(format!(
+                    "path max_depth must be between 1 and {MAX_DEPTH_CAP}"
+                )));
+            }
+            self.check_relationship_types(&path.rel_types)?;
+        }
+        if let Some(neighbors) = &input.neighbors {
+            self.check_relationship_types(&neighbors.rel_types)?;
+        }
+        if input.query_type == QueryType::Neighbors && input.nodes.len() != 1 {
+            return Err(QueryError::Validation(
+                "neighbors requires exactly one center node".into(),
+            ));
+        }
+        if input.query_type == QueryType::Aggregation && input.aggregation.metrics.is_empty() {
+            return Err(QueryError::Validation(
+                "aggregation requires at least one metric".into(),
+            ));
+        }
+        for metric in &input.aggregation.metrics {
+            validate_identifier(metric.expr.node())?;
+            if let Some(property) = metric.expr.property() {
+                validate_identifier(property)?;
+            }
+            if let Some(alias) = &metric.alias {
+                validate_identifier(alias)?;
+            }
+        }
+        for group in &input.aggregation.group_by {
+            validate_identifier(group.node())?;
+            if let Some(property) = group.property() {
+                validate_identifier(property)?;
+            }
+            let (InputGroupByKey::Node { alias, .. } | InputGroupByKey::Property { alias, .. }) =
+                group;
+            if let Some(alias) = alias {
+                validate_identifier(alias)?;
+            }
+        }
+        if let Some(order) = &input.order_by {
+            validate_identifier(&order.node)?;
+            validate_identifier(&order.property)?;
+        }
+        if let Some(sort) = &input.aggregation.sort {
+            validate_identifier(&sort.column)?;
+        }
+        Ok(())
+    }
+
+    fn check_field(&self, entity: &str, property: &str) -> Result<()> {
+        validate_identifier(property)?;
+        self.ontology
+            .validate_field(entity, property)
+            .map_err(|error| QueryError::AllowlistRejected(error.to_string()))
+    }
+
+    fn check_relationship_types(&self, types: &[String]) -> Result<()> {
+        for kind in types {
+            if kind != "*" && !self.ontology.has_edge(kind) {
+                return Err(QueryError::AllowlistRejected(format!(
+                    "unknown relationship type {kind:?}"
+                )));
+            }
+        }
+        Ok(())
+    }
+
     /// Validate cross-node references that JSON Schema cannot express.
     pub fn check_references(&self, input: &Input) -> Result<()> {
         self.check_duplicate_node_ids(input)?;
@@ -236,9 +362,10 @@ impl<'a> Validator<'a> {
         Ok(())
     }
 
-    /// Defense-in-depth: reject queries that exceed hard caps on complexity.
-    /// The JSON schema already enforces these limits via maxItems / maximum /
-    /// maxProperties, so this only fires if schema validation was somehow bypassed.
+    /// Reject queries that exceed hard caps on complexity. The JSON schema
+    /// enforces the same limits first for JSON input, so this is the primary
+    /// enforcement for other frontends and a backstop for JSON. Every cap
+    /// reports `Validation` to match the schema's category.
     pub fn check_depth(&self, input: &Input) -> Result<()> {
         use crate::schema_limits::{
             MAX_COLUMNS, MAX_DEPTH_CAP, MAX_FILTER_ENTRIES_PER_PROPERTY, MAX_FILTERS_PER_NODE,
@@ -249,13 +376,13 @@ impl<'a> Validator<'a> {
         const MAX_GROUP_BY_KEYS: usize = 4;
 
         if input.nodes.len() > MAX_NODES_CAP {
-            return Err(QueryError::DepthExceeded(format!(
+            return Err(QueryError::Validation(format!(
                 "nodes count ({}) must not exceed {MAX_NODES_CAP}",
                 input.nodes.len()
             )));
         }
         if input.relationships.len() > MAX_RELS_CAP {
-            return Err(QueryError::DepthExceeded(format!(
+            return Err(QueryError::Validation(format!(
                 "relationships count ({}) must not exceed {MAX_RELS_CAP}",
                 input.relationships.len()
             )));
@@ -273,13 +400,13 @@ impl<'a> Validator<'a> {
             )));
         }
         if input.aggregation.metrics.len() > MAX_AGGS_CAP {
-            return Err(QueryError::LimitExceeded(format!(
+            return Err(QueryError::Validation(format!(
                 "aggregations count ({}) must not exceed {MAX_AGGS_CAP}",
                 input.aggregation.metrics.len()
             )));
         }
         if input.aggregation.group_by.len() > MAX_GROUP_BY_KEYS {
-            return Err(QueryError::LimitExceeded(format!(
+            return Err(QueryError::Validation(format!(
                 "group_by count ({}) must not exceed {MAX_GROUP_BY_KEYS}",
                 input.aggregation.group_by.len()
             )));
@@ -297,26 +424,26 @@ impl<'a> Validator<'a> {
                 ));
             }
             if rel.hops.max > MAX_HOPS_CAP {
-                return Err(QueryError::DepthExceeded(format!(
+                return Err(QueryError::Validation(format!(
                     "hops upper bound ({}) must not exceed {MAX_HOPS_CAP}",
                     rel.hops.max
                 )));
             }
             if rel.types.len() > MAX_REL_TYPES {
-                return Err(QueryError::LimitExceeded(format!(
+                return Err(QueryError::Validation(format!(
                     "relationship type count ({}) must not exceed {MAX_REL_TYPES}",
                     rel.types.len()
                 )));
             }
             let rel_filter_count = rel.filters.len();
             if rel_filter_count > MAX_FILTERS_PER_REL {
-                return Err(QueryError::LimitExceeded(format!(
+                return Err(QueryError::Validation(format!(
                     "relationship filter property count ({rel_filter_count}) must not exceed {MAX_FILTERS_PER_REL}",
                 )));
             }
             for (prop, filters) in &rel.filters {
                 if filters.len() > MAX_FILTER_ENTRIES_PER_PROPERTY {
-                    return Err(QueryError::LimitExceeded(format!(
+                    return Err(QueryError::Validation(format!(
                         "filter entry count ({}) on relationship property \"{prop}\" must not exceed {MAX_FILTER_ENTRIES_PER_PROPERTY}",
                         filters.len()
                     )));
@@ -325,13 +452,13 @@ impl<'a> Validator<'a> {
         }
         if let Some(ref path) = input.path {
             if path.max_depth > MAX_DEPTH_CAP {
-                return Err(QueryError::DepthExceeded(format!(
+                return Err(QueryError::Validation(format!(
                     "max_depth ({}) must not exceed {MAX_DEPTH_CAP}",
                     path.max_depth
                 )));
             }
             if path.rel_types.len() > MAX_REL_TYPES {
-                return Err(QueryError::LimitExceeded(format!(
+                return Err(QueryError::Validation(format!(
                     "path rel_types count ({}) must not exceed {MAX_REL_TYPES}",
                     path.rel_types.len()
                 )));
@@ -339,7 +466,7 @@ impl<'a> Validator<'a> {
         }
         for node in &input.nodes {
             if node.node_ids.len() > MAX_NODE_IDS {
-                return Err(QueryError::LimitExceeded(format!(
+                return Err(QueryError::Validation(format!(
                     "node_ids count ({}) for node \"{}\" must not exceed {MAX_NODE_IDS}",
                     node.node_ids.len(),
                     node.id
@@ -347,7 +474,7 @@ impl<'a> Validator<'a> {
             }
             let node_filter_count = node.filters.len();
             if node_filter_count > MAX_FILTERS_PER_NODE {
-                return Err(QueryError::LimitExceeded(format!(
+                return Err(QueryError::Validation(format!(
                     "filter property count ({node_filter_count}) for node \"{}\" must not exceed {MAX_FILTERS_PER_NODE}",
                     node.id
                 )));
@@ -355,7 +482,7 @@ impl<'a> Validator<'a> {
             if let Some(crate::input::ColumnSelection::List(cols)) = &node.columns
                 && cols.len() > MAX_COLUMNS
             {
-                return Err(QueryError::LimitExceeded(format!(
+                return Err(QueryError::Validation(format!(
                     "columns count ({}) for node \"{}\" must not exceed {MAX_COLUMNS}",
                     cols.len(),
                     node.id
@@ -363,7 +490,7 @@ impl<'a> Validator<'a> {
             }
             for (prop, filters) in &node.filters {
                 if filters.len() > MAX_FILTER_ENTRIES_PER_PROPERTY {
-                    return Err(QueryError::LimitExceeded(format!(
+                    return Err(QueryError::Validation(format!(
                         "filter entry count ({}) on property \"{prop}\" for node \"{}\" must not exceed {MAX_FILTER_ENTRIES_PER_PROPERTY}",
                         filters.len(),
                         node.id
@@ -378,7 +505,7 @@ impl<'a> Validator<'a> {
                             .map(|a| a.len())
                             .unwrap_or(0);
                         if len > MAX_IN_VALUES {
-                            return Err(QueryError::LimitExceeded(format!(
+                            return Err(QueryError::Validation(format!(
                                 "IN filter on \"{prop}\" for node \"{}\" has {len} values, must not exceed {MAX_IN_VALUES}",
                                 node.id
                             )));
@@ -1076,6 +1203,88 @@ impl<'a> Validator<'a> {
         }
         Ok(())
     }
+}
+
+pub(crate) fn validate_identifier(identifier: &str) -> Result<()> {
+    let mut chars = identifier.chars();
+    let valid = identifier.len() <= MAX_IDENTIFIER_LEN
+        && chars
+            .next()
+            .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_');
+    if valid {
+        Ok(())
+    } else {
+        Err(QueryError::Validation(format!(
+            "invalid identifier {identifier:?}"
+        )))
+    }
+}
+
+fn is_valid_filter_value(value: &serde_json::Value) -> bool {
+    match value {
+        serde_json::Value::Number(_) | serde_json::Value::Bool(_) => true,
+        serde_json::Value::String(text) => text.chars().count() <= MAX_FILTER_STRING_LEN,
+        serde_json::Value::Array(values) => {
+            values.len() <= MAX_IN_VALUES && values.iter().all(is_valid_filter_value)
+        }
+        serde_json::Value::Null | serde_json::Value::Object(_) => false,
+    }
+}
+
+fn check_filters(filters: &std::collections::HashMap<String, Vec<InputFilter>>) -> Result<()> {
+    for (property, predicates) in filters {
+        validate_identifier(property)?;
+        if predicates.is_empty() || predicates.len() > MAX_FILTER_ENTRIES_PER_PROPERTY {
+            return Err(QueryError::Validation(format!(
+                "filter on {property:?} needs between 1 and {MAX_FILTER_ENTRIES_PER_PROPERTY} predicates"
+            )));
+        }
+        for filter in predicates {
+            let op = filter.op.unwrap_or(FilterOp::Eq);
+            if matches!(op, FilterOp::IsNull | FilterOp::IsNotNull) {
+                if filter.value.is_some() {
+                    return Err(QueryError::Validation(
+                        "null checks cannot have a value".into(),
+                    ));
+                }
+                continue;
+            }
+            let value = filter
+                .value
+                .as_ref()
+                .ok_or_else(|| QueryError::Validation("predicate requires a value".into()))?;
+            if !is_valid_filter_value(value) {
+                return Err(QueryError::Validation(format!(
+                    "invalid filter value for {property:?}; values must be numbers, booleans, strings up to {MAX_FILTER_STRING_LEN} characters, or lists of up to {MAX_IN_VALUES} such values"
+                )));
+            }
+            if op == FilterOp::In
+                && !value
+                    .as_array()
+                    .is_some_and(|values| !values.is_empty() && values.len() <= MAX_IN_VALUES)
+            {
+                return Err(QueryError::Validation(format!(
+                    "IN requires 1-{MAX_IN_VALUES} values"
+                )));
+            }
+            if matches!(
+                op,
+                FilterOp::Contains
+                    | FilterOp::StartsWith
+                    | FilterOp::EndsWith
+                    | FilterOp::TokenMatch
+                    | FilterOp::AllTokens
+                    | FilterOp::AnyTokens
+            ) && !value.is_string()
+            {
+                return Err(QueryError::Validation(
+                    "text predicates require a string".into(),
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
