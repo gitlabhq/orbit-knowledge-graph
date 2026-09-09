@@ -1,0 +1,33 @@
+# source: crates/integration-tests/tests/server/data_correctness/traversal.rs::traversal_user_authored_mr_returns_correct_edges
+description: User-MergeRequest AUTHORED traversal returns correct edges and node properties
+
+query:
+  json: |
+    {
+        "query_type": "traversal",
+        "nodes": [
+            {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+            {"id": "mr", "entity": "MergeRequest", "columns": ["title", "state"]}
+        ],
+        "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
+        "limit": 20
+    }
+
+expect:
+  node_count: 7
+  referential_integrity: true
+  edge_exists:
+    AUTHORED:
+      - [1, 2000]
+      - [1, 2001]
+      - [2, 2002]
+      - [3, 2003]
+  nodes:
+    MergeRequest:
+      rows:
+        - id: 2000
+          title: "Add feature A"
+          state: opened
+        - id: 2002
+          title: "Refactor C"
+          state: merged

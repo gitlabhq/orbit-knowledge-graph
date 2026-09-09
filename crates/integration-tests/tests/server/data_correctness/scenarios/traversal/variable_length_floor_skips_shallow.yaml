@@ -1,0 +1,24 @@
+# source: crates/integration-tests/tests/server/data_correctness/traversal.rs::traversal_variable_length_floor_skips_shallow
+description: Variable-length hops [2,3] skips depth-1 and returns only depth-2+
+
+query:
+  json: |
+    {
+        "query_type": "traversal",
+        "nodes": [
+            {"id": "parent", "entity": "Group", "columns": ["name"], "node_ids": [100]},
+            {"id": "child", "entity": "Group", "columns": ["name"]}
+        ],
+        "relationships": [{"type": "CONTAINS", "from": "parent", "to": "child", "hops": [2, 3]}],
+        "limit": 10
+    }
+
+expect:
+  node_count: 2
+  nodes:
+    Group:
+      ids: [100, 300]
+      absent: [200]
+  edge_exists:
+    CONTAINS:
+      - [100, 300]

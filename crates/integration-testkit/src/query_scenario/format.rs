@@ -66,10 +66,19 @@ pub struct QueryExpect {
     pub node_count: Option<usize>,
     #[serde(default)]
     pub nodes: BTreeMap<String, NodeExpect>,
+    /// Exact edge set: `{ MEMBER_OF: [[1,100], [2,100]] }`
     #[serde(default)]
     pub edges: BTreeMap<String, Vec<[i64; 2]>>,
+    /// Spot-check edges exist (subset): `{ AUTHORED: [[1,2000], [2,2002]] }`
+    #[serde(default)]
+    pub edge_exists: BTreeMap<String, Vec<[i64; 2]>>,
+    /// Assert edges do NOT exist: `{ MEMBER_OF: [[1,102]] }`
+    #[serde(default)]
+    pub edge_absent: BTreeMap<String, Vec<[i64; 2]>>,
     #[serde(default)]
     pub edge_count: BTreeMap<String, usize>,
+    #[serde(default)]
+    pub groups: BTreeMap<String, GroupExpect>,
     #[serde(default)]
     pub referential_integrity: bool,
     #[serde(default)]
@@ -95,6 +104,24 @@ pub struct NodeExpect {
     pub filters: BTreeMap<String, serde_json::Value>,
     #[serde(default)]
     pub rows: Vec<BTreeMap<String, serde_json::Value>>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GroupExpect {
+    #[serde(default)]
+    pub rows: Vec<GroupRowExpect>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GroupRowExpect {
+    pub entity: String,
+    pub id: i64,
+    #[serde(default)]
+    pub values: BTreeMap<String, serde_json::Value>,
+    #[serde(default)]
+    pub properties: BTreeMap<String, serde_json::Value>,
 }
 
 impl QueryExpect {
