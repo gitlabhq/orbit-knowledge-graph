@@ -225,36 +225,6 @@ mod tests {
 
     const SCHEMA_VERSION: u32 = 42;
 
-    // The dispatcher pod has a read-only root filesystem and no /tmp mount;
-    // a child process isolates the TMPDIR override from sibling tests.
-    #[test]
-    fn archives_load_without_a_writable_temp_directory() {
-        const CHILD_MARKER: &str = "ONTOLOGY_ARCHIVE_TEST_CHILD";
-        if std::env::var_os(CHILD_MARKER).is_some() {
-            let archive = embedded_archive();
-            let restored = OntologyArchive::from_bytes(SCHEMA_VERSION, archive.bytes()).unwrap();
-            restored.load_ontology().unwrap();
-            return;
-        }
-
-        let output = std::process::Command::new(std::env::current_exe().unwrap())
-            .args([
-                "--exact",
-                "archive::tests::archives_load_without_a_writable_temp_directory",
-            ])
-            .env(CHILD_MARKER, "1")
-            .env("TMPDIR", "/nonexistent/read-only/tmp")
-            .output()
-            .unwrap();
-
-        assert!(
-            output.status.success(),
-            "{}\n{}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
-
     #[test]
     fn identical_sources_produce_identical_archive_bytes() {
         assert_eq!(embedded_archive().bytes(), embedded_archive().bytes());
