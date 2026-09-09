@@ -534,28 +534,20 @@ check_docs_markdown:
 check_docs_i18n_markdown:
   stage: docs
   image: registry.gitlab.com/gitlab-org/technical-writing/docs-gitlab-com/lint-markdown:alpine-3.23-vale-3.14.1-markdownlint2-0.22.1-lychee-0.24.2
+  parallel:
+    matrix:
+      - LOCALE_CODE: ["fr-fr", "ja-jp", "ko-kr"]
   rules:
     - if: $CI_MERGE_REQUEST_IID
       changes:
-        - docs-locale/**/*
+        - docs-locale/${LOCALE_CODE}/**/*
   script:
-    # Lint prose with each locale's own Vale config. The root .vale.ini applies
-    # gitlab_base, whose rules encode English typography and misfire on other
-    # languages, so translations must never be linted with it.
-    - |
-      for locale_dir in docs-locale/*/; do
-        [ -d "${locale_dir}source" ] || continue
-        if [ ! -f "${locale_dir}.vale.ini" ]; then
-          echo "ERROR: ${locale_dir} has translations but no ${locale_dir}.vale.ini."
-          echo "Add one before adding a new locale. See docs-locale/ja-jp/.vale.ini."
-          exit 1
-        fi
-        vale --config="${locale_dir}.vale.ini" --minAlertLevel error "${locale_dir}source/"
-      done
+    # Lint prose
+    - vale --config='docs-locale/${LOCALE_CODE}/.vale.ini' --minAlertLevel error docs-locale/${LOCALE_CODE}/source/
     # Lint Markdown
-    - markdownlint-cli2 'docs-locale/*/source/**/*.md'
+    - markdownlint-cli2 'docs-locale/${LOCALE_CODE}/source/**/*.md'
     # Check links
-    - lychee --offline --include-fragments docs-locale/*/source/**/*.md
+    - lychee --offline --include-fragments docs-locale/${LOCALE_CODE}/source/**/*.md
 
 docs_hugo_build:
   image: registry.gitlab.com/gitlab-org/technical-writing/docs-gitlab-com/docs-gitlab-com-builder:hugo-0.154.5
