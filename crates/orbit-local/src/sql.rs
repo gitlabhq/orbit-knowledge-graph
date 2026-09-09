@@ -115,16 +115,10 @@ fn scope_tables(client: &DuckDbClient, project_id: i64, commit_sha: &str) -> Res
     )?;
     let names = string_column(&tables, "table_name");
     let is_edge = bool_column(&tables, "is_edge");
-    let tables_where = |edge: bool| -> Vec<&str> {
-        names
-            .iter()
-            .zip(&is_edge)
-            .filter(|(_, is_edge)| **is_edge == edge)
-            .map(|(name, _)| name.as_str())
-            .collect()
-    };
-    let node_tables = tables_where(false);
-    let edge_tables = tables_where(true);
+    let (edge_tables, node_tables): (Vec<_>, Vec<_>) = names
+        .iter()
+        .zip(&is_edge)
+        .partition(|(_, is_edge)| **is_edge);
     if node_tables.is_empty() {
         return Ok(false);
     }
@@ -133,7 +127,7 @@ fn scope_tables(client: &DuckDbClient, project_id: i64, commit_sha: &str) -> Res
     let base = |table: &str| format!("{}.main.{}", quote_ident(&catalog), quote_ident(table));
     let indexed = node_tables
         .iter()
-        .map(|table| {
+        .map(|(table, _)| {
             format!(
                 "EXISTS (SELECT 1 FROM {} WHERE project_id = {project_id} AND commit_sha = {sha})",
                 base(table)
@@ -152,7 +146,7 @@ fn scope_tables(client: &DuckDbClient, project_id: i64, commit_sha: &str) -> Res
         return Ok(false);
     }
 
-    for table in &node_tables {
+    for (table, _) in &node_tables {
         client.execute(
             &format!(
                 "CREATE TEMP VIEW {} AS SELECT * FROM {} WHERE project_id = {project_id} AND commit_sha = {sha}",
@@ -164,10 +158,10 @@ fn scope_tables(client: &DuckDbClient, project_id: i64, commit_sha: &str) -> Res
     }
     let node_ids = node_tables
         .iter()
-        .map(|table| format!("SELECT id FROM {}", quote_ident(table)))
+        .map(|(table, _)| format!("SELECT id FROM {}", quote_ident(table)))
         .collect::<Vec<_>>()
         .join(" UNION ALL ");
-    for table in edge_tables {
+    for (table, _) in edge_tables {
         client.execute(
             &format!(
                 "CREATE TEMP VIEW {} AS SELECT DISTINCT * FROM {} WHERE source_id IN ({node_ids})",

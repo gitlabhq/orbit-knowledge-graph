@@ -880,24 +880,7 @@ async fn dispatch_local(command: LocalCommands) -> Result<()> {
                 ),
             }
         }
-        LocalCommands::Context(ContextArgs {
-            fqn,
-            file,
-            kind,
-            outline,
-            repo,
-            db,
-        }) => commands::context::run(
-            commands::context::Target {
-                fqns: fqn,
-                file,
-                kinds: kind_names(kind),
-                outline,
-            },
-            repo,
-            db,
-        ),
-
+        LocalCommands::Context(args) => commands::context::run(args),
         LocalCommands::Sql(SqlArgs {
             query,
             file,

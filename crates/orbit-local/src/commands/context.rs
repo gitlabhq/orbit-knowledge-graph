@@ -1,6 +1,5 @@
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
-use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use duckdb_client::search::kind_scope;
@@ -11,47 +10,41 @@ use crate::commands::{
 };
 use crate::workspace;
 
-pub(crate) struct Target {
-    pub fqns: Vec<String>,
-    pub file: Option<String>,
-    pub kinds: Vec<String>,
-    pub outline: bool,
-}
-
 const SIGNATURE_LINES: usize = 3;
 
-pub(crate) fn run(target: Target, repo: Option<PathBuf>, db: Option<PathBuf>) -> Result<()> {
-    let file_mode = target.fqns.is_empty();
-    let workspace::IndexedRepo { git, client } = workspace::open_indexed(repo, db)?;
+pub(crate) fn run(target: crate::ContextArgs) -> Result<()> {
+    let file_mode = target.fqn.is_empty();
+    let workspace::IndexedRepo { git, client } = workspace::open_indexed(target.repo, target.db)?;
+    let kinds = crate::kind_names(target.kind);
     let file = target
         .file
         .as_deref()
         .map(|p| repo_relative(&git.repo_path, p))
         .transpose()?;
     let file = file.as_deref();
-    let mut defs = match (target.fqns.as_slice(), file) {
+    let mut defs = match (target.fqn.as_slice(), file) {
         ([], None) => anyhow::bail!("pass one or more fqns or globs, or --file <path>"),
         ([], Some(path)) => {
-            let resolved = definitions_in_file(&client, &git, path, &target.kinds)?;
+            let resolved = definitions_in_file(&client, &git, path, &kinds)?;
             if resolved.is_empty() {
                 let launcher = spec::launcher();
                 anyhow::bail!(
                     "no indexed definitions in {path:?}{} for commit {} — pass a repo-relative \
                      path as printed by `{launcher} grep`, and make sure the commit is indexed \
                      (`{launcher} index <path>`)",
-                    fqn::kind_suffix(&target.kinds),
+                    fqn::kind_suffix(&kinds),
                     git.commit_sha
                 );
             }
             resolved
         }
-        (names, file) => names
-            .iter()
-            .map(|name| fqn::resolve(&client, &git, name, file, &target.kinds))
-            .collect::<Result<Vec<_>>>()?
-            .into_iter()
-            .flatten()
-            .collect(),
+        (names, file) => {
+            let mut defs = Vec::new();
+            for name in names {
+                defs.extend(fqn::resolve(&client, &git, name, file, &kinds)?);
+            }
+            defs
+        }
     };
     defs.sort_by(|a, b| {
         a.file

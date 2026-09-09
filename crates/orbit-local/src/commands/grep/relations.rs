@@ -35,10 +35,6 @@ impl Filter {
         self.incoming || !self.outgoing
     }
 
-    fn wants_outgoing(&self) -> bool {
-        self.outgoing || !self.incoming
-    }
-
     fn is_active(&self) -> bool {
         !self.edges.is_empty() || self.incoming != self.outgoing
     }
@@ -49,7 +45,7 @@ impl Filter {
     }
 
     fn direction_predicate(&self) -> &'static str {
-        match (self.wants_incoming(), self.wants_outgoing()) {
+        match (self.incoming, self.outgoing) {
             (true, false) => "  AND e.target_id = ?1",
             (false, true) => "  AND e.source_id = ?1",
             _ => "",
@@ -63,34 +59,27 @@ struct Row {
     label: String,
     loc: String,
     via: String,
-    hidden: bool,
 }
 
-fn rows_from(batches: &[RecordBatch]) -> Vec<Row> {
+fn rows_from(batches: &[RecordBatch], show_tests: bool) -> (Vec<Row>, usize) {
     let kinds = string_column(batches, "kind");
     let dirs = string_column(batches, "dir");
     let labels = string_column(batches, "label");
     let locs = string_column(batches, "loc");
     let vias = string_column(batches, "via");
     let hidden = bool_column(batches, "hidden");
-    (0..kinds.len())
+    let rows: Vec<Row> = (0..kinds.len())
+        .filter(|&j| show_tests || !hidden[j])
         .map(|j| Row {
             kind: kinds[j].clone(),
             dir: dirs[j].clone(),
             label: labels[j].clone(),
             loc: locs[j].clone(),
             via: vias[j].clone(),
-            hidden: hidden[j],
         })
-        .collect()
-}
-
-fn split_hidden(rows: Vec<Row>, show_tests: bool) -> (Vec<Row>, usize) {
-    if show_tests {
-        return (rows, 0);
-    }
-    let (hidden, shown): (Vec<Row>, Vec<Row>) = rows.into_iter().partition(|row| row.hidden);
-    (shown, hidden.len())
+        .collect();
+    let hidden = kinds.len() - rows.len();
+    (rows, hidden)
 }
 
 pub(crate) fn run(
@@ -131,9 +120,9 @@ ORDER BY kind, dir DESC, l.path, l.label"
             ),
             &params,
         )?;
-        let (links, links_hidden) = split_hidden(rows_from(&edges), filter.tests);
+        let (links, links_hidden) = rows_from(&edges, filter.tests);
 
-        let via_rows = if filter.wants_incoming() {
+        let (via, via_hidden) = if filter.wants_incoming() {
             let via = client.query_arrow_json(
                 &format!(
                     "WITH {LABELS_CTE},
@@ -157,11 +146,10 @@ ORDER BY kind, l.path, l.label"
                 ),
                 &params,
             )?;
-            rows_from(&via)
+            rows_from(&via, filter.tests)
         } else {
-            Vec::new()
+            (Vec::new(), 0)
         };
-        let (via, via_hidden) = split_hidden(via_rows, filter.tests);
 
         println!(
             "{}  [{}]  {}:{}-{}  (links {}, via members {})",
