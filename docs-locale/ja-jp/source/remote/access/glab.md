@@ -16,15 +16,13 @@ title: GitLab CLI（`glab`）でOrbitを使用する
 
 {{< history >}}
 
-- `knowledge_graph`という名前の[機能フラグ](https://docs.gitlab.com/administration/feature_flags/)とともに、GitLab 18.10で[導入されました](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676)。デフォルトでは無効です。この機能は[実験的機能](https://docs.gitlab.com/policy/development_stages_support/#experiment)です。
-- GitLab 19.1で[ベータ](https://docs.gitlab.com/policy/development_stages_support/#beta)に[変更されました](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676)。
+- GitLab 18.10で`knowledge_graph`[機能フラグ](https://docs.gitlab.com/administration/feature_flags/)とともに[導入](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676)されました。デフォルトでは無効です。この機能は[実験的機能](https://docs.gitlab.com/policy/development_stages_support/#experiment)です。
+- GitLab 19.1で[ベータ版](https://docs.gitlab.com/policy/development_stages_support/#beta)に[変更](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676)されました。
 
 {{< /history >}}
 
 > [!flag]
-> この機能の利用可否は機能フラグによって制御されています。
-> 詳細については、履歴を参照してください。
-> この機能はテスト目的で利用可能ですが、本番環境での使用には対応していません。
+ この機能の利用可否は、機能フラグによって制御されます。詳細については、履歴を参照してください。この機能はテスト目的で利用可能ですが、本番環境での使用には対応していません。
 
 <!-- -->
 
@@ -50,7 +48,7 @@ title: GitLab CLI（`glab`）でOrbitを使用する
 
 ## AIエージェントをセットアップする {#set-up-your-ai-agent}
 
-`glab orbit setup`は、AIコーディングエージェント（Claude Code、OpenCode、Cursor、Codex、Gemini CLI）がグラフを参照できるよう設定し、GitLab Orbitスキルをインストールします。
+`glab orbit setup`は、AIコーディングエージェント（Claude Code、OpenCode、Cursor、Codex、Gemini CLI）がグラフを参照できるよう設定し、GitLab Orbitスキルをインストールします:
 
 ```shell
 glab orbit setup
@@ -58,7 +56,6 @@ glab orbit setup
 
 MCPクライアントを接続する場合は、[手動で設定してください](mcp.md#connect-your-mcp-client)。
 
-<!-- markdownlint-disable-next-line MD044 -->
 ## コマンドラインからGitLab Orbitにクエリを実行する {#query-gitlab-orbit-from-the-command-line}
 
 `glab orbit remote`を使用して、GitLab Orbit Remote APIを直接呼び出します。スクリプト作成、デバッグ、クエリ作成前のスキーマ調査に役立ちます。`glab` 1.94以降が必要です。
@@ -86,9 +83,9 @@ glab orbit remote tools
 
 ### クエリを実行する {#run-a-query}
 
-`your-group`を実際のグループパスに置き換えてください。このクエリはそのグループの最初の5つのプロジェクトを返します。
+`your-group`を実際のグループパスに置き換えてください。このクエリはそのグループの最初の5つのプロジェクトを返します:
 
-リクエストボディを`query.json`に記述します。
+リクエストボディを`query.json`に記述します:
 
 ```json orbit-query
 {
@@ -110,7 +107,7 @@ glab orbit remote tools
 glab orbit remote query query.json
 ```
 
-`--response-format`フラグはリクエストボディの`response_format`にマップされます。
+`--response-format`フラグはリクエストボディの`response_format`にマップされます:
 
 - `--response-format llm` - AIエージェントの処理に最適化されたコンパクトなテキスト形式。
 - `--response-format raw` - `jq`へのパイプに適した構造化されたJSON形式。
@@ -119,7 +116,7 @@ glab orbit remote query query.json
 
 ### インデックス作成の進捗状況を確認する {#check-indexing-progress}
 
-スコープフラグをいずれか1つ指定してください。
+スコープフラグをいずれか1つ指定してください:
 
 ```shell
 glab orbit remote graph-status --full-path your-group/your-project
