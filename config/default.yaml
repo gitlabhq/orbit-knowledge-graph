@@ -6,7 +6,13 @@
 # Overrides, in increasing priority: an on-disk config/default.yaml (compatibility overlay for the
 # Helm chart's ConfigMap key), the overlay file (--config <path>, else config/config.yaml when
 # present), K8s secret files under /etc/secrets/, and GKG_* environment variables.
-# The values below are tuned for local development.
+#
+# The values below are deployment defaults: what any environment gets when nothing overrides them.
+# They must equal the settings a production pod would run on, so this file can underlay a partial
+# Helm ConfigMap without changing behaviour. config-rs deep-merges maps, so a map entry here that
+# the ConfigMap does not set leaks into production; keep the maps below empty unless the entry is a
+# genuine universal default. Local-development-only tuning lives in config/dev.yaml (loaded by the
+# mise dev tasks via --config), not here.
 
 bind_address: "127.0.0.1:4200"
 grpc_bind_address: "127.0.0.1:50054"
@@ -44,9 +50,7 @@ datalake:
   username: default
   # password: ""
   quorum_writes: false
-  session_settings:
-    max_execution_time: "900"
-    max_query_size: "10485760"
+  session_settings: {}
   insert_settings: {}
   profiling:
     enabled: false
@@ -61,13 +65,11 @@ graph:
   username: default
   # password: ""
   quorum_writes: false
+  # Universal graph defaults, also set by the Helm chart in production.
   session_settings:
-    optimize_on_insert: "0"
     max_query_size: "10485760"
   insert_settings:
-    async_insert: "1"
-    wait_for_async_insert: "1"
-    async_insert_deduplicate: "0"
+    optimize_on_insert: "0"
   profiling:
     enabled: false
     explain: false
@@ -98,8 +100,7 @@ engine:
     entity-handler:
       # datalake_batch_size: 500000  # unset = derived from the container memory limit
       system_notes_resolve_lookup_batch_size: 1000
-      batch_size_overrides:
-        WorkItem: 50000
+      batch_size_overrides: {}       # per-entity overrides; deployments set their own
     code-indexing-task:
       pipeline:
         max_file_size_bytes: 5000000
@@ -165,20 +166,15 @@ grpc:
   max_header_list_size_bytes: 65536 # 64 KiB; tonic/hyper default of 16 KiB is too small for GitLab JWTs carrying many traversal IDs
 
 # `default` applies to every query type; a sibling block keyed by query type (e.g. `path_finding`,
-# `aggregation`) overrides individual fields for that type only.
+# `aggregation`) overrides individual fields for that type only. Optional query knobs (cache flags,
+# per-type overrides, memory caps) stay unset here so a deployment opts into them explicitly.
 query:
   default:
     max_execution_time: 30
     max_ast_elements: 1000000          # 20x ClickHouse default, matches Siphon
     max_expanded_ast_elements: 10000000
     max_ast_depth: 10000
-    use_query_cache: false
     query_cache_ttl: 60
-    graph_query_cache_enabled: false
-    graph_query_cache_ttl: 60
-  path_finding:
-    max_execution_time: 15
-    max_memory_usage: 16106127360
 
 path_resolver:
   cache_ttl_secs: 60

@@ -343,7 +343,7 @@ PY
 run_mode() {
   local mode="$1"
   shift
-  exec cargo run -p orbit-server -- --mode="$mode"
+  exec cargo run -p orbit-server -- --mode="$mode" --config config/dev.yaml
 }
 
 case "${1:-webserver}" in

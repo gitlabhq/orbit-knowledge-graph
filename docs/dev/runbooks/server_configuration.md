@@ -10,11 +10,16 @@ Config is loaded in layers, each overriding the previous:
    section and scalar the server reads; the Rust config structs carry no fallback values, so a
    key removed from this file fails startup with a "missing field" error. Optional keys are
    `Option` fields (passwords, TLS paths, values derived from container resources) and are
-   commented out in the file.
+   commented out in the file. These are **deployment defaults**: a production pod runs on them for
+   every key the Helm ConfigMap does not set, so the file holds no local-development tuning. Its
+   maps stay empty unless an entry is a genuine universal default, because config-rs deep-merges
+   maps and any entry here that a partial ConfigMap does not set would leak into production.
 2. **On-disk `config/default.yaml`**, relative to the working directory, when present. This is
    the key the Helm chart's ConfigMap currently uses; treat it as a partial overlay.
 3. **Overlay file**: the path given with `--config <path>`, otherwise `config/config.yaml` when it exists.
    An explicit `--config` path must exist; the default overlay is optional and Git ignores it.
+   The mise dev tasks pass `--config config/dev.yaml`, a committed overlay holding local-development
+   tuning (laptop ClickHouse session settings, dev batch sizes) kept out of the deployment defaults.
 4. **Secrets**: Files in `/etc/secrets/` (Kubernetes secret mounts)
 5. **Environment variables**: Prefixed with `GKG_`, using `__` as a separator for nested keys and `,` for lists
 
@@ -22,7 +27,13 @@ Adding a setting means adding a field to the struct in `crates/orbit-server-conf
 value to `config/default.yaml`; nothing else. Tests that need a config start from
 `AppConfig::embedded_defaults()` and override the fields they care about.
 
-Overlay example for local development (`config/config.yaml`):
+The mise dev tasks (`server:start`, `dev:web`, `dev:indexer`, `dev:dispatcher`) launch with
+`--config config/dev.yaml`, so that committed overlay is the local-development layer. Personal
+overrides on top go through `GKG_*` environment variables, which the dev tasks already set and which
+take priority over every file. An `--config config/dev.yaml` invocation does not also read
+`config/config.yaml`; the default `config/config.yaml` lookup only applies when no `--config` is passed.
+
+Overlay example (`config/dev.yaml` or a `--config` file):
 
 ```yaml
 graph:

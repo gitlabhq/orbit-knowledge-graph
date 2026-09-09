@@ -337,7 +337,6 @@ mod tests {
                 ("max_execution_time".into(), "30".into()),
                 ("max_expanded_ast_elements".into(), "10000000".into()),
                 ("query_cache_ttl".into(), "60".into()),
-                ("use_query_cache".into(), "0".into()),
             ]
         );
         Ok(())
