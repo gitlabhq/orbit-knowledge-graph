@@ -197,6 +197,7 @@ objects: `{"title": [{"contains": "foo"}, {"contains": "bar"}]}`.
 | `all_tokens` | Text index contains all tokens. |
 | `any_tokens` | Text index contains any token. |
 
+`contains`, `starts_with`, and `ends_with` work only on string, enum, and UUID properties.
 Token operators work only on properties with text indexes.
 
 ### Text-indexed properties
@@ -257,6 +258,12 @@ can require external service calls.
 
 The `content` column is for source code. For merge request diff text, use
 `MergeRequest.diff`, `MergeRequestDiff.patch`, or `MergeRequestDiffFile.diff`.
+
+### Text excerpts
+
+Database-backed node strings return at most 2,048 Unicode code points plus `" [truncated]"` when shortened, including point lookups; use the GitLab API for complete text.
+Virtual columns, their lookup inputs, scalar aggregation outputs, and scalar group keys are exempt. Filters, sorting, grouping, and pagination use complete values.
+This per-property cap does not guarantee a maximum response size. The `llm` format can shorten text further; `<key>_len` counts the formatter input, including any SQL truncation marker.
 
 ### Filtering on virtual columns
 

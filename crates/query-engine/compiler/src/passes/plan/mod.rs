@@ -9,6 +9,8 @@ pub mod pathfinding;
 
 use std::collections::{HashMap, HashSet};
 
+use ontology::{DataType, FieldSource, Ontology};
+
 use crate::error::{QueryError, Result};
 use crate::input::*;
 
@@ -45,6 +47,42 @@ impl Plan {
     pub fn node_edge_mappings(&self) -> HashMap<String, (String, String)> {
         self.node_edge_mappings.clone()
     }
+
+    pub(crate) fn resolve_text_columns(&mut self, ontology: &Ontology) {
+        for node in self.nodes.values_mut() {
+            node.text_columns = returned_text_columns(node.entity.as_deref(), ontology);
+        }
+        if let PlanBody::Hydration(nodes) = &mut self.body {
+            for node in nodes {
+                node.text_columns = returned_text_columns(Some(&node.entity), ontology);
+            }
+        }
+    }
+}
+
+fn returned_text_columns(entity: Option<&str>, ontology: &Ontology) -> HashSet<String> {
+    let Some(node) = entity.and_then(|entity| ontology.get_node(entity)) else {
+        return HashSet::new();
+    };
+    let lookup_inputs: HashSet<&String> = node
+        .fields
+        .iter()
+        .filter_map(|field| match &field.source {
+            FieldSource::Virtual(source) => Some(&source.depends_on),
+            _ => None,
+        })
+        .flatten()
+        .collect();
+
+    node.fields
+        .iter()
+        .filter(|field| {
+            field.data_type == DataType::String
+                && matches!(field.source, FieldSource::DatabaseColumn(_))
+                && !lookup_inputs.contains(&field.name)
+        })
+        .map(|field| field.name.clone())
+        .collect()
 }
 
 pub enum PlanBody {

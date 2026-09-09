@@ -35,26 +35,6 @@ pub(super) async fn traversal_referential_integrity_on_complex_query(ctx: &TestC
     assert!(!contains.is_empty(), "should have CONTAINS edges");
 }
 
-pub(super) async fn giant_string_survives_pipeline(ctx: &TestContext) {
-    let resp = run_query(
-        ctx,
-        r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "n", "entity": "Note", "columns": ["note"], "node_ids": [3002]}],
-            "limit": 10
-        }"#,
-        &allow_all(),
-    )
-    .await;
-
-    resp.assert_node_count(1);
-    resp.assert_node_ids("Note", &[3002]);
-    resp.assert_node("Note", 3002, |n| {
-        n.prop_str("note")
-            .is_some_and(|s| s.len() == 10_000 && s.chars().all(|c| c == 'x'))
-    });
-}
-
 pub(super) async fn sql_injection_string_preserved(ctx: &TestContext) {
     let resp = run_query(
         ctx,

@@ -15,6 +15,39 @@ use crate::passes::shared::{
     rel_kind_filter, rel_kind_filter_values,
 };
 
+const MAX_RETURNED_TEXT_CHARACTERS: u32 = 2048;
+const TEXT_TRUNCATION_SUFFIX: &str = " [truncated]";
+
+pub(super) fn returned_column(alias: &str, column: &str, text_columns: &HashSet<String>) -> Expr {
+    let value = Expr::col(alias, column);
+    if !text_columns.contains(column) {
+        return value;
+    }
+
+    let excerpt = Expr::func(
+        "substringUTF8",
+        vec![
+            value.clone(),
+            Expr::lit(1),
+            Expr::lit(MAX_RETURNED_TEXT_CHARACTERS),
+        ],
+    );
+    let shortened = Expr::binary(
+        Op::Gt,
+        Expr::func("length", vec![value]),
+        Expr::func("length", vec![excerpt.clone()]),
+    );
+    let suffix = Expr::func(
+        "if",
+        vec![
+            shortened,
+            Expr::string(TEXT_TRUNCATION_SUFFIX),
+            Expr::string(""),
+        ],
+    );
+    Expr::func("concat", vec![excerpt, suffix])
+}
+
 /// Predicates applied after `FINAL` has resolved each node's latest row.
 pub(super) fn latest_node_predicates(alias: &str, np: &NodePlan) -> Vec<Expr> {
     let mut predicates = Vec::new();
@@ -57,7 +90,12 @@ pub(super) fn node_select_columns(alias: &str, np: &NodePlan) -> Vec<SelectExpr>
     }
     crate::passes::shared::requested_columns(&np.columns)
         .into_iter()
-        .map(|col| SelectExpr::new(Expr::col(alias, &col), format!("{alias}_{col}")))
+        .map(|col| {
+            SelectExpr::new(
+                returned_column(alias, &col, &np.text_columns),
+                format!("{alias}_{col}"),
+            )
+        })
         .collect()
 }
 

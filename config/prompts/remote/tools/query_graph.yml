@@ -1,12 +1,11 @@
 name: query_graph
-version: 1.0.2
+version: 1.0.3
 summary: >-
   Traverse GitLab relationships and code structure for callers/imports,
   dependencies and blast radius, cross-entity joins, or grouped aggregation.
 description: >-
-  Query GitLab relationships and code structure: traversal,
-  dependency/blast-radius, cross-entity joins, grouped aggregation. Prefer
-  ordinary GitLab tools for one known entity, a simple list/count, or a write.
-  The DSL below is STRUCTURE ONLY: you MUST call get_graph_schema (with
-  expand_nodes) for valid node/property/edge names; use get_query_dsl for the
-  full grammar.
+  Traverse GitLab relationships and code, join entities, or aggregate groups.
+  Use ordinary GitLab tools for single entities, simple lists/counts, and writes.
+  The DSL is structure only: call get_graph_schema with expand_nodes for valid
+  names and get_query_dsl for grammar. Text can be capped at 2,048 characters
+  plus " [truncated]"; use the GitLab API for full text, even for point lookups.

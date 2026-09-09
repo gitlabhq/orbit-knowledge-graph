@@ -34,6 +34,7 @@ pub fn plan_neighbors(input: &Input) -> Result<Plan> {
         is_global: center_node.is_global,
         redaction_id_column: center_node.redaction_id_column.clone(),
         columns: center_node.columns.clone(),
+        text_columns: Default::default(),
         dedup_columns: vec![],
         use_narrowing: false,
         needs_elevated_filter: false,
