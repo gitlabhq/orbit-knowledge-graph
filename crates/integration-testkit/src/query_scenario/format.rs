@@ -179,6 +179,32 @@ pub struct GroupRowExpect {
 }
 
 impl QueryExpect {
+    /// Panics if `pages` is set alongside result-level assertions that would
+    /// be silently ignored.
+    pub fn validate_pages_exclusive(&self, scenario: &str) {
+        if self.pages.is_empty() {
+            return;
+        }
+        let has_result_fields = self.node_count.is_some()
+            || !self.nodes.is_empty()
+            || !self.edges.is_empty()
+            || !self.edge_exists.is_empty()
+            || !self.edge_absent.is_empty()
+            || !self.edge_count.is_empty()
+            || !self.groups.is_empty()
+            || self.empty_aggregation
+            || self.row_count.is_some()
+            || !self.row_values.is_empty()
+            || self.path_count.is_some()
+            || self.referential_integrity
+            || self.has_more.is_some();
+        assert!(
+            !has_result_fields,
+            "{scenario}: pages is set alongside top-level result assertions; \
+             move them into the per-page expect or remove them"
+        );
+    }
+
     /// Derive a total node count from per-entity specs when `node_count` is
     /// not set explicitly. Returns `None` when no entity carries a countable
     /// spec (count, order, or ids).

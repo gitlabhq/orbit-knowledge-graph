@@ -223,7 +223,11 @@ async fn run_frontend(
     }
 
     if !expect.pages.is_empty() {
-        run_pages(ctx, query, &ontology, security, redaction, expect, label).await;
+        expect.validate_pages_exclusive(label);
+        run_pages(
+            ctx, frontend, query, &ontology, security, redaction, expect, label,
+        )
+        .await;
         return;
     }
 
@@ -236,8 +240,10 @@ async fn run_frontend(
     apply_expect(&view, expect, label);
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run_pages(
     ctx: &TestContext,
+    frontend: Frontend,
     base_query: &str,
     ontology: &Arc<ontology::Ontology>,
     security: &SecurityContext,
@@ -253,7 +259,7 @@ async fn run_pages(
         let query_str = query_json.to_string();
 
         let compiled = Arc::new(
-            compile(&query_str, Frontend::JsonDsl, ontology, security)
+            compile(&query_str, frontend, ontology, security)
                 .unwrap_or_else(|e| panic!("{page_label}: compile failed: {e}")),
         );
 
