@@ -171,49 +171,60 @@ inserts a completed row at the parent key and tombstones every row matching
 
 ### Indexing status tracking
 
-Each namespaced pipeline has its own attempt record in the existing, unversioned
-`orbit_indexing_progress` NATS KV bucket. Initial backfill has one separate root snapshot;
-completing one pipeline does not complete it. The response and lifecycle rules are in
-[ADR 010](010_graph_status_endpoint.md).
+Today, one NATS KV key per namespace tracks indexing progress
+(`orbit_indexing_progress` bucket, consumed by `GraphStatusService`). With
+per-entity handlers, this breaks: Entity A completing and writing "Indexed"
+while Entity B is still running gives a wrong answer for the namespace.
 
 #### Per-entity status key
 
 Each entity handler writes its own status key:
 
 ```plaintext
-status.{dotted_root_traversal_path}.{pipeline_name}
+status.{dotted_traversal_path}.{entity_kind}
 ```
 
-For example: `status.42.9970.MergeRequest`. The name comes from the ontology
-pipeline descriptor, including standalone-edge and derived pipelines, not just node
-types. These records describe attempts, not initial completion. Workers update the root
-snapshot's progress time for meaningful work, not delivery liveness. See the
-[entity handler](../../../crates/indexer/src/modules/sdlc/handler/entity.rs) and
-[status store](../../../crates/indexer/src/indexing_status/backfill.rs).
+For example: `status.42.9970.MergeRequest`, `status.42.9970.Issue`.
 
-#### Root backfill snapshot
+```rust
+fn entity_status_key(traversal_path: &str, entity_kind: &str) -> String {
+    let dotted = orbit_utils::traversal_path::to_dotted(traversal_path);
+    format!("status.{dotted}.{entity_kind}")
+}
+```
 
-The dispatcher counts initial-complete parent checkpoints for the target ontology's
-namespaced pipelines at the root namespace. Partition completion alone is insufficient;
-the parent checkpoint must be consolidated. It records completion after initial SDLC
-and all currently replicated projects are indexed. Code completed counts are
-informational, with no total. See the
-[dispatcher](../../../crates/indexer/src/orchestrator/dispatch/backfill_status.rs) and
-[project enumeration](../../../crates/indexer/src/orchestrator/dispatch/code_backfill.rs).
+Each handler writes only its own key. NATS message deduplication serializes
+runs for the same (entity, scope) pair, so no cross-handler coordination is
+needed.
 
-`GraphStatusService` only reads `backfill.<root_namespace_id>`; it does not compute
-completion or consult source tables. Missing status is unknown, not proof indexing never
-ran. Project and subgroup requests share the root's entire backfill summary while live
-graph counts remain requested-scope. See the
-[status service](../../../crates/orbit-server/src/graph_status/mod.rs).
+#### GraphStatusService aggregation
+
+`GraphStatusService` uses the ontology to derive the expected set of
+namespaced entity kinds, then reads one NATS KV key per entity. Missing keys
+are treated as `NotIndexed`. The namespace-level state is the worst of any
+entity's state:
+
+```rust
+// Priority: higher = worse. NotIndexed dominates (missing key = not started).
+fn state_priority(state: IndexingState) -> u8 {
+    match state {
+        IndexingState::Indexed     => 0,
+        IndexingState::Indexing    => 1,
+        IndexingState::Error       => 2,
+        IndexingState::Backfilling => 3,
+        IndexingState::NotIndexed  => 4,
+        IndexingState::Unknown     => 5,
+    }
+}
+```
+
+~36 KV reads at sub-millisecond each ≈ ~18ms total.
 
 #### Migration
 
-Before migration, the dispatcher attempts adoption from the active ontology and
-checkpoints if available. Incomplete snapshots follow the target schema and generation;
-completed snapshots survive later indexing and rebuilds. Root data deletion resets the
-snapshot; subgroup deletion does not. See
-[lifecycle rules](010_graph_status_endpoint.md#storage-and-lifecycle).
+During rollout, `GraphStatusService` checks both old-format keys
+(`status.42.9970`) and new entity-suffixed keys. Old keys become stale once
+all handlers run the new code and can be purged by TTL.
 
 ### Configuration
 

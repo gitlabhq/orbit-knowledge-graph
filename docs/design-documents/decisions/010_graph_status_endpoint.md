@@ -11,178 +11,408 @@ Accepted
 
 ## Date
 
-2026-04-21 (initial-backfill semantics updated 2026-09-09)
+2026-04-21 (state semantics updated 2026-08-10, see "Update: honest indexing state")
+
+## Update: honest indexing state (2026-08-10)
+
+The single `indexing.state` word used to derive purely from run timestamps in NATS KV, so
+a run that completed without writing anything (empty datalake, aborted extract) still
+reported `indexed` — [#1137](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/1137)
+problem 1. The response now separates the two indexing surfaces and makes the combined
+field honest:
+
+- `sdlc_indexing`: the existing worst-of aggregation over per-pipeline KV progress. The
+  read set covers every Namespaced pipeline descriptor (node, composed edge, and derived
+  names), matching the keys the SDLC indexer writes under `plan.name`, so edge-pipeline
+  failures surface too.
+- `code_indexing`: derived from the existing `projects` coverage ratio — no checkpoint on
+  any known project → `not_indexed`, partial → `backfilling`, full → `indexed`. Omitted
+  when the scope has no known projects (nothing to claim).
+- `indexing` (pre-existing field): now the worst of the two, so a namespace whose code was
+  never indexed no longer reports plain `indexed`. Wire shape and enum values are
+  unchanged; Rails needs no update.
+- Each domain item carries an optional per-entity `state` (its own pipeline's state for
+  SDLC entities, the code coverage state for code-graph entities).
+- `IndexingStatus` carries `last_rows_read` / `last_rows_written`, recorded by both
+  indexers at run completion. Rows are evidence for operators (a 0-row full pull next to
+  zero counts explains an empty graph); they never drive the state, because idle
+  incremental ticks legitimately read and write nothing.
 
 ## Context
 
-Entity counts answer what exists in the graph, but not whether initial indexing has
-completed. `GetGraphStatus` combines current counts with an initial-backfill summary.
-It does not certify that Siphon's CDC has caught up or that the graph is fresh relative
-to GitLab. The response contract lives in
-[`orbit.proto`](../../../crates/orbit-server/proto/orbit.proto).
+`GetGraphStats` returns entity counts grouped by ontology domain, scoped to a namespace via `traversal_path`. Consumers (Rails UI, Duo) use it to see what data exists in the graph for a given group or project.
+
+Entity counts alone don't answer the questions users actually ask:
+
+- "Is my project indexed yet?"
+- "When was the last time indexing ran?"
+- "How many of my group's projects have been code-indexed?"
+
+This information lives in the indexer's checkpoint tables but isn't exposed through any RPC. We want to evolve `GetGraphStats` into `GetGraphStatus`, a single RPC that combines entity counts with indexing progress.
+
+The GKG proto is the source of truth for the response schema. The Rails REST endpoint (`GET /api/v4/orbit/graph_status`) is a thin proxy that forwards to GKG. If the GKG response shape changes, Rails adjusts its mapping, not the other way around.
+
+### Current state
+
+- Accepts a raw `traversal_path` string.
+- Runs a `UNION ALL` of `count()` queries across all node tables with a `traversal_path` column.
+- Returns counts grouped by ontology domain (core, source_code, ci, plan, security, code_review).
+- Does not distinguish between group and project scope.
+- `count()` overcounts on `ReplacingMergeTree` tables between background merges.
 
 ## Decision
 
-Extend the existing `IndexingStatusStore` in the unversioned `orbit_indexing_progress`
-NATS KV bucket with one snapshot per root namespace, keyed `backfill.<root_namespace_id>`.
-The dispatcher owns first completion, using target-schema checkpoints and the replicated
-project inventory. The webserver reads the snapshot; it never reads source tables or
-computes completion. See the [snapshot store](../../../crates/indexer/src/indexing_status/backfill.rs),
-[dispatcher](../../../crates/indexer/src/orchestrator/dispatch/backfill_status.rs), and
-[status service](../../../crates/orbit-server/src/graph_status/mod.rs).
+Four phases, each a standalone MR.
 
-### Response contract
+### Phase 1: Accurate counts, `source_type`, and project coverage
 
-The structured response contains `projects`, `domains`, and one `backfill` object:
+The request includes a `scope` field so Rails tells GKG whether this is a group or project request. Rails already knows the scope from the request context, so there is no reason for GKG to spend extra ClickHouse queries looking it up:
+
+```protobuf
+message GetGraphStatsRequest {
+  string traversal_path = 1;
+  SourceType source_type = 2;
+}
+
+enum SourceType {
+  SOURCE_TYPE_GROUP = 0;
+  SOURCE_TYPE_PROJECT = 1;
+}
+```
+
+Entity counts are returned for all node types under the traversal path using `startsWith(traversal_path, ...)`. Subgroups roll up: requesting a parent group counts everything under it.
+
+Every type is counted with `uniq(id)`, which routes to the per-table `tp_count` aggregate projection (`SELECT traversal_path, uniq(id) GROUP BY traversal_path`). It reads kilobytes of HyperLogLog state rather than scanning the namespace and deduplicates the un-merged `ReplacingMergeTree` versions that a plain `count()` overcounts (observed up to +300% for frequently updated types). It carries ~1-2% HyperLogLog error, acceptable for a status indicator, and every type except Group measured within ~1% of exact on prod.
+
+Group is the one exception, counted with exact `count() FINAL`. Namespace deletion permanently removes groups and leaves tombstoned rows with distinct ids, and the projection has no `_deleted` column to exclude them, so `uniq(id)` overcounts Group ~6x (measured +549% on a large namespace). The group table is tiny, so FINAL is cheap. The check lives in `build_node_query` in `crates/orbit-server/src/graph_status/lower.rs`.
+
+#### Per-entity access control
+
+Entity counts must respect the caller's access level. A user who cannot see vulnerabilities in the query pipeline must not see vulnerability counts in the stats response.
+
+[!987](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/987) adds `required_role` to ontology nodes (e.g., `security_manager` for Vulnerability) and tags each traversal path in the JWT with the user's `access_level` on that path. The compiler's security pass calls `SecurityContext::paths_at_least(min_role)` to drop paths where the user's role is below the entity's floor.
+
+The stats endpoint uses the same check. Before including a node type in the `UNION ALL`, skip it if the user has no traversal path that meets the entity's `required_access_level`:
+
+```rust
+.filter(|node| {
+    let min_role = node.required_access_level();
+    !security_context.paths_at_least(min_role).is_empty()
+})
+```
+
+Entities the user cannot access at any path are excluded from the query entirely. A Reporter-only user sees zero Vulnerability rows in query results and zero Vulnerability counts in stats.
+
+#### Project coverage counts
+
+The response includes a `projects` object with `indexed` (how many projects have been code-indexed) and `total_known` (how many projects exist under the traversal path). These counts are pulled forward from Phase 3 into Phase 1 because they only require ClickHouse queries and are useful even without the indexing metadata from NATS KV.
+
+- `total_known`: `uniq(id)` on `gl_project`, filtered by `startsWith(traversal_path, ...)` and `_deleted = 0`.
+- `indexed`: `uniq(project_id)` on `code_indexing_checkpoint`, filtered by `startsWith(traversal_path, ...)` and `_deleted = 0`. Namespace deletion soft-deletes checkpoint rows via `INSERT INTO ... SELECT` with `_deleted = true`.
+
+The entity count and project count queries run concurrently.
+
+### Phase 2: Indexing progress via NATS KV
+
+The indexer writes indexing metadata to a NATS KV bucket (`indexing_progress`) after each run completes. Each key maps to a project or namespace:
+
+- SDLC: keyed by top-level namespace ID (e.g., `sdlc.9970`)
+- Code: keyed by project ID (e.g., `code.278964`)
+
+The value is the same shape for both: `last_started_at`, `last_completed_at`, `last_duration_ms`, `last_error`. Overwritten on every run, so it always reflects the most recent attempt. A non-empty `last_error` means the last run failed.
+
+Reads are O(1) lookups — no extra ClickHouse queries for indexing metadata. The `projects.indexed` / `projects.total_known` counts still come from ClickHouse since they require aggregation.
+
+Schema migrations trigger a full re-index, but the previous progress entry stays valid until the re-index completes. The data is stale but still accurate for the old schema version, so the endpoint keeps serving it rather than showing nothing.
+
+### Phase 3: Rename to GetGraphStatus, wire indexing metadata into the response
+
+Rename the RPC to `GetGraphStatus`.
+
+```protobuf
+message GetGraphStatusRequest {
+  string traversal_path = 1;
+  SourceType source_type = 2;
+}
+```
+
+The response is flat: indexing metadata at the top level, a `projects` object (already shipped in Phase 1), then `stats` (entity counts by ontology domain). Same fields regardless of scope.
+
+### Phase 4: Response caching via NATS KV
+
+Cache the full serialized response in a NATS KV bucket keyed by traversal path with a 60-second TTL. On a hit, return the cached response without touching ClickHouse. On a miss, run the queries, cache, and return.
+
+The indexer invalidates the cached entry for the relevant traversal path after each indexing run, so consumers see fresh data immediately after indexing completes rather than waiting for the TTL to expire. The 60-second TTL is a fallback for bursts between indexing runs.
+
+## Examples
+
+### Group scope
+
+**Request:**
+
+```json
+{ "traversal_path": "9970/12345/" }
+```
+
+**Flow:**
+
+1. Authorize the caller against the traversal path.
+2. Scope is `GROUP` (provided by Rails).
+3. If not a top-level group, resolve the top-level group from the traversal path. SDLC indexing runs at the top-level namespace, so indexing metadata comes from the top-level group's progress entry.
+4. Read indexing progress from NATS KV (`sdlc.{namespace_id}`).
+5. Count all entities under the traversal path per entity type with `uniq(id)` (Group is counted exactly via `count() FINAL`, see above), grouped by domain.
+6. Count projects known (`uniq(id)` on `gl_project`) vs projects indexed (`uniq(project_id)` on `code_indexing_checkpoint`) under the traversal path.
+
+**Response:**
 
 ```json
 {
-  "backfill": {
-    "state": "running",
-    "last_progress_at": "2026-09-09T10:05:00Z",
-    "sdlc": { "completed": 12, "total": 20 },
-    "code": { "completed": 45 }
+  "last_started_at": "2026-04-10T11:50:00Z",
+  "last_completed_at": "2026-04-10T11:55:00Z",
+  "last_duration_ms": 300,
+  "last_error": "",
+  "projects": {
+    "indexed": 45,
+    "total_known": 150
   },
-  "projects": { "indexed": 45, "total_known": 150 },
-  "domains": [
+  "stats": [
     {
       "name": "core",
-      "items": [{ "name": "Project", "count": 150 }]
+      "items": [
+        { "name": "Project", "count": 150 },
+        { "name": "Group", "count": 23 },
+        { "name": "User", "count": 891 }
+      ]
+    },
+    {
+      "name": "code_review",
+      "items": [
+        { "name": "MergeRequest", "count": 8432 }
+      ]
+    },
+    {
+      "name": "ci",
+      "items": [
+        { "name": "Pipeline", "count": 12903 },
+        { "name": "Job", "count": 51204 }
+      ]
+    },
+    {
+      "name": "plan",
+      "items": [
+        { "name": "WorkItem", "count": 3201 },
+        { "name": "Milestone", "count": 87 }
+      ]
     }
   ]
 }
 ```
 
-This is an illustrative structured payload; the state names are the semantic labels.
-The protobuf defines the corresponding `BACKFILL_STATE_*` enum values. `last_progress_at`
-and `error` are optional. SDLC has a total; code has only an informational completed
-count, never a total. No generation, schema, or scope IDs are exposed. The
-`backfill` object replaces `indexing`, `sdlc_indexing`, and `code_indexing`. Domain items
-contain only `name` and `count`, not per-item state. The old protobuf field numbers and
-names are reserved. RAW uses the structured response; LLM uses
-[TOON formatting](../../../crates/orbit-server/src/graph_status/toon.rs), not a separate
-status model. See [`orbit.proto`](../../../crates/orbit-server/proto/orbit.proto).
+For a subgroup, indexing metadata comes from the top-level group. Entity counts and the `projects` ratio are scoped to the subgroup's traversal path.
 
-| State | Meaning |
+### Project scope
+
+**Request:**
+
+```json
+{ "traversal_path": "9970/12345/278964/" }
+```
+
+**Flow:**
+
+1. Authorize the caller against the traversal path.
+2. Source type is `PROJECT` (provided by Rails).
+3. Read indexing progress from NATS KV (`code.{project_id}`).
+4. Count all entities under the project using `uniq(id)` per entity type, grouped by domain.
+
+**Response:**
+
+```json
+{
+  "last_started_at": "2026-04-10T11:30:00Z",
+  "last_completed_at": "2026-04-10T11:30:05Z",
+  "last_duration_ms": 5000,
+  "last_error": "",
+  "projects": {
+    "indexed": 1,
+    "total_known": 1
+  },
+  "stats": [
+    {
+      "name": "core",
+      "items": [
+        { "name": "Project", "count": 1 }
+      ]
+    },
+    {
+      "name": "source_code",
+      "items": [
+        { "name": "Branch", "count": 3 },
+        { "name": "File", "count": 500 },
+        { "name": "Directory", "count": 50 },
+        { "name": "Definition", "count": 2000 },
+        { "name": "ImportedSymbol", "count": 1500 }
+      ]
+    },
+    {
+      "name": "code_review",
+      "items": [
+        { "name": "MergeRequest", "count": 47 }
+      ]
+    },
+    {
+      "name": "ci",
+      "items": [
+        { "name": "Pipeline", "count": 312 },
+        { "name": "Job", "count": 1580 }
+      ]
+    },
+    {
+      "name": "plan",
+      "items": [
+        { "name": "WorkItem", "count": 89 }
+      ]
+    }
+  ]
+}
+```
+
+### Data sources
+
+| Response field | Source |
 |---|---|
-| `unknown` | The snapshot is missing or unreadable, or the dispatcher recorded unavailable evidence. |
-| `running` | Initial backfill has begun but the dispatcher has not recorded completion. |
-| `retrying` | A worker recorded an error before completion; this does not establish that a retry is scheduled or running. |
-| `completed` | The dispatcher recorded initial SDLC completion and no remaining uncheckpointed projects in the root's replicated inventory. |
+| `last_started_at`, `last_completed_at`, `last_duration_ms`, `last_error` | NATS KV `indexing_progress`, key `sdlc.{top_level_namespace_id}` (group) or `code.{project_id}` (project) |
+| `projects.total_known` | `uniq(id)` on `gl_project`, `startsWith(traversal_path, ...)` |
+| `projects.indexed` | `uniq(project_id)` on `code_indexing_checkpoint`, `startsWith(traversal_path, ...)` |
+| `stats[].items[].count` | `uniq(id)` per node table, `startsWith(traversal_path, ...)` |
 
-`not_started` remains a protobuf enum value but is not emitted by the snapshot reader.
-A missing record is unknown, not proof the namespace was never backfilled. Worker
-progress clears an earlier error; completed snapshots ignore later errors. Other
-response branches can still return data when backfill is unknown, so a successful RPC
-alone does not establish completion. See the
-[snapshot updates](../../../crates/indexer/src/indexing_status/backfill.rs) and
-[response mapping](../../../crates/orbit-server/src/graph_status/mod.rs).
+## Rails endpoint
 
-### Scope and counts
+`GET /api/v4/orbit/graph_status` is the REST surface that consumers (Rails UI, Duo) call. It is a thin proxy: Rails resolves the namespace, builds a JWT with the caller's per-path access levels, and forwards to GKG's `GetGraphStatus` gRPC. GKG owns the response schema.
 
-The entire `backfill` object, including both counts and progress, is root-namespace
-scope. Parent, subgroup, and project requests read the same snapshot. See the
-[root key](../../../crates/indexer/src/indexing_status/backfill.rs).
+Based on the initial implementation in [Rails MR !231381](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/231381), adapted to the current design.
 
-- **SDLC:** `sdlc.total` counts the target ontology's namespaced pipeline descriptors,
-  including node, standalone-edge, and derived pipelines. `sdlc.completed` counts
-  initial-complete parent checkpoints in the target schema at the root namespace.
-  Partitions are not separate units; cross-schema KV attempt markers are not completion
-  evidence. See [checkpoint aggregation](../../../crates/indexer/src/orchestrator/dispatch/backfill_status.rs).
-- **Code:** `code.completed` counts distinct projects with non-deleted code checkpoints
-  in the target schema under the root path. It is informational, not a percentage or
-  completion predicate; there is no `code.total`. See
-  [checkpoint counting](../../../crates/indexer/src/orchestrator/dispatch/code_backfill.rs).
-- **Current graph contents:** `projects` remains requested-scope live project coverage
-  and `domains` remains requested-scope live entity counts, even after backfill completes.
-  Entity visibility is derived from ontology role requirements and the caller's security
-  context. See [project coverage](../../../crates/orbit-server/src/graph_status/code.rs),
-  [input selection](../../../crates/orbit-server/src/graph_status/input.rs) and
-  [count queries](../../../crates/orbit-server/src/graph_status/mod.rs).
+### Request
 
-### Dispatcher-owned completion
+Callers identify the scope with exactly one of three parameters:
 
-Enable events and scheduled backfill use the same `CodeBackfill` path. The dispatcher
-compares non-deleted projects in the Datalake's `project_namespace_traversal_paths` with
-the target schema's code checkpoints. It records completion when initial SDLC is complete
-and no replicated projects remain uncheckpointed. Source-read failures do not prove the
-inventory is empty. See [shared dispatch](../../../crates/indexer/src/orchestrator/dispatch/code_backfill.rs)
-and [trigger wiring](../../../crates/indexer/src/lib.rs).
+| Parameter | Type | Description |
+|---|---|---|
+| `namespace_id` | Integer | Group ID |
+| `project_id` | Integer | Project ID |
+| `full_path` | String | Full path of a group or project (e.g., `gitlab-org/gitlab`) |
 
-Completion means **all currently replicated projects are indexed after initial SDLC**.
-There is no upstream-inventory readiness dependency and no replication-freshness
-guarantee. Projects arriving after completion are ongoing indexing and do not reopen
-initial backfill. Polling neither creates nor completes a snapshot. See the
-[completion predicate](../../../crates/indexer/src/orchestrator/dispatch/backfill_status.rs),
-[snapshot updates](../../../crates/indexer/src/indexing_status/backfill.rs), and
-[reader](../../../crates/orbit-server/src/graph_status/mod.rs).
+The endpoint resolves the parameter to a namespace, checks `read_group` permission, and derives the `traversal_path` and `source_type` for the gRPC call.
 
-### Progress and checkpoint evidence
+### Namespace resolution
 
-Workers advance `last_progress_at` for meaningful work, such as processing a nonempty
-SDLC page, repository work, or code checkpoint finalization. Dispatch, attempt start,
-idle polling, and NATS liveness notifications alone do not advance it. No state is
-inferred from timestamp age. See the
-[SDLC pipeline](../../../crates/indexer/src/modules/sdlc/pipeline.rs),
-[code pipeline](../../../crates/indexer/src/modules/code/pipeline.rs), and
-[snapshot store](../../../crates/indexer/src/indexing_status/backfill.rs).
+```ruby
+def resolve_graph_status_namespace(params)
+  namespace = if params[:namespace_id]
+                Group.find_by_id(params[:namespace_id])
+              elsif params[:project_id]
+                Project.find_by_id(params[:project_id])&.namespace
+              elsif params[:full_path]
+                routable = Routable.find_by_full_path(params[:full_path])
+                routable.is_a?(Project) ? routable.namespace : routable
+              end
 
-SDLC completion requires the durable parent checkpoint, including partition
-consolidation. A parent with no cursor, or a resume floor from a completed initial pass,
-counts as initial-complete. Code checkpoints are finalized after their buffered writes
-succeed. Workers report progress and errors, not namespace completion. Existing
-checkpoints can establish completion without inventing a progress timestamp. See
-[SDLC evidence](../../../crates/indexer/src/orchestrator/dispatch/backfill_status.rs) and
-the [code finalizer](../../../crates/indexer/src/modules/code/pipeline.rs).
+  namespace.is_a?(Group) ? namespace : nil
+end
+```
 
-### Storage and lifecycle
+For projects, the namespace is the parent group. The `source_type` sent to GKG is `SOURCE_TYPE_PROJECT` when the caller passed `project_id`, `SOURCE_TYPE_GROUP` otherwise.
 
-All status records and snapshots use the unversioned indexing-progress bucket:
+### gRPC call
 
-| Key | Contents |
+The gRPC client builds the request and forwards it to GKG. The JWT (built by `request_kwargs`) carries the caller's `group_traversal_ids` with per-path `access_level`. GKG uses these for traversal-path scoping and per-entity role filtering.
+
+```ruby
+def get_graph_status(user:, source_type:, traversal_path:, timeout: DEFAULT_TIMEOUT)
+  request = Gkg::V1::GetGraphStatusRequest.new(
+    traversal_path: traversal_path,
+    source_type: source_type
+  )
+  kwargs = request_kwargs(user: user, source_type: source_type, timeout: timeout)
+
+  response = stub.get_graph_status(request, **kwargs)
+  map_graph_status_response(response)
+end
+```
+
+### Response mapping
+
+GKG returns the protobuf response; Rails maps it to JSON for the REST API:
+
+```ruby
+def map_graph_status_response(response)
+  {
+    last_started_at: response.last_started_at,
+    last_completed_at: response.last_completed_at,
+    last_duration_ms: response.last_duration_ms,
+    last_error: response.last_error.presence,
+    projects: {
+      indexed: response.projects.indexed,
+      total_known: response.projects.total_known
+    },
+    stats: response.domains.map do |domain|
+      {
+        name: domain.name,
+        items: domain.items.map { |item| { name: item.name, count: item.count } }
+      }
+    end
+  }
+end
+```
+
+### Authorization
+
+- Route-level: `permissions: :read_knowledge_graph` with `boundary_type: :user`.
+- Namespace-level: `can?(current_user, :read_group, namespace)` before calling GKG.
+- Entity-level: handled by GKG via per-entity role scoping (see Phase 1). The JWT carries per-path access levels; GKG filters entity counts based on the caller's role. Rails does not need to know which entity types require elevated access.
+
+### Error handling
+
+| Condition | HTTP status |
 |---|---|
-| `status.{dotted_root_path}.{pipeline_name}` | SDLC attempt metadata, not initial-completion evidence. |
-| `status.{dotted_project_path}` | Code attempt metadata. |
-| `backfill.<root_namespace_id>` | Root state, progress, counts, error, and internal target schema and generation. |
+| No lookup parameter provided | 400 |
+| Namespace not found or not accessible | 404 |
+| GKG unreachable | 503 |
+| GKG authorization error | 403 |
 
-While incomplete, a snapshot follows the indexing target schema. Dispatcher updates
-are guarded by the migration target and snapshot generation; worker progress applies
-only to the matching target schema. Changing the target resets an incomplete snapshot
-with a new generation. Completed snapshots retain their state, counts, and progress
-across later indexing, schema migrations, and rebuilds. This is not a schema-migration
-readiness gate. See the [dispatcher guard](../../../crates/indexer/src/orchestrator/dispatch/backfill_status.rs)
-and [snapshot updates](../../../crates/indexer/src/indexing_status/backfill.rs).
+## Alternatives considered
 
-Before migration, the dispatcher makes a best-effort adoption pass using the active
-ontology and checkpoints when available. Missing historical evidence cannot establish
-earlier completion. See [startup reconciliation](../../../crates/indexer/src/lib.rs)
-and [schema management](../schema_management.md#stable-initial-backfill-status).
+### Separate `GetIndexingStatus` RPC
 
-Actual root namespace data deletion clears its snapshot and descendant attempt keys
-before marking deletion complete. Subgroup deletion clears its attempt keys without
-resetting the root snapshot. Disabling indexing during the grace period does not clear
-status. See the [cleanup implementation](../../../crates/indexer/src/indexing_status.rs)
-and
-[namespace deletion](../indexing/namespace_deletion.md).
+Two RPCs that consumers must call and correlate. Low entity counts might mean "not indexed yet" rather than "empty namespace." A single RPC avoids that ambiguity.
 
-## Consumers
+### `FINAL` for exact counts
 
-The Rails `GET /api/v4/orbit/graph_status` proxy, UI consumers, CLI output consumers,
-agent prompts, and skills must use `backfill` instead of the removed indexing fields
-and per-item states. The proto is the contract; Rails serialization and display changes
-must be coordinated rather than assuming the previous response mapping still works.
-The CLI entry point is documented in
-[remote access](../../source/remote/access/glab.md#check-indexing-progress).
+`FINAL` forces ClickHouse to deduplicate at query time. On staging with 16M edge rows, `FINAL` reads 14.4M rows (620 MB) and takes 579ms vs 71ms without. At production scale this would take minutes. `uniq(id)` gets equivalent deduplication via HyperLogLog without the cost.
 
-Clients can poll while initial indexing is incomplete. Treat `unknown` as unavailable
-evidence, not proof indexing never ran. `completed` is the root's initial backfill
-milestone, not certified upstream CDC completion, continuous freshness, or current worker
-health. Requested-scope graph counts continue to be queried. See the
-[service implementation](../../../crates/orbit-server/src/graph_status/mod.rs).
+### Pre-compute stats at index time
+
+The indexer could write pre-aggregated entity counts to NATS KV alongside the indexing progress, making the entire response an O(1) read. Rejected because it adds complexity to the indexer for an endpoint that doesn't get enough traffic to justify it. If that changes, this is a natural next step after Phase 4.
+
+## Consequences
+
+What improves:
+
+- Single RPC for "what data exists" and "how fresh is it."
+- Indexing coverage ratio (projects indexed vs known) is the metric operators actually want.
+- `uniq(id)` eliminates overcounting from `ReplacingMergeTree` row duplication.
+- Response caching via NATS KV protects ClickHouse from repeated calls.
+
+What gets harder:
+
+- The endpoint runs multiple queries per request (entity counts + NATS lookups) instead of one.
+- Subgroup requests need to resolve the top-level group for SDLC indexing metadata.
 
 ## References
 
 - [Code indexing design document](../indexing/code_indexing.md)
 - [SDLC indexing design document](../indexing/sdlc_indexing.md)
-- [Entity-level indexing](014_entity_level_indexing.md#indexing-status-tracking)
+- [ADR 005: PostgreSQL task table for code indexing triggers](005_code_indexing_task_table.md)
 - [Security and authorization design](../security.md)
+- [MR !987: Per-entity role scoping for aggregation targets](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/987)
+- [Rails MR !231381: Add `GET /api/v4/orbit/graph_status` endpoint](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/231381)

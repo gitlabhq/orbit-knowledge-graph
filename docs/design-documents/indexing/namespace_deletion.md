@@ -44,9 +44,7 @@ The handler follows these steps:
 
 4. **Soft-delete checkpoints.** Once all graph data has been marked deleted, the handler removes the SDLC checkpoints (keyed by namespace position, e.g. `ns.42.Project`) and the code indexing checkpoints (keyed by traversal path prefix). This prevents stale checkpoints from interfering if the namespace is later re-enabled and re-indexed from scratch.
 
-5. **Clear indexing status.** `IndexingStatusStore::forget_namespace` removes the namespace's and all descendants' `status.*` attempt keys from unversioned NATS KV `orbit_indexing_progress`. Root namespace deletion also removes `backfill.<root_namespace_id>`; subgroup deletion does not reset the root snapshot. See the [status store](../../../crates/indexer/src/indexing_status.rs).
-
-6. **Mark deletion complete.** The handler soft-deletes the `namespace_deletion_schedule` entry so the scheduler does not dispatch it again, only after status cleanup succeeds. See the [handler](../../../crates/indexer/src/modules/namespace_deletion/handler.rs).
+5. **Mark deletion complete.** The handler soft-deletes the `namespace_deletion_schedule` entry so the scheduler does not dispatch it again.
 
 ```sql
 -- Soft-delete pattern for graph tables (generated per table from the ontology)
@@ -102,12 +100,7 @@ The scheduler writes to this table when it detects a deleted namespace. The hand
 
 Table deletion is all-or-nothing. If any graph table fails to soft-delete, the handler returns an error and NATS redelivers the message on the next attempt. Checkpoints and the schedule entry are only cleaned up after every table has been processed, so a transient ClickHouse failure will not leave the namespace in a state where checkpoints are gone but graph data remains.
 
-If status cleanup or `mark_deletion_complete` fails after data and checkpoints have been deleted, the message will be redelivered. The next run re-executes the soft-deletes and retries any remaining status keys before completing the schedule entry. See the [handler](../../../crates/indexer/src/modules/namespace_deletion/handler.rs).
-
-Disabling indexing during the grace period retains status. Actual root data deletion
-resets the backfill snapshot; subgroup deletion and later schema rebuilds do not reset a
-completed snapshot. See
-[initial-backfill lifecycle](../decisions/010_graph_status_endpoint.md#storage-and-lifecycle).
+If the `mark_deletion_complete` step fails after data and checkpoints have been deleted, the message will be redelivered. The next run will re-execute the soft-deletes, which is safe because the queries only affect rows where `_deleted = false`.
 
 ## Observability
 
