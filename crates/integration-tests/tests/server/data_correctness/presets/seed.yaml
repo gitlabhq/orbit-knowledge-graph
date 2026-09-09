@@ -1,3 +1,58 @@
+text_excerpts:
+  gl_merge_request:
+    - { id: 40000, title: { sql: "repeat('m', 3000)" }, state: opened, traversal_path: "1/100/1000/" }
+  gl_file:
+    - id: 50000
+      project_id: 1000
+      branch: { sql: "repeat('b', 3000)" }
+      path: { sql: "repeat('p', 3000)" }
+      name: { sql: "repeat('n', 3000)" }
+      traversal_path: "1/100/1000/"
+  gl_edge:
+    - { traversal_path: "1/100/1000/", source_id: 40000, source_kind: MergeRequest, relationship_kind: HAS_NOTE, target_id: 30005, target_kind: Note }
+  gl_note:
+    - &excerpt_note
+      id: 30000
+      note: ""
+      discussion_id: null
+      noteable_type: MergeRequest
+      noteable_id: 40000
+      author_id: 1
+      created_at: "2026-01-01 00:00:00"
+      internal: false
+      traversal_path: "1/100/1000/"
+    - <<: *excerpt_note
+      id: 30001
+      note: &short_ascii { sql: "repeat('a', 2047)" }
+      discussion_id: *short_ascii
+    - <<: *excerpt_note
+      id: 30002
+      note: &boundary_ascii { sql: "repeat('a', 2048)" }
+      discussion_id: *boundary_ascii
+    - <<: *excerpt_note
+      id: 30003
+      note: &long_ascii { sql: "repeat('a', 2049)" }
+      discussion_id: *long_ascii
+    - <<: *excerpt_note
+      id: 30004
+      note: &boundary_unicode { sql: "repeat('🙂', 2048)" }
+      discussion_id: *boundary_unicode
+    - <<: *excerpt_note
+      id: 30005
+      note: { sql: "repeat('🙂', 2049)" }
+    - <<: *excerpt_note
+      id: 30006
+      note: &late_sort { sql: "concat(repeat('x', 2048), 'z')" }
+      discussion_id: *late_sort
+    - <<: *excerpt_note
+      id: 30007
+      note: &early_sort { sql: "concat(repeat('x', 2048), 'a')" }
+      discussion_id: *early_sort
+    - <<: *excerpt_note
+      id: 30008
+      note: &escaped_text { sql: "repeat(concat(char(34), char(10), '🙂'), 1024)" }
+      discussion_id: *escaped_text
+
 data_correctness:
   gl_user:
     - { id: 1, username: alice, name: Alice Admin, state: active, user_type: human, email: alice@example.com }
@@ -169,4 +224,3 @@ data_correctness:
     - { traversal_path: "1/100/1000/", project_id: 1000, branch: main, source_id: 12000, source_kind: Definition, relationship_kind: CALLS, target_id: 12001, target_kind: Definition }
     - { traversal_path: "1/100/1000/", project_id: 1000, branch: main, source_id: 12001, source_kind: Definition, relationship_kind: CALLS, target_id: 12002, target_kind: Definition }
     - { traversal_path: "1/101/1001/", project_id: 1001, branch: main, source_id: 12001, source_kind: Definition, relationship_kind: CALLS, target_id: 12102, target_kind: Definition }
-

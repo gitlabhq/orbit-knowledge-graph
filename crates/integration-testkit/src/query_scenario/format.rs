@@ -20,7 +20,7 @@ pub struct QueryScenario {
 #[serde(deny_unknown_fields)]
 pub struct ScenarioConfig {
     #[serde(default)]
-    pub extra_seed: Seed,
+    pub extra_seed: Option<PresetOr<Seed>>,
     #[serde(default)]
     pub security: Option<PresetOr<SecurityOverride>>,
     #[serde(default)]
@@ -169,6 +169,15 @@ pub struct GroupRowExpect {
     pub values: BTreeMap<String, serde_json::Value>,
     #[serde(default)]
     pub properties: BTreeMap<String, serde_json::Value>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct RepeatedText {
+    pub text: String,
+    pub repeat: usize,
+    #[serde(default)]
+    pub suffix: String,
 }
 
 impl QueryExpect {

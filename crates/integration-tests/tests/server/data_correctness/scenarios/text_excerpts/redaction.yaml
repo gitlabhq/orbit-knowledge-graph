@@ -1,0 +1,22 @@
+description: Text excerpts do not expose inaccessible notes
+
+config:
+  extra_seed: text_excerpts
+  redaction:
+    allow:
+      note: [30003, 30005]
+    deny:
+      note: [30005]
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [{"id": "note", "entity": "Note", "node_ids": [30003, 30005], "columns": ["note"]}]
+    }
+
+expect:
+  nodes:
+    Note:
+      ids: [30003]
+      absent: [30005]

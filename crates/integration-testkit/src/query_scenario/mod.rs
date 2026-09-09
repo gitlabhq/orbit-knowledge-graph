@@ -46,16 +46,10 @@ pub fn validate_parse(root: &str) {
 
 /// Load a named seed preset from `presets/seed.yaml` and apply it.
 pub async fn load_yaml_seed(ctx: &TestContext, presets_dir: &str, name: &str) {
-    let path = Path::new(presets_dir).join("seed.yaml");
-    let raw = std::fs::read_to_string(&path)
-        .unwrap_or_else(|e| panic!("seed presets at {}: {e}", path.display()));
-    let map: std::collections::BTreeMap<String, Seed> =
-        orbit_utils::yaml::from_str(&raw).unwrap_or_else(|e| panic!("invalid seed presets: {e}"));
-    let seed = map
-        .get(name)
-        .unwrap_or_else(|| panic!("unknown seed preset '{name}'"));
+    let preset = Some(PresetOr::Preset(name.to_string()));
+    let seed: Seed = resolve_preset("seed", &preset, Path::new(presets_dir), name).unwrap();
     let columns = crate::scenario::seed::fetch_table_columns(ctx).await;
-    crate::scenario::seed::apply_seed(ctx, seed, &Default::default(), &columns, name).await;
+    crate::scenario::seed::apply_seed(ctx, &seed, &Default::default(), &columns, name).await;
 }
 
 pub async fn run_dir(ctx: &TestContext, root: &str, presets: &str) {
@@ -119,14 +113,14 @@ async fn run_scenario(ctx: &TestContext, file: &Path, name: &str, presets: &Path
 
     let cfg = &scenario.config;
 
-    let needs_fork = !cfg.extra_seed.is_empty();
-    let ctx = if needs_fork {
+    let extra_seed = resolve_preset("seed", &cfg.extra_seed, presets, name).unwrap_or_default();
+    let ctx = if !extra_seed.is_empty() {
         let db_name = scenario::database_name(name);
         let forked = ctx.fork(&db_name).await;
         let columns = crate::scenario::seed::fetch_table_columns(&forked).await;
         crate::scenario::seed::apply_seed(
             &forked,
-            &cfg.extra_seed,
+            &extra_seed,
             &Default::default(),
             &columns,
             name,
@@ -328,7 +322,8 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
                 if prop == "id" {
                     continue;
                 }
-                assert_property(found, prop, expected, entity, id, label);
+                let expected = expand_expected_value(expected, label);
+                assert_property(found, prop, &expected, entity, id, label);
             }
         }
         for prop in &ne.prop_present {
@@ -355,7 +350,7 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
             }
         }
         for (field, expected) in &ne.filters {
-            let expected = expected.clone();
+            let expected = expand_expected_value(expected, label);
             let field_name = field.clone();
             view.assert_filter(entity, field, move |n| match &expected {
                 serde_json::Value::Object(m) if m.contains_key("starts_with") => {
@@ -485,6 +480,20 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
             "{label}: has_more mismatch"
         );
     }
+}
+
+fn expand_expected_value(value: &serde_json::Value, label: &str) -> serde_json::Value {
+    if !value.is_object() {
+        return value.clone();
+    }
+    let repeated: format::RepeatedText = serde_json::from_value(value.clone())
+        .unwrap_or_else(|error| panic!("{label}: invalid repeated text: {error}"));
+    format!(
+        "{}{}",
+        repeated.text.repeat(repeated.repeat),
+        repeated.suffix
+    )
+    .into()
 }
 
 fn assert_property(
