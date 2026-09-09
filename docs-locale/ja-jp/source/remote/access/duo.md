@@ -2,7 +2,7 @@
 stage: Orbit
 group: Context Systems
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: GitLab Duo Agent Platformを通じてGitLab Orbitを使用します。エージェントはGitLab Orbitのグラフツールを呼び出し、GitLab Duo Agent、Planner Agent、Security Analyst Agent、Data Analyst Agent、CI Expert Agent、Developer Flowにわたって、ライブのGitLabデータに基づいた回答を提供します。
+description: GitLab Duo Agent Platformを通じてGitLab Orbitを使用します。エージェントはGitLab Orbitのグラフツールを呼び出し、GitLab Duo Agent、プランナーエージェント、セキュリティ分析エージェント、データ分析エージェント、CIエキスパートエージェント、デベロッパーフローにわたって、ライブのGitLabデータに基づいた回答を提供します。
 title: GitLab Duo Agent PlatformでGitLab Orbitを使用する
 ---
 
@@ -16,15 +16,13 @@ title: GitLab Duo Agent PlatformでGitLab Orbitを使用する
 
 {{< history >}}
 
-- `knowledge_graph`という名前の[機能フラグ](https://docs.gitlab.com/administration/feature_flags/)とともに、GitLab 18.10で[導入](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676)されました。デフォルトでは無効です。この機能は[実験的機能](https://docs.gitlab.com/policy/development_stages_support/#experiment)です。
-- GitLab 19.1で[ベータ](https://docs.gitlab.com/policy/development_stages_support/#beta)に[変更](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676)されました。
+- GitLab 18.10で`knowledge_graph`[機能フラグ](https://docs.gitlab.com/administration/feature_flags/)とともに[導入](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676)されました。デフォルトでは無効です。この機能は[実験的機能](https://docs.gitlab.com/policy/development_stages_support/#experiment)です。
+- GitLab 19.1で[ベータ版](https://docs.gitlab.com/policy/development_stages_support/#beta)に[変更](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676)されました。
 
 {{< /history >}}
 
 > [!flag]
-> この機能の利用可否は機能フラグによって制御されています。
-> 詳細については、履歴を参照してください。
-> この機能はテスト目的で利用可能ですが、本番環境での使用には対応していません。
+ この機能の利用可否は、機能フラグによって制御されます。詳細については、履歴を参照してください。この機能はテスト目的で利用可能ですが、本番環境での使用には対応していません。
 
 GitLab OrbitはGitLab Duo Agent Platformに統合されています。エージェントは、クロスプロジェクトの依存関係、影響範囲、パイプラインの継承、脆弱性の系譜、コントリビューターのパターンなど、SDLCグラフをトラバースすることで最適に回答できる質問に対して、GitLab Orbitのコマンドツール（`list_commands`、`invoke_command`）を自動的に呼び出し、`get_graph_schema`や`query_graph`などのコマンドを実行します。GitLab Orbitが回答を持っていない場合、エージェントは既存のツールにフォールバックします。
 
@@ -33,19 +31,18 @@ GitLab OrbitはGitLab Duo Agent Platformに統合されています。エージ�
 - GitLab Orbitが[グループで有効化](../getting-started.md)されている。
 - [GitLab Duo Agent Platform](https://docs.gitlab.com/user/duo_agent_platform/)へのアクセス権がある。
 
-<!-- markdownlint-disable-next-line MD044 -->
 ## GitLab Orbitが利用可能な場所 {#where-gitlab-orbit-is-available}
 
-GitLab Orbitは以下のGitLab Duo Agent Platformのエージェントおよびフローに組み込まれています。
+GitLab Orbitは以下のGitLab Duo Agent Platformのエージェントおよびフローに組み込まれています:
 
 | エージェントまたはフロー | 使用するタイミング |
 |---|---|
 | GitLab Duo Agent | 汎用開発アシスタント。コード、計画、セキュリティ、プロジェクト管理に関するサポートを提供します。グラフコンテキストから回答が得られる場合にGitLab Orbitを呼び出します。 |
-| Planner Agent | イシューとマイルストーンの計画。作業アイテムのオーナーシップ、ブロッカー、コントリビューターの負荷、プロジェクト横断のマイルストーン進捗について質問できます。 |
-| Security Analyst Agent | 脆弱性のトリアージ。重大度別のオープンな脆弱性、グループ全体のCVEカバレッジ、脆弱性の発生タイムラインについて質問できます。 |
-| Data Analyst Agent | GLQLを活用したSDLCアナリティクス。パイプラインの健全性、MRのサイクルタイム、コントリビューターのパターン、デプロイ頻度について質問できます。 |
-| CI Expert Agent | パイプラインのトリアージ。ジョブの失敗原因、パイプラインの継承、最も遅いジョブ、頻繁に失敗するプロジェクトについて質問できます。 |
-| Developer Flow | UIで作業アイテムをドラフトMRに変換します。GitLab Orbitは依存関係、オーナーシップ、影響範囲など、ライブのSDLCグラフに基づいてエージェントの実装を補強します。 |
+| プランナーエージェント | イシューとマイルストーンの計画。作業アイテムのオーナーシップ、ブロッカー、コントリビューターの負荷、プロジェクト横断のマイルストーン進捗について質問できます。 |
+| セキュリティ分析エージェント | 脆弱性トリアージ。重大度別のオープンな脆弱性、グループ全体のCVEカバレッジ、脆弱性の発生タイムラインについて質問できます。 |
+| データ分析エージェント | GLQLを活用したSDLCアナリティクス。パイプラインの健全性、MRのサイクルタイム、コントリビューターのパターン、デプロイ頻度について質問できます。 |
+| CIエキスパートエージェント | パイプラインのトリアージ。ジョブの失敗原因、パイプラインの継承、最も遅いジョブ、頻繁に失敗するプロジェクトについて質問できます。 |
+| デベロッパーフロー | UIで作業アイテムをドラフトMRに変換します。GitLab Orbitは依存関係、オーナーシップ、影響範囲など、ライブのSDLCグラフに基づいてエージェントの実装を補強します。 |
 
 エージェントがGitLab Orbitを使用して質問に回答する場合、その回答はエージェントの一般的な知識ではなく、ライブグラフに基づいたものになります。
 
@@ -91,4 +88,4 @@ CI/CDとパイプラインの健全性:
 
 - GitLab Orbitは、有効化されており、かつアクセス権を持つグループについてのみ回答します。
 - 複雑な複数ステップの質問は、スコープを絞り込むためのフォローアップが必要になる場合があります。
-- コードコンテンツ（ファイルのテキスト、関数の本体）は利用可能ですが、大きな結果に対してはデフォルトで返されない場合があります。明示的に質問してください：「この関数のソースを表示してください。」
+- コードコンテンツ（ファイルのテキスト、関数の本体）は利用可能ですが、大きな結果に対してはデフォルトで返されない場合があります。明示的に質問してください: 「この関数のソースを表示してください。」
