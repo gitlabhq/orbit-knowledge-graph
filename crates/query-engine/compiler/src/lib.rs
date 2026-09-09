@@ -2378,4 +2378,41 @@ mod tests {
             "{sql}"
         );
     }
+
+    fn note_excerpt_chars(limit: u32) -> u32 {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+        let compiled = compile(
+            &format!(
+                r#"{{
+                "query_type": "traversal",
+                "nodes": [{{"id": "n", "entity": "Note", "node_ids": [1], "columns": ["note"]}}],
+                "limit": {limit}
+            }}"#
+            ),
+            Frontend::JsonDsl,
+            &ontology,
+            &security_ctx(),
+        )
+        .expect("note query should compile");
+        let sql = compiled.base.render();
+        let (_, after) = sql
+            .split_once("substringUTF8(n.note, 1, ")
+            .unwrap_or_else(|| panic!("expected a text excerpt, got:\n{sql}"));
+        after
+            .split(')')
+            .next()
+            .and_then(|chars| chars.parse().ok())
+            .unwrap_or_else(|| panic!("expected excerpt length, got:\n{sql}"))
+    }
+
+    #[test]
+    fn text_excerpt_length_shrinks_with_page_size() {
+        let single_row = note_excerpt_chars(1);
+        let wide_page = note_excerpt_chars(1000);
+        assert!(single_row > 1_000_000, "single row got {single_row} chars");
+        assert!(
+            (1000..3000).contains(&wide_page),
+            "wide page got {wide_page} chars"
+        );
+    }
 }

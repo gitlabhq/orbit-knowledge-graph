@@ -188,7 +188,8 @@ fn plan(ctx: &mut impl CompilerCtx) -> Result<()> {
                 .insert(node.destination_table.clone(), node.sort_key.clone());
         }
     }
-    let query_plan = plan::plan(&mut input)?;
+    let mut query_plan = plan::plan(&mut input)?;
+    query_plan.resolve_text_excerpts(ctx.ontology());
     ctx.set_input(input);
     ctx.set_query_plan(query_plan);
     Ok(())

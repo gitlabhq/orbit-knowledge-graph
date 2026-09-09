@@ -417,7 +417,7 @@ pub(super) async fn search_nullable_datetime_returns_null_when_unset(ctx: &TestC
         ctx,
         r#"{
             "query_type": "traversal",
-            "nodes": [{"id": "n", "entity": "Note", "id_range": {"start": 1, "end": 10000}, "columns": ["note", "created_at"],
+            "nodes": [{"id": "n", "entity": "Note", "id_range": {"start": 1, "end": 10000}, "columns": ["created_at"],
                      "node_ids": [3002]}],
             "limit": 10
         }"#,
@@ -427,9 +427,9 @@ pub(super) async fn search_nullable_datetime_returns_null_when_unset(ctx: &TestC
 
     resp.assert_node_count(1);
     resp.assert_node_ids("Note", &[3002]);
-    resp.assert_node("Note", 3002, |n| {
-        n.prop_str("note").is_some_and(|s| s.len() == 10_000) && n.prop("created_at").is_none()
-    });
+    resp.find_node("Note", 3002)
+        .unwrap()
+        .assert_prop("created_at", &Value::Null);
 }
 
 pub(super) async fn search_limit_truncates_results(ctx: &TestContext) {

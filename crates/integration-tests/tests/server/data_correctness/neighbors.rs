@@ -106,7 +106,8 @@ pub(super) async fn neighbors_mixed_entity_types(ctx: &TestContext) {
         r#"{
             "query_type": "neighbors",
             "nodes": [{"id": "mr", "entity": "MergeRequest", "node_ids": [2000]}],
-            "neighbors": {"direction": "both"}
+            "neighbors": {"direction": "both"},
+            "options": {"dynamic_columns": "*"}
         }"#,
         &allow_all(),
     )
@@ -118,6 +119,10 @@ pub(super) async fn neighbors_mixed_entity_types(ctx: &TestContext) {
     resp.assert_node_ids("Note", &[3000, 3002, 3003]);
     resp.assert_node_ids("MergeRequestDiff", &[5000, 5001]);
     resp.assert_node_ids("Project", &[1000]);
+
+    let note = resp.find_node("Note", 3002).unwrap();
+    note.assert_prop("note", &format!("{}tail", "🙂".repeat(10_000)).into());
+    note.assert_prop("discussion_id", &"🙂".repeat(2048).into());
 
     resp.assert_edge_exists("User", 1, "MergeRequest", 2000, "AUTHORED");
     resp.assert_edge_exists("User", 2, "MergeRequest", 2000, "APPROVED");
