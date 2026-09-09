@@ -301,7 +301,7 @@ async fn test_expand_all_wildcard() {
 async fn schema_rpc_and_command_use_the_supplied_ontology() {
     let service = OrbitServiceImpl::new(
         Arc::new(mock_validator()),
-        Arc::new(Ontology::new().with_nodes(["CustomNode"])),
+        SchemaWatcher::fixed(Arc::new(Ontology::new().with_nodes(["CustomNode"]))),
         &test_config(),
         ClusterHealthChecker::default().into_arc(),
         60,

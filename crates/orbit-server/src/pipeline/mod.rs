@@ -1,4 +1,5 @@
 pub(crate) mod correlation;
+pub(crate) use helpers::query_error_message;
 mod helpers;
 pub(crate) mod metrics;
 pub(crate) mod path_resolver;

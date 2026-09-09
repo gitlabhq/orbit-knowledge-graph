@@ -17,10 +17,14 @@ endpoint to determine whether the process can answer HTTP.
 
 ### `/ready`
 
-Readiness is also local-only. The Webserver reads the latest state held in memory by its background
-`SchemaWatcher`. The Indexer and Dispatcher read an in-memory serving flag that is set after their
-startup gates have cleared. These handlers make no network calls, so a dependency outage cannot
-restart otherwise healthy pods or prevent a rollout from converging.
+Readiness is also local-only. The Webserver reads the serving snapshot held in memory by its
+background `SchemaWatcher`: an installed snapshot means ready (`200`); no snapshot means pending
+(`503`, `schema_pending`). The Indexer and Dispatcher read an in-memory serving flag that is set
+after their startup gates have cleared. These handlers make no network calls, and liveness does
+not depend on readiness.
+
+Snapshot availability, not binary-version equality, gates readiness. See
+[schema management](schema_management.md#webserver-readiness-gate) for archive failures and recovery.
 
 ## HealthCheck runtime endpoints
 
@@ -84,10 +88,10 @@ component is omitted.
 
 ## Migration awareness
 
-During a schema migration the newly deployed Webserver pods are `Pending` (embedded version greater
-than active version) and drop out of the Kubernetes rotation. The HealthCheck runtime consequently
-reports the Webserver Deployment as Unhealthy for the migration window. Without extra context this
-is indistinguishable from a broken deployment.
+During a schema migration, Webservers with a usable active snapshot remain ready while the target
+version is built. A `migrating` row does not itself make them pending. The cluster-health migration
+overlay applies only when the Kubernetes aggregate is unhealthy; it is independent of the
+Webserver's ready/pending snapshot state.
 
 When only Kubernetes services are unhealthy and every ClickHouse component is Healthy,
 `ClusterHealthChecker` reads the shared `gkg_schema_version` table. If a `migrating` row exists, it:

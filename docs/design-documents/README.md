@@ -9,6 +9,7 @@ Today, the repository includes the following major components:
 - Orbit Remote's `gkg-server` binary, which runs in four modes: `Webserver`, `Indexer`, `DispatchIndexing`, and `HealthCheck`.
 - A ClickHouse-backed remote graph runtime with ontology-driven schema, ETL, authorization metadata, and Query DSL validation. The authoritative ontology lives in `config/ontology/`.
 - Remote HTTP, gRPC, REST, and MCP query surfaces that compile the JSON Query DSL into parameterized ClickHouse SQL. The [Orbit query frontend](querying/orbit_query_frontend.md) provides a separate compiler-level text API.
+- [Archive-backed remote serving](schema_management.md#webserver-serving-snapshots), which follows the active ontology while keeping each request on one snapshot through promotion or rollback.
 - A distributed remote indexing pipeline that consumes Siphon CDC through NATS JetStream, dispatches indexing work, and writes SDLC and code graph data into ClickHouse.
 - Orbit Local's standalone `orbit` CLI, which indexes a repository into DuckDB and supports direct SQL, schema inspection, repository maps, and a stateless stdio MCP server.
 - Shared crates for indexing, query compilation, formatting, ontology loading, database access, GitLab API access, health checks, and integration testing.

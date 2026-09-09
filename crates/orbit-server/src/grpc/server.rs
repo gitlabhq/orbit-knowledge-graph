@@ -2,7 +2,6 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use ontology::Ontology;
 use orbit_server_config::{AnalyticsConfig, ClickHouseConfiguration, GrpcConfig};
 use query_engine::shared::content::ColumnResolverRegistry;
 use tonic::transport::Server as TonicServer;
@@ -13,6 +12,7 @@ use crate::analytics::AnalyticsTracker;
 use crate::auth::JwtValidator;
 use crate::cluster_health::ClusterHealthChecker;
 use crate::proto::orbit_service_server::OrbitServiceServer;
+use crate::schema_watcher::SchemaWatcher;
 use orbit_billing::{BillingTracker, QuotaService};
 
 use super::service::OrbitServiceImpl;
@@ -29,7 +29,7 @@ impl GrpcServer {
     pub fn new(
         addr: SocketAddr,
         validator: Arc<JwtValidator>,
-        ontology: Arc<Ontology>,
+        schema_watcher: Arc<SchemaWatcher>,
         clickhouse_config: &ClickHouseConfiguration,
         cluster_health: Arc<ClusterHealthChecker>,
         tls_config: Option<ServerTlsConfig>,
@@ -38,7 +38,7 @@ impl GrpcServer {
     ) -> Self {
         let service = OrbitServiceImpl::new(
             validator,
-            ontology,
+            schema_watcher,
             clickhouse_config,
             cluster_health,
             grpc_config.stream_timeout_secs,
@@ -59,11 +59,6 @@ impl GrpcServer {
 
     pub fn with_cache_broker(mut self, broker: Arc<nats_client::NatsClient>) -> Self {
         self.service = self.service.with_cache_broker(broker);
-        self
-    }
-
-    pub fn with_path_resolver(mut self, resolver: Arc<crate::pipeline::PathResolver>) -> Self {
-        self.service = self.service.with_path_resolver(resolver);
         self
     }
 
@@ -136,6 +131,7 @@ impl GrpcServer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ontology::Ontology;
     use std::net::{IpAddr, Ipv4Addr};
 
     #[test]
@@ -149,7 +145,7 @@ mod tests {
         let server = GrpcServer::new(
             addr,
             validator,
-            ontology,
+            SchemaWatcher::fixed(ontology),
             &clickhouse_config,
             cluster_health,
             None,

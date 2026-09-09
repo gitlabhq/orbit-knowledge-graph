@@ -397,7 +397,7 @@ These settings are used by the Webserver mode.
 | `grpc.concurrency_limit` | `256` | Max concurrent requests |
 | `grpc.max_connection_age_secs` | `300` (5 min) | Max connection age (for L4 ILB rebalancing) |
 | `grpc.max_connection_age_grace_secs` | `30` | Graceful drain window after `max_connection_age_secs` fires. Must be non-zero to avoid a tonic 0.14.5 panic ([hyperium/tonic#2522](https://github.com/hyperium/tonic/issues/2522)). |
-| `grpc.stream_timeout_secs` | `60` | Stream timeout |
+| `grpc.stream_timeout_secs` | `60` | Total stream budget for initial input, pipeline execution, and final send; all share one absolute deadline |
 | `grpc.max_header_list_size_bytes` | `65536` (64 KiB) | HTTP/2 `SETTINGS_MAX_HEADER_LIST_SIZE` advertised to clients. tonic/hyper default of 16 KiB is too small for GitLab JWTs carrying many traversal IDs. |
 
 ### Query settings

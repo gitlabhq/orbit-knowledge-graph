@@ -1,249 +1,158 @@
-use std::sync::Arc;
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use clickhouse_client::ArrowClickHouseClient;
+use ontology::archive::OntologyArchive;
 use opentelemetry::KeyValue;
-use orbit_migrations::version::{read_active_version, read_migrating_version};
-use tokio::time::sleep;
+use orbit_migrations::catalog::OntologyCatalog;
+use orbit_migrations::version::{read_active_version, table_prefix};
+use orbit_server_config::{AppConfig, PathResolverConfig};
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info, warn};
+use tonic::Status;
+use tracing::{info, warn};
 
-#[repr(u8)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SchemaState {
-    Pending = 0,
-    Ready = 1,
-    Outdated = 2,
-    Migrating = 3,
-}
+use crate::pipeline::PathResolver;
+use crate::serving_schema::ServingSchema;
 
-impl SchemaState {
-    pub fn as_label(self) -> &'static str {
-        match self {
-            Self::Pending => "pending",
-            Self::Ready => "ready",
-            Self::Outdated => "outdated",
-            Self::Migrating => "migrating",
-        }
-    }
-
-    fn from_raw(raw: u8) -> Self {
-        match raw {
-            1 => Self::Ready,
-            2 => Self::Outdated,
-            3 => Self::Migrating,
-            _ => Self::Pending,
-        }
-    }
-}
-
+#[derive(Default)]
 pub struct SchemaWatcher {
-    state: Arc<AtomicU8>,
+    current: RwLock<Option<Arc<ServingSchema>>>,
 }
 
 impl SchemaWatcher {
     pub fn spawn(
-        graph: ArrowClickHouseClient,
-        embedded_version: u32,
-        poll_interval: Duration,
+        graph: Arc<ArrowClickHouseClient>,
+        embedded: OntologyArchive,
+        catalog: OntologyCatalog,
+        config: &AppConfig,
         shutdown: CancellationToken,
     ) -> Arc<Self> {
-        let state = Arc::new(AtomicU8::new(SchemaState::Pending as u8));
-        register_state_gauge(state.clone());
-
-        tokio::spawn(watch_loop(
-            graph,
-            embedded_version,
-            poll_interval,
-            shutdown,
-            state.clone(),
-        ));
-
-        Arc::new(Self { state })
+        let watcher = Arc::new(Self::default());
+        register_state_gauge(&watcher);
+        let target = watcher.clone();
+        let path_config = config.path_resolver.clone();
+        let poll_interval = Duration::from_secs(config.schema.version_poll_interval_secs);
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(poll_interval);
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            loop {
+                tokio::select! {
+                    _ = shutdown.cancelled() => return,
+                    _ = interval.tick() => {}
+                }
+                tokio::select! {
+                    _ = shutdown.cancelled() => return,
+                    result = target.refresh(&graph, &catalog, &embedded, &path_config) => {
+                        if let Err(error) = result {
+                            warn!(%error, "serving schema refresh failed; retrying");
+                        }
+                    }
+                }
+            }
+        });
+        watcher
     }
 
-    pub fn current(&self) -> SchemaState {
-        SchemaState::from_raw(self.state.load(Ordering::Relaxed))
+    pub(crate) fn snapshot(&self) -> Result<Arc<ServingSchema>, Status> {
+        self.current
+            .read()
+            .expect("serving schema lock poisoned")
+            .clone()
+            .ok_or_else(|| Status::unavailable("Active schema is unavailable"))
+    }
+
+    async fn refresh(
+        &self,
+        graph: &Arc<ArrowClickHouseClient>,
+        catalog: &OntologyCatalog,
+        embedded: &OntologyArchive,
+        path_config: &PathResolverConfig,
+    ) -> anyhow::Result<()> {
+        let Some(active_version) = read_active_version(graph).await? else {
+            *self.current.write().expect("serving schema lock poisoned") = None;
+            return Ok(());
+        };
+        if self
+            .snapshot()
+            .is_ok_and(|schema| schema.migration_version == active_version)
+        {
+            return Ok(());
+        }
+
+        let candidate = async {
+            let stored;
+            let archive = if active_version == embedded.schema_version() {
+                embedded
+            } else {
+                stored = catalog.load(active_version).await?;
+                &stored
+            };
+            let ontology = Arc::new(
+                archive
+                    .load_ontology()?
+                    .with_schema_version_prefix(&table_prefix(active_version)),
+            );
+            let resolver = Arc::new(PathResolver::new(graph.clone(), &ontology, path_config).await);
+            ServingSchema::new(active_version, ontology, resolver)
+        }
+        .await;
+
+        let confirmed_version = read_active_version(graph).await?;
+        if confirmed_version != Some(active_version) {
+            if confirmed_version.is_none() {
+                *self.current.write().expect("serving schema lock poisoned") = None;
+            }
+            return Ok(());
+        }
+        let schema = match candidate {
+            Ok(schema) => schema,
+            Err(error) => {
+                *self.current.write().expect("serving schema lock poisoned") = None;
+                return Err(error.context(format!("active ontology v{active_version} unavailable")));
+            }
+        };
+        *self.current.write().expect("serving schema lock poisoned") = Some(Arc::new(schema));
+        info!(
+            migration_version = active_version,
+            "serving schema installed"
+        );
+        Ok(())
     }
 
     #[cfg(any(test, feature = "testkit"))]
-    pub fn for_state(state: SchemaState) -> Arc<Self> {
+    pub fn fixed(ontology: Arc<ontology::Ontology>) -> Arc<Self> {
+        use clickhouse_client::ClickHouseConfigurationExt;
+        let config = AppConfig::embedded_defaults();
+        let resolver = PathResolver::without_dictionaries(
+            Arc::new(config.graph.build_client()),
+            &ontology,
+            &config.path_resolver,
+        );
+        let schema = ServingSchema::new(
+            *orbit_migrations::version::SCHEMA_VERSION,
+            ontology,
+            Arc::new(resolver),
+        )
+        .expect("test serving schema must load");
         Arc::new(Self {
-            state: Arc::new(AtomicU8::new(state as u8)),
+            current: RwLock::new(Some(Arc::new(schema))),
         })
     }
 }
 
-async fn watch_loop(
-    graph: ArrowClickHouseClient,
-    embedded_version: u32,
-    poll_interval: Duration,
-    shutdown: CancellationToken,
-    state: Arc<AtomicU8>,
-) {
-    info!(
-        embedded_version,
-        poll_interval_secs = poll_interval.as_secs(),
-        "schema version watcher started"
-    );
-
-    loop {
-        let (next, active) = poll_once(&graph, embedded_version, &state).await;
-        transition(&state, next);
-
-        if next == SchemaState::Outdated {
-            error!(
-                embedded_version,
-                active_version = active,
-                "active schema version exceeds binary version — \
-                 binary too old, requesting shutdown"
-            );
-            shutdown.cancel();
-            return;
-        }
-
-        tokio::select! {
-            _ = shutdown.cancelled() => return,
-            _ = sleep(poll_interval) => {}
-        }
-    }
-}
-
-async fn poll_once(
-    graph: &ArrowClickHouseClient,
-    embedded_version: u32,
-    state: &Arc<AtomicU8>,
-) -> (SchemaState, Option<u32>) {
-    let active = match read_active_version(graph).await {
-        Ok(active) => active,
-        Err(e) => {
-            warn!(error = %e, "failed to read active schema version — keeping previous state");
-            return (SchemaState::from_raw(state.load(Ordering::Relaxed)), None);
-        }
-    };
-
-    if active == Some(embedded_version) {
-        return (SchemaState::Ready, active);
-    }
-
-    let migrating = match read_migrating_version(graph).await {
-        Ok(migrating) => migrating,
-        Err(e) => {
-            warn!(error = %e, "failed to read migrating schema version — keeping previous state");
-            return (SchemaState::from_raw(state.load(Ordering::Relaxed)), active);
-        }
-    };
-
-    (classify(active, migrating, embedded_version), active)
-}
-
-fn classify(active: Option<u32>, migrating: Option<u32>, embedded: u32) -> SchemaState {
-    if active == Some(embedded) {
-        return SchemaState::Ready;
-    }
-
-    // Outdated must beat Migrating: a below-active migrating row is anomalous data
-    // and must not suppress the safety shutdown.
-    if active.is_some_and(|active| active > embedded) {
-        return SchemaState::Outdated;
-    }
-
-    if migrating == Some(embedded) {
-        return SchemaState::Migrating;
-    }
-
-    SchemaState::Pending
-}
-
-fn transition(state: &Arc<AtomicU8>, next: SchemaState) {
-    let prior = state.swap(next as u8, Ordering::Relaxed);
-    if prior != next as u8 {
-        info!(
-            from = SchemaState::from_raw(prior).as_label(),
-            to = next.as_label(),
-            "schema watcher state transition"
-        );
-    }
-}
-
-fn register_state_gauge(state: Arc<AtomicU8>) {
+fn register_state_gauge(watcher: &Arc<SchemaWatcher>) {
     use orbit_observability::server::schema_watcher as spec;
-    let meter = orbit_observability::meter();
-    spec::STATE.build_observable_gauge_i64(&meter, move |observer| {
-        let raw = state.load(Ordering::Relaxed);
-        for s in [
-            SchemaState::Pending,
-            SchemaState::Ready,
-            SchemaState::Outdated,
-            SchemaState::Migrating,
-        ] {
-            let value = i64::from(s as u8 == raw);
-            observer.observe(value, &[KeyValue::new(spec::labels::STATE, s.as_label())]);
+    let watcher = Arc::downgrade(watcher);
+    spec::STATE.build_observable_gauge_i64(&orbit_observability::meter(), move |observer| {
+        let Some(watcher) = watcher.upgrade() else {
+            return;
+        };
+        let ready = watcher.snapshot().is_ok();
+        for (state, active) in [("ready", ready), ("pending", !ready)] {
+            observer.observe(
+                i64::from(active),
+                &[KeyValue::new(spec::labels::STATE, state)],
+            );
         }
     });
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn classify_active_equal_is_ready() {
-        assert_eq!(classify(Some(2), None, 2), SchemaState::Ready);
-        assert_eq!(classify(Some(2), Some(3), 2), SchemaState::Ready);
-    }
-
-    #[test]
-    fn classify_migrating_equal_is_migrating() {
-        assert_eq!(classify(Some(1), Some(2), 2), SchemaState::Migrating);
-        assert_eq!(classify(None, Some(2), 2), SchemaState::Migrating);
-    }
-
-    #[test]
-    fn classify_outdated_beats_migrating() {
-        assert_eq!(classify(Some(5), Some(1), 1), SchemaState::Outdated);
-    }
-
-    #[test]
-    fn classify_active_higher_is_outdated() {
-        assert_eq!(classify(Some(3), None, 2), SchemaState::Outdated);
-    }
-
-    #[test]
-    fn classify_none_is_pending() {
-        assert_eq!(classify(None, None, 2), SchemaState::Pending);
-    }
-
-    #[test]
-    fn classify_active_lower_is_pending() {
-        assert_eq!(classify(Some(1), None, 2), SchemaState::Pending);
-    }
-
-    #[test]
-    fn from_raw_round_trip() {
-        for s in [
-            SchemaState::Pending,
-            SchemaState::Ready,
-            SchemaState::Outdated,
-            SchemaState::Migrating,
-        ] {
-            assert_eq!(SchemaState::from_raw(s as u8), s);
-        }
-    }
-
-    #[test]
-    fn from_raw_invalid_falls_back_to_pending() {
-        assert_eq!(SchemaState::from_raw(99), SchemaState::Pending);
-    }
-
-    #[test]
-    fn transition_updates_state() {
-        let state = Arc::new(AtomicU8::new(SchemaState::Pending as u8));
-        transition(&state, SchemaState::Ready);
-        assert_eq!(
-            SchemaState::from_raw(state.load(Ordering::Relaxed)),
-            SchemaState::Ready
-        );
-    }
 }

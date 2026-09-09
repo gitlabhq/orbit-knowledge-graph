@@ -1,8 +1,9 @@
 use std::sync::Arc;
 
-use named_queries::NamedQueries;
+use named_queries::{BindingValues, NamedQueries};
 use ontology::Ontology;
-use orbit_migrations::version::SCHEMA_VERSION;
+use query_engine::compiler::{Frontend, SecurityContext, compile};
+use tracing::warn;
 
 use crate::pipeline::PathResolver;
 
@@ -15,15 +16,36 @@ pub(crate) struct ServingSchema {
 }
 
 impl ServingSchema {
-    pub fn new(ontology: Arc<Ontology>) -> Self {
-        Self {
+    pub fn new(
+        migration_version: u32,
+        ontology: Arc<Ontology>,
+        path_resolver: Arc<PathResolver>,
+    ) -> anyhow::Result<Self> {
+        let mut named_queries = NamedQueries::load_embedded()?;
+        let bindings = BindingValues { current_user_id: 1 };
+        let security = SecurityContext::new(1, vec!["1/".into()])?;
+        named_queries.retain(|query| {
+            let result = query
+                .render(&bindings, &query.example_parameters())
+                .map_err(anyhow::Error::from)
+                .and_then(|rendered| {
+                    compile(&rendered, Frontend::JsonDsl, &ontology, &security).map_err(Into::into)
+                });
+            if let Err(error) = &result {
+                warn!(
+                    migration_version,
+                    query = %query.name,
+                    %error,
+                    "named query unavailable in serving schema"
+                );
+            }
+            result.is_ok()
+        });
+        Ok(Self {
             ontology,
-            migration_version: *SCHEMA_VERSION,
-            named_queries: Arc::new(
-                NamedQueries::load_embedded()
-                    .expect("embedded named queries are validated by the build script"),
-            ),
-            path_resolver: None,
-        }
+            migration_version,
+            named_queries: Arc::new(named_queries),
+            path_resolver: Some(path_resolver),
+        })
     }
 }

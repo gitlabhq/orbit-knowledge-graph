@@ -72,7 +72,7 @@ impl QueryPipelineService {
         query_json: &str,
         tx: mpsc::Sender<Result<ExecuteQueryMessage, Status>>,
         stream: Streaming<ExecuteQueryMessage>,
-        timeout: std::time::Duration,
+        deadline: tokio::time::Instant,
     ) -> Result<PipelineOutput, PipelineError> {
         let coding_agent = request_context.coding_agent().map(String::from);
         let claims = request_context.claims;
@@ -128,7 +128,9 @@ impl QueryPipelineService {
                 .await?
                 .then(&CompilationStage)
                 .await?
-                .then(&ClickHouseExecutor)
+                .then(&ClickHouseExecutor {
+                    migration_version: schema.migration_version,
+                })
                 .await?
                 .then(&ExtractionStage)
                 .await?
@@ -144,7 +146,7 @@ impl QueryPipelineService {
                 .ok_or_else(|| PipelineError::custom("OutputStage did not produce PipelineOutput"))
         };
 
-        let output = match tokio::time::timeout(timeout, pipeline).await {
+        let output = match tokio::time::timeout_at(deadline, pipeline).await {
             Ok(Ok(output)) => output,
             Ok(Err(e)) => return Err(e),
             Err(_) => {

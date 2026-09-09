@@ -6,6 +6,7 @@ use orbit_server::cluster_health::ClusterHealthChecker;
 use orbit_server::grpc::GrpcServer;
 use orbit_server::proto::GetClusterHealthRequest;
 use orbit_server::proto::orbit_service_client::OrbitServiceClient;
+use orbit_server::schema_watcher::SchemaWatcher;
 use tonic::transport::server::ServerTlsConfig;
 use tonic::transport::{Certificate, ClientTlsConfig, Endpoint, Identity};
 
@@ -37,7 +38,7 @@ fn build_grpc_server(addr: SocketAddr, tls_config: Option<ServerTlsConfig>) -> G
     GrpcServer::new(
         addr,
         validator,
-        ontology,
+        SchemaWatcher::fixed(ontology),
         &clickhouse_config,
         cluster_health,
         tls_config,
