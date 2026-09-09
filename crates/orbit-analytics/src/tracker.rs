@@ -25,6 +25,10 @@ impl SnowplowAnalyticsTracker {
         Self::new(&config.collector_url, APP_ID)
     }
 
+    pub fn flush(&self) {
+        self.tracker.flush();
+    }
+
     pub async fn shutdown(&self) {
         self.tracker.shutdown().await;
     }

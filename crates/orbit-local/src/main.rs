@@ -22,7 +22,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
 use strum::IntoEnumIterator;
-use tracing::{Level, info};
+use tracing::{Level, debug, info};
 use tracing_subscriber::fmt::format::FmtSpan;
 
 const LOCAL_DDL: &str = include_str!(concat!(env!("CONFIG_DIR"), "/graph_local.sql"));
@@ -35,6 +35,8 @@ const SKILL_LONG_ABOUT: &str = "Print the bundled, version-matched orbit-local s
 /// but not loaded or parsed.
 const MAX_INDEXED_FILE_BYTES: u64 = 5_000_000;
 
+/// Only bounds commands too fast to hide a round trip behind their own work.
+/// Raising it buys no extra delivery and lengthens exit against a dead collector.
 const TELEMETRY_FLUSH_TIMEOUT: Duration = Duration::from_millis(500);
 
 #[derive(Serialize)]
@@ -743,6 +745,9 @@ async fn main() -> Result<()> {
     };
     if let Some(tracker) = &tracker {
         telemetry::emit_command_event(tracker, &subcommand_path(&matches), coding_agent.as_deref());
+        // One event never reaches labkit's batch threshold, so without this the
+        // round trip would not start until shutdown.
+        tracker.flush();
     }
 
     let result = dispatch(cli.command, tracker.as_ref()).await;
@@ -769,9 +774,7 @@ async fn flush_telemetry(tracker: Option<&orbit_analytics::SnowplowAnalyticsTrac
             .await
             .is_err()
     {
-        eprintln!(
-            "warning: telemetry flush timed out; set ORBIT_TELEMETRY_ENABLED=false to disable telemetry"
-        );
+        debug!("telemetry flush timed out; dropping the event");
     }
 }
 
