@@ -17,4 +17,4 @@ query:
 
 expect:
   referential_integrity: true
-  skip_requirements: [path_finding]
+  path_count: 1

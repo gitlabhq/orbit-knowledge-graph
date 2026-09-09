@@ -72,6 +72,8 @@ pub struct RedactionConfig {
 #[serde(deny_unknown_fields)]
 pub struct QueryExpect {
     #[serde(default)]
+    pub compile_only: bool,
+    #[serde(default)]
     pub compile_error: Option<CompileErrorExpect>,
     #[serde(default)]
     pub node_count: Option<usize>,
@@ -102,6 +104,9 @@ pub struct QueryExpect {
     pub sql_contains: Vec<String>,
     #[serde(default)]
     pub sql_not_contains: Vec<String>,
+    /// Assert the number of paths returned by a path_finding query.
+    #[serde(default)]
+    pub path_count: Option<usize>,
     #[serde(default)]
     pub referential_integrity: bool,
     #[serde(default)]
@@ -138,6 +143,10 @@ pub struct NodeExpect {
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct GroupExpect {
+    #[serde(default)]
+    pub entity: Option<String>,
+    #[serde(default)]
+    pub ids: Option<Vec<i64>>,
     #[serde(default)]
     pub rows: Vec<GroupRowExpect>,
     #[serde(default)]

@@ -16,8 +16,9 @@ query:
     }
 
 expect:
-  node_count: 1
   nodes:
     Project:
+      count: 1
       ids: [1010]
-  skip_requirements: ["filter:traversal_path"]
+      filters:
+        traversal_path: { starts_with: "1/100/200/" }

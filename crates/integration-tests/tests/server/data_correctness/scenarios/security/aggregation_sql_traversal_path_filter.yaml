@@ -19,5 +19,5 @@ query:
     }
 
 expect:
+  compile_only: true
   sql_contains: ["startsWith", "traversal_path"]
-  skip_requirements: [aggregation, node_count]

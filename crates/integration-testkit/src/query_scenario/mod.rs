@@ -219,6 +219,10 @@ async fn run_frontend(
         );
     }
 
+    if expect.compile_only {
+        return;
+    }
+
     let resp = execute_pipeline(ctx, &compiled, &ontology, security, redaction).await;
 
     let response: query_engine::formatters::GraphResponse =
@@ -354,8 +358,17 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
         for (field, expected) in &ne.filters {
             let expected = expected.clone();
             let field_name = field.clone();
-            view.assert_filter(entity, field, move |n| {
-                n.prop(&field_name) == Some(&expected)
+            view.assert_filter(entity, field, move |n| match &expected {
+                serde_json::Value::Object(m) if m.contains_key("starts_with") => {
+                    let prefix = m["starts_with"].as_str().unwrap();
+                    n.prop_str(&field_name)
+                        .is_some_and(|v| v.starts_with(prefix))
+                }
+                serde_json::Value::Object(m) if m.contains_key("contains") => {
+                    let sub = m["contains"].as_str().unwrap();
+                    n.prop_str(&field_name).is_some_and(|v| v.contains(sub))
+                }
+                _ => n.prop(&field_name) == Some(&expected),
             });
         }
     }
@@ -392,6 +405,9 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
         view.assert_edge_count(kind, *count);
     }
     for (group_key, ge) in &expect.groups {
+        if let (Some(entity), Some(ids)) = (&ge.entity, &ge.ids) {
+            view.assert_group_node_ids(group_key, entity, ids);
+        }
         for gr in &ge.rows {
             for (col, expected) in &gr.values {
                 match expected {
@@ -434,6 +450,10 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
     }
     if expect.empty_aggregation {
         view.assert_empty_aggregation();
+    }
+    if let Some(n) = expect.path_count {
+        let pids = view.path_ids();
+        assert_eq!(pids.len(), n, "{label}: path count mismatch");
     }
     if expect.referential_integrity {
         view.assert_referential_integrity();

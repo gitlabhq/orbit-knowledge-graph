@@ -17,4 +17,4 @@ query:
 
 expect:
   node_count: 0
-  skip_requirements: [path_finding]
+  path_count: 0
