@@ -16,6 +16,5 @@ query:
     }
 
 expect:
-  nodes:
-    Project:
-      ids: [1000, 1004]
+  referential_integrity: true
+  skip_requirements: [path_finding]

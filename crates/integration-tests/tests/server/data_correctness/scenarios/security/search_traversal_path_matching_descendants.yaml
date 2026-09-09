@@ -20,3 +20,4 @@ expect:
   nodes:
     Project:
       ids: [1010]
+  skip_requirements: ["filter:traversal_path"]

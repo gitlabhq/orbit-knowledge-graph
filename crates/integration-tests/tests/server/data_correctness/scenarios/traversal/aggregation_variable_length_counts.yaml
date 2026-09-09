@@ -26,3 +26,4 @@ expect:
     u:
       rows:
         - { entity: User, id: 7, values: { n: 2 } }
+  skip_requirements: [node_ids]

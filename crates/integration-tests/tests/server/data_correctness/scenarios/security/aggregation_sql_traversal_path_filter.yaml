@@ -20,3 +20,4 @@ query:
 
 expect:
   sql_contains: ["startsWith", "traversal_path"]
+  skip_requirements: [aggregation, node_count]

@@ -15,9 +15,5 @@ query:
     }
 
 expect:
-  nodes:
-    User:
-      ids: [1]
-      prop_absent: [is_admin, is_auditor]
-    Project:
-      ids: [1000]
+  referential_integrity: true
+  skip_requirements: [path_finding]

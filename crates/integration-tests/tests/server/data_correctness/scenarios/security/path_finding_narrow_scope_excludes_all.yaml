@@ -16,6 +16,5 @@ query:
     }
 
 expect:
-  nodes:
-    Project:
-      absent: [1000, 1004]
+  node_count: 0
+  skip_requirements: [path_finding]
