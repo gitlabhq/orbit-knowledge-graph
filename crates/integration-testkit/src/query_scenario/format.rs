@@ -78,6 +78,8 @@ pub struct QueryExpect {
     #[serde(default)]
     pub edge_count: BTreeMap<String, usize>,
     #[serde(default)]
+    pub groups: BTreeMap<String, GroupExpect>,
+    #[serde(default)]
     pub referential_integrity: bool,
     #[serde(default)]
     pub has_more: Option<bool>,
@@ -102,6 +104,24 @@ pub struct NodeExpect {
     pub filters: BTreeMap<String, serde_json::Value>,
     #[serde(default)]
     pub rows: Vec<BTreeMap<String, serde_json::Value>>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GroupExpect {
+    #[serde(default)]
+    pub rows: Vec<GroupRowExpect>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GroupRowExpect {
+    pub entity: String,
+    pub id: i64,
+    #[serde(default)]
+    pub values: BTreeMap<String, serde_json::Value>,
+    #[serde(default)]
+    pub properties: BTreeMap<String, serde_json::Value>,
 }
 
 impl QueryExpect {

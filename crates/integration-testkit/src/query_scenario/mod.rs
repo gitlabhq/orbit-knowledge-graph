@@ -360,6 +360,44 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
     for (kind, count) in &expect.edge_count {
         view.assert_edge_count(kind, *count);
     }
+    for (group_key, ge) in &expect.groups {
+        for gr in &ge.rows {
+            for (col, expected) in &gr.values {
+                match expected {
+                    serde_json::Value::Number(n) if n.is_i64() => {
+                        view.assert_group_row_value_i64(
+                            group_key,
+                            &gr.entity,
+                            gr.id,
+                            col,
+                            n.as_i64().unwrap(),
+                        );
+                    }
+                    serde_json::Value::Number(n) if n.is_f64() => {
+                        view.assert_group_row_value_f64(
+                            group_key,
+                            &gr.entity,
+                            gr.id,
+                            col,
+                            n.as_f64().unwrap(),
+                        );
+                    }
+                    serde_json::Value::String(s) => {
+                        view.assert_group_row_value_str(group_key, &gr.entity, gr.id, col, s);
+                    }
+                    _ => panic!("{label}: unsupported group value type for {col}"),
+                }
+            }
+            for (prop, expected) in &gr.properties {
+                match expected {
+                    serde_json::Value::String(s) => {
+                        view.assert_group_node_property_str(group_key, &gr.entity, gr.id, prop, s);
+                    }
+                    _ => panic!("{label}: unsupported group property type for {prop}"),
+                }
+            }
+        }
+    }
     if expect.referential_integrity {
         view.assert_referential_integrity();
     }
