@@ -12,6 +12,8 @@ query:
         "relationships": [{"type": "*", "from": "u", "to": "mr"}],
         "limit": 20
     }
+  gql: |
+    MATCH (u:User {id: 1})-->(mr:MergeRequest) RETURN u.username, mr.title, mr.state LIMIT 20
 
 expect:
   node_count: 4
