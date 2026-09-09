@@ -92,9 +92,11 @@ fn number(pair: Pair<'_, Rule>) -> Result<Value> {
             .and_then(Number::from_f64)
             .ok_or_else(|| invalid(&pair, "number must be finite and in range"))?;
         Ok(Value::Number(number))
+    } else if let Ok(signed) = raw.parse::<i64>() {
+        Ok(Value::from(signed))
     } else {
-        raw.parse::<Number>()
-            .map(Value::Number)
+        raw.parse::<u64>()
+            .map(Value::from)
             .map_err(|_| invalid(&pair, "integer is out of range"))
     }
 }
