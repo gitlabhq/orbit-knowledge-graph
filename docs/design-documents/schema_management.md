@@ -129,7 +129,8 @@ convention). The prefix is applied at the call site when constructing ClickHouse
 - Publication validates and stores archives by schema version in the durable `orbit_ontology_archives` NATS KV bucket. The dispatcher reuses that ontology for migration.
 - Identical retries succeed; different bytes for a published version fail. Published archives stay immutable.
 - Restore historical archives from their exact release, never from current sources.
-- Serving, readiness, and promotion are unchanged. Older archives are not required at startup.
+- Migration and rollback require usable active and target archives before changing versioned tables.
+- Existing installations need an archive-publishing release before upgrading to a different schema version.
 
 ### Webserver prefix injection
 
@@ -214,10 +215,9 @@ schema:
   indexer_schema_wait_timeout_secs: 300 # indexer wait budget before exiting (default: 300, minimum: 1)
 ```
 
-With `max_retained_versions: 2`, the GC keep-set normally contains version N's active table-set and
-the N−1 retired rollback target. Every migrating version is kept in addition to that limit. Older
-version-prefixed objects are dropped automatically. The value is validated at startup — values
-below 2 are rejected.
+With `max_retained_versions: 2`, cleanup keeps the active tables and the most recently recorded
+retired table-set, as well as any migrating versions. The retained version can be higher or lower
+than active after a rollback. Values below 2 are rejected at startup.
 
 `version_poll_interval_secs` controls how often the webserver re-reads the active version from
 `gkg_schema_version` to drive the readiness gate (see "Webserver readiness gate" below); it is
@@ -411,11 +411,12 @@ not run, promoting it and immediately flipping itself `Outdated`. A `migrating` 
 running dispatcher embeds parks (visible in `migrating_age_seconds`) until one that embeds it
 runs or an operator aborts it.
 
-When completion is detected:
+The checker validates the target archive under the migration lock before changing views or version metadata.
+An invalid archive leaves both versions and the campaign unchanged; the next scheduled check retries.
 
-1. All previously `active` versions are marked `retired`.
-2. The `migrating` version is marked `active`.
-3. The `gkg_schema_migration_completed_total` counter is incremented.
+Promotion and retained-table rollback change active/retired statuses in one
+[synchronous insert](https://clickhouse.com/docs/guides/developer/transactional).
+Archive storage and view changes are not transactional with that write. Promotion then clears the campaign.
 
 Webserver behavior on promotion is automatic: pods built for the new version flip to `Ready`
 on the next poll, and pods built for an older version detect `active > embedded` and exit via
@@ -427,10 +428,11 @@ their readiness check.
 
 After each successful migration-completion check, the checker sweeps `system.tables` for objects in the graph
 database whose names match `v<N>_`. The keep-set contains every active version, every migrating
-version, and the newest `max_retained_versions - 1` retired versions. With the default
+version, and the most recently recorded `max_retained_versions - 1` retired versions. With the default
 `max_retained_versions: 2`, this normally keeps the active version and one retired rollback target;
 all migrating versions are additionally protected regardless of whether they are above or below
-the active version.
+the active version. Retired versions are ranked by recorded retirement time. Timestamps have
+second precision; higher version numbers break ties.
 
 ```plaintext
 Example with max_retained_versions=2, after migrating to v3:
@@ -470,7 +472,7 @@ Cleanup behavior:
 - The cleanup runs under the `schema_migration` NATS KV lock, preventing concurrent cleanup
   attempts.
 - Drops are asynchronous (no `SYNC` keyword); versioned names are not reused for a different schema.
-- The newest retained retired version normally remains available for rollback. Extra migrating
+- The most recently recorded retired version normally remains available for rollback. Extra migrating
   versions can make the total number of retained table-sets exceed `max_retained_versions`.
 
 ### Rolling back
@@ -490,7 +492,7 @@ set means silently broken queries under direct re-activation.
 
 1. **Table set complete** (the embedded version is within the retention window, so GC never
    touched its tables, or GC hasn't started dropping them yet) — direct re-activation. The
-   dispatcher marks the embedded version `active` and retires whatever was active before. There
+   dispatcher records the embedded version as `active` and retires previous active versions in one insert. There
    is no `migrating` phase and no re-indexing: the existing tables are already complete for the
    version this binary understands, and indexing resumes on them through the normal namespace
    sweep.

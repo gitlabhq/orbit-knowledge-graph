@@ -10,13 +10,17 @@ use indexer::orchestrator::scheduled::CodeStaleSweep;
 use indexer::schema::migration;
 use indexer::schema::version::{
     SCHEMA_VERSION, SchemaWaitError, ensure_version_table, mark_version_active,
-    mark_version_migrating, prefixed_table_name, read_active_version, table_prefix,
-    wait_until_ready,
+    mark_version_migrating, mark_version_retired, prefixed_table_name, read_active_version,
+    table_prefix, wait_until_ready,
 };
 use indexer::testkit::MockLockService;
 use integration_testkit::{TestContext, t};
+use orbit_migrations::garbage_collection::find_droppable_entities;
 use orbit_migrations::schema::{DictionaryCredentials, GraphSchema};
 use orbit_migrations::scope::MigrationScope;
+use orbit_migrations::version::{
+    STATUS_ACTIVE, STATUS_RETIRED, promote_version, read_all_versions,
+};
 use orbit_utils::traversal_path::TraversalPath;
 
 fn dictionary_credentials(
@@ -788,6 +792,77 @@ async fn wait_until_ready_ready_when_rebuilding_below_active() {
     .unwrap();
 }
 
+#[tokio::test]
+async fn alternating_promotions_keep_exactly_one_active_during_reads() {
+    let (ctx, _, _) = setup().await;
+    let client = ctx.create_client();
+    let older_version = *SCHEMA_VERSION - 1;
+    let newer_version = *SCHEMA_VERSION;
+
+    mark_version_active(&client, older_version).await.unwrap();
+    mark_version_retired(&client, newer_version).await.unwrap();
+
+    let reader = async {
+        for _ in 0..64 {
+            let versions = read_all_versions(&client).await.unwrap();
+
+            assert_eq!(versions.len(), 2);
+            assert_eq!(
+                versions
+                    .iter()
+                    .filter(|entry| entry.status == STATUS_ACTIVE)
+                    .count(),
+                1,
+                "an interleaved read must still observe exactly one active version"
+            );
+            assert_eq!(
+                versions
+                    .iter()
+                    .filter(|entry| entry.status == STATUS_RETIRED)
+                    .count(),
+                1,
+                "an interleaved read must still observe exactly one retired version"
+            );
+        }
+    };
+
+    let writer = async {
+        let promotion_targets = [newer_version, newer_version, older_version, older_version];
+        let mut current_active_version = older_version;
+
+        for _ in 0..4 {
+            for &promoted_version in &promotion_targets {
+                let retired_versions = promote_version(&client, promoted_version).await.unwrap();
+                let expected_retired_versions = if promoted_version == current_active_version {
+                    Vec::new()
+                } else {
+                    vec![current_active_version]
+                };
+
+                assert_eq!(retired_versions, expected_retired_versions);
+
+                let versions = read_all_versions(&client).await.unwrap();
+                let retired_version = if promoted_version == older_version {
+                    newer_version
+                } else {
+                    older_version
+                };
+                assert_eq!(versions.len(), 2);
+                assert!(versions.iter().any(|entry| {
+                    entry.version == promoted_version && entry.status == STATUS_ACTIVE
+                }));
+                assert!(versions.iter().any(|entry| {
+                    entry.version == retired_version && entry.status == STATUS_RETIRED
+                }));
+
+                current_active_version = promoted_version;
+            }
+        }
+    };
+
+    let ((), ()) = tokio::join!(reader, writer);
+}
+
 const SEED_VERSION: &str = "2024-01-01 00:00:00.000000";
 const REINDEX_VERSION: &str = "2024-06-01 00:00:00.000000";
 
@@ -1356,4 +1431,39 @@ async fn gate_requires_every_invalidated_pipeline_including_global() {
 
     scenario.complete_reindex("global.User").await;
     assert!(scenario.gate(sdlc(&["User"]), &[100, 200]).await.ready);
+}
+
+#[tokio::test]
+async fn garbage_collection_keeps_most_recent_retired_version_by_created_at() {
+    let (ctx, ontology, _metrics) = setup().await;
+    let client = ctx.create_client();
+
+    ctx.execute(
+        "INSERT INTO gkg_schema_version (version, status, created_at) \
+         VALUES \
+         (20, 'active', toDateTime('2024-01-01 00:00:03')), \
+         (10, 'retired', toDateTime('2024-01-01 00:00:01')), \
+         (9, 'retired', toDateTime('2024-01-01 00:00:02'))",
+    )
+    .await;
+
+    let older_retired = prefixed_table_name("gl_user", 10);
+    let newer_retired = prefixed_table_name("gl_user", 9);
+    ctx.execute(&format!(
+        "CREATE TABLE {older_retired} (id UInt32) ENGINE = MergeTree ORDER BY id"
+    ))
+    .await;
+    ctx.execute(&format!(
+        "CREATE TABLE {newer_retired} (id UInt32) ENGINE = MergeTree ORDER BY id"
+    ))
+    .await;
+
+    let schema = GraphSchema::from_ontology(&ontology);
+    let entities = find_droppable_entities(&client, &schema, 2, &[])
+        .await
+        .unwrap();
+    let versions: Vec<u32> = entities.iter().map(|entity| entity.version).collect();
+
+    assert!(versions.contains(&10));
+    assert!(!versions.contains(&9));
 }
