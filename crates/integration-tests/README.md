@@ -81,12 +81,15 @@ between them.
 
 ## Adding tests
 
-### Query response scenarios
+### YAML query scenarios
 
-Add cases to `tests/server/data_correctness/scenarios/query_responses.yaml`
-using `seed`, `query`, `max_response_bytes`, and `expect.pages`.
-The shared runner checks byte limits and lossless pagination through gRPC;
-no Rust registration is needed.
+Add a file under `tests/server/data_correctness/scenarios/<topic>/`; every
+YAML there is discovered by the `data_correctness_scenarios` test, so no Rust
+registration is needed. A scenario declares `query` (per frontend, e.g.
+`json`), optional `config` (`extra_seed`, `security`, `redaction`,
+`max_response_bytes`) and `expect`. Setting `expect.pages` follows
+`next_cursor` through the gRPC response builder and checks that byte-limited
+pages never drop or alter a row (see `scenarios/response_budget/`).
 
 ### Rust tests
 

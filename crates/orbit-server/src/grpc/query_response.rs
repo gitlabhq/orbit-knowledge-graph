@@ -11,13 +11,13 @@ use crate::proto::{
     ResponseFormat, execute_query_message, execute_query_result,
 };
 
-pub(crate) struct QueryResponseOptions {
+pub struct QueryResponseOptions {
     pub format: ResponseFormat,
     pub max_response_bytes: usize,
     pub timeout: Duration,
 }
 
-pub(crate) async fn build_query_response(
+pub async fn build_query_response(
     output: &mut PipelineOutput,
     options: &QueryResponseOptions,
 ) -> Result<ExecuteQueryMessage, PipelineError> {

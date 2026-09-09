@@ -134,11 +134,3 @@ pub(super) async fn seed(ctx: &TestContext) {
     load_seed(ctx, "data_correctness").await;
     ctx.optimize_all().await;
 }
-
-pub(super) async fn query_response_scenarios(ctx: &TestContext) {
-    crate::common::query_scenarios::run_scenarios(
-        ctx,
-        include_str!("scenarios/query_responses.yaml"),
-    )
-    .await;
-}

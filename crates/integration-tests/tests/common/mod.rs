@@ -1,8 +1,5 @@
 #![allow(dead_code, unused_imports)]
 
-mod query_client;
-pub mod query_scenarios;
-
 use ontology::Ontology;
 use orbit_server::redaction::QueryResult;
 pub use query_engine::compiler::compile;

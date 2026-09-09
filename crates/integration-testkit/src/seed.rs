@@ -10,11 +10,7 @@ pub async fn load_seed(ctx: &TestContext, name: &str) {
     let path = format!("{SEED_DIR}/{name}.sql");
     let sql = std::fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("seed '{name}' not found at {path}: {e}"));
-    load_seed_sql(ctx, &sql).await;
-}
-
-pub async fn load_seed_sql(ctx: &TestContext, sql: &str) {
-    for stmt in split_sql_statements(sql).unwrap() {
+    for stmt in split_sql_statements(&sql).unwrap() {
         let prefixed = prefix_graph_tables(&stmt, &TABLE_PREFIX);
         ctx.execute(&prefixed).await;
     }

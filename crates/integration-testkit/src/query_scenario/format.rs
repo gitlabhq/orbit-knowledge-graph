@@ -25,6 +25,8 @@ pub struct ScenarioConfig {
     pub security: Option<PresetOr<SecurityOverride>>,
     #[serde(default)]
     pub redaction: Option<PresetOr<RedactionConfig>>,
+    #[serde(default)]
+    pub max_response_bytes: Option<usize>,
 }
 
 /// Either a preset name (string) or an inline value.
@@ -76,6 +78,8 @@ pub struct QueryExpect {
     pub has_more: Option<bool>,
     #[serde(default)]
     pub skip_requirements: Vec<String>,
+    #[serde(default)]
+    pub pages: Vec<BTreeMap<String, Vec<i64>>>,
 }
 
 #[derive(Debug, Default, Deserialize)]

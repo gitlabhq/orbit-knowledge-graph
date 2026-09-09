@@ -30,7 +30,6 @@ async fn data_correctness() {
 
     run_subtests_shared!(
         &ctx,
-        helpers::query_response_scenarios,
         search::search_returns_correct_user_properties,
         search::search_returns_correct_project_properties,
         search::search_returns_correct_group_full_path,

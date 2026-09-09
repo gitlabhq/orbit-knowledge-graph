@@ -1,0 +1,35 @@
+description: A page over the byte budget is cut down and its cursor resumes right after the last returned row
+
+config:
+  max_response_bytes: 8192
+  redaction:
+    allow:
+      user: [8001, 8002, 8003, 8004, 8005, 8006]
+  extra_seed:
+    gl_user:
+      - { id: 8001, username: user8001, name: { sql: "repeat('x', 4096)" }, state: active, user_type: human }
+      - { id: 8002, username: user8002, name: { sql: "repeat('x', 4096)" }, state: active, user_type: human }
+      - { id: 8003, username: user8003, name: { sql: "repeat('x', 4096)" }, state: active, user_type: human }
+      - { id: 8004, username: user8004, name: { sql: "repeat('x', 4096)" }, state: active, user_type: human }
+      - { id: 8005, username: user8005, name: { sql: "repeat('x', 4096)" }, state: active, user_type: human }
+      - { id: 8006, username: user8006, name: { sql: "repeat('x', 4096)" }, state: active, user_type: human }
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [{"id": "user", "entity": "User",
+                 "node_ids": [8001, 8002, 8003, 8004, 8005, 8006],
+                 "columns": ["username", "name"]}],
+      "order_by": "user.id",
+      "cursor": {"page_size": 4}
+    }
+
+expect:
+  pages:
+    - User: [8001]
+    - User: [8002]
+    - User: [8003]
+    - User: [8004]
+    - User: [8005]
+    - User: [8006]

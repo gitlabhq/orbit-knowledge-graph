@@ -1,0 +1,24 @@
+description: A page within the byte budget is returned whole with no continuation cursor
+
+config:
+  max_response_bytes: 8192
+  redaction:
+    allow:
+      user: [9001]
+  extra_seed:
+    gl_user:
+      - { id: 9001, username: small_user, name: Small User, state: active, user_type: human }
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [{"id": "user", "entity": "User", "node_ids": [9001],
+                 "columns": ["username", "name"]}],
+      "order_by": "user.id",
+      "cursor": {"page_size": 4}
+    }
+
+expect:
+  pages:
+    - User: [9001]

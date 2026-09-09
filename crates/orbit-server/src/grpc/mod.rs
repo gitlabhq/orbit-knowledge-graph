@@ -1,6 +1,6 @@
 mod auth;
 mod legacy;
-pub(crate) mod query_response;
+pub mod query_response;
 mod server;
 mod service;
 

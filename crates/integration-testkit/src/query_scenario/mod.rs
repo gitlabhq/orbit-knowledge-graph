@@ -4,14 +4,17 @@
 
 mod format;
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::sync::Arc;
+use std::time::Duration;
 
+use prost::Message;
 use query_engine::compiler::{
     AccessLevel, AuthorizedPath, CompiledQueryContext, QueryLanguage, SecurityContext,
     compile_query,
 };
-use query_engine::formatters::{GraphFormatter, ResultFormatter};
+use query_engine::formatters::{GraphFormatter, GraphResponse, ResultFormatter};
 use query_engine::pipeline::{NoOpObserver, PipelineStage, QueryPipelineContext, TypeMap};
 use query_engine::shared::content::ColumnResolverRegistry;
 use query_engine::shared::{PipelineOutput, RedactionOutput};
@@ -26,8 +29,14 @@ pub use format::{
     PresetOr, QueryExpect, QueryScenario, RedactionConfig, ScenarioConfig, SecurityOverride,
 };
 
+use orbit_server::grpc::query_response::{QueryResponseOptions, build_query_response};
 use orbit_server::pipeline::HydrationStage;
+use orbit_server::proto::{
+    ResponseFormat, execute_query_message::Content as MessageContent,
+    execute_query_result::Content as ResultContent,
+};
 use orbit_server::redaction::QueryResult;
+use orbit_server_config::GrpcConfig;
 
 /// Parse all YAML scenario files under `root` without executing them.
 /// Catches syntax errors and serde mismatches in `cargo nextest --lib`
@@ -149,6 +158,11 @@ async fn run_scenario(ctx: &TestContext, file: &Path, name: &str, presets: &Path
     let security = build_security(&security_override);
     let redaction = build_redaction(&redaction_config);
 
+    if !scenario.expect.pages.is_empty() {
+        follow_cursor_pages(&ctx, &scenario, &security, &redaction, name).await;
+        return;
+    }
+
     for (frontend_key, query_str) in &scenario.query {
         let Some(language) = QueryLanguage::from_name(frontend_key) else {
             eprintln!("    {name}: skipping unknown query language '{frontend_key}'");
@@ -205,13 +219,160 @@ async fn run_frontend(
         },
     };
 
-    let resp = execute_pipeline(ctx, &compiled, &ontology, security, redaction).await;
+    let output = execute_pipeline(ctx, &compiled, &ontology, security, redaction).await;
 
-    let response: query_engine::formatters::GraphResponse =
-        serde_json::from_value(resp).expect("response should deserialize");
+    let response: GraphResponse = serde_json::from_value(GraphFormatter.format(&output))
+        .expect("response should deserialize");
     let view = ResponseView::for_query(&compiled.input, response);
 
     apply_expect(&view, expect, label);
+}
+
+async fn follow_cursor_pages(
+    ctx: &TestContext,
+    scenario: &QueryScenario,
+    security: &SecurityContext,
+    redaction: &MockRedactionService,
+    name: &str,
+) {
+    let query_str = scenario.query.get("json").unwrap_or_else(|| {
+        panic!("{name}: paged scenarios need a `json` query so cursor.after can be injected")
+    });
+    let mut query: serde_json::Value = serde_json::from_str(query_str)
+        .unwrap_or_else(|e| panic!("{name}: query is not valid JSON: {e}"));
+    let expected_pages = &scenario.expect.pages;
+    let default_budget = GrpcConfig::default().max_query_response_bytes;
+    let budget = scenario.config.max_response_bytes.unwrap_or(default_budget);
+    let ontology = Arc::new(load_ontology());
+
+    let expected_node_count: usize = expected_pages
+        .iter()
+        .flat_map(|page| page.values())
+        .map(Vec::len)
+        .sum();
+    let mut whole_result_query = query.clone();
+    whole_result_query["cursor"]["page_size"] = expected_node_count.max(1).into();
+    let mut whole_result = fetch_encoded_page(
+        ctx,
+        &whole_result_query,
+        &ontology,
+        security,
+        redaction,
+        default_budget,
+        name,
+    )
+    .await;
+    assert!(
+        !whole_result.response.pagination.as_ref().unwrap().has_more,
+        "{name}: the unbudgeted run must fit in a single page"
+    );
+    assert!(
+        whole_result.response.edges.is_empty(),
+        "{name}: paged scenarios require node-only queries"
+    );
+    assert_eq!(
+        whole_result.encoded_bytes > budget,
+        expected_pages.len() > 1,
+        "{name}: fixture size must exercise the expected budget behavior"
+    );
+
+    let mut page =
+        fetch_encoded_page(ctx, &query, &ontology, security, redaction, budget, name).await;
+    let mut returned_nodes = Vec::new();
+    let mut seen_cursors = BTreeSet::new();
+
+    for (page_index, expected_nodes) in expected_pages.iter().enumerate() {
+        let page_label = format!("{name}: page {}", page_index + 1);
+        assert!(
+            page.encoded_bytes <= budget,
+            "{page_label} exceeds the byte budget"
+        );
+        let mut actual_nodes: BTreeMap<String, Vec<i64>> = BTreeMap::new();
+        for node in &page.response.nodes {
+            actual_nodes
+                .entry(node.entity_type.clone())
+                .or_default()
+                .push(node.id);
+        }
+        assert_eq!(&actual_nodes, expected_nodes, "{page_label} node IDs");
+        returned_nodes.extend(page.response.nodes);
+
+        let pagination = page.response.pagination.unwrap();
+        let more_pages_expected = page_index + 1 < expected_pages.len();
+        assert_eq!(
+            pagination.has_more, more_pages_expected,
+            "{page_label} has_more"
+        );
+        assert_eq!(
+            pagination.has_more,
+            pagination.next_cursor.is_some(),
+            "{page_label} next_cursor presence"
+        );
+        assert_eq!(
+            pagination.truncated, pagination.has_more,
+            "{page_label} truncated"
+        );
+
+        let Some(cursor) = pagination.next_cursor else {
+            break;
+        };
+        assert!(
+            seen_cursors.insert(cursor.clone()),
+            "{page_label} cursor must advance"
+        );
+        query["cursor"]["after"] = cursor.into();
+        page = fetch_encoded_page(ctx, &query, &ontology, security, redaction, budget, name).await;
+    }
+
+    returned_nodes.sort_by_key(|node| (node.entity_type.clone(), node.id));
+    whole_result
+        .response
+        .nodes
+        .sort_by_key(|node| (node.entity_type.clone(), node.id));
+    assert_eq!(
+        serde_json::to_value(returned_nodes).unwrap(),
+        serde_json::to_value(whole_result.response.nodes).unwrap(),
+        "{name}: pagination must preserve node properties"
+    );
+}
+
+struct EncodedPage {
+    response: GraphResponse,
+    encoded_bytes: usize,
+}
+
+async fn fetch_encoded_page(
+    ctx: &TestContext,
+    query: &serde_json::Value,
+    ontology: &Arc<ontology::Ontology>,
+    security: &SecurityContext,
+    redaction: &MockRedactionService,
+    max_response_bytes: usize,
+    label: &str,
+) -> EncodedPage {
+    let compiled = compile_query(&query.to_string(), QueryLanguage::Json, ontology, security)
+        .unwrap_or_else(|e| panic!("{label}: unexpected compile error: {e}"));
+    let mut output =
+        execute_pipeline(ctx, &Arc::new(compiled), ontology, security, redaction).await;
+    let options = QueryResponseOptions {
+        format: ResponseFormat::Raw,
+        max_response_bytes,
+        timeout: Duration::from_secs(GrpcConfig::default().stream_timeout_secs),
+    };
+    let message = build_query_response(&mut output, &options)
+        .await
+        .unwrap_or_else(|e| panic!("{label}: response builder failed: {e}"));
+    let encoded_bytes = message.encoded_len();
+    let Some(MessageContent::Result(result)) = message.content else {
+        panic!("{label}: response builder must return a query result");
+    };
+    let Some(ResultContent::ResultJson(json)) = result.content else {
+        panic!("{label}: expected a RAW response");
+    };
+    EncodedPage {
+        response: serde_json::from_str(&json).expect("response should deserialize"),
+        encoded_bytes,
+    }
 }
 
 async fn execute_pipeline(
@@ -220,7 +381,7 @@ async fn execute_pipeline(
     ontology: &Arc<ontology::Ontology>,
     security: &SecurityContext,
     redaction: &MockRedactionService,
-) -> serde_json::Value {
+) -> PipelineOutput {
     let batches = ctx.query_parameterized(&compiled.base).await;
     let mut result = QueryResult::from_batches(&batches, &compiled.base.result_context);
 
@@ -262,7 +423,7 @@ async fn execute_pipeline(
         &compiled.input,
     ));
 
-    let output = PipelineOutput {
+    PipelineOutput {
         row_count: query_result.authorized_count(),
         redacted_count: hydration_output.redacted_count,
         query_type: compiled.query_type.to_string(),
@@ -272,9 +433,7 @@ async fn execute_pipeline(
         result_context: hydration_output.result_context,
         execution_log: vec![],
         pagination,
-    };
-
-    GraphFormatter.format(&output)
+    }
 }
 
 fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
