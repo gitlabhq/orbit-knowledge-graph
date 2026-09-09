@@ -8,7 +8,7 @@ Today, the repository includes the following major components:
 
 - Orbit Remote's `gkg-server` binary, which runs in four modes: `Webserver`, `Indexer`, `DispatchIndexing`, and `HealthCheck`.
 - A ClickHouse-backed remote graph runtime with ontology-driven schema, ETL, authorization metadata, and Query DSL validation. The authoritative ontology lives in `config/ontology/`.
-- Remote HTTP, gRPC, REST, and MCP query surfaces that compile the JSON Query DSL into parameterized ClickHouse SQL. The [Orbit query frontend](querying/orbit_query_frontend.md) provides a separate compiler-level text API.
+- Remote HTTP, gRPC, REST, and MCP query surfaces that compile the JSON Query DSL (default) or explicit `language: gql` text through the [Orbit query frontend](querying/orbit_query_frontend.md) into parameterized ClickHouse SQL.
 - A distributed remote indexing pipeline that consumes Siphon CDC through NATS JetStream, dispatches indexing work, and writes SDLC and code graph data into ClickHouse.
 - Orbit Local's standalone `orbit` CLI, which indexes a repository into DuckDB and supports direct SQL, schema inspection, repository maps, and a stateless stdio MCP server.
 - Shared crates for indexing, query compilation, formatting, ontology loading, database access, GitLab API access, health checks, and integration testing.
@@ -25,7 +25,7 @@ A secure query layer on top of the graph lets developers and AI agents query tha
 - [NATS](https://docs.nats.io/), the durable message broker for CDC and event-driven work such as consuming [`p_knowledge_graph_code_indexing_tasks`](https://gitlab.com/gitlab-org/gitlab/-/blob/master/db/docs/p_knowledge_graph_code_indexing_tasks.yml) for code indexing (see [ADR 005](decisions/005_code_indexing_task_table.md)).
 - [ClickHouse](https://clickhouse.com/), the remote datalake and property-graph store. Orbit does not connect directly to the GitLab OLTP database.
 - **Orbit Remote's service binary**, with four runtime modes:
-  - **`Webserver`** (`gkg-server --mode Webserver`): Serves HTTP, gRPC, REST, and MCP traffic; validates Query DSL requests against the JSON schema and ontology; compiles them to ClickHouse SQL; and applies authorization and formatting before returning results.
+  - **`Webserver`** (`gkg-server --mode Webserver`): Serves HTTP, gRPC, REST, and MCP traffic; validates JSON Query DSL or explicitly selected GQL text requests against their frontend rules and the ontology; compiles them to ClickHouse SQL; and applies authorization and formatting before returning results.
   - **`Indexer`** (`gkg-server --mode Indexer`): Runs the shared indexing engine, consumes SDLC and code indexing requests from NATS JetStream, and writes graph data into ClickHouse.
   - **`DispatchIndexing`** (`gkg-server --mode DispatchIndexing`): On a schedule, detects enabled root namespaces with recent Siphon changes and publishes deduplicated per-namespace indexing requests to the internal `GKG_INDEXER` stream. It also runs scheduled dispatchers for code indexing tasks, namespace deletion, stale-edge reconciliation, and schema-migration lifecycle, including ontology archive publication.
   - **`HealthCheck`** (`gkg-server --mode HealthCheck`): Aggregates cluster health by probing Kubernetes deployments and ClickHouse instances, and exposes the result on a single `/health` endpoint.
@@ -150,7 +150,7 @@ flowchart TD
 
 ### Database & Database Ops
 
-Orbit Remote's [Graph Query Engine](querying/graph_engine.md) validates the JSON Query DSL against the ontology and compiles traversal, aggregation, neighbors, and path-finding requests into parameterized ClickHouse SQL. Cypher was evaluated during the storage and query-engine design, but it is not a current query surface. The JSON Query DSL and the compiler-level Orbit query frontend share the same compiler pipeline.
+Orbit Remote's [Graph Query Engine](querying/graph_engine.md) validates queries against the ontology and compiles traversal, aggregation, neighbors, and path-finding requests into parameterized ClickHouse SQL. The JSON Query DSL remains the default. Explicit `language: gql` text uses the read-only openCypher subset of the Orbit query frontend and shares the same compiler and authorization pipeline.
 
 The current implementation uses ClickHouse for remote graph storage and query execution. In the current repository state:
 
@@ -335,7 +335,7 @@ This makes property graphs a flexible choice for both AI-driven analytics and hu
 
 #### 5. Property Graphs are Standard
 
-Property graphs are standardized by [SQL 2023's ISO/IEC 9075-16:2023](https://www.iso.org/standard/79473.html). The team evaluated Cypher and dedicated graph databases during the original storage and query-language design; those decisions remain documented in [ADR 000](decisions/000_clickhouse_graph_storage.md). The implemented client contract is the JSON Query DSL, which expresses traversals, aggregations, neighbors, and path finding without exposing generated SQL.
+Property graphs are standardized by [SQL 2023's ISO/IEC 9075-16:2023](https://www.iso.org/standard/79473.html). The team evaluated Cypher and dedicated graph databases during the original storage and query-language design; those decisions remain documented in [ADR 000](decisions/000_clickhouse_graph_storage.md). The client contract retains the JSON Query DSL by default and adds explicit `language: gql` read-only text support, without exposing generated SQL.
 
 See the [querying design documents](./querying/) for the current query architecture.
 

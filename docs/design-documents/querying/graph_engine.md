@@ -48,8 +48,8 @@ edge DDL does not define source- or target-ordered projections.
 
 The compiler supports two query frontends:
 
-1. The JSON Query DSL describes traversal, neighbors, path-finding, and aggregation queries. Remote requests through MCP, HTTP, and gRPC use this frontend.
-2. The [Orbit Query Frontend](orbit_query_frontend.md) accepts a restricted, read-only language based on openCypher 9 syntax. It is a compiler preset, not a remote endpoint or a wire-compatible graph-database driver.
+1. The JSON Query DSL describes traversal, neighbors, path-finding, and aggregation queries. Remote requests through MCP, HTTP, and gRPC default to this frontend for compatibility.
+2. The [Orbit Query Frontend](orbit_query_frontend.md) accepts a restricted, read-only language based on openCypher 9 syntax. Remote callers select its compiler preset with `language: gql` (GQL=2 over gRPC), using the same endpoint and authorization pipeline. It is not a Neo4j-compatible driver.
 
 ### Compiler pass pipeline
 

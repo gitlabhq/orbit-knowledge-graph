@@ -37,12 +37,13 @@ impl PipelineStage for PathResolutionStage {
             return Ok(());
         }
 
-        let input = validate_normalize(&ctx.query_json, &ctx.ontology).map_err(|e| {
-            PipelineError::Compile {
-                client_safe: e.is_client_safe(),
-                message: e.to_string(),
-            }
-        })?;
+        let input =
+            validate_normalize(&ctx.query_json, ctx.frontend, &ctx.ontology).map_err(|e| {
+                PipelineError::Compile {
+                    client_safe: e.is_client_safe(),
+                    message: e.to_string(),
+                }
+            })?;
 
         if !scopes_query_type(input.query_type) {
             return Ok(());
@@ -461,8 +462,41 @@ mod tests {
     }
 
     #[test]
+    fn gql_normalization_preserves_scope_keys_and_rejects_unsupported_syntax() {
+        use query_engine::compiler::Frontend;
+
+        let ontology = ontology();
+        let input = validate_normalize(
+            "MATCH (p:Project {id: 42})-[:CONTAINS]->(b:Branch) RETURN p, b LIMIT 1",
+            Frontend::Gql,
+            &ontology,
+        )
+        .unwrap();
+        assert!(scopes_query_type(input.query_type));
+        assert_eq!(
+            scope_keys(&input.nodes[0], &ontology.anchor_fk_mappings()),
+            vec![PathResolutionKey::id("Project", 42)]
+        );
+        assert_eq!(scope_edges(&input).len(), 1);
+        for text in [
+            "CREATE (p:Project)",
+            "MATCH (p:Project) RETURN p UNION MATCH (p:Project) RETURN p",
+        ] {
+            let error = validate_normalize(text, Frontend::Gql, &ontology).unwrap_err();
+            assert!(error.is_client_safe());
+        }
+        assert!(
+            validate_normalize("MATCH (p:Project) RETURN p", Frontend::JsonDsl, &ontology).is_err()
+        );
+    }
+
+    #[test]
     fn only_traversal_and_aggregation_scope_to_tight_prefix() {
-        let qt = |json: &str| validate_normalize(json, &ontology()).unwrap().query_type;
+        let qt = |json: &str| {
+            validate_normalize(json, query_engine::compiler::Frontend::JsonDsl, &ontology())
+                .unwrap()
+                .query_type
+        };
         assert!(scopes_query_type(qt(
             r#"{"query_type": "traversal", "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}], "limit": 1}"#
         )));
@@ -483,6 +517,7 @@ mod tests {
         use query_engine::pipeline::{NoOpObserver, TypeMap};
 
         let mut ctx = QueryPipelineContext {
+            frontend: query_engine::compiler::Frontend::JsonDsl,
             query_json: r#"{"query_type": "traversal", "nodes": [{"id": "p", "entity": "Project", "node_ids": [42]}], "limit": 1}"#.to_string(),
             compiled: None,
             ontology: Arc::new(Ontology::load_embedded().unwrap()),

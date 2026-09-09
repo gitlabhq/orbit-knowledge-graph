@@ -43,7 +43,9 @@ pub(super) fn list_commands_description() -> String {
 }
 
 pub(super) mod params {
+    use query_engine::compiler::Frontend;
     use serde_json::{Value, json};
+    use strum::VariantNames;
 
     pub fn format() -> Value {
         json!({
@@ -53,10 +55,29 @@ pub(super) mod params {
         })
     }
 
-    pub fn query() -> Value {
+    pub fn query_parameters() -> Value {
         json!({
             "type": "object",
-            "description": "Graph query following the DSL schema"
+            "required": ["query"],
+            "properties": {
+                "query": {
+                    "type": ["object", "string"],
+                    "description": "JSON Query DSL object, or raw query text with language=gql."
+                },
+                "language": {
+                    "type": "string",
+                    "enum": Frontend::VARIANTS,
+                    "default": <&str>::from(Frontend::JsonDsl)
+                },
+                "format": format()
+            },
+            "if": {
+                "required": ["language"],
+                "properties": {"language": {"const": <&str>::from(Frontend::Gql)}}
+            },
+            "then": {"properties": {"query": {"type": "string"}}},
+            "else": {"properties": {"query": {"type": "object"}}},
+            "additionalProperties": false
         })
     }
 
@@ -162,15 +183,7 @@ impl CommandRegistry {
         ToolDefinition {
             name: "query_graph".into(),
             description: prompt("tools/query_graph").description().into(),
-            parameters: json!({
-                "type": "object",
-                "required": ["query"],
-                "properties": {
-                    "query": params::query(),
-                    "format": params::format()
-                },
-                "additionalProperties": false
-            }),
+            parameters: params::query_parameters(),
         }
     }
 

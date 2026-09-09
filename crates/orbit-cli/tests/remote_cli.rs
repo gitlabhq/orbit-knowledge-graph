@@ -99,15 +99,39 @@ fn accept_within(listener: &TcpListener, timeout: Duration) -> std::net::TcpStre
     }
 }
 
-fn run_orbit(base_url: &str, args: &[&str]) -> std::process::Output {
-    Command::new(env!("CARGO_BIN_EXE_orbit"))
+fn orbit_command(base_url: &str, args: &[&str]) -> Command {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_orbit"));
+    command
         .args(args)
         .env("ORBIT_API_BASE_URL", base_url)
         .env("ORBIT_AUTH_HEADER_NAME", "Private-Token")
         .env("ORBIT_AUTH_HEADER_VALUE", "glpat-test")
-        .env_remove("GITLAB_TOKEN")
+        .env_remove("GITLAB_TOKEN");
+    command
+}
+
+fn run_orbit(base_url: &str, args: &[&str]) -> std::process::Output {
+    orbit_command(base_url, args)
         .output()
         .expect("run orbit binary")
+}
+
+fn run_orbit_with_stdin(base_url: &str, args: &[&str], input: &[u8]) -> std::process::Output {
+    use std::process::Stdio;
+
+    let mut child = orbit_command(base_url, args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn orbit query");
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(input)
+        .expect("write stdin");
+    child.wait_with_output().expect("wait orbit query")
 }
 
 #[test]
@@ -185,27 +209,11 @@ fn graph_status_sends_full_path_query() {
 #[test]
 fn query_posts_envelope_with_resolved_response_format() {
     let (base_url, handle) = serve_once("@ok", "text/plain");
-    let output = {
-        use std::process::Stdio;
-        let mut child = Command::new(env!("CARGO_BIN_EXE_orbit"))
-            .args(["query", "--response-format", "raw", "-"])
-            .env("ORBIT_API_BASE_URL", &base_url)
-            .env("ORBIT_AUTH_HEADER_NAME", "Private-Token")
-            .env("ORBIT_AUTH_HEADER_VALUE", "glpat-test")
-            .env_remove("GITLAB_TOKEN")
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .expect("spawn orbit query");
-        child
-            .stdin
-            .take()
-            .unwrap()
-            .write_all(br#"{"query":{"query_type":"traversal"}}"#)
-            .expect("write stdin");
-        child.wait_with_output().expect("wait orbit query")
-    };
+    let output = run_orbit_with_stdin(
+        &base_url,
+        &["query", "--response-format", "raw", "-"],
+        br#"{"query":{"query_type":"traversal"}}"#,
+    );
     let request = handle.join().expect("join mock");
 
     assert!(
@@ -220,6 +228,46 @@ fn query_posts_envelope_with_resolved_response_format() {
     assert_eq!(sent["query"]["query_type"], "traversal");
 
     assert_eq!(output.stdout, b"@ok");
+}
+
+#[test]
+fn gql_file_and_stdin_preserve_query_text_and_response_bytes() {
+    let text = "  MATCH (u:User {username: 'a\\\\b\\\"λ'})\r\nRETURN u LIMIT 1\n";
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("query.cypher");
+    std::fs::write(&path, text).unwrap();
+    let path = path.to_str().unwrap();
+
+    for (format, response, source) in [
+        ("llm", "@query\nλ \\\"quoted\\\"\n", path),
+        ("raw", "{ \"result\": {\"nodes\":[]} }\n", "-"),
+    ] {
+        let (base_url, handle) = serve_once(response, "text/plain");
+        let args = [
+            "query",
+            "--language",
+            "gql",
+            "--response-format",
+            format,
+            source,
+        ];
+        let output = if source == path {
+            run_orbit(&base_url, &args)
+        } else {
+            run_orbit_with_stdin(&base_url, &args, text.as_bytes())
+        };
+        let request = handle.join().unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let sent: serde_json::Value = serde_json::from_str(&request.body).unwrap();
+        assert_eq!(sent["query"].as_str().unwrap().as_bytes(), text.as_bytes());
+        assert_eq!(sent["language"], "gql");
+        assert_eq!(sent["response_format"], format);
+        assert_eq!(output.stdout, response.as_bytes());
+    }
 }
 
 #[test]

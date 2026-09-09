@@ -121,10 +121,15 @@ compiler_pipeline_macros::define_compiler_ctx! {
             state: [input, query_plan, node, result_ctx, query_config, hydration_plan, output]
             phases: [restrict, plan, lower, enforce, settings, codegen]
         }
-        validate_normalize {
+        validate_normalize_json_dsl {
             env: [ontology]
             state: [raw, input]
             phases: [json_dsl_parse, validate, normalize]
+        }
+        validate_normalize_gql {
+            env: [ontology]
+            state: [raw, input]
+            phases: [gql_parse, validate, normalize]
         }
     }
 }

@@ -407,6 +407,7 @@ async fn run_pipeline(
     server_extensions.insert(registry);
 
     let mut ctx = QueryPipelineContext {
+        frontend: query_engine::compiler::Frontend::JsonDsl,
         query_json: json.to_string(),
         compiled: None,
         ontology: Arc::clone(ontology),

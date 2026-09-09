@@ -307,4 +307,8 @@ async fn data_correctness_scenarios() {
     query_scenario::load_yaml_seed(&ctx, PRESETS, "data_correctness").await;
     ctx.optimize_all().await;
     query_scenario::run_dir(&ctx, SCENARIOS, PRESETS).await;
+    run_subtests_shared!(
+        &ctx,
+        traversal_scoping::gql_path_resolution_uses_the_selected_frontend,
+    );
 }
