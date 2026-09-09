@@ -261,9 +261,7 @@ The `content` column is for source code. For merge request diff text, use
 
 ### Text excerpts
 
-Database-backed node strings return at most 2,048 Unicode code points plus `" [truncated]"` when shortened, including point lookups; use the GitLab API for complete text.
-Virtual columns, their lookup inputs, scalar aggregation outputs, and scalar group keys are exempt. Filters, sorting, grouping, and pagination use complete values.
-This per-property cap does not guarantee a maximum response size. The `llm` format can shorten text further; `<key>_len` counts the formatter input, including any SQL truncation marker.
+Database-backed node strings may be shortened to 2,048 Unicode code points plus `" [truncated]"`; use the GitLab API for full text.
 
 ### Filtering on virtual columns
 
