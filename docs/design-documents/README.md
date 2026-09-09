@@ -8,7 +8,7 @@ Today, the repository includes the following major components:
 
 - Orbit Remote's `gkg-server` binary, which runs in four modes: `Webserver`, `Indexer`, `DispatchIndexing`, and `HealthCheck`.
 - A ClickHouse-backed remote graph runtime with ontology-driven schema, ETL, authorization metadata, and Query DSL validation. The authoritative ontology lives in `config/ontology/`.
-- Remote HTTP, gRPC, REST, and MCP query surfaces that compile the JSON Query DSL into parameterized ClickHouse SQL.
+- Remote HTTP, gRPC, REST, and MCP query surfaces that compile the JSON Query DSL into parameterized ClickHouse SQL. The [Orbit query frontend](querying/orbit_query_frontend.md) provides a separate compiler-level text API.
 - A distributed remote indexing pipeline that consumes Siphon CDC through NATS JetStream, dispatches indexing work, and writes SDLC and code graph data into ClickHouse.
 - Orbit Local's standalone `orbit` CLI, which indexes a repository into DuckDB and supports direct SQL, schema inspection, repository maps, and a stateless stdio MCP server.
 - Shared crates for indexing, query compilation, formatting, ontology loading, database access, GitLab API access, health checks, and integration testing.
@@ -150,7 +150,7 @@ flowchart TD
 
 ### Database & Database Ops
 
-Orbit Remote's [Graph Query Engine](querying/graph_engine.md) validates the JSON Query DSL against the ontology and compiles traversal, aggregation, neighbors, and path-finding requests into parameterized ClickHouse SQL. Cypher was evaluated during the storage and query-engine design, but it is not a current query surface.
+Orbit Remote's [Graph Query Engine](querying/graph_engine.md) validates the JSON Query DSL against the ontology and compiles traversal, aggregation, neighbors, and path-finding requests into parameterized ClickHouse SQL. Cypher was evaluated during the storage and query-engine design, but it is not a current query surface. The JSON Query DSL and the compiler-level Orbit query frontend share the same compiler pipeline.
 
 The current implementation uses ClickHouse for remote graph storage and query execution. In the current repository state:
 

@@ -8,8 +8,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use query_engine::compiler::{
-    AccessLevel, AuthorizedPath, CompiledQueryContext, QueryLanguage, SecurityContext,
-    compile_query,
+    AccessLevel, AuthorizedPath, CompiledQueryContext, Frontend, SecurityContext, compile,
 };
 use query_engine::formatters::{GraphFormatter, ResultFormatter};
 use query_engine::pipeline::{NoOpObserver, PipelineStage, QueryPipelineContext, TypeMap};
@@ -150,14 +149,14 @@ async fn run_scenario(ctx: &TestContext, file: &Path, name: &str, presets: &Path
     let redaction = build_redaction(&redaction_config);
 
     for (frontend_key, query_str) in &scenario.query {
-        let Some(language) = QueryLanguage::from_name(frontend_key) else {
+        let Ok(frontend) = frontend_key.parse::<Frontend>() else {
             eprintln!("    {name}: skipping unknown query language '{frontend_key}'");
             continue;
         };
         let label = format!("{name} [{frontend_key}]");
         run_frontend(
             &ctx,
-            language,
+            frontend,
             query_str,
             &security,
             &redaction,
@@ -170,7 +169,7 @@ async fn run_scenario(ctx: &TestContext, file: &Path, name: &str, presets: &Path
 
 async fn run_frontend(
     ctx: &TestContext,
-    language: QueryLanguage,
+    frontend: Frontend,
     query: &str,
     security: &SecurityContext,
     redaction: &MockRedactionService,
@@ -179,7 +178,7 @@ async fn run_frontend(
 ) {
     let ontology = Arc::new(load_ontology());
 
-    let compiled = match compile_query(query, language, &ontology, security) {
+    let compiled = match compile(query, frontend, &ontology, security) {
         Ok(c) => {
             let expects_error = matches!(
                 expect.compile_error,
@@ -526,5 +525,48 @@ fn parse_requirement(name: &str) -> Option<Requirement> {
         "neighbors" => Some(Requirement::Neighbors),
         "path_finding" => Some(Requirement::PathFinding),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn json_and_gql_keys_map_to_their_frontends() {
+        assert_eq!("json".parse(), Ok(Frontend::JsonDsl));
+        assert_eq!("gql".parse(), Ok(Frontend::Gql));
+        assert!("sql".parse::<Frontend>().is_err());
+    }
+
+    #[test]
+    fn both_frontends_compile_the_same_query_identically() {
+        let ontology = load_ontology();
+        let security = SecurityContext::new(1, vec!["1/".into()]).unwrap();
+        let json = compile(r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":["username"]}],"limit":5}"#, Frontend::JsonDsl, &ontology, &security)
+        .unwrap();
+        let gql = compile(
+            "MATCH (u:User {id: 1}) RETURN u.username LIMIT 5",
+            Frontend::Gql,
+            &ontology,
+            &security,
+        )
+        .unwrap();
+        assert_eq!(json.base.sql, gql.base.sql);
+        assert_eq!(json.base.params, gql.base.params);
+        assert_eq!(json.query_type, gql.query_type);
+        assert_eq!(json.hydration, gql.hydration);
+    }
+
+    #[test]
+    fn gql_frontend_rejects_writes() {
+        let error = compile(
+            "CREATE (u:User)",
+            Frontend::Gql,
+            &load_ontology(),
+            &SecurityContext::new(1, vec!["1/".into()]).unwrap(),
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("Orbit query syntax"), "{error}");
     }
 }

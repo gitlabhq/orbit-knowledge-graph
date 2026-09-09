@@ -849,15 +849,16 @@ pub(super) async fn search_virtual_filter_without_node_ids_rejected(_ctx: &TestC
     let ontology = load_ontology();
     let err = compile(
         r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "f", "entity": "File",
-                     "columns": ["path"],
-                     "filters": {
-                         "project_id": {"eq": 1000},
-                         "content": {"contains": "ClickHouse"}
-                     }}],
-            "limit": 10
-        }"#,
+        "query_type": "traversal",
+        "nodes": [{"id": "f", "entity": "File",
+                 "columns": ["path"],
+                 "filters": {
+                     "project_id": {"eq": 1000},
+                     "content": {"contains": "ClickHouse"}
+                 }}],
+        "limit": 10
+    }"#,
+        query_engine::compiler::Frontend::JsonDsl,
         &ontology,
         &test_security_context(),
     )

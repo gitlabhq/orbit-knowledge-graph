@@ -12,6 +12,8 @@ query:
         "relationships": [{"type": "CALLS", "from": "caller", "to": "callee"}],
         "limit": 20
     }
+  gql: |
+    MATCH (caller:Definition {id: 12000})-[:CALLS]->(callee:Definition) RETURN caller.name, caller.fqn, callee.name, callee.fqn LIMIT 20
 
 expect:
   node_count: 2
