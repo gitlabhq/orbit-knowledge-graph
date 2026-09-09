@@ -186,7 +186,6 @@ health_check:
 EOF
       ;;
     *)
-      echo "{}"
       ;;
   esac
 }
@@ -202,7 +201,10 @@ write_mode_overlay() {
   tmp="$(mktemp "$target.XXXXXX")"
   gdk_overlay_yaml > "$gdk_part"
   mode_overlay_yaml "$mode" > "$mode_part"
-  local parts=("$DEV_OVERLAY" "$gdk_part" "$mode_part")
+  local parts=("$DEV_OVERLAY" "$gdk_part")
+  if [[ -s "$mode_part" ]]; then
+    parts+=("$mode_part")
+  fi
   if [[ -f "$LOCAL_OVERLAY" ]]; then
     parts+=("$LOCAL_OVERLAY")
   fi
