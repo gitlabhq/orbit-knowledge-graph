@@ -222,6 +222,11 @@ async fn run_frontend(
         return;
     }
 
+    if !expect.pages.is_empty() {
+        run_pages(ctx, query, &ontology, security, redaction, expect, label).await;
+        return;
+    }
+
     let resp = execute_pipeline(ctx, &compiled, &ontology, security, redaction).await;
 
     let response: query_engine::formatters::GraphResponse =
@@ -229,6 +234,54 @@ async fn run_frontend(
     let view = ResponseView::for_query(&compiled.input, response);
 
     apply_expect(&view, expect, label);
+}
+
+async fn run_pages(
+    ctx: &TestContext,
+    base_query: &str,
+    ontology: &Arc<ontology::Ontology>,
+    security: &SecurityContext,
+    redaction: &MockRedactionService,
+    expect: &QueryExpect,
+    label: &str,
+) {
+    let mut query_json: serde_json::Value =
+        serde_json::from_str(base_query).expect("query must be valid JSON");
+
+    for (i, page_expect) in expect.pages.iter().enumerate() {
+        let page_label = format!("{label} page {}", i + 1);
+        let query_str = query_json.to_string();
+
+        let compiled = Arc::new(
+            compile(&query_str, Frontend::JsonDsl, ontology, security)
+                .unwrap_or_else(|e| panic!("{page_label}: compile failed: {e}")),
+        );
+
+        let resp = execute_pipeline(ctx, &compiled, ontology, security, redaction).await;
+        let response: query_engine::formatters::GraphResponse =
+            serde_json::from_value(resp).expect("response should deserialize");
+
+        let next_cursor = response
+            .pagination
+            .as_ref()
+            .and_then(|p| p.next_cursor.clone());
+
+        let view = ResponseView::for_query(&compiled.input, response);
+        apply_expect(&view, page_expect, &page_label);
+
+        match next_cursor {
+            Some(cursor) => {
+                query_json["cursor"]["after"] = serde_json::Value::String(cursor);
+            }
+            None => {
+                assert_eq!(
+                    i + 1,
+                    expect.pages.len(),
+                    "{page_label}: no next_cursor but more pages expected"
+                );
+            }
+        }
+    }
 }
 
 async fn execute_pipeline(

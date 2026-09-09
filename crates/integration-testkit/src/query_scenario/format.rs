@@ -111,6 +111,9 @@ pub struct QueryExpect {
     pub referential_integrity: bool,
     #[serde(default)]
     pub has_more: Option<bool>,
+    /// Multi-page pagination: the runner chains cursors automatically.
+    #[serde(default)]
+    pub pages: Vec<QueryExpect>,
     #[serde(default)]
     pub skip_requirements: Vec<String>,
 }
