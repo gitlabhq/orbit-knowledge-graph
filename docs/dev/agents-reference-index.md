@@ -11,6 +11,7 @@ Canonical locations for files, schemas, configs, and tools in the knowledge-grap
 | Query DSL spec | `docs/design-documents/querying/` |
 | SDLC indexing pipeline | `docs/design-documents/indexing/sdlc_indexing.md` |
 | Code indexing pipeline | `docs/design-documents/indexing/code_indexing.md` |
+| Initial backfill status (`graph_status.backfill`) | `docs/design-documents/decisions/010_graph_status_endpoint.md` (dispatcher-owned root snapshot, target-schema checkpoints) |
 | Namespace deletion pipeline | `docs/design-documents/indexing/namespace_deletion.md` |
 | Schema migration strategy | `docs/design-documents/schema_management.md` |
 | Observability / SLOs | `docs/design-documents/observability.md` |

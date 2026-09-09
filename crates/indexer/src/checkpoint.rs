@@ -82,11 +82,19 @@ pub trait CheckpointStore: Send + Sync {
 
 pub struct ClickHouseCheckpointStore {
     client: Arc<ArrowClickHouseClient>,
+    table: String,
 }
 
 impl ClickHouseCheckpointStore {
     pub fn new(client: Arc<ArrowClickHouseClient>) -> Self {
-        Self { client }
+        Self::for_version(client, *SCHEMA_VERSION)
+    }
+
+    pub fn for_version(client: Arc<ArrowClickHouseClient>, schema_version: u32) -> Self {
+        Self {
+            client,
+            table: prefixed_table_name(CHECKPOINT_TABLE, schema_version),
+        }
     }
 
     async fn upsert(
@@ -97,7 +105,7 @@ impl ClickHouseCheckpointStore {
         resume_floor: &Option<DateTime<Utc>>,
         durability: WriteDurability,
     ) -> Result<(), CheckpointError> {
-        let table = prefixed_table_name(CHECKPOINT_TABLE, *SCHEMA_VERSION);
+        let table = &self.table;
         let formatted_watermark = watermark.format(TIMESTAMP_FORMAT).to_string();
         let cursor_json = encode_cursor_column(cursor_values, resume_floor)?;
 
@@ -120,7 +128,7 @@ impl ClickHouseCheckpointStore {
     }
 
     async fn tombstone(&self, key: &str, watermark: &DateTime<Utc>) -> Result<(), CheckpointError> {
-        let table = prefixed_table_name(CHECKPOINT_TABLE, *SCHEMA_VERSION);
+        let table = &self.table;
         let formatted_watermark = watermark.format(TIMESTAMP_FORMAT).to_string();
 
         self.insert(
@@ -200,7 +208,7 @@ fn checkpoint_store_error<E: std::fmt::Display>(err: E) -> CheckpointError {
 #[async_trait]
 impl CheckpointStore for ClickHouseCheckpointStore {
     async fn load(&self, key: &str) -> Result<Option<Checkpoint>, CheckpointError> {
-        let table = prefixed_table_name(CHECKPOINT_TABLE, *SCHEMA_VERSION);
+        let table = &self.table;
         let batches = self
             .client
             .query(&format!(
@@ -278,7 +286,7 @@ impl CheckpointStore for ClickHouseCheckpointStore {
         &self,
         prefix: &str,
     ) -> Result<Vec<(String, Checkpoint)>, CheckpointError> {
-        let table = prefixed_table_name(CHECKPOINT_TABLE, *SCHEMA_VERSION);
+        let table = &self.table;
         let batches = self
             .client
             .query(&format!(

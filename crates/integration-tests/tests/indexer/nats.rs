@@ -864,6 +864,99 @@ async fn cleanup_is_idempotent() {
         .expect("cleanup_schema_version_buckets failed for non-existent schema version");
 }
 
+#[tokio::test]
+async fn initial_backfill_survives_concurrent_updates_and_schema_cleanup() {
+    use indexer::indexing_status::{IndexingStatusStore, InitialBackfillState};
+    use orbit_migrations::version::SCHEMA_VERSION;
+    use orbit_utils::traversal_path::TraversalPath;
+
+    let (_container, url) = start_nats_container().await;
+    let broker = connect_broker(&default_config(&url)).await;
+    broker
+        .client()
+        .ensure_kv_bucket_exists(INDEXING_PROGRESS_BUCKET, KvBucketConfig::default())
+        .await
+        .unwrap();
+    let store = IndexingStatusStore::new(Arc::new(nats_client::KvServicesImpl::new(
+        broker.client().clone(),
+    )));
+    let path = TraversalPath::new_unchecked("1/100/");
+    let total_pipelines = integration_testkit::load_ontology()
+        .pipeline_descriptors()
+        .into_iter()
+        .filter(|pipeline| pipeline.scope == ontology::EtlScope::Namespaced)
+        .count() as u64;
+    let (first, concurrent) = tokio::join!(
+        store.begin_namespace_backfill(&path, *SCHEMA_VERSION, total_pipelines),
+        store.begin_namespace_backfill(&path, *SCHEMA_VERSION, total_pipelines),
+    );
+    let mut observation = first.unwrap();
+    assert_eq!(observation, concurrent.unwrap());
+
+    observation.completed_pipelines = total_pipelines;
+    let (published, ()) = tokio::join!(
+        store.publish_namespace_backfill(&path, &observation),
+        store.record_progress(&path, *SCHEMA_VERSION),
+    );
+    published.unwrap();
+
+    let progress = store.namespace_backfill(&path).await.unwrap().unwrap();
+    assert_eq!(progress.completed_pipelines, total_pipelines);
+    assert!(progress.last_progress_at.is_some());
+
+    observation.state = InitialBackfillState::Completed;
+    store
+        .publish_namespace_backfill(&path, &observation)
+        .await
+        .unwrap();
+    let completed = store.namespace_backfill(&path).await.unwrap().unwrap();
+    assert_eq!(completed.last_progress_at, progress.last_progress_at);
+
+    orbit_migrations::nats::cleanup_schema_version_buckets(
+        broker.client().nats_client(),
+        *SCHEMA_VERSION,
+        MANAGED_BUCKETS,
+    )
+    .await
+    .unwrap();
+
+    let reader = connect_broker(&default_config(&url)).await;
+    reader
+        .client()
+        .ensure_kv_bucket_exists(INDEXING_PROGRESS_BUCKET, KvBucketConfig::default())
+        .await
+        .unwrap();
+    let reader = IndexingStatusStore::new(Arc::new(nats_client::KvServicesImpl::new(
+        reader.client().clone(),
+    )));
+    assert_eq!(
+        reader
+            .begin_namespace_backfill(&path, *SCHEMA_VERSION + 1, total_pipelines)
+            .await
+            .unwrap(),
+        completed
+    );
+
+    reader.forget_namespace(&path).await.unwrap();
+    assert_eq!(store.namespace_backfill(&path).await.unwrap(), None);
+
+    let recreated = reader
+        .begin_namespace_backfill(&path, *SCHEMA_VERSION, total_pipelines)
+        .await
+        .unwrap();
+    store
+        .publish_namespace_backfill(&path, &completed)
+        .await
+        .unwrap();
+
+    assert_ne!(recreated.generation, completed.generation);
+    assert_eq!(recreated.state, InitialBackfillState::Running);
+    assert_eq!(
+        store.namespace_backfill(&path).await.unwrap(),
+        Some(recreated)
+    );
+}
+
 /// A message that's never ack'd/nack'd/term'd across every `max_deliver` attempt leaves NATS
 /// silent afterward: no error, no dead-letter, nothing. The message stays in its stream slot
 /// forever, blocking all future dispatch to that subject.

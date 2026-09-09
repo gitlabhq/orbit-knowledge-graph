@@ -481,23 +481,25 @@ pub struct GetGraphStatusRequest {
     #[prost(enumeration = "ResponseFormat", tag = "3")]
     pub format: i32,
 }
-/// Indexing progress metadata from the most recent indexing run.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct IndexingStatus {
-    #[prost(enumeration = "IndexingState", tag = "1")]
+pub struct BackfillStatus {
+    #[prost(enumeration = "BackfillState", tag = "1")]
     pub state: i32,
     #[prost(string, optional, tag = "2")]
-    pub last_started_at: ::core::option::Option<::prost::alloc::string::String>,
-    #[prost(string, optional, tag = "3")]
-    pub last_completed_at: ::core::option::Option<::prost::alloc::string::String>,
-    #[prost(uint64, optional, tag = "4")]
-    pub last_duration_ms: ::core::option::Option<u64>,
+    pub last_progress_at: ::core::option::Option<::prost::alloc::string::String>,
+    #[prost(message, optional, tag = "3")]
+    pub sdlc: ::core::option::Option<BackfillCounts>,
+    #[prost(message, optional, tag = "4")]
+    pub code: ::core::option::Option<BackfillCounts>,
     #[prost(string, optional, tag = "5")]
-    pub last_error: ::core::option::Option<::prost::alloc::string::String>,
-    #[prost(uint64, optional, tag = "6")]
-    pub last_rows_read: ::core::option::Option<u64>,
-    #[prost(uint64, optional, tag = "7")]
-    pub last_rows_written: ::core::option::Option<u64>,
+    pub error: ::core::option::Option<::prost::alloc::string::String>,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct BackfillCounts {
+    #[prost(uint64, tag = "1")]
+    pub completed: u64,
+    #[prost(uint64, optional, tag = "2")]
+    pub total: ::core::option::Option<u64>,
 }
 /// Response containing project coverage and entity counts grouped by domain.
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -524,14 +526,8 @@ pub struct StructuredGraphStatus {
     pub projects: ::core::option::Option<ProjectsStatus>,
     #[prost(message, repeated, tag = "2")]
     pub domains: ::prost::alloc::vec::Vec<GraphStatusDomain>,
-    /// worst of sdlc_indexing and code_indexing
-    #[prost(message, optional, tag = "3")]
-    pub indexing: ::core::option::Option<IndexingStatus>,
-    #[prost(message, optional, tag = "4")]
-    pub sdlc_indexing: ::core::option::Option<IndexingStatus>,
-    /// derived from project coverage, not a recorded run
-    #[prost(message, optional, tag = "5")]
-    pub code_indexing: ::core::option::Option<IndexingStatus>,
+    #[prost(message, optional, tag = "6")]
+    pub backfill: ::core::option::Option<BackfillStatus>,
 }
 /// How many projects under this scope have been code-indexed.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
@@ -556,9 +552,6 @@ pub struct GraphStatusItem {
     pub name: ::prost::alloc::string::String,
     #[prost(int64, tag = "2")]
     pub count: i64,
-    /// absent for entities with no per-entity signal
-    #[prost(enumeration = "IndexingState", optional, tag = "3")]
-    pub state: ::core::option::Option<i32>,
 }
 /// Controls output serialization across all data RPCs.
 /// RAW returns structured JSON for programmatic consumers (dashboard, CLI).
@@ -707,41 +700,37 @@ impl SourceType {
         }
     }
 }
-/// Derived indexing lifecycle state.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]
-pub enum IndexingState {
-    NotIndexed = 0,
-    Backfilling = 1,
-    Indexed = 2,
-    Error = 3,
-    Unknown = 4,
-    Indexing = 5,
+pub enum BackfillState {
+    Unknown = 0,
+    NotStarted = 1,
+    Running = 2,
+    Retrying = 3,
+    Completed = 4,
 }
-impl IndexingState {
+impl BackfillState {
     /// String value of the enum field names used in the ProtoBuf definition.
     ///
     /// The values are not transformed in any way and thus are considered stable
     /// (if the ProtoBuf definition does not change) and safe for programmatic use.
     pub fn as_str_name(&self) -> &'static str {
         match self {
-            Self::NotIndexed => "INDEXING_STATE_NOT_INDEXED",
-            Self::Backfilling => "INDEXING_STATE_BACKFILLING",
-            Self::Indexed => "INDEXING_STATE_INDEXED",
-            Self::Error => "INDEXING_STATE_ERROR",
-            Self::Unknown => "INDEXING_STATE_UNKNOWN",
-            Self::Indexing => "INDEXING_STATE_INDEXING",
+            Self::Unknown => "BACKFILL_STATE_UNKNOWN",
+            Self::NotStarted => "BACKFILL_STATE_NOT_STARTED",
+            Self::Running => "BACKFILL_STATE_RUNNING",
+            Self::Retrying => "BACKFILL_STATE_RETRYING",
+            Self::Completed => "BACKFILL_STATE_COMPLETED",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
     pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
         match value {
-            "INDEXING_STATE_NOT_INDEXED" => Some(Self::NotIndexed),
-            "INDEXING_STATE_BACKFILLING" => Some(Self::Backfilling),
-            "INDEXING_STATE_INDEXED" => Some(Self::Indexed),
-            "INDEXING_STATE_ERROR" => Some(Self::Error),
-            "INDEXING_STATE_UNKNOWN" => Some(Self::Unknown),
-            "INDEXING_STATE_INDEXING" => Some(Self::Indexing),
+            "BACKFILL_STATE_UNKNOWN" => Some(Self::Unknown),
+            "BACKFILL_STATE_NOT_STARTED" => Some(Self::NotStarted),
+            "BACKFILL_STATE_RUNNING" => Some(Self::Running),
+            "BACKFILL_STATE_RETRYING" => Some(Self::Retrying),
+            "BACKFILL_STATE_COMPLETED" => Some(Self::Completed),
             _ => None,
         }
     }

@@ -1,20 +1,30 @@
 use serde::Serialize;
 use toon_format::{EncodeOptions, encode};
-use tracing::warn;
 
-use crate::proto::{IndexingState, IndexingStatus, StructuredGraphStatus};
+use crate::proto::{BackfillState, StructuredGraphStatus};
 
 #[derive(Serialize)]
-struct StatusToon {
-    #[serde(skip_serializing_if = "Option::is_none")]
+struct StatusToon<'a> {
+    backfill: Option<BackfillToon<'a>>,
     projects: Option<ProjectsToon>,
-    domains: Vec<DomainToon>,
+    domains: Vec<DomainToon<'a>>,
+}
+
+#[derive(Serialize)]
+struct BackfillToon<'a> {
+    state: String,
+    last_progress_at: Option<&'a str>,
+    sdlc: Option<CountsToon>,
+    code: Option<CountsToon>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    indexing: Option<IndexingToon>,
+    error: Option<&'a str>,
+}
+
+#[derive(Serialize)]
+struct CountsToon {
+    completed: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
-    sdlc_indexing: Option<IndexingToon>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    code_indexing: Option<IndexingToon>,
+    total: Option<u64>,
 }
 
 #[derive(Serialize)]
@@ -24,92 +34,56 @@ struct ProjectsToon {
 }
 
 #[derive(Serialize)]
-struct DomainToon {
-    name: String,
-    items: Vec<ItemToon>,
+struct DomainToon<'a> {
+    name: &'a str,
+    items: Vec<ItemToon<'a>>,
 }
 
 #[derive(Serialize)]
-struct ItemToon {
-    name: String,
+struct ItemToon<'a> {
+    name: &'a str,
     count: i64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    state: Option<String>,
-}
-
-#[derive(Serialize)]
-struct IndexingToon {
-    state: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    last_started_at: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    last_completed_at: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    last_duration_ms: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    last_error: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    last_rows_read: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    last_rows_written: Option<u64>,
-}
-
-fn indexing_toon(status: &IndexingStatus) -> IndexingToon {
-    IndexingToon {
-        state: indexing_state_name(status.state),
-        last_started_at: status.last_started_at.clone(),
-        last_completed_at: status.last_completed_at.clone(),
-        last_duration_ms: status.last_duration_ms,
-        last_error: status.last_error.clone(),
-        last_rows_read: status.last_rows_read,
-        last_rows_written: status.last_rows_written,
-    }
-}
-
-fn indexing_state_name(val: i32) -> String {
-    match IndexingState::try_from(val) {
-        Ok(IndexingState::NotIndexed) => "not_indexed".to_string(),
-        Ok(IndexingState::Backfilling) => "backfilling".to_string(),
-        Ok(IndexingState::Indexed) => "indexed".to_string(),
-        Ok(IndexingState::Error) => "error".to_string(),
-        Ok(IndexingState::Indexing) => "indexing".to_string(),
-        _ => "unknown".to_string(),
-    }
 }
 
 pub fn format_status_as_toon(status: &StructuredGraphStatus) -> String {
-    let toon = StatusToon {
-        projects: status.projects.as_ref().map(|p| ProjectsToon {
-            indexed: p.indexed,
-            total_known: p.total_known,
+    let counts = |counts: &crate::proto::BackfillCounts| CountsToon {
+        completed: counts.completed,
+        total: counts.total,
+    };
+    let output = StatusToon {
+        backfill: status.backfill.as_ref().map(|backfill| BackfillToon {
+            state: BackfillState::try_from(backfill.state)
+                .unwrap_or(BackfillState::Unknown)
+                .as_str_name()
+                .trim_start_matches("BACKFILL_STATE_")
+                .to_ascii_lowercase(),
+            last_progress_at: backfill.last_progress_at.as_deref(),
+            sdlc: backfill.sdlc.as_ref().map(counts),
+            code: backfill.code.as_ref().map(counts),
+            error: backfill.error.as_deref(),
+        }),
+        projects: status.projects.as_ref().map(|projects| ProjectsToon {
+            indexed: projects.indexed,
+            total_known: projects.total_known,
         }),
         domains: status
             .domains
             .iter()
-            .map(|d| DomainToon {
-                name: d.name.clone(),
-                items: d
+            .map(|domain| DomainToon {
+                name: &domain.name,
+                items: domain
                     .items
                     .iter()
-                    .map(|i| ItemToon {
-                        name: i.name.clone(),
-                        count: i.count,
-                        state: i.state.map(indexing_state_name),
+                    .map(|item| ItemToon {
+                        name: &item.name,
+                        count: item.count,
                     })
                     .collect(),
             })
             .collect(),
-        indexing: status.indexing.as_ref().map(indexing_toon),
-        sdlc_indexing: status.sdlc_indexing.as_ref().map(indexing_toon),
-        code_indexing: status.code_indexing.as_ref().map(indexing_toon),
     };
-
-    encode(&toon, &EncodeOptions::default()).unwrap_or_else(|e| {
-        warn!(error = %e, "Failed to encode graph status as TOON, falling back");
-        format!(
-            "projects:{}/{}",
-            status.projects.as_ref().map_or(0, |p| p.indexed),
-            status.projects.as_ref().map_or(0, |p| p.total_known)
-        )
+    encode(&output, &EncodeOptions::default()).unwrap_or_else(|error| {
+        tracing::warn!(%error, "failed to encode graph status");
+        "backfill:\n  state: unknown".into()
     })
 }

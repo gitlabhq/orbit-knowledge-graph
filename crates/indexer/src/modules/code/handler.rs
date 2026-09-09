@@ -5,6 +5,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use code_graph::v2::CancellationToken;
 use gitlab_client::GitlabClientError;
+use orbit_migrations::version::SCHEMA_VERSION;
 use tracing::{debug, info, warn};
 
 use super::checkpoint::{CodeCheckpointStore, CodeIndexingCheckpoint};
@@ -216,6 +217,11 @@ impl CodeIndexingTaskHandler {
                     error = %e,
                     "failed to write deleted-project checkpoint; dispatcher may republish"
                 );
+            } else {
+                context
+                    .indexing_status
+                    .record_progress(&request.traversal_path, *SCHEMA_VERSION)
+                    .await;
             }
             self.metrics
                 .record_empty_repository(EmptyRepositoryReason::NotFound.as_metric_label());
@@ -734,6 +740,14 @@ mod tests {
             RepositoryServiceError::GitlabApi(GitlabClientError::NotFound(123)),
         );
 
+        let path = TraversalPath::new_unchecked("1/123/");
+        let indexing_status =
+            crate::indexing_status::IndexingStatusStore::new(ctx.mock_nats.clone());
+        indexing_status
+            .begin_namespace_backfill(&path, *SCHEMA_VERSION, 0)
+            .await
+            .unwrap();
+
         let envelope = TestContext::make_request_with_sha(42, 123, "main", None);
         let result = ctx.handler.handle(ctx.handler_context(), envelope).await;
 
@@ -747,13 +761,13 @@ mod tests {
         assert_eq!(checkpoint.last_task_id, 42);
         assert!(checkpoint.last_commit.is_none());
 
-        let progress = crate::indexing_status::IndexingStatusStore::new(ctx.mock_nats.clone())
-            .get(&TraversalPath::new_unchecked("1/123/"))
+        let progress = indexing_status
+            .namespace_backfill(&path)
             .await
             .unwrap()
             .expect("progress should be recorded for empty repo");
-        assert_eq!(progress.last_rows_written, Some(0));
-        assert_eq!(progress.last_rows_read, None);
+        assert!(progress.last_progress_at.is_some());
+        assert!(progress.error.is_none());
     }
 
     #[tokio::test]

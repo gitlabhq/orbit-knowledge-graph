@@ -40,11 +40,7 @@ impl Handler for NamespaceDeletionHandler {
         self.subscription.clone()
     }
 
-    async fn handle(
-        &self,
-        _context: HandlerContext,
-        message: Envelope,
-    ) -> Result<(), HandlerError> {
+    async fn handle(&self, context: HandlerContext, message: Envelope) -> Result<(), HandlerError> {
         let payload: NamespaceDeletionRequest =
             message.to_event().map_err(|error| match error {
                 SerializationError::Json(err) => HandlerError::Deserialization(err),
@@ -134,6 +130,11 @@ impl Handler for NamespaceDeletionHandler {
             "deleted namespace checkpoints"
         );
 
+        context
+            .indexing_status
+            .forget_namespace(&payload.traversal_path)
+            .await
+            .map_err(|error| HandlerError::Processing(error.to_string()))?;
         self.store
             .mark_deletion_complete(payload.namespace_id, &payload.traversal_path)
             .await

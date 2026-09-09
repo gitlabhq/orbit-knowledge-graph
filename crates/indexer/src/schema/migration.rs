@@ -18,8 +18,8 @@ use orbit_migrations::version::{
 
 pub use orbit_migrations::execute::CHECKPOINT_TABLE;
 
-const MIGRATION_LOCK_KEY: &str = "schema_migration";
-const MIGRATION_LOCK_TTL: Duration = Duration::from_secs(120);
+pub(crate) const MIGRATION_LOCK_KEY: &str = "schema_migration";
+pub(crate) const MIGRATION_LOCK_TTL: Duration = Duration::from_secs(120);
 const LOCK_POLL_INTERVAL: Duration = Duration::from_secs(5);
 const MAX_LOCK_WAIT_ITERATIONS: u32 = 60;
 

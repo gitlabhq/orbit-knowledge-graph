@@ -10,6 +10,28 @@ This document outlines the general architecture, shared patterns, and components
 - [SDLC Indexing Architecture](sdlc_indexing.md)
 - [Namespace Deletion](namespace_deletion.md)
 
+## Initial backfill status
+
+`GetGraphStatus.backfill` reads one root-namespace snapshot from the existing unversioned
+`orbit_indexing_progress` bucket, keyed `backfill.<root_namespace_id>`. It exposes state,
+optional progress time and error, SDLC completed/total counts, and an informational code
+completed count without a total. Missing or unreadable status is `unknown`. Live
+`projects` and `domains` counts remain requested-scope. See
+[ADR 010](../decisions/010_graph_status_endpoint.md).
+
+The shared enable-event and scheduled code-backfill paths record completion after the
+target schema's initial SDLC checkpoints are complete and all currently replicated
+projects have code checkpoints. Source reads and completion belong to the dispatcher,
+not the webserver. Workers record meaningful progress, never age-based stuck status.
+See [backfill dispatch](../../../crates/indexer/src/orchestrator/dispatch/code_backfill.rs)
+and the [snapshot store](../../../crates/indexer/src/indexing_status/backfill.rs).
+
+Incomplete snapshots are fenced to their target schema and generation. Completed
+snapshots survive later indexing and rebuilds; later-arriving projects are ongoing
+indexing. Root data deletion resets the snapshot; subgroup deletion does not. Completion
+does not certify upstream replication freshness. See
+[lifecycle rules](../decisions/010_graph_status_endpoint.md#storage-and-lifecycle).
+
 ## Architecture Goals
 
 The indexing architecture achieves the following:

@@ -9,10 +9,11 @@ use std::time::Instant;
 use arrow::record_batch::RecordBatch;
 use futures::StreamExt;
 use rand::seq::SliceRandom;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 use super::DispatchOutcome;
+use super::backfill_status::BackfillStatus;
 use super::enabled_namespaces::resolved_enabled_namespaces_sql;
 use crate::campaign::CampaignState;
 use crate::clickhouse::ArrowClickHouseClient;
@@ -36,7 +37,7 @@ WHERE _deleted = false
 
 const NAMESPACE_PROJECTS_QUERY: &str = r#"
 SELECT id AS project_id, traversal_path
-FROM project_namespace_traversal_paths
+FROM project_namespace_traversal_paths FINAL
 WHERE deleted = false
   AND startsWith(traversal_path, {traversal_path:String})
 "#;
@@ -54,6 +55,8 @@ pub struct CodeBackfill {
     campaign: Arc<CampaignState>,
     publish_window: usize,
     namespaces_with_pending: AtomicUsize,
+    schema_version: u32,
+    status: Option<Arc<BackfillStatus>>,
 }
 
 impl CodeBackfill {
@@ -73,7 +76,27 @@ impl CodeBackfill {
             campaign,
             publish_window,
             namespaces_with_pending: AtomicUsize::new(0),
+            schema_version: *SCHEMA_VERSION,
+            status: None,
         }
+    }
+
+    pub fn with_status(mut self, status: Arc<BackfillStatus>) -> Self {
+        self.schema_version = status.schema_version();
+        self.status = Some(status);
+        self
+    }
+
+    pub async fn reconcile_initial_backfills(&self) -> Result<(), TaskError> {
+        for (namespace_id, path) in self.fetch_enabled_namespaces().await? {
+            if let Err(error) = self
+                .fetch_pending_for_namespace(namespace_id, &path, 1)
+                .await
+            {
+                warn!(namespace_id, %error, "could not reconcile initial backfill");
+            }
+        }
+        Ok(())
     }
 
     /// Uncapped, a namespace larger than the window holds the work queue until it drains.
@@ -115,7 +138,14 @@ impl CodeBackfill {
             let (namespace_id, traversal_path) = &namespaces[index];
             let pending = self
                 .fetch_pending_for_namespace(*namespace_id, traversal_path, share)
-                .await?;
+                .await;
+            if pending.is_err()
+                && let Some(status) = &self.status
+                && let Err(error) = status.unavailable(traversal_path).await
+            {
+                warn!(namespace_id, %error, "could not publish unavailable backfill status");
+            }
+            let pending = pending?;
             if pending.is_empty() {
                 outcome.drained_paths.push(traversal_path.clone());
                 continue;
@@ -144,7 +174,7 @@ impl CodeBackfill {
         &self,
         traversal_path: &TraversalPath,
     ) -> Result<HashSet<i64>, TaskError> {
-        let table = prefixed_table_name(CODE_INDEXING_CHECKPOINT_TABLE, *SCHEMA_VERSION);
+        let table = prefixed_table_name(CODE_INDEXING_CHECKPOINT_TABLE, self.schema_version);
         let mut batches = self
             .graph
             .query(CHECKPOINTED_PROJECT_IDS_QUERY)
@@ -195,18 +225,31 @@ impl CodeBackfill {
         traversal_path: &TraversalPath,
         share: usize,
     ) -> Result<Vec<PendingProject>, TaskError> {
-        // Checkpoints first so each project batch is filtered on arrival, holding only the remainder.
+        let observation = match &self.status {
+            Some(status) => status.begin(traversal_path).await,
+            None => Ok(None),
+        };
+        let observation = observation.unwrap_or_else(|error| {
+            warn!(namespace_id, %error, "could not read initial backfill status");
+            None
+        });
+
         let checkpointed = self.fetch_checkpointed_project_ids(traversal_path).await?;
         let (projects, already_checkpointed) = self
             .fetch_pending_projects(traversal_path, &checkpointed, share)
             .await?;
 
-        if projects.is_empty() {
-            debug!(
-                namespace_id,
-                already_checkpointed, "no pending projects in namespace"
-            );
-            return Ok(Vec::new());
+        if let Some((status, observation)) = self.status.as_ref().zip(observation)
+            && let Err(error) = status
+                .finish(
+                    traversal_path,
+                    observation,
+                    checkpointed.len(),
+                    projects.is_empty(),
+                )
+                .await
+        {
+            warn!(namespace_id, %error, "could not publish initial backfill status");
         }
 
         debug!(

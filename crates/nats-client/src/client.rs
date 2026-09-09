@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use async_nats::jetstream::Context;
-use async_nats::jetstream::kv::{CreateErrorKind, Store as KvStore, UpdateErrorKind};
+use async_nats::jetstream::kv::{CreateErrorKind, Operation, Store as KvStore, UpdateErrorKind};
 use async_nats::jetstream::stream::Stream;
 use bytes::Bytes;
 use futures::TryStreamExt;
@@ -246,12 +246,12 @@ impl NatsClient {
         let store = self.get_kv_store(bucket).await?;
 
         match store.entry(key).await {
-            Ok(Some(entry)) => Ok(Some(KvEntry {
+            Ok(Some(entry)) if entry.operation == Operation::Put => Ok(Some(KvEntry {
                 key: entry.key,
                 value: entry.value,
                 revision: entry.revision,
             })),
-            Ok(None) => Ok(None),
+            Ok(_) => Ok(None),
             Err(e) => Err(NatsError::KvGet {
                 bucket: bucket.to_string(),
                 key: key.to_string(),

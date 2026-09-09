@@ -5,7 +5,7 @@ use arrow::array::{Array, BooleanArray, Int64Array, StringArray};
 use chrono::{TimeZone, Utc};
 use clickhouse_client::ClickHouseConfigurationExt;
 use indexer::handler::{Handler, HandlerContext};
-use indexer::indexing_status::IndexingStatusStore;
+use indexer::indexing_status::{IndexingStatusStore, InitialBackfillState};
 use indexer::modules::code::{
     ClickHouseStaleDataCleaner, StaleDataCleaner, config::CodeTableNames,
 };
@@ -14,6 +14,7 @@ use indexer::testkit::{MockLockService, MockNatsServices};
 use indexer::topic::CodeIndexingTaskRequest;
 use indexer::types::Envelope;
 use integration_testkit::{assert_edge_count_for_traversal_path, t};
+use orbit_migrations::version::SCHEMA_VERSION;
 use orbit_utils::arrow::ArrowUtils;
 
 use super::helpers::*;
@@ -712,7 +713,30 @@ async fn disk_is_clean_after_successful_indexing() {
     let cache_dir = deps.cache_dir_path().to_path_buf();
     let handler = deps.code_indexing_task_handler();
 
-    index_code(&handler, &clickhouse, project_id, commit_sha, 1, "1/4/").await;
+    let (context, indexing_status) = handler_context_with_status();
+    let path = TraversalPath::new_unchecked("1/4/");
+    indexing_status
+        .begin_namespace_backfill(&path, *SCHEMA_VERSION, 0)
+        .await
+        .unwrap();
+
+    handler
+        .handle(
+            context,
+            code_indexing_task_envelope(project_id, commit_sha, 1, "1/4/"),
+        )
+        .await
+        .expect("index repository");
+    handler.flush().await.expect("flush indexed data");
+
+    let progress = indexing_status
+        .namespace_backfill(&path)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(progress.last_progress_at.is_some());
+    assert_eq!(progress.state, InitialBackfillState::Running);
+    assert!(progress.error.is_none());
 
     assert_code_indexed(&clickhouse, project_id).await;
 
@@ -822,7 +846,13 @@ async fn does_not_checkpoint_or_stale_delete_when_writer_fails() {
         )],
     );
     let failing_handler = deps.code_indexing_task_handler_with_writer(failing_writer());
-    let (context, _indexing_status) = handler_context_with_status();
+    let (context, indexing_status) = handler_context_with_status();
+    let path = TraversalPath::new_unchecked(traversal_path);
+    indexing_status
+        .begin_namespace_backfill(&path, *SCHEMA_VERSION, 0)
+        .await
+        .unwrap();
+
     let envelope = code_indexing_task_envelope(project_id, "commit2", 2, traversal_path);
     // Writes are buffered, so the handler acks; the deferred flush fails, the project's commit is
     // marked failed (never checkpointed), and the backfill sweep re-indexes it.
@@ -831,6 +861,17 @@ async fn does_not_checkpoint_or_stale_delete_when_writer_fails() {
         .await
         .expect("buffered handler acks even when the deferred write will fail");
     let _ = failing_handler.flush().await;
+
+    let progress = indexing_status
+        .namespace_backfill(&path)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(progress.state, InitialBackfillState::Retrying);
+    assert_eq!(
+        progress.error.as_deref(),
+        Some("Some initial indexing work could not finish.")
+    );
 
     assert_file_is_active(&clickhouse, project_id, "src/Main.java").await;
     assert_file_not_active(&clickhouse, project_id, "src/Other.java").await;

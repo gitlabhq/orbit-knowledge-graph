@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Utc};
 use code_graph::v2::{CancellationToken, Pipeline, PipelineConfig};
+use orbit_migrations::version::SCHEMA_VERSION;
 use orbit_server_config::CodeIndexingPipelineConfig;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tracing::{debug, info, warn};
@@ -18,6 +19,7 @@ use super::repository::{RepositoryResolver, ResolveError};
 use super::stale_data_cleaner::StaleDataCleaner;
 use crate::clickhouse::{BufferedWriter, BufferedWriterConfig, ClickHouseWriter, FlushToken};
 use crate::handler::{HandlerContext, HandlerError};
+use crate::indexing_status::IndexingStatusStore;
 use crate::locking::LockGuard;
 use crate::observer::IndexingObserver;
 use orbit_utils::traversal_path::TraversalPath;
@@ -90,6 +92,7 @@ impl WorkClock {
 /// (then the sweep and NATS redelivery retry it). This makes the checkpoint the single durable
 /// record, with no watermark to track.
 struct ProjectCommit {
+    indexing_status: Arc<IndexingStatusStore>,
     remaining: AtomicUsize,
     failed: AtomicBool,
     checkpoint: CodeIndexingCheckpoint,
@@ -110,39 +113,74 @@ impl ProjectCommit {
     }
 
     async fn finalize(&self) {
+        let checkpoint = &self.checkpoint;
+
         if self.failed.load(Ordering::Acquire) {
+            self.indexing_status
+                .record_completion(
+                    &checkpoint.traversal_path,
+                    checkpoint.indexed_at,
+                    Utc::now(),
+                    Some("A buffered code write failed.".into()),
+                    Default::default(),
+                )
+                .await;
             warn!(
-                project_id = self.checkpoint.project_id,
+                project_id = checkpoint.project_id,
                 "a buffered write failed; skipping checkpoint so the project is re-indexed",
             );
             return;
         }
-        let cp = &self.checkpoint;
+
         // A first index into this schema version (backfill or new project) has no
         // checkpointed prior snapshot to tombstone, so skip the FINAL-scan cleanup.
         if self.had_prior_checkpoint
             && let Err(error) = self
                 .cleaner
-                .delete_stale_data(&cp.traversal_path, cp.project_id, &cp.branch, cp.indexed_at)
+                .delete_stale_data(
+                    &checkpoint.traversal_path,
+                    checkpoint.project_id,
+                    &checkpoint.branch,
+                    checkpoint.indexed_at,
+                )
                 .await
         {
             warn!(
-                project_id = cp.project_id,
+                project_id = checkpoint.project_id,
                 %error,
                 "failed to delete stale data, will retry on next indexing"
             );
         }
-        match self.store.set_checkpoint(cp).await {
-            Ok(()) => info!(
-                project_id = cp.project_id,
-                task_id = cp.last_task_id,
-                "completed code indexing"
-            ),
-            Err(e) => warn!(
-                project_id = cp.project_id,
-                error = %e,
-                "failed to checkpoint code indexing; project will be re-indexed",
-            ),
+
+        match self.store.set_checkpoint(checkpoint).await {
+            Ok(()) => {
+                self.indexing_status
+                    .record_progress(&checkpoint.traversal_path, *SCHEMA_VERSION)
+                    .await;
+
+                info!(
+                    project_id = checkpoint.project_id,
+                    task_id = checkpoint.last_task_id,
+                    "completed code indexing"
+                );
+            }
+            Err(error) => {
+                self.indexing_status
+                    .record_completion(
+                        &checkpoint.traversal_path,
+                        checkpoint.indexed_at,
+                        Utc::now(),
+                        Some("The code checkpoint could not be saved.".into()),
+                        Default::default(),
+                    )
+                    .await;
+
+                warn!(
+                    project_id = checkpoint.project_id,
+                    %error,
+                    "failed to checkpoint code indexing; project will be re-indexed",
+                );
+            }
         }
     }
 }
@@ -281,12 +319,22 @@ impl CodeIndexer {
             });
         };
         let repository = match fetched.map_err(IndexError::Failed)? {
-            Fetched::EmptyRepository => return Ok(IndexOutcome::EmptyRepository),
+            Fetched::EmptyRepository => {
+                context
+                    .indexing_status
+                    .record_progress(&request.traversal_path, *SCHEMA_VERSION)
+                    .await;
+                return Ok(IndexOutcome::EmptyRepository);
+            }
             Fetched::Repository(repository) => repository,
         };
 
         // Fetch plus the longest allowed wait can reach ack_wait; refresh the delivery first.
         context.progress.notify_in_progress().await;
+        context
+            .indexing_status
+            .record_progress(&request.traversal_path, *SCHEMA_VERSION)
+            .await;
         let lane = self
             .acquire_indexing_lane(
                 &repository,
@@ -460,9 +508,9 @@ impl CodeIndexer {
         cancel: CancellationToken,
     ) -> Result<IndexedRun, HandlerError> {
         let indexing_start = Instant::now();
-        let config = self.build_pipeline_config(context, cancel.clone());
+        let config = self.build_pipeline_config(context, &request.traversal_path, cancel.clone());
         let (result, commit, metered_bytes) = self
-            .build_code_graph(request, repository, indexed_at, config)
+            .build_code_graph(context, request, repository, indexed_at, config)
             .await?;
 
         // A cancelled run yields a partial graph with no error, so the fatal-error guard can't catch it.
@@ -507,15 +555,21 @@ impl CodeIndexer {
     fn build_pipeline_config(
         &self,
         context: &HandlerContext,
+        traversal_path: &TraversalPath,
         cancel: CancellationToken,
     ) -> PipelineConfig {
         let to_timeout = |ms: u64| (ms > 0).then(|| std::time::Duration::from_millis(ms));
         let handle = tokio::runtime::Handle::current();
         let progress = context.progress.clone();
+        let indexing_status = context.indexing_status.clone();
+        let traversal_path = traversal_path.clone();
         let on_progress: Option<std::sync::Arc<dyn Fn() + Send + Sync>> =
             Some(std::sync::Arc::new(move || {
                 let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     handle.block_on(progress.notify_in_progress());
+                    handle.block_on(
+                        indexing_status.record_progress(&traversal_path, *SCHEMA_VERSION),
+                    );
                 }));
             }));
         let phase_cpu_metrics = self.metrics.clone();
@@ -544,6 +598,7 @@ impl CodeIndexer {
     /// Parse the repository, stream its batches to the writer under one project commit, return it.
     async fn build_code_graph(
         &self,
+        context: &HandlerContext,
         request: &IndexingRequest,
         repository: &CachedRepository,
         indexed_at: DateTime<Utc>,
@@ -575,6 +630,7 @@ impl CodeIndexer {
         // the commit can't finalize mid-stream even if every flushed part drains first.
         self.inflight.fetch_add(1, Ordering::AcqRel);
         let commit = Arc::new(ProjectCommit {
+            indexing_status: context.indexing_status.clone(),
             remaining: AtomicUsize::new(1),
             failed: AtomicBool::new(false),
             checkpoint: CodeIndexingCheckpoint {
@@ -812,6 +868,9 @@ mod tests {
     ) -> Arc<ProjectCommit> {
         inflight.fetch_add(1, Ordering::AcqRel);
         Arc::new(ProjectCommit {
+            indexing_status: Arc::new(IndexingStatusStore::new(Arc::new(
+                crate::testkit::MockNatsServices::new(),
+            ))),
             remaining: AtomicUsize::new(1 + batches),
             failed: AtomicBool::new(false),
             checkpoint: CodeIndexingCheckpoint {

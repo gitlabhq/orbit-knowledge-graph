@@ -81,7 +81,7 @@ instance, and `--yes` to skip the one-time run confirmation in scripts.
 | `glab orbit remote dsl` | `GET orbit/schema/dsl` | Query DSL JSON Schema. The source of truth for the query body shape. |
 | `glab orbit remote tools` | `GET orbit/tools` | MCP tool manifest with the full DSL JSON Schema. |
 | `glab orbit remote query [file\|-]` | `POST orbit/query` | Run a query from a file or stdin. |
-| `glab orbit remote graph-status` | `GET orbit/graph_status` | Indexing progress for a namespace, project, or full path. |
+| `glab orbit remote graph-status` | `GET orbit/graph_status` | Initial-backfill status and current graph counts for a namespace, project, or full path. |
 
 ### Discover the schema
 
@@ -137,6 +137,22 @@ glab orbit remote graph-status --full-path your-group/your-project
 glab orbit remote graph-status --namespace-id 24
 glab orbit remote graph-status --project-id 2
 ```
+
+The `backfill` summary replaces `indexing`, `sdlc_indexing`, `code_indexing`, and
+per-item state. It reports `state`, optional `last_progress_at` and error, SDLC
+completed/total counts, and an informational code completed count without a total.
+States reported from the snapshot are `unknown`, `running`, `retrying`, and `completed`.
+Missing or unreadable status is `unknown`, not proof indexing never ran. See the
+[response contract](../../../design-documents/decisions/010_graph_status_endpoint.md#response-contract).
+
+The entire backfill summary belongs to the root namespace, even for project or subgroup
+requests. The dispatcher records completion after initial SDLC and all currently
+replicated projects are indexed; polling only reads that snapshot. Later-arriving
+projects are ongoing indexing and do not reopen completion. Separate `projects` and
+`domains` counts remain live and scoped to your request. `last_progress_at` records
+meaningful work, not a heartbeat or proof of a stall, and may be absent. Completion
+does not certify replication freshness or worker health. See
+[completion semantics](../../../design-documents/decisions/010_graph_status_endpoint.md#dispatcher-owned-completion).
 
 ## Exit codes
 

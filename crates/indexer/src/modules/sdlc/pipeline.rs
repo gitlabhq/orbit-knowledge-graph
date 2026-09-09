@@ -8,10 +8,12 @@ use arrow::record_batch::RecordBatch;
 use chrono::{DateTime, Utc};
 use futures::StreamExt;
 use futures::stream::FuturesUnordered;
+use orbit_migrations::version::SCHEMA_VERSION;
 use serde_json::Value;
 use tracing::{debug, info, warn};
 
 use crate::handler::HandlerError;
+use crate::indexing_status::IndexingStatusStore;
 use crate::nats::ProgressNotifier;
 use crate::observer::{IndexingMode, IndexingObserver};
 use crate::retry::{Backoff, LocalRetry, Step, drive_with};
@@ -23,6 +25,7 @@ use super::transform::{BlockTransform, TransformRegistry};
 use crate::checkpoint::{Checkpoint, CheckpointStore};
 use crate::durability::RunDurability;
 use orbit_server_config::DatalakeRetryConfig;
+use orbit_utils::traversal_path::TraversalPath;
 
 const MAX_RETRIES: u32 = 3;
 
@@ -95,6 +98,8 @@ impl Page {
 }
 
 pub(in crate::modules::sdlc) struct PipelineContext {
+    pub indexing_status: Arc<IndexingStatusStore>,
+    pub traversal_path: Option<TraversalPath>,
     pub writer: Arc<crate::clickhouse::ClickHouseWriter>,
     pub progress: ProgressNotifier,
     pub observer: Arc<std::sync::Mutex<dyn IndexingObserver>>,
@@ -259,6 +264,15 @@ impl Pipeline {
 
             self.save_batch_progress(position_key, window, &cursor, &context.progress)
                 .await?;
+
+            if rows_in_page > 0
+                && let Some(path) = &context.traversal_path
+            {
+                context
+                    .indexing_status
+                    .record_progress(path, *SCHEMA_VERSION)
+                    .await;
+            }
 
             let Some(next) = next_page else {
                 break;
@@ -587,6 +601,10 @@ mod tests {
 
     fn noop_context() -> PipelineContext {
         PipelineContext {
+            indexing_status: Arc::new(IndexingStatusStore::new(Arc::new(
+                crate::testkit::MockNatsServices::new(),
+            ))),
+            traversal_path: None,
             writer: test_writer(),
             progress: ProgressNotifier::noop(),
             observer: Arc::new(Mutex::new(NoOpObserver)),

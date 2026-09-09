@@ -149,6 +149,8 @@ impl EntityHandler {
 
         let observer: Arc<Mutex<dyn IndexingObserver>> = Arc::new(Mutex::new(observer));
         let pipeline_context = PipelineContext {
+            indexing_status: context.indexing_status.clone(),
+            traversal_path: request.traversal_path.clone(),
             writer: Arc::clone(&self.writer),
             progress: context.progress.clone(),
             observer: Arc::clone(&observer),
@@ -303,6 +305,8 @@ impl EntityHandler {
             let plan = self.plan.clone();
             let pipeline = Arc::clone(&self.pipeline);
             let partition_context = PipelineContext {
+                indexing_status: parent_pipeline_context.indexing_status.clone(),
+                traversal_path: parent_pipeline_context.traversal_path.clone(),
                 writer: Arc::clone(&self.writer),
                 progress: context.progress.clone(),
                 observer: Arc::clone(&parent_pipeline_context.observer),

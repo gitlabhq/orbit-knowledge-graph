@@ -415,25 +415,25 @@ message GetGraphStatusRequest {
   ResponseFormat format = 3;  // RAW: structured JSON; LLM: TOON text
 }
 
-// Derived indexing lifecycle state.
-enum IndexingState {
-  INDEXING_STATE_NOT_INDEXED = 0;
-  INDEXING_STATE_BACKFILLING = 1;
-  INDEXING_STATE_INDEXED = 2;
-  INDEXING_STATE_ERROR = 3;
-  INDEXING_STATE_UNKNOWN = 4;
-  INDEXING_STATE_INDEXING = 5;
+enum BackfillState {
+  BACKFILL_STATE_UNKNOWN = 0;
+  BACKFILL_STATE_NOT_STARTED = 1;
+  BACKFILL_STATE_RUNNING = 2;
+  BACKFILL_STATE_RETRYING = 3;
+  BACKFILL_STATE_COMPLETED = 4;
 }
 
-// Indexing progress metadata from the most recent indexing run.
-message IndexingStatus {
-  IndexingState state = 1;
-  optional string last_started_at = 2;
-  optional string last_completed_at = 3;
-  optional uint64 last_duration_ms = 4;
-  optional string last_error = 5;
-  optional uint64 last_rows_read = 6;
-  optional uint64 last_rows_written = 7;
+message BackfillStatus {
+  BackfillState state = 1;
+  optional string last_progress_at = 2;
+  BackfillCounts sdlc = 3;
+  BackfillCounts code = 4;
+  optional string error = 5;
+}
+
+message BackfillCounts {
+  uint64 completed = 1;
+  optional uint64 total = 2;
 }
 
 // Response containing project coverage and entity counts grouped by domain.
@@ -448,9 +448,9 @@ message GetGraphStatusResponse {
 message StructuredGraphStatus {
   ProjectsStatus projects = 1;
   repeated GraphStatusDomain domains = 2;
-  IndexingStatus indexing = 3;  // worst of sdlc_indexing and code_indexing
-  IndexingStatus sdlc_indexing = 4;
-  IndexingStatus code_indexing = 5;  // derived from project coverage, not a recorded run
+  reserved 3, 4, 5;
+  reserved "indexing", "sdlc_indexing", "code_indexing";
+  BackfillStatus backfill = 6;
 }
 
 // How many projects under this scope have been code-indexed.
@@ -469,5 +469,6 @@ message GraphStatusDomain {
 message GraphStatusItem {
   string name = 1;
   int64 count = 2;
-  optional IndexingState state = 3;  // absent for entities with no per-entity signal
+  reserved 3;
+  reserved "state";
 }

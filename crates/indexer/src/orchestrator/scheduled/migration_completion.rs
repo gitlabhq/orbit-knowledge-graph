@@ -16,9 +16,7 @@ use crate::clickhouse::ArrowClickHouseClient;
 use crate::locking::LockService;
 use crate::orchestrator::scheduled::{ScheduledTask, ScheduledTaskMetrics, TaskError};
 use crate::schema::metrics::CompletionMetrics;
-
-const MIGRATION_LOCK_KEY: &str = "schema_migration";
-const LOCK_TTL: std::time::Duration = std::time::Duration::from_secs(120);
+use crate::schema::migration::{MIGRATION_LOCK_KEY, MIGRATION_LOCK_TTL};
 
 static COUNT_CODE_ELIGIBLE_PROJECTS: LazyLock<String> = LazyLock::new(|| {
     let del = ontology::siphon_deleted_column();
@@ -105,7 +103,7 @@ impl ScheduledTask for MigrationCompletionChecker {
     async fn run(&self) -> Result<(), TaskError> {
         let acquired = self
             .lock_service
-            .try_acquire(MIGRATION_LOCK_KEY, LOCK_TTL)
+            .try_acquire(MIGRATION_LOCK_KEY, MIGRATION_LOCK_TTL)
             .await
             .map_err(|e| TaskError::new(format!("lock error: {e}")))?;
 

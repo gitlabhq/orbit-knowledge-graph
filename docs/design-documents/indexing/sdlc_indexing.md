@@ -200,48 +200,56 @@ This replaces the previous KV-lock-based deduplication with a simpler, infrastru
 
 **NATS entity versioning and release GC**
 
-To support blue-green deployments, every gkg-owned NATS entity name carries a version segment, resolved in one place (`crates/indexer/src/nats/versioning.rs`):
+To support blue-green deployments, work queues and locks carry version segments, resolved in `crates/indexer/src/nats/versioning.rs`. Initial backfill status has a separate, stable lifetime:
 
 - JetStream streams and their subjects are keyed by release (e.g. `GKG_INDEXER_V0-84-1` capturing `v0-84-1.sdlc. ...`), so two releases run side by side with independent work queues and dead-letter streams.
-- KV buckets (`indexing_locks`, `orbit_indexing_progress`) are keyed by graph schema version (e.g. `indexing_locks_v77`), so same-schema releases share locks and progress while different-schema releases are isolated. Retired schema versions' buckets are deleted by the migration-completion GC.
+- Lock buckets are keyed by graph schema version (e.g. `indexing_locks_v77`), so same-schema releases share locks while different-schema releases are isolated. Retired schema versions' lock buckets are deleted by the migration-completion GC.
+- `IndexingStatusStore` uses the unversioned `orbit_indexing_progress` bucket. Completed root backfill snapshots survive schema bumps; incomplete snapshots follow the target schema and generation. See [ADR 010](../decisions/010_graph_status_endpoint.md#storage-and-lifecycle).
 
 Retired releases' streams are collected at startup without any coordination registry: a live release's dispatcher publishes to its work queue every minute, so stream activity doubles as liveness. At dispatcher startup, other releases' managed streams whose creation time, last publish, and attached-consumer count have all been quiet for longer than `nats.release_gc_idle_threshold_secs` are deleted. Versioned durable consumers (both subscribe-path and Siphon dispatch) carry `nats.consumer_inactive_threshold_secs`, so a dead release's consumers reap themselves instead of holding the consumer-count veto forever.
 
 **Completing an indexing job**
 
-When the handler acks the message, WorkQueue retention automatically removes it from the stream. The handler then updates the database to reflect the date of the last indexing alongside relevant metadata.
+The durable parent checkpoint establishes initial completion for a pipeline. Partitioned
+pipelines must consolidate their checkpoints first; a completed partition or a successful
+extract is not enough. The pipeline advances the root snapshot's `last_progress_at`
+when it processes meaningful work, not when the dispatcher publishes or NATS renews a
+delivery. Message acknowledgement does not establish initial completion. See the
+[entity handler](../../../crates/indexer/src/modules/sdlc/handler/entity.rs) and
+[pipeline](../../../crates/indexer/src/modules/sdlc/pipeline.rs).
 
-```sql
-UPDATE knowledge_graph_enabled_namespaces
-SET last_indexed_at = {started_at}, result = 'success | error', ...
-WHERE id = '{namespace_id}';
-```
-
-**Planned:** A `knowledge_graph_indexing_job_events` table would record individual job lifecycle events (started, completed, error) in the Orbit ClickHouse database for observability. This is not yet implemented; job-level observability currently relies on structured logging and OpenTelemetry metrics. If implemented, the table may need periodic re-creation to remove bloat, triggered by a dedicated cron job.
+The dispatcher counts the target ontology's namespaced pipelines and initial-complete
+parent checkpoints in the target schema, not cross-schema KV attempt records. A parent
+with no cursor or with a resume floor from a completed initial pass counts as complete.
+The entire `graph_status.backfill` summary is root-scoped, including for subgroup and
+project requests. Only the dispatcher records root completion, after initial SDLC and
+all currently replicated projects are indexed. See
+[checkpoint aggregation](../../../crates/indexer/src/orchestrator/dispatch/backfill_status.rs)
+and [ADR 010](../decisions/010_graph_status_endpoint.md).
 
 **Handling errors**
 
-If the worker encounters a recoverable error, it continues indexing the remaining data. The worker updates the database to reflect the error and the date of the last indexing alongside relevant metadata.
-
-```sql
--- ClickHouse
-UPDATE knowledge_graph_enabled_namespaces
-SET last_indexed_at = NOW(), result = 'partial_success', ...
-WHERE id = '{namespace_id}';
-```
-
-If the worker encounters a non-recoverable error, it updates the database to reflect the error and the date of the last indexing alongside relevant metadata.
-
-```sql
--- ClickHouse
-UPDATE knowledge_graph_enabled_namespaces
-SET last_indexed_at = NOW(), result = 'error', ...
-WHERE id = '{namespace_id}';
-```
+The entity handler records an attempt error in the existing status store. For a matching
+incomplete target, this sets the root snapshot to `retrying`; meaningful progress clears
+the error. Completed snapshots ignore later errors. Missing or unreadable snapshots
+report `unknown`, not proof indexing never ran. See the
+[entity handler](../../../crates/indexer/src/modules/sdlc/handler/entity.rs) and
+[snapshot store](../../../crates/indexer/src/indexing_status/backfill.rs).
 
 If the worker fails unexpectedly, the unacked message is redelivered by NATS to another worker. If the message exceeds `max_deliver`, the outcome depends on the subscription's `dead_letter_on_exhaustion` setting: subscriptions with `dead_letter_on_exhaustion: true` (e.g. Siphon CDC) publish the message to the `GKG_DEAD_LETTERS` stream for inspection and replay, while subscriptions with `dead_letter_on_exhaustion: false` (internal dispatch, the default) term-ack the message since the next dispatch cycle re-creates the request. This leverages eventual consistency which is acceptable since the system does not aim for real-time consistency.
 
-The term-ack path assumes the worker is alive to term the message. When a worker crashes or is killed after the final delivery attempt, JetStream gives up on the message without ever receiving an ack, nack, or term. Because GKG's versioned streams use `discard_new_per_subject` (one message per subject), that abandoned message permanently blocks its subject: the sweep and backfill dispatchers keep re-publishing the same request, but the stream discards every new copy. The `MaxDeliveriesReconciler` (an orchestrator trigger) closes this gap. It queue-subscribes to JetStream's `MAX_DELIVERIES` advisory across all replicas, and on each advisory for a GKG-managed stream it deletes the exhausted message, unblocking the subject so the next dispatch cycle can re-deliver the request. It ignores advisories for foreign streams (e.g. Siphon) and treats an already-deleted message as a no-op, so duplicate advisories and concurrent replicas are safe.
+The term-ack path assumes the worker is alive to term the message. When a worker crashes
+or is killed after the final delivery attempt, JetStream gives up on the message without
+ever receiving an ack, nack, or term. Because GKG's versioned streams use
+`discard_new_per_subject` (one message per subject), that abandoned message permanently
+blocks its subject: the sweep and backfill dispatchers keep re-publishing the same
+request, but the stream discards every new copy. The `MaxDeliveriesReconciler` (an
+orchestrator trigger) closes this gap. It queue-subscribes to JetStream's `MAX_DELIVERIES`
+advisory across all replicas, and on each advisory for a GKG-managed stream it deletes
+the exhausted message, unblocking the subject so the next dispatch cycle can re-deliver
+the request. It ignores advisories for foreign streams (e.g. Siphon) and treats an
+already-deleted message as a no-op, so duplicate advisories and concurrent replicas are
+safe.
 
 ##### ETL
 
