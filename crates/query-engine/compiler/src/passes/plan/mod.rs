@@ -50,39 +50,37 @@ impl Plan {
 
     pub(crate) fn resolve_text_columns(&mut self, ontology: &Ontology) {
         for node in self.nodes.values_mut() {
-            node.text_columns = returned_text_columns(node.entity.as_deref(), ontology);
+            node.text_columns = text_excerpt_columns(node.entity.as_deref(), ontology);
         }
         if let PlanBody::Hydration(nodes) = &mut self.body {
             for node in nodes {
-                node.text_columns = returned_text_columns(Some(&node.entity), ontology);
+                node.text_columns = text_excerpt_columns(Some(&node.entity), ontology);
             }
         }
     }
 }
 
-fn returned_text_columns(entity: Option<&str>, ontology: &Ontology) -> HashSet<String> {
-    let Some(node) = entity.and_then(|entity| ontology.get_node(entity)) else {
+fn text_excerpt_columns(entity: Option<&str>, ontology: &Ontology) -> HashSet<String> {
+    let Some(node) = entity.and_then(|name| ontology.get_node(name)) else {
         return HashSet::new();
     };
-    let lookup_inputs: HashSet<&String> = node
+
+    let mut excerpt_columns: HashSet<String> = node
         .fields
         .iter()
-        .filter_map(|field| match &field.source {
-            FieldSource::Virtual(source) => Some(&source.depends_on),
-            _ => None,
-        })
-        .flatten()
+        .filter(|field| field.column_name().is_some() && field.data_type == DataType::String)
+        .map(|field| field.name.clone())
         .collect();
 
-    node.fields
-        .iter()
-        .filter(|field| {
-            field.data_type == DataType::String
-                && matches!(field.source, FieldSource::DatabaseColumn(_))
-                && !lookup_inputs.contains(&field.name)
-        })
-        .map(|field| field.name.clone())
-        .collect()
+    for field in &node.fields {
+        if let FieldSource::Virtual(source) = &field.source {
+            for lookup_input in &source.depends_on {
+                excerpt_columns.remove(lookup_input);
+            }
+        }
+    }
+
+    excerpt_columns
 }
 
 pub enum PlanBody {

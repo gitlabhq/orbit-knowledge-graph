@@ -16,7 +16,7 @@ use crate::error::{QueryError, Result};
 use crate::passes::plan::HydrationNodePlan;
 use crate::passes::shared::deleted_false;
 
-use super::helpers::{limit_by_scan, returned_column};
+use super::helpers::{limit_by_scan, text_excerpt_projection};
 
 use orbit_utils::traversal_path::{TraversalPath, prune_to_leaves};
 
@@ -89,7 +89,7 @@ fn emit_arm(
                     Expr::string(col),
                     Expr::func(
                         "toString",
-                        vec![returned_column(alias, col, &node.text_columns)],
+                        vec![text_excerpt_projection(alias, col, &node.text_columns)],
                     ),
                 ]
             })
