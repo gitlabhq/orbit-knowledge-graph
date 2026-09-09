@@ -304,11 +304,36 @@ Parts that span many namespaces are safe to query: the edge sort key is `(traver
 
 The `code_indexing_checkpoint` table records the last successfully indexed point per namespace, project, and branch (keyed on `traversal_path, project_id, branch`). The code indexing task handler checks it to skip already-indexed commits.
 
+Code checkpoint finalization succeeds only after its buffered writes succeed. Workers
+record meaningful progress in the root's backfill snapshot, not namespace completion.
+Dispatch and delivery liveness do not advance `last_progress_at`, and its age does not
+establish a stall. See the
+[code finalizer](../../../crates/indexer/src/modules/code/pipeline.rs).
+
+`graph_status.backfill.code.completed` is an informational count of distinct projects
+with non-deleted target-schema code checkpoints under the root namespace; there is no
+code total. The shared enable-event and scheduled backfill paths record root completion
+after initial SDLC and all currently replicated projects are indexed. Later-arriving
+projects are ongoing indexing and do not reopen completed snapshots. The webserver
+reads the snapshot without source queries or completion writes; its separate `projects`
+coverage remains requested-scope. See
+[backfill dispatch](../../../crates/indexer/src/orchestrator/dispatch/code_backfill.rs)
+and [ADR 010](../decisions/010_graph_status_endpoint.md#dispatcher-owned-completion).
+
 Projects whose Gitaly archive endpoint returns 404 (no refs) or 5xx (no repository storage) are checkpointed with no commit and treated as terminal "indexed empty". This prevents retries and DLQ churn for projects with no content. Once the project is populated, subsequent siphon tasks arrive with a larger `task_id` than the stored checkpoint and are re-processed normally. The `gkg.indexer.code.repository.empty` counter (labelled `reason=not_found|server_error`) tracks how often this short-circuit fires.
 
 Tasks with no `branch` field resolve the default branch via `GET /api/v4/internal/orbit/project/:id/info`. When that endpoint returns 404 (project deleted in Rails but still referenced by the dispatcher's datalake view), the task is acked with the same `empty_repository{reason=not_found}` counter and no checkpoint is stored — the branch is unknown, so there is no key to write under. The ack avoids DLQ churn; the dispatcher stopping emission for deleted projects is tracked separately.
 
-A job that exceeds its hard wall-clock budget (`job_timeout_secs`, default 1500s) gets one retry to absorb a transient slowdown (a busy pod, a slow Gitaly fetch); a job that times out a second time is treated as structurally stuck and dead-lettered, rather than burning the full delivery budget re-attempting a repo that will almost certainly time out again and wasting an indexing slot each time. (A transient write failure is different — that is retried in the writer with backoff, above, and does not dead-letter the job.) Abandoning the job also stops the indexing work it started, so the pod releases the CPU and memory rather than holding them until it restarts. The stop is not instantaneous: work already in flight on one file finishes first, and a Rust job waiting for the interner sweep described above finishes that wait first.
+A job that exceeds its hard wall-clock budget (`job_timeout_secs`, default 1500s) gets
+one retry to absorb a transient slowdown (a busy pod, a slow Gitaly fetch); a job that
+times out a second time is treated as structurally stuck and dead-lettered, rather than
+burning the full delivery budget re-attempting a repo that will almost certainly time
+out again and wasting an indexing slot each time. (A transient write failure is
+different — that is retried in the writer with backoff, above, and does not dead-letter
+the job.) Abandoning the job also stops the indexing work it started, so the pod releases
+the CPU and memory rather than holding them until it restarts. The stop is not
+instantaneous: work already in flight on one file finishes first, and a Rust job waiting
+for the interner sweep described above finishes that wait first.
 
 #### Flow visual representation
 

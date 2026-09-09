@@ -364,6 +364,24 @@ time:
 
 Datalake tables (`siphon_*`) are never prefixed — only graph tables are.
 
+### Stable initial-backfill status
+
+`IndexingStatusStore` uses the unversioned `orbit_indexing_progress` NATS KV bucket,
+with one root snapshot keyed `backfill.<root_namespace_id>`. Before migration, the
+dispatcher attempts adoption using the active ontology and checkpoints when available;
+missing historical evidence cannot prove the root was never backfilled. See
+[startup reconciliation](../../crates/indexer/src/lib.rs).
+
+While incomplete, snapshots follow the indexing target schema, with a new generation
+when the target changes. Dispatcher updates check both target and generation; SDLC
+completion uses target-schema parent checkpoints, not cross-schema attempt markers.
+Completed snapshots stay completed across later indexing and rebuilds. Root data deletion
+resets the snapshot; subgroup deletion does not. This status is neither a migration
+readiness gate nor a replication-freshness guarantee. See the
+[dispatcher guard](../../crates/indexer/src/orchestrator/dispatch/backfill_status.rs),
+[snapshot store](../../crates/indexer/src/indexing_status/backfill.rs), and
+[ADR 010](decisions/010_graph_status_endpoint.md#storage-and-lifecycle).
+
 ### Observability
 
 The metric `gkg_schema_migration_total` (counter) tracks migration phase outcomes:

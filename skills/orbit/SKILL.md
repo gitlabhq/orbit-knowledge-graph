@@ -1,7 +1,7 @@
 ---
 name: orbit
 description: Query GitLab Orbit via `glab orbit remote` CLI subcommands or run a local copy with `glab orbit local`. Use for code-structure questions (who calls this function, where is this symbol defined), cross-project dependency and blast-radius analysis, merge-request and contributor queries that require relationship traversal or aggregation, repository map / repo-map generation, and any question spanning relationships, cross-entity joins, or multi-entity aggregation across GitLab entities (projects, users, MRs, issues, pipelines, files, definitions, vulnerabilities). Do not use for single-entity GitLab lookups or write operations that `glab` handles directly (e.g. `glab mr view`, `glab mr create`).
-version: 0.26.2
+version: 0.26.3
 license: MIT
 metadata:
   audience: developers
@@ -21,6 +21,12 @@ always go through `glab orbit remote`.
 If `glab orbit` commands fail (command not found, auth errors, feature-flag
 exit codes), work through the first-run setup checklist in
 [`references/prerequisites.md`](references/prerequisites.md).
+
+For `graph-status`, inspect `backfill.state`, not just a successful exit code. Backfill
+status and counts cover the root namespace; live `projects` and `domains` counts cover
+the requested scope. Code completed counts are informational, with no total. Completion
+does not guarantee replication freshness; see the
+[status checklist](references/prerequisites.md).
 
 ## Discovery
 

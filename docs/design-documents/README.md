@@ -157,6 +157,7 @@ The current implementation uses ClickHouse for remote graph storage and query ex
 - Graph nodes live in typed `gl_*` ClickHouse tables such as `gl_group`, `gl_project`, `gl_merge_request`, `gl_pipeline`, `gl_job`, `gl_vulnerability`, `gl_branch`, `gl_file`, `gl_definition`, and `gl_imported_symbol`.
 - Relationships are stored in ontology-configured edge tables (defaulting to `gl_edge`) with adjacency-optimized ordering and projections. Each edge YAML can specify a `table:` field to route relationship types to dedicated tables; `settings.edge_tables` in `schema.yaml` defines available tables.
 - Code indexing progress is tracked in `code_indexing_checkpoint`.
+- Initial backfill status uses one root-namespace snapshot in unversioned NATS KV `orbit_indexing_progress`. The dispatcher records completion from target-schema checkpoints and currently replicated projects; the webserver only reads the snapshot. Completed snapshots survive later indexing and rebuilds. Live graph counts remain requested-scope; backfill is not a freshness guarantee. See [ADR 010](decisions/010_graph_status_endpoint.md).
 - The ontology in `config/ontology/` defines the mapping between entity names, properties, redaction metadata, ETL sources, and relationship kinds.
 
 Orbit Local generates its DuckDB tables from the same ontology, then writes Code Graph nodes and relationships into a workspace database. Local queries use read-only DuckDB SQL directly rather than the remote Query DSL and authorization pipeline.

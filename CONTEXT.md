@@ -90,6 +90,10 @@ _Avoid_: filtering (too generic), content masking (misleading — entire rows ar
 
 ### Data pipeline
 
+**Initial Backfill**:
+The root namespace's initial indexing work reported by `graph_status.backfill`. The dispatcher records completion after initial SDLC and all currently replicated projects are indexed. Later-arriving projects are ongoing indexing, not a new initial backfill. Completion is not a replication-freshness guarantee. See [ADR 010](docs/design-documents/decisions/010_graph_status_endpoint.md).
+_Avoid_: sync status, replication completion
+
 **CDC (Change Data Capture)**:
 The pattern of capturing row-level changes from a source database as a stream of events. In Orbit, CDC flows from the GitLab PostgreSQL database through **Siphon** into the **Datalake**.
 _Avoid_: replication (too broad)
