@@ -83,6 +83,8 @@ pub async fn run_dir(ctx: &TestContext, root: &str, presets: &str) {
         }
     }
 
+    scenario::assert_distinct_database_names(root, &files);
+
     let concurrency: usize = std::env::var("SUBTEST_CONCURRENCY")
         .ok()
         .and_then(|v| v.parse().ok())
@@ -120,10 +122,7 @@ async fn run_scenario(ctx: &TestContext, file: &Path, name: &str, presets: &Path
 
     let needs_fork = !cfg.extra_seed.is_empty();
     let ctx = if needs_fork {
-        let db_name = name
-            .chars()
-            .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
-            .collect::<String>();
+        let db_name = scenario::database_name(name);
         let forked = ctx.fork(&db_name).await;
         let columns = crate::scenario::seed::fetch_table_columns(&forked).await;
         crate::scenario::seed::apply_seed(
@@ -182,8 +181,13 @@ async fn run_frontend(
 
     let compiled = match compile_query(query, language, &ontology, security) {
         Ok(c) => {
+            let expects_error = matches!(
+                expect.compile_error,
+                Some(format::CompileErrorExpect::Flag(true))
+                    | Some(format::CompileErrorExpect::Substring(_))
+            );
             assert!(
-                expect.compile_error.is_none(),
+                !expects_error,
                 "{label}: expected compile error but got success"
             );
             Arc::new(c)

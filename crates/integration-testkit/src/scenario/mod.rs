@@ -172,7 +172,7 @@ pub(crate) fn scenario_name(root: &Path, file: &Path) -> String {
 // database_name collapses every non-alphanumeric character to '_', so two scenario
 // paths differing only in such characters would fork the same database and silently
 // interfere. Catch the collision loudly before any task spawns.
-fn assert_distinct_database_names(root: &Path, files: &[PathBuf]) {
+pub(crate) fn assert_distinct_database_names(root: &Path, files: &[PathBuf]) {
     let mut seen: HashMap<String, String> = HashMap::new();
     for file in files {
         let name = scenario_name(root, file);
@@ -186,7 +186,7 @@ fn assert_distinct_database_names(root: &Path, files: &[PathBuf]) {
     }
 }
 
-fn database_name(scenario_name: &str) -> String {
+pub(crate) fn database_name(scenario_name: &str) -> String {
     scenario_name
         .chars()
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })

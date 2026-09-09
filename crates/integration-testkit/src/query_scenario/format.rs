@@ -20,8 +20,6 @@ pub struct QueryScenario {
 #[serde(deny_unknown_fields)]
 pub struct ScenarioConfig {
     #[serde(default)]
-    pub seed: Option<String>,
-    #[serde(default)]
     pub extra_seed: Seed,
     #[serde(default)]
     pub security: Option<PresetOr<SecurityOverride>>,
