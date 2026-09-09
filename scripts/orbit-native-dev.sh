@@ -391,8 +391,13 @@ schedule.tasks.siphon.events_stream_name=$SIPHON_STREAM_NAME
 EOF
 }
 
+# Reads the database from the same merged overlay the server loads, so a graph.database override
+# in config/dev.local.yaml creates the schema where the processes will look for it.
 apply_schema() {
-  clickhouse client --host 127.0.0.1 --port "$GDK_CLICKHOUSE_TCP_PORT" --query "CREATE DATABASE IF NOT EXISTS \`$GRAPH_DATABASE\`"
+  local overlay graph_database
+  overlay="$(write_mode_overlay setup)"
+  graph_database="$(yq '.graph.database' "$overlay")"
+  clickhouse client --host 127.0.0.1 --port "$GDK_CLICKHOUSE_TCP_PORT" --query "CREATE DATABASE IF NOT EXISTS \`$graph_database\`"
 
   python3 - <<'PY' | while IFS= read -r stmt; do
 from pathlib import Path
@@ -408,7 +413,7 @@ for stmt in joined.split(";"):
     if stmt:
         print(stmt + ";")
 PY
-    clickhouse client --host 127.0.0.1 --port "$GDK_CLICKHOUSE_TCP_PORT" --database "$GRAPH_DATABASE" --query "$stmt"
+    clickhouse client --host 127.0.0.1 --port "$GDK_CLICKHOUSE_TCP_PORT" --database "$graph_database" --query "$stmt"
   done
 }
 
