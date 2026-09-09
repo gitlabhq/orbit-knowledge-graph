@@ -1,0 +1,25 @@
+# source: crates/integration-tests/tests/server/data_correctness/work_items.rs::search_returns_correct_work_item_properties
+description: WorkItem search returns correct properties and ordering
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [{"id": "w", "entity": "WorkItem", "id_range": {"start": 1, "end": 10000},
+                 "columns": ["title", "state", "work_item_type", "confidential", "weight"]}],
+      "order_by": "w.id",
+      "limit": 10
+    }
+  gql: |
+    MATCH (w:WorkItem) WHERE w.id >= 1 AND w.id <= 10000 RETURN w.title, w.state, w.work_item_type, w.confidential, w.weight ORDER BY w.id LIMIT 10
+
+expect:
+  node_count: 5
+  nodes:
+    WorkItem:
+      order: [4000, 4001, 4002, 4003, 4010]
+      rows:
+        - { id: 4000, title: "Implement login page", state: opened, work_item_type: issue, confidential: false, weight: 3 }
+        - { id: 4001, state: closed, work_item_type: incident, confidential: true, weight: 8 }
+        - { id: 4002, work_item_type: task }
+        - { id: 4003, work_item_type: epic, weight: 13 }

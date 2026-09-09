@@ -1,0 +1,25 @@
+# source: crates/integration-tests/tests/server/data_correctness/edge_cases/mod.rs::traversal_referential_integrity_on_complex_query
+description: Multi-hop User→Group→Project traversal has referential integrity
+
+query:
+  json: |
+    {
+        "query_type": "traversal",
+        "nodes": [
+            {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
+            {"id": "g", "entity": "Group"},
+            {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}}
+        ],
+        "relationships": [
+            {"type": "MEMBER_OF", "from": "u", "to": "g"},
+            {"type": "CONTAINS", "from": "g", "to": "p"}
+        ],
+        "limit": 50
+    }
+
+expect:
+  node_count: 14
+  referential_integrity: true
+  edge_exists:
+    MEMBER_OF: [[1, 100]]
+    CONTAINS: [[100, 1000]]

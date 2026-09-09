@@ -367,6 +367,14 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
                     let sub = m["contains"].as_str().unwrap();
                     n.prop_str(&field_name).is_some_and(|v| v.contains(sub))
                 }
+                serde_json::Value::Object(m) if m.contains_key("ends_with") => {
+                    let suffix = m["ends_with"].as_str().unwrap();
+                    n.prop_str(&field_name).is_some_and(|v| v.ends_with(suffix))
+                }
+                serde_json::Value::Object(m) if m.contains_key("in") => {
+                    let vals = m["in"].as_array().unwrap();
+                    n.prop(&field_name).is_some_and(|p| vals.contains(p))
+                }
                 _ => n.prop(&field_name) == Some(&expected),
             });
         }
@@ -406,6 +414,9 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
     for (group_key, ge) in &expect.groups {
         if let (Some(entity), Some(ids)) = (&ge.entity, &ge.ids) {
             view.assert_group_node_ids(group_key, entity, ids);
+        }
+        if let Some(count) = ge.count {
+            view.assert_group_node_count(group_key, count);
         }
         for gr in &ge.rows {
             for (col, expected) in &gr.values {
