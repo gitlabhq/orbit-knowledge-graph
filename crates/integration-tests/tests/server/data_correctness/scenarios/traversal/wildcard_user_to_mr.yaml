@@ -1,0 +1,37 @@
+# source: crates/integration-tests/tests/server/data_correctness/traversal.rs::traversal_wildcard_user_to_mr_infers_relationship_kinds
+description: Wildcard relationship infers all User-MergeRequest edge kinds
+
+query:
+  json: |
+    {
+        "query_type": "traversal",
+        "nodes": [
+            {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
+            {"id": "mr", "entity": "MergeRequest", "columns": ["title", "state"]}
+        ],
+        "relationships": [{"type": "*", "from": "u", "to": "mr"}],
+        "limit": 20
+    }
+
+expect:
+  node_count: 4
+  referential_integrity: true
+  nodes:
+    User:
+      ids: [1]
+    MergeRequest:
+      ids: [2000, 2001, 2002]
+  edges:
+    AUTHORED:
+      - [1, 2000]
+      - [1, 2001]
+    APPROVED:
+      - [1, 2002]
+  edge_count:
+    ASSIGNED: 0
+    CLOSED: 0
+    LAST_EDITED_BY: 0
+    MERGED: 0
+    REOPENED: 0
+    REVIEWER: 0
+    UPDATED_BY: 0

@@ -137,7 +137,7 @@ writer.write_batch(&batches).await?;
 
 ## Configuration
 
-`IndexerConfig` holds all settings:
+`IndexerConfig` holds all settings and is built from the server's `AppConfig` (`IndexerConfig::from(&app_config)`); default values live in `config/default.yaml`:
 
 ```rust
 pub struct IndexerConfig {
@@ -146,6 +146,10 @@ pub struct IndexerConfig {
     pub datalake: ClickHouseConfiguration,
     pub engine: EngineConfiguration,
     pub gitlab: Option<GitlabClientConfiguration>,
+    pub schedule: ScheduleConfig,
+    pub health_bind_address: SocketAddr,
+    pub schema: SchemaConfig,
+    pub analytics: AnalyticsConfig,
 }
 ```
 

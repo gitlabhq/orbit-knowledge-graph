@@ -8,6 +8,7 @@ use std::process::Command;
 
 use anyhow::{Context, Result, anyhow, bail};
 use ontology::Ontology;
+use ontology::archive::OntologyArchive;
 use ontology::migrations::{
     self, Fingerprints, LedgerScope, MigrationEntry, MigrationLedger, MigrationScope, derive_scope,
 };
@@ -172,6 +173,21 @@ pub fn check(base: Option<String>) -> Result<()> {
 
     migrations::verify_snapshot(&ontology, &current, &committed, &ledger, schema_version)
         .map_err(|e| anyhow!(e))?;
+
+    let archive_path = OntologyArchive::path(&config_dir(), schema_version);
+    let archive_bytes = fs::read(&archive_path).with_context(|| {
+        format!(
+            "reading {}. Run `mise schema:snapshot` to recreate a missing archive.",
+            archive_path.display()
+        )
+    })?;
+
+    let archive = OntologyArchive::from_bytes(schema_version, &archive_bytes)?;
+    let current_sources = migrations::embedded_sources();
+
+    if !archive.matches_sources(&current_sources) {
+        bail!("ontology archive is stale. {REMEDIATION}");
+    }
 
     if let Some(base) = base {
         check_under_declaration(&ontology, &committed, &ledger, schema_version, &base)?;
@@ -353,6 +369,25 @@ pub fn bump(
         .validate(&ontology, final_version)
         .map_err(|e| anyhow!(e))?;
 
+    let archive = OntologyArchive::from_sources(final_version, &source_contents)?;
+    archive.load_ontology()?;
+
+    let archive_path = OntologyArchive::path(&config_dir(), final_version);
+
+    if is_new && archive_path.exists() {
+        let existing_bytes = fs::read(&archive_path)
+            .with_context(|| format!("reading {}", archive_path.display()))?;
+
+        if existing_bytes != archive.bytes() {
+            bail!(
+                "ontology archive already exists with different contents: {}",
+                archive_path.display()
+            );
+        }
+    }
+
+    archive.write_atomic(&archive_path)?;
+
     if is_new {
         write_schema_version(final_version)?;
     }
@@ -385,6 +420,12 @@ pub fn snapshot() -> Result<()> {
             format_set(&changed_tables),
         );
     }
+    let version = orbit_versions::VERSIONS.schema;
+    let archive_path = OntologyArchive::path(&config_dir(), version);
+    if !archive_path.exists() {
+        OntologyArchive::from_sources(version, &migrations::embedded_sources())?
+            .write_atomic(&archive_path)?;
+    }
     fs::write(fingerprint_path(), current.render()).context("writing fingerprint snapshot")?;
     println!(
         "regenerated fingerprint snapshot at {}",
@@ -406,6 +447,8 @@ fn write_initial_snapshot(ontology: &Ontology, current: &Fingerprints) -> Result
     let version = orbit_versions::VERSIONS.schema;
     let ledger = read_ledger()?;
     ledger.validate(ontology, version).map_err(|e| anyhow!(e))?;
+    OntologyArchive::from_sources(version, &migrations::embedded_sources())?
+        .write_atomic(&OntologyArchive::path(&config_dir(), version))?;
     fs::write(fingerprint_path(), current.render()).context("writing fingerprint snapshot")?;
     println!("wrote initial fingerprint snapshot for version {version}");
     Ok(())

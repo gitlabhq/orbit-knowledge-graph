@@ -185,8 +185,8 @@ insta = { version = "1.40", features = ["yaml"] }
 proptest = "1.5"
 
 # Health check dependencies
-kube = { version = "3.0", features = ["client", "runtime", "ws"] }
-k8s-openapi = { version = "0.27", features = ["v1_31"] }
+kube = { version = "4.2", features = ["client", "runtime", "ws"] }
+k8s-openapi = { version = "0.28", features = ["v1_32"] }
 reqwest = { version = "0.13", default-features = false, features = ["json", "query", "rustls-no-provider"] }
 rustls = { version = "0.23.36", default-features = false, features = ["aws_lc_rs"] }
 health-check = { path = "crates/health-check" }

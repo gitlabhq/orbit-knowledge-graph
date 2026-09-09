@@ -58,7 +58,7 @@ impl TestContext {
     fn nats_config(&self) -> NatsConfiguration {
         NatsConfiguration {
             url: self.nats_url.clone(),
-            ..Default::default()
+            ..orbit_server_config::AppConfig::embedded_defaults().nats
         }
     }
 
@@ -185,7 +185,11 @@ async fn migration_triggers_backfill_for_all_enabled_namespaces() {
         context.clickhouse.config.build_client(),
         ScheduledTaskMetrics::new(),
         campaign,
-        orbit_server_config::CodeBackfillSweepConfig::default().publish_window,
+        orbit_server_config::AppConfig::embedded_defaults()
+            .schedule
+            .tasks
+            .code_backfill
+            .publish_window,
     );
 
     backfill
@@ -256,7 +260,11 @@ async fn backfill_skips_projects_with_existing_checkpoints() {
         context.clickhouse.config.build_client(),
         ScheduledTaskMetrics::new(),
         std::sync::Arc::new(indexer::campaign::CampaignState::new()),
-        orbit_server_config::CodeBackfillSweepConfig::default().publish_window,
+        orbit_server_config::AppConfig::embedded_defaults()
+            .schedule
+            .tasks
+            .code_backfill
+            .publish_window,
     );
 
     backfill
@@ -323,11 +331,14 @@ async fn migration_completion_checker_promotes_rebuilt_rollback_version() {
         context.clickhouse.create_client(),
         std::sync::Arc::new(indexer::testkit::MockLockService::new()),
         std::sync::Arc::new(ontology::Ontology::load_embedded().unwrap()),
-        orbit_server_config::SchemaConfig::default(),
-        orbit_server_config::MigrationCompletionConfig::default(),
+        orbit_server_config::AppConfig::embedded_defaults().schema,
+        orbit_server_config::AppConfig::embedded_defaults()
+            .schedule
+            .tasks
+            .migration_completion,
         ScheduledTaskMetrics::new(),
         std::sync::Arc::new(indexer::campaign::CampaignState::new()),
-        services.nats_client.clone(),
+        services.nats_connection.clone(),
     );
 
     checker.run().await.unwrap();
@@ -399,11 +410,14 @@ async fn migration_completion_checker_promotes_when_no_namespaces_are_enabled() 
         context.clickhouse.create_client(),
         std::sync::Arc::new(indexer::testkit::MockLockService::new()),
         std::sync::Arc::new(ontology::Ontology::load_embedded().unwrap()),
-        orbit_server_config::SchemaConfig::default(),
-        orbit_server_config::MigrationCompletionConfig::default(),
+        orbit_server_config::AppConfig::embedded_defaults().schema,
+        orbit_server_config::AppConfig::embedded_defaults()
+            .schedule
+            .tasks
+            .migration_completion,
         ScheduledTaskMetrics::new(),
         std::sync::Arc::new(indexer::campaign::CampaignState::new()),
-        services.nats_client.clone(),
+        services.nats_connection.clone(),
     );
 
     checker.run().await.unwrap();
@@ -466,11 +480,14 @@ async fn migration_completion_checker_does_not_promote_version_it_does_not_embed
         context.clickhouse.create_client(),
         std::sync::Arc::new(indexer::testkit::MockLockService::new()),
         std::sync::Arc::new(ontology::Ontology::load_embedded().unwrap()),
-        orbit_server_config::SchemaConfig::default(),
-        orbit_server_config::MigrationCompletionConfig::default(),
+        orbit_server_config::AppConfig::embedded_defaults().schema,
+        orbit_server_config::AppConfig::embedded_defaults()
+            .schedule
+            .tasks
+            .migration_completion,
         ScheduledTaskMetrics::new(),
         std::sync::Arc::new(indexer::campaign::CampaignState::new()),
-        services.nats_client.clone(),
+        services.nats_connection.clone(),
     );
 
     checker.run().await.unwrap();
@@ -534,11 +551,14 @@ async fn migration_completion_checker_guards_against_two_migrating_versions() {
         context.clickhouse.create_client(),
         std::sync::Arc::new(indexer::testkit::MockLockService::new()),
         std::sync::Arc::new(ontology::Ontology::load_embedded().unwrap()),
-        orbit_server_config::SchemaConfig::default(),
-        orbit_server_config::MigrationCompletionConfig::default(),
+        orbit_server_config::AppConfig::embedded_defaults().schema,
+        orbit_server_config::AppConfig::embedded_defaults()
+            .schedule
+            .tasks
+            .migration_completion,
         ScheduledTaskMetrics::new(),
         std::sync::Arc::new(indexer::campaign::CampaignState::new()),
-        services.nats_client.clone(),
+        services.nats_connection.clone(),
     );
 
     checker.run().await.unwrap();

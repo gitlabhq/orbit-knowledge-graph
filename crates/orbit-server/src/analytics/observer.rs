@@ -122,7 +122,6 @@ impl PipelineObserver for AnalyticsObserver {
 mod tests {
     use std::sync::Arc;
 
-    use orbit_server_config::AnalyticsConfig;
     use query_engine::pipeline::{PipelineError, PipelineObserver};
 
     use orbit_analytics::InMemoryAnalyticsTracker;
@@ -144,6 +143,7 @@ mod tests {
             group_traversal_ids: vec![],
             source_type: crate::auth::SourceType::Mcp,
             ai_session_id: Some("sess".into()),
+            request_id: None,
             instance_id: Some("inst".into()),
             unique_instance_id: Some("uniq".into()),
             instance_version: None,
@@ -161,7 +161,7 @@ mod tests {
         let tracker = Arc::new(InMemoryAnalyticsTracker::new());
         let obs = AnalyticsObserver::new(
             Some(tracker.clone()),
-            Arc::new(AnalyticsConfig::default()),
+            Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
             test_claims(),
             "query_graph",
             None,
@@ -176,7 +176,7 @@ mod tests {
         let tracker = Arc::new(InMemoryAnalyticsTracker::new());
         let mut obs = AnalyticsObserver::new(
             Some(tracker.clone()),
-            Arc::new(AnalyticsConfig::default()),
+            Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
             test_claims(),
             "query_graph",
             None,
@@ -227,7 +227,7 @@ mod tests {
         let tracker = Arc::new(InMemoryAnalyticsTracker::new());
         let mut obs = AnalyticsObserver::new(
             Some(tracker.clone()),
-            Arc::new(AnalyticsConfig::default()),
+            Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
             test_claims(),
             "query_graph",
             None,
@@ -250,7 +250,7 @@ mod tests {
         let tracker = Arc::new(InMemoryAnalyticsTracker::new());
         let obs = AnalyticsObserver::new(
             Some(tracker.clone()),
-            Arc::new(AnalyticsConfig::default()),
+            Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
             test_claims(),
             "query_graph",
             None,
@@ -265,7 +265,7 @@ mod tests {
     fn skips_when_tracker_absent() {
         let obs = AnalyticsObserver::new(
             None,
-            Arc::new(AnalyticsConfig::default()),
+            Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
             test_claims(),
             "query_graph",
             None,

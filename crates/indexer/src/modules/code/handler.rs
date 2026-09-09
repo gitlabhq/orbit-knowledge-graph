@@ -515,7 +515,7 @@ mod tests {
                 metrics.clone(),
                 table_names,
                 Arc::new(ontology),
-                orbit_server_config::CodeIndexingPipelineConfig::default(),
+                crate::testkit::builders::test_pipeline_configuration(),
             ));
 
             let handler = CodeIndexingTaskHandler::new(

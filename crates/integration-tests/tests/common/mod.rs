@@ -56,6 +56,7 @@ impl DummyClaims for orbit_server::auth::Claims {
             }],
             source_type: orbit_server::auth::SourceType::Rest,
             ai_session_id: None,
+            request_id: None,
             instance_id: None,
             unique_instance_id: None,
             instance_version: None,

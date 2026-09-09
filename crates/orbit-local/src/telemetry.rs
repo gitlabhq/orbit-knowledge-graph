@@ -1,22 +1,33 @@
-use std::sync::LazyLock;
+use std::sync::{LazyLock, OnceLock};
 
 use labkit_events::StructuredEvent;
 use orbit_analytics::{
     AnalyticsTracker, OrbitCommonContext, SnowplowAnalyticsTracker, orbit_common,
 };
 use regex::Regex;
+use uuid::Uuid;
 
 use crate::settings;
 
-const DEFAULT_COLLECTOR_URL: &str = "https://snowplowprd.trx.gitlab.net";
+const DEFAULT_COLLECTOR_URL: &str = "https://events.gitlab.net";
 const APP_ID: &str = "orbit";
 const CATEGORY: &str = "orbit_cli";
 
 const ENABLED_ENV: &str = "ORBIT_TELEMETRY_ENABLED";
 const COLLECTOR_URL_ENV: &str = "ORBIT_TELEMETRY_COLLECTOR_URL";
 
-static AGENT_VALUE_RE: LazyLock<Regex> =
+static SAFE_IDENTIFIER_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^[A-Za-z0-9._-]{1,64}$").expect("static regex"));
+
+pub fn is_safe_identifier(value: &str) -> bool {
+    SAFE_IDENTIFIER_RE.is_match(value)
+}
+
+/// Shared with the request trace id so analytics and server spans join.
+pub(crate) fn invocation_id() -> String {
+    static ID: OnceLock<String> = OnceLock::new();
+    ID.get_or_init(|| Uuid::new_v4().to_string()).clone()
+}
 
 pub struct TelemetryConfig {
     pub enabled: bool,
@@ -65,7 +76,7 @@ fn build_common_context(action: &str, coding_agent: Option<&str>) -> OrbitCommon
         environment,
         coding_agent: coding_agent
             .and_then(|a| a.parse::<orbit_common::OrbitCommonCodingAgent>().ok()),
-        correlation_id: None,
+        correlation_id: invocation_id().parse().ok(),
         instance_id: None,
         unique_instance_id: None,
         host_name: None,
@@ -77,7 +88,7 @@ fn build_common_context(action: &str, coding_agent: Option<&str>) -> OrbitCommon
 
 pub fn detect_coding_agent(get_env: impl Fn(&str) -> Option<String>) -> Option<String> {
     if let Some(v) = get_env("AI_AGENT")
-        && AGENT_VALUE_RE.is_match(&v)
+        && is_safe_identifier(&v)
     {
         return Some(v);
     }
@@ -222,6 +233,12 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].category(), CATEGORY);
         assert_eq!(events[0].action(), "remote_query");
+    }
+
+    #[test]
+    fn invocation_id_is_stable_within_a_process() {
+        assert_eq!(invocation_id(), invocation_id());
+        assert!(is_safe_identifier(&invocation_id()));
     }
 
     #[test]

@@ -43,6 +43,24 @@ fn query_stopwords() -> &'static HashSet<String> {
     })
 }
 
+pub fn camel_words(identifier: &str) -> Option<String> {
+    let chars: Vec<char> = identifier.chars().collect();
+    let mut out = String::new();
+    for (i, &c) in chars.iter().enumerate() {
+        let boundary = i > 0
+            && c.is_uppercase()
+            && (chars[i - 1].is_lowercase()
+                || chars[i - 1].is_ascii_digit()
+                || chars.get(i + 1).is_some_and(|n| n.is_lowercase())
+                    && chars[i - 1].is_uppercase());
+        if boundary {
+            out.push(' ');
+        }
+        out.extend(c.to_lowercase());
+    }
+    out.contains(' ').then_some(out)
+}
+
 pub fn content_words(input: &str) -> Vec<String> {
     let words: Vec<String> = input
         .split_whitespace()
@@ -89,5 +107,20 @@ mod tests {
         for drop in ["get", "set", "using", "someone", "the", "should"] {
             assert!(sw.contains(drop), "{drop} must be a stopword");
         }
+    }
+
+    #[test]
+    fn camel_words_splits_identifiers_and_leaves_plain_words_alone() {
+        assert_eq!(
+            camel_words("DiskThreshold").as_deref(),
+            Some("disk threshold")
+        );
+        assert_eq!(camel_words("markInSync").as_deref(), Some("mark in sync"));
+        assert_eq!(
+            camel_words("HTTPServer2Go").as_deref(),
+            Some("http server2 go")
+        );
+        assert_eq!(camel_words("threshold"), None);
+        assert_eq!(camel_words("HTTP"), None);
     }
 }

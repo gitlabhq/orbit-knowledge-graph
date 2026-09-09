@@ -4,7 +4,7 @@
 
 mod expect;
 mod format;
-mod seed;
+pub(crate) mod seed;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -139,7 +139,7 @@ async fn run_scenario(ctx: &TestContext, file: &Path, name: &str, handlers: &dyn
     }
 }
 
-fn discover(dir: &Path, files: &mut Vec<PathBuf>) {
+pub(crate) fn discover(dir: &Path, files: &mut Vec<PathBuf>) {
     let entries = match std::fs::read_dir(dir) {
         Ok(entries) => entries,
         Err(e) => panic!("failed to read scenario directory {}: {e}", dir.display()),
@@ -157,7 +157,7 @@ fn discover(dir: &Path, files: &mut Vec<PathBuf>) {
     }
 }
 
-fn scenario_name(root: &Path, file: &Path) -> String {
+pub(crate) fn scenario_name(root: &Path, file: &Path) -> String {
     let relative = file
         .strip_prefix(root)
         .expect("scenario file is under root")
@@ -172,7 +172,7 @@ fn scenario_name(root: &Path, file: &Path) -> String {
 // database_name collapses every non-alphanumeric character to '_', so two scenario
 // paths differing only in such characters would fork the same database and silently
 // interfere. Catch the collision loudly before any task spawns.
-fn assert_distinct_database_names(root: &Path, files: &[PathBuf]) {
+pub(crate) fn assert_distinct_database_names(root: &Path, files: &[PathBuf]) {
     let mut seen: HashMap<String, String> = HashMap::new();
     for file in files {
         let name = scenario_name(root, file);
@@ -186,7 +186,7 @@ fn assert_distinct_database_names(root: &Path, files: &[PathBuf]) {
     }
 }
 
-fn database_name(scenario_name: &str) -> String {
+pub(crate) fn database_name(scenario_name: &str) -> String {
     scenario_name
         .chars()
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })

@@ -6,9 +6,41 @@ Reference for all configurable knobs in the GKG server. All four modes (Webserve
 
 Config is loaded in layers, each overriding the previous:
 
-1. **Configuration file**: Example `config/default.yaml`
-2. **Secrets**: Files in `/etc/secrets/` (Kubernetes secret mounts)
-3. **Environment variables**: Prefixed with `GKG_`, using `__` as a separator for nested keys and `,` for lists
+1. **Embedded defaults**: `config/default.yaml`, compiled into the binary. It declares every
+   section and scalar the server reads; the Rust config structs carry no fallback values, so a
+   key removed from this file fails startup with a "missing field" error. Optional keys are
+   `Option` fields (passwords, TLS paths, values derived from container resources) and are
+   commented out in the file. These are **deployment defaults**: a production pod runs on them for
+   every key the Helm ConfigMap does not set, so the file holds no local-development tuning. Its
+   maps stay empty unless an entry is a genuine universal default, because config-rs deep-merges
+   maps and any entry here that a partial ConfigMap does not set would leak into production.
+2. **On-disk `config/default.yaml`**, relative to the working directory, when present. This is
+   the key the Helm chart's ConfigMap currently uses; treat it as a partial overlay.
+3. **Overlay file**: the path given with `--config <path>`, otherwise `config/config.yaml` when it exists.
+   An explicit `--config` path must exist; the default overlay is optional and Git ignores it.
+   The mise dev tasks pass `--config config/dev.yaml`, a committed overlay holding local-development
+   tuning (laptop ClickHouse session settings, dev batch sizes) kept out of the deployment defaults.
+4. **Secrets**: Files in `/etc/secrets/` (Kubernetes secret mounts)
+5. **Environment variables**: Prefixed with `GKG_`, using `__` as a separator for nested keys and `,` for lists
+
+Adding a setting means adding a field to the struct in `crates/orbit-server-config/` and its
+value to `config/default.yaml`; nothing else. Tests that need a config start from
+`AppConfig::embedded_defaults()` and override the fields they care about.
+
+The mise dev tasks (`server:start`, `dev:web`, `dev:indexer`, `dev:dispatcher`) launch with
+`--config config/dev.yaml`, so that committed overlay is the local-development layer. Personal
+overrides on top go through `GKG_*` environment variables, which the dev tasks already set and which
+take priority over every file. An `--config config/dev.yaml` invocation does not also read
+`config/config.yaml`; the default `config/config.yaml` lookup only applies when no `--config` is passed.
+
+Overlay example (`config/dev.yaml` or a `--config` file):
+
+```yaml
+graph:
+  database: "gkg-development"
+gitlab:
+  base_url: "http://gdk.test:3000"
+```
 
 Environment variable examples:
 
@@ -254,7 +286,7 @@ Initial-load partition parallelism is no longer configured here; a pipeline decl
 
 ## Scheduler configuration
 
-Scheduled tasks run in `DispatchIndexing` mode. Each scheduled task has a 6-field cron expression (seconds, minutes, hours, day-of-month, month, day-of-week). Every task's default cron is declared in Rust (`ScheduledTasksConfiguration` in `crates/orbit-server-config/src/engine.rs`); a `schedule.tasks.<name>` entry in YAML overrides only the cadence you set. A task with no declared cron and no config falls back to a 60-second interval.
+Scheduled tasks run in `DispatchIndexing` mode. Each scheduled task has a 6-field cron expression (seconds, minutes, hours, day-of-month, month, day-of-week). Every task's default cron is declared in `config/default.yaml` under `schedule.tasks`; a `schedule.tasks.<name>` entry in an overlay replaces only the fields you set. The cron expression is required and is parsed when the configuration loads, so a missing or invalid expression fails startup.
 
 Distributed locking via NATS KV ensures only one dispatcher instance runs each scheduled task per interval. Raw Siphon routing is a separate continuous trigger and does not use a cron expression.
 
@@ -289,11 +321,12 @@ DispatchIndexing continuously polls the raw Siphon JetStream and routes code-tas
 | `schedule.tasks.siphon.events_stream_name` | `siphon_stream_main_db` | Raw NATS stream containing Siphon CDC events |
 | `schedule.tasks.siphon.batch_size` | `100` | Pending messages consumed per route and drain call |
 
-### Namespace dispatch and code backfill settings
+### Scheduled task settings
 
 | Config path | Default | Description |
 |-------------|---------|-------------|
 | `schedule.tasks.namespace.sweep_interval_secs` | `3600` | Age at which the namespace dispatcher performs a full enabled-namespace sweep instead of change-only dispatch |
+| `schedule.tasks.stale-edge-reconciliation.lookback_secs` | `3600` | Recent node-version window rescanned on each stale-edge reconciliation run |
 | `schedule.tasks.code-backfill.publish_window` | `200000` | Pending projects held per publish batch. Also the per-run budget shared between the namespaces that still have pending projects, so it bounds both dispatcher memory (about 70 bytes per project) and how much work one namespace can queue ahead of the others |
 
 ## GitLab client
@@ -404,7 +437,7 @@ Controls Snowplow product-analytics event emission. Events carry `orbit_common` 
 | Config path | Env var | Default | Description |
 |-------------|---------|---------|-------------|
 | `analytics.enabled` | `GKG_ANALYTICS__ENABLED` | `false` | Enable Snowplow analytics event emission |
-| `analytics.collector_url` | `GKG_ANALYTICS__COLLECTOR_URL` | `""` | Snowplow collector endpoint (e.g. `https://snowplowprd.trx.gitlab.net`) |
+| `analytics.collector_url` | `GKG_ANALYTICS__COLLECTOR_URL` | `""` | Snowplow collector endpoint (e.g. `https://events.gitlab.net`) |
 | `analytics.deployment.type` | `GKG_ANALYTICS__DEPLOYMENT__TYPE` | `self_managed` | `com`, `dedicated`, or `self_managed` |
 | `analytics.deployment.environment` | `GKG_ANALYTICS__DEPLOYMENT__ENVIRONMENT` | `development` | `development`, `staging`, or `production` |
 
@@ -413,7 +446,7 @@ Example for the .com staging cluster:
 ```yaml
 analytics:
   enabled: true
-  collector_url: "https://snowplowprd.trx.gitlab.net"
+  collector_url: "https://events.gitlab.net"
   deployment:
     type: com
     environment: staging
@@ -502,7 +535,7 @@ GKG_NATS__AUTO_CREATE_STREAMS=true        # Auto-create on startup
 
 ## Helm chart configuration
 
-In production, GKG is deployed via the [`orbit-helm-charts`](https://gitlab.com/gitlab-org/orbit/orbit-helm-charts). Most configuration is set through Helm values rather than raw YAML or environment variables.
+In production, GKG is deployed via the [`orbit-helm-charts`](https://gitlab.com/gitlab-org/orbit/orbit-helm-charts). Most configuration is set through Helm values rather than raw YAML or environment variables. The chart renders the values it knows about into a ConfigMap mounted at `/app/config`; every key the chart does not render comes from the embedded `config/default.yaml`.
 
 ### Key Helm values mapping
 

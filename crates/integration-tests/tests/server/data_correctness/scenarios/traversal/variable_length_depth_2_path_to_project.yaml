@@ -1,0 +1,41 @@
+# source: crates/integration-tests/tests/server/data_correctness/traversal.rs::traversal_variable_length_includes_depth_2_path_to_project
+description: Variable-length CONTAINS includes depth-2 path from group to project (MR !1069 cliff fix)
+
+query:
+  json: |
+    {
+        "query_type": "traversal",
+        "nodes": [
+            {"id": "u", "entity": "User", "node_ids": [7], "columns": ["username"]},
+            {"id": "wi", "entity": "WorkItem", "columns": ["title"]},
+            {"id": "p", "entity": "Project", "columns": ["name"]},
+            {"id": "g", "entity": "Group", "columns": ["name"]}
+        ],
+        "relationships": [
+            {"type": "AUTHORED", "from": "u", "to": "wi"},
+            {"type": "IN_PROJECT", "from": "wi", "to": "p"},
+            {"type": "CONTAINS", "from": "g", "to": "p", "hops": [1, 2]}
+        ],
+        "limit": 20
+    }
+
+expect:
+  referential_integrity: true
+  node_count: 5
+  nodes:
+    User:
+      ids: [7]
+    WorkItem:
+      ids: [4010]
+    Project:
+      ids: [1010]
+    Group:
+      ids: [100, 200]
+  edge_exists:
+    AUTHORED:
+      - [7, 4010]
+    IN_PROJECT:
+      - [4010, 1010]
+    CONTAINS:
+      - [200, 1010]
+      - [100, 1010]

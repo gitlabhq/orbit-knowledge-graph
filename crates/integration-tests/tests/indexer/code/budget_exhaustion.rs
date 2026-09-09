@@ -64,7 +64,7 @@ async fn a_job_too_slow_for_its_budget_never_checkpoints() {
     let (outcome, checkpointed) = index_once(
         CodeIndexingPipelineConfig {
             job_timeout_secs: 1,
-            ..Default::default()
+            ..indexer::testkit::test_pipeline_configuration()
         },
         |mock| mock.add_project_with_slow_archive(PROJECT_ID, BRANCH),
     )
@@ -85,7 +85,7 @@ async fn the_same_repository_lands_once_the_work_fits() {
     let (outcome, checkpointed) = index_once(
         CodeIndexingPipelineConfig {
             job_timeout_secs: 30,
-            ..Default::default()
+            ..indexer::testkit::test_pipeline_configuration()
         },
         |mock| mock.add_project(PROJECT_ID, BRANCH, &[("src/main.rs", "pub fn x() {}")]),
     )
@@ -104,7 +104,7 @@ async fn a_repository_over_the_byte_cap_is_checkpointed_instead_of_overrunning()
     let (outcome, checkpointed) = index_once(
         CodeIndexingPipelineConfig {
             max_total_bytes: 1_000_000,
-            ..Default::default()
+            ..indexer::testkit::test_pipeline_configuration()
         },
         |mock| mock.add_project(PROJECT_ID, BRANCH, &[("big.txt", &oversized)]),
     )

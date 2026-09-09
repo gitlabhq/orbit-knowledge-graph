@@ -1,0 +1,18 @@
+# source: crates/integration-tests/tests/server/data_correctness/neighbors.rs::neighbors_outgoing_returns_correct_targets
+description: Outgoing neighbors from User 1
+
+query:
+  json: |
+    {
+      "query_type": "neighbors",
+      "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
+      "neighbors": {"direction": "outgoing"}
+    }
+
+expect:
+  node_count: 9
+  referential_integrity: true
+  nodes:
+    User:
+      ids: [1]
+  skip_requirements: [neighbors]

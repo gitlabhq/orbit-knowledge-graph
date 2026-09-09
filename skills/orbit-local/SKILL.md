@@ -3,8 +3,9 @@ name: orbit-local
 description: >
   Index and query a LOCAL checkout of a repository offline with the Orbit local
   CLI (the `orbit` binary, run directly or via `glab orbit local`). It builds a
-  DuckDB property graph from the working tree and you query it with read-only
-  SQL. Use when the request targets the current checkout, working tree, or a
+  DuckDB property graph from the working tree. Use grep for definitions and
+  relationships, context for source bodies, and read-only SQL for aggregations.
+  Use when the request targets the current checkout, working tree, or a
   branch that is not pushed/indexed remotely, or is explicitly offline/local:
   index this repo locally, who calls X in my checkout, list definitions in a
   file, generate a repo map of a local checkout, run SQL over the local code
@@ -12,7 +13,7 @@ description: >
   production data in GitLab (a project such as gitlab-org/gitlab, cross-project
   blast radius, contributor or merge-request aggregation) use the `orbit` skill;
   for single-entity GitLab lookups or write operations use `glab`.
-version: 0.3.1
+version: 0.5.0
 license: MIT
 metadata:
   audience: developers
@@ -24,8 +25,9 @@ metadata:
 
 Index and query a **local** copy of the GitLab Orbit graph. The local CLI
 parses a checked-out repository into a DuckDB property
-graph and answers questions with **read-only SQL** — a different surface from
-Orbit Remote, which speaks the JSON DSL over gRPC. Use this skill for the
+graph. **`grep`** finds definitions and relationships; **`context`** reads their
+source bodies. Read-only SQL handles aggregations and complex queries.
+Orbit Remote instead speaks the JSON DSL over gRPC. Use this skill for the
 working tree; use the `orbit` skill for production data.
 
 ## Invocation
@@ -71,12 +73,49 @@ wrapper flags, config keys, and pass-through rules:
 | Command | Purpose |
 |---|---|
 | `orbit index <PATH> [--stats] [--db P]` | Parse repos under `PATH` into DuckDB; prints graph stats as JSON |
-| `orbit sql [QUERY] [-f FILE] [-F table\|json\|ndjson\|csv]` | Run read-only SQL; `-` reads from stdin |
-| `orbit schema [TABLE…] [--raw]` | Describe tables/columns; scope to table names to trim output |
+| `orbit grep [QUERY…] [--path P] [--kind K,K] [--body]` | Find definitions by name, or list definitions under a path; `--body` also prints the top three bodies |
+| `orbit grep FQN --related-to [--edge K] [--in] [--out]` | List connections, including uses through members |
+| `orbit grep FQN --callers` / `--callees` | List incoming or outgoing calls |
+| `orbit context [FQN…] [--file P] [--kind K,K] [--outline]` | Read source bodies by FQN, unique tail, glob, or file; `--outline` prints signatures and members only |
+| `orbit sql [QUERY] [-f FILE] [-F table\|json\|ndjson\|csv] [--all] [--repo P]` | Run read-only SQL scoped to the current checkout's commit; `-` reads from stdin, `--all` spans every indexed commit |
+| `orbit schema [TABLE…] [--raw]` | Describe graph tables/columns (index-storage tables hidden); scope to table names to trim output |
 | `orbit list [-F …]` | List indexed repositories, branch, commit, status |
 | `orbit mcp serve` | Serve the local graph to MCP agents (`run_sql`, `get_graph_schema`, `index`) |
 | `orbit repo-map <SUBCOMMAND> [--repo P] [--ext E]` | High-level, LLM-oriented repo map (`overview`, `tree`, `api`, `class`, `extends`, `imports`) |
 | `orbit skill [PATH]` | Print the bundled, version-matched skill content; no arg prints `SKILL.md`, else a relative path like `references/sql.md` |
+
+## Definitions and relationships
+
+```bash
+orbit grep "rateLimit" --path src --kind Method,Function
+orbit context "Type::method"
+orbit context --file src/lib.rs
+orbit context "Type" --outline
+orbit grep "Type::method" --callers --path src --kind Method
+orbit grep "Type::method" --callees
+orbit grep "Type" --related-to --edge extends --in
+```
+
+Relationship selectors accept an FQN, a unique unqualified tail, or a glob.
+Pass one positional target with the flag, or a target immediately after it.
+An explicit flag target takes precedence over positional terms. Use one
+relationship selector per call, without `--limit`.
+`--path` and `--kind` filter connected results, not the target definition.
+Connections from test, fixture, and generated files are counted but hidden
+unless `--tests` is passed. Incoming lookups include uses through members.
+
+`grep --body` prints the bodies of the top matches (at most three) in the
+same call, for the common case where the first hit is the one you want.
+
+`context` accepts several names or globs in one call. `--file` takes a
+repo-relative or absolute path inside the checkout. `--file` alone reads
+all definitions and the lines between them. With names, it restricts lookup
+to that file and accepts bare names; `--kind` narrows the selection.
+`--outline` replaces bodies with each definition's signature and its nested
+members, so a large type or file can be mapped before reading one method.
+
+`--kind` is one comma-separated list (`Class,Method`); a quoted pipe list
+(`"Class|Method"`) also works. It is not repeatable.
 
 ## Quick start
 

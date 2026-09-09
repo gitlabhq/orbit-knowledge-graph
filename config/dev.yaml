@@ -1,0 +1,31 @@
+# Local-development overlay. Loaded by the mise dev tasks via `--config config/dev.yaml`, on top of
+# the embedded config/default.yaml. Holds tuning that suits a laptop ClickHouse and GDK, and must
+# NOT be promoted into config/default.yaml, which underlays production.
+#
+# For personal overrides on top of this, use GKG_* environment variables (highest priority).
+
+datalake:
+  session_settings:
+    max_execution_time: "900"
+    max_query_size: "10485760"
+
+graph:
+  insert_settings:
+    async_insert: "1"
+    wait_for_async_insert: "1"
+    async_insert_deduplicate: "0"
+
+engine:
+  handlers:
+    entity-handler:
+      batch_size_overrides:
+        WorkItem: 50000
+
+query:
+  default:
+    use_query_cache: false
+    graph_query_cache_enabled: false
+    graph_query_cache_ttl: 60
+  path_finding:
+    max_execution_time: 15
+    max_memory_usage: 16106127360

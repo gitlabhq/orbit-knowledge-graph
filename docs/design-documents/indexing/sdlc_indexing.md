@@ -353,8 +353,8 @@ Rows deleted in the source database have `_siphon_deleted` set to `true`. The ex
 
 Edge tables are `ReplacingMergeTree` keyed on `(traversal_path, relationship_kind, source_id, target_id, …)`. For an FK-derived edge whose FK column is *mutable* — a "latest"/"who did X last" pointer such as `HAS_LATEST_DIFF` (`latest_merge_request_diff_id`) — a changed FK value writes a new edge row with a different `target_id`. Because `target_id` is part of the dedup identity, the prior row keeps a distinct identity and is never replaced or tombstoned, so the owner accumulates one live edge per historical FK value. The before-image needed to tombstone the old edge at write time is unavailable (the datalake `siphon_*` tables are collapsed current-state), so this is reconciled out-of-band instead.
 
-`StaleEdgeReconciliation` is a `ScheduledTask` in `DispatchIndexing` mode (default every 30 minutes). It runs one idempotent `INSERT … SELECT` per `(relationship_kind, FK-owner)` variant: a CTE selects the owner nodes changed since the last cursor (`_version >= cursor`, read `FINAL`), joins them to live edges of that kind, and tombstones (`_deleted = true`) any edge whose endpoint no longer equals the owner's current FK column.
-A dual `IN` on `(traversal_path, owner-id)` prunes the edge scan to the changed set via the primary key, so cost tracks churn rather than table size; the cursor advances only on full success, and re-tombstoning an already-stale edge is a no-op.
+`StaleEdgeReconciliation` is a `ScheduledTask` in `DispatchIndexing` mode (default every 30 minutes). It runs one idempotent `INSERT … SELECT` per `(relationship_kind, FK-owner)` variant: a CTE selects the owner nodes changed within the configured lookback window (`_version >= now - lookback`, read `FINAL`), joins them to live edges of that kind, and tombstones (`_deleted = true`) any edge whose endpoint no longer equals the owner's current FK column.
+A dual `IN` on `(traversal_path, owner-id)` prunes the edge scan to the recently changed set via the primary key, so cost tracks recent churn rather than table size. Each run rescans the fixed lookback window, and re-tombstoning an already-stale edge is a no-op.
 The swept set is derived entirely from the ontology: an edge is reconciled iff its mapping is marked `mutable: true` (the FK can change, so the edge can orphan); immutable FKs (`project_id`, `author_id`) leave it unset and are never swept. The metadata for each variant (owner table, graph column, edge table, direction, endpoint kinds) is likewise derived from the ontology.
 This runs directly in the dispatcher rather than dispatching to indexer workers — it is one cheap global sweep, not per-namespace fan-out, and keeps the load off the high-throughput insert path.
 
@@ -373,6 +373,8 @@ The indexer uses the ontology to create the Orbit ClickHouse tables and build th
 **Lake to Graph**
 
 The Orbit schema is declared in `config/graph.sql` (generated from the ontology) and versioned via the `schema` pin in `config/versions.yaml`. All graph tables are prefixed with `v<N>_` (e.g. `v58_gl_issue`) so that multiple schema versions can coexist during migration. Migrations are applied to the Orbit graph database by the dispatcher at boot via `schema::migration::run_if_needed()`.
+
+The dispatcher publishes its [ontology archive](../schema_management.md#ontology-archives) before migration.
 
 The schema is backward compatible with the previous version until the schema migration is complete for every namespace. A migration is considered complete when `MigrationCompletionChecker` detects that all enabled namespaces have been re-indexed into new-prefix tables, then promotes the new version to `active` and retires the old one.
 

@@ -1,3 +1,44 @@
+## [0.119.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.118.2...v0.119.0) (2026-09-09)
+
+### Features
+
+* **cli,server:** propagate request trace IDs from CLI to server ([18e0755](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/18e0755335821d4a54817df6b670d10b16f1803e)) by Jean-Gabriel Doyon
+* **config:** add config overlay file and --config flag ([13a26b9](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/13a26b91f76f2bf5cfd5b7b74f182ad458d7858c)) by Bohdan Parkhomchuk
+* **dx:** add yaml-driven query scenario test framework ([4d05bf4](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/4d05bf4783c7bd874b0813a597d0a47af92f7740)) by Michael Usachenko
+* **dx:** migrate traversal tests to YAML query scenarios ([da8927c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/da8927c41d0108db9e9c13878d6d7db867c80dcd)) by Michael Usachenko
+* **orbit-local:** simplify code discovery with grep and context ([0905ce6](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/0905ce6bf11189983ee302b5592da16d65a59292)) by Aaron Algutifan
+* **schema:** retain and publish ontology archives ([5306d5d](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/5306d5de01b1da8f315cde03f35df4ad58e13b5a)) by Jean-Gabriel Doyon
+
+### Fixes
+
+* **cli:** start telemetry delivery at emit time ([420c57b](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/420c57b76a51aa2223bd1884137b54e5e54e7765)) by Kai Armstrong
+* **ontology:** load archives in memory instead of a temp directory ([85848b6](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/85848b68143b8a0b997f9ca0f89f60941405812f)) by Bohdan Parkhomchuk
+* **query:** use supplied ontology for security filters ([c84e956](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/c84e9567d6b37fc5c8d4d949726e3a5d521d50e0)) by Jean-Gabriel Doyon
+
+### Other
+
+* **config:** make default.yaml the single source of default values ([f7de013](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f7de013430d5b9f5f6b5fd6859cd61b199afe255)) by Bohdan Parkhomchuk
+* **deps:** update rust crate async-trait to v0.1.92 ([ae454cf](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/ae454cf1744b45a0a5330883d2ea9d7e8e7e3a49)) by GitLab Renovate Bot
+* **deps:** update rust crate clickhouse to v0.15.2 ([9843f02](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/9843f0281813fbf480e12e47cbc930288db030d0)) by GitLab Renovate Bot
+* **deps:** update rust crates kube to 4.2 and k8s-openapi to 0.28 ([0358ef1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/0358ef1dfc4182d01dead1e4ea70ca7fcde4f5b1)) by michaelangeloio
+* **local:** correct CLI and indexing documentation ([a2f4148](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/a2f4148d31b004393c1182f1f858f689b3b11dba)) by Dmitry Gruzd
+
+## [0.118.2](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.118.1...v0.118.2) (2026-09-08)
+
+### Fixes
+
+* **cli:** default the Snowplow collector to events.gitlab.net ([e1fd586](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/e1fd586df7b5fcaba75f4160b1c5919a47bb418b)) by Ashwin Bilgi
+* **ontology:** deduplicate the merge request diff lookup by version ([3dd2ebc](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/3dd2ebc9fa277e2da746b8fc58187eff74053bfe)) by Bohdan Parkhomchuk
+* **skills:** align Orbit examples with the CLI ([7f637f4](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/7f637f481607129c1e1a4c1fb7cc3a7ec60ae2dc)) by Dmitry Gruzd
+
+### Performance
+
+* **indexer:** release arrow batches once encoded into the insert body ([602702f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/602702f3cbc7282cc6f1a5e2faa386692a05a2ab)) by Bohdan Parkhomchuk
+
+### Other
+
+* **orbit:** sync Local and Remote overviews ([47cdd18](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/47cdd182daf65fb9e5c3c384c99a80ba5f94db2e)) by Dmitry Gruzd
+
 ## [0.118.1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.118.0...v0.118.1) (2026-09-07)
 
 ### Fixes

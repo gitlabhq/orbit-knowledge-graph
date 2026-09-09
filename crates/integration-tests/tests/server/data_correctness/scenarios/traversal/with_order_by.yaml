@@ -1,0 +1,32 @@
+# source: crates/integration-tests/tests/server/data_correctness/traversal.rs::traversal_with_order_by
+description: Order by descending user ID preserves correct node ordering
+
+query:
+  json: |
+    {
+        "query_type": "traversal",
+        "nodes": [
+            {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+            {"id": "g", "entity": "Group", "columns": ["name"]}
+        ],
+        "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+        "order_by": "-u.id",
+        "limit": 20
+    }
+
+expect:
+  node_count: 9
+  nodes:
+    User:
+      order: [6, 5, 4, 3, 2, 1]
+  edges:
+    MEMBER_OF:
+      - [1, 100]
+      - [1, 102]
+      - [2, 100]
+      - [3, 101]
+      - [4, 101]
+      - [4, 102]
+      - [5, 101]
+      - [6, 100]
+      - [6, 101]

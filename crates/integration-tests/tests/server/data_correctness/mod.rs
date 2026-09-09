@@ -12,7 +12,16 @@ mod traversal_scoping;
 mod work_items;
 
 use helpers::{GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL, TestContext, seed};
-use integration_testkit::{run_subtests, run_subtests_shared};
+use integration_testkit::{query_scenario, run_subtests, run_subtests_shared};
+
+const SCENARIOS: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/server/data_correctness/scenarios"
+);
+const PRESETS: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/server/data_correctness/presets"
+);
 
 #[tokio::test]
 async fn data_correctness() {
@@ -290,4 +299,12 @@ async fn data_correctness() {
         traversal_scoping::scope_implied_container_elision_chain_counts_diff_files,
         traversal_scoping::code_intel_calls_scoped_traversal_is_lossless,
     );
+}
+
+#[tokio::test]
+async fn data_correctness_scenarios() {
+    let ctx = TestContext::new(&[SIPHON_SCHEMA_SQL, *GRAPH_SCHEMA_SQL]).await;
+    query_scenario::load_yaml_seed(&ctx, PRESETS, "data_correctness").await;
+    ctx.optimize_all().await;
+    query_scenario::run_dir(&ctx, SCENARIOS, PRESETS).await;
 }

@@ -19,12 +19,10 @@ pub use namespace_deletion::NamespaceDeletionScheduler;
 pub use stale_edge_reconciliation::StaleEdgeReconciliation;
 pub use table_cleanup::TableCleanup;
 
-use std::str::FromStr;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use chrono::Utc;
-use croner::Cron;
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
@@ -58,14 +56,6 @@ pub trait ScheduledTask: Send + Sync {
 pub enum SchedulerError {
     #[error("NATS connection failed: {0}")]
     NatsConnection(#[from] crate::nats::NatsError),
-    #[error("task \"{task}\" has no cron expression")]
-    MissingCron { task: String },
-    #[error("task \"{task}\" has invalid cron expression \"{expr}\": {reason}")]
-    InvalidCron {
-        task: String,
-        expr: String,
-        reason: String,
-    },
     #[error("{count} task loop(s) panicked")]
     TaskPanicked { count: usize },
 }
@@ -73,7 +63,8 @@ pub enum SchedulerError {
 pub struct SchedulerServices {
     pub nats: Arc<dyn NatsServices>,
     pub lock_service: Arc<dyn LockService>,
-    pub nats_client: async_nats::Client,
+    pub nats_client: Arc<nats_client::NatsClient>,
+    pub nats_connection: async_nats::Client,
 }
 
 pub async fn connect(nats_config: &NatsConfiguration) -> Result<SchedulerServices, SchedulerError> {
@@ -82,7 +73,8 @@ pub async fn connect(nats_config: &NatsConfiguration) -> Result<SchedulerService
         .ensure_kv_bucket_exists(INDEXING_LOCKS_BUCKET, KvBucketConfig::default())
         .await?;
 
-    let nats_client = broker.nats_client().clone();
+    let nats_connection = broker.nats_client().clone();
+    let nats_client = broker.client().clone();
     let nats: Arc<dyn NatsServices> = Arc::new(NatsServicesImpl::new(broker));
     let lock_service: Arc<dyn LockService> = Arc::new(NatsLockService::new(Arc::clone(&nats)));
 
@@ -90,21 +82,16 @@ pub async fn connect(nats_config: &NatsConfiguration) -> Result<SchedulerService
         nats,
         lock_service,
         nats_client,
+        nats_connection,
     })
 }
 
 /// Runs all tasks in independent loops until `shutdown` is cancelled.
-///
-/// Validates that every task has a parseable cron expression before spawning.
 pub async fn run_loop(
     tasks: Vec<Box<dyn ScheduledTask>>,
     lock_service: Arc<dyn LockService>,
     shutdown: CancellationToken,
 ) -> Result<(), SchedulerError> {
-    for task in &tasks {
-        validate_cron(task.as_ref())?;
-    }
-
     let mut handles = JoinSet::new();
 
     for task in tasks {
@@ -125,22 +112,6 @@ pub async fn run_loop(
         return Err(SchedulerError::TaskPanicked { count: panicked });
     }
 
-    Ok(())
-}
-
-fn validate_cron(task: &dyn ScheduledTask) -> Result<(), SchedulerError> {
-    let expr = task
-        .schedule()
-        .cron
-        .as_deref()
-        .ok_or_else(|| SchedulerError::MissingCron {
-            task: task.name().to_owned(),
-        })?;
-    Cron::from_str(expr).map_err(|e| SchedulerError::InvalidCron {
-        task: task.name().to_owned(),
-        expr: expr.to_owned(),
-        reason: e.to_string(),
-    })?;
     Ok(())
 }
 
@@ -256,6 +227,8 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
 
+    use orbit_server_config::CronSchedule;
+
     use super::*;
     use crate::locking::LockError;
     use crate::testkit::mocks::MockLockService;
@@ -278,16 +251,8 @@ mod tests {
             Self {
                 name,
                 config: ScheduleConfiguration {
-                    cron: Some(cron.to_owned()),
+                    cron: CronSchedule::try_from(cron.to_owned()).unwrap(),
                 },
-                run_count: AtomicUsize::new(0),
-            }
-        }
-
-        fn without_cron(name: &'static str) -> Self {
-            Self {
-                name,
-                config: ScheduleConfiguration { cron: None },
                 run_count: AtomicUsize::new(0),
             }
         }
@@ -385,36 +350,6 @@ mod tests {
 
         assert_eq!(a.run_count(), 1);
         assert_eq!(b.run_count(), 1, "each task has its own cadence lock");
-    }
-
-    #[tokio::test]
-    async fn run_loop_rejects_missing_cron() {
-        let lock_service = Arc::new(AlwaysGrantLockService);
-        let task = Arc::new(StubTask::without_cron("bad"));
-        let tasks: Vec<Box<dyn ScheduledTask>> = vec![Box::new(Arc::clone(&task))];
-
-        let err = run_loop(tasks, lock_service, CancellationToken::new())
-            .await
-            .unwrap_err();
-        assert!(
-            matches!(err, SchedulerError::MissingCron { .. }),
-            "expected MissingCron, got: {err}"
-        );
-    }
-
-    #[tokio::test]
-    async fn run_loop_rejects_invalid_cron() {
-        let lock_service = Arc::new(AlwaysGrantLockService);
-        let task = Arc::new(StubTask::new("bad", "not a cron"));
-        let tasks: Vec<Box<dyn ScheduledTask>> = vec![Box::new(Arc::clone(&task))];
-
-        let err = run_loop(tasks, lock_service, CancellationToken::new())
-            .await
-            .unwrap_err();
-        assert!(
-            matches!(err, SchedulerError::InvalidCron { .. }),
-            "expected InvalidCron, got: {err}"
-        );
     }
 
     #[tokio::test]

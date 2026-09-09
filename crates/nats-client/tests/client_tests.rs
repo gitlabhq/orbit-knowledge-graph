@@ -31,7 +31,7 @@ async fn start_nats() -> (testcontainers::ContainerAsync<Nats>, String) {
 fn config(url: &str) -> NatsConfiguration {
     NatsConfiguration {
         url: url.to_string(),
-        ..Default::default()
+        ..orbit_server_config::AppConfig::embedded_defaults().nats
     }
 }
 

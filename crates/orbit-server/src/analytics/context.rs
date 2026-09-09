@@ -306,6 +306,7 @@ mod tests {
                 .collect(),
             source_type: crate::auth::SourceType::Mcp,
             ai_session_id: None,
+            request_id: None,
             instance_id: None,
             unique_instance_id: None,
             instance_version: None,
@@ -319,7 +320,12 @@ mod tests {
     }
 
     fn query_data(claims: &Claims, tool: &str) -> serde_json::Value {
-        let common = build_common(&AnalyticsConfig::default(), claims, "33").unwrap();
+        let common = build_common(
+            &orbit_server_config::AppConfig::embedded_defaults().analytics,
+            claims,
+            "33",
+        )
+        .unwrap();
         let query = build_query(
             claims,
             tool,
@@ -339,7 +345,12 @@ mod tests {
     }
 
     fn common_data(claims: &Claims, schema_version: &str) -> serde_json::Value {
-        let common = build_common(&AnalyticsConfig::default(), claims, schema_version).unwrap();
+        let common = build_common(
+            &orbit_server_config::AppConfig::embedded_defaults().analytics,
+            claims,
+            schema_version,
+        )
+        .unwrap();
         let query = build_query(
             claims,
             "query_graph",
@@ -396,7 +407,12 @@ mod tests {
     #[test]
     fn build_query_passes_through_coding_agent() {
         let claims = claims_with_paths(vec![]);
-        let common = build_common(&AnalyticsConfig::default(), &claims, "33").unwrap();
+        let common = build_common(
+            &orbit_server_config::AppConfig::embedded_defaults().analytics,
+            &claims,
+            "33",
+        )
+        .unwrap();
         let query = build_query(
             &claims,
             "query_graph",
@@ -450,7 +466,12 @@ mod tests {
     fn build_common_rejects_oversized_instance_id() {
         let mut claims = claims_with_paths(vec![]);
         claims.instance_id = Some("x".repeat(256));
-        let err = build_common(&AnalyticsConfig::default(), &claims, "33").unwrap_err();
+        let err = build_common(
+            &orbit_server_config::AppConfig::embedded_defaults().analytics,
+            &claims,
+            "33",
+        )
+        .unwrap_err();
         assert!(
             matches!(
                 err,
@@ -493,14 +514,24 @@ mod tests {
         #[test]
         fn common_context_validates_against_iglu_schema() {
             let claims = claims_with_paths(vec!["1/22/"]);
-            let common = build_common(&AnalyticsConfig::default(), &claims, "33").unwrap();
+            let common = build_common(
+                &orbit_server_config::AppConfig::embedded_defaults().analytics,
+                &claims,
+                "33",
+            )
+            .unwrap();
             assert_valid(&ORBIT_COMMON_VALIDATOR, &common.data(), "orbit_common");
         }
 
         #[test]
         fn common_context_minimal_validates() {
             let claims = claims_with_paths(vec![]);
-            let common = build_common(&AnalyticsConfig::default(), &claims, "33").unwrap();
+            let common = build_common(
+                &orbit_server_config::AppConfig::embedded_defaults().analytics,
+                &claims,
+                "33",
+            )
+            .unwrap();
             assert_valid(
                 &ORBIT_COMMON_VALIDATOR,
                 &common.data(),

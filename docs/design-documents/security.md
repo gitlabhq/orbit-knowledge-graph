@@ -80,7 +80,11 @@ This layer is primarily intended for .com customers to ensure that they can only
 - Unit tests verify that queries without traversal path filters are rejected by `CheckPass`.
 - Integration tests verify cross-namespace isolation within an organization and cross-organization isolation with multi-org seed data.
 
-**Global table exceptions**: Two entities are global (not namespace-scoped) and have no `traversal_path` column on their node tables: `User` (`gl_user`) and `Runner` (`gl_runner`). Both are listed in `skip_security_filter_for_entities` in the ontology and rely on Rails-side redaction (`Authz::RedactionService` with `read_user` and `read_runner` abilities respectively). They can only appear in query results through edge table joins, and the edge tables always carry the `traversal_path` filter, preventing cross-tenant leakage through global-node joins.
+**Global table exceptions**: Nodes declare `global: true` in the ontology when their tables are not namespace-scoped.
+The compiler's security and check passes use the ontology supplied for that compilation, including its schema-version table prefixes,
+rather than a cached list from the embedded ontology. This keeps archived or overlaid node classifications consistent with the query.
+The current global nodes, `User` and `Runner`, rely on Rails-side redaction with `read_user` and `read_runner` abilities respectively.
+Edge tables and other non-global `gl_*` tables still require traversal-path filters, including when joined to global nodes.
 
 ```plantuml
 @startuml

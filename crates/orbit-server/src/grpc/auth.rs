@@ -23,6 +23,9 @@ impl RequestContext {
         if let Some(sid) = &self.claims.ai_session_id {
             span.record("ai_session_id", sid.as_str());
         }
+        if let Some(rid) = &self.claims.request_id {
+            span.record("client_request_id", rid.as_str());
+        }
         if let Some(agent) = self.coding_agent() {
             span.record("coding_agent", agent);
         }
@@ -142,6 +145,7 @@ mod tests {
                 group_traversal_ids: vec![],
                 source_type: crate::auth::SourceType::Rest,
                 ai_session_id: None,
+                request_id: None,
                 instance_id: None,
                 unique_instance_id: None,
                 instance_version: None,

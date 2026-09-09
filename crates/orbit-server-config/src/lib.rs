@@ -24,12 +24,12 @@ pub mod secret_file_source;
 pub mod tls;
 
 pub use analytics::{AnalyticsConfig, DeploymentConfig, DeploymentEnvironment, DeploymentKind};
-pub use app::{AppConfig, ConfigError, SECRET_FILE_DIR, SharedAppConfig};
+pub use app::{AppConfig, ConfigError, EMBEDDED_DEFAULTS, SECRET_FILE_DIR, SharedAppConfig};
 pub use billing::{BillingConfig, QuotaConfig};
 pub use clickhouse::{ClickHouseConfiguration, ConfigurationError, ProfilingConfig};
 pub use engine::{
     CodeBackfillSweepConfig, CodeIndexingPipelineConfig, CodeIndexingTaskHandlerConfig,
-    DatalakeRetryConfig, EngineConfigError, EngineConfiguration, EntityHandlerConfig,
+    CronSchedule, DatalakeRetryConfig, EngineConfigError, EngineConfiguration, EntityHandlerConfig,
     GlobalDispatcherConfig, HandlersConfiguration, IndexerModule, MigrationCompletionConfig,
     NamespaceDeletionSchedulerConfig, NamespaceDispatcherConfig, ScheduleConfig,
     ScheduleConfiguration, ScheduledTasksConfiguration, SiphonRouterConfig,

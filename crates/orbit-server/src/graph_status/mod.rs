@@ -33,7 +33,7 @@ pub struct GraphStatusService {
 fn graph_status_query_config() -> QueryConfig {
     QueryConfig {
         use_query_cache: Some(true),
-        ..QueryConfig::default()
+        ..orbit_server_config::query::default_config()
     }
 }
 
@@ -381,8 +381,11 @@ mod tests {
 
     #[tokio::test]
     async fn empty_traversal_path_rejected() {
-        let client =
-            Arc::new(orbit_server_config::ClickHouseConfiguration::default().build_client());
+        let client = Arc::new(
+            orbit_server_config::AppConfig::embedded_defaults()
+                .graph
+                .build_client(),
+        );
         let service = GraphStatusService::new(client, test_ontology());
 
         let result = service

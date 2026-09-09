@@ -10,9 +10,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tracing::info;
 
-use crate::resources::{
-    ContainerResources, DEFAULT_MAX_CONCURRENT_WORKERS, derive_code_indexing_slots,
-};
+use crate::resources::{ContainerResources, derive_code_indexing_slots};
 
 // ── Base config types ────────────────────────────────────────────────
 
@@ -30,28 +28,23 @@ use crate::resources::{
 pub struct SubscriptionConfig {
     /// Which concurrency group this subscription belongs to.
     /// Maps to a named semaphore in `EngineConfiguration::concurrency_groups`.
-    #[serde(default)]
     pub concurrency_group: Option<String>,
 
     /// Maximum total attempts (including the first delivery) before giving up.
     ///
     /// `max_attempts: 1` means the message is processed once with no retries.
     /// `max_attempts: 5` means 1 initial attempt + 4 retries.
-    #[serde(default)]
     pub max_attempts: Option<u32>,
 
     /// Delay in seconds between retry attempts. Used as the NATS nack delay.
     /// When absent, nacks use immediate redelivery.
-    #[serde(default)]
     pub retry_interval_secs: Option<u64>,
 
     /// Route exhausted retries to the dead letter queue.
-    #[serde(default)]
     pub dead_letter_on_exhaustion: Option<bool>,
 
     /// Per-consumer cap on simultaneously-delivered-but-not-yet-acked messages.
     /// When absent, the NATS server default applies (currently 1000).
-    #[serde(default)]
     pub max_ack_pending: Option<u32>,
 }
 
@@ -84,7 +77,9 @@ impl SubscriptionConfig {
     }
 }
 
-const DEFAULT_INTERVAL: Duration = Duration::from_secs(60);
+/// Retry cadence when croner finds no occurrence after `now` (an expression
+/// that can never fire again, e.g. a fixed past date).
+const NO_OCCURRENCE_RETRY: Duration = Duration::from_secs(60);
 
 /// Truncate sub-second precision from a [`DateTime`], snapping to the current
 /// whole second. Works around croner 3.0.1 preserving sub-second fractions in
@@ -94,80 +89,79 @@ fn truncate_subsecond(dt: DateTime<Utc>) -> DateTime<Utc> {
     dt.with_nanosecond(0).unwrap_or(dt)
 }
 
+/// A six-field cron expression (`sec min hour dom mon dow`), validated when
+/// the configuration is deserialized so an invalid schedule fails startup.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(try_from = "String", into = "String")]
+#[schemars(with = "String")]
+pub struct CronSchedule {
+    expression: String,
+    #[serde(skip)]
+    cron: Cron,
+}
+
+impl CronSchedule {
+    pub fn expression(&self) -> &str {
+        &self.expression
+    }
+}
+
+impl TryFrom<String> for CronSchedule {
+    type Error = croner::errors::CronError;
+
+    fn try_from(expression: String) -> Result<Self, Self::Error> {
+        let cron = Cron::from_str(&expression)?;
+        Ok(Self { expression, cron })
+    }
+}
+
+impl From<CronSchedule> for String {
+    fn from(schedule: CronSchedule) -> Self {
+        schedule.expression
+    }
+}
+
 /// Per-task schedule configuration.
 ///
 /// Each scheduled task embeds this via `#[serde(flatten)]` in its own typed config struct.
 /// The scheduler reads it via `task.schedule()`.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct ScheduleConfiguration {
-    /// Cron expression with seconds field (6-field: `sec min hour dom mon dow`).
-    /// When absent, the task runs on a default 60-second interval.
-    #[serde(default)]
-    pub cron: Option<String>,
+    pub cron: CronSchedule,
 }
 
 impl ScheduleConfiguration {
     /// Duration until the next fire time after `now`.
-    /// Falls back to `DEFAULT_INTERVAL` when no cron expression is set.
     pub fn next_delay(&self, now: DateTime<Utc>) -> Duration {
-        let Some(expr) = self.cron.as_deref() else {
-            return DEFAULT_INTERVAL;
-        };
-        let Ok(cron) = Cron::from_str(expr) else {
-            return DEFAULT_INTERVAL;
-        };
         // croner 3.0.1 preserves the sub-second fraction of `now` in the
         // returned occurrence, causing drift and periodic double-fires.
         // Truncating to whole seconds for the lookup pins every fire to
         // :00.000; the delta is still measured from the real `now` so the
         // caller sleeps exactly until that clean boundary.
         let truncated = truncate_subsecond(now);
-        cron.find_next_occurrence(&truncated, false)
+        self.cron
+            .cron
+            .find_next_occurrence(&truncated, false)
             .ok()
-            .map(|next| {
-                let delta = next - now;
-                delta.to_std().unwrap_or(DEFAULT_INTERVAL)
-            })
-            .unwrap_or(DEFAULT_INTERVAL)
+            .and_then(|next| (next - now).to_std().ok())
+            .unwrap_or(NO_OCCURRENCE_RETRY)
     }
 
     /// Approximate interval between consecutive firings (used as cadence lock TTL).
-    /// Falls back to `DEFAULT_INTERVAL` when no cron expression is set.
     pub fn interval_hint(&self) -> Duration {
-        let Some(expr) = self.cron.as_deref() else {
-            return DEFAULT_INTERVAL;
-        };
-        let Ok(cron) = Cron::from_str(expr) else {
-            return DEFAULT_INTERVAL;
-        };
         let now = truncate_subsecond(Utc::now());
+        let cron = &self.cron.cron;
         let first = cron.find_next_occurrence(&now, false).ok();
         let second = first.and_then(|t| cron.find_next_occurrence(&t, false).ok());
         match (first, second) {
-            (Some(a), Some(b)) => (b - a).to_std().unwrap_or(DEFAULT_INTERVAL),
-            _ => DEFAULT_INTERVAL,
+            (Some(a), Some(b)) => (b - a).to_std().unwrap_or(NO_OCCURRENCE_RETRY),
+            _ => NO_OCCURRENCE_RETRY,
         }
     }
 }
 
 // ── Handler config types ─────────────────────────────────────────────
-
-fn default_datalake_batch_size() -> u64 {
-    500_000
-}
-
-fn default_system_notes_resolve_lookup_batch_size() -> usize {
-    1_000
-}
-
-fn default_halving_initial_block_size() -> u64 {
-    100_000
-}
-
-fn default_halving_min_block_size() -> u64 {
-    1024
-}
 
 /// Tuning for the SDLC datalake extract retry loop.
 ///
@@ -181,22 +175,11 @@ pub struct DatalakeRetryConfig {
     /// Starting `max_block_size` (in rows) for the halving series after the
     /// first failure. Sized to stay safely under the Arrow String int32
     /// offset cap even on unexpectedly heavy text columns.
-    #[serde(default = "default_halving_initial_block_size")]
     pub halving_initial_block_size: u64,
 
     /// Floor for the halving series. Prevents pathologically tiny scans
     /// after repeated retries.
-    #[serde(default = "default_halving_min_block_size")]
     pub halving_min_block_size: u64,
-}
-
-impl Default for DatalakeRetryConfig {
-    fn default() -> Self {
-        Self {
-            halving_initial_block_size: default_halving_initial_block_size(),
-            halving_min_block_size: default_halving_min_block_size(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
@@ -205,27 +188,14 @@ pub struct EntityHandlerConfig {
     /// Rows per SDLC datalake page (also the ClickHouse `max_block_size`). Unset =
     /// derived from the container memory limit (prod's 32 GiB sdlc pool anchors
     /// the tuned 500k page), floored at 100k.
-    #[serde(default)]
     pub datalake_batch_size: Option<u64>,
 
     #[serde(default)]
     pub batch_size_overrides: HashMap<String, u64>,
 
     /// Maximum number of items bound into each SystemNote resolver lookup.
-    #[serde(default = "default_system_notes_resolve_lookup_batch_size")]
     #[schemars(range(min = 1))]
     pub system_notes_resolve_lookup_batch_size: usize,
-}
-
-impl Default for EntityHandlerConfig {
-    fn default() -> Self {
-        Self {
-            datalake_batch_size: None,
-            batch_size_overrides: HashMap::new(),
-            system_notes_resolve_lookup_batch_size: default_system_notes_resolve_lookup_batch_size(
-            ),
-        }
-    }
 }
 
 impl EntityHandlerConfig {
@@ -242,175 +212,59 @@ impl EntityHandlerConfig {
         );
     }
 
+    /// Panics when [`Self::resolve_runtime_defaults`] has not run and the
+    /// value is unset: there is no fallback constant.
     pub fn datalake_batch_size(&self) -> u64 {
         self.datalake_batch_size
-            .unwrap_or_else(default_datalake_batch_size)
+            .expect("engine.handlers.entity_handler.datalake_batch_size unresolved")
     }
-}
-
-fn default_fetch_concurrency() -> usize {
-    10
-}
-
-fn default_code_indexing_max_file_size_bytes() -> u64 {
-    5_000_000
-}
-
-fn default_code_indexing_max_files() -> usize {
-    1_000_000
-}
-
-fn default_code_indexing_max_total_bytes() -> u64 {
-    2_000_000_000
-}
-
-fn default_code_indexing_per_file_timeout_ms() -> u64 {
-    2000
-}
-
-fn default_code_indexing_per_file_parse_timeout_ms() -> u64 {
-    100
-}
-
-fn default_code_indexing_per_file_walk_timeout_ms() -> u64 {
-    100
-}
-
-fn default_code_indexing_per_file_ssa_timeout_ms() -> u64 {
-    100
-}
-
-fn default_code_indexing_cross_file_resolve_timeout_ms() -> u64 {
-    180_000
-}
-
-fn default_code_indexing_job_timeout_secs() -> u64 {
-    1500
-}
-
-fn default_code_indexing_write_channel_capacity() -> usize {
-    8
-}
-
-fn default_code_indexing_write_slice_rows() -> usize {
-    1_000_000
-}
-
-fn default_code_indexing_write_buffer_age_secs() -> u64 {
-    60
-}
-
-fn default_code_indexing_write_min_flush_rows() -> usize {
-    10_000
-}
-
-fn default_code_indexing_write_max_flush_age_secs() -> u64 {
-    120
-}
-
-fn default_code_indexing_write_max_concurrent() -> usize {
-    4
-}
-
-fn default_code_indexing_small_repo_max_files() -> usize {
-    650
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct CodeIndexingPipelineConfig {
-    #[serde(default = "default_code_indexing_max_file_size_bytes")]
     pub max_file_size_bytes: u64,
-    #[serde(default = "default_code_indexing_max_files")]
     pub max_files: usize,
     /// Post-filter retained bytes above which a repository is skipped entirely
     /// (indexed empty, then checkpointed). Bounds per-repo disk so fetch/index
     /// concurrency can rise without exhausting the pod volume. 0 = no limit.
-    /// Defaults to 2 GB.
-    #[serde(default = "default_code_indexing_max_total_bytes")]
     pub max_total_bytes: u64,
-    #[serde(default)]
     pub worker_threads: usize,
-    #[serde(default)]
     pub max_concurrent_languages: usize,
     /// Global per-file resolution timeout in milliseconds.
     /// Applied to all languages unless the language's own DSL rules
     /// specify a different value. 0 = no global timeout.
-    #[serde(default = "default_code_indexing_per_file_timeout_ms")]
     pub per_file_timeout_ms: u64,
-    #[serde(default = "default_code_indexing_per_file_parse_timeout_ms")]
     pub per_file_parse_timeout_ms: u64,
-    #[serde(default = "default_code_indexing_per_file_walk_timeout_ms")]
     pub per_file_walk_timeout_ms: u64,
-    #[serde(default = "default_code_indexing_per_file_ssa_timeout_ms")]
     pub per_file_ssa_timeout_ms: u64,
     /// Wall-clock budget for the sequential cross-file resolution phase
     /// (import edges, call edges). 0 = no timeout.
-    #[serde(default = "default_code_indexing_cross_file_resolve_timeout_ms")]
     pub cross_file_resolve_timeout_ms: u64,
-    /// Hard wall-clock budget (seconds) for one repository job (fetch + index); exceeding it aborts and retries. May exceed `nats.ack_wait_secs`: the handler heartbeats `ack_progress` and renews the project lock so a long job is not redelivered. 0 = no timeout. Defaults to 1500.
-    #[serde(default = "default_code_indexing_job_timeout_secs")]
+    /// Hard wall-clock budget (seconds) for one repository job (fetch + index); exceeding it aborts and retries. May exceed `nats.ack_wait_secs`: the handler heartbeats `ack_progress` and renews the project lock so a long job is not redelivered. 0 = no timeout.
     pub job_timeout_secs: u64,
     /// Maximum concurrent Gitaly repository fetch operations. Controls how
     /// many repositories can be downloaded simultaneously in the pipelined
-    /// code indexer. 0 = no limit. Defaults to 10.
-    #[serde(default = "default_fetch_concurrency")]
+    /// code indexer. 0 = no limit.
     pub fetch_concurrency: usize,
-    /// In-flight batches the streaming sink holds before back-pressuring the parser. Defaults to 8.
-    #[serde(default = "default_code_indexing_write_channel_capacity")]
+    /// In-flight batches the streaming sink holds before back-pressuring the parser.
     pub write_channel_capacity: usize,
-    /// Maximum rows per ClickHouse insert; larger batches are sliced before sending. Defaults to 1000000.
-    #[serde(default = "default_code_indexing_write_slice_rows")]
+    /// Maximum rows per ClickHouse insert; larger batches are sliced before sending.
     pub write_slice_rows: usize,
-    /// Soft-flush interval in seconds: the coalescer flushes a table on this tick only once it holds at least `write_min_flush_rows`, so a trickle of small repos pools into one part instead of one tiny part per tick. Defaults to 60.
-    #[serde(default = "default_code_indexing_write_buffer_age_secs")]
+    /// Soft-flush interval in seconds: the coalescer flushes a table on this tick only once it holds at least `write_min_flush_rows`, so a trickle of small repos pools into one part instead of one tiny part per tick.
     pub write_buffer_age_secs: u64,
-    /// Minimum buffered rows a table needs before the soft tick flushes it. Below this, rows keep pooling across repos until the row count or the hard `write_max_flush_age_secs` cap is reached. Defaults to 10000.
-    #[serde(default = "default_code_indexing_write_min_flush_rows")]
+    /// Minimum buffered rows a table needs before the soft tick flushes it. Below this, rows keep pooling across repos until the row count or the hard `write_max_flush_age_secs` cap is reached.
     pub write_min_flush_rows: usize,
-    /// Hard cap in seconds on how long a table's oldest unflushed row may wait before it is force-flushed regardless of size, bounding the uncheckpointed-rows window. Keep below `nats.ack_wait_secs`. Defaults to 120.
-    #[serde(default = "default_code_indexing_write_max_flush_age_secs")]
+    /// Hard cap in seconds on how long a table's oldest unflushed row may wait before it is force-flushed regardless of size, bounding the uncheckpointed-rows window. Keep below `nats.ack_wait_secs`.
     pub write_max_flush_age_secs: u64,
-    /// Coalesced parts written to ClickHouse concurrently. Trades memory (up to this many `write_slice_rows`-sized parts in flight) for write throughput. Defaults to 4.
-    #[serde(default = "default_code_indexing_write_max_concurrent")]
+    /// Coalesced parts written to ClickHouse concurrently. Trades memory (up to this many `write_slice_rows`-sized parts in flight) for write throughput.
     pub write_max_concurrent: usize,
-    /// Parsable source-file count (`Decision::Parse`) at or below which a repository runs on the small lane. Defaults to 650.
-    #[serde(default = "default_code_indexing_small_repo_max_files")]
+    /// Parsable source-file count (`Decision::Parse`) at or below which a repository runs on the small lane.
     pub small_repo_max_files: usize,
     /// Concurrent indexing slots for small repositories. Unset = derived from the container CPU count, capped by its memory limit.
-    #[serde(default)]
     pub small_indexing_slots: Option<usize>,
     /// Concurrent indexing slots reserved for big repositories so small ones can't starve them. Unset = derived from the container CPU count, capped by its memory limit.
-    #[serde(default)]
     pub big_indexing_slots: Option<usize>,
-}
-
-impl Default for CodeIndexingPipelineConfig {
-    fn default() -> Self {
-        Self {
-            max_file_size_bytes: default_code_indexing_max_file_size_bytes(),
-            max_files: default_code_indexing_max_files(),
-            max_total_bytes: default_code_indexing_max_total_bytes(),
-            worker_threads: 0,
-            max_concurrent_languages: 0,
-            per_file_timeout_ms: default_code_indexing_per_file_timeout_ms(),
-            per_file_parse_timeout_ms: default_code_indexing_per_file_parse_timeout_ms(),
-            per_file_walk_timeout_ms: default_code_indexing_per_file_walk_timeout_ms(),
-            per_file_ssa_timeout_ms: default_code_indexing_per_file_ssa_timeout_ms(),
-            cross_file_resolve_timeout_ms: default_code_indexing_cross_file_resolve_timeout_ms(),
-            job_timeout_secs: default_code_indexing_job_timeout_secs(),
-            fetch_concurrency: default_fetch_concurrency(),
-            write_channel_capacity: default_code_indexing_write_channel_capacity(),
-            write_slice_rows: default_code_indexing_write_slice_rows(),
-            write_buffer_age_secs: default_code_indexing_write_buffer_age_secs(),
-            write_min_flush_rows: default_code_indexing_write_min_flush_rows(),
-            write_max_flush_age_secs: default_code_indexing_write_max_flush_age_secs(),
-            write_max_concurrent: default_code_indexing_write_max_concurrent(),
-            small_repo_max_files: default_code_indexing_small_repo_max_files(),
-            small_indexing_slots: None,
-            big_indexing_slots: None,
-        }
-    }
 }
 
 impl CodeIndexingPipelineConfig {
@@ -440,12 +294,18 @@ impl CodeIndexingPipelineConfig {
         }
     }
 
+    /// Panics when [`Self::resolve_runtime_defaults`] has not run and the
+    /// value is unset: there is no fallback constant.
     pub fn small_indexing_slots(&self) -> usize {
-        self.small_indexing_slots.unwrap_or(0)
+        self.small_indexing_slots
+            .expect("code-indexing pipeline.small_indexing_slots unresolved")
     }
 
+    /// Panics when [`Self::resolve_runtime_defaults`] has not run and the
+    /// value is unset: there is no fallback constant.
     pub fn big_indexing_slots(&self) -> usize {
-        self.big_indexing_slots.unwrap_or(0)
+        self.big_indexing_slots
+            .expect("code-indexing pipeline.big_indexing_slots unresolved")
     }
 
     /// Hard per-job timeout, or `None` when disabled (`job_timeout_secs == 0`).
@@ -462,23 +322,20 @@ impl CodeIndexingPipelineConfig {
     }
 }
 
-#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct CodeIndexingTaskHandlerConfig {
-    #[serde(default)]
     pub pipeline: CodeIndexingPipelineConfig,
 }
 
 /// Typed per-handler domain configuration (batch sizes, pipeline settings).
 ///
 /// Engine-level config (retry, concurrency, DLQ) lives in `topics`.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 #[schemars(deny_unknown_fields)]
 pub struct HandlersConfiguration {
-    #[serde(default)]
     pub entity_handler: EntityHandlerConfig,
-    #[serde(default)]
     pub code_indexing_task: CodeIndexingTaskHandlerConfig,
 }
 
@@ -490,69 +347,19 @@ pub struct GlobalDispatcherConfig {
     pub schedule: ScheduleConfiguration,
 }
 
-impl Default for GlobalDispatcherConfig {
-    fn default() -> Self {
-        Self {
-            schedule: ScheduleConfiguration {
-                cron: Some("0 */1 * * * *".into()),
-            },
-        }
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct NamespaceDispatcherConfig {
     #[serde(flatten)]
     pub schedule: ScheduleConfiguration,
-    #[serde(default = "default_namespace_sweep_interval_secs")]
     pub sweep_interval_secs: u64,
-}
-
-impl Default for NamespaceDispatcherConfig {
-    fn default() -> Self {
-        Self {
-            schedule: ScheduleConfiguration {
-                cron: Some("*/30 * * * * *".into()),
-            },
-            sweep_interval_secs: default_namespace_sweep_interval_secs(),
-        }
-    }
-}
-
-fn default_namespace_sweep_interval_secs() -> u64 {
-    3600
-}
-
-fn default_events_stream_name() -> String {
-    "siphon_stream_main_db".to_string()
-}
-
-fn default_dispatcher_batch_size() -> usize {
-    100
 }
 
 /// Drives the continuous Siphon CDC trigger: which JetStream the orchestrator
 /// drains and how many messages per `consume_pending` call.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct SiphonRouterConfig {
-    #[serde(default = "default_events_stream_name")]
     pub events_stream_name: String,
-
-    #[serde(default = "default_dispatcher_batch_size")]
     pub batch_size: usize,
-}
-
-impl Default for SiphonRouterConfig {
-    fn default() -> Self {
-        Self {
-            events_stream_name: default_events_stream_name(),
-            batch_size: default_dispatcher_batch_size(),
-        }
-    }
-}
-
-fn default_code_backfill_publish_window() -> usize {
-    200_000
 }
 
 /// Cadence for the coverage-driven code-backfill sweep and its publish batch size.
@@ -560,20 +367,7 @@ fn default_code_backfill_publish_window() -> usize {
 pub struct CodeBackfillSweepConfig {
     #[serde(flatten)]
     pub schedule: ScheduleConfiguration,
-
-    #[serde(default = "default_code_backfill_publish_window")]
     pub publish_window: usize,
-}
-
-impl Default for CodeBackfillSweepConfig {
-    fn default() -> Self {
-        Self {
-            schedule: ScheduleConfiguration {
-                cron: Some("0 */1 * * * *".into()),
-            },
-            publish_window: default_code_backfill_publish_window(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -582,30 +376,10 @@ pub struct TableCleanupConfig {
     pub schedule: ScheduleConfiguration,
 }
 
-impl Default for TableCleanupConfig {
-    fn default() -> Self {
-        Self {
-            schedule: ScheduleConfiguration {
-                cron: Some("0 0 3 * * 0".into()),
-            },
-        }
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct NamespaceDeletionSchedulerConfig {
     #[serde(flatten)]
     pub schedule: ScheduleConfiguration,
-}
-
-impl Default for NamespaceDeletionSchedulerConfig {
-    fn default() -> Self {
-        Self {
-            schedule: ScheduleConfiguration {
-                cron: Some("0 0 3 * * *".into()),
-            },
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -614,28 +388,13 @@ pub struct MigrationCompletionConfig {
     pub schedule: ScheduleConfiguration,
 }
 
-impl Default for MigrationCompletionConfig {
-    fn default() -> Self {
-        Self {
-            schedule: ScheduleConfiguration {
-                cron: Some("0 */1 * * * *".into()),
-            },
-        }
-    }
-}
-
 /// Tombstones edges a node's pipeline stopped emitting, off the indexing path.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct StaleEdgeReconciliationConfig {
     #[serde(flatten)]
     pub schedule: ScheduleConfiguration,
-    #[serde(default = "default_stale_edge_lookback_secs")]
     pub lookback_secs: u64,
-}
-
-fn default_stale_edge_lookback_secs() -> u64 {
-    60 * 60
 }
 
 impl StaleEdgeReconciliationConfig {
@@ -644,37 +403,18 @@ impl StaleEdgeReconciliationConfig {
     }
 }
 
-impl Default for StaleEdgeReconciliationConfig {
-    fn default() -> Self {
-        Self {
-            schedule: ScheduleConfiguration {
-                cron: Some("0 */30 * * * *".into()),
-            },
-            lookback_secs: default_stale_edge_lookback_secs(),
-        }
-    }
-}
-
 /// Typed per-task configuration for all registered scheduled tasks.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 #[schemars(deny_unknown_fields)]
 pub struct ScheduledTasksConfiguration {
-    #[serde(default)]
     pub global: GlobalDispatcherConfig,
-    #[serde(default)]
     pub namespace: NamespaceDispatcherConfig,
-    #[serde(default)]
     pub siphon: SiphonRouterConfig,
-    #[serde(default)]
     pub code_backfill: CodeBackfillSweepConfig,
-    #[serde(default)]
     pub table_cleanup: TableCleanupConfig,
-    #[serde(default)]
     pub namespace_deletion: NamespaceDeletionSchedulerConfig,
-    #[serde(default)]
     pub migration_completion: MigrationCompletionConfig,
-    #[serde(default)]
     pub stale_edge_reconciliation: StaleEdgeReconciliationConfig,
 }
 
@@ -698,7 +438,7 @@ pub enum IndexerModule {
 }
 
 impl IndexerModule {
-    /// Full set of modules. Used as the default so existing deployments stay universal.
+    /// Full set of modules, as declared in `config/default.yaml`.
     pub fn all() -> Vec<IndexerModule> {
         vec![Self::Sdlc, Self::Code, Self::NamespaceDeletion]
     }
@@ -720,7 +460,6 @@ impl IndexerModule {
 pub struct EngineConfiguration {
     /// Maximum concurrent message handlers across all modules. Unset = derived
     /// from the container CPU count, capped by its memory limit.
-    #[serde(default)]
     pub max_concurrent_workers: Option<usize>,
 
     /// Named concurrency groups with their limits. Empty = derived from the
@@ -735,35 +474,21 @@ pub struct EngineConfiguration {
     pub topics: HashMap<String, SubscriptionConfig>,
 
     /// Per-handler domain configuration (batch sizes, pipeline settings).
-    #[serde(default)]
     pub handlers: HandlersConfiguration,
 
     /// Datalake retry tuning shared by all SDLC pipelines.
-    #[serde(default)]
     pub datalake_retry: DatalakeRetryConfig,
 
-    /// Modules whose handlers this process registers. Unset = all modules.
-    #[serde(default = "IndexerModule::all")]
+    /// Modules whose handlers this process registers.
     pub modules: Vec<IndexerModule>,
 }
 
-impl Default for EngineConfiguration {
-    fn default() -> Self {
-        EngineConfiguration {
-            max_concurrent_workers: None,
-            concurrency_groups: HashMap::new(),
-            topics: HashMap::new(),
-            handlers: HandlersConfiguration::default(),
-            datalake_retry: DatalakeRetryConfig::default(),
-            modules: IndexerModule::all(),
-        }
-    }
-}
-
 impl EngineConfiguration {
+    /// Panics when [`Self::resolve_runtime_defaults`] has not run and the
+    /// value is unset: there is no fallback constant.
     pub fn max_concurrent_workers(&self) -> usize {
         self.max_concurrent_workers
-            .unwrap_or(DEFAULT_MAX_CONCURRENT_WORKERS)
+            .expect("engine.max_concurrent_workers unresolved")
     }
 
     /// Returns whether `module` is enabled in this configuration.
@@ -786,10 +511,7 @@ impl EngineConfiguration {
 
 #[derive(Debug, thiserror::Error)]
 pub enum EngineConfigError {
-    #[error(
-        "engine.modules must list at least one module; \
-         leave it unset to register all modules (universal indexer)"
-    )]
+    #[error("engine.modules must list at least one module")]
     NoModulesEnabled,
 
     #[error(
@@ -799,16 +521,20 @@ pub enum EngineConfigError {
 }
 
 /// Top-level schedule configuration.
-#[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct ScheduleConfig {
-    #[serde(default)]
     pub tasks: ScheduledTasksConfiguration,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::AppConfig;
+
+    fn cron(expr: &str) -> CronSchedule {
+        CronSchedule::try_from(expr.to_string()).unwrap()
+    }
 
     fn declared_policy_fixture() -> SubscriptionConfig {
         SubscriptionConfig {
@@ -851,63 +577,58 @@ mod tests {
     }
 
     #[test]
-    fn schedule_tasks_default_to_declared_crons() {
-        let tasks = ScheduledTasksConfiguration::default();
-        assert_eq!(tasks.global.schedule.cron.as_deref(), Some("0 */1 * * * *"));
-        assert_eq!(
-            tasks.namespace.schedule.cron.as_deref(),
-            Some("*/30 * * * * *")
-        );
+    fn embedded_schedule_declares_every_task_cron() {
+        let tasks = AppConfig::embedded_defaults().schedule.tasks;
+        assert_eq!(tasks.global.schedule.cron.expression(), "0 */1 * * * *");
+        assert_eq!(tasks.namespace.schedule.cron.expression(), "*/30 * * * * *");
         assert_eq!(tasks.namespace.sweep_interval_secs, 3600);
         assert_eq!(
-            tasks.code_backfill.schedule.cron.as_deref(),
-            Some("0 */1 * * * *")
+            tasks.table_cleanup.schedule.cron.expression(),
+            "0 0 3 * * 0"
         );
         assert_eq!(
-            tasks.table_cleanup.schedule.cron.as_deref(),
-            Some("0 0 3 * * 0")
-        );
-        assert_eq!(
-            tasks.namespace_deletion.schedule.cron.as_deref(),
-            Some("0 0 3 * * *")
-        );
-        assert_eq!(
-            tasks.migration_completion.schedule.cron.as_deref(),
-            Some("0 */1 * * * *")
-        );
-        assert_eq!(
-            tasks.stale_edge_reconciliation.schedule.cron.as_deref(),
-            Some("0 */30 * * * *")
+            tasks.stale_edge_reconciliation.schedule.cron.expression(),
+            "0 */30 * * * *"
         );
     }
 
     #[test]
-    fn empty_schedule_yaml_yields_default_crons() {
-        let cfg: ScheduleConfig = orbit_utils::yaml::from_str("tasks: {}\n").expect("valid yaml");
-        assert_eq!(
-            cfg.tasks.global.schedule.cron.as_deref(),
-            Some("0 */1 * * * *")
-        );
-        assert_eq!(
-            cfg.tasks.migration_completion.schedule.cron.as_deref(),
-            Some("0 */1 * * * *")
-        );
+    fn task_without_cron_is_rejected() {
+        let err = orbit_utils::yaml::from_str::<TableCleanupConfig>("{}").unwrap_err();
+        assert!(err.to_string().contains("cron"), "{err}");
+    }
+
+    #[test]
+    fn invalid_cron_is_rejected_at_deserialization() {
+        let err = orbit_utils::yaml::from_str::<TableCleanupConfig>("cron: nonsense").unwrap_err();
+        assert!(err.to_string().contains("Invalid pattern"), "{err}");
+    }
+
+    #[test]
+    fn cron_round_trips_through_serialization() {
+        let cfg: TableCleanupConfig = orbit_utils::yaml::from_str("cron: \"0 0 3 * * 0\"").unwrap();
+        let json = serde_json::to_string(&cfg).unwrap();
+        assert_eq!(json, r#"{"cron":"0 0 3 * * 0"}"#);
     }
 
     #[test]
     fn job_timeout_is_some_by_default_and_disabled_at_zero() {
-        let cfg = CodeIndexingPipelineConfig::default();
+        let cfg = AppConfig::embedded_defaults()
+            .engine
+            .handlers
+            .code_indexing_task
+            .pipeline;
         assert_eq!(cfg.job_timeout(), Some(Duration::from_secs(1500)));
         let disabled = CodeIndexingPipelineConfig {
             job_timeout_secs: 0,
-            ..Default::default()
+            ..cfg
         };
         assert_eq!(disabled.job_timeout(), None);
     }
 
     #[test]
     fn default_modules_are_universal() {
-        let cfg = EngineConfiguration::default();
+        let cfg = AppConfig::embedded_defaults().engine;
         assert_eq!(cfg.modules, IndexerModule::all());
         assert!(cfg.is_module_enabled(IndexerModule::Sdlc));
         assert!(cfg.is_module_enabled(IndexerModule::Code));
@@ -919,7 +640,7 @@ mod tests {
     fn empty_modules_fails_validation() {
         let cfg = EngineConfiguration {
             modules: vec![],
-            ..EngineConfiguration::default()
+            ..AppConfig::embedded_defaults().engine
         };
         assert!(matches!(
             cfg.validate(),
@@ -931,7 +652,7 @@ mod tests {
     fn module_subset_only_enables_listed() {
         let cfg = EngineConfiguration {
             modules: vec![IndexerModule::Code],
-            ..EngineConfiguration::default()
+            ..AppConfig::embedded_defaults().engine
         };
         assert!(cfg.is_module_enabled(IndexerModule::Code));
         assert!(!cfg.is_module_enabled(IndexerModule::Sdlc));
@@ -941,27 +662,12 @@ mod tests {
 
     #[test]
     fn modules_deserialize_from_yaml() {
-        let yaml = r#"
-modules: [sdlc, namespace_deletion]
-"#;
-        let cfg: EngineConfiguration = orbit_utils::yaml::from_str(yaml).expect("valid yaml");
+        let modules: Vec<IndexerModule> =
+            orbit_utils::yaml::from_str("[sdlc, namespace_deletion]").expect("valid yaml");
         assert_eq!(
-            cfg.modules,
+            modules,
             vec![IndexerModule::Sdlc, IndexerModule::NamespaceDeletion]
         );
-    }
-
-    #[test]
-    fn omitted_modules_field_uses_default() {
-        let yaml = "max_concurrent_workers: 8\n";
-        let cfg: EngineConfiguration = orbit_utils::yaml::from_str(yaml).expect("valid yaml");
-        assert_eq!(cfg.modules, IndexerModule::all());
-    }
-
-    #[test]
-    fn system_notes_lookup_batch_size_defaults_to_pre_tunable_constant() {
-        let cfg = EntityHandlerConfig::default();
-        assert_eq!(cfg.system_notes_resolve_lookup_batch_size, 1_000);
     }
 
     #[test]
@@ -969,11 +675,12 @@ modules: [sdlc, namespace_deletion]
         let yaml = "system_notes_resolve_lookup_batch_size: 2048\n";
         let cfg: EntityHandlerConfig = orbit_utils::yaml::from_str(yaml).expect("valid yaml");
         assert_eq!(cfg.system_notes_resolve_lookup_batch_size, 2_048);
+        assert!(cfg.batch_size_overrides.is_empty());
     }
 
     #[test]
     fn zero_system_notes_resolve_lookup_batch_size_fails_validation() {
-        let mut cfg = EngineConfiguration::default();
+        let mut cfg = AppConfig::embedded_defaults().engine;
         cfg.handlers
             .entity_handler
             .system_notes_resolve_lookup_batch_size = 0;
@@ -984,9 +691,17 @@ modules: [sdlc, namespace_deletion]
     }
 
     #[test]
+    #[should_panic(expected = "unresolved")]
+    fn unresolved_worker_count_has_no_fallback() {
+        let _ = AppConfig::embedded_defaults()
+            .engine
+            .max_concurrent_workers();
+    }
+
+    #[test]
     fn interval_hint_returns_exact_period() {
         let sched = ScheduleConfiguration {
-            cron: Some("0 */1 * * * *".into()),
+            cron: cron("0 */1 * * * *"),
         };
 
         let hint = sched.interval_hint();
@@ -1004,7 +719,7 @@ modules: [sdlc, namespace_deletion]
         use chrono::NaiveDate;
 
         let sched = ScheduleConfiguration {
-            cron: Some("0 */1 * * * *".into()),
+            cron: cron("0 */1 * * * *"),
         };
 
         // 2026-01-15 10:05:00.700 UTC — 700ms into a matching second.

@@ -34,7 +34,7 @@ async fn main() -> anyhow::Result<()> {
         .expect("Failed to install rustls CryptoProvider");
 
     let args = Args::parse();
-    let config = AppConfig::load()?;
+    let config = AppConfig::load(args.config.as_deref())?;
 
     // Force-parse schema/format versions at boot so malformed version files
     // fail fast instead of per-request.
@@ -80,35 +80,23 @@ async fn main() -> anyhow::Result<()> {
     let result = match args.mode {
         Mode::DispatchIndexing => {
             config.schema.validate()?;
+            let archive = ontology::archive::OntologyArchive::from_bytes(
+                *schema::version::SCHEMA_VERSION,
+                include_bytes!(env!("ONTOLOGY_ARCHIVE_PATH")),
+            )?;
+
             let graph = config.graph.build_client();
             info!("initializing schema version table");
             schema::version::init(&graph).await?;
 
-            let dispatcher_config = DispatcherConfig {
-                nats: config.nats.clone(),
-                graph: config.graph.clone(),
-                datalake: config.datalake.clone(),
-                schedule: config.schedule.clone(),
-                schema: config.schema.clone(),
-                health_bind_address: config.dispatcher_health_bind_address,
-            };
-            indexer::run_dispatcher(&dispatcher_config, &ontology, shutdown)
+            let dispatcher_config = DispatcherConfig::from(&config);
+            indexer::run_dispatcher(&dispatcher_config, &archive, shutdown)
                 .await
                 .map_err(Into::into)
         }
         Mode::HealthCheck => health_check_mode::run(&config).await.map_err(Into::into),
         Mode::Indexer => {
-            let indexer_config = IndexerConfig {
-                nats: config.nats.clone(),
-                graph: config.graph.clone(),
-                datalake: config.datalake.clone(),
-                engine: config.engine.clone(),
-                gitlab: config.gitlab_client_config(),
-                schedule: config.schedule.clone(),
-                health_bind_address: config.indexer_health_bind_address,
-                schema: config.schema.clone(),
-                analytics: config.analytics.clone(),
-            };
+            let indexer_config = IndexerConfig::from(&config);
             indexer::run(&indexer_config, ontology, shutdown)
                 .await
                 .map_err(Into::into)

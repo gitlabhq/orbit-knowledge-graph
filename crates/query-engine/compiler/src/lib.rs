@@ -82,17 +82,44 @@ use std::sync::Arc;
 
 use config::CompilerCtx as _;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QueryLanguage {
+    Json,
+    Cypher,
+}
+
+impl QueryLanguage {
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "json" => Some(Self::Json),
+            "cypher" => Some(Self::Cypher),
+            _ => None,
+        }
+    }
+}
+
+/// Compile a query in the given language into a [`CompiledQueryContext`].
+///
+/// `Json` runs the full ClickHouse pipeline (validate through codegen).
+/// `Cypher` is not yet implemented.
+#[must_use = "the compiled query context should be used"]
+pub fn compile_query(
+    query: &str,
+    language: QueryLanguage,
+    ontology: &Ontology,
+    ctx: &SecurityContext,
+) -> Result<CompiledQueryContext> {
+    match language {
+        QueryLanguage::Json => compile(query, ontology, ctx),
+        QueryLanguage::Cypher => Err(error::QueryError::Validation(
+            "Cypher frontend is not yet implemented".into(),
+        )),
+    }
+}
+
 /// Compile a JSON query into a [`CompiledQueryContext`].
 ///
-/// The context contains the parameterized SQL, bind parameters, result context
-/// for redaction, hydration plan, and the validated input.
-///
-/// Runs the ClickHouse compilation pipeline. Edge-chain-first lowering
-/// produces flat edge-chain JOINs with inline dedup.
-///
-/// ```text
-/// JSON → Validate → Normalize → Restrict → Lower → Enforce → Security → Check → HydratePlan → Settings → Codegen
-/// ```
+/// Shorthand for `compile_query(query, QueryLanguage::Json, ...)`.
 #[must_use = "the compiled query context should be used"]
 pub fn compile(
     json_input: &str,
@@ -308,6 +335,91 @@ mod tests {
             sql.contains("mr.author_id"),
             "FK elision should join via mr.author_id, got: {sql}"
         );
+    }
+
+    #[test]
+    fn compile_uses_supplied_ontology_for_scoped_user_table() {
+        let scoped_user = ONTOLOGY.clone().with_path_scopable_nodes(["User"]);
+        let query = r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":["id"]}],"limit":1}"#;
+
+        for (ontology, expected_table) in [
+            (scoped_user.clone(), "gl_user"),
+            (scoped_user.with_schema_version_prefix("v1_"), "v1_gl_user"),
+        ] {
+            let sql = compile(query, &ontology, &security_ctx())
+                .expect("should compile")
+                .base
+                .render();
+            assert!(
+                sql.contains("startsWith(u.traversal_path"),
+                "supplied ontology must keep the User alias scoped, got:\n{sql}"
+            );
+            assert!(
+                sql.contains(expected_table),
+                "ontology should render {expected_table}, got:\n{sql}"
+            );
+        }
+    }
+
+    #[test]
+    fn compile_uses_each_ontologys_global_tables_and_keeps_join_filters() {
+        let query = r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "user", "entity": "User", "node_ids": [1], "filters": {"username": "alice"}},
+                {"id": "project", "entity": "Project", "filters": {"name": "orbit"}}
+            ],
+            "relationships": [{
+                "type": "MEMBER_OF",
+                "from": "user",
+                "to": "project"
+            }],
+            "limit": 1
+        }"#;
+
+        let mut sources = ontology::migrations::embedded_sources();
+        let user_source = sources.get_mut("nodes/core/user.yaml").unwrap();
+        *user_source = user_source.replace(
+            "destination_table: gl_user",
+            "destination_table: gl_renamed_user",
+        );
+        let archived_ontology = ontology::archive::OntologyArchive::from_sources(1, &sources)
+            .expect("renamed archive should build")
+            .load_ontology()
+            .expect("renamed archive should load");
+        let prefixed = archived_ontology.clone().with_schema_version_prefix("v1_");
+
+        for (ontology, expected_user_table) in [
+            (archived_ontology.clone(), "gl_renamed_user"),
+            (ONTOLOGY.clone(), "gl_user"),
+            (prefixed, "v1_gl_renamed_user"),
+            (
+                ONTOLOGY.clone().with_schema_version_prefix("v2_"),
+                "v2_gl_user",
+            ),
+            (archived_ontology, "gl_renamed_user"),
+        ] {
+            let sql = compile(query, &ontology, &security_ctx())
+                .expect("should compile")
+                .base
+                .render();
+            assert!(
+                sql.contains(expected_user_table),
+                "compiled SQL should use {expected_user_table}, got:\n{sql}"
+            );
+            assert!(
+                !sql.contains("startsWith(user.traversal_path"),
+                "global User must stay unscoped, got:\n{sql}"
+            );
+            assert!(
+                sql.contains("startsWith(project.traversal_path"),
+                "joined Project alias must remain scoped, got:\n{sql}"
+            );
+            assert!(
+                sql.contains("startsWith(e0.traversal_path"),
+                "edge alias e0 must remain scoped, got:\n{sql}"
+            );
+        }
     }
 
     #[test]

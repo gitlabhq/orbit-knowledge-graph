@@ -16,6 +16,7 @@
 //! let user = ontology.get_node("User").expect("User node exists");
 //! ```
 
+pub mod archive;
 pub mod constants;
 pub mod denormalized;
 mod entities;
@@ -1173,6 +1174,14 @@ impl Ontology {
             .filter(|n| n.global)
             .map(|n| n.destination_table.as_str())
             .collect()
+    }
+
+    #[must_use]
+    pub fn is_global_table(&self, table: &str) -> bool {
+        let normalized = strip_schema_version_prefix(table);
+        self.global_tables()
+            .into_iter()
+            .any(|global| strip_schema_version_prefix(global) == normalized)
     }
 
     #[must_use]

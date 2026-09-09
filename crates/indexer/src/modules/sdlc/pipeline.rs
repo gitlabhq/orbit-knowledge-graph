@@ -492,6 +492,7 @@ mod tests {
     use arrow::array::{BooleanArray, Int64Array, StringArray};
     use arrow::datatypes::{DataType as ArrowDataType, Field as ArrowField, Schema};
     use async_trait::async_trait;
+    use orbit_server_config::AppConfig;
     use std::collections::HashSet;
     use std::sync::Mutex;
 
@@ -712,7 +713,7 @@ mod tests {
             Arc::new(EmptyDatalake),
             Arc::new(RecordingCheckpointStore::new()),
             test_metrics(),
-            Default::default(),
+            AppConfig::embedded_defaults().engine.datalake_retry,
         );
         let plan = simple_plan("Test");
 
@@ -741,7 +742,7 @@ mod tests {
             }),
             store.clone(),
             test_metrics(),
-            Default::default(),
+            AppConfig::embedded_defaults().engine.datalake_retry,
         );
         let result = pipeline
             .run_plan(
@@ -805,7 +806,7 @@ mod tests {
             }),
             store.clone(),
             test_metrics(),
-            Default::default(),
+            AppConfig::embedded_defaults().engine.datalake_retry,
         );
         pipeline
             .run_plan(
@@ -832,7 +833,7 @@ mod tests {
             Arc::new(FailingDatalake),
             Arc::new(RecordingCheckpointStore::new()),
             test_metrics(),
-            Default::default(),
+            AppConfig::embedded_defaults().engine.datalake_retry,
         );
         let plan = simple_plan("Failing");
 
@@ -906,7 +907,7 @@ mod tests {
             datalake.clone(),
             Arc::new(RecordingCheckpointStore::new()),
             test_metrics(),
-            Default::default(),
+            AppConfig::embedded_defaults().engine.datalake_retry,
         );
 
         let plan = simple_plan("Test");
@@ -1104,7 +1105,7 @@ mod tests {
             Arc::new(EmptyDatalake),
             store,
             test_metrics(),
-            Default::default(),
+            AppConfig::embedded_defaults().engine.datalake_retry,
         );
         let plan = simple_plan("Test");
 
@@ -1180,7 +1181,7 @@ mod tests {
             datalake,
             Arc::new(RecordingCheckpointStore::new()),
             test_metrics(),
-            Default::default(),
+            AppConfig::embedded_defaults().engine.datalake_retry,
         );
         let plan = simple_plan("Test");
 

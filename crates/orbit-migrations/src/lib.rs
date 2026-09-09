@@ -1,4 +1,5 @@
 pub mod campaign;
+pub mod catalog;
 pub mod completion;
 pub mod execute;
 pub mod fingerprint;

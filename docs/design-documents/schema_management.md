@@ -122,6 +122,15 @@ Version 0 uses no prefix for backward compatibility. Functions `table_prefix(ver
 Unprefixed names are stored in the ontology (the ontology validation enforces the `gl_` prefix
 convention). The prefix is applied at the call site when constructing ClickHouse queries.
 
+### Ontology archives
+
+- `mise schema:bump` creates `config/ontology-archives/v<N>.tar.gz`; amendments refresh it. Builds and CI require exact source contents.
+- `mise schema:snapshot` seeds the current archive without replacing an existing one.
+- Publication validates and stores archives by schema version in the durable `orbit_ontology_archives` NATS KV bucket. The dispatcher reuses that ontology for migration.
+- Identical retries succeed; different bytes for a published version fail. Published archives stay immutable.
+- Restore historical archives from their exact release, never from current sources.
+- Serving, readiness, and promotion are unchanged. Older archives are not required at startup.
+
 ### Webserver prefix injection
 
 The webserver pins the table prefix to its **embedded** `SCHEMA_VERSION` at startup. The prefix
@@ -416,7 +425,7 @@ their readiness check.
 
 ### Automatic cleanup via retention window
 
-On every migration-completion run, the checker sweeps `system.tables` for objects in the graph
+After each successful migration-completion check, the checker sweeps `system.tables` for objects in the graph
 database whose names match `v<N>_`. The keep-set contains every active version, every migrating
 version, and the newest `max_retained_versions - 1` retired versions. With the default
 `max_retained_versions: 2`, this normally keeps the active version and one retired rollback target;
