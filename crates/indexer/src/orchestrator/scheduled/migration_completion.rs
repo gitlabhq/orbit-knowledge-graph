@@ -209,6 +209,12 @@ impl MigrationCompletionChecker {
             .await
             .map_err(|e| TaskError::new(format!("mark v{migrating_version} active: {e}")))?;
 
+        info!(
+            version = migrating_version,
+            ?retired_versions,
+            "promoted schema version, retired previously active versions"
+        );
+
         for version in retired_versions {
             if let Err(error) = orbit_migrations::execute::drop_versioned_refreshable_views(
                 &self.graph,

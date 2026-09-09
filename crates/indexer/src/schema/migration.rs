@@ -191,10 +191,11 @@ async fn run_rollback(
             target_version = *SCHEMA_VERSION,
             "embedded version's table set is complete — rolling back via direct re-activation"
         );
-        promote_version(graph, *SCHEMA_VERSION).await?;
+        let retired_versions = promote_version(graph, *SCHEMA_VERSION).await?;
         metrics.record("complete", "rollback_reactivated");
         info!(
             version = *SCHEMA_VERSION,
+            ?retired_versions,
             "rollback complete — resuming on existing tables"
         );
         return Ok(());
