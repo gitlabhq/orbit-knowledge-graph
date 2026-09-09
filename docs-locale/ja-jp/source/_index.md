@@ -16,22 +16,18 @@ title: GitLab Orbit
 
 {{< history >}}
 
-- `knowledge_graph`という名前の[機能フラグ](https://docs.gitlab.com/administration/feature_flags/)を使用して、GitLab 18.10で[導入](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676)されました。デフォルトでは無効です。この機能は[実験的機能](https://docs.gitlab.com/policy/development_stages_support/#experiment)です。
-- GitLab 19.1で[ベータ](https://docs.gitlab.com/policy/development_stages_support/#beta)に[変更](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676)されました。
+- GitLab 18.10で`knowledge_graph`[機能フラグ](https://docs.gitlab.com/administration/feature_flags/)とともに[導入](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676)されました。デフォルトでは無効です。この機能は[実験的機能](https://docs.gitlab.com/policy/development_stages_support/#experiment)です。
+- GitLab 19.1で[ベータ版](https://docs.gitlab.com/policy/development_stages_support/#beta)に[変更](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676)されました。
 - GitLab 19.2.2でGitLab Self-Managed向けに[導入](https://gitlab.com/groups/gitlab-org/-/epics/22739)されました。
 
 {{< /history >}}
 
 > [!flag]
-> この機能の利用可否は機能フラグによって制御されています。
-> 詳細については、履歴を参照してください。
-> この機能はテスト目的で利用可能ですが、本番環境での使用には対応していません。
+ この機能の利用可否は、機能フラグによって制御されます。詳細については、履歴を参照してください。この機能はテスト目的で利用可能ですが、本番環境での使用には対応していません。
 
-GitLab Orbitはお使いのGitLabインスタンスをインデックス作成し、SDLC全体をクエリ可能なプロパティグラフとして公開します。
-グループで有効にすると、GitLab Orbitはプロジェクト、ユーザー、マージリクエスト、パイプライン、
-作業アイテム、セキュリティの検出結果、ソースコード自体をすべてマップし、それらの関係性を示すプロパティグラフを構築します。
+GitLab Orbitはお使いのGitLabインスタンスをインデックス作成し、SDLC全体をクエリ可能なプロパティグラフとして公開します。グループで有効にすると、GitLab Orbitはプロジェクト、ユーザー、マージリクエスト、パイプライン、作業アイテム、セキュリティの検出結果、ソースコード自体をすべてマップし、それらの関係性を示すプロパティグラフを構築します。
 
-グラフをクエリすることで、インスタンスだけでは直接回答できない質問に答えられます。
+グラフをクエリすることで、インスタンスだけでは直接回答できない質問に答えられます:
 
 - このサービスを変更すると何が壊れるか？
 - 過去90日間でこのファイルに変更を加えたマージリクエストはどれか？
@@ -44,7 +40,6 @@ GitLab Orbitはある時点でのSDLCインサイトを目的とした分析シ�
 クリックスルーデモについては、[GitLab Orbit](https://click-through-demo-generator-v-2-d63870.gitlab.io/demos/orbit-v2/)をご覧ください。
 <!-- Demo published on 2026-06-30 -->
 
-<!-- markdownlint-disable-next-line MD044 -->
 ## GitLab Orbit Remote {#gitlab-orbit-remote}
 
 GitLab.comでは、GitLab Orbit RemoteはGitLabインフラストラクチャ上で独立したサービスとして動作します。トップレベルグループで有効にすると、グループ、プロジェクト、ユーザー、マージリクエスト、パイプライン、脆弱性、ソースコードなど、SDLC全体とコードを自動的にインデックス作成し、マネージドClickHouseグラフに格納します。
@@ -73,7 +68,6 @@ GitLab Orbit Remoteは独立したサービスとして動作し、GitLabイン�
 
 [GitLab Orbit Remoteを使ってみる](remote/getting-started.md)
 
-<!-- markdownlint-disable-next-line MD044 -->
 ## GitLab Orbit Local {#gitlab-orbit-local}
 
 GitLab Orbit Localはお使いのマシン上で完全に動作します。GitLab Orbit CLI（`orbit`）はローカルリポジトリを解析し、定義とクロスファイル参照を抽出して、グラフをローカルのDuckDBファイルに書き込みます。GitLabインスタンスやネットワーク接続は不要です。
@@ -92,17 +86,15 @@ GitLab Orbit Localはコードのみをインデックス作成します。マ�
 
 [GitLab Orbit Localを使ってみる](local/getting-started.md)
 
-<!-- markdownlint-disable-next-line MD044 -->
 ## GitLab Self-ManagedでのGitLab Orbit {#gitlab-orbit-on-gitlab-self-managed}
 
 GitLab Self-Managedでは、インスタンスの隣にあるKubernetesクラスター上でGitLab Orbitを実行します。このデプロイには、グラフにデータを供給するデータパイプライン（PostgreSQLロジカルレプリケーション、Siphon、NATS、ClickHouse）も含まれます。グラフとクエリインターフェースはGitLab.comと同一です。
 
 [GitLab Self-ManagedでGitLab Orbitを使ってみる](self-managed/getting-started.md)
 
-<!-- markdownlint-disable-next-line MD044 -->
 ## GitLab Orbitがインデックス作成する対象 {#what-gitlab-orbit-indexes}
 
-GitLab Orbitは2つのカテゴリのデータをインデックス作成します。
+GitLab Orbitは2つのカテゴリのデータをインデックス作成します:
 
 - GitLabインスタンスのSDLCオブジェクト: グループ、プロジェクト、ユーザー、マージリクエスト、パイプライン、ジョブ、作業アイテム、マイルストーン、ラベル、セキュリティの検出結果。
 
@@ -110,7 +102,7 @@ GitLab Orbitは2つのカテゴリのデータをインデックス作成しま�
 
 GitLab OrbitはRuby、Java、Kotlin、Python、TypeScript、JavaScript、Rust、Go、C#、C、C++、PHPのコードをインデックス作成します。
 
-[インデックス作成の対象範囲](remote/indexing.md) | [スキーマリファレンス](remote/schema.md)
+[インデックス作成の対象範囲](remote/indexing.md) \| [スキーマリファレンス](remote/schema.md)
 
 ## はじめに {#get-started}
 
