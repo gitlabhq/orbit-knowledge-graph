@@ -1,6 +1,6 @@
 mod clickhouse;
 mod code;
-mod common;
+pub(crate) mod common;
 mod dispatcher;
 mod engine;
 mod namespace_deletion;

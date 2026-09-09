@@ -385,7 +385,11 @@ The Orbit schema is declared in `config/graph.sql` (generated from the ontology)
 
 Migration requires usable [ontology archives](../schema_management.md#ontology-archives) for both the active and target versions.
 
-The schema is backward compatible with the previous version until the schema migration is complete for every namespace. A migration is considered complete when `MigrationCompletionChecker` detects that all enabled namespaces have been re-indexed into new-prefix tables, then promotes the new version to `active` and retires the old one.
+The active table-set continues serving queries while the target version is built; this does not
+require the two ontologies to be backward compatible. `MigrationCompletionChecker` promotes the
+target to `active` and retires the old version once the required namespaced and global pipelines
+complete. Each Webserver must still be able to load and serve the promoted archive; there is no
+universal binary/archive compatibility guarantee.
 
 There are multiple types of schema changes the system accounts for:
 
@@ -444,9 +448,21 @@ Indexers then fill the rebuilt tables through the normal global and namespace sw
 
 **Schema update coordination**
 
-When indexing requires a schema update, the `gkg-webserver` must detect the new version so it can serve queries from the correct tables. The `SchemaWatcher` in the webserver polls the `gkg_schema_version` control table in ClickHouse at a configurable interval. When the active version transitions (e.g. from pending to ready, or outdated), the webserver updates its internal state accordingly. If the active version exceeds the binary's embedded version, the watcher requests a graceful shutdown so the pod restarts with a newer binary.
+The Webserver's `SchemaWatcher` polls the active version in `gkg_schema_version`, uses the embedded
+archive when its migration version matches, and otherwise loads the archive from the catalog. It
+builds an immutable snapshot with the prefixed ontology, compatible named queries, and a
+per-schema path resolver, then rechecks active before atomically installing it. Compatible older
+or newer archives are served without an outdated-version shutdown.
 
-The system does not perform any breaking action on the schema until all namespaces have been migrated to the latest version.
+Readiness reflects snapshot availability. Metadata-read errors retain the previous snapshot;
+no active version or an unusable archive for the confirmed active version clears it, making
+schema-dependent RPCs unavailable until a retry succeeds. A `migrating` row alone does not remove
+a usable active snapshot. Liveness is independent.
+
+Each request pins its snapshot through completion, including across promotion or rollback.
+Retired tables must remain available for those in-flight requests; snapshot references do not
+extend the count-based retention window. See [schema management](../schema_management.md) for
+stream deadlines, preparatory-release requirements, and retention limits.
 
 **Closing notes**
 

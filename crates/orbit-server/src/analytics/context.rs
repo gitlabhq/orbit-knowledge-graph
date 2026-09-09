@@ -204,7 +204,6 @@ fn apply_metrics(
     q.ch_read_bytes = Some(metrics.ch_read_bytes as i64);
     q.ch_memory_usage = Some(metrics.ch_memory_usage as i64);
 
-    q.graph_schema_version = VERSIONS.schema.to_string().parse().ok();
     q.query_dsl_version = VERSIONS.query_dsl.parse().ok();
     q.raw_output_format_version = VERSIONS.raw_output_format.parse().ok();
     q.goon_output_format_version = VERSIONS.goon_output_format.parse().ok();

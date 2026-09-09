@@ -166,6 +166,10 @@ impl NamedQueries {
         self.queries.values()
     }
 
+    pub fn retain(&mut self, mut compatible: impl FnMut(&NamedQuery) -> bool) {
+        self.queries.retain(|_, query| compatible(query));
+    }
+
     pub fn names(&self) -> impl Iterator<Item = &str> {
         self.queries.keys().map(String::as_str)
     }

@@ -34,16 +34,16 @@ fn build_grpc_server(addr: SocketAddr, tls_config: Option<ServerTlsConfig>) -> G
     let ontology = Arc::new(ontology::Ontology::load_embedded().expect("ontology must load"));
     let clickhouse_config = orbit_server_config::AppConfig::embedded_defaults().graph;
     let cluster_health = ClusterHealthChecker::default().into_arc();
-    GrpcServer::new(
-        addr,
+    let config = orbit_server_config::AppConfig::embedded_defaults();
+    let service = orbit_server::grpc::OrbitServiceImpl::new(
         validator,
-        ontology,
+        orbit_server::schema_watcher::SchemaWatcher::fixed(ontology),
         &clickhouse_config,
         cluster_health,
-        tls_config,
-        orbit_server_config::AppConfig::embedded_defaults().grpc,
-        Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
-    )
+        config.grpc.stream_timeout_secs,
+        Arc::new(config.analytics),
+    );
+    GrpcServer::new(addr, service, tls_config, config.grpc)
 }
 
 async fn connect_with_retry(endpoint: Endpoint, retries: u32) -> tonic::transport::Channel {

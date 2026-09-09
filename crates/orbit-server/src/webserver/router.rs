@@ -7,7 +7,7 @@ use axum::{Json, Router, routing::get};
 use labkit::http::{CorrelationLayer, GitlabTraceLayer, HttpMetricsLayer};
 use serde::Serialize;
 
-use crate::schema_watcher::{SchemaState, SchemaWatcher};
+use crate::schema_watcher::SchemaWatcher;
 
 #[derive(Serialize)]
 struct HealthResponse {
@@ -30,27 +30,15 @@ async fn live() -> Json<HealthResponse> {
 }
 
 async fn ready(State(schema_watcher): State<Arc<SchemaWatcher>>) -> impl IntoResponse {
-    let mut unhealthy_components = Vec::new();
-
-    match schema_watcher.current() {
-        SchemaState::Ready => {}
-        SchemaState::Pending => unhealthy_components.push("schema_pending"),
-        SchemaState::Outdated => unhealthy_components.push("schema_outdated"),
-        SchemaState::Migrating => unhealthy_components.push("schema_migrating"),
-    }
-
-    let healthy = unhealthy_components.is_empty();
-    let status_code = if healthy {
-        StatusCode::OK
+    let healthy = schema_watcher.snapshot().is_ok();
+    let (status_code, label, unhealthy_components) = if healthy {
+        (StatusCode::OK, "ok", Vec::new())
     } else {
-        StatusCode::SERVICE_UNAVAILABLE
-    };
-    let label = if healthy {
-        "ok"
-    } else if unhealthy_components == ["schema_migrating"] {
-        "migrating"
-    } else {
-        "unhealthy"
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "unhealthy",
+            vec!["schema_pending"],
+        )
     };
 
     (
@@ -82,7 +70,7 @@ mod tests {
     use super::*;
 
     fn ready_watcher() -> Arc<SchemaWatcher> {
-        SchemaWatcher::for_state(SchemaState::Ready)
+        SchemaWatcher::fixed(Arc::new(ontology::Ontology::load_embedded().unwrap()))
     }
 
     fn request(path: &str) -> Request<Body> {

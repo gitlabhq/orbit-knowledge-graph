@@ -423,7 +423,9 @@ async fn run_pipeline(
         .await?
         .then(&CompilationStage)
         .await?
-        .then(&ClickHouseExecutor)
+        .then(&ClickHouseExecutor {
+            migration_version: *orbit_migrations::version::SCHEMA_VERSION,
+        })
         .await?
         .then(&ExtractionStage)
         .await?

@@ -1,13 +1,11 @@
 use std::sync::Arc;
 
 use crate::analytics::{AnalyticsObserver, AnalyticsTracker};
-use crate::auth::Claims;
+use crate::auth::RequestContext;
 use crate::proto::ExecuteQueryMessage;
 use clickhouse_client::ArrowClickHouseClient;
 use nats_client::NatsClient;
-use ontology::Ontology;
 use orbit_billing::{BillingObserver, BillingTracker};
-use orbit_migrations::version::SCHEMA_VERSION;
 use orbit_server_config::AnalyticsConfig;
 use query_engine::shared::content::ColumnResolverRegistry;
 use tokio::sync::mpsc;
@@ -19,36 +17,28 @@ use query_engine::pipeline::{
 use query_engine::shared::{CompilationStage, ExtractionStage, OutputStage, PipelineOutput};
 
 use super::metrics::OTelPipelineObserver;
-use super::path_resolver::PathResolver;
 use super::stages::{
     AuthorizationStage, ClickHouseExecutor, HydrationStage, PathResolutionStage, RedactionStage,
     SecurityStage,
 };
+use crate::schema_watcher::ServingSchema;
 
 #[derive(Clone)]
 pub struct QueryPipelineService {
-    ontology: Arc<Ontology>,
     client: Arc<ArrowClickHouseClient>,
     resolver_registry: Option<Arc<ColumnResolverRegistry>>,
     cache_broker: Option<Arc<NatsClient>>,
-    path_resolver: Option<Arc<PathResolver>>,
     billing_tracker: Option<Arc<dyn BillingTracker>>,
     analytics_tracker: Option<Arc<dyn AnalyticsTracker>>,
     analytics_config: Arc<AnalyticsConfig>,
 }
 
 impl QueryPipelineService {
-    pub fn new(
-        ontology: Arc<Ontology>,
-        client: Arc<ArrowClickHouseClient>,
-        analytics_config: Arc<AnalyticsConfig>,
-    ) -> Self {
+    pub fn new(client: Arc<ArrowClickHouseClient>, analytics_config: Arc<AnalyticsConfig>) -> Self {
         Self {
-            ontology,
             client,
             resolver_registry: None,
             cache_broker: None,
-            path_resolver: None,
             billing_tracker: None,
             analytics_tracker: None,
             analytics_config,
@@ -65,11 +55,6 @@ impl QueryPipelineService {
         self
     }
 
-    pub fn with_path_resolver(mut self, resolver: Arc<PathResolver>) -> Self {
-        self.path_resolver = Some(resolver);
-        self
-    }
-
     pub fn with_billing(mut self, tracker: Arc<dyn BillingTracker>) -> Self {
         self.billing_tracker = Some(tracker);
         self
@@ -80,16 +65,18 @@ impl QueryPipelineService {
         self
     }
 
-    pub async fn run_query(
+    pub(crate) async fn run_query(
         &self,
-        claims: Claims,
-        coding_agent: Option<String>,
+        schema: &ServingSchema,
+        request_context: RequestContext,
         query_json: &str,
         tx: mpsc::Sender<Result<ExecuteQueryMessage, Status>>,
         stream: Streaming<ExecuteQueryMessage>,
-        timeout: std::time::Duration,
+        deadline: tokio::time::Instant,
     ) -> Result<PipelineOutput, PipelineError> {
-        let mut obs = MultiObserver::new(vec![
+        let coding_agent = request_context.coding_agent().map(String::from);
+        let claims = request_context.claims;
+        let mut observers = MultiObserver::new(vec![
             Box::new(OTelPipelineObserver::start()),
             Box::new(BillingObserver::new(
                 self.billing_tracker.clone(),
@@ -101,7 +88,7 @@ impl QueryPipelineService {
                 claims.clone(),
                 "query_graph",
                 coding_agent,
-                SCHEMA_VERSION.to_string(),
+                schema.migration_version.to_string(),
             )),
         ]);
 
@@ -116,14 +103,12 @@ impl QueryPipelineService {
         if let Some(broker) = &self.cache_broker {
             server_extensions.insert(Arc::clone(broker));
         }
-        if let Some(resolver) = &self.path_resolver {
-            server_extensions.insert(Arc::clone(resolver));
-        }
+        server_extensions.insert(Arc::clone(&schema.path_resolver));
 
-        let mut ctx = QueryPipelineContext {
+        let mut context = QueryPipelineContext {
             query_json: query_json.to_string(),
             compiled: None,
-            ontology: Arc::clone(&self.ontology),
+            ontology: Arc::clone(&schema.ontology),
             security_context: None,
             server_extensions,
             phases: TypeMap::default(),
@@ -134,14 +119,16 @@ impl QueryPipelineService {
         // tore down the observer before record_error could run, leaving
         // timed-out queries invisible to every metric.
         let pipeline = async {
-            PipelineRunner::start(&mut ctx, &mut obs)
+            PipelineRunner::start(&mut context, &mut observers)
                 .then(&SecurityStage)
                 .await?
                 .then(&PathResolutionStage)
                 .await?
                 .then(&CompilationStage)
                 .await?
-                .then(&ClickHouseExecutor)
+                .then(&ClickHouseExecutor {
+                    migration_version: schema.migration_version,
+                })
                 .await?
                 .then(&ExtractionStage)
                 .await?
@@ -157,17 +144,17 @@ impl QueryPipelineService {
                 .ok_or_else(|| PipelineError::custom("OutputStage did not produce PipelineOutput"))
         };
 
-        let output = match tokio::time::timeout(timeout, pipeline).await {
+        let output = match tokio::time::timeout_at(deadline, pipeline).await {
             Ok(Ok(output)) => output,
             Ok(Err(e)) => return Err(e),
             Err(_) => {
                 let e = PipelineError::Timeout;
-                obs.record_error(&e);
+                observers.record_error(&e);
                 return Err(e);
             }
         };
 
-        obs.finish(output.row_count, output.redacted_count);
+        observers.finish(output.row_count, output.redacted_count);
         Ok(output)
     }
 }

@@ -7,7 +7,7 @@ use opentelemetry::global;
 use opentelemetry_sdk::metrics::data::{AggregatedMetrics, HistogramDataPoint, MetricData};
 use opentelemetry_sdk::metrics::{InMemoryMetricExporter, PeriodicReader, SdkMeterProvider};
 use orbit_server::pipeline::OTelPipelineObserver;
-use orbit_server::schema_watcher::{SchemaState, SchemaWatcher};
+use orbit_server::schema_watcher::SchemaWatcher;
 use orbit_server::webserver::create_router;
 use query_engine::pipeline::PipelineObserver;
 use tokio::time::sleep;
@@ -44,7 +44,7 @@ fn extract_histogram_points(
 }
 
 fn ready_watcher() -> Arc<SchemaWatcher> {
-    SchemaWatcher::for_state(SchemaState::Ready)
+    SchemaWatcher::fixed(Arc::new(ontology::Ontology::load_embedded().unwrap()))
 }
 
 #[tokio::test]

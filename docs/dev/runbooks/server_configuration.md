@@ -56,7 +56,7 @@ The binary (`gkg-server`) runs in one of four modes via `--mode`:
 
 | Mode | Purpose | Key config sections |
 |------|---------|---------------------|
-| `Webserver` | HTTP/gRPC query server | `bind_address`, `grpc_bind_address`, `grpc`, `tls`, `query`, `graph`, `gitlab` |
+| `Webserver` | HTTP/gRPC query server | `bind_address`, `grpc_bind_address`, `grpc`, `tls`, `query`, `graph`, `gitlab`, `nats`, `schema` |
 | `Indexer` | Consumes NATS messages and runs indexing handlers | `nats`, `engine`, `graph`, `datalake`, `gitlab`, `schedule`, `schema` |
 | `DispatchIndexing` | Runs the scheduler loop that publishes indexing requests | `nats`, `graph`, `datalake`, `schedule`, `schema` |
 | `HealthCheck` | Aggregate Kubernetes workload and ClickHouse health, plus NATS queue depth | `health_check`, `graph`, `datalake`, `nats` |
@@ -396,7 +396,7 @@ These settings are used by the Webserver mode.
 | `grpc.concurrency_limit` | `256` | Max concurrent requests |
 | `grpc.max_connection_age_secs` | `300` (5 min) | Max connection age (for L4 ILB rebalancing) |
 | `grpc.max_connection_age_grace_secs` | `30` | Graceful drain window after `max_connection_age_secs` fires. Must be non-zero to avoid a tonic 0.14.5 panic ([hyperium/tonic#2522](https://github.com/hyperium/tonic/issues/2522)). |
-| `grpc.stream_timeout_secs` | `60` | Stream timeout |
+| `grpc.stream_timeout_secs` | `60` | Total stream budget for initial input, pipeline execution, and final send; all share one absolute deadline |
 | `grpc.max_header_list_size_bytes` | `65536` (64 KiB) | HTTP/2 `SETTINGS_MAX_HEADER_LIST_SIZE` advertised to clients. tonic/hyper default of 16 KiB is too small for GitLab JWTs carrying many traversal IDs. |
 
 ### Query settings
@@ -429,6 +429,33 @@ query:
 | Config path | Default | Description |
 |-------------|---------|-------------|
 | `schema.max_retained_versions` | `2` | Active-plus-retired keep-set size (min 2); every migrating version is retained in addition |
+| `schema.version_poll_interval_secs` | `5` | Webserver active-archive poll interval and indexer readiness base backoff, in seconds (min 1) |
+| `schema.indexer_schema_wait_timeout_secs` | `300` | Indexer schema-readiness wait budget before exiting, in seconds (min 1) |
+
+The Webserver follows the active migration version in `gkg_schema_version`. It uses its embedded
+archive only for the matching version; other versions come from the existing NATS archive catalog.
+No additional configuration keys are required. Compatible older and newer archives are accepted;
+version ordering alone neither gates readiness nor triggers a restart.
+
+`/ready` returns `200` when a serving snapshot is installed and `503` with `schema_pending` when
+none exists. Metadata-read errors preserve the previous snapshot. A confirmed missing active
+version or a load, parse, or ontology failure for the confirmed active archive clears it. The
+watcher retries without restart, and `/live` stays independent. Schema-dependent RPCs return
+`Unavailable` while pending; static tool/command listings, response-format and Query DSL metadata,
+and cluster health do not require a snapshot.
+
+Deploy a preparatory archive-publishing, archive-serving release before a cross-version rollout
+and verify the intended binary/archive combinations. If serving is pending, check the active
+version and that version's archive availability and compatibility rather than assuming the
+embedded version must match. The watcher builds a complete replacement and rechecks active before
+installing it; metadata errors during that recheck preserve the previous snapshot.
+
+In-flight requests keep their original snapshot and need its tables until completion. Retention
+is count-based, not a request lease: keep enough retired versions and space promotions so cleanup
+does not remove tables still in use. `grpc.stream_timeout_secs` bounds a streaming request using
+one deadline; it does not extend table retention. See
+[schema management](../../design-documents/schema_management.md) for archive publication,
+rollback, and retention behavior.
 
 ## Analytics
 

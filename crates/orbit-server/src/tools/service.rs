@@ -3,9 +3,7 @@ use std::sync::Arc;
 
 use jsonschema::Validator;
 use ontology::Ontology;
-use ontology::introspection::{
-    IntrospectionScope, SchemaDomain, SchemaResponse, build_schema_response,
-};
+use ontology::introspection::{IntrospectionScope, build_schema_response};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use thiserror::Error;
@@ -17,6 +15,8 @@ use super::{V2CommandRegistry, V2ToolRegistry};
 
 #[derive(Debug, Error)]
 pub enum ExecutorError {
+    #[error("Active schema is unavailable")]
+    SchemaUnavailable,
     #[error("Tool not found: {0}")]
     NotFound(String),
 
@@ -89,15 +89,14 @@ impl CommandSchema {
 
 #[derive(Debug, Clone)]
 pub struct ToolService {
-    ontology: Arc<Ontology>,
     schemas: Arc<HashMap<String, CommandSchema>>,
 }
 
-impl ToolService {
-    pub fn new(ontology: Arc<Ontology>) -> Self {
-        let definitions = V2CommandRegistry::get_all_commands(&ontology)
+impl Default for ToolService {
+    fn default() -> Self {
+        let definitions = V2CommandRegistry::get_all_commands()
             .into_iter()
-            .chain(V2ToolRegistry::get_all_tools(&ontology));
+            .chain(V2ToolRegistry::get_all_tools());
 
         let mut schemas = HashMap::new();
         for definition in definitions {
@@ -107,11 +106,12 @@ impl ToolService {
         }
 
         Self {
-            ontology,
             schemas: Arc::new(schemas),
         }
     }
+}
 
+impl ToolService {
     /// The error lists the valid parameter names so an agent that passed an
     /// unknown one (e.g. a hallucinated `node_types`) can self-correct without
     /// first calling `list_commands`.
@@ -151,6 +151,7 @@ impl ToolService {
         &self,
         tool_name: &str,
         arguments_json: &str,
+        ontology: Option<&Ontology>,
     ) -> Result<ToolPlan, ExecutorError> {
         let arguments: Value = serde_json::from_str(arguments_json)
             .map_err(|e| ExecutorError::InvalidArguments(e.to_string()))?;
@@ -159,7 +160,10 @@ impl ToolService {
 
         match tool_name {
             "query_graph" => self.resolve_query_graph(&arguments),
-            "get_graph_schema" => self.execute_get_graph_schema(&arguments),
+            "get_graph_schema" => self.execute_get_graph_schema(
+                &arguments,
+                ontology.ok_or(ExecutorError::SchemaUnavailable)?,
+            ),
             _ => Err(ExecutorError::NotFound(tool_name.to_string())),
         }
     }
@@ -168,6 +172,7 @@ impl ToolService {
         &self,
         command_name: &str,
         arguments_json: &str,
+        ontology: Option<&Ontology>,
     ) -> Result<ToolPlan, ExecutorError> {
         let arguments: Value = serde_json::from_str(arguments_json)
             .map_err(|e| ExecutorError::InvalidArguments(e.to_string()))?;
@@ -176,15 +181,22 @@ impl ToolService {
 
         match command_name {
             "query_graph" => Err(ExecutorError::InterceptedCommand(command_name.to_string())),
-            "get_graph_schema" => self.execute_get_graph_schema(&arguments),
+            "get_graph_schema" => self.execute_get_graph_schema(
+                &arguments,
+                ontology.ok_or(ExecutorError::SchemaUnavailable)?,
+            ),
             "get_query_dsl" => self.execute_get_query_dsl(&arguments),
             "get_response_format" => self.execute_get_response_format(&arguments),
             _ => Err(ExecutorError::NotFound(command_name.to_string())),
         }
     }
 
-    pub fn build_schema_toon(&self, expand_nodes: &[String]) -> Result<String, ExecutorError> {
-        let response = self.build_graph_schema_response(expand_nodes);
+    pub fn build_schema_toon(
+        &self,
+        ontology: &Ontology,
+        expand_nodes: &[String],
+    ) -> Result<String, ExecutorError> {
+        let response = build_schema_response(ontology, IntrospectionScope::All, expand_nodes);
         let options = EncodeOptions::default();
         encode(&response, &options)
             .map_err(|e| ExecutorError::InvalidArguments(format!("Failed to encode as toon: {e}")))
@@ -265,13 +277,17 @@ impl ToolService {
         Ok(ToolPlan::RunGraphQuery { query_json, format })
     }
 
-    fn execute_get_graph_schema(&self, arguments: &Value) -> Result<ToolPlan, ExecutorError> {
+    fn execute_get_graph_schema(
+        &self,
+        arguments: &Value,
+        ontology: &Ontology,
+    ) -> Result<ToolPlan, ExecutorError> {
         let args: GetGraphSchemaArgs = serde_json::from_value(arguments.clone())
             .map_err(|e| ExecutorError::InvalidArguments(e.to_string()))?;
 
         let format = parse_format(arguments);
         let expand_nodes = args.resolve_expand_nodes();
-        let response = self.build_graph_schema_response(&expand_nodes);
+        let response = build_schema_response(ontology, IntrospectionScope::All, &expand_nodes);
 
         let result = match format {
             OutputFormat::Llm => {
@@ -332,18 +348,6 @@ impl ToolService {
 
         Ok(ToolPlan::Immediate { result })
     }
-
-    fn build_graph_schema_response(&self, expand_nodes: &[String]) -> SchemaResponse {
-        build_schema_response(&self.ontology, IntrospectionScope::All, expand_nodes)
-    }
-
-    pub fn build_domains(&self, expand_nodes: &[String]) -> Vec<SchemaDomain> {
-        self.build_graph_schema_response(expand_nodes).domains
-    }
-
-    pub fn build_edges(&self) -> Vec<String> {
-        self.build_graph_schema_response(&[]).edges
-    }
 }
 
 fn parse_format(arguments: &Value) -> OutputFormat {
@@ -383,10 +387,10 @@ mod tests {
 
     fn get_toon_output(args: &str) -> String {
         let ontology = Arc::new(Ontology::load_embedded().expect("Failed to load ontology"));
-        let service = ToolService::new(ontology);
+        let service = ToolService::default();
 
         let plan = service
-            .resolve("get_graph_schema", args)
+            .resolve("get_graph_schema", args, Some(&ontology))
             .expect("Should resolve");
 
         match plan {
@@ -478,11 +482,15 @@ mod tests {
     #[test]
     fn resolve_command_accepts_entity_types() {
         let ontology = Arc::new(Ontology::load_embedded().expect("ontology must load"));
-        let service = ToolService::new(ontology);
+        let service = ToolService::default();
 
         assert!(
             service
-                .resolve_command("get_graph_schema", r#"{"entity_types": ["MergeRequest"]}"#)
+                .resolve_command(
+                    "get_graph_schema",
+                    r#"{"entity_types": ["MergeRequest"]}"#,
+                    Some(&ontology)
+                )
                 .is_ok(),
             "entity_types alias should be a valid parameter"
         );
@@ -536,10 +544,10 @@ mod tests {
     #[test]
     fn test_query_graph_returns_run_graph_query_plan() {
         let ontology = Arc::new(Ontology::load_embedded().expect("Failed to load ontology"));
-        let service = ToolService::new(ontology);
+        let service = ToolService::default();
 
         let plan = service
-            .resolve("query_graph", r#"{"query":{"match":{}}}"#)
+            .resolve("query_graph", r#"{"query":{"match":{}}}"#, Some(&ontology))
             .expect("Should resolve");
 
         match plan {
@@ -554,9 +562,9 @@ mod tests {
     #[test]
     fn test_query_graph_requires_query_field() {
         let ontology = Arc::new(Ontology::load_embedded().expect("Failed to load ontology"));
-        let service = ToolService::new(ontology);
+        let service = ToolService::default();
 
-        let result = service.resolve("query_graph", r#"{"match":{}}"#);
+        let result = service.resolve("query_graph", r#"{"match":{}}"#, Some(&ontology));
         assert!(matches!(result, Err(ExecutorError::InvalidArguments(_))));
 
         let err = result.unwrap_err().to_string();
@@ -573,9 +581,11 @@ mod tests {
     #[test]
     fn test_build_schema_toon_returns_string() {
         let ontology = Arc::new(Ontology::load_embedded().expect("Failed to load ontology"));
-        let service = ToolService::new(ontology);
+        let service = ToolService::default();
 
-        let toon = service.build_schema_toon(&[]).expect("Should succeed");
+        let toon = service
+            .build_schema_toon(&ontology, &[])
+            .expect("Should succeed");
         assert!(toon.contains("domains"));
         assert!(toon.contains("edges"));
     }
@@ -583,10 +593,10 @@ mod tests {
     #[test]
     fn test_build_schema_toon_with_expand() {
         let ontology = Arc::new(Ontology::load_embedded().expect("Failed to load ontology"));
-        let service = ToolService::new(ontology);
+        let service = ToolService::default();
 
         let toon = service
-            .build_schema_toon(&["User".to_string()])
+            .build_schema_toon(&ontology, &["User".to_string()])
             .expect("Should succeed");
         assert!(toon.contains("username"));
         assert!(toon.contains("props"));
@@ -595,9 +605,8 @@ mod tests {
     #[test]
     fn test_build_domains_groups_nodes_by_domain() {
         let ontology = Arc::new(Ontology::load_embedded().expect("Failed to load ontology"));
-        let service = ToolService::new(ontology);
 
-        let domains = service.build_domains(&[]);
+        let domains = build_schema_response(&ontology, IntrospectionScope::All, &[]).domains;
         assert!(!domains.is_empty());
 
         let core = domains.iter().find(|d| d.name == "core");
@@ -607,9 +616,8 @@ mod tests {
     #[test]
     fn test_build_edges_returns_edge_names() {
         let ontology = Arc::new(Ontology::load_embedded().expect("Failed to load ontology"));
-        let service = ToolService::new(ontology);
 
-        let edges = service.build_edges();
+        let edges = build_schema_response(&ontology, IntrospectionScope::All, &[]).edges;
         assert!(!edges.is_empty());
         assert!(
             edges.iter().any(|e| e == "AUTHORED"),
@@ -620,9 +628,9 @@ mod tests {
     #[test]
     fn test_resolve_unknown_tool_returns_not_found() {
         let ontology = Arc::new(Ontology::load_embedded().expect("Failed to load ontology"));
-        let service = ToolService::new(ontology);
+        let service = ToolService::default();
 
-        let result = service.resolve("nonexistent_tool", "{}");
+        let result = service.resolve("nonexistent_tool", "{}", Some(&ontology));
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(err.to_string().contains("nonexistent_tool"));
@@ -631,10 +639,10 @@ mod tests {
     #[test]
     fn test_build_schema_toon_with_unknown_expand_node() {
         let ontology = Arc::new(Ontology::load_embedded().expect("Failed to load ontology"));
-        let service = ToolService::new(ontology);
+        let service = ToolService::default();
 
         let toon = service
-            .build_schema_toon(&["FakeNode".to_string()])
+            .build_schema_toon(&ontology, &["FakeNode".to_string()])
             .expect("Should succeed without error");
         assert!(toon.contains("domains"), "Should still return valid schema");
     }
@@ -642,10 +650,10 @@ mod tests {
     #[test]
     fn get_graph_schema_raw_format_returns_json() {
         let ontology = Arc::new(Ontology::load_embedded().expect("Failed to load ontology"));
-        let service = ToolService::new(ontology);
+        let service = ToolService::default();
 
         let plan = service
-            .resolve("get_graph_schema", r#"{"format": "raw"}"#)
+            .resolve("get_graph_schema", r#"{"format": "raw"}"#, Some(&ontology))
             .expect("Should resolve");
 
         match plan {
@@ -661,10 +669,10 @@ mod tests {
     #[test]
     fn get_graph_schema_llm_format_returns_toon() {
         let ontology = Arc::new(Ontology::load_embedded().expect("Failed to load ontology"));
-        let service = ToolService::new(ontology);
+        let service = ToolService::default();
 
         let plan = service
-            .resolve("get_graph_schema", r#"{"format": "llm"}"#)
+            .resolve("get_graph_schema", r#"{"format": "llm"}"#, Some(&ontology))
             .expect("Should resolve");
 
         match plan {
@@ -680,10 +688,10 @@ mod tests {
     #[test]
     fn get_graph_schema_default_format_is_llm() {
         let ontology = Arc::new(Ontology::load_embedded().expect("Failed to load ontology"));
-        let service = ToolService::new(ontology);
+        let service = ToolService::default();
 
         let plan = service
-            .resolve("get_graph_schema", r#"{}"#)
+            .resolve("get_graph_schema", r#"{}"#, Some(&ontology))
             .expect("Should resolve");
 
         match plan {
@@ -697,10 +705,14 @@ mod tests {
     #[test]
     fn query_graph_raw_format_is_carried_in_plan() {
         let ontology = Arc::new(Ontology::load_embedded().expect("Failed to load ontology"));
-        let service = ToolService::new(ontology);
+        let service = ToolService::default();
 
         let plan = service
-            .resolve("query_graph", r#"{"query":{"match":{}}, "format": "raw"}"#)
+            .resolve(
+                "query_graph",
+                r#"{"query":{"match":{}}, "format": "raw"}"#,
+                Some(&ontology),
+            )
             .expect("Should resolve");
 
         match plan {
@@ -722,9 +734,9 @@ mod tests {
     #[test]
     fn test_build_domains_wildcard_expands_all() {
         let ontology = Arc::new(Ontology::load_embedded().expect("Failed to load ontology"));
-        let service = ToolService::new(ontology);
 
-        let domains = service.build_domains(&["*".to_string()]);
+        let domains =
+            build_schema_response(&ontology, IntrospectionScope::All, &["*".to_string()]).domains;
 
         for domain in &domains {
             for node in &domain.nodes {
@@ -738,9 +750,9 @@ mod tests {
 
     fn resolve_command_immediate(args: &str, command: &str) -> Value {
         let ontology = Arc::new(Ontology::load_embedded().expect("ontology must load"));
-        let service = ToolService::new(ontology);
+        let service = ToolService::default();
         match service
-            .resolve_command(command, args)
+            .resolve_command(command, args, Some(&ontology))
             .expect("Should resolve command")
         {
             ToolPlan::Immediate { result } => result,
@@ -751,10 +763,11 @@ mod tests {
     #[test]
     fn get_graph_schema_rejects_unknown_parameter() {
         let ontology = Arc::new(Ontology::load_embedded().expect("ontology must load"));
-        let service = ToolService::new(ontology);
+        let service = ToolService::default();
         let result = service.resolve(
             "get_graph_schema",
             r#"{"format": "raw", "include": ["dsl"]}"#,
+            Some(&ontology),
         );
 
         let err = result.unwrap_err().to_string();
@@ -773,8 +786,12 @@ mod tests {
         // Regression: an agent invoked get_graph_schema with a non-existent
         // `node_types` parameter and silently received the full schema.
         let ontology = Arc::new(Ontology::load_embedded().expect("ontology must load"));
-        let service = ToolService::new(ontology);
-        let result = service.resolve_command("get_graph_schema", r#"{"node_types": ["Job"]}"#);
+        let service = ToolService::default();
+        let result = service.resolve_command(
+            "get_graph_schema",
+            r#"{"node_types": ["Job"]}"#,
+            Some(&ontology),
+        );
 
         let err = result.unwrap_err().to_string();
         assert!(
@@ -794,8 +811,12 @@ mod tests {
     #[test]
     fn resolve_command_rejects_wrong_argument_type() {
         let ontology = Arc::new(Ontology::load_embedded().expect("ontology must load"));
-        let service = ToolService::new(ontology);
-        let result = service.resolve_command("get_graph_schema", r#"{"expand_nodes": "User"}"#);
+        let service = ToolService::default();
+        let result = service.resolve_command(
+            "get_graph_schema",
+            r#"{"expand_nodes": "User"}"#,
+            Some(&ontology),
+        );
 
         assert!(matches!(result, Err(ExecutorError::InvalidArguments(_))));
     }
@@ -803,7 +824,7 @@ mod tests {
     #[test]
     fn valid_arguments_still_resolve() {
         let ontology = Arc::new(Ontology::load_embedded().expect("ontology must load"));
-        let service = ToolService::new(ontology);
+        let service = ToolService::default();
 
         for args in [
             r#"{}"#,
@@ -811,7 +832,9 @@ mod tests {
             r#"{"format": "raw"}"#,
         ] {
             assert!(
-                service.resolve_command("get_graph_schema", args).is_ok(),
+                service
+                    .resolve_command("get_graph_schema", args, Some(&ontology))
+                    .is_ok(),
                 "valid args should resolve: {args}"
             );
         }
@@ -819,11 +842,7 @@ mod tests {
 
     #[test]
     fn every_advertised_schema_compiles() {
-        // Guards the `expect` in CommandSchema::compile: constructing the
-        // service compiles every advertised command and tool schema, so a
-        // malformed schema fails this test instead of panicking in production.
-        let ontology = Arc::new(Ontology::load_embedded().expect("ontology must load"));
-        let service = ToolService::new(ontology);
+        let service = ToolService::default();
 
         for name in [
             "query_graph",
@@ -872,9 +891,9 @@ mod tests {
     #[test]
     fn resolve_command_rejects_rails_intercepted_commands() {
         let ontology = Arc::new(Ontology::load_embedded().expect("ontology must load"));
-        let service = ToolService::new(ontology);
+        let service = ToolService::default();
 
-        let result = service.resolve_command("query_graph", r#"{"query": {}}"#);
+        let result = service.resolve_command("query_graph", r#"{"query": {}}"#, Some(&ontology));
         assert!(matches!(result, Err(ExecutorError::InterceptedCommand(_))));
     }
 }
