@@ -16,8 +16,8 @@ title: GitLab Orbit Localを使ってみる
 
 {{< history >}}
 
-- GitLab 19.0で[実験的機能](https://docs.gitlab.com/policy/development_stages_support/#experiment)として[導入されました](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/324)。
-- GitLab 19.1で[ベータ](https://docs.gitlab.com/policy/development_stages_support/#beta)に[変更されました](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/324)。
+- GitLab 19.0で[実験的機能](https://docs.gitlab.com/policy/development_stages_support/#experiment)として[導入](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/324)されました。
+- GitLab 19.1で[ベータ版](https://docs.gitlab.com/policy/development_stages_support/#beta)に[変更](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/324)されました。
 
 {{< /history >}}
 
@@ -31,7 +31,7 @@ Linuxでは、インストーラーはデフォルトでglibcアーカイブを�
 
 {{< tabs >}}
 
-{{< tab title="macOS and Linux" >}}
+{{< tab title="macOSおよびLinux" >}}
 
 ```shell
 curl -fsSL "https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/raw/main/install.sh" | bash
@@ -79,7 +79,7 @@ orbit help
    Unblock-File .\orbit-local-windows-x86_64.zip
    ```
 
-1. アーカイブを展開し、ターゲットディレクトリを作成して、`orbit.exe`を移動します。この例では、インストーラーが使用するデフォルトと同じ`$env:LOCALAPPDATA\Programs\orbit`を使用します:
+1. アーカイブを展開し、ターゲットディレクトリを作成して、`orbit.exe`をその中に移動します。この例では、インストーラーが使用するデフォルトと同じ`$env:LOCALAPPDATA\Programs\orbit`を使用します:
 
    ```powershell
    Expand-Archive -Path .\orbit-local-windows-x86_64.zip -DestinationPath .
@@ -121,7 +121,7 @@ orbit help
 
 {{< /tab >}}
 
-{{< tab title="GitLab CLI (glab)" >}}
+{{< tab title="GitLab CLI（glab）" >}}
 
 [`glab`](https://gitlab.com/gitlab-org/cli)がすでにインストールされている場合:
 
@@ -154,7 +154,7 @@ glab orbit local help
 ## 60秒クイックスタート {#60-second-quickstart}
 
 > [!note]
-> `glab orbit local`は管理された`orbit`バイナリをラップします。バイナリは初回使用時にダウンロードされ、チェックサムで検証され、最新の状態に保たれます。`glab` 1.94以降が必要です。バイナリを直接実行する場合は、[`orbit` CLIを直接使用する](access/cli.md)を参照してください。
+ `glab orbit local`は管理された`orbit`バイナリをラップします。バイナリは初回使用時にダウンロードされ、チェックサムで検証され、最新の状態に保たれます。`glab` 1.94以降が必要です。バイナリを直接実行する場合は、[`orbit` CLIを直接使用する](access/cli.md)を参照してください。
 
 リポジトリのインデックスを作成して、GitLab Orbitが検出した内容を確認します:
 
@@ -168,8 +168,8 @@ glab orbit local schema
 次のステップ:
 
 - 実際のクエリを実行する: [glabでGitLab Orbit Localを使用する](access/glab.md)。
-- AIエージェントに接続する: `glab orbit setup`を実行してGitLab Orbitスキルをインストールするか、手動設定については[MCPで接続する](access/mcp.md)を参照してください。
-- テーブルレイアウトを確認する: [スキーマリファレンス](schema.md)。
+- セットアップにより、エージェントの指示ファイルとフック設定が編集されます。[実行する前に変更内容を確認](access/cli.md#what-it-changes)してください。AIエージェントに接続する: `glab orbit setup`を実行してGitLab Orbitスキルをインストールするか、手動設定については[MCPで接続する](access/mcp.md)を参照してください。
+- テーブルレイアウトを確認する:[スキーマリファレンス](schema.md)。
 
 ## 課金 {#billing}
 
@@ -177,7 +177,7 @@ GitLab Orbit LocalはGitLabクレジットを消費しません。すべての�
 
 ## 次に試すこと {#what-to-try-next}
 
-- [GitLab Orbit Localのインデックス対象](indexing.md) - 対応言語とカバレッジの範囲。
-- [スキーマリファレンス](schema.md) - ローカルグラフの4つのノードタイプ。
-- [Cookbook](../remote/cookbook.md) - コピー＆ペーストで使えるクエリ集（コードのみのクエリはLocalにも適用可能）。
-- [GitLab Orbit Remoteを使ってみる](../remote/getting-started.md) - GitLabインスタンス全体をクエリする。
+- [GitLab Orbit Localのインデックス対象](indexing.md) \- 対応言語とカバレッジの範囲。
+- [スキーマリファレンス](schema.md) \- ローカルグラフの4つのノードタイプ。
+- [Cookbook](../remote/cookbook.md) \- コピー＆ペーストで使えるクエリ集（コードのみのクエリはLocalにも適用可能）。
+- [GitLab Orbit Remoteを使ってみる](../remote/getting-started.md) \- GitLabインスタンス全体をクエリする。
