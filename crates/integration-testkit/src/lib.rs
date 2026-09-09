@@ -2,6 +2,7 @@ mod assertions;
 pub mod cli;
 mod context;
 pub mod mock_redaction;
+pub mod query_scenario;
 pub mod scenario;
 mod seed;
 pub mod seeded_resolver;

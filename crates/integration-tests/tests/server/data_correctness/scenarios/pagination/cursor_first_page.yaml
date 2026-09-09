@@ -1,0 +1,18 @@
+# source: crates/integration-tests/tests/server/data_correctness/pagination.rs::cursor_first_page
+description: First page with cursor returns correct count and has_more
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000},
+                 "columns": ["username"]}],
+      "order_by": "u.id",
+      "cursor": {"page_size": 2}
+    }
+
+expect:
+  nodes:
+    User:
+      order: [1, 2]
+  has_more: true
