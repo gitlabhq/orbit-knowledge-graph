@@ -152,8 +152,11 @@ Each immutable serving snapshot contains:
 
 Named queries remain build-time validated against the embedded ontology. Snapshot construction
 also compiles them against the selected archive and excludes incompatible definitions from
-listing and execution, rather than rejecting the whole archive. `ToolService` is static: it
-receives the pinned ontology per request instead of retaining a startup ontology.
+listing and execution, rather than rejecting the whole archive. The serving snapshot and its
+construction live in `crates/orbit-server/src/serving_schema.rs`, independently of the watcher.
+`ToolService` validates commands without an ontology and returns typed plans. For a graph-schema
+plan, the gRPC handler pins a snapshot and passes its ontology to the schema renderer. Static
+commands return immediate results without accessing a snapshot.
 
 ```plaintext
 active migration version
@@ -213,6 +216,10 @@ introspection, named-query listing and execution, and schema-dependent tool exec
 tool and command listings, response-format and Query DSL metadata, and `GetClusterHealth` remain
 available independently of the serving snapshot. Requests that already pinned a snapshot keep it
 even if the serving slot is later cleared.
+
+Agent command arguments are validated before checking schema availability. A malformed
+`get_graph_schema` command returns `InvalidArgument` even while the schema is pending; a valid
+command returns `Unavailable` until a snapshot is available.
 
 The webserver `/ready` endpoint intentionally checks only this local schema state. The HealthCheck
 service's `/health` endpoint separately aggregates ClickHouse and Kubernetes Deployment and

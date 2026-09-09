@@ -21,7 +21,7 @@ use super::stages::{
     AuthorizationStage, ClickHouseExecutor, HydrationStage, PathResolutionStage, RedactionStage,
     SecurityStage,
 };
-use crate::schema_watcher::ServingSchema;
+use crate::serving_schema::ServingSchema;
 
 #[derive(Clone)]
 pub struct QueryPipelineService {

@@ -201,6 +201,36 @@ impl ServingFixture {
         })
         .await
         .expect("serving must reflect the active archive");
+        let command = self
+            .client
+            .invoke_agent_command(authenticated(InvokeAgentCommandRequest {
+                command_name: "get_graph_schema".into(),
+                parameters_json: json!({"format": "raw", "expand_nodes": ["Project"]}).to_string(),
+            }))
+            .await;
+        if let Some(version) = version {
+            let Some(invoke_agent_command_response::Content::ResultJson(encoded)) =
+                command.unwrap().into_inner().content
+            else {
+                panic!("expected compact graph schema");
+            };
+            let schema: Value = serde_json::from_str(&encoded).unwrap();
+            let project = schema["domains"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .flat_map(|domain| domain["nodes"].as_array().unwrap())
+                .find(|node| node["name"] == "Project")
+                .unwrap();
+            let has_description = project["props"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|property| property.as_str().unwrap().starts_with("description:"));
+            assert_eq!(has_description, version > 1);
+        } else {
+            assert_eq!(command.unwrap_err().code(), tonic::Code::Unavailable);
+        }
         let expected = if version.is_some() {
             StatusCode::OK
         } else {

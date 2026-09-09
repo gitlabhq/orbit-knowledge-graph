@@ -1,5 +1,6 @@
 mod auth;
 mod legacy;
+mod schema;
 mod server;
 mod service;
 

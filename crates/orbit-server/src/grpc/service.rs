@@ -3,7 +3,6 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use clickhouse_client::ClickHouseConfigurationExt;
-use ontology::Ontology;
 use orbit_server_config::{AnalyticsConfig, ClickHouseConfiguration};
 use orbit_utils::traversal_path::TraversalPath;
 use query_engine::pipeline::PipelineError;
@@ -30,8 +29,7 @@ use crate::proto::{
     InvokeAgentCommandRequest, InvokeAgentCommandResponse, ListAgentCommandsRequest,
     ListAgentCommandsResponse, ListNamedQueriesRequest, ListNamedQueriesResponse, ListToolsRequest,
     ListToolsResponse, NamedQueryDefinition, QueryMetadata, QueryType, ResponseFormat,
-    ResponseFormatSchema, SchemaDomain, SchemaEdge, SchemaEdgeVariant, SchemaNode, SchemaNodeStyle,
-    SchemaProperty, StructuredSchema, ToolDefinition as ProtoToolDefinition, execute_query_message,
+    ResponseFormatSchema, ToolDefinition as ProtoToolDefinition, execute_query_message,
     get_graph_schema_response, get_query_dsl_response, get_response_format_response,
     invoke_agent_command_response,
 };
@@ -57,7 +55,6 @@ fn proto_tool_definition(t: crate::tools::ToolDefinition) -> ProtoToolDefinition
 
 fn command_error_to_status(error: ExecutorError) -> Status {
     match error {
-        ExecutorError::SchemaUnavailable => Status::unavailable(error.to_string()),
         ExecutorError::NotFound(_) => Status::not_found(error.to_string()),
         ExecutorError::InvalidArguments(_) => Status::invalid_argument(error.to_string()),
         ExecutorError::InterceptedCommand(_) => Status::failed_precondition(error.to_string()),
@@ -244,24 +241,26 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
 
         info!(command_name = %req.command_name, "Invoking agent command for user");
 
-        let schema = if req.command_name == "get_graph_schema" {
-            Some(self.schema_watcher.snapshot()?)
-        } else {
-            None
-        };
         let plan = self
             .tool_service
-            .resolve_command(
-                &req.command_name,
-                parameters_json,
-                schema.as_ref().map(|schema| schema.ontology.as_ref()),
-            )
+            .resolve_command(&req.command_name, parameters_json)
             .map_err(command_error_to_status)?;
 
-        let ToolPlan::Immediate { result } = plan else {
-            return Err(Status::failed_precondition(
-                "command must be handled by Rails interceptor",
-            ));
+        let result = match plan {
+            ToolPlan::Immediate { result } => result,
+            ToolPlan::GraphSchema {
+                expand_nodes,
+                format,
+            } => {
+                let schema = self.schema_watcher.snapshot()?;
+                ToolService::render_graph_schema(&schema.ontology, &expand_nodes, format)
+                    .map_err(command_error_to_status)?
+            }
+            ToolPlan::RunGraphQuery { .. } => {
+                return Err(Status::failed_precondition(
+                    "command must be handled by Rails interceptor",
+                ));
+            }
         };
 
         let content = match result {
@@ -431,15 +430,14 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
         let schema = self.schema_watcher.snapshot()?;
 
         let response = if req.format == ResponseFormat::Llm as i32 {
-            let toon_text = self
-                .tool_service
-                .build_schema_toon(&schema.ontology, &req.expand_nodes)
+            let toon_text = ToolService::build_schema_toon(&schema.ontology, &req.expand_nodes)
                 .map_err(|e| Status::internal(e.to_string()))?;
             GetGraphSchemaResponse {
                 content: Some(get_graph_schema_response::Content::FormattedText(toon_text)),
             }
         } else {
-            let structured = Self::build_structured_schema(&schema.ontology, &req.expand_nodes);
+            let structured =
+                super::schema::build_structured_schema(&schema.ontology, &req.expand_nodes);
             GetGraphSchemaResponse {
                 content: Some(get_graph_schema_response::Content::Structured(structured)),
             }
@@ -593,143 +591,6 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
     }
 }
 
-impl OrbitServiceImpl {
-    fn build_structured_schema(ontology: &Ontology, expand_nodes: &[String]) -> StructuredSchema {
-        let domains: Vec<SchemaDomain> = ontology
-            .domains()
-            .map(|d| SchemaDomain {
-                name: d.name.clone(),
-                description: d.description.clone(),
-                node_names: d.node_names.clone(),
-            })
-            .collect();
-
-        let nodes: Vec<SchemaNode> = ontology
-            .nodes()
-            .map(|n| {
-                let should_expand = expand_nodes.iter().any(|e| e == "*" || e == &n.name);
-
-                let properties = if should_expand {
-                    n.fields
-                        .iter()
-                        .map(|f| SchemaProperty {
-                            name: f.name.clone(),
-                            data_type: format!("{}", f.data_type),
-                            nullable: f.nullable,
-                            enum_values: f
-                                .enum_values
-                                .as_ref()
-                                .map(|ev| ev.values().cloned().collect())
-                                .unwrap_or_default(),
-                            description: f.description.clone().unwrap_or_default(),
-                        })
-                        .collect()
-                } else {
-                    vec![]
-                };
-
-                let style = if should_expand {
-                    Some(SchemaNodeStyle {
-                        size: n.style.size,
-                        color: n.style.color.clone(),
-                    })
-                } else {
-                    None
-                };
-
-                let (outgoing_edges, incoming_edges) = if should_expand {
-                    Self::get_node_edge_names(ontology, &n.name)
-                } else {
-                    (vec![], vec![])
-                };
-
-                SchemaNode {
-                    name: n.name.clone(),
-                    domain: n.domain.clone(),
-                    description: n.description.clone(),
-                    primary_key: n
-                        .primary_keys
-                        .first()
-                        .cloned()
-                        .unwrap_or_else(|| "id".to_string()),
-                    label_field: n.label.clone(),
-                    properties,
-                    style,
-                    outgoing_edges,
-                    incoming_edges,
-                }
-            })
-            .collect();
-
-        let edges: Vec<SchemaEdge> = ontology
-            .edge_names()
-            .map(|name| {
-                let variants: Vec<SchemaEdgeVariant> = ontology
-                    .get_edge(name)
-                    .map(|edges| {
-                        edges
-                            .iter()
-                            .map(|e| SchemaEdgeVariant {
-                                source_type: e.source_kind.clone(),
-                                target_type: e.target_kind.clone(),
-                            })
-                            .collect()
-                    })
-                    .unwrap_or_default();
-
-                SchemaEdge {
-                    name: name.to_string(),
-                    description: ontology
-                        .get_edge_description(name)
-                        .unwrap_or_default()
-                        .to_string(),
-                    variants,
-                }
-            })
-            .collect();
-
-        StructuredSchema {
-            schema_version: ontology.schema_version().to_string(),
-            domains,
-            nodes,
-            edges,
-        }
-    }
-
-    fn get_node_edge_names(ontology: &Ontology, node_name: &str) -> (Vec<String>, Vec<String>) {
-        let mut outgoing = Vec::new();
-        let mut incoming = Vec::new();
-
-        for edge_name in ontology.edge_names() {
-            if let Some(edges) = ontology.get_edge(edge_name) {
-                let mut has_outgoing = false;
-                let mut has_incoming = false;
-
-                for edge in edges {
-                    if edge.source_kind == node_name {
-                        has_outgoing = true;
-                    }
-                    if edge.target_kind == node_name {
-                        has_incoming = true;
-                    }
-                }
-
-                if has_outgoing {
-                    outgoing.push(edge_name.to_string());
-                }
-                if has_incoming {
-                    incoming.push(edge_name.to_string());
-                }
-            }
-        }
-
-        outgoing.sort();
-        incoming.sort();
-
-        (outgoing, incoming)
-    }
-}
-
 fn named_query_definitions(
     named_queries: &named_queries::NamedQueries,
     values: &named_queries::BindingValues,
@@ -778,8 +639,10 @@ fn authorize_traversal_path(claims: &Claims, requested_path: &TraversalPath) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::proto::StructuredSchema;
     use crate::proto::orbit_service_server::OrbitService;
     use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
+    use ontology::Ontology;
     use tonic::metadata::MetadataValue;
 
     fn mock_validator() -> JwtValidator {
@@ -831,32 +694,38 @@ mod tests {
         request
     }
 
-    #[test]
-    fn test_service_can_be_created() {
-        let validator = Arc::new(mock_validator());
-        let service = OrbitServiceImpl::new(
-            validator,
-            SchemaWatcher::fixed(test_ontology()),
-            &test_config(),
-            ClusterHealthChecker::default().into_arc(),
-            60,
-            Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
-        );
+    async fn graph_schema(service: &OrbitServiceImpl, expand_nodes: &[&str]) -> StructuredSchema {
+        let response = service
+            .get_graph_schema(authed_request(GetGraphSchemaRequest {
+                expand_nodes: expand_nodes
+                    .iter()
+                    .map(|name| (*name).to_string())
+                    .collect(),
+                format: ResponseFormat::Raw.into(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        let Some(get_graph_schema_response::Content::Structured(schema)) = response.content else {
+            panic!("expected structured graph schema");
+        };
+        schema
+    }
 
-        let plan = service
-            .tool_service
-            .resolve("get_graph_schema", "{}", Some(&test_ontology()))
-            .expect("Should resolve");
-
-        match plan {
-            crate::tools::ToolPlan::Immediate { result } => {
-                assert!(result.is_string(), "Response should be toon-encoded string");
-                let toon_str = result.as_str().unwrap();
-                assert!(toon_str.contains("domains"));
-                assert!(toon_str.contains("edges"));
-            }
-            _ => panic!("Expected Immediate plan"),
-        }
+    async fn schema_command(
+        service: &OrbitServiceImpl,
+        parameters: serde_json::Value,
+    ) -> invoke_agent_command_response::Content {
+        service
+            .invoke_agent_command(authed_request(InvokeAgentCommandRequest {
+                command_name: "get_graph_schema".into(),
+                parameters_json: parameters.to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner()
+            .content
+            .unwrap()
     }
 
     #[tokio::test]
@@ -982,121 +851,38 @@ mod tests {
         assert!(text.contains("QueryDSL v"));
     }
 
-    #[test]
-    fn test_build_structured_schema() {
-        let response = OrbitServiceImpl::build_structured_schema(&test_ontology(), &[]);
+    #[tokio::test]
+    async fn graph_schema_returns_the_catalog_without_expanding_nodes() {
+        let schema = graph_schema(&test_service(), &[]).await;
 
-        assert!(!response.schema_version.is_empty());
-        assert!(!response.nodes.is_empty());
-        assert!(!response.edges.is_empty());
-        assert!(!response.domains.is_empty());
-
-        let user_node = response.nodes.iter().find(|n| n.name == "User");
-        assert!(user_node.is_some());
-        let user = user_node.unwrap();
-        assert_eq!(user.domain, "core");
-        assert!(
-            user.properties.is_empty(),
-            "Unexpanded node should have no properties"
-        );
-        assert!(user.style.is_none(), "Unexpanded node should have no style");
-    }
-
-    #[test]
-    fn test_build_structured_schema_with_expand() {
-        let response =
-            OrbitServiceImpl::build_structured_schema(&test_ontology(), &["User".to_string()]);
-
-        let user_node = response.nodes.iter().find(|n| n.name == "User");
-        assert!(user_node.is_some());
-        let user = user_node.unwrap();
-        assert!(
-            !user.properties.is_empty(),
-            "Expanded node should have properties"
-        );
-        assert!(user.style.is_some(), "Expanded node should have style");
-        assert!(
-            !user.outgoing_edges.is_empty() || !user.incoming_edges.is_empty(),
-            "Expanded node should have edges"
-        );
-
-        let project_node = response.nodes.iter().find(|n| n.name == "Project");
-        assert!(project_node.is_some());
-        let project = project_node.unwrap();
-        assert!(
-            project.properties.is_empty(),
-            "Unexpanded Project should have no properties"
-        );
-    }
-
-    #[test]
-    fn test_get_node_edge_names_returns_sorted() {
-        let (outgoing, incoming) = OrbitServiceImpl::get_node_edge_names(&test_ontology(), "User");
-
-        assert!(
-            !outgoing.is_empty() || !incoming.is_empty(),
-            "User should have at least one edge"
-        );
-
-        let is_sorted = |v: &[String]| v.windows(2).all(|w| w[0] <= w[1]);
-        assert!(is_sorted(&outgoing), "Outgoing edges should be sorted");
-        assert!(is_sorted(&incoming), "Incoming edges should be sorted");
-    }
-
-    #[test]
-    fn test_get_node_edge_names_unknown_node_returns_empty() {
-        let (outgoing, incoming) =
-            OrbitServiceImpl::get_node_edge_names(&test_ontology(), "NonexistentNode");
-
-        assert!(outgoing.is_empty());
-        assert!(incoming.is_empty());
-    }
-
-    #[test]
-    fn test_expanded_node_has_property_details() {
-        let response =
-            OrbitServiceImpl::build_structured_schema(&test_ontology(), &["User".to_string()]);
-        let user = response.nodes.iter().find(|n| n.name == "User").unwrap();
-
-        let id_prop = user.properties.iter().find(|p| p.name == "id");
-        assert!(id_prop.is_some(), "User should have an id property");
-        assert!(
-            !id_prop.unwrap().data_type.is_empty(),
-            "Property should have a data type"
-        );
-
-        let username_prop = user.properties.iter().find(|p| p.name == "username");
-        assert!(
-            username_prop.is_some(),
-            "User should have a username property"
-        );
-    }
-
-    #[test]
-    fn test_structured_schema_domains_have_nodes() {
-        let response = OrbitServiceImpl::build_structured_schema(&test_ontology(), &[]);
-
-        for domain in &response.domains {
-            assert!(!domain.name.is_empty(), "Domain should have a name");
-            assert!(
-                !domain.node_names.is_empty(),
-                "Domain {} should have nodes",
-                domain.name
-            );
+        assert_eq!(schema.schema_version, test_ontology().schema_version());
+        assert_eq!(schema.nodes.len(), test_ontology().nodes().count());
+        for name in ["core", "plan", "ci"] {
+            assert!(schema.domains.iter().any(|domain| domain.name == name));
         }
-    }
-
-    #[test]
-    fn test_structured_schema_edges_have_variants() {
-        let response = OrbitServiceImpl::build_structured_schema(&test_ontology(), &[]);
-
-        for edge in &response.edges {
-            assert!(!edge.name.is_empty(), "Edge should have a name");
-            assert!(
-                !edge.variants.is_empty(),
-                "Edge {} should have variants",
-                edge.name
-            );
+        let user = schema
+            .nodes
+            .iter()
+            .find(|node| node.name == "User")
+            .unwrap();
+        assert_eq!(user.domain, "core");
+        assert!(user.properties.is_empty());
+        assert!(user.style.is_none());
+        assert!(user.incoming_edges.is_empty());
+        assert!(user.outgoing_edges.is_empty());
+        for domain in &schema.domains {
+            assert!(!domain.name.is_empty());
+            assert!(!domain.node_names.is_empty());
+            for name in &domain.node_names {
+                assert!(schema.nodes.iter().any(|node| &node.name == name));
+            }
+        }
+        for name in ["AUTHORED", "CONTAINS"] {
+            assert!(schema.edges.iter().any(|edge| edge.name == name));
+        }
+        for edge in &schema.edges {
+            assert!(!edge.name.is_empty());
+            assert!(!edge.variants.is_empty());
             for variant in &edge.variants {
                 assert!(!variant.source_type.is_empty());
                 assert!(!variant.target_type.is_empty());
@@ -1104,28 +890,245 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_expand_multiple_nodes() {
-        let response = OrbitServiceImpl::build_structured_schema(
-            &test_ontology(),
-            &["User".to_string(), "Project".to_string()],
-        );
+    #[tokio::test]
+    async fn graph_schema_expands_selected_nodes_and_ignores_unknown_names() {
+        let service = test_service();
+        let ontology = test_ontology();
 
-        let user = response.nodes.iter().find(|n| n.name == "User").unwrap();
-        let project = response.nodes.iter().find(|n| n.name == "Project").unwrap();
+        for expanded in [
+            &["User"][..],
+            &["User", "Project"],
+            &["*"],
+            &["NonexistentNode"],
+        ] {
+            let schema = graph_schema(&service, expanded).await;
+            assert_eq!(schema.nodes.len(), ontology.nodes().count());
 
-        assert!(!user.properties.is_empty(), "User should be expanded");
-        assert!(!project.properties.is_empty(), "Project should be expanded");
+            for node in &schema.nodes {
+                if !expanded.contains(&"*") && !expanded.contains(&node.name.as_str()) {
+                    assert!(node.properties.is_empty(), "{}", node.name);
+                    assert!(node.style.is_none(), "{}", node.name);
+                    assert!(node.outgoing_edges.is_empty(), "{}", node.name);
+                    assert!(node.incoming_edges.is_empty(), "{}", node.name);
+                    continue;
+                }
 
-        let mr = response
-            .nodes
-            .iter()
-            .find(|n| n.name == "MergeRequest")
+                let expected = ontology
+                    .nodes()
+                    .find(|expected| expected.name == node.name)
+                    .unwrap();
+                assert_eq!(node.properties.len(), expected.fields.len());
+                for (property, field) in node.properties.iter().zip(&expected.fields) {
+                    assert_eq!(property.name, field.name);
+                    assert_eq!(property.data_type, field.data_type.to_string());
+                    assert_eq!(property.nullable, field.nullable);
+                    assert_eq!(
+                        property.description,
+                        field.description.as_deref().unwrap_or_default()
+                    );
+                    let enum_values: Vec<_> = field
+                        .enum_values
+                        .as_ref()
+                        .map(|values| values.values().cloned().collect())
+                        .unwrap_or_default();
+                    assert_eq!(property.enum_values, enum_values);
+                }
+                let style = node.style.as_ref().unwrap();
+                assert_eq!(style.color, expected.style.color);
+                assert_eq!(style.size, expected.style.size);
+                assert!(!node.outgoing_edges.is_empty() || !node.incoming_edges.is_empty());
+                for names in [&node.outgoing_edges, &node.incoming_edges] {
+                    assert!(names.windows(2).all(|pair| pair[0] < pair[1]));
+                }
+                for edge in &schema.edges {
+                    assert_eq!(
+                        node.outgoing_edges.contains(&edge.name),
+                        edge.variants
+                            .iter()
+                            .any(|variant| variant.source_type == node.name),
+                    );
+                    assert_eq!(
+                        node.incoming_edges.contains(&edge.name),
+                        edge.variants
+                            .iter()
+                            .any(|variant| variant.target_type == node.name),
+                    );
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn schema_commands_preserve_compact_json_and_expansion_aliases() {
+        use serde_json::{Value, json};
+        let service = test_service();
+
+        for (mut parameters, expanded) in [
+            (json!({}), vec![]),
+            (json!({"expand_nodes": ["User"]}), vec!["User"]),
+            (json!({"entity_types": ["User"]}), vec!["User"]),
+            (
+                json!({"expand_nodes": ["User"], "entity_types": ["User", "Project"]}),
+                vec!["User", "Project"],
+            ),
+            (json!({"expand_nodes": ["*"]}), vec!["*"]),
+            (json!({"expand_nodes": ["NonexistentNode"]}), vec![]),
+        ] {
+            parameters["format"] = json!("raw");
+            let invoke_agent_command_response::Content::ResultJson(encoded) =
+                schema_command(&service, parameters).await
+            else {
+                panic!("expected compact JSON schema");
+            };
+            let schema: Value = serde_json::from_str(&encoded).unwrap();
+            assert_eq!(schema.as_object().unwrap().len(), 2);
+            let edges = schema["edges"].as_array().unwrap();
+            assert!(edges.iter().all(Value::is_string));
+            assert!(edges.contains(&json!("AUTHORED")));
+            assert!(edges.contains(&json!("CONTAINS")));
+            let domains = schema["domains"].as_array().unwrap();
+            for name in ["core", "plan", "ci"] {
+                assert!(domains.iter().any(|domain| domain["name"] == name));
+            }
+            let nodes: Vec<_> = domains
+                .iter()
+                .flat_map(|domain| domain["nodes"].as_array().unwrap())
+                .collect();
+            assert_eq!(nodes.len(), test_ontology().nodes().count());
+            for node in nodes {
+                let name = node
+                    .as_str()
+                    .unwrap_or_else(|| node["name"].as_str().unwrap());
+                let should_expand = expanded.contains(&"*") || expanded.contains(&name);
+                assert_eq!(node.is_object(), should_expand, "{name}");
+                if should_expand {
+                    assert!(!node["props"].as_array().unwrap().is_empty());
+                    assert!(node["out"].is_array());
+                    assert!(node["in"].is_array());
+                    if name == "User" {
+                        let properties = node["props"].as_array().unwrap();
+                        for prefix in ["id:", "username:"] {
+                            assert!(
+                                properties
+                                    .iter()
+                                    .any(|property| property.as_str().unwrap().starts_with(prefix))
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn schema_command_llm_output_matches_direct_introspection() {
+        use serde_json::json;
+        let service = test_service();
+
+        for (parameters, expanded) in [
+            (json!({}), vec![]),
+            (json!({"format": "llm"}), vec![]),
+            (json!({"expand_nodes": ["User"]}), vec!["User"]),
+            (json!({"expand_nodes": ["*"]}), vec!["*"]),
+            (
+                json!({"expand_nodes": ["NonexistentNode"]}),
+                vec!["NonexistentNode"],
+            ),
+        ] {
+            let invoke_agent_command_response::Content::FormattedText(text) =
+                schema_command(&service, parameters).await
+            else {
+                panic!("expected TOON schema");
+            };
+            assert!(!text.starts_with('{'));
+            for expected in [
+                "domains",
+                "edges",
+                "core",
+                "plan",
+                "ci",
+                "User",
+                "Project",
+                "MergeRequest",
+                "WorkItem",
+                "AUTHORED",
+                "CONTAINS",
+            ] {
+                assert!(text.contains(expected), "{expected}");
+            }
+            if expanded.contains(&"User") || expanded.contains(&"*") {
+                for expected in ["props", "username", "id:int", "out", "in"] {
+                    assert!(text.contains(expected), "{expected}");
+                }
+            }
+            let response = service
+                .get_graph_schema(authed_request(GetGraphSchemaRequest {
+                    expand_nodes: expanded.into_iter().map(String::from).collect(),
+                    format: ResponseFormat::Llm.into(),
+                }))
+                .await
+                .unwrap()
+                .into_inner();
+            assert_eq!(
+                response.content,
+                Some(get_graph_schema_response::Content::FormattedText(text))
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn pending_schema_validates_commands_before_checking_availability() {
+        let mut service = test_service();
+        service.schema_watcher = Arc::new(SchemaWatcher::default());
+
+        for parameters in [
+            "{",
+            r#"{"expand_nodes":"User"}"#,
+            r#"{"node_types":["Job"]}"#,
+        ] {
+            let error = service
+                .invoke_agent_command(authed_request(InvokeAgentCommandRequest {
+                    command_name: "get_graph_schema".into(),
+                    parameters_json: parameters.into(),
+                }))
+                .await
+                .unwrap_err();
+            assert_eq!(error.code(), tonic::Code::InvalidArgument, "{parameters}");
+        }
+        for parameters in ["", "{}", r#"{"format":"raw","expand_nodes":["User"]}"#] {
+            let error = service
+                .invoke_agent_command(authed_request(InvokeAgentCommandRequest {
+                    command_name: "get_graph_schema".into(),
+                    parameters_json: parameters.into(),
+                }))
+                .await
+                .unwrap_err();
+            assert_eq!(error.code(), tonic::Code::Unavailable, "{parameters}");
+        }
+        let error = service
+            .get_graph_schema(authed_request(GetGraphSchemaRequest::default()))
+            .await
+            .unwrap_err();
+        assert_eq!(error.code(), tonic::Code::Unavailable);
+        for command in ["get_query_dsl", "get_response_format"] {
+            for format in ["raw", "llm"] {
+                service
+                    .invoke_agent_command(authed_request(InvokeAgentCommandRequest {
+                        command_name: command.into(),
+                        parameters_json: serde_json::json!({"format": format}).to_string(),
+                    }))
+                    .await
+                    .unwrap();
+            }
+        }
+        service
+            .list_tools(authed_request(ListToolsRequest::default()))
+            .await
             .unwrap();
-        assert!(
-            mr.properties.is_empty(),
-            "MergeRequest should not be expanded"
-        );
+        service
+            .list_agent_commands(authed_request(ListAgentCommandsRequest::default()))
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
@@ -1259,39 +1262,6 @@ mod tests {
                     .code(),
                 tonic::Code::PermissionDenied,
                 "expected PermissionDenied for {path}"
-            );
-        }
-    }
-
-    #[test]
-    fn test_expand_all_wildcard() {
-        let ontology = test_ontology();
-        let expected_count = ontology.nodes().count();
-
-        let response =
-            OrbitServiceImpl::build_structured_schema(&test_ontology(), &["*".to_string()]);
-
-        assert_eq!(
-            response.nodes.len(),
-            expected_count,
-            "Wildcard should return all ontology nodes"
-        );
-
-        for node in &response.nodes {
-            assert!(
-                !node.properties.is_empty(),
-                "Node {} should be expanded with wildcard",
-                node.name
-            );
-            assert!(
-                node.style.is_some(),
-                "Node {} should have style with wildcard",
-                node.name
-            );
-            assert!(
-                !node.outgoing_edges.is_empty() || !node.incoming_edges.is_empty(),
-                "Node {} should have edges with wildcard",
-                node.name
             );
         }
     }

@@ -2,53 +2,17 @@ use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use clickhouse_client::ArrowClickHouseClient;
-use named_queries::{BindingValues, NamedQueries};
-use ontology::Ontology;
 use ontology::archive::OntologyArchive;
 use opentelemetry::KeyValue;
 use orbit_migrations::catalog::OntologyCatalog;
 use orbit_migrations::version::{read_active_version, table_prefix};
 use orbit_server_config::{AppConfig, PathResolverConfig};
-use query_engine::compiler::{Frontend, SecurityContext, compile};
 use tokio_util::sync::CancellationToken;
 use tonic::Status;
 use tracing::{info, warn};
 
 use crate::pipeline::PathResolver;
-
-pub(crate) struct ServingSchema {
-    pub migration_version: u32,
-    pub ontology: Arc<Ontology>,
-    pub named_queries: NamedQueries,
-    pub path_resolver: Arc<PathResolver>,
-}
-
-impl ServingSchema {
-    fn new(
-        migration_version: u32,
-        ontology: Arc<Ontology>,
-        path_resolver: Arc<PathResolver>,
-    ) -> anyhow::Result<Self> {
-        let mut named_queries = NamedQueries::load_embedded()?;
-        let bindings = BindingValues { current_user_id: 1 };
-        let security = SecurityContext::new(1, vec!["1/".into()])?;
-        named_queries.retain(|query| {
-            let result = query.render(&bindings, &query.example_parameters())
-                .map_err(anyhow::Error::from)
-                .and_then(|rendered| compile(&rendered, Frontend::JsonDsl, &ontology, &security).map_err(Into::into));
-            if let Err(error) = &result {
-                warn!(migration_version, query = %query.name, %error, "named query unavailable in serving schema");
-            }
-            result.is_ok()
-        });
-        Ok(Self {
-            migration_version,
-            ontology,
-            named_queries,
-            path_resolver,
-        })
-    }
-}
+use crate::serving_schema::ServingSchema;
 
 #[derive(Default)]
 pub struct SchemaWatcher {
@@ -156,7 +120,7 @@ impl SchemaWatcher {
     }
 
     #[cfg(any(test, feature = "testkit"))]
-    pub fn fixed(ontology: Arc<Ontology>) -> Arc<Self> {
+    pub fn fixed(ontology: Arc<ontology::Ontology>) -> Arc<Self> {
         use clickhouse_client::ClickHouseConfigurationExt;
         let config = AppConfig::embedded_defaults();
         let resolver = PathResolver::without_dictionaries(
