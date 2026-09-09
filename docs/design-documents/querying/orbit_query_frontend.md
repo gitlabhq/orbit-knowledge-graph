@@ -28,9 +28,9 @@ Keywords are case insensitive; identifiers are case sensitive. Strings support M
 flowchart LR
     Text[Orbit query text] --> Pest[Pest pairs]
     Pest --> Input[Compiler Input]
-    JSON[JSON Query DSL] --> Validate[Existing validation phase]
-    Input --> Validate
-    Validate --> Pipeline[Existing compiler pipeline]
+    JSON[JSON Query DSL] --> FromJson[Input::from_json]
+    FromJson --> Input
+    Input --> Pipeline[ClickHouse compiler pipeline]
     Pipeline --> SQL[Parameterized ClickHouse SQL]
 ```
 
@@ -39,13 +39,14 @@ Scalar values use the same value type as the compiler's filters.
 
 `orbit_query::parse` takes query text and parameters and returns Input.
 `orbit_query::compile` passes that Input to `compiler::compile_from_input`.
-Both compiler entry points run the same ClickHouse pipeline in the same pass order.
 
-The validation phase accepts exactly one input source. JSON retains its existing schema and ontology checks.
-Typed input uses `input_validation` for shape, identifier, and ontology checks that JSON deserialization would otherwise provide.
-It does not read the JSON schema. Its limits are Rust constants in `schema_limits`, and the compiler's build script asserts that the schema still matches them.
-That keeps the typed path independent of the schema file, so retiring the JSON DSL later does not change what the frontend enforces.
-Both sources then run the existing reference and filter-type checks.
+The compiler pipeline starts from `Input` and has no notion of a source language. The JSON Query DSL is one way to produce an `Input`: `Input::from_json` runs the JSON schema check, the ontology-derived schema check, and cursor hashing, then deserializes. `compiler::compile` is that conversion followed by `compile_from_input`.
+The text frontend is the other way, and it calls `compile_from_input` directly.
+
+The pipeline's first phase, `validate`, runs `input_validation` on every Input. That module checks shape, identifiers, limits, and ontology membership natively; it does not read the JSON schema.
+Its limits are Rust constants in `schema_limits`, and the compiler's build script asserts that the schema still matches them.
+JSON is therefore checked twice, once by schema and once natively; the redundancy is cheap and means every JSON test also exercises the shared validator.
+Retiring the JSON DSL later deletes `Input::from_json` and the schema file; the pipeline does not change.
 
 Normalization, restriction, security checks, hydration planning, and SQL generation remain shared.
 Shared normalization makes equality explicit in virtual-column filters before building hydration plans.

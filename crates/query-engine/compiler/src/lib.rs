@@ -83,52 +83,40 @@ use std::sync::Arc;
 
 use config::CompilerCtx as _;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum QueryLanguage {
-    Json,
-    Cypher,
-}
-
-impl QueryLanguage {
-    pub fn from_name(name: &str) -> Option<Self> {
-        match name {
-            "json" => Some(Self::Json),
-            "cypher" => Some(Self::Cypher),
-            _ => None,
-        }
-    }
-}
-
-/// Compile a query in the given language into a [`CompiledQueryContext`].
+/// Compile a JSON Query DSL document into a [`CompiledQueryContext`].
 ///
-/// `Json` runs the full ClickHouse pipeline (validate through codegen).
-/// `Cypher` is not yet implemented.
-#[must_use = "the compiled query context should be used"]
-pub fn compile_query(
-    query: &str,
-    language: QueryLanguage,
-    ontology: &Ontology,
-    ctx: &SecurityContext,
-) -> Result<CompiledQueryContext> {
-    match language {
-        QueryLanguage::Json => compile(query, ontology, ctx),
-        QueryLanguage::Cypher => Err(error::QueryError::Validation(
-            "Cypher frontend is not yet implemented".into(),
-        )),
-    }
-}
-
-/// Compile a JSON query into a [`CompiledQueryContext`].
-///
-/// Shorthand for `compile_query(query, QueryLanguage::Json, ...)`.
+/// Validates the JSON against the schema, lowers it to [`Input`], and hands it
+/// to [`compile_from_input`].
 #[must_use = "the compiled query context should be used"]
 pub fn compile(
     json_input: &str,
     ontology: &Ontology,
     ctx: &SecurityContext,
 ) -> Result<CompiledQueryContext> {
-    let mut ctx = config::ClickhouseCtx::new(Arc::new(ontology.clone()), ctx.clone());
-    ctx.set_json(json_input.to_string());
+    Input::from_json(json_input, ontology)
+        .count_err()
+        .and_then(|input| compile_from_input(input, ontology, ctx))
+}
+
+/// Compile an [`Input`] into a [`CompiledQueryContext`].
+///
+/// The context contains the parameterized SQL, bind parameters, result context
+/// for redaction, hydration plan, and the validated input.
+///
+/// Runs the ClickHouse compilation pipeline. Edge-chain-first lowering
+/// produces flat edge-chain JOINs with inline dedup.
+///
+/// ```text
+/// Input → Validate → Normalize → Restrict → Lower → Enforce → Security → Check → HydratePlan → Settings → Codegen
+/// ```
+#[must_use = "the compiled query context should be used"]
+pub fn compile_from_input(
+    input: Input,
+    ontology: &Ontology,
+    security: &SecurityContext,
+) -> Result<CompiledQueryContext> {
+    let mut ctx = config::ClickhouseCtx::new(Arc::new(ontology.clone()), security.clone());
+    ctx.set_input(input);
     config::run_clickhouse(&mut ctx)
         .and_then(|()| {
             ctx.take_output().ok_or_else(|| {
@@ -138,21 +126,6 @@ pub fn compile(
         .count_err()
 }
 
-pub fn compile_from_input(
-    input: Input,
-    ontology: &Ontology,
-    security: &SecurityContext,
-) -> Result<CompiledQueryContext> {
-    let result = (|| {
-        let mut ctx = config::ClickhouseCtx::new(Arc::new(ontology.clone()), security.clone());
-        ctx.set_input(input);
-        config::run_clickhouse(&mut ctx)?;
-        ctx.take_output()
-            .ok_or_else(|| QueryError::PipelineInvariant("pipeline did not produce output".into()))
-    })();
-    result.count_err()
-}
-
 /// Run only `validate` + `normalize`, returning the normalized [`Input`].
 ///
 /// Lets the querying pipeline's path-resolution stage read normalized scope
@@ -160,7 +133,7 @@ pub fn compile_from_input(
 /// traversal_path prefix as [`SecurityContext`] scope metadata.
 pub fn validate_normalize(json_input: &str, ontology: &Ontology) -> Result<Input> {
     let mut ctx = config::ValidateNormalizeCtx::new(Arc::new(ontology.clone()));
-    ctx.set_json(json_input.to_string());
+    ctx.set_input(Input::from_json(json_input, ontology)?);
     config::run_validate_normalize(&mut ctx)
         .and_then(|()| {
             ctx.take_input().ok_or_else(|| {

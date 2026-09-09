@@ -37,7 +37,6 @@ compiler_pipeline_macros::define_compiler_ctx! {
     }
 
     state {
-        pub json: String,
         pub input: Input,
         pub query_plan: QueryPlan,
         pub node: Node,
@@ -50,7 +49,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
     phases {
         validate {
             reads_env: [ontology]
-            mutates: [json, input]
+            mutates: [input]
         }
         normalize {
             reads_env: [ontology]
@@ -100,7 +99,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
     pipelines {
         clickhouse {
             env: [ontology, security_ctx]
-            state: [json, input, query_plan, node, result_ctx, query_config, hydration_plan, output]
+            state: [input, query_plan, node, result_ctx, query_config, hydration_plan, output]
             phases: [validate, normalize, restrict, plan, lower, enforce, security, cursor, check, hydrate_plan, settings, codegen]
         }
         ch_hydration {
@@ -110,44 +109,25 @@ compiler_pipeline_macros::define_compiler_ctx! {
         }
         validate_normalize {
             env: [ontology]
-            state: [json, input]
+            state: [input]
             phases: [validate, normalize]
         }
     }
 }
 
 fn validate(ctx: &mut impl CompilerCtx) -> Result<()> {
-    let (json, input) = (ctx.take_json(), ctx.take_input());
+    let mut input = require(ctx.take_input(), "input")?;
     let v = validate::Validator::new(ctx.ontology());
-    let mut input = match (json, input) {
-        (Some(json), None) => {
-            let value = v.check_json(&json)?;
-            v.check_ontology(&value)?;
-            let query_hash = cursor::canonical_hash(&value);
-            let mut input: Input = serde_json::from_value(value)?;
-            input.compiler.query_hash = query_hash;
-            input
-        }
-        (None, Some(input)) => {
-            if input.cursor.is_some() {
-                return Err(QueryError::PaginationError(
-                    "typed frontend cursor binding is not supported yet".into(),
-                ));
-            }
-            crate::input_validation::check(&input, ctx.ontology())?;
-            input
-        }
-        _ => {
-            return Err(QueryError::PipelineInvariant(
-                "expected either JSON or typed input".into(),
-            ));
-        }
-    };
-    let query_hash = input.compiler.query_hash;
+    crate::input_validation::check(&input, ctx.ontology())?;
     if let Some(c) = &mut input.cursor
         && let Some(after) = &c.after
     {
-        c.seek = Some(cursor::decode(after, query_hash)?);
+        if input.compiler.query_hash == 0 {
+            return Err(QueryError::PaginationError(
+                "cursor binding requires a query hash from the frontend".into(),
+            ));
+        }
+        c.seek = Some(cursor::decode(after, input.compiler.query_hash)?);
     }
     v.check_references(&input)?;
     v.annotate_filter_types(&mut input);
