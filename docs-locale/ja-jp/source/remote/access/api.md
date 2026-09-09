@@ -2,7 +2,7 @@
 stage: Orbit
 group: Context Systems
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: REST APIを使用してOrbitナレッジグラフに直接クエリを実行します。認証要件とリクエスト例を含む全4エンドポイントのリファレンスです。
+description: REST APIを使用してGitLab Orbitナレッジグラフに直接クエリを実行します。認証要件とリクエスト例を含む全4エンドポイントのリファレンスです。
 title: REST API
 ---
 
@@ -16,21 +16,19 @@ title: REST API
 
 {{< history >}}
 
-- GitLab 18.10で`knowledge_graph`という名前の[機能フラグ](https://docs.gitlab.com/administration/feature_flags/)とともに[導入されました](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676)。デフォルトでは無効です。この機能は[実験的機能](https://docs.gitlab.com/policy/development_stages_support/#experiment)です。
-- GitLab 19.1で[ベータ](https://docs.gitlab.com/policy/development_stages_support/#beta)に[変更されました](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676)。
+- GitLab 18.10で`knowledge_graph`[機能フラグ](https://docs.gitlab.com/administration/feature_flags/)とともに[導入](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676)されました。デフォルトでは無効です。この機能は[実験的機能](https://docs.gitlab.com/policy/development_stages_support/#experiment)です。
+- GitLab 19.1で[ベータ版](https://docs.gitlab.com/policy/development_stages_support/#beta)に[変更](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676)されました。
 
 {{< /history >}}
 
 > [!flag]
-> この機能の利用可否は機能フラグによって制御されています。
-> 詳細については、履歴を参照してください。
-> この機能はテスト目的で利用可能ですが、本番環境での使用には対応していません。
+ この機能の利用可否は、機能フラグによって制御されます。詳細については、履歴を参照してください。この機能はテスト目的で利用可能ですが、本番環境での使用には対応していません。
 
-Orbit REST APIを使用すると、スクリプト、CIパイプライン、またはカスタムツールからナレッジグラフに直接クエリを実行できます。
+GitLab Orbit REST APIを使用すると、スクリプト、CIパイプライン、またはカスタムツールからナレッジグラフに直接クエリを実行できます。
 
 ## 認証 {#authentication}
 
-すべてのエンドポイントには、`read_api`スコープを持つGitLabパーソナルアクセストークンが必要です。Bearerトークンとして渡してください。
+すべてのエンドポイントには、`read_api`スコープを持つGitLabパーソナルアクセストークンが必要です。Bearerトークンとして渡してください:
 
 ```shell
 --header "Authorization: Bearer <your_token>"
@@ -53,11 +51,11 @@ APIコールはサブスクリプションのGitLabクレジットを消費し�
 
 ## クエリエンドポイント {#query-endpoint}
 
-OrbitクエリDSLを使用してグラフクエリを実行します。
+GitLab OrbitクエリDSLを使用してグラフクエリを実行します。
 
-リクエストボディには以下が含まれます。
+リクエストボディには以下が含まれます:
 
-- `query`: Orbitクエリオブジェクト。
+- `query`: GitLab Orbitクエリオブジェクト。
 - `format`: オプションのレスポンス形式。構造化されたJSONには`raw`を、AIエージェント向けに最適化されたコンパクトなテキストには`llm`を使用します。デフォルト: `llm`。
 
 例:
@@ -76,7 +74,7 @@ curl --request POST \
 
 パイプラインの失敗が最も多いプロジェクトを検索するリクエストの例:
 
-リクエストボディを`request.json`に記述します。
+リクエストボディを`request.json`に記述します:
 
 ```json orbit-query
 {
