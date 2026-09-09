@@ -1,0 +1,17 @@
+# source: crates/integration-tests/tests/server/data_correctness/security.rs::aggregation_user_only_admin_still_compiles
+description: Admin caller bypasses User-only aggregation guard
+
+config:
+  security: admin
+
+query:
+  json: |
+    {
+      "query_type": "aggregation",
+      "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]}],
+      "aggregations": [{"count": "u", "as": "cnt"}],
+      "limit": 10
+    }
+
+expect:
+  skip_requirements: [aggregation, node_count]

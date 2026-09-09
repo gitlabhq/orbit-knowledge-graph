@@ -204,6 +204,24 @@ async fn run_frontend(
         },
     };
 
+    let sql = compiled.base.render();
+    for fragment in &expect.sql_contains {
+        assert!(
+            sql.contains(fragment.as_str()),
+            "{label}: SQL does not contain '{fragment}'\nSQL: {sql}"
+        );
+    }
+    for fragment in &expect.sql_not_contains {
+        assert!(
+            !sql.contains(fragment.as_str()),
+            "{label}: SQL should not contain '{fragment}'\nSQL: {sql}"
+        );
+    }
+
+    if expect.compile_only {
+        return;
+    }
+
     let resp = execute_pipeline(ctx, &compiled, &ontology, security, redaction).await;
 
     let response: query_engine::formatters::GraphResponse =
@@ -313,6 +331,24 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
                 assert_property(found, prop, expected, entity, id, label);
             }
         }
+        for prop in &ne.prop_present {
+            for node in view.nodes_of_type(entity) {
+                assert!(
+                    node.has_prop(prop),
+                    "{label}: {entity}/{} missing property '{prop}'",
+                    node.id
+                );
+            }
+        }
+        for prop in &ne.prop_absent {
+            for node in view.nodes_of_type(entity) {
+                assert!(
+                    !node.has_prop(prop),
+                    "{label}: {entity}/{} should not have property '{prop}'",
+                    node.id
+                );
+            }
+        }
         if let Some(absent) = &ne.absent {
             for id in absent {
                 view.assert_node_absent(entity, *id);
@@ -321,8 +357,17 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
         for (field, expected) in &ne.filters {
             let expected = expected.clone();
             let field_name = field.clone();
-            view.assert_filter(entity, field, move |n| {
-                n.prop(&field_name) == Some(&expected)
+            view.assert_filter(entity, field, move |n| match &expected {
+                serde_json::Value::Object(m) if m.contains_key("starts_with") => {
+                    let prefix = m["starts_with"].as_str().unwrap();
+                    n.prop_str(&field_name)
+                        .is_some_and(|v| v.starts_with(prefix))
+                }
+                serde_json::Value::Object(m) if m.contains_key("contains") => {
+                    let sub = m["contains"].as_str().unwrap();
+                    n.prop_str(&field_name).is_some_and(|v| v.contains(sub))
+                }
+                _ => n.prop(&field_name) == Some(&expected),
             });
         }
     }
@@ -359,10 +404,8 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
         view.assert_edge_count(kind, *count);
     }
     for (group_key, ge) in &expect.groups {
-        let ids: Vec<i64> = ge.rows.iter().map(|gr| gr.id).collect();
-        if !ids.is_empty() {
-            let entity = &ge.rows[0].entity;
-            view.assert_group_node_ids(group_key, entity, &ids);
+        if let (Some(entity), Some(ids)) = (&ge.entity, &ge.ids) {
+            view.assert_group_node_ids(group_key, entity, ids);
         }
         for gr in &ge.rows {
             for (col, expected) in &gr.values {
@@ -400,9 +443,35 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
                 }
             }
         }
+        for ga in &ge.absent {
+            view.assert_group_node_absent(group_key, &ga.entity, ga.id);
+        }
+    }
+    if expect.empty_aggregation {
+        view.assert_empty_aggregation();
+    }
+    if let Some(n) = expect.path_count {
+        let pids = view.path_ids();
+        assert_eq!(pids.len(), n, "{label}: path count mismatch");
     }
     if expect.referential_integrity {
         view.assert_referential_integrity();
+    }
+    if let Some(n) = expect.row_count {
+        view.assert_row_count(n);
+    }
+    for (i, row) in expect.row_values.iter().enumerate() {
+        for (col, expected) in row {
+            match expected {
+                serde_json::Value::Number(n) if n.is_i64() => {
+                    view.assert_row_value_i64(i, col, n.as_i64().unwrap());
+                }
+                serde_json::Value::String(s) => {
+                    view.assert_row_value_str(i, col, s);
+                }
+                _ => panic!("{label}: unsupported row_values type for {col}"),
+            }
+        }
     }
     if let Some(expected) = expect.has_more {
         let pagination = view.response.pagination.as_ref();
@@ -477,12 +546,22 @@ fn build_security(overrides: &Option<SecurityOverride>) -> SecurityContext {
         return SecurityContext::new(1, vec!["1/".into()]).unwrap();
     };
     let org = ov.org_id.unwrap_or(1);
-    let paths: Vec<String> = ov.paths.clone().unwrap_or_else(|| vec!["1/".into()]);
-    let access = ov.access_level.unwrap_or(AccessLevel::Reporter as u32);
-    let authorized: Vec<AuthorizedPath> = paths
-        .iter()
-        .map(|p| AuthorizedPath::new(p.as_str(), access))
-        .collect();
+    let authorized: Vec<AuthorizedPath> = if let Some(ap) = &ov.authorized_paths {
+        assert!(
+            ov.paths.is_none() && ov.access_level.is_none(),
+            "specify either paths/access_level or authorized_paths, not both"
+        );
+        ap.iter()
+            .map(|a| AuthorizedPath::new(a.path.as_str(), a.access_level))
+            .collect()
+    } else {
+        let paths: Vec<String> = ov.paths.clone().unwrap_or_else(|| vec!["1/".into()]);
+        let access = ov.access_level.unwrap_or(AccessLevel::Reporter as u32);
+        paths
+            .iter()
+            .map(|p| AuthorizedPath::new(p.as_str(), access))
+            .collect()
+    };
 
     let mut ctx = SecurityContext::new_with_roles(org, authorized).unwrap();
     if let Some(true) = ov.admin {

@@ -1,0 +1,19 @@
+# source: crates/integration-tests/tests/server/data_correctness/security.rs::aggregation_user_joined_to_scoped_group_compiles
+description: Aggregation with User joined to scoped Group compiles for non-admin
+
+query:
+  json: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
+        {"id": "u", "entity": "User"}
+      ],
+      "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+      "group_by": ["g"],
+      "aggregations": [{"count": "u", "as": "member_count"}],
+      "limit": 10
+    }
+
+expect:
+  skip_requirements: [aggregation, node_count]
