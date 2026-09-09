@@ -1,0 +1,28 @@
+# source: crates/integration-tests/tests/server/data_correctness/traversal.rs::traversal_user_group_returns_correct_pairs_and_edges
+description: User-Group MEMBER_OF traversal returns correct pairs and edges
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+        {"id": "g", "entity": "Group", "columns": ["name"]}
+      ],
+      "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+      "limit": 20
+    }
+
+expect:
+  node_count: 9
+  edges:
+    MEMBER_OF: [[1,100], [1,102], [2,100], [3,101], [4,101], [4,102], [5,101], [6,100], [6,101]]
+  referential_integrity: true
+  nodes:
+    User:
+      rows:
+        - { id: 1, username: alice }
+    Group:
+      rows:
+        - { id: 100, name: Public Group }
+        - { id: 101, name: Private Group }

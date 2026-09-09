@@ -82,17 +82,44 @@ use std::sync::Arc;
 
 use config::CompilerCtx as _;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QueryLanguage {
+    Json,
+    Cypher,
+}
+
+impl QueryLanguage {
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "json" => Some(Self::Json),
+            "cypher" => Some(Self::Cypher),
+            _ => None,
+        }
+    }
+}
+
+/// Compile a query in the given language into a [`CompiledQueryContext`].
+///
+/// `Json` runs the full ClickHouse pipeline (validate through codegen).
+/// `Cypher` is not yet implemented.
+#[must_use = "the compiled query context should be used"]
+pub fn compile_query(
+    query: &str,
+    language: QueryLanguage,
+    ontology: &Ontology,
+    ctx: &SecurityContext,
+) -> Result<CompiledQueryContext> {
+    match language {
+        QueryLanguage::Json => compile(query, ontology, ctx),
+        QueryLanguage::Cypher => Err(error::QueryError::Validation(
+            "Cypher frontend is not yet implemented".into(),
+        )),
+    }
+}
+
 /// Compile a JSON query into a [`CompiledQueryContext`].
 ///
-/// The context contains the parameterized SQL, bind parameters, result context
-/// for redaction, hydration plan, and the validated input.
-///
-/// Runs the ClickHouse compilation pipeline. Edge-chain-first lowering
-/// produces flat edge-chain JOINs with inline dedup.
-///
-/// ```text
-/// JSON → Validate → Normalize → Restrict → Lower → Enforce → Security → Check → HydratePlan → Settings → Codegen
-/// ```
+/// Shorthand for `compile_query(query, QueryLanguage::Json, ...)`.
 #[must_use = "the compiled query context should be used"]
 pub fn compile(
     json_input: &str,
