@@ -528,6 +528,10 @@ fn build_security(overrides: &Option<SecurityOverride>) -> SecurityContext {
     };
     let org = ov.org_id.unwrap_or(1);
     let authorized: Vec<AuthorizedPath> = if let Some(ap) = &ov.authorized_paths {
+        assert!(
+            ov.paths.is_none() && ov.access_level.is_none(),
+            "specify either paths/access_level or authorized_paths, not both"
+        );
         ap.iter()
             .map(|a| AuthorizedPath::new(a.path.as_str(), a.access_level))
             .collect()
