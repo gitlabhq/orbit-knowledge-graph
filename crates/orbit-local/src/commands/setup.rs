@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
 
-use spec::{AssistantSpec, Mode, ScopedPath};
+use spec::{AssistantSpec, ScopedPath};
 
 pub(crate) fn assistant_value_parser() -> clap::builder::PossibleValuesParser {
     clap::builder::PossibleValuesParser::new(spec::names())
@@ -59,7 +59,7 @@ impl Target {
     }
 }
 
-pub(crate) fn run(assistants: Vec<String>, remove: bool, mode: Mode, target: Target) -> Result<()> {
+pub(crate) fn run(assistants: Vec<String>, remove: bool, target: Target) -> Result<()> {
     let specs: Vec<&AssistantSpec> = if assistants.is_empty() {
         if !remove {
             bail!(
@@ -80,7 +80,7 @@ pub(crate) fn run(assistants: Vec<String>, remove: bool, mode: Mode, target: Tar
         if remove {
             markdown::strip_block_from_file(&path, &label)?;
         } else {
-            markdown::upsert_block_in_file(&path, &label, mode)?;
+            markdown::upsert_block_in_file(&path, &label)?;
         }
     }
 
@@ -88,7 +88,7 @@ pub(crate) fn run(assistants: Vec<String>, remove: bool, mode: Mode, target: Tar
         if remove {
             remove_extras(spec, &target)?;
         } else {
-            install_extras(spec, &target, mode)?;
+            install_extras(spec, &target)?;
         }
     }
 
@@ -115,14 +115,10 @@ fn ensure_glab_auto_run() {
     }
 }
 
-fn install_extras(spec: &AssistantSpec, target: &Target, mode: Mode) -> Result<()> {
+fn install_extras(spec: &AssistantSpec, target: &Target) -> Result<()> {
     for merge in &spec.json_merges {
         let (path, label) = target.resolve(&merge.file)?;
-        let entries: Vec<Value> = merge
-            .entries
-            .iter()
-            .map(|entry| resolve_mode(entry, mode))
-            .collect();
+        let entries: Vec<Value> = merge.entries.iter().map(resolve_launcher).collect();
         let mut root = json_config::read_object(&path)?;
         if path.exists() {
             backup_once(&path, &label)?;
@@ -142,7 +138,7 @@ fn install_extras(spec: &AssistantSpec, target: &Target, mode: Mode) -> Result<(
             std::fs::create_dir_all(parent)
                 .with_context(|| format!("failed to create {}", parent.display()))?;
         }
-        std::fs::write(&path, template_file.contents(mode))
+        std::fs::write(&path, template_file.contents())
             .with_context(|| format!("failed to write {}", path.display()))?;
         println!("  {label}  ->  written");
     }
@@ -225,16 +221,13 @@ fn backup_path(path: &Path) -> PathBuf {
     path.with_file_name(name)
 }
 
-fn resolve_mode(value: &Value, mode: Mode) -> Value {
+fn resolve_launcher(value: &Value) -> Value {
     match value {
-        Value::String(s) => Value::String(
-            s.replace("{mode}", mode.as_str())
-                .replace("{{orbit}}", spec::launcher()),
-        ),
-        Value::Array(items) => Value::Array(items.iter().map(|v| resolve_mode(v, mode)).collect()),
+        Value::String(s) => Value::String(s.replace("{{orbit}}", spec::launcher())),
+        Value::Array(items) => Value::Array(items.iter().map(resolve_launcher).collect()),
         Value::Object(map) => Value::Object(
             map.iter()
-                .map(|(k, v)| (k.clone(), resolve_mode(v, mode)))
+                .map(|(k, v)| (k.clone(), resolve_launcher(v)))
                 .collect(),
         ),
         other => other.clone(),
@@ -342,19 +335,13 @@ mod tests {
     fn install_requires_at_least_one_assistant_and_bare_remove_removes_all() {
         let dir = tempfile::tempdir().unwrap();
 
-        let err = run(vec![], false, Mode::Local, project(dir.path())).unwrap_err();
+        let err = run(vec![], false, project(dir.path())).unwrap_err();
         assert!(err.to_string().contains("at least one assistant"));
 
-        run(
-            vec!["opencode".into()],
-            false,
-            Mode::Local,
-            project(dir.path()),
-        )
-        .unwrap();
+        run(vec!["opencode".into()], false, project(dir.path())).unwrap();
         assert!(dir.path().join(".opencode/plugins/orbit.js").is_file());
 
-        run(vec![], true, Mode::Local, project(dir.path())).unwrap();
+        run(vec![], true, project(dir.path())).unwrap();
         assert!(!dir.path().join(".opencode/plugins/orbit.js").exists());
         assert!(!dir.path().join("AGENTS.md").exists());
     }
@@ -367,7 +354,6 @@ mod tests {
         run(
             vec!["codex".into(), "opencode".into()],
             false,
-            Mode::Local,
             project(dir.path()),
         )
         .unwrap();
@@ -385,7 +371,6 @@ mod tests {
         run(
             vec!["codex".into(), "opencode".into()],
             true,
-            Mode::Local,
             project(dir.path()),
         )
         .unwrap();
@@ -418,14 +403,12 @@ mod tests {
         run(
             vec!["claude".into(), "codex".into(), "opencode".into()],
             false,
-            Mode::Local,
             project(dir.path()),
         )
         .unwrap();
         run(
             vec!["claude".into(), "codex".into(), "opencode".into()],
             false,
-            Mode::Remote,
             project(dir.path()),
         )
         .unwrap();
@@ -450,13 +433,7 @@ mod tests {
     fn remove_keeps_a_template_file_the_user_edited() {
         let dir = tempfile::tempdir().unwrap();
         let plugin = dir.path().join(".opencode/plugins/orbit.js");
-        run(
-            vec!["opencode".into()],
-            false,
-            Mode::Local,
-            project(dir.path()),
-        )
-        .unwrap();
+        run(vec!["opencode".into()], false, project(dir.path())).unwrap();
 
         let edited = format!(
             "{}\n// my tweak\n",
@@ -464,13 +441,7 @@ mod tests {
         );
         std::fs::write(&plugin, &edited).unwrap();
 
-        run(
-            vec!["opencode".into()],
-            true,
-            Mode::Local,
-            project(dir.path()),
-        )
-        .unwrap();
+        run(vec!["opencode".into()], true, project(dir.path())).unwrap();
 
         assert_eq!(std::fs::read_to_string(&plugin).unwrap(), edited);
     }
@@ -485,13 +456,7 @@ mod tests {
         )
         .unwrap();
 
-        run(
-            vec!["claude".into()],
-            false,
-            Mode::Local,
-            project(dir.path()),
-        )
-        .unwrap();
+        run(vec!["claude".into()], false, project(dir.path())).unwrap();
 
         let settings: Value = serde_json::from_str(
             &std::fs::read_to_string(dir.path().join(".claude/settings.json")).unwrap(),
@@ -500,13 +465,7 @@ mod tests {
         assert_eq!(settings["permissions"]["allow"][0], "Bash");
         assert_eq!(settings["hooks"]["PreToolUse"].as_array().unwrap().len(), 2);
 
-        run(
-            vec!["claude".into()],
-            true,
-            Mode::Local,
-            project(dir.path()),
-        )
-        .unwrap();
+        run(vec!["claude".into()], true, project(dir.path())).unwrap();
 
         let settings: Value = serde_json::from_str(
             &std::fs::read_to_string(dir.path().join(".claude/settings.json")).unwrap(),
@@ -517,25 +476,26 @@ mod tests {
     }
 
     #[test]
-    fn mode_tokens_resolve_in_installed_artifacts() {
+    fn launcher_tokens_resolve_in_installed_artifacts() {
         let dir = tempfile::tempdir().unwrap();
         run(
             vec!["claude".into(), "opencode".into()],
             false,
-            Mode::Remote,
             project(dir.path()),
         )
         .unwrap();
 
         let settings = std::fs::read_to_string(dir.path().join(".claude/settings.json")).unwrap();
-        assert!(settings.contains("orbit local hook-guard search --mode remote"));
-        assert!(!settings.contains("{mode}"));
+        assert!(
+            settings.contains("\"orbit hook-guard search\""),
+            "{settings}"
+        );
+        assert!(!settings.contains("--mode"));
         assert!(!settings.contains("{{orbit}}"));
 
         let plugin =
             std::fs::read_to_string(dir.path().join(".opencode/plugins/orbit.js")).unwrap();
-        assert!(plugin.contains("glab orbit remote"));
-        assert!(plugin.contains("const REQUIRE_LOCAL_GRAPH = false"));
+        assert!(plugin.contains("run orbit grep"));
         assert!(!plugin.contains("{{"));
     }
 
@@ -545,13 +505,7 @@ mod tests {
         std::fs::create_dir_all(dir.path().join(".claude")).unwrap();
         std::fs::write(dir.path().join(".claude/settings.json"), "{not json").unwrap();
 
-        let err = run(
-            vec!["claude".into()],
-            false,
-            Mode::Local,
-            project(dir.path()),
-        )
-        .unwrap_err();
+        let err = run(vec!["claude".into()], false, project(dir.path())).unwrap_err();
         assert!(format!("{err:#}").contains("not valid JSON"));
         assert_eq!(
             std::fs::read_to_string(dir.path().join(".claude/settings.json")).unwrap(),

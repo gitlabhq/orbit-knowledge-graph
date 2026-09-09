@@ -116,7 +116,7 @@ FROM gl_edge e
 JOIN labels l ON l.id = CASE WHEN e.source_id = ?1 THEN e.target_id ELSE e.source_id END
 WHERE (e.source_id = ?1 OR e.target_id = ?1)
 {edge_predicate}{direction_predicate}{paths}{kinds}
-ORDER BY kind, dir DESC, l.path, l.label"
+ORDER BY kind, dir DESC, l.path, l.label, l.loc"
             ),
             &params,
         )?;
@@ -142,7 +142,7 @@ WHERE e.relationship_kind <> 'DEFINES'
   AND e.source_id NOT IN (SELECT id FROM members)
 {edge_predicate}{paths}{kinds}
 GROUP BY kind, l.label, l.loc, l.path
-ORDER BY kind, l.path, l.label"
+ORDER BY kind, l.path, l.label, l.loc"
                 ),
                 &params,
             )?;

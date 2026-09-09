@@ -105,7 +105,7 @@ mod tests {
     fn served_manifest_carries_binary_hint_but_subfiles_do_not() {
         let manifest = render(MANIFEST).unwrap();
         assert!(manifest.starts_with("---"), "frontmatter must stay first");
-        assert!(manifest.contains("orbit local skill references/sql.md"));
+        assert!(manifest.contains("`orbit skill references/sql.md`"));
 
         assert!(
             !render("references/sql.md")

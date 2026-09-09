@@ -2,7 +2,7 @@ use super::client::OrbitClient;
 use super::error::RemoteError;
 use super::{pretty_json, write_stdout};
 
-pub(crate) async fn run_schema(nodes: Vec<String>) -> Result<(), RemoteError> {
+pub(crate) async fn run_ontology(nodes: Vec<String>) -> Result<(), RemoteError> {
     let client = OrbitClient::from_env()?;
     let params: Vec<(&str, String)> = expand_param(&nodes).into_iter().collect();
     let schema = client.get_schema(&params).await?;

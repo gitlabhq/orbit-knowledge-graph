@@ -1,8 +1,8 @@
 //! Declarative assistant specs embedded from `config/setup/agents/`. Each YAML file describes
 //! one assistant as four generic operations (instruction file, marker-owned JSON merges,
 //! templated files, string registrations), so adding an assistant means adding a YAML file, not
-//! Rust. Everything that differs between the local and remote graph lives in
-//! `config/setup/modes.yaml`, selected by the `{mode}` token.
+//! Rust. The instruction block, hook nudges, and template values live in
+//! `config/setup/modes.yaml`.
 
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
@@ -15,71 +15,23 @@ use serde_json::Value;
 #[folder = "$CONFIG_DIR/setup"]
 struct SetupAssets;
 
-#[derive(clap::ValueEnum, Clone, Copy, PartialEq, Eq, Debug, Default)]
-pub(crate) enum Mode {
-    Local,
-    #[default]
-    Remote,
-}
-
-impl Mode {
-    pub(super) const ALL: [Mode; 2] = [Mode::Local, Mode::Remote];
-
-    pub(crate) fn as_str(self) -> &'static str {
-        match self {
-            Mode::Local => "local",
-            Mode::Remote => "remote",
-        }
-    }
-
-    fn texts(self) -> &'static ModeTexts {
-        match self {
-            Mode::Local => &MODES.local,
-            Mode::Remote => &MODES.remote,
-        }
-    }
-}
-
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Modes {
-    local: ModeTexts,
-    remote: ModeTexts,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ModeTexts {
+struct SetupTexts {
     instructions: String,
     nudge_search: String,
     nudge_read: String,
     #[serde(default)]
-    template_vars: BTreeMap<String, TemplateVar>,
+    template_vars: BTreeMap<String, String>,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
-enum TemplateVar {
-    Flag(bool),
-    Text(String),
-}
-
-impl TemplateVar {
-    fn rendered(&self) -> String {
-        match self {
-            TemplateVar::Flag(flag) => flag.to_string(),
-            TemplateVar::Text(text) => text.clone(),
-        }
-    }
-}
-
-static MODES: LazyLock<Modes> = LazyLock::new(|| {
+static TEXTS: LazyLock<SetupTexts> = LazyLock::new(|| {
     let file = SetupAssets::get("modes.yaml").expect("config/setup/modes.yaml must be embedded");
     orbit_utils::yaml::from_slice(&file.data)
         .unwrap_or_else(|e| panic!("config/setup/modes.yaml is invalid: {e}"))
 });
 
-pub(crate) const DIRECT_LAUNCHER: &str = "orbit local";
+pub(crate) const DIRECT_LAUNCHER: &str = "orbit";
 pub(crate) const GLAB_LAUNCHER: &str = "glab orbit local";
 
 pub(crate) fn launcher() -> &'static str {
@@ -97,10 +49,9 @@ fn render_launcher(text: &str, launcher: &str) -> String {
     text.replace("{{orbit}}", launcher)
 }
 
-fn render_instructions(mode: Mode, launcher: &str) -> String {
+fn render_instructions(launcher: &str) -> String {
     render_launcher(
-        &mode
-            .texts()
+        &TEXTS
             .instructions
             .trim_end()
             .replace("{{graph_contents}}", &graph_contents()),
@@ -108,17 +59,13 @@ fn render_instructions(mode: Mode, launcher: &str) -> String {
     )
 }
 
-static RENDERED_INSTRUCTIONS: LazyLock<[String; 2]> =
-    LazyLock::new(|| Mode::ALL.map(|mode| render_instructions(mode, launcher())));
+static RENDERED_INSTRUCTIONS: LazyLock<String> = LazyLock::new(|| render_instructions(launcher()));
 
-static RENDERED_NUDGES: LazyLock<[[String; 2]; 2]> = LazyLock::new(|| {
-    Mode::ALL.map(|mode| {
-        [
-            render_launcher(mode.texts().nudge_search.trim_end(), launcher()),
-            render_launcher(mode.texts().nudge_read.trim_end(), launcher()),
-        ]
-    })
-});
+static RENDERED_NUDGE_SEARCH: LazyLock<String> =
+    LazyLock::new(|| render_launcher(TEXTS.nudge_search.trim_end(), launcher()));
+
+static RENDERED_NUDGE_READ: LazyLock<String> =
+    LazyLock::new(|| render_launcher(TEXTS.nudge_read.trim_end(), launcher()));
 
 fn graph_contents() -> String {
     use strum::IntoEnumIterator;
@@ -159,16 +106,16 @@ fn graph_contents() -> String {
     )
 }
 
-pub(crate) fn instructions(mode: Mode) -> &'static str {
-    &RENDERED_INSTRUCTIONS[mode as usize]
+pub(crate) fn instructions() -> &'static str {
+    &RENDERED_INSTRUCTIONS
 }
 
-pub(crate) fn nudge_search(mode: Mode) -> &'static str {
-    &RENDERED_NUDGES[mode as usize][0]
+pub(crate) fn nudge_search() -> &'static str {
+    &RENDERED_NUDGE_SEARCH
 }
 
-pub(crate) fn nudge_read(mode: Mode) -> &'static str {
-    &RENDERED_NUDGES[mode as usize][1]
+pub(crate) fn nudge_read() -> &'static str {
+    &RENDERED_NUDGE_READ
 }
 
 #[derive(Debug, Deserialize)]
@@ -247,24 +194,22 @@ pub(crate) fn names() -> Vec<&'static str> {
 }
 
 impl TemplateFile {
-    pub(super) fn contents(&self, mode: Mode) -> String {
-        self.contents_with(mode, launcher())
+    pub(super) fn contents(&self) -> String {
+        self.contents_with(launcher())
     }
 
-    fn contents_with(&self, mode: Mode, launcher: &str) -> String {
+    fn contents_with(&self, launcher: &str) -> String {
         let mut rendered = embedded_text(&self.template);
-        for (name, value) in &mode.texts().template_vars {
-            rendered = rendered.replace(&format!("{{{{{name}}}}}"), &value.rendered());
+        for (name, value) in &TEXTS.template_vars {
+            rendered = rendered.replace(&format!("{{{{{name}}}}}"), value);
         }
         render_launcher(&rendered, launcher)
     }
 
     pub(super) fn is_unmodified(&self, contents: &str) -> bool {
-        Mode::ALL.iter().any(|mode| {
-            [DIRECT_LAUNCHER, GLAB_LAUNCHER]
-                .iter()
-                .any(|launcher| self.contents_with(*mode, launcher) == contents)
-        })
+        [DIRECT_LAUNCHER, GLAB_LAUNCHER]
+            .iter()
+            .any(|launcher| self.contents_with(launcher) == contents)
     }
 }
 
@@ -306,39 +251,32 @@ mod tests {
     }
 
     #[test]
-    fn template_and_text_assets_resolve_in_both_modes() {
-        for mode in [Mode::Local, Mode::Remote] {
-            for spec in all() {
-                for template_file in &spec.template_files {
-                    let rendered = template_file.contents(mode);
-                    assert!(!rendered.is_empty());
-                    assert!(
-                        !rendered.contains("{{"),
-                        "{}: unresolved placeholder in {} for {}",
-                        spec.name,
-                        template_file.template,
-                        mode.as_str()
-                    );
-                }
-            }
-            for text in [instructions(mode), nudge_search(mode), nudge_read(mode)] {
-                assert!(!text.trim().is_empty());
+    fn template_and_text_assets_resolve() {
+        for spec in all() {
+            for template_file in &spec.template_files {
+                let rendered = template_file.contents();
+                assert!(!rendered.is_empty());
                 assert!(
-                    !text.contains("{{"),
-                    "unresolved placeholder in {} texts",
-                    mode.as_str()
+                    !rendered.contains("{{"),
+                    "{}: unresolved placeholder in {}",
+                    spec.name,
+                    template_file.template
                 );
             }
+        }
+        for text in [instructions(), nudge_search(), nudge_read()] {
+            assert!(!text.trim().is_empty());
+            assert!(!text.contains("{{"), "unresolved placeholder: {text}");
         }
     }
 
     #[test]
     fn launcher_substitution_renders_both_distributions() {
         for (launcher, expected) in [
-            (DIRECT_LAUNCHER, "`orbit local grep"),
+            (DIRECT_LAUNCHER, "`orbit grep"),
             (GLAB_LAUNCHER, "`glab orbit local grep"),
         ] {
-            let rendered = render_instructions(Mode::Local, launcher);
+            let rendered = render_instructions(launcher);
             assert!(rendered.contains(expected), "{launcher}: {rendered}");
             assert!(!rendered.contains("{{orbit}}"), "{launcher}");
         }
@@ -348,21 +286,15 @@ mod tests {
 
     #[test]
     fn opencode_plugins_are_shell_safe() {
-        for mode in [Mode::Local, Mode::Remote] {
-            let contents = get("opencode").unwrap().template_files[0].contents(mode);
-            assert!(!contents.contains('`'), "{}", mode.as_str());
-            assert!(!contents.contains("$("), "{}", mode.as_str());
+        let contents = get("opencode").unwrap().template_files[0].contents();
+        assert!(!contents.contains('`'));
+        assert!(!contents.contains("$("));
 
-            for (name, value) in &mode.texts().template_vars {
-                let TemplateVar::Text(text) = value else {
-                    continue;
-                };
-                assert!(
-                    !text.contains(['"', '`']) && !text.contains("$("),
-                    "{}: {name} is not shell-safe",
-                    mode.as_str()
-                );
-            }
+        for (name, text) in &TEXTS.template_vars {
+            assert!(
+                !text.contains(['"', '`']) && !text.contains("$("),
+                "{name} is not shell-safe"
+            );
         }
     }
 
