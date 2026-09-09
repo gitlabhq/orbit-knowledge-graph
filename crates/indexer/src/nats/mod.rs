@@ -14,7 +14,7 @@
 //! ```ignore
 //! use etl_engine::nats::{NatsBroker, NatsConfiguration};
 //!
-//! let config = AppConfig::load(&[])?.nats;
+//! let config = AppConfig::load(None)?.nats;
 //! let broker = NatsBroker::connect(&config).await?;
 //! ```
 //!

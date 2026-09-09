@@ -34,7 +34,7 @@ async fn main() -> anyhow::Result<()> {
         .expect("Failed to install rustls CryptoProvider");
 
     let args = Args::parse();
-    let config = AppConfig::load(&args.config)?;
+    let config = AppConfig::load(args.config.as_deref())?;
 
     // Force-parse schema/format versions at boot so malformed version files
     // fail fast instead of per-request.

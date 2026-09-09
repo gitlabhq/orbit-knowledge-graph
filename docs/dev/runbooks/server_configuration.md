@@ -16,10 +16,9 @@ Config is loaded in layers, each overriding the previous:
    maps and any entry here that a partial ConfigMap does not set would leak into production.
 2. **On-disk `config/default.yaml`**, relative to the working directory, when present. This is
    the key the Helm chart's ConfigMap currently uses; treat it as a partial overlay.
-3. **Overlay files**: each `--config <path>`, applied in the order given, so a later file overrides
-   an earlier one. Without any `--config`, `config/config.yaml` is loaded when it exists. An
-   explicit `--config` path must exist; the default overlay is optional and Git ignores it.
-   The mise dev tasks start from `--config config/dev.yaml`, a committed overlay holding
+3. **Overlay file**: the path given with `--config <path>`, otherwise `config/config.yaml` when it exists.
+   An explicit `--config` path must exist; the default overlay is optional and Git ignores it.
+   The mise dev tasks pass a generated file built from `config/dev.yaml`, a committed overlay holding
    local-development tuning (laptop ClickHouse session settings, dev batch sizes) kept out of the
    deployment defaults.
 4. **Secrets**: Files in `/etc/secrets/` (Kubernetes secret mounts)
@@ -31,16 +30,17 @@ value to `config/default.yaml`; nothing else. Tests that need a config start fro
 `AppConfig::embedded_defaults()` and override the fields they care about.
 
 The mise dev tasks (`server:start`, `server:dispatch`, `dev:web`, `dev:indexer`, `dev:dispatcher`,
-`dev:healthcheck`) run `scripts/orbit-native-dev.sh`, which layers these overlays in order:
+`dev:healthcheck`) run `scripts/orbit-native-dev.sh`, which writes `.dev/<mode>.yaml` on every start
+and passes it as the single `--config` file. The file is a `yq` deep merge of, in increasing priority:
 
 1. `config/dev.yaml`: committed local-development tuning.
-2. `config/dev/<mode>.yaml`: committed per-mode ports and names (`webserver`, `indexer`,
-   `health-check`; the dispatcher has none).
-3. `.dev/gdk.yaml`: generated on every start from `gdk.yml` and the GitLab secret files
-   (connection URLs, databases, JWT keys, ClickHouse password). Git ignores it.
-4. `config/dev.local.yaml`: personal overrides, loaded last when the file exists. Git ignores it.
+2. Connection details derived from `gdk.yml` and the GitLab secret files: URLs, databases, JWT keys,
+   ClickHouse password.
+3. The mode's ports and names (webserver bind addresses, indexer health port and consumer name,
+   health-check bind address), so the processes `mise run dev` starts side by side do not collide.
+4. `config/dev.local.yaml`: personal overrides, when the file exists. Git ignores it.
 
-Passing any `--config` disables the default `config/config.yaml` lookup.
+Passing `--config` disables the default `config/config.yaml` lookup.
 
 Overlay example (`config/dev.local.yaml` or any `--config` file):
 

@@ -254,8 +254,7 @@ adjacent.
    ```
 
 The GKG webserver is available at `http://localhost:8090` (HTTP) and
-`localhost:50054` (gRPC) by default. Ports come from the committed
-`config/dev/<mode>.yaml` overlays; override them in `config/dev.local.yaml`.
+`localhost:50054` (gRPC) by default. Override ports in `config/dev.local.yaml`.
 
 This starts all three GKG runtime modes in the foreground:
 
@@ -280,9 +279,9 @@ On the first run, `cargo` compiles the full workspace which takes several
 minutes. Subsequent runs use the cached build and start in seconds.
 
 To run multiple isolated local clusters on the same machine, override the
-bind addresses in `config/dev.local.yaml`. The file is Git-ignored and the
-dev tasks load it last, after `config/dev.yaml`, the per-mode overlay, and the
-generated `.dev/gdk.yaml`. Any `AppConfig` key is valid there:
+bind addresses in `config/dev.local.yaml`. The file is Git-ignored and the dev
+script merges it last into the generated `.dev/<mode>.yaml` that each process
+loads. Any `AppConfig` key is valid there:
 
 ```yaml
 bind_address: "127.0.0.1:8091"
@@ -295,7 +294,7 @@ nats:
 ### HTTPS and NGINX GDK setups
 
 The dev script reads `hostname`, `port`, and `https.enabled` from `gdk.yml` to
-derive `gitlab.base_url` in the generated `.dev/gdk.yaml`. If your GDK has HTTPS
+derive `gitlab.base_url` in the generated `.dev/<mode>.yaml`. If your GDK has HTTPS
 enabled (for example `https.enabled: true` with `hostname: gdk.test` and
 `port: 3443`), the script writes `https://gdk.test:3443`.
 

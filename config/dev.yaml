@@ -1,10 +1,10 @@
-# Local-development overlay. Loaded by the mise dev tasks via `--config config/dev.yaml`, on top of
-# the embedded config/default.yaml. Holds tuning that suits a laptop ClickHouse and GDK, and must
-# NOT be promoted into config/default.yaml, which underlays production.
+# Local-development overlay applied on top of the embedded config/default.yaml. Holds tuning that
+# suits a laptop ClickHouse and GDK, and must NOT be promoted into config/default.yaml, which
+# underlays production.
 #
-# The dev tasks layer further overlays after this one: config/dev/<mode>.yaml (per-mode ports),
-# the generated .dev/gdk.yaml (connection details derived from gdk.yml), and the Git-ignored
-# config/dev.local.yaml for personal overrides (highest priority).
+# The mise dev tasks do not pass this file to --config directly: scripts/orbit-native-dev.sh
+# deep-merges it with the connection details derived from gdk.yml, the mode's ports, and the
+# Git-ignored config/dev.local.yaml (personal overrides, highest priority) into .dev/<mode>.yaml.
 
 datalake:
   session_settings:

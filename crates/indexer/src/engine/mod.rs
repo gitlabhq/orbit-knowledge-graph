@@ -9,7 +9,7 @@
 //! use etl_engine::configuration::EngineConfiguration;
 //! use std::sync::Arc;
 //!
-//! let app_config = AppConfig::load(&[])?;
+//! let app_config = AppConfig::load(None)?;
 //! let config = app_config.nats;
 //! let broker = Arc::new(NatsBroker::connect(&config).await?);
 //! let nats_services = Arc::new(NatsServicesImpl::new(broker.clone()));

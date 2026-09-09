@@ -1,4 +1,0 @@
-# HealthCheck-mode overlay for `mise run dev:healthcheck`, layered after config/dev.yaml. Personal
-# changes go in the Git-ignored config/dev.local.yaml.
-health_check:
-  bind_address: "127.0.0.1:4201"

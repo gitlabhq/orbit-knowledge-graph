@@ -4,8 +4,8 @@
 # fallback values, so removing a key from this file fails startup with a "missing field" error.
 #
 # Overrides, in increasing priority: an on-disk config/default.yaml (compatibility overlay for the
-# Helm chart's ConfigMap key), the overlay files (each --config <path> in order, else
-# config/config.yaml when present), and K8s secret files under /etc/secrets/.
+# Helm chart's ConfigMap key), the overlay file (--config <path>, else config/config.yaml when
+# present), and K8s secret files under /etc/secrets/.
 #
 # The values below are deployment defaults: what any environment gets when nothing overrides them.
 # They must equal the settings a production pod would run on, so this file can underlay a partial

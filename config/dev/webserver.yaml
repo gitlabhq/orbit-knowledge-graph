@@ -1,9 +1,0 @@
-# Webserver-mode overlay for `mise run dev:web`, layered after config/dev.yaml. Ports the GDK
-# workhorse expects locally. Personal changes go in the Git-ignored config/dev.local.yaml.
-bind_address: "127.0.0.1:8090"
-grpc_bind_address: "127.0.0.1:50054"
-
-metrics:
-  prometheus:
-    enabled: false
-    port: 9100

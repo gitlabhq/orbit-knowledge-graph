@@ -1,7 +1,7 @@
 //! Top-level application configuration.
 
 use std::net::SocketAddr;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 
 use schemars::JsonSchema;
@@ -59,10 +59,10 @@ pub struct AppConfig {
 impl AppConfig {
     /// Layers, lowest to highest priority: the embedded `config/default.yaml`,
     /// an on-disk `config/default.yaml` when present (the Helm chart's ConfigMap
-    /// key), the overlays (each `--config <path>` in order, else
-    /// `config/config.yaml` when present), secret files.
-    pub fn load(overlays: &[PathBuf]) -> Result<Self, ConfigError> {
-        Self::load_from(overlays, Path::new(SECRET_FILE_DIR))
+    /// key), the overlay (`--config <path>`, else `config/config.yaml` when
+    /// present), secret files.
+    pub fn load(overlay: Option<&Path>) -> Result<Self, ConfigError> {
+        Self::load_from(overlay, Path::new(SECRET_FILE_DIR))
     }
 
     /// The embedded `config/default.yaml` alone: no overlay or secrets. The
@@ -75,18 +75,15 @@ impl AppConfig {
             .expect("embedded config/default.yaml must deserialize into AppConfig")
     }
 
-    fn load_from(overlays: &[PathBuf], secret_dir: &Path) -> Result<Self, ConfigError> {
-        let mut builder = config::Config::builder()
+    fn load_from(overlay: Option<&Path>, secret_dir: &Path) -> Result<Self, ConfigError> {
+        let overlay_file = match overlay {
+            Some(path) => config::File::from(path.to_path_buf()).required(true),
+            None => config::File::with_name(OVERLAY_CONFIG_FILE).required(false),
+        };
+        let config = config::Config::builder()
             .add_source(embedded_defaults_source())
-            .add_source(config::File::with_name(DEFAULT_CONFIG_FILE).required(false));
-        if overlays.is_empty() {
-            builder =
-                builder.add_source(config::File::with_name(OVERLAY_CONFIG_FILE).required(false));
-        }
-        for overlay in overlays {
-            builder = builder.add_source(config::File::from(overlay.clone()).required(true));
-        }
-        let config = builder
+            .add_source(config::File::with_name(DEFAULT_CONFIG_FILE).required(false))
+            .add_source(overlay_file)
             .add_source(SecretFileSource::new(secret_dir))
             .build()
             .map_err(ConfigError::Config)?;
@@ -173,7 +170,7 @@ gitlab:
         assert!(err.to_string().contains("jwt_clock_skew_secs"), "{err}");
     }
 
-    fn write_overlay(dir: &Path, name: &str, yaml: &str) -> PathBuf {
+    fn write_overlay(dir: &Path, name: &str, yaml: &str) -> std::path::PathBuf {
         let path = dir.join(name);
         std::fs::write(&path, yaml).unwrap();
         path
@@ -186,7 +183,7 @@ gitlab:
         let secrets = dir.path().join("secrets");
         std::fs::create_dir(&secrets).unwrap();
 
-        let config = AppConfig::load_from(&[overlay], &secrets).unwrap();
+        let config = AppConfig::load_from(Some(&overlay), &secrets).unwrap();
 
         assert_eq!(config.nats.url, "nats://overlay:4222");
         assert_eq!(config.graph.database, "overlay-graph");
@@ -199,28 +196,9 @@ gitlab:
         let dir = tempfile::TempDir::new().unwrap();
         let missing = dir.path().join("missing.yaml");
 
-        let err = AppConfig::load_from(&[missing], dir.path()).unwrap_err();
+        let err = AppConfig::load_from(Some(&missing), dir.path()).unwrap_err();
 
         assert!(matches!(err, ConfigError::Config(_)), "{err}");
-    }
-
-    #[test]
-    fn later_overlays_override_earlier_ones() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let base = write_overlay(dir.path(), "base.yaml", OVERLAY_BASE);
-        let mode = write_overlay(
-            dir.path(),
-            "mode.yaml",
-            "nats:\n  url: \"nats://mode:4222\"\n  consumer_name: \"mode-consumer\"\n",
-        );
-        let secrets = dir.path().join("secrets");
-        std::fs::create_dir(&secrets).unwrap();
-
-        let config = AppConfig::load_from(&[base, mode], &secrets).unwrap();
-
-        assert_eq!(config.nats.url, "nats://mode:4222");
-        assert_eq!(config.nats.consumer_name.as_deref(), Some("mode-consumer"));
-        assert_eq!(config.graph.database, "overlay-graph");
     }
 
     #[test]
@@ -243,7 +221,7 @@ schedule:
         let secrets = dir.path().join("secrets");
         std::fs::create_dir(&secrets).unwrap();
 
-        let config = AppConfig::load_from(&[overlay], &secrets).unwrap();
+        let config = AppConfig::load_from(Some(&overlay), &secrets).unwrap();
 
         assert_eq!(
             config.engine.topics["code-indexing-task"].max_attempts,
@@ -263,7 +241,7 @@ schedule:
         std::fs::create_dir_all(secrets.join("graph")).unwrap();
         std::fs::write(secrets.join("graph/password"), "secret-password").unwrap();
 
-        let config = AppConfig::load_from(&[overlay], &secrets).unwrap();
+        let config = AppConfig::load_from(Some(&overlay), &secrets).unwrap();
 
         assert_eq!(config.graph.password.as_deref(), Some("secret-password"));
     }
