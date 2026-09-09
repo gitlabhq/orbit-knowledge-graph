@@ -1,0 +1,69 @@
+name: "Rust: edge collection bug fixes (compound assign, record expr, macro depth)"
+fixtures:
+  - path: Cargo.toml
+    content: |
+      [package]
+      name = "rust_edge_collection_fixes_fixture"
+      version = "0.1.0"
+      edition = "2021"
+
+  - path: src/lib.rs
+    content: |
+      use std::ops::AddAssign;
+
+      pub struct Counter(pub i32);
+
+      impl AddAssign for Counter {
+          fn add_assign(&mut self, rhs: Self) {
+              self.0 += rhs.0;
+          }
+      }
+
+      pub fn call_add_assign(mut a: Counter, b: Counter) {
+          a += b;
+      }
+
+      pub struct Foo {
+          pub x: i32,
+      }
+
+      pub fn construct_foo() -> Foo {
+          Foo { x: 1 }
+      }
+
+      macro_rules! recur {
+          ($e:expr) => { recur!($e) };
+      }
+
+      pub fn trigger_recursive_macro() -> i32 {
+          let _x = 7;
+          0
+      }
+
+tests:
+  - name: "compound assignment resolves to AddAssign::add_assign impl method"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'call_add_assign' AND callee.name = 'add_assign'
+      RETURN callee.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: 'Counter::add_assign' } }
+
+  - name: "record expression construction creates edge to the struct"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'construct_foo' AND callee.name = 'Foo'
+      RETURN callee.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: 'Foo' } }
+
+  - name: "recursive macro expansion terminates without hanging"
+    query: |
+      MATCH (caller:Definition)
+      WHERE caller.name = 'trigger_recursive_macro'
+      RETURN caller.name AS name
+    assert:
+      - { row_count: 1 }
+      - { row: { name: 'trigger_recursive_macro' } }

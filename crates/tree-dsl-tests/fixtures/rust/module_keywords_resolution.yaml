@@ -1,0 +1,98 @@
+name: "Rust: module keyword resolution"
+fixtures:
+  - path: Cargo.toml
+    content: |
+      [package]
+      name = "rust_module_keywords_fixture"
+      version = "0.1.0"
+      edition = "2021"
+
+  - path: src/lib.rs
+    content: |
+      pub mod outer;
+      pub mod shared;
+
+  - path: src/shared.rs
+    content: |
+      pub fn root_helper() {}
+
+  - path: src/outer.rs
+    content: |
+      pub fn parent_helper() {}
+      pub mod inner;
+
+  - path: src/outer/inner.rs
+    content: |
+      use super::parent_helper;
+
+      pub mod deeper;
+
+      fn local_helper() {}
+
+      pub fn via_use_super() {
+          parent_helper();
+      }
+
+      pub fn via_super_path() {
+          super::parent_helper();
+      }
+
+      pub fn via_self_path() {
+          self::local_helper();
+      }
+
+      pub fn via_crate_path() {
+          crate::shared::root_helper();
+      }
+
+  - path: src/outer/inner/deeper.rs
+    content: |
+      pub fn via_double_super() {
+          super::super::parent_helper();
+      }
+
+tests:
+  - name: "imported super path resolves"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'via_use_super' AND callee.name = 'parent_helper'
+      RETURN caller.file_path AS src, callee.file_path AS tgt
+    assert:
+      - { row_count: 1 }
+      - { row: { src: 'src/outer/inner.rs', tgt: 'src/outer.rs' } }
+
+  - name: "direct super path resolves"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'via_super_path' AND callee.name = 'parent_helper'
+      RETURN caller.file_path AS src, callee.file_path AS tgt
+    assert:
+      - { row_count: 1 }
+      - { row: { src: 'src/outer/inner.rs', tgt: 'src/outer.rs' } }
+
+  - name: "self path resolves inside module"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'via_self_path' AND callee.name = 'local_helper'
+      RETURN caller.file_path AS src, callee.file_path AS tgt
+    assert:
+      - { row_count: 1 }
+      - { row: { src: 'src/outer/inner.rs', tgt: 'src/outer/inner.rs' } }
+
+  - name: "crate path resolves across modules"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'via_crate_path' AND callee.name = 'root_helper'
+      RETURN caller.file_path AS src, callee.file_path AS tgt
+    assert:
+      - { row_count: 1 }
+      - { row: { src: 'src/outer/inner.rs', tgt: 'src/shared.rs' } }
+
+  - name: "double super path resolves across nested modules"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'via_double_super' AND callee.name = 'parent_helper'
+      RETURN caller.file_path AS src, callee.file_path AS tgt
+    assert:
+      - { row_count: 1 }
+      - { row: { src: 'src/outer/inner/deeper.rs', tgt: 'src/outer.rs' } }

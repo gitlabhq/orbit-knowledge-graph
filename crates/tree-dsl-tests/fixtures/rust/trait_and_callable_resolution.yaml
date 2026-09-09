@@ -1,0 +1,207 @@
+name: "Rust: trait and callable resolution"
+fixtures:
+  - path: Cargo.toml
+    content: |
+      [package]
+      name = "rust_callable_fixture"
+      version = "0.1.0"
+      edition = "2021"
+
+  - path: src/lib.rs
+    content: |
+      pub mod domain;
+      pub mod usage;
+
+  - path: src/domain.rs
+    content: |
+      pub trait Runner {
+          fn run(&self);
+
+          fn construct() -> Self
+          where
+              Self: Sized;
+      }
+
+      pub struct Service;
+      pub struct Wrapper(pub Service);
+
+      pub enum Command {
+          Start(Service),
+      }
+
+      impl Runner for Service {
+          fn run(&self) {}
+
+          fn construct() -> Self {
+              Service
+          }
+      }
+
+      impl Service {
+          pub fn inherent() -> Self {
+              Service
+          }
+      }
+
+      impl std::ops::Deref for Wrapper {
+          type Target = Service;
+
+          fn deref(&self) -> &Self::Target {
+              &self.0
+          }
+      }
+
+      pub fn helper() {}
+
+  - path: src/usage.rs
+    content: |
+      use crate::domain::{Command, Runner, Service, Wrapper, helper};
+
+      pub fn call_trait_method() {
+          let service = Service::construct();
+          service.run();
+      }
+
+      pub fn call_trait_ufcs() {
+          let service = Service::construct();
+          Runner::run(&service);
+      }
+
+      pub fn call_tuple_struct() {
+          let _wrapper = Wrapper(Service::inherent());
+      }
+
+      pub fn call_enum_variant() {
+          let _command = Command::Start(Service::construct());
+      }
+
+      pub fn call_fn_alias() {
+          let call = helper;
+          call();
+      }
+
+      pub fn call_fn_pointer_alias() {
+          let call: fn() = helper;
+          call();
+      }
+
+      pub fn call_alias_chain() {
+          let first: fn() = helper;
+          let second = first;
+          second();
+      }
+
+      pub fn call_trait_associated_ufcs() {
+          let _ = <Service as Runner>::construct();
+      }
+
+      pub type ServiceAlias = Service;
+
+      pub fn call_type_alias_associated() {
+          let _ = ServiceAlias::construct();
+      }
+
+      pub fn call_autoderef_method() {
+          let wrapper = Wrapper(Service::construct());
+          wrapper.run();
+      }
+
+tests:
+  - name: "trait method call resolves to impl method"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'call_trait_method' AND callee.name = 'run'
+      RETURN caller.file_path AS src, callee.file_path AS tgt, callee.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { src: 'src/usage.rs', tgt: 'src/domain.rs', type: 'Method' } }
+
+  - name: "trait UFCS call resolves to impl method"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'call_trait_ufcs' AND callee.name = 'run'
+      RETURN caller.file_path AS src, callee.file_path AS tgt, callee.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { src: 'src/usage.rs', tgt: 'src/domain.rs', type: 'Method' } }
+
+  - name: "associated function call resolves"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'call_trait_method' AND callee.name = 'construct'
+      RETURN caller.file_path AS src, callee.file_path AS tgt, callee.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { src: 'src/usage.rs', tgt: 'src/domain.rs', type: 'AssociatedFunction' } }
+
+  - name: "tuple struct constructor resolves to struct definition"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'call_tuple_struct' AND callee.name = 'Wrapper'
+      RETURN caller.file_path AS src, callee.file_path AS tgt, callee.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { src: 'src/usage.rs', tgt: 'src/domain.rs', type: 'Struct' } }
+
+  - name: "enum variant constructor resolves to variant definition"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'call_enum_variant' AND callee.name = 'Start'
+      RETURN caller.file_path AS src, callee.file_path AS tgt, callee.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { src: 'src/usage.rs', tgt: 'src/domain.rs', type: 'Variant' } }
+
+  - name: "function-item alias call still resolves to original function"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'call_fn_alias' AND callee.name = 'helper'
+      RETURN caller.file_path AS src, callee.file_path AS tgt
+    assert:
+      - { row_count: 1 }
+      - { row: { src: 'src/usage.rs', tgt: 'src/domain.rs' } }
+
+  - name: "fn pointer coercion still resolves to original function"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'call_fn_pointer_alias' AND callee.name = 'helper'
+      RETURN caller.file_path AS src, callee.file_path AS tgt
+    assert:
+      - { row_count: 1 }
+      - { row: { src: 'src/usage.rs', tgt: 'src/domain.rs' } }
+
+  - name: "local alias chain preserves callable target"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'call_alias_chain' AND callee.name = 'helper'
+      RETURN caller.file_path AS src, callee.file_path AS tgt
+    assert:
+      - { row_count: 1 }
+      - { row: { src: 'src/usage.rs', tgt: 'src/domain.rs' } }
+
+  - name: "trait associated UFCS resolves to impl associated function"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'call_trait_associated_ufcs' AND callee.name = 'construct'
+      RETURN caller.file_path AS src, callee.file_path AS tgt, callee.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { src: 'src/usage.rs', tgt: 'src/domain.rs', type: 'AssociatedFunction' } }
+
+  - name: "type alias associated call resolves to underlying impl"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'call_type_alias_associated' AND callee.name = 'construct'
+      RETURN caller.file_path AS src, callee.file_path AS tgt, callee.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { src: 'src/usage.rs', tgt: 'src/domain.rs', type: 'AssociatedFunction' } }
+
+  - name: "autoderef method call resolves through Deref target"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'call_autoderef_method' AND callee.name = 'run'
+      RETURN caller.file_path AS src, callee.file_path AS tgt, callee.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { src: 'src/usage.rs', tgt: 'src/domain.rs', type: 'Method' } }

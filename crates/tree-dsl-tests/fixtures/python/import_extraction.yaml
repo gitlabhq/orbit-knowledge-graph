@@ -1,0 +1,81 @@
+name: "Python: comprehensive import extraction (C1-C11)"
+fixtures:
+  - path: main.py
+    content: |
+      import urllib.parse.deeply.nested
+      import numpy, torch.nn
+      import xml.etree.ElementTree as ET
+      import numpy as np, torch as pytorch
+      from os.path import join
+      from numpy import array, matrix
+      from urllib.parse import quote as url_quote
+      from typing import List as ListType, Dict as DictType
+      from collections import namedtuple, defaultdict as DD
+      from tkinter import *
+      from __future__ import annotations
+      from __future__ import print_function, division
+
+tests:
+  - name: "C1: regular imports exist"
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.import_type = 'Import'
+      RETURN count(i) AS n
+    assert:
+      - { count_gte: { field: n, value: 2 } }
+
+  - name: "C2: aliased imports exist"
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.import_type = 'AliasedImport'
+      RETURN count(i) AS n
+    assert:
+      - { count_gte: { field: n, value: 2 } }
+
+  - name: "C3: from imports exist"
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.import_type = 'FromImport'
+      RETURN count(i) AS n
+    assert:
+      - { count_gte: { field: n, value: 3 } }
+
+  - name: "C5: from import has correct path for os.path"
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.name = 'join'
+      RETURN i.path AS path
+    assert:
+      - { row_count: 1 }
+      - { row: { path: "os.path" } }
+
+  - name: "C6: wildcard import exists"
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.name = '*'
+      RETURN count(i) AS n
+    assert:
+      - { count_gte: { field: n, value: 1 } }
+
+  - name: "C10: future imports exist"
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.path = '__future__'
+      RETURN count(i) AS n
+    assert:
+      - { count_gte: { field: n, value: 3 } }
+
+  - name: "numpy alias is np"
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.alias = 'np'
+      RETURN i.path AS path
+    assert:
+      - { row_count: 1 }
+
+  - name: "Total imports at least 15"
+    query: |
+      MATCH (i:ImportedSymbol)
+      RETURN count(i) AS n
+    assert:
+      - { count_gte: { field: n, value: 15 } }

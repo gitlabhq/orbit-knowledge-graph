@@ -1,0 +1,132 @@
+# Python rewrite rules — complete language definition.
+# Stamps all synthetics needed by SSA and resolver.
+
+stages:
+  - name: normalize
+    rules:
+      # Hoist decorators onto the inner def/class
+      - match: '(decorated_definition $$$DECOS:decorator definition: $D)'
+        append_under:
+          target: D
+          each: DECOS
+          kind: __decorator
+          tf: 'strip=@'
+
+      # Superclass list → __supertype children
+      - match: '(class_definition superclasses: (argument_list $$$SUPERS:identifier|attribute|call))'
+        append_under:
+          target: ROOT
+          each: SUPERS
+          kind: __supertype
+          tf: 'field=function'
+
+      # __callable detection
+      - match: '(class_definition name: $N body: (block (function_definition name: (identifier "__call__"))))'
+        append: '(__callable "__call__")'
+
+      # self.x / cls.x → __ivar
+      - match: '(attribute object: (identifier "self") attribute: $A)'
+        replace: '(__ivar @$A)'
+      - match: '(attribute object: (identifier "cls") attribute: $A)'
+        replace: '(__ivar @$A)'
+
+      # Aliased import: set sym to real name, append __alias
+      - match: '(aliased_import name: $N)'
+        set_text: '$N'
+      - match: '(aliased_import alias: $A)'
+        append: '(__alias @$A)'
+
+  - name: retag
+    rules:
+      # a.b → __member(object, member)
+      - match: '(attribute object: $O attribute: $M)'
+        retag:
+          kind: __member
+          fields: { O: object, M: member }
+
+      # f(x) → __call(callee, args)
+      - match: '(call function: $F arguments: $A)'
+        retag:
+          kind: __call
+          fields: { F: callee, A: args }
+
+  - name: imports
+    rules:
+      # from X import a, b (non-aliased names as leaves)
+      - match: '(import_from_statement module_name: $M $$$NAMES:dotted_name)'
+        replace: '(__import (__source @$M) $$$NAMES=>__name)'
+
+      # from X import a as b (aliased — keep __alias subtree via ->)
+      - match: '(import_from_statement module_name: $M $$$NAMES:aliased_import)'
+        replace: '(__import (__source @$M) $$$NAMES->__name)'
+
+
+      # from X import *
+      - match: '(import_from_statement module_name: $M $W:wildcard_import)'
+        replace: '(__import (__source @$M) (__name @$W))'
+
+      # import X
+      - match: '(import_statement name: $N:dotted_name)'
+        replace: '(__import (__source @$N) (__name @$N))'
+
+      # import X as Y — rekind capture to __name, keeping __alias subtree
+      - match: '(import_statement name: $N:aliased_import)'
+        replace: '(__import (__source @$N) @$N->__name)'
+
+      # from __future__ import X
+      - match: '(future_import_statement $$$NAMES:dotted_name)'
+        replace: '(__import (__source "__future__") $$$NAMES=>__name)'
+
+  - name: classify
+    rules:
+      # Defs
+      - match: '(class_definition)'
+        append: '(__deftype "Class") (__scope)'
+      - match: '(function_definition)'
+        append: '(__deftype "Function") (__scope)'
+
+      # Lambda assigned to a variable is a def
+      - match: '(assignment right: $R:lambda)'
+        append: '(__deftype "Lambda")'
+
+      # Class field with type annotation is a def (dataclass-style)
+      - match: '(assignment type: $T:type)'
+        append: '(__deftype "Field")'
+
+      # Typed parameters are bindings with type
+      - match: '(typed_parameter)'
+        append: '(__binding)'
+      - match: '(typed_default_parameter)'
+        append: '(__binding)'
+
+      # Bindings
+      - match: '(assignment)'
+        append: '(__binding)'
+      - match: '(augmented_assignment)'
+        append: '(__binding)'
+      - match: '(named_expression)'
+        append: '(__binding)'
+
+      # Branches
+      - match: '(if_statement)'
+        append: '(__branch)'
+      - match: '(try_statement)'
+        append: '(__branch)'
+      - match: '(match_statement)'
+        append: '(__branch)'
+      - match: '(conditional_expression)'
+        append: '(__branch)'
+
+      # Loops
+      - match: '(for_statement)'
+        append: '(__loop)'
+      - match: '(while_statement)'
+        append: '(__loop)'
+      - match: '(list_comprehension)'
+        append: '(__loop)'
+      - match: '(set_comprehension)'
+        append: '(__loop)'
+      - match: '(dictionary_comprehension)'
+        append: '(__loop)'
+      - match: '(generator_expression)'
+        append: '(__loop)'

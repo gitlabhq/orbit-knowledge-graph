@@ -1,0 +1,75 @@
+name: "Rust: local flow bug fixes"
+fixtures:
+  - path: Cargo.toml
+    content: |
+      [package]
+      name = "rust_local_flow_fixes_fixture"
+      version = "0.1.0"
+      edition = "2021"
+
+  - path: src/lib.rs
+    content: |
+      pub fn foo() {}
+
+      pub fn bar() {}
+
+      pub fn loop_reassign() {
+          let mut f = foo;
+          loop {
+              f();
+              f = bar;
+              break;
+          }
+      }
+
+      pub fn tuple_destructure() {
+          let (f, g) = (foo, bar);
+          f();
+          g();
+      }
+
+      pub struct Holder {
+          pub callback: fn(),
+      }
+
+      impl Holder {
+          pub fn new() -> Self {
+              Self { callback: foo }
+          }
+
+          pub fn field_reassign(&mut self) {
+              self.callback = bar;
+              (self.callback)();
+          }
+      }
+
+tests:
+  - name: "loop back-edge preserves prior and reassigned bindings"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'loop_reassign'
+      RETURN callee.fqn AS fqn
+    assert:
+      - { row_count: 2 }
+      - { row: { fqn: 'foo' } }
+      - { row: { fqn: 'bar' } }
+
+  - name: "tuple destructure binds elements positionally"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'tuple_destructure'
+      RETURN callee.fqn AS fqn
+    assert:
+      - { row_count: 2 }
+      - { row: { fqn: 'foo' } }
+      - { row: { fqn: 'bar' } }
+
+  - name: "field reassignment tracks both assigned targets"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'field_reassign'
+      RETURN callee.fqn AS fqn
+    assert:
+      - { row_count: 2 }
+      - { row: { fqn: 'foo' } }
+      - { row: { fqn: 'bar' } }

@@ -1,0 +1,38 @@
+name: "JavaScript self-referential re-export termination"
+pipeline: js
+fixtures:
+  - path: tsconfig.json
+    content: |
+      { "compilerOptions": { "baseUrl": "./src", "allowJs": true } }
+
+  - path: src/wrapper.js
+    content: |
+      export { default } from 'wrapper'
+      export * from 'wrapper'
+
+  - path: src/app.js
+    content: |
+      import Wrapper from 'wrapper'
+
+      export function run() {
+        Wrapper.use([])
+        return new Wrapper('.el')
+      }
+
+tests:
+  - name: import of the self-referential wrapper keeps its imported-symbol fact
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.path = 'wrapper'
+      RETURN i.file_path AS file, i.name AS name, i.alias AS alias
+    assert:
+      - { row_count: 1 }
+      - { row: { file: "src/app.js", name: "default", alias: "Wrapper" } }
+
+  - name: no call edge resolves through the re-export cycle
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { empty: true }

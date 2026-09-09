@@ -1,0 +1,68 @@
+name: "Rust: closures are not extracted as Definition nodes"
+# Intentional limitation, not a bug: ra_ap_hir 0.0.328 does not expose the
+# body-source-map lookup needed to recover a closure's AST node, so closures
+# (and raw fn pointers / `impl Fn*` receivers) have no stable definition site.
+# See the CallableKind::Closure branch in
+# crates/code-graph/src/v2/langs/custom/rust/mod.rs.
+#
+# precision_resolution.yaml already asserts closures create no spurious call
+# edges; this fixture asserts the other direction - closures must not appear
+# as Definition nodes - so an accidental start of anonymous-closure extraction
+# is caught by a test.
+fixtures:
+  - path: Cargo.toml
+    content: |
+      [package]
+      name = "rust_closure_fixture"
+      version = "0.1.0"
+      edition = "2021"
+
+  - path: src/lib.rs
+    content: |
+      // Closures assigned to variables
+      pub fn uses_closures() {
+          let double = |x: i32| x * 2;
+          let add = |a: i32, b: i32| a + b;
+          let _ = double(3);
+          let _ = add(1, 2);
+      }
+
+      // Closure as function argument
+      pub fn with_callback<F: Fn(i32) -> i32>(f: F) -> i32 {
+          f(42)
+      }
+
+      // Named function (control: should be extracted)
+      pub fn named_function() -> i32 { 0 }
+
+tests:
+  - name: "Closures are NOT extracted as Definition nodes"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name IN ['double', 'add', 'f']
+      RETURN d.name AS name
+    assert:
+      - { empty: true }
+
+  - name: "Named functions ARE extracted (control)"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name IN ['uses_closures', 'with_callback', 'named_function']
+      RETURN d.name AS name, d.definition_type AS kind
+      ORDER BY name
+    assert:
+      - { row_count: 3 }
+      - { row: { name: "named_function", kind: "Function" } }
+      - { row: { name: "uses_closures", kind: "Function" } }
+      - { row: { name: "with_callback", kind: "Function" } }
+
+  # An anonymously extracted closure would carry a synthetic name (not
+  # 'double'/'add'/'f'), which the name-filtered test above cannot catch.
+  # Pinning the complete Definition name set closes that gap: any extra
+  # Definition, whatever its name, fails the set equality.
+  - name: "The three named functions are the ONLY Definitions in the fixture"
+    query: |
+      MATCH (d:Definition)
+      RETURN d.name AS name
+    assert:
+      - { column_values: { field: name, values: ["uses_closures", "with_callback", "named_function"] } }

@@ -1,0 +1,85 @@
+name: "Rust: manifest resolution fixes (optional deps and exclude prefixes)"
+fixtures:
+  - path: Cargo.toml
+    content: |
+      [workspace]
+      members = ["crates/*"]
+      exclude = ["vendor"]
+      resolver = "2"
+
+      [workspace.package]
+      version = "0.1.0"
+      edition = "2021"
+
+  - path: crates/helper/Cargo.toml
+    content: |
+      [package]
+      name = "helper"
+      version.workspace = true
+      edition.workspace = true
+
+  - path: crates/helper/src/lib.rs
+    content: |
+      pub fn optional_helper() {}
+
+  - path: crates/app/Cargo.toml
+    content: |
+      [package]
+      name = "app-cli"
+      version.workspace = true
+      edition.workspace = true
+
+      [features]
+      default = []
+      enable-helper = ["dep:helper"]
+
+      [dependencies]
+      helper = { path = "../helper", optional = true }
+
+  - path: crates/app/src/main.rs
+    content: |
+      pub fn local_sentinel() {}
+
+      pub fn uses_optional() {
+          local_sentinel();
+          helper::optional_helper();
+      }
+
+  - path: vendor/stub/Cargo.toml
+    content: |
+      [package]
+      name = "vendor-stub"
+      version = "0.1.0"
+      edition = "2021"
+
+  - path: vendor/stub/src/lib.rs
+    content: |
+      pub fn vendored() {}
+
+tests:
+  - name: "optional dep absent from default features does not wire call edges"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'uses_optional'
+        AND callee.name = 'optional_helper'
+      RETURN callee.name AS name
+    assert:
+      - { row_count: 0 }
+
+  - name: "crate under excluded directory prefix is still indexed as its own workspace"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'vendor/stub/src/lib.rs' AND d.name = 'vendored'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: 'vendor_stub::vendored' } }
+
+  - name: "excluded vendor crate is not pulled into the outer workspace members"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'uses_optional'
+        AND callee.name = 'vendored'
+      RETURN callee.name AS name
+    assert:
+      - { row_count: 0 }

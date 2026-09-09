@@ -1,0 +1,66 @@
+name: "Rust: workspace members outside workspace root"
+fixtures:
+  - path: workspace-root/Cargo.toml
+    content: |
+      [workspace]
+      members = ["../members/app", "../members/shared"]
+      resolver = "2"
+
+      [workspace.package]
+      version = "0.1.0"
+      edition = "2021"
+
+      [workspace.dependencies]
+      shared-lib = { path = "../members/shared" }
+
+  - path: members/shared/Cargo.toml
+    content: |
+      [package]
+      name = "shared-lib"
+      version.workspace = true
+      edition.workspace = true
+      workspace = "../../workspace-root"
+
+  - path: members/shared/src/lib.rs
+    content: |
+      pub fn helper() {}
+
+  - path: members/app/Cargo.toml
+    content: |
+      [package]
+      name = "app-runner"
+      version.workspace = true
+      edition.workspace = true
+      workspace = "../../workspace-root"
+
+      [dependencies]
+      shared-lib.workspace = true
+
+  - path: members/app/src/main.rs
+    content: |
+      use shared_lib::helper;
+
+      pub fn boot() {
+          helper();
+      }
+
+tests:
+  - name: "members outside workspace root still resolve through workspace.dependencies"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.file_path = 'members/app/src/main.rs'
+        AND caller.name = 'boot'
+        AND callee.name = 'helper'
+      RETURN caller.fqn AS caller_fqn, callee.fqn AS callee_fqn, callee.file_path AS tgt
+    assert:
+      - { row_count: 1 }
+      - { row: { caller_fqn: 'app_runner::boot', callee_fqn: 'shared_lib::helper', tgt: 'members/shared/src/lib.rs' } }
+
+  - name: "workspace member outside root keeps crate-qualified FQN"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'members/shared/src/lib.rs' AND d.name = 'helper'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: 'shared_lib::helper' } }

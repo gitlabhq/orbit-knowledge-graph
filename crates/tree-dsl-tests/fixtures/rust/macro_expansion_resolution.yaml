@@ -1,0 +1,62 @@
+name: "Rust: macro expansion resolution"
+fixtures:
+  - path: Cargo.toml
+    content: |
+      [package]
+      name = "rust_macro_resolution_fixture"
+      version = "0.1.0"
+      edition = "2021"
+
+  - path: src/lib.rs
+    content: |
+      pub trait Runner {
+          fn run(&self);
+      }
+
+      pub struct Service;
+
+      impl Runner for Service {
+          fn run(&self) {}
+      }
+
+      pub fn helper() {}
+
+      macro_rules! invoke_helper {
+          () => {
+              helper();
+          };
+      }
+
+      macro_rules! invoke_method {
+          ($value:expr) => {
+              $value.run();
+          };
+      }
+
+      pub fn call_macro_function() {
+          invoke_helper!();
+      }
+
+      pub fn call_macro_method() {
+          let service = Service;
+          invoke_method!(service);
+      }
+
+tests:
+  - name: "macro-expanded function call resolves to local function"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'call_macro_function' AND callee.name = 'helper'
+      RETURN caller.file_path AS src, callee.file_path AS tgt
+    assert:
+      - { row_count: 1 }
+      - { row: { src: 'src/lib.rs', tgt: 'src/lib.rs' } }
+
+  - name: "macro-expanded method call resolves to impl method"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'call_macro_method' AND callee.name = 'run'
+      RETURN callee.fqn AS fqn, callee.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: 'Service::run', type: 'Method' } }

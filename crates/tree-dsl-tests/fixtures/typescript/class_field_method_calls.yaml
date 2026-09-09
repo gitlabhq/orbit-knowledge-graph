@@ -1,0 +1,111 @@
+name: "TypeScript: method calls through typed class fields"
+pipeline: js
+fixtures:
+  - path: terminalProcess.ts
+    content: |
+      export class TerminalProcess {
+        start(): void {
+          console.log('started');
+        }
+      }
+  - path: ptyService.ts
+    content: |
+      import { TerminalProcess } from './terminalProcess';
+
+      export class PtyService {
+        private _terminalProcess: TerminalProcess;
+
+        constructor() {
+          this._terminalProcess = new TerminalProcess();
+        }
+
+        startProcess(): void {
+          this._terminalProcess.start();
+        }
+      }
+  - path: localField.ts
+    content: |
+      class Engine {
+        run(): void {}
+      }
+
+      class Car {
+        private engine: Engine;
+        untyped = 1;
+
+        drive(): void {
+          this.engine.run();
+        }
+      }
+  - path: paramProperty.ts
+    content: |
+      import { TerminalProcess } from './terminalProcess';
+
+      class PersistentTerminalProcess {
+        constructor(
+          private _persistentProcessId: number,
+          private readonly _terminalProcess: TerminalProcess,
+          readonly workspaceId: string,
+        ) {}
+
+        async start(): Promise<void> {
+          await this._terminalProcess.start();
+        }
+      }
+tests:
+  - name: "Method call through a cross-file typed field resolves to the callee"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.fqn = 'PtyService::startProcess'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "PtyService::startProcess", callee: "TerminalProcess::start" } }
+
+  - name: "Method call through a same-file typed field resolves to the callee"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND callee.fqn = 'Engine::run'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "Car::drive", callee: "Engine::run" } }
+
+  - name: "Class field is extracted as a Property definition"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'PtyService::_terminalProcess'
+      RETURN d.name AS name, d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { name: "_terminalProcess", type: "Property" } }
+
+  - name: "Field without a type annotation is still extracted"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'Car::untyped'
+      RETURN d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { type: "Property" } }
+
+  - name: "Method call through a constructor parameter property resolves to the callee"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.fqn = 'PersistentTerminalProcess::start'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "PersistentTerminalProcess::start", callee: "TerminalProcess::start" } }
+
+  - name: "Constructor parameter property is extracted as a Property definition"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'PersistentTerminalProcess::_terminalProcess'
+      RETURN d.name AS name, d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { name: "_terminalProcess", type: "Property" } }

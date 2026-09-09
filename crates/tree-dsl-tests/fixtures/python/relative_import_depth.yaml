@@ -1,0 +1,69 @@
+name: "Python: relative import depth resolution (one-dot, two-dot, bare-dot)"
+
+# Exercises resolve_python_relative_import for multi-level relative imports.
+# The one-dot case is already covered by relative_imports.yaml; this suite
+# focuses on two-dot, bare-dot, and unresolvable paths.
+
+fixtures:
+  - path: pkg/__init__.py
+    content: ""
+
+  - path: pkg/services/__init__.py
+    content: ""
+
+  - path: pkg/services/auth.py
+    content: |
+      def authenticate():
+          pass
+
+  - path: pkg/sub/__init__.py
+    content: ""
+
+  - path: pkg/sub/mod.py
+    content: |
+      # one-dot: resolves within pkg.sub
+      from .sibling import helper
+
+      # two-dot: resolves up to pkg, then into pkg.services
+      from ..services.auth import authenticate
+
+      # bare-dot from-import: imports the parent package itself
+      from . import sub_util
+
+  - path: pkg/sub/sibling.py
+    content: |
+      def helper():
+          pass
+
+  - path: pkg/sub/sub_util.py
+    content: |
+      def util_fn():
+          pass
+
+tests:
+  - name: "One-dot relative import resolves to sibling module"
+    query: |
+      MATCH (f:File)-[:FileToImportedSymbol]->(i:ImportedSymbol)
+      WHERE f.path = 'pkg/sub/mod.py' AND i.name = 'helper'
+      RETURN i.path AS path
+    assert:
+      - { row_count: 1 }
+      - { row: { path: "pkg.sub.sibling" } }
+
+  - name: "Two-dot relative import resolves up one package level"
+    query: |
+      MATCH (f:File)-[:FileToImportedSymbol]->(i:ImportedSymbol)
+      WHERE f.path = 'pkg/sub/mod.py' AND i.name = 'authenticate'
+      RETURN i.path AS path
+    assert:
+      - { row_count: 1 }
+      - { row: { path: "pkg.services.auth" } }
+
+  - name: "Bare-dot relative import resolves to the parent package"
+    query: |
+      MATCH (f:File)-[:FileToImportedSymbol]->(i:ImportedSymbol)
+      WHERE f.path = 'pkg/sub/mod.py' AND i.name = 'sub_util'
+      RETURN i.path AS path
+    assert:
+      - { row_count: 1 }
+      - { row: { path: "pkg.sub" } }

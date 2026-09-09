@@ -1,0 +1,189 @@
+name: "Rust: EXTENDS edges across files, modules, and crates"
+fixtures:
+  # ─────────────────────────────────────────────────────────────────
+  # Workspace root that wires two crates together. The first crate
+  # exercises cross-file resolution within a single crate (mod files);
+  # the second crate exercises cross-crate resolution.
+  # ─────────────────────────────────────────────────────────────────
+  - path: Cargo.toml
+    content: |
+      [workspace]
+      members = ["crates/zoo", "crates/zoo-impl"]
+      resolver = "2"
+
+      [workspace.dependencies]
+      zoo = { path = "crates/zoo" }
+
+  # ─────────────────────────────────────────────────────────────────
+  # crates/zoo: traits split across two module files in a single crate.
+  # ─────────────────────────────────────────────────────────────────
+  - path: crates/zoo/Cargo.toml
+    content: |
+      [package]
+      name = "zoo"
+      version = "0.1.0"
+      edition = "2021"
+  - path: crates/zoo/src/lib.rs
+    content: |
+      pub mod traits;
+      pub mod animals;
+  - path: crates/zoo/src/traits.rs
+    content: |
+      // Supertrait lives here.
+      pub trait Audible {}
+      pub trait Mammal {}
+      pub trait Carnivore: Mammal {}
+  - path: crates/zoo/src/animals.rs
+    content: |
+      // Trait declared in a sibling module references a supertrait
+      // declared in `traits` via the `crate::` path.
+      pub trait Bark: crate::traits::Audible {}
+
+      // Concrete struct implements a trait that lives in a sibling
+      // module file. The EXTENDS edge anchors on Wolf and points at
+      // zoo::traits::Carnivore.
+      pub struct Wolf;
+      impl crate::traits::Carnivore for Wolf {}
+
+      // Same crate, but reach the supertrait through a `use` import
+      // rather than the absolute `crate::` path. The HIR-resolved FQN
+      // must be identical to the absolute-path variant.
+      use crate::traits::Mammal;
+      pub struct Bear;
+      impl Mammal for Bear {}
+
+  # ─────────────────────────────────────────────────────────────────
+  # crates/zoo-impl: implements zoo's traits from a different crate.
+  # Tests cross-crate resolution: the trait FQN we emit must match
+  # the trait's canonical home (`zoo::traits::Audible`), not the
+  # local re-import path.
+  # ─────────────────────────────────────────────────────────────────
+  - path: crates/zoo-impl/Cargo.toml
+    content: |
+      [package]
+      name = "zoo_impl"
+      version = "0.1.0"
+      edition = "2021"
+
+      [dependencies]
+      zoo = { workspace = true }
+  - path: crates/zoo-impl/src/lib.rs
+    content: |
+      use zoo::traits::Audible;
+      use zoo::animals::Bark;
+
+      // Cross-crate impl. The supertrait is `zoo::traits::Audible`,
+      // imported into this crate via a `use` statement. The emitted
+      // EXTENDS edge must still point at the canonical home.
+      pub struct CarHorn;
+      impl Audible for CarHorn {}
+
+      // Cross-crate impl referenced through its absolute path rather
+      // than a `use` import.
+      pub struct Beep;
+      impl zoo::traits::Audible for Beep {}
+
+      // Cross-crate impl of a trait whose own supertrait lives in a
+      // different module of the upstream crate.  Bark: traits::Audible
+      // is the EXTENDS edge declared inside `zoo`; the impl below adds
+      // a Hound -> Bark EXTENDS edge whose target FQN must include
+      // the originating crate prefix.
+      pub struct Hound;
+      impl Bark for Hound {}
+
+tests:
+  # ─────────────────────────────────────────────────────────────────
+  # Cross-file within a single crate
+  # ─────────────────────────────────────────────────────────────────
+  - name: "1. Trait in sibling module file resolves through crate:: path"
+    queries:
+      - query: |
+          MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
+          WHERE e.edge_kind = 'Extends'
+            AND child.fqn = 'zoo::animals::Bark'
+          RETURN parent.fqn AS parent
+        assert:
+          - { row_count: 1 }
+          - { row: { parent: "zoo::traits::Audible" } }
+
+  - name: "2. Impl in one file points at trait declared in another file"
+    queries:
+      - query: |
+          MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
+          WHERE e.edge_kind = 'Extends'
+            AND child.fqn = 'zoo::animals::Wolf'
+          RETURN parent.fqn AS parent
+        assert:
+          - { row_count: 1 }
+          - { row: { parent: "zoo::traits::Carnivore" } }
+
+  - name: "3. Impl reached via `use` import resolves to the same FQN as absolute path"
+    queries:
+      - query: |
+          MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
+          WHERE e.edge_kind = 'Extends'
+            AND child.fqn = 'zoo::animals::Bear'
+          RETURN parent.fqn AS parent
+        assert:
+          - { row_count: 1 }
+          - { row: { parent: "zoo::traits::Mammal" } }
+
+  - name: "4. Carnivore -> Mammal supertrait edge exists inside zoo crate"
+    queries:
+      - query: |
+          MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
+          WHERE e.edge_kind = 'Extends'
+            AND child.fqn = 'zoo::traits::Carnivore'
+          RETURN parent.fqn AS parent
+        assert:
+          - { row_count: 1 }
+          - { row: { parent: "zoo::traits::Mammal" } }
+
+  # ─────────────────────────────────────────────────────────────────
+  # Cross-crate within a workspace
+  # ─────────────────────────────────────────────────────────────────
+  - name: "5. Cross-crate impl resolves trait to its originating crate FQN (via use)"
+    queries:
+      - query: |
+          MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
+          WHERE e.edge_kind = 'Extends'
+            AND child.fqn = 'zoo_impl::CarHorn'
+          RETURN parent.fqn AS parent
+        assert:
+          - { row_count: 1 }
+          - { row: { parent: "zoo::traits::Audible" } }
+
+  - name: "6. Cross-crate impl resolves trait to its originating crate FQN (absolute path)"
+    queries:
+      - query: |
+          MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
+          WHERE e.edge_kind = 'Extends'
+            AND child.fqn = 'zoo_impl::Beep'
+          RETURN parent.fqn AS parent
+        assert:
+          - { row_count: 1 }
+          - { row: { parent: "zoo::traits::Audible" } }
+
+  - name: "7. Cross-crate impl of a trait whose supertrait lives in another module"
+    queries:
+      - query: |
+          MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
+          WHERE e.edge_kind = 'Extends'
+            AND child.fqn = 'zoo_impl::Hound'
+          RETURN parent.fqn AS parent
+        assert:
+          - { row_count: 1 }
+          - { row: { parent: "zoo::animals::Bark" } }
+
+  - name: "8. Both cross-crate impls of Audible appear when querying the trait's incoming edges"
+    queries:
+      - query: |
+          MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
+          WHERE e.edge_kind = 'Extends'
+            AND parent.fqn = 'zoo::traits::Audible'
+          RETURN child.fqn AS child
+          ORDER BY child
+        assert:
+          - { row: { child: "zoo::animals::Bark" } }
+          - { row: { child: "zoo_impl::Beep" } }
+          - { row: { child: "zoo_impl::CarHorn" } }

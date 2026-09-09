@@ -1,0 +1,136 @@
+name: "Python: relative re-exports through a package __init__.py"
+
+# A package __init__.py *is* its package, so a one-dot relative import there
+# resolves against the package itself (no module leaf to drop). Re-exports
+# written this way (`from .base import X`, `from .helpers import *`) must bind
+# callers to the underlying definition rather than an unresolved ImportedSymbol.
+
+fixtures:
+  - path: app/registry/base.py
+    content: |
+      class BaseRegistry:
+          def register(self):
+              pass
+
+  - path: app/registry/helpers.py
+    content: |
+      def make_widget():
+          return 1
+
+  - path: app/registry/__init__.py
+    content: |
+      from .base import BaseRegistry
+      from .helpers import *
+
+  - path: app/consumer.py
+    content: |
+      from app.registry import BaseRegistry, make_widget
+
+      def build():
+          r = BaseRegistry()
+          r.register()
+          return make_widget()
+
+  # Two-dot relative import in a nested __init__.py climbs to the parent package.
+  - path: proj/core.py
+    content: |
+      class Engine:
+          pass
+
+  - path: proj/sub/__init__.py
+    content: |
+      from ..core import Engine
+
+  - path: proj/sub/caller.py
+    content: |
+      from proj.sub import Engine
+
+      def make_engine():
+          return Engine()
+
+  # Regression guard: a one-dot relative import in a REGULAR module still drops
+  # the module leaf (this is the case package-init resolution must not break).
+  - path: reg/pkg/thing.py
+    content: |
+      class Thing:
+          pass
+
+  - path: reg/pkg/mod.py
+    content: |
+      from .thing import Thing
+
+      def use_thing():
+          return Thing()
+
+  # Over-resolution guard: an external import with no local definition must stay
+  # an ImportedSymbol even though the importing file is a package __init__.py.
+  - path: ext/__init__.py
+    content: |
+      from thirdparty import Widget
+
+  - path: ext/caller.py
+    content: |
+      from ext import Widget
+
+      def build_widget():
+          return Widget()
+
+tests:
+  - name: "named relative re-export through __init__ binds the caller to the definition"
+    queries:
+      - query: |
+          MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.fqn = 'app.consumer.build'
+            AND callee.fqn = 'app.registry.base.BaseRegistry'
+            AND e.edge_kind = 'Calls'
+          RETURN caller.fqn AS caller
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+          WHERE caller.fqn = 'app.consumer.build'
+            AND sym.name = 'BaseRegistry'
+            AND e.edge_kind = 'Calls'
+          RETURN caller.fqn AS caller
+        assert:
+          - { empty: true }
+
+  - name: "wildcard relative re-export through __init__ binds the caller to the definition"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'app.consumer.build'
+        AND callee.fqn = 'app.registry.helpers.make_widget'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller
+    assert:
+      - { row_count: 1 }
+
+  - name: "two-dot relative re-export in a nested __init__ climbs to the parent package"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'proj.sub.caller.make_engine'
+        AND callee.fqn = 'proj.core.Engine'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller
+    assert:
+      - { row_count: 1 }
+
+  - name: "one-dot relative import in a regular module still resolves (no regression)"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'reg.pkg.mod.use_thing'
+        AND callee.fqn = 'reg.pkg.thing.Thing'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller
+    assert:
+      - { row_count: 1 }
+
+  - name: "external re-export from a package __init__ stays an ImportedSymbol"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      WHERE caller.fqn = 'ext.caller.build_widget'
+        AND sym.name = 'Widget'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller
+    assert:
+      - { row_count: 1 }

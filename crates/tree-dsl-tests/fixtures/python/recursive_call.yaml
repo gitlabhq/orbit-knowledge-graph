@@ -1,0 +1,20 @@
+name: "Python: recursive function call"
+fixtures:
+  - path: main.py
+    content: |
+      def factorial(n):
+          if n <= 1:
+              return 1
+          return n * factorial(n - 1)
+
+      factorial(5)
+
+tests:
+  - name: Recursive call resolves to self
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'factorial' AND callee.name = 'factorial'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "main.factorial", callee: "main.factorial" } }

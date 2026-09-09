@@ -1,0 +1,81 @@
+name: "Python: module scope derived from file path (__init__.py handling)"
+
+# Exercises python_module_from_path for several representative layouts.
+# The function converts a file path to a dotted module scope; the scope
+# then appears as a prefix in every definition's FQN.
+
+fixtures:
+  - path: services/user_service.py
+    content: |
+      def greet():
+          pass
+
+  - path: pkg/__init__.py
+    content: |
+      def pkg_fn():
+          pass
+
+  - path: pkg/sub/__init__.py
+    content: |
+      def sub_fn():
+          pass
+
+  - path: main.py
+    content: |
+      def main_fn():
+          pass
+
+  # A bare __init__.py at the repository root has no enclosing package.
+  # The pipeline must NOT assign the module scope "__init__"; instead it
+  # should treat this file as module-scope-less, so the FQN is just the
+  # function name with no prefix.
+  - path: __init__.py
+    content: |
+      def root_init_fn():
+          pass
+
+tests:
+  - name: "Regular nested file gets dotted module scope in FQN"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'greet'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: "services.user_service.greet" } }
+
+  - name: "pkg/__init__.py collapses to pkg scope — no __init__ segment in FQN"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'pkg_fn'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: "pkg.pkg_fn" } }
+
+  - name: "pkg/sub/__init__.py collapses to pkg.sub scope"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'sub_fn'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: "pkg.sub.sub_fn" } }
+
+  - name: "Top-level file main.py gets bare module name as scope"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'main_fn'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: "main.main_fn" } }
+
+  - name: "Root-level __init__.py produces no __init__ prefix in FQN (regression)"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'root_init_fn'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: "root_init_fn" } }

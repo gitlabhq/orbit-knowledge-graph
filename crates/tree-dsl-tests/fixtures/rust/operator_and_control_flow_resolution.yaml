@@ -1,0 +1,154 @@
+name: "Rust: operator and control-flow resolution"
+fixtures:
+  - path: Cargo.toml
+    content: |
+      [package]
+      name = "rust_operator_resolution_fixture"
+      version = "0.1.0"
+      edition = "2021"
+
+  - path: src/lib.rs
+    content: |
+      use core::future::Future;
+      use core::ops::{ControlFlow, FromResidual, Residual, Try};
+      use core::pin::Pin;
+      use core::task::{Context, Poll};
+
+      pub struct Number;
+
+      impl std::ops::Neg for Number {
+          type Output = Self;
+
+          fn neg(self) -> Self::Output {
+              Number
+          }
+      }
+
+      impl std::ops::Add for Number {
+          type Output = Self;
+
+          fn add(self, _rhs: Self) -> Self::Output {
+              Number
+          }
+      }
+
+      pub struct Buffer(pub usize);
+
+      impl std::ops::Index<usize> for Buffer {
+          type Output = usize;
+
+          fn index(&self, _index: usize) -> &Self::Output {
+              &self.0
+          }
+      }
+
+      pub enum Maybe<T> {
+          Some(T),
+          None,
+      }
+
+      impl<T> FromResidual<Maybe<core::ops::Infallible>> for Maybe<T> {
+          fn from_residual(residual: Maybe<core::ops::Infallible>) -> Self {
+              match residual {
+                  Maybe::Some(_) => loop {},
+                  Maybe::None => Maybe::None,
+              }
+          }
+      }
+
+      impl<T> Residual<T> for Maybe<core::ops::Infallible> {
+          type TryType = Maybe<T>;
+      }
+
+      impl<T> Try for Maybe<T> {
+          type Output = T;
+          type Residual = Maybe<core::ops::Infallible>;
+
+          fn from_output(output: Self::Output) -> Self {
+              Maybe::Some(output)
+          }
+
+          fn branch(self) -> ControlFlow<Self::Residual, Self::Output> {
+              match self {
+                  Maybe::Some(value) => ControlFlow::Continue(value),
+                  Maybe::None => ControlFlow::Break(Maybe::None),
+              }
+          }
+      }
+
+      pub struct Once;
+
+      impl Future for Once {
+          type Output = ();
+
+          fn poll(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Self::Output> {
+              Poll::Ready(())
+          }
+      }
+
+      pub fn call_neg(value: Number) {
+          let _ = -value;
+      }
+
+      pub fn call_add(lhs: Number, rhs: Number) {
+          let _ = lhs + rhs;
+      }
+
+      pub fn call_index(buffer: Buffer) {
+          let _ = buffer[0];
+      }
+
+      pub fn call_try(value: Maybe<i32>) -> Maybe<i32> {
+          let inner = value?;
+          Maybe::from_output(inner)
+      }
+
+      pub async fn call_await_once(value: Once) {
+          value.await;
+      }
+
+tests:
+  - name: "prefix operator calls resolve to the impl method"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'call_neg' AND callee.name = 'neg'
+      RETURN callee.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: 'Number::neg' } }
+
+  - name: "binary operator calls resolve to the impl method"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'call_add' AND callee.name = 'add'
+      RETURN callee.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: 'Number::add' } }
+
+  - name: "index operator calls resolve to the impl method"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'call_index' AND callee.name = 'index'
+      RETURN callee.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: 'Buffer::index' } }
+
+  - name: "try expressions resolve to the local Try::branch impl"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'call_try' AND callee.name = 'branch'
+      RETURN callee.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: 'Maybe::branch' } }
+
+  - name: "await expressions resolve to the local Future::poll impl"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'call_await_once' AND callee.name = 'poll'
+      RETURN callee.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: 'Once::poll' } }

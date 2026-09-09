@@ -1,0 +1,101 @@
+name: "Rust: interfile resolution"
+fixtures:
+  - path: Cargo.toml
+    content: |
+      [package]
+      name = "codegraph_fixture"
+      version = "0.1.0"
+      edition = "2021"
+
+  - path: src/lib.rs
+    content: |
+      pub mod api;
+      pub mod macros;
+      pub mod util;
+      pub mod worker;
+
+  - path: src/util.rs
+    content: |
+      pub fn helper() {}
+
+  - path: src/worker.rs
+    content: |
+      pub struct Worker;
+
+      impl Worker {
+          pub fn new() -> Self {
+              Self
+          }
+
+          pub fn run(&self) {
+              crate::util::helper();
+          }
+      }
+
+  - path: src/macros.rs
+    content: |
+      #[macro_export]
+      macro_rules! make_worker {
+          () => {
+              $crate::worker::Worker::new()
+          };
+      }
+
+  - path: src/api.rs
+    content: |
+      use crate::make_worker;
+      use crate::util::helper;
+      use crate::worker::Worker;
+
+      pub fn execute() {
+          helper();
+          let worker = Worker::new();
+          worker.run();
+          let _another = make_worker!();
+      }
+
+tests:
+  - name: "execute -> helper resolves through use"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'execute' AND callee.name = 'helper'
+      RETURN caller.file_path AS src, callee.file_path AS tgt
+    assert:
+      - { row_count: 1 }
+      - { row: { src: "src/api.rs", tgt: "src/util.rs" } }
+
+  - name: "execute -> Worker::new resolves across files and macro expansion"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'execute' AND callee.name = 'new'
+      RETURN caller.file_path AS src, callee.file_path AS tgt, callee.definition_type AS type
+    assert:
+      - { row_count: 2 }
+      - { row: { src: "src/api.rs", tgt: "src/worker.rs", type: "AssociatedFunction" } }
+
+  - name: "execute -> Worker::run resolves with inferred receiver type"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'execute' AND callee.name = 'run'
+      RETURN caller.file_path AS src, callee.file_path AS tgt, callee.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { src: "src/api.rs", tgt: "src/worker.rs", type: "Method" } }
+
+  - name: "Worker::run -> helper resolves through crate path"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'run' AND callee.name = 'helper'
+      RETURN caller.file_path AS src, callee.file_path AS tgt
+    assert:
+      - { row_count: 1 }
+      - { row: { src: "src/worker.rs", tgt: "src/util.rs" } }
+
+  - name: "execute -> make_worker macro resolves"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'execute' AND callee.name = 'make_worker'
+      RETURN caller.file_path AS src, callee.file_path AS tgt, callee.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { src: "src/api.rs", tgt: "src/macros.rs", type: "Macro" } }

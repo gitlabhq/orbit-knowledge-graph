@@ -1,0 +1,44 @@
+name: "Python: static and classmethod cross-calls"
+fixtures:
+  - path: main.py
+    content: |
+      class Service:
+          @staticmethod
+          def static_method():
+              pass
+
+          @classmethod
+          def class_method(cls):
+              cls.static_method()
+
+          def instance_method(self):
+              self.static_method()
+              self.class_method()
+
+tests:
+  - name: class_method calls static_method
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'class_method' AND callee.name = 'static_method'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "main.Service.class_method", callee: "main.Service.static_method" } }
+
+  - name: instance_method calls static_method
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'instance_method' AND callee.name = 'static_method'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "main.Service.instance_method", callee: "main.Service.static_method" } }
+
+  - name: instance_method calls class_method
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'instance_method' AND callee.name = 'class_method'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "main.Service.instance_method", callee: "main.Service.class_method" } }

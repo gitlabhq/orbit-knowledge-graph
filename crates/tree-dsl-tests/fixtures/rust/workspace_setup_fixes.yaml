@@ -1,0 +1,75 @@
+name: "Rust: workspace + sysroot setup fixes"
+fixtures:
+  - path: Cargo.toml
+    content: |
+      [workspace]
+      members = ["crates/crate-a", "crates/crate-b"]
+      resolver = "2"
+
+  - path: crates/crate-a/Cargo.toml
+    content: |
+      [package]
+      name = "crate-a"
+      version = "0.1.0"
+      edition = "2021"
+
+  - path: crates/crate-a/src/lib.rs
+    content: |
+      pub mod inner;
+
+      pub fn alpha() {
+          inner::helper();
+      }
+
+  - path: crates/crate-a/src/inner.rs
+    content: |
+      pub fn helper() {}
+
+  - path: crates/crate-b/Cargo.toml
+    content: |
+      [package]
+      name = "crate-b"
+      version = "0.1.0"
+      edition = "2021"
+
+  - path: crates/crate-b/src/lib.rs
+    content: |
+      // intentionally empty: exercises single-crate-name fallback
+      // so that F27 forces crate-name prefixes on crate-a anyway.
+
+  - path: scripts/standalone.rs
+    content: |
+      fn standalone_entry() {
+          helper();
+      }
+
+      fn helper() {}
+
+tests:
+  - name: "multi-workspace forces crate-name prefix even when only one yields a name"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'crates/crate-a/src/inner.rs' AND d.name = 'helper'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: 'crate_a::inner::helper' } }
+
+  - name: "crate-a root function also carries crate-name prefix"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'crates/crate-a/src/lib.rs' AND d.name = 'alpha'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: 'crate_a::alpha' } }
+
+  - name: "standalone file (no Cargo.toml) is still indexed with definitions"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'scripts/standalone.rs'
+      RETURN d.name AS name
+    assert:
+      - { row_count: 2 }
+      - { row: { name: 'standalone_entry' } }
+      - { row: { name: 'helper' } }

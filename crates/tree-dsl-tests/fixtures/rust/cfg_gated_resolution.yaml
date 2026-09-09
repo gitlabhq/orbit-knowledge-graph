@@ -1,0 +1,65 @@
+name: "Rust: cfg-gated resolution"
+fixtures:
+  - path: Cargo.toml
+    content: |
+      [package]
+      name = "rust_cfg_resolution_fixture"
+      version = "0.1.0"
+      edition = "2021"
+
+  - path: src/lib.rs
+    content: |
+      #[cfg(unix)]
+      pub mod unix_only {
+          pub fn helper() {}
+      }
+
+      #[cfg(target_os = "linux")]
+      pub mod linux_only {
+          pub fn helper() {}
+      }
+
+      #[cfg(unix)]
+      pub fn call_unix() {
+          unix_only::helper();
+      }
+
+      #[cfg(target_os = "linux")]
+      pub fn call_linux() {
+          linux_only::helper();
+      }
+
+tests:
+  - name: "unix cfg items are included in the shell-free server profile"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'unix_only' OR d.name = 'call_unix'
+      RETURN d.name AS name
+    assert:
+      - { column_values: { field: name, values: ['call_unix', 'unix_only'] } }
+
+  - name: "target_os cfg items are included in the shell-free server profile"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'linux_only' OR d.name = 'call_linux'
+      RETURN d.name AS name
+    assert:
+      - { column_values: { field: name, values: ['call_linux', 'linux_only'] } }
+
+  - name: "unix cfg call resolves"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'call_unix' AND callee.fqn = 'unix_only::helper'
+      RETURN callee.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: 'unix_only::helper' } }
+
+  - name: "target_os cfg call resolves"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'call_linux' AND callee.fqn = 'linux_only::helper'
+      RETURN callee.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: 'linux_only::helper' } }

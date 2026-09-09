@@ -1,0 +1,122 @@
+languages:
+  bash:
+    extensions: [sh, bash, zsh]
+    grammar: tree-sitter-bash
+
+  c:
+    extensions: [c, h]
+    grammar: tree-sitter-c
+
+  cpp:
+    extensions: [cpp, cc, cxx, hpp, hh, hxx]
+    grammar: tree-sitter-cpp
+
+  csharp:
+    extensions: [cs]
+    grammar: tree-sitter-c-sharp
+    fqn_separator: "."
+
+  elixir:
+    extensions: [ex, exs]
+    grammar: tree-sitter-elixir
+    fqn_separator: "."
+
+  go:
+    extensions: [go]
+    grammar: tree-sitter-go
+    fqn_separator: "."
+
+  haskell:
+    extensions: [hs]
+    aliases: [hs, haskell]
+    grammar: tree-sitter-haskell
+    fqn_separator: "."
+
+  hcl:
+    extensions: [tf, tfvars, hcl]
+    grammar: tree-sitter-hcl
+
+  java:
+    extensions: [java]
+    grammar: tree-sitter-java
+    fqn_separator: "."
+    package_markers: [package-info.java]
+
+  javascript:
+    extensions: [js, jsx, mjs, cjs]
+    aliases: [js, javascript]
+    grammar: tree-sitter-typescript-tsx
+    fqn_separator: "::"
+    package_markers: [package.json]
+    index_names: [index]
+
+  kotlin:
+    extensions: [kt, kts]
+    grammar: tree-sitter-kotlin-sg
+    fqn_separator: "."
+
+  lua:
+    extensions: [lua]
+    grammar: tree-sitter-lua
+
+  ocaml:
+    extensions: [ml, mli]
+    aliases: [ml, ocaml]
+    grammar: tree-sitter-ocaml
+    fqn_separator: "."
+
+  php:
+    extensions: [php, phtml]
+    grammar: tree-sitter-php
+    fqn_separator: "\\"
+
+  python:
+    extensions: [py, pyi]
+    aliases: [py, python]
+    grammar: tree-sitter-python
+    fqn_separator: "."
+    package_markers: ["__init__.py", "__init__.pyi"]
+    index_names: ["__init__"]
+    source_root: package_marker_climb
+
+  ruby:
+    extensions: [rb]
+    grammar: tree-sitter-ruby
+    fqn_separator: "::"
+
+  rust:
+    extensions: [rs]
+    aliases: [rs, rust]
+    grammar: tree-sitter-rust
+    fqn_separator: "::"
+    index_names: [mod, lib, main]
+
+  scala:
+    extensions: [scala, sc]
+    grammar: tree-sitter-scala
+    fqn_separator: "."
+
+  swift:
+    extensions: [swift]
+    grammar: tree-sitter-swift
+    fqn_separator: "."
+
+  typescript:
+    extensions: [ts]
+    aliases: [ts, typescript]
+    grammar: tree-sitter-typescript
+    fqn_separator: "::"
+    package_markers: [package.json]
+    index_names: [index]
+
+  tsx:
+    extensions: [tsx]
+    aliases: [tsx]
+    grammar: tree-sitter-typescript-tsx
+    fqn_separator: "::"
+    package_markers: [package.json]
+    index_names: [index]
+
+  zig:
+    extensions: [zig]
+    grammar: tree-sitter-zig

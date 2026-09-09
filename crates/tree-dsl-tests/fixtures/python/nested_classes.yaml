@@ -1,0 +1,38 @@
+name: "Python: nested class hierarchy"
+fixtures:
+  - path: main.py
+    content: |
+      class Outer:
+          class Inner:
+              def method(self):
+                  pass
+          def outer_method(self):
+              pass
+
+tests:
+  - name: Inner class is contained in Outer
+    query: |
+      MATCH (outer:Definition)-[:DefinitionToDefinition]->(inner:Definition)
+      WHERE outer.name = 'Outer' AND inner.name = 'Inner'
+      RETURN outer.fqn AS parent, inner.fqn AS child
+    assert:
+      - { row_count: 1 }
+      - { row: { parent: "main.Outer", child: "main.Outer.Inner" } }
+
+  - name: method is contained in Inner
+    query: |
+      MATCH (cls:Definition)-[:DefinitionToDefinition]->(m:Definition)
+      WHERE cls.name = 'Inner' AND m.name = 'method'
+      RETURN m.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: "main.Outer.Inner.method" } }
+
+  - name: outer_method is contained in Outer
+    query: |
+      MATCH (cls:Definition)-[:DefinitionToDefinition]->(m:Definition)
+      WHERE cls.name = 'Outer' AND m.name = 'outer_method'
+      RETURN m.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: "main.Outer.outer_method" } }

@@ -1,0 +1,27 @@
+name: "Rust: intrafile resolution"
+fixtures:
+  - path: main.rs
+    content: |
+      fn helper() {}
+
+      fn build() {
+          helper();
+      }
+
+tests:
+  - name: "build -> helper resolves in the same file"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'build' AND callee.name = 'helper'
+      RETURN caller.file_path AS src, callee.file_path AS tgt
+    assert:
+      - { row_count: 1 }
+      - { row: { src: "main.rs", tgt: "main.rs" } }
+
+  - name: "Both function definitions are present"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'main.rs'
+      RETURN d.name AS name
+    assert:
+      - { column_values: { field: name, values: ["build", "helper"] } }

@@ -1,0 +1,43 @@
+name: "Python: class field annotations as Property definitions"
+fixtures:
+  - path: main.py
+    content: |
+      from dataclasses import dataclass, field
+
+      @dataclass
+      class User:
+          id: int
+          name: str = ""
+          roles: list = field(default_factory=list)
+
+          def greet(self) -> str:
+              return "hello"
+
+tests:
+  - name: "Class fields extracted as Field definitions"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name IN ['id', 'name', 'roles']
+        AND d.definition_type = 'Field'
+      RETURN d.fqn AS fqn ORDER BY fqn
+    assert:
+      - { row_count: 3 }
+      - { row: { fqn: "main.User.id" } }
+      - { row: { fqn: "main.User.name" } }
+      - { row: { fqn: "main.User.roles" } }
+
+  - name: "Regular method still extracted and is not a Field"
+    query: |
+      MATCH (d:Definition) WHERE d.name = 'greet'
+      RETURN d.fqn AS fqn, d.definition_type AS kind
+    assert:
+      - { row: { fqn: "main.User.greet", kind: "Method" } }
+
+  - name: "Class contains its fields"
+    query: |
+      MATCH (cls:Definition)-[:DefinitionToDefinition]->(f:Definition)
+      WHERE cls.name = 'User' AND f.name = 'id'
+      RETURN f.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: "main.User.id" } }

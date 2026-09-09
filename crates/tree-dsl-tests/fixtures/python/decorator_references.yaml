@@ -1,0 +1,49 @@
+name: "Python: decorator references"
+fixtures:
+  - path: decorators.py
+    content: |
+      class my_decorator:
+          def __init__(self, func):
+              self.func = func
+
+      class other_decorator:
+          def __init__(self, func):
+              self.func = func
+
+      @my_decorator
+      def decorated_func():
+          pass
+
+      @other_decorator
+      def another_func():
+          pass
+
+      def plain_func():
+          pass
+
+tests:
+  - name: Decorator produces reference edge from decorated function
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'decorated_func' AND e.edge_kind = 'Calls'
+      RETURN callee.name AS callee
+    assert:
+      - { row: { callee: "my_decorator" } }
+      - { not: true, row: { callee: "other_decorator" } }
+
+  - name: Each decorated function references its own decorator
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'another_func' AND e.edge_kind = 'Calls'
+      RETURN callee.name AS callee
+    assert:
+      - { row: { callee: "other_decorator" } }
+      - { not: true, row: { callee: "my_decorator" } }
+
+  - name: Plain function has no decorator edges
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'plain_func' AND e.edge_kind = 'Calls'
+      RETURN callee.name AS callee
+    assert:
+      - { empty: true }

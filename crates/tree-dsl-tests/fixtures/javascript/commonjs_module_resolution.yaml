@@ -1,0 +1,408 @@
+name: "JavaScript CommonJS module resolution"
+pipeline: js
+fixtures:
+  - path: named/util.js
+    content: |
+      exports.helper = function helper() {};
+  - path: named/main.js
+    content: |
+      const { helper } = require('./util');
+
+      function run() {
+        helper();
+      }
+
+  - path: namespace/util.js
+    content: |
+      exports.helper = function helper() {};
+  - path: namespace/main.js
+    content: |
+      const util = require('./util');
+
+      function run() {
+        util.helper();
+      }
+
+  - path: alias/util.js
+    content: |
+      exports.resolve = function resolve() {
+        return "ok";
+      };
+  - path: alias/main.js
+    content: |
+      const { resolve: presolve } = require('./util');
+
+      function run() {
+        return presolve();
+      }
+
+  - path: default/util.js
+    content: |
+      function main() {
+        return "ok";
+      }
+
+      module.exports = main;
+  - path: default/main.js
+    content: |
+      const runMain = require('./util');
+
+      function boot() {
+        return runMain();
+      }
+
+  - path: object/util.js
+    content: |
+      function helper(value) {
+        return value.trim();
+      }
+
+      function normalize(value) {
+        return value.toLowerCase();
+      }
+
+      module.exports = {
+        helper,
+        normalize,
+      };
+  - path: object/main.js
+    content: |
+      const util = require('./util');
+
+      function run(value) {
+        return util.helper(value);
+      }
+
+  - path: alias_chain/util.js
+    content: |
+      function main() {
+        return "ok";
+      }
+
+      module.exports = main;
+  - path: alias_chain/main.js
+    content: |
+      const runMain = require('./util');
+      const rebound = runMain;
+
+      function boot() {
+        return rebound();
+      }
+
+  - path: no_false_call/util.js
+    content: |
+      exports.HTTP_STATUS_OK = 200;
+      exports.trimValue = function trimValue(value) {
+        return value.trim();
+      };
+  - path: no_false_call/main.js
+    content: |
+      const { HTTP_STATUS_OK, trimValue } = require('./util');
+
+      function run(value) {
+        return trimValue(value);
+      }
+
+      function bad() {
+        return HTTP_STATUS_OK();
+      }
+
+  - path: interop/util.js
+    content: |
+      exports.default = function defaultHelper(value) {
+        return value.trim();
+      };
+  - path: interop/main.js
+    content: |
+      const util = require('./util');
+
+      function run(value) {
+        return util.default(value);
+      }
+
+  - path: external/namespace.js
+    content: |
+      const tracker = require('external-tracker');
+
+      function report() {
+        return tracker.emit();
+      }
+
+  - path: external/destructured.js
+    content: |
+      const { track } = require('external-tracker');
+
+      function report() {
+        return track();
+      }
+
+  - path: external/duplicate_aliases.js
+    content: |
+      const { track: firstTrack, track: secondTrack } = require('external-tracker');
+
+      function reportAliases() {
+        firstTrack();
+        secondTrack();
+      }
+  - path: external/module_level.js
+    content: |
+      const { init } = require('external-sdk');
+
+      init();
+  - path: external/module_level_globals.js
+    content: |
+      const { init } = require('external-sdk');
+
+      console.log("ready");
+      JSON.parse("{}");
+  - path: external/imported_reference_only.js
+    content: |
+      const { track } = require('external-tracker');
+
+      function reportReference() {
+        return track;
+      }
+  - path: external/shadowed.js
+    content: |
+      const { track } = require('external-tracker');
+
+      function reportShadowed() {
+        const track = () => "local";
+        return track();
+      }
+  - path: external/globals.js
+    content: |
+      const { track } = require('external-tracker');
+
+      function reportGlobals() {
+        console.log("ready");
+        return JSON.parse("{}");
+      }
+  - path: side_effect/main.js
+    content: |
+      require('external-polyfill');
+
+      function boot() {
+        return installPolyfill();
+      }
+
+tests:
+  - name: Destructured require targets named export proxy
+    query: |
+      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      WHERE i.file_path = 'named/main.js'
+      RETURN i.import_type AS import_type, i.path AS path, i.name AS name, d.fqn AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { import_type: "CjsRequire", path: "./util", name: "helper", target: "helper" } }
+
+  - name: Destructured require call resolves to concrete definition
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.file_path = 'named/main.js'
+        AND callee.file_path = 'named/util.js'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "run", callee: "helper" } }
+
+  - name: Namespace require targets synthesized module
+    query: |
+      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      WHERE i.file_path = 'namespace/main.js'
+      RETURN i.import_type AS import_type, i.path AS path, i.name AS name, d.fqn AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { import_type: "CjsRequire", path: "./util", name: "default", target: "namespace/util.js" } }
+
+  - name: Namespace require call resolves to concrete definition
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.file_path = 'namespace/main.js'
+        AND callee.file_path = 'namespace/util.js'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "run", callee: "helper" } }
+
+  - name: Aliased destructured require preserves source and alias names
+    query: |
+      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      WHERE i.file_path = 'alias/main.js'
+      RETURN i.import_type AS import_type, i.path AS path, i.name AS name, i.alias AS alias, d.fqn AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { import_type: "CjsRequire", path: "./util", name: "resolve", alias: "presolve", target: "resolve" } }
+
+  - name: Aliased destructured require call resolves to concrete definition
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.file_path = 'alias/main.js'
+        AND callee.file_path = 'alias/util.js'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "run", callee: "resolve" } }
+
+  - name: Default module.exports require targets the primary export proxy
+    query: |
+      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      WHERE i.file_path = 'default/main.js'
+      RETURN i.import_type AS import_type, i.path AS path, i.name AS name, d.fqn AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { import_type: "CjsRequire", path: "./util", name: "default", target: "main" } }
+
+  - name: Default module.exports require call resolves to the exported function
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.file_path = 'default/main.js'
+        AND callee.file_path = 'default/util.js'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "boot", callee: "main" } }
+
+  - name: Object literal module.exports member call resolves to the named function
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.file_path = 'object/main.js'
+        AND callee.file_path = 'object/util.js'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "run", callee: "helper" } }
+
+  - name: Bare require alias chains keep callable primary export identity
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.file_path = 'alias_chain/main.js'
+        AND callee.file_path = 'alias_chain/util.js'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "boot", callee: "main" } }
+
+  - name: Mixed CJS imports preserve distinct symbol identities
+    query: |
+      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      WHERE i.file_path = 'no_false_call/main.js'
+      RETURN i.name AS name, i.alias AS alias, d.fqn AS target
+    assert:
+      - { row_count: 2 }
+      - { row: { name: "HTTP_STATUS_OK", alias: null, target: "no_false_call/util.js::HTTP_STATUS_OK" } }
+      - { row: { name: "trimValue", alias: null, target: "trimValue" } }
+
+  - name: Imported CJS constants do not create false call edges
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.file_path = 'no_false_call/main.js'
+        AND callee.file_path = 'no_false_call/util.js'
+        AND callee.name = 'HTTP_STATUS_OK'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { empty: true }
+
+  - name: Imported CJS functions still resolve while constants stay inert
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.file_path = 'no_false_call/main.js'
+        AND callee.file_path = 'no_false_call/util.js'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "run", callee: "trimValue" } }
+
+  - name: Transpiled CJS default interop resolves namespace default member calls
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.file_path = 'interop/main.js'
+        AND callee.file_path = 'interop/util.js'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "run", callee: "defaultHelper" } }
+
+  - name: External CommonJS calls target imported symbols
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      WHERE caller.file_path IN ['external/namespace.js', 'external/destructured.js']
+        AND e.edge_kind = 'Calls'
+      RETURN caller.file_path AS file, caller.fqn AS caller, sym.name AS name, sym.alias AS alias
+      ORDER BY file, name
+    assert:
+      - { row_count: 2 }
+      - { row: { file: "external/destructured.js", caller: "report", name: "track", alias: null } }
+      - { row: { file: "external/namespace.js", caller: "report", name: "default", alias: "tracker" } }
+
+  - name: External CommonJS duplicate aliases preserve exact imported symbols
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      WHERE caller.file_path = 'external/duplicate_aliases.js'
+        AND e.edge_kind = 'Calls'
+      RETURN DISTINCT caller.fqn AS caller, sym.name AS name, sym.alias AS alias
+      ORDER BY alias
+    assert:
+      - { row_count: 2 }
+      - { row: { caller: "reportAliases", name: "track", alias: "firstTrack" } }
+      - { row: { caller: "reportAliases", name: "track", alias: "secondTrack" } }
+
+  - name: Module-level external CommonJS calls target imported symbols from the file
+    query: |
+      MATCH (file:File)-[e:FileToImportedSymbol]->(sym:ImportedSymbol)
+      WHERE file.path = 'external/module_level.js'
+        AND e.edge_kind = 'Calls'
+      RETURN file.path AS file, sym.path AS path, sym.name AS name
+    assert:
+      - { row_count: 1 }
+      - { row: { file: "external/module_level.js", path: "external-sdk", name: "init" } }
+
+  - name: Module-level global CommonJS calls do not target unrelated imports
+    query: |
+      MATCH (file:File)-[e:FileToImportedSymbol]->(sym:ImportedSymbol)
+      WHERE file.path = 'external/module_level_globals.js'
+        AND e.edge_kind = 'Calls'
+      RETURN file.path AS file, sym.path AS path, sym.name AS name
+    assert:
+      - { empty: true }
+
+  - name: Resolved CommonJS calls do not emit imported-symbol fallback
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      WHERE caller.file_path IN [
+        'named/main.js',
+        'namespace/main.js',
+        'alias/main.js',
+        'default/main.js',
+        'object/main.js',
+        'alias_chain/main.js',
+        'no_false_call/main.js',
+        'interop/main.js'
+      ]
+        AND e.edge_kind = 'Calls'
+      RETURN caller.file_path AS file, caller.fqn AS caller, sym.path AS path, sym.name AS name
+    assert:
+      - { empty: true }
+
+  - name: Side-effect shadowed reference-only and global CommonJS calls avoid imported-symbol fallbacks
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      WHERE caller.file_path IN [
+        'side_effect/main.js',
+        'external/shadowed.js',
+        'external/imported_reference_only.js',
+        'external/globals.js'
+      ]
+        AND e.edge_kind = 'Calls'
+      RETURN caller.file_path AS file, caller.fqn AS caller, sym.path AS path, sym.name AS name
+    assert:
+      - { empty: true }

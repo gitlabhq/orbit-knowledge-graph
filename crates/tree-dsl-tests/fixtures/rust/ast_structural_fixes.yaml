@@ -1,0 +1,82 @@
+name: "Rust: AST structural fixes"
+fixtures:
+  - path: Cargo.toml
+    content: |
+      [package]
+      name = "rust_ast_structural_fixes_fixture"
+      version = "0.1.0"
+      edition = "2021"
+
+  - path: src/lib.rs
+    content: |
+      pub mod foo {
+          pub struct Bar;
+      }
+
+      pub(crate) use foo::Bar;
+
+      pub struct Widget;
+
+      pub trait Alpha {
+          fn foo(&self);
+      }
+
+      pub trait Beta {
+          fn foo(&self);
+      }
+
+      impl Alpha for Widget {
+          fn foo(&self) {}
+      }
+
+      impl Beta for Widget {
+          fn foo(&self) {}
+      }
+
+      pub mod outer {
+          pub mod middle {
+              pub mod inner {
+                  pub struct Deep;
+
+                  pub fn reference() {
+                      let _: super::super::super::Widget;
+                      let _: super::super::super::super::super::super::Widget;
+                  }
+              }
+          }
+      }
+
+tests:
+  - name: "restricted pub(crate) use is indexed as a private use"
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.file_path = 'src/lib.rs'
+        AND i.path = 'foo::Bar'
+      RETURN i.import_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { type: 'Use' } }
+
+  - name: "colliding trait-impl methods are disambiguated with trait name"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'src/lib.rs'
+        AND d.name = 'foo'
+        AND (d.definition_type = 'Method' OR d.definition_type = 'AssociatedFunction')
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 4 }
+      - { row: { fqn: 'Alpha::foo' } }
+      - { row: { fqn: 'Beta::foo' } }
+      - { row: { fqn: 'Widget::<Alpha>::foo' } }
+      - { row: { fqn: 'Widget::<Beta>::foo' } }
+
+  - name: "deeply nested module items are retained despite excess super segments"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'src/lib.rs'
+        AND d.fqn = 'outer::middle::inner::Deep'
+      RETURN d.name AS name
+    assert:
+      - { row_count: 1 }
+      - { row: { name: 'Deep' } }
