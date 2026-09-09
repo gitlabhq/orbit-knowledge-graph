@@ -286,46 +286,48 @@ Initial-load partition parallelism is no longer configured here; a pipeline decl
 
 ## Scheduler configuration
 
-Scheduled tasks run in `DispatchIndexing` mode. Each task has a 6-field cron expression (seconds, minutes, hours, day-of-month, month, day-of-week). Every task's default cron is declared in `config/default.yaml` under `schedule.tasks`; a `schedule.tasks.<name>` entry in an overlay replaces only the fields you set. The cron expression is required and is parsed when the configuration loads, so a missing or invalid expression fails startup.
+Scheduled tasks run in `DispatchIndexing` mode. Each scheduled task has a 6-field cron expression (seconds, minutes, hours, day-of-month, month, day-of-week). Every task's default cron is declared in `config/default.yaml` under `schedule.tasks`; a `schedule.tasks.<name>` entry in an overlay replaces only the fields you set. The cron expression is required and is parsed when the configuration loads, so a missing or invalid expression fails startup.
 
-Distributed locking via NATS KV ensures only one dispatcher instance runs each task per interval.
+Distributed locking via NATS KV ensures only one dispatcher instance runs each scheduled task per interval. Raw Siphon routing is a separate continuous trigger and does not use a cron expression.
 
 | Task | Config path | Default cron | Description |
 |------|-------------|-------------|-------------|
 | Global dispatch | `schedule.tasks.global.cron` | `0 */1 * * * *` (every minute) | Publishes `GlobalIndexingRequest` |
-| Namespace dispatch | `schedule.tasks.namespace.cron` | `*/30 * * * * *` (every 30 seconds) | Publishes requests for enabled root namespaces with Siphon changes |
-| Namespace sweep | `schedule.tasks.namespace-sweep.cron` | `0 0 * * * *` (hourly) | Re-dispatches every enabled namespace; backstops migration backfill and missed windows |
-| Code task dispatch | `schedule.tasks.code-indexing-task.cron` | `0 */1 * * * *` (every minute) | Consumes Siphon CDC push events |
-| Code backfill | `schedule.tasks.code-backfill.cron` | `0 */1 * * * *` (every minute) | Backfills newly enabled namespaces |
+| Namespace dispatch | `schedule.tasks.namespace.cron` | `*/30 * * * * *` (every 30 seconds) | Publishes requests for changed enabled root namespaces and performs the integrated namespace sweep when due |
+| Code backfill | `schedule.tasks.code-backfill.cron` | `0 */1 * * * *` (every minute) | Backfills enabled namespaces whose projects do not yet have code checkpoints |
 | Table cleanup | `schedule.tasks.table-cleanup.cron` | `0 0 3 * * 0` (weekly, Sunday 03:00 UTC) | Runs `APPLY DELETED MASK` on every graph table to physically remove lightweight-deleted rows |
 | Namespace deletion | `schedule.tasks.namespace-deletion.cron` | `0 0 3 * * *` (daily 03:00 UTC) | Schedules and executes namespace deletions |
-| Migration completion | `schedule.tasks.migration-completion.cron` | `0 */1 * * * *` (every minute) | Detects completed schema migrations |
+| Migration completion | `schedule.tasks.migration-completion.cron` | `0 */1 * * * *` (every minute) | Detects completed schema migrations and reconciles dead versions |
+| Stale-edge reconciliation | `schedule.tasks.stale-edge-reconciliation.cron` | `0 */30 * * * *` (every 30 minutes) | Tombstones stale mutable-FK edges |
 
-The namespace change dispatcher is checkpoint-driven. With no checkpoint it
+The namespace dispatcher is checkpoint-driven. With no change-detection checkpoint it
 dispatches every enabled namespace once (cold start) and records a checkpoint;
-every later tick queries Siphon changes since that checkpoint, however old it is.
-The hourly namespace sweep re-dispatches every enabled namespace regardless of
-recent Siphon activity, backstopping migration backfill and missed windows.
+every later tick queries Siphon-backed datalake tables for changes since that checkpoint,
+however old it is. The same task re-dispatches every enabled namespace when its separate
+sweep checkpoint is older than `schedule.tasks.namespace.sweep_interval_secs` (default
+`3600`), backstopping migration backfill and missed windows.
 
 `APPLY DELETED MASK` is idempotent. A failed or skipped run is safe — the next
 run picks up all outstanding masks. Alert on
 `gkg.scheduler.task.errors{task="maintenance.table_cleanup"}`; the task logs a
 failed table and moves on.
 
-### Code dispatch task settings
+### Continuous Siphon router settings
+
+DispatchIndexing continuously polls the raw Siphon JetStream and routes code-task and enabled-namespace CDC events into Orbit's internal request stream. It drains each supported source-table subject until no pending messages remain, waits one second, and polls again.
 
 | Config path | Default | Description |
 |-------------|---------|-------------|
-| `schedule.tasks.code-indexing-task.events_stream_name` | `siphon_stream_main_db` | NATS stream for Siphon CDC events |
-| `schedule.tasks.code-indexing-task.batch_size` | `100` | CDC events to process per cycle |
+| `schedule.tasks.siphon.events_stream_name` | `siphon_stream_main_db` | Raw NATS stream containing Siphon CDC events |
+| `schedule.tasks.siphon.batch_size` | `100` | Pending messages consumed per route and drain call |
 
-### Code backfill task settings
+### Scheduled task settings
 
 | Config path | Default | Description |
 |-------------|---------|-------------|
+| `schedule.tasks.namespace.sweep_interval_secs` | `3600` | Age at which the namespace dispatcher performs a full enabled-namespace sweep instead of change-only dispatch |
+| `schedule.tasks.stale-edge-reconciliation.lookback_secs` | `3600` | Recent node-version window rescanned on each stale-edge reconciliation run |
 | `schedule.tasks.code-backfill.publish_window` | `200000` | Pending projects held per publish batch. Also the per-run budget shared between the namespaces that still have pending projects, so it bounds both dispatcher memory (about 70 bytes per project) and how much work one namespace can queue ahead of the others |
-| `schedule.tasks.namespace-code-backfill.events_stream_name` | `siphon_stream_main_db` | NATS stream for namespace events |
-| `schedule.tasks.namespace-code-backfill.batch_size` | `100` | Events to process per cycle |
 
 ## GitLab client
 
@@ -426,7 +428,7 @@ query:
 
 | Config path | Default | Description |
 |-------------|---------|-------------|
-| `schema.max_retained_versions` | `2` | Number of schema version table-sets to retain (min 2) |
+| `schema.max_retained_versions` | `2` | Active-plus-retired keep-set size (min 2); every migrating version is retained in addition |
 
 ## Analytics
 
@@ -514,12 +516,12 @@ GKG_NATS__ACK_WAIT_SECS=600  # 10 minutes instead of default 5
 
 ### Handle large CDC backlogs
 
-Increase the code dispatch batch size:
+Increase the continuous Siphon router batch size:
 
 ```yaml
 schedule:
   tasks:
-    code-indexing-task:
+    siphon:
       batch_size: 500
 ```
 
