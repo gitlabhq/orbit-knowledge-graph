@@ -150,7 +150,7 @@ async fn data_correctness() {
         neighbors::neighbors_non_default_pk_with_non_denorm_filter,
         neighbors::neighbors_non_default_pk_filter_excludes_non_matching,
         neighbors::neighbors_non_default_pk_redaction_uses_merge_request_id,
-        edge_cases::long_node_text_returns_unicode_excerpt,
+        edge_cases::long_node_text_is_excerpted_only_on_wide_pages,
         edge_cases::sql_injection_string_preserved,
         edge_cases::empty_result_has_valid_schema,
         edge_cases::sip_prefilter_with_node_ids_returns_correct_results,

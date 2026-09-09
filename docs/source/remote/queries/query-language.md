@@ -261,7 +261,7 @@ The `content` column is for source code. For merge request diff text, use
 
 ### Text excerpts
 
-Database-backed node strings may be shortened to 2,048 Unicode code points plus `" [truncated]"`; use the GitLab API for full text.
+Database-backed node strings share a per-page budget split across the rows and text columns the page can return, so a single-row lookup returns full text while a 1,000-row page returns short excerpts. Shortened values end with `" [truncated]"`; use the GitLab API for full text.
 
 ### Filtering on virtual columns
 

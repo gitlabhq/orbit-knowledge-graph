@@ -13,6 +13,11 @@ use ontology::{DataType, FieldSource, Ontology};
 
 use crate::error::{QueryError, Result};
 use crate::input::*;
+use crate::passes::shared::requested_columns;
+
+const WORKHORSE_GRPC_MESSAGE_CAP_BYTES: u64 = 8 * 1024 * 1024;
+const TEXT_EXCERPT_BUDGET_BYTES: u64 = WORKHORSE_GRPC_MESSAGE_CAP_BYTES / 4;
+const MIN_TEXT_EXCERPT_CHARACTERS: u64 = 256;
 
 pub use edge_chain::{
     FkShape, Hop, HopFk, HydrationStrategy, JoinColumns, NodePlan, Selectivity, Strategy,
@@ -48,19 +53,55 @@ impl Plan {
         self.node_edge_mappings.clone()
     }
 
-    pub(crate) fn resolve_text_columns(&mut self, ontology: &Ontology) {
+    pub(crate) fn resolve_text_excerpts(&mut self, ontology: &Ontology) {
         for node in self.nodes.values_mut() {
-            node.text_columns = text_excerpt_columns(node.entity.as_deref(), ontology);
+            let requested = requested_columns(&node.columns);
+            node.text_excerpt.columns =
+                requested_text_columns(node.entity.as_deref(), &requested, ontology);
         }
         if let PlanBody::Hydration(nodes) = &mut self.body {
             for node in nodes {
-                node.text_columns = text_excerpt_columns(Some(&node.entity), ontology);
+                node.text_excerpt.columns =
+                    requested_text_columns(Some(&node.entity), &node.columns, ontology);
             }
         }
+
+        let rows_per_page = u64::from(self.limit.max(1));
+        let text_cells_per_row: u64 = self
+            .text_excerpts_mut()
+            .map(|excerpt| excerpt.columns.len() as u64)
+            .sum();
+        let max_chars = TEXT_EXCERPT_BUDGET_BYTES / (rows_per_page * text_cells_per_row.max(1));
+        for excerpt in self.text_excerpts_mut() {
+            excerpt.max_chars = max_chars.max(MIN_TEXT_EXCERPT_CHARACTERS) as u32;
+        }
+    }
+
+    fn text_excerpts_mut(&mut self) -> impl Iterator<Item = &mut TextExcerpt> {
+        let Plan { nodes, body, .. } = self;
+        let hydration_nodes = match body {
+            PlanBody::Hydration(nodes) => nodes.as_mut_slice(),
+            _ => &mut [],
+        };
+        nodes.values_mut().map(|node| &mut node.text_excerpt).chain(
+            hydration_nodes
+                .iter_mut()
+                .map(|node| &mut node.text_excerpt),
+        )
     }
 }
 
-fn text_excerpt_columns(entity: Option<&str>, ontology: &Ontology) -> HashSet<String> {
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct TextExcerpt {
+    pub columns: HashSet<String>,
+    pub max_chars: u32,
+}
+
+fn requested_text_columns(
+    entity: Option<&str>,
+    requested: &[String],
+    ontology: &Ontology,
+) -> HashSet<String> {
     let Some(node) = entity.and_then(|name| ontology.get_node(name)) else {
         return HashSet::new();
     };
@@ -69,6 +110,7 @@ fn text_excerpt_columns(entity: Option<&str>, ontology: &Ontology) -> HashSet<St
         .fields
         .iter()
         .filter(|field| field.column_name().is_some() && field.data_type == DataType::String)
+        .filter(|field| requested.contains(&field.name))
         .map(|field| field.name.clone())
         .collect();
 

@@ -15,16 +15,15 @@ use crate::passes::shared::{
     rel_kind_filter, rel_kind_filter_values,
 };
 
-const MAX_TEXT_EXCERPT_CHARACTERS: u32 = 2048;
 const TEXT_TRUNCATION_SUFFIX: &str = " [truncated]";
 
 pub(super) fn text_excerpt_projection(
     alias: &str,
     column: &str,
-    text_columns: &HashSet<String>,
+    text_excerpt: &TextExcerpt,
 ) -> Expr {
     let value = Expr::col(alias, column);
-    if !text_columns.contains(column) {
+    if !text_excerpt.columns.contains(column) {
         return value;
     }
 
@@ -33,7 +32,7 @@ pub(super) fn text_excerpt_projection(
         vec![
             value.clone(),
             Expr::lit(1),
-            Expr::lit(MAX_TEXT_EXCERPT_CHARACTERS),
+            Expr::lit(text_excerpt.max_chars),
         ],
     );
     let shortened = Expr::binary(
@@ -96,7 +95,7 @@ pub(super) fn node_select_columns(alias: &str, np: &NodePlan) -> Vec<SelectExpr>
         .into_iter()
         .map(|col| {
             SelectExpr::new(
-                text_excerpt_projection(alias, &col, &np.text_columns),
+                text_excerpt_projection(alias, &col, &np.text_excerpt),
                 format!("{alias}_{col}"),
             )
         })

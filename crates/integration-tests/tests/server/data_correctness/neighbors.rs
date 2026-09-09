@@ -121,7 +121,8 @@ pub(super) async fn neighbors_mixed_entity_types(ctx: &TestContext) {
     resp.assert_node_ids("Project", &[1000]);
 
     let note = resp.find_node("Note", 3002).unwrap();
-    note.assert_prop("note", &format!("{} [truncated]", "🙂".repeat(2048)).into());
+    let excerpt = note.prop_str("note").unwrap();
+    assert!(excerpt.ends_with(" [truncated]"), "got {excerpt:?}");
     note.assert_prop("discussion_id", &"🙂".repeat(2048).into());
 
     resp.assert_edge_exists("User", 1, "MergeRequest", 2000, "AUTHORED");

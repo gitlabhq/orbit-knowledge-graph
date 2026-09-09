@@ -89,7 +89,7 @@ fn emit_arm(
                     Expr::string(col),
                     Expr::func(
                         "toString",
-                        vec![text_excerpt_projection(alias, col, &node.text_columns)],
+                        vec![text_excerpt_projection(alias, col, &node.text_excerpt)],
                     ),
                 ]
             })
@@ -283,7 +283,7 @@ mod tests {
             id_property: "id".into(),
             node_ids,
             columns: columns.into_iter().map(String::from).collect(),
-            text_columns: Default::default(),
+            text_excerpt: Default::default(),
             traversal_paths: traversal_paths
                 .into_iter()
                 .map(TraversalPath::new_unchecked)
@@ -401,7 +401,7 @@ mod tests {
             id_property: "id".into(),
             node_ids: vec![1],
             columns: vec!["title".into()],
-            text_columns: Default::default(),
+            text_excerpt: Default::default(),
             traversal_paths: paths.clone(),
             sort_key: vec!["id".to_string()],
         };
@@ -445,7 +445,7 @@ mod tests {
             id_property: "id".into(),
             node_ids: vec![1],
             columns: vec!["title".into()],
-            text_columns: Default::default(),
+            text_excerpt: Default::default(),
             traversal_paths: paths,
             sort_key: vec!["id".to_string()],
         };
