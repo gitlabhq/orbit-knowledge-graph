@@ -79,7 +79,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
             mutates: [input, node]
         }
         check {
-            reads_env: [security_ctx]
+            reads_env: [security_ctx, ontology]
             reads_state: [node]
         }
         hydrate_plan {
