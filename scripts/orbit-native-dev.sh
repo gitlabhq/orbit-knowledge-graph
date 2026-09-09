@@ -85,13 +85,9 @@ else
   GDK_GITLAB_URL="http://${GDK_HOSTNAME}:${GDK_PORT}"
 fi
 
-NATS_URL="nats://127.0.0.1:4222"
-DATALAKE_URL="http://127.0.0.1:${GDK_CLICKHOUSE_HTTP_PORT}"
-DATALAKE_DATABASE="gitlab_clickhouse_development"
-DATALAKE_USERNAME="default"
-GRAPH_URL="http://127.0.0.1:${GDK_CLICKHOUSE_HTTP_PORT}"
-GRAPH_DATABASE="gkg-development"
-GRAPH_USERNAME="default"
+# Static dev values (databases, bind addresses, consumer name) live in config/dev.yaml; only what
+# must be read from the GDK checkout is derived here.
+CLICKHOUSE_URL="http://127.0.0.1:${GDK_CLICKHOUSE_HTTP_PORT}"
 GITLAB_BASE_URL="$GDK_GITLAB_URL"
 # GDK templates its own Siphon stream name (siphon_stream), which differs from the server default.
 SIPHON_STREAM_NAME="$(yq '.producers[0].queueing.stream_name' "$GDK_ROOT/siphon/config_main.yml" 2>/dev/null || true)"
@@ -128,19 +124,13 @@ yaml_str() {
 }
 
 gdk_overlay_yaml() {
-  echo "nats:"
-  echo "  url: $(yaml_str "$NATS_URL")"
   echo "datalake:"
-  echo "  url: $(yaml_str "$DATALAKE_URL")"
-  echo "  database: $(yaml_str "$DATALAKE_DATABASE")"
-  echo "  username: $(yaml_str "$DATALAKE_USERNAME")"
+  echo "  url: $(yaml_str "$CLICKHOUSE_URL")"
   if [[ -n "$CLICKHOUSE_PASSWORD" ]]; then
     echo "  password: $(yaml_str "$CLICKHOUSE_PASSWORD")"
   fi
   echo "graph:"
-  echo "  url: $(yaml_str "$GRAPH_URL")"
-  echo "  database: $(yaml_str "$GRAPH_DATABASE")"
-  echo "  username: $(yaml_str "$GRAPH_USERNAME")"
+  echo "  url: $(yaml_str "$CLICKHOUSE_URL")"
   if [[ -n "$CLICKHOUSE_PASSWORD" ]]; then
     echo "  password: $(yaml_str "$CLICKHOUSE_PASSWORD")"
   fi
@@ -155,35 +145,15 @@ gdk_overlay_yaml() {
   echo "      events_stream_name: $(yaml_str "$SIPHON_STREAM_NAME")"
 }
 
-# Ports and names that differ between the processes `mise run dev` starts side by side.
+# The only value that differs between the processes `mise run dev` starts side by side; it matters
+# once metrics.prometheus.enabled is switched on in config/dev.local.yaml.
 mode_overlay_yaml() {
   case "$1" in
     webserver)
-      cat <<'EOF'
-bind_address: "127.0.0.1:8090"
-grpc_bind_address: "127.0.0.1:50054"
-metrics:
-  prometheus:
-    enabled: false
-    port: 9100
-EOF
+      printf 'metrics:\n  prometheus:\n    port: 9100\n'
       ;;
     indexer)
-      cat <<'EOF'
-indexer_health_bind_address: "127.0.0.1:4202"
-nats:
-  consumer_name: "gkg-indexer-dev"
-metrics:
-  prometheus:
-    enabled: false
-    port: 9200
-EOF
-      ;;
-    health-check)
-      cat <<'EOF'
-health_check:
-  bind_address: "127.0.0.1:4201"
-EOF
+      printf 'metrics:\n  prometheus:\n    port: 9200\n'
       ;;
     *)
       ;;
@@ -378,14 +348,13 @@ GDK_POSTGRES_HOST=$GDK_POSTGRES_HOST
 GDK_POSTGRES_PORT=$GDK_POSTGRES_PORT
 GDK_GITLAB_URL=$GDK_GITLAB_URL
 GITALY_TCP_ADDR=${GITALY_TCP_ADDR:-<not configured>}
+DEV_OVERLAY=$DEV_OVERLAY
 GENERATED_OVERLAYS=$GENERATED_DIR/<mode>.yaml
 LOCAL_OVERLAY=$LOCAL_OVERLAY$([[ -f "$LOCAL_OVERLAY" ]] || echo " (absent)")
 
-nats.url=$NATS_URL
-datalake.url=$DATALAKE_URL
-datalake.database=$DATALAKE_DATABASE
-graph.url=$GRAPH_URL
-graph.database=$GRAPH_DATABASE
+Derived from the GDK checkout:
+datalake.url=$CLICKHOUSE_URL
+graph.url=$CLICKHOUSE_URL
 gitlab.base_url=$GITLAB_BASE_URL
 schedule.tasks.siphon.events_stream_name=$SIPHON_STREAM_NAME
 EOF

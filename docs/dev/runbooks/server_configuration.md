@@ -33,11 +33,12 @@ The mise dev tasks (`server:start`, `server:dispatch`, `dev:web`, `dev:indexer`,
 `dev:healthcheck`) run `scripts/orbit-native-dev.sh`, which writes `.dev/<mode>.yaml` on every start
 and passes it as the single `--config` file. The file is a `yq` deep merge of, in increasing priority:
 
-1. `config/dev.yaml`: committed local-development tuning.
-2. Connection details derived from `gdk.yml`, GDK's Siphon config, and the GitLab secret files: URLs,
-   databases, the Siphon stream name, JWT keys, ClickHouse password.
-3. The mode's ports and names (webserver bind addresses, indexer health port and consumer name,
-   health-check bind address), so the processes `mise run dev` starts side by side do not collide.
+1. `config/dev.yaml`: the committed description of the dev environment: bind addresses, NATS URL and
+   consumer name, database names and users, laptop tuning.
+2. Values read from the GDK checkout: ClickHouse URLs from `gdk.yml`, the GitLab base URL, the Siphon
+   stream name from GDK's Siphon config, JWT keys and the ClickHouse password from the GitLab secret files.
+3. The mode's Prometheus port, so the processes `mise run dev` starts side by side do not collide once
+   metrics are enabled.
 4. `config/dev.local.yaml`: personal overrides, when the file exists. Git ignores it.
 
 Passing `--config` disables the default `config/config.yaml` lookup.

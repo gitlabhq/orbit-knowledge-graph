@@ -3,15 +3,28 @@
 # underlays production.
 #
 # The mise dev tasks do not pass this file to --config directly: scripts/orbit-native-dev.sh
-# deep-merges it with the connection details derived from gdk.yml, the mode's ports, and the
-# Git-ignored config/dev.local.yaml (personal overrides, highest priority) into .dev/<mode>.yaml.
+# deep-merges it with the values it reads from the GDK checkout (ClickHouse URLs, GitLab URL, Siphon
+# stream name, JWT keys, ClickHouse password), the mode's Prometheus port, and the Git-ignored
+# config/dev.local.yaml (personal overrides, highest priority) into .dev/<mode>.yaml.
+
+bind_address: "127.0.0.1:8090"
+grpc_bind_address: "127.0.0.1:50054"
+indexer_health_bind_address: "127.0.0.1:4202"
+
+nats:
+  url: "nats://127.0.0.1:4222"
+  consumer_name: "gkg-indexer-dev"
 
 datalake:
+  database: "gitlab_clickhouse_development"
+  username: "default"
   session_settings:
     max_execution_time: "900"
     max_query_size: "10485760"
 
 graph:
+  database: "gkg-development"
+  username: "default"
   insert_settings:
     async_insert: "1"
     wait_for_async_insert: "1"
@@ -31,3 +44,6 @@ query:
   path_finding:
     max_execution_time: 15
     max_memory_usage: 16106127360
+
+health_check:
+  bind_address: "127.0.0.1:4201"
