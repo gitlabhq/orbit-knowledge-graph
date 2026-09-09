@@ -5,18 +5,10 @@
 pub mod gql;
 pub mod json_dsl;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, strum::EnumString)]
 pub enum Frontend {
+    #[strum(serialize = "json")]
     JsonDsl,
+    #[strum(serialize = "gql")]
     Gql,
-}
-
-impl Frontend {
-    pub fn from_name(name: &str) -> Option<Self> {
-        match name {
-            "json" => Some(Self::JsonDsl),
-            "gql" => Some(Self::Gql),
-            _ => None,
-        }
-    }
 }

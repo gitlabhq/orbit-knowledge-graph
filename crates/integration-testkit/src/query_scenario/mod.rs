@@ -149,7 +149,7 @@ async fn run_scenario(ctx: &TestContext, file: &Path, name: &str, presets: &Path
     let redaction = build_redaction(&redaction_config);
 
     for (frontend_key, query_str) in &scenario.query {
-        let Some(frontend) = Frontend::from_name(frontend_key) else {
+        let Ok(frontend) = frontend_key.parse::<Frontend>() else {
             eprintln!("    {name}: skipping unknown query language '{frontend_key}'");
             continue;
         };
@@ -534,9 +534,9 @@ mod tests {
 
     #[test]
     fn json_and_gql_keys_map_to_their_frontends() {
-        assert_eq!(Frontend::from_name("json"), Some(Frontend::JsonDsl));
-        assert_eq!(Frontend::from_name("gql"), Some(Frontend::Gql));
-        assert_eq!(Frontend::from_name("sql"), None);
+        assert_eq!("json".parse(), Ok(Frontend::JsonDsl));
+        assert_eq!("gql".parse(), Ok(Frontend::Gql));
+        assert!("sql".parse::<Frontend>().is_err());
     }
 
     #[test]
