@@ -455,7 +455,7 @@ Cleanup behavior:
 
 ### Safety guarantees
 
-- Active and migrating versions are excluded by the keep-set. Rollbacks depend on protecting a
+- Active and migrating versions are always included in the keep-set and are never dropped. Rollbacks depend on protecting a
   below-active version while it is marked `migrating` and rebuilt.
 - `DROP ... IF EXISTS` is idempotent, so per-object retries after partial failures are safe.
 - The cleanup runs under the `schema_migration` NATS KV lock, preventing concurrent cleanup

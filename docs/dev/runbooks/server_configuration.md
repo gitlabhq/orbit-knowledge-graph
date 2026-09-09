@@ -289,7 +289,7 @@ DispatchIndexing continuously polls the raw Siphon JetStream and routes code-tas
 | `schedule.tasks.siphon.events_stream_name` | `siphon_stream_main_db` | Raw NATS stream containing Siphon CDC events |
 | `schedule.tasks.siphon.batch_size` | `100` | Pending messages consumed per route and drain call |
 
-### Namespace and code backfill settings
+### Namespace dispatch and code backfill settings
 
 | Config path | Default | Description |
 |-------------|---------|-------------|

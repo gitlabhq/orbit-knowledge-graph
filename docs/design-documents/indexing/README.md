@@ -112,7 +112,7 @@ Siphon uses PostgreSQL's logical replication to capture changes from the write-a
 
 **Shared Use**:
 
-- Delivers raw Siphon events to DispatchIndexing routes and carries the resulting internal indexing requests on release-versioned Orbit streams
+- Delivers raw Siphon events to the subjects DispatchIndexing consumes, and carries the resulting internal indexing requests on release-versioned Orbit streams
 - Distributes internal requests across multiple indexer replicas
 - Provides NATS KV for code indexing task mutual exclusion and cadence coordination. SDLC dispatch deduplication uses per-subject message limits on the JetStream stream.
 
