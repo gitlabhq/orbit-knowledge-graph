@@ -27,7 +27,7 @@ use indexer::topic::{CODE_INDEXING_TASK_SUBJECT_PATTERN, INDEXER_STREAM};
 use nats_client::KvPutOptions;
 use ontology::archive::OntologyArchive;
 use ontology::migrations::embedded_sources;
-use orbit_migrations::catalog::OntologyCatalog;
+use orbit_migrations::catalog::{ONTOLOGY_ARCHIVES_BUCKET, OntologyCatalog};
 use orbit_server_config::NatsConfiguration;
 use serde::Deserialize;
 use testcontainers::ImageExt;
@@ -174,10 +174,7 @@ impl TestContext {
     async fn restore_archive(&self, version: u32) {
         self.scheduler_services
             .nats_client
-            .kv_delete(
-                &archive_bucket(&self.clickhouse.config.database),
-                &version.to_string(),
-            )
+            .kv_delete(ONTOLOGY_ARCHIVES_BUCKET, &version.to_string())
             .await
             .unwrap();
         self.catalog
@@ -325,10 +322,12 @@ impl ArchiveCase {
     }
 
     async fn inject(self, context: &TestContext, version: u32) {
-        let bucket = archive_bucket(&context.clickhouse.config.database);
         let archive_key = version.to_string();
         let client = &context.scheduler_services.nats_client;
-        client.kv_delete(&bucket, &archive_key).await.unwrap();
+        client
+            .kv_delete(ONTOLOGY_ARCHIVES_BUCKET, &archive_key)
+            .await
+            .unwrap();
 
         let payload = match self {
             ArchiveCase::Missing => None,
@@ -342,7 +341,12 @@ impl ArchiveCase {
         };
         if let Some(payload) = payload {
             client
-                .kv_put(&bucket, &archive_key, payload, KvPutOptions::default())
+                .kv_put(
+                    ONTOLOGY_ARCHIVES_BUCKET,
+                    &archive_key,
+                    payload,
+                    KvPutOptions::default(),
+                )
                 .await
                 .unwrap();
         }
@@ -747,11 +751,4 @@ fn dispatcher_config(context: &TestContext) -> DispatcherConfig {
         schema: orbit_server_config::AppConfig::embedded_defaults().schema,
         health_bind_address: "127.0.0.1:0".parse().unwrap(),
     }
-}
-
-fn archive_bucket(graph_database: &str) -> String {
-    format!(
-        "ontology_archives_{}",
-        ontology::migrations::sha256_hex(graph_database)
-    )
 }

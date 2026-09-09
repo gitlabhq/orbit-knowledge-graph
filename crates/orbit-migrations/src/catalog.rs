@@ -5,7 +5,7 @@ use nats_client::{KvBucketConfig, KvPutOptions, KvPutResult, NatsClient};
 use ontology::Ontology;
 use ontology::archive::{ArchiveError, OntologyArchive};
 
-const ONTOLOGY_ARCHIVES_BUCKET: &str = "orbit_ontology_archives";
+pub const ONTOLOGY_ARCHIVES_BUCKET: &str = "orbit_ontology_archives";
 
 #[derive(Debug, thiserror::Error)]
 pub enum CatalogError {
