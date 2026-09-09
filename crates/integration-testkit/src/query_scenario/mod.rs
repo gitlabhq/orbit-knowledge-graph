@@ -465,7 +465,9 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
         view.assert_edge_count(kind, *count);
     }
     for (group_key, ge) in &expect.groups {
-        if let (Some(entity), Some(ids)) = (&ge.entity, &ge.ids) {
+        if let (Some(entity), Some(order)) = (&ge.entity, &ge.order) {
+            view.assert_group_node_order(group_key, entity, order);
+        } else if let (Some(entity), Some(ids)) = (&ge.entity, &ge.ids) {
             view.assert_group_node_ids(group_key, entity, ids);
         }
         if let Some(count) = ge.count {

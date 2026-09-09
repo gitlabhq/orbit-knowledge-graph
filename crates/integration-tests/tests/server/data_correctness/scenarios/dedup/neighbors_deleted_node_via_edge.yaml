@@ -1,0 +1,35 @@
+# source: crates/integration-tests/tests/server/data_correctness/dedup.rs::neighbors_deleted_node_visible_via_edge
+description: >
+  Deleted neighbor visible via edge; neighbor queries don't join non-center
+  node tables (indexer soft-deletes edges alongside parent)
+
+config:
+  extra_seed:
+    gl_user:
+      - { id: 9301, username: del_nbr, name: Deleted Neighbor, state: active, user_type: human, _version: "2024-01-01 00:00:00", _deleted: false }
+      - { id: 9301, username: del_nbr, name: Deleted Neighbor, state: active, user_type: human, _version: "2024-06-01 00:00:00", _deleted: true }
+    gl_merge_request:
+      - { id: 9311, iid: 311, title: "Neighbor del center MR", state: opened, traversal_path: "1/100/1000/", _version: "2024-06-01 00:00:00", _deleted: false }
+    gl_edge:
+      - { traversal_path: "1/100/1000/", source_id: 9301, source_kind: User, relationship_kind: AUTHORED, target_id: 9311, target_kind: MergeRequest, source_tags: [], target_tags: ["state:opened"], _version: "1970-01-01 00:00:00", _deleted: false }
+  redaction:
+    allow:
+      user: [1, 2, 3, 4, 5, 6, 7, 9301]
+      merge_request: [2000, 2001, 2002, 2003, 2004, 2005, 9100, 9311]
+
+query:
+  json: |
+    {
+      "query_type": "neighbors",
+      "nodes": [{"id": "mr", "entity": "MergeRequest", "node_ids": [9311]}],
+      "neighbors": {"direction": "both"}
+    }
+
+expect:
+  skip_requirements: [node_count]
+  nodes:
+    MergeRequest:
+      ids: [9311]
+  edge_exists:
+    AUTHORED:
+      - [9301, 9311]

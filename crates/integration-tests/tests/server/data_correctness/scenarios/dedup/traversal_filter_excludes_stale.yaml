@@ -1,0 +1,41 @@
+# source: crates/integration-tests/tests/server/data_correctness/dedup.rs::traversal_filter_excludes_stale_version
+description: Traversal filter excludes stale version of MR
+
+config:
+  extra_seed:
+    gl_merge_request:
+      - { id: 9400, iid: 400, title: "Stale Traversal MR", state: merged, traversal_path: "1/100/1003/", project_id: 1003, _version: "2024-01-01 00:00:00", _deleted: false }
+      - { id: 9400, iid: 400, title: "Stale Traversal MR", state: opened, traversal_path: "1/100/1003/", project_id: 1003, _version: "2024-06-01 00:00:00", _deleted: false }
+      - { id: 9401, iid: 401, title: "Good Traversal MR", state: merged, traversal_path: "1/100/1003/", project_id: 1003, _version: "2024-06-01 00:00:00", _deleted: false }
+    gl_edge:
+      - { traversal_path: "1/100/1003/", source_id: 9400, source_kind: MergeRequest, relationship_kind: IN_PROJECT, target_id: 1003, target_kind: Project, source_tags: ["state:opened"], target_tags: [], _version: "1970-01-01 00:00:00", _deleted: false }
+      - { traversal_path: "1/100/1003/", source_id: 9401, source_kind: MergeRequest, relationship_kind: IN_PROJECT, target_id: 1003, target_kind: Project, source_tags: ["state:merged"], target_tags: [], _version: "1970-01-01 00:00:00", _deleted: false }
+      - { traversal_path: "1/100/1003/", source_id: 1, source_kind: User, relationship_kind: AUTHORED, target_id: 9400, target_kind: MergeRequest, source_tags: [], target_tags: ["state:opened"], _version: "1970-01-01 00:00:00", _deleted: false }
+      - { traversal_path: "1/100/1003/", source_id: 1, source_kind: User, relationship_kind: AUTHORED, target_id: 9401, target_kind: MergeRequest, source_tags: [], target_tags: ["state:merged"], _version: "1970-01-01 00:00:00", _deleted: false }
+  redaction:
+    allow:
+      merge_request: [2000, 2001, 2002, 2003, 2004, 2005, 9100, 9400, 9401]
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "mr", "entity": "MergeRequest", "filters": {"state": "merged"}},
+        {"id": "p", "entity": "Project", "node_ids": [1003]}
+      ],
+      "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
+      "limit": 10
+    }
+
+expect:
+  skip_requirements: ["filter:state"]
+  node_count: 2
+  nodes:
+    Project:
+      ids: [1003]
+  edge_exists:
+    IN_PROJECT:
+      - [9401, 1003]
+  edge_count:
+    IN_PROJECT: 1

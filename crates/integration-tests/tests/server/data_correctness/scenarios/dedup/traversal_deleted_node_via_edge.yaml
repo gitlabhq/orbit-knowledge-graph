@@ -1,0 +1,43 @@
+# source: crates/integration-tests/tests/server/data_correctness/dedup.rs::traversal_deleted_node_visible_via_edge
+description: >
+  Deleted node excluded from traversal; edge-only queries cannot filter
+  deleted nodes at query layer (indexer soft-deletes edges alongside nodes)
+
+config:
+  extra_seed:
+    gl_merge_request:
+      - { id: 9500, iid: 500, title: "Deleted MR", state: merged, traversal_path: "1/100/1004/", project_id: 1004, _version: "2024-01-01 00:00:00", _deleted: false }
+      - { id: 9500, iid: 500, title: "Deleted MR", state: merged, traversal_path: "1/100/1004/", project_id: 1004, _version: "2024-06-01 00:00:00", _deleted: true }
+      - { id: 9501, iid: 501, title: "Alive MR", state: merged, traversal_path: "1/100/1004/", project_id: 1004, _version: "2024-06-01 00:00:00", _deleted: false }
+    gl_edge:
+      - { traversal_path: "1/100/1004/", source_id: 9500, source_kind: MergeRequest, relationship_kind: IN_PROJECT, target_id: 1004, target_kind: Project, source_tags: ["state:merged"], target_tags: [], _version: "1970-01-01 00:00:00", _deleted: false }
+      - { traversal_path: "1/100/1004/", source_id: 9501, source_kind: MergeRequest, relationship_kind: IN_PROJECT, target_id: 1004, target_kind: Project, source_tags: ["state:merged"], target_tags: [], _version: "1970-01-01 00:00:00", _deleted: false }
+  redaction:
+    allow:
+      merge_request: [2000, 2001, 2002, 2003, 2004, 2005, 9100, 9500, 9501]
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "mr", "entity": "MergeRequest", "id_range": {"start": 1, "end": 10000}},
+        {"id": "p", "entity": "Project", "node_ids": [1004]}
+      ],
+      "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
+      "limit": 10
+    }
+
+expect:
+  node_count: 3
+  nodes:
+    Project:
+      ids: [1004]
+    MergeRequest:
+      ids: [2003, 9501]
+  edge_exists:
+    IN_PROJECT:
+      - [9501, 1004]
+      - [2003, 1004]
+  edge_count:
+    IN_PROJECT: 2

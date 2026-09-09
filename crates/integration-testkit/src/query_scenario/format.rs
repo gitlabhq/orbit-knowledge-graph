@@ -151,6 +151,8 @@ pub struct GroupExpect {
     #[serde(default)]
     pub count: Option<usize>,
     #[serde(default)]
+    pub order: Option<Vec<i64>>,
+    #[serde(default)]
     pub ids: Option<Vec<i64>>,
     #[serde(default)]
     pub rows: Vec<GroupRowExpect>,
