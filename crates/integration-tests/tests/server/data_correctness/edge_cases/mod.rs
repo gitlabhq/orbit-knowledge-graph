@@ -35,6 +35,30 @@ pub(super) async fn traversal_referential_integrity_on_complex_query(ctx: &TestC
     assert!(!contains.is_empty(), "should have CONTAINS edges");
 }
 
+pub(super) async fn long_node_text_returns_unicode_excerpt(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "nodes": [{"id": "n", "entity": "Note", "node_ids": [3002],
+                       "columns": ["note", "discussion_id"],
+                       "filters": {"note": {"ends_with": "tail"}}}]
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_node_count(1);
+    resp.assert_node_ids("Note", &[3002]);
+    let excerpt = format!("{} [truncated]", "🙂".repeat(2048));
+    resp.assert_filter("Note", "note", |note| {
+        note.prop_str("note") == Some(&excerpt)
+    });
+    resp.find_node("Note", 3002)
+        .unwrap()
+        .assert_prop("discussion_id", &"🙂".repeat(2048).into());
+}
+
 pub(super) async fn sql_injection_string_preserved(ctx: &TestContext) {
     let resp = run_query(
         ctx,

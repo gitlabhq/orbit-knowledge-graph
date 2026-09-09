@@ -40,7 +40,6 @@
 --   Notes:
 --     3000 Normal note           (MR 2000, not confidential, not internal)
 --     3001 Confidential note     (MR 2001, confidential=true)
---     3002 Giant string note     (MR 2000, 10000 chars)
 --     3003 SQL injection note    (MR 2000, DROP TABLE payload)
 --
 --   MEMBER_OF edges:
@@ -168,11 +167,11 @@ INSERT INTO gl_merge_request (id, iid, title, state, source_branch, target_branc
     (2004, 5, 'Ship feature E','merged',  'ship-e',     'main', toDateTime64('2024-06-10 09:00:00.000000', 6, 'UTC'), 1000, NULL, '1/100/1000/'),
     (2005, 6, 'Ship feature F','merged',  'ship-f',     'main', toDateTime64('2024-08-20 09:00:00.000000', 6, 'UTC'), 1000, NULL, '1/100/1000/');
 
-INSERT INTO gl_note (id, note, noteable_type, noteable_id, confidential, internal, created_at, author_id, traversal_path) VALUES
-    (3000, 'Normal note on feature A', 'MergeRequest', 2000, false, false, '2024-01-15 10:30:00', 1, '1/100/1000/'),
-    (3001, 'Confidential feedback on bug B', 'MergeRequest', 2001, true, false, '2024-02-20 14:45:00', NULL, '1/100/1000/'),
-    (3002, repeat('x', 10000), 'MergeRequest', 2000, false, false, NULL, NULL, '1/100/1000/'),
-    (3003, 'Robert''); DROP TABLE gl_note;--', 'MergeRequest', 2000, false, false, NULL, NULL, '1/100/1000/');
+INSERT INTO gl_note (id, note, noteable_type, noteable_id, confidential, internal, created_at, author_id, traversal_path, discussion_id) VALUES
+    (3000, 'Normal note on feature A', 'MergeRequest', 2000, false, false, '2024-01-15 10:30:00', 1, '1/100/1000/', NULL),
+    (3001, 'Confidential feedback on bug B', 'MergeRequest', 2001, true, false, '2024-02-20 14:45:00', NULL, '1/100/1000/', NULL),
+    (3002, concat(repeat('🙂', 10000), 'tail'), 'MergeRequest', 2000, false, false, NULL, NULL, '1/100/1000/', repeat('🙂', 2048)),
+    (3003, 'Robert''); DROP TABLE gl_note;--', 'MergeRequest', 2000, false, false, NULL, NULL, '1/100/1000/', NULL);
 
 INSERT INTO gl_merge_request_diff (id, merge_request_id, state, head_commit_sha, traversal_path) VALUES
     (5000, 2000, 'collected', 'aaaaaaaa1111', '1/100/1000/'),
