@@ -66,8 +66,15 @@ pub struct QueryExpect {
     pub node_count: Option<usize>,
     #[serde(default)]
     pub nodes: BTreeMap<String, NodeExpect>,
+    /// Exact edge set: `{ MEMBER_OF: [[1,100], [2,100]] }`
     #[serde(default)]
     pub edges: BTreeMap<String, Vec<[i64; 2]>>,
+    /// Spot-check edges exist (subset): `{ AUTHORED: [[1,2000], [2,2002]] }`
+    #[serde(default)]
+    pub edge_exists: BTreeMap<String, Vec<[i64; 2]>>,
+    /// Assert edges do NOT exist: `{ MEMBER_OF: [[1,102]] }`
+    #[serde(default)]
+    pub edge_absent: BTreeMap<String, Vec<[i64; 2]>>,
     #[serde(default)]
     pub edge_count: BTreeMap<String, usize>,
     #[serde(default)]

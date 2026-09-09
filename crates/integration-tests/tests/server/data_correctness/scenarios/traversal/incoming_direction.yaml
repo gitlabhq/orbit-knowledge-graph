@@ -1,0 +1,25 @@
+# source: crates/integration-tests/tests/server/data_correctness/traversal.rs::traversal_incoming_direction
+description: Incoming direction reverses MEMBER_OF to find users of a group
+
+query:
+  json: |
+    {
+        "query_type": "traversal",
+        "nodes": [
+            {"id": "g", "entity": "Group", "columns": ["name"], "node_ids": [100]},
+            {"id": "u", "entity": "User", "columns": ["username"]}
+        ],
+        "relationships": [{"type": "MEMBER_OF", "from": "g", "to": "u", "direction": "incoming"}],
+        "limit": 10
+    }
+
+expect:
+  node_count: 4
+  nodes:
+    User:
+      ids: [1, 2, 6]
+  edge_exists:
+    MEMBER_OF:
+      - [1, 100]
+      - [2, 100]
+      - [6, 100]

@@ -1,0 +1,26 @@
+# source: crates/integration-tests/tests/server/data_correctness/traversal.rs::traversal_with_filter_narrows_results
+description: Filter on User state=blocked narrows traversal to matching users
+
+query:
+  json: |
+    {
+        "query_type": "traversal",
+        "nodes": [
+            {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "state"],
+             "filters": {"state": "blocked"}},
+            {"id": "g", "entity": "Group", "columns": ["name"]}
+        ],
+        "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+        "limit": 20
+    }
+
+expect:
+  node_count: 2
+  nodes:
+    User:
+      ids: [5]
+      filters:
+        state: blocked
+  edge_exists:
+    MEMBER_OF:
+      - [5, 101]

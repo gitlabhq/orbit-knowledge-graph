@@ -331,6 +331,32 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
         let pairs: Vec<(i64, i64)> = tuples.iter().map(|[a, b]| (*a, *b)).collect();
         view.assert_edge_set(kind, &pairs);
     }
+    for (kind, tuples) in &expect.edge_exists {
+        for [from_id, to_id] in tuples {
+            let found = view
+                .response
+                .edges
+                .iter()
+                .any(|e| e.from_id == *from_id && e.to_id == *to_id && e.edge_type == *kind);
+            assert!(
+                found,
+                "{label}: expected edge {from_id} --{kind}--> {to_id}"
+            );
+        }
+    }
+    for (kind, tuples) in &expect.edge_absent {
+        for [from_id, to_id] in tuples {
+            let found = view
+                .response
+                .edges
+                .iter()
+                .any(|e| e.from_id == *from_id && e.to_id == *to_id && e.edge_type == *kind);
+            assert!(
+                !found,
+                "{label}: unexpected edge {from_id} --{kind}--> {to_id}"
+            );
+        }
+    }
     for (kind, count) in &expect.edge_count {
         view.assert_edge_count(kind, *count);
     }
@@ -441,6 +467,11 @@ fn parse_requirement(name: &str) -> Option<Requirement> {
     if let Some(field) = name.strip_prefix("filter:") {
         return Some(Requirement::Filter {
             field: field.to_string(),
+        });
+    }
+    if let Some(edge_type) = name.strip_prefix("relationship:") {
+        return Some(Requirement::Relationship {
+            edge_type: edge_type.to_string(),
         });
     }
     match name {
