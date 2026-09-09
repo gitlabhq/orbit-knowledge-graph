@@ -175,8 +175,7 @@ async fn setup(ctx: &TestContext) {
 
 fn build_service(ctx: &TestContext) -> GraphStatusService {
     let client = Arc::new(ctx.create_client());
-    let ontology = Arc::new(load_ontology());
-    GraphStatusService::new(client, ontology)
+    GraphStatusService::new(client)
 }
 
 fn build_service_with_indexing_status(
@@ -184,9 +183,8 @@ fn build_service_with_indexing_status(
     mock_kv: MockKvServices,
 ) -> GraphStatusService {
     let client = Arc::new(ctx.create_client());
-    let ontology = Arc::new(load_ontology());
     let store = IndexingStatusStore::new(Arc::new(mock_kv));
-    GraphStatusService::new(client, ontology).with_indexing_status(store)
+    GraphStatusService::new(client).with_indexing_status(store)
 }
 
 fn dotted_traversal(traversal_path: &str) -> String {
@@ -277,6 +275,7 @@ async fn root_traversal_path_returns_all_entity_counts(ctx: &TestContext) {
     let service = build_service(ctx);
     let response = service
         .get_status(
+            &load_ontology(),
             &TraversalPath::new_unchecked("1/"),
             ResponseFormat::Raw as i32,
             &admin_context(),
@@ -304,6 +303,7 @@ async fn scoped_by_traversal_path_filters_counts(ctx: &TestContext) {
 
     let response = service
         .get_status(
+            &load_ontology(),
             &TraversalPath::new_unchecked("1/100/"),
             ResponseFormat::Raw as i32,
             &admin_context(),
@@ -335,6 +335,7 @@ async fn empty_traversal_path_rejected(ctx: &TestContext) {
 
     let result = service
         .get_status(
+            &load_ontology(),
             &TraversalPath::new_unchecked(""),
             ResponseFormat::Raw as i32,
             &admin_context(),
@@ -351,6 +352,7 @@ async fn non_matching_traversal_path_returns_zeros(ctx: &TestContext) {
 
     let response = service
         .get_status(
+            &load_ontology(),
             &TraversalPath::new_unchecked("999/"),
             ResponseFormat::Raw as i32,
             &admin_context(),
@@ -370,6 +372,7 @@ async fn all_domains_present_in_response(ctx: &TestContext) {
 
     let response = service
         .get_status(
+            &load_ontology(),
             &TraversalPath::new_unchecked("1/"),
             ResponseFormat::Raw as i32,
             &admin_context(),
@@ -394,6 +397,7 @@ async fn projects_status_at_root(ctx: &TestContext) {
     let service = build_service(ctx);
     let response = service
         .get_status(
+            &load_ontology(),
             &TraversalPath::new_unchecked("1/"),
             ResponseFormat::Raw as i32,
             &admin_context(),
@@ -411,6 +415,7 @@ async fn projects_status_scoped_by_traversal_path(ctx: &TestContext) {
     let service = build_service(ctx);
     let response = service
         .get_status(
+            &load_ontology(),
             &TraversalPath::new_unchecked("1/100/"),
             ResponseFormat::Raw as i32,
             &admin_context(),
@@ -431,6 +436,7 @@ async fn indexing_status_absent_without_store(ctx: &TestContext) {
     let service = build_service(ctx);
     let response = service
         .get_status(
+            &load_ontology(),
             &TraversalPath::new_unchecked("1/"),
             ResponseFormat::Raw as i32,
             &admin_context(),
@@ -474,6 +480,7 @@ async fn indexing_status_indexed_for_group(ctx: &TestContext) {
     let service = build_service_with_indexing_status(ctx, mock_kv);
     let response = service
         .get_status(
+            &load_ontology(),
             &TraversalPath::new_unchecked("1/100/"),
             ResponseFormat::Raw as i32,
             &admin_context(),
@@ -517,6 +524,7 @@ async fn indexing_status_backfilling_for_project(ctx: &TestContext) {
     let service = build_service_with_indexing_status(ctx, mock_kv);
     let response = service
         .get_status(
+            &load_ontology(),
             &TraversalPath::new_unchecked("1/100/1000/"),
             ResponseFormat::Raw as i32,
             &admin_context(),
@@ -559,6 +567,7 @@ async fn indexing_status_indexing_when_reindex_in_flight(ctx: &TestContext) {
     let service = build_service_with_indexing_status(ctx, mock_kv);
     let response = service
         .get_status(
+            &load_ontology(),
             &TraversalPath::new_unchecked("1/100/"),
             ResponseFormat::Raw as i32,
             &admin_context(),
@@ -578,6 +587,7 @@ async fn indexing_status_not_indexed_when_no_kv_entry(ctx: &TestContext) {
     let service = build_service_with_indexing_status(ctx, mock_kv);
     let response = service
         .get_status(
+            &load_ontology(),
             &TraversalPath::new_unchecked("1/101/"),
             ResponseFormat::Raw as i32,
             &admin_context(),
@@ -610,6 +620,7 @@ async fn indexing_status_error_state(ctx: &TestContext) {
     let service = build_service_with_indexing_status(ctx, mock_kv);
     let response = service
         .get_status(
+            &load_ontology(),
             &TraversalPath::new_unchecked("1/100/"),
             ResponseFormat::Raw as i32,
             &admin_context(),
@@ -631,11 +642,12 @@ async fn indexing_status_error_state(ctx: &TestContext) {
 async fn indexing_status_unknown_when_nats_unreachable(ctx: &TestContext) {
     let store = IndexingStatusStore::new(Arc::new(FailingKvServices));
     let client = Arc::new(ctx.create_client());
-    let ontology = Arc::new(load_ontology());
-    let service = GraphStatusService::new(client, ontology).with_indexing_status(store);
+
+    let service = GraphStatusService::new(client).with_indexing_status(store);
 
     let response = service
         .get_status(
+            &load_ontology(),
             &TraversalPath::new_unchecked("1/100/"),
             ResponseFormat::Raw as i32,
             &admin_context(),
@@ -681,6 +693,7 @@ async fn indexing_status_per_entity_worst_state_wins(ctx: &TestContext) {
     let service = build_service_with_indexing_status(ctx, mock_kv);
     let response = service
         .get_status(
+            &load_ontology(),
             &TraversalPath::new_unchecked("1/100/"),
             ResponseFormat::Raw as i32,
             &admin_context(),
@@ -714,6 +727,7 @@ async fn indexing_status_per_entity_missing_key_treated_as_not_indexed(ctx: &Tes
     let service = build_service_with_indexing_status(ctx, mock_kv);
     let response = service
         .get_status(
+            &load_ontology(),
             &TraversalPath::new_unchecked("1/100/"),
             ResponseFormat::Raw as i32,
             &admin_context(),
@@ -733,6 +747,7 @@ async fn reporter_excludes_security_entity_counts(ctx: &TestContext) {
 
     let response = service
         .get_status(
+            &load_ontology(),
             &TraversalPath::new_unchecked("1/"),
             ResponseFormat::Raw as i32,
             &reporter_context,
@@ -761,6 +776,7 @@ async fn security_manager_includes_security_entity_counts(ctx: &TestContext) {
 
     let response = service
         .get_status(
+            &load_ontology(),
             &TraversalPath::new_unchecked("1/"),
             ResponseFormat::Raw as i32,
             &sm_context,
@@ -814,11 +830,12 @@ async fn indexing_status_survives_single_entity_read_failure(ctx: &TestContext) 
         fail_key: format!("status.1.100.{}", "MergeRequest"),
     }));
     let client = Arc::new(ctx.create_client());
-    let ontology = Arc::new(load_ontology());
-    let service = GraphStatusService::new(client, ontology).with_indexing_status(store);
+
+    let service = GraphStatusService::new(client).with_indexing_status(store);
 
     let response = service
         .get_status(
+            &load_ontology(),
             &TraversalPath::new_unchecked("1/100/"),
             ResponseFormat::Raw as i32,
             &admin_context(),
@@ -853,6 +870,7 @@ async fn code_not_indexed_dominates_when_no_project_checkpointed(ctx: &TestConte
     let service = build_service_with_indexing_status(ctx, mock_kv);
     let response = service
         .get_status(
+            &load_ontology(),
             &TraversalPath::new_unchecked("1/100/1002/"),
             ResponseFormat::Raw as i32,
             &admin_context(),
@@ -890,6 +908,7 @@ async fn code_indexing_omitted_when_no_projects_known(ctx: &TestContext) {
     let service = build_service_with_indexing_status(ctx, mock_kv);
     let response = service
         .get_status(
+            &load_ontology(),
             &TraversalPath::new_unchecked("999/"),
             ResponseFormat::Raw as i32,
             &admin_context(),
@@ -916,6 +935,7 @@ async fn edge_pipeline_error_surfaces_in_sdlc_state(ctx: &TestContext) {
     let service = build_service_with_indexing_status(ctx, mock_kv);
     let response = service
         .get_status(
+            &load_ontology(),
             &TraversalPath::new_unchecked("1/100/"),
             ResponseFormat::Raw as i32,
             &admin_context(),
@@ -941,6 +961,7 @@ async fn items_carry_per_entity_state(ctx: &TestContext) {
     let service = build_service_with_indexing_status(ctx, mock_kv);
     let response = service
         .get_status(
+            &load_ontology(),
             &TraversalPath::new_unchecked("1/100/"),
             ResponseFormat::Raw as i32,
             &admin_context(),
@@ -979,6 +1000,7 @@ async fn indexing_status_reports_last_run_rows(ctx: &TestContext) {
     let service = build_service_with_indexing_status(ctx, mock_kv);
     let response = service
         .get_status(
+            &load_ontology(),
             &TraversalPath::new_unchecked("1/100/"),
             ResponseFormat::Raw as i32,
             &admin_context(),
@@ -1001,6 +1023,7 @@ async fn toon_renders_split_indexing_blocks(ctx: &TestContext) {
     let service = build_service_with_indexing_status(ctx, mock_kv);
     let response = service
         .get_status(
+            &load_ontology(),
             &TraversalPath::new_unchecked("1/100/"),
             ResponseFormat::Llm as i32,
             &admin_context(),
@@ -1036,6 +1059,7 @@ async fn definition_count_counts_distinct_ids(ctx: &TestContext) {
     let service = build_service(&db);
     let response = service
         .get_status(
+            &load_ontology(),
             &TraversalPath::new_unchecked("1/100/1000/"),
             ResponseFormat::Raw as i32,
             &admin_context(),
@@ -1066,6 +1090,7 @@ async fn group_count_excludes_deleted(ctx: &TestContext) {
     let service = build_service(&db);
     let response = service
         .get_status(
+            &load_ontology(),
             &TraversalPath::new_unchecked("1/900/"),
             ResponseFormat::Raw as i32,
             &admin_context(),
@@ -1096,6 +1121,7 @@ async fn projects_total_known_counts_distinct_ids(ctx: &TestContext) {
     let service = build_service(&db);
     let response = service
         .get_status(
+            &load_ontology(),
             &TraversalPath::new_unchecked("1/"),
             ResponseFormat::Raw as i32,
             &admin_context(),
@@ -1134,6 +1160,7 @@ async fn get_status_degrades_when_entity_count_table_missing(ctx: &TestContext) 
 
     let response = service
         .get_status(
+            &load_ontology(),
             &TraversalPath::new_unchecked("1/"),
             ResponseFormat::Raw as i32,
             &admin_context(),
