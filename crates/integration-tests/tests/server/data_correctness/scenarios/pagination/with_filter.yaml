@@ -1,0 +1,37 @@
+# source: crates/integration-tests/tests/server/data_correctness/pagination.rs::cursor_with_filter
+description: Cursor with active-only filter pages through 6 active users
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000},
+                 "columns": ["username", "state"],
+                 "filters": {"state": "active"}}],
+      "order_by": "u.id",
+      "cursor": {"page_size": 2}
+    }
+
+expect:
+  pages:
+    - nodes:
+        User:
+          order: [1, 2]
+          filters:
+            state: active
+      has_more: true
+      skip_requirements: [cursor]
+    - nodes:
+        User:
+          order: [3, 4]
+          filters:
+            state: active
+      has_more: true
+      skip_requirements: [cursor]
+    - nodes:
+        User:
+          order: [6, 7]
+          filters:
+            state: active
+      has_more: false
+      skip_requirements: [cursor]
