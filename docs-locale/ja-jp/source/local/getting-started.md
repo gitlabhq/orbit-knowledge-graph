@@ -168,7 +168,7 @@ glab orbit local schema
 次のステップ:
 
 - 実際のクエリを実行する: [glabでGitLab Orbit Localを使用する](access/glab.md)。
-- セットアップにより、エージェントの指示ファイルとフック設定が編集されます。[実行する前に変更内容を確認](access/cli.md#what-it-changes)してください。AIエージェントに接続する: `glab orbit setup`を実行してGitLab Orbitスキルをインストールするか、手動設定については[MCPで接続する](access/mcp.md)を参照してください。
+- AIエージェントに接続する: `glab orbit setup`を実行してGitLab Orbitスキルをインストールするか、手動設定については[MCPで接続する](access/mcp.md)を参照してください。セットアップにより、エージェントの指示ファイルとフック設定が編集されます。[実行する前に変更内容を確認](access/cli.md#what-it-changes)してください。
 - テーブルレイアウトを確認する: [スキーマリファレンス](schema.md)。
 
 ## 課金 {#billing}

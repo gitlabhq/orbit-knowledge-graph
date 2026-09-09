@@ -49,7 +49,7 @@ GitLab Orbitは、ClickHouse、Kubernetes、NATSという3つのシステムに�
 
 GitLab Orbitには、ClickHouse 26.2以降が必要です。これは、グラフがそのリリースで導入された全文インデックスとマテリアライズド共通テーブル式を使用するためです。GitLabは25.xおよび26.xのリリースをサポートしているため、25.xリリースはGitLabの他の部分には対応しますが、GitLab Orbitには対応しません。ClickHouseに関するその他のGitLab要件は変更ありません。
 
-まずGitLab用にClickHouseをセットアップしてください。詳細については、 [ClickHouse](https://docs.gitlab.com/integration/clickhouse/)を参照してください。[ClickHouseマイグレーションの実行](https://docs.gitlab.com/integration/clickhouse/#run-clickhouse-migrations)および[分析用ClickHouseの有効化](https://docs.gitlab.com/integration/clickhouse/#enable-clickhouse-for-analytics)を含む、そのページのすべての手順を完了してください。これらのマイグレーションにより、レプリケーションが書き込むデータレイクテーブルが作成されます。これらのテーブルがない場合、Siphonには書き込み先がなく、レプリケーションが失敗します。
+まずGitLab用にClickHouseをセットアップしてください。詳細については、[ClickHouse](https://docs.gitlab.com/integration/clickhouse/)を参照してください。[ClickHouseマイグレーションの実行](https://docs.gitlab.com/integration/clickhouse/#run-clickhouse-migrations)および[分析用ClickHouseの有効化](https://docs.gitlab.com/integration/clickhouse/#enable-clickhouse-for-analytics)を含む、そのページのすべての手順を完了してください。これらのマイグレーションにより、レプリケーションが書き込むデータレイクテーブルが作成されます。これらのテーブルがない場合、Siphonには書き込み先がなく、レプリケーションが失敗します。
 
 GitLab Orbitは2つのデータベースを使用します:
 
