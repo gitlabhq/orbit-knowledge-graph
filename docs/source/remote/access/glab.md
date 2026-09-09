@@ -120,6 +120,14 @@ Put the request body in `query.json`:
 glab orbit remote query query.json
 ```
 
+To submit read-only query text instead of the JSON envelope, use `--language gql` with a file or stdin:
+
+```shell
+glab orbit remote query --language gql query.cypher
+```
+
+The text is sent unchanged. See the [API reference](api.md#query-endpoint) for the supported subset.
+
 The `--response-format` flag maps to the body's `response_format`:
 
 - `--response-format llm` - compact text optimized for AI agent consumption.

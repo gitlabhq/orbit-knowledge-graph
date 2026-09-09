@@ -45,7 +45,7 @@ impl PipelineStage for ClickHouseExecutor {
             .get::<crate::auth::Claims>()
             .map(|c| c.user_id)
             .unwrap_or(0);
-        let log_comment = correlation::log_comment_base(user_id, &ctx.query_json);
+        let log_comment = correlation::log_comment_base(user_id, &ctx.query_json, ctx.frontend);
 
         let (prepared, result_context) = {
             let compiled = ctx.compiled().inspect_err(|e| obs.record_error(e))?;

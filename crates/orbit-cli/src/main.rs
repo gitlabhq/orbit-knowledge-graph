@@ -602,6 +602,11 @@ enum Commands {
         #[arg(value_name = "FILE")]
         source: Option<String>,
 
+        /// Query language of the body: `json` (a query object or envelope)
+        /// or `gql` (raw query text).
+        #[arg(long, value_enum, default_value = "json")]
+        language: remote::query::QueryLanguage,
+
         /// Server response format. Overrides the body's `response_format`;
         /// defaults to `llm` when neither is set.
         #[arg(long, value_enum)]
@@ -854,7 +859,8 @@ async fn dispatch(command: Commands) -> Result<()> {
         Commands::Query {
             source,
             response_format,
-        } => Ok(remote::run_query(source, response_format).await?),
+            language,
+        } => Ok(remote::run_query(source, response_format, language).await?),
         Commands::Status => Ok(remote::run_status().await?),
         Commands::Ontology { nodes } => Ok(remote::run_ontology(nodes).await?),
         Commands::Dsl => Ok(remote::run_dsl().await?),
@@ -1396,12 +1402,14 @@ mod tests {
         let Commands::Query {
             source,
             response_format,
+            language,
         } = Cli::parse_from(["orbit", "query", "--response-format", "raw", "-"]).command
         else {
             panic!("expected query");
         };
         assert_eq!(source.as_deref(), Some("-"));
         assert_eq!(response_format, Some(super::remote::ResponseFormat::Raw));
+        assert_eq!(language, super::remote::query::QueryLanguage::Json);
         assert!(matches!(
             Cli::parse_from(["orbit", "status"]).command,
             Commands::Status

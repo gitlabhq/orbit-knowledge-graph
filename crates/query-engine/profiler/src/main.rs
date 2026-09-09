@@ -268,7 +268,7 @@ fn seed_scope_prefixes(
         }
     }
 
-    let input = compiler::validate_normalize(query_json, ontology)
+    let input = compiler::validate_normalize(query_json, compiler::Frontend::JsonDsl, ontology)
         .map_err(|e| anyhow::anyhow!("validate_normalize failed: {e}"))?;
     let edges = compiler::scope_edges(&input);
     let scope_prefixes = ontology.propagate_scope_prefixes(&edges, &seed);

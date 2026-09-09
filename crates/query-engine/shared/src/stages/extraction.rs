@@ -56,6 +56,7 @@ mod tests {
         ctx_result.add_node("p", "Project");
 
         let mut ctx = QueryPipelineContext {
+            frontend: compiler::Frontend::JsonDsl,
             query_json: String::new(),
             compiled: None,
             ontology: Arc::new(Ontology::new()),

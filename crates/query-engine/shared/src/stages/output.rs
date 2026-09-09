@@ -87,6 +87,7 @@ mod tests {
 
     fn make_ctx(security_context: Option<SecurityContext>) -> QueryPipelineContext {
         QueryPipelineContext {
+            frontend: compiler::Frontend::JsonDsl,
             query_json: String::new(),
             compiled: None,
             ontology: Arc::new(Ontology::default()),

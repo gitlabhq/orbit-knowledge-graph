@@ -56,13 +56,14 @@ API calls consume GitLab Credits from your subscription. Each call to
 
 ## Query endpoint
 
-Execute a graph query using the GitLab Orbit query DSL.
+Execute a graph query using a JSON Query DSL object (the default) or read-only query text with `language: gql`.
 
 The request body contains:
 
-- `query`: The GitLab Orbit query object.
-- `format`: Optional response format. Use `raw` for structured JSON, or `llm`
-  for compact text optimized for AI agents. Default: `llm`.
+- `query`: A JSON Query DSL object, or a text string when `language` is `gql`.
+- `language`: Optional `json` (default) or `gql`. Unknown values and query shapes that do not match the language are rejected.
+- `response_format`: Optional response format. Use `raw` for structured JSON, or `llm`
+  for compact text optimized for AI agents. Default: `raw`.
 
 For example:
 
@@ -70,11 +71,24 @@ For example:
 curl --request POST \
   --header "Authorization: Bearer <your_token>" \
   --header "Content-Type: application/json" \
-  --data '{"query": <query_json>, "format": "raw"}' \
+  --data '{"query": <query_json>, "response_format": "raw"}' \
   "https://gitlab.com/api/v4/orbit/query"
 ```
 
 See the [query language reference](../queries/query-language.md) for the full DSL.
+
+To send read-only query text:
+
+```shell
+curl --request POST \
+  --header "Authorization: Bearer <your_token>" \
+  --header "Content-Type: application/json" \
+  --data '{"language":"gql","query":"MATCH (u:User {id: 1}) RETURN u.username LIMIT 1","response_format":"llm"}' \
+  "https://gitlab.com/api/v4/orbit/query"
+```
+
+The text subset supports `MATCH`, optional `WHERE`, `RETURN`, `ORDER BY`, and `LIMIT`.
+It does not support writes, `WITH`, `OPTIONAL MATCH`, `UNION`, or `OR`.
 
 ### Example request
 
@@ -103,7 +117,7 @@ Put the request body in `request.json`:
     "aggregation_sort": "-failed_pipelines",
     "limit": 10
   },
-  "format": "raw"
+  "response_format": "raw"
 }
 ```
 

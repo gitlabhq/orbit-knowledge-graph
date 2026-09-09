@@ -131,6 +131,7 @@ type QueryType int32
 const (
 	QueryType_QUERY_TYPE_JSON  QueryType = 0
 	QueryType_QUERY_TYPE_NAMED QueryType = 1 // `query` is a named-query envelope: {"name": ..., "parameters": {...}}
+	QueryType_QUERY_TYPE_GQL   QueryType = 2
 )
 
 // Enum value maps for QueryType.
@@ -138,10 +139,12 @@ var (
 	QueryType_name = map[int32]string{
 		0: "QUERY_TYPE_JSON",
 		1: "QUERY_TYPE_NAMED",
+		2: "QUERY_TYPE_GQL",
 	}
 	QueryType_value = map[string]int32{
 		"QUERY_TYPE_JSON":  0,
 		"QUERY_TYPE_NAMED": 1,
+		"QUERY_TYPE_GQL":   2,
 	}
 )
 
@@ -451,7 +454,7 @@ func (*ExecuteQueryMessage_Error) isExecuteQueryMessage_Content() {}
 // Client-sent initial message to start a query.
 type ExecuteQueryRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Query         string                 `protobuf:"bytes,1,opt,name=query,proto3" json:"query,omitempty"`                                                   // JSON DSL query string
+	Query         string                 `protobuf:"bytes,1,opt,name=query,proto3" json:"query,omitempty"`
 	Format        ResponseFormat         `protobuf:"varint,2,opt,name=format,proto3,enum=orbit.v1.ResponseFormat" json:"format,omitempty"`                   // RAW: tabular JSON rows; LLM: GOON text
 	QueryType     QueryType              `protobuf:"varint,3,opt,name=query_type,json=queryType,proto3,enum=orbit.v1.QueryType" json:"query_type,omitempty"` // defaults to JSON DSL
 	unknownFields protoimpl.UnknownFields
@@ -3526,10 +3529,11 @@ const file_orbit_proto_rawDesc = "" +
 	"\n" +
 	"FormatName\x12\x13\n" +
 	"\x0fFORMAT_NAME_RAW\x10\x00\x12\x14\n" +
-	"\x10FORMAT_NAME_GOON\x10\x01*6\n" +
+	"\x10FORMAT_NAME_GOON\x10\x01*J\n" +
 	"\tQueryType\x12\x13\n" +
 	"\x0fQUERY_TYPE_JSON\x10\x00\x12\x14\n" +
-	"\x10QUERY_TYPE_NAMED\x10\x01*\xa4\x01\n" +
+	"\x10QUERY_TYPE_NAMED\x10\x01\x12\x12\n" +
+	"\x0eQUERY_TYPE_GQL\x10\x02*\xa4\x01\n" +
 	"\rClusterStatus\x12\x1e\n" +
 	"\x1aCLUSTER_STATUS_UNSPECIFIED\x10\x00\x12\x1a\n" +
 	"\x16CLUSTER_STATUS_HEALTHY\x10\x01\x12\x1b\n" +

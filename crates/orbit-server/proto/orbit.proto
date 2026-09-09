@@ -101,11 +101,12 @@ message ExecuteQueryMessage {
 enum QueryType {
   QUERY_TYPE_JSON = 0;
   QUERY_TYPE_NAMED = 1;  // `query` is a named-query envelope: {"name": ..., "parameters": {...}}
+  QUERY_TYPE_GQL = 2;
 }
 
 // Client-sent initial message to start a query.
 message ExecuteQueryRequest {
-  string query = 1;            // JSON DSL query string
+  string query = 1;
   ResponseFormat format = 2;   // RAW: tabular JSON rows; LLM: GOON text
   QueryType query_type = 3;    // defaults to JSON DSL
 }

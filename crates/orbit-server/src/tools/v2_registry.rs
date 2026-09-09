@@ -66,15 +66,7 @@ impl V2CommandRegistry {
         ToolDefinition {
             name: "query_graph".into(),
             description: prompt("tools/query_graph_v2").description().into(),
-            parameters: json!({
-                "type": "object",
-                "required": ["query"],
-                "properties": {
-                    "query": params::query(),
-                    "format": params::format()
-                },
-                "additionalProperties": false
-            }),
+            parameters: params::query_parameters(),
         }
     }
 

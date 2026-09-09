@@ -48,6 +48,7 @@ impl ProfilerPipelineService {
         }
 
         let mut ctx = QueryPipelineContext {
+            frontend: compiler::Frontend::JsonDsl,
             query_json: query_json.to_string(),
             compiled: None,
             ontology: Arc::clone(&self.ontology),

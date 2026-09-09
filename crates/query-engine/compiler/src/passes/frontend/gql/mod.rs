@@ -3,6 +3,7 @@ mod value;
 
 use crate::{Input, QueryError, Result};
 use pest::Parser;
+use pest::error::LineColLocation;
 use pest::iterators::Pair;
 use pest_derive::Parser;
 
@@ -22,8 +23,12 @@ pub fn parse(query: &str) -> Result<Input> {
     check_nesting(query)?;
     let statement = QueryParser::parse(Rule::Query, query)
         .map_err(|error| {
+            let (line, column) = match error.line_col {
+                LineColLocation::Pos(position) | LineColLocation::Span(position, _) => position,
+            };
             QueryError::Validation(format!(
-                "Orbit query syntax: {error}\nExpected one MATCH ... [WHERE] RETURN [ORDER BY] [LIMIT] statement; only AND predicates, named nodes, and bounded paths are supported."
+                "Orbit query syntax at line {line}, column {column}: {}\nExpected one MATCH ... [WHERE] RETURN [ORDER BY] [LIMIT] statement; only AND predicates, named nodes, and bounded paths are supported.",
+                error.variant.message()
             ))
         })?
         .next()

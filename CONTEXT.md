@@ -121,8 +121,8 @@ The JSON-based query language for the property graph. Supports four query types:
 _Avoid_: intermediate query language, intermediary LLM query language, JSON query language
 
 **Orbit Query Frontend**:
-A compiler-level interface for Orbit's read-only graph language. The `gql` frontend module lowers Pest pairs directly into compiler Input. It does not replace the deployed JSON **Query DSL**.
-_Avoid_: Describing Orbit Query as the deployed query language
+A compiler-level interface for Orbit's read-only graph language. The `gql` frontend module lowers Pest pairs directly into compiler Input. Remote requests can select it with `language: gql`; the JSON **Query DSL** remains the default.
+_Avoid_: Describing Orbit Query as the default query language
 
 **Named Query**:
 A graph query defined in YAML under `config/named_queries/` and invoked by name, instead of the client authoring the **Query DSL** string. Compiled against the ontology at `orbit-server` build time so drift fails the build.

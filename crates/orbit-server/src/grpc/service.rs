@@ -6,6 +6,7 @@ use clickhouse_client::ClickHouseConfigurationExt;
 use ontology::Ontology;
 use orbit_server_config::{AnalyticsConfig, ClickHouseConfiguration};
 use orbit_utils::traversal_path::TraversalPath;
+use query_engine::compiler::Frontend;
 use query_engine::pipeline::PipelineError;
 use query_engine::shared::content::ColumnResolverRegistry;
 use tokio::sync::mpsc;
@@ -19,7 +20,8 @@ use crate::auth::{Claims, JwtValidator, build_security_context};
 use crate::cluster_health::ClusterHealthChecker;
 use crate::graph_status::GraphStatusService;
 use crate::pipeline::{
-    QueryPipelineService, receive_query_request, send_invalid_request_error, send_query_error,
+    QueryPipelineService, RawQuery, receive_query_request, send_invalid_request_error,
+    send_query_error,
 };
 use crate::proto::{
     ExecuteQueryMessage, ExecuteQueryResult, FormatName as ProtoFormatName,
@@ -38,6 +40,26 @@ use crate::serving_schema::ServingSchema;
 use crate::tools::{AgentCommand, ExecutorError, ToolService, V2CommandRegistry, V2ToolRegistry};
 use orbit_billing::{BillingTracker, QuotaCheckInputs, QuotaService};
 use query_engine::formatters::{FormatName, GoonFormatter, GraphFormatter, ResultFormatter};
+
+fn resolve_raw_query(
+    query_type: i32,
+    query: String,
+    named_queries: &named_queries::NamedQueries,
+    values: &named_queries::BindingValues,
+) -> Result<RawQuery, String> {
+    let (text, frontend) = match QueryType::try_from(query_type) {
+        Ok(QueryType::Json) => (query, Frontend::JsonDsl),
+        Ok(QueryType::Gql) => (query, Frontend::Gql),
+        Ok(QueryType::Named) => (
+            named_queries
+                .render_request(&query, values)
+                .map_err(|e| e.to_string())?,
+            Frontend::JsonDsl,
+        ),
+        Err(_) => return Err(format!("Unknown query_type: {query_type}")),
+    };
+    Ok(RawQuery { text, frontend })
+}
 
 fn proto_format_name(name: FormatName) -> ProtoFormatName {
     match name {
@@ -311,20 +333,15 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
                     None => return,
                 };
 
-                let resolved = match QueryType::try_from(req.query_type) {
-                    Ok(QueryType::Json) => Ok(req.query),
-                    Ok(QueryType::Named) => {
-                        let values = named_queries::BindingValues {
-                            current_user_id: ctx.claims.user_id,
-                        };
-                        schema
-                            .named_queries
-                            .render_request(&req.query, &values)
-                            .map_err(|e| e.to_string())
-                    }
-                    Err(_) => Err(format!("Unknown query_type: {}", req.query_type)),
-                };
-                let query_json = match resolved {
+                let resolved = resolve_raw_query(
+                    req.query_type,
+                    req.query,
+                    &schema.named_queries,
+                    &named_queries::BindingValues {
+                        current_user_id: ctx.claims.user_id,
+                    },
+                );
+                let query = match resolved {
                     Ok(query) => query,
                     Err(message) => {
                         send_invalid_request_error(&tx, message).await;
@@ -332,13 +349,13 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
                     }
                 };
 
-                info!(query_len = query_json.len(), "Executing query");
+                info!(query_len = query.text.len(), "Executing query");
 
                 let use_llm_format = req.format == ResponseFormat::Llm as i32;
 
                 let timeout = std::time::Duration::from_secs(stream_timeout);
                 let result = pipeline
-                    .run_query(&schema, ctx, &query_json, tx.clone(), stream, timeout)
+                    .run_query(&schema, ctx, query, tx.clone(), stream, timeout)
                     .await;
 
                 match result {
@@ -771,6 +788,27 @@ mod tests {
     use crate::proto::orbit_service_server::OrbitService;
     use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
     use tonic::metadata::MetadataValue;
+
+    #[test]
+    fn query_source_keeps_wire_values_and_text() {
+        let named = named_queries::NamedQueries::load_embedded().unwrap();
+        let values = named_queries::BindingValues {
+            current_user_id: 42,
+        };
+        let gql = "  // {comment}\nMATCH (u:User {username: 'a\\\\b\\\"λ{}'})\nRETURN u LIMIT 1\n";
+        for (wire, frontend) in [(0, Frontend::JsonDsl), (2, Frontend::Gql)] {
+            let query = resolve_raw_query(wire, gql.into(), &named, &values).unwrap();
+            assert_eq!(query.text.as_bytes(), gql.as_bytes());
+            assert_eq!(query.frontend, frontend);
+        }
+        for wire in [-1, 3, i32::MAX] {
+            assert!(resolve_raw_query(wire, gql.into(), &named, &values).is_err());
+        }
+        let request = r#"{"name":"my_neighbors"}"#;
+        let query = resolve_raw_query(1, request.into(), &named, &values).unwrap();
+        assert_eq!(query.frontend, Frontend::JsonDsl);
+        assert_eq!(query.text, named.render_request(request, &values).unwrap());
+    }
 
     fn mock_validator() -> JwtValidator {
         JwtValidator::new("test-secret-that-is-at-least-32-bytes-long", 0).unwrap()

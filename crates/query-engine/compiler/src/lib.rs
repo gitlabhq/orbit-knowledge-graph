@@ -133,12 +133,23 @@ pub fn compile(
 /// Lets the querying pipeline's path-resolution stage read normalized scope
 /// keys before the full pipeline runs, then resolve and attach the tight
 /// traversal_path prefix as [`SecurityContext`] scope metadata.
-pub fn validate_normalize(json_input: &str, ontology: &Ontology) -> Result<Input> {
-    let mut ctx = config::ValidateNormalizeCtx::new(Arc::new(ontology.clone()));
-    ctx.set_raw(json_input.to_string());
-    config::run_validate_normalize(&mut ctx)
-        .and_then(|()| {
-            ctx.take_input().ok_or_else(|| {
+pub fn validate_normalize(raw: &str, fe: Frontend, ontology: &Ontology) -> Result<Input> {
+    let ontology = Arc::new(ontology.clone());
+    let input = match fe {
+        Frontend::JsonDsl => {
+            let mut ctx = config::ValidateNormalizeJsonDslCtx::new(ontology);
+            ctx.set_raw(raw.to_string());
+            config::run_validate_normalize_json_dsl(&mut ctx).map(|()| ctx.take_input())
+        }
+        Frontend::Gql => {
+            let mut ctx = config::ValidateNormalizeGqlCtx::new(ontology);
+            ctx.set_raw(raw.to_string());
+            config::run_validate_normalize_gql(&mut ctx).map(|()| ctx.take_input())
+        }
+    };
+    input
+        .and_then(|input| {
+            input.ok_or_else(|| {
                 error::QueryError::PipelineInvariant("validate_normalize produced no input".into())
             })
         })
@@ -202,6 +213,41 @@ mod tests {
             .expect("should compile")
             .base
             .render()
+    }
+
+    #[test]
+    fn frontend_normalization_extracts_scope_and_full_compilation_retains_it() {
+        let mut compiled = Vec::new();
+        for (frontend, raw) in [
+            (
+                Frontend::Gql,
+                "MATCH (p:Project {id: 42})-[:CONTAINS]->(b:Branch) RETURN p.name, b.name LIMIT 5",
+            ),
+            (
+                Frontend::JsonDsl,
+                r#"{"query_type":"traversal","nodes":[{"id":"p","entity":"Project","node_ids":[42],"columns":["name"]},{"id":"b","entity":"Branch","columns":["name"]}],"relationships":[{"type":"CONTAINS","from":"p","to":"b"}],"limit":5}"#,
+            ),
+        ] {
+            let input = validate_normalize(raw, frontend, &ONTOLOGY).unwrap();
+            assert_eq!(
+                scope_keys(&input.nodes[0], &ONTOLOGY.anchor_fk_mappings()),
+                vec![PathResolutionKey::id("Project", 42)]
+            );
+            let seed = std::collections::HashMap::from([(
+                "p".into(),
+                TraversalPath::new_unchecked("1/100/42/"),
+            )]);
+            let prefixes = ONTOLOGY.propagate_scope_prefixes(&scope_edges(&input), &seed);
+            assert_eq!(prefixes["b"].as_str(), "1/100/42/");
+            let security = security_ctx().with_scope_prefixes(prefixes);
+            let actual = compile(raw, frontend, &ONTOLOGY, &security).unwrap();
+            assert!(actual.base.render().contains("1/100/42/"));
+            assert!(!matches!(actual.hydration, HydrationPlan::None));
+            compiled.push(actual);
+        }
+        assert_eq!(compiled[0].base.sql, compiled[1].base.sql);
+        assert_eq!(compiled[0].base.params, compiled[1].base.params);
+        assert_eq!(compiled[0].hydration, compiled[1].hydration);
     }
 
     #[test]

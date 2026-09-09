@@ -231,7 +231,7 @@ async fn run_frontend(
         return;
     }
 
-    let resp = execute_pipeline(ctx, &compiled, &ontology, security, redaction).await;
+    let resp = execute_pipeline(ctx, frontend, &compiled, &ontology, security, redaction).await;
 
     let response: query_engine::formatters::GraphResponse =
         serde_json::from_value(resp).expect("response should deserialize");
@@ -270,7 +270,7 @@ async fn run_pages(
                 .unwrap_or_else(|e| panic!("{page_label}: compile failed: {e}")),
         );
 
-        let resp = execute_pipeline(ctx, &compiled, ontology, security, redaction).await;
+        let resp = execute_pipeline(ctx, frontend, &compiled, ontology, security, redaction).await;
         let response: query_engine::formatters::GraphResponse =
             serde_json::from_value(resp).expect("response should deserialize");
 
@@ -373,6 +373,7 @@ async fn run_pages(
 
 async fn execute_pipeline(
     ctx: &TestContext,
+    frontend: Frontend,
     compiled: &Arc<CompiledQueryContext>,
     ontology: &Arc<ontology::Ontology>,
     security: &SecurityContext,
@@ -395,6 +396,7 @@ async fn execute_pipeline(
     server_extensions.insert(resolver_registry);
 
     let mut pipeline_ctx = QueryPipelineContext {
+        frontend,
         query_json: String::new(),
         compiled: Some(Arc::clone(compiled)),
         ontology: Arc::clone(ontology),
@@ -877,14 +879,22 @@ mod tests {
     }
 
     #[test]
-    fn gql_frontend_rejects_writes() {
-        let error = compile(
-            "CREATE (u:User)",
-            Frontend::Gql,
-            &load_ontology(),
-            &SecurityContext::new(1, vec!["1/".into()]).unwrap(),
-        )
-        .unwrap_err();
-        assert!(error.to_string().contains("Orbit query syntax"), "{error}");
+    fn gql_syntax_errors_report_position_without_echoing_source() {
+        let ontology = load_ontology();
+        let security = SecurityContext::new(1, vec!["1/".into()]).unwrap();
+        for (raw, position) in [
+            ("CREATE (u:User)", "line 1, column 1"),
+            (
+                "\nMATCH (u:User {username: 'private-query-literal'}) RETURN u LMIT 1",
+                "line 2, column",
+            ),
+        ] {
+            let error = compile(raw, Frontend::Gql, &ontology, &security).unwrap_err();
+            let message = error.to_string();
+            assert!(error.is_client_safe(), "{message}");
+            assert!(message.contains("Orbit query syntax"), "{message}");
+            assert!(message.contains(position), "{message}");
+            assert!(!message.contains("private-query-literal"), "{message}");
+        }
     }
 }
