@@ -1,12 +1,11 @@
-//! Analytics configuration. `enabled` is false by default — operators must
-//! opt in (Helm values). Self-managed never phones home unless explicitly
-//! switched on.
+//! Analytics configuration. `enabled` is false in `config/default.yaml`;
+//! operators must opt in (Helm values). Self-managed never phones home unless
+//! explicitly switched on.
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema)]
-#[serde(default)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct AnalyticsConfig {
     pub enabled: bool,
@@ -14,8 +13,7 @@ pub struct AnalyticsConfig {
     pub deployment: DeploymentConfig,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema)]
-#[serde(default)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct DeploymentConfig {
     #[serde(rename = "type")]
@@ -24,16 +22,7 @@ pub struct DeploymentConfig {
 }
 
 #[derive(
-    Clone,
-    Copy,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    JsonSchema,
-    strum::IntoStaticStr,
+    Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, strum::IntoStaticStr,
 )]
 #[serde(rename_all = "snake_case")]
 pub enum DeploymentKind {
@@ -41,27 +30,16 @@ pub enum DeploymentKind {
     Com,
     #[strum(serialize = "dedicated")]
     Dedicated,
-    #[default]
     #[strum(serialize = "self-managed")]
     SelfManaged,
 }
 
 #[derive(
-    Clone,
-    Copy,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    JsonSchema,
-    strum::IntoStaticStr,
+    Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, strum::IntoStaticStr,
 )]
 #[serde(rename_all = "snake_case")]
 #[strum(serialize_all = "snake_case")]
 pub enum DeploymentEnvironment {
-    #[default]
     Development,
     Staging,
     Production,
@@ -73,7 +51,7 @@ mod tests {
 
     #[test]
     fn defaults_are_disabled_and_empty_url() {
-        let cfg = AnalyticsConfig::default();
+        let cfg = crate::AppConfig::embedded_defaults().analytics;
         assert!(!cfg.enabled);
         assert_eq!(cfg.collector_url, "");
         assert_eq!(cfg.deployment.kind, DeploymentKind::SelfManaged);

@@ -167,7 +167,6 @@ mod tests {
     };
     use crate::orchestrator::siphon::Siphon;
     use crate::testkit::{MockNatsServices, TestEnvelopeFactory};
-    use orbit_server_config::SiphonRouterConfig;
     use siphon_proto::replication_event::Operation;
 
     fn test_metrics() -> ScheduledTaskMetrics {
@@ -182,7 +181,10 @@ mod tests {
         Siphon::new(
             nats,
             test_metrics(),
-            SiphonRouterConfig::default(),
+            orbit_server_config::AppConfig::embedded_defaults()
+                .schedule
+                .tasks
+                .siphon,
             Arc::new(CampaignState::new()),
             vec![route],
         )

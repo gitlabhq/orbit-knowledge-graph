@@ -23,20 +23,13 @@ fn escape_setting_str(s: &str) -> String {
 /// reaching the SETTINGS clause (CWE-89).
 ///
 /// `None` means "not specified at this layer" -- the merge logic in
-/// [`QuerySettings::resolve`] fills in from the default.
-/// Default max_execution_time: 30 seconds.
-const DEFAULT_MAX_EXECUTION_TIME: u64 = 30;
-/// Default query_cache_ttl: 60 seconds.
-const DEFAULT_QUERY_CACHE_TTL: u32 = 60;
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+/// [`QuerySettings::resolve`] fills in from the default. The derived
+/// `Default` is therefore all-`None`: nothing specified, nothing emitted.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct QueryConfig {
     /// ClickHouse `max_execution_time` in seconds.
-    #[serde(
-        default = "default_max_execution_time",
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_execution_time: Option<u64>,
 
     /// ClickHouse `max_memory_usage` in bytes. Limits the amount of RAM
@@ -62,27 +55,16 @@ pub struct QueryConfig {
     pub max_rows_in_set: Option<u64>,
 
     /// ClickHouse `max_ast_elements`. Limits AST node count after parsing.
-    /// Default: 1,000,000 (20x ClickHouse default, matches Siphon).
-    #[serde(
-        default = "default_max_ast_elements",
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_ast_elements: Option<u64>,
 
     /// ClickHouse `max_expanded_ast_elements`. Limits AST node count after
-    /// alias/macro expansion. Default: 10,000,000 (20x ClickHouse default).
-    #[serde(
-        default = "default_max_expanded_ast_elements",
-        skip_serializing_if = "Option::is_none"
-    )]
+    /// alias/macro expansion.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_expanded_ast_elements: Option<u64>,
 
     /// ClickHouse `max_ast_depth`. Limits AST nesting depth.
-    /// Default: 10,000 (10x ClickHouse default of 1,000).
-    #[serde(
-        default = "default_max_ast_depth",
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_ast_depth: Option<u64>,
 
     /// ClickHouse `use_query_cache`. Enabled for cursor pagination.
@@ -90,10 +72,7 @@ pub struct QueryConfig {
     pub use_query_cache: Option<bool>,
 
     /// ClickHouse `query_cache_ttl` in seconds.
-    #[serde(
-        default = "default_query_cache_ttl",
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub query_cache_ttl: Option<u32>,
 
     /// Compiler-derived ClickHouse settings. Set by the compiler's settings
@@ -156,66 +135,7 @@ impl CompilerDerivedSettings {
     }
 }
 
-const DEFAULT_MAX_AST_ELEMENTS: u64 = 1_000_000;
-const DEFAULT_MAX_EXPANDED_AST_ELEMENTS: u64 = 10_000_000;
-const DEFAULT_MAX_AST_DEPTH: u64 = 10_000;
-
-fn default_max_execution_time() -> Option<u64> {
-    Some(DEFAULT_MAX_EXECUTION_TIME)
-}
-fn default_query_cache_ttl() -> Option<u32> {
-    Some(DEFAULT_QUERY_CACHE_TTL)
-}
-fn default_max_ast_elements() -> Option<u64> {
-    Some(DEFAULT_MAX_AST_ELEMENTS)
-}
-fn default_max_expanded_ast_elements() -> Option<u64> {
-    Some(DEFAULT_MAX_EXPANDED_AST_ELEMENTS)
-}
-fn default_max_ast_depth() -> Option<u64> {
-    Some(DEFAULT_MAX_AST_DEPTH)
-}
-
-impl Default for QueryConfig {
-    fn default() -> Self {
-        Self {
-            max_execution_time: Some(DEFAULT_MAX_EXECUTION_TIME),
-            max_memory_usage: None,
-            max_bytes_to_read: None,
-            max_rows_to_read: None,
-            max_rows_in_set: None,
-            max_ast_elements: Some(DEFAULT_MAX_AST_ELEMENTS),
-            max_expanded_ast_elements: Some(DEFAULT_MAX_EXPANDED_AST_ELEMENTS),
-            max_ast_depth: Some(DEFAULT_MAX_AST_DEPTH),
-            use_query_cache: None,
-            query_cache_ttl: Some(DEFAULT_QUERY_CACHE_TTL),
-            compiler_derived: CompilerDerivedSettings::default(),
-            graph_query_cache_enabled: None,
-            graph_query_cache_ttl: None,
-        }
-    }
-}
-
 impl QueryConfig {
-    /// All-`None` config for tests that don't want any SETTINGS emitted.
-    pub fn empty() -> Self {
-        Self {
-            max_execution_time: None,
-            max_memory_usage: None,
-            max_bytes_to_read: None,
-            max_rows_to_read: None,
-            max_rows_in_set: None,
-            max_ast_elements: None,
-            max_expanded_ast_elements: None,
-            max_ast_depth: None,
-            use_query_cache: None,
-            query_cache_ttl: None,
-            compiler_derived: CompilerDerivedSettings::default(),
-            graph_query_cache_enabled: None,
-            graph_query_cache_ttl: None,
-        }
-    }
-
     /// Merge `overrides` on top of `self`. Fields set in `overrides`
     /// win; `None` fields fall through to `self`.
     pub fn merge(&self, overrides: &QueryConfig) -> QueryConfig {
@@ -290,9 +210,8 @@ impl QueryConfig {
 ///   aggregation:
 ///     max_execution_time: 60
 /// ```
-#[derive(Clone, Debug, Serialize, Deserialize, Default, JsonSchema)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct QuerySettings {
-    #[serde(default)]
     pub default: QueryConfig,
 
     /// Per-query-type overrides. Keys must match `QueryType` variant names
@@ -325,29 +244,11 @@ impl QuerySettings {
     }
 }
 
-fn default_path_cache_ttl_secs() -> u64 {
-    60
-}
-fn default_path_cache_capacity() -> u64 {
-    10_000
-}
-
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct PathResolverConfig {
-    #[serde(default = "default_path_cache_ttl_secs")]
     pub cache_ttl_secs: u64,
-    #[serde(default = "default_path_cache_capacity")]
     pub cache_capacity: u64,
-}
-
-impl Default for PathResolverConfig {
-    fn default() -> Self {
-        Self {
-            cache_ttl_secs: default_path_cache_ttl_secs(),
-            cache_capacity: default_path_cache_capacity(),
-        }
-    }
 }
 
 static QUERY_SETTINGS: OnceLock<QuerySettings> = OnceLock::new();
@@ -361,13 +262,23 @@ pub fn init(settings: QuerySettings) {
 }
 
 /// Resolve the effective [`QueryConfig`] for a given query type from
-/// the global settings. Falls back to a zero-config default if [`init`]
-/// was never called (e.g. in unit tests that don't need config).
+/// the global settings. Before [`init`] has run (unit tests that never load
+/// config) every field is `None`, so no SETTINGS are emitted.
 pub fn for_query_type(query_type: &str) -> QueryConfig {
     match QUERY_SETTINGS.get() {
         Some(settings) => settings.resolve(query_type),
         None => QueryConfig::default(),
     }
+}
+
+/// The `query.default` section, for callers outside the compiler pipeline
+/// that issue their own ClickHouse queries. Same pre-[`init`] behavior as
+/// [`for_query_type`].
+pub fn default_config() -> QueryConfig {
+    QUERY_SETTINGS
+        .get()
+        .map(|settings| settings.default.clone())
+        .unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -401,16 +312,34 @@ mod tests {
         };
         let mut settings = cfg.to_clickhouse_settings()?;
         settings.sort_by(|a, b| a.0.cmp(&b.0));
-        assert_eq!(settings.len(), 6);
-        assert_eq!(settings[0], ("max_ast_depth".into(), "10000".into()));
-        assert_eq!(settings[1], ("max_ast_elements".into(), "1000000".into()));
-        assert_eq!(settings[2], ("max_execution_time".into(), "30".into()));
         assert_eq!(
-            settings[3],
-            ("max_expanded_ast_elements".into(), "10000000".into())
+            settings,
+            vec![
+                ("max_execution_time".into(), "30".into()),
+                ("use_query_cache".into(), "1".into()),
+            ]
         );
-        assert_eq!(settings[4], ("query_cache_ttl".into(), "60".into()));
-        assert_eq!(settings[5], ("use_query_cache".into(), "1".into()));
+        Ok(())
+    }
+
+    #[test]
+    fn embedded_defaults_emit_every_declared_setting() -> Result<(), String> {
+        let cfg = crate::AppConfig::embedded_defaults()
+            .query
+            .resolve("traversal");
+        let mut settings = cfg.to_clickhouse_settings()?;
+        settings.sort_by(|a, b| a.0.cmp(&b.0));
+        assert_eq!(
+            settings,
+            vec![
+                ("max_ast_depth".into(), "10000".into()),
+                ("max_ast_elements".into(), "1000000".into()),
+                ("max_execution_time".into(), "30".into()),
+                ("max_expanded_ast_elements".into(), "10000000".into()),
+                ("query_cache_ttl".into(), "60".into()),
+                ("use_query_cache".into(), "0".into()),
+            ]
+        );
         Ok(())
     }
 
@@ -498,17 +427,12 @@ aggregation:
     }
 
     #[test]
-    fn path_resolver_config_defaults_and_yaml() {
-        assert_eq!(PathResolverConfig::default().cache_ttl_secs, 60);
-        assert_eq!(PathResolverConfig::default().cache_capacity, 10_000);
+    fn path_resolver_config_from_yaml() {
         let cfg: PathResolverConfig =
             orbit_utils::yaml::from_str("cache_ttl_secs: 120\ncache_capacity: 500").unwrap();
         assert_eq!(cfg.cache_ttl_secs, 120);
         assert_eq!(cfg.cache_capacity, 500);
-        assert_eq!(
-            orbit_utils::yaml::from_str::<PathResolverConfig>("{}").unwrap(),
-            PathResolverConfig::default()
-        );
+        assert!(orbit_utils::yaml::from_str::<PathResolverConfig>("{}").is_err());
     }
 
     #[test]

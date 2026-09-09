@@ -6,11 +6,21 @@ Reference for all configurable knobs in the GKG server. All four modes (Webserve
 
 Config is loaded in layers, each overriding the previous:
 
-1. **Base configuration file**: `config/default.yaml`
-2. **Overlay file**: the path given with `--config <path>`, otherwise `config/config.yaml` when it exists.
+1. **Embedded defaults**: `config/default.yaml`, compiled into the binary. It declares every
+   section and scalar the server reads; the Rust config structs carry no fallback values, so a
+   key removed from this file fails startup with a "missing field" error. Optional keys are
+   `Option` fields (passwords, TLS paths, values derived from container resources) and are
+   commented out in the file.
+2. **On-disk `config/default.yaml`**, relative to the working directory, when present. This is
+   the key the Helm chart's ConfigMap currently uses; treat it as a partial overlay.
+3. **Overlay file**: the path given with `--config <path>`, otherwise `config/config.yaml` when it exists.
    An explicit `--config` path must exist; the default overlay is optional and Git ignores it.
-3. **Secrets**: Files in `/etc/secrets/` (Kubernetes secret mounts)
-4. **Environment variables**: Prefixed with `GKG_`, using `__` as a separator for nested keys and `,` for lists
+4. **Secrets**: Files in `/etc/secrets/` (Kubernetes secret mounts)
+5. **Environment variables**: Prefixed with `GKG_`, using `__` as a separator for nested keys and `,` for lists
+
+Adding a setting means adding a field to the struct in `crates/orbit-server-config/` and its
+value to `config/default.yaml`; nothing else. Tests that need a config start from
+`AppConfig::embedded_defaults()` and override the fields they care about.
 
 Overlay example for local development (`config/config.yaml`):
 
@@ -265,7 +275,7 @@ Initial-load partition parallelism is no longer configured here; a pipeline decl
 
 ## Scheduler configuration
 
-Scheduled tasks run in `DispatchIndexing` mode. Each task has a 6-field cron expression (seconds, minutes, hours, day-of-month, month, day-of-week). Every task's default cron is declared in Rust (`ScheduledTasksConfiguration` in `crates/orbit-server-config/src/engine.rs`); a `schedule.tasks.<name>` entry in YAML overrides only the cadence you set. A task with no declared cron and no config falls back to a 60-second interval.
+Scheduled tasks run in `DispatchIndexing` mode. Each task has a 6-field cron expression (seconds, minutes, hours, day-of-month, month, day-of-week). Every task's default cron is declared in `config/default.yaml` under `schedule.tasks`; a `schedule.tasks.<name>` entry in an overlay replaces only the fields you set. The cron expression is required and is parsed when the configuration loads, so a missing or invalid expression fails startup.
 
 Distributed locking via NATS KV ensures only one dispatcher instance runs each task per interval.
 
@@ -512,7 +522,7 @@ GKG_NATS__AUTO_CREATE_STREAMS=true        # Auto-create on startup
 
 ## Helm chart configuration
 
-In production, GKG is deployed via the [`orbit-helm-charts`](https://gitlab.com/gitlab-org/orbit/orbit-helm-charts). Most configuration is set through Helm values rather than raw YAML or environment variables.
+In production, GKG is deployed via the [`orbit-helm-charts`](https://gitlab.com/gitlab-org/orbit/orbit-helm-charts). Most configuration is set through Helm values rather than raw YAML or environment variables. The chart renders the values it knows about into a ConfigMap mounted at `/app/config`; every key the chart does not render comes from the embedded `config/default.yaml`.
 
 ### Key Helm values mapping
 

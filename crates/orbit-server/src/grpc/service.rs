@@ -784,7 +784,7 @@ mod tests {
     }
 
     fn test_config() -> ClickHouseConfiguration {
-        ClickHouseConfiguration::default()
+        orbit_server_config::AppConfig::embedded_defaults().graph
     }
 
     fn test_service() -> OrbitServiceImpl {
@@ -794,7 +794,7 @@ mod tests {
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
             60,
-            Arc::new(AnalyticsConfig::default()),
+            Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
         )
     }
 
@@ -833,7 +833,7 @@ mod tests {
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
             60,
-            Arc::new(AnalyticsConfig::default()),
+            Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
         );
 
         let plan = service
@@ -984,7 +984,7 @@ mod tests {
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
             60,
-            Arc::new(AnalyticsConfig::default()),
+            Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
         );
 
         let response = service.build_structured_schema(&[]);
@@ -1014,7 +1014,7 @@ mod tests {
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
             60,
-            Arc::new(AnalyticsConfig::default()),
+            Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
         );
 
         let response = service.build_structured_schema(&["User".to_string()]);
@@ -1050,7 +1050,7 @@ mod tests {
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
             60,
-            Arc::new(AnalyticsConfig::default()),
+            Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
         );
 
         let (outgoing, incoming) = service.get_node_edge_names("User");
@@ -1074,7 +1074,7 @@ mod tests {
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
             60,
-            Arc::new(AnalyticsConfig::default()),
+            Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
         );
 
         let (outgoing, incoming) = service.get_node_edge_names("NonexistentNode");
@@ -1092,7 +1092,7 @@ mod tests {
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
             60,
-            Arc::new(AnalyticsConfig::default()),
+            Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
         );
 
         let response = service.build_structured_schema(&["User".to_string()]);
@@ -1121,7 +1121,7 @@ mod tests {
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
             60,
-            Arc::new(AnalyticsConfig::default()),
+            Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
         );
 
         let response = service.build_structured_schema(&[]);
@@ -1145,7 +1145,7 @@ mod tests {
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
             60,
-            Arc::new(AnalyticsConfig::default()),
+            Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
         );
 
         let response = service.build_structured_schema(&[]);
@@ -1173,7 +1173,7 @@ mod tests {
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
             60,
-            Arc::new(AnalyticsConfig::default()),
+            Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
         );
 
         let response =
@@ -1342,7 +1342,7 @@ mod tests {
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
             60,
-            Arc::new(AnalyticsConfig::default()),
+            Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
         );
 
         let response = service.build_structured_schema(&["*".to_string()]);

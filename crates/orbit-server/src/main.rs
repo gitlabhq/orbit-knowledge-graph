@@ -89,31 +89,14 @@ async fn main() -> anyhow::Result<()> {
             info!("initializing schema version table");
             schema::version::init(&graph).await?;
 
-            let dispatcher_config = DispatcherConfig {
-                nats: config.nats.clone(),
-                graph: config.graph.clone(),
-                datalake: config.datalake.clone(),
-                schedule: config.schedule.clone(),
-                schema: config.schema.clone(),
-                health_bind_address: config.dispatcher_health_bind_address,
-            };
+            let dispatcher_config = DispatcherConfig::from(&config);
             indexer::run_dispatcher(&dispatcher_config, &archive, shutdown)
                 .await
                 .map_err(Into::into)
         }
         Mode::HealthCheck => health_check_mode::run(&config).await.map_err(Into::into),
         Mode::Indexer => {
-            let indexer_config = IndexerConfig {
-                nats: config.nats.clone(),
-                graph: config.graph.clone(),
-                datalake: config.datalake.clone(),
-                engine: config.engine.clone(),
-                gitlab: config.gitlab_client_config(),
-                schedule: config.schedule.clone(),
-                health_bind_address: config.indexer_health_bind_address,
-                schema: config.schema.clone(),
-                analytics: config.analytics.clone(),
-            };
+            let indexer_config = IndexerConfig::from(&config);
             indexer::run(&indexer_config, ontology, shutdown)
                 .await
                 .map_err(Into::into)
