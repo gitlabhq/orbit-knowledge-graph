@@ -205,6 +205,20 @@ async fn run_frontend(
         },
     };
 
+    let sql = compiled.base.render();
+    for fragment in &expect.sql_contains {
+        assert!(
+            sql.contains(fragment.as_str()),
+            "{label}: SQL does not contain '{fragment}'\nSQL: {sql}"
+        );
+    }
+    for fragment in &expect.sql_not_contains {
+        assert!(
+            !sql.contains(fragment.as_str()),
+            "{label}: SQL should not contain '{fragment}'\nSQL: {sql}"
+        );
+    }
+
     let resp = execute_pipeline(ctx, &compiled, &ontology, security, redaction).await;
 
     let response: query_engine::formatters::GraphResponse =
@@ -401,6 +415,12 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
                 }
             }
         }
+        for ga in &ge.absent {
+            view.assert_group_node_absent(group_key, &ga.entity, ga.id);
+        }
+    }
+    if expect.empty_aggregation {
+        view.assert_empty_aggregation();
     }
     if expect.referential_integrity {
         view.assert_referential_integrity();

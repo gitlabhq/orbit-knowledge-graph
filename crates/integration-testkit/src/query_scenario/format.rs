@@ -80,6 +80,12 @@ pub struct QueryExpect {
     #[serde(default)]
     pub groups: BTreeMap<String, GroupExpect>,
     #[serde(default)]
+    pub empty_aggregation: bool,
+    #[serde(default)]
+    pub sql_contains: Vec<String>,
+    #[serde(default)]
+    pub sql_not_contains: Vec<String>,
+    #[serde(default)]
     pub referential_integrity: bool,
     #[serde(default)]
     pub has_more: Option<bool>,
@@ -111,6 +117,15 @@ pub struct NodeExpect {
 pub struct GroupExpect {
     #[serde(default)]
     pub rows: Vec<GroupRowExpect>,
+    #[serde(default)]
+    pub absent: Vec<GroupAbsentExpect>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GroupAbsentExpect {
+    pub entity: String,
+    pub id: i64,
 }
 
 #[derive(Debug, Deserialize)]
