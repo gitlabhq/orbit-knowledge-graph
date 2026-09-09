@@ -1,21 +1,21 @@
-# yaml-language-server: $schema=../schemas/setup_modes.schema.json
+# yaml-language-server: $schema=../schemas/setup.schema.json
 # Every string `orbit setup` writes into an assistant's files: the managed instruction block, the
 # two hook nudges, and the `template_vars` that fill `{{name}}` placeholders in the templates
 # assistants declare.
 instructions: |
   ## Orbit
 
-  Use Orbit to find code definitions and their relationships.
+  The Orbit knowledge graph is available for discovering entities or tracing relationships.
 
-  - Start each task with `{{orbit}} grep "<terms>"` without filters, unless the user explicitly opts out. Use 1-3 identifier keywords (e.g. `"activateExtension"`, `"shard allocation decider"`). Results list `fqn`, `kind`, and `loc`.
+  - Before starting any task related to this codebase, run `{{orbit}} grep "<terms>"` without filters. Use 1-3 identifier keywords (e.g. `"activateExtension"`, `"shard allocation decider"`). Results list `fqn`, `kind`, and `loc`.
   - For weak or unmatched terms, try the code's identifier (e.g. "throttle" → "rateLimit"). For too many hits, narrow with `--path <dir-or-glob>` (repeatable) or `--kind Class,Method` (one comma-separated list).
   - Trace relationships with `{{orbit}} grep "<fqn>" --callers`, `--callees`, or `--related-to`. With `--related-to`, use `--in`/`--out` for direction and `--edge calls|extends|imports` for edge kind. `--path`/`--kind` filter connected results; `--tests` expands test connections otherwise shown as counts.
   - Read bodies with `{{orbit}} context "<fqn>" ["<fqn>"...]` or `{{orbit}} context --file <path>` for all definitions in a file. Add `--outline` to either for signatures and members only. `grep ... --body` includes the top match's body.
   - Answers directly from the graph should name the mechanism and cite `file:line`. Skip question restatements and search narration.
 
 nudge_search: |
-  MANDATORY: find code definitions with `{{orbit}} grep "<terms>"`. Use 1-3 identifier keywords, without filters first.
+  For code discovery, run `{{orbit}} grep "<terms>"` with 1-3 identifier keywords, without filters first.
 nudge_read: |
-  MANDATORY: read known definitions with `{{orbit}} context "<fqn>" ["<fqn>"...]` or `{{orbit}} context --file <path>`. Find unknown symbols first with `{{orbit}} grep "<terms>"`.
+  For code investigation, read known definitions with `{{orbit}} context "<fqn>" ["<fqn>"...]` or `{{orbit}} context --file <path>`. Find unknown symbols with `{{orbit}} grep "<terms>"`.
 template_vars:
-  reminder: "[orbit] run {{orbit}} grep with identifier keywords to find code definitions"
+  reminder: "[orbit] when a graph lookup would help, run {{orbit}} grep"

@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "setup_modes.schema.json",
+  "$id": "setup.schema.json",
   "title": "Orbit setup texts",
   "description": "Every string `orbit setup` writes into an assistant's files: the managed instruction block, the two hook nudges, and the values filling {{name}} placeholders in assistant templates. Read by crates/orbit-local/src/commands/setup/spec.rs.",
   "type": "object",

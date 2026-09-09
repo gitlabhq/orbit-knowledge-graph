@@ -2,7 +2,7 @@
 //! one assistant as four generic operations (instruction file, marker-owned JSON merges,
 //! templated files, string registrations), so adding an assistant means adding a YAML file, not
 //! Rust. The instruction block, hook nudges, and template values live in
-//! `config/setup/modes.yaml`.
+//! `config/setup/setup.yaml`.
 
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
@@ -26,9 +26,9 @@ struct SetupTexts {
 }
 
 static TEXTS: LazyLock<SetupTexts> = LazyLock::new(|| {
-    let file = SetupAssets::get("modes.yaml").expect("config/setup/modes.yaml must be embedded");
+    let file = SetupAssets::get("setup.yaml").expect("config/setup/setup.yaml must be embedded");
     orbit_utils::yaml::from_slice(&file.data)
-        .unwrap_or_else(|e| panic!("config/setup/modes.yaml is invalid: {e}"))
+        .unwrap_or_else(|e| panic!("config/setup/setup.yaml is invalid: {e}"))
 });
 
 pub(crate) const DIRECT_LAUNCHER: &str = "orbit";
