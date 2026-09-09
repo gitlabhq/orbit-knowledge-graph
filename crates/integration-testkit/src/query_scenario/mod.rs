@@ -333,15 +333,14 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
     }
     for (kind, tuples) in &expect.edge_exists {
         for [from_id, to_id] in tuples {
-            let found = view
+            let edge = view
                 .response
                 .edges
                 .iter()
-                .any(|e| e.from_id == *from_id && e.to_id == *to_id && e.edge_type == *kind);
-            assert!(
-                found,
-                "{label}: expected edge {from_id} --{kind}--> {to_id}"
-            );
+                .find(|e| e.from_id == *from_id && e.to_id == *to_id && e.edge_type == *kind);
+            let edge = edge
+                .unwrap_or_else(|| panic!("{label}: expected edge {from_id} --{kind}--> {to_id}"));
+            view.assert_edge_exists(&edge.from, *from_id, &edge.to, *to_id, kind);
         }
     }
     for (kind, tuples) in &expect.edge_absent {
@@ -361,6 +360,11 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
         view.assert_edge_count(kind, *count);
     }
     for (group_key, ge) in &expect.groups {
+        let ids: Vec<i64> = ge.rows.iter().map(|gr| gr.id).collect();
+        if !ids.is_empty() {
+            let entity = &ge.rows[0].entity;
+            view.assert_group_node_ids(group_key, entity, &ids);
+        }
         for gr in &ge.rows {
             for (col, expected) in &gr.values {
                 match expected {
