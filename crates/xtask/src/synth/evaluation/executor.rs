@@ -5,7 +5,7 @@ use anyhow::Result;
 use clickhouse_client::ArrowClickHouseClient;
 use futures::stream::{self, StreamExt};
 use ontology::Ontology;
-use query_engine::compiler::{ParamValue, SecurityContext, compile};
+use query_engine::compiler::{Frontend, ParamValue, SecurityContext, compile};
 use rand::RngExt;
 use serde::{Deserialize, Serialize};
 use std::time::{Duration, Instant};
@@ -545,7 +545,7 @@ impl QueryExecutor {
             }
         };
 
-        let compiled = match compile(&json_str, &self.ontology, &security_ctx) {
+        let compiled = match compile(&json_str, Frontend::JsonDsl, &self.ontology, &security_ctx) {
             Ok(c) => c,
             Err(e) => {
                 let error_msg = format!("Query compilation failed: {}", e);

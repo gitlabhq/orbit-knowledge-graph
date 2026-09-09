@@ -12,6 +12,8 @@ query:
         "relationships": [{"type": "CALLS", "from": "caller", "to": "callee", "filters": {"project_id": 1000}}],
         "limit": 20
     }
+  gql: |
+    MATCH (caller:Definition)-[:CALLS {project_id: 1000}]->(callee:Definition) WHERE caller.id >= 12000 AND caller.id <= 12999 RETURN caller.name, callee.name LIMIT 20
 
 expect:
   node_count: 3

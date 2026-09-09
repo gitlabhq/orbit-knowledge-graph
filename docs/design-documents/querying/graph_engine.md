@@ -52,25 +52,26 @@ bloom filters lets projections be correctly selected.
 
 ## Query Engine Design
 
-There are two intended ways to interact with the graph engine:
+The compiler supports two query frontends:
 
-1. Intermediate JSON tools (MCP/HTTP): existing JSON schemas describe graph intents (`traversal`, `neighbors`, `path_finding`, `aggregation`). The server validates input and compiles to parameterized SQL.
-2. Cypher reader (optional): Cypher to SQL translation à la ClickGraph for teams that prefer property‑graph syntax or need Neo4j driver compatibility.
+1. The JSON Query DSL describes traversal, neighbors, path-finding, and aggregation queries. Remote requests through MCP, HTTP, and gRPC use this frontend.
+2. The [Orbit Query Frontend](orbit_query_frontend.md) accepts a restricted, read-only language based on openCypher 9 syntax. It is a compiler preset, not a remote endpoint or Neo4j-compatible driver.
 
 ### Compiler pass pipeline
 
-The query compiler transforms a JSON DSL input into parameterized ClickHouse SQL through an ordered pipeline of passes. The canonical pass order is defined in `crates/query-engine/compiler/src/config.rs` (the `clickhouse` pipeline):
+Both frontends compile to parameterized ClickHouse SQL through shared passes.
+`crates/query-engine/compiler/src/config.rs` defines the `clickhouse_json_dsl` and `clickhouse_gql` presets, which differ only in the first phase:
 
 | # | Pass | Responsibility |
 |---|---|---|
-| 1 | `validate` | Schema and cross-reference validation of the JSON input against the ontology |
-| 2 | `normalize` | Resolves entity names to table names, coerces filter types, and expands wildcard columns |
-| 3 | `restrict` | Strips `admin_only` fields and validates user-supplied `traversal_path` filters against the JWT-granted scope ([Security](../security.md)) |
-| 4 | `plan` | Translates validated input into a query plan (hop chain, join strategy, FK shape) |
-| 5 | `lower` | Emits the SQL AST from the query plan (edge-chain-first, nodes lazy) |
-| 6 | `enforce` | Injects ID and type columns required for redaction; builds the result context |
-| 7 | `security` | Injects `startsWith(traversal_path, ?)` predicates on all node-table scans, with per-entity role scoping ([Security](../security.md)) |
-| 8 | `partition` | Adds partition-pruning predicates derived from the traversal path scope |
+| 1 | `json_dsl_parse` or `gql_parse` | Lowers raw text to `Input`; the JSON frontend also validates the JSON schemas and computes the cursor query hash |
+| 2 | `validate` | Checks native `Input` shape, bounds, ontology membership, and cross-references |
+| 3 | `normalize` | Resolves entity names to table names, coerces filter types, and expands wildcard columns |
+| 4 | `restrict` | Strips `admin_only` fields and validates user-supplied `traversal_path` filters against the JWT-granted scope ([Security](../security.md)) |
+| 5 | `plan` | Translates validated input into a query plan (hop chain, join strategy, FK shape) |
+| 6 | `lower` | Emits the SQL AST from the query plan (edge-chain-first, nodes lazy) |
+| 7 | `enforce` | Injects ID and type columns required for redaction; builds the result context |
+| 8 | `security` | Injects `startsWith(traversal_path, ?)` predicates on all node-table scans, with per-entity role scoping ([Security](../security.md)) |
 | 9 | `cursor` | Applies keyset pagination (seek predicate and readback columns) |
 | 10 | `check` | Verifies every node-table alias carries a valid `startsWith` predicate traceable to the `SecurityContext` ([Security](../security.md)) |
 | 11 | `hydrate_plan` | Builds the hydration plan for fetching entity properties after the base query |

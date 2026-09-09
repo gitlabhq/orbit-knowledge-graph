@@ -12,6 +12,8 @@ query:
         "relationships": [{"type": "HAS_NOTE", "from": "mr", "to": "n"}],
         "limit": 20
     }
+  gql: |
+    MATCH (mr:MergeRequest {id: 2000})-[:HAS_NOTE]->(n:Note) RETURN mr.title, n.note LIMIT 20
 
 expect:
   node_count: 4

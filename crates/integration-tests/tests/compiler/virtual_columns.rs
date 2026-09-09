@@ -1,10 +1,10 @@
 use ontology::Ontology;
-use query_engine::compiler::{HydrationPlan, SecurityContext, compile};
+use query_engine::compiler::{Frontend, HydrationPlan, SecurityContext, compile};
 
 fn compile_query(json: &str) -> query_engine::compiler::CompiledQueryContext {
     let ontology = Ontology::load_embedded().unwrap();
     let security_ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
-    compile(json, &ontology, &security_ctx).unwrap()
+    compile(json, Frontend::JsonDsl, &ontology, &security_ctx).unwrap()
 }
 
 #[test]

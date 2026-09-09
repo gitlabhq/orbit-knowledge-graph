@@ -95,6 +95,21 @@ pub fn node_ids_predicate(alias: &str, ids: &[i64]) -> Expr {
     id_list_predicate(alias, DEFAULT_PRIMARY_KEY, ids)
 }
 
+pub fn ordered_filters(
+    filters: &std::collections::HashMap<String, Vec<crate::input::InputFilter>>,
+) -> Vec<(String, crate::input::InputFilter)> {
+    let mut properties: Vec<_> = filters.iter().collect();
+    properties.sort_unstable_by_key(|(property, _)| *property);
+    properties
+        .into_iter()
+        .flat_map(|(property, filters)| {
+            filters
+                .iter()
+                .map(move |filter| (property.clone(), filter.clone()))
+        })
+        .collect()
+}
+
 pub fn requested_columns(columns: &Option<ColumnSelection>) -> Vec<String> {
     match columns {
         Some(ColumnSelection::List(cols)) => cols.clone(),

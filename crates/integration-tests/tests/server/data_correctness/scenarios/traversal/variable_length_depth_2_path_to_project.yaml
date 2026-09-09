@@ -18,6 +18,8 @@ query:
         ],
         "limit": 20
     }
+  gql: |
+    MATCH (u:User {id: 7})-[:AUTHORED]->(wi:WorkItem)-[:IN_PROJECT]->(p:Project)<-[:CONTAINS*1..2]-(g:Group) RETURN u.username, wi.title, p.name, g.name LIMIT 20
 
 expect:
   referential_integrity: true

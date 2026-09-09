@@ -119,6 +119,8 @@ testcontainers = "0.27.3"
 testcontainers-modules = { version = "0.15.0", features = ["nats"] }
 
 # Query engine dependencies
+pest = "2.9.1"
+pest_derive = "2.9.1"
 indexmap = "2"
 jsonschema = "0.44.0"
 const_format = "0.2.35"
