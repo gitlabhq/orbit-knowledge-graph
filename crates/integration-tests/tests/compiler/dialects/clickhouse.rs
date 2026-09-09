@@ -1254,6 +1254,37 @@ fn orbit_query_path_depth_caps_match_json() {
 }
 
 #[test]
+fn orbit_query_neighbors_relationship_type_caps_match_json() {
+    let ontology = test_ontology();
+    let ctx = test_ctx();
+    for (direction, left, right) in [
+        ("outgoing", "-", "->"),
+        ("incoming", "<-", "-"),
+        ("both", "-", "-"),
+    ] {
+        for count in [1, 10, 11] {
+            let kinds = vec!["AUTHORED"; count];
+            let json = serde_json::json!({
+                "query_type": "neighbors",
+                "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
+                "neighbors": {"direction": direction, "rel_types": kinds},
+            })
+            .to_string();
+            let query = format!(
+                "MATCH (u:User {{id: 1}}){left}[:{}]{right}(n) RETURN n",
+                kinds.join("|")
+            );
+            let result = compile_pair(&json, &query, &ontology, &ctx);
+            if count <= 10 {
+                result.unwrap();
+            } else {
+                assert!(matches!(result.unwrap_err(), QueryError::Validation(_)));
+            }
+        }
+    }
+}
+
+#[test]
 fn orbit_query_structural_caps_reject_with_the_json_category() {
     let chain = |count: usize| {
         let nodes: Vec<String> = (0..count)

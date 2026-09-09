@@ -464,6 +464,14 @@ impl<'a> Validator<'a> {
                 )));
             }
         }
+        if let Some(neighbors) = &input.neighbors
+            && neighbors.rel_types.len() > MAX_REL_TYPES
+        {
+            return Err(QueryError::Validation(format!(
+                "neighbors rel_types count ({}) must not exceed {MAX_REL_TYPES}",
+                neighbors.rel_types.len()
+            )));
+        }
         for node in &input.nodes {
             if node.node_ids.len() > MAX_NODE_IDS {
                 return Err(QueryError::Validation(format!(

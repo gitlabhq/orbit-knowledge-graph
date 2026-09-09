@@ -126,6 +126,7 @@ Unsupported syntax or lowering returns a client-safe error rather than dropping 
 
 Query text is limited to 32 KiB. A flat Pest scan checks nesting before recursive parsing, with a limit of 32 levels.
 Existing compiler limits still apply after lowering.
+Explicit relationship-type lists are capped at 10 entries for traversal, path finding, and neighbors queries.
 
 Cursor binding is not implemented for the typed entry point. It rejects cursor input rather than accepting an unbound cursor.
 Cursor support, custom ID-property spellings, and presentation-option syntax remain outside this first frontend slice.
