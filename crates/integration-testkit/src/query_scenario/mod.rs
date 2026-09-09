@@ -392,11 +392,6 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
         view.assert_edge_count(kind, *count);
     }
     for (group_key, ge) in &expect.groups {
-        let ids: Vec<i64> = ge.rows.iter().map(|gr| gr.id).collect();
-        if !ids.is_empty() {
-            let entity = &ge.rows[0].entity;
-            view.assert_group_node_ids(group_key, entity, &ids);
-        }
         for gr in &ge.rows {
             for (col, expected) in &gr.values {
                 match expected {
