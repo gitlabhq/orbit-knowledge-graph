@@ -5,8 +5,9 @@
 The Orbit query frontend accepts a read-only graph language based on openCypher 9 syntax.
 It includes Orbit-specific query restrictions, extensions, and schema discovery.
 
-Queries use the compiler pipeline preset `clickhouse_gql`; schema calls resolve metadata inside the GQL frontend. Remote query contracts remain JSON-only.
-This implementation does not change MCP tools, protocol messages, Rails, or CLI contracts.
+Queries use the compiler pipeline preset `clickhouse_gql`; schema calls resolve metadata inside the GQL frontend.
+Remote graph queries select GQL with `language: gql` and a text query. The JSON Query DSL remains the default.
+Unknown selectors and mismatched payload shapes reject rather than selecting a parser from the query's syntax.
 
 A **Pest pair** is a matched grammar rule and its source span.
 A query's **syntax tree** is its typed Rust form, built from pairs by `pest_consume` in `syntax.rs` and declared in `ast.rs`.
@@ -56,6 +57,7 @@ Schema preparation, result types, and resolution belong only to the GQL frontend
 
 `compiler::gql::prepare` parses once and dispatches by statement kind. MATCH runs the complete graph pipeline; CALL resolves ontology metadata directly.
 `compiler::compile` remains query-only for both frontends. Its GQL path runs `gql_parse`, which rejects schema calls before metadata resolution.
+The query pipeline carries the same `Frontend` into `validate_normalize` for path resolution and into full compilation, so both read the same parser.
 
 `validate` runs the validator's shape check on every Input. It checks identifiers, limits, and ontology membership natively; it does not read the JSON schema.
 Its limits are Rust constants in `schema_limits`, and the compiler's build script asserts that the schema still matches them.
@@ -88,7 +90,15 @@ CALL db.schema('MergeRequest')
 
 The `db.` prefix follows openCypher 9 procedure naming. `db.schema` is Orbit-defined, not an exact Neo4j builtin or an ISO catalog operation.
 Only case-sensitive `db.schema` is allowed. `resolve_schema` rejects unknown or scope-hidden nodes and `'*'` against the supplied ontology. The grammar rejects extra arguments, parameters, YIELD, and query composition.
-`compiler::compile` remains query-only. A future raw-Cypher endpoint can dispatch both statements through `gql::prepare`, but must authenticate before dispatch; no endpoint or transport is wired here.
+`compiler::compile` remains query-only. Schema calls are not yet wired into remote query dispatch; that path must authenticate before using `gql::prepare`.
+
+## Remote transport
+
+The gRPC `QueryType` values remain JSON=0 and NAMED=1, with GQL=2 added. Unknown values reject.
+REST and MCP `query_graph` accept `language: gql` with query text; omitted `language` keeps the JSON object.
+Rails maps the selector onto the gRPC query type. The CLI sends `--language gql` text unchanged.
+Authorization, redaction, hydration, and response formatting are shared and unchanged.
+Deploying this requires a published `orbitpb` containing GQL=2 and a matching Rails/Workhorse pin.
 
 ## Supported query statement
 

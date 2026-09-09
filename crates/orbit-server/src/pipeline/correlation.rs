@@ -1,14 +1,15 @@
 //! Tags each ClickHouse query with the request correlation ID. Sub-queries carry
 //! a per-stage `query_id` and a lightweight `gkg;<kind>;correlation_id=<id>`
 //! comment; the base query additionally carries an attribution payload
-//! (`gkg;<base64(json)>`) so retention can recover who ran which query with which
-//! compiler and schema version.
+//! (`gkg;<base64(json)>`) so retention can recover who ran which query, in which
+//! language, with which compiler and schema version.
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD_NO_PAD;
+use query_engine::compiler::Frontend;
 use serde::Serialize;
 
-const PAYLOAD_VERSION: u32 = 1;
+const PAYLOAD_VERSION: u32 = 2;
 
 #[derive(Serialize)]
 struct AttributionPayload<'a> {
@@ -16,6 +17,7 @@ struct AttributionPayload<'a> {
     correlation_id: Option<String>,
     user_id: u64,
     query: &'a str,
+    language: &'static str,
     versions: Versions,
 }
 
@@ -44,13 +46,17 @@ pub(crate) fn log_comment(suffix: Option<&str>) -> String {
     }
 }
 
-/// Base-query `log_comment`: the `gkg` prefix plus a base64 attribution payload
-/// carrying correlation ID, user, DSL query, and the compiler/schema versions.
-pub(crate) fn log_comment_base(user_id: u64, query_json: &str, migration_version: u32) -> String {
+pub(crate) fn log_comment_base(
+    user_id: u64,
+    query: &str,
+    frontend: Frontend,
+    migration_version: u32,
+) -> String {
     let payload = AttributionPayload {
         correlation_id: labkit::correlation::current(),
         user_id,
-        query: query_json,
+        query,
+        language: frontend.into(),
         versions: Versions {
             payload: PAYLOAD_VERSION,
             dsl: orbit_versions::VERSIONS.query_dsl.clone(),
@@ -158,6 +164,7 @@ mod tests {
             log_comment_base(
                 42,
                 r#"{"query_type":"traversal"}"#,
+                Frontend::JsonDsl,
                 *orbit_migrations::version::SCHEMA_VERSION,
             )
         });
@@ -166,6 +173,7 @@ mod tests {
         assert_eq!(p["correlation_id"], "req-abc-123");
         assert_eq!(p["user_id"], 42);
         assert_eq!(p["query"], r#"{"query_type":"traversal"}"#);
+        assert_eq!(p["language"], "json");
         assert_eq!(p["versions"]["payload"], PAYLOAD_VERSION);
         assert_eq!(p["versions"]["dsl"], orbit_versions::VERSIONS.query_dsl);
         assert_eq!(
@@ -179,9 +187,21 @@ mod tests {
         let p = decode_base_payload(&log_comment_base(
             1,
             "{}",
+            Frontend::JsonDsl,
             *orbit_migrations::version::SCHEMA_VERSION,
         ));
         assert!(p.get("correlation_id").is_none());
         assert_eq!(p["user_id"], 1);
+    }
+
+    #[test]
+    fn base_payload_tags_gql_queries() {
+        let p = decode_base_payload(&log_comment_base(
+            1,
+            "MATCH (u:User) RETURN u",
+            Frontend::Gql,
+            *orbit_migrations::version::SCHEMA_VERSION,
+        ));
+        assert_eq!(p["language"], "gql");
     }
 }

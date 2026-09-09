@@ -23,7 +23,6 @@ pub mod execute_query_message {
 /// Client-sent initial message to start a query.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ExecuteQueryRequest {
-    /// JSON DSL query string
     #[prost(string, tag = "1")]
     pub query: ::prost::alloc::string::String,
     /// RAW: tabular JSON rows; LLM: GOON text
@@ -625,6 +624,7 @@ pub enum QueryType {
     Json = 0,
     /// `query` is a named-query envelope: {"name": ..., "parameters": {...}}
     Named = 1,
+    Gql = 2,
 }
 impl QueryType {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -635,6 +635,7 @@ impl QueryType {
         match self {
             Self::Json => "QUERY_TYPE_JSON",
             Self::Named => "QUERY_TYPE_NAMED",
+            Self::Gql => "QUERY_TYPE_GQL",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
@@ -642,6 +643,7 @@ impl QueryType {
         match value {
             "QUERY_TYPE_JSON" => Some(Self::Json),
             "QUERY_TYPE_NAMED" => Some(Self::Named),
+            "QUERY_TYPE_GQL" => Some(Self::Gql),
             _ => None,
         }
     }

@@ -116,8 +116,12 @@ fn parse_statement(raw: &str) -> Result<ast::Statement<'_>> {
     check_bounds(raw)?;
     let statement = <QueryParser as pest_consume::Parser>::parse(Rule::Statement, raw)
         .map_err(|error| {
+            let (line, column) = match error.line_col {
+                LineColLocation::Pos(position) | LineColLocation::Span(position, _) => position,
+            };
             QueryError::Validation(format!(
-                "Orbit query syntax: {error}\nExpected one MATCH ... RETURN statement, CALL db.schema(), or CALL db.schema('NodeName'); only AND predicates, named nodes, and bounded paths are supported."
+                "Orbit query syntax at line {line}, column {column}: {}\nExpected one MATCH ... RETURN statement, CALL db.schema(), or CALL db.schema('NodeName'); only AND predicates, named nodes, and bounded paths are supported.",
+                error.variant.message()
             ))
         })?
         .single()

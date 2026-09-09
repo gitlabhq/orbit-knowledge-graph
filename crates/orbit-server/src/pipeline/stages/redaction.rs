@@ -74,6 +74,7 @@ mod tests {
         );
 
         let mut ctx = QueryPipelineContext {
+            frontend: query_engine::compiler::Frontend::JsonDsl,
             query_json: String::new(),
             compiled: None,
             ontology: Arc::new(Ontology::new()),
