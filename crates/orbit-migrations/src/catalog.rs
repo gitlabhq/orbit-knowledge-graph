@@ -80,4 +80,9 @@ impl OntologyCatalog {
             .ok_or(CatalogError::Missing(version))?;
         Ok(OntologyArchive::from_bytes(version, &entry.value)?)
     }
+
+    pub async fn verify_archive(&self, version: u32) -> Result<(), CatalogError> {
+        self.load(version).await?.load_ontology()?;
+        Ok(())
+    }
 }

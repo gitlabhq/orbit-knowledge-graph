@@ -314,13 +314,6 @@ enum ArchiveCase {
 }
 
 impl ArchiveCase {
-    fn expected_error(self) -> &'static str {
-        match self {
-            ArchiveCase::Missing | ArchiveCase::BadGzip => "load ontology archive before promotion",
-            ArchiveCase::InvalidYaml => "validate ontology archive before promotion",
-        }
-    }
-
     async fn inject(self, context: &TestContext, version: u32) {
         let archive_key = version.to_string();
         let client = &context.scheduler_services.nats_client;
@@ -634,7 +627,9 @@ async fn migration_completion_preserves_state_until_target_archive_is_usable() {
 
         let error = checker.run().await.unwrap_err();
         assert!(
-            error.to_string().contains(archive_case.expected_error()),
+            error
+                .to_string()
+                .contains("verify ontology archive before promotion"),
             "{error}"
         );
         assert_eq!(context.promotion_state().await, preserved_state);

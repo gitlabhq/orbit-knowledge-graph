@@ -256,11 +256,7 @@ pub async fn run_dispatcher(
     if let Some(active_version) = orbit_migrations::version::read_active_version(&graph).await?
         && active_version != archive.schema_version()
     {
-        catalog
-            .load(active_version)
-            .await?
-            .load_ontology()
-            .map_err(orbit_migrations::catalog::CatalogError::from)?;
+        catalog.verify_archive(active_version).await?;
     }
 
     if let Err(error) = nats::versioning::gc_idle_release_streams(

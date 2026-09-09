@@ -173,16 +173,10 @@ impl MigrationCompletionChecker {
         }
 
         self.catalog
-            .load(migrating_version)
+            .verify_archive(migrating_version)
             .await
             .map_err(|error| {
-                TaskError::new(format!("load ontology archive before promotion: {error}"))
-            })?
-            .load_ontology()
-            .map_err(|error| {
-                TaskError::new(format!(
-                    "validate ontology archive before promotion: {error}"
-                ))
+                TaskError::new(format!("verify ontology archive before promotion: {error}"))
             })?;
 
         {
