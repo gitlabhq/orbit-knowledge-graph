@@ -10,7 +10,7 @@ pub use helpers::{
 };
 pub use metrics::OTelPipelineObserver;
 pub use path_resolver::PathResolver;
-pub use service::QueryPipelineService;
+pub use service::{QueryPipelineService, RawQuery};
 pub use stages::{
     AuthorizationStage, ClickHouseExecutor, HydrationStage, PathResolutionStage, RedactionStage,
     SecurityStage,
