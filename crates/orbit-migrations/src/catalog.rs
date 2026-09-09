@@ -5,7 +5,7 @@ use nats_client::{KvBucketConfig, KvPutOptions, KvPutResult, NatsClient};
 use ontology::Ontology;
 use ontology::archive::{ArchiveError, OntologyArchive};
 
-const ONTOLOGY_ARCHIVES_BUCKET: &str = "orbit_ontology_archives";
+pub const ONTOLOGY_ARCHIVES_BUCKET: &str = "orbit_ontology_archives";
 
 #[derive(Debug, thiserror::Error)]
 pub enum CatalogError {
@@ -79,5 +79,10 @@ impl OntologyCatalog {
             .await?
             .ok_or(CatalogError::Missing(version))?;
         Ok(OntologyArchive::from_bytes(version, &entry.value)?)
+    }
+
+    pub async fn verify_archive(&self, version: u32) -> Result<(), CatalogError> {
+        self.load(version).await?.load_ontology()?;
+        Ok(())
     }
 }

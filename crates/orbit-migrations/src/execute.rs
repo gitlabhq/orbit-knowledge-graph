@@ -10,10 +10,7 @@ use crate::scope::{
     InvalidatedPipelines, MigrationScope, TableMigrationAction, classify_tables_for_scope,
     find_invalidated_pipelines, widen_scope_for_shared_table_writers,
 };
-use crate::version::{
-    self, STATUS_ACTIVE, list_version_entities, mark_version_active, mark_version_retired,
-    read_all_versions, table_prefix,
-};
+use crate::version::{self, list_version_entities, table_prefix};
 
 pub const CHECKPOINT_TABLE: &str = "checkpoint";
 
@@ -193,19 +190,6 @@ pub async fn drop_versioned_refreshable_views(
             format!("DROP VIEW IF EXISTS {prefix}{}", view.name),
         )
         .await?;
-    }
-    Ok(())
-}
-
-pub async fn reactivate_version(
-    graph: &ArrowClickHouseClient,
-    version: u32,
-) -> Result<(), MigrationError> {
-    mark_version_active(graph, version).await?;
-    for entry in &read_all_versions(graph).await? {
-        if entry.status == STATUS_ACTIVE && entry.version != version {
-            mark_version_retired(graph, entry.version).await?;
-        }
     }
     Ok(())
 }
