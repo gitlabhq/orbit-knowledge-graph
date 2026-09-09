@@ -1,0 +1,15 @@
+# source: crates/integration-tests/tests/server/data_correctness/edge_cases/mod.rs::empty_result_has_valid_schema
+description: Non-existent node_id returns empty result with valid schema
+
+query:
+  json: |
+    {
+        "query_type": "traversal",
+        "nodes": [{"id": "u", "entity": "User", "columns": ["username"], "node_ids": [99999]}],
+        "limit": 10
+    }
+
+expect:
+  skip_requirements: [node_ids]
+  node_count: 0
+

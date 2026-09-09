@@ -1,0 +1,15 @@
+# source: crates/integration-tests/tests/server/data_correctness/edge_cases/like.rs::like_starts_with_no_match
+description: LIKE starts_with with no match returns empty
+
+query:
+  json: |
+    {
+        "query_type": "traversal",
+        "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"],
+                 "filters": {"username": {"starts_with": "xyz"}}}],
+        "limit": 10
+    }
+
+expect:
+  skip_requirements: ["filter:username"]
+  node_count: 0

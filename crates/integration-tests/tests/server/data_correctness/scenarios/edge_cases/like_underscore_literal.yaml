@@ -1,0 +1,15 @@
+# source: crates/integration-tests/tests/server/data_correctness/edge_cases/like.rs::like_underscore_matched_literally
+description: Underscore in LIKE filter is matched literally, not as single-char wildcard
+
+query:
+  json: |
+    {
+        "query_type": "traversal",
+        "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"],
+                 "filters": {"username": {"contains": "a_b"}}}],
+        "limit": 10
+    }
+
+expect:
+  skip_requirements: ["filter:username"]
+  node_count: 0

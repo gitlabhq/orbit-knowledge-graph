@@ -1,0 +1,30 @@
+# source: crates/integration-tests/tests/server/data_correctness/work_items.rs::traversal_work_item_in_group_returns_correct_edges
+description: WorkItem-Group IN_GROUP traversal returns correct edges and group names
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "w", "entity": "WorkItem", "id_range": {"start": 1, "end": 10000}, "columns": ["title"]},
+        {"id": "g", "entity": "Group", "columns": ["name"]}
+      ],
+      "relationships": [{"type": "IN_GROUP", "from": "w", "to": "g"}],
+      "limit": 20
+    }
+  gql: |
+    MATCH (w:WorkItem)-[:IN_GROUP]->(g:Group) WHERE w.id >= 1 AND w.id <= 10000 RETURN w.title, g.name LIMIT 20
+
+expect:
+  node_count: 7
+  referential_integrity: true
+  edge_exists:
+    IN_GROUP:
+      - [4000, 100]
+      - [4001, 100]
+      - [4002, 101]
+      - [4003, 102]
+  nodes:
+    Group:
+      rows:
+        - { id: 100, name: "Public Group" }

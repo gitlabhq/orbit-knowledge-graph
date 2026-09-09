@@ -1,0 +1,35 @@
+# source: crates/integration-tests/tests/server/data_correctness/edge_cases/mod.rs::cross_namespace_user_authors_mr_in_different_group
+description: User 2 appears as MR author in namespace 1/101/ despite membership in 1/100/
+
+config:
+  security: { org_id: 1, paths: ["1/101/"] }
+
+query:
+  json: |
+    {
+        "query_type": "traversal",
+        "nodes": [
+            {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+            {"id": "mr", "entity": "MergeRequest", "columns": ["title"]}
+        ],
+        "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
+        "limit": 20
+    }
+
+expect:
+  node_count: 2
+  nodes:
+    User:
+      ids: [2]
+      absent: [1]
+      rows:
+        - { id: 2, username: bob }
+    MergeRequest:
+      ids: [2002]
+      absent: [2000, 2001]
+      rows:
+        - { id: 2002, title: Refactor C }
+  edge_exists:
+    AUTHORED:
+      - [2, 2002]
+  referential_integrity: true

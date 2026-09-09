@@ -407,6 +407,9 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
         if let (Some(entity), Some(ids)) = (&ge.entity, &ge.ids) {
             view.assert_group_node_ids(group_key, entity, ids);
         }
+        if let Some(count) = ge.count {
+            view.assert_group_node_count(group_key, count);
+        }
         for gr in &ge.rows {
             for (col, expected) in &gr.values {
                 match expected {
