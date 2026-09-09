@@ -1177,6 +1177,14 @@ impl Ontology {
     }
 
     #[must_use]
+    pub fn is_global_table(&self, table: &str) -> bool {
+        let normalized = strip_schema_version_prefix(table);
+        self.global_tables()
+            .into_iter()
+            .any(|global| strip_schema_version_prefix(global) == normalized)
+    }
+
+    #[must_use]
     pub fn local_entity_names(&self) -> Vec<&str> {
         self.local_entities.keys().map(|s| s.as_str()).collect()
     }
