@@ -12,6 +12,8 @@ query:
                  "columns": ["username"]}],
       "limit": 10
     }
+  cypher: |
+    MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username LIMIT 10
 
 expect:
   node_count: 0

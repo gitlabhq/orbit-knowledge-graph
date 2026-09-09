@@ -83,6 +83,37 @@ use std::sync::Arc;
 
 use config::CompilerCtx as _;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QueryLanguage {
+    Json,
+    Cypher,
+}
+
+impl QueryLanguage {
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "json" => Some(Self::Json),
+            "cypher" => Some(Self::Cypher),
+            _ => None,
+        }
+    }
+}
+
+#[must_use = "the compiled query context should be used"]
+pub fn compile_query(
+    query: &str,
+    language: QueryLanguage,
+    ontology: &Ontology,
+    ctx: &SecurityContext,
+) -> Result<CompiledQueryContext> {
+    match language {
+        QueryLanguage::Json => compile(query, ontology, ctx),
+        QueryLanguage::Cypher => Err(error::QueryError::Validation(
+            "Cypher frontend is not yet implemented".into(),
+        )),
+    }
+}
+
 /// Compile a JSON Query DSL document into a [`CompiledQueryContext`].
 ///
 /// Validates the JSON against the schema, lowers it to [`Input`], and hands it

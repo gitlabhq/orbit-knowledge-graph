@@ -8,8 +8,8 @@ use std::path::Path;
 use std::sync::Arc;
 
 use query_engine::compiler::{
-    AccessLevel, AuthorizedPath, CompiledQueryContext, QueryLanguage, SecurityContext,
-    compile_query,
+    AccessLevel, AuthorizedPath, CompiledQueryContext, Ontology, QueryLanguage, Result,
+    SecurityContext,
 };
 use query_engine::formatters::{GraphFormatter, ResultFormatter};
 use query_engine::pipeline::{NoOpObserver, PipelineStage, QueryPipelineContext, TypeMap};
@@ -526,5 +526,69 @@ fn parse_requirement(name: &str) -> Option<Requirement> {
         "neighbors" => Some(Requirement::Neighbors),
         "path_finding" => Some(Requirement::PathFinding),
         _ => None,
+    }
+}
+
+fn compile_query(
+    query: &str,
+    language: QueryLanguage,
+    ontology: &Ontology,
+    security: &SecurityContext,
+) -> Result<CompiledQueryContext> {
+    match language {
+        QueryLanguage::Json => {
+            query_engine::compiler::compile_query(query, language, ontology, security)
+        }
+        QueryLanguage::Cypher => {
+            orbit_query::compile(query, &orbit_query::Parameters::new(), ontology, security)
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn json_and_cypher_keys_compile_with_their_frontends() {
+        let ontology = load_ontology();
+        let security = SecurityContext::new(1, vec!["1/".into()]).unwrap();
+        let json = r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":["username"]}],"limit":5}"#;
+        let cypher = "MATCH (u:User {id: 1}) RETURN u.username LIMIT 5";
+        assert_eq!(QueryLanguage::from_name("json"), Some(QueryLanguage::Json));
+        assert_eq!(
+            QueryLanguage::from_name("cypher"),
+            Some(QueryLanguage::Cypher)
+        );
+        let json = compile_query(
+            json,
+            QueryLanguage::from_name("json").unwrap(),
+            &ontology,
+            &security,
+        )
+        .unwrap();
+        let cypher = compile_query(
+            cypher,
+            QueryLanguage::from_name("cypher").unwrap(),
+            &ontology,
+            &security,
+        )
+        .unwrap();
+        assert_eq!(json.base.sql, cypher.base.sql);
+        assert_eq!(json.base.params, cypher.base.params);
+        assert_eq!(json.query_type, cypher.query_type);
+        assert_eq!(json.hydration, cypher.hydration);
+    }
+
+    #[test]
+    fn cypher_key_reaches_the_read_only_parser() {
+        let error = compile_query(
+            "CREATE (u:User)",
+            QueryLanguage::from_name("cypher").unwrap(),
+            &load_ontology(),
+            &SecurityContext::new(1, vec!["1/".into()]).unwrap(),
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("Orbit query syntax"), "{error}");
     }
 }

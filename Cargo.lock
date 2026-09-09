@@ -5935,6 +5935,7 @@ dependencies = [
  "gitalisk-core",
  "ontology",
  "orbit-migrations",
+ "orbit-query",
  "orbit-server",
  "orbit-server-config",
  "orbit-utils",

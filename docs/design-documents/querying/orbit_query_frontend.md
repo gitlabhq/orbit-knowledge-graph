@@ -134,6 +134,11 @@ Handwritten text queries sit beside JSON fixtures in `crates/integration-tests/t
 The shared test helper compares SQL byte for byte, parameter names and typed values, query type, and hydration plans.
 Existing SQL assertions remain in place. Other tests cover syntax rejection, literals, parameter binding, and authorization.
 
+The YAML query scenarios under `crates/integration-tests/tests/server/data_correctness/scenarios/` run against ClickHouse in CI.
+Each scenario declares its query once per frontend under `query:`, keyed `json` and `cypher`, and every frontend present is checked against the same result expectations.
+The runner retains `compiler::QueryLanguage` and dispatches `Cypher` to `orbit-query` in the testkit, which can depend on both crates.
+A scenario with no text spelling, such as cursor pagination, carries only the `json` key.
+
 JSON syntax-error tests remain JSON-only.
 The existing `valid_identifiers_produce_renderable_sql` fixture also remains JSON-only:
 its relationship order reaches the planner's fallback join between unconnected aliases.

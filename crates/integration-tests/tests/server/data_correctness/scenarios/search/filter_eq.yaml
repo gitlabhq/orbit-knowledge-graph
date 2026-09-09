@@ -10,6 +10,8 @@ query:
                  "filters": {"state": "blocked"}}],
       "limit": 10
     }
+  cypher: |
+    MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 AND u.state = 'blocked' RETURN u.username, u.state LIMIT 10
 
 expect:
   nodes:

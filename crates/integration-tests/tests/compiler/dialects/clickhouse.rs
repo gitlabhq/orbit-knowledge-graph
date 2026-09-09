@@ -858,6 +858,10 @@ fn orbit_query_id_selectors_preserve_additional_predicates() {
             "MATCH (u:User) WHERE u.id > 1 AND u.id < 10 RETURN u",
         ),
         (
+            r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"id_range":{"start":1,"end":10000}}]}"#,
+            "MATCH (u:User {id: 1}) WHERE u.id >= 1 AND u.id <= 10000 RETURN u",
+        ),
+        (
             r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"username":[{"contains":"abc"},{"contains":"def"}]}}]}"#,
             "MATCH (u:User) WHERE (u.username CONTAINS 'abc' AND u.username CONTAINS 'def') RETURN u",
         ),

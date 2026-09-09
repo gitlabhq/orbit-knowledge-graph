@@ -13,6 +13,8 @@ query:
                  "filters": {"is_admin": false}, "node_ids": [1]}],
       "limit": 10
     }
+  cypher: |
+    MATCH (u:User {id: 1, is_admin: false}) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username, u.is_admin LIMIT 10
 
 expect:
   nodes:

@@ -112,9 +112,6 @@ impl Lowering<'_> {
 
     pub(super) fn promote_ids(&mut self) -> Result<()> {
         for node in &mut self.input.nodes {
-            if !node.node_ids.is_empty() {
-                continue;
-            }
             let Some(filters) = node.filters.get("id") else {
                 continue;
             };
@@ -125,7 +122,7 @@ impl Lowering<'_> {
                         value: Some(Value::Array(values)),
                         ..
                     },
-                ] if !values.is_empty() => {
+                ] if node.node_ids.is_empty() && !values.is_empty() => {
                     node.node_ids = values
                         .iter()
                         .map(|v| {
