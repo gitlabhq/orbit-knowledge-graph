@@ -1,0 +1,22 @@
+# source: crates/integration-tests/tests/server/data_correctness/security.rs::aggregation_sql_contains_traversal_path_filter
+description: Compiled aggregation SQL contains startsWith traversal_path filter
+
+config:
+  security: { org_id: 1, paths: ["1/100/"] }
+
+query:
+  json: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
+        {"id": "u", "entity": "User"}
+      ],
+      "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+      "group_by": ["g"],
+      "aggregations": [{"count": "u", "as": "member_count"}],
+      "limit": 10
+    }
+
+expect:
+  sql_contains: ["startsWith", "traversal_path"]

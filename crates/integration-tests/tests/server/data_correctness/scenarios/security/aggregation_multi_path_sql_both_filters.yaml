@@ -1,0 +1,22 @@
+# source: crates/integration-tests/tests/server/data_correctness/security.rs::aggregation_multi_path_sql_contains_both_filters
+description: Multi-path aggregation SQL contains startsWith predicates for both paths
+
+config:
+  security: { org_id: 1, paths: ["1/100/", "1/102/"] }
+
+query:
+  json: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
+        {"id": "u", "entity": "User"}
+      ],
+      "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+      "group_by": ["g"],
+      "aggregations": [{"count": "u", "as": "member_count"}],
+      "limit": 10
+    }
+
+expect:
+  sql_contains: ["startsWith"]

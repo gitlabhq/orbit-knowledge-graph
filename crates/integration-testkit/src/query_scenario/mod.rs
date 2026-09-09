@@ -328,6 +328,24 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
                 assert_property(found, prop, expected, entity, id, label);
             }
         }
+        for prop in &ne.prop_present {
+            for node in view.nodes_of_type(entity) {
+                assert!(
+                    node.has_prop(prop),
+                    "{label}: {entity}/{} missing property '{prop}'",
+                    node.id
+                );
+            }
+        }
+        for prop in &ne.prop_absent {
+            for node in view.nodes_of_type(entity) {
+                assert!(
+                    !node.has_prop(prop),
+                    "{label}: {entity}/{} should not have property '{prop}'",
+                    node.id
+                );
+            }
+        }
         if let Some(absent) = &ne.absent {
             for id in absent {
                 view.assert_node_absent(entity, *id);

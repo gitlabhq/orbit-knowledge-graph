@@ -1,0 +1,17 @@
+# source: crates/integration-tests/tests/server/data_correctness/security.rs::aggregation_user_only_with_pii_filter_rejects_at_compile
+description: User-only aggregation with email filter rejects at compile for non-admin
+
+query:
+  json: |
+    {
+      "query_type": "aggregation",
+      "nodes": [{
+        "id": "u", "entity": "User", "columns": ["username"],
+        "filters": {"email": "target@example.com"}
+      }],
+      "aggregations": [{"count": "u", "as": "hit"}],
+      "limit": 1
+    }
+
+expect:
+  compile_error: true

@@ -1,0 +1,32 @@
+# source: crates/integration-tests/tests/server/data_correctness/security.rs::relationship_traversal_path_filter_returns_matching_edges
+description: Relationship traversal_path filter returns matching edges within scope
+
+config:
+  security: { org_id: 1, paths: ["1/"] }
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
+        {"id": "g", "entity": "Group", "columns": ["name", "traversal_path"]}
+      ],
+      "relationships": [{
+        "type": "MEMBER_OF",
+        "from": "u",
+        "to": "g",
+        "filters": {"traversal_path": "1/102/"}
+      }],
+      "limit": 10
+    }
+
+expect:
+  node_count: 2
+  nodes:
+    User:
+      ids: [1]
+    Group:
+      ids: [102]
+  edges:
+    MEMBER_OF: [[1, 102]]

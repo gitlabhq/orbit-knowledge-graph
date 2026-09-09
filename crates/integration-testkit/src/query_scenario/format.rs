@@ -108,6 +108,12 @@ pub struct NodeExpect {
     /// returned node of this entity has `state == "blocked"`.
     #[serde(default)]
     pub filters: BTreeMap<String, serde_json::Value>,
+    /// Assert these properties exist on every node of this entity.
+    #[serde(default)]
+    pub prop_present: Vec<String>,
+    /// Assert these properties are absent on every node of this entity.
+    #[serde(default)]
+    pub prop_absent: Vec<String>,
     #[serde(default)]
     pub rows: Vec<BTreeMap<String, serde_json::Value>>,
 }
