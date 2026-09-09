@@ -20,4 +20,9 @@ query:
     }
 
 expect:
-  skip_requirements: [aggregation]
+  groups:
+    u:
+      rows:
+        - { entity: User, id: 1, values: { mr_count: 2 }, properties: { username: alice } }
+        - { entity: User, id: 2, values: { mr_count: 1 }, properties: { username: bob } }
+        - { entity: User, id: 3, values: { mr_count: 1 }, properties: { username: charlie } }

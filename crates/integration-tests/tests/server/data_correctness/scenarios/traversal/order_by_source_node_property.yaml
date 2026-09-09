@@ -1,0 +1,24 @@
+# source: crates/integration-tests/tests/server/data_correctness/traversal.rs::traversal_order_by_source_node_property
+description: Order by source node username sorts users alphabetically
+
+query:
+  json: |
+    {
+        "query_type": "traversal",
+        "nodes": [
+            {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+            {"id": "g", "entity": "Group", "columns": ["name"]}
+        ],
+        "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+        "order_by": "u.username",
+        "limit": 20
+    }
+
+expect:
+  node_count: 9
+  referential_integrity: true
+  edge_count:
+    MEMBER_OF: 9
+  nodes:
+    User:
+      order: [1, 2, 3, 4, 5, 6]

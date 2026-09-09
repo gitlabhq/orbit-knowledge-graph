@@ -331,8 +331,76 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
         let pairs: Vec<(i64, i64)> = tuples.iter().map(|[a, b]| (*a, *b)).collect();
         view.assert_edge_set(kind, &pairs);
     }
+    for (kind, tuples) in &expect.edge_exists {
+        for [from_id, to_id] in tuples {
+            let edge = view
+                .response
+                .edges
+                .iter()
+                .find(|e| e.from_id == *from_id && e.to_id == *to_id && e.edge_type == *kind);
+            let edge = edge
+                .unwrap_or_else(|| panic!("{label}: expected edge {from_id} --{kind}--> {to_id}"));
+            view.assert_edge_exists(&edge.from, *from_id, &edge.to, *to_id, kind);
+        }
+    }
+    for (kind, tuples) in &expect.edge_absent {
+        for [from_id, to_id] in tuples {
+            let found = view
+                .response
+                .edges
+                .iter()
+                .any(|e| e.from_id == *from_id && e.to_id == *to_id && e.edge_type == *kind);
+            assert!(
+                !found,
+                "{label}: unexpected edge {from_id} --{kind}--> {to_id}"
+            );
+        }
+    }
     for (kind, count) in &expect.edge_count {
         view.assert_edge_count(kind, *count);
+    }
+    for (group_key, ge) in &expect.groups {
+        let ids: Vec<i64> = ge.rows.iter().map(|gr| gr.id).collect();
+        if !ids.is_empty() {
+            let entity = &ge.rows[0].entity;
+            view.assert_group_node_ids(group_key, entity, &ids);
+        }
+        for gr in &ge.rows {
+            for (col, expected) in &gr.values {
+                match expected {
+                    serde_json::Value::Number(n) if n.is_i64() => {
+                        view.assert_group_row_value_i64(
+                            group_key,
+                            &gr.entity,
+                            gr.id,
+                            col,
+                            n.as_i64().unwrap(),
+                        );
+                    }
+                    serde_json::Value::Number(n) if n.is_f64() => {
+                        view.assert_group_row_value_f64(
+                            group_key,
+                            &gr.entity,
+                            gr.id,
+                            col,
+                            n.as_f64().unwrap(),
+                        );
+                    }
+                    serde_json::Value::String(s) => {
+                        view.assert_group_row_value_str(group_key, &gr.entity, gr.id, col, s);
+                    }
+                    _ => panic!("{label}: unsupported group value type for {col}"),
+                }
+            }
+            for (prop, expected) in &gr.properties {
+                match expected {
+                    serde_json::Value::String(s) => {
+                        view.assert_group_node_property_str(group_key, &gr.entity, gr.id, prop, s);
+                    }
+                    _ => panic!("{label}: unsupported group property type for {prop}"),
+                }
+            }
+        }
     }
     if expect.referential_integrity {
         view.assert_referential_integrity();
@@ -441,6 +509,11 @@ fn parse_requirement(name: &str) -> Option<Requirement> {
     if let Some(field) = name.strip_prefix("filter:") {
         return Some(Requirement::Filter {
             field: field.to_string(),
+        });
+    }
+    if let Some(edge_type) = name.strip_prefix("relationship:") {
+        return Some(Requirement::Relationship {
+            edge_type: edge_type.to_string(),
         });
     }
     match name {

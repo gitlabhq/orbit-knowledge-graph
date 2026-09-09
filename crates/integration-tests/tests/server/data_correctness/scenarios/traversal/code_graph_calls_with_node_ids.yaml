@@ -1,0 +1,24 @@
+# source: crates/integration-tests/tests/server/data_correctness/traversal.rs::traversal_code_graph_calls_with_node_ids
+description: Code graph CALLS traversal with explicit node_ids on caller
+
+query:
+  json: |
+    {
+        "query_type": "traversal",
+        "nodes": [
+            {"id": "caller", "entity": "Definition", "node_ids": [12000], "columns": ["name", "fqn"]},
+            {"id": "callee", "entity": "Definition", "columns": ["name", "fqn"]}
+        ],
+        "relationships": [{"type": "CALLS", "from": "caller", "to": "callee"}],
+        "limit": 20
+    }
+
+expect:
+  node_count: 2
+  referential_integrity: true
+  nodes:
+    Definition:
+      ids: [12000, 12001]
+  edges:
+    CALLS:
+      - [12000, 12001]
