@@ -35,7 +35,7 @@ use crate::proto::{
     invoke_agent_command_response,
 };
 use crate::serving_schema::ServingSchema;
-use crate::tools::{ExecutorError, ToolPlan, ToolService, V2CommandRegistry, V2ToolRegistry};
+use crate::tools::{AgentCommand, ExecutorError, ToolService, V2CommandRegistry, V2ToolRegistry};
 use orbit_billing::{BillingTracker, QuotaCheckInputs, QuotaService};
 use query_engine::formatters::{FormatName, GoonFormatter, GraphFormatter, ResultFormatter};
 
@@ -247,27 +247,23 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
 
         info!(command_name = %req.command_name, "Invoking agent command for user");
 
-        let plan = self
+        let command = self
             .tool_service
-            .resolve_command(&req.command_name, parameters_json)
+            .parse_command(&req.command_name, parameters_json)
             .map_err(command_error_to_status)?;
 
-        let result = match plan {
-            ToolPlan::Immediate { result } => result,
-            ToolPlan::GraphSchema {
+        let result = match command {
+            AgentCommand::GraphSchema {
                 expand_nodes,
                 format,
             } => {
                 let schema = Arc::clone(&self.schema);
                 ToolService::render_graph_schema(&schema.ontology, &expand_nodes, format)
-                    .map_err(command_error_to_status)?
             }
-            ToolPlan::RunGraphQuery { .. } => {
-                return Err(Status::failed_precondition(
-                    "command must be handled by Rails interceptor",
-                ));
-            }
-        };
+            AgentCommand::QueryLanguage { format } => ToolService::render_query_language(format),
+            AgentCommand::ResponseFormat { format } => ToolService::render_response_format(format),
+        }
+        .map_err(command_error_to_status)?;
 
         let content = match result {
             serde_json::Value::String(text) => {
@@ -769,6 +765,8 @@ fn authorize_traversal_path(claims: &Claims, requested_path: &TraversalPath) -> 
 
 #[cfg(test)]
 mod tests {
+    mod commands;
+
     use super::*;
     use crate::proto::orbit_service_server::OrbitService;
     use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
@@ -821,216 +819,6 @@ mod tests {
             MetadataValue::try_from(format!("Bearer {token}")).unwrap(),
         );
         request
-    }
-
-    #[test]
-    fn test_service_can_be_created() {
-        let validator = Arc::new(mock_validator());
-        let service = OrbitServiceImpl::new(
-            validator,
-            test_ontology(),
-            &test_config(),
-            ClusterHealthChecker::default().into_arc(),
-            60,
-            Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
-        );
-
-        let plan = service
-            .tool_service
-            .resolve("get_graph_schema", "{}")
-            .expect("Should resolve");
-
-        match plan {
-            crate::tools::ToolPlan::GraphSchema {
-                expand_nodes,
-                format,
-            } => {
-                let result = ToolService::render_graph_schema(
-                    &service.schema.ontology,
-                    &expand_nodes,
-                    format,
-                )
-                .unwrap();
-                assert!(result.is_string(), "Response should be toon-encoded string");
-                let toon_str = result.as_str().unwrap();
-                assert!(toon_str.contains("domains"));
-                assert!(toon_str.contains("edges"));
-            }
-            _ => panic!("Expected graph schema plan"),
-        }
-    }
-
-    #[tokio::test]
-    async fn schema_rpc_and_command_use_the_supplied_ontology() {
-        let service = OrbitServiceImpl::new(
-            Arc::new(mock_validator()),
-            Arc::new(Ontology::new().with_nodes(["CustomNode"])),
-            &test_config(),
-            ClusterHealthChecker::default().into_arc(),
-            60,
-            Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
-        );
-        let response = service
-            .get_graph_schema(authed_request(GetGraphSchemaRequest::default()))
-            .await
-            .unwrap()
-            .into_inner();
-        let Some(get_graph_schema_response::Content::Structured(schema)) = response.content else {
-            panic!("expected structured schema");
-        };
-        assert_eq!(schema.nodes.len(), 1);
-        assert_eq!(schema.nodes[0].name, "CustomNode");
-
-        for format in ["raw", "llm"] {
-            let response = service
-                .invoke_agent_command(authed_request(InvokeAgentCommandRequest {
-                    command_name: "get_graph_schema".into(),
-                    parameters_json: serde_json::json!({"format": format}).to_string(),
-                }))
-                .await
-                .unwrap()
-                .into_inner();
-            match response.content.unwrap() {
-                invoke_agent_command_response::Content::ResultJson(encoded) => {
-                    assert_eq!(format, "raw");
-                    assert_eq!(
-                        serde_json::from_str::<serde_json::Value>(&encoded).unwrap(),
-                        serde_json::json!({
-                            "domains": [{"name": "other", "nodes": ["CustomNode"]}],
-                            "edges": [],
-                        })
-                    );
-                }
-                invoke_agent_command_response::Content::FormattedText(text) => {
-                    assert_eq!(format, "llm");
-                    assert!(text.contains("CustomNode"));
-                    assert!(!text.contains("Project"));
-                }
-            }
-        }
-    }
-
-    #[tokio::test]
-    async fn list_agent_commands_filters_known_command() {
-        let service = test_service();
-        let response = service
-            .list_agent_commands(authed_request(ListAgentCommandsRequest {
-                command_names: vec!["get_query_dsl".into()],
-                format: ResponseFormat::Raw as i32,
-            }))
-            .await
-            .unwrap()
-            .into_inner();
-
-        assert_eq!(response.commands.len(), 1);
-        assert_eq!(response.commands[0].name, "get_query_dsl");
-        assert!(!response.commands[0].description.is_empty());
-    }
-
-    #[tokio::test]
-    async fn list_agent_commands_returns_short_command_descriptions() {
-        let service = test_service();
-        let response = service
-            .list_agent_commands(authed_request(ListAgentCommandsRequest {
-                command_names: vec![],
-                format: ResponseFormat::Raw as i32,
-            }))
-            .await
-            .unwrap()
-            .into_inner();
-
-        let query_graph = response
-            .commands
-            .iter()
-            .find(|command| command.name == "query_graph")
-            .expect("query_graph command should be listed");
-
-        assert!(!query_graph.description.is_empty());
-        assert!(!query_graph.description.contains("<toon>"));
-        assert!(!query_graph.description.contains("Query DSL Schema"));
-    }
-
-    #[tokio::test]
-    async fn list_agent_commands_returns_toon_for_llm_format() {
-        let service = test_service();
-        let response = service
-            .list_agent_commands(authed_request(ListAgentCommandsRequest {
-                command_names: vec!["get_query_dsl".into()],
-                format: ResponseFormat::Llm as i32,
-            }))
-            .await
-            .unwrap()
-            .into_inner();
-
-        assert_eq!(response.commands.len(), 1);
-        assert!(response.formatted_text.contains("commands[1]"));
-        assert!(response.formatted_text.contains("name: get_query_dsl"));
-        assert!(response.formatted_text.contains("input_schema"));
-    }
-
-    #[tokio::test]
-    async fn list_agent_commands_rejects_unknown_command() {
-        let service = test_service();
-        let status = service
-            .list_agent_commands(authed_request(ListAgentCommandsRequest {
-                command_names: vec!["typo".into()],
-                format: ResponseFormat::Raw as i32,
-            }))
-            .await
-            .unwrap_err();
-
-        assert_eq!(status.code(), tonic::Code::NotFound);
-        assert!(status.message().contains("typo"));
-    }
-
-    #[tokio::test]
-    async fn invoke_agent_command_maps_intercepted_command_to_failed_precondition() {
-        let service = test_service();
-        let status = service
-            .invoke_agent_command(authed_request(InvokeAgentCommandRequest {
-                command_name: "query_graph".into(),
-                parameters_json: r#"{"query":{}}"#.into(),
-            }))
-            .await
-            .unwrap_err();
-
-        assert_eq!(status.code(), tonic::Code::FailedPrecondition);
-    }
-
-    #[tokio::test]
-    async fn invoke_agent_command_preserves_raw_and_llm_content_shapes() {
-        let service = test_service();
-        let raw = service
-            .invoke_agent_command(authed_request(InvokeAgentCommandRequest {
-                command_name: "get_query_dsl".into(),
-                parameters_json: r#"{"format":"raw"}"#.into(),
-            }))
-            .await
-            .unwrap()
-            .into_inner();
-
-        let Some(invoke_agent_command_response::Content::ResultJson(json)) = raw.content else {
-            panic!("expected raw command result JSON");
-        };
-        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
-        assert_eq!(
-            parsed.get("version").and_then(serde_json::Value::as_str),
-            Some(ToolService::build_query_dsl_version().as_str())
-        );
-
-        let llm = service
-            .invoke_agent_command(authed_request(InvokeAgentCommandRequest {
-                command_name: "get_query_dsl".into(),
-                parameters_json: "{}".into(),
-            }))
-            .await
-            .unwrap()
-            .into_inner();
-
-        let Some(invoke_agent_command_response::Content::FormattedText(text)) = llm.content else {
-            panic!("expected LLM command result text");
-        };
-        assert!(text.contains("QueryDSL v"));
     }
 
     #[test]
