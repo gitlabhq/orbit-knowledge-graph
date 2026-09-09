@@ -2,7 +2,7 @@
 stage: Orbit
 group: Context Systems
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: AIエージェントをコードベース、パイプライン、依存関係、セキュリティの専門家に変える、すぐに使えるプロンプトのライブラリです。Orbitを使用します。
+description: AIエージェントをコードベース、パイプライン、依存関係、セキュリティの専門家に変える、すぐに使えるプロンプトのライブラリです。GitLab Orbitを使用します。
 title: Cookbook
 ---
 
@@ -16,36 +16,33 @@ title: Cookbook
 
 {{< history >}}
 
-- `knowledge_graph`という名前の[機能フラグ](https://docs.gitlab.com/administration/feature_flags/)とともに、GitLab 18.10で[導入](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676)されました。デフォルトでは無効です。この機能は[実験的機能](https://docs.gitlab.com/policy/development_stages_support/#experiment)です。
+- GitLab 18.10で`knowledge_graph`[機能フラグ](https://docs.gitlab.com/administration/feature_flags/)とともに[導入](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676)されました。デフォルトでは無効です。この機能は[実験的機能](https://docs.gitlab.com/policy/development_stages_support/#experiment)です。
 - GitLab 19.1で[ベータ版](https://docs.gitlab.com/policy/development_stages_support/#beta)に[変更](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676)されました。
 
 {{< /history >}}
 
 > [!flag]
-> この機能の利用可否は機能フラグによって制御されています。
-> 詳細については、履歴を参照してください。
-> この機能はテスト目的で利用可能ですが、本番環境での使用には対応していません。
+ この機能の利用可否は、機能フラグによって制御されます。詳細については、履歴を参照してください。この機能はテスト目的で利用可能ですが、本番環境での使用には対応していません。
 
-Orbitは、コード、マージリクエスト、パイプライン、依存関係、セキュリティなど、ソフトウェア開発ライフサイクル全体に関する質問に答えます。グラフクエリを手動で記述する必要はありません。平易な言葉でAIエージェントに質問するだけで、エージェントがOrbitを使用してグラフを走査し、回答します。
+GitLab Orbitは、コード、マージリクエスト、パイプライン、依存関係、セキュリティなど、ソフトウェア開発ライフサイクル全体に関する質問に答えます。グラフクエリを手動で記述する必要はありません。平易な言葉でAIエージェントに質問するだけで、エージェントがGitLab Orbitを使用してグラフを走査し、回答します。
 
 このページは、実際に機能するプロンプトのライブラリです。各プロンプトにより、エージェントが自分のプロジェクトの専門家になります。
 
 ## このページの使い方 {#how-to-use-this-page}
 
-1. エージェントをOrbitに接続します。GitLab Duo Agent PlatformにはOrbitが組み込まれています。
-   Claude CodeやCodexなどの外部エージェントは、[MCPまたは`glab` CLI](access/mcp.md)を通じて接続します。
+1. エージェントをGitLab Orbitに接続します。GitLab Duo Agent PlatformにはOrbitが組み込まれています。Claude CodeやCodexなどの外部エージェントは、[MCPまたは`glab` CLI](access/mcp.md)を通じて接続します。
 1. 目的の結果を選択し、そのプロンプトをコピーします。
-1. `<山括弧>`内の値を、自分のグループ、プロジェクト、ファイル、または期間に置き換えます。
+1. `<angle brackets>`内の値を、自分のグループ、プロジェクト、ファイル、または期間に置き換えます。
 1. プロンプトをエージェントに貼り付けて実行します。同じ会話内でフォローアップの質問をすることで、さらに深く掘り下げることができます。
 
-各プロンプトには **「このプロンプトで実行されるOrbitクエリを確認する」** セクションもあります。開く必要はありませんが、エージェントが実行する正確なグラフクエリが表示されます。監査したい場合や[REST API](access/api.md)を直接呼び出したい場合に役立ちます。
+各プロンプトには**「このプロンプトで実行されるGitLab Orbitクエリを確認する」**セクションもあります。開く必要はありませんが、エージェントが実行する正確なグラフクエリが表示されます。監査したい場合や[REST API](access/api.md)を直接呼び出したい場合に役立ちます。
 
 ## CIのコストをその原因となるコードに紐付ける {#attribute-your-ci-spend-to-the-code-that-causes-it}
 
 CIのコンピューティングコストは高く、その大部分は繰り返し再試行される失敗に隠れています。このプロンプトは、組織全体の失敗をランク付けし、共有CI/CDテンプレートが原因のものを特定し、それぞれを実際に問題を起こしているファイルとコード定義まで追跡します。この最後のステップがコスト帰属チェーンです。「CIが高コスト」という状況を「これらのファイルがこれらのジョブを壊し続けている」という具体的な情報に変換します。
 
 ```plaintext
-Using Orbit, help me understand what is driving our CI compute cost.
+Using GitLab Orbit, help me understand what is driving our CI compute cost.
 
 1. Find the job and pipeline failures across my organization over the last
    60 days, covering at least 20 projects. Rank the job names by how often
@@ -67,7 +64,7 @@ Prioritize correctness and depth over speed.
 応用: 期間を変更したり、特定のグループやプロジェクトに絞り込んだり、上位3件を修正した場合のコンピューティング削減量の見積もりをエージェントに依頼したりすることができます。
 
 <details>
-<summary>このプロンプトで実行されるOrbitクエリを確認する</summary>
+<summary>このプロンプトで実行されるGitLab Orbitクエリを確認する</summary>
 
 エージェントはこれらを順番に実行します。サンプルのタイムスタンプをウィンドウ開始日の日付に置き換え、マージリクエストIDとファイルパスは前のステップで返された値に置き換えてください。
 
@@ -82,18 +79,18 @@ Prioritize correctness and depth over speed.
       "entity": "Job",
       "filters": {
         "status": "failed",
-        "created_at": {"op": "gte", "value": "2025-01-01T00:00:00Z"}
+        "created_at": {"gte": "2025-01-01T00:00:00Z"}
       }
     }
   ],
-  "group_by": [{"kind": "property", "node": "j", "property": "name", "alias": "job_name"}],
-  "aggregations": [{"function": "count", "target": "j", "alias": "failures"}],
-  "aggregation_sort": {"column": "failures", "direction": "DESC"},
+  "group_by": ["j.name"],
+  "aggregations": [{ "count": "j", "as": "failures" }],
+  "aggregation_sort": "-failures",
   "limit": 40
 }
 ```
 
-複数のプロジェクトにまたがって繰り返し発生する失敗ジョブを検索します。Orbitにはdistinct-count関数がないため、ジョブ名とプロジェクトを組み合わせてグループ化します。3つ以上のプロジェクトに現れるジョブ名は、共有テンプレートのホットスポットです。
+複数のプロジェクトにまたがって繰り返し発生する失敗ジョブを検索します。GitLab Orbitにはdistinct-count関数がないため、ジョブ名とプロジェクトを組み合わせてグループ化します。3つ以上のプロジェクトに現れるジョブ名は、共有テンプレートのホットスポットです。
 
 ```json orbit-query
 {
@@ -104,18 +101,18 @@ Prioritize correctness and depth over speed.
       "entity": "Job",
       "filters": {
         "status": "failed",
-        "created_at": {"op": "gte", "value": "2025-01-01T00:00:00Z"}
+        "created_at": {"gte": "2025-01-01T00:00:00Z"}
       }
     },
     {"id": "p", "entity": "Project"}
   ],
   "relationships": [{"type": "IN_PROJECT", "from": "j", "to": "p"}],
   "group_by": [
-    {"kind": "property", "node": "j", "property": "name", "alias": "job_name"},
-    {"kind": "property", "node": "p", "property": "full_path", "alias": "project"}
+    "j.name",
+    "p.full_path"
   ],
-  "aggregations": [{"function": "count", "target": "j", "alias": "failures"}],
-  "aggregation_sort": {"column": "failures", "direction": "DESC"},
+  "aggregations": [{ "count": "j", "as": "failures" }],
+  "aggregation_sort": "-failures",
   "limit": 200
 }
 ```
@@ -132,13 +129,13 @@ Prioritize correctness and depth over speed.
       "filters": {
         "status": "failed",
         "source": "merge_request_event",
-        "created_at": {"op": "gte", "value": "2025-01-01T00:00:00Z"}
+        "created_at": {"gte": "2025-01-01T00:00:00Z"}
       }
     }
   ],
-  "group_by": [{"kind": "property", "node": "pl", "property": "merge_request_id", "alias": "mr_id"}],
-  "aggregations": [{"function": "count", "target": "pl", "alias": "failed_pipelines"}],
-  "aggregation_sort": {"column": "failed_pipelines", "direction": "DESC"},
+  "group_by": ["pl.merge_request_id"],
+  "aggregations": [{ "count": "pl", "as": "failed_pipelines" }],
+  "aggregation_sort": "-failed_pipelines",
   "limit": 20
 }
 ```
@@ -149,7 +146,7 @@ Prioritize correctness and depth over speed.
 {
   "query_type": "aggregation",
   "nodes": [
-    {"id": "mr", "entity": "MergeRequest", "filters": {"id": {"op": "eq", "value": 123456789}}},
+    {"id": "mr", "entity": "MergeRequest", "filters": {"id": {"eq": 123456789}}},
     {"id": "d", "entity": "MergeRequestDiff"},
     {"id": "f", "entity": "MergeRequestDiffFile"}
   ],
@@ -157,9 +154,9 @@ Prioritize correctness and depth over speed.
     {"type": "HAS_DIFF", "from": "mr", "to": "d"},
     {"type": "HAS_FILE", "from": "d", "to": "f"}
   ],
-  "group_by": [{"kind": "property", "node": "f", "property": "old_path", "alias": "file"}],
-  "aggregations": [{"function": "count", "target": "d", "alias": "diff_snapshots"}],
-  "aggregation_sort": {"column": "diff_snapshots", "direction": "DESC"},
+  "group_by": ["f.old_path"],
+  "aggregations": [{ "count": "d", "as": "diff_snapshots" }],
+  "aggregation_sort": "-diff_snapshots",
   "limit": 20
 }
 ```
@@ -173,7 +170,7 @@ Prioritize correctness and depth over speed.
     {
       "id": "f",
       "entity": "File",
-      "filters": {"path": {"op": "eq", "value": "app/models/project.rb"}}
+      "filters": {"path": {"eq": "app/models/project.rb"}}
     },
     {
       "id": "def",
@@ -193,7 +190,7 @@ Prioritize correctness and depth over speed.
 不慣れなプロジェクトに参加し、数日ではなく数分で全体像を把握します。
 
 ```plaintext
-I'm new to the <my-org/my-project> project. Using Orbit, give me a tour:
+I'm new to the <my-org/my-project> project. Using GitLab Orbit, give me a tour:
 - The most active contributors over the last few months.
 - The core classes, modules, and how they relate.
 - The main entry points and the files I should read first.
@@ -203,7 +200,7 @@ to read first to understand it.
 ```
 
 <details>
-<summary>このプロンプトで実行されるOrbitクエリを確認する</summary>
+<summary>このプロンプトで実行されるGitLab Orbitクエリを確認する</summary>
 
 プロジェクトの最もアクティブなコントリビューターを検索します:
 
@@ -227,11 +224,11 @@ to read first to understand it.
     {"type": "AUTHORED", "from": "u", "to": "mr"},
     {"type": "IN_PROJECT", "from": "mr", "to": "p"}
   ],
-  "group_by": [{"kind": "node", "node": "u"}],
+  "group_by": ["u"],
   "aggregations": [
-    {"function": "count", "target": "mr", "alias": "merged_mrs"}
+    { "count": "mr", "as": "merged_mrs" }
   ],
-  "aggregation_sort": {"column": "merged_mrs", "direction": "DESC"},
+  "aggregation_sort": "-merged_mrs",
   "limit": 10
 }
 ```
@@ -243,7 +240,7 @@ to read first to understand it.
 変更する前に「これを変更すると何が壊れるか」を把握します。
 
 ```plaintext
-Using Orbit, map the blast radius of <shared-auth-lib>.
+Using GitLab Orbit, map the blast radius of <shared-auth-lib>.
 - Which projects and files import it?
 - Which code definitions depend on it?
 - What would break if I changed its public interface?
@@ -253,21 +250,21 @@ riskiest change I could make.
 ```
 
 <details>
-<summary>このプロンプトで実行されるOrbitクエリを確認する</summary>
+<summary>このプロンプトで実行されるGitLab Orbitクエリを確認する</summary>
 
 特定のモジュールをインポートしているすべてのファイルを検索します。`payments-service`をトレースしたいモジュールまたはライブラリに置き換えてください:
 
 ```json orbit-query
 {
   "query_type": "traversal",
-  "node": {
+  "nodes": [{
     "id": "sym",
     "entity": "ImportedSymbol",
     "columns": ["file_path", "import_path", "identifier_name"],
     "filters": {
-      "import_path": {"op": "contains", "value": "payments-service"}
+      "import_path": {"contains": "payments-service"}
     }
-  },
+  }],
   "limit": 100
 }
 ```
@@ -281,7 +278,7 @@ riskiest change I could make.
     {
       "id": "f",
       "entity": "File",
-      "filters": {"path": {"op": "contains", "value": "shared-auth-lib"}}
+      "filters": {"path": {"contains": "shared-auth-lib"}}
     },
     {"id": "b", "entity": "Branch", "columns": ["name", "is_default"]},
     {"id": "p", "entity": "Project", "columns": ["name", "full_path"]}
@@ -305,7 +302,7 @@ riskiest change I could make.
       "entity": "ImportedSymbol",
       "columns": ["import_path"],
       "filters": {
-        "import_path": {"op": "contains", "value": "payments"}
+        "import_path": {"contains": "payments"}
       }
     },
     {"id": "def", "entity": "Definition", "columns": ["name", "fqn", "file_path"]}
@@ -313,11 +310,11 @@ riskiest change I could make.
   "relationships": [
     {"type": "IMPORTS", "from": "sym", "to": "def"}
   ],
-  "group_by": [{"kind": "node", "node": "def"}],
+  "group_by": ["def"],
   "aggregations": [
-    {"function": "count", "target": "sym", "alias": "import_count"}
+    { "count": "sym", "as": "import_count" }
   ],
-  "aggregation_sort": {"column": "import_count", "direction": "DESC"},
+  "aggregation_sort": "-import_count",
   "limit": 20
 }
 ```
@@ -329,7 +326,7 @@ riskiest change I could make.
 最も問題のあるCI/CDの原因とその失敗理由を特定します。
 
 ```plaintext
-Using Orbit, show me where our CI/CD is unhealthy over the last 30 days:
+Using GitLab Orbit, show me where our CI/CD is unhealthy over the last 30 days:
 - The projects with the most failed pipelines.
 - The jobs that fail most often.
 - The most common failure reasons.
@@ -338,7 +335,7 @@ Group the results so I can see which failures are worth fixing first.
 ```
 
 <details>
-<summary>このプロンプトで実行されるOrbitクエリを確認する</summary>
+<summary>このプロンプトで実行されるGitLab Orbitクエリを確認する</summary>
 
 失敗したパイプラインが最も多いプロジェクトを検索します:
 
@@ -352,11 +349,11 @@ Group the results so I can see which failures are worth fixing first.
   "relationships": [
     {"type": "IN_PROJECT", "from": "pl", "to": "p"}
   ],
-  "group_by": [{"kind": "node", "node": "p"}],
+  "group_by": ["p"],
   "aggregations": [
-    {"function": "count", "target": "pl", "alias": "failed_count"}
+    { "count": "pl", "as": "failed_count" }
   ],
-  "aggregation_sort": {"column": "failed_count", "direction": "DESC"},
+  "aggregation_sort": "-failed_count",
   "limit": 10
 }
 ```
@@ -366,12 +363,12 @@ Group the results so I can see which failures are worth fixing first.
 ```json orbit-query
 {
   "query_type": "traversal",
-  "node": {
+  "nodes": [{
     "id": "j",
     "entity": "Job",
     "columns": ["name", "status", "failure_reason"],
     "filters": {"status": "failed"}
-  },
+  }],
   "limit": 10
 }
 ```
@@ -383,7 +380,7 @@ Group the results so I can see which failures are worth fixing first.
 リスクの所在とその経緯を把握します。
 
 ```plaintext
-Using Orbit, find the critical and high severity vulnerabilities across
+Using GitLab Orbit, find the critical and high severity vulnerabilities across
 <my-org> that are still detected:
 - Which projects are affected?
 - How did each one get there? Trace it back to the scan and, where possible,
@@ -393,7 +390,7 @@ Prioritize by severity and give me a short remediation shortlist.
 ```
 
 <details>
-<summary>このプロンプトで実行されるOrbitクエリを確認する</summary>
+<summary>このプロンプトで実行されるGitLab Orbitクエリを確認する</summary>
 
 すべてのcriticalおよびhigh重大度の脆弱性を検索します:
 
@@ -406,7 +403,7 @@ Prioritize by severity and give me a short remediation shortlist.
       "entity": "Vulnerability",
       "columns": ["title", "severity", "state", "report_type"],
       "filters": {
-        "severity": {"op": "in", "value": ["critical", "high"]},
+        "severity": {"in": ["critical", "high"]},
         "state": "detected"
       }
     },
@@ -436,11 +433,11 @@ Prioritize by severity and give me a short remediation shortlist.
   "relationships": [
     {"type": "IN_PROJECT", "from": "v", "to": "p"}
   ],
-  "group_by": [{"kind": "node", "node": "p"}],
+  "group_by": ["p"],
   "aggregations": [
-    {"function": "count", "target": "v", "alias": "vuln_count"}
+    { "count": "v", "as": "vuln_count" }
   ],
-  "aggregation_sort": {"column": "vuln_count", "direction": "DESC"},
+  "aggregation_sort": "-vuln_count",
   "limit": 20
 }
 ```
@@ -457,13 +454,11 @@ Prioritize by severity and give me a short remediation shortlist.
       "filters": {"state": "detected"}
     }
   ],
-  "group_by": [
-    {"kind": "property", "node": "v", "property": "severity", "alias": "severity"}
-  ],
+  "group_by": ["v.severity"],
   "aggregations": [
-    {"function": "count", "target": "v", "alias": "vuln_count"}
+    { "count": "v", "as": "vuln_count" }
   ],
-  "aggregation_sort": {"column": "vuln_count", "direction": "DESC"},
+  "aggregation_sort": "-vuln_count",
   "limit": 10
 }
 ```
@@ -475,28 +470,28 @@ Prioritize by severity and give me a short remediation shortlist.
 エージェントを離れることなく、実際のコードを会話に取り込みます。
 
 ```plaintext
-Using Orbit, show me the source of <app/models/project.rb> and the definition
+Using GitLab Orbit, show me the source of <app/models/project.rb> and the definition
 of <MyModule::my_function>, so I can review them here.
 ```
 
 バーチャルカラム（`File`の`content`と`Definition`の`content`）はグラフクエリの後にGitalyのフェッチをトリガーするため、これらのレスポンスは他のクエリよりも遅くなります。
 
 <details>
-<summary>このプロンプトで実行されるOrbitクエリを確認する</summary>
+<summary>このプロンプトで実行されるGitLab Orbitクエリを確認する</summary>
 
 ファイルのソーステキストをフェッチします。大きなレスポンスを避けるために`limit: 1`を使用してください:
 
 ```json orbit-query
 {
   "query_type": "traversal",
-  "node": {
+  "nodes": [{
     "id": "f",
     "entity": "File",
     "columns": ["path", "language", "content"],
     "filters": {
-      "path": {"op": "ends_with", "value": "app/models/project.rb"}
+      "path": {"ends_with": "app/models/project.rb"}
     }
-  },
+  }],
   "limit": 1
 }
 ```
@@ -506,14 +501,14 @@ of <MyModule::my_function>, so I can review them here.
 ```json orbit-query
 {
   "query_type": "traversal",
-  "node": {
+  "nodes": [{
     "id": "d",
     "entity": "Definition",
     "columns": ["name", "fqn", "file_path", "start_line", "end_line", "content"],
     "filters": {
-      "fqn": {"op": "eq", "value": "Gitlab::Auth::authenticate"}
+      "fqn": {"eq": "Gitlab::Auth::authenticate"}
     }
-  },
+  }],
   "limit": 5
 }
 ```
