@@ -2,7 +2,9 @@
 # the embedded config/default.yaml. Holds tuning that suits a laptop ClickHouse and GDK, and must
 # NOT be promoted into config/default.yaml, which underlays production.
 #
-# For personal overrides on top of this, use GKG_* environment variables (highest priority).
+# The dev tasks layer further overlays after this one: config/dev/<mode>.yaml (per-mode ports),
+# the generated .dev/gdk.yaml (connection details derived from gdk.yml), and the Git-ignored
+# config/dev.local.yaml for personal overrides (highest priority).
 
 datalake:
   session_settings:

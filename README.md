@@ -170,7 +170,7 @@ mise lint:code:fix    # Apply clippy fixes
 mise server:start     # Run gkg-server locally
 ```
 
-The product name is Orbit. The binary and config still use the engineering name GKG (binary `gkg-server`, config prefixes `GKG_*`, metrics).
+The product name is Orbit. The binary and metrics still use the engineering name GKG (binary `gkg-server`, metric names).
 
 - [Local development guide](docs/dev/local-development.md)
 - [E2E testing harness](docs/dev/e2e-testing.md)

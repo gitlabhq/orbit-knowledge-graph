@@ -35,7 +35,9 @@ gdk_enabled() {
   [[ "$(parse_gdk_value "$1.enabled" 2>/dev/null || true)" == "true" ]]
 }
 
-if [[ -z "${GDK_ROOT:-${GDK_DIR:-}}" ]]; then
+# GDK_ROOT_RESOLVED is the mise [env] fallback, so the mise tasks work without a .env file.
+GDK_ROOT="${GDK_ROOT:-${GDK_DIR:-${GDK_ROOT_RESOLVED:-}}}"
+if [[ -z "$GDK_ROOT" ]]; then
   cat <<'EOF'
 ERROR: GDK_ROOT is not set.
 
@@ -48,16 +50,15 @@ EOF
   exit 1
 fi
 
-GDK_ROOT="${GDK_ROOT:-${GDK_DIR}}"
 GDK_ROOT="${GDK_ROOT/#\~/$HOME}"
 GDK_YML="$GDK_ROOT/gdk.yml"
 GDK_DEFAULT_YML="$GDK_ROOT/gdk.example.yml"
 GITLAB_ROOT="${GITLAB_ROOT:-$GDK_ROOT/gitlab}"
 
-WEB_HTTP="127.0.0.1:${GKG_SERVER_PORT:-8090}"
-WEB_GRPC="127.0.0.1:${GKG_SERVER_GRPC_PORT:-50054}"
-IDX_HEALTH="127.0.0.1:${GKG_INDEXER_PORT:-4202}"
-GKG_HEALTHCHECK_BIND_ADDRESS="${GKG_HEALTHCHECK_BIND_ADDRESS:-127.0.0.1:4201}"
+# Connection details derived below are written to this overlay; the server loads it after
+# config/dev.yaml and the per-mode config/dev/<mode>.yaml, before config/dev.local.yaml.
+GDK_OVERLAY="$REPO_ROOT/.dev/gdk.yaml"
+LOCAL_OVERLAY="$REPO_ROOT/config/dev.local.yaml"
 
 GDK_CLICKHOUSE_HTTP_PORT="$(parse_gdk_value clickhouse.http_port 2>/dev/null || echo 8123)"
 GDK_CLICKHOUSE_TCP_PORT="$(parse_gdk_value clickhouse.tcp_port 2>/dev/null || echo 9001)"
@@ -83,16 +84,15 @@ else
   GDK_GITLAB_URL="http://${GDK_HOSTNAME}:${GDK_PORT}"
 fi
 
-GKG_NATS__URL="${GKG_NATS__URL:-nats://127.0.0.1:4222}"
-GKG_DATALAKE__URL="${GKG_DATALAKE__URL:-http://127.0.0.1:${GDK_CLICKHOUSE_HTTP_PORT}}"
-GKG_DATALAKE__DATABASE="${GKG_DATALAKE__DATABASE:-gitlab_clickhouse_development}"
-GKG_DATALAKE__USERNAME="${GKG_DATALAKE__USERNAME:-default}"
-GKG_GRAPH__URL="${GKG_GRAPH__URL:-http://127.0.0.1:${GDK_CLICKHOUSE_HTTP_PORT}}"
-GKG_GRAPH__DATABASE="${GKG_GRAPH__DATABASE:-gkg-development}"
-GKG_GRAPH__USERNAME="${GKG_GRAPH__USERNAME:-default}"
-GKG_GITLAB__BASE_URL="${GKG_GITLAB__BASE_URL:-${GDK_GITLAB_URL}}"
-GKG_SIPHON_STREAM_NAME="${GKG_SIPHON_STREAM_NAME:-siphon_stream_main_db}"
-GKG_ENABLE_METRICS="${GKG_ENABLE_METRICS:-false}"
+NATS_URL="nats://127.0.0.1:4222"
+DATALAKE_URL="http://127.0.0.1:${GDK_CLICKHOUSE_HTTP_PORT}"
+DATALAKE_DATABASE="gitlab_clickhouse_development"
+DATALAKE_USERNAME="default"
+GRAPH_URL="http://127.0.0.1:${GDK_CLICKHOUSE_HTTP_PORT}"
+GRAPH_DATABASE="gkg-development"
+GRAPH_USERNAME="default"
+GITLAB_BASE_URL="$GDK_GITLAB_URL"
+SIPHON_STREAM_NAME="siphon_stream_main_db"
 
 GITALY_TCP_ADDR="$(python3 - "$GDK_ROOT/gitaly/gitaly.config.toml" <<'PY'
 import re
@@ -108,42 +108,55 @@ if match:
 PY
 )"
 
-if [[ -z "${GKG_GITLAB__JWT__VERIFYING_KEY:-}" ]]; then
-  GKG_GITLAB__JWT__VERIFYING_KEY="$(cat "$GITLAB_ROOT/.gitlab_knowledge_graph_secret" 2>/dev/null || cat "$GITLAB_ROOT/.gitlab_shell_secret" 2>/dev/null || echo "development-secret-at-least-32-bytes")"
+JWT_VERIFYING_KEY="$(cat "$GITLAB_ROOT/.gitlab_knowledge_graph_secret" 2>/dev/null || cat "$GITLAB_ROOT/.gitlab_shell_secret" 2>/dev/null || echo "development-secret-at-least-32-bytes")"
+JWT_SIGNING_KEY="$JWT_VERIFYING_KEY"
+
+CLICKHOUSE_PASSWORD=""
+if [[ -f "$GITLAB_ROOT/config/click_house.yml" ]]; then
+  CLICKHOUSE_PASSWORD="$(ruby -e 'require "yaml"; require "erb"; path=ARGV[0]; data=YAML.safe_load(ERB.new(File.read(path)).result, aliases: true) rescue {}; dev=(data["development"] || {}); puts(dev["password"] || "")' "$GITLAB_ROOT/config/click_house.yml" 2>/dev/null || true)"
 fi
 
-if [[ -z "${GKG_GITLAB__JWT__SIGNING_KEY:-}" ]]; then
-  GKG_GITLAB__JWT__SIGNING_KEY="$GKG_GITLAB__JWT__VERIFYING_KEY"
-fi
+yaml_str() {
+  local escaped
+  escaped="$(printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g')"
+  printf '"%s"' "$escaped"
+}
 
-if [[ -z "${GKG_DATALAKE__PASSWORD:-}" && -f "$GITLAB_ROOT/config/click_house.yml" ]]; then
-  clickhouse_password="$(ruby -e 'require "yaml"; require "erb"; path=ARGV[0]; data=YAML.safe_load(ERB.new(File.read(path)).result, aliases: true) rescue {}; dev=(data["development"] || {}); puts(dev["password"] || "")' "$GITLAB_ROOT/config/click_house.yml" 2>/dev/null || true)"
-  if [[ -n "$clickhouse_password" ]]; then
-    GKG_DATALAKE__PASSWORD="$clickhouse_password"
-    GKG_GRAPH__PASSWORD="$clickhouse_password"
-  fi
-fi
-
-export GKG_NATS__URL
-export GKG_DATALAKE__URL
-export GKG_DATALAKE__DATABASE
-export GKG_DATALAKE__USERNAME
-export GKG_GRAPH__URL
-export GKG_GRAPH__DATABASE
-export GKG_GRAPH__USERNAME
-export GKG_GITLAB__BASE_URL
-export GKG_GITLAB__JWT__VERIFYING_KEY
-export GKG_GITLAB__JWT__SIGNING_KEY
-export GKG_SCHEDULE__TASKS__CODE_INDEXING_TASK__EVENTS_STREAM_NAME="$GKG_SIPHON_STREAM_NAME"
-export GKG_SCHEDULE__TASKS__NAMESPACE_CODE_BACKFILL__EVENTS_STREAM_NAME="$GKG_SIPHON_STREAM_NAME"
-
-if [[ -n "${GKG_DATALAKE__PASSWORD:-}" ]]; then
-  export GKG_DATALAKE__PASSWORD
-fi
-
-if [[ -n "${GKG_GRAPH__PASSWORD:-${GKG_DATALAKE__PASSWORD:-}}" ]]; then
-  export GKG_GRAPH__PASSWORD="${GKG_GRAPH__PASSWORD:-${GKG_DATALAKE__PASSWORD:-}}"
-fi
+write_gdk_overlay() {
+  local tmp
+  mkdir -p "$(dirname "$GDK_OVERLAY")"
+  tmp="$(mktemp "$GDK_OVERLAY.XXXXXX")"
+  {
+    echo "# Generated by scripts/orbit-native-dev.sh from gdk.yml; regenerated on every start."
+    echo "nats:"
+    echo "  url: $(yaml_str "$NATS_URL")"
+    echo "datalake:"
+    echo "  url: $(yaml_str "$DATALAKE_URL")"
+    echo "  database: $(yaml_str "$DATALAKE_DATABASE")"
+    echo "  username: $(yaml_str "$DATALAKE_USERNAME")"
+    if [[ -n "$CLICKHOUSE_PASSWORD" ]]; then
+      echo "  password: $(yaml_str "$CLICKHOUSE_PASSWORD")"
+    fi
+    echo "graph:"
+    echo "  url: $(yaml_str "$GRAPH_URL")"
+    echo "  database: $(yaml_str "$GRAPH_DATABASE")"
+    echo "  username: $(yaml_str "$GRAPH_USERNAME")"
+    if [[ -n "$CLICKHOUSE_PASSWORD" ]]; then
+      echo "  password: $(yaml_str "$CLICKHOUSE_PASSWORD")"
+    fi
+    echo "gitlab:"
+    echo "  base_url: $(yaml_str "$GITLAB_BASE_URL")"
+    echo "  jwt:"
+    echo "    verifying_key: $(yaml_str "$JWT_VERIFYING_KEY")"
+    echo "    signing_key: $(yaml_str "$JWT_SIGNING_KEY")"
+    echo "schedule:"
+    echo "  tasks:"
+    echo "    siphon:"
+    echo "      events_stream_name: $(yaml_str "$SIPHON_STREAM_NAME")"
+  } > "$tmp"
+  chmod 600 "$tmp"
+  mv "$tmp" "$GDK_OVERLAY"
+}
 
 run_checks() {
   local failures=0
@@ -287,7 +300,7 @@ EOF
   fi
 
   printf "\nDerived config:\n"
-  print_env
+  print_config
 
   if [[ "$failures" -gt 0 ]]; then
     printf "\n%d prerequisite check(s) failed.\n" "$failures"
@@ -295,7 +308,7 @@ EOF
   fi
 }
 
-print_env() {
+print_config() {
   cat <<EOF
 GDK_ROOT=$GDK_ROOT
 ENV_FILE=${REPO_ROOT}/.env
@@ -305,22 +318,21 @@ GDK_POSTGRES_HOST=$GDK_POSTGRES_HOST
 GDK_POSTGRES_PORT=$GDK_POSTGRES_PORT
 GDK_GITLAB_URL=$GDK_GITLAB_URL
 GITALY_TCP_ADDR=${GITALY_TCP_ADDR:-<not configured>}
-WEB_HTTP=$WEB_HTTP
-WEB_GRPC=$WEB_GRPC
-IDX_HEALTH=$IDX_HEALTH
-GKG_NATS__URL=$GKG_NATS__URL
-GKG_DATALAKE__URL=$GKG_DATALAKE__URL
-GKG_DATALAKE__DATABASE=$GKG_DATALAKE__DATABASE
-GKG_GRAPH__URL=$GKG_GRAPH__URL
-GKG_GRAPH__DATABASE=$GKG_GRAPH__DATABASE
-GKG_GITLAB__BASE_URL=$GKG_GITLAB__BASE_URL
-GKG_SCHEDULE__TASKS__CODE_INDEXING_TASK__EVENTS_STREAM_NAME=$GKG_SIPHON_STREAM_NAME
-GKG_SCHEDULE__TASKS__NAMESPACE_CODE_BACKFILL__EVENTS_STREAM_NAME=$GKG_SIPHON_STREAM_NAME
+GDK_OVERLAY=$GDK_OVERLAY
+LOCAL_OVERLAY=$LOCAL_OVERLAY$([[ -f "$LOCAL_OVERLAY" ]] || echo " (absent)")
+
+nats.url=$NATS_URL
+datalake.url=$DATALAKE_URL
+datalake.database=$DATALAKE_DATABASE
+graph.url=$GRAPH_URL
+graph.database=$GRAPH_DATABASE
+gitlab.base_url=$GITLAB_BASE_URL
+schedule.tasks.siphon.events_stream_name=$SIPHON_STREAM_NAME
 EOF
 }
 
 apply_schema() {
-  clickhouse client --host 127.0.0.1 --port "$GDK_CLICKHOUSE_TCP_PORT" --query "CREATE DATABASE IF NOT EXISTS \`$GKG_GRAPH__DATABASE\`"
+  clickhouse client --host 127.0.0.1 --port "$GDK_CLICKHOUSE_TCP_PORT" --query "CREATE DATABASE IF NOT EXISTS \`$GRAPH_DATABASE\`"
 
   python3 - <<'PY' | while IFS= read -r stmt; do
 from pathlib import Path
@@ -336,41 +348,49 @@ for stmt in joined.split(";"):
     if stmt:
         print(stmt + ";")
 PY
-    clickhouse client --host 127.0.0.1 --port "$GDK_CLICKHOUSE_TCP_PORT" --database "$GKG_GRAPH__DATABASE" --query "$stmt"
+    clickhouse client --host 127.0.0.1 --port "$GDK_CLICKHOUSE_TCP_PORT" --database "$GRAPH_DATABASE" --query "$stmt"
   done
 }
 
 run_mode() {
   local mode="$1"
-  shift
-  exec cargo run -p orbit-server -- --mode="$mode" --config config/dev.yaml
+  local mode_overlay="${2:-}"
+  local args=(--config "$REPO_ROOT/config/dev.yaml")
+  if [[ -n "$mode_overlay" ]]; then
+    args+=(--config "$REPO_ROOT/config/dev/$mode_overlay.yaml")
+  fi
+  write_gdk_overlay
+  args+=(--config "$GDK_OVERLAY")
+  if [[ -f "$LOCAL_OVERLAY" ]]; then
+    args+=(--config "$LOCAL_OVERLAY")
+  fi
+  exec cargo run -p orbit-server -- --mode="$mode" "${args[@]}"
 }
 
 case "${1:-webserver}" in
   check)
     run_checks
     ;;
-  env)
-    print_env
+  config)
+    print_config
     ;;
   setup)
     apply_schema
     ;;
   webserver)
-    run_mode webserver
+    run_mode webserver webserver
     ;;
   indexer)
-    run_mode indexer
+    run_mode indexer indexer
     ;;
   dispatcher)
     run_mode dispatch-indexing
     ;;
   healthcheck)
-    export GKG_HEALTH_CHECK__BIND_ADDRESS="$GKG_HEALTHCHECK_BIND_ADDRESS"
-    run_mode health-check
+    run_mode health-check health-check
     ;;
   *)
-    printf "Usage: %s {check|env|setup|webserver|indexer|dispatcher|healthcheck}\n" "$(basename "$0")"
+    printf "Usage: %s {check|config|setup|webserver|indexer|dispatcher|healthcheck}\n" "$(basename "$0")"
     exit 1
     ;;
 esac

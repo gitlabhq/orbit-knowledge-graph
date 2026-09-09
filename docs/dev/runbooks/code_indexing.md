@@ -315,16 +315,15 @@ Check what streams exist in NATS:
 nats stream ls
 ```
 
-The `events_stream_name` in `schedule.tasks.code_indexing_task` must match the Siphon stream name exactly. For example, staging Siphon may publish to `stg_siphon_event_stream` while GKG defaults to `siphon_stream_main_db`.
+The `events_stream_name` in `schedule.tasks.siphon` must match the Siphon stream name exactly. For example, staging Siphon may publish to `stg_siphon_event_stream` while GKG defaults to `siphon_stream_main_db`.
 
-Fix via Helm values or environment variable:
+Fix it in the dispatcher's configuration overlay (the Helm chart renders it into the ConfigMap mounted at `/app/config/default.yaml`):
 
-```shell
-# Helm
-helm upgrade gkg orbit-helm-charts/gkg \
-  --set dispatcher.extraEnv.GKG_SCHEDULE__TASKS__CODE_INDEXING_TASK__EVENTS_STREAM_NAME=stg_siphon_event_stream
-
-# Or in values.yaml under schedule.tasks.code_indexing_task.events_stream_name
+```yaml
+schedule:
+  tasks:
+    siphon:
+      events_stream_name: stg_siphon_event_stream
 ```
 
 ### Stale data accumulation

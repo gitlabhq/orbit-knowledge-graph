@@ -25,6 +25,7 @@ evaluation_results*/
 # Local environment (credentials)
 .env
 config/config.yaml
+config/dev.local.yaml
 
 # Dev logs, pid files, and runtime artifacts
 .dev/

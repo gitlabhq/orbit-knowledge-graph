@@ -1,0 +1,11 @@
+# Indexer-mode overlay for `mise run dev:indexer`, layered after config/dev.yaml. Personal changes
+# go in the Git-ignored config/dev.local.yaml.
+indexer_health_bind_address: "127.0.0.1:4202"
+
+nats:
+  consumer_name: "gkg-indexer-dev"
+
+metrics:
+  prometheus:
+    enabled: false
+    port: 9200
