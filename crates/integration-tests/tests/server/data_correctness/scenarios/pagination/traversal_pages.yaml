@@ -1,0 +1,24 @@
+# source: crates/integration-tests/tests/server/data_correctness/pagination.rs::cursor_traversal
+description: Two-hop MEMBER_OF traversal pages cover all 9 edges
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
+        {"id": "g", "entity": "Group"}
+      ],
+      "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+      "cursor": {"page_size": 4}
+    }
+
+expect:
+  pages:
+    - node_count: 4
+      skip_requirements: [cursor, "relationship:MEMBER_OF"]
+    - node_count: 4
+      skip_requirements: [cursor, "relationship:MEMBER_OF"]
+    - node_count: 1
+      has_more: false
+      skip_requirements: [cursor, "relationship:MEMBER_OF"]

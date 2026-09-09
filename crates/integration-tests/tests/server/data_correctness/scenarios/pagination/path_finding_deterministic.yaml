@@ -1,0 +1,18 @@
+# source: crates/integration-tests/tests/server/data_correctness/pagination.rs::cursor_path_finding_is_deterministic
+description: Path-finding cursor returns deterministic first page
+
+query:
+  json: |
+    {
+      "query_type": "path_finding",
+      "nodes": [
+        {"id": "start", "entity": "User", "node_ids": [1]},
+        {"id": "end", "entity": "Project", "node_ids": [1000, 1002, 1004]}
+      ],
+      "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3,
+               "rel_types": ["MEMBER_OF", "CONTAINS"]},
+      "cursor": {"page_size": 2}
+    }
+
+expect:
+  skip_requirements: [path_finding]

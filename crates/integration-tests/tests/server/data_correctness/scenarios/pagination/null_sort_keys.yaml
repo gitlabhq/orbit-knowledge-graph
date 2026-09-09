@@ -1,0 +1,20 @@
+# source: crates/integration-tests/tests/server/data_correctness/pagination.rs::cursor_pages_across_null_sort_keys
+description: Pages across NULL merged_at sort keys cover all 6 MRs
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [{"id": "mr", "entity": "MergeRequest", "id_range": {"start": 1, "end": 10000},
+                 "columns": ["title"]}],
+      "order_by": "mr.merged_at",
+      "cursor": {"page_size": 3}
+    }
+
+expect:
+  pages:
+    - node_count: 3
+      skip_requirements: [cursor]
+    - node_count: 3
+      has_more: false
+      skip_requirements: [cursor]

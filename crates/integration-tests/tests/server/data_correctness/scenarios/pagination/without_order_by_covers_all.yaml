@@ -1,0 +1,21 @@
+# source: crates/integration-tests/tests/server/data_correctness/pagination.rs::cursor_without_order_by_pages_cover_all_data
+description: Cursor without order_by covers all users via synthesized PK tie-breaker
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000},
+                 "columns": ["username"]}],
+      "cursor": {"page_size": 3}
+    }
+
+expect:
+  pages:
+    - node_count: 3
+      skip_requirements: [cursor]
+    - node_count: 3
+      skip_requirements: [cursor]
+    - node_count: 1
+      has_more: false
+      skip_requirements: [cursor]

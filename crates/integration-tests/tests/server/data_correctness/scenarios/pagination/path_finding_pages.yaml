@@ -1,0 +1,21 @@
+# source: crates/integration-tests/tests/server/data_correctness/pagination.rs::cursor_path_finding_pages_cover_all_paths
+description: Path-finding cursor pages cover all 3 shortest paths
+
+query:
+  json: |
+    {
+      "query_type": "path_finding",
+      "nodes": [
+        {"id": "start", "entity": "User", "node_ids": [1]},
+        {"id": "end", "entity": "Project", "node_ids": [1000, 1002, 1004]}
+      ],
+      "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3,
+               "rel_types": ["MEMBER_OF", "CONTAINS"]},
+      "cursor": {"page_size": 2}
+    }
+
+expect:
+  pages:
+    - skip_requirements: [cursor, path_finding]
+    - has_more: false
+      skip_requirements: [cursor, path_finding]

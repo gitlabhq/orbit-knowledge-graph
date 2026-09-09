@@ -1,0 +1,18 @@
+# source: crates/integration-tests/tests/server/data_correctness/pagination.rs::cursor_neighbors_pages_cover_all_edges
+description: Neighbor pages cover all edges from Group 100
+
+query:
+  json: |
+    {
+      "query_type": "neighbors",
+      "nodes": [{"id": "g", "entity": "Group", "node_ids": [100]}],
+      "neighbors": {"direction": "both"},
+      "cursor": {"page_size": 3}
+    }
+
+expect:
+  pages:
+    - skip_requirements: [cursor, neighbors, node_ids]
+    - skip_requirements: [cursor, neighbors, node_ids]
+    - has_more: false
+      skip_requirements: [cursor, neighbors, node_ids]

@@ -1,0 +1,19 @@
+# source: crates/integration-tests/tests/server/data_correctness/pagination.rs::cursor_aggregation_without_sort_is_deterministic
+description: Aggregation cursor without sort returns deterministic first page
+
+query:
+  json: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["id", "username"]},
+        {"id": "mr", "entity": "MergeRequest"}
+      ],
+      "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
+      "group_by": ["u"],
+      "aggregations": [{"count": "mr", "as": "mr_count"}],
+      "cursor": {"page_size": 2}
+    }
+
+expect:
+  skip_requirements: [aggregation, cursor]
