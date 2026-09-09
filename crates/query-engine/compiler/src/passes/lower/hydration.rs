@@ -16,7 +16,7 @@ use crate::error::{QueryError, Result};
 use crate::passes::plan::HydrationNodePlan;
 use crate::passes::shared::deleted_false;
 
-use super::helpers::limit_by_scan;
+use super::helpers::{limit_by_scan, text_excerpt_projection};
 
 use orbit_utils::traversal_path::{TraversalPath, prune_to_leaves};
 
@@ -87,7 +87,10 @@ fn emit_arm(
             .flat_map(|col| {
                 [
                     Expr::string(col),
-                    Expr::func("toString", vec![Expr::col(alias, col)]),
+                    Expr::func(
+                        "toString",
+                        vec![text_excerpt_projection(alias, col, &node.text_excerpt)],
+                    ),
                 ]
             })
             .collect();
@@ -280,6 +283,7 @@ mod tests {
             id_property: "id".into(),
             node_ids,
             columns: columns.into_iter().map(String::from).collect(),
+            text_excerpt: Default::default(),
             traversal_paths: traversal_paths
                 .into_iter()
                 .map(TraversalPath::new_unchecked)
@@ -397,6 +401,7 @@ mod tests {
             id_property: "id".into(),
             node_ids: vec![1],
             columns: vec!["title".into()],
+            text_excerpt: Default::default(),
             traversal_paths: paths.clone(),
             sort_key: vec!["id".to_string()],
         };
@@ -440,6 +445,7 @@ mod tests {
             id_property: "id".into(),
             node_ids: vec![1],
             columns: vec!["title".into()],
+            text_excerpt: Default::default(),
             traversal_paths: paths,
             sort_key: vec!["id".to_string()],
         };

@@ -197,6 +197,7 @@ objects: `{"title": [{"contains": "foo"}, {"contains": "bar"}]}`.
 | `all_tokens` | Text index contains all tokens. |
 | `any_tokens` | Text index contains any token. |
 
+`contains`, `starts_with`, and `ends_with` work only on string, enum, and UUID properties.
 Token operators work only on properties with text indexes.
 
 ### Text-indexed properties
@@ -257,6 +258,10 @@ can require external service calls.
 
 The `content` column is for source code. For merge request diff text, use
 `MergeRequest.diff`, `MergeRequestDiff.patch`, or `MergeRequestDiffFile.diff`.
+
+### Text excerpts
+
+Database-backed node strings are shortened to fit the page: the fewer rows a page can return, the longer each value may be, so a single-row lookup returns full text while a 1,000-row page returns short excerpts. Shortened values end with `" [truncated]"`; use the GitLab API for full text.
 
 ### Filtering on virtual columns
 

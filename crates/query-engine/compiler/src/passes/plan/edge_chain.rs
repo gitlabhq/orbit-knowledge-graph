@@ -6,7 +6,7 @@ use orbit_utils::traversal_path::TraversalPath;
 
 use crate::input::*;
 
-use super::{Plan, PlanBody};
+use super::{Plan, PlanBody, TextExcerpt};
 use crate::passes::shared::{requested_columns, resolve_edge_table};
 
 pub struct Hop {
@@ -67,6 +67,7 @@ pub struct NodePlan {
     pub is_global: bool,
     pub redaction_id_column: String,
     pub columns: Option<ColumnSelection>,
+    pub text_excerpt: TextExcerpt,
     pub dedup_columns: Vec<String>,
     pub use_narrowing: bool,
     pub needs_elevated_filter: bool,
@@ -303,6 +304,7 @@ fn build_node_plans(input: &Input) -> HashMap<String, NodePlan> {
                     node_ids: n.node_ids.clone(),
                     id_range: n.id_range.clone(),
                     columns: n.columns.clone(),
+                    text_excerpt: TextExcerpt::default(),
                     dedup_columns: Vec::new(),
                     use_narrowing: false,
                     needs_elevated_filter: false,
@@ -878,6 +880,7 @@ mod tests {
             is_global,
             redaction_id_column: DEFAULT_PRIMARY_KEY.to_string(),
             columns: None,
+            text_excerpt: TextExcerpt::default(),
             dedup_columns: Vec::new(),
             use_narrowing: false,
             needs_elevated_filter: false,

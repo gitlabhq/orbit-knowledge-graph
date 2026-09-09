@@ -259,6 +259,10 @@ can require external service calls.
 The `content` column is for source code. For merge request diff text, use
 `MergeRequest.diff`, `MergeRequestDiff.patch`, or `MergeRequestDiffFile.diff`.
 
+### Text excerpts
+
+Database-backed node strings are shortened to fit the page: the fewer rows a page can return, the longer each value may be, so a single-row lookup returns full text while a 1,000-row page returns short excerpts. Shortened values end with `" [truncated]"`; use the GitLab API for full text.
+
 ### Filtering on virtual columns
 
 Virtual columns support the `eq`, `contains`, `starts_with`, `ends_with`,
