@@ -66,7 +66,11 @@ ReservedWord = @{ (^"ALL" | ^"ASCENDING" | ^"ASC" | ^"BY" | ^"CREATE" | ^"DELETE
 SP = _{ (WhiteSpace | Comment)+ }
 WhiteSpace = _{ " " | "\t" | "\n" | "\r" | "\u{0b}" | "\u{0c}" | '\u{1c}'..'\u{1f}' | "\u{1680}" | "\u{180e}" | '\u{2000}'..'\u{200a}' | "\u{2028}" | "\u{2029}" | "\u{205f}" | "\u{3000}" | "\u{a0}" | "\u{202f}" }
 Comment = _{ "/*" ~ (!"*/" ~ ANY)* ~ "*/" | "//" ~ (!("\n" | "\r") ~ ANY)* ~ ("\r"? ~ "\n" | EOI) }
-Nesting = { SOI ~ (StringLiteral | EscapedSymbolicName | Comment | OpenDelimiter | CloseDelimiter | Ignored)* ~ EOI }
+Nesting = { SOI ~ (SkipString | SkipEscaped | SkipComment | OpenDelimiter | CloseDelimiter | Ignored)* ~ EOI }
+// Unterminated tokens run to EOI instead of failing, so the scan never backtracks and stays linear.
+SkipString = _{ "\"" ~ ("\\" ~ ANY | !"\"" ~ ANY)* ~ ("\"" | EOI) | "'" ~ ("\\" ~ ANY | !"'" ~ ANY)* ~ ("'" | EOI) }
+SkipEscaped = _{ "`" ~ (!"`" ~ ANY)* ~ ("`" | EOI) }
+SkipComment = _{ "/*" ~ (!"*/" ~ ANY)* ~ ("*/" | EOI) | "//" ~ (!("\n" | "\r") ~ ANY)* }
 OpenDelimiter = { "(" | "[" | "{" }
 CloseDelimiter = { ")" | "]" | "}" }
 Ignored = _{ ANY }
