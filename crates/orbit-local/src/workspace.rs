@@ -75,6 +75,48 @@ pub fn resolve_db_path(db: Option<PathBuf>) -> Result<PathBuf> {
     absolutize(path)
 }
 
+pub struct IndexedRepo {
+    pub git: GitInfo,
+    pub client: DuckDbClient,
+}
+
+pub fn open_indexed(repo: Option<PathBuf>, db: Option<PathBuf>) -> Result<IndexedRepo> {
+    let repo_path = repo.unwrap_or_else(|| PathBuf::from("."));
+    let db = resolve_db_path(db)?;
+    let top_level = git_toplevel(&repo_path)
+        .with_context(|| format!("failed to find git top-level for {}", repo_path.display()))?;
+    let git = git_info(&top_level)
+        .with_context(|| format!("failed to read git info for {}", top_level.display()))?;
+
+    let indexed_count = |client: &DuckDbClient| -> Result<i64> {
+        let batches = client.query_arrow_json(
+            "SELECT COUNT(*) AS n FROM gl_file WHERE project_id = ?1 AND commit_sha = ?2",
+            &[git.project_id.into(), git.commit_sha.clone().into()],
+        )?;
+        Ok(duckdb_client::scalar_i64(&batches))
+    };
+
+    let mut client = crate::sql::open_graph(Some(db.clone()))?;
+    if indexed_count(&client)? == 0 {
+        eprintln!(
+            "current commit {} is not indexed — indexing {} first",
+            git.short_sha(),
+            git.repo_path.display()
+        );
+        drop(client);
+        crate::index_collect(git.repo_path.clone(), 0, false, Some(db.clone()))
+            .context("failed to index the repository")?;
+        client = crate::sql::open_graph(Some(db))?;
+        if indexed_count(&client)? == 0 {
+            anyhow::bail!(
+                "indexing finished but commit {} still has no rows in the local graph",
+                git.commit_sha
+            );
+        }
+    }
+    Ok(IndexedRepo { git, client })
+}
+
 fn absolutize(path: PathBuf) -> Result<PathBuf> {
     if path.is_absolute() {
         Ok(path)
@@ -230,6 +272,12 @@ pub struct GitInfo {
     /// For worktrees, the parent repo's canonical path. For regular
     /// repos, same as `repo_path`.
     pub parent_repo_path: PathBuf,
+}
+
+impl GitInfo {
+    pub fn short_sha(&self) -> &str {
+        self.commit_sha.get(..8).unwrap_or(&self.commit_sha)
+    }
 }
 
 pub fn git_info(repo_path: &Path) -> Result<GitInfo> {
