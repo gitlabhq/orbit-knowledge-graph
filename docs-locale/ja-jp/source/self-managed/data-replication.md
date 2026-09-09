@@ -21,7 +21,7 @@ title: データレプリケーションのセットアップ
 {{< /history >}}
 
 > [!note]
- GitLab Self-Managed上のGitLab Orbitは[ベータ版](https://docs.gitlab.com/policy/development_stages_support/#beta)です。この機能はテスト目的で利用可能ですが、本番環境での使用には対応していません。
+> GitLab Self-Managed上のGitLab Orbitは[ベータ版](https://docs.gitlab.com/policy/development_stages_support/#beta)です。この機能はテスト目的で利用可能ですが、本番環境での使用には対応していません。
 
 GitLab OrbitはClickHouse内のGitLabデータベースのコピーからGitLabデータを読み取ります。GitLabデータベース自体からは読み取りません。[Siphon](https://gitlab.com/gitlab-org/analytics-section/siphon)がそのコピーを最新の状態に保ちます。
 
@@ -412,7 +412,7 @@ kubectl -n siphon rollout restart deployment
    PostgreSQLの同じテーブルとカウントを比較してください。テーブルは`ReplacingMergeTree`であり、バックグラウンドマージが完了するまで更新された行が複数回現れるため、`FINAL`が必要です。テーブルが最初の書き込み時にプレースホルダー行を受け取ることがあるため、ClickHouseのカウントは通常わずかに多くなります。
 
 > [!warning]
- 非アクティブなレプリケーションスロットはGitLab PostgreSQLディスク上に先行書き込みログを保持し、ディスクを満杯にする可能性があります。ディスクの空き容量が許す時間を超えてSiphonを停止する場合は、`SELECT pg_drop_replication_slot('siphon_main_1_slot');`でスロットを削除し、後で新しいスナップショットを取得してください。
+> 非アクティブなレプリケーションスロットはGitLab PostgreSQLディスク上に先行書き込みログを保持し、ディスクを満杯にする可能性があります。ディスクの空き容量が許す時間を超えてSiphonを停止する場合は、`SELECT pg_drop_replication_slot('siphon_main_1_slot');`でスロットを削除し、後で新しいスナップショットを取得してください。
 
 ## 次のステップ {#next-step}
 

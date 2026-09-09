@@ -21,7 +21,7 @@ title: GitLab Self-Managed上のGitLab Orbitを使い始める
 {{< /history >}}
 
 > [!note]
- GitLab Self-Managed上のGitLab Orbitは[ベータ版](https://docs.gitlab.com/policy/development_stages_support/#beta)です。この機能はテスト目的で利用可能ですが、本番環境での使用には対応していません。
+> GitLab Self-Managed上のGitLab Orbitは[ベータ版](https://docs.gitlab.com/policy/development_stages_support/#beta)です。この機能はテスト目的で利用可能ですが、本番環境での使用には対応していません。
 
 GitLab Orbitは、ClickHouse、Kubernetes、NATSという3つのシステムに依存していますが、これらはGitLab Orbitがインストールするものではありません。残りのセットアップ手順を進めるには、この3つのシステムがすべて存在し、到達可能である必要があります。
 

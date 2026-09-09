@@ -22,7 +22,7 @@ title: GitLab Orbit Localの仕組み
 {{< /history >}}
 
 > [!note]
- GitLab Orbit Localは実験的機能です。GAリリース前に、機能およびコマンドの形式が変更される場合があります。
+> GitLab Orbit Localは実験的機能です。GAリリース前に、機能およびコマンドの形式が変更される場合があります。
 
 ## インデックス作成パイプライン {#indexing-pipeline}
 

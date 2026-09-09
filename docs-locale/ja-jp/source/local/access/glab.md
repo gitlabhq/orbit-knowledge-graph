@@ -26,7 +26,7 @@ title: GitLab CLI（`glab`）でOrbit Localを使用する
 [GitLab CLI（`glab`）](https://docs.gitlab.com/cli/)は、Orbit Localのインストール、実行、AIエージェントとの統合に推奨される標準的な方法です。`glab orbit local`は`glab orbit remote`と同じ構造を持つため、GitLabインスタンスへのクエリとローカルマシンへのクエリで同じパターンが使用できます。
 
 > [!note]
- `glab orbit local`と`glab orbit setup`は、`glab` 1.94以降で現在利用可能です。
+> `glab orbit local`と`glab orbit setup`は、`glab` 1.94以降で現在利用可能です。
 
 トップレベルのコマンドは2つあります:
 
