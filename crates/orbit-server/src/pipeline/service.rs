@@ -22,6 +22,11 @@ use super::stages::{
     AuthorizationStage, ClickHouseExecutor, HydrationStage, RedactionStage, SecurityStage,
 };
 
+pub struct RawQuery {
+    pub text: String,
+    pub frontend: query_engine::compiler::Frontend,
+}
+
 #[derive(Clone)]
 pub struct QueryPipelineService {
     client: Arc<ArrowClickHouseClient>,
@@ -68,7 +73,7 @@ impl QueryPipelineService {
         &self,
         schema: &SchemaSnapshot,
         request_context: RequestContext,
-        query_json: &str,
+        query: RawQuery,
         tx: mpsc::Sender<Result<ExecuteQueryMessage, Status>>,
         stream: Streaming<ExecuteQueryMessage>,
         timeout: std::time::Duration,
@@ -104,7 +109,8 @@ impl QueryPipelineService {
         }
 
         let mut ctx = QueryPipelineContext {
-            query_json: query_json.to_string(),
+            frontend: query.frontend,
+            query_json: query.text,
             compiled: None,
             ontology: Arc::clone(&schema.ontology),
             security_context: None,

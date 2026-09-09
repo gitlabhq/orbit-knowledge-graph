@@ -9,14 +9,26 @@ use super::error::{EXIT_GENERIC, RemoteError};
 use super::{ResponseFormat, write_stdout_raw};
 
 const DEFAULT_QUERY_FORMAT: &str = "llm";
+const BOM: &[u8] = &[0xEF, 0xBB, 0xBF];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum, strum::AsRefStr)]
+#[strum(serialize_all = "lowercase")]
+pub(crate) enum QueryLanguage {
+    Json,
+    Gql,
+}
 
 pub(crate) async fn run_query(
     source: Option<String>,
     format_override: Option<ResponseFormat>,
+    language: QueryLanguage,
 ) -> Result<(), RemoteError> {
     let client = OrbitClient::from_env()?;
     let raw_body = read_query_body(source.as_deref())?;
-    let request_body = build_query_request(&raw_body, format_override)?;
+    let request_body = match language {
+        QueryLanguage::Json => build_query_request(&raw_body, format_override)?,
+        QueryLanguage::Gql => build_gql_request(&raw_body, format_override)?,
+    };
     let response = client.query_raw(request_body).await?;
     write_stdout_raw(&response)
 }
@@ -37,11 +49,29 @@ fn read_query_body(source: Option<&str>) -> anyhow::Result<Vec<u8>> {
     }
 }
 
+fn build_gql_request(
+    body: &[u8],
+    format_override: Option<ResponseFormat>,
+) -> Result<Vec<u8>, RemoteError> {
+    let body = body.strip_prefix(BOM).unwrap_or(body);
+    let query = std::str::from_utf8(body).map_err(|e| {
+        RemoteError::new(EXIT_GENERIC, format!("query body is not valid UTF-8: {e}"))
+    })?;
+    if query.is_empty() {
+        return Err(RemoteError::new(EXIT_GENERIC, "query body is empty"));
+    }
+    let response_format = format_override.map_or(DEFAULT_QUERY_FORMAT, ResponseFormat::as_str);
+    serialize_request(&serde_json::json!({
+        "query": query,
+        "language": QueryLanguage::Gql.as_ref(),
+        "response_format": response_format,
+    }))
+}
+
 fn build_query_request(
     body: &[u8],
     format_override: Option<ResponseFormat>,
 ) -> Result<Vec<u8>, RemoteError> {
-    const BOM: &[u8] = &[0xEF, 0xBB, 0xBF];
     let body = body.strip_prefix(BOM).unwrap_or(body);
     if body.is_empty() {
         return Err(RemoteError::new(EXIT_GENERIC, "query body is empty"));
@@ -76,11 +106,14 @@ fn build_query_request(
         response_format: String,
     }
 
-    serde_json::to_vec(&Request {
+    serialize_request(&Request {
         query: &query,
         response_format,
     })
-    .map_err(|e| {
+}
+
+fn serialize_request(request: &impl Serialize) -> Result<Vec<u8>, RemoteError> {
+    serde_json::to_vec(request).map_err(|e| {
         RemoteError::new(
             EXIT_GENERIC,
             format!("failed to serialize query request: {e}"),
@@ -91,6 +124,24 @@ fn build_query_request(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gql_query_strips_bom_and_preserves_text() {
+        let text = "MATCH (u:User {username: 'a\\\\b\\\"λ'})\nRETURN u LIMIT 1\n";
+        for format in [None, Some(ResponseFormat::Raw), Some(ResponseFormat::Llm)] {
+            let out = build_gql_request(format!("\u{feff}{text}").as_bytes(), format).unwrap();
+            let value: serde_json::Value = serde_json::from_slice(&out).unwrap();
+            assert_eq!(value["query"].as_str().unwrap().as_bytes(), text.as_bytes());
+            assert_eq!(value["language"], "gql");
+            assert_eq!(
+                value["response_format"],
+                format.map_or("llm", ResponseFormat::as_str)
+            );
+        }
+        for body in [b"".as_slice(), BOM, &[0xff]] {
+            assert!(build_gql_request(body, None).is_err());
+        }
+    }
 
     #[test]
     fn query_flag_overrides_body_and_default() {
