@@ -17,9 +17,7 @@ use indexer::metrics::EngineMetrics;
 use indexer::nats::NatsBroker;
 use indexer::nats::versioning::NATS_VERSIONER;
 use indexer::types::{Envelope, Event, Subscription};
-use orbit_server_config::{
-    ClickHouseConfiguration, EngineConfiguration, NatsConfiguration, SubscriptionConfig,
-};
+use orbit_server_config::{ClickHouseConfiguration, NatsConfiguration, SubscriptionConfig};
 use orbit_utils::arrow::ArrowUtils;
 use serde::{Deserialize, Serialize};
 use testcontainers::GenericImage;
@@ -221,7 +219,7 @@ impl TestContext {
     async fn create_broker(&self) -> Arc<NatsBroker> {
         self.create_broker_with_config(NatsConfiguration {
             url: self.nats_url.clone(),
-            ..Default::default()
+            ..orbit_server_config::AppConfig::embedded_defaults().nats
         })
         .await
     }
@@ -245,7 +243,9 @@ impl TestContext {
                     session_settings: std::collections::HashMap::new(),
                     quorum_writes: false,
                     insert_settings: std::collections::HashMap::new(),
-                    profiling: Default::default(),
+                    profiling: orbit_server_config::AppConfig::embedded_defaults()
+                        .graph
+                        .profiling,
                 },
                 Arc::new(EngineMetrics::default()),
             )
@@ -290,7 +290,7 @@ async fn run_engine_for(engine: Arc<Engine>, duration: Duration) {
     let engine_handle = engine.clone();
     let task = tokio::spawn(async move {
         engine_handle
-            .run(&EngineConfiguration::default())
+            .run(&indexer::testkit::test_engine_configuration())
             .await
             .expect("engine failed");
     });
@@ -429,7 +429,7 @@ async fn subject_is_unblocked_after_handler_panic() {
         url: context.nats_url.clone(),
         max_deliver: Some(1),
         consumer_name: Some("panic-test-consumer".into()),
-        ..Default::default()
+        ..orbit_server_config::AppConfig::embedded_defaults().nats
     };
 
     let should_panic = Arc::new(AtomicBool::new(true));
@@ -611,7 +611,7 @@ async fn permanent_dlq_error_sends_to_dlq_on_first_attempt() {
         .create_broker_with_config(NatsConfiguration {
             url: context.nats_url.clone(),
             consumer_name: Some("permanent-dlq-consumer".into()),
-            ..Default::default()
+            ..orbit_server_config::AppConfig::embedded_defaults().nats
         })
         .await;
     broker
@@ -662,7 +662,7 @@ async fn permanent_drop_error_drops_without_dlq() {
         .create_broker_with_config(NatsConfiguration {
             url: context.nats_url.clone(),
             consumer_name: Some("permanent-drop-consumer".into()),
-            ..Default::default()
+            ..orbit_server_config::AppConfig::embedded_defaults().nats
         })
         .await;
     broker

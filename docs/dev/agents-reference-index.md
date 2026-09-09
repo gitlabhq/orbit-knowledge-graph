@@ -40,7 +40,7 @@ Canonical locations for files, schemas, configs, and tools in the knowledge-grap
 | Graph DDL (local DuckDB) | Generated at runtime from ontology via `generate_local_tables()` + `duckdb_ddl` |
 | Datalake DDL (ClickHouse) | `fixtures/siphon.sql` |
 | gRPC service definition | `crates/orbit-server/proto/orbit.proto` |
-| Server config structure | `crates/orbit-server-config/src/app.rs` (`AppConfig`), `config/default.yaml` |
+| Server config structure | `crates/orbit-server-config/src/app.rs` (`AppConfig`), `config/default.yaml` (embedded; declares every setting, no Rust fallbacks) |
 | Query settings (timeouts, cache) | `config/default.yaml` (`query:` section), `crates/orbit-server-config/src/query.rs` |
 | Configuration runbook | `docs/dev/runbooks/server_configuration.md` |
 | Local development guide | `docs/dev/local-development.md` |

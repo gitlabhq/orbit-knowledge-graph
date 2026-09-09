@@ -18,7 +18,6 @@ chrono = { workspace = true }
 clickhouse = { workspace = true }
 clickhouse-client = { workspace = true }
 code-graph = { path = "../code-graph" }
-croner = { workspace = true }
 orbit-analytics = { path = "../orbit-analytics" }
 orbit-observability = { workspace = true }
 orbit-server-config = { path = "../orbit-server-config" }

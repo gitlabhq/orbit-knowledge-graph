@@ -231,7 +231,7 @@ mod tests {
     use axum::Router;
     use axum::http::StatusCode as AxumStatus;
     use axum::routing::head;
-    use orbit_server_config::QuotaConfig;
+    use orbit_server_config::{AppConfig, QuotaConfig};
     use std::sync::atomic::{AtomicUsize, Ordering};
     use tokio::net::TcpListener;
 
@@ -325,7 +325,7 @@ mod tests {
             collector_url: String::new(),
             quota: QuotaConfig {
                 enabled: false,
-                ..Default::default()
+                ..AppConfig::embedded_defaults().billing.quota
             },
         };
         let svc = QuotaService::from_config(&cfg).unwrap();

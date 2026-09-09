@@ -453,7 +453,10 @@ mod tests {
 
     #[test]
     fn default_config_has_cron() {
-        let config = MigrationCompletionConfig::default();
-        assert!(config.schedule.cron.is_some());
+        let config = orbit_server_config::AppConfig::embedded_defaults()
+            .schedule
+            .tasks
+            .migration_completion;
+        assert!(!config.schedule.cron.expression().is_empty());
     }
 }

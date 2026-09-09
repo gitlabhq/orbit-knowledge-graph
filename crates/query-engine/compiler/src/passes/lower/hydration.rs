@@ -253,7 +253,7 @@ mod tests {
     use orbit_server_config::QueryConfig;
 
     fn render(node: &Node) -> String {
-        codegen(node, ResultContext::new(), QueryConfig::empty())
+        codegen(node, ResultContext::new(), QueryConfig::default())
             .unwrap()
             .sql
     }
@@ -264,7 +264,7 @@ mod tests {
         String,
         std::collections::HashMap<String, crate::passes::codegen::ParamValue>,
     ) {
-        let q = codegen(node, ResultContext::new(), QueryConfig::empty()).unwrap();
+        let q = codegen(node, ResultContext::new(), QueryConfig::default()).unwrap();
         (q.sql, q.params)
     }
 

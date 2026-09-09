@@ -144,7 +144,7 @@ mod tests {
         let validator =
             Arc::new(JwtValidator::new("test-secret-that-is-at-least-32-bytes-long", 0).unwrap());
         let ontology = Arc::new(Ontology::load_embedded().expect("ontology must load"));
-        let clickhouse_config = ClickHouseConfiguration::default();
+        let clickhouse_config = orbit_server_config::AppConfig::embedded_defaults().graph;
         let cluster_health = ClusterHealthChecker::default().into_arc();
         let server = GrpcServer::new(
             addr,
@@ -153,8 +153,8 @@ mod tests {
             &clickhouse_config,
             cluster_health,
             None,
-            GrpcConfig::default(),
-            Arc::new(AnalyticsConfig::default()),
+            orbit_server_config::AppConfig::embedded_defaults().grpc,
+            Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
         );
         assert_eq!(server.addr(), addr);
     }
