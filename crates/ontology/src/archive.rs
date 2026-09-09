@@ -1,10 +1,10 @@
 use std::collections::BTreeMap;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
+use flate2::read::GzDecoder;
 use flate2::{Compression, GzBuilder};
-use orbit_utils::archive::extract_tar_gz;
-use orbit_utils::fs_stream::{CapExceeded, Counter, Decision, FileInventoryEntry, FileStreamHooks};
+use orbit_utils::fs_stream::{CapExceeded, Counter};
 use serde::{Deserialize, Serialize};
 
 use crate::loading::{ReadOntologyFile, load_with};
@@ -21,8 +21,8 @@ const MAX_FILES: u64 = 4096;
 pub enum ArchiveError {
     #[error("ontology archive I/O: {0}")]
     Io(#[from] std::io::Error),
-    #[error("ontology archive extraction: {0}")]
-    Extraction(#[from] orbit_utils::fs_stream::StreamError),
+    #[error("ontology archive limit: {0}")]
+    Cap(#[from] CapExceeded),
     #[error("invalid ontology archive manifest: {0}")]
     Manifest(#[from] serde_json::Error),
     #[error("invalid ontology archive: {0}")]
@@ -86,20 +86,7 @@ impl OntologyArchive {
     }
 
     pub fn from_bytes(schema_version: u32, bytes: &[u8]) -> Result<Self, ArchiveError> {
-        let extraction_directory = tempfile::tempdir()?;
-        let mut limits = ArchiveLimits {
-            source_bytes: Counter::new("ontology source bytes", MAX_SOURCE_BYTES),
-            file_count: Counter::new("ontology files", MAX_FILES),
-        };
-
-        let inventory = extract_tar_gz(bytes, extraction_directory.path(), &mut limits)?;
-
-        let mut sources = BTreeMap::new();
-        for file in inventory {
-            let source_path = extraction_directory.path().join(&file.path);
-            let content = std::fs::read_to_string(source_path)?;
-            sources.insert(file.path, content);
-        }
+        let mut sources = read_sources(bytes)?;
 
         let manifest_json = sources
             .remove(MANIFEST_PATH)
@@ -171,20 +158,46 @@ impl ReadOntologyFile for OntologyArchive {
     }
 }
 
-struct ArchiveLimits {
-    source_bytes: Counter,
-    file_count: Counter,
+fn read_sources(bytes: &[u8]) -> Result<BTreeMap<String, String>, ArchiveError> {
+    let mut source_bytes = Counter::new("ontology source bytes", MAX_SOURCE_BYTES);
+    let mut file_count = Counter::new("ontology files", MAX_FILES);
+    let mut sources = BTreeMap::new();
+
+    let mut archive = tar::Archive::new(GzDecoder::new(bytes));
+    for entry in archive.entries()? {
+        let mut entry = entry?;
+        if entry.header().entry_type() != tar::EntryType::Regular {
+            continue;
+        }
+
+        let relative_path = source_path(&entry.path()?)?;
+        file_count.add(1)?;
+        source_bytes.add(entry.size())?;
+
+        let mut content = String::new();
+        entry.read_to_string(&mut content)?;
+        sources.insert(relative_path, content);
+    }
+
+    Ok(sources)
 }
 
-impl FileStreamHooks for ArchiveLimits {
-    fn admit(&mut self, file: &FileInventoryEntry) -> Result<(), CapExceeded> {
-        self.file_count.add(1)?;
-        self.source_bytes.add(file.size)
+fn source_path(entry_path: &Path) -> Result<String, ArchiveError> {
+    let relative_path = entry_path.strip_prefix(ARCHIVE_ROOT).map_err(|_| {
+        ArchiveError::Invalid(format!(
+            "entry {} is outside the {ARCHIVE_ROOT} root",
+            entry_path.display()
+        ))
+    })?;
+    if relative_path.as_os_str().is_empty()
+        || !orbit_utils::fs::is_safe_relative_path(relative_path)
+    {
+        return Err(ArchiveError::Invalid(format!(
+            "path traversal detected: {}",
+            entry_path.display()
+        )));
     }
-
-    fn on_non_regular(&mut self, _file: &FileInventoryEntry) -> Decision {
-        Decision::Drop
-    }
+    Ok(relative_path.to_string_lossy().into_owned())
 }
 
 fn append_file<W: Write>(
@@ -205,7 +218,6 @@ mod tests {
     use std::io::Write;
 
     use flate2::{Compression, write::GzEncoder};
-    use orbit_utils::fs_stream::StreamError;
 
     use super::{ArchiveError, OntologyArchive};
     use crate::Ontology;
@@ -301,12 +313,12 @@ mod tests {
 
         assert!(matches!(
             OntologyArchive::from_bytes(SCHEMA_VERSION, &bytes),
-            Err(ArchiveError::Extraction(StreamError::Cap(_)))
+            Err(ArchiveError::Cap(_))
         ));
     }
 
     #[test]
-    fn archives_cannot_traverse_outside_the_extraction_directory() {
+    fn archives_cannot_escape_the_archive_root() {
         let bytes = archive_with_header_only("ontology/../schema.yaml", 0);
 
         let error = OntologyArchive::from_bytes(SCHEMA_VERSION, &bytes).unwrap_err();
