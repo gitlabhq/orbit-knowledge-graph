@@ -1,0 +1,22 @@
+# source: crates/integration-tests/tests/server/data_correctness/work_items.rs::search_filter_work_item_type_returns_matching_rows
+description: In-list filter on work_item_type returns only matching rows
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [{"id": "w", "entity": "WorkItem", "id_range": {"start": 1, "end": 10000},
+                 "columns": ["title", "work_item_type"],
+                 "filters": {"work_item_type": {"in": ["issue", "task"]}}}],
+      "limit": 10
+    }
+  gql: |
+    MATCH (w:WorkItem) WHERE w.id >= 1 AND w.id <= 10000 AND w.work_item_type IN ['issue', 'task'] RETURN w.title, w.work_item_type LIMIT 10
+
+expect:
+  nodes:
+    WorkItem:
+      count: 3
+      ids: [4000, 4002, 4010]
+      filters:
+        work_item_type: { in: [issue, task] }

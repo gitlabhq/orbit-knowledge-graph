@@ -1,0 +1,27 @@
+# source: crates/integration-tests/tests/server/data_correctness/edge_cases/mod.rs::cross_namespace_isolation_no_leakage
+description: Namespace 1/101/ sees only its own MRs, no leakage from 1/100/
+
+config:
+  security: { org_id: 1, paths: ["1/101/"] }
+
+query:
+  json: |
+    {
+        "query_type": "traversal",
+        "nodes": [
+            {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
+            {"id": "mr", "entity": "MergeRequest"}
+        ],
+        "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
+        "limit": 50
+    }
+
+expect:
+  node_count: 2
+  nodes:
+    MergeRequest:
+      ids: [2002]
+      absent: [2000, 2001, 2003]
+  edges:
+    AUTHORED: [[2, 2002]]
+  referential_integrity: true

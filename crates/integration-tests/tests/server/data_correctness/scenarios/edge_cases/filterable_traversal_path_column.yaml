@@ -1,0 +1,20 @@
+# source: crates/integration-tests/tests/server/data_correctness/edge_cases/filterable.rs::filterable_traversal_path_readable_as_column
+description: traversal_path (filterable=false) is readable as a return column on Group
+
+query:
+  json: |
+    {
+        "query_type": "traversal",
+        "nodes": [{"id": "g", "entity": "Group",
+                 "columns": ["name", "traversal_path"],
+                 "node_ids": [100]}],
+        "limit": 10
+    }
+
+expect:
+  node_count: 1
+  nodes:
+    Group:
+      ids: [100]
+      rows:
+        - { id: 100, name: Public Group, traversal_path: "1/100/" }

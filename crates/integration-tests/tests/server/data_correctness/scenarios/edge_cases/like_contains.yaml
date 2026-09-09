@@ -1,0 +1,18 @@
+# source: crates/integration-tests/tests/server/data_correctness/edge_cases/like.rs::like_contains_returns_matching_rows
+description: LIKE contains filter returns usernames matching substring
+
+query:
+  json: |
+    {
+        "query_type": "traversal",
+        "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"],
+                 "filters": {"username": {"contains": "lic"}}}],
+        "limit": 10
+    }
+
+expect:
+  node_count: 1
+  nodes:
+    User:
+      filters:
+        username: { contains: lic }

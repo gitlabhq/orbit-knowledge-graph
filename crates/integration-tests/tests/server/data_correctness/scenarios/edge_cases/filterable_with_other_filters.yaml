@@ -1,0 +1,21 @@
+# source: crates/integration-tests/tests/server/data_correctness/edge_cases/filterable.rs::filterable_other_filters_still_work_alongside_traversal_path_column
+description: Other filters still work when traversal_path is a return column
+
+query:
+  json: |
+    {
+        "query_type": "traversal",
+        "nodes": [{"id": "g", "entity": "Group",
+                 "columns": ["name", "traversal_path"],
+                 "filters": {"name": "Public Group"}}],
+        "limit": 10
+    }
+
+expect:
+  node_count: 1
+  nodes:
+    Group:
+      filters:
+        name: Public Group
+      rows:
+        - { id: 100, traversal_path: "1/100/" }

@@ -1,0 +1,30 @@
+# source: crates/integration-tests/tests/server/data_correctness/work_items.rs::traversal_user_closed_work_item_returns_correct_edges
+description: User-WorkItem CLOSED traversal returns correct edges and node properties
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+        {"id": "w", "entity": "WorkItem", "columns": ["title", "state"]}
+      ],
+      "relationships": [{"type": "CLOSED", "from": "u", "to": "w"}],
+      "limit": 20
+    }
+  gql: |
+    MATCH (u:User)-[:CLOSED]->(w:WorkItem) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username, w.title, w.state LIMIT 20
+
+expect:
+  node_count: 2
+  referential_integrity: true
+  edge_exists:
+    CLOSED:
+      - [2, 4001]
+  nodes:
+    User:
+      rows:
+        - { id: 2, username: bob }
+    WorkItem:
+      rows:
+        - { id: 4001, title: "Fix auth bug", state: closed }

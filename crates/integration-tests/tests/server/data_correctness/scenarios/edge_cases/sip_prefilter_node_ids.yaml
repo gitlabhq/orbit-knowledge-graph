@@ -1,0 +1,25 @@
+# source: crates/integration-tests/tests/server/data_correctness/edge_cases/mod.rs::sip_prefilter_with_node_ids_returns_correct_results
+description: SIP prefilter with node_ids returns only the requested users and their groups
+
+query:
+  json: |
+    {
+        "query_type": "traversal",
+        "nodes": [
+            {"id": "u", "entity": "User", "columns": ["username"], "node_ids": [1, 3]},
+            {"id": "g", "entity": "Group", "columns": ["name"]}
+        ],
+        "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+        "limit": 20
+    }
+
+expect:
+  node_count: 5
+  nodes:
+    User:
+      ids: [1, 3]
+    Group:
+      ids: [100, 101, 102]
+  edges:
+    MEMBER_OF: [[1, 100], [1, 102], [3, 101]]
+  referential_integrity: true
