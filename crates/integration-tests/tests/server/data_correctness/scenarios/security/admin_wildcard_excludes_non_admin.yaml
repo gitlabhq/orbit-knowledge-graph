@@ -1,0 +1,18 @@
+# source: crates/integration-tests/tests/server/data_correctness/security.rs::admin_only_non_admin_wildcard_columns_excludes_admin_fields
+description: Non-admin wildcard columns silently exclude admin-only fields
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [{"id": "u", "entity": "User", "columns": "*", "node_ids": [1]}],
+      "limit": 10
+    }
+
+expect:
+  node_count: 1
+  nodes:
+    User:
+      ids: [1]
+      prop_present: [username]
+      prop_absent: [is_admin, is_auditor]

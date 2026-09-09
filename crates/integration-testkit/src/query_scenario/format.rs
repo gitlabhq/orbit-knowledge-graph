@@ -40,12 +40,23 @@ pub enum PresetOr<T> {
 pub struct SecurityOverride {
     #[serde(default)]
     pub admin: Option<bool>,
+    /// Uniform paths (all share the same access_level).
     #[serde(default)]
     pub paths: Option<Vec<String>>,
+    /// Per-path access levels: `[{path: "1/100/", access_level: 20}]`
+    #[serde(default)]
+    pub authorized_paths: Option<Vec<AuthorizedPathSpec>>,
     #[serde(default)]
     pub org_id: Option<i64>,
     #[serde(default)]
     pub access_level: Option<u32>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AuthorizedPathSpec {
+    pub path: String,
+    pub access_level: u32,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -60,6 +71,8 @@ pub struct RedactionConfig {
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct QueryExpect {
+    #[serde(default)]
+    pub compile_only: bool,
     #[serde(default)]
     pub compile_error: Option<CompileErrorExpect>,
     #[serde(default)]
@@ -79,6 +92,21 @@ pub struct QueryExpect {
     pub edge_count: BTreeMap<String, usize>,
     #[serde(default)]
     pub groups: BTreeMap<String, GroupExpect>,
+    #[serde(default)]
+    pub empty_aggregation: bool,
+    /// Assert row count for ungrouped/property-grouped aggregation results.
+    #[serde(default)]
+    pub row_count: Option<usize>,
+    /// Assert values on rows by index: `[{index: 0, col: val}]`
+    #[serde(default)]
+    pub row_values: Vec<BTreeMap<String, serde_json::Value>>,
+    #[serde(default)]
+    pub sql_contains: Vec<String>,
+    #[serde(default)]
+    pub sql_not_contains: Vec<String>,
+    /// Assert the number of paths returned by a path_finding query.
+    #[serde(default)]
+    pub path_count: Option<usize>,
     #[serde(default)]
     pub referential_integrity: bool,
     #[serde(default)]
@@ -102,6 +130,12 @@ pub struct NodeExpect {
     /// returned node of this entity has `state == "blocked"`.
     #[serde(default)]
     pub filters: BTreeMap<String, serde_json::Value>,
+    /// Assert these properties exist on every node of this entity.
+    #[serde(default)]
+    pub prop_present: Vec<String>,
+    /// Assert these properties are absent on every node of this entity.
+    #[serde(default)]
+    pub prop_absent: Vec<String>,
     #[serde(default)]
     pub rows: Vec<BTreeMap<String, serde_json::Value>>,
 }
@@ -110,7 +144,20 @@ pub struct NodeExpect {
 #[serde(deny_unknown_fields)]
 pub struct GroupExpect {
     #[serde(default)]
+    pub entity: Option<String>,
+    #[serde(default)]
+    pub ids: Option<Vec<i64>>,
+    #[serde(default)]
     pub rows: Vec<GroupRowExpect>,
+    #[serde(default)]
+    pub absent: Vec<GroupAbsentExpect>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GroupAbsentExpect {
+    pub entity: String,
+    pub id: i64,
 }
 
 #[derive(Debug, Deserialize)]

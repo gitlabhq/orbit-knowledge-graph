@@ -26,5 +26,7 @@ query:
 expect:
   groups:
     u:
+      entity: User
+      ids: [7]
       rows:
         - { entity: User, id: 7, values: { n: 2 } }
