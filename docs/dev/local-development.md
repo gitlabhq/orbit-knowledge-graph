@@ -3,7 +3,7 @@
 Run GKG as native Rust processes connected to NATS, Siphon, PostgreSQL, and
 ClickHouse from your GDK installation.
 
-> Working on `orbit-local`, the ontology, language parsers, or docs only?
+> Working on `orbit-cli`, the ontology, language parsers, or docs only?
 > You don't need GDK or any of the services below. See the
 > [Orbit Local development quickstart](orbit-local-quickstart.md).
 

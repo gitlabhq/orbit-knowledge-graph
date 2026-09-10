@@ -38,7 +38,7 @@ Definitions declared in one file:
 
 ```bash
 orbit sql "SELECT definition_type, name, start_line FROM gl_definition
-           WHERE file_path='crates/orbit-local/src/main.rs' ORDER BY start_line"
+           WHERE file_path='crates/orbit-cli/src/main.rs' ORDER BY start_line"
 ```
 
 Who calls a function (`CALLS` edge, resolved to caller names):

@@ -17,7 +17,7 @@ members = [
   "crates/query-engine/formatters",
   "crates/query-engine/profiler",
   "crates/query-engine/compiler-pipeline-macros",
-  "crates/orbit-local",
+  "crates/orbit-cli",
 
   "crates/orbit-analytics",
   "crates/orbit-billing",

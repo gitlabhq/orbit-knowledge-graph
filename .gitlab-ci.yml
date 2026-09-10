@@ -713,7 +713,7 @@ corpus-smoke-test:
       when: never
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
       changes:
-        - crates/orbit-local/**/*
+        - crates/orbit-cli/**/*
         - crates/code-graph/**/*
         - crates/ontology/**/*
         - crates/duckdb-client/**/*
