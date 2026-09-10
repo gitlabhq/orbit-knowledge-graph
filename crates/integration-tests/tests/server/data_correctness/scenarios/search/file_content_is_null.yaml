@@ -1,0 +1,25 @@
+# source: crates/integration-tests/tests/server/data_correctness/search.rs::search_file_content_is_null_matches_binary
+description: File content is_null filter matches binary files with no text content
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [{"id": "f", "entity": "File",
+               "node_ids": [13000, 13001, 13002, 13003, 13004],
+               "columns": ["path", "project_id", "content"],
+               "filters": {
+                   "project_id": {"eq": 1000},
+                   "content": {"is_null": true}
+               }}],
+      "limit": 10
+    }
+
+expect:
+  node_count: 1
+  nodes:
+    File:
+      ids: [13003]
+      filters:
+        project_id: { eq: 1000 }
+        content: { is_null: true }

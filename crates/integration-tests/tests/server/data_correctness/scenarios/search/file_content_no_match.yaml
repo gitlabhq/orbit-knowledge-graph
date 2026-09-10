@@ -1,0 +1,23 @@
+# source: crates/integration-tests/tests/server/data_correctness/search.rs::search_file_content_contains_no_match
+description: File content contains filter with nonexistent token returns zero rows
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [{"id": "f", "entity": "File",
+               "node_ids": [13000, 13001, 13002, 13003, 13004],
+               "columns": ["path", "content"],
+               "filters": {
+                   "project_id": {"eq": 1000},
+                   "content": {"contains": "zqxj_nonexistent_token"}
+               }}],
+      "limit": 10
+    }
+
+expect:
+  skip_requirements:
+    - "filter:content"
+    - "filter:project_id"
+    - node_ids
+  node_count: 0
