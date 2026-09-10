@@ -1,0 +1,66 @@
+name: "Rust: trait implementation and method dispatch"
+pipeline: rust
+fixtures:
+  - path: main.rs
+    content: |
+      trait Animal {
+          fn speak(&self) -> &str;
+          fn name(&self) -> &str;
+      }
+
+      struct Dog {
+          name: String,
+      }
+
+      impl Animal for Dog {
+          fn speak(&self) -> &str {
+              "woof"
+          }
+          fn name(&self) -> &str {
+              &self.name
+          }
+      }
+
+      impl Dog {
+          fn fetch(&self) -> &str {
+              self.speak()
+          }
+      }
+
+      fn greet(animal: &dyn Animal) -> String {
+          format!("{} says {}", animal.name(), animal.speak())
+      }
+
+tests:
+  - name: Trait and struct definitions exist
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'main.rs'
+        AND d.definition_type IN ['Trait', 'Struct', 'Function']
+        AND d.name IN ['Animal', 'Dog', 'greet']
+      RETURN d.name AS name, d.definition_type AS type
+      ORDER BY name
+    assert:
+      - { row_count: 3 }
+      - { row: { name: "Animal", type: "Trait" } }
+      - { row: { name: "Dog", type: "Struct" } }
+      - { row: { name: "greet", type: "Function" } }
+
+  - name: impl methods are nested via Defines
+    query: |
+      MATCH (parent:Definition)-[e:DefinitionToDefinition]->(child:Definition)
+      WHERE e.edge_kind = 'Defines'
+        AND child.definition_type = 'Method'
+      RETURN child.name AS method
+      ORDER BY method
+    assert:
+      - { row_count: 3 }
+      - { column_values: { field: method, values: ["fetch", "name", "speak"] } }
+
+  - name: fetch calls self.speak()
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'fetch' AND callee.name = 'speak' AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller
+    assert:
+      - { row_count: 1 }

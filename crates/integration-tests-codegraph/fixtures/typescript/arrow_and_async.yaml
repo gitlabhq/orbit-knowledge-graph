@@ -1,0 +1,53 @@
+name: "TypeScript: arrow functions, async/await, const bindings"
+pipeline: typescript
+fixtures:
+  - path: main.ts
+    content: |
+      const add = (a: number, b: number): number => a + b;
+
+      const multiply = (a: number, b: number): number => {
+          return a * b;
+      };
+
+      async function fetchData(): Promise<string> {
+          return "data";
+      }
+
+      async function process(): Promise<void> {
+          const data = await fetchData();
+      }
+
+      function useArrows(): number {
+          return add(1, multiply(2, 3));
+      }
+
+tests:
+  - name: Arrow functions and async functions extracted
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'main.ts'
+        AND d.definition_type = 'Function'
+      RETURN d.name AS name
+      ORDER BY name
+    assert:
+      - { row_count: 4 }
+      - { unique: name }
+      - { column_values: { field: name, values: ["add", "fetchData", "multiply", "process"] } }
+
+  - name: useArrows calls both add and multiply
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'useArrows' AND e.edge_kind = 'Calls'
+      RETURN callee.name AS callee
+      ORDER BY callee
+    assert:
+      - { row_count: 2 }
+      - { column_values: { field: callee, values: ["add", "multiply"] } }
+
+  - name: process calls fetchData
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'process' AND callee.name = 'fetchData' AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
