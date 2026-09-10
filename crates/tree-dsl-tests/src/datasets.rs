@@ -277,12 +277,12 @@ fn build_files(trees: &[Tree], lang: &Lang) -> anyhow::Result<RecordBatch> {
         let ext = filename.rsplit('.').next().unwrap_or("");
         ext_b.append_value(ext);
         lang_b.append_value(match ext {
-            "py" | "pyi" => "Python",
-            "ts" => "TypeScript",
-            "tsx" => "TSX",
-            "js" | "jsx" | "mjs" | "cjs" => "JavaScript",
-            "rs" => "Rust",
-            _ => "Unknown",
+            "py" | "pyi" => "python",
+            "ts" => "typescript",
+            "tsx" => "tsx",
+            "js" | "jsx" | "mjs" | "cjs" => "javascript",
+            "rs" => "rust",
+            _ => "unknown",
         });
     }
     make_batch(
