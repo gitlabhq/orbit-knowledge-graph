@@ -18,11 +18,12 @@ use crate::error::{QueryError, Result};
 use crate::input::{Input, QueryType};
 use crate::passes::codegen::CompiledQueryContext;
 use crate::passes::enforce::ResultContext;
+use crate::passes::frontend;
 use crate::passes::hydrate::HydrationPlan;
 use crate::passes::plan::QueryPlan;
 use crate::passes::{
-    check, codegen, cursor, enforce, hydrate, lower, normalize, partition, plan, restrict,
-    security, settings, validate,
+    check, codegen, cursor, enforce, hydrate, lower, normalize, plan, restrict, security, settings,
+    validate,
 };
 use crate::types::SecurityContext;
 
@@ -37,7 +38,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
     }
 
     state {
-        pub json: String,
+        pub raw: String,
         pub input: Input,
         pub query_plan: QueryPlan,
         pub node: Node,
@@ -48,9 +49,16 @@ compiler_pipeline_macros::define_compiler_ctx! {
     }
 
     phases {
+        json_dsl_parse {
+            reads_env: [ontology]
+            mutates: [raw, input]
+        }
+        gql_parse {
+            mutates: [raw, input]
+        }
         validate {
             reads_env: [ontology]
-            mutates: [json, input]
+            mutates: [input]
         }
         normalize {
             reads_env: [ontology]
@@ -75,15 +83,11 @@ compiler_pipeline_macros::define_compiler_ctx! {
             reads_env: [security_ctx, ontology]
             mutates: [node]
         }
-        partition {
-            reads_env: [ontology, security_ctx]
-            mutates: [node]
-        }
         cursor {
             mutates: [input, node]
         }
         check {
-            reads_env: [security_ctx]
+            reads_env: [security_ctx, ontology]
             reads_state: [node]
         }
         hydrate_plan {
@@ -102,10 +106,15 @@ compiler_pipeline_macros::define_compiler_ctx! {
     }
 
     pipelines {
-        clickhouse {
+        clickhouse_json_dsl {
             env: [ontology, security_ctx]
-            state: [json, input, query_plan, node, result_ctx, query_config, hydration_plan, output]
-            phases: [validate, normalize, restrict, plan, lower, enforce, security, partition, cursor, check, hydrate_plan, settings, codegen]
+            state: [raw, input, query_plan, node, result_ctx, query_config, hydration_plan, output]
+            phases: [json_dsl_parse, validate, normalize, restrict, plan, lower, enforce, security, cursor, check, hydrate_plan, settings, codegen]
+        }
+        clickhouse_gql {
+            env: [ontology, security_ctx]
+            state: [raw, input, query_plan, node, result_ctx, query_config, hydration_plan, output]
+            phases: [gql_parse, validate, normalize, restrict, plan, lower, enforce, security, cursor, check, hydrate_plan, settings, codegen]
         }
         ch_hydration {
             env: [ontology, security_ctx]
@@ -114,25 +123,37 @@ compiler_pipeline_macros::define_compiler_ctx! {
         }
         validate_normalize {
             env: [ontology]
-            state: [json, input]
-            phases: [validate, normalize]
+            state: [raw, input]
+            phases: [json_dsl_parse, validate, normalize]
         }
     }
 }
 
+fn json_dsl_parse(ctx: &mut impl CompilerCtx) -> Result<()> {
+    let raw = require(ctx.take_raw(), "raw")?;
+    ctx.set_input(frontend::json_dsl::parse(&raw, ctx.ontology())?);
+    Ok(())
+}
+
+fn gql_parse(ctx: &mut impl CompilerCtx) -> Result<()> {
+    let raw = require(ctx.take_raw(), "raw")?;
+    ctx.set_input(frontend::gql::parse(&raw)?);
+    Ok(())
+}
+
 fn validate(ctx: &mut impl CompilerCtx) -> Result<()> {
-    let json = require(ctx.take_json(), "json")?;
-    let ontology = ctx.ontology();
-    let v = validate::Validator::new(ontology);
-    let value = v.check_json(&json)?;
-    v.check_ontology(&value)?;
-    let query_hash = cursor::canonical_hash(&value);
-    let mut input: Input = serde_json::from_value(value)?;
-    input.compiler.query_hash = query_hash;
+    let mut input = require(ctx.take_input(), "input")?;
+    let v = validate::Validator::new(ctx.ontology());
+    v.check_shape(&input)?;
     if let Some(c) = &mut input.cursor
         && let Some(after) = &c.after
     {
-        c.seek = Some(cursor::decode(after, query_hash)?);
+        if input.compiler.query_hash == 0 {
+            return Err(QueryError::PaginationError(
+                "cursor binding requires a query hash from the frontend".into(),
+            ));
+        }
+        c.seek = Some(cursor::decode(after, input.compiler.query_hash)?);
     }
     v.check_references(&input)?;
     v.annotate_filter_types(&mut input);
@@ -167,7 +188,8 @@ fn plan(ctx: &mut impl CompilerCtx) -> Result<()> {
                 .insert(node.destination_table.clone(), node.sort_key.clone());
         }
     }
-    let query_plan = plan::plan(&mut input)?;
+    let mut query_plan = plan::plan(&mut input)?;
+    query_plan.resolve_text_excerpts(ctx.ontology());
     ctx.set_input(input);
     ctx.set_query_plan(query_plan);
     Ok(())
@@ -203,15 +225,6 @@ fn security(ctx: &mut impl CompilerCtx) -> Result<()> {
     Ok(())
 }
 
-fn partition(ctx: &mut impl CompilerCtx) -> Result<()> {
-    let ontology = ctx.ontology().clone();
-    let security_ctx = ctx.security_ctx().clone();
-    let mut node = require(ctx.take_node(), "node")?;
-    partition::apply_partition_pruning(&mut node, &ontology, &security_ctx)?;
-    ctx.set_node(node);
-    Ok(())
-}
-
 fn cursor(ctx: &mut impl CompilerCtx) -> Result<()> {
     let mut input = require(ctx.take_input(), "input")?;
     let mut node = require(ctx.take_node(), "node")?;
@@ -223,7 +236,7 @@ fn cursor(ctx: &mut impl CompilerCtx) -> Result<()> {
 
 fn check(ctx: &mut impl CompilerCtx) -> Result<()> {
     let node = require(ctx.node().clone(), "node")?;
-    check::check_ast(&node, ctx.security_ctx())
+    check::check_ast(&node, ctx.security_ctx(), ctx.ontology())
 }
 
 fn hydrate_plan(ctx: &mut impl CompilerCtx) -> Result<()> {

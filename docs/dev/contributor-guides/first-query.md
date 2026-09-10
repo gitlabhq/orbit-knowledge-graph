@@ -216,7 +216,7 @@ between them.
 - [Orbit Local schema reference](../../source/local/schema.md) for the four
   local node types and their properties.
 - [Orbit Local access methods](../../source/local/getting-started.md) for
-  direct `orbit`, `glab orbit local`, and planned MCP usage.
+  direct `orbit`, `glab orbit local`, and MCP usage.
 - [Orbit query language reference](../../source/remote/queries/query-language.md)
   for the Query DSL used by Orbit Remote and agent-facing graph queries.
 - [Cookbook](../../source/remote/cookbook.md) for copy-paste query ideas.

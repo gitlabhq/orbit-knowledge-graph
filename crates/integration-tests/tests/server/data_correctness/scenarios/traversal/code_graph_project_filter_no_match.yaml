@@ -1,0 +1,22 @@
+# source: crates/integration-tests/tests/server/data_correctness/traversal.rs::traversal_code_graph_project_id_filter_no_match_returns_empty
+description: Filtering by nonexistent project_id returns empty results
+
+query:
+  json: |
+    {
+        "query_type": "traversal",
+        "nodes": [
+            {"id": "caller", "entity": "Definition", "filters": {"project_id": 99999}, "columns": ["name"]},
+            {"id": "callee", "entity": "Definition", "columns": ["name"]}
+        ],
+        "relationships": [{"type": "CALLS", "from": "caller", "to": "callee"}],
+        "limit": 20
+    }
+  gql: |
+    MATCH (caller:Definition {project_id: 99999})-[:CALLS]->(callee:Definition) RETURN caller.name, callee.name LIMIT 20
+
+expect:
+  skip_requirements: ["filter:project_id"]
+  node_count: 0
+  edges:
+    CALLS: []

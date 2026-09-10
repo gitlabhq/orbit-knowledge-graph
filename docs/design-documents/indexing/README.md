@@ -39,6 +39,10 @@ flowchart TD
     CH_RAW["ClickHouse (Raw Data Lake)"]
   end
 
+  subgraph DISPATCHER["gkg-server (DispatchIndexing)"]
+    DISPATCH["CDC Router & Scheduled Dispatchers"]
+  end
+
   subgraph INDEXERS["gkg-indexer workers"]
     direction TB
     SDLC_IDX["SDLC Indexer"]
@@ -57,14 +61,19 @@ flowchart TD
   %% === Data Flow ===
   PG -- Logical Replication --> SYP
   SYP -- CDC Events --> JS
-  JS -- Event Streams --> SDLC_IDX
-  JS -- Code Indexing Tasks --> CODE_IDX
+  JS -- CDC Ingestion --> CH_RAW
+  JS -- Raw Siphon Routes --> DISPATCH
+  CH_RAW -- Namespace Change Detection --> DISPATCH
+  DISPATCH -- Internal Indexing Requests --> JS
+  JS -- Release-versioned Requests --> SDLC_IDX
+  JS -- Release-versioned Requests --> CODE_IDX
   CODE_IDX -- Archive Download --> Rails
 
-  SDLC_IDX -- Queries --> CH_RAW
+  SDLC_IDX -- Extracts --> CH_RAW
   SDLC_IDX -- Writes --> CH_GRAPH
   CODE_IDX -- Writes --> CH_GRAPH
 
+  DISPATCH -.-> KV
   SDLC_IDX -.-> KV
   CODE_IDX -.-> KV
 
@@ -81,7 +90,7 @@ flowchart TD
 
   class PG,Rails source
   class SYP,JS,KV,CH_RAW platform
-  class SDLC_IDX,CODE_IDX indexer
+  class DISPATCH,SDLC_IDX,CODE_IDX indexer
   class CH_GRAPH storage
   class WEB,QE query
 ```
@@ -92,10 +101,10 @@ flowchart TD
 
 **Shared Use**:
 
-- SDLC indexing: Receives events for issues, merge requests, pipelines, projects, namespaces, and other SDLC entities
-- Code indexing: Receives `p_knowledge_graph_code_indexing_tasks` to trigger repository indexing and `knowledge_graph_enabled_namespaces` to trigger namespace backfill
+- SDLC indexing: Replicates source rows into the Datalake, where DispatchIndexing detects changed namespaces and workers later extract entity data
+- Code indexing: Publishes `p_knowledge_graph_code_indexing_tasks` and `knowledge_graph_enabled_namespaces` events that DispatchIndexing routes into internal indexing requests
 
-Siphon uses PostgreSQL's logical replication to capture changes from the write-ahead log (WAL), publishing them as protobuf messages to NATS JetStream. This decouples Orbit from the production database.
+Siphon uses PostgreSQL's logical replication to capture changes from the write-ahead log (WAL), publishing them as protobuf messages to NATS JetStream. DispatchIndexing continuously consumes the two raw Siphon routes used for code tasks and newly enabled namespaces. Other SDLC changes are detected by a scheduled dispatcher querying the Siphon-backed Datalake rather than by workers consuming raw CDC messages.
 
 ### 2. NATS JetStream and NATS KV (Event Broker and Distributed Coordination)
 
@@ -103,11 +112,11 @@ Siphon uses PostgreSQL's logical replication to capture changes from the write-a
 
 **Shared Use**:
 
-- Delivers and distributes CDC events (including `p_knowledge_graph_code_indexing_tasks`) to indexing workers via NATS JetStream subjects.
-- Distributes workload across multiple indexer replicas
+- Delivers raw Siphon events to the subjects DispatchIndexing consumes, and carries the resulting internal indexing requests on release-versioned Orbit streams
+- Distributes internal requests across multiple indexer replicas
 - Provides NATS KV for code indexing task mutual exclusion and cadence coordination. SDLC dispatch deduplication uses per-subject message limits on the JetStream stream.
 
-Both indexing pipelines subscribe to relevant NATS subjects and use the same NATS deployment for event distribution and coordination.
+DispatchIndexing owns raw CDC consumption and request publication. SDLC workers subscribe to internal `GlobalIndexingRequest` and `NamespaceIndexingRequest` subjects, then query the Datalake for the source rows to transform. Code workers likewise consume internal code indexing requests rather than the raw Siphon code-task subject.
 
 ### 3. ClickHouse (Data Lake and Graph Storage)
 

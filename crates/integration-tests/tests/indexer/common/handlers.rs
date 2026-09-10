@@ -175,7 +175,10 @@ pub fn stale_edge_task(
         &ontology,
         checkpoint_store,
         indexer::orchestrator::scheduled::ScheduledTaskMetrics::new(),
-        orbit_server_config::StaleEdgeReconciliationConfig::default(),
+        orbit_server_config::AppConfig::embedded_defaults()
+            .schedule
+            .tasks
+            .stale_edge_reconciliation,
     )
 }
 

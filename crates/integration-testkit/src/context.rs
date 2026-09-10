@@ -5,7 +5,7 @@ use std::time::Duration;
 use arrow::compute::concat_batches;
 use arrow::record_batch::RecordBatch;
 use clickhouse_client::{ArrowClickHouseClient, ClickHouseConfigurationExt};
-use orbit_server_config::ClickHouseConfiguration;
+use orbit_server_config::{AppConfig, ClickHouseConfiguration};
 use query_engine::compiler::ParameterizedQuery;
 use testcontainers::bollard::Docker;
 use testcontainers::bollard::query_parameters::{
@@ -66,7 +66,7 @@ impl TestContext {
             session_settings: std::collections::HashMap::new(),
             quorum_writes: false,
             insert_settings: std::collections::HashMap::new(),
-            profiling: Default::default(),
+            profiling: AppConfig::embedded_defaults().graph.profiling,
         };
 
         Self {
@@ -222,7 +222,7 @@ impl TestContext {
                 session_settings: std::collections::HashMap::new(),
                 quorum_writes: false,
                 insert_settings: std::collections::HashMap::new(),
-                profiling: Default::default(),
+                profiling: AppConfig::embedded_defaults().graph.profiling,
             },
             url: self.url.clone(),
             schema_sqls: Arc::clone(&self.schema_sqls),

@@ -1,0 +1,32 @@
+# source: crates/integration-tests/tests/server/data_correctness/neighbors.rs::neighbors_outgoing_returns_correct_targets
+description: Outgoing neighbors from User 1
+
+query:
+  json: |
+    {
+      "query_type": "neighbors",
+      "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
+      "neighbors": {"direction": "outgoing"}
+    }
+
+expect:
+  node_count: 9
+  referential_integrity: true
+  nodes:
+    User:
+      ids: [1]
+    Group:
+      ids: [100, 102]
+      rows:
+        - { id: 100, name: Public Group }
+    MergeRequest:
+      ids: [2000, 2001, 2002]
+    Note:
+      ids: [3000]
+    WorkItem:
+      ids: [4000, 4002]
+  edge_exists:
+    MEMBER_OF: [[1, 100], [1, 102]]
+    AUTHORED: [[1, 2000], [1, 3000], [1, 4000], [1, 4002]]
+    APPROVED: [[1, 2002]]
+    ASSIGNED: [[1, 4000]]

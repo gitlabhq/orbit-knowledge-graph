@@ -15,27 +15,21 @@ pub struct GitlabClientConfiguration {
     /// `base_url` is resolved to the IP of this hostname instead. This allows
     /// TLS to verify against the `base_url` host while routing traffic through
     /// a different endpoint (e.g. a PSC internal gateway).
-    #[serde(default)]
     pub resolve_host: Option<String>,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct JwtConfig {
-    #[serde(default)]
     pub signing_key: Option<String>,
-    #[serde(default)]
     pub verifying_key: Option<String>,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct GitlabConfig {
-    #[serde(default)]
     pub base_url: Option<String>,
-    #[serde(default)]
     pub jwt: JwtConfig,
-    #[serde(default)]
     pub resolve_host: Option<String>,
 }
 

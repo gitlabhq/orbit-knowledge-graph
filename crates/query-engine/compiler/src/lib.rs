@@ -1,17 +1,17 @@
 //! Graph Query Compiler
 //!
-//! Compiles JSON graph queries into parameterized ClickHouse SQL.
+//! Compiles graph queries into parameterized ClickHouse SQL.
 //!
 //! # Pipeline
 //!
 //! ```text
-//! JSON → Validate → Normalize → Restrict → Plan → Lower → Enforce → Security → Check → Codegen → SQL
+//! raw → {JSON | GQL} frontend → Input → shared compiler passes → SQL
 //! ```
 //!
 //! # Example
 //!
 //! ```rust
-//! use compiler::{compile, SecurityContext};
+//! use compiler::{compile, Frontend, SecurityContext};
 //! use ontology::{Ontology, DataType};
 //!
 //! let ontology = Ontology::new()
@@ -27,7 +27,7 @@
 //!     "limit": 10
 //! }"#;
 //!
-//! let result = compile(json, &ontology, &ctx).unwrap();
+//! let result = compile(json, Frontend::JsonDsl, &ontology, &ctx).unwrap();
 //! println!("SQL: {}", result.base.sql);
 //! ```
 
@@ -38,7 +38,7 @@ pub mod error;
 pub mod input;
 pub mod metrics;
 pub(crate) mod schema_limits;
-mod schema_templates;
+
 pub mod scope;
 pub mod types;
 
@@ -64,25 +64,12 @@ pub use ontology::{Ontology, OntologyError};
 pub use analytics::ExecMetrics;
 pub use passes::codegen::{
     CompiledQueryContext, ParamValue, ParameterizedQuery, SqlDialect,
-    clickhouse::emit_simple_query,
-    codegen,
-    ddl::clickhouse::emit_create_materialized_view,
-    ddl::clickhouse::emit_create_refreshable_materialized_view,
-    ddl::clickhouse::{DictionarySource, emit_create_dictionary, emit_create_table},
-    ddl::duckdb::emit_create_table as emit_duckdb_create_table,
-    ddl::duckdb::generate_local_ddl,
-    ddl::generate_graph_dictionaries,
-    ddl::generate_graph_dictionaries_with_prefix,
-    ddl::generate_graph_materialized_views,
-    ddl::generate_graph_materialized_views_with_prefix,
-    ddl::generate_graph_tables,
-    ddl::generate_graph_tables_with_prefix,
+    clickhouse::emit_simple_query, codegen,
+    ddl::duckdb::emit_create_table as emit_duckdb_create_table, ddl::duckdb::generate_local_ddl,
     ddl::generate_local_tables,
-    ddl::generate_refreshable_materialized_views,
-    ddl::generate_unversioned_objects,
-    ddl::{UnversionedObject, auxiliary_schema_fingerprints, ddl_fingerprints},
 };
 pub use passes::enforce::{EdgeMeta, RedactionNode, ResultContext};
+pub use passes::frontend::Frontend;
 pub use passes::hydrate::{
     DynamicEntityColumns, HydrationPlan, HydrationTemplate, VirtualColumnRequest,
     generate_hydration_plan,
@@ -96,32 +83,49 @@ use std::sync::Arc;
 
 use config::CompilerCtx as _;
 
-/// Compile a JSON query into a [`CompiledQueryContext`].
-///
-/// The context contains the parameterized SQL, bind parameters, result context
-/// for redaction, hydration plan, and the validated input.
-///
-/// Runs the ClickHouse compilation pipeline. Edge-chain-first lowering
-/// produces flat edge-chain JOINs with inline dedup.
-///
-/// ```text
-/// JSON → Validate → Normalize → Restrict → Lower → Enforce → Security → Check → HydratePlan → Settings → Codegen
-/// ```
-#[must_use = "the compiled query context should be used"]
-pub fn compile(
-    json_input: &str,
-    ontology: &Ontology,
-    ctx: &SecurityContext,
+fn finish<C: config::CompilerCtx>(
+    ctx: &mut C,
+    run: impl FnOnce(&mut C) -> Result<()>,
 ) -> Result<CompiledQueryContext> {
-    let mut ctx = config::ClickhouseCtx::new(Arc::new(ontology.clone()), ctx.clone());
-    ctx.set_json(json_input.to_string());
-    config::run_clickhouse(&mut ctx)
+    run(ctx)
         .and_then(|()| {
             ctx.take_output().ok_or_else(|| {
                 error::QueryError::PipelineInvariant("pipeline did not produce output".into())
             })
         })
         .count_err()
+}
+
+/// Compile raw query text through the given frontend into a
+/// [`CompiledQueryContext`].
+///
+/// Each frontend is its own pipeline preset that differs only in the first
+/// phase, which lowers the raw text to [`Input`]. Everything after that is
+/// shared.
+///
+/// ```text
+/// raw → {json_dsl_parse | gql_parse} → Validate → Normalize → Restrict → Lower → Enforce → Security → Cursor → Check → HydratePlan → Settings → Codegen
+/// ```
+#[must_use = "the compiled query context should be used"]
+pub fn compile(
+    raw: &str,
+    fe: Frontend,
+    ontology: &Ontology,
+    ctx: &SecurityContext,
+) -> Result<CompiledQueryContext> {
+    let ontology = Arc::new(ontology.clone());
+    match fe {
+        Frontend::JsonDsl => {
+            let mut ctx = config::ClickhouseJsonDslCtx::new(ontology, ctx.clone());
+            ctx.set_raw(raw.to_string());
+            finish(&mut ctx, config::run_clickhouse_json_dsl)
+        }
+        Frontend::Gql => {
+            let mut ctx = config::ClickhouseGqlCtx::new(ontology, ctx.clone());
+            ctx.set_raw(raw.to_string());
+            finish(&mut ctx, config::run_clickhouse_gql)
+        }
+    }
 }
 
 /// Run only `validate` + `normalize`, returning the normalized [`Input`].
@@ -131,7 +135,7 @@ pub fn compile(
 /// traversal_path prefix as [`SecurityContext`] scope metadata.
 pub fn validate_normalize(json_input: &str, ontology: &Ontology) -> Result<Input> {
     let mut ctx = config::ValidateNormalizeCtx::new(Arc::new(ontology.clone()));
-    ctx.set_json(json_input.to_string());
+    ctx.set_raw(json_input.to_string());
     config::run_validate_normalize(&mut ctx)
         .and_then(|()| {
             ctx.take_input().ok_or_else(|| {
@@ -194,7 +198,7 @@ mod tests {
     }
 
     fn compile_sql(query: &str) -> String {
-        compile(query, &ONTOLOGY, &security_ctx())
+        compile(query, Frontend::JsonDsl, &ONTOLOGY, &security_ctx())
             .expect("should compile")
             .base
             .render()
@@ -204,7 +208,8 @@ mod tests {
     fn malformed_query_increments_compiler_rejected() {
         use std::sync::atomic::Ordering;
         let before = crate::metrics::COUNT_ERR_HITS.load(Ordering::Relaxed);
-        let err = compile("not json", &ONTOLOGY, &security_ctx()).expect_err("must reject");
+        let err = compile("not json", Frontend::JsonDsl, &ONTOLOGY, &security_ctx())
+            .expect_err("must reject");
         let after = crate::metrics::COUNT_ERR_HITS.load(Ordering::Relaxed);
         assert!(
             matches!(err, crate::error::QueryError::Parse(_)),
@@ -221,7 +226,8 @@ mod tests {
         use std::sync::atomic::Ordering;
         let query = r#"{"query_type":"traversal","nodes":[{"id":"x","entity":"NotARealEntity","columns":["id"]}],"limit":1}"#;
         let before = crate::metrics::COUNT_ERR_HITS.load(Ordering::Relaxed);
-        let err = compile(query, &ONTOLOGY, &security_ctx()).expect_err("must reject");
+        let err =
+            compile(query, Frontend::JsonDsl, &ONTOLOGY, &security_ctx()).expect_err("must reject");
         let after = crate::metrics::COUNT_ERR_HITS.load(Ordering::Relaxed);
         assert!(
             !matches!(err, crate::error::QueryError::PipelineInvariant(_)),
@@ -245,7 +251,7 @@ mod tests {
         let ctx =
             SecurityContext::new(1, vec!["1/100/".to_string()]).expect("valid scoped context");
         let before = crate::metrics::COUNT_ERR_HITS.load(Ordering::Relaxed);
-        let err = compile(query, &ONTOLOGY, &ctx).expect_err("must reject");
+        let err = compile(query, Frontend::JsonDsl, &ONTOLOGY, &ctx).expect_err("must reject");
         let after = crate::metrics::COUNT_ERR_HITS.load(Ordering::Relaxed);
 
         assert!(
@@ -271,7 +277,8 @@ mod tests {
                      "filters": {"traversal_path": {"starts_with": 1}}}],
             "limit": 1
         }"#;
-        let err = compile(query, &ONTOLOGY, &security_ctx()).expect_err("must reject");
+        let err =
+            compile(query, Frontend::JsonDsl, &ONTOLOGY, &security_ctx()).expect_err("must reject");
         let msg = err.to_string();
 
         assert!(
@@ -297,7 +304,8 @@ mod tests {
         let prefixed = ONTOLOGY.clone().with_schema_version_prefix("v1_");
 
         let query = r#"{"query_type":"traversal","nodes":[{"id":"g","entity":"Group","node_ids":[1],"columns":["name"]}],"limit":1}"#;
-        let compiled = compile(query, &prefixed, &security_ctx()).expect("should compile");
+        let compiled =
+            compile(query, Frontend::JsonDsl, &prefixed, &security_ctx()).expect("should compile");
         let sql = compiled.base.render();
 
         assert!(
@@ -311,7 +319,8 @@ mod tests {
         let prefixed = ONTOLOGY.clone().with_schema_version_prefix("v1_");
 
         let query = r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":["username"]},{"id":"mr","entity":"MergeRequest","columns":["title"]}],"relationships":[{"type":"AUTHORED","from":"u","to":"mr"}],"limit":1}"#;
-        let compiled = compile(query, &prefixed, &security_ctx()).expect("should compile");
+        let compiled =
+            compile(query, Frontend::JsonDsl, &prefixed, &security_ctx()).expect("should compile");
         let sql = compiled.base.render();
 
         assert!(
@@ -322,6 +331,91 @@ mod tests {
             sql.contains("mr.author_id"),
             "FK elision should join via mr.author_id, got: {sql}"
         );
+    }
+
+    #[test]
+    fn compile_uses_supplied_ontology_for_scoped_user_table() {
+        let scoped_user = ONTOLOGY.clone().with_path_scopable_nodes(["User"]);
+        let query = r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":["id"]}],"limit":1}"#;
+
+        for (ontology, expected_table) in [
+            (scoped_user.clone(), "gl_user"),
+            (scoped_user.with_schema_version_prefix("v1_"), "v1_gl_user"),
+        ] {
+            let sql = compile(query, Frontend::JsonDsl, &ontology, &security_ctx())
+                .expect("should compile")
+                .base
+                .render();
+            assert!(
+                sql.contains("startsWith(u.traversal_path"),
+                "supplied ontology must keep the User alias scoped, got:\n{sql}"
+            );
+            assert!(
+                sql.contains(expected_table),
+                "ontology should render {expected_table}, got:\n{sql}"
+            );
+        }
+    }
+
+    #[test]
+    fn compile_uses_each_ontologys_global_tables_and_keeps_join_filters() {
+        let query = r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "user", "entity": "User", "node_ids": [1], "filters": {"username": "alice"}},
+                {"id": "project", "entity": "Project", "filters": {"name": "orbit"}}
+            ],
+            "relationships": [{
+                "type": "MEMBER_OF",
+                "from": "user",
+                "to": "project"
+            }],
+            "limit": 1
+        }"#;
+
+        let mut sources = ontology::migrations::embedded_sources();
+        let user_source = sources.get_mut("nodes/core/user.yaml").unwrap();
+        *user_source = user_source.replace(
+            "destination_table: gl_user",
+            "destination_table: gl_renamed_user",
+        );
+        let archived_ontology = ontology::archive::OntologyArchive::from_sources(1, &sources)
+            .expect("renamed archive should build")
+            .load_ontology()
+            .expect("renamed archive should load");
+        let prefixed = archived_ontology.clone().with_schema_version_prefix("v1_");
+
+        for (ontology, expected_user_table) in [
+            (archived_ontology.clone(), "gl_renamed_user"),
+            (ONTOLOGY.clone(), "gl_user"),
+            (prefixed, "v1_gl_renamed_user"),
+            (
+                ONTOLOGY.clone().with_schema_version_prefix("v2_"),
+                "v2_gl_user",
+            ),
+            (archived_ontology, "gl_renamed_user"),
+        ] {
+            let sql = compile(query, Frontend::JsonDsl, &ontology, &security_ctx())
+                .expect("should compile")
+                .base
+                .render();
+            assert!(
+                sql.contains(expected_user_table),
+                "compiled SQL should use {expected_user_table}, got:\n{sql}"
+            );
+            assert!(
+                !sql.contains("startsWith(user.traversal_path"),
+                "global User must stay unscoped, got:\n{sql}"
+            );
+            assert!(
+                sql.contains("startsWith(project.traversal_path"),
+                "joined Project alias must remain scoped, got:\n{sql}"
+            );
+            assert!(
+                sql.contains("startsWith(e0.traversal_path"),
+                "edge alias e0 must remain scoped, got:\n{sql}"
+            );
+        }
     }
 
     #[test]
@@ -1530,7 +1624,7 @@ mod tests {
         ];
 
         for (name, query) in queries {
-            let compiled = compile(query, &ONTOLOGY, &security_ctx())
+            let compiled = compile(query, Frontend::JsonDsl, &ONTOLOGY, &security_ctx())
                 .unwrap_or_else(|err| panic!("{name} should compile: {err}"));
             let sql = compiled.base.render();
             assert!(
@@ -1755,30 +1849,10 @@ mod tests {
             .with_scope_prefixes(
                 [("g".to_string(), TraversalPath::new_unchecked("1/9970/"))].into(),
             );
-        compile(&query, &ONTOLOGY, &ctx).unwrap().base.render()
-    }
-
-    #[test]
-    fn scoped_query_pushes_down_partition_predicate() {
-        let query = r#"{"query_type":"traversal","nodes":[{"id":"m","entity":"MergeRequest","columns":["id"],"filters":{"state":{"eq":"opened"}}}],"limit":20}"#;
-        let ctx = SecurityContext::new(1, vec!["1/".into()])
+        compile(&query, Frontend::JsonDsl, &ONTOLOGY, &ctx)
             .unwrap()
-            .with_scope_prefixes(
-                [("m".to_string(), TraversalPath::new_unchecked("1/9970/"))].into(),
-            );
-        let sql = compile(query, &ONTOLOGY, &ctx).unwrap().base.render();
-        assert!(
-            sql.contains("startsWith(m.traversal_path"),
-            "scoped query should always carry the startsWith prefix:\n{sql}"
-        );
-        let has_partition_pred = sql.contains(
-            "m._partition_id = toString(modulo(sipHash64(toUInt64OrZero(arrayElement(splitByChar(",
-        );
-        assert_eq!(
-            has_partition_pred,
-            ONTOLOGY.partition().is_some(),
-            "the _partition_id predicate should track whether the ontology partitions:\n{sql}"
-        );
+            .base
+            .render()
     }
 
     // SQL-shape smoke: the 4-hop diff chain elides CONTAINS to FK node-joins
@@ -2042,7 +2116,8 @@ mod tests {
                      "columns": ["id", "created_at"]}],
             "limit": 10
         }"#;
-        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
+        let compiled =
+            compile(query, Frontend::JsonDsl, &ontology, &security_ctx()).expect("should compile");
         let sql = compiled.base.render();
 
         assert!(
@@ -2056,13 +2131,14 @@ mod tests {
         let ontology = Ontology::load_embedded().expect("ontology must load");
         let compiled = compile(
             r#"{
-                "query_type": "traversal",
-                "nodes": [{"id": "f", "entity": "File",
-                         "node_ids": [1],
-                         "filters": {"content": {"eq": "x"}},
-                         "columns": ["path", "content"]}],
-                "limit": 5
-            }"#,
+        "query_type": "traversal",
+        "nodes": [{"id": "f", "entity": "File",
+                 "node_ids": [1],
+                 "filters": {"content": {"eq": "x"}},
+                 "columns": ["path", "content"]}],
+        "limit": 5
+                }"#,
+            Frontend::JsonDsl,
             &ontology,
             &security_ctx(),
         )
@@ -2089,14 +2165,15 @@ mod tests {
         let ontology = Ontology::load_embedded().expect("ontology must load");
         let compiled = compile(
             r#"{
-                "query_type": "traversal",
-                "nodes": [{"id": "f", "entity": "File",
-                         "node_ids": [1, 2],
-                         "filters": {"content": {"contains": "needle"},
-                                     "project_id": {"eq": 1000}},
-                         "columns": ["project_id", "path"]}],
-                "limit": 10
-            }"#,
+        "query_type": "traversal",
+        "nodes": [{"id": "f", "entity": "File",
+                 "node_ids": [1, 2],
+                 "filters": {"content": {"contains": "needle"},
+                             "project_id": {"eq": 1000}},
+                 "columns": ["project_id", "path"]}],
+        "limit": 10
+                }"#,
+            Frontend::JsonDsl,
             &ontology,
             &security_ctx(),
         )
@@ -2131,13 +2208,14 @@ mod tests {
         let ontology = Ontology::load_embedded().expect("ontology must load");
         let compiled = compile(
             r#"{
-                "query_type": "traversal",
-                "nodes": [{"id": "f", "entity": "File",
-                         "node_ids": [1],
-                         "filters": {"content": {"contains": "needle"}},
-                         "columns": ["path", "content"]}],
-                "limit": 5
-            }"#,
+        "query_type": "traversal",
+        "nodes": [{"id": "f", "entity": "File",
+                 "node_ids": [1],
+                 "filters": {"content": {"contains": "needle"}},
+                 "columns": ["path", "content"]}],
+        "limit": 5
+                }"#,
+            Frontend::JsonDsl,
             &ontology,
             &security_ctx(),
         )
@@ -2162,13 +2240,14 @@ mod tests {
         let ontology = Ontology::load_embedded().expect("ontology must load");
         let err = compile(
             r#"{
-                "query_type": "traversal",
-                "nodes": [{"id": "f", "entity": "File",
-                         "filters": {"content": {"contains": "needle"},
-                                     "project_id": {"eq": 1000}},
-                         "columns": ["path"]}],
-                "limit": 10
-            }"#,
+        "query_type": "traversal",
+        "nodes": [{"id": "f", "entity": "File",
+                 "filters": {"content": {"contains": "needle"},
+                             "project_id": {"eq": 1000}},
+                 "columns": ["path"]}],
+        "limit": 10
+                }"#,
+            Frontend::JsonDsl,
             &ontology,
             &security_ctx(),
         )
@@ -2187,13 +2266,14 @@ mod tests {
         let ontology = Ontology::load_embedded().expect("ontology must load");
         let err = compile(
             r#"{
-                "query_type": "aggregation",
-                "nodes": [{"id": "f", "entity": "File",
-                         "filters": {"content": {"contains": "needle"}}}],
-                "aggregations": [{"count": "f", "as": "total"}],
-                "group_by": ["f.language"],
-                "limit": 5
-            }"#,
+        "query_type": "aggregation",
+        "nodes": [{"id": "f", "entity": "File",
+                 "filters": {"content": {"contains": "needle"}}}],
+        "aggregations": [{"count": "f", "as": "total"}],
+        "group_by": ["f.language"],
+        "limit": 5
+                }"#,
+            Frontend::JsonDsl,
             &ontology,
             &security_ctx(),
         )
@@ -2212,12 +2292,13 @@ mod tests {
         let ontology = Ontology::load_embedded().expect("ontology must load");
         let err = compile(
             r#"{
-                "query_type": "neighbors",
-                "nodes": [{"id": "f", "entity": "File", "node_ids": [1],
-                         "filters": {"content": {"contains": "needle"}}}],
-                "neighbors": {"direction": "outgoing"},
-                "limit": 5
-            }"#,
+        "query_type": "neighbors",
+        "nodes": [{"id": "f", "entity": "File", "node_ids": [1],
+                 "filters": {"content": {"contains": "needle"}}}],
+        "neighbors": {"direction": "outgoing"},
+        "limit": 5
+                }"#,
+            Frontend::JsonDsl,
             &ontology,
             &security_ctx(),
         )
@@ -2236,12 +2317,13 @@ mod tests {
         let ontology = Ontology::load_embedded().expect("ontology must load");
         let err = compile(
             r#"{
-                "query_type": "traversal",
-                "nodes": [{"id": "f", "entity": "File",
-                         "node_ids": [1],
-                         "filters": {"content": {"gt": "x"}}}],
-                "limit": 5
-            }"#,
+        "query_type": "traversal",
+        "nodes": [{"id": "f", "entity": "File",
+                 "node_ids": [1],
+                 "filters": {"content": {"gt": "x"}}}],
+        "limit": 5
+                }"#,
+            Frontend::JsonDsl,
             &ontology,
             &security_ctx(),
         )
@@ -2294,6 +2376,43 @@ mod tests {
         assert!(
             sql.contains("use_index_for_in_with_subqueries_max_values = 100000"),
             "{sql}"
+        );
+    }
+
+    fn note_excerpt_chars(limit: u32) -> u32 {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+        let compiled = compile(
+            &format!(
+                r#"{{
+                "query_type": "traversal",
+                "nodes": [{{"id": "n", "entity": "Note", "node_ids": [1], "columns": ["note"]}}],
+                "limit": {limit}
+            }}"#
+            ),
+            Frontend::JsonDsl,
+            &ontology,
+            &security_ctx(),
+        )
+        .expect("note query should compile");
+        let sql = compiled.base.render();
+        let (_, after) = sql
+            .split_once("substringUTF8(n.note, 1, ")
+            .unwrap_or_else(|| panic!("expected a text excerpt, got:\n{sql}"));
+        after
+            .split(')')
+            .next()
+            .and_then(|chars| chars.parse().ok())
+            .unwrap_or_else(|| panic!("expected excerpt length, got:\n{sql}"))
+    }
+
+    #[test]
+    fn text_excerpt_length_shrinks_with_page_size() {
+        let single_row = note_excerpt_chars(1);
+        let wide_page = note_excerpt_chars(1000);
+        assert!(single_row > 1_000_000, "single row got {single_row} chars");
+        assert!(
+            (1000..3000).contains(&wide_page),
+            "wide page got {wide_page} chars"
         );
     }
 }

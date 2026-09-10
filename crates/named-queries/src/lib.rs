@@ -218,6 +218,10 @@ query:
             "expand_neighbors",
             "search_nodes",
             "list_nodes",
+            "file_definitions",
+            "file_definition_callers",
+            "definition_references",
+            "definition_callees",
         ] {
             assert!(queries.get(name).is_some(), "missing named query `{name}`");
         }

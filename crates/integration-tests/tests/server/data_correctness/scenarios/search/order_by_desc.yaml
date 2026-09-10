@@ -1,0 +1,18 @@
+# source: crates/integration-tests/tests/server/data_correctness/search.rs::search_with_order_by_desc
+description: Descending order_by reverses the result order
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000},
+                 "columns": ["username"]}],
+      "order_by": "-u.id",
+      "limit": 10
+    }
+
+expect:
+  node_count: 7
+  nodes:
+    User:
+      order: [7, 6, 5, 4, 3, 2, 1]

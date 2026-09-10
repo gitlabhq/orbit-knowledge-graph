@@ -1,0 +1,172 @@
+data_correctness:
+  gl_user:
+    - { id: 1, username: alice, name: Alice Admin, state: active, user_type: human, email: alice@example.com }
+    - { id: 2, username: bob, name: Bob Builder, state: active, user_type: human, email: bob@example.com }
+    - { id: 3, username: charlie, name: Charlie Private, state: active, user_type: human, email: charlie@example.com }
+    - { id: 4, username: diana, name: Diana Developer, state: active, user_type: project_bot, email: diana@example.com }
+    - { id: 5, username: eve, name: Eve External, state: blocked, user_type: service_account, email: eve@example.com }
+    - { id: 6, username: "用户_émoji_🎉", name: "Ünïcödé Üser", state: active, user_type: human, email: unicode@example.com }
+    - { id: 7, username: frank, name: Frank Deep, state: active, user_type: human, email: frank@example.com }
+
+  gl_group:
+    - { id: 100, name: Public Group, full_path: public-group, visibility_level: public, traversal_path: "1/100/" }
+    - { id: 101, name: Private Group, full_path: private-group, visibility_level: private, traversal_path: "1/101/" }
+    - { id: 102, name: Internal Group, full_path: internal-group, visibility_level: internal, traversal_path: "1/102/" }
+    - { id: 200, name: Deep Group A, full_path: public-group/deep-a, visibility_level: public, traversal_path: "1/100/200/" }
+    - { id: 300, name: Deep Group B, full_path: public-group/deep-a/deep-b, visibility_level: public, traversal_path: "1/100/200/300/" }
+    - { id: 900, name: Org2 Root Group, full_path: org2-root, visibility_level: public, traversal_path: "2/900/" }
+
+  gl_project:
+    - { id: 1000, name: Public Project, full_path: public-group/public-project, visibility_level: public, traversal_path: "1/100/1000/" }
+    - { id: 1001, name: Private Project, full_path: private-group/private-project, visibility_level: private, traversal_path: "1/101/1001/" }
+    - { id: 1002, name: Internal Project, full_path: public-group/internal-project, visibility_level: internal, traversal_path: "1/100/1002/" }
+    - { id: 1003, name: Secret Project, full_path: private-group/secret-project, visibility_level: private, traversal_path: "1/101/1003/" }
+    - { id: 1004, name: Shared Project, full_path: internal-group/shared-project, visibility_level: public, traversal_path: "1/102/1004/" }
+    - { id: 1010, name: Deep Project, full_path: public-group/deep-a/deep-project, visibility_level: public, traversal_path: "1/100/200/1010/" }
+    - { id: 9000, name: Org2 Project, full_path: org2-root/org2-project, visibility_level: public, traversal_path: "2/900/9000/" }
+
+  gl_merge_request:
+    - { id: 2000, iid: 1, title: Add feature A, state: opened, source_branch: feature-a, target_branch: main, project_id: 1000, author_id: 1, traversal_path: "1/100/1000/" }
+    - { id: 2001, iid: 2, title: Fix bug B, state: opened, source_branch: fix-b, target_branch: main, project_id: 1000, author_id: 1, traversal_path: "1/100/1000/" }
+    - { id: 2002, iid: 3, title: Refactor C, state: merged, source_branch: refactor-c, target_branch: main, merged_at: { sql: "toDateTime64('2024-03-15 12:00:00.000000', 6, 'UTC')" }, project_id: 1001, author_id: 2, traversal_path: "1/101/1001/" }
+    - { id: 2003, iid: 4, title: Update D, state: closed, source_branch: update-d, target_branch: main, project_id: 1004, author_id: 3, traversal_path: "1/102/1004/" }
+    - { id: 2004, iid: 5, title: Ship feature E, state: merged, source_branch: ship-e, target_branch: main, merged_at: { sql: "toDateTime64('2024-06-10 09:00:00.000000', 6, 'UTC')" }, project_id: 1000, traversal_path: "1/100/1000/" }
+    - { id: 2005, iid: 6, title: Ship feature F, state: merged, source_branch: ship-f, target_branch: main, merged_at: { sql: "toDateTime64('2024-08-20 09:00:00.000000', 6, 'UTC')" }, project_id: 1000, traversal_path: "1/100/1000/" }
+    - { id: 9100, iid: 1, title: Org2 MR, state: opened, source_branch: org2-feature, target_branch: main, project_id: 9000, author_id: 1, traversal_path: "2/900/9000/" }
+
+  gl_note:
+    - { id: 3000, note: Normal note on feature A, noteable_type: MergeRequest, noteable_id: 2000, confidential: false, internal: false, created_at: "2024-01-15 10:30:00", author_id: 1, traversal_path: "1/100/1000/" }
+    - { id: 3001, note: Confidential feedback on bug B, noteable_type: MergeRequest, noteable_id: 2001, confidential: true, internal: false, created_at: "2024-02-20 14:45:00", traversal_path: "1/100/1000/" }
+    - { id: 3002, note: { sql: "repeat('x', 10000)" }, noteable_type: MergeRequest, noteable_id: 2000, confidential: false, internal: false, traversal_path: "1/100/1000/" }
+    - { id: 3003, note: "Robert'); DROP TABLE gl_note;--", noteable_type: MergeRequest, noteable_id: 2000, confidential: false, internal: false, traversal_path: "1/100/1000/" }
+
+  gl_merge_request_diff:
+    - { id: 5000, merge_request_id: 2000, state: collected, head_commit_sha: aaaaaaaa1111, traversal_path: "1/100/1000/" }
+    - { id: 5001, merge_request_id: 2000, state: collected, head_commit_sha: aaaaaaaa2222, traversal_path: "1/100/1000/" }
+    - { id: 5002, merge_request_id: 2001, state: collected, head_commit_sha: bbbbbbbb3333, traversal_path: "1/100/1000/" }
+
+  gl_milestone:
+    - { id: 6000, iid: 1, title: Sprint 1, state: active, traversal_path: "1/100/" }
+    - { id: 6001, iid: 2, title: Sprint 2, state: closed, traversal_path: "1/101/" }
+
+  gl_label:
+    - { id: 7000, title: bug, color: "#d73a4a", traversal_path: "1/100/" }
+    - { id: 7001, title: feature, color: "#0075ca", traversal_path: "1/100/" }
+    - { id: 7002, title: urgent, color: "#e4e669", traversal_path: "1/101/" }
+
+  gl_vulnerability:
+    - { id: 8000, title: SQLi in login, state: detected, severity: critical, report_type: sast, resolved_on_default_branch: false, present_on_default_branch: true, project_id: 1000, traversal_path: "1/100/1000/" }
+    - { id: 8001, title: XSS in comments, state: detected, severity: high, report_type: sast, resolved_on_default_branch: false, present_on_default_branch: true, project_id: 1001, traversal_path: "1/101/1001/" }
+    - { id: 8002, title: Exposed secret in CI, state: detected, severity: critical, report_type: secret_detection, resolved_on_default_branch: false, present_on_default_branch: true, project_id: 1004, traversal_path: "1/102/1004/" }
+
+  gl_work_item:
+    - { id: 4000, iid: 1, title: Implement login page, state: opened, work_item_type: issue, confidential: false, weight: 3, created_at: "2024-03-01 09:00:00", updated_at: "2024-03-10 14:00:00", project_id: 1000, author_id: 1, namespace_id: 100, milestone_id: 6000, traversal_path: "1/100/" }
+    - { id: 4001, iid: 2, title: Fix auth bug, state: closed, work_item_type: incident, confidential: true, weight: 8, created_at: "2024-03-05 11:30:00", updated_at: "2024-03-15 16:00:00", closed_at: "2024-03-15 16:00:00", project_id: 1000, author_id: 2, namespace_id: 100, milestone_id: 6000, closed_by_id: 2, traversal_path: "1/100/" }
+    - { id: 4002, iid: 3, title: Write unit tests, state: opened, work_item_type: task, confidential: false, created_at: "2024-04-01 08:00:00", updated_at: "2024-04-01 08:00:00", project_id: 0, author_id: 1, namespace_id: 101, traversal_path: "1/101/" }
+    - { id: 4003, iid: 4, title: Q1 Objective, state: opened, work_item_type: epic, confidential: false, weight: 13, created_at: "2024-01-02 10:00:00", updated_at: "2024-03-30 12:00:00", project_id: 0, author_id: 3, namespace_id: 102, traversal_path: "1/102/" }
+    - { id: 4010, iid: 5, title: Deep WI, state: opened, work_item_type: issue, confidential: false, weight: 5, created_at: "2024-04-15 09:00:00", updated_at: "2024-04-15 09:00:00", project_id: 1010, author_id: 7, namespace_id: 0, traversal_path: "1/100/200/1010/" }
+
+  gl_definition:
+    - { id: 12000, traversal_path: "1/100/1000/", project_id: 1000, branch: main, commit_sha: abc123, file_path: "crates/compiler/src/lib.rs", fqn: "compiler::compile", name: compile, definition_type: Function, start_line: 10, end_line: 20, start_byte: 100, end_byte: 200, start_char: 4, end_char: 11 }
+    - { id: 12001, traversal_path: "1/100/1000/", project_id: 1000, branch: main, commit_sha: abc123, file_path: "crates/compiler/src/lib.rs", fqn: "compiler::helper", name: helper, definition_type: Function, start_line: 22, end_line: 30, start_byte: 220, end_byte: 300, start_char: 4, end_char: 10 }
+    - { id: 12002, traversal_path: "1/100/1000/", project_id: 1000, branch: main, commit_sha: abc123, file_path: "crates/orbit/src/main.rs", fqn: "orbit::run_query", name: run_query, definition_type: Function, start_line: 40, end_line: 55, start_byte: 400, end_byte: 550, start_char: 4, end_char: 13 }
+    - { id: 12100, traversal_path: "1/101/1001/", project_id: 1001, branch: main, commit_sha: def456, file_path: "crates/compiler/src/lib.rs", fqn: "compiler::compile", name: compile, definition_type: Function, start_line: 10, end_line: 20, start_byte: 100, end_byte: 200, start_char: 4, end_char: 11 }
+    - { id: 12102, traversal_path: "1/101/1001/", project_id: 1001, branch: main, commit_sha: def456, file_path: "crates/orbit/src/main.rs", fqn: "orbit::run_query", name: run_query, definition_type: Function, start_line: 40, end_line: 55, start_byte: 400, end_byte: 550, start_char: 4, end_char: 13 }
+
+  gl_file:
+    - { id: 13000, traversal_path: "1/100/1000/", project_id: 1000, branch: main, commit_sha: abc123, path: src/parser.rs, name: parser.rs, extension: rs, language: Rust }
+    - { id: 13001, traversal_path: "1/100/1000/", project_id: 1000, branch: main, commit_sha: abc123, path: src/clickhouse.rs, name: clickhouse.rs, extension: rs, language: Rust }
+    - { id: 13002, traversal_path: "1/100/1000/", project_id: 1000, branch: main, commit_sha: abc123, path: README.md, name: README.md, extension: md, language: Markdown }
+    - { id: 13003, traversal_path: "1/100/1000/", project_id: 1000, branch: main, commit_sha: abc123, path: assets/logo.png, name: logo.png, extension: png, language: "" }
+    - { id: 13004, traversal_path: "1/100/1000/", project_id: 1000, branch: main, commit_sha: abc123, path: VERSION, name: VERSION, extension: "", language: "" }
+
+  gl_edge:
+    # MEMBER_OF
+    - { traversal_path: "1/100/", source_id: 1, source_kind: User, relationship_kind: MEMBER_OF, target_id: 100, target_kind: Group, source_tags: [state:active], target_tags: [] }
+    - { traversal_path: "1/102/", source_id: 1, source_kind: User, relationship_kind: MEMBER_OF, target_id: 102, target_kind: Group, source_tags: [state:active], target_tags: [] }
+    - { traversal_path: "1/100/", source_id: 2, source_kind: User, relationship_kind: MEMBER_OF, target_id: 100, target_kind: Group, source_tags: [state:active], target_tags: [] }
+    - { traversal_path: "1/101/", source_id: 3, source_kind: User, relationship_kind: MEMBER_OF, target_id: 101, target_kind: Group, source_tags: [state:active], target_tags: [] }
+    - { traversal_path: "1/101/", source_id: 4, source_kind: User, relationship_kind: MEMBER_OF, target_id: 101, target_kind: Group, source_tags: ["state:active", "user_type:project_bot"], target_tags: [] }
+    - { traversal_path: "1/102/", source_id: 4, source_kind: User, relationship_kind: MEMBER_OF, target_id: 102, target_kind: Group, source_tags: ["state:active", "user_type:project_bot"], target_tags: [] }
+    - { traversal_path: "1/101/", source_id: 5, source_kind: User, relationship_kind: MEMBER_OF, target_id: 101, target_kind: Group, source_tags: ["state:blocked", "user_type:service_account"], target_tags: [] }
+    - { traversal_path: "1/100/", source_id: 6, source_kind: User, relationship_kind: MEMBER_OF, target_id: 100, target_kind: Group, source_tags: [state:active], target_tags: [] }
+    - { traversal_path: "1/101/", source_id: 6, source_kind: User, relationship_kind: MEMBER_OF, target_id: 101, target_kind: Group, source_tags: [state:active], target_tags: [] }
+    # CONTAINS
+    - { traversal_path: "1/100/200/", source_id: 100, source_kind: Group, relationship_kind: CONTAINS, target_id: 200, target_kind: Group, source_tags: [], target_tags: [] }
+    - { traversal_path: "1/100/200/300/", source_id: 200, source_kind: Group, relationship_kind: CONTAINS, target_id: 300, target_kind: Group, source_tags: [], target_tags: [] }
+    - { traversal_path: "1/100/1000/", source_id: 100, source_kind: Group, relationship_kind: CONTAINS, target_id: 1000, target_kind: Project, source_tags: [], target_tags: [] }
+    - { traversal_path: "1/100/1002/", source_id: 100, source_kind: Group, relationship_kind: CONTAINS, target_id: 1002, target_kind: Project, source_tags: [], target_tags: [] }
+    - { traversal_path: "1/101/1001/", source_id: 101, source_kind: Group, relationship_kind: CONTAINS, target_id: 1001, target_kind: Project, source_tags: [], target_tags: [] }
+    - { traversal_path: "1/101/1003/", source_id: 101, source_kind: Group, relationship_kind: CONTAINS, target_id: 1003, target_kind: Project, source_tags: [], target_tags: [] }
+    - { traversal_path: "1/102/1004/", source_id: 102, source_kind: Group, relationship_kind: CONTAINS, target_id: 1004, target_kind: Project, source_tags: [], target_tags: [] }
+    - { traversal_path: "1/100/200/1010/", source_id: 200, source_kind: Group, relationship_kind: CONTAINS, target_id: 1010, target_kind: Project, source_tags: [], target_tags: [] }
+    # AUTHORED
+    - { traversal_path: "1/100/1000/", source_id: 1, source_kind: User, relationship_kind: AUTHORED, target_id: 2000, target_kind: MergeRequest, source_tags: [], target_tags: [state:opened] }
+    - { traversal_path: "1/100/1000/", source_id: 1, source_kind: User, relationship_kind: AUTHORED, target_id: 2001, target_kind: MergeRequest, source_tags: [], target_tags: [state:opened] }
+    - { traversal_path: "1/101/1001/", source_id: 2, source_kind: User, relationship_kind: AUTHORED, target_id: 2002, target_kind: MergeRequest, source_tags: [], target_tags: [state:merged] }
+    - { traversal_path: "1/102/1004/", source_id: 3, source_kind: User, relationship_kind: AUTHORED, target_id: 2003, target_kind: MergeRequest, source_tags: [], target_tags: [state:closed] }
+    - { traversal_path: "1/100/1000/", source_id: 1, source_kind: User, relationship_kind: AUTHORED, target_id: 3000, target_kind: Note, source_tags: [], target_tags: [] }
+    # HAS_NOTE
+    - { traversal_path: "1/100/1000/", source_id: 2000, source_kind: MergeRequest, relationship_kind: HAS_NOTE, target_id: 3000, target_kind: Note, source_tags: [state:opened], target_tags: [] }
+    - { traversal_path: "1/100/1000/", source_id: 2000, source_kind: MergeRequest, relationship_kind: HAS_NOTE, target_id: 3002, target_kind: Note, source_tags: [state:opened], target_tags: [] }
+    - { traversal_path: "1/100/1000/", source_id: 2000, source_kind: MergeRequest, relationship_kind: HAS_NOTE, target_id: 3003, target_kind: Note, source_tags: [state:opened], target_tags: [] }
+    - { traversal_path: "1/100/1000/", source_id: 2001, source_kind: MergeRequest, relationship_kind: HAS_NOTE, target_id: 3001, target_kind: Note, source_tags: [state:opened], target_tags: [] }
+    # AUTHORED WorkItems
+    - { traversal_path: "1/100/", source_id: 1, source_kind: User, relationship_kind: AUTHORED, target_id: 4000, target_kind: WorkItem, source_tags: [], target_tags: ["state:opened", "wi_type:issue"] }
+    - { traversal_path: "1/100/", source_id: 2, source_kind: User, relationship_kind: AUTHORED, target_id: 4001, target_kind: WorkItem, source_tags: [], target_tags: ["state:closed", "wi_type:incident"] }
+    - { traversal_path: "1/101/", source_id: 1, source_kind: User, relationship_kind: AUTHORED, target_id: 4002, target_kind: WorkItem, source_tags: [], target_tags: ["state:opened", "wi_type:task"] }
+    - { traversal_path: "1/102/", source_id: 3, source_kind: User, relationship_kind: AUTHORED, target_id: 4003, target_kind: WorkItem, source_tags: [], target_tags: ["state:opened", "wi_type:epic"] }
+    # WorkItem IN_GROUP
+    - { traversal_path: "1/100/", source_id: 4000, source_kind: WorkItem, relationship_kind: IN_GROUP, target_id: 100, target_kind: Group, source_tags: ["state:opened", "wi_type:issue"], target_tags: [] }
+    - { traversal_path: "1/100/", source_id: 4001, source_kind: WorkItem, relationship_kind: IN_GROUP, target_id: 100, target_kind: Group, source_tags: ["state:closed", "wi_type:incident"], target_tags: [] }
+    - { traversal_path: "1/101/", source_id: 4002, source_kind: WorkItem, relationship_kind: IN_GROUP, target_id: 101, target_kind: Group, source_tags: ["state:opened", "wi_type:task"], target_tags: [] }
+    - { traversal_path: "1/102/", source_id: 4003, source_kind: WorkItem, relationship_kind: IN_GROUP, target_id: 102, target_kind: Group, source_tags: ["state:opened", "wi_type:epic"], target_tags: [] }
+    # WorkItem IN_MILESTONE
+    - { traversal_path: "1/100/", source_id: 4000, source_kind: WorkItem, relationship_kind: IN_MILESTONE, target_id: 6000, target_kind: Milestone, source_tags: ["state:opened", "wi_type:issue"], target_tags: [] }
+    - { traversal_path: "1/100/", source_id: 4001, source_kind: WorkItem, relationship_kind: IN_MILESTONE, target_id: 6000, target_kind: Milestone, source_tags: ["state:closed", "wi_type:incident"], target_tags: [] }
+    # ASSIGNED
+    - { traversal_path: "1/100/", source_id: 1, source_kind: User, relationship_kind: ASSIGNED, target_id: 4000, target_kind: WorkItem, source_tags: [], target_tags: ["state:opened", "wi_type:issue"] }
+    - { traversal_path: "1/100/", source_id: 2, source_kind: User, relationship_kind: ASSIGNED, target_id: 4000, target_kind: WorkItem, source_tags: [], target_tags: ["state:opened", "wi_type:issue"] }
+    - { traversal_path: "1/100/", source_id: 3, source_kind: User, relationship_kind: ASSIGNED, target_id: 4001, target_kind: WorkItem, source_tags: [], target_tags: ["state:closed", "wi_type:incident"] }
+    # HAS_LABEL
+    - { traversal_path: "1/100/", source_id: 4000, source_kind: WorkItem, relationship_kind: HAS_LABEL, target_id: 7000, target_kind: Label, source_tags: ["state:opened", "wi_type:issue"], target_tags: [] }
+    - { traversal_path: "1/100/", source_id: 4000, source_kind: WorkItem, relationship_kind: HAS_LABEL, target_id: 7001, target_kind: Label, source_tags: ["state:opened", "wi_type:issue"], target_tags: [] }
+    - { traversal_path: "1/100/", source_id: 4001, source_kind: WorkItem, relationship_kind: HAS_LABEL, target_id: 7002, target_kind: Label, source_tags: ["state:closed", "wi_type:incident"], target_tags: [] }
+    # WorkItem IN_PROJECT
+    - { traversal_path: "1/100/", source_id: 4000, source_kind: WorkItem, relationship_kind: IN_PROJECT, target_id: 1000, target_kind: Project, source_tags: ["state:opened", "wi_type:issue"], target_tags: [] }
+    - { traversal_path: "1/100/", source_id: 4001, source_kind: WorkItem, relationship_kind: IN_PROJECT, target_id: 1000, target_kind: Project, source_tags: ["state:closed", "wi_type:incident"], target_tags: [] }
+    - { traversal_path: "1/100/200/1010/", source_id: 4010, source_kind: WorkItem, relationship_kind: IN_PROJECT, target_id: 1010, target_kind: Project, source_tags: ["state:opened", "wi_type:issue"], target_tags: [] }
+    - { traversal_path: "1/100/200/1010/", source_id: 7, source_kind: User, relationship_kind: AUTHORED, target_id: 4010, target_kind: WorkItem, source_tags: [], target_tags: ["state:opened", "wi_type:issue"] }
+    # CLOSED
+    - { traversal_path: "1/100/", source_id: 2, source_kind: User, relationship_kind: CLOSED, target_id: 4001, target_kind: WorkItem, source_tags: [], target_tags: ["state:closed", "wi_type:incident"] }
+    # APPROVED
+    - { traversal_path: "1/100/1000/", source_id: 2, source_kind: User, relationship_kind: APPROVED, target_id: 2000, target_kind: MergeRequest, source_tags: [], target_tags: [state:opened] }
+    - { traversal_path: "1/100/1000/", source_id: 3, source_kind: User, relationship_kind: APPROVED, target_id: 2000, target_kind: MergeRequest, source_tags: [], target_tags: [state:opened] }
+    - { traversal_path: "1/101/1001/", source_id: 1, source_kind: User, relationship_kind: APPROVED, target_id: 2002, target_kind: MergeRequest, source_tags: [], target_tags: [state:merged] }
+    # MR IN_PROJECT
+    - { traversal_path: "1/100/1000/", source_id: 2000, source_kind: MergeRequest, relationship_kind: IN_PROJECT, target_id: 1000, target_kind: Project, source_tags: [state:opened], target_tags: [] }
+    - { traversal_path: "1/100/1000/", source_id: 2001, source_kind: MergeRequest, relationship_kind: IN_PROJECT, target_id: 1000, target_kind: Project, source_tags: [state:opened], target_tags: [] }
+    - { traversal_path: "1/101/1001/", source_id: 2002, source_kind: MergeRequest, relationship_kind: IN_PROJECT, target_id: 1001, target_kind: Project, source_tags: [state:merged], target_tags: [] }
+    - { traversal_path: "1/102/1004/", source_id: 2003, source_kind: MergeRequest, relationship_kind: IN_PROJECT, target_id: 1004, target_kind: Project, source_tags: [state:closed], target_tags: [] }
+    - { traversal_path: "1/100/1000/", source_id: 2004, source_kind: MergeRequest, relationship_kind: IN_PROJECT, target_id: 1000, target_kind: Project, source_tags: [state:merged], target_tags: [] }
+    - { traversal_path: "1/100/1000/", source_id: 2005, source_kind: MergeRequest, relationship_kind: IN_PROJECT, target_id: 1000, target_kind: Project, source_tags: [state:merged], target_tags: [] }
+    # Vulnerability IN_PROJECT
+    - { traversal_path: "1/100/1000/", source_id: 8000, source_kind: Vulnerability, relationship_kind: IN_PROJECT, target_id: 1000, target_kind: Project, source_tags: ["severity:critical", "state:detected"], target_tags: [] }
+    - { traversal_path: "1/101/1001/", source_id: 8001, source_kind: Vulnerability, relationship_kind: IN_PROJECT, target_id: 1001, target_kind: Project, source_tags: ["severity:high", "state:detected"], target_tags: [] }
+    - { traversal_path: "1/102/1004/", source_id: 8002, source_kind: Vulnerability, relationship_kind: IN_PROJECT, target_id: 1004, target_kind: Project, source_tags: ["severity:critical", "state:detected"], target_tags: [] }
+    # Organization 2: cross-org isolation
+    - { traversal_path: "2/900/", source_id: 1, source_kind: User, relationship_kind: MEMBER_OF, target_id: 900, target_kind: Group, source_tags: [state:active], target_tags: [] }
+    - { traversal_path: "2/900/9000/", source_id: 900, source_kind: Group, relationship_kind: CONTAINS, target_id: 9000, target_kind: Project, source_tags: [], target_tags: [] }
+    - { traversal_path: "2/900/9000/", source_id: 1, source_kind: User, relationship_kind: AUTHORED, target_id: 9100, target_kind: MergeRequest, source_tags: [], target_tags: [state:opened] }
+    - { traversal_path: "2/900/9000/", source_id: 9100, source_kind: MergeRequest, relationship_kind: IN_PROJECT, target_id: 9000, target_kind: Project, source_tags: [state:opened], target_tags: [] }
+
+  gl_diff_edge:
+    - { traversal_path: "1/100/1000/", source_id: 2000, source_kind: MergeRequest, relationship_kind: HAS_DIFF, target_id: 5000, target_kind: MergeRequestDiff, source_tags: [state:opened], target_tags: [] }
+    - { traversal_path: "1/100/1000/", source_id: 2000, source_kind: MergeRequest, relationship_kind: HAS_DIFF, target_id: 5001, target_kind: MergeRequestDiff, source_tags: [state:opened], target_tags: [] }
+    - { traversal_path: "1/100/1000/", source_id: 2001, source_kind: MergeRequest, relationship_kind: HAS_DIFF, target_id: 5002, target_kind: MergeRequestDiff, source_tags: [state:opened], target_tags: [] }
+
+  gl_code_edge:
+    - { traversal_path: "1/100/1000/", project_id: 1000, branch: main, source_id: 12000, source_kind: Definition, relationship_kind: CALLS, target_id: 12001, target_kind: Definition }
+    - { traversal_path: "1/100/1000/", project_id: 1000, branch: main, source_id: 12001, source_kind: Definition, relationship_kind: CALLS, target_id: 12002, target_kind: Definition }
+    - { traversal_path: "1/101/1001/", project_id: 1001, branch: main, source_id: 12001, source_kind: Definition, relationship_kind: CALLS, target_id: 12102, target_kind: Definition }
+

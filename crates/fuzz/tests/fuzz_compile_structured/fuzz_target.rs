@@ -1,5 +1,5 @@
 use bolero::check;
-use compiler::{Ontology, SecurityContext, compile};
+use compiler::{Frontend, Ontology, SecurityContext, compile};
 use orbit_fuzz::generators::FuzzQuery;
 use std::sync::OnceLock;
 
@@ -17,6 +17,6 @@ fn main() {
     check!()
         .with_type::<FuzzQuery>()
         .for_each(|query: &FuzzQuery| {
-            let _ = compile(&query.json, ontology(), ctx());
+            let _ = compile(&query.json, Frontend::JsonDsl, ontology(), ctx());
         });
 }

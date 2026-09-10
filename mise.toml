@@ -132,6 +132,11 @@ run = "cargo nextest run --all-features --test containers -j 4 --no-fail-fast --
 env = { DOCKER_HOST = "unix://{{env.HOME}}/.colima/gkg/docker.sock" }
 description = "Run server integration tests (data correctness, hydration, redaction, graph formatter)"
 
+[tasks."test:integration:overlay"]
+run = "GKG_TEST_ONTOLOGY_OVERLAY={{arg(name='overlay')}} cargo nextest run --all-features --test containers -j 4 --no-fail-fast --retries 0 -E 'test(data_correctness) | test(denormalized_tables_match_their_source_join)'"
+env = { DOCKER_HOST = "unix://{{env.HOME}}/.colima/gkg/docker.sock" }
+description = "Run data correctness against the ontology with config/seeds/overlays/<name>/ merged over it"
+
 [tasks."test:integration:data"]
 run = "cargo nextest run --all-features --test containers --no-fail-fast --retries 0 --no-capture -E 'test(data_correctness)'"
 env = { DOCKER_HOST = "unix://{{env.HOME}}/.colima/gkg/docker.sock" }
@@ -286,11 +291,11 @@ run = 'gem push _build/gitlab-gkg-proto-*.gem'
 description = "Publish gitlab-gkg-proto gem to RubyGems.org"
 
 [tasks."server:start"]
-run = 'GKG_GITLAB__JWT__VERIFYING_KEY=${GKG_GITLAB__JWT__VERIFYING_KEY:-$(cat $GDK_ROOT_RESOLVED/gitlab/.gitlab_knowledge_graph_secret 2>/dev/null || cat $GDK_ROOT_RESOLVED/gitlab/.gitlab_shell_secret 2>/dev/null || echo "development-secret-at-least-32-bytes")} cargo run -p orbit-server'
+run = "./scripts/orbit-native-dev.sh webserver"
 description = "Start the GKG server (webserver mode)"
 
 [tasks."server:dispatch"]
-run = './scripts/run-dispatcher.sh'
+run = "./scripts/orbit-native-dev.sh dispatcher"
 description = "Start the GKG server (dispatch-indexing mode)"
 
 [tasks.dev]
@@ -309,8 +314,8 @@ run = "./scripts/orbit-native-dev.sh check"
 description = "Verify GDK-connected local development prerequisites"
 
 [tasks."dev:status"]
-run = "./scripts/orbit-native-dev.sh env"
-description = "Show the derived GDK-backed environment for local development"
+run = "./scripts/orbit-native-dev.sh config"
+description = "Show the derived GDK-backed configuration for local development"
 
 [tasks."dev:restart"]
 run = "mise run dev"
@@ -325,11 +330,11 @@ run = "./scripts/orbit-native-dev.sh setup"
 description = "Create the graph database and apply config/graph.sql to ClickHouse"
 
 [tasks."dev:web"]
-run = "GKG_BIND_ADDRESS=127.0.0.1:${GKG_SERVER_PORT:-8090} GKG_GRPC_BIND_ADDRESS=127.0.0.1:${GKG_SERVER_GRPC_PORT:-50054} GKG_METRICS__PROMETHEUS__ENABLED=${GKG_ENABLE_METRICS:-false} GKG_METRICS__PROMETHEUS__PORT=${GKG_METRICS_PORT:-9100} ./scripts/orbit-native-dev.sh webserver"
+run = "./scripts/orbit-native-dev.sh webserver"
 description = "Start a local GKG webserver connected to GDK services"
 
 [tasks."dev:indexer"]
-run = "GKG_INDEXER_HEALTH_BIND_ADDRESS=127.0.0.1:${GKG_INDEXER_PORT:-4202} GKG_NATS__CONSUMER_NAME=${GKG_INDEXER_CONSUMER:-gkg-indexer-dev} GKG_METRICS__PROMETHEUS__ENABLED=${GKG_ENABLE_METRICS:-false} GKG_METRICS__PROMETHEUS__PORT=${GKG_INDEXER_METRICS_PORT:-9200} ./scripts/orbit-native-dev.sh indexer"
+run = "./scripts/orbit-native-dev.sh indexer"
 description = "Start a local GKG indexer connected to GDK services"
 
 [tasks."dev:dispatcher"]
@@ -339,10 +344,6 @@ description = "Start a local GKG dispatch-indexing process connected to GDK serv
 [tasks."dev:healthcheck"]
 run = "./scripts/orbit-native-dev.sh healthcheck"
 description = "Start the local GKG health-check process"
-
-[tasks."dev:env"]
-run = "./scripts/orbit-native-dev.sh env"
-description = "Print the derived local GKG environment"
 
 
 [tasks."iglu:bump"]
@@ -364,6 +365,7 @@ description = "Validate named query YAML files against JSON schema"
 [tasks."scenarios:validate"]
 run = "find crates/integration-tests/tests/indexer/scenarios -name '*.yaml' | xargs uvx check-jsonschema --verbose --schemafile config/schemas/indexer_scenario.schema.json"
 description = "Validate indexer test scenario YAML files against JSON schema"
+
 
 [tasks."schema:generate"]
 run = "cargo xtask schema -o config/schemas/config.schema.json"

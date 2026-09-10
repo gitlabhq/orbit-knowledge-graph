@@ -26,22 +26,20 @@ use self::input::GraphStatusInput;
 
 pub struct GraphStatusService {
     client: Arc<ArrowClickHouseClient>,
-    ontology: Arc<Ontology>,
     indexing_status: Option<IndexingStatusStore>,
 }
 
 fn graph_status_query_config() -> QueryConfig {
     QueryConfig {
         use_query_cache: Some(true),
-        ..QueryConfig::default()
+        ..orbit_server_config::query::default_config()
     }
 }
 
 impl GraphStatusService {
-    pub fn new(client: Arc<ArrowClickHouseClient>, ontology: Arc<Ontology>) -> Self {
+    pub fn new(client: Arc<ArrowClickHouseClient>) -> Self {
         Self {
             client,
-            ontology,
             indexing_status: None,
         }
     }
@@ -53,6 +51,7 @@ impl GraphStatusService {
 
     pub async fn get_status(
         &self,
+        ontology: &Ontology,
         traversal_path: &TraversalPath,
         format: i32,
         security_context: &SecurityContext,
@@ -63,7 +62,7 @@ impl GraphStatusService {
 
         info!(%traversal_path, "Graph status fetching");
 
-        let input = GraphStatusInput::from_ontology(&self.ontology, security_context);
+        let input = GraphStatusInput::from_ontology(ontology, security_context);
 
         let entity_counts_future = async {
             if input.nodes.is_empty() {
@@ -77,13 +76,9 @@ impl GraphStatusService {
                     HashMap::new()
                 })
         };
-        let code_future =
-            code::get_code_indexing_state(&self.client, &self.ontology, traversal_path);
-        let sdlc_future = sdlc::get_sdlc_indexing_state(
-            self.indexing_status.as_ref(),
-            &self.ontology,
-            traversal_path,
-        );
+        let code_future = code::get_code_indexing_state(&self.client, ontology, traversal_path);
+        let sdlc_future =
+            sdlc::get_sdlc_indexing_state(self.indexing_status.as_ref(), ontology, traversal_path);
 
         let (entity_counts, code, sdlc) =
             tokio::join!(entity_counts_future, code_future, sdlc_future);
@@ -102,7 +97,7 @@ impl GraphStatusService {
 
         let visible_nodes: HashSet<&str> = input.nodes.iter().map(|n| n.name.as_str()).collect();
         let domains =
-            present_domain_response(&self.ontology, &entity_counts, &visible_nodes, &item_states);
+            present_domain_response(ontology, &entity_counts, &visible_nodes, &item_states);
 
         let indexing = match &sdlc.aggregate {
             Some(sdlc_status) => worst_indexing_status(Some(sdlc_status), code.aggregate.as_ref()),
@@ -381,12 +376,16 @@ mod tests {
 
     #[tokio::test]
     async fn empty_traversal_path_rejected() {
-        let client =
-            Arc::new(orbit_server_config::ClickHouseConfiguration::default().build_client());
-        let service = GraphStatusService::new(client, test_ontology());
+        let client = Arc::new(
+            orbit_server_config::AppConfig::embedded_defaults()
+                .graph
+                .build_client(),
+        );
+        let service = GraphStatusService::new(client);
 
         let result = service
             .get_status(
+                &test_ontology(),
                 &TraversalPath::new_unchecked(""),
                 ResponseFormat::Raw as i32,
                 &admin_context(),

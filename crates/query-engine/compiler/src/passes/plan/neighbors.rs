@@ -27,17 +27,14 @@ pub fn plan_neighbors(input: &Input) -> Result<Plan> {
         table: center_node.table.clone(),
         selectivity: Selectivity::from_node(center_node),
         hydration: HydrationStrategy::Skip,
-        filters: center_node
-            .filters
-            .iter()
-            .flat_map(|(k, v)| v.iter().map(move |f| (k.clone(), f.clone())))
-            .collect(),
+        filters: crate::passes::shared::ordered_filters(&center_node.filters),
         node_ids: center_node.node_ids.clone(),
         id_range: center_node.id_range.clone(),
         has_traversal_path: center_node.has_traversal_path,
         is_global: center_node.is_global,
         redaction_id_column: center_node.redaction_id_column.clone(),
         columns: center_node.columns.clone(),
+        text_excerpt: Default::default(),
         dedup_columns: vec![],
         use_narrowing: false,
         needs_elevated_filter: false,

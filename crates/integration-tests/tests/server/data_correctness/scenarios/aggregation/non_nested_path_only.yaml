@@ -1,0 +1,30 @@
+# source: crates/integration-tests/tests/server/data_correctness/aggregation.rs::aggregation_non_nested_path_only
+description: Flat group path 1/102/ shows only Group 102
+
+config:
+  security:
+    org_id: 1
+    paths: ["1/102/"]
+
+query:
+  json: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
+        {"id": "u", "entity": "User"}
+      ],
+      "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+      "group_by": ["g"],
+      "aggregations": [{"count": "u", "as": "member_count"}],
+      "limit": 10
+    }
+
+expect:
+  groups:
+    g:
+      rows:
+        - { entity: Group, id: 102, values: { member_count: 2 }, properties: { name: Internal Group } }
+      absent:
+        - { entity: Group, id: 100 }
+        - { entity: Group, id: 101 }

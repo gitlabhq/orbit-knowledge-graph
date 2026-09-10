@@ -1,0 +1,32 @@
+# source: crates/integration-tests/tests/server/data_correctness/security.rs::aggregation_two_hop_anchor_scoped_excludes_other_namespaces
+description: Two-hop aggregation with scoped anchor excludes users from other namespaces
+
+config:
+  security: { org_id: 1, paths: ["1/100/"] }
+
+query:
+  json: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {"id": "u", "entity": "User", "columns": ["username"]},
+        {"id": "mr", "entity": "MergeRequest"},
+        {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}}
+      ],
+      "relationships": [
+        {"type": "APPROVED", "from": "u", "to": "mr"},
+        {"type": "IN_PROJECT", "from": "mr", "to": "p"}
+      ],
+      "group_by": ["u"],
+      "aggregations": [{"count": "mr", "as": "approved_count"}],
+      "limit": 10
+    }
+
+expect:
+  groups:
+    u:
+      rows:
+        - { entity: User, id: 2, values: { approved_count: 1 } }
+        - { entity: User, id: 3, values: { approved_count: 1 } }
+      absent:
+        - { entity: User, id: 1 }

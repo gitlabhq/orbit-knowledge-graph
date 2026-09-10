@@ -24,7 +24,7 @@
 //! - [`modules::code`] - Code indexing (call graphs, definitions, references)
 //!
 pub mod analytics;
-pub mod campaign;
+pub use orbit_migrations::campaign;
 pub mod checkpoint;
 pub mod clickhouse;
 pub mod config;
@@ -64,6 +64,7 @@ use indexing_status::{INDEXING_PROGRESS_BUCKET, IndexingStatusStore};
 use locking::INDEXING_LOCKS_BUCKET;
 use modules::namespace_deletion::{ClickHouseNamespaceDeletionStore, NamespaceDeletionStore};
 use nats::{KvBucketConfig, NatsBroker};
+use orbit_migrations::catalog::OntologyCatalog;
 use orbit_server_config::IndexerModule;
 use orchestrator::Trigger;
 use orchestrator::dispatch::{CodeBackfill, NamespaceIndexingDispatch};
@@ -243,13 +244,23 @@ pub async fn run(
 
 pub async fn run_dispatcher(
     config: &DispatcherConfig,
-    ontology: &ontology::Ontology,
+    archive: &ontology::archive::OntologyArchive,
     shutdown: CancellationToken,
 ) -> Result<(), DispatcherError> {
     let services = orchestrator::scheduled::connect(&config.nats).await?;
 
+    let catalog = OntologyCatalog::open(services.nats_client.clone()).await?;
+    let ontology = catalog.publish(archive).await?;
+
+    let graph = config.graph.build_client();
+    if let Some(active_version) = orbit_migrations::version::read_active_version(&graph).await?
+        && active_version != archive.schema_version()
+    {
+        catalog.ensure_archive(active_version).await?;
+    }
+
     if let Err(error) = nats::versioning::gc_idle_release_streams(
-        &services.nats_client,
+        &services.nats_connection,
         config.nats.release_gc_idle_threshold(),
     )
     .await
@@ -257,7 +268,6 @@ pub async fn run_dispatcher(
         warn!(%error, "release GC failed, will retry next startup");
     }
 
-    let graph = config.graph.build_client();
     let datalake = config.datalake.build_client();
     let metrics = ScheduledTaskMetrics::new();
     let lock_service = services.lock_service.clone();
@@ -280,16 +290,16 @@ pub async fn run_dispatcher(
 
     let migration_metrics = schema::metrics::MigrationMetrics::new();
     info!("running schema migration check");
-    let dictionary_source = query_engine::compiler::DictionarySource {
-        database: &config.graph.database,
-        user: &config.graph.username,
-        password: config.graph.password.as_deref(),
+    let dictionary_credentials = orbit_migrations::schema::DictionaryCredentials {
+        database: config.graph.database.clone(),
+        user: config.graph.username.clone(),
+        password: config.graph.password.clone(),
     };
     schema::migration::run_if_needed(
         &graph,
-        &dictionary_source,
+        &dictionary_credentials,
         &lock_service,
-        ontology,
+        &ontology,
         &migration_metrics,
         &campaign,
     )
@@ -298,18 +308,23 @@ pub async fn run_dispatcher(
 
     match schema::version::read_active_version(&graph).await {
         Ok(Some(active_version)) if active_version == *schema::version::SCHEMA_VERSION => {
-            if let Err(error) = schema::migration::create_unversioned_tables(&graph, ontology).await
             {
-                warn!(%error, "failed to create unversioned ontology tables at startup");
+                let graph_schema = orbit_migrations::schema::GraphSchema::from_ontology(&ontology);
+                if let Err(error) =
+                    orbit_migrations::execute::create_unversioned_definitions(&graph, &graph_schema)
+                        .await
+                {
+                    warn!(%error, "failed to create unversioned tables at startup");
+                }
             }
-            if let Err(error) = schema::migration::replace_refreshable_views_for_version(
+            if let Err(error) = orbit_migrations::execute::replace_refreshable_views(
                 &graph,
-                ontology,
+                &ontology,
                 active_version,
             )
             .await
             {
-                warn!(%error, "failed to replace refreshable ontology views at startup");
+                warn!(%error, "failed to replace refreshable views at startup");
             }
         }
         Ok(_) => {}
@@ -324,7 +339,7 @@ pub async fn run_dispatcher(
         Arc::new(ClickHouseNamespaceDeletionStore::new(
             deletion_datalake,
             Arc::clone(&deletion_graph),
-            ontology,
+            &ontology,
         ));
     let checkpoint_store = Arc::new(checkpoint::ClickHouseCheckpointStore::new(deletion_graph));
 
@@ -353,21 +368,21 @@ pub async fn run_dispatcher(
             metrics.clone(),
             config.schedule.tasks.namespace.clone(),
             campaign.clone(),
-            ontology,
+            &ontology,
         )),
         Box::new(CodeBackfillSweep::new(
             backfill.clone(),
             CodeStaleSweep::new(
                 config.graph.build_client(),
-                &modules::code::config::CodeTableNames::from_ontology(ontology)
-                    .expect("code tables must resolve from the embedded ontology"),
+                &modules::code::config::CodeTableNames::from_ontology(&ontology)
+                    .expect("code tables must resolve from the archived ontology"),
                 checkpoint_store.clone(),
             ),
             config.schedule.tasks.code_backfill.clone(),
         )),
         Box::new(TableCleanup::new(
             graph,
-            ontology,
+            &ontology,
             metrics.clone(),
             config.schedule.tasks.table_cleanup.clone(),
         )),
@@ -380,7 +395,7 @@ pub async fn run_dispatcher(
         )),
         Box::new(StaleEdgeReconciliation::new(
             config.graph.build_client(),
-            ontology,
+            &ontology,
             Arc::new(checkpoint::ClickHouseCheckpointStore::new(Arc::new(
                 config.graph.build_client(),
             ))),
@@ -391,12 +406,13 @@ pub async fn run_dispatcher(
             config.graph.build_client(),
             config.datalake.build_client(),
             lock_service.clone(),
-            Arc::new(ontology.clone()),
+            Arc::new(ontology),
             config.schema.clone(),
             config.schedule.tasks.migration_completion.clone(),
             metrics.clone(),
             campaign.clone(),
-            services.nats_client.clone(),
+            services.nats_connection.clone(),
+            catalog,
         )),
     ];
 
@@ -420,7 +436,7 @@ pub async fn run_dispatcher(
         campaign.clone(),
         routes,
     );
-    let max_deliveries_reconciler = MaxDeliveriesReconciler::new(services.nats_client.clone());
+    let max_deliveries_reconciler = MaxDeliveriesReconciler::new(services.nats_connection.clone());
     let triggers: Vec<Box<dyn Trigger>> = vec![
         Box::new(scheduled),
         Box::new(siphon),

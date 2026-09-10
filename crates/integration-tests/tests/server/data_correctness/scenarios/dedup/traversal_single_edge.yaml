@@ -1,0 +1,39 @@
+# source: crates/integration-tests/tests/server/data_correctness/dedup.rs::traversal_dedup_returns_single_edge
+description: Traversal returns single edge for duplicated source node
+
+config:
+  extra_seed:
+    gl_user:
+      - { id: 9003, username: dup_author, name: Old Author, state: active, user_type: human, _version: "2024-01-01 00:00:00", _deleted: false }
+      - { id: 9003, username: dup_author_v2, name: New Author, state: active, user_type: human, _version: "2024-06-01 00:00:00", _deleted: false }
+    gl_merge_request:
+      - { id: 9101, iid: 98, title: "MR by dup author", state: opened, author_id: 9003, traversal_path: "1/100/1000/", _version: "2024-06-01 00:00:00", _deleted: false }
+    gl_edge:
+      - { traversal_path: "1/100/1000/", source_id: 9003, source_kind: User, relationship_kind: AUTHORED, target_id: 9101, target_kind: MergeRequest, source_tags: [], target_tags: ["state:opened"], _version: "1970-01-01 00:00:00", _deleted: false }
+  redaction:
+    allow:
+      user: [1, 2, 3, 4, 5, 6, 7, 9003]
+      merge_request: [2000, 2001, 2002, 2003, 2004, 2005, 9100, 9101]
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "u", "entity": "User", "node_ids": [9003]},
+        {"id": "mr", "entity": "MergeRequest"}
+      ],
+      "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
+      "limit": 10
+    }
+
+expect:
+  node_count: 2
+  nodes:
+    User:
+      ids: [9003]
+  edge_exists:
+    AUTHORED:
+      - [9003, 9101]
+  edge_count:
+    AUTHORED: 1

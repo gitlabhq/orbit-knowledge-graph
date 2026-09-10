@@ -1,0 +1,19 @@
+# source: crates/integration-tests/tests/server/data_correctness/security.rs::search_scoped_to_single_project_namespace
+description: Scoping to a single project path returns only that project
+
+config:
+  security: { org_id: 1, paths: ["1/100/1000/"] }
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [{"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]}],
+      "limit": 10
+    }
+
+expect:
+  node_count: 1
+  nodes:
+    Project:
+      ids: [1000]

@@ -1,0 +1,27 @@
+# source: crates/integration-tests/tests/server/data_correctness/traversal.rs::traversal_code_graph_edge_level_project_filter
+description: Relationship-level project_id filter scopes the CALLS edge scan
+
+query:
+  json: |
+    {
+        "query_type": "traversal",
+        "nodes": [
+            {"id": "caller", "entity": "Definition", "id_range": {"start": 12000, "end": 12999}, "columns": ["name"]},
+            {"id": "callee", "entity": "Definition", "columns": ["name"]}
+        ],
+        "relationships": [{"type": "CALLS", "from": "caller", "to": "callee", "filters": {"project_id": 1000}}],
+        "limit": 20
+    }
+  gql: |
+    MATCH (caller:Definition)-[:CALLS {project_id: 1000}]->(callee:Definition) WHERE caller.id >= 12000 AND caller.id <= 12999 RETURN caller.name, callee.name LIMIT 20
+
+expect:
+  node_count: 3
+  referential_integrity: true
+  nodes:
+    Definition:
+      ids: [12000, 12001, 12002]
+  edges:
+    CALLS:
+      - [12000, 12001]
+      - [12001, 12002]

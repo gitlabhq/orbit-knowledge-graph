@@ -1830,7 +1830,7 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
-      "description": "Seconds between the per-entity SDLC watermark and now. Rising lag means SDLC is falling behind on that entity.",
+      "description": "Seconds between the per-entity SDLC watermark and now, worst replica per entity. Rising lag means SDLC is falling behind on that entity.",
       "fieldConfig": {
         "defaults": {
           "custom": {
@@ -1868,7 +1868,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum by (entity) (gkg_indexer_sdlc_watermark_lag_seconds{container=\"gkg-indexer\", cluster=~\".*\"})",
+          "expr": "max by (entity) (gkg_indexer_sdlc_watermark_lag_seconds{container=\"gkg-indexer\", cluster=~\".*\"})",
           "legendFormat": "{{entity}}",
           "refId": "A"
         }
@@ -6850,8 +6850,8 @@
                 "type": "prometheus",
                 "uid": "$ORBIT_DS"
               },
-              "expr": "sum(gkg_indexer_sdlc_watermark_lag_seconds{container=\"gkg-indexer\", cluster=~\".*\"})",
-              "legendFormat": "{{instance}}",
+              "expr": "max by (entity) (gkg_indexer_sdlc_watermark_lag_seconds{container=\"gkg-indexer\", cluster=~\".*\"})",
+              "legendFormat": "{{entity}}",
               "refId": "A"
             }
           ],

@@ -2,7 +2,7 @@
 
 Build and test the `orbit` CLI and related crates without GDK, NATS, Siphon,
 ClickHouse, or PostgreSQL. Many contributions only need the tools on this
-page: language parser additions, `orbit-local` CLI changes, docs, unit
+page: language parser additions, `orbit-cli` changes, docs, unit
 tests, and the code-graph integration tests.
 
 For anything that touches the server pipeline (SDLC indexing, the query
@@ -20,23 +20,6 @@ locally, but verifying their end-to-end behavior requires the full stack.
   curl "https://mise.jdx.dev/install.sh" | sh
   ```
 
-- `protoc` (the protobuf compiler), only if you plan to run the code-graph
-  integration tests. It is not managed by `mise`:
-
-  ```shell
-  # macOS
-  brew install protobuf
-
-  # Debian/Ubuntu
-  sudo apt-get install -y protobuf-compiler
-
-  # Fedora
-  sudo dnf install -y protobuf-compiler
-
-  # Windows
-  winget install protobuf
-  ```
-
 ## Clone and set up
 
 ```shell
@@ -44,6 +27,9 @@ git clone https://gitlab.com/gitlab-org/orbit/knowledge-graph.git
 cd knowledge-graph
 mise trust && mise install
 ```
+
+`mise install` supplies the repository's pinned `protoc` compiler for the
+code-graph integration tests, along with the other managed tools.
 
 If `mise install` errors on first run (the Rust toolchain post-install step
 can fail before the toolchain is fully linked), re-run it once.

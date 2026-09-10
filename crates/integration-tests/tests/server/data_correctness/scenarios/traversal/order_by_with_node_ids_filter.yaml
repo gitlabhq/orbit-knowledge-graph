@@ -1,0 +1,31 @@
+# source: crates/integration-tests/tests/server/data_correctness/traversal.rs::traversal_order_by_with_node_ids_filter
+description: Order by descending MR title with node_ids filter on source users
+
+query:
+  json: |
+    {
+        "query_type": "traversal",
+        "nodes": [
+            {"id": "u", "entity": "User", "columns": ["username"], "node_ids": [1, 2]},
+            {"id": "mr", "entity": "MergeRequest", "columns": ["title"]}
+        ],
+        "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
+        "order_by": "-mr.title",
+        "limit": 20
+    }
+  gql: |
+    MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest) WHERE u.id IN [1, 2] RETURN u.username, mr.title ORDER BY mr.title DESC LIMIT 20
+
+expect:
+  node_count: 5
+  referential_integrity: true
+  nodes:
+    User:
+      ids: [1, 2]
+    MergeRequest:
+      order: [2002, 2001, 2000]
+  edges:
+    AUTHORED:
+      - [1, 2000]
+      - [1, 2001]
+      - [2, 2002]

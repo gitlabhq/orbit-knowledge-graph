@@ -88,7 +88,6 @@ fn stable_yaml_hash(content: &str) -> String {
     match orbit_utils::yaml::from_str::<serde_json::Value>(content) {
         Ok(mut value) => {
             remove_runtime_extract_fields(&mut value);
-            remove_query_time_annotations(&mut value);
             sort_json_keys(&mut value);
             match serde_json::to_string(&value) {
                 Ok(rendered) => sha256_hex(&rendered),
@@ -183,12 +182,6 @@ fn remove_runtime_extract_fields(value: &mut serde_json::Value) {
     }
 }
 
-fn remove_query_time_annotations(value: &mut serde_json::Value) {
-    if let serde_json::Value::Object(root) = value {
-        root.remove("search_weight");
-    }
-}
-
 fn remove_auxiliary_schema_settings(value: &mut serde_json::Value) {
     let serde_json::Value::Object(schema) = value else {
         return;
@@ -241,15 +234,6 @@ mod tests {
             "pipelines:\n  - name: Job\n    extract:\n      tables: [t]\n      order_by: [id]\n";
         let with = "pipelines:\n  - name: Job\n    extract:\n      tables: [t]\n      order_by: [id]\n      partition_count: 5\n";
         assert_eq!(stable_yaml_hash(without), stable_yaml_hash(with));
-    }
-
-    #[test]
-    fn stable_hash_ignores_search_weight() {
-        let without = "description: calls\ntable: gl_code_edge\n";
-        let with = "description: calls\ntable: gl_code_edge\nsearch_weight: 1.0\n";
-        let retuned = "description: calls\ntable: gl_code_edge\nsearch_weight: 0.3\n";
-        assert_eq!(stable_yaml_hash(without), stable_yaml_hash(with));
-        assert_eq!(stable_yaml_hash(with), stable_yaml_hash(retuned));
     }
 
     #[test]

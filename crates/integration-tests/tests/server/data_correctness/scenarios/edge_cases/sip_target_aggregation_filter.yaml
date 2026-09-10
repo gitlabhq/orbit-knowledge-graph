@@ -1,0 +1,26 @@
+# source: crates/integration-tests/tests/server/data_correctness/edge_cases/mod.rs::sip_target_aggregation_with_filter_returns_correct_counts
+description: Aggregation with state filter counts only opened MRs per user
+
+query:
+  json: |
+    {
+        "query_type": "aggregation",
+        "nodes": [
+            {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+            {"id": "mr", "entity": "MergeRequest", "filters": {"state": "opened"}}
+        ],
+        "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
+        "group_by": ["u"],
+        "aggregations": [{"count": "mr", "as": "open_mr_count"}],
+        "limit": 10
+    }
+
+expect:
+  skip_requirements: ["filter:state"]
+  groups:
+    u:
+      rows:
+        - { entity: User, id: 1, values: { open_mr_count: 2 }, properties: { username: alice } }
+      absent:
+        - { entity: User, id: 2 }
+        - { entity: User, id: 3 }

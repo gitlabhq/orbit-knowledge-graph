@@ -3,7 +3,9 @@
 use ontology::Ontology;
 use orbit_server::redaction::QueryResult;
 pub use query_engine::compiler::compile;
-use query_engine::compiler::{AccessLevel, AuthorizedPath, CompiledQueryContext, SecurityContext};
+use query_engine::compiler::{
+    AccessLevel, AuthorizedPath, CompiledQueryContext, Frontend, SecurityContext,
+};
 
 pub use integration_testkit::mock_redaction::MockRedactionService;
 pub use integration_testkit::{GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL, TestContext, load_ontology};
@@ -27,7 +29,7 @@ pub async fn compile_and_execute(
 ) -> (CompiledQueryContext, QueryResult) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
-    let compiled = compile(json, &ontology, &security_ctx).unwrap();
+    let compiled = compile(json, Frontend::JsonDsl, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&compiled.base).await;
     let result = QueryResult::from_batches(&batches, &compiled.base.result_context);
     (compiled, result)
@@ -56,6 +58,7 @@ impl DummyClaims for orbit_server::auth::Claims {
             }],
             source_type: orbit_server::auth::SourceType::Rest,
             ai_session_id: None,
+            request_id: None,
             instance_id: None,
             unique_instance_id: None,
             instance_version: None,

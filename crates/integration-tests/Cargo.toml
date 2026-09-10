@@ -22,6 +22,7 @@ named-queries = { path = "../named-queries" }
 nats-client = { workspace = true, features = ["testkit"] }
 integration-testkit = { path = "../integration-testkit" }
 ontology = { path = "../ontology" }
+orbit-migrations = { path = "../orbit-migrations" }
 query-engine = { path = "../query-engine", features = ["testutils"] }
 arrow = { workspace = true }
 async-nats = { workspace = true }

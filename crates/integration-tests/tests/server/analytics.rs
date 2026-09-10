@@ -158,6 +158,7 @@ async fn snowplow_micro_receives_gkg_query_executed() {
         host_name: None,
         organization_id: Some(42),
         root_namespace_ids: Some(vec![99]),
+        coding_agent: None,
         schema_version: None,
     });
 

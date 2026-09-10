@@ -1,0 +1,26 @@
+# source: crates/integration-tests/tests/server/data_correctness/dedup.rs::search_filter_excludes_stale_match
+description: Stale version matching filter excluded when latest does not match
+
+config:
+  extra_seed:
+    gl_user:
+      - { id: 9011, username: flipper, name: Flipper User, state: active, user_type: human, _version: "2024-01-01 00:00:00", _deleted: false }
+      - { id: 9011, username: flipper, name: Flipper User, state: blocked, user_type: human, _version: "2024-06-01 00:00:00", _deleted: false }
+  redaction:
+    allow:
+      user: [1, 2, 3, 4, 5, 6, 7, 9011]
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "state"],
+                 "filters": {"state": "active"}}],
+      "limit": 100
+    }
+
+expect:
+  skip_requirements: [node_count, "filter:state"]
+  nodes:
+    User:
+      absent: [9011]

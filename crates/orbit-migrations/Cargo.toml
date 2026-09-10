@@ -1,0 +1,23 @@
+[package]
+name = "orbit-migrations"
+version.workspace = true
+edition = "2024"
+license = "LicenseRef-EE"
+
+[dependencies]
+arrow = { workspace = true }
+async-nats = { workspace = true }
+bytes = { workspace = true }
+clickhouse-client = { workspace = true }
+ontology = { path = "../ontology" }
+nats-client = { path = "../nats-client" }
+orbit-versions = { path = "../orbit-versions" }
+orbit-utils = { path = "../utils" }
+regex = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+
+[lints]
+workspace = true

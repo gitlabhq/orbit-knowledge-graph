@@ -221,8 +221,8 @@ local freshness = [
   o.row('Freshness and saturation'),
   o.timeseries(
     'SDLC: watermark lag per entity',
-    'Seconds between the per-entity SDLC watermark and now. Rising lag means SDLC is falling behind on that entity.',
-    [o.target('sum by (entity) (gkg_indexer_sdlc_watermark_lag_seconds{%s})' % [SEL], '{{entity}}', DS)],
+    'Seconds between the per-entity SDLC watermark and now, worst replica per entity. Rising lag means SDLC is falling behind on that entity.',
+    [o.target('max by (entity) (gkg_indexer_sdlc_watermark_lag_seconds{%s})' % [SEL], '{{entity}}', DS)],
     's', 12, 8,
   ),
   o.timeseries(

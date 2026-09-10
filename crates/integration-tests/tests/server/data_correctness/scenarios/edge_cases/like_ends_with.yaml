@@ -1,0 +1,18 @@
+# source: crates/integration-tests/tests/server/data_correctness/edge_cases/like.rs::like_ends_with_returns_matching_rows
+description: LIKE ends_with filter returns matching username
+
+query:
+  json: |
+    {
+        "query_type": "traversal",
+        "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"],
+                 "filters": {"username": {"ends_with": "ice"}}}],
+        "limit": 10
+    }
+
+expect:
+  node_count: 1
+  nodes:
+    User:
+      filters:
+        username: { ends_with: ice }

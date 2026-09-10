@@ -53,7 +53,7 @@ the current directory; pass `--repo PATH` to point at another checkout:
 glab orbit local --yes repo-map overview
 glab orbit local --yes repo-map --repo ~/workspace/knowledge-graph overview
 glab orbit local --yes repo-map --repo ~/workspace/knowledge-graph tree crates
-glab orbit local --yes repo-map --repo ~/workspace/knowledge-graph api crates/orbit-local
+glab orbit local --yes repo-map --repo ~/workspace/knowledge-graph api crates/orbit-cli
 glab orbit local --yes repo-map --repo ~/workspace/knowledge-graph class Workspace
 glab orbit local --yes repo-map --repo ~/workspace/knowledge-graph extends QueryCompiler
 glab orbit local --yes repo-map --repo ~/workspace/knowledge-graph imports Workspace
@@ -70,7 +70,7 @@ or omit the leading dot and can be repeated or comma-separated:
 
 ```bash
 glab orbit local --yes repo-map --ext .rs overview
-glab orbit local --yes repo-map --ext rs api crates/orbit-local
+glab orbit local --yes repo-map --ext rs api crates/orbit-cli
 glab orbit local --yes repo-map --ext rs,toml tree crates
 ```
 

@@ -1,0 +1,24 @@
+# source: crates/integration-tests/tests/server/data_correctness/dedup.rs::search_excludes_deleted_rows
+description: Soft-deleted row excluded from search results
+
+config:
+  extra_seed:
+    gl_user:
+      - { id: 9002, username: ghost, name: Ghost User, state: active, user_type: human, _version: "2024-01-01 00:00:00", _deleted: false }
+      - { id: 9002, username: ghost, name: Ghost User, state: active, user_type: human, _version: "2024-06-01 00:00:00", _deleted: true }
+  redaction:
+    allow:
+      user: [1, 2, 3, 4, 5, 6, 7, 9002]
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [{"id": "u", "entity": "User", "columns": ["username"],
+                 "node_ids": [9002]}],
+      "limit": 10
+    }
+
+expect:
+  skip_requirements: [node_ids]
+  node_count: 0

@@ -1,0 +1,22 @@
+# source: crates/integration-tests/tests/server/data_correctness/edge_cases/like.rs::like_in_filter_on_email_works
+description: IN filter on admin_only email field returns both matching users
+
+config:
+  security: admin
+
+query:
+  json: |
+    {
+        "query_type": "traversal",
+        "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "email"],
+                 "filters": {"email": {"in": ["alice@example.com", "bob@example.com"]}}}],
+        "limit": 10
+    }
+
+expect:
+  node_count: 2
+  nodes:
+    User:
+      count: 2
+      filters:
+        email: { in: ["alice@example.com", "bob@example.com"] }

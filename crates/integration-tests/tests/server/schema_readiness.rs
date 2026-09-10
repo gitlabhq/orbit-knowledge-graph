@@ -3,9 +3,7 @@ use std::time::Duration;
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use indexer::schema::version::{
-    ensure_version_table, write_migrating_version, write_schema_version,
-};
+use indexer::schema::version::{ensure_version_table, mark_version_active, mark_version_migrating};
 use integration_testkit::TestContext;
 use orbit_server::schema_watcher::{SchemaState, SchemaWatcher};
 use orbit_server::webserver::create_router;
@@ -91,14 +89,14 @@ async fn watcher_transitions_to_migrating_then_ready() {
     let ctx = TestContext::new(&[]).await;
     let client = ctx.create_client();
     ensure_version_table(&client).await.unwrap();
-    write_schema_version(&client, 1).await.unwrap();
-    write_migrating_version(&client, 2).await.unwrap();
+    mark_version_active(&client, 1).await.unwrap();
+    mark_version_migrating(&client, 2).await.unwrap();
 
     let shutdown = CancellationToken::new();
     let watcher = SchemaWatcher::spawn(client.clone(), 2, POLL, shutdown.clone());
     await_state(&watcher, SchemaState::Migrating).await;
 
-    write_schema_version(&client, 2).await.unwrap();
+    mark_version_active(&client, 2).await.unwrap();
     await_state(&watcher, SchemaState::Ready).await;
 
     shutdown.cancel();
@@ -114,7 +112,7 @@ async fn watcher_transitions_to_ready_when_active_version_matches() {
     let watcher = SchemaWatcher::spawn(client.clone(), 1, POLL, shutdown.clone());
     assert_eq!(watcher.current(), SchemaState::Pending);
 
-    write_schema_version(&client, 1).await.unwrap();
+    mark_version_active(&client, 1).await.unwrap();
     await_state(&watcher, SchemaState::Ready).await;
 
     shutdown.cancel();
@@ -125,7 +123,7 @@ async fn watcher_transitions_to_outdated_and_cancels_shutdown() {
     let ctx = TestContext::new(&[]).await;
     let client = ctx.create_client();
     ensure_version_table(&client).await.unwrap();
-    write_schema_version(&client, 5).await.unwrap();
+    mark_version_active(&client, 5).await.unwrap();
 
     let shutdown = CancellationToken::new();
     let watcher = SchemaWatcher::spawn(client, 1, POLL, shutdown.clone());
@@ -141,7 +139,7 @@ async fn watcher_stays_pending_when_active_version_lower_than_binary() {
     let ctx = TestContext::new(&[]).await;
     let client = ctx.create_client();
     ensure_version_table(&client).await.unwrap();
-    write_schema_version(&client, 1).await.unwrap();
+    mark_version_active(&client, 1).await.unwrap();
 
     let shutdown = CancellationToken::new();
     let watcher = SchemaWatcher::spawn(client, 5, POLL, shutdown.clone());

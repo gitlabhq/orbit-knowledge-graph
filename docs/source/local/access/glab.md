@@ -34,7 +34,9 @@ instance or your local machine.
 Two top-level commands:
 
 - `glab orbit local`: wraps the managed `orbit` binary to index and query the
-  local graph.
+  local graph. It forwards every command to the binary unchanged, so
+  `glab orbit local grep` runs `orbit grep`. The `local` segment is the `glab`
+  wrapper name, not an `orbit` subcommand.
 - `glab orbit setup`: guided onboarding that verifies access, installs the
   GitLab Orbit skill, and installs the local binary.
 
@@ -100,10 +102,24 @@ glab orbit local sql 'SELECT count(*) FROM gl_definition'
 echo 'SELECT name FROM gl_definition LIMIT 3' | glab orbit local sql -
 ```
 
+Table names resolve to the current checkout: run from inside an indexed
+repository, `gl_definition`, `gl_file`, and the other node tables contain only
+that repository's indexed commit, and `gl_edge` only that commit's edges, so
+queries need no `project_id` or `commit_sha` predicates. Outside an indexed
+checkout the query runs against every indexed commit, with a note on stderr.
+
+| Flag | Purpose |
+|------|---------|
+| `--repo` | Scope the tables to another checkout instead of the current directory. |
+| `--all` | Query every indexed repository and commit. |
+| `-F`, `--format` | Output format: `table` (default), `json`, `ndjson`, or `csv`. |
+| `--db` | Override the DuckDB path. Defaults to `~/.orbit/graph.duckdb`. |
+
 ## Inspect the schema
 
-`glab orbit local schema` lists every table and column in the local DuckDB
-graph:
+`glab orbit local schema` lists the graph tables and their columns. The
+per-project search-index tables and the schema fingerprint are hidden; name one
+explicitly to see it:
 
 ```shell
 glab orbit local schema

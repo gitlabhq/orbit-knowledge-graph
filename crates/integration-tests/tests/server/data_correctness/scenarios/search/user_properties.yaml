@@ -1,0 +1,24 @@
+# source: crates/integration-tests/tests/server/data_correctness/search.rs::search_returns_correct_user_properties
+description: User search returns correct properties and ordering
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000},
+                 "columns": ["username", "name", "state", "user_type"]}],
+      "order_by": "u.id",
+      "limit": 10
+    }
+  gql: |
+    MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username, u.name, u.state, u.user_type ORDER BY u.id LIMIT 10
+
+expect:
+  node_count: 7
+  nodes:
+    User:
+      order: [1, 2, 3, 4, 5, 6, 7]
+      rows:
+        - { id: 1, username: alice, name: Alice Admin, state: active, user_type: human }
+        - { id: 2, username: bob, name: Bob Builder }
+        - { id: 5, username: eve, state: blocked, user_type: service_account }

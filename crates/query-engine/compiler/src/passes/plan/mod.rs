@@ -9,8 +9,13 @@ pub mod pathfinding;
 
 use std::collections::{HashMap, HashSet};
 
+use ontology::{DataType, FieldSource, Ontology};
+
 use crate::error::{QueryError, Result};
 use crate::input::*;
+
+const WORKHORSE_GRPC_MESSAGE_CAP_BYTES: u64 = 8 * 1024 * 1024;
+const MAX_UTF8_BYTES_PER_CHAR: u64 = 4;
 
 pub use edge_chain::{
     FkShape, Hop, HopFk, HydrationStrategy, JoinColumns, NodePlan, Selectivity, Strategy,
@@ -45,6 +50,58 @@ impl Plan {
     pub fn node_edge_mappings(&self) -> HashMap<String, (String, String)> {
         self.node_edge_mappings.clone()
     }
+
+    pub(crate) fn resolve_text_excerpts(&mut self, ontology: &Ontology) {
+        let max_chars = calculate_text_excerpt_chars(self.limit);
+        for node in self.nodes.values_mut() {
+            node.text_excerpt = TextExcerpt {
+                columns: text_excerpt_columns(node.entity.as_deref(), ontology),
+                max_chars,
+            };
+        }
+        if let PlanBody::Hydration(nodes) = &mut self.body {
+            for node in nodes {
+                node.text_excerpt = TextExcerpt {
+                    columns: text_excerpt_columns(Some(&node.entity), ontology),
+                    max_chars,
+                };
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct TextExcerpt {
+    pub columns: HashSet<String>,
+    pub max_chars: u32,
+}
+
+fn calculate_text_excerpt_chars(rows_per_page: u32) -> u32 {
+    let page_chars = WORKHORSE_GRPC_MESSAGE_CAP_BYTES / MAX_UTF8_BYTES_PER_CHAR;
+    (page_chars / u64::from(rows_per_page.max(1))) as u32
+}
+
+fn text_excerpt_columns(entity: Option<&str>, ontology: &Ontology) -> HashSet<String> {
+    let Some(node) = entity.and_then(|name| ontology.get_node(name)) else {
+        return HashSet::new();
+    };
+
+    let mut excerpt_columns: HashSet<String> = node
+        .fields
+        .iter()
+        .filter(|field| field.column_name().is_some() && field.data_type == DataType::String)
+        .map(|field| field.name.clone())
+        .collect();
+
+    for field in &node.fields {
+        if let FieldSource::Virtual(source) = &field.source {
+            for lookup_input in &source.depends_on {
+                excerpt_columns.remove(lookup_input);
+            }
+        }
+    }
+
+    excerpt_columns
 }
 
 pub enum PlanBody {

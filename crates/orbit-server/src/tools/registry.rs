@@ -240,13 +240,11 @@ mod tests {
     }
 
     fn all_commands() -> Vec<ToolDefinition> {
-        let ontology = Arc::new(Ontology::load_embedded().expect("Failed to load ontology"));
-        V2CommandRegistry::get_all_commands(&ontology)
+        V2CommandRegistry::get_all_commands()
     }
 
     fn all_v2_tools() -> Vec<ToolDefinition> {
-        let ontology = Arc::new(Ontology::load_embedded().expect("Failed to load ontology"));
-        V2ToolRegistry::get_all_tools(&ontology)
+        V2ToolRegistry::get_all_tools()
     }
 
     fn find_tool(name: &str) -> ToolDefinition {

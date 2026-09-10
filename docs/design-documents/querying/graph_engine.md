@@ -52,25 +52,26 @@ bloom filters lets projections be correctly selected.
 
 ## Query Engine Design
 
-There are two intended ways to interact with the graph engine:
+The compiler supports two query frontends:
 
-1. Intermediate JSON tools (MCP/HTTP): existing JSON schemas describe graph intents (`traversal`, `neighbors`, `path_finding`, `aggregation`). The server validates input and compiles to parameterized SQL.
-2. Cypher reader (optional): Cypher to SQL translation à la ClickGraph for teams that prefer property‑graph syntax or need Neo4j driver compatibility.
+1. The JSON Query DSL describes traversal, neighbors, path-finding, and aggregation queries. Remote requests through MCP, HTTP, and gRPC use this frontend.
+2. The [Orbit Query Frontend](orbit_query_frontend.md) accepts a restricted, read-only language based on openCypher 9 syntax. It is a compiler preset, not a remote endpoint or Neo4j-compatible driver.
 
 ### Compiler pass pipeline
 
-The query compiler transforms a JSON DSL input into parameterized ClickHouse SQL through an ordered pipeline of passes. The canonical pass order is defined in `crates/query-engine/compiler/src/config.rs` (the `clickhouse` pipeline):
+Both frontends compile to parameterized ClickHouse SQL through shared passes.
+`crates/query-engine/compiler/src/config.rs` defines the `clickhouse_json_dsl` and `clickhouse_gql` presets, which differ only in the first phase:
 
 | # | Pass | Responsibility |
 |---|---|---|
-| 1 | `validate` | Schema and cross-reference validation of the JSON input against the ontology |
-| 2 | `normalize` | Resolves entity names to table names, coerces filter types, and expands wildcard columns |
-| 3 | `restrict` | Strips `admin_only` fields and validates user-supplied `traversal_path` filters against the JWT-granted scope ([Security](../security.md)) |
-| 4 | `plan` | Translates validated input into a query plan (hop chain, join strategy, FK shape) |
-| 5 | `lower` | Emits the SQL AST from the query plan (edge-chain-first, nodes lazy) |
-| 6 | `enforce` | Injects ID and type columns required for redaction; builds the result context |
-| 7 | `security` | Injects `startsWith(traversal_path, ?)` predicates on all node-table scans, with per-entity role scoping ([Security](../security.md)) |
-| 8 | `partition` | Adds partition-pruning predicates derived from the traversal path scope |
+| 1 | `json_dsl_parse` or `gql_parse` | Lowers raw text to `Input`; the JSON frontend also validates the JSON schemas and computes the cursor query hash |
+| 2 | `validate` | Checks native `Input` shape, bounds, ontology membership, and cross-references |
+| 3 | `normalize` | Resolves entity names to table names, coerces filter types, and expands wildcard columns |
+| 4 | `restrict` | Strips `admin_only` fields and validates user-supplied `traversal_path` filters against the JWT-granted scope ([Security](../security.md)) |
+| 5 | `plan` | Translates validated input into a query plan (hop chain, join strategy, FK shape) |
+| 6 | `lower` | Emits the SQL AST from the query plan (edge-chain-first, nodes lazy) |
+| 7 | `enforce` | Injects ID and type columns required for redaction; builds the result context |
+| 8 | `security` | Injects `startsWith(traversal_path, ?)` predicates on all node-table scans, with per-entity role scoping ([Security](../security.md)) |
 | 9 | `cursor` | Applies keyset pagination (seek predicate and readback columns) |
 | 10 | `check` | Verifies every node-table alias carries a valid `startsWith` predicate traceable to the `SecurityContext` ([Security](../security.md)) |
 | 11 | `hydrate_plan` | Builds the hydration plan for fetching entity properties after the base query |
@@ -132,6 +133,8 @@ denormalized_joins:
 
 That resolves to the table chain `gl_user, gl_edge, gl_merge_request, gl_project`. Adjacent tables join on the id or edge id that links them, and every scoped table keeps its own `traversal_path` in the row, exactly as each scan alias keeps its own in an ordinary join. Every other column of every table is copied under a `t{i}_` prefix. The first scoped table's `traversal_path` is the row's unprefixed one and leads the sort key. The DDL generator composes the table from the source tables' already-generated definitions (columns, codecs, indexes, settings, partitioning) and emits one `TO` materialized view per table, joined outward from the trigger with `FINAL`. The security pass filters each path column in the row against the authorized set (see `Ontology::traversal_path_columns`), each at its own table's role floor, so a hop may cross namespaces just as it may in an edge chain: a row is returned only when the caller is authorized for every namespace it touches. The loader only requires that at least one table in the chain is scoped.
 
+Before declaring a join in `schema.yaml`, trial it as an ontology overlay under `config/seeds/overlays/<name>/` (a directory mirroring `config/ontology/`, merged over it) and run the data correctness suite against it with `mise test:integration:overlay <name>`. The suite creates the table and its views from the seed, checks the table holds exactly the rows the live source join produces, and compiles every query it knows against the overlaid ontology.
+
 ### Scope rewrite (traversal_path prefix injection)
 
 Project- and group-scoped queries (`traversal` and `aggregation`) are rewritten to add a tight `startsWith(traversal_path, '<prefix>')` predicate, so the leading primary-key segment prunes the scan rather than a structural-column filter alone. A node pins a scope when it carries a single `id`/`full_path`/`node_ids` for an anchor entity, **or** a single equality filter on a `namespace_anchor` FK column (e.g. `project_id`/`group_id`) — the anchor and its FK columns are read from the ontology's per-property `traversal_path_lookup` declarations and edge scope annotations via `Ontology::is_anchor` / `Ontology::anchor_fk_mappings`, not a hardcoded list. Anchors are `Project` and `Group` (resolved through a ClickHouse `CACHE` dictionary over `gl_project`/`gl_group`), plus `MergeRequest` and the code entities `Definition`/`File`/`Directory`, which have no dictionary and resolve through an `argMax(traversal_path, _version)` lookup on their own table by `id` (`PathResolver`, backed by a short-lived in-process cache; see `crates/orbit-server/src/pipeline/path_resolver.rs`). The code-entity lookups let code-intelligence "find callers/references/callees" traversals — anchored on a single `Definition` node id rather than a project filter — scope to the symbol's own project. A resolution failure — a dictionary miss for a not-yet-indexed id, or the `'0/'` sentinel — yields no injection, so the query falls back to the plain filter.
@@ -156,6 +159,8 @@ Aggregation queries include `columns`, `group_columns`, and `rows` for table-sha
 A `GraphFormatter` handles the transformation, and a JSON Schema defines the response contract between server and frontend.
 
 Namespace graph updates arrive via an ETL worker, described in [SDLC Indexing](../indexing/sdlc_indexing.md). The indexer publishes a small state record (namespace → active state). The web tier caches namespace metadata and injects appropriate filters into queries; no file swapping is required.
+
+Direct projections and hydration apply ontology-derived [text excerpts](../../source/remote/queries/query-language.md#text-excerpts) in SQL before serialization, without changing filters, joins, authorization, grouping, sorting, or cursor keys.
 
 ## Authorization and Safety
 

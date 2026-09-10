@@ -2,6 +2,7 @@ mod assertions;
 pub mod cli;
 mod context;
 pub mod mock_redaction;
+pub mod query_scenario;
 pub mod scenario;
 mod seed;
 pub mod seeded_resolver;
@@ -16,8 +17,25 @@ pub use context::TestContext;
 pub use seed::load_seed;
 pub use seeded_resolver::SeededColumnResolver;
 
+/// `GKG_TEST_ONTOLOGY_OVERLAY=<name>` merges `config/seeds/overlays/<name>/` over the ontology.
+fn load_unprefixed_ontology() -> ontology::Ontology {
+    let Some(name) = std::env::var("GKG_TEST_ONTOLOGY_OVERLAY")
+        .ok()
+        .filter(|v| !v.is_empty())
+    else {
+        return ontology::Ontology::load_embedded().expect("embedded ontology should load");
+    };
+    let dir = format!("{}/overlays/{name}", env!("SEEDS_DIR"));
+    assert!(
+        std::path::Path::new(&dir).is_dir(),
+        "ontology overlay '{name}' not found at {dir}"
+    );
+    ontology::Ontology::load_embedded_with_overlay(&dir)
+        .unwrap_or_else(|e| panic!("ontology overlay '{name}' failed to load: {e}"))
+}
+
 pub fn load_ontology() -> ontology::Ontology {
-    let ont = ontology::Ontology::load_embedded().expect("embedded ontology should load");
+    let ont = load_unprefixed_ontology();
     let prefix = &*TABLE_PREFIX;
     if prefix.is_empty() {
         ont
@@ -42,21 +60,21 @@ pub fn t(table: &str) -> String {
 /// Generated from the ontology so integration tests create the same prefixed
 /// tables and materialized views the indexer writes to at runtime.
 pub static GRAPH_SCHEMA_SQL: std::sync::LazyLock<&'static str> = std::sync::LazyLock::new(|| {
-    use query_engine::compiler::{
-        emit_create_materialized_view, emit_create_table,
-        generate_graph_materialized_views_with_prefix, generate_graph_tables_with_prefix,
-    };
+    let ontology = load_unprefixed_ontology();
+    let schema = orbit_migrations::schema::GraphSchema::from_ontology(&ontology);
 
-    let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
-    let tables = generate_graph_tables_with_prefix(&ontology, &TABLE_PREFIX);
-    let mut stmts: Vec<String> = tables
+    let mut stmts: Vec<String> = schema
+        .tables
         .iter()
-        .map(|t| format!("{};", emit_create_table(t)))
+        .map(|table| format!("{};", table.to_create_sql(&TABLE_PREFIX)))
         .collect();
 
-    let views = generate_graph_materialized_views_with_prefix(&ontology, &TABLE_PREFIX);
-    for mv in &views {
-        stmts.push(format!("{};", emit_create_materialized_view(mv)));
+    let all_table_names: Vec<String> = schema.tables.iter().map(|t| t.name.clone()).collect();
+    for view in schema.views.iter().filter(|v| v.versioned) {
+        let prefixed = view
+            .clone()
+            .with_schema_version_prefix(&TABLE_PREFIX, &all_table_names);
+        stmts.push(format!("{};", prefixed.to_create_sql()));
     }
 
     let sql = stmts.join("\n");

@@ -72,7 +72,9 @@ impl ClickHouseWriter {
     #[cfg(any(test, feature = "testkit"))]
     pub fn noop() -> Self {
         Self {
-            client: ClickHouseConfiguration::default().build_client(),
+            client: orbit_server_config::AppConfig::embedded_defaults()
+                .graph
+                .build_client(),
             metrics: Arc::new(EngineMetrics::new()),
             noop: true,
         }
@@ -132,7 +134,7 @@ impl ClickHouseWriter {
 
         if let Err(error) = self
             .client
-            .insert_arrow_streaming_with_sql(table, &insert_sql, &batches)
+            .insert_arrow_streaming_with_sql(table, &insert_sql, batches)
             .await
         {
             self.metrics.record_write_error(table);

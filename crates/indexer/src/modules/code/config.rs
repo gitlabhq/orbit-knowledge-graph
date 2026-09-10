@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use ontology::{Ontology, OntologyError};
 
-use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
+use orbit_migrations::version::{SCHEMA_VERSION, prefixed_table_name};
 
 const CODE_DOMAIN: &str = "source_code";
 

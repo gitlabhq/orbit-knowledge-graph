@@ -925,7 +925,9 @@
       "description": "Seconds between the current watermark and wall-clock time (data freshness).",
       "kind": "gauge",
       "unit": "s",
-      "labels": [],
+      "labels": [
+        "entity"
+      ],
       "stability": "stable",
       "domain": "indexer.sdlc"
     },

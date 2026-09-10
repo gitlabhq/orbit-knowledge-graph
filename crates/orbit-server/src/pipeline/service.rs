@@ -1,12 +1,11 @@
 use std::sync::Arc;
 
 use crate::analytics::{AnalyticsObserver, AnalyticsTracker};
-use crate::auth::Claims;
+use crate::auth::RequestContext;
 use crate::proto::ExecuteQueryMessage;
+use crate::serving_schema::ServingSchema;
 use clickhouse_client::ArrowClickHouseClient;
-use indexer::schema::version::SCHEMA_VERSION;
 use nats_client::NatsClient;
-use ontology::Ontology;
 use orbit_billing::{BillingObserver, BillingTracker};
 use orbit_server_config::AnalyticsConfig;
 use query_engine::shared::content::ColumnResolverRegistry;
@@ -19,7 +18,6 @@ use query_engine::pipeline::{
 use query_engine::shared::{CompilationStage, ExtractionStage, OutputStage, PipelineOutput};
 
 use super::metrics::OTelPipelineObserver;
-use super::path_resolver::PathResolver;
 use super::stages::{
     AuthorizationStage, ClickHouseExecutor, HydrationStage, PathResolutionStage, RedactionStage,
     SecurityStage,
@@ -27,28 +25,20 @@ use super::stages::{
 
 #[derive(Clone)]
 pub struct QueryPipelineService {
-    ontology: Arc<Ontology>,
     client: Arc<ArrowClickHouseClient>,
     resolver_registry: Option<Arc<ColumnResolverRegistry>>,
     cache_broker: Option<Arc<NatsClient>>,
-    path_resolver: Option<Arc<PathResolver>>,
     billing_tracker: Option<Arc<dyn BillingTracker>>,
     analytics_tracker: Option<Arc<dyn AnalyticsTracker>>,
     analytics_config: Arc<AnalyticsConfig>,
 }
 
 impl QueryPipelineService {
-    pub fn new(
-        ontology: Arc<Ontology>,
-        client: Arc<ArrowClickHouseClient>,
-        analytics_config: Arc<AnalyticsConfig>,
-    ) -> Self {
+    pub fn new(client: Arc<ArrowClickHouseClient>, analytics_config: Arc<AnalyticsConfig>) -> Self {
         Self {
-            ontology,
             client,
             resolver_registry: None,
             cache_broker: None,
-            path_resolver: None,
             billing_tracker: None,
             analytics_tracker: None,
             analytics_config,
@@ -65,11 +55,6 @@ impl QueryPipelineService {
         self
     }
 
-    pub fn with_path_resolver(mut self, resolver: Arc<PathResolver>) -> Self {
-        self.path_resolver = Some(resolver);
-        self
-    }
-
     pub fn with_billing(mut self, tracker: Arc<dyn BillingTracker>) -> Self {
         self.billing_tracker = Some(tracker);
         self
@@ -80,15 +65,17 @@ impl QueryPipelineService {
         self
     }
 
-    pub async fn run_query(
+    pub(crate) async fn run_query(
         &self,
-        claims: Claims,
-        coding_agent: Option<String>,
+        schema: &ServingSchema,
+        request_context: RequestContext,
         query_json: &str,
         tx: mpsc::Sender<Result<ExecuteQueryMessage, Status>>,
         stream: Streaming<ExecuteQueryMessage>,
         timeout: std::time::Duration,
     ) -> Result<PipelineOutput, PipelineError> {
+        let coding_agent = request_context.coding_agent().map(String::from);
+        let claims = request_context.claims;
         let mut obs = MultiObserver::new(vec![
             Box::new(OTelPipelineObserver::start()),
             Box::new(BillingObserver::new(
@@ -101,7 +88,7 @@ impl QueryPipelineService {
                 claims.clone(),
                 "query_graph",
                 coding_agent,
-                SCHEMA_VERSION.to_string(),
+                schema.migration_version.to_string(),
             )),
         ]);
 
@@ -116,14 +103,14 @@ impl QueryPipelineService {
         if let Some(broker) = &self.cache_broker {
             server_extensions.insert(Arc::clone(broker));
         }
-        if let Some(resolver) = &self.path_resolver {
+        if let Some(resolver) = &schema.path_resolver {
             server_extensions.insert(Arc::clone(resolver));
         }
 
         let mut ctx = QueryPipelineContext {
             query_json: query_json.to_string(),
             compiled: None,
-            ontology: Arc::clone(&self.ontology),
+            ontology: Arc::clone(&schema.ontology),
             security_context: None,
             server_extensions,
             phases: TypeMap::default(),

@@ -1,0 +1,23 @@
+# source: crates/integration-tests/tests/server/data_correctness/search.rs::search_definition_content_selective
+description: Definition content contains filter returns matching definitions
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [{"id": "d", "entity": "Definition",
+               "node_ids": [12000, 12001, 12002, 12100, 12102],
+               "columns": ["name", "file_path", "content"],
+               "filters": {
+                   "content": {"contains": "normalize"}
+               }}],
+      "limit": 10
+    }
+
+expect:
+  node_count: 1
+  nodes:
+    Definition:
+      ids: [12000]
+      filters:
+        content: { contains: normalize }

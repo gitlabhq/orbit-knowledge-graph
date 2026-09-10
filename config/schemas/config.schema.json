@@ -4,341 +4,145 @@
   "type": "object",
   "properties": {
     "analytics": {
-      "$ref": "#/$defs/AnalyticsConfig",
-      "default": {
-        "collector_url": "",
-        "deployment": {
-          "environment": "development",
-          "type": "self_managed"
-        },
-        "enabled": false
-      }
+      "$ref": "#/$defs/AnalyticsConfig"
     },
     "billing": {
-      "$ref": "#/$defs/BillingConfig",
-      "default": {
-        "collector_url": "",
-        "enabled": false,
-        "quota": {
-          "api_token": null,
-          "api_user": null,
-          "customers_dot_url": "",
-          "enabled": false,
-          "fallback_cache_ttl_secs": 3600,
-          "request_timeout_ms": 1000
-        }
-      }
+      "$ref": "#/$defs/BillingConfig"
     },
     "bind_address": {
-      "type": "string",
-      "default": "127.0.0.1:4200"
+      "type": "string"
     },
     "datalake": {
-      "$ref": "#/$defs/ClickHouseConfiguration",
-      "default": {
-        "database": "default",
-        "insert_settings": {},
-        "password": null,
-        "profiling": {
-          "enabled": false,
-          "explain": false,
-          "instance_health": false,
-          "processors": false,
-          "query_log": false
-        },
-        "quorum_writes": false,
-        "session_settings": {},
-        "url": "http://127.0.0.1:8123",
-        "username": "default"
-      }
+      "$ref": "#/$defs/ClickHouseConfiguration"
     },
     "dispatcher_health_bind_address": {
-      "type": "string",
-      "default": "0.0.0.0:4203"
+      "type": "string"
     },
     "engine": {
-      "$ref": "#/$defs/EngineConfiguration",
-      "default": {
-        "concurrency_groups": {},
-        "datalake_retry": {
-          "halving_initial_block_size": 100000,
-          "halving_min_block_size": 1024
-        },
-        "handlers": {
-          "code-indexing-task": {
-            "pipeline": {
-              "big_indexing_slots": null,
-              "cross_file_resolve_timeout_ms": 180000,
-              "fetch_concurrency": 10,
-              "job_timeout_secs": 1500,
-              "max_concurrent_languages": 0,
-              "max_file_size_bytes": 5000000,
-              "max_files": 1000000,
-              "max_total_bytes": 2000000000,
-              "per_file_parse_timeout_ms": 100,
-              "per_file_ssa_timeout_ms": 100,
-              "per_file_timeout_ms": 2000,
-              "per_file_walk_timeout_ms": 100,
-              "small_indexing_slots": null,
-              "small_repo_max_files": 650,
-              "worker_threads": 0,
-              "write_buffer_age_secs": 60,
-              "write_channel_capacity": 8,
-              "write_max_concurrent": 4,
-              "write_max_flush_age_secs": 120,
-              "write_min_flush_rows": 10000,
-              "write_slice_rows": 1000000
-            }
-          },
-          "entity-handler": {
-            "batch_size_overrides": {},
-            "datalake_batch_size": null,
-            "system_notes_resolve_lookup_batch_size": 1000
-          }
-        },
-        "max_concurrent_workers": null,
-        "modules": [
-          "sdlc",
-          "code",
-          "namespace_deletion"
-        ],
-        "topics": {}
-      }
+      "$ref": "#/$defs/EngineConfiguration"
     },
     "features": {
-      "$ref": "#/$defs/FeaturesConfig",
-      "default": {}
+      "$ref": "#/$defs/FeaturesConfig"
     },
     "gitlab": {
-      "$ref": "#/$defs/GitlabConfig",
-      "default": {
-        "base_url": null,
-        "jwt": {
-          "signing_key": null,
-          "verifying_key": null
-        },
-        "resolve_host": null
-      }
+      "$ref": "#/$defs/GitlabConfig"
     },
     "graph": {
-      "$ref": "#/$defs/ClickHouseConfiguration",
-      "default": {
-        "database": "default",
-        "insert_settings": {},
-        "password": null,
-        "profiling": {
-          "enabled": false,
-          "explain": false,
-          "instance_health": false,
-          "processors": false,
-          "query_log": false
-        },
-        "quorum_writes": false,
-        "session_settings": {},
-        "url": "http://127.0.0.1:8123",
-        "username": "default"
-      }
+      "$ref": "#/$defs/ClickHouseConfiguration"
     },
     "grpc": {
-      "$ref": "#/$defs/GrpcConfig",
-      "default": {
-        "concurrency_limit": 256,
-        "connection_window_size": 2097152,
-        "keepalive_interval_secs": 20,
-        "keepalive_timeout_secs": 20,
-        "max_connection_age_grace_secs": 30,
-        "max_connection_age_secs": 300,
-        "max_header_list_size_bytes": 65536,
-        "stream_timeout_secs": 60,
-        "stream_window_size": 1048576,
-        "tcp_keepalive_secs": 60
-      }
+      "$ref": "#/$defs/GrpcConfig"
     },
     "grpc_bind_address": {
-      "type": "string",
-      "default": "127.0.0.1:50054"
+      "type": "string"
     },
     "health_check": {
-      "$ref": "#/$defs/HealthCheckConfig",
-      "default": {
-        "bind_address": "0.0.0.0:4201",
-        "targets": []
-      }
+      "$ref": "#/$defs/HealthCheckConfig"
     },
     "health_check_url": {
       "type": [
         "string",
         "null"
-      ],
-      "default": null
+      ]
     },
     "indexer_health_bind_address": {
-      "type": "string",
-      "default": "0.0.0.0:4202"
+      "type": "string"
     },
     "jwt_clock_skew_secs": {
       "type": "integer",
       "format": "uint64",
-      "default": 60,
       "minimum": 0
     },
     "metrics": {
-      "$ref": "#/$defs/MetricsConfig",
-      "default": {
-        "log_level": null,
-        "otel": {
-          "enabled": false,
-          "endpoint": ""
-        },
-        "prometheus": {
-          "enabled": false,
-          "port": 9394
-        }
-      }
+      "$ref": "#/$defs/MetricsConfig"
     },
     "nats": {
-      "$ref": "#/$defs/NatsConfiguration",
-      "default": {
-        "ack_wait_secs": 300,
-        "auto_create_streams": true,
-        "batch_size": 10,
-        "connection_timeout_secs": 10,
-        "consumer_inactive_threshold_secs": 3600,
-        "consumer_name": null,
-        "fetch_expires_secs": 5,
-        "max_deliver": 5,
-        "password": null,
-        "release_gc_idle_threshold_secs": 3600,
-        "request_timeout_secs": 5,
-        "stream_max_age_secs": 14400,
-        "stream_max_bytes": null,
-        "stream_max_messages": null,
-        "stream_replicas": 1,
-        "subscription_buffer_size": 100,
-        "tls_ca_cert_path": null,
-        "tls_cert_path": null,
-        "tls_key_path": null,
-        "url": "localhost:4222",
-        "username": null
-      }
+      "$ref": "#/$defs/NatsConfiguration"
+    },
+    "object_storage": {
+      "$ref": "#/$defs/ObjectStorageConfig"
     },
     "path_resolver": {
-      "$ref": "#/$defs/PathResolverConfig",
-      "default": {
-        "cache_capacity": 10000,
-        "cache_ttl_secs": 60
-      }
+      "$ref": "#/$defs/PathResolverConfig"
     },
     "query": {
-      "$ref": "#/$defs/QuerySettings",
-      "default": {
-        "default": {
-          "max_ast_depth": 10000,
-          "max_ast_elements": 1000000,
-          "max_execution_time": 30,
-          "max_expanded_ast_elements": 10000000,
-          "query_cache_ttl": 60
-        }
-      }
+      "$ref": "#/$defs/QuerySettings"
     },
     "schedule": {
-      "$ref": "#/$defs/ScheduleConfig",
-      "default": {
-        "tasks": {
-          "code-backfill": {
-            "cron": "0 */1 * * * *",
-            "publish_window": 200000
-          },
-          "global": {
-            "cron": "0 */1 * * * *"
-          },
-          "migration-completion": {
-            "cron": "0 */1 * * * *"
-          },
-          "namespace": {
-            "cron": "*/30 * * * * *",
-            "sweep_interval_secs": 3600
-          },
-          "namespace-deletion": {
-            "cron": "0 0 3 * * *"
-          },
-          "siphon": {
-            "batch_size": 100,
-            "events_stream_name": "siphon_stream_main_db"
-          },
-          "stale-edge-reconciliation": {
-            "cron": "0 */30 * * * *",
-            "lookback_secs": 3600
-          },
-          "table-cleanup": {
-            "cron": "0 0 3 * * 0"
-          }
-        }
-      }
+      "$ref": "#/$defs/ScheduleConfig"
     },
     "schema": {
-      "$ref": "#/$defs/SchemaConfig",
-      "default": {
-        "indexer_schema_wait_timeout_secs": 300,
-        "max_retained_versions": 2,
-        "version_poll_interval_secs": 5
-      }
+      "$ref": "#/$defs/SchemaConfig"
     },
     "tls": {
-      "$ref": "#/$defs/TlsConfig",
-      "default": {
-        "cert_path": null,
-        "key_path": null
-      }
+      "$ref": "#/$defs/TlsConfig"
     }
   },
   "additionalProperties": false,
+  "required": [
+    "bind_address",
+    "grpc_bind_address",
+    "jwt_clock_skew_secs",
+    "nats",
+    "datalake",
+    "graph",
+    "engine",
+    "gitlab",
+    "schedule",
+    "health_check",
+    "indexer_health_bind_address",
+    "dispatcher_health_bind_address",
+    "metrics",
+    "tls",
+    "query",
+    "path_resolver",
+    "grpc",
+    "schema",
+    "analytics",
+    "billing",
+    "features",
+    "object_storage"
+  ],
   "$defs": {
     "AnalyticsConfig": {
       "type": "object",
       "properties": {
         "collector_url": {
-          "type": "string",
-          "default": ""
+          "type": "string"
         },
         "deployment": {
-          "$ref": "#/$defs/DeploymentConfig",
-          "default": {
-            "environment": "development",
-            "type": "self_managed"
-          }
+          "$ref": "#/$defs/DeploymentConfig"
         },
         "enabled": {
-          "type": "boolean",
-          "default": false
+          "type": "boolean"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "collector_url",
+        "deployment"
+      ]
     },
     "BillingConfig": {
       "type": "object",
       "properties": {
         "collector_url": {
-          "type": "string",
-          "default": ""
+          "type": "string"
         },
         "enabled": {
-          "type": "boolean",
-          "default": false
+          "type": "boolean"
         },
         "quota": {
-          "$ref": "#/$defs/QuotaConfig",
-          "default": {
-            "api_token": null,
-            "api_user": null,
-            "customers_dot_url": "",
-            "enabled": false,
-            "fallback_cache_ttl_secs": 3600,
-            "request_timeout_ms": 1000
-          }
+          "$ref": "#/$defs/QuotaConfig"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "collector_url",
+        "quota"
+      ]
     },
     "ClickHouseConfiguration": {
       "type": "object",
@@ -358,22 +162,13 @@
           "type": [
             "string",
             "null"
-          ],
-          "default": null
+          ]
         },
         "profiling": {
-          "$ref": "#/$defs/ProfilingConfig",
-          "default": {
-            "enabled": false,
-            "explain": false,
-            "instance_health": false,
-            "processors": false,
-            "query_log": false
-          }
+          "$ref": "#/$defs/ProfilingConfig"
         },
         "quorum_writes": {
-          "type": "boolean",
-          "default": false
+          "type": "boolean"
         },
         "session_settings": {
           "type": "object",
@@ -393,7 +188,9 @@
       "required": [
         "database",
         "url",
-        "username"
+        "username",
+        "quorum_writes",
+        "profiling"
       ]
     },
     "CodeBackfillSweepConfig": {
@@ -401,20 +198,18 @@
       "type": "object",
       "properties": {
         "cron": {
-          "description": "Cron expression with seconds field (6-field: `sec min hour dom mon dow`).\nWhen absent, the task runs on a default 60-second interval.",
-          "type": [
-            "string",
-            "null"
-          ],
-          "default": null
+          "$ref": "#/$defs/CronSchedule"
         },
         "publish_window": {
           "type": "integer",
           "format": "uint",
-          "default": 200000,
           "minimum": 0
         }
-      }
+      },
+      "required": [
+        "cron",
+        "publish_window"
+      ]
     },
     "CodeIndexingPipelineConfig": {
       "type": "object",
@@ -426,78 +221,66 @@
             "null"
           ],
           "format": "uint",
-          "default": null,
           "minimum": 0
         },
         "cross_file_resolve_timeout_ms": {
           "description": "Wall-clock budget for the sequential cross-file resolution phase\n(import edges, call edges). 0 = no timeout.",
           "type": "integer",
           "format": "uint64",
-          "default": 180000,
           "minimum": 0
         },
         "fetch_concurrency": {
-          "description": "Maximum concurrent Gitaly repository fetch operations. Controls how\nmany repositories can be downloaded simultaneously in the pipelined\ncode indexer. 0 = no limit. Defaults to 10.",
+          "description": "Maximum concurrent Gitaly repository fetch operations. Controls how\nmany repositories can be downloaded simultaneously in the pipelined\ncode indexer. 0 = no limit.",
           "type": "integer",
           "format": "uint",
-          "default": 10,
           "minimum": 0
         },
         "job_timeout_secs": {
-          "description": "Hard wall-clock budget (seconds) for one repository job (fetch + index); exceeding it aborts and retries. May exceed `nats.ack_wait_secs`: the handler heartbeats `ack_progress` and renews the project lock so a long job is not redelivered. 0 = no timeout. Defaults to 1500.",
+          "description": "Hard wall-clock budget (seconds) for one repository job (fetch + index); exceeding it aborts and retries. May exceed `nats.ack_wait_secs`: the handler heartbeats `ack_progress` and renews the project lock so a long job is not redelivered. 0 = no timeout.",
           "type": "integer",
           "format": "uint64",
-          "default": 1500,
           "minimum": 0
         },
         "max_concurrent_languages": {
           "type": "integer",
           "format": "uint",
-          "default": 0,
           "minimum": 0
         },
         "max_file_size_bytes": {
           "type": "integer",
           "format": "uint64",
-          "default": 5000000,
           "minimum": 0
         },
         "max_files": {
           "type": "integer",
           "format": "uint",
-          "default": 1000000,
           "minimum": 0
         },
         "max_total_bytes": {
-          "description": "Post-filter retained bytes above which a repository is skipped entirely\n(indexed empty, then checkpointed). Bounds per-repo disk so fetch/index\nconcurrency can rise without exhausting the pod volume. 0 = no limit.\nDefaults to 2 GB.",
+          "description": "Post-filter retained bytes above which a repository is skipped entirely\n(indexed empty, then checkpointed). Bounds per-repo disk so fetch/index\nconcurrency can rise without exhausting the pod volume. 0 = no limit.",
           "type": "integer",
           "format": "uint64",
-          "default": 2000000000,
           "minimum": 0
         },
         "per_file_parse_timeout_ms": {
           "type": "integer",
           "format": "uint64",
-          "default": 100,
           "minimum": 0
         },
         "per_file_ssa_timeout_ms": {
           "type": "integer",
           "format": "uint64",
-          "default": 100,
           "minimum": 0
         },
         "per_file_timeout_ms": {
           "description": "Global per-file resolution timeout in milliseconds.\nApplied to all languages unless the language's own DSL rules\nspecify a different value. 0 = no global timeout.",
           "type": "integer",
           "format": "uint64",
-          "default": 2000,
           "minimum": 0
         },
         "per_file_walk_timeout_ms": {
           "type": "integer",
           "format": "uint64",
-          "default": 100,
           "minimum": 0
         },
         "small_indexing_slots": {
@@ -507,98 +290,94 @@
             "null"
           ],
           "format": "uint",
-          "default": null,
           "minimum": 0
         },
         "small_repo_max_files": {
-          "description": "Parsable source-file count (`Decision::Parse`) at or below which a repository runs on the small lane. Defaults to 650.",
+          "description": "Parsable source-file count (`Decision::Parse`) at or below which a repository runs on the small lane.",
           "type": "integer",
           "format": "uint",
-          "default": 650,
           "minimum": 0
         },
         "worker_threads": {
           "type": "integer",
           "format": "uint",
-          "default": 0,
           "minimum": 0
         },
         "write_buffer_age_secs": {
-          "description": "Soft-flush interval in seconds: the coalescer flushes a table on this tick only once it holds at least `write_min_flush_rows`, so a trickle of small repos pools into one part instead of one tiny part per tick. Defaults to 60.",
+          "description": "Soft-flush interval in seconds: the coalescer flushes a table on this tick only once it holds at least `write_min_flush_rows`, so a trickle of small repos pools into one part instead of one tiny part per tick.",
           "type": "integer",
           "format": "uint64",
-          "default": 60,
           "minimum": 0
         },
         "write_channel_capacity": {
-          "description": "In-flight batches the streaming sink holds before back-pressuring the parser. Defaults to 8.",
+          "description": "In-flight batches the streaming sink holds before back-pressuring the parser.",
           "type": "integer",
           "format": "uint",
-          "default": 8,
           "minimum": 0
         },
         "write_max_concurrent": {
-          "description": "Coalesced parts written to ClickHouse concurrently. Trades memory (up to this many `write_slice_rows`-sized parts in flight) for write throughput. Defaults to 4.",
+          "description": "Coalesced parts written to ClickHouse concurrently. Trades memory (up to this many `write_slice_rows`-sized parts in flight) for write throughput.",
           "type": "integer",
           "format": "uint",
-          "default": 4,
           "minimum": 0
         },
         "write_max_flush_age_secs": {
-          "description": "Hard cap in seconds on how long a table's oldest unflushed row may wait before it is force-flushed regardless of size, bounding the uncheckpointed-rows window. Keep below `nats.ack_wait_secs`. Defaults to 120.",
+          "description": "Hard cap in seconds on how long a table's oldest unflushed row may wait before it is force-flushed regardless of size, bounding the uncheckpointed-rows window. Keep below `nats.ack_wait_secs`.",
           "type": "integer",
           "format": "uint64",
-          "default": 120,
           "minimum": 0
         },
         "write_min_flush_rows": {
-          "description": "Minimum buffered rows a table needs before the soft tick flushes it. Below this, rows keep pooling across repos until the row count or the hard `write_max_flush_age_secs` cap is reached. Defaults to 10000.",
+          "description": "Minimum buffered rows a table needs before the soft tick flushes it. Below this, rows keep pooling across repos until the row count or the hard `write_max_flush_age_secs` cap is reached.",
           "type": "integer",
           "format": "uint",
-          "default": 10000,
           "minimum": 0
         },
         "write_slice_rows": {
-          "description": "Maximum rows per ClickHouse insert; larger batches are sliced before sending. Defaults to 1000000.",
+          "description": "Maximum rows per ClickHouse insert; larger batches are sliced before sending.",
           "type": "integer",
           "format": "uint",
-          "default": 1000000,
           "minimum": 0
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "required": [
+        "max_file_size_bytes",
+        "max_files",
+        "max_total_bytes",
+        "worker_threads",
+        "max_concurrent_languages",
+        "per_file_timeout_ms",
+        "per_file_parse_timeout_ms",
+        "per_file_walk_timeout_ms",
+        "per_file_ssa_timeout_ms",
+        "cross_file_resolve_timeout_ms",
+        "job_timeout_secs",
+        "fetch_concurrency",
+        "write_channel_capacity",
+        "write_slice_rows",
+        "write_buffer_age_secs",
+        "write_min_flush_rows",
+        "write_max_flush_age_secs",
+        "write_max_concurrent",
+        "small_repo_max_files"
+      ]
     },
     "CodeIndexingTaskHandlerConfig": {
       "type": "object",
       "properties": {
         "pipeline": {
-          "$ref": "#/$defs/CodeIndexingPipelineConfig",
-          "default": {
-            "big_indexing_slots": null,
-            "cross_file_resolve_timeout_ms": 180000,
-            "fetch_concurrency": 10,
-            "job_timeout_secs": 1500,
-            "max_concurrent_languages": 0,
-            "max_file_size_bytes": 5000000,
-            "max_files": 1000000,
-            "max_total_bytes": 2000000000,
-            "per_file_parse_timeout_ms": 100,
-            "per_file_ssa_timeout_ms": 100,
-            "per_file_timeout_ms": 2000,
-            "per_file_walk_timeout_ms": 100,
-            "small_indexing_slots": null,
-            "small_repo_max_files": 650,
-            "worker_threads": 0,
-            "write_buffer_age_secs": 60,
-            "write_channel_capacity": 8,
-            "write_max_concurrent": 4,
-            "write_max_flush_age_secs": 120,
-            "write_min_flush_rows": 10000,
-            "write_slice_rows": 1000000
-          }
+          "$ref": "#/$defs/CodeIndexingPipelineConfig"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "required": [
+        "pipeline"
+      ]
+    },
+    "CronSchedule": {
+      "description": "A six-field cron expression (`sec min hour dom mon dow`), validated when\nthe configuration is deserialized so an invalid schedule fails startup.",
+      "type": "string"
     },
     "DatalakeRetryConfig": {
       "description": "Tuning for the SDLC datalake extract retry loop.\n\nThe first attempt uses the datalake's configured `max_block_size`\n(typically `datalake_batch_size`). After a failure, subsequent attempts\nseed at `halving_initial_block_size` and halve on each retry, with\n`halving_min_block_size` as the floor.",
@@ -608,32 +387,36 @@
           "description": "Starting `max_block_size` (in rows) for the halving series after the\nfirst failure. Sized to stay safely under the Arrow String int32\noffset cap even on unexpectedly heavy text columns.",
           "type": "integer",
           "format": "uint64",
-          "default": 100000,
           "minimum": 0
         },
         "halving_min_block_size": {
           "description": "Floor for the halving series. Prevents pathologically tiny scans\nafter repeated retries.",
           "type": "integer",
           "format": "uint64",
-          "default": 1024,
           "minimum": 0
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "required": [
+        "halving_initial_block_size",
+        "halving_min_block_size"
+      ]
     },
     "DeploymentConfig": {
       "type": "object",
       "properties": {
         "environment": {
-          "$ref": "#/$defs/DeploymentEnvironment",
-          "default": "development"
+          "$ref": "#/$defs/DeploymentEnvironment"
         },
         "type": {
-          "$ref": "#/$defs/DeploymentKind",
-          "default": "self_managed"
+          "$ref": "#/$defs/DeploymentKind"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "environment"
+      ]
     },
     "DeploymentEnvironment": {
       "type": "string",
@@ -667,47 +450,11 @@
         },
         "datalake_retry": {
           "description": "Datalake retry tuning shared by all SDLC pipelines.",
-          "$ref": "#/$defs/DatalakeRetryConfig",
-          "default": {
-            "halving_initial_block_size": 100000,
-            "halving_min_block_size": 1024
-          }
+          "$ref": "#/$defs/DatalakeRetryConfig"
         },
         "handlers": {
           "description": "Per-handler domain configuration (batch sizes, pipeline settings).",
-          "$ref": "#/$defs/HandlersConfiguration",
-          "default": {
-            "code-indexing-task": {
-              "pipeline": {
-                "big_indexing_slots": null,
-                "cross_file_resolve_timeout_ms": 180000,
-                "fetch_concurrency": 10,
-                "job_timeout_secs": 1500,
-                "max_concurrent_languages": 0,
-                "max_file_size_bytes": 5000000,
-                "max_files": 1000000,
-                "max_total_bytes": 2000000000,
-                "per_file_parse_timeout_ms": 100,
-                "per_file_ssa_timeout_ms": 100,
-                "per_file_timeout_ms": 2000,
-                "per_file_walk_timeout_ms": 100,
-                "small_indexing_slots": null,
-                "small_repo_max_files": 650,
-                "worker_threads": 0,
-                "write_buffer_age_secs": 60,
-                "write_channel_capacity": 8,
-                "write_max_concurrent": 4,
-                "write_max_flush_age_secs": 120,
-                "write_min_flush_rows": 10000,
-                "write_slice_rows": 1000000
-              }
-            },
-            "entity-handler": {
-              "batch_size_overrides": {},
-              "datalake_batch_size": null,
-              "system_notes_resolve_lookup_batch_size": 1000
-            }
-          }
+          "$ref": "#/$defs/HandlersConfiguration"
         },
         "max_concurrent_workers": {
           "description": "Maximum concurrent message handlers across all modules. Unset = derived\nfrom the container CPU count, capped by its memory limit.",
@@ -716,17 +463,11 @@
             "null"
           ],
           "format": "uint",
-          "default": null,
           "minimum": 0
         },
         "modules": {
-          "description": "Modules whose handlers this process registers. Unset = all modules.",
+          "description": "Modules whose handlers this process registers.",
           "type": "array",
-          "default": [
-            "sdlc",
-            "code",
-            "namespace_deletion"
-          ],
           "items": {
             "$ref": "#/$defs/IndexerModule"
           }
@@ -740,7 +481,12 @@
           "default": {}
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "required": [
+        "handlers",
+        "datalake_retry",
+        "modules"
+      ]
     },
     "EntityHandlerConfig": {
       "type": "object",
@@ -761,26 +507,26 @@
             "null"
           ],
           "format": "uint64",
-          "default": null,
           "minimum": 0
         },
         "system_notes_resolve_lookup_batch_size": {
           "description": "Maximum number of items bound into each SystemNote resolver lookup.",
           "type": "integer",
           "format": "uint",
-          "default": 1000,
           "minimum": 1
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "required": [
+        "system_notes_resolve_lookup_batch_size"
+      ]
     },
     "FeatureScope": {
       "description": "A feature flag scoped to root namespaces: `enabled` toggles it, an empty\n`namespaces` list means every namespace, otherwise only those ids.",
       "type": "object",
       "properties": {
         "enabled": {
-          "type": "boolean",
-          "default": false
+          "type": "boolean"
         },
         "namespaces": {
           "type": "array",
@@ -791,7 +537,10 @@
           }
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "required": [
+        "enabled"
+      ]
     },
     "FeaturesConfig": {
       "description": "An unrecognized key fails deserialization as an unknown [`Feature`] variant,\nrather than being silently ignored.",
@@ -807,39 +556,34 @@
           "type": [
             "string",
             "null"
-          ],
-          "default": null
+          ]
         },
         "jwt": {
-          "$ref": "#/$defs/JwtConfig",
-          "default": {
-            "signing_key": null,
-            "verifying_key": null
-          }
+          "$ref": "#/$defs/JwtConfig"
         },
         "resolve_host": {
           "type": [
             "string",
             "null"
-          ],
-          "default": null
+          ]
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "required": [
+        "jwt"
+      ]
     },
     "GlobalDispatcherConfig": {
       "description": "Per-task schedule configuration.\n\nEach scheduled task embeds this via `#[serde(flatten)]` in its own typed config struct.\nThe scheduler reads it via `task.schedule()`.",
       "type": "object",
       "properties": {
         "cron": {
-          "description": "Cron expression with seconds field (6-field: `sec min hour dom mon dow`).\nWhen absent, the task runs on a default 60-second interval.",
-          "type": [
-            "string",
-            "null"
-          ],
-          "default": null
+          "$ref": "#/$defs/CronSchedule"
         }
-      }
+      },
+      "required": [
+        "cron"
+      ]
     },
     "GrpcConfig": {
       "type": "object",
@@ -847,115 +591,90 @@
         "concurrency_limit": {
           "type": "integer",
           "format": "uint",
-          "default": 256,
           "minimum": 0
         },
         "connection_window_size": {
           "type": "integer",
           "format": "uint32",
-          "default": 2097152,
           "minimum": 0
         },
         "keepalive_interval_secs": {
           "type": "integer",
           "format": "uint64",
-          "default": 20,
           "minimum": 0
         },
         "keepalive_timeout_secs": {
           "type": "integer",
           "format": "uint64",
-          "default": 20,
           "minimum": 0
         },
         "max_connection_age_grace_secs": {
           "type": "integer",
           "format": "uint64",
-          "default": 30,
           "minimum": 0
         },
         "max_connection_age_secs": {
           "type": "integer",
           "format": "uint64",
-          "default": 300,
           "minimum": 0
         },
         "max_header_list_size_bytes": {
           "type": "integer",
           "format": "uint32",
-          "default": 65536,
           "minimum": 0
         },
         "stream_timeout_secs": {
           "type": "integer",
           "format": "uint64",
-          "default": 60,
           "minimum": 0
         },
         "stream_window_size": {
           "type": "integer",
           "format": "uint32",
-          "default": 1048576,
           "minimum": 0
         },
         "tcp_keepalive_secs": {
           "type": "integer",
           "format": "uint64",
-          "default": 60,
           "minimum": 0
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "required": [
+        "keepalive_interval_secs",
+        "keepalive_timeout_secs",
+        "tcp_keepalive_secs",
+        "connection_window_size",
+        "stream_window_size",
+        "concurrency_limit",
+        "max_connection_age_secs",
+        "max_connection_age_grace_secs",
+        "stream_timeout_secs",
+        "max_header_list_size_bytes"
+      ]
     },
     "HandlersConfiguration": {
       "description": "Typed per-handler domain configuration (batch sizes, pipeline settings).\n\nEngine-level config (retry, concurrency, DLQ) lives in `topics`.",
       "type": "object",
       "properties": {
         "code-indexing-task": {
-          "$ref": "#/$defs/CodeIndexingTaskHandlerConfig",
-          "default": {
-            "pipeline": {
-              "big_indexing_slots": null,
-              "cross_file_resolve_timeout_ms": 180000,
-              "fetch_concurrency": 10,
-              "job_timeout_secs": 1500,
-              "max_concurrent_languages": 0,
-              "max_file_size_bytes": 5000000,
-              "max_files": 1000000,
-              "max_total_bytes": 2000000000,
-              "per_file_parse_timeout_ms": 100,
-              "per_file_ssa_timeout_ms": 100,
-              "per_file_timeout_ms": 2000,
-              "per_file_walk_timeout_ms": 100,
-              "small_indexing_slots": null,
-              "small_repo_max_files": 650,
-              "worker_threads": 0,
-              "write_buffer_age_secs": 60,
-              "write_channel_capacity": 8,
-              "write_max_concurrent": 4,
-              "write_max_flush_age_secs": 120,
-              "write_min_flush_rows": 10000,
-              "write_slice_rows": 1000000
-            }
-          }
+          "$ref": "#/$defs/CodeIndexingTaskHandlerConfig"
         },
         "entity-handler": {
-          "$ref": "#/$defs/EntityHandlerConfig",
-          "default": {
-            "batch_size_overrides": {},
-            "datalake_batch_size": null,
-            "system_notes_resolve_lookup_batch_size": 1000
-          }
+          "$ref": "#/$defs/EntityHandlerConfig"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "required": [
+        "entity-handler",
+        "code-indexing-task"
+      ]
     },
     "HealthCheckConfig": {
       "type": "object",
       "properties": {
         "bind_address": {
-          "type": "string",
-          "default": "0.0.0.0:4201"
+          "type": "string"
         },
         "targets": {
           "type": "array",
@@ -965,7 +684,10 @@
           }
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "required": [
+        "bind_address"
+      ]
     },
     "IndexerModule": {
       "description": "Indexer module selector. Each variant maps to a domain in `crates/indexer/src/modules/`.\n\nAn indexer process registers handlers only for the modules listed in\n[`EngineConfiguration::modules`], letting operators run multiple specialised\nindexer Deployments (e.g. a light SDLC pool and a beefy code pool) from the\nsame binary.",
@@ -994,15 +716,13 @@
           "type": [
             "string",
             "null"
-          ],
-          "default": null
+          ]
         },
         "verifying_key": {
           "type": [
             "string",
             "null"
-          ],
-          "default": null
+          ]
         }
       },
       "additionalProperties": false
@@ -1014,73 +734,62 @@
           "type": [
             "string",
             "null"
-          ],
-          "default": null
+          ]
         },
         "otel": {
-          "$ref": "#/$defs/OtelConfig",
-          "default": {
-            "enabled": false,
-            "endpoint": ""
-          }
+          "$ref": "#/$defs/OtelConfig"
         },
         "prometheus": {
-          "$ref": "#/$defs/PrometheusConfig",
-          "default": {
-            "enabled": false,
-            "port": 9394
-          }
+          "$ref": "#/$defs/PrometheusConfig"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "required": [
+        "otel",
+        "prometheus"
+      ]
     },
     "MigrationCompletionConfig": {
       "description": "Per-task schedule configuration.\n\nEach scheduled task embeds this via `#[serde(flatten)]` in its own typed config struct.\nThe scheduler reads it via `task.schedule()`.",
       "type": "object",
       "properties": {
         "cron": {
-          "description": "Cron expression with seconds field (6-field: `sec min hour dom mon dow`).\nWhen absent, the task runs on a default 60-second interval.",
-          "type": [
-            "string",
-            "null"
-          ],
-          "default": null
+          "$ref": "#/$defs/CronSchedule"
         }
-      }
+      },
+      "required": [
+        "cron"
+      ]
     },
     "NamespaceDeletionSchedulerConfig": {
       "description": "Per-task schedule configuration.\n\nEach scheduled task embeds this via `#[serde(flatten)]` in its own typed config struct.\nThe scheduler reads it via `task.schedule()`.",
       "type": "object",
       "properties": {
         "cron": {
-          "description": "Cron expression with seconds field (6-field: `sec min hour dom mon dow`).\nWhen absent, the task runs on a default 60-second interval.",
-          "type": [
-            "string",
-            "null"
-          ],
-          "default": null
+          "$ref": "#/$defs/CronSchedule"
         }
-      }
+      },
+      "required": [
+        "cron"
+      ]
     },
     "NamespaceDispatcherConfig": {
       "description": "Per-task schedule configuration.\n\nEach scheduled task embeds this via `#[serde(flatten)]` in its own typed config struct.\nThe scheduler reads it via `task.schedule()`.",
       "type": "object",
       "properties": {
         "cron": {
-          "description": "Cron expression with seconds field (6-field: `sec min hour dom mon dow`).\nWhen absent, the task runs on a default 60-second interval.",
-          "type": [
-            "string",
-            "null"
-          ],
-          "default": null
+          "$ref": "#/$defs/CronSchedule"
         },
         "sweep_interval_secs": {
           "type": "integer",
           "format": "uint64",
-          "default": 3600,
           "minimum": 0
         }
-      }
+      },
+      "required": [
+        "cron",
+        "sweep_interval_secs"
+      ]
     },
     "NamespaceTarget": {
       "description": "A namespace with lists of deployments and/or statefulsets to monitor.",
@@ -1114,125 +823,109 @@
       "type": "object",
       "properties": {
         "ack_wait_secs": {
-          "description": "Acknowledgment wait time in seconds before message redelivery. Defaults to 300.",
+          "description": "Acknowledgment wait time in seconds before message redelivery.",
           "type": "integer",
           "format": "uint64",
-          "default": 300,
           "minimum": 0
         },
         "auto_create_streams": {
-          "description": "Whether to auto-create streams on startup. Defaults to true.",
-          "type": "boolean",
-          "default": true
+          "description": "Whether to auto-create streams on startup.",
+          "type": "boolean"
         },
         "batch_size": {
-          "description": "How many messages to fetch per batch. Higher values improve throughput\nbut increase memory usage. Defaults to 10.",
+          "description": "How many messages to fetch per batch. Higher values improve throughput\nbut increase memory usage.",
           "type": "integer",
           "format": "uint",
-          "default": 10,
           "minimum": 0
         },
         "connection_timeout_secs": {
-          "description": "Connection timeout in seconds. Defaults to 10.",
+          "description": "Connection timeout in seconds.",
           "type": "integer",
           "format": "uint64",
-          "default": 10,
           "minimum": 0
         },
         "consumer_inactive_threshold_secs": {
-          "description": "Inactive threshold for versioned durable consumers in seconds.\nAfter this duration with no activity, NATS auto-deletes the consumer.\nApplied to Siphon dispatch consumers and to subscribe consumers on the\nversioned work streams, so a retired release's consumers reap\nthemselves and stop vetoing release GC. A connected consumer's fetch\nloop keeps it active. Clamped to a minimum of 60 seconds. Defaults to\n3600 (1 hour).",
+          "description": "Inactive threshold for versioned durable consumers in seconds.\nAfter this duration with no activity, NATS auto-deletes the consumer.\nApplied to Siphon dispatch consumers and to subscribe consumers on the\nversioned work streams, so a retired release's consumers reap\nthemselves and stop vetoing release GC. A connected consumer's fetch\nloop keeps it active. Clamped to a minimum of 60 seconds.",
           "type": "integer",
           "format": "uint64",
-          "default": 3600,
           "minimum": 60
         },
         "consumer_name": {
-          "description": "Consumer name for durable subscriptions. Defaults to None (ephemeral consumer).\n\n**Ephemeral consumers** (`None`): Created on subscribe, destroyed on disconnect.\nMessages are only delivered while connected. Good for transient workers or testing.\n\n**Durable consumers** (`Some(\"name\")`): Persist across restarts. NATS tracks the\nlast acknowledged message, so reconnecting consumers resume where they left off.\nRequired for reliable message processing.\n\nFor horizontal scaling, give all instances the same `consumer_name`. NATS will\ndistribute messages across them (each message delivered to exactly one instance).",
+          "description": "Consumer name for durable subscriptions.\n\n**Ephemeral consumers** (`None`): Created on subscribe, destroyed on disconnect.\nMessages are only delivered while connected. Good for transient workers or testing.\n\n**Durable consumers** (`Some(\"name\")`): Persist across restarts. NATS tracks the\nlast acknowledged message, so reconnecting consumers resume where they left off.\nRequired for reliable message processing.\n\nFor horizontal scaling, give all instances the same `consumer_name`. NATS will\ndistribute messages across them (each message delivered to exactly one instance).",
           "type": [
             "string",
             "null"
-          ],
-          "default": null
+          ]
         },
         "fetch_expires_secs": {
-          "description": "Server-side timeout in seconds for `consume_pending` batch fetch.\nMust be long enough for the NATS server to scan through gaps between\nmatching messages in filtered consumers. Defaults to 5.",
+          "description": "Server-side timeout in seconds for `consume_pending` batch fetch.\nMust be long enough for the NATS server to scan through gaps between\nmatching messages in filtered consumers.",
           "type": "integer",
           "format": "uint64",
-          "default": 5,
           "minimum": 0
         },
         "max_deliver": {
-          "description": "Maximum redelivery attempts. None means unlimited. Defaults to 5.",
+          "description": "Maximum redelivery attempts. None means unlimited.",
           "type": [
             "integer",
             "null"
           ],
           "format": "uint32",
-          "default": 5,
           "minimum": 0
         },
         "password": {
-          "description": "Optional password for authentication.\nFor production, prefer environment variables over storing in config files.",
+          "description": "Optional password for authentication.\nFor production, mount it as a secret file at `/etc/secrets/nats/password`.",
           "type": [
             "string",
             "null"
-          ],
-          "default": null
+          ]
         },
         "release_gc_idle_threshold_secs": {
-          "description": "How long another release's streams must show no activity (creation,\npublishes, attached consumers) before a starting dispatcher deletes\nthem. A live release's dispatcher publishes every minute, so activity\ndoubles as liveness. Clamped to a minimum of 600 seconds. Defaults to\n3600.",
+          "description": "How long another release's streams must show no activity (creation,\npublishes, attached consumers) before a starting dispatcher deletes\nthem. A live release's dispatcher publishes every minute, so activity\ndoubles as liveness. Clamped to a minimum of 600 seconds.",
           "type": "integer",
           "format": "uint64",
-          "default": 3600,
           "minimum": 600
         },
         "request_timeout_secs": {
-          "description": "Request timeout in seconds. Defaults to 5.",
+          "description": "Request timeout in seconds.",
           "type": "integer",
           "format": "uint64",
-          "default": 5,
           "minimum": 0
         },
         "stream_max_age_secs": {
-          "description": "Maximum age of messages in seconds before deletion. Defaults to 14400 (4 hours).",
+          "description": "Maximum age of messages in seconds before deletion.",
           "type": [
             "integer",
             "null"
           ],
           "format": "uint64",
-          "default": 14400,
           "minimum": 0
         },
         "stream_max_bytes": {
-          "description": "Maximum bytes per stream before oldest messages are deleted. Defaults to None (unlimited).",
+          "description": "Maximum bytes per stream before oldest messages are deleted.",
           "type": [
             "integer",
             "null"
           ],
-          "format": "int64",
-          "default": null
+          "format": "int64"
         },
         "stream_max_messages": {
-          "description": "Maximum messages per stream. Defaults to None (unlimited).",
+          "description": "Maximum messages per stream.",
           "type": [
             "integer",
             "null"
           ],
-          "format": "int64",
-          "default": null
+          "format": "int64"
         },
         "stream_replicas": {
-          "description": "Number of stream replicas for fault tolerance. Defaults to 1.\nProduction should use 3 for fault tolerance.",
+          "description": "Number of stream replicas for fault tolerance.\nProduction should use 3 for fault tolerance.",
           "type": "integer",
           "format": "uint",
-          "default": 1,
           "minimum": 0
         },
         "subscription_buffer_size": {
-          "description": "How many messages to buffer per subscription. Defaults to 100.\n\nThis controls the capacity of the internal channel between the NATS fetch loop\nand your message handler. When `subscribe()` is called, a background task fetches\nmessages and queues them in this buffer.\n\n- **Smaller buffer**: Less memory, but the fetch loop may block waiting for the handler\n- **Larger buffer**: More messages pre-fetched, smoother throughput, higher memory usage\n\nFor slow handlers or bursty workloads, consider increasing this value.",
+          "description": "How many messages to buffer per subscription.\n\nThis controls the capacity of the internal channel between the NATS fetch loop\nand your message handler. When `subscribe()` is called, a background task fetches\nmessages and queues them in this buffer.\n\n- **Smaller buffer**: Less memory, but the fetch loop may block waiting for the handler\n- **Larger buffer**: More messages pre-fetched, smoother throughput, higher memory usage\n\nFor slow handlers or bursty workloads, consider increasing this value.",
           "type": "integer",
           "format": "uint",
-          "default": 100,
           "minimum": 0
         },
         "tls_ca_cert_path": {
@@ -1240,24 +933,21 @@
           "type": [
             "string",
             "null"
-          ],
-          "default": null
+          ]
         },
         "tls_cert_path": {
           "description": "Path to client certificate (PEM) for mTLS authentication.\nMust be paired with `tls_key_path`.",
           "type": [
             "string",
             "null"
-          ],
-          "default": null
+          ]
         },
         "tls_key_path": {
           "description": "Path to client private key (PEM) for mTLS authentication.\nMust be paired with `tls_cert_path`.",
           "type": [
             "string",
             "null"
-          ],
-          "default": null
+          ]
         },
         "url": {
           "description": "Server address, e.g. \"localhost:4222\".",
@@ -1268,28 +958,132 @@
           "type": [
             "string",
             "null"
-          ],
-          "default": null
+          ]
         }
       },
       "additionalProperties": false,
       "required": [
-        "url"
+        "url",
+        "connection_timeout_secs",
+        "request_timeout_secs",
+        "ack_wait_secs",
+        "subscription_buffer_size",
+        "batch_size",
+        "auto_create_streams",
+        "stream_replicas",
+        "fetch_expires_secs",
+        "consumer_inactive_threshold_secs",
+        "release_gc_idle_threshold_secs"
+      ]
+    },
+    "ObjectStorageAuth": {
+      "type": "string",
+      "enum": [
+        "identity",
+        "static"
+      ]
+    },
+    "ObjectStorageConfig": {
+      "type": "object",
+      "properties": {
+        "access_key_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "allow_http": {
+          "type": "boolean"
+        },
+        "auth": {
+          "$ref": "#/$defs/ObjectStorageAuth"
+        },
+        "bucket": {
+          "type": "string"
+        },
+        "ca_cert_path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "endpoint": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "path_style": {
+          "type": "boolean"
+        },
+        "prefix": {
+          "type": "string"
+        },
+        "provider": {
+          "$ref": "#/$defs/ObjectStorageProvider"
+        },
+        "region": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "secret_access_key": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "service_account_key": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "session_token": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "provider",
+        "bucket",
+        "prefix",
+        "auth",
+        "path_style",
+        "allow_http"
+      ]
+    },
+    "ObjectStorageProvider": {
+      "type": "string",
+      "enum": [
+        "s3",
+        "gcs",
+        "local"
       ]
     },
     "OtelConfig": {
       "type": "object",
       "properties": {
         "enabled": {
-          "type": "boolean",
-          "default": false
+          "type": "boolean"
         },
         "endpoint": {
-          "type": "string",
-          "default": ""
+          "type": "string"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "endpoint"
+      ]
     },
     "PathResolverConfig": {
       "type": "object",
@@ -1297,62 +1091,69 @@
         "cache_capacity": {
           "type": "integer",
           "format": "uint64",
-          "default": 10000,
           "minimum": 0
         },
         "cache_ttl_secs": {
           "type": "integer",
           "format": "uint64",
-          "default": 60,
           "minimum": 0
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "required": [
+        "cache_ttl_secs",
+        "cache_capacity"
+      ]
     },
     "ProfilingConfig": {
       "type": "object",
       "properties": {
         "enabled": {
-          "type": "boolean",
-          "default": false
+          "type": "boolean"
         },
         "explain": {
-          "type": "boolean",
-          "default": false
+          "type": "boolean"
         },
         "instance_health": {
-          "type": "boolean",
-          "default": false
+          "type": "boolean"
         },
         "processors": {
-          "type": "boolean",
-          "default": false
+          "type": "boolean"
         },
         "query_log": {
-          "type": "boolean",
-          "default": false
+          "type": "boolean"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "explain",
+        "query_log",
+        "processors",
+        "instance_health"
+      ]
     },
     "PrometheusConfig": {
       "type": "object",
       "properties": {
         "enabled": {
-          "type": "boolean",
-          "default": false
+          "type": "boolean"
         },
         "port": {
           "type": "integer",
           "format": "uint16",
-          "default": 9394,
           "maximum": 65535,
           "minimum": 0
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "port"
+      ]
     },
     "QueryConfig": {
+      "description": "Query execution settings. All fields map to ClickHouse query-level\nsettings. The closed set of fields prevents arbitrary user input from\nreaching the SETTINGS clause (CWE-89).\n\n`None` means \"not specified at this layer\" -- the merge logic in\n[`QuerySettings::resolve`] fills in from the default. The derived\n`Default` is therefore all-`None`: nothing specified, nothing emitted.",
       "type": "object",
       "properties": {
         "graph_query_cache_enabled": {
@@ -1374,23 +1175,21 @@
           "writeOnly": true
         },
         "max_ast_depth": {
-          "description": "ClickHouse `max_ast_depth`. Limits AST nesting depth.\nDefault: 10,000 (10x ClickHouse default of 1,000).",
+          "description": "ClickHouse `max_ast_depth`. Limits AST nesting depth.",
           "type": [
             "integer",
             "null"
           ],
           "format": "uint64",
-          "default": 10000,
           "minimum": 0
         },
         "max_ast_elements": {
-          "description": "ClickHouse `max_ast_elements`. Limits AST node count after parsing.\nDefault: 1,000,000 (20x ClickHouse default, matches Siphon).",
+          "description": "ClickHouse `max_ast_elements`. Limits AST node count after parsing.",
           "type": [
             "integer",
             "null"
           ],
           "format": "uint64",
-          "default": 1000000,
           "minimum": 0
         },
         "max_bytes_to_read": {
@@ -1409,17 +1208,15 @@
             "null"
           ],
           "format": "uint64",
-          "default": 30,
           "minimum": 0
         },
         "max_expanded_ast_elements": {
-          "description": "ClickHouse `max_expanded_ast_elements`. Limits AST node count after\nalias/macro expansion. Default: 10,000,000 (20x ClickHouse default).",
+          "description": "ClickHouse `max_expanded_ast_elements`. Limits AST node count after\nalias/macro expansion.",
           "type": [
             "integer",
             "null"
           ],
           "format": "uint64",
-          "default": 10000000,
           "minimum": 0
         },
         "max_memory_usage": {
@@ -1456,7 +1253,6 @@
             "null"
           ],
           "format": "uint32",
-          "default": 60,
           "minimum": 0
         },
         "use_query_cache": {
@@ -1474,19 +1270,15 @@
       "type": "object",
       "properties": {
         "default": {
-          "$ref": "#/$defs/QueryConfig",
-          "default": {
-            "max_ast_depth": 10000,
-            "max_ast_elements": 1000000,
-            "max_execution_time": 30,
-            "max_expanded_ast_elements": 10000000,
-            "query_cache_ttl": 60
-          }
+          "$ref": "#/$defs/QueryConfig"
         }
       },
       "additionalProperties": {
         "$ref": "#/$defs/QueryConfig"
-      }
+      },
+      "required": [
+        "default"
+      ]
     },
     "QuotaConfig": {
       "type": "object",
@@ -1495,137 +1287,92 @@
           "type": [
             "string",
             "null"
-          ],
-          "default": null
+          ]
         },
         "api_user": {
           "type": [
             "string",
             "null"
-          ],
-          "default": null
+          ]
         },
         "customers_dot_url": {
-          "type": "string",
-          "default": ""
+          "type": "string"
         },
         "enabled": {
-          "type": "boolean",
-          "default": false
+          "type": "boolean"
         },
         "fallback_cache_ttl_secs": {
           "type": "integer",
           "format": "uint64",
-          "default": 3600,
           "minimum": 0
         },
         "request_timeout_ms": {
           "type": "integer",
           "format": "uint64",
-          "default": 1000,
           "minimum": 0
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "customers_dot_url",
+        "request_timeout_ms",
+        "fallback_cache_ttl_secs"
+      ]
     },
     "ScheduleConfig": {
       "description": "Top-level schedule configuration.",
       "type": "object",
       "properties": {
         "tasks": {
-          "$ref": "#/$defs/ScheduledTasksConfiguration",
-          "default": {
-            "code-backfill": {
-              "cron": "0 */1 * * * *",
-              "publish_window": 200000
-            },
-            "global": {
-              "cron": "0 */1 * * * *"
-            },
-            "migration-completion": {
-              "cron": "0 */1 * * * *"
-            },
-            "namespace": {
-              "cron": "*/30 * * * * *",
-              "sweep_interval_secs": 3600
-            },
-            "namespace-deletion": {
-              "cron": "0 0 3 * * *"
-            },
-            "siphon": {
-              "batch_size": 100,
-              "events_stream_name": "siphon_stream_main_db"
-            },
-            "stale-edge-reconciliation": {
-              "cron": "0 */30 * * * *",
-              "lookback_secs": 3600
-            },
-            "table-cleanup": {
-              "cron": "0 0 3 * * 0"
-            }
-          }
+          "$ref": "#/$defs/ScheduledTasksConfiguration"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "required": [
+        "tasks"
+      ]
     },
     "ScheduledTasksConfiguration": {
       "description": "Typed per-task configuration for all registered scheduled tasks.",
       "type": "object",
       "properties": {
         "code-backfill": {
-          "$ref": "#/$defs/CodeBackfillSweepConfig",
-          "default": {
-            "cron": "0 */1 * * * *",
-            "publish_window": 200000
-          }
+          "$ref": "#/$defs/CodeBackfillSweepConfig"
         },
         "global": {
-          "$ref": "#/$defs/GlobalDispatcherConfig",
-          "default": {
-            "cron": "0 */1 * * * *"
-          }
+          "$ref": "#/$defs/GlobalDispatcherConfig"
         },
         "migration-completion": {
-          "$ref": "#/$defs/MigrationCompletionConfig",
-          "default": {
-            "cron": "0 */1 * * * *"
-          }
+          "$ref": "#/$defs/MigrationCompletionConfig"
         },
         "namespace": {
-          "$ref": "#/$defs/NamespaceDispatcherConfig",
-          "default": {
-            "cron": "*/30 * * * * *",
-            "sweep_interval_secs": 3600
-          }
+          "$ref": "#/$defs/NamespaceDispatcherConfig"
         },
         "namespace-deletion": {
-          "$ref": "#/$defs/NamespaceDeletionSchedulerConfig",
-          "default": {
-            "cron": "0 0 3 * * *"
-          }
+          "$ref": "#/$defs/NamespaceDeletionSchedulerConfig"
         },
         "siphon": {
-          "$ref": "#/$defs/SiphonRouterConfig",
-          "default": {
-            "batch_size": 100,
-            "events_stream_name": "siphon_stream_main_db"
-          }
+          "$ref": "#/$defs/SiphonRouterConfig"
         },
         "stale-edge-reconciliation": {
-          "$ref": "#/$defs/StaleEdgeReconciliationConfig",
-          "default": {
-            "cron": "0 */30 * * * *",
-            "lookback_secs": 3600
-          }
+          "$ref": "#/$defs/StaleEdgeReconciliationConfig"
         },
         "table-cleanup": {
-          "$ref": "#/$defs/TableCleanupConfig",
-          "default": {
-            "cron": "0 0 3 * * 0"
-          }
+          "$ref": "#/$defs/TableCleanupConfig"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "required": [
+        "global",
+        "namespace",
+        "siphon",
+        "code-backfill",
+        "table-cleanup",
+        "namespace-deletion",
+        "migration-completion",
+        "stale-edge-reconciliation"
+      ]
     },
     "SchemaConfig": {
       "description": "Schema configuration: version retention and related settings.",
@@ -1635,25 +1382,27 @@
           "description": "How long the indexer waits for the dispatcher to prepare its schema\nversion before exiting non-zero (relying on the orchestrator to restart\nit). The indexer retries with backoff within this budget. Must be at\nleast 1.",
           "type": "integer",
           "format": "uint64",
-          "default": 300,
           "minimum": 1
         },
         "max_retained_versions": {
           "description": "Number of schema version table-sets to retain.\n\nAfter migrating to version N, the indexer keeps the N active tables plus\nthe N-1 rollback target. Must be at least 2.",
           "type": "integer",
           "format": "uint32",
-          "default": 2,
           "minimum": 2
         },
         "version_poll_interval_secs": {
           "description": "How often the webserver polls `gkg_schema_version` for the active\nversion, in seconds. Must be at least 1.",
           "type": "integer",
           "format": "uint64",
-          "default": 5,
           "minimum": 1
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "required": [
+        "max_retained_versions",
+        "version_poll_interval_secs",
+        "indexer_schema_wait_timeout_secs"
+      ]
     },
     "SiphonRouterConfig": {
       "description": "Drives the continuous Siphon CDC trigger: which JetStream the orchestrator\ndrains and how many messages per `consume_pending` call.",
@@ -1662,35 +1411,35 @@
         "batch_size": {
           "type": "integer",
           "format": "uint",
-          "default": 100,
           "minimum": 0
         },
         "events_stream_name": {
-          "type": "string",
-          "default": "siphon_stream_main_db"
+          "type": "string"
         }
-      }
+      },
+      "required": [
+        "events_stream_name",
+        "batch_size"
+      ]
     },
     "StaleEdgeReconciliationConfig": {
       "description": "Tombstones edges a node's pipeline stopped emitting, off the indexing path.",
       "type": "object",
       "properties": {
         "cron": {
-          "description": "Cron expression with seconds field (6-field: `sec min hour dom mon dow`).\nWhen absent, the task runs on a default 60-second interval.",
-          "type": [
-            "string",
-            "null"
-          ],
-          "default": null
+          "$ref": "#/$defs/CronSchedule"
         },
         "lookback_secs": {
           "type": "integer",
           "format": "uint64",
-          "default": 3600,
           "minimum": 0
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "required": [
+        "cron",
+        "lookback_secs"
+      ]
     },
     "SubscriptionConfig": {
       "description": "Sparse per-subscription policy override (retry, concurrency, DLQ).\n\nThe correct default policy for each topic is declared in Rust by the indexer\nmodule that owns the topic (see `crates/indexer/src/modules/*`). A\n`engine.topics.<name>` entry in YAML is a *field-wise override* layered on top\nof that declared default via [`SubscriptionConfig::with_optional_override`]: only the\nfields the entry sets change; every unset field keeps the module default. Each\nfield is therefore `Option`, so \"unset\" is distinguishable from an explicit\nvalue (notably `dead_letter_on_exhaustion: false`).",
@@ -1701,16 +1450,14 @@
           "type": [
             "string",
             "null"
-          ],
-          "default": null
+          ]
         },
         "dead_letter_on_exhaustion": {
           "description": "Route exhausted retries to the dead letter queue.",
           "type": [
             "boolean",
             "null"
-          ],
-          "default": null
+          ]
         },
         "max_ack_pending": {
           "description": "Per-consumer cap on simultaneously-delivered-but-not-yet-acked messages.\nWhen absent, the NATS server default applies (currently 1000).",
@@ -1719,7 +1466,6 @@
             "null"
           ],
           "format": "uint32",
-          "default": null,
           "minimum": 0
         },
         "max_attempts": {
@@ -1729,7 +1475,6 @@
             "null"
           ],
           "format": "uint32",
-          "default": null,
           "minimum": 0
         },
         "retry_interval_secs": {
@@ -1739,7 +1484,6 @@
             "null"
           ],
           "format": "uint64",
-          "default": null,
           "minimum": 0
         }
       },
@@ -1750,14 +1494,12 @@
       "type": "object",
       "properties": {
         "cron": {
-          "description": "Cron expression with seconds field (6-field: `sec min hour dom mon dow`).\nWhen absent, the task runs on a default 60-second interval.",
-          "type": [
-            "string",
-            "null"
-          ],
-          "default": null
+          "$ref": "#/$defs/CronSchedule"
         }
-      }
+      },
+      "required": [
+        "cron"
+      ]
     },
     "TlsConfig": {
       "type": "object",
@@ -1766,15 +1508,13 @@
           "type": [
             "string",
             "null"
-          ],
-          "default": null
+          ]
         },
         "key_path": {
           "type": [
             "string",
             "null"
-          ],
-          "default": null
+          ]
         }
       },
       "additionalProperties": false

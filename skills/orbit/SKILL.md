@@ -1,7 +1,7 @@
 ---
 name: orbit
 description: Query GitLab Orbit via `glab orbit remote` CLI subcommands or run a local copy with `glab orbit local`. Use for code-structure questions (who calls this function, where is this symbol defined), cross-project dependency and blast-radius analysis, merge-request and contributor queries that require relationship traversal or aggregation, repository map / repo-map generation, and any question spanning relationships, cross-entity joins, or multi-entity aggregation across GitLab entities (projects, users, MRs, issues, pipelines, files, definitions, vulnerabilities). Do not use for single-entity GitLab lookups or write operations that `glab` handles directly (e.g. `glab mr view`, `glab mr create`).
-version: 0.26.0
+version: 0.26.4
 license: MIT
 metadata:
   audience: developers
@@ -33,9 +33,15 @@ If you must introspect, call `glab orbit remote schema <Entity…>` with explici
 entity names — always pass the entity names you need rather than the unscoped
 form, which returns ~17 KB+ of output. Call schema at most once per session;
 schemas don't change mid-session. Use `glab orbit remote dsl` for the full DSL
-JSON Schema. Note that per-node `outgoing_edges`/`incoming_edges` are arrays
-of **strings** (edge type names), not objects — use `--jq` accordingly (e.g.
-`schema Project --jq '.nodes[] | select(.name=="Project") | .properties'`).
+JSON Schema. The schema command returns an object with a `nodes` array and does
+not accept `--jq`; pipe its output into `jq` instead. Per-node
+`outgoing_edges`/`incoming_edges` are arrays of **strings** (edge type names),
+not objects:
+
+```shell
+glab orbit remote schema Project |
+  jq '.nodes[] | select(.name == "Project") | .properties'
+```
 
 Each `glab orbit remote query` has fixed per-call overhead. Prefer one
 `aggregation` query over N traversal queries for "how many X grouped by Y", and
@@ -47,8 +53,9 @@ When editing Orbit docs or skills, fence executable query JSON as
 ## Running a query
 
 Write the request body to a file and pass it to `glab orbit remote query`.
-Default output is `llm` (compact, agent-friendly); pass `--format raw` to pipe
-into `jq`. Endpoints are user-scoped — do **not** pass `-R owner/repo`.
+Default output is `llm` (compact, agent-friendly); pass
+`--response-format raw` to pipe into `jq`. Endpoints are user-scoped — do
+**not** pass `-R owner/repo`.
 
 Many filters need a numeric project ID. For the repository you are in, let
 `glab` resolve it from the Git remote rather than querying for it:

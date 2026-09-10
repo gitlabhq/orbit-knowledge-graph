@@ -1,0 +1,17 @@
+# source: crates/integration-tests/tests/server/data_correctness/edge_cases/mod.rs::giant_string_survives_pipeline
+description: 10 000-char string survives the query pipeline intact
+
+query:
+  json: |
+    {
+        "query_type": "traversal",
+        "nodes": [{"id": "n", "entity": "Note", "columns": ["note"], "node_ids": [3002]}],
+        "limit": 10
+    }
+
+expect:
+  node_count: 1
+  nodes:
+    Note:
+      ids: [3002]
+      prop_present: [note]

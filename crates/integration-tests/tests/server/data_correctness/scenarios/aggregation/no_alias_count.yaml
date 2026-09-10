@@ -1,0 +1,28 @@
+# source: crates/integration-tests/tests/server/data_correctness/aggregation.rs::aggregation_no_alias_defaults_to_function_name
+description: Omitted alias defaults to the function name (count)
+
+config:
+  security:
+    paths: ["1/"]
+
+query:
+  json: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+        {"id": "mr", "entity": "MergeRequest"}
+      ],
+      "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
+      "group_by": ["u"],
+      "aggregations": [{"count": "mr", "as": "count"}],
+      "limit": 10
+    }
+
+expect:
+  groups:
+    u:
+      rows:
+        - { entity: User, id: 1, values: { count: 2 }, properties: { username: alice } }
+        - { entity: User, id: 2, values: { count: 1 } }
+        - { entity: User, id: 3, values: { count: 1 } }
