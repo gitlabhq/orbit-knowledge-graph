@@ -8,7 +8,17 @@ pub(super) struct Query<'i> {
     pub predicates: Vec<Comparison<'i>>,
     pub projections: Projections<'i>,
     pub order: Option<Sort<'i>>,
-    pub limit: Option<u32>,
+    pub limit: Option<Limit<'i>>,
+    pub debug: bool,
+}
+
+pub(super) enum Limit<'i> {
+    Rows(u32),
+    Page {
+        span: Span<'i>,
+        size: u32,
+        after: Option<String>,
+    },
 }
 
 pub(super) struct Name<'i> {

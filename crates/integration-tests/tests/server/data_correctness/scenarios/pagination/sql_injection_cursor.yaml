@@ -10,6 +10,8 @@ query:
       "order_by": "u.username",
       "cursor": {"page_size": 2, "after": "invalid-but-must-not-crash"}
     }
+  gql: |
+    MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username ORDER BY u.username PAGE 2 AFTER 'invalid-but-must-not-crash'
 
 expect:
   compile_error: true

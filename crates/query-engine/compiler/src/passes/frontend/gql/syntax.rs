@@ -20,18 +20,14 @@ impl QueryParser {
 
     pub(super) fn Query(input: Node) -> Result<Query> {
         Ok(match_nodes!(input.into_children();
-            [Match((pattern, predicates)), Return(projections), EOI(_)] => Query {
-                pattern, predicates, projections, order: None, limit: None,
-            },
-            [Match((pattern, predicates)), Return(projections), Order(order), EOI(_)] => Query {
-                pattern, predicates, projections, order: Some(order), limit: None,
-            },
-            [Match((pattern, predicates)), Return(projections), Limit(limit), EOI(_)] => Query {
-                pattern, predicates, projections, order: None, limit: Some(limit),
-            },
-            [Match((pattern, predicates)), Return(projections), Order(order), Limit(limit), EOI(_)] => Query {
-                pattern, predicates, projections, order: Some(order), limit: Some(limit),
-            },
+            [Match(m), Return(r), EOI(_)] => query(m, r, None, None, false),
+            [Match(m), Return(r), Debug(_), EOI(_)] => query(m, r, None, None, true),
+            [Match(m), Return(r), Order(o), EOI(_)] => query(m, r, Some(o), None, false),
+            [Match(m), Return(r), Order(o), Debug(_), EOI(_)] => query(m, r, Some(o), None, true),
+            [Match(m), Return(r), limit(l), EOI(_)] => query(m, r, None, Some(l), false),
+            [Match(m), Return(r), limit(l), Debug(_), EOI(_)] => query(m, r, None, Some(l), true),
+            [Match(m), Return(r), Order(o), limit(l), EOI(_)] => query(m, r, Some(o), Some(l), false),
+            [Match(m), Return(r), Order(o), limit(l), Debug(_), EOI(_)] => query(m, r, Some(o), Some(l), true),
         ))
     }
 
@@ -395,14 +391,35 @@ impl QueryParser {
         })
     }
 
-    fn Limit(input: Node) -> Result<u32> {
+    #[alias(limit)]
+    fn Limit(input: Node) -> Result<Limit> {
         let span = input.as_span();
         Ok(match_nodes!(input.into_children();
-            [UnsignedInteger(value)] => value
-                .as_u64()
-                .and_then(|n| u32::try_from(n).ok())
-                .ok_or_else(|| error_at(span, "LIMIT must be a positive integer"))?,
+            [UnsignedInteger(value)] => Limit::Rows(row_count(&value, span, "LIMIT")?),
         ))
+    }
+
+    #[alias(limit)]
+    fn Page(input: Node) -> Result<Limit> {
+        let span = input.as_span();
+        Ok(match_nodes!(input.into_children();
+            [UnsignedInteger(value)] => Limit::Page {
+                span, size: row_count(&value, span, "PAGE")?, after: None,
+            },
+            [UnsignedInteger(value), After(after)] => Limit::Page {
+                span, size: row_count(&value, span, "PAGE")?, after: Some(after),
+            },
+        ))
+    }
+
+    fn After(input: Node) -> Result<String> {
+        Ok(match_nodes!(input.into_children();
+            [literal] => string(&literal)?,
+        ))
+    }
+
+    fn Debug(_input: Node) -> Result<()> {
+        Ok(())
     }
 
     fn PropertyExpression(input: Node) -> Result<Property> {
@@ -504,6 +521,30 @@ fn detail<'i>(
 
 fn item<'i>(expression: Expression<'i>, alias: Option<Name<'i>>) -> ProjectionItem<'i> {
     ProjectionItem { expression, alias }
+}
+
+fn query<'i>(
+    (pattern, predicates): (Pattern<'i>, Vec<Comparison<'i>>),
+    projections: Projections<'i>,
+    order: Option<Sort<'i>>,
+    limit: Option<Limit<'i>>,
+    debug: bool,
+) -> Query<'i> {
+    Query {
+        pattern,
+        predicates,
+        projections,
+        order,
+        limit,
+        debug,
+    }
+}
+
+fn row_count(value: &Value, span: Span<'_>, clause: &str) -> Result<u32> {
+    value
+        .as_u64()
+        .and_then(|n| u32::try_from(n).ok())
+        .ok_or_else(|| error_at(span, &format!("{clause} must be a positive integer")))
 }
 
 fn error_at(span: Span<'_>, message: &str) -> Error<Rule> {

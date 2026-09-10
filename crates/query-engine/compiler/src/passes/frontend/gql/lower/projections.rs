@@ -2,8 +2,8 @@ use std::collections::HashSet;
 
 use crate::Result;
 use crate::input::{
-    AggExpr, ColumnSelection, InputAggSort, InputAggregationMetric, InputGroupByKey, InputOrderBy,
-    PropertyRef, QueryType, TargetRef,
+    AggExpr, ColumnSelection, DynamicColumnMode, InputAggSort, InputAggregationMetric,
+    InputGroupByKey, InputOrderBy, PropertyRef, QueryType, TargetRef,
 };
 
 use super::super::ast::{AggregateFunction, Expression, Name, Projections, Sort, Target};
@@ -213,16 +213,20 @@ impl Lowering {
         selected: &mut HashSet<String>,
     ) -> Result<()> {
         let variable = variable.value;
-        if self.path.as_ref() == Some(&variable)
-            || self.neighbor.as_ref() == Some(&variable)
+        let dynamic =
+            self.path.as_ref() == Some(&variable) || self.neighbor.as_ref() == Some(&variable);
+        if dynamic
             || (self.input.query_type == QueryType::Neighbors
                 && (all || self.edges.contains_key(&variable)))
         {
-            if alias.is_some() || all {
+            if alias.is_some() || (all && !dynamic) {
                 return Err(invalid(
                     span,
                     "dynamic graph results cannot be renamed or projected as properties",
                 ));
+            }
+            if all {
+                self.input.options.dynamic_columns = DynamicColumnMode::All;
             }
             if !selected.insert(variable) {
                 return Err(invalid(span, "duplicate graph projection"));

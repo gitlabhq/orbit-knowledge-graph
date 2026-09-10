@@ -46,6 +46,11 @@ fn main() {
         MAX_DEPTH_CAP,
     );
     check_maximum(&schema, "/properties/limit", MAX_LIMIT);
+    check_maximum(
+        &schema,
+        "/properties/cursor/properties/page_size",
+        MAX_LIMIT,
+    );
     check_max_length(&schema, "/$defs/Identifier", MAX_IDENTIFIER_LEN);
     check_max_length(&schema, "/$defs/SearchPattern", MAX_FILTER_STRING_LEN);
     check_string_branch_max_length(&schema, "/$defs/FilterValue/oneOf", MAX_FILTER_STRING_LEN);

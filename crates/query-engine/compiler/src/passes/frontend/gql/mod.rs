@@ -35,8 +35,8 @@ pub fn parse(query: &str) -> Result<Input> {
         })?
         .single()
         .expect("Query produces one pair");
-    let query = QueryParser::Query(statement).map_err(syntax_error)?;
-    lower::lower(query)
+    let statement = QueryParser::Query(statement).map_err(syntax_error)?;
+    lower::lower(query, statement)
 }
 
 fn check_nesting(query: &str) -> Result<()> {

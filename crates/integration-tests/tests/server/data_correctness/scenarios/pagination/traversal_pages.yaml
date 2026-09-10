@@ -12,6 +12,8 @@ query:
       "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
       "cursor": {"page_size": 4}
     }
+  gql: |
+    MATCH (u:User)-[:MEMBER_OF]->(g:Group) WHERE u.id >= 1 AND u.id <= 10000 RETURN u, g PAGE 4
 
 expect:
   all_pages:

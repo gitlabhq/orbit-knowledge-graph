@@ -240,6 +240,18 @@ async fn run_frontend(
     apply_expect(&view, expect, label);
 }
 
+fn with_after(frontend: Frontend, base_query: &str, token: &str) -> String {
+    match frontend {
+        Frontend::JsonDsl => {
+            let mut query: serde_json::Value =
+                serde_json::from_str(base_query).expect("query must be valid JSON");
+            query["cursor"]["after"] = serde_json::Value::String(token.to_owned());
+            query.to_string()
+        }
+        Frontend::Gql => format!("{base_query} AFTER '{token}'"),
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn run_pages(
     ctx: &TestContext,
@@ -251,8 +263,7 @@ async fn run_pages(
     expect: &QueryExpect,
     label: &str,
 ) {
-    let mut query_json: serde_json::Value =
-        serde_json::from_str(base_query).expect("query must be valid JSON");
+    let mut query_str = base_query.trim_end().to_owned();
 
     let mut collected_ids: std::collections::BTreeMap<String, Vec<i64>> =
         std::collections::BTreeMap::new();
@@ -263,7 +274,6 @@ async fn run_pages(
 
     for (i, page_expect) in expect.pages.iter().enumerate() {
         let page_label = format!("{label} page {}", i + 1);
-        let query_str = query_json.to_string();
 
         let compiled = Arc::new(
             compile(&query_str, frontend, ontology, security)
@@ -313,9 +323,7 @@ async fn run_pages(
         }
 
         match next_cursor {
-            Some(cursor) => {
-                query_json["cursor"]["after"] = serde_json::Value::String(cursor);
-            }
+            Some(cursor) => query_str = with_after(frontend, base_query.trim_end(), &cursor),
             None => {
                 assert_eq!(
                     i + 1,

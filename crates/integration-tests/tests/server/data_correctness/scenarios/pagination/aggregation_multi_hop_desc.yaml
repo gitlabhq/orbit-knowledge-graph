@@ -19,6 +19,8 @@ query:
       "aggregation_sort": "-project_count",
       "cursor": {"page_size": 2}
     }
+  gql: |
+    MATCH (u:User)-[:MEMBER_OF]->(g:Group)-[:CONTAINS]->(p:Project) WHERE u.id >= 1 AND u.id <= 10000 AND p.id >= 1 AND p.id <= 10000 RETURN u{.id, .username}, count(p) AS project_count ORDER BY project_count DESC PAGE 2
 
 expect:
   all_pages:

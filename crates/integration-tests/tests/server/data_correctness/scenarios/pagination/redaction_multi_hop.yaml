@@ -25,6 +25,8 @@ query:
       ],
       "cursor": {"page_size": 3}
     }
+  gql: |
+    MATCH (u:User)-[:MEMBER_OF]->(g:Group)-[:CONTAINS]->(p:Project) WHERE u.id >= 1 AND u.id <= 10000 AND p.id >= 1 AND p.id <= 10000 RETURN u, g, p PAGE 3
 
 expect:
   pages:

@@ -15,6 +15,8 @@ query:
       "order_by": "-wi.id",
       "cursor": {"page_size": 1}
     }
+  gql: |
+    MATCH (u:User)-[:AUTHORED]->(wi:WorkItem) WHERE u.id >= 1 AND u.id <= 10000 AND wi.work_item_type IN ['issue', 'task', 'epic'] AND wi.weight >= 3 RETURN u, wi.work_item_type, wi.weight ORDER BY wi.id DESC PAGE 1
 
 expect:
   pages:

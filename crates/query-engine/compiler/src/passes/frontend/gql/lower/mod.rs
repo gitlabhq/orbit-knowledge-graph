@@ -4,14 +4,16 @@ mod projections;
 use std::collections::HashMap;
 
 use crate::input::{
-    Direction, HopRange, InputNeighbors, InputPath, InputRelationship, PathType, QueryType,
+    Direction, HopRange, InputCursor, InputNeighbors, InputPath, InputRelationship, PathType,
+    QueryType,
 };
+use crate::passes::cursor;
 use crate::{Input, InputNode, QueryError, Result};
 
-use super::ast::{NodePattern, Pattern, PatternElement, Query, Range, Relationship};
+use super::ast::{Limit, NodePattern, Pattern, PatternElement, Query, Range, Relationship};
 use super::invalid;
 
-pub(super) fn lower(query: Query<'_>) -> Result<Input> {
+pub(super) fn lower(source: &str, query: Query<'_>) -> Result<Input> {
     let mut lowering = Lowering {
         input: Input::default(),
         edges: HashMap::new(),
@@ -28,10 +30,28 @@ pub(super) fn lower(query: Query<'_>) -> Result<Input> {
     if let Some(sort) = query.order {
         lowering.order(sort)?;
     }
-    if let Some(limit) = query.limit {
-        lowering.input.limit = limit;
+    match query.limit {
+        Some(Limit::Rows(rows)) => lowering.input.limit = rows,
+        Some(Limit::Page { span, size, after }) => {
+            lowering.input.cursor = Some(InputCursor {
+                page_size: size,
+                after,
+                seek: None,
+            });
+            lowering.input.compiler.query_hash = statement_hash(source, span);
+        }
+        None => {}
     }
+    lowering.input.options.include_debug_sql = query.debug;
     Ok(lowering.input)
+}
+
+/// Binds a token to its statement the way the JSON DSL binds to the query minus
+/// `cursor`: the same FNV over the text with the whole PAGE clause removed, so
+/// changing the page size keeps a token valid and any other edit rejects it.
+fn statement_hash(source: &str, page: pest::Span<'_>) -> u64 {
+    let text = format!("{}{}", &source[..page.start()], &source[page.end()..]);
+    cursor::canonical_hash(&serde_json::Value::String(text))
 }
 
 struct Lowering {
@@ -221,4 +241,20 @@ fn hop_range(range: Range<'_>) -> Result<HopRange> {
         ));
     }
     Ok(HopRange { min, max })
+}
+
+#[cfg(test)]
+mod tests {
+    fn hash(query: &str) -> u64 {
+        super::super::parse(query).unwrap().compiler.query_hash
+    }
+
+    #[test]
+    fn statement_hash_ignores_only_the_page_clause() {
+        let base = hash("MATCH (u:User) RETURN u PAGE 5");
+        assert_eq!(base, hash("MATCH (u:User) RETURN u PAGE 7 AFTER 'x'"));
+        assert_ne!(base, hash("MATCH (u:User) RETURN u  PAGE 5"));
+        assert_ne!(base, hash("MATCH (u:User) RETURN u.id PAGE 5"));
+        assert_eq!(0, hash("MATCH (u:User) RETURN u LIMIT 5"));
+    }
 }

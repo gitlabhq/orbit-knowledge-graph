@@ -22,6 +22,7 @@ The new Rust implementation remains under the repository's license.
 
 The grammar restricts identifiers and arrows to ASCII. Escaped identifiers must still pass the compiler's identifier rules.
 Keywords are case insensitive; identifiers are case sensitive. Strings support M23 escape forms, and comments count as whitespace.
+`PAGE`, `AFTER`, and `DEBUG` are reserved in addition to the openCypher reserved words, so a variable with one of those names needs backticks.
 
 ## Compiler boundary
 
@@ -67,7 +68,8 @@ This makes SQL and parameter ordering stable without changing filter meaning.
 MATCH pattern [WHERE predicates]
 RETURN projections
 [ORDER BY key [ASC | DESC]]
-[LIMIT value]
+[LIMIT rows | PAGE rows [AFTER 'token']]
+[DEBUG]
 ```
 
 The pattern contains one node or one linear chain. Nodes need unique variables and one label.
@@ -95,7 +97,8 @@ LIMIT 10
 
 RETURN controls the existing graph response, not a general-purpose table of arbitrary expressions.
 Traversal properties select node columns. Whole nodes use ontology defaults; `properties(node)` selects all allowed columns.
-Neighbors queries reject `properties(node)`, including projections of the center, because their hydration uses dynamic column specifications instead of per-node selections.
+`properties(node)` on the far endpoint of a neighbors query or on a `shortestPath` variable sets the compiler's dynamic column mode to all columns, because those results are hydrated from dynamic column specifications instead of per-node selections.
+Neighbors queries still reject `properties(center)`.
 The compiler still includes graph identity and relationship metadata.
 
 Aggregates support `count`, `sum`, `avg`, `min`, and `max`.
@@ -109,7 +112,7 @@ ORDER BY notes DESC
 LIMIT 10
 ```
 
-The implementation adds node projections, `shortestPath` pattern syntax, `date_trunc`, and token predicates to the selected EBNF productions.
+The implementation adds node projections, `shortestPath` pattern syntax, `date_trunc`, token predicates, `PAGE ... AFTER`, and `DEBUG` to the selected EBNF productions.
 These are implementation extensions, not changes to the official grammar.
 
 Predicates support AND, comparisons, IN, string matching, null checks, and the compiler's three token predicates.
@@ -133,8 +136,18 @@ Query text is limited to 32 KiB. A flat Pest scan checks nesting before recursiv
 Existing compiler limits still apply after lowering.
 Explicit relationship-type lists are capped at 10 entries for traversal, path finding, and neighbors queries.
 
-Cursor binding is not implemented for the typed entry point. It rejects cursor input rather than accepting an unbound cursor.
-Cursor support, custom ID-property spellings, and presentation-option syntax remain outside this first frontend slice.
+Custom ID-property spellings remain outside the frontend.
+
+## Pagination and presentation
+
+`PAGE rows` replaces `LIMIT` and requests keyset pagination: it lowers to the compiler's cursor with that page size, so the response carries `next_cursor` while more rows remain.
+`PAGE rows AFTER 'token'` continues from the previous page's `next_cursor`. Both clauses reuse the JSON DSL's cursor and the shared validation, decoding, seek, and readback passes.
+
+A token binds to its statement through a hash of the query text with the whole `PAGE` clause removed, mirroring the JSON DSL's hash of the query minus `cursor`.
+Changing the page size keeps a token valid; changing anything else in the text, including whitespace or comments, rejects it with the existing "issued for a different query" error.
+JSON and text tokens never validate against each other because their hash sources differ.
+
+`DEBUG` sets the compiler's `include_debug_sql` presentation option and keeps its existing authorization rules.
 
 ## Parity tests
 
@@ -145,7 +158,8 @@ Existing SQL assertions remain in place. Other tests cover syntax rejection, lit
 The YAML query scenarios under `crates/integration-tests/tests/server/data_correctness/scenarios/` run against ClickHouse in CI.
 Each scenario declares its query once per frontend under `query:`, keyed `json` and `gql`, and every frontend present is checked against the same result expectations.
 The runner parses each key into a `Frontend` and passes it to `compiler::compile`.
-A scenario with no text spelling, such as cursor pagination, carries only the `json` key.
+A scenario whose query has no text spelling carries only the `json` key.
+Paginated scenarios end their text query with the `PAGE` clause, and the runner appends `AFTER` with each `next_cursor`.
 
 JSON syntax-error tests remain JSON-only.
 The existing `valid_identifiers_produce_renderable_sql` fixture also remains JSON-only:
