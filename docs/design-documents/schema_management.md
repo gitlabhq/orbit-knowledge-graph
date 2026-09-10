@@ -194,26 +194,40 @@ A background task (`SchemaWatcher`) polls `gkg_schema_version` every
 `schema.version_poll_interval_secs` seconds (default `5`). It builds a replacement snapshot before
 atomically swapping it into the serving slot, leaving the previous snapshot available while the
 replacement is built. It rechecks the active version before installation and discards a candidate
-if that version has changed. Metadata-read errors retain the previous snapshot, including errors
-during the recheck.
+if that version has changed. Every poll checks that the snapshot's expected tables exist, including
+when the active version is unchanged. The expected table names come from the snapshot's ontology.
+Metadata-read errors retain the previous snapshot, including errors during table checks and the
+active-version recheck. A cold reader stays pending until these checks succeed.
 
 Readiness comes from the actual serving slot, not a separate version-comparison flag:
 
 | Watcher result | Snapshot | `/ready` response | Action |
 |---|---|---|---|
 | no active version | cleared | `503` with `schema_pending` | keep polling |
-| usable active archive, older than, equal to, or newer than the binary | installed | `200`, ready | serve traffic |
-| active metadata read fails | unchanged | ready if a snapshot exists, otherwise pending | retry |
+| usable active archive with all expected tables, older than, equal to, or newer than the binary | installed | `200`, ready | serve traffic |
+| an expected table is missing for the confirmed active version | cleared | `503` with `schema_pending` | retry without restart |
+| active-version or table metadata read fails | unchanged | ready if a snapshot exists, otherwise pending | retry |
 | archive load, parse, or ontology construction fails for the confirmed active version | cleared | `503` with `schema_pending` | retry the archive without restart |
 
-An archive failure clears the serving slot only after the watcher confirms that the failed version
-is still active. A changing active version or a metadata-read failure must not let a stale failure
-clear a usable snapshot. A successful read showing no active version clears the slot.
+An archive failure or missing table clears the serving slot only after the watcher confirms that
+the affected version is still active. A changing active version or a metadata-read failure must not
+let a stale failure clear a usable snapshot. A successful read showing no active version clears the
+slot.
 
 `/live` is independent of the watcher. The Webserver has only ready and pending schema states:
 a newer active version does not trigger an outdated-version shutdown, and a `migrating` row does
 not by itself make a usable active snapshot unready. Missing or unusable archives can recover on a
-later poll without a process restart.
+later poll without a process restart, as can missing tables after they are restored.
+
+Table checks use graph-scoped metadata from `system.tables`; validate this visibility with the
+deployed reader role. They detect missing tables but do not guarantee freshness, validate column
+compatibility, or prevent cleanup between polls. Retention must still cover requests pinned to
+older snapshots during replacement.
+
+These checks apply to the new Webserver binary, not to legacy readers already running with an
+outdated-version exit gate. The first rollout still needs verified ordering that replaces those
+readers before schema promotion; a dispatcher-first upgrade can otherwise retain the legacy
+availability gap.
 
 Schema-dependent RPCs return gRPC `Unavailable` while no snapshot exists. This includes graph
 introspection, named-query listing and execution, and schema-dependent tool execution. Static

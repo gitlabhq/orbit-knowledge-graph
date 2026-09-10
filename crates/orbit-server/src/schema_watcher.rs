@@ -5,7 +5,7 @@ use clickhouse_client::ArrowClickHouseClient;
 use ontology::archive::OntologyArchive;
 use opentelemetry::KeyValue;
 use orbit_migrations::catalog::OntologyCatalog;
-use orbit_migrations::version::{read_active_version, table_prefix};
+use orbit_migrations::version::{read_active_version, table_prefix, version_tables_complete};
 use orbit_server_config::{AppConfig, PathResolverConfig};
 use tokio_util::sync::CancellationToken;
 use tonic::Status;
@@ -72,30 +72,41 @@ impl SchemaWatcher {
             *self.current.write().expect("serving schema lock poisoned") = None;
             return Ok(());
         };
-        if self
+        let current = self
             .snapshot()
-            .is_ok_and(|schema| schema.migration_version == active_version)
-        {
-            return Ok(());
-        }
+            .ok()
+            .filter(|schema| schema.migration_version == active_version);
+        let installing_schema = current.is_none();
 
-        let candidate = async {
-            let stored;
-            let archive = if active_version == embedded.schema_version() {
-                embedded
-            } else {
-                stored = catalog.load(active_version).await?;
-                &stored
-            };
-            let ontology = Arc::new(
-                archive
-                    .load_ontology()?
-                    .with_schema_version_prefix(&table_prefix(active_version)),
-            );
-            let resolver = Arc::new(PathResolver::new(graph.clone(), &ontology, path_config).await);
-            ServingSchema::new(active_version, ontology, resolver)
-        }
-        .await;
+        let candidate = if let Some(schema) = current {
+            Ok(schema)
+        } else {
+            async {
+                let stored;
+                let archive = if active_version == embedded.schema_version() {
+                    embedded
+                } else {
+                    stored = catalog.load(active_version).await?;
+                    &stored
+                };
+                let ontology = Arc::new(
+                    archive
+                        .load_ontology()?
+                        .with_schema_version_prefix(&table_prefix(active_version)),
+                );
+                let resolver =
+                    Arc::new(PathResolver::new(graph.clone(), &ontology, path_config).await);
+                ServingSchema::new(active_version, ontology, resolver).map(Arc::new)
+            }
+            .await
+        };
+
+        let tables_complete = match &candidate {
+            Ok(schema) => {
+                version_tables_complete(graph, active_version, &schema.expected_table_names).await?
+            }
+            Err(_) => false,
+        };
 
         let confirmed_version = read_active_version(graph).await?;
         if confirmed_version != Some(active_version) {
@@ -111,11 +122,14 @@ impl SchemaWatcher {
                 return Err(error.context(format!("active ontology v{active_version} unavailable")));
             }
         };
-        *self.current.write().expect("serving schema lock poisoned") = Some(Arc::new(schema));
-        info!(
-            migration_version = active_version,
-            "serving schema installed"
-        );
+        *self.current.write().expect("serving schema lock poisoned") =
+            tables_complete.then_some(schema);
+        if installing_schema && tables_complete {
+            info!(
+                migration_version = active_version,
+                "serving schema installed"
+            );
+        }
         Ok(())
     }
 

@@ -5,13 +5,16 @@ use crate::common::DummyClaims;
 use crate::indexer::common::dispatch::start_nats;
 use axum::body::Body;
 use axum::http::StatusCode;
+use clickhouse_client::ClickHouseConfigurationExt;
 use integration_testkit::TestContext;
 use jsonwebtoken::{EncodingKey, Header, encode};
 use nats_client::{KvPutOptions, NatsClient};
 use ontology::archive::OntologyArchive;
 use orbit_migrations::catalog::{ONTOLOGY_ARCHIVES_BUCKET, OntologyCatalog};
+use orbit_migrations::schema::GraphSchema;
 use orbit_migrations::version::{
     ensure_version_table, mark_version_migrating, mark_version_retired, promote_version,
+    table_prefix,
 };
 use orbit_server::analytics::InMemoryAnalyticsTracker;
 use orbit_server::auth::{Claims, JwtValidator};
@@ -36,6 +39,7 @@ use tower::ServiceExt;
 
 const SECRET: &str = "test-secret-that-is-at-least-32-bytes-long";
 const WAIT_LIMIT: Duration = Duration::from_secs(30);
+const POLL_INTERVAL: Duration = Duration::from_secs(1);
 
 fn archive(version: u32) -> OntologyArchive {
     let mut sources = ontology::migrations::embedded_sources();
@@ -78,6 +82,15 @@ fn authenticated<T>(message: T) -> Request<T> {
     request
 }
 
+async fn probe_status(router: &axum::Router, path: &str) -> StatusCode {
+    router
+        .clone()
+        .oneshot(axum::http::Request::get(path).body(Body::empty()).unwrap())
+        .await
+        .unwrap()
+        .status()
+}
+
 struct ServingFixture {
     database: TestContext,
     catalog: OntologyCatalog,
@@ -98,7 +111,7 @@ impl ServingFixture {
         let (nats, address) = start_nats().await;
         let mut config = AppConfig::embedded_defaults();
         config.graph = database.config.clone();
-        config.schema.version_poll_interval_secs = 1;
+        config.schema.version_poll_interval_secs = POLL_INTERVAL.as_secs();
         config.nats.url = format!("nats://{address}");
         let broker = Arc::new(NatsClient::connect(&config.nats).await.unwrap());
         let catalog = OntologyCatalog::open(broker.clone()).await.unwrap();
@@ -146,19 +159,6 @@ impl ServingFixture {
             _shutdown: shutdown.drop_guard(),
             _nats: nats,
         }
-    }
-
-    async fn ready_status(&self) -> StatusCode {
-        self.router
-            .clone()
-            .oneshot(
-                axum::http::Request::get("/ready")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap()
-            .status()
     }
 
     async fn await_schema(&mut self, version: Option<u32>) {
@@ -236,10 +236,21 @@ impl ServingFixture {
         } else {
             StatusCode::SERVICE_UNAVAILABLE
         };
-        assert_eq!(self.ready_status().await, expected);
+        assert_eq!(probe_status(&self.router, "/ready").await, expected);
     }
 
-    async fn create_projects(&self, version: u32) {
+    async fn create_schema_tables(&self, version: u32) {
+        let ontology = archive(version).load_ontology().unwrap();
+        let schema = GraphSchema::from_ontology(&ontology);
+        for table_name in schema.prefixed_table_names(&table_prefix(version)) {
+            if table_name != format!("v{version}_gl_project") {
+                self.database
+                    .execute(&format!(
+                        "CREATE TABLE {table_name} (id Int64) ENGINE = Memory"
+                    ))
+                    .await;
+            }
+        }
         let description = if version > 1 {
             ", description String DEFAULT 'new property'"
         } else {
@@ -355,7 +366,7 @@ async fn promotion_and_rollback_preserve_in_flight_queries_and_filter_named_quer
     let mut fixture = ServingFixture::start(2, WAIT_LIMIT).await;
     fixture.catalog.publish(&archive(1)).await.unwrap();
     for version in [1, 2] {
-        fixture.create_projects(version).await;
+        fixture.create_schema_tables(version).await;
     }
     let graph = fixture.database.create_client();
     promote_version(&graph, 1).await.unwrap();
@@ -442,6 +453,7 @@ async fn missing_and_corrupt_archives_fail_closed_and_recover_without_restart() 
     let corrupt_archive = bytes::Bytes::from_static(b"corrupt archive");
 
     for (version, corrupt_contents) in [(2, None), (3, Some(corrupt_archive))] {
+        fixture.create_schema_tables(version).await;
         let key = version.to_string();
         if let Some(contents) = corrupt_contents {
             fixture
@@ -483,9 +495,84 @@ async fn missing_and_corrupt_archives_fail_closed_and_recover_without_restart() 
 }
 
 #[tokio::test]
+async fn active_table_loss_and_recovery_gate_warm_and_cold_readers() {
+    let mut fixture = ServingFixture::start(1, WAIT_LIMIT).await;
+    fixture.create_schema_tables(2).await;
+    fixture.catalog.publish(&archive(2)).await.unwrap();
+    promote_version(&fixture.database.create_client(), 2)
+        .await
+        .unwrap();
+    fixture.await_schema(Some(2)).await;
+
+    fixture
+        .database
+        .execute("RENAME TABLE v2_gl_project TO unavailable_project")
+        .await;
+    fixture.await_schema(None).await;
+    assert_eq!(probe_status(&fixture.router, "/live").await, StatusCode::OK);
+
+    let mut config = AppConfig::embedded_defaults();
+    config.schema.version_poll_interval_secs = POLL_INTERVAL.as_secs();
+    config.graph = fixture.database.config.clone();
+    config
+        .graph
+        .session_settings
+        .insert("readonly".into(), "1".into());
+    let reader_client = Arc::new(config.graph.build_client());
+    let cold_readers = [1, 2].map(|embedded_version| {
+        let shutdown = CancellationToken::new();
+        let watcher = SchemaWatcher::spawn(
+            reader_client.clone(),
+            archive(embedded_version),
+            fixture.catalog.clone(),
+            &config,
+            shutdown.clone(),
+        );
+        (create_router(watcher), shutdown.drop_guard())
+    });
+
+    sleep(POLL_INTERVAL * 2).await;
+    for (router, _) in &cold_readers {
+        assert_eq!(
+            probe_status(router, "/ready").await,
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        assert_eq!(probe_status(router, "/live").await, StatusCode::OK);
+    }
+
+    fixture
+        .database
+        .execute("RENAME TABLE unavailable_project TO v2_gl_project")
+        .await;
+    fixture.await_schema(Some(2)).await;
+    for (router, _) in &cold_readers {
+        timeout(WAIT_LIMIT, async {
+            while probe_status(router, "/ready").await != StatusCode::OK {
+                sleep(Duration::from_millis(50)).await;
+            }
+        })
+        .await
+        .expect("a cold reader must become ready when the active tables are restored");
+    }
+
+    let mut query = QueryStream::open(&mut fixture.client, Some(project_query(&["name"]))).await;
+    let authorization = query.receive().await;
+    assert_eq!(
+        query.authorize_and_finish(authorization).await["nodes"][0]["name"],
+        "project v2"
+    );
+    assert!(
+        reader_client
+            .execute("INSERT INTO v2_gl_project (id) VALUES (2)")
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
 async fn metadata_read_failure_keeps_the_last_usable_schema() {
     let mut fixture = ServingFixture::start(1, WAIT_LIMIT).await;
-    fixture.create_projects(1).await;
+    fixture.create_schema_tables(1).await;
     promote_version(&fixture.database.create_client(), 1)
         .await
         .unwrap();
@@ -514,7 +601,10 @@ async fn metadata_read_failure_keeps_the_last_usable_schema() {
     .await
     .expect("watcher must encounter the metadata failure");
 
-    assert_eq!(fixture.ready_status().await, StatusCode::OK);
+    assert_eq!(
+        probe_status(&fixture.router, "/ready").await,
+        StatusCode::OK
+    );
     let mut query = QueryStream::open(&mut fixture.client, Some(project_query(&["name"]))).await;
     let authorization = query.receive().await;
     assert_eq!(
@@ -526,7 +616,7 @@ async fn metadata_read_failure_keeps_the_last_usable_schema() {
 #[tokio::test]
 async fn idle_and_authorization_blocked_streams_time_out_without_query_success() {
     let mut fixture = ServingFixture::start(1, Duration::from_secs(1)).await;
-    fixture.create_projects(1).await;
+    fixture.create_schema_tables(1).await;
     promote_version(&fixture.database.create_client(), 1)
         .await
         .unwrap();
