@@ -28,6 +28,7 @@ use nats_client::KvPutOptions;
 use ontology::archive::OntologyArchive;
 use ontology::migrations::embedded_sources;
 use orbit_migrations::catalog::{ONTOLOGY_ARCHIVES_BUCKET, OntologyCatalog};
+use orbit_migrations::execute;
 use orbit_server_config::NatsConfiguration;
 use serde::Deserialize;
 use testcontainers::ImageExt;
@@ -652,12 +653,74 @@ async fn migration_completion_preserves_state_until_target_archive_is_usable() {
 }
 
 #[tokio::test]
-async fn dispatcher_rejects_missing_active_archive_before_migration() {
+async fn dispatcher_bootstraps_bundled_active_archive_before_migration() {
+    const STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
+    const POLL_INTERVAL: Duration = Duration::from_millis(100);
+
     let context = TestContext::new().await;
+    let graph = context.clickhouse.create_client();
+    let legacy_version = OntologyArchive::bundled_versions()
+        .unwrap()
+        .into_iter()
+        .filter(|version| *version < *SCHEMA_VERSION)
+        .min()
+        .expect("a supported legacy archive must be bundled");
+    let legacy_archive = OntologyArchive::bundled(legacy_version).unwrap().unwrap();
+    let config = dispatcher_config(&context);
+    execute::drop_all_version_entities(&graph, *SCHEMA_VERSION)
+        .await
+        .unwrap();
+    ensure_version_table(&graph).await.unwrap();
+    mark_version_active(&graph, legacy_version).await.unwrap();
+    assert!(matches!(
+        context.catalog.load(legacy_version).await,
+        Err(orbit_migrations::catalog::CatalogError::Missing(_))
+    ));
+
+    let archive = embedded_archive(*SCHEMA_VERSION);
+    let shutdown = CancellationToken::new();
+    let dispatcher = indexer::run_dispatcher(&config, &archive, shutdown.clone());
+    tokio::pin!(dispatcher);
+    let migration_started = tokio::select! {
+        result = &mut dispatcher => panic!("dispatcher exited before migration: {result:?}"),
+        result = tokio::time::timeout(STARTUP_TIMEOUT, async {
+            while read_migrating_version(&graph).await.unwrap() != Some(*SCHEMA_VERSION) {
+                tokio::time::sleep(POLL_INTERVAL).await;
+            }
+        }) => result,
+    };
+    shutdown.cancel();
+    let _shutdown_result = tokio::time::timeout(STARTUP_TIMEOUT, dispatcher)
+        .await
+        .expect("dispatcher must stop after cancellation");
+    migration_started.expect("dispatcher must start migration after bootstrapping the archive");
+
+    assert_eq!(
+        context.catalog.load(legacy_version).await.unwrap().bytes(),
+        legacy_archive.bytes()
+    );
+    assert_eq!(
+        context.catalog.load(*SCHEMA_VERSION).await.unwrap().bytes(),
+        archive.bytes()
+    );
+    assert_eq!(
+        read_active_version(&graph).await.unwrap(),
+        Some(legacy_version)
+    );
+    assert_eq!(
+        read_migrating_version(&graph).await.unwrap(),
+        Some(*SCHEMA_VERSION)
+    );
+}
+
+#[tokio::test]
+async fn dispatcher_rejects_unbundled_missing_active_archive_before_migration() {
+    let context = TestContext::new().await;
+    let unbundled_version = u32::MAX;
 
     let graph = context.clickhouse.create_client();
     ensure_version_table(&graph).await.unwrap();
-    mark_version_active(&graph, *SCHEMA_VERSION - 1)
+    mark_version_active(&graph, unbundled_version)
         .await
         .unwrap();
 
@@ -676,7 +739,7 @@ async fn dispatcher_rejects_missing_active_archive_before_migration() {
     assert!(matches!(
         result,
         Err(DispatcherError::Archive(orbit_migrations::catalog::CatalogError::Missing(version)))
-        if version == *SCHEMA_VERSION - 1
+        if version == unbundled_version
     ));
 
     assert_eq!(
@@ -685,7 +748,7 @@ async fn dispatcher_rejects_missing_active_archive_before_migration() {
     );
     assert_eq!(
         read_active_version(&graph).await.unwrap(),
-        Some(*SCHEMA_VERSION - 1)
+        Some(unbundled_version)
     );
     assert_eq!(read_migrating_version(&graph).await.unwrap(), None);
 }
