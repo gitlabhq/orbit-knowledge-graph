@@ -607,8 +607,8 @@ fn schema_unknown_table_exits_with_error() {
         "expected unknown-table error: {stderr}"
     );
     assert!(
-        stderr.contains("Run `orbit local schema` to list tables"),
-        "expected suggestion to run orbit local schema: {stderr}"
+        stderr.contains("Run `orbit schema` to list tables"),
+        "expected suggestion to run orbit schema: {stderr}"
     );
 }
 
@@ -731,7 +731,7 @@ fn skill_serves_bundled_content() {
     assert!(manifest.contains("name: orbit-local"));
     assert!(manifest.contains("references/sql.md"));
     assert!(
-        manifest.contains("orbit local skill references/sql.md"),
+        manifest.contains("`orbit skill references/sql.md`"),
         "served manifest must tell binary users the version-matched access path"
     );
 
@@ -957,7 +957,7 @@ fn repo_map_reports_unindexed_commit() {
     let out = repo_map(&repo.path, dd, &["overview"]);
     assert!(!out.status.success());
     let err = String::from_utf8(out.stderr).unwrap();
-    assert!(err.contains("is not indexed") && err.contains("orbit local index"));
+    assert!(err.contains("is not indexed") && err.contains("run:  orbit index ."));
 }
 
 /// Two clones at the same commit SHA indexed into one DB must be completely
@@ -1211,6 +1211,52 @@ fn grep_loads_bundled_extension_in_fresh_data_dir() {
         String::from_utf8_lossy(&out.stderr)
     );
     assert!(String::from_utf8_lossy(&out.stdout).contains("read_file"));
+}
+
+#[test]
+fn grep_callers_order_is_stable_across_overloads() {
+    let data_dir = tempfile::TempDir::new().unwrap();
+    let workspace = tempfile::TempDir::new().unwrap();
+    let repo = workspace.path().join("repo");
+    init_repo_at(
+        &repo,
+        &[
+            (
+                "src/Target.java",
+                "public class Target {\n    public Target() {}\n    public void ping() {}\n}\n",
+            ),
+            (
+                "src/Caller.java",
+                concat!(
+                    "public class Caller {\n",
+                    "    public Caller(Target t) { t.ping(); }\n",
+                    "    public Caller(Target t, int n) { t.ping(); }\n",
+                    "    public void run(Target t) { t.ping(); }\n",
+                    "    public void run(Target t, int n) { t.ping(); }\n",
+                    "    public void run(Target t, int n, int m) { t.ping(); }\n",
+                    "}\n",
+                ),
+            ),
+        ],
+    );
+    let dd = data_dir.path();
+    assert!(orbit_index(&repo, dd));
+
+    let repo_arg = repo.to_str().unwrap();
+    for (fqn, section) in [
+        ("Target.ping", "Connections (5):"),
+        ("Target", "Used via members (5)"),
+    ] {
+        let (first, stderr, ok) = run_cmd(&["grep", fqn, "--callers", "--repo", repo_arg], dd);
+        assert!(ok, "grep {fqn} --callers failed: {stderr}");
+        assert!(first.contains(section), "{fqn}: {first}");
+        assert_eq!(first.matches("<-- Caller.Caller ").count(), 2, "{first}");
+        assert_eq!(first.matches("<-- Caller.run ").count(), 3, "{first}");
+        for _ in 0..10 {
+            let (again, _, _) = run_cmd(&["grep", fqn, "--callers", "--repo", repo_arg], dd);
+            assert_eq!(first, again, "grep {fqn} --callers output must be stable");
+        }
+    }
 }
 
 #[test]

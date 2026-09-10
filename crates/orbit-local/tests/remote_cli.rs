@@ -2,6 +2,9 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpListener;
 use std::process::Command;
 use std::thread;
+use std::time::Duration;
+
+const ACCEPT_TIMEOUT: Duration = Duration::from_secs(10);
 
 struct CapturedRequest {
     request_line: String,
@@ -18,7 +21,7 @@ fn serve_once(
     let base_url = format!("http://{addr}");
 
     let handle = thread::spawn(move || {
-        let (mut stream, _) = listener.accept().expect("accept mock connection");
+        let mut stream = accept_within(&listener, ACCEPT_TIMEOUT);
         let mut reader = BufReader::new(stream.try_clone().expect("clone stream"));
 
         let mut request_line = String::new();
@@ -70,6 +73,32 @@ fn serve_once(
     (base_url, handle)
 }
 
+fn accept_within(listener: &TcpListener, timeout: Duration) -> std::net::TcpStream {
+    listener
+        .set_nonblocking(true)
+        .expect("set non-blocking accept");
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        match listener.accept() {
+            Ok((stream, _)) => {
+                stream
+                    .set_nonblocking(false)
+                    .expect("restore blocking stream");
+                return stream;
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "orbit never connected to the mock server within {timeout:?}; \
+                     the CLI most likely rejected the argv before sending a request"
+                );
+                thread::sleep(Duration::from_millis(10));
+            }
+            Err(e) => panic!("accept mock connection: {e}"),
+        }
+    }
+}
+
 fn run_orbit(base_url: &str, args: &[&str]) -> std::process::Output {
     Command::new(env!("CARGO_BIN_EXE_orbit"))
         .args(args)
@@ -82,9 +111,9 @@ fn run_orbit(base_url: &str, args: &[&str]) -> std::process::Output {
 }
 
 #[test]
-fn schema_sends_get_with_expand_and_auth_header() {
+fn ontology_sends_get_with_expand_and_auth_header() {
     let (base_url, handle) = serve_once(r#"{"schema_version":"1"}"#, "application/json");
-    let output = run_orbit(&base_url, &["remote", "schema", "User", "Project"]);
+    let output = run_orbit(&base_url, &["ontology", "User", "Project"]);
     let request = handle.join().expect("join mock");
 
     assert!(
@@ -105,7 +134,7 @@ fn schema_sends_get_with_expand_and_auth_header() {
 #[test]
 fn status_endpoint_is_get_orbit_status() {
     let (base_url, handle) = serve_once(r#"{"status":"healthy"}"#, "application/json");
-    let output = run_orbit(&base_url, &["remote", "status"]);
+    let output = run_orbit(&base_url, &["status"]);
     let request = handle.join().expect("join mock");
 
     assert!(
@@ -117,11 +146,28 @@ fn status_endpoint_is_get_orbit_status() {
 }
 
 #[test]
+fn dsl_endpoint_is_get_orbit_schema_dsl() {
+    let (base_url, handle) = serve_once(r#"{"$schema":"draft"}"#, "application/json");
+    let output = run_orbit(&base_url, &["dsl"]);
+    let request = handle.join().expect("join mock");
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        request.request_line,
+        "GET /api/v4/orbit/schema/dsl HTTP/1.1"
+    );
+}
+
+#[test]
 fn graph_status_sends_full_path_query() {
     let (base_url, handle) = serve_once(r#"{"projects":{"indexed":1}}"#, "application/json");
     let output = run_orbit(
         &base_url,
-        &["remote", "graph-status", "--full-path", "gitlab-org/gitlab"],
+        &["graph-status", "--full-path", "gitlab-org/gitlab"],
     );
     let request = handle.join().expect("join mock");
 
@@ -142,7 +188,7 @@ fn query_posts_envelope_with_resolved_response_format() {
     let output = {
         use std::process::Stdio;
         let mut child = Command::new(env!("CARGO_BIN_EXE_orbit"))
-            .args(["remote", "query", "--response-format", "raw", "-"])
+            .args(["query", "--response-format", "raw", "-"])
             .env("ORBIT_API_BASE_URL", &base_url)
             .env("ORBIT_AUTH_HEADER_NAME", "Private-Token")
             .env("ORBIT_AUTH_HEADER_VALUE", "glpat-test")
@@ -182,7 +228,7 @@ fn http_403_exits_with_code_four() {
     let addr = listener.local_addr().unwrap();
     let base_url = format!("http://{addr}");
     let handle = thread::spawn(move || {
-        let (mut stream, _) = listener.accept().unwrap();
+        let mut stream = accept_within(&listener, ACCEPT_TIMEOUT);
         let mut reader = BufReader::new(stream.try_clone().unwrap());
         let mut line = String::new();
         while reader.read_line(&mut line).unwrap() > 0 {
@@ -199,7 +245,7 @@ fn http_403_exits_with_code_four() {
         stream.write_all(response.as_bytes()).unwrap();
     });
 
-    let output = run_orbit(&base_url, &["remote", "status"]);
+    let output = run_orbit(&base_url, &["status"]);
     handle.join().unwrap();
 
     assert_eq!(output.status.code(), Some(4));

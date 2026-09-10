@@ -15,12 +15,12 @@ Retired engineering abbreviation for Orbit ("GitLab Knowledge Graph"). Still pre
 _Avoid_: using GKG in user-facing contexts
 
 **Orbit Remote**:
-The hosted Orbit service, queried via `glab orbit remote`. Indexes all GitLab.com SDLC and code data; queries are user-scoped and JWT-authenticated.
+The hosted Orbit service. Indexes all GitLab.com SDLC and code data; queries are user-scoped and JWT-authenticated. The `orbit` binary reaches it with the `query`, `status`, `ontology`, `dsl`, `tools`, and `graph-status` verbs; `glab orbit remote` is `glab`'s own client for the same API.
 _Avoid_: "the server", "production GKG"
 
 **Orbit Local**:
-A standalone CLI that indexes a single repository into a local DuckDB database for offline analysis. Managed via `glab orbit local`.
-_Avoid_: "the CLI" (ambiguous — both Remote and Local have CLIs)
+The local backend of the `orbit` binary: indexes a single repository into a DuckDB database for offline analysis, reached with the `index`, `grep`, `context`, `sql`, `schema`, `list`, `repo-map`, and `mcp` verbs. `glab orbit local` installs the binary and forwards commands to it.
+_Avoid_: "the CLI" (ambiguous — one binary serves both backends)
 
 ### Graph model
 

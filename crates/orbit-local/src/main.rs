@@ -150,7 +150,7 @@ struct ErroredFile {
 
 #[derive(Parser)]
 #[command(name = "orbit", version = env!("ORBIT_VERSION"))]
-#[command(about = "Orbit - local code indexing and query CLI")]
+#[command(about = "Orbit - query the local code graph or the remote Orbit API")]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -486,7 +486,7 @@ struct SchemaArgs {
 
     /// Optional table names to scope the output.
     /// When provided, only columns for those tables are shown.
-    /// e.g. `orbit local schema gl_definition gl_edge`
+    /// e.g. `orbit schema gl_definition gl_edge`
     #[arg(value_name = "TABLE")]
     tables: Vec<String>,
 }
@@ -543,21 +543,14 @@ struct RepoMapArgs {
 enum Commands {
     /// Print the version string and exit.
     Version,
-    #[command(hide = true)]
     Index(IndexArgs),
-    #[command(hide = true, alias = "ask")]
     Grep(GrepArgs),
-    #[command(hide = true)]
     Context(ContextArgs),
-    #[command(hide = true)]
     Sql(SqlArgs),
-    #[command(hide = true)]
     Schema(SchemaArgs),
-    #[command(hide = true)]
     List(ListArgs),
-    #[command(hide = true)]
     Mcp(McpArgs),
-    #[command(name = "repo-map", hide = true)]
+    #[command(name = "repo-map")]
     RepoMap(RepoMapArgs),
     #[command(about = descriptions::short("skill"), long_about = SKILL_LONG_ABOUT)]
     Skill {
@@ -572,10 +565,9 @@ enum Commands {
                       instruction file (default) or the project's with `--project`/`--dir`, \
                       telling the assistant to prefer graph queries over grepping raw files, \
                       plus nudge hooks where the platform supports them (Claude Code, \
-                      OpenCode). The guidance points at the remote Orbit graph \
-                      (`glab orbit remote`) unless `--local` is passed. Pre-existing files \
-                      get a one-time `.orbit-backup` sibling before their first modification. \
-                      Re-running updates the section in place; `--remove` uninstalls."
+                      OpenCode). Pre-existing files get a one-time `.orbit-backup` sibling \
+                      before their first modification. Re-running updates the section in \
+                      place; `--remove` uninstalls."
     )]
     Setup {
         /// Assistants to configure. Required when installing; `--remove`
@@ -586,11 +578,6 @@ enum Commands {
         /// Remove the configuration written by `orbit setup`.
         #[arg(long)]
         remove: bool,
-
-        /// Point the guidance at the local graph (queries run through
-        /// `orbit sql`) instead of the remote Orbit graph.
-        #[arg(long, conflicts_with = "remove")]
-        local: bool,
 
         /// Write into the current project instead of the user-global config
         /// files.
@@ -606,80 +593,9 @@ enum Commands {
         #[arg(value_name = "KIND")]
         kind: commands::hook_guard::Kind,
 
-        #[arg(long, default_value = "remote")]
-        mode: commands::setup::spec::Mode,
+        #[arg(long, hide = true, value_name = "MODE")]
+        mode: Option<String>,
     },
-    /// Query the remote Orbit graph over the GitLab API.
-    Remote {
-        #[command(subcommand)]
-        command: RemoteCommands,
-    },
-    /// Operate on the local DuckDB code graph.
-    Local {
-        #[command(subcommand)]
-        command: LocalCommands,
-    },
-    /// Read and write persisted CLI settings (`~/.orbit/settings.json`).
-    Config {
-        #[command(subcommand)]
-        command: ConfigCommands,
-    },
-}
-
-#[derive(Subcommand)]
-enum ConfigCommands {
-    /// Print the saved value of a setting.
-    Get {
-        #[arg(value_name = "KEY")]
-        key: String,
-    },
-    /// Save a setting, such as `telemetry.enabled false`.
-    Set {
-        #[arg(value_name = "KEY")]
-        key: String,
-        #[arg(value_name = "VALUE")]
-        value: String,
-    },
-    /// List all known settings and their saved values.
-    List,
-}
-
-#[derive(Subcommand)]
-enum LocalCommands {
-    Index(IndexArgs),
-    #[command(alias = "ask")]
-    Grep(GrepArgs),
-    Context(ContextArgs),
-    Sql(SqlArgs),
-    Schema(SchemaArgs),
-    List(ListArgs),
-    Mcp(McpArgs),
-    #[command(name = "repo-map")]
-    RepoMap(RepoMapArgs),
-    #[command(about = descriptions::short("skill"), long_about = SKILL_LONG_ABOUT)]
-    Skill {
-        /// Skill file to print, relative to the skill root (default: SKILL.md).
-        #[arg(value_name = "PATH")]
-        path: Option<String>,
-    },
-    #[command(hide = true)]
-    HookGuard {
-        #[arg(value_name = "KIND")]
-        kind: commands::hook_guard::Kind,
-
-        #[arg(long, default_value = "remote")]
-        mode: commands::setup::spec::Mode,
-    },
-}
-
-#[derive(Subcommand, Debug, PartialEq)]
-enum McpCommands {
-    /// Start a stateless MCP server over stdio.
-    Serve,
-}
-
-#[derive(Subcommand)]
-enum RemoteCommands {
     /// POST a query envelope to the remote Orbit API and stream the response.
     Query {
         /// Query body file, or `-`/omitted to read from stdin.
@@ -693,8 +609,8 @@ enum RemoteCommands {
     },
     /// Show Orbit cluster health.
     Status,
-    /// Show the Orbit ontology.
-    Schema {
+    /// Show the remote Orbit ontology.
+    Ontology {
         /// Node names to expand with full properties and edge lists.
         #[arg(value_name = "NODE")]
         nodes: Vec<String>,
@@ -723,6 +639,49 @@ enum RemoteCommands {
         #[arg(long, value_enum)]
         response_format: Option<remote::ResponseFormat>,
     },
+    /// Read and write persisted CLI settings (`~/.orbit/settings.json`).
+    Config {
+        #[command(subcommand)]
+        command: ConfigCommands,
+    },
+}
+
+impl Commands {
+    fn targets_remote(&self) -> bool {
+        matches!(
+            self,
+            Commands::Query { .. }
+                | Commands::Status
+                | Commands::Ontology { .. }
+                | Commands::Dsl
+                | Commands::Tools
+                | Commands::GraphStatus { .. }
+        )
+    }
+}
+
+#[derive(Subcommand)]
+enum ConfigCommands {
+    /// Print the saved value of a setting.
+    Get {
+        #[arg(value_name = "KEY")]
+        key: String,
+    },
+    /// Save a setting, such as `telemetry.enabled false`.
+    Set {
+        #[arg(value_name = "KEY")]
+        key: String,
+        #[arg(value_name = "VALUE")]
+        value: String,
+    },
+    /// List all known settings and their saved values.
+    List,
+}
+
+#[derive(Subcommand, Debug, PartialEq)]
+enum McpCommands {
+    /// Start a stateless MCP server over stdio.
+    Serve,
 }
 
 #[tokio::main]
@@ -732,40 +691,36 @@ async fn main() -> Result<()> {
 
     let coding_agent = telemetry::detect_coding_agent(|key| std::env::var(key).ok());
 
-    let tracker = if matches!(
-        cli.command,
-        Commands::HookGuard { .. }
-            | Commands::Local {
-                command: LocalCommands::HookGuard { .. }
-            }
-    ) {
-        None
-    } else {
-        telemetry::resolve_from_env().build_tracker()
-    };
+    let tracker = telemetry::resolve_from_env().build_tracker();
     if let Some(tracker) = &tracker {
-        telemetry::emit_command_event(tracker, &subcommand_path(&matches), coding_agent.as_deref());
+        telemetry::emit_command_event(
+            tracker,
+            &subcommand_path(&matches),
+            cli.command.targets_remote(),
+            coding_agent.as_deref(),
+        );
         // One event never reaches labkit's batch threshold, so without this the
         // round trip would not start until shutdown.
         tracker.flush();
     }
 
-    let result = dispatch(cli.command, tracker.as_ref()).await;
+    let result = dispatch(cli.command).await;
 
     flush_telemetry(tracker.as_ref()).await;
+    if let Err(err) = &result
+        && let Some(remote) = err.downcast_ref::<remote::error::RemoteError>()
+    {
+        eprintln!("{}", remote.message);
+        std::process::exit(remote.exit_code);
+    }
     result
 }
 
 fn subcommand_path(matches: &clap::ArgMatches) -> String {
-    let Some((top, sub)) = matches.subcommand() else {
-        return String::new();
-    };
-    if matches!(top, "local" | "remote")
-        && let Some((verb, _)) = sub.subcommand()
-    {
-        return format!("{top}_{}", verb.replace('-', "_"));
-    }
-    top.replace('-', "_")
+    matches
+        .subcommand_name()
+        .map(|top| top.replace('-', "_"))
+        .unwrap_or_default()
 }
 
 async fn flush_telemetry(tracker: Option<&orbit_analytics::SnowplowAnalyticsTracker>) {
@@ -778,60 +733,13 @@ async fn flush_telemetry(tracker: Option<&orbit_analytics::SnowplowAnalyticsTrac
     }
 }
 
-async fn dispatch(
-    command: Commands,
-    tracker: Option<&orbit_analytics::SnowplowAnalyticsTracker>,
-) -> Result<()> {
+async fn dispatch(command: Commands) -> Result<()> {
     match command {
         Commands::Version => {
             println!("{}", env!("ORBIT_VERSION"));
             Ok(())
         }
-        Commands::Index(args) => dispatch_local(LocalCommands::Index(args)).await,
-        Commands::Grep(args) => dispatch_local(LocalCommands::Grep(args)).await,
-        Commands::Context(args) => dispatch_local(LocalCommands::Context(args)).await,
-        Commands::Sql(args) => dispatch_local(LocalCommands::Sql(args)).await,
-        Commands::Schema(args) => dispatch_local(LocalCommands::Schema(args)).await,
-        Commands::List(args) => dispatch_local(LocalCommands::List(args)).await,
-        Commands::Mcp(args) => dispatch_local(LocalCommands::Mcp(args)).await,
-        Commands::RepoMap(args) => dispatch_local(LocalCommands::RepoMap(args)).await,
-        Commands::Local { command } => dispatch_local(command).await,
-        Commands::Config { command } => match command {
-            ConfigCommands::Get { key } => commands::config::get(&key),
-            ConfigCommands::Set { key, value } => commands::config::set(&key, &value),
-            ConfigCommands::List => commands::config::list(),
-        },
-        Commands::Skill { path } => skill::run(path),
-        Commands::Setup {
-            assistants,
-            remove,
-            local,
-            project,
-            dir,
-        } => {
-            let mode = if local {
-                commands::setup::spec::Mode::Local
-            } else {
-                commands::setup::spec::Mode::Remote
-            };
-            let target = if project || dir.is_some() {
-                commands::setup::Target::project(dir)?
-            } else {
-                commands::setup::Target::Global
-            };
-            commands::setup::run(assistants, remove, mode, target)
-        }
-        Commands::HookGuard { kind, mode } => {
-            commands::hook_guard::run(kind, mode);
-            Ok(())
-        }
-        Commands::Remote { command } => run_remote(command, tracker).await,
-    }
-}
-
-async fn dispatch_local(command: LocalCommands) -> Result<()> {
-    match command {
-        LocalCommands::Index(IndexArgs {
+        Commands::Index(IndexArgs {
             path,
             threads,
             stats,
@@ -857,7 +765,7 @@ async fn dispatch_local(command: LocalCommands) -> Result<()> {
 
             run_index(path, threads, stats, db).await
         }
-        LocalCommands::Grep(GrepArgs {
+        Commands::Grep(GrepArgs {
             query,
             relations,
             body,
@@ -883,8 +791,8 @@ async fn dispatch_local(command: LocalCommands) -> Result<()> {
                 ),
             }
         }
-        LocalCommands::Context(args) => commands::context::run(args),
-        LocalCommands::Sql(SqlArgs {
+        Commands::Context(args) => commands::context::run(args),
+        Commands::Sql(SqlArgs {
             query,
             file,
             format,
@@ -892,9 +800,9 @@ async fn dispatch_local(command: LocalCommands) -> Result<()> {
             all,
             db,
         }) => sql::run(query, file, format, db, repo, all),
-        LocalCommands::Schema(SchemaArgs { db, raw, tables }) => run_schema(db, raw, tables),
-        LocalCommands::List(ListArgs { format, db }) => list::run(format, db),
-        LocalCommands::Mcp(McpArgs {
+        Commands::Schema(SchemaArgs { db, raw, tables }) => run_schema(db, raw, tables),
+        Commands::List(ListArgs { format, db }) => list::run(format, db),
+        Commands::Mcp(McpArgs {
             command: McpCommands::Serve,
         }) => {
             // Logs must go to stderr only — stdout is the MCP transport.
@@ -909,7 +817,7 @@ async fn dispatch_local(command: LocalCommands) -> Result<()> {
                 .expect("setting default subscriber failed");
             mcp::serve().await
         }
-        LocalCommands::RepoMap(RepoMapArgs {
+        Commands::RepoMap(RepoMapArgs {
             repo,
             extensions,
             db,
@@ -920,41 +828,46 @@ async fn dispatch_local(command: LocalCommands) -> Result<()> {
             db,
             command.unwrap_or(commands::repo_map::RepoMapCommand::Overview),
         ),
-        LocalCommands::Skill { path } => skill::run(path),
-        LocalCommands::HookGuard { kind, mode } => {
-            commands::hook_guard::run(kind, mode);
+        Commands::Config { command } => match command {
+            ConfigCommands::Get { key } => commands::config::get(&key),
+            ConfigCommands::Set { key, value } => commands::config::set(&key, &value),
+            ConfigCommands::List => commands::config::list(),
+        },
+        Commands::Skill { path } => skill::run(path),
+        Commands::Setup {
+            assistants,
+            remove,
+            project,
+            dir,
+        } => {
+            let target = if project || dir.is_some() {
+                commands::setup::Target::project(dir)?
+            } else {
+                commands::setup::Target::Global
+            };
+            commands::setup::run(assistants, remove, target)
+        }
+        Commands::HookGuard { kind, mode: _ } => {
+            commands::hook_guard::run(kind);
             Ok(())
         }
-    }
-}
-
-async fn run_remote(
-    command: RemoteCommands,
-    tracker: Option<&orbit_analytics::SnowplowAnalyticsTracker>,
-) -> Result<()> {
-    let result = match command {
-        RemoteCommands::Query {
+        Commands::Query {
             source,
             response_format,
-        } => remote::run_query(source, response_format).await,
-        RemoteCommands::Status => remote::run_status().await,
-        RemoteCommands::Schema { nodes } => remote::run_schema(nodes).await,
-        RemoteCommands::Dsl => remote::run_dsl().await,
-        RemoteCommands::Tools => remote::run_tools().await,
-        RemoteCommands::GraphStatus {
+        } => Ok(remote::run_query(source, response_format).await?),
+        Commands::Status => Ok(remote::run_status().await?),
+        Commands::Ontology { nodes } => Ok(remote::run_ontology(nodes).await?),
+        Commands::Dsl => Ok(remote::run_dsl().await?),
+        Commands::Tools => Ok(remote::run_tools().await?),
+        Commands::GraphStatus {
             full_path,
             namespace_id,
             project_id,
             response_format,
-        } => remote::run_graph_status(full_path, namespace_id, project_id, response_format).await,
-    };
-
-    if let Err(err) = result {
-        eprintln!("{}", err.message);
-        flush_telemetry(tracker).await;
-        std::process::exit(err.exit_code);
+        } => Ok(
+            remote::run_graph_status(full_path, namespace_id, project_id, response_format).await?,
+        ),
     }
-    Ok(())
 }
 
 fn run_schema(db: Option<PathBuf>, raw: bool, tables: Vec<String>) -> Result<()> {
@@ -1365,7 +1278,7 @@ fn build_index_output(
 
 #[cfg(test)]
 mod tests {
-    use super::{Cli, Commands, IndexArgs, LocalCommands, SchemaArgs, fatal_pipeline_reason};
+    use super::{Cli, Commands, IndexArgs, SchemaArgs, fatal_pipeline_reason};
     use clap::{CommandFactory, Parser};
     use code_graph::v2::pipeline::PipelineError;
 
@@ -1382,41 +1295,50 @@ mod tests {
     }
 
     #[test]
-    fn subcommand_path_names_command_and_namespace_verb() {
+    fn subcommand_path_names_the_top_level_verb() {
         assert_eq!(action_for(&["orbit", "version"]), "version");
-        assert_eq!(action_for(&["orbit", "remote", "query"]), "remote_query");
+        assert_eq!(action_for(&["orbit", "query"]), "query");
         assert_eq!(
-            action_for(&["orbit", "remote", "graph-status", "--full-path", "a/b"]),
-            "remote_graph_status"
+            action_for(&["orbit", "graph-status", "--full-path", "a/b"]),
+            "graph_status"
         );
-        assert_eq!(
-            action_for(&["orbit", "local", "sql", "SELECT 1"]),
-            "local_sql"
-        );
+        assert_eq!(action_for(&["orbit", "sql", "SELECT 1"]), "sql");
         assert_eq!(action_for(&["orbit", "config", "set", "k", "v"]), "config");
         assert_eq!(action_for(&["orbit", "repo-map", "tree"]), "repo_map");
         assert_eq!(action_for(&["orbit", "mcp", "serve"]), "mcp");
     }
 
     #[test]
-    fn local_index_and_top_level_index_parse_to_same_args() {
-        let grouped = Cli::parse_from(["orbit", "local", "index", "/tmp/repo", "--threads", "4"]);
-        let top_level = Cli::parse_from(["orbit", "index", "/tmp/repo", "--threads", "4"]);
+    fn only_remote_api_verbs_target_remote() {
+        for argv in [
+            ["orbit", "query"].as_slice(),
+            &["orbit", "status"],
+            &["orbit", "ontology", "User"],
+            &["orbit", "dsl"],
+            &["orbit", "tools"],
+            &["orbit", "graph-status", "--project-id", "1"],
+        ] {
+            assert!(Cli::parse_from(argv).command.targets_remote(), "{argv:?}");
+        }
+        for argv in [
+            ["orbit", "grep", "x"].as_slice(),
+            &["orbit", "schema"],
+            &["orbit", "sql", "SELECT 1"],
+            &["orbit", "version"],
+        ] {
+            assert!(!Cli::parse_from(argv).command.targets_remote(), "{argv:?}");
+        }
+    }
 
-        let grouped_args = match grouped.command {
-            Commands::Local {
-                command: LocalCommands::Index(args),
-            } => args,
-            _ => panic!("expected local index command"),
+    #[test]
+    fn former_local_and_remote_verbs_parse_at_top_level() {
+        let Commands::Index(index) =
+            Cli::parse_from(["orbit", "index", "/tmp/repo", "--threads", "4"]).command
+        else {
+            panic!("expected index");
         };
-        let top_level_args = match top_level.command {
-            Commands::Index(args) => args,
-            _ => panic!("expected top-level index command"),
-        };
-
-        assert_eq!(grouped_args, top_level_args);
         assert_eq!(
-            grouped_args,
+            index,
             IndexArgs {
                 path: "/tmp/repo".into(),
                 threads: 4,
@@ -1425,136 +1347,105 @@ mod tests {
                 db: None,
             }
         );
-    }
 
-    #[test]
-    fn local_schema_and_top_level_schema_parse_to_same_args() {
-        let grouped = Cli::parse_from(["orbit", "local", "schema", "gl_edge", "--raw"]);
-        let top_level = Cli::parse_from(["orbit", "schema", "gl_edge", "--raw"]);
-
-        let grouped_args = match grouped.command {
-            Commands::Local {
-                command: LocalCommands::Schema(args),
-            } => args,
-            _ => panic!("expected local schema command"),
+        let Commands::Schema(schema) =
+            Cli::parse_from(["orbit", "schema", "gl_edge", "--raw"]).command
+        else {
+            panic!("expected schema");
         };
-        let top_level_args = match top_level.command {
-            Commands::Schema(args) => args,
-            _ => panic!("expected top-level schema command"),
-        };
-
-        assert_eq!(grouped_args, top_level_args);
         assert_eq!(
-            grouped_args,
+            schema,
             SchemaArgs {
                 db: None,
                 raw: true,
                 tables: vec!["gl_edge".to_string()],
             }
         );
-    }
 
-    #[test]
-    fn local_grep_and_top_level_grep_parse_to_same_args() {
-        let grouped = Cli::parse_from(["orbit", "local", "grep", "who calls this", "--limit", "5"]);
-        let top_level = Cli::parse_from(["orbit", "grep", "who calls this", "--limit", "5"]);
-        let grouped_args = match grouped.command {
-            Commands::Local {
-                command: LocalCommands::Grep(args),
-            } => args,
-            _ => panic!("expected local grep command"),
-        };
-        let top_level_args = match top_level.command {
-            Commands::Grep(args) => args,
-            _ => panic!("expected top-level grep command"),
-        };
-        assert_eq!(grouped_args, top_level_args);
-    }
+        assert!(matches!(
+            Cli::parse_from(["orbit", "grep", "who calls this", "--limit", "5"]).command,
+            Commands::Grep(_)
+        ));
+        assert!(matches!(
+            Cli::parse_from(["orbit", "sql", "SELECT 1"]).command,
+            Commands::Sql(_)
+        ));
+        assert!(matches!(
+            Cli::parse_from(["orbit", "list"]).command,
+            Commands::List(_)
+        ));
+        assert!(matches!(
+            Cli::parse_from(["orbit", "mcp", "serve"]).command,
+            Commands::Mcp(_)
+        ));
+        assert!(matches!(
+            Cli::parse_from(["orbit", "repo-map", "overview"]).command,
+            Commands::RepoMap(_)
+        ));
+        assert!(matches!(
+            Cli::parse_from(["orbit", "context", "a::b"]).command,
+            Commands::Context(_)
+        ));
 
-    #[test]
-    fn ask_alias_still_parses_to_grep() {
+        let Commands::Ontology { nodes } =
+            Cli::parse_from(["orbit", "ontology", "User", "Project"]).command
+        else {
+            panic!("expected ontology");
+        };
+        assert_eq!(nodes, vec!["User".to_string(), "Project".to_string()]);
+        let Commands::Query {
+            source,
+            response_format,
+        } = Cli::parse_from(["orbit", "query", "--response-format", "raw", "-"]).command
+        else {
+            panic!("expected query");
+        };
+        assert_eq!(source.as_deref(), Some("-"));
+        assert_eq!(response_format, Some(super::remote::ResponseFormat::Raw));
+        assert!(matches!(
+            Cli::parse_from(["orbit", "status"]).command,
+            Commands::Status
+        ));
+        assert!(matches!(
+            Cli::parse_from(["orbit", "dsl"]).command,
+            Commands::Dsl
+        ));
+        assert!(matches!(
+            Cli::parse_from(["orbit", "tools"]).command,
+            Commands::Tools
+        ));
+        let Commands::GraphStatus { full_path, .. } =
+            Cli::parse_from(["orbit", "graph-status", "--full-path", "a/b"]).command
+        else {
+            panic!("expected graph-status");
+        };
+        assert_eq!(full_path.as_deref(), Some("a/b"));
+
         for argv in [
-            ["orbit", "ask", "who calls this"].as_slice(),
-            ["orbit", "local", "ask", "who calls this"].as_slice(),
+            ["orbit", "local", "grep", "x"].as_slice(),
+            &["orbit", "remote", "status"],
+            &["orbit", "ask", "x"],
+            &["orbit", "setup", "claude", "--local"],
         ] {
-            let cli = Cli::parse_from(argv);
-            let is_grep = matches!(
-                cli.command,
-                Commands::Grep(_)
-                    | Commands::Local {
-                        command: LocalCommands::Grep(_),
-                    }
+            assert!(
+                Cli::try_parse_from(argv).is_err(),
+                "{argv:?} must be rejected"
             );
-            assert!(is_grep, "{argv:?} must resolve to the grep command");
         }
     }
 
     #[test]
-    fn local_sql_and_top_level_sql_parse_to_same_args() {
-        let grouped = Cli::parse_from(["orbit", "local", "sql", "SELECT 1"]);
-        let top_level = Cli::parse_from(["orbit", "sql", "SELECT 1"]);
-        let grouped_args = match grouped.command {
-            Commands::Local {
-                command: LocalCommands::Sql(args),
-            } => args,
-            _ => panic!("expected local sql command"),
-        };
-        let top_level_args = match top_level.command {
-            Commands::Sql(args) => args,
-            _ => panic!("expected top-level sql command"),
-        };
-        assert_eq!(grouped_args, top_level_args);
-    }
-
-    #[test]
-    fn local_list_and_top_level_list_parse_to_same_args() {
-        let grouped = Cli::parse_from(["orbit", "local", "list"]);
-        let top_level = Cli::parse_from(["orbit", "list"]);
-        let grouped_args = match grouped.command {
-            Commands::Local {
-                command: LocalCommands::List(args),
-            } => args,
-            _ => panic!("expected local list command"),
-        };
-        let top_level_args = match top_level.command {
-            Commands::List(args) => args,
-            _ => panic!("expected top-level list command"),
-        };
-        assert_eq!(grouped_args, top_level_args);
-    }
-
-    #[test]
-    fn local_mcp_and_top_level_mcp_parse_to_same_args() {
-        let grouped = Cli::parse_from(["orbit", "local", "mcp", "serve"]);
-        let top_level = Cli::parse_from(["orbit", "mcp", "serve"]);
-        let grouped_args = match grouped.command {
-            Commands::Local {
-                command: LocalCommands::Mcp(args),
-            } => args,
-            _ => panic!("expected local mcp command"),
-        };
-        let top_level_args = match top_level.command {
-            Commands::Mcp(args) => args,
-            _ => panic!("expected top-level mcp command"),
-        };
-        assert_eq!(grouped_args, top_level_args);
-    }
-
-    #[test]
-    fn local_repo_map_and_top_level_repo_map_parse_to_same_args() {
-        let grouped = Cli::parse_from(["orbit", "local", "repo-map", "overview"]);
-        let top_level = Cli::parse_from(["orbit", "repo-map", "overview"]);
-        let grouped_args = match grouped.command {
-            Commands::Local {
-                command: LocalCommands::RepoMap(args),
-            } => args,
-            _ => panic!("expected local repo-map command"),
-        };
-        let top_level_args = match top_level.command {
-            Commands::RepoMap(args) => args,
-            _ => panic!("expected top-level repo-map command"),
-        };
-        assert_eq!(grouped_args, top_level_args);
+    fn hook_guard_ignores_the_legacy_mode_flag() {
+        for argv in [
+            ["orbit", "hook-guard", "search"].as_slice(),
+            &["orbit", "hook-guard", "search", "--mode", "remote"],
+            &["orbit", "hook-guard", "read", "--mode", "local"],
+        ] {
+            assert!(
+                matches!(Cli::parse_from(argv).command, Commands::HookGuard { .. }),
+                "{argv:?}"
+            );
+        }
     }
 
     fn err(stage: &'static str, msg: &str, fatal: bool) -> PipelineError {
