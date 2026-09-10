@@ -23,51 +23,46 @@ fixtures:
       const helper = () => "help";
 
 tests:
-  - name: Function definition exists
+  - name: Exactly 6 top-level definitions with correct types
     query: |
       MATCH (d:Definition)
-      WHERE d.name = 'greet' AND d.definition_type = 'Function'
-      RETURN d.fqn AS fqn, d.file_path AS file
+      WHERE d.file_path = 'main.ts'
+        AND d.definition_type IN ['Function', 'Class', 'Interface', 'TypeAlias', 'Enum']
+      RETURN d.name AS name, d.definition_type AS type
+      ORDER BY name
     assert:
-      - { row_count: 1 }
-      - { row: { fqn: "main.greet", file: "main.ts" } }
+      - { row_count: 6 }
+      - { unique: name }
+      - { no_nulls: name }
+      - { row: { name: "Animal", type: "Class" } }
+      - { row: { name: "Color", type: "Enum" } }
+      - { row: { name: "Point", type: "TypeAlias" } }
+      - { row: { name: "Shape", type: "Interface" } }
+      - { row: { name: "greet", type: "Function" } }
+      - { row: { name: "helper", type: "Function" } }
 
-  - name: Class definition exists
-    query: |
-      MATCH (d:Definition)
-      WHERE d.name = 'Animal' AND d.definition_type = 'Class'
-      RETURN d.fqn AS fqn
-    assert:
-      - { row_count: 1 }
-
-  - name: Interface definition exists
-    query: |
-      MATCH (d:Definition)
-      WHERE d.name = 'Shape' AND d.definition_type = 'Interface'
-      RETURN d.fqn AS fqn
-    assert:
-      - { row_count: 1 }
-
-  - name: TypeAlias definition exists
-    query: |
-      MATCH (d:Definition)
-      WHERE d.name = 'Point' AND d.definition_type = 'TypeAlias'
-      RETURN d.fqn AS fqn
-    assert:
-      - { row_count: 1 }
-
-  - name: Enum definition exists
-    query: |
-      MATCH (d:Definition)
-      WHERE d.name = 'Color' AND d.definition_type = 'Enum'
-      RETURN d.fqn AS fqn
-    assert:
-      - { row_count: 1 }
-
-  - name: Method is nested inside class
+  - name: speak is a Method nested inside Animal
     query: |
       MATCH (cls:Definition)-[e:DefinitionToDefinition]->(m:Definition)
-      WHERE cls.name = 'Animal' AND m.name = 'speak' AND e.edge_kind = 'Defines'
-      RETURN cls.fqn AS cls, m.fqn AS method
+      WHERE cls.name = 'Animal' AND e.edge_kind = 'Defines'
+      RETURN m.name AS method, m.definition_type AS type
     assert:
       - { row_count: 1 }
+      - { row: { method: "speak", type: "Method" } }
+
+  - name: No spurious definitions (no blank names, no duplicates)
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'main.ts' AND (d.name IS NULL OR d.name = '')
+      RETURN count(d) AS n
+    assert:
+      - { row_count: 1 }
+      - { row: { n: 0 } }
+
+  - name: Exactly 1 TypeScript file
+    query: |
+      MATCH (f:File)
+      RETURN f.path AS path, f.language AS lang
+    assert:
+      - { row_count: 1 }
+      - { row: { path: "main.ts", lang: "typescript" } }

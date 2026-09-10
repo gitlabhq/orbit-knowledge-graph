@@ -1,15 +1,15 @@
-name: "TypeScript: simple function call"
-pipeline: typescript
+name: "Rust: simple function call"
+pipeline: rust
 fixtures:
-  - path: main.ts
+  - path: main.rs
     content: |
-      function helper(): string {
-          return "help";
+      fn helper() -> i32 {
+          42
       }
 
-      function unused(): void {}
+      fn unused() {}
 
-      function run(): void {
+      fn run() {
           helper();
       }
 
@@ -17,8 +17,7 @@ tests:
   - name: Exactly 3 definitions with correct types
     query: |
       MATCH (d:Definition)
-      WHERE d.file_path = 'main.ts'
-        AND d.definition_type = 'Function'
+      WHERE d.file_path = 'main.rs' AND d.definition_type = 'Function'
       RETURN d.name AS name, d.fqn AS fqn
       ORDER BY name
     assert:
@@ -46,3 +45,11 @@ tests:
       RETURN caller.fqn AS caller
     assert:
       - { empty: true }
+
+  - name: No imports in single-file fixture
+    query: |
+      MATCH (i:ImportedSymbol)
+      RETURN count(i) AS n
+    assert:
+      - { row_count: 1 }
+      - { row: { n: 0 } }

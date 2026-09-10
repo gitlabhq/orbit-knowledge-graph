@@ -1,0 +1,70 @@
+name: "Rust: impl methods and self calls"
+pipeline: rust
+fixtures:
+  - path: main.rs
+    content: |
+      struct Dog {
+          sound: String,
+      }
+
+      impl Dog {
+          fn new() -> Self {
+              Dog { sound: "woof".into() }
+          }
+
+          fn speak(&self) -> &str {
+              &self.sound
+          }
+
+          fn greet(&self) -> String {
+              let s = self.speak();
+              format!("Dog says: {s}")
+          }
+      }
+
+      fn main() {
+          let d = Dog::new();
+          d.speak();
+      }
+
+tests:
+  - name: Struct, impl, and all methods exist
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'main.rs'
+        AND d.definition_type IN ['Struct', 'Function', 'Method', 'Impl']
+      RETURN d.name AS name, d.definition_type AS type
+      ORDER BY name
+    assert:
+      - { no_nulls: name }
+      - { row: { name: "Dog", type: "Struct" } }
+      - { row: { name: "greet", type: "Method" } }
+      - { row: { name: "main", type: "Function" } }
+      - { row: { name: "new", type: "Method" } }
+      - { row: { name: "speak", type: "Method" } }
+
+  - name: Methods are nested under impl via Defines
+    query: |
+      MATCH (parent:Definition)-[e:DefinitionToDefinition]->(child:Definition)
+      WHERE e.edge_kind = 'Defines' AND child.name IN ['new', 'speak', 'greet']
+      RETURN child.name AS method
+      ORDER BY method
+    assert:
+      - { row_count: 3 }
+      - { column_values: { field: method, values: ["greet", "new", "speak"] } }
+
+  - name: self.speak() resolves within impl
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'greet' AND callee.name = 'speak' AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+
+  - name: No spurious call edges from the struct itself
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'Dog' AND e.edge_kind = 'Calls'
+      RETURN callee.name AS callee
+    assert:
+      - { empty: true }
