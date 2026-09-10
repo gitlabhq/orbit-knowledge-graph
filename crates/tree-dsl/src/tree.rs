@@ -1,6 +1,35 @@
 use std::cell::RefCell;
 
-use crate::lang::{DEAD, NAMED, NONE};
+pub const NONE: u32 = u32::MAX;
+pub const SYNTH: u16 = 0x8000;
+pub const DEAD: u16 = 1 << 0;
+pub const NAMED: u16 = 1 << 1;
+
+#[repr(u16)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EdgeKind {
+    Calls = 1,
+    Defines = 2,
+    Imports = 3,
+    TypeRef = 4,
+}
+
+impl EdgeKind {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Calls => "Calls",
+            Self::Defines => "Defines",
+            Self::Imports => "Imports",
+            Self::TypeRef => "TypeRef",
+        }
+    }
+}
+
+impl std::fmt::Display for EdgeKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.name())
+    }
+}
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Node {
@@ -14,11 +43,26 @@ pub struct Node {
     pub end: u32,
 }
 
+impl Node {
+    pub fn is_dead(&self) -> bool {
+        self.flags & DEAD != 0
+    }
+    pub fn is_named(&self) -> bool {
+        self.flags & NAMED != 0
+    }
+    pub fn is_synth(&self) -> bool {
+        self.kind & SYNTH != 0
+    }
+    pub fn base_kind(&self) -> u16 {
+        self.kind & !SYNTH
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct Edge {
     pub from: u32,
     pub to: u32,
-    pub kind: u16,
+    pub kind: EdgeKind,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -26,7 +70,7 @@ pub struct Link {
     pub from: u32,
     pub to_file: usize,
     pub to_node: u32,
-    pub kind: u16,
+    pub kind: EdgeKind,
     pub name: u32,
 }
 
@@ -233,8 +277,8 @@ impl Tree {
         self.find(i, axis, m).is_some()
     }
 
-    pub fn add_edge(&mut self, from: u32, to: u32, kind: u16) {
-        if kind == crate::lang::E_CALLS
+    pub fn add_edge(&mut self, from: u32, to: u32, kind: EdgeKind) {
+        if kind == EdgeKind::Calls
             || !self
                 .edges
                 .iter()

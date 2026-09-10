@@ -4,7 +4,7 @@ use std::time::Instant;
 use clap::{Parser, Subcommand};
 
 use tree_dsl::grammar::SupportLang;
-use tree_dsl::lang::{E_CALLS, E_DEFINES, E_IMPORTS, E_TYPE_REF, NAMED, SYNTH};
+use tree_dsl::tree::{EdgeKind, NAMED, SYNTH};
 
 #[derive(Parser)]
 #[command(name = "tree-dsl", about = "Code indexing CLI")]
@@ -212,14 +212,8 @@ fn node_label(tree: &tree_dsl::tree::Tree, lang: &tree_dsl::lang::Lang, node: u3
     }
 }
 
-fn edge_name(kind: u16) -> &'static str {
-    match kind {
-        E_CALLS => "Calls",
-        E_DEFINES => "Defines",
-        E_IMPORTS => "Imports",
-        E_TYPE_REF => "TypeRef",
-        _ => "?",
-    }
+fn edge_name(kind: EdgeKind) -> &'static str {
+    kind.name()
 }
 
 // ── index ──

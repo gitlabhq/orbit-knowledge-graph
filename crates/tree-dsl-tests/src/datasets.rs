@@ -6,7 +6,8 @@ use arrow_56::datatypes::{DataType, Field, Schema};
 use arrow_56::record_batch::RecordBatch;
 
 use tree_dsl::grammar::SupportLang;
-use tree_dsl::lang::{Lang, SYNTH};
+use tree_dsl::lang::Lang;
+use tree_dsl::tree::SYNTH;
 use tree_dsl::tree::Tree;
 
 pub type LanceDatasets = HashMap<String, RecordBatch>;
@@ -81,7 +82,7 @@ fn assign_ids(trees: &[Tree], lang: &Lang, sk: &Sk) -> IdMaps {
             modules.insert(fi, next_mod);
         }
         for (i, n) in tree.nodes.iter().enumerate() {
-            if n.flags & tree_dsl::lang::DEAD != 0 {
+            if n.flags & tree_dsl::tree::DEAD != 0 {
                 continue;
             }
             let node = i as u32;
@@ -570,7 +571,7 @@ fn build_file_edges(
         }
         for edge in &tree.edges {
             if edge.from == 0
-                && edge.kind == tree_dsl::lang::E_CALLS
+                && edge.kind == tree_dsl::tree::EdgeKind::Calls
                 && let Some(&tid) = ids.defs.get(&(fi, edge.to))
             {
                 ds.append_value(fid);
@@ -595,8 +596,8 @@ fn build_def2def(
     for (fi, tree) in trees.iter().enumerate() {
         for edge in &tree.edges {
             let label = match edge.kind {
-                tree_dsl::lang::E_CALLS => "Calls",
-                tree_dsl::lang::E_DEFINES => "Defines",
+                tree_dsl::tree::EdgeKind::Calls => "Calls",
+                tree_dsl::tree::EdgeKind::Defines => "Defines",
                 _ => continue,
             };
             if let (Some(&from), Some(&to)) =
@@ -611,8 +612,8 @@ fn build_def2def(
     let mut cross_seen = std::collections::HashSet::new();
     for ce in cross_edges {
         let label = match ce.kind {
-            tree_dsl::lang::E_CALLS => "Calls",
-            tree_dsl::lang::E_DEFINES => "Defines",
+            tree_dsl::tree::EdgeKind::Calls => "Calls",
+            tree_dsl::tree::EdgeKind::Defines => "Defines",
             _ => continue,
         };
         if let (Some(&from), Some(&to)) = (
@@ -642,12 +643,12 @@ fn build_def2imp(
     );
     let resolved: std::collections::HashSet<(usize, u32)> = cross_edges
         .iter()
-        .filter(|ce| ce.kind == tree_dsl::lang::E_CALLS)
+        .filter(|ce| ce.kind == tree_dsl::tree::EdgeKind::Calls)
         .map(|ce| (ce.from_file, ce.from_node))
         .collect();
     for (fi, tree) in trees.iter().enumerate() {
         for edge in &tree.edges {
-            if edge.kind != tree_dsl::lang::E_IMPORTS {
+            if edge.kind != tree_dsl::tree::EdgeKind::Imports {
                 continue;
             }
             if resolved.contains(&(fi, edge.from)) {
@@ -685,7 +686,7 @@ fn build_imp2def(
         StringBuilder::new(),
     );
     for ce in cross_edges {
-        if ce.kind != tree_dsl::lang::E_IMPORTS {
+        if ce.kind != tree_dsl::tree::EdgeKind::Imports {
             continue;
         }
         let Some(&target_id) = ids.defs.get(&(ce.to_file, ce.to_node)) else {
@@ -702,7 +703,7 @@ fn build_imp2def(
         }
         // Also check if any intra-file E_IMPORTS edges point to this import
         for edge in &trees[ce.from_file].edges {
-            if edge.kind != tree_dsl::lang::E_IMPORTS || edge.to != ce.from_node {
+            if edge.kind != tree_dsl::tree::EdgeKind::Imports || edge.to != ce.from_node {
                 continue;
             };
             if let Some(iids) = ids.imports.get(&(ce.from_file, edge.to)) {

@@ -133,7 +133,7 @@ pub fn load_lang(
 
 fn compile_resolve(section: &ResolveSection, lang: &mut Lang) -> crate::file_tree::ResolveConfig {
     use crate::file_tree::ResolveStage;
-    use crate::lang::SYNTH;
+    use crate::tree::SYNTH;
 
     let stages = section
         .stages

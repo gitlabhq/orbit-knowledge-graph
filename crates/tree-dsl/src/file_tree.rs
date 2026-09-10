@@ -3,9 +3,9 @@
 
 use rustc_hash::FxHashMap;
 
-use crate::lang::{Lang, NAMED, NONE, SYNTH};
+use crate::lang::Lang;
 use crate::pattern::{self, Rewrite};
-use crate::tree::{Node, Tree};
+use crate::tree::{NAMED, NONE, Node, SYNTH, Tree};
 
 /// Result of walking the file tree.
 pub struct WalkResult {

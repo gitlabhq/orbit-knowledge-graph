@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
-use crate::lang::{Lang, NAMED, NONE};
+use crate::lang::Lang;
+use crate::tree::{NAMED, NONE};
 use crate::tree::{Node, Tree, copy_subtree, elems, live};
 
 #[derive(Clone)]
@@ -645,7 +646,7 @@ pub fn apply_rewrites(t: &mut Tree, lang: &mut Lang, rules: &[Rewrite]) -> Vec<u
     let mut caps = vec![(0u32, 0u32); rules.iter().map(|r| r.nslots).max().unwrap_or(1)];
     let (mut edits, mut buf) = (Vec::new(), Vec::new());
     for i in 0..t.nodes.len() as u32 {
-        if t.nodes[i as usize].flags & crate::lang::DEAD != 0 {
+        if t.nodes[i as usize].flags & crate::tree::DEAD != 0 {
             continue;
         }
         for r in rules {

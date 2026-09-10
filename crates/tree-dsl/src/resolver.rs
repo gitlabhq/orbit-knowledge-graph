@@ -6,15 +6,15 @@
 use rustc_hash::FxHashMap;
 
 use crate::grammar::SupportLang;
-use crate::lang::{E_IMPORTS, Lang, SYNTH};
-use crate::tree::Tree;
+use crate::lang::Lang;
+use crate::tree::{EdgeKind, NONE, SYNTH, Tree};
 
 pub struct CrossEdge {
     pub from_file: usize,
     pub from_node: u32,
     pub to_file: usize,
     pub to_node: u32,
-    pub kind: u16,
+    pub kind: EdgeKind,
 }
 
 pub struct ResolveResult {
@@ -64,7 +64,7 @@ pub fn resolve(
     for tree in trees.iter() {
         let mut names: FxHashMap<u32, u32> = FxHashMap::default();
         for (i, n) in tree.nodes.iter().enumerate() {
-            if n.flags & crate::lang::DEAD != 0 {
+            if n.flags & crate::tree::DEAD != 0 {
                 continue;
             }
             if !tree.children(i as u32).any(|c| tree.kind(c) == k_deftype) {
@@ -163,7 +163,7 @@ pub fn resolve(
                             from_node: i as u32,
                             to_file: sub_fi,
                             to_node: 0,
-                            kind: E_IMPORTS,
+                            kind: EdgeKind::Imports,
                         });
                         reqs.push(ImportReq {
                             fi,
@@ -289,7 +289,7 @@ pub fn resolve(
                         from_node: i,
                         to_file: real_fi,
                         to_node: real_node,
-                        kind: E_IMPORTS,
+                        kind: EdgeKind::Imports,
                     });
                 }
                 continue;
@@ -305,7 +305,7 @@ pub fn resolve(
                     from_node: i,
                     to_file: re_fi,
                     to_node: re_node,
-                    kind: E_IMPORTS,
+                    kind: EdgeKind::Imports,
                 });
                 continue;
             }
@@ -315,7 +315,7 @@ pub fn resolve(
                     from_node: i,
                     to_file: tfi,
                     to_node: def_node,
-                    kind: E_IMPORTS,
+                    kind: EdgeKind::Imports,
                 });
                 continue;
             }
@@ -333,7 +333,7 @@ pub fn resolve(
                     from_node: i,
                     to_file: def_fi,
                     to_node: def_node,
-                    kind: E_IMPORTS,
+                    kind: EdgeKind::Imports,
                 });
                 continue;
             }
@@ -352,7 +352,7 @@ pub fn resolve(
                         from_node: i,
                         to_file: sub_fi,
                         to_node: 0,
-                        kind: E_IMPORTS,
+                        kind: EdgeKind::Imports,
                     });
                 }
             }
@@ -377,7 +377,7 @@ pub fn resolve(
         // plus any submodule files resolved via cross-edges.
         let mut target_files = vec![req.target_fi];
         for ce in &cross_edges {
-            if ce.from_file == fi && ce.from_node == import_node && ce.kind == E_IMPORTS {
+            if ce.from_file == fi && ce.from_node == import_node && ce.kind == EdgeKind::Imports {
                 if !target_files.contains(&ce.to_file) {
                     target_files.push(ce.to_file);
                 }
@@ -385,7 +385,7 @@ pub fn resolve(
         }
 
         for edge in &trees[fi].edges {
-            if edge.kind != E_IMPORTS {
+            if edge.kind != EdgeKind::Imports {
                 continue;
             }
             let edge_target = edge.to;
@@ -418,7 +418,7 @@ pub fn resolve(
                                 from_node: caller,
                                 to_file: tfi,
                                 to_node: def_node,
-                                kind: crate::lang::E_CALLS,
+                                kind: EdgeKind::Calls,
                             });
                             break;
                         }
@@ -430,7 +430,7 @@ pub fn resolve(
 
     let mut call_edges = Vec::new();
     for ce in &cross_edges {
-        if ce.kind != E_IMPORTS {
+        if ce.kind != EdgeKind::Imports {
             continue;
         }
         let target_name = visible[ce.to_file]
@@ -440,7 +440,7 @@ pub fn resolve(
             .unwrap_or(0);
 
         for edge in &trees[ce.from_file].edges {
-            if edge.kind != E_IMPORTS {
+            if edge.kind != EdgeKind::Imports {
                 continue;
             }
             let edge_import = edge.to;
@@ -480,7 +480,7 @@ pub fn resolve(
                 from_node: edge.from,
                 to_file: ce.to_file,
                 to_node: ce.to_node,
-                kind: crate::lang::E_CALLS,
+                kind: EdgeKind::Calls,
             });
         }
     }
@@ -492,7 +492,7 @@ pub fn resolve(
 
     let mut type_edges = Vec::new();
     for ce in &call_edges {
-        if ce.kind != crate::lang::E_CALLS {
+        if ce.kind != EdgeKind::Calls {
             continue;
         }
         let caller_fi = ce.from_file;
@@ -540,7 +540,7 @@ pub fn resolve(
         }
         if resolved_fi.is_none() {
             for ce2 in &cross_edges {
-                if ce2.from_file == target_fi && ce2.kind == E_IMPORTS {
+                if ce2.from_file == target_fi && ce2.kind == EdgeKind::Imports {
                     let def_name = trees[ce2.to_file]
                         .child_by_field(ce2.to_node, name_f)
                         .or_else(|| trees[ce2.to_file].child_by_field(ce2.to_node, left_f))
@@ -613,7 +613,7 @@ pub fn resolve(
                         for cd in trees[type_fi].descendants(type_node) {
                             if trees[type_fi].kind(cd) == k_deftype {
                                 let mn = trees[type_fi].nodes[cd as usize].parent;
-                                if mn != crate::lang::NONE && mn != type_node {
+                                if mn != NONE && mn != type_node {
                                     let mname = trees[type_fi]
                                         .child_by_field(mn, name_f)
                                         .or_else(|| trees[type_fi].child_by_field(mn, left_f))
@@ -625,7 +625,7 @@ pub fn resolve(
                                             from_node: caller_node,
                                             to_file: type_fi,
                                             to_node: mn,
-                                            kind: crate::lang::E_CALLS,
+                                            kind: EdgeKind::Calls,
                                         });
                                         found = true;
                                     }

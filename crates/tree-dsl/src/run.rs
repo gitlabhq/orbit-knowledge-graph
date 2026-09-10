@@ -1,10 +1,11 @@
 //! Pipeline: parse → rewrite → SSA fold → edges.
 
 use crate::grammar::{self, SupportLang};
-use crate::lang::{DEAD, E_CALLS, E_DEFINES, E_IMPORTS, Lang, NONE, SYNTH};
+use crate::lang::Lang;
 use crate::pattern;
 use crate::ssa::{BlockId, ParseValue, SsaEngine, Value};
 use crate::tree::Tree;
+use crate::tree::{DEAD, EdgeKind, NONE, SYNTH};
 
 pub struct LangDef {
     pub rewrites: Vec<Vec<crate::pattern::Rewrite>>,
@@ -202,7 +203,7 @@ fn resolve_method_on_type(
         if let ParseValue::LocalDef(cdi) = cpv {
             let class_node = def_nodes[*cdi as usize];
             if let Some(method) = find_method(tree, def_nodes, class_node, method_sym, syns, f) {
-                tree.add_edge(from, method, E_CALLS);
+                tree.add_edge(from, method, EdgeKind::Calls);
             }
         }
     }
@@ -218,11 +219,11 @@ fn emit_edge_for_value(
 ) {
     match pv {
         ParseValue::LocalDef(di) => {
-            tree.add_edge(from, def_nodes[*di as usize], E_CALLS);
+            tree.add_edge(from, def_nodes[*di as usize], EdgeKind::Calls);
         }
         ParseValue::ImportRef(ii) => {
             if let Some(&imp_node) = import_nodes.get(*ii as usize) {
-                tree.add_edge(from, imp_node, E_IMPORTS);
+                tree.add_edge(from, imp_node, EdgeKind::Imports);
             }
         }
         _ => {}
@@ -396,7 +397,7 @@ fn ssa_fold(tree: &mut Tree, lang: &mut Lang) {
                 def_nodes.push(i);
                 ssa.write_variable(name, parent_block, Value::LocalDef(def_idx));
                 if let Some(&(Some(parent_def), _, _)) = def_stack.last() {
-                    tree.add_edge(parent_def, i, E_DEFINES);
+                    tree.add_edge(parent_def, i, EdgeKind::Defines);
                 }
                 if has_synth(tree, i, syns.scope) {
                     def_stack.push((Some(i), node_end, parent_block));
@@ -458,7 +459,7 @@ fn ssa_fold(tree: &mut Tree, lang: &mut Lang) {
                             && let Some(method) =
                                 find_method(tree, &def_nodes, cls, ivar_sym, &syns, &f)
                         {
-                            tree.add_edge(enclosing, method, E_CALLS);
+                            tree.add_edge(enclosing, method, EdgeKind::Calls);
                         }
                     }
                 } else {
@@ -500,10 +501,14 @@ fn ssa_fold(tree: &mut Tree, lang: &mut Lang) {
                                                     &syns,
                                                     &f,
                                                 ) {
-                                                    tree.add_edge(enclosing, method, E_CALLS);
+                                                    tree.add_edge(
+                                                        enclosing,
+                                                        method,
+                                                        EdgeKind::Calls,
+                                                    );
                                                 }
                                             } else {
-                                                tree.add_edge(enclosing, target, E_CALLS);
+                                                tree.add_edge(enclosing, target, EdgeKind::Calls);
                                             }
                                         }
                                     }
@@ -546,7 +551,7 @@ fn ssa_fold(tree: &mut Tree, lang: &mut Lang) {
                         match pv {
                             ParseValue::ImportRef(ii) => {
                                 if let Some(&imp_node) = import_nodes.get(*ii as usize) {
-                                    tree.add_edge(enclosing, imp_node, E_IMPORTS);
+                                    tree.add_edge(enclosing, imp_node, EdgeKind::Imports);
                                 }
                             }
                             ParseValue::Type(ts) if *ts != 0 && mem_sym != 0 => {
@@ -668,7 +673,7 @@ fn ssa_fold(tree: &mut Tree, lang: &mut Lang) {
         }
     }
     for (from, to) in meta_edges {
-        tree.add_edge(from, to, E_CALLS);
+        tree.add_edge(from, to, EdgeKind::Calls);
     }
 }
 
