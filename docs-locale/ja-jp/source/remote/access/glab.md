@@ -56,6 +56,7 @@ glab orbit setup
 
 MCPクライアントを接続する場合は、[手動で設定してください](mcp.md#connect-your-mcp-client)。
 
+<!-- markdownlint-disable-next-line MD044 -->
 ## コマンドラインからGitLab Orbitにクエリを実行する {#query-gitlab-orbit-from-the-command-line}
 
 `glab orbit remote`を使用して、GitLab Orbit Remote APIを直接呼び出します。スクリプト作成、デバッグ、クエリ作成前のスキーマ調査に役立ちます。`glab` 1.94以降が必要です。

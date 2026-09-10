@@ -50,6 +50,7 @@ SiphonはKubernetes上で3つのデプロイとして動作します:
 1. パスワードをSiphonで利用可能にする。
 1. Siphonをインストールする。
 
+<!-- markdownlint-disable-next-line MD044 -->
 ## PostgreSQLで論理レプリケーションを有効にする {#turn-on-logical-replication-in-postgresql}
 
 `wal_level`が`logical`でない場合、Siphon producerは起動時に停止します。`wal_level`、`max_replication_slots`、`max_wal_senders`への変更はすべて、リロードではなくPostgreSQLの完全な再起動が必要です。また、`gitlab-ctl reconfigure`はPostgreSQLを再起動しません。
@@ -123,6 +124,7 @@ GitLab Helmチャートは本番PostgreSQLを管理しないため、これら�
 
 {{< /tabs >}}
 
+<!-- markdownlint-disable-next-line MD044 -->
 ## SiphonのPostgreSQLユーザーを作成する {#create-the-siphon-postgresql-users}
 
 Siphonは3つのロールを使用します。スーパーユーザーとして作成してください。ロールが`REPLICATION`を付与できるのは、そのロール自身がすでに`REPLICATION`属性を持っている場合のみです。GitLabアプリケーションロールはこの属性を持っていません。

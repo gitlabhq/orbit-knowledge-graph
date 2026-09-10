@@ -12,6 +12,7 @@ GitLab Orbit Remoteを使用して、トップレベルグループとそのサ�
 
 GitLab Orbit Localを使用して、任意のローカルリポジトリのワークツリーからデータのインデックスを作成します。
 
+<!-- markdownlint-disable-next-line MD044 -->
 ## GitLab Orbitがインデックス作成するデータ {#what-data-gitlab-orbit-indexes}
 
 GitLab Orbit LocalとGitLab Orbit Remoteは、異なる種類のデータのインデックスを作成します。以下のセクションでは、各機能がインデックス作成する内容を示します。

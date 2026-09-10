@@ -40,6 +40,7 @@ GitLab Orbitはある時点でのSDLCインサイトを目的とした分析シ�
 クリックスルーデモについては、[GitLab Orbit](https://click-through-demo-generator-v-2-d63870.gitlab.io/demos/orbit-v2/)をご覧ください。
 <!-- Demo published on 2026-06-30 -->
 
+<!-- markdownlint-disable-next-line MD044 -->
 ## GitLab Orbit Remote {#gitlab-orbit-remote}
 
 GitLab.comでは、GitLab Orbit RemoteはGitLabインフラストラクチャ上で独立したサービスとして動作します。トップレベルグループで有効にすると、グループ、プロジェクト、ユーザー、マージリクエスト、パイプライン、脆弱性、ソースコードなど、SDLC全体とコードを自動的にインデックス作成し、マネージドClickHouseグラフに格納します。
@@ -68,6 +69,7 @@ GitLab Orbit Remoteは独立したサービスとして動作し、GitLabイン�
 
 [GitLab Orbit Remoteを使ってみる](remote/getting-started.md)
 
+<!-- markdownlint-disable-next-line MD044 -->
 ## GitLab Orbit Local {#gitlab-orbit-local}
 
 GitLab Orbit Localはお使いのマシン上で完全に動作します。GitLab Orbit CLI（`orbit`）はローカルリポジトリを解析し、定義とクロスファイル参照を抽出して、グラフをローカルのDuckDBファイルに書き込みます。GitLabインスタンスやネットワーク接続は不要です。
@@ -86,12 +88,14 @@ GitLab Orbit Localはコードのみをインデックス作成します。マ�
 
 [GitLab Orbit Localを使ってみる](local/getting-started.md)
 
+<!-- markdownlint-disable-next-line MD044 -->
 ## GitLab Self-ManagedでのGitLab Orbit {#gitlab-orbit-on-gitlab-self-managed}
 
 GitLab Self-Managedでは、インスタンスの隣にあるKubernetesクラスター上でGitLab Orbitを実行します。このデプロイには、グラフにデータを供給するデータパイプライン（PostgreSQLロジカルレプリケーション、Siphon、NATS、ClickHouse）も含まれます。グラフとクエリインターフェースはGitLab.comと同一です。
 
 [GitLab Self-ManagedでGitLab Orbitを使ってみる](self-managed/getting-started.md)
 
+<!-- markdownlint-disable-next-line MD044 -->
 ## GitLab Orbitがインデックス作成する対象 {#what-gitlab-orbit-indexes}
 
 GitLab Orbitは2つのカテゴリのデータをインデックス作成します:

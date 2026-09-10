@@ -80,6 +80,7 @@ ClickHouseのストレージは、少なくともGitLab PostgreSQLデータベ�
 </profiles>
 ```
 
+<!-- markdownlint-disable-next-line MD044 -->
 ## Kubernetes {#kubernetes}
 
 GitLab Orbitには、Kubernetes 1.33以降が必要です。また、`ImageVolume`フィーチャーゲートが有効になっており、コンテナランタイムでサポートされている必要があります。

@@ -32,6 +32,7 @@ title: GitLab Orbit Remoteを使ってみる
 
 GitLab Orbitはトップレベルグループのみをインデックス作成します。サブグループとプロジェクトは自動的にインデックス作成を継承します。
 
+<!-- markdownlint-disable-next-line MD044 -->
 ## ステップ1: GitLab Orbitを有効にする {#step-1-enable-gitlab-orbit}
 
 1. 左側のサイドバーで、**マイワーク**を展開します。
@@ -69,6 +70,7 @@ GitLab Duoのクエリは消費対象外であり、GitLabクレジットを消�
 
 セットアップについては[MCPを使用してGitLab Orbitにアクセスする](access/mcp.md)を参照してください。設定が完了すると、`query_graph`と`get_graph_schema`の2つのツールが使用できます。
 
+<!-- markdownlint-disable-next-line MD044 -->
 ### AIエージェント向けGitLab Orbitスキルをインストールする {#install-the-gitlab-orbit-skill-for-ai-agents}
 
 GitLab OrbitスキルはAIエージェントにクエリレシピ、DSLガイダンス、トラブルシューティングを提供し、初回から正しいGitLab Orbitクエリを作成できるようにします:
@@ -79,6 +81,7 @@ glab skills install --global orbit
 
 プロジェクトスコープのインストール、アップデート手順、スキルの内容については、[GitLab Orbitスキルを使用してAIコーディングエージェントをセットアップする](../ai_coding_agents.md)を参照してください。
 
+<!-- markdownlint-disable-next-line MD044 -->
 ### REST API {#rest-api}
 
 `your-group`をGitLab Orbitを有効にしたトップレベルグループのパスに置き換えてください。`full_path`フィルターはクエリのスコープを絞り込み、GitLab Orbitの選択性検証を通過させます。

@@ -31,6 +31,7 @@ GitLab OrbitはGitLab Duo Agent Platformに統合されています。エージ�
 - GitLab Orbitが[グループで有効化](../getting-started.md)されている。
 - [GitLab Duo Agent Platform](https://docs.gitlab.com/user/duo_agent_platform/)へのアクセス権がある。
 
+<!-- markdownlint-disable-next-line MD044 -->
 ## GitLab Orbitが利用可能な場所 {#where-gitlab-orbit-is-available}
 
 GitLab Orbitは以下のGitLab Duo Agent Platformのエージェントおよびフローに組み込まれています:

@@ -47,6 +47,7 @@ glab skills install orbit
 
 スキルがすでにインストールされている場合、`glab`は`SKILL.md`が存在することを報告し、上書きするには`--force`を使用するよう提案します。
 
+<!-- markdownlint-disable-next-line MD044 -->
 ## GitLab Orbitスキルをアップデートする {#update-the-gitlab-orbit-skill}
 
 最新バージョンにアップデートするには、`--force`を付けてインストールコマンドを再実行します:
