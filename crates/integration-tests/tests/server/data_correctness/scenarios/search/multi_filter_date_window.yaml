@@ -1,0 +1,28 @@
+# source: crates/integration-tests/tests/server/data_correctness/search.rs::search_multi_filter_date_window
+description: "Date window via multi-filter: merged_at >= 2024-04-01 AND < 2024-07-01"
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [{"id": "mr", "entity": "MergeRequest",
+               "id_range": {"start": 1, "end": 10000},
+               "columns": ["title", "state", "merged_at"],
+               "filters": {
+                   "state": {"eq": "merged"},
+                   "merged_at": [
+                       {"gte": "2024-04-01T00:00:00Z"},
+                       {"lt": "2024-07-01T00:00:00Z"}
+                   ]
+               }}],
+      "limit": 10
+    }
+
+expect:
+  node_count: 1
+  nodes:
+    MergeRequest:
+      ids: [2004]
+      filters:
+        state: { eq: merged }
+        merged_at: { gte: "2024-04-01", lt: "2024-07-01" }

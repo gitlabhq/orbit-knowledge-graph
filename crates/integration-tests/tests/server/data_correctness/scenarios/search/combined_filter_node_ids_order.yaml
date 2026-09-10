@@ -1,0 +1,23 @@
+# source: crates/integration-tests/tests/server/data_correctness/search.rs::search_combined_filter_node_ids_order_by
+description: Filter, node_ids, and order_by combine correctly
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000},
+                 "columns": ["username", "state"],
+                 "node_ids": [1, 2, 3, 5],
+                 "filters": {"state": "active"}}],
+      "order_by": "-u.id",
+      "limit": 10
+    }
+
+expect:
+  node_count: 3
+  nodes:
+    User:
+      order: [3, 2, 1]
+      absent: [5]
+      filters:
+        state: active

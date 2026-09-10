@@ -1,0 +1,16 @@
+# source: crates/integration-tests/tests/server/data_correctness/search.rs::search_filter_no_match_returns_empty
+description: Equality filter with no matching value returns zero rows
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000},
+                 "columns": ["username"],
+                 "filters": {"username": "nonexistent_user"}}],
+      "limit": 10
+    }
+
+expect:
+  skip_requirements: ["filter:username"]
+  node_count: 0
