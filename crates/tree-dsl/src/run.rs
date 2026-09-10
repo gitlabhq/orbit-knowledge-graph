@@ -2,7 +2,7 @@
 //! No coloring rules. SSA reads synthetic nodes directly.
 
 use crate::grammar::{self, SupportLang};
-use crate::lang::{DEAD, E_CALLS, E_DEFINES, E_IMPORTS, E_TYPE_REF, Lang, NONE, SYNTH};
+use crate::lang::{DEAD, E_CALLS, E_DEFINES, E_IMPORTS, Lang, NONE, SYNTH};
 use crate::langs;
 use crate::pattern;
 use crate::ssa::{BlockId, ParseValue, SsaEngine, Value};
@@ -100,7 +100,6 @@ fn classify_methods(tree: &mut Tree, lang: &mut Lang) {
 
 struct Syns {
     import: u16,
-    source: u16,
     name: u16,
     alias: u16,
     deftype: u16,
@@ -123,7 +122,6 @@ impl Syns {
         let s = |name: &str| lang.kinds.lookup(name) as u16 | SYNTH;
         Self {
             import: s("__import"),
-            source: s("__source"),
             name: s("__name"),
             alias: s("__alias"),
             deftype: s("__deftype"),
@@ -158,15 +156,6 @@ fn synth_sym(tree: &Tree, node: u32, kind: u16) -> u32 {
         .unwrap_or(0)
 }
 
-/// Get all syms of synthetic children of the given kind.
-fn synth_syms(tree: &Tree, node: u32, kind: u16) -> Vec<u32> {
-    tree.children(node)
-        .filter(|&c| tree.kind(c) == kind)
-        .map(|c| tree.sym(c))
-        .filter(|&s| s != 0)
-        .collect()
-}
-
 /// Get the def name: try `name:` field, then `left:` field (for assignment defs like lambda),
 /// then `__defname` synthetic.
 fn def_name(tree: &Tree, node: u32, name_f: u16, left_f: u16, syns: &Syns) -> u32 {
@@ -179,32 +168,6 @@ fn def_name(tree: &Tree, node: u32, name_f: u16, left_f: u16, syns: &Syns) -> u3
                 .map(|c| tree.sym(c))
         })
         .unwrap_or(0)
-}
-
-/// Classify the RHS of a binding.
-/// Returns: (is_call_to_class, callee_sym)
-fn classify_rhs(tree: &Tree, node: u32, syns: &Syns) -> RhsKind {
-    // Look for __call sibling or child
-    let call_node = tree.children(node).find(|&c| tree.kind(c) == syns.call);
-    if let Some(cn) = call_node {
-        let callee_f = tree
-            .child_by_field(cn, 3 /* F_CALLEE */)
-            .map(|c| tree.sym(c))
-            .unwrap_or(0);
-        if callee_f != 0 {
-            return RhsKind::Call(callee_f);
-        }
-    }
-    // Look for identifier on the right side
-    let right_f = 4u16; // field ID for "right" — will look up properly
-    // For now, opaque
-    RhsKind::Opaque
-}
-
-enum RhsKind {
-    Call(u32),  // callee sym
-    Alias(u32), // aliased sym
-    Opaque,
 }
 
 // ── SSA fold: walks tree, reads synthetics, produces edges ──
@@ -233,7 +196,7 @@ fn ssa_fold(tree: &mut Tree, lang: &mut Lang) {
     let mut import_names: Vec<u32> = Vec::new(); // import_index → name sym
 
     // Ref info: (node, enclosing_def_node)
-    let mut refs: Vec<(u32, u32)> = Vec::new();
+    let _refs: Vec<(u32, u32)> = Vec::new();
 
     // Scope/def stack: (def_node_or_none, node_end, saved_block)
     let mut def_stack: Vec<(Option<u32>, u32, BlockId)> = vec![(None, u32::MAX, entry)];
@@ -370,7 +333,7 @@ fn ssa_fold(tree: &mut Tree, lang: &mut Lang) {
                     // a.b() — member call
                     let obj_node = tree.child_by_field(cn, object_f);
                     let obj_sym = obj_node.map(|c| tree.sym(c)).unwrap_or(0);
-                    let obj_is_ivar = obj_node.map_or(false, |c| tree.kind(c) == syns.ivar);
+                    let obj_is_ivar = obj_node.is_some_and(|c| tree.kind(c) == syns.ivar);
                     let member_sym = tree
                         .child_by_field(cn, member_f)
                         .map(|c| tree.sym(c))
@@ -379,20 +342,20 @@ fn ssa_fold(tree: &mut Tree, lang: &mut Lang) {
                     if obj_is_ivar && obj_sym != 0 {
                         // self.db.execute() — instance attr chain
                         // Find enclosing class, look up attr type, resolve member
-                        if let Some(class_node) = find_enclosing_class(tree, i, &syns, class_sym) {
-                            if let Some(type_sym) = find_ivar_type(
+                        if let Some(class_node) = find_enclosing_class(tree, i, &syns, class_sym)
+                            && let Some(type_sym) = find_ivar_type(
                                 tree, class_node, obj_sym, &syns, callee_f, right_f, left_f,
-                            ) {
-                                // Resolve method on the type
-                                let class_reaching = ssa.read_variable(type_sym, cur_block);
-                                for cpv in &class_reaching {
-                                    if let ParseValue::LocalDef(cdi) = cpv {
-                                        let cn = def_nodes[*cdi as usize];
-                                        if let Some(method) = find_method(
-                                            tree, &def_nodes, cn, member_sym, &syns, name_f, left_f,
-                                        ) {
-                                            tree.add_edge(enclosing, method, E_CALLS);
-                                        }
+                            )
+                        {
+                            // Resolve method on the type
+                            let class_reaching = ssa.read_variable(type_sym, cur_block);
+                            for cpv in &class_reaching {
+                                if let ParseValue::LocalDef(cdi) = cpv {
+                                    let cn = def_nodes[*cdi as usize];
+                                    if let Some(method) = find_method(
+                                        tree, &def_nodes, cn, member_sym, &syns, name_f, left_f,
+                                    ) {
+                                        tree.add_edge(enclosing, method, E_CALLS);
                                     }
                                 }
                             }
@@ -432,12 +395,12 @@ fn ssa_fold(tree: &mut Tree, lang: &mut Lang) {
                     let ivar_sym = tree.sym(cn);
                     if ivar_sym != 0 {
                         // Find enclosing class
-                        if let Some(class_node) = find_enclosing_class(tree, i, &syns, class_sym) {
-                            if let Some(method) = find_method(
+                        if let Some(class_node) = find_enclosing_class(tree, i, &syns, class_sym)
+                            && let Some(method) = find_method(
                                 tree, &def_nodes, class_node, ivar_sym, &syns, name_f, left_f,
-                            ) {
-                                tree.add_edge(enclosing, method, E_CALLS);
-                            }
+                            )
+                        {
+                            tree.add_edge(enclosing, method, E_CALLS);
                         }
                     }
                 } else {
@@ -451,10 +414,10 @@ fn ssa_fold(tree: &mut Tree, lang: &mut Lang) {
                             if !wildcard.is_empty() {
                                 // Link to the wildcard import — resolver will resolve the name
                                 for pv in &wildcard {
-                                    if let ParseValue::ImportRef(ii) = pv {
-                                        if let Some(&imp_node) = import_nodes.get(*ii as usize) {
-                                            tree.add_edge(enclosing, imp_node, E_IMPORTS);
-                                        }
+                                    if let ParseValue::ImportRef(ii) = pv
+                                        && let Some(&imp_node) = import_nodes.get(*ii as usize)
+                                    {
+                                        tree.add_edge(enclosing, imp_node, E_IMPORTS);
                                     }
                                 }
                                 reaching = wildcard;
@@ -479,8 +442,13 @@ fn ssa_fold(tree: &mut Tree, lang: &mut Lang) {
                                                 synth_sym(tree, target, syns.callable);
                                             if callable_sym != 0 {
                                                 if let Some(method) = find_method(
-                                                    tree, &def_nodes, target, callable_sym,
-                                                    &syns, name_f, left_f,
+                                                    tree,
+                                                    &def_nodes,
+                                                    target,
+                                                    callable_sym,
+                                                    &syns,
+                                                    name_f,
+                                                    left_f,
                                                 ) {
                                                     tree.add_edge(enclosing, method, E_CALLS);
                                                 }
@@ -512,7 +480,7 @@ fn ssa_fold(tree: &mut Tree, lang: &mut Lang) {
             if parent_k != syns.call {
                 let obj_node = tree.child_by_field(i, object_f);
                 let obj_sym = obj_node.map(|c| tree.sym(c)).unwrap_or(0);
-                let obj_is_ivar = obj_node.map_or(false, |c| tree.kind(c) == syns.ivar);
+                let _obj_is_ivar = obj_node.is_some_and(|c| tree.kind(c) == syns.ivar);
                 let member_sym = tree
                     .child_by_field(i, member_f)
                     .map(|c| tree.sym(c))
@@ -575,7 +543,7 @@ fn ssa_fold(tree: &mut Tree, lang: &mut Lang) {
             if lhs != 0 {
                 // Check if it's an instance attr assignment (__ivar on LHS)
                 let lhs_node = tree.child_by_field(i, left_f);
-                let is_ivar = lhs_node.map_or(false, |n| tree.kind(n) == syns.ivar);
+                let is_ivar = lhs_node.is_some_and(|n| tree.kind(n) == syns.ivar);
 
                 if !is_ivar {
                     if ssa.has_variable_in_block(lhs, cur_block) {
@@ -599,7 +567,7 @@ fn ssa_fold(tree: &mut Tree, lang: &mut Lang) {
                         if tree.kind(rn) == syns.call {
                             let callee_node = tree.child_by_field(rn, callee_f);
                             let callee_is_member =
-                                callee_node.map_or(false, |c| tree.kind(c) == syns.member);
+                                callee_node.is_some_and(|c| tree.kind(c) == syns.member);
 
                             // RHS is obj.method() — resolve method's return type
                             if callee_is_member {
@@ -614,7 +582,7 @@ fn ssa_fold(tree: &mut Tree, lang: &mut Lang) {
                                     .unwrap_or(0);
                                 let obj_is_ivar = tree
                                     .child_by_field(cn, object_f)
-                                    .map_or(false, |c| tree.kind(c) == syns.ivar);
+                                    .is_some_and(|c| tree.kind(c) == syns.ivar);
 
                                 // Find the method def, then check its return type
                                 let mut method_ret = None;
@@ -1002,20 +970,21 @@ fn find_ivar_type(
     for d in tree.descendants(class_node) {
         if has_synth(tree, d, syns.binding) {
             let lhs_node = tree.child_by_field(d, left_f);
-            if let Some(ln) = lhs_node {
-                if tree.kind(ln) == syns.ivar && tree.sym(ln) == attr_sym {
-                    // Found self.attr = ... — check RHS
-                    let rhs = tree.child_by_field(d, right_f);
-                    if let Some(rn) = rhs {
-                        if tree.kind(rn) == syns.call {
-                            let callee = tree
-                                .child_by_field(rn, callee_f)
-                                .map(|c| tree.sym(c))
-                                .unwrap_or(0);
-                            if callee != 0 {
-                                return Some(callee);
-                            }
-                        }
+            if let Some(ln) = lhs_node
+                && tree.kind(ln) == syns.ivar
+                && tree.sym(ln) == attr_sym
+            {
+                // Found self.attr = ... — check RHS
+                let rhs = tree.child_by_field(d, right_f);
+                if let Some(rn) = rhs
+                    && tree.kind(rn) == syns.call
+                {
+                    let callee = tree
+                        .child_by_field(rn, callee_f)
+                        .map(|c| tree.sym(c))
+                        .unwrap_or(0);
+                    if callee != 0 {
+                        return Some(callee);
                     }
                 }
             }

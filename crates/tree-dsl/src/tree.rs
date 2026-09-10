@@ -414,27 +414,27 @@ impl Tree {
         self.nodes = new;
         // Remap edges and links through the compaction table.
         for edge in &mut self.edges {
-            if let Some(&new_from) = remap.get(edge.from as usize) {
-                if new_from != NONE {
-                    edge.from = new_from;
-                }
+            if let Some(&new_from) = remap.get(edge.from as usize)
+                && new_from != NONE
+            {
+                edge.from = new_from;
             }
-            if let Some(&new_to) = remap.get(edge.to as usize) {
-                if new_to != NONE {
-                    edge.to = new_to;
-                }
+            if let Some(&new_to) = remap.get(edge.to as usize)
+                && new_to != NONE
+            {
+                edge.to = new_to;
             }
         }
         for link in &mut self.links {
-            if let Some(&new_from) = remap.get(link.from as usize) {
-                if new_from != NONE {
-                    link.from = new_from;
-                }
+            if let Some(&new_from) = remap.get(link.from as usize)
+                && new_from != NONE
+            {
+                link.from = new_from;
             }
-            if let Some(&new_to) = remap.get(link.to_node as usize) {
-                if new_to != NONE {
-                    link.to_node = new_to;
-                }
+            if let Some(&new_to) = remap.get(link.to_node as usize)
+                && new_to != NONE
+            {
+                link.to_node = new_to;
             }
         }
         remap

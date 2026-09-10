@@ -20,7 +20,11 @@ fn main() {
         let kind_id = (raw_kind & !SYNTH) as u32;
         let kind_name = lang.kinds.resolve(kind_id);
         let synth = if raw_kind & SYNTH != 0 { "S:" } else { "" };
-        let sym = if n.sym != 0 { lang.syms.resolve(n.sym).to_string() } else { String::new() };
+        let sym = if n.sym != 0 {
+            lang.syms.resolve(n.sym).to_string()
+        } else {
+            String::new()
+        };
         let short = if sym.len() > 50 { &sym[..50] } else { &sym };
         println!("{i:3}  p={:3}  {synth}{kind_name} \"{short}\"", n.parent);
     }

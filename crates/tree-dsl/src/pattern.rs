@@ -29,7 +29,7 @@ impl Tf {
             Tf::StripSuffix(p) => s.strip_suffix(&**p).unwrap_or(s).to_string(),
             Tf::StripLeading(ch) => s.trim_start_matches(*ch).to_string(),
             Tf::SplitLast(sep) => s.rsplit_once(&**sep).map_or(s, |(_, r)| r).to_string(),
-            Tf::Replace(from, to) => s.replace(&**from, &**to),
+            Tf::Replace(from, to) => s.replace(&**from, to),
             Tf::Prepend(p) => format!("{p}{s}"),
             Tf::Lowercase => s.to_lowercase(),
             Tf::ToRel(ch) => {
@@ -331,7 +331,11 @@ pub fn parse_single_tf(c: &mut Ctx, tf: &str) -> Tf {
         let args = parse_tf_args(&tf[paren_pos..]);
         match name {
             "replace" => {
-                assert_eq!(args.len(), 2, "replace needs 2 args: replace(\"from\",\"to\")");
+                assert_eq!(
+                    args.len(),
+                    2,
+                    "replace needs 2 args: replace(\"from\",\"to\")"
+                );
                 Tf::Replace(args[0].into(), args[1].into())
             }
             "strip_prefix" => {

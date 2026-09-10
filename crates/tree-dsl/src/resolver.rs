@@ -147,9 +147,9 @@ pub fn resolve(trees: &mut [Tree], lang: &mut Lang, support_lang: SupportLang) -
         for req in &reqs {
             let path = lang.syms.resolve(trees[req.fi].nodes[0].sym);
             let stem = support_lang.strip_extension(path);
-            let is_index = index_names.iter().any(|idx| {
-                stem.ends_with(&format!("/{idx}")) || stem == idx.as_str()
-            });
+            let is_index = index_names
+                .iter()
+                .any(|idx| stem.ends_with(&format!("/{idx}")) || stem == idx.as_str());
             if !is_index {
                 continue;
             }
@@ -183,10 +183,10 @@ pub fn resolve(trees: &mut [Tree], lang: &mut Lang, support_lang: SupportLang) -
                     if !visible[req.fi].contains_key(&name_sym) {
                         new_exports.push((req.fi, name_sym, req.target_fi, def_node));
                     }
-                } else if let Some(&(tfi, tn)) = reexports.get(&(req.target_fi, name_sym)) {
-                    if !visible[req.fi].contains_key(&name_sym) {
-                        new_exports.push((req.fi, name_sym, tfi, tn));
-                    }
+                } else if let Some(&(tfi, tn)) = reexports.get(&(req.target_fi, name_sym))
+                    && !visible[req.fi].contains_key(&name_sym)
+                {
+                    new_exports.push((req.fi, name_sym, tfi, tn));
                 }
             }
         }
@@ -292,23 +292,23 @@ pub fn resolve(trees: &mut [Tree], lang: &mut Lang, support_lang: SupportLang) -
                     continue;
                 }
                 let callee_node = trees[fi].child_by_field(d, callee_f);
-                if let Some(cn) = callee_node {
-                    if trees[fi].kind(cn) == k_member {
-                        let member_sym = trees[fi]
-                            .child_by_field(cn, member_f)
-                            .map(|c| trees[fi].sym(c))
-                            .unwrap_or(0);
-                        if member_sym != 0 {
-                            if let Some(&def_node) = visible[tfi].get(&member_sym) {
-                                cross_edges.push(CrossEdge {
-                                    from_file: fi,
-                                    from_node: caller,
-                                    to_file: tfi,
-                                    to_node: def_node,
-                                    kind: crate::lang::E_CALLS,
-                                });
-                            }
-                        }
+                if let Some(cn) = callee_node
+                    && trees[fi].kind(cn) == k_member
+                {
+                    let member_sym = trees[fi]
+                        .child_by_field(cn, member_f)
+                        .map(|c| trees[fi].sym(c))
+                        .unwrap_or(0);
+                    if member_sym != 0
+                        && let Some(&def_node) = visible[tfi].get(&member_sym)
+                    {
+                        cross_edges.push(CrossEdge {
+                            from_file: fi,
+                            from_node: caller,
+                            to_file: tfi,
+                            to_node: def_node,
+                            kind: crate::lang::E_CALLS,
+                        });
                     }
                 }
             }
@@ -459,20 +459,20 @@ pub fn resolve(trees: &mut [Tree], lang: &mut Lang, support_lang: SupportLang) -
                 continue;
             }
             let rhs = tree.child_by_field(d, right_f);
-            if let Some(rn) = rhs {
-                if tree.kind(rn) == k_call {
-                    let callee = tree
-                        .child_by_field(rn, callee_f)
+            if let Some(rn) = rhs
+                && tree.kind(rn) == k_call
+            {
+                let callee = tree
+                    .child_by_field(rn, callee_f)
+                    .map(|c| tree.sym(c))
+                    .unwrap_or(0);
+                if callee == target_name_sym {
+                    let lhs = tree
+                        .child_by_field(d, left_f)
                         .map(|c| tree.sym(c))
                         .unwrap_or(0);
-                    if callee == target_name_sym {
-                        let lhs = tree
-                            .child_by_field(d, left_f)
-                            .map(|c| tree.sym(c))
-                            .unwrap_or(0);
-                        if lhs != 0 {
-                            bound_vars.push(lhs);
-                        }
+                    if lhs != 0 {
+                        bound_vars.push(lhs);
                     }
                 }
             }
@@ -481,40 +481,40 @@ pub fn resolve(trees: &mut [Tree], lang: &mut Lang, support_lang: SupportLang) -
         for d in tree.descendants(caller_node) {
             if tree.kind(d) == k_call {
                 let callee_n = tree.child_by_field(d, callee_f);
-                if let Some(cn) = callee_n {
-                    if tree.kind(cn) == k_member {
-                        let obj_sym = tree
-                            .child_by_field(cn, object_f)
-                            .map(|c| tree.sym(c))
-                            .unwrap_or(0);
-                        if !bound_vars.contains(&obj_sym) {
-                            continue;
-                        }
-                        let mem_sym = tree
-                            .child_by_field(cn, member_f)
-                            .map(|c| tree.sym(c))
-                            .unwrap_or(0);
-                        if mem_sym != 0 {
-                            let mut found = false;
-                            for cd in trees[cls_fi].descendants(cls_node) {
-                                if trees[cls_fi].kind(cd) == k_deftype {
-                                    let mn = trees[cls_fi].nodes[cd as usize].parent;
-                                    if mn != crate::lang::NONE && mn != cls_node {
-                                        let mname = trees[cls_fi]
-                                            .child_by_field(mn, name_f)
-                                            .or_else(|| trees[cls_fi].child_by_field(mn, left_f))
-                                            .map(|c| trees[cls_fi].sym(c))
-                                            .unwrap_or(0);
-                                        if mname == mem_sym && !found {
-                                            type_edges.push(CrossEdge {
-                                                from_file: caller_fi,
-                                                from_node: caller_node,
-                                                to_file: cls_fi,
-                                                to_node: mn,
-                                                kind: crate::lang::E_CALLS,
-                                            });
-                                            found = true;
-                                        }
+                if let Some(cn) = callee_n
+                    && tree.kind(cn) == k_member
+                {
+                    let obj_sym = tree
+                        .child_by_field(cn, object_f)
+                        .map(|c| tree.sym(c))
+                        .unwrap_or(0);
+                    if !bound_vars.contains(&obj_sym) {
+                        continue;
+                    }
+                    let mem_sym = tree
+                        .child_by_field(cn, member_f)
+                        .map(|c| tree.sym(c))
+                        .unwrap_or(0);
+                    if mem_sym != 0 {
+                        let mut found = false;
+                        for cd in trees[cls_fi].descendants(cls_node) {
+                            if trees[cls_fi].kind(cd) == k_deftype {
+                                let mn = trees[cls_fi].nodes[cd as usize].parent;
+                                if mn != crate::lang::NONE && mn != cls_node {
+                                    let mname = trees[cls_fi]
+                                        .child_by_field(mn, name_f)
+                                        .or_else(|| trees[cls_fi].child_by_field(mn, left_f))
+                                        .map(|c| trees[cls_fi].sym(c))
+                                        .unwrap_or(0);
+                                    if mname == mem_sym && !found {
+                                        type_edges.push(CrossEdge {
+                                            from_file: caller_fi,
+                                            from_node: caller_node,
+                                            to_file: cls_fi,
+                                            to_node: mn,
+                                            kind: crate::lang::E_CALLS,
+                                        });
+                                        found = true;
                                     }
                                 }
                             }

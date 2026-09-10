@@ -19,11 +19,10 @@ pub(crate) struct TestSuite {
     /// Load all source files from this directory (relative to workspace root).
     /// Files are discovered recursively and written to the temp dir preserving
     /// relative paths. Combines with `fixtures` (inline files take precedence).
-    #[serde(default)]
-    pub fixture_dir: Option<String>,
-    /// When true, emit detailed engine/resolver trace events to stderr.
-    #[serde(default)]
-    pub trace: bool,
+    #[serde(default, rename = "fixture_dir")]
+    pub _fixture_dir: Option<String>,
+    #[serde(default, rename = "trace")]
+    pub _trace: bool,
     pub tests: Vec<TestCase>,
 }
 

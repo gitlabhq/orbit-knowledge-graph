@@ -558,23 +558,24 @@ fn build_file_edges(
                     dt.append_value(did);
                     dk.append_value("Defines");
                 }
-            } else if sk.is_import(tree, node) {
-                if let Some(iids) = ids.imports.get(&(fi, node)) {
-                    for &iid in iids {
-                        is.append_value(fid);
-                        it.append_value(iid);
-                        ik.append_value("Imports");
-                    }
+            } else if sk.is_import(tree, node)
+                && let Some(iids) = ids.imports.get(&(fi, node))
+            {
+                for &iid in iids {
+                    is.append_value(fid);
+                    it.append_value(iid);
+                    ik.append_value("Imports");
                 }
             }
         }
         for edge in &tree.edges {
-            if edge.from == 0 && edge.kind == tree_dsl::lang::E_CALLS {
-                if let Some(&tid) = ids.defs.get(&(fi, edge.to)) {
-                    ds.append_value(fid);
-                    dt.append_value(tid);
-                    dk.append_value("Calls");
-                }
+            if edge.from == 0
+                && edge.kind == tree_dsl::lang::E_CALLS
+                && let Some(&tid) = ids.defs.get(&(fi, edge.to))
+            {
+                ds.append_value(fid);
+                dt.append_value(tid);
+                dk.append_value("Calls");
             }
         }
     }

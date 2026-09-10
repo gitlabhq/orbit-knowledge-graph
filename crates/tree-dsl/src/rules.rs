@@ -289,8 +289,7 @@ fn parse_append_node(s: &str) -> AppendNode {
     }
 
     // Capture reference: (__alias @$A) or (__decorator @$D|strip=@)
-    if val.starts_with("@$") {
-        let rest = &val[2..];
+    if let Some(rest) = val.strip_prefix("@$") {
         let (capture, tf) = if let Some((cap, tf_str)) = rest.split_once('|') {
             (cap.to_string(), parse_tf_spec(Some(tf_str)))
         } else {
