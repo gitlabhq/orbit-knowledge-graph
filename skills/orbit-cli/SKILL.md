@@ -13,7 +13,7 @@ description: >
   production data in GitLab (a project such as gitlab-org/gitlab, cross-project
   blast radius, contributor or merge-request aggregation) use the `orbit` skill;
   for single-entity GitLab lookups or write operations use `glab`.
-version: 0.5.3
+version: 0.5.4
 license: MIT
 metadata:
   audience: developers
@@ -47,7 +47,7 @@ wrapper flags, config keys, and pass-through rules:
 
 ## Gotchas (read first)
 
-- **`index` operates on git repositories found under `PATH`.** Pointing it at a
+- **`index` operates on Git repositories found under `PATH`.** Pointing it at a
   plain subdirectory that is not its own repo indexes nothing (no graph stats are
   printed at all). Pass a repository root.
 - **Queries are SQL, not the DSL.** `orbit sql "SELECT …"` runs against DuckDB
@@ -86,6 +86,16 @@ wrapper flags, config keys, and pass-through rules:
 
 ## Definitions and relationships
 
+Search one concept per `grep`, including multiword identifiers like `rate limit`.
+Inspect known targets directly with `context`; `--file` includes imports and
+surrounding structure. Reuse returned source (including `grep --body`) for edits
+instead of reading it again with raw file tools. Stop exploring when the edit
+point is clear; follow identifiers only for remaining questions and batch
+independent lookups. Use raw reads for non-code or unreliable index coverage.
+
+Search matches names and paths, not bodies. Neither those matches nor missing
+graph relationships establish field reads, writes, or dataflow; inspect source.
+
 ```bash
 orbit grep "rateLimit" --path src --kind Method,Function
 orbit context "Type::method"
@@ -113,6 +123,12 @@ all definitions and the lines between them. With names, it restricts lookup
 to that file and accepts bare names; `--kind` narrows the selection.
 `--outline` replaces bodies with each definition's signature and its nested
 members, so a large type or file can be mapped before reading one method.
+
+`context` and `grep --body` use indexed ranges only when the current source
+matches its indexed fingerprint. Otherwise they return the full file with
+`ranges=unverified`, even with `--outline`. Test code is included. `context --file`
+also reads files with no indexed definitions. Re-run `index` to refresh the graph;
+reading current source does not refresh search results or relationships.
 
 `--kind` is one comma-separated list (`Class,Method`); a quoted pipe list
 (`"Class|Method"`) also works. It is not repeatable.

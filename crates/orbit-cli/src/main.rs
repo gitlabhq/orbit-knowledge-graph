@@ -183,26 +183,27 @@ struct IndexArgs {
 #[derive(Args, Debug, PartialEq)]
 #[command(about = descriptions::short("grep"))]
 #[command(
-    long_about = "Search the local graph for definitions matching plain-language terms.\n\n\
-                  Ranks indexed definitions by how many distinct query terms they \
-                  match, then shows the most relevant connections to the top matches, \
-                  ranked by graph proximity. Matches resolved definitions, not text \
-                  lines; takes plain words, not regexes. Add --related-to, --callers, \
-                  or --callees to a positional FQN for relationship lookups. An \
-                  explicit target after the flag takes precedence over positional \
-                  terms. Targets accept FQNs, unique unqualified tails, or globs; \
-                  --path and --kind filter connected definitions, not the target. \
-                  --kind takes one comma-separated list, e.g. `Class,Method`.\n\n\
-                  When the output notes unmatched terms or weak matches, read the \
-                  top matches first — they are often still right. Retry with a \
-                  synonym or identifier fragment only if they look off, then fall \
-                  back to text grep."
+    long_about = "Search the local graph for definitions matching one concept.\n\n\
+                  Use 1-3 identifier keywords for one concept; multiword identifiers \
+                  such as 'rate limit' are fine. Read relevant bodies with context, \
+                  not cat, head, sed, or raw Read. Use those bodies for exact edits; \
+                  use context --file when imports or surrounding structure are needed. \
+                  Start implementing once the edit point and nearby pattern are clear. \
+                  If --body already supplied enough context, do not read it again. \
+                  Search matches indexed names and paths, not source bodies or regexes. \
+                  Name/path matches do not establish a code connection or dataflow.\n\n\
+                  Add --related-to, --callers, or --callees to a positional FQN for \
+                  relationship lookups. An explicit target after the flag takes \
+                  precedence over positional terms. Targets accept FQNs, unique \
+                  unqualified tails, or globs; --path and --kind filter connected \
+                  definitions, not the target. --kind takes one comma-separated list, \
+                  e.g. `Class,Method`.\n\n\
+                  For weak or unmatched terms, inspect a candidate with context. \
+                  Retry with one concept or a source identifier; if that still misses, \
+                  fall back to text grep."
 )]
 struct GrepArgs {
-    /// Plain-language queries, e.g. "NATS message publish"; several may be
-    /// given and are searched in one call. Omit them with --path to list
-    /// every definition under that path instead.
-    #[arg(value_name = "QUERY", required_unless_present_any = ["path", "related_to", "callers_of", "callees_of"])]
+    #[arg(help = "One concept per query, e.g. 'rate limit'; batch only independent lookups. Omit with --path to list definitions under that path.", value_name = "QUERY", required_unless_present_any = ["path", "related_to", "callers_of", "callees_of"])]
     query: Vec<String>,
 
     #[command(flatten)]
@@ -278,17 +279,14 @@ fn context_fqn_arg_help() -> String {
 
 fn context_long_about() -> String {
     format!(
-        "Print the full source body of indexed definitions.\n\n\
-         Takes one or more fully qualified names as printed by `{launcher} grep`, or \
-         their unqualified tails such as `Type::method` when that names one definition, \
-         and prints each definition's source lines from the working tree, so following \
-         up on several grep matches takes one command and no file read. A glob fqn such as \
-         `crate::module::*` prints every matching definition in file order, \
-         `--file <path>` alone prints a whole file as its definitions plus the \
-         lines between them, and `<name> --file <path>` prints that definition \
-         from that file by bare name, so whole-module reading needs no file read \
-         either. `--outline` prints each definition's signature and nested members \
-         without bodies, so large types can be mapped before reading one method.",
+        "Print working-tree source for indexed definitions.\n\n\
+         Accepts FQNs from `{launcher} grep`, unique tails like `Type::method`, or globs \
+         like `crate::module::*`, in file order. `--file <path>` alone includes all \
+         definitions and surrounding lines; with names, it also accepts bare names. \
+         `--outline` prints signatures and nested members without bodies.\n\n\
+         If source differs from the indexed content, or its fingerprint is unavailable, \
+         prints the full file with `ranges=unverified` instead of using indexed ranges. \
+         Re-run `index` to refresh definitions and relationships.",
         launcher = commands::setup::spec::launcher()
     )
 }
@@ -1073,8 +1071,10 @@ fn index_repo(
             .context("failed to walk repository files")?,
     );
 
+    let mut sources = workspace::fingerprint_files(&git.repo_path, &file_inventory);
     let client =
         duckdb_client::DuckDbClient::open(db_path).context("failed to open DuckDB for writing")?;
+    workspace::store_source_fingerprints(&client, git.project_id, &Default::default())?;
 
     let node_tables: Vec<String> = ontology
         .local_entity_names()
@@ -1127,7 +1127,7 @@ fn index_repo(
 
     let v2_result = code_graph::v2::Pipeline::run_with_tracer(
         std::path::Path::new(&root_path),
-        file_inventory,
+        file_inventory.clone(),
         pipeline_config.clone(),
         filter.file_reasons(),
         tracer,
@@ -1163,6 +1163,13 @@ fn index_repo(
             &[],
         )
         .context("failed to build the search index")?;
+    let current_sources = workspace::fingerprint_files(&git.repo_path, &file_inventory);
+    sources.retain(|path, fingerprint| current_sources.get(path) == Some(fingerprint));
+    let sources = sources
+        .into_iter()
+        .map(|(path, (hash, _))| (path, hash))
+        .collect();
+    workspace::store_source_fingerprints(&client, git.project_id, &sources)?;
     workspace::set_status(
         &client,
         &key,

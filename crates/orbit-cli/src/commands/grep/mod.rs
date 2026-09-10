@@ -2,12 +2,12 @@ mod local;
 pub(crate) mod relations;
 
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use orbit_search::{RecallFilter, SearchVocab, content_words};
 
-use crate::commands::{context, fqn::Def};
+use crate::commands::{context, fqn::Def, shell_quote};
 use local::LocalBackend;
 
 fn build_vocab<S: orbit_search::grep::GrepSource>(source: &S) -> Result<SearchVocab, S::Error> {
@@ -50,6 +50,7 @@ pub(crate) fn run(
         );
     }
 
+    let context_command = context_command(launcher, repo.as_deref(), db.as_deref());
     let backend = LocalBackend::open(repo, db, &paths)?;
 
     let mut out = std::io::stdout().lock();
@@ -95,8 +96,13 @@ pub(crate) fn run(
             continue;
         }
 
-        report_results(&mut out, &outcome)?;
-        if body || outcome.total <= BODY_LIMIT {
+        let show_bodies = body || outcome.total <= BODY_LIMIT;
+        report_results(
+            &mut out,
+            &outcome,
+            (!show_bodies).then_some(&context_command),
+        )?;
+        if show_bodies {
             let defs: Vec<Def> = outcome
                 .matches
                 .iter()
@@ -152,10 +158,28 @@ fn report_outline(
     Ok(())
 }
 
+fn context_command(launcher: &str, repo: Option<&Path>, db: Option<&Path>) -> String {
+    let mut command = format!("{launcher} context");
+    for (flag, path) in [("--repo", repo), ("--db", db)] {
+        if let Some(path) = path {
+            command.push_str(&format!(" {flag}={}", shell_quote(&path.to_string_lossy())));
+        }
+    }
+    command
+}
+
 fn report_results(
     out: &mut impl Write,
     outcome: &orbit_search::GrepOutcome,
+    context_command: Option<&str>,
 ) -> std::io::Result<()> {
+    if let Some(command) = context_command.filter(|_| !outcome.matches.is_empty()) {
+        write!(out, "Candidate context: {command} --")?;
+        for candidate in outcome.matches.iter().take(BODY_LIMIT) {
+            write!(out, " {}", shell_quote(&candidate.row.fqn))?;
+        }
+        writeln!(out)?;
+    }
     report_confidence(out, outcome)?;
     writeln!(out, "\nNodes:")?;
     for m in &outcome.matches {
@@ -186,27 +210,21 @@ fn report_confidence(
     if outcome.terms.len() >= COMPOUND_TERM_HINT {
         writeln!(
             out,
-            "note: {} search terms — long queries dilute matching. grep matches \
-             symbol-name words, so use one to three identifier-like words per \
-             query and batch several queries in one call instead.",
+            "note: {} search terms — matches may cover different parts of the query.",
             outcome.terms.len()
         )?;
     }
     if outcome.weak {
         writeln!(
             out,
-            "note: weak matches — no term anchors a symbol name, so the results \
-             below may be coincidental. Use an identifier fragment the code would \
-             use, or scope with --path/--kind."
+            "note: weak matches — symbol names do not closely match enough of the query."
         )?;
     }
     if !outcome.unmatched_terms.is_empty() {
         writeln!(
             out,
-            "note: no matches for: {} — results reflect only the matched terms \
-             and may be incomplete. If they look off, retry once with a synonym \
-             or identifier fragment for each unmatched term (e.g. \"throttle\" \
-             → \"rate limit\").",
+            "note: no matches for: {} — results reflect only the matched terms. \
+             If needed, retry once with a synonym or identifier fragment.",
             outcome.unmatched_terms.join(", ")
         )?;
     }
@@ -216,11 +234,7 @@ fn report_confidence(
             .iter()
             .map(|(term, fqn)| format!("{term} → {fqn}"))
             .collect();
-        writeln!(
-            out,
-            "note: matched terms anchored on: {}",
-            anchors.join(", ")
-        )?;
+        writeln!(out, "note: matched-term candidates: {}", anchors.join(", "))?;
     }
     Ok(())
 }
@@ -246,7 +260,10 @@ mod tests {
         report_confidence(&mut buf, &outcome(vec!["throttle", "dlq"], false)).unwrap();
         let text = String::from_utf8(buf).unwrap();
         assert!(text.contains("no matches for: throttle, dlq"), "{text}");
-        assert!(text.contains("retry once"), "{text}");
+        assert!(
+            text.contains("retry once with a synonym or identifier"),
+            "{text}"
+        );
         assert!(!text.contains("weak matches"), "{text}");
     }
 
@@ -256,6 +273,8 @@ mod tests {
         report_confidence(&mut buf, &outcome(vec!["throttle"], true)).unwrap();
         let text = String::from_utf8(buf).unwrap();
         assert!(text.contains("weak matches"), "{text}");
+        assert!(text.contains("symbol names do not closely match"), "{text}");
+        assert!(!text.contains("no term anchors"), "{text}");
         assert!(text.contains("no matches for: throttle"), "{text}");
     }
 
@@ -264,14 +283,84 @@ mod tests {
         let mut o = outcome(Vec::new(), false);
         o.total = 42;
         let mut buf = Vec::new();
-        report_results(&mut buf, &o).unwrap();
+        report_results(&mut buf, &o, None).unwrap();
         let text = String::from_utf8(buf).unwrap();
         assert!(text.contains("42 more (narrow"), "{text}");
 
         o.total = 0;
         let mut buf = Vec::new();
-        report_results(&mut buf, &o).unwrap();
+        report_results(&mut buf, &o, None).unwrap();
         assert!(!String::from_utf8(buf).unwrap().contains(" more"));
+    }
+
+    #[test]
+    fn candidate_context_is_bounded_ordered_and_before_advice() {
+        let mut o = outcome(vec!["unknown"], true);
+        o.matches = [
+            ("crate::Type::field", "Field"),
+            ("crate::module", "Module"),
+            ("crate::it's_a_function", "Function"),
+            ("crate::other", "Function"),
+        ]
+        .into_iter()
+        .map(|(fqn, kind)| orbit_search::grep::GrepMatch {
+            row: orbit_search::CorpusRow {
+                id: 1,
+                fqn: fqn.into(),
+                kind: kind.into(),
+                loc: "src/lib.rs:1".into(),
+                end_line: 1,
+                degree: 0,
+                grams: 0,
+            },
+            score: 0.0,
+        })
+        .collect();
+        o.total = o.matches.len();
+        let mut buf = Vec::new();
+        report_results(&mut buf, &o, Some("orbit context")).unwrap();
+        let text = String::from_utf8(buf).unwrap();
+        assert_eq!(
+            text.lines().next().unwrap(),
+            "Candidate context: orbit context -- 'crate::Type::field' 'crate::module' 'crate::it'\\''s_a_function'"
+        );
+        let nodes: Vec<_> = text.lines().filter(|line| line.starts_with("  ")).collect();
+        assert_eq!(nodes.len(), o.matches.len());
+        for (line, candidate) in nodes.iter().zip(&o.matches) {
+            assert!(
+                line.starts_with(&format!("  {}  [", candidate.row.fqn)),
+                "{line}"
+            );
+        }
+
+        let mut buf = Vec::new();
+        report_results(&mut buf, &o, None).unwrap();
+        assert!(
+            !String::from_utf8(buf)
+                .unwrap()
+                .contains("Candidate context:")
+        );
+        o.matches.clear();
+        let mut buf = Vec::new();
+        report_results(&mut buf, &o, Some("orbit context")).unwrap();
+        assert!(
+            !String::from_utf8(buf)
+                .unwrap()
+                .contains("Candidate context:")
+        );
+    }
+
+    #[test]
+    fn context_command_keeps_only_explicit_scope_and_quotes_it() {
+        assert_eq!(context_command("orbit", None, None), "orbit context");
+        assert_eq!(
+            context_command(
+                "glab orbit local",
+                Some(Path::new("my repo's checkout")),
+                Some(Path::new("-graph $db.duckdb")),
+            ),
+            "glab orbit local context --repo='my repo'\\''s checkout' --db='-graph $db.duckdb'"
+        );
     }
 
     #[test]

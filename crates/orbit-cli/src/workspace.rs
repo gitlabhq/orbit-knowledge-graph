@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -117,7 +118,7 @@ pub fn open_indexed(repo: Option<PathBuf>, db: Option<PathBuf>) -> Result<Indexe
     Ok(IndexedRepo { git, client })
 }
 
-fn absolutize(path: PathBuf) -> Result<PathBuf> {
+pub(crate) fn absolutize(path: PathBuf) -> Result<PathBuf> {
     if path.is_absolute() {
         Ok(path)
     } else {
@@ -125,6 +126,55 @@ fn absolutize(path: PathBuf) -> Result<PathBuf> {
             .context("failed to read current directory")?
             .join(path))
     }
+}
+
+pub fn fingerprint_files(
+    root: &Path,
+    files: &[code_graph::v2::FileInventoryEntry],
+) -> BTreeMap<String, (String, std::time::SystemTime)> {
+    files
+        .iter()
+        .filter(|file| file.decision == orbit_utils::fs_stream::Decision::Parse)
+        .filter_map(|file| {
+            let path = root.join(&file.path);
+            let modified = std::fs::metadata(&path).ok()?.modified().ok()?;
+            let content = std::fs::read_to_string(path).ok()?;
+            Some((
+                file.path.clone(),
+                (ontology::migrations::sha256_hex(&content), modified),
+            ))
+        })
+        .collect()
+}
+
+pub fn source_fingerprints(
+    client: &DuckDbClient,
+    project_id: i64,
+) -> Result<BTreeMap<String, String>> {
+    let batches = client.query_arrow_json(
+        "SELECT value FROM _orbit_meta WHERE key = ?1",
+        &[json!(format!("source_fingerprints:{project_id}"))],
+    )?;
+    duckdb_client::string_column(&batches, "value")
+        .first()
+        .map(|value| serde_json::from_str(value).context("invalid source fingerprints"))
+        .unwrap_or_else(|| Ok(BTreeMap::new()))
+}
+
+pub fn store_source_fingerprints(
+    client: &DuckDbClient,
+    project_id: i64,
+    sources: &BTreeMap<String, String>,
+) -> Result<()> {
+    client.execute(
+        "INSERT INTO _orbit_meta (key, value) VALUES (?1, ?2)
+         ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+        &[
+            json!(format!("source_fingerprints:{project_id}")),
+            json!(serde_json::to_string(sources)?),
+        ],
+    )?;
+    Ok(())
 }
 
 const LOCAL_DDL_META_KEY: &str = "local_ddl";
