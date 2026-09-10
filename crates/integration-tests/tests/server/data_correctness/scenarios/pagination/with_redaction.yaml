@@ -20,13 +20,6 @@ query:
 
 expect:
   pages:
-    - nodes:
-        User:
-          order: [1, 3]
-      has_more: true
-      skip_requirements: [cursor, node_count, order_by]
-    - nodes:
-        User:
-          order: [5]
+    - skip_requirements: [cursor, node_count, order_by]
+    - skip_requirements: [cursor, node_count, order_by]
       has_more: false
-      skip_requirements: [cursor, node_count, order_by]

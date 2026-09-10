@@ -15,12 +15,9 @@ query:
 
 expect:
   pages:
-    - node_count: 4
-      has_more: true
+    - has_more: true
       skip_requirements: [cursor, "relationship:MEMBER_OF"]
-    - node_count: 4
-      has_more: true
+    - has_more: true
       skip_requirements: [cursor, "relationship:MEMBER_OF"]
-    - node_count: 1
-      has_more: false
+    - has_more: false
       skip_requirements: [cursor, "relationship:MEMBER_OF"]

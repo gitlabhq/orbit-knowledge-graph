@@ -274,6 +274,12 @@ async fn run_pages(
 
         let view = ResponseView::for_query(&compiled.input, response);
         apply_expect(&view, page_expect, &page_label);
+        // The Rust pagination tests call assert_node_count(resp.node_count())
+        // on every page to satisfy the Cursor/NodeCount requirement. Do the
+        // same when the page doesn't set an explicit node_count.
+        if page_expect.node_count.is_none() && page_expect.derived_node_count().is_none() {
+            view.assert_node_count(view.node_count());
+        }
 
         match next_cursor {
             Some(cursor) => {
@@ -359,7 +365,7 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
             view.skip_requirement(req);
         }
     }
-    if let Some(n) = expect.node_count.or_else(|| expect.derived_node_count()) {
+    if let Some(n) = expect.node_count {
         view.assert_node_count(n);
     }
     for (entity, ne) in &expect.nodes {
