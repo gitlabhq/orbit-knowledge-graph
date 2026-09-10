@@ -42,20 +42,24 @@ stages:
 
   - name: imports
     rules:
-      # import type { a, b } from './source' (type-only)
-      - match: '(import_statement (type) (import_clause (named_imports $$$SPECS:import_specifier)) source: (string (string_fragment $S)))'
-        replace: '(__import (__source @$S) (__source_path @$S) (__type_only) $$$SPECS->__name)'
-
       # import { a, b } from './source'
-      - match: '(import_statement (import_clause (named_imports $$$SPECS:import_specifier)) source: (string (string_fragment $S)))'
+      - match: '(import_statement (import_clause (named_imports $$$SPECS:import_specifier)) source: (string $S:string_fragment))'
         replace: '(__import (__source @$S) (__source_path @$S) $$$SPECS->__name)'
 
       # import * as ns from './source'
-      - match: '(import_statement (import_clause (namespace_import $N:identifier)) source: (string (string_fragment $S)))'
+      - match: '(import_statement (import_clause (namespace_import $N:identifier)) source: (string $S:string_fragment))'
         replace: '(__import (__source @$S) (__source_path @$S) (__name @$N))'
 
       # import defaultExport from './source'
-      - match: '(import_statement (import_clause $N:identifier) source: (string (string_fragment $S)))'
+      - match: '(import_statement (import_clause $N:identifier) source: (string $S:string_fragment))'
+        replace: '(__import (__source @$S) (__source_path @$S) (__name @$N))'
+
+      # import * as ns from './source'
+      - match: '(import_statement (import_clause (namespace_import $N:identifier)) source: (string $S:string_fragment))'
+        replace: '(__import (__source @$S) (__source_path @$S) (__name @$N))'
+
+      # import defaultExport from './source'
+      - match: '(import_statement (import_clause $N:identifier) source: (string $S:string_fragment))'
         replace: '(__import (__source @$S) (__source_path @$S) (__name @$N))'
 
       # Alias: import_specifier has name + alias fields
