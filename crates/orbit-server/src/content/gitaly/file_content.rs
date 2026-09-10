@@ -27,34 +27,48 @@ pub struct GitalyBlobRequest {
 
 type FileKey = (i64, String, String); // (project_id, revision, file_path)
 
+struct BlobFetch {
+    blobs: Vec<ResolvedBlob>,
+    stream_error: Option<String>,
+}
+
+impl BlobFetch {
+    fn complete(blobs: Vec<ResolvedBlob>) -> Self {
+        Self {
+            blobs,
+            stream_error: None,
+        }
+    }
+
+    fn outcome(&self) -> &'static str {
+        if self.stream_error.is_some() {
+            "error"
+        } else {
+            "ok"
+        }
+    }
+}
+
 #[async_trait]
 trait RailsBlobFetcher: Send + Sync {
-    async fn fetch(
-        &self,
-        project_id: i64,
-        revisions: &[String],
-    ) -> Result<Vec<ResolvedBlob>, String>;
+    async fn fetch(&self, project_id: i64, revisions: &[String]) -> Result<BlobFetch, String>;
 }
 
 struct GitlabRailsBlobFetcher(Arc<GitlabClient>);
 
 #[async_trait]
 impl RailsBlobFetcher for GitlabRailsBlobFetcher {
-    async fn fetch(
-        &self,
-        project_id: i64,
-        revisions: &[String],
-    ) -> Result<Vec<ResolvedBlob>, String> {
+    async fn fetch(&self, project_id: i64, revisions: &[String]) -> Result<BlobFetch, String> {
         let stream = self
             .0
             .list_blobs(project_id, revisions)
             .await
             .map_err(|error| error.to_string())?;
         let (blobs, error) = BlobStream::new(stream).drain().await;
-        match error {
-            Some(error) => Err(error.to_string()),
-            None => Ok(blobs),
-        }
+        Ok(BlobFetch {
+            blobs,
+            stream_error: error.map(|error| error.to_string()),
+        })
     }
 }
 
@@ -143,8 +157,8 @@ impl ColumnResolver for GitalyContentService {
                 )
                 .await;
 
-                let blobs = match blobs {
-                    Ok(blobs) => blobs,
+                let fetched = match blobs {
+                    Ok(fetched) => fetched,
                     Err(error) => {
                         warn!(
                             project_id,
@@ -154,8 +168,12 @@ impl ColumnResolver for GitalyContentService {
                         return (vec![], true);
                     }
                 };
-                let results = blobs_to_content(project_id, &keys, blobs);
-                (results, false)
+                if let Some(error) = &fetched.stream_error {
+                    warn!(project_id, %error, "blob stream ended after partial results");
+                }
+                let had_error = fetched.stream_error.is_some();
+                let results = blobs_to_content(project_id, &keys, fetched.blobs);
+                (results, had_error)
             }
         });
 
@@ -190,10 +208,14 @@ async fn fetch_project_blobs(
     transport: GitalyTransport,
     project_id: i64,
     revisions: &[String],
-) -> Result<Vec<ResolvedBlob>, String> {
+) -> Result<BlobFetch, String> {
     if transport == GitalyTransport::RailsHttp {
         let result = rails.fetch(project_id, revisions).await;
-        metrics::record_gitaly_transport("rails_http", if result.is_ok() { "ok" } else { "error" });
+        let outcome = match &result {
+            Ok(fetched) => fetched.outcome(),
+            Err(_) => "error",
+        };
+        metrics::record_gitaly_transport("rails_http", outcome);
         return result;
     }
 
@@ -201,14 +223,26 @@ async fn fetch_project_blobs(
     match proxy.fetch(project_id, revisions).await {
         Ok(blobs) => {
             metrics::record_gitaly_transport("workhorse_ws", "ok");
-            Ok(blobs)
+            Ok(BlobFetch::complete(blobs))
+        }
+        Err(crate::content::gitaly::proxy::ProxyBlobError::Stream { status, partial }) => {
+            metrics::record_gitaly_transport("workhorse_ws", "stream_error");
+            Ok(BlobFetch {
+                blobs: partial,
+                stream_error: Some(status.to_string()),
+            })
         }
         Err(error)
             if transport == GitalyTransport::WorkhorseWsWithFallback
                 && error.allows_rails_fallback() =>
         {
-            metrics::record_gitaly_transport("workhorse_ws", "fallback");
-            rails.fetch(project_id, revisions).await
+            let fallback = rails.fetch(project_id, revisions).await;
+            let outcome = match &fallback {
+                Ok(fetched) if fetched.stream_error.is_none() => "fallback_ok",
+                Ok(_) | Err(_) => "fallback_error",
+            };
+            metrics::record_gitaly_transport("workhorse_ws", outcome);
+            fallback
         }
         Err(error) => {
             metrics::record_gitaly_transport("workhorse_ws", error.outcome());
@@ -299,12 +333,32 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
 
-    use gitlab_client::test_support::{FakeWorkhorse, Preauth, serve};
+    use gitlab_client::test_support::{FakeWorkhorse, Preauth, StreamPlan, serve};
+    use tonic::Code;
 
     use super::*;
 
     struct MockRails {
         calls: AtomicUsize,
+    }
+
+    struct PartialRails;
+
+    #[async_trait]
+    impl RailsBlobFetcher for PartialRails {
+        async fn fetch(
+            &self,
+            _project_id: i64,
+            _revisions: &[String],
+        ) -> Result<BlobFetch, String> {
+            Ok(BlobFetch {
+                blobs: vec![ResolvedBlob {
+                    oid: "first".to_owned(),
+                    data: b"partial content".to_vec(),
+                }],
+                stream_error: Some("oversized second blob".to_owned()),
+            })
+        }
     }
 
     #[async_trait]
@@ -313,9 +367,9 @@ mod tests {
             &self,
             _project_id: i64,
             _revisions: &[String],
-        ) -> Result<Vec<ResolvedBlob>, String> {
+        ) -> Result<BlobFetch, String> {
             self.calls.fetch_add(1, Ordering::SeqCst);
-            Ok(Vec::new())
+            Ok(BlobFetch::complete(Vec::new()))
         }
     }
 
@@ -415,6 +469,56 @@ mod tests {
     fn slice_empty_on_utf8_boundary() {
         // 'é' is 2 bytes (0xC3 0xA9). Slicing at byte 1 lands mid-character.
         assert_eq!(slice_content("é", Some(0), Some(1)), "");
+    }
+
+    #[tokio::test]
+    async fn rails_stream_errors_keep_decoded_partial_results() {
+        let rails: Arc<dyn RailsBlobFetcher> = Arc::new(PartialRails);
+
+        let fetched = fetch_project_blobs(
+            &rails,
+            None,
+            GitalyTransport::RailsHttp,
+            42,
+            &["HEAD:a".to_owned(), "HEAD:b".to_owned()],
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(fetched.blobs.len(), 1);
+        assert_eq!(fetched.blobs[0].data, b"partial content");
+        assert!(fetched.stream_error.is_some());
+    }
+
+    #[tokio::test]
+    async fn proxy_mid_stream_partials_do_not_fallback() {
+        let fake = FakeWorkhorse::start(
+            Preauth::ok("600"),
+            Arc::new(|_| StreamPlan::ServeThenCut {
+                count: 2,
+                code: Code::Internal,
+            }),
+        )
+        .await;
+        let proxy = ProxyBlobService::new(Arc::new(fake.client()), &GitalyProxyConfig::default());
+        let concrete_rails = Arc::new(MockRails {
+            calls: AtomicUsize::new(0),
+        });
+        let rails: Arc<dyn RailsBlobFetcher> = concrete_rails.clone();
+
+        let fetched = fetch_project_blobs(
+            &rails,
+            Some(&proxy),
+            GitalyTransport::WorkhorseWsWithFallback,
+            42,
+            &["HEAD:a".to_owned(), "HEAD:b".to_owned()],
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(fetched.blobs.len(), 1);
+        assert!(fetched.stream_error.is_some());
+        assert_eq!(concrete_rails.calls.load(Ordering::SeqCst), 0);
     }
 
     #[tokio::test]

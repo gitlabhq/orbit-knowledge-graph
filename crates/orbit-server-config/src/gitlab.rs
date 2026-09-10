@@ -31,6 +31,10 @@ fn default_webserver_negative_cache_ttl_secs() -> u64 {
     30
 }
 
+fn default_webserver_negative_cache_capacity() -> u64 {
+    1024
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum GitalyTransport {
@@ -57,6 +61,8 @@ pub struct GitalyProxyConfig {
     pub webserver_channel_idle_timeout_secs: u64,
     #[serde(default = "default_webserver_negative_cache_ttl_secs")]
     pub webserver_negative_cache_ttl_secs: u64,
+    #[serde(default = "default_webserver_negative_cache_capacity")]
+    pub webserver_negative_cache_capacity: u64,
 }
 
 impl Default for GitalyProxyConfig {
@@ -70,6 +76,7 @@ impl Default for GitalyProxyConfig {
                 default_webserver_max_inflight_streams_per_channel(),
             webserver_channel_idle_timeout_secs: default_webserver_channel_idle_timeout_secs(),
             webserver_negative_cache_ttl_secs: default_webserver_negative_cache_ttl_secs(),
+            webserver_negative_cache_capacity: default_webserver_negative_cache_capacity(),
         }
     }
 }
@@ -147,6 +154,7 @@ mod tests {
         );
         assert_eq!(config.gitaly_proxy.webserver_channel_idle_timeout_secs, 60);
         assert_eq!(config.gitaly_proxy.webserver_negative_cache_ttl_secs, 30);
+        assert_eq!(config.gitaly_proxy.webserver_negative_cache_capacity, 1024);
     }
 
     #[test]

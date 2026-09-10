@@ -222,6 +222,41 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn drain_returns_completed_blobs_before_an_oversized_blob_error() {
+        let first_and_second = ListBlobsResponse {
+            blobs: vec![
+                BlobChunk {
+                    oid: "first".into(),
+                    size: 3,
+                    data: b"one".to_vec(),
+                    path: Vec::new(),
+                },
+                BlobChunk {
+                    oid: "second".into(),
+                    size: (MAX_BLOB_SIZE + 1) as i64,
+                    data: b"x".to_vec(),
+                    path: Vec::new(),
+                },
+            ],
+        };
+        let continuation = ListBlobsResponse {
+            blobs: vec![BlobChunk {
+                data: vec![b'x'; MAX_BLOB_SIZE],
+                ..Default::default()
+            }],
+        };
+        let mut data = encode_frame(&first_and_second);
+        data.extend(encode_frame(&continuation));
+        let mut decoder = blob_stream_from_bytes(data);
+
+        let (blobs, error) = decoder.drain().await;
+
+        assert_eq!(blobs.len(), 1);
+        assert_eq!(blobs[0].oid, "first");
+        assert!(error.unwrap().to_string().contains("exceeds maximum size"));
+    }
+
+    #[tokio::test]
     async fn empty_stream_returns_empty() {
         let blobs = collect_blobs(vec![]).await.unwrap();
         assert!(blobs.is_empty());

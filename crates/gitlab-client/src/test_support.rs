@@ -150,6 +150,11 @@ pub enum StreamPlan {
     },
     Reject(Code, &'static str),
     Cut(Code),
+    ServeThenCut {
+        count: usize,
+        code: Code,
+    },
+    ServeResponses(Vec<ListBlobsResponse>),
 }
 
 pub type Director = Arc<dyn Fn(usize) -> StreamPlan + Send + Sync>;
@@ -451,6 +456,29 @@ impl Service<http::Request<tonic::body::Body>> for StubBlobService {
                         });
                         Ok(tonic::Response::new(ReceiverStream::new(rx)))
                     }
+                    StreamPlan::ServeThenCut { count, code } => {
+                        let (tx, rx) = tokio::sync::mpsc::channel(2);
+                        tokio::spawn(async move {
+                            for _ in 0..count {
+                                if tx.send(Ok(blob_response(conn))).await.is_err() {
+                                    return;
+                                }
+                            }
+                            let _ = tx.send(Err(Status::new(code, "stream cut"))).await;
+                        });
+                        Ok(tonic::Response::new(ReceiverStream::new(rx)))
+                    }
+                    StreamPlan::ServeResponses(responses) => {
+                        let (tx, rx) = tokio::sync::mpsc::channel(2);
+                        tokio::spawn(async move {
+                            for response in responses {
+                                if tx.send(Ok(response)).await.is_err() {
+                                    return;
+                                }
+                            }
+                        });
+                        Ok(tonic::Response::new(ReceiverStream::new(rx)))
+                    }
                     StreamPlan::Serve { count, interval } => {
                         let (tx, rx) = tokio::sync::mpsc::channel(1);
                         tokio::spawn(async move {
@@ -515,6 +543,41 @@ impl Service<http::Request<tonic::body::Body>> for StubRepositoryService {
                                 }))
                                 .await;
                             let _ = tx.send(Err(Status::new(code, "stream cut"))).await;
+                        });
+                        Ok(tonic::Response::new(ReceiverStream::new(rx)))
+                    }
+                    StreamPlan::ServeThenCut { count, code } => {
+                        let (tx, rx) = tokio::sync::mpsc::channel(2);
+                        tokio::spawn(async move {
+                            for _ in 0..count {
+                                if tx
+                                    .send(Ok(GetArchiveResponse {
+                                        data: b"partial".to_vec(),
+                                    }))
+                                    .await
+                                    .is_err()
+                                {
+                                    return;
+                                }
+                            }
+                            let _ = tx.send(Err(Status::new(code, "stream cut"))).await;
+                        });
+                        Ok(tonic::Response::new(ReceiverStream::new(rx)))
+                    }
+                    StreamPlan::ServeResponses(responses) => {
+                        let (tx, rx) = tokio::sync::mpsc::channel(2);
+                        tokio::spawn(async move {
+                            for response in responses {
+                                for blob in response.blobs {
+                                    if tx
+                                        .send(Ok(GetArchiveResponse { data: blob.data }))
+                                        .await
+                                        .is_err()
+                                    {
+                                        return;
+                                    }
+                                }
+                            }
                         });
                         Ok(tonic::Response::new(ReceiverStream::new(rx)))
                     }
@@ -1041,6 +1104,26 @@ mod rotation {
         }
         assert_eq!(fake.upgrades(), 1);
         assert_eq!(fake.rpcs(), 3);
+    }
+
+    #[tokio::test]
+    async fn invalidating_an_old_channel_does_not_remove_its_replacement() {
+        let fake = FakeWorkhorse::start(Preauth::ok("600"), serve(1, 0)).await;
+        let client = fake.client();
+
+        let first = client.gitaly_channel(PROJECT_ID).await.unwrap();
+        client.invalidate_gitaly_channel(&first);
+        let second = client.gitaly_channel(PROJECT_ID).await.unwrap();
+        assert!(!Arc::ptr_eq(&first, &second));
+
+        client.invalidate_gitaly_channel(&first);
+        let still_second = client.gitaly_channel(PROJECT_ID).await.unwrap();
+        assert!(Arc::ptr_eq(&second, &still_second));
+
+        client.invalidate_gitaly_channel(&second);
+        let third = client.gitaly_channel(PROJECT_ID).await.unwrap();
+        assert!(!Arc::ptr_eq(&second, &third));
+        assert_eq!(fake.upgrades(), 3);
     }
 
     #[tokio::test]

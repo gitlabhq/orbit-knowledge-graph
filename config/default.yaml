@@ -65,6 +65,7 @@ gitlab:
     webserver_max_inflight_streams_per_channel: 16
     webserver_channel_idle_timeout_secs: 60
     webserver_negative_cache_ttl_secs: 30
+    webserver_negative_cache_capacity: 1024
   # jwt:
   #   signing_key: ""
   #   verifying_key: ""

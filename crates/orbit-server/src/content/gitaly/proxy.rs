@@ -40,6 +40,11 @@ pub(super) enum ProxyBlobError {
     NegativeCached,
     #[error(transparent)]
     Acquire(Arc<ChannelAcquireError>),
+    #[error("proxy blob stream failed after opening: {status}")]
+    Stream {
+        status: Status,
+        partial: Vec<ResolvedBlob>,
+    },
     #[error(transparent)]
     Proxy(#[from] GitalyProxyError),
 }
@@ -52,6 +57,7 @@ impl ProxyBlobError {
                 ChannelAcquireError::SessionAdmission => true,
                 ChannelAcquireError::Proxy(error) => proxy_error_allows_fallback(error),
             },
+            Self::Stream { .. } => false,
             Self::Proxy(error) => proxy_error_allows_fallback(error),
         }
     }
@@ -68,6 +74,7 @@ impl ProxyBlobError {
                 }
                 ChannelAcquireError::Proxy(_) => "connect_error",
             },
+            Self::Stream { .. } => "stream_error",
             Self::Proxy(GitalyProxyError::PolicyDenied { .. }) => "policy_denied",
             Self::Proxy(GitalyProxyError::StreamDeadline) => "stream_deadline",
             Self::Proxy(_) => "rpc_error",
@@ -92,6 +99,7 @@ pub(super) struct ProxyBlobService {
     sessions: Arc<Semaphore>,
     streams: Arc<Semaphore>,
     streams_per_channel: usize,
+    maintenance: tokio::task::AbortHandle,
 }
 
 impl ProxyBlobService {
@@ -111,11 +119,22 @@ impl ProxyBlobService {
             })
             .build();
         let negative = Cache::builder()
-            .max_capacity(config.webserver_channel_cache_capacity)
+            .max_capacity(config.webserver_negative_cache_capacity)
             .time_to_live(Duration::from_secs(
                 config.webserver_negative_cache_ttl_secs,
             ))
             .build();
+        let maintenance_cache = channels.clone();
+        let maintenance_period =
+            Duration::from_secs((config.webserver_channel_idle_timeout_secs / 2).max(1));
+        let maintenance = tokio::spawn(async move {
+            let mut interval = tokio::time::interval(maintenance_period);
+            loop {
+                interval.tick().await;
+                maintenance_cache.run_pending_tasks().await;
+            }
+        })
+        .abort_handle();
 
         Self {
             client,
@@ -124,6 +143,7 @@ impl ProxyBlobService {
             sessions: Arc::new(Semaphore::new(config.webserver_max_sessions)),
             streams: Arc::new(Semaphore::new(config.webserver_max_inflight_streams)),
             streams_per_channel: config.webserver_max_inflight_streams_per_channel,
+            maintenance,
         }
     }
 
@@ -201,10 +221,10 @@ impl ProxyBlobService {
         project_id: i64,
         revisions: &[String],
     ) -> Result<Vec<ResolvedBlob>, ProxyBlobError> {
+        let mut cached = self.channel(project_id).await?;
         let _stream_permit = Arc::clone(&self.streams)
             .try_acquire_owned()
             .map_err(|_| ProxyBlobError::StreamAdmission)?;
-        let mut cached = self.channel(project_id).await?;
         let mut _channel_stream_permit = Some(
             Arc::clone(&cached.streams)
                 .try_acquire_owned()
@@ -239,11 +259,15 @@ impl ProxyBlobService {
             }
         };
 
-        let result = drain_stream(&mut stream).await;
-        if result.is_err() {
+        let (blobs, stream_error) = drain_stream(&mut stream).await;
+        if let Some(status) = stream_error {
             self.evict(project_id, &cached).await;
+            return Err(ProxyBlobError::Stream {
+                status,
+                partial: blobs,
+            });
         }
-        result.map_err(|status| GitalyProxyError::from(status).into())
+        Ok(blobs)
     }
 
     #[cfg(test)]
@@ -253,21 +277,36 @@ impl ProxyBlobService {
     }
 }
 
+impl Drop for ProxyBlobService {
+    fn drop(&mut self) {
+        self.maintenance.abort();
+    }
+}
+
 async fn drain_stream(
     stream: &mut tonic::Streaming<ListBlobsResponse>,
-) -> Result<Vec<ResolvedBlob>, Status> {
+) -> (Vec<ResolvedBlob>, Option<Status>) {
     let mut resolved = Vec::new();
     let mut current: Option<ResolvedBlob> = None;
 
-    while let Some(response) = stream.message().await? {
-        for chunk in response.blobs {
-            append_chunk(&mut resolved, &mut current, chunk)?;
+    loop {
+        match stream.message().await {
+            Ok(Some(response)) => {
+                for chunk in response.blobs {
+                    if let Err(status) = append_chunk(&mut resolved, &mut current, chunk) {
+                        return (resolved, Some(status));
+                    }
+                }
+            }
+            Ok(None) => {
+                if let Some(blob) = current {
+                    resolved.push(blob);
+                }
+                return (resolved, None);
+            }
+            Err(status) => return (resolved, Some(status)),
         }
     }
-    if let Some(blob) = current {
-        resolved.push(blob);
-    }
-    Ok(resolved)
 }
 
 fn append_chunk(
@@ -351,6 +390,79 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn tree_revision_can_expand_to_multiple_blobs() {
+        let response = ListBlobsResponse {
+            blobs: vec![
+                BlobChunk {
+                    oid: "first".to_owned(),
+                    data: b"one".to_vec(),
+                    ..Default::default()
+                },
+                BlobChunk {
+                    oid: "second".to_owned(),
+                    data: b"two".to_vec(),
+                    ..Default::default()
+                },
+            ],
+        };
+        let fake = FakeWorkhorse::start(
+            Preauth::ok("600"),
+            Arc::new(move |_| StreamPlan::ServeResponses(vec![response.clone()])),
+        )
+        .await;
+        let service = ProxyBlobService::new(Arc::new(fake.client()), &config());
+
+        let blobs = service.fetch(42, &["tree".to_owned()]).await.unwrap();
+
+        assert_eq!(blobs.len(), 2);
+        assert_eq!(blobs[0].data, b"one");
+        assert_eq!(blobs[1].data, b"two");
+    }
+
+    #[tokio::test]
+    async fn unresolvable_revision_fails_without_partial_results() {
+        let fake = FakeWorkhorse::start(
+            Preauth::ok("600"),
+            Arc::new(|_| StreamPlan::Reject(Code::Internal, "processing blobs: bad revision")),
+        )
+        .await;
+        let service = ProxyBlobService::new(Arc::new(fake.client()), &config());
+
+        let error = service
+            .fetch(42, &["missing:path".to_owned()])
+            .await
+            .unwrap_err();
+
+        assert!(matches!(error, ProxyBlobError::Proxy(_)));
+        assert!(!error.allows_rails_fallback());
+    }
+
+    #[tokio::test]
+    async fn concurrent_cold_miss_dials_once_and_holds_one_session_permit() {
+        let fake = FakeWorkhorse::start(Preauth::ok("600"), serve(1, 0)).await;
+        let service = Arc::new(ProxyBlobService::new(Arc::new(fake.client()), &config()));
+        let requests = (0..8).map(|_| {
+            let service = Arc::clone(&service);
+            tokio::spawn(async move { service.channel(42).await.unwrap() })
+        });
+
+        let channels = futures::future::join_all(requests)
+            .await
+            .into_iter()
+            .map(Result::unwrap)
+            .collect::<Vec<_>>();
+
+        assert!(
+            channels
+                .iter()
+                .all(|channel| Arc::ptr_eq(channel, &channels[0]))
+        );
+        assert_eq!(fake.upgrades(), 1);
+        assert_eq!(service.sessions.available_permits(), 2);
+        assert_eq!(service.streams.available_permits(), 2);
+    }
+
+    #[tokio::test]
     async fn rotates_before_the_session_expires() {
         let fake = FakeWorkhorse::start(Preauth::ok("2"), serve(1, 0)).await;
         let service = ProxyBlobService::new(Arc::new(fake.client()), &config());
@@ -380,17 +492,21 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn idle_channels_are_evicted() {
+    async fn idle_channels_are_evicted_without_another_cache_operation() {
         let fake = FakeWorkhorse::start(Preauth::ok("600"), serve(1, 0)).await;
         let mut cfg = config();
         cfg.webserver_channel_idle_timeout_secs = 1;
         let service = ProxyBlobService::new(Arc::new(fake.client()), &cfg);
 
         fetch(&service, 42).await.unwrap();
-        tokio::time::sleep(Duration::from_millis(1100)).await;
-        service.run_cache_maintenance().await;
-        fetch(&service, 42).await.unwrap();
+        assert_eq!(service.sessions.available_permits(), 2);
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        while service.sessions.available_permits() != 3 {
+            assert!(tokio::time::Instant::now() < deadline);
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
 
+        fetch(&service, 42).await.unwrap();
         assert_eq!(fake.upgrades(), 2);
     }
 
@@ -411,6 +527,78 @@ mod tests {
 
         assert_eq!(fake.upgrades(), 2);
         assert_eq!(fake.rpcs(), 2);
+    }
+
+    #[tokio::test]
+    async fn mid_stream_failure_returns_partials_without_fallback_and_evicts() {
+        const PLANS: &[StreamPlan] = &[
+            StreamPlan::ServeThenCut {
+                count: 2,
+                code: Code::Internal,
+            },
+            StreamPlan::Serve {
+                count: 1,
+                interval: Duration::ZERO,
+            },
+        ];
+        let fake = FakeWorkhorse::start(Preauth::ok("600"), direct(PLANS)).await;
+        let service = ProxyBlobService::new(Arc::new(fake.client()), &config());
+
+        let error = service
+            .fetch(42, &["HEAD:a".to_owned(), "HEAD:b".to_owned()])
+            .await
+            .unwrap_err();
+
+        assert!(!error.allows_rails_fallback());
+        assert!(matches!(
+            error,
+            ProxyBlobError::Stream { ref partial, .. } if partial.len() == 1
+        ));
+        assert!(service.channels.get(&42).await.is_none());
+        fetch(&service, 42).await.unwrap();
+        assert_eq!(fake.upgrades(), 2);
+    }
+
+    #[tokio::test]
+    async fn eviction_while_fetching_releases_session_after_the_holder_finishes() {
+        let fake = FakeWorkhorse::start(Preauth::ok("600"), serve(1, 500)).await;
+        let service = Arc::new(ProxyBlobService::new(Arc::new(fake.client()), &config()));
+        let active = {
+            let service = Arc::clone(&service);
+            tokio::spawn(async move { fetch(&service, 42).await })
+        };
+        wait_for_rpcs(&fake, 1).await;
+        let cached = service.channels.get(&42).await.unwrap();
+
+        service.evict(42, &cached).await;
+        assert_eq!(service.sessions.available_permits(), 2);
+        drop(cached);
+        active.await.unwrap().unwrap();
+
+        assert_eq!(service.sessions.available_permits(), 3);
+    }
+
+    #[tokio::test]
+    async fn cancelling_a_fetch_releases_global_and_channel_stream_permits() {
+        let fake = FakeWorkhorse::start(Preauth::ok("600"), serve(1, 500)).await;
+        let mut cfg = config();
+        cfg.webserver_max_inflight_streams = 1;
+        cfg.webserver_max_inflight_streams_per_channel = 1;
+        let service = Arc::new(ProxyBlobService::new(Arc::new(fake.client()), &cfg));
+        let active = {
+            let service = Arc::clone(&service);
+            tokio::spawn(async move { fetch(&service, 42).await })
+        };
+        wait_for_rpcs(&fake, 1).await;
+        let cached = service.channels.get(&42).await.unwrap();
+        assert_eq!(service.streams.available_permits(), 0);
+        assert_eq!(cached.streams.available_permits(), 0);
+
+        active.abort();
+        assert!(active.await.unwrap_err().is_cancelled());
+
+        assert_eq!(service.streams.available_permits(), 1);
+        assert_eq!(cached.streams.available_permits(), 1);
     }
 
     #[tokio::test]
