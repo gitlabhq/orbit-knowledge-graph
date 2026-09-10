@@ -42,6 +42,7 @@ Canonical locations for files, schemas, configs, and tools in the knowledge-grap
 | Datalake DDL (ClickHouse) | `fixtures/siphon.sql` |
 | gRPC service definition | `crates/orbit-server/proto/orbit.proto` |
 | Server config structure | `crates/orbit-server-config/src/app.rs` (`AppConfig`), `config/default.yaml` (embedded; declares every setting, no Rust fallbacks) |
+| Object storage config | `config/default.yaml` (`object_storage:` section), `crates/orbit-server-config/src/object_storage.rs`, client in `crates/object-storage/src/lib.rs` |
 | Query settings (timeouts, cache) | `config/default.yaml` (`query:` section), `crates/orbit-server-config/src/query.rs` |
 | Configuration runbook | `docs/dev/runbooks/server_configuration.md` |
 | Local development guide | `docs/dev/local-development.md` |
