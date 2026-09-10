@@ -331,8 +331,7 @@ pub fn resolve(
             // Import-chain following: search target file's imports for one
             // that re-exports this name, then follow the chain.
             let results = follow_import_chain(
-                trees, lang, &reqs, &visible, name_sym, tfi, k_import, k_name, k_alias, name_f,
-                left_f,
+                trees, &reqs, &visible, name_sym, tfi, k_import, k_name, k_alias,
             );
             if results.len() == 1 {
                 let (def_fi, def_node) = results[0];
@@ -678,7 +677,6 @@ pub fn resolve(
 /// Returns a list of (file_index, node) matches. If >1, the name is ambiguous.
 fn follow_import_chain(
     trees: &[Tree],
-    lang: &Lang,
     reqs: &[ImportReq],
     visible: &[FxHashMap<u32, u32>],
     name_sym: u32,
@@ -686,8 +684,6 @@ fn follow_import_chain(
     k_import: u16,
     k_name: u16,
     k_alias: u16,
-    name_f: u16,
-    left_f: u16,
 ) -> Vec<(usize, u32)> {
     let mut results: Vec<(usize, u32)> = Vec::new();
     let mut visited: Vec<(usize, u32)> = Vec::new();

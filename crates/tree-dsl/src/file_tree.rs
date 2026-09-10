@@ -56,7 +56,7 @@ pub fn walk(paths: &[String], lang: &mut Lang, config: &ResolveConfig) -> WalkRe
                 while_kind,
                 mark_kind,
             } => {
-                climb(&mut tree, lang, *while_kind, *mark_kind);
+                climb(&mut tree, *while_kind, *mark_kind);
                 tree.compact();
             }
         }
@@ -159,7 +159,7 @@ fn build_file_tree(paths: &[String], lang: &mut Lang) -> Tree {
 }
 
 /// Walk up from each node with `while_kind`, mark the first ancestor without it.
-fn climb(tree: &mut Tree, lang: &mut Lang, while_kind: u16, mark_kind: u16) {
+fn climb(tree: &mut Tree, while_kind: u16, mark_kind: u16) {
     let mut marked: Vec<u32> = Vec::new();
 
     for i in 0..tree.nodes.len() as u32 {

@@ -1,6 +1,6 @@
 use rustc_hash::FxHashMap;
 
-#[derive(Default, Clone)]
+#[derive(Default)]
 pub struct Interner {
     map: FxHashMap<Box<str>, u32>,
     names: Vec<Box<str>>,
@@ -78,36 +78,5 @@ impl Lang {
         self.fields.resolve(f as u32)
     }
 
-    pub fn fork(&self) -> Lang {
-        Lang {
-            kinds: self.kinds.clone(),
-            fields: self.fields.clone(),
-            syms: Interner::default(),
-        }
-    }
 
-    pub fn sym_remap_into(&self, target: &mut Lang) -> Vec<u32> {
-        for i in 1..=self.kinds.len() {
-            let s = self.kinds.resolve(i);
-            if !s.is_empty() {
-                target.kinds.get(s);
-            }
-        }
-        for i in 1..=self.fields.len() {
-            let s = self.fields.resolve(i);
-            if !s.is_empty() {
-                target.fields.get(s);
-            }
-        }
-        self.sym_remap_syms_only(target)
-    }
-
-    pub fn sym_remap_syms_only(&self, target: &mut Lang) -> Vec<u32> {
-        let mut remap = vec![0u32; self.syms.len() as usize + 1];
-        for i in 1..=self.syms.len() {
-            let s = self.syms.resolve(i);
-            remap[i as usize] = target.syms.get(s);
-        }
-        remap
-    }
 }
