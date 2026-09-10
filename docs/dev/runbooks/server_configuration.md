@@ -18,9 +18,7 @@ Config is loaded in layers, each overriding the previous:
    the key the Helm chart's ConfigMap currently uses; treat it as a partial overlay.
 3. **Overlay file**: the path given with `--config <path>`, otherwise `config/config.yaml` when it exists.
    An explicit `--config` path must exist; the default overlay is optional and Git ignores it.
-   The mise dev tasks pass a generated file built from `config/dev.yaml`, a committed overlay holding
-   local-development tuning (laptop ClickHouse session settings, dev batch sizes) kept out of the
-   deployment defaults.
+   The mise dev tasks pass a generated file built from `config/dev.yaml`; see the layering below.
 4. **Secrets**: Files in `/etc/secrets/` (Kubernetes secret mounts)
 
 There is no environment-variable layer. Every override is a YAML overlay or a secret file.

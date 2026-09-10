@@ -192,7 +192,7 @@ run_checks() {
   local failures=0
   printf "Checking lightweight native-process prerequisites...\n\n"
 
-  for tool in cargo clickhouse ruby; do
+  for tool in cargo clickhouse ruby yq python3; do
     if command -v "$tool" >/dev/null 2>&1; then
       printf "[ok] %s found: %s\n" "$tool" "$(command -v "$tool")"
     else
@@ -341,7 +341,6 @@ EOF
 print_config() {
   cat <<EOF
 GDK_ROOT=$GDK_ROOT
-ENV_FILE=${REPO_ROOT}/.env
 GDK_CLICKHOUSE_HTTP_PORT=$GDK_CLICKHOUSE_HTTP_PORT
 GDK_CLICKHOUSE_TCP_PORT=$GDK_CLICKHOUSE_TCP_PORT
 GDK_POSTGRES_HOST=$GDK_POSTGRES_HOST
