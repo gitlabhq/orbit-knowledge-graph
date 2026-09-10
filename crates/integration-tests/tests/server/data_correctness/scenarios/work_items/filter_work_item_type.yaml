@@ -14,6 +14,7 @@ query:
     MATCH (w:WorkItem) WHERE w.id >= 1 AND w.id <= 10000 AND w.work_item_type IN ['issue', 'task'] RETURN w.title, w.work_item_type LIMIT 10
 
 expect:
+  node_count: 3
   nodes:
     WorkItem:
       count: 3

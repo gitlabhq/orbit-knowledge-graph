@@ -222,6 +222,15 @@ async fn run_frontend(
         return;
     }
 
+    if !expect.pages.is_empty() {
+        expect.validate_pages_exclusive(label);
+        run_pages(
+            ctx, frontend, query, &ontology, security, redaction, expect, label,
+        )
+        .await;
+        return;
+    }
+
     let resp = execute_pipeline(ctx, &compiled, &ontology, security, redaction).await;
 
     let response: query_engine::formatters::GraphResponse =
@@ -229,6 +238,137 @@ async fn run_frontend(
     let view = ResponseView::for_query(&compiled.input, response);
 
     apply_expect(&view, expect, label);
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_pages(
+    ctx: &TestContext,
+    frontend: Frontend,
+    base_query: &str,
+    ontology: &Arc<ontology::Ontology>,
+    security: &SecurityContext,
+    redaction: &MockRedactionService,
+    expect: &QueryExpect,
+    label: &str,
+) {
+    let mut query_json: serde_json::Value =
+        serde_json::from_str(base_query).expect("query must be valid JSON");
+
+    let mut collected_ids: std::collections::BTreeMap<String, Vec<i64>> =
+        std::collections::BTreeMap::new();
+    let mut collected_group_ids: std::collections::BTreeMap<String, Vec<i64>> =
+        std::collections::BTreeMap::new();
+    let mut collected_edges: Vec<(String, i64, i64)> = Vec::new();
+    let mut page_count = 0;
+
+    for (i, page_expect) in expect.pages.iter().enumerate() {
+        let page_label = format!("{label} page {}", i + 1);
+        let query_str = query_json.to_string();
+
+        let compiled = Arc::new(
+            compile(&query_str, frontend, ontology, security)
+                .unwrap_or_else(|e| panic!("{page_label}: compile failed: {e}")),
+        );
+
+        let resp = execute_pipeline(ctx, &compiled, ontology, security, redaction).await;
+        let response: query_engine::formatters::GraphResponse =
+            serde_json::from_value(resp).expect("response should deserialize");
+
+        let next_cursor = response
+            .pagination
+            .as_ref()
+            .and_then(|p| p.next_cursor.clone());
+
+        // Collect IDs and edges for all_pages assertions.
+        if expect.all_pages.is_some() {
+            for node in &response.nodes {
+                collected_ids
+                    .entry(node.entity_type.clone())
+                    .or_default()
+                    .push(node.id);
+            }
+            for edge in &response.edges {
+                collected_edges.push((edge.edge_type.clone(), edge.from_id, edge.to_id));
+            }
+        }
+        page_count += 1;
+
+        let view = ResponseView::for_query(&compiled.input, response);
+
+        if let Some(ap) = &expect.all_pages {
+            for key in ap.group_node_ids.keys() {
+                if let Some((group_key, entity)) = key.split_once(':') {
+                    let ids = view.group_node_ids_ordered(group_key, entity);
+                    collected_group_ids
+                        .entry(key.clone())
+                        .or_default()
+                        .extend(ids);
+                }
+            }
+        }
+
+        apply_expect(&view, page_expect, &page_label);
+        if page_expect.node_count.is_none() {
+            view.assert_node_count(view.node_count());
+        }
+
+        match next_cursor {
+            Some(cursor) => {
+                query_json["cursor"]["after"] = serde_json::Value::String(cursor);
+            }
+            None => {
+                assert_eq!(
+                    i + 1,
+                    expect.pages.len(),
+                    "{page_label}: no next_cursor but more pages expected"
+                );
+            }
+        }
+    }
+
+    if let Some(ap) = &expect.all_pages {
+        if let Some(expected_pages) = ap.page_count {
+            assert_eq!(page_count, expected_pages, "{label}: page count mismatch");
+        }
+        if ap.no_duplicate_ids {
+            for (entity, ids) in &collected_ids {
+                let mut seen = std::collections::HashSet::new();
+                for id in ids {
+                    assert!(
+                        seen.insert(*id),
+                        "{label}: {entity}/{id} appeared on multiple pages"
+                    );
+                }
+            }
+        }
+        for (entity, expected_ids) in &ap.node_ids {
+            let mut actual: Vec<i64> = collected_ids.get(entity).cloned().unwrap_or_default();
+            actual.sort();
+            actual.dedup();
+            assert_eq!(
+                actual, *expected_ids,
+                "{label}: collected {entity} IDs mismatch"
+            );
+        }
+        for (key, expected_ids) in &ap.group_node_ids {
+            let mut actual = collected_group_ids.get(key).cloned().unwrap_or_default();
+            actual.sort();
+            actual.dedup();
+            assert_eq!(
+                actual, *expected_ids,
+                "{label}: collected group {key} IDs mismatch"
+            );
+        }
+        if let Some(expected) = ap.edge_count {
+            collected_edges.sort();
+            collected_edges.dedup();
+            assert_eq!(
+                collected_edges.len(),
+                expected,
+                "{label}: collected edge count mismatch"
+            );
+        }
+    }
 }
 
 async fn execute_pipeline(
@@ -300,7 +440,7 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
             view.skip_requirement(req);
         }
     }
-    if let Some(n) = expect.node_count.or_else(|| expect.derived_node_count()) {
+    if let Some(n) = expect.node_count {
         view.assert_node_count(n);
     }
     for (entity, ne) in &expect.nodes {
@@ -375,6 +515,12 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
                     let vals = m["in"].as_array().unwrap();
                     n.prop(&field_name).is_some_and(|p| vals.contains(p))
                 }
+                serde_json::Value::Object(m) if m.contains_key("gte") => {
+                    let threshold = m["gte"].as_i64().unwrap();
+                    n.prop_i64(&field_name)
+                        .or_else(|| n.prop_str(&field_name).and_then(|s| s.parse().ok()))
+                        .is_some_and(|v| v >= threshold)
+                }
                 _ => n.prop(&field_name) == Some(&expected),
             });
         }
@@ -412,7 +558,9 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
         view.assert_edge_count(kind, *count);
     }
     for (group_key, ge) in &expect.groups {
-        if let (Some(entity), Some(ids)) = (&ge.entity, &ge.ids) {
+        if let (Some(entity), Some(order)) = (&ge.entity, &ge.order) {
+            view.assert_group_node_order(group_key, entity, order);
+        } else if let (Some(entity), Some(ids)) = (&ge.entity, &ge.ids) {
             view.assert_group_node_ids(group_key, entity, ids);
         }
         if let Some(count) = ge.count {

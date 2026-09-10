@@ -1,0 +1,24 @@
+# source: crates/integration-tests/tests/server/data_correctness/aggregation.rs::aggregation_empty_security_context_rejects_at_compile
+description: Empty traversal_paths rejects at compile time
+
+config:
+  security:
+    org_id: 1
+    paths: []
+
+query:
+  json: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
+        {"id": "u", "entity": "User"}
+      ],
+      "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+      "group_by": ["g"],
+      "aggregations": [{"count": "u", "as": "member_count"}],
+      "limit": 10
+    }
+
+expect:
+  compile_error: true

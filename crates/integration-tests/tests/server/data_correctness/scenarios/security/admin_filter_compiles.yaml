@@ -17,6 +17,7 @@ query:
     MATCH (u:User {id: 1, is_admin: false}) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username, u.is_admin LIMIT 10
 
 expect:
+  node_count: 1
   nodes:
     User:
       ids: [1]

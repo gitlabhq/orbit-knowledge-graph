@@ -12,6 +12,7 @@ query:
     }
 
 expect:
+  node_count: 2
   nodes:
     User:
       order: [1, 2]

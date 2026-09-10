@@ -22,6 +22,7 @@ query:
     MATCH (u:User {id: 9001}) RETURN u.username, u.name, u.state LIMIT 10
 
 expect:
+  node_count: 1
   nodes:
     User:
       ids: [9001]

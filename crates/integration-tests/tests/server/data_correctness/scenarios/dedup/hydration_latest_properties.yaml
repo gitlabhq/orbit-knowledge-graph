@@ -1,0 +1,43 @@
+# source: crates/integration-tests/tests/server/data_correctness/dedup.rs::hydration_returns_latest_properties
+description: Hydration returns latest properties for deduped node
+
+config:
+  extra_seed:
+    gl_user:
+      - { id: 9600, username: hydrate_old, name: Old Hydrated, state: active, user_type: human, _version: "2024-01-01 00:00:00", _deleted: false }
+      - { id: 9600, username: hydrate_new, name: New Hydrated, state: active, user_type: human, _version: "2024-06-01 00:00:00", _deleted: false }
+    gl_edge:
+      - { traversal_path: "1/100/1000/", source_id: 9600, source_kind: User, relationship_kind: MEMBER_OF, target_id: 100, target_kind: Group, source_tags: [], target_tags: [], _version: "1970-01-01 00:00:00", _deleted: false }
+  redaction:
+    allow:
+      user: [1, 2, 3, 4, 5, 6, 7, 9001, 9002, 9003, 9010, 9011, 9300, 9301, 9600]
+      group: [100, 101, 102, 200, 300, 900]
+      project: [1000, 1001, 1002, 1003, 1004, 1010, 9000]
+      merge_request: [2000, 2001, 2002, 2003, 2004, 2005, 9100, 9101, 9200, 9201, 9210, 9310, 9311, 9400, 9401, 9500, 9501, 9700, 9701, 9800, 9801, 9900, 9901]
+      note: [3000, 3001, 3002, 3003]
+      work_item: [4000, 4001, 4002, 4003, 4010]
+      milestone: [6000, 6001]
+      label: [7000, 7001, 7002]
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "u", "entity": "User", "node_ids": [9600], "columns": ["username", "name"]},
+        {"id": "g", "entity": "Group"}
+      ],
+      "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+      "limit": 10
+    }
+
+expect:
+  skip_requirements: [node_count]
+  nodes:
+    User:
+      ids: [9600]
+      rows:
+        - { id: 9600, username: hydrate_new, name: New Hydrated }
+  edge_exists:
+    MEMBER_OF:
+      - [9600, 100]

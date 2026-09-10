@@ -16,6 +16,7 @@ query:
     }
 
 expect:
+  node_count: 1
   nodes:
     Project:
       count: 1
