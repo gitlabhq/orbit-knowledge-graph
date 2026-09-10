@@ -49,10 +49,10 @@ pub fn process_file(path: &str, source: &str, lang: &mut Lang, pipeline: &Pipeli
 }
 
 fn classify_methods(tree: &mut Tree, lang: &mut Lang) {
-    let deftype_k = lang.kind_id("__deftype");
-    let func_sym = lang.syms.get("Function");
-    let method_sym = lang.syms.get("Method");
-    let class_sym = lang.syms.get("Class");
+    let deftype_k = lang.lookup_kind("__deftype");
+    let func_sym = lang.syms.intern("Function");
+    let method_sym = lang.syms.intern("Method");
+    let class_sym = lang.syms.intern("Class");
 
     for i in 0..tree.nodes.len() as u32 {
         if tree.kind(i) != deftype_k || tree.sym(i) != func_sym {
@@ -254,62 +254,299 @@ fn update_branch_arm(branch_stack: &mut [BranchFrame], i: u32, cur_block: BlockI
 
 // ── SSA fold ──
 
+struct SsaState {
+    syns: Syns,
+    f: Fields,
+    ssa: SsaEngine,
+    cur_block: BlockId,
+    def_count: u32,
+    import_count: u32,
+    def_nodes: Vec<u32>,
+    import_nodes: Vec<u32>,
+    import_names: Vec<u32>,
+    def_stack: Vec<(Option<u32>, u32, BlockId)>,
+    branch_stack: Vec<BranchFrame>,
+    wildcard_sym: u32,
+    class_sym: u32,
+}
+
+impl SsaState {
+    fn handle_import(&mut self, tree: &Tree, i: u32) {
+        for c in tree.children(i) {
+            if tree.kind(c) == self.syns.name && tree.sym(c) != 0 {
+                let name_sym = tree.sym(c);
+                self.import_count += 1;
+                self.import_nodes.push(c);
+                self.import_names.push(name_sym);
+                self.ssa.write_variable(
+                    name_sym,
+                    self.cur_block,
+                    Value::ImportRef(self.import_count - 1),
+                );
+                for gc in tree.children(c) {
+                    if tree.kind(gc) == self.syns.alias && tree.sym(gc) != 0 {
+                        let alias = tree.sym(gc);
+                        if alias != name_sym {
+                            self.ssa.write_variable(
+                                alias,
+                                self.cur_block,
+                                Value::ImportRef(self.import_count - 1),
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn handle_def(&mut self, tree: &mut Tree, i: u32, node_end: u32) {
+        let name = def_name(tree, i, &self.f, &self.syns);
+        if name != 0 {
+            let parent_block = self.cur_block;
+            self.cur_block = self.ssa.add_sealed_successor(parent_block);
+            let def_idx = self.def_count;
+            self.def_count += 1;
+            self.def_nodes.push(i);
+            self.ssa
+                .write_variable(name, parent_block, Value::LocalDef(def_idx));
+            if let Some(&(Some(parent_def), _, _)) = self.def_stack.last() {
+                tree.add_edge(parent_def, i, EdgeKind::Defines);
+            }
+            if tree.children(i).any(|c| tree.kind(c) == self.syns.scope) {
+                self.def_stack.push((Some(i), node_end, parent_block));
+            }
+        }
+    }
+
+    fn handle_call(&mut self, tree: &mut Tree, i: u32) {
+        let enclosing = self.def_stack.last().and_then(|&(d, _, _)| d).unwrap_or(0);
+        let Some(cn) = tree.child_by_field(i, self.f.callee) else {
+            return;
+        };
+        let callee_k = tree.kind(cn);
+
+        if callee_k == self.syns.member {
+            let obj_node = tree.child_by_field(cn, self.f.object);
+            let obj_sym = obj_node.map(|c| tree.sym(c)).unwrap_or(0);
+            let obj_is_ivar = obj_node.is_some_and(|c| tree.kind(c) == self.syns.ivar);
+            let mem_sym = tree
+                .child_by_field(cn, self.f.member)
+                .map(|c| tree.sym(c))
+                .unwrap_or(0);
+
+            if obj_is_ivar && obj_sym != 0 {
+                if let Some(cls) = find_enclosing_class(tree, i, &self.syns, self.class_sym)
+                    && let Some(ts) = find_ivar_type(tree, cls, obj_sym, &self.syns, &self.f)
+                {
+                    resolve_method_on_type(
+                        tree,
+                        &self.def_nodes,
+                        &mut self.ssa,
+                        ts,
+                        mem_sym,
+                        self.cur_block,
+                        enclosing,
+                        &self.syns,
+                        &self.f,
+                    );
+                }
+            } else if obj_sym != 0 {
+                for pv in &self.ssa.read_variable(obj_sym, self.cur_block) {
+                    match pv {
+                        ParseValue::Type(ts) if *ts != 0 => {
+                            resolve_method_on_type(
+                                tree,
+                                &self.def_nodes,
+                                &mut self.ssa,
+                                *ts,
+                                mem_sym,
+                                self.cur_block,
+                                enclosing,
+                                &self.syns,
+                                &self.f,
+                            );
+                        }
+                        _ => emit_edge_for_value(
+                            tree,
+                            pv,
+                            &self.def_nodes,
+                            &self.import_nodes,
+                            enclosing,
+                        ),
+                    }
+                }
+            }
+        } else if callee_k == self.syns.ivar {
+            let ivar_sym = tree.sym(cn);
+            if ivar_sym != 0 {
+                if let Some(cls) = find_enclosing_class(tree, i, &self.syns, self.class_sym)
+                    && let Some(method) =
+                        find_method(tree, &self.def_nodes, cls, ivar_sym, &self.syns, &self.f)
+                {
+                    tree.add_edge(enclosing, method, EdgeKind::Calls);
+                }
+            }
+        } else {
+            let callee_sym = tree.sym(cn);
+            if callee_sym != 0 {
+                let mut reaching = self.ssa.read_variable(callee_sym, self.cur_block);
+                if reaching.is_empty() {
+                    let wildcard = self.ssa.read_variable(self.wildcard_sym, self.cur_block);
+                    if !wildcard.is_empty() {
+                        for pv in &wildcard {
+                            emit_edge_for_value(
+                                tree,
+                                pv,
+                                &self.def_nodes,
+                                &self.import_nodes,
+                                enclosing,
+                            );
+                        }
+                        reaching = wildcard;
+                    }
+                }
+                for pv in &reaching {
+                    match pv {
+                        ParseValue::Type(ts) if *ts != 0 => {
+                            let target_reaching = self.ssa.read_variable(*ts, self.cur_block);
+                            for cpv in &target_reaching {
+                                if let ParseValue::LocalDef(cdi) = cpv {
+                                    let target = self.def_nodes[*cdi as usize];
+                                    if let Some(callable_sym) =
+                                        synth_child(tree, target, self.syns.callable)
+                                    {
+                                        if let Some(method) = find_method(
+                                            tree,
+                                            &self.def_nodes,
+                                            target,
+                                            callable_sym,
+                                            &self.syns,
+                                            &self.f,
+                                        ) {
+                                            tree.add_edge(enclosing, method, EdgeKind::Calls);
+                                        }
+                                    } else {
+                                        tree.add_edge(enclosing, target, EdgeKind::Calls);
+                                    }
+                                }
+                            }
+                        }
+                        _ => emit_edge_for_value(
+                            tree,
+                            pv,
+                            &self.def_nodes,
+                            &self.import_nodes,
+                            enclosing,
+                        ),
+                    }
+                }
+            }
+        }
+    }
+
+    fn handle_binding(&mut self, tree: &Tree, i: u32, lang: &Lang) {
+        let lhs = tree
+            .child_by_field(i, self.f.left)
+            .or_else(|| tree.child_by_field(i, self.f.name))
+            .or_else(|| {
+                let ident_k = lang.kinds.lookup("identifier") as u16;
+                if ident_k != 0 {
+                    tree.children(i).find(|&c| tree.kind(c) == ident_k)
+                } else {
+                    None
+                }
+            })
+            .map(|c| tree.sym(c))
+            .unwrap_or(0);
+
+        if lhs != 0 {
+            let is_ivar = tree
+                .child_by_field(i, self.f.left)
+                .is_some_and(|n| tree.kind(n) == self.syns.ivar);
+            if !is_ivar {
+                if self.ssa.has_variable_in_block(lhs, self.cur_block) {
+                    self.cur_block = self.ssa.add_sealed_successor(self.cur_block);
+                }
+                let val = classify_rhs(
+                    tree,
+                    i,
+                    &mut self.ssa,
+                    &self.def_nodes,
+                    self.cur_block,
+                    lang,
+                    &self.syns,
+                    &self.f,
+                    self.class_sym,
+                );
+                self.ssa.write_variable(lhs, self.cur_block, val);
+                update_branch_arm(&mut self.branch_stack, i, self.cur_block);
+            }
+        }
+    }
+}
+
 fn ssa_fold(tree: &mut Tree, lang: &mut Lang) {
     let syns = Syns::new(lang);
     let f = Fields::new(lang);
-    let wildcard_sym = lang.syms.get("*");
-    let class_sym = lang.syms.get("Class");
+    let wildcard_sym = lang.syms.intern("*");
+    let class_sym = lang.syms.intern("Class");
 
     let mut ssa = SsaEngine::new();
     let entry = ssa.add_block();
     ssa.seal_block(entry);
-    let mut cur_block = entry;
 
-    let mut def_count: u32 = 0;
-    let mut import_count: u32 = 0;
-    let mut def_nodes: Vec<u32> = Vec::new();
-    let mut import_nodes: Vec<u32> = Vec::new();
-    let mut import_names: Vec<u32> = Vec::new();
-
-    let mut def_stack: Vec<(Option<u32>, u32, BlockId)> = vec![(None, u32::MAX, entry)];
-
-    let mut branch_stack: Vec<BranchFrame> = Vec::new();
+    let mut state = SsaState {
+        syns,
+        f,
+        ssa,
+        cur_block: entry,
+        def_count: 0,
+        import_count: 0,
+        def_nodes: Vec::new(),
+        import_nodes: Vec::new(),
+        import_names: Vec::new(),
+        def_stack: vec![(None, u32::MAX, entry)],
+        branch_stack: Vec::new(),
+        wildcard_sym,
+        class_sym,
+    };
 
     let mut i = 0u32;
     let len = tree.nodes.len() as u32;
 
     while i < len {
-        let n = &tree.nodes[i as usize];
-        if n.dead {
-            i += n.size.max(1);
+        let (dead, k, node_size, parent) = {
+            let n = &tree.nodes[i as usize];
+            (n.dead, n.kind, n.size, n.parent)
+        };
+        if dead {
+            i += node_size.max(1);
             continue;
         }
-        let k = n.kind;
-        let node_end = i + n.size;
+        let node_end = i + node_size;
 
-        // Pop finished scopes and branches.
-        while def_stack.len() > 1 {
-            let &(_, end, saved) = def_stack.last().unwrap();
+        while state.def_stack.len() > 1 {
+            let &(_, end, saved) = state.def_stack.last().unwrap();
             if i >= end {
-                def_stack.pop();
-                cur_block = saved;
+                state.def_stack.pop();
+                state.cur_block = saved;
             } else {
                 break;
             }
         }
-        while let Some(br) = branch_stack.last() {
+        while let Some(br) = state.branch_stack.last() {
             if i >= br.end {
                 let mut preds = br.exit_blocks.clone();
                 if !br.exhaustive {
                     preds.push(br.pre_block);
                 }
                 let branch_end = br.end;
-                cur_block = ssa.add_sealed_join(preds);
-                branch_stack.pop();
-                if let Some(outer) = branch_stack.last_mut() {
+                state.cur_block = state.ssa.add_sealed_join(preds);
+                state.branch_stack.pop();
+                if let Some(outer) = state.branch_stack.last_mut() {
                     for (idx, &(arm_start, arm_end)) in outer.arms.iter().enumerate() {
                         if branch_end > arm_start && branch_end <= arm_end {
-                            outer.exit_blocks[idx] = cur_block;
+                            outer.exit_blocks[idx] = state.cur_block;
                             break;
                         }
                     }
@@ -318,214 +555,68 @@ fn ssa_fold(tree: &mut Tree, lang: &mut Lang) {
                 break;
             }
         }
-        if let Some(br) = branch_stack.last() {
+        if let Some(br) = state.branch_stack.last() {
             for (idx, &(arm_start, arm_end)) in br.arms.iter().enumerate() {
                 if i >= arm_start && i < arm_end {
-                    cur_block = br.entry_blocks[idx];
+                    state.cur_block = br.entry_blocks[idx];
                     break;
                 }
             }
         }
 
-        // ── import ──
-        if k == syns.import {
-            for c in tree.children(i) {
-                if tree.kind(c) == syns.name && tree.sym(c) != 0 {
-                    let name_sym = tree.sym(c);
-                    import_count += 1;
-                    import_nodes.push(c);
-                    import_names.push(name_sym);
-                    ssa.write_variable(name_sym, cur_block, Value::ImportRef(import_count - 1));
-                    for gc in tree.children(c) {
-                        if tree.kind(gc) == syns.alias && tree.sym(gc) != 0 {
-                            let alias = tree.sym(gc);
-                            if alias != name_sym {
-                                ssa.write_variable(
-                                    alias,
-                                    cur_block,
-                                    Value::ImportRef(import_count - 1),
-                                );
-                            }
-                        }
-                    }
-                }
-            }
-            i += n.size.max(1);
+        if k == state.syns.import {
+            state.handle_import(tree, i);
+            i += node_size.max(1);
             continue;
         }
 
-        // ── def ──
-        if synth_child(tree, i, syns.deftype).is_some() {
-            let name = def_name(tree, i, &f, &syns);
-            if name != 0 {
-                let parent_block = cur_block;
-                cur_block = ssa.add_sealed_successor(parent_block);
-                let def_idx = def_count;
-                def_count += 1;
-                def_nodes.push(i);
-                ssa.write_variable(name, parent_block, Value::LocalDef(def_idx));
-                if let Some(&(Some(parent_def), _, _)) = def_stack.last() {
-                    tree.add_edge(parent_def, i, EdgeKind::Defines);
-                }
-                if tree.children(i).any(|c| tree.kind(c) == syns.scope) {
-                    def_stack.push((Some(i), node_end, parent_block));
-                }
-            }
+        if synth_child(tree, i, state.syns.deftype).is_some() {
+            state.handle_def(tree, i, node_end);
             i += 1;
             continue;
         }
 
-        // ── call ──
-        if k == syns.call {
-            let enclosing = def_stack.last().and_then(|&(d, _, _)| d).unwrap_or(0);
-            if let Some(cn) = tree.child_by_field(i, f.callee) {
-                let callee_k = tree.kind(cn);
-
-                if callee_k == syns.member {
-                    // a.b()
-                    let obj_node = tree.child_by_field(cn, f.object);
-                    let obj_sym = obj_node.map(|c| tree.sym(c)).unwrap_or(0);
-                    let obj_is_ivar = obj_node.is_some_and(|c| tree.kind(c) == syns.ivar);
-                    let mem_sym = tree
-                        .child_by_field(cn, f.member)
-                        .map(|c| tree.sym(c))
-                        .unwrap_or(0);
-
-                    if obj_is_ivar && obj_sym != 0 {
-                        if let Some(cls) = find_enclosing_class(tree, i, &syns, class_sym)
-                            && let Some(ts) = find_ivar_type(tree, cls, obj_sym, &syns, &f)
-                        {
-                            resolve_method_on_type(
-                                tree, &def_nodes, &mut ssa, ts, mem_sym, cur_block, enclosing,
-                                &syns, &f,
-                            );
-                        }
-                    } else if obj_sym != 0 {
-                        for pv in &ssa.read_variable(obj_sym, cur_block) {
-                            match pv {
-                                ParseValue::Type(ts) if *ts != 0 => {
-                                    resolve_method_on_type(
-                                        tree, &def_nodes, &mut ssa, *ts, mem_sym, cur_block,
-                                        enclosing, &syns, &f,
-                                    );
-                                }
-                                _ => emit_edge_for_value(
-                                    tree,
-                                    pv,
-                                    &def_nodes,
-                                    &import_nodes,
-                                    enclosing,
-                                ),
-                            }
-                        }
-                    }
-                } else if callee_k == syns.ivar {
-                    // self.x()
-                    let ivar_sym = tree.sym(cn);
-                    if ivar_sym != 0 {
-                        if let Some(cls) = find_enclosing_class(tree, i, &syns, class_sym)
-                            && let Some(method) =
-                                find_method(tree, &def_nodes, cls, ivar_sym, &syns, &f)
-                        {
-                            tree.add_edge(enclosing, method, EdgeKind::Calls);
-                        }
-                    }
-                } else {
-                    // f()
-                    let callee_sym = tree.sym(cn);
-                    if callee_sym != 0 {
-                        let mut reaching = ssa.read_variable(callee_sym, cur_block);
-                        // Wildcard fallback
-                        if reaching.is_empty() {
-                            let wildcard = ssa.read_variable(wildcard_sym, cur_block);
-                            if !wildcard.is_empty() {
-                                for pv in &wildcard {
-                                    emit_edge_for_value(
-                                        tree,
-                                        pv,
-                                        &def_nodes,
-                                        &import_nodes,
-                                        enclosing,
-                                    );
-                                }
-                                reaching = wildcard;
-                            }
-                        }
-                        for pv in &reaching {
-                            match pv {
-                                ParseValue::Type(ts) if *ts != 0 => {
-                                    let target_reaching = ssa.read_variable(*ts, cur_block);
-                                    for cpv in &target_reaching {
-                                        if let ParseValue::LocalDef(cdi) = cpv {
-                                            let target = def_nodes[*cdi as usize];
-                                            if let Some(callable_sym) =
-                                                synth_child(tree, target, syns.callable)
-                                            {
-                                                if let Some(method) = find_method(
-                                                    tree,
-                                                    &def_nodes,
-                                                    target,
-                                                    callable_sym,
-                                                    &syns,
-                                                    &f,
-                                                ) {
-                                                    tree.add_edge(
-                                                        enclosing,
-                                                        method,
-                                                        EdgeKind::Calls,
-                                                    );
-                                                }
-                                            } else {
-                                                tree.add_edge(enclosing, target, EdgeKind::Calls);
-                                            }
-                                        }
-                                    }
-                                }
-                                _ => emit_edge_for_value(
-                                    tree,
-                                    pv,
-                                    &def_nodes,
-                                    &import_nodes,
-                                    enclosing,
-                                ),
-                            }
-                        }
-                    }
-                }
-            }
+        if k == state.syns.call {
+            state.handle_call(tree, i);
             i += 1;
             continue;
         }
 
-        // ── standalone member (not callee of __call) ──
-        if k == syns.member {
-            let parent_k = if n.parent != NONE {
-                tree.nodes[n.parent as usize].kind
+        if k == state.syns.member {
+            let parent_k = if parent != NONE {
+                tree.nodes[parent as usize].kind
             } else {
                 0
             };
-            if parent_k != syns.call {
+            if parent_k != state.syns.call {
                 let obj_sym = tree
-                    .child_by_field(i, f.object)
+                    .child_by_field(i, state.f.object)
                     .map(|c| tree.sym(c))
                     .unwrap_or(0);
                 let mem_sym = tree
-                    .child_by_field(i, f.member)
+                    .child_by_field(i, state.f.member)
                     .map(|c| tree.sym(c))
                     .unwrap_or(0);
-                let enclosing = def_stack.last().and_then(|&(d, _, _)| d).unwrap_or(0);
+                let enclosing = state.def_stack.last().and_then(|&(d, _, _)| d).unwrap_or(0);
                 if obj_sym != 0 {
-                    for pv in &ssa.read_variable(obj_sym, cur_block) {
+                    for pv in &state.ssa.read_variable(obj_sym, state.cur_block) {
                         match pv {
                             ParseValue::ImportRef(ii) => {
-                                if let Some(&imp_node) = import_nodes.get(*ii as usize) {
+                                if let Some(&imp_node) = state.import_nodes.get(*ii as usize) {
                                     tree.add_edge(enclosing, imp_node, EdgeKind::Imports);
                                 }
                             }
                             ParseValue::Type(ts) if *ts != 0 && mem_sym != 0 => {
                                 resolve_method_on_type(
-                                    tree, &def_nodes, &mut ssa, *ts, mem_sym, cur_block, enclosing,
-                                    &syns, &f,
+                                    tree,
+                                    &state.def_nodes,
+                                    &mut state.ssa,
+                                    *ts,
+                                    mem_sym,
+                                    state.cur_block,
+                                    enclosing,
+                                    &state.syns,
+                                    &state.f,
                                 );
                             }
                             _ => {}
@@ -537,56 +628,29 @@ fn ssa_fold(tree: &mut Tree, lang: &mut Lang) {
             continue;
         }
 
-        if k == syns.ivar && n.parent != NONE && tree.nodes[n.parent as usize].kind != syns.call {
+        if k == state.syns.ivar
+            && parent != NONE
+            && tree.nodes[parent as usize].kind != state.syns.call
+        {
             i += 1;
             continue;
         }
 
-        // ── binding ──
-        if tree.children(i).any(|c| tree.kind(c) == syns.binding) {
-            let lhs = tree
-                .child_by_field(i, f.left)
-                .or_else(|| tree.child_by_field(i, f.name))
-                .or_else(|| {
-                    let ident_k = lang.kinds.lookup("identifier") as u16;
-                    if ident_k != 0 {
-                        tree.children(i).find(|&c| tree.kind(c) == ident_k)
-                    } else {
-                        None
-                    }
-                })
-                .map(|c| tree.sym(c))
-                .unwrap_or(0);
-
-            if lhs != 0 {
-                let is_ivar = tree
-                    .child_by_field(i, f.left)
-                    .is_some_and(|n| tree.kind(n) == syns.ivar);
-                if !is_ivar {
-                    if ssa.has_variable_in_block(lhs, cur_block) {
-                        cur_block = ssa.add_sealed_successor(cur_block);
-                    }
-                    let val = classify_rhs(
-                        tree, i, &mut ssa, &def_nodes, cur_block, lang, &syns, &f, class_sym,
-                    );
-                    ssa.write_variable(lhs, cur_block, val);
-                    update_branch_arm(&mut branch_stack, i, cur_block);
-                }
-            }
+        if tree.children(i).any(|c| tree.kind(c) == state.syns.binding) {
+            state.handle_binding(tree, i, lang);
             i += 1;
             continue;
         }
 
-        // ── branch / loop / scope / decorator ──
-        if tree.children(i).any(|c| tree.kind(c) == syns.branch) {
-            let pre = cur_block;
+        if tree.children(i).any(|c| tree.kind(c) == state.syns.branch) {
+            let pre = state.cur_block;
             let arm_kinds = find_arm_children(tree, i, lang);
             let arm_blocks: Vec<BlockId> = arm_kinds
                 .iter()
-                .map(|_| ssa.add_sealed_successor(pre))
+                .map(|_| state.ssa.add_sealed_successor(pre))
                 .collect();
             let arm_exits = arm_blocks.clone();
-            branch_stack.push(BranchFrame {
+            state.branch_stack.push(BranchFrame {
                 arms: arm_kinds,
                 entry_blocks: arm_blocks,
                 exit_blocks: arm_exits,
@@ -597,19 +661,19 @@ fn ssa_fold(tree: &mut Tree, lang: &mut Lang) {
             i += 1;
             continue;
         }
-        if tree.children(i).any(|c| tree.kind(c) == syns.r#loop) {
-            let (h, _) = ssa.begin_loop(cur_block);
-            cur_block = ssa.finish_loop(h, cur_block);
+        if tree.children(i).any(|c| tree.kind(c) == state.syns.r#loop) {
+            let (h, _) = state.ssa.begin_loop(state.cur_block);
+            state.cur_block = state.ssa.finish_loop(h, state.cur_block);
             i += 1;
             continue;
         }
-        if tree.children(i).any(|c| tree.kind(c) == syns.scope)
-            && synth_child(tree, i, syns.deftype).is_none()
+        if tree.children(i).any(|c| tree.kind(c) == state.syns.scope)
+            && synth_child(tree, i, state.syns.deftype).is_none()
         {
             i += 1;
             continue;
         }
-        if k == syns.decorator || k == syns.supertype {
+        if k == state.syns.decorator || k == state.syns.supertype {
             i += 1;
             continue;
         }
@@ -617,34 +681,32 @@ fn ssa_fold(tree: &mut Tree, lang: &mut Lang) {
         i += 1;
     }
 
-    // Drain remaining branches.
-    while let Some(br) = branch_stack.last() {
+    while let Some(br) = state.branch_stack.last() {
         let mut preds = br.exit_blocks.clone();
         if !br.exhaustive {
             preds.push(br.pre_block);
         }
-        let _ = ssa.add_sealed_join(preds);
-        branch_stack.pop();
+        let _ = state.ssa.add_sealed_join(preds);
+        state.branch_stack.pop();
     }
 
-    ssa.seal_remaining();
-    ssa.remove_redundant_phi_sccs();
+    state.ssa.seal_remaining();
+    state.ssa.remove_redundant_phi_sccs();
 
-    // Decorator/supertype meta-edges.
     let mut meta_edges: Vec<(u32, u32)> = Vec::new();
-    for &def_node in &def_nodes {
+    for &def_node in &state.def_nodes {
         let syms: Vec<u32> = tree
             .children(def_node)
             .filter(|&c| {
                 let ck = tree.kind(c);
-                (ck == syns.supertype || ck == syns.decorator) && tree.sym(c) != 0
+                (ck == state.syns.supertype || ck == state.syns.decorator) && tree.sym(c) != 0
             })
             .map(|c| tree.sym(c))
             .collect();
         for sym in syms {
-            for pv in &ssa.read_variable(sym, entry) {
+            for pv in &state.ssa.read_variable(sym, entry) {
                 if let ParseValue::LocalDef(di) = pv {
-                    meta_edges.push((def_node, def_nodes[*di as usize]));
+                    meta_edges.push((def_node, state.def_nodes[*di as usize]));
                 }
             }
         }

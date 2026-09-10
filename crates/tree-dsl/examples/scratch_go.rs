@@ -142,10 +142,10 @@ func main() {
             &mut lang,
             "(selector_expression operand: $O field: $F)",
             |c| Out::Retag {
-                kind: c.kind("__member"),
+                kind: c.intern_kind("__member"),
                 fields: vec![
-                    (c.slot("O"), c.field("object")),
-                    (c.slot("F"), c.field("member")),
+                    (c.slot("O"), c.intern_field("object")),
+                    (c.slot("F"), c.intern_field("member")),
                 ],
             },
         ),
@@ -154,10 +154,10 @@ func main() {
             &mut lang,
             "(call_expression function: $F arguments: $A)",
             |c| Out::Retag {
-                kind: c.kind("__call"),
+                kind: c.intern_kind("__call"),
                 fields: vec![
-                    (c.slot("F"), c.field("callee")),
-                    (c.slot("A"), c.field("args")),
+                    (c.slot("F"), c.intern_field("callee")),
+                    (c.slot("A"), c.intern_field("args")),
                 ],
             },
         ),
@@ -173,10 +173,10 @@ func main() {
     let path_f = lang.fields.lookup("path") as u16;
     let name_f = lang.fields.lookup("name") as u16;
 
-    let k_import = lang.kind("__import");
-    let k_source = lang.kind("__source");
-    let k_name = lang.kind("__name");
-    let k_alias = lang.kind("__alias");
+    let k_import = lang.intern_kind("__import");
+    let k_source = lang.intern_kind("__source");
+    let k_name = lang.intern_kind("__name");
+    let k_alias = lang.intern_kind("__alias");
 
     let import_decls: Vec<u32> = (0..tree.nodes.len() as u32)
         .filter(|&i| tree.nodes[i as usize].kind == import_decl)
@@ -208,7 +208,7 @@ func main() {
             // Go import name = last segment of path
             let source_str = lang.syms.resolve(source_sym).to_string();
             let pkg_name = source_str.rsplit('/').next().unwrap_or(&source_str);
-            let name_sym = lang.syms.get(pkg_name);
+            let name_sym = lang.syms.intern(pkg_name);
 
             let mut b = SubTree::new(k_import).leaf(k_source, source_sym);
             if alias_sym != 0 {
@@ -238,9 +238,9 @@ func main() {
     let result_f = lang.fields.lookup("result") as u16;
     let type_f = lang.fields.lookup("type") as u16;
 
-    let k_deftype = lang.kind("__deftype");
-    let k_rettype = lang.kind("__return_type");
-    let k_receiver = lang.kind("__receiver");
+    let k_deftype = lang.intern_kind("__deftype");
+    let k_rettype = lang.intern_kind("__return_type");
+    let k_receiver = lang.intern_kind("__receiver");
 
     for i in 0..tree.nodes.len() as u32 {
         let n = &tree.nodes[i as usize];
@@ -266,7 +266,7 @@ func main() {
                 Node {
                     kind: k_deftype,
                     flags: NAMED | SYNTH,
-                    sym: lang.syms.get(label),
+                    sym: lang.syms.intern(label),
                     size: 1,
                     ..Default::default()
                 },
@@ -283,7 +283,7 @@ func main() {
                 Node {
                     kind: k_deftype,
                     flags: NAMED | SYNTH,
-                    sym: lang.syms.get("Function"),
+                    sym: lang.syms.intern("Function"),
                     size: 1,
                     ..Default::default()
                 },
@@ -326,7 +326,7 @@ func main() {
                 Node {
                     kind: k_deftype,
                     flags: NAMED | SYNTH,
-                    sym: lang.syms.get("Method"),
+                    sym: lang.syms.intern("Method"),
                     size: 1,
                     ..Default::default()
                 },
@@ -363,7 +363,7 @@ func main() {
                 Node {
                     kind: k_deftype,
                     flags: NAMED | SYNTH,
-                    sym: lang.syms.get("Variable"),
+                    sym: lang.syms.intern("Variable"),
                     size: 1,
                     ..Default::default()
                 },

@@ -172,11 +172,11 @@ fn from_tree_sitter(
         let id = nodes.len() as u32;
         let parent = parent_stack.last().copied().unwrap_or(NONE);
 
-        let kind = lang.kind(ts.kind());
-        let field = cursor.field_name().map_or(0, |f| lang.field(f));
+        let kind = lang.intern_kind(ts.kind());
+        let field = cursor.field_name().map_or(0, |f| lang.intern_field(f));
         let sym = if ts.is_named() {
             let text = &source[ts.start_byte()..ts.end_byte()];
-            lang.syms.get(text)
+            lang.syms.intern(text)
         } else {
             0
         };
@@ -224,7 +224,7 @@ fn from_tree_sitter(
     let mut tree = Tree::from_nodes(nodes);
     tree.label = label.to_string();
     if !label.is_empty() && !tree.nodes.is_empty() {
-        tree.nodes[0].sym = lang.syms.get(label);
+        tree.nodes[0].sym = lang.syms.intern(label);
     }
     tree
 }

@@ -179,7 +179,7 @@ match x:
         Rewrite::new(&mut lang, "(aliased_import alias: $A)", |c| Out::Append {
             under: 0,
             each: c.slot("A"),
-            kind: c.kind("__alias"),
+            kind: c.intern_kind("__alias"),
             tf: Tf::Id,
         }),
         // self.x / cls.x → __ivar
@@ -200,8 +200,8 @@ match x:
             |c| Out::Append {
                 under: 0,
                 each: c.slot("SUPERS"),
-                kind: c.kind("__supertype"),
-                tf: Tf::Field(c.field("function")),
+                kind: c.intern_kind("__supertype"),
+                tf: Tf::Field(c.intern_field("function")),
             },
         ),
         // decorated_definition: hoist decorators onto the inner def/class
@@ -211,7 +211,7 @@ match x:
             |c| Out::Append {
                 under: c.slot("D"),
                 each: c.slot("DECOS"),
-                kind: c.kind("__decorator"),
+                kind: c.intern_kind("__decorator"),
                 tf: Tf::Strip("@".into()),
             },
         ),
@@ -222,7 +222,7 @@ match x:
             |c| Out::Append {
                 under: 0,
                 each: c.slot("N"),
-                kind: c.kind("__callable"),
+                kind: c.intern_kind("__callable"),
                 tf: Tf::Const("__call__"),
             },
         ),
@@ -234,19 +234,19 @@ match x:
     let stage2 = vec![
         Rewrite::new(&mut lang, "(attribute object: $O attribute: $M)", |c| {
             Out::Retag {
-                kind: c.kind("__member"),
+                kind: c.intern_kind("__member"),
                 fields: vec![
-                    (c.slot("O"), c.field("object")),
-                    (c.slot("M"), c.field("member")),
+                    (c.slot("O"), c.intern_field("object")),
+                    (c.slot("M"), c.intern_field("member")),
                 ],
             }
         }),
         Rewrite::new(&mut lang, "(call function: $F arguments: $A)", |c| {
             Out::Retag {
-                kind: c.kind("__call"),
+                kind: c.intern_kind("__call"),
                 fields: vec![
-                    (c.slot("F"), c.field("callee")),
-                    (c.slot("A"), c.field("args")),
+                    (c.slot("F"), c.intern_field("callee")),
+                    (c.slot("A"), c.intern_field("args")),
                 ],
             }
         }),
@@ -266,10 +266,10 @@ match x:
     let mname_f = lang.fields.lookup("module_name") as u16;
     let name_f = lang.fields.lookup("name") as u16;
 
-    let k_import = lang.kind("__import");
-    let k_source = lang.kind("__source");
-    let k_name = lang.kind("__name");
-    let k_alias = lang.kind("__alias");
+    let k_import = lang.intern_kind("__import");
+    let k_source = lang.intern_kind("__source");
+    let k_name = lang.intern_kind("__name");
+    let k_alias = lang.intern_kind("__alias");
 
     let imports: Vec<u32> = (0..tree.nodes.len() as u32)
         .filter(|&i| {
@@ -281,7 +281,7 @@ match x:
     for &imp in &imports {
         let kind = tree.nodes[imp as usize].kind;
         let source_sym = if kind == future_imp {
-            lang.syms.get("__future__")
+            lang.syms.intern("__future__")
         } else if kind == import_from {
             tree.child_by_field(imp, mname_f)
                 .map(|c| tree.sym(c))
@@ -297,7 +297,7 @@ match x:
             let cn = &tree.nodes[c as usize];
             let ck = cn.kind & !SYNTH;
             if ck == wildcard_k {
-                names.push((lang.syms.get("*"), 0));
+                names.push((lang.syms.intern("*"), 0));
             } else if cn.field == name_f {
                 let alias = tree
                     .children(c)
@@ -334,8 +334,8 @@ match x:
     let name_f2 = lang.fields.lookup("name") as u16;
     let decorator_k = lang.kinds.lookup("__decorator") as u16 | SYNTH;
 
-    let k_deftype = lang.kind("__deftype");
-    let k_rettype = lang.kind("__return_type");
+    let k_deftype = lang.intern_kind("__deftype");
+    let k_rettype = lang.intern_kind("__return_type");
 
     for i in 0..tree.nodes.len() as u32 {
         let n = &tree.nodes[i as usize];
@@ -345,7 +345,7 @@ match x:
         let k = n.kind;
 
         if k == class_def {
-            let dt_sym = lang.syms.get("Class");
+            let dt_sym = lang.syms.intern("Class");
             tree.append(
                 i,
                 Node {
@@ -375,7 +375,7 @@ match x:
             };
             let has_decorator = tree.children(i).any(|c| tree.kind(c) == decorator_k);
             let label = if is_method { "Method" } else { "Function" };
-            let dt_sym = lang.syms.get(label);
+            let dt_sym = lang.syms.intern(label);
             tree.append(
                 i,
                 Node {
@@ -422,15 +422,15 @@ match x:
     let finally_k = lang.kinds.lookup("finally_clause") as u16;
     let case_k = lang.kinds.lookup("case_clause") as u16;
 
-    let k_branch = lang.kind("__branch");
-    let k_loop = lang.kind("__loop");
-    let k_scope = lang.kind("__scope");
-    let k_binding = lang.kind("__binding");
-    let k_arm = lang.kind("__arm");
-    let k_exhaustive = lang.kind("__exhaustive");
-    let k_lhs = lang.kind("__lhs");
-    let k_rhs = lang.kind("__rhs");
-    let k_type = lang.kind("__type_ann");
+    let k_branch = lang.intern_kind("__branch");
+    let k_loop = lang.intern_kind("__loop");
+    let k_scope = lang.intern_kind("__scope");
+    let k_binding = lang.intern_kind("__binding");
+    let k_arm = lang.intern_kind("__arm");
+    let k_exhaustive = lang.intern_kind("__exhaustive");
+    let k_lhs = lang.intern_kind("__lhs");
+    let k_rhs = lang.intern_kind("__rhs");
+    let k_type = lang.intern_kind("__type_ann");
 
     let left_f = lang.fields.lookup("left") as u16;
     let right_f = lang.fields.lookup("right") as u16;
@@ -454,35 +454,35 @@ match x:
         if k == if_k {
             let has_else = tree.children(i).any(|c| tree.kind(c) == else_k);
             let mut b = SubTree::new(k_branch);
-            b = b.leaf(k_arm, lang.syms.get("body"));
+            b = b.leaf(k_arm, lang.syms.intern("body"));
             // elif and else arms
             for c in tree.children(i) {
                 let ck = tree.kind(c);
                 if ck == elif_k {
-                    b = b.leaf(k_arm, lang.syms.get("elif"));
+                    b = b.leaf(k_arm, lang.syms.intern("elif"));
                 }
                 if ck == else_k {
-                    b = b.leaf(k_arm, lang.syms.get("else"));
+                    b = b.leaf(k_arm, lang.syms.intern("else"));
                 }
             }
             if has_else {
-                b = b.leaf(k_exhaustive, lang.syms.get("true"));
+                b = b.leaf(k_exhaustive, lang.syms.intern("true"));
             }
             tree.insert_before(i + 1, &b.build());
         }
 
         if k == try_k {
-            let mut b = SubTree::new(k_branch).leaf(k_arm, lang.syms.get("body"));
+            let mut b = SubTree::new(k_branch).leaf(k_arm, lang.syms.intern("body"));
             for c in tree.children(i) {
                 let ck = tree.kind(c);
                 if ck == except_k {
-                    b = b.leaf(k_arm, lang.syms.get("except"));
+                    b = b.leaf(k_arm, lang.syms.intern("except"));
                 }
                 if ck == finally_k {
-                    b = b.leaf(k_arm, lang.syms.get("finally"));
+                    b = b.leaf(k_arm, lang.syms.intern("finally"));
                 }
             }
-            b = b.leaf(k_exhaustive, lang.syms.get("true"));
+            b = b.leaf(k_exhaustive, lang.syms.intern("true"));
             tree.insert_before(i + 1, &b.build());
         }
 
@@ -491,7 +491,7 @@ match x:
             let mut has_wildcard = false;
             for c in tree.children(i) {
                 if tree.kind(c) == case_k {
-                    b = b.leaf(k_arm, lang.syms.get("case"));
+                    b = b.leaf(k_arm, lang.syms.intern("case"));
                     // Check for wildcard pattern (_)
                     for gc in tree.children(c) {
                         if lang.kinds.resolve((tree.kind(gc) & !SYNTH) as u32) == "case_pattern" {
@@ -505,7 +505,7 @@ match x:
                 }
             }
             if has_wildcard {
-                b = b.leaf(k_exhaustive, lang.syms.get("true"));
+                b = b.leaf(k_exhaustive, lang.syms.intern("true"));
             }
             tree.insert_before(i + 1, &b.build());
         }

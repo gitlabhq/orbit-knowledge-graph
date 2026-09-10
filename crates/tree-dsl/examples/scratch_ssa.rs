@@ -472,7 +472,7 @@ z.speak()
         Rewrite::new(&mut lang, "(aliased_import alias: $A)", |c| Out::Append {
             under: 0,
             each: c.slot("A"),
-            kind: c.kind("__alias"),
+            kind: c.intern_kind("__alias"),
             tf: Tf::Id,
         }),
         Rewrite::new(
@@ -491,8 +491,8 @@ z.speak()
             |c| Out::Append {
                 under: 0,
                 each: c.slot("SUPERS"),
-                kind: c.kind("__supertype"),
-                tf: Tf::Field(c.field("function")),
+                kind: c.intern_kind("__supertype"),
+                tf: Tf::Field(c.intern_field("function")),
             },
         ),
     ];
@@ -503,19 +503,19 @@ z.speak()
     let stage2 = vec![
         Rewrite::new(&mut lang, "(attribute object: $O attribute: $M)", |c| {
             Out::Retag {
-                kind: c.kind("__member"),
+                kind: c.intern_kind("__member"),
                 fields: vec![
-                    (c.slot("O"), c.field("object")),
-                    (c.slot("M"), c.field("member")),
+                    (c.slot("O"), c.intern_field("object")),
+                    (c.slot("M"), c.intern_field("member")),
                 ],
             }
         }),
         Rewrite::new(&mut lang, "(call function: $F arguments: $A)", |c| {
             Out::Retag {
-                kind: c.kind("__call"),
+                kind: c.intern_kind("__call"),
                 fields: vec![
-                    (c.slot("F"), c.field("callee")),
-                    (c.slot("A"), c.field("args")),
+                    (c.slot("F"), c.intern_field("callee")),
+                    (c.slot("A"), c.intern_field("args")),
                 ],
             }
         }),
@@ -531,10 +531,10 @@ z.speak()
     let alias_synth = lang.kinds.lookup("__alias") as u16 | SYNTH;
     let mname_f = lang.fields.lookup("module_name") as u16;
     let name_f = lang.fields.lookup("name") as u16;
-    let k_import = lang.kind("__import");
-    let k_source = lang.kind("__source");
-    let k_name = lang.kind("__name");
-    let k_alias = lang.kind("__alias");
+    let k_import = lang.intern_kind("__import");
+    let k_source = lang.intern_kind("__source");
+    let k_name = lang.intern_kind("__name");
+    let k_alias = lang.intern_kind("__alias");
 
     let imports: Vec<u32> = (0..tree.nodes.len() as u32)
         .filter(|&i| {
@@ -545,7 +545,7 @@ z.speak()
     for &imp in &imports {
         let kind = tree.nodes[imp as usize].kind;
         let source_sym = if kind == future_imp {
-            lang.syms.get("__future__")
+            lang.syms.intern("__future__")
         } else if kind == import_from {
             tree.child_by_field(imp, mname_f)
                 .map(|c| tree.sym(c))
@@ -560,7 +560,7 @@ z.speak()
             let cn = &tree.nodes[c as usize];
             let ck = cn.kind & !SYNTH;
             if ck == wildcard_k {
-                names.push((lang.syms.get("*"), 0));
+                names.push((lang.syms.intern("*"), 0));
             } else if cn.field == name_f {
                 let alias = tree
                     .children(c)
@@ -591,8 +591,8 @@ z.speak()
     let func_def = lang.kinds.lookup("function_definition") as u16;
     let block_k = lang.kinds.lookup("block") as u16;
     let body_f = lang.fields.lookup("body") as u16;
-    let k_deftype = lang.kind("__deftype");
-    let k_scope = lang.kind("__scope");
+    let k_deftype = lang.intern_kind("__deftype");
+    let k_scope = lang.intern_kind("__scope");
     for i in 0..tree.nodes.len() as u32 {
         let n = &tree.nodes[i as usize];
         if n.flags & DEAD != 0 {
@@ -600,7 +600,7 @@ z.speak()
         }
         let k = n.kind;
         if k == class_def {
-            tree.append(i, leaf(k_deftype, lang.syms.get("Class")));
+            tree.append(i, leaf(k_deftype, lang.syms.intern("Class")));
             tree.append(i, leaf(k_scope, 0));
         } else if k == func_def {
             let is_method = {
@@ -619,7 +619,7 @@ z.speak()
                     })
             };
             let label = if is_method { "Method" } else { "Function" };
-            tree.append(i, leaf(k_deftype, lang.syms.get(label)));
+            tree.append(i, leaf(k_deftype, lang.syms.intern(label)));
             tree.append(i, leaf(k_scope, 0));
         }
     }
@@ -629,9 +629,9 @@ z.speak()
     let assign_k = lang.kinds.lookup("assignment") as u16;
     let left_f = lang.fields.lookup("left") as u16;
     let type_f = lang.fields.lookup("type") as u16;
-    let k_binding = lang.kind("__binding");
-    let k_lhs = lang.kind("__lhs");
-    let k_type_ann = lang.kind("__type_ann");
+    let k_binding = lang.intern_kind("__binding");
+    let k_lhs = lang.intern_kind("__lhs");
+    let k_type_ann = lang.intern_kind("__type_ann");
     for i in 0..tree.nodes.len() as u32 {
         let k = tree.nodes[i as usize].kind;
         if k == assign_k {

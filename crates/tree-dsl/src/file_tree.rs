@@ -72,9 +72,9 @@ pub fn walk(paths: &[String], lang: &mut Lang, config: &ResolveConfig) -> WalkRe
 }
 
 fn build_file_tree(paths: &[String], lang: &mut Lang) -> Tree {
-    let root_kind = lang.kind("__root");
-    let dir_kind = lang.kind("__dir");
-    let file_kind = lang.kind("__file");
+    let root_kind = lang.intern_kind("__root");
+    let dir_kind = lang.intern_kind("__dir");
+    let file_kind = lang.intern_kind("__file");
 
     // Collect unique directory segments and files into a trie-like structure.
     // Key: parent path (empty = root), Value: (segment_name, is_file)
@@ -129,7 +129,7 @@ fn build_file_tree(paths: &[String], lang: &mut Lang) -> Tree {
         for (segment, is_file) in kids {
             let idx = nodes.len() as u32;
             let kind = if *is_file { file_kind } else { dir_kind };
-            let sym = lang.syms.get(segment);
+            let sym = lang.syms.intern(segment);
             nodes.push(Node {
                 kind,
                 named: true,
@@ -199,7 +199,7 @@ fn collect_marked_paths(tree: &Tree, lang: &Lang, markers: &[u16]) -> Vec<String
     if markers.is_empty() {
         return vec![];
     }
-    let root_node_kind = lang.kind_id("__root");
+    let root_node_kind = lang.lookup_kind("__root");
     let mut paths = Vec::new();
     for i in 0..tree.nodes.len() as u32 {
         if tree.nodes[i as usize].kind == root_node_kind {
@@ -220,8 +220,8 @@ fn collect_marked_paths(tree: &Tree, lang: &Lang, markers: &[u16]) -> Vec<String
 
 /// Reconstruct the full path of a directory node by walking up parent pointers.
 fn node_path(tree: &Tree, mut node: u32, lang: &Lang) -> String {
-    let dir_kind = lang.kind_id("__dir");
-    let root_kind = lang.kind_id("__root");
+    let dir_kind = lang.lookup_kind("__dir");
+    let root_kind = lang.lookup_kind("__root");
     let mut parts = Vec::new();
     while node != NONE {
         let n = &tree.nodes[node as usize];
@@ -239,7 +239,7 @@ fn node_path(tree: &Tree, mut node: u32, lang: &Lang) -> String {
 
 /// Collect paths of directories marked `__package` by the resolve rules.
 fn collect_packages(tree: &Tree, lang: &Lang) -> Vec<String> {
-    let pkg_kind = lang.kind_id("__package");
+    let pkg_kind = lang.lookup_kind("__package");
     if pkg_kind == 0 {
         return vec![];
     }

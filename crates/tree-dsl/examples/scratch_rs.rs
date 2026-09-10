@@ -162,10 +162,10 @@ mod submodule {
         // field_expression → __member (for non-self cases)
         Rewrite::new(&mut lang, "(field_expression value: $V field: $F)", |c| {
             Out::Retag {
-                kind: c.kind("__member"),
+                kind: c.intern_kind("__member"),
                 fields: vec![
-                    (c.slot("V"), c.field("object")),
-                    (c.slot("F"), c.field("member")),
+                    (c.slot("V"), c.intern_field("object")),
+                    (c.slot("F"), c.intern_field("member")),
                 ],
             }
         }),
@@ -174,10 +174,10 @@ mod submodule {
             &mut lang,
             "(call_expression function: $F arguments: $A)",
             |c| Out::Retag {
-                kind: c.kind("__call"),
+                kind: c.intern_kind("__call"),
                 fields: vec![
-                    (c.slot("F"), c.field("callee")),
-                    (c.slot("A"), c.field("args")),
+                    (c.slot("F"), c.intern_field("callee")),
+                    (c.slot("A"), c.intern_field("args")),
                 ],
             },
         ),
@@ -196,10 +196,10 @@ mod submodule {
     let name_f = lang.fields.lookup("name") as u16;
     let alias_f = lang.fields.lookup("alias") as u16;
 
-    let k_import = lang.kind("__import");
-    let k_source = lang.kind("__source");
-    let k_name = lang.kind("__name");
-    let k_alias = lang.kind("__alias");
+    let k_import = lang.intern_kind("__import");
+    let k_source = lang.intern_kind("__source");
+    let k_name = lang.intern_kind("__name");
+    let k_alias = lang.intern_kind("__alias");
 
     let uses: Vec<u32> = (0..tree.nodes.len() as u32)
         .filter(|&i| tree.nodes[i as usize].kind == use_decl)
@@ -292,7 +292,7 @@ mod submodule {
                                     .unwrap_or(0);
                                 names.push((n, a));
                             } else if ck == use_wildcard {
-                                names.push((lang.syms.get("*"), 0));
+                                names.push((lang.syms.intern("*"), 0));
                             } else if tree.sym(c) != 0 {
                                 names.push((tree.sym(c), 0));
                             }
@@ -344,7 +344,7 @@ mod submodule {
                             .unwrap_or(0);
                         names.push((n, a));
                     } else if ck == use_wildcard {
-                        names.push((lang.syms.get("*"), 0));
+                        names.push((lang.syms.intern("*"), 0));
                     } else if tree.sym(c) != 0 {
                         names.push((tree.sym(c), 0));
                     }
@@ -367,7 +367,7 @@ mod submodule {
         };
 
         tree.remove(u);
-        let source_sym = lang.syms.get(&source);
+        let source_sym = lang.syms.intern(&source);
         let mut b = SubTree::new(k_import).leaf(k_source, source_sym);
         for &(name_sym, alias_sym) in &names {
             if alias_sym != 0 {
@@ -390,9 +390,9 @@ mod submodule {
     let mod_item = lang.kinds.lookup("mod_item") as u16;
     let func_sig = lang.kinds.lookup("function_signature_item") as u16;
 
-    let k_deftype = lang.kind("__deftype");
-    let k_rettype = lang.kind("__return_type");
-    let k_super = lang.kind("__supertype");
+    let k_deftype = lang.intern_kind("__deftype");
+    let k_rettype = lang.intern_kind("__return_type");
+    let k_super = lang.intern_kind("__supertype");
     let return_type_f = lang.fields.lookup("return_type") as u16;
     let trait_f = lang.fields.lookup("trait") as u16;
     let type_f = lang.fields.lookup("type") as u16;
@@ -425,7 +425,7 @@ mod submodule {
                     Node {
                         kind: k_deftype,
                         flags: NAMED | SYNTH,
-                        sym: lang.syms.get(label),
+                        sym: lang.syms.intern(label),
                         size: 1,
                         ..Default::default()
                     },
@@ -456,7 +456,7 @@ mod submodule {
                 Node {
                     kind: k_deftype,
                     flags: NAMED | SYNTH,
-                    sym: lang.syms.get("Impl"),
+                    sym: lang.syms.intern("Impl"),
                     size: 1,
                     ..Default::default()
                 },

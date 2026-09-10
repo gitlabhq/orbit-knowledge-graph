@@ -7,7 +7,7 @@ pub struct Interner {
 }
 
 impl Interner {
-    pub fn get(&mut self, s: &str) -> u32 {
+    pub fn intern(&mut self, s: &str) -> u32 {
         if let Some(&i) = self.map.get(s) {
             return i;
         }
@@ -48,17 +48,17 @@ impl Lang {
 
     /// Register a kind name and return its ID. Use `is_synth_name()` to check
     /// whether a kind name represents a synthetic node.
-    pub fn kind(&mut self, s: &str) -> u16 {
-        self.kinds.get(s) as u16
+    pub fn intern_kind(&mut self, s: &str) -> u16 {
+        self.kinds.intern(s) as u16
     }
 
     /// Look up a kind by name without inserting. Returns 0 if not found.
-    pub fn kind_id(&self, s: &str) -> u16 {
+    pub fn lookup_kind(&self, s: &str) -> u16 {
         self.kinds.lookup(s) as u16
     }
 
-    pub fn field(&mut self, s: &str) -> u16 {
-        self.fields.get(s) as u16
+    pub fn intern_field(&mut self, s: &str) -> u16 {
+        self.fields.intern(s) as u16
     }
 
     pub fn kind_name(&self, k: u16) -> &str {

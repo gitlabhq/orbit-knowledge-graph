@@ -3,7 +3,7 @@
 //! after YAML pipe transforms. Extension stripping and index-file
 //! collapsing are driven by languages.yaml via SupportLang.
 
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::grammar::SupportLang;
 use crate::lang::Lang;
@@ -20,18 +20,105 @@ pub fn resolve(
     lookup_prefixes: &[String],
     external: &[String],
 ) -> ResolveResult {
-    let k_import = lang.kind_id("__import");
-    let k_source = lang.kind_id("__source");
-    let k_source_path = lang.kind_id("__source_path");
-    let k_name = lang.kind_id("__name");
-    let k_alias = lang.kind_id("__alias");
-    let k_deftype = lang.kind_id("__deftype");
+    let k_import = lang.lookup_kind("__import");
+    let k_source = lang.lookup_kind("__source");
+    let k_source_path = lang.lookup_kind("__source_path");
+    let k_name = lang.lookup_kind("__name");
+    let k_alias = lang.lookup_kind("__alias");
+    let k_deftype = lang.lookup_kind("__deftype");
+    let k_call = lang.lookup_kind("__call");
+    let k_member = lang.lookup_kind("__member");
+    let k_binding = lang.lookup_kind("__binding");
     let name_f = lang.fields.lookup("name") as u16;
     let left_f = lang.fields.lookup("left") as u16;
-
+    let right_f = lang.fields.lookup("right") as u16;
+    let callee_f = lang.fields.lookup("callee") as u16;
+    let member_f = lang.fields.lookup("member") as u16;
+    let object_f = lang.fields.lookup("object") as u16;
+    let ret_type_f = lang.fields.lookup("return_type") as u16;
+    let return_k = lang.kinds.lookup("return_statement") as u16;
     let index_names = support_lang.index_names();
+    let fqn_sep = support_lang.fqn_separator();
 
-    // Build file index: stem → file_index
+    let file_index = build_file_index(trees, lang, support_lang, index_names);
+    let mut visible = build_visible_names(trees, k_deftype, name_f, left_f);
+    let (reqs, mut cross_edges) = gather_imports(
+        trees,
+        lang,
+        k_import,
+        k_source_path,
+        k_name,
+        &file_index,
+        lookup_prefixes,
+        external,
+    );
+    let (reexports, ambiguous) = propagate_reexports(
+        trees,
+        lang,
+        &reqs,
+        &mut visible,
+        support_lang,
+        index_names,
+        k_name,
+    );
+    rewrite_sources(trees, lang, &reqs, k_source, fqn_sep);
+    let import_edges = build_import_edges(
+        trees,
+        lang,
+        &reqs,
+        &visible,
+        &reexports,
+        &ambiguous,
+        support_lang,
+        index_names,
+        &file_index,
+        k_import,
+        k_name,
+        k_alias,
+    );
+    cross_edges.extend(import_edges);
+    let (module_call_edges, call_edges) = build_call_edges(
+        trees,
+        lang,
+        &cross_edges,
+        &reqs,
+        &visible,
+        k_call,
+        k_member,
+        k_name,
+        callee_f,
+        member_f,
+    );
+    let type_edges = build_type_edges(
+        trees,
+        &call_edges,
+        &cross_edges,
+        &visible,
+        name_f,
+        left_f,
+        right_f,
+        k_deftype,
+        k_call,
+        k_member,
+        k_binding,
+        callee_f,
+        member_f,
+        object_f,
+        ret_type_f,
+        return_k,
+    );
+    cross_edges.extend(module_call_edges);
+    cross_edges.extend(call_edges);
+    cross_edges.extend(type_edges);
+    ResolveResult { cross_edges }
+}
+
+fn build_file_index(
+    trees: &[Tree],
+    lang: &Lang,
+    support_lang: SupportLang,
+    index_names: &[String],
+) -> FxHashMap<String, usize> {
     let mut file_index: FxHashMap<String, usize> = FxHashMap::default();
     for (fi, tree) in trees.iter().enumerate() {
         let path = lang.syms.resolve(tree.nodes[0].sym).to_string();
@@ -50,8 +137,15 @@ pub fn resolve(
             }
         }
     }
+    file_index
+}
 
-    // Build visible-names per file: name_sym → node_index
+fn build_visible_names(
+    trees: &[Tree],
+    k_deftype: u16,
+    name_f: u16,
+    left_f: u16,
+) -> Vec<FxHashMap<u32, u32>> {
     let mut visible: Vec<FxHashMap<u32, u32>> = Vec::with_capacity(trees.len());
     for tree in trees.iter() {
         let mut names: FxHashMap<u32, u32> = FxHashMap::default();
@@ -69,7 +163,19 @@ pub fn resolve(
         }
         visible.push(names);
     }
+    visible
+}
 
+fn gather_imports(
+    trees: &[Tree],
+    lang: &Lang,
+    k_import: u16,
+    k_source_path: u16,
+    k_name: u16,
+    file_index: &FxHashMap<String, usize>,
+    lookup_prefixes: &[String],
+    external: &[String],
+) -> (Vec<ImportReq>, Vec<Edge>) {
     let mut reqs: Vec<ImportReq> = Vec::new();
     let mut cross_edges = Vec::new();
 
@@ -122,9 +228,8 @@ pub fn resolve(
                     target_path,
                 });
             } else {
-                // No file matches the source path. Try submodule resolution:
-                // for each __name child, check if {source_path}/{name} exists
-                // as a file (handles implicit namespace packages).
+                // Submodule resolution: for each __name child, check if
+                // {source_path}/{name} exists as a file (implicit namespace packages).
                 let tree = &trees[fi];
                 for c in tree.children(i as u32) {
                     if tree.kind(c) != k_name || tree.sym(c) == 0 {
@@ -159,11 +264,26 @@ pub fn resolve(
         }
     }
 
+    (reqs, cross_edges)
+}
+
+fn propagate_reexports(
+    trees: &[Tree],
+    lang: &Lang,
+    reqs: &[ImportReq],
+    visible: &mut [FxHashMap<u32, u32>],
+    support_lang: SupportLang,
+    index_names: &[String],
+    k_name: u16,
+) -> (
+    FxHashMap<(usize, u32), (usize, u32)>,
+    FxHashSet<(usize, u32)>,
+) {
     let mut reexports: FxHashMap<(usize, u32), (usize, u32)> = FxHashMap::default();
-    let mut ambiguous: rustc_hash::FxHashSet<(usize, u32)> = rustc_hash::FxHashSet::default();
+    let mut ambiguous: FxHashSet<(usize, u32)> = FxHashSet::default();
     for _round in 0..3 {
         let mut new_exports = Vec::new();
-        for req in &reqs {
+        for req in reqs {
             let path = lang.syms.resolve(trees[req.fi].nodes[0].sym);
             let stem = support_lang.strip_extension(path);
             let is_index = index_names
@@ -227,12 +347,19 @@ pub fn resolve(
             reexports.insert((fi, name_sym), (tfi, tn));
         }
     }
+    (reexports, ambiguous)
+}
 
-    // Rewrite __source to the resolved module path in the language's native separator
-    let fqn_sep = support_lang.fqn_separator();
-    for req in &reqs {
+fn rewrite_sources(
+    trees: &mut [Tree],
+    lang: &mut Lang,
+    reqs: &[ImportReq],
+    k_source: u16,
+    fqn_sep: &str,
+) {
+    for req in reqs {
         let resolved = req.target_path.replace('/', fqn_sep);
-        let resolved_sym = lang.syms.get(&resolved);
+        let resolved_sym = lang.syms.intern(&resolved);
         let src_node = trees[req.fi]
             .children(req.node)
             .find(|&c| trees[req.fi].kind(c) == k_source);
@@ -240,9 +367,24 @@ pub fn resolve(
             trees[req.fi].nodes[sn as usize].sym = resolved_sym;
         }
     }
+}
 
-    // Build E_IMPORTS cross-edges with import-chain following.
-    for req in &reqs {
+fn build_import_edges(
+    trees: &[Tree],
+    lang: &Lang,
+    reqs: &[ImportReq],
+    visible: &[FxHashMap<u32, u32>],
+    reexports: &FxHashMap<(usize, u32), (usize, u32)>,
+    ambiguous: &FxHashSet<(usize, u32)>,
+    support_lang: SupportLang,
+    index_names: &[String],
+    file_index: &FxHashMap<String, usize>,
+    k_import: u16,
+    k_name: u16,
+    k_alias: u16,
+) -> Vec<Edge> {
+    let mut edges = Vec::new();
+    for req in reqs {
         let fi = req.fi;
         let i = req.node;
         let tfi = req.target_fi;
@@ -266,7 +408,7 @@ pub fn resolve(
                         .get(&(tfi, def_name))
                         .copied()
                         .unwrap_or((tfi, def_node));
-                    cross_edges.push(Edge::new(fi, i, real_fi, real_node, EdgeKind::Imports));
+                    edges.push(Edge::new(fi, i, real_fi, real_node, EdgeKind::Imports));
                 }
                 continue;
             }
@@ -276,26 +418,23 @@ pub fn resolve(
             }
 
             if let Some(&(re_fi, re_node)) = reexports.get(&(tfi, name_sym)) {
-                cross_edges.push(Edge::new(fi, i, re_fi, re_node, EdgeKind::Imports));
+                edges.push(Edge::new(fi, i, re_fi, re_node, EdgeKind::Imports));
                 continue;
             }
             if let Some(&def_node) = visible[tfi].get(&name_sym) {
-                cross_edges.push(Edge::new(fi, i, tfi, def_node, EdgeKind::Imports));
+                edges.push(Edge::new(fi, i, tfi, def_node, EdgeKind::Imports));
                 continue;
             }
 
-            // Import-chain following: search target file's imports for one
-            // that re-exports this name, then follow the chain.
             let results = follow_import_chain(
-                trees, &reqs, &visible, name_sym, tfi, k_import, k_name, k_alias,
+                trees, reqs, visible, name_sym, tfi, k_import, k_name, k_alias,
             );
             if results.len() == 1 {
                 let (def_fi, def_node) = results[0];
-                cross_edges.push(Edge::new(fi, i, def_fi, def_node, EdgeKind::Imports));
+                edges.push(Edge::new(fi, i, def_fi, def_node, EdgeKind::Imports));
                 continue;
             }
 
-            // Submodule fallback (index-file target or namespace package)
             let target_stem =
                 support_lang.strip_extension(lang.syms.resolve(trees[tfi].nodes[0].sym));
             if let Some(target_dir) = index_names
@@ -304,30 +443,33 @@ pub fn resolve(
             {
                 let submod_path = format!("{target_dir}/{name_str}");
                 if let Some(&sub_fi) = file_index.get(&submod_path) {
-                    cross_edges.push(Edge::new(fi, i, sub_fi, 0, EdgeKind::Imports));
+                    edges.push(Edge::new(fi, i, sub_fi, 0, EdgeKind::Imports));
                 }
             }
         }
     }
+    edges
+}
 
-    // E_CALLS cross-edges: follow intra-file E_IMPORTS → cross-file target
-    let k_call = lang.kind_id("__call");
-    let k_member = lang.kind_id("__member");
-    let callee_f = lang.fields.lookup("callee") as u16;
-    let member_f = lang.fields.lookup("member") as u16;
-    let object_f = lang.fields.lookup("object") as u16;
-
-    // Module-level import member access: import X; X.func()
-    // Also handles submodule imports: from pkg import mod; mod.func()
+fn build_call_edges(
+    trees: &[Tree],
+    lang: &Lang,
+    cross_edges: &[Edge],
+    reqs: &[ImportReq],
+    visible: &[FxHashMap<u32, u32>],
+    k_call: u16,
+    k_member: u16,
+    k_name: u16,
+    callee_f: u16,
+    member_f: u16,
+) -> (Vec<Edge>, Vec<Edge>) {
     let mut module_call_edges = Vec::new();
-    for req in &reqs {
+    for req in reqs {
         let fi = req.fi;
         let import_node = req.node;
 
-        // Collect all target files for this import: the primary target
-        // plus any submodule files resolved via cross-edges.
         let mut target_files = vec![req.target_fi];
-        for ce in &cross_edges {
+        for ce in cross_edges {
             if ce.from.tree as usize == fi
                 && ce.from.node == import_node
                 && ce.kind == EdgeKind::Imports
@@ -383,7 +525,7 @@ pub fn resolve(
     }
 
     let mut call_edges = Vec::new();
-    for ce in &cross_edges {
+    for ce in cross_edges {
         if ce.kind != EdgeKind::Imports {
             continue;
         }
@@ -439,13 +581,30 @@ pub fn resolve(
         }
     }
 
-    // Cross-file return type resolution
-    let k_binding = lang.kind_id("__binding");
-    let right_f = lang.fields.lookup("right") as u16;
-    let ret_type_f = lang.fields.lookup("return_type") as u16;
+    (module_call_edges, call_edges)
+}
 
+#[allow(clippy::too_many_arguments)]
+fn build_type_edges(
+    trees: &[Tree],
+    call_edges: &[Edge],
+    cross_edges: &[Edge],
+    visible: &[FxHashMap<u32, u32>],
+    name_f: u16,
+    left_f: u16,
+    right_f: u16,
+    k_deftype: u16,
+    k_call: u16,
+    k_member: u16,
+    k_binding: u16,
+    callee_f: u16,
+    member_f: u16,
+    object_f: u16,
+    ret_type_f: u16,
+    return_k: u16,
+) -> Vec<Edge> {
     let mut type_edges = Vec::new();
-    for ce in &call_edges {
+    for ce in call_edges {
         if ce.kind != EdgeKind::Calls {
             continue;
         }
@@ -463,7 +622,6 @@ pub fn resolve(
             None
         }
         .or_else(|| {
-            let return_k = lang.kinds.lookup("return_statement") as u16;
             if return_k == 0 {
                 return None;
             }
@@ -493,7 +651,7 @@ pub fn resolve(
             resolved_node = Some(cn);
         }
         if resolved_fi.is_none() {
-            for ce2 in &cross_edges {
+            for ce2 in cross_edges {
                 if ce2.from.tree as usize == target_fi && ce2.kind == EdgeKind::Imports {
                     let def_name =
                         name_sym(&trees[ce2.to.tree as usize], ce2.to.node, name_f, left_f);
@@ -580,11 +738,7 @@ pub fn resolve(
             }
         }
     }
-
-    cross_edges.extend(module_call_edges);
-    cross_edges.extend(call_edges);
-    cross_edges.extend(type_edges);
-    ResolveResult { cross_edges }
+    type_edges
 }
 
 /// Follow import chains to find the defining file for a name.
@@ -609,7 +763,6 @@ fn follow_import_chain(
         }
         visited.push((fi, wanted_sym));
 
-        // Check if the wanted name is defined locally
         if let Some(&def_node) = visible[fi].get(&wanted_sym) {
             if !results.contains(&(fi, def_node)) {
                 results.push((fi, def_node));
@@ -617,7 +770,6 @@ fn follow_import_chain(
             continue;
         }
 
-        // Scan this file's imports for one that brings in the wanted name
         let tree = &trees[fi];
         for (ni, n) in tree.nodes.iter().enumerate() {
             if n.kind != k_import {
@@ -628,7 +780,6 @@ fn follow_import_chain(
                     continue;
                 }
                 let import_name = tree.sym(c);
-                // Check alias: the import's __alias child matches the wanted name
                 let alias_sym = tree
                     .children(c)
                     .find(|&gc| tree.kind(gc) == k_alias)
@@ -640,7 +791,6 @@ fn follow_import_chain(
                     continue;
                 }
 
-                // Find the resolved target of this import via reqs
                 let original_name = import_name;
                 for req in reqs {
                     if req.fi == fi && req.node == ni as u32 {
@@ -692,7 +842,6 @@ fn resolve_relative(current_file: &str, source: &str) -> String {
             break;
         }
     }
-    // Handle trailing ".." or "." without slash
     if rest == ".." {
         parts.pop();
         rest = "";

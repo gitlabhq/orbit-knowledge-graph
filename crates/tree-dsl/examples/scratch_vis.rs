@@ -69,8 +69,8 @@ fn stamp_rust() {
     let mut tree = grammar::parse(&src, SupportLang::Rust, &mut lang, "test.rs");
 
     let vis_mod = lang.kinds.lookup("visibility_modifier") as u16;
-    let k_visibility = lang.kind("__visibility");
-    let k_deftype = lang.kind("__deftype");
+    let k_visibility = lang.intern_kind("__visibility");
+    let k_deftype = lang.intern_kind("__deftype");
     let struct_k = lang.kinds.lookup("struct_item") as u16;
     let func_k = lang.kinds.lookup("function_item") as u16;
 
@@ -84,11 +84,11 @@ fn stamp_rust() {
                 .map(|c| tree.sym(c));
             let vis_sym = match vis {
                 Some(s) => s,
-                None => lang.syms.get("private"),
+                None => lang.syms.intern("private"),
             };
             tree.append(i, leaf(k_visibility, vis_sym));
             let dt = if k == struct_k { "Struct" } else { "Function" };
-            tree.append(i, leaf(k_deftype, lang.syms.get(dt)));
+            tree.append(i, leaf(k_deftype, lang.syms.intern(dt)));
         }
     }
     tree.compact();
@@ -103,8 +103,8 @@ fn stamp_go() {
     let func_decl = lang.kinds.lookup("function_declaration") as u16;
     let type_spec = lang.kinds.lookup("type_spec") as u16;
     let name_f = lang.fields.lookup("name") as u16;
-    let k_visibility = lang.kind("__visibility");
-    let k_deftype = lang.kind("__deftype");
+    let k_visibility = lang.intern_kind("__visibility");
+    let k_deftype = lang.intern_kind("__deftype");
 
     for i in 0..tree.nodes.len() as u32 {
         let k = tree.nodes[i as usize].kind;
@@ -116,13 +116,13 @@ fn stamp_go() {
             let name_str = lang.syms.resolve(name_sym);
             let exported = name_str.chars().next().map_or(false, |c| c.is_uppercase());
             let vis_sym = if exported {
-                lang.syms.get("exported")
+                lang.syms.intern("exported")
             } else {
-                lang.syms.get("unexported")
+                lang.syms.intern("unexported")
             };
             tree.append(i, leaf(k_visibility, vis_sym));
             let dt = if k == type_spec { "Struct" } else { "Function" };
-            tree.append(i, leaf(k_deftype, lang.syms.get(dt)));
+            tree.append(i, leaf(k_deftype, lang.syms.intern(dt)));
         }
     }
     tree.compact();
@@ -141,12 +141,12 @@ fn stamp_python() {
     let left_f = lang.fields.lookup("left") as u16;
     let right_f = lang.fields.lookup("right") as u16;
     let name_f = lang.fields.lookup("name") as u16;
-    let k_exports = lang.kind("__exports");
-    let k_name = lang.kind("__name");
-    let k_visibility = lang.kind("__visibility");
-    let k_deftype = lang.kind("__deftype");
+    let k_exports = lang.intern_kind("__exports");
+    let k_name = lang.intern_kind("__name");
+    let k_visibility = lang.intern_kind("__visibility");
+    let k_deftype = lang.intern_kind("__deftype");
 
-    let all_sym = lang.syms.get("__all__");
+    let all_sym = lang.syms.intern("__all__");
 
     // Detect __all__ assignment, extract names, stamp on module root
     let mut exported_names: Vec<u32> = Vec::new();
@@ -208,9 +208,9 @@ fn stamp_python() {
             } else {
                 "public"
             };
-            tree.append(i, leaf(k_visibility, lang.syms.get(vis)));
+            tree.append(i, leaf(k_visibility, lang.syms.intern(vis)));
             let dt = if k == class_k { "Class" } else { "Function" };
-            tree.append(i, leaf(k_deftype, lang.syms.get(dt)));
+            tree.append(i, leaf(k_deftype, lang.syms.intern(dt)));
         }
     }
     tree.compact();
@@ -225,12 +225,12 @@ fn stamp_ruby() {
     let method_k = lang.kinds.lookup("method") as u16;
     let ident_k = lang.kinds.lookup("identifier") as u16;
     let body_stmt_k = lang.kinds.lookup("body_statement") as u16;
-    let k_visibility = lang.kind("__visibility");
-    let k_deftype = lang.kind("__deftype");
+    let k_visibility = lang.intern_kind("__visibility");
+    let k_deftype = lang.intern_kind("__deftype");
 
-    let public_sym = lang.syms.get("public");
-    let private_sym = lang.syms.get("private");
-    let protected_sym = lang.syms.get("protected");
+    let public_sym = lang.syms.intern("public");
+    let private_sym = lang.syms.intern("private");
+    let protected_sym = lang.syms.intern("protected");
 
     // Ruby visibility is stack-based: public/private/protected keywords affect all methods after them
     for i in 0..tree.nodes.len() as u32 {
@@ -254,7 +254,7 @@ fn stamp_ruby() {
             }
             if ck == method_k {
                 tree.append(c, leaf(k_visibility, current_vis));
-                tree.append(c, leaf(k_deftype, lang.syms.get("Method")));
+                tree.append(c, leaf(k_deftype, lang.syms.intern("Method")));
             }
         }
     }
@@ -278,10 +278,10 @@ fn stamp_haskell() {
     let variable_f = lang.fields.lookup("variable") as u16;
     let type_f = lang.fields.lookup("type") as u16;
 
-    let k_exports_synth = lang.kind("__exports");
-    let k_name = lang.kind("__name");
-    let k_visibility = lang.kind("__visibility");
-    let k_deftype = lang.kind("__deftype");
+    let k_exports_synth = lang.intern_kind("__exports");
+    let k_name = lang.intern_kind("__name");
+    let k_visibility = lang.intern_kind("__visibility");
+    let k_deftype = lang.intern_kind("__deftype");
 
     // Extract export list from module header
     let mut exported_names: Vec<u32> = Vec::new();
@@ -326,8 +326,8 @@ fn stamp_haskell() {
             } else {
                 "private"
             };
-            tree.append(i, leaf(k_visibility, lang.syms.get(vis)));
-            tree.append(i, leaf(k_deftype, lang.syms.get("DataType")));
+            tree.append(i, leaf(k_visibility, lang.syms.intern(vis)));
+            tree.append(i, leaf(k_deftype, lang.syms.intern("DataType")));
         }
         if k == function_k || k == signature_k {
             let name_sym = tree
@@ -339,9 +339,9 @@ fn stamp_haskell() {
             } else {
                 "private"
             };
-            tree.append(i, leaf(k_visibility, lang.syms.get(vis)));
+            tree.append(i, leaf(k_visibility, lang.syms.intern(vis)));
             if k == function_k {
-                tree.append(i, leaf(k_deftype, lang.syms.get("Function")));
+                tree.append(i, leaf(k_deftype, lang.syms.intern("Function")));
             }
         }
     }
@@ -362,10 +362,10 @@ int global_var = 0;
     let func_def = lang.kinds.lookup("function_definition") as u16;
     let decl_k = lang.kinds.lookup("declaration") as u16;
     let storage_class_k = lang.kinds.lookup("storage_class_specifier") as u16;
-    let k_visibility = lang.kind("__visibility");
-    let k_deftype = lang.kind("__deftype");
+    let k_visibility = lang.intern_kind("__visibility");
+    let k_deftype = lang.intern_kind("__deftype");
 
-    let static_sym = lang.syms.get("static");
+    let static_sym = lang.syms.intern("static");
 
     for i in 0..tree.nodes.len() as u32 {
         let k = tree.nodes[i as usize].kind;
@@ -374,13 +374,13 @@ int global_var = 0;
                 .children(i)
                 .any(|c| tree.kind(c) == storage_class_k && tree.sym(c) == static_sym);
             let vis = if is_static { "static" } else { "external" };
-            tree.append(i, leaf(k_visibility, lang.syms.get(vis)));
+            tree.append(i, leaf(k_visibility, lang.syms.intern(vis)));
             let dt = if k == func_def {
                 "Function"
             } else {
                 "Variable"
             };
-            tree.append(i, leaf(k_deftype, lang.syms.get(dt)));
+            tree.append(i, leaf(k_deftype, lang.syms.intern(dt)));
         }
     }
     tree.compact();

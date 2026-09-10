@@ -89,10 +89,10 @@ fn main() {
             &mut lang,
             "(dot_index_expression table: $T field: $F)",
             |c| Out::Retag {
-                kind: c.kind("__member"),
+                kind: c.intern_kind("__member"),
                 fields: vec![
-                    (c.slot("T"), c.field("object")),
-                    (c.slot("F"), c.field("member")),
+                    (c.slot("T"), c.intern_field("object")),
+                    (c.slot("F"), c.intern_field("member")),
                 ],
             },
         ),
@@ -101,20 +101,20 @@ fn main() {
             &mut lang,
             "(method_index_expression table: $T method: $M)",
             |c| Out::Retag {
-                kind: c.kind("__member"),
+                kind: c.intern_kind("__member"),
                 fields: vec![
-                    (c.slot("T"), c.field("object")),
-                    (c.slot("M"), c.field("member")),
+                    (c.slot("T"), c.intern_field("object")),
+                    (c.slot("M"), c.intern_field("member")),
                 ],
             },
         ),
         // function_call → __call
         Rewrite::new(&mut lang, "(function_call name: $N arguments: $A)", |c| {
             Out::Retag {
-                kind: c.kind("__call"),
+                kind: c.intern_kind("__call"),
                 fields: vec![
-                    (c.slot("N"), c.field("callee")),
-                    (c.slot("A"), c.field("args")),
+                    (c.slot("N"), c.intern_field("callee")),
+                    (c.slot("A"), c.intern_field("args")),
                 ],
             }
         }),
@@ -128,9 +128,9 @@ fn main() {
     let args_f = lang.fields.lookup("args") as u16;
     let string_content_k = lang.kinds.lookup("string_content") as u16;
 
-    let k_import = lang.kind("__import");
-    let k_source = lang.kind("__source");
-    let k_name = lang.kind("__name");
+    let k_import = lang.intern_kind("__import");
+    let k_source = lang.intern_kind("__source");
+    let k_name = lang.intern_kind("__name");
 
     let require_sym = lang.syms.lookup("require");
 
@@ -163,7 +163,7 @@ fn main() {
 
         let source_str = lang.syms.resolve(source_sym).to_string();
         let name = source_str.rsplit('.').next().unwrap_or(&source_str);
-        let name_sym = lang.syms.get(name);
+        let name_sym = lang.syms.intern(name);
 
         // Find the enclosing variable_declaration to replace the whole thing
         let parent = tree.nodes[node as usize].parent;
@@ -194,9 +194,9 @@ fn main() {
     let object_f = lang.fields.lookup("object") as u16;
     let member_f = lang.fields.lookup("member") as u16;
 
-    let k_deftype = lang.kind("__deftype");
-    let k_defname = lang.kind("__defname");
-    let k_receiver = lang.kind("__receiver");
+    let k_deftype = lang.intern_kind("__deftype");
+    let k_defname = lang.intern_kind("__defname");
+    let k_receiver = lang.intern_kind("__receiver");
 
     for i in 0..tree.nodes.len() as u32 {
         let n = &tree.nodes[i as usize];
@@ -220,7 +220,7 @@ fn main() {
                     Node {
                         kind: k_deftype,
                         flags: NAMED | SYNTH,
-                        sym: lang.syms.get("Method"),
+                        sym: lang.syms.intern("Method"),
                         size: 1,
                         ..Default::default()
                     },
@@ -254,7 +254,7 @@ fn main() {
                     Node {
                         kind: k_deftype,
                         flags: NAMED | SYNTH,
-                        sym: lang.syms.get("Function"),
+                        sym: lang.syms.intern("Function"),
                         size: 1,
                         ..Default::default()
                     },

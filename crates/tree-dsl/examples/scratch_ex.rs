@@ -94,13 +94,13 @@ fn main() {
     let key_f = lang.fields.lookup("key") as u16;
     let value_f = lang.fields.lookup("value") as u16;
 
-    let k_import = lang.kind("__import");
-    let k_source = lang.kind("__source");
-    let k_name = lang.kind("__name");
-    let k_deftype = lang.kind("__deftype");
-    let k_defname = lang.kind("__defname");
-    let k_supertype = lang.kind("__supertype");
-    let k_call = lang.kind("__call");
+    let k_import = lang.intern_kind("__import");
+    let k_source = lang.intern_kind("__source");
+    let k_name = lang.intern_kind("__name");
+    let k_deftype = lang.intern_kind("__deftype");
+    let k_defname = lang.intern_kind("__defname");
+    let k_supertype = lang.intern_kind("__supertype");
+    let k_call = lang.intern_kind("__call");
 
     fn get_target_sym(tree: &Tree, node: u32, target_f: u16) -> u32 {
         tree.child_by_field(node, target_f)
@@ -160,15 +160,15 @@ fn main() {
     }
 
     // Intern known target names
-    let s_defmodule = lang.syms.get("defmodule");
-    let s_def = lang.syms.get("def");
-    let s_defp = lang.syms.get("defp");
-    let s_alias = lang.syms.get("alias");
-    let s_import = lang.syms.get("import");
-    let s_require = lang.syms.get("require");
-    let s_defstruct = lang.syms.get("defstruct");
-    let s_defprotocol = lang.syms.get("defprotocol");
-    let s_defimpl = lang.syms.get("defimpl");
+    let s_defmodule = lang.syms.intern("defmodule");
+    let s_def = lang.syms.intern("def");
+    let s_defp = lang.syms.intern("defp");
+    let s_alias = lang.syms.intern("alias");
+    let s_import = lang.syms.intern("import");
+    let s_require = lang.syms.intern("require");
+    let s_defstruct = lang.syms.intern("defstruct");
+    let s_defprotocol = lang.syms.intern("defprotocol");
+    let s_defimpl = lang.syms.intern("defimpl");
 
     // Collect all top-level-ish call nodes and classify
     let calls: Vec<u32> = (0..tree.nodes.len() as u32)
@@ -183,7 +183,7 @@ fn main() {
             let source_sym = get_first_alias(&tree, node, args_k, alias_k);
             let source_str = lang.syms.resolve(source_sym).to_string();
             let name = source_str.rsplit('.').next().unwrap_or(&source_str);
-            let name_sym = lang.syms.get(name);
+            let name_sym = lang.syms.intern(name);
 
             tree.remove(node);
             let b = SubTree::new(k_import)
@@ -196,7 +196,7 @@ fn main() {
         // ── Module defs: defmodule ──
         if tsym == s_defmodule {
             let module_name = get_first_alias(&tree, node, args_k, alias_k);
-            let dt_sym = lang.syms.get("Module");
+            let dt_sym = lang.syms.intern("Module");
             tree.append(
                 node,
                 Node {
@@ -228,7 +228,7 @@ fn main() {
             } else {
                 "Function"
             };
-            let dt_sym = lang.syms.get(label);
+            let dt_sym = lang.syms.intern(label);
             tree.append(
                 node,
                 Node {
@@ -254,7 +254,7 @@ fn main() {
 
         // ── Struct: defstruct ──
         if tsym == s_defstruct {
-            let dt_sym = lang.syms.get("Struct");
+            let dt_sym = lang.syms.intern("Struct");
             tree.append(
                 node,
                 Node {
@@ -271,7 +271,7 @@ fn main() {
         // ── Protocol: defprotocol ──
         if tsym == s_defprotocol {
             let proto_name = get_first_alias(&tree, node, args_k, alias_k);
-            let dt_sym = lang.syms.get("Protocol");
+            let dt_sym = lang.syms.intern("Protocol");
             tree.append(
                 node,
                 Node {
@@ -301,7 +301,7 @@ fn main() {
             let for_type = get_impl_for(
                 &tree, &lang, node, args_k, keywords_k, pair_k, key_f, value_f,
             );
-            let dt_sym = lang.syms.get("Impl");
+            let dt_sym = lang.syms.intern("Impl");
             tree.append(
                 node,
                 Node {

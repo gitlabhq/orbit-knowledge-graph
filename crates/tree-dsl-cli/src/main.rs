@@ -217,8 +217,8 @@ fn cmd_index(path: &str, lang_override: Option<String>) -> anyhow::Result<()> {
     let result = tree_dsl::index(lang_id, &files);
     let elapsed = t0.elapsed();
 
-    let deftype_k = result.lang.kind_id("__deftype");
-    let import_k = result.lang.kind_id("__import");
+    let deftype_k = result.lang.lookup_kind("__deftype");
+    let import_k = result.lang.lookup_kind("__import");
     let mut total_defs = 0usize;
     let mut total_imports = 0usize;
     let mut total_intra_edges = 0usize;

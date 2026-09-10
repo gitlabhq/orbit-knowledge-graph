@@ -59,7 +59,7 @@ impl Tf {
         match self {
             Tf::Id => t.sym(i),
             Tf::Field(f) => t.child_by_field(i, *f).map_or(t.sym(i), |c| t.sym(c)),
-            Tf::Const(s) => lang.syms.get(s),
+            Tf::Const(s) => lang.syms.intern(s),
             Tf::Child(k) => t
                 .children(i)
                 .find(|&c| t.kind(c) == *k)
@@ -75,7 +75,7 @@ impl Tf {
                 }
                 let s = lang.syms.resolve(sym).to_string();
                 let result = self.apply_to_str(&s);
-                lang.syms.get(&result)
+                lang.syms.intern(&result)
             }
         }
     }
@@ -155,12 +155,12 @@ impl Ctx<'_> {
         s
     }
 
-    pub fn kind(&mut self, k: &str) -> u16 {
-        self.lang.kind(k)
+    pub fn intern_kind(&mut self, k: &str) -> u16 {
+        self.lang.intern_kind(k)
     }
 
-    pub fn field(&mut self, f: &str) -> u16 {
-        self.lang.field(f)
+    pub fn intern_field(&mut self, f: &str) -> u16 {
+        self.lang.intern_field(f)
     }
 
     pub fn template(&mut self, src: &str) -> Pat {
@@ -368,7 +368,7 @@ pub fn parse_single_tf(c: &mut Ctx, tf: &str) -> Tf {
                 // Legacy syntax: strip=prefix, field=name
                 match tf.split_once('=') {
                     Some(("strip", p)) => Tf::Strip(p.into()),
-                    Some(("field", f)) => Tf::Field(c.field(f)),
+                    Some(("field", f)) => Tf::Field(c.intern_field(f)),
                     _ => panic!("unknown transform: {tf}"),
                 }
             }
@@ -388,7 +388,7 @@ fn item(c: &mut Ctx, toks: &[String], pos: &mut usize, field: u16) -> Pat {
     let tok = toks[*pos].as_str();
     *pos += 1;
     if tok == "(" {
-        let kind = c.kind(&toks[*pos]);
+        let kind = c.intern_kind(&toks[*pos]);
         *pos += 1;
         let (mut kids, mut text) = (Vec::new(), Text::Any);
         loop {
@@ -399,7 +399,7 @@ fn item(c: &mut Ctx, toks: &[String], pos: &mut usize, field: u16) -> Pat {
             }
             if let Some(lit) = t.strip_prefix('"') {
                 *pos += 1;
-                text = Text::Lit(c.lang.syms.get(&lit[..lit.len() - 1]));
+                text = Text::Lit(c.lang.syms.intern(&lit[..lit.len() - 1]));
             } else if let Some(rest) = t.strip_prefix("@$") {
                 if rest.contains("->") || rest.contains("=>") {
                     kids.push(item(c, toks, pos, 0));
@@ -422,7 +422,7 @@ fn item(c: &mut Ctx, toks: &[String], pos: &mut usize, field: u16) -> Pat {
                 }
             } else if let Some(f) = t.strip_suffix(':') {
                 *pos += 1;
-                let f = c.field(f);
+                let f = c.intern_field(f);
                 kids.push(item(c, toks, pos, f));
             } else {
                 kids.push(item(c, toks, pos, 0));
@@ -451,9 +451,9 @@ fn item(c: &mut Ctx, toks: &[String], pos: &mut usize, field: u16) -> Pat {
         c.filters[slot as usize] = kinds
             .split('|')
             .filter(|k| !k.is_empty())
-            .map(|k| c.kind(k))
+            .map(|k| c.intern_kind(k))
             .collect();
-        let rekind = rekind_str.map(|k| c.kind(k));
+        let rekind = rekind_str.map(|k| c.intern_kind(k));
         return Pat::Var {
             slot,
             field,
@@ -464,9 +464,9 @@ fn item(c: &mut Ctx, toks: &[String], pos: &mut usize, field: u16) -> Pat {
     if let Some(rest) = tok.strip_prefix("@$") {
         // @$N->__name or @$N=>__name or @$N
         let (name, rekind) = if let Some((n, k)) = rest.split_once("=>") {
-            (n, Some((c.kind(k), true)))
+            (n, Some((c.intern_kind(k), true)))
         } else if let Some((n, k)) = rest.split_once("->") {
-            (n, Some((c.kind(k), false)))
+            (n, Some((c.intern_kind(k), false)))
         } else {
             (rest, None)
         };
@@ -484,7 +484,7 @@ fn item(c: &mut Ctx, toks: &[String], pos: &mut usize, field: u16) -> Pat {
         return Pat::Cap {
             slot: c.slot(n),
             field,
-            kind: k.map(|k| c.kind(k)),
+            kind: k.map(|k| c.intern_kind(k)),
             rekind: None,
         };
     }

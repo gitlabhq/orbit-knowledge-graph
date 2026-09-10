@@ -127,38 +127,38 @@ y = standalone_function(21)
     let stage1 = vec![
         // @sound → __ivar (Ruby instance variables)
         Rewrite::new(&mut lang, "(instance_variable)", |c| {
-            Out::SetKind(c.kind("__ivar"))
+            Out::SetKind(c.intern_kind("__ivar"))
         }),
         // obj.method(args) → __call(callee: __member(object, member), args)
         Rewrite::new(
             &mut lang,
             "(call receiver: $R method: $M arguments: $A)",
             |c| Out::Retag {
-                kind: c.kind("__call"),
+                kind: c.intern_kind("__call"),
                 fields: vec![
-                    (c.slot("R"), c.field("object")),
-                    (c.slot("M"), c.field("callee")),
-                    (c.slot("A"), c.field("args")),
+                    (c.slot("R"), c.intern_field("object")),
+                    (c.slot("M"), c.intern_field("callee")),
+                    (c.slot("A"), c.intern_field("args")),
                 ],
             },
         ),
         // method call without args: obj.method
         Rewrite::new(&mut lang, "(call receiver: $R method: $M)", |c| {
             Out::Retag {
-                kind: c.kind("__call"),
+                kind: c.intern_kind("__call"),
                 fields: vec![
-                    (c.slot("R"), c.field("object")),
-                    (c.slot("M"), c.field("callee")),
+                    (c.slot("R"), c.intern_field("object")),
+                    (c.slot("M"), c.intern_field("callee")),
                 ],
             }
         }),
         // bare function call: method(args)
         Rewrite::new(&mut lang, "(call method: $M arguments: $A)", |c| {
             Out::Retag {
-                kind: c.kind("__call"),
+                kind: c.intern_kind("__call"),
                 fields: vec![
-                    (c.slot("M"), c.field("callee")),
-                    (c.slot("A"), c.field("args")),
+                    (c.slot("M"), c.intern_field("callee")),
+                    (c.slot("A"), c.intern_field("args")),
                 ],
             }
         }),
@@ -167,7 +167,7 @@ y = standalone_function(21)
             Out::Append {
                 under: 0,
                 each: c.slot("S"),
-                kind: c.kind("__supertype"),
+                kind: c.intern_kind("__supertype"),
                 tf: Tf::Id,
             }
         }),
@@ -181,9 +181,9 @@ y = standalone_function(21)
     let args_f = lang.fields.lookup("args") as u16;
     let string_content_k = lang.kinds.lookup("string_content") as u16;
 
-    let k_import = lang.kind("__import");
-    let k_source = lang.kind("__source");
-    let k_name = lang.kind("__name");
+    let k_import = lang.intern_kind("__import");
+    let k_source = lang.intern_kind("__source");
+    let k_name = lang.intern_kind("__name");
 
     let require_sym = lang.syms.lookup("require");
     let require_rel_sym = lang.syms.lookup("require_relative");
@@ -220,7 +220,7 @@ y = standalone_function(21)
         let source_str = lang.syms.resolve(source_sym).to_string();
         let name = source_str.rsplit('/').next().unwrap_or(&source_str);
         let name = name.strip_prefix("./").unwrap_or(name);
-        let name_sym = lang.syms.get(name);
+        let name_sym = lang.syms.intern(name);
 
         tree.remove(imp);
         let b = SubTree::new(k_import)
@@ -252,7 +252,7 @@ y = standalone_function(21)
     // Find enclosing class for each include call and add __supertype
     let class_k = lang.kinds.lookup("class") as u16;
     let body_stmt_k = lang.kinds.lookup("body_statement") as u16;
-    let supertype_k = lang.kind("__supertype");
+    let supertype_k = lang.intern_kind("__supertype");
     for &(call_node, module_sym) in &include_calls {
         // Walk up: call → body_statement → class
         let mut p = tree.nodes[call_node as usize].parent;
@@ -283,7 +283,7 @@ y = standalone_function(21)
     let method_k = lang.kinds.lookup("method") as u16;
     let singleton_method_k = lang.kinds.lookup("singleton_method") as u16;
 
-    let k_deftype = lang.kind("__deftype");
+    let k_deftype = lang.intern_kind("__deftype");
 
     for i in 0..tree.nodes.len() as u32 {
         let n = &tree.nodes[i as usize];
@@ -299,7 +299,7 @@ y = standalone_function(21)
                 Node {
                     kind: k_deftype,
                     flags: NAMED | SYNTH,
-                    sym: lang.syms.get("Class"),
+                    sym: lang.syms.intern("Class"),
                     size: 1,
                     ..Default::default()
                 },
@@ -310,7 +310,7 @@ y = standalone_function(21)
                 Node {
                     kind: k_deftype,
                     flags: NAMED | SYNTH,
-                    sym: lang.syms.get("Module"),
+                    sym: lang.syms.intern("Module"),
                     size: 1,
                     ..Default::default()
                 },
@@ -333,7 +333,7 @@ y = standalone_function(21)
                 Node {
                     kind: k_deftype,
                     flags: NAMED | SYNTH,
-                    sym: lang.syms.get(label),
+                    sym: lang.syms.intern(label),
                     size: 1,
                     ..Default::default()
                 },
@@ -344,7 +344,7 @@ y = standalone_function(21)
                 Node {
                     kind: k_deftype,
                     flags: NAMED | SYNTH,
-                    sym: lang.syms.get("ClassMethod"),
+                    sym: lang.syms.intern("ClassMethod"),
                     size: 1,
                     ..Default::default()
                 },

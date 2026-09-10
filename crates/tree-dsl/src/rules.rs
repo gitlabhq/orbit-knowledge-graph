@@ -139,8 +139,8 @@ fn compile_resolve(section: &ResolveSection, lang: &mut Lang) -> crate::file_tre
         .iter()
         .map(|spec| {
             if let Some(climb) = &spec.climb {
-                let while_kind = lang.kind(&climb.r#while);
-                let mark_kind = lang.kind(&climb.mark);
+                let while_kind = lang.intern_kind(&climb.r#while);
+                let mark_kind = lang.intern_kind(&climb.mark);
                 ResolveStage::Climb {
                     while_kind,
                     mark_kind,
@@ -159,7 +159,7 @@ fn compile_resolve(section: &ResolveSection, lang: &mut Lang) -> crate::file_tre
     let lookup_from = section
         .lookup_from
         .iter()
-        .map(|name| lang.kind(name))
+        .map(|name| lang.intern_kind(name))
         .collect();
     crate::file_tree::ResolveConfig {
         stages,
@@ -194,7 +194,9 @@ fn compile_rule(rule: &Rule, lang: &mut Lang) -> Vec<Rewrite> {
 
     if let Some(ref kind_str) = rule.set_kind {
         let k = kind_str.clone();
-        return vec![Rewrite::new(lang, pat, move |c| Out::SetKind(c.kind(&k)))];
+        return vec![Rewrite::new(lang, pat, move |c| {
+            Out::SetKind(c.intern_kind(&k))
+        })];
     }
 
     if let Some(ref tpl) = rule.replace {
@@ -212,10 +214,10 @@ fn compile_rule(rule: &Rule, lang: &mut Lang) -> Vec<Rewrite> {
             .map(|(slot, field)| (slot.clone(), field.clone()))
             .collect();
         return vec![Rewrite::new(lang, pat, move |c| {
-            let kind = c.kind(&kind_str);
+            let kind = c.intern_kind(&kind_str);
             let fields = field_pairs
                 .iter()
-                .map(|(s, f)| (c.slot(s), c.field(f)))
+                .map(|(s, f)| (c.slot(s), c.intern_field(f)))
                 .collect();
             Out::Retag { kind, fields }
         })];
@@ -230,13 +232,13 @@ fn compile_rule(rule: &Rule, lang: &mut Lang) -> Vec<Rewrite> {
             let tf = match tf_spec.as_deref() {
                 None | Some("id") => Tf::Id,
                 Some(s) if s.starts_with("strip=") => Tf::Strip(s[6..].into()),
-                Some(s) if s.starts_with("field=") => Tf::Field(c.field(&s[6..])),
+                Some(s) if s.starts_with("field=") => Tf::Field(c.intern_field(&s[6..])),
                 Some(s) => panic!("unknown tf: {s}"),
             };
             Out::Append {
                 under: c.slot(&target),
                 each: c.slot(&each),
-                kind: c.kind(&kind),
+                kind: c.intern_kind(&kind),
                 tf,
             }
         })];
@@ -259,7 +261,7 @@ fn compile_rule(rule: &Rule, lang: &mut Lang) -> Vec<Rewrite> {
                     rewrites.push(Rewrite::new(lang, &pat, move |c| Out::Append {
                         under: 0,
                         each: 0,
-                        kind: c.kind(&kind),
+                        kind: c.intern_kind(&kind),
                         tf: Tf::Const(sym_static),
                     }));
                 }
@@ -267,7 +269,7 @@ fn compile_rule(rule: &Rule, lang: &mut Lang) -> Vec<Rewrite> {
                     rewrites.push(Rewrite::new(lang, &pat, move |c| Out::Append {
                         under: 0,
                         each: c.slot(&capture),
-                        kind: c.kind(&kind),
+                        kind: c.intern_kind(&kind),
                         tf: tf.clone(),
                     }));
                 }
@@ -275,7 +277,7 @@ fn compile_rule(rule: &Rule, lang: &mut Lang) -> Vec<Rewrite> {
                     rewrites.push(Rewrite::new(lang, &pat, move |c| Out::Append {
                         under: 0,
                         each: 0,
-                        kind: c.kind(&kind),
+                        kind: c.intern_kind(&kind),
                         tf: Tf::Const(""),
                     }));
                 }

@@ -163,7 +163,7 @@ export default class DefaultExport {}
             |c| Out::Append {
                 under: 0,
                 each: c.slot("V"),
-                kind: c.kind("__supertype"),
+                kind: c.intern_kind("__supertype"),
                 tf: Tf::Id,
             },
         ),
@@ -173,7 +173,7 @@ export default class DefaultExport {}
             |c| Out::Append {
                 under: 0,
                 each: c.slot("V"),
-                kind: c.kind("__supertype"),
+                kind: c.intern_kind("__supertype"),
                 tf: Tf::Id,
             },
         ),
@@ -187,10 +187,10 @@ export default class DefaultExport {}
             &mut lang,
             "(member_expression object: $O property: $P)",
             |c| Out::Retag {
-                kind: c.kind("__member"),
+                kind: c.intern_kind("__member"),
                 fields: vec![
-                    (c.slot("O"), c.field("object")),
-                    (c.slot("P"), c.field("member")),
+                    (c.slot("O"), c.intern_field("object")),
+                    (c.slot("P"), c.intern_field("member")),
                 ],
             },
         ),
@@ -198,10 +198,10 @@ export default class DefaultExport {}
             &mut lang,
             "(call_expression function: $F arguments: $A)",
             |c| Out::Retag {
-                kind: c.kind("__call"),
+                kind: c.intern_kind("__call"),
                 fields: vec![
-                    (c.slot("F"), c.field("callee")),
-                    (c.slot("A"), c.field("args")),
+                    (c.slot("F"), c.intern_field("callee")),
+                    (c.slot("A"), c.intern_field("args")),
                 ],
             },
         ),
@@ -223,10 +223,10 @@ export default class DefaultExport {}
     let name_f = lang.fields.lookup("name") as u16;
     let alias_f = lang.fields.lookup("alias") as u16;
 
-    let k_import = lang.kind("__import");
-    let k_source = lang.kind("__source");
-    let k_name = lang.kind("__name");
-    let k_alias = lang.kind("__alias");
+    let k_import = lang.intern_kind("__import");
+    let k_source = lang.intern_kind("__source");
+    let k_name = lang.intern_kind("__name");
+    let k_alias = lang.intern_kind("__alias");
 
     let imports: Vec<u32> = (0..tree.nodes.len() as u32)
         .filter(|&i| tree.nodes[i as usize].kind == import_stmt)
@@ -267,7 +267,7 @@ export default class DefaultExport {}
                     })
                     .map(|c| tree.sym(c))
                     .unwrap_or(0);
-                names.push((lang.syms.get("*"), ns_name, "NamespaceImport"));
+                names.push((lang.syms.intern("*"), ns_name, "NamespaceImport"));
             } else if has_named {
                 // import { User, Admin as A }
                 for spec in tree
@@ -291,7 +291,7 @@ export default class DefaultExport {}
                     .find(|&c| tree.node(c).flags & NAMED != 0 && tree.sym(c) != 0)
                     .map(|c| tree.sym(c))
                     .unwrap_or(0);
-                names.push((lang.syms.get("default"), default_name, "DefaultImport"));
+                names.push((lang.syms.intern("default"), default_name, "DefaultImport"));
             }
         }
 
@@ -300,9 +300,9 @@ export default class DefaultExport {}
         tree.remove(imp);
         let mut b = SubTree::new(k_import)
             .leaf(k_source, source_sym)
-            .leaf(lang.kind("__import_type"), lang.syms.get(label));
+            .leaf(lang.intern_kind("__import_type"), lang.syms.intern(label));
         if is_type_only {
-            b = b.leaf(lang.kind("__type_only"), lang.syms.get("true"));
+            b = b.leaf(lang.intern_kind("__type_only"), lang.syms.intern("true"));
         }
         for &(name_sym, alias_sym, _) in &names {
             if alias_sym != 0 {
@@ -330,8 +330,8 @@ export default class DefaultExport {}
     let body_f = lang.fields.lookup("body") as u16;
     let return_type_f = lang.fields.lookup("return_type") as u16;
 
-    let k_deftype = lang.kind("__deftype");
-    let k_rettype = lang.kind("__return_type");
+    let k_deftype = lang.intern_kind("__deftype");
+    let k_rettype = lang.intern_kind("__return_type");
 
     let def_kinds: &[(u16, &str)] = &[
         (class_decl, "Class"),
@@ -355,7 +355,7 @@ export default class DefaultExport {}
 
         for &(dk, label) in def_kinds {
             if n.kind == dk {
-                deftype = lang.syms.get(label);
+                deftype = lang.syms.intern(label);
                 rettype = tree
                     .child_by_field(i, return_type_f)
                     .map(|r| tree.sym(r))
@@ -373,7 +373,7 @@ export default class DefaultExport {}
             } else {
                 "Method"
             };
-            deftype = lang.syms.get(label);
+            deftype = lang.syms.intern(label);
             rettype = tree
                 .child_by_field(i, return_type_f)
                 .map(|r| tree.sym(r))
@@ -381,7 +381,7 @@ export default class DefaultExport {}
         }
 
         if n.kind == var_declarator {
-            deftype = lang.syms.get("Variable");
+            deftype = lang.syms.intern("Variable");
         }
 
         if deftype != 0 {
