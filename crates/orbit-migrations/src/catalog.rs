@@ -85,4 +85,20 @@ impl OntologyCatalog {
         self.load(version).await?.load_ontology()?;
         Ok(())
     }
+
+    pub async fn ensure_archive(&self, version: u32) -> Result<(), CatalogError> {
+        match self.verify_archive(version).await {
+            Err(CatalogError::Missing(_)) => {
+                let archive =
+                    OntologyArchive::bundled(version)?.ok_or(CatalogError::Missing(version))?;
+                self.publish(&archive).await?;
+                tracing::info!(
+                    version,
+                    "bootstrapped missing ontology archive from release bundle"
+                );
+                Ok(())
+            }
+            result => result,
+        }
+    }
 }

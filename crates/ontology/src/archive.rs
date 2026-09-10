@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use flate2::read::GzDecoder;
 use flate2::{Compression, GzBuilder};
 use orbit_utils::fs_stream::{CapExceeded, Counter};
+use rust_embed::Embed;
 use serde::{Deserialize, Serialize};
 
 use crate::loading::{ReadOntologyFile, load_with};
@@ -16,6 +17,11 @@ const FORMAT_VERSION: u32 = 1;
 const MANIFEST_PATH: &str = "manifest.json";
 const MAX_SOURCE_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_FILES: u64 = 4096;
+
+#[derive(Embed)]
+#[folder = "$CONFIG_DIR/ontology-archives"]
+#[include = "*.tar.gz"]
+struct BundledArchives;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ArchiveError {
@@ -50,6 +56,26 @@ pub struct OntologyArchive {
 }
 
 impl OntologyArchive {
+    pub fn bundled(schema_version: u32) -> Result<Option<Self>, ArchiveError> {
+        BundledArchives::get(&format!("v{schema_version}.tar.gz"))
+            .map(|file| Self::from_bytes(schema_version, &file.data))
+            .transpose()
+    }
+
+    pub fn bundled_versions() -> Result<Vec<u32>, ArchiveError> {
+        BundledArchives::iter()
+            .map(|path| {
+                path.strip_prefix('v')
+                    .and_then(|name| name.strip_suffix(".tar.gz"))
+                    .and_then(|version| version.parse::<u32>().ok())
+                    .filter(|version| path == format!("v{version}.tar.gz"))
+                    .ok_or_else(|| {
+                        ArchiveError::Invalid(format!("invalid archive filename {path}"))
+                    })
+            })
+            .collect()
+    }
+
     pub fn path(config_dir: &Path, schema_version: u32) -> PathBuf {
         config_dir
             .join(ARCHIVE_DIRECTORY)
@@ -224,6 +250,22 @@ mod tests {
     use crate::migrations::embedded_sources;
 
     const SCHEMA_VERSION: u32 = 42;
+
+    #[test]
+    fn every_bundled_archive_loads_at_its_declared_version() {
+        let versions = OntologyArchive::bundled_versions().unwrap();
+        assert!(!versions.is_empty());
+        for version in versions {
+            let archive = OntologyArchive::bundled(version).unwrap().unwrap();
+            assert_eq!(archive.schema_version(), version);
+            archive.load_ontology().unwrap();
+        }
+    }
+
+    #[test]
+    fn unsupported_versions_have_no_bundled_archive() {
+        assert!(OntologyArchive::bundled(u32::MAX).unwrap().is_none());
+    }
 
     #[test]
     fn identical_sources_produce_identical_archive_bytes() {

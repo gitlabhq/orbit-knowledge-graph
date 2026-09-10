@@ -10,6 +10,17 @@ fn main() {
 }
 
 fn validate_ontology_archive() {
+    let directory = std::path::Path::new(env!("CONFIG_DIR")).join("ontology-archives");
+    println!("cargo:rerun-if-changed={}", directory.display());
+    for version in ontology::archive::OntologyArchive::bundled_versions()
+        .unwrap_or_else(|error| panic!("{error}"))
+    {
+        ontology::archive::OntologyArchive::bundled(version)
+            .unwrap_or_else(|error| panic!("{error}"))
+            .expect("bundled archive must exist")
+            .load_ontology()
+            .unwrap_or_else(|error| panic!("bundled archive v{version}: {error}"));
+    }
     let version = orbit_versions::VERSIONS.schema;
     let path =
         ontology::archive::OntologyArchive::path(std::path::Path::new(env!("CONFIG_DIR")), version);
