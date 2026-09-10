@@ -20,6 +20,7 @@ expect:
   nodes:
     File:
       ids: [13003]
+      prop_present: [path]
+      prop_absent: [content]
       filters:
         project_id: { eq: 1000 }
-        content: { is_null: true }
