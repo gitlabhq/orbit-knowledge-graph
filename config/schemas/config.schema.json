@@ -59,6 +59,9 @@
     "nats": {
       "$ref": "#/$defs/NatsConfiguration"
     },
+    "object_storage": {
+      "$ref": "#/$defs/ObjectStorageConfig"
+    },
     "path_resolver": {
       "$ref": "#/$defs/PathResolverConfig"
     },
@@ -97,7 +100,8 @@
     "schema",
     "analytics",
     "billing",
-    "features"
+    "features",
+    "object_storage"
   ],
   "$defs": {
     "AnalyticsConfig": {
@@ -970,6 +974,99 @@
         "fetch_expires_secs",
         "consumer_inactive_threshold_secs",
         "release_gc_idle_threshold_secs"
+      ]
+    },
+    "ObjectStorageAuth": {
+      "type": "string",
+      "enum": [
+        "identity",
+        "static"
+      ]
+    },
+    "ObjectStorageConfig": {
+      "type": "object",
+      "properties": {
+        "access_key_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "allow_http": {
+          "type": "boolean"
+        },
+        "auth": {
+          "$ref": "#/$defs/ObjectStorageAuth"
+        },
+        "bucket": {
+          "type": "string"
+        },
+        "ca_cert_path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "endpoint": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "path_style": {
+          "type": "boolean"
+        },
+        "prefix": {
+          "type": "string"
+        },
+        "provider": {
+          "$ref": "#/$defs/ObjectStorageProvider"
+        },
+        "region": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "secret_access_key": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "service_account_key": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "session_token": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "provider",
+        "bucket",
+        "prefix",
+        "auth",
+        "path_style",
+        "allow_http"
+      ]
+    },
+    "ObjectStorageProvider": {
+      "type": "string",
+      "enum": [
+        "s3",
+        "gcs",
+        "local"
       ]
     },
     "OtelConfig": {

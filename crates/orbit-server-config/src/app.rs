@@ -17,6 +17,7 @@ use crate::grpc::GrpcConfig;
 use crate::health_check::HealthCheckConfig;
 use crate::metrics::MetricsConfig;
 use crate::nats::NatsConfiguration;
+use crate::object_storage::ObjectStorageConfig;
 use crate::query::{PathResolverConfig, QuerySettings};
 use crate::schema::SchemaConfig;
 use crate::secret_file_source::SecretFileSource;
@@ -54,6 +55,7 @@ pub struct AppConfig {
     pub analytics: AnalyticsConfig,
     pub billing: BillingConfig,
     pub features: FeaturesConfig,
+    pub object_storage: ObjectStorageConfig,
 }
 
 impl AppConfig {
@@ -75,7 +77,7 @@ impl AppConfig {
             .expect("embedded config/default.yaml must deserialize into AppConfig")
     }
 
-    fn load_from(overlay: Option<&Path>, secret_dir: &Path) -> Result<Self, ConfigError> {
+    pub fn load_from(overlay: Option<&Path>, secret_dir: &Path) -> Result<Self, ConfigError> {
         let overlay_file = match overlay {
             Some(path) => config::File::from(path.to_path_buf()).required(true),
             None => config::File::with_name(OVERLAY_CONFIG_FILE).required(false),
