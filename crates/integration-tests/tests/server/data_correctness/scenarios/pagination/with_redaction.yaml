@@ -19,6 +19,9 @@ query:
     }
 
 expect:
+  all_pages:
+    node_ids:
+      User: [1, 3, 5]
   pages:
     - skip_requirements: [cursor, node_count, order_by]
     - skip_requirements: [cursor, node_count, order_by]

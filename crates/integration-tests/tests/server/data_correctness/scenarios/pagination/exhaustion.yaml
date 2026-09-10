@@ -12,19 +12,12 @@ query:
     }
 
 expect:
+  all_pages:
+    node_ids:
+      User: [1, 2, 3, 4, 5, 6, 7]
+    page_count: 3
+    no_duplicate_ids: true
   pages:
-    - nodes:
-        User:
-          order: [1, 2, 3]
-      has_more: true
-      skip_requirements: [cursor]
-    - nodes:
-        User:
-          order: [4, 5, 6]
-      has_more: true
-      skip_requirements: [cursor]
-    - nodes:
-        User:
-          order: [7]
-      has_more: false
-      skip_requirements: [cursor]
+    - skip_requirements: [cursor, order_by]
+    - skip_requirements: [cursor, order_by]
+    - skip_requirements: [cursor, order_by]

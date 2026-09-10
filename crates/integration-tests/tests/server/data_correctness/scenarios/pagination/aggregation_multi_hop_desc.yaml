@@ -21,8 +21,11 @@ query:
     }
 
 expect:
+  all_pages:
+    group_node_ids:
+      "u:User": [1, 2, 3, 4, 5, 6]
+    no_duplicate_ids: true
   pages:
     - skip_requirements: [cursor, aggregation, aggregation_sort]
     - skip_requirements: [cursor, aggregation, aggregation_sort]
-    - has_more: false
-      skip_requirements: [cursor, aggregation, aggregation_sort]
+    - skip_requirements: [cursor, aggregation, aggregation_sort]

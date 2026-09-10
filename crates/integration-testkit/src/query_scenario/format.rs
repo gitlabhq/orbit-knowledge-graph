@@ -111,6 +111,10 @@ pub struct QueryExpect {
     pub referential_integrity: bool,
     #[serde(default)]
     pub has_more: Option<bool>,
+    /// Assertions across ALL pages combined. The runner collects node IDs
+    /// and edge tuples from every page and asserts at the end.
+    #[serde(default)]
+    pub all_pages: Option<AllPagesExpect>,
     /// Multi-page pagination: the runner chains cursors automatically.
     #[serde(default)]
     pub pages: Vec<QueryExpect>,
@@ -176,6 +180,27 @@ pub struct GroupRowExpect {
     pub values: BTreeMap<String, serde_json::Value>,
     #[serde(default)]
     pub properties: BTreeMap<String, serde_json::Value>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AllPagesExpect {
+    /// Expected node IDs collected across all pages, sorted.
+    #[serde(default)]
+    pub node_ids: BTreeMap<String, Vec<i64>>,
+    /// Expected group node IDs collected across all pages, sorted.
+    /// Key is "group_key:EntityType", e.g. "u:User".
+    #[serde(default)]
+    pub group_node_ids: BTreeMap<String, Vec<i64>>,
+    /// Expected total edge count across all pages (after dedup).
+    #[serde(default)]
+    pub edge_count: Option<usize>,
+    /// Expected number of pages.
+    #[serde(default)]
+    pub page_count: Option<usize>,
+    /// Assert no node ID appears on multiple pages.
+    #[serde(default)]
+    pub no_duplicate_ids: bool,
 }
 
 impl QueryExpect {

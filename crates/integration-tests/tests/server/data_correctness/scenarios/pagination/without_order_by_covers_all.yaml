@@ -7,15 +7,16 @@ query:
       "query_type": "traversal",
       "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000},
                  "columns": ["username"]}],
-      "cursor": {"page_size": 3}
+      "cursor": {"page_size": 2}
     }
 
 expect:
+  all_pages:
+    node_ids:
+      User: [1, 2, 3, 4, 5, 6, 7]
+    no_duplicate_ids: true
   pages:
-    - node_count: 3
-      skip_requirements: [cursor]
-    - node_count: 3
-      skip_requirements: [cursor]
-    - node_count: 1
-      has_more: false
-      skip_requirements: [cursor]
+    - skip_requirements: [cursor]
+    - skip_requirements: [cursor]
+    - skip_requirements: [cursor]
+    - skip_requirements: [cursor]

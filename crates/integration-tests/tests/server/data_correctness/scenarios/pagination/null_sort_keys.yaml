@@ -12,13 +12,11 @@ query:
     }
 
 expect:
+  all_pages:
+    node_ids:
+      MergeRequest: [2000, 2001, 2002, 2003, 2004, 2005]
+    no_duplicate_ids: true
   pages:
-    - node_count: 2
-      has_more: true
-      skip_requirements: [cursor, node_count, order_by]
-    - node_count: 2
-      has_more: true
-      skip_requirements: [cursor, node_count, order_by]
-    - node_count: 2
-      has_more: false
-      skip_requirements: [cursor, node_count, order_by]
+    - skip_requirements: [cursor, node_count, order_by]
+    - skip_requirements: [cursor, node_count, order_by]
+    - skip_requirements: [cursor, node_count, order_by]

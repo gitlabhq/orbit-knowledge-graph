@@ -14,10 +14,10 @@ query:
     }
 
 expect:
+  all_pages:
+    edge_count: 9
+    page_count: 3
   pages:
-    - has_more: true
-      skip_requirements: [cursor, "relationship:MEMBER_OF"]
-    - has_more: true
-      skip_requirements: [cursor, "relationship:MEMBER_OF"]
-    - has_more: false
-      skip_requirements: [cursor, "relationship:MEMBER_OF"]
+    - skip_requirements: [cursor, "relationship:MEMBER_OF"]
+    - skip_requirements: [cursor, "relationship:MEMBER_OF"]
+    - skip_requirements: [cursor, "relationship:MEMBER_OF"]

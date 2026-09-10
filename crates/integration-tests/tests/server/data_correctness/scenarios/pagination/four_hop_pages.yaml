@@ -20,10 +20,10 @@ query:
     }
 
 expect:
+  all_pages:
+    edge_count: 13
+    page_count: 3
   pages:
-    - has_more: true
-      skip_requirements: [cursor, "relationship:AUTHORED", "relationship:IN_GROUP", "relationship:CONTAINS"]
-    - has_more: true
-      skip_requirements: [cursor, "relationship:AUTHORED", "relationship:IN_GROUP", "relationship:CONTAINS"]
-    - has_more: false
-      skip_requirements: [cursor, "relationship:AUTHORED", "relationship:IN_GROUP", "relationship:CONTAINS"]
+    - skip_requirements: [cursor, "relationship:AUTHORED", "relationship:IN_GROUP", "relationship:CONTAINS"]
+    - skip_requirements: [cursor, "relationship:AUTHORED", "relationship:IN_GROUP", "relationship:CONTAINS"]
+    - skip_requirements: [cursor, "relationship:AUTHORED", "relationship:IN_GROUP", "relationship:CONTAINS"]

@@ -254,6 +254,13 @@ async fn run_pages(
     let mut query_json: serde_json::Value =
         serde_json::from_str(base_query).expect("query must be valid JSON");
 
+    let mut collected_ids: std::collections::BTreeMap<String, Vec<i64>> =
+        std::collections::BTreeMap::new();
+    let mut collected_group_ids: std::collections::BTreeMap<String, Vec<i64>> =
+        std::collections::BTreeMap::new();
+    let mut collected_edges: Vec<(String, i64, i64)> = Vec::new();
+    let mut page_count = 0;
+
     for (i, page_expect) in expect.pages.iter().enumerate() {
         let page_label = format!("{label} page {}", i + 1);
         let query_str = query_json.to_string();
@@ -272,11 +279,35 @@ async fn run_pages(
             .as_ref()
             .and_then(|p| p.next_cursor.clone());
 
+        // Collect IDs and edges for all_pages assertions.
+        if expect.all_pages.is_some() {
+            for node in &response.nodes {
+                collected_ids
+                    .entry(node.entity_type.clone())
+                    .or_default()
+                    .push(node.id);
+            }
+            for edge in &response.edges {
+                collected_edges.push((edge.edge_type.clone(), edge.from_id, edge.to_id));
+            }
+        }
+        page_count += 1;
+
         let view = ResponseView::for_query(&compiled.input, response);
+
+        if let Some(ap) = &expect.all_pages {
+            for (key, _) in &ap.group_node_ids {
+                if let Some((group_key, entity)) = key.split_once(':') {
+                    let ids = view.group_node_ids_ordered(group_key, entity);
+                    collected_group_ids
+                        .entry(key.clone())
+                        .or_default()
+                        .extend(ids);
+                }
+            }
+        }
+
         apply_expect(&view, page_expect, &page_label);
-        // The Rust pagination tests call assert_node_count(resp.node_count())
-        // on every page to satisfy the Cursor/NodeCount requirement. Do the
-        // same when the page doesn't set an explicit node_count.
         if page_expect.node_count.is_none() {
             view.assert_node_count(view.node_count());
         }
@@ -292,6 +323,50 @@ async fn run_pages(
                     "{page_label}: no next_cursor but more pages expected"
                 );
             }
+        }
+    }
+
+    if let Some(ap) = &expect.all_pages {
+        if let Some(expected_pages) = ap.page_count {
+            assert_eq!(page_count, expected_pages, "{label}: page count mismatch");
+        }
+        if ap.no_duplicate_ids {
+            for (entity, ids) in &collected_ids {
+                let mut seen = std::collections::HashSet::new();
+                for id in ids {
+                    assert!(
+                        seen.insert(*id),
+                        "{label}: {entity}/{id} appeared on multiple pages"
+                    );
+                }
+            }
+        }
+        for (entity, expected_ids) in &ap.node_ids {
+            let mut actual: Vec<i64> = collected_ids.get(entity).cloned().unwrap_or_default();
+            actual.sort();
+            actual.dedup();
+            assert_eq!(
+                actual, *expected_ids,
+                "{label}: collected {entity} IDs mismatch"
+            );
+        }
+        for (key, expected_ids) in &ap.group_node_ids {
+            let mut actual = collected_group_ids.get(key).cloned().unwrap_or_default();
+            actual.sort();
+            actual.dedup();
+            assert_eq!(
+                actual, *expected_ids,
+                "{label}: collected group {key} IDs mismatch"
+            );
+        }
+        if let Some(expected) = ap.edge_count {
+            collected_edges.sort();
+            collected_edges.dedup();
+            assert_eq!(
+                collected_edges.len(),
+                expected,
+                "{label}: collected edge count mismatch"
+            );
         }
     }
 }

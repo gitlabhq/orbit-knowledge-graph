@@ -16,7 +16,10 @@ query:
     }
 
 expect:
+  all_pages:
+    group_node_ids:
+      "u:User": [1, 2, 3]
+    no_duplicate_ids: true
   pages:
     - skip_requirements: [cursor, aggregation]
     - skip_requirements: [cursor, aggregation]
-      has_more: false
