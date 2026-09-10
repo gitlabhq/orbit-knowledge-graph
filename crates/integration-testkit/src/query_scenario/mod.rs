@@ -643,7 +643,7 @@ fn eval_filter_predicate(
             n.prop(field).is_some_and(|p| vals.contains(p))
         }
         serde_json::Value::Object(m) if m.contains_key("is_null") => {
-            n.properties.len() > 0 && !n.has_prop(field)
+            !n.properties.is_empty() && !n.has_prop(field)
         }
         serde_json::Value::Object(m) if m.contains_key("is_not_null") => n.has_prop(field),
         serde_json::Value::Object(m) if m.contains_key("gte") => {
