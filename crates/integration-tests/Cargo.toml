@@ -56,7 +56,7 @@ tower = { workspace = true }
 tempfile = { workspace = true }
 cargo_metadata = { workspace = true }
 reqwest = { workspace = true, features = ["stream", "rustls"] }
-labkit = { workspace = true, features = ["http"] }
+labkit = { workspace = true, features = ["http", "prometheus"] }
 labkit-events = { workspace = true }
 opentelemetry = { workspace = true }
 opentelemetry_sdk = { version = "0.32", features = ["metrics", "rt-tokio", "testing"] }

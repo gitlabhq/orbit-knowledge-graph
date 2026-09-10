@@ -213,3 +213,20 @@ async fn pipeline_observer_records_ch_resource_metrics() {
 
     provider.shutdown().unwrap();
 }
+
+#[tokio::test]
+async fn prometheus_metrics_served_on_probe_server() {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    drop(listener);
+
+    let _guard = labkit::Builder::new("test")
+        .prometheus_metrics(addr)
+        .init()
+        .expect("labkit init");
+
+    for path in ["/-/metrics", "/-/liveness", "/-/readiness"] {
+        let response = reqwest::get(format!("http://{addr}{path}")).await.unwrap();
+        assert_eq!(response.status(), 200, "GET {path}");
+    }
+}
