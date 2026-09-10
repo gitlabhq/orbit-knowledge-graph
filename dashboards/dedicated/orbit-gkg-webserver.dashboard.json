@@ -5198,7 +5198,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "description": "Total HTTP calls issued to the merge_request_diffs internal API.",
+          "description": "Logical blob calls by selected transport and final outcome; fallback records the proxy attempt.",
           "fieldConfig": {
             "defaults": {
               "custom": {
@@ -5217,6 +5217,57 @@
             "y": 290
           },
           "id": 100,
+          "options": {
+            "legend": {
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "$ORBIT_DS"
+              },
+              "expr": "sum by (transport, outcome) (rate(gkg_content_gitaly_transport_calls_total{container=\"gkg-webserver\", cluster=~\".*\"}[5m]))",
+              "legendFormat": "{{transport}} / {{outcome}}",
+              "refId": "A"
+            }
+          ],
+          "title": "gkg_content_gitaly_transport_calls_total — rate/s",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "description": "Total HTTP calls issued to the merge_request_diffs internal API.",
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "lineInterpolation": "smooth",
+                "showPoints": "auto"
+              },
+              "unit": "short"
+            }
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 290
+          },
+          "id": 101,
           "options": {
             "legend": {
               "calcs": [
@@ -5264,10 +5315,10 @@
           "gridPos": {
             "h": 8,
             "w": 8,
-            "x": 8,
+            "x": 16,
             "y": 290
           },
-          "id": 101,
+          "id": 102,
           "options": {
             "legend": {
               "calcs": [
@@ -5315,10 +5366,10 @@
           "gridPos": {
             "h": 8,
             "w": 8,
-            "x": 16,
-            "y": 290
+            "x": 0,
+            "y": 298
           },
-          "id": 102,
+          "id": 103,
           "options": {
             "legend": {
               "calcs": [
@@ -5384,10 +5435,10 @@
           "gridPos": {
             "h": 8,
             "w": 8,
-            "x": 0,
+            "x": 8,
             "y": 298
           },
-          "id": 103,
+          "id": 104,
           "options": {
             "legend": {
               "calcs": [
@@ -5435,10 +5486,10 @@
           "gridPos": {
             "h": 8,
             "w": 8,
-            "x": 8,
+            "x": 16,
             "y": 298
           },
-          "id": 104,
+          "id": 105,
           "options": {
             "legend": {
               "calcs": [
@@ -5504,10 +5555,10 @@
           "gridPos": {
             "h": 8,
             "w": 8,
-            "x": 16,
-            "y": 298
+            "x": 0,
+            "y": 306
           },
-          "id": 105,
+          "id": 106,
           "options": {
             "legend": {
               "calcs": [
@@ -5545,9 +5596,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 306
+        "y": 314
       },
-      "id": 106,
+      "id": 107,
       "panels": [
         {
           "datasource": {
@@ -5570,9 +5621,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 307
+            "y": 315
           },
-          "id": 107,
+          "id": 108,
           "options": {
             "legend": {
               "calcs": [
@@ -5610,9 +5661,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 315
+        "y": 323
       },
-      "id": 108,
+      "id": 109,
       "panels": [
         {
           "datasource": {
@@ -5635,9 +5686,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 316
+            "y": 324
           },
-          "id": 109,
+          "id": 110,
           "options": {
             "legend": {
               "calcs": [
@@ -5686,9 +5737,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 316
+            "y": 324
           },
-          "id": 110,
+          "id": 111,
           "options": {
             "legend": {
               "calcs": [
@@ -5737,9 +5788,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 316
+            "y": 324
           },
-          "id": 111,
+          "id": 112,
           "options": {
             "legend": {
               "calcs": [
@@ -5788,9 +5839,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 324
+            "y": 332
           },
-          "id": 112,
+          "id": 113,
           "options": {
             "legend": {
               "calcs": [
@@ -5839,9 +5890,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 324
+            "y": 332
           },
-          "id": 113,
+          "id": 114,
           "options": {
             "legend": {
               "calcs": [
@@ -5879,9 +5930,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 332
+        "y": 340
       },
-      "id": 114,
+      "id": 115,
       "panels": [
         {
           "datasource": {
@@ -5904,9 +5955,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 333
+            "y": 341
           },
-          "id": 115,
+          "id": 116,
           "options": {
             "legend": {
               "calcs": [
@@ -5955,9 +6006,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 333
+            "y": 341
           },
-          "id": 116,
+          "id": 117,
           "options": {
             "legend": {
               "calcs": [
@@ -6006,9 +6057,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 333
+            "y": 341
           },
-          "id": 117,
+          "id": 118,
           "options": {
             "legend": {
               "calcs": [
@@ -6075,9 +6126,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 341
+            "y": 349
           },
-          "id": 118,
+          "id": 119,
           "options": {
             "legend": {
               "calcs": [
@@ -6126,9 +6177,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 341
+            "y": 349
           },
-          "id": 119,
+          "id": 120,
           "options": {
             "legend": {
               "calcs": [
@@ -6166,9 +6217,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 349
+        "y": 357
       },
-      "id": 120,
+      "id": 121,
       "panels": [
         {
           "datasource": {
@@ -6191,9 +6242,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 350
+            "y": 358
           },
-          "id": 121,
+          "id": 122,
           "options": {
             "legend": {
               "calcs": [
@@ -6242,9 +6293,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 350
+            "y": 358
           },
-          "id": 122,
+          "id": 123,
           "options": {
             "legend": {
               "calcs": [
@@ -6293,9 +6344,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 350
+            "y": 358
           },
-          "id": 123,
+          "id": 124,
           "options": {
             "legend": {
               "calcs": [
@@ -6333,9 +6384,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 358
+        "y": 366
       },
-      "id": 124,
+      "id": 125,
       "panels": [],
       "title": "Rails KG — request (reference)",
       "type": "row"
@@ -6361,9 +6412,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 359
+        "y": 367
       },
-      "id": 125,
+      "id": 126,
       "options": {
         "legend": {
           "calcs": [
@@ -6430,9 +6481,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 359
+        "y": 367
       },
-      "id": 126,
+      "id": 127,
       "options": {
         "legend": {
           "calcs": [
@@ -6481,9 +6532,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 359
+        "y": 367
       },
-      "id": 127,
+      "id": 128,
       "options": {
         "legend": {
           "calcs": [
@@ -6532,9 +6583,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 367
+        "y": 375
       },
-      "id": 128,
+      "id": 129,
       "options": {
         "legend": {
           "calcs": [
@@ -6601,9 +6652,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 367
+        "y": 375
       },
-      "id": 129,
+      "id": 130,
       "options": {
         "legend": {
           "calcs": [
@@ -6652,9 +6703,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 367
+        "y": 375
       },
-      "id": 130,
+      "id": 131,
       "options": {
         "legend": {
           "calcs": [
@@ -6721,9 +6772,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 375
+        "y": 383
       },
-      "id": 131,
+      "id": 132,
       "options": {
         "legend": {
           "calcs": [
@@ -6772,9 +6823,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 375
+        "y": 383
       },
-      "id": 132,
+      "id": 133,
       "options": {
         "legend": {
           "calcs": [
@@ -6841,9 +6892,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 375
+        "y": 383
       },
-      "id": 133,
+      "id": 134,
       "options": {
         "legend": {
           "calcs": [
@@ -6892,9 +6943,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 383
+        "y": 391
       },
-      "id": 134,
+      "id": 135,
       "options": {
         "legend": {
           "calcs": [
@@ -6961,9 +7012,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 383
+        "y": 391
       },
-      "id": 135,
+      "id": 136,
       "options": {
         "legend": {
           "calcs": [
@@ -7012,9 +7063,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 383
+        "y": 391
       },
-      "id": 136,
+      "id": 137,
       "options": {
         "legend": {
           "calcs": [
@@ -7081,9 +7132,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 391
+        "y": 399
       },
-      "id": 137,
+      "id": 138,
       "options": {
         "legend": {
           "calcs": [
@@ -7117,9 +7168,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 399
+        "y": 407
       },
-      "id": 138,
+      "id": 139,
       "panels": [],
       "title": "Rails KG — traversal (reference)",
       "type": "row"
@@ -7145,9 +7196,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 400
+        "y": 408
       },
-      "id": 139,
+      "id": 140,
       "options": {
         "legend": {
           "calcs": [
@@ -7214,9 +7265,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 400
+        "y": 408
       },
-      "id": 140,
+      "id": 141,
       "options": {
         "legend": {
           "calcs": [
@@ -7265,9 +7316,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 400
+        "y": 408
       },
-      "id": 141,
+      "id": 142,
       "options": {
         "legend": {
           "calcs": [
@@ -7334,9 +7385,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 408
+        "y": 416
       },
-      "id": 142,
+      "id": 143,
       "options": {
         "legend": {
           "calcs": [
@@ -7385,9 +7436,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 408
+        "y": 416
       },
-      "id": 143,
+      "id": 144,
       "options": {
         "legend": {
           "calcs": [
@@ -7436,9 +7487,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 408
+        "y": 416
       },
-      "id": 144,
+      "id": 145,
       "options": {
         "legend": {
           "calcs": [

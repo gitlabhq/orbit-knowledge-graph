@@ -208,7 +208,7 @@ impl ProxyBlobService {
             .list_blobs(ListBlobsRequest {
                 repository: Some(channel.repository()),
                 revisions,
-                bytes_limit: -1,
+                bytes_limit: MAX_BLOB_SIZE as i64,
                 with_paths: false,
                 ..Default::default()
             })
@@ -385,8 +385,34 @@ mod tests {
         assert_eq!(fake.rpcs(), 2);
         let requests = fake.blob_requests();
         assert_eq!(requests[0].revisions, ["main:src/lib.rs"]);
-        assert_eq!(requests[0].bytes_limit, -1);
+        assert_eq!(requests[0].bytes_limit, MAX_BLOB_SIZE as i64);
         assert!(!requests[0].with_paths);
+    }
+
+    #[tokio::test]
+    async fn accepts_content_capped_at_the_rails_blob_limit() {
+        let response = ListBlobsResponse {
+            blobs: vec![BlobChunk {
+                oid: "capped".to_owned(),
+                data: vec![b'x'; MAX_BLOB_SIZE],
+                ..Default::default()
+            }],
+        };
+        let fake = FakeWorkhorse::start(
+            Preauth::ok("600"),
+            Arc::new(move |_| StreamPlan::ServeResponses(vec![response.clone()])),
+        )
+        .await;
+        let service = ProxyBlobService::new(Arc::new(fake.client()), &config());
+
+        let blobs = service
+            .fetch(42, &["main:large.txt".to_owned()])
+            .await
+            .unwrap();
+
+        assert_eq!(fake.blob_requests()[0].bytes_limit, MAX_BLOB_SIZE as i64);
+        assert_eq!(blobs.len(), 1);
+        assert_eq!(blobs[0].data, vec![b'x'; MAX_BLOB_SIZE]);
     }
 
     #[tokio::test]
