@@ -17,7 +17,7 @@ query:
 
 expect:
   node_count: 1
-  skip_requirements: ["filter:content", "filter:project_id"]
+  skip_requirements: ["filter:project_id"]
   nodes:
     File:
       ids: [13003]

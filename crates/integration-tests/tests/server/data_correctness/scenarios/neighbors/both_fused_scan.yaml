@@ -1,0 +1,25 @@
+# source: crates/integration-tests/tests/server/data_correctness/neighbors.rs::neighbors_both_fused_scan_returns_complete_bidirectional_set
+description: Bidirectional MEMBER_OF+CONTAINS neighbors of Group 100 with limit
+
+query:
+  json: |
+    {
+      "query_type": "neighbors",
+      "nodes": [{"id": "g", "entity": "Group", "node_ids": [100]}],
+      "neighbors": {"direction": "both", "rel_types": ["MEMBER_OF", "CONTAINS"]},
+      "limit": 50
+    }
+
+expect:
+  node_count: 7
+  referential_integrity: true
+  nodes:
+    Group:
+      ids: [100, 200]
+    User:
+      ids: [1, 2, 6]
+    Project:
+      ids: [1000, 1002]
+  edge_exists:
+    MEMBER_OF: [[1, 100], [2, 100], [6, 100]]
+    CONTAINS: [[100, 200], [100, 1000], [100, 1002]]

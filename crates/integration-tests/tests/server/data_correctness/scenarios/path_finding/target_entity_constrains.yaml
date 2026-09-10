@@ -1,0 +1,21 @@
+# source: crates/integration-tests/tests/server/data_correctness/path_finding.rs::path_finding_target_entity_constrains_results
+description: Target entity MergeRequest excludes Note and WorkItem endpoints
+
+query:
+  json: |
+    {
+      "query_type": "path_finding",
+      "nodes": [
+        {"id": "start", "entity": "User", "node_ids": [1]},
+        {"id": "end", "entity": "MergeRequest", "node_ids": [2000, 2001]}
+      ],
+      "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 1,
+               "rel_types": ["AUTHORED"]}
+    }
+
+expect:
+  referential_integrity: true
+  path_count: 2
+  nodes:
+    Note:
+      absent: [3000]
