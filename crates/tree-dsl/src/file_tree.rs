@@ -22,11 +22,9 @@ pub enum ResolveStage {
 pub struct ResolveConfig {
     pub stages: Vec<ResolveStage>,
     /// Synthetic kinds whose marked nodes provide resolution prefixes.
-    /// The engine collects the path of every file-tree node carrying one of
-    /// these synthetics and uses those paths as candidate prefixes when
-    /// resolving absolute imports. Relative imports (`./`, `../`) always
-    /// resolve against the importing file's directory.
     pub lookup_from: Vec<u16>,
+    /// Module names that should never resolve to local files (e.g. stdlib).
+    pub external: Vec<String>,
 }
 
 impl Default for ResolveConfig {
@@ -34,6 +32,7 @@ impl Default for ResolveConfig {
         Self {
             stages: vec![],
             lookup_from: vec![],
+            external: vec![],
         }
     }
 }

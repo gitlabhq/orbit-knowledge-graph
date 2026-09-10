@@ -33,6 +33,8 @@ struct RuleFile {
 struct ResolveSection {
     #[serde(default)]
     lookup_from: Vec<String>,
+    #[serde(default)]
+    external: Vec<String>,
     stages: Vec<ResolveStageSpec>,
 }
 
@@ -164,6 +166,7 @@ fn compile_resolve(section: &ResolveSection, lang: &mut Lang) -> crate::file_tre
     crate::file_tree::ResolveConfig {
         stages,
         lookup_from,
+        external: section.external.clone(),
     }
 }
 
