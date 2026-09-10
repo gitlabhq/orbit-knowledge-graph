@@ -376,8 +376,7 @@ REST APIまたは`glab orbit remote query`でクエリを送信する場合は�
 
 `merge_request_id`はマージリクエストの内部数値`id`であり、プロジェクトスコープの`iid`ではありません。まず`iid`と`project_id`でフィルタリングする`MergeRequest`トラバーサルで調べてから、その`id`を上記のクエリに使用してください。
 
-`Pipeline.merge_request_id`と`MergeRequest --TRIGGERED-->
-Pipeline`エッジはどちらも、MRのコンテキストで起動されたすべてのCIパイプライン（トップレベルのMRパイプラインがトリガーするダウンストリームの子パイプライン（`source = "parent_pipeline"`）を含む）にMRをリンクします。`source = "merge_request_event"`フィルターなしでは、親子パイプラインのファンアウトを使用するMRで大幅に過剰カウントになり、MRの**パイプライン**タブに表示される内容と一致しません。マルチノードクエリで`MergeRequest --TRIGGERED--> Pipeline`をトラバースする場合も同じフィルターを適用してください。
+`Pipeline.merge_request_id`と`MergeRequest --TRIGGERED--> Pipeline`エッジはどちらも、MRのコンテキストで起動されたすべてのCIパイプライン（トップレベルのMRパイプラインがトリガーするダウンストリームの子パイプライン（`source = "parent_pipeline"`）を含む）にMRをリンクします。`source = "merge_request_event"`フィルターなしでは、親子パイプラインのファンアウトを使用するMRで大幅に過剰カウントになり、MRの**パイプライン**タブに表示される内容と一致しません。マルチノードクエリで`MergeRequest --TRIGGERED--> Pipeline`をトラバースする場合も同じフィルターを適用してください。
 
 `MergeRequest --HAS_HEAD_PIPELINE--> Pipeline`は別のエッジです。マージリクエストのソースブランチの先端に対して実行されている最新の単一パイプラインを指します。パイプラインの履歴ではなく、「現在実行中のもの」を確認する場合に使用してください。
 

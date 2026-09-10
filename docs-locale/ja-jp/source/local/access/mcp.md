@@ -350,12 +350,12 @@ GitLab Orbit Local MCPサーバーは、ローカルグラフと連携するツ�
 
 ### `index` {#index}
 
-リポジトリ（または複数のリポジトリを含むディレクトリ）をローカルグラフにインデックス化します。
+リポジトリ、またはリポジトリを含むディレクトリのインデックスを、ローカルグラフに作成します。
 
 例:
 
 ```plaintext
-Index my checked out project.
+チェックアウト済みのプロジェクトをインデックス作成してください。
 ```
 
 ### `get_graph_schema` {#get_graph_schema}
