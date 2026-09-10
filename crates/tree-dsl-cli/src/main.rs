@@ -4,7 +4,7 @@ use std::time::Instant;
 use clap::{Parser, Subcommand};
 
 use tree_dsl::grammar::SupportLang;
-use tree_dsl::tree::{EdgeKind, NAMED, SYNTH};
+use tree_dsl::tree::EdgeKind;
 
 #[derive(Parser)]
 #[command(name = "tree-dsl", about = "Code indexing CLI")]
@@ -110,7 +110,6 @@ fn cmd_parse(
             let (tree, lang, _) = tree_dsl::parse(lang_id, &path, &source);
             print_tree(&tree, &lang);
             print_edges(&tree, &lang);
-            print_links(&tree, &lang);
         }
     }
     Ok(())
@@ -118,16 +117,15 @@ fn cmd_parse(
 
 fn print_tree(tree: &tree_dsl::tree::Tree, lang: &tree_dsl::lang::Lang) {
     for (i, n) in tree.nodes.iter().enumerate() {
-        if n.flags & tree_dsl::lang::DEAD != 0 {
+        if n.dead {
             continue;
         }
-        if n.flags & NAMED == 0 && n.sym == 0 {
+        if !n.named && n.sym == 0 {
             continue;
         }
 
-        let kind_name = lang.kinds.resolve((n.kind & !SYNTH) as u32);
-        let is_synth = n.kind & SYNTH != 0;
-        let kind_display = if is_synth {
+        let kind_name = lang.kinds.resolve(n.kind as u32);
+        let kind_display = if n.synth {
             format!("__{kind_name}")
         } else {
             kind_name.to_string()
@@ -163,28 +161,9 @@ fn print_edges(tree: &tree_dsl::tree::Tree, lang: &tree_dsl::lang::Lang) {
     }
     println!("edges:");
     for e in &tree.edges {
-        let from = node_label(tree, lang, e.from);
-        let to = node_label(tree, lang, e.to);
+        let from = node_label(tree, lang, e.from.node);
+        let to = node_label(tree, lang, e.to.node);
         println!("  {} --[{}]--> {}", from, edge_name(e.kind), to);
-    }
-}
-
-fn print_links(tree: &tree_dsl::tree::Tree, lang: &tree_dsl::lang::Lang) {
-    if tree.links.is_empty() {
-        return;
-    }
-    println!("links:");
-    for l in &tree.links {
-        let from = node_label(tree, lang, l.from);
-        let name = lang.syms.resolve(l.name);
-        println!(
-            "  {} --[{}]--> file[{}]:{} name={:?}",
-            from,
-            edge_name(l.kind),
-            l.to_file,
-            l.to_node,
-            name
-        );
     }
 }
 
@@ -238,8 +217,8 @@ fn cmd_index(path: &str, lang_override: Option<String>) -> anyhow::Result<()> {
     let result = tree_dsl::index(lang_id, &files);
     let elapsed = t0.elapsed();
 
-    let deftype_k = result.lang.kinds.lookup("__deftype") as u16 | SYNTH;
-    let import_k = result.lang.kinds.lookup("__import") as u16 | SYNTH;
+    let deftype_k = result.lang.kind_id("__deftype");
+    let import_k = result.lang.kind_id("__import");
     let mut total_defs = 0usize;
     let mut total_imports = 0usize;
     let mut total_intra_edges = 0usize;
@@ -267,13 +246,17 @@ fn cmd_index(path: &str, lang_override: Option<String>) -> anyhow::Result<()> {
             let from_path = result
                 .lang
                 .syms
-                .resolve(result.trees[ce.from_file].nodes[0].sym);
+                .resolve(result.trees[ce.from.tree as usize].nodes[0].sym);
             let to_path = result
                 .lang
                 .syms
-                .resolve(result.trees[ce.to_file].nodes[0].sym);
-            let from = node_label(&result.trees[ce.from_file], &result.lang, ce.from_node);
-            let to = node_label(&result.trees[ce.to_file], &result.lang, ce.to_node);
+                .resolve(result.trees[ce.to.tree as usize].nodes[0].sym);
+            let from = node_label(
+                &result.trees[ce.from.tree as usize],
+                &result.lang,
+                ce.from.node,
+            );
+            let to = node_label(&result.trees[ce.to.tree as usize], &result.lang, ce.to.node);
             println!("  {}:{} --> {}:{}", from_path, from, to_path, to);
         }
     }

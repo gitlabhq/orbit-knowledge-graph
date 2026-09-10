@@ -133,7 +133,6 @@ pub fn load_lang(
 
 fn compile_resolve(section: &ResolveSection, lang: &mut Lang) -> crate::file_tree::ResolveConfig {
     use crate::file_tree::ResolveStage;
-    use crate::tree::SYNTH;
 
     let stages = section
         .stages
@@ -142,7 +141,6 @@ fn compile_resolve(section: &ResolveSection, lang: &mut Lang) -> crate::file_tre
             if let Some(climb) = &spec.climb {
                 let while_kind = lang.kind(&climb.r#while);
                 let mark_kind = lang.kind(&climb.mark);
-                // lang.kind() auto-adds SYNTH for __ prefixed names
                 ResolveStage::Climb {
                     while_kind,
                     mark_kind,

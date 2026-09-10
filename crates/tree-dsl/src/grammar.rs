@@ -1,6 +1,5 @@
 use crate::lang::Lang;
-use crate::tree::{NAMED, NONE};
-use crate::tree::{Node, Tree};
+use crate::tree::{NONE, Node, Tree};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -197,8 +196,10 @@ pub fn from_tree_sitter(
         nodes.push(Node {
             kind,
             field,
-            flags: if ts.is_named() { NAMED } else { 0 },
-
+            named: ts.is_named(),
+            synth: false,
+            dead: false,
+            id: 0,
             size: 0,
             parent,
             sym,

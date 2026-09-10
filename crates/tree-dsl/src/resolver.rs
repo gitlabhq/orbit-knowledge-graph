@@ -7,18 +7,10 @@ use rustc_hash::FxHashMap;
 
 use crate::grammar::SupportLang;
 use crate::lang::Lang;
-use crate::tree::{EdgeKind, NONE, SYNTH, Tree};
-
-pub struct CrossEdge {
-    pub from_file: usize,
-    pub from_node: u32,
-    pub to_file: usize,
-    pub to_node: u32,
-    pub kind: EdgeKind,
-}
+use crate::tree::{Edge, EdgeKind, NONE, NodeRef, Tree};
 
 pub struct ResolveResult {
-    pub cross_edges: Vec<CrossEdge>,
+    pub cross_edges: Vec<Edge>,
 }
 
 pub fn resolve(
@@ -28,12 +20,12 @@ pub fn resolve(
     lookup_prefixes: &[String],
     external: &[String],
 ) -> ResolveResult {
-    let k_import = lang.kinds.lookup("__import") as u16 | SYNTH;
-    let k_source = lang.kinds.lookup("__source") as u16 | SYNTH;
-    let k_source_path = lang.kinds.lookup("__source_path") as u16 | SYNTH;
-    let k_name = lang.kinds.lookup("__name") as u16 | SYNTH;
-    let k_alias = lang.kinds.lookup("__alias") as u16 | SYNTH;
-    let k_deftype = lang.kinds.lookup("__deftype") as u16 | SYNTH;
+    let k_import = lang.kind_id("__import");
+    let k_source = lang.kind_id("__source");
+    let k_source_path = lang.kind_id("__source_path");
+    let k_name = lang.kind_id("__name");
+    let k_alias = lang.kind_id("__alias");
+    let k_deftype = lang.kind_id("__deftype");
     let name_f = lang.fields.lookup("name") as u16;
     let left_f = lang.fields.lookup("left") as u16;
 
@@ -64,7 +56,7 @@ pub fn resolve(
     for tree in trees.iter() {
         let mut names: FxHashMap<u32, u32> = FxHashMap::default();
         for (i, n) in tree.nodes.iter().enumerate() {
-            if n.flags & crate::tree::DEAD != 0 {
+            if n.dead {
                 continue;
             }
             if !tree.children(i as u32).any(|c| tree.kind(c) == k_deftype) {
@@ -158,11 +150,15 @@ pub fn resolve(
                         None
                     });
                     if let Some(sub_fi) = sub_fi {
-                        cross_edges.push(CrossEdge {
-                            from_file: fi,
-                            from_node: i as u32,
-                            to_file: sub_fi,
-                            to_node: 0,
+                        cross_edges.push(Edge {
+                            from: NodeRef {
+                                tree: fi as u32,
+                                node: i as u32,
+                            },
+                            to: NodeRef {
+                                tree: sub_fi as u32,
+                                node: 0,
+                            },
                             kind: EdgeKind::Imports,
                         });
                         reqs.push(ImportReq {
@@ -284,11 +280,15 @@ pub fn resolve(
                         .get(&(tfi, def_name))
                         .copied()
                         .unwrap_or((tfi, def_node));
-                    cross_edges.push(CrossEdge {
-                        from_file: fi,
-                        from_node: i,
-                        to_file: real_fi,
-                        to_node: real_node,
+                    cross_edges.push(Edge {
+                        from: NodeRef {
+                            tree: fi as u32,
+                            node: i,
+                        },
+                        to: NodeRef {
+                            tree: real_fi as u32,
+                            node: real_node,
+                        },
                         kind: EdgeKind::Imports,
                     });
                 }
@@ -300,21 +300,29 @@ pub fn resolve(
             }
 
             if let Some(&(re_fi, re_node)) = reexports.get(&(tfi, name_sym)) {
-                cross_edges.push(CrossEdge {
-                    from_file: fi,
-                    from_node: i,
-                    to_file: re_fi,
-                    to_node: re_node,
+                cross_edges.push(Edge {
+                    from: NodeRef {
+                        tree: fi as u32,
+                        node: i,
+                    },
+                    to: NodeRef {
+                        tree: re_fi as u32,
+                        node: re_node,
+                    },
                     kind: EdgeKind::Imports,
                 });
                 continue;
             }
             if let Some(&def_node) = visible[tfi].get(&name_sym) {
-                cross_edges.push(CrossEdge {
-                    from_file: fi,
-                    from_node: i,
-                    to_file: tfi,
-                    to_node: def_node,
+                cross_edges.push(Edge {
+                    from: NodeRef {
+                        tree: fi as u32,
+                        node: i,
+                    },
+                    to: NodeRef {
+                        tree: tfi as u32,
+                        node: def_node,
+                    },
                     kind: EdgeKind::Imports,
                 });
                 continue;
@@ -328,11 +336,15 @@ pub fn resolve(
             );
             if results.len() == 1 {
                 let (def_fi, def_node) = results[0];
-                cross_edges.push(CrossEdge {
-                    from_file: fi,
-                    from_node: i,
-                    to_file: def_fi,
-                    to_node: def_node,
+                cross_edges.push(Edge {
+                    from: NodeRef {
+                        tree: fi as u32,
+                        node: i,
+                    },
+                    to: NodeRef {
+                        tree: def_fi as u32,
+                        node: def_node,
+                    },
                     kind: EdgeKind::Imports,
                 });
                 continue;
@@ -347,11 +359,15 @@ pub fn resolve(
             {
                 let submod_path = format!("{target_dir}/{name_str}");
                 if let Some(&sub_fi) = file_index.get(&submod_path) {
-                    cross_edges.push(CrossEdge {
-                        from_file: fi,
-                        from_node: i,
-                        to_file: sub_fi,
-                        to_node: 0,
+                    cross_edges.push(Edge {
+                        from: NodeRef {
+                            tree: fi as u32,
+                            node: i,
+                        },
+                        to: NodeRef {
+                            tree: sub_fi as u32,
+                            node: 0,
+                        },
                         kind: EdgeKind::Imports,
                     });
                 }
@@ -360,8 +376,8 @@ pub fn resolve(
     }
 
     // E_CALLS cross-edges: follow intra-file E_IMPORTS → cross-file target
-    let k_call = lang.kinds.lookup("__call") as u16 | SYNTH;
-    let k_member = lang.kinds.lookup("__member") as u16 | SYNTH;
+    let k_call = lang.kind_id("__call");
+    let k_member = lang.kind_id("__member");
     let callee_f = lang.fields.lookup("callee") as u16;
     let member_f = lang.fields.lookup("member") as u16;
     let object_f = lang.fields.lookup("object") as u16;
@@ -377,9 +393,12 @@ pub fn resolve(
         // plus any submodule files resolved via cross-edges.
         let mut target_files = vec![req.target_fi];
         for ce in &cross_edges {
-            if ce.from_file == fi && ce.from_node == import_node && ce.kind == EdgeKind::Imports {
-                if !target_files.contains(&ce.to_file) {
-                    target_files.push(ce.to_file);
+            if ce.from.tree as usize == fi
+                && ce.from.node == import_node
+                && ce.kind == EdgeKind::Imports
+            {
+                if !target_files.contains(&(ce.to.tree as usize)) {
+                    target_files.push(ce.to.tree as usize);
                 }
             }
         }
@@ -388,14 +407,14 @@ pub fn resolve(
             if edge.kind != EdgeKind::Imports {
                 continue;
             }
-            let edge_target = edge.to;
+            let edge_target = edge.to.node;
             if edge_target != import_node
                 && trees[fi].nodes[edge_target as usize].parent != import_node
             {
                 continue;
             }
 
-            let caller = edge.from;
+            let caller = edge.from.node;
             for d in trees[fi].descendants(caller) {
                 if trees[fi].kind(d) != k_call {
                     continue;
@@ -413,11 +432,15 @@ pub fn resolve(
                     }
                     for &tfi in &target_files {
                         if let Some(&def_node) = visible[tfi].get(&member_sym) {
-                            module_call_edges.push(CrossEdge {
-                                from_file: fi,
-                                from_node: caller,
-                                to_file: tfi,
-                                to_node: def_node,
+                            module_call_edges.push(Edge {
+                                from: NodeRef {
+                                    tree: fi as u32,
+                                    node: caller,
+                                },
+                                to: NodeRef {
+                                    tree: tfi as u32,
+                                    node: def_node,
+                                },
                                 kind: EdgeKind::Calls,
                             });
                             break;
@@ -433,36 +456,38 @@ pub fn resolve(
         if ce.kind != EdgeKind::Imports {
             continue;
         }
-        let target_name = visible[ce.to_file]
+        let target_name = visible[ce.to.tree as usize]
             .iter()
-            .find(|(_, node)| **node == ce.to_node)
+            .find(|(_, node)| **node == ce.to.node)
             .map(|(sym, _)| *sym)
             .unwrap_or(0);
 
-        for edge in &trees[ce.from_file].edges {
+        for edge in &trees[ce.from.tree as usize].edges {
             if edge.kind != EdgeKind::Imports {
                 continue;
             }
-            let edge_import = edge.to;
-            let matches_import = edge_import == ce.from_node
-                || trees[ce.from_file].nodes[edge_import as usize].parent == ce.from_node;
+            let edge_import = edge.to.node;
+            let matches_import = edge_import == ce.from.node
+                || trees[ce.from.tree as usize].nodes[edge_import as usize].parent == ce.from.node;
             if !matches_import {
                 continue;
             }
 
-            let is_wildcard = trees[ce.from_file].children(ce.from_node).any(|c| {
-                trees[ce.from_file].kind(c) == k_name
-                    && lang.syms.resolve(trees[ce.from_file].sym(c)) == "*"
-            });
+            let is_wildcard = trees[ce.from.tree as usize]
+                .children(ce.from.node)
+                .any(|c| {
+                    trees[ce.from.tree as usize].kind(c) == k_name
+                        && lang.syms.resolve(trees[ce.from.tree as usize].sym(c)) == "*"
+                });
 
             if is_wildcard && target_name != 0 {
-                let caller_node = edge.from;
+                let caller_node = edge.from.node;
                 let mut matched = false;
-                for d in trees[ce.from_file].descendants(caller_node) {
-                    if trees[ce.from_file].kind(d) == k_call {
-                        let callee = trees[ce.from_file]
+                for d in trees[ce.from.tree as usize].descendants(caller_node) {
+                    if trees[ce.from.tree as usize].kind(d) == k_call {
+                        let callee = trees[ce.from.tree as usize]
                             .child_by_field(d, callee_f)
-                            .map(|c| trees[ce.from_file].sym(c))
+                            .map(|c| trees[ce.from.tree as usize].sym(c))
                             .unwrap_or(0);
                         if callee == target_name {
                             matched = true;
@@ -475,18 +500,19 @@ pub fn resolve(
                 }
             }
 
-            call_edges.push(CrossEdge {
-                from_file: ce.from_file,
-                from_node: edge.from,
-                to_file: ce.to_file,
-                to_node: ce.to_node,
+            call_edges.push(Edge {
+                from: NodeRef {
+                    tree: ce.from.tree,
+                    node: edge.from.node,
+                },
+                to: ce.to,
                 kind: EdgeKind::Calls,
             });
         }
     }
 
     // Cross-file return type resolution
-    let k_binding = lang.kinds.lookup("__binding") as u16 | SYNTH;
+    let k_binding = lang.kind_id("__binding");
     let right_f = lang.fields.lookup("right") as u16;
     let ret_type_f = lang.fields.lookup("return_type") as u16;
 
@@ -495,10 +521,10 @@ pub fn resolve(
         if ce.kind != EdgeKind::Calls {
             continue;
         }
-        let caller_fi = ce.from_file;
-        let caller_node = ce.from_node;
-        let target_fi = ce.to_file;
-        let target_node = ce.to_node;
+        let caller_fi = ce.from.tree as usize;
+        let caller_node = ce.from.node;
+        let target_fi = ce.to.tree as usize;
+        let target_node = ce.to.node;
 
         let return_type_sym = if ret_type_f != 0 {
             trees[target_fi]
@@ -540,15 +566,15 @@ pub fn resolve(
         }
         if resolved_fi.is_none() {
             for ce2 in &cross_edges {
-                if ce2.from_file == target_fi && ce2.kind == EdgeKind::Imports {
-                    let def_name = trees[ce2.to_file]
-                        .child_by_field(ce2.to_node, name_f)
-                        .or_else(|| trees[ce2.to_file].child_by_field(ce2.to_node, left_f))
-                        .map(|c| trees[ce2.to_file].sym(c))
+                if ce2.from.tree as usize == target_fi && ce2.kind == EdgeKind::Imports {
+                    let def_name = trees[ce2.to.tree as usize]
+                        .child_by_field(ce2.to.node, name_f)
+                        .or_else(|| trees[ce2.to.tree as usize].child_by_field(ce2.to.node, left_f))
+                        .map(|c| trees[ce2.to.tree as usize].sym(c))
                         .unwrap_or(0);
                     if def_name == ret_sym {
-                        resolved_fi = Some(ce2.to_file);
-                        resolved_node = Some(ce2.to_node);
+                        resolved_fi = Some(ce2.to.tree as usize);
+                        resolved_node = Some(ce2.to.node);
                         break;
                     }
                 }
@@ -620,11 +646,15 @@ pub fn resolve(
                                         .map(|c| trees[type_fi].sym(c))
                                         .unwrap_or(0);
                                     if mname == mem_sym && !found {
-                                        type_edges.push(CrossEdge {
-                                            from_file: caller_fi,
-                                            from_node: caller_node,
-                                            to_file: type_fi,
-                                            to_node: mn,
+                                        type_edges.push(Edge {
+                                            from: NodeRef {
+                                                tree: caller_fi as u32,
+                                                node: caller_node,
+                                            },
+                                            to: NodeRef {
+                                                tree: type_fi as u32,
+                                                node: mn,
+                                            },
                                             kind: EdgeKind::Calls,
                                         });
                                         found = true;

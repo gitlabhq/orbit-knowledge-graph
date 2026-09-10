@@ -1,9 +1,6 @@
 use std::cell::RefCell;
 
 pub const NONE: u32 = u32::MAX;
-pub const SYNTH: u16 = 0x8000;
-pub const DEAD: u16 = 1 << 0;
-pub const NAMED: u16 = 1 << 1;
 
 #[repr(u16)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -33,67 +30,42 @@ impl std::fmt::Display for EdgeKind {
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Node {
+    pub id: u32,
     pub kind: u16,
     pub field: u16,
-    pub flags: u16,
-    pub size: u32,
     pub parent: u32,
     pub sym: u32,
     pub start: u32,
     pub end: u32,
+    pub size: u32,
+    pub synth: bool,
+    pub dead: bool,
+    pub named: bool,
 }
 
-impl Node {
-    pub fn is_dead(&self) -> bool {
-        self.flags & DEAD != 0
-    }
-    pub fn is_named(&self) -> bool {
-        self.flags & NAMED != 0
-    }
-    pub fn is_synth(&self) -> bool {
-        self.kind & SYNTH != 0
-    }
-    pub fn base_kind(&self) -> u16 {
-        self.kind & !SYNTH
-    }
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct NodeRef {
+    pub tree: u32,
+    pub node: u32,
 }
 
 #[derive(Clone, Copy, Debug)]
 pub struct Edge {
-    pub from: u32,
-    pub to: u32,
+    pub from: NodeRef,
+    pub to: NodeRef,
     pub kind: EdgeKind,
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct Link {
-    pub from: u32,
-    pub to_file: usize,
-    pub to_node: u32,
-    pub kind: EdgeKind,
-    pub name: u32,
 }
 
 #[derive(Default)]
 pub struct Tree {
     pub nodes: Vec<Node>,
     pub edges: Vec<Edge>,
-    pub links: Vec<Link>,
     pub label: String,
+    next_id: u32,
     spare: Vec<Node>,
     appends: RefCell<Vec<(u32, Node)>>,
     inserts: RefCell<Vec<(u32, u32, u32)>>,
     insert_buf: RefCell<Vec<Node>>,
-}
-
-pub trait Visitor {
-    fn enter(&mut self, t: &mut Tree, i: u32) -> bool {
-        let _ = (t, i);
-        true
-    }
-    fn exit(&mut self, t: &mut Tree, i: u32) {
-        let _ = (t, i);
-    }
 }
 
 impl Tree {
@@ -282,35 +254,29 @@ impl Tree {
             || !self
                 .edges
                 .iter()
-                .any(|e| e.from == from && e.to == to && e.kind == kind)
+                .any(|e| e.from.node == from && e.to.node == to && e.kind == kind)
         {
-            self.edges.push(Edge { from, to, kind });
+            self.edges.push(Edge {
+                from: NodeRef {
+                    tree: 0,
+                    node: from,
+                },
+                to: NodeRef { tree: 0, node: to },
+                kind,
+            });
         }
     }
 
     pub fn edges_from(&self, node: u32) -> impl Iterator<Item = &Edge> {
-        self.edges.iter().filter(move |e| e.from == node)
+        self.edges.iter().filter(move |e| e.from.node == node)
     }
 
     pub fn edges_to(&self, node: u32) -> impl Iterator<Item = &Edge> {
-        self.edges.iter().filter(move |e| e.to == node)
-    }
-
-    pub fn walk<V: Visitor>(&mut self, i: u32, v: &mut V) {
-        if !v.enter(self, i) {
-            return;
-        }
-        let end = self.hop(i);
-        let mut c = live(self, i + 1, end);
-        while c < end {
-            self.walk(c, v);
-            c = live(self, self.hop(c), end);
-        }
-        v.exit(self, i);
+        self.edges.iter().filter(move |e| e.to.node == node)
     }
 
     pub fn remove(&mut self, i: u32) {
-        self.nodes[i as usize].flags |= DEAD;
+        self.nodes[i as usize].dead = true;
     }
     pub fn set_kind(&mut self, i: u32, k: u16) {
         self.nodes[i as usize].kind = k;
@@ -321,10 +287,6 @@ impl Tree {
     pub fn set_text(&mut self, i: u32, sym: u32) {
         self.nodes[i as usize].sym = sym;
     }
-    pub fn set_flags(&mut self, i: u32, f: u16) {
-        self.nodes[i as usize].flags |= f;
-    }
-
     pub fn flatten(&mut self, first: u32, last: u32, kind: u16, sym: u32) {
         let (end, end_span) = (self.hop(last), self.nodes[last as usize].end);
         let n = &mut self.nodes[first as usize];
@@ -364,7 +326,7 @@ impl Tree {
         }
         if sub.len() < old {
             let d = &mut self.nodes[i as usize + sub.len()];
-            d.flags = DEAD;
+            d.dead = true;
             d.size = (old - sub.len()) as u32;
         }
     }
@@ -435,7 +397,7 @@ impl Tree {
                 ip += 1;
             }
             let n = old[i as usize];
-            if n.flags & DEAD != 0 {
+            if n.dead {
                 i += n.size;
                 continue;
             }
@@ -446,29 +408,16 @@ impl Tree {
         }
         self.spare = old;
         self.nodes = new;
-        // Remap edges and links through the compaction table.
         for edge in &mut self.edges {
-            if let Some(&new_from) = remap.get(edge.from as usize)
+            if let Some(&new_from) = remap.get(edge.from.node as usize)
                 && new_from != NONE
             {
-                edge.from = new_from;
+                edge.from.node = new_from;
             }
-            if let Some(&new_to) = remap.get(edge.to as usize)
+            if let Some(&new_to) = remap.get(edge.to.node as usize)
                 && new_to != NONE
             {
-                edge.to = new_to;
-            }
-        }
-        for link in &mut self.links {
-            if let Some(&new_from) = remap.get(link.from as usize)
-                && new_from != NONE
-            {
-                link.from = new_from;
-            }
-            if let Some(&new_to) = remap.get(link.to_node as usize)
-                && new_to != NONE
-            {
-                link.to_node = new_to;
+                edge.to.node = new_to;
             }
         }
         remap
@@ -477,7 +426,7 @@ impl Tree {
 
 #[inline]
 pub fn live(t: &Tree, mut c: u32, end: u32) -> u32 {
-    while c < end && t.nodes[c as usize].flags & DEAD != 0 {
+    while c < end && t.nodes[c as usize].dead {
         c = t.hop(c);
     }
     c
@@ -532,7 +481,7 @@ impl Match<'_> {
             Match::KindName(_name) => false, // needs Lang; use Kind(id) instead
             Match::AnyKind(ks) => ks.contains(&n.kind),
             Match::Any => true,
-            Match::Named => n.flags & NAMED != 0,
+            Match::Named => n.named,
             Match::Text(s) => n.sym == *s,
         }
     }
@@ -542,6 +491,7 @@ pub fn copy_subtree(t: &Tree, i: u32, out: &mut Vec<Node>, parent: u32) {
     let at = out.len();
     out.push(Node {
         parent,
+        id: 0,
         ..t.nodes[i as usize]
     });
     for c in t.children(i) {

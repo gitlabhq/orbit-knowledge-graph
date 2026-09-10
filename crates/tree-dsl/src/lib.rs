@@ -15,7 +15,7 @@ use tree::Tree;
 
 pub struct IndexResult {
     pub trees: Vec<Tree>,
-    pub cross_edges: Vec<resolver::CrossEdge>,
+    pub cross_edges: Vec<tree::Edge>,
     pub lang: Lang,
     pub pipeline: Pipeline,
 }

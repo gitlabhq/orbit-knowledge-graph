@@ -1,8 +1,7 @@
 use std::collections::HashMap;
 
 use crate::lang::Lang;
-use crate::tree::{NAMED, NONE};
-use crate::tree::{Node, Tree, copy_subtree, elems, live};
+use crate::tree::{NONE, Node, Tree, copy_subtree, elems, live};
 
 #[derive(Clone)]
 pub enum Tf {
@@ -587,7 +586,8 @@ fn materialize(
                     out.push(Node {
                         kind: rekind.unwrap_or(n.kind),
                         field: 0,
-                        flags: NAMED,
+                        named: true,
+                        synth: true,
                         sym: n.sym,
                         size: 1,
                         parent,
@@ -618,7 +618,8 @@ fn materialize(
             out.push(Node {
                 kind: *kind,
                 field: *field,
-                flags: NAMED,
+                named: true,
+                synth: true,
                 sym,
                 parent,
                 start: span.0,
@@ -646,7 +647,7 @@ pub fn apply_rewrites(t: &mut Tree, lang: &mut Lang, rules: &[Rewrite]) -> Vec<u
     let mut caps = vec![(0u32, 0u32); rules.iter().map(|r| r.nslots).max().unwrap_or(1)];
     let (mut edits, mut buf) = (Vec::new(), Vec::new());
     for i in 0..t.nodes.len() as u32 {
-        if t.nodes[i as usize].flags & crate::tree::DEAD != 0 {
+        if t.nodes[i as usize].dead {
             continue;
         }
         for r in rules {
@@ -681,7 +682,8 @@ pub fn apply_rewrites(t: &mut Tree, lang: &mut Lang, rules: &[Rewrite]) -> Vec<u
                             caps[*under as usize].0,
                             Node {
                                 kind: *kind,
-                                flags: NAMED,
+                                named: true,
+                                synth: true,
                                 sym,
                                 start: src.start,
                                 end: src.end,

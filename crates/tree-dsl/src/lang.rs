@@ -1,7 +1,5 @@
 use rustc_hash::FxHashMap;
 
-use crate::tree;
-
 #[derive(Default, Clone)]
 pub struct Interner {
     map: FxHashMap<Box<str>, u32>,
@@ -52,13 +50,15 @@ impl Lang {
         Lang::default()
     }
 
+    /// Register a kind name and return its ID. Use `is_synth_name()` to check
+    /// whether a kind name represents a synthetic node.
     pub fn kind(&mut self, s: &str) -> u16 {
-        let k = self.kinds.get(s) as u16;
-        if s.starts_with("__") {
-            k | tree::SYNTH
-        } else {
-            k
-        }
+        self.kinds.get(s) as u16
+    }
+
+    /// Look up a kind by name without inserting. Returns 0 if not found.
+    pub fn kind_id(&self, s: &str) -> u16 {
+        self.kinds.lookup(s) as u16
     }
 
     pub fn field(&mut self, s: &str) -> u16 {
@@ -66,7 +66,12 @@ impl Lang {
     }
 
     pub fn kind_name(&self, k: u16) -> &str {
-        self.kinds.resolve((k & !tree::SYNTH) as u32)
+        self.kinds.resolve(k as u32)
+    }
+
+    /// Whether a kind name represents a synthetic node (starts with `__`).
+    pub fn is_synth_name(s: &str) -> bool {
+        s.starts_with("__")
     }
 
     pub fn field_name(&self, f: u16) -> &str {

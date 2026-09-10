@@ -7,7 +7,6 @@ use arrow_56::record_batch::RecordBatch;
 
 use tree_dsl::grammar::SupportLang;
 use tree_dsl::lang::Lang;
-use tree_dsl::tree::SYNTH;
 use tree_dsl::tree::Tree;
 
 pub type LanceDatasets = HashMap<String, RecordBatch>;
@@ -37,7 +36,7 @@ struct Sk {
 
 impl Sk {
     fn new(lang: &Lang) -> Self {
-        let s = |n: &str| lang.kinds.lookup(n) as u16 | SYNTH;
+        let s = |n: &str| lang.kinds.lookup(n) as u16;
         Self {
             deftype: s("__deftype"),
             import: s("__import"),
@@ -82,7 +81,7 @@ fn assign_ids(trees: &[Tree], lang: &Lang, sk: &Sk) -> IdMaps {
             modules.insert(fi, next_mod);
         }
         for (i, n) in tree.nodes.iter().enumerate() {
-            if n.flags & tree_dsl::tree::DEAD != 0 {
+            if n.dead {
                 continue;
             }
             let node = i as u32;
@@ -120,7 +119,7 @@ fn assign_ids(trees: &[Tree], lang: &Lang, sk: &Sk) -> IdMaps {
 
 pub fn to_datasets(
     trees: &[Tree],
-    cross_edges: &[tree_dsl::resolver::CrossEdge],
+    cross_edges: &[tree_dsl::tree::Edge],
     lang: &mut Lang,
 ) -> anyhow::Result<LanceDatasets> {
     let sk = Sk::new(lang);
@@ -570,9 +569,9 @@ fn build_file_edges(
             }
         }
         for edge in &tree.edges {
-            if edge.from == 0
+            if edge.from.node == 0
                 && edge.kind == tree_dsl::tree::EdgeKind::Calls
-                && let Some(&tid) = ids.defs.get(&(fi, edge.to))
+                && let Some(&tid) = ids.defs.get(&(fi, edge.to.node))
             {
                 ds.append_value(fid);
                 dt.append_value(tid);
@@ -585,7 +584,7 @@ fn build_file_edges(
 
 fn build_def2def(
     trees: &[Tree],
-    cross_edges: &[tree_dsl::resolver::CrossEdge],
+    cross_edges: &[tree_dsl::tree::Edge],
     ids: &IdMaps,
 ) -> anyhow::Result<RecordBatch> {
     let (mut s, mut t, mut k) = (
@@ -600,9 +599,10 @@ fn build_def2def(
                 tree_dsl::tree::EdgeKind::Defines => "Defines",
                 _ => continue,
             };
-            if let (Some(&from), Some(&to)) =
-                (ids.defs.get(&(fi, edge.from)), ids.defs.get(&(fi, edge.to)))
-            {
+            if let (Some(&from), Some(&to)) = (
+                ids.defs.get(&(fi, edge.from.node)),
+                ids.defs.get(&(fi, edge.to.node)),
+            ) {
                 s.append_value(from);
                 t.append_value(to);
                 k.append_value(label);
@@ -617,8 +617,8 @@ fn build_def2def(
             _ => continue,
         };
         if let (Some(&from), Some(&to)) = (
-            ids.defs.get(&(ce.from_file, ce.from_node)),
-            ids.defs.get(&(ce.to_file, ce.to_node)),
+            ids.defs.get(&(ce.from.tree as usize, ce.from.node)),
+            ids.defs.get(&(ce.to.tree as usize, ce.to.node)),
         ) {
             if !cross_seen.insert((from, to, label)) {
                 continue;
@@ -633,7 +633,7 @@ fn build_def2def(
 
 fn build_def2imp(
     trees: &[Tree],
-    cross_edges: &[tree_dsl::resolver::CrossEdge],
+    cross_edges: &[tree_dsl::tree::Edge],
     ids: &IdMaps,
 ) -> anyhow::Result<RecordBatch> {
     let (mut s, mut t, mut k) = (
@@ -644,25 +644,25 @@ fn build_def2imp(
     let resolved: std::collections::HashSet<(usize, u32)> = cross_edges
         .iter()
         .filter(|ce| ce.kind == tree_dsl::tree::EdgeKind::Calls)
-        .map(|ce| (ce.from_file, ce.from_node))
+        .map(|ce| (ce.from.tree as usize, ce.from.node))
         .collect();
     for (fi, tree) in trees.iter().enumerate() {
         for edge in &tree.edges {
             if edge.kind != tree_dsl::tree::EdgeKind::Imports {
                 continue;
             }
-            if resolved.contains(&(fi, edge.from)) {
+            if resolved.contains(&(fi, edge.from.node)) {
                 continue;
             }
-            let Some(&caller_id) = ids.defs.get(&(fi, edge.from)) else {
+            let Some(&caller_id) = ids.defs.get(&(fi, edge.from.node)) else {
                 continue;
             };
             // edge.to is now a __name node — look up its specific import ID
-            if let Some(&iid) = ids.import_by_name.get(&(fi, edge.to)) {
+            if let Some(&iid) = ids.import_by_name.get(&(fi, edge.to.node)) {
                 s.append_value(caller_id);
                 t.append_value(iid);
                 k.append_value("Calls");
-            } else if let Some(iids) = ids.imports.get(&(fi, edge.to)) {
+            } else if let Some(iids) = ids.imports.get(&(fi, edge.to.node)) {
                 // Fallback: edge.to is __import node (wildcard case)
                 for &iid in iids {
                     s.append_value(caller_id);
@@ -677,7 +677,7 @@ fn build_def2imp(
 
 fn build_imp2def(
     trees: &[Tree],
-    cross_edges: &[tree_dsl::resolver::CrossEdge],
+    cross_edges: &[tree_dsl::tree::Edge],
     ids: &IdMaps,
 ) -> anyhow::Result<RecordBatch> {
     let (mut s, mut t, mut k) = (
@@ -689,12 +689,12 @@ fn build_imp2def(
         if ce.kind != tree_dsl::tree::EdgeKind::Imports {
             continue;
         }
-        let Some(&target_id) = ids.defs.get(&(ce.to_file, ce.to_node)) else {
+        let Some(&target_id) = ids.defs.get(&(ce.to.tree as usize, ce.to.node)) else {
             continue;
         };
         // The cross-edge goes from import_node → def_node.
         // Find the import ID(s) for this import node.
-        if let Some(iids) = ids.imports.get(&(ce.from_file, ce.from_node)) {
+        if let Some(iids) = ids.imports.get(&(ce.from.tree as usize, ce.from.node)) {
             for &iid in iids {
                 s.append_value(iid);
                 t.append_value(target_id);
@@ -702,11 +702,11 @@ fn build_imp2def(
             }
         }
         // Also check if any intra-file E_IMPORTS edges point to this import
-        for edge in &trees[ce.from_file].edges {
-            if edge.kind != tree_dsl::tree::EdgeKind::Imports || edge.to != ce.from_node {
+        for edge in &trees[ce.from.tree as usize].edges {
+            if edge.kind != tree_dsl::tree::EdgeKind::Imports || edge.to.node != ce.from.node {
                 continue;
             };
-            if let Some(iids) = ids.imports.get(&(ce.from_file, edge.to)) {
+            if let Some(iids) = ids.imports.get(&(ce.from.tree as usize, edge.to.node)) {
                 for &iid in iids {
                     s.append_value(iid);
                     t.append_value(target_id);

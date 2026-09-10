@@ -5,7 +5,7 @@ use rustc_hash::FxHashMap;
 
 use crate::lang::Lang;
 use crate::pattern::{self, Rewrite};
-use crate::tree::{NAMED, NONE, Node, SYNTH, Tree};
+use crate::tree::{NONE, Node, Tree};
 
 /// Result of walking the file tree.
 pub struct WalkResult {
@@ -107,7 +107,7 @@ fn build_file_tree(paths: &[String], lang: &mut Lang) -> Tree {
     let root_idx = nodes.len() as u32;
     nodes.push(Node {
         kind: root_kind,
-        flags: NAMED,
+        named: true,
         parent: NONE,
         sym: 0,
         size: 0,
@@ -132,7 +132,7 @@ fn build_file_tree(paths: &[String], lang: &mut Lang) -> Tree {
             let sym = lang.syms.get(segment);
             nodes.push(Node {
                 kind,
-                flags: NAMED,
+                named: true,
                 parent: parent_idx,
                 sym,
                 size: 0,
@@ -184,7 +184,7 @@ fn climb(tree: &mut Tree, lang: &mut Lang, while_kind: u16, mark_kind: u16) {
             node,
             Node {
                 kind: mark_kind,
-                flags: NAMED,
+                named: true,
                 sym: 0,
                 size: 1,
                 parent: node,
@@ -199,7 +199,7 @@ fn collect_marked_paths(tree: &Tree, lang: &Lang, markers: &[u16]) -> Vec<String
     if markers.is_empty() {
         return vec![];
     }
-    let root_node_kind = lang.kinds.lookup("__root") as u16 | SYNTH;
+    let root_node_kind = lang.kind_id("__root");
     let mut paths = Vec::new();
     for i in 0..tree.nodes.len() as u32 {
         if tree.nodes[i as usize].kind == root_node_kind {
@@ -220,8 +220,8 @@ fn collect_marked_paths(tree: &Tree, lang: &Lang, markers: &[u16]) -> Vec<String
 
 /// Reconstruct the full path of a directory node by walking up parent pointers.
 fn node_path(tree: &Tree, mut node: u32, lang: &Lang) -> String {
-    let dir_kind = lang.kinds.lookup("__dir") as u16 | SYNTH;
-    let root_kind = lang.kinds.lookup("__root") as u16 | SYNTH;
+    let dir_kind = lang.kind_id("__dir");
+    let root_kind = lang.kind_id("__root");
     let mut parts = Vec::new();
     while node != NONE {
         let n = &tree.nodes[node as usize];
@@ -239,8 +239,8 @@ fn node_path(tree: &Tree, mut node: u32, lang: &Lang) -> String {
 
 /// Collect paths of directories marked `__package` by the resolve rules.
 fn collect_packages(tree: &Tree, lang: &Lang) -> Vec<String> {
-    let pkg_kind = lang.kinds.lookup("__package") as u16 | SYNTH;
-    if pkg_kind == SYNTH {
+    let pkg_kind = lang.kind_id("__package");
+    if pkg_kind == 0 {
         return vec![];
     }
     let mut pkgs = Vec::new();

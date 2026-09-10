@@ -4,8 +4,7 @@ use crate::grammar::{self, SupportLang};
 use crate::lang::Lang;
 use crate::pattern;
 use crate::ssa::{BlockId, ParseValue, SsaEngine, Value};
-use crate::tree::Tree;
-use crate::tree::{DEAD, EdgeKind, NONE, SYNTH};
+use crate::tree::{EdgeKind, NONE, Tree};
 
 pub struct LangDef {
     pub rewrites: Vec<Vec<crate::pattern::Rewrite>>,
@@ -72,7 +71,7 @@ pub fn process_file(path: &str, source: &str, lang: &mut Lang, pipeline: &Pipeli
 }
 
 fn classify_methods(tree: &mut Tree, lang: &mut Lang) {
-    let deftype_k = lang.kinds.lookup("__deftype") as u16 | SYNTH;
+    let deftype_k = lang.kind_id("__deftype");
     let func_sym = lang.syms.get("Function");
     let method_sym = lang.syms.get("Method");
     let class_sym = lang.syms.get("Class");
@@ -115,7 +114,7 @@ struct Syns {
 
 impl Syns {
     fn new(lang: &Lang) -> Self {
-        let s = |name: &str| lang.kinds.lookup(name) as u16 | SYNTH;
+        let s = |name: &str| lang.kinds.lookup(name) as u16;
         Self {
             import: s("__import"),
             name: s("__name"),
@@ -312,7 +311,7 @@ fn ssa_fold(tree: &mut Tree, lang: &mut Lang) {
 
     while i < len {
         let n = &tree.nodes[i as usize];
-        if n.flags & DEAD != 0 {
+        if n.dead {
             i += n.size.max(1);
             continue;
         }
@@ -707,7 +706,8 @@ fn classify_rhs(
 
     if tree.kind(rn) != syns.call {
         // Bare identifier on RHS → alias
-        if tree.kind(rn) & SYNTH == 0 && tree.sym(rn) != 0 && tree.children(rn).next().is_none() {
+        if !tree.nodes[rn as usize].synth && tree.sym(rn) != 0 && tree.children(rn).next().is_none()
+        {
             return Value::Alias(tree.sym(rn));
         }
         return Value::Opaque;
@@ -928,7 +928,7 @@ fn infer_return_type(
                         .map(|c2| tree.sym(c2))
                         .filter(|&s| s != 0);
                 }
-                if tree.kind(c) & SYNTH == 0
+                if !tree.nodes[c as usize].synth
                     && tree.sym(c) != 0
                     && tree.children(c).next().is_none()
                 {
@@ -998,14 +998,14 @@ fn find_arm_children(tree: &Tree, node: u32, lang: &Lang) -> Vec<(u32, u32)> {
     let mut arms = Vec::new();
     for c in tree.children(node) {
         let n = &tree.nodes[c as usize];
-        if n.flags & DEAD != 0 {
+        if n.dead {
             continue;
         }
         let fld = n.field;
         if fld == consequence_f || fld == alternative_f || (fld == body_f && arms.is_empty()) {
             arms.push((c, c + n.size));
         }
-        let kname = lang.kinds.resolve((n.kind & !SYNTH) as u32);
+        let kname = lang.kinds.resolve(n.kind as u32);
         if kname.ends_with("_clause") && fld != consequence_f {
             arms.push((c, c + n.size));
         }
