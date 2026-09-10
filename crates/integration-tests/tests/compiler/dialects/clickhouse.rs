@@ -1435,15 +1435,23 @@ fn orbit_query_after_token_binds_to_the_statement() {
     let keys = vec![Some("2".to_owned()); page.input.compiler.cursor_key_count];
     let token = compiler::passes::cursor::encode(hash, &keys);
 
-    let next = format!(
-        "MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username ORDER BY u.id PAGE 7 AFTER '{token}'"
-    );
-    let compiled = compile(&next, Frontend::Gql, &test_ontology(), &test_ctx()).unwrap();
-    assert!(
-        compiled.base.render().contains("u.id >"),
-        "{}",
-        compiled.base.render()
-    );
+    for next in [
+        format!(
+            "MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username ORDER BY u.id PAGE 7 AFTER '{token}'"
+        ),
+        format!(
+            "\nMATCH ( u : User )\nWHERE u . id >= 1 AND u . id <= 10000\nRETURN u . username\nORDER BY u . id /* page */\nPAGE 7\nAFTER '{token}'\n// next page\n"
+        ),
+    ] {
+        let compiled = compile(&next, Frontend::Gql, &test_ontology(), &test_ctx()).unwrap();
+        assert_eq!(compiled.input.compiler.query_hash, hash);
+        assert_eq!(compiled.input.cursor.as_ref().unwrap().page_size, 7);
+        assert!(
+            compiled.base.render().contains("u.id >"),
+            "{}",
+            compiled.base.render()
+        );
+    }
 
     let edited = format!(
         "MATCH (u:User) WHERE u.id >= 2 AND u.id <= 10000 RETURN u.username ORDER BY u.id PAGE 2 AFTER '{token}'"

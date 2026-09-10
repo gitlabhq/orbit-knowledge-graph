@@ -143,8 +143,10 @@ Custom ID-property spellings remain outside the frontend.
 `PAGE rows` replaces `LIMIT` and requests keyset pagination: it lowers to the compiler's cursor with that page size, so the response carries `next_cursor` while more rows remain.
 `PAGE rows AFTER 'token'` continues from the previous page's `next_cursor`. Both clauses reuse the JSON DSL's cursor and the shared validation, decoding, seek, and readback passes.
 
-A token binds to its statement through a hash of the query text with the whole `PAGE` clause removed, mirroring the JSON DSL's hash of the query minus `cursor`.
-Changing the page size keeps a token valid; changing anything else in the text, including whitespace or comments, rejects it with the existing "issued for a different query" error.
+A cursor token binds to the statement's lexical tokens, excluding the whole `PAGE` clause, whitespace, and comments.
+Changing the page size or formatting keeps the cursor valid, including changes to whitespace around `PAGE`.
+String literals and escaped identifiers retain their exact text. Changes inside them, including whitespace, reject the cursor with the "issued for a different query" error.
+Other token edits, such as keyword case changes, also reject the cursor. This is not the JSON DSL's structural comparison.
 JSON and text tokens never validate against each other because their hash sources differ.
 
 `DEBUG` sets the compiler's `include_debug_sql` presentation option and keeps its existing authorization rules.

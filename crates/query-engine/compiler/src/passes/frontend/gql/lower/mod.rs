@@ -11,7 +11,7 @@ use crate::passes::cursor;
 use crate::{Input, InputNode, QueryError, Result};
 
 use super::ast::{Limit, NodePattern, Pattern, PatternElement, Query, Range, Relationship};
-use super::invalid;
+use super::{QueryParser, Rule, invalid};
 
 pub(super) fn lower(source: &str, query: Query<'_>) -> Result<Input> {
     let mut lowering = Lowering {
@@ -46,12 +46,17 @@ pub(super) fn lower(source: &str, query: Query<'_>) -> Result<Input> {
     Ok(lowering.input)
 }
 
-/// Binds a token to its statement the way the JSON DSL binds to the query minus
-/// `cursor`: the same FNV over the text with the whole PAGE clause removed, so
-/// changing the page size keeps a token valid and any other edit rejects it.
 fn statement_hash(source: &str, page: pest::Span<'_>) -> u64 {
     let text = format!("{}{}", &source[..page.start()], &source[page.end()..]);
-    cursor::canonical_hash(&serde_json::Value::String(text))
+    let tokens = <QueryParser as pest::Parser<Rule>>::parse(Rule::HashTokens, &text)
+        .expect("HashTokens accepts every character")
+        .next()
+        .expect("HashTokens produces one pair")
+        .into_inner()
+        .filter(|pair| pair.as_rule() == Rule::HashToken)
+        .map(|pair| serde_json::Value::String(pair.as_str().to_owned()))
+        .collect();
+    cursor::canonical_hash(&serde_json::Value::Array(tokens))
 }
 
 struct Lowering {
@@ -250,11 +255,49 @@ mod tests {
     }
 
     #[test]
-    fn statement_hash_ignores_only_the_page_clause() {
+    fn statement_hash_ignores_page_and_formatting() {
         let base = hash("MATCH (u:User) RETURN u PAGE 5");
-        assert_eq!(base, hash("MATCH (u:User) RETURN u PAGE 7 AFTER 'x'"));
-        assert_ne!(base, hash("MATCH (u:User) RETURN u  PAGE 5"));
-        assert_ne!(base, hash("MATCH (u:User) RETURN u.id PAGE 5"));
+        for query in [
+            "MATCH (u:User) RETURN u PAGE 7 AFTER 'x'",
+            "MATCH (u:User) RETURN u  PAGE 5",
+            "\nMATCH ( u : User )\nRETURN\tu\nPAGE 7\nAFTER 'x'\n",
+            "MATCH/*match*/(u:User) RETURN u/*before*/PAGE 7/*after*/",
+            "MATCH (u:User) RETURN u // before\nPAGE 7 AFTER 'x' // after",
+            "MATCH\u{2003}(u:User) RETURN u\u{a0}PAGE 5\u{3000}",
+        ] {
+            assert_eq!(base, hash(query), "{query}");
+        }
+        assert_eq!(
+            hash("MATCH (u:User) RETURN u PAGE 5 DEBUG"),
+            hash("MATCH (u:User) RETURN u\nPAGE 7 AFTER 'x'\nDEBUG\n")
+        );
         assert_eq!(0, hash("MATCH (u:User) RETURN u LIMIT 5"));
+    }
+
+    #[test]
+    fn statement_hash_preserves_query_changes() {
+        let base = hash("MATCH (u:User) RETURN u PAGE 5");
+        for query in [
+            "MATCH (u:User) RETURN u.id PAGE 5",
+            "MATCH (u:User {id: 1}) RETURN u PAGE 5",
+            "MATCH (u:User) RETURN u PAGE 5 DEBUG",
+            "MATCH (u:User) RETURN u PAGE 5;",
+            "match (u:User) RETURN u PAGE 5",
+        ] {
+            assert_ne!(base, hash(query), "{query}");
+        }
+        for (left, right) in [
+            ("'a b'", "'ab'"),
+            ("'a  b'", "'a b'"),
+            ("'a\nb'", "'a b'"),
+            ("'a/*b*/c'", "'ac'"),
+            ("'a//b'", "'a'"),
+            ("'é PAGE 5'", "'é PAGE 7'"),
+            (r"'a\' b'", r"'a\'b'"),
+            (r#""a b""#, r#""ab""#),
+        ] {
+            let query = |value| format!("MATCH (u:User {{name: {value}}}) RETURN u PAGE 5");
+            assert_ne!(hash(&query(left)), hash(&query(right)), "{left}: {right}");
+        }
     }
 }
