@@ -9,7 +9,8 @@ use crate::tree::{Node, Tree};
 
 /// Result of walking the file tree.
 pub struct WalkResult {
-    pub source_roots: Vec<String>,
+    /// Paths to try as prefixes when resolving absolute imports.
+    pub lookup_prefixes: Vec<String>,
 }
 
 /// Resolve-stage config parsed from a language YAML file.
@@ -20,19 +21,28 @@ pub enum ResolveStage {
 
 pub struct ResolveConfig {
     pub stages: Vec<ResolveStage>,
+    /// Synthetic kinds whose marked nodes provide resolution prefixes.
+    /// The engine collects the path of every file-tree node carrying one of
+    /// these synthetics and uses those paths as candidate prefixes when
+    /// resolving absolute imports. Relative imports (`./`, `../`) always
+    /// resolve against the importing file's directory.
+    pub lookup_from: Vec<u16>,
 }
 
 impl Default for ResolveConfig {
     fn default() -> Self {
-        Self { stages: vec![] }
+        Self {
+            stages: vec![],
+            lookup_from: vec![],
+        }
     }
 }
 
 /// Build a file tree from paths, run resolve stages, return results.
 pub fn walk(paths: &[String], lang: &mut Lang, config: &ResolveConfig) -> WalkResult {
-    if config.stages.is_empty() {
+    if config.stages.is_empty() && config.lookup_from.is_empty() {
         return WalkResult {
-            source_roots: vec![],
+            lookup_prefixes: vec![],
         };
     }
 
@@ -53,8 +63,13 @@ pub fn walk(paths: &[String], lang: &mut Lang, config: &ResolveConfig) -> WalkRe
         }
     }
 
-    let source_roots = collect_source_roots(&tree, lang);
-    WalkResult { source_roots }
+    let mut prefixes = collect_marked_paths(&tree, lang, &config.lookup_from);
+    let packages = collect_packages(&tree, lang);
+    let detected = prefixes.clone();
+    add_fallback_roots(paths, &detected, &packages, &mut prefixes);
+    WalkResult {
+        lookup_prefixes: prefixes,
+    }
 }
 
 fn build_file_tree(paths: &[String], lang: &mut Lang) -> Tree {
@@ -180,22 +195,28 @@ fn climb(tree: &mut Tree, lang: &mut Lang, while_kind: u16, mark_kind: u16) {
     }
 }
 
-/// Collect full paths of directories marked with `__source_root`.
-fn collect_source_roots(tree: &Tree, lang: &Lang) -> Vec<String> {
-    let root_kind = lang.kinds.lookup("__source_root") as u16 | SYNTH;
-    if root_kind == SYNTH {
+/// Collect paths of nodes carrying any of the given synthetic markers.
+fn collect_marked_paths(tree: &Tree, lang: &Lang, markers: &[u16]) -> Vec<String> {
+    if markers.is_empty() {
         return vec![];
     }
-
-    let mut roots = Vec::new();
+    let root_node_kind = lang.kinds.lookup("__root") as u16 | SYNTH;
+    let mut paths = Vec::new();
     for i in 0..tree.nodes.len() as u32 {
-        if !tree.children(i).any(|c| tree.kind(c) == root_kind) {
+        if tree.nodes[i as usize].kind == root_node_kind {
             continue;
         }
-        let path = node_path(tree, i, lang);
-        roots.push(path);
+        let has_marker = markers
+            .iter()
+            .any(|&mk| tree.children(i).any(|c| tree.kind(c) == mk));
+        if has_marker {
+            let path = node_path(tree, i, lang);
+            if !paths.contains(&path) {
+                paths.push(path);
+            }
+        }
     }
-    roots
+    paths
 }
 
 /// Reconstruct the full path of a directory node by walking up parent pointers.
@@ -215,4 +236,44 @@ fn node_path(tree: &Tree, mut node: u32, lang: &Lang) -> String {
     }
     parts.reverse();
     parts.join("/")
+}
+
+/// Collect paths of directories marked `__package` by the resolve rules.
+fn collect_packages(tree: &Tree, lang: &Lang) -> Vec<String> {
+    let pkg_kind = lang.kinds.lookup("__package") as u16 | SYNTH;
+    if pkg_kind == SYNTH {
+        return vec![];
+    }
+    let mut pkgs = Vec::new();
+    for i in 0..tree.nodes.len() as u32 {
+        if tree.children(i).any(|c| tree.kind(c) == pkg_kind) {
+            pkgs.push(node_path(tree, i, lang));
+        }
+    }
+    pkgs
+}
+
+/// Add top-level directories that aren't descendants of any detected root
+/// and weren't marked as packages by the resolve rules.
+fn add_fallback_roots(
+    paths: &[String],
+    existing: &[String],
+    packages: &[String],
+    out: &mut Vec<String>,
+) {
+    let mut candidates: Vec<String> = Vec::new();
+    for path in paths {
+        let top = match path.split_once('/') {
+            Some((dir, _)) => dir.to_string(),
+            None => continue,
+        };
+        if !candidates.contains(&top) && !existing.contains(&top) {
+            candidates.push(top);
+        }
+    }
+    for c in candidates {
+        if !packages.contains(&c) && !out.contains(&c) {
+            out.push(c);
+        }
+    }
 }

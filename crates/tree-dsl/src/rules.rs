@@ -31,6 +31,8 @@ struct RuleFile {
 
 #[derive(serde::Deserialize)]
 struct ResolveSection {
+    #[serde(default)]
+    lookup_from: Vec<String>,
     stages: Vec<ResolveStageSpec>,
 }
 
@@ -154,7 +156,15 @@ fn compile_resolve(section: &ResolveSection, lang: &mut Lang) -> crate::file_tre
             }
         })
         .collect();
-    crate::file_tree::ResolveConfig { stages }
+    let lookup_from = section
+        .lookup_from
+        .iter()
+        .map(|name| lang.kind(name))
+        .collect();
+    crate::file_tree::ResolveConfig {
+        stages,
+        lookup_from,
+    }
 }
 
 fn compile_stage(stage: &Stage, lang: &mut Lang) -> Vec<Rewrite> {

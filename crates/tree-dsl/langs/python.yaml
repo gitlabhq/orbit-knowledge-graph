@@ -131,6 +131,8 @@ stages:
         append: '(__loop)'
 
 resolve:
+  lookup_from:
+    - __source_root
   stages:
     - name: packages
       rules:
@@ -142,3 +144,7 @@ resolve:
       climb:
         while: __package
         mark: __source_root
+    - name: src_dirs
+      rules:
+        - match: '(__dir "src")'
+          append: '(__source_root)'

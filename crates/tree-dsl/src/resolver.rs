@@ -25,7 +25,7 @@ pub fn resolve(
     trees: &mut [Tree],
     lang: &mut Lang,
     support_lang: SupportLang,
-    source_roots: &[String],
+    lookup_prefixes: &[String],
 ) -> ResolveResult {
     let k_import = lang.kinds.lookup("__import") as u16 | SYNTH;
     let k_source = lang.kinds.lookup("__source") as u16 | SYNTH;
@@ -113,28 +113,12 @@ pub fn resolve(
             };
 
             let tfi = file_index.get(&target_path).copied().or_else(|| {
-                // Walk up the current file's directory ancestors.
-                let current = lang.syms.resolve(trees[fi].nodes[0].sym);
-                let dir = current.rsplit_once('/').map(|(d, _)| d).unwrap_or("");
-                let mut prefix = dir;
-                loop {
+                for prefix in lookup_prefixes {
                     let candidate = if prefix.is_empty() {
                         target_path.clone()
                     } else {
                         format!("{prefix}/{target_path}")
                     };
-                    if let Some(&tfi) = file_index.get(&candidate) {
-                        return Some(tfi);
-                    }
-                    if let Some((parent, _)) = prefix.rsplit_once('/') {
-                        prefix = parent;
-                    } else {
-                        break;
-                    }
-                }
-                // Try each source root detected by the file-tree walker.
-                for root in source_roots {
-                    let candidate = format!("{root}/{target_path}");
                     if let Some(&tfi) = file_index.get(&candidate) {
                         return Some(tfi);
                     }
