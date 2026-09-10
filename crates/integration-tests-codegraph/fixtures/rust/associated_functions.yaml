@@ -1,5 +1,4 @@
 name: "Rust: associated functions vs methods"
-pipeline: rust
 fixtures:
   - path: main.rs
     content: |
@@ -33,7 +32,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.file_path = 'main.rs'
-        AND d.definition_type IN ['Struct', 'Function', 'Method']
+        AND d.definition_type IN ['Struct', 'Function', 'Method', 'AssociatedFunction']
       RETURN d.name AS name, d.definition_type AS type
       ORDER BY name
     assert:
@@ -41,8 +40,8 @@ tests:
       - { row: { name: "Point", type: "Struct" } }
       - { row: { name: "distance", type: "Method" } }
       - { row: { name: "main", type: "Function" } }
-      - { row: { name: "new", type: "Method" } }
-      - { row: { name: "origin", type: "Method" } }
+      - { row: { name: "new", type: "AssociatedFunction" } }
+      - { row: { name: "origin", type: "AssociatedFunction" } }
 
   - name: origin calls new (associated function calling associated function)
     query: |

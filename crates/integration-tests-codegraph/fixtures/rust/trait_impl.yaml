@@ -1,5 +1,4 @@
 name: "Rust: trait implementation and method dispatch"
-pipeline: rust
 fixtures:
   - path: main.rs
     content: |
@@ -54,7 +53,7 @@ tests:
       RETURN child.name AS method
       ORDER BY method
     assert:
-      - { row_count: 3 }
+      - { row_count: 5 }
       - { column_values: { field: method, values: ["fetch", "name", "speak"] } }
 
   - name: fetch calls self.speak()

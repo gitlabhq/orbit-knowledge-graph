@@ -1,5 +1,5 @@
 name: "TypeScript: re-exports"
-pipeline: typescript
+pipeline: js
 fixtures:
   - path: models.ts
     content: |
@@ -21,15 +21,15 @@ fixtures:
       }
 
 tests:
-  - name: Re-exports are extracted as imports in index.ts
+  - name: Re-exports are extracted as ModuleExport definitions in index.ts
     query: |
-      MATCH (i:ImportedSymbol)
-      WHERE i.file_path = 'index.ts'
-      RETURN i.name AS name
+      MATCH (d:Definition)
+      WHERE d.file_path = 'index.ts' AND d.definition_type = 'ModuleExport'
+      RETURN d.name AS name
       ORDER BY name
     assert:
       - { row_count: 2 }
-      - { column_values: { field: name, values: ["Admin", "User"] } }
+      - { column_values: { field: name, values: ["SuperAdmin", "User"] } }
 
   - name: main.ts imports resolve through re-export to original defs
     query: |

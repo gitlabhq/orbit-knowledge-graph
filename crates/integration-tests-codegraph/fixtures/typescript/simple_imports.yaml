@@ -1,5 +1,5 @@
 name: "TypeScript: simple imports and cross-file resolution"
-pipeline: typescript
+pipeline: js
 fixtures:
   - path: models.ts
     content: |
@@ -51,7 +51,7 @@ tests:
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
-      - { row: { caller: "main.run", callee: "models.createUser" } }
+      - { row: { caller: "run", callee: "createUser" } }
 
   - name: Exactly 2 TypeScript files
     query: |

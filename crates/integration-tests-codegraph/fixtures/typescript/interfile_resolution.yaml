@@ -1,5 +1,5 @@
 name: "TypeScript: inter-file resolution"
-pipeline: typescript
+pipeline: js
 fixtures:
   - path: models.ts
     content: |
@@ -70,7 +70,7 @@ tests:
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
-      - { row: { caller: "main.run", callee: "services.buildUser" } }
+      - { row: { caller: "run", callee: "buildUser" } }
 
   - name: No call edges from models.ts (it only defines)
     query: |

@@ -33,7 +33,7 @@ tests:
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
-      - { row: { caller: "main.run", callee: "main.helper" } }
+      - { row: { caller: "run", callee: "helper" } }
 
   - name: unused has no incoming calls
     query: |

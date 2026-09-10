@@ -1,5 +1,5 @@
 name: "TypeScript: arrow functions, async/await, const bindings"
-pipeline: typescript
+pipeline: js
 fixtures:
   - path: main.ts
     content: |
@@ -30,9 +30,9 @@ tests:
       RETURN d.name AS name
       ORDER BY name
     assert:
-      - { row_count: 4 }
+      - { row_count: 5 }
       - { unique: name }
-      - { column_values: { field: name, values: ["add", "fetchData", "multiply", "process"] } }
+      - { column_values: { field: name, values: ["add", "fetchData", "multiply", "process", "useArrows"] } }
 
   - name: useArrows calls both add and multiply
     query: |

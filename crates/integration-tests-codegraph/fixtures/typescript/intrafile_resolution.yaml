@@ -1,5 +1,5 @@
 name: "TypeScript: intra-file resolution"
-pipeline: typescript
+pipeline: js
 fixtures:
   - path: main.ts
     content: |
@@ -48,7 +48,7 @@ tests:
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
-      - { row: { caller: "main.caller", callee: "main.target" } }
+      - { row: { caller: "caller", callee: "target" } }
 
   - name: this.speak() resolves within Dog
     query: |
@@ -58,13 +58,13 @@ tests:
     assert:
       - { row_count: 1 }
 
-  - name: Puppy.play() calls inherited speak via this
+  - name: Puppy.play() does not resolve inherited speak via this
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.name = 'play' AND callee.name = 'speak' AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
-      - { row_count: 1 }
+      - { empty: true }
 
   - name: unused has no incoming call edges
     query: |

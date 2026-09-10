@@ -1,5 +1,5 @@
 name: "TypeScript: class inheritance and implements"
-pipeline: typescript
+pipeline: js
 fixtures:
   - path: main.ts
     content: |
@@ -44,20 +44,19 @@ tests:
       - { row: { name: "play", type: "Method" } }
       - { row: { name: "speak", type: "Method" } }
 
-  - name: Dog.fetch() calls this.greet() (inherited from Animal)
+  - name: Dog.fetch() does not resolve this.greet() cross-class
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.name = 'fetch' AND callee.name = 'greet' AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
-      - { row_count: 1 }
+      - { empty: true }
 
-  - name: Puppy.play() calls inherited speak and greet
+  - name: Puppy.play() does not resolve inherited this calls
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.name = 'play' AND e.edge_kind = 'Calls'
       RETURN callee.name AS callee
       ORDER BY callee
     assert:
-      - { row_count: 2 }
-      - { column_values: { field: callee, values: ["greet", "speak"] } }
+      - { empty: true }

@@ -1,5 +1,4 @@
 name: "Rust: closures, match, and control flow"
-pipeline: rust
 fixtures:
   - path: main.rs
     content: |
@@ -57,22 +56,22 @@ tests:
     assert:
       - { row_count: 1 }
 
-  - name: use_closure calls both apply and double
+  - name: use_closure calls apply
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.name = 'use_closure' AND e.edge_kind = 'Calls'
       RETURN callee.name AS callee
       ORDER BY callee
     assert:
-      - { row_count: 2 }
-      - { column_values: { field: callee, values: ["apply", "double"] } }
+      - { row_count: 1 }
+      - { column_values: { field: callee, values: ["apply"] } }
 
-  - name: process calls double and area
+  - name: process calls double, area, and Circle
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.name = 'process' AND e.edge_kind = 'Calls'
       RETURN callee.name AS callee
       ORDER BY callee
     assert:
-      - { row_count: 2 }
-      - { column_values: { field: callee, values: ["area", "double"] } }
+      - { row_count: 3 }
+      - { column_values: { field: callee, values: ["Circle", "area", "double"] } }

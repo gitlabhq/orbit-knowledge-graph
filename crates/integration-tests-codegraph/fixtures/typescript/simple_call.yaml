@@ -1,5 +1,5 @@
 name: "TypeScript: simple function call"
-pipeline: typescript
+pipeline: js
 fixtures:
   - path: main.ts
     content: |
@@ -26,9 +26,9 @@ tests:
       - { unique: fqn }
       - { no_nulls: fqn }
       - { column_values: { field: name, values: ["helper", "run", "unused"] } }
-      - { row: { name: "helper", fqn: "main.helper" } }
-      - { row: { name: "run", fqn: "main.run" } }
-      - { row: { name: "unused", fqn: "main.unused" } }
+      - { row: { name: "helper", fqn: "helper" } }
+      - { row: { name: "run", fqn: "run" } }
+      - { row: { name: "unused", fqn: "unused" } }
 
   - name: run calls helper (exactly 1 call edge)
     query: |
@@ -37,7 +37,7 @@ tests:
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
-      - { row: { caller: "main.run", callee: "main.helper" } }
+      - { row: { caller: "run", callee: "helper" } }
 
   - name: unused has no incoming call edges
     query: |

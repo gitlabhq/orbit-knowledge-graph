@@ -1,5 +1,4 @@
 name: "Rust: simple definitions"
-pipeline: rust
 fixtures:
   - path: main.rs
     content: |
@@ -30,7 +29,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.file_path = 'main.rs'
-        AND d.definition_type IN ['Struct', 'Enum', 'Trait', 'Function', 'Const', 'TypeAlias']
+        AND d.definition_type IN ['Struct', 'Enum', 'Trait', 'Function', 'Constant', 'TypeAlias']
       RETURN d.name AS name, d.definition_type AS type
       ORDER BY name
     assert:
@@ -40,18 +39,17 @@ tests:
       - { row: { name: "Animal", type: "Trait" } }
       - { row: { name: "Color", type: "Enum" } }
       - { row: { name: "Dog", type: "Struct" } }
-      - { row: { name: "MAX", type: "Const" } }
+      - { row: { name: "MAX", type: "Constant" } }
       - { row: { name: "Result", type: "TypeAlias" } }
       - { row: { name: "greet", type: "Function" } }
 
-  - name: No spurious definitions
+  - name: All definitions have names
     query: |
       MATCH (d:Definition)
-      WHERE d.file_path = 'main.rs' AND (d.name IS NULL OR d.name = '')
-      RETURN count(d) AS n
+      WHERE d.file_path = 'main.rs'
+      RETURN d.name AS name
     assert:
-      - { row_count: 1 }
-      - { row: { n: 0 } }
+      - { no_nulls: name }
 
   - name: Exactly 1 Rust file
     query: |

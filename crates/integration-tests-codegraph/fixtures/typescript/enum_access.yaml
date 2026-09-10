@@ -1,5 +1,5 @@
 name: "TypeScript: enum member access"
-pipeline: typescript
+pipeline: js
 fixtures:
   - path: main.ts
     content: |

@@ -1,5 +1,4 @@
 name: "Rust: generics, lifetimes, and macro calls"
-pipeline: rust
 fixtures:
   - path: main.rs
     content: |

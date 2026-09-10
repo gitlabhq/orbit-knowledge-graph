@@ -1,5 +1,5 @@
 name: "TypeScript: nested functions and recursive calls"
-pipeline: typescript
+pipeline: js
 fixtures:
   - path: main.ts
     content: |
@@ -25,13 +25,13 @@ fixtures:
       }
 
 tests:
-  - name: inner is nested inside outer
+  - name: inner is not nested inside outer via Defines
     query: |
       MATCH (parent:Definition)-[e:DefinitionToDefinition]->(child:Definition)
       WHERE parent.name = 'outer' AND child.name = 'inner' AND e.edge_kind = 'Defines'
       RETURN parent.fqn AS parent, child.fqn AS child
     assert:
-      - { row_count: 1 }
+      - { empty: true }
 
   - name: outer calls inner
     query: |

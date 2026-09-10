@@ -1,5 +1,4 @@
 name: "Rust: impl methods and self calls"
-pipeline: rust
 fixtures:
   - path: main.rs
     content: |
@@ -32,7 +31,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.file_path = 'main.rs'
-        AND d.definition_type IN ['Struct', 'Function', 'Method', 'Impl']
+        AND d.definition_type IN ['Struct', 'Function', 'Method', 'AssociatedFunction']
       RETURN d.name AS name, d.definition_type AS type
       ORDER BY name
     assert:
@@ -40,7 +39,7 @@ tests:
       - { row: { name: "Dog", type: "Struct" } }
       - { row: { name: "greet", type: "Method" } }
       - { row: { name: "main", type: "Function" } }
-      - { row: { name: "new", type: "Method" } }
+      - { row: { name: "new", type: "AssociatedFunction" } }
       - { row: { name: "speak", type: "Method" } }
 
   - name: Methods are nested under impl via Defines

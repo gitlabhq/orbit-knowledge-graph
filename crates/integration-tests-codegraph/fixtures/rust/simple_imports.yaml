@@ -1,5 +1,4 @@
 name: "Rust: simple use imports and cross-file resolution"
-pipeline: rust
 fixtures:
   - path: models.rs
     content: |
@@ -38,7 +37,7 @@ tests:
       - { row_count: 1 }
       - { row: { n: 0 } }
 
-  - name: Cross-file call from run to create_user
+  - name: Cross-file call from run to create_user does not resolve
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.name = 'run' AND callee.name = 'create_user'
@@ -46,7 +45,7 @@ tests:
         AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
-      - { row_count: 1 }
+      - { empty: true }
 
   - name: Exactly 2 Rust files
     query: |

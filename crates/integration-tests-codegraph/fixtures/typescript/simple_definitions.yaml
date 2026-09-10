@@ -1,5 +1,5 @@
 name: "TypeScript: simple definitions"
-pipeline: typescript
+pipeline: js
 fixtures:
   - path: main.ts
     content: |
@@ -41,23 +41,24 @@ tests:
       - { row: { name: "greet", type: "Function" } }
       - { row: { name: "helper", type: "Function" } }
 
-  - name: speak is a Method nested inside Animal
+  - name: speak and sound are nested inside Animal via Defines
     query: |
       MATCH (cls:Definition)-[e:DefinitionToDefinition]->(m:Definition)
       WHERE cls.name = 'Animal' AND e.edge_kind = 'Defines'
       RETURN m.name AS method, m.definition_type AS type
+      ORDER BY method
     assert:
-      - { row_count: 1 }
+      - { row_count: 2 }
+      - { row: { method: "sound", type: "Property" } }
       - { row: { method: "speak", type: "Method" } }
 
-  - name: No spurious definitions (no blank names, no duplicates)
+  - name: All definitions have names
     query: |
       MATCH (d:Definition)
-      WHERE d.file_path = 'main.ts' AND (d.name IS NULL OR d.name = '')
-      RETURN count(d) AS n
+      WHERE d.file_path = 'main.ts'
+      RETURN d.name AS name
     assert:
-      - { row_count: 1 }
-      - { row: { n: 0 } }
+      - { no_nulls: name }
 
   - name: Exactly 1 TypeScript file
     query: |

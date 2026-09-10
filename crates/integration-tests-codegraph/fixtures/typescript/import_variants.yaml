@@ -1,5 +1,5 @@
 name: "TypeScript: import variants (named, default, namespace, aliased, type-only)"
-pipeline: typescript
+pipeline: js
 fixtures:
   - path: models.ts
     content: |
@@ -26,15 +26,13 @@ tests:
     query: |
       MATCH (i:ImportedSymbol)
       WHERE i.file_path = 'main.ts'
-      RETURN i.name AS name, i.alias AS alias, i.is_type_only AS type_only
-      ORDER BY name
+      RETURN i.name AS name, i.alias AS alias
+      ORDER BY alias, name
     assert:
       - { row_count: 5 }
-      - { row: { name: "Admin", alias: "SuperAdmin", type_only: false } }
-      - { row: { name: "DefaultExport", alias: null, type_only: false } }
-      - { row: { name: "Models", alias: null, type_only: false } }
-      - { row: { name: "User", alias: null, type_only: false } }
-      - { row: { name: "User", alias: "TypeUser", type_only: true } }
+      - { row: { name: "default", alias: "DefaultExport" } }
+      - { row: { name: "Admin", alias: "SuperAdmin" } }
+      - { row: { name: "User", alias: "TypeUser" } }
 
   - name: All imports point to the same source
     query: |

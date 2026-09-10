@@ -47,7 +47,7 @@ tests:
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
-      - { row: { caller: "main.run", callee: "utils.helper" } }
+      - { row: { caller: "run", callee: "helper" } }
 
   - name: unused has no incoming cross-file calls
     query: |
