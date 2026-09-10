@@ -16,4 +16,4 @@ query:
     }
 
 expect:
-  skip_requirements: [aggregation, node_count]
+  compile_only: true

@@ -20,18 +20,15 @@ expect:
           filters:
             state: active
       has_more: true
-      skip_requirements: [cursor]
     - nodes:
         User:
           order: [3, 4]
           filters:
             state: active
       has_more: true
-      skip_requirements: [cursor]
     - nodes:
         User:
           order: [6, 7]
           filters:
             state: active
       has_more: false
-      skip_requirements: [cursor]

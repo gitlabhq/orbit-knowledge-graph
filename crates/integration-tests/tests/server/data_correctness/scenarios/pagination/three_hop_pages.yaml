@@ -22,7 +22,7 @@ expect:
     edge_count: 14
     page_count: 4
   pages:
-    - skip_requirements: [cursor, "relationship:MEMBER_OF", "relationship:CONTAINS"]
-    - skip_requirements: [cursor, "relationship:MEMBER_OF", "relationship:CONTAINS"]
-    - skip_requirements: [cursor, "relationship:MEMBER_OF", "relationship:CONTAINS"]
-    - skip_requirements: [cursor, "relationship:MEMBER_OF", "relationship:CONTAINS"]
+    - skip_requirements: ["relationship:MEMBER_OF", "relationship:CONTAINS"]
+    - skip_requirements: ["relationship:MEMBER_OF", "relationship:CONTAINS"]
+    - skip_requirements: ["relationship:MEMBER_OF", "relationship:CONTAINS"]
+    - skip_requirements: ["relationship:MEMBER_OF", "relationship:CONTAINS"]

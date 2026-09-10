@@ -28,9 +28,9 @@ query:
 
 expect:
   pages:
-    - skip_requirements: [cursor, "relationship:MEMBER_OF", "relationship:CONTAINS"]
-    - skip_requirements: [cursor, "relationship:MEMBER_OF", "relationship:CONTAINS"]
-    - skip_requirements: [cursor, "relationship:MEMBER_OF", "relationship:CONTAINS"]
-    - skip_requirements: [cursor, "relationship:MEMBER_OF", "relationship:CONTAINS"]
-    - skip_requirements: [cursor, "relationship:MEMBER_OF", "relationship:CONTAINS"]
-    - skip_requirements: [cursor, "relationship:MEMBER_OF", "relationship:CONTAINS"]
+    - skip_requirements: ["relationship:MEMBER_OF", "relationship:CONTAINS"]
+    - skip_requirements: ["relationship:MEMBER_OF", "relationship:CONTAINS"]
+    - skip_requirements: ["relationship:MEMBER_OF", "relationship:CONTAINS"]
+    - skip_requirements: ["relationship:MEMBER_OF", "relationship:CONTAINS"]
+    - skip_requirements: ["relationship:MEMBER_OF", "relationship:CONTAINS"]
+    - skip_requirements: ["relationship:MEMBER_OF", "relationship:CONTAINS"]

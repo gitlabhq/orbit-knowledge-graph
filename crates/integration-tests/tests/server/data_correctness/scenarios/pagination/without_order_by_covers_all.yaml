@@ -16,7 +16,7 @@ expect:
       User: [1, 2, 3, 4, 5, 6, 7]
     no_duplicate_ids: true
   pages:
-    - skip_requirements: [cursor]
-    - skip_requirements: [cursor]
-    - skip_requirements: [cursor]
-    - skip_requirements: [cursor]
+    - skip_requirements: [node_count]
+    - skip_requirements: [node_count]
+    - skip_requirements: [node_count]
+    - skip_requirements: [node_count]

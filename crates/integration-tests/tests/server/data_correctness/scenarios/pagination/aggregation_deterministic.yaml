@@ -16,4 +16,7 @@ query:
     }
 
 expect:
-  skip_requirements: [aggregation, cursor]
+  groups:
+    u:
+      count: 2
+  has_more: true

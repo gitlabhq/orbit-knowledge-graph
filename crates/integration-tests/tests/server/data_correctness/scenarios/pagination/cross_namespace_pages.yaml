@@ -21,6 +21,6 @@ expect:
     edge_count: 3
     page_count: 3
   pages:
-    - skip_requirements: [cursor, "relationship:CONTAINS"]
-    - skip_requirements: [cursor, "relationship:CONTAINS"]
-    - skip_requirements: [cursor, "relationship:CONTAINS"]
+    - skip_requirements: ["relationship:CONTAINS"]
+    - skip_requirements: ["relationship:CONTAINS"]
+    - skip_requirements: ["relationship:CONTAINS"]

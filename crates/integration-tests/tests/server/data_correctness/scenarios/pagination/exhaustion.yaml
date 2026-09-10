@@ -18,6 +18,6 @@ expect:
     page_count: 3
     no_duplicate_ids: true
   pages:
-    - skip_requirements: [cursor, order_by]
-    - skip_requirements: [cursor, order_by]
-    - skip_requirements: [cursor, order_by]
+    - skip_requirements: [node_count, order_by]
+    - skip_requirements: [node_count, order_by]
+    - skip_requirements: [node_count, order_by]

@@ -13,10 +13,10 @@ query:
 expect:
   pages:
     - has_more: true
-      skip_requirements: [cursor, neighbors, node_ids]
+      skip_requirements: [neighbors, node_ids]
     - has_more: true
-      skip_requirements: [cursor, neighbors, node_ids]
+      skip_requirements: [neighbors, node_ids]
     - has_more: true
-      skip_requirements: [cursor, neighbors, node_ids]
+      skip_requirements: [neighbors, node_ids]
     - has_more: false
-      skip_requirements: [cursor, neighbors, node_ids]
+      skip_requirements: [neighbors, node_ids]
