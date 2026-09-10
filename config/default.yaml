@@ -218,8 +218,8 @@ features: {}
 # /etc/secrets/object_storage/secret_access_key, /etc/secrets/object_storage/service_account_key.
 object_storage:
   enabled: false
-  provider: s3                  # s3 | gcs
-  bucket: ""
+  provider: s3                  # s3 | gcs | local
+  bucket: ""                    # local: a directory path
   prefix: ""
   auth: identity                # identity | static
   # region: "us-east-1"         # s3: AWS region; S3-compatible stores mostly ignore it

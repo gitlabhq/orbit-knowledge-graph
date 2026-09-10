@@ -25,6 +25,7 @@ pub struct ObjectStorageConfig {
 pub enum ObjectStorageProvider {
     S3,
     Gcs,
+    Local,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

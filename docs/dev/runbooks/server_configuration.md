@@ -478,13 +478,13 @@ When enabled, every metered Orbit query (`mcp`, `rest` source types) is checked 
 
 ## Object storage
 
-Names the bucket Orbit will use for cold storage and how to authenticate to it. Disabled by default; nothing reads the store yet. The `orbit-object-storage` crate turns this section into an `object_store` client for S3, S3-compatible stores and Google Cloud Storage.
+Names the bucket Orbit will use for cold storage and how to authenticate to it. Disabled by default; nothing reads the store yet. The `orbit-object-storage` crate turns this section into an `object_store` client for S3, S3-compatible stores, Google Cloud Storage, or a local directory.
 
 | Config path | Default | Description |
 |-------------|---------|-------------|
 | `object_storage.enabled` | `false` | Enable the object store |
-| `object_storage.provider` | `s3` | `s3` (AWS and S3-compatible) or `gcs` |
-| `object_storage.bucket` | `""` | Bucket name |
+| `object_storage.provider` | `s3` | `s3` (AWS and S3-compatible), `gcs`, or `local` (a directory, for development and tests) |
+| `object_storage.bucket` | `""` | Bucket name, or the directory path for `local` |
 | `object_storage.prefix` | `""` | Key prefix under which every object is placed |
 | `object_storage.auth` | `identity` | `identity` uses the runtime (IRSA, EC2 instance profile, `AWS_*` variables, GKE Workload Identity, GCE metadata server, `GOOGLE_APPLICATION_CREDENTIALS`, gcloud ADC); `static` uses the credentials below |
 | `object_storage.region` | unset | S3 region; required for AWS, ignored by most S3-compatible stores |
@@ -518,6 +518,16 @@ object_storage:
   endpoint: https://minio.internal:9000
   path_style: true
   ca_cert_path: /etc/ssl/private-ca.pem
+```
+
+Local directory for development and tests (the directory must exist):
+
+```yaml
+object_storage:
+  enabled: true
+  provider: local
+  bucket: /tmp/orbit-store
+  prefix: dev
 ```
 
 Round-trip a config file against the bucket it names with the throwaway example:

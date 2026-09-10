@@ -1,6 +1,7 @@
 use bytes::Bytes;
 use object_store::aws::{AmazonS3, AmazonS3Builder};
 use object_store::gcp::{GoogleCloudStorage, GoogleCloudStorageBuilder};
+use object_store::local::LocalFileSystem;
 use object_store::path::Path;
 use object_store::prefix::PrefixStore;
 use object_store::{Certificate, ClientOptions, ObjectStore, ObjectStoreExt, PutPayload};
@@ -23,6 +24,9 @@ impl ObjectStorage {
         let store: Box<dyn ObjectStore> = match config.provider {
             ObjectStorageProvider::S3 => Box::new(s3(config)?),
             ObjectStorageProvider::Gcs => Box::new(gcs(config)?),
+            ObjectStorageProvider::Local => {
+                Box::new(LocalFileSystem::new_with_prefix(&config.bucket)?)
+            }
         };
         let store = PrefixStore::new(store, Path::from(config.prefix.as_str()));
         Ok(Self { store })

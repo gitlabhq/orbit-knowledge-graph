@@ -1065,7 +1065,8 @@
       "type": "string",
       "enum": [
         "s3",
-        "gcs"
+        "gcs",
+        "local"
       ]
     },
     "OtelConfig": {
