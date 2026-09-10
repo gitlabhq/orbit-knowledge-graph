@@ -1,0 +1,37 @@
+description: >
+  A namespace completes once every namespaced SDLC pipeline has a finished
+  checkpoint and every replicated project has a code checkpoint.
+
+steps:
+  - seed:
+      siphon_knowledge_graph_enabled_namespaces:
+        - { id: 320, root_namespace_id: 320, traversal_path: "3/320/", created_at: "2024-01-15", updated_at: "2024-01-15" }
+      namespace_traversal_paths:
+        - { id: 320, traversal_path: "3/320/" }
+      project_namespace_traversal_paths:
+        - { id: 3200, traversal_path: "3/320/3200/" }
+      completed_sdlc_pipelines:
+        - { namespace_id: 320 }
+    dispatch: code_backfill
+    expect:
+      dispatched:
+        - kind: code_task
+          count: 1
+      backfill:
+        - path: "3/320/"
+          state: running
+          code: { completed: 0 }
+
+  - seed:
+      code_indexing_checkpoint:
+        - { traversal_path: "3/320/3200/", project_id: 3200, branch: main, last_task_id: 1, indexed_at: "2024-01-20 12:00:00" }
+    dispatch: code_backfill
+    expect:
+      dispatched:
+        - kind: code_task
+          count: 0
+      backfill:
+        - path: "3/320/"
+          state: completed
+          code: { completed: 1 }
+          progress: recorded

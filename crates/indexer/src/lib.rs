@@ -257,8 +257,8 @@ pub async fn run_dispatcher(
         .nats_client
         .ensure_kv_bucket_exists(INDEXING_PROGRESS_BUCKET, KvBucketConfig::default())
         .await?;
-    let indexing_status = Arc::new(IndexingStatusStore::new(Arc::new(
-        nats_client::KvServicesImpl::new(services.nats_client.clone()),
+    let indexing_status = IndexingStatusStore::new(Arc::new(nats_client::KvServicesImpl::new(
+        services.nats_client.clone(),
     )));
 
     let catalog = OntologyCatalog::open(services.nats_client.clone()).await?;

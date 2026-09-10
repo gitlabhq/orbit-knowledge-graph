@@ -1,0 +1,31 @@
+description: >
+  Once a namespace has completed, a newly replicated project is ongoing
+  indexing work: it is dispatched, but the status stays completed.
+
+steps:
+  - seed:
+      siphon_knowledge_graph_enabled_namespaces:
+        - { id: 340, root_namespace_id: 340, traversal_path: "3/340/", created_at: "2024-01-15", updated_at: "2024-01-15" }
+      namespace_traversal_paths:
+        - { id: 340, traversal_path: "3/340/" }
+      completed_sdlc_pipelines:
+        - { namespace_id: 340 }
+    dispatch: code_backfill
+    expect:
+      backfill:
+        - path: "3/340/"
+          state: completed
+
+  - seed:
+      project_namespace_traversal_paths:
+        - { id: 3400, traversal_path: "3/340/3400/" }
+    dispatch: code_backfill
+    expect:
+      dispatched:
+        - kind: code_task
+          count: 1
+          rows:
+            - { project_id: 3400 }
+      backfill:
+        - path: "3/340/"
+          state: completed

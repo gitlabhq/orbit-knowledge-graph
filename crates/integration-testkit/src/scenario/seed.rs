@@ -67,8 +67,39 @@ fn expand_table(table: &str, rows: &[Row], location: &str) -> Vec<(String, Vec<R
     match table {
         "namespaces" => expand_pseudo_rows(rows, location, expand_namespace),
         "projects" => expand_pseudo_rows(rows, location, expand_project),
+        "completed_sdlc_pipelines" => {
+            expand_pseudo_rows(rows, location, expand_completed_sdlc_pipelines)
+        }
         _ => vec![(prefix_graph_table(table), rows.to_vec())],
     }
+}
+
+/// One completed parent checkpoint per namespaced pipeline: the state a
+/// namespace is in once its initial SDLC pass has finished.
+fn expand_completed_sdlc_pipelines(row: &Row, location: &str) -> Vec<(String, Row)> {
+    let mut fields = PseudoFields::new("completed_sdlc_pipelines", row, location);
+    let namespace_id = yaml_i64(
+        &fields.required("namespace_id"),
+        "completed_sdlc_pipelines.namespace_id",
+        location,
+    );
+    fields.finish();
+
+    crate::load_ontology()
+        .pipeline_descriptors()
+        .into_iter()
+        .filter(|pipeline| pipeline.scope == ontology::EtlScope::Namespaced)
+        .map(|pipeline| {
+            (
+                prefix_graph_table("checkpoint"),
+                row_of([
+                    ("key", format!("ns.{namespace_id}.{}", pipeline.name).into()),
+                    ("watermark", DEFAULT_REPLICATED_AT.into()),
+                    ("cursor_values", "null".into()),
+                ]),
+            )
+        })
+        .collect()
 }
 
 pub(crate) fn prefix_graph_table(table: &str) -> String {

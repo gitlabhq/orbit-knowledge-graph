@@ -23,7 +23,10 @@ use integration_testkit::TestContext;
 use integration_testkit::scenario::{
     CdcEvent, CdcOperation, DispatchedMessage, HandlerInput, ScenarioHandlers,
 };
+use orbit_server::graph_status::GraphStatusService;
+use orbit_server::proto::{BackfillStatus, ResponseFormat, get_graph_status_response};
 use orbit_server_config::{GlobalDispatcherConfig, NamespaceDispatcherConfig, NatsConfiguration};
+use orbit_utils::traversal_path::TraversalPath;
 use siphon_proto::replication_event::{Column, Operation};
 use siphon_proto::{LogicalReplicationEvents, ReplicationEvent, Value, value};
 use testcontainers::ImageExt;
@@ -37,6 +40,7 @@ use testcontainers_modules::nats::{Nats, NatsServerCmd};
 pub struct DispatchScenarioHandlers {
     nats_url: String,
     serial: tokio::sync::Mutex<()>,
+    indexing_status: IndexingStatusStore,
 }
 
 impl DispatchScenarioHandlers {
@@ -44,6 +48,7 @@ impl DispatchScenarioHandlers {
         Self {
             nats_url,
             serial: tokio::sync::Mutex::new(()),
+            indexing_status: IndexingStatusStore::new(Arc::new(MockNatsServices::new())),
         }
     }
 }
@@ -62,9 +67,41 @@ impl ScenarioHandlers for DispatchScenarioHandlers {
             "dispatch_namespace" => run_namespace_dispatcher(ctx, &self.nats_url).await,
             "dispatch_global" => run_global_dispatcher(&self.nats_url).await,
             "dispatch_enabled_namespace_cdc" => {
-                dispatch_enabled_namespace_cdc(ctx, &self.nats_url, input.cdc).await
+                dispatch_enabled_namespace_cdc(
+                    ctx,
+                    &self.nats_url,
+                    input.cdc,
+                    self.indexing_status.clone(),
+                )
+                .await
+            }
+            "dispatch_code_backfill" => {
+                dispatch_code_backfill(ctx, &self.nats_url, self.indexing_status.clone()).await
             }
             other => panic!("unknown dispatch scenario handler '{other}'"),
+        }
+    }
+
+    async fn backfill_status(
+        &self,
+        ctx: &TestContext,
+        traversal_path: &TraversalPath,
+    ) -> BackfillStatus {
+        let response = GraphStatusService::new(Arc::new(ctx.create_client()))
+            .with_indexing_status(self.indexing_status.clone())
+            .get_status(
+                &integration_testkit::load_ontology(),
+                traversal_path,
+                ResponseFormat::Raw as i32,
+                &crate::common::admin_security_context(),
+            )
+            .await
+            .unwrap();
+        match response.content {
+            Some(get_graph_status_response::Content::Structured(status)) => status
+                .backfill
+                .expect("graph status always carries backfill"),
+            other => panic!("expected structured graph status, got {other:?}"),
         }
     }
 }
@@ -137,9 +174,25 @@ pub fn code_backfill(
     datalake: ArrowClickHouseClient,
     campaign: Arc<CampaignState>,
 ) -> CodeBackfill {
+    code_backfill_reporting_to(
+        IndexingStatusStore::new(Arc::new(MockNatsServices::new())),
+        nats,
+        graph,
+        datalake,
+        campaign,
+    )
+}
+
+pub fn code_backfill_reporting_to(
+    indexing_status: IndexingStatusStore,
+    nats: Arc<dyn indexer::nats::NatsServices>,
+    graph: ArrowClickHouseClient,
+    datalake: ArrowClickHouseClient,
+    campaign: Arc<CampaignState>,
+) -> CodeBackfill {
     let initial_backfill = InitialBackfillTracker::new(
         graph.clone(),
-        Arc::new(IndexingStatusStore::new(Arc::new(MockNatsServices::new()))),
+        indexing_status,
         &integration_testkit::load_ontology(),
     );
     CodeBackfill::new(
@@ -157,15 +210,39 @@ pub fn code_backfill(
     )
 }
 
-async fn dispatch_enabled_namespace_cdc(
+async fn dispatch_code_backfill(
     ctx: &TestContext,
     nats_url: &str,
-    cdc: &[CdcEvent],
+    indexing_status: IndexingStatusStore,
 ) -> Vec<DispatchedMessage> {
     let services = indexer::orchestrator::scheduled::connect(&nats_config(nats_url))
         .await
         .unwrap();
-    let backfill = Arc::new(code_backfill(
+    code_backfill_reporting_to(
+        indexing_status,
+        services.nats,
+        ctx.config.build_client(),
+        ctx.config.build_client(),
+        Arc::new(CampaignState::new()),
+    )
+    .dispatch_enabled(uuid::Uuid::new_v4())
+    .await
+    .unwrap();
+
+    drain(nats_url, CODE_INDEXING_TASK_SUBJECT_PATTERN, "code_task").await
+}
+
+async fn dispatch_enabled_namespace_cdc(
+    ctx: &TestContext,
+    nats_url: &str,
+    cdc: &[CdcEvent],
+    indexing_status: IndexingStatusStore,
+) -> Vec<DispatchedMessage> {
+    let services = indexer::orchestrator::scheduled::connect(&nats_config(nats_url))
+        .await
+        .unwrap();
+    let backfill = Arc::new(code_backfill_reporting_to(
+        indexing_status,
         services.nats.clone(),
         ctx.config.build_client(),
         ctx.config.build_client(),

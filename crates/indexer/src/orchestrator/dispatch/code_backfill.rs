@@ -362,9 +362,7 @@ mod tests {
         );
         let tracker = InitialBackfillTracker::new(
             graph.clone(),
-            Arc::new(crate::indexing_status::IndexingStatusStore::new(
-                nats.clone(),
-            )),
+            crate::indexing_status::IndexingStatusStore::new(nats.clone()),
             &ontology::Ontology::load_embedded().expect("should load ontology"),
         );
         CodeBackfill::new(

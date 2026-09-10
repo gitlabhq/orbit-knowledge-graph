@@ -13,11 +13,9 @@ use integration_testkit::{load_ontology, run_subtests_shared, t};
 use nats_client::testkit::MockKvServices;
 use orbit_server::graph_status::GraphStatusService;
 use orbit_server::proto::{
-    BackfillState, BackfillStatus, GetGraphStatusResponse, ResponseFormat, StructuredGraphStatus,
+    BackfillState, GetGraphStatusResponse, ResponseFormat, StructuredGraphStatus,
     get_graph_status_response,
 };
-
-mod backfill;
 
 fn admin_context() -> SecurityContext {
     SecurityContext::new_with_roles(1, vec![AuthorizedPath::new("1/", 50)])
@@ -193,22 +191,6 @@ fn extract_structured(response: GetGraphStatusResponse) -> StructuredGraphStatus
         Some(get_graph_status_response::Content::Structured(s)) => s,
         _ => panic!("Expected structured response"),
     }
-}
-
-async fn backfill_status(service: &GraphStatusService, path: &str) -> BackfillStatus {
-    extract_structured(
-        service
-            .get_status(
-                &load_ontology(),
-                &TraversalPath::new_unchecked(path),
-                ResponseFormat::Raw as i32,
-                &admin_context(),
-            )
-            .await
-            .unwrap(),
-    )
-    .backfill
-    .unwrap()
 }
 
 async fn unavailable_status_preserves_inventory(ctx: &TestContext) {

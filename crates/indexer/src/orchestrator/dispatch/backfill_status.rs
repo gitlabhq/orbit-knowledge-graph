@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use chrono::{DateTime, Utc};
 use clickhouse_client::FromArrowColumn;
 use ontology::{EtlScope, Ontology};
@@ -21,14 +19,14 @@ WHERE _deleted = false \
 
 pub struct InitialBackfillTracker {
     graph: ArrowClickHouseClient,
-    store: Arc<IndexingStatusStore>,
+    store: IndexingStatusStore,
     namespaced_pipelines: Vec<String>,
 }
 
 impl InitialBackfillTracker {
     pub fn new(
         graph: ArrowClickHouseClient,
-        store: Arc<IndexingStatusStore>,
+        store: IndexingStatusStore,
         ontology: &Ontology,
     ) -> Self {
         Self {

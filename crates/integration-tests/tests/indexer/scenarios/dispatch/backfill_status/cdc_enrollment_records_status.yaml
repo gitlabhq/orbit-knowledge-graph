@@ -1,0 +1,30 @@
+description: >
+  Enrollment arriving as a CDC event records the namespace's initial backfill
+  status on the same pass that dispatches its first work.
+
+seed:
+  namespace_traversal_paths:
+    - { id: 350, traversal_path: "3/350/" }
+  project_namespace_traversal_paths:
+    - { id: 3500, traversal_path: "3/350/3500/" }
+
+cdc:
+  - table: knowledge_graph_enabled_namespaces
+    operation: insert
+    rows:
+      - { root_namespace_id: 350 }
+
+dispatch: enabled_namespaces
+
+expect:
+  dispatched:
+    - kind: namespace
+      count: 1
+    - kind: code_task
+      count: 1
+  backfill:
+    - path: "3/350/"
+      state: running
+      sdlc: { completed: 0 }
+      code: { completed: 0 }
+      progress: absent

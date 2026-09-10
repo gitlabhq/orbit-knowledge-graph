@@ -11,6 +11,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use orbit_server::proto::BackfillStatus;
+use orbit_utils::traversal_path::TraversalPath;
 
 use crate::collect_subtest_results;
 use crate::context::TestContext;
@@ -50,6 +52,15 @@ pub trait ScenarioHandlers: Send + Sync {
         handler: &str,
         input: HandlerInput<'_>,
     ) -> Vec<DispatchedMessage>;
+
+    /// What the graph status endpoint reports for `traversal_path`, for `expect.backfill`.
+    async fn backfill_status(
+        &self,
+        _ctx: &TestContext,
+        _traversal_path: &TraversalPath,
+    ) -> BackfillStatus {
+        panic!("these scenario handlers do not read initial backfill status");
+    }
 }
 
 /// Discover and run every scenario under `root` as a concurrent subtest
@@ -134,7 +145,7 @@ async fn run_scenario(ctx: &TestContext, file: &Path, name: &str, handlers: &dyn
             dispatched.extend(handlers.run(ctx, handler, input).await);
         }
         if let Some(expect) = &step.expect {
-            expect::check_expect(ctx, expect, &dispatched, &location).await;
+            expect::check_expect(ctx, handlers, expect, &dispatched, &location).await;
         }
     }
 }

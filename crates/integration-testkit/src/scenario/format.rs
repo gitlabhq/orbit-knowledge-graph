@@ -134,6 +134,7 @@ pub enum DispatchKind {
     Namespace,
     Global,
     EnabledNamespaces,
+    CodeBackfill,
 }
 
 impl DispatchKind {
@@ -142,6 +143,7 @@ impl DispatchKind {
             DispatchKind::Namespace => "dispatch_namespace",
             DispatchKind::Global => "dispatch_global",
             DispatchKind::EnabledNamespaces => "dispatch_enabled_namespace_cdc",
+            DispatchKind::CodeBackfill => "dispatch_code_backfill",
         }
     }
 }
@@ -182,6 +184,38 @@ pub struct Expect {
     pub totals: BTreeMap<String, usize>,
     #[serde(default)]
     pub dispatched: Vec<DispatchExpect>,
+    #[serde(default)]
+    pub backfill: Vec<BackfillExpect>,
+}
+
+/// The initial-backfill status the graph status endpoint reports for a path.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BackfillExpect {
+    pub path: TraversalPath,
+    pub state: String,
+    #[serde(default)]
+    pub sdlc: Option<CountsExpect>,
+    #[serde(default)]
+    pub code: Option<CountsExpect>,
+    #[serde(default)]
+    pub progress: Option<ProgressExpect>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CountsExpect {
+    #[serde(default)]
+    pub completed: Option<u64>,
+    #[serde(default)]
+    pub total: Option<u64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProgressExpect {
+    Recorded,
+    Absent,
 }
 
 #[derive(Debug, Deserialize)]

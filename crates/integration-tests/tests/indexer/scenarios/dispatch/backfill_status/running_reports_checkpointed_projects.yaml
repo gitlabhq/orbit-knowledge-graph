@@ -1,0 +1,35 @@
+description: >
+  While projects are still pending, status is running with the number of
+  code-checkpointed projects and no finished SDLC pipelines; a project path
+  reads the same root-namespace status.
+
+seed:
+  siphon_knowledge_graph_enabled_namespaces:
+    - { id: 310, root_namespace_id: 310, traversal_path: "3/310/", created_at: "2024-01-15", updated_at: "2024-01-15" }
+  namespace_traversal_paths:
+    - { id: 310, traversal_path: "3/310/" }
+  project_namespace_traversal_paths:
+    - { id: 3100, traversal_path: "3/310/3100/" }
+    - { id: 3101, traversal_path: "3/310/3101/" }
+    - { id: 3102, traversal_path: "3/310/3102/" }
+  code_indexing_checkpoint:
+    - { traversal_path: "3/310/3100/", project_id: 3100, branch: main, last_task_id: 1, indexed_at: "2024-01-20 12:00:00" }
+    - { traversal_path: "3/310/3101/", project_id: 3101, branch: main, last_task_id: 1, indexed_at: "2024-01-20 12:00:00" }
+
+dispatch: code_backfill
+
+expect:
+  dispatched:
+    - kind: code_task
+      count: 1
+      rows:
+        - { project_id: 3102 }
+  backfill:
+    - path: "3/310/"
+      state: running
+      sdlc: { completed: 0 }
+      code: { completed: 2 }
+      progress: recorded
+    - path: "3/310/3100/"
+      state: running
+      code: { completed: 2 }
