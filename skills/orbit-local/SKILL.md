@@ -13,7 +13,7 @@ description: >
   production data in GitLab (a project such as gitlab-org/gitlab, cross-project
   blast radius, contributor or merge-request aggregation) use the `orbit` skill;
   for single-entity GitLab lookups or write operations use `glab`.
-version: 0.5.0
+version: 0.5.1
 license: MIT
 metadata:
   audience: developers
@@ -137,7 +137,7 @@ key abstractions, per-file APIs) instead of ad-hoc SQL, use the native
 ```bash
 orbit repo-map overview                 # start here
 orbit repo-map tree crates              # types grouped by file under a subtree
-orbit repo-map api crates/orbit-local   # types + callables + signatures
+orbit repo-map api crates/orbit-cli   # types + callables + signatures
 ```
 
 It is scoped to the current commit; index first if the commit is not indexed.

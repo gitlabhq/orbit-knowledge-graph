@@ -52,7 +52,7 @@ the current directory; pass `--repo PATH` to point at another checkout:
 orbit repo-map overview
 orbit repo-map --repo ~/workspace/knowledge-graph overview
 orbit repo-map --repo ~/workspace/knowledge-graph tree crates
-orbit repo-map --repo ~/workspace/knowledge-graph api crates/orbit-local
+orbit repo-map --repo ~/workspace/knowledge-graph api crates/orbit-cli
 orbit repo-map --repo ~/workspace/knowledge-graph class Workspace
 orbit repo-map --repo ~/workspace/knowledge-graph extends QueryCompiler
 orbit repo-map --repo ~/workspace/knowledge-graph imports Workspace
@@ -69,7 +69,7 @@ or omit the leading dot and can be repeated or comma-separated:
 
 ```bash
 orbit repo-map --ext .rs overview
-orbit repo-map --ext rs api crates/orbit-local
+orbit repo-map --ext rs api crates/orbit-cli
 orbit repo-map --ext rs,toml tree crates
 ```
 

@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "setup_agent.schema.json",
   "title": "Orbit setup assistant spec",
-  "description": "One AI coding assistant configured by `orbit setup`, described as generic operations: a managed instruction-file block, marker-owned JSON merges, templated files, and string registrations. Each file's name field must match its file stem. Applied by crates/orbit-local/src/commands/setup.",
+  "description": "One AI coding assistant configured by `orbit setup`, described as generic operations: a managed instruction-file block, marker-owned JSON merges, templated files, and string registrations. Each file's name field must match its file stem. Applied by crates/orbit-cli/src/commands/setup.",
   "type": "object",
   "required": ["name", "instruction_file"],
   "additionalProperties": false,
