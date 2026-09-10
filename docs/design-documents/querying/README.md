@@ -2,7 +2,7 @@
 
 ## Overview
 
-The deployed HTTP server (`gkg-webserver`) exposes a REST + MCP surface so agents can run graph queries without having to write Cypher or SQL directly. This server adds three major capabilities:
+The deployed HTTP server (`gkg-webserver`) exposes a REST + MCP surface so agents can run graph queries without writing SQL directly. This server adds three major capabilities:
 
 - A **dedicated web server** (`gkg-webserver`) that serves queries by connecting to ClickHouse and NATS to build the graph queries and serve the results.
 - A **graph query engine** that compiles high‑level graph operations into ClickHouse SQL and executes them directly on adjacency‑ordered edge tables and typed node tables.
@@ -18,7 +18,7 @@ View the [Intermediate Query Language](./intermediary_llm_query_language.md) des
 
 ### Orbit query frontend
 
-The [Orbit query frontend](orbit_query_frontend.md) is a compiler-level API for Orbit's read-only graph language. Pest pairs lower directly into compiler Input. Remote requests still use the JSON Query DSL.
+The [Orbit query frontend](orbit_query_frontend.md) is a compiler-level API for Orbit's read-only graph language. Pest pairs lower directly into compiler Input. Remote requests select it with `language: gql`; the JSON Query DSL remains the default.
 
 ### Unified Response Schema
 

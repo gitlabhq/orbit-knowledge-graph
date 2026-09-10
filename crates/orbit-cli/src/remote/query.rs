@@ -24,10 +24,17 @@ pub(crate) async fn run_query(
     language: QueryLanguage,
 ) -> Result<(), RemoteError> {
     let client = OrbitClient::from_env()?;
-    let raw_body = read_query_body(source.as_deref())?;
     let request_body = match language {
-        QueryLanguage::Json => build_query_request(&raw_body, format_override)?,
-        QueryLanguage::Gql => build_gql_request(&raw_body, format_override)?,
+        QueryLanguage::Json => {
+            build_query_request(&read_query_body(source.as_deref())?, format_override)?
+        }
+        QueryLanguage::Gql => {
+            let text = match source.as_deref() {
+                None | Some("-") => read_query_body(None)?,
+                Some(text) => text.as_bytes().to_vec(),
+            };
+            build_gql_request(&text, format_override)?
+        }
     };
     let response = client.query_raw(request_body).await?;
     write_stdout_raw(&response)

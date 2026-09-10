@@ -596,14 +596,15 @@ enum Commands {
         #[arg(long, hide = true, value_name = "MODE")]
         mode: Option<String>,
     },
-    /// POST a query envelope to the remote Orbit API and stream the response.
+    /// POST a query to the remote Orbit API and stream the response.
     Query {
-        /// Query body file, or `-`/omitted to read from stdin.
-        #[arg(value_name = "FILE")]
+        /// With `--language json`: a query body file. With `--language gql`:
+        /// the query text. `-` or omitted reads stdin for either.
+        #[arg(value_name = "FILE|QUERY")]
         source: Option<String>,
 
-        /// Query language of the body: `json` (a query object or envelope)
-        /// or `gql` (raw query text).
+        /// `json` (a query object or envelope file) or `gql` (inline
+        /// read-only query text).
         #[arg(long, value_enum, default_value = "json")]
         language: remote::query::QueryLanguage,
 

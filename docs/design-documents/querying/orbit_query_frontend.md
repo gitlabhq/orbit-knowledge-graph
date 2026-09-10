@@ -5,8 +5,7 @@
 The Orbit query frontend accepts a read-only graph language based on openCypher 9 syntax.
 It includes Orbit-specific restrictions and extensions and supports only the operations that Orbit's compiler can express.
 
-The frontend is a compiler pipeline preset, `clickhouse_gql`. Remote requests can select it with `language: gql` and a text query.
-The JSON Query DSL remains the default during this additive compatibility slice; `language: json` accepts the existing query object.
+The frontend is a compiler pipeline preset, `clickhouse_gql`. Remote requests select it with `language: gql` and a text query; the JSON Query DSL remains the default.
 Unknown selectors and mismatched payload shapes reject rather than selecting a parser from the query's syntax.
 
 A **Pest pair** is a matched grammar rule and its source span.
@@ -60,11 +59,11 @@ This makes SQL and parameter ordering stable without changing filter meaning.
 
 ## Remote transport
 
-The gRPC `QueryType` values remain JSON=0 and NAMED=1, with GQL=2 added. Unknown values reject.
+The gRPC `QueryType` enum is `JSON=0`, `NAMED=1`, `GQL=2`; unknown values reject.
 REST and MCP `query_graph` accept `language: gql` with query text; omitted `language` keeps the JSON object.
 Rails maps the selector onto the gRPC query type. The CLI sends `--language gql` text unchanged.
-Authorization, redaction, hydration, and response formatting are shared and unchanged.
-Deploying this requires a published `orbitpb` containing GQL=2 and a matching Rails/Workhorse pin.
+Path resolution, authorization, redaction, hydration, and response formatting are shared.
+The base ClickHouse query's attribution payload records the language alongside the query text.
 
 ## Supported statement
 
@@ -133,7 +132,7 @@ ID forms preserve the compiler's distinct selector and filter representations:
 The frontend rejects mutations, multiple statements, comma-separated patterns, WITH, OPTIONAL MATCH, UNION, UNWIND, and subqueries.
 It also rejects OR, general NOT, not-equal, DISTINCT, count(*), arbitrary expressions, and offset pagination.
 Unsupported syntax or lowering returns a client-safe error rather than dropping the unsupported part.
-Syntax errors report line, column, and expected tokens without echoing query text.
+Syntax errors report line, column, and expected tokens without echoing query text; lowering errors name the offending identifier.
 
 Query text is limited to 32 KiB. A flat Pest scan checks nesting before recursive parsing, with a limit of 32 levels.
 Existing compiler limits still apply after lowering.

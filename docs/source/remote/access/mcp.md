@@ -51,7 +51,7 @@ Commands available through `invoke_command`:
 
 | Command | Description |
 |---------|-------------|
-| `query_graph` | Execute a graph query using the GitLab Orbit query DSL. |
+| `query_graph` | Execute a graph query using the GitLab Orbit query DSL, or read-only query text with `language: gql`. |
 | `get_graph_schema` | Fetch the current schema: all node types, their properties, and relationship types. |
 | `get_query_dsl` | Return the `query_graph` JSON DSL grammar and version. |
 | `get_response_format` | Return the `query_graph` response JSON Schema and version. |
