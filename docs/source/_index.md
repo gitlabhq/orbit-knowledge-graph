@@ -27,102 +27,82 @@ title: GitLab Orbit
 > For more information, see the history.
 > This feature is available for testing, but not ready for production use.
 
-GitLab Orbit indexes your GitLab instance and exposes your entire SDLC as a queryable property graph.
-Enable it on a group and GitLab Orbit maps everything: projects, users, merge requests, pipelines,
-work items, security findings, and the source code itself, then builds a property graph of how they
-relate to each other.
+GitLab Orbit indexes your local code repositories and remote GitLab data to create
+a queryable, read-only property graph. The graph provides a point-in-time
+snapshot of your entire GitLab instance and checked out code.
 
-Query the graph to answer questions your instance cannot answer directly:
+Query the graph to learn about the relationships between
+your source code, merge requests, pipelines, and other SDLC data.
 
-- What breaks if I change this service?
-- Which merge requests touched this file in the last 90 days?
-- Who has reviewed the most code in this group?
-- Where are the open critical vulnerabilities, and which pipelines introduced them?
-- Which projects depend on this library?
+Follow the tutorial below to get started.
 
-GitLab Orbit is an analytical system designed for point-in-time SDLC insight, not real-time or transactional use cases. Results reflect the state of your data as of the last index cycle.
+## Prerequisites
 
-For a click-through demo, see [GitLab Orbit](https://click-through-demo-generator-v-2-d63870.gitlab.io/demos/orbit-v2/).
-<!-- Demo published on 2026-06-30 -->
+- A top-level group with GitLab Orbit Remote indexing turned on. To check, go to the
+  [GitLab Orbit dashboard](https://gitlab.com/dashboard/orbit/explore), or ask
+  your group Owner.
+- Install the [GitLab CLI (`glab`)](https://docs.gitlab.com/cli/), version 1.115.0 or later.
 
-## GitLab Orbit Remote
+## Step 1: Set up your AI assistant
 
-On GitLab.com, GitLab Orbit Remote runs as a separate service on GitLab infrastructure. Enable it on a top-level group
-and it automatically indexes your entire SDLC and code - groups, projects, users, merge requests,
-pipelines, vulnerabilities, and source code - into a managed ClickHouse graph.
+Connect GitLab Orbit to:
 
-```mermaid
-flowchart LR
-    accTitle: GitLab Orbit Remote architecture
-    accDescr: SDLC data streams from GitLab via CDC to the Data Insights Platform, then to ClickHouse. Code is served over the Rails internal API. GitLab Orbit reads both sources, builds the graph in ClickHouse, and exposes it via REST API, MCP tools, and GitLab Duo Agent Platform.
+- GitLab Duo Agent Platform
+- An external agent, like Claude Code
 
-    subgraph GitLab["GitLab instance"]
-        SDLC[SDLC data]
-        Code[Source code]
-    end
+For the most coverage, use both.
 
-    SDLC -- CDC --> DIP[Data Insights Platform]
-    DIP --> CH[(ClickHouse)]
-    Code -- Rails API --> Orbit[GitLab Orbit service]
-    CH <--> Orbit
+### Use GitLab Duo Agent Platform
 
-    Orbit --> REST[REST API]
-    Orbit --> MCP[MCP tools]
-    Orbit --> DAP[GitLab Duo Agent Platform]
+Turn on the GitLab Duo Agent Platform setting
+for GitLab Orbit to give agents access to
+your graph:
+
+1. In the top bar, select **Search or go to** > **Preferences**.
+1. Under **Behavior**, select the **Use Orbit in GitLab Duo** checkbox. Keep the defaults.
+1. Select **Save changes**.
+1. Open the GitLab Duo Chat sidebar and confirm GitLab Orbit is turned on.
+
+Now, foundational agents can access your graph.
+
+If GitLab Orbit doesn't appear, indexing might not be turned on for your group.
+For help, see [troubleshooting](troubleshooting.md#exit-code-2).
+
+### Use an external agent
+
+To connect to an external agent:
+
+1. Install the GitLab Orbit CLI:
+
+   ```shell
+   glab orbit --install
+   ```
+
+1. Set up your AI assistant:
+
+   ```shell
+   glab orbit setup claude
+   ```
+
+   Replace `claude` with `codex`, `opencode`, or `pi`.
+
+1. Verify the connection:
+
+   ```shell
+   glab orbit remote status
+   ```
+
+   ```json
+   {
+     "status": "healthy",
+     "version": "0.115.0"
+   }
+   ```
+
+## Step 2: Run your first query
+
+Check out an indexed project, or go to one in GitLab, and ask your agent:
+
+```plaintext
+Using Orbit, tell me what does this project do, and how is it structured?
 ```
-
-GitLab Orbit Remote runs as a separate service and shares minimal load with your GitLab instance.
-
-[Get started with GitLab Orbit Remote](remote/getting-started.md)
-
-## GitLab Orbit Local
-
-GitLab Orbit Local runs entirely on your machine. The GitLab Orbit CLI (`orbit`) parses a local repository,
-extracts definitions and cross-file references, and writes the graph to a local DuckDB file.
-Query it directly from the CLI or connect an AI agent through the stdio MCP server. No GitLab
-instance or network connection is required after installation.
-
-```mermaid
-flowchart LR
-    accTitle: GitLab Orbit Local architecture
-    accDescr: The GitLab Orbit CLI parses a local repository, builds a code graph, and writes it to a local DuckDB file. You query the graph via the CLI or connect an AI agent through the stdio MCP server.
-
-    Repo[Local repository] --> CLI["orbit CLI"]
-    CLI --> DB[("DuckDB\n~/.orbit/graph.duckdb")]
-    DB --> Query[CLI query]
-    DB --> MCP[stdio MCP server]
-```
-
-GitLab Orbit Local indexes code only. SDLC data - merge requests, pipelines, work items - requires
-GitLab Orbit Remote.
-
-[Get started with GitLab Orbit Local](local/getting-started.md)
-
-## GitLab Orbit on GitLab Self-Managed
-
-On GitLab Self-Managed, you run GitLab Orbit on a Kubernetes cluster next to your instance. The deployment
-also includes the data pipeline that feeds the graph: PostgreSQL logical replication, Siphon, NATS, and
-ClickHouse. The graph and the query surfaces match GitLab.com.
-
-[Get started with GitLab Orbit on GitLab Self-Managed](self-managed/getting-started.md)
-
-## What GitLab Orbit indexes
-
-GitLab Orbit indexes two categories of data:
-
-- SDLC objects from your GitLab instance: groups, projects, users, merge requests, pipelines, jobs,
-  work items, milestones, labels, and security findings.
-
-- Source code from your repositories: files, directories, function and class definitions, and
-  cross-file import references. Code is indexed from the default branch only.
-
-GitLab Orbit indexes code in Ruby, Java, Kotlin, Python, TypeScript, JavaScript, Rust, Go, C#, C, C++, and PHP.
-
-[Full indexing coverage](remote/indexing.md) | [Schema reference](remote/schema.md)
-
-## Get started
-
-- [Enable GitLab Orbit Remote and run your first query](remote/getting-started.md)
-- [Build a local code graph with GitLab Orbit Local](local/getting-started.md)
-- [Install GitLab Orbit on GitLab Self-Managed](self-managed/getting-started.md)
-- [Set up AI coding agents with the GitLab Orbit skill](ai_coding_agents.md)
