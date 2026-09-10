@@ -11,7 +11,7 @@ The product. Previously named GitLab Knowledge Graph. Builds a property graph fr
 _Avoid_: KGaaS, Knowledge Graph Service
 
 **GKG**:
-Retired engineering abbreviation for Orbit ("GitLab Knowledge Graph"). Still present in the binary name (`gkg-server`), config prefixes (`GKG_*`), metrics, and pinned wire/database names.
+Retired engineering abbreviation for Orbit ("GitLab Knowledge Graph"). Still present in the binary name (`gkg-server`), metrics, and pinned wire/database names.
 _Avoid_: using GKG in user-facing contexts
 
 **Orbit Remote**:

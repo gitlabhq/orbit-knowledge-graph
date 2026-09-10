@@ -111,7 +111,7 @@ lifecycle.
 
 ## Modes and configuration
 
-**Real mode:** When `GKG_HEALTH_CHECK__SERVICES` is set, the Webserver fetches the HealthCheck
+**Real mode:** When `health_check_url` is set, the Webserver fetches the HealthCheck
 runtime's live `/health` response. If that service is unreachable, cluster health is Unhealthy and
 includes the connection error rather than failing the request.
 
@@ -119,8 +119,8 @@ includes the connection error rather than failing the request.
 components with `mode: "stubbed"`. If a GitLab client is configured, the real reporting-only GitLab
 diagnostic is still appended to this stubbed infrastructure data.
 
-| Environment variable | Effect |
+| Config path | Effect |
 |---|---|
-| `GKG_HEALTH_CHECK__SERVICES` | Base URL for the HealthCheck runtime, for example `http://localhost:9090`. When unset, cluster health uses stubbed infrastructure data. |
+| `health_check_url` | Base URL for the HealthCheck runtime, for example `http://localhost:4201`. When unset, cluster health uses stubbed infrastructure data. |
 
 See [ADR 003](decisions/003_api_design.md) for cluster-health request and response examples.

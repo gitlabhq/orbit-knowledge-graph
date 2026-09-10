@@ -21,35 +21,8 @@ pub enum Feature {}
 #[serde(deny_unknown_fields)]
 pub struct FeatureScope {
     pub enabled: bool,
-    #[serde(default, deserialize_with = "deserialize_namespaces")]
+    #[serde(default)]
     pub namespaces: Vec<i64>,
-}
-
-/// A list (YAML/JSON), a single id, or the comma-separated string a `GKG_*`
-/// env var delivers (e.g. `9970,1234`) — so scoped flags are settable via env
-/// without per-key config-source wiring.
-fn deserialize_namespaces<'de, D>(deserializer: D) -> Result<Vec<i64>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum Namespaces {
-        List(Vec<i64>),
-        One(i64),
-        CommaSeparated(String),
-    }
-
-    Ok(match Namespaces::deserialize(deserializer)? {
-        Namespaces::List(ids) => ids,
-        Namespaces::One(id) => vec![id],
-        Namespaces::CommaSeparated(csv) => csv
-            .split(',')
-            .map(str::trim)
-            .filter(|id| !id.is_empty())
-            .map(|id| id.parse().map_err(serde::de::Error::custom))
-            .collect::<Result<_, _>>()?,
-    })
 }
 
 impl FeatureScope {

@@ -5,14 +5,14 @@
 #
 # Overrides, in increasing priority: an on-disk config/default.yaml (compatibility overlay for the
 # Helm chart's ConfigMap key), the overlay file (--config <path>, else config/config.yaml when
-# present), K8s secret files under /etc/secrets/, and GKG_* environment variables.
+# present), and K8s secret files under /etc/secrets/.
 #
 # The values below are deployment defaults: what any environment gets when nothing overrides them.
 # They must equal the settings a production pod would run on, so this file can underlay a partial
 # Helm ConfigMap without changing behaviour. config-rs deep-merges maps, so a map entry here that
 # the ConfigMap does not set leaks into production; keep the maps below empty unless the entry is a
-# genuine universal default. Local-development-only tuning lives in config/dev.yaml (loaded by the
-# mise dev tasks via --config), not here.
+# genuine universal default. Local-development-only tuning lives in config/dev.yaml, which the mise
+# dev tasks merge into the generated .dev/<mode>.yaml, not here.
 
 bind_address: "127.0.0.1:4200"
 grpc_bind_address: "127.0.0.1:50054"
