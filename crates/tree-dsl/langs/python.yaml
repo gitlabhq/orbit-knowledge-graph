@@ -54,24 +54,23 @@ stages:
     rules:
       # from X import a, b (non-aliased names as leaves)
       - match: '(import_from_statement module_name: $M $$$NAMES:dotted_name)'
-        replace: '(__import (__source @$M) $$$NAMES=>__name)'
+        replace: '(__import (__source @$M|to_rel(".")) $$$NAMES=>__name)'
 
       # from X import a as b (aliased — keep __alias subtree via ->)
       - match: '(import_from_statement module_name: $M $$$NAMES:aliased_import)'
-        replace: '(__import (__source @$M) $$$NAMES->__name)'
-
+        replace: '(__import (__source @$M|to_rel(".")) $$$NAMES->__name)'
 
       # from X import *
       - match: '(import_from_statement module_name: $M $W:wildcard_import)'
-        replace: '(__import (__source @$M) (__name @$W))'
+        replace: '(__import (__source @$M|to_rel(".")) (__name @$W))'
 
       # import X
       - match: '(import_statement name: $N:dotted_name)'
-        replace: '(__import (__source @$N) (__name @$N))'
+        replace: '(__import (__source @$N|to_rel(".")) (__name @$N))'
 
       # import X as Y — rekind capture to __name, keeping __alias subtree
       - match: '(import_statement name: $N:aliased_import)'
-        replace: '(__import (__source @$N) @$N->__name)'
+        replace: '(__import (__source @$N|to_rel(".")) @$N->__name)'
 
       # from __future__ import X
       - match: '(future_import_statement $$$NAMES:dotted_name)'

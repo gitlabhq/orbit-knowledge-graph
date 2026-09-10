@@ -9,27 +9,55 @@ pub enum Tf {
     Strip(Box<str>),
     Field(u16),
     Const(&'static str),
-    /// Navigate to the first child of this kind and read its sym.
     Child(u16),
-    /// Navigate to a field, then to a child of this kind, and read its sym.
     FieldChild(u16, u16),
-    /// Strip all leading occurrences of a character.
     StripLeading(char),
-    /// Take the last segment after splitting by separator.
     SplitLast(Box<str>),
-    /// Chain two transforms: apply first, then second to the result string.
-    Then(Box<Tf>, Box<Tf>),
+    Replace(Box<str>, Box<str>),
+    StripSuffix(Box<str>),
+    Prepend(Box<str>),
+    ToRel(char),
+    Lowercase,
+    Pipeline(Vec<Tf>),
 }
 
 impl Tf {
+    fn apply_to_str(&self, s: &str) -> String {
+        match self {
+            Tf::Id => s.to_string(),
+            Tf::Strip(p) => s.strip_prefix(&**p).unwrap_or(s).to_string(),
+            Tf::StripSuffix(p) => s.strip_suffix(&**p).unwrap_or(s).to_string(),
+            Tf::StripLeading(ch) => s.trim_start_matches(*ch).to_string(),
+            Tf::SplitLast(sep) => s.rsplit_once(&**sep).map_or(s, |(_, r)| r).to_string(),
+            Tf::Replace(from, to) => s.replace(&**from, &**to),
+            Tf::Prepend(p) => format!("{p}{s}"),
+            Tf::Lowercase => s.to_lowercase(),
+            Tf::ToRel(ch) => {
+                let count = s.chars().take_while(|c| c == ch).count();
+                let rest = s[count..].replace(*ch, "/");
+                match count {
+                    0 => rest,
+                    1 => format!("./{rest}"),
+                    n => {
+                        let prefix = "../".repeat(n - 1);
+                        format!("{prefix}{rest}")
+                    }
+                }
+            }
+            Tf::Pipeline(steps) => {
+                let mut result = s.to_string();
+                for step in steps {
+                    result = step.apply_to_str(&result);
+                }
+                result
+            }
+            _ => s.to_string(),
+        }
+    }
+
     fn apply_sym(&self, t: &Tree, lang: &mut Lang, i: u32) -> u32 {
         match self {
             Tf::Id => t.sym(i),
-            Tf::Strip(p) => {
-                let s = lang.syms.resolve(t.sym(i)).to_string();
-                let stripped = s.strip_prefix(&**p).unwrap_or(&s);
-                lang.syms.get(stripped)
-            }
             Tf::Field(f) => t.child_by_field(i, *f).map_or(t.sym(i), |c| t.sym(c)),
             Tf::Const(s) => lang.syms.get(s),
             Tf::Child(k) => t
@@ -40,40 +68,14 @@ impl Tf {
                 .child_by_field(i, *f)
                 .and_then(|n| t.children(n).find(|&c| t.kind(c) == *k))
                 .map_or(0, |c| t.sym(c)),
-            Tf::StripLeading(ch) => {
-                let s = lang.syms.resolve(t.sym(i)).to_string();
-                let stripped = s.trim_start_matches(*ch);
-                lang.syms.get(stripped)
-            }
-            Tf::SplitLast(sep) => {
-                let s = lang.syms.resolve(t.sym(i)).to_string();
-                let last = s.rsplit_once(&**sep).map_or(&*s, |(_, r)| r);
-                lang.syms.get(last)
-            }
-            Tf::Then(first, second) => {
-                let mid = first.apply_sym(t, lang, i);
-                if mid == 0 {
+            _ => {
+                let sym = t.sym(i);
+                if sym == 0 {
                     return 0;
                 }
-                // Create a temporary node-like lookup: we need to apply
-                // `second` to the result string. Since second operates on a
-                // node, and we have a sym, we handle the string-only variants.
-                let s = lang.syms.resolve(mid).to_string();
-                match second.as_ref() {
-                    Tf::StripLeading(ch) => {
-                        let stripped = s.trim_start_matches(*ch);
-                        lang.syms.get(stripped)
-                    }
-                    Tf::SplitLast(sep) => {
-                        let last = s.rsplit_once(&**sep).map_or(&*s, |(_, r)| r);
-                        lang.syms.get(last)
-                    }
-                    Tf::Strip(p) => {
-                        let stripped = s.strip_prefix(&**p).unwrap_or(&s);
-                        lang.syms.get(stripped)
-                    }
-                    _ => mid,
-                }
+                let s = lang.syms.resolve(sym).to_string();
+                let result = self.apply_to_str(&s);
+                lang.syms.get(&result)
             }
         }
     }
@@ -187,12 +189,37 @@ impl Rewrite {
 
 pub fn tokenize(s: &str) -> Vec<String> {
     let (mut out, mut cur, mut in_str) = (Vec::new(), String::new(), false);
+    let mut pipe_depth: u32 = 0;
     for ch in s.chars() {
         if in_str {
             cur.push(ch);
             if ch == '"' {
                 in_str = false;
+                if pipe_depth > 0 {
+                    continue;
+                }
                 out.push(std::mem::take(&mut cur));
+            }
+            continue;
+        }
+        if pipe_depth > 0 {
+            match ch {
+                '"' => {
+                    in_str = true;
+                    cur.push(ch);
+                }
+                '(' => {
+                    pipe_depth += 1;
+                    cur.push(ch);
+                }
+                ')' => {
+                    pipe_depth -= 1;
+                    cur.push(ch);
+                }
+                c if c.is_whitespace() && pipe_depth == 0 => {
+                    unreachable!()
+                }
+                c => cur.push(c),
             }
             continue;
         }
@@ -201,7 +228,18 @@ pub fn tokenize(s: &str) -> Vec<String> {
                 in_str = true;
                 cur.push(ch);
             }
-            '(' | ')' => {
+            '(' => {
+                if cur.starts_with("@$") && cur.contains('|') {
+                    pipe_depth = 1;
+                    cur.push(ch);
+                } else {
+                    if !cur.is_empty() {
+                        out.push(std::mem::take(&mut cur));
+                    }
+                    out.push(ch.to_string());
+                }
+            }
+            ')' => {
                 if !cur.is_empty() {
                     out.push(std::mem::take(&mut cur));
                 }
@@ -229,12 +267,117 @@ fn parse(c: &mut Ctx, src: &str) -> Pat {
     pat
 }
 
-fn parse_tf(c: &mut Ctx, tf: &str) -> Tf {
-    match tf.split_once('=') {
-        Some(("strip", p)) => Tf::Strip(p.into()),
-        Some(("field", f)) => Tf::Field(c.field(f)),
-        _ => panic!("unknown transform {tf}"),
+/// Split on `|` at top level (not inside parens or quotes).
+fn split_pipes(s: &str) -> Vec<&str> {
+    let mut result = Vec::new();
+    let mut start = 0;
+    let mut depth = 0u32;
+    let mut in_str = false;
+    for (i, ch) in s.char_indices() {
+        if in_str {
+            if ch == '"' {
+                in_str = false;
+            }
+            continue;
+        }
+        match ch {
+            '"' => in_str = true,
+            '(' => depth += 1,
+            ')' if depth > 0 => depth -= 1,
+            '|' if depth == 0 => {
+                result.push(&s[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
     }
+    result.push(&s[start..]);
+    result
+}
+
+/// Parse quoted args from a function-call transform like `replace(".","/")`.
+fn parse_tf_args(s: &str) -> Vec<&str> {
+    let inner = s.trim_start_matches('(').trim_end_matches(')');
+    let mut args = Vec::new();
+    let mut in_str = false;
+    let mut start = 0;
+    let mut has_content = false;
+    for (i, ch) in inner.char_indices() {
+        match ch {
+            '"' => {
+                if !in_str {
+                    in_str = true;
+                    start = i + 1;
+                } else {
+                    in_str = false;
+                    args.push(&inner[start..i]);
+                    has_content = true;
+                }
+            }
+            ',' if !in_str => {}
+            _ if !in_str && !has_content => start = i,
+            _ => {}
+        }
+    }
+    if !has_content && !inner.is_empty() {
+        args.push(inner.trim());
+    }
+    args
+}
+
+pub fn parse_single_tf(c: &mut Ctx, tf: &str) -> Tf {
+    if let Some(paren_pos) = tf.find('(') {
+        let name = &tf[..paren_pos];
+        let args = parse_tf_args(&tf[paren_pos..]);
+        match name {
+            "replace" => {
+                assert_eq!(args.len(), 2, "replace needs 2 args: replace(\"from\",\"to\")");
+                Tf::Replace(args[0].into(), args[1].into())
+            }
+            "strip_prefix" => {
+                assert_eq!(args.len(), 1, "strip_prefix needs 1 arg");
+                Tf::Strip(args[0].into())
+            }
+            "strip_suffix" => {
+                assert_eq!(args.len(), 1, "strip_suffix needs 1 arg");
+                Tf::StripSuffix(args[0].into())
+            }
+            "prepend" => {
+                assert_eq!(args.len(), 1, "prepend needs 1 arg");
+                Tf::Prepend(args[0].into())
+            }
+            "to_rel" => {
+                assert_eq!(args.len(), 1, "to_rel needs 1 char arg");
+                let ch = args[0].chars().next().expect("to_rel arg must be a char");
+                Tf::ToRel(ch)
+            }
+            "regex" => {
+                assert_eq!(args.len(), 2, "regex needs 2 args: regex(\"pat\",\"repl\")");
+                todo!("regex transform not yet implemented")
+            }
+            _ => panic!("unknown transform: {name}"),
+        }
+    } else {
+        match tf {
+            "lowercase" => Tf::Lowercase,
+            _ => {
+                // Legacy syntax: strip=prefix, field=name
+                match tf.split_once('=') {
+                    Some(("strip", p)) => Tf::Strip(p.into()),
+                    Some(("field", f)) => Tf::Field(c.field(f)),
+                    _ => panic!("unknown transform: {tf}"),
+                }
+            }
+        }
+    }
+}
+
+pub fn parse_tf_chain(c: &mut Ctx, tf_str: &str) -> Tf {
+    let parts = split_pipes(tf_str);
+    if parts.len() == 1 {
+        return parse_single_tf(c, parts[0]);
+    }
+    Tf::Pipeline(parts.iter().map(|p| parse_single_tf(c, p)).collect())
 }
 
 fn item(c: &mut Ctx, toks: &[String], pos: &mut usize, field: u16) -> Pat {
@@ -255,13 +398,21 @@ fn item(c: &mut Ctx, toks: &[String], pos: &mut usize, field: u16) -> Pat {
                 text = Text::Lit(c.lang.syms.get(&lit[..lit.len() - 1]));
             } else if let Some(rest) = t.strip_prefix("@$") {
                 if rest.contains("->") || rest.contains("=>") {
-                    // @$N->__name — subtree copy with rekind, parse as a kid
                     kids.push(item(c, toks, pos, 0));
                 } else {
                     *pos += 1;
-                    let (name, tf) = match rest.split_once('|') {
-                        Some((n, tf)) => (n, parse_tf(c, tf)),
-                        None => (rest, Tf::Id),
+                    let parts = split_pipes(rest);
+                    let name = parts[0];
+                    let tf = if parts.len() > 1 {
+                        let tfs: Vec<Tf> =
+                            parts[1..].iter().map(|p| parse_single_tf(c, p)).collect();
+                        if tfs.len() == 1 {
+                            tfs.into_iter().next().unwrap()
+                        } else {
+                            Tf::Pipeline(tfs)
+                        }
+                    } else {
+                        Tf::Id
                     };
                     text = Text::From(c.slot(name), tf);
                 }
