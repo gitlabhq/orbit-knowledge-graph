@@ -207,6 +207,13 @@ impl GitalyProxyChannels {
             .await
     }
 
+    /// Stops retaining `channel` when it is still the current channel for its
+    /// project. Conditional invalidation prevents an eviction callback for an
+    /// older channel from dropping a replacement that has already rotated in.
+    pub fn invalidate(&self, channel: &Arc<GitalyProxyChannel>) {
+        self.slot(channel.project_id()).invalidate(channel);
+    }
+
     /// Runs `rpc` on the project's channel and, if the proxy rejects the
     /// stream as stale (`session_expired` / `shutting_down`), rotates and
     /// runs it once more on a fresh channel.

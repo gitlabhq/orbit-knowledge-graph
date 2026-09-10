@@ -305,6 +305,14 @@ Required for code indexing (repository archive download) and authorization.
 | `gitlab.jwt.signing_key` | `GKG_GITLAB__JWT__SIGNING_KEY` | None | JWT signing key (for creating tokens) |
 | `gitlab.jwt.verifying_key` | `GKG_GITLAB__JWT__VERIFYING_KEY` | (required) | JWT verification key |
 | `gitlab.resolve_host` | `GKG_GITLAB__RESOLVE_HOST` | None | Override DNS resolution for GitLab |
+| `gitlab.gitaly_transport` | `GKG_GITLAB__GITALY_TRANSPORT` | `rails_http` | Repository transport: `rails_http`, `workhorse_ws`, or `workhorse_ws_with_fallback` |
+| `gitlab.gitaly_proxy.stream_retry_max_attempts` | `GKG_GITLAB__GITALY_PROXY__STREAM_RETRY_MAX_ATTEMPTS` | `3` | Indexer archive stream attempts |
+| `gitlab.gitaly_proxy.webserver_channel_cache_capacity` | `GKG_GITLAB__GITALY_PROXY__WEBSERVER_CHANNEL_CACHE_CAPACITY` | `32` | Maximum project channels retained by one webserver |
+| `gitlab.gitaly_proxy.webserver_max_sessions` | `GKG_GITLAB__GITALY_PROXY__WEBSERVER_MAX_SESSIONS` | `64` | Hard per-webserver proxy session admission limit |
+| `gitlab.gitaly_proxy.webserver_max_inflight_streams` | `GKG_GITLAB__GITALY_PROXY__WEBSERVER_MAX_INFLIGHT_STREAMS` | `64` | Hard global in-flight blob stream limit per webserver |
+| `gitlab.gitaly_proxy.webserver_max_inflight_streams_per_channel` | `GKG_GITLAB__GITALY_PROXY__WEBSERVER_MAX_INFLIGHT_STREAMS_PER_CHANNEL` | `16` | Hard in-flight blob stream limit per project channel |
+| `gitlab.gitaly_proxy.webserver_channel_idle_timeout_secs` | `GKG_GITLAB__GITALY_PROXY__WEBSERVER_CHANNEL_IDLE_TIMEOUT_SECS` | `60` | Idle duration before a cached project channel is evicted |
+| `gitlab.gitaly_proxy.webserver_negative_cache_ttl_secs` | `GKG_GITLAB__GITALY_PROXY__WEBSERVER_NEGATIVE_CACHE_TTL_SECS` | `30` | Cooldown after proxy preauthorization returns 404 |
 
 ## Observability
 

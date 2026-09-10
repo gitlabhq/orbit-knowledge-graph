@@ -43,6 +43,7 @@ reqwest = { workspace = true }
 rustls = { workspace = true }
 query-engine = { path = "../query-engine" }
 gitlab-client = { workspace = true }
+gitaly-protos = { path = "../gitaly-protos" }
 jsonschema = { workspace = true }
 jsonwebtoken = { workspace = true }
 labkit = { workspace = true, features = ["http", "grpc", "otel", "prometheus"] }
@@ -74,6 +75,7 @@ tonic-prost-build = { workspace = true }
 
 [dev-dependencies]
 orbit-analytics = { path = "../orbit-analytics", features = ["testkit"] }
+gitlab-client = { workspace = true, features = ["testkit"] }
 tokio = { workspace = true }
 tracing-subscriber = { workspace = true }
 

@@ -161,6 +161,7 @@ struct Observed {
     rpcs: AtomicUsize,
     requests: Mutex<Vec<Request>>,
     archive_requests: Mutex<Vec<GetArchiveRequest>>,
+    blob_requests: Mutex<Vec<ListBlobsRequest>>,
     client_closes: Mutex<Vec<Option<CloseFrame>>>,
     /// SNI presented on each TLS connection, in accept order.
     sni: Mutex<Vec<Option<String>>>,
@@ -254,12 +255,20 @@ impl FakeWorkhorse {
         self.observed.upgrades.load(Ordering::SeqCst)
     }
 
+    pub fn preauth_requests(&self) -> usize {
+        self.observed.requests.lock().unwrap().len()
+    }
+
     pub fn rpcs(&self) -> usize {
         self.observed.rpcs.load(Ordering::SeqCst)
     }
 
     pub fn archive_requests(&self) -> Vec<GetArchiveRequest> {
         self.observed.archive_requests.lock().unwrap().clone()
+    }
+
+    pub fn blob_requests(&self) -> Vec<ListBlobsRequest> {
+        self.observed.blob_requests.lock().unwrap().clone()
     }
 }
 
@@ -423,8 +432,13 @@ impl Service<http::Request<tonic::body::Body>> for StubBlobService {
         let conn = self.conn;
         let plan = (self.director)(conn);
         let observed = Arc::clone(&self.observed);
-        let handler = service_fn(move |_request: tonic::Request<ListBlobsRequest>| {
+        let handler = service_fn(move |request: tonic::Request<ListBlobsRequest>| {
             observed.rpcs.fetch_add(1, Ordering::SeqCst);
+            observed
+                .blob_requests
+                .lock()
+                .unwrap()
+                .push(request.into_inner());
             let plan = plan.clone();
             async move {
                 match plan {
@@ -537,6 +551,8 @@ impl Service<http::Request<tonic::body::Body>> for StubRepositoryService {
 fn blob_response(conn: usize) -> ListBlobsResponse {
     ListBlobsResponse {
         blobs: vec![list_blobs_response::Blob {
+            oid: format!("oid-{conn}"),
+            data: format!("content-{conn}").into_bytes(),
             path: format!("conn-{conn}").into_bytes(),
             ..Default::default()
         }],

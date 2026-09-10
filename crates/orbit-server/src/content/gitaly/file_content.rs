@@ -3,13 +3,15 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use gitlab_client::GitlabClient;
-use indexer::modules::code::repository::blob_stream::BlobStream;
+use indexer::modules::code::repository::blob_stream::{BlobStream, ResolvedBlob};
+use orbit_server_config::{GitalyProxyConfig, GitalyTransport};
 use orbit_utils::arrow::ColumnValue;
 use query_engine::pipeline::PipelineError;
 use tracing::{debug, warn};
 
 use query_engine::shared::content::{ColumnResolver, PropertyRow, ResolverContext};
 
+use crate::content::gitaly::proxy::ProxyBlobService;
 use crate::content::metrics;
 
 /// `revision` is the git ref used in `<revision>:<path>` for `list_blobs`;
@@ -25,16 +27,67 @@ pub struct GitalyBlobRequest {
 
 type FileKey = (i64, String, String); // (project_id, revision, file_path)
 
+#[async_trait]
+trait RailsBlobFetcher: Send + Sync {
+    async fn fetch(
+        &self,
+        project_id: i64,
+        revisions: &[String],
+    ) -> Result<Vec<ResolvedBlob>, String>;
+}
+
+struct GitlabRailsBlobFetcher(Arc<GitlabClient>);
+
+#[async_trait]
+impl RailsBlobFetcher for GitlabRailsBlobFetcher {
+    async fn fetch(
+        &self,
+        project_id: i64,
+        revisions: &[String],
+    ) -> Result<Vec<ResolvedBlob>, String> {
+        let stream = self
+            .0
+            .list_blobs(project_id, revisions)
+            .await
+            .map_err(|error| error.to_string())?;
+        let (blobs, error) = BlobStream::new(stream).drain().await;
+        match error {
+            Some(error) => Err(error.to_string()),
+            None => Ok(blobs),
+        }
+    }
+}
+
 /// Requests are grouped by `project_id` and deduplicated by file identity.
 /// Multiple definitions in the same file share the fetched content and
 /// only receive their byte-range slice.
 pub struct GitalyContentService {
-    client: Arc<GitlabClient>,
+    rails: Arc<dyn RailsBlobFetcher>,
+    proxy: Option<Arc<ProxyBlobService>>,
+    transport: GitalyTransport,
 }
 
 impl GitalyContentService {
     pub fn new(client: Arc<GitlabClient>) -> Self {
-        Self { client }
+        Self::with_transport(
+            client,
+            GitalyTransport::RailsHttp,
+            &GitalyProxyConfig::default(),
+        )
+    }
+
+    pub fn with_transport(
+        client: Arc<GitlabClient>,
+        transport: GitalyTransport,
+        proxy_config: &GitalyProxyConfig,
+    ) -> Self {
+        let proxy = (transport != GitalyTransport::RailsHttp)
+            .then(|| Arc::new(ProxyBlobService::new(Arc::clone(&client), proxy_config)));
+        Self {
+            rails: Arc::new(GitlabRailsBlobFetcher(client)),
+            proxy,
+            transport,
+        }
     }
 }
 
@@ -71,7 +124,9 @@ impl ColumnResolver for GitalyContentService {
         }
 
         let futures = by_project.iter().map(|(&project_id, keys)| {
-            let client = Arc::clone(&self.client);
+            let rails = Arc::clone(&self.rails);
+            let proxy = self.proxy.clone();
+            let transport = self.transport;
             let revisions: Vec<String> = keys
                 .iter()
                 .map(|(_, revision, path)| format!("{revision}:{path}"))
@@ -79,40 +134,28 @@ impl ColumnResolver for GitalyContentService {
             let keys = keys.clone();
             async move {
                 metrics::record_gitaly_call();
-                let stream = match client.list_blobs(project_id, &revisions).await {
-                    Ok(s) => s,
-                    Err(e) => {
+                let blobs = fetch_project_blobs(
+                    &rails,
+                    proxy.as_deref(),
+                    transport,
+                    project_id,
+                    &revisions,
+                )
+                .await;
+
+                let blobs = match blobs {
+                    Ok(blobs) => blobs,
+                    Err(error) => {
                         warn!(
                             project_id,
-                            error = %e,
+                            %error,
                             "list_blobs failed, content will be missing for this project"
                         );
                         return (vec![], true);
                     }
                 };
-
-                let (blobs, err) = BlobStream::new(stream).drain().await;
-
-                let had_error = err.is_some();
-                if let Some(e) = err {
-                    warn!(project_id, error = %e, "blob stream decode error");
-                }
-
-                let results = blobs
-                    .into_iter()
-                    .zip(keys.iter())
-                    .filter_map(|(blob, key)| match String::from_utf8(blob.data) {
-                        Ok(text) => {
-                            metrics::record_blob_bytes(text.len() as u64);
-                            Some((key.clone(), text))
-                        }
-                        Err(_) => {
-                            debug!(project_id, path = %key.2, "skipping binary blob");
-                            None
-                        }
-                    })
-                    .collect::<Vec<_>>();
-                (results, had_error)
+                let results = blobs_to_content(project_id, &keys, blobs);
+                (results, false)
             }
         });
 
@@ -139,6 +182,60 @@ impl ColumnResolver for GitalyContentService {
             })
             .collect())
     }
+}
+
+async fn fetch_project_blobs(
+    rails: &Arc<dyn RailsBlobFetcher>,
+    proxy: Option<&ProxyBlobService>,
+    transport: GitalyTransport,
+    project_id: i64,
+    revisions: &[String],
+) -> Result<Vec<ResolvedBlob>, String> {
+    if transport == GitalyTransport::RailsHttp {
+        let result = rails.fetch(project_id, revisions).await;
+        metrics::record_gitaly_transport("rails_http", if result.is_ok() { "ok" } else { "error" });
+        return result;
+    }
+
+    let proxy = proxy.expect("proxy service exists for WebSocket transports");
+    match proxy.fetch(project_id, revisions).await {
+        Ok(blobs) => {
+            metrics::record_gitaly_transport("workhorse_ws", "ok");
+            Ok(blobs)
+        }
+        Err(error)
+            if transport == GitalyTransport::WorkhorseWsWithFallback
+                && error.allows_rails_fallback() =>
+        {
+            metrics::record_gitaly_transport("workhorse_ws", "fallback");
+            rails.fetch(project_id, revisions).await
+        }
+        Err(error) => {
+            metrics::record_gitaly_transport("workhorse_ws", error.outcome());
+            Err(error.to_string())
+        }
+    }
+}
+
+fn blobs_to_content(
+    project_id: i64,
+    keys: &[FileKey],
+    blobs: Vec<ResolvedBlob>,
+) -> Vec<(FileKey, String)> {
+    blobs
+        .into_iter()
+        .zip(keys.iter())
+        .filter_map(|(blob, key)| match String::from_utf8(blob.data) {
+            Ok(text) => {
+                metrics::record_blob_bytes(text.len() as u64);
+                Some((key.clone(), text))
+            }
+            Err(_) => {
+                debug!(project_id, path = %key.2, "skipping binary blob");
+                None
+            }
+        })
+        .collect()
 }
 
 impl GitalyContentService {
@@ -199,7 +296,36 @@ fn slice_content(content: &str, start_byte: Option<i64>, end_byte: Option<i64>) 
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
+
+    use gitlab_client::test_support::{FakeWorkhorse, Preauth, serve};
+
     use super::*;
+
+    struct MockRails {
+        calls: AtomicUsize,
+    }
+
+    #[async_trait]
+    impl RailsBlobFetcher for MockRails {
+        async fn fetch(
+            &self,
+            _project_id: i64,
+            _revisions: &[String],
+        ) -> Result<Vec<ResolvedBlob>, String> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Ok(Vec::new())
+        }
+    }
+
+    async fn wait_for_rpcs(fake: &FakeWorkhorse, expected: usize) {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        while fake.rpcs() < expected {
+            assert!(tokio::time::Instant::now() < deadline);
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }
 
     #[test]
     fn build_request_from_file_props() {
@@ -291,7 +417,64 @@ mod tests {
         assert_eq!(slice_content("é", Some(0), Some(1)), "");
     }
 
-    // resolve_batch is covered in the integration-tests crate (needs a live GitlabClient).
+    #[tokio::test]
+    async fn stream_saturation_falls_back_to_rails() {
+        let fake = FakeWorkhorse::start(Preauth::ok("600"), serve(1, 500)).await;
+        let config = GitalyProxyConfig {
+            webserver_max_inflight_streams: 1,
+            ..Default::default()
+        };
+        let proxy = Arc::new(ProxyBlobService::new(Arc::new(fake.client()), &config));
+        let active = {
+            let proxy = Arc::clone(&proxy);
+            tokio::spawn(async move { proxy.fetch(42, &["HEAD:a".to_owned()]).await })
+        };
+        wait_for_rpcs(&fake, 1).await;
+        let concrete_rails = Arc::new(MockRails {
+            calls: AtomicUsize::new(0),
+        });
+        let rails: Arc<dyn RailsBlobFetcher> = concrete_rails.clone();
+
+        fetch_project_blobs(
+            &rails,
+            Some(&proxy),
+            GitalyTransport::WorkhorseWsWithFallback,
+            42,
+            &["HEAD:b".to_owned()],
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(concrete_rails.calls.load(Ordering::SeqCst), 1);
+        active.await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn flag_off_uses_negative_cache_before_falling_back() {
+        let fake =
+            FakeWorkhorse::start(Preauth::reject(reqwest::StatusCode::NOT_FOUND), serve(1, 0))
+                .await;
+        let proxy = ProxyBlobService::new(Arc::new(fake.client()), &GitalyProxyConfig::default());
+        let concrete_rails = Arc::new(MockRails {
+            calls: AtomicUsize::new(0),
+        });
+        let rails: Arc<dyn RailsBlobFetcher> = concrete_rails.clone();
+
+        for _ in 0..2 {
+            fetch_project_blobs(
+                &rails,
+                Some(&proxy),
+                GitalyTransport::WorkhorseWsWithFallback,
+                42,
+                &["HEAD:a".to_owned()],
+            )
+            .await
+            .unwrap();
+        }
+
+        assert_eq!(fake.preauth_requests(), 1);
+        assert_eq!(concrete_rails.calls.load(Ordering::SeqCst), 2);
+    }
 
     fn definition_props(start: i64, end: i64) -> HashMap<String, ColumnValue> {
         let mut props = HashMap::new();

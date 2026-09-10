@@ -8376,6 +8376,7 @@ dependencies = [
  "clickhouse-client",
  "compiler",
  "futures",
+ "gitaly-protos",
  "gitlab-client",
  "health-check",
  "indexer",

@@ -1,10 +1,12 @@
 pub mod file_content;
 pub mod mr_diff;
+mod proxy;
 
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use gitlab_client::GitlabClient;
+use orbit_server_config::{GitalyProxyConfig, GitalyTransport};
 use orbit_utils::arrow::ColumnValue;
 use query_engine::pipeline::PipelineError;
 use query_engine::shared::content::{ColumnResolver, PropertyRow, ResolverContext};
@@ -15,9 +17,17 @@ pub struct GitalyService {
 }
 
 impl GitalyService {
-    pub fn new(client: Arc<GitlabClient>) -> Self {
+    pub fn new(
+        client: Arc<GitlabClient>,
+        transport: GitalyTransport,
+        proxy_config: &GitalyProxyConfig,
+    ) -> Self {
         Self {
-            file_content: file_content::GitalyContentService::new(client.clone()),
+            file_content: file_content::GitalyContentService::with_transport(
+                client.clone(),
+                transport,
+                proxy_config,
+            ),
             mr_diff: mr_diff::MergeRequestDiffContentService::new(client),
         }
     }

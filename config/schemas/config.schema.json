@@ -114,7 +114,13 @@
       "default": {
         "base_url": null,
         "gitaly_proxy": {
-          "stream_retry_max_attempts": 3
+          "stream_retry_max_attempts": 3,
+          "webserver_channel_cache_capacity": 32,
+          "webserver_channel_idle_timeout_secs": 60,
+          "webserver_max_inflight_streams": 64,
+          "webserver_max_inflight_streams_per_channel": 16,
+          "webserver_max_sessions": 64,
+          "webserver_negative_cache_ttl_secs": 30
         },
         "gitaly_transport": "rails_http",
         "jwt": {
@@ -812,6 +818,42 @@
           "format": "uint",
           "default": 3,
           "minimum": 0
+        },
+        "webserver_channel_cache_capacity": {
+          "type": "integer",
+          "format": "uint64",
+          "default": 32,
+          "minimum": 0
+        },
+        "webserver_channel_idle_timeout_secs": {
+          "type": "integer",
+          "format": "uint64",
+          "default": 60,
+          "minimum": 0
+        },
+        "webserver_max_inflight_streams": {
+          "type": "integer",
+          "format": "uint",
+          "default": 64,
+          "minimum": 0
+        },
+        "webserver_max_inflight_streams_per_channel": {
+          "type": "integer",
+          "format": "uint",
+          "default": 16,
+          "minimum": 0
+        },
+        "webserver_max_sessions": {
+          "type": "integer",
+          "format": "uint",
+          "default": 64,
+          "minimum": 0
+        },
+        "webserver_negative_cache_ttl_secs": {
+          "type": "integer",
+          "format": "uint64",
+          "default": 30,
+          "minimum": 0
         }
       },
       "additionalProperties": false
@@ -837,7 +879,13 @@
         "gitaly_proxy": {
           "$ref": "#/$defs/GitalyProxyConfig",
           "default": {
-            "stream_retry_max_attempts": 3
+            "stream_retry_max_attempts": 3,
+            "webserver_channel_cache_capacity": 32,
+            "webserver_channel_idle_timeout_secs": 60,
+            "webserver_max_inflight_streams": 64,
+            "webserver_max_inflight_streams_per_channel": 16,
+            "webserver_max_sessions": 64,
+            "webserver_negative_cache_ttl_secs": 30
           }
         },
         "gitaly_transport": {

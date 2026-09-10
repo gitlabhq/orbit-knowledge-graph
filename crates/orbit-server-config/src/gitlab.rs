@@ -7,6 +7,30 @@ fn default_stream_retry_max_attempts() -> usize {
     3
 }
 
+fn default_webserver_channel_cache_capacity() -> u64 {
+    32
+}
+
+fn default_webserver_max_sessions() -> usize {
+    64
+}
+
+fn default_webserver_max_inflight_streams() -> usize {
+    64
+}
+
+fn default_webserver_max_inflight_streams_per_channel() -> usize {
+    16
+}
+
+fn default_webserver_channel_idle_timeout_secs() -> u64 {
+    60
+}
+
+fn default_webserver_negative_cache_ttl_secs() -> u64 {
+    30
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum GitalyTransport {
@@ -21,12 +45,31 @@ pub enum GitalyTransport {
 pub struct GitalyProxyConfig {
     #[serde(default = "default_stream_retry_max_attempts")]
     pub stream_retry_max_attempts: usize,
+    #[serde(default = "default_webserver_channel_cache_capacity")]
+    pub webserver_channel_cache_capacity: u64,
+    #[serde(default = "default_webserver_max_sessions")]
+    pub webserver_max_sessions: usize,
+    #[serde(default = "default_webserver_max_inflight_streams")]
+    pub webserver_max_inflight_streams: usize,
+    #[serde(default = "default_webserver_max_inflight_streams_per_channel")]
+    pub webserver_max_inflight_streams_per_channel: usize,
+    #[serde(default = "default_webserver_channel_idle_timeout_secs")]
+    pub webserver_channel_idle_timeout_secs: u64,
+    #[serde(default = "default_webserver_negative_cache_ttl_secs")]
+    pub webserver_negative_cache_ttl_secs: u64,
 }
 
 impl Default for GitalyProxyConfig {
     fn default() -> Self {
         Self {
             stream_retry_max_attempts: default_stream_retry_max_attempts(),
+            webserver_channel_cache_capacity: default_webserver_channel_cache_capacity(),
+            webserver_max_sessions: default_webserver_max_sessions(),
+            webserver_max_inflight_streams: default_webserver_max_inflight_streams(),
+            webserver_max_inflight_streams_per_channel:
+                default_webserver_max_inflight_streams_per_channel(),
+            webserver_channel_idle_timeout_secs: default_webserver_channel_idle_timeout_secs(),
+            webserver_negative_cache_ttl_secs: default_webserver_negative_cache_ttl_secs(),
         }
     }
 }
@@ -93,6 +136,17 @@ mod tests {
 
         assert_eq!(config.gitaly_transport, GitalyTransport::RailsHttp);
         assert_eq!(config.gitaly_proxy.stream_retry_max_attempts, 3);
+        assert_eq!(config.gitaly_proxy.webserver_channel_cache_capacity, 32);
+        assert_eq!(config.gitaly_proxy.webserver_max_sessions, 64);
+        assert_eq!(config.gitaly_proxy.webserver_max_inflight_streams, 64);
+        assert_eq!(
+            config
+                .gitaly_proxy
+                .webserver_max_inflight_streams_per_channel,
+            16
+        );
+        assert_eq!(config.gitaly_proxy.webserver_channel_idle_timeout_secs, 60);
+        assert_eq!(config.gitaly_proxy.webserver_negative_cache_ttl_secs, 30);
     }
 
     #[test]
@@ -113,6 +167,7 @@ mod tests {
 
             assert_eq!(config.gitaly_transport, expected);
             assert_eq!(config.gitaly_proxy.stream_retry_max_attempts, 7);
+            assert_eq!(config.gitaly_proxy.webserver_channel_cache_capacity, 32);
         }
     }
 }

@@ -170,6 +170,18 @@
       "domain": "server.content"
     },
     {
+      "otel_name": "gkg.content.gitaly.transport.calls",
+      "prom_name": "gkg_content_gitaly_transport_calls_total",
+      "description": "Logical blob calls by selected transport and final outcome; fallback records the proxy attempt.",
+      "kind": "counter",
+      "labels": [
+        "transport",
+        "outcome"
+      ],
+      "stability": "stable",
+      "domain": "server.content"
+    },
+    {
       "otel_name": "gkg.content.mr_diff.calls",
       "prom_name": "gkg_content_mr_diff_calls_total",
       "description": "Total HTTP calls issued to the merge_request_diffs internal API.",

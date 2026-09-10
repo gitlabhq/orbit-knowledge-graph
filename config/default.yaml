@@ -59,6 +59,12 @@ gitlab:
   gitaly_transport: rails_http
   gitaly_proxy:
     stream_retry_max_attempts: 3
+    webserver_channel_cache_capacity: 32
+    webserver_max_sessions: 64
+    webserver_max_inflight_streams: 64
+    webserver_max_inflight_streams_per_channel: 16
+    webserver_channel_idle_timeout_secs: 60
+    webserver_negative_cache_ttl_secs: 30
   # jwt:
   #   signing_key: ""
   #   verifying_key: ""

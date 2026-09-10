@@ -92,6 +92,12 @@ impl GitlabClient {
         self.gitaly_proxy.get(project_id).await
     }
 
+    /// Stops retaining a specific proxy channel after a cache eviction or RPC
+    /// failure. A newer channel for the same project is not affected.
+    pub fn invalidate_gitaly_channel(&self, channel: &Arc<GitalyProxyChannel>) {
+        self.gitaly_proxy.invalidate(channel);
+    }
+
     /// Runs `rpc` on the project's proxy channel, retrying exactly once on a
     /// fresh channel if the proxy rejected the stream as stale. See
     /// [`GitalyProxyChannels::with_channel`] for what is and is not retried.

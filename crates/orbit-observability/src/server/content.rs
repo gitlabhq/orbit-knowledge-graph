@@ -4,6 +4,7 @@ use crate::buckets::{BATCH_SIZE, BLOB_BYTES, LATENCY_FAST};
 pub mod labels {
     pub const OUTCOME: &str = "outcome";
     pub const ENDPOINT: &str = "endpoint";
+    pub const TRANSPORT: &str = "transport";
 }
 
 const DOMAIN: &str = "server.content";
@@ -51,6 +52,14 @@ pub const GITALY_CALLS: MetricSpec = MetricSpec::counter(
     DOMAIN,
 );
 
+pub const GITALY_TRANSPORT_CALLS: MetricSpec = MetricSpec::counter(
+    "gkg.content.gitaly.transport.calls",
+    "Logical blob calls by selected transport and final outcome; fallback records the proxy attempt.",
+    None,
+    &[labels::TRANSPORT, labels::OUTCOME],
+    DOMAIN,
+);
+
 pub const MR_DIFF_CALLS: MetricSpec = MetricSpec::counter(
     "gkg.content.mr_diff.calls",
     "Total HTTP calls issued to the merge_request_diffs internal API.",
@@ -65,5 +74,6 @@ pub const CATALOG: &[&MetricSpec] = &[
     &BATCH_SIZE_METRIC,
     &BLOB_BYTES_METRIC,
     &GITALY_CALLS,
+    &GITALY_TRANSPORT_CALLS,
     &MR_DIFF_CALLS,
 ];
