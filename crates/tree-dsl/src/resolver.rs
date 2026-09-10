@@ -133,6 +133,46 @@ pub fn resolve(
                     target_fi: tfi,
                     target_path,
                 });
+            } else {
+                // No file matches the source path. Try submodule resolution:
+                // for each __name child, check if {source_path}/{name} exists
+                // as a file (handles implicit namespace packages).
+                let tree = &trees[fi];
+                for c in tree.children(i as u32) {
+                    if tree.kind(c) != k_name || tree.sym(c) == 0 {
+                        continue;
+                    }
+                    let name_str = lang.syms.resolve(tree.sym(c));
+                    let submod = format!("{target_path}/{name_str}");
+                    let sub_fi = file_index.get(&submod).copied().or_else(|| {
+                        for prefix in lookup_prefixes.iter() {
+                            let candidate = if prefix.is_empty() {
+                                submod.clone()
+                            } else {
+                                format!("{prefix}/{submod}")
+                            };
+                            if let Some(&fi) = file_index.get(&candidate) {
+                                return Some(fi);
+                            }
+                        }
+                        None
+                    });
+                    if let Some(sub_fi) = sub_fi {
+                        cross_edges.push(CrossEdge {
+                            from_file: fi,
+                            from_node: i as u32,
+                            to_file: sub_fi,
+                            to_node: 0,
+                            kind: E_IMPORTS,
+                        });
+                        reqs.push(ImportReq {
+                            fi,
+                            node: i as u32,
+                            target_fi: sub_fi,
+                            target_path: submod.clone(),
+                        });
+                    }
+                }
             }
         }
     }
@@ -255,6 +295,24 @@ pub fn resolve(
                     to_node: def_node,
                     kind: E_IMPORTS,
                 });
+            } else {
+                let target_stem =
+                    support_lang.strip_extension(lang.syms.resolve(trees[tfi].nodes[0].sym));
+                if let Some(target_dir) = index_names
+                    .iter()
+                    .find_map(|idx| target_stem.strip_suffix(&format!("/{idx}")))
+                {
+                    let submod_path = format!("{target_dir}/{name_str}");
+                    if let Some(&sub_fi) = file_index.get(&submod_path) {
+                        cross_edges.push(CrossEdge {
+                            from_file: fi,
+                            from_node: i,
+                            to_file: sub_fi,
+                            to_node: 0,
+                            kind: E_IMPORTS,
+                        });
+                    }
+                }
             }
         }
     }
@@ -267,10 +325,22 @@ pub fn resolve(
     let object_f = lang.fields.lookup("object") as u16;
 
     // Module-level import member access: import X; X.func()
+    // Also handles submodule imports: from pkg import mod; mod.func()
+    let mut module_call_edges = Vec::new();
     for req in &reqs {
         let fi = req.fi;
         let import_node = req.node;
-        let tfi = req.target_fi;
+
+        // Collect all target files for this import: the primary target
+        // plus any submodule files resolved via cross-edges.
+        let mut target_files = vec![req.target_fi];
+        for ce in &cross_edges {
+            if ce.from_file == fi && ce.from_node == import_node && ce.kind == E_IMPORTS {
+                if !target_files.contains(&ce.to_file) {
+                    target_files.push(ce.to_file);
+                }
+            }
+        }
 
         for edge in &trees[fi].edges {
             if edge.kind != E_IMPORTS {
@@ -296,16 +366,20 @@ pub fn resolve(
                         .child_by_field(cn, member_f)
                         .map(|c| trees[fi].sym(c))
                         .unwrap_or(0);
-                    if member_sym != 0
-                        && let Some(&def_node) = visible[tfi].get(&member_sym)
-                    {
-                        cross_edges.push(CrossEdge {
-                            from_file: fi,
-                            from_node: caller,
-                            to_file: tfi,
-                            to_node: def_node,
-                            kind: crate::lang::E_CALLS,
-                        });
+                    if member_sym == 0 {
+                        continue;
+                    }
+                    for &tfi in &target_files {
+                        if let Some(&def_node) = visible[tfi].get(&member_sym) {
+                            module_call_edges.push(CrossEdge {
+                                from_file: fi,
+                                from_node: caller,
+                                to_file: tfi,
+                                to_node: def_node,
+                                kind: crate::lang::E_CALLS,
+                            });
+                            break;
+                        }
                     }
                 }
             }
@@ -522,6 +596,7 @@ pub fn resolve(
         }
     }
 
+    cross_edges.extend(module_call_edges);
     cross_edges.extend(call_edges);
     cross_edges.extend(type_edges);
     ResolveResult { cross_edges }
