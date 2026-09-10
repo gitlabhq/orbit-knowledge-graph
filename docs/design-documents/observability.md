@@ -18,7 +18,7 @@ Alerting is based on SLOs and SLIs:
 - **Availability SLO**: We will adopt the Dedicated reference of ≥99.5% monthly SLO for the GKG API plane (excluding planned maintenance).
 - **Availability SLIs**: We will use error-rate and Apdex SLIs on request latency.
 
-Each service exposes a Prometheus `/metrics` endpoint. We use LabKit for instrumentation where possible.
+Each service exposes a Prometheus `/-/metrics` endpoint. We use LabKit for instrumentation where possible.
 
 **Reliability Signals:**
 
@@ -292,14 +292,14 @@ For self-managed deployments, we expose a stable integration surface so operator
 
 Interface contracts (what we provide):
 
-- **Metrics**: Each service exposes a Prometheus-compatible `/metrics` endpoint for service-level KPIs; we also expose gauges for graph database disk usage where applicable. CPU and host/container resource utilization are expected to be collected via standard exporters alongside our service metrics.
+- **Metrics**: Each service exposes a Prometheus-compatible `/-/metrics` endpoint for service-level KPIs; we also expose gauges for graph database disk usage where applicable. CPU and host/container resource utilization are expected to be collected via standard exporters alongside our service metrics.
 - **Logs**: All services emit structured JSON to `stdout`/`stderr` using the schema defined in [Logging Structure and Format](#logging-structure-and-format) (including `correlation_id`).
 - **Tracing**: Services are instrumented with OpenTelemetry, allowing operators to configure an OTLP exporter (gRPC/HTTP) to a customer-managed collector or backend.
 - **Health**: Liveness (`/live`) and readiness (`/ready`) endpoints on dedicated health ports for orchestration and local SLOs.
 
 Operator responsibilities:
 
-- Scrape `/metrics` with your Prometheus (or compatible) and manage storage, alerting, and retention.
+- Scrape `/-/metrics` with your Prometheus (or compatible) and manage storage, alerting, and retention.
 - Collect node/container resource metrics (CPU, memory, disk I/O, and usage) via standard exporters (e.g., cAdvisor, kube-state-metrics, node_exporter) and correlate with service metrics.
 - Collect and ship JSON logs (e.g., Fluentd/Vector/Filebeat) to your aggregator (e.g., Elasticsearch/Loki/Splunk) and manage parsing/retention.
 - Provide and operate an OpenTelemetry collector or tracing backend if traces are required.
@@ -309,7 +309,7 @@ Operator responsibilities:
 
 In Kubernetes, most of this is automatic:
 
-- **Metrics**: Prometheus Operator discovers and scrapes `/metrics`. Cluster exporters (cAdvisor, kube-state-metrics, node_exporter) handle CPU, memory, and disk.
+- **Metrics**: Prometheus Operator discovers and scrapes `/-/metrics`. Cluster exporters (cAdvisor, kube-state-metrics, node_exporter) handle CPU, memory, and disk.
 - **Logging**: Container logs go to `stdout`/`stderr` and get collected by the cluster's logging agent (Fluentd, Vector).
 - **Health Checks**: Kubernetes uses liveness and readiness probes to restart unhealthy pods and manage traffic during rollouts.
 
