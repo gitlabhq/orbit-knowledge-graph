@@ -408,9 +408,7 @@ REST APIまたは`glab orbit remote query`でクエリを送信する場合は�
 
 出力列名は導出されます。ノードキーはノードID（`p`）を使用し、プロパティキーは`<node>_<property>`（`mr_state`）を使用し、切り捨てキーは単位を付加します（`mr_created_at_month`）。これらの名前を`aggregation_sort`で参照してください。グループまたは集計の出力名が重複している場合は拒否されます。
 
-導出された名前を使用してください。コンシューマーが特定の列名を必要とする場合のみ、オブジェクト形式のオプション`as`でリネームしてください: `{"key": "mr.state", "as":
-"state"}`、または切り捨てを使用する場合は`{"key": "mr.created_at", "truncate": "month",
-"as": "month"}`。
+導出された名前を使用してください。コンシューマーが特定の列名を必要とする場合のみ、オブジェクト形式のオプション`as`でリネームしてください: `{"key": "mr.state", "as": "state"}`、または切り捨てを使用する場合は`{"key": "mr.created_at", "truncate": "month", "as": "month"}`。
 
 切り捨て単位は`minute`、`hour`、`day`、`week`、`month`、`quarter`、`year`で、`Date`/`DateTime`プロパティにのみ適用されます。`minute`と`hour`は、バケットのカーディナリティを制限するために`node_ids`または切り捨てプロパティへのフィルターが必要です。
 
