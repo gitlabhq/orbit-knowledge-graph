@@ -15,5 +15,5 @@ expect:
   node_count: 7
   nodes:
     User:
-      prop_present: [username]
-      prop_absent: [avatar_url]
+      filters:
+        avatar_url: { is_null: true }
