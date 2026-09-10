@@ -1,8 +1,8 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
 use anyhow::{Context, Result};
-use duckdb_client::search::kind_scope;
+use duckdb_client::{i64_column, search::kind_scope};
 
 use crate::commands::fqn::{self, Def};
 use crate::workspace;
@@ -53,22 +53,61 @@ pub(crate) fn run(target: crate::ContextArgs) -> Result<()> {
             out.push('\n');
         }
         if sources.get(&file) != Some(&ontology::migrations::sha256_hex(&content)) {
-            render_unverified(&mut out, &file, &lines)?;
+            if file_mode {
+                writeln!(
+                    out,
+                    "{file}  ranges=unverified; outline unavailable; read the file directly"
+                )?;
+            } else {
+                render_unverified(&mut out, &file, &lines)?;
+            }
             continue;
         }
         if file_mode {
             writeln!(
                 out,
-                "{file}  ({} definitions, {} lines)",
+                "{file}  (outline; {} definitions, {} lines)",
                 file_defs.len(),
                 lines.len()
             )?;
-        }
-        if target.outline {
             let members = definitions_in_file(&client, &git, &file, &[])?;
+            let imports = client.query_arrow_json(
+                "SELECT DISTINCT start_line, end_line FROM gl_imported_symbol
+                 WHERE project_id = ?1 AND commit_sha = ?2 AND file_path = ?3
+                 ORDER BY start_line, end_line DESC",
+                &[
+                    git.project_id.into(),
+                    git.commit_sha.clone().into(),
+                    file.clone().into(),
+                ],
+            )?;
+            let mut printed_until = 0;
+            for (start, end) in i64_column(&imports, "start_line")
+                .into_iter()
+                .zip(i64_column(&imports, "end_line"))
+            {
+                let (Ok(start), Ok(end)) = (usize::try_from(start), usize::try_from(end)) else {
+                    continue;
+                };
+                if start == 0
+                    || members
+                        .iter()
+                        .any(|def| def.start <= start && end <= def.end)
+                {
+                    continue;
+                }
+                if printed_until == 0 {
+                    writeln!(out, "Imports:")?;
+                }
+                write_lines(&mut out, &lines, start.max(printed_until + 1), end)?;
+                printed_until = printed_until.max(end);
+            }
+            if printed_until > 0 {
+                out.push('\n');
+            }
             render_outline(&mut out, &file_defs, &members, &lines)?;
         } else {
-            render(&mut out, &file_defs, &lines, file_mode)?;
+            render(&mut out, &file_defs, &lines)?;
         }
     }
     print!("{out}");
@@ -98,7 +137,7 @@ pub(crate) fn render_bodies(
             render_unverified(&mut out, &file, &lines)?;
             continue;
         }
-        render(&mut out, &short, &lines, false)?;
+        render(&mut out, &short, &lines)?;
         if !long.is_empty() {
             let members = definitions_in_file(client, git, &file, &[])?;
             if !short.is_empty() {
@@ -161,7 +200,11 @@ pub(crate) fn render_outline(
     members: &[Def],
     lines: &[&str],
 ) -> std::fmt::Result {
+    let mut shown = BTreeSet::new();
     for (i, def) in defs.iter().enumerate() {
+        if !shown.insert((def.fqn.as_str(), def.start, def.end)) {
+            continue;
+        }
         if i > 0 {
             out.push('\n');
         }
@@ -178,7 +221,9 @@ pub(crate) fn render_outline(
         nested.sort_by(|a, b| a.start.cmp(&b.start).then(b.end.cmp(&a.end)));
         let mut covered_until = 0;
         for member in nested {
-            if member.start <= covered_until {
+            if member.start <= covered_until
+                || !shown.insert((member.fqn.as_str(), member.start, member.end))
+            {
                 continue;
             }
             covered_until = member.end;
@@ -232,51 +277,20 @@ pub(crate) fn outline(defs: &[Def]) -> BTreeMap<String, Vec<Def>> {
     by_file
 }
 
-pub(crate) fn render(
-    out: &mut String,
-    defs: &[Def],
-    lines: &[&str],
-    include_gaps: bool,
-) -> std::fmt::Result {
-    let mut blocks: Vec<(Option<&Def>, usize, usize)> = Vec::new();
-    let mut cursor = 1;
-    let push_gap = |blocks: &mut Vec<(Option<&Def>, usize, usize)>, start: usize, end: usize| {
-        if !include_gaps || start > end {
-            return;
-        }
-        let blank = lines
-            .get(start - 1..end.min(lines.len()))
-            .is_none_or(|gap| gap.iter().all(|l| l.trim().is_empty()));
-        if !blank {
-            blocks.push((None, start, end));
-        }
-    };
-    for def in defs {
-        if def.start > cursor {
-            push_gap(&mut blocks, cursor, def.start - 1);
-        }
-        blocks.push((Some(def), def.start, def.end));
-        cursor = cursor.max(def.end + 1);
-    }
-    if cursor <= lines.len() {
-        push_gap(&mut blocks, cursor, lines.len());
-    }
+pub(crate) fn render(out: &mut String, defs: &[Def], lines: &[&str]) -> std::fmt::Result {
     let mut prev_single_line = false;
-    for (i, (def, start, end)) in blocks.into_iter().enumerate() {
-        let single_line = start == end;
+    for (i, def) in defs.iter().enumerate() {
+        let single_line = def.start == def.end;
         if i > 0 && !(single_line && prev_single_line) {
             out.push('\n');
         }
         prev_single_line = single_line;
-        if let Some(def) = def {
-            let loc = if include_gaps {
-                format!("L{}-{}", def.start, def.end)
-            } else {
-                format!("{}:{}-{}", def.file, def.start, def.end)
-            };
-            writeln!(out, "{}  [{}]  {loc}", def.fqn, def.kind)?;
-        }
-        write_lines(out, lines, start, end)?;
+        writeln!(
+            out,
+            "{}  [{}]  {}:{}-{}",
+            def.fqn, def.kind, def.file, def.start, def.end
+        )?;
+        write_lines(out, lines, def.start, def.end)?;
     }
     Ok(())
 }
@@ -352,12 +366,12 @@ mod tests {
             def("m::run", "Function", 4, 5),
         ];
         let mut out = String::new();
-        render(&mut out, &defs, &lines, true).unwrap();
+        render(&mut out, &defs, &lines).unwrap();
         assert_eq!(
             out,
-            "m::a  [Module]  L1-1\n1|pub mod a;\n\
-             m::b  [Module]  L2-2\n2|pub mod b;\n\n\
-             m::run  [Function]  L4-5\n4|fn run() {\n5|}\n"
+            "m::a  [Module]  src/lib.rs:1-1\n1|pub mod a;\n\
+             m::b  [Module]  src/lib.rs:2-2\n2|pub mod b;\n\n\
+             m::run  [Function]  src/lib.rs:4-5\n4|fn run() {\n5|}\n"
         );
     }
 
@@ -369,20 +383,20 @@ mod tests {
             def("m::b", "Function", 20, 25),
         ];
         let mut out = String::new();
-        render(&mut out, &defs, &lines, true).unwrap();
+        render(&mut out, &defs, &lines).unwrap();
         assert!(out.contains("1|a\n2|b\n3|c\n"));
-        assert!(out.contains("m::b  [Function]  L20-25\n"));
+        assert!(out.contains("m::b  [Function]  src/lib.rs:20-25\n"));
     }
 
     #[test]
-    fn render_without_gaps_prints_only_definition_bodies() {
+    fn render_prints_only_definition_bodies() {
         let lines = vec!["use a;", "", "fn one() {", "}", "", "fn two() {", "}"];
         let defs = vec![
             def("m::one", "Function", 3, 4),
             def("m::two", "Function", 6, 7),
         ];
         let mut out = String::new();
-        render(&mut out, &defs, &lines, false).unwrap();
+        render(&mut out, &defs, &lines).unwrap();
         assert_eq!(
             out,
             "m::one  [Function]  src/lib.rs:3-4\n3|fn one() {\n4|}\n\n\
@@ -391,33 +405,27 @@ mod tests {
     }
 
     #[test]
-    fn render_with_gaps_prints_non_blank_gaps_between_definitions() {
-        let lines = vec![
-            "use a;",
-            "",
-            "fn one() {",
+    fn outline_prints_associated_members_once_without_bodies() {
+        let lines = [
+            "struct Config {",
+            "    name: String,",
             "}",
-            "",
-            "fn two() {",
+            "impl Config {",
+            "    fn name(&self) -> &str {",
+            "        &self.name",
+            "    }",
             "}",
-            "// tail",
         ];
-        let defs = vec![
-            def("m::one", "Function", 3, 4),
-            def("m::two", "Function", 6, 7),
+        let members = vec![
+            def("m::Config", "Struct", 1, 3),
+            def("m::Config::name", "Field", 2, 2),
+            def("m::Config::name", "Method", 5, 7),
         ];
         let mut out = String::new();
-        render(&mut out, &defs, &lines, true).unwrap();
-        let numbered: Vec<usize> = out
-            .lines()
-            .filter_map(|l| l.split_once('|').and_then(|(n, _)| n.trim().parse().ok()))
-            .collect();
-        assert_eq!(
-            numbered,
-            vec![1, 2, 3, 4, 6, 7, 8],
-            "blank-only gaps are skipped"
-        );
-        assert!(out.starts_with("1|use a;\n2|\n\nm::one  [Function]"));
-        assert!(out.ends_with("7|}\n\n8|// tail\n"));
+        render_outline(&mut out, &outline(&members)["src/lib.rs"], &members, &lines).unwrap();
+        assert!(out.contains("name: String"), "{out}");
+        assert_eq!(out.matches("[Method]").count(), 1, "{out}");
+        assert!(out.contains("fn name(&self) -> &str"), "{out}");
+        assert!(!out.contains("&self.name"), "{out}");
     }
 }

@@ -168,7 +168,8 @@ unmatched candidates with `context` before retrying; **weak matches** does not
 mean every term failed to match.
 
 Read known definitions directly with `orbit context <fqn>`, or use
-`context --file <path>` for imports and surrounding structure. Reuse that source
+`context --file <path>` for a file overview with imports and definition
+signatures. Reuse that source
 for edits instead of reading it again with raw file tools. Start implementing
 once the edit point is clear; follow identifiers only for remaining questions
 and batch independent lookups. Queries with three or fewer matches include source
@@ -180,10 +181,9 @@ are discovered and fingerprinted, but not reparsed. Successful refreshes update
 search results and definition ranges together.
 
 If parsing fails, source is unsupported, or files change during refresh, the
-previous definitions remain indexed. Source reads return the full current file,
-labeled `ranges=unverified`, instead of potentially stale slices. This also applies
-to `--outline`. Test code is included. `context --file` can read files with no
-indexed definitions.
+previous definitions remain indexed. Definition reads return the full current file,
+labeled `ranges=unverified`, instead of potentially stale slices. File overviews
+report that the outline is unavailable. Test code is included.
 
 File refresh invalidates all relationships for the affected project. Dedicated
 relationship lookups refuse incomplete results; SQL, MCP, and repository maps

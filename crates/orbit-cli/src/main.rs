@@ -188,7 +188,7 @@ struct IndexArgs {
                   Use 1-3 identifier keywords for one concept; multiword identifiers \
                   such as 'rate limit' are fine. Read relevant bodies with context, \
                   not cat, head, sed, or raw Read. Use those bodies for exact edits; \
-                  use context --file when imports or surrounding structure are needed. \
+                  use context --file for a file overview with imports and signatures. \
                   Start implementing once the edit point and nearby pattern are clear. \
                   Queries with three or fewer matches include source automatically. \
                   Search matches indexed names and paths, not source bodies or regexes. \
@@ -277,15 +277,15 @@ fn context_fqn_arg_help() -> String {
 
 fn context_long_about() -> String {
     format!(
-        "Print working-tree source for indexed definitions.\n\n\
+        "Read definition bodies or a file overview.\n\n\
          Accepts FQNs from `{launcher} grep`, unique tails like `Type::method`, or globs \
-         like `crate::module::*`, in file order. `--file <path>` alone includes all \
-         definitions and surrounding lines; with names, it also accepts bare names. \
-         `--outline` prints signatures and nested members without bodies.\n\n\
+         like `crate::module::*`, and prints their full bodies in file order. \
+         `--file <path>` alone shows imports, definition signatures, and nested members. \
+         With names, `--file` restricts lookup and accepts bare names.\n\n\
          Refreshes changed and new source files on demand without reparsing unchanged files. \
-         Failed, unsupported, or unstable refreshes show the full file with `ranges=unverified` \
-         instead of using stale ranges. File refresh invalidates project relationships; \
-         re-run `index` to rebuild them.",
+         If source cannot be verified, file requests report an unavailable outline; \
+         definition requests show the full file labeled `ranges=unverified`. \
+         File refresh invalidates project relationships; re-run `index` to rebuild them.",
         launcher = commands::setup::spec::launcher()
     )
 }
@@ -317,16 +317,18 @@ fn sql_long_about() -> String {
 }
 
 #[derive(Args, Debug, PartialEq)]
-#[command(about = "Print the full source bodies of definitions by fqn or unqualified name")]
+#[command(about = "Read definition bodies or a file overview")]
 #[command(long_about = context_long_about())]
 struct ContextArgs {
     #[arg(value_name = "FQN", help = context_fqn_arg_help(), required_unless_present = "file")]
     fqn: Vec<String>,
 
-    /// Restrict to this file (repo-relative or absolute). Alone, prints every
-    /// indexed definition in the file in order with the lines between them;
-    /// with FQNs, also accepts bare definition names.
-    #[arg(long, value_name = "PATH", visible_alias = "path")]
+    #[arg(
+        long,
+        value_name = "PATH",
+        visible_alias = "path",
+        help = "Show a file overview, or restrict named definitions to this file (repo-relative or absolute)"
+    )]
     file: Option<String>,
 
     /// Only print definitions of these types, as printed in grep's `[Kind]`
@@ -335,10 +337,6 @@ struct ContextArgs {
     /// Narrows a glob or --file and disambiguates a bare name.
     #[arg(long, value_name = "KINDS", value_parser = parse_kinds)]
     kind: Option<Kinds>,
-
-    /// Print signatures and nested members instead of full bodies.
-    #[arg(long)]
-    outline: bool,
 
     /// Repository path (default: current directory).
     #[arg(long, value_name = "PATH")]
@@ -1413,6 +1411,7 @@ mod tests {
             &["orbit", "remote", "status"],
             &["orbit", "ask", "x"],
             &["orbit", "grep", "x", "--body"],
+            &["orbit", "context", "x", "--outline"],
             &["orbit", "setup", "claude", "--local"],
         ] {
             assert!(
