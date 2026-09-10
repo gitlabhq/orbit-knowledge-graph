@@ -231,15 +231,11 @@ fn query_posts_envelope_with_resolved_response_format() {
 }
 
 #[test]
-fn gql_file_and_stdin_preserve_query_text_and_response_bytes() {
+fn gql_inline_and_stdin_preserve_query_text_and_response_bytes() {
     let text = "  MATCH (u:User {username: 'a\\\\b\\\"λ'})\r\nRETURN u LIMIT 1\n";
-    let directory = tempfile::tempdir().unwrap();
-    let path = directory.path().join("query.cypher");
-    std::fs::write(&path, text).unwrap();
-    let path = path.to_str().unwrap();
 
     for (format, response, source) in [
-        ("llm", "@query\nλ \\\"quoted\\\"\n", path),
+        ("llm", "@query\nλ \\\"quoted\\\"\n", text),
         ("raw", "{ \"result\": {\"nodes\":[]} }\n", "-"),
     ] {
         let (base_url, handle) = serve_once(response, "text/plain");
@@ -251,10 +247,10 @@ fn gql_file_and_stdin_preserve_query_text_and_response_bytes() {
             format,
             source,
         ];
-        let output = if source == path {
-            run_orbit(&base_url, &args)
-        } else {
+        let output = if source == "-" {
             run_orbit_with_stdin(&base_url, &args, text.as_bytes())
+        } else {
+            run_orbit(&base_url, &args)
         };
         let request = handle.join().unwrap();
         assert!(
