@@ -34,7 +34,8 @@ use crate::proto::{
     get_graph_schema_response, get_query_dsl_response, get_response_format_response,
     invoke_agent_command_response,
 };
-use crate::tools::{ExecutorError, ToolPlan, ToolService, V2CommandRegistry, V2ToolRegistry};
+use crate::serving_schema::ServingSchema;
+use crate::tools::{AgentCommand, ExecutorError, ToolService, V2CommandRegistry, V2ToolRegistry};
 use orbit_billing::{BillingTracker, QuotaCheckInputs, QuotaService};
 use query_engine::formatters::{FormatName, GoonFormatter, GraphFormatter, ResultFormatter};
 
@@ -63,9 +64,8 @@ fn command_error_to_status(error: ExecutorError) -> Status {
 
 pub struct OrbitServiceImpl {
     validator: Arc<JwtValidator>,
-    ontology: Arc<Ontology>,
+    schema: Arc<ServingSchema>,
     tool_service: ToolService,
-    named_queries: Arc<named_queries::NamedQueries>,
     pipeline: QueryPipelineService,
     cluster_health: Arc<ClusterHealthChecker>,
     graph_status: GraphStatusService,
@@ -83,19 +83,13 @@ impl OrbitServiceImpl {
         analytics_config: Arc<AnalyticsConfig>,
     ) -> Self {
         let client = Arc::new(clickhouse_config.build_client());
-        let tool_service = ToolService::new(Arc::clone(&ontology));
-        let pipeline =
-            QueryPipelineService::new(Arc::clone(&ontology), Arc::clone(&client), analytics_config);
-        let graph_status = GraphStatusService::new(client, Arc::clone(&ontology));
-        let named_queries = Arc::new(
-            named_queries::NamedQueries::load_embedded()
-                .expect("embedded named queries are validated by the build script"),
-        );
+        let tool_service = ToolService::default();
+        let pipeline = QueryPipelineService::new(Arc::clone(&client), analytics_config);
+        let graph_status = GraphStatusService::new(client);
         Self {
             validator,
-            ontology,
+            schema: Arc::new(ServingSchema::new(ontology)),
             tool_service,
-            named_queries,
             pipeline,
             cluster_health,
             graph_status,
@@ -120,7 +114,7 @@ impl OrbitServiceImpl {
     }
 
     pub fn with_path_resolver(mut self, resolver: Arc<crate::pipeline::PathResolver>) -> Self {
-        self.pipeline = self.pipeline.with_path_resolver(resolver);
+        Arc::make_mut(&mut self.schema).path_resolver = Some(resolver);
         self
     }
 
@@ -161,7 +155,7 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
 
         info!("Listing tools for user");
 
-        let tools = V2ToolRegistry::get_all_tools(&self.ontology)
+        let tools = V2ToolRegistry::get_all_tools()
             .into_iter()
             .map(proto_tool_definition)
             .collect();
@@ -188,7 +182,7 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
             "Listing agent commands for user"
         );
 
-        let all_commands = V2CommandRegistry::get_all_commands(&self.ontology);
+        let all_commands = V2CommandRegistry::get_all_commands();
         let commands: Vec<_> = if requested.is_empty() {
             all_commands
         } else {
@@ -253,16 +247,23 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
 
         info!(command_name = %req.command_name, "Invoking agent command for user");
 
-        let plan = self
+        let command = self
             .tool_service
-            .resolve_command(&req.command_name, parameters_json)
+            .parse_command(&req.command_name, parameters_json)
             .map_err(command_error_to_status)?;
 
-        let ToolPlan::Immediate { result } = plan else {
-            return Err(Status::failed_precondition(
-                "command must be handled by Rails interceptor",
-            ));
-        };
+        let result = match command {
+            AgentCommand::GraphSchema {
+                expand_nodes,
+                format,
+            } => {
+                let schema = Arc::clone(&self.schema);
+                ToolService::render_graph_schema(&schema.ontology, &expand_nodes, format)
+            }
+            AgentCommand::QueryLanguage { format } => ToolService::render_query_language(format),
+            AgentCommand::ResponseFormat { format } => ToolService::render_response_format(format),
+        }
+        .map_err(command_error_to_status)?;
 
         let content = match result {
             serde_json::Value::String(text) => {
@@ -291,16 +292,15 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
     ) -> Result<Response<Self::ExecuteQueryStream>, Status> {
         let ctx = extract_request_context(&request, &self.validator)?;
         ctx.record_in_current_span();
-        let coding_agent = ctx.coding_agent().map(String::from);
-        let claims = ctx.claims;
-
-        self.quota.check(&QuotaCheckInputs::from(&claims)).await?;
+        self.quota
+            .check(&QuotaCheckInputs::from(&ctx.claims))
+            .await?;
 
         let mut stream = request.into_inner();
         let (tx, rx) = mpsc::channel(4);
 
         let pipeline = self.pipeline.clone();
-        let named_queries = Arc::clone(&self.named_queries);
+        let schema = Arc::clone(&self.schema);
         let stream_timeout = self.stream_timeout_secs;
         let span = tracing::Span::current();
 
@@ -315,9 +315,10 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
                     Ok(QueryType::Json) => Ok(req.query),
                     Ok(QueryType::Named) => {
                         let values = named_queries::BindingValues {
-                            current_user_id: claims.user_id,
+                            current_user_id: ctx.claims.user_id,
                         };
-                        named_queries
+                        schema
+                            .named_queries
                             .render_request(&req.query, &values)
                             .map_err(|e| e.to_string())
                     }
@@ -337,14 +338,7 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
 
                 let timeout = std::time::Duration::from_secs(stream_timeout);
                 let result = pipeline
-                    .run_query(
-                        claims,
-                        coding_agent,
-                        &query_json,
-                        tx.clone(),
-                        stream,
-                        timeout,
-                    )
+                    .run_query(&schema, ctx, &query_json, tx.clone(), stream, timeout)
                     .await;
 
                 match result {
@@ -424,17 +418,16 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
 
         let req = request.get_ref();
         info!(format = ?req.format, "Fetching graph schema for user");
+        let schema = Arc::clone(&self.schema);
 
         let response = if req.format == ResponseFormat::Llm as i32 {
-            let toon_text = self
-                .tool_service
-                .build_schema_toon(&req.expand_nodes)
+            let toon_text = ToolService::build_schema_toon(&schema.ontology, &req.expand_nodes)
                 .map_err(|e| Status::internal(e.to_string()))?;
             GetGraphSchemaResponse {
                 content: Some(get_graph_schema_response::Content::FormattedText(toon_text)),
             }
         } else {
-            let structured = self.build_structured_schema(&req.expand_nodes);
+            let structured = Self::build_structured_schema(&schema.ontology, &req.expand_nodes);
             GetGraphSchemaResponse {
                 content: Some(get_graph_schema_response::Content::Structured(structured)),
             }
@@ -527,7 +520,8 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
         let values = named_queries::BindingValues {
             current_user_id: ctx.claims.user_id,
         };
-        let queries = named_query_definitions(&self.named_queries, &values)
+        let schema = Arc::clone(&self.schema);
+        let queries = named_query_definitions(&schema.named_queries, &values)
             .map_err(|e| Status::internal(e.to_string()))?;
 
         info!(count = queries.len(), "Listing named queries");
@@ -572,19 +566,24 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
             build_security_context(&claims).map_err(|e| Status::unauthenticated(e.to_string()))?;
 
         info!(traversal_path = %traversal_path, format = ?req.format, "Fetching graph status for user");
+        let schema = Arc::clone(&self.schema);
 
         let response = self
             .graph_status
-            .get_status(&traversal_path, req.format, &security_context)
+            .get_status(
+                &schema.ontology,
+                &traversal_path,
+                req.format,
+                &security_context,
+            )
             .await?;
         Ok(Response::new(response))
     }
 }
 
 impl OrbitServiceImpl {
-    fn build_structured_schema(&self, expand_nodes: &[String]) -> StructuredSchema {
-        let domains: Vec<SchemaDomain> = self
-            .ontology
+    fn build_structured_schema(ontology: &Ontology, expand_nodes: &[String]) -> StructuredSchema {
+        let domains: Vec<SchemaDomain> = ontology
             .domains()
             .map(|d| SchemaDomain {
                 name: d.name.clone(),
@@ -593,8 +592,7 @@ impl OrbitServiceImpl {
             })
             .collect();
 
-        let nodes: Vec<SchemaNode> = self
-            .ontology
+        let nodes: Vec<SchemaNode> = ontology
             .nodes()
             .map(|n| {
                 let should_expand = expand_nodes.iter().any(|e| e == "*" || e == &n.name);
@@ -628,7 +626,7 @@ impl OrbitServiceImpl {
                 };
 
                 let (outgoing_edges, incoming_edges) = if should_expand {
-                    self.get_node_edge_names(&n.name)
+                    Self::get_node_edge_names(ontology, &n.name)
                 } else {
                     (vec![], vec![])
                 };
@@ -651,12 +649,10 @@ impl OrbitServiceImpl {
             })
             .collect();
 
-        let edges: Vec<SchemaEdge> = self
-            .ontology
+        let edges: Vec<SchemaEdge> = ontology
             .edge_names()
             .map(|name| {
-                let variants: Vec<SchemaEdgeVariant> = self
-                    .ontology
+                let variants: Vec<SchemaEdgeVariant> = ontology
                     .get_edge(name)
                     .map(|edges| {
                         edges
@@ -671,8 +667,7 @@ impl OrbitServiceImpl {
 
                 SchemaEdge {
                     name: name.to_string(),
-                    description: self
-                        .ontology
+                    description: ontology
                         .get_edge_description(name)
                         .unwrap_or_default()
                         .to_string(),
@@ -682,19 +677,19 @@ impl OrbitServiceImpl {
             .collect();
 
         StructuredSchema {
-            schema_version: self.ontology.schema_version().to_string(),
+            schema_version: ontology.schema_version().to_string(),
             domains,
             nodes,
             edges,
         }
     }
 
-    fn get_node_edge_names(&self, node_name: &str) -> (Vec<String>, Vec<String>) {
+    fn get_node_edge_names(ontology: &Ontology, node_name: &str) -> (Vec<String>, Vec<String>) {
         let mut outgoing = Vec::new();
         let mut incoming = Vec::new();
 
-        for edge_name in self.ontology.edge_names() {
-            if let Some(edges) = self.ontology.get_edge(edge_name) {
+        for edge_name in ontology.edge_names() {
+            if let Some(edges) = ontology.get_edge(edge_name) {
                 let mut has_outgoing = false;
                 let mut has_incoming = false;
 
@@ -770,6 +765,8 @@ fn authorize_traversal_path(claims: &Claims, requested_path: &TraversalPath) -> 
 
 #[cfg(test)]
 mod tests {
+    mod commands;
+
     use super::*;
     use crate::proto::orbit_service_server::OrbitService;
     use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
@@ -825,157 +822,6 @@ mod tests {
     }
 
     #[test]
-    fn test_service_can_be_created() {
-        let validator = Arc::new(mock_validator());
-        let service = OrbitServiceImpl::new(
-            validator,
-            test_ontology(),
-            &test_config(),
-            ClusterHealthChecker::default().into_arc(),
-            60,
-            Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
-        );
-
-        let plan = service
-            .tool_service
-            .resolve("get_graph_schema", "{}")
-            .expect("Should resolve");
-
-        match plan {
-            crate::tools::ToolPlan::Immediate { result } => {
-                assert!(result.is_string(), "Response should be toon-encoded string");
-                let toon_str = result.as_str().unwrap();
-                assert!(toon_str.contains("domains"));
-                assert!(toon_str.contains("edges"));
-            }
-            _ => panic!("Expected Immediate plan"),
-        }
-    }
-
-    #[tokio::test]
-    async fn list_agent_commands_filters_known_command() {
-        let service = test_service();
-        let response = service
-            .list_agent_commands(authed_request(ListAgentCommandsRequest {
-                command_names: vec!["get_query_dsl".into()],
-                format: ResponseFormat::Raw as i32,
-            }))
-            .await
-            .unwrap()
-            .into_inner();
-
-        assert_eq!(response.commands.len(), 1);
-        assert_eq!(response.commands[0].name, "get_query_dsl");
-        assert!(!response.commands[0].description.is_empty());
-    }
-
-    #[tokio::test]
-    async fn list_agent_commands_returns_short_command_descriptions() {
-        let service = test_service();
-        let response = service
-            .list_agent_commands(authed_request(ListAgentCommandsRequest {
-                command_names: vec![],
-                format: ResponseFormat::Raw as i32,
-            }))
-            .await
-            .unwrap()
-            .into_inner();
-
-        let query_graph = response
-            .commands
-            .iter()
-            .find(|command| command.name == "query_graph")
-            .expect("query_graph command should be listed");
-
-        assert!(!query_graph.description.is_empty());
-        assert!(!query_graph.description.contains("<toon>"));
-        assert!(!query_graph.description.contains("Query DSL Schema"));
-    }
-
-    #[tokio::test]
-    async fn list_agent_commands_returns_toon_for_llm_format() {
-        let service = test_service();
-        let response = service
-            .list_agent_commands(authed_request(ListAgentCommandsRequest {
-                command_names: vec!["get_query_dsl".into()],
-                format: ResponseFormat::Llm as i32,
-            }))
-            .await
-            .unwrap()
-            .into_inner();
-
-        assert_eq!(response.commands.len(), 1);
-        assert!(response.formatted_text.contains("commands[1]"));
-        assert!(response.formatted_text.contains("name: get_query_dsl"));
-        assert!(response.formatted_text.contains("input_schema"));
-    }
-
-    #[tokio::test]
-    async fn list_agent_commands_rejects_unknown_command() {
-        let service = test_service();
-        let status = service
-            .list_agent_commands(authed_request(ListAgentCommandsRequest {
-                command_names: vec!["typo".into()],
-                format: ResponseFormat::Raw as i32,
-            }))
-            .await
-            .unwrap_err();
-
-        assert_eq!(status.code(), tonic::Code::NotFound);
-        assert!(status.message().contains("typo"));
-    }
-
-    #[tokio::test]
-    async fn invoke_agent_command_maps_intercepted_command_to_failed_precondition() {
-        let service = test_service();
-        let status = service
-            .invoke_agent_command(authed_request(InvokeAgentCommandRequest {
-                command_name: "query_graph".into(),
-                parameters_json: r#"{"query":{}}"#.into(),
-            }))
-            .await
-            .unwrap_err();
-
-        assert_eq!(status.code(), tonic::Code::FailedPrecondition);
-    }
-
-    #[tokio::test]
-    async fn invoke_agent_command_preserves_raw_and_llm_content_shapes() {
-        let service = test_service();
-        let raw = service
-            .invoke_agent_command(authed_request(InvokeAgentCommandRequest {
-                command_name: "get_query_dsl".into(),
-                parameters_json: r#"{"format":"raw"}"#.into(),
-            }))
-            .await
-            .unwrap()
-            .into_inner();
-
-        let Some(invoke_agent_command_response::Content::ResultJson(json)) = raw.content else {
-            panic!("expected raw command result JSON");
-        };
-        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
-        assert_eq!(
-            parsed.get("version").and_then(serde_json::Value::as_str),
-            Some(ToolService::build_query_dsl_version().as_str())
-        );
-
-        let llm = service
-            .invoke_agent_command(authed_request(InvokeAgentCommandRequest {
-                command_name: "get_query_dsl".into(),
-                parameters_json: "{}".into(),
-            }))
-            .await
-            .unwrap()
-            .into_inner();
-
-        let Some(invoke_agent_command_response::Content::FormattedText(text)) = llm.content else {
-            panic!("expected LLM command result text");
-        };
-        assert!(text.contains("QueryDSL v"));
-    }
-
-    #[test]
     fn test_build_structured_schema() {
         let validator = Arc::new(mock_validator());
         let service = OrbitServiceImpl::new(
@@ -987,7 +833,7 @@ mod tests {
             Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
         );
 
-        let response = service.build_structured_schema(&[]);
+        let response = OrbitServiceImpl::build_structured_schema(&service.schema.ontology, &[]);
 
         assert!(!response.schema_version.is_empty());
         assert!(!response.nodes.is_empty());
@@ -1017,7 +863,10 @@ mod tests {
             Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
         );
 
-        let response = service.build_structured_schema(&["User".to_string()]);
+        let response = OrbitServiceImpl::build_structured_schema(
+            &service.schema.ontology,
+            &["User".to_string()],
+        );
 
         let user_node = response.nodes.iter().find(|n| n.name == "User");
         assert!(user_node.is_some());
@@ -1053,7 +902,8 @@ mod tests {
             Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
         );
 
-        let (outgoing, incoming) = service.get_node_edge_names("User");
+        let (outgoing, incoming) =
+            OrbitServiceImpl::get_node_edge_names(&service.schema.ontology, "User");
 
         assert!(
             !outgoing.is_empty() || !incoming.is_empty(),
@@ -1077,7 +927,8 @@ mod tests {
             Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
         );
 
-        let (outgoing, incoming) = service.get_node_edge_names("NonexistentNode");
+        let (outgoing, incoming) =
+            OrbitServiceImpl::get_node_edge_names(&service.schema.ontology, "NonexistentNode");
 
         assert!(outgoing.is_empty());
         assert!(incoming.is_empty());
@@ -1095,7 +946,10 @@ mod tests {
             Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
         );
 
-        let response = service.build_structured_schema(&["User".to_string()]);
+        let response = OrbitServiceImpl::build_structured_schema(
+            &service.schema.ontology,
+            &["User".to_string()],
+        );
         let user = response.nodes.iter().find(|n| n.name == "User").unwrap();
 
         let id_prop = user.properties.iter().find(|p| p.name == "id");
@@ -1124,7 +978,7 @@ mod tests {
             Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
         );
 
-        let response = service.build_structured_schema(&[]);
+        let response = OrbitServiceImpl::build_structured_schema(&service.schema.ontology, &[]);
 
         for domain in &response.domains {
             assert!(!domain.name.is_empty(), "Domain should have a name");
@@ -1148,7 +1002,7 @@ mod tests {
             Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
         );
 
-        let response = service.build_structured_schema(&[]);
+        let response = OrbitServiceImpl::build_structured_schema(&service.schema.ontology, &[]);
 
         for edge in &response.edges {
             assert!(!edge.name.is_empty(), "Edge should have a name");
@@ -1176,8 +1030,10 @@ mod tests {
             Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
         );
 
-        let response =
-            service.build_structured_schema(&["User".to_string(), "Project".to_string()]);
+        let response = OrbitServiceImpl::build_structured_schema(
+            &service.schema.ontology,
+            &["User".to_string(), "Project".to_string()],
+        );
 
         let user = response.nodes.iter().find(|n| n.name == "User").unwrap();
         let project = response.nodes.iter().find(|n| n.name == "Project").unwrap();
@@ -1345,7 +1201,8 @@ mod tests {
             Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
         );
 
-        let response = service.build_structured_schema(&["*".to_string()]);
+        let response =
+            OrbitServiceImpl::build_structured_schema(&service.schema.ontology, &["*".to_string()]);
 
         assert_eq!(
             response.nodes.len(),
