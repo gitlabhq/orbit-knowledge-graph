@@ -476,6 +476,56 @@ When enabled, every metered Orbit query (`mcp`, `rest` source types) is checked 
 | `billing.quota.api_user` | None | CDot admin email. Mounted from `/etc/secrets/billing/quota/api_user`. |
 | `billing.quota.api_token` | None | CDot admin token. Mounted from `/etc/secrets/billing/quota/api_token`. |
 
+## Object storage
+
+Names the bucket Orbit will use for cold storage and how to authenticate to it. Disabled by default; nothing reads the store yet. The `orbit-object-storage` crate turns this section into an `object_store` client for S3, S3-compatible stores and Google Cloud Storage.
+
+| Config path | Default | Description |
+|-------------|---------|-------------|
+| `object_storage.enabled` | `false` | Enable the object store |
+| `object_storage.provider` | `s3` | `s3` (AWS and S3-compatible) or `gcs` |
+| `object_storage.bucket` | `""` | Bucket name |
+| `object_storage.prefix` | `""` | Key prefix under which every object is placed |
+| `object_storage.auth` | `identity` | `identity` uses the runtime (IRSA, EC2 instance profile, `AWS_*` variables, GKE Workload Identity, GCE metadata server, `GOOGLE_APPLICATION_CREDENTIALS`, gcloud ADC); `static` uses the credentials below |
+| `object_storage.region` | unset | S3 region; required for AWS, ignored by most S3-compatible stores |
+| `object_storage.endpoint` | unset | S3-compatible store URL, or a GCS emulator or private endpoint |
+| `object_storage.path_style` | `false` | S3 only. With a custom endpoint and `false`, the endpoint host must include the bucket |
+| `object_storage.allow_http` | `false` | Permit `http://` endpoints; local development only |
+| `object_storage.ca_cert_path` | unset | PEM bundle of extra root certificates for stores behind a private CA |
+| `object_storage.access_key_id` | unset | S3 static credentials; mount at `/etc/secrets/object_storage/access_key_id` |
+| `object_storage.secret_access_key` | unset | S3 static credentials; mount at `/etc/secrets/object_storage/secret_access_key` |
+| `object_storage.session_token` | unset | S3 static credentials, optional |
+| `object_storage.service_account_key` | unset | GCS static credentials, JSON key content; mount at `/etc/secrets/object_storage/service_account_key` |
+
+Identity on GitLab.com and Dedicated:
+
+```yaml
+object_storage:
+  enabled: true
+  provider: gcs
+  bucket: gitlab-orbit-stg-storage
+  prefix: orbit
+```
+
+MinIO behind a private CA, keys mounted as secret files:
+
+```yaml
+object_storage:
+  enabled: true
+  provider: s3
+  bucket: orbit
+  auth: static
+  endpoint: https://minio.internal:9000
+  path_style: true
+  ca_cert_path: /etc/ssl/private-ca.pem
+```
+
+Round-trip a config file against the bucket it names with the throwaway example:
+
+```shell
+cargo run -p orbit-object-storage --example roundtrip -- config.yaml [secrets-dir]
+```
+
 ## Health check
 
 | Config path | Default | Description |

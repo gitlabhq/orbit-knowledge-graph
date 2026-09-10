@@ -213,3 +213,21 @@ billing:
     # api_token: ""
 
 features: {}
+
+# Static credentials are Option fields meant for secret files:
+# /etc/secrets/object_storage/secret_access_key, /etc/secrets/object_storage/service_account_key.
+object_storage:
+  enabled: false
+  provider: s3                  # s3 | gcs
+  bucket: ""
+  prefix: ""
+  auth: identity                # identity | static
+  # region: "us-east-1"         # s3: AWS region; S3-compatible stores mostly ignore it
+  # endpoint: ""                # s3: S3-compatible store; gcs: emulator or private endpoint
+  path_style: false             # s3 only; with an endpoint and false, the endpoint host must include the bucket
+  allow_http: false             # local development only
+  # ca_cert_path: ""            # PEM bundle of extra root certificates
+  # access_key_id: ""           # s3 static
+  # secret_access_key: ""       # s3 static
+  # session_token: ""           # s3 static
+  # service_account_key: ""     # gcs static, JSON key content
