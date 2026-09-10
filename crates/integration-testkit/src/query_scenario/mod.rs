@@ -795,6 +795,17 @@ fn build_security(overrides: &Option<SecurityOverride>) -> SecurityContext {
     if let Some(true) = ov.admin {
         ctx = ctx.with_role(true, Some(AccessLevel::Owner as u32));
     }
+    if !ov.scope_prefixes.is_empty() {
+        let prefixes: std::collections::HashMap<
+            String,
+            orbit_utils::traversal_path::TraversalPath,
+        > = ov
+            .scope_prefixes
+            .iter()
+            .map(|(k, v)| (k.clone(), v.as_str().into()))
+            .collect();
+        ctx = ctx.with_scope_prefixes(prefixes);
+    }
     ctx
 }
 

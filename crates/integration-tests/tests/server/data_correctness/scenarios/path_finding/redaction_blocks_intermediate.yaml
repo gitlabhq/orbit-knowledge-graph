@@ -1,0 +1,23 @@
+# source: crates/integration-tests/tests/server/data_correctness/path_finding.rs::path_finding_redaction_blocks_intermediate_node
+description: Redaction blocking intermediate Group prevents path discovery
+
+config:
+  redaction:
+    allow:
+      user: [1]
+      project: [1000]
+
+query:
+  json: |
+    {
+      "query_type": "path_finding",
+      "nodes": [
+        {"id": "start", "entity": "User", "node_ids": [1]},
+        {"id": "end", "entity": "Project", "node_ids": [1000]}
+      ],
+      "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3,
+               "rel_types": ["CONTAINS", "MEMBER_OF"]}
+    }
+
+expect:
+  path_count: 0
