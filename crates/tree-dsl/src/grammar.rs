@@ -101,6 +101,34 @@ impl SupportLang {
         &LANG_CONFIG.languages[self].index_names
     }
 
+    /// The key used to look up the language's YAML rule file (e.g. "python", "typescript").
+    pub fn yaml_key(&self) -> &'static str {
+        match self {
+            Self::Bash => "bash",
+            Self::C => "c",
+            Self::Cpp => "cpp",
+            Self::CSharp => "csharp",
+            Self::Elixir => "elixir",
+            Self::Go => "go",
+            Self::Haskell => "haskell",
+            Self::Hcl => "hcl",
+            Self::Java => "java",
+            Self::JavaScript => "javascript",
+            Self::Kotlin => "kotlin",
+            Self::Lua => "lua",
+            Self::OCaml => "ocaml",
+            Self::Php => "php",
+            Self::Python => "python",
+            Self::Ruby => "ruby",
+            Self::Rust => "rust",
+            Self::Scala => "scala",
+            Self::Swift => "swift",
+            Self::TypeScript => "typescript",
+            Self::Tsx => "tsx",
+            Self::Zig => "zig",
+        }
+    }
+
     /// Resolve a language from a user-provided string like "js", "python", "rs", "typescript".
     /// Checks aliases first (from languages.yaml), then falls back to extension matching.
     pub fn from_alias(s: &str) -> Option<Self> {

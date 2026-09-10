@@ -2,7 +2,6 @@
 
 use crate::grammar::{self, SupportLang};
 use crate::lang::{DEAD, E_CALLS, E_DEFINES, E_IMPORTS, Lang, NONE, SYNTH};
-use crate::langs;
 use crate::pattern;
 use crate::ssa::{BlockId, ParseValue, SsaEngine, Value};
 use crate::tree::Tree;
@@ -27,16 +26,27 @@ pub struct Pipeline {
     pub resolve: crate::file_tree::ResolveConfig,
 }
 
+/// Embedded YAML rule files. Returns None if the language has no rules yet.
+fn lang_yaml(lang_id: SupportLang) -> Option<&'static str> {
+    match lang_id {
+        SupportLang::Python => Some(include_str!("../langs/python.yaml")),
+        // TS/JS share the same rules when they exist
+        // SupportLang::TypeScript | SupportLang::Tsx | SupportLang::JavaScript =>
+        //     Some(include_str!("../langs/typescript.yaml")),
+        // SupportLang::Rust => Some(include_str!("../langs/rust.yaml")),
+        _ => None,
+    }
+}
+
 impl Pipeline {
     pub fn for_lang(lang_id: SupportLang) -> (Pipeline, Lang) {
         let mut lang = Lang::new();
-        let def = match lang_id {
-            SupportLang::Python => langs::python::lang_def(&mut lang),
-            SupportLang::TypeScript | SupportLang::Tsx | SupportLang::JavaScript => {
-                langs::typescript::lang_def(&mut lang)
+        let def = match lang_yaml(lang_id) {
+            Some(yaml) => {
+                let (rewrites, resolve) = crate::rules::load_lang(yaml, &mut lang);
+                LangDef { rewrites, resolve }
             }
-            SupportLang::Rust => langs::rust_lang::lang_def(&mut lang),
-            _ => LangDef::empty(),
+            None => LangDef::empty(),
         };
         (
             Pipeline {

@@ -1,8 +1,6 @@
 pub mod file_tree;
 pub mod grammar;
 pub mod lang;
-#[path = "../langs/mod.rs"]
-pub mod langs;
 pub mod pattern;
 pub mod resolver;
 pub mod rules;
