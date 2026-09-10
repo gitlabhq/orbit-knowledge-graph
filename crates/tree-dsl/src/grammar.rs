@@ -197,7 +197,7 @@ pub fn from_tree_sitter(
             kind,
             field,
             flags: if ts.is_named() { NAMED } else { 0 },
-            tag: 0,
+
             size: 0,
             parent,
             sym,

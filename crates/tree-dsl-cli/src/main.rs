@@ -5,9 +5,6 @@ use clap::{Parser, Subcommand};
 
 use tree_dsl::grammar::SupportLang;
 use tree_dsl::lang::{E_CALLS, E_DEFINES, E_IMPORTS, E_TYPE_REF, NAMED, SYNTH};
-use tree_dsl::tree::{
-    TAG_BINDING, TAG_BRANCH, TAG_DEF, TAG_IMPORT, TAG_LOOP, TAG_NONE, TAG_REF, TAG_SCOPE,
-};
 
 #[derive(Parser)]
 #[command(name = "tree-dsl", about = "Code indexing CLI")]
@@ -54,11 +51,9 @@ enum Commands {
 enum Stage {
     /// Raw tree-sitter CST (before rewrites)
     Cst,
-    /// Tree after rewrites, before coloring
+    /// Tree after rewrites (before SSA)
     Ast,
-    /// Tree after rewrites + coloring (default)
-    Tagged,
-    /// Full pipeline output with edges
+    /// Full pipeline output with edges (default)
     Ssa,
 }
 
@@ -101,7 +96,7 @@ fn cmd_parse(
         Stage::Cst => {
             let mut lang = tree_dsl::lang::Lang::new();
             let tree = tree_dsl::grammar::parse(&source, lang_id, &mut lang, &path);
-            print_tree(&tree, &lang, false);
+            print_tree(&tree, &lang);
         }
         Stage::Ast => {
             let (pipeline, mut lang) = tree_dsl::run::Pipeline::for_lang(lang_id);
@@ -109,11 +104,11 @@ fn cmd_parse(
             for stage in &pipeline.rewrite_stages {
                 tree_dsl::pattern::apply_rewrites(&mut tree, &mut lang, stage);
             }
-            print_tree(&tree, &lang, false);
+            print_tree(&tree, &lang);
         }
-        Stage::Tagged | Stage::Ssa => {
+        Stage::Ssa => {
             let (tree, lang, _) = tree_dsl::parse(lang_id, &path, &source);
-            print_tree(&tree, &lang, true);
+            print_tree(&tree, &lang);
             print_edges(&tree, &lang);
             print_links(&tree, &lang);
         }
@@ -121,7 +116,7 @@ fn cmd_parse(
     Ok(())
 }
 
-fn print_tree(tree: &tree_dsl::tree::Tree, lang: &tree_dsl::lang::Lang, show_tags: bool) {
+fn print_tree(tree: &tree_dsl::tree::Tree, lang: &tree_dsl::lang::Lang) {
     for (i, n) in tree.nodes.iter().enumerate() {
         if n.flags & tree_dsl::lang::DEAD != 0 {
             continue;
@@ -144,12 +139,6 @@ fn print_tree(tree: &tree_dsl::tree::Tree, lang: &tree_dsl::lang::Lang, show_tag
             String::new()
         };
 
-        let tag_str = if show_tags && n.tag != TAG_NONE {
-            format!(" tag={}", tag_name(n.tag))
-        } else {
-            String::new()
-        };
-
         let sym_str = if n.sym != 0 {
             let text = lang.syms.resolve(n.sym);
             if text.len() > 40 {
@@ -162,8 +151,8 @@ fn print_tree(tree: &tree_dsl::tree::Tree, lang: &tree_dsl::lang::Lang, show_tag
         };
 
         println!(
-            "{:>4}  {:<30}{}{}{} [{}-{}]",
-            i, kind_display, field_str, tag_str, sym_str, n.start, n.end
+            "{:>4}  {:<30}{}{} [{}-{}]",
+            i, kind_display, field_str, sym_str, n.start, n.end
         );
     }
 }
@@ -223,19 +212,6 @@ fn node_label(tree: &tree_dsl::tree::Tree, lang: &tree_dsl::lang::Lang, node: u3
     }
 }
 
-fn tag_name(tag: u8) -> &'static str {
-    match tag {
-        TAG_DEF => "def",
-        TAG_IMPORT => "import",
-        TAG_REF => "ref",
-        TAG_BINDING => "binding",
-        TAG_BRANCH => "branch",
-        TAG_LOOP => "loop",
-        TAG_SCOPE => "scope",
-        _ => "?",
-    }
-}
-
 fn edge_name(kind: u16) -> &'static str {
     match kind {
         E_CALLS => "Calls",
@@ -268,26 +244,24 @@ fn cmd_index(path: &str, lang_override: Option<String>) -> anyhow::Result<()> {
     let result = tree_dsl::index(lang_id, &files);
     let elapsed = t0.elapsed();
 
+    let deftype_k = result.lang.kinds.lookup("__deftype") as u16 | SYNTH;
+    let import_k = result.lang.kinds.lookup("__import") as u16 | SYNTH;
     let mut total_defs = 0usize;
     let mut total_imports = 0usize;
-    let mut total_refs = 0usize;
     let mut total_intra_edges = 0usize;
 
     for tree in &result.trees {
         let path = result.lang.syms.resolve(tree.nodes[0].sym);
-        let defs = tree.nodes.iter().filter(|n| n.tag == TAG_DEF).count();
-        let imports = tree.nodes.iter().filter(|n| n.tag == TAG_IMPORT).count();
-        let refs = tree.nodes.iter().filter(|n| n.tag == TAG_REF).count();
+        let defs = tree.nodes.iter().filter(|n| n.kind == deftype_k).count();
+        let imports = tree.nodes.iter().filter(|n| n.kind == import_k).count();
         total_defs += defs;
         total_imports += imports;
-        total_refs += refs;
         total_intra_edges += tree.edges.len();
         println!(
-            "{}: {} defs, {} imports, {} refs, {} edges",
+            "{}: {} defs, {} imports, {} edges",
             path,
             defs,
             imports,
-            refs,
             tree.edges.len()
         );
     }
@@ -315,7 +289,6 @@ fn cmd_index(path: &str, lang_override: Option<String>) -> anyhow::Result<()> {
     eprintln!("files:        {}", result.trees.len());
     eprintln!("definitions:  {}", total_defs);
     eprintln!("imports:      {}", total_imports);
-    eprintln!("refs:         {}", total_refs);
     eprintln!("intra edges:  {}", total_intra_edges);
     eprintln!("cross edges:  {}", result.cross_edges.len());
     eprintln!("time:         {:.2}s", elapsed.as_secs_f64());

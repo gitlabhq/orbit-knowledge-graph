@@ -2,21 +2,11 @@ use std::cell::RefCell;
 
 use crate::lang::{DEAD, NAMED, NONE};
 
-pub const TAG_NONE: u8 = 0;
-pub const TAG_DEF: u8 = 1;
-pub const TAG_IMPORT: u8 = 2;
-pub const TAG_REF: u8 = 3;
-pub const TAG_BINDING: u8 = 4;
-pub const TAG_BRANCH: u8 = 5;
-pub const TAG_LOOP: u8 = 6;
-pub const TAG_SCOPE: u8 = 7;
-
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Node {
     pub kind: u16,
     pub field: u16,
     pub flags: u16,
-    pub tag: u8,
     pub size: u32,
     pub parent: u32,
     pub sym: u32,
