@@ -61,7 +61,7 @@ To add the MCP server for the current project, run:
 {{< tab title="GitLab Orbit CLI (orbit)" >}}
 
 ```shell
-claude mcp add orbit-local -- orbit mcp serve
+claude mcp add orbit-cli -- orbit mcp serve
 ```
 
 {{< /tab >}}
@@ -69,7 +69,7 @@ claude mcp add orbit-local -- orbit mcp serve
 {{< tab title="GitLab CLI (glab orbit)" >}}
 
 ```shell
-claude mcp add orbit-local -- glab orbit local mcp serve
+claude mcp add orbit-cli -- glab orbit local mcp serve
 ```
 
 {{< /tab >}}
@@ -83,7 +83,7 @@ To add the server for all of your projects, run:
 {{< tab title="GitLab Orbit CLI (orbit)" >}}
 
 ```shell
-claude mcp add orbit-local --scope user -- orbit mcp serve
+claude mcp add orbit-cli --scope user -- orbit mcp serve
 ```
 
 {{< /tab >}}
@@ -91,7 +91,7 @@ claude mcp add orbit-local --scope user -- orbit mcp serve
 {{< tab title="GitLab CLI (glab orbit)" >}}
 
 ```shell
-claude mcp add orbit-local --scope user -- glab orbit local mcp serve
+claude mcp add orbit-cli --scope user -- glab orbit local mcp serve
 ```
 
 {{< /tab >}}
@@ -105,7 +105,7 @@ To add the server for everyone who checks out the repository, run:
 {{< tab title="GitLab Orbit CLI (orbit)" >}}
 
 ```shell
-claude mcp add orbit-local --scope project -- orbit mcp serve
+claude mcp add orbit-cli --scope project -- orbit mcp serve
 ```
 
 {{< /tab >}}
@@ -113,7 +113,7 @@ claude mcp add orbit-local --scope project -- orbit mcp serve
 {{< tab title="GitLab CLI (glab orbit)" >}}
 
 ```shell
-claude mcp add orbit-local --scope project -- glab orbit local mcp serve
+claude mcp add orbit-cli --scope project -- glab orbit local mcp serve
 ```
 
 {{< /tab >}}
@@ -129,7 +129,7 @@ You can also edit the `.mcp.json` file directly:
 ```json
 {
   "mcpServers": {
-    "orbit-local": {
+    "orbit-cli": {
       "command": "orbit",
       "args": ["mcp", "serve"]
     }
@@ -144,7 +144,7 @@ You can also edit the `.mcp.json` file directly:
 ```json
 {
   "mcpServers": {
-    "orbit-local": {
+    "orbit-cli": {
       "command": "glab",
       "args": ["orbit", "local", "mcp", "serve"]
     }
@@ -181,7 +181,7 @@ To connect to Codex, run:
 {{< tab title="GitLab Orbit CLI (orbit)" >}}
 
 ```shell
-codex mcp add orbit-local -- orbit mcp serve
+codex mcp add orbit-cli -- orbit mcp serve
 ```
 
 {{< /tab >}}
@@ -189,7 +189,7 @@ codex mcp add orbit-local -- orbit mcp serve
 {{< tab title="GitLab CLI (glab orbit)" >}}
 
 ```shell
-codex mcp add orbit-local -- glab orbit local mcp serve
+codex mcp add orbit-cli -- glab orbit local mcp serve
 ```
 
 {{< /tab >}}
@@ -223,7 +223,7 @@ To connect to Cursor, create or edit the `mcp.json` file for the scope you want:
 ```json
 {
   "mcpServers": {
-    "orbit-local": {
+    "orbit-cli": {
       "type": "stdio",
       "command": "orbit",
       "args": ["mcp", "serve"]
@@ -239,7 +239,7 @@ To connect to Cursor, create or edit the `mcp.json` file for the scope you want:
 ```json
 {
   "mcpServers": {
-    "orbit-local": {
+    "orbit-cli": {
       "type": "stdio",
       "command": "glab",
       "args": ["orbit", "local", "mcp", "serve"]
@@ -271,7 +271,7 @@ Add the MCP server configuration to `opencode.json` in the repository root, or t
 {
   "$schema": "https://opencode.ai/config.json",
   "mcp": {
-    "orbit-local": {
+    "orbit-cli": {
       "type": "local",
       "command": ["orbit", "mcp", "serve"]
     }
@@ -287,7 +287,7 @@ Add the MCP server configuration to `opencode.json` in the repository root, or t
 {
   "$schema": "https://opencode.ai/config.json",
   "mcp": {
-    "orbit-local": {
+    "orbit-cli": {
       "type": "local",
       "command": ["glab", "orbit", "local", "mcp", "serve"]
     }
@@ -322,7 +322,7 @@ edit your client's MCP configuration file:
 ```json
 {
   "mcpServers": {
-    "orbit-local": {
+    "orbit-cli": {
       "command": "orbit",
       "args": ["mcp", "serve"]
     }
@@ -342,7 +342,7 @@ To connect using the GitLab CLI:
 ```json
 {
   "mcpServers": {
-    "orbit-local": {
+    "orbit-cli": {
       "command": "glab",
       "args": ["orbit", "local", "mcp", "serve"]
     }

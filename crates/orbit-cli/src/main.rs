@@ -27,7 +27,7 @@ use tracing_subscriber::fmt::format::FmtSpan;
 
 const LOCAL_DDL: &str = include_str!(concat!(env!("CONFIG_DIR"), "/graph_local.sql"));
 
-const SKILL_LONG_ABOUT: &str = "Print the bundled, version-matched orbit-local skill content.\n\n\
+const SKILL_LONG_ABOUT: &str = "Print the bundled, version-matched orbit-cli skill content.\n\n\
                                 With no argument, prints SKILL.md (the manifest). Pass a relative path \
                                 such as `references/sql.md` or `references/repo_map.md` to print that file.";
 

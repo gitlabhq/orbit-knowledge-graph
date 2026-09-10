@@ -124,7 +124,7 @@ impl Default for OrbitLocalServer {
 impl ServerHandler for OrbitLocalServer {
     fn get_info(&self) -> ServerInfo {
         let mut info = ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
-            .with_server_info(Implementation::new("orbit-local", env!("ORBIT_VERSION")))
+            .with_server_info(Implementation::new("orbit-cli", env!("ORBIT_VERSION")))
             .with_instructions(
                 "Local code graph backed by DuckDB. Use `get_graph_schema` to learn \
                  the tables, then `run_sql` for read-only SQL (DuckDB dialect). \
