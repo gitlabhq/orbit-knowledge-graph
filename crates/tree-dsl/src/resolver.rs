@@ -532,13 +532,13 @@ pub fn resolve(
             continue;
         };
 
-        let mut class_fi = None;
-        let mut class_node = None;
+        let mut resolved_fi = None;
+        let mut resolved_node = None;
         if let Some(&cn) = visible[target_fi].get(&ret_sym) {
-            class_fi = Some(target_fi);
-            class_node = Some(cn);
+            resolved_fi = Some(target_fi);
+            resolved_node = Some(cn);
         }
-        if class_fi.is_none() {
+        if resolved_fi.is_none() {
             for ce2 in &cross_edges {
                 if ce2.from_file == target_fi && ce2.kind == E_IMPORTS {
                     let def_name = trees[ce2.to_file]
@@ -547,15 +547,15 @@ pub fn resolve(
                         .map(|c| trees[ce2.to_file].sym(c))
                         .unwrap_or(0);
                     if def_name == ret_sym {
-                        class_fi = Some(ce2.to_file);
-                        class_node = Some(ce2.to_node);
+                        resolved_fi = Some(ce2.to_file);
+                        resolved_node = Some(ce2.to_node);
                         break;
                     }
                 }
             }
         }
 
-        let (Some(cls_fi), Some(cls_node)) = (class_fi, class_node) else {
+        let (Some(type_fi), Some(type_node)) = (resolved_fi, resolved_node) else {
             continue;
         };
 
@@ -610,20 +610,20 @@ pub fn resolve(
                         .unwrap_or(0);
                     if mem_sym != 0 {
                         let mut found = false;
-                        for cd in trees[cls_fi].descendants(cls_node) {
-                            if trees[cls_fi].kind(cd) == k_deftype {
-                                let mn = trees[cls_fi].nodes[cd as usize].parent;
-                                if mn != crate::lang::NONE && mn != cls_node {
-                                    let mname = trees[cls_fi]
+                        for cd in trees[type_fi].descendants(type_node) {
+                            if trees[type_fi].kind(cd) == k_deftype {
+                                let mn = trees[type_fi].nodes[cd as usize].parent;
+                                if mn != crate::lang::NONE && mn != type_node {
+                                    let mname = trees[type_fi]
                                         .child_by_field(mn, name_f)
-                                        .or_else(|| trees[cls_fi].child_by_field(mn, left_f))
-                                        .map(|c| trees[cls_fi].sym(c))
+                                        .or_else(|| trees[type_fi].child_by_field(mn, left_f))
+                                        .map(|c| trees[type_fi].sym(c))
                                         .unwrap_or(0);
                                     if mname == mem_sym && !found {
                                         type_edges.push(CrossEdge {
                                             from_file: caller_fi,
                                             from_node: caller_node,
-                                            to_file: cls_fi,
+                                            to_file: type_fi,
                                             to_node: mn,
                                             kind: crate::lang::E_CALLS,
                                         });

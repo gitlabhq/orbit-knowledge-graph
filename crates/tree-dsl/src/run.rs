@@ -814,8 +814,8 @@ fn classify_member_call_rhs(
 
     for cpv in &ssa.read_variable(type_sym, block) {
         if let ParseValue::LocalDef(cdi) = cpv {
-            let cls = def_nodes[*cdi as usize];
-            if let Some(method) = find_method(tree, def_nodes, cls, mem_sym, syns, f) {
+            let target = def_nodes[*cdi as usize];
+            if let Some(method) = find_method(tree, def_nodes, target, mem_sym, syns, f) {
                 if let Some(rt) = return_type_of_def(tree, method, lang, syns, f) {
                     return Value::Type(rt);
                 }
@@ -830,19 +830,19 @@ fn classify_member_call_rhs(
 fn find_method(
     tree: &Tree,
     def_nodes: &[u32],
-    class_node: u32,
+    container: u32,
     method_name: u32,
     syns: &Syns,
     f: &Fields,
 ) -> Option<u32> {
-    let mut search = vec![class_node];
+    let mut search = vec![container];
     let mut si = 0;
     while si < search.len() {
-        let cls = search[si];
-        for d in tree.descendants(cls) {
+        let current = search[si];
+        for d in tree.descendants(current) {
             if tree.kind(d) == syns.deftype {
                 let method_node = tree.nodes[d as usize].parent;
-                if method_node != NONE && method_node != cls {
+                if method_node != NONE && method_node != current {
                     let mname = tree
                         .child_by_field(method_node, f.name)
                         .or_else(|| tree.child_by_field(method_node, f.left))
@@ -854,7 +854,7 @@ fn find_method(
                 }
             }
         }
-        for c in tree.children(cls) {
+        for c in tree.children(current) {
             if tree.kind(c) == syns.supertype && tree.sym(c) != 0 {
                 let super_name = tree.sym(c);
                 for &dn in def_nodes {
