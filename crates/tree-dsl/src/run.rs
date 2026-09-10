@@ -6,34 +6,15 @@ use crate::pattern;
 use crate::ssa::{BlockId, ParseValue, SsaEngine, Value};
 use crate::tree::{EdgeKind, NONE, Tree};
 
-pub struct LangDef {
-    pub rewrites: Vec<Vec<crate::pattern::Rewrite>>,
-    pub resolve: crate::file_tree::ResolveConfig,
-}
-
-impl LangDef {
-    pub fn empty() -> Self {
-        Self {
-            rewrites: vec![],
-            resolve: crate::file_tree::ResolveConfig::default(),
-        }
-    }
-}
-
 pub struct Pipeline {
     pub lang_id: SupportLang,
     pub rewrite_stages: Vec<Vec<crate::pattern::Rewrite>>,
     pub resolve: crate::file_tree::ResolveConfig,
 }
 
-/// Embedded YAML rule files. Returns None if the language has no rules yet.
 fn lang_yaml(lang_id: SupportLang) -> Option<&'static str> {
     match lang_id {
         SupportLang::Python => Some(include_str!("../langs/python.yaml")),
-        // TS/JS share the same rules when they exist
-        // SupportLang::TypeScript | SupportLang::Tsx | SupportLang::JavaScript =>
-        //     Some(include_str!("../langs/typescript.yaml")),
-        // SupportLang::Rust => Some(include_str!("../langs/rust.yaml")),
         _ => None,
     }
 }
@@ -41,18 +22,15 @@ fn lang_yaml(lang_id: SupportLang) -> Option<&'static str> {
 impl Pipeline {
     pub fn for_lang(lang_id: SupportLang) -> (Pipeline, Lang) {
         let mut lang = Lang::new();
-        let def = match lang_yaml(lang_id) {
-            Some(yaml) => {
-                let (rewrites, resolve) = crate::rules::load_lang(yaml, &mut lang);
-                LangDef { rewrites, resolve }
-            }
-            None => LangDef::empty(),
+        let (rewrite_stages, resolve) = match lang_yaml(lang_id) {
+            Some(yaml) => crate::rules::load_lang(yaml, &mut lang),
+            None => (vec![], crate::file_tree::ResolveConfig::default()),
         };
         (
             Pipeline {
                 lang_id,
-                rewrite_stages: def.rewrites,
-                resolve: def.resolve,
+                rewrite_stages,
+                resolve,
             },
             lang,
         )

@@ -190,65 +190,6 @@ impl Tree {
         })
     }
 
-    pub fn find(&self, i: u32, axis: Axis, m: Match) -> Option<u32> {
-        match axis {
-            Axis::Child => self.children(i).find(|&c| m.test(self, c)),
-            Axis::Parent => self.parent(i).filter(|&p| m.test(self, p)),
-            Axis::Ancestor => self.parent_chain(i).find(|&a| m.test(self, a)),
-            Axis::Descendant => self.descendants(i).find(|&d| m.test(self, d)),
-            Axis::Field(f) => self.child_by_field(i, f).filter(|&c| m.test(self, c)),
-            Axis::PrevSibling => {
-                let parent = self.parent(i)?;
-                let mut prev = None;
-                for c in self.children(parent) {
-                    if c == i {
-                        break;
-                    }
-                    if m.test(self, c) {
-                        prev = Some(c);
-                    }
-                }
-                prev
-            }
-            Axis::NextSibling => {
-                let parent = self.parent(i)?;
-                let mut past = false;
-                for c in self.children(parent) {
-                    if past && m.test(self, c) {
-                        return Some(c);
-                    }
-                    if c == i {
-                        past = true;
-                    }
-                }
-                None
-            }
-            Axis::FieldName(_) => None, // needs Lang to resolve; use Field(id) instead
-        }
-    }
-
-    pub fn find_all<'a>(
-        &'a self,
-        i: u32,
-        axis: Axis<'a>,
-        m: Match<'a>,
-    ) -> Box<dyn Iterator<Item = u32> + 'a> {
-        match axis {
-            Axis::Child => Box::new(self.children(i).filter(move |&c| m.test(self, c))),
-            Axis::Descendant => Box::new(self.descendants(i).filter(move |&d| m.test(self, d))),
-            Axis::Ancestor => Box::new(self.parent_chain(i).filter(move |&a| m.test(self, a))),
-            Axis::Parent
-            | Axis::Field(_)
-            | Axis::FieldName(_)
-            | Axis::PrevSibling
-            | Axis::NextSibling => Box::new(self.find(i, axis, m).into_iter()),
-        }
-    }
-
-    pub fn has(&self, i: u32, axis: Axis, m: Match) -> bool {
-        self.find(i, axis, m).is_some()
-    }
-
     pub fn add_edge(&mut self, from: u32, to: u32, kind: EdgeKind) {
         if kind == EdgeKind::Calls
             || !self
@@ -448,43 +389,6 @@ pub fn elems<'a>(
         }
         None
     })
-}
-
-#[derive(Clone, Copy)]
-pub enum Axis<'a> {
-    Child,
-    Parent,
-    Ancestor,
-    Descendant,
-    Field(u16),
-    PrevSibling,
-    NextSibling,
-    #[allow(dead_code)]
-    FieldName(&'a str),
-}
-
-#[derive(Clone, Copy)]
-pub enum Match<'a> {
-    Kind(u16),
-    KindName(&'a str),
-    AnyKind(&'a [u16]),
-    Any,
-    Named,
-    Text(u32),
-}
-
-impl Match<'_> {
-    pub fn test(&self, t: &Tree, i: u32) -> bool {
-        let n = &t.nodes[i as usize];
-        match self {
-            Match::Kind(k) => n.kind == *k,
-            Match::KindName(_name) => false, // needs Lang; use Kind(id) instead
-            Match::AnyKind(ks) => ks.contains(&n.kind),
-            Match::Any => true,
-            Match::Named => n.named,
-            Match::Text(s) => n.sym == *s,
-        }
-    }
 }
 
 pub fn copy_subtree(t: &Tree, i: u32, out: &mut Vec<Node>, parent: u32) {
