@@ -21,7 +21,7 @@ title: GitLab Self-ManagedにおけるGitLab Orbit
 {{< /history >}}
 
 > [!note]
- GitLab Self-ManagedにおけるGitLab Orbitは[ベータ版](https://docs.gitlab.com/policy/development_stages_support/#beta)です。この機能はテスト目的で利用可能ですが、本番環境での使用には対応していません。
+> GitLab Self-ManagedにおけるGitLab Orbitは[ベータ版](https://docs.gitlab.com/policy/development_stages_support/#beta)です。この機能はテスト目的で利用可能ですが、本番環境での使用には対応していません。
 
 GitLab.comでは、GitLab OrbitはGitLabのインフラストラクチャ上で動作します。GitLab Self-Managedでは、GitLab Orbitをインスタンスの隣で実行します。
 

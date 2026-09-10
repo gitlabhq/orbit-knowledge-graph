@@ -160,7 +160,7 @@ claude mcp list
 接続後、[AIアシスタントをセットアップ](./cli.md)します。
 
 > [!note]
- プロジェクトスコープのコマンドの場合、Claude Codeは`mcp.json`ファイルを作成する前に承認を求めます。承認するまで、`claude mcp list`にはサーバーが`Pending approval`として表示されます。
+> プロジェクトスコープのコマンドの場合、Claude Codeは`mcp.json`ファイルを作成する前に承認を求めます。承認するまで、`claude mcp list`にはサーバーが`Pending approval`として表示されます。
 
 ### Codexに接続する {#connect-codex}
 

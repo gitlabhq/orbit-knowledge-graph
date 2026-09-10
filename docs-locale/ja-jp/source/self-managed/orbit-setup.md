@@ -21,7 +21,7 @@ title: GitLab Orbitをセットアップする
 {{< /history >}}
 
 > [!note]
- GitLab Self-ManagedのGitLab Orbitは [ベータ版](https://docs.gitlab.com/policy/development_stages_support/#beta)です。この機能はテスト目的で利用可能ですが、本番環境での使用には対応していません。
+> GitLab Self-ManagedのGitLab Orbitは [ベータ版](https://docs.gitlab.com/policy/development_stages_support/#beta)です。この機能はテスト目的で利用可能ですが、本番環境での使用には対応していません。
 
 GitLab Orbitは、インスタンスの隣にHelmリリースとして動作します。インデクサーはClickHouseデータレイクを読み取り、GitLab内部APIを通じてソースコードをフェッチします。Webサーバーはグラフへのクエリに応答します。
 

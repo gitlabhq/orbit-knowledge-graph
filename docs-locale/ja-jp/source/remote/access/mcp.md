@@ -22,7 +22,7 @@ title: MCPを使用してOrbitにアクセスする
 {{< /history >}}
 
 > [!flag]
- この機能の利用可否は機能フラグによって制御されています。詳細については、履歴を参照してください。この機能はテスト目的で利用可能ですが、本番環境での使用には対応していません。
+> この機能の利用可否は機能フラグによって制御されています。詳細については、履歴を参照してください。この機能はテスト目的で利用可能ですが、本番環境での使用には対応していません。
 
 GitLab OrbitはMCP対応のAIエージェントがGitLabのナレッジグラフに対してGitLab Orbitコマンドを検出・実行できる2つのMCPツールを公開しています。Claude Code、OpenAI Codex、またはModel Context Protocolをサポートするその他のツールと組み合わせて使用できます。
 
@@ -62,7 +62,7 @@ claude mcp add --transport http gitlab-orbit https://gitlab.com/api/v4/orbit/mcp
 最初の`list_commands`または`invoke_command`の呼び出し時にブラウザが開き、GitLabで認証が行われます。JSONの設定ファイルを編集する必要はありません。
 
 > [!note]
- Claude CodeはHTTPで直接接続します。Claude Codeで`npx mcp-remote`を使用しないでください。エンドポイントをstdioプロセスでラップするため、組み込みトランスポートと競合し、「Failed to connect」エラーが発生します。代わりに上記の`claude mcp add --transport http`コマンドを使用してください。
+> Claude CodeはHTTPで直接接続します。Claude Codeで`npx mcp-remote`を使用しないでください。エンドポイントをstdioプロセスでラップするため、組み込みトランスポートと競合し、「Failed to connect」エラーが発生します。代わりに上記の`claude mcp add --transport http`コマンドを使用してください。
 
 一部のクライアントはローカルのstdio MCPサーバーのみをサポートしています。そのような場合は、[`mcp-remote`](https://www.npmjs.com/package/mcp-remote)を使用してGitLab Orbitエンドポイントをローカルコマンドとしてラップします。
 
@@ -93,7 +93,7 @@ claude mcp add --transport http gitlab-orbit https://gitlab.com/api/v4/orbit/mcp
 ```
 
 > [!note]
- opencodeでは`"type": "local"`が必要で、コマンドと引数を単一の配列にまとめて指定します。`args`フィールドを別途指定したり`type`を省略したりすると、`ConfigInvalidError`が発生します。
+> opencodeでは`"type": "local"`が必要で、コマンドと引数を単一の配列にまとめて指定します。`args`フィールドを別途指定したり`type`を省略したりすると、`ConfigInvalidError`が発生します。
 
 **Gemini CLI** — ネイティブHTTPトランスポートでGitLab Orbitエンドポイントをサポートしています。`~/.gemini/settings.json`に以下を追加します:
 
@@ -116,7 +116,7 @@ claude mcp add --transport http gitlab-orbit https://gitlab.com/api/v4/orbit/mcp
 `gemini mcp add gitlab-orbit https://gitlab.com/api/v4/orbit/mcp -t http -s user`で生成した後、`oauth.scopes`ブロックを手動で追加することもできます。
 
 > [!note]
- ネイティブHTTP MCPクライアントは`mcp_orbit` OAuthスコープを明示的にリクエストする必要があります。`oauth.scopes: ["mcp_orbit"]`がない場合、GitLabに既にサインインしていても認証に失敗します。ネイティブHTTPトランスポートのクライアントで認証できない場合は、MCPサーバー設定にこのスコープを追加してください。
+> ネイティブHTTP MCPクライアントは`mcp_orbit` OAuthスコープを明示的にリクエストする必要があります。`oauth.scopes: ["mcp_orbit"]`がない場合、GitLabに既にサインインしていても認証に失敗します。ネイティブHTTPトランスポートのクライアントで認証できない場合は、MCPサーバー設定にこのスコープを追加してください。
 >
 > 古いGemini CLIの設定では `url`+`type: "http"` の代わりに`httpUrl`が使用されている場合があります。`httpUrl`は引き続き機能しますが非推奨です。新しい設定では`url` + `type`を使用してください。
 
@@ -134,12 +134,12 @@ claude mcp add --transport http gitlab-orbit https://gitlab.com/api/v4/orbit/mcp
 ```
 
 > [!note]
- ここでは`oauth`ブロックは不要です。`mcp-remote`がエンドポイントのOAuthメタデータから`mcp_orbit`スコープを検出し、初回使用時にブラウザを開いて認証を行います。
+> ここでは`oauth`ブロックは不要です。`mcp-remote`がエンドポイントのOAuthメタデータから`mcp_orbit`スコープを検出し、初回使用時にブラウザを開いて認証を行います。
 
 認証には既存の`glab auth login`セッションを使用します。トークンのコピーや貼り付けは不要です。サポートされているクライアント:Claude Code、OpenCode、Cursor、Codex、Gemini CLI、Antigravity。
 
 > [!note]
- 計画中の`glab orbit setup`サブコマンドにより、GitLab OrbitスキルのインストールとこのMCP設定の書き込みを1ステップで行えるようになります。リリースまでは、上記の手順に従ってMCPクライアントを手動で設定してください。
+> 計画中の`glab orbit setup`サブコマンドにより、GitLab OrbitスキルのインストールとこのMCP設定の書き込みを1ステップで行えるようになります。リリースまでは、上記の手順に従ってMCPクライアントを手動で設定してください。
 
 また、[GitLab Orbitスキルを手動でインストール](../../ai_coding_agents.md)することで、エージェントにクエリレシピ、DSLガイダンス、トラブルシューティング情報を提供できます。
 
