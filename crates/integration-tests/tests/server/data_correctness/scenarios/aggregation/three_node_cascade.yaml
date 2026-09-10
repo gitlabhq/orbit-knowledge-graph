@@ -1,0 +1,31 @@
+# source: crates/integration-tests/tests/server/data_correctness/aggregation.rs::aggregation_three_node_with_cascade_intermediate
+description: 3-node aggregation with cascade-optimized intermediate node
+
+config:
+  security:
+    paths: ["1/"]
+
+query:
+  json: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
+        {"id": "mr", "entity": "MergeRequest"},
+        {"id": "n", "entity": "Note", "id_range": {"start": 1, "end": 10000}}
+      ],
+      "relationships": [
+        {"type": "AUTHORED", "from": "u", "to": "mr"},
+        {"type": "HAS_NOTE", "from": "mr", "to": "n"}
+      ],
+      "group_by": ["u"],
+      "aggregations": [{"count": "n", "as": "note_count"}],
+      "limit": 10
+    }
+
+expect:
+  skip_requirements: ["node_ids", "relationship:AUTHORED", "relationship:HAS_NOTE"]
+  groups:
+    u:
+      rows:
+        - { entity: User, id: 1, values: { note_count: 4 }, properties: { username: alice } }

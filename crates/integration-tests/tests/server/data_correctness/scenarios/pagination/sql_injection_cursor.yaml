@@ -1,0 +1,15 @@
+# source: crates/integration-tests/tests/server/data_correctness/pagination.rs::cursor_after_token_with_sql_metacharacters_is_parameterized
+description: SQL metacharacters in cursor after token are parameterized
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000},
+                 "columns": ["username"]}],
+      "order_by": "u.username",
+      "cursor": {"page_size": 2, "after": "invalid-but-must-not-crash"}
+    }
+
+expect:
+  compile_error: true

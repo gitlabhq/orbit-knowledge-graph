@@ -1,0 +1,36 @@
+# source: crates/integration-tests/tests/server/data_correctness/pagination.rs::cursor_traversal_multi_hop_with_redaction_covers_authorized_edges
+description: Multi-hop traversal with redaction pages cover authorized edges only
+
+config:
+  redaction:
+    allow:
+      user: [1, 2, 3, 4, 5, 6, 7]
+      group: [100, 102, 200, 300]
+      project: [1000, 1001, 1002, 1003, 1004, 1010]
+    deny:
+      group: [101]
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
+        {"id": "g", "entity": "Group"},
+        {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}}
+      ],
+      "relationships": [
+        {"type": "MEMBER_OF", "from": "u", "to": "g"},
+        {"type": "CONTAINS", "from": "g", "to": "p"}
+      ],
+      "cursor": {"page_size": 3}
+    }
+
+expect:
+  pages:
+    - skip_requirements: ["relationship:MEMBER_OF", "relationship:CONTAINS"]
+    - skip_requirements: ["relationship:MEMBER_OF", "relationship:CONTAINS"]
+    - skip_requirements: ["relationship:MEMBER_OF", "relationship:CONTAINS"]
+    - skip_requirements: ["relationship:MEMBER_OF", "relationship:CONTAINS"]
+    - skip_requirements: ["relationship:MEMBER_OF", "relationship:CONTAINS"]
+    - skip_requirements: ["relationship:MEMBER_OF", "relationship:CONTAINS"]

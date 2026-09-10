@@ -1,0 +1,31 @@
+# source: crates/integration-tests/tests/server/data_correctness/aggregation.rs::aggregation_multiple_functions_in_one_query
+description: Multiple aggregation functions (count, avg, min) in one query
+
+config:
+  security:
+    paths: ["1/"]
+
+query:
+  json: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
+        {"id": "u", "entity": "User"}
+      ],
+      "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+      "group_by": ["g"],
+      "aggregations": [
+        {"count": "u", "as": "cnt"},
+        {"avg": "u.id", "as": "avg_id"},
+        {"min": "u.id", "as": "min_id"}
+      ],
+      "limit": 10
+    }
+
+expect:
+  groups:
+    g:
+      rows:
+        - { entity: Group, id: 100, values: { cnt: 3, avg_id: 3.0, min_id: 1 } }
+        - { entity: Group, id: 101, values: { cnt: 4, avg_id: 4.5, min_id: 3 } }

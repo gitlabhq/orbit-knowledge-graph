@@ -1,0 +1,19 @@
+# source: crates/integration-tests/tests/server/data_correctness/pagination.rs::cursor_traversal_without_order_by_is_deterministic
+description: Traversal cursor without order_by returns deterministic first page
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
+        {"id": "g", "entity": "Group"}
+      ],
+      "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+      "cursor": {"page_size": 4}
+    }
+
+expect:
+  node_count: 6
+  has_more: true
+  skip_requirements: ["relationship:MEMBER_OF"]

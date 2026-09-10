@@ -1,0 +1,28 @@
+# source: crates/integration-tests/tests/server/data_correctness/aggregation.rs::aggregation_group_by_non_default_redaction_id_column
+description: Group by entity with non-default redaction.id_column (MergeRequestDiff)
+
+config:
+  security:
+    paths: ["1/"]
+
+query:
+  json: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {"id": "mr", "entity": "MergeRequest", "id_range": {"start": 1, "end": 10000}},
+        {"id": "d", "entity": "MergeRequestDiff", "columns": ["state"]}
+      ],
+      "relationships": [{"type": "HAS_DIFF", "from": "mr", "to": "d"}],
+      "group_by": ["d"],
+      "aggregations": [{"count": "mr", "as": "mr_count"}],
+      "limit": 10
+    }
+
+expect:
+  groups:
+    d:
+      rows:
+        - { entity: MergeRequestDiff, id: 5000, values: { mr_count: 1 }, properties: { state: collected } }
+        - { entity: MergeRequestDiff, id: 5001, values: { mr_count: 1 }, properties: { state: collected } }
+        - { entity: MergeRequestDiff, id: 5002, values: { mr_count: 1 }, properties: { state: collected } }
