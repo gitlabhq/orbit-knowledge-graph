@@ -1,4 +1,4 @@
-//! Serves the bundled `orbit-local` skill from the binary itself. The skill
+//! Serves the bundled `orbit-cli` skill from the binary itself. The skill
 //! directory is embedded at compile time via `rust-embed` (same pattern the
 //! ontology and named-queries crates use), so the content is always matched to
 //! the binary version and present for every install method — `glab orbit
@@ -8,7 +8,7 @@ use anyhow::{Result, bail};
 use rust_embed::Embed;
 
 #[derive(Embed)]
-#[folder = "$SKILLS_DIR/orbit-local"]
+#[folder = "$SKILLS_DIR/orbit-cli"]
 struct SkillAssets;
 
 const MANIFEST: &str = "SKILL.md";
@@ -65,7 +65,7 @@ mod tests {
     #[test]
     fn manifest_is_embedded_and_is_the_default() {
         assert!(lookup(MANIFEST).is_some());
-        assert!(lookup(MANIFEST).unwrap().contains("orbit-local"));
+        assert!(lookup(MANIFEST).unwrap().contains("orbit-cli"));
     }
 
     #[test]

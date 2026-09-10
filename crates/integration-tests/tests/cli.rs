@@ -728,7 +728,7 @@ fn skill_serves_bundled_content() {
     let manifest = orbit_cmd().arg("skill").output().unwrap();
     assert!(manifest.status.success());
     let manifest = String::from_utf8(manifest.stdout).unwrap();
-    assert!(manifest.contains("name: orbit-local"));
+    assert!(manifest.contains("name: orbit-cli"));
     assert!(manifest.contains("references/sql.md"));
     assert!(
         manifest.contains("`orbit skill references/sql.md`"),
