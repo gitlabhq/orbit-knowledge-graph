@@ -37,7 +37,7 @@ data_correctness:
   gl_note:
     - { id: 3000, note: Normal note on feature A, noteable_type: MergeRequest, noteable_id: 2000, confidential: false, internal: false, created_at: "2024-01-15 10:30:00", author_id: 1, traversal_path: "1/100/1000/" }
     - { id: 3001, note: Confidential feedback on bug B, noteable_type: MergeRequest, noteable_id: 2001, confidential: true, internal: false, created_at: "2024-02-20 14:45:00", traversal_path: "1/100/1000/" }
-    - { id: 3002, note: { sql: "repeat('x', 10000)" }, noteable_type: MergeRequest, noteable_id: 2000, confidential: false, internal: false, traversal_path: "1/100/1000/" }
+    - { id: 3002, note: { sql: "concat(repeat('🙂', 10000), 'tail')" }, noteable_type: MergeRequest, noteable_id: 2000, confidential: false, internal: false, traversal_path: "1/100/1000/", discussion_id: { sql: "repeat('🙂', 2048)" } }
     - { id: 3003, note: "Robert'); DROP TABLE gl_note;--", noteable_type: MergeRequest, noteable_id: 2000, confidential: false, internal: false, traversal_path: "1/100/1000/" }
 
   gl_merge_request_diff:

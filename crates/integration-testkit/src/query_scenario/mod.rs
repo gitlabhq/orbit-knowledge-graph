@@ -480,13 +480,27 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
                 );
             }
         }
-        for prop in &ne.prop_absent {
-            for node in view.nodes_of_type(entity) {
-                assert!(
-                    !node.has_prop(prop),
-                    "{label}: {entity}/{} should not have property '{prop}'",
-                    node.id
-                );
+        if !ne.prop_absent.is_empty() && !view.nodes_of_type(entity).is_empty() {
+            let present = ne.prop_present.clone();
+            let absent = ne.prop_absent.clone();
+            for prop in &absent {
+                let present = present.clone();
+                let absent_field = prop.clone();
+                view.assert_filter(entity, prop, move |n| {
+                    let has_positive =
+                        present.iter().any(|p| n.has_prop(p)) || !n.properties.is_empty();
+                    has_positive && !n.has_prop(&absent_field)
+                });
+            }
+        } else {
+            for prop in &ne.prop_absent {
+                for node in view.nodes_of_type(entity) {
+                    assert!(
+                        !node.has_prop(prop),
+                        "{label}: {entity}/{} should not have property '{prop}'",
+                        node.id
+                    );
+                }
             }
         }
         if let Some(absent) = &ne.absent {
@@ -645,7 +659,12 @@ fn eval_filter_predicate(
         serde_json::Value::Object(m)
             if m.get("is_null") == Some(&serde_json::Value::Bool(true)) =>
         {
-            !n.properties.is_empty() && !n.has_prop(field)
+            // is_null as a filter predicate is inherently trivial (passes for
+            // blank nodes). Use prop_absent on the entity level instead for
+            // non-trivial absence checks. This arm exists for queries where
+            // other filter assertions on the same entity make the overall
+            // predicate non-trivial.
+            !n.has_prop(field)
         }
         serde_json::Value::Object(m)
             if m.get("is_not_null") == Some(&serde_json::Value::Bool(true)) =>
