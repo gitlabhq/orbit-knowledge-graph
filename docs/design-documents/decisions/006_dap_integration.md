@@ -199,12 +199,33 @@ reads only for non-code, missing coverage, or unreliable working-tree source;
 literal-text searches use `rg`. Lookups stop once the edit point is clear.
 Name/path matches do not establish connections, field access, or dataflow.
 
-Local indexing records source fingerprints in `_orbit_meta` for files whose
-contents remain unchanged across the indexing run. `context` and `grep --body`
-use indexed ranges only when the working-tree content matches its fingerprint.
-Otherwise they show the full current file, labeled `ranges=unverified`, without
-reparsing or changing the graph. Test code is included. Re-run `index` to refresh
-definitions, relationships, and fingerprints.
+Full indexing records stable source-version fingerprints in `_orbit_meta`,
+including skipped or failed files: it replaces the previous graph, and fingerprints
+describe source versions, not complete parse coverage. Unchanged skipped files do
+not trigger retries or block refresh of other edited files. On each `grep` or
+`context` request, the repository walk and content hashing identify changed or
+new source and files that left the indexed inventory. Unchanged files still incur
+filesystem reads. The code pipeline parses only changed and new candidates,
+retaining the repository root
+for parser workspace context. Unchanged files are not reparsed. File, definition,
+and import rows, project search documents, and fingerprints are replaced in one
+DuckDB transaction. Directory rows are deduplicated; empty directories are removed.
+
+Any parser error, skip, fault, or unstable source aborts publication of the changed
+set. Previous definitions and fingerprints remain intact. On failure, `context`
+and automatic source output from `grep` show full current source labeled
+`ranges=unverified` rather than use stale ranges. Unsupported files also use this
+fallback. Test code is included.
+
+File refresh is not an incremental semantic graph: range-based IDs can change,
+and subset parsing cannot reconstruct connections from unchanged files. Before
+refresh, all project relationships are removed and an incompleteness marker is
+persisted in `_orbit_meta`, even if parsing later fails. Dedicated relationship
+lookups refuse results until a successful full `index` rebuild clears the marker.
+Full indexing retains its best-effort coverage semantics: ordinary skips and faults
+do not keep relationships invalidated, but fatal failures or unstable source do.
+SQL and repository maps warn about affected projects; MCP adds warning text
+alongside its unchanged JSON result. Other projects remain intact.
 
 Setup hooks route searches to `grep` and source reads to `context`. Known paths
 are absolute and shell-quoted; `context` resolves their internal dot segments.

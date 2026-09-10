@@ -60,6 +60,9 @@ pub fn run(
     }
 
     let client = open_graph(db)?;
+    if let Some(warning) = crate::refresh::relationship_warning(&client, None)? {
+        eprintln!("warning: {warning}");
+    }
     if !all {
         scope_to_checkout(&client, repo.as_deref().unwrap_or(Path::new(".")))?;
     }
@@ -125,14 +128,17 @@ fn scope_tables(client: &DuckDbClient, project_id: i64, commit_sha: &str) -> Res
 
     let sha = sql_lit(commit_sha);
     let base = |table: &str| format!("{}.main.{}", quote_ident(&catalog), quote_ident(table));
-    let indexed = node_tables
-        .iter()
+    let indexed = std::iter::once(format!(
+        "EXISTS (SELECT 1 FROM {} WHERE project_id = {project_id} AND commit_sha = {sha} AND status = 'indexed')",
+        base("_orbit_manifest")
+    ))
+        .chain(node_tables.iter()
         .map(|(table, _)| {
             format!(
                 "EXISTS (SELECT 1 FROM {} WHERE project_id = {project_id} AND commit_sha = {sha})",
                 base(table)
             )
-        })
+        }))
         .collect::<Vec<_>>()
         .join(" OR ");
     if !bool_column(
