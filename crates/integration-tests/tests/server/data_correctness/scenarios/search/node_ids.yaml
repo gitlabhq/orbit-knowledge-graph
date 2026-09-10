@@ -1,0 +1,21 @@
+# source: crates/integration-tests/tests/server/data_correctness/search.rs::search_node_ids_returns_only_specified
+description: node_ids constraint returns only the specified IDs
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [{"id": "g", "entity": "Group", "columns": ["name"],
+                 "node_ids": [100, 102]}],
+      "limit": 10
+    }
+
+expect:
+  node_count: 2
+  nodes:
+    Group:
+      ids: [100, 102]
+      absent: [101]
+      rows:
+        - { id: 100, name: Public Group }
+        - { id: 102, name: Internal Group }

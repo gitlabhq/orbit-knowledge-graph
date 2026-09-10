@@ -497,31 +497,8 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
         for (field, expected) in &ne.filters {
             let expected = expected.clone();
             let field_name = field.clone();
-            view.assert_filter(entity, field, move |n| match &expected {
-                serde_json::Value::Object(m) if m.contains_key("starts_with") => {
-                    let prefix = m["starts_with"].as_str().unwrap();
-                    n.prop_str(&field_name)
-                        .is_some_and(|v| v.starts_with(prefix))
-                }
-                serde_json::Value::Object(m) if m.contains_key("contains") => {
-                    let sub = m["contains"].as_str().unwrap();
-                    n.prop_str(&field_name).is_some_and(|v| v.contains(sub))
-                }
-                serde_json::Value::Object(m) if m.contains_key("ends_with") => {
-                    let suffix = m["ends_with"].as_str().unwrap();
-                    n.prop_str(&field_name).is_some_and(|v| v.ends_with(suffix))
-                }
-                serde_json::Value::Object(m) if m.contains_key("in") => {
-                    let vals = m["in"].as_array().unwrap();
-                    n.prop(&field_name).is_some_and(|p| vals.contains(p))
-                }
-                serde_json::Value::Object(m) if m.contains_key("gte") => {
-                    let threshold = m["gte"].as_i64().unwrap();
-                    n.prop_i64(&field_name)
-                        .or_else(|| n.prop_str(&field_name).and_then(|s| s.parse().ok()))
-                        .is_some_and(|v| v >= threshold)
-                }
-                _ => n.prop(&field_name) == Some(&expected),
+            view.assert_filter(entity, field, move |n| {
+                eval_filter_predicate(n, &field_name, &expected)
             });
         }
     }
@@ -643,6 +620,79 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
             expected,
             "{label}: has_more mismatch"
         );
+    }
+}
+
+fn eval_filter_predicate(
+    n: &query_engine::formatters::GraphNode,
+    field: &str,
+    expected: &serde_json::Value,
+) -> bool {
+    match expected {
+        serde_json::Value::Object(m) if m.contains_key("starts_with") => n
+            .prop_str(field)
+            .is_some_and(|v| v.starts_with(m["starts_with"].as_str().unwrap())),
+        serde_json::Value::Object(m) if m.contains_key("contains") => n
+            .prop_str(field)
+            .is_some_and(|v| v.contains(m["contains"].as_str().unwrap())),
+        serde_json::Value::Object(m) if m.contains_key("ends_with") => n
+            .prop_str(field)
+            .is_some_and(|v| v.ends_with(m["ends_with"].as_str().unwrap())),
+        serde_json::Value::Object(m) if m.contains_key("in") => {
+            let vals = m["in"].as_array().unwrap();
+            n.prop(field).is_some_and(|p| vals.contains(p))
+        }
+        serde_json::Value::Object(m)
+            if m.get("is_null") == Some(&serde_json::Value::Bool(true)) =>
+        {
+            !n.properties.is_empty() && !n.has_prop(field)
+        }
+        serde_json::Value::Object(m)
+            if m.get("is_not_null") == Some(&serde_json::Value::Bool(true)) =>
+        {
+            n.has_prop(field)
+        }
+        serde_json::Value::Object(m) if m.contains_key("gte") => {
+            let threshold = &m["gte"];
+            if let Some(t) = threshold.as_i64() {
+                n.prop_i64(field)
+                    .or_else(|| n.prop_str(field).and_then(|s| s.parse().ok()))
+                    .is_some_and(|v| v >= t)
+            } else {
+                let t = threshold.as_str().unwrap();
+                n.prop_str(field).is_some_and(|v| v >= t)
+            }
+        }
+        serde_json::Value::Object(m) if m.contains_key("lte") => {
+            let t = m["lte"].as_str().unwrap();
+            n.prop_str(field).is_some_and(|v| v <= t)
+        }
+        serde_json::Value::Object(m) if m.contains_key("lt") => {
+            let t = m["lt"].as_str().unwrap();
+            n.prop_str(field).is_some_and(|v| v < t)
+        }
+        serde_json::Value::Object(m) if m.contains_key("eq") => {
+            let val = &m["eq"];
+            n.prop(field) == Some(val)
+                || match val {
+                    serde_json::Value::Number(num) => {
+                        n.prop_str(field).is_some_and(|s| s == num.to_string())
+                    }
+                    serde_json::Value::String(s) => n.prop_str(field) == Some(s.as_str()),
+                    _ => false,
+                }
+        }
+        // Compound filter: all sub-predicates must pass
+        serde_json::Value::Object(m) if m.len() > 1 => m.iter().all(|(op, val)| {
+            let sub =
+                serde_json::Value::Object(std::iter::once((op.clone(), val.clone())).collect());
+            eval_filter_predicate(n, field, &sub)
+        }),
+        serde_json::Value::Object(m) if m.len() == 1 => {
+            let op = m.keys().next().unwrap();
+            panic!("unsupported filter operator '{op}' on field '{field}'")
+        }
+        _ => n.prop(field) == Some(expected),
     }
 }
 

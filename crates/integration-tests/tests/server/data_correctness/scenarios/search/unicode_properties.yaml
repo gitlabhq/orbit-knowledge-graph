@@ -1,0 +1,22 @@
+# source: crates/integration-tests/tests/server/data_correctness/search.rs::search_unicode_properties_survive_pipeline
+description: Unicode and emoji values survive the query pipeline round-trip
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000},
+                 "columns": ["username", "name"],
+                 "node_ids": [6]}],
+      "limit": 10
+    }
+
+expect:
+  node_count: 1
+  nodes:
+    User:
+      ids: [6]
+      rows:
+        - id: 6
+          username: "用户_émoji_🎉"
+          name: "Ünïcödé Üser"

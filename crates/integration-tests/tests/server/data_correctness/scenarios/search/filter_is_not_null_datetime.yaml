@@ -1,0 +1,24 @@
+# source: crates/integration-tests/tests/server/data_correctness/search.rs::search_filter_is_not_null_on_datetime_returns_merged_rows
+description: is_not_null on DateTime returns rows with non-null merged_at
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [{"id": "mr", "entity": "MergeRequest",
+               "id_range": {"start": 1, "end": 10000},
+               "columns": ["title", "state", "merged_at"],
+               "filters": {
+                   "merged_at": {"is_not_null": true}
+               }}],
+      "order_by": "-mr.merged_at",
+      "limit": 10
+    }
+
+expect:
+  node_count: 3
+  nodes:
+    MergeRequest:
+      order: [2005, 2004, 2002]
+      filters:
+        merged_at: { is_not_null: true }

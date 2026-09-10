@@ -1,0 +1,23 @@
+# source: crates/integration-tests/tests/server/data_correctness/search.rs::search_redaction_returns_only_allowed_ids
+description: Redaction allows only the specified entity IDs through
+
+config:
+  redaction:
+    allow:
+      user: [1, 3]
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000},
+                 "columns": ["username"]}],
+      "limit": 10
+    }
+
+expect:
+  node_count: 2
+  nodes:
+    User:
+      ids: [1, 3]
+      absent: [2, 5]
