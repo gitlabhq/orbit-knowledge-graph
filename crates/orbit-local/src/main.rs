@@ -691,11 +691,7 @@ async fn main() -> Result<()> {
 
     let coding_agent = telemetry::detect_coding_agent(|key| std::env::var(key).ok());
 
-    let tracker = if matches!(cli.command, Commands::HookGuard { .. }) {
-        None
-    } else {
-        telemetry::resolve_from_env().build_tracker()
-    };
+    let tracker = telemetry::resolve_from_env().build_tracker();
     if let Some(tracker) = &tracker {
         telemetry::emit_command_event(
             tracker,
