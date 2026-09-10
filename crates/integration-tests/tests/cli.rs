@@ -1281,3 +1281,98 @@ fn repo_map_api_empty_prefix_succeeds() {
         "must not leak DuckDB glob error: {stderr}"
     );
 }
+
+const CONTEXT_RUST: &str = "pub fn run() {}\n#[test]\nfn smoke() {}\n";
+const CONTEXT_PYTHON: &str = "def hello():\n    pass\n\ndef bye():\n    pass\n";
+
+fn context_repo() -> (tempfile::TempDir, tempfile::TempDir) {
+    let repo = tempfile::TempDir::new().unwrap();
+    init_repo_at(
+        repo.path(),
+        &[
+            ("src/lib.rs", CONTEXT_RUST),
+            ("src/tool.py", CONTEXT_PYTHON),
+        ],
+    );
+    let data = tempfile::TempDir::new().unwrap();
+    assert!(orbit_index(repo.path(), data.path()));
+    (repo, data)
+}
+
+fn context(repo: &std::path::Path, data: &std::path::Path, args: &[&str]) -> String {
+    let (stdout, stderr, ok) = run_cmd(
+        &[&["context", "--repo", repo.to_str().unwrap()], args].concat(),
+        data,
+    );
+    assert!(ok, "{stderr}");
+    stdout
+}
+
+fn assert_full_source(output: &str, file: &str, source: &str) {
+    let expected = format!(
+        "{file}  source=working-tree  ranges=unverified; showing full file\n{}",
+        source
+            .lines()
+            .enumerate()
+            .map(|(n, line)| format!("{}|{line}\n", n + 1))
+            .collect::<String>()
+    );
+    assert!(output.ends_with(&expected), "{output}");
+    assert_eq!(output.matches("ranges=unverified").count(), 1, "{output}");
+}
+
+#[test]
+fn context_uses_indexed_ranges_and_includes_tests() {
+    let (repo, data) = context_repo();
+    let output = context(repo.path(), data.path(), &["run"]);
+    assert_eq!(
+        output,
+        "run  [Function]  src/lib.rs:1-1\n1|pub fn run() {}\n"
+    );
+    let output = context(repo.path(), data.path(), &["--file", "src/lib.rs"]);
+    assert!(output.contains("3|fn smoke() {}"), "{output}");
+    assert!(!output.contains("ranges=unverified"), "{output}");
+    assert!(!output.contains("tests omitted"), "{output}");
+}
+
+#[test]
+fn context_falls_back_to_full_source_until_the_index_matches() {
+    let (repo, data) = context_repo();
+    for (file, name, original, prefix) in [
+        ("src/lib.rs", "run", CONTEXT_RUST, "pub fn added() {}\n"),
+        ("src/tool.py", "bye", CONTEXT_PYTHON, "import sys\n"),
+    ] {
+        let edited = format!("{prefix}{original}");
+        std::fs::write(repo.path().join(file), &edited).unwrap();
+        for args in [vec![name], vec![name, "--outline"], vec!["--file", file]] {
+            let output = context(repo.path(), data.path(), &args);
+            assert_full_source(&output, file, &edited);
+        }
+        let (output, stderr, ok) = run_cmd(
+            &[
+                "grep",
+                name,
+                "--body",
+                "--repo",
+                repo.path().to_str().unwrap(),
+            ],
+            data.path(),
+        );
+        assert!(ok, "{stderr}");
+        assert_full_source(&output, file, &edited);
+        assert!(orbit_index(repo.path(), data.path()));
+        let output = context(repo.path(), data.path(), &[name]);
+        assert!(!output.contains("ranges=unverified"), "{output}");
+        git(repo.path(), &["checkout", "--", file]);
+        let output = context(repo.path(), data.path(), &[name]);
+        assert_full_source(&output, file, original);
+    }
+}
+
+#[test]
+fn context_reads_unindexed_files() {
+    let (repo, data) = context_repo();
+    std::fs::write(repo.path().join("notes.txt"), "current notes\n").unwrap();
+    let output = context(repo.path(), data.path(), &["--file", "notes.txt"]);
+    assert_full_source(&output, "notes.txt", "current notes\n");
+}

@@ -4,10 +4,7 @@ use std::fmt::Write as _;
 use anyhow::{Context, Result};
 use duckdb_client::search::kind_scope;
 
-use crate::commands::{
-    fqn::{self, Def},
-    setup::spec,
-};
+use crate::commands::fqn::{self, Def};
 use crate::workspace;
 
 const SIGNATURE_LINES: usize = 3;
@@ -24,20 +21,7 @@ pub(crate) fn run(target: crate::ContextArgs) -> Result<()> {
     let file = file.as_deref();
     let mut defs = match (target.fqn.as_slice(), file) {
         ([], None) => anyhow::bail!("pass one or more fqns or globs, or --file <path>"),
-        ([], Some(path)) => {
-            let resolved = definitions_in_file(&client, &git, path, &kinds)?;
-            if resolved.is_empty() {
-                let launcher = spec::launcher();
-                anyhow::bail!(
-                    "no indexed definitions in {path:?}{} for commit {} — pass a repo-relative \
-                     path as printed by `{launcher} grep`, and make sure the commit is indexed \
-                     (`{launcher} index <path>`)",
-                    fqn::kind_suffix(&kinds),
-                    git.commit_sha
-                );
-            }
-            resolved
-        }
+        ([], Some(path)) => definitions_in_file(&client, &git, path, &kinds)?,
         (names, file) => {
             let mut defs = Vec::new();
             for name in names {
@@ -55,13 +39,22 @@ pub(crate) fn run(target: crate::ContextArgs) -> Result<()> {
     });
     defs.dedup();
 
+    let sources = workspace::source_fingerprints(&client, git.project_id)?;
+    let mut files = outline(&defs);
+    if let Some(file) = file.filter(|_| file_mode) {
+        files.entry(file.to_string()).or_default();
+    }
     let mut out = String::new();
-    for (file, file_defs) in outline(&defs) {
+    for (file, file_defs) in files {
         let content = std::fs::read_to_string(git.repo_path.join(&file))
             .with_context(|| format!("failed to read {file}"))?;
         let lines: Vec<&str> = content.lines().collect();
         if !out.is_empty() {
             out.push('\n');
+        }
+        if sources.get(&file) != Some(&ontology::migrations::sha256_hex(&content)) {
+            render_unverified(&mut out, &file, &lines)?;
+            continue;
         }
         if file_mode {
             writeln!(
@@ -89,6 +82,7 @@ pub(crate) fn render_bodies(
     git: &workspace::GitInfo,
     defs: &[Def],
 ) -> Result<String> {
+    let sources = workspace::source_fingerprints(client, git.project_id)?;
     let mut out = String::new();
     for (file, file_defs) in outline(defs) {
         let content = std::fs::read_to_string(git.repo_path.join(&file))
@@ -99,6 +93,10 @@ pub(crate) fn render_bodies(
             .partition(|d| d.end.saturating_sub(d.start) < INLINE_BODY_LINES);
         if !out.is_empty() {
             out.push('\n');
+        }
+        if sources.get(&file) != Some(&ontology::migrations::sha256_hex(&content)) {
+            render_unverified(&mut out, &file, &lines)?;
+            continue;
         }
         render(&mut out, &short, &lines, false)?;
         if !long.is_empty() {
@@ -112,16 +110,20 @@ pub(crate) fn render_bodies(
     Ok(out)
 }
 
+fn render_unverified(out: &mut String, file: &str, lines: &[&str]) -> std::fmt::Result {
+    writeln!(
+        out,
+        "{file}  source=working-tree  ranges=unverified; showing full file"
+    )?;
+    write_lines(out, lines, 1, lines.len())
+}
+
 fn repo_relative(repo_path: &std::path::Path, path: &str) -> Result<String> {
-    let trimmed = path.trim_end_matches('/');
-    if !std::path::Path::new(trimmed).is_absolute() {
-        return Ok(trimmed.trim_start_matches("./").to_string());
-    }
-    let canonical =
-        dunce::canonicalize(trimmed).with_context(|| format!("{trimmed} does not exist"))?;
+    let canonical = dunce::canonicalize(repo_path.join(path))
+        .with_context(|| format!("{path} does not exist"))?;
     let relative = canonical.strip_prefix(repo_path).with_context(|| {
         format!(
-            "{trimmed} is outside the indexed repository {}",
+            "{path} is outside the indexed repository {}",
             repo_path.display()
         )
     })?;
@@ -299,6 +301,19 @@ mod tests {
             start,
             end,
         }
+    }
+
+    #[test]
+    fn file_context_normalizes_paths_and_rejects_escape() {
+        let root = tempfile::TempDir::new().unwrap();
+        let repo = root.path().join("repo");
+        std::fs::create_dir_all(repo.join("src")).unwrap();
+        std::fs::write(repo.join("lib.rs"), "").unwrap();
+        std::fs::write(root.path().join("outside.rs"), "").unwrap();
+        let repo = dunce::canonicalize(repo).unwrap();
+        assert_eq!(repo_relative(&repo, "src/../lib.rs").unwrap(), "lib.rs");
+        assert!(repo_relative(&repo, "../outside.rs").is_err());
+        assert!(repo_relative(&repo, root.path().join("outside.rs").to_str().unwrap()).is_err());
     }
 
     #[test]

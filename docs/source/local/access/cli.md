@@ -160,6 +160,32 @@ prints nothing; structured formats emit valid empty output (`[]` for `json`,
 no records for `ndjson`) so pipelines like `orbit list -F json | jq` keep
 working.
 
+## Search definitions
+
+`grep` searches indexed names and paths, not source bodies or regular expressions.
+Use one concept per query, such as `orbit grep "rate limit"`. Inspect weak or
+unmatched candidates with `context` before retrying; **weak matches** does not
+mean every term failed to match.
+
+Read known definitions directly with `orbit context <fqn>`, or use
+`context --file <path>` for imports and surrounding structure. Reuse that source
+for edits instead of reading it again with raw file tools. Start implementing
+once the edit point is clear; follow identifiers only for remaining questions
+and batch independent lookups. This also applies to `grep --body` output.
+
+`context` and `grep --body` compare current source with its indexed fingerprint.
+Changed files or indexes without fingerprints return full working-tree source,
+labeled `ranges=unverified`, instead of potentially stale definition slices.
+This also applies to `--outline`. Test code is included. `context --file` can
+read files with no indexed definitions. Re-run `orbit index` to refresh the graph
+and restore definition-level output.
+
+Name/path matches and missing graph relationships do not establish field reads,
+field writes, or dataflow. Inspect source bodies to check these details.
+
+Use `--repo` to choose a checkout and `--db` to choose its database. Use `--path`
+or `--kind` to narrow search results, and `--limit` to change the number shown.
+
 ## Run as an MCP server
 
 Expose the local graph to any MCP-compatible AI agent over stdio:

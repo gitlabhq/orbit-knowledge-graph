@@ -193,6 +193,25 @@ or `--callees`. An explicit target after the flag takes precedence over position
 terms. Path and definition-kind filters apply to the connected results.
 These commands share the indexed definitions and relationships in DuckDB.
 
+Agent guidance prefers one-concept `grep` searches and direct `context` reads
+for known definitions or files. Agents reuse returned source for edits, using raw
+reads only for non-code, missing coverage, or unreliable working-tree source;
+literal-text searches use `rg`. Lookups stop once the edit point is clear.
+Name/path matches do not establish connections, field access, or dataflow.
+
+Local indexing records source fingerprints in `_orbit_meta` for files whose
+contents remain unchanged across the indexing run. `context` and `grep --body`
+use indexed ranges only when the working-tree content matches its fingerprint.
+Otherwise they show the full current file, labeled `ranges=unverified`, without
+reparsing or changing the graph. Test code is included. Re-run `index` to refresh
+definitions, relationships, and fingerprints.
+
+Setup hooks route searches to `grep` and source reads to `context`. Known paths
+are absolute and shell-quoted; `context` resolves their internal dot segments.
+Unavailable working directories or ambiguous shell reads (directory changes,
+multiple operands, `--`, or `-`) get generic guidance. Piped searches take
+precedence over reads. Hooks emit nothing without a local graph and never block.
+
 ### Caller identification
 
 Every Orbit request is classified by source: frontend, DWS, MCP, REST, code
