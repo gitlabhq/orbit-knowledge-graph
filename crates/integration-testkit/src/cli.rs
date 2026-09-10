@@ -138,7 +138,7 @@ pub fn mcp_roundtrip(data_dir: &Path, requests: &[Value]) -> Vec<Value> {
         "params": {"protocolVersion": "2024-11-05", "capabilities": {},
                    "clientInfo": {"name": "testkit", "version": "0"}}
     }));
-    assert_eq!(recv()["result"]["serverInfo"]["name"], "orbit-local");
+    assert_eq!(recv()["result"]["serverInfo"]["name"], "orbit-cli");
     send(&serde_json::json!({"jsonrpc": "2.0", "method": "notifications/initialized"}));
 
     let responses = requests

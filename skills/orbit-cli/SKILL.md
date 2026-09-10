@@ -1,5 +1,5 @@
 ---
-name: orbit-local
+name: orbit-cli
 description: >
   Index and query a LOCAL checkout of a repository offline with the Orbit local
   CLI (the `orbit` binary, run directly or via `glab orbit local`). It builds a
@@ -13,11 +13,11 @@ description: >
   production data in GitLab (a project such as gitlab-org/gitlab, cross-project
   blast radius, contributor or merge-request aggregation) use the `orbit` skill;
   for single-entity GitLab lookups or write operations use `glab`.
-version: 0.5.1
+version: 0.5.2
 license: MIT
 metadata:
   audience: developers
-  keywords: orbit, orbit-local, knowledge-graph, code-graph, duckdb, sql, repo-map
+  keywords: orbit, orbit-cli, orbit-local, knowledge-graph, code-graph, duckdb, sql, repo-map
   workflow: ai
 ---
 
