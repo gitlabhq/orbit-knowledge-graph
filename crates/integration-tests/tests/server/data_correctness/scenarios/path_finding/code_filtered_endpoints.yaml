@@ -1,0 +1,23 @@
+# source: crates/integration-tests/tests/server/data_correctness/path_finding.rs::path_finding_code_filtered_endpoints_stay_on_same_traversal_path
+description: Code-filtered path finding stays within one traversal_path
+
+query:
+  json: |
+    {
+      "query_type": "path_finding",
+      "nodes": [
+        {"id": "start", "entity": "Definition",
+         "filters": {"name": {"eq": "compile"}, "fqn": {"starts_with": "compiler::"}}},
+        {"id": "end", "entity": "Definition",
+         "filters": {"name": {"eq": "run_query"}}}
+      ],
+      "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3,
+               "rel_types": ["CALLS"]}
+    }
+
+expect:
+  path_count: 1
+  referential_integrity: true
+  nodes:
+    Definition:
+      absent: [12102]
