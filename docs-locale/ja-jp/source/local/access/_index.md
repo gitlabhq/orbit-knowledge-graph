@@ -23,16 +23,19 @@ title: ツールを接続する
 
 GitLab Orbit Localは、ローカルグラフへのアクセスやコーディングエージェントとの連携に使用できるツールを提供します。
 
+<!-- markdownlint-disable-next-line MD044 -->
 ## GitLab Orbit CLIを使用したGitLab Orbit Local {#gitlab-orbit-local-with-the-gitlab-orbit-cli}
 
 GitLab Orbit CLIを使用すると、GitLabインスタンスへの接続なしにローカルグラフをビルドしてクエリできます。
 
 また、GitLab Orbit Local MCPサーバーを使用してグラフをAIエージェントに公開し、AIコーディングアシスタントがグラフを参照するよう設定することもできます。
 
+<!-- markdownlint-disable-next-line MD044 -->
 ## GitLab CLIを使用したGitLab Orbit Local {#gitlab-orbit-local-with-the-gitlab-cli}
 
 GitLab CLIを拡張して、GitLab Orbit CLIコマンドをインストールして実行します。GitLab CLIはアップデートの管理も行い、クエリレシピ、DSLガイダンス、トラブルシューティングヘルプでエージェントを更新するGitLab Orbitスキルをインストールします。
 
+<!-- markdownlint-disable-next-line MD044 -->
 ## GitLab Orbit Local MCPサーバー {#gitlab-orbit-local-mcp-server}
 
 GitLab Orbit Local MCPサーバーをAIクライアントに接続します。クライアントへの接続後、ローカルグラフと連携するようエージェントを設定できます。

@@ -22,6 +22,7 @@ title: GitLab Orbitのトラブルシューティング
 
 このページでは、[GitLab Orbit Local](local/_index.md)または[GitLab Orbit Remote](remote/_index.md)で発生する可能性のあるエラーのトラブルシューティング方法を説明します。
 
+<!-- markdownlint-disable-next-line MD044 -->
 ## GitLab Orbit Local {#gitlab-orbit-local}
 
 GitLab Orbit Localのエラーは、`orbit`バイナリを直接実行するか、`glab orbit local`を通じて実行する際に発生します。
@@ -76,6 +77,7 @@ error: unrecognized subcommand 'mcp'
 
 **解決策:** [サポートされているアクセス方法](local/_index.md)のいずれかを使用してください。
 
+<!-- markdownlint-disable-next-line MD044 -->
 ## GitLab Orbit Remote {#gitlab-orbit-remote}
 
 GitLab Orbit Remoteのエラーは、`glab orbit remote`コマンドを実行する際に発生します。GitLab Orbit RemoteにはGitLab PremiumまたはUltimateと、インスタンスで有効化された`knowledge_graph`機能フラグが必要です。

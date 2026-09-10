@@ -79,6 +79,7 @@ GitLab Orbitには専用のグラフデータベースと3つのユーザーが�
 
 GitLab OrbitはHTTPインターフェース（ポート8123）またはTLS使用時はポート8443でClickHouseに接続します。Siphonはポート9000のネイティブプロトコルを使用するため、HTTPポートとポート9000の両方がクラスターから到達可能である必要があります。
 
+<!-- markdownlint-disable-next-line MD044 -->
 ## GitLabでGitLab Orbitを有効にする {#turn-on-gitlab-orbit-in-gitlab}
 
 GitLabとGitLab Orbitは1つの対称キーで相互に認証し、GitLabがそのキーを所有します。後のステップでクラスターにキーをコピーする前にキーが存在するよう、まずGitLabでGitLab Orbitを有効にします。
@@ -145,6 +146,7 @@ GitLabチャートはキーを生成しないため、自分で作成します�
 
 GitLab Orbitチャートをインストールするまで、GitLabはGitLab Orbitに接続できません。それ以前の接続エラーは想定内です。
 
+<!-- markdownlint-disable-next-line MD044 -->
 ## 認証情報をGitLab Orbitで利用可能にする {#make-the-credentials-available-to-gitlab-orbit}
 
 GitLab OrbitはKubernetes Secretの各キーから認証情報を読み取ります。Secretを作成する前にネームスペースが存在している必要があります。次のセクションのvaluesファイルは、GitLab Orbitネームスペース内に`gkg-secrets`という名前のSecretが1つあり、以下のキーを持つことを想定しています:
@@ -163,6 +165,7 @@ GitLab OrbitはKubernetes Secretの各キーから認証情報を読み取りま
 
 gRPCエンドポイント用のTLS証明書も提供する必要があります。詳細については、[TLSとネットワーク要件](#tls-and-network-requirements)を参照してください。
 
+<!-- markdownlint-disable-next-line MD044 -->
 ## GitLab Orbitをインストールする {#install-gitlab-orbit}
 
 1. 以下を`orbit-values.yaml`として保存し、プレースホルダーを置き換えます:

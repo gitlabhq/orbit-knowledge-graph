@@ -28,6 +28,7 @@ GitLab Orbitへのクエリから返されるレスポンスには、あなた�
 
 GitLab Orbitのアクセスは階層的です。トップレベルグループで割り当てられたロールは、その配下のすべてのサブグループおよびプロジェクトに適用されます。GitLab Orbitを有効にしても、既存のアクセス権限は変更されません。
 
+<!-- markdownlint-disable-next-line MD044 -->
 ## GitLab Orbitのクエリに必要なロール {#roles-required-to-query-gitlab-orbit}
 
 グループをクエリするには、そのグループに対してレポーター以上のロールが必要です。

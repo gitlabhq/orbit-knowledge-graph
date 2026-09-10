@@ -34,6 +34,7 @@ GitLab Orbit Local MCPサーバーはステートレスです。これは、サ�
   - [GitLab Orbit CLI](./cli.md)（`orbit`）
   - [GitLab CLI](./glab.md)（`glab orbit`）
 
+<!-- markdownlint-disable-next-line MD044 -->
 ## GitLab Orbit Local MCPサーバーにクライアントを接続する {#connect-a-client-to-the-gitlab-orbit-local-mcp-server}
 
 GitLab Orbit Local MCPサーバーはstdioトランスポートをサポートしています。引数とコマンドは、MCPクライアントおよびローカル環境によって異なります。
