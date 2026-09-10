@@ -127,11 +127,13 @@ impl GitalyRepositoryService {
             .with_gitaly_channel(project_id, move |channel| {
                 let ref_name = ref_name.clone();
                 async move {
+                    let repository = channel.repository();
+                    let prefix = archive_prefix(&repository, &ref_name);
                     RepositoryServiceClient::new(channel.channel())
                         .get_archive(GetArchiveRequest {
-                            repository: Some(channel.repository()),
+                            repository: Some(repository),
                             commit_id: ref_name,
-                            prefix: String::new(),
+                            prefix,
                             format: get_archive_request::Format::TarGz as i32,
                             path: Vec::new(),
                             exclude: Vec::new(),
@@ -268,6 +270,21 @@ impl RepositoryService for GitalyRepositoryService {
         self.download_proxy_archive(project_id, ref_name, stream)
             .await
     }
+}
+
+fn archive_prefix(repository: &gitaly_protos::proto::Repository, ref_name: &str) -> String {
+    let project_path = repository
+        .gl_project_path
+        .rsplit('/')
+        .find(|segment| !segment.is_empty())
+        .unwrap_or(&repository.gl_repository);
+    let ref_name = ref_name
+        .strip_prefix("refs/heads/")
+        .or_else(|| ref_name.strip_prefix("refs/tags/"))
+        .unwrap_or(ref_name)
+        .replace('/', "-");
+
+    format!("{project_path}-{ref_name}")
 }
 
 fn is_restartable_stream_cut(status: &Status) -> bool {
@@ -488,7 +505,7 @@ mod gitaly_tests {
     }
 
     #[tokio::test]
-    async fn get_archive_returns_the_stub_bytes() {
+    async fn get_archive_returns_the_stub_bytes_with_the_rails_archive_prefix() {
         let fake = FakeWorkhorse::start(Preauth::ok("600"), serve(2, 0)).await;
         let rails = Arc::new(CountingRails {
             downloads: AtomicUsize::new(0),
@@ -497,7 +514,7 @@ mod gitaly_tests {
         let (service, metrics) = fake_service(&fake, rails.clone(), false);
 
         let bytes = service
-            .download_archive(42, "main")
+            .download_archive(42, "refs/heads/feature/archive")
             .await
             .unwrap()
             .try_fold(Vec::new(), |mut bytes, chunk| async move {
@@ -510,6 +527,7 @@ mod gitaly_tests {
         assert_eq!(bytes, b"archivearchive");
         assert_eq!(rails.downloads.load(Ordering::SeqCst), 0);
         assert_eq!(fake.rpcs(), 1);
+        assert_eq!(fake.archive_requests()[0].prefix, "proj-feature-archive");
         assert_eq!(metrics.transport_count("workhorse_ws", "ok"), 1);
     }
 

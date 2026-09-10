@@ -160,6 +160,7 @@ struct Observed {
     upgrades: AtomicUsize,
     rpcs: AtomicUsize,
     requests: Mutex<Vec<Request>>,
+    archive_requests: Mutex<Vec<GetArchiveRequest>>,
     client_closes: Mutex<Vec<Option<CloseFrame>>>,
     /// SNI presented on each TLS connection, in accept order.
     sni: Mutex<Vec<Option<String>>>,
@@ -255,6 +256,10 @@ impl FakeWorkhorse {
 
     pub fn rpcs(&self) -> usize {
         self.observed.rpcs.load(Ordering::SeqCst)
+    }
+
+    pub fn archive_requests(&self) -> Vec<GetArchiveRequest> {
+        self.observed.archive_requests.lock().unwrap().clone()
     }
 }
 
@@ -476,8 +481,13 @@ impl Service<http::Request<tonic::body::Body>> for StubRepositoryService {
         let conn = self.0.conn;
         let plan = (self.0.director)(conn);
         let observed = Arc::clone(&self.0.observed);
-        let handler = service_fn(move |_request: tonic::Request<GetArchiveRequest>| {
+        let handler = service_fn(move |request: tonic::Request<GetArchiveRequest>| {
             observed.rpcs.fetch_add(1, Ordering::SeqCst);
+            observed
+                .archive_requests
+                .lock()
+                .unwrap()
+                .push(request.into_inner());
             let plan = plan.clone();
             async move {
                 match plan {
