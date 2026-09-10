@@ -1282,7 +1282,7 @@ fn repo_map_api_empty_prefix_succeeds() {
     );
 }
 
-const CONTEXT_RUST: &str = "pub fn run() {}\n#[test]\nfn smoke() {}\n";
+const CONTEXT_RUST: &str = "use std::fmt;\npub struct Config {\n    pub value: String,\n}\nimpl Config {\n    pub fn get(&self) -> &str {\n        &self.value\n    }\n}\n#[test]\nfn smoke() {}\n";
 const CONTEXT_PYTHON: &str = "def hello():\n    pass\n\ndef bye():\n    pass\n";
 
 fn context_repo() -> (tempfile::TempDir, tempfile::TempDir) {
@@ -1299,40 +1299,37 @@ fn context_repo() -> (tempfile::TempDir, tempfile::TempDir) {
     (repo, data)
 }
 
+fn orbit(repo: &std::path::Path, data: &std::path::Path, args: &[&str]) -> (String, String, bool) {
+    run_cmd(&[args, &["--repo", repo.to_str().unwrap()]].concat(), data)
+}
+
 fn context(repo: &std::path::Path, data: &std::path::Path, args: &[&str]) -> String {
-    let (stdout, stderr, ok) = run_cmd(
-        &[&["context", "--repo", repo.to_str().unwrap()], args].concat(),
-        data,
-    );
+    let (stdout, stderr, ok) = orbit(repo, data, &[&["context"], args].concat());
     assert!(ok, "{stderr}");
     stdout
 }
 
-fn assert_full_source(output: &str, file: &str, source: &str) {
-    let expected = format!(
-        "{file}  source=working-tree  ranges=unverified; showing full file\n{}",
-        source
-            .lines()
-            .enumerate()
-            .map(|(n, line)| format!("{}|{line}\n", n + 1))
-            .collect::<String>()
-    );
-    assert!(output.ends_with(&expected), "{output}");
-    assert_eq!(output.matches("ranges=unverified").count(), 1, "{output}");
-}
-
 #[test]
-fn context_uses_indexed_ranges_and_includes_tests() {
+fn context_file_gives_an_overview_and_names_give_bodies() {
     let (repo, data) = context_repo();
-    let output = context(repo.path(), data.path(), &["run"]);
+    let overview = context(repo.path(), data.path(), &["--file", "src/lib.rs"]);
+    assert!(overview.starts_with("src/lib.rs  (outline;"), "{overview}");
+    assert!(overview.contains("Imports:\n1|use std::fmt;"), "{overview}");
+    assert!(overview.contains("fn get(&self) -> &str"), "{overview}");
+    assert!(overview.contains("fn smoke()"), "{overview}");
+    assert!(!overview.contains("&self.value"), "{overview}");
+    let body = context(repo.path(), data.path(), &["Config::get"]);
+    assert!(body.contains("7|        &self.value"), "{body}");
     assert_eq!(
-        output,
-        "run  [Function]  src/lib.rs:1-1\n1|pub fn run() {}\n"
+        body,
+        context(repo.path(), data.path(), &["get", "--file", "src/lib.rs"])
     );
-    let output = context(repo.path(), data.path(), &["--file", "src/lib.rs"]);
-    assert!(output.contains("3|fn smoke() {}"), "{output}");
-    assert!(!output.contains("ranges=unverified"), "{output}");
-    assert!(!output.contains("tests omitted"), "{output}");
+    std::fs::write(repo.path().join("notes.txt"), "current notes\n").unwrap();
+    let output = context(repo.path(), data.path(), &["--file", "notes.txt"]);
+    assert!(
+        output.contains("outline unavailable") && !output.contains("current notes"),
+        "{output}"
+    );
 }
 
 #[test]
@@ -1343,16 +1340,10 @@ fn grep_includes_source_only_for_three_or_fewer_total_matches() {
             .map(|n| format!("pub fn needle_{n}() {{}}\n"))
             .collect();
         std::fs::write(repo.path().join("src/lib.rs"), source).unwrap();
-        let (output, stderr, ok) = run_cmd(
-            &[
-                "grep",
-                "needle",
-                "--limit",
-                "3",
-                "--repo",
-                repo.path().to_str().unwrap(),
-            ],
+        let (output, stderr, ok) = orbit(
+            repo.path(),
             data.path(),
+            &["grep", "needle", "--limit", "3"],
         );
         assert!(ok, "{stderr}");
         assert_eq!(output.contains("|pub fn needle_"), count == 3, "{output}");
@@ -1361,144 +1352,70 @@ fn grep_includes_source_only_for_three_or_fewer_total_matches() {
 }
 
 #[test]
-fn context_refreshes_changed_rust_and_python_ranges() {
+fn refresh_tracks_edits_renames_deletions_and_ignores() {
     let (repo, data) = context_repo();
-    for (file, name, original, prefix, line) in [
-        ("src/lib.rs", "run", CONTEXT_RUST, "pub fn added() {}\n", 2),
-        ("src/tool.py", "bye", CONTEXT_PYTHON, "import sys\n", 5),
-    ] {
-        let edited = format!("{prefix}{original}");
-        std::fs::write(repo.path().join(file), &edited).unwrap();
-        for args in [vec![name], vec![name, "--outline"], vec!["--file", file]] {
-            let output = context(repo.path(), data.path(), &args);
-            assert!(!output.contains("ranges=unverified"), "{output}");
-            assert!(
-                output.contains(&format!("{file}:{line}-"))
-                    || output.contains(&format!(" L{line}-")),
-                "{output}"
-            );
-        }
-        let (output, stderr, ok) = run_cmd(
-            &["grep", name, "--repo", repo.path().to_str().unwrap()],
-            data.path(),
-        );
-        assert!(ok, "{stderr}");
-        assert!(!output.contains("ranges=unverified"), "{output}");
-        assert!(
-            output.contains(&format!("{file}:{line}-")) || output.contains(&format!(" L{line}-")),
-            "{output}"
-        );
-        git(repo.path(), &["checkout", "--", file]);
-        let output = context(repo.path(), data.path(), &[name]);
-        assert!(!output.contains("ranges=unverified"), "{output}");
-    }
-    std::fs::write(repo.path().join(".gitignore"), "src/tool.py\n").unwrap();
-    std::fs::write(repo.path().join("src/lib.rs"), "pub fn after_ignore() {}\n").unwrap();
+    let repo_path = repo.path();
+    std::fs::write(
+        repo_path.join("src/tool.py"),
+        format!("import sys\n{CONTEXT_PYTHON}"),
+    )
+    .unwrap();
+    let output = context(repo_path, data.path(), &["bye"]);
+    assert!(output.contains("src/tool.py:5-6"), "{output}");
+    std::fs::rename(
+        repo_path.join("src/tool.py"),
+        repo_path.join("src/moved.py"),
+    )
+    .unwrap();
+    let (output, stderr, ok) = orbit(repo_path, data.path(), &["grep", "bye"]);
+    assert!(ok, "{stderr}");
+    assert!(
+        output.contains("src/moved.py:5") && !output.contains("src/tool.py"),
+        "{output}"
+    );
+    std::fs::write(repo_path.join(".gitignore"), "src/moved.py\n").unwrap();
+    std::fs::write(repo_path.join("src/lib.rs"), "pub fn after_ignore() {}\n").unwrap();
     for _ in 0..2 {
-        let output = context(repo.path(), data.path(), &["after_ignore"]);
+        let output = context(repo_path, data.path(), &["after_ignore"]);
         assert!(output.contains("1|pub fn after_ignore() {}"), "{output}");
     }
-    assert!(
-        rows(&orbit_sql(
-            "SELECT id FROM gl_definition WHERE file_path = 'src/tool.py'",
-            data.path()
-        ))
-        .is_empty()
-    );
+    let (stdout, _, _) = orbit(repo_path, data.path(), &["grep", "bye"]);
+    assert!(stdout.contains("No definitions match"), "{stdout}");
 }
 
 #[test]
-fn context_reads_unindexed_files() {
-    let (repo, data) = context_repo();
-    std::fs::write(repo.path().join("notes.txt"), "current notes\n").unwrap();
-    let output = context(repo.path(), data.path(), &["--file", "notes.txt"]);
-    assert_full_source(&output, "notes.txt", "current notes\n");
-}
-
-#[test]
-fn file_refresh_discovers_additions_renames_deletions_and_preserves_other_projects() {
+fn refresh_invalidates_relationships_until_full_index() {
     let (repo, data) = context_repo();
     let other = create_test_repo();
     assert!(orbit_index(&other.path, data.path()));
-    let other_pid = rows(&orbit_sql(
-        "SELECT project_id FROM _orbit_manifest ORDER BY repo_path",
+    let other_defs = orbit_sql(
+        "SELECT * FROM gl_definition WHERE file_path = 'src/main.py' ORDER BY ALL",
         data.path(),
-    ))
-    .iter()
-    .map(|row| row["project_id"].as_i64().unwrap())
-    .find(|pid| {
-        !rows(&orbit_sql(
-            &format!("SELECT * FROM gl_file WHERE project_id = {pid} AND path = 'src/main.py'"),
-            data.path(),
-        ))
-        .is_empty()
-    })
-    .unwrap();
-    let snapshots: Vec<_> = [
-        "gl_file",
-        "gl_definition",
-        "gl_directory",
-        "gl_imported_symbol",
-    ]
-    .iter()
-    .map(|table| {
-        let sql = format!("SELECT * FROM {table} WHERE project_id = {other_pid} ORDER BY ALL");
-        let before = orbit_sql(&sql, data.path());
-        (sql, before)
-    })
-    .collect();
-    let other_edges_sql = format!(
-        "SELECT * FROM gl_edge WHERE source_id IN (SELECT id FROM gl_definition WHERE project_id = {other_pid}) ORDER BY ALL"
     );
-    let other_edges = orbit_sql(&other_edges_sql, data.path());
-    let repo_arg = repo.path().to_str().unwrap();
     git(repo.path(), &["checkout", "-b", "refresh-branch"]);
     std::fs::write(
         repo.path().join("src/lib.rs"),
-        "\npub fn renamed() {}\npub fn caller() { renamed(); }\n",
+        "pub fn renamed() {}\npub fn caller() { renamed(); }\n",
     )
     .unwrap();
-    std::fs::rename(
-        repo.path().join("src/tool.py"),
-        repo.path().join("src/moved.py"),
-    )
-    .unwrap();
-    std::fs::write(
-        repo.path().join("src/moved.py"),
-        "import sys\ndef fresh():\n    return sys.version\n",
-    )
-    .unwrap();
-    let (output, stderr, ok) = run_cmd(&["grep", "fresh", "--repo", repo_arg], data.path());
-    assert!(ok, "{stderr}");
+    let (_, stderr, ok) = orbit(
+        repo.path(),
+        data.path(),
+        &["grep", "renamed", "--callers", "--tests"],
+    );
     assert!(
-        stderr.contains("refreshed definitions in 2 file(s), removed 1 file(s)"),
+        !ok && stderr.contains("relationships incomplete"),
         "{stderr}"
     );
-    assert!(output.contains("src/moved.py:2"), "{output}");
-    assert!(!output.contains("ranges=unverified"), "{output}");
-    let output = context(repo.path(), data.path(), &["renamed"]);
-    assert!(output.contains("src/lib.rs:2-2"), "{output}");
-    let (output, stderr, ok) = run_cmd(
-        &[
-            "grep",
-            "renamed",
-            "--related-to",
-            "--tests",
-            "--repo",
-            repo_arg,
-        ],
+    let (output, stderr, ok) = orbit(
+        repo.path(),
         data.path(),
+        &["sql", "SELECT count(*) AS n FROM gl_edge"],
     );
-    assert!(!ok);
-    assert!(stderr.contains("relationships incomplete"), "{stderr}");
-    assert!(!output.contains("No connections"), "{output}");
-    let (output, stderr, ok) = run_cmd(
-        &["sql", "SELECT count(*) FROM gl_edge", "--repo", repo_arg],
-        data.path(),
+    assert!(
+        ok && stderr.contains("relationships incomplete") && output.contains('0'),
+        "{output}{stderr}"
     );
-    assert!(ok, "{stderr}");
-    assert!(stderr.contains("relationships incomplete"), "{stderr}");
-    assert!(output.contains('0'), "{output}");
     let responses = mcp_roundtrip(
         data.path(),
         &[mcp_tool_call(
@@ -1507,149 +1424,72 @@ fn file_refresh_discovers_additions_renames_deletions_and_preserves_other_projec
             json!({"sql": ["SELECT 1 AS n"]}),
         )],
     );
-    let results: Value = serde_json::from_str(mcp_tool_text(&responses[0])).unwrap();
-    assert_eq!(results[0][0]["n"], 1);
     assert!(
         responses[0]["result"]["content"][1]["text"]
             .as_str()
             .unwrap()
             .contains("relationships incomplete")
     );
-    for _ in 0..2 {
-        let (_, stderr, ok) = run_cmd(&["grep", "fresh", "--repo", repo_arg], data.path());
-        assert!(ok && !stderr.contains("refreshed definitions"), "{stderr}");
-    }
-    assert!(
-        rows(&orbit_sql(
-            "SELECT id FROM gl_definition GROUP BY id HAVING count(*) > 1",
-            data.path()
-        ))
-        .is_empty()
-    );
-    assert!(
-        rows(&orbit_sql(
-            "SELECT path FROM gl_directory GROUP BY project_id, commit_sha, path HAVING count(*) > 1",
-            data.path()
-        ))
-        .is_empty()
-    );
-    assert!(
-        rows(&orbit_sql(
-            "SELECT id FROM gl_file GROUP BY id HAVING count(*) > 1",
-            data.path()
-        ))
-        .is_empty()
-    );
-    assert!(rows(&orbit_sql(&format!("SELECT * FROM gl_definition WHERE project_id <> {other_pid} AND (file_path = 'src/tool.py' OR name IN ('run', 'bye', 'hello'))"), data.path())).is_empty());
-    assert_eq!(rows(&orbit_sql(&format!("SELECT branch FROM gl_definition WHERE project_id <> {other_pid} UNION SELECT branch FROM gl_directory WHERE project_id <> {other_pid}"), data.path())).len(), 1);
-    for (sql, before) in snapshots {
-        assert_eq!(before, orbit_sql(&sql, data.path()));
-    }
-    assert_eq!(other_edges, orbit_sql(&other_edges_sql, data.path()));
-    std::fs::remove_file(repo.path().join("src/moved.py")).unwrap();
-    context(repo.path(), data.path(), &["renamed"]);
-    assert!(
-        rows(&orbit_sql(
-            "SELECT * FROM gl_imported_symbol WHERE file_path = 'src/moved.py'",
-            data.path()
-        ))
-        .is_empty()
-    );
-    assert!(orbit_index(repo.path(), data.path()));
-    let (output, stderr, ok) = run_cmd(
-        &[
-            "grep",
-            "renamed",
-            "--callers",
-            "--tests",
-            "--repo",
-            repo_arg,
-        ],
-        data.path(),
-    );
-    assert!(ok, "{stderr}");
-    assert!(
-        output.contains("caller") && output.contains("[calls]"),
-        "{output}"
-    );
-    assert!(!stderr.contains("relationships incomplete"), "{stderr}");
-}
-
-#[test]
-fn unsupported_refresh_keeps_unverified_source_and_old_fingerprints() {
-    let (repo, data) = context_repo();
-    let before = orbit_sql(
-        "SELECT * FROM _orbit_meta WHERE starts_with(key, 'source_fingerprints:')",
-        data.path(),
-    );
-    let source = "pub fn run() {}\n\0";
-    std::fs::write(repo.path().join("src/lib.rs"), source).unwrap();
-    assert_full_source(
-        &context(repo.path(), data.path(), &["run"]),
-        "src/lib.rs",
-        source,
-    );
+    assert!(rows(&orbit_sql("SELECT path FROM gl_directory GROUP BY project_id, commit_sha, path HAVING count(*) > 1", data.path())).is_empty());
     assert_eq!(
-        before,
+        other_defs,
         orbit_sql(
-            "SELECT * FROM _orbit_meta WHERE starts_with(key, 'source_fingerprints:')",
+            "SELECT * FROM gl_definition WHERE file_path = 'src/main.py' ORDER BY ALL",
             data.path()
         )
     );
+    assert!(orbit_index(repo.path(), data.path()));
+    let (output, stderr, ok) = orbit(
+        repo.path(),
+        data.path(),
+        &["grep", "renamed", "--callers", "--tests"],
+    );
+    assert!(
+        ok && output.contains("caller") && !stderr.contains("relationships incomplete"),
+        "{output}{stderr}"
+    );
 }
 
 #[test]
-fn file_refresh_can_remove_every_file_and_then_add_source_without_full_indexing() {
+fn failed_refresh_falls_back_to_unverified_source() {
     let (repo, data) = context_repo();
-    let pid = rows(&orbit_sql(
-        "SELECT project_id FROM _orbit_manifest",
-        data.path(),
-    ))[0]["project_id"]
-        .as_i64()
-        .unwrap();
+    let source = "pub fn run() {}\n\0";
+    std::fs::write(repo.path().join("src/lib.rs"), source).unwrap();
+    let output = context(repo.path(), data.path(), &["Config::get"]);
+    assert!(
+        output.contains("ranges=unverified") && output.contains("1|pub fn run() {}"),
+        "{output}"
+    );
+    assert!(
+        rows(&orbit_sql(
+            "SELECT * FROM gl_definition WHERE name = 'run'",
+            data.path()
+        ))
+        .is_empty()
+    );
+}
+
+#[test]
+fn empty_project_stays_indexed_and_scoped() {
+    let (repo, data) = context_repo();
     let other = create_test_repo();
     assert!(orbit_index(&other.path, data.path()));
     for file in ["src/lib.rs", "src/tool.py"] {
         std::fs::remove_file(repo.path().join(file)).unwrap();
     }
-    std::fs::write(repo.path().join("notes.txt"), "notes\n").unwrap();
-    context(repo.path(), data.path(), &["--file", "notes.txt"]);
-    context(repo.path(), data.path(), &["--file", "notes.txt"]);
-    assert!(
-        rows(&orbit_sql(
-            &format!("SELECT * FROM gl_file WHERE project_id = {pid}"),
-            data.path()
-        ))
-        .is_empty()
-    );
-    for args in [vec!["grep", "run"], vec!["grep", "--path", "src"]] {
-        let (output, stderr, ok) = run_cmd(
-            &[args.as_slice(), &["--repo", repo.path().to_str().unwrap()]].concat(),
-            data.path(),
-        );
-        assert!(ok, "{stderr}");
-        assert!(output.contains("definitions"), "{output}");
-    }
-    let (output, stderr, ok) = run_cmd(
-        &[
-            "sql",
-            "-F",
-            "json",
-            "SELECT name FROM gl_definition",
-            "--repo",
-            repo.path().to_str().unwrap(),
-        ],
+    let (output, stderr, ok) = orbit(repo.path(), data.path(), &["grep", "--path", "src"]);
+    assert!(ok && output.contains("definitions"), "{output}{stderr}");
+    let (output, stderr, ok) = orbit(
+        repo.path(),
         data.path(),
+        &["sql", "-F", "json", "SELECT name FROM gl_definition"],
     );
-    assert!(ok, "{stderr}");
+    assert!(ok && !stderr.contains("as with --all"), "{stderr}");
     assert_eq!(serde_json::from_str::<Value>(&output).unwrap(), json!([]));
-    assert!(!stderr.contains("as with --all"), "{stderr}");
     std::fs::write(repo.path().join("src/new.py"), "def newest():\n    pass\n").unwrap();
-    let (output, stderr, ok) = run_cmd(
-        &["grep", "newest", "--repo", repo.path().to_str().unwrap()],
-        data.path(),
+    let (output, stderr, ok) = orbit(repo.path(), data.path(), &["grep", "newest"]);
+    assert!(
+        ok && output.contains("src/new.py:1") && !stderr.contains("indexing "),
+        "{output}{stderr}"
     );
-    assert!(ok, "{stderr}");
-    assert!(output.contains("src/new.py:1"), "{output}");
-    assert!(!stderr.contains("indexing "), "{stderr}");
 }

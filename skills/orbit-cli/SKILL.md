@@ -13,7 +13,7 @@ description: >
   production data in GitLab (a project such as gitlab-org/gitlab, cross-project
   blast radius, contributor or merge-request aggregation) use the `orbit` skill;
   for single-entity GitLab lookups or write operations use `glab`.
-version: 0.5.6
+version: 0.5.7
 license: MIT
 metadata:
   audience: developers
@@ -76,7 +76,7 @@ wrapper flags, config keys, and pass-through rules:
 | `orbit grep [QUERY…] [--path P] [--kind K,K]` | Find definitions by name; queries with three or fewer matches include source automatically |
 | `orbit grep FQN --related-to [--edge K] [--in] [--out]` | List connections, including uses through members |
 | `orbit grep FQN --callers` / `--callees` | List incoming or outgoing calls |
-| `orbit context [FQN…] [--file P] [--kind K,K] [--outline]` | Read source bodies by FQN, unique tail, glob, or file; `--outline` prints signatures and members only |
+| `orbit context [FQN…] [--file P] [--kind K,K]` | Read definition bodies by FQN, unique tail, or glob; `--file` alone prints a file overview |
 | `orbit sql [QUERY] [-f FILE] [-F table\|json\|ndjson\|csv] [--all] [--repo P]` | Run read-only SQL scoped to the current checkout's commit; `-` reads from stdin, `--all` spans every indexed commit |
 | `orbit schema [TABLE…] [--raw]` | Describe graph tables/columns (index-storage tables hidden); scope to table names to trim output |
 | `orbit list [-F …]` | List indexed repositories, branch, commit, status |
@@ -87,8 +87,8 @@ wrapper flags, config keys, and pass-through rules:
 ## Definitions and relationships
 
 Search one concept per `grep`, including multiword identifiers like `rate limit`.
-Inspect known targets directly with `context`; `--file` includes imports and
-surrounding structure. Reuse returned source from `grep` or `context` for edits
+Inspect known targets directly with `context`; `--file` alone prints imports and
+definition signatures. Reuse returned source from `grep` or `context` for edits
 instead of reading it again with raw file tools. Stop exploring when the edit
 point is clear; follow identifiers only for remaining questions and batch
 independent lookups. Use raw reads for non-code or unreliable index coverage.
@@ -100,7 +100,6 @@ graph relationships establish field reads, writes, or dataflow; inspect source.
 orbit grep "rateLimit" --path src --kind Method,Function
 orbit context "Type::method"
 orbit context --file src/lib.rs
-orbit context "Type" --outline
 orbit grep "Type::method" --callers --path src --kind Method
 orbit grep "Type::method" --callees
 orbit grep "Type" --related-to --edge extends --in
@@ -118,18 +117,17 @@ unless `--tests` is passed. Incoming lookups include uses through members.
 Broader results include a copyable `context` command for the top candidates.
 
 `context` accepts several names or globs in one call. `--file` takes a
-repo-relative or absolute path inside the checkout. `--file` alone reads
-all definitions and the lines between them. With names, it restricts lookup
-to that file and accepts bare names; `--kind` narrows the selection.
-`--outline` replaces bodies with each definition's signature and its nested
-members, so a large type or file can be mapped before reading one method.
+repo-relative or absolute path inside the checkout. `--file` alone prints an
+overview: imports, definition signatures, and nested members, so a file can be
+mapped before reading one body. With names, it restricts lookup to that file
+and accepts bare names; `--kind` narrows the selection.
 
 `grep` and `context` refresh changed and new source files on demand, removing
 deleted files without reparsing unchanged files. Successful refreshes update
 search results and definition ranges. Failed, unsupported, or unstable refreshes
-keep the previous definitions; source reads return the full current file with
-`ranges=unverified`, even with `--outline`. Test code is included. `context --file`
-also reads files with no indexed definitions.
+keep the previous definitions; definition reads return the full current file with
+`ranges=unverified`, and file overviews report that the outline is unavailable.
+Test code is included.
 
 File refresh invalidates all relationships for that project: it is not a full
 semantic rebuild. Relationship lookups refuse incomplete results; SQL, MCP, and

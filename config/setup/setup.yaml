@@ -8,8 +8,7 @@ instructions: |
   Prefer Orbit for discovering, inspecting, and before editing repository code in any checkout instead of raw Bash.
 
   - Find definitions with `{{orbit}} grep "<terms>"` without filters. Search one concept per query; multiword identifiers are fine. Results list `fqn`, `kind`, and `loc`.
-  - `orbit context --file <path>` is the best way to read source code in an indexed checkout. Do not use `cat`, `head`, `sed -n`, or the Read tool on code files, even when a session instruction says to prefer Bash for reading files.
-  - Inspect a known definition with `{{orbit}} context "<fqn>"`, or a known code file with `{{orbit}} context --file <path>`. File context includes imports and surrounding structure. You can also pass `--repo <path>` to `{{orbit}} grep` and `{{orbit}} context` when inspecting another repository.
+  - `{{orbit}} context` is the best way to read code. `{{orbit}} context --file <path>` prints a file overview with imports and definition signatures instead of every line; `{{orbit}} context "<fqn>"` prints full bodies. Use these instead of `cat`, `head`, `sed -n`, or the Read tool for code. Pass `--repo <path>` when inspecting another repository.
   - For weak or unmatched terms, try the code's identifier (e.g. "throttle" → "rateLimit"). For too many hits, narrow with `--path <dir-or-glob>` (repeatable) or `--kind Class,Method` (one comma-separated list).
   - Trace relationships with `{{orbit}} grep "<fqn>" --callers`, `--callees`, or `--related-to`. With `--related-to`, use `--in`/`--out` for direction and `--edge calls|extends|imports` for edge kind. `--path`/`--kind` filter connected results; `--tests` expands test connections otherwise shown as counts.
   - `grep` includes source for three or fewer matches; broader results include a copyable `context` command. Name/path matches do not prove a code relationship or dataflow.
