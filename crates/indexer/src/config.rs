@@ -95,6 +95,9 @@ impl From<&AppConfig> for DispatcherConfig {
 
 #[derive(Debug, Error)]
 pub enum DispatcherError {
+    #[error("indexing status connection error: {0}")]
+    IndexingStatus(#[from] nats_client::NatsError),
+
     #[error("ontology archive error: {0}")]
     Archive(#[from] orbit_migrations::catalog::CatalogError),
 

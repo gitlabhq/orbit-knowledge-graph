@@ -14,7 +14,6 @@ use clickhouse_client::ClickHouseConfigurationExt;
 use indexer::campaign::{CampaignState, campaign_id_for_version};
 use indexer::config::{DispatcherConfig, DispatcherError};
 use indexer::nats::versioning::NATS_VERSIONER;
-use indexer::orchestrator::dispatch::CodeBackfill;
 use indexer::orchestrator::scheduled::{
     MigrationCompletionChecker, ScheduledTask, ScheduledTaskMetrics, SchedulerServices,
 };
@@ -366,17 +365,11 @@ async fn migration_triggers_backfill_for_all_enabled_namespaces() {
     let campaign = std::sync::Arc::new(indexer::campaign::CampaignState::new());
     campaign.set(indexer::campaign::campaign_id_for_version(1));
 
-    let backfill = CodeBackfill::new(
+    let backfill = common::dispatch::code_backfill(
         context.scheduler_services.nats.clone(),
         context.clickhouse.create_client(),
         context.clickhouse.config.build_client(),
-        ScheduledTaskMetrics::new(),
         campaign,
-        orbit_server_config::AppConfig::embedded_defaults()
-            .schedule
-            .tasks
-            .code_backfill
-            .publish_window,
     );
 
     backfill
@@ -437,17 +430,11 @@ async fn backfill_skips_projects_with_existing_checkpoints() {
         ))
         .await;
 
-    let backfill = CodeBackfill::new(
+    let backfill = common::dispatch::code_backfill(
         context.scheduler_services.nats.clone(),
         context.clickhouse.create_client(),
         context.clickhouse.config.build_client(),
-        ScheduledTaskMetrics::new(),
         std::sync::Arc::new(indexer::campaign::CampaignState::new()),
-        orbit_server_config::AppConfig::embedded_defaults()
-            .schedule
-            .tasks
-            .code_backfill
-            .publish_window,
     );
 
     backfill

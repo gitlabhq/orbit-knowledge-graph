@@ -197,17 +197,14 @@ async fn run_webserver(
             .map_err(|e| anyhow::anyhow!("NATS connection failed: {e}"))?,
     );
 
-    let broker = Arc::new(indexer::nats::NatsBroker::from_client(
-        nats.clone(),
-        &config.nats,
+    nats.ensure_kv_bucket_exists(
+        indexer::indexing_status::INDEXING_PROGRESS_BUCKET,
+        nats_client::KvBucketConfig::default(),
+    )
+    .await?;
+    let indexing_status_store = indexer::indexing_status::IndexingStatusStore::new(Arc::new(
+        nats_client::KvServicesImpl::new(nats.clone()),
     ));
-    broker
-        .ensure_kv_bucket_exists(
-            indexer::indexing_status::INDEXING_PROGRESS_BUCKET,
-            nats_client::KvBucketConfig::default(),
-        )
-        .await?;
-    let indexing_status_store = indexer::indexing_status::IndexingStatusStore::new(broker);
     grpc_server = grpc_server.with_indexing_status(indexing_status_store);
 
     if config.query.default.graph_query_cache_enabled == Some(true) {

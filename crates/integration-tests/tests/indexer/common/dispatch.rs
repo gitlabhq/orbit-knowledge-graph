@@ -1,16 +1,20 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use clickhouse_client::ArrowClickHouseClient;
 use clickhouse_client::ClickHouseConfigurationExt;
 use futures::StreamExt;
 use indexer::campaign::CampaignState;
 use indexer::checkpoint::ClickHouseCheckpointStore;
+use indexer::indexing_status::IndexingStatusStore;
 use indexer::nats::versioning::NATS_VERSIONER;
+use indexer::orchestrator::dispatch::backfill_status::InitialBackfillTracker;
 use indexer::orchestrator::dispatch::{CodeBackfill, NamespaceIndexingDispatch};
 use indexer::orchestrator::scheduled::{
     GlobalDispatcher, NamespaceDispatcher, ScheduledTask, ScheduledTaskMetrics,
 };
 use indexer::orchestrator::siphon::{CdcContext, EnabledNamespacesRoute, Route};
+use indexer::testkit::MockNatsServices;
 use indexer::topic::{
     CODE_INDEXING_TASK_SUBJECT_PATTERN, GLOBAL_INDEXING_SUBJECT, INDEXER_STREAM,
     NAMESPACE_INDEXING_SUBJECT_PATTERN,
@@ -126,6 +130,33 @@ async fn run_global_dispatcher(nats_url: &str) -> Vec<DispatchedMessage> {
     drain(nats_url, GLOBAL_INDEXING_SUBJECT, "global").await
 }
 
+/// Initial-backfill status lands in a throwaway KV; these tests assert on published work only.
+pub fn code_backfill(
+    nats: Arc<dyn indexer::nats::NatsServices>,
+    graph: ArrowClickHouseClient,
+    datalake: ArrowClickHouseClient,
+    campaign: Arc<CampaignState>,
+) -> CodeBackfill {
+    let initial_backfill = InitialBackfillTracker::new(
+        graph.clone(),
+        Arc::new(IndexingStatusStore::new(Arc::new(MockNatsServices::new()))),
+        &integration_testkit::load_ontology(),
+    );
+    CodeBackfill::new(
+        nats,
+        graph,
+        datalake,
+        ScheduledTaskMetrics::new(),
+        campaign,
+        orbit_server_config::AppConfig::embedded_defaults()
+            .schedule
+            .tasks
+            .code_backfill
+            .publish_window,
+        Arc::new(initial_backfill),
+    )
+}
+
 async fn dispatch_enabled_namespace_cdc(
     ctx: &TestContext,
     nats_url: &str,
@@ -134,17 +165,11 @@ async fn dispatch_enabled_namespace_cdc(
     let services = indexer::orchestrator::scheduled::connect(&nats_config(nats_url))
         .await
         .unwrap();
-    let backfill = Arc::new(CodeBackfill::new(
+    let backfill = Arc::new(code_backfill(
         services.nats.clone(),
         ctx.config.build_client(),
         ctx.config.build_client(),
-        ScheduledTaskMetrics::new(),
         Arc::new(CampaignState::new()),
-        orbit_server_config::AppConfig::embedded_defaults()
-            .schedule
-            .tasks
-            .code_backfill
-            .publish_window,
     ));
     let route = EnabledNamespacesRoute::new(
         NamespaceIndexingDispatch::new(services.nats),

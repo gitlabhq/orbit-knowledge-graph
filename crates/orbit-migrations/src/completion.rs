@@ -2,6 +2,7 @@ use std::collections::HashSet;
 use std::sync::LazyLock;
 
 use arrow::datatypes::UInt64Type;
+use chrono::{DateTime, Utc};
 use clickhouse_client::{ArrowClickHouseClient, FromArrowColumn};
 use orbit_utils::arrow::ArrowUtils;
 use orbit_utils::traversal_path::TopLevelSplit;
@@ -43,10 +44,60 @@ WHERE _deleted = false \
   AND splitByChar('.', key)[1] = 'global' \
   AND splitByChar('.', key)[2] IN {plans:Array(String)}";
 
+const COUNT_COMPLETED_NAMESPACE_PIPELINES: &str = "\
+SELECT count(DISTINCT splitByChar('.', key)[3]) AS pipelines, \
+       maxOrNull(_version) AS last_checkpoint_at \
+FROM {table:Identifier} FINAL \
+WHERE _deleted = false \
+  AND cursor_values IN ('null', '') \
+  AND startsWith(key, {prefix:String}) \
+  AND length(splitByChar('.', key)) = 3 \
+  AND splitByChar('.', key)[3] IN {plans:Array(String)}";
+
 #[derive(Debug)]
 pub struct SdlcReindexProgress {
     pub completed_namespaces: u64,
     pub ready: bool,
+}
+
+#[derive(Debug, Default)]
+pub struct CompletedNamespacePipelines {
+    pub pipelines: u64,
+    pub last_checkpoint_at: Option<DateTime<Utc>>,
+}
+
+pub async fn count_completed_namespace_pipelines(
+    graph: &ArrowClickHouseClient,
+    version: u32,
+    namespace_id: i64,
+    pipelines: &[String],
+) -> Result<CompletedNamespacePipelines, MigrationError> {
+    let checkpoint_table = format!("{}{CHECKPOINT_TABLE}", table_prefix(version));
+    let batches = graph
+        .query(COUNT_COMPLETED_NAMESPACE_PIPELINES)
+        .param("table", &checkpoint_table)
+        .param("prefix", format!("ns.{namespace_id}."))
+        .param("plans", pipelines)
+        .fetch_arrow()
+        .await
+        .map_err(|error| MigrationError::Ddl {
+            entity_name: checkpoint_table.clone(),
+            reason: error.to_string(),
+        })?;
+
+    let Some(batch) = batches.first() else {
+        return Ok(CompletedNamespacePipelines::default());
+    };
+    Ok(CompletedNamespacePipelines {
+        pipelines: ArrowUtils::get_column::<UInt64Type>(batch, "pipelines", 0).unwrap_or(0),
+        last_checkpoint_at: DateTime::<Utc>::extract_column(&batches, 1)
+            .map_err(|error| MigrationError::Ddl {
+                entity_name: checkpoint_table,
+                reason: error.to_string(),
+            })?
+            .first()
+            .copied(),
+    })
 }
 
 pub async fn resolve_migration_scope(

@@ -8327,6 +8327,7 @@ dependencies = [
  "arrow 58.3.0",
  "async-nats",
  "bytes",
+ "chrono",
  "clickhouse-client",
  "nats-client",
  "ontology",

@@ -1,6 +1,5 @@
 mod code;
 mod input;
-mod sdlc;
 mod toon;
 
 use std::collections::{HashMap, HashSet};
@@ -8,7 +7,7 @@ use std::sync::Arc;
 
 use arrow::array::{Array, StringArray, UInt64Array};
 use clickhouse_client::ArrowClickHouseClient;
-use indexer::indexing_status::IndexingStatusStore;
+use indexer::indexing_status::{IndexingStatusStore, InitialBackfill, InitialBackfillState};
 use ontology::Ontology;
 use orbit_server_config::QueryConfig;
 use orbit_utils::arrow::ArrowUtils;
@@ -18,8 +17,8 @@ use tonic::Status;
 use tracing::{debug, info, warn};
 
 use crate::proto::{
-    GetGraphStatusResponse, GraphStatusDomain, GraphStatusItem, IndexingState, IndexingStatus,
-    ResponseFormat, StructuredGraphStatus, get_graph_status_response,
+    BackfillCounts, BackfillState, BackfillStatus, GetGraphStatusResponse, GraphStatusDomain,
+    GraphStatusItem, ResponseFormat, StructuredGraphStatus, get_graph_status_response,
 };
 
 use self::input::GraphStatusInput;
@@ -76,40 +75,17 @@ impl GraphStatusService {
                     HashMap::new()
                 })
         };
-        let code_future = code::get_code_indexing_state(&self.client, ontology, traversal_path);
-        let sdlc_future =
-            sdlc::get_sdlc_indexing_state(self.indexing_status.as_ref(), ontology, traversal_path);
-
-        let (entity_counts, code, sdlc) =
-            tokio::join!(entity_counts_future, code_future, sdlc_future);
-
-        info!(
-            entity_count = entity_counts.len(),
-            projects_indexed = code.projects.indexed,
-            projects_total = code.projects.total_known,
-            sdlc_state = ?sdlc.aggregate.as_ref().and_then(|s| IndexingState::try_from(s.state).ok()),
-            code_state = ?code.aggregate.as_ref().and_then(|s| IndexingState::try_from(s.state).ok()),
-            "Graph status fetched"
+        let (entity_counts, projects) = tokio::join!(
+            entity_counts_future,
+            code::fetch_project_coverage(&self.client, ontology, traversal_path),
         );
-
-        let mut item_states = code.node_states;
-        item_states.extend(sdlc.node_states);
-
-        let visible_nodes: HashSet<&str> = input.nodes.iter().map(|n| n.name.as_str()).collect();
-        let domains =
-            present_domain_response(ontology, &entity_counts, &visible_nodes, &item_states);
-
-        let indexing = match &sdlc.aggregate {
-            Some(sdlc_status) => worst_indexing_status(Some(sdlc_status), code.aggregate.as_ref()),
-            None => None,
-        };
-
+        let backfill = self.fetch_backfill(traversal_path).await;
+        let visible_nodes: HashSet<&str> =
+            input.nodes.iter().map(|node| node.name.as_str()).collect();
         let structured = StructuredGraphStatus {
-            projects: Some(code.projects),
-            domains,
-            indexing,
-            sdlc_indexing: sdlc.aggregate,
-            code_indexing: code.aggregate,
+            projects: projects.ok(),
+            domains: present_domain_response(ontology, &entity_counts, &visible_nodes),
+            backfill: Some(backfill),
         };
 
         let content = if format == ResponseFormat::Llm as i32 {
@@ -123,6 +99,20 @@ impl GraphStatusService {
         Ok(GetGraphStatusResponse {
             content: Some(content),
         })
+    }
+
+    async fn fetch_backfill(&self, traversal_path: &TraversalPath) -> BackfillStatus {
+        let Some(store) = self.indexing_status.as_ref() else {
+            return BackfillStatus::default();
+        };
+        match store.initial_backfill(traversal_path).await {
+            Ok(Some(record)) => backfill_response(record),
+            Ok(None) => BackfillStatus::default(),
+            Err(error) => {
+                warn!(%traversal_path, %error, "initial backfill status unavailable");
+                BackfillStatus::default()
+            }
+        }
     }
 }
 
@@ -201,43 +191,22 @@ fn append_query_settings(sql: &str) -> Result<String, String> {
     Ok(format!("{sql} SETTINGS {clause}"))
 }
 
-pub(super) fn status_with_state(state: IndexingState) -> IndexingStatus {
-    IndexingStatus {
-        state: state.into(),
-        ..Default::default()
-    }
-}
-
-pub(super) fn unknown_status() -> IndexingStatus {
-    status_with_state(IndexingState::Unknown)
-}
-
-fn worst_indexing_status(
-    a: Option<&IndexingStatus>,
-    b: Option<&IndexingStatus>,
-) -> Option<IndexingStatus> {
-    let priority = |status: &IndexingStatus| {
-        state_priority(IndexingState::try_from(status.state).unwrap_or(IndexingState::Unknown))
+fn backfill_response(record: InitialBackfill) -> BackfillStatus {
+    let state = match record.state {
+        InitialBackfillState::Running => BackfillState::Running,
+        InitialBackfillState::Completed => BackfillState::Completed,
     };
-    match (a, b) {
-        (Some(a), Some(b)) if priority(b) > priority(a) => Some(b.clone()),
-        (Some(a), Some(_)) => Some(a.clone()),
-        (Some(a), None) => Some(a.clone()),
-        (None, Some(b)) => Some(b.clone()),
-        (None, None) => None,
-    }
-}
-
-// Higher = worse, so the "worst" state wins. NotIndexed dominates a missing
-// key because not-yet-started is a strictly less-known state than failing.
-pub(super) fn state_priority(state: IndexingState) -> u8 {
-    match state {
-        IndexingState::Indexed => 0,
-        IndexingState::Indexing => 1,
-        IndexingState::Error => 2,
-        IndexingState::Backfilling => 3,
-        IndexingState::NotIndexed => 4,
-        IndexingState::Unknown => 5,
+    BackfillStatus {
+        state: state.into(),
+        last_progress_at: record.last_progress_at.map(|at| at.to_rfc3339()),
+        sdlc: Some(BackfillCounts {
+            completed: record.completed_pipelines,
+            total: Some(record.total_pipelines),
+        }),
+        code: Some(BackfillCounts {
+            completed: record.completed_projects,
+            total: None,
+        }),
     }
 }
 
@@ -245,7 +214,6 @@ fn present_domain_response(
     ontology: &Ontology,
     entity_counts: &HashMap<String, i64>,
     visible_nodes: &HashSet<&str>,
-    item_states: &HashMap<String, IndexingState>,
 ) -> Vec<GraphStatusDomain> {
     ontology
         .domains()
@@ -257,7 +225,6 @@ fn present_domain_response(
                 .map(|node_name| GraphStatusItem {
                     name: node_name.clone(),
                     count: entity_counts.get(node_name).copied().unwrap_or(0),
-                    state: item_states.get(node_name).map(|state| *state as i32),
                 })
                 .collect();
 
@@ -302,7 +269,7 @@ mod tests {
         entity_counts.insert("Project".to_string(), 42);
         entity_counts.insert("User".to_string(), 10);
 
-        let domains = present_domain_response(&ontology, &entity_counts, &visible, &HashMap::new());
+        let domains = present_domain_response(&ontology, &entity_counts, &visible);
 
         assert!(!domains.is_empty());
 
@@ -325,7 +292,7 @@ mod tests {
         let visible = all_node_names(&ontology);
         let entity_counts = HashMap::new();
 
-        let domains = present_domain_response(&ontology, &entity_counts, &visible, &HashMap::new());
+        let domains = present_domain_response(&ontology, &entity_counts, &visible);
 
         for domain in &domains {
             for item in &domain.items {
@@ -344,7 +311,7 @@ mod tests {
         let visible = all_node_names(&ontology);
         let entity_counts = HashMap::new();
 
-        let domains = present_domain_response(&ontology, &entity_counts, &visible, &HashMap::new());
+        let domains = present_domain_response(&ontology, &entity_counts, &visible);
         let domain_count = ontology.domains().count();
 
         assert_eq!(domains.len(), domain_count);
@@ -357,7 +324,7 @@ mod tests {
         let mut entity_counts = HashMap::new();
         entity_counts.insert("Project".to_string(), 5);
 
-        let domains = present_domain_response(&ontology, &entity_counts, &visible, &HashMap::new());
+        let domains = present_domain_response(&ontology, &entity_counts, &visible);
 
         let security = domains.iter().find(|d| d.name == "security");
         assert!(
@@ -396,77 +363,6 @@ mod tests {
         let status = result.unwrap_err();
         assert_eq!(status.code(), tonic::Code::InvalidArgument);
         assert!(status.message().contains("traversal_path"));
-    }
-
-    fn dated_status(state: IndexingState) -> IndexingStatus {
-        IndexingStatus {
-            state: state.into(),
-            last_started_at: Some("2020-01-01T00:00:00Z".to_string()),
-            ..Default::default()
-        }
-    }
-
-    #[test]
-    fn worst_indexing_status_picks_worse_surface() {
-        let sdlc = dated_status(IndexingState::Indexed);
-        let code = status_with_state(IndexingState::NotIndexed);
-
-        let worst = worst_indexing_status(Some(&sdlc), Some(&code)).unwrap();
-
-        assert_eq!(worst.state, IndexingState::NotIndexed as i32);
-        assert!(worst.last_started_at.is_none());
-    }
-
-    #[test]
-    fn worst_indexing_status_keeps_timestamps_of_winning_surface() {
-        let sdlc = dated_status(IndexingState::Error);
-        let code = status_with_state(IndexingState::Indexed);
-
-        let worst = worst_indexing_status(Some(&sdlc), Some(&code)).unwrap();
-
-        assert_eq!(worst.state, IndexingState::Error as i32);
-        assert!(worst.last_started_at.is_some());
-
-        let tie = dated_status(IndexingState::Indexed);
-        let worst =
-            worst_indexing_status(Some(&tie), Some(&status_with_state(IndexingState::Indexed)))
-                .unwrap();
-        assert!(worst.last_started_at.is_some());
-    }
-
-    #[test]
-    fn worst_indexing_status_folds_absent_surfaces() {
-        let status = dated_status(IndexingState::Indexed);
-
-        assert_eq!(
-            worst_indexing_status(Some(&status), None).unwrap().state,
-            IndexingState::Indexed as i32
-        );
-        assert_eq!(
-            worst_indexing_status(None, Some(&status)).unwrap().state,
-            IndexingState::Indexed as i32
-        );
-        assert!(worst_indexing_status(None, None).is_none());
-    }
-
-    #[test]
-    fn code_and_sdlc_cover_disjoint_nodes() {
-        let ontology = test_ontology();
-
-        let code_nodes = code::resolve_node_states(&ontology, Some(IndexingState::Indexed));
-        let pipeline_states: HashMap<String, IndexingState> =
-            sdlc::namespaced_pipeline_names(&ontology)
-                .into_iter()
-                .map(|name| (name, IndexingState::Indexed))
-                .collect();
-        let sdlc_nodes = sdlc::resolve_node_states(&ontology, &pipeline_states);
-
-        for node_name in code_nodes.keys() {
-            assert!(
-                !sdlc_nodes.contains_key(node_name),
-                "node {node_name} is claimed by both the code and SDLC surfaces"
-            );
-        }
     }
 
     fn counts_input() -> GraphStatusInput {

@@ -67,6 +67,7 @@ use nats::{KvBucketConfig, NatsBroker};
 use orbit_migrations::catalog::OntologyCatalog;
 use orbit_server_config::IndexerModule;
 use orchestrator::Trigger;
+use orchestrator::dispatch::backfill_status::InitialBackfillTracker;
 use orchestrator::dispatch::{CodeBackfill, NamespaceIndexingDispatch};
 use orchestrator::max_deliveries::MaxDeliveriesReconciler;
 use orchestrator::scheduled::{
@@ -105,6 +106,7 @@ pub async fn run(
         .ensure_kv_bucket_exists(INDEXING_LOCKS_BUCKET, KvBucketConfig::default())
         .await?;
     broker
+        .client()
         .ensure_kv_bucket_exists(INDEXING_PROGRESS_BUCKET, KvBucketConfig::default())
         .await?;
 
@@ -112,7 +114,9 @@ pub async fn run(
         .ensure_managed_streams(&topic::all_managed_subscriptions())
         .await?;
 
-    let indexing_status = Arc::new(IndexingStatusStore::new(broker.clone()));
+    let indexing_status = Arc::new(IndexingStatusStore::new(Arc::new(
+        nats_client::KvServicesImpl::new(broker.client().clone()),
+    )));
 
     // Start the health server before waiting for schema readiness so that the
     // Kubernetes liveness probe is answered during the (potentially long) schema
@@ -249,6 +253,14 @@ pub async fn run_dispatcher(
 ) -> Result<(), DispatcherError> {
     let services = orchestrator::scheduled::connect(&config.nats).await?;
 
+    services
+        .nats_client
+        .ensure_kv_bucket_exists(INDEXING_PROGRESS_BUCKET, KvBucketConfig::default())
+        .await?;
+    let indexing_status = Arc::new(IndexingStatusStore::new(Arc::new(
+        nats_client::KvServicesImpl::new(services.nats_client.clone()),
+    )));
+
     let catalog = OntologyCatalog::open(services.nats_client.clone()).await?;
     let ontology = catalog.publish(archive).await?;
 
@@ -350,6 +362,11 @@ pub async fn run_dispatcher(
         metrics.clone(),
         campaign.clone(),
         config.schedule.tasks.code_backfill.publish_window,
+        Arc::new(InitialBackfillTracker::new(
+            config.graph.build_client(),
+            indexing_status,
+            &ontology,
+        )),
     ));
 
     let tasks: Vec<Box<dyn ScheduledTask>> = vec![

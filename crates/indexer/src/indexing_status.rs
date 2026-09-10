@@ -4,9 +4,14 @@ use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use nats_client::KvPutOptions;
 use orbit_utils::traversal_path::TraversalPath;
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tracing::warn;
+
+mod backfill;
+
+pub use backfill::{InitialBackfill, InitialBackfillState};
 
 pub const INDEXING_PROGRESS_BUCKET: &str = "orbit_indexing_progress";
 const KEY_PREFIX: &str = "status";
@@ -19,8 +24,8 @@ pub enum Error {
     #[error("NATS KV operation failed: {0}")]
     Nats(#[from] nats_client::NatsError),
 
-    #[error("failed to deserialize indexing progress: {0}")]
-    Deserialize(#[from] serde_json::Error),
+    #[error("failed to (de)serialize indexing status: {0}")]
+    Serde(#[from] serde_json::Error),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -57,25 +62,18 @@ impl IndexingStatusStore {
     /// previous completion fields. Safe here because NATS message deduping and
     /// per-path locks already serialize runs for a given traversal path.
     pub async fn record_start(&self, traversal_path: &TraversalPath, started_at: DateTime<Utc>) {
-        let previous = self.get(traversal_path).await.unwrap_or_else(|error| {
-            warn!(%traversal_path, %error, "failed to read previous progress; starting from scratch");
-            None
-        });
-        let progress = match previous {
-            Some(mut prev) => {
-                prev.last_started_at = started_at;
-                prev
-            }
-            None => IndexingProgress {
-                last_started_at: started_at,
-                last_completed_at: None,
-                last_duration_ms: None,
-                last_error: None,
-                last_rows_read: None,
-                last_rows_written: None,
-            },
-        };
-        self.write(traversal_path, progress).await;
+        self.record_started(progress_key(traversal_path), started_at)
+            .await;
+    }
+
+    pub async fn record_entity_start(
+        &self,
+        traversal_path: &TraversalPath,
+        entity_kind: &str,
+        started_at: DateTime<Utc>,
+    ) {
+        self.record_started(entity_key(traversal_path, entity_kind), started_at)
+            .await;
     }
 
     pub async fn record_completion(
@@ -86,47 +84,11 @@ impl IndexingStatusStore {
         error: Option<String>,
         rows: RunRows,
     ) {
-        self.write(
-            traversal_path,
+        self.record_progress(
+            progress_key(traversal_path),
             completed_progress(started_at, completed_at, error, rows),
         )
         .await;
-    }
-
-    pub async fn get(
-        &self,
-        traversal_path: &TraversalPath,
-    ) -> Result<Option<IndexingProgress>, Error> {
-        let key = normalize_key(traversal_path)?;
-        self.read_key(&key).await
-    }
-
-    pub async fn record_entity_start(
-        &self,
-        traversal_path: &TraversalPath,
-        entity_kind: &str,
-        started_at: DateTime<Utc>,
-    ) {
-        let previous = self.get_entity(traversal_path, entity_kind).await.unwrap_or_else(|error| {
-            warn!(%traversal_path, entity_kind, %error, "failed to read previous entity progress; starting from scratch");
-            None
-        });
-        let progress = match previous {
-            Some(mut prev) => {
-                prev.last_started_at = started_at;
-                prev
-            }
-            None => IndexingProgress {
-                last_started_at: started_at,
-                last_completed_at: None,
-                last_duration_ms: None,
-                last_error: None,
-                last_rows_read: None,
-                last_rows_written: None,
-            },
-        };
-        self.write_entity(traversal_path, entity_kind, progress)
-            .await;
     }
 
     pub async fn record_entity_completion(
@@ -138,12 +100,18 @@ impl IndexingStatusStore {
         error: Option<String>,
         rows: RunRows,
     ) {
-        self.write_entity(
-            traversal_path,
-            entity_kind,
+        self.record_progress(
+            entity_key(traversal_path, entity_kind),
             completed_progress(started_at, completed_at, error, rows),
         )
         .await;
+    }
+
+    pub async fn get(
+        &self,
+        traversal_path: &TraversalPath,
+    ) -> Result<Option<IndexingProgress>, Error> {
+        self.read_key(&progress_key(traversal_path)?).await
     }
 
     pub async fn get_entity(
@@ -151,66 +119,88 @@ impl IndexingStatusStore {
         traversal_path: &TraversalPath,
         entity_kind: &str,
     ) -> Result<Option<IndexingProgress>, Error> {
-        let key = entity_key(traversal_path, entity_kind)?;
-        self.read_key(&key).await
+        self.read_key(&entity_key(traversal_path, entity_kind)?)
+            .await
     }
 
-    async fn read_key(&self, key: &str) -> Result<Option<IndexingProgress>, Error> {
-        let Some(entry) = self.kv.kv_get(INDEXING_PROGRESS_BUCKET, key).await? else {
-            return Ok(None);
-        };
-        let progress = serde_json::from_slice::<IndexingProgress>(&entry.value)?;
-        Ok(Some(progress))
+    pub async fn forget_namespace(&self, traversal_path: &TraversalPath) -> Result<(), Error> {
+        let prefix = progress_key(traversal_path)?;
+        for key in self.kv.kv_keys(INDEXING_PROGRESS_BUCKET).await? {
+            if key == prefix || key.starts_with(&format!("{prefix}.")) {
+                self.kv.kv_delete(INDEXING_PROGRESS_BUCKET, &key).await?;
+            }
+        }
+        if traversal_path.root_prefix().as_ref() == Some(traversal_path) {
+            self.kv
+                .kv_delete(
+                    INDEXING_PROGRESS_BUCKET,
+                    &backfill::initial_backfill_key(traversal_path)?,
+                )
+                .await?;
+        }
+        Ok(())
     }
 
-    async fn write(&self, traversal_path: &TraversalPath, progress: IndexingProgress) {
-        let key = match normalize_key(traversal_path) {
+    async fn record_started(&self, key: Result<String, Error>, started_at: DateTime<Utc>) {
+        let key = match key {
             Ok(key) => key,
             Err(error) => {
-                warn!(%traversal_path, %error, "skipping indexing status record");
+                warn!(%error, "skipping indexing status record");
                 return;
             }
         };
-        self.write_raw(&key, progress).await;
+        let previous: Option<IndexingProgress> =
+            self.read_key(&key).await.unwrap_or_else(|error| {
+                warn!(key, %error, "failed to read previous progress; starting from scratch");
+                None
+            });
+        let progress = match previous {
+            Some(mut previous) => {
+                previous.last_started_at = started_at;
+                previous
+            }
+            None => IndexingProgress {
+                last_started_at: started_at,
+                last_completed_at: None,
+                last_duration_ms: None,
+                last_error: None,
+                last_rows_read: None,
+                last_rows_written: None,
+            },
+        };
+        self.record_progress(Ok(key), progress).await;
     }
 
-    async fn write_entity(
-        &self,
-        traversal_path: &TraversalPath,
-        entity_kind: &str,
-        progress: IndexingProgress,
-    ) {
-        let key = match entity_key(traversal_path, entity_kind) {
-            Ok(key) => key,
-            Err(error) => {
-                warn!(%traversal_path, entity_kind, %error, "skipping entity indexing status record");
-                return;
-            }
+    async fn record_progress(&self, key: Result<String, Error>, progress: IndexingProgress) {
+        let written = match key {
+            Ok(key) => self.write_key(&key, &progress).await,
+            Err(error) => Err(error),
         };
-        self.write_raw(&key, progress).await;
+        if let Err(error) = written {
+            warn!(%error, "failed to write indexing progress");
+        }
     }
 
-    async fn write_raw(&self, key: &str, progress: IndexingProgress) {
-        let payload = match serde_json::to_vec(&progress) {
-            Ok(bytes) => Bytes::from(bytes),
-            Err(error) => {
-                warn!(%error, key, "failed to serialize indexing progress");
-                return;
-            }
-        };
+    async fn read_key<T: DeserializeOwned>(&self, key: &str) -> Result<Option<T>, Error> {
+        self.kv
+            .kv_get(INDEXING_PROGRESS_BUCKET, key)
+            .await?
+            .map(|entry| serde_json::from_slice(&entry.value))
+            .transpose()
+            .map_err(Error::from)
+    }
 
-        if let Err(error) = self
-            .kv
+    async fn write_key<T: Serialize>(&self, key: &str, value: &T) -> Result<(), Error> {
+        let payload = Bytes::from(serde_json::to_vec(value)?);
+        self.kv
             .kv_put(
                 INDEXING_PROGRESS_BUCKET,
                 key,
                 payload,
                 KvPutOptions::default(),
             )
-            .await
-        {
-            warn!(%error, key, "failed to write indexing progress");
-        }
+            .await?;
+        Ok(())
     }
 }
 
@@ -235,7 +225,7 @@ fn completed_progress(
 }
 
 /// `"42/9970/12345/"` → `"status.42.9970.12345"`.
-fn normalize_key(traversal_path: &TraversalPath) -> Result<String, Error> {
+fn progress_key(traversal_path: &TraversalPath) -> Result<String, Error> {
     let dotted = traversal_path.to_dotted();
     if dotted.is_empty() {
         return Err(Error::EmptyTraversalPath);
@@ -245,7 +235,7 @@ fn normalize_key(traversal_path: &TraversalPath) -> Result<String, Error> {
 
 /// `("42/9970/", "MergeRequest")` → `"status.42.9970.MergeRequest"`.
 fn entity_key(traversal_path: &TraversalPath, entity_kind: &str) -> Result<String, Error> {
-    let base = normalize_key(traversal_path)?;
+    let base = progress_key(traversal_path)?;
     Ok(format!("{base}.{entity_kind}"))
 }
 
@@ -254,7 +244,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn normalize_key_formats_paths() {
+    fn progress_key_formats_paths() {
         let cases = [
             ("42/9970/", "status.42.9970"),
             ("42/9970/12345/", "status.42.9970.12345"),
@@ -263,7 +253,7 @@ mod tests {
         ];
         for (input, expected) in cases {
             assert_eq!(
-                normalize_key(&TraversalPath::new_unchecked(input)).unwrap(),
+                progress_key(&TraversalPath::new_unchecked(input)).unwrap(),
                 expected,
                 "input: {input:?}"
             );
@@ -272,7 +262,7 @@ mod tests {
         for empty in ["", "/", "//"] {
             assert!(
                 matches!(
-                    normalize_key(&TraversalPath::new_unchecked(empty)),
+                    progress_key(&TraversalPath::new_unchecked(empty)),
                     Err(Error::EmptyTraversalPath)
                 ),
                 "input: {empty:?}"

@@ -2,21 +2,22 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use bytes::Bytes;
-use chrono::{Duration, Utc};
 use nats_client::error::NatsError;
 use nats_client::kv_types::{KvEntry, KvPutOptions, KvPutResult};
 use orbit_utils::traversal_path::TraversalPath;
 use query_engine::compiler::{AuthorizedPath, SecurityContext};
 
 use crate::common::{GRAPH_SCHEMA_SQL, TestContext};
-use indexer::indexing_status::{INDEXING_PROGRESS_BUCKET, IndexingProgress, IndexingStatusStore};
+use indexer::indexing_status::{IndexingStatusStore, InitialBackfill, InitialBackfillState};
 use integration_testkit::{load_ontology, run_subtests_shared, t};
 use nats_client::testkit::MockKvServices;
 use orbit_server::graph_status::GraphStatusService;
 use orbit_server::proto::{
-    GetGraphStatusResponse, IndexingState, ResponseFormat, StructuredGraphStatus,
+    BackfillState, BackfillStatus, GetGraphStatusResponse, ResponseFormat, StructuredGraphStatus,
     get_graph_status_response,
 };
+
+mod backfill;
 
 fn admin_context() -> SecurityContext {
     SecurityContext::new_with_roles(1, vec![AuthorizedPath::new("1/", 50)])
@@ -187,29 +188,56 @@ fn build_service_with_indexing_status(
     GraphStatusService::new(client).with_indexing_status(store)
 }
 
-fn dotted_traversal(traversal_path: &str) -> String {
-    traversal_path
-        .split('/')
-        .filter(|s| !s.is_empty())
-        .collect::<Vec<_>>()
-        .join(".")
-}
-
-fn seed_entity_progress(
-    mock_kv: &MockKvServices,
-    traversal_path: &str,
-    entity_kind: &str,
-    progress: &IndexingProgress,
-) {
-    let key = format!("status.{}.{entity_kind}", dotted_traversal(traversal_path));
-    let payload = serde_json::to_vec(progress).expect("serialize progress");
-    mock_kv.set(INDEXING_PROGRESS_BUCKET, &key, Bytes::from(payload));
-}
-
 fn extract_structured(response: GetGraphStatusResponse) -> StructuredGraphStatus {
     match response.content {
         Some(get_graph_status_response::Content::Structured(s)) => s,
         _ => panic!("Expected structured response"),
+    }
+}
+
+async fn backfill_status(service: &GraphStatusService, path: &str) -> BackfillStatus {
+    extract_structured(
+        service
+            .get_status(
+                &load_ontology(),
+                &TraversalPath::new_unchecked(path),
+                ResponseFormat::Raw as i32,
+                &admin_context(),
+            )
+            .await
+            .unwrap(),
+    )
+    .backfill
+    .unwrap()
+}
+
+async fn unavailable_status_preserves_inventory(ctx: &TestContext) {
+    let services = [
+        build_service(ctx),
+        build_service(ctx)
+            .with_indexing_status(IndexingStatusStore::new(Arc::new(FailingKvServices))),
+        build_service(ctx).with_indexing_status(IndexingStatusStore::new(Arc::new(
+            KvFailingOnKey {
+                inner: MockKvServices::new(),
+                fail_key: "backfill.100".into(),
+            },
+        ))),
+    ];
+    for service in services {
+        let response = service
+            .get_status(
+                &load_ontology(),
+                &TraversalPath::new_unchecked("1/100/"),
+                ResponseFormat::Raw as i32,
+                &admin_context(),
+            )
+            .await
+            .unwrap();
+        let status = extract_structured(response);
+        assert_eq!(status.projects.unwrap().total_known, 2);
+        let backfill = status.backfill.unwrap();
+        assert_eq!(backfill.state(), BackfillState::Unknown);
+        assert_eq!(backfill.last_progress_at, None);
     }
 }
 
@@ -246,22 +274,7 @@ async fn graph_status() {
         all_domains_present_in_response,
         projects_status_at_root,
         projects_status_scoped_by_traversal_path,
-        indexing_status_absent_without_store,
-        indexing_status_indexed_for_group,
-        indexing_status_backfilling_for_project,
-        indexing_status_not_indexed_when_no_kv_entry,
-        indexing_status_indexing_when_reindex_in_flight,
-        indexing_status_error_state,
-        indexing_status_unknown_when_nats_unreachable,
-        indexing_status_per_entity_worst_state_wins,
-        indexing_status_per_entity_missing_key_treated_as_not_indexed,
-        indexing_status_survives_single_entity_read_failure,
-        code_not_indexed_dominates_when_no_project_checkpointed,
-        code_indexing_omitted_when_no_projects_known,
-        edge_pipeline_error_surfaces_in_sdlc_state,
-        items_carry_per_entity_state,
-        indexing_status_reports_last_run_rows,
-        toon_renders_split_indexing_blocks,
+        unavailable_status_preserves_inventory,
         reporter_excludes_security_entity_counts,
         security_manager_includes_security_entity_counts,
         definition_count_counts_distinct_ids,
@@ -432,314 +445,6 @@ async fn projects_status_scoped_by_traversal_path(ctx: &TestContext) {
     );
 }
 
-async fn indexing_status_absent_without_store(ctx: &TestContext) {
-    let service = build_service(ctx);
-    let response = service
-        .get_status(
-            &load_ontology(),
-            &TraversalPath::new_unchecked("1/"),
-            ResponseFormat::Raw as i32,
-            &admin_context(),
-        )
-        .await
-        .expect("should succeed");
-    let status = extract_structured(response);
-
-    assert!(
-        status.indexing.is_none(),
-        "indexing field should be absent when no store is configured"
-    );
-    assert!(status.sdlc_indexing.is_none());
-    let code = status
-        .code_indexing
-        .expect("code_indexing needs only ClickHouse");
-    assert_eq!(
-        code.state,
-        IndexingState::Backfilling as i32,
-        "2 of 3 projects checkpointed"
-    );
-}
-
-async fn indexing_status_indexed_for_group(ctx: &TestContext) {
-    let mock_kv = MockKvServices::new();
-    let started = Utc::now() - Duration::seconds(30);
-    let completed = Utc::now() - Duration::seconds(25);
-    seed_namespaced_entities(
-        &mock_kv,
-        "1/100/",
-        &IndexingProgress {
-            last_started_at: started,
-            last_completed_at: Some(completed),
-            last_duration_ms: Some(5000),
-            last_error: None,
-            last_rows_read: None,
-            last_rows_written: None,
-        },
-    );
-
-    let service = build_service_with_indexing_status(ctx, mock_kv);
-    let response = service
-        .get_status(
-            &load_ontology(),
-            &TraversalPath::new_unchecked("1/100/"),
-            ResponseFormat::Raw as i32,
-            &admin_context(),
-        )
-        .await
-        .expect("should succeed");
-    let status = extract_structured(response);
-
-    let sdlc = status
-        .sdlc_indexing
-        .expect("sdlc_indexing should be present");
-    assert_eq!(sdlc.state, IndexingState::Indexed as i32);
-    assert!(sdlc.last_started_at.is_some());
-    assert!(sdlc.last_completed_at.is_some());
-    assert_eq!(sdlc.last_duration_ms, Some(5000));
-    assert!(sdlc.last_error.is_none());
-
-    let indexing = status.indexing.expect("indexing should be present");
-    assert_eq!(
-        indexing.state,
-        IndexingState::Backfilling as i32,
-        "combined state reflects code coverage (1 of 2 projects) even though SDLC completed"
-    );
-}
-
-async fn indexing_status_backfilling_for_project(ctx: &TestContext) {
-    let mock_kv = MockKvServices::new();
-    seed_namespaced_entities(
-        &mock_kv,
-        "1/100/1000/",
-        &IndexingProgress {
-            last_started_at: Utc::now(),
-            last_completed_at: None,
-            last_duration_ms: None,
-            last_error: None,
-            last_rows_read: None,
-            last_rows_written: None,
-        },
-    );
-
-    let service = build_service_with_indexing_status(ctx, mock_kv);
-    let response = service
-        .get_status(
-            &load_ontology(),
-            &TraversalPath::new_unchecked("1/100/1000/"),
-            ResponseFormat::Raw as i32,
-            &admin_context(),
-        )
-        .await
-        .expect("should succeed");
-    let status = extract_structured(response);
-
-    let indexing = status.indexing.expect("indexing should be present");
-    assert_eq!(indexing.state, IndexingState::Backfilling as i32);
-    assert!(indexing.last_started_at.is_some());
-    assert!(indexing.last_completed_at.is_none());
-
-    let code = status
-        .code_indexing
-        .expect("code_indexing should be present");
-    assert_eq!(
-        code.state,
-        IndexingState::Indexed as i32,
-        "the project itself is checkpointed"
-    );
-}
-
-async fn indexing_status_indexing_when_reindex_in_flight(ctx: &TestContext) {
-    let mock_kv = MockKvServices::new();
-    let previous_completion = Utc::now() - Duration::seconds(60);
-    seed_namespaced_entities(
-        &mock_kv,
-        "1/100/",
-        &IndexingProgress {
-            last_started_at: Utc::now(),
-            last_completed_at: Some(previous_completion),
-            last_duration_ms: Some(5000),
-            last_error: None,
-            last_rows_read: None,
-            last_rows_written: None,
-        },
-    );
-
-    let service = build_service_with_indexing_status(ctx, mock_kv);
-    let response = service
-        .get_status(
-            &load_ontology(),
-            &TraversalPath::new_unchecked("1/100/"),
-            ResponseFormat::Raw as i32,
-            &admin_context(),
-        )
-        .await
-        .expect("should succeed");
-    let status = extract_structured(response);
-
-    let sdlc = status
-        .sdlc_indexing
-        .expect("sdlc_indexing should be present");
-    assert_eq!(sdlc.state, IndexingState::Indexing as i32);
-}
-
-async fn indexing_status_not_indexed_when_no_kv_entry(ctx: &TestContext) {
-    let mock_kv = MockKvServices::new();
-    let service = build_service_with_indexing_status(ctx, mock_kv);
-    let response = service
-        .get_status(
-            &load_ontology(),
-            &TraversalPath::new_unchecked("1/101/"),
-            ResponseFormat::Raw as i32,
-            &admin_context(),
-        )
-        .await
-        .expect("should succeed");
-    let status = extract_structured(response);
-
-    let indexing = status.indexing.expect("indexing should be present");
-    assert_eq!(indexing.state, IndexingState::NotIndexed as i32);
-    assert!(indexing.last_started_at.is_none());
-}
-
-async fn indexing_status_error_state(ctx: &TestContext) {
-    let mock_kv = MockKvServices::new();
-    let started = Utc::now() - Duration::seconds(10);
-    seed_namespaced_entities(
-        &mock_kv,
-        "1/100/",
-        &IndexingProgress {
-            last_started_at: started,
-            last_completed_at: Some(started + Duration::seconds(2)),
-            last_duration_ms: Some(2000),
-            last_error: Some("deadline exceeded".to_string()),
-            last_rows_read: None,
-            last_rows_written: None,
-        },
-    );
-
-    let service = build_service_with_indexing_status(ctx, mock_kv);
-    let response = service
-        .get_status(
-            &load_ontology(),
-            &TraversalPath::new_unchecked("1/100/"),
-            ResponseFormat::Raw as i32,
-            &admin_context(),
-        )
-        .await
-        .expect("should succeed");
-    let status = extract_structured(response);
-
-    let sdlc = status
-        .sdlc_indexing
-        .expect("sdlc_indexing should be present");
-    assert_eq!(sdlc.state, IndexingState::Error as i32);
-    assert_eq!(
-        sdlc.last_error.as_deref(),
-        Some("Something went wrong during indexing.")
-    );
-}
-
-async fn indexing_status_unknown_when_nats_unreachable(ctx: &TestContext) {
-    let store = IndexingStatusStore::new(Arc::new(FailingKvServices));
-    let client = Arc::new(ctx.create_client());
-
-    let service = GraphStatusService::new(client).with_indexing_status(store);
-
-    let response = service
-        .get_status(
-            &load_ontology(),
-            &TraversalPath::new_unchecked("1/100/"),
-            ResponseFormat::Raw as i32,
-            &admin_context(),
-        )
-        .await
-        .expect("should succeed");
-    let status = extract_structured(response);
-
-    let indexing = status.indexing.expect("indexing should be present");
-    assert_eq!(indexing.state, IndexingState::Unknown as i32);
-}
-
-async fn indexing_status_per_entity_worst_state_wins(ctx: &TestContext) {
-    let mock_kv = MockKvServices::new();
-    let started = Utc::now() - Duration::seconds(30);
-    let completed = started + Duration::seconds(5);
-    let indexed = IndexingProgress {
-        last_started_at: started,
-        last_completed_at: Some(completed),
-        last_duration_ms: Some(5000),
-        last_error: None,
-        last_rows_read: None,
-        last_rows_written: None,
-    };
-    let errored = IndexingProgress {
-        last_started_at: started,
-        last_completed_at: Some(completed),
-        last_duration_ms: Some(5000),
-        last_error: Some("scan failure".to_string()),
-        last_rows_read: None,
-        last_rows_written: None,
-    };
-
-    for name in namespaced_pipeline_names() {
-        let progress = if name == "WorkItem" {
-            &errored
-        } else {
-            &indexed
-        };
-        seed_entity_progress(&mock_kv, "1/100/", &name, progress);
-    }
-
-    let service = build_service_with_indexing_status(ctx, mock_kv);
-    let response = service
-        .get_status(
-            &load_ontology(),
-            &TraversalPath::new_unchecked("1/100/"),
-            ResponseFormat::Raw as i32,
-            &admin_context(),
-        )
-        .await
-        .expect("should succeed");
-    let status = extract_structured(response);
-
-    let sdlc = status
-        .sdlc_indexing
-        .expect("sdlc_indexing should be present");
-    assert_eq!(sdlc.state, IndexingState::Error as i32);
-    assert_eq!(
-        sdlc.last_error.as_deref(),
-        Some("Something went wrong during indexing.")
-    );
-}
-
-async fn indexing_status_per_entity_missing_key_treated_as_not_indexed(ctx: &TestContext) {
-    let mock_kv = MockKvServices::new();
-    let progress = IndexingProgress {
-        last_started_at: Utc::now() - Duration::seconds(30),
-        last_completed_at: Some(Utc::now() - Duration::seconds(25)),
-        last_duration_ms: Some(5000),
-        last_error: None,
-        last_rows_read: None,
-        last_rows_written: None,
-    };
-    seed_entity_progress(&mock_kv, "1/100/", "MergeRequest", &progress);
-
-    let service = build_service_with_indexing_status(ctx, mock_kv);
-    let response = service
-        .get_status(
-            &load_ontology(),
-            &TraversalPath::new_unchecked("1/100/"),
-            ResponseFormat::Raw as i32,
-            &admin_context(),
-        )
-        .await
-        .expect("should succeed");
-    let status = extract_structured(response);
-
-    let indexing = status.indexing.expect("indexing should be present");
-    assert_eq!(indexing.state, IndexingState::NotIndexed as i32);
-}
-
 async fn reporter_excludes_security_entity_counts(ctx: &TestContext) {
     let service = build_service(ctx);
     let reporter_context =
@@ -790,256 +495,6 @@ async fn security_manager_includes_security_entity_counts(ctx: &TestContext) {
         find_item(security, "Vulnerability"),
         1,
         "SecurityManager should see vulnerability counts"
-    );
-}
-
-fn namespaced_pipeline_names() -> Vec<String> {
-    load_ontology()
-        .pipeline_descriptors()
-        .into_iter()
-        .filter(|descriptor| descriptor.scope == ontology::EtlScope::Namespaced)
-        .map(|descriptor| descriptor.name)
-        .collect()
-}
-
-fn seed_namespaced_entities(
-    mock_kv: &MockKvServices,
-    traversal_path: &str,
-    progress: &IndexingProgress,
-) {
-    for name in namespaced_pipeline_names() {
-        seed_entity_progress(mock_kv, traversal_path, &name, progress);
-    }
-}
-
-async fn indexing_status_survives_single_entity_read_failure(ctx: &TestContext) {
-    let mock_kv = MockKvServices::new();
-    let started = Utc::now() - Duration::seconds(30);
-    let indexed = IndexingProgress {
-        last_started_at: started,
-        last_completed_at: Some(started + Duration::seconds(5)),
-        last_duration_ms: Some(5000),
-        last_error: None,
-        last_rows_read: None,
-        last_rows_written: None,
-    };
-    seed_namespaced_entities(&mock_kv, "1/100/", &indexed);
-
-    let store = IndexingStatusStore::new(Arc::new(KvFailingOnKey {
-        inner: mock_kv,
-        fail_key: format!("status.1.100.{}", "MergeRequest"),
-    }));
-    let client = Arc::new(ctx.create_client());
-
-    let service = GraphStatusService::new(client).with_indexing_status(store);
-
-    let response = service
-        .get_status(
-            &load_ontology(),
-            &TraversalPath::new_unchecked("1/100/"),
-            ResponseFormat::Raw as i32,
-            &admin_context(),
-        )
-        .await
-        .expect("should succeed");
-    let status = extract_structured(response);
-
-    let sdlc = status
-        .sdlc_indexing
-        .expect("sdlc_indexing should be present");
-    assert_ne!(sdlc.state, IndexingState::Unknown as i32);
-    assert_eq!(sdlc.state, IndexingState::Indexed as i32);
-}
-
-fn completed_progress() -> IndexingProgress {
-    let started = Utc::now() - Duration::seconds(30);
-    IndexingProgress {
-        last_started_at: started,
-        last_completed_at: Some(started + Duration::seconds(5)),
-        last_duration_ms: Some(5000),
-        last_error: None,
-        last_rows_read: None,
-        last_rows_written: None,
-    }
-}
-
-async fn code_not_indexed_dominates_when_no_project_checkpointed(ctx: &TestContext) {
-    let mock_kv = MockKvServices::new();
-    seed_namespaced_entities(&mock_kv, "1/100/1002/", &completed_progress());
-
-    let service = build_service_with_indexing_status(ctx, mock_kv);
-    let response = service
-        .get_status(
-            &load_ontology(),
-            &TraversalPath::new_unchecked("1/100/1002/"),
-            ResponseFormat::Raw as i32,
-            &admin_context(),
-        )
-        .await
-        .expect("should succeed");
-    let status = extract_structured(response);
-
-    let sdlc = status
-        .sdlc_indexing
-        .expect("sdlc_indexing should be present");
-    assert_eq!(sdlc.state, IndexingState::Indexed as i32);
-
-    let code = status
-        .code_indexing
-        .expect("code_indexing should be present");
-    assert_eq!(
-        code.state,
-        IndexingState::NotIndexed as i32,
-        "project 1002 has no checkpoint"
-    );
-
-    let indexing = status.indexing.expect("indexing should be present");
-    assert_eq!(
-        indexing.state,
-        IndexingState::NotIndexed as i32,
-        "an un-code-indexed scope must not report plain indexed"
-    );
-}
-
-async fn code_indexing_omitted_when_no_projects_known(ctx: &TestContext) {
-    let mock_kv = MockKvServices::new();
-    seed_namespaced_entities(&mock_kv, "999/", &completed_progress());
-
-    let service = build_service_with_indexing_status(ctx, mock_kv);
-    let response = service
-        .get_status(
-            &load_ontology(),
-            &TraversalPath::new_unchecked("999/"),
-            ResponseFormat::Raw as i32,
-            &admin_context(),
-        )
-        .await
-        .expect("should succeed");
-    let status = extract_structured(response);
-
-    assert!(
-        status.code_indexing.is_none(),
-        "a scope with no known projects has no code coverage to claim"
-    );
-    let indexing = status.indexing.expect("indexing should be present");
-    assert_eq!(indexing.state, IndexingState::Indexed as i32);
-}
-
-async fn edge_pipeline_error_surfaces_in_sdlc_state(ctx: &TestContext) {
-    let mock_kv = MockKvServices::new();
-    seed_namespaced_entities(&mock_kv, "1/100/", &completed_progress());
-    let mut errored = completed_progress();
-    errored.last_error = Some("scan failure".to_string());
-    seed_entity_progress(&mock_kv, "1/100/", "MEMBER_OF_siphon_members", &errored);
-
-    let service = build_service_with_indexing_status(ctx, mock_kv);
-    let response = service
-        .get_status(
-            &load_ontology(),
-            &TraversalPath::new_unchecked("1/100/"),
-            ResponseFormat::Raw as i32,
-            &admin_context(),
-        )
-        .await
-        .expect("should succeed");
-    let status = extract_structured(response);
-
-    let sdlc = status
-        .sdlc_indexing
-        .expect("sdlc_indexing should be present");
-    assert_eq!(sdlc.state, IndexingState::Error as i32);
-    assert_eq!(
-        sdlc.last_error.as_deref(),
-        Some("Something went wrong during indexing.")
-    );
-}
-
-async fn items_carry_per_entity_state(ctx: &TestContext) {
-    let mock_kv = MockKvServices::new();
-    seed_namespaced_entities(&mock_kv, "1/100/", &completed_progress());
-
-    let service = build_service_with_indexing_status(ctx, mock_kv);
-    let response = service
-        .get_status(
-            &load_ontology(),
-            &TraversalPath::new_unchecked("1/100/"),
-            ResponseFormat::Raw as i32,
-            &admin_context(),
-        )
-        .await
-        .expect("should succeed");
-    let status = extract_structured(response);
-
-    let find_state = |domain: &str, item: &str| {
-        find_domain(&status.domains, domain)
-            .items
-            .iter()
-            .find(|i| i.name == item)
-            .unwrap_or_else(|| panic!("item {item} not found"))
-            .state
-    };
-
-    assert_eq!(
-        find_state("code_review", "MergeRequest"),
-        Some(IndexingState::Indexed as i32)
-    );
-    assert_eq!(
-        find_state("source_code", "Definition"),
-        Some(IndexingState::Backfilling as i32),
-        "code entities carry the code coverage state (1 of 2 projects under 1/100/)"
-    );
-}
-
-async fn indexing_status_reports_last_run_rows(ctx: &TestContext) {
-    let mock_kv = MockKvServices::new();
-    let mut progress = completed_progress();
-    progress.last_rows_read = Some(307);
-    progress.last_rows_written = Some(465);
-    seed_namespaced_entities(&mock_kv, "1/100/", &progress);
-
-    let service = build_service_with_indexing_status(ctx, mock_kv);
-    let response = service
-        .get_status(
-            &load_ontology(),
-            &TraversalPath::new_unchecked("1/100/"),
-            ResponseFormat::Raw as i32,
-            &admin_context(),
-        )
-        .await
-        .expect("should succeed");
-    let status = extract_structured(response);
-
-    let sdlc = status
-        .sdlc_indexing
-        .expect("sdlc_indexing should be present");
-    assert_eq!(sdlc.last_rows_read, Some(307));
-    assert_eq!(sdlc.last_rows_written, Some(465));
-}
-
-async fn toon_renders_split_indexing_blocks(ctx: &TestContext) {
-    let mock_kv = MockKvServices::new();
-    seed_namespaced_entities(&mock_kv, "1/100/", &completed_progress());
-
-    let service = build_service_with_indexing_status(ctx, mock_kv);
-    let response = service
-        .get_status(
-            &load_ontology(),
-            &TraversalPath::new_unchecked("1/100/"),
-            ResponseFormat::Llm as i32,
-            &admin_context(),
-        )
-        .await
-        .expect("should succeed");
-    let text = match response.content {
-        Some(get_graph_status_response::Content::FormattedText(t)) => t,
-        _ => panic!("Expected formatted text response"),
-    };
-
-    assert!(text.contains("sdlc_indexing"), "TOON output: {text}");
-    assert!(text.contains("code_indexing"), "TOON output: {text}");
-    assert!(
-        text.contains("backfilling"),
-        "code coverage 1/2 renders as backfilling: {text}"
     );
 }
 
@@ -1143,25 +598,25 @@ async fn get_status_degrades_when_entity_count_table_missing(ctx: &TestContext) 
         .await;
 
     let mock_kv = MockKvServices::new();
-    let started = Utc::now() - Duration::seconds(30);
-    seed_namespaced_entities(
-        &mock_kv,
-        "1/",
-        &IndexingProgress {
-            last_started_at: started,
-            last_completed_at: Some(started + Duration::seconds(5)),
-            last_duration_ms: Some(5000),
-            last_error: None,
-            last_rows_read: None,
-            last_rows_written: None,
-        },
-    );
+    IndexingStatusStore::new(Arc::new(mock_kv.clone()))
+        .put_initial_backfill(
+            &TraversalPath::new_unchecked("1/100/"),
+            &InitialBackfill {
+                state: InitialBackfillState::Running,
+                completed_pipelines: 0,
+                total_pipelines: 1,
+                completed_projects: 0,
+                last_progress_at: None,
+            },
+        )
+        .await
+        .unwrap();
     let service = build_service_with_indexing_status(&db, mock_kv);
 
     let response = service
         .get_status(
             &load_ontology(),
-            &TraversalPath::new_unchecked("1/"),
+            &TraversalPath::new_unchecked("1/100/1000/"),
             ResponseFormat::Raw as i32,
             &admin_context(),
         )
@@ -1170,12 +625,8 @@ async fn get_status_degrades_when_entity_count_table_missing(ctx: &TestContext) 
     let status = extract_structured(response);
 
     let projects = status.projects.expect("projects should be present");
-    assert_eq!(projects.total_known, 3);
-
-    let sdlc = status
-        .sdlc_indexing
-        .expect("sdlc_indexing should be present");
-    assert_eq!(sdlc.state, IndexingState::Indexed as i32);
+    assert_eq!(projects.total_known, 1);
+    assert_eq!(status.backfill.unwrap().state(), BackfillState::Running);
 
     let core = find_domain(&status.domains, "core");
     assert_eq!(

@@ -13,6 +13,7 @@ use tracing::{debug, info};
 use uuid::Uuid;
 
 use super::DispatchOutcome;
+use super::backfill_status::InitialBackfillTracker;
 use super::enabled_namespaces::resolved_enabled_namespaces_sql;
 use crate::campaign::CampaignState;
 use crate::clickhouse::ArrowClickHouseClient;
@@ -20,12 +21,11 @@ use crate::orchestrator::scheduled::{ScheduledTaskMetrics, TaskError};
 use crate::topic::CodeIndexingTaskRequest;
 use crate::types::Envelope;
 use clickhouse_client::FromArrowColumn;
+use orbit_migrations::scope::CODE_INDEXING_CHECKPOINT_TABLE;
 use orbit_migrations::version::{SCHEMA_VERSION, prefixed_table_name};
 use orbit_utils::traversal_path::TraversalPath;
 
 pub const METRIC_NAME: &str = "dispatch.code_backfill";
-
-const CODE_INDEXING_CHECKPOINT_TABLE: &str = "code_indexing_checkpoint";
 
 const CHECKPOINTED_PROJECT_IDS_QUERY: &str = r#"
 SELECT DISTINCT project_id
@@ -54,6 +54,7 @@ pub struct CodeBackfill {
     campaign: Arc<CampaignState>,
     publish_window: usize,
     namespaces_with_pending: AtomicUsize,
+    initial_backfill: Arc<InitialBackfillTracker>,
 }
 
 impl CodeBackfill {
@@ -64,6 +65,7 @@ impl CodeBackfill {
         metrics: ScheduledTaskMetrics,
         campaign: Arc<CampaignState>,
         publish_window: usize,
+        initial_backfill: Arc<InitialBackfillTracker>,
     ) -> Self {
         Self {
             nats,
@@ -73,6 +75,7 @@ impl CodeBackfill {
             campaign,
             publish_window,
             namespaces_with_pending: AtomicUsize::new(0),
+            initial_backfill,
         }
     }
 
@@ -200,14 +203,9 @@ impl CodeBackfill {
         let (projects, already_checkpointed) = self
             .fetch_pending_projects(traversal_path, &checkpointed, share)
             .await?;
-
-        if projects.is_empty() {
-            debug!(
-                namespace_id,
-                already_checkpointed, "no pending projects in namespace"
-            );
-            return Ok(Vec::new());
-        }
+        self.initial_backfill
+            .record(traversal_path, checkpointed.len(), projects.is_empty())
+            .await;
 
         debug!(
             namespace_id,
@@ -362,6 +360,13 @@ mod tests {
             empty,
             empty,
         );
+        let tracker = InitialBackfillTracker::new(
+            graph.clone(),
+            Arc::new(crate::indexing_status::IndexingStatusStore::new(
+                nats.clone(),
+            )),
+            &ontology::Ontology::load_embedded().expect("should load ontology"),
+        );
         CodeBackfill::new(
             nats,
             graph,
@@ -369,6 +374,7 @@ mod tests {
             test_metrics(),
             Arc::new(CampaignState::new()),
             TEST_PUBLISH_WINDOW,
+            Arc::new(tracker),
         )
     }
 
