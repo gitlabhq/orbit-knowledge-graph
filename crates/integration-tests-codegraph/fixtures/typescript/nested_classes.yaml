@@ -1,0 +1,43 @@
+name: "TypeScript: nested classes"
+pipeline: typescript
+fixtures:
+  - path: main.ts
+    content: |
+      class Outer {
+          inner(): Inner {
+              return new Inner();
+          }
+      }
+
+      class Inner {
+          value(): string { return "inner"; }
+      }
+
+      function build(): void {
+          const o = new Outer();
+          const i = o.inner();
+      }
+
+tests:
+  - name: Both classes and their methods extracted
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'main.ts'
+        AND d.definition_type IN ['Class', 'Method', 'Function']
+      RETURN d.name AS name, d.definition_type AS type
+      ORDER BY name
+    assert:
+      - { row_count: 5 }
+      - { row: { name: "Inner", type: "Class" } }
+      - { row: { name: "Outer", type: "Class" } }
+      - { row: { name: "build", type: "Function" } }
+      - { row: { name: "inner", type: "Method" } }
+      - { row: { name: "value", type: "Method" } }
+
+  - name: inner method nested under Outer
+    query: |
+      MATCH (cls:Definition)-[e:DefinitionToDefinition]->(m:Definition)
+      WHERE cls.name = 'Outer' AND m.name = 'inner' AND e.edge_kind = 'Defines'
+      RETURN cls.fqn AS cls, m.fqn AS method
+    assert:
+      - { row_count: 1 }

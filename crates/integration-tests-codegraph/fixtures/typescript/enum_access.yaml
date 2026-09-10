@@ -1,0 +1,44 @@
+name: "TypeScript: enum member access"
+pipeline: typescript
+fixtures:
+  - path: main.ts
+    content: |
+      enum Status {
+          Active = 'active',
+          Inactive = 'inactive',
+      }
+
+      enum Color {
+          Red,
+          Green,
+          Blue,
+      }
+
+      function getStatus(): Status {
+          return Status.Active;
+      }
+
+      function isRed(c: Color): boolean {
+          return c === Color.Red;
+      }
+
+tests:
+  - name: Both enums extracted
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Enum'
+      RETURN d.name AS name
+      ORDER BY name
+    assert:
+      - { row_count: 2 }
+      - { column_values: { field: name, values: ["Color", "Status"] } }
+
+  - name: Functions extracted
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Function'
+      RETURN d.name AS name
+      ORDER BY name
+    assert:
+      - { row_count: 2 }
+      - { column_values: { field: name, values: ["getStatus", "isRed"] } }

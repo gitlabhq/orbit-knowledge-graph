@@ -1,0 +1,78 @@
+name: "Rust: generics, lifetimes, and macro calls"
+pipeline: rust
+fixtures:
+  - path: main.rs
+    content: |
+      use std::fmt::Display;
+
+      fn largest<T: PartialOrd>(list: &[T]) -> &T {
+          let mut result = &list[0];
+          for item in &list[1..] {
+              if item > result {
+                  result = item;
+              }
+          }
+          result
+      }
+
+      fn print_it<T: Display>(val: &T) {
+          println!("{val}");
+      }
+
+      struct Container<'a, T> {
+          data: &'a [T],
+      }
+
+      impl<'a, T: Display> Container<'a, T> {
+          fn show(&self) {
+              for item in self.data {
+                  print_it(item);
+              }
+          }
+      }
+
+      fn main() {
+          let nums = vec![1, 2, 3];
+          let big = largest(&nums);
+          print_it(big);
+          println!("done");
+      }
+
+tests:
+  - name: Generic functions extracted
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'main.rs'
+        AND d.definition_type = 'Function'
+        AND d.name IN ['largest', 'print_it', 'main']
+      RETURN d.name AS name
+      ORDER BY name
+    assert:
+      - { row_count: 3 }
+      - { column_values: { field: name, values: ["largest", "main", "print_it"] } }
+
+  - name: Generic struct with lifetime extracted
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'Container' AND d.definition_type = 'Struct'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+
+  - name: main calls largest and print_it
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'main' AND e.edge_kind = 'Calls'
+      RETURN callee.name AS callee
+      ORDER BY callee
+    assert:
+      - { row_count: 2 }
+      - { column_values: { field: callee, values: ["largest", "print_it"] } }
+
+  - name: Container.show calls print_it
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'show' AND callee.name = 'print_it' AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller
+    assert:
+      - { row_count: 1 }
