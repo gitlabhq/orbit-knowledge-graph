@@ -23,13 +23,16 @@ query:
         {"type": "MEMBER_OF", "from": "u", "to": "g"},
         {"type": "CONTAINS", "from": "g", "to": "p"}
       ],
-      "cursor": {"page_size": 3}
+      "cursor": {"page_size": 2}
     }
 
 expect:
   pages:
-    - skip_requirements: [cursor, "relationship:MEMBER_OF", "relationship:CONTAINS"]
-    - skip_requirements: [cursor, "relationship:MEMBER_OF", "relationship:CONTAINS"]
-    - skip_requirements: [cursor, "relationship:MEMBER_OF", "relationship:CONTAINS"]
+    - has_more: true
+      skip_requirements: [cursor, "relationship:MEMBER_OF", "relationship:CONTAINS"]
+    - has_more: true
+      skip_requirements: [cursor, "relationship:MEMBER_OF", "relationship:CONTAINS"]
+    - has_more: true
+      skip_requirements: [cursor, "relationship:MEMBER_OF", "relationship:CONTAINS"]
     - has_more: false
       skip_requirements: [cursor, "relationship:MEMBER_OF", "relationship:CONTAINS"]

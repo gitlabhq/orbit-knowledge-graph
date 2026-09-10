@@ -14,8 +14,14 @@ config:
       - { traversal_path: "1/100/1000/", source_id: 9301, source_kind: User, relationship_kind: AUTHORED, target_id: 9311, target_kind: MergeRequest, source_tags: [], target_tags: ["state:opened"], _version: "1970-01-01 00:00:00", _deleted: false }
   redaction:
     allow:
-      user: [1, 2, 3, 4, 5, 6, 7, 9301]
-      merge_request: [2000, 2001, 2002, 2003, 2004, 2005, 9100, 9311]
+      user: [1, 2, 3, 4, 5, 6, 7, 9001, 9002, 9003, 9010, 9011, 9300, 9301, 9600]
+      group: [100, 101, 102, 200, 300, 900]
+      project: [1000, 1001, 1002, 1003, 1004, 1010, 9000]
+      merge_request: [2000, 2001, 2002, 2003, 2004, 2005, 9100, 9101, 9200, 9201, 9210, 9310, 9311, 9400, 9401, 9500, 9501, 9700, 9701, 9800, 9801, 9900, 9901]
+      note: [3000, 3001, 3002, 3003]
+      work_item: [4000, 4001, 4002, 4003, 4010]
+      milestone: [6000, 6001]
+      label: [7000, 7001, 7002]
 
 query:
   json: |

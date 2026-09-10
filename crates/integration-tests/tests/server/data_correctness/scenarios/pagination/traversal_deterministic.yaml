@@ -14,5 +14,6 @@ query:
     }
 
 expect:
+  node_count: 4
   has_more: true
   skip_requirements: ["relationship:MEMBER_OF"]

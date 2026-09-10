@@ -18,7 +18,9 @@ query:
 
 expect:
   pages:
-    - skip_requirements: [cursor, "relationship:CONTAINS"]
-    - skip_requirements: [cursor, "relationship:CONTAINS"]
+    - has_more: true
+      skip_requirements: [cursor, "relationship:CONTAINS"]
+    - has_more: true
+      skip_requirements: [cursor, "relationship:CONTAINS"]
     - has_more: false
       skip_requirements: [cursor, "relationship:CONTAINS"]

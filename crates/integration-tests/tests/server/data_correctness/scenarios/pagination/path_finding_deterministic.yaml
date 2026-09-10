@@ -15,4 +15,4 @@ query:
     }
 
 expect:
-  skip_requirements: [path_finding]
+  has_more: true

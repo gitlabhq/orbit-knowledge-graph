@@ -8,13 +8,17 @@ query:
       "nodes": [{"id": "mr", "entity": "MergeRequest", "id_range": {"start": 1, "end": 10000},
                  "columns": ["title"]}],
       "order_by": "mr.merged_at",
-      "cursor": {"page_size": 3}
+      "cursor": {"page_size": 2}
     }
 
 expect:
   pages:
-    - node_count: 3
-      skip_requirements: [cursor]
-    - node_count: 3
+    - node_count: 2
+      has_more: true
+      skip_requirements: [cursor, node_count, order_by]
+    - node_count: 2
+      has_more: true
+      skip_requirements: [cursor, node_count, order_by]
+    - node_count: 2
       has_more: false
-      skip_requirements: [cursor]
+      skip_requirements: [cursor, node_count, order_by]

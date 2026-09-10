@@ -7,12 +7,16 @@ query:
       "query_type": "neighbors",
       "nodes": [{"id": "g", "entity": "Group", "node_ids": [100]}],
       "neighbors": {"direction": "both"},
-      "cursor": {"page_size": 3}
+      "cursor": {"page_size": 2}
     }
 
 expect:
   pages:
-    - skip_requirements: [cursor, neighbors, node_ids]
-    - skip_requirements: [cursor, neighbors, node_ids]
+    - has_more: true
+      skip_requirements: [cursor, neighbors, node_ids]
+    - has_more: true
+      skip_requirements: [cursor, neighbors, node_ids]
+    - has_more: true
+      skip_requirements: [cursor, neighbors, node_ids]
     - has_more: false
       skip_requirements: [cursor, neighbors, node_ids]

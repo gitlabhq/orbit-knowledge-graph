@@ -21,7 +21,9 @@ query:
 
 expect:
   pages:
-    - skip_requirements: [cursor, "relationship:AUTHORED", "relationship:IN_GROUP", "relationship:CONTAINS"]
-    - skip_requirements: [cursor, "relationship:AUTHORED", "relationship:IN_GROUP", "relationship:CONTAINS"]
+    - has_more: true
+      skip_requirements: [cursor, "relationship:AUTHORED", "relationship:IN_GROUP", "relationship:CONTAINS"]
+    - has_more: true
+      skip_requirements: [cursor, "relationship:AUTHORED", "relationship:IN_GROUP", "relationship:CONTAINS"]
     - has_more: false
       skip_requirements: [cursor, "relationship:AUTHORED", "relationship:IN_GROUP", "relationship:CONTAINS"]

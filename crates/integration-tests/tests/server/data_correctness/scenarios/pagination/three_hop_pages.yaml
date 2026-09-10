@@ -19,8 +19,11 @@ query:
 
 expect:
   pages:
-    - skip_requirements: [cursor, "relationship:MEMBER_OF", "relationship:CONTAINS"]
-    - skip_requirements: [cursor, "relationship:MEMBER_OF", "relationship:CONTAINS"]
-    - skip_requirements: [cursor, "relationship:MEMBER_OF", "relationship:CONTAINS"]
+    - has_more: true
+      skip_requirements: [cursor, "relationship:MEMBER_OF", "relationship:CONTAINS"]
+    - has_more: true
+      skip_requirements: [cursor, "relationship:MEMBER_OF", "relationship:CONTAINS"]
+    - has_more: true
+      skip_requirements: [cursor, "relationship:MEMBER_OF", "relationship:CONTAINS"]
     - has_more: false
       skip_requirements: [cursor, "relationship:MEMBER_OF", "relationship:CONTAINS"]
