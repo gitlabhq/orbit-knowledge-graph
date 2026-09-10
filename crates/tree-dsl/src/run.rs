@@ -60,7 +60,7 @@ fn classify_methods(tree: &mut Tree, lang: &mut Lang) {
         }
         let mut p = tree.nodes[i as usize].parent;
         while p != NONE {
-            if has_synth(tree, p, deftype_k) && synth_sym(tree, p, deftype_k) == class_sym {
+            if synth_child(tree, p, deftype_k) == Some(class_sym) {
                 tree.nodes[i as usize].sym = method_sym;
                 break;
             }
@@ -141,26 +141,37 @@ impl Fields {
     }
 }
 
-fn has_synth(tree: &Tree, node: u32, kind: u16) -> bool {
-    tree.children(node).any(|c| tree.kind(c) == kind)
+struct BranchFrame {
+    arms: Vec<(u32, u32)>,
+    entry_blocks: Vec<BlockId>,
+    exit_blocks: Vec<BlockId>,
+    exhaustive: bool,
+    pre_block: BlockId,
+    end: u32,
 }
 
-fn synth_sym(tree: &Tree, node: u32, kind: u16) -> u32 {
+fn synth_child(tree: &Tree, node: u32, kind: u16) -> Option<u32> {
     tree.children(node)
         .find(|&c| tree.kind(c) == kind)
+        .map(|c| tree.sym(c))
+        .filter(|&s| s != 0)
+}
+
+fn name_sym(tree: &Tree, node: u32, f: &Fields) -> u32 {
+    tree.child_by_field(node, f.name)
+        .or_else(|| tree.child_by_field(node, f.left))
         .map(|c| tree.sym(c))
         .unwrap_or(0)
 }
 
 fn def_name(tree: &Tree, node: u32, f: &Fields, syns: &Syns) -> u32 {
-    tree.child_by_field(node, f.name)
-        .or_else(|| tree.child_by_field(node, f.left))
+    let ns = name_sym(tree, node, f);
+    if ns != 0 {
+        return ns;
+    }
+    tree.children(node)
+        .find(|&c| tree.kind(c) == syns.defname)
         .map(|c| tree.sym(c))
-        .or_else(|| {
-            tree.children(node)
-                .find(|&c| tree.kind(c) == syns.defname)
-                .map(|c| tree.sym(c))
-        })
         .unwrap_or(0)
 }
 
@@ -215,8 +226,7 @@ fn return_type_of_def(
     syns: &Syns,
     f: &Fields,
 ) -> Option<u32> {
-    let rt = synth_sym(tree, def_node, syns.return_type);
-    if rt != 0 {
+    if let Some(rt) = synth_child(tree, def_node, syns.return_type) {
         return Some(rt);
     }
     if f.return_type != 0 {
@@ -231,22 +241,11 @@ fn return_type_of_def(
     infer_return_type(tree, def_node, lang, syns, f)
 }
 
-fn update_branch_arm(
-    branch_stack: &mut [(
-        Vec<(u32, u32)>,
-        Vec<BlockId>,
-        Vec<BlockId>,
-        bool,
-        BlockId,
-        u32,
-    )],
-    i: u32,
-    cur_block: BlockId,
-) {
+fn update_branch_arm(branch_stack: &mut [BranchFrame], i: u32, cur_block: BlockId) {
     if let Some(br) = branch_stack.last_mut() {
-        for (idx, &(arm_start, arm_end)) in br.0.iter().enumerate() {
+        for (idx, &(arm_start, arm_end)) in br.arms.iter().enumerate() {
             if i >= arm_start && i < arm_end {
-                br.2[idx] = cur_block;
+                br.exit_blocks[idx] = cur_block;
                 break;
             }
         }
@@ -274,15 +273,7 @@ fn ssa_fold(tree: &mut Tree, lang: &mut Lang) {
 
     let mut def_stack: Vec<(Option<u32>, u32, BlockId)> = vec![(None, u32::MAX, entry)];
 
-    type BranchEntry = (
-        Vec<(u32, u32)>,
-        Vec<BlockId>,
-        Vec<BlockId>,
-        bool,
-        BlockId,
-        u32,
-    );
-    let mut branch_stack: Vec<BranchEntry> = Vec::new();
+    let mut branch_stack: Vec<BranchFrame> = Vec::new();
 
     let mut i = 0u32;
     let len = tree.nodes.len() as u32;
@@ -307,18 +298,18 @@ fn ssa_fold(tree: &mut Tree, lang: &mut Lang) {
             }
         }
         while let Some(br) = branch_stack.last() {
-            if i >= br.5 {
-                let mut preds = br.2.clone();
-                if !br.3 {
-                    preds.push(br.4);
+            if i >= br.end {
+                let mut preds = br.exit_blocks.clone();
+                if !br.exhaustive {
+                    preds.push(br.pre_block);
                 }
-                let branch_end = br.5;
+                let branch_end = br.end;
                 cur_block = ssa.add_sealed_join(preds);
                 branch_stack.pop();
                 if let Some(outer) = branch_stack.last_mut() {
-                    for (idx, &(arm_start, arm_end)) in outer.0.iter().enumerate() {
+                    for (idx, &(arm_start, arm_end)) in outer.arms.iter().enumerate() {
                         if branch_end > arm_start && branch_end <= arm_end {
-                            outer.2[idx] = cur_block;
+                            outer.exit_blocks[idx] = cur_block;
                             break;
                         }
                     }
@@ -328,9 +319,9 @@ fn ssa_fold(tree: &mut Tree, lang: &mut Lang) {
             }
         }
         if let Some(br) = branch_stack.last() {
-            for (idx, &(arm_start, arm_end)) in br.0.iter().enumerate() {
+            for (idx, &(arm_start, arm_end)) in br.arms.iter().enumerate() {
                 if i >= arm_start && i < arm_end {
-                    cur_block = br.1[idx];
+                    cur_block = br.entry_blocks[idx];
                     break;
                 }
             }
@@ -364,7 +355,7 @@ fn ssa_fold(tree: &mut Tree, lang: &mut Lang) {
         }
 
         // ── def ──
-        if has_synth(tree, i, syns.deftype) {
+        if synth_child(tree, i, syns.deftype).is_some() {
             let name = def_name(tree, i, &f, &syns);
             if name != 0 {
                 let parent_block = cur_block;
@@ -376,7 +367,7 @@ fn ssa_fold(tree: &mut Tree, lang: &mut Lang) {
                 if let Some(&(Some(parent_def), _, _)) = def_stack.last() {
                     tree.add_edge(parent_def, i, EdgeKind::Defines);
                 }
-                if has_synth(tree, i, syns.scope) {
+                if tree.children(i).any(|c| tree.kind(c) == syns.scope) {
                     def_stack.push((Some(i), node_end, parent_block));
                 }
             }
@@ -467,9 +458,9 @@ fn ssa_fold(tree: &mut Tree, lang: &mut Lang) {
                                     for cpv in &target_reaching {
                                         if let ParseValue::LocalDef(cdi) = cpv {
                                             let target = def_nodes[*cdi as usize];
-                                            let callable_sym =
-                                                synth_sym(tree, target, syns.callable);
-                                            if callable_sym != 0 {
+                                            if let Some(callable_sym) =
+                                                synth_child(tree, target, syns.callable)
+                                            {
                                                 if let Some(method) = find_method(
                                                     tree,
                                                     &def_nodes,
@@ -552,7 +543,7 @@ fn ssa_fold(tree: &mut Tree, lang: &mut Lang) {
         }
 
         // ── binding ──
-        if has_synth(tree, i, syns.binding) {
+        if tree.children(i).any(|c| tree.kind(c) == syns.binding) {
             let lhs = tree
                 .child_by_field(i, f.left)
                 .or_else(|| tree.child_by_field(i, f.name))
@@ -587,7 +578,7 @@ fn ssa_fold(tree: &mut Tree, lang: &mut Lang) {
         }
 
         // ── branch / loop / scope / decorator ──
-        if has_synth(tree, i, syns.branch) {
+        if tree.children(i).any(|c| tree.kind(c) == syns.branch) {
             let pre = cur_block;
             let arm_kinds = find_arm_children(tree, i, lang);
             let arm_blocks: Vec<BlockId> = arm_kinds
@@ -595,17 +586,26 @@ fn ssa_fold(tree: &mut Tree, lang: &mut Lang) {
                 .map(|_| ssa.add_sealed_successor(pre))
                 .collect();
             let arm_exits = arm_blocks.clone();
-            branch_stack.push((arm_kinds, arm_blocks, arm_exits, false, pre, node_end));
+            branch_stack.push(BranchFrame {
+                arms: arm_kinds,
+                entry_blocks: arm_blocks,
+                exit_blocks: arm_exits,
+                exhaustive: false,
+                pre_block: pre,
+                end: node_end,
+            });
             i += 1;
             continue;
         }
-        if has_synth(tree, i, syns.r#loop) {
+        if tree.children(i).any(|c| tree.kind(c) == syns.r#loop) {
             let (h, _) = ssa.begin_loop(cur_block);
             cur_block = ssa.finish_loop(h, cur_block);
             i += 1;
             continue;
         }
-        if has_synth(tree, i, syns.scope) && !has_synth(tree, i, syns.deftype) {
+        if tree.children(i).any(|c| tree.kind(c) == syns.scope)
+            && synth_child(tree, i, syns.deftype).is_none()
+        {
             i += 1;
             continue;
         }
@@ -619,9 +619,9 @@ fn ssa_fold(tree: &mut Tree, lang: &mut Lang) {
 
     // Drain remaining branches.
     while let Some(br) = branch_stack.last() {
-        let mut preds = br.2.clone();
-        if !br.3 {
-            preds.push(br.4);
+        let mut preds = br.exit_blocks.clone();
+        if !br.exhaustive {
+            preds.push(br.pre_block);
         }
         let _ = ssa.add_sealed_join(preds);
         branch_stack.pop();
@@ -718,8 +718,8 @@ fn classify_rhs(
     let reaching = ssa.read_variable(callee_sym, block);
     let is_class = reaching.iter().any(|pv| {
         if let ParseValue::LocalDef(di) = pv {
-            let dt = synth_sym(tree, def_nodes[*di as usize], syns.deftype);
-            dt != 0 && lang.syms.resolve(dt) == "Class"
+            synth_child(tree, def_nodes[*di as usize], syns.deftype)
+                .is_some_and(|dt| lang.syms.resolve(dt) == "Class")
         } else {
             false
         }
@@ -738,17 +738,13 @@ fn classify_rhs(
     });
     match ret_type {
         Some(rt_sym) => {
-            let found_def = def_nodes.iter().position(|&dn| {
-                let dname = tree
-                    .child_by_field(dn, f.name)
-                    .or_else(|| tree.child_by_field(dn, f.left))
-                    .map(|c| tree.sym(c))
-                    .unwrap_or(0);
-                dname == rt_sym
-            });
+            let found_def = def_nodes
+                .iter()
+                .position(|&dn| name_sym(tree, dn, f) == rt_sym);
             if let Some(di) = found_def {
-                let dt = synth_sym(tree, def_nodes[di], syns.deftype);
-                if dt != 0 && lang.syms.resolve(dt) == "Class" {
+                if synth_child(tree, def_nodes[di], syns.deftype)
+                    .is_some_and(|dt| lang.syms.resolve(dt) == "Class")
+                {
                     Value::Type(rt_sym)
                 } else {
                     Value::LocalDef(di as u32)
@@ -836,11 +832,7 @@ fn find_method(
             if tree.kind(d) == syns.deftype {
                 let method_node = tree.nodes[d as usize].parent;
                 if method_node != NONE && method_node != current {
-                    let mname = tree
-                        .child_by_field(method_node, f.name)
-                        .or_else(|| tree.child_by_field(method_node, f.left))
-                        .map(|c| tree.sym(c))
-                        .unwrap_or(0);
+                    let mname = name_sym(tree, method_node, f);
                     if mname == method_name {
                         return Some(method_node);
                     }
@@ -880,7 +872,7 @@ fn infer_return_type(
 
     let mut local_binds: Vec<(u32, u32)> = Vec::new();
     for d in tree.descendants(def_node) {
-        if has_synth(tree, d, syns.binding) {
+        if tree.children(d).any(|c| tree.kind(c) == syns.binding) {
             let lhs = tree
                 .child_by_field(d, f.left)
                 .map(|c| tree.sym(c))
@@ -932,7 +924,7 @@ fn find_ivar_type(
     f: &Fields,
 ) -> Option<u32> {
     for d in tree.descendants(class_node) {
-        if has_synth(tree, d, syns.binding) {
+        if tree.children(d).any(|c| tree.kind(c) == syns.binding) {
             let lhs_node = tree.child_by_field(d, f.left);
             if let Some(ln) = lhs_node
                 && tree.kind(ln) == syns.ivar
@@ -961,7 +953,7 @@ fn find_enclosing_class(tree: &Tree, mut node: u32, syns: &Syns, class_sym: u32)
         if node == NONE {
             return None;
         }
-        if has_synth(tree, node, syns.deftype) && synth_sym(tree, node, syns.deftype) == class_sym {
+        if synth_child(tree, node, syns.deftype) == Some(class_sym) {
             return Some(node);
         }
         node = tree.nodes[node as usize].parent;

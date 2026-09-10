@@ -62,13 +62,9 @@ pub fn resolve(
             if !tree.children(i as u32).any(|c| tree.kind(c) == k_deftype) {
                 continue;
             }
-            let name_sym = tree
-                .child_by_field(i as u32, name_f)
-                .or_else(|| tree.child_by_field(i as u32, left_f))
-                .map(|c| tree.sym(c))
-                .unwrap_or(0);
-            if name_sym != 0 {
-                names.insert(name_sym, i as u32);
+            let ns = name_sym(tree, i as u32, name_f, left_f);
+            if ns != 0 {
+                names.insert(ns, i as u32);
             }
         }
         visible.push(names);
@@ -150,17 +146,7 @@ pub fn resolve(
                         None
                     });
                     if let Some(sub_fi) = sub_fi {
-                        cross_edges.push(Edge {
-                            from: NodeRef {
-                                tree: fi as u32,
-                                node: i as u32,
-                            },
-                            to: NodeRef {
-                                tree: sub_fi as u32,
-                                node: 0,
-                            },
-                            kind: EdgeKind::Imports,
-                        });
+                        cross_edges.push(Edge::new(fi, i as u32, sub_fi, 0, EdgeKind::Imports));
                         reqs.push(ImportReq {
                             fi,
                             node: i as u32,
@@ -280,17 +266,7 @@ pub fn resolve(
                         .get(&(tfi, def_name))
                         .copied()
                         .unwrap_or((tfi, def_node));
-                    cross_edges.push(Edge {
-                        from: NodeRef {
-                            tree: fi as u32,
-                            node: i,
-                        },
-                        to: NodeRef {
-                            tree: real_fi as u32,
-                            node: real_node,
-                        },
-                        kind: EdgeKind::Imports,
-                    });
+                    cross_edges.push(Edge::new(fi, i, real_fi, real_node, EdgeKind::Imports));
                 }
                 continue;
             }
@@ -300,31 +276,11 @@ pub fn resolve(
             }
 
             if let Some(&(re_fi, re_node)) = reexports.get(&(tfi, name_sym)) {
-                cross_edges.push(Edge {
-                    from: NodeRef {
-                        tree: fi as u32,
-                        node: i,
-                    },
-                    to: NodeRef {
-                        tree: re_fi as u32,
-                        node: re_node,
-                    },
-                    kind: EdgeKind::Imports,
-                });
+                cross_edges.push(Edge::new(fi, i, re_fi, re_node, EdgeKind::Imports));
                 continue;
             }
             if let Some(&def_node) = visible[tfi].get(&name_sym) {
-                cross_edges.push(Edge {
-                    from: NodeRef {
-                        tree: fi as u32,
-                        node: i,
-                    },
-                    to: NodeRef {
-                        tree: tfi as u32,
-                        node: def_node,
-                    },
-                    kind: EdgeKind::Imports,
-                });
+                cross_edges.push(Edge::new(fi, i, tfi, def_node, EdgeKind::Imports));
                 continue;
             }
 
@@ -335,17 +291,7 @@ pub fn resolve(
             );
             if results.len() == 1 {
                 let (def_fi, def_node) = results[0];
-                cross_edges.push(Edge {
-                    from: NodeRef {
-                        tree: fi as u32,
-                        node: i,
-                    },
-                    to: NodeRef {
-                        tree: def_fi as u32,
-                        node: def_node,
-                    },
-                    kind: EdgeKind::Imports,
-                });
+                cross_edges.push(Edge::new(fi, i, def_fi, def_node, EdgeKind::Imports));
                 continue;
             }
 
@@ -358,17 +304,7 @@ pub fn resolve(
             {
                 let submod_path = format!("{target_dir}/{name_str}");
                 if let Some(&sub_fi) = file_index.get(&submod_path) {
-                    cross_edges.push(Edge {
-                        from: NodeRef {
-                            tree: fi as u32,
-                            node: i,
-                        },
-                        to: NodeRef {
-                            tree: sub_fi as u32,
-                            node: 0,
-                        },
-                        kind: EdgeKind::Imports,
-                    });
+                    cross_edges.push(Edge::new(fi, i, sub_fi, 0, EdgeKind::Imports));
                 }
             }
         }
@@ -431,17 +367,13 @@ pub fn resolve(
                     }
                     for &tfi in &target_files {
                         if let Some(&def_node) = visible[tfi].get(&member_sym) {
-                            module_call_edges.push(Edge {
-                                from: NodeRef {
-                                    tree: fi as u32,
-                                    node: caller,
-                                },
-                                to: NodeRef {
-                                    tree: tfi as u32,
-                                    node: def_node,
-                                },
-                                kind: EdgeKind::Calls,
-                            });
+                            module_call_edges.push(Edge::new(
+                                fi,
+                                caller,
+                                tfi,
+                                def_node,
+                                EdgeKind::Calls,
+                            ));
                             break;
                         }
                     }
@@ -500,10 +432,7 @@ pub fn resolve(
             }
 
             call_edges.push(Edge {
-                from: NodeRef {
-                    tree: ce.from.tree,
-                    node: edge.from.node,
-                },
+                from: NodeRef::new(ce.from.tree as usize, edge.from.node),
                 to: ce.to,
                 kind: EdgeKind::Calls,
             });
@@ -566,11 +495,8 @@ pub fn resolve(
         if resolved_fi.is_none() {
             for ce2 in &cross_edges {
                 if ce2.from.tree as usize == target_fi && ce2.kind == EdgeKind::Imports {
-                    let def_name = trees[ce2.to.tree as usize]
-                        .child_by_field(ce2.to.node, name_f)
-                        .or_else(|| trees[ce2.to.tree as usize].child_by_field(ce2.to.node, left_f))
-                        .map(|c| trees[ce2.to.tree as usize].sym(c))
-                        .unwrap_or(0);
+                    let def_name =
+                        name_sym(&trees[ce2.to.tree as usize], ce2.to.node, name_f, left_f);
                     if def_name == ret_sym {
                         resolved_fi = Some(ce2.to.tree as usize);
                         resolved_node = Some(ce2.to.node);
@@ -585,11 +511,7 @@ pub fn resolve(
         };
 
         let tree = &trees[caller_fi];
-        let target_name_sym = trees[target_fi]
-            .child_by_field(target_node, name_f)
-            .or_else(|| trees[target_fi].child_by_field(target_node, left_f))
-            .map(|c| trees[target_fi].sym(c))
-            .unwrap_or(0);
+        let target_name_sym = name_sym(&trees[target_fi], target_node, name_f, left_f);
 
         let mut bound_vars: Vec<u32> = Vec::new();
         for d in tree.descendants(caller_node) {
@@ -639,23 +561,15 @@ pub fn resolve(
                             if trees[type_fi].kind(cd) == k_deftype {
                                 let mn = trees[type_fi].nodes[cd as usize].parent;
                                 if mn != NONE && mn != type_node {
-                                    let mname = trees[type_fi]
-                                        .child_by_field(mn, name_f)
-                                        .or_else(|| trees[type_fi].child_by_field(mn, left_f))
-                                        .map(|c| trees[type_fi].sym(c))
-                                        .unwrap_or(0);
+                                    let mname = name_sym(&trees[type_fi], mn, name_f, left_f);
                                     if mname == mem_sym && !found {
-                                        type_edges.push(Edge {
-                                            from: NodeRef {
-                                                tree: caller_fi as u32,
-                                                node: caller_node,
-                                            },
-                                            to: NodeRef {
-                                                tree: type_fi as u32,
-                                                node: mn,
-                                            },
-                                            kind: EdgeKind::Calls,
-                                        });
+                                        type_edges.push(Edge::new(
+                                            caller_fi,
+                                            caller_node,
+                                            type_fi,
+                                            mn,
+                                            EdgeKind::Calls,
+                                        ));
                                         found = true;
                                     }
                                 }
@@ -749,6 +663,13 @@ struct ImportReq {
     node: u32,
     target_fi: usize,
     target_path: String,
+}
+
+fn name_sym(tree: &Tree, node: u32, name_f: u16, left_f: u16) -> u32 {
+    tree.child_by_field(node, name_f)
+        .or_else(|| tree.child_by_field(node, left_f))
+        .map(|c| tree.sym(c))
+        .unwrap_or(0)
 }
 
 /// Resolve a relative path ("./foo" or "../bar") against the current file's directory.

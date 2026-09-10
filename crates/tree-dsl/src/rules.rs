@@ -287,19 +287,6 @@ fn compile_rule(rule: &Rule, lang: &mut Lang) -> Vec<Rewrite> {
     panic!("rule has no action: {:?}", pat);
 }
 
-// ── Tf parsing ──
-
-fn parse_tf_spec(spec: Option<&str>) -> Tf {
-    match spec {
-        None | Some("id") => Tf::Id,
-        Some(s) if s.starts_with("strip=") => Tf::Strip(s[6..].into()),
-        Some(s) if s.starts_with("field=") => {
-            panic!("field tf needs lang context, use append_under with explicit field")
-        }
-        Some(s) => panic!("unknown tf: {s}"),
-    }
-}
-
 // ── Append parsing ──
 
 enum AppendNode {
@@ -373,7 +360,12 @@ fn parse_append_node(s: &str) -> AppendNode {
     // Capture reference: (__alias @$A) or (__decorator @$D|strip=@)
     if let Some(rest) = val.strip_prefix("@$") {
         let (capture, tf) = if let Some((cap, tf_str)) = rest.split_once('|') {
-            (cap.to_string(), parse_tf_spec(Some(tf_str)))
+            let tf = match tf_str {
+                "id" => Tf::Id,
+                s if s.starts_with("strip=") => Tf::Strip(s[6..].into()),
+                s => panic!("unknown tf in append spec: {s}"),
+            };
+            (cap.to_string(), tf)
         } else {
             (rest.to_string(), Tf::Id)
         };

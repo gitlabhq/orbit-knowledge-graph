@@ -47,11 +47,46 @@ pub struct NodeRef {
     pub node: u32,
 }
 
+impl NodeRef {
+    pub fn local(node: u32) -> Self {
+        Self { tree: 0, node }
+    }
+    pub fn new(tree: usize, node: u32) -> Self {
+        Self {
+            tree: tree as u32,
+            node,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct Edge {
     pub from: NodeRef,
     pub to: NodeRef,
     pub kind: EdgeKind,
+}
+
+impl Edge {
+    pub fn new(
+        from_tree: usize,
+        from_node: u32,
+        to_tree: usize,
+        to_node: u32,
+        kind: EdgeKind,
+    ) -> Self {
+        Self {
+            from: NodeRef::new(from_tree, from_node),
+            to: NodeRef::new(to_tree, to_node),
+            kind,
+        }
+    }
+    pub fn local(from: u32, to: u32, kind: EdgeKind) -> Self {
+        Self {
+            from: NodeRef::local(from),
+            to: NodeRef::local(to),
+            kind,
+        }
+    }
 }
 
 #[derive(Default)]
@@ -153,14 +188,7 @@ impl Tree {
                 .iter()
                 .any(|e| e.from.node == from && e.to.node == to && e.kind == kind)
         {
-            self.edges.push(Edge {
-                from: NodeRef {
-                    tree: 0,
-                    node: from,
-                },
-                to: NodeRef { tree: 0, node: to },
-                kind,
-            });
+            self.edges.push(Edge::local(from, to, kind));
         }
     }
 
