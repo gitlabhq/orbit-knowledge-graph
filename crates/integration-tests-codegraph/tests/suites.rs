@@ -170,7 +170,7 @@ yaml_test!(
     python_cross_file_return_type,
     "python/cross_file_return_type.yaml"
 );
-yaml_test!(python_call_resolution, "python_resolution.yaml");
+yaml_test!(python_call_resolution, "python/python_resolution.yaml");
 yaml_test!(python_type_flow, "python/type_flow.yaml");
 yaml_test!(
     python_decorator_references,
@@ -209,7 +209,7 @@ yaml_test!(
 
 // Java
 yaml_test!(java_records, "java/records.yaml");
-yaml_test!(java_call_resolution, "java_resolution.yaml");
+yaml_test!(java_call_resolution, "java/java_resolution.yaml");
 yaml_test!(java_intrafile_resolution, "java/intrafile_resolution.yaml");
 yaml_test!(java_interfile_resolution, "java/interfile_resolution.yaml");
 yaml_test!(java_type_flow, "java/type_flow.yaml");
@@ -230,7 +230,7 @@ yaml_test!(java_sealed_classes, "java/sealed_classes.yaml");
 yaml_test!(java_enums, "java/enums.yaml");
 
 // Kotlin
-yaml_test!(kotlin_call_resolution, "kotlin_resolution.yaml");
+yaml_test!(kotlin_call_resolution, "kotlin/kotlin_resolution.yaml");
 yaml_test!(
     kotlin_intrafile_resolution,
     "kotlin/intrafile_resolution.yaml"
@@ -249,7 +249,7 @@ yaml_test!(
 );
 
 //Scala
-yaml_test!(scala_call_resolution, "scala_resolution.yaml");
+yaml_test!(scala_call_resolution, "scala/scala_resolution.yaml");
 yaml_test!(scala_definitions, "scala/definitions.yaml");
 yaml_test!(scala_imports, "scala/imports.yaml");
 yaml_test!(scala_cross_file_calls, "scala/cross_file_calls.yaml");
