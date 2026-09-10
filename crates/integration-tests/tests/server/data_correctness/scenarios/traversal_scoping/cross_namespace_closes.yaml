@@ -1,10 +1,10 @@
 # source: crates/integration-tests/tests/server/data_correctness/traversal_scoping.rs::cross_namespace_closes_returns_cross_project_work_item
-# NOTE: The Rust test uses scope_prefixes on the "mr" alias (1/100/1000/).
-# The YAML harness uses org-level scoping; the project_id filter constrains
-# the MR to the same effective set.
 description: Cross-namespace CLOSES edge returns a work item from a different group
 
 config:
+  security:
+    scope_prefixes:
+      mr: "1/100/1000/"
   extra_seed:
     gl_edge:
       - { traversal_path: "1/101/", source_id: 2000, source_kind: MergeRequest, relationship_kind: CLOSES, target_id: 4002, target_kind: WorkItem, source_tags: ["state:opened"], target_tags: ["state:opened", "wi_type:task"] }

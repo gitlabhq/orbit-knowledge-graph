@@ -1,7 +1,4 @@
 # source: crates/integration-tests/tests/server/data_correctness/traversal_scoping.rs::scope_implied_container_elision_star_counts_authored_mrs
-# NOTE: The Rust test uses scope_prefixes on "g", "p", "mr" aliases (all
-# 1/700/). The YAML harness uses org-level scoping; the full_path filter on
-# Group constrains the result to the same set.
 description: Container-elision star aggregation counts authored MRs per user
 
 config:

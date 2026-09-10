@@ -1,7 +1,4 @@
 # source: crates/integration-tests/tests/server/data_correctness/traversal_scoping.rs::scope_implied_container_elision_chain_counts_diff_files
-# NOTE: The Rust test uses scope_prefixes on all five aliases (g, p, mr, d, f)
-# set to 1/701/. The YAML harness uses org-level scoping; the full_path filter
-# on Group constrains the result to the same set.
 description: Container-elision 4-hop FK chain counts diff files per project
 
 config:
