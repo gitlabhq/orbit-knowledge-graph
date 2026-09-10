@@ -1,0 +1,112 @@
+# Rust rewrite rules.
+# Handles: use declarations, struct/enum/trait/impl/fn defs,
+# method calls, field access, self.x, control flow, bindings.
+
+stages:
+  - name: normalize
+    rules:
+      # self.field → __ivar
+      - match: '(field_expression value: (self) field: $F)'
+        replace: '(__ivar @$F)'
+
+      # Visibility modifier → __visibility
+      - match: '(visibility_modifier)'
+        set_kind: '__visibility'
+
+      # impl Trait for Type → __supertype on the impl
+      - match: '(impl_item trait: $T type: $TY)'
+        append: '(__supertype @$T)'
+
+      # struct/enum heritage via derive macros could go here
+
+  - name: retag
+    rules:
+      # a.b → __member(object, member) for field_expression
+      - match: '(field_expression value: $O field: $F)'
+        retag:
+          kind: __member
+          fields: { O: object, F: member }
+
+      # f(x) → __call(callee, args)
+      - match: '(call_expression function: $F arguments: $A)'
+        retag:
+          kind: __call
+          fields: { F: callee, A: args }
+
+  - name: imports
+    rules:
+      # use crate::foo::Bar;
+      - match: '(use_declaration argument: $A:scoped_identifier)'
+        replace: '(__import (__source @$A|replace("::","/")) (__source_path @$A|replace("::","/")) (__name @$A))'
+
+      # use foo::bar::*;
+      - match: '(use_declaration argument: (scoped_use_list path: $P list: $L:use_list))'
+        replace: '(__import (__source @$P|replace("::","/")) (__source_path @$P|replace("::","/")) $$$L->__name)'
+
+      # use foo;
+      - match: '(use_declaration argument: $A:identifier)'
+        replace: '(__import (__source @$A) (__source_path @$A) (__name @$A))'
+
+  - name: classify
+    rules:
+      # Structs
+      - match: '(struct_item)'
+        append: '(__deftype "Struct") (__scope)'
+
+      # Enums
+      - match: '(enum_item)'
+        append: '(__deftype "Enum") (__scope)'
+
+      # Traits
+      - match: '(trait_item)'
+        append: '(__deftype "Trait") (__scope)'
+
+      # Impl blocks
+      - match: '(impl_item)'
+        append: '(__deftype "Impl") (__scope)'
+
+      # Functions
+      - match: '(function_item)'
+        append: '(__deftype "Function") (__scope)'
+
+      # Constants and statics
+      - match: '(const_item)'
+        append: '(__deftype "Const")'
+      - match: '(static_item)'
+        append: '(__deftype "Static")'
+
+      # Type aliases
+      - match: '(type_item)'
+        append: '(__deftype "TypeAlias")'
+
+      # Let bindings
+      - match: '(let_declaration)'
+        append: '(__binding)'
+
+      # Control flow
+      - match: '(if_expression)'
+        append: '(__branch)'
+      - match: '(match_expression)'
+        append: '(__branch)'
+
+      # Loops
+      - match: '(for_expression)'
+        append: '(__loop)'
+      - match: '(while_expression)'
+        append: '(__loop)'
+      - match: '(loop_expression)'
+        append: '(__loop)'
+
+resolve:
+  lookup_from:
+    - __source_root
+    - __crate_root
+  stages:
+    - name: crate_roots
+      rules:
+        - match: '(__dir (__file "Cargo.toml"))'
+          append: '(__crate_root)'
+        - match: '(__dir (__file "lib.rs"))'
+          append: '(__source_root)'
+        - match: '(__dir (__file "main.rs"))'
+          append: '(__source_root)'

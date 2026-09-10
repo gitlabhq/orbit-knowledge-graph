@@ -32,6 +32,7 @@ struct Sk {
     source: u16,
     name: u16,
     alias: u16,
+    type_only: u16,
 }
 
 impl Sk {
@@ -43,6 +44,7 @@ impl Sk {
             source: s("__source"),
             name: s("__name"),
             alias: s("__alias"),
+            type_only: s("__type_only"),
         }
     }
 
@@ -424,6 +426,8 @@ fn build_imports(
 
             let source_sym = synth_sym(tree, node, sk.source);
             let source_str = lang.syms.resolve(source_sym);
+            let is_type_only =
+                sk.type_only != 0 && tree.children(node).any(|c| tree.kind(c) == sk.type_only);
 
             // Collect __name children with optional __alias (skip empty syms)
             let names: Vec<(u32, u32)> = tree
@@ -460,7 +464,7 @@ fn build_imports(
                 path_b.append_value(source_str);
                 name_b.append_null();
                 alias_b.append_null();
-                to_b.append_value(false);
+                to_b.append_value(is_type_only);
                 ht_b.append_value(false);
                 sl_b.append_value(n.start as i64);
                 el_b.append_value(n.end as i64);
@@ -485,7 +489,7 @@ fn build_imports(
                     } else {
                         alias_b.append_null();
                     }
-                    to_b.append_value(false);
+                    to_b.append_value(is_type_only);
                     ht_b.append_value(false);
                     sl_b.append_value(n.start as i64);
                     el_b.append_value(n.end as i64);

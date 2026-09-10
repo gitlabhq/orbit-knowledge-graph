@@ -15,6 +15,10 @@ pub struct Pipeline {
 fn lang_yaml(lang_id: SupportLang) -> Option<&'static str> {
     match lang_id {
         SupportLang::Python => Some(include_str!("../langs/python.yaml")),
+        SupportLang::TypeScript | SupportLang::Tsx | SupportLang::JavaScript => {
+            Some(include_str!("../langs/typescript.yaml"))
+        }
+        SupportLang::Rust => Some(include_str!("../langs/rust.yaml")),
         _ => None,
     }
 }

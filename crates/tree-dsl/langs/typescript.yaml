@@ -1,0 +1,144 @@
+# TypeScript/JavaScript rewrite rules.
+# Handles: import/export, class/function/interface/enum/type defs,
+# member access, calls, this.x, control flow, bindings.
+
+stages:
+  - name: normalize
+    rules:
+      # this.x → __ivar
+      - match: '(member_expression object: (this) property: $P)'
+        replace: '(__ivar @$P)'
+
+      # Superclass: extends clause → __supertype
+      - match: '(extends_clause value: $V)'
+        replace: '(__supertype @$V)'
+
+      # implements clause → __supertype per type
+      - match: '(implements_clause $$$TYPES:type_identifier)'
+        append_under:
+          target: ROOT
+          each: TYPES
+          kind: __supertype
+
+  - name: retag
+    rules:
+      # a.b → __member(object, member)
+      - match: '(member_expression object: $O property: $M)'
+        retag:
+          kind: __member
+          fields: { O: object, M: member }
+
+      # f(x) → __call(callee, args)
+      - match: '(call_expression function: $F arguments: $A)'
+        retag:
+          kind: __call
+          fields: { F: callee, A: args }
+
+      # new X() → __call(callee, args)
+      - match: '(new_expression constructor: $C arguments: $A)'
+        retag:
+          kind: __call
+          fields: { C: callee, A: args }
+
+  - name: imports
+    rules:
+      # import type { a, b } from './source' (type-only)
+      - match: '(import_statement (type) (import_clause (named_imports $$$SPECS:import_specifier)) source: (string (string_fragment $S)))'
+        replace: '(__import (__source @$S) (__source_path @$S) (__type_only) $$$SPECS->__name)'
+
+      # import { a, b } from './source'
+      - match: '(import_statement (import_clause (named_imports $$$SPECS:import_specifier)) source: (string (string_fragment $S)))'
+        replace: '(__import (__source @$S) (__source_path @$S) $$$SPECS->__name)'
+
+      # import * as ns from './source'
+      - match: '(import_statement (import_clause (namespace_import $N:identifier)) source: (string (string_fragment $S)))'
+        replace: '(__import (__source @$S) (__source_path @$S) (__name @$N))'
+
+      # import defaultExport from './source'
+      - match: '(import_statement (import_clause $N:identifier) source: (string (string_fragment $S)))'
+        replace: '(__import (__source @$S) (__source_path @$S) (__name @$N))'
+
+      # Alias: import_specifier has name + alias fields
+      - match: '(import_specifier name: $N alias: $A)'
+        set_text: '$N'
+      - match: '(import_specifier alias: $A)'
+        append: '(__alias @$A)'
+
+  - name: classify
+    rules:
+      # Classes
+      - match: '(class_declaration)'
+        append: '(__deftype "Class") (__scope)'
+      - match: '(abstract_class_declaration)'
+        append: '(__deftype "Class") (__scope)'
+
+      # Functions
+      - match: '(function_declaration)'
+        append: '(__deftype "Function") (__scope)'
+      - match: '(method_definition)'
+        append: '(__deftype "Function") (__scope)'
+      - match: '(arrow_function)'
+        append: '(__deftype "Function") (__scope)'
+      - match: '(generator_function_declaration)'
+        append: '(__deftype "Function") (__scope)'
+
+      # Interfaces
+      - match: '(interface_declaration)'
+        append: '(__deftype "Interface") (__scope)'
+
+      # Type aliases
+      - match: '(type_alias_declaration)'
+        append: '(__deftype "TypeAlias")'
+
+      # Enums
+      - match: '(enum_declaration)'
+        append: '(__deftype "Enum") (__scope)'
+
+      # Variable declarations with initializer
+      - match: '(variable_declarator value: $V:arrow_function)'
+        append: '(__deftype "Function") (__scope)'
+      - match: '(variable_declarator value: $V:call_expression)'
+        append: '(__binding)'
+      - match: '(variable_declarator value: $V:new_expression)'
+        append: '(__binding)'
+      - match: '(variable_declarator)'
+        append: '(__binding)'
+
+      # Assignments
+      - match: '(assignment_expression)'
+        append: '(__binding)'
+
+      # Control flow
+      - match: '(if_statement)'
+        append: '(__branch)'
+      - match: '(switch_statement)'
+        append: '(__branch)'
+      - match: '(ternary_expression)'
+        append: '(__branch)'
+      - match: '(try_statement)'
+        append: '(__branch)'
+
+      # Loops
+      - match: '(for_statement)'
+        append: '(__loop)'
+      - match: '(for_in_statement)'
+        append: '(__loop)'
+      - match: '(while_statement)'
+        append: '(__loop)'
+      - match: '(do_statement)'
+        append: '(__loop)'
+
+resolve:
+  lookup_from:
+    - __source_root
+  stages:
+    - name: packages
+      rules:
+        - match: '(__dir (__file "package.json"))'
+          append: '(__package_root)'
+    - name: index_dirs
+      rules:
+        - match: '(__dir (__file "index.ts"))'
+          append: '(__source_root)'
+        - match: '(__dir (__file "index.js"))'
+          append: '(__source_root)'
