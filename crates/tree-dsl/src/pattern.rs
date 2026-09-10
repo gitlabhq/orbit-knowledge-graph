@@ -51,7 +51,9 @@ impl Tf {
                 }
                 result
             }
-            _ => s.to_string(),
+            Tf::Field(_) | Tf::Child(_) | Tf::FieldChild(_, _) | Tf::Const(_) => {
+                unreachable!("tree-context transform used as string transform")
+            }
         }
     }
 
@@ -188,69 +190,83 @@ impl Rewrite {
 }
 
 pub fn tokenize(s: &str) -> Vec<String> {
-    let (mut out, mut cur, mut in_str) = (Vec::new(), String::new(), false);
-    let mut pipe_depth: u32 = 0;
+    #[derive(Clone, Copy)]
+    enum State {
+        Normal,
+        InString,
+        InPipe(u32),
+        InPipeString(u32),
+    }
+
+    let mut out = Vec::new();
+    let mut cur = String::new();
+    let mut state = State::Normal;
+
     for ch in s.chars() {
-        if in_str {
-            cur.push(ch);
-            if ch == '"' {
-                in_str = false;
-                if pipe_depth > 0 {
-                    continue;
-                }
-                out.push(std::mem::take(&mut cur));
-            }
-            continue;
-        }
-        if pipe_depth > 0 {
-            match ch {
+        match state {
+            State::Normal => match ch {
                 '"' => {
-                    in_str = true;
                     cur.push(ch);
+                    state = State::InString;
                 }
                 '(' => {
-                    pipe_depth += 1;
-                    cur.push(ch);
+                    if cur.starts_with("@$") && cur.contains('|') {
+                        cur.push(ch);
+                        state = State::InPipe(1);
+                    } else {
+                        if !cur.is_empty() {
+                            out.push(std::mem::take(&mut cur));
+                        }
+                        out.push(ch.to_string());
+                    }
                 }
                 ')' => {
-                    pipe_depth -= 1;
-                    cur.push(ch);
-                }
-                c if c.is_whitespace() && pipe_depth == 0 => {
-                    unreachable!()
-                }
-                c => cur.push(c),
-            }
-            continue;
-        }
-        match ch {
-            '"' => {
-                in_str = true;
-                cur.push(ch);
-            }
-            '(' => {
-                if cur.starts_with("@$") && cur.contains('|') {
-                    pipe_depth = 1;
-                    cur.push(ch);
-                } else {
                     if !cur.is_empty() {
                         out.push(std::mem::take(&mut cur));
                     }
                     out.push(ch.to_string());
                 }
-            }
-            ')' => {
-                if !cur.is_empty() {
-                    out.push(std::mem::take(&mut cur));
+                c if c.is_whitespace() => {
+                    if !cur.is_empty() {
+                        out.push(std::mem::take(&mut cur));
+                    }
                 }
-                out.push(ch.to_string());
-            }
-            c if c.is_whitespace() => {
-                if !cur.is_empty() {
+                c => cur.push(c),
+            },
+            State::InString => match ch {
+                '"' => {
+                    cur.push(ch);
                     out.push(std::mem::take(&mut cur));
+                    state = State::Normal;
                 }
-            }
-            c => cur.push(c),
+                _ => cur.push(ch),
+            },
+            State::InPipe(d) => match ch {
+                '"' => {
+                    cur.push(ch);
+                    state = State::InPipeString(d);
+                }
+                '(' => {
+                    cur.push(ch);
+                    state = State::InPipe(d + 1);
+                }
+                ')' => {
+                    cur.push(ch);
+                    state = if d == 1 {
+                        State::Normal
+                    } else {
+                        State::InPipe(d - 1)
+                    };
+                }
+                _ => cur.push(ch),
+            },
+            State::InPipeString(d) => match ch {
+                '"' => {
+                    cur.push(ch);
+                    state = State::InPipe(d);
+                }
+                _ => cur.push(ch),
+            },
         }
     }
     if !cur.is_empty() {
