@@ -1,10 +1,37 @@
 use tree_dsl_tests::runner::run_yaml_suite;
 
+fn fixtures_dir() -> String {
+    if let Ok(dir) = std::env::var("TREE_DSL_FIXTURES_DIR") {
+        return dir;
+    }
+    // Default: find the main worktree via git common dir
+    let manifest = env!("CARGO_MANIFEST_DIR");
+    let common_dir = std::process::Command::new("git")
+        .args(["rev-parse", "--git-common-dir"])
+        .current_dir(manifest)
+        .output()
+        .expect("git rev-parse failed")
+        .stdout;
+    let common = String::from_utf8(common_dir).unwrap();
+    let common = common.trim();
+    let main_root = std::path::Path::new(common)
+        .parent()
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_string();
+    format!("{main_root}/crates/integration-tests-codegraph/fixtures/")
+}
+
 macro_rules! yaml_test {
     ($name:ident, $path:expr) => {
         #[tokio::test]
         async fn $name() {
-            run_yaml_suite(include_str!(concat!("../fixtures/", $path))).await;
+            let dir = fixtures_dir();
+            let path = format!("{dir}{}", $path);
+            let yaml = std::fs::read_to_string(&path)
+                .unwrap_or_else(|e| panic!("failed to read {path}: {e}"));
+            run_yaml_suite(&yaml).await;
         }
     };
 }
