@@ -379,7 +379,7 @@ This dual approach provides zero-trust security:
 The Orbit service connects to ClickHouse with restricted privileges:
 
 - **Read-Only Role**: The database user has SELECT-only permissions, preventing any writes or schema modifications.
-- **Table-Level Restrictions**: Access is limited to Orbit graph tables only; the role cannot access system tables or other tenant data.
+- **Table-Level Restrictions**: The reader needs SELECT on its Orbit graph tables and visibility of their metadata in `system.tables` for readiness checks. It must not have SELECT on other tenants' data.
 - **Connection Pooling**: Connections are pooled and rate-limited to prevent resource exhaustion.
 
 ## Handling Aggregations

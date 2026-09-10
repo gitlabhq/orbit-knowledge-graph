@@ -4,10 +4,13 @@ use std::time::Duration;
 
 use clickhouse_client::ArrowClickHouseClient;
 use opentelemetry::KeyValue;
-use orbit_migrations::version::{read_active_version, read_migrating_version};
+use orbit_migrations::version::{
+    STATUS_ACTIVE, STATUS_MIGRATING, STATUS_RETIRED, SchemaVersionError, read_all_versions,
+    version_tables_complete,
+};
 use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -46,6 +49,7 @@ impl SchemaWatcher {
     pub fn spawn(
         graph: ArrowClickHouseClient,
         embedded_version: u32,
+        expected_table_names: Vec<String>,
         poll_interval: Duration,
         shutdown: CancellationToken,
     ) -> Arc<Self> {
@@ -55,6 +59,7 @@ impl SchemaWatcher {
         tokio::spawn(watch_loop(
             graph,
             embedded_version,
+            expected_table_names,
             poll_interval,
             shutdown,
             state.clone(),
@@ -78,6 +83,7 @@ impl SchemaWatcher {
 async fn watch_loop(
     graph: ArrowClickHouseClient,
     embedded_version: u32,
+    expected_table_names: Vec<String>,
     poll_interval: Duration,
     shutdown: CancellationToken,
     state: Arc<AtomicU8>,
@@ -89,18 +95,11 @@ async fn watch_loop(
     );
 
     loop {
-        let (next, active) = poll_once(&graph, embedded_version, &state).await;
-        transition(&state, next);
-
-        if next == SchemaState::Outdated {
-            error!(
-                embedded_version,
-                active_version = active,
-                "active schema version exceeds binary version — \
-                 binary too old, requesting shutdown"
-            );
-            shutdown.cancel();
-            return;
+        match read_schema_state(&graph, embedded_version, &expected_table_names).await {
+            Ok(next_state) => transition(&state, next_state),
+            Err(error) => {
+                warn!(%error, "failed to check serving schema — keeping previous state");
+            }
         }
 
         tokio::select! {
@@ -110,50 +109,36 @@ async fn watch_loop(
     }
 }
 
-async fn poll_once(
+async fn read_schema_state(
     graph: &ArrowClickHouseClient,
-    embedded_version: u32,
-    state: &Arc<AtomicU8>,
-) -> (SchemaState, Option<u32>) {
-    let active = match read_active_version(graph).await {
-        Ok(active) => active,
-        Err(e) => {
-            warn!(error = %e, "failed to read active schema version — keeping previous state");
-            return (SchemaState::from_raw(state.load(Ordering::Relaxed)), None);
-        }
+    reader_version: u32,
+    expected_table_names: &[String],
+) -> Result<SchemaState, SchemaVersionError> {
+    let schemas = read_all_versions(graph).await?;
+
+    let reader_status = schemas
+        .iter()
+        .find(|schema| schema.version == reader_version)
+        .map(|schema| schema.status.as_str());
+
+    let newer_schema_is_active = schemas
+        .iter()
+        .any(|schema| schema.version > reader_version && schema.status == STATUS_ACTIVE);
+
+    let serving_state = match reader_status {
+        Some(STATUS_ACTIVE) => SchemaState::Ready,
+        Some(STATUS_RETIRED) if newer_schema_is_active => SchemaState::Outdated,
+        Some(STATUS_MIGRATING) => return Ok(SchemaState::Migrating),
+        _ => return Ok(SchemaState::Pending),
     };
 
-    if active == Some(embedded_version) {
-        return (SchemaState::Ready, active);
+    let tables_exist = version_tables_complete(graph, reader_version, expected_table_names).await?;
+
+    if !tables_exist {
+        return Ok(SchemaState::Pending);
     }
 
-    let migrating = match read_migrating_version(graph).await {
-        Ok(migrating) => migrating,
-        Err(e) => {
-            warn!(error = %e, "failed to read migrating schema version — keeping previous state");
-            return (SchemaState::from_raw(state.load(Ordering::Relaxed)), active);
-        }
-    };
-
-    (classify(active, migrating, embedded_version), active)
-}
-
-fn classify(active: Option<u32>, migrating: Option<u32>, embedded: u32) -> SchemaState {
-    if active == Some(embedded) {
-        return SchemaState::Ready;
-    }
-
-    // Outdated must beat Migrating: a below-active migrating row is anomalous data
-    // and must not suppress the safety shutdown.
-    if active.is_some_and(|active| active > embedded) {
-        return SchemaState::Outdated;
-    }
-
-    if migrating == Some(embedded) {
-        return SchemaState::Migrating;
-    }
-
-    SchemaState::Pending
+    Ok(serving_state)
 }
 
 fn transition(state: &Arc<AtomicU8>, next: SchemaState) {
@@ -172,14 +157,17 @@ fn register_state_gauge(state: Arc<AtomicU8>) {
     let meter = orbit_observability::meter();
     spec::STATE.build_observable_gauge_i64(&meter, move |observer| {
         let raw = state.load(Ordering::Relaxed);
-        for s in [
+        for schema_state in [
             SchemaState::Pending,
             SchemaState::Ready,
             SchemaState::Outdated,
             SchemaState::Migrating,
         ] {
-            let value = i64::from(s as u8 == raw);
-            observer.observe(value, &[KeyValue::new(spec::labels::STATE, s.as_label())]);
+            let value = i64::from(schema_state as u8 == raw);
+            observer.observe(
+                value,
+                &[KeyValue::new(spec::labels::STATE, schema_state.as_label())],
+            );
         }
     });
 }
@@ -189,46 +177,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn classify_active_equal_is_ready() {
-        assert_eq!(classify(Some(2), None, 2), SchemaState::Ready);
-        assert_eq!(classify(Some(2), Some(3), 2), SchemaState::Ready);
-    }
-
-    #[test]
-    fn classify_migrating_equal_is_migrating() {
-        assert_eq!(classify(Some(1), Some(2), 2), SchemaState::Migrating);
-        assert_eq!(classify(None, Some(2), 2), SchemaState::Migrating);
-    }
-
-    #[test]
-    fn classify_outdated_beats_migrating() {
-        assert_eq!(classify(Some(5), Some(1), 1), SchemaState::Outdated);
-    }
-
-    #[test]
-    fn classify_active_higher_is_outdated() {
-        assert_eq!(classify(Some(3), None, 2), SchemaState::Outdated);
-    }
-
-    #[test]
-    fn classify_none_is_pending() {
-        assert_eq!(classify(None, None, 2), SchemaState::Pending);
-    }
-
-    #[test]
-    fn classify_active_lower_is_pending() {
-        assert_eq!(classify(Some(1), None, 2), SchemaState::Pending);
-    }
-
-    #[test]
     fn from_raw_round_trip() {
-        for s in [
+        for schema_state in [
             SchemaState::Pending,
             SchemaState::Ready,
             SchemaState::Outdated,
             SchemaState::Migrating,
         ] {
-            assert_eq!(SchemaState::from_raw(s as u8), s);
+            assert_eq!(SchemaState::from_raw(schema_state as u8), schema_state);
         }
     }
 

@@ -9,6 +9,7 @@ use clickhouse_client::ClickHouseConfigurationExt;
 use indexer::schema;
 use indexer::{DispatcherConfig, IndexerConfig};
 use orbit_billing::{QuotaService, SnowplowBillingTracker};
+use orbit_migrations::schema::GraphSchema;
 use orbit_migrations::version::SCHEMA_VERSION;
 use orbit_server::analytics::SnowplowAnalyticsTracker;
 use orbit_server::auth::JwtValidator;
@@ -124,6 +125,8 @@ async fn main() -> anyhow::Result<()> {
 
             let embedded = *SCHEMA_VERSION;
             let prefix = schema::version::table_prefix(embedded);
+            let expected_table_names =
+                GraphSchema::from_ontology(&ontology).prefixed_table_names(&prefix);
             info!(version = embedded, table_prefix = %prefix, "pinned to embedded schema version");
             let ontology =
                 Arc::new(Arc::unwrap_or_clone(ontology).with_schema_version_prefix(&prefix));
@@ -131,6 +134,7 @@ async fn main() -> anyhow::Result<()> {
             let watcher = SchemaWatcher::spawn(
                 graph,
                 embedded,
+                expected_table_names,
                 Duration::from_secs(config.schema.version_poll_interval_secs),
                 shutdown.clone(),
             );

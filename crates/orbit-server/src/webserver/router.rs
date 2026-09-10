@@ -33,9 +33,8 @@ async fn ready(State(schema_watcher): State<Arc<SchemaWatcher>>) -> impl IntoRes
     let mut unhealthy_components = Vec::new();
 
     match schema_watcher.current() {
-        SchemaState::Ready => {}
+        SchemaState::Ready | SchemaState::Outdated => {}
         SchemaState::Pending => unhealthy_components.push("schema_pending"),
-        SchemaState::Outdated => unhealthy_components.push("schema_outdated"),
         SchemaState::Migrating => unhealthy_components.push("schema_migrating"),
     }
 
