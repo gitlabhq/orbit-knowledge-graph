@@ -6529,7 +6529,7 @@ checksum = "3752f229dcc5a481d60f385fa479ff46818033d881d2d801aa27dffcfb5e8306"
 [[package]]
 name = "labkit"
 version = "0.1.0"
-source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=fecb53d5f37754c603cc0f482948501bd337b863#fecb53d5f37754c603cc0f482948501bd337b863"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=80a372d1a9aa13720e74166405aff98f26873690#80a372d1a9aa13720e74166405aff98f26873690"
 dependencies = [
  "axum",
  "futures-util",
@@ -6560,7 +6560,7 @@ dependencies = [
 [[package]]
 name = "labkit-events"
 version = "0.1.0"
-source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=fecb53d5f37754c603cc0f482948501bd337b863#fecb53d5f37754c603cc0f482948501bd337b863"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=80a372d1a9aa13720e74166405aff98f26873690#80a372d1a9aa13720e74166405aff98f26873690"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -6578,7 +6578,7 @@ dependencies = [
 [[package]]
 name = "labkit-fields"
 version = "0.1.0"
-source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=fecb53d5f37754c603cc0f482948501bd337b863#fecb53d5f37754c603cc0f482948501bd337b863"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=80a372d1a9aa13720e74166405aff98f26873690#80a372d1a9aa13720e74166405aff98f26873690"
 
 [[package]]
 name = "lance"
