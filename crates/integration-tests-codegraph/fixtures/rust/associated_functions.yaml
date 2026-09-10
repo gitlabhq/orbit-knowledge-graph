@@ -1,0 +1,53 @@
+name: "Rust: associated functions vs methods"
+pipeline: rust
+fixtures:
+  - path: main.rs
+    content: |
+      struct Point {
+          x: f64,
+          y: f64,
+      }
+
+      impl Point {
+          fn new(x: f64, y: f64) -> Self {
+              Point { x, y }
+          }
+
+          fn origin() -> Self {
+              Self::new(0.0, 0.0)
+          }
+
+          fn distance(&self, other: &Point) -> f64 {
+              ((self.x - other.x).powi(2) + (self.y - other.y).powi(2)).sqrt()
+          }
+      }
+
+      fn main() {
+          let p = Point::new(3.0, 4.0);
+          let o = Point::origin();
+          let d = p.distance(&o);
+      }
+
+tests:
+  - name: Struct and all associated functions/methods exist
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'main.rs'
+        AND d.definition_type IN ['Struct', 'Function', 'Method']
+      RETURN d.name AS name, d.definition_type AS type
+      ORDER BY name
+    assert:
+      - { row_count: 5 }
+      - { row: { name: "Point", type: "Struct" } }
+      - { row: { name: "distance", type: "Method" } }
+      - { row: { name: "main", type: "Function" } }
+      - { row: { name: "new", type: "Method" } }
+      - { row: { name: "origin", type: "Method" } }
+
+  - name: origin calls new (associated function calling associated function)
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'origin' AND callee.name = 'new' AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller
+    assert:
+      - { row_count: 1 }

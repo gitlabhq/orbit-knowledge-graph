@@ -1,0 +1,43 @@
+name: "TypeScript: re-exports"
+pipeline: typescript
+fixtures:
+  - path: models.ts
+    content: |
+      export class User {}
+      export class Admin {}
+
+  - path: index.ts
+    content: |
+      export { User } from './models';
+      export { Admin as SuperAdmin } from './models';
+
+  - path: main.ts
+    content: |
+      import { User, SuperAdmin } from './index';
+
+      function run(): void {
+          const u = new User();
+          const a = new SuperAdmin();
+      }
+
+tests:
+  - name: Re-exports are extracted as imports in index.ts
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.file_path = 'index.ts'
+      RETURN i.name AS name
+      ORDER BY name
+    assert:
+      - { row_count: 2 }
+      - { column_values: { field: name, values: ["Admin", "User"] } }
+
+  - name: main.ts imports resolve through re-export to original defs
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'run' AND e.edge_kind = 'Calls'
+      RETURN callee.name AS callee, callee.file_path AS file
+      ORDER BY callee
+    assert:
+      - { row_count: 2 }
+      - { row: { callee: "Admin", file: "models.ts" } }
+      - { row: { callee: "User", file: "models.ts" } }
