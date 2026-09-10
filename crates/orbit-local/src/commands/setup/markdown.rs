@@ -9,19 +9,15 @@ use anyhow::{Context, Result};
 const BLOCK_BEGIN: &str = "<!-- orbit:setup:begin -->";
 const BLOCK_END: &str = "<!-- orbit:setup:end -->";
 
-fn rendered_block(mode: super::spec::Mode) -> String {
+fn rendered_block() -> String {
     format!(
         "{BLOCK_BEGIN}\n{}\n{BLOCK_END}",
-        super::spec::instructions(mode)
+        super::spec::instructions()
     )
 }
 
-pub(super) fn upsert_block_in_file(
-    path: &Path,
-    label: &str,
-    mode: super::spec::Mode,
-) -> Result<()> {
-    let block = rendered_block(mode);
+pub(super) fn upsert_block_in_file(path: &Path, label: &str) -> Result<()> {
+    let block = rendered_block();
     let (updated, action) = match std::fs::read_to_string(path) {
         Ok(existing) => match splice_block(&existing, &block) {
             Some(updated) => (updated, "orbit section updated"),
@@ -101,12 +97,11 @@ fn block_span(existing: &str) -> Option<(usize, usize)> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::spec::Mode;
     use super::*;
 
     #[test]
     fn append_then_splice_is_idempotent() {
-        let block = rendered_block(Mode::Local);
+        let block = rendered_block();
         let appended = append_block("# My project\n\nSome rules.\n", &block);
         assert!(appended.starts_with("# My project"));
         assert!(appended.ends_with(&format!("{BLOCK_END}\n")));
@@ -118,23 +113,23 @@ mod tests {
     #[test]
     fn splice_preserves_surrounding_content() {
         let existing = format!("# Before\n\n{BLOCK_BEGIN}\nold content\n{BLOCK_END}\n\n# After\n");
-        let updated = splice_block(&existing, &rendered_block(Mode::Local)).unwrap();
+        let updated = splice_block(&existing, &rendered_block()).unwrap();
         assert!(updated.starts_with("# Before"));
         assert!(updated.ends_with("# After\n"));
-        assert!(updated.contains("orbit local grep"));
+        assert!(updated.contains("`orbit grep"));
         assert!(!updated.contains("old content"));
     }
 
     #[test]
     fn strip_removes_block_and_keeps_neighbors() {
-        let existing = format!("# Before\n\n{}\n\n# After\n", rendered_block(Mode::Local));
+        let existing = format!("# Before\n\n{}\n\n# After\n", rendered_block());
         let remaining = strip_block(&existing).unwrap();
         assert_eq!(remaining, "# Before\n\n# After\n");
     }
 
     #[test]
     fn strip_on_orbit_only_file_leaves_nothing() {
-        let existing = format!("{}\n", rendered_block(Mode::Local));
+        let existing = format!("{}\n", rendered_block());
         assert_eq!(strip_block(&existing).unwrap(), "");
     }
 
@@ -144,30 +139,13 @@ mod tests {
     }
 
     #[test]
-    fn modes_replace_each_other_rather_than_combining() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("AGENTS.md");
-
-        upsert_block_in_file(&path, "AGENTS.md", Mode::Remote).unwrap();
-        let written = std::fs::read_to_string(&path).unwrap();
-        assert!(written.contains("glab orbit remote"));
-        assert!(!written.contains("orbit local sql"));
-
-        upsert_block_in_file(&path, "AGENTS.md", Mode::Local).unwrap();
-        let written = std::fs::read_to_string(&path).unwrap();
-        assert!(written.contains("orbit local sql"));
-        assert!(!written.contains("glab orbit remote"));
-        assert_eq!(written.matches(BLOCK_BEGIN).count(), 1);
-    }
-
-    #[test]
     fn upsert_creates_updates_and_strip_restores() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("AGENTS.md");
         std::fs::write(&path, "# My rules\n").unwrap();
 
-        upsert_block_in_file(&path, "AGENTS.md", Mode::Local).unwrap();
-        upsert_block_in_file(&path, "AGENTS.md", Mode::Local).unwrap();
+        upsert_block_in_file(&path, "AGENTS.md").unwrap();
+        upsert_block_in_file(&path, "AGENTS.md").unwrap();
         let written = std::fs::read_to_string(&path).unwrap();
         assert_eq!(written.matches(BLOCK_BEGIN).count(), 1);
         assert!(written.contains("# My rules"));
@@ -181,7 +159,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("CLAUDE.md");
 
-        upsert_block_in_file(&path, "CLAUDE.md", Mode::Local).unwrap();
+        upsert_block_in_file(&path, "CLAUDE.md").unwrap();
         assert!(path.is_file());
 
         strip_block_from_file(&path, "CLAUDE.md").unwrap();

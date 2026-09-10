@@ -239,7 +239,7 @@ impl RepoMap {
                 "SELECT language, COUNT(*) AS files
 FROM gl_file
 WHERE project_id={pid} AND commit_sha={sha}{exclude}
-GROUP BY 1 ORDER BY files DESC",
+GROUP BY 1 ORDER BY files DESC, language",
                 exclude = self.exclude("path")
             ),
         )?;
@@ -254,7 +254,7 @@ FROM gl_definition
 WHERE project_id={pid} AND commit_sha={sha}{exclude}
 GROUP BY 1
 HAVING n >= 5
-ORDER BY n DESC",
+ORDER BY n DESC, definition_type",
                 exclude = self.exclude("file_path")
             ),
         )?;
@@ -292,7 +292,7 @@ SELECT
   COUNT(*) FILTER (WHERE definition_type IN {callables}) AS callables
 FROM paths
 GROUP BY dir
-ORDER BY files DESC
+ORDER BY files DESC, dir
 LIMIT 30",
                 exclude = self.exclude("file_path"),
                 types = kind_list(TYPE_KINDS),
@@ -319,7 +319,7 @@ WHERE parent.project_id={pid} AND parent.commit_sha={sha}
   AND parent.definition_type IN {abstractions}{exclude_parent}{exclude_child}
 GROUP BY 1, 2, 3
 HAVING descendants >= 2
-ORDER BY descendants DESC
+ORDER BY descendants DESC, base, loc
 LIMIT 20",
                 abstractions = kind_list(ABSTRACTION_KINDS),
                 exclude_parent = self.exclude("parent.file_path"),
@@ -342,7 +342,7 @@ LIMIT 20",
             &format!(
                 "SELECT i.identifier_name AS symbol,
        COUNT(DISTINCT i.file_path) AS importers,
-       any_value(d.file_path || ':' || d.start_line) AS defined_at
+       min(d.file_path || ':' || d.start_line) AS defined_at
 FROM gl_imported_symbol i
 JOIN gl_definition d
   ON d.project_id = i.project_id
@@ -354,7 +354,7 @@ WHERE i.project_id={pid} AND i.commit_sha={sha}{exclude_i}
   AND d.definition_type IN {anchors}
 GROUP BY 1
 HAVING importers >= 3
-ORDER BY importers DESC
+ORDER BY importers DESC, symbol
 LIMIT 25",
                 exclude_d = self.exclude("d.file_path"),
                 exclude_i = self.exclude("i.file_path"),
@@ -384,7 +384,7 @@ LIMIT 25",
 ),
 ranked AS (
   SELECT name, definition_type, file_path, start_line, callers,
-         ROW_NUMBER() OVER (PARTITION BY name ORDER BY callers DESC, length(file_path), file_path) AS rn,
+         ROW_NUMBER() OVER (PARTITION BY name ORDER BY callers DESC, length(file_path), file_path, start_line) AS rn,
          SUM(callers) OVER (PARTITION BY name) AS total_callers
   FROM per_loc
 )
@@ -393,7 +393,7 @@ SELECT name AS callable, definition_type AS kind,
        total_callers AS callers
 FROM ranked
 WHERE rn = 1
-ORDER BY total_callers DESC
+ORDER BY total_callers DESC, callable
 LIMIT 20",
                 called_kinds = kind_list(&[
                     "Function",
@@ -573,7 +573,7 @@ FROM gl_definition
 WHERE project_id={pid} AND commit_sha={sha}
   AND (fqn={t} OR name={t})
   AND definition_type IN {containers}{exclude}
-ORDER BY loc
+ORDER BY loc, fqn
 LIMIT 10",
                 exclude = self.exclude("file_path"),
             ),
@@ -699,7 +699,7 @@ LIMIT 300",
 )
 SELECT depth, fqn, file_path || ':' || start_line AS loc
 FROM chain
-ORDER BY depth, fqn
+ORDER BY depth, fqn, loc
 LIMIT 200",
                 pid = self.project_id,
                 sha = sql_lit(&self.sha),
@@ -730,7 +730,7 @@ FROM gl_imported_symbol
 WHERE project_id={pid} AND commit_sha={sha}{exclude}
   AND (identifier_name LIKE {like} OR import_path LIKE {like})
 GROUP BY 1, 2
-ORDER BY importers DESC
+ORDER BY importers DESC, symbol, import_path
 LIMIT 50",
                 pid = self.project_id,
                 sha = sql_lit(&self.sha),

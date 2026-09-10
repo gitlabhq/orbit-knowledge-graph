@@ -19,6 +19,14 @@ impl RemoteError {
     }
 }
 
+impl std::fmt::Display for RemoteError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for RemoteError {}
+
 impl From<anyhow::Error> for RemoteError {
     fn from(err: anyhow::Error) -> Self {
         RemoteError::new(EXIT_GENERIC, format!("{err:#}"))

@@ -54,18 +54,19 @@ pub fn resolve_from_env() -> TelemetryConfig {
 pub fn emit_command_event<T: AnalyticsTracker + ?Sized>(
     tracker: &T,
     action: &str,
+    targets_remote: bool,
     coding_agent: Option<&str>,
 ) {
     if let Ok(event) = StructuredEvent::builder(CATEGORY, action)
-        .context(build_common_context(action, coding_agent))
+        .context(build_common_context(targets_remote, coding_agent))
         .build()
     {
         tracker.track(event);
     }
 }
 
-fn build_common_context(action: &str, coding_agent: Option<&str>) -> OrbitCommonContext {
-    let targets_saas = action.starts_with("remote")
+fn build_common_context(targets_remote: bool, coding_agent: Option<&str>) -> OrbitCommonContext {
+    let targets_saas = targets_remote
         && crate::remote::client::instance_host()
             .as_deref()
             .is_some_and(crate::remote::client::is_gitlab_com);
@@ -228,11 +229,11 @@ mod tests {
     #[test]
     fn emit_sends_one_event_with_action() {
         let tracker = orbit_analytics::InMemoryAnalyticsTracker::new();
-        emit_command_event(&tracker, "remote_query", None);
+        emit_command_event(&tracker, "query", false, None);
         let events = tracker.drain();
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].category(), CATEGORY);
-        assert_eq!(events[0].action(), "remote_query");
+        assert_eq!(events[0].action(), "query");
     }
 
     #[test]

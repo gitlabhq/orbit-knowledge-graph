@@ -8,7 +8,7 @@ use std::io::Read;
 use clap::ValueEnum;
 use serde_json::{Value, json};
 
-use crate::commands::setup::spec::{self, Mode};
+use crate::commands::setup::spec;
 use crate::workspace;
 
 #[derive(ValueEnum, Clone, Copy, Debug)]
@@ -32,7 +32,7 @@ const SOURCE_EXTS: &[&str] = &[
     "h", "cpp", "hpp", "cc", "cs", "kt", "kts", "swift", "php", "scala", "lua", "sh", "pl",
 ];
 
-pub(crate) fn run(kind: Kind, mode: Mode) {
+pub(crate) fn run(kind: Kind) {
     let mut input = String::new();
     if std::io::stdin().read_to_string(&mut input).is_err() {
         return;
@@ -40,7 +40,7 @@ pub(crate) fn run(kind: Kind, mode: Mode) {
     let Ok(call) = serde_json::from_str::<Value>(&input) else {
         return;
     };
-    if mode == Mode::Local && !local_graph_exists() {
+    if !local_graph_exists() {
         return;
     }
     if should_nudge(kind, &call) {
@@ -49,7 +49,7 @@ pub(crate) fn run(kind: Kind, mode: Mode) {
             json!({
                 "hookSpecificOutput": {
                     "hookEventName": "PreToolUse",
-                    "additionalContext": nudge_text(kind, mode),
+                    "additionalContext": nudge_text(kind),
                 }
             })
         );
@@ -62,10 +62,10 @@ fn local_graph_exists() -> bool {
         .unwrap_or(false)
 }
 
-fn nudge_text(kind: Kind, mode: Mode) -> &'static str {
+fn nudge_text(kind: Kind) -> &'static str {
     match kind {
-        Kind::Search => spec::nudge_search(mode),
-        Kind::Read => spec::nudge_read(mode),
+        Kind::Search => spec::nudge_search(),
+        Kind::Read => spec::nudge_read(),
     }
 }
 
@@ -232,9 +232,8 @@ mod tests {
     }
 
     #[test]
-    fn nudge_text_follows_the_mode() {
-        assert!(nudge_text(Kind::Search, Mode::Local).contains("orbit local grep"));
-        assert!(nudge_text(Kind::Search, Mode::Remote).contains("glab orbit remote"));
-        assert!(nudge_text(Kind::Read, Mode::Remote).contains("glab orbit remote"));
+    fn nudge_text_names_the_launcher_verbs() {
+        assert!(nudge_text(Kind::Search).contains("`orbit grep"));
+        assert!(nudge_text(Kind::Read).contains("`orbit context"));
     }
 }
