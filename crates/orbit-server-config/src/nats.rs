@@ -19,7 +19,7 @@ pub struct NatsConfiguration {
     pub username: Option<String>,
 
     /// Optional password for authentication.
-    /// For production, prefer environment variables over storing in config files.
+    /// For production, mount it as a secret file at `/etc/secrets/nats/password`.
     pub password: Option<String>,
 
     /// Path to CA certificate (PEM) for verifying the NATS server.

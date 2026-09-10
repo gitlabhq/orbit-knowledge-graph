@@ -220,8 +220,7 @@ async fn run_webserver(
     if config.billing.enabled {
         if config.billing.collector_url.trim().is_empty() {
             return Err(anyhow::anyhow!(
-                "billing.enabled=true but billing.collector_url is empty — \
-                 set GKG_BILLING__COLLECTOR_URL"
+                "billing.enabled=true but billing.collector_url is empty"
             ));
         }
         info!(
@@ -239,14 +238,13 @@ async fn run_webserver(
     if config.billing.quota.enabled {
         if config.billing.quota.customers_dot_url.trim().is_empty() {
             return Err(anyhow::anyhow!(
-                "billing.quota.enabled=true but billing.quota.customers_dot_url is empty — \
-                 set GKG_BILLING__QUOTA__CUSTOMERS_DOT_URL"
+                "billing.quota.enabled=true but billing.quota.customers_dot_url is empty"
             ));
         }
         if config.billing.quota.api_user.is_none() || config.billing.quota.api_token.is_none() {
             return Err(anyhow::anyhow!(
-                "billing.quota.enabled=true but billing.quota.api_user or api_token is not set — \
-                 set GKG_BILLING__QUOTA__API_USER and GKG_BILLING__QUOTA__API_TOKEN"
+                "billing.quota.enabled=true but billing.quota.api_user or api_token is not set \
+                 (mount them at /etc/secrets/billing/quota/)"
             ));
         }
         info!(
@@ -261,8 +259,7 @@ async fn run_webserver(
     if config.analytics.enabled {
         if config.analytics.collector_url.trim().is_empty() {
             return Err(anyhow::anyhow!(
-                "analytics.enabled=true but analytics.collector_url is empty — \
-                 set GKG_ANALYTICS__COLLECTOR_URL"
+                "analytics.enabled=true but analytics.collector_url is empty"
             ));
         }
         info!(

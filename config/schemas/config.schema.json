@@ -869,7 +869,7 @@
           "minimum": 0
         },
         "password": {
-          "description": "Optional password for authentication.\nFor production, prefer environment variables over storing in config files.",
+          "description": "Optional password for authentication.\nFor production, mount it as a secret file at `/etc/secrets/nats/password`.",
           "type": [
             "string",
             "null"

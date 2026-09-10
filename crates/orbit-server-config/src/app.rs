@@ -60,13 +60,13 @@ impl AppConfig {
     /// Layers, lowest to highest priority: the embedded `config/default.yaml`,
     /// an on-disk `config/default.yaml` when present (the Helm chart's ConfigMap
     /// key), the overlay (`--config <path>`, else `config/config.yaml` when
-    /// present), secret files, `GKG_*` environment variables.
+    /// present), secret files.
     pub fn load(overlay: Option<&Path>) -> Result<Self, ConfigError> {
         Self::load_from(overlay, Path::new(SECRET_FILE_DIR))
     }
 
-    /// The embedded `config/default.yaml` alone: no overlay, secrets, or
-    /// environment. The fixture every test that needs a config starts from.
+    /// The embedded `config/default.yaml` alone: no overlay or secrets. The
+    /// fixture every test that needs a config starts from.
     pub fn embedded_defaults() -> Self {
         config::Config::builder()
             .add_source(embedded_defaults_source())
@@ -85,12 +85,6 @@ impl AppConfig {
             .add_source(config::File::with_name(DEFAULT_CONFIG_FILE).required(false))
             .add_source(overlay_file)
             .add_source(SecretFileSource::new(secret_dir))
-            .add_source(
-                config::Environment::with_prefix("GKG")
-                    .prefix_separator("_")
-                    .separator("__")
-                    .try_parsing(true),
-            )
             .build()
             .map_err(ConfigError::Config)?;
 
@@ -125,7 +119,7 @@ pub enum ConfigError {
     #[error("configuration error: {0}")]
     Config(#[from] config::ConfigError),
     #[error(
-        "gitlab.jwt.verifying_key is required (set GKG_GITLAB__JWT__VERIFYING_KEY, add to the config overlay, or mount at /etc/secrets/gitlab/jwt/verifying_key)"
+        "gitlab.jwt.verifying_key is required (set it in a config overlay or mount it at /etc/secrets/gitlab/jwt/verifying_key)"
     )]
     MissingJwtSecret,
 }
@@ -176,11 +170,16 @@ gitlab:
         assert!(err.to_string().contains("jwt_clock_skew_secs"), "{err}");
     }
 
+    fn write_overlay(dir: &Path, name: &str, yaml: &str) -> std::path::PathBuf {
+        let path = dir.join(name);
+        std::fs::write(&path, yaml).unwrap();
+        path
+    }
+
     #[test]
     fn explicit_overlay_file_overrides_defaults() {
         let dir = tempfile::TempDir::new().unwrap();
-        let overlay = dir.path().join("custom.yaml");
-        std::fs::write(&overlay, OVERLAY_BASE).unwrap();
+        let overlay = write_overlay(dir.path(), "custom.yaml", OVERLAY_BASE);
         let secrets = dir.path().join("secrets");
         std::fs::create_dir(&secrets).unwrap();
 
@@ -203,10 +202,41 @@ gitlab:
     }
 
     #[test]
+    fn overlay_reaches_topics_and_schedule() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let overlay = write_overlay(
+            dir.path(),
+            "tuning.yaml",
+            r#"
+engine:
+  topics:
+    code-indexing-task:
+      max_attempts: 2
+schedule:
+  tasks:
+    global:
+      cron: "0 */2 * * * *"
+"#,
+        );
+        let secrets = dir.path().join("secrets");
+        std::fs::create_dir(&secrets).unwrap();
+
+        let config = AppConfig::load_from(Some(&overlay), &secrets).unwrap();
+
+        assert_eq!(
+            config.engine.topics["code-indexing-task"].max_attempts,
+            Some(2)
+        );
+        assert_eq!(
+            config.schedule.tasks.global.schedule.cron.expression(),
+            "0 */2 * * * *"
+        );
+    }
+
+    #[test]
     fn secret_files_override_overlay_values() {
         let dir = tempfile::TempDir::new().unwrap();
-        let overlay = dir.path().join("custom.yaml");
-        std::fs::write(&overlay, OVERLAY_BASE).unwrap();
+        let overlay = write_overlay(dir.path(), "custom.yaml", OVERLAY_BASE);
         let secrets = dir.path().join("secrets");
         std::fs::create_dir_all(secrets.join("graph")).unwrap();
         std::fs::write(secrets.join("graph/password"), "secret-password").unwrap();
@@ -270,148 +300,5 @@ engine:
         assert_eq!(pipeline.worker_threads, 2);
         assert_eq!(pipeline.max_concurrent_languages, 3);
         assert_eq!(pipeline.per_file_timeout_ms, 2000);
-    }
-
-    /// Environment source with `GKG_` prefix and `__` separator maps env
-    /// vars to nested config keys:
-    ///   GKG_NATS__URL -> nats.url
-    ///   GKG_GRAPH__DATABASE -> graph.database
-    #[test]
-    fn environment_source_overrides_file_values() {
-        let dir = tempfile::TempDir::new().unwrap();
-
-        // set_override mirrors what config::Environment produces without
-        // mutating process state.
-        let config = builder_with_defaults()
-            .add_source(SecretFileSource::new(dir.path()))
-            .set_override("nats.url", "nats://custom:4222")
-            .unwrap()
-            .set_override("graph.database", "test-graph-db")
-            .unwrap()
-            .set_override("datalake.database", "test-datalake-db")
-            .unwrap()
-            .set_override(
-                "gitlab.jwt.verifying_key",
-                "env-secret-at-least-32-bytes-long",
-            )
-            .unwrap()
-            .build()
-            .unwrap();
-
-        let config: AppConfig = config.try_deserialize().expect("config should deserialize");
-
-        assert_eq!(config.nats.url, "nats://custom:4222");
-        assert_eq!(config.graph.database, "test-graph-db");
-        assert_eq!(config.datalake.database, "test-datalake-db");
-        assert_eq!(
-            config.gitlab.jwt.verifying_key.as_deref(),
-            Some("env-secret-at-least-32-bytes-long")
-        );
-    }
-
-    #[test]
-    fn env_style_overrides_reach_topics_and_schedule() {
-        let dir = tempfile::TempDir::new().unwrap();
-
-        let config = builder_with_defaults()
-            .add_source(SecretFileSource::new(dir.path()))
-            .set_override("engine.topics.code-indexing-task.max_attempts", "2")
-            .unwrap()
-            .set_override("schedule.tasks.global.cron", "0 */2 * * * *")
-            .unwrap()
-            .build()
-            .unwrap();
-
-        let config: AppConfig = config.try_deserialize().expect("config should deserialize");
-
-        assert_eq!(
-            config.engine.topics["code-indexing-task"].max_attempts,
-            Some(2)
-        );
-        assert_eq!(
-            config.schedule.tasks.global.schedule.cron.expression(),
-            "0 */2 * * * *"
-        );
-    }
-
-    /// Verifies `prefix_separator("_")` is required for `GKG_GRAPH__DATABASE`
-    /// style env vars to work with real process env vars.
-    ///
-    /// Without it, the config crate defaults the prefix separator to the
-    /// hierarchy separator (`__`), so it looks for `GKG__GRAPH__DATABASE`
-    /// (double underscore after prefix) and silently ignores
-    /// `GKG_GRAPH__DATABASE` (single underscore).
-    ///
-    /// Uses a subprocess since env vars must be set before config loading
-    /// and `std::env::set_var` is unsafe in multi-threaded test runners.
-    #[test]
-    fn real_env_vars_override_yaml_defaults() {
-        let test_bin = std::env::current_exe().unwrap();
-        let output = std::process::Command::new(&test_bin)
-            .arg("app::tests::subprocess_env_config_loader")
-            .arg("--ignored")
-            .arg("--exact")
-            .arg("--nocapture")
-            .env("GKG_GRAPH__DATABASE", "env_graph_db")
-            .env("GKG_DATALAKE__DATABASE", "env_datalake_db")
-            .env("GKG_NATS__URL", "nats://env-host:4222")
-            .output()
-            .expect("failed to spawn subprocess");
-
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let stderr = String::from_utf8_lossy(&output.stderr);
-
-        let json_line = stdout
-            .lines()
-            .find(|l| l.starts_with('{'))
-            .unwrap_or_else(|| {
-                panic!(
-                    "inner test did not print JSON.\nstdout: {stdout}\nstderr: {stderr}\nexit: {}",
-                    output.status
-                )
-            });
-        let values: serde_json::Value =
-            serde_json::from_str(json_line).expect("inner test should print valid JSON");
-
-        if let Some(err) = values.get("error") {
-            panic!("inner test config load failed: {err}");
-        }
-
-        assert_eq!(
-            values["graph_database"], "env_graph_db",
-            "GKG_GRAPH__DATABASE should override config/default.yaml"
-        );
-        assert_eq!(
-            values["datalake_database"], "env_datalake_db",
-            "GKG_DATALAKE__DATABASE should override config/default.yaml"
-        );
-        assert_eq!(
-            values["nats_url"], "nats://env-host:4222",
-            "GKG_NATS__URL should override config/default.yaml"
-        );
-    }
-
-    /// Subprocess helper: loads config with real process env vars and prints
-    /// the resolved values as JSON. Only runs when called by the outer test.
-    #[test]
-    #[ignore]
-    fn subprocess_env_config_loader() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let config = match AppConfig::load_from(None, dir.path()) {
-            Ok(c) => c,
-            Err(e) => {
-                println!("{}", serde_json::json!({"error": e.to_string()}));
-                return;
-            }
-        };
-
-        println!(
-            "{}",
-            serde_json::json!({
-                "graph_database": config.graph.database,
-                "datalake_database": config.datalake.database,
-                "nats_url": config.nats.url,
-            })
-        );
     }
 }
