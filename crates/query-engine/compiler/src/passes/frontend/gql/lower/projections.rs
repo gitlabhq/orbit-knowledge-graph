@@ -3,25 +3,31 @@ use std::collections::HashSet;
 use crate::Result;
 use crate::input::{
     AggExpr, ColumnSelection, InputAggSort, InputAggregationMetric, InputGroupByKey, InputOrderBy,
-    OrderDirection, PropertyRef, QueryType, TargetRef, TruncateUnit,
+    PropertyRef, QueryType, TargetRef,
 };
-use pest::iterators::Pair;
 
-use super::super::{Rule, invalid, name, property, unexpected, value::string};
+use super::super::ast::{AggregateFunction, Expression, Name, Projections, Sort, Target};
+use super::super::invalid;
 use super::Lowering;
 
 impl Lowering {
-    pub(super) fn project(&mut self, clause: Pair<'_, Rule>) -> Result<()> {
-        let items = clause.into_inner().next().expect("RETURN has projections");
-        let aggregate = items.clone().into_inner().any(|item| {
-            item.into_inner()
-                .next()
-                .is_some_and(|expression| expression.as_rule() == Rule::Aggregate)
-        });
+    pub(super) fn project(&mut self, projections: Projections<'_>) -> Result<()> {
+        let (span, items) = match projections {
+            Projections::Star(span) => {
+                if self.input.query_type != QueryType::Traversal {
+                    return Err(invalid(span, "RETURN * is only supported for traversal"));
+                }
+                return Ok(());
+            }
+            Projections::Items { span, items } => (span, items),
+        };
+        let aggregate = items
+            .iter()
+            .any(|item| matches!(item.expression, Expression::Aggregate { .. }));
         if aggregate {
             if self.input.query_type != QueryType::Traversal {
                 return Err(invalid(
-                    &items,
+                    span,
                     "path finding and neighbors cannot be aggregated; use labeled node patterns",
                 ));
             }
@@ -29,131 +35,88 @@ impl Lowering {
         }
         let mut selected = HashSet::new();
         let mut property_nodes = HashSet::new();
-        for item in items.into_inner() {
-            if item.as_rule() == Rule::Star {
-                if aggregate || self.input.query_type != QueryType::Traversal {
-                    return Err(invalid(&item, "RETURN * is only supported for traversal"));
-                }
-                continue;
-            }
-            let mut parts = item.clone().into_inner();
-            let expression = parts.next().expect("projection has an expression");
-            let alias = parts.next().map(name).transpose()?;
-            match expression.as_rule() {
-                Rule::Aggregate => {
-                    let mut parts = expression.into_inner();
-                    let function = parts
-                        .next()
-                        .expect("aggregate has a function")
-                        .as_str()
-                        .to_ascii_lowercase();
-                    let target = parts.next().expect("aggregate has a target");
-                    let expr = if function == "count" {
-                        let target = if target.as_rule() == Rule::PropertyExpression {
-                            let p = property(target)?;
-                            TargetRef {
-                                node: p.node,
-                                property: Some(p.property),
-                            }
-                        } else {
-                            TargetRef {
-                                node: name(target)?,
+        for item in items {
+            let alias = item.alias.map(|alias| alias.value);
+            match item.expression {
+                Expression::Aggregate { function, target } => {
+                    let expr = match (function, target) {
+                        (AggregateFunction::Count, Target::Property(p)) => {
+                            AggExpr::Count(TargetRef {
+                                node: p.node.value,
+                                property: Some(p.property.value),
+                            })
+                        }
+                        (AggregateFunction::Count, Target::Variable(v)) => {
+                            AggExpr::Count(TargetRef {
+                                node: v.value,
                                 property: None,
-                            }
-                        };
-                        AggExpr::Count(target)
-                    } else {
-                        if target.as_rule() != Rule::PropertyExpression {
+                            })
+                        }
+                        (_, Target::Variable(v)) => {
                             return Err(invalid(
-                                &target,
+                                v.span,
                                 "this aggregate requires a node.property target",
                             ));
                         }
-                        let p = property(target)?;
-                        match function.as_str() {
-                            "sum" => AggExpr::Sum(p),
-                            "avg" => AggExpr::Avg(p),
-                            "min" => AggExpr::Min(p),
-                            "max" => AggExpr::Max(p),
-                            _ => unreachable!("grammar restricts aggregate functions"),
-                        }
+                        (AggregateFunction::Sum, Target::Property(p)) => AggExpr::Sum(p.into()),
+                        (AggregateFunction::Avg, Target::Property(p)) => AggExpr::Avg(p.into()),
+                        (AggregateFunction::Min, Target::Property(p)) => AggExpr::Min(p.into()),
+                        (AggregateFunction::Max, Target::Property(p)) => AggExpr::Max(p.into()),
                     };
                     self.input
                         .aggregation
                         .metrics
                         .push(InputAggregationMetric { expr, alias });
                 }
-                Rule::DateTrunc => {
+                Expression::DateTrunc {
+                    span,
+                    unit,
+                    property,
+                } => {
                     if !aggregate {
                         return Err(invalid(
-                            &expression,
+                            span,
                             "date_trunc is only supported as an aggregation group key",
                         ));
                     }
-                    let mut parts = expression.clone().into_inner();
-                    let unit = string(parts.next().expect("date_trunc has a unit"))?;
-                    let truncate = match unit.as_str() {
-                        "minute" => TruncateUnit::Minute,
-                        "hour" => TruncateUnit::Hour,
-                        "day" => TruncateUnit::Day,
-                        "week" => TruncateUnit::Week,
-                        "month" => TruncateUnit::Month,
-                        "quarter" => TruncateUnit::Quarter,
-                        "year" => TruncateUnit::Year,
-                        _ => {
-                            return Err(invalid(
-                                &expression,
-                                "date_trunc unit must be minute, hour, day, week, month, quarter, or year",
-                            ));
-                        }
-                    };
-                    let p = property(parts.next().expect("date_trunc has a property"))?;
                     self.input
                         .aggregation
                         .group_by
                         .push(InputGroupByKey::Property {
-                            node: p.node,
-                            property: p.property,
-                            truncate: Some(truncate),
+                            node: property.node.value,
+                            property: property.property.value,
+                            truncate: Some(unit),
                             alias,
                         });
                 }
-                Rule::NodeProjection => {
+                Expression::Node {
+                    span,
+                    variable,
+                    properties,
+                } => {
                     if self.input.query_type != QueryType::Traversal && !aggregate {
                         return Err(invalid(
-                            &expression,
+                            span,
                             "node projections require traversal or aggregation",
                         ));
                     }
-                    let mut parts = expression.clone().into_inner();
-                    let variable = name(parts.next().expect("node projection has a variable"))?;
-                    let columns = parts
-                        .map(|p| {
-                            name(
-                                p.into_inner()
-                                    .next()
-                                    .expect("projection property has a name"),
-                            )
-                        })
-                        .collect::<Result<Vec<_>>>()?;
+                    let variable = variable.value;
+                    let columns: Vec<String> = properties.into_iter().map(|p| p.value).collect();
                     if !selected.insert(variable.clone())
                         || columns.iter().collect::<HashSet<_>>().len() != columns.len()
                     {
-                        return Err(invalid(
-                            &expression,
-                            "duplicate or overlapping node projection",
-                        ));
+                        return Err(invalid(span, "duplicate or overlapping node projection"));
                     }
                     if aggregate {
                         if !columns.iter().any(|c| c == "id") {
                             return Err(invalid(
-                                &expression,
+                                span,
                                 "an aggregated node projection must include .id to preserve node identity; use a scalar property for property grouping",
                             ));
                         }
                     } else if alias.is_some() {
                         return Err(invalid(
-                            &expression,
+                            span,
                             "traversal node projections cannot be renamed",
                         ));
                     }
@@ -163,10 +126,7 @@ impl Lowering {
                         .iter_mut()
                         .find(|n| n.id == variable)
                         .ok_or_else(|| {
-                            invalid(
-                                &expression,
-                                "node projection references an undefined variable",
-                            )
+                            invalid(span, "node projection references an undefined variable")
                         })?;
                     node.columns = Some(ColumnSelection::List(columns));
                     if aggregate {
@@ -176,180 +136,187 @@ impl Lowering {
                         });
                     }
                 }
-                Rule::PropertyExpression => {
-                    let p = property(expression.clone())?;
+                Expression::Property(property) => {
+                    let span = property.span;
+                    let PropertyRef { node, property } = property.into();
                     if aggregate {
                         self.input
                             .aggregation
                             .group_by
                             .push(InputGroupByKey::Property {
-                                node: p.node,
-                                property: p.property,
+                                node,
+                                property,
                                 truncate: None,
                                 alias,
                             });
                     } else {
                         if alias.is_some() || self.input.query_type != QueryType::Traversal {
                             return Err(invalid(
-                                &expression,
+                                span,
                                 "property projections require traversal and cannot be renamed",
                             ));
                         }
-                        let node = self
+                        let input_node = self
                             .input
                             .nodes
                             .iter_mut()
-                            .find(|n| n.id == p.node)
+                            .find(|n| n.id == node)
                             .ok_or_else(|| {
-                                invalid(
-                                    &expression,
-                                    "property projection references an undefined node",
-                                )
+                                invalid(span, "property projection references an undefined node")
                             })?;
-                        if selected.insert(p.node.clone()) {
-                            property_nodes.insert(p.node.clone());
-                            node.columns = Some(ColumnSelection::List(Vec::new()));
-                        } else if !property_nodes.contains(&p.node) {
-                            return Err(invalid(
-                                &expression,
-                                "duplicate or overlapping node projection",
-                            ));
+                        if selected.insert(node.clone()) {
+                            property_nodes.insert(node.clone());
+                            input_node.columns = Some(ColumnSelection::List(Vec::new()));
+                        } else if !property_nodes.contains(&node) {
+                            return Err(invalid(span, "duplicate or overlapping node projection"));
                         }
-                        match &mut node.columns {
+                        match &mut input_node.columns {
                             Some(ColumnSelection::List(columns))
-                                if !columns.contains(&p.property) =>
+                                if !columns.contains(&property) =>
                             {
-                                columns.push(p.property)
+                                columns.push(property)
                             }
                             _ => {
                                 return Err(invalid(
-                                    &expression,
+                                    span,
                                     "duplicate or overlapping node projection",
                                 ));
                             }
                         }
                     }
                 }
-                Rule::Variable | Rule::AllProperties => {
-                    let all = expression.as_rule() == Rule::AllProperties;
-                    let variable = if all {
-                        name(
-                            expression
-                                .clone()
-                                .into_inner()
-                                .next()
-                                .expect("properties has a node"),
-                        )?
-                    } else {
-                        name(expression.clone())?
-                    };
-                    if self.path.as_ref() == Some(&variable)
-                        || self.neighbor.as_ref() == Some(&variable)
-                        || (self.input.query_type == QueryType::Neighbors
-                            && (all || self.edges.contains_key(&variable)))
-                    {
-                        if alias.is_some() || all {
-                            return Err(invalid(
-                                &expression,
-                                "dynamic graph results cannot be renamed or projected as properties",
-                            ));
-                        }
-                        if !selected.insert(variable) {
-                            return Err(invalid(&expression, "duplicate graph projection"));
-                        }
-                        continue;
-                    }
-                    if self.input.query_type == QueryType::PathFinding {
-                        return Err(invalid(
-                            &expression,
-                            "path finding requires RETURN of the shortestPath variable",
-                        ));
-                    }
-                    let node = self.input.nodes.iter_mut().find(|n| n.id == variable)
-                        .ok_or_else(|| {
-                            let (line, column) = expression.line_col();
-                            crate::QueryError::ReferenceError(format!(
-                                "line {line}, column {column}: projection references undefined node \"{variable}\""
-                            ))
-                        })?;
-                    if !selected.insert(variable.clone()) {
-                        return Err(invalid(
-                            &expression,
-                            "duplicate or overlapping node projection",
-                        ));
-                    }
-                    if all {
-                        node.columns = Some(ColumnSelection::All);
-                    }
-                    if aggregate {
-                        self.input.aggregation.group_by.push(InputGroupByKey::Node {
-                            node: variable,
-                            alias,
-                        });
-                    } else if alias.is_some() {
-                        return Err(invalid(
-                            &expression,
-                            "traversal node projections cannot be renamed",
-                        ));
-                    }
+                Expression::Variable(variable) => {
+                    self.graph_projection(
+                        variable.span,
+                        variable,
+                        false,
+                        alias,
+                        aggregate,
+                        &mut selected,
+                    )?;
                 }
-                _ => return Err(unexpected(&expression)),
+                Expression::AllProperties { span, variable } => {
+                    self.graph_projection(span, variable, true, alias, aggregate, &mut selected)?;
+                }
             }
         }
         Ok(())
     }
 
-    pub(super) fn order(&mut self, clause: Pair<'_, Rule>) -> Result<()> {
-        let sort = clause.into_inner().next().expect("ORDER BY has a sort key");
-        let mut parts = sort.clone().into_inner();
-        let key = parts.next().expect("sort key has an expression");
-        let direction = if parts
-            .next()
-            .is_some_and(|p| p.as_str().to_ascii_lowercase().starts_with("desc"))
+    fn graph_projection(
+        &mut self,
+        span: pest::Span<'_>,
+        variable: Name<'_>,
+        all: bool,
+        alias: Option<String>,
+        aggregate: bool,
+        selected: &mut HashSet<String>,
+    ) -> Result<()> {
+        let variable = variable.value;
+        if self.path.as_ref() == Some(&variable)
+            || self.neighbor.as_ref() == Some(&variable)
+            || (self.input.query_type == QueryType::Neighbors
+                && (all || self.edges.contains_key(&variable)))
         {
-            OrderDirection::Desc
-        } else {
-            OrderDirection::Asc
-        };
+            if alias.is_some() || all {
+                return Err(invalid(
+                    span,
+                    "dynamic graph results cannot be renamed or projected as properties",
+                ));
+            }
+            if !selected.insert(variable) {
+                return Err(invalid(span, "duplicate graph projection"));
+            }
+            return Ok(());
+        }
+        if self.input.query_type == QueryType::PathFinding {
+            return Err(invalid(
+                span,
+                "path finding requires RETURN of the shortestPath variable",
+            ));
+        }
+        let node = self
+            .input
+            .nodes
+            .iter_mut()
+            .find(|n| n.id == variable)
+            .ok_or_else(|| {
+                let (line, column) = span.start_pos().line_col();
+                crate::QueryError::ReferenceError(format!(
+                    "line {line}, column {column}: projection references undefined node \"{variable}\""
+                ))
+            })?;
+        if !selected.insert(variable.clone()) {
+            return Err(invalid(span, "duplicate or overlapping node projection"));
+        }
+        if all {
+            node.columns = Some(ColumnSelection::All);
+        }
+        if aggregate {
+            self.input.aggregation.group_by.push(InputGroupByKey::Node {
+                node: variable,
+                alias,
+            });
+        } else if alias.is_some() {
+            return Err(invalid(
+                span,
+                "traversal node projections cannot be renamed",
+            ));
+        }
+        Ok(())
+    }
+
+    pub(super) fn order(&mut self, sort: Sort<'_>) -> Result<()> {
         match self.input.query_type {
             QueryType::Aggregation => {
-                let column = if key.as_rule() == Rule::PropertyExpression {
-                    let PropertyRef { node, property } = property(key.clone())?;
-                    self.input
-                        .aggregation
-                        .group_by
-                        .iter()
-                        .find(|g| {
-                            g.node() == node
-                                && g.property() == Some(property.as_str())
-                                && g.truncate().is_none()
-                        })
-                        .map(InputGroupByKey::output_name)
-                        .ok_or_else(|| {
-                            invalid(
-                                &key,
-                                "ORDER BY must name an aggregate alias or returned group key",
-                            )
-                        })?
-                } else {
-                    name(key)?
+                let column = match sort.key {
+                    Target::Property(key) => {
+                        let span = key.span;
+                        let PropertyRef { node, property } = key.into();
+                        self.input
+                            .aggregation
+                            .group_by
+                            .iter()
+                            .find(|g| {
+                                g.node() == node
+                                    && g.property() == Some(property.as_str())
+                                    && g.truncate().is_none()
+                            })
+                            .map(InputGroupByKey::output_name)
+                            .ok_or_else(|| {
+                                invalid(
+                                    span,
+                                    "ORDER BY must name an aggregate alias or returned group key",
+                                )
+                            })?
+                    }
+                    Target::Variable(name) => name.value,
                 };
-                self.input.aggregation.sort = Some(InputAggSort { column, direction });
+                self.input.aggregation.sort = Some(InputAggSort {
+                    column,
+                    direction: sort.direction,
+                });
             }
             QueryType::Traversal => {
-                if key.as_rule() != Rule::PropertyExpression {
-                    return Err(invalid(&key, "traversal ORDER BY requires node.property"));
-                }
-                let PropertyRef { node, property } = property(key)?;
+                let key = match sort.key {
+                    Target::Property(key) => key,
+                    Target::Variable(name) => {
+                        return Err(invalid(
+                            name.span,
+                            "traversal ORDER BY requires node.property",
+                        ));
+                    }
+                };
+                let PropertyRef { node, property } = key.into();
                 self.input.order_by = Some(InputOrderBy {
                     node,
                     property,
-                    direction,
+                    direction: sort.direction,
                 });
             }
             _ => {
                 return Err(invalid(
-                    &sort,
+                    sort.span,
                     "path finding and neighbors have fixed result ordering",
                 ));
             }

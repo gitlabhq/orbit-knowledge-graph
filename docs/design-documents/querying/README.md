@@ -18,7 +18,7 @@ View the [Intermediate Query Language](./intermediary_llm_query_language.md) des
 
 ### Orbit query frontend
 
-The [Orbit query frontend](orbit_query_frontend.md) is a compiler-level API for Orbit's read-only graph language. Pest pairs lower directly into compiler Input. Remote requests still use the JSON Query DSL.
+The [Orbit query frontend](orbit_query_frontend.md) is a compiler-level API for Orbit's read-only graph language. Pest pairs become a typed syntax tree that lowers into compiler Input. Remote requests still use the JSON Query DSL.
 
 ### Unified Response Schema
 

@@ -9,6 +9,7 @@ The frontend is a compiler pipeline preset, `clickhouse_gql`. The JSON Query DSL
 This implementation does not change MCP tools, protocol messages, Rails, or glab.
 
 A **Pest pair** is a matched grammar rule and its source span.
+The frontend's **syntax tree** is the typed Rust form of one statement, built from pairs by `pest_consume` in `syntax.rs` and declared in `ast.rs`.
 The compiler's **Input** contains node selectors, predicates, and the other logical query fields.
 
 ## Grammar source
@@ -37,7 +38,11 @@ flowchart LR
 
 Each query language is one module under `crates/query-engine/compiler/src/passes/frontend/` and one phase in the pipeline declaration in `config.rs`.
 `json_dsl_parse` runs the JSON schema check, the ontology-derived schema check, and cursor hashing, then deserializes.
-`gql_parse` walks Pest pairs directly into Input; it does not construct another query AST or serialize a JSON query.
+`gql_parse` runs in two steps and never serializes a JSON query.
+`syntax.rs` converts Pest pairs into the typed syntax tree with one `pest_consume` method per grammar rule; `match_nodes!` names each child by rule, so a grammar change that alters a rule's children fails that method instead of shifting positional reads.
+Lexical checks live here: identifier rules, string escapes, numeric ranges, `date_trunc` units, and duplicate map keys.
+`lower/` then turns the syntax tree into Input and owns every check that needs query-wide context: variable uniqueness, ID promotion, query-type classification, projection rules, and ORDER BY resolution.
+Syntax-tree errors carry the pair's line and column; a child shape the conversion has no arm for is a pipeline invariant, not a client error.
 Scalar values use the same value type as the compiler's filters.
 
 The `clickhouse_json_dsl` and `clickhouse_gql` presets differ only in that first phase. Both parse phases read the one `raw` state and write `Input`; `validate` and everything after it can reach only `Input`, so no shared phase can depend on the source language.

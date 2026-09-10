@@ -65,7 +65,8 @@ IdentifierPart = _{ ASCII_ALPHANUMERIC | "_" }
 ReservedWord = @{ (^"ALL" | ^"ASCENDING" | ^"ASC" | ^"BY" | ^"CREATE" | ^"DELETE" | ^"DESCENDING" | ^"DESC" | ^"DETACH" | ^"EXISTS" | ^"LIMIT" | ^"MATCH" | ^"MERGE" | ^"ON" | ^"OPTIONAL" | ^"ORDER" | ^"REMOVE" | ^"RETURN" | ^"SET" | ^"SKIP" | ^"WHERE" | ^"WITH" | ^"UNION" | ^"UNWIND" | ^"AND" | ^"AS" | ^"CONTAINS" | ^"DISTINCT" | ^"ENDS" | ^"IN" | ^"IS" | ^"NOT" | ^"OR" | ^"STARTS" | ^"XOR" | ^"FALSE" | ^"TRUE" | ^"NULL" | ^"CONSTRAINT" | ^"DO" | ^"FOR" | ^"REQUIRE" | ^"UNIQUE" | ^"CASE" | ^"WHEN" | ^"THEN" | ^"ELSE" | ^"END" | ^"MANDATORY" | ^"SCALAR" | ^"OF" | ^"ADD" | ^"DROP") ~ !IdentifierPart }
 SP = _{ (WhiteSpace | Comment)+ }
 WhiteSpace = _{ " " | "\t" | "\n" | "\r" | "\u{0b}" | "\u{0c}" | '\u{1c}'..'\u{1f}' | "\u{1680}" | "\u{180e}" | '\u{2000}'..'\u{200a}' | "\u{2028}" | "\u{2029}" | "\u{205f}" | "\u{3000}" | "\u{a0}" | "\u{202f}" }
-Comment = _{ "/*" ~ (!"*/" ~ ANY)* ~ "*/" | "//" ~ (!("\n" | "\r") ~ ANY)* ~ ("\r"? ~ "\n" | EOI) }
+// A trailing line comment must not reference EOI, which would emit a second EOI pair under Query.
+Comment = _{ "/*" ~ (!"*/" ~ ANY)* ~ "*/" | "//" ~ (!("\n" | "\r") ~ ANY)* ~ ("\r"? ~ "\n")? }
 Nesting = { SOI ~ (SkipString | SkipEscaped | SkipComment | OpenDelimiter | CloseDelimiter | Ignored)* ~ EOI }
 // Unterminated tokens run to EOI instead of failing, so the scan never backtracks and stays linear.
 SkipString = _{ "\"" ~ ("\\" ~ ANY | !"\"" ~ ANY)* ~ ("\"" | EOI) | "'" ~ ("\\" ~ ANY | !"'" ~ ANY)* ~ ("'" | EOI) }
