@@ -214,8 +214,12 @@ fn ensure_search_index(client: &DuckDbClient, project_id: i64, sha: &str) -> Res
     let indexed = table_exists
         && scalar_i64(&client.query_arrow(&format!(
             "SELECT CAST(COUNT(*) AS BIGINT) AS n FROM (
-  SELECT 1 FROM {doc_table}
-  WHERE commit_sha = {sha}
+  SELECT 1 FROM {doc_table} WHERE commit_sha = {sha}
+  UNION ALL
+  SELECT 1 FROM _orbit_manifest
+  WHERE project_id = {project_id} AND commit_sha = {sha} AND status = 'indexed'
+    AND NOT EXISTS (SELECT 1 FROM {doc_table})
+    AND NOT EXISTS (SELECT 1 FROM gl_definition WHERE project_id = {project_id} AND commit_sha = {sha})
   LIMIT 1
 )"
         ))?) > 0;

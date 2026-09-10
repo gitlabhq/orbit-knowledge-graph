@@ -171,14 +171,24 @@ Read known definitions directly with `orbit context <fqn>`, or use
 `context --file <path>` for imports and surrounding structure. Reuse that source
 for edits instead of reading it again with raw file tools. Start implementing
 once the edit point is clear; follow identifiers only for remaining questions
-and batch independent lookups. This also applies to `grep --body` output.
+and batch independent lookups. Queries with three or fewer matches include source
+automatically; broader results include a copyable `context` command.
 
-`context` and `grep --body` compare current source with its indexed fingerprint.
-Changed files or indexes without fingerprints return full working-tree source,
-labeled `ranges=unverified`, instead of potentially stale definition slices.
-This also applies to `--outline`. Test code is included. `context --file` can
-read files with no indexed definitions. Re-run `orbit index` to refresh the graph
-and restore definition-level output.
+`grep` and `context` refresh changed and new source files on demand, including
+edits made without changing commits. Deleted files are removed. Unchanged files
+are discovered and fingerprinted, but not reparsed. Successful refreshes update
+search results and definition ranges together.
+
+If parsing fails, source is unsupported, or files change during refresh, the
+previous definitions remain indexed. Source reads return the full current file,
+labeled `ranges=unverified`, instead of potentially stale slices. This also applies
+to `--outline`. Test code is included. `context --file` can read files with no
+indexed definitions.
+
+File refresh invalidates all relationships for the affected project. Dedicated
+relationship lookups refuse incomplete results; SQL, MCP, and repository maps
+warn about affected projects. Re-run `orbit index` to rebuild relationships.
+An empty relationship result while invalidated does not mean there are no connections.
 
 Name/path matches and missing graph relationships do not establish field reads,
 field writes, or dataflow. Inspect source bodies to check these details.

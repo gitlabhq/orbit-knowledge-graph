@@ -5,6 +5,7 @@ mod commands;
 mod descriptions;
 mod list;
 mod mcp;
+mod refresh;
 mod remote;
 mod settings;
 mod skill;
@@ -189,8 +190,10 @@ struct IndexArgs {
                   not cat, head, sed, or raw Read. Use those bodies for exact edits; \
                   use context --file when imports or surrounding structure are needed. \
                   Start implementing once the edit point and nearby pattern are clear. \
-                  If --body already supplied enough context, do not read it again. \
+                  Queries with three or fewer matches include source automatically. \
                   Search matches indexed names and paths, not source bodies or regexes. \
+                  Changed and new source files are refreshed on demand; unchanged files are not reparsed. \
+                  Project relationships are invalidated until a full `index` rebuild. \
                   Name/path matches do not establish a code connection or dataflow.\n\n\
                   Add --related-to, --callers, or --callees to a positional FQN for \
                   relationship lookups. An explicit target after the flag takes \
@@ -208,11 +211,6 @@ struct GrepArgs {
 
     #[command(flatten)]
     relations: RelationArgs,
-
-    /// Print the source bodies of the top three matches even when the search
-    /// is broad; searches with three or fewer hits include bodies automatically.
-    #[arg(long, requires = "query", conflicts_with = "relation_target")]
-    body: bool,
 
     /// Repository path (default: current directory).
     #[arg(long, value_name = "PATH")]
@@ -284,9 +282,10 @@ fn context_long_about() -> String {
          like `crate::module::*`, in file order. `--file <path>` alone includes all \
          definitions and surrounding lines; with names, it also accepts bare names. \
          `--outline` prints signatures and nested members without bodies.\n\n\
-         If source differs from the indexed content, or its fingerprint is unavailable, \
-         prints the full file with `ranges=unverified` instead of using indexed ranges. \
-         Re-run `index` to refresh definitions and relationships.",
+         Refreshes changed and new source files on demand without reparsing unchanged files. \
+         Failed, unsupported, or unstable refreshes show the full file with `ranges=unverified` \
+         instead of using stale ranges. File refresh invalidates project relationships; \
+         re-run `index` to rebuild them.",
         launcher = commands::setup::spec::launcher()
     )
 }
@@ -766,7 +765,6 @@ async fn dispatch(command: Commands) -> Result<()> {
         Commands::Grep(GrepArgs {
             query,
             relations,
-            body,
             repo,
             limit,
             path,
@@ -785,7 +783,6 @@ async fn dispatch(command: Commands) -> Result<()> {
                     limit,
                     path,
                     orbit_search::RecallFilter { kinds: kind },
-                    body,
                 ),
             }
         }
@@ -959,15 +956,7 @@ pub(crate) fn index_collect(
 
     workspace::ensure_graph_schema(&db_path, LOCAL_DDL)?;
 
-    let pipeline_config = code_graph::v2::PipelineConfig {
-        worker_threads: threads,
-        per_file_timeout: Some(std::time::Duration::from_secs(2)),
-        per_file_parse_timeout: Some(std::time::Duration::from_millis(100)),
-        per_file_walk_timeout: Some(std::time::Duration::from_millis(100)),
-        per_file_ssa_timeout: Some(std::time::Duration::from_millis(100)),
-        cross_file_resolve_timeout: Some(std::time::Duration::from_secs(180)),
-        ..Default::default()
-    };
+    let pipeline_config = pipeline_config(threads);
 
     let mut failed = 0usize;
     let mut outputs = Vec::with_capacity(repos.len());
@@ -1041,6 +1030,18 @@ pub(crate) fn index_collect(
     Ok(outputs)
 }
 
+fn pipeline_config(threads: usize) -> code_graph::v2::PipelineConfig {
+    code_graph::v2::PipelineConfig {
+        worker_threads: threads,
+        per_file_timeout: Some(std::time::Duration::from_secs(2)),
+        per_file_parse_timeout: Some(std::time::Duration::from_millis(100)),
+        per_file_walk_timeout: Some(std::time::Duration::from_millis(100)),
+        per_file_ssa_timeout: Some(std::time::Duration::from_millis(100)),
+        cross_file_resolve_timeout: Some(std::time::Duration::from_secs(180)),
+        ..Default::default()
+    }
+}
+
 fn fatal_pipeline_reason(errors: &[code_graph::v2::pipeline::PipelineError]) -> Option<String> {
     let fatal_count = errors.iter().filter(|e| e.fatal).count();
     let first = errors.iter().find(|e| e.fatal)?;
@@ -1061,19 +1062,12 @@ fn index_repo(
     let start_time = std::time::Instant::now();
 
     let tracer = code_graph::v2::trace::Tracer::new(false);
-    let mut filter = code_graph::v2::config::CodeFilter::new(
-        MAX_INDEXED_FILE_BYTES,
-        0,
-        code_graph::v2::config::detect_language_from_path,
-    );
-    let file_inventory: std::sync::Arc<[code_graph::v2::FileInventoryEntry]> = std::sync::Arc::from(
-        orbit_utils::walk::walk_dir(&git.repo_path, &mut filter)
-            .context("failed to walk repository files")?,
-    );
+    let (file_inventory, filter) = refresh::inventory(&git.repo_path)?;
 
     let mut sources = workspace::fingerprint_files(&git.repo_path, &file_inventory);
     let client =
         duckdb_client::DuckDbClient::open(db_path).context("failed to open DuckDB for writing")?;
+    refresh::mark_incomplete(&client, git)?;
     workspace::store_source_fingerprints(&client, git.project_id, &Default::default())?;
 
     let node_tables: Vec<String> = ontology
@@ -1144,32 +1138,18 @@ fn index_repo(
 
     let client =
         duckdb_client::DuckDbClient::open(db_path).context("failed to open DuckDB for status")?;
-    let doc_table = duckdb_client::search::def_doc_table(git.project_id);
-    client
-        .load_extension("fts")
-        .context("failed to load the DuckDB fts extension")?;
-    client
-        .execute(
-            &duckdb_client::search::def_doc_sql(&doc_table),
-            &[
-                serde_json::json!(git.project_id),
-                serde_json::json!(git.commit_sha),
-            ],
-        )
-        .context("failed to build the search documents")?;
-    client
-        .execute(
-            &duckdb_client::search::create_fts_index_sql(&doc_table),
-            &[],
-        )
-        .context("failed to build the search index")?;
+    refresh::rebuild_search(&client, git)?;
     let current_sources = workspace::fingerprint_files(&git.repo_path, &file_inventory);
+    let stable_sources = sources == current_sources;
     sources.retain(|path, fingerprint| current_sources.get(path) == Some(fingerprint));
     let sources = sources
         .into_iter()
         .map(|(path, (hash, _))| (path, hash))
         .collect();
     workspace::store_source_fingerprints(&client, git.project_id, &sources)?;
+    if stable_sources {
+        refresh::clear_incomplete(&client, git.project_id)?;
+    }
     workspace::set_status(
         &client,
         &key,
@@ -1432,6 +1412,7 @@ mod tests {
             ["orbit", "local", "grep", "x"].as_slice(),
             &["orbit", "remote", "status"],
             &["orbit", "ask", "x"],
+            &["orbit", "grep", "x", "--body"],
             &["orbit", "setup", "claude", "--local"],
         ] {
             assert!(

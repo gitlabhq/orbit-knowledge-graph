@@ -84,7 +84,19 @@ impl OrbitLocalServer {
         &self,
         Parameters(args): Parameters<RunSqlArgs>,
     ) -> Result<CallToolResult, ErrorData> {
-        blocking_tool(move || run_sql_impl(args)).await
+        let result = tokio::task::spawn_blocking(move || run_sql_impl(args))
+            .await
+            .map_err(|e| ErrorData::internal_error(format!("join error: {e}"), None))?;
+        Ok(match result {
+            Ok((json, warning)) => {
+                let mut content = vec![Content::text(json)];
+                if let Some(warning) = warning {
+                    content.push(Content::text(format!("warning: {warning}")));
+                }
+                CallToolResult::success(content)
+            }
+            Err(e) => CallToolResult::error(vec![Content::text(format!("{e:#}"))]),
+        })
     }
 
     #[tool]
@@ -145,7 +157,7 @@ fn batches_to_json(batches: &[RecordBatch]) -> Result<String> {
     Ok(json)
 }
 
-fn run_sql_impl(args: RunSqlArgs) -> Result<String> {
+fn run_sql_impl(args: RunSqlArgs) -> Result<(String, Option<String>)> {
     if args.sql.is_empty() {
         anyhow::bail!("`sql` must contain at least one statement");
     }
@@ -167,7 +179,10 @@ fn run_sql_impl(args: RunSqlArgs) -> Result<String> {
         }
         results.push(batches_to_json(&batches)?);
     }
-    Ok(format!("[{}]", results.join(",")))
+    Ok((
+        format!("[{}]", results.join(",")),
+        crate::refresh::relationship_warning(&client, None)?,
+    ))
 }
 
 pub async fn serve() -> Result<()> {

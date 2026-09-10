@@ -13,7 +13,7 @@ description: >
   production data in GitLab (a project such as gitlab-org/gitlab, cross-project
   blast radius, contributor or merge-request aggregation) use the `orbit` skill;
   for single-entity GitLab lookups or write operations use `glab`.
-version: 0.5.4
+version: 0.5.6
 license: MIT
 metadata:
   audience: developers
@@ -73,7 +73,7 @@ wrapper flags, config keys, and pass-through rules:
 | Command | Purpose |
 |---|---|
 | `orbit index <PATH> [--stats] [--db P]` | Parse repos under `PATH` into DuckDB; prints graph stats as JSON |
-| `orbit grep [QUERY…] [--path P] [--kind K,K] [--body]` | Find definitions by name, or list definitions under a path; `--body` also prints the top three bodies |
+| `orbit grep [QUERY…] [--path P] [--kind K,K]` | Find definitions by name; queries with three or fewer matches include source automatically |
 | `orbit grep FQN --related-to [--edge K] [--in] [--out]` | List connections, including uses through members |
 | `orbit grep FQN --callers` / `--callees` | List incoming or outgoing calls |
 | `orbit context [FQN…] [--file P] [--kind K,K] [--outline]` | Read source bodies by FQN, unique tail, glob, or file; `--outline` prints signatures and members only |
@@ -88,7 +88,7 @@ wrapper flags, config keys, and pass-through rules:
 
 Search one concept per `grep`, including multiword identifiers like `rate limit`.
 Inspect known targets directly with `context`; `--file` includes imports and
-surrounding structure. Reuse returned source (including `grep --body`) for edits
+surrounding structure. Reuse returned source from `grep` or `context` for edits
 instead of reading it again with raw file tools. Stop exploring when the edit
 point is clear; follow identifiers only for remaining questions and batch
 independent lookups. Use raw reads for non-code or unreliable index coverage.
@@ -96,7 +96,7 @@ independent lookups. Use raw reads for non-code or unreliable index coverage.
 Search matches names and paths, not bodies. Neither those matches nor missing
 graph relationships establish field reads, writes, or dataflow; inspect source.
 
-```bash
+```shell
 orbit grep "rateLimit" --path src --kind Method,Function
 orbit context "Type::method"
 orbit context --file src/lib.rs
@@ -114,8 +114,8 @@ relationship selector per call, without `--limit`.
 Connections from test, fixture, and generated files are counted but hidden
 unless `--tests` is passed. Incoming lookups include uses through members.
 
-`grep --body` prints the bodies of the top matches (at most three) in the
-same call, for the common case where the first hit is the one you want.
+`grep` includes source automatically when a query has three or fewer matches.
+Broader results include a copyable `context` command for the top candidates.
 
 `context` accepts several names or globs in one call. `--file` takes a
 repo-relative or absolute path inside the checkout. `--file` alone reads
@@ -124,18 +124,24 @@ to that file and accepts bare names; `--kind` narrows the selection.
 `--outline` replaces bodies with each definition's signature and its nested
 members, so a large type or file can be mapped before reading one method.
 
-`context` and `grep --body` use indexed ranges only when the current source
-matches its indexed fingerprint. Otherwise they return the full file with
+`grep` and `context` refresh changed and new source files on demand, removing
+deleted files without reparsing unchanged files. Successful refreshes update
+search results and definition ranges. Failed, unsupported, or unstable refreshes
+keep the previous definitions; source reads return the full current file with
 `ranges=unverified`, even with `--outline`. Test code is included. `context --file`
-also reads files with no indexed definitions. Re-run `index` to refresh the graph;
-reading current source does not refresh search results or relationships.
+also reads files with no indexed definitions.
+
+File refresh invalidates all relationships for that project: it is not a full
+semantic rebuild. Relationship lookups refuse incomplete results; SQL, MCP, and
+repo maps warn about affected projects. Re-run `index` to rebuild relationships.
+Do not treat missing connections as evidence that code is unrelated.
 
 `--kind` is one comma-separated list (`Class,Method`); a quoted pipe list
 (`"Class|Method"`) also works. It is not repeatable.
 
 ## Quick start
 
-```bash
+```shell
 orbit index .                                   # index the current repo
 orbit schema gl_definition gl_edge              # confirm columns before querying
 orbit sql "SELECT definition_type, count(*) n FROM gl_definition GROUP BY 1 ORDER BY n DESC"
@@ -150,7 +156,7 @@ For a hierarchical orientation pass over a local checkout (languages, structure,
 key abstractions, per-file APIs) instead of ad-hoc SQL, use the native
 `orbit repo-map` command:
 
-```bash
+```shell
 orbit repo-map overview                 # start here
 orbit repo-map tree crates              # types grouped by file under a subtree
 orbit repo-map api crates/orbit-cli   # types + callables + signatures

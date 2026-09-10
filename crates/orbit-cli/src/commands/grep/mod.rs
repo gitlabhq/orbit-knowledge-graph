@@ -39,7 +39,6 @@ pub(crate) fn run(
     limit: usize,
     paths: Vec<String>,
     filter: RecallFilter,
-    body: bool,
 ) -> Result<()> {
     let launcher = crate::commands::setup::spec::launcher();
     if let Some(query) = queries.iter().find(|q| content_words(q).is_empty()) {
@@ -65,7 +64,6 @@ pub(crate) fn run(
     }
 
     let vocab = build_vocab(backend.search())?;
-    let limit = if body { limit.min(BODY_LIMIT) } else { limit };
     let per_query_limit = (limit / queries.len()).max(MIN_HITS_PER_QUERY.min(limit));
     for (i, query) in queries.iter().enumerate() {
         if i > 0 {
@@ -96,7 +94,7 @@ pub(crate) fn run(
             continue;
         }
 
-        let show_bodies = body || outcome.total <= BODY_LIMIT;
+        let show_bodies = outcome.total <= BODY_LIMIT;
         report_results(
             &mut out,
             &outcome,

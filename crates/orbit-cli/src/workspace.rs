@@ -86,12 +86,12 @@ pub fn open_indexed(repo: Option<PathBuf>, db: Option<PathBuf>) -> Result<Indexe
     let db = resolve_db_path(db)?;
     let top_level = git_toplevel(&repo_path)
         .with_context(|| format!("failed to find git top-level for {}", repo_path.display()))?;
-    let git = git_info(&top_level)
+    let mut git = git_info(&top_level)
         .with_context(|| format!("failed to read git info for {}", top_level.display()))?;
 
     let indexed_count = |client: &DuckDbClient| -> Result<i64> {
         let batches = client.query_arrow_json(
-            "SELECT COUNT(*) AS n FROM gl_file WHERE project_id = ?1 AND commit_sha = ?2",
+            "SELECT COUNT(*) AS n FROM _orbit_manifest WHERE project_id = ?1 AND commit_sha = ?2 AND status = 'indexed'",
             &[git.project_id.into(), git.commit_sha.clone().into()],
         )?;
         Ok(duckdb_client::scalar_i64(&batches))
@@ -107,14 +107,24 @@ pub fn open_indexed(repo: Option<PathBuf>, db: Option<PathBuf>) -> Result<Indexe
         drop(client);
         crate::index_collect(git.repo_path.clone(), 0, false, Some(db.clone()))
             .context("failed to index the repository")?;
-        client = crate::sql::open_graph(Some(db))?;
+        client = crate::sql::open_graph(Some(db.clone()))?;
         if indexed_count(&client)? == 0 {
             anyhow::bail!(
-                "indexing finished but commit {} still has no rows in the local graph",
+                "indexing finished but commit {} is still not marked indexed",
                 git.commit_sha
             );
         }
     }
+    git.branch = duckdb_client::string_column(
+        &client.query_arrow_json(
+            "SELECT branch FROM _orbit_manifest WHERE project_id = ?1 AND commit_sha = ?2",
+            &[git.project_id.into(), git.commit_sha.clone().into()],
+        )?,
+        "branch",
+    )
+    .pop()
+    .context("indexed branch is missing")?;
+    let client = crate::refresh::open(&git, &db, client, crate::pipeline_config(0))?;
     Ok(IndexedRepo { git, client })
 }
 

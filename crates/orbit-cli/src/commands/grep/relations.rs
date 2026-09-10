@@ -91,6 +91,9 @@ pub(crate) fn run(
     kinds: &[String],
 ) -> Result<()> {
     let workspace::IndexedRepo { git, client } = workspace::open_indexed(repo, db)?;
+    if let Some(warning) = crate::refresh::relationship_warning(&client, Some(git.project_id))? {
+        anyhow::bail!(warning);
+    }
     let defs = fqn::resolve(&client, &git, &fqn, None, &[])?;
     let hidden_expr = format!("COALESCE({}, FALSE)", excluded_path_predicate("l.path"));
     let edge_predicate = filter.edge_predicate();
