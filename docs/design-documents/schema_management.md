@@ -130,7 +130,10 @@ convention). The prefix is applied at the call site when constructing ClickHouse
 - Identical retries succeed; different bytes for a published version fail. Published archives stay immutable.
 - Restore historical archives from their exact release, never from current sources.
 - Migration and rollback require usable active and target archives before changing versioned tables.
-- Existing installations need an archive-publishing release before upgrading to a different schema version.
+- The server embeds and build-time validates every retained archive in `config/ontology-archives/`.
+- If the active archive is missing, the dispatcher publishes its bundled copy before migration. Existing entries are verified and reused, never replaced; corruption, conflicting concurrent publication, and NATS errors still block migration.
+- Legacy schema 93 (release `v0.115.0`) is bundled from its exact release sources, so it can upgrade directly without manual catalog seeding or an intermediate deployment. See `config/ontology-archives/README.md` for provenance and how to add support for another starting schema.
+- A missing active archive with no bundled copy still blocks migration before versioned DDL. Restore that archive from the exact release or add it to the supported bundle; do not synthesize it from current sources or ClickHouse tables.
 
 ### Webserver prefix injection
 
