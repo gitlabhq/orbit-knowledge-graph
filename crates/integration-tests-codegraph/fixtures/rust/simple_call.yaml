@@ -1,0 +1,55 @@
+name: "Rust: simple function call"
+pipeline: rust
+fixtures:
+  - path: main.rs
+    content: |
+      fn helper() -> i32 {
+          42
+      }
+
+      fn unused() {}
+
+      fn run() {
+          helper();
+      }
+
+tests:
+  - name: Exactly 3 definitions with correct types
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'main.rs' AND d.definition_type = 'Function'
+      RETURN d.name AS name, d.fqn AS fqn
+      ORDER BY name
+    assert:
+      - { row_count: 3 }
+      - { unique: fqn }
+      - { no_nulls: fqn }
+      - { column_values: { field: name, values: ["helper", "run", "unused"] } }
+      - { row: { name: "helper", fqn: "main.helper" } }
+      - { row: { name: "run", fqn: "main.run" } }
+      - { row: { name: "unused", fqn: "main.unused" } }
+
+  - name: run calls helper (exactly 1 call edge)
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "main.run", callee: "main.helper" } }
+
+  - name: unused has no incoming call edges
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE callee.name = 'unused' AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller
+    assert:
+      - { empty: true }
+
+  - name: No imports in single-file fixture
+    query: |
+      MATCH (i:ImportedSymbol)
+      RETURN count(i) AS n
+    assert:
+      - { row_count: 1 }
+      - { row: { n: 0 } }

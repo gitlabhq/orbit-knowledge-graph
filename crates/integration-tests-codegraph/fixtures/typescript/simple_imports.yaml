@@ -1,0 +1,76 @@
+name: "TypeScript: simple imports and cross-file resolution"
+pipeline: typescript
+fixtures:
+  - path: models.ts
+    content: |
+      export class User {
+          name: string = "";
+      }
+
+      export function createUser(name: string): User {
+          const u = new User();
+          return u;
+      }
+
+  - path: main.ts
+    content: |
+      import { User, createUser } from './models';
+
+      function run(): void {
+          const u = createUser("alice");
+      }
+
+tests:
+  - name: Exactly 2 named imports extracted
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.file_path = 'main.ts'
+      RETURN i.name AS name, i.path AS path
+      ORDER BY name
+    assert:
+      - { row_count: 2 }
+      - { unique: name }
+      - { row: { name: "User", path: "./models" } }
+      - { row: { name: "createUser", path: "./models" } }
+
+  - name: No imports from models.ts (it only exports)
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.file_path = 'models.ts'
+      RETURN count(i) AS n
+    assert:
+      - { row_count: 1 }
+      - { row: { n: 0 } }
+
+  - name: Cross-file call from run to createUser
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'run' AND callee.name = 'createUser'
+        AND caller.file_path <> callee.file_path
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "main.run", callee: "models.createUser" } }
+
+  - name: Exactly 2 TypeScript files
+    query: |
+      MATCH (f:File)
+      RETURN f.path AS path, f.language AS lang
+      ORDER BY path
+    assert:
+      - { row_count: 2 }
+      - { match: { field: lang, pattern: "typescript" } }
+      - { column_values: { field: path, values: ["main.ts", "models.ts"] } }
+
+  - name: Exactly 3 definitions across both files
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type IN ['Class', 'Function']
+      RETURN d.name AS name, d.file_path AS file
+      ORDER BY name
+    assert:
+      - { row_count: 3 }
+      - { row: { name: "User", file: "models.ts" } }
+      - { row: { name: "createUser", file: "models.ts" } }
+      - { row: { name: "run", file: "main.ts" } }
