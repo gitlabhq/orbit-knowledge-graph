@@ -475,12 +475,12 @@ fn ssa_fold(tree: &mut Tree, lang: &mut Lang) {
                                     for cpv in &type_reaching {
                                         if let ParseValue::LocalDef(cdi) = cpv {
                                             let target = def_nodes[*cdi as usize];
-                                            let dt = synth_sym(tree, target, syns.deftype);
-                                            if dt != 0 && lang.syms.resolve(dt) == "Class" {
-                                                let call_sym = lang.syms.get("__call__");
+                                            let callable_sym =
+                                                synth_sym(tree, target, syns.callable);
+                                            if callable_sym != 0 {
                                                 if let Some(method) = find_method(
-                                                    tree, &def_nodes, target, call_sym, &syns,
-                                                    name_f, left_f,
+                                                    tree, &def_nodes, target, callable_sym,
+                                                    &syns, name_f, left_f,
                                                 ) {
                                                     tree.add_edge(enclosing, method, E_CALLS);
                                                 }

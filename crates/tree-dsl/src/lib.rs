@@ -30,7 +30,7 @@ pub fn index(lang_id: SupportLang, files: &[(String, String)]) -> IndexResult {
             trees.push(run::process_file(path, content, &mut lang, &pipeline));
         }
     }
-    let cross_edges = resolver::resolve(&mut trees, &mut lang).cross_edges;
+    let cross_edges = resolver::resolve(&mut trees, &mut lang, lang_id).cross_edges;
     if !cross_edges.is_empty() {
         eprintln!("[resolver] {} cross-edges", cross_edges.len());
     }

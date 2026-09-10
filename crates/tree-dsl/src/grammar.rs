@@ -101,14 +101,6 @@ impl SupportLang {
         &LANG_CONFIG.languages[self].index_names
     }
 
-    pub fn source_root(&self) -> crate::resolver::SourceRoot {
-        if self.has_package_marker_climb() {
-            crate::resolver::SourceRoot::PackageMarkerClimb
-        } else {
-            crate::resolver::SourceRoot::ProjectRoot
-        }
-    }
-
     /// Resolve a language from a user-provided string like "js", "python", "rs", "typescript".
     /// Checks aliases first (from languages.yaml), then falls back to extension matching.
     pub fn from_alias(s: &str) -> Option<Self> {
