@@ -15,4 +15,6 @@ query:
     }
 
 expect:
+  node_count: 4
   has_more: true
+  path_count: 2

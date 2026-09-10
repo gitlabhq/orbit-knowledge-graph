@@ -19,6 +19,7 @@ query:
     }
 
 expect:
+  node_count: 1
   nodes:
     Project:
       ids: [9000]

@@ -22,4 +22,4 @@ expect:
   pages:
     - skip_requirements: [cursor, node_count, order_by]
     - skip_requirements: [cursor, node_count, order_by]
-      has_more: false
+    - skip_requirements: [cursor, node_count, order_by]

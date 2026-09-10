@@ -277,7 +277,7 @@ async fn run_pages(
         // The Rust pagination tests call assert_node_count(resp.node_count())
         // on every page to satisfy the Cursor/NodeCount requirement. Do the
         // same when the page doesn't set an explicit node_count.
-        if page_expect.node_count.is_none() && page_expect.derived_node_count().is_none() {
+        if page_expect.node_count.is_none() {
             view.assert_node_count(view.node_count());
         }
 
@@ -439,6 +439,12 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
                 serde_json::Value::Object(m) if m.contains_key("in") => {
                     let vals = m["in"].as_array().unwrap();
                     n.prop(&field_name).is_some_and(|p| vals.contains(p))
+                }
+                serde_json::Value::Object(m) if m.contains_key("gte") => {
+                    let threshold = m["gte"].as_i64().unwrap();
+                    n.prop_i64(&field_name)
+                        .or_else(|| n.prop_str(&field_name).and_then(|s| s.parse().ok()))
+                        .is_some_and(|v| v >= threshold)
                 }
                 _ => n.prop(&field_name) == Some(&expected),
             });
