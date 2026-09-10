@@ -12,7 +12,7 @@ use tonic::{Code, Status};
 use tonic_types::{ErrorDetails, StatusExt};
 use tracing::{info, warn};
 
-use crate::constants::{METERED_SOURCE_TYPES, QUOTA_MAX_CACHE_ENTRIES};
+use crate::constants::QUOTA_MAX_CACHE_ENTRIES;
 use cache::{CacheOutcome, QuotaCache, QuotaGateDecision};
 use client::QuotaClient;
 pub use inputs::QuotaCheckInputs;
@@ -25,9 +25,6 @@ pub use metrics::register as register_metrics;
 
 #[cfg(test)]
 pub(crate) static DECISION_RECORD_HITS: std::sync::atomic::AtomicUsize =
-    std::sync::atomic::AtomicUsize::new(0);
-#[cfg(test)]
-pub(crate) static BYPASS_RECORD_HITS: std::sync::atomic::AtomicUsize =
     std::sync::atomic::AtomicUsize::new(0);
 
 pub struct QuotaService {
@@ -76,11 +73,6 @@ impl QuotaService {
         let Some(inner) = &self.inner else {
             return Ok(());
         };
-
-        if !METERED_SOURCE_TYPES.contains(&inputs.source_type.as_str()) {
-            record_bypass(&inputs.source_type);
-            return Ok(());
-        }
 
         let correlation_id = labkit::correlation::current()
             .as_ref()
@@ -195,32 +187,14 @@ fn record_decision(gate: &QuotaGateDecision, cache: CacheOutcome, source_type: &
     DECISION_RECORD_HITS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 }
 
-fn record_bypass(source_type: &str) {
-    use orbit_observability::billing::quota::labels::SOURCE_TYPE;
-    metrics::QUOTA_METRICS.bypassed.add(
-        1,
-        &[opentelemetry::KeyValue::new(
-            SOURCE_TYPE,
-            bypass_source_type_label(source_type),
-        )],
-    );
-    #[cfg(test)]
-    BYPASS_RECORD_HITS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-}
-
 fn metered_source_type_label(s: &str) -> &'static str {
     match s {
         "mcp" => "mcp",
         "rest" => "rest",
-        _ => "other",
-    }
-}
-
-fn bypass_source_type_label(s: &str) -> &'static str {
-    match s {
         "frontend" => "frontend",
         "core" => "core",
         "dws" => "dws",
+        "code_intelligence" => "code_intelligence",
         _ => "other",
     }
 }
@@ -351,25 +325,6 @@ mod tests {
 
         assert!(svc.check(&inputs_with_source("mcp")).await.is_ok());
         assert_eq!(counter.load(Ordering::SeqCst), 0);
-    }
-
-    #[tokio::test]
-    async fn skips_quota_check_for_non_metered_sources() {
-        let (url, counter) = counting_server(AxumStatus::PAYMENT_REQUIRED).await;
-        let svc = service_for(url);
-
-        let before = BYPASS_RECORD_HITS.load(Ordering::Relaxed);
-
-        assert!(svc.check(&inputs_with_source("frontend")).await.is_ok());
-        assert!(svc.check(&inputs_with_source("core")).await.is_ok());
-        assert!(svc.check(&inputs_with_source("dws")).await.is_ok());
-
-        assert_eq!(counter.load(Ordering::SeqCst), 0);
-        let after = BYPASS_RECORD_HITS.load(Ordering::Relaxed);
-        assert!(
-            after >= before + 3,
-            "record_bypass must fire once per non-metered source (before={before}, after={after})"
-        );
     }
 
     #[tokio::test]

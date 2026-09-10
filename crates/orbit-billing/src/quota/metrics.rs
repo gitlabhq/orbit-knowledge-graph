@@ -13,7 +13,6 @@ pub(super) static QUOTA_METRICS: LazyLock<QuotaMetrics> = LazyLock::new(QuotaMet
 pub(super) struct QuotaMetrics {
     pub decisions: Counter<u64>,
     pub cdot_duration: Histogram<f64>,
-    pub bypassed: Counter<u64>,
 }
 
 impl QuotaMetrics {
@@ -22,7 +21,6 @@ impl QuotaMetrics {
         Self {
             decisions: spec::QUOTA_DECISIONS.build_counter_u64(&meter),
             cdot_duration: spec::QUOTA_CDOT_DURATION.build_histogram_f64(&meter),
-            bypassed: spec::QUOTA_BYPASSED.build_counter_u64(&meter),
         }
     }
 }
@@ -36,8 +34,14 @@ impl QuotaMetrics {
 /// Histograms are not pre-seeded — `record(0.0)` would be a real observation that
 /// skews `_count` and `_sum`; they appear on the first genuine CDot call.
 pub fn register() {
-    let metered_types = ["mcp", "rest"];
-    let bypass_types = ["frontend", "core", "dws"];
+    let metered_types = [
+        "mcp",
+        "rest",
+        "frontend",
+        "core",
+        "dws",
+        "code_intelligence",
+    ];
 
     for cache in [HIT, MISS] {
         for decision in [ALLOW, DENY] {
@@ -63,10 +67,5 @@ pub fn register() {
                 KeyValue::new(SOURCE_TYPE, source_type),
             ],
         );
-    }
-    for source_type in bypass_types {
-        QUOTA_METRICS
-            .bypassed
-            .add(0, &[KeyValue::new(SOURCE_TYPE, source_type)]);
     }
 }
