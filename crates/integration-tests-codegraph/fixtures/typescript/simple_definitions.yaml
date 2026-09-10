@@ -1,0 +1,73 @@
+name: "TypeScript: simple definitions"
+pipeline: typescript
+fixtures:
+  - path: main.ts
+    content: |
+      function greet(name: string): string {
+          return `hello ${name}`;
+      }
+
+      class Animal {
+          sound: string = "generic";
+          speak(): string { return this.sound; }
+      }
+
+      interface Shape {
+          area(): number;
+      }
+
+      type Point = { x: number; y: number };
+
+      enum Color { Red, Green, Blue }
+
+      const helper = () => "help";
+
+tests:
+  - name: Function definition exists
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'greet' AND d.definition_type = 'Function'
+      RETURN d.fqn AS fqn, d.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: "main.greet", file: "main.ts" } }
+
+  - name: Class definition exists
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'Animal' AND d.definition_type = 'Class'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+
+  - name: Interface definition exists
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'Shape' AND d.definition_type = 'Interface'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+
+  - name: TypeAlias definition exists
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'Point' AND d.definition_type = 'TypeAlias'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+
+  - name: Enum definition exists
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'Color' AND d.definition_type = 'Enum'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+
+  - name: Method is nested inside class
+    query: |
+      MATCH (cls:Definition)-[e:DefinitionToDefinition]->(m:Definition)
+      WHERE cls.name = 'Animal' AND m.name = 'speak' AND e.edge_kind = 'Defines'
+      RETURN cls.fqn AS cls, m.fqn AS method
+    assert:
+      - { row_count: 1 }

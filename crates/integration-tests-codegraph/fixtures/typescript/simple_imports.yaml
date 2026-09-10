@@ -1,0 +1,42 @@
+name: "TypeScript: simple imports"
+pipeline: typescript
+fixtures:
+  - path: models.ts
+    content: |
+      export class User {
+          name: string = "";
+      }
+
+      export function createUser(name: string): User {
+          const u = new User();
+          return u;
+      }
+
+  - path: main.ts
+    content: |
+      import { User, createUser } from './models';
+
+      function run(): void {
+          const u = createUser("alice");
+      }
+
+tests:
+  - name: Named imports are extracted
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.file_path = 'main.ts'
+      RETURN i.name AS name, i.path AS path
+      ORDER BY name
+    assert:
+      - { row_count: 2 }
+      - { row: { name: "User", path: "./models" } }
+      - { row: { name: "createUser", path: "./models" } }
+
+  - name: Cross-file call resolves
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'run' AND callee.name = 'createUser'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }

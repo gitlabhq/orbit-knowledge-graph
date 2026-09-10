@@ -1,0 +1,31 @@
+name: "TypeScript: simple function call"
+pipeline: typescript
+fixtures:
+  - path: main.ts
+    content: |
+      function helper(): string {
+          return "help";
+      }
+
+      function run(): void {
+          helper();
+      }
+
+tests:
+  - name: helper definition exists
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'helper'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: "main.helper" } }
+
+  - name: run calls helper
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'run' AND callee.name = 'helper' AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "main.run", callee: "main.helper" } }
