@@ -642,10 +642,16 @@ fn eval_filter_predicate(
             let vals = m["in"].as_array().unwrap();
             n.prop(field).is_some_and(|p| vals.contains(p))
         }
-        serde_json::Value::Object(m) if m.contains_key("is_null") => {
+        serde_json::Value::Object(m)
+            if m.get("is_null") == Some(&serde_json::Value::Bool(true)) =>
+        {
             !n.properties.is_empty() && !n.has_prop(field)
         }
-        serde_json::Value::Object(m) if m.contains_key("is_not_null") => n.has_prop(field),
+        serde_json::Value::Object(m)
+            if m.get("is_not_null") == Some(&serde_json::Value::Bool(true)) =>
+        {
+            n.has_prop(field)
+        }
         serde_json::Value::Object(m) if m.contains_key("gte") => {
             let threshold = &m["gte"];
             if let Some(t) = threshold.as_i64() {
@@ -682,6 +688,10 @@ fn eval_filter_predicate(
                 serde_json::Value::Object(std::iter::once((op.clone(), val.clone())).collect());
             eval_filter_predicate(n, field, &sub)
         }),
+        serde_json::Value::Object(m) if m.len() == 1 => {
+            let op = m.keys().next().unwrap();
+            panic!("unsupported filter operator '{op}' on field '{field}'")
+        }
         _ => n.prop(field) == Some(expected),
     }
 }
