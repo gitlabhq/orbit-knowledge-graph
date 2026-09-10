@@ -2,7 +2,7 @@
 
 ### ⚠ BREAKING CHANGES
 
-* **metrics:** the Prometheus scrape endpoint moved from `/metrics` to `/-/metrics`. The same port now also serves `/-/liveness` and `/-/readiness`. Deployments with the gkg Helm chart need chart 2.0.0 or later.
+* **metrics:** the Prometheus scrape endpoint moved from `/metrics` to `/-/metrics`. Deployments with the gkg Helm chart need chart 2.0.0 or later.
 
 ### Features
 

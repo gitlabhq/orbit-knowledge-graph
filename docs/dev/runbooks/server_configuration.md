@@ -362,8 +362,8 @@ Example: `info,orbit_server=debug,gkg_indexer=trace`
 
 | Config path | Default | Description |
 |-------------|---------|-------------|
-| `metrics.prometheus.enabled` | `false` | Expose the `/-/metrics` scrape endpoint on the probe server, which also serves `/-/liveness` and `/-/readiness` |
-| `metrics.prometheus.port` | `9394` | Probe server port for `/-/metrics`, `/-/liveness` and `/-/readiness` |
+| `metrics.prometheus.enabled` | `false` | Expose the `/-/metrics` scrape endpoint |
+| `metrics.prometheus.port` | `9394` | Prometheus scrape port |
 
 ## Webserver
 
