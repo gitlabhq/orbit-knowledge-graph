@@ -21,6 +21,7 @@ pub fn resolve(
     external: &[String],
 ) -> ResolveResult {
     let k_import = lang.lookup_kind("__import");
+    let k_import_type = lang.lookup_kind("__import_type");
     let k_source = lang.lookup_kind("__source");
     let k_source_path = lang.lookup_kind("__source_path");
     let k_name = lang.lookup_kind("__name");
@@ -46,6 +47,7 @@ pub fn resolve(
         trees,
         lang,
         k_import,
+        k_import_type,
         k_source_path,
         k_name,
         &file_index,
@@ -170,6 +172,7 @@ fn gather_imports(
     trees: &[Tree],
     lang: &Lang,
     k_import: u16,
+    k_import_type: u16,
     k_source_path: u16,
     k_name: u16,
     file_index: &FxHashMap<String, usize>,
@@ -181,7 +184,7 @@ fn gather_imports(
 
     for (fi, tree) in trees.iter().enumerate() {
         for (i, n) in tree.nodes.iter().enumerate() {
-            if n.kind != k_import {
+            if n.kind != k_import && n.kind != k_import_type {
                 continue;
             }
             let source_sym = tree

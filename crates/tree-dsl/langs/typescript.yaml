@@ -5,6 +5,10 @@
 stages:
   - name: normalize
     rules:
+      # Distinguish import type from import before rewriting
+      - match: '(import_statement (type))'
+        set_kind: 'import_type_statement'
+
       # this.x → __ivar
       - match: '(member_expression object: (this) property: $P)'
         replace: '(__ivar @$P)'
@@ -42,9 +46,13 @@ stages:
 
   - name: imports
     rules:
+      # import type { a, b } from './source'
+      - match: '(import_type_statement (import_clause (named_imports $$$SPECS:import_specifier)) source: (string $S:string_fragment))'
+        replace: '(__import_type (__source @$S) (__source_path @$S) $$$SPECS=>__name)'
+
       # import { a, b } from './source'
       - match: '(import_statement (import_clause (named_imports $$$SPECS:import_specifier)) source: (string $S:string_fragment))'
-        replace: '(__import (__source @$S) (__source_path @$S) $$$SPECS->__name)'
+        replace: '(__import (__source @$S) (__source_path @$S) $$$SPECS=>__name)'
 
       # import * as ns from './source'
       - match: '(import_statement (import_clause (namespace_import $N:identifier)) source: (string $S:string_fragment))'

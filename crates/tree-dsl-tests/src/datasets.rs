@@ -29,6 +29,7 @@ fn has_synth(tree: &Tree, node: u32, kind: u16) -> bool {
 struct Sk {
     deftype: u16,
     import: u16,
+    import_type: u16,
     source: u16,
     name: u16,
     alias: u16,
@@ -41,6 +42,7 @@ impl Sk {
         Self {
             deftype: s("__deftype"),
             import: s("__import"),
+            import_type: s("__import_type"),
             source: s("__source"),
             name: s("__name"),
             alias: s("__alias"),
@@ -53,7 +55,8 @@ impl Sk {
     }
 
     fn is_import(&self, tree: &Tree, node: u32) -> bool {
-        tree.nodes[node as usize].kind == self.import
+        let k = tree.nodes[node as usize].kind;
+        k == self.import || k == self.import_type
     }
 }
 
@@ -426,8 +429,7 @@ fn build_imports(
 
             let source_sym = synth_sym(tree, node, sk.source);
             let source_str = lang.syms.resolve(source_sym);
-            let is_type_only =
-                sk.type_only != 0 && tree.children(node).any(|c| tree.kind(c) == sk.type_only);
+            let is_type_only = tree.nodes[node as usize].kind == sk.import_type;
 
             // Collect __name children with optional __alias (skip empty syms)
             let names: Vec<(u32, u32)> = tree

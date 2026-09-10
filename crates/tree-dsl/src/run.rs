@@ -77,6 +77,7 @@ fn classify_methods(tree: &mut Tree, lang: &mut Lang) {
 
 struct Syns {
     import: u16,
+    import_type: u16,
     name: u16,
     alias: u16,
     deftype: u16,
@@ -99,6 +100,7 @@ impl Syns {
         let s = |name: &str| lang.kinds.lookup(name) as u16;
         Self {
             import: s("__import"),
+            import_type: s("__import_type"),
             name: s("__name"),
             alias: s("__alias"),
             deftype: s("__deftype"),
@@ -568,7 +570,7 @@ fn ssa_fold(tree: &mut Tree, lang: &mut Lang) {
             }
         }
 
-        if k == state.syns.import {
+        if k == state.syns.import || k == state.syns.import_type {
             state.handle_import(tree, i);
             i += node_size.max(1);
             continue;
