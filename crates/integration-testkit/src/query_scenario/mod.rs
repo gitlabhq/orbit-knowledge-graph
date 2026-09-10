@@ -296,7 +296,7 @@ async fn run_pages(
         let view = ResponseView::for_query(&compiled.input, response);
 
         if let Some(ap) = &expect.all_pages {
-            for (key, _) in &ap.group_node_ids {
+            for key in ap.group_node_ids.keys() {
                 if let Some((group_key, entity)) = key.split_once(':') {
                     let ids = view.group_node_ids_ordered(group_key, entity);
                     collected_group_ids
