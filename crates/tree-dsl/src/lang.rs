@@ -32,10 +32,6 @@ impl Interner {
     pub fn len(&self) -> u32 {
         self.names.len() as u32
     }
-
-    pub fn is_empty(&self) -> bool {
-        self.names.is_empty()
-    }
 }
 
 #[derive(Default)]
@@ -77,6 +73,4 @@ impl Lang {
     pub fn field_name(&self, f: u16) -> &str {
         self.fields.resolve(f as u32)
     }
-
-
 }

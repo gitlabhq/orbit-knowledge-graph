@@ -8,7 +8,6 @@ pub enum EdgeKind {
     Calls = 1,
     Defines = 2,
     Imports = 3,
-    TypeRef = 4,
 }
 
 impl EdgeKind {
@@ -17,7 +16,6 @@ impl EdgeKind {
             Self::Calls => "Calls",
             Self::Defines => "Defines",
             Self::Imports => "Imports",
-            Self::TypeRef => "TypeRef",
         }
     }
 }
@@ -93,24 +91,12 @@ impl Tree {
         self.nodes[i as usize].field
     }
     #[inline]
-    pub fn parent_kind(&self, i: u32) -> Option<u16> {
-        let p = self.nodes[i as usize].parent;
-        (p != NONE).then(|| self.kind(p))
-    }
-    #[inline]
     pub fn hop(&self, i: u32) -> u32 {
         i + self.nodes[i as usize].size
     }
     #[inline]
     pub fn text<'a>(&self, lang: &'a crate::lang::Lang, i: u32) -> &'a str {
         lang.syms.resolve(self.nodes[i as usize].sym)
-    }
-
-    /// Read text from the source by the node's byte span. Use this for
-    /// non-leaf nodes (e.g. dotted_name) whose sym is 0.
-    pub fn span_text<'a>(&self, source: &'a str, i: u32) -> &'a str {
-        let n = &self.nodes[i as usize];
-        &source[n.start as usize..n.end as usize]
     }
 
     pub fn children(&self, i: u32) -> impl Iterator<Item = u32> + '_ {
@@ -133,10 +119,6 @@ impl Tree {
         self.children(i).filter(move |&c| self.kind(c) == k)
     }
 
-    pub fn has_child(&self, i: u32, k: u16) -> bool {
-        self.children_of_kind(i, k).next().is_some()
-    }
-
     pub fn parent(&self, i: u32) -> Option<u32> {
         let p = self.nodes[i as usize].parent;
         (p != NONE).then_some(p)
@@ -149,32 +131,6 @@ impl Tree {
             cur = self.parent(n);
             Some(n)
         })
-    }
-
-    pub fn prev_sibling(&self, i: u32) -> Option<u32> {
-        let parent = self.parent(i)?;
-        let mut prev = None;
-        for c in self.children(parent) {
-            if c == i {
-                return prev;
-            }
-            prev = Some(c);
-        }
-        None
-    }
-
-    pub fn next_sibling(&self, i: u32) -> Option<u32> {
-        let parent = self.parent(i)?;
-        let mut found = false;
-        for c in self.children(parent) {
-            if found {
-                return Some(c);
-            }
-            if c == i {
-                found = true;
-            }
-        }
-        None
     }
 
     pub fn descendants(&self, i: u32) -> impl Iterator<Item = u32> + '_ {
@@ -206,14 +162,6 @@ impl Tree {
                 kind,
             });
         }
-    }
-
-    pub fn edges_from(&self, node: u32) -> impl Iterator<Item = &Edge> {
-        self.edges.iter().filter(move |e| e.from.node == node)
-    }
-
-    pub fn edges_to(&self, node: u32) -> impl Iterator<Item = &Edge> {
-        self.edges.iter().filter(move |e| e.to.node == node)
     }
 
     pub fn remove(&mut self, i: u32) {

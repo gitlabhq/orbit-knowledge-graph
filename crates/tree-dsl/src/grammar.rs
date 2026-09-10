@@ -38,12 +38,12 @@ struct LangEntry {
     grammar: String,
     #[serde(default)]
     fqn_separator: Option<String>,
-    #[serde(default)]
-    package_markers: Vec<String>,
+    #[serde(default, rename = "package_markers")]
+    _package_markers: Vec<String>,
     #[serde(default)]
     index_names: Vec<String>,
-    #[serde(default)]
-    source_root: Option<String>,
+    #[serde(default, rename = "source_root")]
+    _source_root: Option<String>,
 }
 
 #[derive(serde::Deserialize)]
@@ -78,23 +78,11 @@ impl SupportLang {
         grammar_to_ts_language(&entry.grammar)
     }
 
-    pub fn extensions(&self) -> &[String] {
-        &LANG_CONFIG.languages[self].extensions
-    }
-
     pub fn fqn_separator(&self) -> &'static str {
         LANG_CONFIG.languages[self]
             .fqn_separator
             .as_deref()
             .unwrap_or(".")
-    }
-
-    pub fn package_markers(&self) -> &[String] {
-        &LANG_CONFIG.languages[self].package_markers
-    }
-
-    pub fn has_package_marker_climb(&self) -> bool {
-        LANG_CONFIG.languages[self].source_root.as_deref() == Some("package_marker_climb")
     }
 
     pub fn index_names(&self) -> &[String] {
@@ -167,7 +155,7 @@ fn grammar_to_ts_language(grammar: &str) -> tree_sitter::Language {
     }
 }
 
-pub fn from_tree_sitter(
+fn from_tree_sitter(
     source: &str,
     ts_tree: &tree_sitter::Tree,
     lang: &mut Lang,
