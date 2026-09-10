@@ -1,3 +1,4 @@
+pub mod file_tree;
 pub mod grammar;
 pub mod lang;
 #[path = "../langs/mod.rs"]
@@ -30,7 +31,10 @@ pub fn index(lang_id: SupportLang, files: &[(String, String)]) -> IndexResult {
             trees.push(run::process_file(path, content, &mut lang, &pipeline));
         }
     }
-    let cross_edges = resolver::resolve(&mut trees, &mut lang, lang_id).cross_edges;
+    let file_paths: Vec<String> = files.iter().map(|(p, _)| p.clone()).collect();
+    let walk = file_tree::walk(&file_paths, &mut lang, &pipeline.resolve);
+    let cross_edges =
+        resolver::resolve(&mut trees, &mut lang, lang_id, &walk.source_roots).cross_edges;
     if !cross_edges.is_empty() {
         eprintln!("[resolver] {} cross-edges", cross_edges.len());
     }

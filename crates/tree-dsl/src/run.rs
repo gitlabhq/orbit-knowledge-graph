@@ -9,17 +9,22 @@ use crate::tree::Tree;
 
 pub struct LangDef {
     pub rewrites: Vec<Vec<crate::pattern::Rewrite>>,
+    pub resolve: crate::file_tree::ResolveConfig,
 }
 
 impl LangDef {
     pub fn empty() -> Self {
-        Self { rewrites: vec![] }
+        Self {
+            rewrites: vec![],
+            resolve: crate::file_tree::ResolveConfig::default(),
+        }
     }
 }
 
 pub struct Pipeline {
     pub lang_id: SupportLang,
     pub rewrite_stages: Vec<Vec<crate::pattern::Rewrite>>,
+    pub resolve: crate::file_tree::ResolveConfig,
 }
 
 impl Pipeline {
@@ -37,6 +42,7 @@ impl Pipeline {
             Pipeline {
                 lang_id,
                 rewrite_stages: def.rewrites,
+                resolve: def.resolve,
             },
             lang,
         )

@@ -129,3 +129,16 @@ stages:
         append: '(__loop)'
       - match: '(generator_expression)'
         append: '(__loop)'
+
+resolve:
+  stages:
+    - name: packages
+      rules:
+        - match: '(__dir (__file "__init__.py"))'
+          append: '(__package)'
+        - match: '(__dir (__file "__init__.pyi"))'
+          append: '(__package)'
+    - name: roots
+      climb:
+        while: __package
+        mark: __source_root

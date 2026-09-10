@@ -25,6 +25,29 @@ use crate::pattern::{Out, Rewrite, Tf};
 #[derive(serde::Deserialize)]
 struct RuleFile {
     stages: Vec<Stage>,
+    #[serde(default)]
+    resolve: Option<ResolveSection>,
+}
+
+#[derive(serde::Deserialize)]
+struct ResolveSection {
+    stages: Vec<ResolveStageSpec>,
+}
+
+#[derive(serde::Deserialize)]
+struct ResolveStageSpec {
+    #[allow(dead_code)]
+    name: Option<String>,
+    #[serde(default)]
+    rules: Option<Vec<Rule>>,
+    #[serde(default)]
+    climb: Option<ClimbSpec>,
+}
+
+#[derive(serde::Deserialize)]
+struct ClimbSpec {
+    r#while: String,
+    mark: String,
 }
 
 #[derive(serde::Deserialize)]
@@ -84,6 +107,54 @@ pub fn load_rules(yaml: &str, lang: &mut Lang) -> Vec<Vec<Rewrite>> {
         .iter()
         .map(|stage| compile_stage(stage, lang))
         .collect()
+}
+
+/// Load both rewrite stages and resolve config from a language YAML file.
+pub fn load_lang(
+    yaml: &str,
+    lang: &mut Lang,
+) -> (Vec<Vec<Rewrite>>, crate::file_tree::ResolveConfig) {
+    let file: RuleFile = serde_yaml::from_str(yaml).expect("failed to parse rule YAML");
+    let rewrites = file
+        .stages
+        .iter()
+        .map(|stage| compile_stage(stage, lang))
+        .collect();
+    let resolve = match file.resolve {
+        Some(section) => compile_resolve(&section, lang),
+        None => crate::file_tree::ResolveConfig::default(),
+    };
+    (rewrites, resolve)
+}
+
+fn compile_resolve(section: &ResolveSection, lang: &mut Lang) -> crate::file_tree::ResolveConfig {
+    use crate::file_tree::ResolveStage;
+    use crate::lang::SYNTH;
+
+    let stages = section
+        .stages
+        .iter()
+        .map(|spec| {
+            if let Some(climb) = &spec.climb {
+                let while_kind = lang.kind(&climb.r#while);
+                let mark_kind = lang.kind(&climb.mark);
+                // lang.kind() auto-adds SYNTH for __ prefixed names
+                ResolveStage::Climb {
+                    while_kind,
+                    mark_kind,
+                }
+            } else if let Some(rules) = &spec.rules {
+                let compiled = rules
+                    .iter()
+                    .flat_map(|rule| compile_rule(rule, lang))
+                    .collect();
+                ResolveStage::Rules(compiled)
+            } else {
+                panic!("resolve stage must have either `rules` or `climb`");
+            }
+        })
+        .collect();
+    crate::file_tree::ResolveConfig { stages }
 }
 
 fn compile_stage(stage: &Stage, lang: &mut Lang) -> Vec<Rewrite> {
