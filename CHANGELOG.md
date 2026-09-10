@@ -2,7 +2,7 @@
 
 ### ⚠ BREAKING CHANGES
 
-* **metrics:** the Prometheus scrape endpoint moved from `/metrics` to `/-/metrics`. The same port now also serves `/-/liveness` and `/-/readiness`. Deployments with the gkg Helm chart need chart 2.0.0 or later, which scrapes the new path; older charts get a 404 and lose all series. Comes from the labkit-rs bump in [4fb7c67](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/4fb7c67239d72bc9f04dde7cc4f1f48618b79054).
+* **metrics:** the Prometheus scrape endpoint moved from `/metrics` to `/-/metrics`. The same port now also serves `/-/liveness` and `/-/readiness`. Deployments with the gkg Helm chart need chart 2.0.0 or later.
 
 ### Features
 
