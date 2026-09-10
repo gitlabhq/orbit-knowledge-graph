@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use bytes::Bytes;
 use indexer::config::{DispatcherConfig, DispatcherError};
-use nats_client::{KvBucketConfig, KvPutOptions, NatsClient};
+use nats_client::{KvPutOptions, NatsClient};
 use ontology::archive::OntologyArchive;
 use ontology::migrations::embedded_sources;
 use orbit_migrations::catalog::{CatalogError, ONTOLOGY_ARCHIVES_BUCKET, OntologyCatalog};
@@ -20,7 +20,7 @@ const LEGACY_SCHEMA_VERSION: u32 = 93;
 #[tokio::test]
 async fn missing_legacy_archive_is_bootstrapped_and_survives_restart() {
     let mut context = TestContext::new().await;
-    let catalog = context.catalog().await;
+    let (_, catalog) = context.connect_catalog().await;
     let expected = OntologyArchive::bundled(LEGACY_SCHEMA_VERSION)
         .unwrap()
         .unwrap();
@@ -31,31 +31,26 @@ async fn missing_legacy_archive_is_bootstrapped_and_survives_restart() {
 
     catalog.ensure_archive(LEGACY_SCHEMA_VERSION).await.unwrap();
     context.restart_nats().await;
-    let catalog = context.catalog().await;
+    let (client, catalog) = context.connect_catalog().await;
     catalog.ensure_archive(LEGACY_SCHEMA_VERSION).await.unwrap();
 
     assert_eq!(
         catalog.load(LEGACY_SCHEMA_VERSION).await.unwrap().bytes(),
         expected.bytes()
     );
-    assert_eq!(
-        context
-            .client()
-            .await
-            .kv_get(ONTOLOGY_ARCHIVES_BUCKET, &LEGACY_SCHEMA_VERSION.to_string())
-            .await
-            .unwrap()
-            .unwrap()
-            .revision,
-        1
-    );
+    let stored = client
+        .kv_get(ONTOLOGY_ARCHIVES_BUCKET, &LEGACY_SCHEMA_VERSION.to_string())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(stored.revision, 1);
 }
 
 #[tokio::test]
 async fn concurrent_bootstraps_publish_the_exact_bundle_only_once() {
     let context = TestContext::new().await;
-    let first_catalog = context.catalog().await;
-    let second_catalog = context.catalog().await;
+    let (client, first_catalog) = context.connect_catalog().await;
+    let (_, second_catalog) = context.connect_catalog().await;
 
     let (first, second) = tokio::join!(
         first_catalog.ensure_archive(LEGACY_SCHEMA_VERSION),
@@ -75,23 +70,18 @@ async fn concurrent_bootstraps_publish_the_exact_bundle_only_once() {
             .bytes(),
         expected.bytes()
     );
-    assert_eq!(
-        context
-            .client()
-            .await
-            .kv_get(ONTOLOGY_ARCHIVES_BUCKET, &LEGACY_SCHEMA_VERSION.to_string())
-            .await
-            .unwrap()
-            .unwrap()
-            .revision,
-        1
-    );
+    let stored = client
+        .kv_get(ONTOLOGY_ARCHIVES_BUCKET, &LEGACY_SCHEMA_VERSION.to_string())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(stored.revision, 1);
 }
 
 #[tokio::test]
 async fn an_existing_valid_archive_is_reused_even_when_the_bundle_differs() {
     let context = TestContext::new().await;
-    let catalog = context.catalog().await;
+    let (_, catalog) = context.connect_catalog().await;
     let existing = archive_with_distinct_ontology(LEGACY_SCHEMA_VERSION);
     catalog.publish(&existing).await.unwrap();
 
@@ -106,7 +96,7 @@ async fn an_existing_valid_archive_is_reused_even_when_the_bundle_differs() {
 #[tokio::test]
 async fn an_unbundled_version_requires_an_existing_valid_archive() {
     let context = TestContext::new().await;
-    let catalog = context.catalog().await;
+    let (_, catalog) = context.connect_catalog().await;
     let unbundled_version = u32::MAX;
 
     assert!(
@@ -136,8 +126,7 @@ async fn bootstrap_never_replaces_corrupt_or_mismatched_entries() {
             .to_vec(),
     ] {
         let context = TestContext::new().await;
-        let catalog = context.catalog().await;
-        let client = context.client().await;
+        let (client, catalog) = context.connect_catalog().await;
         let key = LEGACY_SCHEMA_VERSION.to_string();
         client
             .kv_put(
@@ -166,8 +155,7 @@ async fn bootstrap_never_replaces_corrupt_or_mismatched_entries() {
 #[tokio::test]
 async fn failed_bootstrap_can_be_retried_after_reconnecting() {
     let context = TestContext::new().await;
-    let client = context.client().await;
-    let catalog = OntologyCatalog::open(client.clone()).await.unwrap();
+    let (client, catalog) = context.connect_catalog().await;
     client.nats_client().drain().await.unwrap();
 
     let result = tokio::time::timeout(
@@ -178,7 +166,7 @@ async fn failed_bootstrap_can_be_retried_after_reconnecting() {
     .unwrap();
     assert!(matches!(result, Err(CatalogError::Nats(_))));
 
-    let catalog = context.catalog().await;
+    let (_, catalog) = context.connect_catalog().await;
     assert!(matches!(
         catalog.load(LEGACY_SCHEMA_VERSION).await,
         Err(CatalogError::Missing(_))
@@ -191,12 +179,12 @@ async fn failed_bootstrap_can_be_retried_after_reconnecting() {
 async fn published_archives_survive_a_nats_restart() {
     let mut context = TestContext::new().await;
     let archive = embedded_archive(1);
-    let catalog = context.catalog().await;
+    let (_, catalog) = context.connect_catalog().await;
     catalog.publish(&archive).await.unwrap();
     drop(catalog);
 
     context.restart_nats().await;
-    let catalog = context.catalog().await;
+    let (_, catalog) = context.connect_catalog().await;
 
     assert_eq!(catalog.load(1).await.unwrap().bytes(), archive.bytes());
 }
@@ -204,7 +192,7 @@ async fn published_archives_survive_a_nats_restart() {
 #[tokio::test]
 async fn concurrent_identical_publications_return_the_archived_ontology() {
     let context = TestContext::new().await;
-    let catalog = context.catalog().await;
+    let (_, catalog) = context.connect_catalog().await;
     let archive = archive_with_distinct_ontology(1);
     let expected = archive.load_ontology().unwrap();
 
@@ -218,7 +206,7 @@ async fn concurrent_identical_publications_return_the_archived_ontology() {
 #[tokio::test]
 async fn published_versions_cannot_be_overwritten() {
     let context = TestContext::new().await;
-    let catalog = context.catalog().await;
+    let (_, catalog) = context.connect_catalog().await;
     let archive = embedded_archive(1);
     let conflicting = archive_with_extra_newline(1);
     catalog.publish(&archive).await.unwrap();
@@ -233,7 +221,7 @@ async fn published_versions_cannot_be_overwritten() {
 #[tokio::test]
 async fn new_versions_do_not_replace_previous_archives() {
     let context = TestContext::new().await;
-    let catalog = context.catalog().await;
+    let (_, catalog) = context.connect_catalog().await;
     let archive = embedded_archive(1);
     let next_version = archive_with_extra_newline(2);
     catalog.publish(&archive).await.unwrap();
@@ -247,7 +235,7 @@ async fn new_versions_do_not_replace_previous_archives() {
 #[tokio::test]
 async fn dispatcher_rejects_conflicting_archives_before_migration() {
     let context = TestContext::new().await;
-    let catalog = context.catalog().await;
+    let (_, catalog) = context.connect_catalog().await;
     let archive = embedded_archive(*SCHEMA_VERSION);
     let conflicting = archive_with_extra_newline(*SCHEMA_VERSION);
     catalog.publish(&archive).await.unwrap();
@@ -268,7 +256,7 @@ async fn dispatcher_rejects_conflicting_archives_before_migration() {
 #[tokio::test]
 async fn dispatcher_rejects_invalid_archives_before_migration() {
     let context = TestContext::new().await;
-    let catalog = context.catalog().await;
+    let (_, catalog) = context.connect_catalog().await;
     let archive = embedded_archive(*SCHEMA_VERSION);
     let invalid = archive_with_invalid_schema(*SCHEMA_VERSION);
     catalog.publish(&archive).await.unwrap();
@@ -308,11 +296,7 @@ impl TestContext {
         Self { server, config }
     }
 
-    async fn catalog(&self) -> OntologyCatalog {
-        OntologyCatalog::open(self.client().await).await.unwrap()
-    }
-
-    async fn client(&self) -> Arc<NatsClient> {
+    async fn connect_catalog(&self) -> (Arc<NatsClient>, OntologyCatalog) {
         const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
         const RETRY_INTERVAL: Duration = Duration::from_millis(100);
 
@@ -326,11 +310,8 @@ impl TestContext {
         })
         .await
         .expect("NATS did not become ready");
-        client
-            .ensure_kv_bucket_exists(ONTOLOGY_ARCHIVES_BUCKET, KvBucketConfig::default())
-            .await
-            .unwrap();
-        client
+        let catalog = OntologyCatalog::open(client.clone()).await.unwrap();
+        (client, catalog)
     }
 
     async fn restart_nats(&mut self) {
