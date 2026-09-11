@@ -60,11 +60,13 @@ pub fn run(
     }
 
     let client = open_graph(db)?;
-    if let Some(warning) = crate::refresh::relationship_warning(&client, None)? {
+    let project = if all {
+        None
+    } else {
+        scope_to_checkout(&client, repo.as_deref().unwrap_or(Path::new(".")))?
+    };
+    if let Some(warning) = crate::refresh::relationship_warning(&client, project)? {
         eprintln!("warning: {warning}");
-    }
-    if !all {
-        scope_to_checkout(&client, repo.as_deref().unwrap_or(Path::new(".")))?;
     }
     let batches = query(&client, sql)?;
 
@@ -72,7 +74,7 @@ pub fn run(
     sql_format::write(stdout, format, &batches)
 }
 
-fn scope_to_checkout(client: &DuckDbClient, repo: &Path) -> Result<()> {
+fn scope_to_checkout(client: &DuckDbClient, repo: &Path) -> Result<Option<i64>> {
     let git = match workspace::git_toplevel(repo).and_then(|top| workspace::git_info(&top)) {
         Ok(git) => git,
         Err(_) => {
@@ -80,7 +82,7 @@ fn scope_to_checkout(client: &DuckDbClient, repo: &Path) -> Result<()> {
                 "note: {} is not inside a git checkout; querying every indexed commit (as with --all)",
                 repo.display()
             );
-            return Ok(());
+            return Ok(None);
         }
     };
     if !scope_tables(client, git.project_id, &git.commit_sha)? {
@@ -93,7 +95,7 @@ fn scope_to_checkout(client: &DuckDbClient, repo: &Path) -> Result<()> {
             git.repo_path.display()
         );
     }
-    Ok(())
+    Ok(Some(git.project_id))
 }
 
 fn scope_tables(client: &DuckDbClient, project_id: i64, commit_sha: &str) -> Result<bool> {

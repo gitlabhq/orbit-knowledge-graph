@@ -177,7 +177,8 @@ automatically; broader results include a copyable `context` command.
 
 `grep` and `context` refresh changed and new source files on demand, including
 edits made without changing commits. Deleted files are removed. Unchanged files
-are discovered and fingerprinted, but not reparsed. Successful refreshes update
+are discovered and fingerprinted; only changed files and their neighbors are
+reparsed. Successful refreshes update
 search results and definition ranges together.
 
 If parsing fails, source is unsupported, or files change during refresh, the
@@ -185,11 +186,17 @@ previous definitions remain indexed. Definition reads return the full current fi
 labeled `ranges=unverified`, instead of potentially stale slices. File overviews
 report that the outline is unavailable. Test code is included.
 
-File refresh also reparses the indexed files that import a changed file, or that
-it imports, so relationships between them are re-resolved. Relationships between
-unchanged files are kept. If a changed file imports a project file the indexer
-cannot parse, relationship commands, SQL, MCP, and repository maps warn that
-relationships may be stale for that file. Re-run `orbit index` to clear the warning.
+File refresh also reparses the changed file's neighbors: files it imports, files
+that import it, and files that share a relationship with it. Relationships between
+unchanged files are kept. A new reference to a file with no import and no prior
+relationship is not discovered until a full `orbit index`. If a changed file imports
+a project file the indexer cannot parse, `context --related`, SQL, MCP, and
+repository maps warn that relationships may be stale for that file. Re-run
+`orbit index` to clear the warning.
+
+`orbit context <fqn> --related` lists every connection of a definition. Each line
+shows direction (`<--` incoming, `-->` outgoing) and edge kind. Connections from
+test, fixture, and generated files are collapsed to a count; `--tests` expands them.
 
 Name/path matches and missing graph relationships do not establish field reads,
 field writes, or dataflow. Inspect source bodies to check these details.
