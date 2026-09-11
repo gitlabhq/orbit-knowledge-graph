@@ -62,6 +62,18 @@ pub fn resolve(
         k_name,
     );
 
+    // Write resolved target paths back to __source_path so downstream
+    // consumers (datasets) can convert to display format.
+    for req in &reqs {
+        let resolved_sym = lang.syms.intern(&req.target_path);
+        let sp_node = trees[req.fi]
+            .children(req.node)
+            .find(|&c| trees[req.fi].kind(c) == k_source_path);
+        if let Some(sn) = sp_node {
+            trees[req.fi].nodes[sn as usize].sym = resolved_sym;
+        }
+    }
+
     let import_edges = build_import_edges(
         trees,
         lang,

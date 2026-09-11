@@ -39,8 +39,13 @@ pub async fn run_yaml_suite(yaml: &str) {
         .collect();
 
     let mut result = tree_dsl::index(lang_id, &fixtures);
-    let datasets = to_datasets(&result.trees, &result.cross_edges, &mut result.lang)
-        .expect("Failed to build datasets");
+    let datasets = to_datasets(
+        &result.trees,
+        &result.cross_edges,
+        &mut result.lang,
+        lang_id,
+    )
+    .expect("Failed to build datasets");
 
     let config = make_graph_config().expect("Failed to build graph config");
     let failures = run_suite(&suite, &datasets, &config).await;
