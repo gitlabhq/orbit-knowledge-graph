@@ -14,6 +14,8 @@ query:
         "aggregations": [{"count": "mr", "as": "open_mr_count"}],
         "limit": 10
     }
+  gql: |
+    MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest) WHERE u.id >= 1 AND u.id <= 10000 AND mr.state = 'opened' RETURN u{.id, .username}, count(mr) AS open_mr_count LIMIT 10
 
 expect:
   skip_requirements: ["filter:state"]

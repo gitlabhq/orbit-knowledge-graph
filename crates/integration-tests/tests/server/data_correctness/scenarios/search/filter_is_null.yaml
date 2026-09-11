@@ -10,6 +10,8 @@ query:
                  "filters": {"avatar_url": {"is_null": true}}}],
       "limit": 10
     }
+  gql: |
+    MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 AND u.avatar_url IS NULL RETURN u.username, u.avatar_url LIMIT 10
 
 expect:
   node_count: 7

@@ -21,6 +21,8 @@ query:
       "aggregations": [{"count": "mr", "as": "approved_count"}],
       "limit": 10
     }
+  gql: |
+    MATCH (u:User)-[:APPROVED]->(mr:MergeRequest)-[:IN_PROJECT]->(p:Project) WHERE p.id >= 1 AND p.id <= 10000 RETURN u{.id, .username}, count(mr) AS approved_count LIMIT 10
 
 expect:
   groups:

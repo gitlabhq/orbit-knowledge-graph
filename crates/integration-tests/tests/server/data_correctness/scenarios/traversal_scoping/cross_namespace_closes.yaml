@@ -21,6 +21,8 @@ query:
         "relationships": [{"type": "CLOSES", "from": "mr", "to": "wi"}],
         "limit": 50
     }
+  gql: |
+    MATCH (mr:MergeRequest)-[:CLOSES]->(wi:WorkItem) WHERE mr.project_id = 1000 RETURN mr.project_id, wi LIMIT 50
 
 expect:
   node_count: 2

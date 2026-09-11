@@ -10,6 +10,8 @@ query:
       "order_by": "u.id",
       "limit": 3
     }
+  gql: |
+    MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username ORDER BY u.id LIMIT 3
 
 expect:
   node_count: 3

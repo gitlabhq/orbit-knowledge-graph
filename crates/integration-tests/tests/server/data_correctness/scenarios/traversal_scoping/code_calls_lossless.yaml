@@ -24,6 +24,8 @@ query:
         "relationships": [{"type": "CALLS", "from": "caller", "to": "def"}],
         "limit": 50
     }
+  gql: |
+    MATCH (caller:Definition)-[:CALLS]->(def:Definition {id: 12000}) RETURN caller, def LIMIT 50
 
 expect:
   node_count: 2

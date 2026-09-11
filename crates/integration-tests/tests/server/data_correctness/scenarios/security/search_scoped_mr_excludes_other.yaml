@@ -11,6 +11,8 @@ query:
       "nodes": [{"id": "mr", "entity": "MergeRequest", "id_range": {"start": 1, "end": 10000}, "columns": ["title"]}],
       "limit": 10
     }
+  gql: |
+    MATCH (mr:MergeRequest) WHERE mr.id >= 1 AND mr.id <= 10000 RETURN mr.title LIMIT 10
 
 expect:
   node_count: 1

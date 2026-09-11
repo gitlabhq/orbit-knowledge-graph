@@ -12,6 +12,8 @@ query:
       "order_by": "-u.id",
       "limit": 10
     }
+  gql: |
+    MATCH (u:User) WHERE u.id IN [1, 2, 3, 5] AND u.id >= 1 AND u.id <= 10000 AND u.state = 'active' RETURN u.username, u.state ORDER BY u.id DESC LIMIT 10
 
 expect:
   node_count: 3

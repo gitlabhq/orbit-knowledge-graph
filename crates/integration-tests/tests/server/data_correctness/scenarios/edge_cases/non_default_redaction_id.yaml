@@ -12,6 +12,8 @@ query:
         "relationships": [{"type": "HAS_DIFF", "from": "mr", "to": "d"}],
         "limit": 20
     }
+  gql: |
+    MATCH (mr:MergeRequest {id: 2000})-[:HAS_DIFF]->(d:MergeRequestDiff) RETURN mr.title, d.state LIMIT 20
 
 expect:
   node_count: 3

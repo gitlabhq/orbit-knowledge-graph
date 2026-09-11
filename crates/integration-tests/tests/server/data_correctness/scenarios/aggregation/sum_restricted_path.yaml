@@ -19,6 +19,8 @@ query:
       "aggregations": [{"sum": "u.id", "as": "id_sum"}],
       "limit": 10
     }
+  gql: |
+    MATCH (g:Group)<-[:MEMBER_OF]-(u:User) WHERE g.id >= 1 AND g.id <= 10000 RETURN g{.id, .name}, sum(u.id) AS id_sum LIMIT 10
 
 expect:
   groups:

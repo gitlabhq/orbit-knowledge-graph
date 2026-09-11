@@ -17,6 +17,8 @@ query:
         "aggregations": [{"count": "p", "as": "project_count"}],
         "limit": 20
     }
+  gql: |
+    MATCH (p:Project)<-[:`CONTAINS`]-(g:Group) WHERE p.id >= 1 AND p.id <= 10000 RETURN g{.id, .name}, count(p) AS project_count LIMIT 20
 
 expect:
   groups:

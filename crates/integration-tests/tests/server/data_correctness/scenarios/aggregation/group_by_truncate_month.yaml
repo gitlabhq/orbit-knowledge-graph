@@ -19,6 +19,8 @@ query:
       "aggregation_sort": "n_created_at_month",
       "limit": 20
     }
+  gql: |
+    MATCH (mr:MergeRequest)-[:HAS_NOTE]->(n:Note) WHERE mr.id IN [2000, 2001] AND n.created_at >= '2024-01-01T00:00:00Z' RETURN date_trunc('month', n.created_at), count(n) AS note_count ORDER BY n_created_at_month LIMIT 20
 
 expect:
   skip_requirements: ["node_ids", "filter:created_at", "aggregation_sort", "aggregation"]

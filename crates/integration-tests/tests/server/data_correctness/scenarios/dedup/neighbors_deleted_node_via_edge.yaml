@@ -30,6 +30,8 @@ query:
       "nodes": [{"id": "mr", "entity": "MergeRequest", "node_ids": [9311]}],
       "neighbors": {"direction": "both"}
     }
+  gql: |
+    MATCH (mr:MergeRequest {id: 9311})--(n) RETURN mr, n
 
 expect:
   skip_requirements: [node_count]

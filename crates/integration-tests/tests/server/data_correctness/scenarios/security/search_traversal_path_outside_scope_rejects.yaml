@@ -12,6 +12,8 @@ query:
                  "filters": {"traversal_path": {"starts_with": "1/"}}}],
       "limit": 10
     }
+  gql: |
+    MATCH (p:Project) WHERE p.traversal_path STARTS WITH '1/' RETURN p LIMIT 10
 
 expect:
   compile_error: "authorized traversal_path scope"

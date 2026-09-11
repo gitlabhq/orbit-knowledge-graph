@@ -30,6 +30,8 @@ query:
       "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
       "limit": 10
     }
+  gql: |
+    MATCH (u:User {id: 9600})-[:MEMBER_OF]->(g:Group) RETURN u.username, u.name, g LIMIT 10
 
 expect:
   skip_requirements: [node_count]

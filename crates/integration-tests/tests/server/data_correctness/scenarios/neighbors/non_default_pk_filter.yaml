@@ -12,6 +12,8 @@ query:
       }],
       "neighbors": {"direction": "incoming", "rel_types": ["HAS_DIFF"]}
     }
+  gql: |
+    MATCH (d:MergeRequestDiff)<-[:HAS_DIFF]-(n) WHERE d.head_commit_sha STARTS WITH 'aaaa' RETURN d, n
 
 expect:
   skip_requirements:

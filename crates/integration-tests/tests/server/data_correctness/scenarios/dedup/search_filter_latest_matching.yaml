@@ -18,6 +18,8 @@ query:
                  "filters": {"state": "active"}}],
       "limit": 100
     }
+  gql: |
+    MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 AND u.state = 'active' RETURN u.username, u.state LIMIT 100
 
 expect:
   skip_requirements: [node_count]

@@ -13,6 +13,8 @@ query:
                }}],
       "limit": 10
     }
+  gql: |
+    MATCH (mr:MergeRequest) WHERE mr.id IN [2000, 2001, 2002, 2003, 2004, 2005] AND mr.diff = 'nonexistent content' RETURN mr.title, mr.diff LIMIT 10
 
 expect:
   skip_requirements:

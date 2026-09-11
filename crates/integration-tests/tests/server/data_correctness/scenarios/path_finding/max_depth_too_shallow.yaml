@@ -12,6 +12,8 @@ query:
       "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 1,
                "rel_types": ["CONTAINS", "MEMBER_OF"]}
     }
+  gql: |
+    MATCH p = shortestPath((start:User {id: 1})-[:`CONTAINS`|MEMBER_OF*1]->(`end`:Project {id: 1000})) RETURN p
 
 expect:
   path_count: 0

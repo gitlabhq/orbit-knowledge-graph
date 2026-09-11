@@ -49,6 +49,8 @@ query:
         "aggregations": [{"count": "mr", "as": "c"}],
         "limit": 10
     }
+  gql: |
+    MATCH (g:Group)-[:`CONTAINS`]->(p:Project)<-[:IN_PROJECT]-(mr:MergeRequest)<-[:AUTHORED]-(u:User) WHERE g.full_path = 'g700' RETURN u{.id, .username}, count(mr) AS c LIMIT 10
 
 expect:
   groups:

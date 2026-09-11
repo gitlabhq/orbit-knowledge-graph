@@ -13,6 +13,8 @@ query:
                }}],
       "limit": 10
     }
+  gql: |
+    MATCH (f:File) WHERE f.project_id = 1000 AND f.content CONTAINS 'ClickHouse' RETURN f.path LIMIT 10
 
 expect:
   compile_error: true

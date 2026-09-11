@@ -18,6 +18,8 @@ query:
       "aggregations": [{"count": "mr", "as": "mr_edge_count"}],
       "limit": 10
     }
+  gql: |
+    MATCH (u:User)-->(mr:MergeRequest) WHERE u.id >= 1 AND u.id <= 10000 RETURN u{.id, .username}, count(mr) AS mr_edge_count LIMIT 10
 
 expect:
   groups:

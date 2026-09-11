@@ -9,6 +9,8 @@ query:
                  "node_ids": [100, 102]}],
       "limit": 10
     }
+  gql: |
+    MATCH (g:Group) WHERE g.id IN [100, 102] RETURN g.name LIMIT 10
 
 expect:
   node_count: 2

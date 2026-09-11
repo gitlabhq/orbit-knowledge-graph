@@ -34,6 +34,8 @@ query:
       "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
       "limit": 10
     }
+  gql: |
+    MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1003}) WHERE mr.state = 'merged' RETURN mr, p LIMIT 10
 
 expect:
   skip_requirements: ["filter:state"]

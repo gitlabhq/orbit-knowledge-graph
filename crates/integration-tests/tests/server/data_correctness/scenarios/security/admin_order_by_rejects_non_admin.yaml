@@ -9,6 +9,8 @@ query:
       "order_by": "-u.is_admin",
       "limit": 10
     }
+  gql: |
+    MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username ORDER BY u.is_admin DESC LIMIT 10
 
 expect:
   compile_error: true

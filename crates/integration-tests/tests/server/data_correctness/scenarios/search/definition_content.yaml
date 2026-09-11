@@ -13,6 +13,8 @@ query:
                }}],
       "limit": 10
     }
+  gql: |
+    MATCH (d:Definition) WHERE d.id IN [12000, 12001, 12002, 12100, 12102] AND d.content CONTAINS 'normalize' RETURN d.name, d.file_path, d.content LIMIT 10
 
 expect:
   node_count: 1

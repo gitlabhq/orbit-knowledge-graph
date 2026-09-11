@@ -9,6 +9,8 @@ query:
       "neighbors": {"direction": "both", "rel_types": ["MEMBER_OF", "CONTAINS"]},
       "limit": 50
     }
+  gql: |
+    MATCH (g:Group {id: 100})-[:MEMBER_OF|`CONTAINS`]-(n) RETURN g, n LIMIT 50
 
 expect:
   node_count: 7

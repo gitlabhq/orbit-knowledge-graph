@@ -18,6 +18,8 @@ query:
       "aggregations": [{"min": "u.username", "as": "first_username"}],
       "limit": 10
     }
+  gql: |
+    MATCH (g:Group)<-[:MEMBER_OF]-(u:User) WHERE g.id >= 1 AND g.id <= 10000 RETURN g{.id, .name}, min(u.username) AS first_username LIMIT 10
 
 expect:
   groups:

@@ -10,6 +10,8 @@ query:
                  "filters": {"visibility_level": {"in": ["public", "internal"]}}}],
       "limit": 10
     }
+  gql: |
+    MATCH (p:Project) WHERE p.id >= 1 AND p.id <= 10000 AND p.visibility_level IN ['public', 'internal'] RETURN p.name, p.visibility_level LIMIT 10
 
 expect:
   node_count: 4

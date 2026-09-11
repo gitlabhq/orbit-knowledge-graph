@@ -20,6 +20,8 @@ query:
       }],
       "limit": 10
     }
+  gql: |
+    MATCH (u:User {id: 1})-[:MEMBER_OF {traversal_path: '1/102/'}]->(g:Group) RETURN u, g LIMIT 10
 
 expect:
   compile_error: "authorized traversal_path scope"

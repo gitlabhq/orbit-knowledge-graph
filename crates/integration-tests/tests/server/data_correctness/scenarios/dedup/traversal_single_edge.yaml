@@ -26,6 +26,8 @@ query:
       "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
       "limit": 10
     }
+  gql: |
+    MATCH (u:User {id: 9003})-[:AUTHORED]->(mr:MergeRequest) RETURN u, mr LIMIT 10
 
 expect:
   node_count: 2
