@@ -10,6 +10,8 @@ query:
       "order_by": "mr.merged_at",
       "cursor": {"page_size": 2}
     }
+  gql: |
+    MATCH (mr:MergeRequest) WHERE mr.id >= 1 AND mr.id <= 10000 RETURN mr.title ORDER BY mr.merged_at PAGE 2
 
 expect:
   all_pages:
