@@ -5,6 +5,8 @@
 //! Stages: cst, rewrite, ssa (default: ssa)
 //! Languages: py, ts, js, rs
 
+use std::io::IsTerminal;
+
 use tree_dsl::grammar::{self, SupportLang};
 use tree_dsl::lang::Lang;
 use tree_dsl::run::Pipeline;
@@ -38,11 +40,13 @@ fn main() {
             buf
         });
 
+    let color = std::io::stdout().is_terminal();
+
     match stage.as_str() {
         "cst" => {
             let mut lang = Lang::new();
             let tree = grammar::parse(&source, lang_id, &mut lang, "test");
-            println!("{}", pretty_print(&tree, &lang));
+            println!("{}", pretty_print(&tree, &lang, color));
         }
         "rewrite" => {
             let (pipeline, mut lang) = Pipeline::for_lang(lang_id);
@@ -50,12 +54,12 @@ fn main() {
             for rules in &pipeline.rewrite_stages {
                 tree_dsl::pattern::apply_rewrites(&mut tree, &mut lang, rules);
             }
-            println!("{}", pretty_print(&tree, &lang));
+            println!("{}", pretty_print(&tree, &lang, color));
         }
         "ssa" => {
             let (pipeline, mut lang) = Pipeline::for_lang(lang_id);
             let tree = tree_dsl::run::process_file("test", &source, &mut lang, &pipeline);
-            println!("{}", pretty_print(&tree, &lang));
+            println!("{}", pretty_print(&tree, &lang, color));
             if !tree.edges.is_empty() {
                 println!("edges:");
                 for e in &tree.edges {
