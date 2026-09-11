@@ -63,7 +63,7 @@ pub fn resolve(
         index_names,
         k_name,
     );
-    rewrite_sources(trees, lang, &reqs, k_source, fqn_sep);
+    rewrite_sources(trees, lang, &reqs, k_source, k_source_path, fqn_sep);
     let import_edges = build_import_edges(
         trees,
         lang,
@@ -358,9 +358,25 @@ fn rewrite_sources(
     lang: &mut Lang,
     reqs: &[ImportReq],
     k_source: u16,
+    k_source_path: u16,
     fqn_sep: &str,
 ) {
     for req in reqs {
+        let source_path = trees[req.fi]
+            .children(req.node)
+            .find(|&c| trees[req.fi].kind(c) == k_source_path)
+            .map(|c| {
+                lang.syms
+                    .resolve(trees[req.fi].nodes[c as usize].sym)
+                    .to_string()
+            })
+            .unwrap_or_default();
+        // Only rewrite __source when the import was resolved through a
+        // different path (e.g. Python relative ".models" → "mypackage.models").
+        // Skip when the source is already a display-ready path (TS "./utils").
+        if source_path.starts_with("./") || source_path.starts_with("../") {
+            continue;
+        }
         let resolved = req.target_path.replace('/', fqn_sep);
         let resolved_sym = lang.syms.intern(&resolved);
         let src_node = trees[req.fi]
