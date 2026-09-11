@@ -2,6 +2,7 @@ use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use clickhouse_client::ArrowClickHouseClient;
+use ontology::Ontology;
 use ontology::archive::OntologyArchive;
 use opentelemetry::KeyValue;
 use orbit_migrations::catalog::OntologyCatalog;
@@ -29,112 +30,44 @@ impl SchemaWatcher {
     ) -> Arc<Self> {
         let watcher = Arc::new(Self::default());
         register_state_gauge(&watcher);
-        let target = watcher.clone();
-        let path_config = config.path_resolver.clone();
+        let loader = ServingSchemaLoader {
+            graph,
+            embedded,
+            catalog,
+            path_config: config.path_resolver.clone(),
+        };
         let poll_interval = Duration::from_secs(config.schema.version_poll_interval_secs);
-        tokio::spawn(async move {
-            let mut interval = tokio::time::interval(poll_interval);
-            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-            loop {
-                tokio::select! {
-                    _ = shutdown.cancelled() => return,
-                    _ = interval.tick() => {}
-                }
-                tokio::select! {
-                    _ = shutdown.cancelled() => return,
-                    result = target.refresh(&graph, &catalog, &embedded, &path_config) => {
-                        if let Err(error) = result {
-                            warn!(%error, "serving schema refresh failed; retrying");
-                        }
-                    }
-                }
-            }
-        });
+        tokio::spawn(watch_loop(watcher.clone(), loader, poll_interval, shutdown));
         watcher
     }
 
     pub(crate) fn snapshot(&self) -> Result<Arc<ServingSchema>, Status> {
+        self.current()
+            .ok_or_else(|| Status::unavailable("Active schema is unavailable"))
+    }
+
+    fn current(&self) -> Option<Arc<ServingSchema>> {
         self.current
             .read()
             .expect("serving schema lock poisoned")
             .clone()
-            .ok_or_else(|| Status::unavailable("Active schema is unavailable"))
     }
 
-    async fn refresh(
-        &self,
-        graph: &Arc<ArrowClickHouseClient>,
-        catalog: &OntologyCatalog,
-        embedded: &OntologyArchive,
-        path_config: &PathResolverConfig,
-    ) -> anyhow::Result<()> {
-        let Some(active_version) = read_active_version(graph).await? else {
-            *self.current.write().expect("serving schema lock poisoned") = None;
-            return Ok(());
-        };
-        let current = self
-            .snapshot()
-            .ok()
-            .filter(|schema| schema.migration_version == active_version);
-        let installing_schema = current.is_none();
-
-        let candidate = if let Some(schema) = current {
-            Ok(schema)
-        } else {
-            async {
-                let stored;
-                let archive = if active_version == embedded.schema_version() {
-                    embedded
-                } else {
-                    stored = catalog.load(active_version).await?;
-                    &stored
-                };
-                let ontology = Arc::new(
-                    archive
-                        .load_ontology()?
-                        .with_schema_version_prefix(&table_prefix(active_version)),
-                );
-                let resolver =
-                    Arc::new(PathResolver::new(graph.clone(), &ontology, path_config).await);
-                ServingSchema::new(active_version, ontology, resolver).map(Arc::new)
-            }
-            .await
-        };
-
-        let tables_complete = match &candidate {
-            Ok(schema) => {
-                version_tables_complete(graph, active_version, &schema.expected_table_names).await?
-            }
-            Err(_) => false,
-        };
-
-        let confirmed_version = read_active_version(graph).await?;
-        if confirmed_version != Some(active_version) {
-            if confirmed_version.is_none() {
-                *self.current.write().expect("serving schema lock poisoned") = None;
-            }
-            return Ok(());
-        }
-        let schema = match candidate {
-            Ok(schema) => schema,
-            Err(error) => {
-                *self.current.write().expect("serving schema lock poisoned") = None;
-                return Err(error.context(format!("active ontology v{active_version} unavailable")));
-            }
-        };
-        *self.current.write().expect("serving schema lock poisoned") =
-            tables_complete.then_some(schema);
-        if installing_schema && tables_complete {
+    fn install(&self, schema: Option<Arc<ServingSchema>>) {
+        let installed_version = schema.as_ref().map(|schema| schema.migration_version);
+        let mut slot = self.current.write().expect("serving schema lock poisoned");
+        let previous_version = slot.as_ref().map(|schema| schema.migration_version);
+        *slot = schema;
+        if installed_version != previous_version {
             info!(
-                migration_version = active_version,
-                "serving schema installed"
+                migration_version = installed_version,
+                "serving schema changed"
             );
         }
-        Ok(())
     }
 
     #[cfg(any(test, feature = "testkit"))]
-    pub fn fixed(ontology: Arc<ontology::Ontology>) -> Arc<Self> {
+    pub fn fixed(ontology: Arc<Ontology>) -> Arc<Self> {
         use clickhouse_client::ClickHouseConfigurationExt;
         let config = AppConfig::embedded_defaults();
         let resolver = PathResolver::without_dictionaries(
@@ -154,6 +87,94 @@ impl SchemaWatcher {
     }
 }
 
+struct ServingSchemaLoader {
+    graph: Arc<ArrowClickHouseClient>,
+    embedded: OntologyArchive,
+    catalog: OntologyCatalog,
+    path_config: PathResolverConfig,
+}
+
+impl ServingSchemaLoader {
+    async fn load(&self, version: u32) -> anyhow::Result<Arc<ServingSchema>> {
+        let ontology = Arc::new(
+            self.load_ontology(version)
+                .await?
+                .with_schema_version_prefix(&table_prefix(version)),
+        );
+        let resolver =
+            Arc::new(PathResolver::new(self.graph.clone(), &ontology, &self.path_config).await);
+        ServingSchema::new(version, ontology, resolver).map(Arc::new)
+    }
+
+    async fn load_ontology(&self, version: u32) -> anyhow::Result<Ontology> {
+        if version == self.embedded.schema_version() {
+            return Ok(self.embedded.load_ontology()?);
+        }
+        Ok(self.catalog.load(version).await?.load_ontology()?)
+    }
+}
+
+async fn watch_loop(
+    watcher: Arc<SchemaWatcher>,
+    loader: ServingSchemaLoader,
+    poll_interval: Duration,
+    shutdown: CancellationToken,
+) {
+    let mut interval = tokio::time::interval(poll_interval);
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    loop {
+        let poll = async {
+            interval.tick().await;
+            refresh(&watcher, &loader).await
+        };
+        tokio::select! {
+            _ = shutdown.cancelled() => return,
+            result = poll => {
+                if let Err(error) = result {
+                    warn!(%error, "serving schema refresh failed; retrying");
+                }
+            }
+        }
+    }
+}
+
+async fn refresh(watcher: &SchemaWatcher, loader: &ServingSchemaLoader) -> anyhow::Result<()> {
+    let Some(active_version) = read_active_version(&loader.graph).await? else {
+        watcher.install(None);
+        return Ok(());
+    };
+
+    let candidate = match watcher
+        .current()
+        .filter(|schema| schema.migration_version == active_version)
+    {
+        Some(schema) => Ok(schema),
+        None => loader.load(active_version).await,
+    };
+    let tables_complete = match &candidate {
+        Ok(schema) => {
+            version_tables_complete(&loader.graph, active_version, &schema.expected_table_names)
+                .await?
+        }
+        Err(_) => false,
+    };
+
+    // A failure only clears the slot once the failed version is confirmed still
+    // active. Otherwise a promotion mid-poll would clear a usable snapshot.
+    if read_active_version(&loader.graph).await? != Some(active_version) {
+        return Ok(());
+    }
+    let schema = match candidate {
+        Ok(schema) => schema,
+        Err(error) => {
+            watcher.install(None);
+            return Err(error.context(format!("active ontology v{active_version} unavailable")));
+        }
+    };
+    watcher.install(tables_complete.then_some(schema));
+    Ok(())
+}
+
 fn register_state_gauge(watcher: &Arc<SchemaWatcher>) {
     use orbit_observability::server::schema_watcher as spec;
     let watcher = Arc::downgrade(watcher);
@@ -161,7 +182,7 @@ fn register_state_gauge(watcher: &Arc<SchemaWatcher>) {
         let Some(watcher) = watcher.upgrade() else {
             return;
         };
-        let ready = watcher.snapshot().is_ok();
+        let ready = watcher.current().is_some();
         for (state, active) in [("ready", ready), ("pending", !ready)] {
             observer.observe(
                 i64::from(active),
