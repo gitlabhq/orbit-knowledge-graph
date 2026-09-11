@@ -1,3 +1,19 @@
+## [0.121.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.120.0...v0.121.0) (2026-09-11)
+
+### Features
+
+* **dx:** complete YAML test coverage, port text-excerpt changes, fix harness robustness ([c71f7b5](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/c71f7b57fca933047e20d85b6f2ea4373956fb02)) by Michael Usachenko
+* **dx:** port all 47 search tests to YAML scenarios ([571eaba](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/571eaba36630b11aeb1d6914c8d3f4f1d71e71e0)) by Michael Usachenko
+
+### Fixes
+
+* **schema:** bootstrap missing legacy ontology archives ([bfd8ef0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/bfd8ef070231fd06b31eab18f1c694978f56abbf)) by Jean-Gabriel Doyon
+
+### Other
+
+* add Argo Translations from GITTECHA-908 [#1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/issues/1) ([47b675e](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/47b675edc51add83edc85fd8412bd1f876dc5315)) by GitLab-Argo Bot
+* **deps:** bump labkit-rs to 80a372d ([0a8b385](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/0a8b3850d0d5dd7c42580e9a9e46219719ce231e)) by Bohdan Parkhomchuk
+
 ## [0.120.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.119.0...v0.120.0) (2026-09-10)
 
 ### ⚠ BREAKING CHANGES
