@@ -377,6 +377,7 @@ pub async fn run_dispatcher(
                 &modules::code::config::CodeTableNames::from_ontology(&ontology)
                     .expect("code tables must resolve from the archived ontology"),
                 checkpoint_store.clone(),
+                config.schedule.tasks.code_backfill.stale_sweeps_per_tick,
             ),
             config.schedule.tasks.code_backfill.clone(),
         )),
