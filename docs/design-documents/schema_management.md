@@ -21,9 +21,9 @@ versioned separately as the `raw_output_format` semver pin in `config/versions.y
 enforced by `scripts/check-pinned-version.sh`. See
 [ADR 004](decisions/004_unified_response_schema.md) for the response format contract.
 
-The integer archive `migration_version` identifies the table-set used by a request and its
-telemetry. Introspection's `schema_version` remains the ontology format version (`0.1`), not
-the migration version. Query DSL and response-format versions remain binary-defined.
+A request's `migration_version` is the version of the archive it was served from; telemetry and
+the ClickHouse `log_comment` report it. Introspection's `schema_version` is still the ontology
+format version (`0.1`).
 
 ### The `schema` pin in `config/versions.yaml`
 
@@ -141,114 +141,59 @@ convention). The prefix is applied at the call site when constructing ClickHouse
 
 ### Webserver serving snapshots
 
-The Webserver follows the `active` version in `gkg_schema_version`. When it matches the binary's
-embedded migration version, the watcher uses the embedded archive; otherwise it loads that
-version's archive from the catalog. It does not substitute the embedded ontology for another
-version. Compatible older and newer archives can both be served without restarting the process.
+The Webserver serves whatever version is `active` in `gkg_schema_version`. It uses its embedded
+archive when that version matches the binary and loads the archive from the catalog otherwise, so
+one binary serves older and newer schemas without a restart.
 
-Each immutable serving snapshot contains:
+A serving snapshot (`crates/orbit-server/src/serving_schema.rs`) is immutable and holds:
 
-- the integer archive `migration_version`;
+- the archive's `migration_version`;
 - the archive's ontology with that version's table prefix applied;
-- the binary's named queries that compile successfully against that ontology; and
-- a per-schema `PathResolver`, so path-resolution caches cannot cross table-sets.
+- the embedded named queries that compile against that ontology (the rest are hidden and rejected);
+- a `PathResolver` for that table-set.
 
-Named queries remain build-time compiled against the embedded ontology. Snapshot construction
-validates each template against the selected archive's ontology and excludes incompatible
-definitions from listing and execution, rather than rejecting the whole archive. The serving snapshot and its
-construction live in `crates/orbit-server/src/serving_schema.rs`, independently of the watcher.
-`ToolService` validates commands without an ontology and returns typed plans. For a graph-schema
-plan, the gRPC handler pins a snapshot and passes its ontology to the schema renderer. Static
-commands return immediate results without accessing a snapshot.
+Every request pins one snapshot for its whole run, from compilation through path resolution and
+redaction, so a promotion cannot switch tables under a running query. Streaming requests pin the
+snapshot before waiting for input, and `grpc.stream_timeout_secs` is one absolute deadline for
+input, execution, and the final send, so an idle stream cannot pin a retired snapshot forever.
 
-```plaintext
-active migration version
-  → embedded archive when versions match, otherwise catalog archive
-  → load ontology and apply the active table prefix
-  → compile-filter named queries and construct a per-schema path resolver
-  → recheck active version, then atomically install the complete snapshot
-  → each request pins one snapshot for its entire execution
-```
-
-Compilation, authorization, hydration, redaction, path resolution, and tool execution use the
-request's snapshot. A promotion cannot change the ontology or table prefix halfway through a
-request. The compiler does not discover tables through ClickHouse metadata; it uses the prefixed
-ontology supplied by the snapshot.
-
-Streaming requests pin their snapshot before waiting for initial input. One absolute deadline,
-derived from `grpc.stream_timeout_secs`, bounds initial input, pipeline execution, and the final
-send; each stage shares the same budget rather than restarting it. The pipeline owns its timeout
-handling so its observer remains alive to record the timeout before returning the error.
-
-Serving compatibility depends on the binary's archive loader, ontology parser, compiler, and
-runtime semantics, not on migration-version ordering alone. Archive loading does not guarantee
-that every binary can serve every archive. Before a cross-version rollout, validate the intended
-binary/archive combinations. Supported legacy versions with bundled archives can upgrade directly;
-other missing active archives must be restored from their exact release before migration.
-Publication, rollback, and retention use the existing
-mechanisms; archive-backed serving adds no runtime dependencies, configuration keys, or proto fields.
+Loading an archive does not prove the binary can serve it; that depends on the archive loader,
+parser, and compiler. Validate a cross-version rollout before relying on it.
 
 ### Webserver readiness gate
 
-A background task (`SchemaWatcher`) polls `gkg_schema_version` every
-`schema.version_poll_interval_secs` seconds (default `5`). It builds a replacement snapshot before
-atomically swapping it into the serving slot, leaving the previous snapshot available while the
-replacement is built. It rechecks the active version before installation and discards a candidate
-if that version has changed. Every poll checks that the snapshot's expected tables exist, including
-when the active version is unchanged. The expected table names come from the snapshot's ontology.
-Metadata-read errors retain the previous snapshot, including errors during table checks and the
-active-version recheck. A cold reader stays pending until these checks succeed.
+`SchemaWatcher` polls `gkg_schema_version` every `schema.version_poll_interval_secs` seconds
+(default `5`). Each poll reads the active version, builds a snapshot for it when the installed one
+differs, checks that every table the snapshot's ontology expects exists in `system.tables`, and
+rechecks the active version before installing. Readiness means "a snapshot is installed":
 
-Readiness comes from the actual serving slot, not a separate version-comparison flag:
+| Poll result | Snapshot | `/ready` |
+|---|---|---|
+| no active version | cleared | `503` with `schema_pending` |
+| usable archive and all expected tables, whatever the version relative to the binary | installed | `200` |
+| a table of the active version is missing | cleared | `503` with `schema_pending` |
+| the active archive is missing, corrupt, or fails to load | cleared | `503` with `schema_pending` |
+| version or table metadata read fails | unchanged | last state |
 
-| Watcher result | Snapshot | `/ready` response | Action |
-|---|---|---|---|
-| no active version | cleared | `503` with `schema_pending` | keep polling |
-| usable active archive with all expected tables, older than, equal to, or newer than the binary | installed | `200`, ready | serve traffic |
-| an expected table is missing for the confirmed active version | cleared | `503` with `schema_pending` | retry without restart |
-| active-version or table metadata read fails | unchanged | ready if a snapshot exists, otherwise pending | retry |
-| archive load, parse, or ontology construction fails for the confirmed active version | cleared | `503` with `schema_pending` | retry the archive without restart |
+A failure clears the slot only once the watcher confirms the failed version is still active, so a
+promotion mid-poll cannot wipe a usable snapshot. Every failure retries on the next poll without a
+restart. `/live` never depends on the watcher, and there is no outdated-version shutdown: a newer
+active version is served, not refused.
 
-An archive failure or missing table clears the serving slot only after the watcher confirms that
-the affected version is still active. A changing active version or a metadata-read failure must not
-let a stale failure clear a usable snapshot. A successful read showing no active version clears the
-slot.
+While no snapshot is installed, schema-dependent RPCs (introspection, named queries, query
+execution) return `Unavailable`. Static listings, DSL and format metadata, and `GetClusterHealth`
+still answer. Command arguments are validated first, so a malformed command gets `InvalidArgument`
+even while pending. Requests that already pinned a snapshot keep it.
 
-`/live` is independent of the watcher. The Webserver has only ready and pending schema states:
-a newer active version does not trigger an outdated-version shutdown, and a `migrating` row does
-not by itself make a usable active snapshot unready. Missing or unusable archives can recover on a
-later poll without a process restart, as can missing tables after they are restored.
+The table check needs the reader role to see the graph database in `system.tables`. It detects
+missing tables only; it does not validate columns or freshness.
 
-Table checks use graph-scoped metadata from `system.tables`; validate this visibility with the
-deployed reader role. They detect missing tables but do not guarantee freshness, validate column
-compatibility, or prevent cleanup between polls. Retention must still cover requests pinned to
-older snapshots during replacement.
+Webservers built before this gate exit when the active version exceeds their binary, so the first
+rollout of the new binary must replace them before a schema promotion.
 
-These checks apply to the new Webserver binary, not to legacy readers already running with an
-outdated-version exit gate. The first rollout still needs verified ordering that replaces those
-readers before schema promotion; a dispatcher-first upgrade can otherwise retain the legacy
-availability gap.
-
-Schema-dependent RPCs return gRPC `Unavailable` while no snapshot exists. This includes graph
-introspection, named-query listing and execution, and schema-dependent tool execution. Static
-tool and command listings, response-format and Query DSL metadata, and `GetClusterHealth` remain
-available independently of the serving snapshot. Requests that already pinned a snapshot keep it
-even if the serving slot is later cleared.
-
-Agent command arguments are validated before checking schema availability. A malformed
-`get_graph_schema` command returns `InvalidArgument` even while the schema is pending; a valid
-command returns `Unavailable` until a snapshot is available.
-
-The webserver `/ready` endpoint intentionally checks only this local schema state. The HealthCheck
-service's `/health` endpoint separately aggregates ClickHouse and Kubernetes Deployment and
-StatefulSet health. GitLab connectivity and JWT authentication are reported separately as a
-reporting-only component in the Webserver's `GetClusterHealth` gRPC response, which Rails exposes at
-`GET /api/v4/orbit/status`. That diagnostic is not part of readiness or the HealthCheck service
-aggregate and cannot change the top-level cluster status.
-
-`ClusterHealthChecker` can report an unhealthy Kubernetes aggregate as `Migrating` when a
-`migrating` row exists and ClickHouse is healthy. This diagnostic is separate from snapshot
-readiness; a migration with ready Webservers does not need that overlay. See
+`/ready` checks only this local state. The HealthCheck service's `/health` aggregates ClickHouse
+and Kubernetes health separately, and `ClusterHealthChecker` may label an unhealthy Kubernetes
+aggregate `Migrating` while a `migrating` row exists; see
 [`health_check.md`](health_check.md#migration-awareness).
 
 Implemented in `crates/orbit-server/src/schema_watcher.rs`.
@@ -356,9 +301,8 @@ back, not a mistake to refuse. Indexers do not run DDL; they gate on the version
    prefixed or cloned.
 
 5. **Mark migrating** — Insert the new version with status `migrating` in `gkg_schema_version`.
-   This signals indexers that the new-prefix tables exist. Webservers continue serving the
-   active archive while the target tables are filled. They switch new requests to the target
-   archive only after promotion to `active` and successful snapshot installation.
+   This signals indexers that the new-prefix tables exist. Webservers keep serving the active
+   archive until the target is promoted.
 
 6. **Release lock** — Allow other pods to proceed.
 
@@ -469,11 +413,8 @@ Promotion and retained-table rollback change active/retired statuses in one
 [synchronous insert](https://clickhouse.com/docs/guides/developer/transactional).
 Archive storage and view changes are not transactional with that write. Promotion then clears the campaign.
 
-On promotion, each Webserver loads the active archive and atomically installs its snapshot after
-rechecking the active version. Compatible binaries switch without restarting, regardless of
-whether their embedded version is older or newer. In-flight requests retain their original
-snapshot; requests admitted after the swap use the replacement. Archive failures follow the
-pending-and-retry behavior described above.
+On promotion, every Webserver swaps to the new archive on its next poll without restarting (see
+"Webserver readiness gate"). Requests already running keep their snapshot.
 
 ### Automatic cleanup via retention window
 
@@ -515,11 +456,8 @@ Cleanup behavior:
    drops. NATS cleanup or dropped-marker failures are logged, but are not independently queued for
    retry once no droppable ClickHouse objects remain for that version.
 
-In-flight requests still need the tables referenced by their pinned snapshot. Keep those retired
-tables available until the requests finish or hit their stream deadline. Snapshot references are
-not database leases and do not extend the retention keep-set: the existing count-based cleanup
-does not guarantee survival across arbitrarily many promotions. Operators must size retention
-and space promotions accordingly; pinning an ontology alone does not protect its tables from GC.
+Pinned snapshots do not extend the keep-set. Retired tables must outlive the requests still pinned
+to them, so size `max_retained_versions` and space promotions accordingly.
 
 ### Safety guarantees
 

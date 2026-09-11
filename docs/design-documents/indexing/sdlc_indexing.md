@@ -385,11 +385,9 @@ The Orbit schema is declared in `config/graph.sql` (generated from the ontology)
 
 Migration requires usable [ontology archives](../schema_management.md#ontology-archives) for both the active and target versions.
 
-The active table-set continues serving queries while the target version is built; this does not
-require the two ontologies to be backward compatible. `MigrationCompletionChecker` promotes the
-target to `active` and retires the old version once the required namespaced and global pipelines
-complete. Each Webserver must still be able to load and serve the promoted archive; there is no
-universal binary/archive compatibility guarantee.
+The active table-set keeps serving queries while the target version is built, so the two schemas
+need not be backward compatible. `MigrationCompletionChecker` promotes the target to `active` and
+retires the old version once the required namespaced and global pipelines complete.
 
 There are multiple types of schema changes the system accounts for:
 
@@ -448,12 +446,9 @@ Indexers then fill the rebuilt tables through the normal global and namespace sw
 
 **Schema update coordination**
 
-The Webserver's `SchemaWatcher` polls `gkg_schema_version` and installs the active archive's
-ontology without restarting, provided the binary can serve it. Readiness reflects snapshot
-availability, not version equality. In-flight requests retain their original snapshot through
-promotion or rollback and still need its tables until completion. See
-[schema management](../schema_management.md#webserver-serving-snapshots) for archive recovery,
-rollout prerequisites, and retention limits.
+The Webserver's `SchemaWatcher` polls `gkg_schema_version` and swaps to the active archive without
+restarting; requests already running keep their snapshot. See
+[schema management](../schema_management.md#webserver-serving-snapshots).
 
 **Closing notes**
 
