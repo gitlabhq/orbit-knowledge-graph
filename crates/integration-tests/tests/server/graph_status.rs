@@ -13,7 +13,7 @@ use integration_testkit::{load_ontology, run_subtests_shared, t};
 use nats_client::testkit::MockKvServices;
 use orbit_server::graph_status::GraphStatusService;
 use orbit_server::proto::{
-    BackfillState, GetGraphStatusResponse, ResponseFormat, StructuredGraphStatus,
+    GetGraphStatusResponse, IndexingState, ResponseFormat, StructuredGraphStatus,
     get_graph_status_response,
 };
 
@@ -217,9 +217,10 @@ async fn unavailable_status_preserves_inventory(ctx: &TestContext) {
             .unwrap();
         let status = extract_structured(response);
         assert_eq!(status.projects.unwrap().total_known, 2);
-        let backfill = status.backfill.unwrap();
-        assert_eq!(backfill.state(), BackfillState::Unknown);
-        assert_eq!(backfill.last_progress_at, None);
+        let indexing = status.indexing.unwrap();
+        assert_eq!(indexing.state(), IndexingState::Unknown);
+        assert_eq!(indexing.last_progress_at, None);
+        assert_eq!(indexing.completed_projects, None);
     }
 }
 
@@ -608,7 +609,7 @@ async fn get_status_degrades_when_entity_count_table_missing(ctx: &TestContext) 
 
     let projects = status.projects.expect("projects should be present");
     assert_eq!(projects.total_known, 1);
-    assert_eq!(status.backfill.unwrap().state(), BackfillState::Running);
+    assert_eq!(status.indexing.unwrap().state(), IndexingState::Backfilling);
 
     let core = find_domain(&status.domains, "core");
     assert_eq!(

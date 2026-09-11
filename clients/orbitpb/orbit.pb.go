@@ -273,53 +273,64 @@ func (SourceType) EnumDescriptor() ([]byte, []int) {
 	return file_orbit_proto_rawDescGZIP(), []int{4}
 }
 
-// Initial indexing of a root namespace. UNKNOWN means no record could be read.
-type BackfillState int32
+// Initial indexing of the root namespace. Only BACKFILLING, INDEXED, and
+// UNKNOWN (no record could be read) are emitted; the other values stay for
+// clients generated from earlier releases.
+type IndexingState int32
 
 const (
-	BackfillState_BACKFILL_STATE_UNKNOWN   BackfillState = 0
-	BackfillState_BACKFILL_STATE_RUNNING   BackfillState = 1
-	BackfillState_BACKFILL_STATE_COMPLETED BackfillState = 2
+	IndexingState_INDEXING_STATE_NOT_INDEXED IndexingState = 0
+	IndexingState_INDEXING_STATE_BACKFILLING IndexingState = 1
+	IndexingState_INDEXING_STATE_INDEXED     IndexingState = 2
+	IndexingState_INDEXING_STATE_ERROR       IndexingState = 3
+	IndexingState_INDEXING_STATE_UNKNOWN     IndexingState = 4
+	IndexingState_INDEXING_STATE_INDEXING    IndexingState = 5
 )
 
-// Enum value maps for BackfillState.
+// Enum value maps for IndexingState.
 var (
-	BackfillState_name = map[int32]string{
-		0: "BACKFILL_STATE_UNKNOWN",
-		1: "BACKFILL_STATE_RUNNING",
-		2: "BACKFILL_STATE_COMPLETED",
+	IndexingState_name = map[int32]string{
+		0: "INDEXING_STATE_NOT_INDEXED",
+		1: "INDEXING_STATE_BACKFILLING",
+		2: "INDEXING_STATE_INDEXED",
+		3: "INDEXING_STATE_ERROR",
+		4: "INDEXING_STATE_UNKNOWN",
+		5: "INDEXING_STATE_INDEXING",
 	}
-	BackfillState_value = map[string]int32{
-		"BACKFILL_STATE_UNKNOWN":   0,
-		"BACKFILL_STATE_RUNNING":   1,
-		"BACKFILL_STATE_COMPLETED": 2,
+	IndexingState_value = map[string]int32{
+		"INDEXING_STATE_NOT_INDEXED": 0,
+		"INDEXING_STATE_BACKFILLING": 1,
+		"INDEXING_STATE_INDEXED":     2,
+		"INDEXING_STATE_ERROR":       3,
+		"INDEXING_STATE_UNKNOWN":     4,
+		"INDEXING_STATE_INDEXING":    5,
 	}
 )
 
-func (x BackfillState) Enum() *BackfillState {
-	p := new(BackfillState)
+func (x IndexingState) Enum() *IndexingState {
+	p := new(IndexingState)
 	*p = x
 	return p
 }
 
-func (x BackfillState) String() string {
+func (x IndexingState) String() string {
 	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
 }
 
-func (BackfillState) Descriptor() protoreflect.EnumDescriptor {
+func (IndexingState) Descriptor() protoreflect.EnumDescriptor {
 	return file_orbit_proto_enumTypes[5].Descriptor()
 }
 
-func (BackfillState) Type() protoreflect.EnumType {
+func (IndexingState) Type() protoreflect.EnumType {
 	return &file_orbit_proto_enumTypes[5]
 }
 
-func (x BackfillState) Number() protoreflect.EnumNumber {
+func (x IndexingState) Number() protoreflect.EnumNumber {
 	return protoreflect.EnumNumber(x)
 }
 
-// Deprecated: Use BackfillState.Descriptor instead.
-func (BackfillState) EnumDescriptor() ([]byte, []int) {
+// Deprecated: Use IndexingState.Descriptor instead.
+func (IndexingState) EnumDescriptor() ([]byte, []int) {
 	return file_orbit_proto_rawDescGZIP(), []int{5}
 }
 
@@ -2866,31 +2877,39 @@ func (x *GetGraphStatusRequest) GetFormat() ResponseFormat {
 	return ResponseFormat_RESPONSE_FORMAT_RAW
 }
 
-// Root-namespace scope regardless of the requested traversal_path.
-type BackfillStatus struct {
-	state          protoimpl.MessageState `protogen:"open.v1"`
-	State          BackfillState          `protobuf:"varint,1,opt,name=state,proto3,enum=orbit.v1.BackfillState" json:"state,omitempty"`
-	LastProgressAt *string                `protobuf:"bytes,2,opt,name=last_progress_at,json=lastProgressAt,proto3,oneof" json:"last_progress_at,omitempty"`
-	Sdlc           *BackfillCounts        `protobuf:"bytes,3,opt,name=sdlc,proto3" json:"sdlc,omitempty"`
-	Code           *BackfillCounts        `protobuf:"bytes,4,opt,name=code,proto3" json:"code,omitempty"` // informational; code has no total
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+// Initial indexing of the root namespace, regardless of the requested
+// traversal_path. Fields 2 and 4-7 are no longer populated.
+type IndexingStatus struct {
+	state              protoimpl.MessageState `protogen:"open.v1"`
+	State              IndexingState          `protobuf:"varint,1,opt,name=state,proto3,enum=orbit.v1.IndexingState" json:"state,omitempty"`
+	LastStartedAt      *string                `protobuf:"bytes,2,opt,name=last_started_at,json=lastStartedAt,proto3,oneof" json:"last_started_at,omitempty"`
+	LastCompletedAt    *string                `protobuf:"bytes,3,opt,name=last_completed_at,json=lastCompletedAt,proto3,oneof" json:"last_completed_at,omitempty"`
+	LastDurationMs     *uint64                `protobuf:"varint,4,opt,name=last_duration_ms,json=lastDurationMs,proto3,oneof" json:"last_duration_ms,omitempty"`
+	LastError          *string                `protobuf:"bytes,5,opt,name=last_error,json=lastError,proto3,oneof" json:"last_error,omitempty"`
+	LastRowsRead       *uint64                `protobuf:"varint,6,opt,name=last_rows_read,json=lastRowsRead,proto3,oneof" json:"last_rows_read,omitempty"`
+	LastRowsWritten    *uint64                `protobuf:"varint,7,opt,name=last_rows_written,json=lastRowsWritten,proto3,oneof" json:"last_rows_written,omitempty"`
+	LastProgressAt     *string                `protobuf:"bytes,8,opt,name=last_progress_at,json=lastProgressAt,proto3,oneof" json:"last_progress_at,omitempty"` // newest checkpoint, present while running too
+	CompletedPipelines *uint64                `protobuf:"varint,9,opt,name=completed_pipelines,json=completedPipelines,proto3,oneof" json:"completed_pipelines,omitempty"`
+	TotalPipelines     *uint64                `protobuf:"varint,10,opt,name=total_pipelines,json=totalPipelines,proto3,oneof" json:"total_pipelines,omitempty"`
+	CompletedProjects  *uint64                `protobuf:"varint,11,opt,name=completed_projects,json=completedProjects,proto3,oneof" json:"completed_projects,omitempty"` // code has no total: projects keep arriving
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
-func (x *BackfillStatus) Reset() {
-	*x = BackfillStatus{}
+func (x *IndexingStatus) Reset() {
+	*x = IndexingStatus{}
 	mi := &file_orbit_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *BackfillStatus) String() string {
+func (x *IndexingStatus) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*BackfillStatus) ProtoMessage() {}
+func (*IndexingStatus) ProtoMessage() {}
 
-func (x *BackfillStatus) ProtoReflect() protoreflect.Message {
+func (x *IndexingStatus) ProtoReflect() protoreflect.Message {
 	mi := &file_orbit_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -2902,87 +2921,84 @@ func (x *BackfillStatus) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use BackfillStatus.ProtoReflect.Descriptor instead.
-func (*BackfillStatus) Descriptor() ([]byte, []int) {
+// Deprecated: Use IndexingStatus.ProtoReflect.Descriptor instead.
+func (*IndexingStatus) Descriptor() ([]byte, []int) {
 	return file_orbit_proto_rawDescGZIP(), []int{40}
 }
 
-func (x *BackfillStatus) GetState() BackfillState {
+func (x *IndexingStatus) GetState() IndexingState {
 	if x != nil {
 		return x.State
 	}
-	return BackfillState_BACKFILL_STATE_UNKNOWN
+	return IndexingState_INDEXING_STATE_NOT_INDEXED
 }
 
-func (x *BackfillStatus) GetLastProgressAt() string {
+func (x *IndexingStatus) GetLastStartedAt() string {
+	if x != nil && x.LastStartedAt != nil {
+		return *x.LastStartedAt
+	}
+	return ""
+}
+
+func (x *IndexingStatus) GetLastCompletedAt() string {
+	if x != nil && x.LastCompletedAt != nil {
+		return *x.LastCompletedAt
+	}
+	return ""
+}
+
+func (x *IndexingStatus) GetLastDurationMs() uint64 {
+	if x != nil && x.LastDurationMs != nil {
+		return *x.LastDurationMs
+	}
+	return 0
+}
+
+func (x *IndexingStatus) GetLastError() string {
+	if x != nil && x.LastError != nil {
+		return *x.LastError
+	}
+	return ""
+}
+
+func (x *IndexingStatus) GetLastRowsRead() uint64 {
+	if x != nil && x.LastRowsRead != nil {
+		return *x.LastRowsRead
+	}
+	return 0
+}
+
+func (x *IndexingStatus) GetLastRowsWritten() uint64 {
+	if x != nil && x.LastRowsWritten != nil {
+		return *x.LastRowsWritten
+	}
+	return 0
+}
+
+func (x *IndexingStatus) GetLastProgressAt() string {
 	if x != nil && x.LastProgressAt != nil {
 		return *x.LastProgressAt
 	}
 	return ""
 }
 
-func (x *BackfillStatus) GetSdlc() *BackfillCounts {
-	if x != nil {
-		return x.Sdlc
-	}
-	return nil
-}
-
-func (x *BackfillStatus) GetCode() *BackfillCounts {
-	if x != nil {
-		return x.Code
-	}
-	return nil
-}
-
-type BackfillCounts struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Completed     uint64                 `protobuf:"varint,1,opt,name=completed,proto3" json:"completed,omitempty"`
-	Total         *uint64                `protobuf:"varint,2,opt,name=total,proto3,oneof" json:"total,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *BackfillCounts) Reset() {
-	*x = BackfillCounts{}
-	mi := &file_orbit_proto_msgTypes[41]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *BackfillCounts) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*BackfillCounts) ProtoMessage() {}
-
-func (x *BackfillCounts) ProtoReflect() protoreflect.Message {
-	mi := &file_orbit_proto_msgTypes[41]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use BackfillCounts.ProtoReflect.Descriptor instead.
-func (*BackfillCounts) Descriptor() ([]byte, []int) {
-	return file_orbit_proto_rawDescGZIP(), []int{41}
-}
-
-func (x *BackfillCounts) GetCompleted() uint64 {
-	if x != nil {
-		return x.Completed
+func (x *IndexingStatus) GetCompletedPipelines() uint64 {
+	if x != nil && x.CompletedPipelines != nil {
+		return *x.CompletedPipelines
 	}
 	return 0
 }
 
-func (x *BackfillCounts) GetTotal() uint64 {
-	if x != nil && x.Total != nil {
-		return *x.Total
+func (x *IndexingStatus) GetTotalPipelines() uint64 {
+	if x != nil && x.TotalPipelines != nil {
+		return *x.TotalPipelines
+	}
+	return 0
+}
+
+func (x *IndexingStatus) GetCompletedProjects() uint64 {
+	if x != nil && x.CompletedProjects != nil {
+		return *x.CompletedProjects
 	}
 	return 0
 }
@@ -3001,7 +3017,7 @@ type GetGraphStatusResponse struct {
 
 func (x *GetGraphStatusResponse) Reset() {
 	*x = GetGraphStatusResponse{}
-	mi := &file_orbit_proto_msgTypes[42]
+	mi := &file_orbit_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3013,7 +3029,7 @@ func (x *GetGraphStatusResponse) String() string {
 func (*GetGraphStatusResponse) ProtoMessage() {}
 
 func (x *GetGraphStatusResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_orbit_proto_msgTypes[42]
+	mi := &file_orbit_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3026,7 +3042,7 @@ func (x *GetGraphStatusResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetGraphStatusResponse.ProtoReflect.Descriptor instead.
 func (*GetGraphStatusResponse) Descriptor() ([]byte, []int) {
-	return file_orbit_proto_rawDescGZIP(), []int{42}
+	return file_orbit_proto_rawDescGZIP(), []int{41}
 }
 
 func (x *GetGraphStatusResponse) GetContent() isGetGraphStatusResponse_Content {
@@ -3075,14 +3091,16 @@ type StructuredGraphStatus struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Projects      *ProjectsStatus        `protobuf:"bytes,1,opt,name=projects,proto3" json:"projects,omitempty"`
 	Domains       []*GraphStatusDomain   `protobuf:"bytes,2,rep,name=domains,proto3" json:"domains,omitempty"`
-	Backfill      *BackfillStatus        `protobuf:"bytes,6,opt,name=backfill,proto3" json:"backfill,omitempty"`
+	Indexing      *IndexingStatus        `protobuf:"bytes,3,opt,name=indexing,proto3" json:"indexing,omitempty"`
+	SdlcIndexing  *IndexingStatus        `protobuf:"bytes,4,opt,name=sdlc_indexing,json=sdlcIndexing,proto3" json:"sdlc_indexing,omitempty"` // no longer populated
+	CodeIndexing  *IndexingStatus        `protobuf:"bytes,5,opt,name=code_indexing,json=codeIndexing,proto3" json:"code_indexing,omitempty"` // no longer populated
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *StructuredGraphStatus) Reset() {
 	*x = StructuredGraphStatus{}
-	mi := &file_orbit_proto_msgTypes[43]
+	mi := &file_orbit_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3094,7 +3112,7 @@ func (x *StructuredGraphStatus) String() string {
 func (*StructuredGraphStatus) ProtoMessage() {}
 
 func (x *StructuredGraphStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_orbit_proto_msgTypes[43]
+	mi := &file_orbit_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3107,7 +3125,7 @@ func (x *StructuredGraphStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StructuredGraphStatus.ProtoReflect.Descriptor instead.
 func (*StructuredGraphStatus) Descriptor() ([]byte, []int) {
-	return file_orbit_proto_rawDescGZIP(), []int{43}
+	return file_orbit_proto_rawDescGZIP(), []int{42}
 }
 
 func (x *StructuredGraphStatus) GetProjects() *ProjectsStatus {
@@ -3124,9 +3142,23 @@ func (x *StructuredGraphStatus) GetDomains() []*GraphStatusDomain {
 	return nil
 }
 
-func (x *StructuredGraphStatus) GetBackfill() *BackfillStatus {
+func (x *StructuredGraphStatus) GetIndexing() *IndexingStatus {
 	if x != nil {
-		return x.Backfill
+		return x.Indexing
+	}
+	return nil
+}
+
+func (x *StructuredGraphStatus) GetSdlcIndexing() *IndexingStatus {
+	if x != nil {
+		return x.SdlcIndexing
+	}
+	return nil
+}
+
+func (x *StructuredGraphStatus) GetCodeIndexing() *IndexingStatus {
+	if x != nil {
+		return x.CodeIndexing
 	}
 	return nil
 }
@@ -3142,7 +3174,7 @@ type ProjectsStatus struct {
 
 func (x *ProjectsStatus) Reset() {
 	*x = ProjectsStatus{}
-	mi := &file_orbit_proto_msgTypes[44]
+	mi := &file_orbit_proto_msgTypes[43]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3154,7 +3186,7 @@ func (x *ProjectsStatus) String() string {
 func (*ProjectsStatus) ProtoMessage() {}
 
 func (x *ProjectsStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_orbit_proto_msgTypes[44]
+	mi := &file_orbit_proto_msgTypes[43]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3167,7 +3199,7 @@ func (x *ProjectsStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProjectsStatus.ProtoReflect.Descriptor instead.
 func (*ProjectsStatus) Descriptor() ([]byte, []int) {
-	return file_orbit_proto_rawDescGZIP(), []int{44}
+	return file_orbit_proto_rawDescGZIP(), []int{43}
 }
 
 func (x *ProjectsStatus) GetIndexed() int64 {
@@ -3195,7 +3227,7 @@ type GraphStatusDomain struct {
 
 func (x *GraphStatusDomain) Reset() {
 	*x = GraphStatusDomain{}
-	mi := &file_orbit_proto_msgTypes[45]
+	mi := &file_orbit_proto_msgTypes[44]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3207,7 +3239,7 @@ func (x *GraphStatusDomain) String() string {
 func (*GraphStatusDomain) ProtoMessage() {}
 
 func (x *GraphStatusDomain) ProtoReflect() protoreflect.Message {
-	mi := &file_orbit_proto_msgTypes[45]
+	mi := &file_orbit_proto_msgTypes[44]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3220,7 +3252,7 @@ func (x *GraphStatusDomain) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GraphStatusDomain.ProtoReflect.Descriptor instead.
 func (*GraphStatusDomain) Descriptor() ([]byte, []int) {
-	return file_orbit_proto_rawDescGZIP(), []int{45}
+	return file_orbit_proto_rawDescGZIP(), []int{44}
 }
 
 func (x *GraphStatusDomain) GetName() string {
@@ -3242,13 +3274,14 @@ type GraphStatusItem struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
 	Count         int64                  `protobuf:"varint,2,opt,name=count,proto3" json:"count,omitempty"`
+	State         *IndexingState         `protobuf:"varint,3,opt,name=state,proto3,enum=orbit.v1.IndexingState,oneof" json:"state,omitempty"` // no longer populated
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *GraphStatusItem) Reset() {
 	*x = GraphStatusItem{}
-	mi := &file_orbit_proto_msgTypes[46]
+	mi := &file_orbit_proto_msgTypes[45]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3260,7 +3293,7 @@ func (x *GraphStatusItem) String() string {
 func (*GraphStatusItem) ProtoMessage() {}
 
 func (x *GraphStatusItem) ProtoReflect() protoreflect.Message {
-	mi := &file_orbit_proto_msgTypes[46]
+	mi := &file_orbit_proto_msgTypes[45]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3273,7 +3306,7 @@ func (x *GraphStatusItem) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GraphStatusItem.ProtoReflect.Descriptor instead.
 func (*GraphStatusItem) Descriptor() ([]byte, []int) {
-	return file_orbit_proto_rawDescGZIP(), []int{46}
+	return file_orbit_proto_rawDescGZIP(), []int{45}
 }
 
 func (x *GraphStatusItem) GetName() string {
@@ -3288,6 +3321,13 @@ func (x *GraphStatusItem) GetCount() int64 {
 		return x.Count
 	}
 	return 0
+}
+
+func (x *GraphStatusItem) GetState() IndexingState {
+	if x != nil && x.State != nil {
+		return *x.State
+	}
+	return IndexingState_INDEXING_STATE_NOT_INDEXED
 }
 
 var File_orbit_proto protoreflect.FileDescriptor
@@ -3475,37 +3515,55 @@ const file_orbit_proto_rawDesc = "" +
 	"\x0etraversal_path\x18\x01 \x01(\tR\rtraversalPath\x125\n" +
 	"\vsource_type\x18\x02 \x01(\x0e2\x14.orbit.v1.SourceTypeR\n" +
 	"sourceType\x120\n" +
-	"\x06format\x18\x03 \x01(\x0e2\x18.orbit.v1.ResponseFormatR\x06format\"\xdf\x01\n" +
-	"\x0eBackfillStatus\x12-\n" +
-	"\x05state\x18\x01 \x01(\x0e2\x17.orbit.v1.BackfillStateR\x05state\x12-\n" +
-	"\x10last_progress_at\x18\x02 \x01(\tH\x00R\x0elastProgressAt\x88\x01\x01\x12,\n" +
-	"\x04sdlc\x18\x03 \x01(\v2\x18.orbit.v1.BackfillCountsR\x04sdlc\x12,\n" +
-	"\x04code\x18\x04 \x01(\v2\x18.orbit.v1.BackfillCountsR\x04codeB\x13\n" +
-	"\x11_last_progress_at\"S\n" +
-	"\x0eBackfillCounts\x12\x1c\n" +
-	"\tcompleted\x18\x01 \x01(\x04R\tcompleted\x12\x19\n" +
-	"\x05total\x18\x02 \x01(\x04H\x00R\x05total\x88\x01\x01B\b\n" +
-	"\x06_total\"\x8f\x01\n" +
+	"\x06format\x18\x03 \x01(\x0e2\x18.orbit.v1.ResponseFormatR\x06format\"\xe2\x05\n" +
+	"\x0eIndexingStatus\x12-\n" +
+	"\x05state\x18\x01 \x01(\x0e2\x17.orbit.v1.IndexingStateR\x05state\x12+\n" +
+	"\x0flast_started_at\x18\x02 \x01(\tH\x00R\rlastStartedAt\x88\x01\x01\x12/\n" +
+	"\x11last_completed_at\x18\x03 \x01(\tH\x01R\x0flastCompletedAt\x88\x01\x01\x12-\n" +
+	"\x10last_duration_ms\x18\x04 \x01(\x04H\x02R\x0elastDurationMs\x88\x01\x01\x12\"\n" +
+	"\n" +
+	"last_error\x18\x05 \x01(\tH\x03R\tlastError\x88\x01\x01\x12)\n" +
+	"\x0elast_rows_read\x18\x06 \x01(\x04H\x04R\flastRowsRead\x88\x01\x01\x12/\n" +
+	"\x11last_rows_written\x18\a \x01(\x04H\x05R\x0flastRowsWritten\x88\x01\x01\x12-\n" +
+	"\x10last_progress_at\x18\b \x01(\tH\x06R\x0elastProgressAt\x88\x01\x01\x124\n" +
+	"\x13completed_pipelines\x18\t \x01(\x04H\aR\x12completedPipelines\x88\x01\x01\x12,\n" +
+	"\x0ftotal_pipelines\x18\n" +
+	" \x01(\x04H\bR\x0etotalPipelines\x88\x01\x01\x122\n" +
+	"\x12completed_projects\x18\v \x01(\x04H\tR\x11completedProjects\x88\x01\x01B\x12\n" +
+	"\x10_last_started_atB\x14\n" +
+	"\x12_last_completed_atB\x13\n" +
+	"\x11_last_duration_msB\r\n" +
+	"\v_last_errorB\x11\n" +
+	"\x0f_last_rows_readB\x14\n" +
+	"\x12_last_rows_writtenB\x13\n" +
+	"\x11_last_progress_atB\x16\n" +
+	"\x14_completed_pipelinesB\x12\n" +
+	"\x10_total_pipelinesB\x15\n" +
+	"\x13_completed_projects\"\x8f\x01\n" +
 	"\x16GetGraphStatusResponse\x12A\n" +
 	"\n" +
 	"structured\x18\x01 \x01(\v2\x1f.orbit.v1.StructuredGraphStatusH\x00R\n" +
 	"structured\x12'\n" +
 	"\x0eformatted_text\x18\x02 \x01(\tH\x00R\rformattedTextB\t\n" +
-	"\acontent\"\xf4\x01\n" +
+	"\acontent\"\xb8\x02\n" +
 	"\x15StructuredGraphStatus\x124\n" +
 	"\bprojects\x18\x01 \x01(\v2\x18.orbit.v1.ProjectsStatusR\bprojects\x125\n" +
 	"\adomains\x18\x02 \x03(\v2\x1b.orbit.v1.GraphStatusDomainR\adomains\x124\n" +
-	"\bbackfill\x18\x06 \x01(\v2\x18.orbit.v1.BackfillStatusR\bbackfillJ\x04\b\x03\x10\x04J\x04\b\x04\x10\x05J\x04\b\x05\x10\x06R\bindexingR\rsdlc_indexingR\rcode_indexing\"K\n" +
+	"\bindexing\x18\x03 \x01(\v2\x18.orbit.v1.IndexingStatusR\bindexing\x12=\n" +
+	"\rsdlc_indexing\x18\x04 \x01(\v2\x18.orbit.v1.IndexingStatusR\fsdlcIndexing\x12=\n" +
+	"\rcode_indexing\x18\x05 \x01(\v2\x18.orbit.v1.IndexingStatusR\fcodeIndexing\"K\n" +
 	"\x0eProjectsStatus\x12\x18\n" +
 	"\aindexed\x18\x01 \x01(\x03R\aindexed\x12\x1f\n" +
 	"\vtotal_known\x18\x02 \x01(\x03R\n" +
 	"totalKnown\"X\n" +
 	"\x11GraphStatusDomain\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12/\n" +
-	"\x05items\x18\x02 \x03(\v2\x19.orbit.v1.GraphStatusItemR\x05items\"H\n" +
+	"\x05items\x18\x02 \x03(\v2\x19.orbit.v1.GraphStatusItemR\x05items\"y\n" +
 	"\x0fGraphStatusItem\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
-	"\x05count\x18\x02 \x01(\x03R\x05countJ\x04\b\x03\x10\x04R\x05state*B\n" +
+	"\x05count\x18\x02 \x01(\x03R\x05count\x122\n" +
+	"\x05state\x18\x03 \x01(\x0e2\x17.orbit.v1.IndexingStateH\x00R\x05state\x88\x01\x01B\b\n" +
+	"\x06_state*B\n" +
 	"\x0eResponseFormat\x12\x17\n" +
 	"\x13RESPONSE_FORMAT_RAW\x10\x00\x12\x17\n" +
 	"\x13RESPONSE_FORMAT_LLM\x10\x01*7\n" +
@@ -3525,11 +3583,14 @@ const file_orbit_proto_rawDesc = "" +
 	"\n" +
 	"SourceType\x12\x15\n" +
 	"\x11SOURCE_TYPE_GROUP\x10\x00\x12\x17\n" +
-	"\x13SOURCE_TYPE_PROJECT\x10\x01*e\n" +
-	"\rBackfillState\x12\x1a\n" +
-	"\x16BACKFILL_STATE_UNKNOWN\x10\x00\x12\x1a\n" +
-	"\x16BACKFILL_STATE_RUNNING\x10\x01\x12\x1c\n" +
-	"\x18BACKFILL_STATE_COMPLETED\x10\x022\xef\x06\n" +
+	"\x13SOURCE_TYPE_PROJECT\x10\x01*\xbe\x01\n" +
+	"\rIndexingState\x12\x1e\n" +
+	"\x1aINDEXING_STATE_NOT_INDEXED\x10\x00\x12\x1e\n" +
+	"\x1aINDEXING_STATE_BACKFILLING\x10\x01\x12\x1a\n" +
+	"\x16INDEXING_STATE_INDEXED\x10\x02\x12\x18\n" +
+	"\x14INDEXING_STATE_ERROR\x10\x03\x12\x1a\n" +
+	"\x16INDEXING_STATE_UNKNOWN\x10\x04\x12\x1b\n" +
+	"\x17INDEXING_STATE_INDEXING\x10\x052\xef\x06\n" +
 	"\fOrbitService\x12D\n" +
 	"\tListTools\x12\x1a.orbit.v1.ListToolsRequest\x1a\x1b.orbit.v1.ListToolsResponse\x12\\\n" +
 	"\x11ListAgentCommands\x12\".orbit.v1.ListAgentCommandsRequest\x1a#.orbit.v1.ListAgentCommandsResponse\x12_\n" +
@@ -3555,14 +3616,14 @@ func file_orbit_proto_rawDescGZIP() []byte {
 }
 
 var file_orbit_proto_enumTypes = make([]protoimpl.EnumInfo, 6)
-var file_orbit_proto_msgTypes = make([]protoimpl.MessageInfo, 49)
+var file_orbit_proto_msgTypes = make([]protoimpl.MessageInfo, 48)
 var file_orbit_proto_goTypes = []any{
 	(ResponseFormat)(0),                // 0: orbit.v1.ResponseFormat
 	(FormatName)(0),                    // 1: orbit.v1.FormatName
 	(QueryType)(0),                     // 2: orbit.v1.QueryType
 	(ClusterStatus)(0),                 // 3: orbit.v1.ClusterStatus
 	(SourceType)(0),                    // 4: orbit.v1.SourceType
-	(BackfillState)(0),                 // 5: orbit.v1.BackfillState
+	(IndexingState)(0),                 // 5: orbit.v1.IndexingState
 	(*ExecuteQueryMessage)(nil),        // 6: orbit.v1.ExecuteQueryMessage
 	(*ExecuteQueryRequest)(nil),        // 7: orbit.v1.ExecuteQueryRequest
 	(*ExecuteQueryResult)(nil),         // 8: orbit.v1.ExecuteQueryResult
@@ -3603,15 +3664,14 @@ var file_orbit_proto_goTypes = []any{
 	(*ComponentHealth)(nil),            // 43: orbit.v1.ComponentHealth
 	(*ReplicaStatus)(nil),              // 44: orbit.v1.ReplicaStatus
 	(*GetGraphStatusRequest)(nil),      // 45: orbit.v1.GetGraphStatusRequest
-	(*BackfillStatus)(nil),             // 46: orbit.v1.BackfillStatus
-	(*BackfillCounts)(nil),             // 47: orbit.v1.BackfillCounts
-	(*GetGraphStatusResponse)(nil),     // 48: orbit.v1.GetGraphStatusResponse
-	(*StructuredGraphStatus)(nil),      // 49: orbit.v1.StructuredGraphStatus
-	(*ProjectsStatus)(nil),             // 50: orbit.v1.ProjectsStatus
-	(*GraphStatusDomain)(nil),          // 51: orbit.v1.GraphStatusDomain
-	(*GraphStatusItem)(nil),            // 52: orbit.v1.GraphStatusItem
-	nil,                                // 53: orbit.v1.ResourceAuthorization.AuthorizedEntry
-	nil,                                // 54: orbit.v1.ComponentHealth.MetricsEntry
+	(*IndexingStatus)(nil),             // 46: orbit.v1.IndexingStatus
+	(*GetGraphStatusResponse)(nil),     // 47: orbit.v1.GetGraphStatusResponse
+	(*StructuredGraphStatus)(nil),      // 48: orbit.v1.StructuredGraphStatus
+	(*ProjectsStatus)(nil),             // 49: orbit.v1.ProjectsStatus
+	(*GraphStatusDomain)(nil),          // 50: orbit.v1.GraphStatusDomain
+	(*GraphStatusItem)(nil),            // 51: orbit.v1.GraphStatusItem
+	nil,                                // 52: orbit.v1.ResourceAuthorization.AuthorizedEntry
+	nil,                                // 53: orbit.v1.ComponentHealth.MetricsEntry
 }
 var file_orbit_proto_depIdxs = []int32{
 	7,  // 0: orbit.v1.ExecuteQueryMessage.request:type_name -> orbit.v1.ExecuteQueryRequest
@@ -3638,7 +3698,7 @@ var file_orbit_proto_depIdxs = []int32{
 	31, // 21: orbit.v1.RedactionExchange.response:type_name -> orbit.v1.RedactionResponse
 	30, // 22: orbit.v1.RedactionRequired.resources:type_name -> orbit.v1.ResourceToAuthorize
 	32, // 23: orbit.v1.RedactionResponse.authorizations:type_name -> orbit.v1.ResourceAuthorization
-	53, // 24: orbit.v1.ResourceAuthorization.authorized:type_name -> orbit.v1.ResourceAuthorization.AuthorizedEntry
+	52, // 24: orbit.v1.ResourceAuthorization.authorized:type_name -> orbit.v1.ResourceAuthorization.AuthorizedEntry
 	35, // 25: orbit.v1.ListToolsResponse.tools:type_name -> orbit.v1.ToolDefinition
 	0,  // 26: orbit.v1.ListAgentCommandsRequest.format:type_name -> orbit.v1.ResponseFormat
 	35, // 27: orbit.v1.ListAgentCommandsResponse.commands:type_name -> orbit.v1.ToolDefinition
@@ -3648,42 +3708,43 @@ var file_orbit_proto_depIdxs = []int32{
 	43, // 31: orbit.v1.StructuredClusterHealth.components:type_name -> orbit.v1.ComponentHealth
 	3,  // 32: orbit.v1.ComponentHealth.status:type_name -> orbit.v1.ClusterStatus
 	44, // 33: orbit.v1.ComponentHealth.replicas:type_name -> orbit.v1.ReplicaStatus
-	54, // 34: orbit.v1.ComponentHealth.metrics:type_name -> orbit.v1.ComponentHealth.MetricsEntry
+	53, // 34: orbit.v1.ComponentHealth.metrics:type_name -> orbit.v1.ComponentHealth.MetricsEntry
 	4,  // 35: orbit.v1.GetGraphStatusRequest.source_type:type_name -> orbit.v1.SourceType
 	0,  // 36: orbit.v1.GetGraphStatusRequest.format:type_name -> orbit.v1.ResponseFormat
-	5,  // 37: orbit.v1.BackfillStatus.state:type_name -> orbit.v1.BackfillState
-	47, // 38: orbit.v1.BackfillStatus.sdlc:type_name -> orbit.v1.BackfillCounts
-	47, // 39: orbit.v1.BackfillStatus.code:type_name -> orbit.v1.BackfillCounts
-	49, // 40: orbit.v1.GetGraphStatusResponse.structured:type_name -> orbit.v1.StructuredGraphStatus
-	50, // 41: orbit.v1.StructuredGraphStatus.projects:type_name -> orbit.v1.ProjectsStatus
-	51, // 42: orbit.v1.StructuredGraphStatus.domains:type_name -> orbit.v1.GraphStatusDomain
-	46, // 43: orbit.v1.StructuredGraphStatus.backfill:type_name -> orbit.v1.BackfillStatus
-	52, // 44: orbit.v1.GraphStatusDomain.items:type_name -> orbit.v1.GraphStatusItem
-	33, // 45: orbit.v1.OrbitService.ListTools:input_type -> orbit.v1.ListToolsRequest
-	36, // 46: orbit.v1.OrbitService.ListAgentCommands:input_type -> orbit.v1.ListAgentCommandsRequest
-	38, // 47: orbit.v1.OrbitService.InvokeAgentCommand:input_type -> orbit.v1.InvokeAgentCommandRequest
-	6,  // 48: orbit.v1.OrbitService.ExecuteQuery:input_type -> orbit.v1.ExecuteQueryMessage
-	11, // 49: orbit.v1.OrbitService.GetGraphSchema:input_type -> orbit.v1.GetGraphSchemaRequest
-	20, // 50: orbit.v1.OrbitService.GetQueryDsl:input_type -> orbit.v1.GetQueryDslRequest
-	25, // 51: orbit.v1.OrbitService.ListNamedQueries:input_type -> orbit.v1.ListNamedQueriesRequest
-	22, // 52: orbit.v1.OrbitService.GetResponseFormat:input_type -> orbit.v1.GetResponseFormatRequest
-	40, // 53: orbit.v1.OrbitService.GetClusterHealth:input_type -> orbit.v1.GetClusterHealthRequest
-	45, // 54: orbit.v1.OrbitService.GetGraphStatus:input_type -> orbit.v1.GetGraphStatusRequest
-	34, // 55: orbit.v1.OrbitService.ListTools:output_type -> orbit.v1.ListToolsResponse
-	37, // 56: orbit.v1.OrbitService.ListAgentCommands:output_type -> orbit.v1.ListAgentCommandsResponse
-	39, // 57: orbit.v1.OrbitService.InvokeAgentCommand:output_type -> orbit.v1.InvokeAgentCommandResponse
-	6,  // 58: orbit.v1.OrbitService.ExecuteQuery:output_type -> orbit.v1.ExecuteQueryMessage
-	12, // 59: orbit.v1.OrbitService.GetGraphSchema:output_type -> orbit.v1.GetGraphSchemaResponse
-	21, // 60: orbit.v1.OrbitService.GetQueryDsl:output_type -> orbit.v1.GetQueryDslResponse
-	26, // 61: orbit.v1.OrbitService.ListNamedQueries:output_type -> orbit.v1.ListNamedQueriesResponse
-	23, // 62: orbit.v1.OrbitService.GetResponseFormat:output_type -> orbit.v1.GetResponseFormatResponse
-	41, // 63: orbit.v1.OrbitService.GetClusterHealth:output_type -> orbit.v1.GetClusterHealthResponse
-	48, // 64: orbit.v1.OrbitService.GetGraphStatus:output_type -> orbit.v1.GetGraphStatusResponse
-	55, // [55:65] is the sub-list for method output_type
-	45, // [45:55] is the sub-list for method input_type
-	45, // [45:45] is the sub-list for extension type_name
-	45, // [45:45] is the sub-list for extension extendee
-	0,  // [0:45] is the sub-list for field type_name
+	5,  // 37: orbit.v1.IndexingStatus.state:type_name -> orbit.v1.IndexingState
+	48, // 38: orbit.v1.GetGraphStatusResponse.structured:type_name -> orbit.v1.StructuredGraphStatus
+	49, // 39: orbit.v1.StructuredGraphStatus.projects:type_name -> orbit.v1.ProjectsStatus
+	50, // 40: orbit.v1.StructuredGraphStatus.domains:type_name -> orbit.v1.GraphStatusDomain
+	46, // 41: orbit.v1.StructuredGraphStatus.indexing:type_name -> orbit.v1.IndexingStatus
+	46, // 42: orbit.v1.StructuredGraphStatus.sdlc_indexing:type_name -> orbit.v1.IndexingStatus
+	46, // 43: orbit.v1.StructuredGraphStatus.code_indexing:type_name -> orbit.v1.IndexingStatus
+	51, // 44: orbit.v1.GraphStatusDomain.items:type_name -> orbit.v1.GraphStatusItem
+	5,  // 45: orbit.v1.GraphStatusItem.state:type_name -> orbit.v1.IndexingState
+	33, // 46: orbit.v1.OrbitService.ListTools:input_type -> orbit.v1.ListToolsRequest
+	36, // 47: orbit.v1.OrbitService.ListAgentCommands:input_type -> orbit.v1.ListAgentCommandsRequest
+	38, // 48: orbit.v1.OrbitService.InvokeAgentCommand:input_type -> orbit.v1.InvokeAgentCommandRequest
+	6,  // 49: orbit.v1.OrbitService.ExecuteQuery:input_type -> orbit.v1.ExecuteQueryMessage
+	11, // 50: orbit.v1.OrbitService.GetGraphSchema:input_type -> orbit.v1.GetGraphSchemaRequest
+	20, // 51: orbit.v1.OrbitService.GetQueryDsl:input_type -> orbit.v1.GetQueryDslRequest
+	25, // 52: orbit.v1.OrbitService.ListNamedQueries:input_type -> orbit.v1.ListNamedQueriesRequest
+	22, // 53: orbit.v1.OrbitService.GetResponseFormat:input_type -> orbit.v1.GetResponseFormatRequest
+	40, // 54: orbit.v1.OrbitService.GetClusterHealth:input_type -> orbit.v1.GetClusterHealthRequest
+	45, // 55: orbit.v1.OrbitService.GetGraphStatus:input_type -> orbit.v1.GetGraphStatusRequest
+	34, // 56: orbit.v1.OrbitService.ListTools:output_type -> orbit.v1.ListToolsResponse
+	37, // 57: orbit.v1.OrbitService.ListAgentCommands:output_type -> orbit.v1.ListAgentCommandsResponse
+	39, // 58: orbit.v1.OrbitService.InvokeAgentCommand:output_type -> orbit.v1.InvokeAgentCommandResponse
+	6,  // 59: orbit.v1.OrbitService.ExecuteQuery:output_type -> orbit.v1.ExecuteQueryMessage
+	12, // 60: orbit.v1.OrbitService.GetGraphSchema:output_type -> orbit.v1.GetGraphSchemaResponse
+	21, // 61: orbit.v1.OrbitService.GetQueryDsl:output_type -> orbit.v1.GetQueryDslResponse
+	26, // 62: orbit.v1.OrbitService.ListNamedQueries:output_type -> orbit.v1.ListNamedQueriesResponse
+	23, // 63: orbit.v1.OrbitService.GetResponseFormat:output_type -> orbit.v1.GetResponseFormatResponse
+	41, // 64: orbit.v1.OrbitService.GetClusterHealth:output_type -> orbit.v1.GetClusterHealthResponse
+	47, // 65: orbit.v1.OrbitService.GetGraphStatus:output_type -> orbit.v1.GetGraphStatusResponse
+	56, // [56:66] is the sub-list for method output_type
+	46, // [46:56] is the sub-list for method input_type
+	46, // [46:46] is the sub-list for extension type_name
+	46, // [46:46] is the sub-list for extension extendee
+	0,  // [0:46] is the sub-list for field type_name
 }
 
 func init() { file_orbit_proto_init() }
@@ -3726,18 +3787,18 @@ func file_orbit_proto_init() {
 		(*GetClusterHealthResponse_FormattedText)(nil),
 	}
 	file_orbit_proto_msgTypes[40].OneofWrappers = []any{}
-	file_orbit_proto_msgTypes[41].OneofWrappers = []any{}
-	file_orbit_proto_msgTypes[42].OneofWrappers = []any{
+	file_orbit_proto_msgTypes[41].OneofWrappers = []any{
 		(*GetGraphStatusResponse_Structured)(nil),
 		(*GetGraphStatusResponse_FormattedText)(nil),
 	}
+	file_orbit_proto_msgTypes[45].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_orbit_proto_rawDesc), len(file_orbit_proto_rawDesc)),
 			NumEnums:      6,
-			NumMessages:   49,
+			NumMessages:   48,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

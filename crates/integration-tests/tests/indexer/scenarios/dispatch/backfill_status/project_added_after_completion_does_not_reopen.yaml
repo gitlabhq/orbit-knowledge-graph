@@ -12,9 +12,9 @@ steps:
         - { namespace_id: 340 }
     dispatch: code_backfill
     expect:
-      backfill:
+      indexing:
         - path: "3/340/"
-          state: completed
+          state: indexed
 
   - seed:
       project_namespace_traversal_paths:
@@ -26,6 +26,6 @@ steps:
           count: 1
           rows:
             - { project_id: 3400 }
-      backfill:
+      indexing:
         - path: "3/340/"
-          state: completed
+          state: indexed

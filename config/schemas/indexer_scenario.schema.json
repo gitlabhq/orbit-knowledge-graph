@@ -159,31 +159,25 @@
           "description": "Assertions on the indexing requests a dispatch handler published to NATS.",
           "items": { "$ref": "#/definitions/dispatchExpect" }
         },
-        "backfill": {
+        "indexing": {
           "type": "array",
-          "description": "Initial-backfill status the graph status endpoint reports for a path.",
-          "items": { "$ref": "#/definitions/backfillExpect" }
+          "description": "The indexing block the graph status endpoint reports for a path; fields mirror the proto IndexingStatus.",
+          "items": { "$ref": "#/definitions/indexingExpect" }
         }
       }
     },
-    "backfillExpect": {
+    "indexingExpect": {
       "type": "object",
       "additionalProperties": false,
       "required": ["path", "state"],
       "properties": {
         "path": { "type": "string" },
-        "state": { "type": "string", "enum": ["unknown", "running", "completed"] },
-        "sdlc": { "$ref": "#/definitions/backfillCounts" },
-        "code": { "$ref": "#/definitions/backfillCounts" },
-        "progress": { "type": "string", "enum": ["recorded", "absent"] }
-      }
-    },
-    "backfillCounts": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "completed": { "type": "integer", "minimum": 0 },
-        "total": { "type": "integer", "minimum": 0 }
+        "state": { "type": "string", "enum": ["unknown", "backfilling", "indexed"] },
+        "completed_pipelines": { "type": "integer", "minimum": 0 },
+        "total_pipelines": { "type": "integer", "minimum": 0 },
+        "completed_projects": { "type": "integer", "minimum": 0 },
+        "last_progress_at": { "type": "string", "enum": ["recorded", "absent"] },
+        "last_completed_at": { "type": "string", "enum": ["recorded", "absent"] }
       }
     },
     "dispatchExpect": {

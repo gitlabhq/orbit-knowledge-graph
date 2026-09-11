@@ -22,9 +22,9 @@ expect:
       count: 1
     - kind: code_task
       count: 1
-  backfill:
+  indexing:
     - path: "3/350/"
-      state: running
-      sdlc: { completed: 0 }
-      code: { completed: 0 }
-      progress: absent
+      state: backfilling
+      completed_pipelines: 0
+      completed_projects: 0
+      last_progress_at: absent

@@ -24,12 +24,13 @@ expect:
       count: 1
       rows:
         - { project_id: 3102 }
-  backfill:
+  indexing:
     - path: "3/310/"
-      state: running
-      sdlc: { completed: 0 }
-      code: { completed: 2 }
-      progress: recorded
+      state: backfilling
+      completed_pipelines: 0
+      completed_projects: 2
+      last_progress_at: recorded
+      last_completed_at: absent
     - path: "3/310/3100/"
-      state: running
-      code: { completed: 2 }
+      state: backfilling
+      completed_projects: 2

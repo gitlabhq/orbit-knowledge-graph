@@ -16,6 +16,6 @@ seed:
 dispatch: code_backfill
 
 expect:
-  backfill:
+  indexing:
     - path: "3/330/"
-      state: running
+      state: backfilling

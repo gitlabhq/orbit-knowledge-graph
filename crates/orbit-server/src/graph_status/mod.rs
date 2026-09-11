@@ -17,8 +17,8 @@ use tonic::Status;
 use tracing::{debug, info, warn};
 
 use crate::proto::{
-    BackfillCounts, BackfillState, BackfillStatus, GetGraphStatusResponse, GraphStatusDomain,
-    GraphStatusItem, ResponseFormat, StructuredGraphStatus, get_graph_status_response,
+    GetGraphStatusResponse, GraphStatusDomain, GraphStatusItem, IndexingState, IndexingStatus,
+    ResponseFormat, StructuredGraphStatus, get_graph_status_response,
 };
 
 use self::input::GraphStatusInput;
@@ -79,13 +79,14 @@ impl GraphStatusService {
             entity_counts_future,
             code::fetch_project_coverage(&self.client, ontology, traversal_path),
         );
-        let backfill = self.fetch_backfill(traversal_path).await;
+        let indexing = self.fetch_indexing(traversal_path).await;
         let visible_nodes: HashSet<&str> =
             input.nodes.iter().map(|node| node.name.as_str()).collect();
         let structured = StructuredGraphStatus {
             projects: projects.ok(),
             domains: present_domain_response(ontology, &entity_counts, &visible_nodes),
-            backfill: Some(backfill),
+            indexing: Some(indexing),
+            ..StructuredGraphStatus::default()
         };
 
         let content = if format == ResponseFormat::Llm as i32 {
@@ -101,18 +102,42 @@ impl GraphStatusService {
         })
     }
 
-    async fn fetch_backfill(&self, traversal_path: &TraversalPath) -> BackfillStatus {
+    async fn fetch_indexing(&self, traversal_path: &TraversalPath) -> IndexingStatus {
         let Some(store) = self.indexing_status.as_ref() else {
-            return BackfillStatus::default();
+            return unknown_indexing();
         };
         match store.initial_backfill(traversal_path).await {
-            Ok(Some(record)) => backfill_response(record),
-            Ok(None) => BackfillStatus::default(),
+            Ok(Some(record)) => indexing_response(record),
+            Ok(None) => unknown_indexing(),
             Err(error) => {
                 warn!(%traversal_path, %error, "initial backfill status unavailable");
-                BackfillStatus::default()
+                unknown_indexing()
             }
         }
+    }
+}
+
+fn unknown_indexing() -> IndexingStatus {
+    IndexingStatus {
+        state: IndexingState::Unknown.into(),
+        ..IndexingStatus::default()
+    }
+}
+
+fn indexing_response(record: InitialBackfill) -> IndexingStatus {
+    let last_progress_at = record.last_progress_at.map(|at| at.to_rfc3339());
+    let (state, last_completed_at) = match record.state {
+        InitialBackfillState::Running => (IndexingState::Backfilling, None),
+        InitialBackfillState::Completed => (IndexingState::Indexed, last_progress_at.clone()),
+    };
+    IndexingStatus {
+        state: state.into(),
+        last_completed_at,
+        last_progress_at,
+        completed_pipelines: Some(record.completed_pipelines),
+        total_pipelines: Some(record.total_pipelines),
+        completed_projects: Some(record.completed_projects),
+        ..IndexingStatus::default()
     }
 }
 
@@ -191,25 +216,6 @@ fn append_query_settings(sql: &str) -> Result<String, String> {
     Ok(format!("{sql} SETTINGS {clause}"))
 }
 
-fn backfill_response(record: InitialBackfill) -> BackfillStatus {
-    let state = match record.state {
-        InitialBackfillState::Running => BackfillState::Running,
-        InitialBackfillState::Completed => BackfillState::Completed,
-    };
-    BackfillStatus {
-        state: state.into(),
-        last_progress_at: record.last_progress_at.map(|at| at.to_rfc3339()),
-        sdlc: Some(BackfillCounts {
-            completed: record.completed_pipelines,
-            total: Some(record.total_pipelines),
-        }),
-        code: Some(BackfillCounts {
-            completed: record.completed_projects,
-            total: None,
-        }),
-    }
-}
-
 fn present_domain_response(
     ontology: &Ontology,
     entity_counts: &HashMap<String, i64>,
@@ -225,6 +231,7 @@ fn present_domain_response(
                 .map(|node_name| GraphStatusItem {
                     name: node_name.clone(),
                     count: entity_counts.get(node_name).copied().unwrap_or(0),
+                    state: None,
                 })
                 .collect();
 

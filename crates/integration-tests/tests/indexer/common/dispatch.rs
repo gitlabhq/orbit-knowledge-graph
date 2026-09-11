@@ -24,7 +24,7 @@ use integration_testkit::scenario::{
     CdcEvent, CdcOperation, DispatchedMessage, HandlerInput, ScenarioHandlers,
 };
 use orbit_server::graph_status::GraphStatusService;
-use orbit_server::proto::{BackfillStatus, ResponseFormat, get_graph_status_response};
+use orbit_server::proto::{IndexingStatus, ResponseFormat, get_graph_status_response};
 use orbit_server_config::{GlobalDispatcherConfig, NamespaceDispatcherConfig, NatsConfiguration};
 use orbit_utils::traversal_path::TraversalPath;
 use siphon_proto::replication_event::{Column, Operation};
@@ -82,11 +82,11 @@ impl ScenarioHandlers for DispatchScenarioHandlers {
         }
     }
 
-    async fn backfill_status(
+    async fn indexing_status(
         &self,
         ctx: &TestContext,
         traversal_path: &TraversalPath,
-    ) -> BackfillStatus {
+    ) -> IndexingStatus {
         let response = GraphStatusService::new(Arc::new(ctx.create_client()))
             .with_indexing_status(self.indexing_status.clone())
             .get_status(
@@ -99,8 +99,8 @@ impl ScenarioHandlers for DispatchScenarioHandlers {
             .unwrap();
         match response.content {
             Some(get_graph_status_response::Content::Structured(status)) => status
-                .backfill
-                .expect("graph status always carries backfill"),
+                .indexing
+                .expect("graph status always carries indexing"),
             other => panic!("expected structured graph status, got {other:?}"),
         }
     }

@@ -185,35 +185,31 @@ pub struct Expect {
     #[serde(default)]
     pub dispatched: Vec<DispatchExpect>,
     #[serde(default)]
-    pub backfill: Vec<BackfillExpect>,
+    pub indexing: Vec<IndexingExpect>,
 }
 
-/// The initial-backfill status the graph status endpoint reports for a path.
+/// The `indexing` block the graph status endpoint reports for a path; field
+/// names mirror the proto `IndexingStatus`.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct BackfillExpect {
+pub struct IndexingExpect {
     pub path: TraversalPath,
     pub state: String,
     #[serde(default)]
-    pub sdlc: Option<CountsExpect>,
+    pub completed_pipelines: Option<u64>,
     #[serde(default)]
-    pub code: Option<CountsExpect>,
+    pub total_pipelines: Option<u64>,
     #[serde(default)]
-    pub progress: Option<ProgressExpect>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct CountsExpect {
+    pub completed_projects: Option<u64>,
     #[serde(default)]
-    pub completed: Option<u64>,
+    pub last_progress_at: Option<TimestampExpect>,
     #[serde(default)]
-    pub total: Option<u64>,
+    pub last_completed_at: Option<TimestampExpect>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum ProgressExpect {
+pub enum TimestampExpect {
     Recorded,
     Absent,
 }

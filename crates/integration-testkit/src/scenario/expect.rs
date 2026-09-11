@@ -3,11 +3,11 @@ use std::collections::HashMap;
 use arrow::record_batch::RecordBatch;
 use orbit_utils::arrow::{ArrowUtils, ColumnValue};
 
-use orbit_server::proto::{BackfillCounts, BackfillState};
+use orbit_server::proto::IndexingState;
 
 use super::format::{
-    BackfillExpect, CountsExpect, DispatchExpect, EdgeExpect, Expect, Matcher, NodeExpect,
-    ProgressExpect, RowMatcher,
+    DispatchExpect, EdgeExpect, Expect, IndexingExpect, Matcher, NodeExpect, RowMatcher,
+    TimestampExpect,
 };
 use super::seed::prefix_graph_table;
 use super::{DispatchedMessage, ScenarioHandlers};
@@ -34,58 +34,70 @@ pub async fn check_expect(
     for dispatch_expect in &expect.dispatched {
         check_dispatched(dispatched, dispatch_expect, location);
     }
-    for backfill_expect in &expect.backfill {
-        check_backfill(ctx, handlers, backfill_expect, location).await;
+    for indexing_expect in &expect.indexing {
+        check_indexing(ctx, handlers, indexing_expect, location).await;
     }
 }
 
-async fn check_backfill(
+async fn check_indexing(
     ctx: &TestContext,
     handlers: &dyn ScenarioHandlers,
-    expect: &BackfillExpect,
+    expect: &IndexingExpect,
     location: &str,
 ) {
-    let status = handlers.backfill_status(ctx, &expect.path).await;
-    let backfill_location = format!("{location}: backfill for {}", expect.path);
+    let status = handlers.indexing_status(ctx, &expect.path).await;
+    let indexing_location = format!("{location}: indexing for {}", expect.path);
 
-    let expected_state = BackfillState::from_str_name(&format!(
-        "BACKFILL_STATE_{}",
+    let expected_state = IndexingState::from_str_name(&format!(
+        "INDEXING_STATE_{}",
         expect.state.to_ascii_uppercase()
     ))
-    .unwrap_or_else(|| panic!("{backfill_location}: unknown state '{}'", expect.state));
-    assert_eq!(status.state(), expected_state, "{backfill_location}: state");
+    .unwrap_or_else(|| panic!("{indexing_location}: unknown state '{}'", expect.state));
+    assert_eq!(status.state(), expected_state, "{indexing_location}: state");
 
-    if let Some(sdlc) = &expect.sdlc {
-        check_counts(
-            status.sdlc.as_ref(),
-            sdlc,
-            &format!("{backfill_location}: sdlc"),
-        );
+    let counts = [
+        (
+            "completed_pipelines",
+            status.completed_pipelines,
+            expect.completed_pipelines,
+        ),
+        (
+            "total_pipelines",
+            status.total_pipelines,
+            expect.total_pipelines,
+        ),
+        (
+            "completed_projects",
+            status.completed_projects,
+            expect.completed_projects,
+        ),
+    ];
+    for (field, actual, expected) in counts {
+        if let Some(expected) = expected {
+            assert_eq!(actual, Some(expected), "{indexing_location}: {field}");
+        }
     }
-    if let Some(code) = &expect.code {
-        check_counts(
-            status.code.as_ref(),
-            code,
-            &format!("{backfill_location}: code"),
-        );
-    }
-    if let Some(progress) = expect.progress {
-        assert_eq!(
-            status.last_progress_at.is_some(),
-            progress == ProgressExpect::Recorded,
-            "{backfill_location}: last_progress_at = {:?}",
-            status.last_progress_at
-        );
-    }
-}
 
-fn check_counts(actual: Option<&BackfillCounts>, expect: &CountsExpect, location: &str) {
-    let actual = actual.unwrap_or_else(|| panic!("{location}: counts missing"));
-    if let Some(completed) = expect.completed {
-        assert_eq!(actual.completed, completed, "{location}: completed");
-    }
-    if let Some(total) = expect.total {
-        assert_eq!(actual.total, Some(total), "{location}: total");
+    let timestamps = [
+        (
+            "last_progress_at",
+            &status.last_progress_at,
+            expect.last_progress_at,
+        ),
+        (
+            "last_completed_at",
+            &status.last_completed_at,
+            expect.last_completed_at,
+        ),
+    ];
+    for (field, actual, expected) in timestamps {
+        if let Some(expected) = expected {
+            assert_eq!(
+                actual.is_some(),
+                expected == TimestampExpect::Recorded,
+                "{indexing_location}: {field} = {actual:?}"
+            );
+        }
     }
 }
 

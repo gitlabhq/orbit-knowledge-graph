@@ -17,10 +17,11 @@ steps:
       dispatched:
         - kind: code_task
           count: 1
-      backfill:
+      indexing:
         - path: "3/320/"
-          state: running
-          code: { completed: 0 }
+          state: backfilling
+          completed_projects: 0
+          last_completed_at: absent
 
   - seed:
       code_indexing_checkpoint:
@@ -30,8 +31,9 @@ steps:
       dispatched:
         - kind: code_task
           count: 0
-      backfill:
+      indexing:
         - path: "3/320/"
-          state: completed
-          code: { completed: 1 }
-          progress: recorded
+          state: indexed
+          completed_projects: 1
+          last_progress_at: recorded
+          last_completed_at: recorded

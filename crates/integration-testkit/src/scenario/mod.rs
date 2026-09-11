@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use orbit_server::proto::BackfillStatus;
+use orbit_server::proto::IndexingStatus;
 use orbit_utils::traversal_path::TraversalPath;
 
 use crate::collect_subtest_results;
@@ -53,13 +53,13 @@ pub trait ScenarioHandlers: Send + Sync {
         input: HandlerInput<'_>,
     ) -> Vec<DispatchedMessage>;
 
-    /// What the graph status endpoint reports for `traversal_path`, for `expect.backfill`.
-    async fn backfill_status(
+    /// What the graph status endpoint reports for `traversal_path`, for `expect.indexing`.
+    async fn indexing_status(
         &self,
         _ctx: &TestContext,
         _traversal_path: &TraversalPath,
-    ) -> BackfillStatus {
-        panic!("these scenario handlers do not read initial backfill status");
+    ) -> IndexingStatus {
+        panic!("these scenario handlers do not read indexing status");
     }
 }
 
