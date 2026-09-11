@@ -17,6 +17,8 @@ query:
       "aggregations": [{"max": "u.is_admin", "as": "has_admin"}],
       "limit": 10
     }
+  gql: |
+    MATCH (u:User)-[:MEMBER_OF]->(g:Group) WHERE u.id >= 1 AND u.id <= 10000 RETURN g{.id, .name}, max(u.is_admin) AS has_admin LIMIT 10
 
 expect:
   compile_only: true

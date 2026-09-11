@@ -25,10 +25,10 @@ impl Lowering {
             .iter()
             .any(|item| matches!(item.expression, Expression::Aggregate { .. }));
         if aggregate {
-            if self.input.query_type != QueryType::Traversal {
+            if self.input.query_type == QueryType::Neighbors {
                 return Err(invalid(
                     span,
-                    "path finding and neighbors cannot be aggregated; use labeled node patterns",
+                    "neighbors cannot be aggregated; use labeled node patterns",
                 ));
             }
             self.input.query_type = QueryType::Aggregation;
@@ -94,10 +94,10 @@ impl Lowering {
                     variable,
                     properties,
                 } => {
-                    if self.input.query_type != QueryType::Traversal && !aggregate {
+                    if self.input.query_type == QueryType::PathFinding {
                         return Err(invalid(
                             span,
-                            "node projections require traversal or aggregation",
+                            "node projections require traversal, neighbors, or aggregation",
                         ));
                     }
                     let variable = variable.value;
@@ -150,10 +150,10 @@ impl Lowering {
                                 alias,
                             });
                     } else {
-                        if alias.is_some() || self.input.query_type != QueryType::Traversal {
+                        if alias.is_some() || self.input.query_type == QueryType::PathFinding {
                             return Err(invalid(
                                 span,
-                                "property projections require traversal and cannot be renamed",
+                                "property projections require traversal or neighbors and cannot be renamed",
                             ));
                         }
                         let input_node = self
@@ -219,6 +219,12 @@ impl Lowering {
             || (self.input.query_type == QueryType::Neighbors
                 && (all || self.edges.contains_key(&variable)))
         {
+            if aggregate {
+                return Err(invalid(
+                    span,
+                    "aggregations group by path endpoints, not the path variable",
+                ));
+            }
             if alias.is_some() || (all && !dynamic) {
                 return Err(invalid(
                     span,
@@ -236,7 +242,7 @@ impl Lowering {
         if self.input.query_type == QueryType::PathFinding {
             return Err(invalid(
                 span,
-                "path finding requires RETURN of the shortestPath variable",
+                "path finding requires RETURN of the path variable",
             ));
         }
         let node = self
