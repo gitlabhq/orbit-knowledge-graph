@@ -57,10 +57,7 @@ impl CodeStaleSweep {
         }
     }
 
-    /// Sweeps at most `sweeps_per_tick` of the drained namespaces that have no gate yet and
-    /// leaves the rest to later ticks. The backfill task dispatches nothing while it sweeps,
-    /// and a fleet-wide re-index drains thousands of namespaces within minutes, so an
-    /// uncapped sweep starved the indexers for the length of that burst.
+    /// Capped per tick so a burst of drained namespaces cannot hold up the next dispatch ticks.
     pub async fn run_for_drained(&self, drained_paths: &[TraversalPath]) -> Result<(), TaskError> {
         if drained_paths.is_empty() || self.sweeps_per_tick == 0 {
             return Ok(());
