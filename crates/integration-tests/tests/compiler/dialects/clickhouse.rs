@@ -1064,6 +1064,14 @@ fn orbit_query_rejects_unsupported_syntax_and_shapes() {
         "MATCH (u:User) RETURN count(*)",
         "MATCH (u:User) RETURN collect(u.username)",
         "MATCH (u:User) RETURN u SKIP 1",
+        "MATCH (u:User) RETURN u DEBUG DEBUG",
+        "MATCH (u:User) RETURN u DEBUG LIMIT 1",
+        "MATCH (u:User) RETURN u LIMIT 1 ORDER BY u.id",
+        "MATCH (u:User) RETURN u LIMIT 1 PAGE 1",
+        "MATCH (u:User) RETURN u PAGE 1 LIMIT 1",
+        "MATCH (u:User) RETURN u AFTER 'token'",
+        "MATCH (u:User) RETURN u; DEBUG",
+        "MATCH (u:User) RETURN count(u) AS n AS other",
         "MATCH (u:User) RETURN u ORDER BY u.id, u.username",
         "MATCH (u:User) RETURN u.username AS renamed",
         "MATCH (u:User) RETURN u{.username}, count(u)",
@@ -1524,6 +1532,58 @@ fn orbit_query_debug_and_dynamic_properties_match_json_options() {
         compiled.input.options.dynamic_columns,
         DynamicColumnMode::All
     );
+}
+
+#[test]
+fn orbit_query_optional_clauses_preserve_options() {
+    for order in ["", " ORDER BY u.id"] {
+        for (limit, rows, page) in [
+            ("", None, None),
+            (" LIMIT 7", Some(7), None),
+            (" PAGE 7", None, Some(7)),
+        ] {
+            for debug in ["", " DEBUG"] {
+                let query = format!("MATCH (u:User {{id: 1}}) RETURN u{order}{limit}{debug}");
+                let compiled =
+                    compile(&query, Frontend::Gql, &test_ontology(), &test_ctx()).unwrap();
+                let input = compiled.input;
+                assert_eq!(
+                    input.options.include_debug_sql,
+                    !debug.is_empty(),
+                    "{query}"
+                );
+                assert_eq!(input.order_by.is_some(), !order.is_empty(), "{query}");
+                assert_eq!(input.cursor.as_ref().map(|c| c.page_size), page, "{query}");
+                if let Some(rows) = rows {
+                    assert_eq!(input.limit, rows, "{query}");
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn orbit_query_debug_in_literals_and_comments_stays_data() {
+    for (literal, value) in [
+        (r#"'DEBUG'"#, "DEBUG"),
+        (r#"'x\' RETURN u DEBUG //'"#, "x' RETURN u DEBUG //"),
+        (r#"'\u0027 RETURN u DEBUG //'"#, "' RETURN u DEBUG //"),
+        (
+            r#""'; DROP TABLE gl_user; --""#,
+            "'; DROP TABLE gl_user; --",
+        ),
+    ] {
+        for comment in ["", " /* DEBUG */", " // DEBUG"] {
+            let query = format!("MATCH (u:User {{username: {literal}}}) RETURN u{comment}");
+            let compiled = compile(&query, Frontend::Gql, &test_ontology(), &test_ctx()).unwrap();
+            assert!(!compiled.input.options.include_debug_sql, "{query}");
+            assert!(
+                has_param_value(&compiled.base.params, &serde_json::json!(value)),
+                "{query}"
+            );
+            assert!(!compiled.base.sql.contains(value), "{query}");
+        }
+    }
 }
 
 #[test]

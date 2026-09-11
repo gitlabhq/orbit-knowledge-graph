@@ -11,6 +11,26 @@ use pest_derive::Parser;
 #[grammar = "passes/frontend/gql/query.pest"]
 struct QueryParser;
 
+pub const GRAMMAR: &str = include_str!("query.pest");
+
+pub fn pair_outline(query: &str) -> Option<Vec<(usize, String)>> {
+    fn visit(
+        pairs: pest::iterators::Pairs<'_, Rule>,
+        depth: usize,
+        out: &mut Vec<(usize, String)>,
+    ) {
+        for pair in pairs {
+            out.push((depth, format!("{:?}", pair.as_rule())));
+            visit(pair.into_inner(), depth + 1, out);
+        }
+    }
+    check_bounds(query).ok()?;
+    let pairs = <QueryParser as pest::Parser<Rule>>::parse(Rule::Query, query).ok()?;
+    let mut outline = Vec::new();
+    visit(pairs, 0, &mut outline);
+    Some(outline)
+}
+
 const MAX_QUERY_BYTES: usize = 32 * 1024;
 const MAX_NESTING: usize = 32;
 
@@ -21,12 +41,7 @@ const INVARIANT_PREFIXES: [&str; 3] = [
 ];
 
 pub fn parse(query: &str) -> Result<Input> {
-    if query.len() > MAX_QUERY_BYTES {
-        return Err(QueryError::LimitExceeded(format!(
-            "query must not exceed {MAX_QUERY_BYTES} bytes"
-        )));
-    }
-    check_nesting(query)?;
+    check_bounds(query)?;
     let statement = <QueryParser as pest_consume::Parser>::parse(Rule::Query, query)
         .map_err(|error| {
             QueryError::Validation(format!(
@@ -37,6 +52,15 @@ pub fn parse(query: &str) -> Result<Input> {
         .expect("Query produces one pair");
     let statement = QueryParser::Query(statement).map_err(syntax_error)?;
     lower::lower(query, statement)
+}
+
+fn check_bounds(query: &str) -> Result<()> {
+    if query.len() > MAX_QUERY_BYTES {
+        return Err(QueryError::LimitExceeded(format!(
+            "query must not exceed {MAX_QUERY_BYTES} bytes"
+        )));
+    }
+    check_nesting(query)
 }
 
 fn check_nesting(query: &str) -> Result<()> {

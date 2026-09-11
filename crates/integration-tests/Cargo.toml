@@ -23,6 +23,7 @@ nats-client = { workspace = true, features = ["testkit"] }
 integration-testkit = { path = "../integration-testkit" }
 ontology = { path = "../ontology" }
 orbit-migrations = { path = "../orbit-migrations" }
+orbit-fuzz = { path = "../fuzz" }
 query-engine = { path = "../query-engine", features = ["testutils"] }
 arrow = { workspace = true }
 async-nats = { workspace = true }

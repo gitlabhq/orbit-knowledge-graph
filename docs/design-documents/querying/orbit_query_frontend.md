@@ -165,6 +165,18 @@ The runner parses each key into a `Frontend` and passes it to `compiler::compile
 A scenario whose query has no text spelling carries only the `json` key.
 Paginated scenarios end their text query with the `PAGE` clause, and the runner appends `AFTER` with each `next_cursor`.
 
+### Grammar coverage
+
+`crates/integration-tests/tests/compiler/gql_grammar.rs` checks the parser against the grammar rather than against hand-picked queries.
+
+`orbit_fuzz::grammar::Grammar` reads `query.pest` through `pest_meta` and enumerates, for every rule reachable from `Query`, every derivation that varies the decisions inside that rule (bounded to two repetitions) while the rest of the statement takes the shortest path that reaches it.
+Each derivation must be consumed by `syntax.rs`: a lowering error is acceptable, a syntax error or pipeline invariant is not.
+The real parser decides whether a derivation is faithful: its pair tree for the generated text must equal the rules the walk produced, which discards derivations that PEG ordered choice or greedy repetition would read differently.
+This replaces the need to hand-enumerate the child shapes that `match_nodes!` arms accept, and it fails when the grammar changes but the syntax tree does not.
+
+Semantics stay with the JSON parity tests above: each lowering rule that matters has a paired JSON and text query whose compiled SQL must match.
+The `fuzz_gql` and `fuzz_gql_grammar` targets in `crates/fuzz/` run the same oracles on random input.
+
 JSON syntax-error tests remain JSON-only.
 The existing `valid_identifiers_produce_renderable_sql` fixture also remains JSON-only:
 its relationship order reaches the planner's fallback join between unconnected aliases.
