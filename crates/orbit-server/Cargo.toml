@@ -65,7 +65,6 @@ uuid = { workspace = true, features = ["v4"] }
 toon-format = { workspace = true }
 
 [build-dependencies]
-compiler = { path = "../query-engine/compiler" }
 orbit-migrations = { path = "../orbit-migrations" }
 orbit-prompts = { path = "../orbit-prompts" }
 named-queries = { path = "../named-queries" }

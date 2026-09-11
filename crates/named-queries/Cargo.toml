@@ -5,7 +5,9 @@ edition = "2024"
 license = "MIT"
 
 [dependencies]
+compiler = { path = "../query-engine/compiler" }
 jsonschema = { workspace = true }
+ontology = { path = "../ontology" }
 rust-embed = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
