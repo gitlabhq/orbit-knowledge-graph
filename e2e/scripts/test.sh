@@ -45,6 +45,7 @@ helm "${HELM_ARGS[@]}"
 
 "$E2E_DIR/scripts/ch-chaos.sh" indexing &
 CHAOS_PID=$!
+trap 'rm -rf "$FIX_TMP"; kill "$CHAOS_PID" 2>/dev/null || true' EXIT
 
 # Poll job status until terminal condition or timeout. Heartbeat keeps the
 # pipeline trace alive without the complexity (and orphaned-kubectl bugs) of
