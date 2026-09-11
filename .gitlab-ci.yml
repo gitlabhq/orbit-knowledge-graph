@@ -1317,9 +1317,8 @@ e2e:
       junit: e2e/diagnostics/junit.xml
     expire_in: 3 days
 
-# Same suite against a 3-replica ClickHouse cluster with embedded Keeper. One
-# replica is killed during the schema migration and again during the run.
-# Runs on the e2e-ha schedule and by hand on merge requests.
+# Same suite against a 3-replica ClickHouse cluster; ch-chaos.sh kills one
+# replica during the schema migration and another during the run.
 e2e-ha:
   extends: e2e
   variables:

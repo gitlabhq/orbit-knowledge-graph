@@ -1,12 +1,23 @@
+{{ $replicas := env "E2E_CH_REPLICAS" | default "1" | atoi }}
 password: {{ requiredEnv "E2E_CH_DEFAULT_PASS" | quote }}
 
-# E2E_CH_REPLICAS=3 deploys a replicated cluster with embedded Keeper; the
-# default stays a single node.
-replicas: {{ env "E2E_CH_REPLICAS" | default "1" }}
+replicas: {{ $replicas }}
 
+# A replica that comes back on an empty disk has lost its database metadata, so
+# the cluster keeps its data across the pod kills in ch-chaos.sh.
 persistence:
-  enabled: false
-  size: 20Gi
+  enabled: {{ gt $replicas 1 }}
+  size: 10Gi
+
+{{ if gt $replicas 1 }}
+resources:
+  requests:
+    cpu: 500m
+    memory: 2Gi
+  limits:
+    cpu: 2
+    memory: 4Gi
+{{ end }}
 
 users:
   siphon:
