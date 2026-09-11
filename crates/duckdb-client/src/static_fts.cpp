@@ -1,6 +1,11 @@
 #include "duckdb/main/capi/capi_internal.hpp"
 #include "fts_extension.hpp"
 
+#include <memory>
+
+static_assert(sizeof(duckdb::DatabaseWrapper) == sizeof(std::shared_ptr<duckdb::DuckDB>),
+              "DuckDB's C API database wrapper layout changed");
+
 extern "C" int orbit_duckdb_load_fts(duckdb_database database) {
     if (!database) {
         return 1;

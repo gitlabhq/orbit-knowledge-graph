@@ -535,18 +535,37 @@ CREATE TABLE IF NOT EXISTS gl_edge (
 
     #[cfg(feature = "static-fts")]
     #[test]
-    fn static_fts_is_registered_when_the_database_opens() {
+    fn static_fts_indexes_and_searches_documents() {
         let client = DuckDbClient::open_in_memory().unwrap();
         client.load_extension("fts").unwrap();
+        client
+            .execute("CREATE TABLE documents(id BIGINT, body VARCHAR)", &[])
+            .unwrap();
+        client
+            .execute(
+                "INSERT INTO documents VALUES (1, 'graph search'), (2, 'query compiler')",
+                &[],
+            )
+            .unwrap();
+        client
+            .execute(
+                "PRAGMA create_fts_index('documents', 'id', 'body', overwrite=1)",
+                &[],
+            )
+            .unwrap();
 
         let batches = client
-            .query_arrow("SELECT stem('running', 'english') AS word")
+            .query_arrow(
+                "SELECT CAST(id AS BIGINT) AS id
+                 FROM documents
+                 WHERE fts_main_documents.match_bm25(id, 'graph') IS NOT NULL",
+            )
             .unwrap();
-        let words = batches[0]
+        let ids = batches[0]
             .column(0)
             .as_any()
-            .downcast_ref::<StringArray>()
+            .downcast_ref::<Int64Array>()
             .unwrap();
-        assert_eq!(words.value(0), "run");
+        assert_eq!(ids.values(), &[1]);
     }
 }

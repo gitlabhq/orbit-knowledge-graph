@@ -59,6 +59,13 @@ pub(crate) fn open(
                 "failed to configure DuckDB access mode".to_string(),
             ));
         }
+        if libduckdb_sys::duckdb_set_config(config.0, c"duckdb_api".as_ptr(), c"rust".as_ptr())
+            != libduckdb_sys::DuckDBSuccess
+        {
+            return Err(DuckDbError::Schema(
+                "failed to configure the DuckDB API identifier".to_string(),
+            ));
+        }
 
         let state =
             libduckdb_sys::duckdb_open_ext(path.as_ptr(), &mut database, config.0, &mut error);
