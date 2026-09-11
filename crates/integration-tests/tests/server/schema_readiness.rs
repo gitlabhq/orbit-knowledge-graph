@@ -41,13 +41,15 @@ const SECRET: &str = "test-secret-that-is-at-least-32-bytes-long";
 const WAIT_LIMIT: Duration = Duration::from_secs(30);
 const POLL_INTERVAL: Duration = Duration::from_secs(1);
 
-fn archive(version: u32) -> OntologyArchive {
+const PROPERTIES_ADDED_IN_V2: [(&str, &str); 2] = [
+    ("nodes/core/project.yaml", "description"),
+    ("nodes/code_review/merge_request.yaml", "merged_at"),
+];
+
+fn test_archive(version: u32) -> OntologyArchive {
     let mut sources = ontology::migrations::embedded_sources();
     if version == 1 {
-        for (path, property) in [
-            ("nodes/core/project.yaml", "description"),
-            ("nodes/code_review/merge_request.yaml", "merged_at"),
-        ] {
+        for (path, property) in PROPERTIES_ADDED_IN_V2 {
             let mut node: Value = yaml::from_str(&sources[path]).unwrap();
             node["properties"]
                 .as_object_mut()
@@ -62,6 +64,10 @@ fn archive(version: u32) -> OntologyArchive {
         }
     }
     OntologyArchive::from_sources(version, &sources).unwrap()
+}
+
+fn has_description(version: u32) -> bool {
+    version > 1
 }
 
 fn authenticated<T>(message: T) -> Request<T> {
@@ -118,7 +124,7 @@ impl ServingFixture {
         let shutdown = CancellationToken::new();
         let watcher = SchemaWatcher::spawn(
             Arc::new(database.create_client()),
-            archive(embedded_version),
+            test_archive(embedded_version),
             catalog.clone(),
             &config,
             shutdown.clone(),
@@ -161,46 +167,48 @@ impl ServingFixture {
         }
     }
 
-    async fn await_schema(&mut self, version: Option<u32>) {
+    async fn await_serving_version(&mut self, version: Option<u32>) {
         timeout(WAIT_LIMIT, async {
-            loop {
-                let response = self
-                    .client
-                    .get_graph_schema(authenticated(GetGraphSchemaRequest {
-                        expand_nodes: vec!["Project".into()],
-                        ..Default::default()
-                    }))
-                    .await;
-                let description_available = match response {
-                    Ok(response) => {
-                        let Some(get_graph_schema_response::Content::Structured(schema)) =
-                            response.into_inner().content
-                        else {
-                            panic!("expected structured schema");
-                        };
-                        let project = schema
-                            .nodes
-                            .iter()
-                            .find(|node| node.name == "Project")
-                            .unwrap();
-                        Some(
-                            project
-                                .properties
-                                .iter()
-                                .any(|property| property.name == "description"),
-                        )
-                    }
-                    Err(error) if error.code() == tonic::Code::Unavailable => None,
-                    Err(error) => panic!("unexpected schema error: {error}"),
-                };
-                if description_available == version.map(|version| version > 1) {
-                    return;
-                }
+            while self.structured_schema_has_description().await != version.map(has_description) {
                 sleep(Duration::from_millis(50)).await;
             }
         })
         .await
         .expect("serving must reflect the active archive");
+        self.assert_compact_schema_matches(version).await;
+        self.assert_readiness_matches(version).await;
+    }
+
+    async fn structured_schema_has_description(&mut self) -> Option<bool> {
+        let response = self
+            .client
+            .get_graph_schema(authenticated(GetGraphSchemaRequest {
+                expand_nodes: vec!["Project".into()],
+                ..Default::default()
+            }))
+            .await;
+        let response = match response {
+            Ok(response) => response.into_inner(),
+            Err(error) if error.code() == tonic::Code::Unavailable => return None,
+            Err(error) => panic!("unexpected schema error: {error}"),
+        };
+        let Some(get_graph_schema_response::Content::Structured(schema)) = response.content else {
+            panic!("expected structured schema");
+        };
+        let project = schema
+            .nodes
+            .iter()
+            .find(|node| node.name == "Project")
+            .unwrap();
+        Some(
+            project
+                .properties
+                .iter()
+                .any(|property| property.name == "description"),
+        )
+    }
+
+    async fn assert_compact_schema_matches(&mut self, version: Option<u32>) {
         let command = self
             .client
             .invoke_agent_command(authenticated(InvokeAgentCommandRequest {
@@ -208,29 +216,32 @@ impl ServingFixture {
                 parameters_json: json!({"format": "raw", "expand_nodes": ["Project"]}).to_string(),
             }))
             .await;
-        if let Some(version) = version {
-            let Some(invoke_agent_command_response::Content::ResultJson(encoded)) =
-                command.unwrap().into_inner().content
-            else {
-                panic!("expected compact graph schema");
-            };
-            let schema: Value = serde_json::from_str(&encoded).unwrap();
-            let project = schema["domains"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .flat_map(|domain| domain["nodes"].as_array().unwrap())
-                .find(|node| node["name"] == "Project")
-                .unwrap();
-            let has_description = project["props"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(|property| property.as_str().unwrap().starts_with("description:"));
-            assert_eq!(has_description, version > 1);
-        } else {
+        let Some(version) = version else {
             assert_eq!(command.unwrap_err().code(), tonic::Code::Unavailable);
-        }
+            return;
+        };
+        let Some(invoke_agent_command_response::Content::ResultJson(encoded)) =
+            command.unwrap().into_inner().content
+        else {
+            panic!("expected compact graph schema");
+        };
+        let schema: Value = serde_json::from_str(&encoded).unwrap();
+        let project = schema["domains"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|domain| domain["nodes"].as_array().unwrap())
+            .find(|node| node["name"] == "Project")
+            .unwrap();
+        let project_has_description = project["props"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|property| property.as_str().unwrap().starts_with("description:"));
+        assert_eq!(project_has_description, has_description(version));
+    }
+
+    async fn assert_readiness_matches(&self, version: Option<u32>) {
         let expected = if version.is_some() {
             StatusCode::OK
         } else {
@@ -240,7 +251,7 @@ impl ServingFixture {
     }
 
     async fn create_schema_tables(&self, version: u32) {
-        let ontology = archive(version).load_ontology().unwrap();
+        let ontology = test_archive(version).load_ontology().unwrap();
         let schema = GraphSchema::from_ontology(&ontology);
         for table_name in schema.prefixed_table_names(&table_prefix(version)) {
             if table_name != format!("v{version}_gl_project") {
@@ -251,7 +262,7 @@ impl ServingFixture {
                     .await;
             }
         }
-        let description = if version > 1 {
+        let description = if has_description(version) {
             ", description String DEFAULT 'new property'"
         } else {
             ""
@@ -268,6 +279,36 @@ impl ServingFixture {
              VALUES (1, 'project v{version}', 'group/project', '1/', 1, false)"
         )).await;
     }
+
+    async fn put_archive_bytes(&self, version: u32, contents: bytes::Bytes) {
+        self.broker
+            .kv_put(
+                ONTOLOGY_ARCHIVES_BUCKET,
+                &version.to_string(),
+                contents,
+                KvPutOptions::default(),
+            )
+            .await
+            .unwrap();
+    }
+
+    async fn named_query_names(&mut self) -> Vec<String> {
+        self.client
+            .list_named_queries(authenticated(ListNamedQueriesRequest::default()))
+            .await
+            .unwrap()
+            .into_inner()
+            .queries
+            .into_iter()
+            .map(|query| query.name)
+            .collect()
+    }
+
+    async fn run_project_query(&mut self, columns: &[&str]) -> Value {
+        let mut query = QueryStream::open(&mut self.client, Some(project_query(columns))).await;
+        let authorization = query.receive().await;
+        query.authorize_and_finish(authorization).await
+    }
 }
 
 fn project_query(columns: &[&str]) -> ExecuteQueryRequest {
@@ -278,6 +319,14 @@ fn project_query(columns: &[&str]) -> ExecuteQueryRequest {
             "limit": 10
         })
         .to_string(),
+        ..Default::default()
+    }
+}
+
+fn named_query(name: &str) -> ExecuteQueryRequest {
+    ExecuteQueryRequest {
+        query_type: QueryType::Named as i32,
+        query: json!({"name": name}).to_string(),
         ..Default::default()
     }
 }
@@ -362,65 +411,40 @@ impl QueryStream {
 }
 
 #[tokio::test]
-async fn promotion_and_rollback_preserve_in_flight_queries_and_filter_named_queries() {
+async fn promotion_and_rollback_keep_in_flight_queries_on_their_snapshot() {
     let mut fixture = ServingFixture::start(2, WAIT_LIMIT).await;
-    fixture.catalog.publish(&archive(1)).await.unwrap();
+    fixture.catalog.publish(&test_archive(1)).await.unwrap();
     for version in [1, 2] {
         fixture.create_schema_tables(version).await;
     }
     let graph = fixture.database.create_client();
     promote_version(&graph, 1).await.unwrap();
     mark_version_migrating(&graph, 2).await.unwrap();
-    fixture.await_schema(Some(1)).await;
+    fixture.await_serving_version(Some(1)).await;
 
     for (current, next) in [(1, 2), (2, 1)] {
-        let columns = if current == 1 {
-            vec!["name"]
+        let columns: &[&str] = if has_description(current) {
+            &["name", "description"]
         } else {
-            vec!["name", "description"]
+            &["name"]
         };
-        let mut query = QueryStream::open(&mut fixture.client, Some(project_query(&columns))).await;
+        let mut query = QueryStream::open(&mut fixture.client, Some(project_query(columns))).await;
         let authorization = query.receive().await;
         promote_version(&graph, next).await.unwrap();
-        fixture.await_schema(Some(next)).await;
+        fixture.await_serving_version(Some(next)).await;
+
         let result = query.authorize_and_finish(authorization).await;
         assert_eq!(result["nodes"][0]["name"], format!("project v{current}"));
-        assert_eq!(
-            result["nodes"][0]["description"],
-            if current == 1 {
-                Value::Null
-            } else {
-                json!("new property")
-            }
-        );
-
-        let queries = fixture
-            .client
-            .list_named_queries(authenticated(ListNamedQueriesRequest::default()))
-            .await
-            .unwrap()
-            .into_inner();
-        assert_eq!(
-            queries
-                .queries
-                .iter()
-                .any(|query| query.name == "recent_merges"),
-            next == 2
-        );
-        assert!(
-            queries
-                .queries
-                .iter()
-                .any(|query| query.name == "my_mrs_with_pipelines")
-        );
+        let expected_description = if has_description(current) {
+            json!("new property")
+        } else {
+            Value::Null
+        };
+        assert_eq!(result["nodes"][0]["description"], expected_description);
     }
 
-    let mut query = QueryStream::open(&mut fixture.client, Some(project_query(&["name"]))).await;
-    let authorization = query.receive().await;
-    assert_eq!(
-        query.authorize_and_finish(authorization).await["nodes"][0]["name"],
-        "project v1"
-    );
+    let result = fixture.run_project_query(&["name"]).await;
+    assert_eq!(result["nodes"][0]["name"], "project v1");
     let versions: Vec<_> = fixture
         .analytics
         .drain()
@@ -428,22 +452,37 @@ async fn promotion_and_rollback_preserve_in_flight_queries_and_filter_named_quer
         .map(|event| event.contexts()[1].data["graph_schema_version"].clone())
         .collect();
     assert_eq!(versions, [json!("1"), json!("2"), json!("1")]);
+}
 
-    let mut query = QueryStream::open(
-        &mut fixture.client,
-        Some(ExecuteQueryRequest {
-            query_type: QueryType::Named as i32,
-            query: json!({"name": "recent_merges"}).to_string(),
-            ..Default::default()
-        }),
-    )
-    .await;
+#[tokio::test]
+async fn named_queries_follow_the_active_schema() {
+    let mut fixture = ServingFixture::start(2, WAIT_LIMIT).await;
+    fixture.catalog.publish(&test_archive(1)).await.unwrap();
+    for version in [1, 2] {
+        fixture.create_schema_tables(version).await;
+    }
+    let graph = fixture.database.create_client();
+
+    promote_version(&graph, 1).await.unwrap();
+    fixture.await_serving_version(Some(1)).await;
+    let names = fixture.named_query_names().await;
+    assert!(names.contains(&"my_mrs_with_pipelines".to_string()));
+    assert!(!names.contains(&"recent_merges".to_string()));
+
+    let mut query =
+        QueryStream::open(&mut fixture.client, Some(named_query("recent_merges"))).await;
     let response = query.receive().await;
     let Content::Error(error) = response else {
         panic!("expected unavailable named query to be rejected, got {response:?}");
     };
     assert_eq!(error.code, "invalid_request");
     assert!(error.message.contains("recent_merges"));
+
+    promote_version(&graph, 2).await.unwrap();
+    fixture.await_serving_version(Some(2)).await;
+    let names = fixture.named_query_names().await;
+    assert!(names.contains(&"my_mrs_with_pipelines".to_string()));
+    assert!(names.contains(&"recent_merges".to_string()));
 }
 
 #[tokio::test]
@@ -454,61 +493,43 @@ async fn missing_and_corrupt_archives_fail_closed_and_recover_without_restart() 
 
     for (version, corrupt_contents) in [(2, None), (3, Some(corrupt_archive))] {
         fixture.create_schema_tables(version).await;
-        let key = version.to_string();
         if let Some(contents) = corrupt_contents {
-            fixture
-                .broker
-                .kv_put(
-                    ONTOLOGY_ARCHIVES_BUCKET,
-                    &key,
-                    contents,
-                    KvPutOptions::default(),
-                )
-                .await
-                .unwrap();
+            fixture.put_archive_bytes(version, contents).await;
         }
         promote_version(&graph, version).await.unwrap();
-        fixture.await_schema(None).await;
+        fixture.await_serving_version(None).await;
         fixture
             .client
             .list_tools(authenticated(ListToolsRequest::default()))
             .await
             .unwrap();
 
-        let restored_contents = bytes::Bytes::copy_from_slice(archive(version).bytes());
-        fixture
-            .broker
-            .kv_put(
-                ONTOLOGY_ARCHIVES_BUCKET,
-                &key,
-                restored_contents,
-                KvPutOptions::default(),
-            )
-            .await
-            .unwrap();
-        fixture.await_schema(Some(version)).await;
+        let restored_contents = bytes::Bytes::copy_from_slice(test_archive(version).bytes());
+        fixture.put_archive_bytes(version, restored_contents).await;
+        fixture.await_serving_version(Some(version)).await;
     }
+
     mark_version_retired(&graph, 3).await.unwrap();
-    fixture.await_schema(None).await;
+    fixture.await_serving_version(None).await;
     promote_version(&graph, 3).await.unwrap();
-    fixture.await_schema(Some(3)).await;
+    fixture.await_serving_version(Some(3)).await;
 }
 
 #[tokio::test]
 async fn active_table_loss_and_recovery_gate_warm_and_cold_readers() {
     let mut fixture = ServingFixture::start(1, WAIT_LIMIT).await;
     fixture.create_schema_tables(2).await;
-    fixture.catalog.publish(&archive(2)).await.unwrap();
+    fixture.catalog.publish(&test_archive(2)).await.unwrap();
     promote_version(&fixture.database.create_client(), 2)
         .await
         .unwrap();
-    fixture.await_schema(Some(2)).await;
+    fixture.await_serving_version(Some(2)).await;
 
     fixture
         .database
         .execute("RENAME TABLE v2_gl_project TO unavailable_project")
         .await;
-    fixture.await_schema(None).await;
+    fixture.await_serving_version(None).await;
     assert_eq!(probe_status(&fixture.router, "/live").await, StatusCode::OK);
 
     let mut config = AppConfig::embedded_defaults();
@@ -523,7 +544,7 @@ async fn active_table_loss_and_recovery_gate_warm_and_cold_readers() {
         let shutdown = CancellationToken::new();
         let watcher = SchemaWatcher::spawn(
             reader_client.clone(),
-            archive(embedded_version),
+            test_archive(embedded_version),
             fixture.catalog.clone(),
             &config,
             shutdown.clone(),
@@ -544,7 +565,7 @@ async fn active_table_loss_and_recovery_gate_warm_and_cold_readers() {
         .database
         .execute("RENAME TABLE unavailable_project TO v2_gl_project")
         .await;
-    fixture.await_schema(Some(2)).await;
+    fixture.await_serving_version(Some(2)).await;
     for (router, _) in &cold_readers {
         timeout(WAIT_LIMIT, async {
             while probe_status(router, "/ready").await != StatusCode::OK {
@@ -555,12 +576,8 @@ async fn active_table_loss_and_recovery_gate_warm_and_cold_readers() {
         .expect("a cold reader must become ready when the active tables are restored");
     }
 
-    let mut query = QueryStream::open(&mut fixture.client, Some(project_query(&["name"]))).await;
-    let authorization = query.receive().await;
-    assert_eq!(
-        query.authorize_and_finish(authorization).await["nodes"][0]["name"],
-        "project v2"
-    );
+    let result = fixture.run_project_query(&["name"]).await;
+    assert_eq!(result["nodes"][0]["name"], "project v2");
     assert!(
         reader_client
             .execute("INSERT INTO v2_gl_project (id) VALUES (2)")
@@ -576,7 +593,7 @@ async fn metadata_read_failure_keeps_the_last_usable_schema() {
     promote_version(&fixture.database.create_client(), 1)
         .await
         .unwrap();
-    fixture.await_schema(Some(1)).await;
+    fixture.await_serving_version(Some(1)).await;
     fixture
         .database
         .execute("RENAME TABLE gkg_schema_version TO unavailable_schema_version")
@@ -601,16 +618,9 @@ async fn metadata_read_failure_keeps_the_last_usable_schema() {
     .await
     .expect("watcher must encounter the metadata failure");
 
-    assert_eq!(
-        probe_status(&fixture.router, "/ready").await,
-        StatusCode::OK
-    );
-    let mut query = QueryStream::open(&mut fixture.client, Some(project_query(&["name"]))).await;
-    let authorization = query.receive().await;
-    assert_eq!(
-        query.authorize_and_finish(authorization).await["nodes"][0]["name"],
-        "project v1"
-    );
+    fixture.assert_readiness_matches(Some(1)).await;
+    let result = fixture.run_project_query(&["name"]).await;
+    assert_eq!(result["nodes"][0]["name"], "project v1");
 }
 
 #[tokio::test]
@@ -620,7 +630,7 @@ async fn idle_and_authorization_blocked_streams_time_out_without_query_success()
     promote_version(&fixture.database.create_client(), 1)
         .await
         .unwrap();
-    fixture.await_schema(Some(1)).await;
+    fixture.await_serving_version(Some(1)).await;
 
     for request in [None, Some(project_query(&["name"]))] {
         let waiting_for_authorization = request.is_some();
