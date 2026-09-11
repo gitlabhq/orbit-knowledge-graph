@@ -1,5 +1,6 @@
 use std::env;
 use std::fs;
+use std::io::Cursor;
 use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
@@ -30,6 +31,8 @@ const EXTENSIONS: &[(&str, &str, &str)] = &[
 ];
 
 const DOWNLOAD_LIMIT: u64 = 64 * 1024 * 1024;
+const STATIC_FTS_ARCHIVE: &str = "third_party/duckdb-fts-sources.tar.gz";
+const STATIC_FTS_PIN: &str = "third_party/duckdb-fts-sources.PIN";
 
 fn main() {
     println!("cargo:rerun-if-changed={}", env!("LOCKFILE"));
@@ -45,7 +48,7 @@ fn main() {
 
     let mut entries = String::new();
     if env::var_os("CARGO_FEATURE_STATIC_FTS").is_some() {
-        build_static_fts();
+        build_static_fts(&out_dir, duckdb_version);
     } else {
         for &(name, _, expected) in EXTENSIONS.iter().filter(|(_, p, _)| *p == platform) {
             let url = format!(
@@ -75,9 +78,28 @@ fn main() {
     .unwrap();
 }
 
-fn build_static_fts() {
-    let fts = Path::new("third_party/fts");
-    let snowball = Path::new("third_party/snowball");
+fn build_static_fts(out_dir: &Path, duckdb_version: &str) {
+    let archive = Path::new(STATIC_FTS_ARCHIVE);
+    let pin = fs::read_to_string(STATIC_FTS_PIN).unwrap();
+    assert_eq!(pin_value(&pin, "duckdb"), duckdb_version);
+    assert_eq!(
+        sha256_of(archive).as_deref(),
+        Some(pin_value(&pin, "archive_sha256")),
+        "{STATIC_FTS_ARCHIVE} does not match {STATIC_FTS_PIN}"
+    );
+
+    let source_root = out_dir.join("duckdb-fts-sources");
+    if source_root.exists() {
+        fs::remove_dir_all(&source_root).unwrap();
+    }
+    tar::Archive::new(flate2::read::GzDecoder::new(Cursor::new(
+        fs::read(archive).unwrap(),
+    )))
+    .unpack(out_dir)
+    .unwrap();
+
+    let fts = source_root.join("fts");
+    let snowball = source_root.join("snowball");
     let mut sources = vec![
         fts.join("fts_extension.cpp"),
         fts.join("fts_indexing.cpp"),
@@ -95,15 +117,15 @@ fn build_static_fts() {
     sources.push(PathBuf::from("src/static_fts.cpp"));
 
     println!("cargo:rerun-if-changed=src/static_fts.cpp");
-    println!("cargo:rerun-if-changed=third_party/fts");
-    println!("cargo:rerun-if-changed=third_party/snowball");
+    println!("cargo:rerun-if-changed={STATIC_FTS_ARCHIVE}");
+    println!("cargo:rerun-if-changed={STATIC_FTS_PIN}");
 
     let mut build = cc::Build::new();
     build
         .cpp(true)
         .include(env::var("DEP_DUCKDB_INCLUDE").expect("bundled DuckDB include path"))
         .include(fts.join("include"))
-        .include(snowball)
+        .include(&snowball)
         .include(snowball.join("libstemmer"))
         .include(snowball.join("runtime"))
         .include(snowball.join("src_c"))
@@ -125,6 +147,12 @@ fn build_static_fts() {
         }
     }
     build.compile("orbit_duckdb_fts");
+}
+
+fn pin_value<'a>(pin: &'a str, key: &str) -> &'a str {
+    pin.lines()
+        .find_map(|line| line.strip_prefix(&format!("{key}: ")))
+        .unwrap_or_else(|| panic!("missing {key} in {STATIC_FTS_PIN}"))
 }
 
 /// DuckDB 1.5.5 ships as duckdb crate 1.10505.x.

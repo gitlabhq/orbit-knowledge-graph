@@ -26,8 +26,10 @@ thiserror = { workspace = true }
 
 [build-dependencies]
 cc = { workspace = true }
+flate2 = { workspace = true }
 orbit-versions = { path = "../orbit-versions" }
 sha2 = { workspace = true }
+tar = { workspace = true }
 ureq = { workspace = true }
 
 [dev-dependencies]

@@ -18,7 +18,7 @@ raw_output_format: 5.0.1
 goon_output_format: 4.0.1
 
 # DuckDB release linked by the duckdb crate in Cargo.lock; crate 1.10505.x
-# is DuckDB 1.5.5. Vendored extension checksums and FTS/Snowball sources
+# is DuckDB 1.5.5. Vendored extension checksums and the FTS source archive
 # are pinned against this release.
 duckdb: v1.5.5
 
