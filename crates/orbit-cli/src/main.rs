@@ -190,8 +190,8 @@ struct IndexArgs {
                   Start implementing once the edit point and nearby pattern are clear. \
                   Queries with three or fewer matches include source automatically. \
                   Search matches indexed names and paths, not source bodies or regexes. \
-                  Changed and new source files are refreshed on demand together with their import neighbors; \
-                  other files are not reparsed. \
+                  Changed and new source files are refreshed on demand together with their neighbors \
+                  (files they import, that import them, or that share a relationship); other files are not reparsed. \
                   Name/path matches do not establish a code connection or dataflow. \
                   Trace relationships with `context <fqn> --related`. \
                   --kind takes one comma-separated list, e.g. `Class,Method`.\n\n\
@@ -271,11 +271,12 @@ fn context_long_about() -> String {
          With names, `--file` restricts lookup and accepts bare names. \
          Add `--related` to list connections instead of bodies; arrows show direction and \
          each line names its edge kind. `--tests` expands test connections.\n\n\
-         Refreshes changed and new source files on demand without reparsing unchanged files. \
+         Refreshes changed and new source files on demand together with their neighbors; \
+         other files are not reparsed. \
          If source cannot be verified, file requests report an unavailable outline; \
          definition requests show the full file labeled `ranges=unverified`. \
-         File refresh re-resolves relationships through import neighbors; imports outside the \
-         indexed checkout leave a stale-relationship warning until a full `index`.",
+         Relationships are re-resolved across the reparsed set; an import of a project file the \
+         indexer cannot parse leaves a stale-relationship warning until a full `index`.",
         launcher = commands::setup::spec::launcher()
     )
 }

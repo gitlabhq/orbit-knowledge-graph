@@ -8,15 +8,14 @@ use crate::workspace;
 
 const LABELS_CTE: &str = "labels AS (
   SELECT id, fqn AS label,
-         file_path || ':' || CAST(start_line AS VARCHAR) AS loc, file_path AS path,
-         definition_type
+         file_path || ':' || CAST(start_line AS VARCHAR) AS loc, file_path AS path
   FROM gl_definition WHERE project_id = ?2 AND commit_sha = ?3
   UNION ALL
-  SELECT id, path, '', path, NULL FROM gl_file WHERE project_id = ?2 AND commit_sha = ?3
+  SELECT id, path, '', path FROM gl_file WHERE project_id = ?2 AND commit_sha = ?3
   UNION ALL
-  SELECT id, path, '', path, NULL FROM gl_directory WHERE project_id = ?2 AND commit_sha = ?3
+  SELECT id, path, '', path FROM gl_directory WHERE project_id = ?2 AND commit_sha = ?3
   UNION ALL
-  SELECT id, identifier_name, '', file_path, NULL FROM gl_imported_symbol
+  SELECT id, identifier_name, '', file_path FROM gl_imported_symbol
   WHERE project_id = ?2 AND commit_sha = ?3
 )";
 

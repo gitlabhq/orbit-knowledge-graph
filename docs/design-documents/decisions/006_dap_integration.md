@@ -206,9 +206,9 @@ describe source versions, not complete parse coverage. Unchanged skipped files d
 not trigger retries or block refresh of other edited files. On each `grep` or
 `context` request, the repository walk and content hashing identify changed or
 new source and files that left the indexed inventory. Unchanged files still incur
-filesystem reads. The code pipeline parses only changed and new candidates,
-retaining the repository root
-for parser workspace context. Unchanged files are not reparsed. File, definition,
+filesystem reads. The code pipeline parses changed and new candidates plus their
+neighbors, retaining the repository root for parser workspace context. Other files
+are not reparsed. File, definition,
 and import rows, project search documents, and fingerprints are replaced in one
 DuckDB transaction. Directory rows are deduplicated; empty directories are removed.
 
@@ -219,9 +219,14 @@ and automatic source output from `grep` show full current source labeled
 fallback. Test code is included.
 
 Subset parsing only resolves relationships between files in the same parse run,
-so refresh widens the run to import neighbors: indexed files whose recorded
-imports mention a changed file's stem, and files a changed file's recorded
-imports mention. Edges whose source or target lives in a changed or deleted file
+so refresh widens the run to neighbors: indexed files whose recorded imports
+mention a changed file's stem, files a changed file's recorded imports mention,
+and files sharing an edge (definition or file endpoint) with a changed file. If
+the fresh parse of a changed file imports an indexed file outside that set, the
+set is widened once and parsed again. A file that was parseable and no longer is
+leaves the index like a deleted file. A reference with no import and no prior
+edge is not discovered until a full index. Edges whose source or target lives in
+a changed or deleted file
 are replaced from the fresh parse; edges between unchanged files are kept, and
 neighbor rows already present are not duplicated. When a fresh import points at a
 project file the indexer cannot parse, a stale marker naming the importing file is

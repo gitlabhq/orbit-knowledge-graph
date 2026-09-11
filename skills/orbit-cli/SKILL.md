@@ -25,7 +25,7 @@ metadata:
 
 Index and query a **local** copy of the GitLab Orbit graph. The local CLI
 parses a checked-out repository into a DuckDB property
-graph. **`grep`** finds definitions and relationships; **`context`** reads their
+graph. **`grep`** finds definitions; **`context`** reads their
 source bodies. Read-only SQL handles aggregations and complex queries.
 Orbit Remote instead speaks the JSON DSL over gRPC. Use this skill for the
 working tree; use the `orbit` skill for production data.
@@ -120,17 +120,19 @@ mapped before reading one body. With names, it restricts lookup to that file
 and accepts bare names; `--kind` narrows the selection.
 
 `grep` and `context` refresh changed and new source files on demand, removing
-deleted files without reparsing unchanged files. Successful refreshes update
+deleted files. Neighbors (files they import, that import them, or that share a
+relationship) are reparsed with them; other files are not. Successful refreshes update
 search results and definition ranges. Failed, unsupported, or unstable refreshes
 keep the previous definitions; definition reads return the full current file with
 `ranges=unverified`, and file overviews report that the outline is unavailable.
 Test code is included.
 
-File refresh reparses changed files together with the indexed files they import
-or that import them, so cross-file relationships are re-resolved without a full
-rebuild. Edges touching unchanged files are kept. When a changed file imports a
-project file that the indexer cannot parse, relationship commands print a
-stale warning naming that file; re-run `index` to clear it.
+File refresh reparses changed files together with their neighbors, so cross-file
+relationships are re-resolved without a full rebuild. Edges between unchanged
+files are kept. A new reference to a file that has no import and no prior edge
+(for example a Ruby constant with no `require`) is not discovered until a full
+`index`. When a changed file imports a project file the indexer cannot parse,
+relationship commands print a stale warning naming that file; `index` clears it.
 
 `--kind` is one comma-separated list (`Class,Method`); a quoted pipe list
 (`"Class|Method"`) also works. It is not repeatable.

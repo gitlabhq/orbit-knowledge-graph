@@ -1379,11 +1379,31 @@ fn refresh_resolves_relationships_through_import_neighbors() {
         &["context", "read_file", "--related"],
     );
     assert!(ok, "{stderr}");
-    assert!(stderr.contains("import neighbor(s)"), "{stderr}");
+    assert!(stderr.contains("neighbor(s)"), "{stderr}");
     assert!(!stderr.contains("stale"), "{stderr}");
+    assert!(output.contains("<-- src.main.App.run  [calls]"), "{output}");
+    std::fs::write(
+        repo.path.join("src/test_utils.py"),
+        "from utils import read_file\n\ndef test_read():\n    read_file(\"x\")\n",
+    )
+    .unwrap();
+    let (collapsed, _, ok) = orbit(
+        &repo.path,
+        data.path(),
+        &["context", "read_file", "--related"],
+    );
     assert!(
-        output.contains("run") && output.contains("[calls]"),
-        "{output}"
+        ok && collapsed.contains("1 more in test, fixture, or generated files"),
+        "{collapsed}"
+    );
+    let (expanded, _, ok) = orbit(
+        &repo.path,
+        data.path(),
+        &["context", "read_file", "--related", "--tests"],
+    );
+    assert!(
+        ok && expanded.contains("<-- src.test_utils.test_read  [calls]"),
+        "{expanded}"
     );
     let (_, stderr, ok) = orbit(&repo.path, data.path(), &["context", "hello", "--related"]);
     assert!(ok && !stderr.contains("refreshed"), "{stderr}");

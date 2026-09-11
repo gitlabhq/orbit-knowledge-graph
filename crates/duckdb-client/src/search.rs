@@ -45,10 +45,6 @@ pub struct DuckDbSearch {
 }
 
 impl DuckDbSearch {
-    pub fn new(client: DuckDbClient, project_id: i64, commit_sha: &str) -> Result<Self> {
-        Self::scoped(client, project_id, commit_sha, &[])
-    }
-
     pub fn scoped(
         client: DuckDbClient,
         project_id: i64,
@@ -290,7 +286,7 @@ WHERE d.project_id = {pid} AND d.commit_sha = {sha}
         } else {
             String::new()
         },
-        paths = path_scope("d.file_path", paths, false),
+        paths = path_scope("d.file_path", paths),
     )
 }
 
@@ -306,7 +302,7 @@ pub fn kind_scope(col: &str, kinds: &[String]) -> String {
     format!("  AND lower({col}) IN ({list})\n")
 }
 
-pub fn path_scope(col: &str, paths: &[String], include_excluded: bool) -> String {
+fn path_scope(col: &str, paths: &[String]) -> String {
     if paths.is_empty() {
         return String::new();
     }
@@ -323,9 +319,6 @@ pub fn path_scope(col: &str, paths: &[String], include_excluded: bool) -> String
                     sql_lit(&format!("{p}/*"))
                 )
             };
-            if include_excluded {
-                return format!("({scope})");
-            }
             let opted_in = format!(
                 "{} OR {}",
                 excluded_path_predicate(&sql_lit(p)),
