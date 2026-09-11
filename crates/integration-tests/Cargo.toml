@@ -17,6 +17,7 @@ orbit-server = { path = "../orbit-server", features = ["testkit"] }
 orbit-server-config = { path = "../orbit-server-config" }
 orbit-utils = { path = "../utils" }
 jsonschema = { workspace = true }
+jsonwebtoken = { workspace = true }
 indexer = { path = "../indexer", features = ["testkit"] }
 named-queries = { path = "../named-queries" }
 nats-client = { workspace = true, features = ["testkit"] }
@@ -48,6 +49,7 @@ regex = { workspace = true }
 tar = { workspace = true }
 testcontainers = { workspace = true }
 testcontainers-modules = { workspace = true }
+tokio-stream = { workspace = true, features = ["net"] }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 tonic = { workspace = true }

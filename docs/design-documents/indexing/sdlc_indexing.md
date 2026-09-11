@@ -385,7 +385,9 @@ The Orbit schema is declared in `config/graph.sql` (generated from the ontology)
 
 Migration requires usable [ontology archives](../schema_management.md#ontology-archives) for both the active and target versions.
 
-The schema is backward compatible with the previous version until the schema migration is complete for every namespace. A migration is considered complete when `MigrationCompletionChecker` detects that all enabled namespaces have been re-indexed into new-prefix tables, then promotes the new version to `active` and retires the old one.
+The active table-set keeps serving queries while the target version is built, so the two schemas
+need not be backward compatible. `MigrationCompletionChecker` promotes the target to `active` and
+retires the old version once the required namespaced and global pipelines complete.
 
 There are multiple types of schema changes the system accounts for:
 
@@ -444,9 +446,9 @@ Indexers then fill the rebuilt tables through the normal global and namespace sw
 
 **Schema update coordination**
 
-When indexing requires a schema update, the `gkg-webserver` must detect the new version so it can serve queries from the correct tables. The `SchemaWatcher` in the webserver polls the `gkg_schema_version` control table in ClickHouse at a configurable interval. When the active version transitions (e.g. from pending to ready, or outdated), the webserver updates its internal state accordingly. If the active version exceeds the binary's embedded version, the watcher requests a graceful shutdown so the pod restarts with a newer binary.
-
-The system does not perform any breaking action on the schema until all namespaces have been migrated to the latest version.
+The Webserver's `ActiveSchema` polls `gkg_schema_version` and swaps to the active archive without
+restarting; requests already running keep their snapshot. See
+[schema management](../schema_management.md#webserver-serving-snapshots).
 
 **Closing notes**
 

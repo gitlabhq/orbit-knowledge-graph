@@ -91,7 +91,7 @@ impl PipelineObserver for AnalyticsObserver {
                 return;
             }
         };
-        let query = match build_query(
+        let mut query = match build_query(
             &self.claims,
             &self.tool_name,
             self.coding_agent.as_deref(),
@@ -106,6 +106,8 @@ impl PipelineObserver for AnalyticsObserver {
                 return;
             }
         };
+
+        query.data.graph_schema_version = self.schema_version.parse().ok();
 
         match StructuredEvent::builder(GKG_CATEGORY, ACTION_QUERY_EXECUTED)
             .context(common)
