@@ -31,5 +31,6 @@ serde = { workspace = true }
 serde_yaml = "0.9"
 stacker = "0.1"
 rustc-hash = "2"
+winnow = "1.0"
 
 

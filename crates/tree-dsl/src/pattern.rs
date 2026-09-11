@@ -255,107 +255,54 @@ impl Rewrite {
     }
 }
 
-pub fn tokenize(s: &str) -> Vec<String> {
-    #[derive(Clone, Copy)]
-    enum State {
-        Normal,
-        InString,
-        InPipe(u32),
-        InPipeString(u32),
-    }
+// ── Winnow-based parser ──
+//
+// Parses S-expression patterns directly from &str, no tokenizer.
+// Winnow handles leaf parsing (strings, identifiers, delimiters);
+// explicit recursion handles structure (Ctx<P> can't go into Stateful).
 
-    let mut out = Vec::new();
-    let mut cur = String::new();
-    let mut state = State::Normal;
+use winnow::Parser;
+use winnow::combinator::{alt, delimited, opt, preceded};
+use winnow::token::{literal, take_while};
 
-    for ch in s.chars() {
-        match state {
-            State::Normal => match ch {
-                '"' => {
-                    cur.push(ch);
-                    state = State::InString;
-                }
-                '(' => {
-                    if cur.starts_with("@$") && cur.contains('|') {
-                        cur.push(ch);
-                        state = State::InPipe(1);
-                    } else {
-                        if !cur.is_empty() {
-                            out.push(std::mem::take(&mut cur));
-                        }
-                        out.push(ch.to_string());
-                    }
-                }
-                ')' => {
-                    if !cur.is_empty() {
-                        out.push(std::mem::take(&mut cur));
-                    }
-                    out.push(ch.to_string());
-                }
-                c if c.is_whitespace() => {
-                    if !cur.is_empty() {
-                        out.push(std::mem::take(&mut cur));
-                    }
-                }
-                c => cur.push(c),
-            },
-            State::InString => match ch {
-                '"' => {
-                    cur.push(ch);
-                    out.push(std::mem::take(&mut cur));
-                    state = State::Normal;
-                }
-                _ => cur.push(ch),
-            },
-            State::InPipe(d) => match ch {
-                '"' => {
-                    cur.push(ch);
-                    state = State::InPipeString(d);
-                }
-                '(' => {
-                    cur.push(ch);
-                    state = State::InPipe(d + 1);
-                }
-                ')' => {
-                    cur.push(ch);
-                    state = if d == 1 {
-                        State::Normal
-                    } else {
-                        State::InPipe(d - 1)
-                    };
-                }
-                _ => cur.push(ch),
-            },
-            State::InPipeString(d) => match ch {
-                '"' => {
-                    cur.push(ch);
-                    state = State::InPipe(d);
-                }
-                _ => cur.push(ch),
-            },
-        }
-    }
-    if !cur.is_empty() {
-        out.push(cur);
-    }
-    out
+/// Consume a literal string, panicking if absent.
+fn eat(i: &mut &str, s: &str) {
+    literal::<_, _, winnow::error::ContextError>(s)
+        .void()
+        .parse_next(i)
+        .unwrap_or_else(|_| panic!("expected {s:?}"));
 }
 
-fn parse<P: Phase>(c: &mut Ctx<'_, P>, src: &str) -> Pat {
-    let toks = tokenize(src);
-    let mut pos = 0;
-    let pat = item(c, &toks, &mut pos, 0);
-    assert_eq!(pos, toks.len(), "trailing tokens in pattern: {src}");
-    pat
+fn ws(i: &mut &str) -> winnow::Result<()> {
+    take_while(0.., |c: char| c.is_whitespace())
+        .void()
+        .parse_next(i)
 }
 
-/// Split on `|` at top level (not inside parens or quotes).
-fn split_pipes(s: &str) -> Vec<&str> {
-    let mut result = Vec::new();
-    let mut start = 0;
+fn quoted<'i>(i: &mut &'i str) -> winnow::Result<&'i str> {
+    delimited('"', take_while(0.., |c: char| c != '"'), '"').parse_next(i)
+}
+
+fn ident<'i>(i: &mut &'i str) -> winnow::Result<&'i str> {
+    take_while(1.., |c: char| c.is_alphanumeric() || c == '_' || c == '.').parse_next(i)
+}
+
+fn cap_name<'i>(i: &mut &'i str) -> winnow::Result<&'i str> {
+    take_while(1.., |c: char| c.is_alphanumeric() || c == '_').parse_next(i)
+}
+
+/// Consume `->` or `=>`, returning true for `=>` (leaf).
+fn arrow(i: &mut &str) -> winnow::Result<bool> {
+    alt((literal("=>").value(true), literal("->").value(false))).parse_next(i)
+}
+
+/// Take a balanced transform segment. Stops at `|`, `)`, or whitespace
+/// at depth 0 but tracks `(`/`)` and `"` for function args.
+fn tf_segment<'i>(i: &mut &'i str) -> &'i str {
+    let start = *i;
     let mut depth = 0u32;
     let mut in_str = false;
-    for (i, ch) in s.char_indices() {
+    for (pos, ch) in start.char_indices() {
         if in_str {
             if ch == '"' {
                 in_str = false;
@@ -366,222 +313,228 @@ fn split_pipes(s: &str) -> Vec<&str> {
             '"' => in_str = true,
             '(' => depth += 1,
             ')' if depth > 0 => depth -= 1,
-            '|' if depth == 0 => {
-                result.push(&s[start..i]);
-                start = i + 1;
+            '|' | ')' if depth == 0 => {
+                *i = &start[pos..];
+                return &start[..pos];
+            }
+            c if c.is_whitespace() && depth == 0 => {
+                *i = &start[pos..];
+                return &start[..pos];
             }
             _ => {}
         }
     }
-    result.push(&s[start..]);
-    result
+    *i = "";
+    start
 }
 
-/// Parse quoted args from a function-call transform like `replace(".","/")`.
-fn parse_tf_args(s: &str) -> Vec<&str> {
-    let inner = s.trim_start_matches('(').trim_end_matches(')');
-    let mut args = Vec::new();
-    let mut in_str = false;
-    let mut start = 0;
-    let mut has_content = false;
-    for (i, ch) in inner.char_indices() {
-        match ch {
-            '"' => {
-                if !in_str {
-                    in_str = true;
-                    start = i + 1;
-                } else {
-                    in_str = false;
-                    args.push(&inner[start..i]);
-                    has_content = true;
-                }
-            }
-            ',' if !in_str => {}
-            _ if !in_str && !has_content => start = i,
-            _ => {}
-        }
-    }
-    if !has_content && !inner.is_empty() {
-        args.push(inner.trim());
-    }
-    args
-}
+fn parse_single_tf<P: Phase>(c: &mut Ctx<'_, P>, tf: &str) -> Tf {
+    if let Some(paren) = tf.find('(') {
+        let func = &tf[..paren];
+        let mut args_input = &tf[paren..];
+        let args: Vec<&str> = delimited(
+            '(',
+            winnow::combinator::separated::<_, _, Vec<_>, _, _, _, _>(
+                0..,
+                preceded(ws, quoted),
+                (ws, ',', ws),
+            ),
+            preceded(ws, ')'),
+        )
+        .parse_next(&mut args_input)
+        .expect("bad transform args");
 
-pub fn parse_single_tf<P: Phase>(c: &mut Ctx<'_, P>, tf: &str) -> Tf {
-    if let Some(paren_pos) = tf.find('(') {
-        let name = &tf[..paren_pos];
-        let args = parse_tf_args(&tf[paren_pos..]);
-        match name {
+        match func {
             "replace" => {
-                assert_eq!(
-                    args.len(),
-                    2,
-                    "replace needs 2 args: replace(\"from\",\"to\")"
-                );
+                assert_eq!(args.len(), 2, "replace needs 2 args");
                 Tf::Replace(args[0].into(), args[1].into())
             }
-            "strip_prefix" => {
-                assert_eq!(args.len(), 1, "strip_prefix needs 1 arg");
-                Tf::Strip(args[0].into())
-            }
-            "strip_suffix" => {
-                assert_eq!(args.len(), 1, "strip_suffix needs 1 arg");
-                Tf::StripSuffix(args[0].into())
-            }
-            "prepend" => {
-                assert_eq!(args.len(), 1, "prepend needs 1 arg");
-                Tf::Prepend(args[0].into())
-            }
-            "to_rel" => {
-                assert_eq!(args.len(), 1, "to_rel needs 1 char arg");
-                let ch = args[0].chars().next().expect("to_rel arg must be a char");
-                Tf::ToRel(ch)
-            }
-            "split_last" => {
-                assert_eq!(args.len(), 1, "split_last needs 1 arg");
-                Tf::SplitLast(args[0].into())
-            }
-            "regex" => {
-                assert_eq!(args.len(), 2, "regex needs 2 args: regex(\"pat\",\"repl\")");
-                todo!("regex transform not yet implemented")
-            }
-            _ => panic!("unknown transform: {name}"),
+            "strip_prefix" => Tf::Strip(args[0].into()),
+            "strip_suffix" => Tf::StripSuffix(args[0].into()),
+            "prepend" => Tf::Prepend(args[0].into()),
+            "to_rel" => Tf::ToRel(args[0].chars().next().expect("to_rel arg")),
+            "split_last" => Tf::SplitLast(args[0].into()),
+            _ => panic!("unknown transform: {func}"),
         }
     } else {
         match tf {
             "lowercase" => Tf::Lowercase,
-            _ => {
-                // Legacy syntax: strip=prefix, field=name
-                match tf.split_once('=') {
-                    Some(("strip", p)) => Tf::Strip(p.into()),
-                    Some(("field", f)) => Tf::Field(c.intern_field(f)),
-                    _ => panic!("unknown transform: {tf}"),
-                }
-            }
+            _ => match tf.split_once('=') {
+                Some(("strip", p)) => Tf::Strip(p.into()),
+                Some(("field", f)) => Tf::Field(c.intern_field(f)),
+                _ => panic!("unknown transform: {tf}"),
+            },
         }
     }
 }
 
-pub fn parse_tf_chain<P: Phase>(c: &mut Ctx<'_, P>, tf_str: &str) -> Tf {
-    let parts = split_pipes(tf_str);
-    if parts.len() == 1 {
-        return parse_single_tf(c, parts[0]);
+fn parse_tf_chain<P: Phase>(c: &mut Ctx<'_, P>, i: &mut &str) -> Tf {
+    let mut tfs = vec![parse_single_tf(c, tf_segment(i))];
+    while i.starts_with('|') {
+        eat(i, "|");
+        tfs.push(parse_single_tf(c, tf_segment(i)));
     }
-    Tf::Pipeline(parts.iter().map(|p| parse_single_tf(c, p)).collect())
+    if tfs.len() == 1 {
+        tfs.into_iter().next().unwrap()
+    } else {
+        Tf::Pipeline(tfs)
+    }
 }
 
-fn item<P: Phase>(c: &mut Ctx<'_, P>, toks: &[String], pos: &mut usize, field: u16) -> Pat {
-    let tok = toks[*pos].as_str();
-    *pos += 1;
-    if tok == "(" {
-        let kind = c.intern_kind(&toks[*pos]);
-        *pos += 1;
-        let (mut kids, mut text) = (Vec::new(), Text::Any);
-        loop {
-            let t = toks[*pos].as_str();
-            if t == ")" {
-                *pos += 1;
-                break;
-            }
-            if let Some(lit) = t.strip_prefix('"') {
-                *pos += 1;
-                text = Text::Lit(c.lang.syms.intern(&lit[..lit.len() - 1]));
-            } else if let Some(rest) = t.strip_prefix("@$") {
-                if rest.contains("->") || rest.contains("=>") {
-                    kids.push(item(c, toks, pos, 0));
-                } else {
-                    *pos += 1;
-                    let parts = split_pipes(rest);
-                    let name = parts[0];
-                    let tf = if parts.len() > 1 {
-                        let tfs: Vec<Tf> =
-                            parts[1..].iter().map(|p| parse_single_tf(c, p)).collect();
-                        if tfs.len() == 1 {
-                            tfs.into_iter().next().unwrap()
-                        } else {
-                            Tf::Pipeline(tfs)
-                        }
-                    } else {
-                        Tf::Id
-                    };
-                    text = Text::From(c.slot(name), tf);
-                }
-            } else if let Some(f) = t.strip_suffix(':') {
-                *pos += 1;
-                let f = c.intern_field(f);
-                kids.push(item(c, toks, pos, f));
+fn parse<P: Phase>(c: &mut Ctx<'_, P>, src: &str) -> Pat {
+    let i = &mut src.as_ref();
+    ws(i).unwrap();
+    let pat = parse_pat(c, i, 0);
+    ws(i).unwrap();
+    assert!(i.is_empty(), "trailing input: {i:?}");
+    pat
+}
+
+fn parse_pat<P: Phase>(c: &mut Ctx<'_, P>, i: &mut &str, field: u16) -> Pat {
+    ws(i).unwrap();
+    if i.starts_with('(') {
+        parse_node(c, i, field)
+    } else if i.starts_with("$$$") {
+        eat(i, "$$$");
+        parse_variadic(c, i, field)
+    } else if i.starts_with("@$") {
+        eat(i, "@$");
+        parse_cap_ref(c, i, field)
+    } else if i.starts_with('$') {
+        eat(i, "$");
+        parse_capture(c, i, field)
+    } else {
+        panic!("expected pattern at: {:?}", &i[..i.len().min(30)])
+    }
+}
+
+fn parse_node<P: Phase>(c: &mut Ctx<'_, P>, i: &mut &str, field: u16) -> Pat {
+    eat(i, "(");
+    ws(i).unwrap();
+    let kind = c.intern_kind(ident(i).expect("expected kind"));
+    ws(i).unwrap();
+
+    let mut kids = Vec::new();
+    let mut text = Text::Any;
+
+    while !i.starts_with(')') {
+        ws(i).unwrap();
+        if i.starts_with(')') {
+            break;
+        }
+        if let Some(lit) = opt(quoted).parse_next(i).unwrap() {
+            text = Text::Lit(c.lang.syms.intern(lit));
+        } else if i.starts_with("@$") {
+            eat(i, "@$");
+            let n = cap_name(i).expect("expected capture name");
+            if let Some(_leaf) = opt(arrow).parse_next(i).unwrap() {
+                let rekind = c.intern_kind(ident(i).expect("expected kind"));
+                kids.push(Pat::Cap {
+                    slot: c.slot(n),
+                    field: 0,
+                    kind: None,
+                    rekind: Some(rekind),
+                });
+            } else if opt(literal::<_, _, ()>('|'))
+                .parse_next(i)
+                .unwrap()
+                .is_some()
+            {
+                text = Text::From(c.slot(n), parse_tf_chain(c, i));
             } else {
-                kids.push(item(c, toks, pos, 0));
+                text = Text::From(c.slot(n), Tf::Id);
             }
+        } else if let Some(f) = try_field(i) {
+            let f = c.intern_field(f);
+            ws(i).unwrap();
+            kids.push(parse_pat(c, i, f));
+        } else {
+            kids.push(parse_pat(c, i, 0));
         }
-        return Pat::Node {
-            kind,
-            field,
-            text,
-            kids,
-        };
+        ws(i).unwrap();
     }
-    if let Some(rest) = tok.strip_prefix("$$$") {
-        // $$$NAME=>__kind  (leaf rekind, discard children)
-        // $$$NAME->__kind  (subtree rekind, keep children)
-        // $$$NAME:filter   (no rekind)
-        let (rest, rekind_str, leaf_only) = if let Some((before, after)) = rest.split_once("=>") {
-            (before, Some(after), true)
-        } else if let Some((before, after)) = rest.split_once("->") {
-            (before, Some(after), false)
-        } else {
-            (rest, None, false)
-        };
-        let (n, explicit_filter) = if let Some((n, k)) = rest.split_once(':') {
-            (n, Some(k))
-        } else {
-            (rest, None)
-        };
-        let slot = c.slot(n);
-        if let Some(kinds) = explicit_filter {
-            let filter: Vec<u16> = kinds
-                .split('|')
-                .filter(|k| !k.is_empty())
-                .map(|k| c.intern_kind(k))
-                .collect();
-            c.apply_filter(slot, filter);
+    eat(i, ")");
+    Pat::Node {
+        kind,
+        field,
+        text,
+        kids,
+    }
+}
+
+fn parse_variadic<P: Phase>(c: &mut Ctx<'_, P>, i: &mut &str, field: u16) -> Pat {
+    let full = take_while::<_, _, ()>(1.., |c: char| !c.is_whitespace() && c != ')')
+        .parse_next(i)
+        .expect("expected variadic body");
+    let (rest, rekind_str, leaf_only) = if let Some((b, a)) = full.split_once("=>") {
+        (b, Some(a), true)
+    } else if let Some((b, a)) = full.split_once("->") {
+        (b, Some(a), false)
+    } else {
+        (full, None, false)
+    };
+    let (n, explicit_filter) = match rest.split_once(':') {
+        Some((n, k)) => (n, Some(k)),
+        None => (rest, None),
+    };
+    let slot = c.slot(n);
+    if let Some(kinds) = explicit_filter {
+        let filter: Vec<u16> = kinds
+            .split('|')
+            .filter(|k| !k.is_empty())
+            .map(|k| c.intern_kind(k))
+            .collect();
+        c.apply_filter(slot, filter);
+    }
+    Pat::Var {
+        slot,
+        field,
+        rekind: rekind_str.map(|k| c.intern_kind(k)),
+        leaf_only,
+    }
+}
+
+fn parse_cap_ref<P: Phase>(c: &mut Ctx<'_, P>, i: &mut &str, field: u16) -> Pat {
+    let n = cap_name(i).expect("expected capture name");
+    let rekind = if i.starts_with("->") || i.starts_with("=>") {
+        let _leaf = arrow(i).unwrap();
+        Some(c.intern_kind(ident(i).expect("expected kind")))
+    } else {
+        None
+    };
+    Pat::Cap {
+        slot: c.slot(n),
+        field,
+        kind: None,
+        rekind,
+    }
+}
+
+fn parse_capture<P: Phase>(c: &mut Ctx<'_, P>, i: &mut &str, field: u16) -> Pat {
+    let n = cap_name(i).expect("expected capture name");
+    let kind = opt(preceded(literal(':'), ident))
+        .parse_next(i)
+        .unwrap()
+        .map(|k| c.intern_kind(k));
+    Pat::Cap {
+        slot: c.slot(n),
+        field,
+        kind,
+        rekind: None,
+    }
+}
+
+/// Try to parse `field_name:` prefix. Returns the field name if present.
+fn try_field<'i>(i: &mut &'i str) -> Option<&'i str> {
+    let saved = *i;
+    if let Ok(id) = ident(i) {
+        if i.starts_with(':') {
+            eat(i, ":");
+            return Some(id);
         }
-        let rekind = rekind_str.map(|k| c.intern_kind(k));
-        return Pat::Var {
-            slot,
-            field,
-            rekind,
-            leaf_only,
-        };
     }
-    if let Some(rest) = tok.strip_prefix("@$") {
-        // @$N->__name or @$N=>__name or @$N
-        let (name, rekind) = if let Some((n, k)) = rest.split_once("=>") {
-            (n, Some((c.intern_kind(k), true)))
-        } else if let Some((n, k)) = rest.split_once("->") {
-            (n, Some((c.intern_kind(k), false)))
-        } else {
-            (rest, None)
-        };
-        return Pat::Cap {
-            slot: c.slot(name),
-            field,
-            kind: None,
-            rekind: rekind.map(|(k, _)| k),
-        };
-    }
-    if let Some(rest) = tok.strip_prefix('$') {
-        let (n, k) = rest
-            .split_once(':')
-            .map_or((rest, None), |(n, k)| (n, Some(k)));
-        return Pat::Cap {
-            slot: c.slot(n),
-            field,
-            kind: k.map(|k| c.intern_kind(k)),
-            rekind: None,
-        };
-    }
-    panic!("bad token {tok}")
+    *i = saved;
+    None
 }
 
 fn matches(t: &Tree, i: u32, p: &Pat, caps: &mut [(u32, u32)]) -> bool {
