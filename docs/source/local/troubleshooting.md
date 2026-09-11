@@ -38,7 +38,7 @@ reported as `Table 'Definition' does not exist`.
 Resolution: Index the repository first:
 
 ```shell
-glab orbit local index /path/to/your/repo
+glab orbit index /path/to/your/repo
 ```
 
 ## `IO Error: Could not set lock on file`
@@ -82,7 +82,7 @@ Resolution: Update the managed binary, then start the stdio MCP server:
 
 ```shell
 glab orbit --update
-glab orbit local mcp serve
+glab orbit mcp serve
 ```
 
 If you installed `orbit` directly, rerun the installer from the
