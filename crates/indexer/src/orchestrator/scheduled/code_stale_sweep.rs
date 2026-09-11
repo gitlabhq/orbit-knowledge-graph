@@ -75,8 +75,9 @@ impl CodeStaleSweep {
             .iter()
             .filter(|path| !swept.contains(&namespace_checkpoint_key(path)))
             .collect();
+        let attempted = pending.len().min(self.sweeps_per_tick);
         let mut failed = 0usize;
-        for path in pending.iter().take(self.sweeps_per_tick) {
+        for path in pending.iter().take(attempted) {
             if let Err(error) = self.sweep_namespace(path).await {
                 failed += 1;
                 warn!(%path, %error, "post-backfill stale sweep failed, retrying on a later tick");
@@ -91,8 +92,7 @@ impl CodeStaleSweep {
         }
         if failed > 0 {
             return Err(TaskError::new(format!(
-                "{failed} of {} post-backfill stale sweeps failed",
-                pending.len().min(self.sweeps_per_tick)
+                "{failed} of {attempted} post-backfill stale sweeps failed"
             )));
         }
         Ok(())
