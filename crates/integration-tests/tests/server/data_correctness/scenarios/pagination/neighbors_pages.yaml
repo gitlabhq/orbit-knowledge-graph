@@ -9,6 +9,8 @@ query:
       "neighbors": {"direction": "both"},
       "cursor": {"page_size": 2}
     }
+  gql: |
+    MATCH (g:Group {id: 100})--(n) RETURN g, n PAGE 2
 
 expect:
   pages:

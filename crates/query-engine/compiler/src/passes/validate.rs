@@ -241,6 +241,13 @@ impl<'a> Validator<'a> {
                 "limit must be between 1 and {MAX_LIMIT}"
             )));
         }
+        if let Some(cursor) = &input.cursor
+            && (cursor.page_size == 0 || cursor.page_size > MAX_LIMIT)
+        {
+            return Err(QueryError::Validation(format!(
+                "cursor.page_size must be between 1 and {MAX_LIMIT}"
+            )));
+        }
         for node in &input.nodes {
             validate_identifier(&node.id)?;
             let entity = node
