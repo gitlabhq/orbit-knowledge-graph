@@ -106,11 +106,16 @@ fn neighbors(
     if !changed.is_empty() {
         let linked = client.query_arrow_json(
             &format!(
-                "WITH touched AS (SELECT id FROM gl_definition WHERE project_id = ?1 AND commit_sha = ?2 AND file_path IN ({placeholders}))
-                 SELECT DISTINCT d.file_path FROM gl_edge e
-                 JOIN gl_definition d ON d.id = CASE WHEN e.source_id IN (SELECT id FROM touched) THEN e.target_id ELSE e.source_id END
-                 WHERE (e.source_id IN (SELECT id FROM touched) OR e.target_id IN (SELECT id FROM touched))
-                   AND d.project_id = ?1 AND d.commit_sha = ?2"
+                "WITH touched AS (
+                   SELECT id FROM gl_definition WHERE project_id = ?1 AND commit_sha = ?2 AND file_path IN ({placeholders})
+                   UNION ALL SELECT id FROM gl_file WHERE project_id = ?1 AND commit_sha = ?2 AND path IN ({placeholders})
+                 ), owners AS (
+                   SELECT id, file_path FROM gl_definition WHERE project_id = ?1 AND commit_sha = ?2
+                   UNION ALL SELECT id, path FROM gl_file WHERE project_id = ?1 AND commit_sha = ?2
+                 )
+                 SELECT DISTINCT o.file_path FROM gl_edge e
+                 JOIN owners o ON o.id = CASE WHEN e.source_id IN (SELECT id FROM touched) THEN e.target_id ELSE e.source_id END
+                 WHERE e.source_id IN (SELECT id FROM touched) OR e.target_id IN (SELECT id FROM touched)"
             ),
             &params,
         )?;
@@ -125,6 +130,46 @@ fn neighbors(
         })
         .cloned()
         .collect())
+}
+
+fn fresh_import_targets(
+    batches: &[(String, arrow::record_batch::RecordBatch)],
+    files: &[FileInventoryEntry],
+    changed_paths: &BTreeSet<&str>,
+    parsed_paths: &BTreeSet<&str>,
+) -> Vec<FileInventoryEntry> {
+    let mut wanted = BTreeSet::new();
+    for (table, batch) in batches {
+        if table != "gl_imported_symbol" {
+            continue;
+        }
+        let batch = std::slice::from_ref(batch);
+        for ((source, path), name) in string_column(batch, "file_path")
+            .into_iter()
+            .zip(string_column(batch, "import_path"))
+            .zip(string_column(batch, "identifier_name"))
+        {
+            if !changed_paths.contains(source.as_str()) {
+                continue;
+            }
+            let target = format!("{path}/{name}");
+            wanted.extend(
+                files
+                    .iter()
+                    .filter(|f| {
+                        f.decision == Decision::Parse
+                            && !parsed_paths.contains(f.path.as_str())
+                            && import_mentions(&target, stem(&f.path))
+                    })
+                    .map(|f| f.path.clone()),
+            );
+        }
+    }
+    files
+        .iter()
+        .filter(|f| wanted.contains(&f.path))
+        .cloned()
+        .collect()
 }
 
 pub fn open(
@@ -146,7 +191,9 @@ pub fn open(
     );
     let deleted: Vec<_> = indexed
         .into_iter()
-        .filter(|p| !paths.contains(p.as_str()))
+        .filter(|p| {
+            !paths.contains(p.as_str()) || (known.contains_key(p) && !before.contains_key(p))
+        })
         .collect();
     let removed_present: Vec<_> = deleted
         .iter()
@@ -155,10 +202,9 @@ pub fn open(
     let changed: Vec<FileInventoryEntry> = files
         .iter()
         .filter(|f| {
-            (f.decision == Decision::Parse
+            f.decision == Decision::Parse
                 && (!known.contains_key(&f.path)
-                    || before.get(&f.path).map(|(hash, _)| hash) != known.get(&f.path)))
-                || (known.contains_key(&f.path) && !before.contains_key(&f.path))
+                    || before.get(&f.path).map(|(hash, _)| hash) != known.get(&f.path))
         })
         .cloned()
         .collect();
@@ -179,10 +225,29 @@ pub fn open(
             .local_edge_table_name()
             .context("missing local edge table")?
             .to_string();
-        let parsed: Arc<[FileInventoryEntry]> =
+        let mut parsed_files: Vec<FileInventoryEntry> =
             changed.iter().chain(&companions).cloned().collect();
-        let batches = parse(git, parsed, &filter, ontology, config)?;
         let changed_paths: BTreeSet<_> = changed.iter().map(|f| f.path.as_str()).collect();
+        let mut batches = parse(
+            git,
+            Arc::from(parsed_files.clone()),
+            &filter,
+            ontology.clone(),
+            config.clone(),
+        )?;
+        let parsed_paths: BTreeSet<_> = parsed_files.iter().map(|f| f.path.as_str()).collect();
+        let fresh = fresh_import_targets(&batches, &files, &changed_paths, &parsed_paths);
+        if !fresh.is_empty() {
+            parsed_files.extend(fresh);
+            batches = parse(
+                git,
+                Arc::from(parsed_files.clone()),
+                &filter,
+                ontology,
+                config,
+            )?;
+        }
+        let companions = parsed_files.len() - changed.len();
         let mut unresolved: Vec<String> = batches
             .iter()
             .filter(|(table, _)| table == "gl_imported_symbol")
@@ -271,7 +336,12 @@ pub fn open(
                 &[],
             )?;
             client.insert_batch("refresh_rows", batch)?;
-            client.execute(&format!("INSERT INTO {table} SELECT DISTINCT * FROM refresh_rows WHERE id NOT IN (SELECT id FROM {table})"), &[])?;
+            let dedupe = if table == "gl_definition" {
+                " AND NOT EXISTS (SELECT 1 FROM gl_definition g WHERE g.project_id = r.project_id AND g.commit_sha = r.commit_sha AND g.file_path = r.file_path AND g.name = r.name AND g.start_byte = r.start_byte AND g.end_byte = r.end_byte)"
+            } else {
+                ""
+            };
+            client.execute(&format!("INSERT INTO {table} SELECT DISTINCT * FROM refresh_rows r WHERE r.id NOT IN (SELECT id FROM {table}){dedupe}"), &[])?;
             client.execute("DROP TABLE refresh_rows", &[])?;
         }
         client.execute("DROP TABLE refresh_touched", &[])?;
@@ -318,9 +388,9 @@ pub fn open(
         );
         client.execute("COMMIT", &[])?;
         eprintln!(
-            "refreshed {} file(s) with {} import neighbor(s), removed {} file(s)",
+            "refreshed {} file(s) with {} neighbor(s), removed {} file(s)",
             changed.len(),
-            companions.len(),
+            companions,
             deleted.len()
         );
         Ok(())
