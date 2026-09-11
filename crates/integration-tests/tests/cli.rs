@@ -1318,6 +1318,28 @@ fn context_file_gives_an_overview_and_names_give_bodies() {
     assert!(overview.contains("fn get(&self) -> &str"), "{overview}");
     assert!(overview.contains("fn smoke()"), "{overview}");
     assert!(!overview.contains("&self.value"), "{overview}");
+    for (kind, includes_type) in [("mEtHoD", false), ("sTrUcT", true)] {
+        let selected = context(
+            repo.path(),
+            data.path(),
+            &["--file", "src/lib.rs", "--kind", kind],
+        );
+        assert!(selected.contains("Imports:\n1|use std::fmt;"), "{selected}");
+        assert_eq!(
+            selected.contains("pub struct Config"),
+            includes_type,
+            "{selected}"
+        );
+        assert_eq!(
+            selected.matches("fn get(&self) -> &str").count(),
+            1,
+            "{selected}"
+        );
+        assert!(
+            !selected.contains("fn smoke()") && !selected.contains("&self.value"),
+            "{selected}"
+        );
+    }
     let body = context(repo.path(), data.path(), &["Config::get"]);
     assert!(body.contains("7|        &self.value"), "{body}");
     assert_eq!(
@@ -1364,16 +1386,16 @@ fn refresh_tracks_edits_renames_deletions_and_ignores() {
     assert!(output.contains("src/tool.py:5-6"), "{output}");
     std::fs::rename(
         repo_path.join("src/tool.py"),
-        repo_path.join("src/moved.py"),
+        repo_path.join("src/moved's.py"),
     )
     .unwrap();
     let (output, stderr, ok) = orbit(repo_path, data.path(), &["grep", "bye"]);
     assert!(ok, "{stderr}");
     assert!(
-        output.contains("src/moved.py:5") && !output.contains("src/tool.py"),
+        output.contains("src/moved's.py:5") && !output.contains("src/tool.py"),
         "{output}"
     );
-    std::fs::write(repo_path.join(".gitignore"), "src/moved.py\n").unwrap();
+    std::fs::write(repo_path.join(".gitignore"), "src/moved's.py\n").unwrap();
     std::fs::write(repo_path.join("src/lib.rs"), "pub fn after_ignore() {}\n").unwrap();
     for _ in 0..2 {
         let output = context(repo_path, data.path(), &["after_ignore"]);

@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
 use anyhow::{Context, Result};
-use duckdb_client::{i64_column, search::kind_scope};
+use duckdb_client::i64_column;
 
 use crate::commands::fqn::{self, Def};
 use crate::workspace;
@@ -19,9 +19,19 @@ pub(crate) fn run(target: crate::ContextArgs) -> Result<()> {
         .map(|p| repo_relative(&git.repo_path, p))
         .transpose()?;
     let file = file.as_deref();
+    let mut members = Vec::new();
     let mut defs = match (target.fqn.as_slice(), file) {
         ([], None) => anyhow::bail!("pass one or more fqns or globs, or --file <path>"),
-        ([], Some(path)) => definitions_in_file(&client, &git, path, &kinds)?,
+        ([], Some(path)) => {
+            members = definitions_in_file(&client, &git, path)?;
+            members
+                .iter()
+                .filter(|def| {
+                    kinds.is_empty() || kinds.iter().any(|k| def.kind.eq_ignore_ascii_case(k))
+                })
+                .cloned()
+                .collect()
+        }
         (names, file) => {
             let mut defs = Vec::new();
             for name in names {
@@ -70,7 +80,6 @@ pub(crate) fn run(target: crate::ContextArgs) -> Result<()> {
                 file_defs.len(),
                 lines.len()
             )?;
-            let members = definitions_in_file(&client, &git, &file, &[])?;
             let imports = client.query_arrow_json(
                 "SELECT DISTINCT start_line, end_line FROM gl_imported_symbol
                  WHERE project_id = ?1 AND commit_sha = ?2 AND file_path = ?3
@@ -139,7 +148,7 @@ pub(crate) fn render_bodies(
         }
         render(&mut out, &short, &lines)?;
         if !long.is_empty() {
-            let members = definitions_in_file(client, git, &file, &[])?;
+            let members = definitions_in_file(client, git, &file)?;
             if !short.is_empty() {
                 out.push('\n');
             }
@@ -173,18 +182,13 @@ fn definitions_in_file(
     client: &duckdb_client::DuckDbClient,
     git: &workspace::GitInfo,
     path: &str,
-    kinds: &[String],
 ) -> Result<Vec<Def>> {
     let batches = client.query_arrow_json(
-        &format!(
-            "SELECT id, fqn, definition_type, file_path, start_line, end_line
-             FROM gl_definition
-             WHERE project_id = ?1 AND commit_sha = ?2 AND file_path = ?3
-               AND fqn NOT LIKE '%@%'
-             {}
-             ORDER BY start_line, end_line DESC, fqn",
-            kind_scope("definition_type", kinds)
-        ),
+        "SELECT id, fqn, definition_type, file_path, start_line, end_line
+         FROM gl_definition
+         WHERE project_id = ?1 AND commit_sha = ?2 AND file_path = ?3
+           AND fqn NOT LIKE '%@%'
+         ORDER BY start_line, end_line DESC, fqn",
         &[
             git.project_id.into(),
             git.commit_sha.clone().into(),
@@ -214,13 +218,8 @@ pub(crate) fn render_outline(
             def.fqn, def.kind, def.file, def.start, def.end
         )?;
         write_signature(out, lines, def.start, def.end)?;
-        let mut nested: Vec<&Def> = members
-            .iter()
-            .filter(|m| m != &def && belongs_to(def, m))
-            .collect();
-        nested.sort_by(|a, b| a.start.cmp(&b.start).then(b.end.cmp(&a.end)));
         let mut covered_until = 0;
-        for member in nested {
+        for member in members.iter().filter(|m| m != &def && belongs_to(def, m)) {
             if member.start <= covered_until
                 || !shown.insert((member.fqn.as_str(), member.start, member.end))
             {
