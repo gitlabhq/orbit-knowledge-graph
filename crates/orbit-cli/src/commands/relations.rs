@@ -1,9 +1,6 @@
-use std::path::PathBuf;
-
 use anyhow::Result;
 use arrow::record_batch::RecordBatch;
-use code_graph::v2::types::EdgeKind;
-use duckdb_client::search::{excluded_path_predicate, kind_scope, path_scope};
+use duckdb_client::search::excluded_path_predicate;
 use duckdb_client::{bool_column, string_column};
 
 use crate::commands::fqn;
@@ -22,36 +19,6 @@ const LABELS_CTE: &str = "labels AS (
   SELECT id, identifier_name, '', file_path, NULL FROM gl_imported_symbol
   WHERE project_id = ?2 AND commit_sha = ?3
 )";
-
-pub(crate) struct Filter {
-    pub edges: Vec<EdgeKind>,
-    pub incoming: bool,
-    pub outgoing: bool,
-    pub tests: bool,
-}
-
-impl Filter {
-    fn wants_incoming(&self) -> bool {
-        self.incoming || !self.outgoing
-    }
-
-    fn is_active(&self) -> bool {
-        !self.edges.is_empty() || self.incoming != self.outgoing
-    }
-
-    fn edge_predicate(&self) -> String {
-        let kinds: Vec<String> = self.edges.iter().map(|k| k.as_ref().to_string()).collect();
-        kind_scope("e.relationship_kind", &kinds)
-    }
-
-    fn direction_predicate(&self) -> &'static str {
-        match (self.incoming, self.outgoing) {
-            (true, false) => "  AND e.target_id = ?1",
-            (false, true) => "  AND e.source_id = ?1",
-            _ => "",
-        }
-    }
-}
 
 struct Row {
     kind: String,
@@ -82,24 +49,22 @@ fn rows_from(batches: &[RecordBatch], show_tests: bool) -> (Vec<Row>, usize) {
     (rows, hidden)
 }
 
-pub(crate) fn run(
-    fqn: String,
-    repo: Option<PathBuf>,
-    db: Option<PathBuf>,
-    filter: Filter,
-    paths: &[String],
-    kinds: &[String],
-) -> Result<()> {
-    let workspace::IndexedRepo { git, client } = workspace::open_indexed(repo, db)?;
+pub(crate) fn run(target: crate::ContextArgs) -> Result<()> {
+    let workspace::IndexedRepo { git, client } = workspace::open_indexed(target.repo, target.db)?;
     if let Some(warning) = crate::refresh::relationship_warning(&client, Some(git.project_id))? {
         eprintln!("warning: {warning}");
     }
-    let defs = fqn::resolve(&client, &git, &fqn, None, &[])?;
+    let kinds = crate::kind_names(target.kind);
+    let file = target
+        .file
+        .as_deref()
+        .map(|p| crate::commands::context::repo_relative(&git.repo_path, p))
+        .transpose()?;
+    let mut defs = Vec::new();
+    for name in &target.fqn {
+        defs.extend(fqn::resolve(&client, &git, name, file.as_deref(), &kinds)?);
+    }
     let hidden_expr = format!("COALESCE({}, FALSE)", excluded_path_predicate("l.path"));
-    let edge_predicate = filter.edge_predicate();
-    let direction_predicate = filter.direction_predicate();
-    let paths = path_scope("l.path", paths, true);
-    let kinds = kind_scope("l.definition_type", kinds);
     for (i, def) in defs.iter().enumerate() {
         if i > 0 {
             println!();
@@ -118,14 +83,13 @@ SELECT DISTINCT e.relationship_kind AS kind,
 FROM gl_edge e
 JOIN labels l ON l.id = CASE WHEN e.source_id = ?1 THEN e.target_id ELSE e.source_id END
 WHERE (e.source_id = ?1 OR e.target_id = ?1)
-{edge_predicate}{direction_predicate}{paths}{kinds}
 ORDER BY kind, dir DESC, l.path, l.label, l.loc"
             ),
             &params,
         )?;
-        let (links, links_hidden) = rows_from(&edges, filter.tests);
+        let (links, links_hidden) = rows_from(&edges, target.tests);
 
-        let (via, via_hidden) = if filter.wants_incoming() {
+        let (via, via_hidden) = {
             let via = client.query_arrow_json(
                 &format!(
                     "WITH {LABELS_CTE},
@@ -143,15 +107,12 @@ JOIN labels l ON l.id = e.source_id
 WHERE e.relationship_kind <> 'DEFINES'
   AND e.source_id <> ?1
   AND e.source_id NOT IN (SELECT id FROM members)
-{edge_predicate}{paths}{kinds}
 GROUP BY kind, l.label, l.loc, l.path
 ORDER BY kind, l.path, l.label, l.loc"
                 ),
                 &params,
             )?;
-            rows_from(&via, filter.tests)
-        } else {
-            (Vec::new(), 0)
+            rows_from(&via, target.tests)
         };
 
         println!(
@@ -171,8 +132,6 @@ ORDER BY kind, l.path, l.label, l.loc"
                     "\nNo connections outside test, fixture, or generated files \
                      ({hidden} hidden; pass --tests to show them)."
                 );
-            } else if filter.is_active() || !paths.is_empty() || !kinds.is_empty() {
-                println!("\nNo connections match the filter.");
             } else {
                 println!("\nNo connections.");
             }

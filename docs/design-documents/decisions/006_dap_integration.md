@@ -187,11 +187,12 @@ branch, which the remote graph does not cover. Flows that already give the
 agent a shell get Orbit this way for free; the MCP path exists for the
 surfaces that do not.
 
-Orbit Local exposes code discovery through `grep` and source bodies through
-`context`. Relationship lookups use `grep <fqn>` with `--related-to`, `--callers`,
-or `--callees`. An explicit target after the flag takes precedence over positional
-terms. Path and definition-kind filters apply to the connected results.
-These commands share the indexed definitions and relationships in DuckDB.
+Orbit Local exposes code discovery through `grep` and inspection through
+`context`. `grep` is search only. `context <fqn>` prints bodies; with
+`--related` it lists every connection of the same targets instead, with
+direction and edge kind on each line. `--file` and `--kind` narrow the target
+in both modes.
+Both commands share the indexed definitions and relationships in DuckDB.
 
 Agent guidance prefers one-concept `grep` searches and direct `context` reads
 for known definitions or files. Agents reuse returned source for edits, using raw

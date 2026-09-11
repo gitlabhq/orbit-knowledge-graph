@@ -166,7 +166,7 @@ fn render_unverified(out: &mut String, file: &str, lines: &[&str]) -> std::fmt::
     write_lines(out, lines, 1, lines.len())
 }
 
-fn repo_relative(repo_path: &std::path::Path, path: &str) -> Result<String> {
+pub(crate) fn repo_relative(repo_path: &std::path::Path, path: &str) -> Result<String> {
     let canonical = dunce::canonicalize(repo_path.join(path))
         .with_context(|| format!("{path} does not exist"))?;
     let relative = canonical.strip_prefix(repo_path).with_context(|| {
