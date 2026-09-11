@@ -9,8 +9,8 @@ Before using Orbit, verify:
 1. `glab` installed with Orbit extension
 
    ```sh
-   glab --version     # need 1.117.0+
-   glab orbit --help  # should show orbit subcommands
+   glab --version    # need 1.117.0+
+   glab orbit help   # should show orbit subcommands
    ```
 
    If `glab` not already installed, follow [the install instructions](https://gitlab.com/gitlab-org/cli#installation).

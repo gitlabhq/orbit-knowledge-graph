@@ -1,9 +1,9 @@
 # `glab orbit` reference
 
-`glab orbit` downloads, installs, and runs the Orbit CLI binary (project:
-`gitlab-org/orbit/knowledge-graph`, package: `orbit-local`). The binary is
-managed for you — verified, cached in `<config-dir>/bin/orbit`, and kept up to
-date automatically.
+`glab orbit <command>` runs the Orbit CLI binary (project:
+`gitlab-org/orbit/knowledge-graph`, package: `orbit-local`). `glab` downloads,
+verifies, caches the binary in `<config-dir>/bin/orbit`, and keeps it up to date
+automatically.
 
 **Supported platforms:** macOS and Linux (x86_64 and aarch64). Windows is not
 supported (the binary is not published for Windows).
@@ -14,10 +14,10 @@ Remote.
 ## First run / install
 
 ```bash
-# Download and install the managed binary, then run it
+# Show the glab wrapper help
 glab orbit
 
-# Install only (do not run)
+# Install the managed binary without running it
 glab orbit --install
 
 # Skip all confirmation prompts (for CI/scripts)
@@ -42,13 +42,9 @@ passed directly to the Orbit binary:
 glab orbit <subcommand> [flags...]
 glab orbit --help           # shows this glab wrapper's help
 glab orbit help             # shows the orbit binary's top-level help
+glab orbit -- --help        # also shows the orbit binary's top-level help
 glab orbit index --help     # shows orbit's help for the 'index' subcommand
 ```
-
-> **Note:** `glab orbit -- --help` does **not** show orbit's help. glab forwards
-> `--` and `--help` as-is, but orbit's argument parser treats `--` as end-of-flags and
-> then sees `--help` as an unknown subcommand name, resulting in an error. Use
-> `glab orbit help` instead.
 
 ## Configuration
 

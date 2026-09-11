@@ -24,8 +24,8 @@ exit codes), work through the first-run setup checklist in
 
 ## Discovery
 
-`glab orbit --help` and `glab orbit query --help` are the
-authoritative usage references. For entity properties, prefer the recipes in
+`glab orbit help` and `glab orbit <command> --help` are the authoritative
+usage references. For entity properties, prefer the recipes in
 [`references/recipes.md`](references/recipes.md) over schema introspection —
 they already encode the columns and filters known to work.
 
