@@ -136,7 +136,10 @@ fn build_static_fts(out_dir: &Path, duckdb_version: &str) {
         .warnings(false)
         .flag_if_supported("-w");
 
-    let is_debug = env::var("DEBUG").is_ok_and(|value| value == "true" || value == "1");
+    let is_debug = match env::var("DEBUG") {
+        Ok(value) => value != "false" && value != "0",
+        Err(_) => false,
+    };
     if !is_debug {
         build.define("NDEBUG", None);
     }
