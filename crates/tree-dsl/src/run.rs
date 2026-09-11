@@ -49,7 +49,20 @@ pub fn process_file(path: &str, source: &str, lang: &mut Lang, pipeline: &Pipeli
     tree.compact();
     classify_methods(&mut tree, lang);
     ssa_fold(&mut tree, lang);
+    prune(&mut tree);
+    tree.compact();
     tree
+}
+
+fn prune(tree: &mut Tree) {
+    for i in 0..tree.nodes.len() {
+        if tree.nodes[i].dead {
+            continue;
+        }
+        if !tree.nodes[i].named && tree.nodes[i].size == 1 {
+            tree.nodes[i].dead = true;
+        }
+    }
 }
 
 fn classify_methods(tree: &mut Tree, lang: &mut Lang) {
