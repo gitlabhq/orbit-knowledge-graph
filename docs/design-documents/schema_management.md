@@ -145,7 +145,7 @@ The Webserver serves whatever version is `active` in `gkg_schema_version`. It us
 archive when that version matches the binary and loads the archive from the catalog otherwise, so
 one binary serves older and newer schemas without a restart.
 
-A serving snapshot (`crates/orbit-server/src/serving_schema.rs`) is immutable and holds:
+A serving snapshot (`crates/orbit-server/src/active_schema.rs`) is immutable and holds:
 
 - the archive's `migration_version`;
 - the archive's ontology with that version's table prefix applied;
@@ -160,7 +160,7 @@ parser, and compiler. Validate a cross-version rollout before relying on it.
 
 ### Webserver readiness gate
 
-`SchemaWatcher` polls `gkg_schema_version` every `schema.version_poll_interval_secs` seconds
+`ActiveSchema` polls `gkg_schema_version` every `schema.version_poll_interval_secs` seconds
 (default `5`). Each poll reads the active version, builds a snapshot for it when the installed one
 differs, checks that every table the snapshot's ontology expects exists in `system.tables`, and
 rechecks the active version before installing. Readiness means "a snapshot is installed":
@@ -173,9 +173,9 @@ rechecks the active version before installing. Readiness means "a snapshot is in
 | the active archive is missing, corrupt, or fails to load | cleared | `503` with `schema_pending` |
 | version or table metadata read fails | unchanged | last state |
 
-A failure clears the slot only once the watcher confirms the failed version is still active, so a
+A failure clears the slot only once the poll confirms the failed version is still active, so a
 promotion mid-poll cannot wipe a usable snapshot. Every failure retries on the next poll without a
-restart. `/live` never depends on the watcher, and there is no outdated-version shutdown: a newer
+restart. `/live` never depends on the active schema, and there is no outdated-version shutdown: a newer
 active version is served, not refused.
 
 While no snapshot is installed, schema-dependent RPCs (introspection, named queries, query
@@ -194,7 +194,7 @@ and Kubernetes health separately, and `ClusterHealthChecker` may label an unheal
 aggregate `Migrating` while a `migrating` row exists; see
 [`health_check.md`](health_check.md#migration-awareness).
 
-Implemented in `crates/orbit-server/src/schema_watcher.rs`.
+Implemented in `crates/orbit-server/src/active_schema.rs`.
 
 #### Observability
 

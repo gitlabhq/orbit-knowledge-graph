@@ -7,7 +7,7 @@ use axum::{Json, Router, routing::get};
 use labkit::http::{CorrelationLayer, GitlabTraceLayer, HttpMetricsLayer};
 use serde::Serialize;
 
-use crate::schema_watcher::SchemaWatcher;
+use crate::active_schema::ActiveSchema;
 
 #[derive(Serialize)]
 struct HealthResponse {
@@ -29,8 +29,8 @@ async fn live() -> Json<HealthResponse> {
     })
 }
 
-async fn ready(State(schema_watcher): State<Arc<SchemaWatcher>>) -> impl IntoResponse {
-    let healthy = schema_watcher.snapshot().is_ok();
+async fn ready(State(active_schema): State<Arc<ActiveSchema>>) -> impl IntoResponse {
+    let healthy = active_schema.snapshot().is_ok();
     let (status_code, label, unhealthy_components) = if healthy {
         (StatusCode::OK, "ok", Vec::new())
     } else {
@@ -51,11 +51,11 @@ async fn ready(State(schema_watcher): State<Arc<SchemaWatcher>>) -> impl IntoRes
     )
 }
 
-pub fn create_router(schema_watcher: Arc<SchemaWatcher>) -> Router {
+pub fn create_router(active_schema: Arc<ActiveSchema>) -> Router {
     Router::new()
         .route("/live", get(live))
         .route("/ready", get(ready))
-        .with_state(schema_watcher)
+        .with_state(active_schema)
         .layer(HttpMetricsLayer::new())
         .layer(GitlabTraceLayer::new())
         .layer(CorrelationLayer::new())
@@ -69,8 +69,8 @@ mod tests {
 
     use super::*;
 
-    fn ready_watcher() -> Arc<SchemaWatcher> {
-        SchemaWatcher::fixed(Arc::new(ontology::Ontology::load_embedded().unwrap()))
+    fn pinned_schema() -> Arc<ActiveSchema> {
+        ActiveSchema::pinned(Arc::new(ontology::Ontology::load_embedded().unwrap()))
     }
 
     fn request(path: &str) -> Request<Body> {
@@ -88,7 +88,7 @@ mod tests {
 
     #[tokio::test]
     async fn live_returns_ok() {
-        let router = create_router(ready_watcher());
+        let router = create_router(pinned_schema());
 
         let (status, json) = parse_response(router.oneshot(request("/live")).await.unwrap()).await;
 
@@ -99,7 +99,7 @@ mod tests {
 
     #[tokio::test]
     async fn ready_returns_ok_when_schema_is_ready() {
-        let router = create_router(ready_watcher());
+        let router = create_router(pinned_schema());
 
         let (status, json) = parse_response(router.oneshot(request("/ready")).await.unwrap()).await;
 

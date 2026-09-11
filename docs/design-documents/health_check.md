@@ -17,7 +17,7 @@ endpoint to determine whether the process can answer HTTP.
 
 ### `/ready`
 
-Readiness is also local-only. The Webserver is ready (`200`) while its `SchemaWatcher` holds a
+Readiness is also local-only. The Webserver is ready (`200`) while its `ActiveSchema` holds a
 serving snapshot and pending (`503`, `schema_pending`) otherwise; see
 [schema management](schema_management.md#webserver-readiness-gate). The Indexer and Dispatcher
 read an in-memory serving flag that is set after their startup gates have cleared. These handlers
@@ -67,7 +67,7 @@ GitLab ─────────── connectivity/JWT check ────┘ 
 
 NATS JetStream ─► HealthChecker.queue_depth() ─► HealthCheck /queue-depth ─► KEDA
 
-Local SchemaWatcher/serving flag ─► pod /ready
+Local ActiveSchema/serving flag ─► pod /ready
 Local HTTP process response ───────► pod /live
 ```
 

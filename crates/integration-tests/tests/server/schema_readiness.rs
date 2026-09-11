@@ -16,6 +16,7 @@ use orbit_migrations::version::{
     ensure_version_table, mark_version_migrating, mark_version_retired, promote_version,
     table_prefix,
 };
+use orbit_server::active_schema::ActiveSchema;
 use orbit_server::analytics::InMemoryAnalyticsTracker;
 use orbit_server::auth::{Claims, JwtValidator};
 use orbit_server::cluster_health::ClusterHealthChecker;
@@ -24,7 +25,6 @@ use orbit_server::proto::execute_query_message::Content;
 use orbit_server::proto::orbit_service_client::OrbitServiceClient;
 use orbit_server::proto::orbit_service_server::OrbitServiceServer;
 use orbit_server::proto::*;
-use orbit_server::schema_watcher::SchemaWatcher;
 use orbit_server::webserver::create_router;
 use orbit_server_config::AppConfig;
 use orbit_utils::yaml;
@@ -200,7 +200,7 @@ impl Cluster {
         let catalog = OntologyCatalog::open(nats_client.clone()).await.unwrap();
 
         let shutdown = CancellationToken::new();
-        let watcher = SchemaWatcher::spawn(
+        let active_schema = ActiveSchema::spawn(
             Arc::new(graph.create_client()),
             test_archive(embedded_version),
             catalog.clone(),
@@ -210,7 +210,7 @@ impl Cluster {
         let analytics = Arc::new(InMemoryAnalyticsTracker::new());
         let service = OrbitServiceImpl::new(
             Arc::new(JwtValidator::new(SECRET, 0).unwrap()),
-            watcher.clone(),
+            active_schema.clone(),
             &config.graph,
             ClusterHealthChecker::default().into_arc(),
             WAIT_LIMIT.as_secs(),
@@ -225,7 +225,7 @@ impl Cluster {
             catalog,
             nats_client,
             client,
-            router: create_router(watcher),
+            router: create_router(active_schema),
             analytics,
             _shutdown: shutdown.drop_guard(),
             _nats: nats,
@@ -326,7 +326,7 @@ impl Cluster {
             .insert("readonly".into(), "1".into());
         let client = Arc::new(config.graph.build_client());
         let shutdown = CancellationToken::new();
-        let watcher = SchemaWatcher::spawn(
+        let active_schema = ActiveSchema::spawn(
             client.clone(),
             test_archive(embedded_version),
             self.catalog.clone(),
@@ -334,7 +334,7 @@ impl Cluster {
             shutdown.clone(),
         );
         Reader {
-            router: create_router(watcher),
+            router: create_router(active_schema),
             client,
             _shutdown: shutdown.drop_guard(),
         }
@@ -442,7 +442,7 @@ impl Cluster {
             }
         })
         .await
-        .expect("watcher must encounter the metadata failure");
+        .expect("the active schema poll must hit the metadata failure");
     }
 
     async fn ready_status(&self) -> StatusCode {

@@ -9,6 +9,7 @@ use indexer::schema;
 use indexer::{DispatcherConfig, IndexerConfig};
 use orbit_billing::{QuotaService, SnowplowBillingTracker};
 use orbit_migrations::version::SCHEMA_VERSION;
+use orbit_server::active_schema::ActiveSchema;
 use orbit_server::analytics::SnowplowAnalyticsTracker;
 use orbit_server::auth::JwtValidator;
 use orbit_server::cli::{Args, Mode};
@@ -16,7 +17,6 @@ use orbit_server::cluster_health::ClusterHealthChecker;
 use orbit_server::content;
 use orbit_server::grpc::GrpcServer;
 use orbit_server::health_check as health_check_mode;
-use orbit_server::schema_watcher::SchemaWatcher;
 use orbit_server::shutdown;
 use orbit_server::webserver::Server as HttpServer;
 use orbit_server_config::AppConfig;
@@ -152,7 +152,7 @@ async fn run_webserver(config: &AppConfig, shutdown: CancellationToken) -> anyho
         include_bytes!(env!("ONTOLOGY_ARCHIVE_PATH")),
     )?;
     let catalog = orbit_migrations::catalog::OntologyCatalog::open(nats.clone()).await?;
-    let schema_watcher = SchemaWatcher::spawn(
+    let active_schema = ActiveSchema::spawn(
         Arc::new(config.graph.build_client()),
         archive,
         catalog,
@@ -160,7 +160,7 @@ async fn run_webserver(config: &AppConfig, shutdown: CancellationToken) -> anyho
         shutdown.clone(),
     );
 
-    let http_server = HttpServer::bind(config.bind_address, schema_watcher.clone()).await?;
+    let http_server = HttpServer::bind(config.bind_address, active_schema.clone()).await?;
     info!(addr = %config.bind_address, "HTTP server bound");
 
     let tls_config = orbit_server::tls::load_tls_config(&config.tls).await?;
@@ -168,7 +168,7 @@ async fn run_webserver(config: &AppConfig, shutdown: CancellationToken) -> anyho
     let mut grpc_server = GrpcServer::new(
         config.grpc_bind_address,
         validator,
-        schema_watcher,
+        active_schema,
         &config.graph,
         cluster_health,
         tls_config,

@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
+use crate::active_schema::SchemaSnapshot;
 use crate::analytics::{AnalyticsObserver, AnalyticsTracker};
 use crate::auth::RequestContext;
 use crate::proto::ExecuteQueryMessage;
-use crate::serving_schema::ServingSchema;
 use clickhouse_client::ArrowClickHouseClient;
 use nats_client::NatsClient;
 use orbit_billing::{BillingObserver, BillingTracker};
@@ -67,7 +67,7 @@ impl QueryPipelineService {
 
     pub(crate) async fn run_query(
         &self,
-        schema: &ServingSchema,
+        schema: &SchemaSnapshot,
         request_context: RequestContext,
         query_json: &str,
         tx: mpsc::Sender<Result<ExecuteQueryMessage, Status>>,

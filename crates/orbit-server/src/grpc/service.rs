@@ -14,6 +14,7 @@ use tonic::{Request, Response, Status, Streaming};
 use tracing::{Instrument, info, instrument};
 
 use super::auth::extract_request_context;
+use crate::active_schema::ActiveSchema;
 use crate::analytics::AnalyticsTracker;
 use crate::auth::{Claims, JwtValidator, build_security_context};
 use crate::cluster_health::ClusterHealthChecker;
@@ -34,7 +35,6 @@ use crate::proto::{
     get_graph_schema_response, get_query_dsl_response, get_response_format_response,
     invoke_agent_command_response,
 };
-use crate::schema_watcher::SchemaWatcher;
 use crate::tools::{AgentCommand, ExecutorError, ToolService, V2CommandRegistry, V2ToolRegistry};
 use orbit_billing::{BillingTracker, QuotaCheckInputs, QuotaService};
 use query_engine::formatters::{FormatName, GoonFormatter, GraphFormatter, ResultFormatter};
@@ -64,7 +64,7 @@ fn command_error_to_status(error: ExecutorError) -> Status {
 
 pub struct OrbitServiceImpl {
     validator: Arc<JwtValidator>,
-    schema_watcher: Arc<SchemaWatcher>,
+    active_schema: Arc<ActiveSchema>,
     tool_service: ToolService,
     pipeline: QueryPipelineService,
     cluster_health: Arc<ClusterHealthChecker>,
@@ -76,7 +76,7 @@ pub struct OrbitServiceImpl {
 impl OrbitServiceImpl {
     pub fn new(
         validator: Arc<JwtValidator>,
-        schema_watcher: Arc<SchemaWatcher>,
+        active_schema: Arc<ActiveSchema>,
         clickhouse_config: &ClickHouseConfiguration,
         cluster_health: Arc<ClusterHealthChecker>,
         stream_timeout_secs: u64,
@@ -88,7 +88,7 @@ impl OrbitServiceImpl {
         let graph_status = GraphStatusService::new(client);
         Self {
             validator,
-            schema_watcher,
+            active_schema,
             tool_service,
             pipeline,
             cluster_health,
@@ -252,7 +252,7 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
                 expand_nodes,
                 format,
             } => {
-                let schema = self.schema_watcher.snapshot()?;
+                let schema = self.active_schema.snapshot()?;
                 ToolService::render_graph_schema(&schema.ontology, &expand_nodes, format)
             }
             AgentCommand::QueryLanguage { format } => ToolService::render_query_language(format),
@@ -295,7 +295,7 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
         let (tx, rx) = mpsc::channel(4);
 
         let pipeline = self.pipeline.clone();
-        let schema = self.schema_watcher.snapshot()?;
+        let schema = self.active_schema.snapshot()?;
         let stream_timeout = self.stream_timeout_secs;
         let span = tracing::Span::current();
 
@@ -413,7 +413,7 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
 
         let req = request.get_ref();
         info!(format = ?req.format, "Fetching graph schema for user");
-        let schema = self.schema_watcher.snapshot()?;
+        let schema = self.active_schema.snapshot()?;
 
         let response = if req.format == ResponseFormat::Llm as i32 {
             let toon_text = ToolService::build_schema_toon(&schema.ontology, &req.expand_nodes)
@@ -515,7 +515,7 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
         let values = named_queries::BindingValues {
             current_user_id: ctx.claims.user_id,
         };
-        let schema = self.schema_watcher.snapshot()?;
+        let schema = self.active_schema.snapshot()?;
         let queries = named_query_definitions(&schema.named_queries, &values)
             .map_err(|e| Status::internal(e.to_string()))?;
 
@@ -561,7 +561,7 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
             build_security_context(&claims).map_err(|e| Status::unauthenticated(e.to_string()))?;
 
         info!(traversal_path = %traversal_path, format = ?req.format, "Fetching graph status for user");
-        let schema = self.schema_watcher.snapshot()?;
+        let schema = self.active_schema.snapshot()?;
 
         let response = self
             .graph_status
@@ -782,7 +782,7 @@ mod tests {
     fn test_service() -> OrbitServiceImpl {
         OrbitServiceImpl::new(
             Arc::new(mock_validator()),
-            SchemaWatcher::fixed(test_ontology()),
+            ActiveSchema::pinned(test_ontology()),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
             60,
@@ -821,7 +821,7 @@ mod tests {
         let validator = Arc::new(mock_validator());
         let service = OrbitServiceImpl::new(
             validator,
-            SchemaWatcher::fixed(test_ontology()),
+            ActiveSchema::pinned(test_ontology()),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
             60,
@@ -829,7 +829,7 @@ mod tests {
         );
 
         let response = OrbitServiceImpl::build_structured_schema(
-            &service.schema_watcher.snapshot().unwrap().ontology,
+            &service.active_schema.snapshot().unwrap().ontology,
             &[],
         );
 
@@ -854,7 +854,7 @@ mod tests {
         let validator = Arc::new(mock_validator());
         let service = OrbitServiceImpl::new(
             validator,
-            SchemaWatcher::fixed(test_ontology()),
+            ActiveSchema::pinned(test_ontology()),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
             60,
@@ -862,7 +862,7 @@ mod tests {
         );
 
         let response = OrbitServiceImpl::build_structured_schema(
-            &service.schema_watcher.snapshot().unwrap().ontology,
+            &service.active_schema.snapshot().unwrap().ontology,
             &["User".to_string()],
         );
 
@@ -893,7 +893,7 @@ mod tests {
         let validator = Arc::new(mock_validator());
         let service = OrbitServiceImpl::new(
             validator,
-            SchemaWatcher::fixed(test_ontology()),
+            ActiveSchema::pinned(test_ontology()),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
             60,
@@ -901,7 +901,7 @@ mod tests {
         );
 
         let (outgoing, incoming) = OrbitServiceImpl::get_node_edge_names(
-            &service.schema_watcher.snapshot().unwrap().ontology,
+            &service.active_schema.snapshot().unwrap().ontology,
             "User",
         );
 
@@ -920,7 +920,7 @@ mod tests {
         let validator = Arc::new(mock_validator());
         let service = OrbitServiceImpl::new(
             validator,
-            SchemaWatcher::fixed(test_ontology()),
+            ActiveSchema::pinned(test_ontology()),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
             60,
@@ -928,7 +928,7 @@ mod tests {
         );
 
         let (outgoing, incoming) = OrbitServiceImpl::get_node_edge_names(
-            &service.schema_watcher.snapshot().unwrap().ontology,
+            &service.active_schema.snapshot().unwrap().ontology,
             "NonexistentNode",
         );
 
@@ -941,7 +941,7 @@ mod tests {
         let validator = Arc::new(mock_validator());
         let service = OrbitServiceImpl::new(
             validator,
-            SchemaWatcher::fixed(test_ontology()),
+            ActiveSchema::pinned(test_ontology()),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
             60,
@@ -949,7 +949,7 @@ mod tests {
         );
 
         let response = OrbitServiceImpl::build_structured_schema(
-            &service.schema_watcher.snapshot().unwrap().ontology,
+            &service.active_schema.snapshot().unwrap().ontology,
             &["User".to_string()],
         );
         let user = response.nodes.iter().find(|n| n.name == "User").unwrap();
@@ -973,7 +973,7 @@ mod tests {
         let validator = Arc::new(mock_validator());
         let service = OrbitServiceImpl::new(
             validator,
-            SchemaWatcher::fixed(test_ontology()),
+            ActiveSchema::pinned(test_ontology()),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
             60,
@@ -981,7 +981,7 @@ mod tests {
         );
 
         let response = OrbitServiceImpl::build_structured_schema(
-            &service.schema_watcher.snapshot().unwrap().ontology,
+            &service.active_schema.snapshot().unwrap().ontology,
             &[],
         );
 
@@ -1000,7 +1000,7 @@ mod tests {
         let validator = Arc::new(mock_validator());
         let service = OrbitServiceImpl::new(
             validator,
-            SchemaWatcher::fixed(test_ontology()),
+            ActiveSchema::pinned(test_ontology()),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
             60,
@@ -1008,7 +1008,7 @@ mod tests {
         );
 
         let response = OrbitServiceImpl::build_structured_schema(
-            &service.schema_watcher.snapshot().unwrap().ontology,
+            &service.active_schema.snapshot().unwrap().ontology,
             &[],
         );
 
@@ -1031,7 +1031,7 @@ mod tests {
         let validator = Arc::new(mock_validator());
         let service = OrbitServiceImpl::new(
             validator,
-            SchemaWatcher::fixed(test_ontology()),
+            ActiveSchema::pinned(test_ontology()),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
             60,
@@ -1039,7 +1039,7 @@ mod tests {
         );
 
         let response = OrbitServiceImpl::build_structured_schema(
-            &service.schema_watcher.snapshot().unwrap().ontology,
+            &service.active_schema.snapshot().unwrap().ontology,
             &["User".to_string(), "Project".to_string()],
         );
 
@@ -1202,7 +1202,7 @@ mod tests {
         let validator = Arc::new(mock_validator());
         let service = OrbitServiceImpl::new(
             validator,
-            SchemaWatcher::fixed(Arc::clone(&ontology)),
+            ActiveSchema::pinned(Arc::clone(&ontology)),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
             60,
@@ -1210,7 +1210,7 @@ mod tests {
         );
 
         let response = OrbitServiceImpl::build_structured_schema(
-            &service.schema_watcher.snapshot().unwrap().ontology,
+            &service.active_schema.snapshot().unwrap().ontology,
             &["*".to_string()],
         );
 

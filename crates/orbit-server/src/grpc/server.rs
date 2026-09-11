@@ -8,11 +8,11 @@ use tonic::transport::Server as TonicServer;
 use tonic::transport::server::ServerTlsConfig;
 use tracing::info;
 
+use crate::active_schema::ActiveSchema;
 use crate::analytics::AnalyticsTracker;
 use crate::auth::JwtValidator;
 use crate::cluster_health::ClusterHealthChecker;
 use crate::proto::orbit_service_server::OrbitServiceServer;
-use crate::schema_watcher::SchemaWatcher;
 use orbit_billing::{BillingTracker, QuotaService};
 
 use super::service::OrbitServiceImpl;
@@ -29,7 +29,7 @@ impl GrpcServer {
     pub fn new(
         addr: SocketAddr,
         validator: Arc<JwtValidator>,
-        schema_watcher: Arc<SchemaWatcher>,
+        active_schema: Arc<ActiveSchema>,
         clickhouse_config: &ClickHouseConfiguration,
         cluster_health: Arc<ClusterHealthChecker>,
         tls_config: Option<ServerTlsConfig>,
@@ -38,7 +38,7 @@ impl GrpcServer {
     ) -> Self {
         let service = OrbitServiceImpl::new(
             validator,
-            schema_watcher,
+            active_schema,
             clickhouse_config,
             cluster_health,
             grpc_config.stream_timeout_secs,
@@ -145,7 +145,7 @@ mod tests {
         let server = GrpcServer::new(
             addr,
             validator,
-            SchemaWatcher::fixed(ontology),
+            ActiveSchema::pinned(ontology),
             &clickhouse_config,
             cluster_health,
             None,

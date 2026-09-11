@@ -4,7 +4,7 @@ use serde_json::Value;
 fn service_without_schema() -> OrbitServiceImpl {
     OrbitServiceImpl::new(
         Arc::new(mock_validator()),
-        Arc::new(SchemaWatcher::default()),
+        Arc::new(ActiveSchema::default()),
         &test_config(),
         ClusterHealthChecker::default().into_arc(),
         60,
@@ -353,7 +353,7 @@ async fn test_expand_all_wildcard() {
 async fn schema_rpc_and_command_use_the_supplied_ontology() {
     let service = OrbitServiceImpl::new(
         Arc::new(mock_validator()),
-        SchemaWatcher::fixed(Arc::new(Ontology::new().with_nodes(["CustomNode"]))),
+        ActiveSchema::pinned(Arc::new(Ontology::new().with_nodes(["CustomNode"]))),
         &test_config(),
         ClusterHealthChecker::default().into_arc(),
         60,

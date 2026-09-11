@@ -7,7 +7,7 @@ use std::sync::Arc;
 use tokio::net::TcpListener;
 use tracing::info;
 
-use crate::schema_watcher::SchemaWatcher;
+use crate::active_schema::ActiveSchema;
 
 pub use health_client::InfrastructureHealthClient;
 pub use router::create_router;
@@ -18,12 +18,9 @@ pub struct Server {
 }
 
 impl Server {
-    pub async fn bind(
-        addr: SocketAddr,
-        schema_watcher: Arc<SchemaWatcher>,
-    ) -> std::io::Result<Self> {
+    pub async fn bind(addr: SocketAddr, active_schema: Arc<ActiveSchema>) -> std::io::Result<Self> {
         let listener = TcpListener::bind(addr).await?;
-        let router = create_router(schema_watcher);
+        let router = create_router(active_schema);
         Ok(Self { listener, router })
     }
 
