@@ -371,6 +371,10 @@ pub fn parse_single_tf(c: &mut Ctx, tf: &str) -> Tf {
                 let ch = args[0].chars().next().expect("to_rel arg must be a char");
                 Tf::ToRel(ch)
             }
+            "split_last" => {
+                assert_eq!(args.len(), 1, "split_last needs 1 arg");
+                Tf::SplitLast(args[0].into())
+            }
             "regex" => {
                 assert_eq!(args.len(), 2, "regex needs 2 args: regex(\"pat\",\"repl\")");
                 todo!("regex transform not yet implemented")

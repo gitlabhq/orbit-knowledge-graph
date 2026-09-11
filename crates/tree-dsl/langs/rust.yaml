@@ -37,7 +37,7 @@ stages:
     rules:
       # use crate::foo::Bar;
       - match: '(use_declaration argument: $A:scoped_identifier)'
-        replace: '(__import (__source @$A|replace("::","/")) (__source_path @$A|replace("::","/")) (__name @$A))'
+        replace: '(__import (__source @$A|replace("::","/")) (__source_path @$A|replace("::","/")) (__name @$A|split_last("::")))' 
 
       # use foo::bar::*;
       - match: '(use_declaration argument: (scoped_use_list path: $P list: $L:use_list))'
