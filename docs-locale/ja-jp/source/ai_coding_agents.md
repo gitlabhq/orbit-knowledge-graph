@@ -14,7 +14,7 @@ title: GitLab Orbitスキルを使用してAIコーディングエージェン�
 
 {{< /details >}}
 
-GitLab OrbitスキルはAIコーディングエージェントに、GitLab Orbitグラフをクエリするための体系的なガイダンスを提供します。含まれる内容は以下のとおりです。
+GitLab OrbitスキルはAIコーディングエージェントに、GitLab Orbitグラフをクエリするための体系的なガイダンスを提供します。これには以下が含まれます:
 
 - **クエリレシピ** - よくある質問（影響範囲、パイプライン履歴、コントリビューターのパターン）に対応した、そのまま使えるJSONボディ。
 - **DSLリファレンス** - エージェントが初回から正しいクエリを作成できるよう、クエリ言語の完全な仕様を収録。
@@ -50,7 +50,7 @@ glab skills install orbit
 <!-- markdownlint-disable-next-line MD044 -->
 ## GitLab Orbitスキルをアップデートする {#update-the-gitlab-orbit-skill}
 
-最新バージョンにアップデートするには、`--force`を付けてインストールコマンドを再実行します。
+最新バージョンにアップデートするには、`--force`を付けてインストールコマンドを再実行します:
 
 ```shell
 glab skills install --global --force orbit
