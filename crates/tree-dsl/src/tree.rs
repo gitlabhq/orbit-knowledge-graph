@@ -378,3 +378,41 @@ pub fn copy_subtree(t: &Tree, i: u32, out: &mut Vec<Node>, parent: u32) {
     }
     out[at].size = (out.len() - at) as u32;
 }
+
+/// Render the tree as a termtree for display.
+pub fn pretty_print(tree: &Tree, lang: &crate::lang::Lang) -> String {
+    use termtree::Tree as TTree;
+
+    fn build(tree: &Tree, lang: &crate::lang::Lang, idx: u32) -> TTree<String> {
+        let n = &tree.nodes[idx as usize];
+        let kind = lang.kind_name(n.kind);
+        let field_prefix = if n.field != 0 {
+            format!("{}:", lang.field_name(n.field))
+        } else {
+            String::new()
+        };
+        let sym_suffix = if n.sym != 0 {
+            let s = lang.syms.resolve(n.sym);
+            if s.len() > 50 {
+                format!(" {:?}...", &s[..50])
+            } else {
+                format!(" {s:?}")
+            }
+        } else {
+            String::new()
+        };
+        let label = format!("{field_prefix}{kind}{sym_suffix}");
+        let mut tt = TTree::new(label);
+        for c in tree.children(idx) {
+            if !tree.nodes[c as usize].dead {
+                tt.push(build(tree, lang, c));
+            }
+        }
+        tt
+    }
+
+    if tree.nodes.is_empty() {
+        return String::from("(empty)");
+    }
+    build(tree, lang, 0).to_string()
+}

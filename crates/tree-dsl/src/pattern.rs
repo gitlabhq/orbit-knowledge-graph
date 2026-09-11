@@ -267,7 +267,6 @@ struct PatParser;
 impl PatParser {}
 
 fn parse<P: Phase>(c: &mut Ctx<'_, P>, src: &str) -> Pat {
-    use pest_consume::Parser as _;
     let root = <PatParser as pest_consume::Parser>::parse(Rule::Pattern, src)
         .unwrap_or_else(|e| panic!("pattern parse error: {e}"))
         .single()

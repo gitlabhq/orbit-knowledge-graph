@@ -12934,6 +12934,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "termtree"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d4d1330fe7f7f872cd05165130b10602d667b205fd85be09be2814b115d4ced9"
+
+[[package]]
 name = "testcontainers"
 version = "0.27.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -13583,6 +13589,7 @@ dependencies = [
  "smallvec",
  "smol_str",
  "stacker",
+ "termtree",
  "tree-sitter",
  "tree-sitter-bash",
  "tree-sitter-c",
