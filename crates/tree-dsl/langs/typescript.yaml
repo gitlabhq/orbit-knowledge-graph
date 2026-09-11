@@ -30,25 +30,25 @@ stages:
       - match: '(import_specifier alias: $A)'
         append: '(__alias @$A)'
 
-  - name: retag
+  - name: retag-refs
     rules:
-      # a.b → __member(object, member)
+      - match: '(member_expression object: $O:__ivar property: $M)'
+        replace: '(__member @$M (__object $O))'
       - match: '(member_expression object: $O property: $M)'
-        retag:
-          kind: __member
-          fields: { O: object, M: member }
+        replace: '(__member @$M (__object @$O))'
 
-      # f(x) → __call(callee, args)
+  - name: retag-calls
+    rules:
+      - match: '(call_expression function: $F:__ivar arguments: $A)'
+        replace: '(__call (__callee $F) $A)'
+      - match: '(call_expression function: $F:__member arguments: $A)'
+        replace: '(__call (__callee $F) $A)'
       - match: '(call_expression function: $F arguments: $A)'
-        retag:
-          kind: __call
-          fields: { F: callee, A: args }
-
-      # new X() → __call(callee, args)
+        replace: '(__call (__callee @$F) $A)'
+      - match: '(new_expression constructor: $C:__member arguments: $A)'
+        replace: '(__call (__callee $C) $A)'
       - match: '(new_expression constructor: $C arguments: $A)'
-        retag:
-          kind: __call
-          fields: { C: callee, A: args }
+        replace: '(__call (__callee @$C) $A)'
 
   - name: imports
     rules:

@@ -23,19 +23,21 @@ stages:
 
       # struct/enum heritage via derive macros could go here
 
-  - name: retag
+  - name: retag-refs
     rules:
-      # a.b → __member(object, member) for field_expression
+      - match: '(field_expression value: $O:__ivar field: $F)'
+        replace: '(__member @$F (__object $O))'
       - match: '(field_expression value: $O field: $F)'
-        retag:
-          kind: __member
-          fields: { O: object, F: member }
+        replace: '(__member @$F (__object @$O))'
 
-      # f(x) → __call(callee, args)
+  - name: retag-calls
+    rules:
+      - match: '(call_expression function: $F:__ivar arguments: $A)'
+        replace: '(__call (__callee $F) $A)'
+      - match: '(call_expression function: $F:__member arguments: $A)'
+        replace: '(__call (__callee $F) $A)'
       - match: '(call_expression function: $F arguments: $A)'
-        retag:
-          kind: __call
-          fields: { F: callee, A: args }
+        replace: '(__call (__callee @$F) $A)'
 
   - name: imports
     rules:

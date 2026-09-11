@@ -36,29 +36,33 @@ stages:
       - match: '(aliased_import alias: $A)'
         append: '(__alias @$A)'
 
-  - name: retag
+  - name: retag-refs
     rules:
-      # a.b → __member(object, member)
+      # self.x.method → __member "method" (__object __ivar)
+      - match: '(attribute object: $O:__ivar attribute: $M)'
+        replace: '(__member @$M (__object $O))'
+      # a.b → __member "b" (__object "a")
       - match: '(attribute object: $O attribute: $M)'
-        retag:
-          kind: __member
-          fields: { O: object, M: member }
+        replace: '(__member @$M (__object @$O))'
 
-      # f(x) → __call(callee, args)
+  - name: retag-calls
+    rules:
+      - match: '(call function: $F:__ivar arguments: $A)'
+        replace: '(__call (__callee $F) $A)'
+      - match: '(call function: $F:__member arguments: $A)'
+        replace: '(__call (__callee $F) $A)'
       - match: '(call function: $F arguments: $A)'
-        retag:
-          kind: __call
-          fields: { F: callee, A: args }
+        replace: '(__call (__callee @$F) $A)'
 
   - name: imports
     rules:
+      # from X import * (must precede named-import rule due to first-match-wins)
+      - match: '(import_from_statement module_name: $M $W:wildcard_import)'
+        replace: '(__import (__source @$M) (__source_path @$M|to_rel(".")) (__name @$W))'
+
       # from X import a, b  /  from X import a as b  /  mixed
       - match: '(import_from_statement module_name: $M $$$NAMES:dotted_name|aliased_import)'
         replace: '(__import (__source @$M) (__source_path @$M|to_rel(".")) $$$NAMES->__name)'
-
-      # from X import *
-      - match: '(import_from_statement module_name: $M $W:wildcard_import)'
-        replace: '(__import (__source @$M) (__source_path @$M|to_rel(".")) (__name @$W))'
 
       # import X
       - match: '(import_statement name: $N:dotted_name)'

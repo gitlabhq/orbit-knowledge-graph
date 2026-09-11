@@ -678,6 +678,7 @@ pub fn apply_rewrites(t: &mut Tree, lang: &mut Lang, rules: &[Rewrite]) -> Vec<u
                         (root.start, root.end),
                     );
                     edits.push(Edit::Replace(i, s, buf.len() as u32 - s));
+                    break;
                 }
             }
         }

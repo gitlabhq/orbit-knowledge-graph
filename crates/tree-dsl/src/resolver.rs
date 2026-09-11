@@ -27,7 +27,9 @@ pub fn resolve(
     let k_alias = lang.lookup_kind("__alias");
     let k_deftype = lang.lookup_kind("__deftype");
     let k_call = lang.lookup_kind("__call");
+    let k_callee = lang.lookup_kind("__callee");
     let k_member = lang.lookup_kind("__member");
+    let k_object = lang.lookup_kind("__object");
     let k_binding = lang.lookup_kind("__binding");
     let name_f = lang.fields.lookup("name") as u16;
     let left_f = lang.fields.lookup("left") as u16;
@@ -96,10 +98,9 @@ pub fn resolve(
         &reqs,
         &visible,
         k_call,
+        k_callee,
         k_member,
         k_name,
-        callee_f,
-        member_f,
     );
     let type_edges = build_type_edges(
         trees,
@@ -111,11 +112,10 @@ pub fn resolve(
         right_f,
         k_deftype,
         k_call,
+        k_callee,
         k_member,
+        k_object,
         k_binding,
-        callee_f,
-        member_f,
-        object_f,
         ret_type_f,
         return_k,
     );
@@ -453,10 +453,9 @@ fn build_call_edges(
     reqs: &[ImportReq],
     visible: &[FxHashMap<u32, u32>],
     k_call: u16,
+    k_callee: u16,
     k_member: u16,
-    k_name: u16,
-    callee_f: u16,
-    member_f: u16,
+    _k_name: u16,
 ) -> (Vec<Edge>, Vec<Edge>) {
     let mut module_call_edges = Vec::new();
     for req in reqs {
@@ -492,14 +491,15 @@ fn build_call_edges(
                 if trees[fi].kind(d) != k_call {
                     continue;
                 }
-                let callee_node = trees[fi].child_by_field(d, callee_f);
+                let callee_node = trees[fi]
+                    .children(d)
+                    .find(|&c| trees[fi].kind(c) == k_callee);
                 if let Some(cn) = callee_node
-                    && trees[fi].kind(cn) == k_member
+                    && let Some(mn) = trees[fi]
+                        .children(cn)
+                        .find(|&c| trees[fi].kind(c) == k_member)
                 {
-                    let member_sym = trees[fi]
-                        .child_by_field(cn, member_f)
-                        .map(|c| trees[fi].sym(c))
-                        .unwrap_or(0);
+                    let member_sym = trees[fi].sym(mn);
                     if member_sym == 0 {
                         continue;
                     }
@@ -555,7 +555,8 @@ fn build_call_edges(
                 for d in trees[ce.from.tree as usize].descendants(caller_node) {
                     if trees[ce.from.tree as usize].kind(d) == k_call {
                         let callee = trees[ce.from.tree as usize]
-                            .child_by_field(d, callee_f)
+                            .children(d)
+                            .find(|&c| trees[ce.from.tree as usize].kind(c) == k_callee)
                             .map(|c| trees[ce.from.tree as usize].sym(c))
                             .unwrap_or(0);
                         if callee == target_name {
@@ -591,11 +592,10 @@ fn build_type_edges(
     right_f: u16,
     k_deftype: u16,
     k_call: u16,
+    k_callee: u16,
     k_member: u16,
+    k_object: u16,
     k_binding: u16,
-    callee_f: u16,
-    member_f: u16,
-    object_f: u16,
     ret_type_f: u16,
     return_k: u16,
 ) -> Vec<Edge> {
@@ -626,7 +626,8 @@ fn build_type_edges(
                     for c in trees[target_fi].children(d) {
                         if trees[target_fi].kind(c) == k_call {
                             return trees[target_fi]
-                                .child_by_field(c, callee_f)
+                                .children(c)
+                                .find(|&c2| trees[target_fi].kind(c2) == k_callee)
                                 .map(|c2| trees[target_fi].sym(c2))
                                 .filter(|&s| s != 0);
                         }
@@ -677,7 +678,8 @@ fn build_type_edges(
                 && tree.kind(rn) == k_call
             {
                 let callee = tree
-                    .child_by_field(rn, callee_f)
+                    .children(rn)
+                    .find(|&c| tree.kind(c) == k_callee)
                     .map(|c| tree.sym(c))
                     .unwrap_or(0);
                 if callee == target_name_sym {
@@ -694,21 +696,19 @@ fn build_type_edges(
 
         for d in tree.descendants(caller_node) {
             if tree.kind(d) == k_call {
-                let callee_n = tree.child_by_field(d, callee_f);
-                if let Some(cn) = callee_n
-                    && tree.kind(cn) == k_member
-                {
+                let callee_n = tree.children(d).find(|&c| tree.kind(c) == k_callee);
+                let member_n =
+                    callee_n.and_then(|cn| tree.children(cn).find(|&c| tree.kind(c) == k_member));
+                if let Some(mn) = member_n {
                     let obj_sym = tree
-                        .child_by_field(cn, object_f)
+                        .children(mn)
+                        .find(|&c| tree.kind(c) == k_object)
                         .map(|c| tree.sym(c))
                         .unwrap_or(0);
                     if !bound_vars.contains(&obj_sym) {
                         continue;
                     }
-                    let mem_sym = tree
-                        .child_by_field(cn, member_f)
-                        .map(|c| tree.sym(c))
-                        .unwrap_or(0);
+                    let mem_sym = tree.sym(mn);
                     if mem_sym != 0 {
                         let mut found = false;
                         for cd in trees[type_fi].descendants(type_node) {

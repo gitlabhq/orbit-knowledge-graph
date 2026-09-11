@@ -106,7 +106,9 @@ struct Syns {
     decorator: u16,
     callable: u16,
     call: u16,
+    callee: u16,
     member: u16,
+    object: u16,
     ivar: u16,
     binding: u16,
     branch: u16,
@@ -129,7 +131,9 @@ impl Syns {
             decorator: s("__decorator"),
             callable: s("__callable"),
             call: s("__call"),
+            callee: s("__callee"),
             member: s("__member"),
+            object: s("__object"),
             ivar: s("__ivar"),
             binding: s("__binding"),
             branch: s("__branch"),
@@ -180,6 +184,10 @@ fn synth_child(tree: &Tree, node: u32, kind: u16) -> Option<u32> {
         .find(|&c| tree.kind(c) == kind)
         .map(|c| tree.sym(c))
         .filter(|&s| s != 0)
+}
+
+fn synth_child_node(tree: &Tree, node: u32, kind: u16) -> Option<u32> {
+    tree.children(node).find(|&c| tree.kind(c) == kind)
 }
 
 fn name_sym(tree: &Tree, node: u32, f: &Fields) -> u32 {
@@ -345,18 +353,18 @@ impl SsaState {
 
     fn handle_call(&mut self, tree: &mut Tree, i: u32) {
         let enclosing = self.def_stack.last().and_then(|&(d, _, _)| d).unwrap_or(0);
-        let Some(cn) = tree.child_by_field(i, self.f.callee) else {
+        let Some(callee_node) = synth_child_node(tree, i, self.syns.callee) else {
             return;
         };
-        let callee_k = tree.kind(cn);
 
-        if callee_k == self.syns.member {
-            let obj_node = tree.child_by_field(cn, self.f.object);
-            let obj_sym = obj_node.map(|c| tree.sym(c)).unwrap_or(0);
-            let obj_is_ivar = obj_node.is_some_and(|c| tree.kind(c) == self.syns.ivar);
-            let mem_sym = tree
-                .child_by_field(cn, self.f.member)
-                .map(|c| tree.sym(c))
+        if let Some(member) = synth_child_node(tree, callee_node, self.syns.member) {
+            let mem_sym = tree.sym(member);
+            let obj_node = synth_child_node(tree, member, self.syns.object);
+            let ivar_node = obj_node.and_then(|o| synth_child_node(tree, o, self.syns.ivar));
+            let obj_is_ivar = ivar_node.is_some();
+            let obj_sym = ivar_node
+                .map(|iv| tree.sym(iv))
+                .or_else(|| obj_node.map(|o| tree.sym(o)))
                 .unwrap_or(0);
 
             if obj_is_ivar && obj_sym != 0 {
@@ -401,8 +409,8 @@ impl SsaState {
                     }
                 }
             }
-        } else if callee_k == self.syns.ivar {
-            let ivar_sym = tree.sym(cn);
+        } else if let Some(ivar) = synth_child_node(tree, callee_node, self.syns.ivar) {
+            let ivar_sym = tree.sym(ivar);
             if ivar_sym != 0 {
                 if let Some(cls) = find_enclosing_class(tree, i, &self.syns, &self.container_syms)
                     && let Some(method) =
@@ -412,7 +420,7 @@ impl SsaState {
                 }
             }
         } else {
-            let callee_sym = tree.sym(cn);
+            let callee_sym = tree.sym(callee_node);
             if callee_sym != 0 {
                 let mut reaching = self.ssa.read_variable(callee_sym, self.cur_block);
                 if reaching.is_empty() {
@@ -617,15 +625,11 @@ fn ssa_fold(tree: &mut Tree, lang: &mut Lang) {
             } else {
                 0
             };
-            if parent_k != state.syns.call {
-                let obj_sym = tree
-                    .child_by_field(i, state.f.object)
-                    .map(|c| tree.sym(c))
+            if parent_k != state.syns.call && parent_k != state.syns.callee {
+                let obj_sym = synth_child_node(tree, i, state.syns.object)
+                    .map(|o| tree.sym(o))
                     .unwrap_or(0);
-                let mem_sym = tree
-                    .child_by_field(i, state.f.member)
-                    .map(|c| tree.sym(c))
-                    .unwrap_or(0);
+                let mem_sym = tree.sym(i);
                 let enclosing = state.def_stack.last().and_then(|&(d, _, _)| d).unwrap_or(0);
                 if obj_sym != 0 {
                     for pv in &state.ssa.read_variable(obj_sym, state.cur_block) {
@@ -783,13 +787,17 @@ fn classify_rhs(
     }
 
     // RHS is a call
-    let callee_node = tree.child_by_field(rn, f.callee);
-    let callee_is_member = callee_node.is_some_and(|c| tree.kind(c) == syns.member);
+    let callee_node = synth_child_node(tree, rn, syns.callee);
+    let callee_is_member = callee_node
+        .and_then(|cn| synth_child_node(tree, cn, syns.member))
+        .is_some();
 
     if callee_is_member {
+        let callee_n = callee_node.unwrap();
+        let member_n = synth_child_node(tree, callee_n, syns.member).unwrap();
         return classify_member_call_rhs(
             tree,
-            callee_node.unwrap(),
+            member_n,
             node,
             ssa,
             def_nodes,
@@ -861,17 +869,14 @@ fn classify_member_call_rhs(
     f: &Fields,
     container_syms: &[u32],
 ) -> Value {
-    let obj_sym = tree
-        .child_by_field(callee_member, f.object)
-        .map(|c| tree.sym(c))
+    let obj_node = synth_child_node(tree, callee_member, syns.object);
+    let ivar_node = obj_node.and_then(|o| synth_child_node(tree, o, syns.ivar));
+    let obj_is_ivar = ivar_node.is_some();
+    let obj_sym = ivar_node
+        .map(|iv| tree.sym(iv))
+        .or_else(|| obj_node.map(|o| tree.sym(o)))
         .unwrap_or(0);
-    let mem_sym = tree
-        .child_by_field(callee_member, f.member)
-        .map(|c| tree.sym(c))
-        .unwrap_or(0);
-    let obj_is_ivar = tree
-        .child_by_field(callee_member, f.object)
-        .is_some_and(|c| tree.kind(c) == syns.ivar);
+    let mem_sym = tree.sym(callee_member);
 
     let obj_type = if obj_is_ivar {
         find_enclosing_class(tree, binding_node, syns, container_syms)
@@ -971,7 +976,7 @@ fn infer_return_type(
             let rhs_call = tree
                 .child_by_field(d, f.right)
                 .filter(|&r| tree.kind(r) == syns.call)
-                .and_then(|r| tree.child_by_field(r, f.callee))
+                .and_then(|r| synth_child_node(tree, r, syns.callee))
                 .map(|c| tree.sym(c))
                 .unwrap_or(0);
             if lhs != 0 && rhs_call != 0 {
@@ -984,8 +989,7 @@ fn infer_return_type(
         if tree.nodes[d as usize].kind == return_k {
             for c in tree.children(d) {
                 if tree.kind(c) == syns.call {
-                    return tree
-                        .child_by_field(c, f.callee)
+                    return synth_child_node(tree, c, syns.callee)
                         .map(|c2| tree.sym(c2))
                         .filter(|&s| s != 0);
                 }
@@ -1025,8 +1029,7 @@ fn find_ivar_type(
                 if let Some(rn) = rhs
                     && tree.kind(rn) == syns.call
                 {
-                    let callee = tree
-                        .child_by_field(rn, f.callee)
+                    let callee = synth_child_node(tree, rn, syns.callee)
                         .map(|c| tree.sym(c))
                         .unwrap_or(0);
                     if callee != 0 {
