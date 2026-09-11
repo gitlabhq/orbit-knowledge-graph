@@ -1,5 +1,6 @@
 use std::env;
 use std::fs;
+use std::io::Cursor;
 use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
@@ -30,6 +31,8 @@ const EXTENSIONS: &[(&str, &str, &str)] = &[
 ];
 
 const DOWNLOAD_LIMIT: u64 = 64 * 1024 * 1024;
+const FTS_COMMIT: &str = "6814ec9a7d5fd63500176507262b0dbf7cea0095";
+const FTS_SHA256: &str = "a9ef28e36ada6a75658b91890402c7955207b487e14725ea6291c8e17649f517";
 
 fn main() {
     println!("cargo:rerun-if-changed={}", env!("LOCKFILE"));
@@ -44,22 +47,26 @@ fn main() {
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
 
     let mut entries = String::new();
-    for &(name, _, expected) in EXTENSIONS.iter().filter(|(_, p, _)| *p == platform) {
-        let url = format!(
-            "http://extensions.duckdb.org/{duckdb_version}/{platform}/{name}.duckdb_extension.gz"
-        );
-        let gz = out_dir.join(format!("{name}.duckdb_extension.gz"));
-        if sha256_of(&gz).as_deref() != Some(expected) {
-            fs::write(&gz, fetch(&url)).unwrap();
-            assert_eq!(
-                sha256_of(&gz).unwrap(),
-                expected,
-                "checksum mismatch for {url}; if upstream republished the artifact, re-pin it"
+    if env::var_os("CARGO_FEATURE_STATIC_FTS").is_some() {
+        build_static_fts(&out_dir);
+    } else {
+        for &(name, _, expected) in EXTENSIONS.iter().filter(|(_, p, _)| *p == platform) {
+            let url = format!(
+                "http://extensions.duckdb.org/{duckdb_version}/{platform}/{name}.duckdb_extension.gz"
             );
+            let gz = out_dir.join(format!("{name}.duckdb_extension.gz"));
+            if sha256_of(&gz).as_deref() != Some(expected) {
+                fs::write(&gz, fetch(&url)).unwrap();
+                assert_eq!(
+                    sha256_of(&gz).unwrap(),
+                    expected,
+                    "checksum mismatch for {url}; if upstream republished the artifact, re-pin it"
+                );
+            }
+            entries += &format!("({name:?}, include_bytes!({gz:?})),");
         }
-        entries += &format!("({name:?}, include_bytes!({gz:?})),");
+        assert!(!entries.is_empty(), "no extensions pinned for {platform}");
     }
-    assert!(!entries.is_empty(), "no extensions pinned for {platform}");
 
     fs::write(
         out_dir.join("bundled_extensions.rs"),
@@ -69,6 +76,72 @@ fn main() {
         ),
     )
     .unwrap();
+}
+
+fn build_static_fts(out_dir: &Path) {
+    let url = format!("https://github.com/duckdb/duckdb-fts/archive/{FTS_COMMIT}.tar.gz");
+    let archive_path = out_dir.join("duckdb-fts.tar.gz");
+    if sha256_of(&archive_path).as_deref() != Some(FTS_SHA256) {
+        fs::write(&archive_path, fetch(&url)).unwrap();
+        assert_eq!(
+            sha256_of(&archive_path).unwrap(),
+            FTS_SHA256,
+            "checksum mismatch for {url}"
+        );
+    }
+
+    let source_root = out_dir.join(format!("duckdb-fts-{FTS_COMMIT}"));
+    if !source_root.is_dir() {
+        tar::Archive::new(flate2::read::GzDecoder::new(Cursor::new(
+            fs::read(&archive_path).unwrap(),
+        )))
+        .unpack(out_dir)
+        .unwrap();
+    }
+
+    let snowball = Path::new("third_party/snowball");
+    let mut sources = vec![
+        source_root.join("extension/fts/fts_extension.cpp"),
+        source_root.join("extension/fts/fts_indexing.cpp"),
+        snowball.join("libstemmer/libstemmer.cpp"),
+        snowball.join("runtime/utilities.cpp"),
+        snowball.join("runtime/api.cpp"),
+    ];
+    let mut stemmers = fs::read_dir(snowball.join("src_c"))
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .filter(|path| path.extension().is_some_and(|ext| ext == "cpp"))
+        .collect::<Vec<_>>();
+    stemmers.sort();
+    sources.extend(stemmers);
+    sources.push(PathBuf::from("src/static_fts.cpp"));
+
+    println!("cargo:rerun-if-changed=src/static_fts.cpp");
+    println!("cargo:rerun-if-changed=third_party/snowball");
+
+    let mut build = cc::Build::new();
+    build
+        .cpp(true)
+        .include(env::var("DEP_DUCKDB_INCLUDE").expect("bundled DuckDB include path"))
+        .include(source_root.join("extension/fts/include"))
+        .include(snowball)
+        .include(snowball.join("libstemmer"))
+        .include(snowball.join("runtime"))
+        .include(snowball.join("src_c"))
+        .files(sources)
+        .flag_if_supported("-std=c++11")
+        .flag_if_supported("/utf-8")
+        .flag_if_supported("/bigobj")
+        .warnings(false)
+        .flag_if_supported("-w");
+
+    if env::var("DEBUG").is_ok_and(|value| value == "false" || value == "0") {
+        build.define("NDEBUG", None);
+    }
+    if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
+        build.define("DUCKDB_BUILD_LIBRARY", None);
+    }
+    build.compile("orbit_duckdb_fts");
 }
 
 /// DuckDB 1.5.5 ships as duckdb crate 1.10505.x.
