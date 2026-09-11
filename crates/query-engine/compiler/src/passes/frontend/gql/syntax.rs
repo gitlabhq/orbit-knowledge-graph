@@ -53,8 +53,25 @@ impl QueryParser {
 
     fn ShortestPattern(input: Node) -> Result<Pattern> {
         Ok(match_nodes!(input.into_children();
-            [Variable(variable), PatternElement(element)] => Pattern::Shortest { variable, element },
+            [Variable(variable), PathSearch(_), PatternElement(element)] => Pattern::Shortest { variable, element },
+            [Variable(_), LegacyShortestPath(_)] => unreachable!("LegacyShortestPath always errors"),
         ))
+    }
+
+    fn LegacyShortestPath(input: Node) -> Result<()> {
+        Err(input.error("use ANY SHORTEST (a)-[*1..3]->(b) for shortest paths"))
+    }
+
+    fn PathSearch(input: Node) -> Result<()> {
+        let span = input.as_span();
+        match_nodes!(input.into_children();
+            [] => Ok(()),
+            [UnsignedInteger(count)] => if count.as_u64() == Some(1) {
+                Ok(())
+            } else {
+                Err(error_at(span, "only one shortest path is supported; use ANY SHORTEST or SHORTEST 1"))
+            },
+        )
     }
 
     fn PatternElement(input: Node) -> Result<PatternElement> {

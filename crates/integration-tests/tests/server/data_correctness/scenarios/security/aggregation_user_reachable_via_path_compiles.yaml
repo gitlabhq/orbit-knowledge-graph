@@ -14,6 +14,8 @@ query:
       "aggregations": [{"count": "u", "as": "hit"}],
       "limit": 10
     }
+  gql: |
+    MATCH path = ANY SHORTEST (u:User)-[*1..3]->(p:Project) WHERE u.id >= 1 AND u.id <= 10000 RETURN p, count(u) AS hit LIMIT 10
 
 expect:
   compile_only: true

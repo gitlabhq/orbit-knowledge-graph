@@ -12,6 +12,8 @@ query:
       "aggregations": [{"count": "u", "as": "hit"}],
       "limit": 1
     }
+  gql: |
+    MATCH (u:User {email: 'target@example.com'}) RETURN count(u) AS hit LIMIT 1
 
 expect:
   compile_error: true

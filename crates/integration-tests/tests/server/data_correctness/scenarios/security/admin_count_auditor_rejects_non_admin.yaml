@@ -14,6 +14,8 @@ query:
       "aggregations": [{"count": "u.is_auditor", "as": "auditor_count"}],
       "limit": 10
     }
+  gql: |
+    MATCH (g:Group)<-[:MEMBER_OF]-(u:User) WHERE g.id >= 1 AND g.id <= 10000 RETURN g, count(u.is_auditor) AS auditor_count LIMIT 10
 
 expect:
   compile_error: true

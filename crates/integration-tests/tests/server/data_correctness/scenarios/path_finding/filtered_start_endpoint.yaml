@@ -13,7 +13,7 @@ query:
                "rel_types": ["MEMBER_OF", "CONTAINS"]}
     }
   gql: |
-    MATCH p = shortestPath((start:User)-[:MEMBER_OF|`CONTAINS`*1..3]->(`end`:Project {id: 1004})) WHERE start.username = 'alice' RETURN p
+    MATCH p = ANY SHORTEST (start:User)-[:MEMBER_OF|`CONTAINS`*1..3]->(`end`:Project {id: 1004}) WHERE start.username = 'alice' RETURN p
 
 expect:
   referential_integrity: true

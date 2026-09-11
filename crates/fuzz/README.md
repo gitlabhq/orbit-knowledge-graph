@@ -18,7 +18,7 @@ Fuzz testing for GKG using [Bolero](https://github.com/camshaft/bolero).
 | `fuzz_gql` | Unstructured text into `compile()` with the Orbit query frontend; every failure must be client-safe |
 | `fuzz_gql_grammar` | Derivations of `query.pest` itself (`grammar::Grammar`), so the text is in the language by construction; the syntax tree must consume it or reject it with a lowering error, never a syntax error or pipeline invariant |
 
-`grammar::Grammar` parses the grammar with `pest_meta` and walks the rule AST. `Grammar::local_derivations` enumerates every decision vector inside one rule while the rest of the query takes the shortest path that reaches it; the compiler integration tests run this for every rule reachable from `Query`. The real parser decides whether a derivation is faithful: `gql::pair_outline` must return the same rule sequence the walk produced, which discards derivations that PEG ordered choice or greedy repetition would read differently. Identifiers in the minimal context come from a leaf override because the grammar's shortest name is the empty escaped name.
+`grammar::Grammar` parses the grammar with `pest_meta` and uses input bytes to choose productions while walking the rule AST. The real parser decides whether a derivation is faithful: `gql::pair_outline` must return the same rule sequence the walk produced, which discards derivations that PEG ordered choice or greedy repetition would read differently. Leaf overrides supply nonempty identifiers.
 
 ### Language parsers
 

@@ -263,7 +263,7 @@ fn group_by_truncate_custom_alias_preserved() {
 
 #[test]
 fn path_finding_query() {
-    let orbit_query = "MATCH p = shortestPath((start:Project {id: 100})-[:CONTAINS*1..3]->(`end`:Project {id: 200})) RETURN p";
+    let orbit_query = "MATCH p = ANY SHORTEST (start:Project {id: 100})-[:CONTAINS*1..3]->(`end`:Project {id: 200}) RETURN p";
     let json = r#"{
         "query_type": "path_finding",
         "nodes": [
@@ -314,8 +314,8 @@ fn path_finding_depth_control() {
         "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["CONTAINS", "MEMBER_OF"]}
     }"#;
 
-    let shallow_orbit_query = "MATCH p = shortestPath((start:Project {id: 1})-[:CONTAINS|MEMBER_OF*1]->(`end`:Project {id: 2})) RETURN p";
-    let deep_orbit_query = "MATCH p = shortestPath((start:Project {id: 1})-[:CONTAINS|MEMBER_OF*1..3]->(`end`:Project {id: 2})) RETURN p";
+    let shallow_orbit_query = "MATCH p = ANY SHORTEST (start:Project {id: 1})-[:CONTAINS|MEMBER_OF*1]->(`end`:Project {id: 2}) RETURN p";
+    let deep_orbit_query = "MATCH p = ANY SHORTEST (start:Project {id: 1})-[:CONTAINS|MEMBER_OF*1..3]->(`end`:Project {id: 2}) RETURN p";
     let shallow_sql = compile_pair(shallow, shallow_orbit_query, &test_ontology(), &test_ctx())
         .unwrap()
         .base
@@ -662,7 +662,7 @@ fn single_table_ontology_no_union() {
 
 #[test]
 fn multi_table_path_finding_scans_all_tables() {
-    let orbit_query = "MATCH path = shortestPath((start:User {id: 1})-[:CONTAINS|DEFINES*1..3]->(`end`:Definition {id: 100})) RETURN path";
+    let orbit_query = "MATCH path = ANY SHORTEST (start:User {id: 1})-[:CONTAINS|DEFINES*1..3]->(`end`:Definition {id: 100}) RETURN path";
     let json = r#"{
         "query_type": "path_finding",
         "nodes": [
@@ -861,6 +861,22 @@ fn orbit_query_bounded_hops_and_relationship_filters() {
 fn orbit_query_id_selectors_preserve_additional_predicates() {
     let cases = [
         (
+            r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1,2],"filters":{"id":{"eq":2}}}]}"#,
+            "MATCH (u:User) WHERE u.id IN [1, 2] AND u.id = 2 RETURN u",
+        ),
+        (
+            r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1,2],"filters":{"id":{"in":[2,3]}}}]}"#,
+            "MATCH (u:User) WHERE u.id IN [1, 2] AND u.id IN [2, 3] RETURN u",
+        ),
+        (
+            r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1,2],"filters":{"id":[{"gte":1},{"lte":3},{"eq":2}]}}]}"#,
+            "MATCH (u:User) WHERE u.id >= 1 AND u.id IN [1, 2] AND u.id <= 3 AND u.id = 2 RETURN u",
+        ),
+        (
+            r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"filters":{"id":[{"in":[2,3]},{"gte":1},{"lte":3}]}}]}"#,
+            "MATCH (u:User {id: 1}) WHERE u.id IN [2, 3] AND u.id >= 1 AND u.id <= 3 RETURN u",
+        ),
+        (
             r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"filters":{"id":{"in":[2,3]}}}]}"#,
             "MATCH (u:User {id: 1}) WHERE u.id IN [2, 3] RETURN u",
         ),
@@ -883,6 +899,37 @@ fn orbit_query_id_selectors_preserve_additional_predicates() {
     ];
     for (json, orbit_query) in cases {
         compile_pair(json, orbit_query, &test_ontology(), &test_ctx()).unwrap();
+    }
+}
+
+#[test]
+fn orbit_query_id_list_and_range_promote_independently() {
+    let json = r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1,2,3,5],"id_range":{"start":1,"end":3},"filters":{"state":"active"}}]}"#;
+    let ontology = test_ontology();
+    let context = test_ctx();
+    for list in ["u.id IN [1, 2, 3, 5]", "u.id IN ['1', '2', '3', '5']"] {
+        for bounds in [["u.id >= 1", "u.id <= 3"], ["u.id > 0", "u.id < 4"]] {
+            let predicates = [list, bounds[0], bounds[1]];
+            for order in [
+                [0, 1, 2],
+                [0, 2, 1],
+                [1, 0, 2],
+                [1, 2, 0],
+                [2, 0, 1],
+                [2, 1, 0],
+            ] {
+                let conditions = order.map(|i| predicates[i]).join(" AND ");
+                let query =
+                    format!("MATCH (u:User) WHERE {conditions} AND u.state = 'active' RETURN u");
+                let input = compiler::passes::frontend::gql::parse(&query).unwrap();
+                let node = &input.nodes[0];
+                assert_eq!(node.node_ids, [1, 2, 3, 5], "{query}");
+                let range = node.id_range.as_ref().unwrap();
+                assert_eq!((range.start, range.end), (1, 3), "{query}");
+                assert!(!node.filters.contains_key("id"), "{query}");
+                compile_pair(json, &query, &ontology, &context).unwrap();
+            }
+        }
     }
 }
 
@@ -954,6 +1001,23 @@ fn orbit_query_rejects_inline_filters_on_variable_length_relationships() {
 }
 
 #[test]
+fn orbit_query_aggregates_over_shortest_paths() {
+    let json = r#"{"query_type":"aggregation","nodes":[{"id":"u","entity":"User","id_range":{"start":1,"end":10000}},{"id":"p","entity":"Project"}],"path":{"type":"shortest","from":"u","to":"p","max_depth":3},"group_by":["p"],"aggregations":[{"count":"u","as":"hit"}],"limit":10}"#;
+    let query = "MATCH path = ANY SHORTEST (u:User)-[*1..3]->(p:Project) WHERE u.id >= 1 AND u.id <= 10000 RETURN p, count(u) AS hit LIMIT 10";
+    compile_pair(json, query, &embedded_ontology(), &test_ctx()).unwrap();
+    for query in [
+        "MATCH path = ANY SHORTEST (u:User {id: 1})-[*1..3]->(p:Project) RETURN path, count(u)",
+        "MATCH path = ANY SHORTEST (u:User {id: 1})-[*1..3]->(p:Project) RETURN properties(path), count(u)",
+    ] {
+        let error = compiler::passes::frontend::gql::parse(query).expect_err(query);
+        assert!(
+            error.to_string().contains("not the path variable"),
+            "{query}: {error}"
+        );
+    }
+}
+
+#[test]
 fn orbit_query_rejects_neighbors_center_all_properties() {
     for query in [
         "MATCH (center:User {id: 1})--(n) RETURN properties(center), n",
@@ -970,6 +1034,9 @@ fn orbit_query_rejects_neighbors_center_all_properties() {
     }
     let json = r#"{"query_type":"neighbors","nodes":[{"id":"center","entity":"User","node_ids":[1]}],"neighbors":{"direction":"both"}}"#;
     let query = "MATCH (center:User {id: 1})--(n) RETURN center, n";
+    compile_pair(json, query, &embedded_ontology(), &test_ctx()).unwrap();
+    let json = r#"{"query_type":"neighbors","nodes":[{"id":"center","entity":"User","node_ids":[1],"columns":["username","state"]}],"neighbors":{"direction":"both"}}"#;
+    let query = "MATCH (center:User {id: 1})--(n) RETURN center.username, center.state, n";
     compile_pair(json, query, &embedded_ontology(), &test_ctx()).unwrap();
 }
 
@@ -1086,7 +1153,11 @@ fn orbit_query_rejects_unsupported_syntax_and_shapes() {
         "MATCH (u:User {id: 1})-->(n) WHERE n.id = 2 RETURN n",
         "MATCH (u:User {id: 1})-->(n) RETURN count(n)",
         "MATCH (u:User {id: 1})-[r:MEMBER_OF*1..2]->(p:Project) WHERE r.target_id = 2 RETURN u",
-        "MATCH p = shortestPath((u:User {id: 1})<-[:MEMBER_OF*1..3]-(p:Project {id: 2})) RETURN p",
+        "MATCH p = ANY SHORTEST (u:User {id: 1})<-[:MEMBER_OF*1..3]-(p:Project {id: 2}) RETURN p",
+        "MATCH p = shortestPath((u:User {id: 1})-[:MEMBER_OF*1..3]->(g:Group)) RETURN p",
+        "MATCH p = ALL SHORTEST (u:User {id: 1})-[:MEMBER_OF*1..3]->(g:Group) RETURN p",
+        "MATCH p = SHORTEST 2 (u:User {id: 1})-[:MEMBER_OF*1..3]->(g:Group) RETURN p",
+        "MATCH p = (u:User {id: 1})-[:MEMBER_OF*1..3]->(g:Group) RETURN p",
         "MATCH (u:User {id: 1})-->(u) RETURN u",
         "MATCH (u:User {id: 1, id: 2}) RETURN u",
         "MATCH (u:User) WHERE missing.username = 'abc' RETURN u",
@@ -1179,15 +1250,23 @@ fn orbit_query_bounds_input_before_recursive_parsing() {
     for query in [nested, oversized] {
         assert!(compiler::passes::frontend::gql::parse(&query).is_err());
     }
-    assert!(
-        compiler::compile(
-            "MATCH (u:User) WHERE u.id IN [] RETURN u",
-            compiler::Frontend::Gql,
-            &test_ontology(),
-            &test_ctx()
-        )
-        .is_err()
-    );
+    for query in [
+        "MATCH (u:User) WHERE u.id IN [] RETURN u",
+        "MATCH (u:User) WHERE u.id IN [] AND u.id >= 1 AND u.id <= 3 RETURN u",
+        "MATCH (u:User) WHERE u.id IN [1, 2] AND u.id IN [] RETURN u",
+        "MATCH (u:User) WHERE u.id IN ['invalid'] AND u.id >= 1 AND u.id <= 3 RETURN u",
+    ] {
+        assert!(
+            compiler::compile(
+                query,
+                compiler::Frontend::Gql,
+                &test_ontology(),
+                &test_ctx()
+            )
+            .is_err(),
+            "{query}"
+        );
+    }
 }
 
 #[test]
@@ -1251,7 +1330,7 @@ fn orbit_query_path_depth_caps_match_json() {
             r#"{{"query_type":"path_finding","nodes":[{{"id":"a","entity":"Project","node_ids":[1]}},{{"id":"b","entity":"Project","node_ids":[2]}}],"path":{{"type":"shortest","from":"a","to":"b","max_depth":{depth},"rel_types":["CONTAINS"]}}}}"#
         );
         let query = format!(
-            "MATCH p = shortestPath((a:Project {{id: 1}})-[:CONTAINS*1..{depth}]->(b:Project {{id: 2}})) RETURN p"
+            "MATCH p = ANY SHORTEST (a:Project {{id: 1}})-[:CONTAINS*1..{depth}]->(b:Project {{id: 2}}) RETURN p"
         );
         let result = compile_pair(&json, &query, &ontology, &ctx);
         if (1..=3).contains(&depth) {
@@ -1523,7 +1602,7 @@ fn orbit_query_debug_and_dynamic_properties_match_json_options() {
     let json = r#"{"query_type":"path_finding","nodes":[{"id":"start","entity":"Project","node_ids":[100]},{"id":"end","entity":"Project","node_ids":[200]}],"path":{"type":"shortest","from":"start","to":"end","max_depth":3,"rel_types":["CONTAINS"]},"options":{"dynamic_columns":"*"}}"#;
     let compiled = compile_pair(
         json,
-        "MATCH p = shortestPath((start:Project {id: 100})-[:CONTAINS*1..3]->(`end`:Project {id: 200})) RETURN properties(p)",
+        "MATCH p = ANY SHORTEST (start:Project {id: 100})-[:CONTAINS*1..3]->(`end`:Project {id: 200}) RETURN properties(p)",
         &test_ontology(),
         &test_ctx(),
     )

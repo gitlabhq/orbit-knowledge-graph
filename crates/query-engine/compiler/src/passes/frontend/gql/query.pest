@@ -1,7 +1,9 @@
 Query = { SOI ~ SP? ~ Match ~ SP? ~ Return ~ (SP ~ Order)? ~ (SP ~ (Limit | Page))? ~ (SP ~ Debug)? ~ SP? ~ ";"? ~ SP? ~ EOI }
 Match = { ^"MATCH" ~ SP? ~ Pattern ~ (SP? ~ Where)? }
 Pattern = { ShortestPattern | PatternElement }
-ShortestPattern = { Variable ~ SP? ~ "=" ~ SP? ~ ^"shortestPath" ~ SP? ~ "(" ~ SP? ~ PatternElement ~ SP? ~ ")" }
+ShortestPattern = { Variable ~ SP? ~ "=" ~ SP? ~ (PathSearch ~ SP? ~ PatternElement | LegacyShortestPath) }
+PathSearch = { ^"ANY" ~ SP ~ ^"SHORTEST" | ^"SHORTEST" ~ SP ~ UnsignedInteger }
+LegacyShortestPath = { ^"shortestPath" ~ SP? ~ "(" ~ SP? ~ PatternElement ~ SP? ~ ")" }
 PatternElement = { NodePattern ~ (SP? ~ PatternElementChain)* }
 NodePattern = { "(" ~ SP? ~ Variable ~ SP? ~ (NodeLabel ~ SP?)? ~ (MapLiteral ~ SP?)? ~ ")" }
 NodeLabel = { ":" ~ SP? ~ SchemaName }
@@ -65,7 +67,7 @@ SymbolicName = _{ EscapedSymbolicName | !ReservedWord ~ UnescapedSymbolicName }
 UnescapedSymbolicName = @{ (ASCII_ALPHA | "_") ~ IdentifierPart* }
 EscapedSymbolicName = @{ "`" ~ ("``" | !"`" ~ ANY)* ~ "`" }
 IdentifierPart = _{ ASCII_ALPHANUMERIC | "_" }
-ReservedWord = @{ (^"ALL" | ^"ASCENDING" | ^"ASC" | ^"BY" | ^"CREATE" | ^"DELETE" | ^"DESCENDING" | ^"DESC" | ^"DETACH" | ^"EXISTS" | ^"LIMIT" | ^"PAGE" | ^"AFTER" | ^"DEBUG" | ^"MATCH" | ^"MERGE" | ^"ON" | ^"OPTIONAL" | ^"ORDER" | ^"REMOVE" | ^"RETURN" | ^"SET" | ^"SKIP" | ^"WHERE" | ^"WITH" | ^"UNION" | ^"UNWIND" | ^"AND" | ^"AS" | ^"CONTAINS" | ^"DISTINCT" | ^"ENDS" | ^"IN" | ^"IS" | ^"NOT" | ^"OR" | ^"STARTS" | ^"XOR" | ^"FALSE" | ^"TRUE" | ^"NULL" | ^"CONSTRAINT" | ^"DO" | ^"FOR" | ^"REQUIRE" | ^"UNIQUE" | ^"CASE" | ^"WHEN" | ^"THEN" | ^"ELSE" | ^"END" | ^"MANDATORY" | ^"SCALAR" | ^"OF" | ^"ADD" | ^"DROP") ~ !IdentifierPart }
+ReservedWord = @{ (^"ALL" | ^"ANY" | ^"SHORTEST" | ^"ASCENDING" | ^"ASC" | ^"BY" | ^"CREATE" | ^"DELETE" | ^"DESCENDING" | ^"DESC" | ^"DETACH" | ^"EXISTS" | ^"LIMIT" | ^"PAGE" | ^"AFTER" | ^"DEBUG" | ^"MATCH" | ^"MERGE" | ^"ON" | ^"OPTIONAL" | ^"ORDER" | ^"REMOVE" | ^"RETURN" | ^"SET" | ^"SKIP" | ^"WHERE" | ^"WITH" | ^"UNION" | ^"UNWIND" | ^"AND" | ^"AS" | ^"CONTAINS" | ^"DISTINCT" | ^"ENDS" | ^"IN" | ^"IS" | ^"NOT" | ^"OR" | ^"STARTS" | ^"XOR" | ^"FALSE" | ^"TRUE" | ^"NULL" | ^"CONSTRAINT" | ^"DO" | ^"FOR" | ^"REQUIRE" | ^"UNIQUE" | ^"CASE" | ^"WHEN" | ^"THEN" | ^"ELSE" | ^"END" | ^"MANDATORY" | ^"SCALAR" | ^"OF" | ^"ADD" | ^"DROP") ~ !IdentifierPart }
 SP = _{ (WhiteSpace | Comment)+ }
 WhiteSpace = _{ " " | "\t" | "\n" | "\r" | "\u{0b}" | "\u{0c}" | '\u{1c}'..'\u{1f}' | "\u{1680}" | "\u{180e}" | '\u{2000}'..'\u{200a}' | "\u{2028}" | "\u{2029}" | "\u{205f}" | "\u{3000}" | "\u{a0}" | "\u{202f}" }
 // A trailing line comment must not reference EOI, which would emit a second EOI pair under Query.

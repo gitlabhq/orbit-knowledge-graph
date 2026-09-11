@@ -55,7 +55,7 @@ bloom filters lets projections be correctly selected.
 The compiler supports two query frontends:
 
 1. The JSON Query DSL describes traversal, neighbors, path-finding, and aggregation queries. Remote requests through MCP, HTTP, and gRPC use this frontend.
-2. The [Orbit Query Frontend](orbit_query_frontend.md) accepts a restricted, read-only language based on openCypher 9 syntax. It is a compiler preset, not a remote endpoint or Neo4j-compatible driver.
+2. The [Orbit Query Frontend](orbit_query_frontend.md) accepts a restricted, read-only language based on openCypher 9 syntax. It is a compiler preset, not a remote endpoint or a wire-compatible graph-database driver.
 
 ### Compiler pass pipeline
 
