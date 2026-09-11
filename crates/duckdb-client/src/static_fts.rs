@@ -31,7 +31,10 @@ impl Drop for OwnedConfig {
 }
 
 unsafe extern "C" {
-    fn orbit_duckdb_load_fts(database: libduckdb_sys::duckdb_database) -> std::ffi::c_int;
+    fn orbit_duckdb_load_fts(
+        database: libduckdb_sys::duckdb_database,
+        out_error: *mut *mut std::ffi::c_char,
+    ) -> std::ffi::c_int;
 }
 
 pub(crate) fn open(
@@ -80,10 +83,13 @@ pub(crate) fn open(
         }
 
         let database = OwnedDatabase(database);
-        if orbit_duckdb_load_fts(database.0) != 0 {
-            return Err(DuckDbError::Schema(
-                "failed to register the static DuckDB fts extension".to_string(),
-            ));
+        let mut extension_error = std::ptr::null_mut();
+        if orbit_duckdb_load_fts(database.0, &mut extension_error) != 0 {
+            let message =
+                take_error(extension_error).unwrap_or_else(|| "unknown C++ exception".to_string());
+            return Err(DuckDbError::Schema(format!(
+                "failed to register the static DuckDB fts extension: {message}"
+            )));
         }
         let conn = duckdb::Connection::open_from_raw(database.0)?;
         Ok((conn, database))

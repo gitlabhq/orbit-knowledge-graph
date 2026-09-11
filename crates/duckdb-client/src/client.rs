@@ -25,7 +25,8 @@ fn is_lock_error(e: &impl std::fmt::Display) -> bool {
 }
 
 impl DuckDbClient {
-    /// Loads a DuckDB extension vendored by build.rs; never touches the network.
+    /// Loads a vendored DuckDB extension without network access. With `static-fts`, FTS is
+    /// linked when the database opens, so loading it is a no-op.
     pub fn load_extension(&self, name: &str) -> Result<()> {
         if cfg!(feature = "static-fts") && name == "fts" {
             return Ok(());
@@ -325,6 +326,10 @@ CREATE TABLE IF NOT EXISTS gl_edge (
 );";
 
     const TEST_TABLES: &[&str] = &["gl_directory", "gl_file", "gl_edge"];
+    #[cfg(feature = "static-fts")]
+    const STATIC_LOCK_PATH_ENV: &str = "ORBIT_TEST_STATIC_LOCK_PATH";
+    #[cfg(feature = "static-fts")]
+    const STATIC_LOCK_READY_ENV: &str = "ORBIT_TEST_STATIC_LOCK_READY";
 
     fn file_schema() -> Arc<Schema> {
         Arc::new(Schema::new(vec![
@@ -531,6 +536,62 @@ CREATE TABLE IF NOT EXISTS gl_edge (
             .downcast_ref::<Int64Array>()
             .unwrap();
         assert_eq!(count.value(0), 0);
+    }
+
+    #[cfg(feature = "static-fts")]
+    #[test]
+    fn static_lock_holder_process() {
+        let Some(path) = std::env::var_os(STATIC_LOCK_PATH_ENV) else {
+            return;
+        };
+        let ready = std::env::var_os(STATIC_LOCK_READY_ENV).unwrap();
+        let client =
+            DuckDbClient::open_once(Path::new(&path), duckdb::AccessMode::ReadWrite).unwrap();
+        client
+            .execute("CREATE TABLE lock_holder(id BIGINT)", &[])
+            .unwrap();
+        std::fs::write(ready, []).unwrap();
+        std::io::Read::read_to_end(&mut std::io::stdin(), &mut Vec::new()).unwrap();
+    }
+
+    #[cfg(feature = "static-fts")]
+    #[test]
+    fn static_open_preserves_duckdb_lock_error_text() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("locked.duckdb");
+        let ready = dir.path().join("locked.ready");
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "client::tests::static_lock_holder_process",
+                "--nocapture",
+            ])
+            .env(STATIC_LOCK_PATH_ENV, &path)
+            .env(STATIC_LOCK_READY_ENV, &ready)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while !ready.exists() {
+            assert!(
+                child.try_wait().unwrap().is_none(),
+                "lock holder exited early"
+            );
+            assert!(
+                std::time::Instant::now() < deadline,
+                "lock holder timed out"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+
+        let second = DuckDbClient::open_once(&path, duckdb::AccessMode::ReadWrite);
+        drop(child.stdin.take());
+        assert!(child.wait().unwrap().success());
+        let error = second
+            .err()
+            .expect("second process should fail while the first holds the lock");
+        assert!(is_lock_error(&error), "unexpected error: {error}");
     }
 
     #[cfg(feature = "static-fts")]
