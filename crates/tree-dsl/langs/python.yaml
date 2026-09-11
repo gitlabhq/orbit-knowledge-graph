@@ -4,6 +4,10 @@
 stages:
   - name: normalize
     rules:
+      # return expr → __return
+      - match: '(return_statement $$$VALS)'
+        replace: '(__return $$$VALS)'
+
       # Hoist decorators onto the inner def/class
       - match: '(decorated_definition $$$DECOS:decorator definition: $D)'
         append_under:
@@ -79,56 +83,64 @@ stages:
   - name: classify
     rules:
       # Defs
-      - match: '(class_definition)'
-        append: '(__deftype "Class") (__scope)'
-      - match: '(function_definition)'
-        append: '(__deftype "Function") (__scope)'
-
-      # Lambda assigned to a variable is a def
-      - match: '(assignment right: $R:lambda)'
-        append: '(__deftype "Lambda")'
-
-      # Class field with type annotation is a def (dataclass-style)
-      - match: '(assignment type: $T:type)'
-        append: '(__deftype "Field")'
-
-      # Typed parameters are bindings with type
-      - match: '(typed_parameter)'
-        append: '(__binding)'
-      - match: '(typed_default_parameter)'
-        append: '(__binding)'
+      - match: '(assignment left: $N right: $R:lambda)'
+        replace: '(__def (__defname @$N) (__deftype "Lambda") $R)'
+      - match: '(assignment left: $N type: $T:type)'
+        replace: '(__def (__defname @$N) (__deftype "Field"))'
+      - match: '(typed_default_parameter name: $N)'
+        replace: '(__binding @$N)'
+      - match: '(typed_parameter $C:identifier)'
+        replace: '(__binding @$C)'
 
       # Bindings
-      - match: '(assignment)'
-        append: '(__binding)'
-      - match: '(augmented_assignment)'
-        append: '(__binding)'
-      - match: '(named_expression)'
-        append: '(__binding)'
+      - match: '(assignment left: $N:__ivar right: $R)'
+        replace: '(__binding $N $R)'
+      - match: '(assignment left: $N right: $R)'
+        replace: '(__binding @$N $R)'
+      - match: '(assignment left: $N:__ivar)'
+        replace: '(__binding $N)'
+      - match: '(assignment left: $N)'
+        replace: '(__binding @$N)'
+      - match: '(augmented_assignment left: $N right: $R)'
+        replace: '(__binding @$N $R)'
+      - match: '(named_expression name: $N value: $V)'
+        replace: '(__binding @$N $V)'
 
       # Branches
-      - match: '(if_statement)'
-        append: '(__branch)'
-      - match: '(try_statement)'
-        append: '(__branch)'
-      - match: '(match_statement)'
-        append: '(__branch)'
+      - match: '(if_statement condition: $COND consequence: $C $$$ALTS:elif_clause|else_clause)'
+        replace: '(__branch $COND (__arm $C) $$$ALTS->__arm)'
+      - match: '(if_statement condition: $COND consequence: $C)'
+        replace: '(__branch $COND (__arm $C))'
+      - match: '(try_statement body: $B $$$ALTS:except_clause|finally_clause)'
+        replace: '(__branch (__arm $B) $$$ALTS->__arm)'
+      - match: '(match_statement subject: $S body: (block $$$CASES:case_clause))'
+        replace: '(__branch $S $$$CASES->__arm)'
       - match: '(conditional_expression)'
-        append: '(__branch)'
+        replace: '(__branch)'
 
       # Loops
-      - match: '(for_statement)'
-        append: '(__loop)'
-      - match: '(while_statement)'
-        append: '(__loop)'
+      - match: '(for_statement body: $B)'
+        replace: '(__loop $B)'
+      - match: '(while_statement body: $B)'
+        replace: '(__loop $B)'
       - match: '(list_comprehension)'
-        append: '(__loop)'
+        replace: '(__loop)'
       - match: '(set_comprehension)'
-        append: '(__loop)'
+        replace: '(__loop)'
       - match: '(dictionary_comprehension)'
-        append: '(__loop)'
+        replace: '(__loop)'
       - match: '(generator_expression)'
-        append: '(__loop)'
+        replace: '(__loop)'
+
+      # Functions (after bindings/control-flow so body is canonical)
+      - match: '(function_definition name: $N return_type: $R body: $B $$$ANN:__decorator)'
+        replace: '(__def (__defname @$N) (__deftype "Function") (__return_type @$R) (__scope) $$$ANN $B)'
+      - match: '(function_definition name: $N body: $B $$$ANN:__decorator)'
+        replace: '(__def (__defname @$N) (__deftype "Function") (__scope) $$$ANN $B)'
+
+      # Classes (after functions so methods are canonical)
+      - match: '(class_definition name: $N body: $B $$$ANN:__callable|__supertype|__decorator)'
+        replace: '(__def (__defname @$N) (__deftype "Class") (__scope) $$$ANN $B)'
 
 resolve:
   display_source: resolved

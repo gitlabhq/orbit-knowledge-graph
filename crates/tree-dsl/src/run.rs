@@ -127,6 +127,8 @@ struct Syns {
     branch: u16,
     r#loop: u16,
     scope: u16,
+    arm: u16,
+    ret: u16,
 }
 
 impl Syns {
@@ -152,6 +154,8 @@ impl Syns {
             branch: s("__branch"),
             r#loop: s("__loop"),
             scope: s("__scope"),
+            arm: s("__arm"),
+            ret: s("__return"),
         }
     }
 }
@@ -491,24 +495,31 @@ impl SsaState {
     }
 
     fn handle_binding(&mut self, tree: &Tree, i: u32, lang: &Lang) {
-        let lhs = tree
-            .child_by_field(i, self.f.left)
-            .or_else(|| tree.child_by_field(i, self.f.name))
-            .or_else(|| {
-                let ident_k = lang.kinds.lookup("identifier") as u16;
-                if ident_k != 0 {
-                    tree.children(i).find(|&c| tree.kind(c) == ident_k)
-                } else {
-                    None
-                }
-            })
-            .map(|c| tree.sym(c))
-            .unwrap_or(0);
+        let lhs = {
+            let s = tree.sym(i);
+            if s != 0 {
+                s
+            } else {
+                tree.child_by_field(i, self.f.left)
+                    .or_else(|| tree.child_by_field(i, self.f.name))
+                    .or_else(|| {
+                        let ident_k = lang.kinds.lookup("identifier") as u16;
+                        if ident_k != 0 {
+                            tree.children(i).find(|&c| tree.kind(c) == ident_k)
+                        } else {
+                            None
+                        }
+                    })
+                    .map(|c| tree.sym(c))
+                    .unwrap_or(0)
+            }
+        };
 
         if lhs != 0 {
-            let is_ivar = tree
-                .child_by_field(i, self.f.left)
-                .is_some_and(|n| tree.kind(n) == self.syns.ivar);
+            let is_ivar = synth_child_node(tree, i, self.syns.ivar).is_some()
+                || tree
+                    .child_by_field(i, self.f.left)
+                    .is_some_and(|n| tree.kind(n) == self.syns.ivar);
             if !is_ivar {
                 if self.ssa.has_variable_in_block(lhs, self.cur_block) {
                     self.cur_block = self.ssa.add_sealed_successor(self.cur_block);
@@ -682,15 +693,19 @@ fn ssa_fold(tree: &mut Tree, lang: &mut Lang) {
             continue;
         }
 
-        if tree.children(i).any(|c| tree.kind(c) == state.syns.binding) {
+        if k == state.syns.binding
+            || tree.children(i).any(|c| tree.kind(c) == state.syns.binding)
+        {
             state.handle_binding(tree, i, lang);
             i += 1;
             continue;
         }
 
-        if tree.children(i).any(|c| tree.kind(c) == state.syns.branch) {
+        if k == state.syns.branch
+            || tree.children(i).any(|c| tree.kind(c) == state.syns.branch)
+        {
             let pre = state.cur_block;
-            let arm_kinds = find_arm_children(tree, i, lang);
+            let arm_kinds = find_arm_children(tree, i, lang, &state.syns);
             let arm_blocks: Vec<BlockId> = arm_kinds
                 .iter()
                 .map(|_| state.ssa.add_sealed_successor(pre))
@@ -707,7 +722,9 @@ fn ssa_fold(tree: &mut Tree, lang: &mut Lang) {
             i += 1;
             continue;
         }
-        if tree.children(i).any(|c| tree.kind(c) == state.syns.r#loop) {
+        if k == state.syns.r#loop
+            || tree.children(i).any(|c| tree.kind(c) == state.syns.r#loop)
+        {
             let (h, _) = state.ssa.begin_loop(state.cur_block);
             state.cur_block = state.ssa.finish_loop(h, state.cur_block);
             i += 1;
@@ -786,7 +803,18 @@ fn classify_rhs(
         }
     }
 
-    let Some(rn) = tree.child_by_field(node, f.right) else {
+    let Some(rn) = tree.child_by_field(node, f.right).or_else(|| {
+        tree.children(node).find(|&c| {
+            let ck = tree.kind(c);
+            ck != syns.ivar
+                && ck != syns.deftype
+                && ck != syns.defname
+                && ck != syns.binding
+                && ck != syns.scope
+                && ck != syns.callee
+                && tree.nodes[c as usize].named
+        })
+    }) else {
         return Value::Opaque;
     };
 
@@ -852,7 +880,7 @@ fn classify_rhs(
         Some(rt_sym) => {
             let found_def = def_nodes
                 .iter()
-                .position(|&dn| name_sym(tree, dn, f) == rt_sym);
+                .position(|&dn| def_name(tree, dn, f, syns) == rt_sym);
             if let Some(di) = found_def {
                 if synth_child(tree, def_nodes[di], syns.deftype)
                     .is_some_and(|dt| lang.syms.resolve(dt) == "Class")
@@ -941,7 +969,7 @@ fn find_method(
             if tree.kind(d) == syns.deftype {
                 let method_node = tree.nodes[d as usize].parent;
                 if method_node != NONE && method_node != current {
-                    let mname = name_sym(tree, method_node, f);
+                    let mname = def_name(tree, method_node, f, syns);
                     if mname == method_name {
                         return Some(method_node);
                     }
@@ -952,10 +980,7 @@ fn find_method(
             if tree.kind(c) == syns.supertype && tree.sym(c) != 0 {
                 let super_name = tree.sym(c);
                 for &dn in def_nodes {
-                    let dname = tree
-                        .child_by_field(dn, f.name)
-                        .map(|c| tree.sym(c))
-                        .unwrap_or(0);
+                    let dname = def_name(tree, dn, f, syns);
                     if dname == super_name && !search.contains(&dn) {
                         search.push(dn);
                     }
@@ -974,21 +999,30 @@ fn infer_return_type(
     syns: &Syns,
     f: &Fields,
 ) -> Option<u32> {
-    let return_k = lang.kinds.lookup("return_statement") as u16;
-    if return_k == 0 {
+    let return_k_legacy = lang.kinds.lookup("return_statement") as u16;
+    if syns.ret == 0 && return_k_legacy == 0 {
         return None;
     }
 
     let mut local_binds: Vec<(u32, u32)> = Vec::new();
     for d in tree.descendants(def_node) {
-        if tree.children(d).any(|c| tree.kind(c) == syns.binding) {
-            let lhs = tree
-                .child_by_field(d, f.left)
-                .map(|c| tree.sym(c))
-                .unwrap_or(0);
+        if tree.kind(d) == syns.binding
+            || tree.children(d).any(|c| tree.kind(c) == syns.binding)
+        {
+            let lhs = if tree.kind(d) == syns.binding && tree.sym(d) != 0 {
+                tree.sym(d)
+            } else {
+                tree.child_by_field(d, f.left)
+                    .map(|c| tree.sym(c))
+                    .unwrap_or(0)
+            };
             let rhs_call = tree
-                .child_by_field(d, f.right)
-                .filter(|&r| tree.kind(r) == syns.call)
+                .children(d)
+                .find(|&c| tree.kind(c) == syns.call)
+                .or_else(|| {
+                    tree.child_by_field(d, f.right)
+                        .filter(|&r| tree.kind(r) == syns.call)
+                })
                 .and_then(|r| synth_child_node(tree, r, syns.callee))
                 .map(|c| tree.sym(c))
                 .unwrap_or(0);
@@ -999,7 +1033,10 @@ fn infer_return_type(
     }
 
     for d in tree.descendants(def_node) {
-        if tree.nodes[d as usize].kind == return_k {
+        let dk = tree.nodes[d as usize].kind;
+        if (syns.ret != 0 && dk == syns.ret)
+            || (return_k_legacy != 0 && dk == return_k_legacy)
+        {
             for c in tree.children(d) {
                 if tree.kind(c) == syns.call {
                     return synth_child_node(tree, c, syns.callee)
@@ -1032,16 +1069,26 @@ fn find_ivar_type(
     f: &Fields,
 ) -> Option<u32> {
     for d in tree.descendants(class_node) {
-        if tree.children(d).any(|c| tree.kind(c) == syns.binding) {
-            let lhs_node = tree.child_by_field(d, f.left);
-            if let Some(ln) = lhs_node
-                && tree.kind(ln) == syns.ivar
-                && tree.sym(ln) == attr_sym
-            {
-                let rhs = tree.child_by_field(d, f.right);
-                if let Some(rn) = rhs
-                    && tree.kind(rn) == syns.call
-                {
+        if tree.kind(d) == syns.binding
+            || tree.children(d).any(|c| tree.kind(c) == syns.binding)
+        {
+            let ivar_match = if tree.kind(d) == syns.binding {
+                synth_child_node(tree, d, syns.ivar)
+                    .filter(|&iv| tree.sym(iv) == attr_sym)
+                    .is_some()
+            } else {
+                tree.child_by_field(d, f.left)
+                    .is_some_and(|ln| tree.kind(ln) == syns.ivar && tree.sym(ln) == attr_sym)
+            };
+            if ivar_match {
+                let rhs_call = tree
+                    .children(d)
+                    .find(|&c| tree.kind(c) == syns.call)
+                    .or_else(|| {
+                        tree.child_by_field(d, f.right)
+                            .filter(|&r| tree.kind(r) == syns.call)
+                    });
+                if let Some(rn) = rhs_call {
                     let callee = synth_child_node(tree, rn, syns.callee)
                         .map(|c| tree.sym(c))
                         .unwrap_or(0);
@@ -1074,7 +1121,16 @@ fn find_enclosing_class(
     }
 }
 
-fn find_arm_children(tree: &Tree, node: u32, lang: &Lang) -> Vec<(u32, u32)> {
+fn find_arm_children(tree: &Tree, node: u32, lang: &Lang, syns: &Syns) -> Vec<(u32, u32)> {
+    let arm_children: Vec<(u32, u32)> = tree
+        .children(node)
+        .filter(|&c| tree.kind(c) == syns.arm && !tree.nodes[c as usize].dead)
+        .map(|c| (c, c + tree.nodes[c as usize].size))
+        .collect();
+    if !arm_children.is_empty() {
+        return arm_children;
+    }
+
     let consequence_f = lang.fields.lookup("consequence") as u16;
     let alternative_f = lang.fields.lookup("alternative") as u16;
     let body_f = lang.fields.lookup("body") as u16;

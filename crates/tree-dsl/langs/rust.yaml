@@ -5,6 +5,9 @@
 stages:
   - name: normalize
     rules:
+      - match: '(return_expression $$$VALS)'
+        replace: '(__return $$$VALS)'
+
       # self.field → __ivar
       - match: '(field_expression value: (self) field: $F)'
         replace: '(__ivar @$F)'
@@ -55,60 +58,55 @@ stages:
 
   - name: classify
     rules:
-      # Structs
-      - match: '(struct_item)'
-        append: '(__deftype "Struct") (__scope)'
-
-      # Enums
-      - match: '(enum_item)'
-        append: '(__deftype "Enum") (__scope)'
-
-      # Traits
-      - match: '(trait_item)'
-        append: '(__deftype "Trait") (__scope)'
-
-      # Impl blocks — use type: field as the def name
-      - match: '(impl_item type: $T)'
-        append: '(__deftype "Impl") (__defname @$T) (__scope)'
-
-      # Functions — classify_methods upgrades to Method (has &self inside
-      # impl/trait) or AssociatedFunction (no &self inside impl/trait)
-      - match: '(function_item)'
-        append: '(__deftype "Function") (__scope)'
-
-      # Trait method signatures (no body)
-      - match: '(function_signature_item parameters: (parameters (self_parameter)))'
-        append: '(__deftype "Function") (__self_method)'
-      - match: '(function_signature_item)'
-        append: '(__deftype "Function")'
-
-      # Constants and statics
-      - match: '(const_item)'
-        append: '(__deftype "Constant")'
-      - match: '(static_item)'
-        append: '(__deftype "Static")'
-
-      # Type aliases
-      - match: '(type_item)'
-        append: '(__deftype "TypeAlias")'
-
-      # Let bindings
-      - match: '(let_declaration)'
-        append: '(__binding)'
+      # Bindings
+      - match: '(let_declaration pattern: $N value: $V)'
+        replace: '(__binding @$N $V)'
+      - match: '(let_declaration pattern: $N)'
+        replace: '(__binding @$N)'
+      - match: '(const_item name: $N)'
+        replace: '(__def (__defname @$N) (__deftype "Constant"))'
+      - match: '(static_item name: $N)'
+        replace: '(__def (__defname @$N) (__deftype "Static"))'
+      - match: '(type_item name: $N)'
+        replace: '(__def (__defname @$N) (__deftype "TypeAlias"))'
 
       # Control flow
-      - match: '(if_expression)'
-        append: '(__branch)'
-      - match: '(match_expression)'
-        append: '(__branch)'
+      - match: '(if_expression condition: $COND consequence: $C alternative: $A)'
+        replace: '(__branch $COND (__arm $C) (__arm $A))'
+      - match: '(if_expression condition: $COND consequence: $C)'
+        replace: '(__branch $COND (__arm $C))'
+      - match: '(match_expression value: $V body: $B)'
+        replace: '(__branch $V $B)'
+      - match: '(for_expression body: $B)'
+        replace: '(__loop $B)'
+      - match: '(while_expression body: $B)'
+        replace: '(__loop $B)'
+      - match: '(loop_expression body: $B)'
+        replace: '(__loop $B)'
 
-      # Loops
-      - match: '(for_expression)'
-        append: '(__loop)'
-      - match: '(while_expression)'
-        append: '(__loop)'
-      - match: '(loop_expression)'
-        append: '(__loop)'
+      # Trait method signatures (no body)
+      - match: '(function_signature_item name: $N parameters: (parameters (self_parameter)))'
+        replace: '(__def (__defname @$N) (__deftype "Function") (__self_method))'
+      - match: '(function_signature_item name: $N)'
+        replace: '(__def (__defname @$N) (__deftype "Function"))'
+
+      # Functions
+      - match: '(function_item name: $N body: $B $$$ANN:__self_method|__visibility)'
+        replace: '(__def (__defname @$N) (__deftype "Function") (__scope) $$$ANN $B)'
+      - match: '(function_item name: $N body: $B)'
+        replace: '(__def (__defname @$N) (__deftype "Function") (__scope) $B)'
+
+      # Containers (after functions)
+      - match: '(struct_item name: $N body: $B)'
+        replace: '(__def (__defname @$N) (__deftype "Struct") (__scope) $B)'
+      - match: '(struct_item name: $N)'
+        replace: '(__def (__defname @$N) (__deftype "Struct") (__scope))'
+      - match: '(enum_item name: $N body: $B)'
+        replace: '(__def (__defname @$N) (__deftype "Enum") (__scope) $B)'
+      - match: '(trait_item name: $N body: $B)'
+        replace: '(__def (__defname @$N) (__deftype "Trait") (__scope) $B)'
+      - match: '(impl_item type: $T body: $B $$$ANN:__supertype)'
+        replace: '(__def (__defname @$T) (__deftype "Impl") (__scope) $$$ANN $B)'
 
 resolve:
   lookup_from:

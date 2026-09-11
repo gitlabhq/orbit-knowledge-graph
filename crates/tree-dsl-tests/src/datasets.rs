@@ -28,6 +28,7 @@ fn has_synth(tree: &Tree, node: u32, kind: u16) -> bool {
 
 struct Sk {
     deftype: u16,
+    defname: u16,
     import: u16,
     import_type: u16,
     source: u16,
@@ -41,6 +42,7 @@ impl Sk {
         let s = |n: &str| lang.kinds.lookup(n) as u16;
         Self {
             deftype: s("__deftype"),
+            defname: s("__defname"),
             import: s("__import"),
             import_type: s("__import_type"),
             source: s("__source"),
@@ -161,8 +163,9 @@ pub fn to_datasets(
 
 // ── FQN builder ──
 
-fn def_name_sym(tree: &Tree, node: u32, name_f: u16, left_f: u16) -> u32 {
-    tree.child_by_field(node, name_f)
+fn def_name_sym(tree: &Tree, node: u32, name_f: u16, left_f: u16, defname_k: u16) -> u32 {
+    let s = tree
+        .child_by_field(node, name_f)
         .or_else(|| {
             if left_f != 0 {
                 tree.child_by_field(node, left_f)
@@ -171,7 +174,18 @@ fn def_name_sym(tree: &Tree, node: u32, name_f: u16, left_f: u16) -> u32 {
             }
         })
         .map(|c| tree.sym(c))
-        .unwrap_or(0)
+        .unwrap_or(0);
+    if s != 0 {
+        return s;
+    }
+    if defname_k != 0 {
+        tree.children(node)
+            .find(|&c| tree.kind(c) == defname_k)
+            .map(|c| tree.sym(c))
+            .unwrap_or(0)
+    } else {
+        0
+    }
 }
 
 fn def_fqn(tree: &Tree, node: u32, lang: &Lang, sk: &Sk) -> String {
@@ -220,7 +234,7 @@ fn def_fqn(tree: &Tree, node: u32, lang: &Lang, sk: &Sk) -> String {
                 };
                 collapsed.replace('/', sep)
             } else {
-                let sym = def_name_sym(tree, n, name_f, left_f);
+                let sym = def_name_sym(tree, n, name_f, left_f, sk.defname);
                 lang.syms.resolve(sym).to_string()
             };
             if !name.is_empty() {
@@ -340,7 +354,7 @@ fn build_defs(trees: &[Tree], lang: &Lang, ids: &IdMaps, sk: &Sk) -> anyhow::Res
             }
             let did = ids.defs[&(fi, node)];
             let left_f = lang.fields.lookup("left") as u16;
-            let name_sym = def_name_sym(tree, node, name_f, left_f);
+            let name_sym = def_name_sym(tree, node, name_f, left_f, sk.defname);
             let deftype_sym = synth_sym(tree, node, sk.deftype);
             id_b.append_value(did);
             fp_b.append_value(&path);
