@@ -130,6 +130,9 @@ pub use orbit_migrations::completion::SdlcReindexProgress;
 impl MigrationCompletionChecker {
     async fn run_inner(&self) -> Result<(), TaskError> {
         self.check_completion().await?;
+        if let Err(error) = self.catalog.sync_active_version(&self.graph).await {
+            warn!(%error, "active version mirror skipped this tick");
+        }
         self.reconcile_dead_versions().await?;
         Ok(())
     }

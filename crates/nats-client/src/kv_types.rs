@@ -47,5 +47,7 @@ pub struct KvEntry {
     pub revision: u64,
 }
 
+pub type KvWatch = futures::stream::BoxStream<'static, Result<Option<KvEntry>, crate::NatsError>>;
+
 #[derive(Debug, Clone, Default)]
 pub struct KvBucketConfig {}

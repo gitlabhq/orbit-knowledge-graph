@@ -446,8 +446,9 @@ Indexers then fill the rebuilt tables through the normal global and namespace sw
 
 **Schema update coordination**
 
-The Webserver's `ActiveSchema` polls `gkg_schema_version` and swaps to the active archive without
-restarting; requests already running keep their snapshot. See
+The Webserver's `ActiveSchema` watches the `active_version` NATS KV key (mirrored from
+`gkg_schema_version` by the dispatcher) and swaps to the active archive without restarting;
+requests already running keep their snapshot. See
 [schema management](../schema_management.md#webserver-serving-snapshots).
 
 **Closing notes**

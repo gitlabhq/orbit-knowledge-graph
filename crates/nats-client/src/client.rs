@@ -3,15 +3,17 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use async_nats::jetstream::Context;
-use async_nats::jetstream::kv::{CreateErrorKind, Store as KvStore, UpdateErrorKind};
+use async_nats::jetstream::kv::{
+    CreateErrorKind, Entry, Operation, Store as KvStore, UpdateErrorKind,
+};
 use async_nats::jetstream::stream::Stream;
 use bytes::Bytes;
-use futures::TryStreamExt;
+use futures::{StreamExt, TryStreamExt};
 use tokio::sync::RwLock;
 use tracing::info;
 
 use crate::error::{NatsError, map_connect_error};
-use crate::kv_types::{KvBucketConfig, KvEntry, KvPutOptions, KvPutResult};
+use crate::kv_types::{KvBucketConfig, KvEntry, KvPutOptions, KvPutResult, KvWatch};
 use orbit_server_config::NatsConfiguration;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -246,11 +248,7 @@ impl NatsClient {
         let store = self.get_kv_store(bucket).await?;
 
         match store.entry(key).await {
-            Ok(Some(entry)) => Ok(Some(KvEntry {
-                key: entry.key,
-                value: entry.value,
-                revision: entry.revision,
-            })),
+            Ok(Some(entry)) => Ok(live_entry(entry)),
             Ok(None) => Ok(None),
             Err(e) => Err(NatsError::KvGet {
                 bucket: bucket.to_string(),
@@ -258,6 +256,30 @@ impl NatsClient {
                 message: e.to_string(),
             }),
         }
+    }
+
+    pub async fn kv_watch(&self, bucket: &str, key: &str) -> Result<KvWatch, NatsError> {
+        let store = self.get_kv_store(bucket).await?;
+        let watch_error = {
+            let bucket = bucket.to_string();
+            let key = key.to_string();
+            move |message: String| NatsError::KvWatch {
+                bucket: bucket.clone(),
+                key: key.clone(),
+                message,
+            }
+        };
+        let changes = store
+            .watch(key)
+            .await
+            .map_err(|e| watch_error(e.to_string()))?;
+        Ok(changes
+            .map(move |entry| {
+                entry
+                    .map(live_entry)
+                    .map_err(|e| watch_error(e.to_string()))
+            })
+            .boxed())
     }
 
     pub async fn kv_put(
@@ -331,6 +353,17 @@ impl NatsClient {
             bucket: bucket.to_string(),
             message: e.to_string(),
         })
+    }
+}
+
+fn live_entry(entry: Entry) -> Option<KvEntry> {
+    match entry.operation {
+        Operation::Put => Some(KvEntry {
+            key: entry.key,
+            value: entry.value,
+            revision: entry.revision,
+        }),
+        Operation::Delete | Operation::Purge => None,
     }
 }
 

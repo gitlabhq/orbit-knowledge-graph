@@ -62,6 +62,13 @@ pub enum NatsError {
     #[error("KV keys listing failed for '{bucket}': {message}")]
     KvKeys { bucket: String, message: String },
 
+    #[error("KV watch failed for '{bucket}/{key}': {message}")]
+    KvWatch {
+        bucket: String,
+        key: String,
+        message: String,
+    },
+
     #[error("circuit open for service {service}")]
     CircuitOpen { service: &'static str },
 }
@@ -80,7 +87,8 @@ impl CircuitBreakableError for NatsError {
             | Self::KvGet { .. }
             | Self::KvPut { .. }
             | Self::KvDelete { .. }
-            | Self::KvKeys { .. } => true,
+            | Self::KvKeys { .. }
+            | Self::KvWatch { .. } => true,
 
             Self::StreamNotFound { source, .. } => matches!(
                 source.kind(),
