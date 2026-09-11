@@ -7,28 +7,38 @@ codes — a working setup does not need to re-verify these on every invocation.
 Before using Orbit, verify:
 
 1. `glab` installed with Orbit extension
-    ```sh
-    glab --version     # need 1.117.0+
-    glab orbit --help  # should show orbit subcommands
-    ```
-   If `glab` not already installed, follow [the install instructions](https://gitlab.com/gitlab-org/cli#installation)
-2. `glab` authenticated to GitLab
-    ```sh
-    # check authentication status
-    glab auth status
 
-    # if not authenticated:
-    glab auth login
-    ```
+   ```sh
+   glab --version     # need 1.117.0+
+   glab orbit --help  # should show orbit subcommands
+   ```
+
+   If `glab` not already installed, follow [the install instructions](https://gitlab.com/gitlab-org/cli#installation).
+
+2. `glab` authenticated to GitLab
+
+   ```sh
+   # check authentication status
+   glab auth status
+
+   # if not authenticated:
+   glab auth login
+   ```
+
 3. Orbit Remote: feature flag enabled for namespace
-    ```sh
-    glab orbit graph-status --full-path GROUP_NAMESPACE
-    # exit code 0 = ready to query
-    # exit code 2 = feature flag not enabled. Contact your GitLab admin
-    ```
+
+   ```sh
+   glab orbit graph-status --full-path GROUP_NAMESPACE
+   # exit code 0 = ready to query
+   # exit code 2 = feature flag not enabled. Contact your GitLab admin
+   ```
+
 4. Orbit Local: no server needed
-    ```sh
-    glab orbit --install --yes       # installs the orbit binary
-    glab orbit index /path/to/your/repo  # index a local repo
-    ```
-    If `glab orbit` cannot find the managed binary, add `"$HOME/.config/glab-cli/bin/"` (Linux/macOS) to `PATH` as a fallback
+
+   ```sh
+   glab orbit --install --yes           # installs the orbit binary
+   glab orbit index /path/to/your/repo  # index a local repo
+   ```
+
+   If `glab orbit` cannot find the managed binary, add
+   `"$HOME/.config/glab-cli/bin/"` (Linux/macOS) to `PATH` as a fallback.
