@@ -97,7 +97,7 @@ Then tell each writer that the cluster is replicated:
 |-----------|---------|
 | GitLab | Nothing. GitLab detects the `Replicated` database engine and creates replicated tables. |
 | Siphon | `connection_settings` with `insert_quorum: "auto"`, `insert_quorum_parallel: "0"`, and `async_insert: "0"`. See [Install Siphon](data-replication.md#install-siphon). |
-| GitLab Orbit | `clickhouse.datalake.replicated: true` and `clickhouse.graph.replicated: true` in the Helm values. |
+| GitLab Orbit | `clickhouse.ha.enabled: true` in the Helm values. When only one database sits on the cluster, set `replicated: true` on that connection instead. |
 
 With the switch on, GitLab Orbit creates `Replicated*MergeTree` tables, writes with a majority quorum, reads
 with sequential consistency, and retries the transient quorum and Keeper errors. One replica can leave the cluster

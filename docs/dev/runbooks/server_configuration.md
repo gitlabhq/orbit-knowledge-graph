@@ -147,6 +147,8 @@ graph:
   replicated: true
 ```
 
+The Helm chart sets both from one value, `clickhouse.ha.enabled: true`.
+
 The database must use the `Replicated` database engine, created by the ClickHouse administrator:
 
 ```sql
