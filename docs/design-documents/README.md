@@ -29,7 +29,7 @@ A secure query layer on top of the graph lets developers and AI agents query tha
   - **`Indexer`** (`gkg-server --mode Indexer`): Runs the shared indexing engine, consumes SDLC and code indexing requests from NATS JetStream, and writes graph data into ClickHouse.
   - **`DispatchIndexing`** (`gkg-server --mode DispatchIndexing`): On a schedule, detects enabled root namespaces with recent Siphon changes and publishes deduplicated per-namespace indexing requests to the internal `GKG_INDEXER` stream. It also runs scheduled dispatchers for code indexing tasks, namespace deletion, stale-edge reconciliation, and schema-migration lifecycle, including ontology archive publication.
   - **`HealthCheck`** (`gkg-server --mode HealthCheck`): Aggregates cluster health by probing Kubernetes deployments and ClickHouse instances, and exposes the result on a single `/health` endpoint.
-- **Orbit Local's `orbit` CLI**, which parses a local repository, stores its code graph in DuckDB, accepts read-only DuckDB SQL, and serves local MCP tools over stdio. `glab orbit local` installs and runs this binary.
+- **The `orbit` CLI**, which exposes one flat command tree. Local commands parse repositories, store code graphs in DuckDB, accept read-only DuckDB SQL, and serve MCP tools over stdio; hosted commands query Orbit Remote. `glab orbit` installs and runs this binary.
 - **UI and product experiences**, which consume Orbit Remote through GitLab APIs and the GitLab Duo Agent Platform.
 
 ```mermaid

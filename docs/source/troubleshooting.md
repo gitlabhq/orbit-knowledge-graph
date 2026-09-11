@@ -26,7 +26,7 @@ Use this page to troubleshoot errors you might encounter with
 ## GitLab Orbit Local
 
 GitLab Orbit Local errors occur when running the `orbit` binary directly or through
-`glab orbit local`.
+`glab orbit`.
 
 ### `no local graph found`
 
@@ -43,7 +43,7 @@ reported as `Table 'Definition' does not exist`.
 **Resolution:** Index the repository first:
 
 ```shell
-glab orbit local index /path/to/your/repo
+glab orbit index /path/to/your/repo
 ```
 
 ### `IO Error: Could not set lock on file`
@@ -87,7 +87,7 @@ server.
 
 ```shell
 glab orbit --update
-glab orbit local mcp serve
+glab orbit mcp serve
 ```
 
 If you installed `orbit` directly, rerun the installer from the
@@ -95,13 +95,13 @@ If you installed `orbit` directly, rerun the installer from the
 
 ## GitLab Orbit Remote
 
-GitLab Orbit Remote errors occur when running `glab orbit remote` commands.
+GitLab Orbit Remote errors occur when running `glab orbit` commands.
 GitLab Orbit Remote requires GitLab Premium or Ultimate and the `knowledge_graph`
 feature flag to be enabled on your instance.
 
 ### Exit code 2
 
-**Symptoms:** `glab orbit remote` commands exit with code 2.
+**Symptoms:** `glab orbit` commands exit with code 2.
 
 **Cause:** The `knowledge_graph` feature flag is not enabled for your
 namespace or instance.
@@ -111,7 +111,7 @@ namespace or instance.
 
 ### Exit code 3
 
-**Symptoms:** `glab orbit remote` commands exit with code 3.
+**Symptoms:** `glab orbit` commands exit with code 3.
 
 **Cause:** You are not authenticated with the GitLab CLI.
 
