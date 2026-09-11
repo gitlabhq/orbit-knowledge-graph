@@ -1,5 +1,4 @@
 mod local;
-pub(crate) mod relations;
 
 use std::io::Write;
 use std::path::{Path, PathBuf};

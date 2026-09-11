@@ -13,7 +13,7 @@ description: >
   production data in GitLab (a project such as gitlab-org/gitlab, cross-project
   blast radius, contributor or merge-request aggregation) use the `orbit` skill;
   for single-entity GitLab lookups or write operations use `glab`.
-version: 0.5.8
+version: 0.5.9
 license: MIT
 metadata:
   audience: developers
@@ -74,9 +74,8 @@ wrapper flags, config keys, and pass-through rules:
 |---|---|
 | `orbit index <PATH> [--stats] [--db P]` | Parse repos under `PATH` into DuckDB; prints graph stats as JSON |
 | `orbit grep [QUERY…] [--path P] [--kind K,K]` | Find definitions by name; queries with three or fewer matches include source automatically |
-| `orbit grep FQN --related-to [--edge K] [--in] [--out]` | List connections, including uses through members |
-| `orbit grep FQN --callers` / `--callees` | List incoming or outgoing calls |
 | `orbit context [FQN…] [--file P] [--kind K,K]` | Read definition bodies by FQN, unique tail, or glob; `--file` alone prints a file overview |
+| `orbit context FQN --related [--tests]` | List every connection of a definition: calls both ways, imports, extends |
 | `orbit sql [QUERY] [-f FILE] [-F table\|json\|ndjson\|csv] [--all] [--repo P]` | Run read-only SQL scoped to the current checkout's commit; `-` reads from stdin, `--all` spans every indexed commit |
 | `orbit schema [TABLE…] [--raw]` | Describe graph tables/columns (index-storage tables hidden); scope to table names to trim output |
 | `orbit list [-F …]` | List indexed repositories, branch, commit, status |
@@ -100,18 +99,16 @@ graph relationships establish field reads, writes, or dataflow; inspect source.
 orbit grep "rateLimit" --path src --kind Method,Function
 orbit context "Type::method"
 orbit context --file src/lib.rs
-orbit grep "Type::method" --callers --path src --kind Method
-orbit grep "Type::method" --callees
-orbit grep "Type" --related-to --edge extends --in
+orbit context "Type::method" --related
 ```
 
-Relationship selectors accept an FQN, a unique unqualified tail, or a glob.
-Pass one positional target with the flag, or a target immediately after it.
-An explicit flag target takes precedence over positional terms. Use one
-relationship selector per call, without `--limit`.
-`--path` and `--kind` filter connected results, not the target definition.
-Connections from test, fixture, and generated files are counted but hidden
-unless `--tests` is passed. Incoming lookups include uses through members.
+`--related` takes the same positional targets as body reads: an FQN, a unique
+unqualified tail, or a glob, with `--file` and `--kind` narrowing the target.
+Each connection line shows direction (`<--` incoming, `-->` outgoing) and its
+edge kind (`calls`, `imports`, `extends`, `defines`), so callers are the
+incoming `calls` lines. Connections from test, fixture, and generated files are
+counted but hidden unless `--tests` is passed. Incoming lookups include uses
+through members.
 
 `grep` includes source automatically when a query has three or fewer matches.
 Broader results include a copyable `context` command for the top candidates.

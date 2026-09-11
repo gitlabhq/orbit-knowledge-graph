@@ -1214,52 +1214,6 @@ fn grep_loads_bundled_extension_in_fresh_data_dir() {
 }
 
 #[test]
-fn grep_callers_order_is_stable_across_overloads() {
-    let data_dir = tempfile::TempDir::new().unwrap();
-    let workspace = tempfile::TempDir::new().unwrap();
-    let repo = workspace.path().join("repo");
-    init_repo_at(
-        &repo,
-        &[
-            (
-                "src/Target.java",
-                "public class Target {\n    public Target() {}\n    public void ping() {}\n}\n",
-            ),
-            (
-                "src/Caller.java",
-                concat!(
-                    "public class Caller {\n",
-                    "    public Caller(Target t) { t.ping(); }\n",
-                    "    public Caller(Target t, int n) { t.ping(); }\n",
-                    "    public void run(Target t) { t.ping(); }\n",
-                    "    public void run(Target t, int n) { t.ping(); }\n",
-                    "    public void run(Target t, int n, int m) { t.ping(); }\n",
-                    "}\n",
-                ),
-            ),
-        ],
-    );
-    let dd = data_dir.path();
-    assert!(orbit_index(&repo, dd));
-
-    let repo_arg = repo.to_str().unwrap();
-    for (fqn, section) in [
-        ("Target.ping", "Connections (5):"),
-        ("Target", "Used via members (5)"),
-    ] {
-        let (first, stderr, ok) = run_cmd(&["grep", fqn, "--callers", "--repo", repo_arg], dd);
-        assert!(ok, "grep {fqn} --callers failed: {stderr}");
-        assert!(first.contains(section), "{fqn}: {first}");
-        assert_eq!(first.matches("<-- Caller.Caller ").count(), 2, "{first}");
-        assert_eq!(first.matches("<-- Caller.run ").count(), 3, "{first}");
-        for _ in 0..10 {
-            let (again, _, _) = run_cmd(&["grep", fqn, "--callers", "--repo", repo_arg], dd);
-            assert_eq!(first, again, "grep {fqn} --callers output must be stable");
-        }
-    }
-}
-
-#[test]
 fn repo_map_api_empty_prefix_succeeds() {
     let data_dir = tempfile::TempDir::new().unwrap();
     let repo = create_test_repo();
@@ -1419,7 +1373,11 @@ fn refresh_resolves_relationships_through_import_neighbors() {
         "import os\n\ndef write_file(path):\n    pass\n\ndef read_file(path):\n    return open(path).read()\n",
     )
     .unwrap();
-    let (output, stderr, ok) = orbit(&repo.path, data.path(), &["grep", "read_file", "--callers"]);
+    let (output, stderr, ok) = orbit(
+        &repo.path,
+        data.path(),
+        &["context", "read_file", "--related"],
+    );
     assert!(ok, "{stderr}");
     assert!(stderr.contains("import neighbor(s)"), "{stderr}");
     assert!(!stderr.contains("stale"), "{stderr}");
@@ -1427,7 +1385,7 @@ fn refresh_resolves_relationships_through_import_neighbors() {
         output.contains("run") && output.contains("[calls]"),
         "{output}"
     );
-    let (_, stderr, ok) = orbit(&repo.path, data.path(), &["grep", "hello", "--callers"]);
+    let (_, stderr, ok) = orbit(&repo.path, data.path(), &["context", "hello", "--related"]);
     assert!(ok && !stderr.contains("refreshed"), "{stderr}");
     assert!(rows(&orbit_sql("SELECT source_id, target_id, relationship_kind FROM gl_edge GROUP BY ALL HAVING count(*) > 1", data.path())).is_empty());
     assert_ne!(
@@ -1437,19 +1395,23 @@ fn refresh_resolves_relationships_through_import_neighbors() {
             data.path()
         )
     );
-    std::fs::write(repo.path.join("src/notes.txt"), "docs\n").unwrap();
     std::fs::write(
-        repo.path.join("src/main.py"),
-        "import notes\n\ndef fetch():\n    notes.read()\n",
+        repo.path.join("src/huge.py"),
+        format!("def read():\n    pass\n{}", "#".repeat(5_000_001)),
     )
     .unwrap();
-    let (output, stderr, ok) = orbit(&repo.path, data.path(), &["grep", "fetch", "--callees"]);
+    std::fs::write(
+        repo.path.join("src/main.py"),
+        "import huge\n\ndef fetch():\n    huge.read()\n",
+    )
+    .unwrap();
+    let (output, stderr, ok) = orbit(&repo.path, data.path(), &["context", "fetch", "--related"]);
     assert!(
         ok && stderr.contains("relationships may be stale for src/main.py"),
         "{output}{stderr}"
     );
     assert!(orbit_index(&repo.path, data.path()));
-    let (_, stderr, ok) = orbit(&repo.path, data.path(), &["grep", "fetch", "--callees"]);
+    let (_, stderr, ok) = orbit(&repo.path, data.path(), &["context", "fetch", "--related"]);
     assert!(ok && !stderr.contains("stale"), "{stderr}");
 }
 

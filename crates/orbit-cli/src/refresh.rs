@@ -3,7 +3,10 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result, ensure};
-use code_graph::v2::{FileInventoryEntry, Pipeline, PipelineConfig, config::CodeFilter};
+use code_graph::v2::{
+    FileInventoryEntry, Pipeline, PipelineConfig,
+    config::{CodeFilter, detect_language_from_path},
+};
 use duckdb_client::{DuckDbClient, search, string_column};
 use orbit_utils::fs_stream::Decision;
 use serde_json::json;
@@ -68,7 +71,8 @@ fn neighbors(
     changed: &[FileInventoryEntry],
 ) -> Result<Vec<FileInventoryEntry>> {
     let imports = client.query_arrow_json(
-        "SELECT file_path, import_path FROM gl_imported_symbol WHERE project_id = ?1 AND commit_sha = ?2",
+        "SELECT file_path, import_path || '/' || identifier_name AS import_path
+         FROM gl_imported_symbol WHERE project_id = ?1 AND commit_sha = ?2",
         &[json!(git.project_id), json!(git.commit_sha)],
     )?;
     let sources = string_column(&imports, "file_path");
@@ -76,8 +80,7 @@ fn neighbors(
     let changed_paths: BTreeSet<_> = changed.iter().map(|f| f.path.as_str()).collect();
     let mut wanted = BTreeSet::new();
     for (source, target) in sources.iter().zip(&targets) {
-        let source_changed = changed_paths.contains(source.as_str());
-        if source_changed {
+        if changed_paths.contains(source.as_str()) {
             wanted.extend(
                 files
                     .iter()
@@ -94,12 +97,34 @@ fn neighbors(
             wanted.insert(source.clone());
         }
     }
-    let companions: Vec<_> = files
+    let mut params = vec![json!(git.project_id), json!(git.commit_sha)];
+    params.extend(changed.iter().map(|f| json!(f.path)));
+    let placeholders = (3..=params.len())
+        .map(|n| format!("?{n}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    if !changed.is_empty() {
+        let linked = client.query_arrow_json(
+            &format!(
+                "WITH touched AS (SELECT id FROM gl_definition WHERE project_id = ?1 AND commit_sha = ?2 AND file_path IN ({placeholders}))
+                 SELECT DISTINCT d.file_path FROM gl_edge e
+                 JOIN gl_definition d ON d.id = CASE WHEN e.source_id IN (SELECT id FROM touched) THEN e.target_id ELSE e.source_id END
+                 WHERE (e.source_id IN (SELECT id FROM touched) OR e.target_id IN (SELECT id FROM touched))
+                   AND d.project_id = ?1 AND d.commit_sha = ?2"
+            ),
+            &params,
+        )?;
+        wanted.extend(string_column(&linked, "file_path"));
+    }
+    Ok(files
         .iter()
-        .filter(|f| f.decision == Decision::Parse && wanted.contains(&f.path))
+        .filter(|f| {
+            f.decision == Decision::Parse
+                && !changed_paths.contains(f.path.as_str())
+                && wanted.contains(&f.path)
+        })
         .cloned()
-        .collect();
-    Ok(companions)
+        .collect())
 }
 
 pub fn open(
@@ -162,14 +187,21 @@ pub fn open(
             .iter()
             .filter(|(table, _)| table == "gl_imported_symbol")
             .flat_map(|(_, batch)| {
-                string_column(std::slice::from_ref(batch), "file_path")
-                    .into_iter()
-                    .zip(string_column(std::slice::from_ref(batch), "import_path"))
+                let batch = std::slice::from_ref(batch);
+                string_column(batch, "file_path").into_iter().zip(
+                    string_column(batch, "import_path")
+                        .into_iter()
+                        .zip(string_column(batch, "identifier_name"))
+                        .map(|(path, name)| format!("{path}/{name}")),
+                )
             })
             .filter(|(source, target)| {
+                let family = detect_language_from_path(source).map(|l| l.family());
                 changed_paths.contains(source.as_str())
                     && files.iter().any(|f| {
-                        f.decision != Decision::Parse && import_mentions(target, stem(&f.path))
+                        f.decision != Decision::Parse
+                            && detect_language_from_path(&f.path).map(|l| l.family()) == family
+                            && import_mentions(target, stem(&f.path))
                     })
             })
             .map(|(source, _)| source)
