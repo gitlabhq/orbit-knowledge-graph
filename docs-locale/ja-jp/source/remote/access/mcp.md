@@ -16,15 +16,13 @@ title: MCPを使用してOrbitにアクセスする
 
 {{< history >}}
 
-- GitLab 18.10で`knowledge_graph`という名前の[機能フラグ](https://docs.gitlab.com/administration/feature_flags/)とともに[導入](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676)されました。デフォルトでは無効です。この機能は[実験的機能](https://docs.gitlab.com/policy/development_stages_support/#experiment)です。
+- GitLab 18.10で`knowledge_graph`[機能フラグ](https://docs.gitlab.com/administration/feature_flags/)とともに[導入](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676)されました。デフォルトでは無効です。この機能は[実験的機能](https://docs.gitlab.com/policy/development_stages_support/#experiment)です。
 - GitLab 19.1で[ベータ版](https://docs.gitlab.com/policy/development_stages_support/#beta)に[変更](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676)されました。
 
 {{< /history >}}
 
 > [!flag]
-> この機能の利用可否は機能フラグによって制御されています。
-> 詳細については、履歴を参照してください。
-> この機能はテスト目的で利用可能ですが、本番環境での使用には対応していません。
+> この機能の利用可否は機能フラグによって制御されています。詳細については、履歴を参照してください。この機能はテスト目的で利用可能ですが、本番環境での使用には対応していません。
 
 GitLab OrbitはMCP対応のAIエージェントがGitLabのナレッジグラフに対してGitLab Orbitコマンドを検出・実行できる2つのMCPツールを公開しています。Claude Code、OpenAI Codex、またはModel Context Protocolをサポートするその他のツールと組み合わせて使用できます。
 
@@ -46,7 +44,7 @@ GitLab OrbitはMCP対応のAIエージェントがGitLabのナレッジグラフ
 
 | コマンド | 説明 |
 |---------|-------------|
-| `query_graph` | OrbitクエリDSLを使用してグラフクエリを実行します。 |
+| `query_graph` | GitLab OrbitクエリDSLを使用してグラフクエリを実行します。 |
 | `get_graph_schema` | 現在のスキーマ（すべてのノードタイプ、プロパティ、リレーションシップタイプ）を取得します。 |
 | `get_query_dsl` | `query_graph` JSONのDSL文法とバージョンを返します。 |
 | `get_response_format` | `query_graph`レスポンスのJSONスキーマとバージョンを返します。 |
@@ -55,8 +53,7 @@ GitLab OrbitはMCP対応のAIエージェントがGitLabのナレッジグラフ
 
 MCPクライアントが`https://gitlab.com/api/v4/orbit/mcp`を指すように設定します。
 
-**Claude Code**は組み込みのHTTPトランスポートを使用してOrbitエンドポイントをサポートしています。
-次のコマンドで登録します:
+**Claude Code**は組み込みのHTTPトランスポートを使用してGitLab Orbitエンドポイントをサポートしています。次のコマンドで登録します:
 
 ```shell
 claude mcp add --transport http gitlab-orbit https://gitlab.com/api/v4/orbit/mcp
@@ -67,7 +64,7 @@ claude mcp add --transport http gitlab-orbit https://gitlab.com/api/v4/orbit/mcp
 > [!note]
 > Claude CodeはHTTPで直接接続します。Claude Codeで`npx mcp-remote`を使用しないでください。エンドポイントをstdioプロセスでラップするため、組み込みトランスポートと競合し、「Failed to connect」エラーが発生します。代わりに上記の`claude mcp add --transport http`コマンドを使用してください。
 
-一部のクライアントはローカルのstdio MCPサーバーのみをサポートしています。そのような場合は、[`mcp-remote`](https://www.npmjs.com/package/mcp-remote)を使用してOrbitエンドポイントをローカルコマンドとしてラップします。
+一部のクライアントはローカルのstdio MCPサーバーのみをサポートしています。そのような場合は、[`mcp-remote`](https://www.npmjs.com/package/mcp-remote)を使用してGitLab Orbitエンドポイントをローカルコマンドとしてラップします。
 
 **Cursor、Codex、およびその他のJSON設定クライアント** — エージェントのMCP設定に以下を追加します:
 
@@ -98,7 +95,7 @@ claude mcp add --transport http gitlab-orbit https://gitlab.com/api/v4/orbit/mcp
 > [!note]
 > opencodeでは`"type": "local"`が必要で、コマンドと引数を単一の配列にまとめて指定します。`args`フィールドを別途指定したり`type`を省略したりすると、`ConfigInvalidError`が発生します。
 
-**Gemini CLI** — ネイティブHTTPトランスポートでOrbitエンドポイントをサポートしています。`~/.gemini/settings.json`に以下を追加します:
+**Gemini CLI** — ネイティブHTTPトランスポートでGitLab Orbitエンドポイントをサポートしています。`~/.gemini/settings.json`に以下を追加します:
 
 ```json
 {
@@ -119,11 +116,9 @@ claude mcp add --transport http gitlab-orbit https://gitlab.com/api/v4/orbit/mcp
 `gemini mcp add gitlab-orbit https://gitlab.com/api/v4/orbit/mcp -t http -s user`で生成した後、`oauth.scopes`ブロックを手動で追加することもできます。
 
 > [!note]
-> ネイティブHTTP MCPクライアントは`mcp_orbit` OAuthスコープを明示的にリクエストする必要があります。
-> `oauth.scopes: ["mcp_orbit"]`がない場合、GitLabに既にサインインしていても認証に失敗します。ネイティブHTTPトランスポートのクライアントで認証できない場合は、MCPサーバー設定にこのスコープを追加してください。
+> ネイティブHTTP MCPクライアントは`mcp_orbit` OAuthスコープを明示的にリクエストする必要があります。`oauth.scopes: ["mcp_orbit"]`がない場合、GitLabに既にサインインしていても認証に失敗します。ネイティブHTTPトランスポートのクライアントで認証できない場合は、MCPサーバー設定にこのスコープを追加してください。
 >
-> 古いGemini CLIの設定では`url` + `type: "http"`の代わりに`httpUrl`が使用されている場合があります。
-> `httpUrl`は引き続き機能しますが非推奨です。新しい設定では`url` + `type`を使用してください。
+> 古いGemini CLIの設定では `url`+`type: "http"` の代わりに`httpUrl`が使用されている場合があります。`httpUrl`は引き続き機能しますが非推奨です。新しい設定では`url` + `type`を使用してください。
 
 **Antigravity** — Antigravity IDEとCLIは`~/.gemini/config/mcp_config.json`にある同じMCP設定を読み込みます。Antigravityはリモートサーバーに対するMCP OAuthフローをまだサポートしていないため（ネイティブの`serverUrl`エントリはトークンなしで`initialize`を送信し、`Unauthorized`で失敗します）、`mcp-remote`でエンドポイントをラップします:
 
@@ -141,7 +136,7 @@ claude mcp add --transport http gitlab-orbit https://gitlab.com/api/v4/orbit/mcp
 > [!note]
 > ここでは`oauth`ブロックは不要です。`mcp-remote`がエンドポイントのOAuthメタデータから`mcp_orbit`スコープを検出し、初回使用時にブラウザを開いて認証を行います。
 
-認証には既存の`glab auth login`セッションを使用します。トークンのコピーや貼り付けは不要です。サポートされているクライアント: Claude Code、OpenCode、Cursor、Codex、Gemini CLI、Antigravity。
+認証には既存の`glab auth login`セッションを使用します。トークンのコピーや貼り付けは不要です。サポートされているクライアント:Claude Code、OpenCode、Cursor、Codex、Gemini CLI、Antigravity。
 
 > [!note]
 > 計画中の`glab orbit setup`サブコマンドにより、GitLab OrbitスキルのインストールとこのMCP設定の書き込みを1ステップで行えるようになります。リリースまでは、上記の手順に従ってMCPクライアントを手動で設定してください。
@@ -152,7 +147,7 @@ claude mcp add --transport http gitlab-orbit https://gitlab.com/api/v4/orbit/mcp
 
 AIエージェントで次のように質問します:
 
-> 「Orbitを使用して、グループ内で最近更新された5つのプロジェクトを一覧表示してください。」
+> 「GitLab Orbitを使用して、グループ内で最近更新された5つのプロジェクトを一覧表示してください。」
 
 プロジェクト名とパスを含む型付きの結果が返されれば、接続は成功しています。結果が返されない場合は、`glab auth status`を実行して認証状態を確認し、少なくとも1つのグループでGitLab Orbitが有効になっていることを確認してください。
 
@@ -171,14 +166,14 @@ MCP経由のクエリはGitLabクレジットを消費します。`query_graph`�
 > 「`query_graph`コマンドを使用して、グループ内でオープンなマージリクエストが最も多い10件のプロジェクトを検索してください。」
 
 影響範囲の分析:
-> 「Orbitを使用して、このプロジェクト内で`AuthService`を直接または推移的にインポートしているすべてのファイルを検索してください。」
+> 「GitLab Orbitを使用して、このプロジェクト内で`AuthService`を直接または推移的にインポートしているすべてのファイルを検索してください。」
 
 オンボーディング:
-> 「Orbitを使用して、このグループの主要なサービス、使用言語、および依存プロジェクトをマップしてください。」
+> 「GitLab Orbitを使用して、このグループの主要なサービス、使用言語、および依存プロジェクトをマップしてください。」
 
 エージェントはJSONクエリDSLを構成し、代わりに`query_graph`コマンドを呼び出します。結果を正確に制御したい場合は、生のJSONクエリを直接渡すこともできます。
 
-## 例: invoke_commandによるquery_graphの手動呼び出し {#example-manual-invokecommand-call-for-querygraph}
+## 例: invoke_commandによるquery_graphの手動呼び出し {#example-manual-invoke_command-call-for-query_graph}
 
 以下のクエリを`invoke_command`に`{"command_name": "query_graph", "parameters": {"query": ...}}`の形式で渡します:
 
@@ -205,7 +200,7 @@ MCP経由のクエリはGitLabクレジットを消費します。`query_graph`�
 
 ### Claude Codeで「Failed to connect」が表示される {#failed-to-connect-in-claude-code}
 
-Claude Codeには組み込みのHTTP MCPサポートがあります。`--transport http`の代わりに`npx mcp-remote`でOrbitを登録した場合、`mcp-remote`ラッパーがローカルのstdioプロセスを作成し、ネイティブトランスポートと競合します。
+Claude Codeには組み込みのHTTP MCPサポートがあります。`--transport http`の代わりに`npx mcp-remote`でGitLab Orbitを登録した場合、`mcp-remote`ラッパーがローカルのstdioプロセスを作成し、ネイティブトランスポートと競合します。
 
 修正するには、壊れた登録を削除してHTTPトランスポートで再登録します:
 

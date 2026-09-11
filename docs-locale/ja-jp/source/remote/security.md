@@ -2,7 +2,7 @@
 stage: Orbit
 group: Context Systems
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Orbit Remoteがデータを保護する方法（クエリに必要なロール、認可モデル、プログラムによるアクセスを含む）。
+description: GitLab Orbit Remoteがデータを保護する方法（クエリに必要なロール、認可モデル、プログラムによるアクセスを含む）。
 title: GitLab Orbit Remoteのセキュリティ
 ---
 
@@ -16,15 +16,13 @@ title: GitLab Orbit Remoteのセキュリティ
 
 {{< history >}}
 
-- `knowledge_graph`という名前の[機能フラグ](https://docs.gitlab.com/administration/feature_flags/)を使用して、GitLab 18.10で[導入](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676)されました。デフォルトでは無効です。この機能は[実験的機能](https://docs.gitlab.com/policy/development_stages_support/#experiment)です。
+- GitLab 18.10で`knowledge_graph`[機能フラグ](https://docs.gitlab.com/administration/feature_flags/)とともに[導入](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676)されました。デフォルトでは無効です。この機能は[実験的機能](https://docs.gitlab.com/policy/development_stages_support/#experiment)です。
 - GitLab 19.1で[ベータ版](https://docs.gitlab.com/policy/development_stages_support/#beta)に[変更](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676)されました。
 
 {{< /history >}}
 
 > [!flag]
-> この機能の利用可否は機能フラグによって制御されています。
-> 詳細については、履歴を参照してください。
-> この機能はテスト目的で利用可能ですが、本番環境での使用には対応していません。
+> この機能の利用可否は、機能フラグによって制御されます。詳細については、履歴を参照してください。この機能はテスト目的で利用可能ですが、本番環境での使用には対応していません。
 
 GitLab Orbitへのクエリから返されるレスポンスには、あなたのロールで参照可能な情報のみが含まれます。あなたまたはエージェントが、より高いユーザーロールを必要とするGitLabの機能にアクセスしようとした場合、関連情報はグラフに表示されません。
 
@@ -35,7 +33,7 @@ GitLab Orbitのアクセスは階層的です。トップレベルグループ�
 
 グループをクエリするには、そのグループに対してレポーター以上のロールが必要です。
 
-セキュリティデータへのアクセスには、セキュリティマネージャーロールが必要です。対象データは以下のとおりです。
+セキュリティデータへのアクセスには、セキュリティマネージャーロールが必要です。対象データは以下のとおりです:
 
 - 脆弱性
 - セキュリティの検出結果
@@ -54,7 +52,7 @@ GitLab Orbitのアクセスは階層的です。トップレベルグループ�
 
 GitLab Orbitは独自に権限を生成しません。GitLabが「誰が何を参照できるか」の信頼できる唯一の情報源であり、すべてのクエリはGitLabを通じて認可されます。
 
-アクセスは以下のレイヤーで制御されます。
+アクセスは以下のレイヤーで制御されます:
 
 - 組織の分離。クエリは常に自分の組織内のデータのみを参照します。
 - 階層的なロールベースのスコープ。結果は、必要なロールを持つグループ、サブグループ、およびプロジェクトに限定されます。兄弟グループはスコープ外となります。
@@ -68,6 +66,6 @@ GitLab Orbitは読み取り専用です。GitLabからの変更を読み取る�
 
 プログラムによるアクセスは、既存のGitLab認証を使用し、トークンオーナーがGitLabで参照できる範囲にスコープが限定されます。
 
-- REST API: `read_api`スコープを持つ標準（レガシー）パーソナルアクセストークンをBearerトークンとして送信します。きめ細かいパーソナルアクセストークンはサポートされていません。詳細については、[REST API](access/api.md)を参照してください。
+- REST API: `read_api`スコープを持つ標準（レガシー）パーソナルアクセストークンをBearerトークンとして送信します。詳細権限パーソナルアクセストークンはサポートされていません。詳細については、[REST API](access/api.md)を参照してください。
 - MCP: GitLab OAuth。ネイティブHTTPクライアントは`mcp_orbit`スコープをリクエストします。詳細については、[MCP](access/mcp.md)を参照してください。
 - GitLab Duo Agent Platform: 設定するトークンはありません。詳細については、[GitLab Duo Agent Platform](access/duo.md)を参照してください。
