@@ -1,5 +1,9 @@
 password: {{ requiredEnv "E2E_CH_DEFAULT_PASS" | quote }}
 
+# E2E_CH_REPLICAS=3 deploys a replicated cluster with embedded Keeper; the
+# default stays a single node.
+replicas: {{ env "E2E_CH_REPLICAS" | default "1" }}
+
 persistence:
   enabled: false
   size: 20Gi

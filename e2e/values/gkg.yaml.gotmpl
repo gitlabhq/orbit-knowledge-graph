@@ -120,6 +120,7 @@ healthCheck:
       memory: 128Mi
 
 {{ $chHost := env "E2E_CH_HOST" | default (printf "clickhouse.e2e-%s-clickhouse.svc.cluster.local" $sha) }}
+{{ $chReplicated := gt (env "E2E_CH_REPLICAS" | default "1" | atoi) 1 }}
 clickhouse:
   datalake:
     host: {{ $chHost }}
@@ -127,6 +128,7 @@ clickhouse:
     database: datalake
     user: gkg_siphon_reader
     ssl: false
+    replicated: {{ $chReplicated }}
   graph:
     host: {{ $chHost }}
     httpPort: 8123
@@ -134,6 +136,7 @@ clickhouse:
     user: gkg_writer
     readUser: gkg_reader
     ssl: false
+    replicated: {{ $chReplicated }}
 
 nats:
   url: "nats://nats.e2e-{{ $sha }}-nats.svc.cluster.local:4222"

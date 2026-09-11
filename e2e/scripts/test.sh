@@ -43,6 +43,9 @@ if [ -n "${E2E_ROBOT_IMAGE:-}" ]; then
 fi
 helm "${HELM_ARGS[@]}"
 
+"$E2E_DIR/scripts/ch-chaos.sh" indexing &
+CHAOS_PID=$!
+
 # Poll job status until terminal condition or timeout. Heartbeat keeps the
 # pipeline trace alive without the complexity (and orphaned-kubectl bugs) of
 # streaming `kubectl logs -f` from a background subshell.
@@ -62,6 +65,8 @@ while [ "$SECONDS" -lt "$TIMEOUT_SECONDS" ]; do
   log "Tests running... (${SECONDS}s elapsed)"
   sleep "$POLL_INTERVAL"
 done
+
+wait "$CHAOS_PID" || log "ch-chaos.sh indexing failed"
 
 log "Robot Framework output:"
 $KC logs job/"$JOB_NAME" -n "$NS_GKG" --tail=-1 2>&1 || true

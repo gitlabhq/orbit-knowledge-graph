@@ -1277,7 +1277,7 @@ e2e:
     - bash e2e/scripts/install-ci-tools.sh
     - kubectl config use-context "$KCTX"
   script:
-    - export E2E_SHA="${CI_COMMIT_SHORT_SHA}"
+    - export E2E_SHA="${CI_COMMIT_SHORT_SHA}${E2E_SUFFIX:-}"
     - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
     # Sourced: exports E2E_GKG_IMAGE/E2E_GKG_TAG and backgrounds the MR build
     # so `wait "$E2E_BUILD_PID"` below stays in this shell.
@@ -1306,9 +1306,9 @@ e2e:
     # Before teardown wipes the namespaces; failure-only (the dump costs ~3 min).
     - |
       if [ "$CI_JOB_STATUS" != "success" ]; then
-        E2E_SHA="${CI_COMMIT_SHORT_SHA}" bash e2e/scripts/dump-diagnostics.sh || true
+        E2E_SHA="${CI_COMMIT_SHORT_SHA}${E2E_SUFFIX:-}" bash e2e/scripts/dump-diagnostics.sh || true
       fi
-    - bash e2e/scripts/teardown.sh --sha="${CI_COMMIT_SHORT_SHA}" -y
+    - bash e2e/scripts/teardown.sh --sha="${CI_COMMIT_SHORT_SHA}${E2E_SUFFIX:-}" -y
   artifacts:
     when: always
     paths:
@@ -1316,3 +1316,19 @@ e2e:
     reports:
       junit: e2e/diagnostics/junit.xml
     expire_in: 3 days
+
+# Same suite against a 3-replica ClickHouse cluster with embedded Keeper. One
+# replica is killed during the schema migration and again during the run.
+# Runs on the e2e-ha schedule and by hand on merge requests.
+e2e-ha:
+  extends: e2e
+  variables:
+    E2E_CH_REPLICAS: "3"
+    E2E_SUFFIX: "-ha"
+  rules:
+    - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
+      when: never
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULE_ONLY == "e2e-ha"
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+      when: manual
+      allow_failure: true
