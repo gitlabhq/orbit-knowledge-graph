@@ -27,34 +27,34 @@ Use this page to troubleshoot errors you might encounter with
 Errors occur when running the `orbit` binary directly or through
 `glab orbit local`.
 
-### `no local graph found`
+## `no local graph found`
 
-**Symptoms:**
+Symptoms:
 
 ```plaintext
 Error: no local graph found at ~/.orbit/graph.duckdb. Run `orbit index` first.
 ```
 
-**Cause:** The repository has not been indexed yet, or the `--db` path you
+Cause: The repository has not been indexed yet, or the `--db` path you
 specified does not exist. On older versions of GitLab Orbit Local, this error was
 reported as `Table 'Definition' does not exist`.
 
-**Resolution:** Index the repository first:
+Resolution: Index the repository first:
 
 ```shell
 glab orbit local index /path/to/your/repo
 ```
 
-### `IO Error: Could not set lock on file`
+## `IO Error: Could not set lock on file`
 
-**Symptoms:** A command appears to pause briefly, then fails with an error
+Symptoms: A command appears to pause briefly, then fails with an error
 containing `Could not set lock on file`.
 
-**Cause:** Another `orbit` process is already running and holds the DuckDB
+Cause: Another `orbit` process is already running and holds the DuckDB
 write lock. GitLab Orbit retries automatically with exponential backoff, but fails if
 the lock is not released within the retry window.
 
-**Resolution:** Wait for the other process to finish, or stop it:
+Resolution: Wait for the other process to finish, or stop it:
 
 ```shell
 pkill orbit
@@ -62,27 +62,27 @@ pkill orbit
 
 Then retry your command.
 
-### `list_contains source_tags`
+## `list_contains source_tags`
 
-**Symptoms:** A query fails with an error containing `list_contains source_tags`.
+Symptoms: A query fails with an error containing `list_contains source_tags`.
 
-**Cause:** A known bug triggered by certain filter combinations that include
+Cause: A known bug triggered by certain filter combinations that include
 the `source_tags` property.
 
-**Resolution:** Remove any `source_tags` filter from your query and retry.
+Resolution: Remove any `source_tags` filter from your query and retry.
 
-### `error: unrecognized subcommand 'mcp'`
+## `error: unrecognized subcommand 'mcp'`
 
-**Symptoms:**
+Symptoms:
 
 ```plaintext
 error: unrecognized subcommand 'mcp'
 ```
 
-**Cause:** Your installed `orbit` binary predates the GitLab Orbit Local MCP
+Cause: Your installed `orbit` binary predates the GitLab Orbit Local MCP
 server.
 
-**Resolution:** Update the managed binary, then start the stdio MCP server:
+Resolution: Update the managed binary, then start the stdio MCP server:
 
 ```shell
 glab orbit --update

@@ -27,39 +27,37 @@ title: Troubleshoot GitLab Orbit Remote
 > This feature is available for testing, but not ready for production use.
 
 GitLab Orbit Remote errors occur when running `glab orbit remote` commands.
-GitLab Orbit Remote requires GitLab Premium or Ultimate and the `knowledge_graph`
-feature flag to be enabled on your instance.
 
-### Exit code 2
+## Exit code 2
 
-**Symptoms:** `glab orbit remote` commands exit with code 2.
+Symptoms: `glab orbit remote` commands exit with code 2.
 
-**Cause:** The `knowledge_graph` feature flag is not enabled for your
+Cause: The `knowledge_graph` feature flag is not enabled for your
 namespace or instance.
 
-**Resolution:** Contact your GitLab administrator to enable the
+Resolution: Contact your GitLab administrator to enable the
 `knowledge_graph` feature flag for your namespace.
 
-### Exit code 3
+## Exit code 3
 
-**Symptoms:** `glab orbit remote` commands exit with code 3.
+Symptoms: `glab orbit remote` commands exit with code 3.
 
-**Cause:** You are not authenticated with the GitLab CLI.
+Cause: You are not authenticated with the GitLab CLI.
 
-**Resolution:** Log in:
+Resolution: Log in:
 
 ```shell
 glab auth login
 ```
 
-### `insufficient_scope` on the MCP endpoint
+## `insufficient_scope` on the MCP endpoint
 
-**Symptoms:** Connecting to the GitLab Orbit MCP endpoint fails with
+Symptoms: Connecting to the GitLab Orbit MCP endpoint fails with
 `insufficient_scope`.
 
-**Cause:** The personal access token or OAuth token does not include the
+Cause: The personal access token or OAuth token does not include the
 `mcp_orbit` scope. The `read_api` scope alone is not sufficient for the MCP
 transport.
 
-**Resolution:** Create a new token with the `mcp_orbit` scope, or
+Resolution: Create a new token with the `mcp_orbit` scope, or
 re-authenticate to grant the additional scope.
