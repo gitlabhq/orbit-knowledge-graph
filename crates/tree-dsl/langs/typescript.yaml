@@ -24,6 +24,12 @@ stages:
           each: TYPES
           kind: __supertype
 
+      # Import alias: set import_specifier sym to real name, append __alias
+      - match: '(import_specifier name: $N alias: $A)'
+        set_text: '$N'
+      - match: '(import_specifier alias: $A)'
+        append: '(__alias @$A)'
+
   - name: retag
     rules:
       # a.b → __member(object, member)
@@ -70,11 +76,7 @@ stages:
       - match: '(import_statement (import_clause $N:identifier) source: (string $S:string_fragment))'
         replace: '(__import (__source @$S) (__source_path @$S) (__name @$N))'
 
-      # Alias: import_specifier has name + alias fields
-      - match: '(import_specifier name: $N alias: $A)'
-        set_text: '$N'
-      - match: '(import_specifier alias: $A)'
-        append: '(__alias @$A)'
+
 
   - name: classify
     rules:
@@ -88,8 +90,6 @@ stages:
       - match: '(function_declaration)'
         append: '(__deftype "Function") (__scope)'
       - match: '(method_definition)'
-        append: '(__deftype "Function") (__scope)'
-      - match: '(arrow_function)'
         append: '(__deftype "Function") (__scope)'
       - match: '(generator_function_declaration)'
         append: '(__deftype "Function") (__scope)'
