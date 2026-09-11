@@ -25,7 +25,9 @@ impl CircuitBreakingClickHouseClient {
     }
 
     pub async fn execute(&self, sql: &str) -> Result<(), ClickHouseError> {
-        self.query(sql).execute().await
+        self.breaker
+            .call_transient(|| self.client.execute(sql))
+            .await
     }
 
     pub async fn query_arrow(&self, sql: &str) -> Result<Vec<RecordBatch>, ClickHouseError> {

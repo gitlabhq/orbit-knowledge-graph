@@ -72,22 +72,38 @@ where
 
 /// A `Replicated` database replicates DDL only; data needs `Replicated*MergeTree` engines.
 fn replicate_merge_tree_engines(sql: &str) -> String {
-    const MARKER: &str = "ENGINE = ";
+    let lower = sql.to_ascii_lowercase();
+    let bytes = sql.as_bytes();
+    let is_word = |b: u8| b.is_ascii_alphanumeric() || b == b'_';
     let mut result = String::with_capacity(sql.len() + 32);
-    let mut remaining = sql;
-    while let Some(index) = remaining.find(MARKER) {
-        let (head, tail) = remaining.split_at(index + MARKER.len());
-        result.push_str(head);
-        let word_end = tail
+    let mut cursor = 0;
+    while let Some(found) = lower[cursor..].find("engine") {
+        let start = cursor + found;
+        let mut index = start + "engine".len();
+        let standalone = start == 0 || !is_word(bytes[start - 1]);
+        while index < bytes.len() && bytes[index].is_ascii_whitespace() {
+            index += 1;
+        }
+        if !standalone || bytes.get(index) != Some(&b'=') {
+            result.push_str(&sql[cursor..index]);
+            cursor = index;
+            continue;
+        }
+        index += 1;
+        while index < bytes.len() && bytes[index].is_ascii_whitespace() {
+            index += 1;
+        }
+        result.push_str(&sql[cursor..index]);
+        let word_end = sql[index..]
             .find(|c: char| !c.is_alphanumeric() && c != '_')
-            .unwrap_or(tail.len());
-        let engine = &tail[..word_end];
+            .map_or(sql.len(), |end| index + end);
+        let engine = &sql[index..word_end];
         if engine.ends_with("MergeTree") && !engine.starts_with("Replicated") {
             result.push_str("Replicated");
         }
-        remaining = tail;
+        cursor = index;
     }
-    result.push_str(remaining);
+    result.push_str(&sql[cursor..]);
     result
 }
 
@@ -461,7 +477,10 @@ impl ArrowQuery {
     }
 
     pub async fn execute(self) -> Result<(), ClickHouseError> {
-        retry_quorum_conflicts(self.retry_quorum_conflicts, || async {
+        if !self.retry_quorum_conflicts {
+            return self.inner.execute().await.map_err(ClickHouseError::Query);
+        }
+        retry_quorum_conflicts(true, || async {
             self.inner
                 .clone()
                 .execute()
@@ -758,6 +777,22 @@ mod tests {
              CREATE TABLE d (x Int64) ENGINE = Dictionary(dict);\n\
              CREATE TABLE r (x Int64) ENGINE = ReplicatedMergeTree ORDER BY x"
         );
+    }
+
+    #[test]
+    fn replicated_ddl_matches_any_engine_spelling() {
+        assert_eq!(
+            replicate_merge_tree_engines("CREATE TABLE t (x Int64) engine=MergeTree ORDER BY x"),
+            "CREATE TABLE t (x Int64) engine=ReplicatedMergeTree ORDER BY x"
+        );
+        assert_eq!(
+            replicate_merge_tree_engines(
+                "CREATE TABLE t (x Int64) Engine  =\n  SummingMergeTree() ORDER BY x"
+            ),
+            "CREATE TABLE t (x Int64) Engine  =\n  ReplicatedSummingMergeTree() ORDER BY x"
+        );
+        let untouched = "CREATE TABLE t (engine String, x Int64) ENGINE = Null; SELECT engine FROM system.tables WHERE engine = 'MergeTree'";
+        assert_eq!(replicate_merge_tree_engines(untouched), untouched);
     }
 
     #[test]
