@@ -1,22 +1,24 @@
 # yaml-language-server: $schema=../schemas/setup.schema.json
-# Every string `orbit setup` writes into an assistant's files: the managed instruction block, the
-# two hook nudges, and the `template_vars` that fill `{{name}}` placeholders in the templates
-# assistants declare.
 instructions: |
   ## Orbit
 
-  Prefer Orbit for discovering, inspecting, and before editing repository code in any checkout instead of raw Bash.
+  Orbit first for code.
 
-  - Find definitions with `{{orbit}} grep "<terms>"` without filters. Search one concept per query; multiword identifiers are fine. Results list `fqn`, `kind`, and `loc`.
-  - `{{orbit}} context` is the best way to read code. `{{orbit}} context --file <path>` prints a file overview with imports and definition signatures instead of every line; `{{orbit}} context "<fqn>"` prints full bodies. Use these instead of `cat`, `head`, `sed -n`, or the Read tool for code. Pass `--repo <path>` when inspecting another repository.
-  - For weak or unmatched terms, try the code's identifier (e.g. "throttle" → "rateLimit"). For too many hits, narrow with `--path <dir-or-glob>` (repeatable) or `--kind Class,Method` (one comma-separated list).
-  - Trace relationships with `{{orbit}} context "<fqn>" --related`. Lines show direction (`<--` incoming, `-->` outgoing) and edge kind, so callers are incoming `calls`. `--tests` expands test connections otherwise shown as counts.
-  - `grep` includes source for three or fewer matches; broader results include a copyable `context` command. Name/path matches do not prove a code relationship or dataflow.
-  - Answers directly from the graph should name the mechanism and cite `file:line`. Skip question restatements and search narration.
+  - Find: `{{orbit}} grep "<one concept>"`. Start unfiltered. Miss? Try the code's identifier. Too broad? Add `--path <dir-or-glob>` or `--kind Class,Method`.
+  - Read: `{{orbit}} context "<fqn>"`. Map/imports: `{{orbit}} context --file <path>`. Other repo: `--repo <path>`.
+  - Callers: `{{orbit}} context "<fqn>" --related`. Incoming `<--` + `calls` = caller. `--tests` shows hidden tests.
+  - Edit from returned source. Numbered lines are verbatim; strip `NN|`. Need a body or test helper? Fetch it with `context`. No whole-file rereads just to edit.
+  - No piping Orbit output through `head`, `sed`, or other truncation. `grep` budgets itself. Narrow targets; use supplied `context` commands for more source.
+  - Raw tools: literal searches, non-code, or missing/unreliable Orbit source only.
+  - Names are not dataflow. Missing edges prove nothing. Check source. Answer mechanism + `file:line`; skip search narration.
 
 nudge_search: |
-  Prefer `{{orbit}} grep "<terms>"` for definition searches. Inspect known targets directly with `{{orbit}} context "<fqn>"` or `{{orbit}} context --file <path>`.
+  Find: `{{orbit}} grep "<terms>"`. Callers: `{{orbit}} context "<fqn>" --related`. Text matches are not calls. No `head`.
+nudge_usage: |
+  Callers/connections: `{{orbit}} context "{{term}}" --related`. Definition: `{{orbit}} grep "{{term}}"`.
+nudge_in_file: |
+  Map/imports: `{{orbit}} context --file={{path}}`. Find: `{{orbit}} grep "{{term}}" --path {{path}}`. Reuse returned source.
 nudge_read: |
-  Prefer `{{orbit}} context "<fqn>"` or `{{orbit}} context --file <path>` for repository code. Do not search first for a known target or retrieve source Orbit already supplied. Use `read` for non-code files, unavailable index coverage, or when Orbit cannot reliably return current working-tree source.
+  Map/imports: `{{orbit}} context --file <path>`. Body/helper: `{{orbit}} context "<fqn>"`. Strip `NN|`; edit. No whole-file rereads or `head`. Raw reads only for non-code or missing/unreliable Orbit source.
 template_vars:
   reminder: "[orbit] when a graph lookup would help, run {{orbit}} grep"

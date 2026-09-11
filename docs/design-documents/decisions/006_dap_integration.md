@@ -188,7 +188,13 @@ agent a shell get Orbit this way for free; the MCP path exists for the
 surfaces that do not.
 
 Orbit Local exposes code discovery through `grep` and inspection through
-`context`. `grep` is search only. `context <fqn>` prints bodies; with
+`context`. `grep` returns the top ten ranked matches without parent or file quotas.
+It includes source for the first five matches regardless of confidence, with exact identifiers first,
+within a shared 24,000-character output budget. Batched queries and path
+listings share that cap. After result listings, the remaining space is divided
+equally among the selected matches. Long bodies stop at a line boundary with a
+truncation notice and a `context` command.
+`grep` has no `--limit` flag. `context <fqn>` prints bodies; with
 `--related` it lists every connection of the same targets instead, with
 direction and edge kind on each line. `--file` and `--kind` narrow the target
 in both modes.
@@ -214,9 +220,9 @@ DuckDB transaction. Directory rows are deduplicated; empty directories are remov
 
 Any parser error, skip, fault, or unstable source aborts publication of the changed
 set. Previous definitions and fingerprints remain intact. On failure, `context`
-and automatic source output from `grep` show full current source labeled
-`ranges=unverified` rather than use stale ranges. Unsupported files also use this
-fallback. Test code is included.
+shows full current source labeled `ranges=unverified` rather than use stale ranges.
+`grep` uses the same label and truncates the current file to its source budget,
+with a `context` command for the full file. Unsupported files also use this fallback. Test code is included.
 
 Subset parsing only resolves relationships between files in the same parse run,
 so refresh widens the run to neighbors: indexed files whose recorded imports

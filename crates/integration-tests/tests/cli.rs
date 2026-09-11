@@ -1309,22 +1309,77 @@ fn context_file_gives_an_overview_and_names_give_bodies() {
 }
 
 #[test]
-fn grep_includes_source_only_for_three_or_fewer_total_matches() {
+fn grep_shares_its_budget_across_distinct_bodies_and_keeps_context_hints() {
     let (repo, data) = context_repo();
-    for count in [3, 4] {
-        let source: String = (1..=count)
-            .map(|n| format!("pub fn needle_{n}() {{}}\n"))
-            .collect();
-        std::fs::write(repo.path().join("src/lib.rs"), source).unwrap();
-        let (output, stderr, ok) = orbit(
-            repo.path(),
-            data.path(),
-            &["grep", "needle", "--limit", "3"],
-        );
-        assert!(ok, "{stderr}");
-        assert_eq!(output.contains("|pub fn needle_"), count == 3, "{output}");
-        assert_eq!(output.contains("Candidate context:"), count > 3, "{output}");
+    let line = "    consume('αβγδεζηθικλμνξοπρστυφχψω')\n";
+    for n in 0..7 {
+        let name = if n == 6 {
+            "needle".into()
+        } else {
+            format!("needle_{n}")
+        };
+        std::fs::write(
+            repo.path().join(format!("src/case_{n}.py")),
+            format!("def {name}():\n{}", line.repeat(800)),
+        )
+        .unwrap();
     }
+    for (args, count) in [
+        (vec!["grep", "needle", "--path", "src/case_6.py"], 1),
+        (vec!["grep", "needle", "needle", "hello"], 5),
+    ] {
+        let (output, stderr, ok) = orbit(repo.path(), data.path(), &args);
+        assert!(ok, "{stderr}");
+        let blocks: Vec<_> = output
+            .split("\n\n")
+            .filter(|block| block.contains("|def needle"))
+            .collect();
+        assert_eq!(blocks.len(), count, "{output}");
+        assert_eq!(
+            blocks
+                .iter()
+                .map(|block| block.lines().next().unwrap())
+                .collect::<BTreeSet<_>>()
+                .len(),
+            count
+        );
+        assert!(blocks[0].contains("|def needle():"), "{output}");
+        let lengths: Vec<_> = blocks
+            .iter()
+            .map(|block| block.matches("|    consume(").count())
+            .collect();
+        assert!(
+            lengths.iter().max().unwrap() - lengths.iter().min().unwrap() <= 1,
+            "{output}"
+        );
+        for block in blocks {
+            assert!(
+                (16_000 / count..=24_000 / count).contains(&block.chars().count()),
+                "{output}"
+            );
+            assert!(block.contains("Source truncated. Context:"), "{output}");
+            assert!(
+                block
+                    .lines()
+                    .filter(|s| s.contains("|    consume("))
+                    .all(|s| s.split_once('|').unwrap().1 == line.trim_end()),
+                "{output}"
+            );
+        }
+        assert!(output.chars().count() <= 24_000, "{output}");
+    }
+    let (output, stderr, ok) = orbit(
+        repo.path(),
+        data.path(),
+        &[&["grep"][..], &["needle"; 100]].concat(),
+    );
+    assert!(ok, "{stderr}");
+    assert!(output.chars().count() <= 24_000, "{output}");
+    assert!(
+        output.contains("Output budget reached")
+            && output.contains("Candidate context: orbit context --repo="),
+        "{output}"
+    );
 }
 
 #[test]

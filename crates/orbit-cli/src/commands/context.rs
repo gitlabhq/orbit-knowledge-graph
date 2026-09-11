@@ -123,39 +123,101 @@ pub(crate) fn run(target: crate::ContextArgs) -> Result<()> {
     Ok(())
 }
 
-pub(crate) const INLINE_BODY_LINES: usize = 120;
-
 pub(crate) fn render_bodies(
     client: &duckdb_client::DuckDbClient,
     git: &workspace::GitInfo,
     defs: &[Def],
+    max_chars: usize,
+    command: &str,
 ) -> Result<String> {
     let sources = workspace::source_fingerprints(client, git.project_id)?;
+    let mut files = BTreeMap::new();
     let mut out = String::new();
-    for (file, file_defs) in outline(defs) {
-        let content = std::fs::read_to_string(git.repo_path.join(&file))
-            .with_context(|| format!("failed to read {file}"))?;
+    let per_body = max_chars.checked_div(defs.len()).unwrap_or(0);
+    for def in defs {
+        if !files.contains_key(&def.file) {
+            let content = std::fs::read_to_string(git.repo_path.join(&def.file))
+                .with_context(|| format!("failed to read {}", def.file))?;
+            let verified =
+                sources.get(&def.file) == Some(&ontology::migrations::sha256_hex(&content));
+            files.insert(def.file.clone(), (content, verified));
+        }
+        let (content, verified) = &files[&def.file];
         let lines: Vec<&str> = content.lines().collect();
-        let (short, long): (Vec<Def>, Vec<Def>) = file_defs
-            .into_iter()
-            .partition(|d| d.end.saturating_sub(d.start) < INLINE_BODY_LINES);
-        if !out.is_empty() {
-            out.push('\n');
-        }
-        if sources.get(&file) != Some(&ontology::migrations::sha256_hex(&content)) {
-            render_unverified(&mut out, &file, &lines)?;
-            continue;
-        }
-        render(&mut out, &short, &lines)?;
-        if !long.is_empty() {
-            let members = definitions_in_file(client, git, &file)?;
-            if !short.is_empty() {
-                out.push('\n');
-            }
-            render_outline(&mut out, &long, &members, &lines)?;
-        }
+        let target = format!("{command} -- {}", crate::commands::shell_quote(&def.fqn));
+        out.push_str(&render_excerpt(def, &lines, *verified, per_body, &target)?);
     }
     Ok(out)
+}
+
+fn render_excerpt(
+    def: &Def,
+    lines: &[&str],
+    verified: bool,
+    max_chars: usize,
+    target: &str,
+) -> Result<String> {
+    let verified = verified && def.start > 0 && def.end >= def.start && def.end <= lines.len();
+    let (start, end) = if verified {
+        (def.start, def.end)
+    } else {
+        (1, lines.len())
+    };
+    let mut block = String::from("\n");
+    if lines.is_empty() || lines_fit(lines, start, end, max_chars) {
+        if verified {
+            render(&mut block, std::slice::from_ref(def), lines)?;
+        } else {
+            render_unverified(&mut block, &def.file, lines)?;
+        }
+        if block.chars().count() <= max_chars {
+            return Ok(block);
+        }
+        block.truncate(1);
+    }
+    if verified {
+        render_header(&mut block, def)?;
+    } else {
+        writeln!(
+            block,
+            "{}  source=working-tree  ranges=unverified",
+            def.file
+        )?;
+    }
+    let hint = format!("Source truncated. Context: {target}\n");
+    let Some(mut remaining) = max_chars.checked_sub(block.chars().count() + hint.chars().count())
+    else {
+        return Ok(String::new());
+    };
+    for n in start..=end {
+        if !lines_fit(lines, n, n, remaining) {
+            break;
+        }
+        let before = block.len();
+        write_lines(&mut block, lines, n, n)?;
+        remaining -= block[before..].chars().count();
+    }
+    block.push_str(&hint);
+    Ok(block)
+}
+
+fn lines_fit(lines: &[&str], start: usize, end: usize, mut remaining: usize) -> bool {
+    if start == 0 || end < start || end > lines.len() {
+        return false;
+    }
+    for n in start..=end {
+        let chars = lines[n - 1]
+            .chars()
+            .take(remaining.saturating_add(1))
+            .count()
+            + n.to_string().len()
+            + "|\n".len();
+        let Some(rest) = remaining.checked_sub(chars) else {
+            return false;
+        };
+        remaining = rest;
+    }
+    true
 }
 
 fn render_unverified(out: &mut String, file: &str, lines: &[&str]) -> std::fmt::Result {
@@ -212,11 +274,7 @@ pub(crate) fn render_outline(
         if i > 0 {
             out.push('\n');
         }
-        writeln!(
-            out,
-            "{}  [{}]  {}:{}-{}",
-            def.fqn, def.kind, def.file, def.start, def.end
-        )?;
+        render_header(out, def)?;
         write_signature(out, lines, def.start, def.end)?;
         let mut covered_until = 0;
         for member in members.iter().filter(|m| m != &def && belongs_to(def, m)) {
@@ -256,7 +314,7 @@ fn write_signature(out: &mut String, lines: &[&str], start: usize, end: usize) -
         }
     }
     if last < end {
-        writeln!(out, "{}|…", last + 1)?;
+        writeln!(out, "… signature continues")?;
     }
     Ok(())
 }
@@ -284,14 +342,18 @@ pub(crate) fn render(out: &mut String, defs: &[Def], lines: &[&str]) -> std::fmt
             out.push('\n');
         }
         prev_single_line = single_line;
-        writeln!(
-            out,
-            "{}  [{}]  {}:{}-{}",
-            def.fqn, def.kind, def.file, def.start, def.end
-        )?;
+        render_header(out, def)?;
         write_lines(out, lines, def.start, def.end)?;
     }
     Ok(())
+}
+
+fn render_header(out: &mut String, def: &Def) -> std::fmt::Result {
+    writeln!(
+        out,
+        "{}  [{}]  {}:{}-{}",
+        def.fqn, def.kind, def.file, def.start, def.end
+    )
 }
 
 fn write_lines(out: &mut String, lines: &[&str], start: usize, end: usize) -> std::fmt::Result {
@@ -314,6 +376,24 @@ mod tests {
             start,
             end,
         }
+    }
+
+    #[test]
+    fn excerpts_obey_unicode_and_line_boundaries() {
+        let long_line = "é".repeat(300);
+        let lines = ["fn large() {", long_line.as_str(), "}"];
+        let definition = def("m::large", "Function", 1, 3);
+        let target = "orbit context -- 'm::large'";
+        let full = render_excerpt(&definition, &lines, true, 1_000, target).unwrap();
+        assert_eq!(
+            render_excerpt(&definition, &lines, true, full.chars().count(), target).unwrap(),
+            full
+        );
+        let short = render_excerpt(&definition, &lines, true, 180, target).unwrap();
+        assert!(short.chars().count() <= 180 && !short.contains('é'));
+        assert!(short.contains("Source truncated.") && short.contains(target));
+        let empty = render_excerpt(&definition, &[], false, 180, target).unwrap();
+        assert!(empty.contains("ranges=unverified") && !empty.contains("truncated"));
     }
 
     #[test]

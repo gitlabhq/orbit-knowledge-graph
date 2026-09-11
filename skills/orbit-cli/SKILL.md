@@ -13,7 +13,7 @@ description: >
   production data in GitLab (a project such as gitlab-org/gitlab, cross-project
   blast radius, contributor or merge-request aggregation) use the `orbit` skill;
   for single-entity GitLab lookups or write operations use `glab`.
-version: 0.5.9
+version: 0.5.10
 license: MIT
 metadata:
   audience: developers
@@ -73,7 +73,7 @@ wrapper flags, config keys, and pass-through rules:
 | Command | Purpose |
 |---|---|
 | `orbit index <PATH> [--stats] [--db P]` | Parse repos under `PATH` into DuckDB; prints graph stats as JSON |
-| `orbit grep [QUERY…] [--path P] [--kind K,K]` | Find definitions by name; queries with three or fewer matches include source automatically |
+| `orbit grep [QUERY…] [--path P] [--kind K,K]` | Find definitions by name with up to five source bodies in bounded output |
 | `orbit context [FQN…] [--file P] [--kind K,K]` | Read definition bodies by FQN, unique tail, or glob; `--file` alone prints a file overview |
 | `orbit context FQN --related [--tests]` | List every connection of a definition: calls both ways, imports, extends |
 | `orbit sql [QUERY] [-f FILE] [-F table\|json\|ndjson\|csv] [--all] [--repo P]` | Run read-only SQL scoped to the current checkout's commit; `-` reads from stdin, `--all` spans every indexed commit |
@@ -87,8 +87,8 @@ wrapper flags, config keys, and pass-through rules:
 
 Search one concept per `grep`, including multiword identifiers like `rate limit`.
 Inspect known targets directly with `context`; `--file` alone prints imports and
-definition signatures. Reuse returned source from `grep` or `context` for edits
-instead of reading it again with raw file tools. Stop exploring when the edit
+definition signatures. Numbered source lines are verbatim working-tree text;
+strip `NN|` and reuse them for edits instead of rereading the file with raw tools. Stop exploring when the edit
 point is clear; follow identifiers only for remaining questions and batch
 independent lookups. Use raw reads for non-code or unreliable index coverage.
 
@@ -110,8 +110,13 @@ incoming `calls` lines. Connections from test, fixture, and generated files are
 counted but hidden unless `--tests` is passed. Incoming lookups include uses
 through members.
 
-`grep` includes source automatically when a query has three or fewer matches.
-Broader results include a copyable `context` command for the top candidates.
+`grep` shows the top ten ranked matches without parent or file quotas. It includes
+source for the first five matches, including weak matches, with exact identifiers first.
+The whole response shares a 24,000-character budget, including batched queries.
+After result listings, the remaining space is divided equally among the selected
+matches. Long bodies stop at a line boundary with a truncation notice and a
+`context` command.
+Use `--path` or `--kind` to narrow results; `grep` has no `--limit` flag.
 
 `context` accepts several names or globs in one call. `--file` takes a
 repo-relative or absolute path inside the checkout. `--file` alone prints an
@@ -123,8 +128,9 @@ and accepts bare names; `--kind` narrows the selection.
 deleted files. Neighbors (files they import, that import them, or that share a
 relationship) are reparsed with them; other files are not. Successful refreshes update
 search results and definition ranges. Failed, unsupported, or unstable refreshes
-keep the previous definitions; definition reads return the full current file with
-`ranges=unverified`, and file overviews report that the outline is unavailable.
+keep the previous definitions. `context` definition reads return the full current
+file with `ranges=unverified`; `grep` uses the same label and truncates to its source budget.
+File overviews report that the outline is unavailable.
 Test code is included.
 
 File refresh reparses changed files together with their neighbors, so cross-file
