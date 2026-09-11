@@ -101,8 +101,8 @@ impl ActiveSchema {
         let mut target = match loader.active_version().await {
             Ok(version) => version,
             Err(error) => {
-                warn!(%error, "active version unknown until the key is written");
-                None
+                warn!(%error, "active version unknown; keeping the last installed snapshot");
+                self.installed().map(|snapshot| snapshot.migration_version)
             }
         };
         loop {
