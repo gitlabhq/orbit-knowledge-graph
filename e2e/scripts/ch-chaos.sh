@@ -38,8 +38,10 @@ for _ in $(seq 1 60); do
   sleep 2
 done
 $KC wait -n "$NS_CH" --for=condition=Ready "pod/$POD" --timeout=300s
+CATCH_UP_SQL="SELECT (SELECT count() FROM system.database_replicas WHERE is_readonly OR is_session_expired OR log_ptr < max_log_ptr) \
+  + (SELECT count() FROM system.replicas WHERE absolute_delay > 0 OR queue_size > 0 OR is_readonly OR is_session_expired)"
 for _ in $(seq 1 150); do
-  lagging=$($KC exec -n "$NS_CH" "$POD" -- sh -c 'clickhouse-client --user default --password "$CLICKHOUSE_PASSWORD" --query "SELECT count() FROM system.replicas WHERE absolute_delay > 0 OR queue_size > 0 OR is_readonly"' 2>/dev/null || echo unknown)
+  lagging=$($KC exec -n "$NS_CH" "$POD" -- sh -c "clickhouse-client --user default --password \"\$CLICKHOUSE_PASSWORD\" --query \"$CATCH_UP_SQL\"" 2>/dev/null || echo unknown)
   [[ "$lagging" == "0" ]] && { log "chaos: $POD rejoined and caught up at $(date -u +%T)"; exit 0; }
   sleep 2
 done

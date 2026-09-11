@@ -7,7 +7,7 @@ replicas: {{ $replicas }}
 # the cluster keeps its data across the pod kills in ch-chaos.sh.
 persistence:
   enabled: {{ gt $replicas 1 }}
-  size: 10Gi
+  size: 20Gi
 
 {{ if gt $replicas 1 }}
 resources:

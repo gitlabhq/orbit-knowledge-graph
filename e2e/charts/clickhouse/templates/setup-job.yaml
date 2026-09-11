@@ -44,7 +44,11 @@ spec:
               {{- range $i := until (int .Values.replicas) }}
               until clickhouse-client --host {{ $.Release.Name }}-{{ $i }}.{{ $headless }} --user default --password "$CLICKHOUSE_PASSWORD" --query "SELECT 1" >/dev/null 2>&1; do sleep 2; done
               {{- end }}
-              clickhouse-client --host {{ .Release.Name }} --user default --password "$CLICKHOUSE_PASSWORD" --multiquery < /setup/setup.sql
+              for attempt in $(seq 1 30); do
+                clickhouse-client --host {{ .Release.Name }} --user default --password "$CLICKHOUSE_PASSWORD" --multiquery < /setup/setup.sql && break
+                [ "$attempt" -lt 30 ] || exit 1
+                sleep 5
+              done
               echo "clickhouse setup complete"
           env:
             - name: CLICKHOUSE_PASSWORD

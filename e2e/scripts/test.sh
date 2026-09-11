@@ -66,7 +66,12 @@ while [ "$SECONDS" -lt "$TIMEOUT_SECONDS" ]; do
   sleep "$POLL_INTERVAL"
 done
 
-wait "$CHAOS_PID" || log "ch-chaos.sh indexing failed"
+CHAOS_FAILED=0
+if [ "$result" = "pass" ]; then
+  wait "$CHAOS_PID" || CHAOS_FAILED=1
+else
+  kill "$CHAOS_PID" 2>/dev/null || true
+fi
 
 log "Robot Framework output:"
 $KC logs job/"$JOB_NAME" -n "$NS_GKG" --tail=-1 2>&1 || true
@@ -89,10 +94,11 @@ for pod in $($KC get pods -n "$NS_GKG" -o jsonpath='{.items[*].metadata.name}' 2
     > "$DIAG_DIR/${GKG_NS_SHORT}-${pod}.log" || true
 done
 
-if [ "$result" = "pass" ]; then
+if [ "$result" = "pass" ] && [ "$CHAOS_FAILED" -eq 0 ]; then
   log "Tests passed"
   exit 0
 fi
+[ "$CHAOS_FAILED" -eq 0 ] || log "ch-chaos.sh indexing failed"
 
 log "Tests $result"
 

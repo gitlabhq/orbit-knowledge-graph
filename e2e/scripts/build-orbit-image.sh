@@ -8,6 +8,8 @@ if [ "$CI_COMMIT_BRANCH" = "$CI_DEFAULT_BRANCH" ]; then
   # Reuse multi-arch dev image published by docker-manifest.
   export E2E_GKG_IMAGE="${CI_REGISTRY_IMAGE}/gkg"
   export E2E_GKG_TAG="${DEV_PREFIX}-${CI_COMMIT_SHORT_SHA}"
+  docker manifest inspect "${E2E_GKG_IMAGE}:${E2E_GKG_TAG}" >/dev/null 2>&1 \
+    || { echo "${E2E_GKG_IMAGE}:${E2E_GKG_TAG} is not in the registry; the docker-manifest job for this commit has not published it"; exit 1; }
 else
   # MR: build a debug image inline for faster iteration.
   export E2E_GKG_IMAGE="${CI_REGISTRY_IMAGE}/gkg-e2e"
