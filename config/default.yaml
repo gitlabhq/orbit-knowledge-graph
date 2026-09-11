@@ -139,6 +139,7 @@ schedule:
     code-backfill:
       cron: "0 */1 * * * *"
       publish_window: 200000
+      stale_sweeps_per_tick: 10
     table-cleanup:
       cron: "0 0 3 * * 0"
     namespace-deletion:

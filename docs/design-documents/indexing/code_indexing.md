@@ -178,6 +178,8 @@ Pending projects are published in bounded batches rather than after every namesp
 
 These backfill requests omit `branch` and `commit_sha`. The handler resolves the default branch from the Rails internal API at processing time.
 
+A namespace whose every project is checkpointed is drained. Once per schema version, the backfill tick then tombstones the namespace's code rows that are older than their project's checkpoint (rows left by a previous version or by a run that died before checkpointing). The sweep runs inside the tick, so it is capped at `schedule.tasks.code-backfill.stale_sweeps_per_tick` namespaces per tick and the rest wait for later ticks; without the cap a fleet-wide re-index, which drains thousands of small namespaces within minutes, held dispatch for the length of that burst while indexers sat idle.
+
 ##### Handler
 
 The `CodeIndexingTaskHandler` runs in Indexer mode and subscribes to `CodeIndexingTaskRequest` messages from the `GKG_INDEXER` stream. It deserializes the JSON request and, if no branch was provided (e.g. from a namespace backfill), resolves the default branch from the Rails internal API. It then acquires a lock on the project + branch combination to prevent other workers from indexing the same branch concurrently.

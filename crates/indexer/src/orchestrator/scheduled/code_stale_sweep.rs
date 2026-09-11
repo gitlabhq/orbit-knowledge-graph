@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use chrono::Utc;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 use crate::checkpoint::CheckpointStore;
 use crate::clickhouse::ArrowClickHouseClient;
@@ -25,6 +25,7 @@ pub struct CodeStaleSweep {
     graph: ArrowClickHouseClient,
     checkpoint_store: Arc<dyn CheckpointStore>,
     statements: Vec<(String, String)>,
+    sweeps_per_tick: usize,
 }
 
 impl CodeStaleSweep {
@@ -32,6 +33,7 @@ impl CodeStaleSweep {
         graph: ArrowClickHouseClient,
         table_names: &CodeTableNames,
         checkpoint_store: Arc<dyn CheckpointStore>,
+        sweeps_per_tick: usize,
     ) -> Self {
         let checkpoint_table = prefixed_table_name(CODE_INDEXING_CHECKPOINT_TABLE, *SCHEMA_VERSION);
 
@@ -51,11 +53,13 @@ impl CodeStaleSweep {
             graph,
             checkpoint_store,
             statements,
+            sweeps_per_tick,
         }
     }
 
+    /// Capped per tick so a burst of drained namespaces cannot hold up the next dispatch ticks.
     pub async fn run_for_drained(&self, drained_paths: &[TraversalPath]) -> Result<(), TaskError> {
-        if drained_paths.is_empty() {
+        if drained_paths.is_empty() || self.sweeps_per_tick == 0 {
             return Ok(());
         }
         let swept: HashSet<String> = self
@@ -67,11 +71,29 @@ impl CodeStaleSweep {
             .map(|(key, _)| key)
             .collect();
 
-        for path in drained_paths {
-            if swept.contains(&namespace_checkpoint_key(path)) {
-                continue;
+        let pending: Vec<&TraversalPath> = drained_paths
+            .iter()
+            .filter(|path| !swept.contains(&namespace_checkpoint_key(path)))
+            .collect();
+        let attempted = pending.len().min(self.sweeps_per_tick);
+        let mut failed = 0usize;
+        for path in pending.iter().take(attempted) {
+            if let Err(error) = self.sweep_namespace(path).await {
+                failed += 1;
+                warn!(%path, %error, "post-backfill stale sweep failed, retrying on a later tick");
             }
-            self.sweep_namespace(path).await?;
+        }
+        if pending.len() > self.sweeps_per_tick {
+            info!(
+                pending = pending.len(),
+                cap = self.sweeps_per_tick,
+                "post-backfill stale sweeps deferred to later ticks"
+            );
+        }
+        if failed > 0 {
+            return Err(TaskError::new(format!(
+                "{failed} of {attempted} post-backfill stale sweeps failed"
+            )));
         }
         Ok(())
     }
@@ -284,7 +306,7 @@ mod tests {
         let store = Arc::new(crate::checkpoint::ClickHouseCheckpointStore::new(Arc::new(
             graph.clone(),
         )));
-        let sweep = CodeStaleSweep::new(graph, &names, store);
+        let sweep = CodeStaleSweep::new(graph, &names, store, 10);
         let tables: Vec<&str> = sweep.statements.iter().map(|(t, _)| t.as_str()).collect();
         assert_eq!(
             tables.len(),
