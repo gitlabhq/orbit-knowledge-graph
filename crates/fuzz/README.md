@@ -11,6 +11,15 @@ Fuzz testing for GKG using [Bolero](https://github.com/camshaft/bolero).
 | `fuzz_compile` | Unstructured byte input to `compile()` — tests JSON parsing edge cases |
 | `fuzz_compile_structured` | Structured JSON query generation via `FuzzQuery` `TypeGenerator` — generates valid/semi-valid queries that reach deeper compiler logic (normalization, lowering, optimization, security enforcement, codegen) |
 
+### Orbit query frontend
+
+| Target | What it exercises |
+|---|---|
+| `fuzz_gql` | Unstructured text into `compile()` with the Orbit query frontend; every failure must be client-safe |
+| `fuzz_gql_grammar` | Derivations of `query.pest` itself (`grammar::Grammar`), so the text is in the language by construction; the syntax tree must consume it or reject it with a lowering error, never a syntax error or pipeline invariant |
+
+`grammar::Grammar` parses the grammar with `pest_meta` and walks the rule AST. `Grammar::local_derivations` enumerates every decision vector inside one rule while the rest of the query takes the shortest path that reaches it; the compiler integration tests run this for every rule reachable from `Query`. The real parser decides whether a derivation is faithful: `gql::pair_outline` must return the same rule sequence the walk produced, which discards derivations that PEG ordered choice or greedy repetition would read differently. Identifiers in the minimal context come from a leaf override because the grammar's shortest name is the empty escaped name.
+
 ### Language parsers
 
 | Target | What it exercises |
@@ -36,6 +45,8 @@ With mise (recommended):
 ```sh
 mise fuzz:compile              # fuzz the query compiler (unstructured)
 mise fuzz:compile-structured   # fuzz the query compiler (structured)
+mise fuzz:gql                  # fuzz the Orbit query frontend (unstructured)
+mise fuzz:gql-grammar          # fuzz the Orbit query frontend (grammar derivations)
 mise fuzz:ruby                 # fuzz the Ruby parser
 mise fuzz:python               # fuzz the Python parser
 mise fuzz:typescript           # fuzz the TypeScript/JS parser

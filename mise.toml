@@ -62,6 +62,14 @@ description = "Fuzz the query compiler (compile JSON → SQL pipeline)"
 run = "cargo +nightly bolero test fuzz_compile_structured -p orbit-fuzz"
 description = "Fuzz the query compiler with structured JSON query generation"
 
+[tasks."fuzz:gql"]
+run = "cargo +nightly bolero test fuzz_gql -p orbit-fuzz"
+description = "Fuzz the Orbit query frontend with unstructured text"
+
+[tasks."fuzz:gql-grammar"]
+run = "cargo +nightly bolero test fuzz_gql_grammar -p orbit-fuzz"
+description = "Fuzz the Orbit query frontend with derivations of its own grammar"
+
 [tasks."fuzz:ruby"]
 run = "cargo +nightly bolero test fuzz_ruby -p orbit-fuzz"
 description = "Fuzz the Ruby code parser"
