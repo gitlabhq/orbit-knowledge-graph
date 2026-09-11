@@ -104,10 +104,12 @@ fn validate_named_queries() {
     let ontology = ontology::Ontology::load_embedded()
         .unwrap_or_else(|e| panic!("embedded ontology failed to load: {e}"));
 
-    let queries = named_queries::NamedQueries::load_from_dir(&dir)
-        .unwrap_or_else(|e| panic!("named queries failed to load: {e}"));
     let ctx = compiler::SecurityContext::new(1, vec!["1/".into()])
         .expect("static security context must be valid");
+
+    let queries = named_queries::NamedQueries::load_from_dir(&dir)
+        .unwrap_or_else(|e| panic!("named queries failed to load: {e}"));
+
     for query in queries.iter() {
         let rendered = query
             .render_example()

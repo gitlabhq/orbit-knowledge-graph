@@ -14,7 +14,7 @@ pub(crate) struct ServingSchema {
     pub migration_version: u32,
     pub expected_table_names: Vec<String>,
     pub named_queries: Arc<NamedQueries>,
-    pub path_resolver: Option<Arc<PathResolver>>,
+    pub path_resolver: Arc<PathResolver>,
 }
 
 impl ServingSchema {
@@ -46,7 +46,7 @@ impl ServingSchema {
             migration_version,
             expected_table_names,
             named_queries: Arc::new(named_queries),
-            path_resolver: Some(path_resolver),
+            path_resolver,
         })
     }
 }

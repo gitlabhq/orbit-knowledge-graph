@@ -103,9 +103,7 @@ impl QueryPipelineService {
         if let Some(broker) = &self.cache_broker {
             server_extensions.insert(Arc::clone(broker));
         }
-        if let Some(resolver) = &schema.path_resolver {
-            server_extensions.insert(Arc::clone(resolver));
-        }
+        server_extensions.insert(Arc::clone(&schema.path_resolver));
 
         let mut ctx = QueryPipelineContext {
             query_json: query_json.to_string(),
