@@ -167,7 +167,7 @@ fn create_config(host: &str, port: u16) -> ClickHouseConfiguration {
         username: TEST_USERNAME.to_string(),
         password: Some(TEST_PASSWORD.to_string()),
         session_settings: std::collections::HashMap::new(),
-        quorum_writes: false,
+        replicated: false,
         insert_settings: std::collections::HashMap::new(),
         profiling: orbit_server_config::AppConfig::embedded_defaults()
             .graph
@@ -321,7 +321,7 @@ async fn connection_failure_returns_error() {
         username: "default".to_string(),
         password: None,
         session_settings: std::collections::HashMap::new(),
-        quorum_writes: false,
+        replicated: false,
         insert_settings: std::collections::HashMap::new(),
         profiling: orbit_server_config::AppConfig::embedded_defaults()
             .graph

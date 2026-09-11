@@ -241,7 +241,7 @@ impl TestContext {
                     username: USERNAME.to_string(),
                     password: Some(PASSWORD.to_string()),
                     session_settings: std::collections::HashMap::new(),
-                    quorum_writes: false,
+                    replicated: false,
                     insert_settings: std::collections::HashMap::new(),
                     profiling: orbit_server_config::AppConfig::embedded_defaults()
                         .graph

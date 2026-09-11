@@ -167,7 +167,7 @@
         "profiling": {
           "$ref": "#/$defs/ProfilingConfig"
         },
-        "quorum_writes": {
+        "replicated": {
           "type": "boolean"
         },
         "session_settings": {
@@ -189,7 +189,7 @@
         "database",
         "url",
         "username",
-        "quorum_writes",
+        "replicated",
         "profiling"
       ]
     },

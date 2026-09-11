@@ -77,6 +77,42 @@ GitLab Orbit credentials for the instance that holds the database each one uses.
 The `gitlab_clickhouse_main_production` database exists after ClickHouse setup is complete. You create the
 `orbit` database when you set up GitLab Orbit. GitLab Orbit does not create it at startup.
 
+### High availability
+
+GitLab Orbit runs on a ClickHouse cluster with several replicas behind one load balancer. The cluster needs
+ClickHouse Keeper with a quorum of three nodes, at least two ClickHouse replicas, and an HTTP load balancer
+in front of the replicas. For the ClickHouse side, see
+[HA ClickHouse for GitLab Self-Managed](https://docs.gitlab.com/integration/clickhouse/?tab=HA+ClickHouse+for+GitLab+Self-Managed).
+
+Create both databases with the `Replicated` database engine, on the cluster:
+
+```sql
+CREATE DATABASE orbit ON CLUSTER '{cluster}'
+ENGINE = Replicated('/clickhouse/databases/orbit', '{shard}', '{replica}');
+```
+
+Then tell each writer that the cluster is replicated:
+
+| Component | Setting |
+|-----------|---------|
+| GitLab | Nothing. GitLab detects the `Replicated` database engine and creates replicated tables. |
+| Siphon | `connection_settings` with `insert_quorum: "auto"`, `insert_quorum_parallel: "0"`, and `async_insert: "0"`. See [Install Siphon](data-replication.md#install-siphon). |
+| GitLab Orbit | `clickhouse.datalake.replicated: true` and `clickhouse.graph.replicated: true` in the Helm values. |
+
+With the switch on, GitLab Orbit creates `Replicated*MergeTree` tables, writes with a majority quorum, reads
+with sequential consistency, and retries the two transient quorum errors. One replica can leave the cluster
+while indexing and queries continue. Leave the switch off on a single node and on ClickHouse Cloud.
+
+ClickHouse 26.7 and later reject the GitLab migrations that create `AggregatingMergeTree` tables with
+columns outside the sorting key. Set `allow_dimensions_outside_sorting_key` to `1` in the server
+`merge_tree` settings before you run the GitLab migrations on those releases:
+
+```xml
+<merge_tree>
+  <allow_dimensions_outside_sorting_key>1</allow_dimensions_outside_sorting_key>
+</merge_tree>
+```
+
 ### Sizing and settings
 
 Provision at least 8 CPU and 32 GiB of memory for ClickHouse. ClickHouse saturates 8 cores while the graph
