@@ -104,7 +104,7 @@ Put the request body in `request.json`:
     }],
     "limit": 10
   },
-  "format": "raw"
+  "response_format": "raw"
 }
 ```
 
