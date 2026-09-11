@@ -5,10 +5,10 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
+use duckdb_client::search::DuckDbSearch;
 use orbit_search::{RecallFilter, SearchVocab, content_words};
 
 use crate::commands::{context, fqn::Def, shell_quote};
-use local::LocalBackend;
 
 fn build_vocab<S: orbit_search::grep::GrepSource>(source: &S) -> Result<SearchVocab, S::Error> {
     use strum::IntoEnumIterator;
@@ -50,11 +50,18 @@ pub(crate) fn run(
     }
 
     let context_command = context_command(launcher, repo.as_deref(), db.as_deref());
-    let backend = LocalBackend::open(repo, db, &paths)?;
+    let (git, search) = local::open(repo, db, &paths)?;
 
     let mut out = std::io::stdout().lock();
     if queries.is_empty() {
-        return report_outline(&mut out, &backend, &paths, &filter, launcher);
+        return report_outline(
+            &mut out,
+            &search,
+            git.short_sha(),
+            &paths,
+            &filter,
+            launcher,
+        );
     }
     if !paths.is_empty() {
         writeln!(out, "path: {}", paths.join(" "))?;
@@ -63,14 +70,14 @@ pub(crate) fn run(
         writeln!(out, "kind: {}", filter.kinds.join(" "))?;
     }
 
-    let vocab = build_vocab(backend.search())?;
+    let vocab = build_vocab(&search)?;
     let per_query_limit = (limit / queries.len()).max(MIN_HITS_PER_QUERY.min(limit));
     for (i, query) in queries.iter().enumerate() {
         if i > 0 {
             writeln!(out)?;
         }
-        writeln!(out, "grep {:?} @ {}", query, backend.header())?;
-        let outcome = backend.grep(query, per_query_limit, &vocab, &filter)?;
+        writeln!(out, "grep {:?} @ {}", query, git.short_sha())?;
+        let outcome = search.grep(query, per_query_limit, &vocab, &filter)?;
         let typed: Vec<String> = query.split_whitespace().map(str::to_lowercase).collect();
         if outcome.terms != typed {
             writeln!(out, "terms: {}", outcome.terms.join(" "))?;
@@ -111,7 +118,7 @@ pub(crate) fn run(
             write!(
                 out,
                 "{}",
-                context::render_bodies(backend.search().client(), backend.git(), &defs)?
+                context::render_bodies(search.client(), &git, &defs)?
             )?;
         }
     }
@@ -132,16 +139,17 @@ fn def_from(row: &orbit_search::CorpusRow) -> Def {
 
 fn report_outline(
     out: &mut impl Write,
-    backend: &LocalBackend,
+    search: &DuckDbSearch,
+    header: &str,
     paths: &[String],
     filter: &RecallFilter,
     launcher: &str,
 ) -> Result<()> {
-    writeln!(out, "outline {} @ {}", paths.join(" "), backend.header())?;
+    writeln!(out, "outline {} @ {header}", paths.join(" "))?;
     if !filter.kinds.is_empty() {
         writeln!(out, "kind: {}", filter.kinds.join(" "))?;
     }
-    let rows = backend.search().list_corpus(filter)?;
+    let rows = search.list_corpus(filter)?;
     if rows.is_empty() {
         writeln!(
             out,

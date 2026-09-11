@@ -2,56 +2,23 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use duckdb_client::search::DuckDbSearch;
-use orbit_search::{GrepOutcome, RecallFilter, SearchVocab};
 
 use crate::workspace;
 
-pub(super) struct LocalBackend {
-    search: DuckDbSearch,
-    header: String,
-    git: workspace::GitInfo,
-}
-
-impl LocalBackend {
-    pub(super) fn open(
-        repo: Option<PathBuf>,
-        db: Option<PathBuf>,
-        paths: &[String],
-    ) -> Result<Self> {
-        let workspace::IndexedRepo { git, client } = workspace::open_indexed(repo, db)?;
-        Ok(Self {
-            search: DuckDbSearch::scoped(client, git.project_id, &git.commit_sha, paths)?,
-            header: git.short_sha().to_string(),
-            git,
-        })
-    }
-
-    pub(super) fn header(&self) -> &str {
-        &self.header
-    }
-
-    pub(super) fn git(&self) -> &workspace::GitInfo {
-        &self.git
-    }
-
-    pub(super) fn search(&self) -> &DuckDbSearch {
-        &self.search
-    }
-
-    pub(super) fn grep(
-        &self,
-        query: &str,
-        limit: usize,
-        vocab: &SearchVocab,
-        filter: &RecallFilter,
-    ) -> Result<GrepOutcome> {
-        self.search.grep(query, limit, vocab, filter)
-    }
+pub(super) fn open(
+    repo: Option<PathBuf>,
+    db: Option<PathBuf>,
+    paths: &[String],
+) -> Result<(workspace::GitInfo, DuckDbSearch)> {
+    let workspace::IndexedRepo { git, client } = workspace::open_indexed(repo, db)?;
+    let search = DuckDbSearch::scoped(client, git.project_id, &git.commit_sha, paths)?;
+    Ok((git, search))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use duckdb_client::search::DuckDbSearch;
+    use orbit_search::{RecallFilter, SearchVocab};
 
     struct TestGraph {
         client: duckdb_client::DuckDbClient,

@@ -89,16 +89,23 @@ pub fn open_indexed(repo: Option<PathBuf>, db: Option<PathBuf>) -> Result<Indexe
     let mut git = git_info(&top_level)
         .with_context(|| format!("failed to read git info for {}", top_level.display()))?;
 
-    let indexed_count = |client: &DuckDbClient| -> Result<i64> {
+    let indexed_branch = |client: &DuckDbClient| -> Result<Option<String>> {
         let batches = client.query_arrow_json(
-            "SELECT COUNT(*) AS n FROM _orbit_manifest WHERE project_id = ?1 AND commit_sha = ?2 AND status = 'indexed'",
+            "SELECT branch FROM _orbit_manifest WHERE project_id = ?1 AND commit_sha = ?2 AND status = 'indexed'",
             &[git.project_id.into(), git.commit_sha.clone().into()],
         )?;
-        Ok(duckdb_client::scalar_i64(&batches))
+        let branch = duckdb_client::string_column(&batches, "branch").pop();
+        anyhow::ensure!(
+            branch.is_some() || batches.iter().all(|b| b.num_rows() == 0),
+            "indexed branch is missing"
+        );
+        Ok(branch)
     };
 
     let mut client = crate::sql::open_graph(Some(db.clone()))?;
-    if indexed_count(&client)? == 0 {
+    git.branch = if let Some(branch) = indexed_branch(&client)? {
+        branch
+    } else {
         eprintln!(
             "current commit {} is not indexed — indexing {} first",
             git.short_sha(),
@@ -108,22 +115,13 @@ pub fn open_indexed(repo: Option<PathBuf>, db: Option<PathBuf>) -> Result<Indexe
         crate::index_collect(git.repo_path.clone(), 0, false, Some(db.clone()))
             .context("failed to index the repository")?;
         client = crate::sql::open_graph(Some(db.clone()))?;
-        if indexed_count(&client)? == 0 {
-            anyhow::bail!(
-                "indexing finished but commit {} is still not marked indexed",
+        indexed_branch(&client)?.with_context(|| {
+            format!(
+                "indexing finished but commit {} has no indexed branch",
                 git.commit_sha
-            );
-        }
-    }
-    git.branch = duckdb_client::string_column(
-        &client.query_arrow_json(
-            "SELECT branch FROM _orbit_manifest WHERE project_id = ?1 AND commit_sha = ?2",
-            &[git.project_id.into(), git.commit_sha.clone().into()],
-        )?,
-        "branch",
-    )
-    .pop()
-    .context("indexed branch is missing")?;
+            )
+        })?
+    };
     let client = crate::refresh::open(&git, &db, client, crate::pipeline_config(0))?;
     Ok(IndexedRepo { git, client })
 }
