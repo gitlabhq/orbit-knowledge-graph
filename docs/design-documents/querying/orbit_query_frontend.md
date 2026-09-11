@@ -40,7 +40,9 @@ flowchart LR
 Each query language is one module under `crates/query-engine/compiler/src/passes/frontend/` and one phase in the pipeline declaration in `config.rs`.
 `json_dsl_parse` runs the JSON schema check, the ontology-derived schema check, and cursor hashing, then deserializes.
 `gql_parse` runs in two steps and never serializes a JSON query.
-`syntax.rs` converts Pest pairs into the typed syntax tree with one `pest_consume` method per grammar rule; `match_nodes!` names each child by rule, so a grammar change that alters a rule's children fails that method instead of shifting positional reads.
+`syntax.rs` converts Pest pairs into the typed syntax tree with `pest_consume` methods.
+Fixed child shapes use `match_nodes!`; optional query clauses and relationship fields are consumed by rule without enumerating their combinations.
+The grammar enforces their order and cardinality, and the consumer rejects unexpected rules.
 Lexical checks live here: identifier rules, string escapes, numeric ranges, `date_trunc` units, and duplicate map keys.
 `lower/` then turns the syntax tree into Input and owns every check that needs query-wide context: variable uniqueness, ID promotion, query-type classification, projection rules, and ORDER BY resolution.
 Syntax-tree errors carry the pair's line and column; a child shape the conversion has no arm for is a pipeline invariant, not a client error.

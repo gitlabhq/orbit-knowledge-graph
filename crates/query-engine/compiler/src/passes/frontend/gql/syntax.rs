@@ -20,14 +20,20 @@ impl QueryParser {
 
     pub(super) fn Query(input: Node) -> Result<Query> {
         Ok(match_nodes!(input.into_children();
-            [Match(m), Return(r), EOI(_)] => query(m, r, None, None, false),
-            [Match(m), Return(r), Debug(_), EOI(_)] => query(m, r, None, None, true),
-            [Match(m), Return(r), Order(o), EOI(_)] => query(m, r, Some(o), None, false),
-            [Match(m), Return(r), Order(o), Debug(_), EOI(_)] => query(m, r, Some(o), None, true),
-            [Match(m), Return(r), limit(l), EOI(_)] => query(m, r, None, Some(l), false),
-            [Match(m), Return(r), limit(l), Debug(_), EOI(_)] => query(m, r, None, Some(l), true),
-            [Match(m), Return(r), Order(o), limit(l), EOI(_)] => query(m, r, Some(o), Some(l), false),
-            [Match(m), Return(r), Order(o), limit(l), Debug(_), EOI(_)] => query(m, r, Some(o), Some(l), true),
+            [Match((pattern, predicates)), Return(projections), clauses.., EOI(_)] => {
+                let mut query = Query {
+                    pattern, predicates, projections, order: None, limit: None, debug: false,
+                };
+                for clause in clauses {
+                    match clause.as_rule() {
+                        Rule::Order => query.order = Some(Self::Order(clause)?),
+                        Rule::Limit | Rule::Page => query.limit = Some(Self::limit(clause)?),
+                        Rule::Debug => query.debug = Self::Debug(clause)?,
+                        _ => return Err(mismatch(&clause)),
+                    }
+                }
+                query
+            },
         ))
     }
 
@@ -112,24 +118,23 @@ impl QueryParser {
     }
 
     fn RelationshipDetail(input: Node) -> Result<Relationship> {
-        Ok(match_nodes!(input.into_children();
-            [] => detail(None, Vec::new(), None, None),
-            [Variable(v)] => detail(Some(v), Vec::new(), None, None),
-            [RelationshipTypes(t)] => detail(None, t, None, None),
-            [RangeLiteral(r)] => detail(None, Vec::new(), Some(r), None),
-            [MapLiteral(m)] => detail(None, Vec::new(), None, Some(m)),
-            [Variable(v), RelationshipTypes(t)] => detail(Some(v), t, None, None),
-            [Variable(v), RangeLiteral(r)] => detail(Some(v), Vec::new(), Some(r), None),
-            [Variable(v), MapLiteral(m)] => detail(Some(v), Vec::new(), None, Some(m)),
-            [RelationshipTypes(t), RangeLiteral(r)] => detail(None, t, Some(r), None),
-            [RelationshipTypes(t), MapLiteral(m)] => detail(None, t, None, Some(m)),
-            [RangeLiteral(r), MapLiteral(m)] => detail(None, Vec::new(), Some(r), Some(m)),
-            [Variable(v), RelationshipTypes(t), RangeLiteral(r)] => detail(Some(v), t, Some(r), None),
-            [Variable(v), RelationshipTypes(t), MapLiteral(m)] => detail(Some(v), t, None, Some(m)),
-            [Variable(v), RangeLiteral(r), MapLiteral(m)] => detail(Some(v), Vec::new(), Some(r), Some(m)),
-            [RelationshipTypes(t), RangeLiteral(r), MapLiteral(m)] => detail(None, t, Some(r), Some(m)),
-            [Variable(v), RelationshipTypes(t), RangeLiteral(r), MapLiteral(m)] => detail(Some(v), t, Some(r), Some(m)),
-        ))
+        let mut relationship = Relationship {
+            direction: Direction::Outgoing,
+            variable: None,
+            types: Vec::new(),
+            range: None,
+            properties: None,
+        };
+        for child in input.into_children() {
+            match child.as_rule() {
+                Rule::Variable => relationship.variable = Some(Self::Variable(child)?),
+                Rule::RelationshipTypes => relationship.types = Self::RelationshipTypes(child)?,
+                Rule::RangeLiteral => relationship.range = Some(Self::RangeLiteral(child)?),
+                Rule::MapLiteral => relationship.properties = Some(Self::MapLiteral(child)?),
+                _ => return Err(mismatch(&child)),
+            }
+        }
+        Ok(relationship)
     }
 
     fn RelationshipTypes(input: Node) -> Result<Vec<Name>> {
@@ -276,18 +281,21 @@ impl QueryParser {
 
     fn ProjectionItem(input: Node) -> Result<ProjectionItem> {
         Ok(match_nodes!(input.into_children();
-            [Aggregate(e)] => item(e, None),
-            [Aggregate(e), Variable(alias)] => item(e, Some(alias)),
-            [DateTrunc(e)] => item(e, None),
-            [DateTrunc(e), Variable(alias)] => item(e, Some(alias)),
-            [AllProperties(e)] => item(e, None),
-            [AllProperties(e), Variable(alias)] => item(e, Some(alias)),
-            [NodeProjection(e)] => item(e, None),
-            [NodeProjection(e), Variable(alias)] => item(e, Some(alias)),
-            [PropertyExpression(p)] => item(Expression::Property(p), None),
-            [PropertyExpression(p), Variable(alias)] => item(Expression::Property(p), Some(alias)),
-            [Variable(v)] => item(Expression::Variable(v), None),
-            [Variable(v), Variable(alias)] => item(Expression::Variable(v), Some(alias)),
+            [ProjectionExpression(expression)] => ProjectionItem { expression, alias: None },
+            [ProjectionExpression(expression), Variable(alias)] => ProjectionItem {
+                expression, alias: Some(alias),
+            },
+        ))
+    }
+
+    fn ProjectionExpression(input: Node) -> Result<Expression> {
+        Ok(match_nodes!(input.into_children();
+            [Aggregate(expression)] => expression,
+            [DateTrunc(expression)] => expression,
+            [AllProperties(expression)] => expression,
+            [NodeProjection(expression)] => expression,
+            [PropertyExpression(property)] => Expression::Property(property),
+            [Variable(variable)] => Expression::Variable(variable),
         ))
     }
 
@@ -418,8 +426,8 @@ impl QueryParser {
         ))
     }
 
-    fn Debug(_input: Node) -> Result<()> {
-        Ok(())
+    fn Debug(_input: Node) -> Result<bool> {
+        Ok(true)
     }
 
     fn PropertyExpression(input: Node) -> Result<Property> {
@@ -502,42 +510,6 @@ fn directed(input: Node, direction: Direction) -> Result<Relationship> {
         },
         [RelationshipDetail(detail)] => Relationship { direction, ..detail },
     ))
-}
-
-fn detail<'i>(
-    variable: Option<Name<'i>>,
-    types: Vec<Name<'i>>,
-    range: Option<Range<'i>>,
-    properties: Option<MapLiteral<'i>>,
-) -> Relationship<'i> {
-    Relationship {
-        direction: Direction::Outgoing,
-        variable,
-        types,
-        range,
-        properties,
-    }
-}
-
-fn item<'i>(expression: Expression<'i>, alias: Option<Name<'i>>) -> ProjectionItem<'i> {
-    ProjectionItem { expression, alias }
-}
-
-fn query<'i>(
-    (pattern, predicates): (Pattern<'i>, Vec<Comparison<'i>>),
-    projections: Projections<'i>,
-    order: Option<Sort<'i>>,
-    limit: Option<Limit<'i>>,
-    debug: bool,
-) -> Query<'i> {
-    Query {
-        pattern,
-        predicates,
-        projections,
-        order,
-        limit,
-        debug,
-    }
 }
 
 fn row_count(value: &Value, span: Span<'_>, clause: &str) -> Result<u32> {
