@@ -8331,6 +8331,7 @@ dependencies = [
  "async-nats",
  "bytes",
  "clickhouse-client",
+ "futures",
  "nats-client",
  "ontology",
  "orbit-utils",

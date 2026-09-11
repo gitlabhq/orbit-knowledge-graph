@@ -304,6 +304,9 @@ pub async fn run_dispatcher(
         &campaign,
     )
     .await?;
+    if let Err(error) = catalog.sync_active_version(&graph).await {
+        warn!(%error, "active version not mirrored at startup; retried every completion tick");
+    }
     serving.store(true, std::sync::atomic::Ordering::Relaxed);
 
     match schema::version::read_active_version(&graph).await {
