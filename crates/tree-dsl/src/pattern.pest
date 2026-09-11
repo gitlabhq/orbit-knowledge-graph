@@ -1,0 +1,46 @@
+// S-expression pattern grammar for tree-dsl rewrite rules.
+//
+// Match patterns:   (kind "lit"? field: $Cap $$$Var:filter children...)
+// Templates:        (__kind @$Cap|tf (__child @$Ref->__rekind) $$$Var->__name)
+
+Pattern  =  { SOI ~ SP? ~ Element ~ SP? ~ EOI }
+Element  = _{ Node | Variadic | CapRef | Capture }
+
+// ── S-expression node ──────────────────────────────────────────────
+
+Node     =  { "(" ~ SP? ~ Ident ~ (SP? ~ Content)* ~ SP? ~ ")" }
+Content  = _{ Quoted | TextField | FieldChild | Element }
+
+FieldChild = { Ident ~ ":" ~ SP? ~ Element }
+
+// ── Captures and variadics ─────────────────────────────────────────
+
+// @$NAME|tf  (text ref inside Node) or @$NAME->kind (child capture)
+TextField = { "@$" ~ Name ~ !Arrow ~ ("|" ~ TfChain)? }
+CapRef    = { "@$" ~ Name ~ Arrow ~ Ident }
+Capture   = { "$" ~ Name ~ (":" ~ Ident)? }
+
+// $$$NAME:filter|filter->kind  or  $$$NAME:filter=>kind
+Variadic  = { "$$$" ~ Name ~ (":" ~ Filter)? ~ (Arrow ~ Ident)? }
+
+Arrow     = @{ "=>" | "->" }
+Filter    =  { Ident ~ ("|" ~ Ident)* }
+
+// ── Transforms (pipe-separated chain) ──────────────────────────────
+
+TfChain   = { TfExpr ~ ("|" ~ TfExpr)* }
+TfExpr    = { TfFunc | TfLegacy | TfBare }
+TfFunc    = { TfName ~ "(" ~ SP? ~ TfArgs ~ SP? ~ ")" }
+TfArgs    = { Quoted ~ (SP? ~ "," ~ SP? ~ Quoted)* }
+TfLegacy  = { TfName ~ "=" ~ LegacyVal }
+TfBare    = { TfName }
+TfName    = @{ ASCII_ALPHA ~ (ASCII_ALPHANUMERIC | "_")* }
+LegacyVal = @{ (!(" " | "\t" | "|" | ")") ~ ANY)+ }
+
+// ── Leaves ─────────────────────────────────────────────────────────
+
+Ident     = @{ (ASCII_ALPHANUMERIC | "_" | ".")+ }
+Name      = @{ (ASCII_ALPHANUMERIC | "_")+ }
+Quoted    = ${ "\"" ~ Inner ~ "\"" }
+Inner     = @{ (!("\"") ~ ANY)* }
+SP        = _{ (" " | "\t" | "\n" | "\r")+ }

@@ -13574,6 +13574,9 @@ dependencies = [
 name = "tree-dsl"
 version = "0.1.0"
 dependencies = [
+ "pest",
+ "pest_consume",
+ "pest_derive",
  "rustc-hash 2.1.3",
  "serde",
  "serde_yaml",
@@ -13601,7 +13604,6 @@ dependencies = [
  "tree-sitter-swift",
  "tree-sitter-typescript",
  "tree-sitter-zig",
- "winnow 1.0.2",
 ]
 
 [[package]]
