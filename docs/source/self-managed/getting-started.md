@@ -80,8 +80,8 @@ The `gitlab_clickhouse_main_production` database exists after ClickHouse setup i
 ### High availability
 
 GitLab Orbit runs on a ClickHouse cluster with several replicas behind one load balancer. The cluster needs
-ClickHouse Keeper with a quorum of three nodes, at least two ClickHouse replicas, and an HTTP load balancer
-in front of the replicas. For the ClickHouse side, see
+ClickHouse Keeper with a quorum of three nodes and at least two ClickHouse replicas. An HTTP load balancer
+sits in front of the replicas. For the ClickHouse side, see
 [HA ClickHouse for GitLab Self-Managed](https://docs.gitlab.com/integration/clickhouse/?tab=HA+ClickHouse+for+GitLab+Self-Managed).
 
 Create both databases with the `Replicated` database engine, on the cluster:
