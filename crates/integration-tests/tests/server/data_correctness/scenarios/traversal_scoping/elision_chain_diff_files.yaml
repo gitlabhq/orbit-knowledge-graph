@@ -56,6 +56,8 @@ query:
         "aggregations": [{"count": "f", "as": "c"}],
         "limit": 10
     }
+  gql: |
+    MATCH (g:Group)-[:`CONTAINS`]->(p:Project)<-[:IN_PROJECT]-(mr:MergeRequest)-[:HAS_LATEST_DIFF]->(d:MergeRequestDiff)-[:HAS_FILE]->(f:MergeRequestDiffFile) WHERE g.full_path = 'g701' RETURN p, count(f) AS c LIMIT 10
 
 expect:
   groups:

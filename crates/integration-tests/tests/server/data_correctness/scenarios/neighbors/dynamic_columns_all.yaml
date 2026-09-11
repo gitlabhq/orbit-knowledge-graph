@@ -9,6 +9,8 @@ query:
       "neighbors": {"direction": "outgoing", "rel_types": ["MEMBER_OF"]},
       "options": {"dynamic_columns": "*"}
     }
+  gql: |
+    MATCH (u:User {id: 1})-[:MEMBER_OF]->(n) RETURN u, properties(n)
 
 expect:
   node_count: 3

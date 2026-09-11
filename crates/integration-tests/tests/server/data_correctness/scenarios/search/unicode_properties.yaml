@@ -10,6 +10,8 @@ query:
                  "node_ids": [6]}],
       "limit": 10
     }
+  gql: |
+    MATCH (u:User {id: 6}) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username, u.name LIMIT 10
 
 expect:
   node_count: 1

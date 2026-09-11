@@ -18,6 +18,8 @@ query:
       "aggregations": [{"avg": "u.id", "as": "avg_id"}],
       "limit": 10
     }
+  gql: |
+    MATCH (g:Group)<-[:MEMBER_OF]-(u:User) WHERE g.id >= 1 AND g.id <= 10000 RETURN g{.id, .name}, avg(u.id) AS avg_id LIMIT 10
 
 expect:
   groups:

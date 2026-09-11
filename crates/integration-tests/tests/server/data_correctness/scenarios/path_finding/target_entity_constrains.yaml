@@ -12,6 +12,8 @@ query:
       "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 1,
                "rel_types": ["AUTHORED"]}
     }
+  gql: |
+    MATCH p = shortestPath((start:User {id: 1})-[:AUTHORED*1]->(`end`:MergeRequest)) WHERE `end`.id IN [2000, 2001] RETURN p
 
 expect:
   referential_integrity: true

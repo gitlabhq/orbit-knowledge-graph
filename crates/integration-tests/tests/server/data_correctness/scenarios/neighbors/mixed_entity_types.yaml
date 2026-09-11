@@ -9,6 +9,8 @@ query:
       "neighbors": {"direction": "both"},
       "options": {"dynamic_columns": "*"}
     }
+  gql: |
+    MATCH (mr:MergeRequest {id: 2000})--(n) RETURN mr, properties(n)
 
 expect:
   node_count: 10

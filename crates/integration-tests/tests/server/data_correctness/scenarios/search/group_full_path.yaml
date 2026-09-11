@@ -10,6 +10,8 @@ query:
       "order_by": "g.id",
       "limit": 10
     }
+  gql: |
+    MATCH (g:Group) WHERE g.id >= 1 AND g.id <= 10000 RETURN g.name, g.full_path ORDER BY g.id LIMIT 10
 
 expect:
   node_count: 5

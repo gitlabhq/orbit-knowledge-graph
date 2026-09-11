@@ -15,6 +15,8 @@ query:
       "order_by": "mr.id",
       "limit": 10
     }
+  gql: |
+    MATCH (mr:MergeRequest) WHERE mr.id IN [2000, 2001, 2002, 2003, 2004, 2005] AND mr.state = 'merged' AND mr.diff CONTAINS 'ship' RETURN mr.title, mr.state, mr.diff ORDER BY mr.id LIMIT 10
 
 expect:
   node_count: 2

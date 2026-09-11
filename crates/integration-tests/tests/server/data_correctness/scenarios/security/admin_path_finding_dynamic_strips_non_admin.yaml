@@ -13,6 +13,8 @@ query:
                "rel_types": ["MEMBER_OF", "CONTAINS"]},
       "options": {"dynamic_columns": "*"}
     }
+  gql: |
+    MATCH p = shortestPath((start:User {id: 1})-[:MEMBER_OF|`CONTAINS`*1..3]->(`end`:Project {id: 1000})) RETURN properties(p)
 
 expect:
   referential_integrity: true
