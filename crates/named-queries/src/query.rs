@@ -243,6 +243,13 @@ impl NamedQuery {
         Ok(rendered.to_string())
     }
 
+    pub fn render_example(&self) -> Result<String, NamedQueryError> {
+        self.render(
+            &BindingValues { current_user_id: 0 },
+            &self.example_parameters(),
+        )
+    }
+
     pub fn example_parameters(&self) -> Map<String, Value> {
         self.parameters
             .iter()

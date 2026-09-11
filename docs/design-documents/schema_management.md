@@ -16,10 +16,14 @@ keys, and explicit `SETTINGS` entries that need to be emitted into the generated
 
 ## Schema Version Tracking
 
-This file covers ClickHouse DDL versioning only. The query **response format** is
+This file covers ClickHouse schema migration versions and archive-backed serving. The query **response format** is
 versioned separately as the `raw_output_format` semver pin in `config/versions.yaml` and
 enforced by `scripts/check-pinned-version.sh`. See
 [ADR 004](decisions/004_unified_response_schema.md) for the response format contract.
+
+A request's `migration_version` is the version of the archive it was served from; telemetry and
+the ClickHouse `log_comment` report it. Introspection's `schema_version` is still the ontology
+format version (`0.1`).
 
 ### The `schema` pin in `config/versions.yaml`
 
@@ -135,86 +139,75 @@ convention). The prefix is applied at the call site when constructing ClickHouse
 - Legacy schema 93 (release `v0.115.0`) is bundled from its exact release sources, so it can upgrade directly without manual catalog seeding or an intermediate deployment. See `config/ontology-archives/README.md` for provenance and how to add support for another starting schema.
 - A missing active archive with no bundled copy still blocks migration before versioned DDL. Restore that archive from the exact release or add it to the supported bundle; do not synthesize it from current sources or ClickHouse tables.
 
-### Webserver prefix injection
+### Webserver serving snapshots
 
-The webserver pins the table prefix to its **embedded** `SCHEMA_VERSION` at startup. The prefix
-flows through the query pipeline once and never changes for the lifetime of the process — a binary
-upgrade is the only way to switch to a new prefix. The active version recorded in
-`gkg_schema_version` is consulted only by the readiness gate (see below), not by the query path.
+The Webserver serves whatever version is `active` in `gkg_schema_version`. It uses its embedded
+archive when that version matches the binary and loads the archive from the catalog otherwise, so
+one binary serves older and newer schemas without a restart.
 
-```plaintext
-startup
-  → schema_version::table_prefix(SCHEMA_VERSION)   # "" for v0, "v1_" for v1, …
-  → GrpcServer::new(…, table_prefix)
-  → QueryPipelineService::new(…, table_prefix)
-  → QueryPipelineContext { table_prefix }          # shared across all pipeline stages
-  → CompilationStage calls compile(…, &ctx.table_prefix)
-  → normalize() prepends prefix to every node table name and edge table name
-  → lower() uses input.compiler.default_edge_table (already prefixed) instead of a
-    compile-time constant
-```
+A serving snapshot (`crates/orbit-server/src/active_schema.rs`) is immutable and holds:
 
-The query compiler does not access ClickHouse metadata to discover which tables exist — the prefix
-is injected top-down from the embedded version and flows through without further I/O.
+- the archive's `migration_version`;
+- the archive's ontology with that version's table prefix applied;
+- the embedded named queries that compile against that ontology (the rest are hidden and rejected);
+- a `PathResolver` for that table-set.
+
+Every request pins one snapshot for its whole run, from compilation through path resolution and
+redaction, so a promotion cannot switch tables under a running query.
+
+Loading an archive does not prove the binary can serve it; that depends on the archive loader,
+parser, and compiler. Validate a cross-version rollout before relying on it.
 
 ### Webserver readiness gate
 
-A background task (`SchemaWatcher`) polls `gkg_schema_version` every
-`schema.version_poll_interval_secs` seconds (default `5`) and classifies the result against the
-binary's embedded version. It reads the `active` status first and, only when that does not match
-the binary, also reads the `migrating` status:
+`ActiveSchema` polls `gkg_schema_version` every `schema.version_poll_interval_secs` seconds
+(default `5`). Each poll reads the active version, builds a snapshot for it when the installed one
+differs, checks that every table the snapshot's ontology expects exists in `system.tables`, and
+rechecks the active version before installing. Readiness means "a snapshot is installed":
 
-| Database vs. binary | State | `/ready` response | Action |
-|---|---|---|---|
-| active missing (no row yet) | `Pending` | `503` with `schema_pending` | keep polling |
-| active `<` binary | `Pending` | `503` with `schema_pending` | keep polling |
-| active `==` binary | `Ready` | `200` | serve traffic |
-| active `>` binary | `Outdated` | `503` with `schema_outdated` | log error, cancel shutdown token, exit |
-| migrating `==` binary (active `<` binary) | `Migrating` | `503` with `schema_migrating`, `status:"migrating"` | keep polling |
+| Poll result | Snapshot | `/ready` |
+|---|---|---|
+| no active version | cleared | `503` with `schema_pending` |
+| usable archive and all expected tables, whatever the version relative to the binary | installed | `200` |
+| a table of the active version is missing | cleared | `503` with `schema_pending` |
+| the active archive is missing, corrupt, or fails to load | cleared | `503` with `schema_pending` |
+| version or table metadata read fails | unchanged | last state |
 
-`Migrating` means the dispatcher has created this binary's table-set and marked it `migrating`, but
-has not yet promoted it to `active`. The pod correctly stays out of Kubernetes rotation (still
-`503`), but the distinct `status:"migrating"` label and `schema_migrating` component distinguish an
-in-progress migration from a genuinely broken deployment. `Outdated` always wins over `Migrating`:
-an active version above the binary triggers the safety shutdown even if a below-active `migrating`
-row matches, consistent with the downgrade guard (issue #957).
+A failure clears the slot only once the poll confirms the failed version is still active, so a
+promotion mid-poll cannot wipe a usable snapshot. Every failure retries on the next poll without a
+restart. `/live` never depends on the active schema, and there is no outdated-version shutdown: a newer
+active version is served, not refused.
 
-`/live` is never gated on the watcher — Kubernetes keeps the pod alive while it waits for the
-indexer to promote the matching version. When the binary detects a newer active version than it
-supports, the watcher cancels the shared `CancellationToken`, the gRPC and HTTP servers exit
-their `tokio::select`, and the process returns. Kubernetes restarts the pod; if the operator
-deployed the wrong (too-old) binary, `CrashLoopBackoff` surfaces the mistake instead of silently
-serving the wrong schema.
+While no snapshot is installed, schema-dependent RPCs (introspection, named queries, query
+execution) return `Unavailable`. Static listings, DSL and format metadata, and `GetClusterHealth`
+still answer. Command arguments are validated first, so a malformed command gets `InvalidArgument`
+even while pending. Requests that already pinned a snapshot keep it.
 
-The webserver `/ready` endpoint intentionally checks only this local schema state. The HealthCheck
-service's `/health` endpoint separately aggregates ClickHouse and Kubernetes Deployment and
-StatefulSet health. GitLab connectivity and JWT authentication are reported separately as a
-reporting-only component in the Webserver's `GetClusterHealth` gRPC response, which Rails exposes at
-`GET /api/v4/orbit/status`. That diagnostic is not part of readiness or the HealthCheck service
-aggregate and cannot change the top-level cluster status.
+The table check needs the reader role to see the graph database in `system.tables`. It detects
+missing tables only; it does not validate columns or freshness.
 
-Transient ClickHouse errors during a poll keep the previous state — the watcher does not
-flap to `Pending` on a single failed read.
+Webservers built before this gate exit when the active version exceeds their binary, so the first
+rollout of the new binary must replace them before a schema promotion.
 
-The unready webserver pods also make the cluster-health sidecar report Unhealthy for the whole
-migration window. `ClusterHealthChecker` reads the same `migrating` row to report that aggregate
-as `Migrating` (with a `schema_migration` component) instead of Unhealthy, gated on ClickHouse
-being healthy. See [`health_check.md`](health_check.md#migration-awareness).
+`/ready` checks only this local state. The HealthCheck service's `/health` aggregates ClickHouse
+and Kubernetes health separately, and `ClusterHealthChecker` may label an unhealthy Kubernetes
+aggregate `Migrating` while a `migrating` row exists; see
+[`health_check.md`](health_check.md#migration-awareness).
 
-Implemented in `crates/orbit-server/src/schema_watcher.rs`.
+Implemented in `crates/orbit-server/src/active_schema.rs`.
 
 #### Observability
 
 | Metric | Type | Labels | Description |
 |--------|------|--------|-------------|
-| `gkg.webserver.schema.state` | observable gauge | `state` (`pending` \| `ready` \| `outdated` \| `migrating`) | Value `1` for the active state, `0` otherwise |
+| `gkg.webserver.schema.state` | observable gauge | `state` (`pending` \| `ready`) | Value `1` for the state derived from snapshot availability, `0` otherwise |
 
 ### Configuration
 
 ```yaml
 schema:
   max_retained_versions: 2              # active + retired keep-set size (default: 2, minimum: 2)
-  version_poll_interval_secs: 5         # readiness-gate poll cadence (default: 5, minimum: 1)
+  version_poll_interval_secs: 5         # active-archive poll cadence (default: 5, minimum: 1)
   indexer_schema_wait_timeout_secs: 300 # indexer wait budget before exiting (default: 300, minimum: 1)
 ```
 
@@ -223,7 +216,7 @@ retired table-set, as well as any migrating versions. The retained version can b
 than active after a rollback. Values below 2 are rejected at startup.
 
 `version_poll_interval_secs` controls how often the webserver re-reads the active version from
-`gkg_schema_version` to drive the readiness gate (see "Webserver readiness gate" below); it is
+`gkg_schema_version` to refresh its serving snapshot (see "Webserver readiness gate" above); it is
 also the base backoff interval for the indexer readiness gate.
 
 `indexer_schema_wait_timeout_secs` is the total time the indexer waits for the dispatcher to
@@ -306,11 +299,8 @@ back, not a mistake to refuse. Indexers do not run DDL; they gate on the version
    prefixed or cloned.
 
 5. **Mark migrating** — Insert the new version with status `migrating` in `gkg_schema_version`.
-   This signals indexers that the new-prefix tables exist. A newly deployed webserver whose
-   embedded version matches this `migrating` row reports readiness state `Migrating`
-   (`503` with `status:"migrating"`), distinguishing the migration window from a broken deployment
-   (see "Webserver readiness gate" above). The Webserver read cutover (tracked in issue #441)
-   switches reads to the new table-set.
+   This signals indexers that the new-prefix tables exist. Webservers keep serving the active
+   archive until the target is promoted.
 
 6. **Release lock** — Allow other pods to proceed.
 
@@ -421,11 +411,8 @@ Promotion and retained-table rollback change active/retired statuses in one
 [synchronous insert](https://clickhouse.com/docs/guides/developer/transactional).
 Archive storage and view changes are not transactional with that write. Promotion then clears the campaign.
 
-Webserver behavior on promotion is automatic: pods built for the new version flip to `Ready`
-on the next poll, and pods built for an older version detect `active > embedded` and exit via
-the `SchemaWatcher` shutdown path described above. No manual restart is required for either
-fleet — Kubernetes recycles the old pods and routes traffic to the new ones once they pass
-their readiness check.
+On promotion, every Webserver swaps to the new archive on its next poll without restarting (see
+"Webserver readiness gate"). Requests already running keep their snapshot.
 
 ### Automatic cleanup via retention window
 
@@ -466,6 +453,9 @@ Cleanup behavior:
 4. On the next run, enumerate the remaining version-prefixed ClickHouse objects and retry their
    drops. NATS cleanup or dropped-marker failures are logged, but are not independently queued for
    retry once no droppable ClickHouse objects remain for that version.
+
+Pinned snapshots do not extend the keep-set. Retired tables must outlive the requests still pinned
+to them, so size `max_retained_versions` and space promotions accordingly.
 
 ### Safety guarantees
 
