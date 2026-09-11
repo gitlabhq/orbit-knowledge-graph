@@ -22,7 +22,6 @@ pub fn resolve(
 ) -> ResolveResult {
     let k_import = lang.lookup_kind("__import");
     let k_import_type = lang.lookup_kind("__import_type");
-    let k_source = lang.lookup_kind("__source");
     let k_source_path = lang.lookup_kind("__source_path");
     let k_name = lang.lookup_kind("__name");
     let k_alias = lang.lookup_kind("__alias");
@@ -39,7 +38,6 @@ pub fn resolve(
     let ret_type_f = lang.fields.lookup("return_type") as u16;
     let return_k = lang.kinds.lookup("return_statement") as u16;
     let index_names = support_lang.index_names();
-    let fqn_sep = support_lang.fqn_separator();
 
     let file_index = build_file_index(trees, lang, support_lang, index_names);
     let mut visible = build_visible_names(trees, k_deftype, name_f, left_f);
@@ -63,7 +61,7 @@ pub fn resolve(
         index_names,
         k_name,
     );
-    rewrite_sources(trees, lang, &reqs, k_source, k_source_path, fqn_sep);
+
     let import_edges = build_import_edges(
         trees,
         lang,
@@ -351,41 +349,6 @@ fn propagate_reexports(
         }
     }
     (reexports, ambiguous)
-}
-
-fn rewrite_sources(
-    trees: &mut [Tree],
-    lang: &mut Lang,
-    reqs: &[ImportReq],
-    k_source: u16,
-    k_source_path: u16,
-    fqn_sep: &str,
-) {
-    for req in reqs {
-        let source_path = trees[req.fi]
-            .children(req.node)
-            .find(|&c| trees[req.fi].kind(c) == k_source_path)
-            .map(|c| {
-                lang.syms
-                    .resolve(trees[req.fi].nodes[c as usize].sym)
-                    .to_string()
-            })
-            .unwrap_or_default();
-        // Only rewrite __source when the import was resolved through a
-        // different path (e.g. Python relative ".models" → "mypackage.models").
-        // Skip when the source is already a display-ready path (TS "./utils").
-        if source_path.starts_with("./") || source_path.starts_with("../") {
-            continue;
-        }
-        let resolved = req.target_path.replace('/', fqn_sep);
-        let resolved_sym = lang.syms.intern(&resolved);
-        let src_node = trees[req.fi]
-            .children(req.node)
-            .find(|&c| trees[req.fi].kind(c) == k_source);
-        if let Some(sn) = src_node {
-            trees[req.fi].nodes[sn as usize].sym = resolved_sym;
-        }
-    }
 }
 
 fn build_import_edges(
