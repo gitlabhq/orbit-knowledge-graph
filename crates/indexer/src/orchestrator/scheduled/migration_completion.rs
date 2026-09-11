@@ -180,7 +180,10 @@ impl MigrationCompletionChecker {
             })?;
 
         {
-            let schema = orbit_migrations::schema::GraphSchema::from_ontology(&self.ontology);
+            let schema = orbit_migrations::schema::GraphSchema::from_ontology_replicated(
+                &self.ontology,
+                self.graph.is_replicated(),
+            );
             orbit_migrations::execute::create_unversioned_definitions(&self.graph, &schema)
                 .await
                 .map_err(|error| {
@@ -397,7 +400,10 @@ impl MigrationCompletionChecker {
     }
 
     async fn reconcile_dead_versions(&self) -> Result<(), TaskError> {
-        let schema = orbit_migrations::schema::GraphSchema::from_ontology(&self.ontology);
+        let schema = orbit_migrations::schema::GraphSchema::from_ontology_replicated(
+            &self.ontology,
+            self.graph.is_replicated(),
+        );
 
         let entities = orbit_migrations::garbage_collection::find_droppable_entities(
             &self.graph,

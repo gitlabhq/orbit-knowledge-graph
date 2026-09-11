@@ -2032,6 +2032,7 @@ dependencies = [
  "futures",
  "orbit-server-config",
  "orbit-utils",
+ "rand 0.10.2",
  "serde",
  "serde_json",
  "thiserror 2.0.18",

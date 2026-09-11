@@ -309,7 +309,10 @@ pub async fn run_dispatcher(
     match schema::version::read_active_version(&graph).await {
         Ok(Some(active_version)) if active_version == *schema::version::SCHEMA_VERSION => {
             {
-                let graph_schema = orbit_migrations::schema::GraphSchema::from_ontology(&ontology);
+                let graph_schema = orbit_migrations::schema::GraphSchema::from_ontology_replicated(
+                    &ontology,
+                    graph.is_replicated(),
+                );
                 if let Err(error) =
                     orbit_migrations::execute::create_unversioned_definitions(&graph, &graph_schema)
                         .await

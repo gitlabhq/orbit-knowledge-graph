@@ -26,7 +26,7 @@ impl ClickHouseConfigurationExt for ClickHouseConfiguration {
             &build_session_settings_with_quorum_defaults(self),
             &self.insert_settings,
         )
-        .with_replicated_ddl(self.replicated)
+        .with_replicated(self.replicated)
     }
 }
 
@@ -241,7 +241,7 @@ mod tests {
 
         let client = config.build_client();
         assert!(client.has_quorum_writes());
-        assert!(client.has_replicated_ddl());
+        assert!(client.is_replicated());
     }
 
     #[test]

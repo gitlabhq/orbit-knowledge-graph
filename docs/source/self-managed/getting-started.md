@@ -79,9 +79,10 @@ The `gitlab_clickhouse_main_production` database exists after ClickHouse setup i
 
 ### High availability
 
-GitLab Orbit runs on a ClickHouse cluster with several replicas behind one load balancer. The cluster needs
-ClickHouse Keeper with a quorum of three nodes and at least two ClickHouse replicas. An HTTP load balancer
-sits in front of the replicas. For the ClickHouse side, see
+GitLab Orbit can run on a ClickHouse cluster with several replicas behind one load balancer.
+The cluster needs ClickHouse Keeper with a quorum of three nodes and at least two ClickHouse replicas.
+An HTTP load balancer sits in front of the replicas.
+For the ClickHouse side, see
 [HA ClickHouse for GitLab Self-Managed](https://docs.gitlab.com/integration/clickhouse/?tab=HA+ClickHouse+for+GitLab+Self-Managed).
 
 Create both databases with the `Replicated` database engine, on the cluster:
@@ -95,17 +96,20 @@ Then tell each writer that the cluster is replicated:
 
 | Component | Setting |
 |-----------|---------|
-| GitLab | Nothing. GitLab detects the `Replicated` database engine and creates replicated tables. |
+| GitLab | None. GitLab detects the `Replicated` database engine and creates replicated tables. |
 | Siphon | `connection_settings` with `insert_quorum: "auto"`, `insert_quorum_parallel: "0"`, and `async_insert: "0"`. See [Install Siphon](data-replication.md#install-siphon). |
 | GitLab Orbit | `clickhouse.ha.enabled: true` in the Helm values. When only one database sits on the cluster, set `replicated: true` on that connection instead. |
 
 With the switch on, GitLab Orbit creates `Replicated*MergeTree` tables, writes with a majority quorum, reads
-with sequential consistency, and retries the transient quorum and Keeper errors. One replica can leave the cluster
-while indexing and queries continue. Leave the switch off on a single node and on ClickHouse Cloud.
+with sequential consistency, and retries the transient quorum and Keeper errors.
+One replica can leave the cluster while indexing and queries continue.
+Leave the switch off on a single node and on ClickHouse Cloud.
 
 ClickHouse 26.7 and later reject the GitLab migrations that create `AggregatingMergeTree` tables with
-columns outside the sorting key. Set `allow_dimensions_outside_sorting_key` to `1` in the server
-`merge_tree` settings before you run the GitLab migrations on those releases:
+columns outside the sorting key.
+Until [issue 627691](https://gitlab.com/gitlab-org/gitlab/-/work_items/627691) updates those migrations,
+set `allow_dimensions_outside_sorting_key` to `1` in the server `merge_tree` settings before you run the
+GitLab migrations on those releases:
 
 ```xml
 <merge_tree>

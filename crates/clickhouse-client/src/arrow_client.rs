@@ -46,7 +46,8 @@ fn is_replication_transient(error: &ClickHouseError) -> bool {
 }
 
 fn quorum_backoff(attempt: u32) -> Duration {
-    Duration::from_millis((100 * u64::from(attempt)).min(1000))
+    let base = (100 * u64::from(attempt)).min(1000);
+    Duration::from_millis(base + rand::random_range(0..=base / 4))
 }
 
 async fn retry_quorum_conflicts<T, F, Fut>(enabled: bool, mut op: F) -> Result<T, ClickHouseError>
@@ -68,46 +69,6 @@ where
             result => return result,
         }
     }
-}
-
-/// A `Replicated` database replicates DDL only; data needs `Replicated*MergeTree` engines.
-fn replicate_merge_tree_engines(sql: &str) -> String {
-    let lower = sql.to_ascii_lowercase();
-    let bytes = sql.as_bytes();
-    let is_word = |b: u8| b.is_ascii_alphanumeric() || b == b'_';
-    let mut result = String::with_capacity(sql.len() + 32);
-    let mut cursor = 0;
-    while let Some(found) = lower[cursor..].find("engine") {
-        let start = cursor + found;
-        let mut index = start + "engine".len();
-        let standalone = start == 0 || !is_word(bytes[start - 1]);
-        while index < bytes.len() && bytes[index].is_ascii_whitespace() {
-            index += 1;
-        }
-        if !standalone || bytes.get(index) != Some(&b'=') {
-            result.push_str(&sql[cursor..index]);
-            cursor = index;
-            continue;
-        }
-        index += 1;
-        while index < bytes.len() && bytes[index].is_ascii_whitespace() {
-            index += 1;
-        }
-        result.push_str(&sql[cursor..index]);
-        let word_end = sql[index..]
-            .find(|c: char| !c.is_alphanumeric() && c != '_')
-            .map_or(sql.len(), |end| index + end);
-        let engine = &sql[index..word_end];
-        if engine.ends_with("MergeTree")
-            && !engine.starts_with("Replicated")
-            && !engine.starts_with("Shared")
-        {
-            result.push_str("Replicated");
-        }
-        cursor = index;
-    }
-    result.push_str(&sql[cursor..]);
-    result
 }
 
 #[derive(Clone)]
@@ -158,7 +119,7 @@ impl ArrowClickHouseClient {
         }
     }
 
-    pub fn with_replicated_ddl(mut self, replicated: bool) -> Self {
+    pub fn with_replicated(mut self, replicated: bool) -> Self {
         self.replicated = replicated;
         self
     }
@@ -171,7 +132,8 @@ impl ArrowClickHouseClient {
         self.quorum_writes
     }
 
-    pub fn has_replicated_ddl(&self) -> bool {
+    /// The connection points at a self-managed cluster with more than one replica.
+    pub fn is_replicated(&self) -> bool {
         self.replicated
     }
 
@@ -343,12 +305,6 @@ impl ArrowClickHouseClient {
     }
 
     pub async fn execute(&self, sql: &str) -> Result<(), ClickHouseError> {
-        if self.replicated && sql.contains("MergeTree") {
-            return self
-                .query(&replicate_merge_tree_engines(sql))
-                .execute()
-                .await;
-        }
         self.query(sql).execute().await
     }
 
@@ -774,41 +730,10 @@ mod tests {
     }
 
     #[test]
-    fn replicated_ddl_prefixes_merge_tree_engines() {
-        let ddl = "CREATE TABLE t (x Int64) ENGINE = ReplacingMergeTree(_version, _deleted) ORDER BY x;\n\
-                   CREATE MATERIALIZED VIEW v ENGINE = AggregatingMergeTree ORDER BY x AS SELECT x FROM t;\n\
-                   CREATE TABLE d (x Int64) ENGINE = Dictionary(dict);\n\
-                   CREATE TABLE r (x Int64) ENGINE = ReplicatedMergeTree ORDER BY x";
-        assert_eq!(
-            replicate_merge_tree_engines(ddl),
-            "CREATE TABLE t (x Int64) ENGINE = ReplicatedReplacingMergeTree(_version, _deleted) ORDER BY x;\n\
-             CREATE MATERIALIZED VIEW v ENGINE = ReplicatedAggregatingMergeTree ORDER BY x AS SELECT x FROM t;\n\
-             CREATE TABLE d (x Int64) ENGINE = Dictionary(dict);\n\
-             CREATE TABLE r (x Int64) ENGINE = ReplicatedMergeTree ORDER BY x"
-        );
-    }
-
-    #[test]
-    fn replicated_ddl_matches_any_engine_spelling() {
-        assert_eq!(
-            replicate_merge_tree_engines("CREATE TABLE t (x Int64) engine=MergeTree ORDER BY x"),
-            "CREATE TABLE t (x Int64) engine=ReplicatedMergeTree ORDER BY x"
-        );
-        assert_eq!(
-            replicate_merge_tree_engines(
-                "CREATE TABLE t (x Int64) Engine  =\n  SummingMergeTree() ORDER BY x"
-            ),
-            "CREATE TABLE t (x Int64) Engine  =\n  ReplicatedSummingMergeTree() ORDER BY x"
-        );
-        let untouched = "CREATE TABLE t (engine String, x Int64) ENGINE = Null; SELECT engine FROM system.tables WHERE engine = 'MergeTree'; CREATE TABLE c (x Int64) ENGINE = SharedMergeTree ORDER BY x";
-        assert_eq!(replicate_merge_tree_engines(untouched), untouched);
-    }
-
-    #[test]
-    fn replicated_ddl_is_off_by_default() {
+    fn replicated_is_off_by_default() {
         let client = client_with_insert_settings(HashMap::new());
-        assert!(!client.has_replicated_ddl());
-        assert!(client.with_replicated_ddl(true).has_replicated_ddl());
+        assert!(!client.is_replicated());
+        assert!(client.with_replicated(true).is_replicated());
     }
 
     fn bad_response(message: &str) -> ClickHouseError {
