@@ -25,6 +25,17 @@ pub struct ResolveConfig {
     pub lookup_from: Vec<u16>,
     /// Module names that should never resolve to local files (e.g. stdlib).
     pub external: Vec<String>,
+    /// How to display the import source path.
+    /// "resolved" (default): use the resolved path converted via fqn_separator.
+    /// "original": use the original __source text as-is.
+    pub display_source: DisplaySource,
+}
+
+#[derive(Default, Clone, Copy, PartialEq, Eq)]
+pub enum DisplaySource {
+    #[default]
+    Original,
+    Resolved,
 }
 
 impl Default for ResolveConfig {
@@ -33,6 +44,7 @@ impl Default for ResolveConfig {
             stages: vec![],
             lookup_from: vec![],
             external: vec![],
+            display_source: DisplaySource::Original,
         }
     }
 }

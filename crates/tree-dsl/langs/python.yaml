@@ -131,6 +131,7 @@ stages:
         append: '(__loop)'
 
 resolve:
+  display_source: resolved
   lookup_from:
     - __source_root
   stages:

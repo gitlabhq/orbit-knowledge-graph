@@ -127,6 +127,7 @@ pub fn to_datasets(
     cross_edges: &[tree_dsl::tree::Edge],
     lang: &mut Lang,
     support_lang: SupportLang,
+    resolve_config: &tree_dsl::file_tree::ResolveConfig,
 ) -> anyhow::Result<LanceDatasets> {
     let sk = Sk::new(lang);
     let ids = assign_ids(trees, lang, &sk);
@@ -135,7 +136,7 @@ pub fn to_datasets(
     ds.insert("Definition".into(), build_defs(trees, lang, &ids, &sk)?);
     ds.insert(
         "ImportedSymbol".into(),
-        build_imports(trees, lang, &ids, &sk, support_lang)?,
+        build_imports(trees, lang, &ids, &sk, support_lang, resolve_config)?,
     );
     let (f2d, f2i) = build_file_edges(trees, &ids, &sk);
     ds.insert("FileToDefinition".into(), f2d?);
@@ -399,7 +400,10 @@ fn build_imports(
     ids: &IdMaps,
     sk: &Sk,
     support_lang: SupportLang,
+    resolve_config: &tree_dsl::file_tree::ResolveConfig,
 ) -> anyhow::Result<RecordBatch> {
+    let use_resolved =
+        resolve_config.display_source == tree_dsl::file_tree::DisplaySource::Resolved;
     let fqn_sep = support_lang.fqn_separator();
     let source_path_k = lang.kinds.lookup("__source_path") as u16;
     let (mut id_b, mut fp_b, mut it_b, mut path_b, mut name_b, mut alias_b) = (
@@ -431,23 +435,18 @@ fn build_imports(
                 continue;
             };
 
-            // Use __source_path (resolved) converted back to display format,
-            // falling back to __source (original text) if no __source_path.
-            let source_str = if source_path_k != 0 {
+            let source_sym = synth_sym(tree, node, sk.source);
+            let source_str = if use_resolved && source_path_k != 0 {
                 let sp_sym = synth_sym(tree, node, source_path_k);
                 if sp_sym != 0 {
-                    let sp = lang.syms.resolve(sp_sym);
-                    sp.replace('/', fqn_sep)
+                    lang.syms.resolve(sp_sym).replace('/', fqn_sep)
                 } else {
-                    let source_sym = synth_sym(tree, node, sk.source);
                     lang.syms.resolve(source_sym).to_string()
                 }
             } else {
-                let source_sym = synth_sym(tree, node, sk.source);
                 lang.syms.resolve(source_sym).to_string()
             };
             let source_str = source_str.as_str();
-            let source_sym = synth_sym(tree, node, sk.source);
             let is_type_only = tree.nodes[node as usize].kind == sk.import_type;
 
             // Collect __name children with optional __alias (skip empty syms)

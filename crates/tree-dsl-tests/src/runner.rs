@@ -44,6 +44,7 @@ pub async fn run_yaml_suite(yaml: &str) {
         &result.cross_edges,
         &mut result.lang,
         lang_id,
+        &result.pipeline.resolve,
     )
     .expect("Failed to build datasets");
 

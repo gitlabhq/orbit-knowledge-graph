@@ -35,6 +35,8 @@ struct ResolveSection {
     lookup_from: Vec<String>,
     #[serde(default)]
     external: Vec<String>,
+    #[serde(default)]
+    display_source: Option<String>,
     stages: Vec<ResolveStageSpec>,
 }
 
@@ -165,6 +167,10 @@ fn compile_resolve(section: &ResolveSection, lang: &mut Lang) -> crate::file_tre
         stages,
         lookup_from,
         external: section.external.clone(),
+        display_source: match section.display_source.as_deref() {
+            Some("resolved") => crate::file_tree::DisplaySource::Resolved,
+            _ => crate::file_tree::DisplaySource::Original,
+        },
     }
 }
 

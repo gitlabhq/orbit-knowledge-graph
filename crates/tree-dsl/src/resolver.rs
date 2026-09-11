@@ -134,7 +134,8 @@ fn build_file_index(
     let mut file_index: FxHashMap<String, usize> = FxHashMap::default();
     for (fi, tree) in trees.iter().enumerate() {
         let path = lang.syms.resolve(tree.nodes[0].sym).to_string();
-        let stem = support_lang.strip_extension(&path);
+        let file_lang = SupportLang::from_path(&path).unwrap_or(support_lang);
+        let stem = file_lang.strip_extension(&path);
         file_index.insert(path.clone(), fi);
         file_index.insert(stem.to_string(), fi);
         for idx_name in index_names {
