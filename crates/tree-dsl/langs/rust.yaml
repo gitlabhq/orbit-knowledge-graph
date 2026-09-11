@@ -74,6 +74,12 @@ stages:
       - match: '(function_item)'
         append: '(__deftype "Function") (__scope)'
 
+      # Trait method signatures (no body)
+      - match: '(function_signature_item parameters: (parameters (self_parameter)))'
+        append: '(__deftype "Function") (__self_method)'
+      - match: '(function_signature_item)'
+        append: '(__deftype "Function")'
+
       # Constants and statics
       - match: '(const_item)'
         append: '(__deftype "Constant")'

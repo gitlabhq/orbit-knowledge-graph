@@ -724,26 +724,16 @@ fn build_imp2def(
         let Some(&target_id) = ids.defs.get(&(ce.to.tree as usize, ce.to.node)) else {
             continue;
         };
-        // The cross-edge goes from import_node → def_node.
-        // Find the import ID(s) for this import node.
-        if let Some(iids) = ids.imports.get(&(ce.from.tree as usize, ce.from.node)) {
+        let key = (ce.from.tree as usize, ce.from.node);
+        if let Some(&iid) = ids.import_by_name.get(&key) {
+            s.append_value(iid);
+            t.append_value(target_id);
+            k.append_value("Resolves");
+        } else if let Some(iids) = ids.imports.get(&key) {
             for &iid in iids {
                 s.append_value(iid);
                 t.append_value(target_id);
                 k.append_value("Resolves");
-            }
-        }
-        // Also check if any intra-file E_IMPORTS edges point to this import
-        for edge in &trees[ce.from.tree as usize].edges {
-            if edge.kind != tree_dsl::tree::EdgeKind::Imports || edge.to.node != ce.from.node {
-                continue;
-            };
-            if let Some(iids) = ids.imports.get(&(ce.from.tree as usize, edge.to.node)) {
-                for &iid in iids {
-                    s.append_value(iid);
-                    t.append_value(target_id);
-                    k.append_value("Resolves");
-                }
             }
         }
     }

@@ -1,7 +1,53 @@
 use std::collections::HashMap;
+use std::marker::PhantomData;
 
 use crate::lang::Lang;
 use crate::tree::{NONE, Node, Tree, copy_subtree, elems, live};
+
+// ── Phase markers ──
+
+pub struct Match;
+pub struct Template;
+
+pub trait Phase {
+    fn resolve_slot(
+        slots: &mut HashMap<Box<str>, u16>,
+        filters: &mut Vec<Vec<u16>>,
+        n: &str,
+    ) -> u16;
+    fn apply_filter(filters: &mut [Vec<u16>], slot: u16, kinds: Vec<u16>);
+}
+
+impl Phase for Match {
+    fn resolve_slot(
+        slots: &mut HashMap<Box<str>, u16>,
+        filters: &mut Vec<Vec<u16>>,
+        n: &str,
+    ) -> u16 {
+        let next = slots.len() as u16;
+        let s = *slots.entry(n.into()).or_insert(next);
+        if filters.len() <= s as usize {
+            filters.resize(s as usize + 1, Vec::new());
+        }
+        s
+    }
+    fn apply_filter(filters: &mut [Vec<u16>], slot: u16, kinds: Vec<u16>) {
+        filters[slot as usize] = kinds;
+    }
+}
+
+impl Phase for Template {
+    fn resolve_slot(
+        slots: &mut HashMap<Box<str>, u16>,
+        _filters: &mut Vec<Vec<u16>>,
+        n: &str,
+    ) -> u16 {
+        *slots
+            .get(n)
+            .unwrap_or_else(|| panic!("template references unknown slot: {n}"))
+    }
+    fn apply_filter(_filters: &mut [Vec<u16>], _slot: u16, _kinds: Vec<u16>) {}
+}
 
 #[derive(Clone)]
 pub enum Tf {
@@ -141,20 +187,16 @@ pub struct Rewrite {
     pub filters: Vec<Vec<u16>>,
 }
 
-pub struct Ctx<'l> {
+pub struct Ctx<'l, P: Phase> {
     pub lang: &'l mut Lang,
-    pub slots: HashMap<Box<str>, u16>,
-    pub filters: Vec<Vec<u16>>,
+    slots: HashMap<Box<str>, u16>,
+    filters: Vec<Vec<u16>>,
+    _phase: PhantomData<P>,
 }
 
-impl Ctx<'_> {
+impl<'l, P: Phase> Ctx<'l, P> {
     pub fn slot(&mut self, n: &str) -> u16 {
-        let next = self.slots.len() as u16;
-        let s = *self.slots.entry(n.into()).or_insert(next);
-        if self.filters.len() <= s as usize {
-            self.filters.resize(s as usize + 1, Vec::new());
-        }
-        s
+        P::resolve_slot(&mut self.slots, &mut self.filters, n)
     }
 
     pub fn intern_kind(&mut self, k: &str) -> u16 {
@@ -165,26 +207,50 @@ impl Ctx<'_> {
         self.lang.intern_field(f)
     }
 
+    fn apply_filter(&mut self, slot: u16, kinds: Vec<u16>) {
+        P::apply_filter(&mut self.filters, slot, kinds);
+    }
+}
+
+impl<'l> Ctx<'l, Match> {
+    fn new(lang: &'l mut Lang) -> Self {
+        Ctx {
+            lang,
+            slots: HashMap::new(),
+            filters: Vec::new(),
+            _phase: PhantomData,
+        }
+    }
+
+    fn freeze(self) -> Ctx<'l, Template> {
+        Ctx {
+            lang: self.lang,
+            slots: self.slots,
+            filters: self.filters,
+            _phase: PhantomData,
+        }
+    }
+}
+
+impl Ctx<'_, Template> {
     pub fn template(&mut self, src: &str) -> Pat {
         parse(self, src)
     }
 }
 
 impl Rewrite {
-    pub fn new(lang: &mut Lang, src: &str, out: impl FnOnce(&mut Ctx) -> Out) -> Rewrite {
-        let mut c = Ctx {
-            lang,
-            slots: HashMap::new(),
-            filters: Vec::new(),
-        };
-        c.slot("ROOT");
-        let pat = parse(&mut c, src);
-        let out = out(&mut c);
+    pub fn new(lang: &mut Lang, src: &str, out: impl FnOnce(&mut Ctx<Template>) -> Out) -> Rewrite {
+        let mut mc = Ctx::<Match>::new(lang);
+        mc.slot("ROOT");
+        let pat = parse(&mut mc, src);
+        let mut tc = mc.freeze();
+        let out = out(&mut tc);
+        let nslots = tc.slots.len();
         Rewrite {
             pat,
             out,
-            nslots: c.slots.len(),
-            filters: c.filters,
+            nslots,
+            filters: tc.filters,
         }
     }
 }
@@ -275,7 +341,7 @@ pub fn tokenize(s: &str) -> Vec<String> {
     out
 }
 
-fn parse(c: &mut Ctx, src: &str) -> Pat {
+fn parse<P: Phase>(c: &mut Ctx<'_, P>, src: &str) -> Pat {
     let toks = tokenize(src);
     let mut pos = 0;
     let pat = item(c, &toks, &mut pos, 0);
@@ -341,7 +407,7 @@ fn parse_tf_args(s: &str) -> Vec<&str> {
     args
 }
 
-pub fn parse_single_tf(c: &mut Ctx, tf: &str) -> Tf {
+pub fn parse_single_tf<P: Phase>(c: &mut Ctx<'_, P>, tf: &str) -> Tf {
     if let Some(paren_pos) = tf.find('(') {
         let name = &tf[..paren_pos];
         let args = parse_tf_args(&tf[paren_pos..]);
@@ -396,7 +462,7 @@ pub fn parse_single_tf(c: &mut Ctx, tf: &str) -> Tf {
     }
 }
 
-pub fn parse_tf_chain(c: &mut Ctx, tf_str: &str) -> Tf {
+pub fn parse_tf_chain<P: Phase>(c: &mut Ctx<'_, P>, tf_str: &str) -> Tf {
     let parts = split_pipes(tf_str);
     if parts.len() == 1 {
         return parse_single_tf(c, parts[0]);
@@ -404,7 +470,7 @@ pub fn parse_tf_chain(c: &mut Ctx, tf_str: &str) -> Tf {
     Tf::Pipeline(parts.iter().map(|p| parse_single_tf(c, p)).collect())
 }
 
-fn item(c: &mut Ctx, toks: &[String], pos: &mut usize, field: u16) -> Pat {
+fn item<P: Phase>(c: &mut Ctx<'_, P>, toks: &[String], pos: &mut usize, field: u16) -> Pat {
     let tok = toks[*pos].as_str();
     *pos += 1;
     if tok == "(" {
@@ -473,11 +539,12 @@ fn item(c: &mut Ctx, toks: &[String], pos: &mut usize, field: u16) -> Pat {
         };
         let slot = c.slot(n);
         if let Some(kinds) = explicit_filter {
-            c.filters[slot as usize] = kinds
+            let filter: Vec<u16> = kinds
                 .split('|')
                 .filter(|k| !k.is_empty())
                 .map(|k| c.intern_kind(k))
                 .collect();
+            c.apply_filter(slot, filter);
         }
         let rekind = rekind_str.map(|k| c.intern_kind(k));
         return Pat::Var {

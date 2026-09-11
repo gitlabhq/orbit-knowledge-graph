@@ -403,7 +403,7 @@ fn build_import_edges(
                         .get(&(tfi, def_name))
                         .copied()
                         .unwrap_or((tfi, def_node));
-                    edges.push(Edge::new(fi, i, real_fi, real_node, EdgeKind::Imports));
+                    edges.push(Edge::new(fi, c, real_fi, real_node, EdgeKind::Imports));
                 }
                 continue;
             }
@@ -413,11 +413,11 @@ fn build_import_edges(
             }
 
             if let Some(&(re_fi, re_node)) = reexports.get(&(tfi, name_sym)) {
-                edges.push(Edge::new(fi, i, re_fi, re_node, EdgeKind::Imports));
+                edges.push(Edge::new(fi, c, re_fi, re_node, EdgeKind::Imports));
                 continue;
             }
             if let Some(&def_node) = visible[tfi].get(&name_sym) {
-                edges.push(Edge::new(fi, i, tfi, def_node, EdgeKind::Imports));
+                edges.push(Edge::new(fi, c, tfi, def_node, EdgeKind::Imports));
                 continue;
             }
 
@@ -426,7 +426,7 @@ fn build_import_edges(
             );
             if results.len() == 1 {
                 let (def_fi, def_node) = results[0];
-                edges.push(Edge::new(fi, i, def_fi, def_node, EdgeKind::Imports));
+                edges.push(Edge::new(fi, c, def_fi, def_node, EdgeKind::Imports));
                 continue;
             }
 
@@ -438,7 +438,7 @@ fn build_import_edges(
             {
                 let submod_path = format!("{target_dir}/{name_str}");
                 if let Some(&sub_fi) = file_index.get(&submod_path) {
-                    edges.push(Edge::new(fi, i, sub_fi, 0, EdgeKind::Imports));
+                    edges.push(Edge::new(fi, c, sub_fi, 0, EdgeKind::Imports));
                 }
             }
         }
@@ -466,7 +466,8 @@ fn build_call_edges(
         let mut target_files = vec![req.target_fi];
         for ce in cross_edges {
             if ce.from.tree as usize == fi
-                && ce.from.node == import_node
+                && (ce.from.node == import_node
+                    || trees[fi].nodes[ce.from.node as usize].parent == import_node)
                 && ce.kind == EdgeKind::Imports
             {
                 if !target_files.contains(&(ce.to.tree as usize)) {
@@ -535,18 +536,18 @@ fn build_call_edges(
                 continue;
             }
             let edge_import = edge.to.node;
+            let import_parent = trees[ce.from.tree as usize].nodes[ce.from.node as usize].parent;
             let matches_import = edge_import == ce.from.node
-                || trees[ce.from.tree as usize].nodes[edge_import as usize].parent == ce.from.node;
+                || edge_import == import_parent
+                || trees[ce.from.tree as usize].nodes[edge_import as usize].parent == import_parent;
             if !matches_import {
                 continue;
             }
 
-            let is_wildcard = trees[ce.from.tree as usize]
-                .children(ce.from.node)
-                .any(|c| {
-                    trees[ce.from.tree as usize].kind(c) == k_name
-                        && lang.syms.resolve(trees[ce.from.tree as usize].sym(c)) == "*"
-                });
+            let is_wildcard = lang
+                .syms
+                .resolve(trees[ce.from.tree as usize].sym(ce.from.node))
+                == "*";
 
             if is_wildcard && target_name != 0 {
                 let caller_node = edge.from.node;
