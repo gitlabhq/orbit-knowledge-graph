@@ -16,11 +16,11 @@ deploying an intermediate release. Each holds the unmodified ontology YAML and S
 templates from the exact release below, keyed by relative path under
 `config/ontology/`, and no current ontology files were substituted:
 
-| Archive        | Release    | Commit                                     | Sources |
-| -------------- | ---------- | ------------------------------------------ | ------- |
-| `v93.tar.gz`   | `v0.115.0` | `4cd41155c4bd87c59f2f1665ce2443e630e1f784` | 104     |
-| `v94.tar.gz`   | `v0.118.0` | `be1137efc42bd09ab2120e8e024719e041adb37e` | 104     |
-| `v95.tar.gz`   | `v0.118.1` | `53544c54efa727be390cd28faba0460597eaa792` | 104     |
+| Archive        | Release    | Commit                                     |
+| -------------- | ---------- | ------------------------------------------ |
+| `v93.tar.gz`   | `v0.115.0` | `4cd41155c4bd87c59f2f1665ce2443e630e1f784` |
+| `v94.tar.gz`   | `v0.118.0` | `be1137efc42bd09ab2120e8e024719e041adb37e` |
+| `v95.tar.gz`   | `v0.118.1` | `53544c54efa727be390cd28faba0460597eaa792` |
 
 Each was produced with `OntologyArchive::from_sources(N, sources)` over that commit's
 `config/ontology/` files, plus the format-1 manifest.
