@@ -153,9 +153,7 @@ A serving snapshot (`crates/orbit-server/src/serving_schema.rs`) is immutable an
 - a `PathResolver` for that table-set.
 
 Every request pins one snapshot for its whole run, from compilation through path resolution and
-redaction, so a promotion cannot switch tables under a running query. Streaming requests pin the
-snapshot before waiting for input, and `grpc.stream_timeout_secs` is one absolute deadline for
-input, execution, and the final send, so an idle stream cannot pin a retired snapshot forever.
+redaction, so a promotion cannot switch tables under a running query.
 
 Loading an archive does not prove the binary can serve it; that depends on the archive loader,
 parser, and compiler. Validate a cross-version rollout before relying on it.

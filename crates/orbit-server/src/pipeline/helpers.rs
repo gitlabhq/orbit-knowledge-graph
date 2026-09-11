@@ -70,10 +70,6 @@ pub async fn send_query_error(
     tx: &mpsc::Sender<Result<ExecuteQueryMessage, Status>>,
     error: PipelineError,
 ) {
-    let _ = tx.send(Ok(query_error_message(error))).await;
-}
-
-pub(crate) fn query_error_message(error: PipelineError) -> ExecuteQueryMessage {
     let client_safe = matches!(
         error,
         PipelineError::Compile {
@@ -91,12 +87,14 @@ pub(crate) fn query_error_message(error: PipelineError) -> ExecuteQueryMessage {
         error = %error,
         "Pipeline error",
     );
-    ExecuteQueryMessage {
-        content: Some(execute_query_message::Content::Error(ExecuteQueryError {
-            code: error.code().to_string(),
-            message: sanitize_error_message(&error),
-        })),
-    }
+    let _ = tx
+        .send(Ok(ExecuteQueryMessage {
+            content: Some(execute_query_message::Content::Error(ExecuteQueryError {
+                code: error.code().to_string(),
+                message: sanitize_error_message(&error),
+            })),
+        }))
+        .await;
 }
 
 /// Sanitize error messages before sending to clients.

@@ -19,8 +19,7 @@ use crate::auth::{Claims, JwtValidator, build_security_context};
 use crate::cluster_health::ClusterHealthChecker;
 use crate::graph_status::GraphStatusService;
 use crate::pipeline::{
-    QueryPipelineService, query_error_message, receive_query_request, send_invalid_request_error,
-    send_query_error,
+    QueryPipelineService, receive_query_request, send_invalid_request_error, send_query_error,
 };
 use crate::proto::{
     ExecuteQueryMessage, ExecuteQueryResult, FormatName as ProtoFormatName,
@@ -297,24 +296,14 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
 
         let pipeline = self.pipeline.clone();
         let schema = self.schema_watcher.snapshot()?;
-        let deadline =
-            tokio::time::Instant::now() + std::time::Duration::from_secs(self.stream_timeout_secs);
+        let stream_timeout = self.stream_timeout_secs;
         let span = tracing::Span::current();
 
         tokio::spawn(
             async move {
-                let req = match tokio::time::timeout_at(
-                    deadline,
-                    receive_query_request(&mut stream, &tx),
-                )
-                .await
-                {
-                    Ok(Some(request)) => request,
-                    Ok(None) => return,
-                    Err(_) => {
-                        let _ = tx.try_send(Ok(query_error_message(PipelineError::Timeout)));
-                        return;
-                    }
+                let req = match receive_query_request(&mut stream, &tx).await {
+                    Some(r) => r,
+                    None => return,
                 };
 
                 let resolved = match QueryType::try_from(req.query_type) {
@@ -333,11 +322,7 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
                 let query_json = match resolved {
                     Ok(query) => query,
                     Err(message) => {
-                        let _ = tokio::time::timeout_at(
-                            deadline,
-                            send_invalid_request_error(&tx, message),
-                        )
-                        .await;
+                        send_invalid_request_error(&tx, message).await;
                         return;
                     }
                 };
@@ -346,8 +331,9 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
 
                 let use_llm_format = req.format == ResponseFormat::Llm as i32;
 
+                let timeout = std::time::Duration::from_secs(stream_timeout);
                 let result = pipeline
-                    .run_query(&schema, ctx, &query_json, tx.clone(), stream, deadline)
+                    .run_query(&schema, ctx, &query_json, tx.clone(), stream, timeout)
                     .await;
 
                 match result {
@@ -386,23 +372,25 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
                             format_name: proto_format_name(format_name).into(),
                         });
 
-                        let _ = tokio::time::timeout_at(
-                            deadline,
-                            tx.send(Ok(ExecuteQueryMessage {
+                        let _ = tx
+                            .send(Ok(ExecuteQueryMessage {
                                 content: Some(execute_query_message::Content::Result(
                                     ExecuteQueryResult { content, metadata },
                                 )),
-                            })),
-                        )
-                        .await;
+                            }))
+                            .await;
                     }
                     Err(e @ PipelineError::Timeout) => {
-                        let _ = tx.try_send(Ok(query_error_message(e)));
-                        let _ =
-                            tx.try_send(Err(Status::deadline_exceeded("Query stream timed out")));
+                        // run_query already logged via send_query_error and
+                        // recorded the metric through the observer chain.
+                        // Translate to deadline_exceeded for the gRPC client.
+                        send_query_error(&tx, e).await;
+                        let _ = tx
+                            .send(Err(Status::deadline_exceeded("Query stream timed out")))
+                            .await;
                     }
                     Err(e) => {
-                        let _ = tokio::time::timeout_at(deadline, send_query_error(&tx, e)).await;
+                        send_query_error(&tx, e).await;
                     }
                 }
             }

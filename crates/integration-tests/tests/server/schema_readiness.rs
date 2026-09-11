@@ -178,22 +178,6 @@ async fn metadata_read_failure_keeps_the_last_usable_schema() {
     assert_eq!(project_row(&result), expected_project_row(1));
 }
 
-#[tokio::test]
-async fn idle_and_authorization_blocked_streams_time_out_without_query_success() {
-    let mut cluster = Cluster::start_with_stream_timeout(1, Duration::from_secs(1)).await;
-    cluster.create_tables(&[1]).await;
-    cluster.promote(1).await;
-    cluster.await_serving(Some(1)).await;
-
-    let mut idle = cluster.open_query(None).await;
-    let mut blocked = cluster.open_query(Some(project_query(1))).await;
-    blocked.await_authorization_request().await;
-
-    assert_eq!(error_code(idle.next().await), Some("timeout".into()));
-    assert_eq!(error_code(blocked.next().await), Some("timeout".into()));
-    assert!(cluster.recorded_schema_versions().is_empty());
-}
-
 struct Cluster {
     graph: TestContext,
     config: AppConfig,
@@ -208,10 +192,6 @@ struct Cluster {
 
 impl Cluster {
     async fn start(embedded_version: u32) -> Self {
-        Self::start_with_stream_timeout(embedded_version, WAIT_LIMIT).await
-    }
-
-    async fn start_with_stream_timeout(embedded_version: u32, stream_timeout: Duration) -> Self {
         let graph = TestContext::new(&[]).await;
         ensure_version_table(&graph.create_client()).await.unwrap();
         let (nats, nats_address) = start_nats().await;
@@ -233,7 +213,7 @@ impl Cluster {
             watcher.clone(),
             &config.graph,
             ClusterHealthChecker::default().into_arc(),
-            stream_timeout.as_secs(),
+            WAIT_LIMIT.as_secs(),
             Arc::new(config.analytics.clone()),
         )
         .with_analytics(analytics.clone());
@@ -688,13 +668,6 @@ fn named_query(name: &str) -> ExecuteQueryRequest {
         query_type: QueryType::Named as i32,
         query: json!({"name": name}).to_string(),
         ..Default::default()
-    }
-}
-
-fn error_code(message: Content) -> Option<String> {
-    match message {
-        Content::Error(error) => Some(error.code),
-        _ => None,
     }
 }
 
