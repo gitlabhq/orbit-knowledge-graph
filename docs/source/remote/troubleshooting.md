@@ -26,7 +26,7 @@ title: Troubleshoot GitLab Orbit Remote
 > For more information, see the history.
 > This feature is available for testing, but not ready for production use.
 
-GitLab Orbit Remote errors occur when running `glab orbit remote` commands.
+When working with GitLab Orbit Remote, you might encounter the following issues.
 
 ## Exit code 2
 
