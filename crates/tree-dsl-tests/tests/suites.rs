@@ -134,7 +134,7 @@ yaml_test!(
     python_v1_interfile_resolution,
     "python/v1_interfile_resolution.yaml"
 );
-yaml_test!(python_resolution, "python_resolution.yaml");
+yaml_test!(python_resolution, "python/python_resolution.yaml");
 
 // ── JavaScript ──
 yaml_test!(
