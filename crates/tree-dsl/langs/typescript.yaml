@@ -106,6 +106,10 @@ stages:
       - match: '(enum_declaration)'
         append: '(__deftype "Enum") (__scope)'
 
+      # Class fields
+      - match: '(public_field_definition)'
+        append: '(__deftype "Property")'
+
       # Variable declarations with initializer
       - match: '(variable_declarator value: $V:arrow_function)'
         append: '(__deftype "Function") (__scope)'

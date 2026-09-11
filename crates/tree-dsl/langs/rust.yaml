@@ -71,7 +71,7 @@ stages:
 
       # Constants and statics
       - match: '(const_item)'
-        append: '(__deftype "Const")'
+        append: '(__deftype "Constant")'
       - match: '(static_item)'
         append: '(__deftype "Static")'
 

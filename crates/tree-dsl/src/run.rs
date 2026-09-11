@@ -56,7 +56,11 @@ fn classify_methods(tree: &mut Tree, lang: &mut Lang) {
     let deftype_k = lang.lookup_kind("__deftype");
     let func_sym = lang.syms.intern("Function");
     let method_sym = lang.syms.intern("Method");
-    let class_sym = lang.syms.intern("Class");
+    let container_syms = [
+        lang.syms.intern("Class"),
+        lang.syms.intern("Impl"),
+        lang.syms.intern("Trait"),
+    ];
 
     for i in 0..tree.nodes.len() as u32 {
         if tree.kind(i) != deftype_k || tree.sym(i) != func_sym {
@@ -64,9 +68,11 @@ fn classify_methods(tree: &mut Tree, lang: &mut Lang) {
         }
         let mut p = tree.nodes[i as usize].parent;
         while p != NONE {
-            if synth_child(tree, p, deftype_k) == Some(class_sym) {
-                tree.nodes[i as usize].sym = method_sym;
-                break;
+            if let Some(dt) = synth_child(tree, p, deftype_k) {
+                if container_syms.contains(&dt) {
+                    tree.nodes[i as usize].sym = method_sym;
+                    break;
+                }
             }
             p = tree.nodes[p as usize].parent;
         }
