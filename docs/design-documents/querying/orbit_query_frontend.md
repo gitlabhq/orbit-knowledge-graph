@@ -81,12 +81,13 @@ The frontend infers the query type:
 
 | Pattern or projection | Compiler query type |
 |---|---|
-| Named `ANY SHORTEST ...` pattern | Path finding, or aggregation when RETURN aggregates over its endpoints |
+| Named `ANY SHORTEST ...` pattern | Path finding |
 | One relationship to an unfiltered, unlabeled far endpoint | Neighbors |
 | Aggregate in RETURN | Aggregation |
 | Other supported patterns | Traversal |
 
 Path finding supports outgoing paths from one hop to an explicit maximum.
+Aggregation over shortest paths is unsupported; shared validation rejects it for both JSON and GQL.
 Variable-length traversal accepts exact lengths and bounded ranges. Traversal and path finding share the compiler's three-hop cap.
 Undirected relationships are supported only for neighbors queries. Between labeled nodes, use `->` or `<-`.
 Relationship property filters, including inline maps, require a maximum of one hop.

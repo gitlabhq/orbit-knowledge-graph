@@ -1001,17 +1001,38 @@ fn orbit_query_rejects_inline_filters_on_variable_length_relationships() {
 }
 
 #[test]
-fn orbit_query_aggregates_over_shortest_paths() {
-    let json = r#"{"query_type":"aggregation","nodes":[{"id":"u","entity":"User","id_range":{"start":1,"end":10000}},{"id":"p","entity":"Project"}],"path":{"type":"shortest","from":"u","to":"p","max_depth":3},"group_by":["p"],"aggregations":[{"count":"u","as":"hit"}],"limit":10}"#;
-    let query = "MATCH path = ANY SHORTEST (u:User)-[*1..3]->(p:Project) WHERE u.id >= 1 AND u.id <= 10000 RETURN p, count(u) AS hit LIMIT 10";
-    compile_pair(json, query, &embedded_ontology(), &test_ctx()).unwrap();
+fn orbit_query_rejects_aggregation_over_shortest_paths() {
+    let cases = [
+        (
+            r#"{"query_type":"aggregation","nodes":[{"id":"u","entity":"User","id_range":{"start":1,"end":10000}},{"id":"p","entity":"Project"}],"path":{"type":"shortest","from":"u","to":"p","max_depth":3},"group_by":["p"],"aggregations":[{"count":"u","as":"hit"}],"limit":10}"#,
+            "MATCH path = ANY SHORTEST (u:User)-[*1..3]->(p:Project) WHERE u.id >= 1 AND u.id <= 10000 RETURN p, count(u) AS hit LIMIT 10",
+        ),
+        (
+            r#"{"query_type":"aggregation","nodes":[{"id":"u","entity":"User","node_ids":[1],"id_range":{"start":2,"end":2}},{"id":"p","entity":"Project","node_ids":[2],"columns":["id"]}],"path":{"type":"shortest","from":"u","to":"p","max_depth":3},"group_by":["p"],"aggregations":[{"count":"u","as":"hit"}],"limit":1}"#,
+            "MATCH path = ANY SHORTEST (u:User {id: 1})-[*1..3]->(p:Project {id: 2}) WHERE u.id >= 2 AND u.id <= 2 RETURN p{.id}, count(u) AS hit LIMIT 1",
+        ),
+    ];
+    let ontology = embedded_ontology();
+    let context = test_ctx();
+    for (json, gql) in cases {
+        for (source, frontend) in [(json, Frontend::JsonDsl), (gql, Frontend::Gql)] {
+            let error = compile(source, frontend, &ontology, &context).expect_err(source);
+            assert!(
+                matches!(&error, QueryError::Validation(message)
+                    if message == "aggregation over shortest paths is not supported"),
+                "{source}: {error}"
+            );
+        }
+    }
     for query in [
         "MATCH path = ANY SHORTEST (u:User {id: 1})-[*1..3]->(p:Project) RETURN path, count(u)",
         "MATCH path = ANY SHORTEST (u:User {id: 1})-[*1..3]->(p:Project) RETURN properties(path), count(u)",
     ] {
         let error = compiler::passes::frontend::gql::parse(query).expect_err(query);
         assert!(
-            error.to_string().contains("not the path variable"),
+            error
+                .to_string()
+                .contains("aggregation cannot return the path variable"),
             "{query}: {error}"
         );
     }

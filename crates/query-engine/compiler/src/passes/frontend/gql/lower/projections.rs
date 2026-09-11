@@ -220,10 +220,7 @@ impl Lowering {
                 && (all || self.edges.contains_key(&variable)))
         {
             if aggregate {
-                return Err(invalid(
-                    span,
-                    "aggregations group by path endpoints, not the path variable",
-                ));
+                return Err(invalid(span, "aggregation cannot return the path variable"));
             }
             if alias.is_some() || (all && !dynamic) {
                 return Err(invalid(
