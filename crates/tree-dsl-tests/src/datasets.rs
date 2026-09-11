@@ -182,7 +182,12 @@ fn def_fqn(tree: &Tree, node: u32, lang: &Lang, sk: &Sk) -> String {
     let left_f = lang.fields.lookup("left") as u16;
     let skip_root = matches!(
         lang_id,
-        Some(SupportLang::JavaScript | SupportLang::TypeScript | SupportLang::Tsx)
+        Some(
+            SupportLang::JavaScript
+                | SupportLang::TypeScript
+                | SupportLang::Tsx
+                | SupportLang::Rust
+        )
     );
 
     let mut parts = Vec::new();
