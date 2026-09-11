@@ -14,26 +14,28 @@ use async_trait::async_trait;
 use tracing::warn;
 use uuid::Uuid;
 
+use crate::checkpoint::CheckpointStore;
 use crate::orchestrator::dispatch::CodeBackfill;
 use crate::orchestrator::dispatch::code_backfill::METRIC_NAME;
-use crate::orchestrator::scheduled::{CodeStaleSweep, ScheduledTask, TaskError};
+use crate::orchestrator::scheduled::code_stale_sweep::request_sweeps;
+use crate::orchestrator::scheduled::{ScheduledTask, TaskError};
 use orbit_server_config::{CodeBackfillSweepConfig, ScheduleConfiguration};
 
 pub struct CodeBackfillSweep {
     code_backfill: Arc<CodeBackfill>,
-    stale_sweep: CodeStaleSweep,
+    checkpoint_store: Arc<dyn CheckpointStore>,
     config: CodeBackfillSweepConfig,
 }
 
 impl CodeBackfillSweep {
     pub fn new(
         code_backfill: Arc<CodeBackfill>,
-        stale_sweep: CodeStaleSweep,
+        checkpoint_store: Arc<dyn CheckpointStore>,
         config: CodeBackfillSweepConfig,
     ) -> Self {
         Self {
             code_backfill,
-            stale_sweep,
+            checkpoint_store,
             config,
         }
     }
@@ -62,12 +64,10 @@ impl ScheduledTask for CodeBackfillSweep {
 
         match result {
             Ok(outcome) => {
-                if let Err(error) = self
-                    .stale_sweep
-                    .run_for_drained(&outcome.drained_paths)
-                    .await
+                if let Err(error) =
+                    request_sweeps(self.checkpoint_store.as_ref(), &outcome.drained_paths).await
                 {
-                    warn!(%error, "post-backfill stale sweep failed, retrying next tick");
+                    warn!(%error, "failed to request post-backfill stale sweeps, retrying next tick");
                 }
             }
             Err(error) => {

@@ -372,13 +372,16 @@ pub async fn run_dispatcher(
         )),
         Box::new(CodeBackfillSweep::new(
             backfill.clone(),
-            CodeStaleSweep::new(
-                config.graph.build_client(),
-                &modules::code::config::CodeTableNames::from_ontology(&ontology)
-                    .expect("code tables must resolve from the archived ontology"),
-                checkpoint_store.clone(),
-            ),
+            checkpoint_store.clone(),
             config.schedule.tasks.code_backfill.clone(),
+        )),
+        Box::new(CodeStaleSweep::new(
+            config.graph.build_client(),
+            &modules::code::config::CodeTableNames::from_ontology(&ontology)
+                .expect("code tables must resolve from the archived ontology"),
+            checkpoint_store.clone(),
+            metrics.clone(),
+            config.schedule.tasks.code_stale_sweep.clone(),
         )),
         Box::new(TableCleanup::new(
             graph,

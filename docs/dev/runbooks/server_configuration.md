@@ -295,7 +295,8 @@ Distributed locking via NATS KV ensures only one dispatcher instance runs each s
 |------|-------------|-------------|-------------|
 | Global dispatch | `schedule.tasks.global.cron` | `0 */1 * * * *` (every minute) | Publishes `GlobalIndexingRequest` |
 | Namespace dispatch | `schedule.tasks.namespace.cron` | `*/30 * * * * *` (every 30 seconds) | Publishes requests for changed enabled root namespaces and performs the integrated namespace sweep when due |
-| Code backfill | `schedule.tasks.code-backfill.cron` | `0 */1 * * * *` (every minute) | Backfills enabled namespaces whose projects do not yet have code checkpoints |
+| Code backfill | `schedule.tasks.code-backfill.cron` | `0 */1 * * * *` (every minute) | Backfills enabled namespaces whose projects do not yet have code checkpoints, and requests a stale sweep for each namespace it finds drained |
+| Code stale sweep | `schedule.tasks.code-stale-sweep.cron` | `0 */1 * * * *` (every minute) | Tombstones pre-backfill code rows for namespaces the code backfill has drained, oldest request first |
 | Table cleanup | `schedule.tasks.table-cleanup.cron` | `0 0 3 * * 0` (weekly, Sunday 03:00 UTC) | Runs `APPLY DELETED MASK` on every graph table to physically remove lightweight-deleted rows |
 | Namespace deletion | `schedule.tasks.namespace-deletion.cron` | `0 0 3 * * *` (daily 03:00 UTC) | Schedules and executes namespace deletions |
 | Migration completion | `schedule.tasks.migration-completion.cron` | `0 */1 * * * *` (every minute) | Detects completed schema migrations and reconciles dead versions |
@@ -329,6 +330,7 @@ DispatchIndexing continuously polls the raw Siphon JetStream and routes code-tas
 | `schedule.tasks.namespace.sweep_interval_secs` | `3600` | Age at which the namespace dispatcher performs a full enabled-namespace sweep instead of change-only dispatch |
 | `schedule.tasks.stale-edge-reconciliation.lookback_secs` | `3600` | Recent node-version window rescanned on each stale-edge reconciliation run |
 | `schedule.tasks.code-backfill.publish_window` | `200000` | Pending projects held per publish batch. Also the per-run budget shared between the namespaces that still have pending projects, so it bounds both dispatcher memory (about 70 bytes per project) and how much work one namespace can queue ahead of the others |
+| `schedule.tasks.code-stale-sweep.max_namespaces_per_run` | `10` | Drained namespaces swept per run. Each namespace costs one `FINAL` scan per code table, so the cap bounds run length; `0` pauses sweeping while requests keep accumulating |
 
 ## GitLab client
 

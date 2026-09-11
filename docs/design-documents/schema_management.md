@@ -293,7 +293,7 @@ back, not a mistake to refuse. Indexers do not run DDL; they gate on the version
    version. If an affected table also has writers outside the requested scope, the migration
    widens to a full rebuild. This prevents a shared edge table from keeping an old row when the
    corrected row has a different sort-key identity. A code migration is the exception for `gl_edge`:
-   it clones the table intact and relies on the code stale sweep to tombstone its own rows as each
+   it clones the table intact and relies on the code stale sweep to tombstone its own rows once each
    namespace's re-index drains, so a code bump re-indexes only code without re-pulling SDLC. The
    clone-vs-rebuild decision, the ledger-union scope resolution, and the plan-scoped promotion
    gate are recorded in [ADR 017](decisions/017_clone_based_non_blocking_migrations.md).

@@ -139,6 +139,9 @@ schedule:
     code-backfill:
       cron: "0 */1 * * * *"
       publish_window: 200000
+    code-stale-sweep:
+      cron: "0 */1 * * * *"
+      max_namespaces_per_run: 10
     table-cleanup:
       cron: "0 0 3 * * 0"
     namespace-deletion:

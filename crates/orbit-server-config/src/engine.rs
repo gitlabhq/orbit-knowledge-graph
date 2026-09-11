@@ -370,6 +370,14 @@ pub struct CodeBackfillSweepConfig {
     pub publish_window: usize,
 }
 
+/// Cadence and per-run namespace cap for the post-backfill code stale sweep.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct CodeStaleSweepConfig {
+    #[serde(flatten)]
+    pub schedule: ScheduleConfiguration,
+    pub max_namespaces_per_run: usize,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct TableCleanupConfig {
     #[serde(flatten)]
@@ -412,6 +420,7 @@ pub struct ScheduledTasksConfiguration {
     pub namespace: NamespaceDispatcherConfig,
     pub siphon: SiphonRouterConfig,
     pub code_backfill: CodeBackfillSweepConfig,
+    pub code_stale_sweep: CodeStaleSweepConfig,
     pub table_cleanup: TableCleanupConfig,
     pub namespace_deletion: NamespaceDeletionSchedulerConfig,
     pub migration_completion: MigrationCompletionConfig,
@@ -590,6 +599,11 @@ mod tests {
             tasks.stale_edge_reconciliation.schedule.cron.expression(),
             "0 */30 * * * *"
         );
+        assert_eq!(
+            tasks.code_stale_sweep.schedule.cron.expression(),
+            "0 */1 * * * *"
+        );
+        assert_eq!(tasks.code_stale_sweep.max_namespaces_per_run, 10);
     }
 
     #[test]

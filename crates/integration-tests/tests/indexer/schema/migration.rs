@@ -6,7 +6,8 @@ use indexer::checkpoint::ClickHouseCheckpointStore;
 use indexer::locking::LockService;
 use indexer::metrics::MigrationMetrics;
 use indexer::modules::code::config::CodeTableNames;
-use indexer::orchestrator::scheduled::CodeStaleSweep;
+use indexer::orchestrator::scheduled::code_stale_sweep::request_sweeps;
+use indexer::orchestrator::scheduled::{CodeStaleSweep, ScheduledTask, ScheduledTaskMetrics};
 use indexer::schema::migration;
 use indexer::schema::version::{
     SCHEMA_VERSION, SchemaWaitError, ensure_version_table, mark_version_active,
@@ -21,6 +22,7 @@ use orbit_migrations::scope::MigrationScope;
 use orbit_migrations::version::{
     STATUS_ACTIVE, STATUS_RETIRED, promote_version, read_all_versions,
 };
+use orbit_server_config::AppConfig;
 use orbit_utils::traversal_path::TraversalPath;
 
 fn dictionary_credentials(
@@ -1119,10 +1121,24 @@ impl MigrationScenario {
         let store = Arc::new(ClickHouseCheckpointStore::new(Arc::new(
             self.ctx.config.build_client(),
         )));
-        CodeStaleSweep::new(self.ctx.config.build_client(), &table_names, store)
-            .run_for_drained(&[TraversalPath::new_unchecked("1/100/")])
+        let drained = [TraversalPath::new_unchecked("1/100/")];
+        request_sweeps(store.as_ref(), &drained)
             .await
-            .expect("sweep failed");
+            .expect("request failed");
+        self.ctx.execute("SYSTEM FLUSH ASYNC INSERT QUEUE").await;
+        CodeStaleSweep::new(
+            self.ctx.config.build_client(),
+            &table_names,
+            store,
+            ScheduledTaskMetrics::new(),
+            AppConfig::embedded_defaults()
+                .schedule
+                .tasks
+                .code_stale_sweep,
+        )
+        .run()
+        .await
+        .expect("sweep failed");
     }
 
     async fn live_edge_exists(&self, kind: &str, source_id: u64) -> bool {

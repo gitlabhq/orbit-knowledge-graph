@@ -422,7 +422,7 @@ Shared tables need a stricter rule. If the requested scope touches a table that 
 that scope, the dispatcher performs a full rebuild instead. Without that widening, a changed edge
 identity could leave the old row beside the corrected row in a `ReplacingMergeTree` table. A code
 migration is exempt for `gl_edge`: it clones the table intact and relies on the code stale sweep to
-tombstone its own rows as each namespace's re-index drains, so it re-indexes only code without re-pulling SDLC.
+tombstone its own rows once each namespace's re-index drains, so it re-indexes only code without re-pulling SDLC.
 It also clones the SDLC checkpoint intact (keeping the `dispatch.*` cursors so SDLC does not
 re-sweep) but drops the per-namespace `maintenance.code_stale_sweep.*` gates so each namespace
 re-sweeps against the clone.

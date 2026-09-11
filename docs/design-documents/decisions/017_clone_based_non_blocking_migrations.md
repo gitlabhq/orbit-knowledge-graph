@@ -64,7 +64,7 @@ would corrupt data:
 - A rebuilt table has writers outside the scope, whose rows the clone would drop.
 
 `code` is the exception: it clones `gl_edge` intact because the code stale sweep
-tombstones code's own edge rows as each namespace's re-index drains. So a code bump touches
+tombstones code's own edge rows once each namespace's re-index drains. So a code bump touches
 only code.
 
 `classify_tables_for_scope` then marks each table `CloneFromActive` or

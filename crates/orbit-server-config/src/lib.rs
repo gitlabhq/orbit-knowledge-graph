@@ -30,11 +30,11 @@ pub use billing::{BillingConfig, QuotaConfig};
 pub use clickhouse::{ClickHouseConfiguration, ConfigurationError, ProfilingConfig};
 pub use engine::{
     CodeBackfillSweepConfig, CodeIndexingPipelineConfig, CodeIndexingTaskHandlerConfig,
-    CronSchedule, DatalakeRetryConfig, EngineConfigError, EngineConfiguration, EntityHandlerConfig,
-    GlobalDispatcherConfig, HandlersConfiguration, IndexerModule, MigrationCompletionConfig,
-    NamespaceDeletionSchedulerConfig, NamespaceDispatcherConfig, ScheduleConfig,
-    ScheduleConfiguration, ScheduledTasksConfiguration, SiphonRouterConfig,
-    StaleEdgeReconciliationConfig, SubscriptionConfig, TableCleanupConfig,
+    CodeStaleSweepConfig, CronSchedule, DatalakeRetryConfig, EngineConfigError,
+    EngineConfiguration, EntityHandlerConfig, GlobalDispatcherConfig, HandlersConfiguration,
+    IndexerModule, MigrationCompletionConfig, NamespaceDeletionSchedulerConfig,
+    NamespaceDispatcherConfig, ScheduleConfig, ScheduleConfiguration, ScheduledTasksConfiguration,
+    SiphonRouterConfig, StaleEdgeReconciliationConfig, SubscriptionConfig, TableCleanupConfig,
 };
 pub use features::{Feature, FeatureScope, FeaturesConfig};
 pub use gitlab::{GitlabClientConfiguration, GitlabConfig, JwtConfig};

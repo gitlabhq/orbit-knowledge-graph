@@ -375,6 +375,24 @@
         "pipeline"
       ]
     },
+    "CodeStaleSweepConfig": {
+      "description": "Cadence and per-run namespace cap for the post-backfill code stale sweep.",
+      "type": "object",
+      "properties": {
+        "cron": {
+          "$ref": "#/$defs/CronSchedule"
+        },
+        "max_namespaces_per_run": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "cron",
+        "max_namespaces_per_run"
+      ]
+    },
     "CronSchedule": {
       "description": "A six-field cron expression (`sec min hour dom mon dow`), validated when\nthe configuration is deserialized so an invalid schedule fails startup.",
       "type": "string"
@@ -1340,6 +1358,9 @@
         "code-backfill": {
           "$ref": "#/$defs/CodeBackfillSweepConfig"
         },
+        "code-stale-sweep": {
+          "$ref": "#/$defs/CodeStaleSweepConfig"
+        },
         "global": {
           "$ref": "#/$defs/GlobalDispatcherConfig"
         },
@@ -1368,6 +1389,7 @@
         "namespace",
         "siphon",
         "code-backfill",
+        "code-stale-sweep",
         "table-cleanup",
         "namespace-deletion",
         "migration-completion",

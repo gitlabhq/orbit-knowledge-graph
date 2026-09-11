@@ -3,8 +3,10 @@ use std::sync::Arc;
 use clickhouse_client::ClickHouseConfigurationExt;
 use indexer::checkpoint::{CheckpointStore, ClickHouseCheckpointStore};
 use indexer::modules::code::config::CodeTableNames;
-use indexer::orchestrator::scheduled::CodeStaleSweep;
+use indexer::orchestrator::scheduled::code_stale_sweep::request_sweeps;
+use indexer::orchestrator::scheduled::{CodeStaleSweep, ScheduledTask, ScheduledTaskMetrics};
 use integration_testkit::{TestContext, t};
+use orbit_server_config::AppConfig;
 use orbit_utils::traversal_path::TraversalPath;
 
 const WATERMARK: &str = "2026-01-02 00:00:00.000000";
@@ -65,31 +67,50 @@ async fn drained_namespace_sweeps_unclaimed_rows_once() {
         ))
         .await;
 
-    let (sweep, store) = build_sweep(&clickhouse);
+    let (sweep, store) = build_sweep(&clickhouse, 10);
 
     sweep
-        .run_for_drained(&[])
+        .run()
         .await
-        .expect("no drained namespaces must not sweep");
+        .expect("a run without requests must succeed");
     assert!(
         file_is_active(&clickhouse, project_id, 111).await,
         "sweep must not touch a namespace the backfill has not drained"
     );
 
     let drained = vec![TraversalPath::new_unchecked(traversal_path)];
-    sweep.run_for_drained(&drained).await.expect("sweep failed");
+    assert_eq!(
+        request_sweeps(store.as_ref(), &drained)
+            .await
+            .expect("request failed"),
+        1
+    );
+    flush_requests(&clickhouse).await;
+    let gate_key = format!("maintenance.code_stale_sweep.{traversal_path}");
+    let request = store
+        .load(&gate_key)
+        .await
+        .expect("load gate")
+        .expect("request must be recorded");
+    assert!(
+        request.cursor_values.is_some(),
+        "a requested sweep must be recorded as an in-progress gate"
+    );
+
+    sweep.run().await.expect("sweep failed");
 
     assert!(!file_is_active(&clickhouse, project_id, 111).await);
     assert!(file_is_active(&clickhouse, project_id, 222).await);
     assert_eq!(active_edge_count(&clickhouse, "gl_edge", 111).await, 0);
     assert_eq!(active_edge_count(&clickhouse, "gl_code_edge", 111).await, 0);
+    let gate = store
+        .load(&gate_key)
+        .await
+        .expect("load gate")
+        .expect("gate must survive the sweep");
     assert!(
-        store
-            .load(&format!("maintenance.code_stale_sweep.{traversal_path}"))
-            .await
-            .expect("load marker")
-            .is_some(),
-        "the sweep must record its per-namespace maintenance checkpoint"
+        gate.cursor_values.is_none(),
+        "the sweep must complete its per-namespace maintenance checkpoint"
     );
 
     insert_file(
@@ -101,10 +122,14 @@ async fn drained_namespace_sweeps_unclaimed_rows_once() {
         PRE_WATERMARK,
     )
     .await;
-    sweep
-        .run_for_drained(&drained)
-        .await
-        .expect("marked sweep must be a no-op");
+    assert_eq!(
+        request_sweeps(store.as_ref(), &drained)
+            .await
+            .expect("request failed"),
+        0,
+        "a completed gate must not be requested again"
+    );
+    sweep.run().await.expect("run without requests failed");
     assert!(
         file_is_active(&clickhouse, project_id, 333).await,
         "a swept namespace must not sweep again for the same schema version"
@@ -138,11 +163,8 @@ async fn sweep_scopes_to_the_drained_namespace() {
         .await;
     }
 
-    let (sweep, _) = build_sweep(&clickhouse);
-    sweep
-        .run_for_drained(&[TraversalPath::new_unchecked("1/40/")])
-        .await
-        .expect("sweep failed");
+    let (sweep, store) = build_sweep(&clickhouse, 10);
+    request_and_run(&clickhouse, &sweep, &store, &["1/40/"]).await;
 
     assert!(
         !file_is_active(&clickhouse, 40, 140).await,
@@ -152,6 +174,60 @@ async fn sweep_scopes_to_the_drained_namespace() {
         file_is_active(&clickhouse, 41, 141).await,
         "an undrained namespace must keep its rows even when a sibling sweeps"
     );
+}
+
+#[tokio::test]
+async fn sweep_honours_the_per_run_cap_and_finishes_on_the_next_run() {
+    let clickhouse = TestContext::new(&[
+        integration_testkit::SIPHON_SCHEMA_SQL,
+        *integration_testkit::GRAPH_SCHEMA_SQL,
+    ])
+    .await;
+
+    for (path, project_id) in [("1/40/", 40i64), ("1/41/", 41i64)] {
+        clickhouse
+            .execute(&format!(
+                "INSERT INTO {} (traversal_path, project_id, branch, last_task_id, indexed_at) \
+                 VALUES ('{path}', {project_id}, 'main', 1, '{WATERMARK}')",
+                t("code_indexing_checkpoint")
+            ))
+            .await;
+        insert_file(
+            &clickhouse,
+            path,
+            project_id,
+            "main",
+            project_id + 100,
+            PRE_WATERMARK,
+        )
+        .await;
+    }
+
+    let (paused, store) = build_sweep(&clickhouse, 0);
+    request_and_run(&clickhouse, &paused, &store, &["1/40/", "1/41/"]).await;
+    assert!(
+        file_is_active(&clickhouse, 40, 140).await && file_is_active(&clickhouse, 41, 141).await,
+        "a zero cap must pause sweeping while the requests wait"
+    );
+
+    let (sweep, store) = build_sweep(&clickhouse, 1);
+    request_and_run(&clickhouse, &sweep, &store, &["1/40/", "1/41/"]).await;
+
+    let swept_after_first_run = [
+        !file_is_active(&clickhouse, 40, 140).await,
+        !file_is_active(&clickhouse, 41, 141).await,
+    ]
+    .into_iter()
+    .filter(|swept| *swept)
+    .count();
+    assert_eq!(
+        swept_after_first_run, 1,
+        "a run must sweep no more namespaces than its cap"
+    );
+
+    sweep.run().await.expect("second run failed");
+    assert!(!file_is_active(&clickhouse, 40, 140).await);
+    assert!(!file_is_active(&clickhouse, 41, 141).await);
 }
 
 #[tokio::test]
@@ -191,11 +267,8 @@ async fn sweep_writes_no_tombstones_for_superseded_rows() {
     )
     .await;
 
-    let (sweep, _) = build_sweep(&clickhouse);
-    sweep
-        .run_for_drained(&[TraversalPath::new_unchecked(traversal_path)])
-        .await
-        .expect("sweep failed");
+    let (sweep, store) = build_sweep(&clickhouse, 10);
+    request_and_run(&clickhouse, &sweep, &store, &[traversal_path]).await;
 
     assert!(file_is_active(&clickhouse, project_id, 444).await);
     let rows = clickhouse
@@ -212,20 +285,53 @@ async fn sweep_writes_no_tombstones_for_superseded_rows() {
     );
 }
 
-fn build_sweep(clickhouse: &TestContext) -> (CodeStaleSweep, Arc<ClickHouseCheckpointStore>) {
+fn build_sweep(
+    clickhouse: &TestContext,
+    max_namespaces_per_run: usize,
+) -> (CodeStaleSweep, Arc<ClickHouseCheckpointStore>) {
     let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
     let table_names = CodeTableNames::from_ontology(&ontology).expect("code tables must resolve");
     let store = Arc::new(ClickHouseCheckpointStore::new(Arc::new(
         clickhouse.config.build_client(),
     )));
+    let mut config = AppConfig::embedded_defaults()
+        .schedule
+        .tasks
+        .code_stale_sweep;
+    config.max_namespaces_per_run = max_namespaces_per_run;
     (
         CodeStaleSweep::new(
             clickhouse.config.build_client(),
             &table_names,
             store.clone(),
+            ScheduledTaskMetrics::new(),
+            config,
         ),
         store,
     )
+}
+
+async fn request_and_run(
+    clickhouse: &TestContext,
+    sweep: &CodeStaleSweep,
+    store: &Arc<ClickHouseCheckpointStore>,
+    drained: &[&str],
+) {
+    let drained: Vec<TraversalPath> = drained
+        .iter()
+        .map(|path| TraversalPath::new_unchecked(*path))
+        .collect();
+    request_sweeps(store.as_ref(), &drained)
+        .await
+        .expect("request failed");
+    flush_requests(clickhouse).await;
+    sweep.run().await.expect("sweep failed");
+}
+
+// Sweep requests are fire-and-forget async inserts; production picks them up a
+// flush later on its next tick, a test forces the flush.
+async fn flush_requests(clickhouse: &TestContext) {
+    clickhouse.execute("SYSTEM FLUSH ASYNC INSERT QUEUE").await;
 }
 
 async fn insert_file(

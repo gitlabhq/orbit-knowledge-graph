@@ -47,7 +47,7 @@ NATS KV distributed lock and reads the requested scope from the migration ledger
 SDLC change rebuilds the affected table and clones unaffected tables from the active version. If an
 affected table has writers outside the requested scope, the dispatcher widens the migration to a
 full rebuild. A code migration is the exception: it clones the shared `gl_edge` table intact (rather
-than widening) and lets the code stale sweep tombstone its own rows as the re-index drains, so it
+than widening) and lets the code stale sweep tombstone its own rows once the re-index drains, so it
 re-indexes only code without re-pulling SDLC.
 
 Selective migrations seed the new checkpoint table with completed checkpoints for unchanged
