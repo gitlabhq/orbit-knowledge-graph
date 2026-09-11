@@ -124,6 +124,11 @@ releases:
     createNamespace: true
     chart: siphon/siphon
     version: {{ $v.siphon.chart }}
+{{ if gt (env "E2E_CH_REPLICAS" | default "1" | atoi) 1 }}
+    # The producer is ready once the consumer drained every initial snapshot, and
+    # quorum inserts serialize that drain per table.
+    timeout: 1800
+{{ end }}
     labels:
       phase: pipeline
       component: siphon

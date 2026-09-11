@@ -9,16 +9,6 @@ persistence:
   enabled: {{ gt $replicas 1 }}
   size: 20Gi
 
-{{ if gt $replicas 1 }}
-resources:
-  requests:
-    cpu: 500m
-    memory: 2Gi
-  limits:
-    cpu: 2
-    memory: 4Gi
-{{ end }}
-
 users:
   siphon:
     password: {{ requiredEnv "E2E_CH_SIPHON_PASS" | quote }}
