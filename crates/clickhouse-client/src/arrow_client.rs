@@ -27,13 +27,22 @@ use crate::error::ClickHouseError;
 /// ClickHouse rejects an async insert that also carries `insert_quorum`.
 const ASYNC_INSERT_SETTING_KEYS: [&str; 2] = ["async_insert", "wait_for_async_insert"];
 
-/// 286: serialized quorum inserts collided; 289: the replica missed the last quorum write.
-const QUORUM_CONFLICTS: [&str; 2] = ["UNSATISFIED_QUORUM", "REPLICA_IS_NOT_IN_QUORUM"];
+/// 286: serialized quorum inserts collided; 289: the replica missed the last quorum write;
+/// the Keeper texts cover a coordination leader election while a replica is down.
+const REPLICATION_TRANSIENTS: [&str; 5] = [
+    "UNSATISFIED_QUORUM",
+    "REPLICA_IS_NOT_IN_QUORUM",
+    "Session expired",
+    "Connection loss",
+    "Operation timeout",
+];
 const QUORUM_RETRY_ATTEMPTS: u32 = 20;
 
-fn is_quorum_conflict(error: &ClickHouseError) -> bool {
+fn is_replication_transient(error: &ClickHouseError) -> bool {
     let message = error.to_string();
-    QUORUM_CONFLICTS.iter().any(|code| message.contains(code))
+    REPLICATION_TRANSIENTS
+        .iter()
+        .any(|text| message.contains(text))
 }
 
 fn quorum_backoff(attempt: u32) -> Duration {
@@ -49,7 +58,9 @@ where
     loop {
         match op().await {
             Err(error)
-                if enabled && attempt < QUORUM_RETRY_ATTEMPTS && is_quorum_conflict(&error) =>
+                if enabled
+                    && attempt < QUORUM_RETRY_ATTEMPTS
+                    && is_replication_transient(&error) =>
             {
                 attempt += 1;
                 tokio::time::sleep(quorum_backoff(attempt)).await;
@@ -761,14 +772,18 @@ mod tests {
     }
 
     #[test]
-    fn quorum_conflicts_are_the_two_quorum_codes() {
-        assert!(is_quorum_conflict(&bad_response(
-            "Code: 286. DB::Exception: Quorum for previous write has not been satisfied yet. (UNSATISFIED_QUORUM)"
-        )));
-        assert!(is_quorum_conflict(&bad_response(
-            "Code: 289. DB::Exception: Replica doesn't have part. (REPLICA_IS_NOT_IN_QUORUM)"
-        )));
-        assert!(!is_quorum_conflict(&bad_response(
+    fn replication_transients_cover_quorum_and_keeper_errors() {
+        for message in [
+            "Code: 286. DB::Exception: Quorum for previous write has not been satisfied yet. (UNSATISFIED_QUORUM)",
+            "Code: 289. DB::Exception: Replica doesn't have part. (REPLICA_IS_NOT_IN_QUORUM)",
+            "Code: 999. Coordination::Exception: Session expired. (KEEPER_EXCEPTION)",
+        ] {
+            assert!(
+                is_replication_transient(&bad_response(message)),
+                "{message}"
+            );
+        }
+        assert!(!is_replication_transient(&bad_response(
             "Code: 241. DB::Exception: Memory limit exceeded. (MEMORY_LIMIT_EXCEEDED)"
         )));
     }
@@ -796,7 +811,7 @@ mod tests {
             Err(bad_response("(REPLICA_IS_NOT_IN_QUORUM)"))
         })
         .await;
-        assert!(is_quorum_conflict(&result.unwrap_err()));
+        assert!(is_replication_transient(&result.unwrap_err()));
         assert_eq!(attempts.load(std::sync::atomic::Ordering::SeqCst), 1);
     }
 
