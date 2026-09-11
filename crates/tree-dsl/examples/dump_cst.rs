@@ -38,6 +38,17 @@ fn main() {
         if stage == "ssa" {
             let tree = tree_dsl::run::process_file("test", &source, &mut lang, &pipeline);
             dump(&tree, &lang);
+            for e in &tree.edges {
+                let from_s = lang.syms.resolve(tree.nodes[e.from.node as usize].sym);
+                let to_s = lang.syms.resolve(tree.nodes[e.to.node as usize].sym);
+                let from = if from_s.len() > 30 {
+                    &from_s[..30]
+                } else {
+                    from_s
+                };
+                let to = if to_s.len() > 30 { &to_s[..30] } else { to_s };
+                eprintln!("  edge: {from} --[{}]--> {to}", e.kind);
+            }
         } else {
             dump(&tree, &lang);
         }

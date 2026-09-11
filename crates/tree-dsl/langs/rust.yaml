@@ -9,6 +9,10 @@ stages:
       - match: '(field_expression value: (self) field: $F)'
         replace: '(__ivar @$F)'
 
+      # Mark functions with &self as methods (for classify_methods)
+      - match: '(function_item parameters: (parameters (self_parameter)))'
+        append: '(__self_method)'
+
       # Visibility modifier → __visibility
       - match: '(visibility_modifier)'
         set_kind: '__visibility'
@@ -39,9 +43,9 @@ stages:
       - match: '(use_declaration argument: $A:scoped_identifier)'
         replace: '(__import (__source @$A|replace("::","/")) (__source_path @$A|replace("::","/")) (__name @$A|split_last("::")))' 
 
-      # use foo::bar::*;
-      - match: '(use_declaration argument: (scoped_use_list path: $P list: $L:use_list))'
-        replace: '(__import (__source @$P|replace("::","/")) (__source_path @$P|replace("::","/")) $$$L->__name)'
+      # use foo::{A, B};
+      - match: '(use_declaration argument: (scoped_use_list path: $P list: (use_list $$$NAMES:identifier)))'
+        replace: '(__import (__source @$P|replace("::","/")) (__source_path @$P|replace("::","/")) $$$NAMES=>__name)'
 
       # use foo;
       - match: '(use_declaration argument: $A:identifier)'
@@ -61,11 +65,12 @@ stages:
       - match: '(trait_item)'
         append: '(__deftype "Trait") (__scope)'
 
-      # Impl blocks
-      - match: '(impl_item)'
-        append: '(__deftype "Impl") (__scope)'
+      # Impl blocks — use type: field as the def name
+      - match: '(impl_item type: $T)'
+        append: '(__deftype "Impl") (__defname @$T) (__scope)'
 
-      # Functions
+      # Functions — classify_methods upgrades to Method (has &self inside
+      # impl/trait) or AssociatedFunction (no &self inside impl/trait)
       - match: '(function_item)'
         append: '(__deftype "Function") (__scope)'
 

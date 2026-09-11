@@ -54,23 +54,36 @@ pub fn process_file(path: &str, source: &str, lang: &mut Lang, pipeline: &Pipeli
 
 fn classify_methods(tree: &mut Tree, lang: &mut Lang) {
     let deftype_k = lang.lookup_kind("__deftype");
+    let self_method_k = lang.lookup_kind("__self_method");
     let func_sym = lang.syms.intern("Function");
     let method_sym = lang.syms.intern("Method");
-    let container_syms = [
-        lang.syms.intern("Class"),
-        lang.syms.intern("Impl"),
-        lang.syms.intern("Trait"),
-    ];
+    let assoc_fn_sym = lang.syms.intern("AssociatedFunction");
+
+    let class_sym = lang.syms.intern("Class");
+    let impl_sym = lang.syms.intern("Impl");
+    let trait_sym = lang.syms.intern("Trait");
 
     for i in 0..tree.nodes.len() as u32 {
         if tree.kind(i) != deftype_k || tree.sym(i) != func_sym {
             continue;
         }
-        let mut p = tree.nodes[i as usize].parent;
+        let def_node = tree.nodes[i as usize].parent;
+        if def_node == NONE {
+            continue;
+        }
+        let mut p = tree.nodes[def_node as usize].parent;
         while p != NONE {
             if let Some(dt) = synth_child(tree, p, deftype_k) {
-                if container_syms.contains(&dt) {
+                if dt == class_sym {
                     tree.nodes[i as usize].sym = method_sym;
+                    break;
+                }
+                if dt == impl_sym || dt == trait_sym {
+                    let has_self = self_method_k != 0
+                        && tree
+                            .children(def_node)
+                            .any(|c| tree.kind(c) == self_method_k);
+                    tree.nodes[i as usize].sym = if has_self { method_sym } else { assoc_fn_sym };
                     break;
                 }
             }
@@ -279,7 +292,7 @@ struct SsaState {
     def_stack: Vec<(Option<u32>, u32, BlockId)>,
     branch_stack: Vec<BranchFrame>,
     wildcard_sym: u32,
-    class_sym: u32,
+    container_syms: Vec<u32>,
 }
 
 impl SsaState {
@@ -347,7 +360,7 @@ impl SsaState {
                 .unwrap_or(0);
 
             if obj_is_ivar && obj_sym != 0 {
-                if let Some(cls) = find_enclosing_class(tree, i, &self.syns, self.class_sym)
+                if let Some(cls) = find_enclosing_class(tree, i, &self.syns, &self.container_syms)
                     && let Some(ts) = find_ivar_type(tree, cls, obj_sym, &self.syns, &self.f)
                 {
                     resolve_method_on_type(
@@ -391,7 +404,7 @@ impl SsaState {
         } else if callee_k == self.syns.ivar {
             let ivar_sym = tree.sym(cn);
             if ivar_sym != 0 {
-                if let Some(cls) = find_enclosing_class(tree, i, &self.syns, self.class_sym)
+                if let Some(cls) = find_enclosing_class(tree, i, &self.syns, &self.container_syms)
                     && let Some(method) =
                         find_method(tree, &self.def_nodes, cls, ivar_sym, &self.syns, &self.f)
                 {
@@ -488,7 +501,7 @@ impl SsaState {
                     lang,
                     &self.syns,
                     &self.f,
-                    self.class_sym,
+                    &self.container_syms,
                 );
                 self.ssa.write_variable(lhs, self.cur_block, val);
                 update_branch_arm(&mut self.branch_stack, i, self.cur_block);
@@ -501,7 +514,11 @@ fn ssa_fold(tree: &mut Tree, lang: &mut Lang) {
     let syns = Syns::new(lang);
     let f = Fields::new(lang);
     let wildcard_sym = lang.syms.intern("*");
-    let class_sym = lang.syms.intern("Class");
+    let container_syms = vec![
+        lang.syms.intern("Class"),
+        lang.syms.intern("Impl"),
+        lang.syms.intern("Trait"),
+    ];
 
     let mut ssa = SsaEngine::new();
     let entry = ssa.add_block();
@@ -520,7 +537,7 @@ fn ssa_fold(tree: &mut Tree, lang: &mut Lang) {
         def_stack: vec![(None, u32::MAX, entry)],
         branch_stack: Vec::new(),
         wildcard_sym,
-        class_sym,
+        container_syms,
     };
 
     let mut i = 0u32;
@@ -740,7 +757,7 @@ fn classify_rhs(
     lang: &Lang,
     syns: &Syns,
     f: &Fields,
-    class_sym: u32,
+    container_syms: &[u32],
 ) -> Value {
     let type_node = tree.child_by_field(node, f.r#type);
     if f.r#type != 0 {
@@ -780,7 +797,7 @@ fn classify_rhs(
             lang,
             syns,
             f,
-            class_sym,
+            container_syms,
         );
     }
 
@@ -842,7 +859,7 @@ fn classify_member_call_rhs(
     lang: &Lang,
     syns: &Syns,
     f: &Fields,
-    class_sym: u32,
+    container_syms: &[u32],
 ) -> Value {
     let obj_sym = tree
         .child_by_field(callee_member, f.object)
@@ -857,7 +874,7 @@ fn classify_member_call_rhs(
         .is_some_and(|c| tree.kind(c) == syns.ivar);
 
     let obj_type = if obj_is_ivar {
-        find_enclosing_class(tree, binding_node, syns, class_sym)
+        find_enclosing_class(tree, binding_node, syns, container_syms)
             .and_then(|cls| find_ivar_type(tree, cls, obj_sym, syns, f))
     } else if obj_sym != 0 {
         ssa.read_variable(obj_sym, block).iter().find_map(|pv| {
@@ -1022,13 +1039,20 @@ fn find_ivar_type(
     None
 }
 
-fn find_enclosing_class(tree: &Tree, mut node: u32, syns: &Syns, class_sym: u32) -> Option<u32> {
+fn find_enclosing_class(
+    tree: &Tree,
+    mut node: u32,
+    syns: &Syns,
+    container_syms: &[u32],
+) -> Option<u32> {
     loop {
         if node == NONE {
             return None;
         }
-        if synth_child(tree, node, syns.deftype) == Some(class_sym) {
-            return Some(node);
+        if let Some(dt) = synth_child(tree, node, syns.deftype) {
+            if container_syms.contains(&dt) {
+                return Some(node);
+            }
         }
         node = tree.nodes[node as usize].parent;
     }
