@@ -22,7 +22,7 @@ title: Troubleshoot GitLab Orbit Local
 {{< /history >}}
 
 Use this page to troubleshoot errors you might encounter with
-[GitLab Orbit Local](local/_index.md).
+[GitLab Orbit Local](_index.md).
 
 Errors occur when running the `orbit` binary directly or through
 `glab orbit local`.
@@ -90,4 +90,4 @@ glab orbit local mcp serve
 ```
 
 If you installed `orbit` directly, rerun the installer from the
-[GitLab Orbit CLI instructions](local/access/cli.md#install).
+[GitLab Orbit CLI instructions](access/cli.md#install).
