@@ -617,8 +617,8 @@ enum Edit {
 
 pub fn apply_rewrites(t: &mut Tree, lang: &mut Lang, rules: &[Rewrite]) -> Vec<u32> {
     let mut caps = vec![(0u32, 0u32); rules.iter().map(|r| r.nslots).max().unwrap_or(1)];
-    let (mut edits, mut buf) = (Vec::new(), Vec::new());
-    for i in 0..t.nodes.len() as u32 {
+    let mut buf: Vec<Node> = Vec::new();
+    for i in (0..t.nodes.len() as u32).rev() {
         if t.nodes[i as usize].dead {
             continue;
         }
@@ -629,17 +629,17 @@ pub fn apply_rewrites(t: &mut Tree, lang: &mut Lang, rules: &[Rewrite]) -> Vec<u
             caps[0] = (i, t.hop(i));
             let root = t.nodes[i as usize];
             match &r.out {
-                Out::Remove => edits.push(Edit::Remove(i)),
-                Out::SetKind(k) => edits.push(Edit::SetKind(i, *k)),
+                Out::Remove => t.remove(i),
+                Out::SetKind(k) => t.set_kind(i, *k),
                 Out::Retag { kind, fields } => {
-                    edits.push(Edit::SetKind(i, *kind));
+                    t.set_kind(i, *kind);
                     for (slot, f) in fields {
-                        edits.push(Edit::SetField(caps[*slot as usize].0, *f));
+                        t.set_field(caps[*slot as usize].0, *f);
                     }
                 }
                 Out::SetText { target, from, tf } => {
                     let sym = tf.apply_sym(t, lang, caps[*from as usize].0);
-                    edits.push(Edit::SetText(caps[*target as usize].0, sym));
+                    t.set_text(caps[*target as usize].0, sym);
                 }
                 Out::Append {
                     under,
@@ -647,22 +647,30 @@ pub fn apply_rewrites(t: &mut Tree, lang: &mut Lang, rules: &[Rewrite]) -> Vec<u
                     kind,
                     tf,
                 } => {
-                    for e in elems(t, caps[*each as usize], &r.filters[*each as usize]) {
-                        let sym = tf.apply_sym(t, lang, e);
-                        let src = t.nodes[e as usize];
-                        edits.push(Edit::Append(
+                    let items: Vec<(u32, u32, u32)> =
+                        elems(t, caps[*each as usize], &r.filters[*each as usize])
+                            .map(|e| {
+                                (
+                                    tf.apply_sym(t, lang, e),
+                                    t.nodes[e as usize].start,
+                                    t.nodes[e as usize].end,
+                                )
+                            })
+                            .collect();
+                    for (sym, start, end) in items {
+                        t.append(
                             caps[*under as usize].0,
                             Node {
                                 kind: *kind,
                                 named: true,
                                 synth: true,
                                 sym,
-                                start: src.start,
-                                end: src.end,
+                                start,
+                                end,
                                 size: 1,
                                 ..Default::default()
                             },
-                        ));
+                        );
                     }
                 }
                 Out::Replace(tpl) => {
@@ -677,20 +685,11 @@ pub fn apply_rewrites(t: &mut Tree, lang: &mut Lang, rules: &[Rewrite]) -> Vec<u
                         NONE,
                         (root.start, root.end),
                     );
-                    edits.push(Edit::Replace(i, s, buf.len() as u32 - s));
+                    let l = buf.len() as u32 - s;
+                    t.replace(i, &buf[s as usize..(s + l) as usize]);
                     break;
                 }
             }
-        }
-    }
-    for e in edits {
-        match e {
-            Edit::Remove(i) => t.remove(i),
-            Edit::SetKind(i, k) => t.set_kind(i, k),
-            Edit::SetField(i, f) => t.set_field(i, f),
-            Edit::SetText(i, s) => t.set_text(i, s),
-            Edit::Append(p, n) => t.append(p, n),
-            Edit::Replace(i, s, l) => t.replace(i, &buf[s as usize..(s + l) as usize]),
         }
     }
     t.compact()
