@@ -14,6 +14,8 @@ query:
       "aggregations": [{"count": "mr", "as": "mr_count"}],
       "cursor": {"page_size": 2}
     }
+  gql: |
+    MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest) WHERE u.id >= 1 AND u.id <= 10000 RETURN u{.id, .username}, count(mr) AS mr_count PAGE 2
 
 expect:
   groups:

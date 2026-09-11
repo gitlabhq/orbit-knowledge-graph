@@ -1,110 +1,57 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use crate::input::{FilterOp, InputFilter, InputIdRange};
 use crate::{QueryError, Result};
-use pest::iterators::Pair;
 use serde_json::Value;
 
-use super::super::value::value;
-use super::super::{Rule, invalid, name, property, unexpected};
+use super::super::ast::{Comparison, MapEntry};
+use super::super::invalid;
 use super::Lowering;
 
 impl Lowering {
     pub(super) fn map_filters(
-        pair: Pair<'_, Rule>,
+        entries: Vec<MapEntry<'_>>,
         filters: &mut HashMap<String, Vec<InputFilter>>,
-    ) -> Result<()> {
-        let mut keys = HashSet::new();
-        for entry in pair.into_inner() {
-            let mut parts = entry.clone().into_inner();
-            let key = name(parts.next().expect("map entry has a key"))?;
-            if !keys.insert(key.clone()) {
-                return Err(invalid(&entry, "duplicate property in a map"));
-            }
-            let val = value(parts.next().expect("map entry has a value"))?;
-            filters.entry(key).or_default().push(InputFilter {
-                op: Some(FilterOp::Eq),
-                value: Some(val),
-                ..Default::default()
-            });
+    ) {
+        for entry in entries {
+            filters
+                .entry(entry.key.value)
+                .or_default()
+                .push(InputFilter {
+                    op: Some(FilterOp::Eq),
+                    value: Some(entry.value),
+                    ..Default::default()
+                });
         }
-        Ok(())
     }
 
-    pub(super) fn predicates(&mut self, pair: Pair<'_, Rule>) -> Result<()> {
-        match pair.as_rule() {
-            Rule::Where | Rule::AndExpression | Rule::ParenthesizedExpression => {
-                for child in pair.into_inner() {
-                    self.predicates(child)?;
-                }
+    pub(super) fn predicate(&mut self, comparison: Comparison<'_>) -> Result<()> {
+        let Comparison {
+            span,
+            property,
+            op,
+            value,
+        } = comparison;
+        let filter = InputFilter {
+            op: Some(op),
+            value,
+            ..Default::default()
+        };
+        let node = property.node.value;
+        let key = property.property.value;
+        if let Some(node) = self.input.nodes.iter_mut().find(|n| n.id == node) {
+            node.filters.entry(key).or_default().push(filter);
+        } else if let Some(index) = self.edges.get(&node) {
+            let edge = &mut self.input.relationships[*index];
+            if edge.hops.max != 1 {
+                return Err(invalid(
+                    span,
+                    "a variable-length relationship binds a list; relationship-list predicates are unsupported",
+                ));
             }
-            Rule::ComparisonExpression | Rule::TokenPredicate => {
-                let mut parts = pair.clone().into_inner();
-                let (prop, operator) = if pair.as_rule() == Rule::TokenPredicate {
-                    let operator = parts.next().expect("token predicate has a function");
-                    (
-                        property(parts.next().expect("token predicate has a property"))?,
-                        operator,
-                    )
-                } else {
-                    (
-                        property(parts.next().expect("comparison has a property"))?,
-                        parts.next().expect("comparison has an operator"),
-                    )
-                };
-                let op = match operator.as_rule() {
-                    Rule::NullOperator => {
-                        if operator.into_inner().next().is_some() {
-                            FilterOp::IsNotNull
-                        } else {
-                            FilterOp::IsNull
-                        }
-                    }
-                    Rule::StringOperator => {
-                        let token = operator.as_str().to_ascii_lowercase();
-                        if token.starts_with("starts") {
-                            FilterOp::StartsWith
-                        } else if token.starts_with("ends") {
-                            FilterOp::EndsWith
-                        } else {
-                            FilterOp::Contains
-                        }
-                    }
-                    _ => match operator.as_str().to_ascii_lowercase().as_str() {
-                        "=" => FilterOp::Eq,
-                        ">" => FilterOp::Gt,
-                        "<" => FilterOp::Lt,
-                        ">=" => FilterOp::Gte,
-                        "<=" => FilterOp::Lte,
-                        "in" => FilterOp::In,
-                        "token_match" => FilterOp::TokenMatch,
-                        "all_tokens" => FilterOp::AllTokens,
-                        "any_tokens" => FilterOp::AnyTokens,
-                        _ => return Err(unexpected(&operator)),
-                    },
-                };
-                let value = parts.next().map(value).transpose()?;
-                let filter = InputFilter {
-                    op: Some(op),
-                    value,
-                    ..Default::default()
-                };
-                if let Some(node) = self.input.nodes.iter_mut().find(|n| n.id == prop.node) {
-                    node.filters.entry(prop.property).or_default().push(filter);
-                } else if let Some(index) = self.edges.get(&prop.node) {
-                    let edge = &mut self.input.relationships[*index];
-                    if edge.hops.max != 1 {
-                        return Err(invalid(
-                            &pair,
-                            "a variable-length relationship binds a list; relationship-list predicates are unsupported",
-                        ));
-                    }
-                    edge.filters.entry(prop.property).or_default().push(filter);
-                } else {
-                    return Err(invalid(&pair, &format!("undefined variable {}", prop.node)));
-                }
-            }
-            _ => return Err(unexpected(&pair)),
+            edge.filters.entry(key).or_default().push(filter);
+        } else {
+            return Err(invalid(span, &format!("undefined variable {node}")));
         }
         Ok(())
     }

@@ -18,6 +18,8 @@ query:
       ],
       "cursor": {"page_size": 3}
     }
+  gql: |
+    MATCH (u:User)-[:AUTHORED]->(wi:WorkItem)-[:IN_GROUP]->(g:Group)-[:CONTAINS]->(p:Project) WHERE u.id >= 1 AND u.id <= 10000 AND p.id >= 1 AND p.id <= 10000 RETURN u, wi, g, p PAGE 3
 
 expect:
   all_pages:

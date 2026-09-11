@@ -9,6 +9,8 @@ query:
                  "columns": ["username"]}],
       "cursor": {"page_size": 2}
     }
+  gql: |
+    MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username PAGE 2
 
 expect:
   all_pages:

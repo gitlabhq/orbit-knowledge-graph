@@ -9,6 +9,7 @@ The frontend is a compiler pipeline preset, `clickhouse_gql`. The JSON Query DSL
 This implementation does not change MCP tools, protocol messages, Rails, or glab.
 
 A **Pest pair** is a matched grammar rule and its source span.
+The frontend's **syntax tree** is the typed Rust form of one statement, built from pairs by `pest_consume` in `syntax.rs` and declared in `ast.rs`.
 The compiler's **Input** contains node selectors, predicates, and the other logical query fields.
 
 ## Grammar source
@@ -21,6 +22,7 @@ The new Rust implementation remains under the repository's license.
 
 The grammar restricts identifiers and arrows to ASCII. Escaped identifiers must still pass the compiler's identifier rules.
 Keywords are case insensitive; identifiers are case sensitive. Strings support M23 escape forms, and comments count as whitespace.
+`PAGE`, `AFTER`, and `DEBUG` are reserved in addition to the openCypher reserved words, so a variable with one of those names needs backticks.
 
 ## Compiler boundary
 
@@ -37,7 +39,13 @@ flowchart LR
 
 Each query language is one module under `crates/query-engine/compiler/src/passes/frontend/` and one phase in the pipeline declaration in `config.rs`.
 `json_dsl_parse` runs the JSON schema check, the ontology-derived schema check, and cursor hashing, then deserializes.
-`gql_parse` walks Pest pairs directly into Input; it does not construct another query AST or serialize a JSON query.
+`gql_parse` runs in two steps and never serializes a JSON query.
+`syntax.rs` converts Pest pairs into the typed syntax tree with `pest_consume` methods.
+Fixed child shapes use `match_nodes!`; optional query clauses and relationship fields are consumed by rule without enumerating their combinations.
+The grammar enforces their order and cardinality, and the consumer rejects unexpected rules.
+Lexical checks live here: identifier rules, string escapes, numeric ranges, `date_trunc` units, and duplicate map keys.
+`lower/` then turns the syntax tree into Input and owns every check that needs query-wide context: variable uniqueness, ID promotion, query-type classification, projection rules, and ORDER BY resolution.
+Syntax-tree errors carry the pair's line and column; a child shape the conversion has no arm for is a pipeline invariant, not a client error.
 Scalar values use the same value type as the compiler's filters.
 
 The `clickhouse_json_dsl` and `clickhouse_gql` presets differ only in that first phase. Both parse phases read the one `raw` state and write `Input`; `validate` and everything after it can reach only `Input`, so no shared phase can depend on the source language.
@@ -62,7 +70,8 @@ This makes SQL and parameter ordering stable without changing filter meaning.
 MATCH pattern [WHERE predicates]
 RETURN projections
 [ORDER BY key [ASC | DESC]]
-[LIMIT value]
+[LIMIT rows | PAGE rows [AFTER 'token']]
+[DEBUG]
 ```
 
 The pattern contains one node or one linear chain. Nodes need unique variables and one label.
@@ -90,7 +99,8 @@ LIMIT 10
 
 RETURN controls the existing graph response, not a general-purpose table of arbitrary expressions.
 Traversal properties select node columns. Whole nodes use ontology defaults; `properties(node)` selects all allowed columns.
-Neighbors queries reject `properties(node)`, including projections of the center, because their hydration uses dynamic column specifications instead of per-node selections.
+`properties(node)` on the far endpoint of a neighbors query or on a `shortestPath` variable sets the compiler's dynamic column mode to all columns, because those results are hydrated from dynamic column specifications instead of per-node selections.
+Neighbors queries still reject `properties(center)`.
 The compiler still includes graph identity and relationship metadata.
 
 Aggregates support `count`, `sum`, `avg`, `min`, and `max`.
@@ -104,7 +114,7 @@ ORDER BY notes DESC
 LIMIT 10
 ```
 
-The implementation adds node projections, `shortestPath` pattern syntax, `date_trunc`, and token predicates to the selected EBNF productions.
+The implementation adds node projections, `shortestPath` pattern syntax, `date_trunc`, token predicates, `PAGE ... AFTER`, and `DEBUG` to the selected EBNF productions.
 These are implementation extensions, not changes to the official grammar.
 
 Predicates support AND, comparisons, IN, string matching, null checks, and the compiler's three token predicates.
@@ -128,8 +138,20 @@ Query text is limited to 32 KiB. A flat Pest scan checks nesting before recursiv
 Existing compiler limits still apply after lowering.
 Explicit relationship-type lists are capped at 10 entries for traversal, path finding, and neighbors queries.
 
-Cursor binding is not implemented for the typed entry point. It rejects cursor input rather than accepting an unbound cursor.
-Cursor support, custom ID-property spellings, and presentation-option syntax remain outside this first frontend slice.
+Custom ID-property spellings remain outside the frontend.
+
+## Pagination and presentation
+
+`PAGE rows` replaces `LIMIT` and requests keyset pagination: it lowers to the compiler's cursor with that page size, so the response carries `next_cursor` while more rows remain.
+`PAGE rows AFTER 'token'` continues from the previous page's `next_cursor`. Both clauses reuse the JSON DSL's cursor and the shared validation, decoding, seek, and readback passes.
+
+A cursor token binds to the statement's lexical tokens, excluding the whole `PAGE` clause, whitespace, and comments.
+Changing the page size or formatting keeps the cursor valid, including changes to whitespace around `PAGE`.
+String literals and escaped identifiers retain their exact text. Changes inside them, including whitespace, reject the cursor with the "issued for a different query" error.
+Other token edits, such as keyword case changes, also reject the cursor. This is not the JSON DSL's structural comparison.
+JSON and text tokens never validate against each other because their hash sources differ.
+
+`DEBUG` sets the compiler's `include_debug_sql` presentation option and keeps its existing authorization rules.
 
 ## Parity tests
 
@@ -140,7 +162,8 @@ Existing SQL assertions remain in place. Other tests cover syntax rejection, lit
 The YAML query scenarios under `crates/integration-tests/tests/server/data_correctness/scenarios/` run against ClickHouse in CI.
 Each scenario declares its query once per frontend under `query:`, keyed `json` and `gql`, and every frontend present is checked against the same result expectations.
 The runner parses each key into a `Frontend` and passes it to `compiler::compile`.
-A scenario with no text spelling, such as cursor pagination, carries only the `json` key.
+A scenario whose query has no text spelling carries only the `json` key.
+Paginated scenarios end their text query with the `PAGE` clause, and the runner appends `AFTER` with each `next_cursor`.
 
 JSON syntax-error tests remain JSON-only.
 The existing `valid_identifiers_produce_renderable_sql` fixture also remains JSON-only:
