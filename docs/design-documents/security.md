@@ -61,7 +61,7 @@ sequenceDiagram
 
 The first security boundary is logical tenant segregation enforced through the `traversal_path` column on every graph table. The `traversal_path` encodes the full namespace hierarchy as a `/`-delimited string where the first segment is the organization ID (e.g., `"42/100/1000/"`). A user's `SecurityContext` carries the exact set of traversal paths that Rails authorized. The compiler injects `startsWith(traversal_path, ?)` predicates for each path, so queries are scoped to exactly those namespaces — regardless of which organization(s) the paths belong to.
 
-This layer is primarily intended for .com customers to ensure that they can only query data within their own organization.
+This layer limits queries to data within the traversal paths that Rails authorized. A user's authorized paths can span more than one organization.
 
 **Component**: Orbit Query Engine (`gkg-webserver`)
 
@@ -201,7 +201,7 @@ In addition to authorization filtering, the query engine implements further safe
 
 **Controls**:
 
-- **Depth Caps**: Traversals limited to max 3 hops. Enforced in query compiler; queries exceeding this are rejected with error.
+- **Traversal Shape Caps**: A traversal accepts at most five node selectors and therefore at most four relationship selectors in its chain. Each relationship selector's inclusive `hops` range has a maximum of 3, while a path-finding query independently caps `path.max_depth` at 3. The schema and compiler reject requests that exceed these limits.
 - **Relationship Allow-Lists**: Only pre-defined relationship types are allowed. Unknown relationships trigger validation errors.
 - **Row Limits**: Max 1000 rows per query (configurable). Enforced in SQL generation: `LIMIT 1000`.
 - **Query Timeouts**: All ClickHouse queries have a 30-second timeout via `max_execution_time` setting.
