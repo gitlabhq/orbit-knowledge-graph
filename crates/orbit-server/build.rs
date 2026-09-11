@@ -104,14 +104,18 @@ fn validate_named_queries() {
     let ontology = ontology::Ontology::load_embedded()
         .unwrap_or_else(|e| panic!("embedded ontology failed to load: {e}"));
 
-    let mut queries = named_queries::NamedQueries::load_from_dir(&dir)
+    let queries = named_queries::NamedQueries::load_from_dir(&dir)
         .unwrap_or_else(|e| panic!("named queries failed to load: {e}"));
-    let rejected: Vec<String> = queries
-        .retain_compilable(&ontology)
-        .iter()
-        .map(ToString::to_string)
-        .collect();
-    assert!(rejected.is_empty(), "{}", rejected.join("\n"));
+    let ctx = compiler::SecurityContext::new(1, vec!["1/".into()])
+        .expect("static security context must be valid");
+    for query in queries.iter() {
+        let rendered = query
+            .render_example()
+            .unwrap_or_else(|e| panic!("named query failed to render: {e}"));
+        if let Err(e) = compiler::compile(&rendered, compiler::Frontend::JsonDsl, &ontology, &ctx) {
+            panic!("named query `{}` failed to compile: {e}", query.name);
+        }
+    }
 }
 
 #[cfg(feature = "regenerate-protos")]

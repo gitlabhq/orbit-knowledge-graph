@@ -12,6 +12,7 @@ const BINDING_KEY: &str = "$binding";
 const PARAM_KEY: &str = "$param";
 const PARAM_KEY_PREFIX: &str = "$param:";
 const CURRENT_USER_ID: &str = "current_user_id";
+const EXAMPLE_BINDINGS: BindingValues = BindingValues { current_user_id: 0 };
 
 #[derive(Debug, Clone, Copy)]
 pub struct BindingValues {
@@ -189,7 +190,7 @@ impl NamedQuery {
 
     fn validate(&self) -> Result<(), NamedQueryError> {
         let params = self.example_parameters();
-        let mut ctx = Substitution::new(&BindingValues { current_user_id: 0 }, &params);
+        let mut ctx = Substitution::new(&EXAMPLE_BINDINGS, &params);
         self.substitute(&mut self.query.clone(), &mut ctx)?;
         for kind in Placeholder::ALL {
             for name in self.declared(kind) {
@@ -241,6 +242,10 @@ impl NamedQuery {
         let mut rendered = self.query.clone();
         self.substitute(&mut rendered, &mut Substitution::new(values, params))?;
         Ok(rendered.to_string())
+    }
+
+    pub fn render_example(&self) -> Result<String, NamedQueryError> {
+        self.render(&EXAMPLE_BINDINGS, &self.example_parameters())
     }
 
     pub fn example_parameters(&self) -> Map<String, Value> {

@@ -21,16 +21,10 @@ mod query;
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use compiler::{Frontend, SecurityContext, compile};
-use ontology::Ontology;
 use rust_embed::Embed;
 use serde_json::{Map, Value};
 
 pub use query::{BindingValues, NamedQuery};
-
-const VALIDATION_USER_ID: u64 = 1;
-const VALIDATION_ORG_ID: i64 = 1;
-const VALIDATION_TRAVERSAL_PATH: &str = "1/";
 
 #[derive(Embed)]
 #[folder = "$NAMED_QUERIES_DIR"]
@@ -172,34 +166,8 @@ impl NamedQueries {
         self.queries.values()
     }
 
-    pub fn retain_compilable(&mut self, ontology: &Ontology) -> Vec<NamedQueryError> {
-        let bindings = BindingValues {
-            current_user_id: VALIDATION_USER_ID,
-        };
-        let security =
-            SecurityContext::new(VALIDATION_ORG_ID, vec![VALIDATION_TRAVERSAL_PATH.into()])
-                .expect("validation security context is constant");
-        let mut rejected = Vec::new();
-        self.queries.retain(|name, query| {
-            let compiled = query
-                .render(&bindings, &query.example_parameters())
-                .map_err(|error| error.to_string())
-                .and_then(|rendered| {
-                    compile(&rendered, Frontend::JsonDsl, ontology, &security)
-                        .map_err(|error| error.to_string())
-                });
-            match compiled {
-                Ok(_) => true,
-                Err(message) => {
-                    rejected.push(NamedQueryError::Invalid {
-                        name: name.clone(),
-                        message,
-                    });
-                    false
-                }
-            }
-        });
-        rejected
+    pub fn retain(&mut self, mut keep: impl FnMut(&NamedQuery) -> bool) {
+        self.queries.retain(|_, query| keep(query));
     }
 
     pub fn names(&self) -> impl Iterator<Item = &str> {

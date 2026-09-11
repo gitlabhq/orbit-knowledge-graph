@@ -1,8 +1,9 @@
 use std::sync::Arc;
 
-use named_queries::NamedQueries;
+use named_queries::{NamedQueries, NamedQuery};
 use ontology::Ontology;
 use orbit_migrations::schema::GraphSchema;
+use query_engine::compiler::validate_normalize;
 use tracing::warn;
 
 use crate::pipeline::PathResolver;
@@ -23,13 +24,18 @@ impl ServingSchema {
         path_resolver: Arc<PathResolver>,
     ) -> anyhow::Result<Self> {
         let mut named_queries = NamedQueries::load_embedded()?;
-        for rejected in named_queries.retain_compilable(&ontology) {
-            warn!(
-                migration_version,
-                %rejected,
-                "named query unavailable in serving schema"
-            );
-        }
+        named_queries.retain(|query| match fits_ontology(query, &ontology) {
+            Ok(()) => true,
+            Err(error) => {
+                warn!(
+                    migration_version,
+                    query = %query.name,
+                    error,
+                    "named query unavailable in serving schema"
+                );
+                false
+            }
+        });
         let expected_table_names = GraphSchema::from_ontology(&ontology)
             .tables
             .into_iter()
@@ -43,4 +49,10 @@ impl ServingSchema {
             path_resolver: Some(path_resolver),
         })
     }
+}
+
+fn fits_ontology(query: &NamedQuery, ontology: &Ontology) -> Result<(), String> {
+    let rendered = query.render_example().map_err(|error| error.to_string())?;
+    validate_normalize(&rendered, ontology).map_err(|error| error.to_string())?;
+    Ok(())
 }

@@ -153,8 +153,8 @@ Each immutable serving snapshot contains:
 - the binary's named queries that compile successfully against that ontology; and
 - a per-schema `PathResolver`, so path-resolution caches cannot cross table-sets.
 
-Named queries remain build-time validated against the embedded ontology. Snapshot construction
-runs the same `named-queries` compile check against the selected archive and excludes incompatible
+Named queries remain build-time compiled against the embedded ontology. Snapshot construction
+validates each template against the selected archive's ontology and excludes incompatible
 definitions from listing and execution, rather than rejecting the whole archive. The serving snapshot and its
 construction live in `crates/orbit-server/src/serving_schema.rs`, independently of the watcher.
 `ToolService` validates commands without an ontology and returns typed plans. For a graph-schema
