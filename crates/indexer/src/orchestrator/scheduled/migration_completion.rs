@@ -2,9 +2,10 @@ use std::sync::{Arc, LazyLock};
 
 use arrow::datatypes::UInt64Type;
 use async_trait::async_trait;
+use orbit_migrations::catalog::OntologyCatalog;
 use orbit_migrations::scope::{CODE_INDEXING_CHECKPOINT_TABLE, MigrationScope};
 use orbit_migrations::version::{
-    SCHEMA_VERSION, read_all_versions, read_migrating_version, table_prefix,
+    SCHEMA_VERSION, promote_version, read_migrating_version, table_prefix,
 };
 use orbit_server_config::{MigrationCompletionConfig, ScheduleConfiguration, SchemaConfig};
 use orbit_utils::arrow::ArrowUtils;
@@ -59,6 +60,7 @@ pub struct MigrationCompletionChecker {
     _task_metrics: ScheduledTaskMetrics,
     campaign: Arc<CampaignState>,
     nats_client: async_nats::Client,
+    catalog: OntologyCatalog,
 }
 
 impl MigrationCompletionChecker {
@@ -76,6 +78,7 @@ impl MigrationCompletionChecker {
         task_metrics: ScheduledTaskMetrics,
         campaign: Arc<CampaignState>,
         nats_client: async_nats::Client,
+        catalog: OntologyCatalog,
     ) -> Self {
         Self {
             graph,
@@ -88,6 +91,7 @@ impl MigrationCompletionChecker {
             _task_metrics: task_metrics,
             campaign,
             nats_client,
+            catalog,
         }
     }
 }
@@ -168,6 +172,13 @@ impl MigrationCompletionChecker {
             return Ok(());
         }
 
+        self.catalog
+            .verify_archive(migrating_version)
+            .await
+            .map_err(|error| {
+                TaskError::new(format!("verify ontology archive before promotion: {error}"))
+            })?;
+
         {
             let schema = orbit_migrations::schema::GraphSchema::from_ontology(&self.ontology);
             orbit_migrations::execute::create_unversioned_definitions(&self.graph, &schema)
@@ -190,31 +201,19 @@ impl MigrationCompletionChecker {
             ))
         })?;
 
-        let versions = read_all_versions(&self.graph)
-            .await
-            .map_err(|e| TaskError::new(format!("read all versions: {e}")))?;
-
-        let mut retired_versions = Vec::new();
-        for entry in &versions {
-            if entry.status == "active" && entry.version != migrating_version {
-                info!(
-                    version = entry.version,
-                    "marking old active version as retired"
-                );
-                orbit_migrations::version::mark_version_retired(&self.graph, entry.version)
-                    .await
-                    .map_err(|e| TaskError::new(format!("mark v{} retired: {e}", entry.version)))?;
-                retired_versions.push(entry.version);
-            }
-        }
-
         info!(
             version = migrating_version,
             "marking migrating version as active — schema migration complete"
         );
-        orbit_migrations::version::mark_version_active(&self.graph, migrating_version)
+        let retired_versions = promote_version(&self.graph, migrating_version)
             .await
             .map_err(|e| TaskError::new(format!("mark v{migrating_version} active: {e}")))?;
+
+        info!(
+            version = migrating_version,
+            ?retired_versions,
+            "promoted schema version, retired previously active versions"
+        );
 
         for version in retired_versions {
             if let Err(error) = orbit_migrations::execute::drop_versioned_refreshable_views(

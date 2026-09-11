@@ -1,3 +1,48 @@
+## [0.121.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.120.0...v0.121.0) (2026-09-11)
+
+### Features
+
+* **dx:** complete YAML test coverage, port text-excerpt changes, fix harness robustness ([c71f7b5](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/c71f7b57fca933047e20d85b6f2ea4373956fb02)) by Michael Usachenko
+* **dx:** port all 47 search tests to YAML scenarios ([571eaba](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/571eaba36630b11aeb1d6914c8d3f4f1d71e71e0)) by Michael Usachenko
+
+### Fixes
+
+* **schema:** bootstrap missing legacy ontology archives ([bfd8ef0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/bfd8ef070231fd06b31eab18f1c694978f56abbf)) by Jean-Gabriel Doyon
+
+### Other
+
+* add Argo Translations from GITTECHA-908 [#1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/issues/1) ([47b675e](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/47b675edc51add83edc85fd8412bd1f876dc5315)) by GitLab-Argo Bot
+* **deps:** bump labkit-rs to 80a372d ([0a8b385](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/0a8b3850d0d5dd7c42580e9a9e46219719ce231e)) by Bohdan Parkhomchuk
+
+## [0.120.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.119.0...v0.120.0) (2026-09-10)
+
+### ⚠ BREAKING CHANGES
+
+* **metrics:** the Prometheus scrape endpoint moved from `/metrics` to `/-/metrics`. Deployments with the gkg Helm chart need chart 2.0.0 or later.
+
+### Features
+
+* **compiler:** add a read-only graph query frontend ([1d0cee8](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/1d0cee830d766a0498641531d00f3617b0ae2c41)) by Aaron Algutifan
+* **config:** add object_storage section and reference object store client ([00af095](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/00af0958d6671dad98c42d366ef562935b328ee0)) by Bohdan Parkhomchuk
+* **dx:** migrate aggregation, dedup, and pagination tests to YAML ([41e10e3](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/41e10e37ad0824784d781f2bf3008c621c177d94)) by Michael Usachenko
+* **dx:** migrate edge-case and work-item tests to YAML scenarios ([1d93a77](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/1d93a77551571d6f1d6a1a30c5bf0672d6c55db8)) by Michael Usachenko
+* **dx:** migrate security tests to YAML query scenarios ([8e96627](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/8e9662736bb66b7b627e1e01dc611397342b5e8f)) by Michael Usachenko
+
+### Fixes
+
+* **query-engine:** cap returned text properties ([6fbd97d](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/6fbd97d381369c123f7d10f7464eaf8eea87b0b8)) by Jean-Gabriel Doyon
+* **schema:** validate archives before promotion and rollback ([87e11ca](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/87e11ca8de87848967fdd7a94103cd2a2a9b2bda)) by Jean-Gabriel Doyon
+
+### Other
+
+* **cli:** one command surface, drop local/remote ([90f1ac4](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/90f1ac47ed602dfa5fe398d545da1e1923c616f8)) by Aaron Algutifan
+* **cli:** rename crates/orbit-local directory to crates/orbit-cli ([cfc57a2](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/cfc57a220c7c1ec77fb1a3b6fdbdd933111ce7af)) by Jean-Gabriel Doyon
+* **cli:** rename orbit-local skill and MCP server to orbit-cli ([d66ea7c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/d66ea7c204c642765bc6974e15fd6191732bdc28)) by Jean-Gabriel Doyon
+* **config:** drop GKG_* environment variable configuration layer ([42435b0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/42435b05a4b93669f7577101fc5e4d13ed8c7c12)) by Bohdan Parkhomchuk
+* **deps:** bump labkit-rs for updated billing usage event schema ([4fb7c67](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/4fb7c67239d72bc9f04dde7cc4f1f48618b79054)) by Sharmad Nachnolkar
+* **indexing:** correct operations lifecycle guidance ([8de0973](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/8de09735fa6df50e809ff68c2d6451d0cf0a538c)) by Dmitry Gruzd
+* **schema:** bind requests to one serving schema ([0660ef7](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/0660ef7d1b35950daa000113d9c096f85e768e92)) by Jean-Gabriel Doyon
+
 ## [0.119.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.118.2...v0.119.0) (2026-09-09)
 
 ### Features

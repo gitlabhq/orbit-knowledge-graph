@@ -6,4 +6,7 @@ fn main() {
     let dir = std::env::var("ONTOLOGY_DIR")
         .expect("ONTOLOGY_DIR must be set via .cargo/config.toml [env]");
     println!("cargo:rerun-if-changed={dir}");
+    let config_dir =
+        std::env::var("CONFIG_DIR").expect("CONFIG_DIR must be set via .cargo/config.toml [env]");
+    println!("cargo:rerun-if-changed={config_dir}/ontology-archives");
 }

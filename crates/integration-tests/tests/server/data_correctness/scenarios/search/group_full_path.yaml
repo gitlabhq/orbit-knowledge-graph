@@ -1,0 +1,22 @@
+# source: crates/integration-tests/tests/server/data_correctness/search.rs::search_returns_correct_group_full_path
+description: Group search returns correct full_path for nested groups
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [{"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000},
+                 "columns": ["name", "full_path"]}],
+      "order_by": "g.id",
+      "limit": 10
+    }
+
+expect:
+  node_count: 5
+  nodes:
+    Group:
+      order: [100, 101, 102, 200, 300]
+      rows:
+        - { id: 100, full_path: public-group }
+        - { id: 200, full_path: public-group/deep-a }
+        - { id: 300, full_path: public-group/deep-a/deep-b }

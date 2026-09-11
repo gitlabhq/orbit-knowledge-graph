@@ -16,6 +16,10 @@ View the [Graph Query Engine](graph_engine.md) design document for more details 
 
 View the [Intermediate Query Language](./intermediary_llm_query_language.md) design document for more details on the intermediate LLM query language.
 
+### Orbit query frontend
+
+The [Orbit query frontend](orbit_query_frontend.md) is a compiler-level API for Orbit's read-only graph language. Pest pairs lower directly into compiler Input. Remote requests still use the JSON Query DSL.
+
 ### Unified Response Schema
 
 All four query types (traversal, aggregation, path_finding, neighbors) return a unified JSON response in the shape `{ format_version, query_type, nodes, edges, columns?, group_columns?, rows?, pagination? }`. Deduplicated entity objects and instance-level edges replace the previous flat tabular rows, giving callers a single contract for rendering graphs, tables, or analytics views. Aggregation queries include a `columns` array describing each computed value, `group_columns` describing grouping keys, and tabular `rows` carrying group values plus metric values. Every response includes a `pagination` object with `has_more`, `truncated`, and (for cursor queries with more pages) `next_cursor`.
@@ -41,7 +45,8 @@ At runtime the same files are embedded into the binary (via the `named-queries` 
 - `{ "$binding": ... }` — identity values resolved from trusted request context (currently only `current_user_id`, taken from the caller's JWT claims). Never client-supplied.
 - `{ "$param": ... }` — selection values supplied by the client (e.g. the entity and ids of a node clicked in the graph explorer), validated against a JSON Schema each template declares per parameter. Authorization never depends on these: the compiler security pass and redaction filter results regardless of which ids the client asks for. Each parameter also declares an `example` value used to compile the template at build time.
 
-Unknown names, missing/unknown parameters, and schema violations are rejected with client-safe errors that list the valid options. Clients discover the catalog through the `ListNamedQueries` RPC (surfaced as `GET /api/v4/orbit/templates`), which returns each parameterless query's name, description, and DSL rendered for the caller with bindings resolved from the JWT claims, so the returned DSL is executable as-is and can populate a query editor. Queries that declare parameters are executed by name only and do not appear in the catalog. Templates keep query structure (entities, relationships, columns, aggregation shape) server-side — parameters carry only values (a string parameter may also fill an object key, written `"$param:<name>": ...`, so a template can take the property name to filter on), so the drift-by-construction guarantee is preserved.
+Unknown names, missing/unknown parameters, and schema violations are rejected with client-safe errors that list the valid options. Clients discover the catalog through the `ListNamedQueries` RPC (surfaced as `GET /api/v4/orbit/templates`), which returns each parameterless query's name, description, and DSL rendered for the caller with bindings resolved from the JWT claims, so the returned DSL is executable as-is and can populate a query editor.
+Queries that declare parameters are executed by name only and do not appear in the catalog. Templates keep query structure (entities, relationships, columns, aggregation shape) server-side — parameters carry only values (a string parameter may also fill an object key, written `"$param:<name>": ...`, so a template can take the property name to filter on), so the drift-by-construction guarantee is preserved.
 
 Whether a given Duo agent actually receives these commands depends on routing decisions that live in GitLab Rails: which Duo surface invoked the prompt, which Orbit subsetting applies to the user, and which feature flags are on. See [Duo / Orbit prompt routing architecture](../duo_orbit_prompt_routing.md) for the full picture of when prompts reach the Orbit MCP server.
 

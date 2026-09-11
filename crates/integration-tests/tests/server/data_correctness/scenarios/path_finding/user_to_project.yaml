@@ -15,4 +15,14 @@ query:
 
 expect:
   referential_integrity: true
-  skip_requirements: [path_finding]
+  path_count: 1
+  nodes:
+    User:
+      rows:
+        - { id: 1 }
+    Group:
+      rows:
+        - { id: 100 }
+    Project:
+      rows:
+        - { id: 1000 }

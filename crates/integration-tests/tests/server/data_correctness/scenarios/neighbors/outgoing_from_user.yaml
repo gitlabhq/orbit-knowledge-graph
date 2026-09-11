@@ -15,4 +15,18 @@ expect:
   nodes:
     User:
       ids: [1]
-  skip_requirements: [neighbors]
+    Group:
+      ids: [100, 102]
+      rows:
+        - { id: 100, name: Public Group }
+    MergeRequest:
+      ids: [2000, 2001, 2002]
+    Note:
+      ids: [3000]
+    WorkItem:
+      ids: [4000, 4002]
+  edge_exists:
+    MEMBER_OF: [[1, 100], [1, 102]]
+    AUTHORED: [[1, 2000], [1, 3000], [1, 4000], [1, 4002]]
+    APPROVED: [[1, 2002]]
+    ASSIGNED: [[1, 4000]]

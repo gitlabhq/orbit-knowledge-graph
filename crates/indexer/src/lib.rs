@@ -252,6 +252,13 @@ pub async fn run_dispatcher(
     let catalog = OntologyCatalog::open(services.nats_client.clone()).await?;
     let ontology = catalog.publish(archive).await?;
 
+    let graph = config.graph.build_client();
+    if let Some(active_version) = orbit_migrations::version::read_active_version(&graph).await?
+        && active_version != archive.schema_version()
+    {
+        catalog.ensure_archive(active_version).await?;
+    }
+
     if let Err(error) = nats::versioning::gc_idle_release_streams(
         &services.nats_connection,
         config.nats.release_gc_idle_threshold(),
@@ -261,7 +268,6 @@ pub async fn run_dispatcher(
         warn!(%error, "release GC failed, will retry next startup");
     }
 
-    let graph = config.graph.build_client();
     let datalake = config.datalake.build_client();
     let metrics = ScheduledTaskMetrics::new();
     let lock_service = services.lock_service.clone();
@@ -406,6 +412,7 @@ pub async fn run_dispatcher(
             metrics.clone(),
             campaign.clone(),
             services.nats_connection.clone(),
+            catalog,
         )),
     ];
 

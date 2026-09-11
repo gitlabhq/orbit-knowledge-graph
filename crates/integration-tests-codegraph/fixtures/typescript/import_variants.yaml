@@ -1,0 +1,44 @@
+name: "TypeScript: import variants (named, default, namespace, aliased, type-only)"
+pipeline: js
+fixtures:
+  - path: models.ts
+    content: |
+      export class User {}
+      export class Admin {}
+      export default class DefaultExport {}
+      export function helper() {}
+
+  - path: main.ts
+    content: |
+      import DefaultExport from './models';
+      import { User, Admin as SuperAdmin } from './models';
+      import * as Models from './models';
+      import type { User as TypeUser } from './models';
+
+      function run(): void {
+          const u = new User();
+          const a = new SuperAdmin();
+          Models.helper();
+      }
+
+tests:
+  - name: All import variants extracted
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.file_path = 'main.ts'
+      RETURN i.name AS name, i.alias AS alias
+      ORDER BY alias, name
+    assert:
+      - { row_count: 5 }
+      - { row: { name: "default", alias: "DefaultExport" } }
+      - { row: { name: "Admin", alias: "SuperAdmin" } }
+      - { row: { name: "User", alias: "TypeUser" } }
+
+  - name: All imports point to the same source
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.file_path = 'main.ts'
+      RETURN DISTINCT i.path AS path
+    assert:
+      - { row_count: 1 }
+      - { row: { path: "./models" } }

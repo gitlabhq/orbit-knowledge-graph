@@ -1,0 +1,31 @@
+# source: crates/integration-tests/tests/server/data_correctness/edge_cases/mod.rs::non_default_redaction_id_denies_unauthorized
+description: Redaction on non-default id_column denies unauthorized MergeRequestDiffs
+
+config:
+  redaction:
+    allow:
+      merge_request: [2001]
+
+query:
+  json: |
+    {
+        "query_type": "traversal",
+        "nodes": [
+            {"id": "mr", "entity": "MergeRequest", "node_ids": [2000, 2001]},
+            {"id": "d", "entity": "MergeRequestDiff"}
+        ],
+        "relationships": [{"type": "HAS_DIFF", "from": "mr", "to": "d"}],
+        "limit": 20
+    }
+
+expect:
+  node_count: 2
+  nodes:
+    MergeRequest:
+      ids: [2001]
+      absent: [2000]
+    MergeRequestDiff:
+      ids: [5002]
+      absent: [5000, 5001]
+  edges:
+    HAS_DIFF: [[2001, 5002]]

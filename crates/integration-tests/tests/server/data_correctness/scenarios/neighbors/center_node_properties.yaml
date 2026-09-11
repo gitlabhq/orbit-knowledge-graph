@@ -1,0 +1,26 @@
+# source: crates/integration-tests/tests/server/data_correctness/neighbors.rs::neighbors_center_node_properties_hydrated
+description: Center node columns are hydrated on User 1
+
+query:
+  json: |
+    {
+      "query_type": "neighbors",
+      "nodes": [{"id": "u", "entity": "User", "node_ids": [1], "columns": ["username", "name", "state"]}],
+      "neighbors": {"direction": "outgoing", "rel_types": ["MEMBER_OF"]}
+    }
+
+expect:
+  node_count: 3
+  referential_integrity: true
+  nodes:
+    User:
+      ids: [1]
+      rows:
+        - { id: 1, username: alice, name: Alice Admin, state: active }
+    Group:
+      ids: [100, 102]
+      rows:
+        - { id: 100, name: Public Group }
+        - { id: 102, name: Internal Group }
+  edge_exists:
+    MEMBER_OF: [[1, 100], [1, 102]]

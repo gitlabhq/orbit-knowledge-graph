@@ -57,7 +57,7 @@ python3 ./scripts/remote_repo_map.py callers "MergeRequests::RefreshService#exec
 Override the project or branch with global flags before the subcommand:
 
 ```bash
-python3 ./scripts/remote_repo_map.py --project-id 77960826 --branch main api crates/orbit-local
+python3 ./scripts/remote_repo_map.py --project-id 77960826 --branch main api crates/orbit-cli
 ```
 
 ## Subcommands

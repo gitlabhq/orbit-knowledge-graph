@@ -1,0 +1,18 @@
+# source: crates/integration-tests/tests/server/data_correctness/path_finding.rs::path_finding_entity_filter_excludes_wrong_types
+description: id_range endpoint filters to MergeRequest, excludes Note and WorkItem
+
+query:
+  json: |
+    {
+      "query_type": "path_finding",
+      "nodes": [
+        {"id": "start", "entity": "User", "node_ids": [1]},
+        {"id": "end", "entity": "MergeRequest", "id_range": {"start": 2000, "end": 2003}}
+      ],
+      "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 1,
+               "rel_types": ["AUTHORED"]}
+    }
+
+expect:
+  referential_integrity: true
+  path_count: 2

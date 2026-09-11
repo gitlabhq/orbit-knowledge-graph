@@ -105,6 +105,37 @@ pub async fn mark_version_active(
     set_version_status(graph, version, STATUS_ACTIVE).await
 }
 
+pub async fn promote_version(
+    graph: &ArrowClickHouseClient,
+    version: u32,
+) -> Result<Vec<u32>, SchemaVersionError> {
+    let retired_versions: Vec<u32> = read_all_versions(graph)
+        .await?
+        .into_iter()
+        .filter(|entry| entry.status == STATUS_ACTIVE && entry.version != version)
+        .map(|entry| entry.version)
+        .collect();
+    let mut rows = vec![format!("({version}, '{STATUS_ACTIVE}')")];
+    rows.extend(
+        retired_versions
+            .iter()
+            .map(|retired| format!("({retired}, '{STATUS_RETIRED}')")),
+    );
+
+    let insert_block_size = rows.len().to_string();
+    graph
+        .query(&format!(
+            "INSERT INTO gkg_schema_version (version, status) VALUES {}",
+            rows.join(", ")
+        ))
+        .with_setting("async_insert", "0")
+        .with_setting("max_insert_block_size", insert_block_size)
+        .with_setting("insert_deduplication_token", Uuid::new_v4().to_string())
+        .execute()
+        .await?;
+    Ok(retired_versions)
+}
+
 pub async fn mark_version_retired(
     graph: &ArrowClickHouseClient,
     version: u32,

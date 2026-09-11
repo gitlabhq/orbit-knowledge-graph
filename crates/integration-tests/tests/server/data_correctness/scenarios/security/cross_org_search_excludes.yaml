@@ -1,0 +1,20 @@
+# source: crates/integration-tests/tests/server/data_correctness/security.rs::cross_org_search_excludes_other_org
+description: Org-1 scoped search returns only org-1 projects, not org-2
+
+config:
+  security: { org_id: 1, paths: ["1/"] }
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [{"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]}],
+      "limit": 50
+    }
+
+expect:
+  node_count: 6
+  nodes:
+    Project:
+      ids: [1000, 1001, 1002, 1003, 1004, 1010]
+      absent: [9000]

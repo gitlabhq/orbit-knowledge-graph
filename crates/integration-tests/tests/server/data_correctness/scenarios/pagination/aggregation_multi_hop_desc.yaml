@@ -1,0 +1,31 @@
+# source: crates/integration-tests/tests/server/data_correctness/pagination.rs::cursor_aggregation_multi_hop_desc_seek_covers_all_groups
+description: Multi-hop aggregation DESC seek pages cover all 6 groups
+
+query:
+  json: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["id", "username"]},
+        {"id": "g", "entity": "Group"},
+        {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}}
+      ],
+      "relationships": [
+        {"type": "MEMBER_OF", "from": "u", "to": "g"},
+        {"type": "CONTAINS", "from": "g", "to": "p"}
+      ],
+      "group_by": ["u"],
+      "aggregations": [{"count": "p", "as": "project_count"}],
+      "aggregation_sort": "-project_count",
+      "cursor": {"page_size": 2}
+    }
+
+expect:
+  all_pages:
+    group_node_ids:
+      "u:User": [1, 2, 3, 4, 5, 6]
+    no_duplicate_ids: true
+  pages:
+    - skip_requirements: [cursor, aggregation, aggregation_sort]
+    - skip_requirements: [cursor, aggregation, aggregation_sort]
+    - skip_requirements: [cursor, aggregation, aggregation_sort]

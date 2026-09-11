@@ -17,7 +17,7 @@ members = [
   "crates/query-engine/formatters",
   "crates/query-engine/profiler",
   "crates/query-engine/compiler-pipeline-macros",
-  "crates/orbit-local",
+  "crates/orbit-cli",
 
   "crates/orbit-analytics",
   "crates/orbit-billing",
@@ -26,6 +26,7 @@ members = [
   "crates/orbit-search",
   "crates/orbit-migrations",
   "crates/orbit-server-config",
+  "crates/object-storage",
   "crates/orbit-server",
   "crates/ontology",
 
@@ -49,8 +50,8 @@ members = [
 
 [workspace.dependencies]
 orbit-observability = { path = "crates/orbit-observability" }
-labkit = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", rev = "1e235f49" }
-labkit-events = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", rev = "1e235f49" }
+labkit = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", rev = "80a372d1a9aa13720e74166405aff98f26873690" }
+labkit-events = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", rev = "80a372d1a9aa13720e74166405aff98f26873690" }
 arrow = "58.0.0"
 bumpalo = { version = "3.20.2", features = ["collections"] }
 cargo-platform = "0.3.3"
@@ -93,6 +94,7 @@ tempfile = "3.24.0"
 
 # Indexer dependencies
 anyhow = "1.0.100"
+object_store = { version = "0.13.2", features = ["aws", "gcp"] }
 config = { version = "0.15", default-features = false, features = ["yaml"] }
 parquet = { version = "58", default-features = false, features = ["arrow", "snap", "zstd", "lz4"] }
 tokio = { version = "1.49.0", features = ["full"] }
@@ -124,6 +126,8 @@ testcontainers = "0.27.3"
 testcontainers-modules = { version = "0.15.0", features = ["nats"] }
 
 # Query engine dependencies
+pest = "2.9.1"
+pest_derive = "2.9.1"
 indexmap = "2"
 jsonschema = "0.44.0"
 const_format = "0.2.35"

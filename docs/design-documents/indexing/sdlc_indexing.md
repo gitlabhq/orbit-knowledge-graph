@@ -241,7 +241,16 @@ WHERE id = '{namespace_id}';
 
 If the worker fails unexpectedly, the unacked message is redelivered by NATS to another worker. If the message exceeds `max_deliver`, the outcome depends on the subscription's `dead_letter_on_exhaustion` setting: subscriptions with `dead_letter_on_exhaustion: true` (e.g. Siphon CDC) publish the message to the `GKG_DEAD_LETTERS` stream for inspection and replay, while subscriptions with `dead_letter_on_exhaustion: false` (internal dispatch, the default) term-ack the message since the next dispatch cycle re-creates the request. This leverages eventual consistency which is acceptable since the system does not aim for real-time consistency.
 
-The term-ack path assumes the worker is alive to term the message. When a worker crashes or is killed after the final delivery attempt, JetStream gives up on the message without ever receiving an ack, nack, or term. Because GKG's versioned streams use `discard_new_per_subject` (one message per subject), that abandoned message permanently blocks its subject: the sweep and backfill dispatchers keep re-publishing the same request, but the stream discards every new copy. The `MaxDeliveriesReconciler` (an orchestrator trigger) closes this gap. It queue-subscribes to JetStream's `MAX_DELIVERIES` advisory across all replicas, and on each advisory for a GKG-managed stream it deletes the exhausted message, unblocking the subject so the next dispatch cycle can re-deliver the request. It ignores advisories for foreign streams (e.g. Siphon) and treats an already-deleted message as a no-op, so duplicate advisories and concurrent replicas are safe.
+The term-ack path assumes the worker is alive to term the message. When a worker crashes or is killed
+after the final delivery attempt, JetStream gives up on the message without ever receiving an ack,
+nack, or term. Because GKG's versioned streams use `discard_new_per_subject` (one message per subject),
+that abandoned message permanently blocks its subject: the sweep and backfill dispatchers keep
+re-publishing the same request, but the stream discards every new copy. The `MaxDeliveriesReconciler`
+(an orchestrator trigger) closes this gap. It queue-subscribes to JetStream's `MAX_DELIVERIES` advisory
+across all replicas, and on each advisory for a GKG-managed stream it deletes the exhausted message,
+unblocking the subject so the next dispatch cycle can re-deliver the request. It ignores advisories for
+foreign streams (e.g. Siphon) and treats an already-deleted message as a no-op, so duplicate advisories
+and concurrent replicas are safe.
 
 ##### ETL
 
@@ -353,8 +362,8 @@ Rows deleted in the source database have `_siphon_deleted` set to `true`. The ex
 
 Edge tables are `ReplacingMergeTree` keyed on `(traversal_path, relationship_kind, source_id, target_id, …)`. For an FK-derived edge whose FK column is *mutable* — a "latest"/"who did X last" pointer such as `HAS_LATEST_DIFF` (`latest_merge_request_diff_id`) — a changed FK value writes a new edge row with a different `target_id`. Because `target_id` is part of the dedup identity, the prior row keeps a distinct identity and is never replaced or tombstoned, so the owner accumulates one live edge per historical FK value. The before-image needed to tombstone the old edge at write time is unavailable (the datalake `siphon_*` tables are collapsed current-state), so this is reconciled out-of-band instead.
 
-`StaleEdgeReconciliation` is a `ScheduledTask` in `DispatchIndexing` mode (default every 15 minutes). It runs one idempotent `INSERT … SELECT` per `(relationship_kind, FK-owner)` variant: a CTE selects the owner nodes changed since the last cursor (`_version >= cursor`, read `FINAL`), joins them to live edges of that kind, and tombstones (`_deleted = true`) any edge whose endpoint no longer equals the owner's current FK column.
-A dual `IN` on `(traversal_path, owner-id)` prunes the edge scan to the changed set via the primary key, so cost tracks churn rather than table size; the cursor advances only on full success, and re-tombstoning an already-stale edge is a no-op.
+`StaleEdgeReconciliation` is a `ScheduledTask` in `DispatchIndexing` mode (default every 30 minutes). It runs one idempotent `INSERT … SELECT` per `(relationship_kind, FK-owner)` variant: a CTE selects the owner nodes changed within the configured lookback window (`_version >= now - lookback`, read `FINAL`), joins them to live edges of that kind, and tombstones (`_deleted = true`) any edge whose endpoint no longer equals the owner's current FK column.
+A dual `IN` on `(traversal_path, owner-id)` prunes the edge scan to the recently changed set via the primary key, so cost tracks recent churn rather than table size. Each run rescans the fixed lookback window, and re-tombstoning an already-stale edge is a no-op.
 The swept set is derived entirely from the ontology: an edge is reconciled iff its mapping is marked `mutable: true` (the FK can change, so the edge can orphan); immutable FKs (`project_id`, `author_id`) leave it unset and are never swept. The metadata for each variant (owner table, graph column, edge table, direction, endpoint kinds) is likewise derived from the ontology.
 This runs directly in the dispatcher rather than dispatching to indexer workers — it is one cheap global sweep, not per-namespace fan-out, and keeps the load off the high-throughput insert path.
 
@@ -374,7 +383,7 @@ The indexer uses the ontology to create the Orbit ClickHouse tables and build th
 
 The Orbit schema is declared in `config/graph.sql` (generated from the ontology) and versioned via the `schema` pin in `config/versions.yaml`. All graph tables are prefixed with `v<N>_` (e.g. `v58_gl_issue`) so that multiple schema versions can coexist during migration. Migrations are applied to the Orbit graph database by the dispatcher at boot via `schema::migration::run_if_needed()`.
 
-The dispatcher publishes its [ontology archive](../schema_management.md#ontology-archives) before migration.
+Migration requires usable [ontology archives](../schema_management.md#ontology-archives) for both the active and target versions.
 
 The schema is backward compatible with the previous version until the schema migration is complete for every namespace. A migration is considered complete when `MigrationCompletionChecker` detects that all enabled namespaces have been re-indexed into new-prefix tables, then promotes the new version to `active` and retires the old one.
 
@@ -421,6 +430,7 @@ re-sweeps against the clone.
 `MigrationCompletionChecker` promotes the new version only after every currently enabled top-level
 namespace ID has completed all required namespaced pipelines and every required global pipeline is
 complete. A checkpoint from a namespace that has since been disabled does not satisfy the gate.
+An unusable target archive blocks promotion until a later scheduled check succeeds.
 
 **Initial schema creation**
 

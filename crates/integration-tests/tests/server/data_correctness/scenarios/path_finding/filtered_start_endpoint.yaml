@@ -1,0 +1,22 @@
+# source: crates/integration-tests/tests/server/data_correctness/path_finding.rs::path_finding_filtered_start_endpoint_reaches_project
+description: Filtered start endpoint (username=alice) finds path to Project 1004
+
+query:
+  json: |
+    {
+      "query_type": "path_finding",
+      "nodes": [
+        {"id": "start", "entity": "User", "filters": {"username": {"eq": "alice"}}},
+        {"id": "end", "entity": "Project", "node_ids": [1004]}
+      ],
+      "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3,
+               "rel_types": ["MEMBER_OF", "CONTAINS"]}
+    }
+
+expect:
+  referential_integrity: true
+  path_count: 1
+  nodes:
+    User:
+      filters:
+        username: { eq: alice }

@@ -1,0 +1,30 @@
+# source: crates/integration-tests/tests/server/data_correctness/aggregation.rs::aggregation_nested_path_includes_child_projects
+description: Nested path 1/100/ includes child projects under Group 100
+
+config:
+  security:
+    org_id: 1
+    paths: ["1/100/"]
+
+query:
+  json: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
+        {"id": "p", "entity": "Project"}
+      ],
+      "relationships": [{"type": "CONTAINS", "from": "g", "to": "p"}],
+      "group_by": ["g"],
+      "aggregations": [{"count": "p", "as": "project_count"}],
+      "limit": 10
+    }
+
+expect:
+  groups:
+    g:
+      rows:
+        - { entity: Group, id: 100, values: { project_count: 2 } }
+      absent:
+        - { entity: Group, id: 101 }
+        - { entity: Group, id: 102 }

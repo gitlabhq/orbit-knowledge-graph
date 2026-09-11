@@ -75,7 +75,15 @@ async fn run_pipeline(
 ) -> PipelineOutput {
     let ontology = Arc::new(load_ontology());
     let client = Arc::new(ctx.create_client());
-    let compiled = Arc::new(compile(json, &ontology, &security_ctx).unwrap());
+    let compiled = Arc::new(
+        compile(
+            json,
+            query_engine::compiler::Frontend::JsonDsl,
+            &ontology,
+            &security_ctx,
+        )
+        .unwrap(),
+    );
 
     let batches = ctx.query_parameterized(&compiled.base).await;
     let mut result = QueryResult::from_batches(&batches, &compiled.base.result_context);

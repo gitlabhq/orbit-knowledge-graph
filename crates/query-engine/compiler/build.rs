@@ -45,6 +45,10 @@ fn main() {
         "/$defs/PathConfig/properties/max_depth",
         MAX_DEPTH_CAP,
     );
+    check_maximum(&schema, "/properties/limit", MAX_LIMIT);
+    check_max_length(&schema, "/$defs/Identifier", MAX_IDENTIFIER_LEN);
+    check_max_length(&schema, "/$defs/SearchPattern", MAX_FILTER_STRING_LEN);
+    check_string_branch_max_length(&schema, "/$defs/FilterValue/oneOf", MAX_FILTER_STRING_LEN);
 
     check_max_items(&schema, "/properties/nodes", MAX_NODES_CAP);
     check_max_items(&schema, "/properties/relationships", MAX_RELS_CAP);
@@ -182,6 +186,45 @@ fn check_max_items(schema: &Value, ptr: &str, expected: usize) {
     assert_eq!(
         actual, expected as u64,
         "DRIFT: `{field}` = {actual} but compiler cap = {expected}. \
+         Update either the schema or src/schema_limits.rs so they match."
+    );
+}
+
+fn check_max_length(schema: &Value, ptr: &str, expected: usize) {
+    let field = format!("{ptr}/maxLength");
+    let actual = schema
+        .pointer(&field)
+        .and_then(Value::as_u64)
+        .unwrap_or_else(|| panic!("graph_query.schema.json is missing integer `{field}`"));
+    assert_eq!(
+        actual, expected as u64,
+        "DRIFT: `{field}` = {actual} but compiler cap = {expected}. \
+         Update either the schema or src/schema_limits.rs so they match."
+    );
+}
+
+fn check_string_branch_max_length(schema: &Value, ptr: &str, expected: usize) {
+    let branches = schema
+        .pointer(ptr)
+        .and_then(Value::as_array)
+        .unwrap_or_else(|| panic!("graph_query.schema.json is missing array `{ptr}`"));
+    let string_branches: Vec<&Value> = branches
+        .iter()
+        .filter(|b| b.get("type").and_then(Value::as_str) == Some("string"))
+        .collect();
+    let [branch] = string_branches.as_slice() else {
+        panic!(
+            "`{ptr}` must have exactly one `type: string` branch to guard, found {}",
+            string_branches.len()
+        );
+    };
+    let actual = branch
+        .get("maxLength")
+        .and_then(Value::as_u64)
+        .unwrap_or_else(|| panic!("string branch under `{ptr}` is missing integer `maxLength`"));
+    assert_eq!(
+        actual, expected as u64,
+        "DRIFT: string branch under `{ptr}` maxLength = {actual} but compiler cap = {expected}. \
          Update either the schema or src/schema_limits.rs so they match."
     );
 }

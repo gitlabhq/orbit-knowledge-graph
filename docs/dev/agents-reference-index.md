@@ -9,6 +9,7 @@ Canonical locations for files, schemas, configs, and tools in the knowledge-grap
 | Architecture and data model | `docs/design-documents/data_model.md` |
 | Security / AuthZ design | `docs/design-documents/security.md` |
 | Query DSL spec | `docs/design-documents/querying/` |
+| Orbit query frontend | `crates/query-engine/compiler/src/passes/frontend/`; design in `docs/design-documents/querying/orbit_query_frontend.md` |
 | SDLC indexing pipeline | `docs/design-documents/indexing/sdlc_indexing.md` |
 | Code indexing pipeline | `docs/design-documents/indexing/code_indexing.md` |
 | Namespace deletion pipeline | `docs/design-documents/indexing/namespace_deletion.md` |
@@ -25,7 +26,7 @@ Canonical locations for files, schemas, configs, and tools in the knowledge-grap
 | YAML document type JSON schema | `config/schemas/yaml_document_type.schema.json` (configs validated against it when the code-graph YAML pipeline first loads them) |
 | Named query definitions | `config/named_queries/` (parsed/embedded by `crates/named-queries`, compiled against the ontology by `crates/orbit-server/build.rs`, executed via gRPC `QUERY_TYPE_NAMED`, listed via gRPC `ListNamedQueries`) |
 | Named query JSON schema | `config/schemas/named_query.schema.json` (validate with `mise named-queries:validate`; CI gate `named-query-schema-validate`) |
-| Agent prompt files (tool descriptions) | `config/prompts/` (versioned YAML, one file per prompt; `remote/` feeds `orbit-server`, `local/` feeds `orbit-local`; embedded via rust-embed and build-time validated by `crates/orbit-prompts`) |
+| Agent prompt files (tool descriptions) | `config/prompts/` (versioned YAML, one file per prompt; `remote/` feeds `orbit-server`, `local/` feeds `orbit-cli`; embedded via rust-embed and build-time validated by `crates/orbit-prompts`) |
 | Server config JSON schema | `config/schemas/config.schema.json` (generated via `mise schema:generate`) |
 | Query response JSON schema | `config/schemas/query_response.json` |
 | Query language reference (text-indexed properties table is generated) | `docs/source/remote/queries/query-language.md` (regenerate the ontology-derived table with `mise docs:query-language`; CI gate `query-language-docs-check`) |
@@ -41,6 +42,7 @@ Canonical locations for files, schemas, configs, and tools in the knowledge-grap
 | Datalake DDL (ClickHouse) | `fixtures/siphon.sql` |
 | gRPC service definition | `crates/orbit-server/proto/orbit.proto` |
 | Server config structure | `crates/orbit-server-config/src/app.rs` (`AppConfig`), `config/default.yaml` (embedded; declares every setting, no Rust fallbacks) |
+| Object storage config | `config/default.yaml` (`object_storage:` section), `crates/orbit-server-config/src/object_storage.rs`, client in `crates/object-storage/src/lib.rs` |
 | Query settings (timeouts, cache) | `config/default.yaml` (`query:` section), `crates/orbit-server-config/src/query.rs` |
 | Configuration runbook | `docs/dev/runbooks/server_configuration.md` |
 | Local development guide | `docs/dev/local-development.md` |

@@ -5,14 +5,14 @@
 #
 # Overrides, in increasing priority: an on-disk config/default.yaml (compatibility overlay for the
 # Helm chart's ConfigMap key), the overlay file (--config <path>, else config/config.yaml when
-# present), K8s secret files under /etc/secrets/, and GKG_* environment variables.
+# present), and K8s secret files under /etc/secrets/.
 #
 # The values below are deployment defaults: what any environment gets when nothing overrides them.
 # They must equal the settings a production pod would run on, so this file can underlay a partial
 # Helm ConfigMap without changing behaviour. config-rs deep-merges maps, so a map entry here that
 # the ConfigMap does not set leaks into production; keep the maps below empty unless the entry is a
-# genuine universal default. Local-development-only tuning lives in config/dev.yaml (loaded by the
-# mise dev tasks via --config), not here.
+# genuine universal default. Local-development-only tuning lives in config/dev.yaml, which the mise
+# dev tasks merge into the generated .dev/<mode>.yaml, not here.
 
 bind_address: "127.0.0.1:4200"
 grpc_bind_address: "127.0.0.1:50054"
@@ -213,3 +213,21 @@ billing:
     # api_token: ""
 
 features: {}
+
+# Static credentials are Option fields meant for secret files:
+# /etc/secrets/object_storage/secret_access_key, /etc/secrets/object_storage/service_account_key.
+object_storage:
+  enabled: false
+  provider: s3                  # s3 | gcs | local
+  bucket: ""                    # local: a directory path
+  prefix: ""
+  auth: identity                # identity | static
+  # region: "us-east-1"         # s3: AWS region; S3-compatible stores mostly ignore it
+  # endpoint: ""                # s3: S3-compatible store; gcs: emulator or private endpoint
+  path_style: false             # s3 only; with an endpoint and false, the endpoint host must include the bucket
+  allow_http: false             # local development only
+  # ca_cert_path: ""            # PEM bundle of extra root certificates
+  # access_key_id: ""           # s3 static
+  # secret_access_key: ""       # s3 static
+  # session_token: ""           # s3 static
+  # service_account_key: ""     # gcs static, JSON key content

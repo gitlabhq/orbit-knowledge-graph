@@ -1,0 +1,19 @@
+# source: crates/integration-tests/tests/server/data_correctness/edge_cases/filterable.rs::filterable_traversal_path_readable_on_project
+description: traversal_path (filterable=false) is readable as a return column on Project
+
+query:
+  json: |
+    {
+        "query_type": "traversal",
+        "nodes": [{"id": "p", "entity": "Project",
+                 "columns": ["name", "traversal_path"],
+                 "node_ids": [1000]}],
+        "limit": 10
+    }
+
+expect:
+  node_count: 1
+  nodes:
+    Project:
+      ids: [1000]
+      prop_present: [traversal_path]

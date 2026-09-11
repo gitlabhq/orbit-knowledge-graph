@@ -1,0 +1,14 @@
+# source: crates/integration-tests/tests/server/data_correctness/security.rs::aggregation_user_only_neighbors_query_is_not_blocked
+description: Non-aggregation neighbors query on User is not blocked by the aggregation guard
+
+query:
+  json: |
+    {
+      "query_type": "neighbors",
+      "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
+      "neighbors": {"direction": "outgoing", "rel_types": ["MEMBER_OF"]},
+      "limit": 10
+    }
+
+expect:
+  compile_only: true

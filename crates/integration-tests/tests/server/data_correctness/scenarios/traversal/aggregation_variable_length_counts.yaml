@@ -20,9 +20,13 @@ query:
       "aggregations": [{"count": "g", "as": "n"}],
       "limit": 5
     }
+  gql: |
+    MATCH (u:User {id: 7})-[:AUTHORED]->(wi:WorkItem)-[:IN_PROJECT]->(p:Project)<-[:CONTAINS*1..2]-(g:Group) RETURN u, count(g) AS n LIMIT 5
 
 expect:
   groups:
     u:
+      entity: User
+      ids: [7]
       rows:
         - { entity: User, id: 7, values: { n: 2 } }

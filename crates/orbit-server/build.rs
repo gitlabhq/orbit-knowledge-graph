@@ -3,36 +3,43 @@ fn main() {
     validate_prompts();
     validate_named_queries();
     validate_migration_ledger();
-    validate_ontology_archive();
+    validate_ontology_archives();
     validate_authored_etl_sql();
     #[cfg(feature = "regenerate-protos")]
     regenerate_protos();
 }
 
-fn validate_ontology_archive() {
-    let version = orbit_versions::VERSIONS.schema;
-    let path =
-        ontology::archive::OntologyArchive::path(std::path::Path::new(env!("CONFIG_DIR")), version);
-    println!("cargo:rerun-if-changed={}", path.display());
-    let bytes = std::fs::read(&path).unwrap_or_else(|error| {
-        panic!(
-            "{}: {error}. Run `mise schema:snapshot` to seed the current archive.",
-            path.display()
-        )
-    });
-    let archive = ontology::archive::OntologyArchive::from_bytes(version, &bytes)
+fn validate_ontology_archives() {
+    let config_directory = std::path::Path::new(env!("CONFIG_DIR"));
+    let directory = config_directory.join("ontology-archives");
+    println!("cargo:rerun-if-changed={}", directory.display());
+    let current_version = orbit_versions::VERSIONS.schema;
+    let current_path = ontology::archive::OntologyArchive::path(config_directory, current_version);
+    let versions = ontology::archive::OntologyArchive::bundled_versions()
         .unwrap_or_else(|error| panic!("{error}"));
-    archive
-        .load_ontology()
-        .unwrap_or_else(|error| panic!("{error}"));
-    let current_sources = ontology::migrations::embedded_sources();
     assert!(
-        archive.matches_sources(&current_sources),
-        "ontology archive is stale; run `mise schema:bump`"
+        versions.contains(&current_version),
+        "{} is missing; run `mise schema:snapshot` to seed the current archive.",
+        current_path.display()
     );
+
+    for version in versions {
+        let archive = ontology::archive::OntologyArchive::bundled(version)
+            .unwrap_or_else(|error| panic!("{error}"))
+            .expect("bundled archive must exist");
+        archive
+            .load_ontology()
+            .unwrap_or_else(|error| panic!("bundled archive v{version}: {error}"));
+        if version == current_version {
+            assert!(
+                archive.matches_sources(&ontology::migrations::embedded_sources()),
+                "ontology archive is stale; run `mise schema:bump`"
+            );
+        }
+    }
     println!(
         "cargo:rustc-env=ONTOLOGY_ARCHIVE_PATH={}",
-        path.canonicalize().unwrap().display()
+        current_path.canonicalize().unwrap().display()
     );
 }
 
@@ -108,7 +115,7 @@ fn validate_named_queries() {
         let rendered = query
             .render(&values, &query.example_parameters())
             .unwrap_or_else(|e| panic!("named query failed to render: {e}"));
-        if let Err(e) = compiler::compile(&rendered, &ontology, &ctx) {
+        if let Err(e) = compiler::compile(&rendered, compiler::Frontend::JsonDsl, &ontology, &ctx) {
             panic!("named query `{}` failed to compile: {e}", query.name);
         }
     }

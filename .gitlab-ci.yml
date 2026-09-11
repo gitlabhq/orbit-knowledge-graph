@@ -257,7 +257,7 @@ setup-schema-validate:
   needs: []
   script:
     - find config/setup/agents -name '*.yaml' | xargs uvx check-jsonschema --verbose --schemafile config/schemas/setup_agent.schema.json
-    - uvx check-jsonschema --verbose --schemafile config/schemas/setup_modes.schema.json config/setup/modes.yaml
+    - uvx check-jsonschema --verbose --schemafile config/schemas/setup.schema.json config/setup/setup.yaml
 
 generate-config-schema:
   stage: lint
@@ -713,7 +713,7 @@ corpus-smoke-test:
       when: never
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
       changes:
-        - crates/orbit-local/**/*
+        - crates/orbit-cli/**/*
         - crates/code-graph/**/*
         - crates/ontology/**/*
         - crates/duckdb-client/**/*

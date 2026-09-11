@@ -18,36 +18,37 @@ Config is loaded in layers, each overriding the previous:
    the key the Helm chart's ConfigMap currently uses; treat it as a partial overlay.
 3. **Overlay file**: the path given with `--config <path>`, otherwise `config/config.yaml` when it exists.
    An explicit `--config` path must exist; the default overlay is optional and Git ignores it.
-   The mise dev tasks pass `--config config/dev.yaml`, a committed overlay holding local-development
-   tuning (laptop ClickHouse session settings, dev batch sizes) kept out of the deployment defaults.
+   The mise dev tasks pass a generated file built from `config/dev.yaml`; see the layering below.
 4. **Secrets**: Files in `/etc/secrets/` (Kubernetes secret mounts)
-5. **Environment variables**: Prefixed with `GKG_`, using `__` as a separator for nested keys and `,` for lists
+
+There is no environment-variable layer. Every override is a YAML overlay or a secret file.
 
 Adding a setting means adding a field to the struct in `crates/orbit-server-config/` and its
 value to `config/default.yaml`; nothing else. Tests that need a config start from
 `AppConfig::embedded_defaults()` and override the fields they care about.
 
-The mise dev tasks (`server:start`, `dev:web`, `dev:indexer`, `dev:dispatcher`) launch with
-`--config config/dev.yaml`, so that committed overlay is the local-development layer. Personal
-overrides on top go through `GKG_*` environment variables, which the dev tasks already set and which
-take priority over every file. An `--config config/dev.yaml` invocation does not also read
-`config/config.yaml`; the default `config/config.yaml` lookup only applies when no `--config` is passed.
+The mise dev tasks (`server:start`, `server:dispatch`, `dev:web`, `dev:indexer`, `dev:dispatcher`,
+`dev:healthcheck`) run `scripts/orbit-native-dev.sh`, which writes `.dev/<mode>.yaml` on every start
+and passes it as the single `--config` file. The file is a `yq` deep merge of, in increasing priority:
 
-Overlay example (`config/dev.yaml` or a `--config` file):
+1. `config/dev.yaml`: the committed description of the dev environment: bind addresses, NATS URL and
+   consumer name, database names and users, laptop tuning.
+2. Values read from the GDK checkout: ClickHouse URLs from `gdk.yml`, the GitLab base URL, the Siphon
+   stream name from GDK's Siphon config, JWT keys and the ClickHouse password from the GitLab secret files.
+3. The mode's Prometheus port, so the processes `mise run dev` starts side by side do not collide once
+   metrics are enabled.
+4. `config/dev.local.yaml`: personal overrides, when the file exists. Git ignores it.
+
+Passing `--config` disables the default `config/config.yaml` lookup.
+
+Overlay example (`config/dev.local.yaml` or any `--config` file):
 
 ```yaml
+bind_address: "127.0.0.1:8091"
 graph:
-  database: "gkg-development"
-gitlab:
-  base_url: "http://gdk.test:3000"
-```
-
-Environment variable examples:
-
-```shell
-GKG_NATS__URL=nats://gkg-nats:4222
-GKG_GRAPH__DATABASE=gkg-sandbox
-GKG_ENGINE__MAX_CONCURRENT_WORKERS=16
+  database: "gkg-sandbox"
+engine:
+  max_concurrent_workers: 16
 ```
 
 ## Server modes
@@ -67,39 +68,39 @@ All modes share the same configuration structure.
 
 ### Connection
 
-| Config path | Env var | Default | Description |
-|-------------|---------|---------|-------------|
-| `nats.url` | `GKG_NATS__URL` | `localhost:4222` | Broker address |
-| `nats.username` | `GKG_NATS__USERNAME` | None | Auth username |
-| `nats.password` | `GKG_NATS__PASSWORD` | None | Auth password |
-| `nats.tls_ca_cert_path` | `GKG_NATS__TLS_CA_CERT_PATH` | None | CA cert (PEM) for TLS. Setting any TLS path enables TLS. |
-| `nats.tls_cert_path` | `GKG_NATS__TLS_CERT_PATH` | None | Client cert (PEM) for mTLS. Must pair with `tls_key_path`. |
-| `nats.tls_key_path` | `GKG_NATS__TLS_KEY_PATH` | None | Client key (PEM) for mTLS. Must pair with `tls_cert_path`. |
-| `nats.connection_timeout_secs` | | `10` | Connection timeout |
-| `nats.request_timeout_secs` | | `5` | Request timeout |
+| Config path | Default | Description |
+|-------------|---------|-------------|
+| `nats.url` | `localhost:4222` | Broker address |
+| `nats.username` | None | Auth username |
+| `nats.password` | None | Auth password |
+| `nats.tls_ca_cert_path` | None | CA cert (PEM) for TLS. Setting any TLS path enables TLS. |
+| `nats.tls_cert_path` | None | Client cert (PEM) for mTLS. Must pair with `tls_key_path`. |
+| `nats.tls_key_path` | None | Client key (PEM) for mTLS. Must pair with `tls_cert_path`. |
+| `nats.connection_timeout_secs` | `10` | Connection timeout |
+| `nats.request_timeout_secs` | `5` | Request timeout |
 
 ### Consumer
 
-| Config path | Env var | Default | Description |
-|-------------|---------|---------|-------------|
-| `nats.consumer_name` | `GKG_NATS__CONSUMER_NAME` | None | Durable consumer name. `None` = ephemeral (lost on disconnect). Set in production for persistence across restarts. |
-| `nats.ack_wait_secs` | | `300` | Seconds before unacked message is redelivered |
-| `nats.max_deliver` | | `5` | Max redelivery attempts. `None` = unlimited. |
-| `nats.batch_size` | | `10` | Messages fetched per batch |
-| `nats.subscription_buffer_size` | | `100` | Internal channel buffer between fetch loop and handler |
-| `nats.fetch_expires_secs` | | `5` | Server-side timeout for batch fetch (clamped to min 1s) |
+| Config path | Default | Description |
+|-------------|---------|-------------|
+| `nats.consumer_name` | None | Durable consumer name. `None` = ephemeral (lost on disconnect). Set in production for persistence across restarts. |
+| `nats.ack_wait_secs` | `300` | Seconds before unacked message is redelivered |
+| `nats.max_deliver` | `5` | Max redelivery attempts. `None` = unlimited. |
+| `nats.batch_size` | `10` | Messages fetched per batch |
+| `nats.subscription_buffer_size` | `100` | Internal channel buffer between fetch loop and handler |
+| `nats.fetch_expires_secs` | `5` | Server-side timeout for batch fetch (clamped to min 1s) |
 
 ### Stream
 
-| Config path | Env var | Default | Description |
-|-------------|---------|---------|-------------|
-| `nats.auto_create_streams` | `GKG_NATS__AUTO_CREATE_STREAMS` | `true` | Create streams on startup |
-| `nats.stream_replicas` | `GKG_NATS__STREAM_REPLICAS` | `1` | Replicas per stream. Use 3 in production for fault tolerance. |
-| `nats.stream_max_age_secs` | `GKG_NATS__STREAM_MAX_AGE_SECS` | None | Max message age before deletion |
-| `nats.stream_max_bytes` | `GKG_NATS__STREAM_MAX_BYTES` | None | Max stream size in bytes |
-| `nats.stream_max_messages` | `GKG_NATS__STREAM_MAX_MESSAGES` | None | Max messages per stream |
-| `nats.consumer_inactive_threshold_secs` | `GKG_NATS__CONSUMER_INACTIVE_THRESHOLD_SECS` | `3600` | Idle time after which NATS auto-deletes a versioned durable consumer (min 60) |
-| `nats.release_gc_idle_threshold_secs` | `GKG_NATS__RELEASE_GC_IDLE_THRESHOLD_SECS` | `3600` | Idle time after which a starting dispatcher deletes another release's streams (min 600) |
+| Config path | Default | Description |
+|-------------|---------|-------------|
+| `nats.auto_create_streams` | `true` | Create streams on startup |
+| `nats.stream_replicas` | `1` | Replicas per stream. Use 3 in production for fault tolerance. |
+| `nats.stream_max_age_secs` | None | Max message age before deletion |
+| `nats.stream_max_bytes` | None | Max stream size in bytes |
+| `nats.stream_max_messages` | None | Max messages per stream |
+| `nats.consumer_inactive_threshold_secs` | `3600` | Idle time after which NATS auto-deletes a versioned durable consumer (min 60) |
+| `nats.release_gc_idle_threshold_secs` | `3600` | Idle time after which a starting dispatcher deletes another release's streams (min 600) |
 
 The `GKG_INDEXER` stream is created with:
 
@@ -114,25 +115,25 @@ Two separate ClickHouse connections are required: one for the datalake (Siphon-r
 
 ### Datalake
 
-| Config path | Env var | Default | Description |
-|-------------|---------|---------|-------------|
-| `datalake.url` | `GKG_DATALAKE__URL` | `http://127.0.0.1:8123` | HTTP endpoint |
-| `datalake.database` | `GKG_DATALAKE__DATABASE` | `default` | Database name |
-| `datalake.username` | `GKG_DATALAKE__USERNAME` | `default` | Auth user |
-| `datalake.password` | `GKG_DATALAKE__PASSWORD` | None | Auth password |
-| `datalake.session_settings` | | `{}` | ClickHouse session-level settings (e.g., `max_execution_time`, `max_query_size`) |
+| Config path | Default | Description |
+|-------------|---------|-------------|
+| `datalake.url` | `http://127.0.0.1:8123` | HTTP endpoint |
+| `datalake.database` | `default` | Database name |
+| `datalake.username` | `default` | Auth user |
+| `datalake.password` | None | Auth password |
+| `datalake.session_settings` | `{}` | ClickHouse session-level settings (e.g., `max_execution_time`, `max_query_size`) |
 
 ### Graph
 
-| Config path | Env var | Default | Description |
-|-------------|---------|---------|-------------|
-| `graph.url` | `GKG_GRAPH__URL` | `http://127.0.0.1:8123` | HTTP endpoint |
-| `graph.database` | `GKG_GRAPH__DATABASE` | `default` | Database name |
-| `graph.username` | `GKG_GRAPH__USERNAME` | `default` | Auth user |
-| `graph.password` | `GKG_GRAPH__PASSWORD` | None | Auth password |
-| `graph.session_settings` | | `{}` | ClickHouse session-level settings (e.g., `optimize_on_insert`, `max_query_size`) |
-| `graph.insert_settings` | | `{}` | Settings applied to INSERT operations only (e.g., `async_insert`, `wait_for_async_insert`) |
-| `graph.quorum_writes` | `GKG_GRAPH__QUORUM_WRITES` | `false` | Replicated-cluster mode; see [Self-managed replicated clusters](#self-managed-replicated-clusters) |
+| Config path | Default | Description |
+|-------------|---------|-------------|
+| `graph.url` | `http://127.0.0.1:8123` | HTTP endpoint |
+| `graph.database` | `default` | Database name |
+| `graph.username` | `default` | Auth user |
+| `graph.password` | None | Auth password |
+| `graph.session_settings` | `{}` | ClickHouse session-level settings (e.g., `optimize_on_insert`, `max_query_size`) |
+| `graph.insert_settings` | `{}` | Settings applied to INSERT operations only (e.g., `async_insert`, `wait_for_async_insert`) |
+| `graph.quorum_writes` | `false` | Replicated-cluster mode; see [Self-managed replicated clusters](#self-managed-replicated-clusters) |
 
 ### Self-managed replicated clusters
 
@@ -179,14 +180,14 @@ Expect three costs. Writes create more parts and more merge work, because async 
 
 The worker pool limits how many messages are processed concurrently. It uses a two-level semaphore: a global limit and optional per-group limits.
 
-| Config path | Env var | Default | Description |
-|-------------|---------|---------|-------------|
-| `engine.max_concurrent_workers` | `GKG_ENGINE__MAX_CONCURRENT_WORKERS` | derived | Global concurrency cap |
-| `engine.concurrency_groups` | | derived | Named group limits |
+| Config path | Default | Description |
+|-------------|---------|-------------|
+| `engine.max_concurrent_workers` | derived | Global concurrency cap |
+| `engine.concurrency_groups` | derived | Named group limits |
 
 ### Resource-derived defaults
 
-These fields derive from the container's resources at startup when left unset; an explicit config value (YAML or env var) always wins. Each derived value logs once at info level with its input, so an operator can read a pod's choice from its logs without exec'ing in.
+These fields derive from the container's resources at startup when left unset; an explicit config value always wins. Each derived value logs once at info level with its input, so an operator can read a pod's choice from its logs without exec'ing in.
 
 - `max_concurrent_workers` unset → the container's available parallelism (`std::thread::available_parallelism`, which is cgroup-aware on Linux, so it tracks the pod's CPU limit), capped by the cgroup memory limit at 1.5 GiB per worker so a CPU-rich but memory-tight pod cannot derive more workers than it can feed. The budget is calibrated on production's hand-tuned pools (code: 16 workers in 24 GiB, sdlc: 20 in 32 GiB). No readable memory limit (unlimited cgroup, bare metal, macOS) means CPU alone decides.
 - `concurrency_groups` empty → derived from the modules the pool registers (`engine.modules`) and the resolved worker cap. A single-group pool gives that group the whole cap; a pool spanning both the SDLC and code groups splits the cap 75% / 25% (the historical universal-pool ratio of sdlc 12 / code 4 out of 16). Namespace deletion shares the sdlc group.
@@ -286,65 +287,67 @@ Initial-load partition parallelism is no longer configured here; a pipeline decl
 
 ## Scheduler configuration
 
-Scheduled tasks run in `DispatchIndexing` mode. Each task has a 6-field cron expression (seconds, minutes, hours, day-of-month, month, day-of-week). Every task's default cron is declared in `config/default.yaml` under `schedule.tasks`; a `schedule.tasks.<name>` entry in an overlay replaces only the fields you set. The cron expression is required and is parsed when the configuration loads, so a missing or invalid expression fails startup.
+Scheduled tasks run in `DispatchIndexing` mode. Each scheduled task has a 6-field cron expression (seconds, minutes, hours, day-of-month, month, day-of-week). Every task's default cron is declared in `config/default.yaml` under `schedule.tasks`; a `schedule.tasks.<name>` entry in an overlay replaces only the fields you set. The cron expression is required and is parsed when the configuration loads, so a missing or invalid expression fails startup.
 
-Distributed locking via NATS KV ensures only one dispatcher instance runs each task per interval.
+Distributed locking via NATS KV ensures only one dispatcher instance runs each scheduled task per interval. Raw Siphon routing is a separate continuous trigger and does not use a cron expression.
 
 | Task | Config path | Default cron | Description |
 |------|-------------|-------------|-------------|
 | Global dispatch | `schedule.tasks.global.cron` | `0 */1 * * * *` (every minute) | Publishes `GlobalIndexingRequest` |
-| Namespace dispatch | `schedule.tasks.namespace.cron` | `*/30 * * * * *` (every 30 seconds) | Publishes requests for enabled root namespaces with Siphon changes |
-| Namespace sweep | `schedule.tasks.namespace-sweep.cron` | `0 0 * * * *` (hourly) | Re-dispatches every enabled namespace; backstops migration backfill and missed windows |
-| Code task dispatch | `schedule.tasks.code-indexing-task.cron` | `0 */1 * * * *` (every minute) | Consumes Siphon CDC push events |
-| Code backfill | `schedule.tasks.code-backfill.cron` | `0 */1 * * * *` (every minute) | Backfills newly enabled namespaces |
+| Namespace dispatch | `schedule.tasks.namespace.cron` | `*/30 * * * * *` (every 30 seconds) | Publishes requests for changed enabled root namespaces and performs the integrated namespace sweep when due |
+| Code backfill | `schedule.tasks.code-backfill.cron` | `0 */1 * * * *` (every minute) | Backfills enabled namespaces whose projects do not yet have code checkpoints |
 | Table cleanup | `schedule.tasks.table-cleanup.cron` | `0 0 3 * * 0` (weekly, Sunday 03:00 UTC) | Runs `APPLY DELETED MASK` on every graph table to physically remove lightweight-deleted rows |
 | Namespace deletion | `schedule.tasks.namespace-deletion.cron` | `0 0 3 * * *` (daily 03:00 UTC) | Schedules and executes namespace deletions |
-| Migration completion | `schedule.tasks.migration-completion.cron` | `0 */1 * * * *` (every minute) | Detects completed schema migrations |
+| Migration completion | `schedule.tasks.migration-completion.cron` | `0 */1 * * * *` (every minute) | Detects completed schema migrations and reconciles dead versions |
+| Stale-edge reconciliation | `schedule.tasks.stale-edge-reconciliation.cron` | `0 */30 * * * *` (every 30 minutes) | Tombstones stale mutable-FK edges |
 
-The namespace change dispatcher is checkpoint-driven. With no checkpoint it
+The namespace dispatcher is checkpoint-driven. With no change-detection checkpoint it
 dispatches every enabled namespace once (cold start) and records a checkpoint;
-every later tick queries Siphon changes since that checkpoint, however old it is.
-The hourly namespace sweep re-dispatches every enabled namespace regardless of
-recent Siphon activity, backstopping migration backfill and missed windows.
+every later tick queries Siphon-backed datalake tables for changes since that checkpoint,
+however old it is. The same task re-dispatches every enabled namespace when its separate
+sweep checkpoint is older than `schedule.tasks.namespace.sweep_interval_secs` (default
+`3600`), backstopping migration backfill and missed windows.
 
 `APPLY DELETED MASK` is idempotent. A failed or skipped run is safe — the next
 run picks up all outstanding masks. Alert on
 `gkg.scheduler.task.errors{task="maintenance.table_cleanup"}`; the task logs a
 failed table and moves on.
 
-### Code dispatch task settings
+### Continuous Siphon router settings
+
+DispatchIndexing continuously polls the raw Siphon JetStream and routes code-task and enabled-namespace CDC events into Orbit's internal request stream. It drains each supported source-table subject until no pending messages remain, waits one second, and polls again.
 
 | Config path | Default | Description |
 |-------------|---------|-------------|
-| `schedule.tasks.code-indexing-task.events_stream_name` | `siphon_stream_main_db` | NATS stream for Siphon CDC events |
-| `schedule.tasks.code-indexing-task.batch_size` | `100` | CDC events to process per cycle |
+| `schedule.tasks.siphon.events_stream_name` | `siphon_stream_main_db` | Raw NATS stream containing Siphon CDC events |
+| `schedule.tasks.siphon.batch_size` | `100` | Pending messages consumed per route and drain call |
 
-### Code backfill task settings
+### Scheduled task settings
 
 | Config path | Default | Description |
 |-------------|---------|-------------|
+| `schedule.tasks.namespace.sweep_interval_secs` | `3600` | Age at which the namespace dispatcher performs a full enabled-namespace sweep instead of change-only dispatch |
+| `schedule.tasks.stale-edge-reconciliation.lookback_secs` | `3600` | Recent node-version window rescanned on each stale-edge reconciliation run |
 | `schedule.tasks.code-backfill.publish_window` | `200000` | Pending projects held per publish batch. Also the per-run budget shared between the namespaces that still have pending projects, so it bounds both dispatcher memory (about 70 bytes per project) and how much work one namespace can queue ahead of the others |
-| `schedule.tasks.namespace-code-backfill.events_stream_name` | `siphon_stream_main_db` | NATS stream for namespace events |
-| `schedule.tasks.namespace-code-backfill.batch_size` | `100` | Events to process per cycle |
 
 ## GitLab client
 
 Required for code indexing (repository archive download) and authorization.
 
-| Config path | Env var | Default | Description |
-|-------------|---------|---------|-------------|
-| `gitlab.base_url` | `GKG_GITLAB__BASE_URL` | None | GitLab instance URL |
-| `gitlab.jwt.signing_key` | `GKG_GITLAB__JWT__SIGNING_KEY` | None | JWT signing key (for creating tokens) |
-| `gitlab.jwt.verifying_key` | `GKG_GITLAB__JWT__VERIFYING_KEY` | (required) | JWT verification key |
-| `gitlab.resolve_host` | `GKG_GITLAB__RESOLVE_HOST` | None | Override DNS resolution for GitLab |
+| Config path | Default | Description |
+|-------------|---------|-------------|
+| `gitlab.base_url` | None | GitLab instance URL |
+| `gitlab.jwt.signing_key` | None | JWT signing key (for creating tokens) |
+| `gitlab.jwt.verifying_key` | (required) | JWT verification key |
+| `gitlab.resolve_host` | None | Override DNS resolution for GitLab |
 
 ## Observability
 
 ### Logging
 
-| Config path | Env var | Default | Description |
-|-------------|---------|---------|-------------|
-| `metrics.log_level` | `GKG_METRICS__LOG_LEVEL` | None | Rust log filter string |
+| Config path | Default | Description |
+|-------------|---------|-------------|
+| `metrics.log_level` | None | Rust log filter string |
 
 Example: `info,orbit_server=debug,gkg_indexer=trace`
 
@@ -359,7 +362,7 @@ Example: `info,orbit_server=debug,gkg_indexer=trace`
 
 | Config path | Default | Description |
 |-------------|---------|-------------|
-| `metrics.prometheus.enabled` | `false` | Expose `/metrics` endpoint |
+| `metrics.prometheus.enabled` | `false` | Expose the `/-/metrics` scrape endpoint |
 | `metrics.prometheus.port` | `9394` | Prometheus scrape port |
 
 ## Webserver
@@ -368,19 +371,19 @@ These settings are used by the Webserver mode.
 
 ### General
 
-| Config path | Env var | Default | Description |
-|-------------|---------|---------|-------------|
-| `bind_address` | `GKG_BIND_ADDRESS` | `127.0.0.1:4200` | HTTP server bind address |
-| `grpc_bind_address` | `GKG_GRPC_BIND_ADDRESS` | `127.0.0.1:50054` | gRPC server bind address |
-| `jwt_clock_skew_secs` | `GKG_JWT_CLOCK_SKEW_SECS` | `60` | Allowed JWT clock skew in seconds |
-| `health_check_url` | `GKG_HEALTH_CHECK_URL` | None | Optional health check URL |
+| Config path | Default | Description |
+|-------------|---------|-------------|
+| `bind_address` | `127.0.0.1:4200` | HTTP server bind address |
+| `grpc_bind_address` | `127.0.0.1:50054` | gRPC server bind address |
+| `jwt_clock_skew_secs` | `60` | Allowed JWT clock skew in seconds |
+| `health_check_url` | None | Optional health check URL |
 
 ### TLS
 
-| Config path | Env var | Default | Description |
-|-------------|---------|---------|-------------|
-| `tls.cert_path` | `GKG_TLS__CERT_PATH` | None | TLS certificate path (PEM) |
-| `tls.key_path` | `GKG_TLS__KEY_PATH` | None | TLS private key path (PEM) |
+| Config path | Default | Description |
+|-------------|---------|-------------|
+| `tls.cert_path` | None | TLS certificate path (PEM) |
+| `tls.key_path` | None | TLS private key path (PEM) |
 
 ### gRPC tuning
 
@@ -426,18 +429,18 @@ query:
 
 | Config path | Default | Description |
 |-------------|---------|-------------|
-| `schema.max_retained_versions` | `2` | Number of schema version table-sets to retain (min 2) |
+| `schema.max_retained_versions` | `2` | Active-plus-retired keep-set size (min 2); every migrating version is retained in addition |
 
 ## Analytics
 
 Controls Snowplow product-analytics event emission. Events carry `orbit_common` and `orbit_query` contexts (consumer-owned, defined in `orbit-analytics`). Disabled by default -- Helm enables it for .com and Dedicated.
 
-| Config path | Env var | Default | Description |
-|-------------|---------|---------|-------------|
-| `analytics.enabled` | `GKG_ANALYTICS__ENABLED` | `false` | Enable Snowplow analytics event emission |
-| `analytics.collector_url` | `GKG_ANALYTICS__COLLECTOR_URL` | `""` | Snowplow collector endpoint (e.g. `https://events.gitlab.net`) |
-| `analytics.deployment.type` | `GKG_ANALYTICS__DEPLOYMENT__TYPE` | `self_managed` | `com`, `dedicated`, or `self_managed` |
-| `analytics.deployment.environment` | `GKG_ANALYTICS__DEPLOYMENT__ENVIRONMENT` | `development` | `development`, `staging`, or `production` |
+| Config path | Default | Description |
+|-------------|---------|-------------|
+| `analytics.enabled` | `false` | Enable Snowplow analytics event emission |
+| `analytics.collector_url` | `""` | Snowplow collector endpoint (e.g. `https://events.gitlab.net`) |
+| `analytics.deployment.type` | `self_managed` | `com`, `dedicated`, or `self_managed` |
+| `analytics.deployment.environment` | `development` | `development`, `staging`, or `production` |
 
 Example for the .com staging cluster:
 
@@ -456,22 +459,82 @@ Controls Snowplow billing-event emission and the CDot quota gate that enforces G
 
 ### Billing events
 
-| Config path | Env var | Default | Description |
-|-------------|---------|---------|-------------|
-| `billing.enabled` | `GKG_BILLING__ENABLED` | `false` | Enable Snowplow billing-event emission |
-| `billing.collector_url` | `GKG_BILLING__COLLECTOR_URL` | `""` | Snowplow collector endpoint |
+| Config path | Default | Description |
+|-------------|---------|-------------|
+| `billing.enabled` | `false` | Enable Snowplow billing-event emission |
+| `billing.collector_url` | `""` | Snowplow collector endpoint |
 
 ### Quota gate
 
 When enabled, every metered Orbit query (`mcp`, `rest` source types) is checked against CDot before execution. Requests from namespaces with exhausted credits are rejected with `codes.ResourceExhausted`.
 
-| Config path | Env var | Default | Description |
-|-------------|---------|---------|-------------|
-| `billing.quota.enabled` | `GKG_BILLING__QUOTA__ENABLED` | `false` | Enable the CDot quota gate |
-| `billing.quota.customers_dot_url` | `GKG_BILLING__QUOTA__CUSTOMERS_DOT_URL` | `""` | CDot base URL (e.g. `https://customers.gitlab.com`) |
-| `billing.quota.request_timeout_ms` | `GKG_BILLING__QUOTA__REQUEST_TIMEOUT_MS` | `1000` | CDot request timeout in milliseconds |
-| `billing.quota.api_user` | `GKG_BILLING__QUOTA__API_USER` | None | CDot admin email. Mounted from `/etc/secrets/billing/quota/api_user`. |
-| `billing.quota.api_token` | `GKG_BILLING__QUOTA__API_TOKEN` | None | CDot admin token. Mounted from `/etc/secrets/billing/quota/api_token`. |
+| Config path | Default | Description |
+|-------------|---------|-------------|
+| `billing.quota.enabled` | `false` | Enable the CDot quota gate |
+| `billing.quota.customers_dot_url` | `""` | CDot base URL (e.g. `https://customers.gitlab.com`) |
+| `billing.quota.request_timeout_ms` | `1000` | CDot request timeout in milliseconds |
+| `billing.quota.api_user` | None | CDot admin email. Mounted from `/etc/secrets/billing/quota/api_user`. |
+| `billing.quota.api_token` | None | CDot admin token. Mounted from `/etc/secrets/billing/quota/api_token`. |
+
+## Object storage
+
+Names the bucket Orbit will use for cold storage and how to authenticate to it. Disabled by default; nothing reads the store yet. The `orbit-object-storage` crate turns this section into an `object_store` client for S3, S3-compatible stores, Google Cloud Storage, or a local directory.
+
+| Config path | Default | Description |
+|-------------|---------|-------------|
+| `object_storage.enabled` | `false` | Enable the object store |
+| `object_storage.provider` | `s3` | `s3` (AWS and S3-compatible), `gcs`, or `local` (a directory, for development and tests) |
+| `object_storage.bucket` | `""` | Bucket name, or the directory path for `local` |
+| `object_storage.prefix` | `""` | Key prefix under which every object is placed |
+| `object_storage.auth` | `identity` | `identity` uses the runtime (IRSA, EC2 instance profile, `AWS_*` variables, GKE Workload Identity, GCE metadata server, `GOOGLE_APPLICATION_CREDENTIALS`, gcloud ADC); `static` uses the credentials below |
+| `object_storage.region` | unset | S3 region; required for AWS, ignored by most S3-compatible stores |
+| `object_storage.endpoint` | unset | S3-compatible store URL, or a GCS emulator or private endpoint |
+| `object_storage.path_style` | `false` | S3 only. With a custom endpoint and `false`, the endpoint host must include the bucket |
+| `object_storage.allow_http` | `false` | Permit `http://` endpoints; local development only |
+| `object_storage.ca_cert_path` | unset | PEM bundle of extra root certificates for stores behind a private CA |
+| `object_storage.access_key_id` | unset | S3 static credentials; mount at `/etc/secrets/object_storage/access_key_id` |
+| `object_storage.secret_access_key` | unset | S3 static credentials; mount at `/etc/secrets/object_storage/secret_access_key` |
+| `object_storage.session_token` | unset | S3 static credentials, optional |
+| `object_storage.service_account_key` | unset | GCS static credentials, JSON key content; mount at `/etc/secrets/object_storage/service_account_key` |
+
+Identity on GitLab.com and Dedicated:
+
+```yaml
+object_storage:
+  enabled: true
+  provider: gcs
+  bucket: gitlab-orbit-stg-storage
+  prefix: orbit
+```
+
+MinIO behind a private CA, keys mounted as secret files:
+
+```yaml
+object_storage:
+  enabled: true
+  provider: s3
+  bucket: orbit
+  auth: static
+  endpoint: https://minio.internal:9000
+  path_style: true
+  ca_cert_path: /etc/ssl/private-ca.pem
+```
+
+Local directory for development and tests (the directory must exist):
+
+```yaml
+object_storage:
+  enabled: true
+  provider: local
+  bucket: /tmp/orbit-store
+  prefix: dev
+```
+
+Round-trip a config file against the bucket it names with the throwaway example:
+
+```shell
+cargo run -p orbit-object-storage --example roundtrip -- config.yaml [secrets-dir]
+```
 
 ## Health check
 
@@ -508,32 +571,34 @@ engine:
 
 Increase ack wait for slow handlers:
 
-```shell
-GKG_NATS__ACK_WAIT_SECS=600  # 10 minutes instead of default 5
+```yaml
+nats:
+  ack_wait_secs: 600  # 10 minutes instead of default 5
 ```
 
 ### Handle large CDC backlogs
 
-Increase the code dispatch batch size:
+Increase the continuous Siphon router batch size:
 
 ```yaml
 schedule:
   tasks:
-    code-indexing-task:
+    siphon:
       batch_size: 500
 ```
 
 ### Production NATS settings
 
-```shell
-GKG_NATS__CONSUMER_NAME=gkg-indexer       # Durable consumer (survives restarts)
-GKG_NATS__STREAM_REPLICAS=3               # Fault tolerance
-GKG_NATS__AUTO_CREATE_STREAMS=true        # Auto-create on startup
+```yaml
+nats:
+  consumer_name: gkg-indexer   # Durable consumer (survives restarts)
+  stream_replicas: 3           # Fault tolerance
+  auto_create_streams: true    # Auto-create on startup
 ```
 
 ## Helm chart configuration
 
-In production, GKG is deployed via the [`orbit-helm-charts`](https://gitlab.com/gitlab-org/orbit/orbit-helm-charts). Most configuration is set through Helm values rather than raw YAML or environment variables. The chart renders the values it knows about into a ConfigMap mounted at `/app/config`; every key the chart does not render comes from the embedded `config/default.yaml`.
+In production, GKG is deployed via the [`orbit-helm-charts`](https://gitlab.com/gitlab-org/orbit/orbit-helm-charts). Most configuration is set through Helm values rather than raw YAML. The chart renders the values it knows about into a ConfigMap mounted at `/app/config`; every key the chart does not render comes from the embedded `config/default.yaml`.
 
 ### Key Helm values mapping
 
@@ -578,8 +643,10 @@ kubectl -n gkg logs deployment/gkg-indexer -f | grep 'project_id=<id>'
 
 ### Inspect running configuration
 
+The chart mounts its ConfigMap at `/app/config/default.yaml`; every key absent from it runs on the embedded default.
+
 ```shell
-kubectl -n gkg exec deployment/gkg-indexer -- env | grep GKG_
+kubectl -n gkg exec deployment/gkg-indexer -- cat /app/config/default.yaml
 ```
 
 ### Troubleshoot NATS with nats-box

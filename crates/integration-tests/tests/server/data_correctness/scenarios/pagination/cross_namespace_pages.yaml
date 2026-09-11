@@ -1,0 +1,26 @@
+# source: crates/integration-tests/tests/server/data_correctness/pagination.rs::cursor_traversal_cross_namespace_pages_cover_scoped_edges
+description: Cross-namespace scoped traversal pages cover 3 in-scope edges
+
+config:
+  security: { org_id: 1, paths: ["1/100/"] }
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "g", "entity": "Group"},
+        {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}}
+      ],
+      "relationships": [{"type": "CONTAINS", "from": "g", "to": "p"}],
+      "cursor": {"page_size": 1}
+    }
+
+expect:
+  all_pages:
+    edge_count: 3
+    page_count: 3
+  pages:
+    - skip_requirements: ["relationship:CONTAINS"]
+    - skip_requirements: ["relationship:CONTAINS"]
+    - skip_requirements: ["relationship:CONTAINS"]

@@ -1,0 +1,44 @@
+# source: crates/integration-tests/tests/server/data_correctness/dedup.rs::aggregation_dedup_counts_unique_entities
+description: Aggregation counts each entity once after dedup
+
+config:
+  extra_seed:
+    gl_merge_request:
+      - { id: 9100, iid: 99, title: "Dedup MR", state: merged, traversal_path: "1/100/1000/", project_id: 1000, _version: "2024-01-01 00:00:00", _deleted: false }
+      - { id: 9100, iid: 99, title: "Dedup MR Updated", state: merged, traversal_path: "1/100/1000/", project_id: 1000, _version: "2024-06-01 00:00:00", _deleted: false }
+    gl_edge:
+      - { traversal_path: "1/100/1000/", source_id: 9100, source_kind: MergeRequest, relationship_kind: IN_PROJECT, target_id: 1000, target_kind: Project, source_tags: ["state:merged"], target_tags: [], _version: "1970-01-01 00:00:00", _deleted: false }
+  redaction:
+    allow:
+      user: [1, 2, 3, 4, 5, 6, 7, 9001, 9002, 9003, 9010, 9011, 9300, 9301, 9600]
+      group: [100, 101, 102, 200, 300, 900]
+      project: [1000, 1001, 1002, 1003, 1004, 1010, 9000]
+      merge_request: [2000, 2001, 2002, 2003, 2004, 2005, 9100, 9101, 9200, 9201, 9210, 9310, 9311, 9400, 9401, 9500, 9501, 9700, 9701, 9800, 9801, 9900, 9901]
+      note: [3000, 3001, 3002, 3003]
+      work_item: [4000, 4001, 4002, 4003, 4010]
+      milestone: [6000, 6001]
+      label: [7000, 7001, 7002]
+
+query:
+  json: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {"id": "mr", "entity": "MergeRequest", "filters": {"state": "merged"}},
+        {"id": "p", "entity": "Project", "columns": ["name"], "node_ids": [1000]}
+      ],
+      "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
+      "group_by": ["p"],
+      "aggregations": [{"count": "mr", "as": "mr_count"}],
+      "limit": 10
+    }
+
+expect:
+  skip_requirements: ["filter:state"]
+  groups:
+    p:
+      count: 1
+      entity: Project
+      ids: [1000]
+      rows:
+        - { entity: Project, id: 1000, values: { mr_count: 3 }, properties: { name: "Public Project" } }

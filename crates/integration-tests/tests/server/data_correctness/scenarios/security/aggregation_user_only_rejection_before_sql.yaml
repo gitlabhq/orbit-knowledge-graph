@@ -1,0 +1,17 @@
+# source: crates/integration-tests/tests/server/data_correctness/security.rs::aggregation_user_only_rejection_happens_before_sql_compile
+description: User-only aggregation rejection happens before SQL compile so backing table and filter values are not leaked
+
+query:
+  json: |
+    {
+      "query_type": "aggregation",
+      "nodes": [{
+        "id": "u", "entity": "User",
+        "filters": {"email": "victim@example.com"}
+      }],
+      "aggregations": [{"count": "u", "as": "oracle"}],
+      "limit": 1
+    }
+
+expect:
+  compile_error: true

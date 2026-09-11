@@ -12,6 +12,8 @@ query:
         "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
         "limit": 20
     }
+  gql: |
+    MATCH (u:User)-[:MEMBER_OF]->(g:Group) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username, g.name LIMIT 20
 
 expect:
   node_count: 9

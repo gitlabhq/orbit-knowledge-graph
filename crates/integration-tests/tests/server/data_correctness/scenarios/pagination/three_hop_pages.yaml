@@ -1,0 +1,28 @@
+# source: crates/integration-tests/tests/server/data_correctness/pagination.rs::cursor_traversal_three_hop_pages_cover_all_edges
+description: Three-hop traversal pages cover all 14 edges in 4 pages
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
+        {"id": "g", "entity": "Group"},
+        {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}}
+      ],
+      "relationships": [
+        {"type": "MEMBER_OF", "from": "u", "to": "g"},
+        {"type": "CONTAINS", "from": "g", "to": "p"}
+      ],
+      "cursor": {"page_size": 5}
+    }
+
+expect:
+  all_pages:
+    edge_count: 14
+    page_count: 4
+  pages:
+    - skip_requirements: ["relationship:MEMBER_OF", "relationship:CONTAINS"]
+    - skip_requirements: ["relationship:MEMBER_OF", "relationship:CONTAINS"]
+    - skip_requirements: ["relationship:MEMBER_OF", "relationship:CONTAINS"]
+    - skip_requirements: ["relationship:MEMBER_OF", "relationship:CONTAINS"]

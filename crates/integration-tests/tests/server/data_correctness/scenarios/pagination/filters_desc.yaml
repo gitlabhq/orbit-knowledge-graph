@@ -1,0 +1,47 @@
+# source: crates/integration-tests/tests/server/data_correctness/pagination.rs::cursor_traversal_with_filters_desc_pages_return_exact_matches
+description: Filtered DESC pagination returns exact matches per page
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
+        {"id": "wi", "entity": "WorkItem", "columns": ["work_item_type", "weight"],
+         "filters": {"work_item_type": {"in": ["issue", "task", "epic"]},
+                     "weight": {"gte": 3}}}
+      ],
+      "relationships": [{"type": "AUTHORED", "from": "u", "to": "wi"}],
+      "order_by": "-wi.id",
+      "cursor": {"page_size": 1}
+    }
+
+expect:
+  pages:
+    - nodes:
+        WorkItem:
+          order: [4010]
+          filters:
+            work_item_type: { in: [issue, task, epic] }
+            weight: { gte: 3 }
+      edge_exists:
+        AUTHORED: [[7, 4010]]
+      has_more: true
+    - nodes:
+        WorkItem:
+          order: [4003]
+          filters:
+            work_item_type: { in: [issue, task, epic] }
+            weight: { gte: 3 }
+      edge_exists:
+        AUTHORED: [[3, 4003]]
+      has_more: true
+    - nodes:
+        WorkItem:
+          order: [4000]
+          filters:
+            work_item_type: { in: [issue, task, epic] }
+            weight: { gte: 3 }
+      edge_exists:
+        AUTHORED: [[1, 4000]]
+      has_more: false

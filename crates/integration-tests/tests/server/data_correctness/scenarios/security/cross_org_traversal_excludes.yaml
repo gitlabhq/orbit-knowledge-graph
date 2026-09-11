@@ -1,0 +1,26 @@
+# source: crates/integration-tests/tests/server/data_correctness/security.rs::cross_org_traversal_excludes_other_org
+description: Org-1 traversal from User 1 excludes MR 9100 authored in org 2
+
+config:
+  security: { org_id: 1, paths: ["1/"] }
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "u", "entity": "User", "node_ids": [1]},
+        {"id": "mr", "entity": "MergeRequest", "columns": ["title"]}
+      ],
+      "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
+      "limit": 50
+    }
+
+expect:
+  node_count: 3
+  nodes:
+    MergeRequest:
+      ids: [2000, 2001]
+      absent: [9100]
+  edges:
+    AUTHORED: [[1, 2000], [1, 2001]]

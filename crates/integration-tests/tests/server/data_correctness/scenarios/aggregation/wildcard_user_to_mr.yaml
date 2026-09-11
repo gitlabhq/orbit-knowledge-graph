@@ -1,0 +1,28 @@
+# source: crates/integration-tests/tests/server/data_correctness/aggregation.rs::aggregation_wildcard_user_to_mr_counts_inferred_edges
+description: Wildcard relationship counts all inferred edge types between User and MergeRequest
+
+config:
+  security:
+    paths: ["1/"]
+
+query:
+  json: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+        {"id": "mr", "entity": "MergeRequest"}
+      ],
+      "relationships": [{"type": "*", "from": "u", "to": "mr"}],
+      "group_by": ["u"],
+      "aggregations": [{"count": "mr", "as": "mr_edge_count"}],
+      "limit": 10
+    }
+
+expect:
+  groups:
+    u:
+      rows:
+        - { entity: User, id: 1, values: { mr_edge_count: 3 }, properties: { username: alice } }
+        - { entity: User, id: 2, values: { mr_edge_count: 2 }, properties: { username: bob } }
+        - { entity: User, id: 3, values: { mr_edge_count: 2 }, properties: { username: charlie } }

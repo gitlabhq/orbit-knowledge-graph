@@ -1,0 +1,25 @@
+# source: crates/integration-tests/tests/server/data_correctness/pagination.rs::cursor_aggregation_pages_cover_all_groups
+description: Aggregation cursor pages cover all 3 groups
+
+query:
+  json: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["id", "username"]},
+        {"id": "mr", "entity": "MergeRequest"}
+      ],
+      "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
+      "group_by": ["u"],
+      "aggregations": [{"count": "mr", "as": "mr_count"}],
+      "cursor": {"page_size": 2}
+    }
+
+expect:
+  all_pages:
+    group_node_ids:
+      "u:User": [1, 2, 3]
+    no_duplicate_ids: true
+  pages:
+    - skip_requirements: [cursor, aggregation]
+    - skip_requirements: [cursor, aggregation]

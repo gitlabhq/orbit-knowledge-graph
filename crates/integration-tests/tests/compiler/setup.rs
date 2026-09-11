@@ -56,6 +56,46 @@ pub fn embedded_ontology() -> Ontology {
     Ontology::load_embedded().expect("Failed to load embedded ontology")
 }
 
+pub fn compile_pair(
+    json: &str,
+    orbit_query: &str,
+    ontology: &Ontology,
+    context: &SecurityContext,
+) -> compiler::Result<compiler::CompiledQueryContext> {
+    let json_result = compiler::compile(json, compiler::Frontend::JsonDsl, ontology, context);
+    let orbit_query_result =
+        compiler::compile(orbit_query, compiler::Frontend::Gql, ontology, context);
+    match (json_result, orbit_query_result) {
+        (Ok(json), Ok(orbit_query_result)) => {
+            assert_eq!(
+                json.base.sql, orbit_query_result.base.sql,
+                "SQL differs for {orbit_query}"
+            );
+            assert_eq!(
+                json.base.params, orbit_query_result.base.params,
+                "parameters differ for {orbit_query}"
+            );
+            assert_eq!(json.query_type, orbit_query_result.query_type);
+            assert_eq!(
+                json.hydration, orbit_query_result.hydration,
+                "hydration differs for {orbit_query}"
+            );
+            Ok(json)
+        }
+        (Err(json), Err(orbit_query_result)) => {
+            assert_eq!(
+                std::mem::discriminant(&json),
+                std::mem::discriminant(&orbit_query_result),
+                "rejection differs for {orbit_query}: JSON={json}; Orbit={orbit_query_result}"
+            );
+            Err(json)
+        }
+        (json, orbit_query_result) => panic!(
+            "frontend acceptance differs for {orbit_query}: JSON={json:?}; Orbit={orbit_query_result:?}"
+        ),
+    }
+}
+
 pub fn compile_to_ast(json_input: &str, ontology: &Ontology) -> compiler::Result<Node> {
     let v = Validator::new(ontology);
     let value = v.check_json(json_input)?;

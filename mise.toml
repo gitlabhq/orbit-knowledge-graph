@@ -291,11 +291,11 @@ run = 'gem push _build/gitlab-gkg-proto-*.gem'
 description = "Publish gitlab-gkg-proto gem to RubyGems.org"
 
 [tasks."server:start"]
-run = 'GKG_GITLAB__JWT__VERIFYING_KEY=${GKG_GITLAB__JWT__VERIFYING_KEY:-$(cat $GDK_ROOT_RESOLVED/gitlab/.gitlab_knowledge_graph_secret 2>/dev/null || cat $GDK_ROOT_RESOLVED/gitlab/.gitlab_shell_secret 2>/dev/null || echo "development-secret-at-least-32-bytes")} cargo run -p orbit-server -- --config config/dev.yaml'
+run = "./scripts/orbit-native-dev.sh webserver"
 description = "Start the GKG server (webserver mode)"
 
 [tasks."server:dispatch"]
-run = './scripts/run-dispatcher.sh'
+run = "./scripts/orbit-native-dev.sh dispatcher"
 description = "Start the GKG server (dispatch-indexing mode)"
 
 [tasks.dev]
@@ -314,8 +314,8 @@ run = "./scripts/orbit-native-dev.sh check"
 description = "Verify GDK-connected local development prerequisites"
 
 [tasks."dev:status"]
-run = "./scripts/orbit-native-dev.sh env"
-description = "Show the derived GDK-backed environment for local development"
+run = "./scripts/orbit-native-dev.sh config"
+description = "Show the derived GDK-backed configuration for local development"
 
 [tasks."dev:restart"]
 run = "mise run dev"
@@ -330,11 +330,11 @@ run = "./scripts/orbit-native-dev.sh setup"
 description = "Create the graph database and apply config/graph.sql to ClickHouse"
 
 [tasks."dev:web"]
-run = "GKG_BIND_ADDRESS=127.0.0.1:${GKG_SERVER_PORT:-8090} GKG_GRPC_BIND_ADDRESS=127.0.0.1:${GKG_SERVER_GRPC_PORT:-50054} GKG_METRICS__PROMETHEUS__ENABLED=${GKG_ENABLE_METRICS:-false} GKG_METRICS__PROMETHEUS__PORT=${GKG_METRICS_PORT:-9100} ./scripts/orbit-native-dev.sh webserver"
+run = "./scripts/orbit-native-dev.sh webserver"
 description = "Start a local GKG webserver connected to GDK services"
 
 [tasks."dev:indexer"]
-run = "GKG_INDEXER_HEALTH_BIND_ADDRESS=127.0.0.1:${GKG_INDEXER_PORT:-4202} GKG_NATS__CONSUMER_NAME=${GKG_INDEXER_CONSUMER:-gkg-indexer-dev} GKG_METRICS__PROMETHEUS__ENABLED=${GKG_ENABLE_METRICS:-false} GKG_METRICS__PROMETHEUS__PORT=${GKG_INDEXER_METRICS_PORT:-9200} ./scripts/orbit-native-dev.sh indexer"
+run = "./scripts/orbit-native-dev.sh indexer"
 description = "Start a local GKG indexer connected to GDK services"
 
 [tasks."dev:dispatcher"]
@@ -344,10 +344,6 @@ description = "Start a local GKG dispatch-indexing process connected to GDK serv
 [tasks."dev:healthcheck"]
 run = "./scripts/orbit-native-dev.sh healthcheck"
 description = "Start the local GKG health-check process"
-
-[tasks."dev:env"]
-run = "./scripts/orbit-native-dev.sh env"
-description = "Print the derived local GKG environment"
 
 
 [tasks."iglu:bump"]

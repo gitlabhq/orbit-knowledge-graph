@@ -1,0 +1,52 @@
+name: "JavaScript: simple function call"
+pipeline: js
+fixtures:
+  - path: main.js
+    content: |
+      function helper() {
+          return "help";
+      }
+
+      function unused() {}
+
+      function run() {
+          helper();
+      }
+
+tests:
+  - name: Exactly 3 definitions
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'main.js' AND d.definition_type = 'Function'
+      RETURN d.name AS name, d.fqn AS fqn
+      ORDER BY name
+    assert:
+      - { row_count: 3 }
+      - { unique: fqn }
+      - { no_nulls: fqn }
+      - { column_values: { field: name, values: ["helper", "run", "unused"] } }
+
+  - name: run calls helper (exactly 1 call edge)
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "run", callee: "helper" } }
+
+  - name: unused has no incoming calls
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE callee.name = 'unused' AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller
+    assert:
+      - { empty: true }
+
+  - name: Exactly 1 JavaScript file
+    query: |
+      MATCH (f:File)
+      RETURN f.path AS path, f.language AS lang
+    assert:
+      - { row_count: 1 }
+      - { row: { path: "main.js", lang: "javascript" } }

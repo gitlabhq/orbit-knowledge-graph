@@ -2,7 +2,7 @@
 
 Build and test the `orbit` CLI and related crates without GDK, NATS, Siphon,
 ClickHouse, or PostgreSQL. Many contributions only need the tools on this
-page: language parser additions, `orbit-local` CLI changes, docs, unit
+page: language parser additions, `orbit-cli` changes, docs, unit
 tests, and the code-graph integration tests.
 
 For anything that touches the server pipeline (SDLC indexing, the query

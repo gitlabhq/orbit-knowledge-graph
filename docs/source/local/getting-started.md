@@ -164,7 +164,7 @@ for details.
 |---|---|---|
 | [The GitLab Orbit CLI (`orbit`)](access/cli.md) | Direct CLI use, scripting, indexing tasks | One-line installer or `glab orbit local --install` |
 | [The GitLab CLI (`glab`)](access/glab.md) | Anyone already using `glab` | `glab orbit local --install` |
-| [MCP](access/mcp.md) | Claude Code, Codex, and other AI agents | `claude mcp add orbit-local -- orbit mcp serve` |
+| [MCP](access/mcp.md) | Claude Code, Codex, and other AI agents | `claude mcp add orbit-cli -- orbit mcp serve` |
 
 All three read the same local graph. GitLab Orbit Local is queried with DuckDB SQL;
 the structured JSON query DSL is [GitLab Orbit Remote](../remote/_index.md) only.

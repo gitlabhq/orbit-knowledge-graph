@@ -34,7 +34,9 @@ instance or your local machine.
 Two top-level commands:
 
 - `glab orbit local`: wraps the managed `orbit` binary to index and query the
-  local graph.
+  local graph. It forwards every command to the binary unchanged, so
+  `glab orbit local grep` runs `orbit grep`. The `local` segment is the `glab`
+  wrapper name, not an `orbit` subcommand.
 - `glab orbit setup`: guided onboarding that verifies access, installs the
   GitLab Orbit skill, and installs the local binary.
 

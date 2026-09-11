@@ -1,6 +1,3 @@
-use std::sync::Arc;
-
-use ontology::Ontology;
 use serde_json::json;
 
 use super::prompt;
@@ -9,7 +6,7 @@ use super::registry::{ToolDefinition, ToolRegistry, list_commands_description, p
 pub struct V2ToolRegistry;
 
 impl V2ToolRegistry {
-    pub fn get_all_tools(_ontology: &Arc<Ontology>) -> Vec<ToolDefinition> {
+    pub fn get_all_tools() -> Vec<ToolDefinition> {
         vec![
             ToolRegistry::query_graph(),
             ToolRegistry::get_graph_schema(),
@@ -56,7 +53,7 @@ impl V2ToolRegistry {
 pub struct V2CommandRegistry;
 
 impl V2CommandRegistry {
-    pub fn get_all_commands(_ontology: &Arc<Ontology>) -> Vec<ToolDefinition> {
+    pub fn get_all_commands() -> Vec<ToolDefinition> {
         vec![
             Self::query_graph(),
             Self::get_graph_schema(),

@@ -1,0 +1,30 @@
+# source: crates/integration-tests/tests/server/data_correctness/edge_cases/mod.rs::cross_namespace_narrow_scope_returns_all_authors
+description: Project-level scope 1/100/1000/ returns all authors of that project's MRs
+
+config:
+  security: { org_id: 1, paths: ["1/100/1000/"] }
+
+query:
+  json: |
+    {
+        "query_type": "traversal",
+        "nodes": [
+            {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+            {"id": "mr", "entity": "MergeRequest", "columns": ["title"]}
+        ],
+        "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
+        "limit": 20
+    }
+
+expect:
+  node_count: 3
+  nodes:
+    MergeRequest:
+      ids: [2000, 2001]
+      absent: [2002]
+    User:
+      rows:
+        - { id: 1, username: alice }
+  edges:
+    AUTHORED: [[1, 2000], [1, 2001]]
+  referential_integrity: true

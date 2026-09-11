@@ -29,7 +29,7 @@ impl DuckDbClient {
             .iter()
             .find(|(n, _)| *n == name)
             .ok_or_else(|| DuckDbError::Schema(format!("extension {name} is not bundled")))?;
-        // Same ORBIT_DATA_DIR / ~/.orbit convention as orbit-local::Workspace::default_root.
+        // Same ORBIT_DATA_DIR / ~/.orbit convention as orbit-cli::Workspace::default_root.
         let data_dir = match std::env::var("ORBIT_DATA_DIR") {
             Ok(dir) if !dir.is_empty() => PathBuf::from(dir),
             _ => dirs::home_dir()

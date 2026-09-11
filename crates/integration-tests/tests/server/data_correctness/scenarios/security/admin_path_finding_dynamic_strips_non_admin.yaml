@@ -1,0 +1,19 @@
+# source: crates/integration-tests/tests/server/data_correctness/security.rs::admin_only_non_admin_path_finding_dynamic_wildcard_strips_admin_fields
+description: Non-admin path_finding with dynamic_columns wildcard strips admin-only fields
+
+query:
+  json: |
+    {
+      "query_type": "path_finding",
+      "nodes": [
+        {"id": "start", "entity": "User", "node_ids": [1]},
+        {"id": "end", "entity": "Project", "node_ids": [1000]}
+      ],
+      "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3,
+               "rel_types": ["MEMBER_OF", "CONTAINS"]},
+      "options": {"dynamic_columns": "*"}
+    }
+
+expect:
+  referential_integrity: true
+  path_count: 1

@@ -16,15 +16,15 @@ title: GitLab Orbit Local
 
 {{< history >}}
 
-- GitLab 19.0で[実験的機能](https://docs.gitlab.com/policy/development_stages_support/#experiment)として[導入されました](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/324)。
-- GitLab 19.1で[ベータ](https://docs.gitlab.com/policy/development_stages_support/#beta)に[変更されました](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/324)。
+- GitLab 19.0で[実験的機能](https://docs.gitlab.com/policy/development_stages_support/#experiment)として[導入](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/324)されました。
+- GitLab 19.1で[ベータ版](https://docs.gitlab.com/policy/development_stages_support/#beta)に[変更](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/324)されました。
 
 {{< /history >}}
 
 GitLab Orbit Localはすべてお使いのマシン上で動作します。任意のローカルリポジトリのコードグラフを構築し、GitLab Orbit Remoteと同じクエリ言語を使用してクエリできます。GitLabアカウントもネットワーク接続も不要です。
 
 - インデックス作成: コードのみ（ファイル、定義、クロスファイル参照を含む）
-- ストレージ: DuckDB（`~/.orbit/graph.duckdb` のローカルファイル）
+- ストレージ: DuckDB（`~/.orbit/graph.duckdb`のローカルファイル）
 
 [GitLab Orbit Localを始める](getting-started.md)
 
@@ -41,8 +41,8 @@ GitLab Orbit Localはすべてお使いのマシン上で動作します。任�
 
 | 方法 | 説明 |
 |---|---|
-| [GitLab Orbit CLI（`orbit`）](access/cli.md) | `orbit` バイナリを直接実行してインデックス作成とクエリを行う |
-| [GitLab CLI（`glab`）](access/glab.md) | `glab orbit local` を通じてGitLab Orbit Localを操作する |
+| [GitLab Orbit CLI（`orbit`）](access/cli.md) | `orbit`バイナリを直接実行してインデックス作成とクエリを行う |
+| [GitLab CLI（`glab`）](access/glab.md) | `glab orbit local`を通じてGitLab Orbit Localを操作する |
 | [MCP](access/mcp.md) | ローカルグラフをClaude Code、Codex、その他のエージェントに公開する |
 
 ## 課金 {#billing}
