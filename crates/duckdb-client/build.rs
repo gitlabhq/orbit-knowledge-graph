@@ -1,5 +1,6 @@
 use std::env;
 use std::fs;
+use std::io::Cursor;
 use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
@@ -30,6 +31,8 @@ const EXTENSIONS: &[(&str, &str, &str)] = &[
 ];
 
 const DOWNLOAD_LIMIT: u64 = 64 * 1024 * 1024;
+const STATIC_FTS_ARCHIVE: &str = "third_party/duckdb-fts-sources.tar.gz";
+const STATIC_FTS_PIN: &str = "third_party/duckdb-fts-sources.PIN";
 
 fn main() {
     println!("cargo:rerun-if-changed={}", env!("LOCKFILE"));
@@ -44,22 +47,26 @@ fn main() {
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
 
     let mut entries = String::new();
-    for &(name, _, expected) in EXTENSIONS.iter().filter(|(_, p, _)| *p == platform) {
-        let url = format!(
-            "http://extensions.duckdb.org/{duckdb_version}/{platform}/{name}.duckdb_extension.gz"
-        );
-        let gz = out_dir.join(format!("{name}.duckdb_extension.gz"));
-        if sha256_of(&gz).as_deref() != Some(expected) {
-            fs::write(&gz, fetch(&url)).unwrap();
-            assert_eq!(
-                sha256_of(&gz).unwrap(),
-                expected,
-                "checksum mismatch for {url}; if upstream republished the artifact, re-pin it"
+    if env::var_os("CARGO_FEATURE_STATIC_FTS").is_some() {
+        build_static_fts(&out_dir, duckdb_version);
+    } else {
+        for &(name, _, expected) in EXTENSIONS.iter().filter(|(_, p, _)| *p == platform) {
+            let url = format!(
+                "http://extensions.duckdb.org/{duckdb_version}/{platform}/{name}.duckdb_extension.gz"
             );
+            let gz = out_dir.join(format!("{name}.duckdb_extension.gz"));
+            if sha256_of(&gz).as_deref() != Some(expected) {
+                fs::write(&gz, fetch(&url)).unwrap();
+                assert_eq!(
+                    sha256_of(&gz).unwrap(),
+                    expected,
+                    "checksum mismatch for {url}; if upstream republished the artifact, re-pin it"
+                );
+            }
+            entries += &format!("({name:?}, include_bytes!({gz:?})),");
         }
-        entries += &format!("({name:?}, include_bytes!({gz:?})),");
+        assert!(!entries.is_empty(), "no extensions pinned for {platform}");
     }
-    assert!(!entries.is_empty(), "no extensions pinned for {platform}");
 
     fs::write(
         out_dir.join("bundled_extensions.rs"),
@@ -69,6 +76,86 @@ fn main() {
         ),
     )
     .unwrap();
+}
+
+fn build_static_fts(out_dir: &Path, duckdb_version: &str) {
+    let archive = Path::new(STATIC_FTS_ARCHIVE);
+    let pin = fs::read_to_string(STATIC_FTS_PIN).unwrap();
+    assert_eq!(pin_value(&pin, "duckdb"), duckdb_version);
+    assert_eq!(
+        sha256_of(archive).as_deref(),
+        Some(pin_value(&pin, "archive_sha256")),
+        "{STATIC_FTS_ARCHIVE} does not match {STATIC_FTS_PIN}"
+    );
+
+    let source_root = out_dir.join("duckdb-fts-sources");
+    if source_root.exists() {
+        fs::remove_dir_all(&source_root).unwrap();
+    }
+    tar::Archive::new(flate2::read::GzDecoder::new(Cursor::new(
+        fs::read(archive).unwrap(),
+    )))
+    .unpack(out_dir)
+    .unwrap();
+
+    let fts = source_root.join("fts");
+    let snowball = source_root.join("snowball");
+    let mut sources = vec![
+        fts.join("fts_extension.cpp"),
+        fts.join("fts_indexing.cpp"),
+        snowball.join("libstemmer/libstemmer.cpp"),
+        snowball.join("runtime/utilities.cpp"),
+        snowball.join("runtime/api.cpp"),
+    ];
+    let mut stemmers = fs::read_dir(snowball.join("src_c"))
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .filter(|path| path.extension().is_some_and(|ext| ext == "cpp"))
+        .collect::<Vec<_>>();
+    stemmers.sort();
+    sources.extend(stemmers);
+    sources.push(PathBuf::from("src/static_fts.cpp"));
+
+    println!("cargo:rerun-if-changed=src/static_fts.cpp");
+    println!("cargo:rerun-if-changed={STATIC_FTS_ARCHIVE}");
+    println!("cargo:rerun-if-changed={STATIC_FTS_PIN}");
+
+    let mut build = cc::Build::new();
+    build
+        .cpp(true)
+        .include(env::var("DEP_DUCKDB_INCLUDE").expect("bundled DuckDB include path"))
+        .include(fts.join("include"))
+        .include(&snowball)
+        .include(snowball.join("libstemmer"))
+        .include(snowball.join("runtime"))
+        .include(snowball.join("src_c"))
+        .files(sources)
+        .flag_if_supported("-std=c++11")
+        .flag_if_supported("/utf-8")
+        .flag_if_supported("/bigobj")
+        .warnings(false)
+        .flag_if_supported("-w");
+
+    let is_debug = match env::var("DEBUG") {
+        Ok(value) => value != "false" && value != "0",
+        Err(_) => false,
+    };
+    if !is_debug {
+        build.define("NDEBUG", None);
+    }
+    if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
+        build.define("DUCKDB_BUILD_LIBRARY", None);
+        if env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") {
+            build.flag("/EHsc");
+        }
+    }
+    build.compile("orbit_duckdb_fts");
+}
+
+fn pin_value<'a>(pin: &'a str, key: &str) -> &'a str {
+    pin.lines()
+        .find_map(|line| line.strip_prefix(&format!("{key}: ")))
+        .unwrap_or_else(|| panic!("missing {key} in {STATIC_FTS_PIN}"))
 }
 
 /// DuckDB 1.5.5 ships as duckdb crate 1.10505.x.
