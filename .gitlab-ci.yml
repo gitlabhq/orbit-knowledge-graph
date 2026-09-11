@@ -548,17 +548,20 @@ check_docs_markdown:
 check_docs_i18n_markdown:
   stage: docs
   image: registry.gitlab.com/gitlab-org/technical-writing/docs-gitlab-com/lint-markdown:alpine-3.23-vale-3.14.1-markdownlint2-0.22.1-lychee-0.24.2
+  parallel:
+    matrix:
+      - LOCALE_CODE: ["fr-fr", "ja-jp", "ko-kr"]
   rules:
     - if: $CI_MERGE_REQUEST_IID
       changes:
-        - docs-locale/**/*
+        - docs-locale/${LOCALE_CODE}/**/*
   script:
     # Lint prose
-    - vale --minAlertLevel error docs-locale/*/source/
+    - vale --config="docs-locale/${LOCALE_CODE}/.vale.ini" --minAlertLevel error docs-locale/${LOCALE_CODE}/source/
     # Lint Markdown
-    - markdownlint-cli2 'docs-locale/*/source/**/*.md'
+    - markdownlint-cli2 "docs-locale/${LOCALE_CODE}/source/**/*.md"
     # Check links
-    - lychee --offline --include-fragments docs-locale/*/source/**/*.md
+    - lychee --offline --include-fragments docs-locale/${LOCALE_CODE}/source/**/*.md
 
 docs_hugo_build:
   image: registry.gitlab.com/gitlab-org/technical-writing/docs-gitlab-com/docs-gitlab-com-builder:hugo-0.154.5
