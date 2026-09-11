@@ -81,7 +81,10 @@ fn assign_ids(trees: &[Tree], lang: &Lang, sk: &Sk) -> IdMaps {
 
     for (fi, tree) in trees.iter().enumerate() {
         let path = lang.syms.resolve(tree.nodes[0].sym);
-        if !matches!(SupportLang::from_path(path), Some(SupportLang::Python)) {
+        if matches!(
+            SupportLang::from_path(path),
+            Some(SupportLang::JavaScript | SupportLang::TypeScript | SupportLang::Tsx)
+        ) {
             next_mod += 1;
             modules.insert(fi, next_mod);
         }

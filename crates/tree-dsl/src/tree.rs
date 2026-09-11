@@ -182,11 +182,10 @@ impl Tree {
     }
 
     pub fn add_edge(&mut self, from: u32, to: u32, kind: EdgeKind) {
-        if kind == EdgeKind::Calls
-            || !self
-                .edges
-                .iter()
-                .any(|e| e.from.node == from && e.to.node == to && e.kind == kind)
+        if !self
+            .edges
+            .iter()
+            .any(|e| e.from.node == from && e.to.node == to && e.kind == kind)
         {
             self.edges.push(Edge::local(from, to, kind));
         }
