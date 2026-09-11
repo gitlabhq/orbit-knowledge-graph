@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""remote_repo_map.py — remote repo map backed by glab orbit remote.
+"""remote_repo_map.py — remote repo map backed by glab orbit.
 
 Usage:
     remote_repo_map.py [--project-id ID] [--branch B] extends   NAME         [--depth N]
@@ -10,7 +10,7 @@ Usage:
     remote_repo_map.py [--project-id ID] [--branch B] callers   NAME
 
 Defaults to gitlab-org/gitlab (project 278964, branch master).
-Requires glab >= v1.94.0 authenticated against gitlab.com.
+Requires glab >= v1.117.0 authenticated against gitlab.com.
 """
 from __future__ import annotations
 
@@ -46,12 +46,12 @@ def _query(body: dict) -> dict:
         with os.fdopen(fd, "w") as f:
             json.dump(body, f)
         cp = subprocess.run(
-            ["glab", "orbit", "remote", "query", "--response-format", "raw", tmp],
+            ["glab", "orbit", "query", "--response-format", "raw", tmp],
             capture_output=True, text=True,
             timeout=QUERY_TIMEOUT_SECONDS,
         )
     except FileNotFoundError:
-        sys.exit("glab not found on PATH - install glab >= 1.94.0 (https://gitlab.com/gitlab-org/cli)")
+        sys.exit("glab not found on PATH - install glab >= 1.117.0 (https://gitlab.com/gitlab-org/cli)")
     except subprocess.TimeoutExpired:
         sys.exit(f"Orbit query timed out after {QUERY_TIMEOUT_SECONDS} seconds")
     finally:
@@ -613,7 +613,7 @@ def cmd_callers(args: argparse.Namespace) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="remote_repo_map.py",
-        description="Remote Orbit repo map — code navigation via glab orbit remote.",
+        description="Remote Orbit repo map — code navigation via glab orbit.",
     )
     parser.add_argument("--project-id", type=int, default=DEFAULT_PROJECT_ID,
                         help=f"GitLab project numeric ID (default: {DEFAULT_PROJECT_ID})")

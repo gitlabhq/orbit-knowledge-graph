@@ -1,7 +1,7 @@
 ---
 name: orbit
-description: Query GitLab Orbit via `glab orbit remote` CLI subcommands or run a local copy with `glab orbit local`. Use for code-structure questions (who calls this function, where is this symbol defined), cross-project dependency and blast-radius analysis, merge-request and contributor queries that require relationship traversal or aggregation, repository map / repo-map generation, and any question spanning relationships, cross-entity joins, or multi-entity aggregation across GitLab entities (projects, users, MRs, issues, pipelines, files, definitions, vulnerabilities). Do not use for single-entity GitLab lookups or write operations that `glab` handles directly (e.g. `glab mr view`, `glab mr create`).
-version: 0.26.4
+description: Use the single `glab orbit` CLI to query hosted GitLab data or index and query local repositories. Use for code-structure questions (who calls this function, where is this symbol defined), cross-project dependency and blast-radius analysis, merge-request and contributor queries that require relationship traversal or aggregation, repository map / repo-map generation, and any question spanning relationships, cross-entity joins, or multi-entity aggregation across GitLab entities (projects, users, MRs, issues, pipelines, files, definitions, vulnerabilities). Do not use for single-entity GitLab lookups or write operations that `glab` handles directly (e.g. `glab mr view`, `glab mr create`).
+version: 0.26.5
 license: MIT
 metadata:
   audience: developers
@@ -11,10 +11,10 @@ metadata:
 
 # Orbit skill
 
-Query **GitLab Orbit** (previously GitLab Knowledge Graph) via the typed
-`glab orbit remote` CLI subcommands (shipped in glab v1.94.0+). The typed CLI
-handles the `Content-Type` header, response framing, and exit codes for you —
-always go through `glab orbit remote`.
+Query **GitLab Orbit** (previously GitLab Knowledge Graph) through the single,
+flat `glab orbit` command tree (requires glab v1.117.0+). Hosted commands handle
+authentication, response framing, and exit codes; local commands use the managed
+binary and local DuckDB graph.
 
 ## Prerequisites
 
@@ -24,26 +24,26 @@ exit codes), work through the first-run setup checklist in
 
 ## Discovery
 
-`glab orbit remote --help` and `glab orbit remote query --help` are the
+`glab orbit --help` and `glab orbit query --help` are the
 authoritative usage references. For entity properties, prefer the recipes in
 [`references/recipes.md`](references/recipes.md) over schema introspection —
 they already encode the columns and filters known to work.
 
-If you must introspect, call `glab orbit remote schema <Entity…>` with explicit
+If you must introspect, call `glab orbit ontology <Entity…>` with explicit
 entity names — always pass the entity names you need rather than the unscoped
-form, which returns ~17 KB+ of output. Call schema at most once per session;
-schemas don't change mid-session. Use `glab orbit remote dsl` for the full DSL
-JSON Schema. The schema command returns an object with a `nodes` array and does
+form, which returns ~17 KB+ of output. Call the ontology command at most once
+per session; the ontology does not change mid-session. Use `glab orbit dsl` for
+the full DSL JSON Schema. The ontology command returns an object with a `nodes` array and does
 not accept `--jq`; pipe its output into `jq` instead. Per-node
 `outgoing_edges`/`incoming_edges` are arrays of **strings** (edge type names),
 not objects:
 
 ```shell
-glab orbit remote schema Project |
+glab orbit ontology Project |
   jq '.nodes[] | select(.name == "Project") | .properties'
 ```
 
-Each `glab orbit remote query` has fixed per-call overhead. Prefer one
+Each `glab orbit query` has fixed per-call overhead. Prefer one
 `aggregation` query over N traversal queries for "how many X grouped by Y", and
 batch related lookups.
 
@@ -52,7 +52,7 @@ When editing Orbit docs or skills, fence executable query JSON as
 
 ## Running a query
 
-Write the request body to a file and pass it to `glab orbit remote query`.
+Write the request body to a file and pass it to `glab orbit query`.
 Default output is `llm` (compact, agent-friendly); pass
 `--response-format raw` to pipe into `jq`. Endpoints are user-scoped — do
 **not** pass `-R owner/repo`.
@@ -86,7 +86,7 @@ Put the request body in `/tmp/q.json`:
 ```
 
 ```shell
-glab orbit remote query /tmp/q.json
+glab orbit query /tmp/q.json
 ```
 
 `filters` is an **object keyed by property name** — not an array. Use either
@@ -159,21 +159,21 @@ lacks. Full guidance and worked examples:
 
 ## Repository map helpers
 
-For code-structure orientation before planning a change, use a repo-map helper:
-the native **local** command `glab orbit local repo-map` for an
-uncommitted/branch-local checkout, or the bundled **remote** helper script (path
-relative to this skill root, not the user's current repo) for a project already
-indexed in Orbit Remote. See the repository-map rows in
+For code-structure orientation before planning a change, use `glab orbit
+repo-map` for an uncommitted or branch-local checkout, or the bundled remote
+helper script (path relative to this skill root, not the user's current repo)
+for a project already indexed in Orbit Remote. See the repository-map rows in
 [References](#references) below.
 
-## Local CLI (glab orbit local)
+## Managed CLI
 
-`glab orbit local` downloads and runs a managed Orbit CLI binary for indexing
-and querying a local copy of the graph (macOS/Linux only,
-x86_64/aarch64). Prefer it over `glab orbit remote` when indexing a local
-repository for offline analysis; use `remote` to query production. Install/run
-with `glab orbit local` (add `--install` or `--update`). Full config keys and
-pass-through args: [`references/local_cli.md`](references/local_cli.md).
+`glab orbit` downloads and runs the managed Orbit binary (macOS/Linux only,
+x86_64/aarch64). The command determines the backend: `index`, `grep`, `context`,
+`sql`, `schema`, `list`, `mcp`, and `repo-map` use the local graph, while
+`query`, `status`, `ontology`, `dsl`, `tools`, and `graph-status` use Orbit
+Remote. Install or update it with `glab orbit --install` or `glab orbit
+--update`. Full configuration and pass-through details:
+[`references/local_cli.md`](references/local_cli.md).
 
 ## References
 
@@ -183,8 +183,8 @@ pass-through args: [`references/local_cli.md`](references/local_cli.md).
 | Full DSL reference | [`references/query_language.md`](references/query_language.md) |
 | Paste-ready bodies per `query_type` | [`references/recipes.md`](references/recipes.md) |
 | Reporting results & coverage caveats | [`references/reporting.md`](references/reporting.md) |
-| Local repository map command (`glab orbit local repo-map`) | [`references/local_repo_map.md`](references/local_repo_map.md) |
+| Local repository map command (`glab orbit repo-map`) | [`references/local_repo_map.md`](references/local_repo_map.md) |
 | Remote repository map helper | [`references/remote_repo_map.md`](references/remote_repo_map.md) |
 | CLI exit codes (1-5), errors, iteration budget | [`references/troubleshooting.md`](references/troubleshooting.md) |
-| Local CLI flags, config keys & pass-through args | [`references/local_cli.md`](references/local_cli.md) |
+| Managed CLI flags, config keys & pass-through args | [`references/local_cli.md`](references/local_cli.md) |
 | Maintaining this skill (contributing, doc sync) | [`references/maintaining.md`](references/maintaining.md) |

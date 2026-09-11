@@ -1,6 +1,6 @@
 # Orbit skill troubleshooting
 
-Common errors when using `glab orbit remote`, organised by exit code. See
+Common errors when using `glab orbit`, organised by exit code. See
 [`SKILL.md`](../SKILL.md) for prerequisites.
 
 ## CLI exit codes
@@ -14,7 +14,7 @@ Common errors when using `glab orbit remote`, organised by exit code. See
 | `4`  | 403  | Access denied (no Knowledge Graph enabled namespaces).       |
 | `5`  | 429  | Rate limited.                                                |
 
-`glab orbit remote query --response-format raw` is the easiest way to surface
+`glab orbit query --response-format raw` is the easiest way to surface
 the full JSON error payload when the exit code alone is not enough.
 
 ## Exit `2` — feature flag is off, or wrong subcommand
@@ -24,11 +24,11 @@ feature flag. If it is disabled for your user, every endpoint returns 404.
 
 **Fix:** contact an admin to enable `knowledge_graph` for your user.
 
-**Cause 2 — wrong CLI path.** Make sure you are on `glab` v1.94.0+:
+**Cause 2 — wrong CLI path.** Make sure you are on `glab` v1.117.0+:
 
 ```shell
 glab --version
-glab orbit remote --help
+glab orbit --help
 ```
 
 If `glab orbit` is not recognised, upgrade `glab`.
@@ -93,7 +93,7 @@ Put the request body in `/tmp/q-min.json`:
 ```
 
 ```shell
-glab orbit remote query --response-format raw /tmp/q-min.json
+glab orbit query --response-format raw /tmp/q-min.json
 ```
 
 If this returns a result, the connection works and your other query likely
@@ -112,20 +112,20 @@ has no matches.
 - `cursor.after` reused after changing the query (the token is bound to the exact query that issued it).
 - `allowlist rejected` / `not valid under 'oneOf'` on a `columns` entry —
   the column name is not in the entity's allowlist. Run
-  `glab orbit remote schema <Entity>` to get the valid column list.
+  `glab orbit ontology <Entity>` to get the valid column list.
 
 **Fix:** validate against the live DSL schema, which is authoritative and
-always current. Fetch it with `glab orbit remote dsl`:
+always current. Fetch it with `glab orbit dsl`:
 
 ```shell
-glab orbit remote dsl
+glab orbit dsl
 ```
 
 Full field reference in [`query_language.md`](query_language.md).
 
 ## Service unavailable
 
-`glab orbit remote status` reports the GKG service health. On GitLab 19.1+
+`glab orbit status` reports the GKG service health. On GitLab 19.1+
 (after [!241580](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/241580))
 the underlying `GET /api/v4/orbit/status` endpoint returns a nested wrapper —
 `{ "user": { "available": … }, "system": { …health… } | null }` — and always

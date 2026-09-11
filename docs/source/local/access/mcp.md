@@ -69,7 +69,7 @@ claude mcp add orbit-cli -- orbit mcp serve
 {{< tab title="GitLab CLI (glab orbit)" >}}
 
 ```shell
-claude mcp add orbit-cli -- glab orbit local mcp serve
+claude mcp add orbit-cli -- glab orbit mcp serve
 ```
 
 {{< /tab >}}
@@ -91,7 +91,7 @@ claude mcp add orbit-cli --scope user -- orbit mcp serve
 {{< tab title="GitLab CLI (glab orbit)" >}}
 
 ```shell
-claude mcp add orbit-cli --scope user -- glab orbit local mcp serve
+claude mcp add orbit-cli --scope user -- glab orbit mcp serve
 ```
 
 {{< /tab >}}
@@ -113,7 +113,7 @@ claude mcp add orbit-cli --scope project -- orbit mcp serve
 {{< tab title="GitLab CLI (glab orbit)" >}}
 
 ```shell
-claude mcp add orbit-cli --scope project -- glab orbit local mcp serve
+claude mcp add orbit-cli --scope project -- glab orbit mcp serve
 ```
 
 {{< /tab >}}
@@ -146,7 +146,7 @@ You can also edit the `.mcp.json` file directly:
   "mcpServers": {
     "orbit-cli": {
       "command": "glab",
-      "args": ["orbit", "local", "mcp", "serve"]
+      "args": ["orbit", "mcp", "serve"]
     }
   }
 }
@@ -189,7 +189,7 @@ codex mcp add orbit-cli -- orbit mcp serve
 {{< tab title="GitLab CLI (glab orbit)" >}}
 
 ```shell
-codex mcp add orbit-cli -- glab orbit local mcp serve
+codex mcp add orbit-cli -- glab orbit mcp serve
 ```
 
 {{< /tab >}}
@@ -242,7 +242,7 @@ To connect to Cursor, create or edit the `mcp.json` file for the scope you want:
     "orbit-cli": {
       "type": "stdio",
       "command": "glab",
-      "args": ["orbit", "local", "mcp", "serve"]
+      "args": ["orbit", "mcp", "serve"]
     }
   }
 }
@@ -289,7 +289,7 @@ Add the MCP server configuration to `opencode.json` in the repository root, or t
   "mcp": {
     "orbit-cli": {
       "type": "local",
-      "command": ["glab", "orbit", "local", "mcp", "serve"]
+      "command": ["glab", "orbit", "mcp", "serve"]
     }
   }
 }
@@ -336,7 +336,7 @@ edit your client's MCP configuration file:
 
 To connect using the GitLab CLI:
 
-1. Run `glab orbit local --install`. This command downloads the `orbit` binary.
+1. Run `glab orbit --install`. This command downloads the `orbit` binary.
 1. Then, edit your client's MCP configuration file:
 
 ```json
@@ -344,7 +344,7 @@ To connect using the GitLab CLI:
   "mcpServers": {
     "orbit-cli": {
       "command": "glab",
-      "args": ["orbit", "local", "mcp", "serve"]
+      "args": ["orbit", "mcp", "serve"]
     }
   }
 }

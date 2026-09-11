@@ -6,7 +6,7 @@ large code change, when first opening an unfamiliar repository, or when a
 directory-level map is more useful than reading files one by one.
 
 It is a native subcommand of the managed Orbit Local binary (run it via
-`glab orbit local`) — no Python runtime and no sidecar script. It summarizes
+`glab orbit`) — no Python runtime and no sidecar script. It summarizes
 languages, top-level structure, key abstractions, definitions, per-file APIs,
 inheritance edges, and imports using Orbit Local's indexed `File`,
 `Definition`, `ImportedSymbol`, and relationship tables.
@@ -37,11 +37,11 @@ The target repository must be indexed by Orbit Local at the current commit.
 missing:
 
 ```bash
-glab orbit local index .
+glab orbit index .
 ```
 
 Orbit Local stores the graph in the local DuckDB database managed by
-`glab orbit local`. See [`local_cli.md`](local_cli.md) for installation,
+`glab orbit`. See [`local_cli.md`](local_cli.md) for installation,
 configuration, and pass-through argument details.
 
 ## Invocation
@@ -50,13 +50,13 @@ The map is scoped to the current commit of the repository. By default it uses
 the current directory; pass `--repo PATH` to point at another checkout:
 
 ```bash
-glab orbit local --yes repo-map overview
-glab orbit local --yes repo-map --repo ~/workspace/knowledge-graph overview
-glab orbit local --yes repo-map --repo ~/workspace/knowledge-graph tree crates
-glab orbit local --yes repo-map --repo ~/workspace/knowledge-graph api crates/orbit-cli
-glab orbit local --yes repo-map --repo ~/workspace/knowledge-graph class Workspace
-glab orbit local --yes repo-map --repo ~/workspace/knowledge-graph extends QueryCompiler
-glab orbit local --yes repo-map --repo ~/workspace/knowledge-graph imports Workspace
+glab orbit --yes repo-map overview
+glab orbit --yes repo-map --repo ~/workspace/knowledge-graph overview
+glab orbit --yes repo-map --repo ~/workspace/knowledge-graph tree crates
+glab orbit --yes repo-map --repo ~/workspace/knowledge-graph api crates/orbit-cli
+glab orbit --yes repo-map --repo ~/workspace/knowledge-graph class Workspace
+glab orbit --yes repo-map --repo ~/workspace/knowledge-graph extends QueryCompiler
+glab orbit --yes repo-map --repo ~/workspace/knowledge-graph imports Workspace
 ```
 
 With the standalone binary the prefix is just `orbit`:
@@ -69,9 +69,9 @@ To focus on one or more file extensions, pass `--ext`. Extensions may include
 or omit the leading dot and can be repeated or comma-separated:
 
 ```bash
-glab orbit local --yes repo-map --ext .rs overview
-glab orbit local --yes repo-map --ext rs api crates/orbit-cli
-glab orbit local --yes repo-map --ext rs,toml tree crates
+glab orbit --yes repo-map --ext .rs overview
+glab orbit --yes repo-map --ext rs api crates/orbit-cli
+glab orbit --yes repo-map --ext rs,toml tree crates
 ```
 
 ## Recommended workflow

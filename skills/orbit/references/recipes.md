@@ -11,11 +11,11 @@ Every recipe assumes `glab auth login` has succeeded and the
 The shell pattern is always:
 
 ```shell
-glab orbit remote query /tmp/q.json
+glab orbit query /tmp/q.json
 # or:
-cat /tmp/q.json | glab orbit remote query -
+cat /tmp/q.json | glab orbit query -
 # or, for jq pipelines:
-glab orbit remote query --response-format raw /tmp/q.json | jq '.'
+glab orbit query --response-format raw /tmp/q.json | jq '.'
 ```
 
 For the full field reference see [`query_language.md`](query_language.md).

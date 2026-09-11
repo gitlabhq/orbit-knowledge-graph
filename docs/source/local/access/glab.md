@@ -2,7 +2,7 @@
 stage: Orbit
 group: Context Systems
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Install, index, and query GitLab Orbit Local through the GitLab CLI with glab orbit local and glab orbit setup.
+description: Install, index, and query GitLab Orbit Local through the GitLab CLI with glab orbit and glab orbit setup.
 title: Use GitLab Orbit Local with the GitLab CLI (`glab`)
 ---
 
@@ -23,29 +23,24 @@ title: Use GitLab Orbit Local with the GitLab CLI (`glab`)
 
 > [!disclaimer]
 
-The [GitLab CLI (`glab`)](https://docs.gitlab.com/cli/) is the canonical way to install,
-run, and integrate GitLab Orbit Local with your AI agent. `glab orbit local` mirrors
-`glab orbit remote`, so the same patterns work whether you query the GitLab
-instance or your local machine.
+The [GitLab CLI (`glab`)](https://docs.gitlab.com/cli/) is the canonical way to
+install, run, and integrate GitLab Orbit with your AI agent. `glab orbit`
+forwards one flat command tree to the managed `orbit` binary. Commands such as
+`index`, `grep`, and `sql` use the local graph, while commands such as `query`
+and `ontology` use the hosted graph.
 
 > [!note]
-> `glab orbit local` and `glab orbit setup` ship today, in `glab` 1.94 or later.
+> The flat `glab orbit` command tree requires `glab` 1.117 or later.
 
-Two top-level commands:
-
-- `glab orbit local`: wraps the managed `orbit` binary to index and query the
-  local graph. It forwards every command to the binary unchanged, so
-  `glab orbit local grep` runs `orbit grep`. The `local` segment is the `glab`
-  wrapper name, not an `orbit` subcommand.
-- `glab orbit setup`: guided onboarding that verifies access, installs the
-  GitLab Orbit skill, and installs the local binary.
+`glab orbit setup` provides guided onboarding, installs the GitLab Orbit skill,
+and configures supported AI agents.
 
 ## Prerequisites
 
-- `glab` 1.94 or later is installed.
+- `glab` 1.117 or later is installed.
 - A local Git repository to index.
 
-No GitLab account or network connection is required to use `glab orbit local`
+No GitLab account or network connection is required to use `glab orbit`
 once the binary is installed.
 
 ## Install
@@ -53,7 +48,7 @@ once the binary is installed.
 Install the managed `orbit` binary:
 
 ```shell
-glab orbit local --install
+glab orbit --install
 ```
 
 `glab` downloads the binary, verifies its checksum, and keeps it up to date.
@@ -73,9 +68,8 @@ skill.
 glab orbit setup
 ```
 
-Run `glab orbit setup --help` for the full option list: which agents to
-configure, project or user scope, local or remote graph, and `--remove` to
-uninstall.
+Run `glab orbit setup --help` for the full option list, including supported
+agents, project or user scope, and `--remove` to uninstall.
 
 The skill drives the `orbit` binary directly. To connect an MCP client to the
 local graph instead, see [Connect via MCP](mcp.md).
@@ -86,7 +80,7 @@ with `glab skills install --global orbit`.
 ## Index a repository
 
 ```shell
-glab orbit local index /path/to/your/repo
+glab orbit index /path/to/your/repo
 ```
 
 | Flag | Purpose |
@@ -98,8 +92,8 @@ glab orbit local index /path/to/your/repo
 ## Run SQL against the graph
 
 ```shell
-glab orbit local sql 'SELECT count(*) FROM gl_definition'
-echo 'SELECT name FROM gl_definition LIMIT 3' | glab orbit local sql -
+glab orbit sql 'SELECT count(*) FROM gl_definition'
+echo 'SELECT name FROM gl_definition LIMIT 3' | glab orbit sql -
 ```
 
 Table names resolve to the current checkout: run from inside an indexed
@@ -117,19 +111,19 @@ checkout the query runs against every indexed commit, with a note on stderr.
 
 ## Inspect the schema
 
-`glab orbit local schema` lists the graph tables and their columns. The
+`glab orbit schema` lists the graph tables and their columns. The
 per-project search-index tables and the schema fingerprint are hidden; name one
 explicitly to see it:
 
 ```shell
-glab orbit local schema
+glab orbit schema
 ```
 
 Pass table names as positional arguments to scope the output:
 
 ```shell
-glab orbit local schema gl_definition              # scoped to one table
-glab orbit local schema gl_definition gl_edge      # scoped to two tables
+glab orbit schema gl_definition              # scoped to one table
+glab orbit schema gl_definition gl_edge      # scoped to two tables
 ```
 
 | Flag | Purpose |
@@ -142,7 +136,7 @@ glab orbit local schema gl_definition gl_edge      # scoped to two tables
 Expose the local graph to any MCP-compatible AI agent:
 
 ```shell
-glab orbit local mcp serve
+glab orbit mcp serve
 ```
 
 It serves `run_sql`, `get_graph_schema`, and `index` over the MCP protocol
@@ -151,7 +145,7 @@ agent integration guide.
 
 ## Exit codes
 
-`glab orbit local` returns `0` on success and a non-zero exit code on failure,
+`glab orbit` returns `0` on success and a non-zero exit code on failure,
 with details on stderr. Scripts and agents can branch on success or failure.
 
 ## Billing

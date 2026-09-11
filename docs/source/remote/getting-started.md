@@ -47,7 +47,7 @@ and up to 30 minutes for groups with thousands of projects.
 Check indexing status at any time:
 
 ```shell
-glab orbit remote status
+glab orbit status
 ```
 
 ## Step 2: Run your first query
