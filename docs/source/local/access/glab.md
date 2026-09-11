@@ -40,8 +40,10 @@ and configures supported AI agents.
 - `glab` 1.117 or later is installed.
 - A local Git repository to index.
 
-No GitLab account or network connection is required to use `glab orbit`
-once the binary is installed.
+The local-graph verbs (`index`, `grep`, `context`, `sql`, `schema`, `list`,
+`mcp`, and `repo-map`) require no GitLab account or network connection once the
+binary is installed. Hosted verbs (`query`, `status`, `ontology`, `dsl`, `tools`,
+and `graph-status`) require an authenticated GitLab account and network access.
 
 ## Install
 
@@ -150,4 +152,7 @@ with details on stderr. Scripts and agents can branch on success or failure.
 
 ## Billing
 
-GitLab Orbit Local does not consume GitLab Credits. All processing is local.
+The local-graph verbs (`index`, `grep`, `context`, `sql`, `schema`, `list`,
+`mcp`, and `repo-map`) process data locally and do not consume GitLab Credits.
+Hosted verbs require network access, and `query`
+[consumes GitLab Credits](../../remote/access/glab.md#billing).
