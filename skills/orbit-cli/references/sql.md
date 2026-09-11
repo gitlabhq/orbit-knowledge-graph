@@ -1,7 +1,7 @@
 # Orbit local SQL reference
 
 The local graph is a DuckDB database (`~/.orbit/graph.duckdb` by default) that
-you query with read-only SQL via `orbit sql` (or `glab orbit local --yes sql`).
+you query with read-only SQL via `orbit sql` (or `glab orbit --yes sql`).
 Run `orbit schema [TABLE…]` to see live columns; the tables below are the ones
 you query directly (`_orbit_manifest` is bookkeeping).
 

@@ -58,10 +58,10 @@ orbit repo-map --repo ~/workspace/knowledge-graph extends QueryCompiler
 orbit repo-map --repo ~/workspace/knowledge-graph imports Workspace
 ```
 
-Reached through glab, prefix with `glab orbit local --yes`:
+Reached through glab, prefix with `glab orbit --yes`:
 
 ```bash
-glab orbit local --yes repo-map overview
+glab orbit --yes repo-map overview
 ```
 
 To focus on one or more file extensions, pass `--ext`. Extensions may include

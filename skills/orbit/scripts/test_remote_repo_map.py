@@ -3,7 +3,7 @@
 
 These cover the partition / hop-bound logic without touching the network: the
 helpers are exercised against canned `nodes`/`edges` payloads shaped like a
-`glab orbit remote query --response-format raw` response.
+`glab orbit query --response-format raw` response.
 
 Run with: python3 -m unittest skills.orbit.scripts.test_remote_repo_map
       or:  python3 skills/orbit/scripts/test_remote_repo_map.py
@@ -54,8 +54,8 @@ class QueryTest(unittest.TestCase):
         response = rrm._query({"query": {"query_type": "traversal"}})
 
         command = run.call_args.args[0]
-        self.assertEqual(command[:6], [
-            "glab", "orbit", "remote", "query", "--response-format", "raw",
+        self.assertEqual(command[:5], [
+            "glab", "orbit", "query", "--response-format", "raw",
         ])
         self.assertEqual(rrm._nodes(response), [])
         self.assertEqual(rrm._edges(response), [])
