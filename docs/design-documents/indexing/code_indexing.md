@@ -180,7 +180,7 @@ These backfill requests omit `branch` and `commit_sha`. The handler resolves the
 
 A namespace whose every project is checkpointed is drained. The backfill tick records a sweep request for each drained namespace (an in-progress `maintenance.code_stale_sweep.<path>` checkpoint) and moves on; a separate scheduled task (`schedule.tasks.code-stale-sweep`) consumes the requests oldest first, up to `max_namespaces_per_run` per run, tombstones every code row older than its project's checkpoint, and completes the gate.
 
-A namespace whose sweep fails is re-queued behind the other requests and the run reports an error; after five failed attempts it is abandoned with an error log and its gate closed, so its pre-backfill rows stay until the next schema version. The sweep runs once per namespace per schema version. It is kept off the dispatch tick because each namespace costs one `FINAL` scan per code table, and running those inline held dispatch back while indexers sat idle.
+A namespace whose sweep fails is re-queued behind the other requests and the run reports an error; after five failed attempts it is abandoned with an error log and its gate closed, so its pre-backfill rows stay until the next schema version. A namespace is requested once per schema version. It is kept off the dispatch tick because each namespace costs one `FINAL` scan per code table, and running those inline held dispatch back while indexers sat idle.
 
 ##### Handler
 

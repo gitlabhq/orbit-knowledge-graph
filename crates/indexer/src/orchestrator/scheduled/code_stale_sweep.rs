@@ -71,7 +71,7 @@ async fn save_request(
 
 /// The request is the gate key saved in progress; the sweep task turns it into a completed
 /// gate. A gate in either state is never requested again for the schema version, so a
-/// namespace sweeps once no matter how many ticks see it drained.
+/// namespace is requested once no matter how many ticks see it drained.
 pub async fn request_sweeps(
     checkpoint_store: &dyn CheckpointStore,
     drained_paths: &[TraversalPath],
@@ -109,7 +109,7 @@ struct SweepRequest {
 }
 
 /// Oldest requests first, so a burst of drained namespaces is served in drain order.
-fn requested_sweeps(gates: Vec<(String, Checkpoint)>, cap: usize) -> Vec<SweepRequest> {
+fn requested_sweeps(gates: Vec<(String, Checkpoint)>) -> Vec<SweepRequest> {
     let mut requested: Vec<(DateTime<Utc>, SweepRequest)> = gates
         .into_iter()
         .filter_map(|(key, gate)| {
@@ -119,11 +119,7 @@ fn requested_sweeps(gates: Vec<(String, Checkpoint)>, cap: usize) -> Vec<SweepRe
         })
         .collect();
     requested.sort_by_key(|(requested_at, _)| *requested_at);
-    requested
-        .into_iter()
-        .take(cap)
-        .map(|(_, request)| request)
-        .collect()
+    requested.into_iter().map(|(_, request)| request).collect()
 }
 
 pub struct CodeStaleSweep {
@@ -175,10 +171,8 @@ impl CodeStaleSweep {
                     .record_error(CHECKPOINT_KEY_PREFIX, "checkpoint");
                 TaskError::new(error)
             })?;
-        let pending = gates
-            .iter()
-            .filter(|(_, gate)| requested_attempts(gate).is_some())
-            .count();
+        let mut requests = requested_sweeps(gates);
+        let pending = requests.len();
         if pending == 0 {
             return Ok(());
         }
@@ -190,8 +184,8 @@ impl CodeStaleSweep {
             );
             return Ok(());
         }
+        requests.truncate(cap);
 
-        let requests = requested_sweeps(gates, cap);
         let mut failed = 0usize;
         for request in &requests {
             if let Err(error) = self.sweep_namespace(&request.path).await {
@@ -220,33 +214,44 @@ impl CodeStaleSweep {
         Ok(())
     }
 
-    // A fresh request timestamp moves a failing namespace behind every other request, so one
-    // namespace that fails every run cannot hold the oldest-first queue. Abandoning closes the
-    // gate like a completed sweep would, which is what stops the retries.
+    /// A fresh request timestamp moves a failing namespace behind every other request, so one
+    /// namespace that fails every run cannot hold the oldest-first queue. Abandoning closes the
+    /// gate like a completed sweep would.
     async fn retry_or_abandon(&self, request: &SweepRequest) {
         let attempts = request.attempts + 1;
-        let result = if attempts < MAX_SWEEP_ATTEMPTS {
-            save_request(self.checkpoint_store.as_ref(), &request.path, attempts).await
-        } else {
-            error!(
-                path = %request.path,
-                attempts,
-                "abandoning post-backfill stale sweep; rows older than the backfill stay until the next schema version"
-            );
-            self.metrics
-                .record_error(CHECKPOINT_KEY_PREFIX, "abandoned");
-            self.checkpoint_store
-                .save_completed(
-                    &namespace_checkpoint_key(&request.path),
-                    &Utc::now(),
-                    WriteDurability::Durable,
-                )
-                .await
-        };
-        if let Err(error) = result {
-            self.metrics
-                .record_error(CHECKPOINT_KEY_PREFIX, "checkpoint");
-            warn!(path = %request.path, %error, "failed to update stale sweep request");
+        if attempts < MAX_SWEEP_ATTEMPTS {
+            if let Err(error) =
+                save_request(self.checkpoint_store.as_ref(), &request.path, attempts).await
+            {
+                self.metrics
+                    .record_error(CHECKPOINT_KEY_PREFIX, "checkpoint");
+                warn!(path = %request.path, %error, "failed to re-queue stale sweep request");
+            }
+            return;
+        }
+        let closed = self
+            .checkpoint_store
+            .save_completed(
+                &namespace_checkpoint_key(&request.path),
+                &Utc::now(),
+                WriteDurability::Durable,
+            )
+            .await;
+        match closed {
+            Ok(()) => {
+                self.metrics
+                    .record_error(CHECKPOINT_KEY_PREFIX, "abandoned");
+                error!(
+                    path = %request.path,
+                    attempts,
+                    "abandoned post-backfill stale sweep; rows older than the backfill stay until the next schema version"
+                );
+            }
+            Err(error) => {
+                self.metrics
+                    .record_error(CHECKPOINT_KEY_PREFIX, "checkpoint");
+                warn!(path = %request.path, %error, "failed to abandon stale sweep request");
+            }
         }
     }
 
@@ -571,7 +576,7 @@ mod tests {
     }
 
     #[test]
-    fn requested_sweeps_takes_oldest_requests_first_up_to_the_cap() {
+    fn requested_sweeps_orders_oldest_first_and_skips_completed_and_malformed_gates() {
         let now = Utc::now();
         let gates = vec![
             requested("1/30/", now),
@@ -588,12 +593,12 @@ mod tests {
             ),
         ];
 
-        let paths: Vec<String> = requested_sweeps(gates, 2)
+        let paths: Vec<String> = requested_sweeps(gates)
             .into_iter()
             .map(|request| request.path.as_str().to_string())
             .collect();
 
-        assert_eq!(paths, vec!["1/10/", "1/20/"]);
+        assert_eq!(paths, vec!["1/10/", "1/20/", "1/30/"]);
     }
 
     #[tokio::test]
@@ -609,7 +614,7 @@ mod tests {
             .unwrap();
 
         let gates = store.load_by_prefix(CHECKPOINT_KEY_PREFIX).await.unwrap();
-        let requests: Vec<(String, usize)> = requested_sweeps(gates, 10)
+        let requests: Vec<(String, usize)> = requested_sweeps(gates)
             .into_iter()
             .map(|request| (request.path.as_str().to_string(), request.attempts))
             .collect();
@@ -691,22 +696,98 @@ mod tests {
         let key = namespace_checkpoint_key(&TraversalPath::new_unchecked("1/9970/"));
         assert!(
             key.starts_with(CHECKPOINT_KEY_PREFIX),
-            "SEED_CODE_CHECKPOINT_SQL drops sweep gates by this prefix; a key \
+            "SEED_CHECKPOINT_SQL drops sweep gates by this prefix; a key \
              outside it would survive a code migration and suppress the re-sweep: {key}"
         );
     }
 
-    #[test]
-    fn statements_cover_every_code_table_nodes_first() {
-        let names = table_names();
-        let graph = ArrowClickHouseClient::new(
+    fn unreachable_graph() -> ArrowClickHouseClient {
+        ArrowClickHouseClient::new(
             "http://localhost:0",
             "default",
             "default",
             None,
             &Default::default(),
             &Default::default(),
+        )
+    }
+
+    fn sweep_with_store(
+        store: Arc<RecordingCheckpointStore>,
+        max_namespaces_per_run: usize,
+    ) -> CodeStaleSweep {
+        CodeStaleSweep::new(
+            unreachable_graph(),
+            &table_names(),
+            store,
+            ScheduledTaskMetrics::with_meter(&crate::testkit::test_meter()),
+            sweep_config(max_namespaces_per_run),
+        )
+    }
+
+    async fn gate(store: &RecordingCheckpointStore, path: &str) -> Checkpoint {
+        store
+            .load(&namespace_checkpoint_key(&TraversalPath::new_unchecked(
+                path,
+            )))
+            .await
+            .unwrap()
+            .expect("gate must exist")
+    }
+
+    #[tokio::test]
+    async fn a_failing_namespace_is_retried_behind_the_others_and_abandoned_after_the_cap() {
+        let now = Utc::now();
+        let store = Arc::new(RecordingCheckpointStore::with_gates(vec![requested(
+            "1/10/",
+            now - TimeDelta::hours(1),
+        )]));
+        let sweep = sweep_with_store(store.clone(), 10);
+
+        for expected_attempts in 1..MAX_SWEEP_ATTEMPTS {
+            assert!(
+                sweep.run().await.is_err(),
+                "a failed sweep must fail the run"
+            );
+            let gate = gate(&store, "1/10/").await;
+            assert_eq!(requested_attempts(&gate), Some(expected_attempts));
+            assert!(
+                gate.watermark > now,
+                "a retried request must move behind requests made before it"
+            );
+        }
+
+        assert!(sweep.run().await.is_err());
+        assert_eq!(
+            requested_attempts(&gate(&store, "1/10/").await),
+            None,
+            "the last allowed attempt must close the gate so the namespace is not retried"
         );
+        assert!(
+            sweep.run().await.is_ok(),
+            "an abandoned namespace must not be swept again"
+        );
+    }
+
+    #[tokio::test]
+    async fn one_failing_namespace_does_not_stop_the_others_in_the_same_run() {
+        let now = Utc::now();
+        let store = Arc::new(RecordingCheckpointStore::with_gates(vec![
+            requested("1/10/", now - TimeDelta::hours(2)),
+            requested("1/20/", now - TimeDelta::hours(1)),
+        ]));
+        let sweep = sweep_with_store(store.clone(), 10);
+
+        assert!(sweep.run().await.is_err());
+
+        assert_eq!(requested_attempts(&gate(&store, "1/10/").await), Some(1));
+        assert_eq!(requested_attempts(&gate(&store, "1/20/").await), Some(1));
+    }
+
+    #[test]
+    fn statements_cover_every_code_table_nodes_first() {
+        let names = table_names();
+        let graph = unreachable_graph();
         let store = Arc::new(crate::checkpoint::ClickHouseCheckpointStore::new(Arc::new(
             graph.clone(),
         )));
