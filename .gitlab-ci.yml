@@ -420,7 +420,7 @@ snowball-sync-check:
     - .mr-only-rules
   needs: []
   script:
-    - apk add --no-cache bash git
+    - apk add --no-cache bash diffutils git
     - bash ./scripts/check-snowball-sync.sh
 
 unused-deps-check:
