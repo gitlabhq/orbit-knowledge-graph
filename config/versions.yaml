@@ -18,8 +18,8 @@ raw_output_format: 5.0.1
 goon_output_format: 4.0.1
 
 # DuckDB release linked by the duckdb crate in Cargo.lock; crate 1.10505.x
-# is DuckDB 1.5.5. Vendored extension checksums in
-# crates/duckdb-client/build.rs are pinned against this release.
+# is DuckDB 1.5.5. Vendored extension checksums and the FTS source archive
+# are pinned against this release.
 duckdb: v1.5.5
 
 # gitlab-org/gitlab commit whose SystemNoteMetadata::ICON_TYPES is vendored

@@ -55,6 +55,7 @@ cargo-platform = "0.3.3"
 cpu-time = "1.0.0"
 cargo-util-schemas = "0.14.0"
 cargo_metadata = "0.23.1"
+cc = "1.4.5"
 enum-as-inner = "0.7.0"
 either = "1.15.0"
 datafusion = { version = "54.1.0", default-features = false, features = ["sql", "nested_expressions"] }
@@ -103,6 +104,7 @@ circuit-breaker = { path = "crates/circuit-breaker" }
 clickhouse-client = { path = "crates/clickhouse-client" }
 nats-client = { path = "crates/nats-client" }
 duckdb = { version = "1.10505.0", features = ["vtab-arrow", "appender-arrow"] }
+libduckdb-sys = "1.10505.0"
 gitalisk-core = { git = "https://gitlab.com/gitlab-org/rust/gitalisk.git", tag = "v0.8.0" }
 siphon-proto = { git = "https://gitlab.com/gitlab-org/analytics-section/siphon.git", tag = "0.0.103-beta" }
 thiserror = "2.0.18"
